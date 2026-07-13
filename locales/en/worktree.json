@@ -72,7 +72,10 @@
     "showFiles": "Show files",
     "hideFiles": "Hide files",
     "equalizeWidths": "Equal widths",
-    "equalizeWidthsHint": "Equalize terminal widths and reset History width"
+    "equalizeWidthsHint": "Equalize terminal widths and reset History width",
+    "addSplit": "Add split",
+    "removeSplit": "Remove split",
+    "selectInstance": "Select agent instance for {split}"
   },
   "todo": {
     "addPlaceholder": "Add a todo…",

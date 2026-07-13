@@ -42,7 +42,6 @@ import { useSplitMessages } from '@/hooks/useSplitMessages';
 import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
-import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 import type {
   TerminalSplitPaneCoreProps,
   SplitAutoYesProps,
@@ -246,29 +245,6 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     terminal.isUnclassifiedActive &&
     !showNav &&
     !showPrompt;
-
-  // Issue #743: AI agent status indicator (dot/spinner) for the split header.
-  // Uses the same inline span markup as the Mobile canonical implementation
-  // (WorktreeDetailRefactored.tsx:1947-1974): title-only a11y (no aria-label,
-  // to avoid duplicate readout / S3-006), spinner for running/generating.
-  const statusConfig = SIDEBAR_STATUS_CONFIG[cliStatus];
-  const statusIndicator = useMemo(
-    () =>
-      statusConfig.type === 'spinner' ? (
-        <span
-          className={`w-2 h-2 rounded-full flex-shrink-0 border-2 border-t-transparent animate-spin ${statusConfig.className}`}
-          title={statusConfig.label}
-          data-testid={`split-status-indicator-${splitIndex}`}
-        />
-      ) : (
-        <span
-          className={`w-2 h-2 rounded-full flex-shrink-0 ${statusConfig.className}`}
-          title={statusConfig.label}
-          data-testid={`split-status-indicator-${splitIndex}`}
-        />
-      ),
-    [statusConfig.type, statusConfig.className, statusConfig.label, splitIndex],
-  );
 
   // Issue #744: the embedded HistoryPane for THIS split. Receives this split's
   // own messages (useSplitMessages) and the per-split highlight namespace via
@@ -515,9 +491,11 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       instance={instance}
       availableInstances={availableInstances}
       onInstanceChange={onInstanceChange}
+      // Issue #1079: the derived agent status now renders as a StatusDot inside
+      // the selector trigger (session title bar). BranchStatus ⊂ StatusDotStatus.
+      status={cliStatus}
       onFocus={onFocus}
       attaching={terminal.attaching}
-      headerExtras={statusIndicator}
       terminal={terminalSlot}
       footer={footerSlot}
       // Issue #786 / #869: drag-drop pass-through (optional; inert when omitted).

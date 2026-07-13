@@ -9,10 +9,14 @@
  */
 
 import React from 'react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import { TerminalSplitPaneContent } from '@/components/worktree/TerminalSplitPaneContent';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
+import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
+
+// Issue #1079: TerminalSplitPane's instance selector is now a Radix DropdownMenu.
+beforeAll(() => installRadixJsdomPolyfills());
 
 /**
  * Issue #869: build a primary AgentInstance (id === cliTool) for tests. The
@@ -599,27 +603,29 @@ describe('TerminalSplitPaneContent', () => {
     });
   });
 
-  // Issue #743: AI agent status indicator (dot/spinner) restored in PC
-  // per-split header. Data flows in as a derived `cliStatus: BranchStatus`
-  // prop and renders via headerExtras (same shape as the Mobile canonical
-  // span at WorktreeDetailRefactored.tsx:1947-1974).
-  describe('status indicator in split header (Issue #743)', () => {
+  // Issue #743 / #1079: the derived agent status renders as a `StatusDot`
+  // inside the instance-selector trigger (the session title bar). `cliStatus:
+  // BranchStatus` is a subset of `StatusDotStatus`, so it flows straight into
+  // the `status` prop. The dot is decorative (aria-hidden) inside the labeled
+  // trigger button; running/generating animate via StatusDot's glow.
+  describe('status indicator in split header (Issue #743 / #1079)', () => {
     beforeEach(() => {
       mockFetch.mockImplementation(() =>
         okJson({ isRunning: true, fullOutput: '', thinking: false }),
       );
     });
 
-    // 1. State-specific rendering: idle/ready/waiting -> dot, running/generating -> spinner.
+    // 1. State-specific rendering via StatusDot semantics: idle→muted, ready→
+    //    success, waiting→warning; running/generating add the glow animation.
     it.each([
-      ['idle', 'dot', 'bg-gray-500'],
-      ['ready', 'dot', 'bg-green-500'],
-      ['waiting', 'dot', 'bg-yellow-500'],
-      ['running', 'spinner', 'border-info'],
-      ['generating', 'spinner', 'border-info'],
+      ['idle', 'bg-muted-foreground', false],
+      ['ready', 'bg-success', false],
+      ['waiting', 'bg-warning', false],
+      ['running', 'bg-success', true],
+      ['generating', 'bg-success', true],
     ] as const)(
-      'renders %s as a %s with class %s',
-      async (status, kind, colorClass) => {
+      'renders %s status as a StatusDot with class %s (glow=%s)',
+      async (status, colorClass, hasGlow) => {
         render(
           <TerminalSplitPaneContent
             worktreeId="w-1"
@@ -636,21 +642,21 @@ describe('TerminalSplitPaneContent', () => {
         const indicator = await screen.findByTestId('split-status-indicator-0');
         expect(indicator).toBeInTheDocument();
         expect(indicator.className).toContain(colorClass);
-        // a11y: title only (no aria-label) to avoid duplicate readout (S3-006).
+        // Decorative inside the labeled trigger button; tooltip via title.
         expect(indicator.getAttribute('title')).toBeTruthy();
-        expect(indicator.getAttribute('aria-label')).toBeNull();
+        expect(indicator.getAttribute('aria-hidden')).toBe('true');
 
-        if (kind === 'spinner') {
-          expect(indicator.className).toContain('animate-spin');
+        if (hasGlow) {
+          expect(indicator.className).toContain('animate-status-glow');
         } else {
-          expect(indicator.className).not.toContain('animate-spin');
+          expect(indicator.className).not.toContain('animate-status-glow');
         }
       },
     );
 
-    // 2. Fallback when cliStatus prop is omitted -> idle (gray dot). The existing
+    // 2. Fallback when cliStatus prop is omitted -> idle (muted dot). The existing
     //    call sites that never pass cliStatus must keep working unchanged (S3-002).
-    it('falls back to idle (gray dot) when cliStatus is omitted', async () => {
+    it('falls back to idle (muted StatusDot) when cliStatus is omitted', async () => {
       render(
         <TerminalSplitPaneContent
           worktreeId="w-1"
@@ -665,13 +671,13 @@ describe('TerminalSplitPaneContent', () => {
 
       const indicator = await screen.findByTestId('split-status-indicator-0');
       expect(indicator).toBeInTheDocument();
-      expect(indicator.className).toContain('bg-gray-500');
-      expect(indicator.className).not.toContain('animate-spin');
+      expect(indicator.className).toContain('bg-muted-foreground');
+      expect(indicator.className).not.toContain('animate-status-glow');
     });
 
-    // 3. Per-split independence: split 0 running (blue spinner), split 1 idle
-    //    (gray dot) render independently with distinct data-testids.
-    it('renders each split status independently (A=running spinner, B=idle dot)', async () => {
+    // 3. Per-split independence: split 0 running (glow), split 1 idle (muted)
+    //    render independently with distinct data-testids.
+    it('renders each split status independently (A=running glow, B=idle muted)', async () => {
       render(
         <>
           <TerminalSplitPaneContent
@@ -700,11 +706,10 @@ describe('TerminalSplitPaneContent', () => {
       const indicator0 = await screen.findByTestId('split-status-indicator-0');
       const indicator1 = await screen.findByTestId('split-status-indicator-1');
 
-      expect(indicator0.className).toContain('border-info');
-      expect(indicator0.className).toContain('animate-spin');
+      expect(indicator0.className).toContain('animate-status-glow');
 
-      expect(indicator1.className).toContain('bg-gray-500');
-      expect(indicator1.className).not.toContain('animate-spin');
+      expect(indicator1.className).toContain('bg-muted-foreground');
+      expect(indicator1.className).not.toContain('animate-status-glow');
     });
   });
 

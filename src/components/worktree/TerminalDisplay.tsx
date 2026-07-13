@@ -8,6 +8,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useMemo, memo, useCallback } from 'react';
+import { ArrowUp, ArrowDown } from 'lucide-react';
 import { sanitizeTerminalOutput } from '@/lib/security/sanitize';
 import { useTerminalScroll } from '@/hooks/useTerminalScroll';
 import { useTerminalSearch } from '@/hooks/useTerminalSearch';
@@ -195,9 +196,10 @@ export const TerminalDisplay = memo(function TerminalDisplay({
         'border-gray-700',
         // Height - flex container will control actual height
         'h-full',
-        // Active state
+        // Active state — Issue #1079: the flashy full-perimeter accent border is
+        // gone (focus is now expressed subtly on the pane card). The `active`
+        // marker class is kept for behavior/tests.
         isActive ? 'active' : '',
-        isActive ? 'border-accent-500' : '',
         // Custom classes
         className,
       ]
@@ -205,6 +207,36 @@ export const TerminalDisplay = memo(function TerminalDisplay({
         .join(' '),
     [isActive, className]
   );
+
+  // Issue #1079: the scroll FAB stays subtle while idle and reveals to full
+  // opacity on scroll activity (then fades back) and on hover/focus, so it never
+  // competes with the terminal output but is always reachable.
+  const [scrollActive, setScrollActive] = useState(false);
+  const scrollActivityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const revealScrollButton = useCallback(() => {
+    setScrollActive(true);
+    if (scrollActivityTimerRef.current) clearTimeout(scrollActivityTimerRef.current);
+    scrollActivityTimerRef.current = setTimeout(() => setScrollActive(false), 1500);
+  }, []);
+  useEffect(
+    () => () => {
+      if (scrollActivityTimerRef.current) clearTimeout(scrollActivityTimerRef.current);
+    },
+    []
+  );
+  const handleScrollWithReveal = useCallback(() => {
+    handleScroll();
+    revealScrollButton();
+  }, [handleScroll, revealScrollButton]);
+
+  const scrollFabClass = [
+    'absolute bottom-4 right-4 flex items-center justify-center h-9 w-9 rounded-full',
+    'bg-surface/80 backdrop-blur border border-border text-muted-foreground shadow-lg',
+    'transition-opacity hover:text-surface-foreground hover:opacity-100 focus-visible:opacity-100',
+    'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+    // Idle stays muted (auto-fade intent) but discoverable; reveals on scroll/hover.
+    scrollActive ? 'opacity-100' : 'opacity-60',
+  ].join(' ');
 
   return (
     <div className="relative h-full flex flex-col">
@@ -230,7 +262,7 @@ export const TerminalDisplay = memo(function TerminalDisplay({
         aria-live="polite"
         aria-label="Terminal output"
         className={containerClasses}
-        onScroll={handleScroll}
+        onScroll={handleScrollWithReveal}
         onKeyDown={handleKeyDown}
         tabIndex={0}
       >
@@ -262,22 +294,25 @@ export const TerminalDisplay = memo(function TerminalDisplay({
         {isActive && isThinking && <ThinkingIndicator />}
       </div>
 
-      {/* Scroll button: shows "Scroll to top" at bottom, or "Scroll to bottom" when scrolled up */}
+      {/* Issue #1079: icon-only circular scroll FAB. Shows an up arrow at the
+          bottom (jump to top) or a down arrow when scrolled up (jump to bottom). */}
       {autoScroll ? (
         <button
+          type="button"
           onClick={scrollToTop}
-          className="absolute bottom-4 right-4 bg-accent-600 hover:bg-accent-700 text-white px-3 py-1 rounded-md text-sm shadow-lg transition-colors"
+          className={scrollFabClass}
           aria-label="Scroll to top"
         >
-          Scroll to top
+          <ArrowUp size={16} aria-hidden="true" />
         </button>
       ) : (
         <button
+          type="button"
           onClick={scrollToBottom}
-          className="absolute bottom-4 right-4 bg-accent-600 hover:bg-accent-700 text-white px-3 py-1 rounded-md text-sm shadow-lg transition-colors"
+          className={scrollFabClass}
           aria-label="Scroll to bottom"
         >
-          Scroll to bottom
+          <ArrowDown size={16} aria-hidden="true" />
         </button>
       )}
     </div>
