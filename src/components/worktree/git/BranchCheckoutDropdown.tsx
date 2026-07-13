@@ -17,7 +17,7 @@ import {
   CHECKOUT_HISTORY_LOSS_WARNING,
   CHECKOUT_RUNNING_SESSION_WARNING,
 } from '@/config/git-status-config';
-import { Checkbox } from '@/components/ui';
+import { Button, Checkbox } from '@/components/ui';
 
 interface BranchCheckoutDropdownProps {
   branches: BranchInfo[];
@@ -65,11 +65,12 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
 
   return (
     <div className="relative" data-testid="branch-checkout-dropdown">
-      <button
+      <Button
+        variant="ghost"
         type="button"
         onClick={() => setMenuOpen((prev) => !prev)}
         disabled={busy || options.length === 0}
-        className="flex items-center gap-1 px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-accent-700 dark:text-accent-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+        className="flex items-center gap-1 px-2 py-1 text-xs rounded border border-input text-accent-700 dark:text-accent-300 hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
         data-testid="branch-checkout-dropdown-toggle"
         aria-haspopup="menu"
         aria-expanded={menuOpen}
@@ -77,28 +78,29 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
       >
         Checkout
         <span aria-hidden="true" className="text-[10px]">▾</span>
-      </button>
+      </Button>
 
       {menuOpen && (
         <div
-          className="absolute left-0 top-full z-20 mt-1 min-w-[12rem] max-h-64 overflow-y-auto rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg"
+          className="absolute left-0 top-full z-20 mt-1 min-w-[12rem] max-h-64 overflow-y-auto rounded border border-border bg-surface shadow-lg"
           role="menu"
           data-testid="branch-checkout-menu"
         >
           {options.length === 0 ? (
-            <div className="px-3 py-1.5 text-xs text-gray-400 dark:text-gray-500">No branches</div>
+            <div className="px-3 py-1.5 text-xs text-muted-foreground">No branches</div>
           ) : (
-            <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+            <ul className="divide-y divide-border">
               {options.map((branch) => {
                 const checkedOutElsewhere = branch.checkedOutWorktreePath !== null;
                 return (
                   <li key={`${branch.isRemote ? 'r' : 'l'}:${branch.name}`}>
+                    {/* Issue #1061: full-width left-aligned menu row — 残置 */}
                     <button
                       type="button"
                       role="menuitem"
                       onClick={() => openCheckout(branch)}
                       disabled={busy || checkedOutElsewhere}
-                      className="w-full text-left px-3 py-1.5 font-mono text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-full text-left px-3 py-1.5 font-mono text-xs text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
                       aria-label={`Checkout ${branch.name}`}
                       title={
                         checkedOutElsewhere
@@ -108,7 +110,7 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
                     >
                       {branch.name}
                       {branch.isDefault && (
-                        <span className="ml-1.5 text-[10px] text-gray-400 dark:text-gray-500">default</span>
+                        <span className="ml-1.5 text-[10px] text-muted-foreground">default</span>
                       )}
                     </button>
                   </li>
@@ -137,8 +139,8 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
           aria-modal="true"
           data-testid="branch-checkout-confirm"
         >
-          <div className="w-full max-w-md rounded-lg bg-white dark:bg-gray-800 p-4 shadow-xl flex flex-col gap-3">
-            <h3 className="text-sm font-medium text-gray-800 dark:text-gray-200">
+          <div className="w-full max-w-md rounded-lg bg-surface p-4 shadow-xl flex flex-col gap-3">
+            <h3 className="text-sm font-medium text-foreground">
               Checkout <span className="font-mono">{checkoutTarget.name}</span>?
             </h3>
 
@@ -162,7 +164,7 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
               </div>
             )}
 
-            <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Checkbox
                 checked={checkoutForce}
                 onCheckedChange={(checked) => setCheckoutForce(checked === true)}
@@ -172,14 +174,16 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
             </label>
 
             <div className={`flex items-center justify-end gap-2 ${isMobile ? 'flex-wrap' : ''}`}>
-              <button
+              <Button
+                variant="ghost"
                 type="button"
                 onClick={() => setCheckoutTarget(null)}
-                className="px-3 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                className="px-3 py-1 text-xs rounded border border-input text-foreground hover:bg-muted"
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="ghost"
                 type="button"
                 onClick={confirmCheckout}
                 disabled={busy}
@@ -187,7 +191,7 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
                 data-testid="branch-checkout-confirm-button"
               >
                 Checkout
-              </button>
+              </Button>
             </div>
           </div>
         </div>

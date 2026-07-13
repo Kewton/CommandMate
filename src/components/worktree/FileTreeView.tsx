@@ -30,6 +30,7 @@ import { useFileMetadataDisplay } from '@/hooks/useFileMetadataDisplay';
 import { FILE_TREE_POLL_INTERVAL_MS } from '@/config/file-polling-config';
 import { useLocale } from 'next-intl';
 import { FilePlus, FolderPlus, AlertCircle, RefreshCw } from 'lucide-react';
+import { Button } from '@/components/ui';
 
 // ============================================================================
 // Types
@@ -492,8 +493,8 @@ export const FileTreeView = memo(function FileTreeView({
         data-testid="file-tree-loading"
         className={`flex items-center justify-center p-4 ${className}`}
       >
-        <span className="w-5 h-5 border-2 border-gray-300 dark:border-gray-600 border-t-cyan-500 rounded-full animate-spin" />
-        <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">Loading files...</span>
+        <span className="w-5 h-5 border-2 border-input border-t-cyan-500 rounded-full animate-spin" />
+        <span className="ml-2 text-sm text-muted-foreground">Loading files...</span>
       </div>
     );
   }
@@ -522,31 +523,33 @@ export const FileTreeView = memo(function FileTreeView({
     return (
       <div
         data-testid="file-tree-empty"
-        className={`p-4 text-center text-gray-500 dark:text-gray-400 ${className}`}
+        className={`p-4 text-center text-muted-foreground ${className}`}
       >
         <p className="text-sm">No files found</p>
         {/* Action buttons for empty state - only show when callbacks are provided */}
         {(onNewFile || onNewDirectory) && (
           <div className="flex flex-col gap-2 mt-4">
             {onNewFile && (
-              <button
+              <Button
+                variant="ghost"
                 data-testid="empty-new-file-button"
                 onClick={() => onNewFile('')}
-                className="flex items-center justify-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                className="flex items-center justify-center gap-2 px-3 py-2 text-sm text-foreground bg-surface border border-input rounded-md hover:bg-muted transition-colors"
               >
                 <FilePlus className="w-4 h-4" aria-hidden="true" />
                 <span>New File</span>
-              </button>
+              </Button>
             )}
             {onNewDirectory && (
-              <button
+              <Button
+                variant="ghost"
                 data-testid="empty-new-directory-button"
                 onClick={() => onNewDirectory('')}
-                className="flex items-center justify-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                className="flex items-center justify-center gap-2 px-3 py-2 text-sm text-foreground bg-surface border border-input rounded-md hover:bg-muted transition-colors"
               >
                 <FolderPlus className="w-4 h-4" aria-hidden="true" />
                 <span>New Directory</span>
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -559,7 +562,7 @@ export const FileTreeView = memo(function FileTreeView({
     return (
       <div
         data-testid="file-tree-no-results"
-        className={`p-4 text-center text-gray-500 dark:text-gray-400 ${className}`}
+        className={`p-4 text-center text-muted-foreground ${className}`}
       >
         <p className="text-sm">
           No {searchMode === 'content' ? 'files containing' : 'files matching'} &quot;{searchQuery}&quot;
@@ -573,30 +576,32 @@ export const FileTreeView = memo(function FileTreeView({
       data-testid="file-tree-view"
       role="tree"
       aria-label="File tree"
-      className={`overflow-auto bg-white dark:bg-gray-900 ${className}`}
+      className={`overflow-auto bg-surface ${className}`}
     >
       {/* [Issue #300/#888] Toolbar: root-level create actions + manual refresh.
           Always rendered so the manual refresh button (Issue #888) is available
           even when no create callbacks are wired in. */}
       <div
         data-testid="file-tree-toolbar"
-        className="flex items-center gap-1 p-1 border-b border-gray-200 dark:border-gray-700"
+        className="flex items-center gap-1 p-1 border-b border-border"
       >
         {onNewFile && (
+          /* Issue #1061: dense toolbar control — base padding/hover-lift would change the dense feel — 残置 */
           <button
             data-testid="toolbar-new-file-button"
             onClick={() => onNewFile('')}
-            className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+            className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:bg-muted rounded transition-colors"
           >
             <FilePlus className="w-4 h-4" aria-hidden="true" />
             <span>New File</span>
           </button>
         )}
         {onNewDirectory && (
+          /* Issue #1061: dense toolbar control — base padding/hover-lift would change the dense feel — 残置 */
           <button
             data-testid="toolbar-new-directory-button"
             onClick={() => onNewDirectory('')}
-            className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+            className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:bg-muted rounded transition-colors"
           >
             <FolderPlus className="w-4 h-4" aria-hidden="true" />
             <span>New Directory</span>
@@ -613,17 +618,18 @@ export const FileTreeView = memo(function FileTreeView({
               data-testid="file-tree-refetch-indicator"
               role="status"
               aria-live="polite"
-              className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400"
+              className="flex items-center gap-1 text-xs text-muted-foreground"
             >
               <span
                 aria-hidden="true"
-                className="w-3 h-3 border-2 border-gray-300 dark:border-gray-600 border-t-cyan-500 rounded-full animate-spin"
+                className="w-3 h-3 border-2 border-input border-t-cyan-500 rounded-full animate-spin"
               />
               <span className="sr-only">Refreshing files</span>
             </div>
           )}
           {/* [Issue #888] Manual refresh: re-fetch the root + all expanded
               directories on demand (preserves scroll/selection/expansion). */}
+          {/* Issue #1061: dense toolbar icon control — base padding/hover-lift would change the dense feel — 残置 */}
           <button
             data-testid="file-tree-refresh-button"
             type="button"
@@ -633,7 +639,7 @@ export const FileTreeView = memo(function FileTreeView({
             disabled={isRefetching}
             aria-label="Refresh file tree"
             title="更新"
-            className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:bg-muted rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <RefreshCw
               className={`w-4 h-4 ${isRefetching ? 'animate-spin' : ''}`}
@@ -653,7 +659,8 @@ export const FileTreeView = memo(function FileTreeView({
         >
           <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
           <span className="flex-1 truncate">{error}</span>
-          <button
+          <Button
+            variant="ghost"
             data-testid="file-tree-refetch-retry-button"
             onClick={() => {
               void reloadTreeWithExpandedDirs();
@@ -661,7 +668,7 @@ export const FileTreeView = memo(function FileTreeView({
             className="px-2 py-0.5 text-xs rounded border border-red-300 dark:border-red-700 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
           >
             再試行
-          </button>
+          </Button>
         </div>
       )}
       {filteredRootItems.map((item) => (

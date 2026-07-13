@@ -12,6 +12,7 @@
 'use client';
 
 import React, { useRef, useEffect, useCallback } from 'react';
+import { Button } from '@/components/ui';
 
 export interface MemoSearchBarProps {
   /** Current search query */
@@ -75,7 +76,7 @@ export function MemoSearchBar({
 
   return (
     <div
-      className="flex items-center gap-1 px-2 py-1 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded"
+      className="flex items-center gap-1 px-2 py-1 bg-muted border border-input rounded"
       role="search"
       aria-label="Memo search"
     >
@@ -88,7 +89,7 @@ export function MemoSearchBar({
         onCompositionStart={onCompositionStart}
         onCompositionEnd={onCompositionEnd}
         placeholder="Search..."
-        className="flex-1 min-w-0 bg-transparent text-gray-800 dark:text-gray-200 text-sm outline-none placeholder-gray-400 dark:placeholder-gray-500"
+        className="flex-1 min-w-0 bg-transparent text-foreground text-sm outline-none placeholder-muted-foreground"
         aria-label="Search memos"
         autoComplete="off"
         autoCorrect="off"
@@ -100,39 +101,42 @@ export function MemoSearchBar({
         role="status"
         aria-live="polite"
         aria-atomic="true"
-        className="text-gray-500 dark:text-gray-400 text-xs min-w-[3rem] text-right"
+        className="text-muted-foreground text-xs min-w-[3rem] text-right"
       >
         {countDisplay}
       </span>
 
-      <button
+      <Button
+        variant="ghost"
         type="button"
         onClick={onPrev}
         disabled={matchCount === 0}
         aria-label="Previous match (prev)"
-        className="text-gray-500 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white disabled:text-gray-300 dark:disabled:text-gray-600 min-w-[36px] min-h-[36px] flex items-center justify-center text-base"
+        className="text-muted-foreground hover:text-foreground dark:hover:text-white disabled:text-muted-foreground/50 min-w-[36px] min-h-[36px] flex items-center justify-center text-base"
       >
         ▲
-      </button>
+      </Button>
 
-      <button
+      <Button
+        variant="ghost"
         type="button"
         onClick={onNext}
         disabled={matchCount === 0}
         aria-label="Next match (next)"
-        className="text-gray-500 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white disabled:text-gray-300 dark:disabled:text-gray-600 min-w-[36px] min-h-[36px] flex items-center justify-center text-base"
+        className="text-muted-foreground hover:text-foreground dark:hover:text-white disabled:text-muted-foreground/50 min-w-[36px] min-h-[36px] flex items-center justify-center text-base"
       >
         ▼
-      </button>
+      </Button>
 
-      <button
+      <Button
+        variant="ghost"
         type="button"
         onClick={onClose}
         aria-label="Close search (close)"
-        className="text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white min-w-[36px] min-h-[36px] flex items-center justify-center text-base ml-1"
+        className="text-muted-foreground hover:text-foreground dark:hover:text-white min-w-[36px] min-h-[36px] flex items-center justify-center text-base ml-1"
       >
         ✕
-      </button>
+      </Button>
     </div>
   );
 }

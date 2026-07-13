@@ -26,7 +26,7 @@ import {
 /**
  * Props for FeedbackSection.
  * [CONS-005] className allows parent to specify container styling
- * (InfoModal: bg-gray-50, MobileInfoContent: bg-white border).
+ * (InfoModal: bg-muted, MobileInfoContent: bg-surface border).
  */
 export interface FeedbackSectionProps {
   className?: string;
@@ -48,7 +48,7 @@ export function FeedbackSection({ className }: FeedbackSectionProps) {
 
   return (
     <div className={className} data-testid="feedback-section">
-      <h2 className="text-sm font-medium text-gray-500 mb-2">
+      <h2 className="text-sm font-medium text-muted-foreground mb-2">
         {t('feedback.title')}
       </h2>
       <div className="flex flex-col gap-1">

@@ -12,7 +12,7 @@ import { memo, useState, useCallback, useId, useMemo } from 'react';
 import { useTranslations } from 'next-intl';
 import type { PromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
-import { RadioGroup, RadioGroupItem } from '@/components/ui';
+import { RadioGroup, RadioGroupItem, Button } from '@/components/ui';
 import { usePromptAnimation } from '@/hooks/usePromptAnimation';
 
 /** Animation duration for prompt panel transitions */
@@ -29,7 +29,7 @@ const BUTTON_BASE_STYLES = `
 const BUTTON_PRIMARY_STYLES = 'bg-accent-600 text-white hover:bg-accent-700 focus:ring-ring';
 
 /** Secondary button styles */
-const BUTTON_SECONDARY_STYLES = 'bg-white dark:bg-gray-700 border-2 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 focus:ring-gray-500';
+const BUTTON_SECONDARY_STYLES = 'bg-surface border-2 border-input hover:bg-muted text-foreground focus:ring-ring';
 
 /**
  * Props for PromptPanel component
@@ -136,33 +136,34 @@ function PromptPanelContent({
           {cliToolName ? t('confirmationFrom', { toolName: cliToolName }) : t('confirmationFromClaude')}
         </h3>
         {onDismiss && (
-          <button
+          <Button
+            variant="ghost"
             type="button"
             onClick={onDismiss}
             aria-label="close"
-            className="p-1 rounded hover:bg-yellow-200 dark:hover:bg-gray-700 transition-colors"
+            className="p-1 rounded hover:bg-yellow-200 dark:hover:bg-muted transition-colors"
           >
             <svg className="w-5 h-5 text-yellow-700 dark:text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
-          </button>
+          </Button>
         )}
       </div>
 
       {/* Instruction Text (context preceding the prompt) */}
       {promptData.instructionText && (
-        <div className="max-h-40 overflow-y-auto whitespace-pre-wrap text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 rounded p-2 border border-gray-200 dark:border-gray-700">
+        <div className="max-h-40 overflow-y-auto whitespace-pre-wrap text-sm text-muted-foreground bg-muted rounded p-2 border border-border">
           {promptData.instructionText}
         </div>
       )}
 
       {/* Question */}
-      <p className="text-gray-800 dark:text-gray-200 leading-relaxed">{promptData.question}</p>
+      <p className="text-foreground leading-relaxed">{promptData.question}</p>
 
       {/* Answering indicator */}
       {isDisabled && (
-        <div data-testid="answering-indicator" className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400" role="status" aria-live="polite">
-          <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-accent-600" aria-hidden="true" />
+        <div data-testid="answering-indicator" className="flex items-center gap-2 text-sm text-muted-foreground" role="status" aria-live="polite">
+          <div className="animate-spin rounded-full h-4 w-4 border-2 border-input border-t-accent-600" aria-hidden="true" />
           <span>{t('sending')}</span>
         </div>
       )}
@@ -216,26 +217,28 @@ function YesNoPromptActions({
   const isNoDefault = promptData.defaultOption === 'no';
 
   const yesButtonClasses = `${BUTTON_BASE_STYLES} ${BUTTON_PRIMARY_STYLES} ${isYesDefault ? 'primary default highlighted' : ''}`;
-  const noButtonClasses = `${BUTTON_BASE_STYLES} ${isNoDefault ? 'bg-gray-600 text-white hover:bg-gray-700 primary default highlighted' : BUTTON_SECONDARY_STYLES}`;
+  const noButtonClasses = `${BUTTON_BASE_STYLES} ${isNoDefault ? 'bg-foreground text-background hover:bg-foreground/90 primary default highlighted' : BUTTON_SECONDARY_STYLES}`;
 
   return (
     <div className="flex items-center gap-3" role="group" aria-label="Yes or No options">
-      <button
+      <Button
+        variant="ghost"
         type="button"
         onClick={onYes}
         disabled={disabled}
         className={yesButtonClasses}
       >
         {t('yes')}
-      </button>
-      <button
+      </Button>
+      <Button
+        variant="ghost"
         type="button"
         onClick={onNo}
         disabled={disabled}
         className={noButtonClasses}
       >
         {t('no')}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -273,7 +276,7 @@ function MultipleChoicePromptActions({
     const baseClasses = 'flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-all';
     const selectionClasses = isSelected
       ? 'bg-accent-50 dark:bg-accent-900/30 border-2 border-accent-500'
-      : 'bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600';
+      : 'bg-surface border-2 border-border hover:border-input';
     const disabledClasses = disabled ? 'opacity-50 cursor-not-allowed' : '';
     return `${baseClasses} ${selectionClasses} ${disabledClasses}`;
   }, [selectedOption, disabled]);
@@ -323,12 +326,13 @@ function MultipleChoicePromptActions({
             onChange={(e) => onTextInputChange(e.target.value)}
             disabled={disabled}
             placeholder={t('enterValuePlaceholder')}
-            className="w-full px-4 py-2 border-2 border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg focus:outline-none focus:border-accent-500 disabled:opacity-50"
+            className="w-full px-4 py-2 border-2 border-input dark:bg-muted dark:text-foreground rounded-lg focus:outline-none focus:border-accent-500 disabled:opacity-50"
           />
         </div>
       )}
 
       {/* Submit button */}
+      {/* Issue #1061: full-width (w-full) without justify-center — base centering/hover-lift would alter layout — 残置 */}
       <button
         type="button"
         onClick={onSubmit}
@@ -345,7 +349,7 @@ function MultipleChoicePromptActions({
  * Generates container class names based on animation state
  */
 function getContainerClasses(animationClass: string): string {
-  const baseClasses = 'bg-yellow-50 dark:bg-gray-800 border-2 border-yellow-300 dark:border-yellow-600 rounded-lg p-4 shadow-lg transition-all duration-200 ease-in-out';
+  const baseClasses = 'bg-yellow-50 dark:bg-muted border-2 border-yellow-300 dark:border-yellow-600 rounded-lg p-4 shadow-lg transition-all duration-200 ease-in-out';
 
   let animationStyles = 'opacity-100';
   if (animationClass === 'animate-fade-in') {

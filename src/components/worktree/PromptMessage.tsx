@@ -13,6 +13,7 @@ import type { ChatMessage } from '@/types/models';
 import { format } from 'date-fns';
 import { getDateFnsLocale } from '@/lib/date-locale';
 import { getCliToolDisplayNameSafe } from '@/lib/cli-tools/types';
+import { Button } from '@/components/ui';
 
 export interface PromptMessageProps {
   message: ChatMessage;
@@ -58,8 +59,8 @@ const BUTTON_BASE_CLASSES = 'rounded-lg font-medium transition-all disabled:opac
 function SendingIndicator({ className = '' }: { className?: string }) {
   const t = useTranslations('prompt');
   return (
-    <div className={`flex items-center gap-2 text-sm text-gray-500 ${className}`.trim()}>
-      <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-accent-600" />
+    <div className={`flex items-center gap-2 text-sm text-muted-foreground ${className}`.trim()}>
+      <div className="animate-spin rounded-full h-4 w-4 border-2 border-input border-t-accent-600" />
       <span>{t('sending')}</span>
     </div>
   );
@@ -90,26 +91,26 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
 
   return (
     <div className="mb-4">
-      <div className="bg-yellow-50 border-2 border-yellow-300 rounded-lg p-4 shadow-sm">
+      <div className="bg-yellow-50 dark:bg-muted border-2 border-yellow-300 dark:border-yellow-600 rounded-lg p-4 shadow-sm">
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <TriangleAlert className="w-6 h-6 text-yellow-600" aria-hidden="true" />
-            <span className="font-bold text-yellow-800">{t('confirmationFrom', { toolName: getCliToolDisplayNameSafe(message.cliToolId, 'Claude') })}</span>
+            <TriangleAlert className="w-6 h-6 text-yellow-600 dark:text-yellow-400" aria-hidden="true" />
+            <span className="font-bold text-yellow-800 dark:text-yellow-300">{t('confirmationFrom', { toolName: getCliToolDisplayNameSafe(message.cliToolId, 'Claude') })}</span>
           </div>
-          <span className="text-xs text-yellow-600">{timestamp}</span>
+          <span className="text-xs text-yellow-600 dark:text-yellow-400">{timestamp}</span>
         </div>
 
         {/* Instruction text (Issue #235: rawContent display) [SF-S2-004] */}
         {displayContent && (
-          <div className="text-sm text-gray-700 whitespace-pre-wrap mb-2">
+          <div className="text-sm text-foreground whitespace-pre-wrap mb-2">
             {displayContent}
           </div>
         )}
 
         {/* Question */}
         <div className="mb-4">
-          <p className="text-base text-gray-800 leading-relaxed">
+          <p className="text-base text-foreground leading-relaxed">
             {prompt.question}
           </p>
         </div>
@@ -120,20 +121,22 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
             {/* Yes/No buttons for yes_no prompts */}
             {prompt.type === 'yes_no' && (
               <div className="flex items-center gap-3">
-                <button
+                <Button
+                  variant="ghost"
                   onClick={() => handleRespond('yes')}
                   disabled={responding}
                   className={`px-6 py-2 ${BUTTON_BASE_CLASSES} bg-accent-600 text-white hover:bg-accent-700 focus:ring-ring`}
                 >
                   {t('yes')}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="ghost"
                   onClick={() => handleRespond('no')}
                   disabled={responding}
-                  className={`px-6 py-2 ${BUTTON_BASE_CLASSES} bg-white border-2 border-gray-300 hover:bg-gray-50 focus:ring-gray-500`}
+                  className={`px-6 py-2 ${BUTTON_BASE_CLASSES} bg-surface border-2 border-input hover:bg-muted focus:ring-ring`}
                 >
                   {t('no')}
-                </button>
+                </Button>
                 {responding && <SendingIndicator />}
               </div>
             )}
@@ -142,6 +145,7 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
             {prompt.type === 'multiple_choice' && (
               <div className="space-y-2">
                 {prompt.options.map((option) => (
+                  /* Issue #1061: full-width left-aligned choice row (w-full text-left) — base centering/hover-lift would break the row layout — 残置 */
                   <button
                     key={option.number}
                     onClick={() => handleRespond(option.number.toString())}
@@ -150,7 +154,7 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
                       w-full text-left px-4 py-3 ${BUTTON_BASE_CLASSES}
                       ${option.isDefault
                         ? 'bg-accent-600 text-white hover:bg-accent-700 border-2 border-accent-600'
-                        : 'bg-white border-2 border-gray-300 hover:bg-gray-50 text-gray-900'
+                        : 'bg-surface border-2 border-input hover:bg-muted text-foreground'
                       }
                       focus:ring-ring
                     `}
@@ -171,9 +175,9 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
             )}
           </div>
         ) : (
-          <div className="bg-white border border-gray-300 rounded-lg px-4 py-2 inline-block">
-            <span className="text-sm text-gray-600">
-              <CircleCheck size={16} className="inline align-[-3px] mr-1 text-green-600" aria-hidden="true" />{t('answered')}: <strong className="text-gray-900">{prompt.answer}</strong>
+          <div className="bg-surface border border-input rounded-lg px-4 py-2 inline-block">
+            <span className="text-sm text-muted-foreground">
+              <CircleCheck size={16} className="inline align-[-3px] mr-1 text-green-600" aria-hidden="true" />{t('answered')}: <strong className="text-foreground">{prompt.answer}</strong>
             </span>
           </div>
         )}
