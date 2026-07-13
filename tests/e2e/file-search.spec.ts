@@ -103,14 +103,14 @@ test.describe('File Search Feature', () => {
           await contentButton.click();
 
           // Verify content mode is active
-          await expect(contentButton).toHaveClass(/bg-blue-100/);
+          await expect(contentButton).toHaveClass(/bg-accent-100/);
 
           // Click name mode button
           const nameButton = page.locator('[data-testid="mode-name"]');
           await nameButton.click();
 
           // Verify name mode is active
-          await expect(nameButton).toHaveClass(/bg-blue-100/);
+          await expect(nameButton).toHaveClass(/bg-accent-100/);
         }
       }
     });

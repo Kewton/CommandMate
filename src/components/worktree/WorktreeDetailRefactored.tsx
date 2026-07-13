@@ -16,13 +16,15 @@
 
 'use client';
 
-import React, { memo } from 'react';
+import React, { memo, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { Loader2 } from 'lucide-react';
+import { Loader2, MoreHorizontal } from 'lucide-react';
 import { MobileHeader } from '@/components/mobile/MobileHeader';
 import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
+import { StatusDot } from '@/components/ui/StatusDot';
 import { MobileTabBar } from '@/components/mobile/MobileTabBar';
 import { MobilePromptSheet } from '@/components/mobile/MobilePromptSheet';
+import { MobileTerminalActionsSheet } from '@/components/mobile/MobileTerminalActionsSheet';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
@@ -42,7 +44,7 @@ const MarkdownEditor = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex items-center justify-center h-full bg-white dark:bg-gray-900 text-gray-400 dark:text-gray-500">
+      <div className="flex items-center justify-center h-full bg-surface text-muted-foreground">
         <Loader2 className="animate-spin h-6 w-6 mr-2" />
         <span>Loading editor...</span>
       </div>
@@ -83,6 +85,15 @@ export interface WorktreeDetailRefactoredProps {
  * without recreating a function on every render.
  */
 const NOOP_SELECTED_AGENTS_CHANGE = (): void => {};
+
+/**
+ * Mobile bottom-anchored layout offsets (both include the iOS safe-area inset).
+ * The MobileTabBar is 4rem tall and the fixed MessageInput sits directly above
+ * it; the scrollable content reserves 12rem so nothing is hidden behind the
+ * input stack + tab bar.
+ */
+const MOBILE_MESSAGE_INPUT_BOTTOM = 'calc(4rem + env(safe-area-inset-bottom, 0px))';
+const MOBILE_CONTENT_BOTTOM_PADDING = 'calc(12rem + env(safe-area-inset-bottom, 0px))';
 
 // ============================================================================
 // Main Component
@@ -213,6 +224,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     worktreeName,
     worktreeStatus,
   } = useWorktreeDetailController({ worktreeId });
+
+  // Issue #1080: mobile terminal secondary actions (search + End) moved off the
+  // sticky control row into a bottom sheet, opened from a "more actions" trigger.
+  const [showActionsSheet, setShowActionsSheet] = useState(false);
 
   // Render
   // ========================================================================
@@ -378,106 +393,60 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           </div>
         )}
 
-        {/* Auto Yes + CLI Tool Tabs combined row (Mobile) */}
-        <div className="sticky top-0 z-30 flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-          {/* Left: Auto Yes toggle (inline mode) — fixed, does not shrink */}
-          <div className="flex-shrink-0">
-            <AutoYesToggle
-              enabled={autoYesEnabled}
-              expiresAt={autoYesExpiresAt}
-              onToggle={handleAutoYesToggle}
-              lastAutoResponse={lastAutoResponse}
-              cliToolName={activeCliTab}
-              inline
-            />
-          </div>
-          {/* Center: CLI tool tabs — horizontally scrollable so 3+ agents
-              never overflow off-screen (Issue #958). `min-w-0` is required to
-              release the flex item's default min-width:auto, otherwise the nav
-              expands past the parent instead of scrolling.
-              Issue #874: Mobile tabs are per-agent-instance (alias-aware) so
-              multiple instances of the same CLI tool are independently
-              selectable, mirroring the PC header. `displayedInstances` is the
-              per-device visible subset (localStorage); status is resolved
-              per-instance優先（PC版と整合, Issue #960）so closing one instance
-              of a duplicated CLI tool no longer leaves a sibling's status. */}
+        {/* Agent-instance tabs row (Mobile, Issue #1080) — dedicated to the
+            per-instance tabs. Auto-Yes moved into the composer meta row; terminal
+            search + End moved into the "more actions" bottom sheet. */}
+        <div className="sticky top-0 z-30 flex items-center gap-2 px-3 py-1.5 bg-surface-2 border-b border-border">
+          {/* CLI tool tabs — horizontally scrollable so 3+ agents never overflow
+              off-screen (Issue #958). `min-w-0` releases the flex item's default
+              min-width:auto so the nav scrolls instead of expanding.
+              Issue #874: per-agent-instance (alias-aware) tabs mirror the PC
+              header; `displayedInstances` is the per-device visible subset.
+              Issue #960: status resolved per-instance優先（PC版と整合）. */}
           <nav
-            className="flex gap-2 flex-1 min-w-0 overflow-x-auto scrollbar-hide"
+            className="flex gap-1 flex-1 min-w-0 overflow-x-auto scrollbar-hide"
             aria-label="Agent Instance Selection"
           >
             {displayedInstances.map((inst) => {
-              // Issue #960: resolve each instance's status from the
-              // per-instance map first so a closed instance of a duplicated
-              // CLI tool no longer inherits a running sibling's status; fall
-              // back to the per-CLI aggregate for backward compat (PC版と整合).
               const toolStatus = deriveCliStatus(
                 worktree?.sessionStatusByInstance?.[inst.id] ?? worktree?.sessionStatusByCli?.[inst.cliTool]
               );
-              const statusConfig = SIDEBAR_STATUS_CONFIG[toolStatus];
+              const statusLabel = SIDEBAR_STATUS_CONFIG[toolStatus].label;
               const isActive = activeInstanceId === inst.id;
               return (
                 <button
                   key={inst.id}
                   onClick={() => setActiveInstanceId(inst.id)}
-                  className={`flex-shrink-0 whitespace-nowrap px-1.5 py-0.5 rounded font-medium text-xs transition-colors flex items-center gap-1 ${
+                  className={`flex-shrink-0 whitespace-nowrap px-1.5 py-1 font-medium text-xs transition-colors flex items-center gap-1 border-b-2 ${
                     isActive
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'text-gray-500 hover:text-gray-700'
+                      ? 'text-accent-600 dark:text-accent-400 border-accent-500'
+                      : 'text-muted-foreground hover:text-foreground border-transparent'
                   }`}
                   aria-current={isActive ? 'page' : undefined}
                 >
-                  {statusConfig.type === 'spinner' ? (
-                    <span
-                      className={`w-2 h-2 rounded-full flex-shrink-0 border-2 border-t-transparent animate-spin ${statusConfig.className}`}
-                      title={statusConfig.label}
-                    />
-                  ) : (
-                    <span
-                      className={`w-2 h-2 rounded-full flex-shrink-0 ${statusConfig.className}`}
-                      title={statusConfig.label}
-                    />
-                  )}
+                  {/* Issue #1078: unified StatusDot visual language (was blue spinner) */}
+                  <StatusDot status={toolStatus} size="sm" label={`${getInstanceLabel(inst)}: ${statusLabel}`} />
                   {getInstanceLabel(inst)}
                 </button>
               );
             })}
           </nav>
-          {/* Right: search + End button — pinned, always reachable regardless
-              of tab count (Issue #958) */}
-          <div className="flex items-center gap-2 flex-shrink-0">
-            {/* [Issue #47] Terminal search button (Mobile) */}
-            <button
-              onClick={() => {
-                window.dispatchEvent(new CustomEvent('terminal-search-open'));
-              }}
-              className="flex items-center px-1.5 py-0.5 text-xs text-gray-500 hover:text-gray-800 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
-              aria-label="ターミナル内を検索"
-              data-testid="terminal-search-button-mobile"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-            </button>
-            <button
-              onClick={handleKillSession}
-              disabled={!activeSessionRunning}
-              className={`flex items-center gap-0.5 px-1.5 py-0.5 text-xs font-medium rounded transition-colors ${
-                activeSessionRunning
-                  ? 'text-red-600 hover:bg-red-50'
-                  : 'invisible'
-              }`}
-              aria-label={`End ${activeCliTab} session`}
-            >
-              <span aria-hidden="true">&#x2715;</span>
-              End
-            </button>
-          </div>
+          {/* More actions (terminal search + End) — pinned, opens bottom sheet */}
+          <button
+            type="button"
+            onClick={() => setShowActionsSheet(true)}
+            className="flex-shrink-0 flex items-center justify-center min-h-[44px] min-w-[44px] rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            aria-label={tWorktree('terminal.moreActions')}
+            data-testid="mobile-more-actions-button"
+          >
+            <MoreHorizontal size={18} aria-hidden="true" />
+          </button>
         </div>
 
         <main
           className="flex-1 overflow-y-auto"
           style={{
-            paddingBottom: 'calc(12rem + env(safe-area-inset-bottom, 0px))',
+            paddingBottom: MOBILE_CONTENT_BOTTOM_PADDING,
           }}
         >
           <MobileContent
@@ -534,12 +503,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 
         {/* Message Input - fixed above tab bar */}
         <div
-          className="fixed left-0 right-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 z-30"
-          style={{ bottom: 'calc(4rem + env(safe-area-inset-bottom, 0px))' }}
+          className="fixed left-0 right-0 border-t border-border bg-surface z-30"
+          style={{ bottom: MOBILE_MESSAGE_INPUT_BOTTOM }}
         >
           {/* Issue #473: Navigation buttons for OpenCode TUI selection list (mobile) */}
           {isSelectionListActive && (
-            <div className="px-2 pt-1 border-b border-gray-200 dark:border-gray-700">
+            <div className="px-2 pt-1 border-b border-border">
               <NavigationButtons
                 worktreeId={worktreeId}
                 cliToolId={activeCliTab}
@@ -558,6 +527,20 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               isSessionRunning={activeSessionRunning}
               pendingInsertText={pendingInsertText}
               onInsertConsumed={handleInsertConsumedSingle}
+              // Issue #1080: Auto-Yes now lives in the composer meta row (moved off
+              // the sticky tab row). The active agent tab already names the tool, so
+              // the parenthetical tool name is suppressed here (showToolName=false).
+              autoYesSlot={
+                <AutoYesToggle
+                  enabled={autoYesEnabled}
+                  expiresAt={autoYesExpiresAt}
+                  onToggle={handleAutoYesToggle}
+                  lastAutoResponse={lastAutoResponse}
+                  cliToolName={activeCliTab}
+                  inline
+                  showToolName={false}
+                />
+              }
             />
           </div>
         </div>
@@ -580,6 +563,17 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             cliToolName={getCliToolDisplayName(activeCliTab)}
           />
         )}
+
+        {/* Issue #1080: terminal secondary actions (search + End) bottom sheet.
+            End defers to handleKillSession, which opens the existing kill-confirm
+            dialog (destructive confirmation preserved). */}
+        <MobileTerminalActionsSheet
+          open={showActionsSheet}
+          onClose={() => setShowActionsSheet(false)}
+          onSearch={() => window.dispatchEvent(new CustomEvent('terminal-search-open'))}
+          onEnd={handleKillSession}
+          endDisabled={!activeSessionRunning}
+        />
 
         {/* File Viewer Modal (Mobile only) */}
         <FileViewer
@@ -628,14 +622,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           showCloseButton={true}
         >
           <div className="space-y-4">
-            <p className="text-sm text-gray-700">
+            <p className="text-sm text-foreground">
               {tWorktree('session.endWarning')}
             </p>
             <div className="flex justify-end gap-3 pt-2">
               <button
                 type="button"
                 onClick={handleKillCancel}
-                className="px-4 py-2 text-sm font-medium rounded-md bg-gray-200 hover:bg-gray-300 text-gray-700"
+                className="px-4 py-2 text-sm font-medium rounded-md bg-muted hover:bg-muted/80 text-foreground"
               >
                 {tCommon('cancel')}
               </button>

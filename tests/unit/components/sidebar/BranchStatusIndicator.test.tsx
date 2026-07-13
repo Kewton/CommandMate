@@ -40,28 +40,28 @@ describe('BranchStatusIndicator', () => {
       render(<BranchStatusIndicator status="idle" />);
 
       const indicator = screen.getByTestId('status-indicator');
-      expect(indicator.className).toMatch(/bg-gray-500|gray/);
+      expect(indicator.className).toMatch(/bg-muted-foreground|gray/);
     });
 
-    it('should have blue spinner for running status', () => {
+    it('should have green (success) color for running status (Issue #1051)', () => {
       render(<BranchStatusIndicator status="running" />);
 
       const indicator = screen.getByTestId('status-indicator');
-      expect(indicator.className).toMatch(/border-blue-500|blue/);
+      expect(indicator.className).toMatch(/bg-success/);
     });
 
-    it('should have yellow color for waiting status', () => {
+    it('should have amber (warning) color for waiting status (Issue #1051)', () => {
       render(<BranchStatusIndicator status="waiting" />);
 
       const indicator = screen.getByTestId('status-indicator');
-      expect(indicator.className).toMatch(/bg-yellow-500|yellow|amber/);
+      expect(indicator.className).toMatch(/bg-warning|yellow|amber/);
     });
 
-    it('should have blue spinner for generating status', () => {
+    it('should have green (success) color for generating status (Issue #1051)', () => {
       render(<BranchStatusIndicator status="generating" />);
 
       const indicator = screen.getByTestId('status-indicator');
-      expect(indicator.className).toMatch(/border-blue-500|blue/);
+      expect(indicator.className).toMatch(/bg-success/);
     });
   });
 
@@ -70,28 +70,30 @@ describe('BranchStatusIndicator', () => {
       render(<BranchStatusIndicator status="idle" />);
 
       const indicator = screen.getByTestId('status-indicator');
-      expect(indicator.className).not.toMatch(/animate-spin/);
+      expect(indicator.className).not.toMatch(/animate-status/);
     });
 
-    it('should spin for running status (spinner)', () => {
+    it('should glow/pulse for running status (Issue #1051)', () => {
       render(<BranchStatusIndicator status="running" />);
 
       const indicator = screen.getByTestId('status-indicator');
-      expect(indicator.className).toMatch(/animate-spin/);
+      expect(indicator.className).toMatch(/animate-status-glow/);
     });
 
-    it('should not animate for waiting status (dot)', () => {
+    it('should blink for waiting status (Issue #1051)', () => {
       render(<BranchStatusIndicator status="waiting" />);
 
       const indicator = screen.getByTestId('status-indicator');
+      // Waiting blinks (weak) but never spins.
+      expect(indicator.className).toMatch(/animate-status-blink/);
       expect(indicator.className).not.toMatch(/animate-spin/);
     });
 
-    it('should spin for generating status (spinner)', () => {
+    it('should glow/pulse for generating status (Issue #1051)', () => {
       render(<BranchStatusIndicator status="generating" />);
 
       const indicator = screen.getByTestId('status-indicator');
-      expect(indicator.className).toMatch(/animate-spin/);
+      expect(indicator.className).toMatch(/animate-status-glow/);
     });
   });
 

@@ -4,6 +4,120 @@
 
 @layer base {
   /*
+   * [Issue #1041] Semantic design tokens.
+   * Values are RGB channel triplets (not hex) so Tailwind can synthesize alpha
+   * via `rgb(var(--token) / <alpha-value>)`.
+   * See docs/design-system.md for naming rules and the hardcoded-color policy.
+   *
+   * [Issue #1049] Surface/depth revision — the FIRST intentional visual change.
+   * background/surface/surface-2/border now form a deliberate elevation ladder
+   * (deep base → subtly-lifted surface → recessed secondary → hairline border)
+   * so screens read as layered rather than "flat gray boxes". Body text keeps
+   * WCAG AA (>=4.5:1) and auxiliary text >=3:1 against these surfaces.
+   *
+   * [Issue #1074] Light ladder INVERTED to match dark's intent: the page is a
+   * near-white gray (--background), cards are pure white (--surface, brightest
+   * top-lit layer) and the secondary surface is a recessed well (--surface-2,
+   * darkest). Reads as "white card floats above a gray page": surface-2 <
+   * background < surface. Not a monotone mirror of dark — dark unchanged.
+   */
+  :root {
+    /*
+     * [Issue #1071] Declare color-scheme so the UA themes native controls
+     * (select dropdowns, scrollbars, form widgets) to match the active theme
+     * instead of rendering light-on-dark (or vice versa).
+     */
+    color-scheme: light;
+    --background: 250 250 251; /* near-white gray page [#1074] */
+    --foreground: 17 24 39; /* gray-900 */
+    --surface: 255 255 255; /* white card — brightest, top-lit [#1074] */
+    --surface-foreground: 17 24 39; /* gray-900 */
+    --surface-2: 244 246 250; /* recessed well — darkest light surface [#1074] */
+    --muted: 243 244 246; /* gray-100 */
+    --muted-foreground: 107 114 128; /* gray-500 */
+    --border: 226 232 240; /* slate-200 — hairline */
+    --input: 209 213 219; /* gray-300 */
+    --ring: 6 182 212; /* cyan-500 */
+    --accent-50: 236 254 255; /* cyan-50 */
+    --accent-100: 207 250 254; /* cyan-100 */
+    --accent-200: 165 243 252; /* cyan-200 */
+    --accent-300: 103 232 249; /* cyan-300 */
+    --accent-400: 34 211 238; /* cyan-400 */
+    --accent-500: 6 182 212; /* cyan-500 */
+    --accent-600: 8 145 178; /* cyan-600 */
+    --accent-700: 14 116 144; /* cyan-700 */
+    --accent-800: 21 94 117; /* cyan-800 */
+    --accent-900: 22 78 99; /* cyan-900 */
+    --accent-950: 8 51 68; /* cyan-950 */
+    --success: 34 197 94; /* green-500 */
+    --warning: 245 158 11; /* amber-500 */
+    --danger: 239 68 68; /* red-500 */
+    --info: 59 130 246; /* blue-500 */
+
+    /*
+     * [Issue #1073] Sidebar surface tokens. STANDALONE literal RGB values — they
+     * intentionally do NOT reference --surface via var(), so #1074's light
+     * --surface ladder revision cannot bleed into the sidebar color. Theme-
+     * following: light = slate-50 panel + hairline, dark = #141821 (aligned with
+     * the #1049 surface elevation). See docs/design-system.md.
+     */
+    --sidebar: 248 250 252; /* slate-50 — light panel */
+    --sidebar-foreground: 17 24 39; /* gray-900 */
+    --sidebar-border: 226 232 240; /* slate-200 — hairline */
+    --sidebar-hover: 241 245 249; /* slate-100 — hover/selected bg */
+    --sidebar-muted: 107 114 128; /* gray-500 — secondary text */
+
+    /*
+     * [Issue #1050] Motion tokens. Mode-independent, so defined once on :root.
+     * Durations map to the tailwindcss-animate `duration-*` scale used across
+     * Modal / Radix data-state primitives / list stagger. Easing is ease-out
+     * biased for entrances. See docs/design-system.md (Motion section).
+     */
+    --motion-duration-fast: 150ms;
+    --motion-duration-base: 200ms;
+    --motion-duration-slow: 300ms;
+    --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --motion-stagger-step: 40ms;
+  }
+
+  .dark {
+    color-scheme: dark; /* [Issue #1071] see :root note */
+    --background: 10 12 18; /* #0a0c12 — deep base */
+    --foreground: 243 244 246; /* gray-100 */
+    --surface: 20 24 33; /* #141821 — subtly lifted card */
+    --surface-foreground: 243 244 246; /* gray-100 */
+    --surface-2: 15 18 26; /* #0f121a — recessed secondary */
+    --muted: 31 41 55; /* gray-800 */
+    --muted-foreground: 156 163 175; /* gray-400 */
+    --border: 42 48 62; /* #2a303e — hairline */
+    --input: 75 85 99; /* gray-600 */
+    --ring: 6 182 212; /* cyan-500 */
+    --accent-50: 236 254 255; /* cyan-50 */
+    --accent-100: 207 250 254; /* cyan-100 */
+    --accent-200: 165 243 252; /* cyan-200 */
+    --accent-300: 103 232 249; /* cyan-300 */
+    --accent-400: 34 211 238; /* cyan-400 */
+    --accent-500: 6 182 212; /* cyan-500 */
+    --accent-600: 8 145 178; /* cyan-600 */
+    --accent-700: 14 116 144; /* cyan-700 */
+    --accent-800: 21 94 117; /* cyan-800 */
+    --accent-900: 22 78 99; /* cyan-900 */
+    --accent-950: 8 51 68; /* cyan-950 */
+    --success: 34 197 94; /* green-500 */
+    --warning: 245 158 11; /* amber-500 */
+    --danger: 239 68 68; /* red-500 */
+    --info: 59 130 246; /* blue-500 */
+
+    /* [Issue #1073] Sidebar surface tokens (see :root note). Dark values match
+       the #1049 elevation ladder so the sidebar lifts subtly above the base. */
+    --sidebar: 20 24 33; /* #141821 — matches --surface */
+    --sidebar-foreground: 243 244 246; /* gray-100 */
+    --sidebar-border: 42 48 62; /* #2a303e — hairline */
+    --sidebar-hover: 31 41 55; /* gray-800 — hover/selected bg */
+    --sidebar-muted: 156 163 175; /* gray-400 — secondary text */
+  }
+
+  /*
    * [Issue #915] PC display size (案A: rem カスケード).
    * Applied to <html data-pc-size> on PC only (see PcDisplaySizeProvider).
    * rem-based Tailwind spacing/typography scales with the root font-size;
@@ -24,27 +138,37 @@
   }
 
   body {
-    @apply text-gray-900 dark:text-gray-100 antialiased;
+    @apply text-foreground antialiased;
   }
 
+  /* [Issue #1082] Text selection uses a translucent accent wash so highlights
+     read as brand-tinted in both themes (accent is mode-independent). */
+  ::selection {
+    background-color: rgb(var(--accent-500) / 0.25);
+  }
+
+  /*
+   * [Issue #1049] Heading hierarchy: bolder, tighter display headings (h1/h2)
+   * step down to semibold section headings (h3/h4). tracking-tight throughout.
+   */
   h1, h2, h3, h4, h5, h6 {
     @apply font-semibold tracking-tight;
   }
 
   h1 {
-    @apply text-3xl md:text-4xl;
+    @apply text-3xl md:text-4xl font-bold leading-tight;
   }
 
   h2 {
-    @apply text-2xl md:text-3xl;
+    @apply text-2xl md:text-3xl font-bold leading-tight;
   }
 
   h3 {
-    @apply text-xl md:text-2xl;
+    @apply text-xl md:text-2xl leading-snug;
   }
 
   h4 {
-    @apply text-lg md:text-xl;
+    @apply text-lg md:text-xl leading-snug;
   }
 }
 
@@ -65,9 +189,10 @@
     padding: 1rem;
   }
 
-  /* Inline code styling (not in pre blocks) */
+  /* Inline code styling (not in pre blocks) — theme-follows via tokens, same
+     look as `.assistant-md code` (Issue #1082). */
   .prose :not(pre) > code {
-    @apply bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 px-1.5 py-0.5 rounded text-sm font-mono;
+    @apply bg-muted text-foreground px-1.5 py-0.5 rounded text-sm font-mono;
   }
 
   .prose :not(pre) > code::before,
@@ -75,69 +200,11 @@
     content: none;
   }
 
-  /* Card component base */
-  .card {
-    @apply bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm;
-  }
-
-  .card-hover {
-    @apply transition-shadow duration-200 hover:shadow-md;
-  }
-
-  /* Button base styles */
-  .btn {
-    @apply inline-flex items-center justify-center px-4 py-2 rounded-md font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2;
-  }
-
-  .btn-primary {
-    @apply bg-cyan-600 dark:bg-cyan-500 text-white hover:bg-cyan-700 dark:hover:bg-cyan-600 focus:ring-cyan-500;
-  }
-
-  .btn-secondary {
-    @apply bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 hover:bg-gray-300 dark:hover:bg-gray-600 focus:ring-gray-500;
-  }
-
-  .btn-danger {
-    @apply bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
-  }
-
-  .btn-sm {
-    @apply px-3 py-1.5 text-sm;
-  }
-
-  .btn-lg {
-    @apply px-6 py-3 text-lg;
-  }
-
-  /* Badge styles */
-  .badge {
-    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
-  }
-
-  .badge-success {
-    @apply bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300;
-  }
-
-  .badge-warning {
-    @apply bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-300;
-  }
-
-  .badge-error {
-    @apply bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-300;
-  }
-
-  .badge-info {
-    @apply bg-cyan-100 dark:bg-cyan-900 text-cyan-800 dark:text-cyan-300;
-  }
-
-  .badge-gray {
-    @apply bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-300;
-  }
-
-  /* Input styles */
-  .input {
-    @apply w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500;
-  }
+  /*
+   * [Issue #1048] Legacy @apply component classes were removed here to
+   * eliminate the style-definition double structure; their Tailwind classes
+   * now live directly in the cva primitives under src/components/ui/.
+   */
 
   /* Container utilities */
   .container-custom {
@@ -160,17 +227,17 @@
 /* [Issue #716] CSS Custom Highlight API - History text search highlighting */
 /* Blue palette so it visually disambiguates from the terminal (orange) namespace */
 ::highlight(history-search) {
-  background-color: rgba(59, 130, 246, 0.4);
+  background-color: rgb(var(--info) / 0.4);
   color: inherit;
 }
 
 ::highlight(history-search-current) {
-  background-color: rgba(59, 130, 246, 0.8);
+  background-color: rgb(var(--info) / 0.8);
   color: white;
 }
 
 #history-search-fallback-overlay {
-  background-color: rgba(59, 130, 246, 0.6);
+  background-color: rgb(var(--info) / 0.6);
   border-radius: 2px;
   pointer-events: none;
 }
@@ -187,14 +254,14 @@
 ::highlight(history-search-0),
 ::highlight(history-search-1),
 ::highlight(history-search-2) {
-  background-color: rgba(59, 130, 246, 0.4);
+  background-color: rgb(var(--info) / 0.4);
   color: inherit;
 }
 
 ::highlight(history-search-current-0),
 ::highlight(history-search-current-1),
 ::highlight(history-search-current-2) {
-  background-color: rgba(59, 130, 246, 0.8);
+  background-color: rgb(var(--info) / 0.8);
   color: white;
 }
 
@@ -207,10 +274,11 @@
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
-  /* Custom scrollbar */
+  /* Custom scrollbar — [Issue #1082] tokenized so the thumb follows the theme
+     (was a fixed slate). --input tracks the light/dark form-border shade. */
   .scrollbar-thin {
     scrollbar-width: thin;
-    scrollbar-color: rgb(203 213 225) transparent;
+    scrollbar-color: rgb(var(--input)) transparent;
   }
 
   .scrollbar-thin::-webkit-scrollbar {
@@ -223,12 +291,12 @@
   }
 
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    background-color: rgb(203 213 225);
+    background-color: rgb(var(--input));
     border-radius: 3px;
   }
 
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    background-color: rgb(148 163 184);
+    background-color: rgb(var(--muted-foreground));
   }
 
   /* スクロールバー非表示・スワイプ/スクロールは維持 */
@@ -271,21 +339,41 @@
   .assistant-md li {
     margin: 0.15em 0;
   }
+  /*
+   * [Issue #1075] Theme-follow the assistant markdown so it reads as light on a
+   * light card and dark on a dark card. Accent tokens are identical in both
+   * modes, so links need an explicit .dark override (not just a token swap):
+   * accent-700 clears AA (>=4.5:1) on the white card; accent-300 clears AA on
+   * the dark card. code/table/blockquote/hr use semantic tokens that flip.
+   * Fenced code blocks are the deliberate exception — see `.assistant-md pre`.
+   */
   .assistant-md a {
-    color: rgb(103 232 249);
+    color: rgb(var(--accent-700));
     text-decoration: underline;
     word-break: break-all;
   }
+  .dark .assistant-md a {
+    color: rgb(var(--accent-300));
+  }
   .assistant-md code {
-    background-color: rgb(15 23 42 / 0.85);
+    background-color: rgb(var(--muted));
+    color: rgb(var(--foreground));
     padding: 0.08em 0.35em;
     border-radius: 4px;
     font-size: 0.9em;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: theme('fontFamily.mono');
   }
+  /*
+   * Fenced code blocks carry rehype-highlight (github-dark) syntax tokens, which
+   * are light colors tuned for a dark canvas. Keep the block dark in BOTH themes
+   * so those tokens stay AA-legible — same rationale (and #0d1117 value) as the
+   * always-dark terminal / `.prose pre` exception in docs/design-system.md. The
+   * explicit light `color` covers non-highlighted blocks (no .hljs class).
+   */
   .assistant-md pre {
-    background-color: rgb(15 23 42 / 0.85);
-    border: 1px solid rgb(51 65 85);
+    background-color: #0d1117;
+    color: rgb(201 209 217);
+    border: 1px solid rgb(var(--border));
     border-radius: 6px;
     padding: 0.6em 0.8em;
     margin: 0.5em 0;
@@ -295,14 +383,15 @@
   }
   .assistant-md pre code {
     background: transparent;
+    color: inherit;
     padding: 0;
     font-size: inherit;
   }
   .assistant-md blockquote {
     margin: 0.5em 0;
     padding-left: 0.8em;
-    border-left: 3px solid rgb(51 65 85);
-    color: rgb(203 213 225);
+    border-left: 3px solid rgb(var(--border));
+    color: rgb(var(--muted-foreground));
   }
   .assistant-md table {
     border-collapse: collapse;
@@ -311,16 +400,37 @@
   }
   .assistant-md th,
   .assistant-md td {
-    border: 1px solid rgb(51 65 85);
+    border: 1px solid rgb(var(--border));
     padding: 0.3em 0.6em;
     text-align: left;
   }
   .assistant-md th {
-    background-color: rgb(15 23 42 / 0.6);
+    background-color: rgb(var(--muted));
   }
   .assistant-md hr {
     border: none;
-    border-top: 1px solid rgb(51 65 85);
+    border-top: 1px solid rgb(var(--border));
     margin: 0.8em 0;
+  }
+}
+
+/*
+ * [Issue #1050] Reduced-motion utility.
+ * Honors the OS "reduce motion" setting by neutralizing all animations and
+ * transitions globally. Declared as plain CSS (outside @layer) so the
+ * !important reset reliably wins over both core Tailwind and
+ * tailwindcss-animate utilities. Keep this the single source of truth for
+ * motion suppression — components should not re-implement the media query.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
   }
 }

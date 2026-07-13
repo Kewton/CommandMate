@@ -24,6 +24,11 @@ vi.mock('next/link', () => ({
   ),
 }));
 
+// Mock next-themes so the header-mounted ThemeToggle (Issue #1071) renders deterministically
+vi.mock('next-themes', () => ({
+  useTheme: () => ({ theme: 'dark', setTheme: vi.fn() }),
+}));
+
 import { Header } from '@/components/layout/Header';
 
 describe('Header', () => {
@@ -69,21 +74,21 @@ describe('Header', () => {
     mockPathname.mockReturnValue('/');
     render(<Header />);
     const homeLink = screen.getByText('Home').closest('a');
-    expect(homeLink?.className).toContain('text-cyan-600');
+    expect(homeLink?.className).toContain('text-accent-600');
   });
 
   it('should highlight the active Sessions link when on /sessions', () => {
     mockPathname.mockReturnValue('/sessions');
     render(<Header />);
     const sessionsLink = screen.getByText('Sessions').closest('a');
-    expect(sessionsLink?.className).toContain('text-cyan-600');
+    expect(sessionsLink?.className).toContain('text-accent-600');
   });
 
   it('should highlight the active Review/Report link when on /review', () => {
     mockPathname.mockReturnValue('/review');
     render(<Header />);
     const reviewLink = screen.getByText('Review/Report').closest('a');
-    expect(reviewLink?.className).toContain('text-cyan-600');
+    expect(reviewLink?.className).toContain('text-accent-600');
   });
 
   it('should still render GitHub link', () => {
@@ -98,5 +103,22 @@ describe('Header', () => {
     render(<Header />);
     const nav = screen.getByRole('navigation');
     expect(nav).toBeDefined();
+  });
+
+  it('should render the ThemeToggle in the header (Issue #1071)', () => {
+    render(<Header />);
+    expect(screen.getByTestId('theme-toggle')).toBeInTheDocument();
+  });
+
+  it('should apply a translucent backdrop-blur header with an opaque fallback (Issue #1049)', () => {
+    const { container } = render(<Header />);
+    const header = container.querySelector('header');
+    expect(header).not.toBeNull();
+    const cls = header!.className;
+    // opaque fallback + translucent-only-when-supported + blur + hairline token
+    expect(cls).toContain('bg-background');
+    expect(cls).toContain('supports-[backdrop-filter]:bg-background/80');
+    expect(cls).toContain('backdrop-blur-md');
+    expect(cls).toContain('border-border');
   });
 });

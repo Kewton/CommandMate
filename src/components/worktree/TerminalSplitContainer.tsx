@@ -30,7 +30,7 @@ import React, {
   type ReactNode,
 } from 'react';
 import { useTranslations } from 'next-intl';
-import { History, Files, AlignHorizontalDistributeCenter } from 'lucide-react';
+import { History, Files, AlignHorizontalDistributeCenter, Plus, Minus } from 'lucide-react';
 import { getInstanceLabel, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
 import type { ShowToast } from '@/types/markdown-editor';
 import { MAX_SPLITS, MIN_SPLITS } from '@/config/terminal-split-config';
@@ -279,38 +279,40 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
       className="flex flex-col h-full min-h-0"
     >
       {/* Action bar */}
-      <div className="flex items-center gap-2 px-2 py-1 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-        <span className="text-xs text-gray-500 dark:text-gray-400">
+      <div className="flex items-center gap-1 px-2 py-1 bg-surface border-b border-border flex-shrink-0">
+        <span className="text-xs text-muted-foreground tabular-nums mr-1">
           {splits.length} / {MAX_SPLITS} splits
         </span>
 
         {/*
-          Issue #977: all action-bar buttons are left-aligned in a single
-          group, ordered +Split → -Split → Equal widths → History → Files.
-          The `ml-auto` that previously pushed +Split (and everything after)
-          to the right has been removed so the bar reads left-to-right.
+          Issue #1079: the layout-operation controls (+Split / -Split / Equal)
+          are lucide icon ghost buttons with tooltips. They form the LEFT group;
+          an `ml-auto` hairline separator pushes the History / Files panel
+          toggles to the RIGHT group ("layout ops | panel visibility").
         */}
         <button
           type="button"
           onClick={addSplit}
           disabled={!canAdd}
           aria-disabled={!canAdd}
-          aria-label="Add terminal split"
+          aria-label={t('terminal.addSplit')}
+          title={t('terminal.addSplit')}
           data-testid="add-terminal-split"
-          className="text-xs px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
         >
-          + Split
+          <Plus className="w-4 h-4" aria-hidden="true" />
         </button>
         <button
           type="button"
           onClick={removeSplit}
           disabled={!canRemove}
           aria-disabled={!canRemove}
-          aria-label="Remove last terminal split"
+          aria-label={t('terminal.removeSplit')}
+          title={t('terminal.removeSplit')}
           data-testid="remove-terminal-split"
-          className="text-xs px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
         >
-          - Split
+          <Minus className="w-4 h-4" aria-hidden="true" />
         </button>
 
         {/*
@@ -326,14 +328,17 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
           aria-label={t('terminal.equalizeWidthsHint')}
           title={t('terminal.equalizeWidthsHint')}
           data-testid="equalize-split-widths"
-          className="flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
         >
           <AlignHorizontalDistributeCenter
-            className="w-3.5 h-3.5 flex-shrink-0"
+            className="w-4 h-4 flex-shrink-0"
             aria-hidden="true"
           />
-          <span>{t('terminal.equalizeWidths')}</span>
         </button>
+
+        {/* Issue #1079: separator dividing layout ops (left) from panel toggles
+            (right). `ml-auto` pushes the History / Files group to the far right. */}
+        <div className="ml-auto h-4 w-px bg-border" aria-hidden="true" />
 
         {/*
           Issue #841 (Phase 2): History / Files visibility toggles. Always
@@ -358,7 +363,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
           data-testid="toggle-history-pane"
           className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors ${
             historyVisible
-              ? 'border-cyan-300 dark:border-cyan-700 bg-cyan-50 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300'
+              ? 'border-accent-300 dark:border-accent-700 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300'
               : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
           }`}
         >
@@ -378,7 +383,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
           data-testid="toggle-file-panel"
           className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors ${
             filesVisible
-              ? 'border-cyan-300 dark:border-cyan-700 bg-cyan-50 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300'
+              ? 'border-accent-300 dark:border-accent-700 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300'
               : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
           }`}
         >

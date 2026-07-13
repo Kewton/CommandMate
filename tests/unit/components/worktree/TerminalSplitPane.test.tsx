@@ -5,13 +5,23 @@
  */
 
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import {
   TerminalSplitPane,
   AGENT_INSTANCE_DND_MIME,
 } from '@/components/worktree/TerminalSplitPane';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
+import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
+
+// Issue #1079: the instance selector is now a Radix DropdownMenu (portalled),
+// which touches pointer-capture / scrollIntoView that jsdom does not implement.
+beforeAll(() => installRadixJsdomPolyfills());
+
+/** Open the split's instance-selector menu (keyboard-opens the Radix trigger). */
+function openSelector(splitIndex = 0) {
+  fireEvent.keyDown(screen.getByTestId(`cli-selector-${splitIndex}`), { key: 'Enter' });
+}
 
 /** Build a primary AgentInstance (id === cliTool) for tests. */
 function inst(cliTool: CLIToolType, alias?: string): AgentInstance {
@@ -63,7 +73,19 @@ describe('TerminalSplitPane', () => {
     expect(screen.getByTestId('footer-body')).toBeInTheDocument();
   });
 
-  it('renders only the available instances as selector options', () => {
+  it('shows the current instance alias and a status dot in the selector trigger', () => {
+    renderPane({
+      instanceId: 'claude',
+      instance: { id: 'claude', cliTool: 'claude', alias: 'Primary', order: 0 },
+      status: 'running',
+    });
+    const trigger = screen.getByTestId('cli-selector-0');
+    expect(trigger).toHaveTextContent('Primary');
+    // Issue #1079: the derived status renders as a StatusDot inside the trigger.
+    expect(screen.getByTestId('split-status-indicator-0')).toBeInTheDocument();
+  });
+
+  it('lists only the available instances in the selector menu', () => {
     // Issue #869: the parent already excludes instances used by other splits and
     // always includes this split's own instance, so the pane simply lists them.
     renderPane({
@@ -71,12 +93,12 @@ describe('TerminalSplitPane', () => {
       instance: inst('claude'),
       availableInstances: [inst('claude'), inst('gemini')],
     });
-    const select = screen.getByTestId('cli-selector-0') as HTMLSelectElement;
-    const values = Array.from(select.querySelectorAll('option')).map(o => o.value);
-    expect(values).toEqual(['claude', 'gemini']);
+    openSelector();
+    const items = screen.getAllByRole('menuitemradio').map(i => i.textContent);
+    expect(items).toEqual(['claude', 'gemini']);
   });
 
-  it('labels options by the instance alias', () => {
+  it('labels menu items by the instance alias', () => {
     renderPane({
       instanceId: 'claude',
       instance: { id: 'claude', cliTool: 'claude', alias: 'Primary', order: 0 },
@@ -85,16 +107,19 @@ describe('TerminalSplitPane', () => {
         { id: 'claude-2', cliTool: 'claude', alias: 'Review', order: 1 },
       ],
     });
-    const select = screen.getByTestId('cli-selector-0') as HTMLSelectElement;
-    const labels = Array.from(select.querySelectorAll('option')).map(o => o.textContent);
+    openSelector();
+    const labels = screen.getAllByRole('menuitemradio').map(i => i.textContent);
     expect(labels).toEqual(['Primary', 'Review']);
   });
 
-  it('fires onInstanceChange when selector changes', () => {
+  it('fires onInstanceChange when a different instance is picked from the menu', () => {
     const onInstanceChange = vi.fn();
-    renderPane({ onInstanceChange });
-    const select = screen.getByTestId('cli-selector-0') as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: 'codex' } });
+    renderPane({
+      onInstanceChange,
+      availableInstances: [inst('claude'), inst('codex')],
+    });
+    openSelector();
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'codex' }));
     expect(onInstanceChange).toHaveBeenCalledWith('codex');
   });
 
@@ -191,7 +216,7 @@ describe('TerminalSplitPane drop target (Issue #786 / #869)', () => {
     });
     const region = screen.getByRole('region', { name: /Terminal split 1/i });
     fireEvent.dragEnter(region, { dataTransfer: makeDataTransfer() });
-    expect(region.className).toMatch(/ring-cyan-400/);
+    expect(region.className).toMatch(/ring-accent-400/);
     expect(region.className).not.toMatch(/ring-red/);
   });
 
@@ -216,9 +241,9 @@ describe('TerminalSplitPane drop target (Issue #786 / #869)', () => {
     });
     const region = screen.getByRole('region', { name: /Terminal split 1/i });
     fireEvent.dragEnter(region, { dataTransfer: makeDataTransfer() });
-    expect(region.className).toMatch(/ring-cyan-400/);
+    expect(region.className).toMatch(/ring-accent-400/);
     fireEvent.dragLeave(region, { dataTransfer: makeDataTransfer() });
-    expect(region.className).not.toMatch(/ring-cyan-400/);
+    expect(region.className).not.toMatch(/ring-accent-400/);
   });
 
   it('onDrop reads the dropped instanceId from dataTransfer and calls onDropInstance', () => {
@@ -239,9 +264,9 @@ describe('TerminalSplitPane drop target (Issue #786 / #869)', () => {
     });
     const region = screen.getByRole('region', { name: /Terminal split 1/i });
     fireEvent.dragEnter(region, { dataTransfer: makeDataTransfer() });
-    expect(region.className).toMatch(/ring-cyan-400/);
+    expect(region.className).toMatch(/ring-accent-400/);
     fireEvent.drop(region, { dataTransfer: makeDataTransfer('codex') });
-    expect(region.className).not.toMatch(/ring-cyan-400/);
+    expect(region.className).not.toMatch(/ring-accent-400/);
   });
 
   it('onDrop ignores an empty / foreign payload (no onDropInstance call)', () => {
@@ -260,7 +285,7 @@ describe('TerminalSplitPane drop target (Issue #786 / #869)', () => {
       fireEvent.dragEnter(region, { dataTransfer: makeDataTransfer() });
       fireEvent.drop(region, { dataTransfer: makeDataTransfer('codex') });
     }).not.toThrow();
-    expect(region.className).not.toMatch(/ring-cyan-400/);
+    expect(region.className).not.toMatch(/ring-accent-400/);
     expect(region.className).not.toMatch(/ring-red-300/);
   });
 });

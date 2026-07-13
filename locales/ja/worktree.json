@@ -1,9 +1,18 @@
 {
+  "agentStatus": {
+    "moreAgents": "他 {count} 件のエージェント",
+    "overflowTrigger": "他のエージェント"
+  },
   "toc": {
     "title": "目次",
     "show": "目次を表示",
     "hide": "目次を非表示",
     "empty": "見出しなし"
+  },
+  "composer": {
+    "placeholder": "メッセージを入力…",
+    "commandsHint": "コマンド",
+    "newlineHint": "改行"
   },
   "session": {
     "confirmKill": "「{name}」のセッションを終了しますか？\n\n※全てのメッセージ履歴が削除されます。ログファイルは保持されます。",
@@ -72,7 +81,13 @@
     "showFiles": "ファイルを表示",
     "hideFiles": "ファイルを非表示",
     "equalizeWidths": "均等幅",
-    "equalizeWidthsHint": "ターミナル幅を均等にし、履歴幅を初期値に戻す"
+    "equalizeWidthsHint": "ターミナル幅を均等にし、履歴幅を初期値に戻す",
+    "addSplit": "分割を追加",
+    "removeSplit": "分割を削除",
+    "selectInstance": "{split} のエージェントインスタンスを選択",
+    "moreActions": "その他の操作",
+    "searchTerminal": "ターミナル内を検索",
+    "endSession": "セッションを終了"
   },
   "todo": {
     "addPlaceholder": "ToDoを追加…",

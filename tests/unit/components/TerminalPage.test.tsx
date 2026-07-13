@@ -132,6 +132,25 @@ describe('TerminalPage', () => {
       expect(screen.getByText('Bash')).toBeInTheDocument();
     });
 
+    // Issue #1044: CLI tool tabs use lucide-react icons instead of emoji literals.
+    it('should render a lucide svg icon in each CLI tool button', () => {
+      render(<TerminalPage params={{ id: 'test-worktree-123' }} />);
+
+      for (const name of ['Claude', 'Codex', 'Gemini', 'Bash']) {
+        const button = screen.getByText(name).closest('button');
+        expect(button).not.toBeNull();
+        expect(button!.querySelector('svg')).not.toBeNull();
+      }
+    });
+
+    it('should not render emoji icon literals in CLI tool buttons', () => {
+      const { container } = render(<TerminalPage params={{ id: 'test-worktree-123' }} />);
+
+      for (const emoji of ['🤖', '⚡', '✦', '💻']) {
+        expect(container.textContent).not.toContain(emoji);
+      }
+    });
+
     it('should render the dynamically imported TerminalComponent', () => {
       render(<TerminalPage params={{ id: 'test-worktree-123' }} />);
 

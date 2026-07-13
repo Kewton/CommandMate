@@ -14,6 +14,7 @@
 
 import React, { useState, useEffect, useCallback, memo } from 'react';
 import { Modal } from '@/components/ui/Modal';
+import { Button } from '@/components/ui';
 import { useTranslations } from 'next-intl';
 import type { TreeItem } from '@/types/models';
 import { ChevronRight, Folder, FolderOpen, Loader2 } from 'lucide-react';
@@ -199,7 +200,7 @@ export const MoveDialog = memo(function MoveDialog({
       <div key={node.path}>
         <div
           className={`flex items-center gap-1 py-1.5 px-2 cursor-pointer rounded text-sm transition-colors ${
-            isSelected ? 'bg-blue-100 text-blue-800' : 'hover:bg-gray-100 text-gray-700'
+            isSelected ? 'bg-accent-100 text-accent-800' : 'hover:bg-muted text-foreground'
           } ${!isValid ? 'opacity-40 cursor-not-allowed' : ''}`}
           style={{ paddingLeft: `${0.5 + depth * 1.25}rem` }}
           onClick={() => {
@@ -208,6 +209,7 @@ export const MoveDialog = memo(function MoveDialog({
             }
           }}
         >
+          {/* Issue #1061: tiny icon toggle in a dense tree row (base padding/lift would break the layout) — 残置 */}
           <button
             className="w-4 h-4 flex items-center justify-center flex-shrink-0"
             onClick={(e) => {
@@ -216,10 +218,10 @@ export const MoveDialog = memo(function MoveDialog({
             }}
           >
             {isLoading ? (
-              <Loader2 className="w-3 h-3 animate-spin text-gray-400" />
+              <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
             ) : (
               <ChevronRight
-                className={`w-3 h-3 text-gray-400 transition-transform ${
+                className={`w-3 h-3 text-muted-foreground transition-transform ${
                   isExpanded ? 'rotate-90' : ''
                 }`}
               />
@@ -247,16 +249,16 @@ export const MoveDialog = memo(function MoveDialog({
     <Modal isOpen={isOpen} onClose={onClose} title={t('fileTree.moveDialogTitle')} size="md">
       <div className="flex flex-col gap-4">
         {/* Source info */}
-        <div className="text-sm text-gray-600">
-          {t('fileTree.moveTo')}: <span className="font-mono text-gray-800">{sourcePath}</span>
+        <div className="text-sm text-muted-foreground">
+          {t('fileTree.moveTo')}: <span className="font-mono text-foreground">{sourcePath}</span>
         </div>
 
         {/* Directory tree */}
-        <div className="border border-gray-200 rounded-lg max-h-64 overflow-y-auto p-2">
+        <div className="border border-border rounded-lg max-h-64 overflow-y-auto p-2">
           {/* Root directory option */}
           <div
             className={`flex items-center gap-1 py-1.5 px-2 cursor-pointer rounded text-sm transition-colors ${
-              selectedPath === '' ? 'bg-blue-100 text-blue-800' : 'hover:bg-gray-100 text-gray-700'
+              selectedPath === '' ? 'bg-accent-100 text-accent-800' : 'hover:bg-muted text-foreground'
             } ${!isValidDestination('') ? 'opacity-40 cursor-not-allowed' : ''}`}
             onClick={() => {
               if (isValidDestination('')) {
@@ -271,7 +273,7 @@ export const MoveDialog = memo(function MoveDialog({
 
           {rootLoading ? (
             <div className="flex items-center justify-center py-4">
-              <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
             </div>
           ) : (
             directoryTree.map((node) => renderDirectoryNode(node, 1))
@@ -280,19 +282,21 @@ export const MoveDialog = memo(function MoveDialog({
 
         {/* Action buttons */}
         <div className="flex justify-end gap-2">
-          <button
+          <Button
+            variant="ghost"
             onClick={onClose}
-            className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+            className="px-4 py-2 text-sm text-foreground bg-white border border-border rounded-md hover:bg-muted transition-colors"
           >
             {tCommon('cancel')}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
             onClick={() => onConfirm(selectedPath)}
             disabled={!canConfirm}
-            className="px-4 py-2 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 text-sm text-white bg-accent-600 rounded-md hover:bg-accent-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {t('fileTree.moveConfirm')}
-          </button>
+          </Button>
         </div>
       </div>
     </Modal>

@@ -136,7 +136,7 @@ export const ChevronIcon = memo(function ChevronIcon({ expanded }: { expanded: b
   return (
     <svg
       data-testid="chevron-icon"
-      className={`w-4 h-4 text-gray-500 dark:text-gray-400 transition-transform ${expanded ? 'rotate-90' : ''}`}
+      className={`w-4 h-4 text-muted-foreground transition-transform ${expanded ? 'rotate-90' : ''}`}
       fill="none"
       stroke="currentColor"
       viewBox="0 0 24 24"
@@ -193,7 +193,7 @@ export const HighlightedText = memo(function HighlightedText({
     <>
       {parts.map((part, i) =>
         part.toLowerCase() === query.toLowerCase() ? (
-          <mark key={i} className="bg-yellow-200 dark:bg-yellow-700 text-gray-900 dark:text-gray-100 px-0.5 rounded">
+          <mark key={i} className="bg-yellow-200 dark:bg-yellow-700 text-foreground px-0.5 rounded">
             {part}
           </mark>
         ) : (
@@ -207,22 +207,22 @@ export const HighlightedText = memo(function HighlightedText({
 export const FileIcon = memo(function FileIcon({ extension }: { extension?: string }) {
   // Determine icon color based on extension
   const iconColor = useMemo(() => {
-    if (!extension) return 'text-gray-400';
+    if (!extension) return 'text-muted-foreground';
 
     const colorMap: Record<string, string> = {
-      ts: 'text-blue-500',
-      tsx: 'text-blue-500',
+      ts: 'text-info',
+      tsx: 'text-info',
       js: 'text-yellow-400',
       jsx: 'text-yellow-400',
       json: 'text-yellow-600',
-      md: 'text-gray-500',
+      md: 'text-muted-foreground',
       css: 'text-pink-500',
       scss: 'text-pink-500',
       html: 'text-orange-500',
       py: 'text-green-500',
     };
 
-    return colorMap[extension] || 'text-gray-400';
+    return colorMap[extension] || 'text-muted-foreground';
   }, [extension]);
 
   return (
@@ -381,7 +381,7 @@ export const TreeNode = memo(function TreeNode({
         aria-selected={false}
         aria-expanded={isDirectory ? isExpanded : undefined}
         tabIndex={0}
-        className="flex items-center gap-2 py-1.5 pr-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
+        className="flex items-center gap-2 py-1.5 pr-2 cursor-pointer hover:bg-muted rounded transition-colors"
         style={combinedStyle}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
@@ -395,7 +395,7 @@ export const TreeNode = memo(function TreeNode({
         {isDirectory ? (
           <span className="w-4 h-4 flex items-center justify-center">
             {loading ? (
-              <span className="w-3 h-3 border-2 border-gray-300 dark:border-gray-600 border-t-cyan-500 rounded-full animate-spin" />
+              <span className="w-3 h-3 border-2 border-input border-t-accent-500 rounded-full animate-spin" />
             ) : (
               <ChevronIcon expanded={isExpanded} />
             )}
@@ -418,7 +418,7 @@ export const TreeNode = memo(function TreeNode({
         <TruncationTooltip
           content={item.name}
           metadata={metadataTooltip}
-          className="flex-1 truncate text-sm text-gray-700 dark:text-gray-300"
+          className="flex-1 truncate text-sm text-foreground"
         >
           {searchMode === 'name' && searchQuery ? (
             <HighlightedText text={item.name} query={searchQuery} />
@@ -431,7 +431,7 @@ export const TreeNode = memo(function TreeNode({
         {metadataDisplay.showSize && (
           <span
             data-testid="tree-item-size"
-            className="text-xs text-gray-400 flex-shrink-0"
+            className="text-xs text-muted-foreground flex-shrink-0"
           >
             {isDirectory
               ? item.itemCount !== undefined && `${item.itemCount} items`
@@ -443,7 +443,7 @@ export const TreeNode = memo(function TreeNode({
         {!isDirectory && metadataDisplay.showCreated && item.birthtime && (
           <span
             data-testid="tree-item-created"
-            className="text-xs text-gray-400 flex-shrink-0"
+            className="text-xs text-muted-foreground flex-shrink-0"
           >
             {formatRelativeTime(item.birthtime, dateFnsLocale)}
           </span>
@@ -453,7 +453,7 @@ export const TreeNode = memo(function TreeNode({
         {!isDirectory && metadataDisplay.showModified && item.mtime && (
           <span
             data-testid="tree-item-modified"
-            className="text-xs text-gray-400 flex-shrink-0"
+            className="text-xs text-muted-foreground flex-shrink-0"
           >
             {formatRelativeTime(item.mtime, dateFnsLocale)}
           </span>

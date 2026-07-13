@@ -67,10 +67,10 @@ function getToastStyles(type: ToastType): {
     case 'info':
     default:
       return {
-        bgColor: 'bg-cyan-50',
-        borderColor: 'border-cyan-200',
-        textColor: 'text-cyan-800',
-        iconColor: 'text-cyan-500',
+        bgColor: 'bg-accent-50',
+        borderColor: 'border-accent-200',
+        textColor: 'text-accent-800',
+        iconColor: 'text-accent-500',
       };
   }
 }

@@ -15,6 +15,7 @@ import type { BranchInfo, BranchInclude } from '@/types/git';
 import { branchCreatePrompt, branchDeletePrompt } from '@/lib/git-ai-prompt-templates';
 import { AskAiButton, RefreshIcon } from '@/components/worktree/git/gitPaneShared';
 import { useGitPaneContext } from '@/components/worktree/git/GitPaneContext';
+import { Checkbox } from '@/components/ui';
 
 export interface GitBranchPanelProps {
   branches: BranchInfo[];
@@ -68,14 +69,14 @@ export const GitBranchPanel = memo(function GitBranchPanel({
 
   return (
     <div
-      className="flex flex-col border-b border-gray-200 dark:border-gray-700"
+      className="flex flex-col border-b border-border"
       data-testid="git-branches-section"
     >
       <div className="flex items-center justify-between px-3 py-2">
         <button
           type="button"
           onClick={() => setOpen((prev) => !prev)}
-          className="flex items-center gap-1 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100"
+          className="flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground"
         >
           <span className="text-xs w-4 text-center">{open ? '▼' : '▶'}</span>
           Branches
@@ -84,7 +85,7 @@ export const GitBranchPanel = memo(function GitBranchPanel({
           <button
             type="button"
             onClick={() => setShowCreate(true)}
-            className="px-2 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+            className="px-2 py-0.5 text-xs rounded border border-input text-foreground hover:bg-muted"
             data-testid="git-branch-create-open"
           >
             + New
@@ -92,7 +93,7 @@ export const GitBranchPanel = memo(function GitBranchPanel({
           <button
             type="button"
             onClick={onRefresh}
-            className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded"
+            className="p-1 text-muted-foreground hover:text-foreground rounded"
             aria-label="Refresh branches"
           >
             <RefreshIcon />
@@ -111,8 +112,8 @@ export const GitBranchPanel = memo(function GitBranchPanel({
                 onClick={() => onIncludeChange(tab)}
                 className={`px-2 py-0.5 text-xs rounded ${
                   include === tab
-                    ? 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-200'
-                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                    ? 'bg-accent-100 text-accent-800 dark:bg-accent-900/40 dark:text-accent-200'
+                    : 'text-muted-foreground hover:bg-muted'
                 }`}
                 data-testid={`git-branches-tab-${tab}`}
               >
@@ -123,7 +124,7 @@ export const GitBranchPanel = memo(function GitBranchPanel({
 
           {loading && branches.length === 0 && (
             <div className="flex items-center gap-2 px-3 pb-2" role="status">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-cyan-500" />
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-accent-500" />
               <span className="sr-only">Loading branches...</span>
             </div>
           )}
@@ -149,11 +150,11 @@ export const GitBranchPanel = memo(function GitBranchPanel({
           )}
 
           {!loading && !error && branches.length === 0 && (
-            <div className="px-3 pb-2 text-xs text-gray-400 dark:text-gray-500">No branches</div>
+            <div className="px-3 pb-2 text-xs text-muted-foreground">No branches</div>
           )}
 
           {branches.length > 0 && (
-            <ul className="divide-y divide-gray-100 dark:divide-gray-800 max-h-64 overflow-y-auto">
+            <ul className="divide-y divide-border max-h-64 overflow-y-auto">
               {branches.map((branch) => {
                 const deleteDisabled = busy || branch.isCurrent || branch.isDefault;
                 return (
@@ -163,13 +164,13 @@ export const GitBranchPanel = memo(function GitBranchPanel({
                     data-testid="git-branch-row"
                   >
                     <span
-                      className="flex-1 truncate font-mono text-xs text-gray-700 dark:text-gray-300"
+                      className="flex-1 truncate font-mono text-xs text-foreground"
                       title={branch.name}
                     >
-                      {branch.isCurrent && <span className="text-cyan-600 dark:text-cyan-400 mr-1">●</span>}
+                      {branch.isCurrent && <span className="text-accent-600 dark:text-accent-400 mr-1">●</span>}
                       {branch.name}
                       {branch.isDefault && (
-                        <span className="ml-1.5 text-[10px] text-gray-400 dark:text-gray-500">default</span>
+                        <span className="ml-1.5 text-[10px] text-muted-foreground">default</span>
                       )}
                     </span>
                     <button
@@ -179,7 +180,7 @@ export const GitBranchPanel = memo(function GitBranchPanel({
                         setDeleteTarget(branch);
                       }}
                       disabled={deleteDisabled}
-                      className="shrink-0 px-1.5 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 text-red-600 dark:text-red-400 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="shrink-0 px-1.5 py-0.5 text-xs rounded border border-input text-red-600 dark:text-red-400 hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
                       aria-label={`Delete ${branch.name}`}
                     >
                       Delete
@@ -200,21 +201,21 @@ export const GitBranchPanel = memo(function GitBranchPanel({
           aria-modal="true"
           data-testid="branch-create-modal"
         >
-          <div className="w-full max-w-md rounded-lg bg-white dark:bg-gray-800 p-4 shadow-xl flex flex-col gap-3">
-            <h3 className="text-sm font-medium text-gray-800 dark:text-gray-200">Create branch</h3>
+          <div className="w-full max-w-md rounded-lg bg-surface p-4 shadow-xl flex flex-col gap-3">
+            <h3 className="text-sm font-medium text-foreground">Create branch</h3>
             <input
               type="text"
               value={createName}
               onChange={(e) => setCreateName(e.target.value)}
               placeholder="branch name (e.g. feature/123-foo)"
-              className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-xs text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              className="w-full rounded border border-input bg-surface dark:bg-surface-2 px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               data-testid="branch-create-name-input"
               aria-label="New branch name"
             />
             <select
               value={createFrom}
               onChange={(e) => setCreateFrom(e.target.value)}
-              className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-xs text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              className="w-full rounded border border-input bg-surface dark:bg-surface-2 px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               data-testid="branch-create-from-select"
               aria-label="Base branch"
             >
@@ -240,7 +241,7 @@ export const GitBranchPanel = memo(function GitBranchPanel({
               <button
                 type="button"
                 onClick={() => setShowCreate(false)}
-                className="px-3 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                className="px-3 py-1 text-xs rounded border border-input text-foreground hover:bg-muted"
               >
                 Cancel
               </button>
@@ -248,7 +249,7 @@ export const GitBranchPanel = memo(function GitBranchPanel({
                 type="button"
                 onClick={confirmCreate}
                 disabled={busy || createName.trim().length === 0}
-                className="px-3 py-1 text-xs font-medium rounded bg-cyan-600 text-white hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-3 py-1 text-xs font-medium rounded bg-accent-600 text-white hover:bg-accent-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 data-testid="branch-create-submit"
               >
                 Create
@@ -266,15 +267,14 @@ export const GitBranchPanel = memo(function GitBranchPanel({
           aria-modal="true"
           data-testid="branch-delete-confirm"
         >
-          <div className="w-full max-w-md rounded-lg bg-white dark:bg-gray-800 p-4 shadow-xl flex flex-col gap-3">
-            <h3 className="text-sm font-medium text-gray-800 dark:text-gray-200">
+          <div className="w-full max-w-md rounded-lg bg-surface p-4 shadow-xl flex flex-col gap-3">
+            <h3 className="text-sm font-medium text-foreground">
               Delete <span className="font-mono">{deleteTarget.name}</span>?
             </h3>
-            <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
-              <input
-                type="checkbox"
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Checkbox
                 checked={deleteForce}
-                onChange={(e) => setDeleteForce(e.target.checked)}
+                onCheckedChange={(checked) => setDeleteForce(checked === true)}
                 data-testid="branch-delete-force"
               />
               Force delete (-D) — unmerged commits will be lost
@@ -294,7 +294,7 @@ export const GitBranchPanel = memo(function GitBranchPanel({
               <button
                 type="button"
                 onClick={() => setDeleteTarget(null)}
-                className="px-3 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                className="px-3 py-1 text-xs rounded border border-input text-foreground hover:bg-muted"
               >
                 Cancel
               </button>

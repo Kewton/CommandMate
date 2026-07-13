@@ -9,8 +9,10 @@
 
 'use client';
 
-import { useMemo, memo } from 'react';
-import { MOBILE_STATUS_CONFIG, type WorktreeStatusType } from '@/config/status-colors';
+import { memo } from 'react';
+import { type WorktreeStatusType } from '@/config/status-colors';
+import { Button } from '@/components/ui';
+import { StatusDot } from '@/components/ui/StatusDot';
 import { truncateString } from '@/lib/utils';
 import type { GitStatus } from '@/types/models';
 
@@ -91,48 +93,37 @@ export function MobileHeader({
   onBackClick,
   onMenuClick,
 }: MobileHeaderProps) {
-  /**
-   * Status indicator configuration
-   */
-  const statusConfig = useMemo(() => MOBILE_STATUS_CONFIG[status], [status]);
-
   return (
     <header
       data-testid="mobile-header"
       role="banner"
-      className="sticky top-0 inset-x-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 shadow-sm pt-safe z-40"
+      className="sticky top-0 inset-x-0 bg-surface border-b border-border shadow-sm pt-safe z-40"
     >
       <div className="flex items-center justify-between h-14 px-4">
         {/* Left section: Back button or spacer */}
         <div className="w-10 flex-shrink-0">
           {onBackClick && (
-            <button
+            <Button
+              variant="ghost"
               type="button"
               onClick={onBackClick}
               aria-label="Back"
-              className="p-2 -ml-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors dark:text-gray-300"
+              className="p-2 -ml-2 rounded-full hover:bg-muted transition-colors dark:text-foreground"
             >
               <Icon path={ICON_PATHS.back} />
-            </button>
+            </Button>
           )}
         </div>
 
         {/* Center section: Worktree name, repository, and status */}
         <div className="flex-1 flex items-center justify-center min-w-0 px-2">
-          {/* Status indicator */}
-          {statusConfig.type === 'spinner' ? (
-            <span
-              data-testid="status-indicator"
-              aria-label={statusConfig.label}
-              className={`w-2.5 h-2.5 rounded-full mr-2 flex-shrink-0 border-2 border-t-transparent animate-spin ${statusConfig.className}`}
-            />
-          ) : (
-            <span
-              data-testid="status-indicator"
-              aria-label={statusConfig.label}
-              className={`w-2.5 h-2.5 rounded-full mr-2 flex-shrink-0 ${statusConfig.className}`}
-            />
-          )}
+          {/* Status indicator (Issue #1078: unified StatusDot visual language) */}
+          <StatusDot
+            data-testid="status-indicator"
+            status={status}
+            size="sm"
+            className="mr-2"
+          />
 
           {/* Worktree name and repository */}
           <div className="flex flex-col items-center min-w-0">
@@ -140,11 +131,11 @@ export function MobileHeader({
               role="heading"
               data-testid="worktree-name"
               title={worktreeName}
-              className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate text-center leading-tight"
+              className="text-sm font-medium text-foreground truncate text-center leading-tight"
             >
               {worktreeName}
             </h1>
-            <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
               {repositoryName && (
                 <span className="truncate max-w-[100px] text-center">
                   {repositoryName}
@@ -152,7 +143,7 @@ export function MobileHeader({
               )}
               {gitStatus && gitStatus.currentBranch !== '(unknown)' && (
                 <>
-                  {repositoryName && <span className="text-gray-300 dark:text-gray-600">/</span>}
+                  {repositoryName && <span className="text-muted-foreground/50">/</span>}
                   <span
                     className="truncate max-w-[80px] font-mono"
                     title={gitStatus.currentBranch}
@@ -172,14 +163,15 @@ export function MobileHeader({
         {/* Right section: Menu button or spacer */}
         <div className="w-10 flex-shrink-0 flex justify-end">
           {onMenuClick && (
-            <button
+            <Button
+              variant="ghost"
               type="button"
               onClick={onMenuClick}
               aria-label="Menu"
-              className="p-2 -mr-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors dark:text-gray-300"
+              className="p-2 -mr-2 rounded-full hover:bg-muted transition-colors dark:text-foreground"
             >
               <Icon path={ICON_PATHS.menu} />
-            </button>
+            </Button>
           )}
         </div>
       </div>

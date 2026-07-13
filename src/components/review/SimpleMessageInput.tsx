@@ -12,6 +12,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
+import { Button, Input } from '@/components/ui';
 import { useSendMessage } from '@/hooks/useSendMessage';
 
 export interface SimpleMessageInputProps {
@@ -56,23 +57,26 @@ export function SimpleMessageInput({ worktreeId, cliToolId }: SimpleMessageInput
 
   return (
     <div className="flex items-center gap-2">
-      <input
+      <Input
         type="text"
+        inputSize="sm"
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
         placeholder="Send a message..."
         disabled={isSending}
-        className="flex-1 px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-cyan-500 focus:border-transparent disabled:opacity-50"
+        className="w-auto flex-1"
       />
-      <button
+      <Button
+        variant="primary"
+        size="sm"
         onClick={handleSend}
         disabled={isSending || !text.trim()}
         aria-label="Send"
-        className="px-3 py-1.5 text-sm font-medium text-white bg-cyan-600 hover:bg-cyan-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        className="shrink-0"
       >
         {isSending ? 'Sending...' : 'Send'}
-      </button>
+      </Button>
     </div>
   );
 }

@@ -15,6 +15,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Button, Card, Checkbox, Input } from '@/components/ui';
 import { todoApi, type TodoItem } from '@/lib/api/todo-api';
 import { MAX_TODO_CONTENT_LENGTH } from '@/config/todo-config';
 
@@ -183,10 +184,12 @@ export function TodoWidget() {
   const hasRepositories = repositories.length > 0;
 
   return (
-    <div
-      className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700"
-      data-testid="home-todo-widget"
-    >
+    <Card className="h-full" data-testid="home-todo-widget">
+      {/* Tile heading — parity with the Session Overview tile (Issue #1052). */}
+      <h2 className="mb-3 text-lg font-semibold text-foreground">
+        ToDo
+      </h2>
+
       {/* Repository selector + remaining count.
           Mobile: stack vertically so the select can use the full width; the
           `N open` count drops to its own line. Desktop (>= sm): unchanged
@@ -195,14 +198,14 @@ export function TodoWidget() {
         className="flex flex-col gap-2 mb-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
         data-testid="todo-selector-row"
       >
-        <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 min-w-0">
+        <label className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
           <span className="shrink-0">Repository</span>
           <select
             value={selectedRepoId}
             onChange={(e) => setSelectedRepoId(e.target.value)}
             disabled={!hasRepositories}
             data-testid="todo-repo-select"
-            className="min-w-0 flex-1 truncate rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm text-gray-900 dark:text-gray-100 disabled:opacity-50 sm:flex-initial sm:max-w-[16rem]"
+            className="min-w-0 flex-1 truncate rounded-md border border-input bg-surface dark:bg-surface-2 px-2 py-1 text-sm text-surface-foreground disabled:opacity-50 sm:flex-initial sm:max-w-[16rem]"
           >
             {repositories.map((repo) => (
               <option key={repo.id} value={repo.id}>
@@ -212,14 +215,14 @@ export function TodoWidget() {
           </select>
         </label>
         {hasRepositories && (
-          <span className="shrink-0 text-xs text-gray-400 dark:text-gray-500" data-testid="todo-remaining">
+          <span className="shrink-0 text-xs text-muted-foreground" data-testid="todo-remaining">
             {remainingCount} open
           </span>
         )}
       </div>
 
       {!hasRepositories ? (
-        <p className="text-sm text-gray-500 dark:text-gray-400">
+        <p className="text-sm text-muted-foreground">
           No repositories yet. Add one from the Repositories screen to start
           adding todos.
         </p>
@@ -227,7 +230,7 @@ export function TodoWidget() {
         <>
           {/* Add form */}
           <div className="flex items-center gap-2 mb-3">
-            <input
+            <Input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -235,17 +238,19 @@ export function TodoWidget() {
               maxLength={MAX_TODO_CONTENT_LENGTH}
               placeholder="Add a todo…"
               data-testid="todo-input"
-              className="flex-1 min-w-0 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400"
+              className="w-auto flex-1 min-w-0"
             />
-            <button
+            <Button
               type="button"
+              variant="primary"
+              size="sm"
               onClick={handleAdd}
               disabled={busy || input.trim().length === 0}
               data-testid="todo-add-button"
-              className="shrink-0 rounded-md bg-cyan-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-700 disabled:opacity-50"
+              className="shrink-0"
             >
               Add
-            </button>
+            </Button>
           </div>
 
           {error && (
@@ -256,9 +261,9 @@ export function TodoWidget() {
 
           {/* Todo list */}
           {loading ? (
-            <p className="text-sm text-gray-400 dark:text-gray-500">Loading…</p>
+            <p className="text-sm text-muted-foreground">Loading…</p>
           ) : todos.length === 0 ? (
-            <p className="text-sm text-gray-500 dark:text-gray-400" data-testid="todo-empty">
+            <p className="text-sm text-muted-foreground" data-testid="todo-empty">
               No todos yet.
             </p>
           ) : (
@@ -266,7 +271,7 @@ export function TodoWidget() {
               {todos.map((todo) => (
                 <li
                   key={todo.id}
-                  className="flex flex-col gap-1 rounded-md px-1 py-1 hover:bg-gray-50 dark:hover:bg-gray-700/40 group sm:flex-row sm:items-center sm:gap-2"
+                  className="flex flex-col gap-1 rounded-md px-1 py-1 hover:bg-muted group sm:flex-row sm:items-center sm:gap-2"
                   data-testid="todo-item"
                 >
                   {/* Top row (mobile) / left section (desktop): checkbox + content.
@@ -275,20 +280,18 @@ export function TodoWidget() {
                       (Issue #909). */}
                   <div className="flex min-w-0 flex-1 items-center gap-2">
                     <label className="shrink-0 inline-flex min-h-[44px] min-w-[44px] cursor-pointer items-center justify-center sm:min-h-0 sm:min-w-0">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={todo.done}
-                        onChange={() => handleToggle(todo)}
+                        onCheckedChange={() => handleToggle(todo)}
                         data-testid="todo-checkbox"
                         aria-label={todo.done ? 'Mark as not done' : 'Mark as done'}
-                        className="h-4 w-4 rounded border-gray-300 text-cyan-600 focus:ring-cyan-400"
                       />
                     </label>
                     <span
                       className={`min-w-0 flex-1 break-words text-sm ${
                         todo.done
-                          ? 'line-through text-gray-400 dark:text-gray-500'
-                          : 'text-gray-800 dark:text-gray-200'
+                          ? 'line-through text-muted-foreground'
+                          : 'text-foreground'
                       }`}
                     >
                       {todo.content}
@@ -301,7 +304,7 @@ export function TodoWidget() {
                   <div className="flex shrink-0 items-center justify-end gap-2">
                     {todoRepoLabel(todo) && (
                       <span
-                        className="shrink-0 max-w-[8rem] truncate rounded-full bg-gray-100 dark:bg-gray-700 px-2 py-0.5 text-[10px] font-medium text-gray-500 dark:text-gray-400"
+                        className="shrink-0 max-w-[8rem] truncate rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
                         data-testid="todo-repo-badge"
                         title={todoRepoLabel(todo)}
                       >
@@ -313,7 +316,7 @@ export function TodoWidget() {
                       onClick={() => handleDelete(todo)}
                       aria-label="Delete todo"
                       data-testid="todo-delete"
-                      className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center text-gray-300 opacity-100 transition-opacity hover:text-red-500 dark:text-gray-600 dark:hover:text-red-400 sm:min-h-0 sm:min-w-0 sm:opacity-0 sm:group-hover:opacity-100"
+                      className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center text-muted-foreground opacity-100 transition-opacity hover:text-red-500 dark:hover:text-red-400 sm:min-h-0 sm:min-w-0 sm:opacity-0 sm:group-hover:opacity-100"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -326,6 +329,6 @@ export function TodoWidget() {
           )}
         </>
       )}
-    </div>
+    </Card>
   );
 }

@@ -10,6 +10,7 @@ import { useState, useCallback, useId, useMemo, useRef, useEffect, memo } from '
 import { useTranslations } from 'next-intl';
 import type { PromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
+import { RadioGroup, RadioGroupItem } from '@/components/ui';
 import { usePromptAnimation } from '@/hooks/usePromptAnimation';
 
 /** Animation duration for sheet transitions */
@@ -23,11 +24,11 @@ const BUTTON_STYLES = {
   /** Common button base styles */
   base: 'px-6 py-3 rounded-lg font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2',
   /** Primary button styles */
-  primary: 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500',
+  primary: 'bg-accent-600 text-white hover:bg-accent-700 focus:ring-ring',
   /** Secondary button styles */
-  secondary: 'bg-white dark:bg-gray-700 border-2 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 focus:ring-gray-500',
+  secondary: 'bg-muted border-2 border-input hover:bg-muted/80 text-foreground focus:ring-ring',
   /** Default selected button styles */
-  defaultSelected: 'bg-gray-600 text-white hover:bg-gray-700',
+  defaultSelected: 'bg-muted-foreground text-background hover:bg-muted-foreground/90',
 } as const;
 
 /**
@@ -164,13 +165,13 @@ export const MobilePromptSheet = memo(function MobilePromptSheet({
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         style={{ transform: sheetTransform }}
-        className={`fixed bottom-0 inset-x-0 bg-white dark:bg-gray-800 rounded-t-2xl z-50 pb-safe transform transition-transform duration-300 ${sheetAnimation}`}
+        className={`fixed bottom-0 inset-x-0 bg-surface rounded-t-2xl z-50 pb-safe transform transition-transform duration-300 ${sheetAnimation}`}
       >
         {/* Drag handle */}
         <div className="flex justify-center pt-3 pb-2">
           <div
             data-testid="drag-handle"
-            className="w-10 h-1 bg-gray-300 dark:bg-gray-600 rounded-full"
+            className="w-10 h-1 bg-input rounded-full"
             aria-hidden="true"
           />
         </div>
@@ -263,24 +264,24 @@ function PromptContent({
   return (
     <div className="space-y-4">
       {/* Header */}
-      <h3 id={labelId} className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+      <h3 id={labelId} className="text-lg font-semibold text-foreground">
         {cliToolName ? t('confirmationFrom', { toolName: cliToolName }) : t('confirmationFromClaude')}
       </h3>
 
       {/* Instruction Text (context preceding the prompt) */}
       {promptData.instructionText && (
-        <div className="max-h-40 overflow-y-auto whitespace-pre-wrap text-sm text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-700 rounded p-2 border border-gray-200 dark:border-gray-600">
+        <div className="max-h-40 overflow-y-auto whitespace-pre-wrap text-sm text-muted-foreground bg-muted rounded p-2 border border-border">
           {promptData.instructionText}
         </div>
       )}
 
       {/* Question */}
-      <p className="text-gray-700 dark:text-gray-300 leading-relaxed">{promptData.question}</p>
+      <p className="text-foreground leading-relaxed">{promptData.question}</p>
 
       {/* Answering indicator */}
       {isDisabled && (
-        <div data-testid="answering-indicator" className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400" role="status" aria-live="polite">
-          <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 dark:border-gray-600 border-t-blue-600" aria-hidden="true" />
+        <div data-testid="answering-indicator" className="flex items-center gap-2 text-sm text-muted-foreground" role="status" aria-live="polite">
+          <div className="animate-spin rounded-full h-4 w-4 border-2 border-input border-t-accent-600" aria-hidden="true" />
           <span>{t('sending')}</span>
         </div>
       )}
@@ -341,7 +342,7 @@ const YesNoActions = memo(function YesNoActions({
         type="button"
         onClick={onYes}
         disabled={disabled}
-        className={`flex-1 ${BUTTON_STYLES.base} ${BUTTON_STYLES.primary} ${isYesDefault ? 'ring-2 ring-blue-300' : ''}`}
+        className={`flex-1 ${BUTTON_STYLES.base} ${BUTTON_STYLES.primary} ${isYesDefault ? 'ring-2 ring-accent-300' : ''}`}
       >
         {t('yes')}
       </button>
@@ -391,7 +392,13 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
     <div className="space-y-3">
       <fieldset>
         <legend className="sr-only">Select an option</legend>
-        <div className="space-y-2">
+        <RadioGroup
+          name={groupName}
+          value={selectedOption != null ? String(selectedOption) : ''}
+          onValueChange={(v) => onSelectOption(Number(v))}
+          disabled={disabled}
+          className="flex flex-col gap-2"
+        >
           {promptData.options.map((option) => {
             const isSelected = selectedOption === option.number;
             return (
@@ -399,23 +406,18 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
                 key={option.number}
                 className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-all ${
                   isSelected
-                    ? 'bg-blue-50 dark:bg-blue-900/30 border-2 border-blue-500'
-                    : 'bg-white dark:bg-gray-700 border-2 border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
+                    ? 'bg-accent-50 dark:bg-accent-900/30 border-2 border-accent-500'
+                    : 'bg-surface border-2 border-border hover:border-input'
                 } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
-                <input
-                  type="radio"
-                  name={groupName}
-                  value={option.number}
-                  checked={isSelected}
-                  onChange={() => onSelectOption(option.number)}
-                  disabled={disabled}
+                <RadioGroupItem
+                  value={String(option.number)}
                   className="mt-1"
                 />
                 <div className="flex-1">
-                  <span className="font-medium dark:text-gray-200">{option.number}. {option.label}</span>
+                  <span className="font-medium text-foreground">{option.number}. {option.label}</span>
                   {option.isDefault && (
-                    <span className="ml-2 text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded">
+                    <span className="ml-2 text-xs text-accent-600 bg-accent-100 px-2 py-0.5 rounded">
                       {t('default')}
                     </span>
                   )}
@@ -423,7 +425,7 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
               </label>
             );
           })}
-        </div>
+        </RadioGroup>
       </fieldset>
 
       {/* Text input for options that require it */}
@@ -437,7 +439,7 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
             onChange={(e) => onTextInputChange(e.target.value)}
             disabled={disabled}
             placeholder={t('enterValuePlaceholder')}
-            className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+            className="w-full px-4 py-3 border-2 border-input rounded-lg bg-surface text-foreground focus:outline-none focus:border-ring disabled:opacity-50"
           />
         </div>
       )}

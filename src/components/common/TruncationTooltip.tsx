@@ -152,12 +152,12 @@ export function TruncationTooltip({
           <span
             role="tooltip"
             aria-hidden="true"
-            className="fixed z-[9999] max-w-md px-2 py-1 text-xs font-medium rounded bg-gray-900 text-gray-100 shadow-lg pointer-events-none"
+            className="fixed z-[9999] max-w-md px-2 py-1 text-xs font-medium rounded bg-foreground text-background shadow-lg pointer-events-none"
             style={{ top: coords.top, left: coords.left }}
           >
             <span className="block break-all">{content}</span>
             {metadata && (
-              <span className="mt-0.5 block whitespace-pre-line font-normal text-gray-300">
+              <span className="mt-0.5 block whitespace-pre-line font-normal text-background/70">
                 {metadata}
               </span>
             )}

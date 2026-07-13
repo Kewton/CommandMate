@@ -48,7 +48,7 @@ export function PcDisplaySizeSelector() {
             setSize(next);
           }
         }}
-        className="text-sm bg-transparent text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+        className="text-sm bg-transparent text-foreground border border-input rounded-md px-2 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         {PC_DISPLAY_SIZE_ORDER.map((option) => (
           <option key={option} value={option}>

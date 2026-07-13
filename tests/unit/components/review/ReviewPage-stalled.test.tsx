@@ -49,10 +49,10 @@ vi.mock('@/config/review-config', () => ({
 vi.mock('@/config/status-colors', () => ({
   SIDEBAR_STATUS_CONFIG: {
     idle: { type: 'dot', className: 'bg-gray-400', label: 'Idle' },
-    ready: { type: 'dot', className: 'bg-cyan-500', label: 'Ready' },
+    ready: { type: 'dot', className: 'bg-accent-500', label: 'Ready' },
     running: { type: 'spinner', className: 'border-green-500', label: 'Running' },
     waiting: { type: 'dot', className: 'bg-yellow-500', label: 'Waiting' },
-    generating: { type: 'spinner', className: 'border-blue-500', label: 'Generating' },
+    generating: { type: 'spinner', className: 'border-info', label: 'Generating' },
   },
 }));
 
@@ -120,6 +120,30 @@ describe('Review page filters', () => {
       expect(screen.getByTestId('review-filter-approval')).toBeDefined();
       expect(screen.getByTestId('review-filter-stalled')).toBeDefined();
     });
+  });
+
+  it('shows a count badge per filter reflecting the filtered length', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        worktrees: [
+          { id: 'a', name: 'a', repositoryName: 'r', status: 'in_review', selectedAgents: ['claude'] },
+          { id: 'b', name: 'b', repositoryName: 'r', status: 'in_review', selectedAgents: ['claude'] },
+          { id: 'c', name: 'c', repositoryName: 'r', status: 'in_progress', isWaitingForResponse: true, selectedAgents: ['claude'] },
+          // no stalled worktrees
+        ],
+      }),
+    }) as unknown as typeof fetch;
+
+    render(React.createElement(ReviewPage));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('review-filter-in_review')).toBeDefined();
+    });
+
+    expect(screen.getByTestId('review-filter-in_review').textContent).toMatch(/2/);
+    expect(screen.getByTestId('review-filter-approval').textContent).toMatch(/1/);
+    expect(screen.getByTestId('review-filter-stalled').textContent).toMatch(/0/);
   });
 
   it('should show in_review worktrees by default', async () => {

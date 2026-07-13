@@ -35,6 +35,7 @@ import { useWorktreeSelection } from '@/contexts/WorktreeSelectionContext';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { BranchListItem } from '@/components/sidebar/BranchListItem';
 import { SortSelector } from '@/components/sidebar/SortSelector';
+import { Input } from '@/components/ui';
 import { Tooltip } from '@/components/common/Tooltip';
 import { TruncationTooltip } from '@/components/common/TruncationTooltip';
 import { LocaleSwitcher } from '@/components/common/LocaleSwitcher';
@@ -427,13 +428,13 @@ export const Sidebar = memo(function Sidebar() {
     <nav
       data-testid="sidebar"
       aria-label="Branch navigation"
-      className="h-full flex flex-col bg-gray-800 text-white"
+      className="h-full flex flex-col bg-sidebar text-sidebar-foreground"
       role="navigation"
     >
       {/* Header */}
       <div
         data-testid="sidebar-header"
-        className="flex-shrink-0 px-4 py-4 border-b border-gray-700"
+        className="flex-shrink-0 px-4 py-4 border-b border-sidebar-border"
       >
         {/* Issue #976: wrap the heading + actions when the sidebar is narrow so
             the button group drops to a new line instead of overflowing
@@ -441,7 +442,7 @@ export const Sidebar = memo(function Sidebar() {
             and the actions group keeps everything within the sidebar width
             without an overflow clip (which would crop the Sort dropdown). */}
         <div className="flex flex-wrap items-center justify-between gap-y-2">
-          <h2 className="min-w-0 truncate text-lg font-semibold text-white">Branches</h2>
+          <h2 className="min-w-0 truncate text-lg font-semibold text-sidebar-foreground">Branches</h2>
           <div className="flex flex-wrap items-center gap-1">
             <ViewModeToggle viewMode={viewMode} onToggle={setViewMode} />
             <SortSelector />
@@ -450,8 +451,8 @@ export const Sidebar = memo(function Sidebar() {
               <Link
                 href="/repositories"
                 aria-label="Repositories"
-                className="p-1 rounded text-gray-300 hover:text-white hover:bg-gray-700
-                  focus:outline-none focus:ring-2 focus:ring-blue-500
+                className="p-1 rounded text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover
+                  focus:outline-none focus:ring-2 focus:ring-ring
                   transition-colors inline-flex items-center"
               >
                 <Database className={HEADER_ICON_CLASS} aria-hidden="true" />
@@ -462,18 +463,17 @@ export const Sidebar = memo(function Sidebar() {
       </div>
 
       {/* Search */}
-      <div className="flex-shrink-0 px-4 py-3 border-b border-gray-700">
-        <input
+      <div className="flex-shrink-0 px-4 py-3 border-b border-sidebar-border">
+        {/* Issue #1073: use the Input primitive defaults (border-input, semantic
+            text/placeholder) instead of the old gray overrides. Only bg-background
+            is kept so the field stays distinct from the light slate-50 sidebar
+            panel (in dark the primitive's recessed surface already contrasts). */}
+        <Input
           type="text"
           placeholder="Search branches..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="
-            w-full px-3 py-2 rounded-md
-            bg-gray-700 text-white placeholder-gray-400
-            border border-gray-600
-            focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent
-          "
+          className="bg-background shadow-none"
         />
       </div>
 
@@ -487,7 +487,7 @@ export const Sidebar = memo(function Sidebar() {
         className="flex-1 overflow-y-auto overflow-x-hidden"
       >
         {isEmpty ? (
-          <div className="px-4 py-8 text-center text-gray-400">
+          <div className="px-4 py-8 text-center text-sidebar-muted">
             {searchQuery ? 'No branches found' : 'No branches available'}
           </div>
         ) : viewMode === 'grouped' && groupedBranches ? (
@@ -531,7 +531,7 @@ export const Sidebar = memo(function Sidebar() {
       </div>
 
       {/* Footer: Language Switcher + Theme Toggle + Logout */}
-      <div className="flex-shrink-0 px-4 py-3 border-t border-gray-700 space-y-2">
+      <div className="flex-shrink-0 px-4 py-3 border-t border-sidebar-border space-y-2">
         <div className="flex items-center gap-2">
           <div className="flex-1">
             <LocaleSwitcher />
@@ -673,7 +673,7 @@ function GroupHeader({
           className="
             flex-shrink-0 flex items-center justify-center
             w-6 h-full pl-2 cursor-grab active:cursor-grabbing
-            text-gray-500 hover:text-gray-300 transition-colors
+            text-sidebar-muted hover:text-sidebar-foreground transition-colors
           "
         >
           <GripVerticalIcon />
@@ -687,8 +687,8 @@ function GroupHeader({
         aria-expanded={isExpanded}
         className="
           flex-1 min-w-0 flex items-center gap-2 px-2 py-2
-          text-xs font-semibold text-gray-300 uppercase tracking-wider
-          focus:outline-none focus:ring-2 focus:ring-inset focus:ring-cyan-500
+          text-xs font-semibold text-sidebar-muted uppercase tracking-wider
+          focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring
           transition-colors
         "
       >
@@ -697,7 +697,7 @@ function GroupHeader({
         <TruncationTooltip content={repositoryName} className="flex-1 min-w-0 text-left truncate">
           {repositoryName}
         </TruncationTooltip>
-        <span className="text-gray-500 font-normal pr-2">{branchCount}</span>
+        <span className="text-sidebar-muted font-normal tabular-nums pr-2">{branchCount}</span>
       </button>
     </div>
   );
@@ -724,8 +724,8 @@ function ViewModeToggle({
         onClick={handleClick}
         aria-label={viewMode === 'grouped' ? 'Switch to flat view' : 'Switch to grouped view'}
         className="
-          p-1 rounded text-gray-300 hover:text-white hover:bg-gray-700
-          focus:outline-none focus:ring-2 focus:ring-blue-500
+          p-1 rounded text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover
+          focus:outline-none focus:ring-2 focus:ring-ring
           transition-colors
         "
       >
@@ -870,8 +870,8 @@ const SyncButton = memo(function SyncButton({
           onClick={handleSync}
           disabled={isSyncing}
           aria-label={t('syncButtonLabel')}
-          className="p-1 rounded text-gray-300 hover:text-white hover:bg-gray-700
-            focus:outline-none focus:ring-2 focus:ring-blue-500
+          className="p-1 rounded text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover
+            focus:outline-none focus:ring-2 focus:ring-ring
             disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           <SyncIcon className={isSyncing ? 'animate-spin' : ''} />

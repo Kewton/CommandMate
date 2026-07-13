@@ -14,6 +14,7 @@ import {
   getAllExternalApps,
   createExternalApp,
   getExternalAppByPathPrefix,
+  ExternalAppDbError,
 } from '@/lib/external-apps/db';
 import { getExternalAppCache } from '@/lib/external-apps/cache';
 import { validateCreateInput } from '@/lib/external-apps/validation';
@@ -99,8 +100,10 @@ export async function POST(request: Request) {
 
       return NextResponse.json({ app }, { status: 201 });
     } catch (dbError) {
-      // Check for unique constraint violation (duplicate name)
-      if (dbError instanceof Error && dbError.message.includes('UNIQUE constraint')) {
+      // Check for unique constraint violation (duplicate name or pathPrefix).
+      // createExternalApp wraps the raw SQLite error into an ExternalAppDbError
+      // with code 'DUPLICATE', so inspect the typed error rather than its message.
+      if (dbError instanceof ExternalAppDbError && dbError.code === 'DUPLICATE') {
         return NextResponse.json(
           { error: `An app with name "${input.name}" or pathPrefix "${input.pathPrefix}" already exists` },
           { status: 409 }

@@ -18,6 +18,7 @@ import { usePcDisplaySizeContext } from '@/contexts/PcDisplaySizeContext';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { GlobalMobileNav } from '@/components/mobile/GlobalMobileNav';
+import { CommandPalette } from '@/components/common/CommandPalette';
 import { Z_INDEX } from '@/config/z-index';
 
 // ============================================================================
@@ -130,6 +131,9 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
 
         {/* Global mobile nav (bottom tab bar) */}
         {showGlobalNav && <GlobalMobileNav />}
+
+        {/* Global command palette (⌘K / Ctrl+K) - single instance (Issue #1053) */}
+        <CommandPalette />
       </div>
     );
   }
@@ -149,8 +153,9 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
             ref={sidebarRef}
             data-testid="sidebar-container"
             className={`
-              fixed left-0 top-0 h-full
-              border-r border-gray-200 dark:border-gray-600
+              fixed left-0
+              ${showGlobalNav ? 'top-16 h-[calc(100vh-4rem)]' : 'top-0 h-full'}
+              border-r border-border
               ${SIDEBAR_TRANSITION}
               ${isOpen ? 'translate-x-0' : '-translate-x-full'}
             `}
@@ -180,6 +185,9 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
           {children}
         </main>
       </div>
+
+      {/* Global command palette (⌘K / Ctrl+K) - single instance (Issue #1053) */}
+      <CommandPalette />
     </div>
   );
 });
@@ -257,7 +265,7 @@ function ResizeHandle({
       data-testid="sidebar-resize-handle"
       aria-hidden="true"
       onMouseDown={handleMouseDown}
-      className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-cyan-500/40 transition-colors"
+      className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-accent-500/40 transition-colors"
     />
   );
 }

@@ -28,7 +28,9 @@
 'use client';
 
 import React, { memo, useCallback, useEffect, useState } from 'react';
-import { Badge, Button, Card } from '@/components/ui';
+import { Pencil } from 'lucide-react';
+import { Button, Card, Input, StatusDot } from '@/components/ui';
+import { cn } from '@/lib/utils/cn';
 import {
   handleApiError,
   repositoryApi,
@@ -264,7 +266,7 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
   if (loading && repositories.length === 0) {
     return (
       <Card padding="lg">
-        <p className="text-sm text-gray-600 dark:text-gray-400">
+        <p className="text-sm text-muted-foreground">
           Loading repositories...
         </p>
       </Card>
@@ -304,28 +306,28 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
       <Card padding="none">
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
-            <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+            <thead className="bg-muted border-b border-border">
               <tr>
-                <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
+                <th className="px-4 py-2 text-left font-medium text-foreground">
                   Name
                 </th>
-                <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
+                <th className="px-4 py-2 text-left font-medium text-foreground">
                   Display name
                 </th>
                 {/* Issue #690: Visibility column placed before Path so it is always reachable on narrow screens */}
-                <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
+                <th className="px-4 py-2 text-left font-medium text-foreground">
                   Visibility
                 </th>
-                <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
+                <th className="px-4 py-2 text-left font-medium text-foreground">
                   Path
                 </th>
-                <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
+                <th className="px-4 py-2 text-left font-medium text-foreground">
                   Worktrees
                 </th>
-                <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
+                <th className="px-4 py-2 text-left font-medium text-foreground">
                   Status
                 </th>
-                <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
+                <th className="px-4 py-2 text-left font-medium text-foreground">
                   Actions
                 </th>
               </tr>
@@ -335,7 +337,7 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                 <tr>
                   <td
                     colSpan={7}
-                    className="px-4 py-6 text-center text-gray-500 dark:text-gray-400"
+                    className="px-4 py-6 text-center text-muted-foreground"
                   >
                     No repositories registered yet.
                   </td>
@@ -346,16 +348,16 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                 return (
                   <tr
                     key={repo.id}
-                    className="border-b border-gray-100 dark:border-gray-800"
+                    className="border-b border-border"
                     data-testid={`repository-row-${repo.id}`}
                   >
-                    <td className="px-4 py-3 align-top text-gray-900 dark:text-gray-100">
+                    <td className="px-4 py-3 align-top text-foreground">
                       {repo.name}
                     </td>
                     <td className="px-4 py-3 align-top">
                       {isEditing ? (
                         <div className="space-y-1">
-                          <input
+                          <Input
                             aria-label={`Edit display name for ${repo.name}`}
                             type="text"
                             value={edit.value}
@@ -363,7 +365,6 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                             maxLength={MAX_DISPLAY_NAME_LENGTH + 1}
                             onChange={(e) => handleChangeValue(e.target.value)}
                             onKeyDown={(e) => handleKeyDown(e, repo)}
-                            className="input w-full text-sm"
                           />
                           {edit.error && (
                             <p className="text-xs text-red-600 dark:text-red-400">
@@ -371,15 +372,11 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                             </p>
                           )}
                         </div>
+                      ) : repo.displayName ? (
+                        <span className="text-foreground">{repo.displayName}</span>
                       ) : (
-                        <span
-                          className={
-                            repo.displayName
-                              ? 'text-gray-900 dark:text-gray-100'
-                              : 'text-gray-400 dark:text-gray-500 italic'
-                          }
-                        >
-                          {repo.displayName ?? '(none)'}
+                        <span className="text-muted-foreground" aria-hidden="true">
+                          &mdash;
                         </span>
                       )}
                     </td>
@@ -391,18 +388,27 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                         onToggle={handleToggleVisibility}
                       />
                     </td>
-                    <td className="px-4 py-3 align-top text-xs font-mono text-gray-500 dark:text-gray-400 break-all">
-                      {repo.path}
+                    <td className="px-4 py-3 align-top">
+                      <span
+                        className="block max-w-[240px] truncate font-mono text-xs text-muted-foreground"
+                        title={repo.path}
+                      >
+                        {repo.path}
+                      </span>
                     </td>
-                    <td className="px-4 py-3 align-top text-gray-700 dark:text-gray-300">
+                    <td className="px-4 py-3 align-top text-foreground">
                       {repo.worktreeCount}
                     </td>
                     <td className="px-4 py-3 align-top">
-                      {repo.enabled ? (
-                        <Badge variant="success">Enabled</Badge>
-                      ) : (
-                        <Badge variant="gray">Disabled</Badge>
-                      )}
+                      <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+                        <StatusDot
+                          status={repo.enabled ? 'ready' : 'idle'}
+                          size="sm"
+                          label={repo.enabled ? 'Enabled' : 'Disabled'}
+                          aria-hidden="true"
+                        />
+                        {repo.enabled ? 'Enabled' : 'Disabled'}
+                      </span>
                     </td>
                     <td className="px-4 py-3 align-top">
                       {isEditing ? (
@@ -426,12 +432,13 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                         </div>
                       ) : (
                         <Button
-                          variant="secondary"
+                          variant="ghost"
                           size="sm"
+                          className="px-2"
                           onClick={() => handleStartEdit(repo)}
                           aria-label={`Edit display name for ${repo.name}`}
                         >
-                          Edit
+                          <Pencil className="h-4 w-4" aria-hidden="true" />
                         </Button>
                       )}
                     </td>
@@ -481,24 +488,19 @@ function VisibilityToggle({
       data-testid={`visibility-toggle-${repo.id}`}
       onClick={() => onToggle(repo)}
       disabled={pending}
-      className={`
-        inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium
-        border transition-colors
-        focus:outline-none focus:ring-2 focus:ring-cyan-500
-        disabled:opacity-60 disabled:cursor-not-allowed
-        ${
-          isVisible
-            ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 border-green-300 dark:border-green-800'
-            : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-700'
-        }
-      `}
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium',
+        'text-muted-foreground transition-colors',
+        'hover:bg-muted hover:text-foreground',
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        'disabled:opacity-60 disabled:cursor-not-allowed'
+      )}
     >
-      <span
+      <StatusDot
+        status={isVisible ? 'ready' : 'idle'}
+        size="sm"
+        label={isVisible ? 'Visible' : 'Hidden'}
         aria-hidden="true"
-        className={`
-          inline-block w-2 h-2 rounded-full
-          ${isVisible ? 'bg-green-500' : 'bg-gray-400'}
-        `}
       />
       {isVisible ? 'Visible' : 'Hidden'}
     </button>

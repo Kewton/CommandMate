@@ -22,20 +22,18 @@ describe('Dark Mode Foundation (Issue #424)', () => {
       expect(content).toContain("darkMode: 'class'");
     });
 
-    it('should define primary color palette with cyan values', () => {
+    it('should register the accent scale via CSS variables (migrated from primary in Issue #1041)', () => {
       const content = fs.readFileSync(configPath, 'utf-8');
-      // Check for cyan-50 hex value
-      expect(content).toContain('#ecfeff');
-      // Check for cyan-400 hex value
-      expect(content).toContain('#22d3ee');
-      // Check for cyan-600 hex value
-      expect(content).toContain('#0891b2');
+      // The former `primary` cyan palette is now the semantic `accent` scale,
+      // backed by CSS variables. Hex values live in globals.css instead.
+      expect(content).toContain('rgb(var(--accent-500) / <alpha-value>)');
+      expect(content).not.toContain('primary:');
     });
 
-    it('should define cmd-bg-dark custom color', () => {
+    it('should no longer define the cmd-bg-dark color (absorbed into --background in Issue #1041)', () => {
       const content = fs.readFileSync(configPath, 'utf-8');
-      expect(content).toContain("'cmd-bg-dark'");
-      expect(content).toContain('#0f1117');
+      expect(content).not.toContain('cmd-bg-dark');
+      expect(content).toContain('rgb(var(--background) / <alpha-value>)');
     });
   });
 
@@ -47,14 +45,12 @@ describe('Dark Mode Foundation (Issue #424)', () => {
       expect(content).toContain('suppressHydrationWarning');
     });
 
-    it('should have dark:bg-cmd-bg-dark on body', () => {
+    it('should use the semantic bg-background token on body (Issue #1041)', () => {
       const content = fs.readFileSync(layoutPath, 'utf-8');
-      expect(content).toContain('dark:bg-cmd-bg-dark');
-    });
-
-    it('should maintain bg-gray-50 for light mode on body', () => {
-      const content = fs.readFileSync(layoutPath, 'utf-8');
-      expect(content).toContain('bg-gray-50');
+      // Replaces the former `bg-gray-50 dark:bg-cmd-bg-dark`; --background carries
+      // the same effective values (gray-50 light / #0f1117 dark).
+      expect(content).toContain('bg-background');
+      expect(content).not.toContain('cmd-bg-dark');
     });
   });
 
@@ -66,12 +62,14 @@ describe('Dark Mode Foundation (Issue #424)', () => {
       cssContent = fs.readFileSync(cssPath, 'utf-8');
     });
 
-    it('should have dark:text-gray-100 in body base layer', () => {
-      expect(cssContent).toContain('dark:text-gray-100');
+    it('body uses the semantic text-foreground token (Issue #1082)', () => {
+      // The body color was `text-gray-900 dark:text-gray-100`; #1082 replaced it
+      // with the theme-following `text-foreground` token.
+      expect(cssContent).toContain('text-foreground');
     });
 
-    it('should maintain text-gray-900 for light mode body', () => {
-      expect(cssContent).toContain('text-gray-900');
+    it('body no longer hardcodes raw gray text (Issue #1082)', () => {
+      expect(cssContent).not.toContain('@apply text-gray-900 dark:text-gray-100');
     });
 
     it('should NOT modify .prose pre styles (dark fixed)', () => {
@@ -79,61 +77,102 @@ describe('Dark Mode Foundation (Issue #424)', () => {
       expect(cssContent).toContain('bg-[#0d1117]');
     });
 
-    it('should have dark: variants for .card component', () => {
-      expect(cssContent).toContain('dark:bg-gray-900');
-      expect(cssContent).toContain('dark:border-gray-700');
+    it('inline code in .prose uses semantic tokens (Issue #1082)', () => {
+      // Was `bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200`;
+      // now theme-following tokens (same look as `.assistant-md code`).
+      expect(cssContent).toContain('bg-muted text-foreground');
     });
 
-    it('should have cyan colors for .btn-primary', () => {
-      expect(cssContent).toContain('bg-cyan-600');
-      expect(cssContent).toContain('dark:bg-cyan-500');
+    it('should no longer define the legacy @apply component classes (Issue #1048)', () => {
+      // .card/.btn*/.badge*/.input moved into the cva primitives to remove the
+      // style-definition double structure. globals.css must not redefine them.
+      expect(cssContent).not.toMatch(/\.card\s*\{/);
+      expect(cssContent).not.toMatch(/\.btn(-\w+)?\s*\{/);
+      expect(cssContent).not.toMatch(/\.badge(-\w+)?\s*\{/);
+      expect(cssContent).not.toMatch(/\.input\s*\{/);
     });
 
-    it('should have dark: variants for .btn-secondary', () => {
-      expect(cssContent).toContain('dark:bg-gray-700');
-      expect(cssContent).toContain('dark:text-gray-100');
+    it('should keep the semantic --input / --surface tokens with a dark override', () => {
+      // The Input primitive relies on border-input / bg-surface, whose dark
+      // values come from the .dark override block.
+      expect(cssContent).toContain('--input:');
+      expect(cssContent).toContain('--surface:');
+      expect(cssContent).toContain('.dark {');
     });
 
-    it('should have cyan colors for .badge-info', () => {
-      expect(cssContent).toContain('bg-cyan-100');
-      expect(cssContent).toContain('dark:bg-cyan-900');
-      expect(cssContent).toContain('text-cyan-800');
-      expect(cssContent).toContain('dark:text-cyan-300');
+    it('should declare color-scheme on both :root and .dark (Issue #1071: native chrome)', () => {
+      // color-scheme tells the UA to theme native controls (select dropdowns,
+      // scrollbars, form widgets) so they don't render light-on-dark.
+      const rootBlock = cssContent.match(/:root\s*\{([^}]*)\}/);
+      const darkBlock = cssContent.match(/\.dark\s*\{([^}]*)\}/);
+      expect(rootBlock, 'expected a :root block').not.toBeNull();
+      expect(darkBlock, 'expected a .dark block').not.toBeNull();
+      expect(rootBlock![1]).toMatch(/color-scheme:\s*light;/);
+      expect(darkBlock![1]).toMatch(/color-scheme:\s*dark;/);
+    });
+  });
+
+  describe('UI primitives dark mode (Issue #1048: @apply → cva)', () => {
+    // The dark-mode component styling now lives in the cva primitives rather
+    // than in globals.css @apply classes.
+    const readPrimitive = (rel: string): string =>
+      fs.readFileSync(path.join(ROOT, rel), 'utf-8');
+
+    it('Button primary keeps accent tokens with dark variant', () => {
+      const content = readPrimitive('src/components/ui/Button.tsx');
+      expect(content).toContain('bg-accent-600');
+      expect(content).toContain('dark:bg-accent-500');
     });
 
-    it('should have dark: variants for .badge-success', () => {
-      expect(cssContent).toContain('dark:bg-green-900');
-      expect(cssContent).toContain('dark:text-green-300');
+    it('Button secondary uses semantic muted/foreground tokens (Issue #1082)', () => {
+      const content = readPrimitive('src/components/ui/Button.tsx');
+      // Was `bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100`.
+      expect(content).toContain('bg-muted');
+      expect(content).toContain('text-foreground');
+      expect(content).not.toContain('dark:bg-gray-700');
     });
 
-    it('should have dark: variants for .badge-warning', () => {
-      expect(cssContent).toContain('dark:bg-yellow-900');
-      expect(cssContent).toContain('dark:text-yellow-300');
+    it('Card uses semantic surface/border tokens (migrated in Issue #1049)', () => {
+      // The hardcoded dark:bg-gray-900 / dark:border-gray-700 were replaced by
+      // bg-surface / border-border so the depth-token revision propagates.
+      const content = readPrimitive('src/components/ui/Card.tsx');
+      expect(content).toContain('bg-surface');
+      expect(content).toContain('border-border');
     });
 
-    it('should have dark: variants for .badge-error', () => {
-      expect(cssContent).toContain('dark:bg-red-900');
-      expect(cssContent).toContain('dark:text-red-300');
+    it('Badge info keeps accent tokens with dark variants', () => {
+      const content = readPrimitive('src/components/ui/Badge.tsx');
+      expect(content).toContain('bg-accent-100');
+      expect(content).toContain('dark:bg-accent-900');
+      expect(content).toContain('text-accent-800');
+      expect(content).toContain('dark:text-accent-300');
     });
 
-    it('should have dark: variants for .badge-gray', () => {
-      expect(cssContent).toContain('dark:bg-gray-800');
-      expect(cssContent).toContain('dark:text-gray-300');
+    it('Badge success/warning/error keep dark variants; gray uses muted token (Issue #1082)', () => {
+      const content = readPrimitive('src/components/ui/Badge.tsx');
+      expect(content).toContain('dark:bg-green-900');
+      expect(content).toContain('dark:text-green-300');
+      expect(content).toContain('dark:bg-yellow-900');
+      expect(content).toContain('dark:text-yellow-300');
+      expect(content).toContain('dark:bg-red-900');
+      expect(content).toContain('dark:text-red-300');
+      // gray variant migrated to the muted token (was dark:bg-gray-800/dark:text-gray-300)
+      expect(content).toContain('bg-muted text-muted-foreground');
     });
 
-    it('should have dark: variants for inline code in .prose', () => {
-      expect(cssContent).toContain('dark:bg-gray-800');
-      expect(cssContent).toContain('dark:text-gray-200');
+    it('Input uses focus-visible ring/border tokens (Issue #1082)', () => {
+      const content = readPrimitive('src/components/ui/Input.tsx');
+      // focus: → focus-visible: so the ring is keyboard-only.
+      expect(content).toContain('focus-visible:ring-ring');
+      expect(content).toContain('focus-visible:border-ring');
     });
 
-    it('should have cyan colors for .input focus ring', () => {
-      expect(cssContent).toContain('focus:ring-cyan-500');
-      expect(cssContent).toContain('focus:border-cyan-500');
-    });
-
-    it('should have dark: variants for .input', () => {
-      expect(cssContent).toContain('dark:border-gray-600');
-      expect(cssContent).toContain('dark:bg-gray-800');
+    it('Input uses semantic border-input / bg-surface tokens and recedes to surface-2 in dark (Issue #1049)', () => {
+      const content = readPrimitive('src/components/ui/Input.tsx');
+      expect(content).toContain('border-input');
+      expect(content).toContain('bg-surface');
+      // dark recede so an Input inside a bg-surface Card is distinguishable
+      expect(content).toContain('dark:bg-surface-2');
     });
   });
 
@@ -150,14 +189,16 @@ describe('Dark Mode Foundation (Issue #424)', () => {
       expect(content).toContain('attribute="class"');
     });
 
-    it('should configure ThemeProvider with defaultTheme="dark"', () => {
+    it('should configure ThemeProvider with defaultTheme="system" (Issue #1071: follow OS)', () => {
       const content = fs.readFileSync(providersPath, 'utf-8');
-      expect(content).toContain('defaultTheme="dark"');
+      expect(content).toContain('defaultTheme="system"');
+      expect(content).not.toContain('defaultTheme="dark"');
     });
 
-    it('should configure ThemeProvider with enableSystem={false}', () => {
+    it('should enable system theme detection (Issue #1071)', () => {
       const content = fs.readFileSync(providersPath, 'utf-8');
-      expect(content).toContain('enableSystem={false}');
+      expect(content).toContain('enableSystem');
+      expect(content).not.toContain('enableSystem={false}');
     });
 
     it('should place ThemeProvider inside NextIntlClientProvider and outside AuthProvider', () => {
@@ -175,9 +216,12 @@ describe('Dark Mode Foundation (Issue #424)', () => {
   describe('status-colors.ts constraint', () => {
     const statusColorsPath = path.join(ROOT, 'src/config/status-colors.ts');
 
-    it('should preserve border-blue-500 in STATUS_COLORS (NOT migrated to cyan)', () => {
+    it('should use the info token for the STATUS_COLORS spinner (blue, kept distinct from the cyan accent)', () => {
       const content = fs.readFileSync(statusColorsPath, 'utf-8');
-      expect(content).toContain('border-blue-500');
+      expect(content).toContain('border-info');
+      // The running/generating spinner stays blue (info), not migrated to the cyan accent.
+      expect(content).not.toContain('border-blue-500');
+      expect(content).not.toContain('border-accent-500');
     });
   });
 });

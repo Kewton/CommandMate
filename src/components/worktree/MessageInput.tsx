@@ -6,8 +6,11 @@
 'use client';
 
 import React, { memo, useState, useCallback, FormEvent, useRef, useEffect } from 'react';
+import { useTranslations } from 'next-intl';
 import { worktreeApi, handleApiError } from '@/lib/api-client';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { Kbd } from '@/components/ui/Kbd';
+import { Button } from '@/components/ui';
 import { SlashCommandSelector } from './SlashCommandSelector';
 import { InterruptButton } from './InterruptButton';
 import { useSlashCommands } from '@/hooks/useSlashCommands';
@@ -56,6 +59,12 @@ export interface MessageInputProps {
    * Optional — when omitted (or when the session is idle) no toast is shown.
    */
   showToast?: ShowToast;
+  /**
+   * Issue #1080: content rendered in the composer's bottom meta row (left side),
+   * typically the per-instance Auto-Yes toggle. Sits alongside the keyboard-hint
+   * pills so Auto-Yes no longer occupies its own full-width row.
+   */
+  autoYesSlot?: React.ReactNode;
 }
 
 /**
@@ -107,7 +116,8 @@ function migrateLegacyDraftKey(worktreeId: string): void {
   }
 }
 
-export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast }: MessageInputProps) {
+export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast, autoYesSlot }: MessageInputProps) {
+  const t = useTranslations('worktree');
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -409,15 +419,16 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
 
       {/* Issue #474: Image attachment preview */}
       {attachedImage && (
-        <div className="flex items-center gap-2 px-4 py-1.5 bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800 rounded-lg text-sm" data-testid="image-attachment-preview">
-          <svg className="h-4 w-4 flex-shrink-0 text-cyan-600 dark:text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="flex items-center gap-2 px-4 py-1.5 bg-accent-50 dark:bg-accent-900/20 border border-accent-200 dark:border-accent-800 rounded-lg text-sm" data-testid="image-attachment-preview">
+          <svg className="h-4 w-4 flex-shrink-0 text-accent-600 dark:text-accent-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
-          <span className="truncate text-cyan-800 dark:text-cyan-300">{attachedImage.file.name}</span>
+          <span className="truncate text-accent-800 dark:text-accent-300">{attachedImage.file.name}</span>
+          {/* Issue #1061: dense p-0.5 icon action in the attachment pill (hover-lift would disturb the compact pill) — 残置 */}
           <button
             type="button"
             onClick={removeAttachment}
-            className="flex-shrink-0 p-0.5 text-cyan-600 hover:text-red-500 dark:text-cyan-400 dark:hover:text-red-400 rounded transition-colors"
+            className="flex-shrink-0 p-0.5 text-accent-600 hover:text-red-500 dark:text-accent-400 dark:hover:text-red-400 rounded transition-colors"
             aria-label="Remove attachment"
             data-testid="remove-attachment-button"
           >
@@ -438,11 +449,14 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         data-testid="image-file-input"
       />
 
-      <form onSubmit={handleSubmit} className={`bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus-within:border-cyan-500 focus-within:ring-1 focus-within:ring-cyan-500 ${isMobile ? 'flex flex-col gap-1' : 'flex items-center gap-2'}`}>
+      <form onSubmit={handleSubmit} className="rounded-xl bg-surface border border-border shadow-sm px-3 py-2 focus-within:ring-2 focus-within:ring-accent-500/40 transition-shadow flex flex-col gap-1.5">
+        {/* Issue #1080: input area (action buttons + textarea + send) */}
+        <div className={isMobile ? 'flex flex-col gap-1' : 'flex items-center gap-2'}>
         {/* Mobile: Row 1 - action buttons (slash command, attach, interrupt) */}
         {isMobile && (
           <div className="flex items-center gap-1">
-            <button
+            <Button
+              variant="ghost"
               type="button"
               onClick={() => {
                 if (isFreeInputMode) {
@@ -450,19 +464,20 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
                 }
                 setShowCommandSelector(true);
               }}
-              className="flex-shrink-0 p-2 text-gray-500 hover:text-cyan-600 hover:bg-cyan-50 dark:text-gray-400 dark:hover:text-cyan-400 dark:hover:bg-cyan-900/30 rounded-full transition-colors"
+              className="flex-shrink-0 p-2 text-muted-foreground hover:text-accent-600 hover:bg-accent-50 dark:hover:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors"
               aria-label="Show slash commands"
               data-testid="mobile-command-button"
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
               </svg>
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
               type="button"
               onClick={openFileDialog}
               disabled={isUploading || sending}
-              className="flex-shrink-0 p-2 text-gray-500 hover:text-cyan-600 hover:bg-cyan-50 dark:text-gray-400 dark:hover:text-cyan-400 dark:hover:bg-cyan-900/30 rounded-full transition-colors disabled:text-gray-300 dark:disabled:text-gray-600 disabled:hover:bg-transparent"
+              className="flex-shrink-0 p-2 text-muted-foreground hover:text-accent-600 hover:bg-accent-50 dark:hover:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
               aria-label="Attach image"
               data-testid="attach-image-button"
             >
@@ -476,7 +491,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                 </svg>
               )}
-            </button>
+            </Button>
             <InterruptButton
               worktreeId={worktreeId}
               cliToolId={cliToolId || 'claude'}
@@ -488,11 +503,12 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
 
         {/* Desktop: Image attach button (inline) */}
         {!isMobile && (
-          <button
+          <Button
+            variant="ghost"
             type="button"
             onClick={openFileDialog}
             disabled={isUploading || sending}
-            className="flex-shrink-0 p-2 text-gray-500 hover:text-cyan-600 hover:bg-cyan-50 dark:text-gray-400 dark:hover:text-cyan-400 dark:hover:bg-cyan-900/30 rounded-full transition-colors disabled:text-gray-300 dark:disabled:text-gray-600 disabled:hover:bg-transparent"
+            className="flex-shrink-0 p-2 text-muted-foreground hover:text-accent-600 hover:bg-accent-50 dark:hover:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
             aria-label="Attach image"
             data-testid="attach-image-button"
           >
@@ -506,20 +522,21 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
               </svg>
             )}
-          </button>
+          </Button>
         )}
 
         {/* Row 2 (mobile) / inline (desktop): message input + send */}
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <textarea
             ref={textareaRef}
+            data-testid="message-input-textarea"
             value={message}
             onChange={handleMessageChange}
             onKeyDown={handleKeyDown}
             onCompositionStart={handleCompositionStart}
             onCompositionEnd={handleCompositionEnd}
             onFocus={onFocus}
-            placeholder={isMobile ? "Type your message..." : "Type your message... (/ for commands, Shift+Enter for line break)"}
+            placeholder={t('composer.placeholder')}
             disabled={sending}
             rows={1}
             className="flex-1 outline-none bg-transparent resize-none overflow-y-auto scrollbar-thin"
@@ -536,10 +553,17 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
             />
           )}
 
-          <button
+          <Button
+            variant="ghost"
             type="submit"
+            data-testid="send-message-button"
+            data-can-send={String((!!message.trim() || !!attachedImage) && !sending)}
             disabled={(!message.trim() && !attachedImage) || sending}
-            className="flex-shrink-0 p-2 text-cyan-600 hover:bg-cyan-50 dark:text-cyan-400 dark:hover:bg-cyan-900/30 rounded-full transition-colors disabled:text-gray-300 dark:disabled:text-gray-600 disabled:hover:bg-transparent"
+            className={`flex-shrink-0 p-2 rounded-full transition-colors disabled:hover:bg-transparent ${
+              (!!message.trim() || !!attachedImage) && !sending
+                ? 'bg-accent-600 text-white hover:bg-accent-700 shadow-sm'
+                : 'text-muted-foreground/50'
+            }`}
             aria-label="Send message"
           >
             {sending ? (
@@ -552,8 +576,30 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
               </svg>
             )}
-          </button>
+          </Button>
         </div>
+        </div>
+
+        {/* Issue #1080: composer meta row — Auto-Yes (left) + keyboard hints (right).
+            Renders when Auto-Yes is embedded (mobile + desktop) or on desktop for
+            the hint pills (mobile Enter inserts a newline, so no Shift+Enter hint). */}
+        {(autoYesSlot || !isMobile) && (
+          <div className="flex items-center justify-between gap-2 min-w-0" data-testid="composer-meta-row">
+            <div className="flex items-center gap-2 min-w-0 overflow-x-auto scrollbar-hide">
+              {autoYesSlot}
+            </div>
+            {!isMobile && (
+              <div className="flex flex-shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground select-none">
+                <Kbd>/</Kbd>
+                <span>{t('composer.commandsHint')}</span>
+                <span aria-hidden="true" className="opacity-50">·</span>
+                <Kbd>⇧</Kbd>
+                <Kbd>↵</Kbd>
+                <span>{t('composer.newlineHint')}</span>
+              </div>
+            )}
+          </div>
+        )}
       </form>
 
       {/* Slash Command Selector */}

@@ -17,6 +17,11 @@ import { Sun, Moon } from 'lucide-react';
 /**
  * ThemeToggle - Toggle between light and dark mode
  *
+ * Issue #1073 (Must Fix S3-001): this control is shared by the sidebar footer
+ * AND the app Header, so it is styled with theme-NEUTRAL semantic tokens
+ * (`text-muted-foreground` / `hover:bg-muted` / `focus:ring-ring`) rather than
+ * the sidebar-* scale, to avoid regressing the header appearance.
+ *
  * @example
  * ```tsx
  * <ThemeToggle />
@@ -48,7 +53,7 @@ export function ThemeToggle() {
     <button
       data-testid="theme-toggle"
       onClick={() => setTheme(isDark ? 'light' : 'dark')}
-      className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-gray-700 transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500"
+      className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring"
       aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
       title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
     >

@@ -19,6 +19,7 @@ import { formatTimestamp } from '@/components/worktree/schedules/format';
 import { parseCmateContent } from '@/lib/cmate-validator';
 import { parseCliToolColumn } from '@/lib/cmate-cli-tool-parser';
 import type { AgentInstance } from '@/lib/cli-tools/types';
+import { Button } from '@/components/ui';
 
 // ============================================================================
 // Types
@@ -256,8 +257,8 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
     return (
       <div className={`flex items-center justify-center h-full p-4 ${className}`}>
         <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-4 border-gray-200 dark:border-gray-700 border-t-cyan-500 rounded-full animate-spin" />
-          <span className="text-sm text-gray-500 dark:text-gray-400">{t('loading')}</span>
+          <div className="w-8 h-8 border-4 border-border border-t-accent-500 rounded-full animate-spin" />
+          <span className="text-sm text-muted-foreground">{t('loading')}</span>
         </div>
       </div>
     );
@@ -268,13 +269,14 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
       <div className={`flex items-center justify-center h-full p-4 ${className}`}>
         <div className="text-center">
           <span className="text-sm text-red-600 dark:text-red-400">{error}</span>
-          <button
+          <Button
+            variant="ghost"
             type="button"
             onClick={() => void fetchData()}
-            className="ml-2 px-3 py-1 text-sm text-white bg-cyan-500 rounded hover:bg-cyan-600"
+            className="ml-2 px-3 py-1 text-sm text-white bg-accent-500 rounded hover:bg-accent-600"
           >
             {t('retry')}
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -283,7 +285,8 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
   return (
     <div className={`flex flex-col h-full ${className}`}>
       {/* Tab bar (Issue #826): separate "Schedules" view from "Logs" view */}
-      <div className="flex shrink-0 border-b border-gray-200 dark:border-gray-700 px-4 pt-3">
+      <div className="flex shrink-0 border-b border-border px-4 pt-3">
+        {/* Issue #1061: role=tab aria-selected セグメントタブ — 残置 */}
         <button
           type="button"
           data-testid="schedule-tab-schedules"
@@ -292,12 +295,13 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
           onClick={() => setActiveTab('schedules')}
           className={`-mb-px px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
             activeTab === 'schedules'
-              ? 'border-cyan-500 text-cyan-700 dark:text-cyan-300'
-              : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+              ? 'border-accent-500 text-accent-700 dark:text-accent-300'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
           }`}
         >
           {t('tabs.schedules')} ({schedules.length})
         </button>
+        {/* Issue #1061: role=tab aria-selected セグメントタブ — 残置 */}
         <button
           type="button"
           data-testid="schedule-tab-logs"
@@ -306,8 +310,8 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
           onClick={() => setActiveTab('logs')}
           className={`-mb-px px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
             activeTab === 'logs'
-              ? 'border-cyan-500 text-cyan-700 dark:text-cyan-300'
-              : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+              ? 'border-accent-500 text-accent-700 dark:text-accent-300'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
           }`}
         >
           {t('tabs.logs')} ({logs.length})
@@ -318,35 +322,35 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
         {activeTab === 'schedules' ? (
           <div className="flex flex-col gap-4">
             {/* Active Schedules overview */}
-            <div className="rounded border border-cyan-100 bg-cyan-50/60 p-3 dark:border-cyan-900/40 dark:bg-cyan-950/20">
+            <div className="rounded border border-accent-100 bg-accent-50/60 p-3 dark:border-accent-900/40 dark:bg-accent-950/20">
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-sm font-semibold text-cyan-900 dark:text-cyan-200">
+                <span className="text-sm font-semibold text-accent-900 dark:text-accent-200">
                   {t('activeSchedulesTitle')} ({activeSchedules.length})
                 </span>
-                <span className="text-xs text-cyan-700 dark:text-cyan-300">
+                <span className="text-xs text-accent-700 dark:text-accent-300">
                   {t('activeSchedulesDescription')}
                 </span>
               </div>
               {activeSchedules.length === 0 ? (
-                <p className="text-xs text-cyan-800 dark:text-cyan-300">{t('noActiveSchedules')}</p>
+                <p className="text-xs text-accent-800 dark:text-accent-300">{t('noActiveSchedules')}</p>
               ) : (
                 <div className="space-y-2">
                   {activeSchedules.map((schedule) => (
-                    <div key={schedule.scheduleId} className="rounded border border-cyan-200/80 bg-white/80 p-3 dark:border-cyan-900/40 dark:bg-gray-900/60">
+                    <div key={schedule.scheduleId} className="rounded border border-accent-200/80 bg-white/80 p-3 dark:border-accent-900/40 dark:bg-surface/60">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-medium text-sm text-gray-900 dark:text-gray-100">{schedule.name}</span>
+                        <span className="font-medium text-sm text-foreground">{schedule.name}</span>
                         <div className="flex items-center gap-2">
                           <span className={`text-xs px-2 py-0.5 rounded ${schedule.isCronActive ? 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300'}`}>
                             {schedule.isCronActive ? t('activeState.active') : t('activeState.inactive')}
                           </span>
                           {schedule.isExecuting && (
-                            <span className="text-xs px-2 py-0.5 rounded bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300">
+                            <span className="text-xs px-2 py-0.5 rounded bg-accent-100 text-accent-700 dark:bg-accent-900/30 dark:text-accent-300">
                               {t('activeState.executing')}
                             </span>
                           )}
                         </div>
                       </div>
-                      <div className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                      <div className="mt-1 text-xs text-muted-foreground">
                         <span>{t('cron')}: {schedule.cronExpression || 'N/A'}</span>
                         <span className="ml-3">{t('agentLabel')}: {schedule.cliToolId}</span>
                         {schedule.model && (
@@ -365,38 +369,40 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
             {/* Configured schedules */}
             {schedules.length === 0 ? (
               <div className="flex flex-col items-center text-center py-8 px-4">
-                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-cyan-50 text-cyan-600 dark:bg-cyan-900/30 dark:text-cyan-300">
+                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-accent-50 text-accent-600 dark:bg-accent-900/30 dark:text-accent-300">
                   <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-7 h-7">
                     <circle cx="12" cy="12" r="9" />
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 7.5V12l3 2" />
                   </svg>
                 </div>
-                <p className="font-semibold text-gray-700 dark:text-gray-200 mb-1">{t('emptyState.title')}</p>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-5 max-w-xs">{t('emptyState.description')}</p>
-                <button
+                <p className="font-semibold text-foreground mb-1">{t('emptyState.title')}</p>
+                <p className="text-sm text-muted-foreground mb-5 max-w-xs">{t('emptyState.description')}</p>
+                <Button
+                  variant="ghost"
                   type="button"
                   data-testid="schedule-empty-cta"
                   onClick={handleNewSchedule}
-                  className="inline-flex items-center gap-1.5 px-5 py-2.5 text-sm font-semibold text-white bg-cyan-600 hover:bg-cyan-700 rounded-lg shadow-sm transition-colors"
+                  className="inline-flex items-center gap-1.5 px-5 py-2.5 text-sm font-semibold text-white bg-accent-600 hover:bg-accent-700 rounded-lg shadow-sm transition-colors"
                 >
                   <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
                     <path d="M10 4a1 1 0 011 1v4h4a1 1 0 110 2h-4v4a1 1 0 11-2 0v-4H5a1 1 0 110-2h4V5a1 1 0 011-1z" />
                   </svg>
                   {t('emptyState.createButton')}
-                </button>
+                </Button>
+                {/* Issue #1061: パディングなしテキストリンク（Button の余白/lift が外観を変える）— 残置 */}
                 <button
                   type="button"
                   data-testid="schedule-manual-toggle"
                   aria-expanded={manualStepsOpen}
                   onClick={() => setManualStepsOpen((open) => !open)}
-                  className="mt-5 text-xs text-cyan-700 dark:text-cyan-300 hover:underline"
+                  className="mt-5 text-xs text-accent-700 dark:text-accent-300 hover:underline"
                 >
                   {t('emptyState.manualToggle')}
                 </button>
                 {manualStepsOpen && (
                   <ol
                     data-testid="schedule-manual-steps"
-                    className="mt-3 text-xs text-left inline-block space-y-1.5 list-decimal list-inside text-gray-500 dark:text-gray-400"
+                    className="mt-3 text-xs text-left inline-block space-y-1.5 list-decimal list-inside text-muted-foreground"
                   >
                     <li>{t('noSchedulesStep1')}</li>
                     <li>{t('noSchedulesStep2')}</li>
@@ -408,27 +414,29 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
             ) : (
               <div>
                 <div className="mb-2 flex items-center justify-end">
-                  <button
+                  <Button
+                    variant="ghost"
                     type="button"
                     data-testid="schedule-new-button"
                     onClick={handleNewSchedule}
-                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-cyan-600 hover:bg-cyan-700 rounded transition-colors whitespace-nowrap"
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-accent-600 hover:bg-accent-700 rounded transition-colors whitespace-nowrap"
                   >
                     <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
                       <path d="M10 4a1 1 0 011 1v4h4a1 1 0 110 2h-4v4a1 1 0 11-2 0v-4H5a1 1 0 110-2h4V5a1 1 0 011-1z" />
                     </svg>
                     {t('edit.newSchedule')}
-                  </button>
+                  </Button>
                 </div>
                 <div className="space-y-2">
                   {schedules.map((schedule) => {
                     const isEnabled = schedule.enabled === 1;
                     return (
-                      <div key={schedule.id} className="border border-gray-200 dark:border-gray-700 rounded p-3 bg-white dark:bg-gray-900">
+                      <div key={schedule.id} className="border border-border rounded p-3 bg-white dark:bg-surface">
                         <div className="flex items-center justify-between gap-2">
                           <span className="font-medium text-sm truncate">{schedule.name}</span>
                           <div className="flex items-center gap-1">
                             {/* Inline enabled toggle (1-click, no modal) */}
+                            {/* Issue #1061: role=switch aria-checked トグルトラック（knob 描画）— 残置 */}
                             <button
                               type="button"
                               role="switch"
@@ -438,7 +446,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
                               data-testid={`schedule-toggle-${schedule.name}`}
                               onClick={() => void handleToggleSchedule(schedule)}
                               className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
-                                isEnabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
+                                isEnabled ? 'bg-green-500' : 'bg-input'
                               }`}
                             >
                               <span
@@ -447,29 +455,31 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
                                 }`}
                               />
                             </button>
-                            <button
+                            <Button
+                              variant="ghost"
                               type="button"
                               data-testid={`schedule-edit-${schedule.name}`}
                               aria-label={t('edit.edit')}
                               title={t('edit.edit')}
                               onClick={() => void handleEditSchedule(schedule)}
-                              className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-cyan-600 dark:hover:text-cyan-400 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 rounded transition-colors"
+                              className="p-1.5 text-muted-foreground hover:text-accent-600 dark:hover:text-accent-400 hover:bg-accent-50 dark:hover:bg-accent-900/20 rounded transition-colors"
                             >
                               <EditIcon />
-                            </button>
-                            <button
+                            </Button>
+                            <Button
+                              variant="ghost"
                               type="button"
                               data-testid={`schedule-delete-${schedule.name}`}
                               aria-label={t('edit.delete')}
                               title={t('edit.delete')}
                               onClick={() => void handleDeleteSchedule(schedule.name)}
-                              className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
+                              className="p-1.5 text-muted-foreground hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
                             >
                               <DeleteIcon />
-                            </button>
+                            </Button>
                           </div>
                         </div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        <div className="text-xs text-muted-foreground mt-1">
                           <span>{t('cron')}: {schedule.cron_expression || 'N/A'}</span>
                           {schedule.last_executed_at && (
                             <span className="ml-3">{t('lastRun')}: {formatTimestamp(schedule.last_executed_at)}</span>

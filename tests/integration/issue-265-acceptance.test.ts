@@ -160,7 +160,10 @@ describe('Issue #265 Acceptance Test: CLI path cache invalidation and broken ses
 
     it('should detect regex error patterns and auto-recover', async () => {
       vi.mocked(hasSession).mockResolvedValue(true);
-      vi.mocked(capturePane).mockResolvedValue('Error: Claude CLI crashed unexpectedly');
+      // Issue #1102: CLAUDE_SESSION_ERROR_REGEX_PATTERNS is /^Error:.*Claude Code/,
+      // which targets the "Claude Code" product name. Use a matching sample (was the
+      // stale "Claude CLI", which the current regex does not match).
+      vi.mocked(capturePane).mockResolvedValue('Error: Claude Code crashed unexpectedly');
 
       const running = await isClaudeRunning('test-worktree');
       expect(running).toBe(false);
@@ -196,7 +199,8 @@ describe('Issue #265 Acceptance Test: CLI path cache invalidation and broken ses
         'Claude Code cannot be launched inside another Claude Code session'
       );
       expect(CLAUDE_SESSION_ERROR_REGEX_PATTERNS.length).toBeGreaterThan(0);
-      expect(CLAUDE_SESSION_ERROR_REGEX_PATTERNS[0].test('Error: Claude CLI crashed')).toBe(true);
+      // Regex is /^Error:.*Claude Code/ — matches the "Claude Code" product name (Issue #1102).
+      expect(CLAUDE_SESSION_ERROR_REGEX_PATTERNS[0].test('Error: Claude Code crashed')).toBe(true);
     });
   });
 

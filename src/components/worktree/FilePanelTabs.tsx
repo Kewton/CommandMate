@@ -85,8 +85,8 @@ const TabButton = memo(function TabButton({
   );
 
   const activeClasses = isActive
-    ? 'border-cyan-500 text-cyan-600 dark:text-cyan-400 bg-white dark:bg-gray-800'
-    : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100';
+    ? 'border-accent-500 text-accent-600 dark:text-accent-400 bg-surface'
+    : 'border-transparent text-muted-foreground hover:text-foreground';
 
   return (
     <div
@@ -109,7 +109,7 @@ const TabButton = memo(function TabButton({
       <button
         type="button"
         onClick={handleClose}
-        className="ml-1 p-0.5 rounded-sm hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+        className="ml-1 p-0.5 rounded-sm hover:bg-muted transition-colors"
         aria-label={`Close ${tab.name}`}
       >
         <X className="w-3 h-3" />
@@ -177,7 +177,7 @@ export const FilePanelTabs = memo(function FilePanelTabs({
   return (
     <div className="flex flex-col h-full">
       {/* Tab bar */}
-      <div className="flex border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 min-w-0">
+      <div className="flex border-b border-border bg-surface dark:bg-surface-2 min-w-0">
         <div className="flex min-w-0 overflow-hidden flex-1">
           {visibleTabs.map((tab, index) => (
             <TabButton
@@ -196,20 +196,20 @@ export const FilePanelTabs = memo(function FilePanelTabs({
               type="button"
               data-testid="tab-dropdown-button"
               onClick={handleDropdownToggle}
-              className="flex items-center gap-0.5 px-2 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 border-b-2 border-transparent transition-colors"
+              className="flex items-center gap-0.5 px-2 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted border-b-2 border-transparent transition-colors"
             >
               <ChevronDown className={`w-3 h-3 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
               <span>+{overflowTabs.length}</span>
             </button>
             {dropdownOpen && (
-              <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg z-50 min-w-[200px] max-h-[300px] overflow-y-auto">
+              <div className="absolute right-0 top-full mt-1 bg-surface border border-border rounded-md shadow-lg z-50 min-w-[200px] max-h-[300px] overflow-y-auto">
                 {overflowTabs.map(tab => (
                   <button
                     key={tab.path}
                     type="button"
                     data-testid={`tab-dropdown-item-${tab.path}`}
                     onClick={() => handleDropdownSelect(tab.path)}
-                    className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 truncate"
+                    className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-muted truncate"
                     title={tab.path}
                   >
                     {tab.name}

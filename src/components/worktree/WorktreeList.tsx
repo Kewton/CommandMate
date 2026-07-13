@@ -6,8 +6,9 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Star } from 'lucide-react';
 import { WorktreeCard } from './WorktreeCard';
-import { Button, Badge } from '@/components/ui';
+import { Button, Badge, Input } from '@/components/ui';
 import { worktreeApi, repositoryApi, handleApiError, type RepositorySummary, type ExcludedRepository } from '@/lib/api-client';
 import { useWebSocket, type WebSocketMessage, type SessionStatusPayload, type BroadcastPayload } from '@/hooks/useWebSocket';
 import type { Worktree } from '@/types/models';
@@ -341,12 +342,12 @@ Type "delete" to confirm:`;
 
       {/* Search Bar - First */}
       <div className="flex flex-col sm:flex-row gap-3">
-        <input
+        <Input
           type="text"
           placeholder="Search worktrees..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="input flex-1"
+          className="flex-1"
         />
       </div>
 
@@ -371,7 +372,7 @@ Type "delete" to confirm:`;
                 {repo.name} ({repo.worktreeCount})
               </Button>
               <button
-                className="absolute right-1 opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-opacity px-1"
+                className="absolute right-1 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-500 transition-opacity px-1"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleDeleteRepository(repo.path, repo.name);
@@ -434,13 +435,13 @@ Type "delete" to confirm:`;
 
       {/* Sort Options */}
       <div className="flex gap-2 flex-wrap">
-        <span className="text-sm text-gray-600 dark:text-gray-400 self-center">Sort by:</span>
+        <span className="text-sm text-muted-foreground self-center">Sort by:</span>
         <Button
           variant={sortBy === 'favorite' ? 'primary' : 'ghost'}
           size="sm"
           onClick={() => toggleSort('favorite')}
         >
-          ⭐ Favorite {sortBy === 'favorite' && (sortDirection === 'asc' ? '↑' : '↓')}
+          <Star size={14} className="inline align-[-2px] mr-1" aria-hidden="true" />Favorite {sortBy === 'favorite' && (sortDirection === 'asc' ? '↑' : '↓')}
         </Button>
         <Button
           variant={sortBy === 'name' ? 'primary' : 'ghost'}
@@ -468,8 +469,8 @@ Type "delete" to confirm:`;
       {/* Loading State */}
       {loading && !worktrees.length && (
         <div className="text-center py-12">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-cyan-600" />
-          <p className="mt-4 text-gray-600 dark:text-gray-400">Loading worktrees...</p>
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-input border-t-accent-600" />
+          <p className="mt-4 text-muted-foreground">Loading worktrees...</p>
         </div>
       )}
 
@@ -477,7 +478,7 @@ Type "delete" to confirm:`;
       {!loading && !error && filteredAndSortedWorktrees.length === 0 && (
         <div className="text-center py-12">
           <svg
-            className="mx-auto h-12 w-12 text-gray-400"
+            className="mx-auto h-12 w-12 text-muted-foreground"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -489,7 +490,7 @@ Type "delete" to confirm:`;
               d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
             />
           </svg>
-          <p className="mt-4 text-gray-600 dark:text-gray-400">
+          <p className="mt-4 text-muted-foreground">
             {searchQuery ? 'No worktrees found matching your search' : 'No worktrees found'}
           </p>
         </div>
@@ -506,8 +507,8 @@ Type "delete" to confirm:`;
               <div key={repoPath} className="space-y-4">
                 {/* Repository Header (only show if multiple repositories or not filtered) */}
                 {(repositories.length > 1 || !selectedRepository) && (
-                  <div className="flex items-center gap-3 pb-2 border-b border-gray-200 dark:border-gray-700">
-                    <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100">{repoName}</h3>
+                  <div className="flex items-center gap-3 pb-2 border-b border-border">
+                    <h3 className="text-xl font-semibold text-foreground">{repoName}</h3>
                     <Badge variant="gray">{repoWorktrees.length}</Badge>
                   </div>
                 )}
@@ -531,25 +532,25 @@ Type "delete" to confirm:`;
 
       {/* Excluded Repositories Section - Issue #190 */}
       {excludedRepositories.length > 0 && (
-        <div className="border border-gray-200 dark:border-gray-700 rounded-lg">
+        <div className="border border-border rounded-lg">
           <button
-            className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            className="w-full flex items-center justify-between p-4 text-left hover:bg-muted transition-colors"
             onClick={() => setExcludedExpanded(!excludedExpanded)}
           >
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+            <span className="text-sm font-medium text-foreground">
               Excluded Repositories ({excludedRepositories.length})
             </span>
-            <span className="text-gray-400 text-sm">
+            <span className="text-muted-foreground text-sm">
               {excludedExpanded ? 'Hide' : 'Show'}
             </span>
           </button>
           {excludedExpanded && (
-            <div className="border-t border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-800">
+            <div className="border-t border-border divide-y divide-border">
               {excludedRepositories.map((repo) => (
                 <div key={repo.id} className="flex items-center justify-between p-4">
                   <div>
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{repo.name}</span>
-                    <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">{repo.path}</span>
+                    <span className="text-sm font-medium text-foreground">{repo.name}</span>
+                    <span className="text-xs text-muted-foreground ml-2">{repo.path}</span>
                   </div>
                   <Button
                     variant="secondary"

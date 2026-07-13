@@ -17,7 +17,8 @@
  * 4. Modal dialogs (50)
  * 5. Maximized editor overlay (55)
  * 6. Toast notifications (60)
- * 7. Context menus (70)
+ * 7. Radix overlay popovers - Select/DropdownMenu/Tooltip (65)
+ * 8. Context menus (70)
  */
 export const Z_INDEX = {
   /** Dropdown menus and select options */
@@ -37,6 +38,13 @@ export const Z_INDEX = {
 
   /** Toast notifications */
   TOAST: 60,
+
+  /**
+   * Radix overlay primitives (Select / DropdownMenu / Tooltip) content.
+   * Sits above Modal (50) so popovers opened from within a dialog are not
+   * clipped, and below Context menus (70) which remain the topmost layer.
+   */
+  POPOVER: 65,
 
   /** Context menus (right-click menus) */
   CONTEXT_MENU: 70,

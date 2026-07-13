@@ -6,6 +6,8 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { Trash2 } from 'lucide-react';
+import { Button, Card } from '@/components/ui';
 import { AssistantMessageInput } from './AssistantMessageInput';
 import { AssistantMessageList } from './AssistantMessageList';
 import { assistantApi } from '@/lib/api/assistant-api';
@@ -326,19 +328,21 @@ export function AssistantChatPanel() {
   );
 
   return (
-    <div
-      className="overflow-hidden rounded-xl border border-slate-800 bg-slate-950/95 shadow-lg shadow-slate-950/20"
+    <Card
+      variant="elevated"
+      padding="none"
+      className="overflow-hidden rounded-xl shadow-lg"
       data-testid="assistant-chat-panel"
     >
       <div
-        className="flex h-[78vh] min-h-[34rem] max-h-[48rem] flex-col gap-4 overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950/80 p-4"
+        className="flex h-[78vh] min-h-[34rem] max-h-[48rem] flex-col gap-4 overflow-hidden bg-gradient-to-br from-transparent to-accent-500/5 p-4"
       >
           <div className="flex flex-col gap-1">
             <div className="grid gap-3 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_auto]">
-              <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-300">
+              <span className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
                 Repository to Work In
               </span>
-              <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-300">
+              <span className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
                 Assistant CLI
               </span>
               <span className="hidden md:block" />
@@ -349,7 +353,7 @@ export function AssistantChatPanel() {
                 value={selectedRepoId}
                 onChange={(e) => void handleRepoChange(e.target.value)}
                 disabled={repositories.length === 0}
-                className="w-full rounded-lg border border-slate-600 bg-slate-100 px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:cursor-not-allowed disabled:bg-slate-300"
+                className="w-full rounded-lg border border-input bg-surface px-3 py-2 text-sm text-foreground shadow-sm transition-colors focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
                 data-testid="assistant-repo-select"
               >
                 {repositories.length === 0 && <option value="">No repositories</option>}
@@ -364,7 +368,7 @@ export function AssistantChatPanel() {
                 value={selectedTool}
                 onChange={(e) => handleToolChange(e.target.value as CLIToolType)}
                 disabled={conversationActive}
-                className="w-full rounded-lg border border-slate-600 bg-slate-100 px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:cursor-not-allowed disabled:bg-slate-300"
+                className="w-full rounded-lg border border-input bg-surface px-3 py-2 text-sm text-foreground shadow-sm transition-colors focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
                 data-testid="assistant-tool-select"
               >
                 {allowedTools.map((tool) => (
@@ -376,28 +380,30 @@ export function AssistantChatPanel() {
 
               <div>
                 {!conversationActive ? (
-                  <button
+                  <Button
+                    variant="primary"
                     onClick={handleStart}
                     disabled={!selectedRepoId || starting}
-                    className="w-full rounded-lg bg-cyan-500 px-4 py-2 text-sm font-medium text-slate-950 transition-colors hover:bg-cyan-400 disabled:bg-slate-500 disabled:text-slate-300 md:w-auto"
+                    className="w-full md:w-auto"
                     data-testid="assistant-start-button"
                   >
                     {starting ? 'Starting...' : 'Start'}
-                  </button>
+                  </Button>
                 ) : (
-                  <button
+                  <Button
+                    variant="danger"
                     onClick={handleStop}
                     disabled={stopping}
-                    className="w-full rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-500 disabled:bg-slate-500 disabled:text-slate-300 md:w-auto"
+                    className="w-full md:w-auto"
                     data-testid="assistant-stop-button"
                   >
                     {stopping ? 'Stopping...' : 'Stop'}
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>
 
-            <p className="text-xs text-slate-300">
+            <p className="text-xs text-muted-foreground">
               {selectedRepository
                 ? `Start directory: ${selectedRepository.displayName || selectedRepository.name} (${selectedRepository.path})`
                 : 'Select the repository used as the assistant session start directory.'}
@@ -405,28 +411,28 @@ export function AssistantChatPanel() {
           </div>
 
           {error && (
-            <div className="rounded border border-red-800 bg-red-950/40 p-2 text-sm text-red-200">
+            <div className="rounded border border-red-500/40 bg-red-500/10 p-2 text-sm text-red-700 dark:text-red-200">
               {error}
             </div>
           )}
 
           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
             <div className="flex shrink-0 items-center justify-between">
-              <span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+              <span className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
                 History
               </span>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={handleClearHistory}
                 disabled={!conversation || clearing || executionRunning || messages.length === 0}
-                className="inline-flex items-center gap-1 rounded-md border border-slate-700 bg-slate-900/80 px-2.5 py-1 text-xs font-medium text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-900/40 disabled:text-slate-500"
+                className="gap-1"
                 data-testid="assistant-clear-button"
               >
-                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" />
-                </svg>
+                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                 {clearing ? 'Clearing...' : 'Clear history'}
-              </button>
+              </Button>
             </div>
 
             <div className="min-h-0 flex-1 overflow-hidden">
@@ -449,6 +455,6 @@ export function AssistantChatPanel() {
             </div>
           </div>
       </div>
-    </div>
+    </Card>
   );
 }

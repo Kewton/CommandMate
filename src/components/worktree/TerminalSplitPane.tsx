@@ -19,11 +19,21 @@
 'use client';
 
 import React, { memo, useCallback, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import {
   getInstanceLabel,
   type AgentInstance,
   type CLIToolType,
 } from '@/lib/cli-tools/types';
+import { StatusDot, type StatusDotStatus } from '@/components/ui/StatusDot';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/DropdownMenu';
 
 /**
  * Issue #786 / #869: dedicated MIME so the drag payload never collides with
@@ -48,6 +58,13 @@ export interface TerminalSplitPaneProps {
   availableInstances: AgentInstance[];
   /** Called when the instance selector picks a different instance. */
   onInstanceChange: (instanceId: string) => void;
+  /**
+   * Issue #1079: this split's derived agent status, shown as a `StatusDot` in
+   * the instance-selector trigger (the session title bar). `BranchStatus` is a
+   * subset of `StatusDotStatus`, so callers can pass their derived status
+   * directly. Defaults to `idle`.
+   */
+  status?: StatusDotStatus;
   /** Called when the textarea (or any input) inside this pane gains focus. */
   onFocus: () => void;
   /** Whether tmux attach is in progress for this split. */
@@ -83,6 +100,7 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   instance,
   availableInstances,
   onInstanceChange,
+  status = 'idle',
   onFocus,
   attaching = false,
   headerExtras,
@@ -92,6 +110,7 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   onDropInstance,
   draggedInstanceId,
 }: TerminalSplitPaneProps) {
+  const t = useTranslations('worktree');
   // Issue #786: drag-over hover state lives LOCAL to this pane (D-3) so a hover
   // change never re-creates the parent's renderSplitPane / terminalSplitRegion
   // memo (which would re-render every split). null = no drag over this pane.
@@ -155,17 +174,18 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
 
   const dragRingClass =
     dragOverState === 'allowed'
-      ? ' ring-2 ring-cyan-400'
+      ? ' ring-2 ring-accent-400'
       : dragOverState === 'forbidden'
         ? ' ring-2 ring-red-300 cursor-not-allowed'
         : '';
 
-  const handleSelectorChange = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
-      onInstanceChange(e.target.value);
-    },
-    [onInstanceChange],
-  );
+  // Issue #1079: the subtle focus ring and the drag-over ring share the same
+  // `ring` box-shadow. `focus-within:` is a pseudo-class (higher specificity),
+  // so it would override the more prominent 2px drag ring when a focused pane is
+  // also the drop target. Suppress the focus ring while a drag is over this pane
+  // so the drop affordance always wins.
+  const focusRingClass =
+    dragOverState === null ? ' focus-within:ring-1 focus-within:ring-accent-500/30' : '';
 
   const handleSearchClick = useCallback(() => {
     // Issue #47: dispatch terminal-wide search-open event; TerminalDisplay listens.
@@ -179,8 +199,10 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   }, [onFocus]);
 
   const splitLabel = `Terminal split ${splitIndex + 1}`;
-  // Alias-first label for the attach skeleton (falls back to the CLI tool name).
+  // Alias-first label for the selector trigger + attach skeleton (falls back to
+  // the CLI tool name when the instance is stale/undefined).
   const attachLabel = getInstanceLabel(instance ?? { cliTool: cliToolId });
+  const selectInstanceLabel = t('terminal.selectInstance', { split: splitLabel });
 
   return (
     <div
@@ -189,7 +211,10 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
       data-testid={`terminal-split-pane-${splitIndex}`}
       data-split-index={splitIndex}
       style={style}
-      className={`flex flex-col min-w-0 h-full bg-white dark:bg-gray-900${dragRingClass}`}
+      // Issue #1079: the pane is a card (rounded, clipped, hairline border).
+      // Focus is expressed subtly via `focus-within` (a soft accent ring) instead
+      // of the old flashy full-perimeter accent border.
+      className={`flex flex-col min-w-0 h-full rounded-lg overflow-hidden border border-border bg-surface${focusRingClass}${dragRingClass}`}
       onFocusCapture={handleFocusCapture}
       onMouseDown={onFocus}
       // Issue #786: drop target handlers. Separate event system from
@@ -200,32 +225,43 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {/* Header: instance selector + search button */}
-      <div className="px-2 py-1 flex items-center gap-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-        <label className="sr-only" htmlFor={`cli-selector-${splitIndex}`}>
-          {`Select agent instance for ${splitLabel}`}
-        </label>
-        <select
-          id={`cli-selector-${splitIndex}`}
-          value={instanceId}
-          onChange={handleSelectorChange}
-          data-testid={`cli-selector-${splitIndex}`}
-          aria-label={`Select agent instance for ${splitLabel}`}
-          className="text-xs bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded px-1.5 py-0.5"
-        >
-          {availableInstances.map(inst => (
-            <option key={inst.id} value={inst.id}>
-              {getInstanceLabel(inst)}
-            </option>
-          ))}
-        </select>
+      {/* Header: session title bar — instance selector (status + alias) + search */}
+      <div className="px-2 py-1 flex items-center gap-2 bg-surface-2 border-b border-border flex-shrink-0">
+        {/* Issue #1079: native <select> → Radix DropdownMenu. The trigger reads as
+            a session title (StatusDot + alias + chevron); the radio group keeps
+            the same single-select value/onChange semantics as the old <select>. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            data-testid={`cli-selector-${splitIndex}`}
+            aria-label={selectInstanceLabel}
+            className="flex items-center gap-1.5 min-w-0 max-w-[12rem] rounded px-1.5 py-0.5 text-xs border border-border bg-surface text-surface-foreground hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:ring-2 data-[state=open]:ring-ring transition-colors"
+          >
+            <StatusDot
+              status={status}
+              size="sm"
+              aria-hidden
+              data-testid={`split-status-indicator-${splitIndex}`}
+            />
+            <span className="truncate">{attachLabel}</span>
+            <ChevronDown size={14} aria-hidden="true" className="flex-shrink-0 opacity-70" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="min-w-[10rem]">
+            <DropdownMenuRadioGroup value={instanceId} onValueChange={onInstanceChange}>
+              {availableInstances.map(inst => (
+                <DropdownMenuRadioItem key={inst.id} value={inst.id}>
+                  {getInstanceLabel(inst)}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <button
           type="button"
           onClick={handleSearchClick}
           aria-label={`Search terminal output for ${splitLabel}`}
           data-testid={`terminal-search-button-${splitIndex}`}
-          className="ml-auto flex items-center gap-1 px-1.5 py-0.5 text-xs text-gray-500 hover:text-gray-800 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+          className="ml-auto flex items-center gap-1 px-1.5 py-0.5 text-xs text-muted-foreground hover:text-surface-foreground hover:bg-muted-foreground/10 rounded transition-colors"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -251,7 +287,7 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
         {attaching ? (
           <div
             data-testid={`terminal-attach-skeleton-${splitIndex}`}
-            className="absolute inset-0 flex items-center justify-center text-xs text-gray-500 dark:text-gray-400 bg-gray-50/80 dark:bg-gray-800/80"
+            className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground bg-surface-2/80"
             role="status"
             aria-live="polite"
           >
@@ -262,7 +298,7 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
       </div>
 
       {/* Footer: navigation + prompt + message input */}
-      <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-700 p-2 bg-gray-50 dark:bg-gray-800">
+      <div className="flex-shrink-0 border-t border-border p-2 bg-surface-2">
         {footer}
       </div>
     </div>

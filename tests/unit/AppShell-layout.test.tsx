@@ -53,6 +53,12 @@ vi.mock('@/components/layout/Header', () => ({
   Header: () => <div data-testid="header">Header</div>,
 }));
 
+// Mock CommandPalette (Issue #1053) - it is mounted by AppShell but needs
+// router/theme context; this layout test only cares about shell structure.
+vi.mock('@/components/common/CommandPalette', () => ({
+  CommandPalette: () => <div data-testid="command-palette-mock" />,
+}));
+
 // Mock z-index config
 vi.mock('@/config/z-index', () => ({
   Z_INDEX: { SIDEBAR: 30 },
@@ -117,5 +123,48 @@ describe('AppShell with useLayoutConfig', () => {
     });
     render(<AppShell><div>Content</div></AppShell>);
     expect(screen.getByTestId('sidebar-container')).toBeDefined();
+  });
+
+  // Issue #1070: fixed sidebar must not sit under the sticky header.
+  it('should offset the desktop sidebar below the header when showGlobalNav is true', () => {
+    mockIsMobile.mockReturnValue(false);
+    mockLayoutConfig.mockReturnValue({
+      showSidebar: true,
+      showGlobalNav: true,
+      showLocalNav: false,
+      autoCollapseSidebar: false,
+    });
+    render(<AppShell><div>Content</div></AppShell>);
+    const aside = screen.getByTestId('sidebar-container');
+    expect(aside).toHaveClass('top-16', 'h-[calc(100vh-4rem)]');
+    expect(aside).not.toHaveClass('top-0', 'h-full');
+  });
+
+  it('should keep the desktop sidebar full-height when the header is hidden (showGlobalNav false)', () => {
+    mockIsMobile.mockReturnValue(false);
+    mockLayoutConfig.mockReturnValue({
+      showSidebar: true,
+      showGlobalNav: false,
+      showLocalNav: true,
+      autoCollapseSidebar: false,
+    });
+    render(<AppShell><div>Content</div></AppShell>);
+    const aside = screen.getByTestId('sidebar-container');
+    expect(aside).toHaveClass('top-0', 'h-full');
+    expect(aside).not.toHaveClass('top-16', 'h-[calc(100vh-4rem)]');
+  });
+
+  it('should use the semantic border-border token on the desktop sidebar', () => {
+    mockIsMobile.mockReturnValue(false);
+    mockLayoutConfig.mockReturnValue({
+      showSidebar: true,
+      showGlobalNav: true,
+      showLocalNav: false,
+      autoCollapseSidebar: false,
+    });
+    render(<AppShell><div>Content</div></AppShell>);
+    const aside = screen.getByTestId('sidebar-container');
+    expect(aside).toHaveClass('border-border');
+    expect(aside).not.toHaveClass('border-gray-200', 'dark:border-gray-600');
   });
 });

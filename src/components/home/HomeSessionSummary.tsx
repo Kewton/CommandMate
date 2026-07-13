@@ -2,7 +2,11 @@
  * HomeSessionSummary Component
  *
  * Issue #600: UX refresh - Running/Waiting session count display for Home screen.
- * Client-side aggregate from worktrees API response.
+ * Issue #1052: Rendered as compact inline stats inside the Session Overview
+ * bento tile (no longer a standalone 2-card grid). Client-side aggregate from
+ * worktrees API response.
+ * Issue #1051: A StatusDot on each stat "comes alive" (glow/blink) while the
+ * corresponding count is non-zero, so a running session reads as live.
  *
  * Security [DR4-005]: Counts are for display only, not access control.
  */
@@ -10,6 +14,8 @@
 'use client';
 
 import React, { useMemo } from 'react';
+import { StatusDot } from '@/components/ui';
+import { cn } from '@/lib/utils/cn';
 import type { Worktree } from '@/types/models';
 
 export interface HomeSessionSummaryProps {
@@ -18,7 +24,7 @@ export interface HomeSessionSummaryProps {
 }
 
 /**
- * Displays Running and Waiting session counts.
+ * Displays Running and Waiting session counts as compact inline stats.
  */
 export function HomeSessionSummary({ worktrees }: HomeSessionSummaryProps) {
   const { runningCount, waitingCount } = useMemo(() => {
@@ -36,16 +42,34 @@ export function HomeSessionSummary({ worktrees }: HomeSessionSummaryProps) {
   }, [worktrees]);
 
   return (
-    <div className="grid grid-cols-2 gap-4" data-testid="home-session-summary">
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-        <div className="text-sm text-gray-500 dark:text-gray-400">Running</div>
-        <div className="text-2xl font-bold text-green-600 dark:text-green-400" data-testid="running-count">
+    <div className="grid grid-cols-2 gap-3" data-testid="home-session-summary">
+      <div className="rounded-lg border border-border bg-surface-2 px-3 py-2">
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <StatusDot status={runningCount > 0 ? 'running' : 'idle'} size="sm" label="Running" />
+          Running
+        </div>
+        <div
+          className={cn(
+            'text-3xl font-bold tabular-nums',
+            runningCount > 0 ? 'text-foreground' : 'text-muted-foreground',
+          )}
+          data-testid="running-count"
+        >
           {runningCount}
         </div>
       </div>
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-        <div className="text-sm text-gray-500 dark:text-gray-400">Waiting</div>
-        <div className="text-2xl font-bold text-amber-600 dark:text-amber-400" data-testid="waiting-count">
+      <div className="rounded-lg border border-border bg-surface-2 px-3 py-2">
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <StatusDot status={waitingCount > 0 ? 'waiting' : 'idle'} size="sm" label="Waiting" />
+          Waiting
+        </div>
+        <div
+          className={cn(
+            'text-3xl font-bold tabular-nums',
+            waitingCount > 0 ? 'text-foreground' : 'text-muted-foreground',
+          )}
+          data-testid="waiting-count"
+        >
           {waitingCount}
         </div>
       </div>

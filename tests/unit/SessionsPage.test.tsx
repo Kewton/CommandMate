@@ -33,10 +33,10 @@ vi.mock('@/components/layout', () => ({
 vi.mock('@/config/status-colors', () => ({
   SIDEBAR_STATUS_CONFIG: {
     idle: { type: 'dot', className: 'bg-gray-400', label: 'Idle' },
-    ready: { type: 'dot', className: 'bg-cyan-500', label: 'Ready' },
+    ready: { type: 'dot', className: 'bg-accent-500', label: 'Ready' },
     running: { type: 'spinner', className: 'border-green-500', label: 'Running' },
     waiting: { type: 'dot', className: 'bg-yellow-500', label: 'Waiting' },
-    generating: { type: 'spinner', className: 'border-blue-500', label: 'Generating' },
+    generating: { type: 'spinner', className: 'border-info', label: 'Generating' },
   },
 }));
 
@@ -45,6 +45,11 @@ vi.mock('@/lib/date-utils', () => ({
   formatRelativeTime: (isoString: string) => {
     if (!isoString) return '';
     return '2 hours ago';
+  },
+  // Issue #1078: Sessions now uses the short form ("2h ago") with tabular-nums.
+  formatRelativeTimeShort: (isoString: string) => {
+    if (!isoString) return '';
+    return '2h ago';
   },
 }));
 
@@ -126,7 +131,9 @@ describe('SessionsPage', () => {
       render(<SessionsPage />);
 
       const timeEl = screen.getByTestId('session-time-wt-time');
-      expect(timeEl.textContent).toBe('2 hours ago');
+      expect(timeEl.textContent).toBe('2h ago');
+      // Issue #1078: relative time uses tabular-nums for stable column width.
+      expect(timeEl.className).toContain('tabular-nums');
     });
 
     it('should not display message row when lastUserMessage is absent', () => {
@@ -142,7 +149,7 @@ describe('SessionsPage', () => {
       expect(screen.queryByTestId('session-message-wt-no-msg')).toBeNull();
     });
 
-    it('should truncate PC preview to 100 characters', () => {
+    it('renders the full message and truncates via CSS (no char-slice) [Issue #1078]', () => {
       const longMessage = 'A'.repeat(150);
       mockWorktrees = [
         createWorktree({
@@ -154,28 +161,15 @@ describe('SessionsPage', () => {
 
       render(<SessionsPage />);
 
-      const pcEl = screen.getByTestId('session-message-pc-wt-long');
-      // 100 chars + '...'
-      expect(pcEl.textContent).toBe('A'.repeat(100) + '...');
+      const textEl = screen.getByTestId('session-message-text-wt-long');
+      // Full text is present (CSS `truncate` clips visually, not by character count).
+      expect(textEl.textContent).toBe('A'.repeat(150));
+      expect(textEl.className).toContain('truncate');
+      // Full text also exposed via title for hover/accessibility.
+      expect(textEl.getAttribute('title')).toBe('A'.repeat(150));
     });
 
-    it('should truncate SP preview to 20 characters', () => {
-      const longMessage = 'B'.repeat(50);
-      mockWorktrees = [
-        createWorktree({
-          id: 'wt-sp',
-          lastUserMessage: longMessage,
-          lastUserMessageAt: '2026-04-01T10:00:00Z',
-        }),
-      ];
-
-      render(<SessionsPage />);
-
-      const spEl = screen.getByTestId('session-message-sp-wt-sp');
-      expect(spEl.textContent).toBe('B'.repeat(20) + '...');
-    });
-
-    it('should not add ellipsis when message is within limit', () => {
+    it('renders short messages verbatim with no ellipsis', () => {
       mockWorktrees = [
         createWorktree({
           id: 'wt-short',
@@ -186,10 +180,8 @@ describe('SessionsPage', () => {
 
       render(<SessionsPage />);
 
-      const pcEl = screen.getByTestId('session-message-pc-wt-short');
-      expect(pcEl.textContent).toBe('Short');
-      const spEl = screen.getByTestId('session-message-sp-wt-short');
-      expect(spEl.textContent).toBe('Short');
+      const textEl = screen.getByTestId('session-message-text-wt-short');
+      expect(textEl.textContent).toBe('Short');
     });
   });
 
@@ -240,7 +232,7 @@ describe('SessionsPage', () => {
 
       render(<SessionsPage />);
 
-      const pcEl = screen.getByTestId('session-message-pc-wt-ctrl');
+      const pcEl = screen.getByTestId('session-message-text-wt-ctrl');
       // Control chars and zero-width chars should be removed
       expect(pcEl.textContent).toBe('HelloWorldtest');
     });
@@ -256,7 +248,7 @@ describe('SessionsPage', () => {
 
       render(<SessionsPage />);
 
-      const pcEl = screen.getByTestId('session-message-pc-wt-newline');
+      const pcEl = screen.getByTestId('session-message-text-wt-newline');
       expect(pcEl.textContent).toBe('Line1 Line2 Line3');
     });
 
@@ -271,7 +263,7 @@ describe('SessionsPage', () => {
 
       render(<SessionsPage />);
 
-      const pcEl = screen.getByTestId('session-message-pc-wt-spaces');
+      const pcEl = screen.getByTestId('session-message-text-wt-spaces');
       expect(pcEl.textContent).toBe('Hello World Test');
     });
   });
@@ -332,8 +324,82 @@ describe('SessionsPage', () => {
 
       render(<SessionsPage />);
 
-      // SortSelectorBase should be rendered
-      expect(screen.getByTestId('sort-selector-base')).toBeDefined();
+      // Sort primitive (Radix Select trigger) and direction toggle are rendered
+      expect(screen.getByTestId('sessions-sort-select')).toBeDefined();
+      expect(screen.getByTestId('sessions-sort-direction')).toBeDefined();
+    });
+  });
+
+  describe('entrance stagger (Issue #1050)', () => {
+    it('applies stagger entrance classes with an incremental delay per item', () => {
+      mockWorktrees = [
+        createWorktree({ id: 'wt-1', lastUserMessageAt: '2026-04-03T10:00:00Z' }),
+        createWorktree({ id: 'wt-2', lastUserMessageAt: '2026-04-02T10:00:00Z' }),
+        createWorktree({ id: 'wt-3', lastUserMessageAt: '2026-04-01T10:00:00Z' }),
+      ];
+
+      render(<SessionsPage />);
+
+      const first = screen.getByTestId('session-item-wt-1');
+      const second = screen.getByTestId('session-item-wt-2');
+      const third = screen.getByTestId('session-item-wt-3');
+
+      // Entrance animation classes present on every item
+      expect(first.className).toContain('animate-in');
+      expect(first.className).toContain('fill-mode-backwards');
+
+      // First item: no delay; subsequent items: 40ms increments
+      expect(first.style.animationDelay).toBe('');
+      expect(second.style.animationDelay).toBe('40ms');
+      expect(third.style.animationDelay).toBe('80ms');
+    });
+
+    it('does NOT re-fire the entrance animation on a polling re-render (stable keys)', () => {
+      mockWorktrees = [
+        createWorktree({ id: 'wt-1', lastUserMessage: 'first', lastUserMessageAt: '2026-04-03T10:00:00Z' }),
+        createWorktree({ id: 'wt-2', lastUserMessage: 'second', lastUserMessageAt: '2026-04-02T10:00:00Z' }),
+      ];
+
+      const { rerender } = render(<SessionsPage />);
+      const before = screen.getByTestId('session-item-wt-1');
+
+      // Simulate a polling update: same worktree ids, changed payload.
+      mockWorktrees = [
+        createWorktree({ id: 'wt-1', lastUserMessage: 'first (updated)', lastUserMessageAt: '2026-04-03T10:05:00Z' }),
+        createWorktree({ id: 'wt-2', lastUserMessage: 'second', lastUserMessageAt: '2026-04-02T10:00:00Z' }),
+      ];
+      rerender(<SessionsPage />);
+      const after = screen.getByTestId('session-item-wt-1');
+
+      // Same DOM node is reused (not remounted) → CSS entrance animation cannot
+      // restart. This is the guard against animations re-firing on each poll.
+      expect(after).toBe(before);
+      expect(after.className).toContain('animate-in');
+    });
+
+    it('keeps the list mounted (no re-fire) through a transient polling error', () => {
+      mockWorktrees = [
+        createWorktree({ id: 'wt-1', lastUserMessageAt: '2026-04-03T10:00:00Z' }),
+      ];
+      const { rerender } = render(<SessionsPage />);
+      const before = screen.getByTestId('session-item-wt-1');
+      expect(screen.getByTestId('sessions-list')).toBeDefined();
+
+      // Transient poll failure (e.g. server rebuild): data still present, error set.
+      mockError = new Error('fetch failed');
+      rerender(<SessionsPage />);
+
+      // The list stays mounted with the SAME DOM node (animation cannot re-fire),
+      // and the error surfaces as a non-blocking banner rather than replacing it.
+      const during = screen.getByTestId('session-item-wt-1');
+      expect(during).toBe(before);
+      expect(screen.getByTestId('sessions-error-banner')).toBeDefined();
+      expect(screen.queryByTestId('sessions-error')).toBeNull();
+
+      // Recovery poll: error clears, list node still identical.
+      mockError = null;
+      rerender(<SessionsPage />);
+      expect(screen.getByTestId('session-item-wt-1')).toBe(before);
     });
   });
 
@@ -377,6 +443,82 @@ describe('SessionsPage', () => {
       render(<SessionsPage />);
 
       expect(screen.getByTestId('sessions-empty')).toBeDefined();
+    });
+  });
+
+  // Issue #1078: only actively-working agents get a labelled chip; the idle
+  // group collapses to a "+N" counter so a working session is not buried.
+  describe('agent status display (Issue #1078)', () => {
+    const SIX_AGENTS = ['claude', 'codex', 'gemini', 'cursor', 'aider', 'qwen'];
+
+    it('running 1 + idle 5: only the running agent is a labelled chip + a "+5" idle counter', () => {
+      mockWorktrees = [
+        createWorktree({
+          id: 'wt-mix',
+          selectedAgents: SIX_AGENTS,
+          sessionStatusByCli: {
+            claude: { isRunning: true, isWaitingForResponse: false, isProcessing: true },
+          },
+        }),
+      ];
+
+      render(<SessionsPage />);
+
+      // Working agent → labelled chip.
+      expect(screen.getByTestId('session-agent-claude')).toBeDefined();
+      // Idle agents are NOT rendered as labelled chips.
+      expect(screen.queryByTestId('session-agent-codex')).toBeNull();
+      expect(screen.queryByTestId('session-agent-gemini')).toBeNull();
+      // Idle group collapses into a "+5" counter.
+      const cluster = screen.getByTestId('session-idle-cluster-wt-mix');
+      expect(cluster.textContent).toContain('+5');
+    });
+
+    it('all idle: no labelled chips, a single "+6" idle counter', () => {
+      mockWorktrees = [
+        createWorktree({ id: 'wt-idle', selectedAgents: SIX_AGENTS }),
+      ];
+
+      render(<SessionsPage />);
+
+      expect(screen.queryByTestId('session-agent-claude')).toBeNull();
+      const cluster = screen.getByTestId('session-idle-cluster-wt-idle');
+      expect(cluster.textContent).toContain('+6');
+    });
+
+    it('waiting agents also count as working (labelled chip)', () => {
+      mockWorktrees = [
+        createWorktree({
+          id: 'wt-wait',
+          selectedAgents: SIX_AGENTS,
+          sessionStatusByCli: {
+            codex: { isRunning: true, isWaitingForResponse: true, isProcessing: false },
+          },
+        }),
+      ];
+
+      render(<SessionsPage />);
+
+      expect(screen.getByTestId('session-agent-codex')).toBeDefined();
+      const cluster = screen.getByTestId('session-idle-cluster-wt-wait');
+      expect(cluster.textContent).toContain('+5');
+    });
+
+    it('all working: labelled chips for each, no idle counter', () => {
+      const running = { isRunning: true, isWaitingForResponse: false, isProcessing: true };
+      mockWorktrees = [
+        createWorktree({
+          id: 'wt-all',
+          selectedAgents: ['claude', 'codex'],
+          sessionStatusByCli: { claude: running, codex: running },
+        }),
+      ];
+
+      render(<SessionsPage />);
+
+      expect(screen.getByTestId('session-agent-claude')).toBeDefined();
+      expect(screen.getByTestId('session-agent-codex')).toBeDefined();
+      expect(screen.queryByTestId('session-idle-cluster-wt-all')).toBeNull();
     });
   });
 });

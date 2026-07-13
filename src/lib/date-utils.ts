@@ -44,6 +44,56 @@ export function formatRelativeTime(isoString: string, locale?: Locale): string {
 }
 
 /**
+ * Convert an ISO 8601 date string to a compact relative time string. (Issue #1072)
+ *
+ * Produces short, fixed-width-friendly forms (e.g. "now", "5m ago", "4h ago",
+ * "3d ago", "2w ago", "6mo ago", "1y ago") for dense list UIs where the verbose
+ * `formatRelativeTime` output ("about 4 hours ago") is too long. Returns an
+ * empty string for invalid input, matching `formatRelativeTime`.
+ *
+ * @param isoString - ISO 8601 format date string
+ * @returns Compact relative time string, or empty string if the input is invalid
+ *
+ * @example
+ * ```ts
+ * formatRelativeTimeShort('2026-07-12T08:00:00Z') // "4h ago" (when now is 12:00Z)
+ * formatRelativeTimeShort('invalid')              // ""
+ * ```
+ */
+export function formatRelativeTimeShort(isoString: string): string {
+  const date = new Date(isoString);
+
+  if (isNaN(date.getTime())) {
+    return '';
+  }
+
+  const diffSeconds = Math.round((Date.now() - date.getTime()) / 1000);
+
+  if (diffSeconds < 45) {
+    return 'now';
+  }
+  const minutes = Math.round(diffSeconds / 60);
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h ago`;
+  }
+  const days = Math.round(hours / 24);
+  if (days < 7) {
+    return `${days}d ago`;
+  }
+  if (days < 30) {
+    return `${Math.round(days / 7)}w ago`;
+  }
+  if (days < 365) {
+    return `${Math.round(days / 30)}mo ago`;
+  }
+  return `${Math.round(days / 365)}y ago`;
+}
+
+/**
  * Format a message timestamp as a localized date + time string. (Issue #687)
  *
  * Uses date-fns `'PPp'` (long localized date + long localized time) to match

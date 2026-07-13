@@ -10,6 +10,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import ReportDatePicker from './ReportDatePicker';
+import { Button, Card, Input, RadioGroup, RadioGroupItem, Textarea } from '@/components/ui';
 import { SUMMARY_ALLOWED_TOOLS, MAX_USER_INSTRUCTION_LENGTH } from '@/config/review-config';
 import { useReportGeneration } from '@/hooks/useReportGeneration';
 import { useGenerationStatus } from '@/hooks/useGenerationStatus';
@@ -200,11 +201,11 @@ export default function ReportTab() {
         <ReportDatePicker value={selectedDate} onChange={handleDateChange} />
 
         <div className="flex items-center gap-2">
-          <label className="text-sm text-gray-600 dark:text-gray-400">Tool:</label>
+          <label className="text-sm text-muted-foreground">Tool:</label>
           <select
             value={selectedTool}
             onChange={(e) => setSelectedTool(e.target.value)}
-            className="px-3 py-1 text-sm border rounded dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200"
+            className="px-3 py-1 text-sm rounded border border-input bg-surface dark:bg-surface-2 text-surface-foreground"
             data-testid="tool-selector"
           >
             {SUMMARY_ALLOWED_TOOLS.map((tool) => (
@@ -213,12 +214,13 @@ export default function ReportTab() {
           </select>
 
           {selectedTool === 'copilot' && (
-            <input
+            <Input
               type="text"
+              inputSize="sm"
               placeholder="Model (optional)"
               value={modelInput}
               onChange={(e) => setModelInput(e.target.value)}
-              className="px-3 py-1 text-sm border rounded dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200"
+              className="w-auto"
               data-testid="model-input"
             />
           )}
@@ -228,41 +230,39 @@ export default function ReportTab() {
 
       {/* Generation mode selector */}
       <div className="mb-4" data-testid="generation-mode-selector">
-        <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+        <label className="text-sm font-medium text-foreground mb-2 block">
           Generation Mode
         </label>
-        <div className="flex gap-4">
+        <RadioGroup
+          value={mode}
+          onValueChange={(v) => setMode(v as GenerationMode)}
+          name="generation-mode"
+          className="flex flex-row gap-4"
+        >
           {MODE_OPTIONS.map((option) => (
             <label key={option.value} className="flex items-center gap-2 text-sm cursor-pointer">
-              <input
-                type="radio"
-                name="generation-mode"
-                value={option.value}
-                checked={mode === option.value}
-                onChange={() => setMode(option.value)}
-                data-testid={`mode-radio-${option.value}`}
-              />
-              <span className="text-gray-700 dark:text-gray-300">{option.label}</span>
+              <RadioGroupItem value={option.value} data-testid={`mode-radio-${option.value}`} />
+              <span className="text-foreground">{option.label}</span>
             </label>
           ))}
-        </div>
+        </RadioGroup>
       </div>
 
       {/* Template selector (only in template mode) */}
       {mode === 'template' && (
         <div className="mb-4" data-testid="template-selector">
-          <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+          <label className="text-sm font-medium text-foreground mb-2 block">
             Select Template
           </label>
           {isLoadingTemplates ? (
-            <div className="text-sm text-gray-500">Loading templates...</div>
+            <div className="text-sm text-muted-foreground">Loading templates...</div>
           ) : templates.length === 0 ? (
-            <div className="text-sm text-gray-500">No templates available. Create one in the Template tab.</div>
+            <div className="text-sm text-muted-foreground">No templates available. Create one in the Template tab.</div>
           ) : (
             <select
               value={selectedTemplateId || ''}
               onChange={(e) => selectTemplate(e.target.value)}
-              className="px-3 py-1 text-sm border rounded dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200"
+              className="px-3 py-1 text-sm rounded border border-input bg-surface dark:bg-surface-2 text-surface-foreground"
               data-testid="template-select"
             >
               <option value="">-- Select a template --</option>
@@ -277,7 +277,7 @@ export default function ReportTab() {
       {/* User instruction textarea (visible in template and custom modes) */}
       {mode !== 'none' && (
         <div className="mb-4">
-          <textarea
+          <Textarea
             value={userInstruction}
             onChange={(e) => setUserInstruction(e.target.value)}
             rows={3}
@@ -288,8 +288,8 @@ export default function ReportTab() {
                 ? 'Select a template above to populate this field'
                 : 'Additional instructions for summary generation'
             }
-            className={`w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200 resize-y ${
-              isUserInstructionReadOnly ? 'bg-gray-100 dark:bg-gray-900 cursor-not-allowed' : ''
+            className={`resize-y ${
+              isUserInstructionReadOnly ? 'bg-muted cursor-not-allowed' : ''
             }`}
             data-testid="user-instruction-input"
           />
@@ -298,22 +298,18 @@ export default function ReportTab() {
 
       {/* Generate button */}
       <div className="mb-6">
-        <button
+        <Button
+          variant="primary"
           onClick={handleGenerate}
           disabled={isGenerating || isRemoteGenerating || messageCount === 0}
-          className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-            isGenerating || isRemoteGenerating || messageCount === 0
-              ? 'bg-gray-300 dark:bg-gray-700 text-gray-500 dark:text-gray-500 cursor-not-allowed'
-              : 'bg-cyan-600 text-white hover:bg-cyan-700'
-          }`}
           data-testid="generate-button"
         >
           {isGenerating || isRemoteGenerating ? 'Generating...' : 'Generate Summary'}
-        </button>
+        </Button>
       </div>
 
       {/* Message count */}
-      <div className="mb-4 text-sm text-gray-600 dark:text-gray-400" data-testid="message-count">
+      <div className="mb-4 text-sm text-muted-foreground" data-testid="message-count">
         {isLoading ? (
           'Loading...'
         ) : messageCount === 0 ? (
@@ -332,8 +328,8 @@ export default function ReportTab() {
 
       {/* Loading spinner for generation (local or remote) */}
       {(isGenerating || isRemoteGenerating) && (
-        <div className="flex items-center gap-2 mb-4 text-sm text-gray-600 dark:text-gray-400" data-testid="generating-spinner">
-          <div className="w-4 h-4 border-2 border-cyan-600 border-t-transparent rounded-full animate-spin" />
+        <div className="flex items-center gap-2 mb-4 text-sm text-muted-foreground" data-testid="generating-spinner">
+          <div className="w-4 h-4 border-2 border-accent-600 border-t-transparent rounded-full animate-spin" />
           {isRemoteGenerating && remoteStatus.tool
             ? `Generating report... (tool: ${remoteStatus.tool}${remoteStatus.startedAt ? `, started: ${Math.round((Date.now() - new Date(remoteStatus.startedAt).getTime()) / 1000)}s ago` : ''})`
             : 'Generating summary...'}
@@ -342,25 +338,28 @@ export default function ReportTab() {
 
       {/* Report content */}
       {!isLoading && report && (
-        <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-4" data-testid="report-content">
+        <Card data-testid="report-content">
           <div className="flex items-center justify-between mb-3">
-            <div className="text-xs text-gray-500 dark:text-gray-400">
+            <div className="text-xs text-muted-foreground">
               Generated by: {report.generatedByTool}
               {report.model && ` (${report.model})`}
             </div>
             <div className="flex items-center gap-2">
-              <button
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={async () => {
                   await copyToClipboard(report.content);
                   setCopied(true);
                   setTimeout(() => setCopied(false), COPY_FEEDBACK_RESET_MS);
                 }}
-                className="px-3 py-1 text-xs font-medium rounded transition-colors bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300"
                 data-testid="copy-report-button"
               >
                 {copied ? 'Copied!' : 'Copy'}
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={() => {
                   if (isEditing) {
                     handleSave();
@@ -369,19 +368,18 @@ export default function ReportTab() {
                   }
                 }}
                 disabled={isSaving}
-                className="px-3 py-1 text-xs font-medium rounded transition-colors bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300"
                 data-testid="edit-save-button"
               >
                 {isSaving ? 'Saving...' : isEditing ? 'Save' : 'Edit'}
-              </button>
+              </Button>
             </div>
           </div>
 
           {isEditing ? (
-            <textarea
+            <Textarea
               value={editContent}
               onChange={(e) => setEditContent(e.target.value)}
-              className="w-full h-64 p-3 text-sm border rounded dark:bg-gray-900 dark:border-gray-600 dark:text-gray-200 font-mono"
+              className="h-64 p-3 font-mono"
               data-testid="report-editor"
             />
           ) : (
@@ -389,7 +387,7 @@ export default function ReportTab() {
               {report.content}
             </div>
           )}
-        </div>
+        </Card>
       )}
     </div>
   );

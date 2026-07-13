@@ -221,6 +221,8 @@ describe('External Apps API', () => {
       expect(data.error).toContain('pathPrefix');
     });
 
+    // Fixed in #1104: route now checks ExternalAppDbError.code === 'DUPLICATE'
+    // (was quarantined in #1102 because the route returned 500 for a duplicate name).
     it('should return 409 for duplicate name', async () => {
       // Create initial app
       createExternalApp(db, {

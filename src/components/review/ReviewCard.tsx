@@ -9,6 +9,7 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { Card } from '@/components/ui';
 import type { ReviewStatus } from '@/lib/session/next-action-helper';
 
 export interface ReviewCardProps {
@@ -59,10 +60,7 @@ export function ReviewCard({
   children,
 }: ReviewCardProps) {
   return (
-    <div
-      data-testid="review-card"
-      className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700"
-    >
+    <Card data-testid="review-card">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <Link
@@ -70,18 +68,18 @@ export function ReviewCard({
             data-testid="review-card-link"
             className="hover:underline"
           >
-            <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+            <div className="text-sm font-medium text-foreground truncate">
               {repositoryName}
             </div>
-            <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+            <div className="text-xs text-muted-foreground truncate">
               {branchName}
             </div>
           </Link>
-          <div className="mt-2 text-xs text-gray-600 dark:text-gray-300">
+          <div className="mt-2 text-xs text-muted-foreground">
             {nextAction}
           </div>
           {cliToolId && (
-            <span className="mt-1 inline-block text-xs px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+            <span className="mt-1 inline-block text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
               {cliToolId}
             </span>
           )}
@@ -93,7 +91,7 @@ export function ReviewCard({
           {STATUS_LABELS[status]}
         </span>
       </div>
-      {children && <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">{children}</div>}
-    </div>
+      {children && <div className="mt-3 pt-3 border-t border-border">{children}</div>}
+    </Card>
   );
 }

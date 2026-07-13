@@ -42,7 +42,6 @@ import { useSplitMessages } from '@/hooks/useSplitMessages';
 import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
-import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 import type {
   TerminalSplitPaneCoreProps,
   SplitAutoYesProps,
@@ -247,29 +246,6 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     !showNav &&
     !showPrompt;
 
-  // Issue #743: AI agent status indicator (dot/spinner) for the split header.
-  // Uses the same inline span markup as the Mobile canonical implementation
-  // (WorktreeDetailRefactored.tsx:1947-1974): title-only a11y (no aria-label,
-  // to avoid duplicate readout / S3-006), spinner for running/generating.
-  const statusConfig = SIDEBAR_STATUS_CONFIG[cliStatus];
-  const statusIndicator = useMemo(
-    () =>
-      statusConfig.type === 'spinner' ? (
-        <span
-          className={`w-2 h-2 rounded-full flex-shrink-0 border-2 border-t-transparent animate-spin ${statusConfig.className}`}
-          title={statusConfig.label}
-          data-testid={`split-status-indicator-${splitIndex}`}
-        />
-      ) : (
-        <span
-          className={`w-2 h-2 rounded-full flex-shrink-0 ${statusConfig.className}`}
-          title={statusConfig.label}
-          data-testid={`split-status-indicator-${splitIndex}`}
-        />
-      ),
-    [statusConfig.type, statusConfig.className, statusConfig.label, splitIndex],
-  );
-
   // Issue #744: the embedded HistoryPane for THIS split. Receives this split's
   // own messages (useSplitMessages) and the per-split highlight namespace via
   // `splitIndex`. Insert routing targets this split (S3-005). No client-side
@@ -374,7 +350,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
               title={t('terminal.showHistory')}
               aria-expanded="false"
               onClick={toggleHistory}
-              className="flex flex-col items-center gap-2 w-full pt-2 text-gray-500 dark:text-gray-400 hover:text-cyan-600 dark:hover:text-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+              className="flex flex-col items-center gap-2 w-full pt-2 text-gray-500 dark:text-gray-400 hover:text-accent-600 dark:hover:text-accent-400 focus:outline-none focus:ring-2 focus:ring-ring"
             >
               <svg
                 className="w-4 h-4 flex-shrink-0"
@@ -420,15 +396,6 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   const footerSlot = useMemo(
     () => (
       <div className="space-y-2">
-        {/* Issue #740: per-split Auto-Yes toggle, keyed by this split's CLI. */}
-        <AutoYesToggle
-          enabled={autoYesEnabled}
-          expiresAt={autoYesExpiresAt ?? null}
-          onToggle={onAutoYesToggle}
-          lastAutoResponse={lastAutoResponse ?? null}
-          cliToolName={cliToolId}
-          inline
-        />
         {showNav ? (
           <NavigationButtons
             worktreeId={worktreeId}
@@ -473,6 +440,18 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
           // showToast reuses the existing history toast surface.
           isProcessing={terminal.isRunning}
           showToast={showToast}
+          // Issue #1080: per-split Auto-Yes toggle now lives in the composer's
+          // bottom meta row instead of its own full-width footer row.
+          autoYesSlot={
+            <AutoYesToggle
+              enabled={autoYesEnabled}
+              expiresAt={autoYesExpiresAt ?? null}
+              onToggle={onAutoYesToggle}
+              lastAutoResponse={lastAutoResponse ?? null}
+              cliToolName={cliToolId}
+              inline
+            />
+          }
         />
       </div>
     ),
@@ -515,9 +494,11 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       instance={instance}
       availableInstances={availableInstances}
       onInstanceChange={onInstanceChange}
+      // Issue #1079: the derived agent status now renders as a StatusDot inside
+      // the selector trigger (session title bar). BranchStatus ⊂ StatusDotStatus.
+      status={cliStatus}
       onFocus={onFocus}
       attaching={terminal.attaching}
-      headerExtras={statusIndicator}
       terminal={terminalSlot}
       footer={footerSlot}
       // Issue #786 / #869: drag-drop pass-through (optional; inert when omitted).

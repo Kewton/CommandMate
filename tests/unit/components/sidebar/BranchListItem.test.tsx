@@ -92,7 +92,9 @@ describe('BranchListItem', () => {
       );
 
       const item = screen.getByTestId('branch-list-item');
-      expect(item.className).toMatch(/bg-gray-600|bg-gray-700|selected|border-l|border-cyan/);
+      // Issue #1073: selected background migrated to the `bg-sidebar-hover`
+      // token; the accent left border remains the primary selection marker.
+      expect(item.className).toMatch(/bg-sidebar-hover|selected|border-l|border-accent/);
     });
 
     it('should not apply selected styling when not selected', () => {
@@ -105,8 +107,8 @@ describe('BranchListItem', () => {
       );
 
       const item = screen.getByTestId('branch-list-item');
-      // bg-gray-600 is the selected background; unselected should not have it
-      expect(item.className).not.toMatch(/(?<![a-z-])bg-gray-600/);
+      // border-accent-500 is the selected marker; unselected must not have it.
+      expect(item.className).not.toMatch(/border-accent-500/);
     });
 
     it('should have aria-current attribute when selected', () => {
@@ -183,7 +185,7 @@ describe('BranchListItem', () => {
       expect(screen.queryByLabelText('CLI tool status')).not.toBeInTheDocument();
     });
 
-    it('should reflect running status with spinner styling', () => {
+    it('should reflect running status with a glowing dot (Issue #1051)', () => {
       render(
         <BranchListItem
           branch={{ ...defaultBranch, cliStatus: { claude: 'running', codex: 'idle' } }}
@@ -193,7 +195,7 @@ describe('BranchListItem', () => {
       );
 
       const claudeDot = screen.getByLabelText(/Claude:/);
-      expect(claudeDot.className).toMatch(/animate-spin/);
+      expect(claudeDot.className).toMatch(/animate-status-glow/);
     });
 
     it('should render vibe-local status dot dynamically (Issue #368)', () => {
@@ -253,8 +255,8 @@ describe('BranchListItem', () => {
       );
 
       const indicator = screen.getByTestId('status-indicator');
-      // waiting renders as a static yellow dot (no spinner).
-      expect(indicator.className).toMatch(/bg-yellow-500/);
+      // waiting renders as an amber dot that blinks (never spins).
+      expect(indicator.className).toMatch(/bg-warning/);
       expect(indicator.className).not.toMatch(/animate-spin/);
     });
 
@@ -271,7 +273,7 @@ describe('BranchListItem', () => {
       );
 
       const indicator = screen.getByTestId('status-indicator');
-      expect(indicator.className).toMatch(/animate-spin/);
+      expect(indicator.className).toMatch(/animate-status-glow/);
     });
 
     it('should expose the per-agent breakdown via the indicator label', () => {
@@ -317,7 +319,7 @@ describe('BranchListItem', () => {
       expect(screen.queryByTestId('unread-indicator')).not.toBeInTheDocument();
     });
 
-    it('should have cyan styling for unread indicator', () => {
+    it('should have accent styling for unread indicator', () => {
       render(
         <BranchListItem
           branch={{ ...defaultBranch, hasUnread: true }}
@@ -327,7 +329,7 @@ describe('BranchListItem', () => {
       );
 
       const indicator = screen.getByTestId('unread-indicator');
-      expect(indicator.className).toMatch(/bg-cyan|cyan/);
+      expect(indicator.className).toMatch(/bg-accent|accent/);
     });
   });
 

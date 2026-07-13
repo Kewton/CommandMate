@@ -8,7 +8,7 @@
 import React, { useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { ArrowLeft, Terminal, Monitor, Code, Loader2 } from 'lucide-react';
+import { ArrowLeft, Terminal, Monitor, Code, Loader2, Bot, Zap, Sparkles, SquareTerminal } from 'lucide-react';
 import { isTmuxControlModeEnabledForClient } from '@/lib/tmux/tmux-control-mode-flags';
 import { usePcDisplaySizeContext } from '@/contexts/PcDisplaySizeContext';
 import { getTerminalFontSize } from '@/hooks/usePcDisplaySize';
@@ -46,10 +46,10 @@ export default function TerminalPage({
   const terminalFontSize = getTerminalFontSize(pcDisplaySize);
 
   const cliTools = [
-    { id: 'claude', name: 'Claude', icon: '🤖', color: 'bg-purple-600' },
-    { id: 'codex', name: 'Codex', icon: '⚡', color: 'bg-blue-600' },
-    { id: 'gemini', name: 'Gemini', icon: '✦', color: 'bg-green-600' },
-    { id: 'bash', name: 'Bash', icon: '💻', color: 'bg-gray-600' },
+    { id: 'claude', name: 'Claude', Icon: Bot, color: 'bg-purple-600' },
+    { id: 'codex', name: 'Codex', Icon: Zap, color: 'bg-blue-600' },
+    { id: 'gemini', name: 'Gemini', Icon: Sparkles, color: 'bg-green-600' },
+    { id: 'bash', name: 'Bash', Icon: SquareTerminal, color: 'bg-gray-600' },
   ];
 
   return (
@@ -88,7 +88,7 @@ export default function TerminalPage({
                   }
                 `}
               >
-                <span className="text-lg">{tool.icon}</span>
+                <tool.Icon size={20} aria-hidden="true" />
                 <span className="text-sm font-medium">{tool.name}</span>
               </button>
             ))}

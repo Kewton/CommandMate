@@ -7,7 +7,24 @@
 
 import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { cva } from 'class-variance-authority';
 import { Z_INDEX } from '@/config/z-index';
+import { cn } from '@/lib/utils/cn';
+
+const modalSizeVariants = cva('', {
+  variants: {
+    size: {
+      sm: 'max-w-[calc(100vw-2rem)] sm:max-w-md',
+      md: 'max-w-[calc(100vw-2rem)] sm:max-w-2xl',
+      lg: 'max-w-[calc(100vw-2rem)] sm:max-w-4xl',
+      xl: 'max-w-[calc(100vw-2rem)] sm:max-w-6xl',
+      full: 'max-w-[calc(100vw-2rem)] sm:max-w-[95vw]',
+    },
+  },
+  defaultVariants: {
+    size: 'lg',
+  },
+});
 
 export interface ModalProps {
   isOpen: boolean;
@@ -74,20 +91,14 @@ export function Modal({
 
   if (!isOpen) return null;
 
-  const sizeClasses = {
-    sm: 'max-w-[calc(100vw-2rem)] sm:max-w-md',
-    md: 'max-w-[calc(100vw-2rem)] sm:max-w-2xl',
-    lg: 'max-w-[calc(100vw-2rem)] sm:max-w-4xl',
-    xl: 'max-w-[calc(100vw-2rem)] sm:max-w-6xl',
-    full: 'max-w-[calc(100vw-2rem)] sm:max-w-[95vw]',
-  };
-
   // Use portal to render at document.body level, escaping any parent stacking context
   return createPortal(
     <div className="fixed inset-0 overflow-y-auto" style={{ zIndex: Z_INDEX.MODAL }}>
       {/* Backdrop - Issue #104: skip onClick if disableClose is true */}
+      {/* [Issue #1050] data-state drives the fade-in enter animation (mount-only). */}
       <div
-        className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
+        data-state="open"
+        className="fixed inset-0 bg-black bg-opacity-50 transition-opacity data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-200"
         onClick={disableClose ? undefined : onClose}
       />
 
@@ -95,16 +106,26 @@ export function Modal({
       <div className="relative flex min-h-full items-center justify-center p-2 sm:p-4">
         <div
           ref={modalRef}
-          className={`relative w-full ${sizeClasses[size]} max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-2rem)] flex flex-col bg-white dark:bg-gray-900 rounded-lg shadow-xl transform transition-all`}
+          data-state="open"
+          data-testid="modal-panel"
+          className={cn(
+            'relative w-full',
+            modalSizeVariants({ size }),
+            'max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-2rem)] flex flex-col bg-surface rounded-lg shadow-xl transform transition-all',
+            // [Issue #1050] fade + scale enter on mount. Runs once per open (the
+            // panel unmounts on close via `if (!isOpen) return null`), so
+            // parent re-renders do not re-fire the animation.
+            'data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:duration-200'
+          )}
         >
           {/* Header */}
           {(title || showCloseButton) && (
-            <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-              <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100 truncate pr-2">{title}</h3>
+            <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-border flex-shrink-0">
+              <h3 className="text-base sm:text-lg font-semibold text-foreground truncate pr-2">{title}</h3>
               {showCloseButton && (
                 <button
                   onClick={onClose}
-                  className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors flex-shrink-0"
+                  className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
                 >
                   <svg
                     className="w-5 h-5 sm:w-6 sm:h-6"

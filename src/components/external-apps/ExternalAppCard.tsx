@@ -80,10 +80,10 @@ export function ExternalAppCard({ app, onEdit, onDelete }: ExternalAppCardProps)
       {/* Header */}
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">
-          <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100 truncate">
+          <h4 className="text-base font-semibold text-foreground truncate">
             {app.displayName}
           </h4>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 font-mono truncate">
+          <p className="text-xs text-muted-foreground mt-0.5 font-mono truncate">
             {app.name}
           </p>
         </div>
@@ -95,22 +95,22 @@ export function ExternalAppCard({ app, onEdit, onDelete }: ExternalAppCardProps)
       {/* Info */}
       <div className="space-y-2 mb-4">
         <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-600 dark:text-gray-300">Status</span>
+          <span className="text-sm text-muted-foreground">Status</span>
           <ExternalAppStatus appId={app.id} pollInterval={30000} />
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-600 dark:text-gray-300">Port</span>
-          <span className="text-sm font-mono text-gray-900 dark:text-gray-100">:{app.targetPort}</span>
+          <span className="text-sm text-muted-foreground">Port</span>
+          <span className="text-sm font-mono text-foreground">:{app.targetPort}</span>
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-600 dark:text-gray-300">Path</span>
-          <span className="text-sm font-mono text-gray-900 dark:text-gray-100 truncate max-w-[150px]">
+          <span className="text-sm text-muted-foreground">Path</span>
+          <span className="text-sm font-mono text-foreground truncate max-w-[150px]">
             /proxy/{app.pathPrefix}/
           </span>
         </div>
         {app.websocketEnabled && (
           <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-600 dark:text-gray-300">WebSocket</span>
+            <span className="text-sm text-muted-foreground">WebSocket</span>
             <Badge variant="info">Enabled</Badge>
           </div>
         )}
@@ -124,7 +124,7 @@ export function ExternalAppCard({ app, onEdit, onDelete }: ExternalAppCardProps)
       {/* Actions */}
       {showDeleteConfirm ? (
         <div className="space-y-2">
-          <p className="text-sm text-gray-600 dark:text-gray-300">
+          <p className="text-sm text-muted-foreground">
             Delete &quot;{app.displayName}&quot;?
           </p>
           <div className="flex gap-2">

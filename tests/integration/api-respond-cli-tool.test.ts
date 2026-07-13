@@ -10,9 +10,12 @@ import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree, createMessage } from '@/lib/db';
 import type { Worktree, ChatMessage } from '@/types/models';
 
-// Mock tmux
+// Mock tmux. sendPromptAnswer (Issue #616) imports both sendKeys and
+// sendSpecialKeys from this module; both must be provided or vitest throws
+// "No sendSpecialKeys export" and the route returns 500 (Issue #1102).
 vi.mock('@/lib/tmux/tmux', () => ({
   sendKeys: vi.fn(() => Promise.resolve()),
+  sendSpecialKeys: vi.fn(() => Promise.resolve()),
 }));
 
 // Mock ws-server
@@ -83,9 +86,12 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
       };
       upsertWorktree(db, worktree);
 
-      // Create prompt message
+      // Create prompt message. cliToolId must match the asking tool: the route
+      // resolves the session from message.cliToolId first (Issue #868), so an
+      // unset value would default to 'claude' and mis-target the session.
       const promptMessage: Partial<ChatMessage> = {
         worktreeId: 'claude-test',
+        cliToolId: 'claude',
         role: 'assistant',
         content: 'Do you want to proceed?',
         messageType: 'prompt',
@@ -112,9 +118,12 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
 
       expect(response.status).toBe(200);
 
-      // Verify tmux sendKeys was called with correct session name
+      // Verify tmux sendKeys was called with correct session name. Issue #616:
+      // the answer is sent first without Enter (answer_then_enter), then a
+      // separate Enter keystroke is sent.
       const { sendKeys } = await import('@/lib/tmux/tmux');
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-claude-test', 'y', true);
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-claude-test', 'y', false);
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-claude-test', '', true);
     });
   });
 
@@ -131,9 +140,10 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
       };
       upsertWorktree(db, worktree);
 
-      // Create prompt message
+      // Create prompt message (cliToolId identifies the asking tool for session routing)
       const promptMessage: Partial<ChatMessage> = {
         worktreeId: 'codex-test',
+        cliToolId: 'codex',
         role: 'assistant',
         content: 'Choose an option:\n 1. Option A\n 2. Option B',
         messageType: 'prompt',
@@ -163,9 +173,10 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
 
       expect(response.status).toBe(200);
 
-      // Verify tmux sendKeys was called with correct session name
+      // Verify tmux sendKeys was called with correct session name (answer then Enter, Issue #616)
       const { sendKeys } = await import('@/lib/tmux/tmux');
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-codex-codex-test', '1', true);
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-codex-codex-test', '1', false);
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-codex-codex-test', '', true);
     });
   });
 
@@ -182,9 +193,10 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
       };
       upsertWorktree(db, worktree);
 
-      // Create prompt message
+      // Create prompt message (cliToolId identifies the asking tool for session routing)
       const promptMessage: Partial<ChatMessage> = {
         worktreeId: 'gemini-test',
+        cliToolId: 'gemini',
         role: 'assistant',
         content: 'Do you want to continue?',
         messageType: 'prompt',
@@ -211,9 +223,10 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
 
       expect(response.status).toBe(200);
 
-      // Verify tmux sendKeys was called with correct session name
+      // Verify tmux sendKeys was called with correct session name (answer then Enter, Issue #616)
       const { sendKeys } = await import('@/lib/tmux/tmux');
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-gemini-gemini-test', 'n', true);
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-gemini-gemini-test', 'n', false);
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-gemini-gemini-test', '', true);
     });
   });
 

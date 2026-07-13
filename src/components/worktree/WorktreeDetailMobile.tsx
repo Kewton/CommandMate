@@ -78,7 +78,7 @@ export const MobileInfoContent = memo(function MobileInfoContent({
 
   if (!worktree) {
     return (
-      <div className="text-gray-500 text-center py-8">
+      <div className="text-muted-foreground text-center py-8">
         Loading worktree info...
       </div>
     );
@@ -89,7 +89,7 @@ export const MobileInfoContent = memo(function MobileInfoContent({
       <WorktreeInfoFields
         worktreeId={worktreeId}
         worktree={worktree}
-        cardClassName="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4"
+        cardClassName="bg-surface rounded-lg border border-border p-4"
         descriptionEditor={descriptionEditor}
         showLogs={showLogs}
         onToggleLogs={() => setShowLogs(!showLogs)}
@@ -293,14 +293,14 @@ export const MobileContent = memo(function MobileContent({
       return (
         <div className="h-full flex flex-col">
           {/* History sub-tab switcher: Message | Git (Issue #447) */}
-          <div className="flex border-b border-gray-200 dark:border-gray-700 shrink-0">
+          <div className="flex border-b border-border shrink-0">
             <button
               type="button"
               onClick={() => onHistorySubTabChange('message')}
               className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
                 historySubTab === 'message'
-                  ? 'text-cyan-600 dark:text-cyan-400 border-b-2 border-cyan-600 dark:border-cyan-400 bg-cyan-50 dark:bg-cyan-900/30'
-                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                  ? 'text-accent-600 dark:text-accent-400 border-b-2 border-accent-600 dark:border-accent-400 bg-accent-50 dark:bg-accent-900/30'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               Message
@@ -310,8 +310,8 @@ export const MobileContent = memo(function MobileContent({
               onClick={() => onHistorySubTabChange('git')}
               className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
                 historySubTab === 'git'
-                  ? 'text-cyan-600 dark:text-cyan-400 border-b-2 border-cyan-600 dark:border-cyan-400 bg-cyan-50 dark:bg-cyan-900/30'
-                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                  ? 'text-accent-600 dark:text-accent-400 border-b-2 border-accent-600 dark:border-accent-400 bg-accent-50 dark:bg-accent-900/30'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               Git

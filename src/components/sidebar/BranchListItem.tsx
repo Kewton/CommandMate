@@ -77,7 +77,7 @@ function BranchTooltip({
       className="
         fixed z-[9999]
         px-3 py-2 rounded-md shadow-lg
-        bg-gray-950 text-xs text-gray-200 border border-gray-700
+        bg-sidebar text-xs text-sidebar-foreground border border-sidebar-border
         pointer-events-none max-w-sm
         transition-opacity duration-150
       "
@@ -86,14 +86,14 @@ function BranchTooltip({
         left: coords.left,
       }}
     >
-      <p className="font-medium text-white whitespace-nowrap">{branch.name}</p>
-      <p className="text-gray-400 whitespace-nowrap">{branch.repositoryName}</p>
-      <p className="text-gray-400 whitespace-nowrap">Status: {branch.status}</p>
+      <p className="font-medium text-sidebar-foreground whitespace-nowrap">{branch.name}</p>
+      <p className="text-sidebar-muted whitespace-nowrap">{branch.repositoryName}</p>
+      <p className="text-sidebar-muted whitespace-nowrap">Status: {branch.status}</p>
       {branch.worktreePath && (
-        <p className="text-gray-500 truncate">{branch.worktreePath}</p>
+        <p className="text-sidebar-muted truncate">{branch.worktreePath}</p>
       )}
       {branch.description && (
-        <p className="text-gray-300 mt-1 border-t border-gray-700 pt-1 whitespace-pre-wrap break-words">
+        <p className="text-sidebar-muted mt-1 border-t border-sidebar-border pt-1 whitespace-pre-wrap break-words">
           {branch.description}
         </p>
       )}
@@ -234,9 +234,9 @@ export const BranchListItem = memo(function BranchListItem({
       aria-label={!showRepositoryName ? `${branch.name} - ${branch.repositoryName}` : undefined}
       className={`
         group relative w-full px-4 py-3 flex flex-col gap-1
-        hover:bg-gray-700 transition-colors
-        focus:outline-none focus:ring-2 focus:ring-inset focus:ring-cyan-500
-        ${isSelected ? 'bg-gray-600 border-l-2 border-cyan-500' : 'border-l-2 border-transparent'}
+        hover:bg-sidebar-hover transition-colors
+        focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring
+        ${isSelected ? 'bg-sidebar-hover border-l-2 border-accent-500' : 'border-l-2 border-transparent'}
       `}
     >
       {/* Main row: aggregated CLI status, info, unread */}
@@ -257,11 +257,11 @@ export const BranchListItem = memo(function BranchListItem({
 
         {/* Branch info */}
         <div className="flex-1 min-w-0 text-left">
-          <p className="text-sm font-medium text-white truncate">
+          <p className="text-sm font-medium text-sidebar-foreground truncate">
             {branch.name}
           </p>
           {showRepositoryName && (
-            <p className="text-xs text-gray-400 truncate">
+            <p className="text-xs text-sidebar-muted truncate">
               {branch.repositoryName}
             </p>
           )}
@@ -271,7 +271,7 @@ export const BranchListItem = memo(function BranchListItem({
         {branch.hasUnread && (
           <span
             data-testid="unread-indicator"
-            className="w-2 h-2 rounded-full bg-cyan-500 flex-shrink-0"
+            className="w-2 h-2 rounded-full bg-accent-500 flex-shrink-0"
             aria-label="Has unread messages"
           />
         )}
@@ -283,7 +283,7 @@ export const BranchListItem = memo(function BranchListItem({
           data-testid="branch-description"
           className="pl-6 pr-2 mt-1 text-left"
         >
-          <p className="text-xs text-gray-400 line-clamp-2">
+          <p className="text-xs text-sidebar-muted line-clamp-2">
             {branch.description}
           </p>
         </div>

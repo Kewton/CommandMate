@@ -27,6 +27,7 @@ import {
   Check,
 } from 'lucide-react';
 import type { ViewMode } from '@/types/markdown-editor';
+import { Button } from '@/components/ui';
 
 // ============================================================================
 // Types
@@ -90,11 +91,11 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
   hideViewModeToggle,
 }: MarkdownToolbarProps) {
   return (
-    <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+    <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted">
       {/* File path and dirty indicator */}
       <div className="flex items-center gap-2 min-w-0 flex-shrink">
-        <FileText className="h-4 w-4 text-gray-500 dark:text-gray-400 flex-shrink-0" />
-        <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">{filePath}</span>
+        <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+        <span className="text-sm font-medium text-foreground truncate">{filePath}</span>
         {isDirty && (
           <span
             data-testid="dirty-indicator"
@@ -109,41 +110,44 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
       <div className="flex items-center gap-2 flex-shrink-0">
         {/* View mode buttons - hide on mobile portrait with split mode, or in text-only mode */}
         {!showMobileTabs && !hideViewModeToggle && (
-          <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
+          <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
+            {/* Issue #1061: セグメントコントロールのトグル（アクティブ thumb 表現）— 残置 */}
             <button
               data-testid="view-mode-split"
               aria-pressed={viewMode === 'split'}
               onClick={() => onViewModeChange('split')}
               className={`p-1.5 rounded ${
                 viewMode === 'split'
-                  ? 'bg-white dark:bg-gray-600 shadow-sm text-cyan-600 dark:text-cyan-400'
-                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                  ? 'bg-white dark:bg-input shadow-sm text-accent-600 dark:text-accent-400'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
               title="Split view"
             >
               <Columns className="h-4 w-4" />
             </button>
+            {/* Issue #1061: セグメントコントロールのトグル（アクティブ thumb 表現）— 残置 */}
             <button
               data-testid="view-mode-editor"
               aria-pressed={viewMode === 'editor'}
               onClick={() => onViewModeChange('editor')}
               className={`p-1.5 rounded ${
                 viewMode === 'editor'
-                  ? 'bg-white dark:bg-gray-600 shadow-sm text-cyan-600 dark:text-cyan-400'
-                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                  ? 'bg-white dark:bg-input shadow-sm text-accent-600 dark:text-accent-400'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
               title="Editor only"
             >
               <FileText className="h-4 w-4" />
             </button>
+            {/* Issue #1061: セグメントコントロールのトグル（アクティブ thumb 表現）— 残置 */}
             <button
               data-testid="view-mode-preview"
               aria-pressed={viewMode === 'preview'}
               onClick={() => onViewModeChange('preview')}
               className={`p-1.5 rounded ${
                 viewMode === 'preview'
-                  ? 'bg-white dark:bg-gray-600 shadow-sm text-cyan-600 dark:text-cyan-400'
-                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                  ? 'bg-white dark:bg-input shadow-sm text-accent-600 dark:text-accent-400'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
               title="Preview only"
             >
@@ -153,11 +157,12 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
         )}
 
         {/* Copy content button */}
-        <button
+        <Button
+          variant="ghost"
           data-testid="copy-content-button"
           onClick={onCopy}
-          className={`p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded ${
-            copied ? 'text-green-500' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+          className={`p-1.5 hover:bg-muted rounded ${
+            copied ? 'text-green-500' : 'text-muted-foreground hover:text-foreground'
           }`}
           title="Copy content"
         >
@@ -166,13 +171,14 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
           ) : (
             <Copy className="h-4 w-4" />
           )}
-        </button>
+        </Button>
 
         {/* Maximize button */}
-        <button
+        <Button
+          variant="ghost"
           data-testid="maximize-button"
           onClick={onToggleFullscreen}
-          className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+          className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded"
           title={isMaximized ? 'Exit fullscreen (ESC)' : 'Enter fullscreen (Ctrl+Shift+F)'}
           aria-pressed={isMaximized}
         >
@@ -181,18 +187,19 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
           ) : (
             <Maximize2 className="h-4 w-4" />
           )}
-        </button>
+        </Button>
 
         {/* Auto-save toggle */}
         <div className="flex items-center gap-1.5">
-          <span className="text-xs text-gray-500 dark:text-gray-400">Auto</span>
+          <span className="text-xs text-muted-foreground">Auto</span>
+          {/* Issue #1061: role=switch aria-checked トグルトラック（knob 描画）— 残置 */}
           <button
             data-testid="auto-save-toggle"
             role="switch"
             aria-checked={isAutoSaveEnabled}
             onClick={() => onAutoSaveToggle(!isAutoSaveEnabled)}
             className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-              isAutoSaveEnabled ? 'bg-cyan-600' : 'bg-gray-300 dark:bg-gray-600'
+              isAutoSaveEnabled ? 'bg-accent-600' : 'bg-input'
             }`}
           >
             <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
@@ -203,35 +210,37 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
 
         {/* Save button OR auto-save indicator */}
         {isAutoSaveEnabled ? (
-          <span data-testid="auto-save-indicator" className="text-sm text-gray-500 dark:text-gray-400">
+          <span data-testid="auto-save-indicator" className="text-sm text-muted-foreground">
             {isAutoSaving ? 'Saving...' : isDirty ? '' : 'Saved'}
           </span>
         ) : (
-          <button
+          <Button
+            variant="ghost"
             data-testid="save-button"
             onClick={onSave}
             disabled={!isDirty || isSaving}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
               isDirty && !isSaving
-                ? 'bg-cyan-600 text-white hover:bg-cyan-700'
-                : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+                ? 'bg-accent-600 text-white hover:bg-accent-700'
+                : 'bg-muted text-muted-foreground cursor-not-allowed'
             }`}
           >
             <Save className="h-4 w-4" />
             {isSaving ? 'Saving...' : 'Save'}
-          </button>
+          </Button>
         )}
 
         {/* Close button */}
         {onClose && (
-          <button
+          <Button
+            variant="ghost"
             data-testid="close-button"
             onClick={onClose}
-            className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+            className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded"
             title="Close"
           >
             <X className="h-4 w-4" />
-          </button>
+          </Button>
         )}
       </div>
     </div>

@@ -11,13 +11,41 @@
 
 ## ステータス一覧
 
+**サイドバー / Home / Sessions** の表示は共通プリミティブ `StatusDot`
+（`src/components/ui/StatusDot.tsx`, Issue #1051）が担う。
+`running` / `generating` は発光ドット + ゆっくりしたパルス（+ モーション凍結時も残る
+リングで `ready` と区別）、`waiting` は amber の弱い点滅、その他は静的ドット。
+
+下表は **StatusDot（サイドバー / Home / Sessions）** の表示を示す。
+
 | ステータス | 表示 | 色 | 説明 |
 |-----------|------|-----|------|
 | `idle` | ● | グレー | セッション未起動 |
 | `ready` | ● | 緑 | 入力プロンプト表示中（新しいメッセージ入力可能） |
-| `running` | ⟳ | 青スピナー | Claude処理中（思考インジケータ表示中） |
-| `waiting` | ● | 黄 | ユーザー入力待ち（yes/no、選択肢など） |
-| `generating` | ⟳ | 青スピナー | レスポンス生成中 |
+| `running` | ● 発光・パルス（リング） | 緑グロー | Claude処理中（思考インジケータ表示中） |
+| `waiting` | ● 弱点滅 | amber | ユーザー入力待ち（yes/no、選択肢など） |
+| `generating` | ● 発光・パルス（リング） | 緑グロー | レスポンス生成中 |
+
+> **モーション**: パルス／点滅は CSS の infinite アニメーション（`animate-status-glow` /
+> `animate-status-blink`, `tailwind.config.js`）で実装し、ポーリング再描画でリセットされない。
+> OS の「視差効果を減らす」設定時は `globals.css`（Issue #1050）が全アニメを無効化し、
+> 静的ドットへフォールバックする（このとき `running` はリングで `ready` と識別できる）。
+
+### 表示の適用範囲と既知の不整合（Issue #1051 時点）
+
+Issue #1051 の StatusDot 化は **サイドバー / Home / Sessions のみ**。以下は今回移行しておらず、
+**従来の `src/config/status-colors.ts`（`MOBILE_STATUS_CONFIG` / `DESKTOP_STATUS_CONFIG`）** のままで、
+今後の追随対象。全面的な表示統一はまだ達成していない点に注意。
+
+| 箇所 | `running` / `generating` | `waiting` |
+|------|--------------------------|-----------|
+| サイドバー / Home / Sessions（StatusDot） | 緑グロー + パルス（発光ドット） | amber（`bg-warning`）・弱点滅 |
+| worktree詳細（`WorktreeDetailRefactored` 等）・`MobileHeader` | 青スピナー（`border-info`, `animate-spin`） | 黄（`bg-yellow-500`）・静的 |
+
+- **`running` の色/表現差**: StatusDot 側は緑の発光ドット、worktree詳細/MobileHeader 側は青スピナーのまま。
+- **`waiting` の色差**: StatusDot は amber（`bg-warning`）、worktree詳細/MobileHeader は `bg-yellow-500`。
+  さらに `Terminal.tsx` / `MobileTabBar.tsx` は `bg-yellow-500` をハードコードしている。
+  完全統一には `status-colors.ts` とこれらのハードコード双方の変更が必要なため、追随作業まで保留。
 
 ## ブランチ左の集約ステータスアイコン（Issue #867）
 
@@ -31,8 +59,8 @@
 waiting > running / generating > ready > idle
 ```
 
-- いずれかのエージェントが `waiting` なら `waiting`（黄ドット）。
-- `waiting` がなく `running` または `generating` があればスピナー（`running` を優先）。
+- いずれかのエージェントが `waiting` なら `waiting`（amber ドット・弱点滅）。
+- `waiting` がなく `running` または `generating` があれば発光ドット（`running` を優先）。
 - 上記がなく `ready` があれば `ready`（緑ドット）。
 - それ以外は `idle`（グレードット）。
 
@@ -108,10 +136,10 @@ yes/no確認や選択肢を表示している場合：
 
 ## 検出優先順位
 
-1. **インタラクティブプロンプト** → `waiting` (黄)
-2. **思考インジケータ** → `running` (スピナー)
+1. **インタラクティブプロンプト** → `waiting` (黄・弱点滅)
+2. **思考インジケータ** → `running` (緑・発光パルス)
 3. **入力プロンプトのみ** → `ready` (緑)
-4. **それ以外** → `running` (スピナー) - 処理中と推定
+4. **それ以外** → `running` (緑・発光パルス) - 処理中と推定
 
 ## ポーリング間隔
 
@@ -136,7 +164,8 @@ yes/no確認や選択肢を表示している場合：
 - `src/app/api/worktrees/[id]/current-output/route.ts` - リアルタイム出力取得
 
 ### フロントエンド
-- `src/components/sidebar/BranchStatusIndicator.tsx` - ステータスインジケーターコンポーネント
+- `src/components/ui/StatusDot.tsx` - 共通ステータスドット（発光・パルス・点滅、Issue #1051）
+- `src/components/sidebar/BranchStatusIndicator.tsx` - StatusDot を用いたインジケーター
 - `src/types/sidebar.ts` - ステータス判定ロジック
 - `src/contexts/WorktreeSelectionContext.tsx` - ポーリング管理
 

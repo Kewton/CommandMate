@@ -91,7 +91,7 @@ export function GitPaneLayout({
       <div
         data-testid="git-group-write"
         data-git-group="write"
-        className="border-l-2 border-gray-300 dark:border-gray-600 bg-gray-50/70 dark:bg-gray-800/30"
+        className="border-l-2 border-input bg-muted/70 dark:bg-muted/30"
       >
         {quickActionsSection}
         {changesSection}
@@ -110,7 +110,7 @@ export function GitPaneLayout({
       <div
         data-testid="git-group-advanced"
         data-git-group="advanced"
-        className="border-l-2 border-t-2 border-gray-300 dark:border-gray-600 bg-gray-100/50 dark:bg-gray-800/40"
+        className="border-l-2 border-t-2 border-input bg-muted/50 dark:bg-muted/40"
       >
         {advancedSection}
       </div>

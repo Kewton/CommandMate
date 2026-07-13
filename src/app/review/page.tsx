@@ -13,6 +13,7 @@
 
 import { useState } from 'react';
 import { AppShell } from '@/components/layout';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui';
 import ReviewTab from '@/components/review/ReviewTab';
 import ReportTab from '@/components/review/ReportTab';
 import TemplateTab from '@/components/review/TemplateTab';
@@ -32,34 +33,39 @@ export default function ReviewPage() {
     <AppShell>
       <div className="container-custom py-8 overflow-auto h-full">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">Review</h1>
-          <p className="text-sm text-gray-600 dark:text-gray-400">
+          <h1 className="text-2xl font-bold text-foreground mb-2">Review</h1>
+          <p className="text-sm text-muted-foreground">
             Worktrees that need your attention.
           </p>
         </div>
 
         {/* Page-level tabs */}
-        <div className="flex gap-1 mb-6 border-b dark:border-gray-700" data-testid="page-tabs">
-          {PAGE_TABS.map((tab) => (
-            <button
-              key={tab.value}
-              onClick={() => setPageTab(tab.value)}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                pageTab === tab.value
-                  ? 'border-cyan-600 text-cyan-600 dark:text-cyan-400'
-                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-              }`}
-              data-testid={`page-tab-${tab.value}`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          value={pageTab}
+          onValueChange={(value) => setPageTab(value as PageTab)}
+        >
+          <TabsList className="mb-6 w-full justify-start" data-testid="page-tabs">
+            {PAGE_TABS.map((tab) => (
+              <TabsTrigger
+                key={tab.value}
+                value={tab.value}
+                data-testid={`page-tab-${tab.value}`}
+              >
+                {tab.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
 
-        {/* Tab content */}
-        {pageTab === 'review' && <ReviewTab />}
-        {pageTab === 'report' && <ReportTab />}
-        {pageTab === 'template' && <TemplateTab />}
+          <TabsContent value="review">
+            <ReviewTab />
+          </TabsContent>
+          <TabsContent value="report">
+            <ReportTab />
+          </TabsContent>
+          <TabsContent value="template">
+            <TemplateTab />
+          </TabsContent>
+        </Tabs>
       </div>
     </AppShell>
   );

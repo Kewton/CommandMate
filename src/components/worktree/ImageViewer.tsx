@@ -49,7 +49,7 @@ export function ImageViewer({ src, alt, onError }: ImageViewerProps) {
 
   if (hasError) {
     return (
-      <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+      <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
         <svg
           className="w-16 h-16 mb-4"
           fill="none"
@@ -64,7 +64,7 @@ export function ImageViewer({ src, alt, onError }: ImageViewerProps) {
           />
         </svg>
         <p className="text-sm">Failed to load image</p>
-        <p className="text-xs text-gray-400 mt-1">{alt}</p>
+        <p className="text-xs text-muted-foreground mt-1">{alt}</p>
       </div>
     );
   }

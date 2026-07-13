@@ -167,13 +167,17 @@ describe('WorktreeDetailRefactored Integration', () => {
       });
     });
 
-    it('displays history pane on the left', async () => {
+    // Issue #744 refactored the desktop layout: the standalone left "history pane"
+    // was removed (history now lives inside the TerminalContainer/right pane), and
+    // the left column is now the optional Activity pane. Testids were renamed
+    // left-pane → activity-pane-slot and right-pane → right-pane-slot (Issue #1102).
+    it('displays the activity pane on the left', async () => {
       await act(async () => {
         render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
       });
 
       await waitFor(() => {
-        expect(screen.getByTestId('left-pane')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-pane-slot')).toBeInTheDocument();
       });
     });
 
@@ -183,7 +187,7 @@ describe('WorktreeDetailRefactored Integration', () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByTestId('right-pane')).toBeInTheDocument();
+        expect(screen.getByTestId('right-pane-slot')).toBeInTheDocument();
       });
     });
 

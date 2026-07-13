@@ -9,7 +9,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Button, Modal } from '@/components/ui';
+import { Button, Input, Modal, Switch, Textarea, inputVariants } from '@/components/ui';
+import { cn } from '@/lib/utils/cn';
 import {
   validateFormData,
   VALID_APP_TYPES,
@@ -211,16 +212,16 @@ export function ExternalAppForm({
         <div>
           <label
             htmlFor="displayName"
-            className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+            className="block text-sm font-medium text-foreground mb-1"
           >
             Display Name <span className="text-red-500">*</span>
           </label>
-          <input
+          <Input
             id="displayName"
             type="text"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
-            className={`input w-full ${errors.displayName ? 'border-red-500' : ''}`}
+            className={errors.displayName ? 'border-red-500' : ''}
             placeholder="My App"
             disabled={isSubmitting}
           />
@@ -234,20 +235,20 @@ export function ExternalAppForm({
           <div>
             <label
               htmlFor="name"
-              className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+              className="block text-sm font-medium text-foreground mb-1"
             >
               Identifier Name <span className="text-red-500">*</span>
             </label>
-            <input
+            <Input
               id="name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className={`input w-full font-mono ${errors.name ? 'border-red-500' : ''}`}
+              className={`font-mono ${errors.name ? 'border-red-500' : ''}`}
               placeholder="my-app"
               disabled={isSubmitting}
             />
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            <p className="mt-1 text-xs text-muted-foreground">
               Alphanumeric and hyphens only. Cannot be changed later.
             </p>
             {errors.name && (
@@ -261,24 +262,24 @@ export function ExternalAppForm({
           <div>
             <label
               htmlFor="pathPrefix"
-              className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+              className="block text-sm font-medium text-foreground mb-1"
             >
               Path Prefix <span className="text-red-500">*</span>
             </label>
             <div className="flex items-center">
-              <span className="text-sm text-gray-500 dark:text-gray-400 mr-1">/proxy/</span>
-              <input
+              <span className="text-sm text-muted-foreground mr-1">/proxy/</span>
+              <Input
                 id="pathPrefix"
                 type="text"
                 value={pathPrefix}
                 onChange={(e) => setPathPrefix(e.target.value)}
-                className={`input flex-1 font-mono ${errors.pathPrefix ? 'border-red-500' : ''}`}
+                className={`w-auto flex-1 font-mono ${errors.pathPrefix ? 'border-red-500' : ''}`}
                 placeholder="app-name"
                 disabled={isSubmitting}
               />
-              <span className="text-sm text-gray-500 dark:text-gray-400 ml-1">/</span>
+              <span className="text-sm text-muted-foreground ml-1">/</span>
             </div>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            <p className="mt-1 text-xs text-muted-foreground">
               URL path for accessing this app. Cannot be changed later.
             </p>
             {errors.pathPrefix && (
@@ -291,24 +292,24 @@ export function ExternalAppForm({
         <div>
           <label
             htmlFor="targetPort"
-            className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+            className="block text-sm font-medium text-foreground mb-1"
           >
             Port Number <span className="text-red-500">*</span>
           </label>
-          <input
+          <Input
             id="targetPort"
             type="number"
             value={targetPort}
             onChange={(e) =>
               setTargetPort(e.target.value ? parseInt(e.target.value, 10) : '')
             }
-            className={`input w-full font-mono ${errors.targetPort ? 'border-red-500' : ''}`}
+            className={`font-mono ${errors.targetPort ? 'border-red-500' : ''}`}
             placeholder="5173"
             min={PORT_CONSTRAINTS.MIN}
             max={PORT_CONSTRAINTS.MAX}
             disabled={isSubmitting}
           />
-          <p className="mt-1 text-xs text-gray-500">
+          <p className="mt-1 text-xs text-muted-foreground">
             Target port ({PORT_CONSTRAINTS.MIN}-{PORT_CONSTRAINTS.MAX})
           </p>
           {errors.targetPort && (
@@ -321,7 +322,7 @@ export function ExternalAppForm({
           <div>
             <label
               htmlFor="appType"
-              className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+              className="block text-sm font-medium text-foreground mb-1"
             >
               App Type <span className="text-red-500">*</span>
             </label>
@@ -329,7 +330,7 @@ export function ExternalAppForm({
               id="appType"
               value={appType}
               onChange={(e) => setAppType(e.target.value as ExternalAppType)}
-              className={`input w-full ${errors.appType ? 'border-red-500' : ''}`}
+              className={cn(inputVariants(), errors.appType && 'border-red-500')}
               disabled={isSubmitting}
             >
               <option value="">Select app type...</option>
@@ -349,15 +350,14 @@ export function ExternalAppForm({
         <div>
           <label
             htmlFor="description"
-            className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+            className="block text-sm font-medium text-foreground mb-1"
           >
             Description
           </label>
-          <textarea
+          <Textarea
             id="description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className="input w-full"
             placeholder="Optional description..."
             rows={2}
             disabled={isSubmitting}
@@ -365,18 +365,16 @@ export function ExternalAppForm({
         </div>
 
         {/* WebSocket */}
-        <div className="flex items-center">
-          <input
+        <div className="flex items-center gap-2">
+          <Switch
             id="websocketEnabled"
-            type="checkbox"
             checked={websocketEnabled}
-            onChange={(e) => setWebsocketEnabled(e.target.checked)}
-            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            onCheckedChange={setWebsocketEnabled}
             disabled={isSubmitting}
           />
           <label
             htmlFor="websocketEnabled"
-            className="ml-2 text-sm text-gray-700 dark:text-gray-200"
+            className="text-sm text-foreground"
           >
             Enable WebSocket support
           </label>
@@ -384,16 +382,14 @@ export function ExternalAppForm({
 
         {/* Enabled (only for edit) */}
         {isEdit && (
-          <div className="flex items-center">
-            <input
+          <div className="flex items-center gap-2">
+            <Switch
               id="enabled"
-              type="checkbox"
               checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              onCheckedChange={setEnabled}
               disabled={isSubmitting}
             />
-            <label htmlFor="enabled" className="ml-2 text-sm text-gray-700 dark:text-gray-200">
+            <label htmlFor="enabled" className="text-sm text-foreground">
               App is enabled
             </label>
           </div>
@@ -407,7 +403,7 @@ export function ExternalAppForm({
         )}
 
         {/* Actions */}
-        <div className="flex justify-end gap-2 pt-4 border-t border-gray-200 dark:border-gray-700">
+        <div className="flex justify-end gap-2 pt-4 border-t border-border">
           <Button
             type="button"
             variant="ghost"

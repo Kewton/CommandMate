@@ -127,7 +127,7 @@ const MessageBubble = React.memo(function MessageBubble({
               onFilePathClickRef.current(filePath);
             }}
             className={`underline hover:no-underline font-mono transition-colors break-all inline ${
-              isUser ? 'text-blue-100 hover:text-white' : 'text-blue-600 hover:text-blue-800'
+              isUser ? 'text-accent-100 hover:text-white' : 'text-accent-600 hover:text-accent-800'
             }`}
           >
             {fullMatch}
@@ -181,16 +181,16 @@ const MessageBubble = React.memo(function MessageBubble({
         <div
           className={`rounded-lg px-4 py-3 ${
             isUser
-              ? 'bg-blue-600 text-white'
-              : 'bg-white border border-gray-200'
+              ? 'bg-accent-600 text-white'
+              : 'bg-surface border border-border'
           }`}
         >
           {/* Header */}
           <div className="flex items-center gap-2 mb-2">
-            <span className={`text-xs font-medium ${isUser ? 'text-blue-100' : 'text-gray-500'}`}>
+            <span className={`text-xs font-medium ${isUser ? 'text-accent-100' : 'text-muted-foreground'}`}>
               {isUser ? 'You' : getCliToolDisplayNameSafe(message.cliToolId)}
             </span>
-            <span className={`text-xs ${isUser ? 'text-blue-200' : 'text-gray-400'}`}>
+            <span className={`text-xs ${isUser ? 'text-accent-200' : 'text-muted-foreground'}`}>
               {timestamp}
             </span>
           </div>
@@ -198,14 +198,14 @@ const MessageBubble = React.memo(function MessageBubble({
           {/* Content */}
           <div className={`prose prose-sm max-w-none break-words overflow-wrap-anywhere ${isUser ? 'prose-invert' : ''}`}>
             {message.summary && (
-              <div className={`text-sm font-medium mb-2 ${isUser ? 'text-blue-50' : 'text-gray-700'}`}>
+              <div className={`text-sm font-medium mb-2 ${isUser ? 'text-accent-50' : 'text-foreground'}`}>
                 {message.summary}
               </div>
             )}
-            <div className={`break-words overflow-wrap-anywhere ${isUser ? 'text-white' : 'text-gray-900'}`}>
+            <div className={`break-words overflow-wrap-anywhere ${isUser ? 'text-white' : 'text-foreground'}`}>
               {hasAnsiCodes(message.content) ? (
                 <pre
-                  className="whitespace-pre-wrap font-mono text-sm bg-gray-900 text-gray-100 p-4 rounded overflow-x-auto"
+                  className="whitespace-pre-wrap font-mono text-sm bg-[#0d1117] text-[#c9d1d9] p-4 rounded overflow-x-auto"
                   dangerouslySetInnerHTML={{ __html: convertAnsiToHtml(message.content) }}
                 />
               ) : (
@@ -227,7 +227,7 @@ const MessageBubble = React.memo(function MessageBubble({
                 href={`/api/worktrees/${message.worktreeId}/logs/${message.logFileName}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={`text-xs ${isUser ? 'text-blue-100 hover:text-white' : 'text-blue-600 hover:text-blue-700'}`}
+                className={`text-xs ${isUser ? 'text-accent-100 hover:text-white' : 'text-accent-600 hover:text-accent-700'}`}
               >
                 View log file →
               </a>
@@ -236,12 +236,12 @@ const MessageBubble = React.memo(function MessageBubble({
 
           {/* Prompt choice buttons for assistant messages */}
           {!isUser && message.promptData && onPromptRespond && (
-            <div className="mt-3 pt-3 border-t border-gray-200">
+            <div className="mt-3 pt-3 border-t border-border">
               <div className="flex items-center gap-2 mb-3">
                 <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
                   {tPrompt('awaitingSelection')}
                 </span>
-                <div className="text-sm text-gray-700 font-medium">
+                <div className="text-sm text-foreground font-medium">
                   {message.promptData.question}
                 </div>
               </div>
@@ -289,15 +289,15 @@ const MessageBubble = React.memo(function MessageBubble({
                           selectedTextInputOption === option.number
                             ? 'bg-purple-600 text-white hover:bg-purple-700 ring-2 ring-purple-400 ring-opacity-50'
                             : option.isDefault
-                            ? 'bg-blue-600 text-white hover:bg-blue-700 ring-2 ring-blue-400 ring-opacity-50'
-                            : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
+                            ? 'bg-accent-600 text-white hover:bg-accent-700 ring-2 ring-accent-400 ring-opacity-50'
+                            : 'bg-surface text-foreground hover:bg-muted border border-input'
                         }`}
                       >
                         <span className="inline-flex items-center gap-2">
                           <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
                             selectedTextInputOption === option.number
                               ? 'bg-purple-500'
-                              : option.isDefault ? 'bg-blue-500' : 'bg-gray-200 text-gray-600'
+                              : option.isDefault ? 'bg-accent-500' : 'bg-muted text-muted-foreground'
                           }`}>
                             {option.number}
                           </span>
@@ -309,7 +309,7 @@ const MessageBubble = React.memo(function MessageBubble({
                     {/* Text input field for selected text input option */}
                     {selectedTextInputOption !== null && message.promptData?.status === 'pending' && (
                       <div className="w-full mt-3 p-4 bg-purple-50 border border-purple-200 rounded-lg">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-foreground mb-2">
                           {tPrompt('enterCustomMessage')}:
                         </label>
                         <textarea
@@ -317,7 +317,7 @@ const MessageBubble = React.memo(function MessageBubble({
                           onChange={(e) => setTextInputValue(e.target.value)}
                           placeholder={tPrompt('enterMessageHere')}
                           rows={3}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500 text-sm"
+                          className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500 text-sm"
                         />
                         <div className="flex gap-2 mt-3">
                           <button
@@ -338,7 +338,7 @@ const MessageBubble = React.memo(function MessageBubble({
                               setSelectedTextInputOption(null);
                               setTextInputValue('');
                             }}
-                            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-all font-medium text-sm"
+                            className="px-4 py-2 bg-muted text-foreground rounded-lg hover:bg-muted/80 transition-all font-medium text-sm"
                           >
                             {tCommon('cancel')}
                           </button>
@@ -486,8 +486,8 @@ export function MessageList({
     return (
       <Card padding="lg">
         <div className="text-center py-8">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 border-t-blue-600" />
-          <p className="mt-4 text-gray-600">Loading messages...</p>
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-input border-t-accent-600" />
+          <p className="mt-4 text-muted-foreground">Loading messages...</p>
         </div>
       </Card>
     );
@@ -498,7 +498,7 @@ export function MessageList({
       <Card padding="lg">
         <div className="text-center py-8">
           <svg
-            className="mx-auto h-12 w-12 text-gray-400"
+            className="mx-auto h-12 w-12 text-muted-foreground"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -510,7 +510,7 @@ export function MessageList({
               d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
             />
           </svg>
-          <p className="mt-4 text-gray-600">No messages yet</p>
+          <p className="mt-4 text-muted-foreground">No messages yet</p>
         </div>
       </Card>
     );
@@ -547,10 +547,10 @@ export function MessageList({
         {waitingForResponse && (
           <div className="flex justify-start mb-4">
             <div className="w-full">
-              <div className="rounded-lg px-4 py-3 bg-white border border-gray-200 shadow-sm">
+              <div className="rounded-lg px-4 py-3 bg-surface border border-border shadow-sm">
                 {/* Header with status indicator */}
                 <div className="flex items-center gap-2 mb-3">
-                  <span className="text-xs font-medium text-gray-500">{getCliToolDisplayNameSafe(selectedCliTool)}</span>
+                  <span className="text-xs font-medium text-muted-foreground">{getCliToolDisplayNameSafe(selectedCliTool)}</span>
                   <div className="flex gap-1">
                     <div className="w-1.5 h-1.5 bg-green-600 rounded-full animate-pulse" />
                   </div>
@@ -558,7 +558,7 @@ export function MessageList({
                 </div>
 
                 {/* Progress indicator - fixed at top */}
-                <div className="sticky top-0 bg-white z-10 pb-2 mb-3 border-b border-gray-200">
+                <div className="sticky top-0 bg-surface z-10 pb-2 mb-3 border-b border-border">
                   {/* Thinking indicator */}
                   {isThinking && (
                     <div className="flex items-center gap-2 mb-2">
@@ -580,9 +580,9 @@ export function MessageList({
                   {/* Starting up indicator */}
                   {!isThinking && !realtimeOutput && (
                     <div className="flex items-center gap-2 mb-2">
-                      <div className="w-2 h-2 rounded-full bg-gray-400 animate-pulse" />
-                      <span className="text-sm font-medium text-gray-700">{tWorktree('session.starting')}</span>
-                      <span className="text-xs text-gray-500 ml-auto">...</span>
+                      <div className="w-2 h-2 rounded-full bg-muted-foreground animate-pulse" />
+                      <span className="text-sm font-medium text-foreground">{tWorktree('session.starting')}</span>
+                      <span className="text-xs text-muted-foreground ml-auto">...</span>
                     </div>
                   )}
                 </div>
@@ -604,7 +604,7 @@ export function MessageList({
                       <div className="prose prose-sm max-w-none break-words overflow-wrap-anywhere">
                         {/\x1b\[[0-9;]*m|\[[0-9;]*m/.test(realtimeOutput) ? (
                           <pre
-                            className="whitespace-pre-wrap font-mono text-xs bg-gray-900 text-gray-300 p-3 rounded overflow-x-auto max-h-[500px] overflow-y-auto"
+                            className="whitespace-pre-wrap font-mono text-xs bg-[#0d1117] text-[#c9d1d9] p-3 rounded overflow-x-auto max-h-[500px] overflow-y-auto"
                             dangerouslySetInnerHTML={{ __html: new AnsiToHtml({
                               fg: '#d1d5db', // Default text color: gray-300
                               bg: '#1f2937', // Default background: gray-800
@@ -613,7 +613,7 @@ export function MessageList({
                             }).toHtml(realtimeOutput) }}
                           />
                         ) : (
-                          <div className="text-sm text-gray-800 whitespace-pre-wrap font-mono max-h-[500px] overflow-y-auto">
+                          <div className="text-sm text-foreground whitespace-pre-wrap font-mono max-h-[500px] overflow-y-auto">
                             {realtimeOutput}
                           </div>
                         )}
@@ -632,8 +632,8 @@ export function MessageList({
                   </div>
                 ) : (
                   <div className="text-center py-6">
-                    <div className="inline-flex items-center gap-2 text-gray-500">
-                      <div className="w-2 h-2 rounded-full bg-gray-400 animate-pulse" />
+                    <div className="inline-flex items-center gap-2 text-muted-foreground">
+                      <div className="w-2 h-2 rounded-full bg-muted-foreground animate-pulse" />
                       <p className="text-sm">{tWorktree('session.startingEllipsis')}</p>
                     </div>
                   </div>

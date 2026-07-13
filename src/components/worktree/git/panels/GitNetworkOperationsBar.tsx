@@ -82,10 +82,10 @@ export const GitNetworkOperationsBar = memo(function GitNetworkOperationsBar({
 
   return (
     <div
-      className="flex flex-col gap-1.5 px-3 py-2 border-b border-gray-200 dark:border-gray-700"
+      className="flex flex-col gap-1.5 px-3 py-2 border-b border-border"
       data-testid="git-network-section"
     >
-      <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+      <span className="text-xs font-medium text-muted-foreground">
         Quick actions
       </span>
 
@@ -97,7 +97,7 @@ export const GitNetworkOperationsBar = memo(function GitNetworkOperationsBar({
             type="button"
             onClick={onFetch}
             disabled={running}
-            className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+            className="px-2 py-1 text-xs rounded border border-border text-foreground hover:bg-muted disabled:opacity-50"
             data-testid="git-fetch-button"
           >
             Fetch
@@ -107,7 +107,7 @@ export const GitNetworkOperationsBar = memo(function GitNetworkOperationsBar({
           type="button"
           onClick={onPull}
           disabled={running}
-          className="px-2 py-1 text-xs rounded border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/30 disabled:opacity-50"
+          className="px-2 py-1 text-xs rounded border border-accent-300 dark:border-accent-700 text-accent-700 dark:text-accent-300 hover:bg-accent-50 dark:hover:bg-accent-900/30 disabled:opacity-50"
           data-testid="git-pull-button"
         >
           Pull
@@ -129,13 +129,13 @@ export const GitNetworkOperationsBar = memo(function GitNetworkOperationsBar({
       {/* Progress / abort bar (sticky on mobile, z-40 < confirm modals z-50) */}
       {running && (
         <div
-          className={`flex items-center gap-2 rounded px-2 py-1 text-xs bg-cyan-50 text-cyan-800 dark:bg-cyan-900/20 dark:text-cyan-300 ${
+          className={`flex items-center gap-2 rounded px-2 py-1 text-xs bg-accent-50 text-accent-800 dark:bg-accent-900/20 dark:text-accent-300 ${
             isMobile ? 'sticky top-0 z-40' : ''
           }`}
           data-testid="git-network-progress-bar"
         >
           <span className="flex items-center gap-2" role="status" data-testid="git-network-operation-spinner">
-            <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-cyan-500" aria-hidden="true" />
+            <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-accent-500" aria-hidden="true" />
             <span>
               {operation === 'push' ? 'Pushing' : operation === 'pull' ? 'Pulling' : 'Fetching'}… {elapsed}s
             </span>
@@ -143,7 +143,7 @@ export const GitNetworkOperationsBar = memo(function GitNetworkOperationsBar({
           <button
             type="button"
             onClick={onAbort}
-            className="ml-auto px-1.5 py-0.5 rounded border border-cyan-400 dark:border-cyan-600 hover:bg-cyan-100 dark:hover:bg-cyan-900/40"
+            className="ml-auto px-1.5 py-0.5 rounded border border-accent-400 dark:border-accent-600 hover:bg-accent-100 dark:hover:bg-accent-900/40"
             data-testid="git-network-abort-button"
           >
             Abort

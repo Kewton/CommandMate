@@ -229,8 +229,8 @@ export const MemoPane = memo(function MemoPane({
           data-testid="memo-loading"
           className="flex flex-col items-center gap-3"
         >
-          <div className="w-8 h-8 border-4 border-gray-200 dark:border-gray-700 border-t-cyan-500 rounded-full animate-spin" />
-          <span className="text-sm text-gray-500 dark:text-gray-400">Loading memos...</span>
+          <div className="w-8 h-8 border-4 border-border border-t-accent-500 rounded-full animate-spin" />
+          <span className="text-sm text-muted-foreground">Loading memos...</span>
         </div>
       </div>
     );
@@ -262,7 +262,7 @@ export const MemoPane = memo(function MemoPane({
             type="button"
             onClick={handleRetry}
             aria-label="Retry"
-            className="px-4 py-2 text-sm font-medium text-white bg-cyan-500 rounded-lg hover:bg-cyan-600 transition-colors"
+            className="px-4 py-2 text-sm font-medium text-white bg-accent-500 rounded-lg hover:bg-accent-600 transition-colors"
           >
             Retry
           </button>
@@ -301,7 +301,7 @@ export const MemoPane = memo(function MemoPane({
               data-testid="memo-search-toggle"
               onClick={handleToggleSearch}
               aria-label="Search memos"
-              className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors rounded"
+              className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded"
             >
               <Search className="w-4 h-4" aria-hidden="true" />
             </button>
@@ -311,7 +311,7 @@ export const MemoPane = memo(function MemoPane({
 
       {/* Empty state (only when there are no memos and search is not filtering) */}
       {memos.length === 0 && !isSearchActive && !createError && (
-        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+        <div className="text-center py-8 text-muted-foreground">
           <p>No memos yet.</p>
           <p className="text-sm">Click the button below to add one.</p>
         </div>
@@ -319,7 +319,7 @@ export const MemoPane = memo(function MemoPane({
 
       {/* No-results state while searching */}
       {isSearchActive && displayedMemos.length === 0 && (
-        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+        <div className="text-center py-8 text-muted-foreground">
           <p>No memos match your search.</p>
         </div>
       )}

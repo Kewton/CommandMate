@@ -117,7 +117,7 @@ export function MarkdownToc({
 
   return (
     <nav aria-label={title} className={className}>
-      <p className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+      <p className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         {title}
       </p>
       <ul className="space-y-0.5 text-sm">
@@ -134,8 +134,8 @@ export function MarkdownToc({
                 className={[
                   'block truncate rounded py-1 pr-2 transition-colors',
                   isActive
-                    ? 'bg-blue-50 font-medium text-blue-700'
-                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+                    ? 'bg-accent-50 font-medium text-accent-700'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground',
                 ].join(' ')}
                 title={entry.text}
               >

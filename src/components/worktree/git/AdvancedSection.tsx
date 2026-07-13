@@ -29,13 +29,13 @@ export const AdvancedSection = memo(function AdvancedSection({
 }: AdvancedSectionProps) {
   return (
     <div
-      className="flex flex-col border-t border-gray-200 dark:border-gray-700"
+      className="flex flex-col border-t border-border"
       data-testid="git-advanced-section"
     >
       <button
         type="button"
         onClick={onToggle}
-        className="w-full flex items-center gap-1 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 cursor-pointer hover:text-gray-900 dark:hover:text-gray-100"
+        className="w-full flex items-center gap-1 px-3 py-2 text-sm font-medium text-muted-foreground cursor-pointer hover:text-foreground"
         data-testid="git-advanced-toggle"
         aria-expanded={open}
       >

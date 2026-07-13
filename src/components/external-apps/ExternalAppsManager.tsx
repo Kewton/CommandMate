@@ -106,9 +106,9 @@ export function ExternalAppsManager() {
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">External Apps</h2>
+      {/* Heading is owned by the parent page (More) — this section only
+          provides the add-app action to avoid a duplicate "External Apps" title. */}
+      <div className="flex items-center justify-end">
         <Button variant="primary" size="sm" onClick={handleAdd}>
           + Add App
         </Button>
@@ -118,8 +118,8 @@ export function ExternalAppsManager() {
       {isLoading ? (
         <Card padding="lg">
           <div className="flex items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-600" />
-            <span className="ml-3 text-gray-600 dark:text-gray-300">Loading apps...</span>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent-600" />
+            <span className="ml-3 text-muted-foreground">Loading apps...</span>
           </div>
         </Card>
       ) : error ? (
@@ -134,10 +134,10 @@ export function ExternalAppsManager() {
       ) : apps.length === 0 ? (
         <Card padding="lg">
           <div className="text-center py-8">
-            <p className="text-gray-500 dark:text-gray-400 mb-4">
+            <p className="text-muted-foreground mb-4">
               No external apps registered yet.
             </p>
-            <p className="text-sm text-gray-400 dark:text-gray-500 mb-4">
+            <p className="text-sm text-muted-foreground mb-4">
               Add an external app to proxy requests to other frontend
               applications.
             </p>

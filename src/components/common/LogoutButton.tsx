@@ -44,8 +44,8 @@ export function LogoutButton() {
       data-testid="logout-button"
       className="
         w-full px-3 py-2 text-sm text-left rounded-md
-        text-gray-300 hover:text-white hover:bg-gray-700
-        focus:outline-none focus:ring-2 focus:ring-blue-500
+        text-muted-foreground hover:text-foreground hover:bg-muted
+        focus:outline-none focus:ring-2 focus:ring-ring
         disabled:opacity-50 transition-colors
       "
     >

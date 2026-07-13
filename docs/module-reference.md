@@ -22,6 +22,7 @@
 | `src/lib/db/db-instance.ts` | DBインスタンス管理（getEnv().CM_DB_PATH使用） |
 | `src/config/system-directories.ts` | システムディレクトリ定数（SYSTEM_DIRECTORIES、isSystemDirectory()） |
 | `src/config/status-colors.ts` | ステータス色の一元管理 |
+| `src/app/globals.css` / `tailwind.config.js` | セマンティックデザイントークン（CSS変数）の定義・登録（Issue #1041）。詳細は [docs/design-system.md](./design-system.md) を参照 |
 | `src/lib/detection/cli-patterns.ts` | CLIツール別パターン定義（Issue #212: PASTED_TEXT_PATTERN定数追加、skipPatterns拡張。**Issue #265: セッションエラーパターン追加** - CLAUDE_SESSION_ERROR_PATTERNS/CLAUDE_SESSION_ERROR_REGEX_PATTERNSでセッション起動失敗検出。**Issue #379: OpenCodeパターン追加** - OPENCODE_PROMPT_PATTERN/OPENCODE_PROMPT_AFTER_RESPONSE/OPENCODE_THINKING_PATTERN/OPENCODE_LOADING_PATTERN/OPENCODE_RESPONSE_COMPLETE/OPENCODE_PROCESSING_INDICATOR/OPENCODE_SEPARATOR_PATTERN/OPENCODE_SKIP_PATTERNS定数、detectThinking()/getCliToolPatterns()/buildDetectPromptOptions()にcase 'opencode'追加、buildDetectPromptOptions('opencode')はrequireDefaultIndicator:false）。CLIツール別パターン定義、COPILOT_SELECTION_LIST_PATTERN（Issue #547）、COPILOT_SKIP_PATTERNS拡張（Issue #565）。**Issue #988: ANTIGRAVITY_PROMPT_PATTERN/ANTIGRAVITY_THINKING_PATTERN/ANTIGRAVITY_SEPARATOR_PATTERN/ANTIGRAVITY_SKIP_PATTERNS追加、detectThinking()/getCliToolPatterns()にcase 'antigravity'追加。buildDetectPromptOptions()はagy追加せず（標準">"インジケータ使用＝default正）** |
 | `src/lib/pasted-text-helper.ts` | Pasted text検知とEnter再送の共通ヘルパー（Issue #212: detectAndResendIfPastedText関数、リトライロジック、構造化ログ）。Pasted text検知・Enter再送 |
 | `src/lib/clipboard-utils.ts` | クリップボードコピーユーティリティ（stripAnsi利用、空文字バリデーション、Issue #211） |
@@ -110,6 +111,7 @@
 | `src/hooks/useFileSearch.ts` | 検索状態管理フック（debounce処理、API呼び出し、結果管理） |
 | `src/components/worktree/MoveDialog.tsx` | ファイル移動先選択ダイアログ（Issue #162: ディレクトリツリーブラウザ、ルート選択、ネスト対応、updateTreeNode/findNodeByPath抽出） |
 | `src/components/ui/Modal.tsx` | モーダルダイアログコンポーネント（Issue #299: z-[9999]ハードコード除去、Z_INDEX.MODAL使用に統一） |
+| `src/components/ui/StatusDot.tsx` | 共通ステータスドット（Issue #1051: running/generating=緑グロー+パルス+静的リング(reduced-motion凍結時もreadyと識別)、waiting=amber弱点滅、idle/ready/error+未知state=静的、size sm/md/lg。infinite CSSアニメでポーリング非リセット、reduced-motionはglobals.css準拠。適用はサイドバー/Home/Sessionsのみ、worktree詳細/MobileHeaderは従来spinner据置） |
 | `src/components/common/FullScreenModal.tsx` | モバイル向けフルスクリーンモーダルシェル（Issue #825: slide-up、右上クローズ、sticky footer、visualViewportでキーボード回避、focus時scrollIntoView） |
 | `src/components/common/Toast.tsx` | トースト通知コンポーネント（Issue #299: z-50ハードコード除去、Z_INDEX.TOAST使用に統一） |
 | `src/components/worktree/ContextMenu.tsx` | ファイル/ディレクトリコンテキストメニュー（Issue #162: 「移動」メニュー項目追加、FolderInputアイコン、onMoveコールバック。Issue #299: z-50除去、Z_INDEX.CONTEXT_MENU使用） |

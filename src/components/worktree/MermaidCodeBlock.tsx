@@ -25,7 +25,7 @@ const MermaidDiagram = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="mermaid-loading flex items-center gap-2 text-gray-500 p-4">
+      <div className="mermaid-loading flex items-center gap-2 text-muted-foreground p-4">
         <Loader2 className="animate-spin h-4 w-4" />
         <span>Loading diagram...</span>
       </div>

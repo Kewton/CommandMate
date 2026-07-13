@@ -75,7 +75,7 @@ export function CopyButton({ text, className = '', label = 'Copy' }: CopyButtonP
     <button
       type="button"
       onClick={handleClick}
-      className={`inline-flex items-center gap-1 rounded border border-slate-700 bg-slate-900/70 px-2 py-0.5 text-[11px] font-medium text-slate-300 transition-colors hover:bg-slate-800 ${className}`}
+      className={`inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-foreground transition-colors hover:bg-muted ${className}`}
       aria-label={copied ? 'Copied' : label}
       title={copied ? 'Copied!' : label}
     >

@@ -8,7 +8,7 @@
 'use client';
 
 import React, { useMemo, useCallback, memo } from 'react';
-import { Copy, ArrowDownToLine } from 'lucide-react';
+import { Copy, ArrowDownToLine, ChevronDown } from 'lucide-react';
 import { useLocale } from 'next-intl';
 import type { ConversationPair } from '@/types/conversation';
 import type { ChatMessage } from '@/types/models';
@@ -172,7 +172,7 @@ const MessageContent = memo(function MessageContent({
             key={index}
             type="button"
             onClick={handlePathClick(part.content)}
-            className="text-blue-400 hover:text-blue-300 hover:underline cursor-pointer font-mono text-sm"
+            className="text-accent-700 dark:text-accent-400 hover:text-accent-600 dark:hover:text-accent-300 hover:underline cursor-pointer font-mono text-sm"
             aria-label={`Open file: ${part.content}`}
           >
             {part.content}
@@ -193,16 +193,16 @@ function PendingIndicator() {
   return (
     <div
       data-testid="pending-indicator"
-      className="flex items-center gap-2 text-gray-400 py-2"
+      className="flex items-center gap-2 text-muted-foreground py-2"
     >
       <div className="flex gap-1" aria-hidden="true">
-        <span className="w-2 h-2 bg-gray-400 rounded-full animate-pulse" />
+        <span className="w-2 h-2 bg-muted-foreground rounded-full animate-pulse" />
         <span
-          className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"
+          className="w-2 h-2 bg-muted-foreground rounded-full animate-pulse"
           style={{ animationDelay: '150ms' }}
         />
         <span
-          className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"
+          className="w-2 h-2 bg-muted-foreground rounded-full animate-pulse"
           style={{ animationDelay: '300ms' }}
         />
       </div>
@@ -234,41 +234,47 @@ const UserMessageSection = memo(function UserMessageSection({
   const formattedTime = formatMessageTimestamp(message.timestamp, dateFnsLocale);
 
   return (
-    <div className="relative bg-blue-900/30 border-l-4 border-blue-500 p-3">
+    <div className="group relative border-l-2 border-accent-500 bg-accent-500/10 p-3">
       <div className="flex items-center gap-2 mb-1">
-        <span className="text-xs font-medium text-blue-400">You</span>
-        <span className="text-xs text-gray-500">{formattedTime}</span>
+        <span className="text-xs font-medium text-accent-700 dark:text-accent-400">You</span>
+        <span className="text-xs text-muted-foreground">{formattedTime}</span>
+        {/* Persistent mini-toolbar: reveal on hover/focus (desktop), pinned to the
+            row's right edge so actions never overlap the message body. On touch
+            devices (no hover) it stays visible so copy/insert remain reachable
+            (Issue #1075). */}
+        <div className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+          {onInsertToMessage && (
+            <button
+              type="button"
+              data-testid="insert-user-message"
+              onClick={() => onInsertToMessage(message.content)}
+              className="p-1 text-muted-foreground hover:text-accent-600 dark:hover:text-accent-400 hover:bg-muted rounded transition-colors"
+              aria-label="Insert to message"
+              title="Insert to message"
+            >
+              <ArrowDownToLine size={14} aria-hidden="true" />
+            </button>
+          )}
+          {onCopy && (
+            <button
+              type="button"
+              data-testid="copy-user-message"
+              onClick={() => onCopy(message.content)}
+              className="p-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors"
+              aria-label="Copy message"
+              title="Copy"
+            >
+              <Copy size={14} aria-hidden="true" />
+            </button>
+          )}
+        </div>
       </div>
       <div
         data-message-id={message.id}
-        className="text-sm text-gray-200 whitespace-pre-wrap break-words [word-break:break-word] max-w-full overflow-x-hidden"
+        className="text-sm text-foreground whitespace-pre-wrap break-words [word-break:break-word] max-w-full overflow-x-hidden"
       >
         <MessageContent content={message.content} onFilePathClick={onFilePathClick} />
       </div>
-      {onInsertToMessage && (
-        <button
-          type="button"
-          data-testid="insert-user-message"
-          onClick={() => onInsertToMessage(message.content)}
-          className="absolute top-2 right-10 p-1 text-gray-400 hover:text-cyan-400 bg-gray-800/80 rounded transition-colors"
-          aria-label="Insert to message"
-          title="Insert to message"
-        >
-          <ArrowDownToLine size={14} aria-hidden="true" />
-        </button>
-      )}
-      {onCopy && (
-        <button
-          type="button"
-          data-testid="copy-user-message"
-          onClick={() => onCopy(message.content)}
-          className="absolute top-2 right-2 p-1 text-gray-400 hover:text-gray-200 bg-gray-800/80 rounded transition-colors"
-          aria-label="Copy message"
-          title="Copy"
-        >
-          <Copy size={14} aria-hidden="true" />
-        </button>
-      )}
     </div>
   );
 });
@@ -290,6 +296,8 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
   isExpanded,
   onFilePathClick,
   onCopy,
+  hasLongContent = false,
+  onToggleExpand,
 }: {
   message: ChatMessage;
   index: number;
@@ -297,6 +305,9 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
   isExpanded: boolean;
   onFilePathClick: (path: string) => void;
   onCopy?: (content: string) => void;
+  /** Issue #1075: show the pair-level expand toggle on the first item's header. */
+  hasLongContent?: boolean;
+  onToggleExpand?: () => void;
 }) {
   const locale = useLocale();
   const dateFnsLocale = getDateFnsLocale(locale);
@@ -308,39 +319,62 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
   );
 
   const displayContent = isExpanded || !isTruncated ? message.content : truncatedText;
+  // The expand/collapse control governs the whole pair, so render it once on the
+  // first assistant item's header (Issue #1075: moved out of the body overlay).
+  const showExpandToggle = index === 0 && hasLongContent && !!onToggleExpand;
 
   return (
-    <div className="assistant-message-item relative">
+    <div className="assistant-message-item group relative">
       <div className="flex items-center gap-2 mb-1">
-        <span className="text-xs font-medium text-gray-400">Assistant</span>
-        <span className="text-xs text-gray-500">{formattedTime}</span>
+        <span className="text-xs font-medium text-muted-foreground">Assistant</span>
+        <span className="text-xs text-muted-foreground">{formattedTime}</span>
         {total > 1 && (
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-muted-foreground">
             ({index + 1}/{total})
           </span>
         )}
+        {/* Persistent mini-toolbar pinned right; keeps actions off the body.
+            Stays visible on touch devices (no hover) so expand/copy work there. */}
+        <div className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+          {showExpandToggle && (
+            <button
+              type="button"
+              onClick={onToggleExpand}
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-accent-700 dark:text-accent-400 hover:text-accent-600 dark:hover:text-accent-300 hover:bg-muted transition-colors"
+              aria-expanded={isExpanded}
+              aria-label={isExpanded ? 'Collapse message' : 'Expand message'}
+            >
+              <ChevronDown
+                size={12}
+                className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                aria-hidden="true"
+              />
+              {isExpanded ? 'Collapse' : 'Expand'}
+            </button>
+          )}
+          {onCopy && (
+            <button
+              type="button"
+              data-testid="copy-assistant-message"
+              onClick={() => onCopy(message.content)}
+              className="p-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors"
+              aria-label="Copy message"
+              title="Copy"
+            >
+              <Copy size={14} aria-hidden="true" />
+            </button>
+          )}
+        </div>
       </div>
       <div
         data-message-id={message.id}
-        className="text-xs text-gray-300 whitespace-pre-wrap break-words [word-break:break-word] max-w-full overflow-x-hidden"
+        className="text-xs text-foreground whitespace-pre-wrap break-words [word-break:break-word] max-w-full overflow-x-hidden"
       >
         <MessageContent content={displayContent} onFilePathClick={onFilePathClick} />
         {!isExpanded && isTruncated && (
-          <span className="text-gray-500">...</span>
+          <span className="text-muted-foreground">...</span>
         )}
       </div>
-      {onCopy && (
-        <button
-          type="button"
-          data-testid="copy-assistant-message"
-          onClick={() => onCopy(message.content)}
-          className="absolute top-2 right-2 p-1 text-gray-400 hover:text-gray-200 bg-gray-800/80 rounded transition-colors"
-          aria-label="Copy message"
-          title="Copy"
-        >
-          <Copy size={14} aria-hidden="true" />
-        </button>
-      )}
     </div>
   );
 });
@@ -358,20 +392,24 @@ const AssistantMessagesSection = memo(function AssistantMessagesSection({
   isExpanded,
   onFilePathClick,
   onCopy,
+  hasLongContent = false,
+  onToggleExpand,
 }: {
   messages: ChatMessage[];
   isExpanded: boolean;
   onFilePathClick: (path: string) => void;
   onCopy?: (content: string) => void;
+  hasLongContent?: boolean;
+  onToggleExpand?: () => void;
 }) {
   return (
-    <div className="bg-gray-900/30 border-l-4 border-gray-700 p-2 border-t border-gray-700 space-y-2">
+    <div className="bg-surface-2/50 border-l-2 border-border p-2 border-t border-border space-y-2">
       {messages.map((message, index) => (
         <React.Fragment key={message.id}>
           {index > 0 && (
             <div
               data-testid="assistant-message-divider"
-              className="border-t border-dashed border-gray-600"
+              className="border-t border-dashed border-border"
             />
           )}
           <AssistantMessageItem
@@ -381,6 +419,8 @@ const AssistantMessagesSection = memo(function AssistantMessagesSection({
             isExpanded={isExpanded}
             onFilePathClick={onFilePathClick}
             onCopy={onCopy}
+            hasLongContent={hasLongContent}
+            onToggleExpand={onToggleExpand}
           />
         </React.Fragment>
       ))}
@@ -396,7 +436,7 @@ function OrphanHeader() {
   return (
     <div
       data-testid="orphan-indicator"
-      className="bg-yellow-900/20 text-yellow-400 text-xs px-3 py-1 flex items-center gap-2"
+      className="bg-warning/10 text-yellow-800 dark:text-yellow-400 text-xs px-3 py-1 flex items-center gap-2"
     >
       <svg
         className="w-3 h-3"
@@ -465,7 +505,7 @@ export const ConversationPairCard = memo(function ConversationPairCard({
   // Build card class based on status
   const cardClassName = useMemo(() => {
     const base =
-      'border border-gray-700 rounded-lg overflow-hidden mb-4 transition-colors';
+      'border border-border rounded-lg overflow-hidden mb-4 transition-colors';
     const statusClass =
       pair.status === 'pending'
         ? 'pending'
@@ -506,46 +546,18 @@ export const ConversationPairCard = memo(function ConversationPairCard({
 
       {/* Assistant section */}
       {pair.status === 'pending' ? (
-        <div className="bg-gray-800/30 border-l-4 border-gray-600 p-3 border-t border-gray-700">
+        <div className="bg-muted/40 border-l-2 border-border p-3 border-t border-border">
           <PendingIndicator />
         </div>
       ) : showAssistant && pair.assistantMessages.length > 0 ? (
-        <div className="relative">
-          <AssistantMessagesSection
-            messages={pair.assistantMessages}
-            isExpanded={isExpanded}
-            onFilePathClick={onFilePathClick}
-            onCopy={onCopy}
-          />
-          {/* Expand/Collapse button */}
-          {hasLongContent && (
-            <div className="absolute top-2 right-2">
-              <button
-                type="button"
-                onClick={handleToggle}
-                className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors bg-gray-800/80 px-2 py-1 rounded"
-                aria-expanded={isExpanded}
-                aria-label={isExpanded ? 'Collapse message' : 'Expand message'}
-              >
-                <svg
-                  className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 9l-7 7-7-7"
-                  />
-                </svg>
-                {isExpanded ? 'Collapse' : 'Expand'}
-              </button>
-            </div>
-          )}
-        </div>
+        <AssistantMessagesSection
+          messages={pair.assistantMessages}
+          isExpanded={isExpanded}
+          onFilePathClick={onFilePathClick}
+          onCopy={onCopy}
+          hasLongContent={hasLongContent}
+          onToggleExpand={handleToggle}
+        />
       ) : null}
     </div>
   );

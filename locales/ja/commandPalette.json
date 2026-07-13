@@ -1,0 +1,38 @@
+{
+  "title": "コマンドパレット",
+  "placeholder": "コマンドを入力または検索...",
+  "searchAction": "検索…",
+  "empty": "該当する項目がありません。",
+  "loading": "ワークツリーを読み込み中...",
+  "groups": {
+    "recent": "最近",
+    "navigation": "ナビゲーション",
+    "worktrees": "ワークツリー",
+    "actions": "アクション"
+  },
+  "nav": {
+    "home": "ホーム",
+    "chat": "チャット",
+    "sessions": "セッション",
+    "repositories": "リポジトリ",
+    "review": "レビュー",
+    "more": "その他"
+  },
+  "actions": {
+    "toLight": "ライトテーマに切り替え",
+    "toDark": "ダークテーマに切り替え",
+    "displaySizePrefix": "表示サイズ",
+    "syncRepositories": "リポジトリを同期",
+    "syncSuccess": "リポジトリを同期しました",
+    "syncError": "リポジトリの同期に失敗しました",
+    "switchLanguage": "言語を切り替え",
+    "openGitHub": "GitHub を開く"
+  },
+  "footer": {
+    "navigate": "移動",
+    "select": "実行",
+    "close": "閉じる"
+  },
+  "mobileTrigger": "コマンドパレットを開く",
+  "mobileLabel": "検索"
+}

@@ -31,17 +31,17 @@ export const GitCurrentStatusBar = memo(function GitCurrentStatusBar({
   const { isMobile } = useGitPaneContext();
   return (
     <div
-      className="flex flex-col gap-1.5 px-3 py-2 border-b border-gray-200 dark:border-gray-700"
+      className="flex flex-col gap-1.5 px-3 py-2 border-b border-border"
       data-testid="git-status-section"
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+        <span className="text-xs font-medium text-muted-foreground">
           Current Status
         </span>
         <button
           type="button"
           onClick={onRefresh}
-          className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded"
+          className="p-1 text-muted-foreground hover:text-foreground rounded"
           aria-label="Refresh git status"
         >
           <RefreshIcon />
@@ -51,7 +51,7 @@ export const GitCurrentStatusBar = memo(function GitCurrentStatusBar({
       {/* Loading: only show the spinner before the first successful load */}
       {statusLoading && !gitStatus && (
         <div className="flex items-center gap-2 py-1" role="status">
-          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-cyan-500" />
+          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-accent-500" />
           <span className="sr-only">Loading git status...</span>
         </div>
       )}
@@ -72,7 +72,7 @@ export const GitCurrentStatusBar = memo(function GitCurrentStatusBar({
           <div className={`flex items-center flex-wrap ${isMobile ? 'gap-1.5' : 'gap-2'}`}>
             {/* Branch chip */}
             <span
-              className="inline-flex items-center max-w-full truncate rounded px-2 py-0.5 text-xs font-mono bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300"
+              className="inline-flex items-center max-w-full truncate rounded px-2 py-0.5 text-xs font-mono bg-accent-50 text-accent-700 dark:bg-accent-900/30 dark:text-accent-300"
               data-testid="git-status-branch-chip"
               title={gitStatus.currentBranch}
             >
@@ -92,7 +92,7 @@ export const GitCurrentStatusBar = memo(function GitCurrentStatusBar({
             {/* Ahead/behind (only when non-null) */}
             {gitStatus.aheadBehind && (
               <span
-                className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-mono bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-mono bg-muted text-foreground"
                 data-testid="git-status-ahead-behind"
               >
                 <span title="commits ahead of upstream">↑{gitStatus.aheadBehind.ahead}</span>

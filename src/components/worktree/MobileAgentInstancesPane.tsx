@@ -25,6 +25,7 @@ import {
   getCliToolDisplayName,
   type AgentInstance,
 } from '@/lib/cli-tools/types';
+import { Checkbox } from '@/components/ui';
 import { MIN_VISIBLE_INSTANCES } from '@/hooks/useMobileSelectedInstances';
 import { AgentInstancesPane } from '@/components/worktree/AgentInstancesPane';
 
@@ -81,12 +82,12 @@ export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
       {/* Per-device "show as tabs" selection (localStorage, never the DB). */}
       <div
         data-testid="mobile-visible-instances"
-        className="px-4 pb-4 border-t border-gray-200 dark:border-gray-700 mt-2 pt-4"
+        className="px-4 pb-4 border-t border-border mt-2 pt-4"
       >
-        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">
+        <h3 className="text-sm font-semibold text-foreground mb-1">
           {t('mobileVisibleInstances')}
         </h3>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+        <p className="text-xs text-muted-foreground mb-3">
           {t('mobileVisibleInstancesDescription')}
         </p>
 
@@ -99,22 +100,20 @@ export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
               <label
                 key={inst.id}
                 className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer ${
-                  disabled ? 'opacity-60 cursor-not-allowed' : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+                  disabled ? 'opacity-60 cursor-not-allowed' : 'hover:bg-muted'
                 }`}
               >
-                <input
-                  type="checkbox"
+                <Checkbox
                   data-testid={`mobile-visible-instance-toggle-${inst.id}`}
                   checked={checked}
                   disabled={disabled}
-                  onChange={() => onToggleInstanceVisible(inst.id)}
-                  className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-cyan-600 focus:ring-cyan-500 disabled:opacity-50"
+                  onCheckedChange={() => onToggleInstanceVisible(inst.id)}
                 />
                 <span className="flex-1 min-w-0">
-                  <span className="block text-sm font-medium text-gray-700 dark:text-gray-200 truncate">
+                  <span className="block text-sm font-medium text-foreground truncate">
                     {getInstanceLabel(inst)}
                   </span>
-                  <span className="block text-xs text-gray-500 dark:text-gray-400 truncate">
+                  <span className="block text-xs text-muted-foreground truncate">
                     {getCliToolDisplayName(inst.cliTool)}
                   </span>
                 </span>
@@ -124,7 +123,7 @@ export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
         </div>
 
         {atMinVisible && (
-          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+          <p className="mt-2 text-xs text-muted-foreground">
             {t('mobileVisibleInstanceMin')}
           </p>
         )}

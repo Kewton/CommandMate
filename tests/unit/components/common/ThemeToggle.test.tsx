@@ -91,7 +91,7 @@ describe('ThemeToggle', () => {
     it('should have focus ring with cyan color', () => {
       render(<ThemeToggle />);
       const toggle = screen.getByTestId('theme-toggle');
-      expect(toggle.className).toContain('focus:ring-cyan-500');
+      expect(toggle.className).toContain('focus:ring-ring');
     });
   });
 });

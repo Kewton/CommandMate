@@ -1,9 +1,18 @@
 {
+  "agentStatus": {
+    "moreAgents": "{count} more agents",
+    "overflowTrigger": "More agents"
+  },
   "toc": {
     "title": "Contents",
     "show": "Show table of contents",
     "hide": "Hide table of contents",
     "empty": "No headings"
+  },
+  "composer": {
+    "placeholder": "Type your message…",
+    "commandsHint": "commands",
+    "newlineHint": "newline"
   },
   "session": {
     "confirmKill": "End session for \"{name}\"?\n\nAll message history will be deleted. Log files will be retained.",
@@ -72,7 +81,13 @@
     "showFiles": "Show files",
     "hideFiles": "Hide files",
     "equalizeWidths": "Equal widths",
-    "equalizeWidthsHint": "Equalize terminal widths and reset History width"
+    "equalizeWidthsHint": "Equalize terminal widths and reset History width",
+    "addSplit": "Add split",
+    "removeSplit": "Remove split",
+    "selectInstance": "Select agent instance for {split}",
+    "moreActions": "More actions",
+    "searchTerminal": "Search terminal",
+    "endSession": "End session"
   },
   "todo": {
     "addPlaceholder": "Add a todo…",

@@ -93,10 +93,10 @@ function HtmlSourceViewer({ content }: { content: string }) {
             const idx = lineNumber - 1;
             return (
               <tr key={lineNumber} data-line={lineNumber}>
-                <td className="pl-3 pr-2 text-right select-none font-mono border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 sticky left-0 align-top whitespace-nowrap text-gray-400 dark:text-gray-600">
+                <td className="pl-3 pr-2 text-right select-none font-mono border-r border-border bg-muted dark:bg-muted/50 sticky left-0 align-top whitespace-nowrap text-muted-foreground">
                   {lineNumber}
                 </td>
-                <td className="px-4 text-gray-900 dark:text-gray-100 align-top">
+                <td className="px-4 text-foreground align-top">
                   <pre className="m-0 whitespace-pre-wrap break-words font-mono" style={{ lineHeight: '1.5rem' }}>
                     <code
                       className="hljs"
@@ -246,7 +246,7 @@ export function HtmlPreview({
   return (
     <div className="h-full flex flex-col" data-testid="html-preview">
       {/* Toolbar */}
-      <div className="flex items-center justify-between p-1 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex-shrink-0">
+      <div className="flex items-center justify-between p-1 border-b border-border bg-muted flex-shrink-0">
         {/* View mode buttons */}
         <div className="flex gap-1">
           {(['source', 'preview', 'split'] as const).map((mode) => (
@@ -256,8 +256,8 @@ export function HtmlPreview({
               onClick={() => setViewMode(mode)}
               className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
                 viewMode === mode
-                  ? 'bg-cyan-100 dark:bg-cyan-900/50 text-cyan-700 dark:text-cyan-300'
-                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                  ? 'bg-accent-100 dark:bg-accent-900/50 text-accent-700 dark:text-accent-300'
+                  : 'text-muted-foreground hover:bg-muted'
               }`}
             >
               {mode.charAt(0).toUpperCase() + mode.slice(1)}
@@ -277,7 +277,7 @@ export function HtmlPreview({
                   ? level === 'safe'
                     ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300'
                     : 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300'
-                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                  : 'text-muted-foreground hover:bg-muted'
               }`}
             >
               {level.charAt(0).toUpperCase() + level.slice(1)}
@@ -300,7 +300,7 @@ export function HtmlPreview({
         )}
         {viewMode === 'split' && (
           <div className="flex h-full">
-            <div className="w-1/2 border-r border-gray-200 dark:border-gray-700 overflow-hidden">
+            <div className="w-1/2 border-r border-border overflow-hidden">
               <HtmlSourceViewer content={htmlContent} />
             </div>
             <div className="w-1/2 overflow-hidden">

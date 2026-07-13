@@ -46,13 +46,13 @@ describe('SearchBar', () => {
     it('should highlight active mode button', () => {
       const { rerender } = render(<SearchBar {...defaultProps} mode="name" />);
 
-      expect(screen.getByTestId('mode-name')).toHaveClass('bg-cyan-100');
-      expect(screen.getByTestId('mode-content')).not.toHaveClass('bg-cyan-100');
+      expect(screen.getByTestId('mode-name')).toHaveClass('bg-accent-100');
+      expect(screen.getByTestId('mode-content')).not.toHaveClass('bg-accent-100');
 
       rerender(<SearchBar {...defaultProps} mode="content" />);
 
-      expect(screen.getByTestId('mode-name')).not.toHaveClass('bg-cyan-100');
-      expect(screen.getByTestId('mode-content')).toHaveClass('bg-cyan-100');
+      expect(screen.getByTestId('mode-name')).not.toHaveClass('bg-accent-100');
+      expect(screen.getByTestId('mode-content')).toHaveClass('bg-accent-100');
     });
 
     it('should use custom placeholder', () => {

@@ -159,7 +159,7 @@ export default function FileViewerPage() {
         {loading && (
           <Card padding="lg">
             <div className="flex items-center justify-center py-12">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 border-t-blue-600" />
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 border-t-accent-600" />
               <p className="ml-3 text-gray-600">Loading file...</p>
             </div>
           </Card>
@@ -214,7 +214,7 @@ export default function FileViewerPage() {
                 // (flex row + side TOC) are scoped to this branch only so the
                 // image/video/code viewers are unaffected (Issue #1007).
                 <div className="lg:flex lg:gap-6 lg:items-start">
-                <div className="min-w-0 lg:flex-1 prose prose-slate max-w-none prose-headings:font-semibold prose-headings:scroll-mt-[57px] prose-h1:text-3xl prose-h1:border-b prose-h1:pb-2 prose-h2:text-2xl prose-h2:border-b prose-h2:pb-2 prose-h3:text-xl prose-a:text-blue-600 prose-a:no-underline hover:prose-a:underline prose-code:text-sm prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-img:rounded-lg prose-img:shadow-md">
+                <div className="min-w-0 lg:flex-1 prose prose-slate max-w-none prose-headings:font-semibold prose-headings:scroll-mt-[57px] prose-h1:text-3xl prose-h1:border-b prose-h1:pb-2 prose-h2:text-2xl prose-h2:border-b prose-h2:pb-2 prose-h3:text-xl prose-a:text-accent-600 prose-a:no-underline hover:prose-a:underline prose-code:text-sm prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-img:rounded-lg prose-img:shadow-md">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     rehypePlugins={[rehypeSlug, rehypeHighlight]}

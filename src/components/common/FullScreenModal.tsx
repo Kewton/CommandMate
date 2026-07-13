@@ -89,15 +89,15 @@ export function FullScreenModal({
       data-testid="full-screen-modal"
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 flex flex-col bg-white dark:bg-gray-900 animate-slide-up"
+      className="fixed inset-0 flex flex-col bg-surface animate-slide-up"
       style={{
         zIndex: Z_INDEX.MODAL,
         height: viewportHeight ? `${viewportHeight}px` : '100dvh',
       }}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 truncate pr-2">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
+        <h3 className="text-base font-semibold text-foreground truncate pr-2">
           {title}
         </h3>
         {showCloseButton && (
@@ -106,7 +106,7 @@ export function FullScreenModal({
             onClick={onClose}
             aria-label="Close"
             data-testid="full-screen-modal-close"
-            className="flex-shrink-0 -mr-1 p-1 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors"
+            className="flex-shrink-0 -mr-1 p-1 text-muted-foreground hover:text-foreground transition-colors"
           >
             <X className="w-6 h-6" />
           </button>
@@ -126,7 +126,7 @@ export function FullScreenModal({
       {footer && (
         <div
           data-testid="full-screen-modal-footer"
-          className="flex-shrink-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-3"
+          className="flex-shrink-0 border-t border-border bg-surface px-4 py-3"
           style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
         >
           {footer}

@@ -95,7 +95,7 @@ export function PdfPreview({ dataUri, filePath, variant = 'iframe' }: PdfPreview
         <a
           href={dataUri}
           download={filePath.split('/').pop() || 'document.pdf'}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-input text-sm text-foreground hover:bg-muted"
           rel="noopener"
         >
           Download PDF
@@ -110,7 +110,7 @@ export function PdfPreview({ dataUri, filePath, variant = 'iframe' }: PdfPreview
         className="h-full flex items-center justify-center"
         data-testid="pdf-preview-loading"
       >
-        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-cyan-600 dark:border-t-cyan-400" />
+        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-input border-t-accent-600 dark:border-t-accent-400" />
       </div>
     );
   }
@@ -123,7 +123,7 @@ export function PdfPreview({ dataUri, filePath, variant = 'iframe' }: PdfPreview
         data-testid="pdf-preview-download"
       >
         <svg
-          className="w-16 h-16 text-gray-400 dark:text-gray-500"
+          className="w-16 h-16 text-muted-foreground"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -136,7 +136,7 @@ export function PdfPreview({ dataUri, filePath, variant = 'iframe' }: PdfPreview
             d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
           />
         </svg>
-        <p className="text-sm text-gray-700 dark:text-gray-300 break-all">
+        <p className="text-sm text-foreground break-all">
           {fileName}
         </p>
         <div className="flex flex-col gap-2 w-full max-w-xs">
@@ -144,14 +144,14 @@ export function PdfPreview({ dataUri, filePath, variant = 'iframe' }: PdfPreview
             href={blobUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg bg-cyan-600 hover:bg-cyan-700 active:bg-cyan-800 text-white text-sm font-medium transition-colors"
+            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg bg-accent-600 hover:bg-accent-700 active:bg-accent-800 text-white text-sm font-medium transition-colors"
           >
             PDFを新しいタブで開く
           </a>
           <a
             href={blobUrl}
             download={fileName}
-            className="inline-flex items-center justify-center gap-2 px-6 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            className="inline-flex items-center justify-center gap-2 px-6 py-2 rounded-lg border border-input text-sm text-foreground hover:bg-muted transition-colors"
           >
             ダウンロード
           </a>

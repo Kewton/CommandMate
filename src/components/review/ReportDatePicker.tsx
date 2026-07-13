@@ -7,6 +7,8 @@
 
 'use client';
 
+import { Button, Input } from '@/components/ui';
+
 interface ReportDatePickerProps {
   value: string; // YYYY-MM-DD
   onChange: (date: string) => void;
@@ -47,35 +49,34 @@ export default function ReportDatePicker({ value, onChange }: ReportDatePickerPr
 
   return (
     <div className="flex items-center gap-2" data-testid="report-date-picker">
-      <button
+      <Button
+        variant="secondary"
+        size="sm"
         onClick={handlePrev}
-        className="px-2 py-1 text-sm rounded bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300"
         data-testid="date-prev"
         aria-label="Previous day"
       >
         &lt;
-      </button>
-      <input
+      </Button>
+      <Input
         type="date"
+        inputSize="sm"
         value={value}
         max={today}
         onChange={(e) => onChange(e.target.value)}
-        className="px-3 py-1 text-sm border rounded dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200"
+        className="w-auto"
         data-testid="date-input"
       />
-      <button
+      <Button
+        variant="secondary"
+        size="sm"
         onClick={handleNext}
         disabled={isToday}
-        className={`px-2 py-1 text-sm rounded ${
-          isToday
-            ? 'bg-gray-50 dark:bg-gray-900 text-gray-400 dark:text-gray-600 cursor-not-allowed'
-            : 'bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300'
-        }`}
         data-testid="date-next"
         aria-label="Next day"
       >
         &gt;
-      </button>
+      </Button>
     </div>
   );
 }

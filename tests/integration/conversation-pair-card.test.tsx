@@ -67,8 +67,10 @@ describe('ConversationPairCard', () => {
       expect(assistantSection).toBeTruthy();
 
       // Find the content container (sibling div with text)
-      // Issue #725: Assistant style weakened from text-sm/text-gray-200 to text-xs/text-gray-300.
-      const contentContainer = assistantSection?.querySelector('.text-xs.text-gray-300');
+      // Issue #725 weakened assistant style to text-xs; Issue #1075 (#1091) then
+      // migrated the raw text-gray-300 to the theme-following `text-foreground`
+      // token (Issue #1102: selector updated to match).
+      const contentContainer = assistantSection?.querySelector('.text-xs.text-foreground');
       expect(contentContainer).toBeTruthy();
 
       // Check for required CSS classes for text wrapping (Safari compatible)
@@ -107,10 +109,10 @@ describe('ConversationPairCard', () => {
       const card = container.querySelector('[data-testid="conversation-pair-card"]');
       expect(card).toBeTruthy();
 
-      // Verify assistant section has overflow-x-hidden
-      // Issue #725: Assistant style weakened from text-sm/text-gray-200 to text-xs/text-gray-300.
+      // Verify assistant section has overflow-x-hidden. Content class migrated to
+      // the `text-foreground` token in Issue #1075 (#1091) (Issue #1102).
       const assistantSection = card?.querySelector('.assistant-message-item');
-      const contentContainer = assistantSection?.querySelector('.text-xs.text-gray-300');
+      const contentContainer = assistantSection?.querySelector('.text-xs.text-foreground');
       expect(contentContainer?.className).toContain('overflow-x-hidden');
     });
 
@@ -180,11 +182,13 @@ describe('ConversationPairCard', () => {
         />
       );
 
-      // User message should also have word-break classes
-      const userSection = screen.getByText('You').closest('.bg-blue-900\\/30');
+      // User message should also have word-break classes. Issue #1075 (#1091)
+      // migrated the user bubble to accent tokens (bg-accent-500/10) and the
+      // content to `text-foreground` (Issue #1102: selectors updated to match).
+      const userSection = screen.getByText('You').closest('.bg-accent-500\\/10');
       expect(userSection).toBeTruthy();
 
-      const userContentContainer = userSection?.querySelector('.text-sm.text-gray-200');
+      const userContentContainer = userSection?.querySelector('.text-sm.text-foreground');
       expect(userContentContainer).toBeTruthy();
       expect(userContentContainer?.className).toContain('whitespace-pre-wrap');
       expect(userContentContainer?.className).toContain('break-words');

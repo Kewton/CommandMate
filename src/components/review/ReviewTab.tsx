@@ -10,6 +10,8 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
+import { Card } from '@/components/ui';
+import { cn } from '@/lib/utils/cn';
 import { REVIEW_POLL_INTERVAL_MS } from '@/config/review-config';
 import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
 import { deriveCliStatus } from '@/types/sidebar';
@@ -25,6 +27,14 @@ const FILTER_TABS: Array<{ value: ReviewFilter; label: string }> = [
   { value: 'approval', label: 'Approval' },
   { value: 'stalled', label: 'Stalled' },
 ];
+
+/** Membership predicate per filter. Shared by the visible list and the chip
+ * counts so both always agree (counts are derived, never fetched separately). */
+const FILTER_PREDICATES: Record<ReviewFilter, (wt: Worktree) => boolean> = {
+  in_review: (wt) => wt.status === 'in_review',
+  approval: (wt) => wt.isWaitingForResponse === true,
+  stalled: (wt) => wt.isStalled === true,
+};
 
 /** Small CLI status dot */
 function CliDot({ status, label }: { status: BranchStatus; label: string }) {
@@ -94,20 +104,19 @@ export default function ReviewTab() {
     };
   }, [fetchWorktrees]);
 
-  const filteredWorktrees = useMemo(() => {
-    return worktrees.filter((wt) => {
-      switch (activeFilter) {
-        case 'in_review':
-          return wt.status === 'in_review';
-        case 'approval':
-          return wt.isWaitingForResponse === true;
-        case 'stalled':
-          return wt.isStalled === true;
-        default:
-          return false;
-      }
-    });
-  }, [worktrees, activeFilter]);
+  const filteredWorktrees = useMemo(
+    () => worktrees.filter(FILTER_PREDICATES[activeFilter]),
+    [worktrees, activeFilter]
+  );
+
+  const filterCounts = useMemo<Record<ReviewFilter, number>>(
+    () => ({
+      in_review: worktrees.filter(FILTER_PREDICATES.in_review).length,
+      approval: worktrees.filter(FILTER_PREDICATES.approval).length,
+      stalled: worktrees.filter(FILTER_PREDICATES.stalled).length,
+    }),
+    [worktrees]
+  );
 
   const emptyMessage = useMemo(() => {
     switch (activeFilter) {
@@ -122,27 +131,48 @@ export default function ReviewTab() {
 
   return (
     <>
-      {/* Filter tabs */}
-      <div className="flex gap-2 mb-6" data-testid="review-filters">
-        {FILTER_TABS.map((tab) => (
-          <button
-            key={tab.value}
-            onClick={() => setActiveFilter(tab.value)}
-            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-              activeFilter === tab.value
-                ? 'bg-cyan-600 text-white'
-                : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
-            }`}
-            data-testid={`review-filter-${tab.value}`}
-          >
-            {tab.label}
-          </button>
-        ))}
+      {/* Filter segmented control: quiet selection (subtle accent tint), clearly
+          distinct from a solid CTA. Each chip shows its live filtered count. */}
+      <div
+        className="mb-6 inline-flex items-center gap-1 rounded-lg bg-muted p-1"
+        role="group"
+        aria-label="Review filters"
+        data-testid="review-filters"
+      >
+        {FILTER_TABS.map((tab) => {
+          const isActive = activeFilter === tab.value;
+          return (
+            <button
+              key={tab.value}
+              type="button"
+              aria-pressed={isActive}
+              onClick={() => setActiveFilter(tab.value)}
+              data-testid={`review-filter-${tab.value}`}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                isActive
+                  ? 'bg-accent-500/15 text-accent-700 dark:text-accent-300'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              {tab.label}
+              <span
+                className={cn(
+                  'text-xs font-semibold tabular-nums',
+                  isActive ? 'text-accent-700 dark:text-accent-300' : 'text-muted-foreground'
+                )}
+              >
+                {filterCounts[tab.value]}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Loading */}
       {isLoading && (
-        <div className="text-gray-500 dark:text-gray-400" data-testid="review-loading">
+        <div className="text-muted-foreground" data-testid="review-loading">
           Loading...
         </div>
       )}
@@ -151,7 +181,7 @@ export default function ReviewTab() {
       {!isLoading && (
         <div className="space-y-2" data-testid="review-list">
           {filteredWorktrees.length === 0 ? (
-            <div className="text-gray-500 dark:text-gray-400 py-8 text-center" data-testid="review-empty">
+            <div className="text-muted-foreground py-8 text-center" data-testid="review-empty">
               {emptyMessage}
             </div>
           ) : (
@@ -161,15 +191,16 @@ export default function ReviewTab() {
                 <Link
                   key={wt.id}
                   href={`/worktrees/${wt.id}`}
-                  className={`block bg-white dark:bg-gray-800 rounded-lg p-4 border transition-colors ${getBorderClass(activeFilter)}`}
+                  className="block"
                   data-testid={`review-item-${wt.id}`}
                 >
+                  <Card padding="md" className={`transition-colors ${getBorderClass(activeFilter)}`}>
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                      <div className="text-sm font-medium text-foreground truncate">
                         {wt.name}
                       </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                      <div className="text-xs text-muted-foreground truncate">
                         {wt.repositoryName}
                       </div>
                     </div>
@@ -182,7 +213,7 @@ export default function ReviewTab() {
                         return (
                           <div key={agent} className="flex items-center gap-1">
                             <CliDot status={agentStatus} label={getCliToolDisplayName(agent)} />
-                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                            <span className="text-xs text-muted-foreground">
                               {getCliToolDisplayName(agent)}
                             </span>
                           </div>
@@ -193,11 +224,12 @@ export default function ReviewTab() {
 
                   {wt.description && (
                     <div className="mt-2">
-                      <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 whitespace-pre-wrap">
+                      <p className="text-xs text-muted-foreground line-clamp-2 whitespace-pre-wrap">
                         {wt.description}
                       </p>
                     </div>
                   )}
+                  </Card>
                 </Link>
               );
             })
