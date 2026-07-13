@@ -15,6 +15,7 @@ import type { BranchInfo, BranchInclude } from '@/types/git';
 import { branchCreatePrompt, branchDeletePrompt } from '@/lib/git-ai-prompt-templates';
 import { AskAiButton, RefreshIcon } from '@/components/worktree/git/gitPaneShared';
 import { useGitPaneContext } from '@/components/worktree/git/GitPaneContext';
+import { Checkbox } from '@/components/ui';
 
 export interface GitBranchPanelProps {
   branches: BranchInfo[];
@@ -271,10 +272,9 @@ export const GitBranchPanel = memo(function GitBranchPanel({
               Delete <span className="font-mono">{deleteTarget.name}</span>?
             </h3>
             <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={deleteForce}
-                onChange={(e) => setDeleteForce(e.target.checked)}
+                onCheckedChange={(checked) => setDeleteForce(checked === true)}
                 data-testid="branch-delete-force"
               />
               Force delete (-D) — unmerged commits will be lost

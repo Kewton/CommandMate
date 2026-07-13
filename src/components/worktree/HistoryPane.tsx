@@ -13,6 +13,7 @@
 import React, { useMemo, useCallback, memo, useRef, useLayoutEffect, useState, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
 import { Search, User, UserCheck, ChevronRight } from 'lucide-react';
+import { Checkbox } from '@/components/ui';
 import type { ChatMessage } from '@/types/models';
 import { useConversationHistory } from '@/hooks/useConversationHistory';
 import { useHistorySearch } from '@/hooks/useHistorySearch';
@@ -514,11 +515,10 @@ export const HistoryPane = memo(function HistoryPane({
           )}
           {onShowArchivedChange && (
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={showArchived}
-                onChange={(e) => onShowArchivedChange(e.target.checked)}
-                className="rounded border-input bg-surface text-accent-500 focus:ring-ring focus:ring-offset-0 h-3.5 w-3.5"
+                onCheckedChange={(checked) => onShowArchivedChange(checked === true)}
+                className="h-3.5 w-3.5"
               />
               Show archived
             </label>

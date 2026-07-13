@@ -72,9 +72,9 @@ describe('MobileAgentInstancesPane (Issue #874)', () => {
     const codex = screen.getByTestId('mobile-visible-instance-toggle-codex') as HTMLInputElement;
 
     // checked state mirrors visibleInstanceIds.
-    expect(claude.checked).toBe(true);
-    expect(codex.checked).toBe(true);
-    expect(claude2.checked).toBe(false);
+    expect(claude).toBeChecked();
+    expect(codex).toBeChecked();
+    expect(claude2).not.toBeChecked();
 
     // alias is the visible label (getInstanceLabel).
     expect(screen.getByText('Claude (review)')).toBeInTheDocument();

@@ -25,6 +25,7 @@ import {
   getCliToolDisplayName,
   type AgentInstance,
 } from '@/lib/cli-tools/types';
+import { Checkbox } from '@/components/ui';
 import { MIN_VISIBLE_INSTANCES } from '@/hooks/useMobileSelectedInstances';
 import { AgentInstancesPane } from '@/components/worktree/AgentInstancesPane';
 
@@ -102,13 +103,11 @@ export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
                   disabled ? 'opacity-60 cursor-not-allowed' : 'hover:bg-gray-50 dark:hover:bg-gray-800'
                 }`}
               >
-                <input
-                  type="checkbox"
+                <Checkbox
                   data-testid={`mobile-visible-instance-toggle-${inst.id}`}
                   checked={checked}
                   disabled={disabled}
-                  onChange={() => onToggleInstanceVisible(inst.id)}
-                  className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-accent-600 focus:ring-ring disabled:opacity-50"
+                  onCheckedChange={() => onToggleInstanceVisible(inst.id)}
                 />
                 <span className="flex-1 min-w-0">
                   <span className="block text-sm font-medium text-gray-700 dark:text-gray-200 truncate">

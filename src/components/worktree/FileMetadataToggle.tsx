@@ -13,6 +13,7 @@
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Settings2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { Checkbox } from '@/components/ui';
 import type {
   FileMetadataDisplaySettings,
 } from '@/hooks/useFileMetadataDisplay';
@@ -101,12 +102,11 @@ export const FileMetadataToggle = memo(function FileMetadataToggle({
               key={row.key}
               className="flex items-center gap-2 px-2 py-1.5 text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/60 rounded cursor-pointer"
             >
-              <input
-                type="checkbox"
+              <Checkbox
                 data-testid={`file-metadata-toggle-${row.key}`}
                 checked={settings[row.key]}
-                onChange={() => handleToggle(row.key)}
-                className="h-3.5 w-3.5 accent-accent-500"
+                onCheckedChange={() => handleToggle(row.key)}
+                className="h-3.5 w-3.5"
               />
               <span>{t(row.labelKey)}</span>
             </label>

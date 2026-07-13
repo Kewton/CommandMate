@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import ReportDatePicker from './ReportDatePicker';
-import { Button, Card, Input, Textarea } from '@/components/ui';
+import { Button, Card, Input, RadioGroup, RadioGroupItem, Textarea } from '@/components/ui';
 import { SUMMARY_ALLOWED_TOOLS, MAX_USER_INSTRUCTION_LENGTH } from '@/config/review-config';
 import { useReportGeneration } from '@/hooks/useReportGeneration';
 import { useGenerationStatus } from '@/hooks/useGenerationStatus';
@@ -233,21 +233,19 @@ export default function ReportTab() {
         <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
           Generation Mode
         </label>
-        <div className="flex gap-4">
+        <RadioGroup
+          value={mode}
+          onValueChange={(v) => setMode(v as GenerationMode)}
+          name="generation-mode"
+          className="flex flex-row gap-4"
+        >
           {MODE_OPTIONS.map((option) => (
             <label key={option.value} className="flex items-center gap-2 text-sm cursor-pointer">
-              <input
-                type="radio"
-                name="generation-mode"
-                value={option.value}
-                checked={mode === option.value}
-                onChange={() => setMode(option.value)}
-                data-testid={`mode-radio-${option.value}`}
-              />
+              <RadioGroupItem value={option.value} data-testid={`mode-radio-${option.value}`} />
               <span className="text-gray-700 dark:text-gray-300">{option.label}</span>
             </label>
           ))}
-        </div>
+        </RadioGroup>
       </div>
 
       {/* Template selector (only in template mode) */}

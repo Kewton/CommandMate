@@ -10,6 +10,7 @@ import { useState, useCallback, useId, useMemo, useRef, useEffect, memo } from '
 import { useTranslations } from 'next-intl';
 import type { PromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
+import { RadioGroup, RadioGroupItem } from '@/components/ui';
 import { usePromptAnimation } from '@/hooks/usePromptAnimation';
 
 /** Animation duration for sheet transitions */
@@ -391,7 +392,13 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
     <div className="space-y-3">
       <fieldset>
         <legend className="sr-only">Select an option</legend>
-        <div className="space-y-2">
+        <RadioGroup
+          name={groupName}
+          value={selectedOption != null ? String(selectedOption) : ''}
+          onValueChange={(v) => onSelectOption(Number(v))}
+          disabled={disabled}
+          className="flex flex-col gap-2"
+        >
           {promptData.options.map((option) => {
             const isSelected = selectedOption === option.number;
             return (
@@ -403,13 +410,8 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
                     : 'bg-white dark:bg-gray-700 border-2 border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
                 } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
-                <input
-                  type="radio"
-                  name={groupName}
-                  value={option.number}
-                  checked={isSelected}
-                  onChange={() => onSelectOption(option.number)}
-                  disabled={disabled}
+                <RadioGroupItem
+                  value={String(option.number)}
                   className="mt-1"
                 />
                 <div className="flex-1">
@@ -423,7 +425,7 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
               </label>
             );
           })}
-        </div>
+        </RadioGroup>
       </fieldset>
 
       {/* Text input for options that require it */}

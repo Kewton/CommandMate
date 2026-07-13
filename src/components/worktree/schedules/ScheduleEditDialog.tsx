@@ -23,6 +23,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
 import { Info, SlidersHorizontal, MessageSquare, ChevronDown, Sparkles } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
+import { Checkbox } from '@/components/ui';
 import { FullScreenModal } from '@/components/common/FullScreenModal';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import {
@@ -493,12 +494,10 @@ export function ScheduleEditDialog({
 
       {/* Enabled */}
       <label className="flex items-center gap-2 cursor-pointer">
-        <input
-          type="checkbox"
+        <Checkbox
           data-testid="schedule-enabled-toggle"
           checked={form.enabled}
-          onChange={(e) => setForm((prev) => ({ ...prev, enabled: e.target.checked }))}
-          className="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-ring"
+          onCheckedChange={(checked) => setForm((prev) => ({ ...prev, enabled: checked === true }))}
         />
         <span className="text-sm text-gray-700 dark:text-gray-300">{t('edit.enabledLabel')}</span>
       </label>

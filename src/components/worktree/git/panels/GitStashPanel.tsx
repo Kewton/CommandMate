@@ -15,6 +15,7 @@ import { stashCleanupPrompt, stashConflictPrompt } from '@/lib/git-ai-prompt-tem
 import { DANGER_ZONE_RUNNING_SESSION_WARNING } from '@/config/git-status-config';
 import { AskAiButton, RefreshIcon } from '@/components/worktree/git/gitPaneShared';
 import { useGitPaneContext } from '@/components/worktree/git/GitPaneContext';
+import { Checkbox } from '@/components/ui';
 
 export interface GitStashPanelProps {
   stashes: StashInfo[];
@@ -122,10 +123,9 @@ export const GitStashPanel = memo(function GitStashPanel({
             />
             <div className="flex items-center justify-between gap-2">
               <label className="flex items-center gap-1 text-xs text-gray-600 dark:text-gray-300">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={includeUntracked}
-                  onChange={(e) => setIncludeUntracked(e.target.checked)}
+                  onCheckedChange={(checked) => setIncludeUntracked(checked === true)}
                   data-testid="git-stash-include-untracked"
                 />
                 Include untracked

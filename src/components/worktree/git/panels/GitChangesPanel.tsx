@@ -18,6 +18,7 @@ import {
   type ChangesDiffMode,
 } from '@/components/worktree/git/gitPaneShared';
 import { useGitPaneContext } from '@/components/worktree/git/GitPaneContext';
+import { Checkbox } from '@/components/ui';
 
 interface ChangedFileListProps {
   title: string;
@@ -344,10 +345,9 @@ export const GitChangesPanel = memo(function GitChangesPanel({
             />
             <div className="flex items-center justify-between gap-2">
               <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={amend}
-                  onChange={(e) => onAmendChange(e.target.checked)}
+                  onCheckedChange={(checked) => onAmendChange(checked === true)}
                   data-testid="git-amend-checkbox"
                 />
                 Amend

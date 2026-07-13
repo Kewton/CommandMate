@@ -19,6 +19,7 @@ import {
   type CLIToolType,
 } from '@/lib/cli-tools/types';
 import { VibeLocalSettings } from '@/components/worktree/VibeLocalSettings';
+import { Checkbox } from '@/components/ui';
 
 // ============================================================================
 // Types
@@ -190,14 +191,12 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
                     : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'
               }`}
             >
-              <input
-                type="checkbox"
+              <Checkbox
                 data-testid={`agent-checkbox-${toolId}`}
                 aria-label={getCliToolDisplayName(toolId)}
                 checked={isChecked}
                 disabled={isDisabled || saving}
-                onChange={(e) => handleCheckboxChange(toolId, e.target.checked)}
-                className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-accent-600 focus:ring-ring"
+                onCheckedChange={(checked) => handleCheckboxChange(toolId, checked === true)}
               />
               <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
                 {getCliToolDisplayName(toolId)}
