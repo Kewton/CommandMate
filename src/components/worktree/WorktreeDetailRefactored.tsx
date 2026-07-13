@@ -215,6 +215,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     tWorktree,
     tabsActions,
     tabsState,
+    resetFileTreeView,
     toasts,
     toggleInstanceVisible,
     vibeLocalContextWindow,
@@ -313,6 +314,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           onDelete={handleDelete}
           onUpload={handleUpload}
           onMove={handleMove}
+          onFileTreeReset={resetFileTreeView}
           onDiffSelect={handleDiffSelect}
           onAgentInstancesChange={handleAgentInstancesChange}
           vibeLocalModel={vibeLocalModel}
@@ -465,6 +467,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onDelete={handleDelete}
             onUpload={handleUpload}
             onMove={handleMove}
+            onFileTreeReset={resetFileTreeView}
             refreshTrigger={fileTreeRefresh}
             fileSearch={fileSearch}
             showToast={showToast}

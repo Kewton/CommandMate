@@ -804,6 +804,19 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     setEditorFilePath(null);
   }, []);
 
+  /**
+   * [Issue #1108] Controller-owned part of the Files full view reset. The
+   * FileTreeView toolbar button resets its own view state (expansion / cache /
+   * scroll) and then calls this to clear search and close open file surfaces:
+   * desktop tabs plus the mobile file viewer / editor (mobile has no tabs).
+   */
+  const resetFileTreeView = useCallback(() => {
+    fileSearch.clearSearch();
+    tabsActions.closeAllTabs();
+    setMobileFileViewerPath(null);
+    setEditorFilePath(null);
+  }, [fileSearch, tabsActions]);
+
   /** Handle file save in editor - refresh tree to reflect changes (savedPath accepted for callback interface compatibility) */
   const handleEditorSave = useCallback((_savedPath: string) => {
     setFileTreeRefresh(prev => prev + 1);
@@ -1460,6 +1473,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     handleMobileFileViewerClose,
     handleMobileTabChange,
     handleMove,
+    resetFileTreeView,
     handleMoveCancel,
     handleMoveConfirm,
     handleNewDirectory,

@@ -334,6 +334,29 @@ describe('fileTabsReducer', () => {
     });
   });
 
+  describe('CLOSE_ALL', () => {
+    it('should clear all tabs and reset activeIndex to null', () => {
+      const stateWithTabs: FileTabsState = {
+        tabs: [
+          { path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false },
+          { path: 'b.ts', name: 'b.ts', content: null, loading: false, error: null, isDirty: false },
+        ],
+        activeIndex: 1,
+      };
+      const result = fileTabsReducer(stateWithTabs, { type: 'CLOSE_ALL' });
+
+      expect(result.tabs).toEqual([]);
+      expect(result.activeIndex).toBeNull();
+    });
+
+    it('should return the same reference when already empty (no-op)', () => {
+      const emptyState: FileTabsState = { tabs: [], activeIndex: null };
+      const result = fileTabsReducer(emptyState, { type: 'CLOSE_ALL' });
+
+      expect(result).toBe(emptyState);
+    });
+  });
+
   // ============================================================================
   // MAX_FILE_TABS regression guard (Issue #505) [DR3-002]
   // ============================================================================
@@ -641,6 +664,37 @@ describe('useFileTabs', () => {
 
       expect(result.current[0].tabs).toHaveLength(1);
       expect(result.current[0].tabs[0].path).toBe('b.ts');
+    });
+  });
+
+  describe('closeAllTabs', () => {
+    it('should close every open tab and clear the persisted key', () => {
+      const { result } = renderHook(() => useFileTabs('test-wt'));
+
+      act(() => {
+        result.current[1].openFile('a.ts');
+        result.current[1].openFile('b.ts');
+        result.current[1].openFile('c.ts');
+      });
+      expect(result.current[0].tabs).toHaveLength(3);
+
+      act(() => {
+        result.current[1].closeAllTabs();
+      });
+
+      expect(result.current[0].tabs).toHaveLength(0);
+      expect(result.current[0].activeIndex).toBeNull();
+      // Persisted empty state should not restore any tabs.
+      const raw = window.localStorage.getItem('commandmate:file-tabs:test-wt');
+      const parsed = raw ? JSON.parse(raw) : { paths: [] };
+      expect(parsed.paths).toEqual([]);
+    });
+
+    it('closeAllTabs identity is stable across renders', () => {
+      const { result, rerender } = renderHook(() => useFileTabs('test-wt'));
+      const fn1 = result.current[1].closeAllTabs;
+      rerender();
+      expect(Object.is(fn1, result.current[1].closeAllTabs)).toBe(true);
     });
   });
 

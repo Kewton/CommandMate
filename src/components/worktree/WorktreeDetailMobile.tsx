@@ -131,6 +131,8 @@ interface MobileContentProps {
   onUpload: (targetDir: string) => void;
   /** [Issue #162] Move callback */
   onMove?: (path: string, type: 'file' | 'directory') => void;
+  /** [Issue #1108] Reset the controller-owned Files view state (search + mobile viewer/editor). */
+  onFileTreeReset?: () => void;
   refreshTrigger: number;
   /** [Issue #21] File search hook return object */
   fileSearch: UseFileSearchReturn;
@@ -248,6 +250,7 @@ export const MobileContent = memo(function MobileContent({
   onDelete,
   onUpload,
   onMove,
+  onFileTreeReset,
   refreshTrigger,
   fileSearch,
   showToast,
@@ -371,6 +374,7 @@ export const MobileContent = memo(function MobileContent({
               onDelete={onDelete}
               onUpload={onUpload}
               onMove={onMove}
+              onResetView={onFileTreeReset}
               refreshTrigger={refreshTrigger}
               pollingEnabled={activeTab === 'files'}
               searchQuery={fileSearch.query}

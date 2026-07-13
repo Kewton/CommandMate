@@ -28,8 +28,9 @@ import { computeMatchedPaths } from '@/lib/utils';
 import { useFilePolling } from '@/hooks/useFilePolling';
 import { useFileMetadataDisplay } from '@/hooks/useFileMetadataDisplay';
 import { FILE_TREE_POLL_INTERVAL_MS } from '@/config/file-polling-config';
+import { useFileTreeExpandedState } from '@/hooks/useFileTreeExpandedState';
 import { useLocale } from 'next-intl';
-import { FilePlus, FolderPlus, AlertCircle, RefreshCw } from 'lucide-react';
+import { FilePlus, FolderPlus, AlertCircle, RefreshCw, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui';
 
 // ============================================================================
@@ -73,6 +74,13 @@ export interface FileTreeViewProps {
   searchResults?: SearchResultItem[];
   /** [Issue #21] Callback when a search result is selected (optional) */
   onSearchResultSelect?: (filePath: string) => void;
+  /**
+   * [Issue #1108] Called by the toolbar reset button after the tree clears its
+   * own view state (expansion / cache / scroll). The parent uses it to reset
+   * the controller-owned parts of a full reset: clear search, close open file
+   * tabs / viewer. Optional so the tree still renders without it.
+   */
+  onResetView?: () => void;
 }
 
 /** Maximum number of concurrent directory fetches during tree reload */
@@ -113,6 +121,7 @@ export const FileTreeView = memo(function FileTreeView({
   searchMode,
   searchResults,
   onSearchResultSelect,
+  onResetView,
 }: FileTreeViewProps) {
   // [Issue #162] Get locale for date formatting
   const locale = useLocale();
@@ -123,8 +132,15 @@ export const FileTreeView = memo(function FileTreeView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rootItems, setRootItems] = useState<TreeItem[]>([]);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // [Issue #1108] Expansion set is persisted per worktree in localStorage so
+  // open folders survive activity switches / reloads / worktree round-trips.
+  const { expanded, setExpanded, resetExpanded } =
+    useFileTreeExpandedState(worktreeId);
   const [cache, setCache] = useState<Map<string, TreeItem[]>>(() => new Map());
+
+  // [Issue #1108] Ref to the scrollable tree container so the reset button can
+  // return the scroll position to the top.
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // [Issue #164] Ref to access current expanded state without adding to useEffect dependencies
   const expandedRef = useRef(expanded);
@@ -246,7 +262,7 @@ export const FileTreeView = memo(function FileTreeView({
         setLoading(false);
       }
     }
-  }, [fetchDirectory]);
+  }, [fetchDirectory, setExpanded]);
 
   useEffect(() => {
     void reloadTreeWithExpandedDirs();
@@ -390,7 +406,20 @@ export const FileTreeView = memo(function FileTreeView({
       }
       return next;
     });
-  }, []);
+  }, [setExpanded]);
+
+  /**
+   * [Issue #1108] Full view reset: return the Files view to its initial state.
+   * Resets the tree-owned parts here (expansion + persisted key, cached
+   * children, scroll position) and delegates the controller-owned parts
+   * (search, open file tabs / viewer) to `onResetView`.
+   */
+  const handleResetView = useCallback(() => {
+    resetExpanded();
+    setCache(new Map());
+    scrollContainerRef.current?.scrollTo({ top: 0 });
+    onResetView?.();
+  }, [resetExpanded, onResetView]);
 
   /**
    * [Issue #21] Compute matched paths for content search
@@ -422,7 +451,7 @@ export const FileTreeView = memo(function FileTreeView({
         return next;
       });
     }
-  }, [matchedPaths, cache, searchResults]);
+  }, [matchedPaths, cache, searchResults, setExpanded]);
 
   /**
    * [Issue #21] Filter root items based on search
@@ -573,6 +602,7 @@ export const FileTreeView = memo(function FileTreeView({
 
   return (
     <div
+      ref={scrollContainerRef}
       data-testid="file-tree-view"
       role="tree"
       aria-label="File tree"
@@ -645,6 +675,22 @@ export const FileTreeView = memo(function FileTreeView({
               className={`w-4 h-4 ${isRefetching ? 'animate-spin' : ''}`}
               aria-hidden="true"
             />
+          </button>
+          {/* [Issue #1108] Reset the Files view to its initial state: collapse
+              all folders (and drop the persisted key), clear the cache, scroll
+              to top, and clear search / open file tabs / viewer via onResetView.
+              Distinct from "更新" (refresh), which preserves expansion. Lives in
+              the always-visible toolbar so it stays reachable on touch devices. */}
+          {/* Issue #1061: dense toolbar icon control — base padding/hover-lift would change the dense feel — 残置 */}
+          <button
+            data-testid="file-tree-reset-button"
+            type="button"
+            onClick={handleResetView}
+            aria-label="Reset file tree view"
+            title="表示をリセット"
+            className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:bg-muted rounded transition-colors"
+          >
+            <RotateCcw className="w-4 h-4" aria-hidden="true" />
           </button>
         </div>
       </div>
