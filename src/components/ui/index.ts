@@ -64,3 +64,7 @@ export {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from './DropdownMenu';
+
+// Keyboard-key badge (Issue #1077)
+export { Kbd } from './Kbd';
+export type { KbdProps } from './Kbd';
