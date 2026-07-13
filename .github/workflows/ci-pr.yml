@@ -40,12 +40,14 @@ jobs:
           # docs/design-system.md (foreground / muted / muted-foreground / border /
           # surface / input / ring), NOT by editing this whitelist.
           #
-          # WHITELIST (guarded) = migrated dirs only.
-          # EXCLUDED (NOT yet migrated — #1061 will extend the guard):
-          #   - src/components/worktree, src/components/mobile,
-          #     src/components/external-apps
-          #   - src/app/worktrees/**  (worktree domain; incl. the intentionally
-          #     always-dark terminal page and its CLI brand colors)
+          # WHITELIST (guarded) = migrated dirs. #1061 extended this to the
+          # worktree/mobile/external-apps component trees.
+          # EXCLUDED (intentional always-dark islands / not yet migrated):
+          #   - *Terminal* source files (worktree/mobile): the terminal output
+          #     surfaces stay dark in BOTH themes, matching the fixed xterm theme
+          #     (#1079) — they use raw dark utilities on purpose.
+          #   - src/app/worktrees/**  (worktree detail route / terminal page,
+          #     incl. CLI brand colors) — out of #1061's component scope.
           # Test files (*.test.*, *.spec.*, __tests__) are excluded because they
           # assert on concrete class strings.
           PATTERN='(bg|text|border|ring)-(gray|slate)-[0-9]'
@@ -59,8 +61,12 @@ jobs:
             'src/components/common' \
             'src/components/sidebar' \
             'src/components/providers' \
+            'src/components/worktree' \
+            'src/components/mobile' \
+            'src/components/external-apps' \
             ':(exclude)src/app/worktrees' \
-            | grep -vE '\.test\.|\.spec\.|__tests__' || true)
+            | grep -vE '\.test\.|\.spec\.|__tests__' \
+            | grep -vE '^[^:]*Terminal[^:]*:' || true)
           if [ -n "$MATCHES" ]; then
             echo "::error::Raw gray/slate color utilities found in migrated directories (Issue #1082). Replace with semantic tokens — see docs/design-system.md."
             echo "$MATCHES"
