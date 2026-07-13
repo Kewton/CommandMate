@@ -28,7 +28,9 @@
 'use client';
 
 import React, { memo, useCallback, useEffect, useState } from 'react';
-import { Badge, Button, Card, Input } from '@/components/ui';
+import { Pencil } from 'lucide-react';
+import { Button, Card, Input, StatusDot } from '@/components/ui';
+import { cn } from '@/lib/utils/cn';
 import {
   handleApiError,
   repositoryApi,
@@ -370,15 +372,11 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                             </p>
                           )}
                         </div>
+                      ) : repo.displayName ? (
+                        <span className="text-foreground">{repo.displayName}</span>
                       ) : (
-                        <span
-                          className={
-                            repo.displayName
-                              ? 'text-gray-900 dark:text-gray-100'
-                              : 'text-gray-400 dark:text-gray-500 italic'
-                          }
-                        >
-                          {repo.displayName ?? '(none)'}
+                        <span className="text-muted-foreground" aria-hidden="true">
+                          &mdash;
                         </span>
                       )}
                     </td>
@@ -390,18 +388,27 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                         onToggle={handleToggleVisibility}
                       />
                     </td>
-                    <td className="px-4 py-3 align-top text-xs font-mono text-gray-500 dark:text-gray-400 break-all">
-                      {repo.path}
+                    <td className="px-4 py-3 align-top">
+                      <span
+                        className="block max-w-[240px] truncate font-mono text-xs text-muted-foreground"
+                        title={repo.path}
+                      >
+                        {repo.path}
+                      </span>
                     </td>
                     <td className="px-4 py-3 align-top text-gray-700 dark:text-gray-300">
                       {repo.worktreeCount}
                     </td>
                     <td className="px-4 py-3 align-top">
-                      {repo.enabled ? (
-                        <Badge variant="success">Enabled</Badge>
-                      ) : (
-                        <Badge variant="gray">Disabled</Badge>
-                      )}
+                      <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+                        <StatusDot
+                          status={repo.enabled ? 'ready' : 'idle'}
+                          size="sm"
+                          label={repo.enabled ? 'Enabled' : 'Disabled'}
+                          aria-hidden="true"
+                        />
+                        {repo.enabled ? 'Enabled' : 'Disabled'}
+                      </span>
                     </td>
                     <td className="px-4 py-3 align-top">
                       {isEditing ? (
@@ -425,12 +432,13 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                         </div>
                       ) : (
                         <Button
-                          variant="secondary"
+                          variant="ghost"
                           size="sm"
+                          className="px-2"
                           onClick={() => handleStartEdit(repo)}
                           aria-label={`Edit display name for ${repo.name}`}
                         >
-                          Edit
+                          <Pencil className="h-4 w-4" aria-hidden="true" />
                         </Button>
                       )}
                     </td>
@@ -480,24 +488,19 @@ function VisibilityToggle({
       data-testid={`visibility-toggle-${repo.id}`}
       onClick={() => onToggle(repo)}
       disabled={pending}
-      className={`
-        inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium
-        border transition-colors
-        focus:outline-none focus:ring-2 focus:ring-ring
-        disabled:opacity-60 disabled:cursor-not-allowed
-        ${
-          isVisible
-            ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 border-green-300 dark:border-green-800'
-            : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-700'
-        }
-      `}
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium',
+        'text-muted-foreground transition-colors',
+        'hover:bg-muted hover:text-foreground',
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        'disabled:opacity-60 disabled:cursor-not-allowed'
+      )}
     >
-      <span
+      <StatusDot
+        status={isVisible ? 'ready' : 'idle'}
+        size="sm"
+        label={isVisible ? 'Visible' : 'Hidden'}
         aria-hidden="true"
-        className={`
-          inline-block w-2 h-2 rounded-full
-          ${isVisible ? 'bg-green-500' : 'bg-gray-400'}
-        `}
       />
       {isVisible ? 'Visible' : 'Hidden'}
     </button>

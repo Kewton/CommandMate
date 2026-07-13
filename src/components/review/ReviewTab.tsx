@@ -10,7 +10,8 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { Button, Card } from '@/components/ui';
+import { Card } from '@/components/ui';
+import { cn } from '@/lib/utils/cn';
 import { REVIEW_POLL_INTERVAL_MS } from '@/config/review-config';
 import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
 import { deriveCliStatus } from '@/types/sidebar';
@@ -26,6 +27,14 @@ const FILTER_TABS: Array<{ value: ReviewFilter; label: string }> = [
   { value: 'approval', label: 'Approval' },
   { value: 'stalled', label: 'Stalled' },
 ];
+
+/** Membership predicate per filter. Shared by the visible list and the chip
+ * counts so both always agree (counts are derived, never fetched separately). */
+const FILTER_PREDICATES: Record<ReviewFilter, (wt: Worktree) => boolean> = {
+  in_review: (wt) => wt.status === 'in_review',
+  approval: (wt) => wt.isWaitingForResponse === true,
+  stalled: (wt) => wt.isStalled === true,
+};
 
 /** Small CLI status dot */
 function CliDot({ status, label }: { status: BranchStatus; label: string }) {
@@ -95,20 +104,19 @@ export default function ReviewTab() {
     };
   }, [fetchWorktrees]);
 
-  const filteredWorktrees = useMemo(() => {
-    return worktrees.filter((wt) => {
-      switch (activeFilter) {
-        case 'in_review':
-          return wt.status === 'in_review';
-        case 'approval':
-          return wt.isWaitingForResponse === true;
-        case 'stalled':
-          return wt.isStalled === true;
-        default:
-          return false;
-      }
-    });
-  }, [worktrees, activeFilter]);
+  const filteredWorktrees = useMemo(
+    () => worktrees.filter(FILTER_PREDICATES[activeFilter]),
+    [worktrees, activeFilter]
+  );
+
+  const filterCounts = useMemo<Record<ReviewFilter, number>>(
+    () => ({
+      in_review: worktrees.filter(FILTER_PREDICATES.in_review).length,
+      approval: worktrees.filter(FILTER_PREDICATES.approval).length,
+      stalled: worktrees.filter(FILTER_PREDICATES.stalled).length,
+    }),
+    [worktrees]
+  );
 
   const emptyMessage = useMemo(() => {
     switch (activeFilter) {
@@ -123,18 +131,43 @@ export default function ReviewTab() {
 
   return (
     <>
-      {/* Filter tabs */}
-      <div className="flex gap-2 mb-6" data-testid="review-filters">
-        {FILTER_TABS.map((tab) => (
-          <Button
-            key={tab.value}
-            variant={activeFilter === tab.value ? 'primary' : 'secondary'}
-            onClick={() => setActiveFilter(tab.value)}
-            data-testid={`review-filter-${tab.value}`}
-          >
-            {tab.label}
-          </Button>
-        ))}
+      {/* Filter segmented control: quiet selection (subtle accent tint), clearly
+          distinct from a solid CTA. Each chip shows its live filtered count. */}
+      <div
+        className="mb-6 inline-flex items-center gap-1 rounded-lg bg-muted p-1"
+        role="group"
+        aria-label="Review filters"
+        data-testid="review-filters"
+      >
+        {FILTER_TABS.map((tab) => {
+          const isActive = activeFilter === tab.value;
+          return (
+            <button
+              key={tab.value}
+              type="button"
+              aria-pressed={isActive}
+              onClick={() => setActiveFilter(tab.value)}
+              data-testid={`review-filter-${tab.value}`}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                isActive
+                  ? 'bg-accent-500/15 text-accent-700 dark:text-accent-300'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              {tab.label}
+              <span
+                className={cn(
+                  'text-xs font-semibold tabular-nums',
+                  isActive ? 'text-accent-700 dark:text-accent-300' : 'text-muted-foreground'
+                )}
+              >
+                {filterCounts[tab.value]}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Loading */}

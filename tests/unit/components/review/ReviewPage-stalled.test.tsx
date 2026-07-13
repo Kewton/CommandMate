@@ -122,6 +122,30 @@ describe('Review page filters', () => {
     });
   });
 
+  it('shows a count badge per filter reflecting the filtered length', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        worktrees: [
+          { id: 'a', name: 'a', repositoryName: 'r', status: 'in_review', selectedAgents: ['claude'] },
+          { id: 'b', name: 'b', repositoryName: 'r', status: 'in_review', selectedAgents: ['claude'] },
+          { id: 'c', name: 'c', repositoryName: 'r', status: 'in_progress', isWaitingForResponse: true, selectedAgents: ['claude'] },
+          // no stalled worktrees
+        ],
+      }),
+    }) as unknown as typeof fetch;
+
+    render(React.createElement(ReviewPage));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('review-filter-in_review')).toBeDefined();
+    });
+
+    expect(screen.getByTestId('review-filter-in_review').textContent).toMatch(/2/);
+    expect(screen.getByTestId('review-filter-approval').textContent).toMatch(/1/);
+    expect(screen.getByTestId('review-filter-stalled').textContent).toMatch(/0/);
+  });
+
   it('should show in_review worktrees by default', async () => {
     render(React.createElement(ReviewPage));
 
