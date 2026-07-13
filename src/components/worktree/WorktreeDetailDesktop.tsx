@@ -137,6 +137,8 @@ export interface WorktreeDetailDesktopProps {
   onDelete: (path: string) => void;
   onUpload: (targetDir: string) => void;
   onMove: (path: string, type: 'file' | 'directory') => void;
+  /** [Issue #1108] Reset the controller-owned Files view state (search + tabs/viewer). */
+  onFileTreeReset: () => void;
 
   // Git activity
   onDiffSelect: (diff: string, filePath: string) => void;
@@ -242,6 +244,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   onDelete,
   onUpload,
   onMove,
+  onFileTreeReset,
   onDiffSelect,
   onAgentInstancesChange,
   vibeLocalModel,
@@ -539,6 +542,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             onDelete={onDelete}
             onUpload={onUpload}
             onMove={onMove}
+            onResetView={onFileTreeReset}
             refreshTrigger={fileTreeRefresh}
             pollingEnabled={activeActivity === 'files'}
             searchQuery={fileSearch.query}
@@ -610,6 +614,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       onDelete,
       onUpload,
       onMove,
+      onFileTreeReset,
       fileTreeRefresh,
       onDiffSelect,
       handleInsertToMessage,
