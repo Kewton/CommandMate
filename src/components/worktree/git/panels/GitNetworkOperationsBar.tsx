@@ -82,10 +82,10 @@ export const GitNetworkOperationsBar = memo(function GitNetworkOperationsBar({
 
   return (
     <div
-      className="flex flex-col gap-1.5 px-3 py-2 border-b border-gray-200 dark:border-gray-700"
+      className="flex flex-col gap-1.5 px-3 py-2 border-b border-border"
       data-testid="git-network-section"
     >
-      <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+      <span className="text-xs font-medium text-muted-foreground">
         Quick actions
       </span>
 
@@ -97,7 +97,7 @@ export const GitNetworkOperationsBar = memo(function GitNetworkOperationsBar({
             type="button"
             onClick={onFetch}
             disabled={running}
-            className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+            className="px-2 py-1 text-xs rounded border border-border text-foreground hover:bg-muted disabled:opacity-50"
             data-testid="git-fetch-button"
           >
             Fetch

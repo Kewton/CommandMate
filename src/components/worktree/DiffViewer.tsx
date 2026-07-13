@@ -37,9 +37,9 @@ const DiffLine = memo(function DiffLine({ line }: { line: string }) {
   } else if (line.startsWith('@@')) {
     className += ' text-info bg-info/10';
   } else if (line.startsWith('diff --git') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) {
-    className += ' text-gray-500 dark:text-gray-400';
+    className += ' text-muted-foreground';
   } else {
-    className += ' text-gray-700 dark:text-gray-300';
+    className += ' text-foreground';
   }
 
   return <div className={className}>{line}</div>;
@@ -55,21 +55,21 @@ export const DiffViewer = memo(function DiffViewer({
   onClose,
 }: DiffViewerProps) {
   return (
-    <div className="h-full flex flex-col bg-white dark:bg-gray-900">
+    <div className="h-full flex flex-col bg-surface">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 shrink-0">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-muted shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-xs font-medium text-accent-600 dark:text-accent-400 shrink-0">
             DIFF
           </span>
-          <span className="text-xs font-mono text-gray-600 dark:text-gray-300 truncate">
+          <span className="text-xs font-mono text-muted-foreground truncate">
             {filePath}
           </span>
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded shrink-0"
+          className="p-1 text-muted-foreground hover:text-foreground rounded shrink-0"
           aria-label="Close diff view"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">

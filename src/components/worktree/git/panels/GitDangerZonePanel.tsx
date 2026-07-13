@@ -131,7 +131,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
             )}
           </div>
           {!selectedCommit && (
-            <p className="text-xs text-gray-500 dark:text-gray-400">
+            <p className="text-xs text-muted-foreground">
               Select a commit in Commit History to enable revert / reset-to-commit.
             </p>
           )}
@@ -154,11 +154,11 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
             name="reset-target"
             className="flex flex-col gap-1 mb-2"
           >
-            <label className="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300">
+            <label className="flex items-center gap-1 text-xs text-foreground">
               <RadioGroupItem value="head" data-testid="reset-target-head" />
               HEAD
             </label>
-            <label className="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300">
+            <label className="flex items-center gap-1 text-xs text-foreground">
               <RadioGroupItem
                 value="commit"
                 disabled={!selectedCommit}
@@ -176,7 +176,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
             className="flex flex-col gap-1 mb-2"
           >
             {(['soft', 'mixed', 'hard'] as GitResetMode[]).map((m) => (
-              <label key={m} className="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300">
+              <label key={m} className="flex items-center gap-1 text-xs text-foreground">
                 <RadioGroupItem value={m} data-testid={`reset-mode-${m}`} />
                 {m}
               </label>
@@ -205,7 +205,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
                 value={confirmBranch}
                 onChange={(e) => setConfirmBranch(e.target.value)}
                 placeholder={`Type "${currentBranch ?? ''}" to confirm`}
-                className="w-full px-2 py-1 text-xs border border-red-300 dark:border-red-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                className="w-full px-2 py-1 text-xs border border-red-300 dark:border-red-600 rounded bg-surface dark:bg-surface-2 text-foreground"
                 data-testid="reset-hard-branch-input"
               />
             </div>
@@ -249,7 +249,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
                 setShowResetModal(false);
                 setConfirmBranch('');
               }}
-              className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800"
+              className="px-2 py-1 text-xs rounded border border-border hover:bg-muted"
             >
               Cancel
             </button>
@@ -265,7 +265,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
           role="dialog"
         >
           <p className="text-sm font-medium text-red-700 dark:text-red-300 mb-2">Revert</p>
-          <p className="text-xs text-gray-700 dark:text-gray-300 mb-2">
+          <p className="text-xs text-foreground mb-2">
             Revert commit <span className="font-mono">{selectedCommit.slice(0, 7)}</span>
           </p>
           {hasRunningSession && (
@@ -276,7 +276,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
               {DANGER_ZONE_RUNNING_SESSION_WARNING}
             </p>
           )}
-          <label className="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 mb-2">
+          <label className="flex items-center gap-1 text-xs text-foreground mb-2">
             <Checkbox
               checked={revertNoCommit}
               onCheckedChange={(checked) => setRevertNoCommit(checked === true)}
@@ -315,7 +315,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
                 setShowRevertModal(false);
                 setRevertNoCommit(false);
               }}
-              className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800"
+              className="px-2 py-1 text-xs rounded border border-border hover:bg-muted"
             >
               Cancel
             </button>
@@ -345,7 +345,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
               {DANGER_ZONE_RUNNING_SESSION_WARNING}
             </p>
           )}
-          <label className="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 mb-2">
+          <label className="flex items-center gap-1 text-xs text-foreground mb-2">
             <Checkbox
               checked={forceWithLease}
               onCheckedChange={(checked) => setForceWithLease(checked === true)}
@@ -379,7 +379,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
             <button
               type="button"
               onClick={() => setShowForcePushModal(false)}
-              className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800"
+              className="px-2 py-1 text-xs rounded border border-border hover:bg-muted"
             >
               Cancel
             </button>

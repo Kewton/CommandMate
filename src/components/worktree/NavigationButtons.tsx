@@ -94,23 +94,23 @@ export function NavigationButtons({ worktreeId, cliToolId, instanceId, onKeysSen
 
   return (
     <div
-      className="flex flex-wrap items-center gap-1.5 py-1.5 bg-gray-100 dark:bg-gray-800 rounded-lg"
+      className="flex flex-wrap items-center gap-1.5 py-1.5 bg-muted rounded-lg"
       onKeyDown={handleKeyDown}
       role="toolbar"
       aria-label="TUI Navigation"
     >
-      <span className="text-xs text-gray-500 dark:text-gray-400 mx-2">Nav</span>
+      <span className="text-xs text-muted-foreground mx-2">Nav</span>
       {buttons.map(({ key, label, ariaLabel }) => (
         <button
           key={key}
           type="button"
           className={`min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
-            border border-gray-300 dark:border-gray-600
+            border border-border
             focus:outline-none focus:ring-2 focus:ring-ring
             transition-colors duration-75
             ${activeKey === key
               ? 'bg-accent-500 text-white border-accent-500 scale-95'
-              : 'bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 active:bg-gray-100 dark:active:bg-gray-500'
+              : 'bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted'
             }`}
           aria-label={ariaLabel}
           onClick={() => sendKeys([key])}

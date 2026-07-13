@@ -90,8 +90,8 @@ describe('Dynamic Import Patterns', () => {
       expect(content).toContain('mod.MarkdownEditor');
     });
 
-    it('should have a loading component with bg-white theme', () => {
-      expect(content).toContain('bg-white');
+    it('should have a loading component with bg-surface theme', () => {
+      expect(content).toContain('bg-surface');
       expect(content).toContain('loading');
     });
 

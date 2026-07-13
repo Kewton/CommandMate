@@ -66,7 +66,7 @@ function FileViewerSearchBar({
   onClose: () => void;
 }) {
   return (
-    <div className="flex items-center gap-1 px-2 py-1 bg-gray-200 dark:bg-gray-700 border-b border-gray-300 dark:border-gray-600">
+    <div className="flex items-center gap-1 px-2 py-1 bg-muted border-b border-border">
       <input
         ref={searchInputRef}
         type="text"
@@ -77,18 +77,18 @@ function FileViewerSearchBar({
           if (e.key === 'Enter') { if (e.shiftKey) { onPrev(); } else { onNext(); } }
         }}
         placeholder="検索..."
-        className="flex-1 min-w-0 px-2 py-0.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-ring"
+        className="flex-1 min-w-0 px-2 py-0.5 text-sm bg-surface dark:bg-surface-2 text-foreground border border-input rounded outline-none focus:ring-1 focus:ring-ring"
         autoComplete="off"
         autoCorrect="off"
         autoCapitalize="off"
         spellCheck={false}
       />
-      <span className="text-xs text-gray-500 min-w-[3rem] text-right">
+      <span className="text-xs text-muted-foreground min-w-[3rem] text-right">
         {searchMatches.length > 0 ? `${searchCurrentIdx + 1}/${searchMatches.length}` : '0/0'}
       </span>
-      <button onClick={onPrev} disabled={searchMatches.length === 0} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white disabled:text-gray-300 dark:disabled:text-gray-600" aria-label="前の結果">▲</button>
-      <button onClick={onNext} disabled={searchMatches.length === 0} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white disabled:text-gray-300 dark:disabled:text-gray-600" aria-label="次の結果">▼</button>
-      <button onClick={onClose} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-gray-400 hover:text-gray-800 dark:hover:text-white" aria-label="検索を閉じる"><X className="w-4 h-4" /></button>
+      <button onClick={onPrev} disabled={searchMatches.length === 0} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-muted-foreground hover:text-foreground disabled:text-muted-foreground" aria-label="前の結果">▲</button>
+      <button onClick={onNext} disabled={searchMatches.length === 0} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-muted-foreground hover:text-foreground disabled:text-muted-foreground" aria-label="次の結果">▼</button>
+      <button onClick={onClose} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-muted-foreground hover:text-foreground" aria-label="検索を閉じる"><X className="w-4 h-4" /></button>
     </div>
   );
 }
@@ -187,7 +187,7 @@ function HtmlPreviewMobile({
   return (
     <div className="flex flex-col h-full" data-testid="html-preview-mobile">
       {/* Tab bar */}
-      <div className="flex items-center justify-between p-1 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+      <div className="flex items-center justify-between p-1 border-b border-border bg-muted">
         <div className="flex gap-1">
           {(['source', 'preview'] as const).map((tab) => (
             <button
@@ -197,7 +197,7 @@ function HtmlPreviewMobile({
               className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
                 activeTab === tab
                   ? 'bg-accent-100 dark:bg-accent-900/50 text-accent-700 dark:text-accent-300'
-                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                  : 'text-muted-foreground hover:bg-muted'
               }`}
             >
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -215,7 +215,7 @@ function HtmlPreviewMobile({
                   ? level === 'safe'
                     ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300'
                     : 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300'
-                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                  : 'text-muted-foreground hover:bg-muted'
               }`}
             >
               {level.charAt(0).toUpperCase() + level.slice(1)}
@@ -232,10 +232,10 @@ function HtmlPreviewMobile({
                 const idx = lineNumber - 1;
                 return (
                   <tr key={lineNumber}>
-                    <td className="pl-3 pr-2 text-right select-none font-mono border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 sticky left-0 align-top whitespace-nowrap text-gray-400 dark:text-gray-600">
+                    <td className="pl-3 pr-2 text-right select-none font-mono border-r border-border bg-muted dark:bg-muted/50 sticky left-0 align-top whitespace-nowrap text-muted-foreground">
                       {lineNumber}
                     </td>
-                    <td className="px-4 text-gray-900 dark:text-gray-100 align-top">
+                    <td className="px-4 text-foreground align-top">
                       <pre className="m-0 whitespace-pre-wrap break-words font-mono">
                         <code
                           className="hljs"
@@ -511,23 +511,23 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
     if (isMarp && marpSlides) {
       return (
         <div className="flex flex-col">
-          <div className="flex items-center justify-between p-2 bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600">
+          <div className="flex items-center justify-between p-2 bg-muted border-b border-border">
             <button
               type="button"
               onClick={() => setMarpCurrentSlide((prev) => Math.max(0, prev - 1))}
               disabled={marpCurrentSlide === 0}
-              className="px-3 py-1 text-sm rounded-md bg-gray-200 dark:bg-gray-600 disabled:opacity-50 hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"
+              className="px-3 py-1 text-sm rounded-md bg-muted disabled:opacity-50 hover:bg-muted/80 transition-colors"
             >
               Prev
             </button>
-            <span className="text-sm text-gray-600 dark:text-gray-400">
+            <span className="text-sm text-muted-foreground">
               {marpCurrentSlide + 1} / {marpSlides.length}
             </span>
             <button
               type="button"
               onClick={() => setMarpCurrentSlide((prev) => Math.min(marpSlides.length - 1, prev + 1))}
               disabled={marpCurrentSlide === marpSlides.length - 1}
-              className="px-3 py-1 text-sm rounded-md bg-gray-200 dark:bg-gray-600 disabled:opacity-50 hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"
+              className="px-3 py-1 text-sm rounded-md bg-muted disabled:opacity-50 hover:bg-muted/80 transition-colors"
             >
               Next
             </button>
@@ -560,10 +560,10 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
               const rowBg = isCurrent ? 'bg-orange-400/30' : isMatch ? 'bg-yellow-400/15' : '';
               return (
                 <tr key={lineNumber} data-line={lineNumber} className={rowBg}>
-                  <td className={`pl-3 pr-2 text-right select-none font-mono border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 sticky left-0 align-top whitespace-nowrap ${isCurrent ? 'text-orange-300' : isMatch ? 'text-yellow-300' : 'text-gray-400 dark:text-gray-600'}`}>
+                  <td className={`pl-3 pr-2 text-right select-none font-mono border-r border-border bg-muted dark:bg-muted/50 sticky left-0 align-top whitespace-nowrap ${isCurrent ? 'text-orange-300' : isMatch ? 'text-yellow-300' : 'text-muted-foreground'}`}>
                     {lineNumber}
                   </td>
-                  <td className="px-4 text-gray-900 dark:text-gray-100 align-top">
+                  <td className="px-4 text-foreground align-top">
                     <pre className="m-0 whitespace-pre-wrap break-words font-mono">
                       <code
                         className="hljs"
@@ -610,11 +610,11 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
 
   /** Toolbar with path copy, content copy, download, and fullscreen buttons */
   const renderToolbar = () => (
-    <div className="bg-gray-100 dark:bg-gray-700 px-3 py-1.5 border-b border-gray-200 dark:border-gray-600 flex items-center justify-between gap-2">
+    <div className="bg-muted px-3 py-1.5 border-b border-border flex items-center justify-between gap-2">
       <div className="flex items-center gap-1 min-w-0">
         <button
           onClick={handleCopyPath}
-          className="flex-shrink-0 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+          className="flex-shrink-0 p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
           aria-label="Copy file path"
           title="Copy path"
         >
@@ -624,7 +624,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
             <ClipboardCopy className="w-3.5 h-3.5" />
           )}
         </button>
-        <p className="text-xs text-gray-600 dark:text-gray-400 font-mono truncate">
+        <p className="text-xs text-muted-foreground font-mono truncate">
           {filePath}
         </p>
       </div>
@@ -633,7 +633,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
         {canCopy && (
           <button
             onClick={openSearch}
-            className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+            className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
             aria-label="Search in file"
             title="Search"
           >
@@ -643,7 +643,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
         {isMarkdown && onEditMarkdown && (
           <button
             onClick={handleEditMarkdown}
-            className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+            className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
             aria-label="Edit file"
             title="Edit"
           >
@@ -654,7 +654,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
           <button
             data-testid="copy-content-button"
             onClick={handleCopy}
-            className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+            className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
             aria-label="Copy file content"
             title="Copy content"
           >
@@ -667,11 +667,11 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
         )}
         {/* [Issue #1024] Download link — always present (not gated on canCopy) */}
         {renderDownloadLink(
-          'p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+          'p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground'
         )}
         <button
           onClick={toggleFullscreen}
-          className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+          className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
           aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
           title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
         >
@@ -685,7 +685,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
   if (isFullscreen && content && !loading && !error) {
     return (
       <div
-        className="fixed inset-0 bg-white dark:bg-gray-900 flex flex-col"
+        className="fixed inset-0 bg-surface flex flex-col"
         style={{ zIndex: Z_INDEX.MAXIMIZED_EDITOR }}
       >
         {renderToolbar()}
@@ -719,8 +719,8 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
       <div className="max-h-[60vh] sm:max-h-[70vh] flex flex-col">
         {loading && (
           <div className="flex items-center justify-center py-12">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-accent-600 dark:border-t-accent-400" />
-            <p className="ml-3 text-gray-600 dark:text-gray-400">Loading file...</p>
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-muted border-t-accent-600 dark:border-t-accent-400" />
+            <p className="ml-3 text-muted-foreground">Loading file...</p>
           </div>
         )}
 
@@ -746,7 +746,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
                 (e.g. oversize FILE_TOO_LARGE / unsupported / read error). */}
             <div className="mt-3">
               {renderDownloadLink(
-                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors',
+                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-surface border border-border text-foreground hover:bg-muted transition-colors',
                 true
               )}
             </div>
@@ -754,7 +754,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
         )}
 
         {content && !loading && !error && (
-          <div className="bg-gray-50 dark:bg-gray-800 rounded-lg overflow-hidden flex flex-col min-h-0 flex-1">
+          <div className="bg-muted rounded-lg overflow-hidden flex flex-col min-h-0 flex-1">
             {/* Fixed header: toolbar + search bar */}
             <div className="flex-shrink-0">
               {renderToolbar()}
