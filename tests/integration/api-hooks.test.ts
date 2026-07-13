@@ -38,8 +38,11 @@ vi.mock('@/lib/db/db-instance', () => {
   };
 });
 
-// Mock tmux module
+// Mock tmux module. The route captures via captureClaudeOutput(), which first
+// calls hasSession() before capturePane(); both must be provided or vitest
+// throws "No hasSession export" and the route returns 500 (Issue #1102).
 vi.mock('@/lib/tmux/tmux', () => ({
+  hasSession: vi.fn(() => Promise.resolve(true)),
   capturePane: vi.fn(),
 }));
 
@@ -104,13 +107,15 @@ Summary: Implemented the user authentication feature
 
     expect(response.status).toBe(200);
 
-    // Verify tmux was called
-    expect(capturePane).toHaveBeenCalledWith('test-session', expect.any(Number));
+    // Verify tmux was captured for the worktree's derived claude session. The
+    // route now goes through captureClaudeOutput(worktreeId), which derives the
+    // session name (mcbd-claude-<worktreeId>) and passes a { startLine } option.
+    expect(capturePane).toHaveBeenCalledWith('mcbd-claude-test-worktree', { startLine: expect.any(Number) });
 
     // Verify message was created
     const messages = getMessages(db, 'test-worktree');
     expect(messages).toHaveLength(1);
-    expect(messages[0].role).toBe('claude');
+    expect(messages[0].role).toBe('assistant');
     expect(messages[0].summary).toBe('Implemented the user authentication feature');
     expect(messages[0].logFileName).toBe('2025-01-17_10-30-45_abc123.jsonl');
     expect(messages[0].requestId).toBe('abc123');
@@ -147,7 +152,7 @@ Summary: Implemented the user authentication feature
     // Verify message was created with default content
     const messages = getMessages(db, 'test-worktree');
     expect(messages).toHaveLength(1);
-    expect(messages[0].role).toBe('claude');
+    expect(messages[0].role).toBe('assistant');
     expect(messages[0].content).toBeTruthy();
     expect(messages[0].logFileName).toBeUndefined();
     expect(messages[0].requestId).toBeUndefined();
@@ -192,7 +197,13 @@ Summary: Implemented the user authentication feature
     expect(data.error).toContain('worktreeId');
   });
 
-  it('should reject request without sessionName', async () => {
+  it('should not require sessionName (session is derived from worktreeId)', async () => {
+    // The route no longer takes sessionName in its body; it derives the tmux
+    // session from worktreeId via captureClaudeOutput(). A request with only
+    // worktreeId must succeed (Issue #1102: contract drift — sessionName removed).
+    const { capturePane } = await import('@/lib/tmux/tmux');
+    vi.mocked(capturePane).mockResolvedValue('Some output');
+
     const request = new Request('http://localhost:3000/api/hooks/claude-done', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -201,11 +212,10 @@ Summary: Implemented the user authentication feature
 
     const response = await claudeDone(request as unknown as import('next/server').NextRequest);
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(200);
 
-    const data = await response.json();
-    expect(data).toHaveProperty('error');
-    expect(data.error).toContain('sessionName');
+    const messages = getMessages(db, 'test-worktree');
+    expect(messages).toHaveLength(1);
   });
 
   it('should return 404 when worktree not found', async () => {

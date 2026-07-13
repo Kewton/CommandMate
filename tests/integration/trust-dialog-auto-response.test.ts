@@ -179,8 +179,13 @@ describe('Issue #201: Trust dialog auto-response - Acceptance Tests', () => {
         worktreePath: '/path/to/stuck/workspace',
       });
 
+      // The init-timeout path (throw 'Claude initialization timeout') is caught by
+      // startClaudeSession and deliberately re-thrown as the generic
+      // 'Failed to start Claude session' (SEC-SF-002: detailed error is logged
+      // server-side, not surfaced to the client). Assert that generic message
+      // (Issue #1102: was asserting the internal timeout message).
       const assertion = expect(promise).rejects.toThrow(
-        'Claude initialization timeout'
+        'Failed to start Claude session'
       );
 
       await vi.advanceTimersByTimeAsync(CLAUDE_INIT_TIMEOUT + 1000);

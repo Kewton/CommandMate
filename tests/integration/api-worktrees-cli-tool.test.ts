@@ -5,10 +5,42 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { GET as getWorktrees } from '@/app/api/worktrees/route';
+import { NextRequest } from 'next/server';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree } from '@/lib/db';
 import type { Worktree } from '@/types/models';
+
+// Issue #405/#875: the worktrees route no longer calls cliTool.isRunning().
+// Session-running status is derived from the batched tmux session list
+// (listSessions) plus, for claude, a health check (isSessionHealthy). Tests
+// drive those layers instead. Session name format is `mcbd-{cliToolId}-{worktreeId}`.
+const mockListSessions = vi.fn(
+  (): Promise<Array<{ name: string; windows: number; attached: boolean }>> => Promise.resolve([])
+);
+vi.mock('@/lib/tmux/tmux', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/tmux/tmux')>()),
+  listSessions: () => mockListSessions(),
+}));
+
+// Claude's presence is gated by a health check; force healthy so a listed
+// claude session counts as running.
+vi.mock('@/lib/session/claude-session', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/session/claude-session')>()),
+  isSessionHealthy: vi.fn(() => Promise.resolve({ healthy: true })),
+}));
+
+// Avoid real tmux capture for running sessions; status detection (waiting/
+// processing) is not under test here, only isSessionRunning/cliToolId.
+vi.mock('@/lib/session/cli-session', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/session/cli-session')>()),
+  captureSessionOutput: vi.fn(() => Promise.resolve('')),
+}));
+
+/** Build a listSessions() entry for a worktree's primary session of a CLI tool. */
+function sessionEntry(cliToolId: string, worktreeId: string) {
+  return { name: `mcbd-${cliToolId}-${worktreeId}`, windows: 1, attached: false };
+}
 
 // Declare mock function type
 declare module '@/lib/db/db-instance' {
@@ -52,6 +84,8 @@ describe('GET /api/worktrees - CLI Tool Support', () => {
 
     // Reset mocks
     vi.clearAllMocks();
+    // Default: no tmux sessions running (each test opts specific ones in).
+    mockListSessions.mockResolvedValue([]);
   });
 
   afterEach(async () => {
@@ -61,17 +95,11 @@ describe('GET /api/worktrees - CLI Tool Support', () => {
   });
 
   it('should return correct session status for different CLI tools', async () => {
-    // Mock isRunning for different CLI tools
-    const { CLIToolManager } = await import('@/lib/cli-tools/manager');
-    const manager = CLIToolManager.getInstance();
-
-    const claudeTool = manager.getTool('claude');
-    const codexTool = manager.getTool('codex');
-    const geminiTool = manager.getTool('gemini');
-
-    vi.spyOn(claudeTool, 'isRunning').mockResolvedValue(true);
-    vi.spyOn(codexTool, 'isRunning').mockResolvedValue(false);
-    vi.spyOn(geminiTool, 'isRunning').mockResolvedValue(true);
+    // Running sessions: claude-wt and gemini-wt. codex-wt is absent → not running.
+    mockListSessions.mockResolvedValue([
+      sessionEntry('claude', 'claude-wt'),
+      sessionEntry('gemini', 'gemini-wt'),
+    ]);
 
     // Create test worktrees with different CLI tools
     const claudeWorktree: Worktree = {
@@ -108,8 +136,8 @@ describe('GET /api/worktrees - CLI Tool Support', () => {
     upsertWorktree(db, codexWorktree);
     upsertWorktree(db, geminiWorktree);
 
-    const request = new Request('http://localhost:3000/api/worktrees');
-    const response = await getWorktrees(request as unknown as import('next/server').NextRequest);
+    const request = new NextRequest('http://localhost:3000/api/worktrees');
+    const response = await getWorktrees(request);
 
     expect(response.status).toBe(200);
 
@@ -133,19 +161,11 @@ describe('GET /api/worktrees - CLI Tool Support', () => {
     expect(geminiWt).toBeDefined();
     expect(geminiWt.cliToolId).toBe('gemini');
     expect(geminiWt.isSessionRunning).toBe(true);
-
-    // Verify correct isRunning methods were called
-    expect(claudeTool.isRunning).toHaveBeenCalledWith('claude-wt');
-    expect(codexTool.isRunning).toHaveBeenCalledWith('codex-wt');
-    expect(geminiTool.isRunning).toHaveBeenCalledWith('gemini-wt');
   });
 
   it('should default to claude when cliToolId is not specified', async () => {
-    // Mock isRunning for claude tool
-    const { CLIToolManager } = await import('@/lib/cli-tools/manager');
-    const manager = CLIToolManager.getInstance();
-    const claudeTool = manager.getTool('claude');
-    vi.spyOn(claudeTool, 'isRunning').mockResolvedValue(true);
+    // The default worktree's claude session is running.
+    mockListSessions.mockResolvedValue([sessionEntry('claude', 'default-wt')]);
 
     // Create worktree without cliToolId (defaults to claude)
     const worktree: Worktree = {
@@ -159,8 +179,8 @@ describe('GET /api/worktrees - CLI Tool Support', () => {
 
     upsertWorktree(db, worktree);
 
-    const request = new Request('http://localhost:3000/api/worktrees');
-    const response = await getWorktrees(request as unknown as import('next/server').NextRequest);
+    const request = new NextRequest('http://localhost:3000/api/worktrees');
+    const response = await getWorktrees(request);
 
     expect(response.status).toBe(200);
 
@@ -170,16 +190,10 @@ describe('GET /api/worktrees - CLI Tool Support', () => {
     expect(defaultWt).toBeDefined();
     expect(defaultWt.cliToolId).toBe('claude');
     expect(defaultWt.isSessionRunning).toBe(true);
-    expect(claudeTool.isRunning).toHaveBeenCalledWith('default-wt');
   });
 
   it('should include cliToolId in worktree response', async () => {
-    // Mock isRunning
-    const { CLIToolManager } = await import('@/lib/cli-tools/manager');
-    const manager = CLIToolManager.getInstance();
-    const codexTool = manager.getTool('codex');
-    vi.spyOn(codexTool, 'isRunning').mockResolvedValue(false);
-
+    // No running sessions (default) — this test only checks cliToolId passthrough.
     const worktree: Worktree = {
       id: 'test-wt',
       name: 'Test Worktree',
@@ -191,8 +205,8 @@ describe('GET /api/worktrees - CLI Tool Support', () => {
 
     upsertWorktree(db, worktree);
 
-    const request = new Request('http://localhost:3000/api/worktrees');
-    const response = await getWorktrees(request as unknown as import('next/server').NextRequest);
+    const request = new NextRequest('http://localhost:3000/api/worktrees');
+    const response = await getWorktrees(request);
 
     expect(response.status).toBe(200);
 
