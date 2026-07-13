@@ -5,6 +5,9 @@ module.exports = {
     './src/pages/**/*.{js,ts,jsx,tsx,mdx}',
     './src/components/**/*.{js,ts,jsx,tsx,mdx}',
     './src/app/**/*.{js,ts,jsx,tsx,mdx}',
+    // [Issue #1114] Hooks emit class names too (usePromptAnimation returns
+    // animate-fade-in/out), so they must be scanned or the utilities get purged.
+    './src/hooks/**/*.{js,ts,jsx,tsx}',
   ],
   theme: {
     extend: {
@@ -109,6 +112,13 @@ module.exports = {
       animation: {
         'slide-in': 'slide-in 0.3s ease-out',
         'slide-up': 'slide-up 0.25s ease-out',
+        // [Issue #1114] Fade utilities consumed by usePromptAnimation
+        // (PromptPanel). Previously emitted but never defined (no-op). Duration
+        // and easing reference the #1050 motion tokens; `both` fill keeps the
+        // end state until the JS unmount timer (same 200ms) fires, avoiding a
+        // 1-frame flash if the timer lands after the animation ends.
+        'fade-in': 'fade-in var(--motion-duration-base) var(--motion-ease-out) both',
+        'fade-out': 'fade-out var(--motion-duration-base) var(--motion-ease-out) both',
         // [Issue #1051] StatusDot "living" states. Infinite CSS animations so
         // polling re-renders never restart them (no JS/inline-style keying).
         // OS "reduce motion" is honored globally in globals.css (#1050), which
@@ -120,6 +130,16 @@ module.exports = {
         'slide-in': {
           '0%': { transform: 'translateX(100%)', opacity: '0' },
           '100%': { transform: 'translateX(0)', opacity: '1' },
+        },
+        // [Issue #1114] Plain opacity fades (no transform — PromptPanel layers
+        // its own translate via transition utilities).
+        'fade-in': {
+          '0%': { opacity: '0' },
+          '100%': { opacity: '1' },
+        },
+        'fade-out': {
+          '0%': { opacity: '1' },
+          '100%': { opacity: '0' },
         },
         'slide-up': {
           '0%': { transform: 'translateY(100%)' },

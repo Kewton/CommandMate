@@ -6,8 +6,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { ContextMenu } from '@/components/worktree/ContextMenu';
+import { CONTEXT_MENU_EXIT_DURATION_MS } from '@/config/ui-feedback-config';
 
 describe('ContextMenu', () => {
   const defaultProps = {
@@ -37,6 +38,33 @@ describe('ContextMenu', () => {
       render(<ContextMenu {...defaultProps} isOpen={false} />);
 
       expect(screen.queryByTestId('context-menu')).not.toBeInTheDocument();
+    });
+
+    // [Issue #1114] Closing keeps the menu mounted for the exit window so the
+    // fade-out animation can play, then unmounts.
+    it('should play the exit animation before unmounting when closed', () => {
+      vi.useFakeTimers();
+      try {
+        const { rerender } = render(<ContextMenu {...defaultProps} />);
+        expect(screen.getByTestId('context-menu')).toBeInTheDocument();
+
+        rerender(<ContextMenu {...defaultProps} isOpen={false} />);
+
+        // Still mounted with exit classes; clicks are ignored while exiting.
+        const menu = screen.getByTestId('context-menu');
+        expect(menu.className).toContain('animate-out');
+        expect(menu.className).toContain('fade-out-0');
+        expect(menu.className).toContain('zoom-out-95');
+        expect(menu.className).toContain('pointer-events-none');
+        expect(menu.className).not.toContain('animate-in');
+
+        act(() => {
+          vi.advanceTimersByTime(CONTEXT_MENU_EXIT_DURATION_MS);
+        });
+        expect(screen.queryByTestId('context-menu')).not.toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('should position menu at specified coordinates', () => {

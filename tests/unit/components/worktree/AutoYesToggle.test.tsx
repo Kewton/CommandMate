@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { AutoYesToggle, type AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
 import { DEFAULT_AUTO_YES_DURATION, AUTO_YES_COUNTDOWN_INTERVAL_MS } from '@/config/auto-yes-config';
+import { EXIT_ANIMATION_DURATION_MS } from '@/config/ui-feedback-config';
 
 describe('AutoYesToggle', () => {
   const defaultProps = {
@@ -79,10 +80,16 @@ describe('AutoYesToggle', () => {
     });
 
     it('should close dialog after cancel', () => {
+      // [Issue #1114] The Modal plays a 200ms exit animation before
+      // unmounting, so the dialog disappears after the exit window.
+      vi.useFakeTimers();
       render(<AutoYesToggle {...defaultProps} enabled={false} />);
       fireEvent.click(screen.getByRole('switch'));
       fireEvent.click(screen.getByText('common.cancel'));
 
+      act(() => {
+        vi.advanceTimersByTime(EXIT_ANIMATION_DURATION_MS);
+      });
       expect(screen.queryByText('autoYes.enableTitle')).toBeNull();
     });
   });

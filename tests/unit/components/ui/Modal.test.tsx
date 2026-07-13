@@ -6,8 +6,9 @@
 
 import React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
 import { Modal } from '@/components/ui/Modal';
+import { EXIT_ANIMATION_DURATION_MS } from '@/config/ui-feedback-config';
 
 // [Issue #1050] Motion foundation: data-state + enter animation.
 describe('Modal (Issue #1050 motion)', () => {
@@ -30,21 +31,71 @@ describe('Modal (Issue #1050 motion)', () => {
     expect(cls).toContain('data-[state=open]:zoom-in-95');
   });
 
-  it('transitions from an open panel to no panel when closed', () => {
-    const { rerender } = render(
-      <Modal isOpen onClose={() => {}} title="Anim">
-        <p>content</p>
-      </Modal>
-    );
-    expect(screen.getByTestId('modal-panel')).toHaveAttribute('data-state', 'open');
+  // [Issue #1114] Closing keeps the panel mounted for the exit window so the
+  // data-[state=closed] fade+zoom-out animation can play, then unmounts.
+  it('plays the exit animation before unmounting when closed', () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(
+        <Modal isOpen onClose={() => {}} title="Anim">
+          <p>content</p>
+        </Modal>
+      );
+      expect(screen.getByTestId('modal-panel')).toHaveAttribute('data-state', 'open');
 
-    rerender(
-      <Modal isOpen={false} onClose={() => {}} title="Anim">
-        <p>content</p>
-      </Modal>
-    );
-    // Closed modals unmount, so the panel (and its data-state) is gone.
-    expect(screen.queryByTestId('modal-panel')).toBeNull();
+      rerender(
+        <Modal isOpen={false} onClose={() => {}} title="Anim">
+          <p>content</p>
+        </Modal>
+      );
+
+      // Still mounted, now flagged closed with exit classes.
+      const panel = screen.getByTestId('modal-panel');
+      expect(panel).toHaveAttribute('data-state', 'closed');
+      expect(panel.className).toContain('data-[state=closed]:animate-out');
+      expect(panel.className).toContain('data-[state=closed]:fade-out-0');
+      expect(panel.className).toContain('data-[state=closed]:zoom-out-95');
+
+      // After the exit window the panel unmounts.
+      act(() => {
+        vi.advanceTimersByTime(EXIT_ANIMATION_DURATION_MS);
+      });
+      expect(screen.queryByTestId('modal-panel')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stays open when reopened during the exit window', () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(
+        <Modal isOpen onClose={() => {}} title="Anim">
+          <p>content</p>
+        </Modal>
+      );
+
+      rerender(
+        <Modal isOpen={false} onClose={() => {}} title="Anim">
+          <p>content</p>
+        </Modal>
+      );
+      act(() => {
+        vi.advanceTimersByTime(EXIT_ANIMATION_DURATION_MS / 2);
+      });
+      rerender(
+        <Modal isOpen onClose={() => {}} title="Anim">
+          <p>content</p>
+        </Modal>
+      );
+
+      act(() => {
+        vi.advanceTimersByTime(EXIT_ANIMATION_DURATION_MS * 2);
+      });
+      expect(screen.getByTestId('modal-panel')).toHaveAttribute('data-state', 'open');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
