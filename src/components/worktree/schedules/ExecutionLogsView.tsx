@@ -55,7 +55,7 @@ function getStatusColor(status: ExecutionLogStatus): string {
     case 'failed': return 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30';
     case 'timeout': return 'text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-900/30';
     case 'running': return 'text-accent-600 dark:text-accent-400 bg-accent-50 dark:bg-accent-900/30';
-    case 'cancelled': return 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800';
+    case 'cancelled': return 'text-muted-foreground bg-muted';
   }
 }
 
@@ -91,17 +91,17 @@ export const ExecutionLogsView = memo(function ExecutionLogsView({
   }, [worktreeId, expandedLogId]);
 
   if (logs.length === 0) {
-    return <p className="text-sm text-gray-500 dark:text-gray-400">{t('noLogs')}</p>;
+    return <p className="text-sm text-muted-foreground">{t('noLogs')}</p>;
   }
 
   return (
     <div className="space-y-2" data-testid="execution-logs-view">
       {logs.map((log) => (
-        <div key={log.id} className="border border-gray-200 dark:border-gray-700 rounded bg-white dark:bg-gray-900">
+        <div key={log.id} className="border border-border rounded bg-surface">
           <button
             type="button"
             onClick={() => void handleExpandLog(log.id)}
-            className="w-full text-left p-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            className="w-full text-left p-3 hover:bg-muted transition-colors"
           >
             <div className="flex items-center justify-between">
               <span className="text-sm truncate max-w-[60%]">{log.schedule_name || t('unknownSchedule')}</span>
@@ -109,7 +109,7 @@ export const ExecutionLogsView = memo(function ExecutionLogsView({
                 {t(`status.${log.status}`)}
               </span>
             </div>
-            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            <div className="text-xs text-muted-foreground mt-1">
               {formatTimestamp(log.started_at)}
               {formatDuration(log.started_at, log.completed_at) && (
                 <span className="ml-2">({formatDuration(log.started_at, log.completed_at)})</span>
@@ -119,16 +119,16 @@ export const ExecutionLogsView = memo(function ExecutionLogsView({
           </button>
 
           {expandedLogId === log.id && logDetail && (
-            <div className="border-t border-gray-200 dark:border-gray-700 p-3 bg-gray-50 dark:bg-gray-800 space-y-3">
+            <div className="border-t border-border p-3 bg-muted space-y-3">
               <div>
-                <div className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">{t('message')}</div>
-                <pre className="text-xs whitespace-pre-wrap font-mono text-gray-700 dark:text-gray-200">
+                <div className="text-xs font-semibold text-muted-foreground mb-1">{t('message')}</div>
+                <pre className="text-xs whitespace-pre-wrap font-mono text-foreground">
                   {logDetail.message}
                 </pre>
               </div>
               <div>
-                <div className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">{t('response')}</div>
-                <pre className="text-xs whitespace-pre-wrap font-mono text-gray-700 dark:text-gray-200 max-h-60 overflow-y-auto">
+                <div className="text-xs font-semibold text-muted-foreground mb-1">{t('response')}</div>
+                <pre className="text-xs whitespace-pre-wrap font-mono text-foreground max-h-60 overflow-y-auto">
                   {logDetail.result || t('noOutput')}
                 </pre>
               </div>

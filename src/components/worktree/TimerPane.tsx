@@ -68,9 +68,9 @@ function getStatusColor(status: string): string {
     case 'sending': return 'text-yellow-600 dark:text-yellow-400';
     case 'sent': return 'text-green-600 dark:text-green-400';
     case 'failed': return 'text-red-600 dark:text-red-400';
-    case 'cancelled': return 'text-gray-500 dark:text-gray-400';
+    case 'cancelled': return 'text-muted-foreground';
     case 'no_session': return 'text-orange-600 dark:text-orange-400';
-    default: return 'text-gray-600 dark:text-gray-400';
+    default: return 'text-muted-foreground';
   }
 }
 
@@ -240,8 +240,8 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-accent-50 text-accent-600 dark:bg-accent-900/30 dark:text-accent-300">
             <Clock className="w-7 h-7" />
           </div>
-          <p className="font-semibold text-gray-700 dark:text-gray-200 mb-1">{t('timer.title')}</p>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mb-5 max-w-xs">{t('timer.noTimers')}</p>
+          <p className="font-semibold text-foreground mb-1">{t('timer.title')}</p>
+          <p className="text-sm text-muted-foreground mb-5 max-w-xs">{t('timer.noTimers')}</p>
           <button
             type="button"
             data-testid="timer-empty-cta"
@@ -276,10 +276,10 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
           {timers.map((timer) => (
             <div
               key={timer.id}
-              className="flex items-center gap-2 p-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900"
+              className="flex items-center gap-2 p-2 rounded-lg border border-border bg-surface"
             >
               <div className="flex-1 min-w-0">
-                <div className="text-sm text-gray-900 dark:text-gray-100 truncate">
+                <div className="text-sm text-foreground truncate">
                   {timer.message.length > 60 ? timer.message.slice(0, 60) + '...' : timer.message}
                 </div>
                 <div className="flex items-center gap-2 text-xs">
@@ -290,11 +290,11 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
                     {t(`timer.status.${timer.status}`)}
                   </span>
                   {timer.status === 'pending' && (
-                    <span className="text-gray-500 dark:text-gray-400">
+                    <span className="text-muted-foreground">
                       {formatTimeRemaining(timer.scheduledSendTime)}
                     </span>
                   )}
-                  <span className="text-gray-400 dark:text-gray-500">
+                  <span className="text-muted-foreground">
                     {formatDelayLabel(timer.delayMs)}
                   </span>
                 </div>
@@ -328,7 +328,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
             <button
               type="button"
               onClick={handleClearHistory}
-              className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors text-center"
+              className="px-3 py-2 text-sm text-muted-foreground hover:bg-muted rounded-md transition-colors text-center"
             >
               {t('timer.clearHistory')}
             </button>

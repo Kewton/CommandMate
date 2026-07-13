@@ -112,8 +112,8 @@ function permissionDefaultFor(cliToolId: string): string {
 }
 
 const INPUT_CLASS =
-  'w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-ring';
-const LABEL_CLASS = 'block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1';
+  'w-full px-3 py-2 text-sm border border-input rounded-md bg-surface dark:bg-surface-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring';
+const LABEL_CLASS = 'block text-xs font-semibold text-foreground mb-1';
 const ERROR_CLASS = 'mt-1 text-xs text-red-600 dark:text-red-400';
 
 /** Accordion section identifiers (Issue #825). */
@@ -181,29 +181,29 @@ function AccordionSection({
 }: AccordionSectionProps) {
   const contentId = `schedule-section-${id}-content`;
   return (
-    <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+    <div className="border border-border rounded-lg overflow-hidden">
       <button
         type="button"
         data-testid={`schedule-section-${id}`}
         aria-expanded={isOpen}
         aria-controls={contentId}
         onClick={() => onToggle(id)}
-        className="w-full flex items-center gap-3 px-3 py-2.5 text-left bg-gray-50 dark:bg-gray-800/50 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+        className="w-full flex items-center gap-3 px-3 py-2.5 text-left bg-surface-2 hover:bg-muted transition-colors"
       >
         <span className="flex-shrink-0 text-accent-600 dark:text-accent-400">{icon}</span>
         <span className="flex-1 min-w-0">
-          <span className="block text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</span>
+          <span className="block text-sm font-semibold text-foreground">{title}</span>
           {summary && (
             <span
               data-testid={`schedule-section-${id}-summary`}
-              className="block truncate text-xs text-gray-500 dark:text-gray-400"
+              className="block truncate text-xs text-muted-foreground"
             >
               {summary}
             </span>
           )}
         </span>
         <ChevronDown
-          className={`flex-shrink-0 w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+          className={`flex-shrink-0 w-4 h-4 text-muted-foreground transition-transform ${isOpen ? 'rotate-180' : ''}`}
         />
       </button>
       {isOpen && (
@@ -452,7 +452,7 @@ export function ScheduleEditDialog({
       {/* Cron */}
       <div>
         <div className="mb-1 flex items-center justify-between gap-2">
-          <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300" htmlFor="schedule-cron-input">
+          <label className="block text-xs font-semibold text-foreground" htmlFor="schedule-cron-input">
             {t('edit.cron')}
           </label>
           {onInsertToMessage && (
@@ -499,7 +499,7 @@ export function ScheduleEditDialog({
           checked={form.enabled}
           onCheckedChange={(checked) => setForm((prev) => ({ ...prev, enabled: checked === true }))}
         />
-        <span className="text-sm text-gray-700 dark:text-gray-300">{t('edit.enabledLabel')}</span>
+        <span className="text-sm text-foreground">{t('edit.enabledLabel')}</span>
       </label>
     </>
   );
@@ -574,7 +574,7 @@ export function ScheduleEditDialog({
   const messageFields = (
     <div>
       <div className="mb-1 flex items-center justify-between gap-2">
-        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300" htmlFor="schedule-message-input">
+        <label className="block text-xs font-semibold text-foreground" htmlFor="schedule-message-input">
           {t('edit.message')}
         </label>
         {onInsertToMessage && (
@@ -602,7 +602,7 @@ export function ScheduleEditDialog({
         ) : (
           <span />
         )}
-        <span className="text-xs text-gray-400 dark:text-gray-500" data-testid="schedule-message-count">
+        <span className="text-xs text-muted-foreground" data-testid="schedule-message-count">
           {t('edit.charCount', { count: form.message.length, max: MAX_SCHEDULE_MESSAGE_LENGTH })}
         </span>
       </div>
@@ -662,7 +662,7 @@ export function ScheduleEditDialog({
       <button
         type="button"
         onClick={onClose}
-        className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors"
+        className="px-4 py-2 text-sm font-medium text-foreground hover:bg-muted rounded-md transition-colors"
       >
         {t('edit.cancel')}
       </button>
@@ -694,7 +694,7 @@ export function ScheduleEditDialog({
     <Modal isOpen={isOpen} onClose={onClose} title={title} size="md">
       <div className="flex flex-col gap-4">
         {sections}
-        <div className="pt-2 border-t border-gray-200 dark:border-gray-700">{footerButtons}</div>
+        <div className="pt-2 border-t border-border">{footerButtons}</div>
       </div>
     </Modal>
   );

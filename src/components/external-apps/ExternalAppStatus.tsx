@@ -77,14 +77,14 @@ export function ExternalAppStatus({
   if (isLoading) {
     return (
       <div className="flex items-center gap-1.5">
-        <span className="inline-block h-2.5 w-2.5 rounded-full bg-gray-300 dark:bg-gray-600 animate-pulse" />
-        {!compact && <span className="text-xs text-gray-400 dark:text-gray-500">Checking...</span>}
+        <span className="inline-block h-2.5 w-2.5 rounded-full bg-muted-foreground animate-pulse" />
+        {!compact && <span className="text-xs text-muted-foreground">Checking...</span>}
       </div>
     );
   }
 
   const isHealthy = health?.healthy ?? false;
-  const statusColor = isHealthy ? 'bg-green-500' : 'bg-gray-400';
+  const statusColor = isHealthy ? 'bg-green-500' : 'bg-muted-foreground';
   const statusText = isHealthy ? 'Running' : 'Stopped';
 
   if (compact) {
@@ -99,11 +99,11 @@ export function ExternalAppStatus({
   return (
     <div className="flex items-center gap-1.5">
       <span className={`inline-block h-2.5 w-2.5 rounded-full ${statusColor}`} />
-      <span className={`text-xs ${isHealthy ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'}`}>
+      <span className={`text-xs ${isHealthy ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'}`}>
         {statusText}
       </span>
       {showResponseTime && health?.responseTime !== undefined && (
-        <span className="text-xs text-gray-400">
+        <span className="text-xs text-muted-foreground">
           ({health.responseTime}ms)
         </span>
       )}

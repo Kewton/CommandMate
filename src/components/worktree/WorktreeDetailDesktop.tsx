@@ -731,14 +731,14 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           showCloseButton={true}
         >
           <div className="space-y-4">
-            <p className="text-sm text-gray-700 dark:text-gray-300">
+            <p className="text-sm text-foreground">
               {killDialogWarning}
             </p>
             <div className="flex justify-end gap-3 pt-2">
               <button
                 type="button"
                 onClick={onKillCancel}
-                className="px-4 py-2 text-sm font-medium rounded-md bg-gray-200 hover:bg-gray-300 text-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-300"
+                className="px-4 py-2 text-sm font-medium rounded-md bg-muted hover:bg-muted/80 text-foreground"
               >
                 {cancelLabel}
               </button>

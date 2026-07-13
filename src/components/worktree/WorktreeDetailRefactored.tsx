@@ -44,7 +44,7 @@ const MarkdownEditor = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex items-center justify-center h-full bg-white dark:bg-gray-900 text-gray-400 dark:text-gray-500">
+      <div className="flex items-center justify-center h-full bg-surface text-muted-foreground">
         <Loader2 className="animate-spin h-6 w-6 mr-2" />
         <span>Loading editor...</span>
       </div>
@@ -420,7 +420,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                   className={`flex-shrink-0 whitespace-nowrap px-1.5 py-1 font-medium text-xs transition-colors flex items-center gap-1 border-b-2 ${
                     isActive
                       ? 'text-accent-600 dark:text-accent-400 border-accent-500'
-                      : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 border-transparent'
+                      : 'text-muted-foreground hover:text-foreground border-transparent'
                   }`}
                   aria-current={isActive ? 'page' : undefined}
                 >
@@ -503,12 +503,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 
         {/* Message Input - fixed above tab bar */}
         <div
-          className="fixed left-0 right-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 z-30"
+          className="fixed left-0 right-0 border-t border-border bg-surface z-30"
           style={{ bottom: MOBILE_MESSAGE_INPUT_BOTTOM }}
         >
           {/* Issue #473: Navigation buttons for OpenCode TUI selection list (mobile) */}
           {isSelectionListActive && (
-            <div className="px-2 pt-1 border-b border-gray-200 dark:border-gray-700">
+            <div className="px-2 pt-1 border-b border-border">
               <NavigationButtons
                 worktreeId={worktreeId}
                 cliToolId={activeCliTab}
@@ -622,14 +622,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           showCloseButton={true}
         >
           <div className="space-y-4">
-            <p className="text-sm text-gray-700">
+            <p className="text-sm text-foreground">
               {tWorktree('session.endWarning')}
             </p>
             <div className="flex justify-end gap-3 pt-2">
               <button
                 type="button"
                 onClick={handleKillCancel}
-                className="px-4 py-2 text-sm font-medium rounded-md bg-gray-200 hover:bg-gray-300 text-gray-700"
+                className="px-4 py-2 text-sm font-medium rounded-md bg-muted hover:bg-muted/80 text-foreground"
               >
                 {tCommon('cancel')}
               </button>
