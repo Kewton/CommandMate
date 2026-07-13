@@ -9,8 +9,9 @@
 
 'use client';
 
-import { useMemo, memo } from 'react';
-import { MOBILE_STATUS_CONFIG, type WorktreeStatusType } from '@/config/status-colors';
+import { memo } from 'react';
+import { type WorktreeStatusType } from '@/config/status-colors';
+import { StatusDot } from '@/components/ui/StatusDot';
 import { truncateString } from '@/lib/utils';
 import type { GitStatus } from '@/types/models';
 
@@ -91,11 +92,6 @@ export function MobileHeader({
   onBackClick,
   onMenuClick,
 }: MobileHeaderProps) {
-  /**
-   * Status indicator configuration
-   */
-  const statusConfig = useMemo(() => MOBILE_STATUS_CONFIG[status], [status]);
-
   return (
     <header
       data-testid="mobile-header"
@@ -119,20 +115,13 @@ export function MobileHeader({
 
         {/* Center section: Worktree name, repository, and status */}
         <div className="flex-1 flex items-center justify-center min-w-0 px-2">
-          {/* Status indicator */}
-          {statusConfig.type === 'spinner' ? (
-            <span
-              data-testid="status-indicator"
-              aria-label={statusConfig.label}
-              className={`w-2.5 h-2.5 rounded-full mr-2 flex-shrink-0 border-2 border-t-transparent animate-spin ${statusConfig.className}`}
-            />
-          ) : (
-            <span
-              data-testid="status-indicator"
-              aria-label={statusConfig.label}
-              className={`w-2.5 h-2.5 rounded-full mr-2 flex-shrink-0 ${statusConfig.className}`}
-            />
-          )}
+          {/* Status indicator (Issue #1078: unified StatusDot visual language) */}
+          <StatusDot
+            data-testid="status-indicator"
+            status={status}
+            size="sm"
+            className="mr-2"
+          />
 
           {/* Worktree name and repository */}
           <div className="flex flex-col items-center min-w-0">

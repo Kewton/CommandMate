@@ -12,8 +12,18 @@
 'use client';
 
 import React, { useEffect, useCallback, useState, memo, useRef } from 'react';
+import { useTranslations } from 'next-intl';
 import { type WorktreeStatus } from '@/components/mobile/MobileHeader';
 import { DESKTOP_STATUS_CONFIG, SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
+import { StatusDot } from '@/components/ui/StatusDot';
+import { Tooltip } from '@/components/common/Tooltip';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/DropdownMenu';
+import { classifyHeaderInstances } from '@/lib/agent-status-display';
 import { LogViewer } from '@/components/worktree/LogViewer';
 import { VersionSection } from '@/components/worktree/VersionSection';
 import { FeedbackSection } from '@/components/worktree/FeedbackSection';
@@ -489,6 +499,13 @@ const WORKTREE_STATUS_OPTIONS: Array<{ value: 'ready' | 'in_progress' | 'in_revi
 
 /** Status indicator configuration is imported from @/config/status-colors (SF1) */
 
+/**
+ * Issue #1078: max labelled agent pills kept inline in the desktop header before
+ * the rest collapse into the "+N" overflow menu. Idle/ready instances always
+ * render as narrow icon-only dots and never count against this budget.
+ */
+const MAX_HEADER_AGENT_PILLS = 4;
+
 /** Desktop header with hamburger menu, back button, worktree name, repository, status, and info button */
 export const DesktopHeader = memo(function DesktopHeader({
   worktreeName,
@@ -510,6 +527,7 @@ export const DesktopHeader = memo(function DesktopHeader({
   onAgentDragEnd,
   onKillSession,
 }: DesktopHeaderProps) {
+  const tWorktree = useTranslations('worktree');
   const statusConfig = DESKTOP_STATUS_CONFIG[status];
   // Issue #111: DRY - Use shared truncateString utility
   const DESKTOP_BRANCH_MAX_LENGTH = 30;
@@ -585,22 +603,13 @@ export const DesktopHeader = memo(function DesktopHeader({
           <span className="text-sm font-medium">Home</span>
         </button>
         <div className="w-px h-6 bg-gray-300 dark:bg-gray-600" aria-hidden="true" />
-        {/* Status indicator */}
-        {statusConfig.type === 'spinner' ? (
-          <span
-            data-testid="desktop-status-indicator"
-            title={statusConfig.label}
-            aria-label={statusConfig.label}
-            className={`w-3 h-3 rounded-full flex-shrink-0 border-2 border-t-transparent animate-spin ${statusConfig.className}`}
-          />
-        ) : (
-          <span
-            data-testid="desktop-status-indicator"
-            title={statusConfig.label}
-            aria-label={statusConfig.label}
-            className={`w-3 h-3 rounded-full flex-shrink-0 ${statusConfig.className}`}
-          />
-        )}
+        {/* Worktree-level status (Issue #1078: unified StatusDot visual language) */}
+        <StatusDot
+          data-testid="desktop-status-indicator"
+          status={status}
+          size="lg"
+          label={statusConfig.label}
+        />
         {/* Worktree name, memo, and repository */}
         <div className="flex flex-col min-w-0">
           <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate max-w-[200px] leading-tight">
@@ -642,62 +651,138 @@ export const DesktopHeader = memo(function DesktopHeader({
 
       {/* Right: Per-agent status row + Status dropdown + Info button */}
       <div className="flex items-center gap-2">
-        {/* Issue #749/#869: Per-instance session status indicators (PC only).
-            Distinct from the worktree-level dot on the left (DESKTOP_STATUS_CONFIG):
-            this row is per-agent-instance (SIDEBAR_STATUS_CONFIG) and doubles as
-            an instance-tab switcher. Each tab is labelled by its alias
-            (getInstanceLabel); status is resolved per backing CLI tool. Rendered
-            only when instances is provided (backward compat). */}
-        {instances && instances.length > 0 && (
-          <div className="flex items-center gap-2 flex-shrink-0" data-testid="desktop-agent-status-row">
-            {instances.map((inst) => {
-              // Issue #875: resolve each instance's status from the per-instance
-              // map so alias instances (instanceId !== cliToolId) show their own
-              // status; fall back to the per-CLI map for backward compat.
-              const cliStatus = deriveCliStatus(
+        {/* Issue #749/#869/#1078: Per-instance session status row (PC only).
+            Distinct from the worktree-level StatusDot on the left: this row is
+            per-agent-instance and doubles as an instance-tab switcher. Issue #1078
+            unifies the status visual on <StatusDot> and collapses idle noise —
+            active/working instances stay labelled pills, idle/ready collapse to
+            icon-only dots (label via Tooltip), and pills beyond the budget fold
+            into a "+N" overflow menu so a working session never gets buried.
+            Rendered only when instances is provided (backward compat). */}
+        {instances && instances.length > 0 && (() => {
+          // Issue #875: resolve each instance's status from the per-instance map
+          // so alias instances (instanceId !== cliToolId) show their own status;
+          // fall back to the per-CLI map for backward compat.
+          const classified = classifyHeaderInstances(
+            instances.map((inst) => ({
+              item: inst,
+              status: deriveCliStatus(
                 sessionStatusByInstance?.[inst.id] ?? sessionStatusByCli?.[inst.cliTool]
-              );
-              const agentStatusConfig = SIDEBAR_STATUS_CONFIG[cliStatus];
-              const isActive = inst.id === activeInstanceId;
-              const label = getInstanceLabel(inst);
-              return (
-                <button
-                  key={inst.id}
-                  type="button"
-                  data-testid={`desktop-agent-status-${inst.id}`}
-                  onClick={() => onActiveInstanceChange?.(inst.id)}
-                  // Issue #786: drag source. click and drag are mutually
-                  // exclusive in HTML; a plain click (no drag) still fires
-                  // onClick exactly once (S3-002 regression-guarded).
-                  draggable
-                  onDragStart={(e) => handleAgentDragStart(e, inst.id)}
-                  onDragEnd={handleAgentDragEnd}
-                  aria-label={`${label}: ${agentStatusConfig.label}`}
-                  aria-pressed={isActive}
-                  className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${
-                    isActive
-                      ? 'bg-accent-100 dark:bg-accent-900/30 text-accent-900 dark:text-accent-100'
-                      : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'
-                  }${draggingInstanceId === inst.id ? ' opacity-50 cursor-grabbing' : ''}`}
-                >
-                  {/* Issue #751: dot/spinner icon to the LEFT of the always-visible text */}
-                  {agentStatusConfig.type === 'spinner' ? (
-                    <span
-                      className={`block w-2.5 h-2.5 rounded-full border-2 border-t-transparent animate-spin ${agentStatusConfig.className}`}
-                    />
-                  ) : (
-                    <span
-                      className={`block w-2.5 h-2.5 rounded-full ${agentStatusConfig.className}`}
-                    />
-                  )}
-                  <span className="whitespace-nowrap">
-                    {label}: {agentStatusConfig.label}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
+              ),
+              isActive: inst.id === activeInstanceId,
+            })),
+            MAX_HEADER_AGENT_PILLS
+          );
+          const overflow = classified.filter((c) => c.slot === 'overflow');
+          // Issue #1078: if any folded instance is actively working, surface the
+          // living glow on the "+N" trigger so a running session stays visible
+          // at a glance even when collapsed. Prefer running/generating (green
+          // glow) over waiting (amber blink); no working ones → no glow.
+          const overflowGlowStatus =
+            overflow.find((c) => c.status === 'running' || c.status === 'generating')?.status ??
+            overflow.find((c) => c.status === 'waiting')?.status ??
+            null;
+
+          return (
+            <div className="flex items-center gap-2 flex-shrink-0" data-testid="desktop-agent-status-row">
+              {classified.map((c) => {
+                if (c.slot === 'overflow') return null;
+                const inst = c.item;
+                const label = getInstanceLabel(inst);
+                const fullLabel = `${label}: ${SIDEBAR_STATUS_CONFIG[c.status].label}`;
+                const isActive = c.isActive;
+                // Issue #786: drag source. click and drag are mutually exclusive
+                // in HTML; a plain click (no drag) still fires onClick exactly
+                // once (S3-002 regression-guarded). Preserved on both pill and dot.
+                const dragProps = {
+                  draggable: true,
+                  onDragStart: (e: React.DragEvent<HTMLButtonElement>) => handleAgentDragStart(e, inst.id),
+                  onDragEnd: handleAgentDragEnd,
+                } as const;
+                const dragActive = draggingInstanceId === inst.id ? ' opacity-50 cursor-grabbing' : '';
+
+                if (c.slot === 'pill') {
+                  return (
+                    <button
+                      key={inst.id}
+                      type="button"
+                      data-testid={`desktop-agent-status-${inst.id}`}
+                      onClick={() => onActiveInstanceChange?.(inst.id)}
+                      {...dragProps}
+                      aria-label={fullLabel}
+                      aria-pressed={isActive}
+                      className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${
+                        isActive
+                          ? 'bg-accent-100 dark:bg-accent-900/30 text-accent-900 dark:text-accent-100'
+                          : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'
+                      }${dragActive}`}
+                    >
+                      {/* Issue #1078: unified StatusDot (decorative; the button carries the label) */}
+                      <StatusDot status={c.status} size="sm" aria-hidden title={undefined} />
+                      <span className="whitespace-nowrap">{fullLabel}</span>
+                    </button>
+                  );
+                }
+
+                // Idle/ready → icon-only 24px circular button; full label via Tooltip.
+                return (
+                  <Tooltip key={inst.id} content={fullLabel} placement="bottom">
+                    <button
+                      type="button"
+                      data-testid={`desktop-agent-status-${inst.id}`}
+                      onClick={() => onActiveInstanceChange?.(inst.id)}
+                      {...dragProps}
+                      aria-label={fullLabel}
+                      aria-pressed={isActive}
+                      className={`flex items-center justify-center w-6 h-6 rounded-full transition-colors ${
+                        isActive
+                          ? 'bg-accent-100 dark:bg-accent-900/30'
+                          : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+                      }${dragActive}`}
+                    >
+                      <StatusDot status={c.status} size="sm" aria-hidden title={undefined} />
+                    </button>
+                  </Tooltip>
+                );
+              })}
+
+              {/* Issue #1078: width-overflow menu for surplus labelled pills. */}
+              {overflow.length > 0 && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      data-testid="desktop-agent-status-overflow"
+                      aria-label={tWorktree('agentStatus.moreAgents', { count: overflow.length })}
+                      className="flex items-center gap-1 px-2 py-1 rounded text-xs tabular-nums text-muted-foreground hover:bg-muted transition-colors"
+                    >
+                      {overflowGlowStatus && (
+                        <StatusDot status={overflowGlowStatus} size="sm" aria-hidden title={undefined} />
+                      )}
+                      +{overflow.length}
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {overflow.map((c) => {
+                      const inst = c.item;
+                      const fullLabel = `${getInstanceLabel(inst)}: ${SIDEBAR_STATUS_CONFIG[c.status].label}`;
+                      return (
+                        <DropdownMenuItem
+                          key={inst.id}
+                          data-testid={`desktop-agent-overflow-${inst.id}`}
+                          onSelect={() => onActiveInstanceChange?.(inst.id)}
+                        >
+                          <StatusDot status={c.status} size="sm" aria-hidden title={undefined} />
+                          <span className="whitespace-nowrap">{fullLabel}</span>
+                        </DropdownMenuItem>
+                      );
+                    })}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
+          );
+        })()}
         {/* Issue #784: Session kill button (PC only). Restored after the
             #728 (split-ification) + #755 (Desktop/Mobile split) regression that
             left the kill confirmation modal unreachable on PC. Mirrors the

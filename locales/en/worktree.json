@@ -1,4 +1,8 @@
 {
+  "agentStatus": {
+    "moreAgents": "{count} more agents",
+    "overflowTrigger": "More agents"
+  },
   "toc": {
     "title": "Contents",
     "show": "Show table of contents",
