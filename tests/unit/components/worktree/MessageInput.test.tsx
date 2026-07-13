@@ -107,6 +107,24 @@ describe('MessageInput', () => {
 
       expect(getSendButton()).not.toBeDisabled();
     });
+
+    // Issue #1080: the send button switches from a ghost affordance to a filled
+    // accent circle when the composer holds a sendable message.
+    it('should change send button class between ghost and filled on input (Issue #1080)', () => {
+      render(<MessageInput {...defaultProps} />);
+
+      const emptyBtn = getSendButton();
+      expect(emptyBtn.getAttribute('data-can-send')).toBe('false');
+      expect(emptyBtn.className).toContain('text-muted-foreground/50');
+      expect(emptyBtn.className).not.toContain('bg-accent-600');
+
+      typeMessage('Hello');
+
+      const filledBtn = getSendButton();
+      expect(filledBtn.getAttribute('data-can-send')).toBe('true');
+      expect(filledBtn.className).toContain('bg-accent-600');
+      expect(filledBtn.className).toContain('text-white');
+    });
   });
 
   // ===== Desktop behavior =====

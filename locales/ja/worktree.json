@@ -5,6 +5,11 @@
     "hide": "目次を非表示",
     "empty": "見出しなし"
   },
+  "composer": {
+    "placeholder": "メッセージを入力…",
+    "commandsHint": "コマンド",
+    "newlineHint": "改行"
+  },
   "session": {
     "confirmKill": "「{name}」のセッションを終了しますか？\n\n※全てのメッセージ履歴が削除されます。ログファイルは保持されます。",
     "failedToKill": "セッションの終了に失敗しました",
@@ -75,7 +80,10 @@
     "equalizeWidthsHint": "ターミナル幅を均等にし、履歴幅を初期値に戻す",
     "addSplit": "分割を追加",
     "removeSplit": "分割を削除",
-    "selectInstance": "{split} のエージェントインスタンスを選択"
+    "selectInstance": "{split} のエージェントインスタンスを選択",
+    "moreActions": "その他の操作",
+    "searchTerminal": "ターミナル内を検索",
+    "endSession": "セッションを終了"
   },
   "todo": {
     "addPlaceholder": "ToDoを追加…",

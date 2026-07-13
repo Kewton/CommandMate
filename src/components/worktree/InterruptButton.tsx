@@ -97,7 +97,7 @@ export const InterruptButton = memo(function InterruptButton({
       type="button"
       onClick={handleInterrupt}
       disabled={disabled || isLoading}
-      className="flex-shrink-0 p-2 text-orange-600 hover:bg-orange-50 rounded-full transition-colors disabled:text-gray-300 disabled:hover:bg-transparent"
+      className="flex-shrink-0 p-2 text-danger hover:bg-danger/10 rounded-full transition-colors disabled:text-muted-foreground/40 disabled:hover:bg-transparent"
       aria-label="Stop processing"
       data-testid="interrupt-button"
     >

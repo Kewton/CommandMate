@@ -49,16 +49,21 @@ vi.mock('@/components/worktree/MessageInput', () => ({
     cliToolId,
     splitIndex,
     pendingInsertText,
+    autoYesSlot,
   }: {
     cliToolId: string;
     splitIndex: number;
     pendingInsertText?: string | null;
+    // Issue #1080: Auto-Yes moved into the composer meta row (autoYesSlot).
+    autoYesSlot?: React.ReactNode;
   }) => (
     <div
       data-testid={`message-input-${splitIndex}`}
       data-cli-tool-id={cliToolId}
       data-pending-insert={pendingInsertText ?? ''}
-    />
+    >
+      {autoYesSlot}
+    </div>
   ),
 }));
 

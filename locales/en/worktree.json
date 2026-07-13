@@ -5,6 +5,11 @@
     "hide": "Hide table of contents",
     "empty": "No headings"
   },
+  "composer": {
+    "placeholder": "Type your message…",
+    "commandsHint": "commands",
+    "newlineHint": "newline"
+  },
   "session": {
     "confirmKill": "End session for \"{name}\"?\n\nAll message history will be deleted. Log files will be retained.",
     "failedToKill": "Failed to end session",
@@ -75,7 +80,10 @@
     "equalizeWidthsHint": "Equalize terminal widths and reset History width",
     "addSplit": "Add split",
     "removeSplit": "Remove split",
-    "selectInstance": "Select agent instance for {split}"
+    "selectInstance": "Select agent instance for {split}",
+    "moreActions": "More actions",
+    "searchTerminal": "Search terminal",
+    "endSession": "End session"
   },
   "todo": {
     "addPlaceholder": "Add a todo…",
