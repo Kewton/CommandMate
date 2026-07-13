@@ -12,6 +12,7 @@ import { memo, useState, useCallback, useId, useMemo } from 'react';
 import { useTranslations } from 'next-intl';
 import type { PromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
+import { RadioGroup, RadioGroupItem } from '@/components/ui';
 import { usePromptAnimation } from '@/hooks/usePromptAnimation';
 
 /** Animation duration for prompt panel transitions */
@@ -281,19 +282,20 @@ function MultipleChoicePromptActions({
     <div className="space-y-3">
       <fieldset>
         <legend className="sr-only">Select an option</legend>
-        <div className="space-y-2">
+        <RadioGroup
+          name={groupName}
+          value={selectedOption != null ? String(selectedOption) : ''}
+          onValueChange={(v) => onSelectOption(Number(v))}
+          disabled={disabled}
+          className="flex flex-col gap-2"
+        >
           {promptData.options.map((option) => (
             <label
               key={option.number}
               className={getOptionClasses(option.number)}
             >
-              <input
-                type="radio"
-                name={groupName}
-                value={option.number}
-                checked={selectedOption === option.number}
-                onChange={() => onSelectOption(option.number)}
-                disabled={disabled}
+              <RadioGroupItem
+                value={String(option.number)}
                 className="mt-1"
                 aria-describedby={option.isDefault ? `default-${option.number}` : undefined}
               />
@@ -307,7 +309,7 @@ function MultipleChoicePromptActions({
               </div>
             </label>
           ))}
-        </div>
+        </RadioGroup>
       </fieldset>
 
       {/* Text input for options that require it */}

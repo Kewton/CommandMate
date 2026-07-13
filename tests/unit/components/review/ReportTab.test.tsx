@@ -84,7 +84,7 @@ describe('ReportTab', () => {
     render(React.createElement(ReportTab));
     await waitFor(() => {
       const noneRadio = screen.getByTestId('mode-radio-none') as HTMLInputElement;
-      expect(noneRadio.checked).toBe(true);
+      expect(noneRadio).toBeChecked();
     });
   });
 

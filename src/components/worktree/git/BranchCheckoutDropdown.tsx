@@ -17,6 +17,7 @@ import {
   CHECKOUT_HISTORY_LOSS_WARNING,
   CHECKOUT_RUNNING_SESSION_WARNING,
 } from '@/config/git-status-config';
+import { Checkbox } from '@/components/ui';
 
 interface BranchCheckoutDropdownProps {
   branches: BranchInfo[];
@@ -162,10 +163,9 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
             )}
 
             <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={checkoutForce}
-                onChange={(e) => setCheckoutForce(e.target.checked)}
+                onCheckedChange={(checked) => setCheckoutForce(checked === true)}
                 data-testid="branch-checkout-force"
               />
               Discard uncommitted changes (force) — 未コミットの変更は失われます

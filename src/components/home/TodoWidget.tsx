@@ -15,7 +15,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Card, Input } from '@/components/ui';
+import { Button, Card, Checkbox, Input } from '@/components/ui';
 import { todoApi, type TodoItem } from '@/lib/api/todo-api';
 import { MAX_TODO_CONTENT_LENGTH } from '@/config/todo-config';
 
@@ -280,13 +280,11 @@ export function TodoWidget() {
                       (Issue #909). */}
                   <div className="flex min-w-0 flex-1 items-center gap-2">
                     <label className="shrink-0 inline-flex min-h-[44px] min-w-[44px] cursor-pointer items-center justify-center sm:min-h-0 sm:min-w-0">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={todo.done}
-                        onChange={() => handleToggle(todo)}
+                        onCheckedChange={() => handleToggle(todo)}
                         data-testid="todo-checkbox"
                         aria-label={todo.done ? 'Mark as not done' : 'Mark as done'}
-                        className="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-ring"
                       />
                     </label>
                     <span

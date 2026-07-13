@@ -31,6 +31,12 @@ export type { SkeletonProps } from './Skeleton';
 export { Switch } from './Switch';
 export type { SwitchProps } from './Switch';
 
+export { Checkbox } from './Checkbox';
+export type { CheckboxProps } from './Checkbox';
+
+export { RadioGroup, RadioGroupItem } from './RadioGroup';
+export type { RadioGroupProps, RadioGroupItemProps } from './RadioGroup';
+
 export { Tabs, TabsList, TabsTrigger, TabsContent } from './Tabs';
 export type { TabsProps, TabsVariant } from './Tabs';
 
