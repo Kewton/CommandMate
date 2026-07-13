@@ -214,6 +214,7 @@ export async function GET(
         status: t.status,
         createdAt: t.createdAt,
         sentAt: t.sentAt,
+        error: t.error,
       })),
       hasMore,
     });

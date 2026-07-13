@@ -109,7 +109,10 @@ async function executeTimer(timerId: string): Promise<void> {
     });
 
     if (!result.ok) {
-      updateTimerStatus(db, timerId, 'failed');
+      // [Issue #1107] Persist the failure reason so the detail modal can show
+      // it (previously logged server-side only).
+      const reason = `[${result.stage}] ${result.error}`;
+      updateTimerStatus(db, timerId, 'failed', undefined, reason);
       logger.error('timer:send-failed', { timerId, stage: result.stage, error: result.error });
       return;
     }
@@ -120,7 +123,8 @@ async function executeTimer(timerId: string): Promise<void> {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     try {
-      updateTimerStatus(db, timerId, 'failed');
+      // [Issue #1107] Persist the thrown error message as the failure reason.
+      updateTimerStatus(db, timerId, 'failed', undefined, msg);
     } catch {
       // DB update failure is non-fatal
     }
