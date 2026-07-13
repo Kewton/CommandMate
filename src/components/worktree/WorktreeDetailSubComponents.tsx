@@ -964,9 +964,9 @@ export const ErrorDisplay = memo(function ErrorDisplay({
       role="alert"
       aria-live="assertive"
     >
-      <div className="text-center p-6 bg-red-50 rounded-lg border border-red-200 max-w-md">
+      <div className="text-center p-6 bg-danger-subtle rounded-lg border border-danger-border max-w-md">
         <svg
-          className="mx-auto h-12 w-12 text-red-400 mb-4"
+          className="mx-auto h-12 w-12 text-danger-foreground/70 mb-4"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -979,14 +979,14 @@ export const ErrorDisplay = memo(function ErrorDisplay({
             d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
           />
         </svg>
-        <p className="text-red-600 font-medium">Error loading worktree</p>
-        <p className="text-red-500 text-sm mt-2">{message}</p>
+        <p className="text-danger-foreground font-medium">Error loading worktree</p>
+        <p className="text-danger-foreground/80 text-sm mt-2">{message}</p>
         {onRetry && (
           <Button
             variant="ghost"
             type="button"
             onClick={onRetry}
-            className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+            className="mt-4 px-4 py-2 bg-danger-foreground text-danger-subtle rounded-lg hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-danger focus:ring-offset-2 ring-offset-background"
           >
             Retry
           </Button>

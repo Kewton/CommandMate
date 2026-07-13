@@ -45,32 +45,32 @@ function getToastStyles(type: ToastType): {
   switch (type) {
     case 'success':
       return {
-        bgColor: 'bg-green-50',
-        borderColor: 'border-green-200',
-        textColor: 'text-green-800',
-        iconColor: 'text-green-500',
+        bgColor: 'bg-success-subtle',
+        borderColor: 'border-success-border',
+        textColor: 'text-success-foreground',
+        iconColor: 'text-success-foreground',
       };
     case 'error':
       return {
-        bgColor: 'bg-red-50',
-        borderColor: 'border-red-200',
-        textColor: 'text-red-800',
-        iconColor: 'text-red-500',
+        bgColor: 'bg-danger-subtle',
+        borderColor: 'border-danger-border',
+        textColor: 'text-danger-foreground',
+        iconColor: 'text-danger-foreground',
       };
     case 'warning':
       return {
-        bgColor: 'bg-amber-50',
-        borderColor: 'border-amber-200',
-        textColor: 'text-amber-800',
-        iconColor: 'text-amber-500',
+        bgColor: 'bg-warning-subtle',
+        borderColor: 'border-warning-border',
+        textColor: 'text-warning-foreground',
+        iconColor: 'text-warning-foreground',
       };
     case 'info':
     default:
       return {
-        bgColor: 'bg-accent-50',
-        borderColor: 'border-accent-200',
-        textColor: 'text-accent-800',
-        iconColor: 'text-accent-500',
+        bgColor: 'bg-info-subtle',
+        borderColor: 'border-info-border',
+        textColor: 'text-info-foreground',
+        iconColor: 'text-info-foreground',
       };
   }
 }

@@ -70,10 +70,32 @@ module.exports = {
           900: 'rgb(var(--accent-900) / <alpha-value>)',
           950: 'rgb(var(--accent-950) / <alpha-value>)',
         },
-        success: 'rgb(var(--success) / <alpha-value>)',
-        warning: 'rgb(var(--warning) / <alpha-value>)',
-        danger: 'rgb(var(--danger) / <alpha-value>)',
-        info: 'rgb(var(--info) / <alpha-value>)',
+        // [Issue #1112] Status colors carry a tint scale (subtle/border/foreground)
+        // for alert surfaces; DEFAULT keeps `text-success` etc. working unchanged.
+        success: {
+          DEFAULT: 'rgb(var(--success) / <alpha-value>)',
+          subtle: 'rgb(var(--success-subtle) / <alpha-value>)',
+          border: 'rgb(var(--success-border) / <alpha-value>)',
+          foreground: 'rgb(var(--success-foreground) / <alpha-value>)',
+        },
+        warning: {
+          DEFAULT: 'rgb(var(--warning) / <alpha-value>)',
+          subtle: 'rgb(var(--warning-subtle) / <alpha-value>)',
+          border: 'rgb(var(--warning-border) / <alpha-value>)',
+          foreground: 'rgb(var(--warning-foreground) / <alpha-value>)',
+        },
+        danger: {
+          DEFAULT: 'rgb(var(--danger) / <alpha-value>)',
+          subtle: 'rgb(var(--danger-subtle) / <alpha-value>)',
+          border: 'rgb(var(--danger-border) / <alpha-value>)',
+          foreground: 'rgb(var(--danger-foreground) / <alpha-value>)',
+        },
+        info: {
+          DEFAULT: 'rgb(var(--info) / <alpha-value>)',
+          subtle: 'rgb(var(--info-subtle) / <alpha-value>)',
+          border: 'rgb(var(--info-border) / <alpha-value>)',
+          foreground: 'rgb(var(--info-foreground) / <alpha-value>)',
+        },
       },
       // [Issue #1074] Light mode inverted to a gray page with white cards, so
       // shadow-sm must read as a real 2-layer elevation instead of the flat

@@ -131,7 +131,7 @@ function PromptPanelContent({
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h3 id={labelId} className="text-lg font-semibold text-yellow-800 dark:text-yellow-300 flex items-center gap-2">
+        <h3 id={labelId} className="text-lg font-semibold text-warning-foreground flex items-center gap-2">
           <span className="text-xl" aria-hidden="true">?</span>
           {cliToolName ? t('confirmationFrom', { toolName: cliToolName }) : t('confirmationFromClaude')}
         </h3>
@@ -141,9 +141,9 @@ function PromptPanelContent({
             type="button"
             onClick={onDismiss}
             aria-label="close"
-            className="p-1 rounded hover:bg-yellow-200 dark:hover:bg-muted transition-colors"
+            className="p-1 rounded hover:bg-warning-border/50 transition-colors"
           >
-            <svg className="w-5 h-5 text-yellow-700 dark:text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+            <svg className="w-5 h-5 text-warning-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </Button>
@@ -349,7 +349,7 @@ function MultipleChoicePromptActions({
  * Generates container class names based on animation state
  */
 function getContainerClasses(animationClass: string): string {
-  const baseClasses = 'bg-yellow-50 dark:bg-muted border-2 border-yellow-300 dark:border-yellow-600 rounded-lg p-4 shadow-lg transition-all duration-200 ease-in-out';
+  const baseClasses = 'bg-warning-subtle border-2 border-warning-border rounded-lg p-4 shadow-lg transition-all duration-200 ease-in-out';
 
   let animationStyles = 'opacity-100';
   if (animationClass === 'animate-fade-in') {
