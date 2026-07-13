@@ -5,7 +5,6 @@
  * - GET /api/worktrees/:id/messages (upper-bound validation)
  * - HistoryPane selector UI (selectable options)
  * - WorktreeDetailRefactored state (persisted to localStorage)
- * - useInfiniteMessages default page size
  *
  * Design decisions:
  * - MAX_MESSAGES_LIMIT is derived from HISTORY_DISPLAY_LIMIT_OPTIONS (no duplication).
@@ -36,8 +35,7 @@ export const MAX_MESSAGES_LIMIT: HistoryDisplayLimit = Math.max(
 ) as HistoryDisplayLimit;
 
 /**
- * Default history display limit (used when no localStorage value is present
- * and as the default `pageSize` for `useInfiniteMessages`).
+ * Default history display limit (used when no localStorage value is present).
  */
 export const DEFAULT_MESSAGES_LIMIT: HistoryDisplayLimit = 50;
 

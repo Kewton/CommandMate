@@ -551,7 +551,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         <MobileTabBar
           activeTab={activeTab}
           onTabChange={handleMobileTabChange}
-          hasNewOutput={false}
           hasPrompt={state.prompt.visible}
           hasUpdate={hasUpdate}
         />
