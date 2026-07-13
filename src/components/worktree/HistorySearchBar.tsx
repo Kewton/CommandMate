@@ -77,7 +77,7 @@ export function HistorySearchBar({
 
   return (
     <div
-      className="flex items-center gap-1 px-2 py-1 bg-gray-800 border border-gray-600 rounded shadow-lg"
+      className="flex items-center gap-1 px-2 py-1 bg-surface border border-border rounded shadow-lg"
       role="search"
       aria-label="履歴内テキスト検索"
     >
@@ -90,7 +90,7 @@ export function HistorySearchBar({
         onCompositionStart={onCompositionStart}
         onCompositionEnd={onCompositionEnd}
         placeholder="検索..."
-        className="bg-transparent text-gray-200 text-sm outline-none w-32 sm:w-40 placeholder-gray-500"
+        className="bg-transparent text-foreground text-sm outline-none w-32 sm:w-40 placeholder-muted-foreground"
         aria-label="検索キーワード"
         autoComplete="off"
         autoCorrect="off"
@@ -102,7 +102,7 @@ export function HistorySearchBar({
         role="status"
         aria-live="polite"
         aria-atomic="true"
-        className="text-gray-400 text-xs min-w-[3rem] text-right"
+        className="text-muted-foreground text-xs min-w-[3rem] text-right"
       >
         {countDisplay}
       </span>
@@ -112,7 +112,7 @@ export function HistorySearchBar({
         onClick={onPrev}
         disabled={matchCount === 0}
         aria-label="前の結果 (prev)"
-        className="text-gray-300 hover:text-white disabled:text-gray-600 min-w-[36px] min-h-[36px] flex items-center justify-center text-base"
+        className="text-muted-foreground hover:text-foreground disabled:opacity-40 min-w-[36px] min-h-[36px] flex items-center justify-center text-base"
       >
         ▲
       </button>
@@ -122,7 +122,7 @@ export function HistorySearchBar({
         onClick={onNext}
         disabled={matchCount === 0}
         aria-label="次の結果 (next)"
-        className="text-gray-300 hover:text-white disabled:text-gray-600 min-w-[36px] min-h-[36px] flex items-center justify-center text-base"
+        className="text-muted-foreground hover:text-foreground disabled:opacity-40 min-w-[36px] min-h-[36px] flex items-center justify-center text-base"
       >
         ▼
       </button>
@@ -131,7 +131,7 @@ export function HistorySearchBar({
         type="button"
         onClick={onClose}
         aria-label="検索を閉じる (close)"
-        className="text-gray-400 hover:text-white min-w-[36px] min-h-[36px] flex items-center justify-center text-base ml-1"
+        className="text-muted-foreground hover:text-foreground min-w-[36px] min-h-[36px] flex items-center justify-center text-base ml-1"
       >
         ✕
       </button>

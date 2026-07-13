@@ -130,18 +130,18 @@ function LoadingIndicator() {
       aria-label="Loading messages"
     >
       <div className="flex gap-1" aria-hidden="true">
-        <span className="w-2 h-2 bg-gray-400 rounded-full animate-pulse" />
-        <span className="w-2 h-2 bg-gray-400 rounded-full animate-pulse delay-100" />
-        <span className="w-2 h-2 bg-gray-400 rounded-full animate-pulse delay-200" />
+        <span className="w-2 h-2 bg-muted-foreground rounded-full animate-pulse" />
+        <span className="w-2 h-2 bg-muted-foreground rounded-full animate-pulse delay-100" />
+        <span className="w-2 h-2 bg-muted-foreground rounded-full animate-pulse delay-200" />
       </div>
-      <span className="ml-2 text-sm text-gray-400">Loading...</span>
+      <span className="ml-2 text-sm text-muted-foreground">Loading...</span>
     </div>
   );
 }
 
 function EmptyState() {
   return (
-    <div className="flex flex-col items-center justify-center py-8 text-gray-500">
+    <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
       <svg
         className="w-12 h-12 mb-2 opacity-50"
         fill="none"
@@ -205,10 +205,10 @@ const BASE_CONTAINER_CLASSES = [
   'flex',
   'flex-col',
   'overflow-hidden',
-  'bg-gray-900',
+  'bg-surface-2',
   'rounded-lg',
   'border',
-  'border-gray-700',
+  'border-border',
 ] as const;
 
 export const HistoryPane = memo(function HistoryPane({
@@ -492,17 +492,17 @@ export const HistoryPane = memo(function HistoryPane({
       className={containerClasses}
     >
       {/* Header — fixed row, always pinned at the top (Issue #1019) */}
-      <div className="flex-shrink-0 bg-gray-900 border-b border-gray-700 px-4 py-2 flex items-center justify-between flex-wrap gap-1">
-        <h3 className="text-sm font-medium text-gray-300">Message History</h3>
+      <div className="flex-shrink-0 bg-surface-2 border-b border-border px-4 py-2 flex items-center justify-between flex-wrap gap-1">
+        <h3 className="text-sm font-medium text-foreground">Message History</h3>
         <div className="flex items-center gap-2 flex-wrap">
           {onHistoryDisplayLimitChange && historyDisplayLimit !== undefined && (
-            <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
               <span>Show</span>
               <select
                 value={historyDisplayLimit}
                 onChange={handleHistoryDisplayLimitSelectChange}
                 aria-label="History display limit"
-                className="rounded border border-gray-600 bg-gray-800 text-gray-200 text-xs px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-ring"
+                className="rounded border border-input bg-surface text-foreground text-xs px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-ring"
               >
                 {HISTORY_DISPLAY_LIMIT_OPTIONS.map((opt) => (
                   <option key={opt} value={opt}>
@@ -513,12 +513,12 @@ export const HistoryPane = memo(function HistoryPane({
             </label>
           )}
           {onShowArchivedChange && (
-            <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
               <input
                 type="checkbox"
                 checked={showArchived}
                 onChange={(e) => onShowArchivedChange(e.target.checked)}
-                className="rounded border-gray-600 bg-gray-800 text-accent-500 focus:ring-ring focus:ring-offset-0 h-3.5 w-3.5"
+                className="rounded border-input bg-surface text-accent-500 focus:ring-ring focus:ring-offset-0 h-3.5 w-3.5"
               />
               Show archived
             </label>
@@ -531,8 +531,8 @@ export const HistoryPane = memo(function HistoryPane({
               aria-pressed={historyUserOnly}
               className={`p-1 rounded transition-colors ${
                 historyUserOnly
-                  ? 'bg-accent-900/40 text-accent-300'
-                  : 'text-gray-400 hover:text-gray-200'
+                  ? 'bg-accent-500/15 text-accent-700 dark:text-accent-300'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
               title={historyUserOnly ? 'Show all messages' : 'Show user messages only'}
             >
@@ -548,7 +548,7 @@ export const HistoryPane = memo(function HistoryPane({
             onClick={handleToggleSearch}
             aria-label={isSearchOpen ? 'Close search' : 'Open search'}
             aria-pressed={isSearchOpen}
-            className="p-1 text-gray-400 hover:text-gray-200 rounded transition-colors"
+            className="p-1 text-muted-foreground hover:text-foreground rounded transition-colors"
             title={isSearchOpen ? 'Close search' : 'Open search'}
           >
             <Search size={14} aria-hidden="true" />
@@ -560,7 +560,7 @@ export const HistoryPane = memo(function HistoryPane({
               aria-label={t('terminal.hideHistory')}
               aria-expanded="true"
               aria-controls={collapseAriaControls}
-              className="p-1 text-gray-400 hover:text-gray-200 rounded transition-colors"
+              className="p-1 text-muted-foreground hover:text-foreground rounded transition-colors"
               title={t('terminal.hideHistory')}
               data-testid={collapseTestId}
             >
@@ -572,7 +572,7 @@ export const HistoryPane = memo(function HistoryPane({
 
       {/* Search bar (toggleable) — fixed row below the header (Issue #1019) */}
       {isSearchOpen && (
-        <div className="flex-shrink-0 px-3 py-2 bg-gray-900 border-b border-gray-700">
+        <div className="flex-shrink-0 px-3 py-2 bg-surface-2 border-b border-border">
           <HistorySearchBar
             query={searchQuery}
             onQueryChange={setSearchQuery}
