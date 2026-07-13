@@ -102,7 +102,7 @@ export const DiffLine = memo(function DiffLine({ line }: { line: string }) {
   } else if (line.startsWith('@@')) {
     className += ' text-info';
   } else {
-    className += ' text-gray-700 dark:text-gray-300';
+    className += ' text-foreground';
   }
 
   return <div className={className}>{line}</div>;

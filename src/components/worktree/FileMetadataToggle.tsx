@@ -83,7 +83,7 @@ export const FileMetadataToggle = memo(function FileMetadataToggle({
         aria-expanded={open}
         aria-label={t('fileTree.metadata.settingsLabel')}
         title={t('fileTree.metadata.settingsLabel')}
-        className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+        className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:bg-muted rounded transition-colors"
       >
         <Settings2 className="w-4 h-4" aria-hidden="true" />
       </button>
@@ -92,15 +92,15 @@ export const FileMetadataToggle = memo(function FileMetadataToggle({
         <div
           role="menu"
           data-testid="file-metadata-toggle-menu"
-          className="absolute right-0 top-full z-20 mt-1 min-w-[12rem] rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg p-1"
+          className="absolute right-0 top-full z-20 mt-1 min-w-[12rem] rounded border border-border bg-surface shadow-lg p-1"
         >
-          <div className="px-2 py-1 text-[11px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide">
+          <div className="px-2 py-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
             {t('fileTree.metadata.settingsTitle')}
           </div>
           {ROWS.map((row) => (
             <label
               key={row.key}
-              className="flex items-center gap-2 px-2 py-1.5 text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/60 rounded cursor-pointer"
+              className="flex items-center gap-2 px-2 py-1.5 text-xs text-foreground hover:bg-muted rounded cursor-pointer"
             >
               <Checkbox
                 data-testid={`file-metadata-toggle-${row.key}`}

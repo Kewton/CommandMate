@@ -705,7 +705,7 @@ describe('FileTreeView', () => {
       const fileItem = screen.getByTestId('tree-item-package.json');
       fireEvent.mouseEnter(fileItem);
 
-      expect(fileItem).toHaveClass('hover:bg-gray-100');
+      expect(fileItem).toHaveClass('hover:bg-muted');
     });
   });
 

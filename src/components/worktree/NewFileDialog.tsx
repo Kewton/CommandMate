@@ -101,7 +101,7 @@ export const NewFileDialog = memo(function NewFileDialog({
         <div>
           <label
             htmlFor="new-file-name"
-            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+            className="block text-sm font-medium text-foreground mb-1"
           >
             File name
           </label>
@@ -115,13 +115,13 @@ export const NewFileDialog = memo(function NewFileDialog({
               onChange={(e) => setFileName(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="document"
-              className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
+              className="flex-1 px-3 py-2 border border-input rounded-lg bg-surface text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
             />
             <select
               data-testid="new-file-ext-select"
               value={selectedExt}
               onChange={(e) => setSelectedExt(e.target.value)}
-              className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
+              className="px-3 py-2 border border-input rounded-lg bg-surface text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
             >
               {EDITABLE_EXTENSIONS.map((ext) => (
                 <option key={ext} value={ext}>
@@ -134,7 +134,7 @@ export const NewFileDialog = memo(function NewFileDialog({
 
         {/* File path preview */}
         {resolvedName && (
-          <div className="text-xs text-gray-500 dark:text-gray-400 font-mono bg-gray-50 dark:bg-gray-800 rounded px-2 py-1">
+          <div className="text-xs text-muted-foreground font-mono bg-muted rounded px-2 py-1">
             {displayPath}
           </div>
         )}
@@ -144,7 +144,7 @@ export const NewFileDialog = memo(function NewFileDialog({
           <button
             type="button"
             onClick={onCancel}
-            className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+            className="px-4 py-2 text-sm font-medium text-foreground bg-muted hover:bg-muted/80 rounded-lg transition-colors"
           >
             Cancel
           </button>

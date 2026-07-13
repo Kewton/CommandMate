@@ -226,7 +226,7 @@ export const ContextMenu = memo(function ContextMenu({
       data-testid="context-menu"
       role="menu"
       aria-label="File actions"
-      className="fixed min-w-[160px] py-1 bg-white rounded-lg shadow-lg border border-gray-200 animate-in fade-in-0 zoom-in-95 duration-100"
+      className="fixed min-w-[160px] py-1 bg-surface rounded-lg shadow-lg border border-border animate-in fade-in-0 zoom-in-95 duration-100"
       style={{
         zIndex: Z_INDEX.CONTEXT_MENU,
         left: `${position.x}px`,
@@ -239,10 +239,10 @@ export const ContextMenu = memo(function ContextMenu({
             role="menuitem"
             onClick={item.onClick}
             disabled={!targetPath}
-            className={`w-full flex items-center gap-3 px-3 py-2 text-sm transition-colors focus:outline-none focus:bg-gray-100 ${
+            className={`w-full flex items-center gap-3 px-3 py-2 text-sm transition-colors focus:outline-none focus:bg-muted ${
               item.variant === 'danger'
                 ? 'text-red-600 hover:bg-red-50 focus:bg-red-50'
-                : 'text-gray-700 hover:bg-gray-100'
+                : 'text-foreground hover:bg-muted'
             } ${!targetPath ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             {item.icon}
@@ -251,7 +251,7 @@ export const ContextMenu = memo(function ContextMenu({
           {item.showDividerAfter && index < visibleItems.length - 1 && (
             <div
               data-testid="context-menu-divider"
-              className="my-1 border-t border-gray-200"
+              className="my-1 border-t border-border"
             />
           )}
         </React.Fragment>
