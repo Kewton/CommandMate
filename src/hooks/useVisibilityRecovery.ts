@@ -144,7 +144,7 @@ export function useVisibilityRecovery({
    * This handles the case where the browser suspended network requests while
    * the page was in the background (common on mobile browsers).
    *
-   * Unlike WorktreeList.tsx (SF-003), this component needs:
+   * Unlike the former worktree list UI (removed in #1115), this hook needs:
    * - Error state branching: full recovery (handleRetry) vs lightweight recovery
    * - Throttle guard (RECOVERY_THROTTLE_MS) to prevent rapid re-fetches
    */

@@ -6,9 +6,6 @@
 export { WorktreeCard } from './WorktreeCard';
 export type { WorktreeCardProps } from './WorktreeCard';
 
-export { WorktreeList } from './WorktreeList';
-export type { WorktreeListProps, SortOption, SortDirection } from './WorktreeList';
-
 export { MessageList } from './MessageList';
 export type { MessageListProps } from './MessageList';
 

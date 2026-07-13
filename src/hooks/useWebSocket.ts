@@ -1,6 +1,8 @@
 /**
  * WebSocket Custom Hook
  * React hook for managing WebSocket connections
+ *
+ * @deprecated 再設計予定。現在消費者ゼロだが、後続のWebSocketストリーミング化で再設計・再利用予定（親 #1110 参照）
  */
 
 'use client';
