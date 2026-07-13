@@ -80,10 +80,11 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`text-sm font-medium transition-colors ${
+                  aria-current={active ? 'page' : undefined}
+                  className={`relative py-1 text-sm font-medium transition-colors after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:bg-accent-600 dark:after:bg-accent-400 after:origin-center motion-safe:after:transition-transform after:duration-200 after:ease-[var(--motion-ease-out)] ${
                     active
-                      ? 'text-accent-600 dark:text-accent-400'
-                      : 'text-muted-foreground hover:text-foreground'
+                      ? 'text-accent-600 dark:text-accent-400 after:scale-x-100'
+                      : 'text-muted-foreground hover:text-foreground after:scale-x-0'
                   }`}
                 >
                   {item.label}
@@ -96,7 +97,7 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
               data-testid="header-command-palette-trigger"
               onClick={() => setOpen(true)}
               aria-label={t('mobileTrigger')}
-              className="hidden md:inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-surface-2 transition-colors"
+              className="hidden md:inline-flex items-center gap-2 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-surface-2 transition-colors"
             >
               <Search size={16} strokeWidth={2} aria-hidden="true" className="shrink-0" />
               <span>{t('searchAction')}</span>
