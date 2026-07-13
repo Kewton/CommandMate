@@ -83,7 +83,7 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
       await onRespond(answer);
     } catch (error) {
       console.error('Failed to respond:', error);
-      alert(t('failedToRespond'));
+      window.alert(t('failedToRespond'));
     } finally {
       setResponding(false);
     }

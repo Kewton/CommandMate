@@ -8,7 +8,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslations } from 'next-intl';
 import { Button, Card, Input, Textarea } from '@/components/ui';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import {
   MAX_TEMPLATES,
   MAX_TEMPLATE_NAME_LENGTH,
@@ -17,6 +19,8 @@ import {
 import type { TemplateData } from '@/hooks/useReportGeneration';
 
 export default function TemplateTab() {
+  const t = useTranslations('review');
+  const confirm = useConfirm();
   const [templates, setTemplates] = useState<TemplateData[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -123,7 +127,7 @@ export default function TemplateTab() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Delete this template?')) return;
+    if (!(await confirm({ description: t('template.deleteConfirm'), variant: 'danger' }))) return;
 
     setError(null);
     try {

@@ -18,6 +18,7 @@ import { AuthProvider } from '@/contexts/AuthContext';
 import { PcDisplaySizeProvider } from '@/contexts/PcDisplaySizeContext';
 import { CommandPaletteProvider } from '@/contexts/CommandPaletteContext';
 import { WorktreesCacheProvider } from '@/components/providers/WorktreesCacheProvider';
+import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 
 interface AppProvidersProps {
   children: ReactNode;
@@ -46,7 +47,9 @@ export function AppProviders({ children, locale, messages, timeZone, authEnabled
             <SidebarProvider>
               <WorktreesCacheProvider>
                 <CommandPaletteProvider>
-                  {children}
+                  <ConfirmProvider>
+                    {children}
+                  </ConfirmProvider>
                 </CommandPaletteProvider>
               </WorktreesCacheProvider>
             </SidebarProvider>

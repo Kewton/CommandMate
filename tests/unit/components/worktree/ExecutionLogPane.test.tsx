@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import React from 'react';
 import { ExecutionLogPane } from '@/components/worktree/ExecutionLogPane';
+import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 
 const mockFetch = vi.fn();
 global.fetch = mockFetch as unknown as typeof fetch;
@@ -151,11 +152,15 @@ describe('ExecutionLogPane (Issue #826)', () => {
 
     it('sends a DELETE after confirmation when the delete icon is clicked', async () => {
       setupFetch({ schedules: [makeSchedule()] });
-      vi.spyOn(window, 'confirm').mockReturnValue(true);
-      render(<ExecutionLogPane worktreeId="wt-1" />);
+      render(
+        <ConfirmProvider>
+          <ExecutionLogPane worktreeId="wt-1" />
+        </ConfirmProvider>
+      );
 
       const del = await screen.findByTestId('schedule-delete-daily-review');
       fireEvent.click(del);
+      fireEvent.click(await screen.findByTestId('confirm-dialog-confirm'));
 
       await waitFor(() => {
         const call = mockFetch.mock.calls.find(

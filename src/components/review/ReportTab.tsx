@@ -9,8 +9,10 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslations } from 'next-intl';
 import ReportDatePicker from './ReportDatePicker';
 import { Button, Card, Input, RadioGroup, RadioGroupItem, Textarea } from '@/components/ui';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { SUMMARY_ALLOWED_TOOLS, MAX_USER_INSTRUCTION_LENGTH } from '@/config/review-config';
 import { useReportGeneration } from '@/hooks/useReportGeneration';
 import { useGenerationStatus } from '@/hooks/useGenerationStatus';
@@ -43,6 +45,8 @@ const MODE_OPTIONS: Array<{ value: GenerationMode; label: string }> = [
 ];
 
 export default function ReportTab() {
+  const t = useTranslations('review');
+  const confirm = useConfirm();
   const [selectedDate, setSelectedDate] = useState(formatToday());
   const [selectedTool, setSelectedTool] = useState<string>('claude');
   const [modelInput, setModelInput] = useState('');
@@ -120,7 +124,7 @@ export default function ReportTab() {
 
   const handleGenerate = async () => {
     // Overwrite confirmation
-    if (report && !window.confirm('A report already exists for this date. Regenerate and overwrite?')) {
+    if (report && !(await confirm({ description: t('report.regenerateConfirm') }))) {
       return;
     }
 

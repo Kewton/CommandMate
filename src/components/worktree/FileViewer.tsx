@@ -19,7 +19,9 @@
 'use client';
 
 import React, { memo, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useTranslations } from 'next-intl';
 import { Modal } from '@/components/ui';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { FileContent } from '@/types/models';
 import { ImageViewer } from './ImageViewer';
 import { VideoViewer } from './VideoViewer';
@@ -128,17 +130,19 @@ function HtmlPreviewMobile({
   const [activeTab, setActiveTab] = useState<'source' | 'preview'>('preview');
   const [sandboxLevel, setSandboxLevel] = useState<SandboxLevel>('safe');
   const confirmedFilesRef = useRef<Set<string>>(new Set());
+  const tWorktree = useTranslations('worktree');
+  const confirm = useConfirm();
 
-  const handleSandboxChange = useCallback((newLevel: SandboxLevel) => {
+  const handleSandboxChange = useCallback(async (newLevel: SandboxLevel) => {
     if (newLevel === 'interactive' && !confirmedFilesRef.current.has(filePath)) {
-      const confirmed = window.confirm(
-        'Interactiveモードではスクリプトが実行されます。信頼できないHTMLファイルではSafeモードを使用してください。'
-      );
+      const confirmed = await confirm({
+        description: tWorktree('htmlPreview.interactiveModeConfirm'),
+      });
       if (!confirmed) return;
       confirmedFilesRef.current.add(filePath);
     }
     setSandboxLevel(newLevel);
-  }, [filePath]);
+  }, [filePath, confirm, tWorktree]);
 
   // In interactive mode, inject link click script; in safe mode, pass as-is
   const iframeSrcDoc = useMemo(() => {

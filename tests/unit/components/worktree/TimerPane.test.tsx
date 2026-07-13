@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import React from 'react';
 import { TimerPane } from '@/components/worktree/TimerPane';
+import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 import { MAX_TIMERS_PER_WORKTREE } from '@/config/timer-constants';
 
 interface FakeTimer {
@@ -111,6 +112,47 @@ describe('TimerPane (Issue #945)', () => {
     await waitFor(() => expect(screen.getByTestId('timer-new-button')).toBeDefined());
     expect((screen.getByTestId('timer-new-button') as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText('schedule.timer.maxReached')).toBeDefined();
+  });
+});
+
+describe('TimerPane clear history (Issue #1113: ConfirmDialog)', () => {
+  it('sends DELETE to /timers/history after the ConfirmDialog is confirmed', async () => {
+    const fetchMock = stubTimers([makeTimer({ id: 't-sent', status: 'sent', sentAt: 1_700_000_100_000 })]);
+    render(
+      <ConfirmProvider>
+        <TimerPane worktreeId="wt-1" />
+      </ConfirmProvider>
+    );
+
+    fireEvent.click(await screen.findByText('schedule.timer.clearHistory'));
+    fireEvent.click(await screen.findByTestId('confirm-dialog-confirm'));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/worktrees/wt-1/timers/history',
+        { method: 'DELETE' },
+      );
+    });
+  });
+
+  it('does not call the API when the ConfirmDialog is cancelled', async () => {
+    const fetchMock = stubTimers([makeTimer({ id: 't-sent', status: 'sent', sentAt: 1_700_000_100_000 })]);
+    render(
+      <ConfirmProvider>
+        <TimerPane worktreeId="wt-1" />
+      </ConfirmProvider>
+    );
+
+    fireEvent.click(await screen.findByText('schedule.timer.clearHistory'));
+    fireEvent.click(await screen.findByTestId('confirm-dialog-cancel'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('confirm-dialog')).toBeNull();
+    });
+    const deleteCalls = fetchMock.mock.calls.filter(
+      ([, init]) => (init as RequestInit | undefined)?.method === 'DELETE',
+    );
+    expect(deleteCalls).toHaveLength(0);
   });
 });
 
