@@ -28,6 +28,7 @@ import type { CLIToolType, AgentInstance } from '@/lib/cli-tools/types';
 import { CLI_TOOL_IDS, agentInstancesFromSelectedAgents } from '@/lib/cli-tools/types';
 import { formatDelayLabel } from './timers/timer-format';
 import { TimerEditDialog } from './timers/TimerEditDialog';
+import { TimerDetailModal, type TimerItem } from './timers/TimerDetailModal';
 
 // =============================================================================
 // Types
@@ -45,18 +46,7 @@ interface TimerPaneProps {
   selectedAgents?: CLIToolType[];
 }
 
-interface TimerItem {
-  id: string;
-  cliToolId: string;
-  /** Target agent instance (Issue #942). Legacy rows fall back to cliToolId. */
-  instanceId: string;
-  message: string;
-  delayMs: number;
-  scheduledSendTime: number;
-  status: string;
-  createdAt: number;
-  sentAt: number | null;
-}
+// TimerItem is shared with TimerDetailModal (includes the Issue #1107 `error`).
 
 // =============================================================================
 // Helpers
@@ -94,6 +84,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
   const [timers, setTimers] = useState<TimerItem[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [selectedTimer, setSelectedTimer] = useState<TimerItem | null>(null);
   const [, setTick] = useState(0); // Force re-render for countdown
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -276,7 +267,17 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
           {timers.map((timer) => (
             <div
               key={timer.id}
-              className="flex items-center gap-2 p-2 rounded-lg border border-border bg-surface"
+              role="button"
+              tabIndex={0}
+              data-testid="timer-row"
+              onClick={() => setSelectedTimer(timer)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setSelectedTimer(timer);
+                }
+              }}
+              className="flex items-center gap-2 p-2 rounded-lg border border-border bg-surface text-left cursor-pointer hover:bg-muted transition-colors"
             >
               <div className="flex-1 min-w-0">
                 <div className="text-sm text-foreground truncate">
@@ -303,7 +304,11 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
               {timer.status === 'pending' && (
                 <button
                   type="button"
-                  onClick={() => handleCancel(timer.id)}
+                  onClick={(e) => {
+                    // Row click opens the detail modal; keep cancel isolated.
+                    e.stopPropagation();
+                    void handleCancel(timer.id);
+                  }}
                   className="px-2 py-1 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
                 >
                   {t('timer.cancel')}
@@ -342,6 +347,12 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
         instances={instances}
         onClose={() => setDialogOpen(false)}
         onSaved={() => { void fetchTimers(); }}
+      />
+
+      <TimerDetailModal
+        timer={selectedTimer}
+        instances={resolvedInstances}
+        onClose={() => setSelectedTimer(null)}
       />
     </div>
   );

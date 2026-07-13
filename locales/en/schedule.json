@@ -159,6 +159,12 @@
     "loadMore": "Load more",
     "clearHistory": "Clear history",
     "clearConfirm": "Delete all sent, failed, and cancelled timer history?",
-    "cleared": "History cleared ({count} items)"
+    "cleared": "History cleared ({count} items)",
+    "detailTitle": "Timer Details",
+    "statusLabel": "Status",
+    "scheduledTime": "Scheduled Send",
+    "createdTime": "Created",
+    "sentTime": "Sent",
+    "failureReason": "Failure Reason"
   }
 }
