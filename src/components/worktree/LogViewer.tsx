@@ -266,7 +266,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
         <CardContent>
           {loading && logFiles.length === 0 && (
             <div className="text-center py-4">
-              <div className="inline-block animate-spin rounded-full h-6 w-6 border-4 border-gray-300 border-t-accent-600" />
+              <div className="inline-block animate-spin rounded-full h-6 w-6 border-4 border-input border-t-accent-600" />
             </div>
           )}
 
@@ -277,7 +277,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
           )}
 
           {!loading && filteredLogFiles.length === 0 && !error && (
-            <p className="text-sm text-gray-600 text-center py-4">
+            <p className="text-sm text-muted-foreground text-center py-4">
               {cliToolFilter === 'all' ? 'No log files found' : `No ${cliToolFilter} log files found`}
             </p>
           )}
@@ -291,7 +291,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
                   className={`w-full text-left px-3 py-2 rounded text-sm font-mono transition-colors ${
                     selectedFile === file
                       ? 'bg-accent-50 text-accent-700 border border-accent-200'
-                      : 'hover:bg-gray-50 border border-transparent'
+                      : 'hover:bg-muted border border-transparent'
                   }`}
                 >
                   {file}
@@ -346,7 +346,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
                     className="w-full pr-20"
                   />
                   {matches.length > 0 && (
-                    <div className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-500">
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
                       {currentMatchIndex + 1} / {matches.length}
                     </div>
                   )}
@@ -381,12 +381,12 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
           <CardContent>
             {loading && (
               <div className="text-center py-8">
-                <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 border-t-accent-600" />
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-input border-t-accent-600" />
               </div>
             )}
 
             {!loading && fileContent && (
-              <div className="bg-gray-900 text-gray-100 rounded p-4 overflow-x-auto max-h-[500px] scrollbar-thin">
+              <div className="bg-[#111827] text-[#f3f4f6] rounded p-4 overflow-x-auto max-h-[500px] scrollbar-thin">
                 {searchQuery && matches.length > 0 ? (
                   <pre
                     className="text-xs font-mono whitespace-pre-wrap"
@@ -399,7 +399,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
             )}
 
             {!loading && searchQuery && matches.length === 0 && fileContent && (
-              <div className="text-center py-4 text-sm text-gray-500">
+              <div className="text-center py-4 text-sm text-muted-foreground">
                 No matches found for &quot;{searchQuery}&quot;
               </div>
             )}

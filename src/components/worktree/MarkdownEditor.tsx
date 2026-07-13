@@ -200,7 +200,7 @@ const MarkdownPreviewPane = memo(function MarkdownPreviewPane({
       {showToc && (
         <aside
           data-testid="markdown-preview-toc"
-          className="w-48 flex-shrink-0 overflow-y-auto border-l border-gray-200 dark:border-gray-700 py-4"
+          className="w-48 flex-shrink-0 overflow-y-auto border-l border-border py-4"
         >
           <div className="sticky top-0">
             <MarkdownToc entries={tocEntries} title={tocTitle} headerOffset={0} root={scrollEl} />
@@ -214,7 +214,7 @@ const MarkdownPreviewPane = memo(function MarkdownPreviewPane({
           aria-pressed={tocVisible}
           aria-label={tocVisible ? tocHideLabel : tocShowLabel}
           title={tocVisible ? tocHideLabel : tocShowLabel}
-          className="absolute top-2 right-2 z-10 flex items-center justify-center rounded-md border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-gray-800/90 p-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 shadow-sm"
+          className="absolute top-2 right-2 z-10 flex items-center justify-center rounded-md border border-border bg-surface/90 p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted shadow-sm"
         >
           <List className="h-4 w-4" />
         </button>
@@ -626,7 +626,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     <>
       <div
         ref={lineNumberRef}
-        className="flex-shrink-0 py-4 pl-2 pr-2 text-right select-none text-gray-400 dark:text-gray-600 font-mono text-sm bg-gray-50 dark:bg-gray-800/50 border-r border-gray-200 dark:border-gray-700 overflow-hidden"
+        className="flex-shrink-0 py-4 pl-2 pr-2 text-right select-none text-muted-foreground font-mono text-sm bg-muted dark:bg-muted/50 border-r border-border overflow-hidden"
         aria-hidden="true"
       >
         {Array.from({ length: lineCount }, (_, i) => (
@@ -640,7 +640,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         onChange={handleContentChange}
         onKeyDown={handleKeyDown}
         onScroll={handleEditorScroll}
-        className={`flex-1 py-4 pr-4 pl-3 font-mono text-sm resize-none bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none leading-[1.5rem]${showFocusRing ? ' focus:ring-2 focus:ring-ring focus:ring-inset' : ''}`}
+        className={`flex-1 py-4 pr-4 pl-3 font-mono text-sm resize-none bg-surface text-foreground focus:outline-none leading-[1.5rem]${showFocusRing ? ' focus:ring-2 focus:ring-ring focus:ring-inset' : ''}`}
         placeholder={isTextMode ? 'Start typing...' : 'Start typing markdown...'}
         spellCheck={false}
       />
@@ -747,7 +747,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
 
   // Calculate container classes for maximized state
   const containerClasses = useMemo(() => {
-    const base = 'flex flex-col bg-white dark:bg-gray-900';
+    const base = 'flex flex-col bg-surface';
 
     if (isMaximized && isFallbackMode) {
       // CSS fallback for fullscreen (iOS Safari, etc.)
@@ -794,11 +794,11 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     return (
       <div
         data-testid="markdown-editor"
-        className="flex items-center justify-center h-full bg-white dark:bg-gray-900"
+        className="flex items-center justify-center h-full bg-surface"
       >
         <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-accent-600 dark:border-t-accent-400" />
-          <p className="mt-4 text-gray-600 dark:text-gray-400">Loading...</p>
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-input border-t-accent-600 dark:border-t-accent-400" />
+          <p className="mt-4 text-muted-foreground">Loading...</p>
         </div>
       </div>
     );
@@ -809,7 +809,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     return (
       <div
         data-testid="markdown-editor-error"
-        className="flex items-center justify-center h-full bg-white dark:bg-gray-900"
+        className="flex items-center justify-center h-full bg-surface"
       >
         <div className="text-center">
           <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
@@ -817,7 +817,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
           {onClose && (
             <button
               onClick={onClose}
-              className="mt-4 px-4 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg dark:text-gray-300"
+              className="mt-4 px-4 py-2 bg-muted hover:bg-muted/80 rounded-lg text-foreground"
             >
               Close
             </button>
