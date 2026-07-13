@@ -57,9 +57,14 @@ export function createDefaultProps(overrides?: {
 
 /**
  * Get the textarea element used for message input.
+ *
+ * Issue #1080: the placeholder is now i18n-driven (`worktree.composer.placeholder`),
+ * so under the key-returning next-intl test mock it is no longer the literal
+ * "Type your message". Query by the stable textarea test id instead (robust even
+ * when the slash-command selector renders its own filter input).
  */
 export function getTextarea(): HTMLTextAreaElement {
-  return screen.getByPlaceholderText(/Type your message/i) as HTMLTextAreaElement;
+  return screen.getByTestId('message-input-textarea') as HTMLTextAreaElement;
 }
 
 /**

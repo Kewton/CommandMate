@@ -25,6 +25,20 @@ vi.mock('next-intl', () => ({
 beforeAll(() => {
   // テスト開始時の初期化処理
 
+  // Polyfill ResizeObserver for jsdom (Issue #1080). Radix primitives such as
+  // ui/Switch measure their thumb via `useSize` (ResizeObserver) in a layout
+  // effect. AutoYesToggle now renders a Radix Switch, so any tree that mounts it
+  // (worktree detail, composer meta row) would otherwise throw
+  // "ResizeObserver is not defined". Global + benign (jsdom has no native impl).
+  if (typeof window !== 'undefined' && !('ResizeObserver' in window)) {
+    class ResizeObserverStub {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    }
+    (window as unknown as { ResizeObserver: unknown }).ResizeObserver = ResizeObserverStub;
+  }
+
   // Mock Element.scrollTo for jsdom (only in browser-like environments)
   if (typeof Element !== 'undefined' && typeof Element.prototype.scrollTo !== 'function') {
     Element.prototype.scrollTo = function(options?: ScrollToOptions | number) {

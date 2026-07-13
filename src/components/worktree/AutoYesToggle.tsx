@@ -11,6 +11,7 @@
 'use client';
 
 import React, { memo, useEffect, useState, useCallback } from 'react';
+import { Switch } from '@/components/ui/Switch';
 import { AutoYesConfirmDialog } from './AutoYesConfirmDialog';
 import { formatTimeRemaining, AUTO_YES_COUNTDOWN_INTERVAL_MS } from '@/config/auto-yes-config';
 import type { AutoYesDuration } from '@/config/auto-yes-config';
@@ -37,6 +38,13 @@ export interface AutoYesToggleProps {
   /** If true, render without outer container styles (for inline embedding) */
   inline?: boolean;
   /**
+   * Issue #1080: whether to show the active CLI tool name next to the label
+   * (e.g. "(Claude)"). Defaults to true (per-split PC disambiguation, #525).
+   * The mobile composer meta row sets this false since the active agent tab is
+   * already shown alongside.
+   */
+  showToolName?: boolean;
+  /**
    * Optional callback fired once when the countdown reaches 00:00 (Issue #959).
    * Lets a parent proactively disable auto-yes the instant the timer expires
    * instead of waiting for the next server poll. Optional so existing callers
@@ -52,6 +60,7 @@ export const AutoYesToggle = memo(function AutoYesToggle({
   lastAutoResponse,
   cliToolName,
   inline = false,
+  showToolName = true,
   onExpire,
 }: AutoYesToggleProps) {
   const [timeRemaining, setTimeRemaining] = useState<string>('');
@@ -137,29 +146,18 @@ export const AutoYesToggle = memo(function AutoYesToggle({
   }, []);
 
   return (
-    <div className={inline ? 'flex items-center gap-2' : 'flex items-center gap-3 px-4 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700'}>
-      {/* Toggle switch */}
-      <button
-        type="button"
-        role="switch"
-        aria-checked={displayEnabled}
-        aria-label="Auto Yes mode"
+    <div className={inline ? 'flex items-center gap-2' : 'flex items-center gap-3 px-4 py-2 bg-surface-2 border-b border-border'}>
+      {/* Toggle switch (Issue #1080: shared Radix ui/Switch) */}
+      <Switch
+        checked={displayEnabled}
+        onCheckedChange={handleToggle}
         disabled={toggling}
-        onClick={handleToggle}
-        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 dark:focus:ring-offset-gray-800 ${
-          displayEnabled ? 'bg-accent-600' : 'bg-gray-300 dark:bg-gray-600'
-        } ${toggling ? 'opacity-50' : ''}`}
-      >
-        <span
-          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-            displayEnabled ? 'translate-x-6' : 'translate-x-1'
-          }`}
-        />
-      </button>
-      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Auto Yes</span>
+        aria-label="Auto Yes mode"
+      />
+      <span className="text-sm font-medium text-foreground">Auto Yes</span>
 
       {/* Active CLI tool indicator (Issue #525: show regardless of enabled state) */}
-      {cliToolName && (
+      {showToolName && cliToolName && (
         <span className="text-xs text-accent-600 dark:text-accent-400 font-medium" aria-label="Auto Yes target">
           ({getCliToolDisplayNameSafe(cliToolName, '')})
         </span>
@@ -167,14 +165,14 @@ export const AutoYesToggle = memo(function AutoYesToggle({
 
       {/* Countdown timer */}
       {displayEnabled && timeRemaining && (
-        <span className="text-sm text-gray-500 dark:text-gray-400" aria-label="Time remaining">
+        <span className="text-sm text-muted-foreground" aria-label="Time remaining">
           {timeRemaining}
         </span>
       )}
 
       {/* Auto-response notification */}
       {notification && (
-        <span className="text-sm text-green-600 dark:text-green-400 animate-pulse">
+        <span className="text-sm text-success animate-pulse">
           {notification}
         </span>
       )}

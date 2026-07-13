@@ -396,15 +396,6 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   const footerSlot = useMemo(
     () => (
       <div className="space-y-2">
-        {/* Issue #740: per-split Auto-Yes toggle, keyed by this split's CLI. */}
-        <AutoYesToggle
-          enabled={autoYesEnabled}
-          expiresAt={autoYesExpiresAt ?? null}
-          onToggle={onAutoYesToggle}
-          lastAutoResponse={lastAutoResponse ?? null}
-          cliToolName={cliToolId}
-          inline
-        />
         {showNav ? (
           <NavigationButtons
             worktreeId={worktreeId}
@@ -449,6 +440,18 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
           // showToast reuses the existing history toast surface.
           isProcessing={terminal.isRunning}
           showToast={showToast}
+          // Issue #1080: per-split Auto-Yes toggle now lives in the composer's
+          // bottom meta row instead of its own full-width footer row.
+          autoYesSlot={
+            <AutoYesToggle
+              enabled={autoYesEnabled}
+              expiresAt={autoYesExpiresAt ?? null}
+              onToggle={onAutoYesToggle}
+              lastAutoResponse={lastAutoResponse ?? null}
+              cliToolName={cliToolId}
+              inline
+            />
+          }
         />
       </div>
     ),

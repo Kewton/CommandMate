@@ -7,7 +7,7 @@
 'use client';
 
 import { useCallback, useMemo } from 'react';
-import { SquareTerminal, Clock, Folder, FileText, Info } from 'lucide-react';
+import { SquareTerminal, Clock, Folder, Wrench, Info } from 'lucide-react';
 import { NotificationDot } from '@/components/common/NotificationDot';
 import type { DeepLinkPane } from '@/types/ui-state';
 
@@ -65,7 +65,7 @@ const TABS: TabConfig[] = [
   { id: 'terminal', label: 'Terminal', icon: <SquareTerminal size={20} aria-hidden="true" /> },
   { id: 'history', label: 'History', icon: <Clock size={20} aria-hidden="true" /> },
   { id: 'files', label: 'Files', icon: <Folder size={20} aria-hidden="true" /> },
-  { id: 'memo', label: 'Tools', icon: <FileText size={20} aria-hidden="true" /> },
+  { id: 'memo', label: 'Tools', icon: <Wrench size={20} aria-hidden="true" /> },
   { id: 'info', label: 'Info', icon: <Info size={20} aria-hidden="true" /> },
 ];
 
@@ -90,9 +90,11 @@ export function MobileTabBar({
     (tabId: MobileTab) => {
       const isActive = tabId === activeTab;
       const baseStyles = 'flex flex-col items-center justify-center flex-1 py-2 px-1 transition-colors relative';
+      // Issue #1080: match GlobalMobileNav — no cell fill; active is expressed by
+      // accent text + a 2px top indicator bar (rendered in the button body).
       const activeStyles = isActive
-        ? 'text-accent-600 dark:text-accent-400 bg-accent-50 dark:bg-accent-900/30'
-        : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800';
+        ? 'text-accent-600 dark:text-accent-400'
+        : 'text-muted-foreground hover:text-foreground';
       return `${baseStyles} ${activeStyles}`;
     },
     [activeTab]
@@ -107,14 +109,14 @@ export function MobileTabBar({
         {hasNewOutput && (
           <span
             data-testid="new-output-badge"
-            className="absolute top-1 right-1 w-2 h-2 bg-green-500 rounded-full"
+            className="absolute top-1 right-1 w-2 h-2 bg-success rounded-full"
             aria-label="New output available"
           />
         )}
         {hasPrompt && (
           <span
             data-testid="prompt-badge"
-            className="absolute top-1 right-3 w-2 h-2 bg-yellow-500 rounded-full"
+            className="absolute top-1 right-3 w-2 h-2 bg-warning rounded-full"
             aria-label="Prompt waiting"
           />
         )}
@@ -127,7 +129,7 @@ export function MobileTabBar({
       data-testid="mobile-tab-bar"
       role="tablist"
       aria-label="Mobile navigation"
-      className="fixed bottom-0 inset-x-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex pb-safe z-40"
+      className="fixed bottom-0 inset-x-0 border-t border-border bg-background supports-[backdrop-filter]:bg-background/80 backdrop-blur-md flex pb-safe z-40"
     >
       {TABS.map((tab) => (
         <button
@@ -143,6 +145,12 @@ export function MobileTabBar({
           }}
           className={getTabStyles(tab.id)}
         >
+          {activeTab === tab.id && (
+            <span
+              aria-hidden="true"
+              className="absolute top-0 inset-x-2 h-0.5 rounded-full bg-accent-500"
+            />
+          )}
           {tab.icon}
           <span className="text-xs mt-1">{tab.label}</span>
           {tab.id === 'terminal' && renderBadges}
