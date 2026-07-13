@@ -10,7 +10,7 @@ import { useState, useCallback, useId, useMemo, useRef, useEffect, memo } from '
 import { useTranslations } from 'next-intl';
 import type { PromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
-import { RadioGroup, RadioGroupItem } from '@/components/ui';
+import { RadioGroup, RadioGroupItem, Spinner } from '@/components/ui';
 import { usePromptAnimation } from '@/hooks/usePromptAnimation';
 
 /** Animation duration for sheet transitions */
@@ -281,7 +281,7 @@ function PromptContent({
       {/* Answering indicator */}
       {isDisabled && (
         <div data-testid="answering-indicator" className="flex items-center gap-2 text-sm text-muted-foreground" role="status" aria-live="polite">
-          <div className="animate-spin rounded-full h-4 w-4 border-2 border-input border-t-accent-600" aria-hidden="true" />
+          <Spinner size="sm" variant="accent" />
           <span>{t('sending')}</span>
         </div>
       )}

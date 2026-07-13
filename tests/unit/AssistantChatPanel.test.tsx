@@ -84,4 +84,26 @@ describe('AssistantChatPanel', () => {
       await screen.findByText('Select a repository and click Start to open an assistant session.'),
     ).toBeInTheDocument();
   });
+
+  it('shows a history skeleton while the conversation loads, then the message list (Issue #1118)', async () => {
+    let resolveConversation!: (value: null) => void;
+    vi.mocked(assistantApi.getConversation).mockReturnValue(
+      new Promise((resolve) => {
+        resolveConversation = resolve;
+      }) as ReturnType<typeof assistantApi.getConversation>,
+    );
+
+    render(<AssistantChatPanel />);
+
+    // Pending conversation fetch → bubble-shaped skeleton in the history area
+    const loading = await screen.findByTestId('assistant-chat-loading');
+    expect(loading.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
+
+    resolveConversation(null);
+
+    expect(
+      await screen.findByText('Select a repository and click Start to open an assistant session.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-chat-loading')).toBeNull();
+  });
 });

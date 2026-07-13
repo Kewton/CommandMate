@@ -27,6 +27,7 @@ import {
   DEFAULT_FILE_METADATA_DISPLAY,
   type FileMetadataDisplaySettings,
 } from '@/hooks/useFileMetadataDisplay';
+import { Spinner } from '@/components/ui/Spinner';
 
 // ============================================================================
 // Types
@@ -395,7 +396,7 @@ export const TreeNode = memo(function TreeNode({
         {isDirectory ? (
           <span className="w-4 h-4 flex items-center justify-center">
             {loading ? (
-              <span className="w-3 h-3 border-2 border-input border-t-accent-500 rounded-full animate-spin" />
+              <Spinner size="xs" variant="accent" />
             ) : (
               <ChevronIcon expanded={isExpanded} />
             )}

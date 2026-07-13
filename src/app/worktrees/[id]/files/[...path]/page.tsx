@@ -9,7 +9,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { List, BookOpen } from 'lucide-react';
-import { Card } from '@/components/ui';
+import { Card, Spinner } from '@/components/ui';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -159,7 +159,7 @@ export default function FileViewerPage() {
         {loading && (
           <Card padding="lg">
             <div className="flex items-center justify-center py-12">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 border-t-accent-600" />
+              <Spinner size="xl" variant="accent" />
               <p className="ml-3 text-gray-600">Loading file...</p>
             </div>
           </Card>

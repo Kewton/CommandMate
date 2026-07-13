@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { Card } from '@/components/ui';
+import { Card, Skeleton } from '@/components/ui';
 import { cn } from '@/lib/utils/cn';
 import { REVIEW_POLL_INTERVAL_MS } from '@/config/review-config';
 import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
@@ -170,10 +170,25 @@ export default function ReviewTab() {
         })}
       </div>
 
-      {/* Loading */}
+      {/* Loading — card-shaped skeletons mirroring review list items (Issue #1118) */}
       {isLoading && (
-        <div className="text-muted-foreground" data-testid="review-loading">
-          Loading...
+        <div
+          className="space-y-2"
+          data-testid="review-loading"
+          role="status"
+          aria-label="Loading reviews"
+        >
+          {[0, 1, 2].map((i) => (
+            <Card key={i} padding="md">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <Skeleton className="h-4 w-40 max-w-full" />
+                  <Skeleton className="h-3 w-24 max-w-full" />
+                </div>
+                <Skeleton className="ml-4 h-5 w-16 flex-shrink-0" />
+              </div>
+            </Card>
+          ))}
         </div>
       )}
 

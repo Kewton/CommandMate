@@ -13,7 +13,7 @@
 import React, { useMemo, useCallback, memo, useRef, useLayoutEffect, useState, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
 import { Search, User, UserCheck, ChevronRight } from 'lucide-react';
-import { Checkbox } from '@/components/ui';
+import { Checkbox, Skeleton } from '@/components/ui';
 import type { ChatMessage } from '@/types/models';
 import { useConversationHistory } from '@/hooks/useConversationHistory';
 import { useHistorySearch } from '@/hooks/useHistorySearch';
@@ -122,20 +122,35 @@ export interface HistoryPaneProps {
 // Sub-components
 // ============================================================================
 
+/**
+ * Issue #1118: Card-shaped skeleton mirroring the ConversationPairCard outline
+ * (rounded-lg border, mb-4 rhythm) so the loading state matches the loaded
+ * layout instead of popping in. Kept generic on purpose — the real card is
+ * being restructured by Issue #1117, so only the outer shape is mimicked.
+ */
 function LoadingIndicator() {
   return (
     <div
       data-testid="loading-indicator"
-      className="flex items-center justify-center py-4"
       role="status"
       aria-label="Loading messages"
     >
-      <div className="flex gap-1" aria-hidden="true">
-        <span className="w-2 h-2 bg-muted-foreground rounded-full animate-pulse" />
-        <span className="w-2 h-2 bg-muted-foreground rounded-full animate-pulse delay-100" />
-        <span className="w-2 h-2 bg-muted-foreground rounded-full animate-pulse delay-200" />
-      </div>
-      <span className="ml-2 text-sm text-muted-foreground">Loading...</span>
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          className="mb-4 overflow-hidden rounded-lg border border-border"
+        >
+          <div className="flex items-center gap-2 p-3">
+            <Skeleton className="h-4 w-4 rounded-full" />
+            <Skeleton className="h-4 w-1/3" />
+          </div>
+          <div className="space-y-2 px-3 pb-3">
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-5/6" />
+            <Skeleton className="h-3 w-2/3" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

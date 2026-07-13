@@ -27,7 +27,10 @@ import { TodoWidget } from '@/components/home/TodoWidget';
 import { HomeQuickActions } from '@/components/home/HomeQuickActions';
 
 export default function Home() {
-  const { worktrees } = useWorktreesCacheContext();
+  const { worktrees, isLoading } = useWorktreesCacheContext();
+  // [Issue #1118] Skeletons only on the very first load; once the cache has
+  // data, poll re-fetches keep the rendered content (non-blocking pattern).
+  const isFirstLoad = isLoading && worktrees.length === 0;
 
   return (
     <AppShell>
@@ -40,7 +43,7 @@ export default function Home() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-12" data-testid="home-bento-grid">
           {/* Session Overview + Recent sessions — large tile */}
           <div className="md:col-span-8">
-            <SessionOverviewTile worktrees={worktrees} />
+            <SessionOverviewTile worktrees={worktrees} isLoading={isFirstLoad} />
           </div>
 
           {/* ToDo — medium tile */}

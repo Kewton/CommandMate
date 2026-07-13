@@ -18,7 +18,7 @@ import {
   type ChangesDiffMode,
 } from '@/components/worktree/git/gitPaneShared';
 import { useGitPaneContext } from '@/components/worktree/git/GitPaneContext';
-import { Checkbox } from '@/components/ui';
+import { Checkbox, Spinner } from '@/components/ui';
 
 interface ChangedFileListProps {
   title: string;
@@ -158,7 +158,7 @@ const ChangedFileList = memo(function ChangedFileList({
                   >
                     {previewLoading && (
                       <div className="flex items-center gap-2 py-2" role="status">
-                        <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-accent-500" />
+                        <Spinner size="xs" variant="accent" />
                         <span className="sr-only">Loading diff preview...</span>
                       </div>
                     )}
@@ -278,7 +278,7 @@ export const GitChangesPanel = memo(function GitChangesPanel({
 
       {loading && !staged && (
         <div className="flex items-center gap-2 px-3 pb-2" role="status">
-          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-accent-500" />
+          <Spinner size="sm" variant="accent" />
           <span className="sr-only">Loading changes...</span>
         </div>
       )}

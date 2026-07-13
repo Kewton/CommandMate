@@ -577,4 +577,32 @@ describe('RepositoryList (Issue #644)', () => {
       expect(disabledRow.textContent).toMatch(/Disabled/);
     });
   });
+
+  describe('Loading skeleton (Issue #1118)', () => {
+    it('shows table-shaped skeleton rows while loading, then the loaded rows', async () => {
+      let resolveList!: (value: { success: boolean; repositories: RepositoryListItem[] }) => void;
+      vi.mocked(repositoryApi.list).mockReturnValue(
+        new Promise((resolve) => {
+          resolveList = resolve;
+        }) as ReturnType<typeof repositoryApi.list>,
+      );
+
+      render(<RepositoryList refreshKey={0} />);
+
+      // While pending: skeleton (real table header + pulse rows), no naked text
+      const loading = screen.getByTestId('repository-list-loading');
+      expect(loading.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
+      expect(loading.textContent).toContain('Name');
+      expect(screen.queryByText('Loading repositories...')).toBeNull();
+
+      await act(async () => {
+        resolveList({ success: true, repositories: [buildRepo({ id: 'r1', name: 'repo-a' })] });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('repository-row-r1')).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('repository-list-loading')).toBeNull();
+    });
+  });
 });

@@ -7,7 +7,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Card, CardHeader, CardTitle, CardContent, Button, Badge, Input } from '@/components/ui';
+import { Card, CardHeader, CardTitle, CardContent, Button, Badge, Input, Spinner } from '@/components/ui';
 import { ToastContainer, useToast } from '@/components/common/Toast';
 import { worktreeApi, handleApiError } from '@/lib/api-client';
 import { copyToClipboard } from '@/lib/clipboard-utils';
@@ -266,7 +266,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
         <CardContent>
           {loading && logFiles.length === 0 && (
             <div className="text-center py-4">
-              <div className="inline-block animate-spin rounded-full h-6 w-6 border-4 border-input border-t-accent-600" />
+              <Spinner size="lg" variant="accent" className="inline-block" />
             </div>
           )}
 
@@ -381,7 +381,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
           <CardContent>
             {loading && (
               <div className="text-center py-8">
-                <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-input border-t-accent-600" />
+                <Spinner size="xl" variant="accent" className="inline-block" />
               </div>
             )}
 

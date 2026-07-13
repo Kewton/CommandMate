@@ -13,7 +13,7 @@ import type { ChatMessage } from '@/types/models';
 import { format } from 'date-fns';
 import { getDateFnsLocale } from '@/lib/date-locale';
 import { getCliToolDisplayNameSafe } from '@/lib/cli-tools/types';
-import { Button } from '@/components/ui';
+import { Button, Spinner } from '@/components/ui';
 
 export interface PromptMessageProps {
   message: ChatMessage;
@@ -60,7 +60,7 @@ function SendingIndicator({ className = '' }: { className?: string }) {
   const t = useTranslations('prompt');
   return (
     <div className={`flex items-center gap-2 text-sm text-muted-foreground ${className}`.trim()}>
-      <div className="animate-spin rounded-full h-4 w-4 border-2 border-input border-t-accent-600" />
+      <Spinner size="sm" variant="accent" />
       <span>{t('sending')}</span>
     </div>
   );

@@ -28,7 +28,7 @@ import { LogViewer } from '@/components/worktree/LogViewer';
 import { VersionSection } from '@/components/worktree/VersionSection';
 import { FeedbackSection } from '@/components/worktree/FeedbackSection';
 import { Modal } from '@/components/ui/Modal';
-import { Button } from '@/components/ui';
+import { Button, Spinner } from '@/components/ui';
 import { worktreeApi } from '@/lib/api-client';
 import { truncateString } from '@/lib/utils';
 import { ClipboardCopy, Check } from 'lucide-react';
@@ -937,10 +937,7 @@ export const LoadingIndicator = memo(function LoadingIndicator() {
       aria-live="polite"
     >
       <div className="flex flex-col items-center gap-3">
-        <div
-          className="animate-spin rounded-full h-8 w-8 border-4 border-input border-t-accent-600 dark:border-t-accent-400"
-          aria-hidden="true"
-        />
+        <Spinner size="xl" variant="accent" />
         <p className="text-muted-foreground">Loading worktree...</p>
       </div>
     </div>

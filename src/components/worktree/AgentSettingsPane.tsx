@@ -19,7 +19,7 @@ import {
   type CLIToolType,
 } from '@/lib/cli-tools/types';
 import { VibeLocalSettings } from '@/components/worktree/VibeLocalSettings';
-import { Checkbox } from '@/components/ui';
+import { Checkbox, Spinner } from '@/components/ui';
 
 // ============================================================================
 // Types
@@ -211,7 +211,7 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
           data-testid="agent-settings-loading"
           className="mt-3 flex items-center gap-2 text-xs text-muted-foreground"
         >
-          <span className="w-3 h-3 border-2 border-accent-500 border-t-transparent rounded-full animate-spin" />
+          <Spinner size="xs" variant="muted" />
           {t('loading')}
         </div>
       )}

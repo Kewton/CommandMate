@@ -15,7 +15,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Card, Checkbox, Input } from '@/components/ui';
+import { Button, Card, Checkbox, Input, Skeleton } from '@/components/ui';
 import { todoApi, type TodoItem } from '@/lib/api/todo-api';
 import { MAX_TODO_CONTENT_LENGTH } from '@/config/todo-config';
 
@@ -260,8 +260,23 @@ export function TodoWidget() {
           )}
 
           {/* Todo list */}
-          {loading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
+          {loading && todos.length === 0 ? (
+            // [Issue #1118] First-load only skeleton (re-fetches after
+            // add/toggle keep the current list): rows mirror a todo item
+            // (checkbox + text).
+            <ul
+              className="space-y-1"
+              data-testid="todo-loading"
+              role="status"
+              aria-label="Loading todos"
+            >
+              {[0, 1, 2].map((i) => (
+                <li key={i} className="flex items-center gap-2 rounded-md px-1 py-1">
+                  <Skeleton className="h-4 w-4 shrink-0 rounded" />
+                  <Skeleton className={`h-4 ${i === 1 ? 'w-2/3' : 'w-5/6'}`} />
+                </li>
+              ))}
+            </ul>
           ) : todos.length === 0 ? (
             <p className="text-sm text-muted-foreground" data-testid="todo-empty">
               No todos yet.

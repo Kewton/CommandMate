@@ -71,6 +71,13 @@ describe('FileTreeView', () => {
       expect(screen.getByTestId('file-tree-loading')).toBeInTheDocument();
     });
 
+    it('should render tree-row skeletons without naked loading text (Issue #1118)', () => {
+      render(<FileTreeView worktreeId="test-worktree" />);
+      const loading = screen.getByTestId('file-tree-loading');
+      expect(loading.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
+      expect(loading.textContent).not.toContain('Loading files');
+    });
+
     it('should render tree items after loading', async () => {
       render(<FileTreeView worktreeId="test-worktree" />);
 

@@ -20,6 +20,7 @@ import type { WorktreeMemo } from '@/types/models';
 import { MemoCard } from './MemoCard';
 import { MemoAddButton } from './MemoAddButton';
 import { MemoSearchBar } from './MemoSearchBar';
+import { Spinner } from '@/components/ui/Spinner';
 
 // ============================================================================
 // Types
@@ -229,7 +230,7 @@ export const MemoPane = memo(function MemoPane({
           data-testid="memo-loading"
           className="flex flex-col items-center gap-3"
         >
-          <div className="w-8 h-8 border-4 border-border border-t-accent-500 rounded-full animate-spin" />
+          <Spinner size="xl" variant="accent" />
           <span className="text-sm text-muted-foreground">Loading memos...</span>
         </div>
       </div>

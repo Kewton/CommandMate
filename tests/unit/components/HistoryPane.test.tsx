@@ -267,6 +267,21 @@ describe('HistoryPane', () => {
       expect(screen.getByTestId('loading-indicator')).toBeInTheDocument();
     });
 
+    it('should render card-shaped skeletons without naked loading text (Issue #1118)', () => {
+      render(
+        <HistoryPane
+          messages={[]}
+          worktreeId={defaultWorktreeId}
+          onFilePathClick={mockOnFilePathClick}
+          isLoading={true}
+        />
+      );
+
+      const indicator = screen.getByTestId('loading-indicator');
+      expect(indicator.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
+      expect(indicator.textContent).not.toContain('Loading');
+    });
+
     it('should not show loading indicator when isLoading is false', () => {
       render(
         <HistoryPane
