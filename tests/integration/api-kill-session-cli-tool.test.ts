@@ -4,6 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { NextRequest } from 'next/server';
 import { POST as killSession } from '@/app/api/worktrees/[id]/kill-session/route';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
@@ -69,6 +70,11 @@ describe('POST /api/worktrees/:id/kill-session - CLI Tool Support', () => {
     const { closeDbInstance } = await import('@/lib/db/db-instance');
     closeDbInstance();
     db.close();
+    // Restore vi.spyOn(...isRunning) spies so a running-session spy from one
+    // test doesn't leak into the next (clearAllMocks resets calls, not spies).
+    // Without this the "no session running" case sees other tools still spied
+    // as running and returns 200 instead of 404 (Issue #1102).
+    vi.restoreAllMocks();
   });
 
   describe('Claude tool', () => {
@@ -90,11 +96,11 @@ describe('POST /api/worktrees/:id/kill-session - CLI Tool Support', () => {
       };
       upsertWorktree(db, worktree);
 
-      const request = new Request('http://localhost:3000/api/worktrees/claude-test/kill-session', {
+      const request = new NextRequest('http://localhost:3000/api/worktrees/claude-test/kill-session', {
         method: 'POST',
       });
 
-      const response = await killSession(request as unknown as import('next/server').NextRequest, { params: { id: 'claude-test' } });
+      const response = await killSession(request, { params: { id: 'claude-test' } });
 
       expect(response.status).toBe(200);
 
@@ -123,11 +129,11 @@ describe('POST /api/worktrees/:id/kill-session - CLI Tool Support', () => {
       };
       upsertWorktree(db, worktree);
 
-      const request = new Request('http://localhost:3000/api/worktrees/codex-test/kill-session', {
+      const request = new NextRequest('http://localhost:3000/api/worktrees/codex-test/kill-session', {
         method: 'POST',
       });
 
-      const response = await killSession(request as unknown as import('next/server').NextRequest, { params: { id: 'codex-test' } });
+      const response = await killSession(request, { params: { id: 'codex-test' } });
 
       expect(response.status).toBe(200);
 
@@ -156,11 +162,11 @@ describe('POST /api/worktrees/:id/kill-session - CLI Tool Support', () => {
       };
       upsertWorktree(db, worktree);
 
-      const request = new Request('http://localhost:3000/api/worktrees/gemini-test/kill-session', {
+      const request = new NextRequest('http://localhost:3000/api/worktrees/gemini-test/kill-session', {
         method: 'POST',
       });
 
-      const response = await killSession(request as unknown as import('next/server').NextRequest, { params: { id: 'gemini-test' } });
+      const response = await killSession(request, { params: { id: 'gemini-test' } });
 
       expect(response.status).toBe(200);
 
@@ -172,11 +178,11 @@ describe('POST /api/worktrees/:id/kill-session - CLI Tool Support', () => {
 
   describe('Error handling', () => {
     it('should return 404 when worktree not found', async () => {
-      const request = new Request('http://localhost:3000/api/worktrees/nonexistent/kill-session', {
+      const request = new NextRequest('http://localhost:3000/api/worktrees/nonexistent/kill-session', {
         method: 'POST',
       });
 
-      const response = await killSession(request as unknown as import('next/server').NextRequest, { params: { id: 'nonexistent' } });
+      const response = await killSession(request, { params: { id: 'nonexistent' } });
 
       expect(response.status).toBe(404);
       const data = await response.json();
@@ -184,7 +190,13 @@ describe('POST /api/worktrees/:id/kill-session - CLI Tool Support', () => {
     });
 
     it('should return 404 when session is not running', async () => {
-      // Mock isRunning to return false
+      // No cliTool query param means the route probes every CLI tool. Force the
+      // tmux hasSession probe to report no session so isRunning() is false for
+      // ALL tools (not just claude); otherwise the default hasSession=true mock
+      // makes other tools appear running and the route returns 200 (Issue #1102).
+      const { hasSession } = await import('@/lib/tmux/tmux');
+      vi.mocked(hasSession).mockResolvedValue(false);
+
       const { CLIToolManager } = await import('@/lib/cli-tools/manager');
       const manager = CLIToolManager.getInstance();
       const claudeTool = manager.getTool('claude');
@@ -200,11 +212,11 @@ describe('POST /api/worktrees/:id/kill-session - CLI Tool Support', () => {
       };
       upsertWorktree(db, worktree);
 
-      const request = new Request('http://localhost:3000/api/worktrees/no-session/kill-session', {
+      const request = new NextRequest('http://localhost:3000/api/worktrees/no-session/kill-session', {
         method: 'POST',
       });
 
-      const response = await killSession(request as unknown as import('next/server').NextRequest, { params: { id: 'no-session' } });
+      const response = await killSession(request, { params: { id: 'no-session' } });
 
       expect(response.status).toBe(404);
       const data = await response.json();

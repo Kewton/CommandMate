@@ -155,13 +155,15 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
 
       expect(response.status).toBe(201);
 
-      // Verify Claude session was used
+      // Verify Claude session was used. Issue #868 threads an optional instanceId
+      // (undefined for the primary instance) through startSession/sendMessage.
       const { startClaudeSession, sendMessageToClaude } = await import('@/lib/session/claude-session');
       expect(startClaudeSession).toHaveBeenCalledWith({
         worktreeId: 'test-worktree',
         worktreePath: '/path/to/test',
+        instanceId: undefined,
       });
-      expect(sendMessageToClaude).toHaveBeenCalledWith('test-worktree', 'Test message');
+      expect(sendMessageToClaude).toHaveBeenCalledWith('test-worktree', 'Test message', undefined);
     });
   });
 

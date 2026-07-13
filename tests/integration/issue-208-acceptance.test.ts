@@ -268,10 +268,15 @@ describe('Issue #208 Acceptance Test', () => {
     });
 
     it('AC4-2: Layer 3 (consecutive validation) still works with requireDefaultIndicator=false', () => {
+      // Issue #1102: isConsecutiveFromOne now tolerates a SINGLE gap (e.g. [1,3])
+      // as a tmux capture artifact ([S3-010]), so [1,3] is accepted. Use [1,3,5]
+      // (two gaps) which still exceeds the tolerance and is rejected by Layer 3,
+      // preserving this regression guard's intent (scattered numbering ≠ prompt).
       const output = [
         'Select one:',
         '  1. Option A',
         '  3. Option C',
+        '  5. Option E',
       ].join('\n');
 
       const result = detectPrompt(output, falseOptions);
@@ -332,7 +337,9 @@ describe('Issue #208 Acceptance Test', () => {
     });
 
     it('AC5-3: Non-consecutive numbers should NOT be detected (Layer 3)', () => {
-      const output = '\u276F 1. Option A\n  3. Option B';
+      // Issue #1102: single-gap tolerance ([S3-010]) now accepts [1,3]; use [1,3,5]
+      // (two gaps) so Layer 3 still rejects genuinely scattered numbering.
+      const output = '\u276F 1. Option A\n  3. Option B\n  5. Option C';
       const result = detectPrompt(output);
       expect(result.isPrompt).toBe(false);
     });

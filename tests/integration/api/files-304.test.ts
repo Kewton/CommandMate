@@ -29,11 +29,17 @@ vi.mock('@/lib/security/path-validator', () => ({
   resolveAndValidateRealPath: vi.fn(() => true),
 }));
 
-vi.mock('@/config/image-extensions', () => ({
+// Partial mock: keep real exports (normalizeExtension, validateImageContent,
+// getMimeTypeByExtension, ...) and only force the detection helper to false so
+// this text-file path test isn't treated as an image. Prevents drift when new
+// exports are added to the module (Issue #1102).
+vi.mock('@/config/image-extensions', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/config/image-extensions')>()),
   isImageExtension: vi.fn(() => false),
 }));
 
-vi.mock('@/config/video-extensions', () => ({
+vi.mock('@/config/video-extensions', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/config/video-extensions')>()),
   isVideoExtension: vi.fn(() => false),
 }));
 
@@ -52,7 +58,10 @@ vi.mock('@/lib/file-operations', () => ({
   isEditableFile: vi.fn(() => true),
 }));
 
-vi.mock('@/config/editable-extensions', () => ({
+// Partial mock: keep real exports (TEXT_MAX_SIZE_BYTES, ...) and only stub the
+// two helpers this test controls (Issue #1102).
+vi.mock('@/config/editable-extensions', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/config/editable-extensions')>()),
   validateContent: vi.fn(() => ({ valid: true })),
   isEditableExtension: vi.fn(() => true),
 }));
