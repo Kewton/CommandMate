@@ -44,7 +44,7 @@ const KEYBOARD_STEP = 10;
  * Base classes shared by all resizer states.
  *
  * VS Code-style thin divider (Issue #970): the line stays a constant 1px and
- * uses the same subtle color as fixed panel borders (`gray-200`/`gray-700`),
+ * uses the same subtle color as fixed panel borders (the `border` token),
  * so it blends in until hovered. An accent color appears on hover/focus only —
  * the line never thickens on hover. `relative` provides the positioning context
  * for the transparent `::before` hit area added per-orientation below.
@@ -52,21 +52,18 @@ const KEYBOARD_STEP = 10;
 const BASE_CLASSES = [
   'relative',
   'flex-shrink-0',
-  'bg-gray-200',
-  'dark:bg-gray-700',
+  'bg-border',
   'transition-colors',
   'duration-150',
   'hover:bg-accent-500',
-  // Explicit dark hover variant: with `darkMode: 'class'`, the base
-  // `dark:bg-gray-700` outranks a plain `hover:` accent in dark mode, so the
-  // hover accent must be re-stated under `dark:` to win (Issue #970).
+  // Explicit dark hover variant retained defensively so the accent reliably
+  // wins over the tokenized `bg-border` base in dark mode (Issue #970).
   'dark:hover:bg-accent-500',
   'focus:outline-none',
   'focus:ring-2',
   'focus:ring-ring',
   'focus:ring-offset-2',
-  'focus:ring-offset-white',
-  'dark:focus:ring-offset-gray-900',
+  'focus:ring-offset-background',
 ] as const;
 
 /**
@@ -285,7 +282,7 @@ export const PaneResizer = memo(function PaneResizer({
     const orientationClasses = isHorizontal ? HORIZONTAL_CLASSES : VERTICAL_CLASSES;
     // While dragging, accent the line and let it thicken slightly as live
     // feedback (only hover stays a constant 1px — Issue #970). `dark:bg-accent-500`
-    // is needed so the accent outranks the base `dark:bg-gray-700` in dark mode.
+    // is retained so the accent reliably outranks the tokenized base in dark mode.
     const draggingClasses = isDragging
       ? ['bg-accent-500', 'dark:bg-accent-500', 'dragging', isHorizontal ? 'w-2' : 'h-2']
       : [];

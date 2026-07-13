@@ -228,11 +228,11 @@ describe('PaneResizer', () => {
     it('should use subtle panel-border color matching fixed borders (light/dark)', () => {
       render(<PaneResizer onResize={mockOnResize} />);
       const separator = screen.getByRole('separator');
-      // Same color family as fixed panel borders (gray-200 / dark gray-700),
-      // not the heavy bg-gray-700 used before.
-      expect(separator.className).toContain('bg-gray-200');
-      expect(separator.className).toContain('dark:bg-gray-700');
-      expect(separator.className).not.toMatch(/(^|\s)bg-gray-700(\s|$)/);
+      // [#1061] Divider uses the `border` token (same value as the fixed panel
+      // borders gray-200 / gray-700) and theme-follows via CSS var — it must not
+      // reintroduce a raw gray bg utility.
+      expect(separator.className).toContain('bg-border');
+      expect(separator.className).not.toMatch(/bg-gray-\d/);
     });
 
     it('should keep a constant 1px line at rest (no hover thickening)', () => {
@@ -254,8 +254,8 @@ describe('PaneResizer', () => {
       render(<PaneResizer onResize={mockOnResize} />);
       const separator = screen.getByRole('separator');
       expect(separator.className).toContain('hover:bg-accent-500');
-      // dark:class strategy requires an explicit dark hover variant to beat the
-      // base dark:bg-gray-700.
+      // A dark hover variant is retained defensively so the accent reliably wins
+      // over the tokenized `bg-border` base in dark mode (#1061).
       expect(separator.className).toContain('dark:hover:bg-accent-500');
     });
 

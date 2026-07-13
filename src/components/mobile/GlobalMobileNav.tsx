@@ -63,7 +63,7 @@ export function GlobalMobileNav() {
               className={`flex flex-col items-center justify-center flex-1 h-full text-xs transition-colors ${
                 active
                   ? 'text-accent-600 dark:text-accent-400'
-                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               {tab.icon}
@@ -78,7 +78,7 @@ export function GlobalMobileNav() {
           data-testid="mobile-command-palette-trigger"
           onClick={() => setOpen(true)}
           aria-label={t('mobileTrigger')}
-          className="flex flex-col items-center justify-center flex-1 h-full text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+          className="flex flex-col items-center justify-center flex-1 h-full text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
           <Search size={20} aria-hidden="true" />
           <span className="mt-1">{t('mobileLabel')}</span>

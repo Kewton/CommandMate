@@ -94,7 +94,7 @@ const SUB_TABS: readonly SubTabConfig[] = [
 /** CSS class for the active sub-tab button */
 const ACTIVE_TAB_CLASS = 'text-accent-600 dark:text-accent-400 border-b-2 border-accent-600 dark:border-accent-400 bg-accent-50 dark:bg-accent-900/30';
 /** CSS class for inactive sub-tab buttons */
-const INACTIVE_TAB_CLASS = 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800';
+const INACTIVE_TAB_CLASS = 'text-muted-foreground hover:text-foreground hover:bg-muted';
 
 // ============================================================================
 // Component
@@ -130,7 +130,7 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
   return (
     <div className={`flex flex-col h-full ${className}`}>
       {/* Sub-tab switcher */}
-      <div className="flex border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex-shrink-0">
+      <div className="flex border-b border-border bg-surface dark:bg-surface-2 flex-shrink-0">
         {SUB_TABS.map((tab) => (
           <button
             key={tab.id}

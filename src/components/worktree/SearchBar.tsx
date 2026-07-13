@@ -47,7 +47,7 @@ export interface SearchBarProps {
 const SearchIcon = memo(function SearchIcon() {
   return (
     <svg
-      className="w-4 h-4 text-gray-400"
+      className="w-4 h-4 text-muted-foreground"
       fill="none"
       stroke="currentColor"
       viewBox="0 0 24 24"
@@ -86,7 +86,7 @@ const LoadingSpinner = memo(function LoadingSpinner() {
   return (
     <div
       data-testid="search-loading"
-      className="w-4 h-4 border-2 border-gray-300 border-t-accent-500 rounded-full animate-spin"
+      className="w-4 h-4 border-2 border-input border-t-accent-500 rounded-full animate-spin"
       aria-label="Searching..."
     />
   );
@@ -168,7 +168,7 @@ export const SearchBar = memo(function SearchBar({
   return (
     <div
       data-testid="search-bar"
-      className={`flex flex-col gap-2 p-2 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 ${className}`}
+      className={`flex flex-col gap-2 p-2 bg-surface dark:bg-surface-2 border-b border-border ${className}`}
     >
       {/* Search Input Row */}
       <div className="flex items-center gap-2">
@@ -186,7 +186,7 @@ export const SearchBar = memo(function SearchBar({
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          className="flex-1 min-w-0 px-2 py-1 text-sm bg-gray-50 dark:bg-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-ring focus:border-accent-500"
+          className="flex-1 min-w-0 px-2 py-1 text-sm bg-muted text-foreground border border-input rounded focus:outline-none focus:ring-1 focus:ring-ring focus:border-accent-500"
           aria-label="Search files"
           aria-busy={isSearching}
         />
@@ -200,7 +200,7 @@ export const SearchBar = memo(function SearchBar({
               type="button"
               data-testid="search-clear"
               onClick={handleClear}
-              className="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors"
+              className="p-1 text-muted-foreground hover:text-foreground rounded transition-colors"
               aria-label="Clear search"
             >
               <ClearIcon />
@@ -211,7 +211,7 @@ export const SearchBar = memo(function SearchBar({
 
       {/* Mode Toggle Row */}
       <div className="flex items-center gap-1">
-        <span className="text-xs text-gray-500 mr-1">Mode:</span>
+        <span className="text-xs text-muted-foreground mr-1">Mode:</span>
         <button
           type="button"
           data-testid="mode-name"
@@ -219,7 +219,7 @@ export const SearchBar = memo(function SearchBar({
           className={`px-2 py-0.5 text-xs rounded transition-colors ${
             mode === 'name'
               ? 'bg-accent-100 dark:bg-accent-900 text-accent-700 dark:text-accent-300 font-medium'
-              : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+              : 'bg-muted text-muted-foreground hover:bg-muted/80'
           }`}
           aria-pressed={mode === 'name'}
         >
@@ -232,7 +232,7 @@ export const SearchBar = memo(function SearchBar({
           className={`px-2 py-0.5 text-xs rounded transition-colors ${
             mode === 'content'
               ? 'bg-accent-100 dark:bg-accent-900 text-accent-700 dark:text-accent-300 font-medium'
-              : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+              : 'bg-muted text-muted-foreground hover:bg-muted/80'
           }`}
           aria-pressed={mode === 'content'}
         >

@@ -266,14 +266,14 @@ export const MobileTabBar = memo(function MobileTabBar({
   onTabChange,
 }: MobileTabBarProps) {
   return (
-    <div className="flex border-b border-gray-200 dark:border-gray-700">
+    <div className="flex border-b border-border">
       <button
         data-testid="mobile-tab-editor"
         onClick={() => onTabChange('editor')}
         className={`flex-1 py-2 text-sm font-medium ${
           mobileTab === 'editor'
             ? 'text-accent-600 dark:text-accent-400 border-b-2 border-accent-600 dark:border-accent-400'
-            : 'text-gray-500 dark:text-gray-400'
+            : 'text-muted-foreground'
         }`}
       >
         <FileText className="h-4 w-4 inline-block mr-1" />
@@ -285,7 +285,7 @@ export const MobileTabBar = memo(function MobileTabBar({
         className={`flex-1 py-2 text-sm font-medium ${
           mobileTab === 'preview'
             ? 'text-accent-600 dark:text-accent-400 border-b-2 border-accent-600 dark:border-accent-400'
-            : 'text-gray-500 dark:text-gray-400'
+            : 'text-muted-foreground'
         }`}
       >
         <Eye className="h-4 w-4 inline-block mr-1" />
@@ -308,7 +308,7 @@ export const MaximizeHint = memo(function MaximizeHint({
   return (
     <div
       data-testid="maximize-hint"
-      className="flex items-center justify-center px-4 py-1 bg-gray-800 text-gray-300 text-xs"
+      className="flex items-center justify-center px-4 py-1 bg-muted text-muted-foreground text-xs"
     >
       Press ESC to exit fullscreen {isMobile && '(or swipe down)'}
     </div>

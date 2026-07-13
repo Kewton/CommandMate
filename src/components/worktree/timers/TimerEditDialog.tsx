@@ -50,7 +50,7 @@ export interface TimerEditDialogProps {
 }
 
 const INPUT_CLASS =
-  'w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-ring';
+  'w-full px-3 py-2 text-sm border border-input rounded-md bg-surface dark:bg-surface-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring';
 
 // =============================================================================
 // Component
@@ -157,7 +157,7 @@ export function TimerEditDialog({
     <div className="flex flex-col gap-3">
       {/* Agent instance selector (Issue #942) */}
       <div>
-        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1" htmlFor="timer-instance-select">
+        <label className="block text-xs font-semibold text-foreground mb-1" htmlFor="timer-instance-select">
           {t('timer.agent')}
         </label>
         <select
@@ -177,7 +177,7 @@ export function TimerEditDialog({
 
       {/* Message input */}
       <div>
-        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1" htmlFor="timer-message-input">
+        <label className="block text-xs font-semibold text-foreground mb-1" htmlFor="timer-message-input">
           {t('timer.message')}
         </label>
         <textarea
@@ -194,7 +194,7 @@ export function TimerEditDialog({
 
       {/* Delay selector */}
       <div>
-        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1" htmlFor="timer-delay-select">
+        <label className="block text-xs font-semibold text-foreground mb-1" htmlFor="timer-delay-select">
           {t('timer.delay')}
         </label>
         <select
@@ -229,7 +229,7 @@ export function TimerEditDialog({
       <button
         type="button"
         onClick={onClose}
-        className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors"
+        className="px-4 py-2 text-sm font-medium text-foreground hover:bg-muted rounded-md transition-colors"
       >
         {t('timer.close')}
       </button>
@@ -261,7 +261,7 @@ export function TimerEditDialog({
     <Modal isOpen={isOpen} onClose={onClose} title={title} size="md">
       <div className="flex flex-col gap-4">
         {body}
-        <div className="pt-2 border-t border-gray-200 dark:border-gray-700">{footerButtons}</div>
+        <div className="pt-2 border-t border-border">{footerButtons}</div>
       </div>
     </Modal>
   );
