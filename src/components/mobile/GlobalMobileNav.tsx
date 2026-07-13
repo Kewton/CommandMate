@@ -51,7 +51,7 @@ export function GlobalMobileNav() {
   return (
     <nav
       data-testid="global-mobile-nav"
-      className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-background supports-[backdrop-filter]:bg-background/80 backdrop-blur-md safe-area-bottom"
+      className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-background supports-[backdrop-filter]:bg-background/80 backdrop-blur-md pb-safe"
     >
       <div className="flex items-center justify-around h-14">
         {MOBILE_NAV_TABS.map((tab) => {
