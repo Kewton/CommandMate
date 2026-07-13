@@ -105,3 +105,46 @@ describe('PromptMessage - Issue #235: rawContent display', () => {
     expect(screen.getByText(/Instruction line 50/)).toBeDefined();
   });
 });
+
+describe('PromptMessage - Issue #1117: status tint tokens', () => {
+  const mockOnRespond = vi.fn().mockResolvedValue(undefined);
+
+  it('uses warning tint tokens for the container without raw palette classes', () => {
+    const { container } = render(
+      <PromptMessage
+        message={createPromptMessage()}
+        worktreeId="test-worktree"
+        onRespond={mockOnRespond}
+      />
+    );
+
+    expect(container.querySelector('.bg-warning-subtle')).not.toBeNull();
+    expect(container.querySelector('.border-warning-border')).not.toBeNull();
+    expect(container.innerHTML).not.toMatch(
+      /(bg|text|border|ring)-(red|green|yellow|amber|orange|purple|violet|sky|blue|gray|slate)-[0-9]/
+    );
+  });
+
+  it('shows answered state with the success token', () => {
+    const message = createPromptMessage({
+      promptData: {
+        type: 'yes_no',
+        question: 'Do you want to proceed?',
+        options: ['yes', 'no'],
+        status: 'answered',
+        answer: 'yes',
+      },
+    });
+
+    const { container } = render(
+      <PromptMessage
+        message={message}
+        worktreeId="test-worktree"
+        onRespond={mockOnRespond}
+      />
+    );
+
+    expect(screen.getByText(/prompt\.answered/)).toBeDefined();
+    expect(container.querySelector('.text-success')).not.toBeNull();
+  });
+});

@@ -1,18 +1,22 @@
 /**
  * MessageList Component
  * Displays chat message history for a worktree
+ *
+ * Issue #1117: Visual language unified with ConversationPairCard
+ * (semantic/status tint tokens, lucide-react icons, hover-reveal toolbar
+ * with touch fallback). Structure and optimistic-update logic preserved.
  */
 
 'use client';
 
 import React, { useRef, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { Check, CircleCheck, Clock, Copy, Loader2, MessageCircle, X } from 'lucide-react';
 import { Card } from '@/components/ui';
 import type { ChatMessage } from '@/types/models';
-import { useTranslations } from 'next-intl';
-import { useLocale } from 'next-intl';
-import { format } from 'date-fns';
+import { useTranslations, useLocale } from 'next-intl';
 import { getDateFnsLocale } from '@/lib/date-locale';
+import { formatMessageTimestamp } from '@/lib/date-utils';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -23,6 +27,20 @@ import { getCliToolDisplayNameSafe } from '@/lib/cli-tools/types';
 // Module-level constants to prevent ReactMarkdown DOM rebuilds on re-render
 const REMARK_PLUGINS = [remarkGfm];
 const REHYPE_PLUGINS = [rehypeHighlight];
+
+/**
+ * File-path link style shared by user/assistant content, matching
+ * ConversationPairCard's MessageContent link treatment.
+ */
+const FILE_LINK_CLASSES =
+  'text-accent-700 dark:text-accent-400 hover:text-accent-600 dark:hover:text-accent-300 hover:underline font-mono transition-colors break-all inline';
+
+/**
+ * Hover-reveal mini-toolbar (ConversationPairCard language). Stays visible on
+ * touch devices (no hover) so actions remain reachable.
+ */
+const TOOLBAR_CLASSES =
+  'ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100';
 
 export interface MessageListProps {
   messages: ChatMessage[];
@@ -48,6 +66,23 @@ interface MessageBubbleProps {
   onPromptRespond?: (messageId: string, answer: string) => void;
 }
 
+// Check if content contains ANSI escape codes
+const hasAnsiCodes = (text: string): boolean => {
+  return /\x1b\[[0-9;]*m|\[[0-9;]*m/.test(text);
+};
+
+// Convert ANSI codes to HTML (always-dark island — matches the fixed terminal
+// theme, so the raw hex values here are intentional; see docs/design-system.md)
+const convertAnsiToHtml = (text: string): string => {
+  const convert = new AnsiToHtml({
+    fg: '#d1d5db',
+    bg: '#1f2937',
+    newline: true,
+    escapeXML: true,
+  });
+  return convert.toHtml(text);
+};
+
 /**
  * Message bubble component (Memoized)
  * Issue #36: React.memo prevents unnecessary re-renders when message updates occur
@@ -63,27 +98,17 @@ const MessageBubble = React.memo(function MessageBubble({
   const dateFnsLocale = getDateFnsLocale(locale);
   const tPrompt = useTranslations('prompt');
   const tCommon = useTranslations('common');
-  const timestamp = format(new Date(message.timestamp), 'PPp', { locale: dateFnsLocale });
+  const timestamp = formatMessageTimestamp(new Date(message.timestamp), dateFnsLocale);
 
   // State for handling text input options
   const [selectedTextInputOption, setSelectedTextInputOption] = React.useState<number | null>(null);
   const [textInputValue, setTextInputValue] = React.useState('');
 
-  // Check if content contains ANSI escape codes
-  const hasAnsiCodes = (text: string): boolean => {
-    return /\x1b\[[0-9;]*m|\[[0-9;]*m/.test(text);
-  };
-
-  // Convert ANSI codes to HTML
-  const convertAnsiToHtml = (text: string): string => {
-    const convert = new AnsiToHtml({
-      fg: '#d1d5db', // Default text color: gray-300
-      bg: '#1f2937', // Default background: gray-800
-      newline: true,
-      escapeXML: true,
+  const handleCopy = useCallback(() => {
+    void navigator.clipboard?.writeText(message.content).catch(() => {
+      // Clipboard unavailable (e.g. insecure context) — silently ignore
     });
-    return convert.toHtml(text);
-  };
+  }, [message.content]);
 
   // Use ref to stabilize onFilePathClick reference for markdownComponents.
   // This prevents ReactMarkdown from rebuilding DOM when parent re-renders.
@@ -92,7 +117,7 @@ const MessageBubble = React.memo(function MessageBubble({
 
   /**
    * Memoized markdown components to prevent re-renders.
-   * Uses ref for onFilePathClick so deps are stable ([isUser] only).
+   * Uses ref for onFilePathClick so deps are stable.
    */
   const markdownComponents = useMemo<Components>(() => {
     /**
@@ -126,9 +151,7 @@ const MessageBubble = React.memo(function MessageBubble({
               e.stopPropagation();
               onFilePathClickRef.current(filePath);
             }}
-            className={`underline hover:no-underline font-mono transition-colors break-all inline ${
-              isUser ? 'text-accent-100 hover:text-white' : 'text-accent-600 hover:text-accent-800'
-            }`}
+            className={FILE_LINK_CLASSES}
           >
             {fullMatch}
           </button>
@@ -165,200 +188,201 @@ const MessageBubble = React.memo(function MessageBubble({
 
     const components: Components = {
       p: ({ children, ...props }) => {
-        if (!isUser) {
-          return <p {...props}>{processChildren(children)}</p>;
-        }
-        return <p {...props}>{children}</p>;
+        return <p {...props}>{processChildren(children)}</p>;
       }
     };
 
     return components;
-  }, [isUser]);
+  }, []);
 
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
-      <div className={`${isUser ? 'max-w-[80%]' : 'w-full'} ${isUser ? 'order-2' : 'order-1'}`}>
-        <div
-          className={`rounded-lg px-4 py-3 ${
-            isUser
-              ? 'bg-accent-600 text-white'
-              : 'bg-surface border border-border'
-          }`}
-        >
-          {/* Header */}
-          <div className="flex items-center gap-2 mb-2">
-            <span className={`text-xs font-medium ${isUser ? 'text-accent-100' : 'text-muted-foreground'}`}>
-              {isUser ? 'You' : getCliToolDisplayNameSafe(message.cliToolId)}
-            </span>
-            <span className={`text-xs ${isUser ? 'text-accent-200' : 'text-muted-foreground'}`}>
-              {timestamp}
-            </span>
+    <div className="border border-border rounded-lg overflow-hidden mb-4 transition-colors">
+      <div
+        className={`group relative p-3 border-l-2 ${
+          isUser ? 'border-accent-500 bg-accent-500/10' : 'border-border bg-surface-2/50'
+        }`}
+      >
+        {/* Header */}
+        <div className="flex items-center gap-2 mb-1">
+          <span
+            className={`text-xs font-medium ${
+              isUser ? 'text-accent-700 dark:text-accent-400' : 'text-muted-foreground'
+            }`}
+          >
+            {isUser ? 'You' : getCliToolDisplayNameSafe(message.cliToolId)}
+          </span>
+          <span className="text-xs text-muted-foreground">{timestamp}</span>
+          <div className={TOOLBAR_CLASSES}>
+            <button
+              type="button"
+              data-testid={isUser ? 'copy-user-message' : 'copy-assistant-message'}
+              onClick={handleCopy}
+              className="p-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors"
+              aria-label="Copy message"
+              title="Copy"
+            >
+              <Copy size={14} aria-hidden="true" />
+            </button>
           </div>
+        </div>
 
-          {/* Content */}
-          <div className={`prose prose-sm max-w-none break-words overflow-wrap-anywhere ${isUser ? 'prose-invert' : ''}`}>
-            {message.summary && (
-              <div className={`text-sm font-medium mb-2 ${isUser ? 'text-accent-50' : 'text-foreground'}`}>
-                {message.summary}
-              </div>
-            )}
-            <div className={`break-words overflow-wrap-anywhere ${isUser ? 'text-white' : 'text-foreground'}`}>
-              {hasAnsiCodes(message.content) ? (
-                <pre
-                  className="whitespace-pre-wrap font-mono text-sm bg-[#0d1117] text-[#c9d1d9] p-4 rounded overflow-x-auto"
-                  dangerouslySetInnerHTML={{ __html: convertAnsiToHtml(message.content) }}
-                />
-              ) : (
-                <ReactMarkdown
-                  remarkPlugins={REMARK_PLUGINS}
-                  rehypePlugins={REHYPE_PLUGINS}
-                  components={markdownComponents}
-                >
-                  {message.content}
-                </ReactMarkdown>
-              )}
-            </div>
+        {/* Content */}
+        {message.summary && (
+          <div className="text-sm font-medium mb-2 text-foreground">
+            {message.summary}
           </div>
-
-          {/* Log file link */}
-          {message.logFileName && (
-            <div className="mt-2 pt-2 border-t border-opacity-20">
-              <a
-                href={`/api/worktrees/${message.worktreeId}/logs/${message.logFileName}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={`text-xs ${isUser ? 'text-accent-100 hover:text-white' : 'text-accent-600 hover:text-accent-700'}`}
+        )}
+        <div className="text-sm text-foreground break-words [word-break:break-word] max-w-full overflow-x-hidden">
+          {hasAnsiCodes(message.content) ? (
+            <pre
+              className="whitespace-pre-wrap font-mono text-sm bg-[#0d1117] text-[#c9d1d9] p-4 rounded overflow-x-auto"
+              dangerouslySetInnerHTML={{ __html: convertAnsiToHtml(message.content) }}
+            />
+          ) : (
+            <div className="assistant-md text-sm leading-6">
+              <ReactMarkdown
+                remarkPlugins={REMARK_PLUGINS}
+                rehypePlugins={REHYPE_PLUGINS}
+                components={markdownComponents}
               >
-                View log file →
-              </a>
-            </div>
-          )}
-
-          {/* Prompt choice buttons for assistant messages */}
-          {!isUser && message.promptData && onPromptRespond && (
-            <div className="mt-3 pt-3 border-t border-border">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                  {tPrompt('awaitingSelection')}
-                </span>
-                <div className="text-sm text-foreground font-medium">
-                  {message.promptData.question}
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {message.promptData.type === 'yes_no' ? (
-                  <>
-                    <button
-                      onClick={() => onPromptRespond(message.id, 'yes')}
-                      disabled={message.promptData.status === 'answered'}
-                      className="px-5 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium text-sm shadow-sm hover:shadow-md flex items-center gap-2"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                      {tPrompt('yes')}
-                    </button>
-                    <button
-                      onClick={() => onPromptRespond(message.id, 'no')}
-                      disabled={message.promptData.status === 'answered'}
-                      className="px-5 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium text-sm shadow-sm hover:shadow-md flex items-center gap-2"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                      {tPrompt('no')}
-                    </button>
-                  </>
-                ) : message.promptData.type === 'multiple_choice' ? (
-                  <>
-                    {message.promptData.options.map((option) => (
-                      <button
-                        key={option.number}
-                        onClick={() => {
-                          if (option.requiresTextInput) {
-                            // For text input options, select the option (don't send immediately)
-                            setSelectedTextInputOption(option.number);
-                            setTextInputValue('');
-                          } else {
-                            // For regular options, send immediately
-                            onPromptRespond(message.id, option.number.toString());
-                          }
-                        }}
-                        disabled={message.promptData?.status === 'answered'}
-                        className={`px-5 py-2.5 rounded-lg transition-all font-medium text-sm shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed ${
-                          selectedTextInputOption === option.number
-                            ? 'bg-purple-600 text-white hover:bg-purple-700 ring-2 ring-purple-400 ring-opacity-50'
-                            : option.isDefault
-                            ? 'bg-accent-600 text-white hover:bg-accent-700 ring-2 ring-accent-400 ring-opacity-50'
-                            : 'bg-surface text-foreground hover:bg-muted border border-input'
-                        }`}
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
-                            selectedTextInputOption === option.number
-                              ? 'bg-purple-500'
-                              : option.isDefault ? 'bg-accent-500' : 'bg-muted text-muted-foreground'
-                          }`}>
-                            {option.number}
-                          </span>
-                          {option.label}
-                        </span>
-                      </button>
-                    ))}
-
-                    {/* Text input field for selected text input option */}
-                    {selectedTextInputOption !== null && message.promptData?.status === 'pending' && (
-                      <div className="w-full mt-3 p-4 bg-purple-50 border border-purple-200 rounded-lg">
-                        <label className="block text-sm font-medium text-foreground mb-2">
-                          {tPrompt('enterCustomMessage')}:
-                        </label>
-                        <textarea
-                          value={textInputValue}
-                          onChange={(e) => setTextInputValue(e.target.value)}
-                          placeholder={tPrompt('enterMessageHere')}
-                          rows={3}
-                          className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500 text-sm"
-                        />
-                        <div className="flex gap-2 mt-3">
-                          <button
-                            onClick={() => {
-                              if (textInputValue.trim()) {
-                                onPromptRespond(message.id, textInputValue.trim());
-                                setSelectedTextInputOption(null);
-                                setTextInputValue('');
-                              }
-                            }}
-                            disabled={!textInputValue.trim()}
-                            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium text-sm shadow-sm hover:shadow-md"
-                          >
-                            {tCommon('send')}
-                          </button>
-                          <button
-                            onClick={() => {
-                              setSelectedTextInputOption(null);
-                              setTextInputValue('');
-                            }}
-                            className="px-4 py-2 bg-muted text-foreground rounded-lg hover:bg-muted/80 transition-all font-medium text-sm"
-                          >
-                            {tCommon('cancel')}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                ) : null}
-              </div>
-              {message.promptData.status === 'answered' && message.promptData.answer && (
-                <div className="mt-3 flex items-center gap-2 text-sm text-green-600 bg-green-50 px-3 py-2 rounded-lg">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  {tPrompt('answered')}: {message.promptData.answer}
-                </div>
-              )}
+                {message.content}
+              </ReactMarkdown>
             </div>
           )}
         </div>
+
+        {/* Log file link */}
+        {message.logFileName && (
+          <div className="mt-2 pt-2 border-t border-border">
+            <a
+              href={`/api/worktrees/${message.worktreeId}/logs/${message.logFileName}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-accent-700 dark:text-accent-400 hover:text-accent-600 dark:hover:text-accent-300 hover:underline"
+            >
+              View log file →
+            </a>
+          </div>
+        )}
+
+        {/* Prompt choice buttons for assistant messages */}
+        {!isUser && message.promptData && onPromptRespond && (
+          <div className="mt-3 pt-3 border-t border-border">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-warning-subtle text-warning-foreground border border-warning-border">
+                {tPrompt('awaitingSelection')}
+              </span>
+              <div className="text-sm text-foreground font-medium">
+                {message.promptData.question}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {message.promptData.type === 'yes_no' ? (
+                <>
+                  <button
+                    onClick={() => onPromptRespond(message.id, 'yes')}
+                    disabled={message.promptData.status === 'answered'}
+                    className="px-5 py-2.5 bg-accent-600 text-white rounded-lg hover:bg-accent-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium text-sm shadow-sm hover:shadow-md flex items-center gap-2"
+                  >
+                    <Check size={16} aria-hidden="true" />
+                    {tPrompt('yes')}
+                  </button>
+                  <button
+                    onClick={() => onPromptRespond(message.id, 'no')}
+                    disabled={message.promptData.status === 'answered'}
+                    className="px-5 py-2.5 bg-surface text-foreground border-2 border-input rounded-lg hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium text-sm shadow-sm hover:shadow-md flex items-center gap-2"
+                  >
+                    <X size={16} aria-hidden="true" />
+                    {tPrompt('no')}
+                  </button>
+                </>
+              ) : message.promptData.type === 'multiple_choice' ? (
+                <>
+                  {message.promptData.options.map((option) => (
+                    <button
+                      key={option.number}
+                      onClick={() => {
+                        if (option.requiresTextInput) {
+                          // For text input options, select the option (don't send immediately)
+                          setSelectedTextInputOption(option.number);
+                          setTextInputValue('');
+                        } else {
+                          // For regular options, send immediately
+                          onPromptRespond(message.id, option.number.toString());
+                        }
+                      }}
+                      disabled={message.promptData?.status === 'answered'}
+                      className={`px-5 py-2.5 rounded-lg transition-all font-medium text-sm shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed ${
+                        selectedTextInputOption === option.number
+                          ? 'bg-accent-600 text-white hover:bg-accent-700 ring-2 ring-ring'
+                          : option.isDefault
+                          ? 'bg-accent-600 text-white hover:bg-accent-700 ring-2 ring-accent-400/50'
+                          : 'bg-surface text-foreground hover:bg-muted border border-input'
+                      }`}
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
+                          selectedTextInputOption === option.number || option.isDefault
+                            ? 'bg-accent-500 text-white'
+                            : 'bg-muted text-muted-foreground'
+                        }`}>
+                          {option.number}
+                        </span>
+                        {option.label}
+                      </span>
+                    </button>
+                  ))}
+
+                  {/* Text input field for selected text input option */}
+                  {selectedTextInputOption !== null && message.promptData?.status === 'pending' && (
+                    <div className="w-full mt-3 p-4 bg-surface-2 border border-border rounded-lg">
+                      <label className="block text-sm font-medium text-foreground mb-2">
+                        {tPrompt('enterCustomMessage')}:
+                      </label>
+                      <textarea
+                        value={textInputValue}
+                        onChange={(e) => setTextInputValue(e.target.value)}
+                        placeholder={tPrompt('enterMessageHere')}
+                        rows={3}
+                        className="w-full px-3 py-2 bg-surface text-foreground border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-accent-500 text-sm"
+                      />
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          onClick={() => {
+                            if (textInputValue.trim()) {
+                              onPromptRespond(message.id, textInputValue.trim());
+                              setSelectedTextInputOption(null);
+                              setTextInputValue('');
+                            }
+                          }}
+                          disabled={!textInputValue.trim()}
+                          className="px-4 py-2 bg-accent-600 text-white rounded-lg hover:bg-accent-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium text-sm shadow-sm hover:shadow-md"
+                        >
+                          {tCommon('send')}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSelectedTextInputOption(null);
+                            setTextInputValue('');
+                          }}
+                          className="px-4 py-2 bg-muted text-foreground rounded-lg hover:bg-muted/80 transition-all font-medium text-sm"
+                        >
+                          {tCommon('cancel')}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : null}
+            </div>
+            {message.promptData.status === 'answered' && message.promptData.answer && (
+              <div className="mt-3 flex items-center gap-2 text-sm text-success-foreground bg-success-subtle border border-success-border px-3 py-2 rounded-lg">
+                <CircleCheck size={16} aria-hidden="true" />
+                {tPrompt('answered')}: {message.promptData.answer}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -497,19 +521,7 @@ export function MessageList({
     return (
       <Card padding="lg">
         <div className="text-center py-8">
-          <svg
-            className="mx-auto h-12 w-12 text-muted-foreground"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-            />
-          </svg>
+          <MessageCircle size={48} className="mx-auto text-muted-foreground" aria-hidden="true" />
           <p className="mt-4 text-muted-foreground">No messages yet</p>
         </div>
       </Card>
@@ -545,100 +557,88 @@ export function MessageList({
 
         {/* Show realtime output while session is running */}
         {waitingForResponse && (
-          <div className="flex justify-start mb-4">
-            <div className="w-full">
-              <div className="rounded-lg px-4 py-3 bg-surface border border-border shadow-sm">
-                {/* Header with status indicator */}
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="text-xs font-medium text-muted-foreground">{getCliToolDisplayNameSafe(selectedCliTool)}</span>
-                  <div className="flex gap-1">
-                    <div className="w-1.5 h-1.5 bg-green-600 rounded-full animate-pulse" />
-                  </div>
-                  <span className="text-xs text-green-600 font-medium">{tWorktree('session.running')}</span>
+          <div className="border border-border rounded-lg overflow-hidden mb-4 transition-colors">
+            <div className="border-l-2 border-border bg-surface-2/50 p-3">
+              {/* Header with status indicator */}
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-xs font-medium text-muted-foreground">{getCliToolDisplayNameSafe(selectedCliTool)}</span>
+                <div className="flex gap-1">
+                  <div className="w-1.5 h-1.5 bg-success rounded-full animate-pulse" />
                 </div>
+                <span className="text-xs text-success-foreground font-medium">{tWorktree('session.running')}</span>
+              </div>
 
-                {/* Progress indicator - fixed at top */}
-                <div className="sticky top-0 bg-surface z-10 pb-2 mb-3 border-b border-border">
-                  {/* Thinking indicator */}
-                  {isThinking && (
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-2 h-2 rounded-full bg-purple-600 animate-pulse" />
-                      <span className="text-sm font-medium text-purple-700">{tWorktree('status.thinking')}</span>
-                      <span className="text-xs text-purple-500 ml-auto">{tWorktree('status.thinkingStatus')}</span>
-                    </div>
-                  )}
-
-                  {/* Active output indicator */}
-                  {!isThinking && realtimeOutput && (
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-2 h-2 rounded-full bg-green-600 animate-pulse" />
-                      <span className="text-sm font-medium text-green-700">{tWorktree('output.latest')}</span>
-                      <span className="text-xs text-green-500 ml-auto">{tWorktree('output.realtimeUpdate')}</span>
-                    </div>
-                  )}
-
-                  {/* Starting up indicator */}
-                  {!isThinking && !realtimeOutput && (
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-2 h-2 rounded-full bg-muted-foreground animate-pulse" />
-                      <span className="text-sm font-medium text-foreground">{tWorktree('session.starting')}</span>
-                      <span className="text-xs text-muted-foreground ml-auto">...</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Realtime output area */}
-                {realtimeOutput ? (
-                  <div className="space-y-3">
-                    {/* Latest content */}
-                    <div className="p-3 bg-green-50 rounded-lg border border-green-200">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-semibold text-green-700 uppercase tracking-wide flex items-center gap-1">
-                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-                          </svg>
-                          {tWorktree('output.latest')}
-                        </span>
-                        <span className="text-xs text-green-500">{new Date().toLocaleTimeString()}</span>
-                      </div>
-                      <div className="prose prose-sm max-w-none break-words overflow-wrap-anywhere">
-                        {/\x1b\[[0-9;]*m|\[[0-9;]*m/.test(realtimeOutput) ? (
-                          <pre
-                            className="whitespace-pre-wrap font-mono text-xs bg-[#0d1117] text-[#c9d1d9] p-3 rounded overflow-x-auto max-h-[500px] overflow-y-auto"
-                            dangerouslySetInnerHTML={{ __html: new AnsiToHtml({
-                              fg: '#d1d5db', // Default text color: gray-300
-                              bg: '#1f2937', // Default background: gray-800
-                              newline: true,
-                              escapeXML: true,
-                            }).toHtml(realtimeOutput) }}
-                          />
-                        ) : (
-                          <div className="text-sm text-foreground whitespace-pre-wrap font-mono max-h-[500px] overflow-y-auto">
-                            {realtimeOutput}
-                          </div>
-                        )}
-                      </div>
-                    </div>
+              {/* Progress indicator - fixed at top */}
+              <div className="sticky top-0 bg-surface z-10 pb-2 mb-3 border-b border-border">
+                {/* Thinking indicator */}
+                {isThinking && (
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-2 h-2 rounded-full bg-info animate-pulse" />
+                    <span className="text-sm font-medium text-info-foreground">{tWorktree('status.thinking')}</span>
+                    <span className="text-xs text-info-foreground/70 ml-auto">{tWorktree('status.thinkingStatus')}</span>
                   </div>
-                ) : isThinking ? (
-                  <div className="text-center py-6">
-                    <div className="inline-flex items-center gap-2 text-purple-600">
-                      <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                      </svg>
-                      <p className="text-sm font-medium">{tWorktree('status.claudeIsThinking')}</p>
-                    </div>
+                )}
+
+                {/* Active output indicator */}
+                {!isThinking && realtimeOutput && (
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
+                    <span className="text-sm font-medium text-success-foreground">{tWorktree('output.latest')}</span>
+                    <span className="text-xs text-success-foreground/70 ml-auto">{tWorktree('output.realtimeUpdate')}</span>
                   </div>
-                ) : (
-                  <div className="text-center py-6">
-                    <div className="inline-flex items-center gap-2 text-muted-foreground">
-                      <div className="w-2 h-2 rounded-full bg-muted-foreground animate-pulse" />
-                      <p className="text-sm">{tWorktree('session.startingEllipsis')}</p>
-                    </div>
+                )}
+
+                {/* Starting up indicator */}
+                {!isThinking && !realtimeOutput && (
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-2 h-2 rounded-full bg-muted-foreground animate-pulse" />
+                    <span className="text-sm font-medium text-foreground">{tWorktree('session.starting')}</span>
+                    <span className="text-xs text-muted-foreground ml-auto">...</span>
                   </div>
                 )}
               </div>
+
+              {/* Realtime output area */}
+              {realtimeOutput ? (
+                <div className="space-y-3">
+                  {/* Latest content */}
+                  <div className="p-3 bg-success-subtle rounded-lg border border-success-border">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-semibold text-success-foreground uppercase tracking-wide flex items-center gap-1">
+                        <Clock size={12} aria-hidden="true" />
+                        {tWorktree('output.latest')}
+                      </span>
+                      <span className="text-xs text-success-foreground/70">{new Date().toLocaleTimeString()}</span>
+                    </div>
+                    <div className="break-words [word-break:break-word] max-w-full">
+                      {hasAnsiCodes(realtimeOutput) ? (
+                        <pre
+                          className="whitespace-pre-wrap font-mono text-xs bg-[#0d1117] text-[#c9d1d9] p-3 rounded overflow-x-auto max-h-[500px] overflow-y-auto"
+                          dangerouslySetInnerHTML={{ __html: convertAnsiToHtml(realtimeOutput) }}
+                        />
+                      ) : (
+                        <div className="text-sm text-foreground whitespace-pre-wrap font-mono max-h-[500px] overflow-y-auto">
+                          {realtimeOutput}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : isThinking ? (
+                <div className="text-center py-6">
+                  <div className="inline-flex items-center gap-2 text-info-foreground">
+                    <Loader2 size={20} className="animate-spin" aria-hidden="true" />
+                    <p className="text-sm font-medium">{tWorktree('status.claudeIsThinking')}</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-6">
+                  <div className="inline-flex items-center gap-2 text-muted-foreground">
+                    <div className="w-2 h-2 rounded-full bg-muted-foreground animate-pulse" />
+                    <p className="text-sm">{tWorktree('session.startingEllipsis')}</p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
