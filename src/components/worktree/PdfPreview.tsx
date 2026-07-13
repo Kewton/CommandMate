@@ -28,6 +28,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { PDF_IFRAME_SANDBOX } from '@/config/pdf-extensions';
+import { Spinner } from '@/components/ui/Spinner';
 
 export type PdfPreviewVariant = 'iframe' | 'download';
 
@@ -110,7 +111,7 @@ export function PdfPreview({ dataUri, filePath, variant = 'iframe' }: PdfPreview
         className="h-full flex items-center justify-center"
         data-testid="pdf-preview-loading"
       >
-        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-input border-t-accent-600 dark:border-t-accent-400" />
+        <Spinner size="xl" variant="accent" />
       </div>
     );
   }

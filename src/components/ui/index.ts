@@ -31,6 +31,9 @@ export type { TextareaProps } from './Textarea';
 export { Skeleton } from './Skeleton';
 export type { SkeletonProps } from './Skeleton';
 
+export { Spinner } from './Spinner';
+export type { SpinnerProps, SpinnerSize, SpinnerVariant } from './Spinner';
+
 export { Switch } from './Switch';
 export type { SwitchProps } from './Switch';
 

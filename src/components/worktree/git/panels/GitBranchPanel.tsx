@@ -15,7 +15,7 @@ import type { BranchInfo, BranchInclude } from '@/types/git';
 import { branchCreatePrompt, branchDeletePrompt } from '@/lib/git-ai-prompt-templates';
 import { AskAiButton, RefreshIcon } from '@/components/worktree/git/gitPaneShared';
 import { useGitPaneContext } from '@/components/worktree/git/GitPaneContext';
-import { Checkbox } from '@/components/ui';
+import { Checkbox, Spinner } from '@/components/ui';
 
 export interface GitBranchPanelProps {
   branches: BranchInfo[];
@@ -124,7 +124,7 @@ export const GitBranchPanel = memo(function GitBranchPanel({
 
           {loading && branches.length === 0 && (
             <div className="flex items-center gap-2 px-3 pb-2" role="status">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-accent-500" />
+              <Spinner size="sm" variant="accent" />
               <span className="sr-only">Loading branches...</span>
             </div>
           )}

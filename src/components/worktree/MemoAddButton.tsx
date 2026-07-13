@@ -12,6 +12,7 @@
 'use client';
 
 import React, { memo } from 'react';
+import { Spinner } from '@/components/ui/Spinner';
 
 // ============================================================================
 // Types
@@ -86,10 +87,7 @@ export const MemoAddButton = memo(function MemoAddButton({
         `}
       >
         {isLoading ? (
-          <span
-            data-testid="loading-indicator"
-            className="w-5 h-5 border-2 border-muted border-t-accent-500 rounded-full animate-spin"
-          />
+          <Spinner data-testid="loading-indicator" size="md" variant="accent" />
         ) : (
           <svg
             className="w-5 h-5"

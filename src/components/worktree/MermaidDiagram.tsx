@@ -15,6 +15,7 @@
 import React, { useState, useEffect, useRef, useId } from 'react';
 import mermaid from 'mermaid';
 import { MERMAID_CONFIG } from '@/config/mermaid-config';
+import { Spinner } from '@/components/ui/Spinner';
 
 /**
  * Props for MermaidDiagram component
@@ -138,7 +139,7 @@ export function MermaidDiagram({
         className="flex items-center justify-center p-4 text-muted-foreground"
       >
         <div className="flex items-center gap-2">
-          <div className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-muted border-t-accent-600" />
+          <Spinner size="sm" variant="accent" />
           <span>Rendering diagram...</span>
         </div>
       </div>

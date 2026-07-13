@@ -9,7 +9,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
-import { Button, Card, Input, Textarea } from '@/components/ui';
+import { Button, Card, Input, Skeleton, Textarea } from '@/components/ui';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import {
   MAX_TEMPLATES,
@@ -165,7 +165,23 @@ export default function TemplateTab() {
         </h2>
 
         {isLoading ? (
-          <div className="text-sm text-muted-foreground" data-testid="template-loading">Loading...</div>
+          // [Issue #1118] Card-shaped skeletons instead of naked loading text
+          <div
+            className="space-y-3"
+            data-testid="template-loading"
+            role="status"
+            aria-label="Loading templates"
+          >
+            {[0, 1].map((i) => (
+              <Card key={i} padding="md">
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-full" />
+                  <Skeleton className="h-3 w-2/3" />
+                </div>
+              </Card>
+            ))}
+          </div>
         ) : templates.length === 0 ? (
           <div className="text-sm text-muted-foreground" data-testid="template-empty">No templates yet.</div>
         ) : (

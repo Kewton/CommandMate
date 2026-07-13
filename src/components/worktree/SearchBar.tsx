@@ -14,6 +14,7 @@
 import React, { memo, useCallback, useRef, useEffect } from 'react';
 import { MOBILE_BREAKPOINT } from '@/hooks/useIsMobile';
 import type { SearchMode } from '@/types/models';
+import { Spinner } from '@/components/ui/Spinner';
 
 // ============================================================================
 // Types
@@ -84,9 +85,12 @@ const ClearIcon = memo(function ClearIcon() {
 
 const LoadingSpinner = memo(function LoadingSpinner() {
   return (
-    <div
+    <Spinner
+      size="sm"
+      variant="accent"
       data-testid="search-loading"
-      className="w-4 h-4 border-2 border-input border-t-accent-500 rounded-full animate-spin"
+      role="status"
+      aria-hidden={false}
       aria-label="Searching..."
     />
   );

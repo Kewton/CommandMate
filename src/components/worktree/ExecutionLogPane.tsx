@@ -19,7 +19,7 @@ import { formatTimestamp } from '@/components/worktree/schedules/format';
 import { parseCmateContent } from '@/lib/cmate-validator';
 import { parseCliToolColumn } from '@/lib/cmate-cli-tool-parser';
 import type { AgentInstance } from '@/lib/cli-tools/types';
-import { Button } from '@/components/ui';
+import { Button, Spinner } from '@/components/ui';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 // ============================================================================
@@ -259,7 +259,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
     return (
       <div className={`flex items-center justify-center h-full p-4 ${className}`}>
         <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-4 border-border border-t-accent-500 rounded-full animate-spin" />
+          <Spinner size="xl" variant="accent" />
           <span className="text-sm text-muted-foreground">{t('loading')}</span>
         </div>
       </div>

@@ -57,9 +57,9 @@ describe('Dynamic Import Patterns', () => {
       expect(content).toContain('loading');
     });
 
-    it('should import Loader2 from lucide-react', () => {
-      expect(content).toContain('Loader2');
-      expect(content).toContain('lucide-react');
+    it('should render the shared Spinner in the loading placeholder (Issue #1118)', () => {
+      expect(content).toContain('Spinner');
+      expect(content).not.toContain('Loader2');
     });
   });
 
@@ -95,9 +95,9 @@ describe('Dynamic Import Patterns', () => {
       expect(content).toContain('loading');
     });
 
-    it('should import Loader2 from lucide-react', () => {
-      expect(content).toContain('Loader2');
-      expect(content).toContain('lucide-react');
+    it('should render the shared Spinner in the loading placeholder (Issue #1118)', () => {
+      expect(content).toContain('Spinner');
+      expect(content).not.toContain('Loader2');
     });
   });
 

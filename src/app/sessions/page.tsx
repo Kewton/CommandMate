@@ -31,6 +31,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Skeleton,
   StatusDot,
 } from '@/components/ui';
 import { compareByTimestamp } from '@/lib/sidebar-utils';
@@ -405,8 +406,33 @@ export default function SessionsPage() {
           <>
             {/* No data yet: loading / blocking error / empty are mutually exclusive. */}
             {isLoading && (
-              <div className="text-muted-foreground" data-testid="sessions-loading">
-                Loading sessions...
+              // [Issue #1118] First-load only (hasWorktrees keeps the list on
+              // re-fetch). Skeleton cards mirror the session card layout:
+              // name/branch lines + agent chip, then a message/time footer.
+              <div
+                className="space-y-2"
+                data-testid="sessions-loading"
+                role="status"
+                aria-label="Loading sessions"
+              >
+                {[0, 1, 2].map((i) => (
+                  <div
+                    key={i}
+                    className="block bg-surface rounded-lg p-4 border border-border shadow-sm"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0 flex-1 space-y-1.5">
+                        <Skeleton className="h-4 w-40 max-w-full" />
+                        <Skeleton className="h-3 w-56 max-w-full" />
+                      </div>
+                      <Skeleton className="ml-4 h-3 w-16 flex-shrink-0" />
+                    </div>
+                    <div className="mt-3 flex items-center gap-2">
+                      <Skeleton className="h-3 min-w-0 flex-1" />
+                      <Skeleton className="h-3 w-10 flex-shrink-0" />
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
             {!isLoading && error && (

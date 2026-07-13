@@ -29,6 +29,8 @@ import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
 import { Z_INDEX } from '@/config/z-index';
 import { COPY_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { Spinner } from '@/components/ui/Spinner';
 
 /** Fixed row height for the virtualized CodeViewer (px). Monospace + leading-6. */
 const CODE_VIEWER_ROW_HEIGHT_PX = 24;
@@ -37,7 +39,7 @@ const CODE_VIEWER_ROW_HEIGHT_PX = 24;
 function DynamicImportSpinner() {
   return (
     <div className="flex items-center justify-center py-12 bg-surface">
-      <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-input border-t-accent-600 dark:border-t-accent-400" />
+      <Spinner size="xl" variant="accent" />
     </div>
   );
 }
@@ -119,7 +121,7 @@ const MARP_FRONTMATTER_REGEX = /^---\s*\nmarp:\s*true/;
 function LoadingSpinner() {
   return (
     <div className="flex items-center justify-center py-12">
-      <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-input border-t-accent-600 dark:border-t-accent-400" />
+      <Spinner size="xl" variant="accent" />
       <p className="ml-3 text-muted-foreground">Loading file...</p>
     </div>
   );
@@ -476,7 +478,7 @@ function CodeViewer({
                     dangerouslySetInnerHTML={{ __html: html }}
                   />
                 ) : (
-                  <span className="text-muted-foreground italic">Loading…</span>
+                  <Skeleton className="h-4 w-3/4" />
                 )}
               </div>
             </div>

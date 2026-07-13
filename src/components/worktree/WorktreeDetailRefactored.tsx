@@ -18,7 +18,8 @@
 
 import React, { memo, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { Loader2, MoreHorizontal } from 'lucide-react';
+import { MoreHorizontal } from 'lucide-react';
+import { Spinner } from '@/components/ui/Spinner';
 import { MobileHeader } from '@/components/mobile/MobileHeader';
 import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 import { StatusDot } from '@/components/ui/StatusDot';
@@ -45,7 +46,7 @@ const MarkdownEditor = dynamic(
     ssr: false,
     loading: () => (
       <div className="flex items-center justify-center h-full bg-surface text-muted-foreground">
-        <Loader2 className="animate-spin h-6 w-6 mr-2" />
+        <Spinner size="lg" className="mr-2" />
         <span>Loading editor...</span>
       </div>
     ),

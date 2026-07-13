@@ -20,7 +20,7 @@
 
 import React, { memo, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslations } from 'next-intl';
-import { Modal } from '@/components/ui';
+import { Modal, Spinner } from '@/components/ui';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { FileContent } from '@/types/models';
 import { ImageViewer } from './ImageViewer';
@@ -723,7 +723,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
       <div className="max-h-[60vh] sm:max-h-[70vh] flex flex-col">
         {loading && (
           <div className="flex items-center justify-center py-12">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-muted border-t-accent-600 dark:border-t-accent-400" />
+            <Spinner size="xl" variant="accent" />
             <p className="ml-3 text-muted-foreground">Loading file...</p>
           </div>
         )}

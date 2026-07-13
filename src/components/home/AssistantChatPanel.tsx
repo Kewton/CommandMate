@@ -8,7 +8,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useTranslations } from 'next-intl';
 import { Trash2 } from 'lucide-react';
-import { Button, Card } from '@/components/ui';
+import { Button, Card, Skeleton } from '@/components/ui';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { AssistantMessageInput } from './AssistantMessageInput';
 import { AssistantMessageList } from './AssistantMessageList';
@@ -48,6 +48,15 @@ export function AssistantChatPanel() {
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [clearing, setClearing] = useState(false);
+  // [Issue #1118] History skeleton state, derived (not effect-toggled) so the
+  // empty state never flashes for a frame before the skeleton appears:
+  // loading until the repo list has answered, and, once a repo is selected,
+  // until the conversation for the current repo+tool key has been fetched.
+  const [reposLoaded, setReposLoaded] = useState(false);
+  const [loadedConversationKey, setLoadedConversationKey] = useState<string | null>(null);
+  const conversationKey = `${selectedRepoId}:${selectedTool}`;
+  const conversationLoading =
+    !reposLoaded || (selectedRepoId !== '' && loadedConversationKey !== conversationKey);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const conversationActive = conversation?.status === 'ready' || conversation?.status === 'running';
@@ -113,6 +122,8 @@ export function AssistantChatPanel() {
         }
       } catch {
         // Silent fetch failure
+      } finally {
+        setReposLoaded(true);
       }
     }
 
@@ -160,6 +171,10 @@ export function AssistantChatPanel() {
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load conversation');
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadedConversationKey(`${selectedRepoId}:${selectedTool}`);
         }
       }
     })();
@@ -441,14 +456,31 @@ export function AssistantChatPanel() {
             </div>
 
             <div className="min-h-0 flex-1 overflow-hidden">
-              <AssistantMessageList
-                messages={messages}
-                assistantLabel={assistantLabel}
-                sessionActive={conversationActive}
-                waitingForResponse={executionRunning}
-                canEdit={canSend}
-                onEditMessage={handleEditMessage}
-              />
+              {conversationLoading && messages.length === 0 ? (
+                // [Issue #1118] First-load skeleton mirroring the message list
+                // container and its chat bubbles (user right, assistant left).
+                <div
+                  className="h-full min-h-0 overflow-hidden rounded-xl border border-border bg-surface-2 p-3"
+                  data-testid="assistant-chat-loading"
+                  role="status"
+                  aria-label="Loading conversation"
+                >
+                  <div className="space-y-3">
+                    <Skeleton className="ml-auto h-10 w-3/5 rounded-2xl" />
+                    <Skeleton className="mr-auto h-16 w-4/5 rounded-2xl" />
+                    <Skeleton className="ml-auto h-10 w-2/5 rounded-2xl" />
+                  </div>
+                </div>
+              ) : (
+                <AssistantMessageList
+                  messages={messages}
+                  assistantLabel={assistantLabel}
+                  sessionActive={conversationActive}
+                  waitingForResponse={executionRunning}
+                  canEdit={canSend}
+                  onEditMessage={handleEditMessage}
+                />
+              )}
             </div>
 
             <div className="shrink-0">

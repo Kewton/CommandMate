@@ -20,6 +20,7 @@ import {
   VIBE_LOCAL_CONTEXT_WINDOW_MIN,
   VIBE_LOCAL_CONTEXT_WINDOW_MAX,
 } from '@/lib/cli-tools/types';
+import { Spinner } from '@/components/ui/Spinner';
 
 // ============================================================================
 // Types
@@ -177,7 +178,7 @@ export const VibeLocalSettings = memo(function VibeLocalSettings({
 
       {loadingModels ? (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="w-3 h-3 border-2 border-accent-500 border-t-transparent rounded-full animate-spin" />
+          <Spinner size="xs" variant="muted" />
           {t('loading')}
         </div>
       ) : ollamaError && ollamaModels.length === 0 ? (

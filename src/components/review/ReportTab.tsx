@@ -11,7 +11,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
 import ReportDatePicker from './ReportDatePicker';
-import { Button, Card, Input, RadioGroup, RadioGroupItem, Textarea } from '@/components/ui';
+import { Button, Card, Input, RadioGroup, RadioGroupItem, Skeleton, Spinner, Textarea } from '@/components/ui';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { SUMMARY_ALLOWED_TOOLS, MAX_USER_INSTRUCTION_LENGTH } from '@/config/review-config';
 import { useReportGeneration } from '@/hooks/useReportGeneration';
@@ -259,7 +259,13 @@ export default function ReportTab() {
             Select Template
           </label>
           {isLoadingTemplates ? (
-            <div className="text-sm text-muted-foreground">Loading templates...</div>
+            <Skeleton
+              className="h-9 w-full"
+              data-testid="report-template-loading"
+              role="status"
+              aria-label="Loading templates"
+              aria-hidden={undefined}
+            />
           ) : templates.length === 0 ? (
             <div className="text-sm text-muted-foreground">No templates available. Create one in the Template tab.</div>
           ) : (
@@ -315,7 +321,7 @@ export default function ReportTab() {
       {/* Message count */}
       <div className="mb-4 text-sm text-muted-foreground" data-testid="message-count">
         {isLoading ? (
-          'Loading...'
+          <Skeleton className="h-4 w-48" />
         ) : messageCount === 0 ? (
           'No messages for this date.'
         ) : (
@@ -333,7 +339,7 @@ export default function ReportTab() {
       {/* Loading spinner for generation (local or remote) */}
       {(isGenerating || isRemoteGenerating) && (
         <div className="flex items-center gap-2 mb-4 text-sm text-muted-foreground" data-testid="generating-spinner">
-          <div className="w-4 h-4 border-2 border-accent-600 border-t-transparent rounded-full animate-spin" />
+          <Spinner size="sm" variant="muted" />
           {isRemoteGenerating && remoteStatus.tool
             ? `Generating report... (tool: ${remoteStatus.tool}${remoteStatus.startedAt ? `, started: ${Math.round((Date.now() - new Date(remoteStatus.startedAt).getTime()) / 1000)}s ago` : ''})`
             : 'Generating summary...'}

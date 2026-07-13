@@ -36,6 +36,7 @@ import { debounce } from '@/lib/utils';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { ToastContainer, useToast } from '@/components/common/Toast';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
+import { Spinner } from '@/components/ui/Spinner';
 import { PaneResizer } from '@/components/worktree/PaneResizer';
 import { MarkdownToolbar } from '@/components/worktree/MarkdownToolbar';
 import {
@@ -803,7 +804,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         className="flex items-center justify-center h-full bg-surface"
       >
         <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-input border-t-accent-600 dark:border-t-accent-400" />
+          <Spinner size="xl" variant="accent" className="inline-block" />
           <p className="mt-4 text-muted-foreground">Loading...</p>
         </div>
       </div>

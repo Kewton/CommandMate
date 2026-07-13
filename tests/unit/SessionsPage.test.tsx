@@ -429,6 +429,16 @@ describe('SessionsPage', () => {
       expect(screen.getByTestId('sessions-loading')).toBeDefined();
     });
 
+    it('should render skeleton session cards without naked loading text (Issue #1118)', () => {
+      mockIsLoading = true;
+
+      render(<SessionsPage />);
+
+      const loading = screen.getByTestId('sessions-loading');
+      expect(loading.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
+      expect(loading.textContent).not.toContain('Loading sessions');
+    });
+
     it('should show error state', () => {
       mockError = new Error('Network error');
 

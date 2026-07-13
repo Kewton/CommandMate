@@ -28,6 +28,7 @@ import {
 } from '@/lib/cli-tools/types';
 import { MIN_AGENT_INSTANCES } from '@/lib/agent-instances-validator';
 import { VibeLocalSettings } from '@/components/worktree/VibeLocalSettings';
+import { Spinner } from '@/components/ui/Spinner';
 
 // ============================================================================
 // Types
@@ -332,7 +333,7 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
           data-testid="agent-instances-loading"
           className="mt-3 flex items-center gap-2 text-xs text-muted-foreground"
         >
-          <span className="w-3 h-3 border-2 border-accent-500 border-t-transparent rounded-full animate-spin" />
+          <Spinner size="xs" variant="muted" />
           {t('loading')}
         </div>
       )}

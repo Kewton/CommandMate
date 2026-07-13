@@ -31,7 +31,7 @@ import { FILE_TREE_POLL_INTERVAL_MS } from '@/config/file-polling-config';
 import { useFileTreeExpandedState } from '@/hooks/useFileTreeExpandedState';
 import { useLocale } from 'next-intl';
 import { FilePlus, FolderPlus, AlertCircle, RefreshCw, RotateCcw } from 'lucide-react';
-import { Button } from '@/components/ui';
+import { Button, Skeleton } from '@/components/ui';
 
 // ============================================================================
 // Types
@@ -517,13 +517,26 @@ export const FileTreeView = memo(function FileTreeView({
   // rendered in the toolbar area instead (see below).
   const isInitialLoading = loading && rootItems.length === 0;
   if (isInitialLoading) {
+    // [Issue #1118] Skeleton rows shaped like tree nodes (chevron/icon +
+    // name at staggered indents) instead of a centered spinner, so the real
+    // tree replaces them without a layout jump.
     return (
       <div
         data-testid="file-tree-loading"
-        className={`flex items-center justify-center p-4 ${className}`}
+        className={`p-2 ${className}`}
+        role="status"
+        aria-label="Loading files"
       >
-        <span className="w-5 h-5 border-2 border-input border-t-cyan-500 rounded-full animate-spin" />
-        <span className="ml-2 text-sm text-muted-foreground">Loading files...</span>
+        {[0, 8, 16, 8, 0, 8].map((indent, i) => (
+          <div
+            key={i}
+            className="flex items-center gap-2 py-1.5 pr-2"
+            style={{ paddingLeft: `${8 + indent}px` }}
+          >
+            <Skeleton className="h-4 w-4 shrink-0 rounded" />
+            <Skeleton className={`h-4 ${i % 3 === 0 ? 'w-32' : i % 3 === 1 ? 'w-24' : 'w-40'} max-w-full`} />
+          </div>
+        ))}
       </div>
     );
   }

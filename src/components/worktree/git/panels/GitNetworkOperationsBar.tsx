@@ -21,6 +21,7 @@
 import React, { memo, useEffect, useState } from 'react';
 import type { GitNetworkOperation } from '@/types/git';
 import { useGitPaneContext } from '@/components/worktree/git/GitPaneContext';
+import { Spinner } from '@/components/ui/Spinner';
 
 export interface GitNetworkOperationsBarProps {
   /** 3-value progress state from useGitPaneNetworkOps. */
@@ -135,7 +136,7 @@ export const GitNetworkOperationsBar = memo(function GitNetworkOperationsBar({
           data-testid="git-network-progress-bar"
         >
           <span className="flex items-center gap-2" role="status" data-testid="git-network-operation-spinner">
-            <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-accent-500" aria-hidden="true" />
+            <Spinner size="sm" variant="accent" />
             <span>
               {operation === 'push' ? 'Pushing' : operation === 'pull' ? 'Pulling' : 'Fetching'}… {elapsed}s
             </span>
