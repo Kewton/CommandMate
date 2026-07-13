@@ -67,7 +67,8 @@ describe('MobileHeader', () => {
 
       const indicator = screen.getByTestId('status-indicator');
       expect(indicator).toBeInTheDocument();
-      expect(indicator.className).toMatch(/gray|neutral/);
+      // Issue #1078: unified StatusDot uses the semantic `muted-foreground` token.
+      expect(indicator.className).toMatch(/muted|gray|neutral/);
     });
 
     it('should show running status indicator with animation', () => {
@@ -75,7 +76,9 @@ describe('MobileHeader', () => {
 
       const indicator = screen.getByTestId('status-indicator');
       expect(indicator).toBeInTheDocument();
-      expect(indicator.className).toMatch(/green|animate|pulse/);
+      // Issue #1078: StatusDot running = green glow (animate-status-glow), no spinner.
+      expect(indicator.className).toMatch(/green|success|animate/);
+      expect(indicator.className).not.toContain('animate-spin');
     });
 
     it('should show waiting status indicator', () => {
@@ -83,7 +86,8 @@ describe('MobileHeader', () => {
 
       const indicator = screen.getByTestId('status-indicator');
       expect(indicator).toBeInTheDocument();
-      expect(indicator.className).toMatch(/yellow|amber|waiting/);
+      // Issue #1078: StatusDot waiting = amber (`bg-warning`).
+      expect(indicator.className).toMatch(/warning|yellow|amber/);
     });
 
     it('should show error status indicator', () => {
@@ -91,7 +95,8 @@ describe('MobileHeader', () => {
 
       const indicator = screen.getByTestId('status-indicator');
       expect(indicator).toBeInTheDocument();
-      expect(indicator.className).toMatch(/red|error/);
+      // Issue #1078: StatusDot error = `bg-danger`.
+      expect(indicator.className).toMatch(/danger|red|error/);
     });
 
     it('should have accessible status text', () => {

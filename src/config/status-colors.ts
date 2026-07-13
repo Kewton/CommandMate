@@ -22,7 +22,11 @@ export type SidebarStatusType = BaseStatusType | 'generating';
 /** Extended status types for worktree detail (includes error) */
 export type WorktreeStatusType = BaseStatusType | 'error';
 
-/** Display type for status indicator */
+/**
+ * Display type for status indicator.
+ * @deprecated Issue #1078: `'spinner'` is being retired in favour of the unified
+ * `<StatusDot>` (running = green glow). Only `ReviewTab.tsx` still branches on it.
+ */
 export type StatusDisplayType = 'dot' | 'spinner';
 
 /** Status configuration interface */
@@ -45,7 +49,13 @@ export const STATUS_COLORS = {
   idle: 'bg-gray-500',
   /** Green for ready/active state */
   ready: 'bg-green-500',
-  /** Info (blue) border for spinner states (running/generating); kept distinct from the cyan accent */
+  /**
+   * @deprecated Issue #1078: the blue rotating-ring spinner is being unified
+   * into the single `<StatusDot>` visual language (running = green glow). Kept
+   * only because `ReviewTab.tsx` still consumes the `type: 'spinner'` branch;
+   * remove this constant and the `type: 'spinner'` configs below once that last
+   * consumer migrates to `<StatusDot>`.
+   */
   spinner: 'border-info',
   /** Yellow for waiting state (G1: distinguishes from ready) */
   waiting: 'bg-yellow-500',

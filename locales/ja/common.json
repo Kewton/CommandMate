@@ -1,4 +1,8 @@
 {
+  "sessions": {
+    "idleAgents": "アイドル {count} 件",
+    "activeAgents": "稼働 {count} 件"
+  },
   "cancel": "キャンセル",
   "send": "送信",
   "end": "終了する",

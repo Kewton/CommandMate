@@ -21,6 +21,7 @@ import dynamic from 'next/dynamic';
 import { Loader2, MoreHorizontal } from 'lucide-react';
 import { MobileHeader } from '@/components/mobile/MobileHeader';
 import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
+import { StatusDot } from '@/components/ui/StatusDot';
 import { MobileTabBar } from '@/components/mobile/MobileTabBar';
 import { MobilePromptSheet } from '@/components/mobile/MobilePromptSheet';
 import { MobileTerminalActionsSheet } from '@/components/mobile/MobileTerminalActionsSheet';
@@ -410,7 +411,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               const toolStatus = deriveCliStatus(
                 worktree?.sessionStatusByInstance?.[inst.id] ?? worktree?.sessionStatusByCli?.[inst.cliTool]
               );
-              const statusConfig = SIDEBAR_STATUS_CONFIG[toolStatus];
+              const statusLabel = SIDEBAR_STATUS_CONFIG[toolStatus].label;
               const isActive = activeInstanceId === inst.id;
               return (
                 <button
@@ -423,17 +424,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                   }`}
                   aria-current={isActive ? 'page' : undefined}
                 >
-                  {statusConfig.type === 'spinner' ? (
-                    <span
-                      className={`w-2 h-2 rounded-full flex-shrink-0 border-2 border-t-transparent animate-spin ${statusConfig.className}`}
-                      title={statusConfig.label}
-                    />
-                  ) : (
-                    <span
-                      className={`w-2 h-2 rounded-full flex-shrink-0 ${statusConfig.className}`}
-                      title={statusConfig.label}
-                    />
-                  )}
+                  {/* Issue #1078: unified StatusDot visual language (was blue spinner) */}
+                  <StatusDot status={toolStatus} size="sm" label={`${getInstanceLabel(inst)}: ${statusLabel}`} />
                   {getInstanceLabel(inst)}
                 </button>
               );

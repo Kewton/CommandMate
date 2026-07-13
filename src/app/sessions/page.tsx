@@ -15,10 +15,12 @@
 
 import { useState, useMemo, useCallback } from 'react';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { AppShell } from '@/components/layout';
 import { useWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
 import { deriveCliStatus } from '@/types/sidebar';
+import { isWorkingStatus } from '@/lib/agent-status-display';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
 import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
@@ -32,13 +34,9 @@ import {
   StatusDot,
 } from '@/components/ui';
 import { compareByTimestamp } from '@/lib/sidebar-utils';
-import { formatRelativeTime } from '@/lib/date-utils';
+import { formatRelativeTimeShort } from '@/lib/date-utils';
 import { STAGGER_ENTER_CLASS, staggerDelay } from '@/lib/utils/stagger';
-import {
-  MESSAGE_PREVIEW_MAX_LENGTH_PC,
-  MESSAGE_PREVIEW_MAX_LENGTH_SP,
-  sanitizePreview,
-} from '@/config/message-preview-config';
+import { sanitizePreview } from '@/config/message-preview-config';
 import type { SortKey, SortDirection } from '@/lib/sidebar-utils';
 import type { Worktree } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -118,6 +116,7 @@ const DEFAULT_BADGE_CLASS = 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:tex
 // ============================================================================
 
 export default function SessionsPage() {
+  const tCommon = useTranslations('common');
   const { worktrees, isLoading, error } = useWorktreesCacheContext();
   // [Issue #1050] Whether we have any data to keep mounted. Based on the raw
   // (unfiltered) list so an active text filter never unmounts the list.
@@ -290,8 +289,17 @@ export default function SessionsPage() {
                   ? sanitizePreview(wt.lastUserMessage)
                   : null;
                 const relativeTime = wt.lastUserMessageAt
-                  ? formatRelativeTime(String(wt.lastUserMessageAt))
+                  ? formatRelativeTimeShort(String(wt.lastUserMessageAt))
                   : null;
+                // [Issue #1078] Only actively-working agents (running/waiting)
+                // get a labelled chip; the idle group collapses to a "+N" counter
+                // so a working session is never buried under a row of gray dots.
+                const agentStatuses = agents.map((agent) => ({
+                  agent,
+                  status: deriveCliStatus(wt.sessionStatusByCli?.[agent]),
+                }));
+                const workingAgents = agentStatuses.filter((a) => isWorkingStatus(a.status));
+                const idleCount = agentStatuses.length - workingAgents.length;
                 // [Issue #1051] Active (running) cards get an accent border +
                 // subtle glow so a working session stands out at a glance.
                 const isActive = isWorktreeActive(wt, agents);
@@ -320,19 +328,28 @@ export default function SessionsPage() {
                         </div>
                       </div>
 
-                      {/* Per-agent status dots */}
-                      <div className="flex items-center gap-2 ml-4 flex-shrink-0">
-                        {agents.map((agent) => {
-                          const agentStatus = deriveCliStatus(wt.sessionStatusByCli?.[agent]);
-                          return (
-                            <div key={agent} className="flex items-center gap-1" data-testid={`session-agent-${agent}`}>
-                              <CliDot status={agentStatus} label={getCliToolDisplayName(agent)} />
-                              <span className="text-xs text-gray-500 dark:text-gray-400">
-                                {getCliToolDisplayName(agent)}
-                              </span>
-                            </div>
-                          );
-                        })}
+                      {/* [Issue #1078] Working agents as labelled chips; idle group collapsed */}
+                      <div className="flex items-center gap-2 ml-4 flex-shrink-0" data-testid={`session-agents-${wt.id}`}>
+                        {workingAgents.map(({ agent, status }) => (
+                          <div key={agent} className="flex items-center gap-1" data-testid={`session-agent-${agent}`}>
+                            <CliDot status={status} label={getCliToolDisplayName(agent)} />
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                              {getCliToolDisplayName(agent)}
+                            </span>
+                          </div>
+                        ))}
+                        {idleCount > 0 && (
+                          <div
+                            className="flex items-center gap-1"
+                            data-testid={`session-idle-cluster-${wt.id}`}
+                            aria-label={tCommon('sessions.idleAgents', { count: idleCount })}
+                          >
+                            <StatusDot status="idle" size="sm" aria-hidden title={undefined} />
+                            <span className="text-xs text-gray-400 dark:text-gray-500 tabular-nums">
+                              +{idleCount}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -359,21 +376,18 @@ export default function SessionsPage() {
                     {/* Row 4: Last sent message preview + relative time [Issue #606] */}
                     {sanitizedMessage && (
                       <div className="mt-2 flex items-center gap-2" data-testid={`session-message-${wt.id}`}>
-                        <span className="text-xs text-gray-500 dark:text-gray-400 truncate min-w-0 flex-1">
-                          {/* PC preview (md and above) */}
-                          <span className="hidden md:inline" data-testid={`session-message-pc-${wt.id}`}>
-                            {sanitizedMessage.slice(0, MESSAGE_PREVIEW_MAX_LENGTH_PC)}
-                            {sanitizedMessage.length > MESSAGE_PREVIEW_MAX_LENGTH_PC ? '...' : ''}
-                          </span>
-                          {/* SP preview (below md) */}
-                          <span className="inline md:hidden" data-testid={`session-message-sp-${wt.id}`}>
-                            {sanitizedMessage.slice(0, MESSAGE_PREVIEW_MAX_LENGTH_SP)}
-                            {sanitizedMessage.length > MESSAGE_PREVIEW_MAX_LENGTH_SP ? '...' : ''}
-                          </span>
+                        {/* [Issue #1078] CSS truncate (not char-slice): byte-width is
+                            consistent across JP/EN and adapts to the container width. */}
+                        <span
+                          className="text-xs text-gray-500 dark:text-gray-400 truncate min-w-0 flex-1"
+                          data-testid={`session-message-text-${wt.id}`}
+                          title={sanitizedMessage}
+                        >
+                          {sanitizedMessage}
                         </span>
                         {relativeTime && (
                           <span
-                            className="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0 whitespace-nowrap"
+                            className="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0 whitespace-nowrap tabular-nums"
                             data-testid={`session-time-${wt.id}`}
                           >
                             {relativeTime}
