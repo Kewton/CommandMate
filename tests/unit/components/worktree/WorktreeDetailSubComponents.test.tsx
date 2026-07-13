@@ -16,7 +16,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { DesktopHeader } from '@/components/worktree/WorktreeDetailSubComponents';
 import { AGENT_INSTANCE_DND_MIME } from '@/components/worktree/TerminalSplitPane';
-import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 import {
   getCliToolDisplayName,
   type AgentInstance,
@@ -82,21 +81,28 @@ describe('DesktopHeader per-instance status row (Issue #749 / #869)', () => {
       render(<DesktopHeader {...baseProps} instances={dualClaude} />);
       expect(screen.getByTestId('desktop-agent-status-claude')).toBeDefined();
       expect(screen.getByTestId('desktop-agent-status-claude-2')).toBeDefined();
-      // Each tab is labelled by its alias (not the shared CLI display name).
-      expect(screen.getByText('Primary: Idle')).toBeDefined();
-      expect(screen.getByText('Review: Idle')).toBeDefined();
+      // Issue #1078: idle instances collapse to icon-only dots; the alias label
+      // lives on the button's aria-label (and the hover tooltip), not inline text.
+      expect(screen.getByTestId('desktop-agent-status-claude').getAttribute('aria-label')).toBe(
+        'Primary: Idle'
+      );
+      expect(screen.getByTestId('desktop-agent-status-claude-2').getAttribute('aria-label')).toBe(
+        'Review: Idle'
+      );
     });
   });
 
-  describe('status → dot/spinner class mapping', () => {
-    it('idle → gray dot (no session status entry)', () => {
+  // Issue #1078: the status visual is unified on <StatusDot> (no blue spinner).
+  // running/waiting → glow/blink (working), idle/ready → static dot. No animate-spin.
+  describe('status → StatusDot class mapping (Issue #1078)', () => {
+    it('idle → muted static dot (no session status entry)', () => {
       render(<DesktopHeader {...baseProps} instances={mkInstances(['claude'])} />);
       const span = screen.getByTestId('desktop-agent-status-claude').querySelector('span');
-      expect(span?.className).toContain(SIDEBAR_STATUS_CONFIG.idle.className); // bg-gray-500
+      expect(span?.className).toContain('bg-muted-foreground');
       expect(span?.className).not.toContain('animate-spin');
     });
 
-    it('ready → green dot (isRunning only)', () => {
+    it('ready → success static dot (isRunning only)', () => {
       const sessionStatusByCli: SessionStatusMap = {
         claude: { isRunning: true, isWaitingForResponse: false, isProcessing: false },
       };
@@ -108,11 +114,11 @@ describe('DesktopHeader per-instance status row (Issue #749 / #869)', () => {
         />
       );
       const span = screen.getByTestId('desktop-agent-status-claude').querySelector('span');
-      expect(span?.className).toContain(SIDEBAR_STATUS_CONFIG.ready.className); // bg-green-500
+      expect(span?.className).toContain('bg-success');
       expect(span?.className).not.toContain('animate-spin');
     });
 
-    it('waiting → yellow dot (isWaitingForResponse)', () => {
+    it('waiting → warning dot with blink (isWaitingForResponse)', () => {
       const sessionStatusByCli: SessionStatusMap = {
         claude: { isRunning: true, isWaitingForResponse: true, isProcessing: false },
       };
@@ -124,11 +130,11 @@ describe('DesktopHeader per-instance status row (Issue #749 / #869)', () => {
         />
       );
       const span = screen.getByTestId('desktop-agent-status-claude').querySelector('span');
-      expect(span?.className).toContain(SIDEBAR_STATUS_CONFIG.waiting.className); // bg-yellow-500
+      expect(span?.className).toContain('bg-warning');
       expect(span?.className).not.toContain('animate-spin');
     });
 
-    it('running → blue spinner (isProcessing)', () => {
+    it('running → success dot with glow, NOT a spinner (isProcessing)', () => {
       const sessionStatusByCli: SessionStatusMap = {
         claude: { isRunning: true, isWaitingForResponse: false, isProcessing: true },
       };
@@ -140,8 +146,10 @@ describe('DesktopHeader per-instance status row (Issue #749 / #869)', () => {
         />
       );
       const span = screen.getByTestId('desktop-agent-status-claude').querySelector('span');
-      expect(span?.className).toContain(SIDEBAR_STATUS_CONFIG.running.className); // border-info
-      expect(span?.className).toContain('animate-spin');
+      expect(span?.className).toContain('bg-success');
+      expect(span?.className).toContain('animate-status-glow');
+      expect(span?.className).not.toContain('animate-spin');
+      expect(span?.className).not.toContain('border-info');
     });
   });
 
@@ -223,18 +231,18 @@ describe('DesktopHeader per-instance status row (Issue #749 / #869)', () => {
       );
       const button = screen.getByTestId('desktop-agent-status-claude');
       const iconSpan = button.querySelector('span');
-      // Icon span keeps the status color class (waiting → yellow dot).
-      expect(iconSpan?.className).toContain(SIDEBAR_STATUS_CONFIG.waiting.className);
-      // Issue #751: text is now visible inline, so title is redundant and removed.
+      // Issue #1078: StatusDot waiting uses the semantic `bg-warning` token.
+      expect(iconSpan?.className).toContain('bg-warning');
+      // The decorative StatusDot carries no title/role (the button labels itself).
       expect(iconSpan?.getAttribute('title')).toBeNull();
       expect(iconSpan?.getAttribute('role')).toBeNull();
-      // The button shows the visible inline text.
+      // Working instances stay labelled pills with visible inline text.
       expect(button.textContent).toContain('Claude: Waiting for response');
     });
   });
 
-  describe('Issue #751: inline always-visible agent name + status text', () => {
-    it('renders visible text "Claude: Running" when claude is processing', () => {
+  describe('Issue #1078: working instances labelled, idle collapsed to icon dots', () => {
+    it('renders visible text "Claude: Running" for a working (pill) instance', () => {
       const sessionStatusByCli: SessionStatusMap = {
         claude: { isRunning: true, isWaitingForResponse: false, isProcessing: true },
       };
@@ -248,7 +256,7 @@ describe('DesktopHeader per-instance status row (Issue #749 / #869)', () => {
       expect(screen.getByText('Claude: Running')).toBeDefined();
     });
 
-    it('renders visible text "Codex: Idle" when codex has no session', () => {
+    it('idle instance is icon-only: label on aria-label, NOT visible inline text', () => {
       const sessionStatusByCli: SessionStatusMap = {
         claude: { isRunning: true, isWaitingForResponse: false, isProcessing: true },
       };
@@ -259,18 +267,25 @@ describe('DesktopHeader per-instance status row (Issue #749 / #869)', () => {
           sessionStatusByCli={sessionStatusByCli}
         />
       );
-      expect(screen.getByText('Codex: Idle')).toBeDefined();
+      // Idle codex collapses to an icon-only dot — no inline "Codex: Idle" text.
+      expect(screen.queryByText('Codex: Idle')).toBeNull();
+      expect(screen.getByTestId('desktop-agent-status-codex').getAttribute('aria-label')).toBe(
+        'Codex: Idle'
+      );
     });
 
-    it('does NOT render a Tooltip wrapper (no role="tooltip" on render)', () => {
+    it('idle instance is wrapped in a tooltip, but its content is absent until hover', () => {
       render(
         <DesktopHeader
           {...baseProps}
           instances={mkInstances(['claude', 'codex'])}
         />
       );
-      // Tooltip wrapper removed: no tooltip element should be present without hover.
+      // Idle dots use a hover tooltip for the full label; nothing with
+      // role="tooltip" is present on initial render (no accidental double label).
       expect(screen.queryByRole('tooltip')).toBeNull();
+      const codex = screen.getByTestId('desktop-agent-status-codex');
+      expect(codex.closest('[data-testid="tooltip-wrapper"]')).not.toBeNull();
     });
 
     it('row container uses gap-2 (Issue #751)', () => {
@@ -287,8 +302,8 @@ describe('DesktopHeader per-instance status row (Issue #749 / #869)', () => {
         <DesktopHeader {...baseProps} instances={mkInstances(['claude'])} sessionStatusByCli={{}} />
       );
       let span = screen.getByTestId('desktop-agent-status-claude').querySelector('span');
-      // idle: gray dot, not a spinner
-      expect(span?.className).toContain(SIDEBAR_STATUS_CONFIG.idle.className);
+      // idle: muted static dot, never a spinner
+      expect(span?.className).toContain('bg-muted-foreground');
       expect(span?.className).not.toContain('animate-spin');
 
       // Next poll: claude is now processing → new object identity (memo must re-render).
@@ -299,9 +314,10 @@ describe('DesktopHeader per-instance status row (Issue #749 / #869)', () => {
         <DesktopHeader {...baseProps} instances={mkInstances(['claude'])} sessionStatusByCli={updated} />
       );
       span = screen.getByTestId('desktop-agent-status-claude').querySelector('span');
-      // running: blue spinner
-      expect(span?.className).toContain(SIDEBAR_STATUS_CONFIG.running.className);
-      expect(span?.className).toContain('animate-spin');
+      // running: success dot with glow (unified StatusDot), not a spinner
+      expect(span?.className).toContain('bg-success');
+      expect(span?.className).toContain('animate-status-glow');
+      expect(span?.className).not.toContain('animate-spin');
       expect(screen.getByTestId('desktop-agent-status-claude').getAttribute('aria-label')).toBe(
         'Claude: Running'
       );
@@ -467,12 +483,13 @@ describe('DesktopHeader per-instance status resolution (Issue #875)', () => {
     const primarySpan = screen.getByTestId('desktop-agent-status-claude').querySelector('span');
     const aliasSpan = screen.getByTestId('desktop-agent-status-claude-2').querySelector('span');
 
-    // Primary → idle gray dot, no spinner.
-    expect(primarySpan?.className).toContain(SIDEBAR_STATUS_CONFIG.idle.className);
+    // Primary → idle muted dot, no spinner (Issue #1078 unified StatusDot).
+    expect(primarySpan?.className).toContain('bg-muted-foreground');
     expect(primarySpan?.className).not.toContain('animate-spin');
-    // Alias → running blue spinner.
-    expect(aliasSpan?.className).toContain(SIDEBAR_STATUS_CONFIG.running.className);
-    expect(aliasSpan?.className).toContain('animate-spin');
+    // Alias → running success dot with glow, never a spinner.
+    expect(aliasSpan?.className).toContain('bg-success');
+    expect(aliasSpan?.className).toContain('animate-status-glow');
+    expect(aliasSpan?.className).not.toContain('animate-spin');
   });
 
   it('renders the "End" button for an alias instance whose own session is running', () => {
@@ -526,7 +543,7 @@ describe('DesktopHeader per-instance status resolution (Issue #875)', () => {
     );
     // No sessionStatusByInstance → primary resolves via sessionStatusByCli.
     const span = screen.getByTestId('desktop-agent-status-claude').querySelector('span');
-    expect(span?.className).toContain(SIDEBAR_STATUS_CONFIG.ready.className);
+    expect(span?.className).toContain('bg-success');
     expect(screen.getByTestId('desktop-kill-session')).toBeDefined();
   });
 });
@@ -665,5 +682,138 @@ describe('DesktopHeader agent indicator drag source (Issue #786 / #869)', () => 
       expect(screen.getByTestId('desktop-agent-status-row')).toBeDefined();
       expect(screen.getByTestId('pc-display-size-select')).toBeDefined();
     });
+  });
+});
+
+/**
+ * Issue #1078: idle-noise collapse + "+N" overflow in the desktop agent row.
+ *
+ * - running/waiting (working) or the active instance → labelled pill,
+ * - idle/ready → icon-only dot (label via tooltip / aria-label),
+ * - labelled pills beyond the budget (4) fold into a "+N" overflow menu so a
+ *   working session never gets buried.
+ */
+describe('DesktopHeader agent-row idle collapse + overflow (Issue #1078)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function roster(n: number): AgentInstance[] {
+    return Array.from({ length: n }, (_, i) => ({
+      id: `claude-${i}`,
+      cliTool: 'claude' as CLIToolType,
+      alias: `Agent ${i}`,
+      order: i,
+    }));
+  }
+
+  const running = { isRunning: true, isWaitingForResponse: false, isProcessing: true };
+  const waiting = { isRunning: true, isWaitingForResponse: true, isProcessing: false };
+
+  it('running 1 + idle 5: the running one is labelled, idle stay icon-only, no overflow', () => {
+    const instances = roster(6);
+    const sessionStatusByInstance = { 'claude-0': running } as NonNullable<
+      Worktree['sessionStatusByInstance']
+    >;
+    render(
+      <DesktopHeader
+        {...baseProps}
+        instances={instances}
+        sessionStatusByInstance={sessionStatusByInstance}
+      />
+    );
+    // Working instance is a labelled pill (visible text).
+    expect(screen.getByText('Agent 0: Running')).toBeDefined();
+    // Idle instances are icon-only (no visible "Agent N: Idle" text), but each
+    // is still a reachable button carrying the full label on aria-label.
+    expect(screen.queryByText('Agent 1: Idle')).toBeNull();
+    expect(screen.getByTestId('desktop-agent-status-claude-5').getAttribute('aria-label')).toBe(
+      'Agent 5: Idle'
+    );
+    // Idle dots never overflow — they are narrow.
+    expect(screen.queryByTestId('desktop-agent-status-overflow')).toBeNull();
+  });
+
+  it('all idle: every instance renders as an icon-only dot, no overflow', () => {
+    render(<DesktopHeader {...baseProps} instances={roster(6)} />);
+    for (let i = 0; i < 6; i += 1) {
+      expect(screen.getByTestId(`desktop-agent-status-claude-${i}`)).toBeDefined();
+      expect(screen.queryByText(`Agent ${i}: Idle`)).toBeNull();
+    }
+    expect(screen.queryByTestId('desktop-agent-status-overflow')).toBeNull();
+  });
+
+  it('6 all working: keeps 4 pills inline and folds the remaining 2 into "+N"', () => {
+    const instances = roster(6);
+    const sessionStatusByInstance = Object.fromEntries(
+      instances.map((inst) => [inst.id, running])
+    ) as NonNullable<Worktree['sessionStatusByInstance']>;
+    render(
+      <DesktopHeader
+        {...baseProps}
+        instances={instances}
+        sessionStatusByInstance={sessionStatusByInstance}
+      />
+    );
+    // First 4 remain inline as pills.
+    for (let i = 0; i < 4; i += 1) {
+      expect(screen.getByTestId(`desktop-agent-status-claude-${i}`)).toBeDefined();
+    }
+    // The rest collapse into a "+2" overflow trigger (closed menu → not inline).
+    const overflow = screen.getByTestId('desktop-agent-status-overflow');
+    expect(overflow.textContent).toContain('+2');
+    expect(screen.queryByTestId('desktop-agent-status-claude-5')).toBeNull();
+    // Issue #1078: folded working sessions still surface the living glow so a
+    // running instance stays visible at a glance even when collapsed.
+    const overflowDot = overflow.querySelector('span');
+    expect(overflowDot?.className).toContain('bg-success');
+    expect(overflowDot?.className).toContain('animate-status-glow');
+    // Token discipline: the trigger uses semantic tokens, not raw grays.
+    expect(overflow.className).toContain('text-muted-foreground');
+    expect(overflow.className).toContain('hover:bg-muted');
+    expect(overflow.className).not.toMatch(/text-gray-|bg-gray-/);
+  });
+
+  it('overflow with only waiting sessions surfaces the amber (waiting) glow', () => {
+    const instances = roster(6);
+    const sessionStatusByInstance = Object.fromEntries(
+      instances.map((inst) => [inst.id, waiting])
+    ) as NonNullable<Worktree['sessionStatusByInstance']>;
+    render(
+      <DesktopHeader
+        {...baseProps}
+        instances={instances}
+        sessionStatusByInstance={sessionStatusByInstance}
+      />
+    );
+    const overflow = screen.getByTestId('desktop-agent-status-overflow');
+    const overflowDot = overflow.querySelector('span');
+    expect(overflowDot?.className).toContain('bg-warning');
+    expect(overflowDot?.className).toContain('animate-status-blink');
+  });
+
+  it('overflow prefers a running glow over a waiting one when both are folded', () => {
+    // First 4 (waiting) stay as pills; positions 4-5 (running, waiting) overflow.
+    const instances = roster(6);
+    const sessionStatusByInstance = {
+      'claude-0': waiting,
+      'claude-1': waiting,
+      'claude-2': waiting,
+      'claude-3': waiting,
+      'claude-4': running,
+      'claude-5': waiting,
+    } as NonNullable<Worktree['sessionStatusByInstance']>;
+    render(
+      <DesktopHeader
+        {...baseProps}
+        instances={instances}
+        sessionStatusByInstance={sessionStatusByInstance}
+      />
+    );
+    const overflow = screen.getByTestId('desktop-agent-status-overflow');
+    const overflowDot = overflow.querySelector('span');
+    // Running is folded → green glow wins over the folded waiting instance.
+    expect(overflowDot?.className).toContain('bg-success');
+    expect(overflowDot?.className).toContain('animate-status-glow');
   });
 });

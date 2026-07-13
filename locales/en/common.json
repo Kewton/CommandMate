@@ -1,4 +1,8 @@
 {
+  "sessions": {
+    "idleAgents": "{count} idle",
+    "activeAgents": "{count} active"
+  },
   "cancel": "Cancel",
   "send": "Send",
   "end": "End",

@@ -1,4 +1,8 @@
 {
+  "agentStatus": {
+    "moreAgents": "他 {count} 件のエージェント",
+    "overflowTrigger": "他のエージェント"
+  },
   "toc": {
     "title": "目次",
     "show": "目次を表示",
