@@ -85,8 +85,8 @@ function DefaultErrorFallback({
   const tCommon = useTranslations('common');
 
   return (
-    <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-      <div className="flex items-center gap-2 text-red-800 mb-2">
+    <div className="p-4 bg-danger-subtle border border-danger-border rounded-lg">
+      <div className="flex items-center gap-2 text-danger-foreground mb-2">
         <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
           <path
             fillRule="evenodd"
@@ -99,12 +99,12 @@ function DefaultErrorFallback({
         </span>
       </div>
       {error && (
-        <p className="text-sm text-red-600 mb-3">{error.message}</p>
+        <p className="text-sm text-danger-foreground/80 mb-3">{error.message}</p>
       )}
       {onRetry && (
         <button
           onClick={onRetry}
-          className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors text-sm"
+          className="px-4 py-2 bg-danger-foreground text-danger-subtle rounded hover:opacity-90 transition-opacity text-sm"
         >
           {tCommon('retry')}
         </button>

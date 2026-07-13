@@ -44,7 +44,7 @@ describe('Toast Component', () => {
   });
 
   describe('Toast rendering', () => {
-    it('should render success toast with green styling', () => {
+    it('should render success toast with success tint styling', () => {
       const mockOnClose = vi.fn();
       render(
         <Toast
@@ -58,10 +58,12 @@ describe('Toast Component', () => {
       const toast = screen.getByTestId('toast-test-1');
       expect(toast).toBeInTheDocument();
       expect(toast).toHaveTextContent('Success message');
-      expect(toast).toHaveClass('bg-green-50');
+      expect(toast).toHaveClass('bg-success-subtle');
+      expect(toast).toHaveClass('border-success-border');
+      expect(toast).toHaveClass('text-success-foreground');
     });
 
-    it('should render error toast with red styling', () => {
+    it('should render error toast with danger tint styling', () => {
       const mockOnClose = vi.fn();
       render(
         <Toast
@@ -75,10 +77,31 @@ describe('Toast Component', () => {
       const toast = screen.getByTestId('toast-test-2');
       expect(toast).toBeInTheDocument();
       expect(toast).toHaveTextContent('Error message');
-      expect(toast).toHaveClass('bg-red-50');
+      expect(toast).toHaveClass('bg-danger-subtle');
+      expect(toast).toHaveClass('border-danger-border');
+      expect(toast).toHaveClass('text-danger-foreground');
     });
 
-    it('should render info toast with cyan styling', () => {
+    it('should render warning toast with warning tint styling', () => {
+      const mockOnClose = vi.fn();
+      render(
+        <Toast
+          id="test-4"
+          message="Warning message"
+          type="warning"
+          onClose={mockOnClose}
+        />
+      );
+
+      const toast = screen.getByTestId('toast-test-4');
+      expect(toast).toBeInTheDocument();
+      expect(toast).toHaveTextContent('Warning message');
+      expect(toast).toHaveClass('bg-warning-subtle');
+      expect(toast).toHaveClass('border-warning-border');
+      expect(toast).toHaveClass('text-warning-foreground');
+    });
+
+    it('should render info toast with info tint styling', () => {
       const mockOnClose = vi.fn();
       render(
         <Toast
@@ -92,7 +115,9 @@ describe('Toast Component', () => {
       const toast = screen.getByTestId('toast-test-3');
       expect(toast).toBeInTheDocument();
       expect(toast).toHaveTextContent('Info message');
-      expect(toast).toHaveClass('bg-accent-50');
+      expect(toast).toHaveClass('bg-info-subtle');
+      expect(toast).toHaveClass('border-info-border');
+      expect(toast).toHaveClass('text-info-foreground');
     });
 
     it('should display success icon for success toast', () => {

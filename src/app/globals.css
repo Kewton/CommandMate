@@ -55,6 +55,28 @@
     --info: 59 130 246; /* blue-500 */
 
     /*
+     * [Issue #1112] Status tint scale (subtle wash / hairline border / text-and-
+     * icon foreground) for alert surfaces — Toast, error fallbacks, PromptPanel.
+     * Light pairs a *-50 wash with a *-800 foreground; every foreground clears
+     * WCAG AA (>=4.5:1) on its subtle wash (success 7.7:1, warning 8.0:1,
+     * danger 7.7:1, info 9.4:1). Solid action buttons inside a tinted surface
+     * invert the pair (bg = foreground token, text = subtle token) so they stay
+     * AA in both modes. See docs/design-system.md.
+     */
+    --success-subtle: 240 253 244; /* green-50 */
+    --success-border: 187 247 208; /* green-200 */
+    --success-foreground: 22 101 52; /* green-800 */
+    --warning-subtle: 255 251 235; /* amber-50 */
+    --warning-border: 253 230 138; /* amber-200 */
+    --warning-foreground: 146 64 14; /* amber-800 */
+    --danger-subtle: 254 242 242; /* red-50 */
+    --danger-border: 254 202 202; /* red-200 */
+    --danger-foreground: 153 27 27; /* red-800 */
+    --info-subtle: 239 246 255; /* blue-50 */
+    --info-border: 191 219 254; /* blue-200 */
+    --info-foreground: 30 64 175; /* blue-800 */
+
+    /*
      * [Issue #1073] Sidebar surface tokens. STANDALONE literal RGB values — they
      * intentionally do NOT reference --surface via var(), so #1074's light
      * --surface ladder revision cannot bleed into the sidebar color. Theme-
@@ -107,6 +129,26 @@
     --warning: 245 158 11; /* amber-500 */
     --danger: 239 68 68; /* red-500 */
     --info: 59 130 246; /* blue-500 */
+
+    /*
+     * [Issue #1112] Status tint scale, dark values. Low-saturation *-950
+     * surfaces sit inside the #0a0c12 -> #141821 elevation ladder (no glowing
+     * alert slabs); *-300 foregrounds follow the Badge dark-foreground
+     * convention and clear WCAG AA with margin on their subtle wash
+     * (success 11.3:1, warning 9.4:1, danger 8.6:1, info 8.7:1).
+     */
+    --success-subtle: 5 46 22; /* green-950 */
+    --success-border: 22 101 52; /* green-800 */
+    --success-foreground: 134 239 172; /* green-300 */
+    --warning-subtle: 69 26 3; /* amber-950 */
+    --warning-border: 146 64 14; /* amber-800 */
+    --warning-foreground: 252 211 77; /* amber-300 */
+    --danger-subtle: 69 10 10; /* red-950 */
+    --danger-border: 153 27 27; /* red-800 */
+    --danger-foreground: 252 165 165; /* red-300 */
+    --info-subtle: 23 37 84; /* blue-950 */
+    --info-border: 30 64 175; /* blue-800 */
+    --info-foreground: 147 197 253; /* blue-300 */
 
     /* [Issue #1073] Sidebar surface tokens (see :root note). Dark values match
        the #1049 elevation ladder so the sidebar lifts subtly above the base. */

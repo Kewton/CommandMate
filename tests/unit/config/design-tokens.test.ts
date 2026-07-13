@@ -122,10 +122,12 @@ describe('Design tokens (Issue #1041)', () => {
       expect(colors.border).toBe('rgb(var(--border) / <alpha-value>)');
       expect(colors.input).toBe('rgb(var(--input) / <alpha-value>)');
       expect(colors.ring).toBe('rgb(var(--ring) / <alpha-value>)');
-      expect(colors.success).toBe('rgb(var(--success) / <alpha-value>)');
-      expect(colors.warning).toBe('rgb(var(--warning) / <alpha-value>)');
-      expect(colors.danger).toBe('rgb(var(--danger) / <alpha-value>)');
-      expect(colors.info).toBe('rgb(var(--info) / <alpha-value>)');
+      // [Issue #1112] status colors became nested scales (DEFAULT + tint roles);
+      // the DEFAULT keeps `text-success` etc. working unchanged.
+      for (const status of ['success', 'warning', 'danger', 'info']) {
+        const scale = colors[status] as Record<string, string>;
+        expect(scale.DEFAULT).toBe(`rgb(var(--${status}) / <alpha-value>)`);
+      }
     });
 
     it('registers nested surface/muted/accent scales', () => {
