@@ -24,7 +24,7 @@
  * coupling via a minimal DTO/projection type.
  */
 
-import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN, CODEX_PAGER_FOOTER_PATTERN, CLAUDE_INTERRUPT_HINT_PATTERN, ANTIGRAVITY_SELECTION_LIST_PATTERN } from './cli-patterns';
+import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN, CODEX_PAGER_FOOTER_PATTERN, CODEX_STATUS_BAR_PATTERN, CLAUDE_INTERRUPT_HINT_PATTERN, ANTIGRAVITY_SELECTION_LIST_PATTERN } from './cli-patterns';
 import { detectPrompt } from './prompt-detector';
 import type { PromptDetectionResult } from './prompt-detector';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -264,10 +264,11 @@ export function detectSessionStatus(
   // would allow stale "Press enter to confirm" text from already-answered approval
   // prompts high in scrollback to falsely trigger NavigationButtons.
   if (cliToolId === 'codex') {
-    const codexStatusBarPattern = /^\s*\S+.*\d+%\s+left\s+·/;
+    // Issue #1150: locate the status bar via CODEX_STATUS_BAR_PATTERN (version-
+    // independent; matches both legacy "N% left ·" and v0.141 "model · path" bars).
     let codexFooterBoundary = -1;
     for (let ci = contentLines.length - 1; ci >= Math.max(0, contentLines.length - 10); ci--) {
-      if (codexStatusBarPattern.test(contentLines[ci])) {
+      if (CODEX_STATUS_BAR_PATTERN.test(contentLines[ci])) {
         codexFooterBoundary = ci;
         break;
       }
@@ -496,11 +497,15 @@ export function detectSessionStatus(
   // A. Thinking indicators (• Ran, • Planning) in the conversation area → should show spinner
   // B. Idle prompt (›) at the end of the conversation area → should show ready
   // Strategy: find the Codex status bar, extract content above it, then check for thinking/idle.
+  //
+  // Issue #1150: the status-bar pattern was relaxed (CODEX_STATUS_BAR_PATTERN) so it
+  // matches v0.141's "model · path" bar (no "N% left ·"). Without this, codexFooterBoundary
+  // stayed -1, this whole block was skipped, and generating sessions fell through to the
+  // input-prompt check below and were misreported as `ready` (static dot, no glow).
   if (cliToolId === 'codex') {
-    const codexStatusBarPattern = /^\s*\S+.*\d+%\s+left\s+·/;
     let codexFooterBoundary = -1;
     for (let ci = contentLines.length - 1; ci >= Math.max(0, contentLines.length - 10); ci--) {
-      if (codexStatusBarPattern.test(contentLines[ci])) {
+      if (CODEX_STATUS_BAR_PATTERN.test(contentLines[ci])) {
         codexFooterBoundary = ci;
         break;
       }
@@ -549,6 +554,29 @@ export function detectSessionStatus(
         // • Ran/• Working indicators beyond the 5-line thinking window.
         // The status bar ("model · N% left · path") is always visible during Codex
         // sessions, and the only idle state (›) was checked in B above.
+        return {
+          status: 'running',
+          confidence: 'high',
+          reason: 'thinking_indicator',
+          hasActivePrompt: false,
+          promptDetection,
+        };
+      }
+    } else {
+      // D. Status-bar-independent running detection (Issue #1150, mitigation B).
+      // Defense-in-depth for the next Codex CLI status-bar format drift: if the bar
+      // can't be located (the exact failure that broke Issue #1150), fall back to the
+      // Codex thinking indicator in the wider 15-line footer window — mirroring
+      // Claude's priority 2.6 interrupt-hint net. Gated so idle frames are unaffected:
+      // only fires when the tail is NOT the idle › prompt, so an idle session still
+      // falls through to the 'ready' input-prompt check at step 3.
+      let codexTailIdx = contentLines.length - 1;
+      while (codexTailIdx >= 0 && contentLines[codexTailIdx].trim() === '') {
+        codexTailIdx--;
+      }
+      const codexTailIsIdlePrompt =
+        codexTailIdx >= 0 && CODEX_PROMPT_PATTERN.test(contentLines[codexTailIdx].trim());
+      if (!codexTailIsIdlePrompt && detectThinking('codex', lastLines)) {
         return {
           status: 'running',
           confidence: 'high',
