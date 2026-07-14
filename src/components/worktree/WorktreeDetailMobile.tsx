@@ -220,6 +220,8 @@ const MobileTerminalTab = memo(function MobileTerminalTab({
   disableAutoFollow?: boolean;
 }) {
   const { terminal, setAutoScroll } = useTerminalPanePolling({ worktreeId, cliToolId, instanceId });
+  // Issue #1172: compact the 1000-row layout padding for Claude/Codex (display only).
+  const compactTuiLayoutPadding = cliToolId === 'claude' || cliToolId === 'codex';
   return (
     <TerminalDisplay
       output={terminal.output}
@@ -228,6 +230,7 @@ const MobileTerminalTab = memo(function MobileTerminalTab({
       autoScroll={terminal.autoScroll}
       onScrollChange={setAutoScroll}
       disableAutoFollow={disableAutoFollow}
+      compactTuiLayoutPadding={compactTuiLayoutPadding}
       className="h-full"
     />
   );
