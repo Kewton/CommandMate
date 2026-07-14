@@ -13,6 +13,7 @@ import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { RadioGroup, RadioGroupItem, Spinner } from '@/components/ui';
 import { usePromptAnimation } from '@/hooks/usePromptAnimation';
 import { useFocusTrap } from '@/hooks/useFocusTrap';
+import { useSwipeGesture } from '@/hooks/useSwipeGesture';
 
 /** Animation duration for sheet transitions */
 const ANIMATION_DURATION_MS = 300;
@@ -70,15 +71,19 @@ export const MobilePromptSheet = memo(function MobilePromptSheet({
   });
   const labelId = useId();
 
+  const isActive = visible && promptData !== null;
+
   // [Issue #1127] Trap keyboard focus within the sheet while it is the active
   // modal surface (Tab cycling + focus restore); shares the single useFocusTrap
   // implementation with ui/Modal. The ref doubles as the sheet element ref.
   const sheetRef = useFocusTrap<HTMLDivElement>({
-    active: visible && promptData !== null,
+    active: isActive,
   });
 
-  // Swipe handling state
-  const [touchStartY, setTouchStartY] = useState<number | null>(null);
+  // Swipe-to-dismiss (Issue #1128): unified on the shared useSwipeGesture hook
+  // (was an ad-hoc touch handler). Vertical axis + direction lock keeps a
+  // horizontal drag from dismissing; onSwipeMove drives the finger-follow
+  // translate, and a downward swipe past the threshold dismisses.
   const [translateY, setTranslateY] = useState(0);
 
   // Reset translate when visibility changes
@@ -88,38 +93,37 @@ export const MobilePromptSheet = memo(function MobilePromptSheet({
     }
   }, [visible]);
 
-  /**
-   * Handle touch start
-   */
-  const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    setTouchStartY(e.touches[0].clientY);
+  const handleSwipeMove = useCallback(({ deltaY }: { deltaX: number; deltaY: number }) => {
+    // Only follow downward drags (positive delta).
+    setTranslateY(deltaY > 0 ? deltaY : 0);
   }, []);
 
-  /**
-   * Handle touch move
-   */
-  const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    if (touchStartY === null) return;
+  const handleSwipeDismiss = useCallback(() => {
+    onDismiss?.();
+  }, [onDismiss]);
 
-    const currentY = e.touches[0].clientY;
-    const deltaY = currentY - touchStartY;
-
-    // Only allow swiping down (positive delta)
-    if (deltaY > 0) {
-      setTranslateY(deltaY);
-    }
-  }, [touchStartY]);
-
-  /**
-   * Handle touch end
-   */
-  const handleTouchEnd = useCallback(() => {
-    if (translateY > SWIPE_DISMISS_THRESHOLD && onDismiss) {
-      onDismiss();
-    }
+  const handleSwipeEnd = useCallback(() => {
     setTranslateY(0);
-    setTouchStartY(null);
-  }, [translateY, onDismiss]);
+  }, []);
+
+  const { ref: swipeRef } = useSwipeGesture({
+    axis: 'vertical',
+    threshold: SWIPE_DISMISS_THRESHOLD,
+    enabled: isActive,
+    onSwipeMove: handleSwipeMove,
+    onSwipeDown: handleSwipeDismiss,
+    onSwipeEnd: handleSwipeEnd,
+  });
+
+  // Merge the focus-trap container ref (#1127) with the swipe ref (#1128) onto
+  // the single sheet element without disturbing either hook's contract.
+  const setSheetRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      (sheetRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+      (swipeRef as React.MutableRefObject<HTMLElement | null>).current = el;
+    },
+    [sheetRef, swipeRef]
+  );
 
   /**
    * Handle overlay click
@@ -162,15 +166,12 @@ export const MobilePromptSheet = memo(function MobilePromptSheet({
 
       {/* Sheet */}
       <div
-        ref={sheetRef}
+        ref={setSheetRef}
         data-testid="mobile-prompt-sheet"
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelId}
         onClick={handleSheetClick}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
         style={{ transform: sheetTransform }}
         className={`fixed bottom-0 inset-x-0 bg-surface rounded-t-2xl z-50 pb-safe transform transition-transform duration-300 ${sheetAnimation}`}
       >
@@ -446,6 +447,9 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
             onChange={(e) => onTextInputChange(e.target.value)}
             disabled={disabled}
             placeholder={t('enterValuePlaceholder')}
+            // Issue #1128: mobile keyboard hints for the custom-value field.
+            inputMode="text"
+            enterKeyHint="done"
             className="w-full px-4 py-3 border-2 border-input rounded-lg bg-surface text-foreground focus:outline-none focus:border-ring disabled:opacity-50"
           />
         </div>

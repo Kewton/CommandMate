@@ -907,4 +907,63 @@ describe('MessageInput', () => {
       });
     });
   });
+
+  // ===== Keyboard follow (Issue #1128) =====
+
+  describe('Keyboard follow (Issue #1128)', () => {
+    const originalVisualViewport = window.visualViewport;
+
+    afterEach(() => {
+      Object.defineProperty(window, 'visualViewport', {
+        value: originalVisualViewport,
+        configurable: true,
+        writable: true,
+      });
+    });
+
+    /** Mock a visualViewport shrunk by `heightDiff` (i.e. keyboard height). */
+    function mockKeyboard(heightDiff: number) {
+      Object.defineProperty(window, 'visualViewport', {
+        value: {
+          height: window.innerHeight - heightDiff,
+          width: 375,
+          offsetTop: 0,
+          offsetLeft: 0,
+          pageTop: 0,
+          pageLeft: 0,
+          scale: 1,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        },
+        configurable: true,
+        writable: true,
+      });
+    }
+
+    it('translates the composer up by the keyboard height when keyboardAware', () => {
+      mockKeyboard(300);
+      render(<MessageInput {...defaultProps} keyboardAware />);
+
+      const container = screen.getByTestId('message-input-container');
+      expect(container.style.transform).toBe('translateY(-300px)');
+    });
+
+    it('does not translate when keyboardAware is off', () => {
+      mockKeyboard(300);
+      render(<MessageInput {...defaultProps} />);
+
+      const container = screen.getByTestId('message-input-container');
+      expect(container.style.transform).toBe('');
+    });
+
+    it('does not translate when the keyboard is hidden', () => {
+      // Below the 100px keyboard threshold → treated as no keyboard.
+      mockKeyboard(0);
+      render(<MessageInput {...defaultProps} keyboardAware />);
+
+      const container = screen.getByTestId('message-input-container');
+      expect(container.style.transform).toBe('');
+    });
+  });
 });

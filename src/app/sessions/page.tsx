@@ -18,6 +18,8 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { AppShell } from '@/components/layout';
+import { PullToRefresh } from '@/components/common/PullToRefresh';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import { useWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
 import { deriveCliStatus } from '@/types/sidebar';
 import { isWorkingStatus } from '@/lib/agent-status-display';
@@ -118,7 +120,8 @@ const DEFAULT_BADGE_CLASS = 'bg-muted text-muted-foreground';
 
 export default function SessionsPage() {
   const tCommon = useTranslations('common');
-  const { worktrees, isLoading, error } = useWorktreesCacheContext();
+  const isMobile = useIsMobile();
+  const { worktrees, isLoading, error, refresh } = useWorktreesCacheContext();
   // [Issue #1050] Whether we have any data to keep mounted. Based on the raw
   // (unfiltered) list so an active text filter never unmounts the list.
   const hasWorktrees = worktrees.length > 0;
@@ -206,7 +209,14 @@ export default function SessionsPage() {
 
   return (
     <AppShell>
-      <div className="container-custom py-8 overflow-auto h-full">
+      {/* Issue #1128: pull-to-refresh (mobile) — the wrapper owns the scroll
+          container so the gesture only fires at the top and native PTR is
+          suppressed. `refresh` re-fetches the shared worktrees cache. */}
+      <PullToRefresh
+        onRefresh={refresh}
+        enabled={isMobile}
+        className="container-custom py-8 h-full"
+      >
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-foreground mb-2">Sessions</h1>
           <p className="text-sm text-muted-foreground">
@@ -224,6 +234,9 @@ export default function SessionsPage() {
             className="max-w-md flex-1"
             data-testid="sessions-filter"
             aria-label="Filter sessions by name or repository"
+            // Issue #1128: surface the search keyboard + "search" enter key on mobile.
+            inputMode="search"
+            enterKeyHint="search"
           />
           <Select value={sortKey} onValueChange={handleSortKeyChange}>
             <SelectTrigger
@@ -447,7 +460,7 @@ export default function SessionsPage() {
             )}
           </>
         )}
-      </div>
+      </PullToRefresh>
     </AppShell>
   );
 }
