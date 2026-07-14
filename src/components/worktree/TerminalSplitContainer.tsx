@@ -96,6 +96,26 @@ export interface TerminalSplitContainerProps {
    * instance to the drop target split. Fires only when the change is applied.
    */
   onActiveInstanceChange?: (instanceId: string) => void;
+  /**
+   * Issue #1152: a header-initiated instance selection to route into the PRIMARY
+   * split (split 0), wiring the DesktopHeader instance switcher to the terminal
+   * that actually polls output / sends messages.
+   *
+   * Distinct from `onActiveInstanceChange` (which flows split→active): this flows
+   * header→split. It is a token-stamped object rather than a bare instanceId so
+   * the container applies it exactly ONCE per header click — the many OTHER
+   * mutations of the worktree-global `activeInstanceId` (the split 0→active
+   * mirror, drag-drop, roster reconcile, localStorage restore) must NOT reassign
+   * a split, and a value-watching effect could not tell those apart. The parent
+   * bumps `token` on every pill click; the container ignores repeats.
+   *
+   * Collision policy (S1-002 preserved — an instance never occupies two splits):
+   * when the selected instance is already shown in ANOTHER split, focus moves to
+   * that split (focus-move) instead of reassigning — non-destructive, and it
+   * satisfies the user's intent to interact with that instance. When it is shown
+   * nowhere, it is bound to split 0. When split 0 already shows it, it is a no-op.
+   */
+  headerInstanceSelection?: { instanceId: string; token: number } | null;
 }
 
 export const TerminalSplitContainer = memo(function TerminalSplitContainer({
@@ -106,6 +126,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   onFocusedSplitChange,
   showToast,
   onActiveInstanceChange,
+  headerInstanceSelection,
 }: TerminalSplitContainerProps) {
   const {
     splits,
@@ -160,6 +181,42 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   useEffect(() => {
     onFocusedSplitChange?.(focusedSplitIndex);
   }, [focusedSplitIndex, onFocusedSplitChange]);
+
+  /**
+   * Issue #1152: apply a header-initiated instance selection to the PRIMARY
+   * split, wiring the header instance switcher to the terminal that actually
+   * polls output / sends messages. Gated on `token` (not the instanceId) so it
+   * runs exactly once per header click and never fires on mount, roster
+   * reconcile, localStorage restore, the split 0→active mirror, or a drop — all
+   * of which mutate the shared `activeInstanceId` but must NOT reassign a split.
+   *
+   * `splits` is intentionally omitted from the deps: only a NEW token should
+   * trigger this. The classification reads the latest `splits` through a ref so a
+   * stale closure cannot mis-target the primary split.
+   */
+  const lastHeaderTokenRef = useRef(0);
+  const splitsRef = useRef(splits);
+  splitsRef.current = splits;
+  useEffect(() => {
+    if (!headerInstanceSelection) return;
+    if (headerInstanceSelection.token === lastHeaderTokenRef.current) return;
+    lastHeaderTokenRef.current = headerInstanceSelection.token;
+    const { instanceId } = headerInstanceSelection;
+    const current = splitsRef.current;
+    const shownIdx = current.findIndex((s) => s.instanceId === instanceId);
+    if (shownIdx === 0) return; // primary split already shows it — no-op
+    if (shownIdx > 0) {
+      // Collision (S1-002): the instance already occupies another split. Surface
+      // that split (focus-move) instead of duplicating/reassigning it.
+      setFocusedSplitIndex(shownIdx);
+      return;
+    }
+    // Not shown anywhere → bind it to the primary split (split 0), symmetric with
+    // the existing split 0→active mirror. Focus the primary split on success.
+    if (setSplitInstance(0, instanceId)) {
+      setFocusedSplitIndex(0);
+    }
+  }, [headerInstanceSelection, setSplitInstance, setFocusedSplitIndex]);
 
   // After lastAddedIndex changes, focus the textarea in that pane.
   useEffect(() => {
