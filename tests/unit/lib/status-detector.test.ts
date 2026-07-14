@@ -770,4 +770,116 @@ describe('status-detector', () => {
       expect(result.reason).toBe('input_prompt');
     });
   });
+
+  // =========================================================================
+  // Issue #1160: Codex answered-approval-prompt staleness
+  //
+  // Codex keeps the answered "1. Yes / 2. No" block + "press number to confirm"
+  // footer in its transcript (historyLimit 50000) instead of repainting it away
+  // like Claude. detectPrompt()'s 50-line window then keeps matching that dead
+  // prompt, so priority-1 returned `waiting` even after the user answered and Codex
+  // resumed — the sidebar status dot stayed orange forever (the reported bug).
+  //
+  // The position guard treats the prompt as active only when it is the bottom-most
+  // interactive element: if a Codex thinking indicator (• Working / • Ran) sits below
+  // the prompt block, the prompt is stale and status detection falls through to the
+  // running/idle check. Unanswered prompts (nothing running below) still wait, so
+  // Auto-Yes is unaffected.
+  // =========================================================================
+  describe('Issue #1160: Codex answered approval prompt staleness', () => {
+    // Codex TUI: conversation content (top) | ~10 empty padding lines | status bar.
+    const codexFrame = (contentLines: string[], statusBar: string): string =>
+      [...contentLines, ...Array(10).fill(''), statusBar].join('\n');
+    const V0141_BAR = 'gpt-5.5 xhigh · ~/share/work/github_kewton/commandmate-issue-947';
+
+    const APPROVAL_BLOCK = [
+      'Allow Codex to run `rm -rf build`?',
+      '',
+      '1. Yes',
+      '2. No, and tell Codex what to do differently',
+      'press number to confirm · esc to cancel',
+    ];
+
+    it('answered approval + processing below → running (not the stale waiting)', () => {
+      // The • Ran indicator sits directly below the answered block: the prompt is
+      // stale scrollback, so the guard falls through to the running detection.
+      const output = codexFrame([...APPROVAL_BLOCK, '• Ran rm -rf build'], V0141_BAR);
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('running');
+      expect(result.confidence).toBe('high');
+      expect(result.reason).toBe('thinking_indicator');
+      expect(result.hasActivePrompt).toBe(false);
+      // Neutralized so Auto-Yes / the sidebar never act on the dead prompt
+      // (hasActivePrompt === promptDetection.isPrompt invariant).
+      expect(result.promptDetection.isPrompt).toBe(false);
+    });
+
+    it('answered approval + thinking indicator beyond the 5-line window → running (fallback C)', () => {
+      // The • Working indicator is pushed above the narrow 5-line thinking window by
+      // trailing command output, but the position guard still sees it below the prompt
+      // block, so the prompt is treated as stale and priority-2.7 fallback C runs.
+      const output = codexFrame(
+        [
+          ...APPROVAL_BLOCK,
+          '• Working (running the build)',
+          'compiling module a',
+          'compiling module b',
+          'compiling module c',
+          'compiling module d',
+          'compiling module e',
+        ],
+        V0141_BAR
+      );
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('running');
+      expect(result.reason).toBe('thinking_indicator');
+      expect(result.hasActivePrompt).toBe(false);
+      expect(result.promptDetection.isPrompt).toBe(false);
+    });
+
+    it('unanswered approval (nothing running below) → waiting (Auto-Yes preserved)', () => {
+      // No running indicator below the block: the prompt is the bottom-most element,
+      // so it must still be reported as waiting — the over-fix guardrail.
+      const output = codexFrame(APPROVAL_BLOCK, V0141_BAR);
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('waiting');
+      expect(result.confidence).toBe('high');
+      expect(result.reason).toBe('prompt_detected');
+      expect(result.hasActivePrompt).toBe(true);
+      expect(result.promptDetection.isPrompt).toBe(true);
+    });
+
+    it('answered approval + bare › input line below → running (detectPrompt barrier)', () => {
+      // A bare › below the answered block trips detectPrompt()'s user-input barrier
+      // (isPrompt=false) before the guard runs; Codex is still working, so the frame
+      // resolves to running rather than sticking at waiting.
+      const output = codexFrame(
+        [...APPROVAL_BLOCK, '›', '• Working (deciding next step)'],
+        V0141_BAR
+      );
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('running');
+      expect(result.reason).toBe('thinking_indicator');
+      expect(result.hasActivePrompt).toBe(false);
+      expect(result.promptDetection.isPrompt).toBe(false);
+    });
+
+    it('does not regress a genuine numbered prompt when a stale • Ran sits ABOVE it', () => {
+      // A leftover • Ran from a prior command above the current prompt block must not
+      // make the active prompt look stale (thinking is above, not below, the block).
+      const output = codexFrame(
+        ['• Ran npm test', 'All tests passed', '', ...APPROVAL_BLOCK],
+        V0141_BAR
+      );
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('waiting');
+      expect(result.reason).toBe('prompt_detected');
+      expect(result.hasActivePrompt).toBe(true);
+    });
+  });
 });
