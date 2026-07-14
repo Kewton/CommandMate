@@ -9,11 +9,14 @@
 'use client';
 
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { AppShell } from '@/components/layout';
 import { Card } from '@/components/ui';
 import { ExternalAppsManager } from '@/components/external-apps';
+import { NotificationsSettings } from '@/components/notifications';
 
 export default function MorePage() {
+  const tNotifications = useTranslations('notifications');
   return (
     <AppShell>
       <div className="container-custom py-8 overflow-auto h-full">
@@ -39,6 +42,12 @@ export default function MorePage() {
               </Card>
             </Link>
           </div>
+        </div>
+
+        {/* Notifications */}
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold mb-4 text-foreground">{tNotifications('title')}</h2>
+          <NotificationsSettings />
         </div>
 
         {/* External Apps */}
