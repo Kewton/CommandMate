@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
 import { createLogger } from '@/lib/logger';
 import { TmuxControlParser, type TmuxControlEvent } from './tmux-control-parser';
+import { exactTarget } from './tmux';
 
 const logger = createLogger('tmux-control-client');
 const DEFAULT_CONTROL_CLIENT_IDLE_TIMEOUT_MS = 30_000;
@@ -51,7 +52,7 @@ export class TmuxControlClient {
     this.sessionName = sessionName;
     this.child = this.spawnProcess(
       this.tmuxBinary,
-      ['-C', 'attach-session', '-t', sessionName],
+      ['-C', 'attach-session', '-t', exactTarget(sessionName)],
       { stdio: 'pipe' }
     );
     this.started = true;

@@ -17,6 +17,7 @@ import {
   sendKeys,
   sendSpecialKey,
   killSession,
+  exactTarget,
 } from '../tmux/tmux';
 import { detectAndResendIfPastedText } from '../pasted-text-helper';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
@@ -122,7 +123,8 @@ export class OpenCodeTool extends BaseCLITool {
       // [SEC-001] Uses execFile (not exec) to prevent shell meta-character injection via sessionName
       try {
         await execFileAsync('tmux', [
-          'resize-window', '-t', sessionName,
+          // Issue #1156: exact-match target so resize never leaks to a prefix-colliding instance
+          'resize-window', '-t', exactTarget(sessionName),
           '-x', '80', '-y', String(OPENCODE_PANE_HEIGHT),
         ]);
       } catch {
