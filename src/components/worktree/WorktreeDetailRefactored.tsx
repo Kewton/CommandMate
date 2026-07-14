@@ -68,6 +68,7 @@ import { deriveCliStatus } from '@/types/sidebar';
 import { MoveDialog } from '@/components/worktree/MoveDialog';
 import { NewFileDialog } from '@/components/worktree/NewFileDialog';
 import { useSwipeGesture } from '@/hooks/useSwipeGesture';
+import { useVirtualKeyboard } from '@/hooks/useVirtualKeyboard';
 import type { MobileTab } from '@/components/mobile/MobileTabBar';
 
 // ============================================================================
@@ -88,15 +89,6 @@ export interface WorktreeDetailRefactoredProps {
  * without recreating a function on every render.
  */
 const NOOP_SELECTED_AGENTS_CHANGE = (): void => {};
-
-/**
- * Mobile bottom-anchored layout offsets (both include the iOS safe-area inset).
- * The MobileTabBar is 4rem tall and the fixed MessageInput sits directly above
- * it; the scrollable content reserves 12rem so nothing is hidden behind the
- * input stack + tab bar.
- */
-const MOBILE_MESSAGE_INPUT_BOTTOM = 'calc(4rem + env(safe-area-inset-bottom, 0px))';
-const MOBILE_CONTENT_BOTTOM_PADDING = 'calc(12rem + env(safe-area-inset-bottom, 0px))';
 
 /**
  * Issue #1128: left-to-right order of the mobile tabs, matching MobileTabBar's
@@ -260,6 +252,13 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     worktreeId,
     active: activeTab === 'terminal',
   });
+
+  // Issue #1166: track the visible viewport height so the mobile shell can pin
+  // its container to it. When the software keyboard opens, visualViewport.height
+  // shrinks (Android resizes-visual / iOS Safari) while the layout viewport does
+  // not; sizing the flex column to this height keeps the in-flow composer + tab
+  // bar docked directly above the keyboard (replaces the fixed+translateY hack).
+  const { viewportHeight } = useVirtualKeyboard();
 
   // Issue #1128: step to the previous/next mobile tab (no wraparound). Keeps the
   // MobileTabBar indicator synced since both derive from the same `activeTab`.
@@ -428,21 +427,38 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   }
 
   // Render mobile layout
+  //
+  // Issue #1166: the mobile shell is a flex column whose height tracks the
+  // *visible* viewport (visualViewport.height), mirroring the proven
+  // FullScreenModal pattern. Header / instance-tabs / composer / tab bar are all
+  // `flex-shrink-0` in normal flow and the scrollable content is `flex-1
+  // min-h-0`, so when the keyboard opens the container shrinks and the composer
+  // + tab bar stay docked directly above it — no `position: fixed` and no
+  // `translateY` lift (which mis-referenced the layout-viewport bottom and made
+  // the composer fly off-screen on Android Chrome). Falls back to `100%` (fill
+  // the AppShell main) until visualViewport is measured / on unsupported
+  // browsers, preserving the pre-#1166 full-height behavior.
   return (
     <ErrorBoundary componentName="WorktreeDetailRefactored">
-      <div className="h-full flex flex-col">
-        <MobileHeader
-          worktreeName={worktreeName}
-          repositoryName={worktree?.repositoryName}
-          status={worktreeStatus}
-          gitStatus={worktree?.gitStatus}
-          onBackClick={handleBackClick}
-          onMenuClick={openMobileDrawer}
-        />
+      <div
+        className="flex flex-col overflow-hidden"
+        style={{ height: viewportHeight != null ? `${viewportHeight}px` : '100%' }}
+        data-testid="mobile-worktree-shell"
+      >
+        <div className="flex-shrink-0">
+          <MobileHeader
+            worktreeName={worktreeName}
+            repositoryName={worktree?.repositoryName}
+            status={worktreeStatus}
+            gitStatus={worktree?.gitStatus}
+            onBackClick={handleBackClick}
+            onMenuClick={openMobileDrawer}
+          />
+        </div>
 
         {/* Issue #111: Branch mismatch warning (Mobile) */}
         {worktree?.gitStatus && worktree.gitStatus.isBranchMismatch && (
-          <div className="z-35">
+          <div className="z-35 flex-shrink-0">
             <BranchMismatchAlert
               isBranchMismatch={worktree.gitStatus.isBranchMismatch}
               currentBranch={worktree.gitStatus.currentBranch}
@@ -453,8 +469,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 
         {/* Agent-instance tabs row (Mobile, Issue #1080) — dedicated to the
             per-instance tabs. Auto-Yes moved into the composer meta row; terminal
-            search + End moved into the "more actions" bottom sheet. */}
-        <div className="sticky top-0 z-30 flex items-center gap-2 px-3 py-1.5 bg-surface-2 border-b border-border">
+            search + End moved into the "more actions" bottom sheet.
+            Issue #1166: `flex-shrink-0` in the viewport-height flex column (the
+            row no longer needs `sticky` — the shell itself does not scroll). */}
+        <div className="flex-shrink-0 z-30 flex items-center gap-2 px-3 py-1.5 bg-surface-2 border-b border-border">
           {/* CLI tool tabs — horizontally scrollable so 3+ agents never overflow
               off-screen (Issue #958). `min-w-0` releases the flex item's default
               min-width:auto so the nav scrolls instead of expanding.
@@ -505,12 +523,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           </button>
         </div>
 
+        {/* Issue #1166: `flex-1 min-h-0 overflow-y-auto` — the only element that
+            absorbs the flex column's remaining space and scrolls internally, so
+            the fixed-height header/tabs/composer/tab bar keep their size when the
+            keyboard shrinks the shell. The old 12rem bottom padding is gone: the
+            composer + tab bar are now in-flow siblings, not fixed overlays. */}
         <main
-          className="flex-1 overflow-y-auto"
+          className="flex-1 min-h-0 overflow-y-auto"
           ref={tabSwipeRef}
-          style={{
-            paddingBottom: MOBILE_CONTENT_BOTTOM_PADDING,
-          }}
         >
           <MobileContent
             activeTab={activeTab}
@@ -565,11 +585,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           />
         </main>
 
-        {/* Message Input - fixed above tab bar */}
-        <div
-          className="fixed left-0 right-0 border-t border-border bg-surface z-30"
-          style={{ bottom: MOBILE_MESSAGE_INPUT_BOTTOM }}
-        >
+        {/* Message Input — Issue #1166: in-flow bottom bar (`flex-shrink-0`).
+            The viewport-height shell keeps this docked above the software
+            keyboard, so it no longer needs `position: fixed` + a translateY lift. */}
+        <div className="flex-shrink-0 border-t border-border bg-surface z-30">
           {/* Issue #473: Navigation buttons for OpenCode TUI selection list (mobile) */}
           {isSelectionListActive && (
             <div className="px-2 pt-1 border-b border-border">
@@ -591,9 +610,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               isSessionRunning={activeSessionRunning}
               pendingInsertText={pendingInsertText}
               onInsertConsumed={handleInsertConsumedSingle}
-              // Issue #1128: lift the composer above the software keyboard so it
-              // stays visible while typing (visualViewport-driven).
-              keyboardAware
               // Issue #1080: Auto-Yes now lives in the composer meta row (moved off
               // the sticky tab row). The active agent tab already names the tool, so
               // the parenthetical tool name is suppressed here (showToolName=false).
@@ -612,12 +628,15 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           </div>
         </div>
 
+        {/* Issue #1166: `inFlow` renders the tab bar as the bottom flex child
+            (static) so it tracks the viewport-height shell above the keyboard. */}
         <MobileTabBar
           activeTab={activeTab}
           onTabChange={handleMobileTabChange}
           hasNewOutput={hasNewOutput}
           hasPrompt={state.prompt.visible}
           hasUpdate={hasUpdate}
+          inFlow
         />
 
         {!autoYesEnabled && (

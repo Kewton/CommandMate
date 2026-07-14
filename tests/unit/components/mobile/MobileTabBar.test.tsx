@@ -214,6 +214,29 @@ describe('MobileTabBar', () => {
     });
   });
 
+  // Issue #1166: the worktree mobile shell tracks visualViewport.height and lays
+  // the tab bar out as an in-flow bottom flex child (above the keyboard), so it
+  // opts into a static variant instead of the default fixed-to-viewport-bottom.
+  describe('In-flow variant (Issue #1166)', () => {
+    it('is fixed to the viewport bottom by default', () => {
+      render(<MobileTabBar {...defaultProps} />);
+
+      const tabBar = screen.getByTestId('mobile-tab-bar');
+      expect(tabBar.className).toContain('fixed');
+      expect(tabBar.className).toContain('bottom-0');
+      expect(tabBar.className).not.toContain('flex-shrink-0');
+    });
+
+    it('renders in normal flow (flex-shrink-0, not fixed) when inFlow is set', () => {
+      render(<MobileTabBar {...defaultProps} inFlow />);
+
+      const tabBar = screen.getByTestId('mobile-tab-bar');
+      expect(tabBar.className).toContain('flex-shrink-0');
+      expect(tabBar.className).not.toContain('fixed');
+      expect(tabBar.className).not.toContain('bottom-0');
+    });
+  });
+
   describe('Accessibility', () => {
     it('should have correct ARIA attributes on tabs', () => {
       render(<MobileTabBar {...defaultProps} activeTab="terminal" />);

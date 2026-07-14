@@ -908,9 +908,13 @@ describe('MessageInput', () => {
     });
   });
 
-  // ===== Keyboard follow (Issue #1128) =====
-
-  describe('Keyboard follow (Issue #1128)', () => {
+  // ===== No self-lift transform (Issue #1166) =====
+  //
+  // The old #1128 translateY hack was removed: the mobile shell
+  // (WorktreeDetailRefactored) now sizes its container to visualViewport.height
+  // and places the composer in normal flow, so MessageInput must never apply a
+  // transform of its own regardless of the software-keyboard state.
+  describe('No self-lift transform (Issue #1166)', () => {
     const originalVisualViewport = window.visualViewport;
 
     afterEach(() => {
@@ -941,15 +945,7 @@ describe('MessageInput', () => {
       });
     }
 
-    it('translates the composer up by the keyboard height when keyboardAware', () => {
-      mockKeyboard(300);
-      render(<MessageInput {...defaultProps} keyboardAware />);
-
-      const container = screen.getByTestId('message-input-container');
-      expect(container.style.transform).toBe('translateY(-300px)');
-    });
-
-    it('does not translate when keyboardAware is off', () => {
+    it('never applies an inline transform when the keyboard is open', () => {
       mockKeyboard(300);
       render(<MessageInput {...defaultProps} />);
 
@@ -957,10 +953,9 @@ describe('MessageInput', () => {
       expect(container.style.transform).toBe('');
     });
 
-    it('does not translate when the keyboard is hidden', () => {
-      // Below the 100px keyboard threshold → treated as no keyboard.
+    it('never applies an inline transform when the keyboard is closed', () => {
       mockKeyboard(0);
-      render(<MessageInput {...defaultProps} keyboardAware />);
+      render(<MessageInput {...defaultProps} />);
 
       const container = screen.getByTestId('message-input-container');
       expect(container.style.transform).toBe('');

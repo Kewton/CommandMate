@@ -15,7 +15,6 @@ import { SlashCommandSelector } from './SlashCommandSelector';
 import { InterruptButton } from './InterruptButton';
 import { useSlashCommands } from '@/hooks/useSlashCommands';
 import { useIsMobile } from '@/hooks/useIsMobile';
-import { useVirtualKeyboard } from '@/hooks/useVirtualKeyboard';
 import { useImageAttachment } from '@/hooks/useImageAttachment';
 import type { SlashCommand } from '@/types/slash-commands';
 import { getSlashCommandTrigger } from '@/lib/slash-command-format';
@@ -79,13 +78,6 @@ export interface MessageInputProps {
     content: string,
     options: { cliToolId: CLIToolType; instanceId?: string; imagePath?: string },
   ) => void;
-  /**
-   * Issue #1128: when true, the composer follows the software keyboard — it
-   * translates up by the keyboard height (visualViewport) so it never hides
-   * behind the keyboard on mobile. Opt-in; only the bottom-anchored mobile
-   * composer sets it (PC splits / assistant chat are not keyboard-obscured).
-   */
-  keyboardAware?: boolean;
 }
 
 /**
@@ -137,7 +129,7 @@ function migrateLegacyDraftKey(worktreeId: string): void {
   }
 }
 
-export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast, autoYesSlot, onOptimisticSend, keyboardAware = false }: MessageInputProps) {
+export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast, autoYesSlot, onOptimisticSend }: MessageInputProps) {
   const t = useTranslations('worktree');
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
@@ -156,17 +148,11 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   const isMobile = useIsMobile();
   const { groups } = useSlashCommands(worktreeId, cliToolId);
 
-  // Issue #1128: keyboard-follow. When opted in, lift the composer by the
-  // software-keyboard height so it stays visible above the keyboard. A short
-  // transition smooths the show/hide; no offset when the keyboard is hidden.
-  const { isKeyboardVisible, keyboardHeight } = useVirtualKeyboard();
-  const keyboardFollowStyle: React.CSSProperties | undefined = keyboardAware
-    ? {
-        transform: isKeyboardVisible ? `translateY(-${keyboardHeight}px)` : undefined,
-        transition: 'transform 0.2s ease-out',
-        willChange: 'transform',
-      }
-    : undefined;
+  // Issue #1166: the composer no longer lifts itself with a translateY hack.
+  // The mobile shell (WorktreeDetailRefactored) now sizes its container to
+  // visualViewport.height and places this composer in normal flow at the bottom,
+  // so it docks above the software keyboard without any transform. This keeps
+  // the composer a plain in-flow element on every surface (mobile / PC / chat).
 
   // Issue #474: Image attachment hook
   const uploadFn = useCallback(
@@ -466,7 +452,6 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     <div
       ref={containerRef}
       className="space-y-2 relative"
-      style={keyboardFollowStyle}
       data-testid="message-input-container"
     >
       {/* Error display (send error or image error) */}
