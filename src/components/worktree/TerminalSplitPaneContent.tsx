@@ -23,6 +23,7 @@
 'use client';
 
 import React, { memo, useCallback, useMemo } from 'react';
+import { X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 import { TerminalSplitPane } from '@/components/worktree/TerminalSplitPane';
@@ -43,11 +44,12 @@ import { usePendingMessages, type OptimisticSendOptions } from '@/hooks/usePendi
 import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
 import { worktreeApi } from '@/lib/api-client';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
-import { getCliToolDisplayName } from '@/lib/cli-tools/types';
+import { getCliToolDisplayName, getInstanceLabel } from '@/lib/cli-tools/types';
 import type {
   TerminalSplitPaneCoreProps,
   SplitAutoYesProps,
   HistoryPaneProps,
+  SessionKillTarget,
 } from '@/types/terminal-split-pane';
 
 /**
@@ -88,6 +90,14 @@ export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProp
   onDropInstance?: (instanceId: string) => void;
   /** Issue #786 / #869 (D-2): published instanceId being dragged, for the dragOver ring. */
   draggedInstanceId?: string | null;
+  /**
+   * Issue #1171: request ending THIS split's session. The split builds its own
+   * {@link SessionKillTarget} snapshot (its cliToolId / resolved instanceId /
+   * alias-first label) and hands it up so the confirm dialog terminates exactly
+   * the session this split shows — never the globally-active one. Optional; when
+   * omitted the End (×) button is not rendered (backward compatible).
+   */
+  onRequestSessionEnd?: (target: SessionKillTarget) => void;
 }
 
 export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
@@ -108,6 +118,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   history,
   onDropInstance,
   draggedInstanceId,
+  onRequestSessionEnd,
 }: TerminalSplitPaneContentProps) {
   // Issue #869: resolve the instance id this split targets. Defaults to the
   // primary instance (`=== cliToolId`) so pre-#869 single-instance behavior —
@@ -529,6 +540,44 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     ],
   );
 
+  // Issue #1171: alias-first display name for THIS split's session, snapshotted
+  // into the kill target and shown in the End button tooltip / aria-label.
+  const endTargetLabel = getInstanceLabel(instance ?? { cliTool: cliToolId });
+
+  // Issue #1171: build this split's own kill-target snapshot and request the
+  // confirm dialog. Uses THIS split's cliToolId / resolved instanceId, so a
+  // non-focused split terminates exactly the session it displays.
+  const handleRequestSessionEnd = useCallback(() => {
+    onRequestSessionEnd?.({
+      cliToolId,
+      instanceId: resolvedInstanceId,
+      label: endTargetLabel,
+    });
+  }, [onRequestSessionEnd, cliToolId, resolvedInstanceId, endTargetLabel]);
+
+  // Issue #1171: the End (×) button, rendered as `headerExtras` (Dropdown-adjacent).
+  // Shown ONLY when THIS split's own session is running (terminal.isRunning) —
+  // independent of other splits or the DesktopHeader — and never during
+  // attaching / stopped states. Memoized so a steady polling tick (isRunning
+  // unchanged) does not recreate the element and re-render the memoized
+  // TerminalSplitPane.
+  const endSessionExtras = useMemo(() => {
+    if (!onRequestSessionEnd || !terminal.isRunning) return null;
+    const label = t('terminal.endSessionFor', { name: endTargetLabel });
+    return (
+      <button
+        type="button"
+        onClick={handleRequestSessionEnd}
+        aria-label={label}
+        title={label}
+        data-testid={`terminal-end-session-button-${splitIndex}`}
+        className="flex items-center justify-center p-0.5 rounded text-muted-foreground hover:text-danger focus:text-danger hover:bg-danger/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-danger/50 transition-colors"
+      >
+        <X size={14} aria-hidden="true" />
+      </button>
+    );
+  }, [onRequestSessionEnd, terminal.isRunning, t, endTargetLabel, handleRequestSessionEnd, splitIndex]);
+
   return (
     <TerminalSplitPane
       worktreeId={worktreeId}
@@ -538,6 +587,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       instance={instance}
       availableInstances={availableInstances}
       onInstanceChange={onInstanceChange}
+      headerExtras={endSessionExtras}
       // Issue #1079: the derived agent status now renders as a StatusDot inside
       // the selector trigger (session title bar). BranchStatus ⊂ StatusDotStatus.
       status={cliStatus}

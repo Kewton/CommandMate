@@ -69,7 +69,11 @@ export interface TerminalSplitPaneProps {
   onFocus: () => void;
   /** Whether tmux attach is in progress for this split. */
   attaching?: boolean;
-  /** Rendered above the instance selector — usually empty (`null`). */
+  /**
+   * Rendered directly after the instance selector (Dropdown) and before the
+   * search button (Issue #1171). Usually the per-split session End (×) button;
+   * empty (`null`) when the split's session is not running.
+   */
   headerExtras?: React.ReactNode;
   /** Terminal output area (TerminalDisplay). */
   terminal: React.ReactNode;
@@ -256,6 +260,12 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
           </DropdownMenuContent>
         </DropdownMenu>
 
+        {/* Issue #1171: session-scoped extras (the End × button) sit directly
+            after the instance selector, before the search button, so the
+            terminate action reads as tied to the selected session. The search
+            button keeps `ml-auto` and stays pinned to the right edge. */}
+        {headerExtras}
+
         <button
           type="button"
           onClick={handleSearchClick}
@@ -279,7 +289,6 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
             />
           </svg>
         </button>
-        {headerExtras}
       </div>
 
       {/* Body: terminal display (or attach skeleton) */}

@@ -87,7 +87,8 @@
     "selectInstance": "Select agent instance for {split}",
     "moreActions": "More actions",
     "searchTerminal": "Search terminal",
-    "endSession": "End session"
+    "endSession": "End session",
+    "endSessionFor": "End session for {name}"
   },
   "todo": {
     "addPlaceholder": "Add a todo…",

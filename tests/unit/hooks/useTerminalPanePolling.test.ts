@@ -8,6 +8,36 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
 
+// Issue #1171: controllable realtime mock so tests can fire session_status_changed
+// stop events. `connected: false` preserves the pre-#1171 poll cadence (the
+// default no-op provider is also disconnected), so existing tests are unaffected.
+const realtimeMock = vi.hoisted(() => {
+  const listeners: Array<(e: unknown) => void> = [];
+  // Stable object so addListener identity does not change across renders (avoids
+  // effect re-registration churn).
+  const api = {
+    status: 'disconnected' as const,
+    connected: false,
+    subscribe: () => {},
+    unsubscribe: () => {},
+    addListener: (l: (e: unknown) => void) => {
+      listeners.push(l);
+      return () => {
+        const i = listeners.indexOf(l);
+        if (i >= 0) listeners.splice(i, 1);
+      };
+    },
+  };
+  return {
+    listeners,
+    emit: (event: unknown) => { for (const l of [...listeners]) l(event); },
+    useRealtime: () => api,
+  };
+});
+vi.mock('@/hooks/useRealtimeConnection', () => ({
+  useRealtime: realtimeMock.useRealtime,
+}));
+
 type MockFetchResponse = {
   ok: boolean;
   status?: number;
@@ -221,6 +251,110 @@ describe('useTerminalPanePolling', () => {
     });
     expect(result.current.terminal.output).toBe('steady output');
     expect(result.current.terminal.isRunning).toBe(true);
+  });
+
+  // Issue #1171: matching scoped session-stop events flip the pane to the
+  // terminated placeholder immediately (before the throttled fallback poll).
+  it('clears the pane on a matching scoped session_status_changed stop event', async () => {
+    mockFetch.mockImplementation(() =>
+      okJson({
+        isRunning: true,
+        fullOutput: 'live',
+        thinking: false,
+        isPromptWaiting: true,
+        promptData: { type: 'yes_no', question: 'Continue?' },
+      }),
+    );
+    const { result } = renderHook(() =>
+      useTerminalPanePolling({ worktreeId: 'w-1', cliToolId: 'claude', instanceId: 'claude-2' }),
+    );
+    await waitFor(() => expect(result.current.terminal.output).toBe('live'));
+    await waitFor(() => expect(result.current.prompt.visible).toBe(true));
+
+    // The session ends; subsequent polls also report stopped.
+    mockFetch.mockImplementation(() => okJson({ isRunning: false, fullOutput: '', thinking: false }));
+    await act(async () => {
+      realtimeMock.emit({
+        type: 'session_status_changed',
+        worktreeId: 'w-1',
+        isRunning: false,
+        cliTool: 'claude',
+        instance: 'claude-2',
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(result.current.terminal.isRunning).toBe(false);
+      expect(result.current.terminal.output).toBe('');
+      expect(result.current.prompt.visible).toBe(false);
+    });
+  });
+
+  it('ignores a scoped stop event targeting a different instance', async () => {
+    mockFetch.mockImplementation(() =>
+      okJson({ isRunning: true, fullOutput: 'live', thinking: false }),
+    );
+    const { result } = renderHook(() =>
+      useTerminalPanePolling({ worktreeId: 'w-1', cliToolId: 'claude', instanceId: 'claude-2' }),
+    );
+    await waitFor(() => expect(result.current.terminal.output).toBe('live'));
+    act(() => {
+      realtimeMock.emit({
+        type: 'session_status_changed',
+        worktreeId: 'w-1',
+        isRunning: false,
+        cliTool: 'claude',
+        instance: 'claude', // primary, not this pane's claude-2
+      });
+    });
+    expect(result.current.terminal.isRunning).toBe(true);
+    expect(result.current.terminal.output).toBe('live');
+  });
+
+  it('ignores a stop event for a different worktree', async () => {
+    mockFetch.mockImplementation(() =>
+      okJson({ isRunning: true, fullOutput: 'live', thinking: false }),
+    );
+    const { result } = renderHook(() =>
+      useTerminalPanePolling({ worktreeId: 'w-1', cliToolId: 'claude' }),
+    );
+    await waitFor(() => expect(result.current.terminal.output).toBe('live'));
+    act(() => {
+      realtimeMock.emit({
+        type: 'session_status_changed',
+        worktreeId: 'w-OTHER',
+        isRunning: false,
+        cliTool: 'claude',
+        instance: 'claude',
+      });
+    });
+    expect(result.current.terminal.isRunning).toBe(true);
+    expect(result.current.terminal.output).toBe('live');
+  });
+
+  it('applies an unscoped (kill-all) stop event to the pane', async () => {
+    mockFetch.mockImplementation(() =>
+      okJson({ isRunning: true, fullOutput: 'live', thinking: false }),
+    );
+    const { result } = renderHook(() =>
+      useTerminalPanePolling({ worktreeId: 'w-1', cliToolId: 'claude' }),
+    );
+    await waitFor(() => expect(result.current.terminal.output).toBe('live'));
+    mockFetch.mockImplementation(() => okJson({ isRunning: false, fullOutput: '', thinking: false }));
+    await act(async () => {
+      realtimeMock.emit({
+        type: 'session_status_changed',
+        worktreeId: 'w-1',
+        isRunning: false,
+        cliTool: null,
+        instance: null,
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(result.current.terminal.isRunning).toBe(false);
+      expect(result.current.terminal.output).toBe('');
+    });
   });
 
   it('resets output/attaching/prompt when (worktreeId, cliToolId) changes', async () => {

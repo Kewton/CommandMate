@@ -33,7 +33,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { PromptData } from '@/types/models';
 import { useRealtime } from '@/hooks/useRealtimeConnection';
-import type { RealtimeEvent, TerminalSnapshotEvent } from '@/lib/realtime/types';
+import type { RealtimeEvent, TerminalSnapshotEvent, SessionStatusEvent } from '@/lib/realtime/types';
 
 export const ACTIVE_POLLING_INTERVAL_MS = 2000;
 export const IDLE_POLLING_INTERVAL_MS = 5000;
@@ -376,6 +376,40 @@ export function useTerminalPanePolling({
       });
     });
   }, [enabled, worktreeId, addListener, applySnapshot, markPushHealthy]);
+
+  // Issue #1171: apply a matching scoped session-stop event immediately so a
+  // targeted kill flips THIS pane to the terminated placeholder (#842) without
+  // waiting for the throttled HTTP fallback poll (up to 15s while a WS push is
+  // healthy). Matching rules: worktreeId exact; when the event carries an
+  // `instance` it must equal this pane's resolved instance; when it carries a
+  // `cliTool` it must equal this pane's cliTool. An unscoped kill-all
+  // (instance == null && cliTool == null) applies to every pane. Scoped events
+  // for another split are ignored, so a sibling's kill never blanks this pane.
+  useEffect(() => {
+    if (!enabled) return;
+    return addListener((event: RealtimeEvent) => {
+      if (event.type !== 'session_status_changed') return;
+      const evt = event as SessionStatusEvent;
+      if (evt.worktreeId !== worktreeId) return;
+      if (evt.isRunning !== false) return;
+      if (evt.instance != null && evt.instance !== inFlightInstanceRef.current) return;
+      if (evt.cliTool != null && evt.cliTool !== inFlightCliToolRef.current) return;
+      // Reset the push version guard so a subsequent restart's snapshots (which
+      // restart their own version counter) are not rejected as stale.
+      lastSnapshotVersionRef.current = 0;
+      applySnapshot({
+        fullOutput: '',
+        realtimeSnippet: '',
+        isRunning: false,
+        thinking: false,
+        isSelectionListActive: false,
+        isPagerActive: false,
+        isUnclassifiedActive: false,
+        isPromptWaiting: false,
+        promptData: null,
+      });
+    });
+  }, [enabled, worktreeId, addListener, applySnapshot]);
 
   // Initial + interval polling. Pauses when hidden, resumes on visible.
   // Cadence depends on isRunning (active=2s, idle=5s); while a WS push

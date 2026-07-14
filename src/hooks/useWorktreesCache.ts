@@ -227,6 +227,20 @@ export function useWorktreesCache(): UseWorktreesCacheReturn {
         const targetId = event.worktreeId;
         const isRunning = (event as { isRunning?: boolean }).isRunning;
         if (typeof isRunning !== 'boolean') return;
+        // Issue #1171: a SCOPED stop (a single agent instance / CLI ended, so the
+        // event carries a `cliTool` or `instance`) does NOT imply the whole
+        // worktree stopped — another instance may still be running. Forcing the
+        // aggregate `isSessionRunning` to false here would flip the sidebar/header
+        // to idle while a sibling session runs. Re-fetch the server-computed
+        // aggregate instead. Unscoped stops (kill-all) and any running transition
+        // keep the direct set below (unchanged behavior).
+        const scoped =
+          (event as { cliTool?: string | null }).cliTool != null ||
+          (event as { instance?: string | null }).instance != null;
+        if (scoped && isRunning === false) {
+          void refresh();
+          return;
+        }
         startTransition(() => {
           setWorktrees((prev) => {
             let changed = false;

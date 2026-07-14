@@ -14,7 +14,9 @@ import {
   getLastAssistantMessageAt,
   deleteAllMessages,
   deleteMessagesByCliTool,
+  deleteMessagesByInstance,
   clearLastUserMessage,
+  recomputeLastUserMessage,
   getMessageById,
   upsertWorktree,
   ACTIVE_FILTER,
@@ -332,6 +334,53 @@ describe('Archived Messages (Issue #168)', () => {
         .get(testWorktreeId) as { last_user_message: string | null; last_user_message_at: number | null };
       expect(after.last_user_message).toBeNull();
       expect(after.last_user_message_at).toBeNull();
+    });
+  });
+
+  describe('recomputeLastUserMessage (Issue #1171)', () => {
+    it('falls back to the newest remaining message after a targeted archive', () => {
+      createMessage(db, {
+        worktreeId: testWorktreeId,
+        role: 'user',
+        content: 'primary remains',
+        timestamp: new Date(1000),
+        messageType: 'normal',
+        cliToolId: 'claude',
+        instanceId: 'claude',
+      });
+      createMessage(db, {
+        worktreeId: testWorktreeId,
+        role: 'user',
+        content: 'alias goes away',
+        timestamp: new Date(2000),
+        messageType: 'normal',
+        cliToolId: 'claude',
+        instanceId: 'claude-2',
+      });
+      // Archive only the alias instance's messages, then recompute.
+      deleteMessagesByInstance(db, testWorktreeId, 'claude-2');
+      recomputeLastUserMessage(db, testWorktreeId);
+
+      const row = db.prepare('SELECT last_user_message FROM worktrees WHERE id = ?')
+        .get(testWorktreeId) as { last_user_message: string | null };
+      expect(row.last_user_message).toBe('primary remains');
+    });
+
+    it('clears the metadata when no active user message remains', () => {
+      createMessage(db, {
+        worktreeId: testWorktreeId,
+        role: 'user',
+        content: 'only message',
+        timestamp: new Date(1000),
+        messageType: 'normal',
+      });
+      deleteAllMessages(db, testWorktreeId);
+      recomputeLastUserMessage(db, testWorktreeId);
+
+      const row = db.prepare('SELECT last_user_message, last_user_message_at FROM worktrees WHERE id = ?')
+        .get(testWorktreeId) as { last_user_message: string | null; last_user_message_at: number | null };
+      expect(row.last_user_message).toBeNull();
+      expect(row.last_user_message_at).toBeNull();
     });
   });
 

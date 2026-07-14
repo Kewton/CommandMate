@@ -22,6 +22,23 @@ import type { HistoryDisplayLimit } from '@/config/history-display-config';
 import type { AutoYesToggleParams } from '@/types/auto-yes';
 import type { ShowToast } from '@/types/markdown-editor';
 
+/**
+ * A session-kill target captured as a value at the moment the End (×) button is
+ * pressed (Issue #1171).
+ *
+ * The kill confirmation dialog is a destructive operation, so its target must
+ * NOT be re-derived from global active/focus state at confirm time (the active
+ * instance, focused split, or Dropdown selection may have changed while the
+ * dialog was open). Each caller snapshots the exact (cliToolId, instanceId) and
+ * a press-time display `label`; the confirm handler acts only on this snapshot.
+ */
+export interface SessionKillTarget {
+  cliToolId: CLIToolType;
+  instanceId: string;
+  /** Alias-first display name captured at press time (for tooltip / dialog). */
+  label: string;
+}
+
 /** Identity + derived status of a single terminal split (Issue #756). */
 export interface TerminalSplitPaneCoreProps {
   worktreeId: string;

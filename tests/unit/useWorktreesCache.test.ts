@@ -12,6 +12,33 @@ import {
   POLLING_INTERVAL_IDLE,
 } from '@/hooks/useWorktreesCache';
 
+// Issue #1171: controllable realtime mock so tests can fire session_status_changed
+// events. Existing tests never emit, so their behavior is unchanged.
+const realtimeMock = vi.hoisted(() => {
+  const listeners: Array<(e: unknown) => void> = [];
+  const api = {
+    status: 'disconnected' as const,
+    connected: false,
+    subscribe: () => {},
+    unsubscribe: () => {},
+    addListener: (l: (e: unknown) => void) => {
+      listeners.push(l);
+      return () => {
+        const i = listeners.indexOf(l);
+        if (i >= 0) listeners.splice(i, 1);
+      };
+    },
+  };
+  return {
+    listeners,
+    emit: (event: unknown) => { for (const l of [...listeners]) l(event); },
+    useRealtime: () => api,
+  };
+});
+vi.mock('@/hooks/useRealtimeConnection', () => ({
+  useRealtime: realtimeMock.useRealtime,
+}));
+
 // Mock global fetch
 const mockFetch = vi.fn();
 globalThis.fetch = mockFetch;
@@ -390,6 +417,63 @@ describe('useWorktreesCache()', () => {
         value: false,
         configurable: true,
       });
+    });
+  });
+
+  describe('realtime session_status_changed (Issue #1171)', () => {
+    it('re-fetches instead of forcing the aggregate false on a SCOPED stop event', async () => {
+      // Initial + refresh both report running: another instance is still alive,
+      // so the server-computed aggregate stays running.
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ worktrees: [{ id: 'wt-1', name: 'main', isSessionRunning: true }] }),
+      });
+      const { result } = renderHook(() => useWorktreesCache());
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      await waitFor(() => expect(result.current.worktrees[0]?.isSessionRunning).toBe(true));
+      const before = mockFetch.mock.calls.length;
+
+      await act(async () => {
+        realtimeMock.emit({
+          type: 'session_status_changed',
+          worktreeId: 'wt-1',
+          isRunning: false,
+          cliTool: 'claude',
+          instance: 'claude',
+        });
+        await Promise.resolve();
+      });
+
+      // A scoped stop cannot infer the worktree aggregate → it re-fetches...
+      await waitFor(() => expect(mockFetch.mock.calls.length).toBeGreaterThan(before));
+      // ...and the aggregate stays running (server truth; never forced false).
+      expect(result.current.worktrees[0].isSessionRunning).toBe(true);
+    });
+
+    it('directly sets the aggregate false on an UNSCOPED (kill-all) stop event', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ worktrees: [{ id: 'wt-1', name: 'main', isSessionRunning: true }] }),
+      });
+      const { result } = renderHook(() => useWorktreesCache());
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      await waitFor(() => expect(result.current.worktrees[0]?.isSessionRunning).toBe(true));
+      const before = mockFetch.mock.calls.length;
+
+      await act(async () => {
+        realtimeMock.emit({
+          type: 'session_status_changed',
+          worktreeId: 'wt-1',
+          isRunning: false,
+          cliTool: null,
+          instance: null,
+        });
+        await Promise.resolve();
+      });
+
+      // Unscoped kill-all is applied directly, with no extra re-fetch.
+      await waitFor(() => expect(result.current.worktrees[0].isSessionRunning).toBe(false));
+      expect(mockFetch.mock.calls.length).toBe(before);
     });
   });
 });
