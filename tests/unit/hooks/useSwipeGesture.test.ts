@@ -510,5 +510,166 @@ describe('useSwipeGesture', () => {
 
       document.body.removeChild(grandparent);
     });
+
+    it('should detect horizontal scrollability when axis is "horizontal"', () => {
+      const element = document.createElement('div');
+      element.style.overflowX = 'auto';
+      Object.defineProperty(element, 'scrollWidth', { value: 500, configurable: true });
+      Object.defineProperty(element, 'clientWidth', { value: 200, configurable: true });
+      document.body.appendChild(element);
+
+      // Horizontally scrollable, but NOT vertically scrollable.
+      expect(isInsideScrollableElement(element, 'horizontal')).toBe(true);
+      expect(isInsideScrollableElement(element, 'vertical')).toBe(false);
+
+      document.body.removeChild(element);
+    });
+  });
+
+  describe('Issue #1128: axis, direction lock, edge zone', () => {
+    /** Minimal touch event (jsdom lacks Touch/TouchEvent constructors). */
+    function createTouchEvent(
+      type: string,
+      clientX: number,
+      clientY: number,
+      target: EventTarget
+    ): TouchEvent {
+      const touch = { clientX, clientY, identifier: 0, target } as unknown as Touch;
+      const event = new Event(type, { bubbles: true, cancelable: true }) as unknown as TouchEvent;
+      Object.defineProperty(event, 'touches', { value: [touch] });
+      Object.defineProperty(event, 'changedTouches', { value: [touch] });
+      Object.defineProperty(event, 'target', { value: target });
+      return event;
+    }
+
+    /** Render the hook with an element pre-attached to its ref. */
+    function renderHookWithElement(
+      element: HTMLElement,
+      options: Parameters<typeof useSwipeGesture>[0]
+    ) {
+      const hookResult = renderHook((props) => useSwipeGesture(props), {
+        initialProps: { ...options, enabled: false },
+      });
+      (hookResult.result.current.ref as { current: HTMLElement | null }).current = element;
+      hookResult.rerender({ ...options, enabled: true });
+      return hookResult;
+    }
+
+    function dispatch(el: HTMLElement, event: TouchEvent) {
+      act(() => {
+        el.dispatchEvent(event);
+      });
+    }
+
+    it('should fire onSwipeLeft for a horizontal-axis left swipe', () => {
+      const onSwipeLeft = vi.fn();
+      const el = document.createElement('div');
+      const child = document.createElement('span');
+      el.appendChild(child);
+      document.body.appendChild(el);
+
+      renderHookWithElement(el, { axis: 'horizontal', threshold: 60, onSwipeLeft });
+
+      dispatch(el, createTouchEvent('touchstart', 200, 100, child));
+      dispatch(el, createTouchEvent('touchmove', 100, 105, child));
+      dispatch(el, createTouchEvent('touchend', 90, 108, child));
+
+      expect(onSwipeLeft).toHaveBeenCalledTimes(1);
+      document.body.removeChild(el);
+    });
+
+    it('should NOT fire a horizontal swipe once the gesture locks to vertical (direction lock)', () => {
+      const onSwipeLeft = vi.fn();
+      const onSwipeRight = vi.fn();
+      const el = document.createElement('div');
+      const child = document.createElement('span');
+      el.appendChild(child);
+      document.body.appendChild(el);
+
+      renderHookWithElement(el, { axis: 'horizontal', threshold: 60, onSwipeLeft, onSwipeRight });
+
+      // Vertical-dominant move commits the gesture to the vertical axis, which is
+      // perpendicular to the horizontal hook → cancelled for the rest of the touch.
+      dispatch(el, createTouchEvent('touchstart', 200, 100, child));
+      dispatch(el, createTouchEvent('touchmove', 190, 200, child));
+      dispatch(el, createTouchEvent('touchend', 90, 220, child));
+
+      expect(onSwipeLeft).not.toHaveBeenCalled();
+      expect(onSwipeRight).not.toHaveBeenCalled();
+      document.body.removeChild(el);
+    });
+
+    it('should still fire a vertical swipe on the vertical axis (bottom-sheet dismiss)', () => {
+      const onSwipeDown = vi.fn();
+      const el = document.createElement('div');
+      const child = document.createElement('span');
+      el.appendChild(child);
+      document.body.appendChild(el);
+
+      renderHookWithElement(el, { axis: 'vertical', threshold: 100, onSwipeDown });
+
+      dispatch(el, createTouchEvent('touchstart', 100, 0, child));
+      dispatch(el, createTouchEvent('touchmove', 100, 80, child));
+      dispatch(el, createTouchEvent('touchend', 100, 160, child));
+
+      expect(onSwipeDown).toHaveBeenCalledTimes(1);
+      document.body.removeChild(el);
+    });
+
+    it('should report live progress via onSwipeMove', () => {
+      const onSwipeMove = vi.fn();
+      const el = document.createElement('div');
+      const child = document.createElement('span');
+      el.appendChild(child);
+      document.body.appendChild(el);
+
+      renderHookWithElement(el, { axis: 'vertical', threshold: 100, onSwipeMove });
+
+      dispatch(el, createTouchEvent('touchstart', 100, 0, child));
+      dispatch(el, createTouchEvent('touchmove', 100, 40, child));
+
+      expect(onSwipeMove).toHaveBeenCalledWith({ deltaX: 0, deltaY: 40 });
+      document.body.removeChild(el);
+    });
+
+    it('should suppress a center-start swipe when edgeStartZone is set', () => {
+      const onSwipeRight = vi.fn();
+      const el = document.createElement('div');
+      const child = document.createElement('span');
+      el.appendChild(child);
+      document.body.appendChild(el);
+      el.getBoundingClientRect = () =>
+        ({ left: 0, right: 400, top: 0, bottom: 0, width: 400, height: 0, x: 0, y: 0, toJSON() {} }) as DOMRect;
+
+      renderHookWithElement(el, { axis: 'horizontal', threshold: 60, edgeStartZone: 32, onSwipeRight });
+
+      // Start in the centre (far from both edges) → not tracked.
+      dispatch(el, createTouchEvent('touchstart', 200, 100, child));
+      dispatch(el, createTouchEvent('touchmove', 300, 100, child));
+      dispatch(el, createTouchEvent('touchend', 320, 100, child));
+
+      expect(onSwipeRight).not.toHaveBeenCalled();
+      document.body.removeChild(el);
+    });
+
+    it('should allow an edge-start swipe when edgeStartZone is set', () => {
+      const onSwipeRight = vi.fn();
+      const el = document.createElement('div');
+      const child = document.createElement('span');
+      el.appendChild(child);
+      document.body.appendChild(el);
+      el.getBoundingClientRect = () =>
+        ({ left: 0, right: 400, top: 0, bottom: 0, width: 400, height: 0, x: 0, y: 0, toJSON() {} }) as DOMRect;
+
+      renderHookWithElement(el, { axis: 'horizontal', threshold: 60, edgeStartZone: 32, onSwipeRight });
+
+      // Start near the left edge (within 32px) → tracked, swipe right fires.
+      dispatch(el, createTouchEvent('touchstart', 10, 100, child));
+      dispatch(el, createTouchEvent('touchmove', 90, 105, child));
+      dispatch(el, createTouchEvent('touchend', 110, 108, child));
+
+      expect(onSwipeRight).toHaveBeenCalledTimes(1);
+      document.body.removeChild(el);
+    });
   });
 });

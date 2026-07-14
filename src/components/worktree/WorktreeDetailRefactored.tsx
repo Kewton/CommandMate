@@ -16,7 +16,7 @@
 
 'use client';
 
-import React, { memo, useState } from 'react';
+import React, { memo, useCallback, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { MoreHorizontal } from 'lucide-react';
 import { Spinner } from '@/components/ui/Spinner';
@@ -67,6 +67,8 @@ import { getCliToolDisplayName, getInstanceLabel, getActiveInstanceLabel } from 
 import { deriveCliStatus } from '@/types/sidebar';
 import { MoveDialog } from '@/components/worktree/MoveDialog';
 import { NewFileDialog } from '@/components/worktree/NewFileDialog';
+import { useSwipeGesture } from '@/hooks/useSwipeGesture';
+import type { MobileTab } from '@/components/mobile/MobileTabBar';
 
 // ============================================================================
 // Types
@@ -95,6 +97,27 @@ const NOOP_SELECTED_AGENTS_CHANGE = (): void => {};
  */
 const MOBILE_MESSAGE_INPUT_BOTTOM = 'calc(4rem + env(safe-area-inset-bottom, 0px))';
 const MOBILE_CONTENT_BOTTOM_PADDING = 'calc(12rem + env(safe-area-inset-bottom, 0px))';
+
+/**
+ * Issue #1128: left-to-right order of the mobile tabs, matching MobileTabBar's
+ * TABS array. Horizontal swipes step through this order (no wraparound) and the
+ * MobileTabBar indicator stays in sync because both read the same `activeTab`.
+ */
+const MOBILE_TAB_ORDER: readonly MobileTab[] = ['terminal', 'history', 'files', 'memo', 'info'];
+
+/**
+ * Issue #1128: horizontal travel (px) required to switch tabs — deliberately
+ * above the 50px default so a small horizontal wobble during a vertical scroll
+ * never flips tabs (the direction lock is the primary guard; this is a backstop).
+ */
+const TAB_SWIPE_THRESHOLD = 60;
+
+/**
+ * Issue #1128: on the Terminal tab the swipe must start within this many pixels
+ * of a screen edge. The terminal body supports text selection and reading, so
+ * central swipes are ignored and only an intentional edge swipe changes tabs.
+ */
+const TERMINAL_SWIPE_EDGE_ZONE = 32;
 
 // ============================================================================
 // Main Component
@@ -236,6 +259,31 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const hasNewOutput = useNewOutputIndicator({
     worktreeId,
     active: activeTab === 'terminal',
+  });
+
+  // Issue #1128: step to the previous/next mobile tab (no wraparound). Keeps the
+  // MobileTabBar indicator synced since both derive from the same `activeTab`.
+  const goToAdjacentTab = useCallback(
+    (delta: number) => {
+      const index = MOBILE_TAB_ORDER.indexOf(activeTab);
+      if (index === -1) return;
+      const nextIndex = index + delta;
+      if (nextIndex < 0 || nextIndex >= MOBILE_TAB_ORDER.length) return;
+      handleMobileTabChange(MOBILE_TAB_ORDER[nextIndex]);
+    },
+    [activeTab, handleMobileTabChange]
+  );
+
+  // Issue #1128: horizontal tab-swipe over the mobile content area. Constrained
+  // to the horizontal axis with a direction lock so a vertical scroll never
+  // flips tabs; suppressed inside horizontally-scrollable panes; and restricted
+  // to the screen edges while the Terminal tab is active (text selection safe).
+  const { ref: tabSwipeRef } = useSwipeGesture({
+    axis: 'horizontal',
+    threshold: TAB_SWIPE_THRESHOLD,
+    edgeStartZone: activeTab === 'terminal' ? TERMINAL_SWIPE_EDGE_ZONE : 0,
+    onSwipeLeft: () => goToAdjacentTab(1),
+    onSwipeRight: () => goToAdjacentTab(-1),
   });
 
   // Render
@@ -459,6 +507,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 
         <main
           className="flex-1 overflow-y-auto"
+          ref={tabSwipeRef}
           style={{
             paddingBottom: MOBILE_CONTENT_BOTTOM_PADDING,
           }}
@@ -542,6 +591,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               isSessionRunning={activeSessionRunning}
               pendingInsertText={pendingInsertText}
               onInsertConsumed={handleInsertConsumedSingle}
+              // Issue #1128: lift the composer above the software keyboard so it
+              // stays visible while typing (visualViewport-driven).
+              keyboardAware
               // Issue #1080: Auto-Yes now lives in the composer meta row (moved off
               // the sticky tab row). The active agent tab already names the tool, so
               // the parenthetical tool name is suppressed here (showToolName=false).
