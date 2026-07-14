@@ -13,6 +13,7 @@ vi.mock('@/lib/tmux/tmux', () => ({
   sendKeys: vi.fn(),
   sendSpecialKey: vi.fn(),
   killSession: vi.fn(),
+  reconcileSessionGeometry: vi.fn().mockResolvedValue(false),
 }));
 
 // Mock opencode-config module

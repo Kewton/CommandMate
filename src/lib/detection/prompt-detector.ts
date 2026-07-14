@@ -7,6 +7,7 @@
 import { createLogger } from '@/lib/logger';
 import { detectMultipleChoicePrompt } from './prompt-detect-multiple-choice';
 import type { DetectPromptOptions, PromptDetectionResult } from './types';
+import { normalizeTuiFrameForDetection } from './tui-detection-frame';
 
 // Re-export types for backward compatibility (existing import paths)
 export type { DetectPromptOptions, PromptDetectionResult } from './types';
@@ -141,12 +142,15 @@ function yesNoPromptResult(
  * ```
  */
 export function detectPrompt(output: string, options?: DetectPromptOptions): PromptDetectionResult {
+  const detectionOutput = normalizeTuiFrameForDetection(output);
   // D2-001: Extract tail 50 lines for duplicate log suppression.
   // Reuse `lines` for both dedup check and yes/no pattern matching below.
   // detectMultipleChoicePrompt() has its own independent split() in its
   // own scope -- this is intentional function encapsulation [S1-004][S2-001].
   // Issue #499 Item 4: Use precomputedLines when provided to avoid redundant split.
-  const lines = options?.precomputedLines ?? output.split('\n');
+  const lines = detectionOutput === output && options?.precomputedLines
+    ? options.precomputedLines
+    : detectionOutput.split('\n');
   const tailForDedup = lines.slice(-50).join('\n');
   const isDuplicate = tailForDedup === lastOutputTail;
 
@@ -155,7 +159,7 @@ export function detectPrompt(output: string, options?: DetectPromptOptions): Pro
   // If log suppression grows complex (e.g., per-worktree cache), extract
   // to shouldSuppressLog(output): boolean helper.]
   if (!isDuplicate) {
-    logger.debug('detectPrompt:start', { outputLength: output.length });
+    logger.debug('detectPrompt:start', { outputLength: detectionOutput.length });
   }
 
   // D2-003: Update cache (affects logging only, never return values)
@@ -170,7 +174,7 @@ export function detectPrompt(output: string, options?: DetectPromptOptions): Pro
   // ❯ 1. Yes
   //   2. No
   //   3. Cancel
-  const multipleChoiceResult = detectMultipleChoicePrompt(output, options, truncateRawContent);
+  const multipleChoiceResult = detectMultipleChoicePrompt(detectionOutput, options, truncateRawContent);
   if (multipleChoiceResult.isPrompt) {
     // D2-004: Suppress duplicate multipleChoice info log
     if (!isDuplicate) {
@@ -212,7 +216,7 @@ export function detectPrompt(output: string, options?: DetectPromptOptions): Pro
   }
   return {
     isPrompt: false,
-    cleanContent: output.trim(),
+    cleanContent: detectionOutput.trim(),
   };
 }
 

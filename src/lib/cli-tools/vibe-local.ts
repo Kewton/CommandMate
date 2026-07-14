@@ -80,6 +80,7 @@ export class VibeLocalTool extends BaseCLITool {
 
     const exists = await hasSession(sessionName);
     if (exists) {
+      await this.reconcileExistingSession(sessionName);
       logger.info('vibe-local-session');
       return;
     }

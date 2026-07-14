@@ -7,8 +7,10 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { invalidateCache } from './tmux-capture-cache';
 import { TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '@/config/tmux-pane-config';
+import { createLogger } from '@/lib/logger';
 
 const execFileAsync = promisify(execFile);
+const logger = createLogger('tmux');
 
 /**
  * Default timeout for tmux commands (5 seconds)
@@ -66,6 +68,79 @@ export interface CreateSessionOptions {
   historyLimit?: number;  // scrollback バッファサイズ（デフォルト: 50000）
   windowWidth?: number;   // ペイン幅（デフォルト: TUI_PANE_WIDTH）
   windowHeight?: number;  // ペイン高さ（デフォルト: TUI_PANE_HEIGHT、alternate screen TUIで十分な表示行数を確保。Issue #1163）
+}
+
+export interface SessionGeometryOptions {
+  windowWidth?: number;
+  windowHeight?: number;
+}
+
+/**
+ * Reconcile a session's window geometry without disrupting the running process.
+ * Failures are intentionally non-fatal: geometry improves capture fidelity but
+ * must never make an otherwise healthy CLI session unusable.
+ *
+ * @returns true when at least one tmux option was changed.
+ */
+export async function reconcileSessionGeometry(
+  sessionName: string,
+  options: SessionGeometryOptions = {},
+): Promise<boolean> {
+  const windowWidth = options.windowWidth ?? TUI_PANE_WIDTH;
+  const windowHeight = options.windowHeight ?? TUI_PANE_HEIGHT;
+  const target = exactTarget(sessionName);
+
+  let currentMode: string | undefined;
+  let currentWidth: number | undefined;
+  let currentHeight: number | undefined;
+
+  try {
+    const modeResult = await execFileAsync(
+      'tmux',
+      ['show-window-options', '-v', '-t', target, 'window-size'],
+      { timeout: DEFAULT_TIMEOUT },
+    );
+    currentMode = modeResult.stdout.trim();
+
+    const sizeResult = await execFileAsync(
+      'tmux',
+      ['display-message', '-p', '-t', target, '#{window_width}|#{window_height}'],
+      { timeout: DEFAULT_TIMEOUT },
+    );
+    const [width, height] = sizeResult.stdout.trim().split('|').map(Number);
+    if (Number.isFinite(width)) currentWidth = width;
+    if (Number.isFinite(height)) currentHeight = height;
+  } catch {
+    // Query failure is not decisive. Attempt the idempotent set/resize below.
+  }
+
+  const modeMatches = currentMode === 'manual';
+  const sizeMatches = currentWidth === windowWidth && currentHeight === windowHeight;
+  if (modeMatches && sizeMatches) return false;
+
+  try {
+    if (!modeMatches) {
+      await execFileAsync(
+        'tmux',
+        ['set-window-option', '-t', target, 'window-size', 'manual'],
+        { timeout: DEFAULT_TIMEOUT },
+      );
+    }
+    if (!sizeMatches) {
+      await execFileAsync(
+        'tmux',
+        ['resize-window', '-t', target, '-x', String(windowWidth), '-y', String(windowHeight)],
+        { timeout: DEFAULT_TIMEOUT },
+      );
+    }
+    return true;
+  } catch (error: unknown) {
+    logger.warn('session-geometry:reconcile-failed', {
+      sessionName,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
 }
 
 /**
@@ -234,21 +309,7 @@ export async function createSession(
     // tracking (the global option is never touched), and an explicit
     // `resize-window` then locks in the intended geometry. Best-effort: a failure
     // here must not abort session creation (some environments restrict resize).
-    try {
-      await execFileAsync(
-        'tmux',
-        ['set-window-option', '-t', exactTarget(sessionName), 'window-size', 'manual'],
-        { timeout: DEFAULT_TIMEOUT }
-      );
-      await execFileAsync(
-        'tmux',
-        ['resize-window', '-t', exactTarget(sessionName), '-x', String(windowWidth), '-y', String(windowHeight)],
-        { timeout: DEFAULT_TIMEOUT }
-      );
-    } catch {
-      // Non-fatal: window-size/resize is a display enhancement, not required for
-      // the session to function.
-    }
+    await reconcileSessionGeometry(sessionName, { windowWidth, windowHeight });
 
     // Set history limit
     await execFileAsync(

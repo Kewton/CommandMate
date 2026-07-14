@@ -18,6 +18,8 @@ import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree } from '@/lib/db';
 import type { Worktree, PromptType } from '@/types/models';
+import { startPolling } from '@/lib/polling/response-poller';
+import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 
 // --- Mocks ---
 
@@ -50,6 +52,10 @@ vi.mock('@/lib/tmux/tmux', () => ({
 vi.mock('@/lib/session/cli-session', () => ({
   captureSessionOutput: vi.fn().mockResolvedValue(''),
   captureSessionOutputFresh: vi.fn().mockResolvedValue(''),
+}));
+vi.mock('@/lib/polling/response-poller', () => ({ startPolling: vi.fn() }));
+vi.mock('@/lib/realtime/terminal-broadcast', () => ({
+  broadcastTerminalSnapshotAfterInteraction: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock prompt-detector
@@ -161,6 +167,12 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
     expect(data.success).toBe(true);
     // Issue #193: Claude multi-choice uses sendSpecialKeys (cursor-based navigation)
     expect(sendSpecialKeys).toHaveBeenCalled();
+    expect(startPolling).toHaveBeenCalledWith('test-wt', 'claude', undefined);
+    expect(broadcastTerminalSnapshotAfterInteraction).toHaveBeenCalledWith(
+      'test-wt',
+      'claude',
+      undefined,
+    );
   });
 
   it('should NOT send keys when prompt has disappeared (race condition)', async () => {

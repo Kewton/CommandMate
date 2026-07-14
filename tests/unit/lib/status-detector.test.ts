@@ -18,6 +18,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
 import { resetDetectPromptCache } from '@/lib/detection/prompt-detector';
+import { buildClaude1000RowPermissionFrame } from '../../fixtures/claude-1000-row-prompt';
 
 // Named constants for Unicode characters used in tmux output simulation.
 // These match the actual characters produced by Claude CLI and detected by cli-patterns.ts.
@@ -42,6 +43,25 @@ function activeThinking(activity: string): string {
 }
 
 describe('status-detector', () => {
+  describe('Issue #1167 1000-row Claude frame', () => {
+    it('classifies a permission prompt above a bottom task panel as waiting', () => {
+      const result = detectSessionStatus(buildClaude1000RowPermissionFrame(), 'claude');
+
+      expect(result.status).toBe('waiting');
+      expect(result.reason).toBe('prompt_detected');
+      expect(result.hasActivePrompt).toBe(true);
+      expect(result.promptDetection.promptData?.type).toBe('multiple_choice');
+    });
+
+    it('does not resurrect an old footer when a newer input prompt is below it', () => {
+      const output = `${buildClaude1000RowPermissionFrame()}\n❯\n? for shortcuts`;
+      const result = detectSessionStatus(output, 'claude');
+
+      expect(result.hasActivePrompt).toBe(false);
+      expect(result.status).toBe('ready');
+    });
+  });
+
   // Issue #402: Reset duplicate log suppression cache for test isolation
   beforeEach(() => {
     resetDetectPromptCache();

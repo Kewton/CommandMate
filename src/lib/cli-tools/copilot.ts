@@ -123,6 +123,7 @@ export class CopilotTool extends BaseCLITool {
     // Check if session already exists
     const exists = await hasSession(sessionName);
     if (exists) {
+      await this.reconcileExistingSession(sessionName);
       logger.info('copilot-session-exists');
       return;
     }

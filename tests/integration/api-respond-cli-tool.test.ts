@@ -22,6 +22,9 @@ vi.mock('@/lib/tmux/tmux', () => ({
 vi.mock('@/lib/ws-server', () => ({
   broadcastMessage: vi.fn(),
 }));
+vi.mock('@/lib/realtime/terminal-broadcast', () => ({
+  broadcastTerminalSnapshotAfterInteraction: vi.fn().mockResolvedValue(undefined),
+}));
 
 // Declare mock function type
 declare module '@/lib/db/db-instance' {

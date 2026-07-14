@@ -17,6 +17,7 @@ import {
   killSession,
   ensureSession,
   exactTarget,
+  reconcileSessionGeometry,
   SPECIAL_KEY_VALUES,
 } from '@/lib/tmux/tmux';
 
@@ -411,6 +412,69 @@ describe('tmux library', () => {
     });
   });
 
+  describe('reconcileSessionGeometry (Issue #1167)', () => {
+    function installGeometryMock(mode: string, size: string): void {
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const cmdArgs = args[1] as string[];
+        const callback = args[args.length - 1] as (
+          err: Error | null,
+          result: { stdout: string; stderr: string }
+        ) => void;
+        const stdout = cmdArgs[0] === 'show-window-options'
+          ? mode
+          : cmdArgs[0] === 'display-message'
+            ? size
+            : '';
+        callback(null, { stdout, stderr: '' });
+        return {} as ReturnType<typeof execFile>;
+      });
+    }
+
+    it('is a no-op when the existing session already has the expected geometry', async () => {
+      installGeometryMock('manual\n', '200|1000\n');
+
+      await expect(reconcileSessionGeometry('mcbd-claude-wt')).resolves.toBe(false);
+
+      const subcommands = vi.mocked(execFile).mock.calls.map(call => (call[1] as string[])[0]);
+      expect(subcommands).toEqual(['show-window-options', 'display-message']);
+    });
+
+    it('repairs a legacy latest/72-row session without touching global options', async () => {
+      installGeometryMock('latest\n', '271|72\n');
+
+      await expect(reconcileSessionGeometry('mcbd-claude-wt')).resolves.toBe(true);
+
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['set-window-option', '-t', '=mcbd-claude-wt:', 'window-size', 'manual'],
+        { timeout: 5000 },
+        expect.any(Function),
+      );
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['resize-window', '-t', '=mcbd-claude-wt:', '-x', '200', '-y', '1000'],
+        { timeout: 5000 },
+        expect.any(Function),
+      );
+      for (const call of vi.mocked(execFile).mock.calls) {
+        expect(call[1] as string[]).not.toContain('-g');
+      }
+    });
+
+    it('keeps the session usable when reconciliation fails', async () => {
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const callback = args[args.length - 1] as (
+          err: Error | null,
+          result: { stdout: string; stderr: string }
+        ) => void;
+        callback(new Error('resize denied'), { stdout: '', stderr: '' });
+        return {} as ReturnType<typeof execFile>;
+      });
+
+      await expect(reconcileSessionGeometry('mcbd-claude-wt')).resolves.toBe(false);
+    });
+  });
+
   describe('sendKeys', () => {
     it('should send keys with Enter', async () => {
       vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
@@ -618,9 +682,8 @@ describe('tmux library', () => {
 
       await ensureSession('test-session', '/path/to/cwd');
 
-      // Should call has-session, new-session, set-window-option (window-size manual),
-      // resize-window, and set-option (Issue #1163 adds the window-size + resize calls)
-      expect(execFile).toHaveBeenCalledTimes(5);
+      // Includes two geometry inspection calls before the window-size writes.
+      expect(execFile).toHaveBeenCalledTimes(7);
     });
 
     it('should not create session if it already exists', async () => {

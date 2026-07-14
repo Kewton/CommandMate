@@ -18,6 +18,7 @@ vi.mock('@/lib/tmux/tmux', () => ({
   capturePane: vi.fn(),
   killSession: vi.fn(),
   sendSpecialKey: vi.fn(),
+  reconcileSessionGeometry: vi.fn().mockResolvedValue(false),
 }));
 
 // Mock pasted-text-helper (Issue #212)
@@ -69,7 +70,7 @@ import {
   CLAUDE_PROMPT_POLL_INTERVAL,
   CLAUDE_SEND_PROMPT_WAIT_TIMEOUT,
 } from '@/lib/session/claude-session';
-import { hasSession, createSession, sendKeys, capturePane, killSession, sendSpecialKey } from '@/lib/tmux/tmux';
+import { hasSession, createSession, sendKeys, capturePane, killSession, sendSpecialKey, reconcileSessionGeometry } from '@/lib/tmux/tmux';
 import {
   CLAUDE_PROMPT_PATTERN,
   CLAUDE_SEPARATOR_PATTERN,
@@ -322,6 +323,7 @@ describe('claude-session - Issue #152 improvements', () => {
       await startClaudeSession(TEST_SESSION_OPTIONS);
 
       expect(createSession).not.toHaveBeenCalled();
+      expect(reconcileSessionGeometry).toHaveBeenCalledWith('mcbd-claude-test-worktree');
     });
 
     it('should recreate unhealthy existing session (Issue #265, Bug 2)', async () => {

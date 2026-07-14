@@ -280,7 +280,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   const showEscapeHatch =
     terminal.isUnclassifiedActive &&
     !showNav &&
-    !showPrompt;
+    !prompt.visible;
 
   // Issue #744: the embedded HistoryPane for THIS split. Receives this split's
   // own messages (useSplitMessages) and the per-split highlight namespace via

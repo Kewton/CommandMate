@@ -330,8 +330,13 @@ describe('TerminalSplitPaneContent', () => {
   });
 
   it('renders the C-lite escape hatch for an unclassified running session (Issue #1017)', async () => {
-    mockFetch.mockImplementation(() =>
-      okJson({
+    let fetchCount = 0;
+    mockFetch.mockImplementation(async () => {
+      fetchCount += 1;
+      if (fetchCount > 1) {
+        await new Promise(resolve => setTimeout(resolve, 550));
+      }
+      return okJson({
         isRunning: true,
         fullOutput: 'stuck in an unknown TUI mode',
         thinking: false,
@@ -340,8 +345,8 @@ describe('TerminalSplitPaneContent', () => {
         isPagerActive: false,
         isPromptWaiting: false,
         isUnclassifiedActive: true,
-      }),
-    );
+      });
+    });
 
     render(
       <TerminalSplitPaneContent
@@ -357,7 +362,7 @@ describe('TerminalSplitPaneContent', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('terminal-escape-hatch')).toBeInTheDocument();
-    });
+    }, { timeout: 1500 });
     expect(screen.getByTestId('terminal-escape-hatch').getAttribute('data-cli-tool-id')).toBe('codex');
   });
 
@@ -433,6 +438,7 @@ describe('TerminalSplitPaneContent', () => {
         fullOutput: '',
         thinking: false,
         isPromptWaiting: true,
+        isUnclassifiedActive: true,
         promptData: { type: 'yes_no', question: 'Continue?' },
       }),
     );
@@ -452,6 +458,7 @@ describe('TerminalSplitPaneContent', () => {
       await Promise.resolve();
     });
     expect(screen.queryByTestId('prompt-panel')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('terminal-escape-hatch')).not.toBeInTheDocument();
   });
 
   it('shows attach skeleton until the first /current-output resolves', async () => {

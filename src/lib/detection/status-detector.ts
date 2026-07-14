@@ -26,6 +26,7 @@
 
 import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN, CODEX_PAGER_FOOTER_PATTERN, CODEX_STATUS_BAR_PATTERN, CLAUDE_INTERRUPT_HINT_PATTERN, ANTIGRAVITY_SELECTION_LIST_PATTERN } from './cli-patterns';
 import { detectPrompt } from './prompt-detector';
+import { normalizeTuiFrameForDetection } from './tui-detection-frame';
 import type { PromptDetectionResult } from './prompt-detector';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
@@ -231,7 +232,7 @@ export function detectSessionStatus(
   lastOutputTimestamp?: Date
 ): StatusDetectionResult {
   // Strip ANSI codes and get last N lines for analysis
-  const cleanOutput = stripAnsi(output);
+  const cleanOutput = normalizeTuiFrameForDetection(stripAnsi(output));
   const lines = cleanOutput.split('\n');
   // Strip trailing empty lines (tmux terminal padding) before windowing.
   // tmux buffers often end with many empty padding lines that would otherwise

@@ -13,6 +13,7 @@ vi.mock('@/lib/tmux/tmux', () => ({
   sendSpecialKey: vi.fn(),
   killSession: vi.fn(),
   capturePane: vi.fn(),
+  reconcileSessionGeometry: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock('@/lib/pasted-text-helper', () => ({
