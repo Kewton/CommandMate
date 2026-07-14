@@ -319,7 +319,7 @@ export const FileTreeView = memo(function FileTreeView({
               // A directory we previously listed that now errors (deleted /
               // inaccessible) is itself a change — record a sentinel so the
               // comparison trips and the reload prunes the stale path.
-              return { dirPath, hash: ' unavailable' };
+              return { dirPath, hash: 'unavailable' };
             }
           })
         );
