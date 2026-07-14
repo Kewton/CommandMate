@@ -367,6 +367,11 @@
 | `src/lib/session/current-output-builder.ts` | `buildCurrentOutput()`（Issue #1120）。/current-outputルートとWS terminal streamerで共有するペイロード組立（pull/push一致） |
 | `src/hooks/useNewOutputIndicator.ts` | モバイル端末タブ新着出力バッジのpush駆動シグナル（Issue #1120）。非表示中のterminal_snapshot/messageでフラグ、terminalタブ表示で解除 |
 | `src/components/common/ConnectionStatusIndicator.tsx` | realtime接続状態のさりげないインジケータ（Issue #1120）。connected時は非表示、切断/再接続中のみpill表示（pollingフォールバック動作中） |
+| `src/lib/pwa/cache-policy.ts` | SWキャッシュ方針の単一情報源（Issue #1124）。allowlist方式。`selectCacheStrategy`（GET/同一オリジンのみ、`/api`・`/login`・`/proxy`はnetwork-only、`/_next/static/`・`/icons/`・manifest/faviconはcache-first、navigationはoffline-fallback）、`isExcludedPath`/`isStaticAsset`、本番のみ登録の`shouldRegisterServiceWorker`。`public/sw.js`が同定数を鏡写しし`tests/unit/pwa/sw-file.test.ts`で同期を担保 |
+| `public/sw.js` | 手書きvanilla Service Worker（Issue #1124）。next-pwa/Workbox不使用（custom server＋allowlist要件のため）。install時に`/offline`をprecache（skipWaitingしない）、activateで旧cache削除＋clients.claim、fetchはcache-policy.tsを鏡写した判定、`SKIP_WAITING`メッセージで更新適用。#1125 Web Push用の拡張ポイントをコメントで確保 |
+| `src/components/pwa/ServiceWorkerRegistrar.tsx` | `/sw.js`登録（本番のみ）＋更新検知トースト（Issue #1124）。新workerがinstalled＋controller有時にバナー表示→タップで`SKIP_WAITING`送信→`controllerchange`でreload。dev/test・非セキュアコンテキストでは登録スキップ。AppProvidersにマウント |
+| `src/app/manifest.ts` | Web App Manifest（Issue #1124、`/manifest.webmanifest`配信）。name/short_name/start_url/`display:standalone`/dark系background/theme_color/icons（192・512・maskable512） |
+| `src/app/offline/page.tsx` | オフラインフォールバック画面（Issue #1124）。SWがprecacheしnavigation失敗時に配信。ユーザーデータ非依存でauth前も到達可（AUTH_EXCLUDED_PATHS）。`OfflineReconnectButton`（reload）を含む |
 
 ---
 

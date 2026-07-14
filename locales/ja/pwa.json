@@ -1,0 +1,11 @@
+{
+  "offline": {
+    "title": "オフラインです",
+    "description": "サーバーに接続できません。接続を確認して再試行してください。",
+    "reconnect": "再接続"
+  },
+  "update": {
+    "available": "新しいバージョンがあります",
+    "reload": "リロード"
+  }
+}
