@@ -264,6 +264,14 @@ export interface MultipleChoicePromptData extends BasePromptData {
 export type PromptData = YesNoPromptData | MultipleChoicePromptData;
 
 /**
+ * Issue #1121: Client-only optimistic send state for a message shown in the UI
+ * before the server confirms it. `sending` = awaiting the send API / server
+ * echo; `error` = the send failed and the user can retry or discard. Never set
+ * on messages returned by the API.
+ */
+export type OptimisticSendState = 'sending' | 'error';
+
+/**
  * Chat message
  */
 export interface ChatMessage {
@@ -296,6 +304,12 @@ export interface ChatMessage {
   instanceId?: string;
   /** Whether this message is archived (from a previous session) */
   archived: boolean;
+  /**
+   * Issue #1121: Optimistic send state. Present only on client-side pending
+   * messages inserted before the server confirms the send; never set on
+   * messages returned by the API.
+   */
+  optimisticState?: OptimisticSendState;
 }
 
 /**

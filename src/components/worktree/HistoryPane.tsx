@@ -84,6 +84,17 @@ export interface HistoryPaneProps {
   showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
   /** Issue #485: Callback when a message is inserted into message input */
   onInsertToMessage?: (content: string) => void;
+  /**
+   * Issue #1121: Called with a failed optimistic message's tempId to re-send it.
+   * Wired by callers that provide optimistic-UI sending (PC split). Omitted
+   * elsewhere — error bubbles simply render without a Retry action.
+   */
+  onRetryPending?: (tempId: string) => void;
+  /**
+   * Issue #1121: Called with a failed optimistic message's tempId to discard it
+   * (the caller may restore its content to the composer draft).
+   */
+  onDiscardPending?: (tempId: string) => void;
   /** Issue #168: Whether archived messages are being shown */
   showArchived?: boolean;
   /** Issue #168: Callback when showArchived toggle changes */
@@ -242,6 +253,8 @@ export const HistoryPane = memo(function HistoryPane({
   className = '',
   showToast,
   onInsertToMessage,
+  onRetryPending,
+  onDiscardPending,
   showArchived = false,
   onShowArchivedChange,
   historyDisplayLimit,
@@ -538,6 +551,8 @@ export const HistoryPane = memo(function HistoryPane({
           onToggleExpand={createToggleHandler(pair.id)}
           onCopy={handleCopy}
           onInsertToMessage={onInsertToMessage}
+          onRetryPending={onRetryPending}
+          onDiscardPending={onDiscardPending}
           showAssistant={!historyUserOnly}
         />
       </div>

@@ -434,4 +434,78 @@ describe('ConversationPairCard', () => {
       expect(screen.queryByTestId('copy-assistant-message')).not.toBeInTheDocument();
     });
   });
+
+  // ===== Optimistic send state (Issue #1121) =====
+
+  describe('optimistic send state', () => {
+    function createOptimisticPair(
+      state: 'sending' | 'error',
+      content = 'Optimistic hi',
+      id = 'temp-1'
+    ): ConversationPair {
+      const userMessage = createMessage('user', content, id);
+      userMessage.optimisticState = state;
+      return { id, userMessage, assistantMessages: [], status: 'pending' };
+    }
+
+    it('renders the sending chip and hides the waiting-for-response indicator', () => {
+      render(
+        <ConversationPairCard
+          pair={createOptimisticPair('sending')}
+          onFilePathClick={mockOnFilePathClick}
+        />
+      );
+
+      expect(screen.getByTestId('optimistic-sending')).toBeInTheDocument();
+      expect(screen.getByText('Optimistic hi')).toBeInTheDocument();
+      // The "Waiting for response…" block is for confirmed messages only.
+      expect(screen.queryByTestId('pending-indicator')).not.toBeInTheDocument();
+    });
+
+    it('renders the error state with retry/discard and hides the waiting indicator', () => {
+      render(
+        <ConversationPairCard
+          pair={createOptimisticPair('error')}
+          onFilePathClick={mockOnFilePathClick}
+          onRetryPending={vi.fn()}
+          onDiscardPending={vi.fn()}
+        />
+      );
+
+      expect(screen.getByTestId('optimistic-error')).toBeInTheDocument();
+      expect(screen.getByTestId('pending-retry')).toBeInTheDocument();
+      expect(screen.getByTestId('pending-discard')).toBeInTheDocument();
+      expect(screen.queryByTestId('pending-indicator')).not.toBeInTheDocument();
+    });
+
+    it('invokes onRetryPending with the message id when retry is clicked', () => {
+      const onRetryPending = vi.fn();
+      render(
+        <ConversationPairCard
+          pair={createOptimisticPair('error', 'boom', 'temp-42')}
+          onFilePathClick={mockOnFilePathClick}
+          onRetryPending={onRetryPending}
+          onDiscardPending={vi.fn()}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId('pending-retry'));
+      expect(onRetryPending).toHaveBeenCalledWith('temp-42');
+    });
+
+    it('invokes onDiscardPending with the message id when discard is clicked', () => {
+      const onDiscardPending = vi.fn();
+      render(
+        <ConversationPairCard
+          pair={createOptimisticPair('error', 'boom', 'temp-99')}
+          onFilePathClick={mockOnFilePathClick}
+          onRetryPending={vi.fn()}
+          onDiscardPending={onDiscardPending}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId('pending-discard'));
+      expect(onDiscardPending).toHaveBeenCalledWith('temp-99');
+    });
+  });
 });
