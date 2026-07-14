@@ -171,7 +171,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     handleInsertToSplit,
     handleKillCancel,
     handleKillConfirm,
-    handleKillSession,
+    openKillConfirm,
+    openActiveKillConfirm,
+    killTarget,
+    isKillPending,
     handleLoadContent,
     handleLoadError,
     handleMessageSent,
@@ -224,7 +227,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     setIsEditorMaximized,
     setWorktree,
     showArchived,
-    showKillConfirm,
     showNewFileDialog,
     showToast,
     state,
@@ -304,6 +306,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // display name when no alias is set or the active instance is stale).
   const activeInstanceLabel = getActiveInstanceLabel(agentInstances, activeInstanceId, activeCliTab);
 
+  // Issue #1171: the kill-confirm dialog title uses the SNAPSHOTTED target label
+  // (captured at button press) so it stays fixed even if the active instance /
+  // focused split / Dropdown selection changes while the dialog is open. Falls
+  // back to the active instance label when no target is set (dialog closed).
+  const killDialogLabel = killTarget?.label ?? activeInstanceLabel;
+
   // Issue #960: derive the active session's running state per-instance優先
   // （PC版と整合）so the End button and MessageInput reflect the selected
   // instance rather than the per-CLI aggregate. Falls back to the per-CLI map
@@ -381,8 +389,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           onWorktreeUpdate={setWorktree}
           fileInputRef={fileInputRef}
           onFileInputChange={handleFileInputChange}
-          onKillSession={handleKillSession}
-          showKillConfirm={showKillConfirm}
+          onKillSession={openActiveKillConfirm}
+          onRequestSessionEnd={openKillConfirm}
+          killTarget={killTarget}
+          isKillPending={isKillPending}
           onKillCancel={handleKillCancel}
           onKillConfirm={handleKillConfirm}
           moveTarget={moveTarget}
@@ -395,7 +405,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           onNewFileCancel={handleNewFileCancel}
           toasts={toasts}
           onToastClose={removeToast}
-          killDialogTitle={tWorktree('session.confirmEnd', { tool: activeInstanceLabel })}
+          killDialogTitle={tWorktree('session.confirmEnd', { tool: killDialogLabel })}
           killDialogWarning={tWorktree('session.endWarning')}
           cancelLabel={tCommon('cancel')}
           endLabel={tCommon('end')}
@@ -651,13 +661,13 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         )}
 
         {/* Issue #1080: terminal secondary actions (search + End) bottom sheet.
-            End defers to handleKillSession, which opens the existing kill-confirm
-            dialog (destructive confirmation preserved). */}
+            Issue #1171: End defers to openActiveKillConfirm, which snapshots the
+            active instance as the kill target and opens the confirm dialog. */}
         <MobileTerminalActionsSheet
           open={showActionsSheet}
           onClose={() => setShowActionsSheet(false)}
           onSearch={() => window.dispatchEvent(new CustomEvent('terminal-search-open'))}
-          onEnd={handleKillSession}
+          onEnd={openActiveKillConfirm}
           endDisabled={!activeSessionRunning}
         />
 
@@ -699,11 +709,13 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           className="hidden"
           aria-label="Upload file"
         />
-        {/* Kill session confirmation dialog (Mobile) */}
+        {/* Kill session confirmation dialog (Mobile) — Issue #1171: same
+            target-snapshot model as PC (killTarget drives open-state + title;
+            Confirm disabled while the POST is in flight). */}
         <Modal
-          isOpen={showKillConfirm}
+          isOpen={killTarget !== null}
           onClose={handleKillCancel}
-          title={tWorktree('session.confirmEnd', { tool: activeInstanceLabel })}
+          title={tWorktree('session.confirmEnd', { tool: killDialogLabel })}
           size="sm"
           showCloseButton={true}
         >
@@ -722,7 +734,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               <button
                 type="button"
                 onClick={handleKillConfirm}
-                className="px-4 py-2 text-sm font-medium rounded-md bg-danger hover:bg-danger/90 text-white"
+                disabled={isKillPending}
+                className="px-4 py-2 text-sm font-medium rounded-md bg-danger hover:bg-danger/90 text-white disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {tCommon('end')}
               </button>

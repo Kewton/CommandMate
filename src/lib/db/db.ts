@@ -50,6 +50,7 @@ export {
   deleteMessagesByInstance,
   updateLastUserMessage,
   clearLastUserMessage,
+  recomputeLastUserMessage,
   getMessageById,
   updatePromptData,
   markPendingPromptsAsAnswered,

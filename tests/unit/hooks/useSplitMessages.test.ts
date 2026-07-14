@@ -13,6 +13,33 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useSplitMessages } from '@/hooks/useSplitMessages';
 
+// Issue #1171: controllable realtime mock so tests can fire session_status_changed
+// stop events. Existing tests never emit, so their behavior is unchanged.
+const realtimeMock = vi.hoisted(() => {
+  const listeners: Array<(e: unknown) => void> = [];
+  const api = {
+    status: 'disconnected' as const,
+    connected: false,
+    subscribe: () => {},
+    unsubscribe: () => {},
+    addListener: (l: (e: unknown) => void) => {
+      listeners.push(l);
+      return () => {
+        const i = listeners.indexOf(l);
+        if (i >= 0) listeners.splice(i, 1);
+      };
+    },
+  };
+  return {
+    listeners,
+    emit: (event: unknown) => { for (const l of [...listeners]) l(event); },
+    useRealtime: () => api,
+  };
+});
+vi.mock('@/hooks/useRealtimeConnection', () => ({
+  useRealtime: realtimeMock.useRealtime,
+}));
+
 type MockFetchResponse = {
   ok: boolean;
   status?: number;
@@ -211,6 +238,57 @@ describe('useSplitMessages (Issue #744)', () => {
       await result.current.refresh();
     });
     expect(result.current.messages[0]?.content).toBe('second');
+  });
+
+  // Issue #1171: a targeted kill archives this split's messages; a matching
+  // scoped stop event triggers an immediate re-fetch so the history clears now.
+  it('re-fetches on a matching scoped session stop event', async () => {
+    let phase: 'active' | 'archived' = 'active';
+    mockFetch.mockImplementation(() =>
+      phase === 'active' ? okJson([makeMessage({ content: 'active' })]) : okJson([]),
+    );
+    const { result } = renderHook(() =>
+      useSplitMessages({ worktreeId: 'w-1', cliToolId: 'claude', instanceId: 'claude-2' }),
+    );
+    await waitFor(() => expect(result.current.messages.length).toBe(1));
+
+    phase = 'archived';
+    await act(async () => {
+      realtimeMock.emit({
+        type: 'session_status_changed',
+        worktreeId: 'w-1',
+        isRunning: false,
+        cliTool: 'claude',
+        instance: 'claude-2',
+        messagesCleared: true,
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(result.current.messages.length).toBe(0));
+  });
+
+  it('does not re-fetch on a scoped stop event for a different instance', async () => {
+    const calls = { n: 0 };
+    mockFetch.mockImplementation(() => {
+      calls.n += 1;
+      return okJson([makeMessage()]);
+    });
+    renderHook(() =>
+      useSplitMessages({ worktreeId: 'w-1', cliToolId: 'claude', instanceId: 'claude-2' }),
+    );
+    await waitFor(() => expect(calls.n).toBeGreaterThan(0));
+    const before = calls.n;
+    act(() => {
+      realtimeMock.emit({
+        type: 'session_status_changed',
+        worktreeId: 'w-1',
+        isRunning: false,
+        cliTool: 'claude',
+        instance: 'claude', // primary, not this pane's claude-2
+      });
+    });
+    await Promise.resolve();
+    expect(calls.n).toBe(before);
   });
 
   it('resets messages and re-fetches when (worktreeId, cliToolId) changes', async () => {

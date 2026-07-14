@@ -25,6 +25,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { ChatMessage } from '@/types/models';
+import { useRealtime } from '@/hooks/useRealtimeConnection';
+import type { RealtimeEvent, SessionStatusEvent } from '@/lib/realtime/types';
 
 /** Polling cadence for per-split message history (ms). */
 export const SPLIT_MESSAGES_POLL_INTERVAL_MS = 5000;
@@ -71,6 +73,10 @@ export function useSplitMessages({
 }: UseSplitMessagesOptions): UseSplitMessagesReturn {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Issue #1171: realtime access so a targeted kill (matching scoped stop event)
+  // refreshes THIS split's history immediately instead of waiting for the 5s poll.
+  const { subscribe, unsubscribe, addListener } = useRealtime();
 
   // Resolve to the primary instance when omitted (instanceId === cliToolId).
   const resolvedInstanceId = instanceId ?? cliToolId;
@@ -167,6 +173,31 @@ export function useSplitMessages({
       document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [enabled, fetchMessages]);
+
+  // Issue #1171: join the worktree room so scoped stop events are delivered
+  // (ref-counted, so sharing the room with useTerminalPanePolling is harmless).
+  useEffect(() => {
+    if (!enabled) return;
+    subscribe(worktreeId);
+    return () => unsubscribe(worktreeId);
+  }, [enabled, worktreeId, subscribe, unsubscribe]);
+
+  // Issue #1171: when THIS split's session is terminated (matching scoped stop
+  // event; messages were archived server-side), re-fetch so the current session
+  // history clears immediately. Scoped events for other splits are ignored, so a
+  // sibling's kill never refetches — and thus never disturbs — this split.
+  useEffect(() => {
+    if (!enabled) return;
+    return addListener((event: RealtimeEvent) => {
+      if (event.type !== 'session_status_changed') return;
+      const evt = event as SessionStatusEvent;
+      if (evt.worktreeId !== worktreeId) return;
+      if (evt.isRunning !== false) return;
+      if (evt.instance != null && evt.instance !== inFlightInstanceRef.current) return;
+      if (evt.cliTool != null && evt.cliTool !== inFlightCliToolRef.current) return;
+      void fetchMessages();
+    });
+  }, [enabled, worktreeId, addListener, fetchMessages]);
 
   const refresh = useCallback(() => fetchMessages(), [fetchMessages]);
 

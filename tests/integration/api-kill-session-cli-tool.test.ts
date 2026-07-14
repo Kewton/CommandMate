@@ -8,7 +8,7 @@ import { NextRequest } from 'next/server';
 import { POST as killSession } from '@/app/api/worktrees/[id]/kill-session/route';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
-import { upsertWorktree } from '@/lib/db';
+import { upsertWorktree, createMessage, getWorktreeById } from '@/lib/db';
 import type { Worktree } from '@/types/models';
 
 // Mock tmux
@@ -221,6 +221,97 @@ describe('POST /api/worktrees/:id/kill-session - CLI Tool Support', () => {
       expect(response.status).toBe(404);
       const data = await response.json();
       expect(data.error).toContain('No active session');
+    });
+  });
+
+  describe('last_user_message recompute (Issue #1171)', () => {
+    it('recomputes last_user_message from remaining messages after a targeted instance kill', async () => {
+      const { CLIToolManager } = await import('@/lib/cli-tools/manager');
+      const claudeTool = CLIToolManager.getInstance().getTool('claude');
+      vi.spyOn(claudeTool, 'isRunning').mockResolvedValue(true);
+
+      const worktree: Worktree = {
+        id: 'wt-metadata',
+        name: 'Metadata Test',
+        path: '/path/to/meta',
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'TestRepo',
+        cliToolId: 'claude',
+      };
+      upsertWorktree(db, worktree);
+
+      // Primary-instance user message (older) — must remain and drive metadata.
+      createMessage(db, {
+        worktreeId: 'wt-metadata',
+        role: 'user',
+        content: 'primary remains',
+        timestamp: new Date(1000),
+        messageType: 'normal',
+        cliToolId: 'claude',
+        instanceId: 'claude',
+      });
+      // Alias-instance user message (newer) — archived by the targeted kill.
+      createMessage(db, {
+        worktreeId: 'wt-metadata',
+        role: 'user',
+        content: 'alias goes away',
+        timestamp: new Date(2000),
+        messageType: 'normal',
+        cliToolId: 'claude',
+        instanceId: 'claude-2',
+      });
+
+      // Before the kill: last_user_message is the newest (alias) message.
+      expect(getWorktreeById(db, 'wt-metadata')?.lastUserMessage).toBe('alias goes away');
+
+      const request = new NextRequest(
+        'http://localhost:3000/api/worktrees/wt-metadata/kill-session?cliTool=claude&instance=claude-2',
+        { method: 'POST' },
+      );
+      const response = await killSession(request, { params: { id: 'wt-metadata' } });
+      expect(response.status).toBe(200);
+
+      // The alias message was archived; last_user_message falls back to the
+      // still-active primary message rather than being cleared.
+      expect(getWorktreeById(db, 'wt-metadata')?.lastUserMessage).toBe('primary remains');
+    });
+
+    it('clears last_user_message when the kill archives the last remaining message', async () => {
+      const { CLIToolManager } = await import('@/lib/cli-tools/manager');
+      const claudeTool = CLIToolManager.getInstance().getTool('claude');
+      vi.spyOn(claudeTool, 'isRunning').mockResolvedValue(true);
+
+      const worktree: Worktree = {
+        id: 'wt-metadata-clear',
+        name: 'Metadata Clear',
+        path: '/path/to/meta2',
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'TestRepo',
+        cliToolId: 'claude',
+      };
+      upsertWorktree(db, worktree);
+
+      createMessage(db, {
+        worktreeId: 'wt-metadata-clear',
+        role: 'user',
+        content: 'only message',
+        timestamp: new Date(1000),
+        messageType: 'normal',
+        cliToolId: 'claude',
+        instanceId: 'claude',
+      });
+      expect(getWorktreeById(db, 'wt-metadata-clear')?.lastUserMessage).toBe('only message');
+
+      // Kill the only (primary) instance; its message is the last remaining one.
+      const request = new NextRequest(
+        'http://localhost:3000/api/worktrees/wt-metadata-clear/kill-session?cliTool=claude&instance=claude',
+        { method: 'POST' },
+      );
+      const response = await killSession(request, { params: { id: 'wt-metadata-clear' } });
+      expect(response.status).toBe(200);
+
+      // No active user message remains → cleared (undefined), as before #1171.
+      expect(getWorktreeById(db, 'wt-metadata-clear')?.lastUserMessage).toBeUndefined();
     });
   });
 });

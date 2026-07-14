@@ -50,6 +50,7 @@ import { DesktopHeader, InfoModal } from '@/components/worktree/WorktreeDetailSu
 import { UPLOADABLE_EXTENSIONS } from '@/config/uploadable-extensions';
 import { deriveCliStatus } from '@/types/sidebar';
 import { getCliToolDisplayName, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
+import type { SessionKillTarget } from '@/types/terminal-split-pane';
 import type { AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
 import type { ShowToast } from '@/types/markdown-editor';
 import type { Worktree, FileContent } from '@/types/models';
@@ -159,10 +160,15 @@ export interface WorktreeDetailDesktopProps {
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileInputChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
 
-  // Kill session confirmation
-  /** Opens the kill confirmation modal for the active CLI session (Issue #784). */
+  // Kill session confirmation (Issue #1171: target-snapshot based)
+  /** Opens the kill confirmation modal for the active agent instance (DesktopHeader, Issue #784). */
   onKillSession: () => void;
-  showKillConfirm: boolean;
+  /** Issue #1171: open the confirm dialog for a specific split's snapshotted target. */
+  onRequestSessionEnd: (target: SessionKillTarget) => void;
+  /** Issue #1171: the snapshotted kill target; non-null opens the dialog (no separate boolean). */
+  killTarget: SessionKillTarget | null;
+  /** Issue #1171: true while the kill POST is in flight (disables Confirm, blocks double-submit). */
+  isKillPending: boolean;
   onKillCancel: () => void;
   onKillConfirm: () => void;
 
@@ -257,7 +263,9 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   fileInputRef,
   onFileInputChange,
   onKillSession,
-  showKillConfirm,
+  onRequestSessionEnd,
+  killTarget,
+  isKillPending,
   onKillCancel,
   onKillConfirm,
   moveTarget,
@@ -430,6 +438,9 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           // the dragOver ring (D-2). The hover ring state stays child-local (D-3).
           onDropInstance={onDropInstance}
           draggedInstanceId={draggedInstanceId}
+          // Issue #1171: the split builds its own kill-target snapshot and calls
+          // this to open the confirm dialog for exactly the session it shows.
+          onRequestSessionEnd={onRequestSessionEnd}
         />
       );
     },
@@ -461,6 +472,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       // changes so each split's dragOver ring reflects the in-flight drag
       // (drag-time only, not a polling-cadence re-render).
       draggedInstanceId,
+      // Issue #1171: stable controller callback; listed for exhaustive-deps.
+      onRequestSessionEnd,
     ],
   );
 
@@ -762,9 +775,11 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           className="hidden"
           aria-label="Upload file"
         />
-        {/* Kill session confirmation dialog */}
+        {/* Kill session confirmation dialog (Issue #1171: target-snapshot based;
+            `killTarget !== null` is the single open-state source, and Confirm is
+            disabled while the POST is in flight to prevent a double-submit). */}
         <Modal
-          isOpen={showKillConfirm}
+          isOpen={killTarget !== null}
           onClose={onKillCancel}
           title={killDialogTitle}
           size="sm"
@@ -785,7 +800,9 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
               <button
                 type="button"
                 onClick={onKillConfirm}
-                className="px-4 py-2 text-sm font-medium rounded-md bg-danger hover:bg-danger/90 text-white"
+                disabled={isKillPending}
+                data-testid="kill-session-confirm-button"
+                className="px-4 py-2 text-sm font-medium rounded-md bg-danger hover:bg-danger/90 text-white disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {endLabel}
               </button>
