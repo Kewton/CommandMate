@@ -1105,6 +1105,96 @@ describe('loadCodexSkills .system subdirectory', () => {
   });
 });
 
+describe('loadAgentsSkills', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should return empty array when skills directory does not exist', async () => {
+    const nonExistentDir = path.resolve(__dirname, '../fixtures/nonexistent-agents-dir');
+    const { loadAgentsSkills } = await import('@/lib/slash-commands');
+    const skills = await loadAgentsSkills(nonExistentDir);
+
+    expect(skills).toEqual([]);
+  });
+
+  it('should load .agents/skills with source codex-skill and cliTools codex', async () => {
+    const testDir = path.resolve(__dirname, '../fixtures/test-agents-skills');
+    const skillDir = path.join(testDir, '.agents', 'skills', 'my-agents-skill');
+    try {
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(skillDir, 'SKILL.md'),
+        '---\nname: my-agents-skill\ndescription: An agents skill\n---\nBody'
+      );
+
+      const { loadAgentsSkills } = await import('@/lib/slash-commands');
+      const skills = await loadAgentsSkills(testDir);
+
+      expect(skills).toHaveLength(1);
+      expect(skills[0].name).toBe('my-agents-skill');
+      expect(skills[0].description).toBe('An agents skill');
+      expect(skills[0].category).toBe('skill');
+      expect(skills[0].source).toBe('codex-skill');
+      expect(skills[0].cliTools).toEqual(['codex']);
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should use os.homedir() when basePath is not provided', async () => {
+    const testDir = path.resolve(__dirname, '../fixtures/test-agents-homedir');
+    const skillDir = path.join(testDir, '.agents', 'skills', 'home-agents-skill');
+    try {
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(skillDir, 'SKILL.md'),
+        '---\nname: home-agents-skill\ndescription: Home agents skill\n---\nBody'
+      );
+
+      vi.doMock('os', async () => {
+        const actual = await vi.importActual<typeof import('os')>('os');
+        return { ...actual, homedir: () => testDir };
+      });
+
+      const { loadAgentsSkills } = await import('@/lib/slash-commands');
+      const skills = await loadAgentsSkills();
+
+      expect(skills).toHaveLength(1);
+      expect(skills[0].name).toBe('home-agents-skill');
+      expect(skills[0].source).toBe('codex-skill');
+      expect(skills[0].cliTools).toEqual(['codex']);
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should load built-in skills from .system/ subdirectory', async () => {
+    const testDir = path.resolve(__dirname, '../fixtures/test-agents-system');
+    const systemSkillDir = path.join(testDir, '.agents', 'skills', '.system', 'built-in-agents-skill');
+    try {
+      fs.mkdirSync(systemSkillDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(systemSkillDir, 'SKILL.md'),
+        '---\nname: built-in-agents-skill\ndescription: Built-in\n---\nBody'
+      );
+
+      const { loadAgentsSkills } = await import('@/lib/slash-commands');
+      const skills = await loadAgentsSkills(testDir);
+
+      expect(skills).toHaveLength(1);
+      expect(skills[0].name).toBe('built-in-agents-skill');
+      expect(skills[0].source).toBe('codex-skill');
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('getSlashCommandGroups with Codex skills', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -1112,6 +1202,57 @@ describe('getSlashCommandGroups with Codex skills', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('should include local .agents/skills when basePath is provided', async () => {
+    const testDir = path.resolve(__dirname, '../fixtures/test-agents-groups');
+    const agentsSkillDir = path.join(testDir, '.agents', 'skills', 'agents-only-skill');
+    try {
+      fs.mkdirSync(agentsSkillDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(agentsSkillDir, 'SKILL.md'),
+        '---\nname: agents-only-skill\ndescription: Agents skill\n---\nContent'
+      );
+
+      const { getSlashCommandGroups } = await import('@/lib/slash-commands');
+      const groups = await getSlashCommandGroups(testDir);
+
+      const allCommands = groups.flatMap((g) => g.commands);
+      const agentsSkill = allCommands.find((c) => c.name === 'agents-only-skill');
+      expect(agentsSkill).toBeDefined();
+      expect(agentsSkill?.source).toBe('codex-skill');
+      expect(agentsSkill?.cliTools).toEqual(['codex']);
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should deduplicate a skill present in both .agents/skills and .codex/skills', async () => {
+    const testDir = path.resolve(__dirname, '../fixtures/test-agents-codex-dedup');
+    const agentsSkillDir = path.join(testDir, '.agents', 'skills', 'shared-skill');
+    const codexSkillDir = path.join(testDir, '.codex', 'skills', 'shared-skill');
+    try {
+      fs.mkdirSync(agentsSkillDir, { recursive: true });
+      fs.mkdirSync(codexSkillDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(agentsSkillDir, 'SKILL.md'),
+        '---\nname: shared-skill\ndescription: From agents\n---\nContent'
+      );
+      fs.writeFileSync(
+        path.join(codexSkillDir, 'SKILL.md'),
+        '---\nname: shared-skill\ndescription: From codex\n---\nContent'
+      );
+
+      const { getSlashCommandGroups } = await import('@/lib/slash-commands');
+      const groups = await getSlashCommandGroups(testDir);
+
+      const shared = groups.flatMap((g) => g.commands).filter((c) => c.name === 'shared-skill');
+      expect(shared).toHaveLength(1);
+      expect(shared[0].source).toBe('codex-skill');
+      expect(shared[0].cliTools).toEqual(['codex']);
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
   });
 
   it('should include local Codex skills when basePath is provided', async () => {
