@@ -109,6 +109,7 @@ const MOBILE_CONTENT_BOTTOM_PADDING = 'calc(12rem + env(safe-area-inset-bottom, 
  * ```
  */
 import { useWorktreeDetailController } from '@/hooks/useWorktreeDetailController';
+import { useNewOutputIndicator } from '@/hooks/useNewOutputIndicator';
 export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   worktreeId,
 }: WorktreeDetailRefactoredProps) {
@@ -230,6 +231,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Issue #1080: mobile terminal secondary actions (search + End) moved off the
   // sticky control row into a bottom sheet, opened from a "more actions" trigger.
   const [showActionsSheet, setShowActionsSheet] = useState(false);
+
+  // Issue #1120: push-driven "new terminal output" badge on the mobile terminal tab.
+  const hasNewOutput = useNewOutputIndicator({
+    worktreeId,
+    active: activeTab === 'terminal',
+  });
 
   // Render
   // ========================================================================
@@ -552,6 +559,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         <MobileTabBar
           activeTab={activeTab}
           onTabChange={handleMobileTabChange}
+          hasNewOutput={hasNewOutput}
           hasPrompt={state.prompt.visible}
           hasUpdate={hasUpdate}
         />

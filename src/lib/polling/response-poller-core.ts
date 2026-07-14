@@ -8,6 +8,7 @@ import {
 } from '../tui-accumulator';
 import { clearPromptHashCache } from './prompt-dedup';
 import { checkForResponse } from './response-checker';
+import { broadcastTerminalSnapshot } from '@/lib/realtime/terminal-broadcast';
 
 const logger = createLogger('response-poller');
 
@@ -132,6 +133,11 @@ export function scheduleNextResponsePoll(
     } catch (error: unknown) {
       logger.error('error:', { error: error instanceof Error ? error.message : String(error) });
     }
+
+    // Issue #1120: push the current terminal snapshot to WS subscribers so the
+    // output streams during generation. No-op (and no tmux capture) when nobody
+    // is subscribed to the worktree room. Best-effort; polling is the fallback.
+    void broadcastTerminalSnapshot(worktreeId, cliToolId, instanceId);
 
     // Schedule next poll ONLY after current one completes
     // Guard: only if poller is still active (not stopped during checkForResponse)

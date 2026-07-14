@@ -783,6 +783,19 @@ export function broadcast(worktreeId: string, data: unknown): void {
 }
 
 /**
+ * Whether a worktree room currently has at least one subscribed client.
+ *
+ * Issue #1120: lets the server-side terminal streamer skip the (relatively
+ * expensive) tmux capture + detection work when nobody is watching the room.
+ *
+ * @param worktreeId - Worktree identifier
+ */
+export function hasRoomSubscribers(worktreeId: string): boolean {
+  const room = rooms.get(worktreeId);
+  return !!room && room.size > 0;
+}
+
+/**
  * Broadcast message with type to a specific worktree room
  *
  * @param type - Message type
