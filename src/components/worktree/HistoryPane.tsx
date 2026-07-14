@@ -12,6 +12,7 @@
 
 import React, { useMemo, useCallback, memo, useRef, useLayoutEffect, useState, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { Search, User, UserCheck, ChevronRight } from 'lucide-react';
 import { Checkbox, Skeleton } from '@/components/ui';
 import type { ChatMessage } from '@/types/models';
@@ -36,6 +37,11 @@ import {
 } from '@/config/history-display-config';
 import type { ConversationPair } from '@/types/conversation';
 import type { HistoryMatch } from '@/hooks/useHistorySearch';
+import {
+  HISTORY_VIRTUAL_OVERSCAN,
+  HISTORY_ESTIMATED_PAIR_HEIGHT_PX,
+  isNearBottom,
+} from '@/lib/history-virtualization';
 
 // ============================================================================
 // Constants
@@ -271,8 +277,10 @@ export const HistoryPane = memo(function HistoryPane({
   const collapseTestId = collapseButtonTestId(splitIndex);
   const collapseAriaControls =
     splitIndex === undefined ? HISTORY_PANE_ID : splitHistorySlotId(splitIndex);
-  const scrollPositionRef = useRef<number>(0);
-  const prevMessageCountRef = useRef<number>(messages.length);
+  /** [Issue #1123] Whether the view is pinned to the latest message (follow mode). */
+  const isPinnedToBottomRef = useRef<boolean>(true);
+  /** [Issue #1123] Previous rendered-pair count, to detect appended messages. */
+  const prevVisiblePairCountRef = useRef<number>(-1);
   /** [Issue #716] Saved scrollTop at the moment search was opened. */
   const searchStartScrollPositionRef = useRef<number | null>(null);
 
@@ -328,39 +336,83 @@ export const HistoryPane = memo(function HistoryPane({
   }, [worktreeId]);
 
   // ---------------------------------------------------------------
-  // Effect order per design policy §4.2:
-  //   (1) save scroll position
-  //   (2) restore scroll position (skipped while search is active)
-  //   (3) compute autoExpandedIds
-  //   (4) apply highlights + scrollIntoView
+  // [Issue #1123] Virtualization
   // ---------------------------------------------------------------
+  // Only the pairs that will actually render participate in the virtual list so
+  // DOM row indices line up with the virtualizer's item indices. Issue #725: in
+  // "User only" mode orphan (assistant-only) pairs are dropped up-front.
+  const visiblePairs = useMemo(
+    () => (historyUserOnly ? pairs.filter((p) => p.userMessage) : pairs),
+    [pairs, historyUserOnly]
+  );
 
-  // (1) Save scrollTop before re-render.
-  useLayoutEffect(() => {
-    const container = scrollContainerRef.current;
-    if (container) {
-      scrollPositionRef.current = container.scrollTop;
+  // messageId -> owning pair id, and pair id -> row index. Used to translate a
+  // search match (which references a messageId) into the virtual row that must
+  // be materialized before it can be highlighted — off-screen cards are
+  // unmounted, so their DOM cannot be queried until the row is scrolled in.
+  const messageIdToPairId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const pair of visiblePairs) {
+      if (pair.userMessage) map.set(pair.userMessage.id, pair.id);
+      for (const am of pair.assistantMessages) map.set(am.id, pair.id);
     }
+    return map;
+  }, [visiblePairs]);
+
+  const pairRowIndexById = useMemo(() => {
+    const map = new Map<string, number>();
+    visiblePairs.forEach((pair, index) => map.set(pair.id, index));
+    return map;
+  }, [visiblePairs]);
+
+  const rowVirtualizer = useVirtualizer({
+    count: visiblePairs.length,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: () => HISTORY_ESTIMATED_PAIR_HEIGHT_PX,
+    overscan: HISTORY_VIRTUAL_OVERSCAN,
+    getItemKey: (index) => visiblePairs[index]?.id ?? index,
   });
 
-  // (2) Restore scrollTop if message count is stable; skip while searching.
-  useLayoutEffect(() => {
+  const virtualItems = rowVirtualizer.getVirtualItems();
+  // Stable key describing the currently mounted window; drives the highlight
+  // effect so highlights re-apply as rows mount/unmount during scrolling.
+  const renderedRange =
+    virtualItems.length > 0
+      ? `${virtualItems[0].index}-${virtualItems[virtualItems.length - 1].index}`
+      : '';
+
+  // Track whether the view is pinned to the bottom (follow mode) on every scroll,
+  // so the append effect below can choose follow vs. maintain.
+  const handleScroll = useCallback(() => {
     const container = scrollContainerRef.current;
-    const prevCount = prevMessageCountRef.current;
+    if (!container) return;
+    isPinnedToBottomRef.current = isNearBottom({
+      scrollTop: container.scrollTop,
+      scrollHeight: container.scrollHeight,
+      clientHeight: container.clientHeight,
+    });
+  }, []);
 
-    if (isSearchActive) {
-      // Update the count baseline so the next non-searching render restores correctly.
-      prevMessageCountRef.current = messages.length;
-      return;
+  // Follow newly appended messages to the bottom only while pinned; otherwise the
+  // reader's position is preserved automatically (react-virtual keeps the scroll
+  // offset stable when rows are appended at the end). Skipped during an active
+  // search so search's own scrollToIndex is not overridden.
+  useLayoutEffect(() => {
+    const prev = prevVisiblePairCountRef.current;
+    const curr = visiblePairs.length;
+    prevVisiblePairCountRef.current = curr;
+    if (prev === -1) return; // first render: establish baseline, do not auto-scroll
+    if (curr > prev && curr > 0 && isPinnedToBottomRef.current && !isSearchActive) {
+      rowVirtualizer.scrollToIndex(curr - 1, { align: 'end' });
     }
+  }, [visiblePairs.length, isSearchActive, rowVirtualizer]);
 
-    if (container && messages.length === prevCount) {
-      requestAnimationFrame(() => {
-        container.scrollTop = scrollPositionRef.current;
-      });
-    }
-    prevMessageCountRef.current = messages.length;
-  }, [messages.length, isSearchActive]);
+  // ---------------------------------------------------------------
+  // Effect order per design policy §4.2 (search):
+  //   (3) compute autoExpandedIds
+  //   (3b) scroll the current match's row into view (materialize it)
+  //   (4) apply highlights + scrollIntoView (re-runs as rows mount)
+  // ---------------------------------------------------------------
 
   // (3) Recompute auto-expanded pair IDs whenever search results change.
   useLayoutEffect(() => {
@@ -371,7 +423,22 @@ export const HistoryPane = memo(function HistoryPane({
     setAutoExpandedIds(computeMatchedPairIds(matchPositions, pairs));
   }, [isSearchOpen, matchPositions, pairs]);
 
-  // (4) Apply per-message highlights and scroll the current match into view.
+  // (3b) Bring the current match's row into view. Virtualized rows are unmounted
+  // when off-screen, so the row must be materialized via the virtualizer before
+  // effect (4) can find and mark its DOM node. Changing the mounted window bumps
+  // `renderedRange`, which re-triggers effect (4).
+  useEffect(() => {
+    if (!isSearchOpen || !currentMatch) return;
+    const pairId = messageIdToPairId.get(currentMatch.messageId);
+    if (pairId === undefined) return;
+    const rowIndex = pairRowIndexById.get(pairId);
+    if (rowIndex === undefined) return;
+    rowVirtualizer.scrollToIndex(rowIndex, { align: 'center' });
+  }, [isSearchOpen, currentMatch, messageIdToPairId, pairRowIndexById, rowVirtualizer]);
+
+  // (4) Apply per-message highlights to the mounted matches and scroll the
+  // current match into view. Re-runs when the mounted window changes
+  // (`renderedRange`) so off-screen matches get highlighted once scrolled in.
   useLayoutEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
@@ -384,7 +451,7 @@ export const HistoryPane = memo(function HistoryPane({
     let currentMatchElement: HTMLElement | null = null;
     for (const match of matchPositions) {
       const el = findMessageElement(container, match.messageId);
-      if (!el) continue;
+      if (!el) continue; // off-screen row not mounted yet; applied on next mount
       const isCurrent = currentMatch?.messageId === match.messageId;
       const localIdx = isCurrent ? currentMatch.localIndex : -1;
       applyHistoryHighlights(el, match.ranges, localIdx, highlightNamespace);
@@ -400,7 +467,7 @@ export const HistoryPane = memo(function HistoryPane({
     return () => {
       clearHistoryHighlights(highlightNamespace);
     };
-  }, [isSearchOpen, matchPositions, currentMatch, autoExpandedIds, highlightNamespace]);
+  }, [isSearchOpen, matchPositions, currentMatch, autoExpandedIds, highlightNamespace, renderedRange]);
 
   // Save scroll position when the search opens; restore it when search closes.
   useEffect(() => {
@@ -456,31 +523,55 @@ export const HistoryPane = memo(function HistoryPane({
     if (isLoading) {
       return <LoadingIndicator />;
     }
-    if (messages.length === 0) {
+    if (visiblePairs.length === 0) {
       return <EmptyState />;
     }
-    return pairs.map((pair) => {
-      // Issue #725: When User only filter is active, skip pairs that have no
-      // user message (orphan / assistant-only). Determined via `!pair.userMessage`
-      // — equivalent to `pair.status === 'orphan'` in current grouping logic.
-      if (historyUserOnly && !pair.userMessage) return null;
-      const isArchived = pair.userMessage?.archived === true ||
-        pair.assistantMessages?.some(m => m.archived === true);
-      const expanded = isManuallyExpanded(pair.id) || autoExpandedIds.has(pair.id);
-      return (
-        <div key={pair.id} className={isArchived ? 'opacity-60' : ''}>
-          <ConversationPairCard
-            pair={pair}
-            onFilePathClick={handleFilePathClick}
-            isExpanded={expanded}
-            onToggleExpand={createToggleHandler(pair.id)}
-            onCopy={handleCopy}
-            onInsertToMessage={onInsertToMessage}
-            showAssistant={!historyUserOnly}
-          />
-        </div>
-      );
-    });
+    // [Issue #1123] Virtualized list: only mount the visible window + overscan.
+    // The sizer reserves the full scroll height; each row is absolutely
+    // positioned and self-measured (`measureElement`) so variable-height cards
+    // (truncate/expand, code blocks) re-measure automatically when they change.
+    return (
+      <div
+        style={{
+          height: rowVirtualizer.getTotalSize(),
+          width: '100%',
+          position: 'relative',
+        }}
+      >
+        {virtualItems.map((virtualRow) => {
+          const pair = visiblePairs[virtualRow.index];
+          if (!pair) return null;
+          const isArchived =
+            pair.userMessage?.archived === true ||
+            pair.assistantMessages?.some((m) => m.archived === true);
+          // Expand state lives in the parent (useConversationHistory + search
+          // auto-expand), so it survives the card's unmount/remount as rows
+          // recycle during virtualized scrolling.
+          const expanded = isManuallyExpanded(pair.id) || autoExpandedIds.has(pair.id);
+          return (
+            <div
+              key={virtualRow.key}
+              data-index={virtualRow.index}
+              ref={rowVirtualizer.measureElement}
+              className="absolute left-0 top-0 w-full"
+              style={{ transform: `translateY(${virtualRow.start}px)` }}
+            >
+              <div className={isArchived ? 'opacity-60' : ''}>
+                <ConversationPairCard
+                  pair={pair}
+                  onFilePathClick={handleFilePathClick}
+                  isExpanded={expanded}
+                  onToggleExpand={createToggleHandler(pair.id)}
+                  onCopy={handleCopy}
+                  onInsertToMessage={onInsertToMessage}
+                  showAssistant={!historyUserOnly}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
   };
 
   const handleHistoryDisplayLimitSelectChange = useCallback(
@@ -610,6 +701,7 @@ export const HistoryPane = memo(function HistoryPane({
       <div
         ref={scrollContainerRef}
         data-testid="history-scroll-container"
+        onScroll={handleScroll}
         className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4"
       >
         {renderContent()}

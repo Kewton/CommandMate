@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { HistoryPane } from '@/components/worktree/HistoryPane';
 import type { ChatMessage } from '@/types/models';
+import { installVirtualLayout } from '@tests/helpers/virtual-layout';
 
 // [Issue #744] Spy on the highlight engine so we can assert which namespace a
 // given HistoryPane uses (legacy global vs per-split). We keep the real
@@ -51,11 +52,17 @@ describe('HistoryPane', () => {
   const mockOnFilePathClick = vi.fn();
   const defaultWorktreeId = 'test-worktree';
 
+  // [Issue #1123] The list is virtualized; jsdom reports zero-size layout so the
+  // virtualizer would mount no rows. Give it a real viewport for these tests.
+  let restoreLayout: () => void;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    restoreLayout = installVirtualLayout();
   });
 
   afterEach(() => {
+    restoreLayout();
     vi.restoreAllMocks();
   });
 
