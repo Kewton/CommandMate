@@ -208,6 +208,10 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // would hide the menus at the top of the screen.
   const disableAutoFollow = cliToolId === 'opencode' || cliToolId === 'copilot';
 
+  // Issue #1172: Claude/Codex pin a 1000-row pane and pad the layout with
+  // hundreds of blank rows; compact them for display only (raw output untouched).
+  const compactTuiLayoutPadding = cliToolId === 'claude' || cliToolId === 'codex';
+
   const handleAutoScrollChange = useCallback(
     (enabled: boolean) => setAutoScroll(enabled),
     [setAutoScroll],
@@ -340,6 +344,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
         autoScroll={terminal.autoScroll}
         onScrollChange={handleAutoScrollChange}
         disableAutoFollow={disableAutoFollow}
+        compactTuiLayoutPadding={compactTuiLayoutPadding}
       />
     ),
     [
@@ -350,6 +355,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       terminal.autoScroll,
       handleAutoScrollChange,
       disableAutoFollow,
+      compactTuiLayoutPadding,
     ],
   );
 

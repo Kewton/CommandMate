@@ -11,6 +11,7 @@ import React, { useEffect, useRef, useState, useMemo, memo, useCallback } from '
 import { ArrowUp, ArrowDown } from 'lucide-react';
 import { sanitizeTerminalOutput } from '@/lib/security/sanitize';
 import { computeTerminalUpdate } from '@/lib/terminal/terminal-diff';
+import { normalizeTerminalOutputForDisplay } from '@/lib/terminal/terminal-display-normalizer';
 import { useTerminalScroll } from '@/hooks/useTerminalScroll';
 import { useTerminalSearch } from '@/hooks/useTerminalSearch';
 import { TerminalSearchBar } from '@/components/worktree/TerminalSearchBar';
@@ -37,6 +38,14 @@ export interface TerminalDisplayProps {
   onScrollChange?: (enabled: boolean) => void;
   /** Disable auto-follow on new content (for TUI tools like OpenCode) */
   disableAutoFollow?: boolean;
+  /**
+   * Issue #1172: opt-in display-only compression of layout blank rows for
+   * Claude/Codex 1000-row panes. When true, the rendered/searched/scrolled text
+   * is derived from `normalizeTerminalOutputForDisplay(output)`; the raw `output`
+   * (and every consumer of it) is untouched. Default false — no other CLI's
+   * display changes.
+   */
+  compactTuiLayoutPadding?: boolean;
   /** Additional CSS classes */
   className?: string;
 }
@@ -81,6 +90,7 @@ export const TerminalDisplay = memo(function TerminalDisplay({
   autoScroll: initialAutoScroll = true,
   onScrollChange,
   disableAutoFollow = false,
+  compactTuiLayoutPadding = false,
   className = '',
 }: TerminalDisplayProps) {
   const { scrollRef, autoScroll, handleScroll, scrollToBottom, scrollToTop } =
@@ -88,6 +98,22 @@ export const TerminalDisplay = memo(function TerminalDisplay({
       initialAutoScroll,
       onAutoScrollChange: onScrollChange,
     });
+
+  // Issue #1172: `rawOutput` stays authoritative for lifecycle (attaching /
+  // never-started / ended). `displayOutput` is the opt-in compacted text that
+  // drives rendering, search, diffing and auto-scroll. When compaction is off
+  // (default) they are identical, so non-Claude/Codex panes render byte-for-byte
+  // as before. Because JS strings compare by value, a raw-only frame change that
+  // yields an identical `displayOutput` is `Object.is`-equal here, so downstream
+  // memos/effects do not re-render, re-search or re-scroll.
+  const rawOutput = output ?? '';
+  const displayOutput = useMemo(
+    () =>
+      compactTuiLayoutPadding
+        ? normalizeTerminalOutputForDisplay(rawOutput)
+        : rawOutput,
+    [compactTuiLayoutPadding, rawOutput]
+  );
 
   // [Issue #47] Terminal search - scrollRef is reused as containerRef
   const {
@@ -101,7 +127,7 @@ export const TerminalDisplay = memo(function TerminalDisplay({
     setQuery: setSearchQuery,
     nextMatch,
     prevMatch,
-  } = useTerminalSearch({ output, containerRef: scrollRef });
+  } = useTerminalSearch({ output: displayOutput, containerRef: scrollRef });
 
   // [Issue #47] Ctrl+F / Cmd+F handler to open search (suppresses browser find)
   const handleKeyDown = useCallback(
@@ -128,16 +154,15 @@ export const TerminalDisplay = memo(function TerminalDisplay({
   // it) untouched and only mounts the appended node. Divergence falls back to a
   // full replace (single fresh chunk).
   const MAX_RENDERED_CHUNKS = 400;
-  const safeOutput = output ?? '';
   const [renderedChunks, setRenderedChunks] = useState<Array<{ key: number; html: string }>>(() =>
-    safeOutput ? [{ key: 0, html: sanitizeTerminalOutput(safeOutput) }] : []
+    displayOutput ? [{ key: 0, html: sanitizeTerminalOutput(displayOutput) }] : []
   );
-  const prevOutputRef = useRef(safeOutput);
+  const prevOutputRef = useRef(displayOutput);
   const chunkKeyRef = useRef(0);
 
   useEffect(() => {
-    const update = computeTerminalUpdate(prevOutputRef.current, safeOutput);
-    prevOutputRef.current = safeOutput;
+    const update = computeTerminalUpdate(prevOutputRef.current, displayOutput);
+    prevOutputRef.current = displayOutput;
     if (update.mode === 'noop') return;
 
     if (update.mode === 'append') {
@@ -145,7 +170,7 @@ export const TerminalDisplay = memo(function TerminalDisplay({
         chunkKeyRef.current += 1;
         // Coalesce back to a single chunk if the DOM node count grows unbounded.
         if (prev.length >= MAX_RENDERED_CHUNKS) {
-          return [{ key: chunkKeyRef.current, html: sanitizeTerminalOutput(safeOutput) }];
+          return [{ key: chunkKeyRef.current, html: sanitizeTerminalOutput(displayOutput) }];
         }
         return [...prev, { key: chunkKeyRef.current, html: sanitizeTerminalOutput(update.appended) }];
       });
@@ -155,9 +180,9 @@ export const TerminalDisplay = memo(function TerminalDisplay({
     // replace
     chunkKeyRef.current += 1;
     setRenderedChunks(
-      safeOutput ? [{ key: chunkKeyRef.current, html: sanitizeTerminalOutput(safeOutput) }] : []
+      displayOutput ? [{ key: chunkKeyRef.current, html: sanitizeTerminalOutput(displayOutput) }] : []
     );
-  }, [safeOutput]);
+  }, [displayOutput]);
 
   // Issue #842: distinguish "loading (attaching)" / "not-started" / "ended" so an
   // empty terminal does not ambiguously read as a dead session. We only show the
@@ -198,7 +223,7 @@ export const TerminalDisplay = memo(function TerminalDisplay({
     if (!scrollRef.current) return;
 
     // Issue #379: Scroll to top once when content first arrives in disableAutoFollow mode
-    if (needsScrollToTopRef.current && disableAutoFollow && output) {
+    if (needsScrollToTopRef.current && disableAutoFollow && displayOutput) {
       scrollRef.current.scrollTo({ top: 0, behavior: 'instant' });
       needsScrollToTopRef.current = false;
       return;
@@ -210,7 +235,9 @@ export const TerminalDisplay = memo(function TerminalDisplay({
         behavior: 'instant',
       });
     }
-  }, [renderedChunks, output, autoScroll, disableAutoFollow, scrollRef]);
+    // Issue #1172: keyed on displayOutput (not raw output) so a raw-only frame
+    // change that compacts to an identical display does not re-trigger scroll.
+  }, [renderedChunks, displayOutput, autoScroll, disableAutoFollow, scrollRef]);
 
   // Memoized CSS classes for performance
   const containerClasses = useMemo(

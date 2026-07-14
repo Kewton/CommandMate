@@ -773,30 +773,10 @@ export function getCliToolPatterns(cliToolId: CLIToolType): {
   }
 }
 
-/**
- * Strip ANSI escape codes from a string.
- * Optimized version at module level for performance.
- *
- * Covers:
- * - SGR sequences: ESC[Nm (colors, bold, underline, etc.)
- * - OSC sequences: ESC]...BEL (window title, hyperlinks, etc.)
- * - CSI sequences: ESC[...letter (cursor movement, erase, etc.)
- *
- * Known limitations (SEC-002):
- * - 8-bit CSI (0x9B): C1 control code form of CSI is not covered
- * - DEC private modes: ESC[?25h and similar are not covered
- * - Character set switching: ESC(0, ESC(B are not covered
- * - Some RGB color forms: ESC[38;2;r;g;bm may not be fully matched
- *
- * In practice, tmux capture-pane output rarely contains these sequences,
- * so the risk is low. Future consideration: adopt the `strip-ansi` npm package
- * for more comprehensive coverage.
- */
-const ANSI_PATTERN = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\[[0-9;]*m/g;
-
-export function stripAnsi(str: string): string {
-  return str.replace(ANSI_PATTERN, '');
-}
+// ANSI primitives live in a dependency-free leaf module so client components can
+// reuse the same tested pattern without pulling this file's server-only imports
+// (logger/db) into the browser bundle. Re-exported here for existing importers.
+export { stripAnsi, extractAnsiSequences } from './ansi';
 
 /**
  * Strip box-drawing border characters from CLI output.
