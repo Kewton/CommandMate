@@ -1,0 +1,11 @@
+{
+  "offline": {
+    "title": "You're offline",
+    "description": "CommandMate can't reach the server right now. Check your connection and try again.",
+    "reconnect": "Reconnect"
+  },
+  "update": {
+    "available": "A new version is available.",
+    "reload": "Reload"
+  }
+}

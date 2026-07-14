@@ -13,6 +13,14 @@ export const metadata: Metadata = {
     template: '%s | CommandMate',
   },
   description: 'Git worktree management with Claude CLI and tmux sessions',
+  // [Issue #1124] iOS PWA: Safari ignores the Web App Manifest for standalone
+  // launch, so these emit apple-mobile-web-app-* meta tags for home-screen
+  // installs (Android/desktop rely on manifest.ts).
+  appleWebApp: {
+    capable: true,
+    title: 'CommandMate',
+    statusBarStyle: 'default',
+  },
 };
 
 // [Issue #1082] themeColor follows the light/dark --background token so the

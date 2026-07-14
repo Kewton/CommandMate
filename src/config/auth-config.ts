@@ -33,6 +33,12 @@ export const AUTH_EXCLUDED_PATHS = [
   '/api/auth/login',
   '/api/auth/logout',
   '/api/auth/status',
+  // Issue #1124 (PWA): non-sensitive resources that must stay reachable before
+  // auth so the app is installable and the offline fallback can be precached.
+  // All carry no user data (app metadata / public SW code / static fallback).
+  '/manifest.webmanifest',
+  '/sw.js',
+  '/offline',
 ] as const;
 
 // ============================================================

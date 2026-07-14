@@ -21,6 +21,7 @@ import { WorktreesCacheProvider } from '@/components/providers/WorktreesCachePro
 import { ViewTransitionsProvider } from '@/components/providers/ViewTransitionsProvider';
 import { RealtimeProvider } from '@/hooks/useRealtimeConnection';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
+import { ServiceWorkerRegistrar } from '@/components/pwa/ServiceWorkerRegistrar';
 
 interface AppProvidersProps {
   children: ReactNode;
@@ -59,6 +60,9 @@ export function AppProviders({ children, locale, messages, timeZone, authEnabled
                       <ViewTransitionsProvider>
                         {children}
                       </ViewTransitionsProvider>
+                      {/* Issue #1124: registers the Service Worker (prod only)
+                          and shows the update-available prompt. */}
+                      <ServiceWorkerRegistrar />
                     </ConfirmProvider>
                   </CommandPaletteProvider>
                 </WorktreesCacheProvider>
