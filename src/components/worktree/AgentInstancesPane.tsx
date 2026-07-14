@@ -17,7 +17,7 @@
 
 import React, { useState, useCallback, memo } from 'react';
 import { useTranslations } from 'next-intl';
-import { GripVertical, ChevronUp, ChevronDown, Trash2, Plus } from 'lucide-react';
+import { GripVertical, ChevronUp, ChevronDown, Trash2, Plus, MoreVertical } from 'lucide-react';
 import {
   CLI_TOOL_IDS,
   getCliToolDisplayName,
@@ -29,6 +29,14 @@ import {
 import { MIN_AGENT_INSTANCES } from '@/lib/agent-instances-validator';
 import { VibeLocalSettings } from '@/components/worktree/VibeLocalSettings';
 import { Spinner } from '@/components/ui/Spinner';
+import { TruncationTooltip } from '@/components/common/TruncationTooltip';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/DropdownMenu';
 
 // ============================================================================
 // Types
@@ -215,7 +223,7 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
                 setDraggingIndex(null);
               }}
               onDragEnd={() => setDraggingIndex(null)}
-              className={`flex items-center gap-2 p-2 rounded-lg border border-border bg-surface ${
+              className={`flex items-center gap-2 p-2 rounded-lg border border-border bg-surface transition-colors hover:border-accent-300 dark:hover:border-accent-700 focus-within:border-accent-500 ${
                 isDragging ? 'opacity-50' : ''
               }`}
             >
@@ -226,6 +234,10 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
                 <GripVertical className="w-4 h-4" />
               </span>
 
+              {/* Issue #1130: name is primary — the alias input takes the full row
+                  width and the base-tool name gets a TruncationTooltip so it stays
+                  readable in the narrow activity column. Reorder/delete moved to
+                  the kebab menu so they no longer compete for horizontal space. */}
               <div className="flex-1 min-w-0">
                 <input
                   type="text"
@@ -244,46 +256,54 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
                   }}
                   className="w-full text-sm font-medium border border-input rounded-md px-2 py-1 bg-surface dark:bg-surface-2 text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-accent-500 disabled:opacity-50"
                 />
-                <span className="block text-xs text-muted-foreground mt-0.5 truncate">
-                  {getCliToolDisplayName(inst.cliTool)}
-                </span>
+                <TruncationTooltip
+                  content={getCliToolDisplayName(inst.cliTool)}
+                  className="mt-0.5 block truncate text-xs text-muted-foreground"
+                />
               </div>
 
-              <div className="flex items-center gap-1 shrink-0">
-                <button
-                  type="button"
-                  data-testid={`agent-instance-move-up-${inst.id}`}
-                  aria-label={t('agentInstanceMoveUp')}
-                  title={t('agentInstanceMoveUp')}
-                  disabled={saving || index === 0}
-                  onClick={() => handleMove(index, -1)}
-                  className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  <ChevronUp className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  data-testid={`agent-instance-move-down-${inst.id}`}
-                  aria-label={t('agentInstanceMoveDown')}
-                  title={t('agentInstanceMoveDown')}
-                  disabled={saving || index === instances.length - 1}
-                  onClick={() => handleMove(index, 1)}
-                  className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  <ChevronDown className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  data-testid={`agent-instance-delete-${inst.id}`}
-                  aria-label={t('agentInstanceDelete')}
-                  title={t('agentInstanceDelete')}
-                  disabled={saving || atMin}
-                  onClick={() => handleDelete(inst.id)}
-                  className="p-1 rounded text-muted-foreground hover:text-danger-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    data-testid={`agent-instance-menu-${inst.id}`}
+                    aria-label={t('agentInstanceActions')}
+                    title={t('agentInstanceActions')}
+                    disabled={saving}
+                    className="shrink-0 p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    <MoreVertical className="w-4 h-4" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    data-testid={`agent-instance-move-up-${inst.id}`}
+                    disabled={index === 0}
+                    onSelect={() => handleMove(index, -1)}
+                  >
+                    <ChevronUp className="w-4 h-4" />
+                    {t('agentInstanceMoveUp')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    data-testid={`agent-instance-move-down-${inst.id}`}
+                    disabled={index === instances.length - 1}
+                    onSelect={() => handleMove(index, 1)}
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                    {t('agentInstanceMoveDown')}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    data-testid={`agent-instance-delete-${inst.id}`}
+                    disabled={atMin}
+                    onSelect={() => handleDelete(inst.id)}
+                    className="text-danger-foreground focus:text-danger-foreground"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    {t('agentInstanceDelete')}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           );
         })}

@@ -1,0 +1,17 @@
+{
+  "title": "Keyboard shortcuts",
+  "scopes": {
+    "global": "Global",
+    "terminal": "Terminal",
+    "composer": "Composer"
+  },
+  "shortcuts": {
+    "commandPalette": "Open command palette",
+    "keyboardHelp": "Show keyboard shortcuts",
+    "closeOverlay": "Close overlay or dialog",
+    "navigateList": "Move selection up / down",
+    "terminalSearch": "Search terminal output",
+    "sendMessage": "Send message",
+    "composerNewline": "Insert a new line"
+  }
+}

@@ -26,7 +26,8 @@
     "syncSuccess": "リポジトリを同期しました",
     "syncError": "リポジトリの同期に失敗しました",
     "switchLanguage": "言語を切り替え",
-    "openGitHub": "GitHub を開く"
+    "openGitHub": "GitHub を開く",
+    "keyboardShortcuts": "キーボードショートカット"
   },
   "footer": {
     "navigate": "移動",

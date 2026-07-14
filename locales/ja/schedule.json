@@ -63,6 +63,7 @@
   "agentInstanceDelete": "インスタンスを削除",
   "agentInstanceMoveUp": "上へ移動",
   "agentInstanceMoveDown": "下へ移動",
+  "agentInstanceActions": "インスタンス操作",
   "memoMoveUp": "上へ移動",
   "memoMoveDown": "下へ移動",
   "agentInstanceMax": "インスタンスは最大{max}個まで追加できます。",

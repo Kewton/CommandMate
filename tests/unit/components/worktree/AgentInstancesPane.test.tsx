@@ -10,7 +10,7 @@
  */
 
 import React from 'react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { AgentInstancesPane } from '@/components/worktree/AgentInstancesPane';
 import {
@@ -19,9 +19,18 @@ import {
   type AgentInstance,
   type CLIToolType,
 } from '@/lib/cli-tools/types';
+import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
 
 const mockFetch = vi.fn();
 global.fetch = mockFetch as unknown as typeof fetch;
+
+// Issue #1130: reorder/delete now live in a Radix DropdownMenu kebab. Open a
+// row's menu (keyboard-open is the reliable path in jsdom) so its items mount.
+function openRowMenu(id: string): void {
+  fireEvent.keyDown(screen.getByTestId(`agent-instance-menu-${id}`), { key: 'Enter' });
+}
+
+beforeAll(() => installRadixJsdomPolyfills());
 
 /** Build a primary AgentInstance (id === cliTool). */
 function primary(cliTool: CLIToolType, order: number, alias?: string): AgentInstance {
@@ -170,6 +179,7 @@ describe('AgentInstancesPane (Issue #869)', () => {
           instances={[primary('claude', 0), primary('codex', 1), primary('gemini', 2)]}
         />,
       );
+      openRowMenu('claude');
       fireEvent.click(screen.getByTestId('agent-instance-delete-claude'));
       await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
       const body = patchBody();
@@ -179,7 +189,8 @@ describe('AgentInstancesPane (Issue #869)', () => {
 
     it('disables delete at MIN (single instance) and shows the min hint', () => {
       render(<AgentInstancesPane {...baseProps} instances={[primary('claude', 0)]} />);
-      expect(screen.getByTestId('agent-instance-delete-claude')).toBeDisabled();
+      openRowMenu('claude');
+      expect(screen.getByTestId('agent-instance-delete-claude')).toHaveAttribute('data-disabled');
       expect(screen.getByText('schedule.agentInstanceMin')).toBeInTheDocument();
     });
   });
@@ -192,6 +203,7 @@ describe('AgentInstancesPane (Issue #869)', () => {
           instances={[primary('claude', 0), primary('codex', 1), primary('gemini', 2)]}
         />,
       );
+      openRowMenu('claude');
       fireEvent.click(screen.getByTestId('agent-instance-move-down-claude'));
       await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
       const body = patchBody();
@@ -206,11 +218,20 @@ describe('AgentInstancesPane (Issue #869)', () => {
           instances={[primary('claude', 0), primary('codex', 1)]}
         />,
       );
-      expect(screen.getByTestId('agent-instance-move-up-claude')).toBeDisabled();
-      expect(screen.getByTestId('agent-instance-move-down-codex')).toBeDisabled();
-      // Interior moves remain enabled.
-      expect(screen.getByTestId('agent-instance-move-down-claude')).not.toBeDisabled();
-      expect(screen.getByTestId('agent-instance-move-up-codex')).not.toBeDisabled();
+      // First row (claude): move-up disabled, move-down enabled.
+      openRowMenu('claude');
+      expect(screen.getByTestId('agent-instance-move-up-claude')).toHaveAttribute('data-disabled');
+      expect(screen.getByTestId('agent-instance-move-down-claude')).not.toHaveAttribute(
+        'data-disabled',
+      );
+      fireEvent.keyDown(document.body, { key: 'Escape' });
+
+      // Last row (codex): move-down disabled, move-up enabled.
+      openRowMenu('codex');
+      expect(screen.getByTestId('agent-instance-move-down-codex')).toHaveAttribute('data-disabled');
+      expect(screen.getByTestId('agent-instance-move-up-codex')).not.toHaveAttribute(
+        'data-disabled',
+      );
     });
   });
 
@@ -251,6 +272,7 @@ describe('AgentInstancesPane (Issue #869)', () => {
           instances={[primary('claude', 0), primary('codex', 1)]}
         />,
       );
+      openRowMenu('claude');
       fireEvent.click(screen.getByTestId('agent-instance-delete-claude'));
       await waitFor(() =>
         expect(screen.getByTestId('agent-instances-error')).toBeInTheDocument(),

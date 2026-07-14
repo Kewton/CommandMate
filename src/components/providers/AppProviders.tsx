@@ -17,6 +17,7 @@ import { SidebarProvider } from '@/contexts/SidebarContext';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { PcDisplaySizeProvider } from '@/contexts/PcDisplaySizeContext';
 import { CommandPaletteProvider } from '@/contexts/CommandPaletteContext';
+import { KeyboardShortcutsProvider } from '@/contexts/KeyboardShortcutsContext';
 import { WorktreesCacheProvider } from '@/components/providers/WorktreesCacheProvider';
 import { ViewTransitionsProvider } from '@/components/providers/ViewTransitionsProvider';
 import { RealtimeProvider } from '@/hooks/useRealtimeConnection';
@@ -55,15 +56,18 @@ export function AppProviders({ children, locale, messages, timeZone, authEnabled
               <RealtimeProvider>
                 <WorktreesCacheProvider>
                   <CommandPaletteProvider>
-                    <ConfirmProvider>
-                      {/* Issue #1141: View Transitions wraps the routed content. */}
-                      <ViewTransitionsProvider>
-                        {children}
-                      </ViewTransitionsProvider>
-                      {/* Issue #1124: registers the Service Worker (prod only)
-                          and shows the update-available prompt. */}
-                      <ServiceWorkerRegistrar />
-                    </ConfirmProvider>
+                    {/* Issue #1130: `?` keyboard-shortcuts help overlay open state. */}
+                    <KeyboardShortcutsProvider>
+                      <ConfirmProvider>
+                        {/* Issue #1141: View Transitions wraps the routed content. */}
+                        <ViewTransitionsProvider>
+                          {children}
+                        </ViewTransitionsProvider>
+                        {/* Issue #1124: registers the Service Worker (prod only)
+                            and shows the update-available prompt. */}
+                        <ServiceWorkerRegistrar />
+                      </ConfirmProvider>
+                    </KeyboardShortcutsProvider>
                   </CommandPaletteProvider>
                 </WorktreesCacheProvider>
               </RealtimeProvider>

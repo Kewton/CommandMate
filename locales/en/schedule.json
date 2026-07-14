@@ -63,6 +63,7 @@
   "agentInstanceDelete": "Delete instance",
   "agentInstanceMoveUp": "Move up",
   "agentInstanceMoveDown": "Move down",
+  "agentInstanceActions": "Instance actions",
   "memoMoveUp": "Move up",
   "memoMoveDown": "Move down",
   "agentInstanceMax": "Up to {max} instances can be added.",

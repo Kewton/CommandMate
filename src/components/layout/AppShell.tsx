@@ -19,6 +19,7 @@ import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { GlobalMobileNav } from '@/components/mobile/GlobalMobileNav';
 import { CommandPalette } from '@/components/common/CommandPalette';
+import { KeyboardShortcutsOverlay } from '@/components/common/KeyboardShortcutsOverlay';
 import { Z_INDEX } from '@/config/z-index';
 
 // ============================================================================
@@ -138,6 +139,8 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
 
         {/* Global command palette (⌘K / Ctrl+K) - single instance (Issue #1053) */}
         <CommandPalette />
+        {/* Global keyboard-shortcuts help overlay (?) - single instance (Issue #1130) */}
+        <KeyboardShortcutsOverlay />
       </div>
     );
   }
@@ -193,6 +196,8 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
 
       {/* Global command palette (⌘K / Ctrl+K) - single instance (Issue #1053) */}
       <CommandPalette />
+      {/* Global keyboard-shortcuts help overlay (?) - single instance (Issue #1130) */}
+      <KeyboardShortcutsOverlay />
     </div>
   );
 });

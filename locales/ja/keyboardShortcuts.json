@@ -1,0 +1,17 @@
+{
+  "title": "キーボードショートカット",
+  "scopes": {
+    "global": "グローバル",
+    "terminal": "ターミナル",
+    "composer": "入力欄"
+  },
+  "shortcuts": {
+    "commandPalette": "コマンドパレットを開く",
+    "keyboardHelp": "キーボードショートカットを表示",
+    "closeOverlay": "オーバーレイ・ダイアログを閉じる",
+    "navigateList": "選択を上下に移動",
+    "terminalSearch": "ターミナル出力を検索",
+    "sendMessage": "メッセージを送信",
+    "composerNewline": "改行を挿入"
+  }
+}
