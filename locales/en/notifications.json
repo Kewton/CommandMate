@@ -1,0 +1,29 @@
+{
+  "title": "Notifications",
+  "description": "Get a push notification when an agent is waiting for you or finishes a session — even when the app is closed.",
+  "enable": "Enable notifications",
+  "enabling": "Enabling…",
+  "enabledOnThisDevice": "Notifications are enabled on this device.",
+  "unsubscribe": "Unsubscribe this device",
+  "types": {
+    "heading": "Notify me about",
+    "promptWaiting": "Prompt waiting",
+    "promptWaitingDesc": "When an agent is waiting for your reply",
+    "completion": "Session complete",
+    "completionDesc": "When an agent finishes a session"
+  },
+  "permission": {
+    "denied": "Notifications are blocked in your browser settings. Allow them for this site to receive push notifications."
+  },
+  "unsupported": "This browser does not support push notifications.",
+  "notConfigured": "Push notifications are not configured on this server. Set the VAPID keys to enable them.",
+  "ios": {
+    "guidance": "On iPhone/iPad, add this app to your Home Screen and open it from there to enable notifications."
+  },
+  "toast": {
+    "enabled": "Notifications enabled on this device",
+    "disabled": "Notifications turned off on this device",
+    "error": "Could not enable notifications",
+    "updated": "Notification settings updated"
+  }
+}

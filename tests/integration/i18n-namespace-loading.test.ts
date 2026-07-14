@@ -21,8 +21,9 @@ const LOCALES_DIR = path.resolve(__dirname, '../../locales');
  * Issue #1072: Added 'home' namespace
  * Issue #1113: Added 'review' namespace
  * Issue #1124: Added 'pwa' namespace
+ * Issue #1125: Added 'notifications' namespace
  */
-const EXPECTED_NAMESPACES = ['common', 'worktree', 'autoYes', 'error', 'prompt', 'auth', 'schedule', 'commandPalette', 'home', 'review', 'pwa'] as const;
+const EXPECTED_NAMESPACES = ['common', 'worktree', 'autoYes', 'error', 'prompt', 'auth', 'schedule', 'commandPalette', 'home', 'review', 'pwa', 'notifications'] as const;
 
 describe('i18n Namespace Loading', () => {
   for (const locale of SUPPORTED_LOCALES) {

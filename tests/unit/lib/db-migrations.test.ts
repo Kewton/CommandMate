@@ -33,8 +33,8 @@ describe('db-migrations', () => {
   });
 
   describe('CURRENT_SCHEMA_VERSION', () => {
-    it('should be 40 after Migration #40 (timer error column)', () => {
-      expect(CURRENT_SCHEMA_VERSION).toBe(40);
+    it('should be 41 after Migration #41 (push subscriptions)', () => {
+      expect(CURRENT_SCHEMA_VERSION).toBe(41);
     });
   });
 

@@ -170,3 +170,18 @@ export type {
   AssistantExecutionStatus,
   AssistantSessionState,
 } from './assistant-conversation-db';
+
+// push-subscriptions-db (Web Push, Issue #1125)
+export {
+  upsertPushSubscription,
+  getPushSubscriptionByEndpoint,
+  getAllPushSubscriptions,
+  getPushSubscriptionsForKind,
+  updatePushSubscriptionPreferences,
+  deletePushSubscriptionByEndpoint,
+} from './push-subscriptions-db';
+export type {
+  PushSubscriptionRecord,
+  UpsertPushSubscriptionInput,
+  PushNotificationKind,
+} from './push-subscriptions-db';

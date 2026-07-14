@@ -139,9 +139,71 @@ self.addEventListener('message', function (event) {
   }
 });
 
-// --- Issue #1125 (Web Push) extension point -------------------------------
-// Web Push support will attach handlers here without touching the cache logic
-// above, e.g.:
-//   self.addEventListener('push', function (event) { /* show notification */ });
-//   self.addEventListener('notificationclick', function (event) { /* focus */ });
-// Keep push/notification concerns isolated from the fetch/cache handlers.
+// --- Issue #1125 (Web Push) ------------------------------------------------
+// Push/notification concerns are kept isolated from the fetch/cache handlers
+// above. Payloads are minimal (worktree name + kind + short excerpt); the SW
+// never receives full terminal output.
+
+self.addEventListener('push', function (event) {
+  var payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch (err) {
+    payload = {};
+  }
+
+  var title = payload.title || 'CommandMate';
+  var options = {
+    body: payload.body || '',
+    tag: payload.tag || undefined,
+    renotify: true,
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    data: {
+      url: payload.url || '/',
+      worktreeId: payload.worktreeId,
+      kind: payload.kind,
+    },
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', function (event) {
+  event.notification.close();
+
+  var data = event.notification.data || {};
+  var targetUrl = data.url || '/';
+
+  event.waitUntil(
+    self.clients
+      .matchAll({ type: 'window', includeUncontrolled: true })
+      .then(function (clientList) {
+        // Prefer an existing window already on the target path.
+        for (var i = 0; i < clientList.length; i++) {
+          var client = clientList[i];
+          try {
+            if (new URL(client.url).pathname === targetUrl && 'focus' in client) {
+              return client.focus();
+            }
+          } catch (err) {
+            // ignore malformed client URL
+          }
+        }
+        // Otherwise navigate an existing window to the deep link.
+        for (var j = 0; j < clientList.length; j++) {
+          var existing = clientList[j];
+          if ('focus' in existing && typeof existing.navigate === 'function') {
+            return existing.navigate(targetUrl).then(function (navigated) {
+              return navigated ? navigated.focus() : null;
+            });
+          }
+        }
+        // No window open — open a new one.
+        if (self.clients.openWindow) {
+          return self.clients.openWindow(targetUrl);
+        }
+        return null;
+      })
+  );
+});
