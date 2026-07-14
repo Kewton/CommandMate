@@ -10,6 +10,7 @@
 import React, { useEffect, useRef, useState, useMemo, memo, useCallback } from 'react';
 import { ArrowUp, ArrowDown } from 'lucide-react';
 import { sanitizeTerminalOutput } from '@/lib/security/sanitize';
+import { computeTerminalUpdate } from '@/lib/terminal/terminal-diff';
 import { useTerminalScroll } from '@/hooks/useTerminalScroll';
 import { useTerminalSearch } from '@/hooks/useTerminalSearch';
 import { TerminalSearchBar } from '@/components/worktree/TerminalSearchBar';
@@ -120,8 +121,43 @@ export const TerminalDisplay = memo(function TerminalDisplay({
     return () => window.removeEventListener('terminal-search-open', handler);
   }, [openSearch]);
 
-  // Sanitize the output for safe rendering
-  const sanitizedOutput = sanitizeTerminalOutput(output || '');
+  // Issue #1120: selection-preserving rendering. Instead of replacing the entire
+  // innerHTML on every update (which clears any active text selection), we diff
+  // the previous vs. next raw output and, on a clean append, push a NEW keyed
+  // chunk. React leaves the already-rendered chunk DOM (and any selection inside
+  // it) untouched and only mounts the appended node. Divergence falls back to a
+  // full replace (single fresh chunk).
+  const MAX_RENDERED_CHUNKS = 400;
+  const safeOutput = output ?? '';
+  const [renderedChunks, setRenderedChunks] = useState<Array<{ key: number; html: string }>>(() =>
+    safeOutput ? [{ key: 0, html: sanitizeTerminalOutput(safeOutput) }] : []
+  );
+  const prevOutputRef = useRef(safeOutput);
+  const chunkKeyRef = useRef(0);
+
+  useEffect(() => {
+    const update = computeTerminalUpdate(prevOutputRef.current, safeOutput);
+    prevOutputRef.current = safeOutput;
+    if (update.mode === 'noop') return;
+
+    if (update.mode === 'append') {
+      setRenderedChunks((prev) => {
+        chunkKeyRef.current += 1;
+        // Coalesce back to a single chunk if the DOM node count grows unbounded.
+        if (prev.length >= MAX_RENDERED_CHUNKS) {
+          return [{ key: chunkKeyRef.current, html: sanitizeTerminalOutput(safeOutput) }];
+        }
+        return [...prev, { key: chunkKeyRef.current, html: sanitizeTerminalOutput(update.appended) }];
+      });
+      return;
+    }
+
+    // replace
+    chunkKeyRef.current += 1;
+    setRenderedChunks(
+      safeOutput ? [{ key: chunkKeyRef.current, html: sanitizeTerminalOutput(safeOutput) }] : []
+    );
+  }, [safeOutput]);
 
   // Issue #842: distinguish "loading (attaching)" / "not-started" / "ended" so an
   // empty terminal does not ambiguously read as a dead session. We only show the
@@ -162,7 +198,7 @@ export const TerminalDisplay = memo(function TerminalDisplay({
     if (!scrollRef.current) return;
 
     // Issue #379: Scroll to top once when content first arrives in disableAutoFollow mode
-    if (needsScrollToTopRef.current && disableAutoFollow && sanitizedOutput) {
+    if (needsScrollToTopRef.current && disableAutoFollow && output) {
       scrollRef.current.scrollTo({ top: 0, behavior: 'instant' });
       needsScrollToTopRef.current = false;
       return;
@@ -174,7 +210,7 @@ export const TerminalDisplay = memo(function TerminalDisplay({
         behavior: 'instant',
       });
     }
-  }, [sanitizedOutput, autoScroll, disableAutoFollow, scrollRef]);
+  }, [renderedChunks, output, autoScroll, disableAutoFollow, scrollRef]);
 
   // Memoized CSS classes for performance
   const containerClasses = useMemo(
@@ -266,11 +302,13 @@ export const TerminalDisplay = memo(function TerminalDisplay({
         onKeyDown={handleKeyDown}
         tabIndex={0}
       >
-        {/* Terminal output with sanitized HTML */}
-        <div
-          className="whitespace-pre-wrap break-words"
-          dangerouslySetInnerHTML={{ __html: sanitizedOutput }}
-        />
+        {/* Terminal output with sanitized HTML. Issue #1120: rendered as keyed
+            append-only chunks so text selection survives streaming updates. */}
+        <div className="whitespace-pre-wrap break-words">
+          {renderedChunks.map((chunk) => (
+            <span key={chunk.key} dangerouslySetInnerHTML={{ __html: chunk.html }} />
+          ))}
+        </div>
 
         {/* Issue #842: empty-state placeholders clarify loading vs. ended. */}
         {showLoadingPlaceholder && (

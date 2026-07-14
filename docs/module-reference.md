@@ -358,6 +358,14 @@
 | `src/components/layout/Header.tsx` | PC 5画面ナビゲーション（Issue #600） |
 | `src/components/layout/AppShell.tsx` | アプリケーションシェル（useLayoutConfig統合）（Issue #600） |
 | `src/types/ui-state.ts` | UI状態型定義（DeepLinkPane型追加）（Issue #600）、LayoutStateにleftPaneCollapsed追加（Issue #688）。Issue #736で `TerminalState` 型・`initialTerminalState`・`WorktreeUIState.terminal` を削除（terminalは`useTerminalPanePolling`へ移譲） |
+| `src/hooks/useWebSocket.ts` | 単一WS接続の低レベル管理（Issue #1120再設計）。指数バックオフ再接続(1s..30s)・visibility連携・room購読再送・エンベロープparse→onEvent dispatch。認証はCookie自動付与 |
+| `src/hooks/useRealtimeConnection.tsx` | `RealtimeProvider`/`useRealtime`（Issue #1120）。共有WS1本＋listener fan-out＋room購読refカウント。Provider未装着時はdisconnected no-opでpollingフォールバック |
+| `src/lib/realtime/types.ts` | realtime配信メッセージ契約＋`parseRealtimeEvent`（`{type:'broadcast',data}`エンベロープ展開）（Issue #1120） |
+| `src/lib/realtime/terminal-broadcast.ts` | サーバ側push（Issue #1120）。`broadcastTerminalSnapshot`(poller tickからversion付terminal_snapshot、購読者0でno-op)・`broadcastSessionStatus`(running遷移) |
+| `src/lib/terminal/terminal-diff.ts` | `computeTerminalUpdate(prev,next)`（Issue #1120）。追記=append/分岐=replace/同一=noop、ANSIエスケープ境界を退避しテキスト選択維持 |
+| `src/lib/session/current-output-builder.ts` | `buildCurrentOutput()`（Issue #1120）。/current-outputルートとWS terminal streamerで共有するペイロード組立（pull/push一致） |
+| `src/hooks/useNewOutputIndicator.ts` | モバイル端末タブ新着出力バッジのpush駆動シグナル（Issue #1120）。非表示中のterminal_snapshot/messageでフラグ、terminalタブ表示で解除 |
+| `src/components/common/ConnectionStatusIndicator.tsx` | realtime接続状態のさりげないインジケータ（Issue #1120）。connected時は非表示、切断/再接続中のみpill表示（pollingフォールバック動作中） |
 
 ---
 

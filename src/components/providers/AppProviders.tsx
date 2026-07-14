@@ -19,6 +19,7 @@ import { PcDisplaySizeProvider } from '@/contexts/PcDisplaySizeContext';
 import { CommandPaletteProvider } from '@/contexts/CommandPaletteContext';
 import { WorktreesCacheProvider } from '@/components/providers/WorktreesCacheProvider';
 import { ViewTransitionsProvider } from '@/components/providers/ViewTransitionsProvider';
+import { RealtimeProvider } from '@/hooks/useRealtimeConnection';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 
 interface AppProvidersProps {
@@ -46,15 +47,22 @@ export function AppProviders({ children, locale, messages, timeZone, authEnabled
         <AuthProvider authEnabled={authEnabled}>
           <PcDisplaySizeProvider>
             <SidebarProvider>
-              <WorktreesCacheProvider>
-                <CommandPaletteProvider>
-                  <ConfirmProvider>
-                    <ViewTransitionsProvider>
-                      {children}
-                    </ViewTransitionsProvider>
-                  </ConfirmProvider>
-                </CommandPaletteProvider>
-              </WorktreesCacheProvider>
+              {/* Issue #1120: single shared WebSocket connection wrapping the
+                  worktrees cache so session-status / message / terminal pushes
+                  feed the sidebar and terminal panes; polling remains the
+                  fallback when disconnected. */}
+              <RealtimeProvider>
+                <WorktreesCacheProvider>
+                  <CommandPaletteProvider>
+                    <ConfirmProvider>
+                      {/* Issue #1141: View Transitions wraps the routed content. */}
+                      <ViewTransitionsProvider>
+                        {children}
+                      </ViewTransitionsProvider>
+                    </ConfirmProvider>
+                  </CommandPaletteProvider>
+                </WorktreesCacheProvider>
+              </RealtimeProvider>
             </SidebarProvider>
           </PcDisplaySizeProvider>
         </AuthProvider>

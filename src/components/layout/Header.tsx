@@ -15,6 +15,7 @@ import { useTranslations } from 'next-intl';
 import { Folder, Github, Search } from 'lucide-react';
 import { PcDisplaySizeSelector } from './PcDisplaySizeSelector';
 import { ThemeToggle } from '@/components/common/ThemeToggle';
+import { ConnectionStatusIndicator } from '@/components/common/ConnectionStatusIndicator';
 import { Kbd } from '@/components/ui/Kbd';
 import { useCommandPalette } from '@/contexts/CommandPaletteContext';
 
@@ -108,6 +109,9 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
                 </span>
               )}
             </button>
+            {/* Realtime connection status (Issue #1120) - only shows when the
+                live push connection is down (polling fallback active). */}
+            <ConnectionStatusIndicator />
             {/* PC display size selector (Issue #915) - hidden on mobile */}
             <PcDisplaySizeSelector />
             {/* Theme toggle promoted to the header (Issue #1071) */}
