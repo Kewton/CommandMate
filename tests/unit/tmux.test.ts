@@ -165,9 +165,26 @@ describe('tmux library', () => {
 
       await createSession('test-session', '/path/to/cwd');
 
+      // Issue #1163: default pane height is now TUI_PANE_HEIGHT (1000 rows)
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '200'],
+        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '1000'],
+        { timeout: 5000 },
+        expect.any(Function)
+      );
+      // Issue #1163: pin window-size manual (per session) so `window-size latest`
+      // never shrinks the pane when a small client attaches.
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['set-window-option', '-t', '=test-session:', 'window-size', 'manual'],
+        { timeout: 5000 },
+        expect.any(Function)
+      );
+      // Issue #1163: explicit resize-window locks in the intended geometry
+      // (the -y on new-session does not survive window-size latest on its own).
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['resize-window', '-t', '=test-session:', '-x', '200', '-y', '1000'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -192,9 +209,10 @@ describe('tmux library', () => {
         historyLimit: 100000,
       });
 
+      // Issue #1163: default pane height is now TUI_PANE_HEIGHT (1000 rows)
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '200'],
+        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '1000'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -226,9 +244,16 @@ describe('tmux library', () => {
         { timeout: 5000 },
         expect.any(Function)
       );
+      // Issue #1163: resize-window honors the explicit windowWidth/windowHeight too
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['resize-window', '-t', '=test-session:', '-x', '200', '-y', '50'],
+        { timeout: 5000 },
+        expect.any(Function)
+      );
     });
 
-    it('should use default window size (200x200) with legacy signature', async () => {
+    it('should use default window size (200x1000) with legacy signature', async () => {
       vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
         const callback = args[args.length - 1] as (err: Error | null, result: { stdout: string; stderr: string }) => void;
         callback(null, { stdout: '', stderr: '' });
@@ -237,9 +262,10 @@ describe('tmux library', () => {
 
       await createSession('test-session', '/path/to/cwd');
 
+      // Issue #1163: default height raised to TUI_PANE_HEIGHT (1000 rows)
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '200'],
+        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '1000'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -257,9 +283,10 @@ describe('tmux library', () => {
         workingDirectory: '/path/to/cwd',
       });
 
+      // Issue #1163: default height raised to TUI_PANE_HEIGHT (1000 rows)
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '200'],
+        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '1000'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -274,6 +301,112 @@ describe('tmux library', () => {
 
       await expect(createSession('test-session', '/path/to/cwd')).rejects.toThrow(
         'Failed to create tmux session'
+      );
+    });
+  });
+
+  // Issue #1163: pane-height pinning so `window-size latest` cannot shrink the
+  // capturable rows of an alternate-screen TUI when a small client attaches.
+  describe('createSession window-size pinning (Issue #1163)', () => {
+    /** Record the tmux subcommand of each execFile call in order. */
+    function installOrderRecordingMock(): string[] {
+      const subcommands: string[] = [];
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const cmdArgs = args[1] as string[];
+        subcommands.push(cmdArgs[0]);
+        const callback = args[args.length - 1] as (
+          err: Error | null,
+          result: { stdout: string; stderr: string }
+        ) => void;
+        callback(null, { stdout: '', stderr: '' });
+        return {} as ReturnType<typeof execFile>;
+      });
+      return subcommands;
+    }
+
+    it('sets window-size manual then resize-window AFTER new-session (order matters)', async () => {
+      const subcommands = installOrderRecordingMock();
+
+      await createSession({
+        sessionName: 'test-session',
+        workingDirectory: '/path/to/cwd',
+      });
+
+      const newSessionIdx = subcommands.indexOf('new-session');
+      const setWinOptIdx = subcommands.indexOf('set-window-option');
+      const resizeIdx = subcommands.indexOf('resize-window');
+
+      expect(newSessionIdx).toBeGreaterThanOrEqual(0);
+      expect(setWinOptIdx).toBeGreaterThan(newSessionIdx);
+      expect(resizeIdx).toBeGreaterThan(setWinOptIdx);
+    });
+
+    it('targets the session exactly (=name:) for window-size manual and resize', async () => {
+      installOrderRecordingMock();
+
+      await createSession({
+        sessionName: 'mcbd-claude-wt',
+        workingDirectory: '/path/to/cwd',
+      });
+
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['set-window-option', '-t', '=mcbd-claude-wt:', 'window-size', 'manual'],
+        { timeout: 5000 },
+        expect.any(Function)
+      );
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['resize-window', '-t', '=mcbd-claude-wt:', '-x', '200', '-y', '1000'],
+        { timeout: 5000 },
+        expect.any(Function)
+      );
+    });
+
+    it('never touches the GLOBAL window-size option (-g)', async () => {
+      installOrderRecordingMock();
+
+      await createSession({
+        sessionName: 'test-session',
+        workingDirectory: '/path/to/cwd',
+      });
+
+      // No call may pass -g together with window-size (would leak to all sessions).
+      for (const call of vi.mocked(execFile).mock.calls) {
+        const cmdArgs = call[1] as string[];
+        if (cmdArgs.includes('window-size')) {
+          expect(cmdArgs).not.toContain('-g');
+        }
+      }
+    });
+
+    it('treats window-size/resize failure as non-fatal (session still created)', async () => {
+      // new-session + set-option succeed; the window-size/resize calls fail.
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const cmdArgs = args[1] as string[];
+        const subcommand = cmdArgs[0];
+        const callback = args[args.length - 1] as (
+          err: Error | null,
+          result: { stdout: string; stderr: string }
+        ) => void;
+        if (subcommand === 'set-window-option' || subcommand === 'resize-window') {
+          callback(new Error('resize not supported'), { stdout: '', stderr: '' });
+        } else {
+          callback(null, { stdout: '', stderr: '' });
+        }
+        return {} as ReturnType<typeof execFile>;
+      });
+
+      await expect(
+        createSession({ sessionName: 'test-session', workingDirectory: '/path/to/cwd' })
+      ).resolves.toBeUndefined();
+
+      // history-limit is still applied after the swallowed resize failure.
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['set-option', '-t', '=test-session:', 'history-limit', '50000'],
+        { timeout: 5000 },
+        expect.any(Function)
       );
     });
   });
@@ -485,8 +618,9 @@ describe('tmux library', () => {
 
       await ensureSession('test-session', '/path/to/cwd');
 
-      // Should call has-session, new-session, and set-option
-      expect(execFile).toHaveBeenCalledTimes(3);
+      // Should call has-session, new-session, set-window-option (window-size manual),
+      // resize-window, and set-option (Issue #1163 adds the window-size + resize calls)
+      expect(execFile).toHaveBeenCalledTimes(5);
     });
 
     it('should not create session if it already exists', async () => {
