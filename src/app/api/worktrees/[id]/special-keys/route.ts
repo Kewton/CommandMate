@@ -15,6 +15,7 @@ import { getWorktreeById } from '@/lib/db';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { hasSession, isAllowedSpecialKey, sendSpecialKeysAndInvalidate } from '@/lib/tmux/tmux';
 import { createLogger } from '@/lib/logger';
+import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 
 const logger = createLogger('api/special-keys');
 
@@ -106,6 +107,7 @@ export async function POST(
 
     // 6. Send special keys and invalidate cache [DR1-003]
     await sendSpecialKeysAndInvalidate(sessionName, keys);
+    void broadcastTerminalSnapshotAfterInteraction(params.id, cliToolId, instanceId as string | undefined);
 
     return NextResponse.json({ success: true });
   } catch (error) {

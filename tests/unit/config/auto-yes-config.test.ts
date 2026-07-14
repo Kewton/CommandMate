@@ -298,8 +298,8 @@ describe('auto-yes-config', () => {
       expect(THINKING_POLLING_INTERVAL_MS).toBe(5000);
     });
 
-    it('REDUCED_CAPTURE_LINES should be 300', () => {
-      expect(REDUCED_CAPTURE_LINES).toBe(300);
+    it('REDUCED_CAPTURE_LINES should cover the fixed TUI pane', () => {
+      expect(REDUCED_CAPTURE_LINES).toBe(1000);
     });
 
     it('FULL_CAPTURE_LINES should be 5000', () => {

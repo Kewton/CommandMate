@@ -101,6 +101,10 @@ export class OpenCodeTool extends BaseCLITool {
 
     const exists = await hasSession(sessionName);
     if (exists) {
+      await this.reconcileExistingSession(sessionName, {
+        windowWidth: 80,
+        windowHeight: OPENCODE_PANE_HEIGHT,
+      });
       logger.info('opencode-session-sessionname');
       return;
     }

@@ -141,6 +141,7 @@ export class AntigravityTool extends BaseCLITool {
     // Check if session already exists
     const exists = await hasSession(sessionName);
     if (exists) {
+      await this.reconcileExistingSession(sessionName);
       logger.info('antigravity-session-exists');
       return;
     }

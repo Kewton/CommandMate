@@ -37,10 +37,17 @@ import {
   FULL_CAPTURE_LINES,
   AUTO_STOP_ERROR_THRESHOLD,
 } from '@/config/auto-yes-config';
+import { buildClaude1000RowPermissionFrame } from '../../fixtures/claude-1000-row-prompt';
 
 // Mock modules for pollAutoYes testing (Issue #161)
 vi.mock('@/lib/session/cli-session', () => ({
   captureSessionOutput: vi.fn(),
+}));
+vi.mock('@/lib/polling/response-poller', () => ({
+  startPolling: vi.fn(),
+}));
+vi.mock('@/lib/realtime/terminal-broadcast', () => ({
+  broadcastTerminalSnapshotAfterInteraction: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('@/lib/tmux/tmux', () => ({
   sendKeys: vi.fn(),
@@ -1628,6 +1635,34 @@ describe('auto-yes-manager', () => {
   // Issue #323: detectAndRespondToPrompt unit tests (timer-independent)
   // ==========================================================================
   describe('Issue #323: detectAndRespondToPrompt', () => {
+    it('answers the Issue #1167 1000-row prompt exactly once', async () => {
+      const { sendSpecialKeys } = await import('@/lib/tmux/tmux');
+      const { startPolling } = await import('@/lib/polling/response-poller');
+      const { broadcastTerminalSnapshotAfterInteraction } = await import('@/lib/realtime/terminal-broadcast');
+      vi.mocked(sendSpecialKeys).mockReset();
+      vi.mocked(sendSpecialKeys).mockResolvedValue(undefined);
+      vi.mocked(startPolling).mockClear();
+      vi.mocked(broadcastTerminalSnapshotAfterInteraction).mockClear();
+
+      const pollerState = createTestPollerState();
+      globalThis.__autoYesPollerStates?.set('test-wt-1167:claude', pollerState);
+      const frame = buildClaude1000RowPermissionFrame();
+
+      expect(await detectAndRespondToPrompt('test-wt-1167', pollerState, 'claude', frame))
+        .toBe('responded');
+      expect(await detectAndRespondToPrompt('test-wt-1167', pollerState, 'claude', frame))
+        .toBe('duplicate');
+      expect(sendSpecialKeys).toHaveBeenCalledTimes(1);
+      expect(startPolling).toHaveBeenCalledTimes(1);
+      expect(broadcastTerminalSnapshotAfterInteraction).toHaveBeenCalledWith(
+        'test-wt-1167',
+        'claude',
+        undefined,
+      );
+
+      globalThis.__autoYesPollerStates?.delete('test-wt-1167:claude');
+    });
+
     it('should return no_prompt when no prompt detected', async () => {
       const pollerState = createTestPollerState();
 
@@ -2126,7 +2161,7 @@ describe('auto-yes-manager', () => {
       // Call with explicit REDUCED_CAPTURE_LINES
       // Issue #896: instanceId is passed as 4th arg (undefined for primary)
       await captureAndCleanOutput('test-wt', 'claude', REDUCED_CAPTURE_LINES);
-      expect(captureSessionOutput).toHaveBeenCalledWith('test-wt', 'claude', 300, undefined);
+      expect(captureSessionOutput).toHaveBeenCalledWith('test-wt', 'claude', 1000, undefined);
 
       vi.mocked(captureSessionOutput).mockReset();
       vi.mocked(captureSessionOutput).mockResolvedValue('test output');
@@ -2138,8 +2173,8 @@ describe('auto-yes-manager', () => {
       vi.mocked(captureSessionOutput).mockReset();
     });
 
-    it('Item 3: REDUCED_CAPTURE_LINES should be 300 and FULL_CAPTURE_LINES should be 5000', () => {
-      expect(REDUCED_CAPTURE_LINES).toBe(300);
+    it('Item 3: REDUCED_CAPTURE_LINES should cover the 1000-row frame', () => {
+      expect(REDUCED_CAPTURE_LINES).toBe(1000);
       expect(FULL_CAPTURE_LINES).toBe(5000);
     });
 

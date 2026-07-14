@@ -144,6 +144,35 @@ describe('useTerminalPanePolling', () => {
     expect(result.current.terminal.output).toBe('second');
   });
 
+  it('requires consecutive unclassified snapshots and resets when a prompt is found', async () => {
+    mockFetch.mockImplementation(() => okJson({
+      isRunning: true,
+      fullOutput: 'unknown TUI',
+      isUnclassifiedActive: true,
+    }));
+    const { result } = renderHook(() =>
+      useTerminalPanePolling({ worktreeId: 'w-1', cliToolId: 'claude' }),
+    );
+
+    await waitFor(() => expect(result.current.terminal.attaching).toBe(false));
+    expect(result.current.terminal.isUnclassifiedActive).toBe(false);
+
+    await new Promise(resolve => setTimeout(resolve, 550));
+    await act(async () => result.current.refresh());
+    expect(result.current.terminal.isUnclassifiedActive).toBe(true);
+
+    mockFetch.mockImplementation(() => okJson({
+      isRunning: true,
+      fullOutput: 'permission prompt',
+      isUnclassifiedActive: true,
+      isPromptWaiting: true,
+      promptData: { type: 'yes_no', question: 'Continue?' },
+    }));
+    await act(async () => result.current.refresh());
+    expect(result.current.terminal.isUnclassifiedActive).toBe(false);
+    expect(result.current.prompt.visible).toBe(true);
+  });
+
   it('does not fetch when enabled=false', async () => {
     mockFetch.mockImplementation(() =>
       okJson({ isRunning: false, fullOutput: 'never', thinking: false }),

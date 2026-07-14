@@ -40,11 +40,15 @@ vi.mock('@/lib/tmux/tmux', () => ({
 vi.mock('@/lib/tmux/tmux-capture-cache', () => ({
   invalidateCache: vi.fn(),
 }));
+vi.mock('@/lib/realtime/terminal-broadcast', () => ({
+  broadcastTerminalSnapshotAfterInteraction: vi.fn().mockResolvedValue(undefined),
+}));
 
 import { POST } from '@/app/api/worktrees/[id]/special-keys/route';
 import { getWorktreeById } from '@/lib/db';
 import { hasSession, sendSpecialKeysAndInvalidate } from '@/lib/tmux/tmux';
 import { isCliToolType } from '@/lib/cli-tools/types';
+import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 
 function createRequest(body: unknown): NextRequest {
   const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
@@ -82,6 +86,11 @@ describe('POST /api/worktrees/[id]/special-keys', () => {
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
     expect(sendSpecialKeysAndInvalidate).toHaveBeenCalledWith('mcbd-opencode-wt-1', ['Up']);
+    expect(broadcastTerminalSnapshotAfterInteraction).toHaveBeenCalledWith(
+      'wt-1',
+      'opencode',
+      undefined,
+    );
   });
 
   it('should accept multiple valid keys', async () => {

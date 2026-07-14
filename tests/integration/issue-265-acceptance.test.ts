@@ -15,6 +15,7 @@ vi.mock('@/lib/tmux/tmux', () => ({
   sendKeys: vi.fn(),
   capturePane: vi.fn(),
   killSession: vi.fn(),
+  reconcileSessionGeometry: vi.fn().mockResolvedValue(false),
 }));
 
 // Mock pasted-text-helper
@@ -51,7 +52,7 @@ import {
   CLAUDE_POST_PROMPT_DELAY,
   CLAUDE_INIT_TIMEOUT,
 } from '@/lib/session/claude-session';
-import { hasSession, createSession, sendKeys, capturePane, killSession } from '@/lib/tmux/tmux';
+import { hasSession, createSession, sendKeys, capturePane, killSession, reconcileSessionGeometry } from '@/lib/tmux/tmux';
 import {
   CLAUDE_SESSION_ERROR_PATTERNS,
   CLAUDE_SESSION_ERROR_REGEX_PATTERNS,
@@ -312,9 +313,7 @@ describe('Issue #265 Acceptance Test: CLI path cache invalidation and broken ses
       expect(true).toBe(true); // Test passes = overhead is within budget
     });
 
-    it('should not add overhead to healthy session reuse', async () => {
-      // When session exists and is healthy, only isSessionHealthy check runs
-      // isSessionHealthy does capturePane + pattern matching (~50ms)
+    it('should reuse a healthy session after non-blocking geometry reconciliation', async () => {
       vi.mocked(hasSession).mockResolvedValue(true);
       vi.mocked(capturePane).mockResolvedValue('Some Claude output\n> ');
 
@@ -323,6 +322,7 @@ describe('Issue #265 Acceptance Test: CLI path cache invalidation and broken ses
       // No createSession, no sanitizeSessionEnvironment
       expect(createSession).not.toHaveBeenCalled();
       expect(sendKeys).not.toHaveBeenCalled();
+      expect(reconcileSessionGeometry).toHaveBeenCalledWith(TEST_SESSION_NAME);
     });
 
     it('should ensure CLAUDE_INIT_TIMEOUT allows sufficient time with sanitization overhead', () => {

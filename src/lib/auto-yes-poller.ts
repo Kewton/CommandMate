@@ -384,6 +384,16 @@ export async function detectAndRespondToPrompt(
 
     logger.info('poller:response-sent', { worktreeId, cliToolId, instanceId });
 
+    // Dynamic imports avoid a module cycle through terminal-broadcast ->
+    // current-output-builder -> auto-yes-manager -> this poller.
+    const [{ startPolling: startResponsePolling }, { broadcastTerminalSnapshotAfterInteraction }] =
+      await Promise.all([
+        import('@/lib/polling/response-poller'),
+        import('@/lib/realtime/terminal-broadcast'),
+      ]);
+    startResponsePolling(worktreeId, cliToolId, instanceId);
+    void broadcastTerminalSnapshotAfterInteraction(worktreeId, cliToolId, instanceId);
+
     return 'responded';
   } catch {
     incrementErrorCount(compositeKey);

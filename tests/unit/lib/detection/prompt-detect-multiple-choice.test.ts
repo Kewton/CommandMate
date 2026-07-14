@@ -26,6 +26,7 @@ import {
 } from '@/lib/detection/prompt-detect-multiple-choice';
 import type { DetectPromptOptions } from '@/lib/detection/types';
 import type { MultipleChoicePromptData } from '@/types/models';
+import { buildClaude1000RowPermissionFrame } from '../../../fixtures/claude-1000-row-prompt';
 
 /** Identity truncation: the unit under test only needs a passthrough. */
 const truncate = (s: string) => s;
@@ -71,6 +72,18 @@ const PICKER_WITH_TASK_PANEL = [
 ].join('\n');
 
 describe('detectMultipleChoicePrompt - Issue #807 AskUserQuestion picker', () => {
+  describe('Issue #1167 1000-row frame', () => {
+    it('finds the prompt above internal padding and excludes the task panel', () => {
+      const promptData = asMultipleChoice(buildClaude1000RowPermissionFrame());
+
+      expect(promptData).not.toBeNull();
+      expect(promptData?.question).toContain('Do you want to make this edit');
+      expect(promptData?.options.map(option => option.number)).toEqual([1, 2, 3]);
+      expect(promptData?.options.some(option => option.label.includes('tasks'))).toBe(false);
+      expect(promptData?.options.some(option => option.label.includes('pending'))).toBe(false);
+    });
+  });
+
   describe('clean picker (no trailing task panel)', () => {
     it('detects all 5 options including the divider-separated meta options', () => {
       const promptData = asMultipleChoice(PICKER_CLEAN);

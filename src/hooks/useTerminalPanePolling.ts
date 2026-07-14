@@ -44,6 +44,11 @@ export const IDLE_POLLING_INTERVAL_MS = 5000;
  * a slow fallback that only recovers if push delivery stalls.
  */
 export const WS_CONNECTED_POLLING_INTERVAL_MS = 15000;
+/** Push is unhealthy when no terminal snapshot heartbeat arrives in this window. */
+export const WS_PUSH_STALE_AFTER_MS = 5000;
+/** Require two consecutive low-confidence frames before exposing escape controls. */
+export const UNCLASSIFIED_CONFIRMATION_COUNT = 2;
+export const UNCLASSIFIED_CONFIRMATION_DELAY_MS = 500;
 
 export interface PaneTerminalState {
   output: string;
@@ -162,9 +167,22 @@ export function useTerminalPanePolling({
   // `terminal_snapshot` while a session generates; `version` guards against
   // out-of-order deliveries (parity with the poll's requestId stale-guard).
   const { connected, subscribe, unsubscribe, addListener } = useRealtime();
-  const connectedRef = useRef(connected);
-  connectedRef.current = connected;
   const lastSnapshotVersionRef = useRef(0);
+  const unclassifiedCountRef = useRef(0);
+  const unclassifiedSinceRef = useRef<number | null>(null);
+  const pushStaleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pushHealthy, setPushHealthy] = useState(false);
+
+  const markPushHealthy = useCallback(() => {
+    setPushHealthy(true);
+    if (pushStaleTimerRef.current !== null) {
+      clearTimeout(pushStaleTimerRef.current);
+    }
+    pushStaleTimerRef.current = setTimeout(() => {
+      pushStaleTimerRef.current = null;
+      setPushHealthy(false);
+    }, WS_PUSH_STALE_AFTER_MS);
+  }, []);
 
   /**
    * Apply a normalized output snapshot (from a poll response or a WS push) to the
@@ -183,6 +201,21 @@ export function useTerminalPanePolling({
       promptData?: PromptData | null;
     }): void => {
       const nextOutput = data.fullOutput ?? data.realtimeSnippet ?? '';
+      const rawUnclassified = data.isUnclassifiedActive === true
+        && data.isPromptWaiting !== true
+        && data.isSelectionListActive !== true
+        && data.isPagerActive !== true;
+      if (rawUnclassified) {
+        unclassifiedCountRef.current += 1;
+        unclassifiedSinceRef.current ??= Date.now();
+      } else {
+        unclassifiedCountRef.current = 0;
+        unclassifiedSinceRef.current = null;
+      }
+      const confirmedUnclassified =
+        unclassifiedCountRef.current >= UNCLASSIFIED_CONFIRMATION_COUNT
+        && unclassifiedSinceRef.current !== null
+        && Date.now() - unclassifiedSinceRef.current >= UNCLASSIFIED_CONFIRMATION_DELAY_MS;
 
       setTerminal(prev => {
         // Overwrite output if we have content or the session is still running.
@@ -198,7 +231,7 @@ export function useTerminalPanePolling({
           isThinking: data.thinking ?? false,
           isSelectionListActive: data.isSelectionListActive ?? false,
           isPagerActive: data.isPagerActive ?? false,
-          isUnclassifiedActive: data.isUnclassifiedActive ?? false,
+          isUnclassifiedActive: confirmedUnclassified,
           attaching: false,
         };
       });
@@ -266,6 +299,13 @@ export function useTerminalPanePolling({
     // Issue #1120: reset the push version guard so the new session's snapshots
     // (which restart their own version counter) are not rejected as stale.
     lastSnapshotVersionRef.current = 0;
+    unclassifiedCountRef.current = 0;
+    unclassifiedSinceRef.current = null;
+    setPushHealthy(false);
+    if (pushStaleTimerRef.current !== null) {
+      clearTimeout(pushStaleTimerRef.current);
+      pushStaleTimerRef.current = null;
+    }
     setTerminal(prev => ({
       ...prev,
       output: '',
@@ -290,8 +330,19 @@ export function useTerminalPanePolling({
   // Issue #1120: a fresh connection resets the push version guard so snapshots
   // are accepted after a server restart (which restarts server-side counters).
   useEffect(() => {
-    if (connected) lastSnapshotVersionRef.current = 0;
+    lastSnapshotVersionRef.current = 0;
+    setPushHealthy(false);
+    if (pushStaleTimerRef.current !== null) {
+      clearTimeout(pushStaleTimerRef.current);
+      pushStaleTimerRef.current = null;
+    }
   }, [connected]);
+
+  useEffect(() => () => {
+    if (pushStaleTimerRef.current !== null) {
+      clearTimeout(pushStaleTimerRef.current);
+    }
+  }, []);
 
   // Issue #1120: apply pushed terminal snapshots for this exact pane.
   useEffect(() => {
@@ -309,6 +360,7 @@ export function useTerminalPanePolling({
       // Version guard: drop out-of-order / stale deliveries.
       if (snap.version <= lastSnapshotVersionRef.current) return;
       lastSnapshotVersionRef.current = snap.version;
+      markPushHealthy();
 
       const realtimeSnippet = snap.output.split('\n').slice(-100).join('\n');
       applySnapshot({
@@ -323,7 +375,7 @@ export function useTerminalPanePolling({
         promptData: snap.promptData ?? null,
       });
     });
-  }, [enabled, worktreeId, addListener, applySnapshot]);
+  }, [enabled, worktreeId, addListener, applySnapshot, markPushHealthy]);
 
   // Initial + interval polling. Pauses when hidden, resumes on visible.
   // Cadence depends on isRunning (active=2s, idle=5s); while a WS push
@@ -339,9 +391,13 @@ export function useTerminalPanePolling({
       }, ms);
     };
 
-    const intervalMs = connected
+    const interactionActive = prompt.visible
+      || terminal.isSelectionListActive
+      || terminal.isPagerActive
+      || terminal.isUnclassifiedActive;
+    const intervalMs = connected && pushHealthy && !interactionActive
       ? WS_CONNECTED_POLLING_INTERVAL_MS
-      : terminal.isRunning
+      : terminal.isRunning || interactionActive
         ? ACTIVE_POLLING_INTERVAL_MS
         : IDLE_POLLING_INTERVAL_MS;
     let intervalId: ReturnType<typeof setInterval> | null = startInterval(intervalMs);
@@ -371,7 +427,17 @@ export function useTerminalPanePolling({
     //   - the cadence-driving isRunning flips
     //   - the WS connection state flips (Issue #1120)
     //   - fetchCurrentOutput identity changes (cliToolId / worktreeId)
-  }, [enabled, connected, terminal.isRunning, fetchCurrentOutput]);
+  }, [
+    enabled,
+    connected,
+    pushHealthy,
+    terminal.isRunning,
+    terminal.isSelectionListActive,
+    terminal.isPagerActive,
+    terminal.isUnclassifiedActive,
+    prompt.visible,
+    fetchCurrentOutput,
+  ]);
 
   const setAutoScroll = useCallback((next: boolean) => {
     setTerminal(prev => (prev.autoScroll === next ? prev : { ...prev, autoScroll: next }));

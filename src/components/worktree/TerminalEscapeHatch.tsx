@@ -9,12 +9,10 @@
  * and the session becomes unreachable — exactly the failure this issue fixes for
  * the Codex pager (via CODEX_PAGER_FOOTER_PATTERN).
  *
- * This component is the permanent insurance against the NEXT undetected TUI mode:
- * a minimal Esc / q affordance that the caller renders whenever the session is
- * interactive but in an unclassified state (no prompt, no selection list). Esc
- * exits/interrupts most modes; q quits pager-style views. It is intentionally NOT
- * shown at a normal idle input prompt (status 'ready'), where 'q' would insert the
- * literal character — the caller gates on that.
+ * This component is the permanent insurance against the NEXT undetected TUI mode.
+ * Esc is safe across supported CLIs; q is exposed only for Codex, where it is a
+ * known pager quit key. The caller renders it only for a confirmed unclassified
+ * state, never at a normal input prompt or over a detected prompt/navigation UI.
  */
 
 import { useCallback, useState } from 'react';
@@ -32,14 +30,20 @@ export interface TerminalEscapeHatchProps {
   onKeysSent?: () => void;
 }
 
-const ESCAPE_KEYS: ReadonlyArray<{ key: NavigationKey; label: string; ariaLabel: string }> = [
-  { key: 'Escape', label: 'Esc', ariaLabel: 'Send Escape' },
-  { key: 'q', label: 'q', ariaLabel: 'Send q (quit)' },
+const ESCAPE_KEY: { key: NavigationKey; label: string; ariaLabel: string } =
+  { key: 'Escape', label: 'Esc', ariaLabel: 'Send Escape' };
+const CODEX_QUIT_KEY: { key: NavigationKey; label: string; ariaLabel: string } =
+  { key: 'q', label: 'q', ariaLabel: 'Send q (quit)' };
+
+const CODEX_ESCAPE_KEYS: ReadonlyArray<{ key: NavigationKey; label: string; ariaLabel: string }> = [
+  ESCAPE_KEY,
+  CODEX_QUIT_KEY,
 ];
 
 export function TerminalEscapeHatch({ worktreeId, cliToolId, instanceId, onKeysSent }: TerminalEscapeHatchProps) {
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const send = useSpecialKeys(worktreeId, cliToolId, instanceId, onKeysSent);
+  const escapeKeys = cliToolId === 'codex' ? CODEX_ESCAPE_KEYS : [ESCAPE_KEY];
 
   const handleClick = useCallback(
     (key: NavigationKey) => {
@@ -59,7 +63,7 @@ export function TerminalEscapeHatch({ worktreeId, cliToolId, instanceId, onKeysS
       <span className="text-xs text-amber-700 dark:text-amber-400 mx-2" title="Send an escape key when the terminal is stuck in a TUI mode">
         Escape
       </span>
-      {ESCAPE_KEYS.map(({ key, label, ariaLabel }) => (
+      {escapeKeys.map(({ key, label, ariaLabel }) => (
         <button
           key={key}
           type="button"

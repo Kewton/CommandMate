@@ -17,6 +17,7 @@ import {
   ACTIVE_POLLING_INTERVAL_MS,
   IDLE_POLLING_INTERVAL_MS,
   WS_CONNECTED_POLLING_INTERVAL_MS,
+  WS_PUSH_STALE_AFTER_MS,
 } from '@/hooks/useTerminalPanePolling';
 import { MockWebSocket, installMockWebSocket } from '@tests/helpers/mock-websocket';
 
@@ -51,7 +52,25 @@ describe('WS ↔ polling fallback (Issue #1120)', () => {
     delete (globalThis as { fetch?: unknown }).fetch;
   });
 
-  it('throttles polling while connected and restores it on disconnect/reconnect', async () => {
+  function terminalSnapshot(version: number): string {
+    return JSON.stringify({
+      type: 'terminal_snapshot',
+      worktreeId: 'wt-1',
+      cliToolId: 'claude',
+      instanceId: 'claude',
+      output: 'stable output',
+      isRunning: false,
+      thinking: false,
+      isPromptWaiting: false,
+      promptData: null,
+      isSelectionListActive: false,
+      isPagerActive: false,
+      isUnclassifiedActive: false,
+      version,
+    });
+  }
+
+  it('throttles only while terminal snapshot heartbeats are healthy', async () => {
     renderHook(
       () => useTerminalPanePolling({ worktreeId: 'wt-1', cliToolId: 'claude' }),
       { wrapper },
@@ -70,22 +89,35 @@ describe('WS ↔ polling fallback (Issue #1120)', () => {
     });
     expect(fetchMock.mock.calls.length).toBeGreaterThan(before);
 
-    // --- Connect: cadence throttled to the slow WS fallback interval. ---
+    // A connected socket without snapshots is not considered a healthy producer.
     await act(async () => {
       ws.mockOpen();
       await vi.advanceTimersByTimeAsync(0);
     });
-    const afterConnect = fetchMock.mock.calls.length; // includes the effect re-run kick
-    // Below the throttled interval → no new poll while connected.
+    before = fetchMock.mock.calls.length;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(IDLE_POLLING_INTERVAL_MS);
     });
-    expect(fetchMock.mock.calls.length).toBe(afterConnect);
-    // Reaching the throttled interval → exactly one poll.
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(before);
+
+    // Once snapshots arrive, keep their watchdog alive and verify the 15s cadence.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(WS_CONNECTED_POLLING_INTERVAL_MS - IDLE_POLLING_INTERVAL_MS);
+      ws.mockMessage(terminalSnapshot(1));
+      await vi.advanceTimersByTimeAsync(0);
     });
-    expect(fetchMock.mock.calls.length).toBe(afterConnect + 1);
+    const afterHealthyPush = fetchMock.mock.calls.length;
+    for (let version = 2; version <= 4; version++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000);
+        ws.mockMessage(terminalSnapshot(version));
+        await vi.advanceTimersByTimeAsync(0);
+      });
+    }
+    expect(fetchMock.mock.calls.length).toBe(afterHealthyPush);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(fetchMock.mock.calls.length).toBe(afterHealthyPush + 1);
 
     // --- Disconnect: fast polling resumes (fallback). ---
     await act(async () => {
@@ -98,19 +130,44 @@ describe('WS ↔ polling fallback (Issue #1120)', () => {
     });
     expect(fetchMock.mock.calls.length).toBeGreaterThan(before);
 
-    // --- Reconnect: throttled again. ---
+    // Reconnect requires a new snapshot before it is considered healthy again.
     // The reconnect timer (base 1s backoff) fires during the advance above; open it.
     const ws2 = MockWebSocket.last();
     expect(ws2).not.toBe(ws);
     await act(async () => {
       ws2.mockOpen();
       await vi.advanceTimersByTimeAsync(0);
+      ws2.mockMessage(terminalSnapshot(5));
+      await vi.advanceTimersByTimeAsync(0);
     });
     const afterReconnect = fetchMock.mock.calls.length;
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(IDLE_POLLING_INTERVAL_MS);
+      await vi.advanceTimersByTimeAsync(WS_PUSH_STALE_AFTER_MS - 1);
     });
     expect(fetchMock.mock.calls.length).toBe(afterReconnect);
+  });
+
+  it('falls back before 15 seconds when push stops on a connected socket', async () => {
+    renderHook(
+      () => useTerminalPanePolling({ worktreeId: 'wt-1', cliToolId: 'claude' }),
+      { wrapper },
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    const ws = MockWebSocket.last();
+    await act(async () => {
+      ws.mockOpen();
+      ws.mockMessage(terminalSnapshot(1));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const afterPush = fetchMock.mock.calls.length;
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(WS_PUSH_STALE_AFTER_MS + ACTIVE_POLLING_INTERVAL_MS);
+    });
+
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(afterPush);
+    expect(WS_PUSH_STALE_AFTER_MS + ACTIVE_POLLING_INTERVAL_MS)
+      .toBeLessThan(WS_CONNECTED_POLLING_INTERVAL_MS);
   });
 
   it('sanity: the throttled interval is larger than the active poll interval', () => {
