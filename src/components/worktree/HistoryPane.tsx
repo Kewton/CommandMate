@@ -40,6 +40,7 @@ import type { HistoryMatch } from '@/hooks/useHistorySearch';
 import {
   HISTORY_VIRTUAL_OVERSCAN,
   HISTORY_ESTIMATED_PAIR_HEIGHT_PX,
+  HISTORY_FALLBACK_RENDER_COUNT,
   isNearBottom,
 } from '@/lib/history-virtualization';
 
@@ -519,6 +520,30 @@ export const HistoryPane = memo(function HistoryPane({
     [showToast]
   );
 
+  // Card body shared by the virtualized rows and the zero-measurement fallback.
+  // Expand state lives in the parent (useConversationHistory + search
+  // auto-expand), so it survives the card's unmount/remount as rows recycle
+  // during virtualized scrolling.
+  const renderPairBody = (pair: ConversationPair) => {
+    const isArchived =
+      pair.userMessage?.archived === true ||
+      pair.assistantMessages?.some((m) => m.archived === true);
+    const expanded = isManuallyExpanded(pair.id) || autoExpandedIds.has(pair.id);
+    return (
+      <div className={isArchived ? 'opacity-60' : ''}>
+        <ConversationPairCard
+          pair={pair}
+          onFilePathClick={handleFilePathClick}
+          isExpanded={expanded}
+          onToggleExpand={createToggleHandler(pair.id)}
+          onCopy={handleCopy}
+          onInsertToMessage={onInsertToMessage}
+          showAssistant={!historyUserOnly}
+        />
+      </div>
+    );
+  };
+
   const renderContent = () => {
     if (isLoading) {
       return <LoadingIndicator />;
@@ -526,10 +551,25 @@ export const HistoryPane = memo(function HistoryPane({
     if (visiblePairs.length === 0) {
       return <EmptyState />;
     }
-    // [Issue #1123] Virtualized list: only mount the visible window + overscan.
-    // The sizer reserves the full scroll height; each row is absolutely
-    // positioned and self-measured (`measureElement`) so variable-height cards
-    // (truncate/expand, code blocks) re-measure automatically when they change.
+    // [Issue #1123] Zero-measurement fallback: when the virtualizer has not yet
+    // measured a viewport it materializes no rows (first render before the
+    // layout-effect measurement — SSR / first paint — and layout-less
+    // environments such as jsdom). Render a bounded slice of the leading pairs
+    // in normal flow so message content is present. As soon as a real height is
+    // measured, the virtualized branch below takes over.
+    if (virtualItems.length === 0) {
+      return (
+        <div data-testid="history-fallback-list">
+          {visiblePairs.slice(0, HISTORY_FALLBACK_RENDER_COUNT).map((pair) => (
+            <div key={pair.id}>{renderPairBody(pair)}</div>
+          ))}
+        </div>
+      );
+    }
+    // Virtualized list: only mount the visible window + overscan. The sizer
+    // reserves the full scroll height; each row is absolutely positioned and
+    // self-measured (`measureElement`) so variable-height cards (truncate/
+    // expand, code blocks) re-measure automatically when they change.
     return (
       <div
         style={{
@@ -541,13 +581,6 @@ export const HistoryPane = memo(function HistoryPane({
         {virtualItems.map((virtualRow) => {
           const pair = visiblePairs[virtualRow.index];
           if (!pair) return null;
-          const isArchived =
-            pair.userMessage?.archived === true ||
-            pair.assistantMessages?.some((m) => m.archived === true);
-          // Expand state lives in the parent (useConversationHistory + search
-          // auto-expand), so it survives the card's unmount/remount as rows
-          // recycle during virtualized scrolling.
-          const expanded = isManuallyExpanded(pair.id) || autoExpandedIds.has(pair.id);
           return (
             <div
               key={virtualRow.key}
@@ -556,17 +589,7 @@ export const HistoryPane = memo(function HistoryPane({
               className="absolute left-0 top-0 w-full"
               style={{ transform: `translateY(${virtualRow.start}px)` }}
             >
-              <div className={isArchived ? 'opacity-60' : ''}>
-                <ConversationPairCard
-                  pair={pair}
-                  onFilePathClick={handleFilePathClick}
-                  isExpanded={expanded}
-                  onToggleExpand={createToggleHandler(pair.id)}
-                  onCopy={handleCopy}
-                  onInsertToMessage={onInsertToMessage}
-                  showAssistant={!historyUserOnly}
-                />
-              </div>
+              {renderPairBody(pair)}
             </div>
           );
         })}

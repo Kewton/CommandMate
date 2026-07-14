@@ -29,6 +29,17 @@ export const HISTORY_ESTIMATED_PAIR_HEIGHT_PX = 160;
  */
 export const HISTORY_STICK_TO_BOTTOM_THRESHOLD_PX = 80;
 
+/**
+ * Bounded number of leading pairs rendered in normal flow when the virtualizer
+ * has not measured a viewport yet — i.e. it materialized zero rows despite
+ * having pairs. This happens on the first render before the layout-effect
+ * measurement (SSR / first paint) and in zero-layout environments like jsdom.
+ * Rendering a small slice keeps message content present without mounting the
+ * whole list; the virtualized list takes over as soon as a real height is
+ * measured. Kept small so it never defeats virtualization in production.
+ */
+export const HISTORY_FALLBACK_RENDER_COUNT = 30;
+
 /** Minimal scroll geometry needed to decide the follow/maintain behaviour. */
 export interface ScrollMetrics {
   scrollTop: number;
