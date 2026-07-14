@@ -15,6 +15,8 @@ import React from 'react';
 const mockPathname = vi.fn(() => '/');
 vi.mock('next/navigation', () => ({
   usePathname: () => mockPathname(),
+  // TransitionLink (#1122) reads the router at render time via useViewTransitionRouter.
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }));
 
 // Mock next/link

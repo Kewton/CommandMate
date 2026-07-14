@@ -11,8 +11,8 @@
 'use client';
 
 import React from 'react';
-import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { TransitionLink } from '@/components/view-transitions/TransitionLink';
 import { useTranslations } from 'next-intl';
 import { Home, MessageSquare, AlignJustify, CircleCheck, MoreHorizontal, Search } from 'lucide-react';
 import { useCommandPalette } from '@/contexts/CommandPaletteContext';
@@ -57,7 +57,7 @@ export function GlobalMobileNav() {
         {MOBILE_NAV_TABS.map((tab) => {
           const active = tab.isActive(pathname);
           return (
-            <Link
+            <TransitionLink
               key={tab.href}
               href={tab.href}
               className={`flex flex-col items-center justify-center flex-1 h-full text-xs transition-colors ${
@@ -68,7 +68,7 @@ export function GlobalMobileNav() {
             >
               {tab.icon}
               <span className="mt-1">{tab.label}</span>
-            </Link>
+            </TransitionLink>
           );
         })}
 

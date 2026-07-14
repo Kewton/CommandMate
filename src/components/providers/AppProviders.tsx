@@ -18,6 +18,7 @@ import { AuthProvider } from '@/contexts/AuthContext';
 import { PcDisplaySizeProvider } from '@/contexts/PcDisplaySizeContext';
 import { CommandPaletteProvider } from '@/contexts/CommandPaletteContext';
 import { WorktreesCacheProvider } from '@/components/providers/WorktreesCacheProvider';
+import { ViewTransitionsProvider } from '@/components/providers/ViewTransitionsProvider';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 
 interface AppProvidersProps {
@@ -48,7 +49,9 @@ export function AppProviders({ children, locale, messages, timeZone, authEnabled
               <WorktreesCacheProvider>
                 <CommandPaletteProvider>
                   <ConfirmProvider>
-                    {children}
+                    <ViewTransitionsProvider>
+                      {children}
+                    </ViewTransitionsProvider>
                   </ConfirmProvider>
                 </CommandPaletteProvider>
               </WorktreesCacheProvider>

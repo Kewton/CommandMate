@@ -125,7 +125,11 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
         )}
 
         {/* Main content */}
-        <main className={`flex-1 min-h-0 overflow-hidden ${showGlobalNav ? 'pb-14' : ''}`} role="main">
+        <main
+          className={`flex-1 min-h-0 overflow-hidden ${showGlobalNav ? 'pb-14' : ''}`}
+          role="main"
+          data-view-transition="content"
+        >
           {children}
         </main>
 
@@ -181,6 +185,7 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
           className="flex-1 min-w-0 h-full overflow-hidden transition-[padding] duration-300 ease-out"
           style={{ paddingLeft: showSidebar && isOpen ? `${displayWidth}px` : 0 }}
           role="main"
+          data-view-transition="content"
         >
           {children}
         </main>
