@@ -6,6 +6,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { invalidateCache } from './tmux-capture-cache';
+import { TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '@/config/tmux-pane-config';
 
 const execFileAsync = promisify(execFile);
 
@@ -63,8 +64,8 @@ export interface CreateSessionOptions {
   sessionName: string;
   workingDirectory: string;
   historyLimit?: number;  // scrollback バッファサイズ（デフォルト: 50000）
-  windowWidth?: number;   // ペイン幅（デフォルト: 200）
-  windowHeight?: number;  // ペイン高さ（デフォルト: 200、alternate screen TUIで十分な表示領域を確保）
+  windowWidth?: number;   // ペイン幅（デフォルト: TUI_PANE_WIDTH）
+  windowHeight?: number;  // ペイン高さ（デフォルト: TUI_PANE_HEIGHT、alternate screen TUIで十分な表示行数を確保。Issue #1163）
 }
 
 /**
@@ -202,15 +203,15 @@ export async function createSession(
     sessionName = sessionNameOrOptions;
     workingDirectory = cwd!;
     historyLimit = 50000;
-    windowWidth = 200;
-    windowHeight = 200;
+    windowWidth = TUI_PANE_WIDTH;
+    windowHeight = TUI_PANE_HEIGHT;
   } else {
     // New signature with options
     sessionName = sessionNameOrOptions.sessionName;
     workingDirectory = sessionNameOrOptions.workingDirectory;
     historyLimit = sessionNameOrOptions.historyLimit || 50000;
-    windowWidth = sessionNameOrOptions.windowWidth || 200;
-    windowHeight = sessionNameOrOptions.windowHeight || 200;
+    windowWidth = sessionNameOrOptions.windowWidth || TUI_PANE_WIDTH;
+    windowHeight = sessionNameOrOptions.windowHeight || TUI_PANE_HEIGHT;
   }
 
   try {
@@ -221,6 +222,33 @@ export async function createSession(
       ['new-session', '-d', '-s', sessionName, '-c', workingDirectory, '-x', String(windowWidth), '-y', String(windowHeight)],
       { timeout: DEFAULT_TIMEOUT }
     );
+
+    // Issue #1163: Pin the pane to a fixed height so alternate-screen TUIs
+    // (Claude/Codex/etc.) keep enough visible rows for capture-pane.
+    //
+    // The `-x`/`-y` passed to `new-session` do NOT survive on their own: the
+    // server-global `window-size latest` immediately resizes a detached window
+    // to the most recently active client, so a small terminal that later attaches
+    // (or is already attached) shrinks the pane — and the capturable row count
+    // shrinks with it. Setting `window-size manual` PER SESSION disables that
+    // tracking (the global option is never touched), and an explicit
+    // `resize-window` then locks in the intended geometry. Best-effort: a failure
+    // here must not abort session creation (some environments restrict resize).
+    try {
+      await execFileAsync(
+        'tmux',
+        ['set-window-option', '-t', exactTarget(sessionName), 'window-size', 'manual'],
+        { timeout: DEFAULT_TIMEOUT }
+      );
+      await execFileAsync(
+        'tmux',
+        ['resize-window', '-t', exactTarget(sessionName), '-x', String(windowWidth), '-y', String(windowHeight)],
+        { timeout: DEFAULT_TIMEOUT }
+      );
+    } catch {
+      // Non-fatal: window-size/resize is a display enhancement, not required for
+      // the session to function.
+    }
 
     // Set history limit
     await execFileAsync(
