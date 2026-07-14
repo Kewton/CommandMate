@@ -75,6 +75,8 @@ vi.mock('@/hooks/useLocaleSwitch', () => ({
 
 import { CommandPalette, isTypingTarget } from '@/components/common/CommandPalette';
 import { CommandPaletteProvider } from '@/contexts/CommandPaletteContext';
+import { KeyboardShortcutsProvider } from '@/contexts/KeyboardShortcutsContext';
+import { KeyboardShortcutsOverlay } from '@/components/common/KeyboardShortcutsOverlay';
 import { GlobalMobileNav } from '@/components/mobile/GlobalMobileNav';
 import { Header } from '@/components/layout/Header';
 
@@ -429,6 +431,24 @@ describe('CommandPalette (Issue #1053)', () => {
     expect(screen.queryByTestId('command-palette')).toBeNull();
     fireEvent.click(screen.getByTestId('header-command-palette-trigger'));
     expect(screen.getByTestId('command-palette')).toBeInTheDocument();
+  });
+
+  it('opens the keyboard-shortcuts overlay from the Actions group (Issue #1130)', () => {
+    render(
+      <CommandPaletteProvider>
+        <KeyboardShortcutsProvider>
+          <CommandPalette />
+          <KeyboardShortcutsOverlay />
+        </KeyboardShortcutsProvider>
+      </CommandPaletteProvider>
+    );
+    pressKey(window, { key: 'k', metaKey: true });
+    expect(screen.queryByTestId('keyboard-shortcuts-overlay')).toBeNull();
+
+    fireEvent.click(screen.getByText('commandPalette.actions.keyboardShortcuts'));
+    // Palette closes and the overlay opens.
+    expect(screen.queryByTestId('command-palette')).toBeNull();
+    expect(screen.getByTestId('keyboard-shortcuts-overlay')).toBeInTheDocument();
   });
 
   it('syncs repositories from the Actions group and shows a success toast', async () => {

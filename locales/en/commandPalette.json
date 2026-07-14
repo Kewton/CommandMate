@@ -26,7 +26,8 @@
     "syncSuccess": "Repositories synced",
     "syncError": "Failed to sync repositories",
     "switchLanguage": "Switch language",
-    "openGitHub": "Open GitHub"
+    "openGitHub": "Open GitHub",
+    "keyboardShortcuts": "Keyboard shortcuts"
   },
   "footer": {
     "navigate": "Navigate",

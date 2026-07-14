@@ -44,10 +44,12 @@ import {
   RefreshCw,
   Languages,
   Github,
+  Keyboard,
 } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import { Z_INDEX } from '@/config/z-index';
 import { useCommandPalette } from '@/contexts/CommandPaletteContext';
+import { useKeyboardShortcuts } from '@/contexts/KeyboardShortcutsContext';
 import { usePcDisplaySizeContext } from '@/contexts/PcDisplaySizeContext';
 import { useOptionalWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
 import { PC_DISPLAY_SIZE_ORDER } from '@/hooks/usePcDisplaySize';
@@ -195,6 +197,7 @@ interface RecentRow {
  */
 export function CommandPalette() {
   const { open, setOpen } = useCommandPalette();
+  const { setOpen: setShortcutsOpen } = useKeyboardShortcuts();
   const router = useRouter();
   const t = useTranslations('commandPalette');
   const tCommon = useTranslations('common');
@@ -351,6 +354,13 @@ export function CommandPalette() {
           '_blank',
           'noopener,noreferrer'
         ),
+    },
+    {
+      // Issue #1130: opens the `?` keyboard-shortcuts help overlay.
+      id: 'keyboardShortcuts',
+      label: t('actions.keyboardShortcuts'),
+      icon: Keyboard,
+      run: () => setShortcutsOpen(true),
     },
   ];
 
