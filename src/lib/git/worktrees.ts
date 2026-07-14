@@ -8,7 +8,7 @@ import { promisify } from 'util';
 import path from 'path';
 import type { Worktree } from '@/types/models';
 import type Database from 'better-sqlite3';
-import { upsertWorktree, getWorktreeIdsByRepository, deleteWorktreesByIds } from '@/lib/db';
+import { upsertWorktree, getWorktreesByRepository, deleteWorktreesByIds } from '@/lib/db';
 import { getEnvByKey } from '@/lib/env';
 import { createLogger } from '@/lib/logger';
 
@@ -315,14 +315,20 @@ export function syncWorktreesToDB(
   for (const [repoPath, repoWorktrees] of worktreesByRepo) {
     if (!repoPath) continue;
 
-    // Get current worktree IDs in DB for this repository
-    const existingIds = getWorktreeIdsByRepository(db, repoPath);
+    // Get current worktree rows (id + path) in DB for this repository
+    const existingRows = getWorktreesByRepository(db, repoPath);
 
-    // Get new worktree IDs from scan
-    const newIds = new Set(repoWorktrees.map(wt => wt.id));
+    // Issue #1151: prune by on-disk PATH, not by branch-derived ID. A worktree's
+    // ID changes when its branch changes (`generateWorktreeId`), so keying the
+    // "removed" decision on ID mistakes a same-directory branch switch for a
+    // deleted worktree and CASCADE-deletes its chat history and related data.
+    // Only a worktree whose PATH is gone from the scan was genuinely removed.
+    const newPaths = new Set(repoWorktrees.map(wt => path.resolve(wt.path)));
 
-    // Find worktrees that no longer exist (deleted)
-    const deletedIds = existingIds.filter(id => !newIds.has(id));
+    // Find worktrees that no longer exist on disk (genuinely deleted)
+    const deletedIds = existingRows
+      .filter(row => !newPaths.has(path.resolve(row.path)))
+      .map(row => row.id);
 
     // Delete removed worktrees from DB
     if (deletedIds.length > 0) {
