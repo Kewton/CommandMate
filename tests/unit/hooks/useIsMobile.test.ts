@@ -91,7 +91,8 @@ describe('useIsMobile', () => {
     it('seeds state with false on the first render even on a mobile viewport', () => {
       // The SSR-safe invariant: the useState seed is false so the server render
       // and the first client render agree (no hydration mismatch). Detection
-      // happens in useEffect, which only runs on the client after hydration.
+      // happens in a layout effect (Issue #1126), which only runs on the client
+      // — flushed before the first paint so the correct tree is the first frame.
       setViewportWidth(390);
       const renders: boolean[] = [];
       renderHook(() => {
@@ -103,7 +104,7 @@ describe('useIsMobile', () => {
       expect(renders[renders.length - 1]).toBe(true);
     });
 
-    it('does not call matchMedia during the initial render (only in effect)', () => {
+    it('does not call matchMedia during the initial render (only in the layout effect)', () => {
       // Server-side there is no matchMedia; the hook must not touch it during
       // render. renderHook flushes effects, so by the end it has been called,
       // but never before the first render committed.
