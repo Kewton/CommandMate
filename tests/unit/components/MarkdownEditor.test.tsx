@@ -936,10 +936,10 @@ describe('MarkdownEditor', () => {
         fireEvent.click(copyButton);
       });
 
-      // After copy, the button should have a green check icon (text-green-500)
+      // After copy, the button should have a success check icon (text-success)
       await waitFor(() => {
         const buttonInner = copyButton.querySelector('svg');
-        expect(buttonInner?.parentElement).toHaveClass('text-green-500');
+        expect(buttonInner?.parentElement).toHaveClass('text-success');
       });
 
       // After 2 seconds, should revert back
@@ -949,7 +949,7 @@ describe('MarkdownEditor', () => {
 
       await waitFor(() => {
         const buttonInner = copyButton.querySelector('svg');
-        expect(buttonInner?.parentElement).not.toHaveClass('text-green-500');
+        expect(buttonInner?.parentElement).not.toHaveClass('text-success');
       });
     });
 

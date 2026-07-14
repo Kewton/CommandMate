@@ -163,7 +163,7 @@ const ChangedFileList = memo(function ChangedFileList({
                       </div>
                     )}
                     {previewError && (
-                      <div className="py-2 text-xs text-red-600 dark:text-red-400" role="alert">
+                      <div className="py-2 text-xs text-danger-foreground" role="alert">
                         {previewError}
                       </div>
                     )}
@@ -285,7 +285,7 @@ export const GitChangesPanel = memo(function GitChangesPanel({
 
       {error && !staged && (
         <div
-          className="px-3 pb-2 text-xs text-red-600 dark:text-red-400"
+          className="px-3 pb-2 text-xs text-danger-foreground"
           role="alert"
           data-testid="git-changes-error"
         >
@@ -379,7 +379,7 @@ export const GitChangesPanel = memo(function GitChangesPanel({
             </div>
             {commitError && (
               <div
-                className="text-xs text-red-600 dark:text-red-400"
+                className="text-xs text-danger-foreground"
                 role="alert"
                 data-testid="git-commit-error"
               >

@@ -102,7 +102,7 @@ const TabButton = memo(function TabButton({
       {tab.isDirty && (
         <span
           data-testid={`file-tab-dirty-${tab.path}`}
-          className="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0"
+          className="w-2 h-2 rounded-full bg-warning flex-shrink-0"
           title="Unsaved changes"
         />
       )}
@@ -214,7 +214,7 @@ export const FilePanelTabs = memo(function FilePanelTabs({
                   >
                     {tab.name}
                     {tab.isDirty && (
-                      <span className="ml-1 w-2 h-2 inline-block rounded-full bg-amber-500" />
+                      <span className="ml-1 w-2 h-2 inline-block rounded-full bg-warning" />
                     )}
                   </button>
                 ))}

@@ -431,7 +431,7 @@ export function AssistantChatPanel() {
           </div>
 
           {error && (
-            <div className="rounded border border-red-500/40 bg-red-500/10 p-2 text-sm text-red-700 dark:text-red-200">
+            <div className="rounded border border-danger/40 bg-danger/10 p-2 text-sm text-danger-foreground">
               {error}
             </div>
           )}

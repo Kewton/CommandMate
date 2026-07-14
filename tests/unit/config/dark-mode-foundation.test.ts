@@ -148,14 +148,15 @@ describe('Dark Mode Foundation (Issue #424)', () => {
       expect(content).toContain('dark:text-accent-300');
     });
 
-    it('Badge success/warning/error keep dark variants; gray uses muted token (Issue #1082)', () => {
+    it('Badge success/warning/error use tint tokens; gray uses muted token (Issue #1116)', () => {
       const content = readPrimitive('src/components/ui/Badge.tsx');
-      expect(content).toContain('dark:bg-green-900');
-      expect(content).toContain('dark:text-green-300');
-      expect(content).toContain('dark:bg-yellow-900');
-      expect(content).toContain('dark:text-yellow-300');
-      expect(content).toContain('dark:bg-red-900');
-      expect(content).toContain('dark:text-red-300');
+      // chromatic dark: pairs replaced by status tint tokens (both themes absorbed)
+      expect(content).toContain('bg-success-subtle text-success-foreground');
+      expect(content).toContain('bg-warning-subtle text-warning-foreground');
+      expect(content).toContain('bg-danger-subtle text-danger-foreground');
+      expect(content).not.toContain('dark:bg-green-900');
+      expect(content).not.toContain('dark:bg-yellow-900');
+      expect(content).not.toContain('dark:bg-red-900');
       // gray variant migrated to the muted token (was dark:bg-gray-800/dark:text-gray-300)
       expect(content).toContain('bg-muted text-muted-foreground');
     });

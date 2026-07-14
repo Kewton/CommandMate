@@ -114,7 +114,7 @@ function permissionDefaultFor(cliToolId: string): string {
 const INPUT_CLASS =
   'w-full px-3 py-2 text-sm border border-input rounded-md bg-surface dark:bg-surface-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring';
 const LABEL_CLASS = 'block text-xs font-semibold text-foreground mb-1';
-const ERROR_CLASS = 'mt-1 text-xs text-red-600 dark:text-red-400';
+const ERROR_CLASS = 'mt-1 text-xs text-danger-foreground';
 
 /** Accordion section identifiers (Issue #825). */
 type SectionId = 'basic' | 'advanced' | 'message';
@@ -147,7 +147,7 @@ function AskAiButton({
       data-testid={testId}
       onClick={onClick}
       title={title}
-      className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded border border-violet-300 dark:border-violet-700 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-900/30 transition-colors"
+      className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded border border-info-border text-info-foreground hover:bg-info-subtle transition-colors"
     >
       <Sparkles size={14} aria-hidden="true" />
       {label}
@@ -647,7 +647,7 @@ export function ScheduleEditDialog({
 
       {submitError && (
         <div
-          className="text-xs p-2 rounded bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400"
+          className="text-xs p-2 rounded bg-danger-subtle text-danger-foreground"
           data-testid="schedule-submit-error"
         >
           {submitError}

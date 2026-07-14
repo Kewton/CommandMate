@@ -75,13 +75,13 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
 
   return (
     <div
-      className="border-t-2 border-red-300 dark:border-red-800"
+      className="border-t-2 border-danger-border"
       data-testid="git-danger-zone-section"
     >
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="w-full flex items-center gap-1 px-3 py-2 text-sm font-medium text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20 cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/30"
+        className="w-full flex items-center gap-1 px-3 py-2 text-sm font-medium text-danger-foreground bg-danger-subtle cursor-pointer hover:bg-danger-subtle"
         data-testid="git-danger-zone-toggle"
       >
         <span className="text-xs w-4 text-center">{open ? '▼' : '▶'}</span>
@@ -89,14 +89,14 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
       </button>
 
       {open && (
-        <div className="px-3 py-3 space-y-2 bg-red-50/50 dark:bg-red-900/10">
+        <div className="px-3 py-3 space-y-2 bg-danger-subtle">
           {actionError && (
-            <div className="text-xs text-red-600 dark:text-red-400" role="alert" data-testid="git-danger-zone-error">
+            <div className="text-xs text-danger-foreground" role="alert" data-testid="git-danger-zone-error">
               {actionError}
             </div>
           )}
           {conflictNotice && (
-            <div className="text-xs text-orange-600 dark:text-orange-400" role="status" data-testid="git-danger-zone-conflict">
+            <div className="text-xs text-warning-foreground" role="status" data-testid="git-danger-zone-conflict">
               {conflictNotice}
             </div>
           )}
@@ -104,7 +104,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
             <button
               type="button"
               onClick={() => setShowResetModal(true)}
-              className="px-2 py-1 text-xs rounded border border-red-400 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/30"
+              className="px-2 py-1 text-xs rounded border border-danger-border text-danger-foreground hover:bg-danger-subtle"
               data-testid="git-danger-zone-reset-open"
             >
               Reset…
@@ -113,7 +113,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
               type="button"
               disabled={!selectedCommit}
               onClick={() => setShowRevertModal(true)}
-              className="px-2 py-1 text-xs rounded border border-red-400 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/30 disabled:opacity-50"
+              className="px-2 py-1 text-xs rounded border border-danger-border text-danger-foreground hover:bg-danger-subtle disabled:opacity-50"
               data-testid="git-danger-zone-revert-open"
             >
               Revert…
@@ -123,7 +123,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
                 type="button"
                 disabled={busy}
                 onClick={() => setShowForcePushModal(true)}
-                className="px-2 py-1 text-xs rounded border border-red-400 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/30 disabled:opacity-50"
+                className="px-2 py-1 text-xs rounded border border-danger-border text-danger-foreground hover:bg-danger-subtle disabled:opacity-50"
                 data-testid="git-force-push-open"
               >
                 Force Push…
@@ -141,11 +141,11 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
       {/* Reset modal */}
       {showResetModal && (
         <div
-          className="px-3 py-3 border-t border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20"
+          className="px-3 py-3 border-t border-danger-border bg-danger-subtle"
           data-testid="reset-confirm"
           role="dialog"
         >
-          <p className="text-sm font-medium text-red-700 dark:text-red-300 mb-2">Reset</p>
+          <p className="text-sm font-medium text-danger-foreground mb-2">Reset</p>
 
           {/* Target selection */}
           <RadioGroup
@@ -187,14 +187,14 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
           {resetMode === 'hard' && (
             <div className="mb-2 space-y-1">
               <p
-                className="text-xs text-red-700 dark:text-red-300"
+                className="text-xs text-danger-foreground"
                 data-testid="reset-hard-history-loss-warning"
               >
                 {RESET_HARD_HISTORY_LOSS_WARNING}
               </p>
               {hasRunningSession && (
                 <p
-                  className="text-xs text-red-700 dark:text-red-300"
+                  className="text-xs text-danger-foreground"
                   data-testid="reset-hard-session-warning"
                 >
                   {DANGER_ZONE_RUNNING_SESSION_WARNING}
@@ -205,7 +205,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
                 value={confirmBranch}
                 onChange={(e) => setConfirmBranch(e.target.value)}
                 placeholder={`Type "${currentBranch ?? ''}" to confirm`}
-                className="w-full px-2 py-1 text-xs border border-red-300 dark:border-red-600 rounded bg-surface dark:bg-surface-2 text-foreground"
+                className="w-full px-2 py-1 text-xs border border-danger-border rounded bg-surface dark:bg-surface-2 text-foreground"
                 data-testid="reset-hard-branch-input"
               />
             </div>
@@ -238,7 +238,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
                 setShowResetModal(false);
                 setConfirmBranch('');
               }}
-              className="px-2 py-1 text-xs rounded bg-red-600 hover:bg-red-700 text-white disabled:opacity-50"
+              className="px-2 py-1 text-xs rounded bg-danger hover:bg-danger/90 text-white disabled:opacity-50"
               data-testid="reset-confirm-button"
             >
               Reset
@@ -260,17 +260,17 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
       {/* Revert modal */}
       {showRevertModal && selectedCommit && (
         <div
-          className="px-3 py-3 border-t border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20"
+          className="px-3 py-3 border-t border-danger-border bg-danger-subtle"
           data-testid="revert-confirm"
           role="dialog"
         >
-          <p className="text-sm font-medium text-red-700 dark:text-red-300 mb-2">Revert</p>
+          <p className="text-sm font-medium text-danger-foreground mb-2">Revert</p>
           <p className="text-xs text-foreground mb-2">
             Revert commit <span className="font-mono">{selectedCommit.slice(0, 7)}</span>
           </p>
           {hasRunningSession && (
             <p
-              className="mb-2 text-xs text-red-700 dark:text-red-300"
+              className="mb-2 text-xs text-danger-foreground"
               data-testid="revert-session-warning"
             >
               {DANGER_ZONE_RUNNING_SESSION_WARNING}
@@ -304,7 +304,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
                 setShowRevertModal(false);
                 setRevertNoCommit(false);
               }}
-              className="px-2 py-1 text-xs rounded bg-red-600 hover:bg-red-700 text-white disabled:opacity-50"
+              className="px-2 py-1 text-xs rounded bg-danger hover:bg-danger/90 text-white disabled:opacity-50"
               data-testid="revert-confirm-button"
             >
               Revert
@@ -326,20 +326,20 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
       {/* Force push modal (Issue #783, §7.3) */}
       {showForcePushModal && onForcePush && (
         <div
-          className="px-3 py-3 border-t border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20"
+          className="px-3 py-3 border-t border-danger-border bg-danger-subtle"
           data-testid="force-push-confirm"
           role="dialog"
         >
-          <p className="text-sm font-medium text-red-700 dark:text-red-300 mb-2">Force Push</p>
+          <p className="text-sm font-medium text-danger-foreground mb-2">Force Push</p>
           <p
-            className="mb-2 text-xs text-red-700 dark:text-red-300"
+            className="mb-2 text-xs text-danger-foreground"
             data-testid="force-push-protected-branch-warning"
           >
             {PUSH_PROTECTED_BRANCH_WARNING}
           </p>
           {hasRunningSession && (
             <p
-              className="mb-2 text-xs text-red-700 dark:text-red-300"
+              className="mb-2 text-xs text-danger-foreground"
               data-testid="force-push-session-warning"
             >
               {DANGER_ZONE_RUNNING_SESSION_WARNING}
@@ -371,7 +371,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
                 onForcePush(forceWithLease);
                 setShowForcePushModal(false);
               }}
-              className="px-2 py-1 text-xs rounded bg-red-600 hover:bg-red-700 text-white disabled:opacity-50"
+              className="px-2 py-1 text-xs rounded bg-danger hover:bg-danger/90 text-white disabled:opacity-50"
               data-testid="force-push-confirm-button"
             >
               Force Push

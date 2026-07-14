@@ -153,7 +153,7 @@ export default function TemplateTab() {
     <div data-testid="template-tab">
       {/* Error display */}
       {error && (
-        <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-sm" data-testid="template-error">
+        <div className="mb-4 p-3 bg-danger-subtle text-danger-foreground rounded-lg text-sm" data-testid="template-error">
           {error}
         </div>
       )}

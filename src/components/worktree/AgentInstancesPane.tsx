@@ -279,7 +279,7 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
                   title={t('agentInstanceDelete')}
                   disabled={saving || atMin}
                   onClick={() => handleDelete(inst.id)}
-                  className="p-1 rounded text-muted-foreground hover:text-red-600 dark:hover:text-red-400 hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="p-1 rounded text-muted-foreground hover:text-danger-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
@@ -339,7 +339,7 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
       )}
 
       {error && (
-        <p data-testid="agent-instances-error" className="mt-3 text-xs text-red-600 dark:text-red-400">
+        <p data-testid="agent-instances-error" className="mt-3 text-xs text-danger-foreground">
           {error}
         </p>
       )}

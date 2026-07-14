@@ -248,7 +248,7 @@ export const SearchBar = memo(function SearchBar({
       {error && (
         <div
           data-testid="search-error"
-          className="text-xs text-red-600 bg-red-50 px-2 py-1 rounded"
+          className="text-xs text-danger bg-danger-subtle px-2 py-1 rounded"
           role="alert"
         >
           {error}

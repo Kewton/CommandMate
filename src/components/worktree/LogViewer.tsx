@@ -172,7 +172,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
       // Add highlighted match (escaped)
       const matchText = fileContent.substring(match.index, match.index + match.length);
       const isCurrent = idx === currentMatchIndex;
-      result += `<mark class="${isCurrent ? 'bg-yellow-400 text-black' : 'bg-yellow-200 text-black'}" data-match-index="${idx}">${escapeHtml(matchText)}</mark>`;
+      result += `<mark class="${isCurrent ? 'bg-warning text-black' : 'bg-warning-border text-black'}" data-match-index="${idx}">${escapeHtml(matchText)}</mark>`;
 
       lastIndex = match.index + match.length;
     });
@@ -271,7 +271,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
           )}
 
           {error && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded text-sm text-red-800">
+            <div className="p-3 bg-danger-subtle border border-danger-border rounded text-sm text-danger-foreground">
               {error}
             </div>
           )}

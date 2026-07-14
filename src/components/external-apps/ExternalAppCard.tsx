@@ -115,7 +115,7 @@ export function ExternalAppCard({ app, onEdit, onDelete }: ExternalAppCardProps)
           </div>
         )}
         {!app.enabled && (
-          <div className="mt-2 py-1 px-2 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-700 rounded text-xs text-yellow-700 dark:text-yellow-300">
+          <div className="mt-2 py-1 px-2 bg-warning-subtle border border-warning-border rounded text-xs text-warning-foreground">
             This app is disabled
           </div>
         )}
@@ -168,7 +168,7 @@ export function ExternalAppCard({ app, onEdit, onDelete }: ExternalAppCardProps)
             variant="ghost"
             size="sm"
             onClick={() => setShowDeleteConfirm(true)}
-            className="text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
+            className="text-danger-foreground hover:bg-danger-subtle"
           >
             Delete
           </Button>

@@ -16,7 +16,7 @@ import { useTranslations } from 'next-intl';
 import QRCode from 'react-qr-code';
 
 const INPUT_CLASS =
-  'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring dark:bg-gray-700 dark:text-white text-sm';
+  'w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring bg-surface dark:bg-surface-2 text-surface-foreground text-sm';
 
 function buildQrLoginUrl(rawUrl: string, rawToken: string): string {
   const trimmedUrl = rawUrl.trim();
@@ -65,8 +65,8 @@ export function QrCodeGenerator() {
   const isHttp = url.trim().startsWith('http://');
 
   return (
-    <div className="mt-6 p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
-      <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">
+    <div className="mt-6 p-4 border border-border rounded-lg">
+      <h2 className="text-lg font-semibold mb-4 text-foreground">
         {t('login.qr.sectionTitle')}
       </h2>
 
@@ -81,7 +81,7 @@ export function QrCodeGenerator() {
             className={INPUT_CLASS}
           />
           {isHttp && (
-            <p className="mt-1 text-sm text-yellow-600 dark:text-yellow-400">
+            <p className="mt-1 text-sm text-warning-foreground">
               {t('login.qr.httpsWarning')}
             </p>
           )}
@@ -99,7 +99,7 @@ export function QrCodeGenerator() {
           />
         </div>
 
-        <p className="text-xs text-gray-500 dark:text-gray-400">
+        <p className="text-xs text-muted-foreground">
           {t('login.qr.securityNotice')}
         </p>
 
@@ -107,7 +107,7 @@ export function QrCodeGenerator() {
           <button
             type="button"
             onClick={() => setQrVisible(!qrVisible)}
-            className="w-full py-2 px-4 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-ring"
+            className="w-full py-2 px-4 border border-input rounded-md shadow-sm text-sm font-medium text-foreground bg-surface dark:bg-surface-2 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-ring"
           >
             {qrVisible ? t('login.qr.hideQrButton') : t('login.qr.showQrButton')}
           </button>
@@ -115,7 +115,7 @@ export function QrCodeGenerator() {
 
         {qrVisible && qrValue && (
           <div className="space-y-3">
-            <p className="text-sm text-amber-600 dark:text-amber-400">
+            <p className="text-sm text-warning-foreground">
               {t('login.qr.qrSecurityWarning')}
             </p>
             <div className="flex justify-center p-4 bg-white rounded-lg">

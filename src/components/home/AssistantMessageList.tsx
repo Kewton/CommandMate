@@ -110,7 +110,7 @@ function UserMessageBubble({ message, canEdit, onEdit }: UserMessageBubbleProps)
             disabled={saving}
             data-testid="assistant-edit-textarea"
           />
-          {error && <p className="text-[11px] text-red-600 dark:text-red-300">{error}</p>}
+          {error && <p className="text-[11px] text-danger-foreground">{error}</p>}
           <div className="flex items-center justify-end gap-2">
             <button
               type="button"
@@ -138,7 +138,7 @@ function UserMessageBubble({ message, canEdit, onEdit }: UserMessageBubbleProps)
             <span
               className={`text-[11px] font-medium ${
                 message.deliveryStatus === 'failed'
-                  ? 'text-red-600 dark:text-red-300'
+                  ? 'text-danger-foreground'
                   : 'text-muted-foreground'
               }`}
             >

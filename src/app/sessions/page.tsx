@@ -105,8 +105,8 @@ function formatStatus(status: string | null | undefined): string {
 
 /** Status badge CSS classes keyed by status value */
 const STATUS_BADGE_CLASSES: Record<string, string> = {
-  done: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
-  in_review: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400',
+  done: 'bg-success-subtle text-success-foreground',
+  in_review: 'bg-info-subtle text-info-foreground',
   in_progress: 'bg-accent-100 dark:bg-accent-900/30 text-accent-700 dark:text-accent-400',
 };
 
@@ -271,7 +271,7 @@ export default function SessionsPage() {
             {/* Non-blocking error banner (data already visible below) */}
             {error && (
               <div
-                className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-400"
+                className="mb-4 rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
                 role="status"
                 data-testid="sessions-error-banner"
               >
@@ -436,7 +436,7 @@ export default function SessionsPage() {
               </div>
             )}
             {!isLoading && error && (
-              <div className="text-red-500 dark:text-red-400" data-testid="sessions-error">
+              <div className="text-danger-foreground" data-testid="sessions-error">
                 Failed to load sessions: {error.message}
               </div>
             )}

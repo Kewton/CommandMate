@@ -87,18 +87,18 @@ export const GitStashPanel = memo(function GitStashPanel({
       {open && (
         <div className="px-3 pb-3 space-y-2">
           {error && (
-            <div className="text-xs text-red-600 dark:text-red-400" role="alert" data-testid="git-stash-error">
+            <div className="text-xs text-danger-foreground" role="alert" data-testid="git-stash-error">
               {error}
             </div>
           )}
           {actionError && (
-            <div className="text-xs text-red-600 dark:text-red-400" role="alert" data-testid="git-stash-action-error">
+            <div className="text-xs text-danger-foreground" role="alert" data-testid="git-stash-action-error">
               {actionError}
             </div>
           )}
           {conflictNotice && (
             <div className="flex items-start justify-between gap-2">
-              <div className="text-xs text-orange-600 dark:text-orange-400" role="status" data-testid="git-stash-conflict">
+              <div className="text-xs text-warning-foreground" role="status" data-testid="git-stash-conflict">
                 {conflictNotice}
               </div>
               {onAskAi && (
@@ -189,7 +189,7 @@ export const GitStashPanel = memo(function GitStashPanel({
                         type="button"
                         disabled={busy}
                         onClick={() => setDropConfirm(stash.index)}
-                        className="px-1.5 py-0.5 text-xs rounded border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-50"
+                        className="px-1.5 py-0.5 text-xs rounded border border-danger-border text-danger-foreground hover:bg-danger-subtle disabled:opacity-50"
                         data-testid="stash-drop-button"
                       >
                         Drop
@@ -206,16 +206,16 @@ export const GitStashPanel = memo(function GitStashPanel({
       {/* Drop confirm dialog */}
       {dropConfirm !== null && (
         <div
-          className="px-3 py-3 border-t border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20"
+          className="px-3 py-3 border-t border-danger-border bg-danger-subtle"
           data-testid="git-stash-drop-confirm"
           role="dialog"
         >
-          <p className="text-xs text-red-700 dark:text-red-300">
+          <p className="text-xs text-danger-foreground">
             stash@{'{'}{dropConfirm}{'}'} を完全に削除します。この操作は取り消せません。
           </p>
           {hasRunningSession && (
             <p
-              className="mt-1 text-xs text-red-700 dark:text-red-300"
+              className="mt-1 text-xs text-danger-foreground"
               data-testid="git-stash-drop-session-warning"
             >
               {DANGER_ZONE_RUNNING_SESSION_WARNING}
@@ -229,7 +229,7 @@ export const GitStashPanel = memo(function GitStashPanel({
                 onDrop(dropConfirm);
                 setDropConfirm(null);
               }}
-              className="px-2 py-1 text-xs rounded bg-red-600 hover:bg-red-700 text-white disabled:opacity-50"
+              className="px-2 py-1 text-xs rounded bg-danger hover:bg-danger/90 text-white disabled:opacity-50"
               data-testid="git-stash-drop-confirm-button"
             >
               Drop

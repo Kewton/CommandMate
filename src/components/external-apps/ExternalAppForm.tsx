@@ -202,8 +202,8 @@ export function ExternalAppForm({
     >
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* Issue #395: Security warning about same-origin proxy risks */}
-        <div className="rounded-md bg-amber-50 dark:bg-amber-900/30 p-3 mb-4 border border-amber-200 dark:border-amber-700">
-          <p className="text-sm text-amber-800 dark:text-amber-300">
+        <div className="rounded-md bg-warning-subtle p-3 mb-4 border border-warning-border">
+          <p className="text-sm text-warning-foreground">
             Proxied apps run under the CommandMate origin and can access CommandMate APIs. Only register trusted applications.
           </p>
         </div>
@@ -214,19 +214,19 @@ export function ExternalAppForm({
             htmlFor="displayName"
             className="block text-sm font-medium text-foreground mb-1"
           >
-            Display Name <span className="text-red-500">*</span>
+            Display Name <span className="text-danger">*</span>
           </label>
           <Input
             id="displayName"
             type="text"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
-            className={errors.displayName ? 'border-red-500' : ''}
+            className={errors.displayName ? 'border-danger' : ''}
             placeholder="My App"
             disabled={isSubmitting}
           />
           {errors.displayName && (
-            <p className="mt-1 text-xs text-red-500">{errors.displayName}</p>
+            <p className="mt-1 text-xs text-danger">{errors.displayName}</p>
           )}
         </div>
 
@@ -237,14 +237,14 @@ export function ExternalAppForm({
               htmlFor="name"
               className="block text-sm font-medium text-foreground mb-1"
             >
-              Identifier Name <span className="text-red-500">*</span>
+              Identifier Name <span className="text-danger">*</span>
             </label>
             <Input
               id="name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className={`font-mono ${errors.name ? 'border-red-500' : ''}`}
+              className={`font-mono ${errors.name ? 'border-danger' : ''}`}
               placeholder="my-app"
               disabled={isSubmitting}
             />
@@ -252,7 +252,7 @@ export function ExternalAppForm({
               Alphanumeric and hyphens only. Cannot be changed later.
             </p>
             {errors.name && (
-              <p className="mt-1 text-xs text-red-500">{errors.name}</p>
+              <p className="mt-1 text-xs text-danger">{errors.name}</p>
             )}
           </div>
         )}
@@ -264,7 +264,7 @@ export function ExternalAppForm({
               htmlFor="pathPrefix"
               className="block text-sm font-medium text-foreground mb-1"
             >
-              Path Prefix <span className="text-red-500">*</span>
+              Path Prefix <span className="text-danger">*</span>
             </label>
             <div className="flex items-center">
               <span className="text-sm text-muted-foreground mr-1">/proxy/</span>
@@ -273,7 +273,7 @@ export function ExternalAppForm({
                 type="text"
                 value={pathPrefix}
                 onChange={(e) => setPathPrefix(e.target.value)}
-                className={`w-auto flex-1 font-mono ${errors.pathPrefix ? 'border-red-500' : ''}`}
+                className={`w-auto flex-1 font-mono ${errors.pathPrefix ? 'border-danger' : ''}`}
                 placeholder="app-name"
                 disabled={isSubmitting}
               />
@@ -283,7 +283,7 @@ export function ExternalAppForm({
               URL path for accessing this app. Cannot be changed later.
             </p>
             {errors.pathPrefix && (
-              <p className="mt-1 text-xs text-red-500">{errors.pathPrefix}</p>
+              <p className="mt-1 text-xs text-danger">{errors.pathPrefix}</p>
             )}
           </div>
         )}
@@ -294,7 +294,7 @@ export function ExternalAppForm({
             htmlFor="targetPort"
             className="block text-sm font-medium text-foreground mb-1"
           >
-            Port Number <span className="text-red-500">*</span>
+            Port Number <span className="text-danger">*</span>
           </label>
           <Input
             id="targetPort"
@@ -303,7 +303,7 @@ export function ExternalAppForm({
             onChange={(e) =>
               setTargetPort(e.target.value ? parseInt(e.target.value, 10) : '')
             }
-            className={`font-mono ${errors.targetPort ? 'border-red-500' : ''}`}
+            className={`font-mono ${errors.targetPort ? 'border-danger' : ''}`}
             placeholder="5173"
             min={PORT_CONSTRAINTS.MIN}
             max={PORT_CONSTRAINTS.MAX}
@@ -313,7 +313,7 @@ export function ExternalAppForm({
             Target port ({PORT_CONSTRAINTS.MIN}-{PORT_CONSTRAINTS.MAX})
           </p>
           {errors.targetPort && (
-            <p className="mt-1 text-xs text-red-500">{errors.targetPort}</p>
+            <p className="mt-1 text-xs text-danger">{errors.targetPort}</p>
           )}
         </div>
 
@@ -324,13 +324,13 @@ export function ExternalAppForm({
               htmlFor="appType"
               className="block text-sm font-medium text-foreground mb-1"
             >
-              App Type <span className="text-red-500">*</span>
+              App Type <span className="text-danger">*</span>
             </label>
             <select
               id="appType"
               value={appType}
               onChange={(e) => setAppType(e.target.value as ExternalAppType)}
-              className={cn(inputVariants(), errors.appType && 'border-red-500')}
+              className={cn(inputVariants(), errors.appType && 'border-danger')}
               disabled={isSubmitting}
             >
               <option value="">Select app type...</option>
@@ -341,7 +341,7 @@ export function ExternalAppForm({
               ))}
             </select>
             {errors.appType && (
-              <p className="mt-1 text-xs text-red-500">{errors.appType}</p>
+              <p className="mt-1 text-xs text-danger">{errors.appType}</p>
             )}
           </div>
         )}
@@ -397,7 +397,7 @@ export function ExternalAppForm({
 
         {/* Submit Error */}
         {submitError && (
-          <div className="p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded text-sm text-red-700 dark:text-red-300">
+          <div className="p-3 bg-danger-subtle border border-danger-border rounded text-sm text-danger-foreground">
             {submitError}
           </div>
         )}

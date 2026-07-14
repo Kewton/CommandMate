@@ -215,7 +215,7 @@ export function TimerEditDialog({
       {warning === 'session_not_running' && (
         <div
           data-testid="timer-session-warning"
-          className="text-xs p-2 rounded bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-400"
+          className="text-xs p-2 rounded bg-warning-subtle text-warning-foreground"
         >
           {t('timer.sessionWarning')}
         </div>

@@ -31,9 +31,9 @@ const DiffLine = memo(function DiffLine({ line }: { line: string }) {
   let className = 'whitespace-pre font-mono text-xs leading-5';
 
   if (line.startsWith('+') && !line.startsWith('+++')) {
-    className += ' text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20';
+    className += ' text-success-foreground bg-success-subtle';
   } else if (line.startsWith('-') && !line.startsWith('---')) {
-    className += ' text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20';
+    className += ' text-danger-foreground bg-danger-subtle';
   } else if (line.startsWith('@@')) {
     className += ' text-info bg-info/10';
   } else if (line.startsWith('diff --git') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) {

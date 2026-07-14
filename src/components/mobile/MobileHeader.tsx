@@ -152,7 +152,7 @@ export function MobileHeader({
                     {truncateString(gitStatus.currentBranch, MOBILE_BRANCH_MAX_LENGTH)}
                   </span>
                   {gitStatus.isDirty && (
-                    <span className="text-amber-500" title="Uncommitted changes">*</span>
+                    <span className="text-warning" title="Uncommitted changes">*</span>
                   )}
                 </>
               )}

@@ -203,7 +203,7 @@ describe('ContextMenu', () => {
       render(<ContextMenu {...defaultProps} />);
 
       const deleteItem = screen.getByText('Delete').closest('button');
-      expect(deleteItem).toHaveClass('text-red-600');
+      expect(deleteItem).toHaveClass('text-danger');
     });
 
     it('should show divider before delete option', () => {

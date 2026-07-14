@@ -436,7 +436,7 @@ function OrphanHeader() {
   return (
     <div
       data-testid="orphan-indicator"
-      className="bg-warning/10 text-yellow-800 dark:text-yellow-400 text-xs px-3 py-1 flex items-center gap-2"
+      className="bg-warning/10 text-warning-foreground text-xs px-3 py-1 flex items-center gap-2"
     >
       <svg
         className="w-3 h-3"
@@ -510,7 +510,7 @@ export const ConversationPairCard = memo(function ConversationPairCard({
       pair.status === 'pending'
         ? 'pending'
         : pair.status === 'orphan'
-        ? 'orphan border-l-4 border-yellow-600'
+        ? 'orphan border-l-4 border-warning'
         : '';
     return `${base} ${statusClass}`.trim();
   }, [pair.status]);

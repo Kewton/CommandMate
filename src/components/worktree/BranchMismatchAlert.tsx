@@ -61,9 +61,9 @@ export const BranchMismatchAlert = memo(function BranchMismatchAlert({
     <div
       data-testid="branch-mismatch-alert"
       role="alert"
-      className="flex items-center gap-3 px-4 py-2 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg"
+      className="flex items-center gap-3 px-4 py-2 bg-warning-subtle border border-warning-border text-warning-foreground rounded-lg"
     >
-      <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0" />
+      <AlertTriangle className="w-5 h-5 text-warning flex-shrink-0" />
       <div className="flex-1 min-w-0">
         <span className="text-sm">
           Branch changed from{' '}
@@ -75,7 +75,7 @@ export const BranchMismatchAlert = memo(function BranchMismatchAlert({
       <button
         type="button"
         onClick={() => setDismissed(true)}
-        className="p-1 rounded hover:bg-amber-100 transition-colors"
+        className="p-1 rounded hover:bg-warning-subtle transition-colors"
         aria-label="Dismiss alert"
       >
         <X className="w-4 h-4" />

@@ -279,8 +279,8 @@ export function HtmlPreview({
               className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
                 sandboxLevel === level
                   ? level === 'safe'
-                    ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300'
-                    : 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300'
+                    ? 'bg-success-subtle text-success-foreground'
+                    : 'bg-warning-subtle text-warning-foreground'
                   : 'text-muted-foreground hover:bg-muted'
               }`}
             >

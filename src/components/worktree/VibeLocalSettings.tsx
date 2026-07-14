@@ -182,7 +182,7 @@ export const VibeLocalSettings = memo(function VibeLocalSettings({
           {t('loading')}
         </div>
       ) : ollamaError && ollamaModels.length === 0 ? (
-        <p className="text-xs text-amber-600 dark:text-amber-400">
+        <p className="text-xs text-warning-foreground">
           {t('ollamaNotAvailable')}
         </p>
       ) : (

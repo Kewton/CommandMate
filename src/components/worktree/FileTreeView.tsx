@@ -549,9 +549,9 @@ export const FileTreeView = memo(function FileTreeView({
     return (
       <div
         data-testid="file-tree-error"
-        className={`p-4 bg-red-50 border border-red-200 rounded-lg ${className}`}
+        className={`p-4 bg-danger-subtle border border-danger-border rounded-lg ${className}`}
       >
-        <p className="text-sm text-red-600">{error}</p>
+        <p className="text-sm text-danger">{error}</p>
       </div>
     );
   }
@@ -714,7 +714,7 @@ export const FileTreeView = memo(function FileTreeView({
         <div
           data-testid="file-tree-refetch-error"
           role="alert"
-          className="flex items-center gap-2 px-2 py-1 text-xs bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800 text-red-700 dark:text-red-300"
+          className="flex items-center gap-2 px-2 py-1 text-xs bg-danger-subtle border-b border-danger-border text-danger-foreground"
         >
           <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
           <span className="flex-1 truncate">{error}</span>
@@ -724,7 +724,7 @@ export const FileTreeView = memo(function FileTreeView({
             onClick={() => {
               void reloadTreeWithExpandedDirs();
             }}
-            className="px-2 py-0.5 text-xs rounded border border-red-300 dark:border-red-700 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
+            className="px-2 py-0.5 text-xs rounded border border-danger-border hover:bg-danger-subtle transition-colors"
           >
             再試行
           </Button>

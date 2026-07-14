@@ -48,7 +48,7 @@ function getCopyButton(): HTMLElement {
 /** Check whether the SVG icon inside a button has the green Check icon class */
 function hasCheckIcon(button: HTMLElement): boolean {
   const svg = button.querySelector('svg');
-  return svg?.classList.toString().includes('text-green-600') ?? false;
+  return svg?.classList.toString().includes('text-success') ?? false;
 }
 
 describe('MemoCard', () => {

@@ -6,7 +6,7 @@
  * - MobileHeader.tsx
  * - WorktreeDetailRefactored.tsx
  *
- * G1: waiting status uses yellow (bg-yellow-500) to distinguish from ready (bg-green-500)
+ * G1: waiting status uses the warning token to distinguish from ready (success token)
  */
 
 // ============================================================================
@@ -45,10 +45,10 @@ export interface StatusConfig {
 
 /** Centralized color class definitions */
 export const STATUS_COLORS = {
-  /** Gray for idle/inactive state */
-  idle: 'bg-gray-500',
-  /** Green for ready/active state */
-  ready: 'bg-green-500',
+  /** Muted for idle/inactive state */
+  idle: 'bg-muted-foreground',
+  /** Success token for ready/active state */
+  ready: 'bg-success',
   /**
    * @deprecated Issue #1078: the blue rotating-ring spinner is being unified
    * into the single `<StatusDot>` visual language (running = green glow). Kept
@@ -57,10 +57,10 @@ export const STATUS_COLORS = {
    * consumer migrates to `<StatusDot>`.
    */
   spinner: 'border-info',
-  /** Yellow for waiting state (G1: distinguishes from ready) */
-  waiting: 'bg-yellow-500',
-  /** Red for error state */
-  error: 'bg-red-500',
+  /** Warning token for waiting state (G1: distinguishes from ready) */
+  waiting: 'bg-warning',
+  /** Danger token for error state */
+  error: 'bg-danger',
 } as const;
 
 // ============================================================================

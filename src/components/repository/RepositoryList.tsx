@@ -331,7 +331,7 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
     return (
       <Card padding="lg">
         <div className="space-y-3">
-          <p className="text-sm text-red-800 dark:text-red-300">
+          <p className="text-sm text-danger-foreground">
             Failed to load repositories: {loadError}
           </p>
           <Button variant="secondary" size="sm" onClick={() => void fetchRepositories()}>
@@ -349,8 +349,8 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
           role="status"
           className={`p-3 rounded-lg text-sm ${
             feedback.type === 'success'
-              ? 'bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-300'
-              : 'bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-300'
+              ? 'bg-success-subtle border border-success-border text-success-foreground'
+              : 'bg-danger-subtle border border-danger-border text-danger-foreground'
           }`}
         >
           {feedback.message}
@@ -396,7 +396,7 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                             onKeyDown={(e) => handleKeyDown(e, repo)}
                           />
                           {edit.error && (
-                            <p className="text-xs text-red-600 dark:text-red-400">
+                            <p className="text-xs text-danger-foreground">
                               {edit.error}
                             </p>
                           )}
