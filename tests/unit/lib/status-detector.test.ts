@@ -653,4 +653,121 @@ describe('status-detector', () => {
       expect(result.reason).toBe('input_prompt');
     });
   });
+
+  // =========================================================================
+  // Issue #1150: Codex processing status not detected (status-bar pattern drift)
+  //
+  // Codex v0.141 (gpt-5.5) dropped the "N% left ·" token from its status bar, so
+  // the previous pattern (/^\s*\S+.*\d+%\s+left\s+·/) never matched. The footer
+  // boundary stayed -1, the entire Codex running/idle block (priority 2.7) was
+  // skipped, and generating sessions fell through to the input-prompt check and
+  // were misreported as `ready` (static green dot, no glow).
+  //
+  // These fixtures use the REAL v0.141 bar and the legacy "% left" bar to guard
+  // against the next CLI-format drift (Acceptance Criteria: both must be covered).
+  // =========================================================================
+  describe('Issue #1150: Codex status-bar version drift', () => {
+    // Codex TUI: conversation content (top) | ~10 empty padding lines | status bar (bottom).
+    const codexFrame = (contentLines: string[], statusBar: string): string =>
+      [...contentLines, ...Array(10).fill(''), statusBar].join('\n');
+
+    // v0.141 status bar (gpt-5.5): "model effort · path", NO "% left".
+    const V0141_BAR = 'gpt-5.5 xhigh · ~/share/work/github_kewton/commandmate-issue-947';
+    // Legacy status bar (gpt-5.4 / o4-mini): includes "N% left ·".
+    const LEGACY_BAR = 'gpt-5.4 high · 21% left · ~/share/work/github_kewton/commandmate-issue-947';
+
+    it('should return running for a generating Codex frame with the v0.141 bar (fallback C)', () => {
+      // Command output (no › prompt, no • indicator in the last 5 lines) above the
+      // v0.141 bar → the status bar is located and the fallback marks it running.
+      const output = codexFrame(
+        ['Applying patch to src/foo.ts', 'Updated 3 files', 'Running build'],
+        V0141_BAR
+      );
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('running');
+      expect(result.confidence).toBe('high');
+      expect(result.reason).toBe('thinking_indicator');
+      expect(result.hasActivePrompt).toBe(false);
+    });
+
+    it('should return running/thinking_indicator when a Codex thinking marker sits above the v0.141 bar (>5 lines away)', () => {
+      // The • Working indicator is pushed beyond the narrow 5-line window by the
+      // padding, so only the wider priority-2.7 content scan (restored by the fix) sees it.
+      const output = codexFrame(
+        ['user: do the thing', '', '• Working (deciding next step)'],
+        V0141_BAR
+      );
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('running');
+      expect(result.reason).toBe('thinking_indicator');
+    });
+
+    it('should keep the idle Codex › prompt as ready with the v0.141 bar (no over-detection)', () => {
+      const output = codexFrame(['Here is the result.', '', '›'], V0141_BAR);
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('ready');
+      expect(result.reason).toBe('input_prompt');
+      expect(result.hasActivePrompt).toBe(false);
+    });
+
+    it('should still return running for a generating Codex frame with the legacy "% left" bar (regression)', () => {
+      const output = codexFrame(
+        ['Applying patch to src/foo.ts', 'Updated 3 files', 'Running build'],
+        LEGACY_BAR
+      );
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('running');
+      expect(result.reason).toBe('thinking_indicator');
+    });
+
+    it('should still keep the idle Codex › prompt as ready with the legacy "% left" bar (regression)', () => {
+      const output = codexFrame(['Here is the result.', '', '›'], LEGACY_BAR);
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('ready');
+      expect(result.reason).toBe('input_prompt');
+    });
+
+    it('mitigation B: should detect running from the Codex thinking marker even when NO status bar is present', () => {
+      // Defense-in-depth for a future status-bar format drift: no bar line at all,
+      // • Working pushed beyond the 5-line window, tail is command output (not ›).
+      const output = [
+        'user prompt',
+        '• Working (Esc to interrupt)',
+        'line a',
+        'line b',
+        'line c',
+        'line d',
+        'line e',
+        'tail output line',
+      ].join('\n');
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('running');
+      expect(result.reason).toBe('thinking_indicator');
+    });
+
+    it('mitigation B: should NOT over-detect running for an idle › tail when no status bar is present', () => {
+      // Stale • Ran sits above the 5-line window and the tail is the idle › prompt,
+      // so the status-bar-independent net must defer to the ready input-prompt check.
+      const output = [
+        'user prompt',
+        '• Ran npm test',
+        'output 1',
+        'output 2',
+        'output 3',
+        'output 4',
+        'output 5',
+        '›',
+      ].join('\n');
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('ready');
+      expect(result.reason).toBe('input_prompt');
+    });
+  });
 });

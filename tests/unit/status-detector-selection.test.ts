@@ -709,3 +709,34 @@ describe('detectSessionStatus - Antigravity permission-approval menu detection (
     expect(result.reason).not.toBe(STATUS_REASON.ANTIGRAVITY_SELECTION_LIST);
   });
 });
+
+// ===========================================================================
+// Issue #1150: Codex status-bar version drift must not break the footer boundary
+// used by selection-list detection.
+//
+// buildCodexOutput() above pins the LEGACY "N% left ·" bar; these tests use the
+// v0.141 bar ("model effort · path", no "% left") to prove the relaxed
+// CODEX_STATUS_BAR_PATTERN still anchors the footer boundary for priority 0.8.
+// ===========================================================================
+describe('detectSessionStatus - Codex selection list with v0.141 status bar (Issue #1150)', () => {
+  const V0141_BAR = 'gpt-5.5 xhigh · ~/share/work/github_kewton/commandmate-issue-947';
+
+  it('should detect the /model selection list above a v0.141 status bar (no "% left")', () => {
+    const output = [
+      'Select a model',
+      '',
+      '  ❯ gpt-5.5 (current)',
+      '    gpt-5.4',
+      '    codex-mini-latest',
+      '',
+      'press enter to confirm or esc to cancel',
+      ...Array(10).fill(''),
+      V0141_BAR,
+    ].join('\n');
+
+    const result = detectSessionStatus(output, 'codex');
+    expect(result.status).toBe('waiting');
+    expect(result.reason).toBe(STATUS_REASON.CODEX_SELECTION_LIST);
+    expect(result.hasActivePrompt).toBe(false);
+  });
+});
