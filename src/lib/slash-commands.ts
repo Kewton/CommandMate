@@ -4,8 +4,13 @@
  * Loads and parses slash commands from:
  * - .claude/commands/*.md (Claude commands)
  * - .claude/skills/{name}/SKILL.md (Claude skills, Issue #343)
- * - .codex/skills/{name}/SKILL.md (Codex skills, Issue #166)
- * - .codex/prompts/*.md (Codex custom prompts, Issue #166)
+ * - .agents/skills/{name}/SKILL.md (Codex skills, current CLI standard, Issue #1165)
+ * - .codex/skills/{name}/SKILL.md (Codex skills, legacy, Issue #166)
+ *
+ * `.agents/skills` is where the current Codex CLI reads skills
+ * ($REPO_ROOT/.agents/skills and $HOME/.agents/skills); `.codex/skills` is kept
+ * for backward compatibility. `.codex/prompts` is intentionally not scanned
+ * (Codex CLI never reads it, Issue #790).
  *
  * Uses gray-matter for frontmatter parsing
  */
@@ -38,8 +43,11 @@ let commandsCache: SlashCommand[] | null = null;
  */
 let skillsCache: SlashCommand[] | null = null;
 
-/** Codex skills subdirectory path (Issue #166) */
+/** Codex skills subdirectory path, legacy location (Issue #166) */
 const CODEX_SKILLS_SUBDIR = path.join('.codex', 'skills');
+
+/** Codex skills subdirectory path, current CLI standard location (Issue #1165) */
+const AGENTS_SKILLS_SUBDIR = path.join('.agents', 'skills');
 
 /** Skills subdirectory scan limit (Issue #343) */
 const MAX_SKILLS_COUNT = 100;
@@ -362,6 +370,31 @@ export async function loadCodexSkills(basePath?: string): Promise<SlashCommand[]
 }
 
 /**
+ * Load Codex skills from .agents/skills/{name}/SKILL.md (Issue #1165)
+ *
+ * `.agents/skills` is the directory the current Codex CLI scans for skills
+ * ($REPO_ROOT/.agents/skills and $HOME/.agents/skills). Loaded alongside the
+ * legacy .codex/skills scan (loadCodexSkills) so both locations are surfaced;
+ * duplicates by name are collapsed via deduplicateByName().
+ *
+ * Reuses the codex-skill source so the $NAME trigger, category aggregation, and
+ * codex CLI filter all apply. Also scans .system/ for built-in Codex skills.
+ *
+ * @param basePath - Optional base path. If not provided, uses os.homedir()
+ * @returns Promise resolving to array of SlashCommand objects
+ */
+export async function loadAgentsSkills(basePath?: string): Promise<SlashCommand[]> {
+  const root = basePath ?? os.homedir();
+  const skillsDir = path.join(root, AGENTS_SKILLS_SUBDIR);
+  return scanSkillDirs(
+    skillsDir,
+    { source: 'codex-skill', cliTools: ['codex'] },
+    'agents-skills-count-limit',
+    true,
+  );
+}
+
+/**
  * Get Copilot CLI builtin commands (Issue #547)
  *
  * Returns hardcoded builtin slash commands for Copilot CLI.
@@ -513,8 +546,13 @@ export async function getSlashCommandGroups(basePath?: string): Promise<SlashCom
   if (basePath) {
     const commands = await loadSlashCommands(basePath);
     const skills = await loadSkills(basePath);
+    // Local Codex skills: current .agents/skills (Issue #1165) + legacy .codex/skills (Issue #166)
     const codexLocalSkills = await loadCodexSkills(basePath);
-    const deduplicated = deduplicateByName([...skills, ...codexLocalSkills], commands);
+    const agentsLocalSkills = await loadAgentsSkills(basePath);
+    const deduplicated = deduplicateByName(
+      [...skills, ...codexLocalSkills, ...agentsLocalSkills],
+      commands,
+    );
     return groupByCategory(deduplicated);
   }
 
