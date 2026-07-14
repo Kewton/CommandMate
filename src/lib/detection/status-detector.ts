@@ -138,6 +138,78 @@ export const SELECTION_LIST_REASONS = new Set<string>([
 const STALE_OUTPUT_THRESHOLD_MS: number = 5000;
 
 /**
+ * Issue #1160: anchors for the BOTTOM edge of a Codex approval / numbered-choice
+ * prompt. Used only by isCodexStalePrompt() to distinguish an ACTIVE prompt (the
+ * bottom-most interactive element → waiting) from an already-ANSWERED one lingering
+ * in scrollback with Codex processing below it (→ fall through to running detection).
+ * Detection-wide Codex patterns live in cli-patterns.ts; these stay local to the guard.
+ *
+ * CODEX_CONFIRMATION_FOOTER_PATTERN matches the "press number/enter to confirm" footer
+ * that closes a numbered prompt. CODEX_NUMBERED_OPTION_PATTERN matches an option line
+ * ("1. Yes", optionally prefixed by a ❯/›/● selection indicator). Neither pattern uses
+ * /g (keeps .test() stateless) nor nested quantifiers (ReDoS-safe).
+ */
+const CODEX_CONFIRMATION_FOOTER_PATTERN = /press\s+(?:number|enter)\s+to\s+confirm/i;
+const CODEX_NUMBERED_OPTION_PATTERN = /^\s*[❯›●]?\s*\d{1,2}[.)]\s/;
+
+/**
+ * Issue #1160: decide whether a Codex prompt that detectPrompt() matched is a stale,
+ * already-answered prompt left in the 50-line scan window rather than an active one.
+ *
+ * Codex keeps the answered "1. Yes / 2. No" block + "press number to confirm" footer in
+ * its transcript (session historyLimit 50000) instead of repainting it away like Claude,
+ * so detectPrompt() keeps matching it and detectSessionStatus() reports `waiting` even
+ * after the user answered and Codex resumed — the sidebar status dot then stays orange
+ * forever (the reported bug).
+ *
+ * Position-based guard (mirrors isCodexPromptReady()'s bottom-most-element idea): the
+ * prompt is stale when a Codex thinking indicator (• Working / • Ran / …) sits strictly
+ * BELOW the bottom-most prompt anchor (footer or numbered option) within the content
+ * above the status bar. An UNANSWERED prompt has no running indicator below its block,
+ * so this returns false and the caller keeps reporting `waiting` (Auto-Yes unaffected).
+ *
+ * The bare "›" input-line case ("answered, then › below") is already handled upstream by
+ * detectPrompt()'s user-input barrier (prompt-detect-multiple-choice.ts), which returns
+ * isPrompt=false before this guard runs, so only the thinking-indicator signal is needed
+ * here — keeping the guard conservative against flipping a genuine prompt to running.
+ */
+function isCodexStalePrompt(contentLines: string[]): boolean {
+  // Locate the Codex status bar (version-independent, Issue #1150). The content of
+  // interest is above it — same footer-boundary scan as priority 2.7 below.
+  let footerBoundary = -1;
+  for (let ci = contentLines.length - 1; ci >= Math.max(0, contentLines.length - 10); ci--) {
+    if (CODEX_STATUS_BAR_PATTERN.test(contentLines[ci])) {
+      footerBoundary = ci;
+      break;
+    }
+  }
+  const end = footerBoundary >= 0 ? footerBoundary : contentLines.length;
+
+  let lastPromptIdx = -1;
+  let lastThinkingIdx = -1;
+  for (let i = 0; i < end; i++) {
+    const line = contentLines[i];
+    const trimmed = line.trim();
+    if (trimmed === '') {
+      continue;
+    }
+    if (
+      CODEX_CONFIRMATION_FOOTER_PATTERN.test(trimmed) ||
+      CODEX_NUMBERED_OPTION_PATTERN.test(trimmed)
+    ) {
+      lastPromptIdx = i;
+    }
+    // detectThinking('codex', …) requires the "•" activity prefix, so option text that
+    // merely contains a word like "Running" cannot be mistaken for a running indicator.
+    if (detectThinking('codex', line)) {
+      lastThinkingIdx = i;
+    }
+  }
+
+  return lastPromptIdx >= 0 && lastThinkingIdx > lastPromptIdx;
+}
+
+/**
  * Detect session status with confidence level
  *
  * Priority order:
@@ -329,15 +401,31 @@ export function detectSessionStatus(
   const promptInput = (cliToolId === 'opencode' || cliToolId === 'codex' || cliToolId === 'claude' || cliToolId === 'copilot')
     ? stripBoxDrawing(cleanOutput)
     : stripBoxDrawing(lastLines);
-  const promptDetection = detectPrompt(promptInput, promptOptions);
+  let promptDetection = detectPrompt(promptInput, promptOptions);
   if (promptDetection.isPrompt) {
-    return {
-      status: 'waiting',
-      confidence: 'high',
-      reason: 'prompt_detected',
-      hasActivePrompt: true,
-      promptDetection,
-    };
+    // Issue #1160: Codex keeps an ANSWERED approval / numbered-choice block
+    // ("1. Yes / 2. No" + "press number to confirm" footer) in its transcript
+    // (historyLimit 50000) instead of repainting it away like Claude. detectPrompt's
+    // 50-line window then keeps matching that dead prompt, so this priority-1 branch
+    // returns `waiting` even after the user answered and Codex resumed — the sidebar
+    // status dot stays orange forever (the reported bug). Guard with a position check:
+    // treat the prompt as active only when it is the bottom-most interactive element.
+    // If a Codex thinking indicator (• Working / • Ran / …) sits BELOW the prompt block,
+    // it is stale scrollback — neutralize the detection (so Auto-Yes and the sidebar
+    // never act on a dead prompt) and fall through to the priority-2.7 running/idle
+    // check. Unanswered prompts (nothing running below the block) still return `waiting`,
+    // so Auto-Yes is unaffected.
+    if (cliToolId === 'codex' && isCodexStalePrompt(contentLines)) {
+      promptDetection = { ...promptDetection, isPrompt: false, promptData: undefined };
+    } else {
+      return {
+        status: 'waiting',
+        confidence: 'high',
+        reason: 'prompt_detected',
+        hasActivePrompt: true,
+        promptDetection,
+      };
+    }
   }
 
   // 1.5. Claude CLI selection list detection
