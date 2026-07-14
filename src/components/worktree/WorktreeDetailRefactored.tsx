@@ -427,7 +427,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 <button
                   key={inst.id}
                   onClick={() => setActiveInstanceId(inst.id)}
-                  className={`flex-shrink-0 whitespace-nowrap px-1.5 py-1 font-medium text-xs transition-colors flex items-center gap-1 border-b-2 ${
+                  // Issue #1127: min-h-[44px] + touch-manipulation give these
+                  // densely-packed instance tabs a ≥44px tap target (text stays
+                  // text-xs; only the hit area grows) and kill the double-tap
+                  // zoom delay on touch devices.
+                  className={`flex-shrink-0 whitespace-nowrap min-h-[44px] px-1.5 py-1 font-medium text-xs transition-colors flex items-center gap-1 border-b-2 touch-manipulation ${
                     isActive
                       ? 'text-accent-600 dark:text-accent-400 border-accent-500'
                       : 'text-muted-foreground hover:text-foreground border-transparent'
@@ -445,7 +449,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           <button
             type="button"
             onClick={() => setShowActionsSheet(true)}
-            className="flex-shrink-0 flex items-center justify-center min-h-[44px] min-w-[44px] rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            className="flex-shrink-0 flex items-center justify-center min-h-[44px] min-w-[44px] rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors touch-manipulation"
             aria-label={tWorktree('terminal.moreActions')}
             data-testid="mobile-more-actions-button"
           >

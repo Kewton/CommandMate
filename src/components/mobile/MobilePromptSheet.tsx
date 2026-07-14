@@ -6,12 +6,13 @@
 
 'use client';
 
-import { useState, useCallback, useId, useMemo, useRef, useEffect, memo } from 'react';
+import { useState, useCallback, useId, useMemo, useEffect, memo } from 'react';
 import { useTranslations } from 'next-intl';
 import type { PromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { RadioGroup, RadioGroupItem, Spinner } from '@/components/ui';
 import { usePromptAnimation } from '@/hooks/usePromptAnimation';
+import { useFocusTrap } from '@/hooks/useFocusTrap';
 
 /** Animation duration for sheet transitions */
 const ANIMATION_DURATION_MS = 300;
@@ -22,7 +23,7 @@ const SWIPE_DISMISS_THRESHOLD = 100;
 /** Button style constants */
 const BUTTON_STYLES = {
   /** Common button base styles */
-  base: 'px-6 py-3 rounded-lg font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2',
+  base: 'px-6 py-3 rounded-lg font-medium transition-all touch-manipulation disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2',
   /** Primary button styles */
   primary: 'bg-accent-600 text-white hover:bg-accent-700 focus:ring-ring',
   /** Secondary button styles */
@@ -69,10 +70,16 @@ export const MobilePromptSheet = memo(function MobilePromptSheet({
   });
   const labelId = useId();
 
+  // [Issue #1127] Trap keyboard focus within the sheet while it is the active
+  // modal surface (Tab cycling + focus restore); shares the single useFocusTrap
+  // implementation with ui/Modal. The ref doubles as the sheet element ref.
+  const sheetRef = useFocusTrap<HTMLDivElement>({
+    active: visible && promptData !== null,
+  });
+
   // Swipe handling state
   const [touchStartY, setTouchStartY] = useState<number | null>(null);
   const [translateY, setTranslateY] = useState(0);
-  const sheetRef = useRef<HTMLDivElement>(null);
 
   // Reset translate when visibility changes
   useEffect(() => {

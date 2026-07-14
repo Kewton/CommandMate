@@ -87,4 +87,23 @@ describe('MobileTerminalActionsSheet', () => {
     fireEvent.keyDown(window, { key: 'Enter' });
     expect(defaultProps.onClose).not.toHaveBeenCalled();
   });
+
+  // Issue #1127: focus trap parity with ui/Modal.
+  it('moves initial focus to the sheet and traps Tab within it', () => {
+    render(<MobileTerminalActionsSheet {...defaultProps} />);
+    const sheet = screen.getByTestId('mobile-terminal-actions-sheet');
+    expect(document.activeElement).toBe(sheet);
+
+    const buttons = Array.from(sheet.querySelectorAll('button'));
+    const first = buttons[0];
+    const last = buttons[buttons.length - 1];
+
+    last.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+
+    first.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
 });
