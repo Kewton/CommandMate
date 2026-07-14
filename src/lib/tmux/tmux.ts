@@ -30,11 +30,21 @@ const DEFAULT_TIMEOUT = 5000;
  * attach in tmux-control-client.ts) MUST go through this helper so no call site
  * can regress to prefix matching.
  *
+ * The trailing `:` is REQUIRED, not cosmetic. tmux accepts a bare `=name` only
+ * where a session target is expected (has-session/kill-session/set-option). For
+ * commands that take a window/pane target (capture-pane/send-keys, and
+ * resize-window in opencode.ts), `=name` is parsed as a pane spec and tmux fails
+ * with `can't find pane: =name` — which broke ALL session display/send after the
+ * initial #1156 fix. `=name:` (session `name`, unspecified window → active) is a
+ * valid target for BOTH session and window/pane commands, and still forces exact
+ * session matching (a non-existent `=primary:` yields `can't find session`, so it
+ * never leaks to the prefix-colliding `-2` instance).
+ *
  * @param sessionName - Exact tmux session name to target
- * @returns Target specifier with the `=` exact-match prefix
+ * @returns Target specifier with the `=` exact-match prefix and `:` session terminator
  */
 export function exactTarget(sessionName: string): string {
-  return `=${sessionName}`;
+  return `=${sessionName}:`;
 }
 
 /**
