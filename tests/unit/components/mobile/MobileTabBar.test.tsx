@@ -407,4 +407,110 @@ describe('MobileTabBar', () => {
       expect(badge).toHaveAttribute('aria-label', 'Update available');
     });
   });
+
+  // Issue #1127: ARIA tabs pattern — roving tabindex + arrow-key navigation.
+  describe('Roving tabindex (Issue #1127)', () => {
+    it('puts only the active tab in the page tab order', () => {
+      render(<MobileTabBar {...defaultProps} activeTab="history" />);
+
+      expect(screen.getByRole('tab', { name: /history/i })).toHaveAttribute('tabindex', '0');
+      expect(screen.getByRole('tab', { name: /terminal/i })).toHaveAttribute('tabindex', '-1');
+      expect(screen.getByRole('tab', { name: /files/i })).toHaveAttribute('tabindex', '-1');
+      expect(screen.getByRole('tab', { name: /tools/i })).toHaveAttribute('tabindex', '-1');
+      expect(screen.getByRole('tab', { name: /info/i })).toHaveAttribute('tabindex', '-1');
+    });
+
+    it('moves the roving tabindex when the active tab changes', () => {
+      const { rerender } = render(<MobileTabBar {...defaultProps} activeTab="terminal" />);
+      expect(screen.getByRole('tab', { name: /terminal/i })).toHaveAttribute('tabindex', '0');
+
+      rerender(<MobileTabBar {...defaultProps} activeTab="files" />);
+      expect(screen.getByRole('tab', { name: /files/i })).toHaveAttribute('tabindex', '0');
+      expect(screen.getByRole('tab', { name: /terminal/i })).toHaveAttribute('tabindex', '-1');
+    });
+  });
+
+  describe('Arrow-key navigation (Issue #1127)', () => {
+    it('ArrowRight focuses and selects the next tab', () => {
+      const onTabChange = vi.fn();
+      render(<MobileTabBar {...defaultProps} activeTab="terminal" onTabChange={onTabChange} />);
+
+      const terminalTab = screen.getByRole('tab', { name: /terminal/i });
+      terminalTab.focus();
+      fireEvent.keyDown(terminalTab, { key: 'ArrowRight' });
+
+      expect(onTabChange).toHaveBeenCalledWith('history');
+      expect(document.activeElement).toBe(screen.getByRole('tab', { name: /history/i }));
+    });
+
+    it('ArrowLeft wraps from the first tab to the last', () => {
+      const onTabChange = vi.fn();
+      render(<MobileTabBar {...defaultProps} activeTab="terminal" onTabChange={onTabChange} />);
+
+      const terminalTab = screen.getByRole('tab', { name: /terminal/i });
+      fireEvent.keyDown(terminalTab, { key: 'ArrowLeft' });
+
+      expect(onTabChange).toHaveBeenCalledWith('info');
+      expect(document.activeElement).toBe(screen.getByRole('tab', { name: /info/i }));
+    });
+
+    it('ArrowRight wraps from the last tab to the first', () => {
+      const onTabChange = vi.fn();
+      render(<MobileTabBar {...defaultProps} activeTab="info" onTabChange={onTabChange} />);
+
+      const infoTab = screen.getByRole('tab', { name: /info/i });
+      fireEvent.keyDown(infoTab, { key: 'ArrowRight' });
+
+      expect(onTabChange).toHaveBeenCalledWith('terminal');
+      expect(document.activeElement).toBe(screen.getByRole('tab', { name: /terminal/i }));
+    });
+
+    it('Home jumps to the first tab and End to the last', () => {
+      const onTabChange = vi.fn();
+      render(<MobileTabBar {...defaultProps} activeTab="files" onTabChange={onTabChange} />);
+
+      const filesTab = screen.getByRole('tab', { name: /files/i });
+
+      fireEvent.keyDown(filesTab, { key: 'Home' });
+      expect(onTabChange).toHaveBeenCalledWith('terminal');
+      expect(document.activeElement).toBe(screen.getByRole('tab', { name: /terminal/i }));
+
+      fireEvent.keyDown(screen.getByRole('tab', { name: /terminal/i }), { key: 'End' });
+      expect(onTabChange).toHaveBeenCalledWith('info');
+      expect(document.activeElement).toBe(screen.getByRole('tab', { name: /info/i }));
+    });
+
+    it('also mirrors arrow navigation to searchParams when provided', () => {
+      const onSearchParamsChange = vi.fn();
+      render(
+        <MobileTabBar
+          {...defaultProps}
+          activeTab="terminal"
+          onSearchParamsChange={onSearchParamsChange}
+        />
+      );
+
+      fireEvent.keyDown(screen.getByRole('tab', { name: /terminal/i }), { key: 'ArrowRight' });
+      expect(onSearchParamsChange).toHaveBeenCalledWith('history');
+    });
+
+    it('ignores unrelated keys', () => {
+      const onTabChange = vi.fn();
+      render(<MobileTabBar {...defaultProps} activeTab="terminal" onTabChange={onTabChange} />);
+
+      fireEvent.keyDown(screen.getByRole('tab', { name: /terminal/i }), { key: 'a' });
+      expect(onTabChange).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Tap targets (Issue #1127)', () => {
+    it('gives every tab a ≥44px hit area and touch-manipulation', () => {
+      render(<MobileTabBar {...defaultProps} />);
+
+      screen.getAllByRole('tab').forEach((tab) => {
+        expect(tab.className).toContain('min-h-[44px]');
+        expect(tab.className).toContain('touch-manipulation');
+      });
+    });
+  });
 });

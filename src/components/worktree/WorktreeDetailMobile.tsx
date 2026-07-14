@@ -300,7 +300,9 @@ export const MobileContent = memo(function MobileContent({
             <button
               type="button"
               onClick={() => onHistorySubTabChange('message')}
-              className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
+              // Issue #1127: min-h-[44px] + touch-manipulation — ≥44px tap
+              // target (text stays text-xs) and no double-tap zoom delay.
+              className={`flex-1 min-h-[44px] px-3 py-1.5 text-xs font-medium transition-colors touch-manipulation ${
                 historySubTab === 'message'
                   ? 'text-accent-600 dark:text-accent-400 border-b-2 border-accent-600 dark:border-accent-400 bg-accent-50 dark:bg-accent-900/30'
                   : 'text-muted-foreground hover:text-foreground'
@@ -311,7 +313,9 @@ export const MobileContent = memo(function MobileContent({
             <button
               type="button"
               onClick={() => onHistorySubTabChange('git')}
-              className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
+              // Issue #1127: min-h-[44px] + touch-manipulation — ≥44px tap
+              // target (text stays text-xs) and no double-tap zoom delay.
+              className={`flex-1 min-h-[44px] px-3 py-1.5 text-xs font-medium transition-colors touch-manipulation ${
                 historySubTab === 'git'
                   ? 'text-accent-600 dark:text-accent-400 border-b-2 border-accent-600 dark:border-accent-400 bg-accent-50 dark:bg-accent-900/30'
                   : 'text-muted-foreground hover:text-foreground'

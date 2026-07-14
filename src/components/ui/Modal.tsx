@@ -5,12 +5,13 @@
 
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useId } from 'react';
 import { createPortal } from 'react-dom';
 import { cva } from 'class-variance-authority';
 import { Z_INDEX } from '@/config/z-index';
 import { EXIT_ANIMATION_DURATION_MS } from '@/config/ui-feedback-config';
 import { useExitAnimation } from '@/hooks/useExitAnimation';
+import { useFocusTrap } from '@/hooks/useFocusTrap';
 import { cn } from '@/lib/utils/cn';
 
 const modalSizeVariants = cva('', {
@@ -62,7 +63,13 @@ export function Modal({
   showCloseButton = true,
   disableClose = false,
 }: ModalProps) {
-  const modalRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+
+  // [Issue #1127] Trap keyboard focus inside the dialog while it is open (Tab
+  // cycling, initial focus, focus restore on close). Engaged on `isOpen` — not
+  // `shouldRender` — so focus returns to the opener the moment closing begins,
+  // even while the exit animation keeps the panel mounted.
+  const modalRef = useFocusTrap<HTMLDivElement>({ active: isOpen });
 
   // [Issue #1114] Keep the modal mounted for the exit window so the
   // data-[state=closed] fade/zoom-out animation can play before unmount.
@@ -118,6 +125,10 @@ export function Modal({
           ref={modalRef}
           data-state={dataState}
           data-testid="modal-panel"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={title ? titleId : undefined}
+          tabIndex={-1}
           className={cn(
             'relative w-full',
             modalSizeVariants({ size }),
@@ -135,11 +146,12 @@ export function Modal({
           {/* Header */}
           {(title || showCloseButton) && (
             <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-border flex-shrink-0">
-              <h3 className="text-base sm:text-lg font-semibold text-foreground truncate pr-2">{title}</h3>
+              <h3 id={titleId} className="text-base sm:text-lg font-semibold text-foreground truncate pr-2">{title}</h3>
               {showCloseButton && (
                 <button
                   onClick={onClose}
-                  className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
+                  aria-label="Close"
+                  className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0 touch-manipulation"
                 >
                   <svg
                     className="w-5 h-5 sm:w-6 sm:h-6"

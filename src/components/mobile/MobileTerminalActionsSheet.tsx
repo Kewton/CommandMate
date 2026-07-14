@@ -13,6 +13,7 @@
 import React, { useCallback, useEffect, useId } from 'react';
 import { useTranslations } from 'next-intl';
 import { Search, LogOut } from 'lucide-react';
+import { useFocusTrap } from '@/hooks/useFocusTrap';
 
 export interface MobileTerminalActionsSheetProps {
   /** Whether the sheet is visible. */
@@ -39,6 +40,10 @@ export function MobileTerminalActionsSheet({
 }: MobileTerminalActionsSheetProps) {
   const t = useTranslations('worktree');
   const labelId = useId();
+
+  // [Issue #1127] Keep keyboard focus inside the sheet while open (shared
+  // useFocusTrap); pairs with the existing Escape/backdrop dismiss paths.
+  const sheetRef = useFocusTrap<HTMLDivElement>({ active: open });
 
   const handleSearch = useCallback(() => {
     onSearch();
@@ -75,10 +80,12 @@ export function MobileTerminalActionsSheet({
 
       {/* Sheet */}
       <div
+        ref={sheetRef}
         data-testid="mobile-terminal-actions-sheet"
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelId}
+        tabIndex={-1}
         className="fixed bottom-0 inset-x-0 z-50 rounded-t-2xl border-t border-border bg-surface pb-safe"
       >
         {/* Drag handle */}
@@ -95,7 +102,7 @@ export function MobileTerminalActionsSheet({
             type="button"
             data-testid="actions-sheet-search"
             onClick={handleSearch}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm text-foreground hover:bg-muted transition-colors"
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm text-foreground hover:bg-muted transition-colors touch-manipulation"
           >
             <Search size={18} aria-hidden="true" className="text-muted-foreground" />
             {t('terminal.searchTerminal')}
@@ -105,7 +112,7 @@ export function MobileTerminalActionsSheet({
             data-testid="actions-sheet-end"
             onClick={handleEnd}
             disabled={endDisabled}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm text-danger hover:bg-danger/10 transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm text-danger hover:bg-danger/10 transition-colors touch-manipulation disabled:opacity-40 disabled:hover:bg-transparent"
           >
             <LogOut size={18} aria-hidden="true" />
             {t('terminal.endSession')}

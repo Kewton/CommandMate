@@ -184,3 +184,53 @@ describe('Modal', () => {
     expect(screen.queryByRole('button')).toBeNull();
   });
 });
+
+// [Issue #1127] Focus management: dialog semantics + focus trap.
+describe('Modal focus trap (Issue #1127)', () => {
+  afterEach(() => {
+    cleanup();
+    document.body.style.overflow = 'unset';
+  });
+
+  it('exposes dialog semantics on the panel', () => {
+    render(
+      <Modal isOpen onClose={() => {}} title="A11y">
+        <p>content</p>
+      </Modal>
+    );
+    const panel = screen.getByTestId('modal-panel');
+    expect(panel).toHaveAttribute('role', 'dialog');
+    expect(panel).toHaveAttribute('aria-modal', 'true');
+    expect(panel).toHaveAttribute('aria-labelledby');
+  });
+
+  it('moves initial focus to the dialog when opened', () => {
+    render(
+      <Modal isOpen onClose={() => {}} title="Focus">
+        <button data-testid="a">A</button>
+      </Modal>
+    );
+    expect(document.activeElement).toBe(screen.getByTestId('modal-panel'));
+  });
+
+  it('cycles Tab and Shift+Tab within the dialog', () => {
+    render(
+      <Modal isOpen onClose={() => {}} title="Trap">
+        <button data-testid="a">A</button>
+        <button data-testid="b">B</button>
+      </Modal>
+    );
+    const panel = screen.getByTestId('modal-panel');
+    const focusables = Array.from(panel.querySelectorAll('button'));
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+
+    last.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+
+    first.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
+});

@@ -17,7 +17,9 @@ const buttonVariants = cva(
   // focus-visible + ring-offset-background: keyboard-only ring, and the offset
   // color is tied to the page background so dark mode no longer paints the
   // default white halo (Tabs/Switch are the reference).
-  'inline-flex items-center justify-center px-4 py-2 rounded-md font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background',
+  // [Issue #1127] touch-manipulation: opt every Button out of the browser's
+  // double-tap-to-zoom delay on touch devices (no visual change).
+  'inline-flex items-center justify-center px-4 py-2 rounded-md font-medium transition-all duration-200 touch-manipulation focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background',
   {
     variants: {
       variant: {

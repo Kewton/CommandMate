@@ -120,7 +120,11 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
               <button
                 onClick={handleToggleFavorite}
                 disabled={isTogglingFavorite}
-                className="flex-shrink-0 transition-colors hover:scale-110"
+                className="flex-shrink-0 transition-colors hover:scale-110 touch-manipulation"
+                // Issue #1127: this control is icon-only, so its `title` tooltip
+                // is invisible on touch/SR. aria-label gives it a real
+                // accessible name reachable without hover.
+                aria-label={isFavorite ? t('common.favorites.remove') : t('common.favorites.add')}
                 title={isFavorite ? t('common.favorites.remove') : t('common.favorites.add')}
               >
                 <svg

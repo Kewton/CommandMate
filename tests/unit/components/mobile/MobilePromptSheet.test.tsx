@@ -421,6 +421,8 @@ describe('MobilePromptSheet', () => {
     });
 
     it('should trap focus within the sheet', () => {
+      // Issue #1127: Tab / Shift+Tab cycle within the sheet instead of escaping
+      // to the page behind the overlay.
       render(
         <MobilePromptSheet
           {...defaultProps}
@@ -429,8 +431,22 @@ describe('MobilePromptSheet', () => {
         />
       );
 
-      const buttons = screen.getAllByRole('button');
+      const sheet = screen.getByTestId('mobile-prompt-sheet');
+      // Initial focus lands on the sheet dialog itself.
+      expect(document.activeElement).toBe(sheet);
+
+      const buttons = Array.from(sheet.querySelectorAll('button'));
       expect(buttons.length).toBeGreaterThan(0);
+      const first = buttons[0];
+      const last = buttons[buttons.length - 1];
+
+      last.focus();
+      fireEvent.keyDown(document, { key: 'Tab' });
+      expect(document.activeElement).toBe(first);
+
+      first.focus();
+      fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+      expect(document.activeElement).toBe(last);
     });
   });
 
