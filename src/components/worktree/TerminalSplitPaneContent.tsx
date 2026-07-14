@@ -39,7 +39,9 @@ import {
   type PanePromptState,
 } from '@/hooks/useTerminalPanePolling';
 import { useSplitMessages } from '@/hooks/useSplitMessages';
+import { usePendingMessages, type OptimisticSendOptions } from '@/hooks/usePendingMessages';
 import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
+import { worktreeApi } from '@/lib/api-client';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
 import type {
@@ -161,6 +163,27 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     enabled: !disabled,
   });
 
+  // Issue #1121: optimistic-UI layer. Merges a just-sent message into this
+  // split's history as a pending bubble (< 100ms) before the send resolves, then
+  // reconciles it against the server echo (no duplicate) or surfaces a
+  // retry/discard error on failure. onSent refetches so reconciliation is prompt.
+  const sendMessageFn = useCallback(
+    (content: string, options: OptimisticSendOptions) =>
+      worktreeApi.sendMessage(worktreeId, content, options),
+    [worktreeId],
+  );
+  const {
+    messages: mergedMessages,
+    sendOptimistic,
+    retry: retryPending,
+    discard: discardPending,
+  } = usePendingMessages({
+    worktreeId,
+    serverMessages: splitMessages,
+    sendFn: sendMessageFn,
+    onSent: refreshSplitMessages,
+  });
+
   // Issue #744: History visible/width. MVP keeps this common across splits
   // (single useHistoryPaneState instance per pane, all reading the same
   // localStorage-backed state). Width is applied relative to THIS split's inner
@@ -199,6 +222,19 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       onMessageSent?.(sentCli);
     },
     [refresh, refreshSplitMessages, onMessageSent],
+  );
+
+  // Issue #1121: discarding a failed optimistic message removes its bubble and
+  // restores the text to the composer (via the existing insert-to-message
+  // pathway) so the user can edit and re-send.
+  const handleDiscardPending = useCallback(
+    (tempId: string) => {
+      const content = discardPending(tempId);
+      if (content) {
+        onHistoryInsertToMessage?.(content);
+      }
+    },
+    [discardPending, onHistoryInsertToMessage],
   );
 
   const handlePromptRespond = useCallback(
@@ -253,13 +289,15 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   const historyPaneSlot = useMemo(
     () => (
       <HistoryPane
-        messages={splitMessages}
+        messages={mergedMessages}
         worktreeId={worktreeId}
         onFilePathClick={onFilePathClick ?? (() => {})}
         isLoading={splitMessagesLoading}
         className="h-full"
         showToast={showToast}
         onInsertToMessage={onHistoryInsertToMessage}
+        onRetryPending={retryPending}
+        onDiscardPending={handleDiscardPending}
         showArchived={showArchived}
         onShowArchivedChange={onShowArchivedChange}
         historyDisplayLimit={historyDisplayLimit}
@@ -272,7 +310,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       />
     ),
     [
-      splitMessages,
+      mergedMessages,
+      retryPending,
+      handleDiscardPending,
       worktreeId,
       onFilePathClick,
       splitMessagesLoading,
@@ -427,6 +467,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
         <MessageInput
           worktreeId={worktreeId}
           onMessageSent={handleMessageSent}
+          // Issue #1121: delegate the send to the optimistic layer so a pending
+          // bubble appears in this split's history immediately.
+          onOptimisticSend={sendOptimistic}
           cliToolId={cliToolId}
           instanceId={resolvedInstanceId}
           isSessionRunning={terminal.isRunning}
@@ -471,6 +514,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       handlePromptRespond,
       handlePromptDismiss,
       handleMessageSent,
+      sendOptimistic,
       terminal.isRunning,
       pendingInsertText,
       onInsertConsumed,

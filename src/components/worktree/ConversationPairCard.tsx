@@ -8,7 +8,7 @@
 'use client';
 
 import React, { useMemo, useCallback, memo } from 'react';
-import { Copy, ArrowDownToLine, ChevronDown } from 'lucide-react';
+import { Copy, ArrowDownToLine, ChevronDown, Loader2, AlertCircle, RotateCcw, X } from 'lucide-react';
 import { useLocale } from 'next-intl';
 import type { ConversationPair } from '@/types/conversation';
 import type { ChatMessage } from '@/types/models';
@@ -44,6 +44,16 @@ export interface ConversationPairCardProps {
    * exist in the pair.
    */
   showAssistant?: boolean;
+  /**
+   * Issue #1121: Called with the message id (tempId) to re-send an
+   * optimistic message whose send failed. Only reachable on error bubbles.
+   */
+  onRetryPending?: (tempId: string) => void;
+  /**
+   * Issue #1121: Called with the message id (tempId) to discard an
+   * optimistic message whose send failed. Only reachable on error bubbles.
+   */
+  onDiscardPending?: (tempId: string) => void;
 }
 
 /** Parsed content part type */
@@ -223,51 +233,119 @@ const UserMessageSection = memo(function UserMessageSection({
   onFilePathClick,
   onCopy,
   onInsertToMessage,
+  onRetryPending,
+  onDiscardPending,
 }: {
   message: ChatMessage;
   onFilePathClick: (path: string) => void;
   onCopy?: (content: string) => void;
   onInsertToMessage?: (content: string) => void;
+  onRetryPending?: (tempId: string) => void;
+  onDiscardPending?: (tempId: string) => void;
 }) {
   const locale = useLocale();
   const dateFnsLocale = getDateFnsLocale(locale);
   const formattedTime = formatMessageTimestamp(message.timestamp, dateFnsLocale);
 
+  // Issue #1121: optimistic send state drives the bubble's styling and actions.
+  const sendState = message.optimisticState;
+  const sectionClassName = [
+    'group relative border-l-2 p-3 transition-opacity',
+    sendState === 'error'
+      ? 'border-danger-border bg-danger-subtle'
+      : 'border-accent-500 bg-accent-500/10',
+    sendState === 'sending' ? 'opacity-70' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
-    <div className="group relative border-l-2 border-accent-500 bg-accent-500/10 p-3">
+    <div className={sectionClassName}>
       <div className="flex items-center gap-2 mb-1">
         <span className="text-xs font-medium text-accent-700 dark:text-accent-400">You</span>
         <span className="text-xs text-muted-foreground">{formattedTime}</span>
-        {/* Persistent mini-toolbar: reveal on hover/focus (desktop), pinned to the
-            row's right edge so actions never overlap the message body. On touch
-            devices (no hover) it stays visible so copy/insert remain reachable
-            (Issue #1075). */}
-        <div className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-          {onInsertToMessage && (
-            <button
-              type="button"
-              data-testid="insert-user-message"
-              onClick={() => onInsertToMessage(message.content)}
-              className="p-1 text-muted-foreground hover:text-accent-600 dark:hover:text-accent-400 hover:bg-muted rounded transition-colors"
-              aria-label="Insert to message"
-              title="Insert to message"
-            >
-              <ArrowDownToLine size={14} aria-hidden="true" />
-            </button>
-          )}
-          {onCopy && (
-            <button
-              type="button"
-              data-testid="copy-user-message"
-              onClick={() => onCopy(message.content)}
-              className="p-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors"
-              aria-label="Copy message"
-              title="Copy"
-            >
-              <Copy size={14} aria-hidden="true" />
-            </button>
-          )}
-        </div>
+        {/* Issue #1121: send-state chip (before the action toolbar). */}
+        {sendState === 'sending' && (
+          <span
+            data-testid="optimistic-sending"
+            className="flex items-center gap-1 text-xs text-muted-foreground"
+          >
+            <Loader2 size={12} className="animate-spin" aria-hidden="true" />
+            <span>Sending…</span>
+          </span>
+        )}
+        {sendState === 'error' && (
+          <span
+            data-testid="optimistic-error"
+            className="flex items-center gap-1 text-xs text-danger-foreground"
+          >
+            <AlertCircle size={12} aria-hidden="true" />
+            <span>Failed to send</span>
+          </span>
+        )}
+        {/* Issue #1121: on a failed send, retry/discard replace the hover toolbar
+            and stay always-visible so recovery actions are reachable on touch too. */}
+        {sendState === 'error' ? (
+          <div className="ml-auto flex items-center gap-1">
+            {onRetryPending && (
+              <button
+                type="button"
+                data-testid="pending-retry"
+                onClick={() => onRetryPending(message.id)}
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-accent-700 dark:text-accent-400 hover:bg-muted transition-colors"
+                aria-label="Retry sending message"
+                title="Retry"
+              >
+                <RotateCcw size={12} aria-hidden="true" />
+                Retry
+              </button>
+            )}
+            {onDiscardPending && (
+              <button
+                type="button"
+                data-testid="pending-discard"
+                onClick={() => onDiscardPending(message.id)}
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-danger-foreground hover:bg-muted transition-colors"
+                aria-label="Discard message"
+                title="Discard"
+              >
+                <X size={12} aria-hidden="true" />
+                Discard
+              </button>
+            )}
+          </div>
+        ) : (
+          /* Persistent mini-toolbar: reveal on hover/focus (desktop), pinned to the
+             row's right edge so actions never overlap the message body. On touch
+             devices (no hover) it stays visible so copy/insert remain reachable
+             (Issue #1075). */
+          <div className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+            {onInsertToMessage && (
+              <button
+                type="button"
+                data-testid="insert-user-message"
+                onClick={() => onInsertToMessage(message.content)}
+                className="p-1 text-muted-foreground hover:text-accent-600 dark:hover:text-accent-400 hover:bg-muted rounded transition-colors"
+                aria-label="Insert to message"
+                title="Insert to message"
+              >
+                <ArrowDownToLine size={14} aria-hidden="true" />
+              </button>
+            )}
+            {onCopy && (
+              <button
+                type="button"
+                data-testid="copy-user-message"
+                onClick={() => onCopy(message.content)}
+                className="p-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors"
+                aria-label="Copy message"
+                title="Copy"
+              >
+                <Copy size={14} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        )}
       </div>
       <div
         data-message-id={message.id}
@@ -487,7 +565,14 @@ export const ConversationPairCard = memo(function ConversationPairCard({
   onCopy,
   onInsertToMessage,
   showAssistant = true,
+  onRetryPending,
+  onDiscardPending,
 }: ConversationPairCardProps) {
+  // Issue #1121: an optimistic (unsent / failed) user message drives special
+  // styling and suppresses the "Waiting for response…" block — it is not yet
+  // waiting on the assistant, it is waiting on the server to confirm the send.
+  const isOptimistic = pair.userMessage?.optimisticState !== undefined;
+
   // Determine if expand button should be shown
   const hasLongContent = useMemo(() => {
     return pair.assistantMessages.some((msg) => {
@@ -541,11 +626,13 @@ export const ConversationPairCard = memo(function ConversationPairCard({
           onFilePathClick={onFilePathClick}
           onCopy={onCopy}
           onInsertToMessage={onInsertToMessage}
+          onRetryPending={onRetryPending}
+          onDiscardPending={onDiscardPending}
         />
       )}
 
       {/* Assistant section */}
-      {pair.status === 'pending' ? (
+      {pair.status === 'pending' && !isOptimistic ? (
         <div className="bg-muted/40 border-l-2 border-border p-3 border-t border-border">
           <PendingIndicator />
         </div>

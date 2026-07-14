@@ -65,6 +65,19 @@ export interface MessageInputProps {
    * pills so Auto-Yes no longer occupies its own full-width row.
    */
   autoYesSlot?: React.ReactNode;
+  /**
+   * Issue #1121: optimistic-send hook. When provided, the composer delegates the
+   * actual send to this callback (which inserts a pending bubble into the history
+   * and fires the API in the background) instead of awaiting the send API itself.
+   * The composer clears immediately (optimistic); send failures surface on the
+   * pending bubble, not the composer's error banner. Omitted by callers without
+   * an optimistic-UI history (mobile / assistant chat), which keep the legacy
+   * await-then-clear behavior.
+   */
+  onOptimisticSend?: (
+    content: string,
+    options: { cliToolId: CLIToolType; instanceId?: string; imagePath?: string },
+  ) => void;
 }
 
 /**
@@ -116,7 +129,7 @@ function migrateLegacyDraftKey(worktreeId: string): void {
   }
 }
 
-export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast, autoYesSlot }: MessageInputProps) {
+export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast, autoYesSlot, onOptimisticSend }: MessageInputProps) {
   const t = useTranslations('worktree');
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
@@ -221,19 +234,40 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       return;
     }
 
+    const trimmed = message.trim();
+    const effectiveCliTool: CLIToolType = cliToolId || 'claude';
+    const options: { cliToolId: CLIToolType; instanceId?: string; imagePath?: string } = { cliToolId: effectiveCliTool };
+    // Issue #869: route to the specific instance when it differs from the primary.
+    if (instanceId && instanceId !== effectiveCliTool) {
+      options.instanceId = instanceId;
+    }
+    if (attachedImage) {
+      options.imagePath = attachedImage.path;
+    }
+
+    // Issue #1121: optimistic path. Hand the send to the history layer (which
+    // shows a pending bubble and fires the API in the background) and clear the
+    // composer immediately rather than blocking on the API. Send failures surface
+    // on the pending bubble, so the composer never sets its own error/sending
+    // state here.
+    if (onOptimisticSend) {
+      setError(null);
+      onOptimisticSend(trimmed, options);
+      setMessage('');
+      setIsFreeInputMode(false);
+      resetAfterSend();
+      try { window.localStorage.removeItem(getDraftKey(worktreeId, splitIndex)); } catch { /* ignore */ }
+      if (isProcessing) {
+        showToast?.(QUEUED_BUSY_TOAST_MESSAGE, 'warning');
+      }
+      onMessageSent?.(effectiveCliTool);
+      return;
+    }
+
     try {
       setSending(true);
       setError(null);
-      const effectiveCliTool: CLIToolType = cliToolId || 'claude';
-      const options: { cliToolId: CLIToolType; instanceId?: string; imagePath?: string } = { cliToolId: effectiveCliTool };
-      // Issue #869: route to the specific instance when it differs from the primary.
-      if (instanceId && instanceId !== effectiveCliTool) {
-        options.instanceId = instanceId;
-      }
-      if (attachedImage) {
-        options.imagePath = attachedImage.path;
-      }
-      await worktreeApi.sendMessage(worktreeId, message.trim(), options);
+      await worktreeApi.sendMessage(worktreeId, trimmed, options);
       setMessage('');
       setIsFreeInputMode(false);
       resetAfterSend();
@@ -250,7 +284,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     } finally {
       setSending(false);
     }
-  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, splitIndex, isProcessing, showToast]);
+  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, splitIndex, isProcessing, showToast, onOptimisticSend]);
 
   const handleSubmit = useCallback(async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
