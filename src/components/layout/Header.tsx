@@ -9,8 +9,8 @@
 'use client';
 
 import React from 'react';
-import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { TransitionLink } from '@/components/view-transitions/TransitionLink';
 import { useTranslations } from 'next-intl';
 import { Folder, Github, Search } from 'lucide-react';
 import { PcDisplaySizeSelector } from './PcDisplaySizeSelector';
@@ -64,12 +64,12 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
         <div className="flex items-center justify-between h-16">
           {/* Logo and Title */}
           <div className="flex items-center space-x-4">
-            <Link href="/" className="flex items-center space-x-2 hover:opacity-80 transition-opacity">
+            <TransitionLink href="/" className="flex items-center space-x-2 hover:opacity-80 transition-opacity">
               <div className="w-8 h-8 bg-accent-600 rounded-lg flex items-center justify-center">
                 <Folder size={20} strokeWidth={2} className="text-white" aria-hidden="true" />
               </div>
               <h1 className="text-xl font-bold text-foreground">{title}</h1>
-            </Link>
+            </TransitionLink>
           </div>
 
           {/* Navigation */}
@@ -77,7 +77,7 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
             {NAV_ITEMS.map((item) => {
               const active = item.isActive(pathname);
               return (
-                <Link
+                <TransitionLink
                   key={item.href}
                   href={item.href}
                   aria-current={active ? 'page' : undefined}
@@ -88,7 +88,7 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
                   }`}
                 >
                   {item.label}
-                </Link>
+                </TransitionLink>
               );
             })}
             {/* ⌘K command palette entry point (Issue #1077) - desktop only */}

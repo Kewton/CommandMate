@@ -15,6 +15,8 @@ const usePathnameMock = vi.fn<() => string>(() => '/');
 
 vi.mock('next/navigation', () => ({
   usePathname: () => usePathnameMock(),
+  // TransitionLink (#1122) reads the router at render time via useViewTransitionRouter.
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }));
 
 vi.mock('@/contexts/CommandPaletteContext', () => ({

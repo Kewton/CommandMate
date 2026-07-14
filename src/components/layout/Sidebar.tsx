@@ -13,8 +13,8 @@
 
 import React, { memo, useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useDeferredValue } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { useViewTransitionRouter } from '@/components/providers/ViewTransitionsProvider';
 import { Database } from 'lucide-react';
 import {
   DndContext,
@@ -162,7 +162,8 @@ function persistSidebarScrollTop(scrollTop: number): void {
  * ```
  */
 export const Sidebar = memo(function Sidebar() {
-  const router = useRouter();
+  // Worktree-detail navigation crossfades via the View Transitions API (#1122).
+  const router = useViewTransitionRouter();
   const {
     worktrees,
     repositories,

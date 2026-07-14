@@ -476,3 +476,82 @@
     scroll-behavior: auto !important;
   }
 }
+
+/*
+ * [Issue #1122] View Transitions — route content crossfade with a persistent
+ * shell. Declared outside @layer so the pseudo-element rules aren't reordered
+ * by Tailwind. The JS guard (src/lib/view-transitions) skips
+ * startViewTransition entirely when unsupported or under reduced motion; these
+ * rules shape the animation when it does run.
+ */
+
+/*
+ * The transition overlay's backdrop is the theme background so the semi-opaque
+ * midpoint of the content crossfade never reveals the browser's default white
+ * canvas (channels resolve via the .dark class on <html>). Prevents the dark-
+ * theme white flash.
+ */
+::view-transition {
+  background-color: rgb(var(--background));
+}
+
+/*
+ * Keep the persistent shell (header / sidebar / bottom nav) and the page
+ * background static: the root snapshot must not fade. Only the named content
+ * region below animates.
+ */
+::view-transition-group(root),
+::view-transition-image-pair(root),
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+
+/*
+ * Assigning a name lifts the routed content out of the root snapshot into its
+ * own transition group. Targets only the AppShell <main> (the nested
+ * role="main" in the worktree detail layout is intentionally excluded — two
+ * elements sharing a view-transition-name would abort the transition).
+ */
+[data-view-transition='content'] {
+  view-transition-name: cm-content;
+}
+
+::view-transition-old(cm-content) {
+  animation: cm-vt-fade-out var(--motion-duration-base) var(--motion-ease-out) both;
+}
+
+::view-transition-new(cm-content) {
+  animation: cm-vt-fade-in var(--motion-duration-base) var(--motion-ease-out) both;
+}
+
+@keyframes cm-vt-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes cm-vt-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/*
+ * Defense in depth: neutralize any transition pseudo-elements under reduced
+ * motion. The JS guard already skips startViewTransition, but browser-driven
+ * back/forward gestures can still initiate one.
+ */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
