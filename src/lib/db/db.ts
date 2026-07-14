@@ -30,6 +30,8 @@ export {
   saveInitialBranch,
   getInitialBranch,
   getWorktreeIdsByRepository,
+  getWorktreesByRepository,
+  migrateWorktreeIdPreservingChildren,
   deleteRepositoryWorktrees,
   deleteWorktreesByIds,
 } from './worktree-db';
