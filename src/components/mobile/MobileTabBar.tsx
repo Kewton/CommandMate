@@ -36,6 +36,15 @@ export interface MobileTabBarProps {
    * memo -> 'notes', others map 1:1.
    */
   onSearchParamsChange?: (pane: DeepLinkPane) => void;
+  /**
+   * Issue #1166: when true, render in normal document flow (static,
+   * `flex-shrink-0`) instead of `position: fixed`. The worktree mobile shell
+   * sizes its container to `visualViewport.height` and lays the tab bar out as
+   * the bottom flex child, so it docks above the software keyboard without the
+   * fixed-to-layout-viewport positioning that hid it behind the keyboard.
+   * Defaults to false (legacy fixed-bottom positioning) for other callers.
+   */
+  inFlow?: boolean;
 }
 
 /**
@@ -82,6 +91,7 @@ export function MobileTabBar({
   hasPrompt = false,
   hasUpdate = false,
   onSearchParamsChange,
+  inFlow = false,
 }: MobileTabBarProps) {
   // [Issue #1127] Button refs for the ARIA tabs roving-tabindex pattern: arrow
   // keys move focus (and selection) to the neighbouring tab element directly.
@@ -179,7 +189,12 @@ export function MobileTabBar({
       data-testid="mobile-tab-bar"
       role="tablist"
       aria-label="Mobile navigation"
-      className="fixed bottom-0 inset-x-0 border-t border-border bg-background supports-[backdrop-filter]:bg-background/80 backdrop-blur-md flex pb-safe z-40"
+      // Issue #1166: `inFlow` renders the bar as a static bottom flex child so it
+      // follows the visualViewport-sized shell above the keyboard; the default
+      // keeps the legacy fixed-to-viewport-bottom positioning for other callers.
+      className={`${
+        inFlow ? 'flex-shrink-0' : 'fixed bottom-0'
+      } inset-x-0 border-t border-border bg-background supports-[backdrop-filter]:bg-background/80 backdrop-blur-md flex pb-safe z-40`}
     >
       {TABS.map((tab, index) => (
         <button

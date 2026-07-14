@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import { renderHook, act } from '@testing-library/react';
 
 import { useVirtualKeyboard } from '@/hooks/useVirtualKeyboard';
 
@@ -149,6 +149,8 @@ describe('useVirtualKeyboard', () => {
       expect(result.current).toEqual({
         isKeyboardVisible: false,
         keyboardHeight: 0,
+        // Issue #1166: viewportHeight stays null when the API is unavailable.
+        viewportHeight: null,
       });
     });
   });
@@ -257,6 +259,45 @@ describe('useVirtualKeyboard', () => {
 
       expect(result.current.isKeyboardVisible).toBe(false);
       expect(result.current.keyboardHeight).toBe(0);
+    });
+  });
+
+  // Issue #1166: expose the raw visible viewport height for containers that
+  // follow the software keyboard (visualViewport-height layout).
+  describe('viewportHeight (Issue #1166)', () => {
+    it('returns the current visualViewport height when supported', () => {
+      mockVisualViewport({ height: 640 });
+
+      const { result } = renderHook(() => useVirtualKeyboard());
+
+      expect(result.current.viewportHeight).toBe(640);
+    });
+
+    it('returns null when visualViewport is not supported', () => {
+      Object.defineProperty(window, 'visualViewport', {
+        value: null,
+        writable: true,
+        configurable: true,
+      });
+
+      const { result } = renderHook(() => useVirtualKeyboard());
+
+      expect(result.current.viewportHeight).toBeNull();
+    });
+
+    it('updates viewportHeight when the visual viewport resizes', () => {
+      const viewport = mockVisualViewport({ height: 800 });
+
+      const { result } = renderHook(() => useVirtualKeyboard());
+      expect(result.current.viewportHeight).toBe(800);
+
+      // Simulate the keyboard opening: the visible viewport shrinks.
+      act(() => {
+        (viewport as unknown as { height: number }).height = 500;
+        viewport._triggerResize();
+      });
+
+      expect(result.current.viewportHeight).toBe(500);
     });
   });
 });
