@@ -89,7 +89,7 @@ describe('tmux library', () => {
       expect(result).toBe(true);
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['has-session', '-t', '=test-session'],
+        ['has-session', '-t', '=test-session:'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -173,7 +173,7 @@ describe('tmux library', () => {
       );
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['set-option', '-t', '=test-session', 'history-limit', '50000'],
+        ['set-option', '-t', '=test-session:', 'history-limit', '50000'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -200,7 +200,7 @@ describe('tmux library', () => {
       );
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['set-option', '-t', '=test-session', 'history-limit', '100000'],
+        ['set-option', '-t', '=test-session:', 'history-limit', '100000'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -290,7 +290,7 @@ describe('tmux library', () => {
 
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['send-keys', '-t', '=test-session', 'echo hello', 'C-m'],
+        ['send-keys', '-t', '=test-session:', 'echo hello', 'C-m'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -307,7 +307,7 @@ describe('tmux library', () => {
 
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['send-keys', '-t', '=test-session', 'echo hello'],
+        ['send-keys', '-t', '=test-session:', 'echo hello'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -325,7 +325,7 @@ describe('tmux library', () => {
 
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['send-keys', '-t', '=test-session', "echo 'hello'", 'C-m'],
+        ['send-keys', '-t', '=test-session:', "echo 'hello'", 'C-m'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -357,7 +357,7 @@ describe('tmux library', () => {
       expect(result).toBe('output');
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['capture-pane', '-t', '=test-session', '-p', '-e', '-S', '-1000', '-E', '-'],
+        ['capture-pane', '-t', '=test-session:', '-p', '-e', '-S', '-1000', '-E', '-'],
         { timeout: 5000, maxBuffer: 10 * 1024 * 1024 },
         expect.any(Function)
       );
@@ -375,7 +375,7 @@ describe('tmux library', () => {
       expect(result).toBe('output');
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['capture-pane', '-t', '=test-session', '-p', '-e', '-S', '-500', '-E', '-'],
+        ['capture-pane', '-t', '=test-session:', '-p', '-e', '-S', '-500', '-E', '-'],
         { timeout: 5000, maxBuffer: 10 * 1024 * 1024 },
         expect.any(Function)
       );
@@ -396,7 +396,7 @@ describe('tmux library', () => {
       expect(result).toBe('output');
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['capture-pane', '-t', '=test-session', '-p', '-e', '-S', '-10000', '-E', '-1'],
+        ['capture-pane', '-t', '=test-session:', '-p', '-e', '-S', '-10000', '-E', '-1'],
         { timeout: 5000, maxBuffer: 10 * 1024 * 1024 },
         expect.any(Function)
       );
@@ -426,7 +426,7 @@ describe('tmux library', () => {
       expect(result).toBe(true);
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['kill-session', '-t', '=test-session'],
+        ['kill-session', '-t', '=test-session:'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -503,7 +503,7 @@ describe('tmux library', () => {
       expect(execFile).toHaveBeenCalledTimes(1);
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['has-session', '-t', '=test-session'],
+        ['has-session', '-t', '=test-session:'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -522,7 +522,7 @@ describe('tmux library', () => {
 
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['send-keys', '-t', '=test-session', 'Escape'],
+        ['send-keys', '-t', '=test-session:', 'Escape'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -539,7 +539,7 @@ describe('tmux library', () => {
 
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['send-keys', '-t', '=test-session', 'C-c'],
+        ['send-keys', '-t', '=test-session:', 'C-c'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -556,7 +556,7 @@ describe('tmux library', () => {
 
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['send-keys', '-t', '=test-session', 'C-d'],
+        ['send-keys', '-t', '=test-session:', 'C-d'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -610,7 +610,7 @@ describe('tmux library', () => {
 
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['send-keys', '-t', '=test-session', 'Down'],
+        ['send-keys', '-t', '=test-session:', 'Down'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -645,7 +645,7 @@ describe('tmux library', () => {
       // Issue #1156: the target is exact-match prefixed (`=`) but still a single arg.
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['has-session', '-t', `=${malicious}`],
+        ['has-session', '-t', `=${malicious}:`],
         expect.any(Object),
         expect.any(Function)
       );
@@ -664,7 +664,7 @@ describe('tmux library', () => {
       // The malicious command is passed as a single argument, not interpreted by shell
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['send-keys', '-t', '=test-session', maliciousCommand, 'C-m'],
+        ['send-keys', '-t', '=test-session:', maliciousCommand, 'C-m'],
         expect.any(Object),
         expect.any(Function)
       );
@@ -674,14 +674,14 @@ describe('tmux library', () => {
   // Issue #1156: prefix-collision session leakage prevention
   describe('exactTarget helper (Issue #1156)', () => {
     it('should prefix the session name with = for exact matching', () => {
-      expect(exactTarget('mcbd-claude-wt')).toBe('=mcbd-claude-wt');
+      expect(exactTarget('mcbd-claude-wt')).toBe('=mcbd-claude-wt:');
     });
 
     it('should produce distinct exact-match targets for primary and -2', () => {
       // Both targets are exact-match forms; tmux will not resolve one from the other.
       // (The behavioral guarantee is exercised by the leakage tests below.)
-      expect(exactTarget('mcbd-claude-wt')).toBe('=mcbd-claude-wt');
-      expect(exactTarget('mcbd-claude-wt-2')).toBe('=mcbd-claude-wt-2');
+      expect(exactTarget('mcbd-claude-wt')).toBe('=mcbd-claude-wt:');
+      expect(exactTarget('mcbd-claude-wt-2')).toBe('=mcbd-claude-wt-2:');
       expect(exactTarget('mcbd-claude-wt')).not.toBe(exactTarget('mcbd-claude-wt-2'));
     });
   });
@@ -697,12 +697,26 @@ describe('tmux library', () => {
 
     /**
      * Resolve a tmux `-t` target against the set of live sessions, mirroring
-     * tmux semantics: `=name` is exact-only; a bare `name` matches exactly or,
-     * failing that, by prefix (the bug that this fix closes).
+     * tmux semantics:
+     *   - `=name:` is exact-only and valid for BOTH session and window/pane
+     *     commands (the form this fix ships).
+     *   - `=name` (no trailing `:`) is exact-only for session commands but is
+     *     rejected by window/pane commands (capture-pane/send-keys) as an invalid
+     *     pane spec — the regression that shipped from the initial #1156 fix.
+     *   - a bare `name` matches exactly or, failing that, by prefix (the original
+     *     #1156 bug this fix closes).
      */
-    function resolveTarget(target: string, liveSessions: Map<string, string>): string | null {
+    function resolveTarget(
+      target: string,
+      liveSessions: Map<string, string>,
+      subcommand?: string
+    ): string | null {
       if (target.startsWith('=')) {
-        const exact = target.slice(1);
+        const paneCommand = subcommand === 'capture-pane' || subcommand === 'send-keys';
+        const hasColon = target.endsWith(':');
+        // Real tmux rejects `=name` (no `:`) for pane/window commands.
+        if (paneCommand && !hasColon) return null;
+        const exact = target.slice(1).replace(/:$/, '');
         return liveSessions.has(exact) ? exact : null;
       }
       if (liveSessions.has(target)) return target;
@@ -731,10 +745,10 @@ describe('tmux library', () => {
           return {} as ReturnType<typeof execFile>;
         }
         const target = cmdArgs[tIdx + 1];
-        const resolved = resolveTarget(target, liveSessions);
+        const resolved = resolveTarget(target, liveSessions, subcommand);
         resolvedTargets.push(resolved);
         if (!resolved) {
-          callback(new Error(`can't find session: ${target.replace(/^=/, '')}`), {
+          callback(new Error(`can't find session: ${target.replace(/^=/, '').replace(/:$/, '')}`), {
             stdout: '',
             stderr: '',
           });
@@ -756,7 +770,7 @@ describe('tmux library', () => {
       expect(resolvedTargets).toEqual([null]);
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['has-session', '-t', `=${PRIMARY}`],
+        ['has-session', '-t', `=${PRIMARY}:`],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -784,7 +798,7 @@ describe('tmux library', () => {
 
       expect(killed).toBe(false);
       // The -2 session is untouched (still resolvable on its own exact target)
-      expect(resolveTargetHelper(`=${SECOND}`, live)).toBe(SECOND);
+      expect(resolveTargetHelper(`=${SECOND}:`, live)).toBe(SECOND);
     });
 
     // Regression guard for the normal case: when the primary IS running, all
