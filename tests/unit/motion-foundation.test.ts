@@ -2,12 +2,16 @@
  * Motion foundation tests (Issue #1050).
  *
  * Verifies the build-visible / static-file acceptance criteria:
- * - tailwindcss-animate is registered as a Tailwind plugin
+ * - the animation utility library is registered
  * - a prefers-reduced-motion rule exists in globals.css
  * - the shared stagger helper caps and increments delays correctly
+ *
+ * [Issue #1178] Tailwind 4 moved config from tailwind.config.js to CSS-first
+ * `@theme` in globals.css, and tailwindcss-animate (v3-only) was replaced by the
+ * drop-in tw-animate-css. The registration assertions follow that move.
  */
 
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import path from 'path';
 import { describe, it, expect } from 'vitest';
 import {
@@ -23,19 +27,62 @@ function read(relative: string): string {
   return readFileSync(path.join(root, relative), 'utf8');
 }
 
-describe('tailwindcss-animate registration', () => {
-  it('registers the plugin in tailwind.config.js', () => {
-    const config = read('tailwind.config.js');
-    expect(config).toContain('tailwindcss-animate');
+describe('tw-animate-css registration', () => {
+  it('imports the animation library in globals.css', () => {
+    const css = read('src/app/globals.css');
+    expect(css).toContain("@import 'tw-animate-css'");
   });
 
-  it('lists tailwindcss-animate as a dependency in package.json', () => {
+  it('lists tw-animate-css as a dependency in package.json', () => {
     const pkg = JSON.parse(read('package.json')) as {
       dependencies?: Record<string, string>;
       devDependencies?: Record<string, string>;
     };
     const all = { ...pkg.dependencies, ...pkg.devDependencies };
-    expect(all['tailwindcss-animate']).toBeDefined();
+    expect(all['tw-animate-css']).toBeDefined();
+  });
+
+  it('no longer depends on the Tailwind 3-only tailwindcss-animate', () => {
+    const pkg = JSON.parse(read('package.json')) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    const all = { ...pkg.dependencies, ...pkg.devDependencies };
+    expect(all['tailwindcss-animate']).toBeUndefined();
+  });
+});
+
+describe('Tailwind 4 CSS-first configuration', () => {
+  it('uses tailwindcss on the v4 major', () => {
+    const pkg = JSON.parse(read('package.json')) as {
+      devDependencies?: Record<string, string>;
+    };
+    expect(pkg.devDependencies?.tailwindcss).toMatch(/^\^?4\./);
+  });
+
+  it('declares the theme in CSS rather than tailwind.config.js', () => {
+    const css = read('src/app/globals.css');
+    expect(css).toContain('@theme inline');
+    expect(existsSync(path.join(root, 'tailwind.config.js'))).toBe(false);
+  });
+
+  it('keeps the class-based dark variant', () => {
+    const css = read('src/app/globals.css');
+    expect(css).toContain('@custom-variant dark');
+  });
+
+  it('defines the motion animations consumed by the UI primitives', () => {
+    const css = read('src/app/globals.css');
+    for (const name of [
+      '--animate-fade-in',
+      '--animate-fade-out',
+      '--animate-slide-in',
+      '--animate-slide-up',
+      '--animate-status-glow',
+      '--animate-status-blink',
+    ]) {
+      expect(css).toContain(name);
+    }
   });
 });
 

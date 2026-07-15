@@ -4,7 +4,7 @@
  * Verifies that:
  *  - globals.css defines subtle/border/foreground tint tokens for each status
  *    color (success/warning/danger/info) in both `:root` (light) and `.dark`.
- *  - tailwind.config.js registers each status color as a nested scale
+ *  - the `@theme` block registers each status color as a scale
  *    (DEFAULT/subtle/border/foreground) backed by the CSS variables.
  *  - the migrated feedback surfaces (Toast / DefaultErrorFallback /
  *    History-Prompt-ConnectionErrorFallback / ErrorDisplay / PromptPanel) no
@@ -18,7 +18,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import resolveConfig from 'tailwindcss/resolveConfig';
 
 const ROOT = path.resolve(__dirname, '../../..');
 
@@ -79,21 +78,31 @@ describe('Status tint tokens (Issue #1112)', () => {
     });
   });
 
-  describe('tailwind.config.js color registration', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const config = require(path.join(ROOT, 'tailwind.config.js'));
-    const colors = resolveConfig(config).theme.colors as Record<string, unknown>;
+  /*
+   * [Issue #1178] Tailwind 4 registers colors via `@theme` in globals.css rather
+   * than tailwind.config.js. The `<alpha-value>` placeholder is gone — Tailwind 4
+   * composes opacity modifiers with color-mix() from a plain rgb() value — so the
+   * expected registration is `rgb(var(--token))`. See docs/design-system.md.
+   */
+  describe('@theme color registration', () => {
+    let css: string;
 
-    it('registers each status color as a nested DEFAULT/subtle/border/foreground scale', () => {
+    beforeAll(() => {
+      css = fs.readFileSync(path.join(ROOT, 'src/app/globals.css'), 'utf-8');
+    });
+
+    it('registers each status color as a DEFAULT/subtle/border/foreground scale', () => {
       for (const status of STATUSES) {
-        const scale = colors[status] as Record<string, string>;
-        expect(scale.DEFAULT, `${status}.DEFAULT`).toBe(`rgb(var(--${status}) / <alpha-value>)`);
-        expect(scale.subtle, `${status}.subtle`).toBe(`rgb(var(--${status}-subtle) / <alpha-value>)`);
-        expect(scale.border, `${status}.border`).toBe(`rgb(var(--${status}-border) / <alpha-value>)`);
-        expect(scale.foreground, `${status}.foreground`).toBe(
-          `rgb(var(--${status}-foreground) / <alpha-value>)`
-        );
+        for (const suffix of ['', '-subtle', '-border', '-foreground']) {
+          const decl = `--color-${status}${suffix}: rgb(var(--${status}${suffix}));`;
+          expect(css.includes(decl), decl).toBe(true);
+        }
       }
+    });
+
+    it('registers the scale inside @theme inline so .dark re-declaration resolves', () => {
+      // Non-inline @theme would freeze var(--success) at :root and break theming.
+      expect(css).toContain('@theme inline');
     });
   });
 

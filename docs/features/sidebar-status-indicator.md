@@ -27,7 +27,7 @@
 | `generating` | ● 発光・パルス（リング） | 緑グロー | レスポンス生成中 |
 
 > **モーション**: パルス／点滅は CSS の infinite アニメーション（`animate-status-glow` /
-> `animate-status-blink`, `tailwind.config.js`）で実装し、ポーリング再描画でリセットされない。
+> `animate-status-blink`, `globals.css` の `@theme`）で実装し、ポーリング再描画でリセットされない。
 > OS の「視差効果を減らす」設定時は `globals.css`（Issue #1050）が全アニメを無効化し、
 > 静的ドットへフォールバックする（このとき `running` はリングで `ready` と識別できる）。
 
