@@ -39,7 +39,6 @@ Required Dependencies:
     - npm
     - tmux
     - git
-    - openssl
 
 Optional Dependencies:
     - Claude CLI (required for CLI session management features)
@@ -123,9 +122,6 @@ get_version() {
         git)
             git --version 2>/dev/null | awk '{print $3}'
             ;;
-        openssl)
-            openssl version 2>/dev/null | awk '{print $2}'
-            ;;
         claude)
             claude --version 2>/dev/null | head -1
             ;;
@@ -187,16 +183,6 @@ main() {
         log_success "git: ${git_version}"
     else
         log_error "git: not installed"
-        has_error=true
-    fi
-
-    # Check openssl (required)
-    if check_command openssl; then
-        local openssl_version
-        openssl_version=$(get_version openssl)
-        log_success "openssl: ${openssl_version}"
-    else
-        log_error "openssl: not installed"
         has_error=true
     fi
 

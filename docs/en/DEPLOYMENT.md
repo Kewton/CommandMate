@@ -25,7 +25,6 @@ The following tools must be installed:
 | npm | - | ✓ | `npm -v` |
 | Git | - | ✓ | `git --version` |
 | tmux | - | ✓ | `tmux -V` |
-| openssl | - | ✓ | `openssl version` |
 | Claude CLI | - | △ | `claude --version` |
 
 ## Setup Procedure

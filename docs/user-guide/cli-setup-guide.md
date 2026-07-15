@@ -29,7 +29,6 @@ CommandMate を使用するには、以下のツールが必要です。
 | npm | - | ✓ | `npm -v` |
 | Git | - | ✓ | `git --version` |
 | tmux | - | ✓ | `tmux -V` |
-| openssl | - | ✓ | `openssl version` |
 | Claude CLI | - | △（オプション） | `claude --version` |
 | gh CLI | - | △（オプション） | `gh --version` |
 
@@ -37,7 +36,7 @@ CommandMate を使用するには、以下のツールが必要です。
 
 ```bash
 # すべての依存関係を確認
-node -v && npm -v && git --version && tmux -V && openssl version
+node -v && npm -v && git --version && tmux -V
 ```
 
 ### 各ツールのインストール
@@ -46,17 +45,17 @@ node -v && npm -v && git --version && tmux -V && openssl version
 
 ```bash
 # Homebrew を使用
-brew install node git tmux openssl
+brew install node git tmux
 ```
 
 #### Ubuntu/Debian
 
 ```bash
 sudo apt update
-sudo apt install nodejs npm git tmux openssl
+sudo apt install nodejs npm git tmux
 ```
 
-> **注意**: Windows は現在サポートされていません（tmux 依存のため）。WSL2 での動作は未検証です。
+> **注意**: ネイティブ Windows は tmux 依存のためサポートしていません。Windows では WSL2 上で CommandMate を実行してください（[WSL2 セットアップガイド](./wsl2-setup.md) を参照）。
 
 ---
 

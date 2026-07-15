@@ -25,7 +25,6 @@
 | npm | - | ✓ | `npm -v` |
 | Git | - | ✓ | `git --version` |
 | tmux | - | ✓ | `tmux -V` |
-| openssl | - | ✓ | `openssl version` |
 | Claude CLI | - | △ | `claude --version` |
 
 ## セットアップ手順

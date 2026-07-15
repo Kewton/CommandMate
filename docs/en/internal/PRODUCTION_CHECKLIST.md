@@ -51,7 +51,6 @@ For contributors or self-building, see the [Deployment Guide](../DEPLOYMENT.md#d
 - [ ] npm is installed
 - [ ] Git is installed
 - [ ] tmux is installed
-- [ ] openssl is installed
 - [ ] Claude CLI (Claude Code) is installed (optional)
   ```bash
   claude --version
