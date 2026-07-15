@@ -79,7 +79,7 @@ describe('PATCH /api/worktrees/:id/cli-tool', () => {
       body: JSON.stringify({ cliToolId: 'codex' }),
     });
 
-    const response = await updateCliTool(request as unknown as import('next/server').NextRequest, { params: { id: 'test-wt' } });
+    const response = await updateCliTool(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-wt' }) });
     expect(response.status).toBe(200);
 
     const data = await response.json();
@@ -107,7 +107,7 @@ describe('PATCH /api/worktrees/:id/cli-tool', () => {
       body: JSON.stringify({ cliToolId: 'gemini' }),
     });
 
-    const response = await updateCliTool(request as unknown as import('next/server').NextRequest, { params: { id: 'test-wt' } });
+    const response = await updateCliTool(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-wt' }) });
     expect(response.status).toBe(200);
 
     const data = await response.json();
@@ -135,7 +135,7 @@ describe('PATCH /api/worktrees/:id/cli-tool', () => {
       body: JSON.stringify({ cliToolId: 'invalid-tool' }),
     });
 
-    const response = await updateCliTool(request as unknown as import('next/server').NextRequest, { params: { id: 'test-wt' } });
+    const response = await updateCliTool(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-wt' }) });
     expect(response.status).toBe(400);
 
     const data = await response.json();
@@ -149,7 +149,7 @@ describe('PATCH /api/worktrees/:id/cli-tool', () => {
       body: JSON.stringify({ cliToolId: 'codex' }),
     });
 
-    const response = await updateCliTool(request as unknown as import('next/server').NextRequest, { params: { id: 'non-existent' } });
+    const response = await updateCliTool(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'non-existent' }) });
     expect(response.status).toBe(404);
 
     const data = await response.json();
@@ -173,7 +173,7 @@ describe('PATCH /api/worktrees/:id/cli-tool', () => {
       body: JSON.stringify({}),
     });
 
-    const response = await updateCliTool(request as unknown as import('next/server').NextRequest, { params: { id: 'test-wt' } });
+    const response = await updateCliTool(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-wt' }) });
     expect(response.status).toBe(400);
 
     const data = await response.json();
@@ -199,7 +199,7 @@ describe('PATCH /api/worktrees/:id/cli-tool', () => {
 
     const response = await updateCliTool(
       request as unknown as import('next/server').NextRequest,
-      { params: { id: 'test-wt' } }
+      { params: Promise.resolve({ id: 'test-wt' }) }
     );
     expect(response.status).toBe(400);
 

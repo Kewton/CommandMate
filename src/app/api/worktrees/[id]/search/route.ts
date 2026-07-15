@@ -72,11 +72,12 @@ function hashQuery(query: string): string {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse<SearchSuccessResponse | SearchErrorResponse>> {
+  const { id } = await params;
   const startTime = Date.now();
   const requestId = generateRequestId();
-  const worktreeId = params.id;
+  const worktreeId = id;
 
   // Create logger with context
   const log = logger.withContext({ worktreeId, requestId });

@@ -113,7 +113,7 @@ describe('File Tree API', () => {
   describe('GET /api/worktrees/:id/tree', () => {
     it('should return root directory contents', async () => {
       const request = createMockRequest('http://localhost/api/worktrees/test-worktree/tree');
-      const response = await getRootTree(request, { params: { id: 'test-worktree' } });
+      const response = await getRootTree(request, { params: Promise.resolve({ id: 'test-worktree' }) });
 
       expect(response.status).toBe(200);
 
@@ -138,7 +138,7 @@ describe('File Tree API', () => {
 
     it('should return directories first, then files', async () => {
       const request = createMockRequest('http://localhost/api/worktrees/test-worktree/tree');
-      const response = await getRootTree(request, { params: { id: 'test-worktree' } });
+      const response = await getRootTree(request, { params: Promise.resolve({ id: 'test-worktree' }) });
 
       const data = await response.json();
 
@@ -162,7 +162,7 @@ describe('File Tree API', () => {
 
     it('should return 404 for non-existent worktree', async () => {
       const request = createMockRequest('http://localhost/api/worktrees/non-existent/tree');
-      const response = await getRootTree(request, { params: { id: 'non-existent' } });
+      const response = await getRootTree(request, { params: Promise.resolve({ id: 'non-existent' }) });
 
       expect(response.status).toBe(404);
       const data = await response.json();
@@ -171,7 +171,7 @@ describe('File Tree API', () => {
 
     it('should include file sizes and extensions', async () => {
       const request = createMockRequest('http://localhost/api/worktrees/test-worktree/tree');
-      const response = await getRootTree(request, { params: { id: 'test-worktree' } });
+      const response = await getRootTree(request, { params: Promise.resolve({ id: 'test-worktree' }) });
 
       const data = await response.json();
       const jsonFile = data.items.find((i: { name: string }) => i.name === 'package.json');
@@ -185,7 +185,7 @@ describe('File Tree API', () => {
 
     it('should include directory item counts', async () => {
       const request = createMockRequest('http://localhost/api/worktrees/test-worktree/tree');
-      const response = await getRootTree(request, { params: { id: 'test-worktree' } });
+      const response = await getRootTree(request, { params: Promise.resolve({ id: 'test-worktree' }) });
 
       const data = await response.json();
       const srcDir = data.items.find((i: { name: string }) => i.name === 'src');
@@ -202,7 +202,7 @@ describe('File Tree API', () => {
     it('should return subdirectory contents', async () => {
       const request = createMockRequest('http://localhost/api/worktrees/test-worktree/tree/src');
       const response = await getSubdirTree(request, {
-        params: { id: 'test-worktree', path: ['src'] },
+        params: Promise.resolve({ id: 'test-worktree', path: ['src'] }),
       });
 
       expect(response.status).toBe(200);
@@ -222,7 +222,7 @@ describe('File Tree API', () => {
     it('should return nested subdirectory contents', async () => {
       const request = createMockRequest('http://localhost/api/worktrees/test-worktree/tree/src/components');
       const response = await getSubdirTree(request, {
-        params: { id: 'test-worktree', path: ['src', 'components'] },
+        params: Promise.resolve({ id: 'test-worktree', path: ['src', 'components'] }),
       });
 
       expect(response.status).toBe(200);
@@ -239,7 +239,7 @@ describe('File Tree API', () => {
     it('should return 404 for non-existent path', async () => {
       const request = createMockRequest('http://localhost/api/worktrees/test-worktree/tree/nonexistent');
       const response = await getSubdirTree(request, {
-        params: { id: 'test-worktree', path: ['nonexistent'] },
+        params: Promise.resolve({ id: 'test-worktree', path: ['nonexistent'] }),
       });
 
       expect(response.status).toBe(404);
@@ -250,7 +250,7 @@ describe('File Tree API', () => {
     it('should return 400 for file path (not a directory)', async () => {
       const request = createMockRequest('http://localhost/api/worktrees/test-worktree/tree/package.json');
       const response = await getSubdirTree(request, {
-        params: { id: 'test-worktree', path: ['package.json'] },
+        params: Promise.resolve({ id: 'test-worktree', path: ['package.json'] }),
       });
 
       expect(response.status).toBe(400);
@@ -261,7 +261,7 @@ describe('File Tree API', () => {
     it('should return 404 for non-existent worktree', async () => {
       const request = createMockRequest('http://localhost/api/worktrees/non-existent/tree/src');
       const response = await getSubdirTree(request, {
-        params: { id: 'non-existent', path: ['src'] },
+        params: Promise.resolve({ id: 'non-existent', path: ['src'] }),
       });
 
       expect(response.status).toBe(404);
@@ -274,7 +274,7 @@ describe('File Tree API', () => {
     it('should reject path traversal with ..', async () => {
       const request = createMockRequest('http://localhost/api/worktrees/test-worktree/tree/../etc');
       const response = await getSubdirTree(request, {
-        params: { id: 'test-worktree', path: ['..', 'etc'] },
+        params: Promise.resolve({ id: 'test-worktree', path: ['..', 'etc'] }),
       });
 
       expect(response.status).toBe(403);
@@ -285,7 +285,7 @@ describe('File Tree API', () => {
     it('should reject encoded path traversal', async () => {
       const request = createMockRequest('http://localhost/api/worktrees/test-worktree/tree/%2e%2e/etc');
       const response = await getSubdirTree(request, {
-        params: { id: 'test-worktree', path: ['%2e%2e', 'etc'] },
+        params: Promise.resolve({ id: 'test-worktree', path: ['%2e%2e', 'etc'] }),
       });
 
       // Even if URL decoding happens, should still be rejected
@@ -295,7 +295,7 @@ describe('File Tree API', () => {
     it('should reject access to excluded directories', async () => {
       const request = createMockRequest('http://localhost/api/worktrees/test-worktree/tree/.git');
       const response = await getSubdirTree(request, {
-        params: { id: 'test-worktree', path: ['.git'] },
+        params: Promise.resolve({ id: 'test-worktree', path: ['.git'] }),
       });
 
       expect(response.status).toBe(403);
@@ -306,7 +306,7 @@ describe('File Tree API', () => {
     it('should reject access to node_modules', async () => {
       const request = createMockRequest('http://localhost/api/worktrees/test-worktree/tree/node_modules');
       const response = await getSubdirTree(request, {
-        params: { id: 'test-worktree', path: ['node_modules'] },
+        params: Promise.resolve({ id: 'test-worktree', path: ['node_modules'] }),
       });
 
       expect(response.status).toBe(403);
@@ -317,7 +317,7 @@ describe('File Tree API', () => {
     it('should reject access to .env files', async () => {
       const request = createMockRequest('http://localhost/api/worktrees/test-worktree/tree/.env');
       const response = await getSubdirTree(request, {
-        params: { id: 'test-worktree', path: ['.env'] },
+        params: Promise.resolve({ id: 'test-worktree', path: ['.env'] }),
       });
 
       expect(response.status).toBe(403);

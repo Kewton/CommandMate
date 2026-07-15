@@ -55,7 +55,7 @@ describe('GET /api/worktrees/[id]/schedules', () => {
       { id: 'c', worktree_id: 'wt-1', name: 'disabled-two', enabled: 0 },
     ]);
 
-    const res = await GET(makeReq(), { params: { id: 'wt-1' } });
+    const res = await GET(makeReq(), { params: Promise.resolve({ id: 'wt-1' }) });
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -67,9 +67,9 @@ describe('GET /api/worktrees/[id]/schedules', () => {
     ]);
   });
 
-  it('SQL must not filter by enabled (regression: pre-fix query was AND enabled = 1)', () => {
+  it('SQL must not filter by enabled (regression: pre-fix query was AND enabled = 1)', async () => {
     allMock.mockReturnValue([]);
-    void GET(makeReq(), { params: { id: 'wt-1' } });
+    await GET(makeReq(), { params: Promise.resolve({ id: 'wt-1' }) });
 
     expect(prepareMock).toHaveBeenCalled();
     const sql = prepareMock.mock.calls[0][0];

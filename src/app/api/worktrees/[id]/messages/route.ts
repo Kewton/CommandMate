@@ -14,16 +14,17 @@ const logger = createLogger('api/messages');
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const db = getDbInstance();
 
     // Check if worktree exists
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${params.id}' not found` },
+        { error: `Worktree '${id}' not found` },
         { status: 404 }
       );
     }
@@ -68,7 +69,7 @@ export async function GET(
     }
 
     // Get messages with optional CLI tool / instance filter
-    const messages = getMessages(db, params.id, { before, limit, cliToolId, instanceId, includeArchived });
+    const messages = getMessages(db, id, { before, limit, cliToolId, instanceId, includeArchived });
 
     // Filter out messages with empty content (defensive programming)
     const validMessages = messages.filter((m) => m.content && m.content.trim() !== '');

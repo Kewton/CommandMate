@@ -27,25 +27,26 @@ const MAX_CONTENT_LENGTH = 10000;
  */
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string; memoId: string } }
+  { params }: { params: Promise<{ id: string; memoId: string }> }
 ) {
   try {
+    const { id, memoId } = await params;
     const db = getDbInstance();
 
     // Check if worktree exists
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${params.id}' not found` },
+        { error: `Worktree '${id}' not found` },
         { status: 404 }
       );
     }
 
     // Check if memo exists
-    const existingMemo = getMemoById(db, params.memoId);
+    const existingMemo = getMemoById(db, memoId);
     if (!existingMemo) {
       return NextResponse.json(
-        { error: `Memo '${params.memoId}' not found` },
+        { error: `Memo '${memoId}' not found` },
         { status: 404 }
       );
     }
@@ -71,10 +72,10 @@ export async function PUT(
     }
 
     // Update the memo
-    updateMemo(db, params.memoId, { title, content });
+    updateMemo(db, memoId, { title, content });
 
     // Fetch the updated memo
-    const updatedMemo = getMemoById(db, params.memoId);
+    const updatedMemo = getMemoById(db, memoId);
 
     return NextResponse.json({ memo: updatedMemo }, { status: 200 });
   } catch (error) {
@@ -92,31 +93,32 @@ export async function PUT(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string; memoId: string } }
+  { params }: { params: Promise<{ id: string; memoId: string }> }
 ) {
   try {
+    const { id, memoId } = await params;
     const db = getDbInstance();
 
     // Check if worktree exists
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${params.id}' not found` },
+        { error: `Worktree '${id}' not found` },
         { status: 404 }
       );
     }
 
     // Check if memo exists
-    const existingMemo = getMemoById(db, params.memoId);
+    const existingMemo = getMemoById(db, memoId);
     if (!existingMemo) {
       return NextResponse.json(
-        { error: `Memo '${params.memoId}' not found` },
+        { error: `Memo '${memoId}' not found` },
         { status: 404 }
       );
     }
 
     // Delete the memo
-    deleteMemo(db, params.memoId);
+    deleteMemo(db, memoId);
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {

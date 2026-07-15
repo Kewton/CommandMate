@@ -105,7 +105,7 @@ describe('YAML File Operations API (Issue #646)', () => {
     it('should create a new .yaml file', async () => {
       const yamlContent = 'name: test\nversion: 1.0';
       const request = createRequest('POST', 'config.yaml', { type: 'file', content: yamlContent });
-      const params = { params: { id: 'test-worktree', path: ['config.yaml'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['config.yaml'] }) };
 
       const response = await POST(request, params);
       const data = await response.json();
@@ -119,7 +119,7 @@ describe('YAML File Operations API (Issue #646)', () => {
     it('should create a new .yml file', async () => {
       const ymlContent = 'key: value\nlist:\n  - item1\n  - item2';
       const request = createRequest('POST', 'data.yml', { type: 'file', content: ymlContent });
-      const params = { params: { id: 'test-worktree', path: ['data.yml'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['data.yml'] }) };
 
       const response = await POST(request, params);
       const data = await response.json();
@@ -132,7 +132,7 @@ describe('YAML File Operations API (Issue #646)', () => {
 
     it('should create a new .yaml file with empty content', async () => {
       const request = createRequest('POST', 'empty.yaml', { type: 'file', content: '' });
-      const params = { params: { id: 'test-worktree', path: ['empty.yaml'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['empty.yaml'] }) };
 
       const response = await POST(request, params);
       const data = await response.json();
@@ -144,7 +144,7 @@ describe('YAML File Operations API (Issue #646)', () => {
     it('should reject creation of YAML file with dangerous tags', async () => {
       const dangerousContent = 'exploit: !ruby/object:Gem::Requirement\n  - test';
       const request = createRequest('POST', 'exploit.yaml', { type: 'file', content: dangerousContent });
-      const params = { params: { id: 'test-worktree', path: ['exploit.yaml'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['exploit.yaml'] }) };
 
       const response = await POST(request, params);
       const data = await response.json();
@@ -161,7 +161,7 @@ describe('YAML File Operations API (Issue #646)', () => {
       writeFileSync(join(testDir, 'config.yaml'), 'name: old');
 
       const request = createRequest('PUT', 'config.yaml', { content: 'name: updated\nversion: 2.0' });
-      const params = { params: { id: 'test-worktree', path: ['config.yaml'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['config.yaml'] }) };
 
       const response = await PUT(request, params);
       const data = await response.json();
@@ -175,7 +175,7 @@ describe('YAML File Operations API (Issue #646)', () => {
       writeFileSync(join(testDir, 'data.yml'), 'key: old');
 
       const request = createRequest('PUT', 'data.yml', { content: 'key: new\nlist:\n  - a\n  - b' });
-      const params = { params: { id: 'test-worktree', path: ['data.yml'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['data.yml'] }) };
 
       const response = await PUT(request, params);
       const data = await response.json();
@@ -190,7 +190,7 @@ describe('YAML File Operations API (Issue #646)', () => {
 
       const dangerousContent = '!!python/object/apply:os.system ["echo pwned"]';
       const request = createRequest('PUT', 'config.yaml', { content: dangerousContent });
-      const params = { params: { id: 'test-worktree', path: ['config.yaml'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['config.yaml'] }) };
 
       const response = await PUT(request, params);
       const data = await response.json();
@@ -206,7 +206,7 @@ describe('YAML File Operations API (Issue #646)', () => {
 
       const dangerousContent = 'exploit: !ruby/object:Gem::Installer\n  - payload';
       const request = createRequest('PUT', 'data.yml', { content: dangerousContent });
-      const params = { params: { id: 'test-worktree', path: ['data.yml'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['data.yml'] }) };
 
       const response = await PUT(request, params);
       const data = await response.json();
@@ -220,7 +220,7 @@ describe('YAML File Operations API (Issue #646)', () => {
       writeFileSync(join(testDir, 'config.yaml'), 'name: safe');
 
       const request = createRequest('PUT', 'config.yaml', { content: 'key: value\x00' });
-      const params = { params: { id: 'test-worktree', path: ['config.yaml'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['config.yaml'] }) };
 
       const response = await PUT(request, params);
       const data = await response.json();
@@ -235,7 +235,7 @@ describe('YAML File Operations API (Issue #646)', () => {
 
       const largeContent = 'x'.repeat(2 * 1024 * 1024 + 1);
       const request = createRequest('PUT', 'config.yaml', { content: largeContent });
-      const params = { params: { id: 'test-worktree', path: ['config.yaml'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['config.yaml'] }) };
 
       const response = await PUT(request, params);
       const data = await response.json();
@@ -249,7 +249,7 @@ describe('YAML File Operations API (Issue #646)', () => {
   describe('.md regression (existing functionality preserved)', () => {
     it('should still create .md files successfully', async () => {
       const request = createRequest('POST', 'readme.md', { type: 'file', content: '# Readme' });
-      const params = { params: { id: 'test-worktree', path: ['readme.md'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['readme.md'] }) };
 
       const response = await POST(request, params);
       const data = await response.json();
@@ -263,7 +263,7 @@ describe('YAML File Operations API (Issue #646)', () => {
       writeFileSync(join(testDir, 'readme.md'), '# Old');
 
       const request = createRequest('PUT', 'readme.md', { content: '# Updated' });
-      const params = { params: { id: 'test-worktree', path: ['readme.md'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['readme.md'] }) };
 
       const response = await PUT(request, params);
       const data = await response.json();

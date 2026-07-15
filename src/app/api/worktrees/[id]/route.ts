@@ -23,11 +23,12 @@ const logger = createLogger('api/worktrees');
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // R4-002: Validate worktree ID format
-    if (!isValidWorktreeId(params.id)) {
+    const { id } = await params;
+    if (!isValidWorktreeId(id)) {
       return NextResponse.json(
         { error: 'Invalid worktree ID format' },
         { status: 400 }
@@ -35,16 +36,16 @@ export async function GET(
     }
 
     const db = getDbInstance();
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
 
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${params.id}' not found` },
+        { error: `Worktree '${id}' not found` },
         { status: 404 }
       );
     }
 
-    const initialBranch = getInitialBranch(db, params.id);
+    const initialBranch = getInitialBranch(db, id);
 
     // Issue #965: git status is independent of the tmux session list, so start
     // it immediately instead of waiting for listSessions() to resolve first.
@@ -60,7 +61,7 @@ export async function GET(
     const sessionStatusPromise = listSessions().then((tmuxSessions) => {
       const sessionNameSet = new Set(tmuxSessions.map(s => s.name));
       return detectWorktreeSessionStatus(
-        params.id,
+        id,
         sessionNameSet,
         db,
         getMessages,
@@ -76,7 +77,7 @@ export async function GET(
 
     // Issue #368: selectedAgents is already included in worktree from getWorktreeById
     // Issue #869: include the agent-instance roster (fallback derived from selectedAgents)
-    const agentInstances = resolveAgentInstances(db, params.id, worktree.selectedAgents);
+    const agentInstances = resolveAgentInstances(db, id, worktree.selectedAgents);
     return NextResponse.json(
       {
         ...worktree,
@@ -97,11 +98,12 @@ export async function GET(
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // R4-002: Validate worktree ID format
-    if (!isValidWorktreeId(params.id)) {
+    const { id } = await params;
+    if (!isValidWorktreeId(id)) {
       return NextResponse.json(
         { error: 'Invalid worktree ID format' },
         { status: 400 }
@@ -111,10 +113,10 @@ export async function PATCH(
     const db = getDbInstance();
 
     // Check if worktree exists
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${params.id}' not found` },
+        { error: `Worktree '${id}' not found` },
         { status: 404 }
       );
     }
@@ -134,24 +136,24 @@ export async function PATCH(
 
     // Update description if provided
     if ('description' in body) {
-      updateWorktreeDescription(db, params.id, body.description);
+      updateWorktreeDescription(db, id, body.description);
     }
 
     // Update link if provided
     if ('link' in body) {
-      updateWorktreeLink(db, params.id, body.link);
+      updateWorktreeLink(db, id, body.link);
     }
 
     // Update favorite if provided
     if ('favorite' in body && typeof body.favorite === 'boolean') {
-      updateFavorite(db, params.id, body.favorite);
+      updateFavorite(db, id, body.favorite);
     }
 
     // Update status if provided
     if ('status' in body) {
       const validStatuses = ['ready', 'in_progress', 'in_review', 'done', null];
       if (validStatuses.includes(body.status)) {
-        updateStatus(db, params.id, body.status);
+        updateStatus(db, id, body.status);
       }
     }
 
@@ -167,7 +169,7 @@ export async function PATCH(
           { status: 400 }
         );
       }
-      updateCliToolId(db, params.id, body.cliToolId);
+      updateCliToolId(db, id, body.cliToolId);
       nextCliToolId = body.cliToolId;
     }
 
@@ -182,14 +184,14 @@ export async function PATCH(
       }
 
       const validatedAgents = validation.value as CLIToolType[];
-      updateSelectedAgents(db, params.id, validatedAgents);
+      updateSelectedAgents(db, id, validatedAgents);
 
       // R1-007: cli_tool_id consistency check
       // If current cli_tool_id is not in new selectedAgents, auto-update to selectedAgents[0]
       if (!validatedAgents.includes(nextCliToolId)) {
         const newCliToolId = validatedAgents[0];
         logger.info('worktree:auto-update-cli-tool', { from: nextCliToolId, to: newCliToolId, selectedAgents: validatedAgents });
-        updateCliToolId(db, params.id, newCliToolId);
+        updateCliToolId(db, id, newCliToolId);
         nextCliToolId = newCliToolId;
         cliToolIdAutoUpdated = true;
       }
@@ -210,7 +212,7 @@ export async function PATCH(
 
       const validatedInstances = validation.value as AgentInstance[];
       try {
-        setAgentInstances(db, params.id, validatedInstances);
+        setAgentInstances(db, id, validatedInstances);
       } catch (instanceError) {
         if (instanceError instanceof AgentInstanceLimitError || instanceError instanceof InvalidAgentInstanceError) {
           return NextResponse.json(
@@ -226,7 +228,7 @@ export async function PATCH(
       if (!instanceTools.has(nextCliToolId)) {
         const newCliToolId = validatedInstances[0].cliTool;
         logger.info('worktree:auto-update-cli-tool-from-instances', { from: nextCliToolId, to: newCliToolId });
-        updateCliToolId(db, params.id, newCliToolId);
+        updateCliToolId(db, id, newCliToolId);
         nextCliToolId = newCliToolId;
         cliToolIdAutoUpdated = true;
       }
@@ -250,7 +252,7 @@ export async function PATCH(
           );
         }
       }
-      updateVibeLocalModel(db, params.id, model);
+      updateVibeLocalModel(db, id, model);
     }
 
     // Update vibe-local context window if provided (Issue #374)
@@ -264,16 +266,16 @@ export async function PATCH(
           { status: 400 }
         );
       }
-      updateVibeLocalContextWindow(db, params.id, ctxWindow);
+      updateVibeLocalContextWindow(db, id, ctxWindow);
     }
 
     // Return updated worktree with session status
-    const updatedWorktree = getWorktreeById(db, params.id);
+    const updatedWorktree = getWorktreeById(db, id);
     const manager = CLIToolManager.getInstance();
     const cliToolId = updatedWorktree?.cliToolId || 'claude';
     const cliTool = manager.getTool(cliToolId);
-    const isRunning = await cliTool.isRunning(params.id);
-    const agentInstances = resolveAgentInstances(db, params.id, updatedWorktree?.selectedAgents);
+    const isRunning = await cliTool.isRunning(id);
+    const agentInstances = resolveAgentInstances(db, id, updatedWorktree?.selectedAgents);
     return NextResponse.json(
       {
         ...updatedWorktree,

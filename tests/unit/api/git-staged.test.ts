@@ -77,7 +77,7 @@ describe('GET /api/worktrees/:id/git/staged (Issue #780)', () => {
   it('should return 400 for invalid worktree ID', async () => {
     (isValidWorktreeId as ReturnType<typeof vi.fn>).mockReturnValue(false);
 
-    const response = await GET(createRequest('/api/worktrees/bad!/git/staged'), { params: { id: 'bad!' } });
+    const response = await GET(createRequest('/api/worktrees/bad!/git/staged'), { params: Promise.resolve({ id: 'bad!' }) });
 
     expect(response.status).toBe(400);
   });
@@ -85,13 +85,13 @@ describe('GET /api/worktrees/:id/git/staged (Issue #780)', () => {
   it('should return 404 when worktree not found', async () => {
     (getWorktreeById as ReturnType<typeof vi.fn>).mockReturnValue(null);
 
-    const response = await GET(createRequest('/api/worktrees/test-id/git/staged'), { params: { id: 'test-id' } });
+    const response = await GET(createRequest('/api/worktrees/test-id/git/staged'), { params: Promise.resolve({ id: 'test-id' }) });
 
     expect(response.status).toBe(404);
   });
 
   it('should return 200 with the staged buckets', async () => {
-    const response = await GET(createRequest('/api/worktrees/test-id/git/staged'), { params: { id: 'test-id' } });
+    const response = await GET(createRequest('/api/worktrees/test-id/git/staged'), { params: Promise.resolve({ id: 'test-id' }) });
 
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -102,7 +102,7 @@ describe('GET /api/worktrees/:id/git/staged (Issue #780)', () => {
   it('should return 504 on timeout', async () => {
     (getStagedStatus as ReturnType<typeof vi.fn>).mockRejectedValue(new GitTimeoutError('timed out'));
 
-    const response = await GET(createRequest('/api/worktrees/test-id/git/staged'), { params: { id: 'test-id' } });
+    const response = await GET(createRequest('/api/worktrees/test-id/git/staged'), { params: Promise.resolve({ id: 'test-id' }) });
 
     expect(response.status).toBe(504);
   });
@@ -110,7 +110,7 @@ describe('GET /api/worktrees/:id/git/staged (Issue #780)', () => {
   it('should return 500 on general error', async () => {
     (getStagedStatus as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('boom'));
 
-    const response = await GET(createRequest('/api/worktrees/test-id/git/staged'), { params: { id: 'test-id' } });
+    const response = await GET(createRequest('/api/worktrees/test-id/git/staged'), { params: Promise.resolve({ id: 'test-id' }) });
 
     expect(response.status).toBe(500);
   });

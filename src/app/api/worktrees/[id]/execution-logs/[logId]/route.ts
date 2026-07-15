@@ -21,29 +21,30 @@ const logger = createLogger('api/execution-logs');
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string; logId: string } }
+  { params }: { params: Promise<{ id: string; logId: string }> }
 ) {
   try {
     // [S4-010] 2-stage worktree ID validation
-    if (!isValidWorktreeId(params.id)) {
+    const { id, logId } = await params;
+    if (!isValidWorktreeId(id)) {
       return NextResponse.json({ error: 'Invalid worktree ID format' }, { status: 400 });
     }
 
     // [S4-014] UUID v4 format validation
-    if (!isValidUuidV4(params.logId)) {
+    if (!isValidUuidV4(logId)) {
       return NextResponse.json({ error: 'Invalid log ID format' }, { status: 400 });
     }
 
     const db = getDbInstance();
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
-      return NextResponse.json({ error: `Worktree '${params.id}' not found` }, { status: 404 });
+      return NextResponse.json({ error: `Worktree '${id}' not found` }, { status: 404 });
     }
 
     // Include result column for individual log detail
     const log = db.prepare(
       'SELECT * FROM execution_logs WHERE id = ? AND worktree_id = ?'
-    ).get(params.logId, params.id);
+    ).get(logId, id);
 
     if (!log) {
       return NextResponse.json({ error: 'Execution log not found' }, { status: 404 });

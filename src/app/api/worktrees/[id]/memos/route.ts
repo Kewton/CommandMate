@@ -27,22 +27,23 @@ const MAX_CONTENT_LENGTH = 10000;
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const db = getDbInstance();
 
     // Check if worktree exists
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${params.id}' not found` },
+        { error: `Worktree '${id}' not found` },
         { status: 404 }
       );
     }
 
     // Get all memos for the worktree
-    const memos = getMemosByWorktreeId(db, params.id);
+    const memos = getMemosByWorktreeId(db, id);
 
     return NextResponse.json({ memos }, { status: 200 });
   } catch (error) {
@@ -65,16 +66,17 @@ export async function GET(
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const db = getDbInstance();
 
     // Check if worktree exists
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${params.id}' not found` },
+        { error: `Worktree '${id}' not found` },
         { status: 404 }
       );
     }
@@ -100,7 +102,7 @@ export async function POST(
     }
 
     // Get existing memos to check limit and determine next position
-    const existingMemos = getMemosByWorktreeId(db, params.id);
+    const existingMemos = getMemosByWorktreeId(db, id);
 
     // Check memo limit
     if (existingMemos.length >= MAX_MEMOS) {
@@ -124,7 +126,7 @@ export async function POST(
     }
 
     // Create the memo
-    const memo = createMemo(db, params.id, {
+    const memo = createMemo(db, id, {
       title,
       content,
       position,
@@ -156,11 +158,12 @@ export async function POST(
  */
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // Validate worktree ID format (mirrors PATCH /api/worktrees/[id])
-    if (!isValidWorktreeId(params.id)) {
+    const { id } = await params;
+    if (!isValidWorktreeId(id)) {
       return NextResponse.json(
         { error: 'Invalid worktree ID format', code: 'INVALID_WORKTREE_ID' },
         { status: 400 }
@@ -170,10 +173,10 @@ export async function PATCH(
     const db = getDbInstance();
 
     // Check if worktree exists
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${params.id}' not found`, code: 'WORKTREE_NOT_FOUND' },
+        { error: `Worktree '${id}' not found`, code: 'WORKTREE_NOT_FOUND' },
         { status: 404 }
       );
     }
@@ -183,7 +186,7 @@ export async function PATCH(
     const memoIds = (body as { memoIds?: unknown }).memoIds;
 
     // Domain validation against the worktree's existing memos
-    const existingMemos = getMemosByWorktreeId(db, params.id);
+    const existingMemos = getMemosByWorktreeId(db, id);
     const validation = validateMemoReorderInput(memoIds, existingMemos);
     if (!validation.valid) {
       return NextResponse.json(
@@ -192,7 +195,7 @@ export async function PATCH(
       );
     }
 
-    reorderMemos(db, params.id, memoIds as string[]);
+    reorderMemos(db, id, memoIds as string[]);
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {

@@ -27,7 +27,7 @@ export interface UsePullToRefreshOptions {
 
 export interface UsePullToRefreshReturn {
   /** Attach to the scrollable container element. */
-  containerRef: React.RefObject<HTMLDivElement>;
+  containerRef: React.RefObject<HTMLDivElement | null>;
   /** Current (resisted) pull distance in pixels. */
   pullDistance: number;
   /** Whether a refresh is in flight. */

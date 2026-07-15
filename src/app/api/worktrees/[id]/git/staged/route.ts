@@ -14,10 +14,11 @@ import { getStagedStatus, handleGitApiError } from '@/lib/git/git-utils';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    if (!isValidWorktreeId(params.id)) {
+    const { id } = await params;
+    if (!isValidWorktreeId(id)) {
       return NextResponse.json(
         { error: 'Invalid worktree ID format' },
         { status: 400 }
@@ -25,7 +26,7 @@ export async function GET(
     }
 
     const db = getDbInstance();
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
 
     if (!worktree) {
       return NextResponse.json(

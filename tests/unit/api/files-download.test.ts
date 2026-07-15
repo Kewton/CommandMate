@@ -84,7 +84,7 @@ describe('GET /api/worktrees/:id/files/:path (?download=1 branch)', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-wt/files/docs/report.txt?download=1'),
-      { params: { id: 'test-wt', path: ['docs', 'report.txt'] } },
+      { params: Promise.resolve({ id: 'test-wt', path: ['docs', 'report.txt'] }) },
     );
 
     expect(response.status).toBe(200);
@@ -108,7 +108,7 @@ describe('GET /api/worktrees/:id/files/:path (?download=1 branch)', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-wt/files/pic.png?download=1'),
-      { params: { id: 'test-wt', path: ['pic.png'] } },
+      { params: Promise.resolve({ id: 'test-wt', path: ['pic.png'] }) },
     );
 
     expect(response.status).toBe(200);
@@ -128,7 +128,7 @@ describe('GET /api/worktrees/:id/files/:path (?download=1 branch)', () => {
       createRequest(
         `/api/worktrees/test-wt/files/${encodeURIComponent('レポート.txt')}?download=1`,
       ),
-      { params: { id: 'test-wt', path: ['レポート.txt'] } },
+      { params: Promise.resolve({ id: 'test-wt', path: ['レポート.txt'] }) },
     );
 
     expect(response.status).toBe(200);
@@ -146,7 +146,7 @@ describe('GET /api/worktrees/:id/files/:path (?download=1 branch)', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-wt/files/evil.txt?download=1'),
-      { params: { id: 'test-wt', path: ['evil\r\nSet-Cookie: p=1.txt'] } },
+      { params: Promise.resolve({ id: 'test-wt', path: ['evil\r\nSet-Cookie: p=1.txt'] }) },
     );
 
     expect(response.status).toBe(200);
@@ -161,7 +161,7 @@ describe('GET /api/worktrees/:id/files/:path (?download=1 branch)', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-wt/files/outside?download=1'),
-      { params: { id: 'test-wt', path: ['..', '..', 'etc', 'passwd'] } },
+      { params: Promise.resolve({ id: 'test-wt', path: ['..', '..', 'etc', 'passwd'] }) },
     );
 
     expect(response.status).toBe(400);
@@ -176,7 +176,7 @@ describe('GET /api/worktrees/:id/files/:path (?download=1 branch)', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-wt/files/link?download=1'),
-      { params: { id: 'test-wt', path: ['evil-link'] } },
+      { params: Promise.resolve({ id: 'test-wt', path: ['evil-link'] }) },
     );
 
     expect(response.status).toBe(400);
@@ -193,7 +193,7 @@ describe('GET /api/worktrees/:id/files/:path (?download=1 branch)', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-wt/files/missing.bin?download=1'),
-      { params: { id: 'test-wt', path: ['missing.bin'] } },
+      { params: Promise.resolve({ id: 'test-wt', path: ['missing.bin'] }) },
     );
 
     expect(response.status).toBe(404);
@@ -207,7 +207,7 @@ describe('GET /api/worktrees/:id/files/:path (?download=1 branch)', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/ghost/files/any.bin?download=1'),
-      { params: { id: 'ghost', path: ['any.bin'] } },
+      { params: Promise.resolve({ id: 'ghost', path: ['any.bin'] }) },
     );
 
     expect(response.status).toBe(404);
@@ -228,7 +228,7 @@ describe('GET /api/worktrees/:id/files/:path (?download=1 branch)', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-wt/files/pic.png'),
-      { params: { id: 'test-wt', path: ['pic.png'] } },
+      { params: Promise.resolve({ id: 'test-wt', path: ['pic.png'] }) },
     );
 
     expect(response.headers.get('Content-Type')).not.toBe('application/octet-stream');
@@ -243,7 +243,7 @@ describe('GET /api/worktrees/:id/files/:path (?download=1 branch)', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-wt/files/pic.png?download=0'),
-      { params: { id: 'test-wt', path: ['pic.png'] } },
+      { params: Promise.resolve({ id: 'test-wt', path: ['pic.png'] }) },
     );
 
     expect(response.headers.get('Content-Type')).not.toBe('application/octet-stream');

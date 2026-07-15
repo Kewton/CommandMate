@@ -23,9 +23,10 @@ const logger = createLogger('api/capture');
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const { cliToolId, lines = 1000, instanceId } = await req.json();
 
     // Validate cliToolId against known CLI tool types
@@ -57,7 +58,7 @@ export async function POST(
 
     // Verify worktree exists in DB
     const db = getDbInstance();
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
         { error: 'Worktree not found' },
@@ -68,7 +69,7 @@ export async function POST(
     // Derive session name via CLIToolManager (validates via BaseCLITool.getSessionName)
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(cliToolId);
-    const sessionName = cliTool.getSessionName(params.id, instanceId);
+    const sessionName = cliTool.getSessionName(id, instanceId);
 
     // No auto-creation; return 404 if session does not exist
     const sessionExists = await hasSession(sessionName);

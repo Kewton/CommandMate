@@ -100,7 +100,7 @@ describe('POST /api/worktrees/:id/kill-session - CLI Tool Support', () => {
         method: 'POST',
       });
 
-      const response = await killSession(request, { params: { id: 'claude-test' } });
+      const response = await killSession(request, { params: Promise.resolve({ id: 'claude-test' }) });
 
       expect(response.status).toBe(200);
 
@@ -133,7 +133,7 @@ describe('POST /api/worktrees/:id/kill-session - CLI Tool Support', () => {
         method: 'POST',
       });
 
-      const response = await killSession(request, { params: { id: 'codex-test' } });
+      const response = await killSession(request, { params: Promise.resolve({ id: 'codex-test' }) });
 
       expect(response.status).toBe(200);
 
@@ -166,7 +166,7 @@ describe('POST /api/worktrees/:id/kill-session - CLI Tool Support', () => {
         method: 'POST',
       });
 
-      const response = await killSession(request, { params: { id: 'gemini-test' } });
+      const response = await killSession(request, { params: Promise.resolve({ id: 'gemini-test' }) });
 
       expect(response.status).toBe(200);
 
@@ -182,7 +182,7 @@ describe('POST /api/worktrees/:id/kill-session - CLI Tool Support', () => {
         method: 'POST',
       });
 
-      const response = await killSession(request, { params: { id: 'nonexistent' } });
+      const response = await killSession(request, { params: Promise.resolve({ id: 'nonexistent' }) });
 
       expect(response.status).toBe(404);
       const data = await response.json();
@@ -216,7 +216,7 @@ describe('POST /api/worktrees/:id/kill-session - CLI Tool Support', () => {
         method: 'POST',
       });
 
-      const response = await killSession(request, { params: { id: 'no-session' } });
+      const response = await killSession(request, { params: Promise.resolve({ id: 'no-session' }) });
 
       expect(response.status).toBe(404);
       const data = await response.json();
@@ -268,7 +268,7 @@ describe('POST /api/worktrees/:id/kill-session - CLI Tool Support', () => {
         'http://localhost:3000/api/worktrees/wt-metadata/kill-session?cliTool=claude&instance=claude-2',
         { method: 'POST' },
       );
-      const response = await killSession(request, { params: { id: 'wt-metadata' } });
+      const response = await killSession(request, { params: Promise.resolve({ id: 'wt-metadata' }) });
       expect(response.status).toBe(200);
 
       // The alias message was archived; last_user_message falls back to the
@@ -307,7 +307,7 @@ describe('POST /api/worktrees/:id/kill-session - CLI Tool Support', () => {
         'http://localhost:3000/api/worktrees/wt-metadata-clear/kill-session?cliTool=claude&instance=claude',
         { method: 'POST' },
       );
-      const response = await killSession(request, { params: { id: 'wt-metadata-clear' } });
+      const response = await killSession(request, { params: Promise.resolve({ id: 'wt-metadata-clear' }) });
       expect(response.status).toBe(200);
 
       // No active user message remains → cleared (undefined), as before #1171.

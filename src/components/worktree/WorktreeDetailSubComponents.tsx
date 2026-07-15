@@ -205,8 +205,8 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
 
   const [pathCopied, setPathCopied] = useState(false);
   const [repoPathCopied, setRepoPathCopied] = useState(false);
-  const pathTimerRef = useRef<ReturnType<typeof setTimeout>>();
-  const repoPathTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const pathTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const repoPathTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     return () => {

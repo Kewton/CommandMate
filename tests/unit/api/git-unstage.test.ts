@@ -76,49 +76,49 @@ describe('POST /api/worktrees/:id/git/unstage (Issue #780)', () => {
 
   it('should return 400 for invalid worktree ID', async () => {
     (isValidWorktreeId as ReturnType<typeof vi.fn>).mockReturnValue(false);
-    const response = await POST(createRequest({ files: ['a.ts'] }), { params: { id: 'bad!' } });
+    const response = await POST(createRequest({ files: ['a.ts'] }), { params: Promise.resolve({ id: 'bad!' }) });
     expect(response.status).toBe(400);
   });
 
   it('should return 404 when worktree not found', async () => {
     (getWorktreeById as ReturnType<typeof vi.fn>).mockReturnValue(null);
-    const response = await POST(createRequest({ files: ['a.ts'] }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ files: ['a.ts'] }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(404);
   });
 
   it('should return 400 when files is empty', async () => {
-    const response = await POST(createRequest({ files: [] }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ files: [] }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(400);
   });
 
   it('should return 400 on path traversal (isPathSafe false)', async () => {
     (isPathSafe as ReturnType<typeof vi.fn>).mockReturnValue(false);
-    const response = await POST(createRequest({ files: ['../escape'] }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ files: ['../escape'] }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(400);
     expect(unstageFiles).not.toHaveBeenCalled();
   });
 
   it('should return 200 and call unstageFiles on success', async () => {
-    const response = await POST(createRequest({ files: ['a.ts'] }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ files: ['a.ts'] }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(200);
     expect(unstageFiles).toHaveBeenCalledWith('/path/to/worktree', ['a.ts']);
   });
 
   it('should return 409 when the index is locked', async () => {
     (unstageFiles as ReturnType<typeof vi.fn>).mockRejectedValue(new GitIndexLockedError('locked'));
-    const response = await POST(createRequest({ files: ['a.ts'] }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ files: ['a.ts'] }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(409);
   });
 
   it('should return 504 on timeout', async () => {
     (unstageFiles as ReturnType<typeof vi.fn>).mockRejectedValue(new GitTimeoutError('timeout'));
-    const response = await POST(createRequest({ files: ['a.ts'] }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ files: ['a.ts'] }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(504);
   });
 
   it('should return 500 on general error', async () => {
     (unstageFiles as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('boom'));
-    const response = await POST(createRequest({ files: ['a.ts'] }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ files: ['a.ts'] }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(500);
   });
 });

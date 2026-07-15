@@ -70,7 +70,7 @@ describe('GET /api/worktrees/:id/git/diff', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/invalid/git/diff?commit=abc1234&file=test.ts'),
-      { params: { id: 'invalid' } }
+      { params: Promise.resolve({ id: 'invalid' }) }
     );
 
     expect(response.status).toBe(400);
@@ -81,7 +81,7 @@ describe('GET /api/worktrees/:id/git/diff', () => {
   it('should return 400 for missing commit hash', async () => {
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/diff?file=test.ts'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(400);
@@ -92,7 +92,7 @@ describe('GET /api/worktrees/:id/git/diff', () => {
   it('should return 400 for invalid commit hash', async () => {
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/diff?commit=INVALID&file=test.ts'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(400);
@@ -103,7 +103,7 @@ describe('GET /api/worktrees/:id/git/diff', () => {
   it('should return 400 for missing file path', async () => {
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/diff?commit=abc1234'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(400);
@@ -116,7 +116,7 @@ describe('GET /api/worktrees/:id/git/diff', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/diff?commit=abc1234&file=../../etc/passwd'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(400);
@@ -129,7 +129,7 @@ describe('GET /api/worktrees/:id/git/diff', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/diff?commit=abc1234&file=test.ts'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(404);
@@ -142,7 +142,7 @@ describe('GET /api/worktrees/:id/git/diff', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/diff?commit=abc1234&file=src/file.ts'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(200);
@@ -153,7 +153,7 @@ describe('GET /api/worktrees/:id/git/diff', () => {
   it('should call isPathSafe with file path and worktree path', async () => {
     await GET(
       createRequest('/api/worktrees/test-id/git/diff?commit=abc1234&file=src/file.ts'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(isPathSafe).toHaveBeenCalledWith('src/file.ts', '/path/to/worktree');
@@ -164,7 +164,7 @@ describe('GET /api/worktrees/:id/git/diff', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/diff?commit=abc1234&file=nonexistent.ts'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(404);
@@ -175,7 +175,7 @@ describe('GET /api/worktrees/:id/git/diff', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/diff?commit=abc1234&file=test.ts'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(400);
@@ -186,7 +186,7 @@ describe('GET /api/worktrees/:id/git/diff', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/diff?commit=abc1234&file=test.ts'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(504);
@@ -197,7 +197,7 @@ describe('GET /api/worktrees/:id/git/diff', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/diff?commit=abc1234&file=test.ts'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(500);

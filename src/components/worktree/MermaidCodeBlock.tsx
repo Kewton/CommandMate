@@ -111,7 +111,7 @@ function isMermaidLanguage(className?: string): boolean {
 export function MermaidCodeBlock({
   className,
   children,
-}: MermaidCodeBlockProps): JSX.Element {
+}: MermaidCodeBlockProps): React.JSX.Element {
   // Fenced mermaid blocks render as a diagram.
   if (isMermaidLanguage(className)) {
     const code = extractCodeString(children);

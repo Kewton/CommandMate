@@ -68,7 +68,7 @@ describe('GET /api/worktrees/:id/git/log', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/invalid!id/git/log'),
-      { params: { id: 'invalid!id' } }
+      { params: Promise.resolve({ id: 'invalid!id' }) }
     );
 
     expect(response.status).toBe(400);
@@ -81,7 +81,7 @@ describe('GET /api/worktrees/:id/git/log', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/log'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(404);
@@ -97,7 +97,7 @@ describe('GET /api/worktrees/:id/git/log', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/log'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(200);
@@ -108,7 +108,7 @@ describe('GET /api/worktrees/:id/git/log', () => {
   it('should pass default limit=50 and offset=0', async () => {
     await GET(
       createRequest('/api/worktrees/test-id/git/log'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(getGitLog).toHaveBeenCalledWith('/path/to/worktree', 50, 0);
@@ -117,7 +117,7 @@ describe('GET /api/worktrees/:id/git/log', () => {
   it('should pass custom limit and offset', async () => {
     await GET(
       createRequest('/api/worktrees/test-id/git/log?limit=10&offset=5'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(getGitLog).toHaveBeenCalledWith('/path/to/worktree', 10, 5);
@@ -126,7 +126,7 @@ describe('GET /api/worktrees/:id/git/log', () => {
   it('should return 400 for invalid limit (0)', async () => {
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/log?limit=0'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(400);
@@ -137,7 +137,7 @@ describe('GET /api/worktrees/:id/git/log', () => {
   it('should return 400 for invalid limit (101)', async () => {
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/log?limit=101'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(400);
@@ -148,7 +148,7 @@ describe('GET /api/worktrees/:id/git/log', () => {
   it('should return 400 for invalid limit (NaN)', async () => {
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/log?limit=abc'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(400);
@@ -159,7 +159,7 @@ describe('GET /api/worktrees/:id/git/log', () => {
   it('should return 400 for invalid offset (negative)', async () => {
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/log?offset=-1'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(400);
@@ -170,7 +170,7 @@ describe('GET /api/worktrees/:id/git/log', () => {
   it('should return 400 for invalid offset (NaN)', async () => {
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/log?offset=xyz'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(400);
@@ -183,7 +183,7 @@ describe('GET /api/worktrees/:id/git/log', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/log'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(400);
@@ -196,7 +196,7 @@ describe('GET /api/worktrees/:id/git/log', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/log'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(504);
@@ -209,7 +209,7 @@ describe('GET /api/worktrees/:id/git/log', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/log'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(500);

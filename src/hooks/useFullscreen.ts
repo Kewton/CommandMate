@@ -43,7 +43,7 @@ export interface UseFullscreenReturn {
  */
 export interface UseFullscreenOptions {
   /** Reference to the element to make fullscreen */
-  elementRef?: RefObject<HTMLElement>;
+  elementRef?: RefObject<HTMLElement | null>;
   /** Callback when entering fullscreen */
   onEnter?: () => void;
   /** Callback when exiting fullscreen */

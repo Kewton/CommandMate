@@ -891,7 +891,9 @@ describe('FileTreeView', () => {
         render(<FileTreeView worktreeId="test-worktree" onNewFile={onNewFile} />);
 
         // Advance timers to allow component to load
-        await vi.runAllTimersAsync();
+        await act(async () => {
+          await vi.runAllTimersAsync();
+        });
 
         const fileItem = screen.getByTestId('tree-item-package.json');
 
@@ -899,7 +901,9 @@ describe('FileTreeView', () => {
         fireEvent.touchStart(fileItem, createTouchEventInit(100, 200));
 
         // Advance time by 500ms to trigger long press
-        await vi.advanceTimersByTimeAsync(500);
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(500);
+        });
 
         // Context menu should open
         expect(screen.queryByRole('menu')).toBeInTheDocument();
@@ -924,7 +928,9 @@ describe('FileTreeView', () => {
 
         render(<FileTreeView worktreeId="test-worktree" onNewFile={onNewFile} />);
 
-        await vi.runAllTimersAsync();
+        await act(async () => {
+          await vi.runAllTimersAsync();
+        });
 
         const fileItem = screen.getByTestId('tree-item-package.json');
 
@@ -935,7 +941,9 @@ describe('FileTreeView', () => {
         fireEvent.touchMove(fileItem, createTouchEventInit(115, 100));
 
         // Wait for would-be long press delay
-        vi.advanceTimersByTime(500);
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(500);
+        });
 
         // Context menu should NOT open
         expect(screen.queryByRole('menu')).not.toBeInTheDocument();
@@ -960,7 +968,9 @@ describe('FileTreeView', () => {
 
         render(<FileTreeView worktreeId="test-worktree" onNewFile={onNewFile} />);
 
-        await vi.runAllTimersAsync();
+        await act(async () => {
+          await vi.runAllTimersAsync();
+        });
 
         const fileItem = screen.getByTestId('tree-item-package.json');
 
@@ -971,7 +981,9 @@ describe('FileTreeView', () => {
         fireEvent.touchCancel(fileItem);
 
         // Wait for would-be long press delay
-        vi.advanceTimersByTime(500);
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(500);
+        });
 
         // Context menu should NOT open
         expect(screen.queryByRole('menu')).not.toBeInTheDocument();
@@ -996,7 +1008,9 @@ describe('FileTreeView', () => {
 
         render(<FileTreeView worktreeId="test-worktree" onNewFile={onNewFile} />);
 
-        await vi.runAllTimersAsync();
+        await act(async () => {
+          await vi.runAllTimersAsync();
+        });
 
         const fileItem = screen.getByTestId('tree-item-package.json');
 
@@ -1007,7 +1021,9 @@ describe('FileTreeView', () => {
         fireEvent.touchEnd(fileItem);
 
         // Wait for would-be long press delay
-        vi.advanceTimersByTime(500);
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(500);
+        });
 
         // Context menu should NOT open (short tap should select file, not open menu)
         expect(screen.queryByRole('menu')).not.toBeInTheDocument();

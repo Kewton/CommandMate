@@ -108,7 +108,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'test.md'), '# Old Content');
 
       const request = createRequest('PUT', 'test.md', { content: '# New Content' });
-      const params = { params: { id: 'test-worktree', path: ['test.md'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['test.md'] }) };
 
       const response = await PUT(request, params);
       const data = await response.json();
@@ -120,7 +120,7 @@ describe('File Operations API', () => {
 
     it('should return 404 for non-existent file', async () => {
       const request = createRequest('PUT', 'nonexistent.md', { content: 'content' });
-      const params = { params: { id: 'test-worktree', path: ['nonexistent.md'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['nonexistent.md'] }) };
 
       const response = await PUT(request, params);
       const data = await response.json();
@@ -134,7 +134,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'script.js'), 'console.log("test")');
 
       const request = createRequest('PUT', 'script.js', { content: 'new code' });
-      const params = { params: { id: 'test-worktree', path: ['script.js'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['script.js'] }) };
 
       const response = await PUT(request, params);
       const data = await response.json();
@@ -146,7 +146,7 @@ describe('File Operations API', () => {
 
     it('should reject path traversal', async () => {
       const request = createRequest('PUT', '../etc/passwd', { content: 'malicious' });
-      const params = { params: { id: 'test-worktree', path: ['..', 'etc', 'passwd'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['..', 'etc', 'passwd'] }) };
 
       const response = await PUT(request, params);
       const data = await response.json();
@@ -160,7 +160,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'test.md'), '# Test');
 
       const request = createRequest('PUT', 'test.md', { content: 'Hello\x00World' });
-      const params = { params: { id: 'test-worktree', path: ['test.md'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['test.md'] }) };
 
       const response = await PUT(request, params);
       const data = await response.json();
@@ -174,7 +174,7 @@ describe('File Operations API', () => {
   describe('POST /api/worktrees/:id/files/:path', () => {
     it('should create new file', async () => {
       const request = createRequest('POST', 'new-file.md', { type: 'file', content: '# New File' });
-      const params = { params: { id: 'test-worktree', path: ['new-file.md'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['new-file.md'] }) };
 
       const response = await POST(request, params);
       const data = await response.json();
@@ -187,7 +187,7 @@ describe('File Operations API', () => {
 
     it('should create new directory', async () => {
       const request = createRequest('POST', 'new-dir', { type: 'directory' });
-      const params = { params: { id: 'test-worktree', path: ['new-dir'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['new-dir'] }) };
 
       const response = await POST(request, params);
       const data = await response.json();
@@ -201,7 +201,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'existing.md'), 'content');
 
       const request = createRequest('POST', 'existing.md', { type: 'file', content: 'new' });
-      const params = { params: { id: 'test-worktree', path: ['existing.md'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['existing.md'] }) };
 
       const response = await POST(request, params);
       const data = await response.json();
@@ -213,7 +213,7 @@ describe('File Operations API', () => {
 
     it('should reject invalid type', async () => {
       const request = createRequest('POST', 'test.md', { type: 'invalid' });
-      const params = { params: { id: 'test-worktree', path: ['test.md'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['test.md'] }) };
 
       const response = await POST(request, params);
       const data = await response.json();
@@ -229,7 +229,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'to-delete.md'), 'content');
 
       const request = createRequest('DELETE', 'to-delete.md');
-      const params = { params: { id: 'test-worktree', path: ['to-delete.md'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['to-delete.md'] }) };
 
       const response = await DELETE(request, params);
       const data = await response.json();
@@ -244,7 +244,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'non-empty', 'file.txt'), 'content');
 
       const request = createRequest('DELETE', 'non-empty');
-      const params = { params: { id: 'test-worktree', path: ['non-empty'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['non-empty'] }) };
 
       const response = await DELETE(request, params);
       const data = await response.json();
@@ -259,7 +259,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'non-empty', 'file.txt'), 'content');
 
       const request = createRequest('DELETE', 'non-empty', undefined, { recursive: 'true' });
-      const params = { params: { id: 'test-worktree', path: ['non-empty'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['non-empty'] }) };
 
       const response = await DELETE(request, params);
       const data = await response.json();
@@ -273,7 +273,7 @@ describe('File Operations API', () => {
       mkdirSync(join(testDir, '.git'));
 
       const request = createRequest('DELETE', '.git', undefined, { recursive: 'true' });
-      const params = { params: { id: 'test-worktree', path: ['.git'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['.git'] }) };
 
       const response = await DELETE(request, params);
       const data = await response.json();
@@ -285,7 +285,7 @@ describe('File Operations API', () => {
 
     it('should return 404 for non-existent file', async () => {
       const request = createRequest('DELETE', 'nonexistent.md');
-      const params = { params: { id: 'test-worktree', path: ['nonexistent.md'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['nonexistent.md'] }) };
 
       const response = await DELETE(request, params);
       const data = await response.json();
@@ -300,7 +300,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'old-name.md'), 'content');
 
       const request = createRequest('PATCH', 'old-name.md', { action: 'rename', newName: 'new-name.md' });
-      const params = { params: { id: 'test-worktree', path: ['old-name.md'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['old-name.md'] }) };
 
       const response = await PATCH(request, params);
       const data = await response.json();
@@ -316,7 +316,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'file.md'), 'content');
 
       const request = createRequest('PATCH', 'file.md', { action: 'invalid', newName: 'new.md' });
-      const params = { params: { id: 'test-worktree', path: ['file.md'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['file.md'] }) };
 
       const response = await PATCH(request, params);
       const data = await response.json();
@@ -330,7 +330,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'file.md'), 'content');
 
       const request = createRequest('PATCH', 'file.md', { action: 'rename', newName: 'path/to/file.md' });
-      const params = { params: { id: 'test-worktree', path: ['file.md'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['file.md'] }) };
 
       const response = await PATCH(request, params);
       const data = await response.json();
@@ -344,7 +344,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'file.md'), 'content');
 
       const request = createRequest('PATCH', 'file.md', { action: 'rename', newName: '../outside.md' });
-      const params = { params: { id: 'test-worktree', path: ['file.md'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['file.md'] }) };
 
       const response = await PATCH(request, params);
       const data = await response.json();
@@ -359,7 +359,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'target.md'), 'target');
 
       const request = createRequest('PATCH', 'source.md', { action: 'rename', newName: 'target.md' });
-      const params = { params: { id: 'test-worktree', path: ['source.md'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['source.md'] }) };
 
       const response = await PATCH(request, params);
       const data = await response.json();
@@ -375,7 +375,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'test.md'), '# Test Content');
 
       const request = createRequest('GET', 'test.md');
-      const params = { params: { id: 'test-worktree', path: ['test.md'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['test.md'] }) };
 
       const response = await GET(request, params);
       const data = await response.json();
@@ -387,7 +387,7 @@ describe('File Operations API', () => {
 
     it('should reject path traversal', async () => {
       const request = createRequest('GET', '../etc/passwd');
-      const params = { params: { id: 'test-worktree', path: ['..', 'etc', 'passwd'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['..', 'etc', 'passwd'] }) };
 
       const response = await GET(request, params);
       const data = await response.json();
@@ -411,7 +411,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'test-video.mp4'), mp4Header);
 
       const request = createRequest('GET', 'test-video.mp4');
-      const params = { params: { id: 'test-worktree', path: ['test-video.mp4'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['test-video.mp4'] }) };
 
       const response = await GET(request, params);
       const data = await response.json();
@@ -425,7 +425,7 @@ describe('File Operations API', () => {
 
     it('should return 404 for non-existent video file', async () => {
       const request = createRequest('GET', 'nonexistent.mp4');
-      const params = { params: { id: 'test-worktree', path: ['nonexistent.mp4'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['nonexistent.mp4'] }) };
 
       const response = await GET(request, params);
       const data = await response.json();
@@ -439,7 +439,7 @@ describe('File Operations API', () => {
   describe('Worktree not found', () => {
     it('should return 404 for non-existent worktree', async () => {
       const request = createRequest('GET', 'test.md');
-      const params = { params: { id: 'nonexistent', path: ['test.md'] } };
+      const params = { params: Promise.resolve({ id: 'nonexistent', path: ['test.md'] }) };
 
       const response = await GET(request, params);
       const data = await response.json();
@@ -462,7 +462,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'sample.log'), makeNumberedLines(100));
 
       const request = createRequest('GET', 'sample.log', undefined, { startLine: '10', endLine: '12' });
-      const params = { params: { id: 'test-worktree', path: ['sample.log'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['sample.log'] }) };
 
       const response = await GET(request, params);
       const data = await response.json();
@@ -480,7 +480,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'sample.log'), makeNumberedLines(10));
 
       const request = createRequest('GET', 'sample.log', undefined, { startLine: '0', endLine: '5' });
-      const params = { params: { id: 'test-worktree', path: ['sample.log'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['sample.log'] }) };
 
       const response = await GET(request, params);
       const data = await response.json();
@@ -494,7 +494,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'sample.log'), makeNumberedLines(10));
 
       const request = createRequest('GET', 'sample.log', undefined, { startLine: 'abc', endLine: '5' });
-      const params = { params: { id: 'test-worktree', path: ['sample.log'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['sample.log'] }) };
 
       const response = await GET(request, params);
       const data = await response.json();
@@ -507,7 +507,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'short.log'), makeNumberedLines(5));
 
       const request = createRequest('GET', 'short.log', undefined, { startLine: '3', endLine: '99' });
-      const params = { params: { id: 'test-worktree', path: ['short.log'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['short.log'] }) };
 
       const response = await GET(request, params);
       const data = await response.json();
@@ -529,7 +529,7 @@ describe('File Operations API', () => {
           'If-Modified-Since': new Date(Date.now() + 1000 * 3600 * 24 * 365).toUTCString(),
         },
       });
-      const params = { params: { id: 'test-worktree', path: ['always.log'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['always.log'] }) };
 
       const response = await GET(request, params);
       expect(response.status).toBe(200);
@@ -543,7 +543,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'big.md'), large);
 
       const request = createRequest('GET', 'big.md');
-      const params = { params: { id: 'test-worktree', path: ['big.md'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['big.md'] }) };
 
       const response = await GET(request, params);
       const data = await response.json();
@@ -557,7 +557,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'exact.md'), exact);
 
       const request = createRequest('GET', 'exact.md');
-      const params = { params: { id: 'test-worktree', path: ['exact.md'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['exact.md'] }) };
 
       const response = await GET(request, params);
       expect(response.status).toBe(200);
@@ -568,7 +568,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'big.yaml'), large);
 
       const request = createRequest('GET', 'big.yaml');
-      const params = { params: { id: 'test-worktree', path: ['big.yaml'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['big.yaml'] }) };
 
       const response = await GET(request, params);
       const data = await response.json();
@@ -582,7 +582,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'big.yml'), large);
 
       const request = createRequest('GET', 'big.yml');
-      const params = { params: { id: 'test-worktree', path: ['big.yml'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['big.yml'] }) };
 
       const response = await GET(request, params);
       const data = await response.json();
@@ -596,7 +596,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'mid.html'), fourMb);
 
       const request = createRequest('GET', 'mid.html');
-      const params = { params: { id: 'test-worktree', path: ['mid.html'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['mid.html'] }) };
 
       const response = await GET(request, params);
       expect(response.status).toBe(200);
@@ -607,7 +607,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'big.html'), sixMb);
 
       const request = createRequest('GET', 'big.html');
-      const params = { params: { id: 'test-worktree', path: ['big.html'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['big.html'] }) };
 
       const response = await GET(request, params);
       const data = await response.json();
@@ -622,7 +622,7 @@ describe('File Operations API', () => {
       writeFileSync(join(testDir, 'large.log'), threeMb);
 
       const request = createRequest('GET', 'large.log');
-      const params = { params: { id: 'test-worktree', path: ['large.log'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['large.log'] }) };
 
       const response = await GET(request, params);
       expect(response.status).toBe(200);

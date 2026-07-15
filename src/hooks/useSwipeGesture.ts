@@ -91,7 +91,7 @@ export interface UseSwipeGestureOptions {
  */
 export interface UseSwipeGestureReturn {
   /** Ref to attach to the element */
-  ref: React.RefObject<HTMLElement>;
+  ref: React.RefObject<HTMLElement | null>;
   /** Whether user is currently swiping */
   isSwiping: boolean;
   /** Detected swipe direction (null if no swipe detected) */

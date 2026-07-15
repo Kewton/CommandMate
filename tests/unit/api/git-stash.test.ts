@@ -54,20 +54,20 @@ describe('GET /api/worktrees/:id/git/stash (Issue #782)', () => {
 
   it('returns 400 for an invalid worktree ID', async () => {
     (isValidWorktreeId as ReturnType<typeof vi.fn>).mockReturnValue(false);
-    const response = await GET(createRequest(), { params: { id: 'bad!' } });
+    const response = await GET(createRequest(), { params: Promise.resolve({ id: 'bad!' }) });
     expect(response.status).toBe(400);
   });
 
   it('returns 404 when the worktree is not found', async () => {
     (getWorktreeById as ReturnType<typeof vi.fn>).mockReturnValue(null);
-    const response = await GET(createRequest(), { params: { id: 'test-id' } });
+    const response = await GET(createRequest(), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(404);
   });
 
   it('returns 200 with the stash list on success', async () => {
     const stashes = [{ index: 0, message: 'WIP on main: x', branch: 'main', date: '2026-01-01', sha: 'abc' }];
     (getStashList as ReturnType<typeof vi.fn>).mockResolvedValue(stashes);
-    const response = await GET(createRequest(), { params: { id: 'test-id' } });
+    const response = await GET(createRequest(), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data.stashes).toEqual(stashes);
@@ -75,7 +75,7 @@ describe('GET /api/worktrees/:id/git/stash (Issue #782)', () => {
   });
 
   it('returns 200 with an empty list (best-effort degrade)', async () => {
-    const response = await GET(createRequest(), { params: { id: 'test-id' } });
+    const response = await GET(createRequest(), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data.stashes).toEqual([]);

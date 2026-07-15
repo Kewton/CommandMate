@@ -117,7 +117,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
         }),
       });
 
-      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: { id: 'claude-test' } });
+      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'claude-test' }) });
 
       expect(response.status).toBe(200);
 
@@ -172,7 +172,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
         }),
       });
 
-      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: { id: 'codex-test' } });
+      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'codex-test' }) });
 
       expect(response.status).toBe(200);
 
@@ -222,7 +222,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
         }),
       });
 
-      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: { id: 'gemini-test' } });
+      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'gemini-test' }) });
 
       expect(response.status).toBe(200);
 
@@ -244,7 +244,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
         }),
       });
 
-      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: { id: 'nonexistent' } });
+      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'nonexistent' }) });
 
       expect(response.status).toBe(404);
     });

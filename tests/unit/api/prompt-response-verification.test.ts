@@ -161,7 +161,7 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
     });
 
     const request = createRequest('test-wt', '1');
-    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
     const data = await response.json();
 
     expect(data.success).toBe(true);
@@ -188,7 +188,7 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
     });
 
     const request = createRequest('test-wt', '1');
-    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
     const data = await response.json();
 
     expect(data.success).toBe(false);
@@ -204,7 +204,7 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
     vi.mocked(captureSessionOutputFresh).mockRejectedValue(new Error('tmux capture failed'));
 
     const request = createRequest('test-wt', '1');
-    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
     const data = await response.json();
 
     // Should still send keys (don't block manual responses)
@@ -214,7 +214,7 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
 
   it('should return 404 for non-existent worktree', async () => {
     const request = createRequest('nonexistent', '1');
-    const response = await promptResponse(request, { params: { id: 'nonexistent' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'nonexistent' }) });
 
     expect(response.status).toBe(404);
   });
@@ -226,7 +226,7 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
       body: JSON.stringify({}),
     }) as unknown as NextRequest;
 
-    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
 
     expect(response.status).toBe(400);
   });
@@ -235,7 +235,7 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
     const { sendKeys } = await import('@/lib/tmux/tmux');
 
     const request = createRequest('../invalid', '1');
-    const response = await promptResponse(request, { params: { id: '../invalid' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: '../invalid' }) });
     const data = await response.json();
 
     expect(response.status).toBe(400);
@@ -247,7 +247,7 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
     const { sendKeys } = await import('@/lib/tmux/tmux');
 
     const request = createRequest('test-wt', { answer: '1', cliTool: 'malicious-tool' });
-    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
     const data = await response.json();
 
     expect(response.status).toBe(400);
@@ -292,7 +292,7 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
       promptType: 'multiple_choice',
       defaultOptionNumber: 1,
     });
-    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
     const data = await response.json();
 
     expect(data.success).toBe(true);
@@ -317,7 +317,7 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
       promptType: 'multiple_choice',
       // defaultOptionNumber intentionally omitted -> should fall back to 1
     });
-    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
     const data = await response.json();
 
     expect(data.success).toBe(true);
@@ -338,7 +338,7 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
       answer: 'y',
       promptType: 'yes_no',
     });
-    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
     const data = await response.json();
 
     expect(data.success).toBe(true);
@@ -355,7 +355,7 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
 
     // Old client: no promptType or defaultOptionNumber fields
     const request = createRequest('test-wt', '1');
-    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
     const data = await response.json();
 
     expect(data.success).toBe(true);
@@ -391,7 +391,7 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
       promptType: 'multiple_choice',
       defaultOptionNumber: 1,
     });
-    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
     const data = await response.json();
 
     expect(data.success).toBe(true);
@@ -426,7 +426,7 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
       promptType: 'multiple_choice',
       defaultOptionNumber: 1,
     });
-    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
     const data = await response.json();
 
     expect(data.success).toBe(true);
@@ -458,7 +458,7 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
       promptType: 'multiple_choice',
       defaultOptionNumber: 2,
     });
-    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
     const data = await response.json();
 
     expect(data.success).toBe(true);
@@ -494,7 +494,7 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
 
     // Old client: no promptType in body
     const request = createRequest('test-wt', '2');
-    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
     const data = await response.json();
 
     expect(data.success).toBe(true);
@@ -533,7 +533,7 @@ describe('POST /api/worktrees/:id/prompt-response - Error handling and edge case
     mockIsRunning.mockResolvedValueOnce(false);
 
     const request = createRequest('test-wt', 'y');
-    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
     const data = await response.json();
 
     expect(response.status).toBe(400);
@@ -562,7 +562,7 @@ describe('POST /api/worktrees/:id/prompt-response - Error handling and edge case
     vi.mocked(sendKeys).mockRejectedValue(new Error('tmux send-keys failed'));
 
     const request = createRequest('test-wt', 'y');
-    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
     const data = await response.json();
 
     expect(response.status).toBe(500);
@@ -594,7 +594,7 @@ describe('POST /api/worktrees/:id/prompt-response - Error handling and edge case
     vi.mocked(sendSpecialKeys).mockRejectedValue(new Error('tmux special-keys failed'));
 
     const request = createRequest('test-wt', '2');
-    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
     const data = await response.json();
 
     expect(response.status).toBe(500);
@@ -622,7 +622,7 @@ describe('POST /api/worktrees/:id/prompt-response - Error handling and edge case
     vi.mocked(sendKeys).mockRejectedValue('unexpected string error');
 
     const request = createRequest('test-wt', 'y');
-    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
     const data = await response.json();
 
     expect(response.status).toBe(500);
@@ -637,7 +637,7 @@ describe('POST /api/worktrees/:id/prompt-response - Error handling and edge case
       body: 'this is not valid JSON',
     }) as unknown as NextRequest;
 
-    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
 
     expect(response.status).toBe(500);
   });
@@ -697,7 +697,7 @@ describe('POST /api/worktrees/:id/prompt-response - Multi-select (checkbox) prom
 
     // Select option 2: offset=2-1=1 Down, Space, then 3-2+1=2 Downs to "Next", Enter
     const request = createRequest('test-wt', '2');
-    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
     const data = await response.json();
 
     expect(data.success).toBe(true);
@@ -732,7 +732,7 @@ describe('POST /api/worktrees/:id/prompt-response - Multi-select (checkbox) prom
 
     // Select option 1: offset=1-3=-2 -> 2 Up, Space, then 3-1+1=3 Downs to "Next", Enter
     const request = createRequest('test-wt', '1');
-    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
     const data = await response.json();
 
     expect(data.success).toBe(true);
@@ -762,7 +762,7 @@ describe('POST /api/worktrees/:id/prompt-response - Multi-select (checkbox) prom
 
     // Select option 1 (default): offset=0 -> no navigation, Space, 2-1+1=2 Downs, Enter
     const request = createRequest('test-wt', '1');
-    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
     const data = await response.json();
 
     expect(data.success).toBe(true);

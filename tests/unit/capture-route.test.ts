@@ -48,7 +48,7 @@ function createRequest(body: Record<string, unknown>): NextRequest {
   });
 }
 
-const defaultParams = { params: { id: 'wt-1' } };
+const defaultParams = { params: Promise.resolve({ id: 'wt-1' }) };
 
 describe('POST /api/worktrees/[id]/capture', () => {
   beforeEach(() => {

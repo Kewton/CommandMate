@@ -70,7 +70,7 @@ describe('GET /api/worktrees/:id/git/working-diff (Issue #780)', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/bad!/git/working-diff?file=a.ts&mode=unstaged'),
-      { params: { id: 'bad!' } }
+      { params: Promise.resolve({ id: 'bad!' }) }
     );
 
     expect(response.status).toBe(400);
@@ -81,7 +81,7 @@ describe('GET /api/worktrees/:id/git/working-diff (Issue #780)', () => {
   it('should return 400 for missing file path', async () => {
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/working-diff?mode=unstaged'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(400);
@@ -92,7 +92,7 @@ describe('GET /api/worktrees/:id/git/working-diff (Issue #780)', () => {
   it('should return 400 for an invalid mode', async () => {
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/working-diff?file=a.ts&mode=bogus'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(400);
@@ -105,7 +105,7 @@ describe('GET /api/worktrees/:id/git/working-diff (Issue #780)', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/working-diff?file=../../etc/passwd&mode=unstaged'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(400);
@@ -118,7 +118,7 @@ describe('GET /api/worktrees/:id/git/working-diff (Issue #780)', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/working-diff?file=a.ts&mode=unstaged'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(404);
@@ -131,7 +131,7 @@ describe('GET /api/worktrees/:id/git/working-diff (Issue #780)', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/working-diff?file=src/a.ts&mode=unstaged'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(200);
@@ -143,7 +143,7 @@ describe('GET /api/worktrees/:id/git/working-diff (Issue #780)', () => {
   it('should default to unstaged mode when mode is omitted', async () => {
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/working-diff?file=src/a.ts'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(200);
@@ -153,7 +153,7 @@ describe('GET /api/worktrees/:id/git/working-diff (Issue #780)', () => {
   it('should pass the staged mode through to getWorkingTreeDiff', async () => {
     await GET(
       createRequest('/api/worktrees/test-id/git/working-diff?file=src/a.ts&mode=staged'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(getWorkingTreeDiff).toHaveBeenCalledWith('/path/to/worktree', 'src/a.ts', 'staged');
@@ -162,7 +162,7 @@ describe('GET /api/worktrees/:id/git/working-diff (Issue #780)', () => {
   it('should pass the untracked mode through to getWorkingTreeDiff', async () => {
     await GET(
       createRequest('/api/worktrees/test-id/git/working-diff?file=src/new.ts&mode=untracked'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(getWorkingTreeDiff).toHaveBeenCalledWith('/path/to/worktree', 'src/new.ts', 'untracked');
@@ -173,7 +173,7 @@ describe('GET /api/worktrees/:id/git/working-diff (Issue #780)', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/working-diff?file=src/clean.ts&mode=unstaged'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(200);
@@ -184,7 +184,7 @@ describe('GET /api/worktrees/:id/git/working-diff (Issue #780)', () => {
   it('should call isPathSafe with the file path and worktree path', async () => {
     await GET(
       createRequest('/api/worktrees/test-id/git/working-diff?file=src/a.ts&mode=unstaged'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(isPathSafe).toHaveBeenCalledWith('src/a.ts', '/path/to/worktree');
@@ -195,7 +195,7 @@ describe('GET /api/worktrees/:id/git/working-diff (Issue #780)', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/working-diff?file=a.ts&mode=unstaged'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(400);
@@ -206,7 +206,7 @@ describe('GET /api/worktrees/:id/git/working-diff (Issue #780)', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/working-diff?file=a.ts&mode=unstaged'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(504);
@@ -217,7 +217,7 @@ describe('GET /api/worktrees/:id/git/working-diff (Issue #780)', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/working-diff?file=a.ts&mode=unstaged'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(500);

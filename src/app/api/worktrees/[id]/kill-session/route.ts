@@ -22,16 +22,17 @@ const logger = createLogger('api/kill-session');
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const db = getDbInstance();
 
     // Check if worktree exists
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${params.id}' not found` },
+        { error: `Worktree '${id}' not found` },
         { status: 404 }
       );
     }
@@ -68,7 +69,7 @@ export async function POST(
       // Single-instance kill: resolve the backing CLI tool from (in priority order)
       // the explicit cliTool param, the registered instance, or the instance id
       // itself when it names a primary instance.
-      const known = getAgentInstance(db, params.id, instanceParam);
+      const known = getAgentInstance(db, id, instanceParam);
       const resolvedTool: CLIToolType | null =
         (targetCliTool ?? null)
         ?? (known ? known.cliTool : null)
@@ -94,7 +95,7 @@ export async function POST(
       }
       // Include any additional registered instances of the targeted tools so
       // their sessions are not orphaned.
-      for (const ai of getAgentInstances(db, params.id)) {
+      for (const ai of getAgentInstances(db, id)) {
         if (toolsToKill.includes(ai.cliTool)) {
           const key = `${ai.cliTool}:${ai.id}`;
           if (!seen.has(key)) {
@@ -112,11 +113,11 @@ export async function POST(
     // Kill targeted sessions
     for (const { cliToolId, instanceId } of targets) {
       const cliTool = manager.getTool(cliToolId);
-      const isRunning = await cliTool.isRunning(params.id, instanceId);
+      const isRunning = await cliTool.isRunning(id, instanceId);
 
       if (isRunning) {
         anySessionRunning = true;
-        const sessionName = cliTool.getSessionName(params.id, instanceId);
+        const sessionName = cliTool.getSessionName(id, instanceId);
         const killed = await killSession(sessionName);
 
         if (killed) {
@@ -125,10 +126,10 @@ export async function POST(
         }
 
         // Stop poller if running (uses CLIToolManager.stopPollers for DIP compliance - MF1-001)
-        manager.stopPollers(params.id, cliToolId, instanceId);
+        manager.stopPollers(id, cliToolId, instanceId);
 
         // Clean up session state for this instance
-        deleteSessionState(db, params.id, cliToolId, instanceId);
+        deleteSessionState(db, id, cliToolId, instanceId);
       }
     }
 
@@ -145,26 +146,26 @@ export async function POST(
     // Archive messages based on scope (Issue #168: logical archive, archived=1).
     if (instanceParam) {
       // Issue #868: archive only the targeted instance's messages.
-      deleteMessagesByInstance(db, params.id, instanceParam);
+      deleteMessagesByInstance(db, id, instanceParam);
     } else if (targetCliTool) {
       // Issue #4: Archive only messages for the specific CLI tool
-      deleteMessagesByCliTool(db, params.id, targetCliTool);
+      deleteMessagesByCliTool(db, id, targetCliTool);
     } else {
       // Archive all messages (backward compatible)
-      deleteAllMessages(db, params.id);
+      deleteAllMessages(db, id);
     }
 
     // Issue #168 / #1171: recompute last_user_message from the remaining active
     // messages after archiving. A targeted (instance / CLI) kill only archives
     // that scope's messages, so other instances' un-archived user messages must
     // keep driving the sidebar metadata; only when none remain is it cleared.
-    recomputeLastUserMessage(db, params.id);
+    recomputeLastUserMessage(db, id);
 
     // Broadcast session status change via WebSocket
     // Issue #4: Include cliTool in payload for targeted updates
-    broadcast(params.id, {
+    broadcast(id, {
       type: 'session_status_changed',
-      worktreeId: params.id,
+      worktreeId: id,
       isRunning: false,
       messagesCleared: true,
       cliTool: targetCliTool || null,

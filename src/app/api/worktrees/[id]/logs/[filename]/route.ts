@@ -17,26 +17,24 @@ const logger = createLogger('api/logs');
 
 export const GET = withLogging<{ id: string; filename: string }>(async (
   request: NextRequest,
-  { params }: { params: { id: string; filename: string } | Promise<{ id: string; filename: string }> }
+  { params }: { params: Promise<{ id: string; filename: string }> }
 ) => {
   try {
-    const resolvedParams = await Promise.resolve(params);
+    const { id, filename } = await params;
     const db = getDbInstance();
 
     // Check if worktree exists
-    const worktree = getWorktreeById(db, resolvedParams.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${resolvedParams.id}' not found` },
+        { error: `Worktree '${id}' not found` },
         { status: 404 }
       );
     }
 
     // Validate filename to prevent path traversal attacks
-    const filename = resolvedParams.filename;
-
     // Only allow .md files and ensure it starts with the worktree ID
-    if (!filename.endsWith('.md') || !filename.startsWith(`${resolvedParams.id}-`)) {
+    if (!filename.endsWith('.md') || !filename.startsWith(`${id}-`)) {
       return NextResponse.json(
         { error: 'Invalid filename' },
         { status: 400 }

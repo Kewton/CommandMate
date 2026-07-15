@@ -77,7 +77,7 @@ describe('GET /api/worktrees/:id/memos', () => {
     const { GET } = await import('@/app/api/worktrees/[id]/memos/route');
 
     const request = new Request('http://localhost:3000/api/worktrees/test-worktree/memos');
-    const params = { params: { id: 'test-worktree' } };
+    const params = { params: Promise.resolve({ id: 'test-worktree' }) };
     const response = await GET(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(200);
@@ -96,7 +96,7 @@ describe('GET /api/worktrees/:id/memos', () => {
     const { GET } = await import('@/app/api/worktrees/[id]/memos/route');
 
     const request = new Request('http://localhost:3000/api/worktrees/test-worktree/memos');
-    const params = { params: { id: 'test-worktree' } };
+    const params = { params: Promise.resolve({ id: 'test-worktree' }) };
     const response = await GET(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(200);
@@ -115,7 +115,7 @@ describe('GET /api/worktrees/:id/memos', () => {
     const { GET } = await import('@/app/api/worktrees/[id]/memos/route');
 
     const request = new Request('http://localhost:3000/api/worktrees/nonexistent/memos');
-    const params = { params: { id: 'nonexistent' } };
+    const params = { params: Promise.resolve({ id: 'nonexistent' }) };
     const response = await GET(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(404);
@@ -131,7 +131,7 @@ describe('GET /api/worktrees/:id/memos', () => {
     const { GET } = await import('@/app/api/worktrees/[id]/memos/route');
 
     const request = new Request('http://localhost:3000/api/worktrees/test-worktree/memos');
-    const params = { params: { id: 'test-worktree' } };
+    const params = { params: Promise.resolve({ id: 'test-worktree' }) };
     const response = await GET(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(500);
@@ -176,7 +176,7 @@ describe('POST /api/worktrees/:id/memos', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     });
-    const params = { params: { id: 'test-worktree' } };
+    const params = { params: Promise.resolve({ id: 'test-worktree' }) };
     const response = await POST(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(201);
@@ -201,7 +201,7 @@ describe('POST /api/worktrees/:id/memos', () => {
         content: 'My custom content',
       }),
     });
-    const params = { params: { id: 'test-worktree' } };
+    const params = { params: Promise.resolve({ id: 'test-worktree' }) };
     const response = await POST(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(201);
@@ -223,7 +223,7 @@ describe('POST /api/worktrees/:id/memos', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: 'Memo 2' }),
     });
-    const params = { params: { id: 'test-worktree' } };
+    const params = { params: Promise.resolve({ id: 'test-worktree' }) };
     const response = await POST(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(201);
@@ -245,7 +245,7 @@ describe('POST /api/worktrees/:id/memos', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: 'Memo 21' }),
     });
-    const params = { params: { id: 'test-worktree' } };
+    const params = { params: Promise.resolve({ id: 'test-worktree' }) };
     const response = await POST(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(400);
@@ -263,7 +263,7 @@ describe('POST /api/worktrees/:id/memos', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     });
-    const params = { params: { id: 'nonexistent' } };
+    const params = { params: Promise.resolve({ id: 'nonexistent' }) };
     const response = await POST(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(404);
@@ -282,7 +282,7 @@ describe('POST /api/worktrees/:id/memos', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: longTitle }),
     });
-    const params = { params: { id: 'test-worktree' } };
+    const params = { params: Promise.resolve({ id: 'test-worktree' }) };
     const response = await POST(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(400);
@@ -301,7 +301,7 @@ describe('POST /api/worktrees/:id/memos', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: longContent }),
     });
-    const params = { params: { id: 'test-worktree' } };
+    const params = { params: Promise.resolve({ id: 'test-worktree' }) };
     const response = await POST(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(400);
@@ -321,7 +321,7 @@ describe('POST /api/worktrees/:id/memos', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     });
-    const params = { params: { id: 'test-worktree' } };
+    const params = { params: Promise.resolve({ id: 'test-worktree' }) };
     const response = await POST(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(500);
@@ -375,7 +375,7 @@ describe('PUT /api/worktrees/:id/memos/:memoId', () => {
         body: JSON.stringify({ title: 'Updated Title' }),
       }
     );
-    const params = { params: { id: 'test-worktree', memoId: memo.id } };
+    const params = { params: Promise.resolve({ id: 'test-worktree', memoId: memo.id }) };
     const response = await PUT(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(200);
@@ -403,7 +403,7 @@ describe('PUT /api/worktrees/:id/memos/:memoId', () => {
         body: JSON.stringify({ content: 'Updated Content' }),
       }
     );
-    const params = { params: { id: 'test-worktree', memoId: memo.id } };
+    const params = { params: Promise.resolve({ id: 'test-worktree', memoId: memo.id }) };
     const response = await PUT(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(200);
@@ -430,7 +430,7 @@ describe('PUT /api/worktrees/:id/memos/:memoId', () => {
         body: JSON.stringify({ title: 'New Title', content: 'New Content' }),
       }
     );
-    const params = { params: { id: 'test-worktree', memoId: memo.id } };
+    const params = { params: Promise.resolve({ id: 'test-worktree', memoId: memo.id }) };
     const response = await PUT(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(200);
@@ -451,7 +451,7 @@ describe('PUT /api/worktrees/:id/memos/:memoId', () => {
         body: JSON.stringify({ title: 'Updated' }),
       }
     );
-    const params = { params: { id: 'test-worktree', memoId: 'nonexistent-memo-id' } };
+    const params = { params: Promise.resolve({ id: 'test-worktree', memoId: 'nonexistent-memo-id' }) };
     const response = await PUT(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(404);
@@ -472,7 +472,7 @@ describe('PUT /api/worktrees/:id/memos/:memoId', () => {
         body: JSON.stringify({ title: 'Updated' }),
       }
     );
-    const params = { params: { id: 'nonexistent', memoId: 'some-memo-id' } };
+    const params = { params: Promise.resolve({ id: 'nonexistent', memoId: 'some-memo-id' }) };
     const response = await PUT(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(404);
@@ -495,7 +495,7 @@ describe('PUT /api/worktrees/:id/memos/:memoId', () => {
         body: JSON.stringify({ title: longTitle }),
       }
     );
-    const params = { params: { id: 'test-worktree', memoId: memo.id } };
+    const params = { params: Promise.resolve({ id: 'test-worktree', memoId: memo.id }) };
     const response = await PUT(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(400);
@@ -517,7 +517,7 @@ describe('PUT /api/worktrees/:id/memos/:memoId', () => {
         body: JSON.stringify({ title: 'Updated' }),
       }
     );
-    const params = { params: { id: 'test-worktree', memoId: 'some-memo-id' } };
+    const params = { params: Promise.resolve({ id: 'test-worktree', memoId: 'some-memo-id' }) };
     const response = await PUT(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(500);
@@ -569,7 +569,7 @@ describe('PATCH /api/worktrees/:id/memos (reorder, Issue #944)', () => {
     const { PATCH } = await import('@/app/api/worktrees/[id]/memos/route');
 
     const request = makeRequest('test-worktree', { memoIds: [m2.id, m0.id, m1.id] });
-    const params = { params: { id: 'test-worktree' } };
+    const params = { params: Promise.resolve({ id: 'test-worktree' }) };
     const response = await PATCH(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(200);
@@ -586,7 +586,7 @@ describe('PATCH /api/worktrees/:id/memos (reorder, Issue #944)', () => {
     const { PATCH } = await import('@/app/api/worktrees/[id]/memos/route');
 
     const request = makeRequest('../etc/passwd', { memoIds: [] });
-    const params = { params: { id: '../etc/passwd' } };
+    const params = { params: Promise.resolve({ id: '../etc/passwd' }) };
     const response = await PATCH(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(400);
@@ -599,7 +599,7 @@ describe('PATCH /api/worktrees/:id/memos (reorder, Issue #944)', () => {
     const { PATCH } = await import('@/app/api/worktrees/[id]/memos/route');
 
     const request = makeRequest('nonexistent', { memoIds: ['some-id'] });
-    const params = { params: { id: 'nonexistent' } };
+    const params = { params: Promise.resolve({ id: 'nonexistent' }) };
     const response = await PATCH(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(404);
@@ -614,7 +614,7 @@ describe('PATCH /api/worktrees/:id/memos (reorder, Issue #944)', () => {
     const { PATCH } = await import('@/app/api/worktrees/[id]/memos/route');
 
     const request = makeRequest('test-worktree', { memoIds: 'a,b' });
-    const params = { params: { id: 'test-worktree' } };
+    const params = { params: Promise.resolve({ id: 'test-worktree' }) };
     const response = await PATCH(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(400);
@@ -629,7 +629,7 @@ describe('PATCH /api/worktrees/:id/memos (reorder, Issue #944)', () => {
     const { PATCH } = await import('@/app/api/worktrees/[id]/memos/route');
 
     const request = makeRequest('test-worktree', { memoIds: [m0.id] });
-    const params = { params: { id: 'test-worktree' } };
+    const params = { params: Promise.resolve({ id: 'test-worktree' }) };
     const response = await PATCH(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(400);
@@ -652,7 +652,7 @@ describe('PATCH /api/worktrees/:id/memos (reorder, Issue #944)', () => {
     const { PATCH } = await import('@/app/api/worktrees/[id]/memos/route');
 
     const request = makeRequest('test-worktree', { memoIds: [m0.id, foreign.id] });
-    const params = { params: { id: 'test-worktree' } };
+    const params = { params: Promise.resolve({ id: 'test-worktree' }) };
     const response = await PATCH(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(400);
@@ -670,7 +670,7 @@ describe('PATCH /api/worktrees/:id/memos (reorder, Issue #944)', () => {
     const { PATCH } = await import('@/app/api/worktrees/[id]/memos/route');
 
     const request = makeRequest('test-worktree', { memoIds: ['a'] });
-    const params = { params: { id: 'test-worktree' } };
+    const params = { params: Promise.resolve({ id: 'test-worktree' }) };
     const response = await PATCH(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(500);
@@ -715,7 +715,7 @@ describe('DELETE /api/worktrees/:id/memos/:memoId', () => {
       `http://localhost:3000/api/worktrees/test-worktree/memos/${memo.id}`,
       { method: 'DELETE' }
     );
-    const params = { params: { id: 'test-worktree', memoId: memo.id } };
+    const params = { params: Promise.resolve({ id: 'test-worktree', memoId: memo.id }) };
     const response = await DELETE(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(200);
@@ -738,7 +738,7 @@ describe('DELETE /api/worktrees/:id/memos/:memoId', () => {
       `http://localhost:3000/api/worktrees/test-worktree/memos/${memo0.id}`,
       { method: 'DELETE' }
     );
-    const params = { params: { id: 'test-worktree', memoId: memo0.id } };
+    const params = { params: Promise.resolve({ id: 'test-worktree', memoId: memo0.id }) };
     const response = await DELETE(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(200);
@@ -755,7 +755,7 @@ describe('DELETE /api/worktrees/:id/memos/:memoId', () => {
       'http://localhost:3000/api/worktrees/test-worktree/memos/nonexistent-memo-id',
       { method: 'DELETE' }
     );
-    const params = { params: { id: 'test-worktree', memoId: 'nonexistent-memo-id' } };
+    const params = { params: Promise.resolve({ id: 'test-worktree', memoId: 'nonexistent-memo-id' }) };
     const response = await DELETE(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(404);
@@ -772,7 +772,7 @@ describe('DELETE /api/worktrees/:id/memos/:memoId', () => {
       'http://localhost:3000/api/worktrees/nonexistent/memos/some-memo-id',
       { method: 'DELETE' }
     );
-    const params = { params: { id: 'nonexistent', memoId: 'some-memo-id' } };
+    const params = { params: Promise.resolve({ id: 'nonexistent', memoId: 'some-memo-id' }) };
     const response = await DELETE(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(404);
@@ -790,7 +790,7 @@ describe('DELETE /api/worktrees/:id/memos/:memoId', () => {
       'http://localhost:3000/api/worktrees/test-worktree/memos/some-memo-id',
       { method: 'DELETE' }
     );
-    const params = { params: { id: 'test-worktree', memoId: 'some-memo-id' } };
+    const params = { params: Promise.resolve({ id: 'test-worktree', memoId: 'some-memo-id' }) };
     const response = await DELETE(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(500);

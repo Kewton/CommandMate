@@ -71,7 +71,7 @@ function initializeMermaidWithValidation(): void {
 export function MermaidDiagram({
   code,
   id: providedId,
-}: MermaidDiagramProps): JSX.Element {
+}: MermaidDiagramProps): React.JSX.Element {
   const [svg, setSvg] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);

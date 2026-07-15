@@ -9,22 +9,23 @@ const logger = createLogger('api/schedules/active');
 
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
   void request;
 
   try {
-    if (!isValidWorktreeId(params.id)) {
+    if (!isValidWorktreeId(id)) {
       return NextResponse.json({ error: 'Invalid worktree ID format' }, { status: 400 });
     }
 
     const db = getDbInstance();
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
-      return NextResponse.json({ error: `Worktree '${params.id}' not found` }, { status: 404 });
+      return NextResponse.json({ error: `Worktree '${id}' not found` }, { status: 404 });
     }
 
-    const schedules = getActiveSchedulesForWorktree(params.id);
+    const schedules = getActiveSchedulesForWorktree(id);
     return NextResponse.json({ schedules }, { status: 200 });
   } catch (error) {
     logger.error('error-fetching-active-schedules:', {

@@ -73,18 +73,18 @@ describe('POST /api/worktrees/:id/git/reset (Issue #782)', () => {
 
   it('returns 404 when the worktree is not found', async () => {
     (getWorktreeById as ReturnType<typeof vi.fn>).mockReturnValue(null);
-    const response = await POST(createRequest({ target: 'HEAD', mode: 'soft' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ target: 'HEAD', mode: 'soft' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(404);
   });
 
   it('returns 400 invalid_mode for a bad mode', async () => {
-    const response = await POST(createRequest({ target: 'HEAD', mode: 'bogus' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ target: 'HEAD', mode: 'bogus' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(400);
     expect(gitReset).not.toHaveBeenCalled();
   });
 
   it('returns 400 invalid_target for a branch-name target', async () => {
-    const response = await POST(createRequest({ target: 'main', mode: 'soft' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ target: 'main', mode: 'soft' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(400);
     const data = await response.json();
     expect(data.reason).toBe('invalid_target');
@@ -92,23 +92,23 @@ describe('POST /api/worktrees/:id/git/reset (Issue #782)', () => {
   });
 
   it('returns 400 invalid_target for HEAD~1', async () => {
-    const response = await POST(createRequest({ target: 'HEAD~1', mode: 'soft' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ target: 'HEAD~1', mode: 'soft' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(400);
   });
 
   it('returns 400 invalid_target for an uppercase hash', async () => {
-    const response = await POST(createRequest({ target: 'ABC1234', mode: 'soft' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ target: 'ABC1234', mode: 'soft' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(400);
   });
 
   it('accepts the literal HEAD target (soft)', async () => {
-    const response = await POST(createRequest({ target: 'HEAD', mode: 'soft' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ target: 'HEAD', mode: 'soft' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(200);
     expect(gitReset).toHaveBeenCalledWith('/path/to/worktree', { target: 'HEAD', mode: 'soft' });
   });
 
   it('accepts a valid commit hash target (mixed) and returns the resulting status', async () => {
-    const response = await POST(createRequest({ target: 'deadbeef', mode: 'mixed' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ target: 'deadbeef', mode: 'mixed' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data.success).toBe(true);
@@ -117,7 +117,7 @@ describe('POST /api/worktrees/:id/git/reset (Issue #782)', () => {
   });
 
   it('returns 400 confirmation_mismatch when hard mode confirmBranch does not match', async () => {
-    const response = await POST(createRequest({ target: 'HEAD', mode: 'hard', confirmBranch: 'wrong' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ target: 'HEAD', mode: 'hard', confirmBranch: 'wrong' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(400);
     const data = await response.json();
     expect(data.reason).toBe('confirmation_mismatch');
@@ -125,21 +125,21 @@ describe('POST /api/worktrees/:id/git/reset (Issue #782)', () => {
   });
 
   it('returns 400 confirmation_mismatch when hard mode confirmBranch is missing', async () => {
-    const response = await POST(createRequest({ target: 'HEAD', mode: 'hard' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ target: 'HEAD', mode: 'hard' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(400);
     const data = await response.json();
     expect(data.reason).toBe('confirmation_mismatch');
   });
 
   it('allows hard mode when confirmBranch matches the current branch', async () => {
-    const response = await POST(createRequest({ target: 'HEAD', mode: 'hard', confirmBranch: 'feature/x' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ target: 'HEAD', mode: 'hard', confirmBranch: 'feature/x' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(200);
     expect(gitReset).toHaveBeenCalledWith('/path/to/worktree', { target: 'HEAD', mode: 'hard' });
   });
 
   it('returns 409 default_branch when gitReset rejects a hard reset on the default branch', async () => {
     (gitReset as ReturnType<typeof vi.fn>).mockRejectedValue(new GitResetDefaultBranchError('default'));
-    const response = await POST(createRequest({ target: 'HEAD', mode: 'hard', confirmBranch: 'feature/x' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ target: 'HEAD', mode: 'hard', confirmBranch: 'feature/x' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(409);
     const data = await response.json();
     expect(data.reason).toBe('default_branch');
@@ -147,13 +147,13 @@ describe('POST /api/worktrees/:id/git/reset (Issue #782)', () => {
 
   it('returns 409 when the index is locked', async () => {
     (gitReset as ReturnType<typeof vi.fn>).mockRejectedValue(new GitIndexLockedError('locked'));
-    const response = await POST(createRequest({ target: 'HEAD', mode: 'soft' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ target: 'HEAD', mode: 'soft' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(409);
   });
 
   it('returns 504 on timeout', async () => {
     (gitReset as ReturnType<typeof vi.fn>).mockRejectedValue(new GitTimeoutError('timeout'));
-    const response = await POST(createRequest({ target: 'HEAD', mode: 'soft' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ target: 'HEAD', mode: 'soft' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(504);
   });
 });
