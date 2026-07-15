@@ -225,15 +225,35 @@ commandmate status
 #### Update Deployment
 
 ```bash
-# Stop server
-commandmate stop
+# Check for updates (changes nothing)
+commandmate update --check
 
-# Upgrade
-npm install -g commandmate@latest
+# Update (stop -> npm install -g -> restart -> readiness check)
+commandmate update
 
-# Start server
-commandmate start --daemon
+# --yes is required in non-interactive environments (CI, automation)
+commandmate update --yes
 ```
+
+**Before updating**:
+
+- [ ] Stopped worktree servers (`--issue`) with `commandmate stop --issue <number>`. `npm install -g` replaces the package directory, so running worktree servers may crash
+- [ ] Checked whether the server was started with `--auth`, `--cert`, `--key`, `--allowed-ips`, `--trust-proxy` or `--port`. If so, it must be started again manually after the update, because the restart only uses `.env` (`--auth` generates a new token on every start and invalidates existing ones)
+- [ ] Backed up the database
+
+**After updating**:
+
+- [ ] Verified the version and configuration with `commandmate status`
+- [ ] Verified that auth, IP restrictions, and HTTPS are as intended (especially if the readiness check degraded to a warning)
+
+**Exit codes**: `0` updated/skipped, `2` non-interactive without `--yes`, `3` post-restart verification failed, `4` stop failed (nothing changed), `5` update failed (a rollback command is printed)
+
+> Manual steps if `commandmate update` is unavailable:
+> ```bash
+> commandmate stop
+> npm install -g commandmate@latest
+> commandmate start --daemon
+> ```
 
 ---
 

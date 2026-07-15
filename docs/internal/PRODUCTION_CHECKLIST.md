@@ -225,15 +225,35 @@ commandmate status
 #### 更新デプロイ
 
 ```bash
-# サーバー停止
-commandmate stop
+# 更新の有無を確認（何も変更しない）
+commandmate update --check
 
-# アップグレード
-npm install -g commandmate@latest
+# 更新（停止 → npm install -g → 再起動 → 応答確認）
+commandmate update
 
-# サーバー起動
-commandmate start --daemon
+# 非対話環境（CI・自動化）では --yes が必須
+commandmate update --yes
 ```
+
+**更新前チェック**:
+
+- [ ] worktree 用サーバー（`--issue`）を停止した（`commandmate stop --issue <number>`）。`npm install -g` はパッケージディレクトリを置換するため、稼働中の worktree サーバーは異常終了する可能性がある
+- [ ] `--auth` / `--cert` / `--key` / `--allowed-ips` / `--trust-proxy` / `--port` を付けて起動していないか確認した。使用していた場合、update 後は `.env` の設定のみで起動するため手動での起動し直しが必要（`--auth` は起動のたびに新トークンが生成され、既存トークンは無効化される）
+- [ ] データベースのバックアップを取得した
+
+**更新後チェック**:
+
+- [ ] `commandmate status` でバージョンと構成を確認した
+- [ ] 認証・IP 制限・HTTPS の設定が意図どおりか確認した（応答確認が degrade して警告付き成功になった場合は特に）
+
+**終了コード**: `0` 成功/スキップ、`2` 非対話環境で `--yes` 無し、`3` 再起動後の確認失敗、`4` 停止失敗（未変更）、`5` 更新失敗（ロールバック手順が表示される）
+
+> `commandmate update` が使えない場合の手動手順:
+> ```bash
+> commandmate stop
+> npm install -g commandmate@latest
+> commandmate start --daemon
+> ```
 
 ---
 

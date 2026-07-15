@@ -48,6 +48,7 @@ node bin/commandmate.js ls
 | [`commandmate capture`](#commandmate-capture) | Get terminal output |
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Control auto-yes |
 | [`commandmate report`](#commandmate-report) | Generate, show, and list daily reports |
+| [`commandmate update`](#commandmate-update) | Update CommandMate itself (stop, update, restart) |
 
 ---
 
@@ -267,6 +268,66 @@ commandmate report list --json                     # JSON output
 
 ---
 
+## commandmate update
+
+Update CommandMate itself to the latest version (Issue #1194).
+In a global install it runs stop, `npm install -g commandmate@latest`, restart, and a readiness check in one command.
+Unlike the other commands here, it acts on the **npm registry and the local daemon** rather than on a worktree (there is no `--token` flag; the readiness check resolves its URL from `.env` / `CM_PORT` and sends `CM_AUTH_TOKEN` as a bearer token when it is set).
+
+```bash
+commandmate update            # Update with a confirmation prompt
+commandmate update --check    # Only report versions (changes nothing)
+commandmate update --yes      # Skip the confirmation prompt (required without a TTY)
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--check` | Print versions only. No install, stop or restart (exits 5 only if the registry query fails) |
+| `-y, --yes` | Skip the confirmation prompt. Required without a TTY (otherwise exits 2) |
+
+### --check Output
+
+```
+Current: v0.9.0
+Latest: v0.10.0
+Update available: yes
+```
+
+### When the Update Is Skipped
+
+Each of these prints a message and exits 0 without changing anything.
+
+| Condition | Behavior |
+|-----------|----------|
+| Already up to date | Prints `Already up to date` |
+| Local version is newer | Skips (never downgrades) |
+| Local or latest is a prerelease | Skips (versions are not comparable) |
+| Not installed globally (git clone) | Prints the manual steps (`git pull`, `npm install`, `npm run build:all`, restart) |
+
+### Exit Codes
+
+| Code | Name | Meaning |
+|:----:|------|---------|
+| 0 | SUCCESS | Updated, skipped, cancelled, or `--check` (including a degraded readiness check) |
+| 2 | CONFIG_ERROR | No TTY and `--yes` was not passed |
+| 3 | START_FAILED | Update succeeded but the restarted server could not be verified (no rollback needed) |
+| 4 | STOP_FAILED | The server could not be stopped; aborted **without changing anything** |
+| 5 | UPDATE_FAILED | Registry query, `npm install -g`, or version verification failed |
+| 99 | UNEXPECTED_ERROR | Unexpected error |
+
+### Caveats
+
+- **Startup options are not restored**: after the restart the server uses only the settings in `.env`. If you used `--auth`, `--auth-expire`, `--cert`, `--key`, `--allow-http`, `--allowed-ips`, `--trust-proxy`, `--port` or `--dev`, start it again manually (`--auth` generates a new token on every start).
+- **Worktree servers (`--issue`) are out of scope**: they are neither stopped nor restarted. `npm install -g` replaces the package directory (`dist/`, `.next/`), so a running worktree server may crash. Run `commandmate stop --issue <number>` **before** updating and `commandmate start --issue <number>` afterwards. The command warns when it detects running worktree servers.
+- **If the main server was not running**: it is updated but not started.
+- **With auth, IP restrictions, or a self-signed certificate**: the readiness check degrades to "the server responds" and exits 0 with a warning. Set `CM_AUTH_TOKEN` for the strict check.
+- **EACCES**: do not re-run with `sudo`. Fix the npm global directory permissions as described in the [CLI setup guide](./cli-setup-guide.md#permission-error-eacces).
+- **Rollback**: on failure the command prints `npm install -g commandmate@<previous-version>`.
+
+---
+
 ## Typical Workflows
 
 ### Basic: send, wait, capture
@@ -420,6 +481,9 @@ commandmate ls --token your-token
 | 0 | SUCCESS | Completed successfully |
 | 1 | DEPENDENCY_ERROR | Server not running |
 | 2 | CONFIG_ERROR | Validation error (invalid agent, duration, etc.) |
+| 3 | START_FAILED | Failed to start or verify the server (`start` / `update`) |
+| 4 | STOP_FAILED | Failed to stop the server (`stop` / `update`) |
+| 5 | UPDATE_FAILED | Update failed (`update`: registry query / `npm install -g` / version verification) |
 | 10 | PROMPT_DETECTED | Prompt detected during wait |
 | 99 | UNEXPECTED_ERROR | Unexpected error / resource not found |
 | 124 | TIMEOUT | Wait timeout exceeded |

@@ -8,6 +8,8 @@ import { initCommand } from './commands/init';
 import { startCommand } from './commands/start';
 import { stopCommand } from './commands/stop';
 import { statusCommand } from './commands/status';
+// Issue #1194: update command (stop -> npm install -g -> start)
+import { updateCommand } from './commands/update';
 import { createIssueCommand } from './commands/issue';
 import { createDocsCommand } from './commands/docs';
 // Issue #518: Agent orchestration commands
@@ -108,6 +110,20 @@ program
     await statusCommand({
       issue: options.issue,
       all: options.all,
+    });
+  });
+
+// Update command
+// Issue #1194: bundle stop -> npm install -g commandmate@latest -> start
+program
+  .command('update')
+  .description('Update CommandMate to the latest version')
+  .option('--check', 'Only check for updates (no install, stop or restart)')
+  .option('-y, --yes', 'Skip the confirmation prompt (required for non-interactive use)')
+  .action(async (options) => {
+    await updateCommand({
+      check: options.check,
+      yes: options.yes,
     });
   });
 
