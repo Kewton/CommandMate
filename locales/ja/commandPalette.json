@@ -10,14 +10,6 @@
     "worktrees": "ワークツリー",
     "actions": "アクション"
   },
-  "nav": {
-    "home": "ホーム",
-    "chat": "チャット",
-    "sessions": "セッション",
-    "repositories": "リポジトリ",
-    "review": "レビュー",
-    "more": "その他"
-  },
   "actions": {
     "toLight": "ライトテーマに切り替え",
     "toDark": "ダークテーマに切り替え",

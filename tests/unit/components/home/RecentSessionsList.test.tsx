@@ -34,6 +34,14 @@ describe('RecentSessionsList', () => {
     expect(screen.queryByTestId('recent-sessions')).toBeNull();
   });
 
+  // Issue #1197: the empty copy must resolve through next-intl, not be inlined.
+  it('renders the empty state copy via a translation key', () => {
+    render(<RecentSessionsList worktrees={[]} />);
+    expect(screen.getByTestId('recent-sessions-empty').textContent).toBe(
+      'home.recentSessions.empty'
+    );
+  });
+
   it('links each recent session to its worktree detail page', () => {
     const worktrees = [
       createMockWorktree({ id: 'wt-1', name: 'feature/a' }),

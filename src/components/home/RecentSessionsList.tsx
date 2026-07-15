@@ -11,6 +11,7 @@
 
 import React, { useMemo } from 'react';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { Skeleton } from '@/components/ui';
 import { compareByTimestamp } from '@/lib/sidebar-utils';
 import { formatRelativeTimeShort } from '@/lib/date-utils';
@@ -42,6 +43,8 @@ function statusDotClass(wt: Worktree): string {
 }
 
 export function RecentSessionsList({ worktrees, limit = 5, isLoading = false }: RecentSessionsListProps) {
+  const t = useTranslations('home');
+
   const recent = useMemo(() => {
     return [...worktrees]
       .sort((a, b) => compareByTimestamp(recencyOf(a), recencyOf(b)))
@@ -78,7 +81,7 @@ export function RecentSessionsList({ worktrees, limit = 5, isLoading = false }: 
         className="text-sm text-muted-foreground"
         data-testid="recent-sessions-empty"
       >
-        No recent sessions yet.
+        {t('recentSessions.empty')}
       </p>
     );
   }

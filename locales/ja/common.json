@@ -3,6 +3,17 @@
     "idleAgents": "アイドル {count} 件",
     "activeAgents": "稼働 {count} 件"
   },
+  "nav": {
+    "home": "ホーム",
+    "chat": "チャット",
+    "sessions": "セッション",
+    "repositories": "リポジトリ",
+    "review": "レビュー",
+    "more": "その他"
+  },
+  "repositories": {
+    "empty": "リポジトリが登録されていません。"
+  },
   "cancel": "キャンセル",
   "send": "送信",
   "end": "終了する",

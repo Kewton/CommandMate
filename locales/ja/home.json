@@ -2,6 +2,14 @@
   "title": "概要",
   "running": "実行中",
   "waiting": "待機中",
+  "sessionOverview": {
+    "title": "セッション概要",
+    "recentSessions": "最近のセッション",
+    "viewAll": "すべて表示"
+  },
+  "recentSessions": {
+    "empty": "最近のセッションはまだありません。"
+  },
   "assistant": {
     "clearHistoryConfirm": "このリポジトリとCLIのチャット履歴をすべて削除しますか？過去のメッセージはアシスタントに送信されなくなります。",
     "changeRepoConfirm": "リポジトリを変更すると進行中の会話が停止します。続行しますか？"

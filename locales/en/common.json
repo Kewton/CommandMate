@@ -3,6 +3,17 @@
     "idleAgents": "{count} idle",
     "activeAgents": "{count} active"
   },
+  "nav": {
+    "home": "Home",
+    "chat": "Chat",
+    "sessions": "Sessions",
+    "repositories": "Repositories",
+    "review": "Review",
+    "more": "More"
+  },
+  "repositories": {
+    "empty": "No repositories registered yet."
+  },
   "cancel": "Cancel",
   "send": "Send",
   "end": "End",
