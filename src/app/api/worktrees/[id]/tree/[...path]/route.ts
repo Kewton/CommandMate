@@ -47,15 +47,16 @@ function hasExcludedSegment(pathSegments: string[]): boolean {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string; path: string[] } }
+  { params }: { params: Promise<{ id: string; path: string[] }> }
 ) {
   try {
+    const { id, path } = await params;
     const db = getDbInstance();
 
     // Check if worktree exists
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
-      const errorResponse = createWorktreeNotFoundError(params.id);
+      const errorResponse = createWorktreeNotFoundError(id);
       return NextResponse.json(
         { error: errorResponse.error },
         { status: errorResponse.status }
@@ -63,10 +64,10 @@ export async function GET(
     }
 
     // Construct relative path from path segments
-    const relativePath = params.path.join('/');
+    const relativePath = path.join('/');
 
     // Security: Check if any path segment is excluded
-    if (hasExcludedSegment(params.path)) {
+    if (hasExcludedSegment(path)) {
       const errorResponse = createAccessDeniedError('Path contains excluded pattern');
       return NextResponse.json(
         { error: errorResponse.error },

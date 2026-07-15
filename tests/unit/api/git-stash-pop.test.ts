@@ -63,23 +63,23 @@ describe('POST /api/worktrees/:id/git/stash/pop (Issue #782)', () => {
 
   it('returns 404 when the worktree is not found', async () => {
     (getWorktreeById as ReturnType<typeof vi.fn>).mockReturnValue(null);
-    const response = await POST(createRequest({}), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({}), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(404);
   });
 
   it('defaults the index to 0 when omitted', async () => {
-    const response = await POST(createRequest({}), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({}), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(200);
     expect(stashPop).toHaveBeenCalledWith('/path/to/worktree', 0);
   });
 
   it('forwards a valid index', async () => {
-    await POST(createRequest({ index: 3 }), { params: { id: 'test-id' } });
+    await POST(createRequest({ index: 3 }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(stashPop).toHaveBeenCalledWith('/path/to/worktree', 3);
   });
 
   it('returns 400 invalid_stash_index for a negative index', async () => {
-    const response = await POST(createRequest({ index: -1 }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ index: -1 }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(400);
     const data = await response.json();
     expect(data.reason).toBe('invalid_stash_index');
@@ -87,7 +87,7 @@ describe('POST /api/worktrees/:id/git/stash/pop (Issue #782)', () => {
   });
 
   it('returns 400 invalid_stash_index for a non-integer index', async () => {
-    const response = await POST(createRequest({ index: 1.5 }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ index: 1.5 }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(400);
   });
 
@@ -97,7 +97,7 @@ describe('POST /api/worktrees/:id/git/stash/pop (Issue #782)', () => {
       conflictFiles: ['src/a.ts'],
       stashRetained: true,
     });
-    const response = await POST(createRequest({ index: 0 }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ index: 0 }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data.success).toBe(true);
@@ -108,13 +108,13 @@ describe('POST /api/worktrees/:id/git/stash/pop (Issue #782)', () => {
 
   it('returns 409 when the index is locked', async () => {
     (stashPop as ReturnType<typeof vi.fn>).mockRejectedValue(new GitIndexLockedError('locked'));
-    const response = await POST(createRequest({ index: 0 }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ index: 0 }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(409);
   });
 
   it('returns 504 on timeout', async () => {
     (stashPop as ReturnType<typeof vi.fn>).mockRejectedValue(new GitTimeoutError('timeout'));
-    const response = await POST(createRequest({ index: 0 }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ index: 0 }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(504);
   });
 });

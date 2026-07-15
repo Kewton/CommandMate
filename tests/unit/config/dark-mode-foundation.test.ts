@@ -1,8 +1,8 @@
 /**
  * Tests for Dark Mode Foundation (Issue #424)
  *
- * Verifies tailwind.config.js, globals.css, and layout.tsx
- * are correctly configured for dark mode support.
+ * Verifies the Tailwind theme (globals.css, CSS-first since Issue #1178) and
+ * layout.tsx are correctly configured for dark mode support.
  *
  * @vitest-environment node
  */
@@ -14,26 +14,33 @@ import path from 'path';
 const ROOT = path.resolve(__dirname, '../../..');
 
 describe('Dark Mode Foundation (Issue #424)', () => {
-  describe('tailwind.config.js', () => {
-    const configPath = path.join(ROOT, 'tailwind.config.js');
+  /*
+   * [Issue #1178] Tailwind 4 is CSS-first: `darkMode: 'class'` became a
+   * `@custom-variant`, and colors moved from tailwind.config.js into `@theme`
+   * (without the now-obsolete `<alpha-value>` placeholder).
+   */
+  describe('Tailwind theme (globals.css)', () => {
+    const cssPath = path.join(ROOT, 'src/app/globals.css');
+    let content: string;
 
-    it('should have darkMode set to class', () => {
-      const content = fs.readFileSync(configPath, 'utf-8');
-      expect(content).toContain("darkMode: 'class'");
+    beforeAll(() => {
+      content = fs.readFileSync(cssPath, 'utf-8');
+    });
+
+    it('should drive dark mode off the .dark class', () => {
+      expect(content).toMatch(/@custom-variant dark \(&:where\(\.dark, \.dark \*\)\);/);
     });
 
     it('should register the accent scale via CSS variables (migrated from primary in Issue #1041)', () => {
-      const content = fs.readFileSync(configPath, 'utf-8');
       // The former `primary` cyan palette is now the semantic `accent` scale,
-      // backed by CSS variables. Hex values live in globals.css instead.
-      expect(content).toContain('rgb(var(--accent-500) / <alpha-value>)');
-      expect(content).not.toContain('primary:');
+      // backed by CSS variables. Hex values live in the token blocks instead.
+      expect(content).toContain('--color-accent-500: rgb(var(--accent-500));');
+      expect(content).not.toContain('--color-primary:');
     });
 
     it('should no longer define the cmd-bg-dark color (absorbed into --background in Issue #1041)', () => {
-      const content = fs.readFileSync(configPath, 'utf-8');
       expect(content).not.toContain('cmd-bg-dark');
-      expect(content).toContain('rgb(var(--background) / <alpha-value>)');
+      expect(content).toContain('--color-background: rgb(var(--background));');
     });
   });
 

@@ -161,7 +161,7 @@ describe('Security Tests', () => {
         action: 'rename',
         newName: '../../../etc/passwd',
       });
-      const params = { params: { id: 'test-worktree', path: ['file.md'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['file.md'] }) };
 
       const response = await PATCH(request, params);
       const data = await response.json();
@@ -204,7 +204,7 @@ describe('Security Tests', () => {
       mkdirSync(join(testDir, '.git'));
 
       const request = createRequest('DELETE', '.git', undefined, { recursive: 'true' });
-      const params = { params: { id: 'test-worktree', path: ['.git'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['.git'] }) };
 
       const response = await DELETE(request, params);
       const data = await response.json();
@@ -218,7 +218,7 @@ describe('Security Tests', () => {
       mkdirSync(join(testDir, '.git', 'objects'), { recursive: true });
 
       const request = createRequest('DELETE', '.git/objects', undefined, { recursive: 'true' });
-      const params = { params: { id: 'test-worktree', path: ['.git', 'objects'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['.git', 'objects'] }) };
 
       const response = await DELETE(request, params);
       const data = await response.json();
@@ -261,7 +261,7 @@ describe('Security Tests', () => {
       writeFileSync(join(testDir, 'test.md'), '# Test');
 
       const request = createRequest('PUT', 'test.md', { content: 'Binary\x00Content' });
-      const params = { params: { id: 'test-worktree', path: ['test.md'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['test.md'] }) };
 
       const response = await PUT(request, params);
       const data = await response.json();
@@ -275,7 +275,7 @@ describe('Security Tests', () => {
   describe('[SEC-SF-002] Error response security', () => {
     it('should not include absolute paths in error messages', async () => {
       const request = createRequest('PUT', 'nonexistent.md', { content: 'test' });
-      const params = { params: { id: 'test-worktree', path: ['nonexistent.md'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['nonexistent.md'] }) };
 
       const response = await PUT(request, params);
       const data = await response.json();
@@ -292,7 +292,7 @@ describe('Security Tests', () => {
 
     it('should return generic error codes without system details', async () => {
       const request = createRequest('DELETE', '../etc/passwd');
-      const params = { params: { id: 'test-worktree', path: ['..', 'etc', 'passwd'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['..', 'etc', 'passwd'] }) };
 
       const response = await DELETE(request, params);
       const data = await response.json();
@@ -321,7 +321,7 @@ describe('Security Tests', () => {
 
       it(`should block traversal: ${pathDisplay}`, async () => {
         const request = createRequest('PUT', pathSegments.join('/'), { content: 'malicious' });
-        const params = { params: { id: 'test-worktree', path: pathSegments } };
+        const params = { params: Promise.resolve({ id: 'test-worktree', path: pathSegments }) };
 
         const response = await PUT(request, params);
 
@@ -335,7 +335,7 @@ describe('Security Tests', () => {
       writeFileSync(join(testDir, '.env'), 'SECRET=value');
 
       const request = createRequest('PUT', '.env', { content: 'COMPROMISED=true' });
-      const params = { params: { id: 'test-worktree', path: ['.env'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['.env'] }) };
 
       const response = await PUT(request, params);
       const data = await response.json();
@@ -348,7 +348,7 @@ describe('Security Tests', () => {
       writeFileSync(join(testDir, 'script.js'), 'console.log("safe")');
 
       const request = createRequest('PUT', 'script.js', { content: 'malicious()' });
-      const params = { params: { id: 'test-worktree', path: ['script.js'] } };
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['script.js'] }) };
 
       const response = await PUT(request, params);
 

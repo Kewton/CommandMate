@@ -87,7 +87,7 @@ describe('GET /api/worktrees/:id/files/:path - 304 response', () => {
   it('should include Last-Modified header in 200 response', async () => {
     const request = new NextRequest('http://localhost/api/worktrees/test-wt/files/src/index.ts');
     const response = await GET(request, {
-      params: { id: 'test-wt', path: ['src', 'index.ts'] },
+      params: Promise.resolve({ id: 'test-wt', path: ['src', 'index.ts'] }),
     });
 
     expect(response.status).toBe(200);
@@ -97,7 +97,7 @@ describe('GET /api/worktrees/:id/files/:path - 304 response', () => {
   it('should include Cache-Control: no-store, private in 200 response', async () => {
     const request = new NextRequest('http://localhost/api/worktrees/test-wt/files/src/index.ts');
     const response = await GET(request, {
-      params: { id: 'test-wt', path: ['src', 'index.ts'] },
+      params: Promise.resolve({ id: 'test-wt', path: ['src', 'index.ts'] }),
     });
 
     expect(response.status).toBe(200);
@@ -111,7 +111,7 @@ describe('GET /api/worktrees/:id/files/:path - 304 response', () => {
       },
     });
     const response = await GET(request, {
-      params: { id: 'test-wt', path: ['src', 'index.ts'] },
+      params: Promise.resolve({ id: 'test-wt', path: ['src', 'index.ts'] }),
     });
 
     expect(response.status).toBe(304);
@@ -127,7 +127,7 @@ describe('GET /api/worktrees/:id/files/:path - 304 response', () => {
       },
     });
     const response = await GET(request, {
-      params: { id: 'test-wt', path: ['src', 'index.ts'] },
+      params: Promise.resolve({ id: 'test-wt', path: ['src', 'index.ts'] }),
     });
 
     expect(response.status).toBe(304);
@@ -141,7 +141,7 @@ describe('GET /api/worktrees/:id/files/:path - 304 response', () => {
       },
     });
     const response = await GET(request, {
-      params: { id: 'test-wt', path: ['src', 'index.ts'] },
+      params: Promise.resolve({ id: 'test-wt', path: ['src', 'index.ts'] }),
     });
 
     expect(response.status).toBe(200);
@@ -154,7 +154,7 @@ describe('GET /api/worktrees/:id/files/:path - 304 response', () => {
       },
     });
     const response = await GET(request, {
-      params: { id: 'test-wt', path: ['src', 'index.ts'] },
+      params: Promise.resolve({ id: 'test-wt', path: ['src', 'index.ts'] }),
     });
 
     expect(response.status).toBe(200);
@@ -168,7 +168,7 @@ describe('GET /api/worktrees/:id/files/:path - 304 response', () => {
       },
     });
     const response = await GET(request, {
-      params: { id: 'test-wt', path: ['src', 'index.ts'] },
+      params: Promise.resolve({ id: 'test-wt', path: ['src', 'index.ts'] }),
     });
 
     // isNaN check should fallback to 200
@@ -178,7 +178,7 @@ describe('GET /api/worktrees/:id/files/:path - 304 response', () => {
   it('should not include If-Modified-Since check when header is absent', async () => {
     const request = new NextRequest('http://localhost/api/worktrees/test-wt/files/src/index.ts');
     const response = await GET(request, {
-      params: { id: 'test-wt', path: ['src', 'index.ts'] },
+      params: Promise.resolve({ id: 'test-wt', path: ['src', 'index.ts'] }),
     });
 
     expect(response.status).toBe(200);

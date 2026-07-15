@@ -69,7 +69,7 @@ describe('PATCH /api/worktrees/:id/viewed (G4)', () => {
     const request = new Request('http://localhost:3000/api/worktrees/test-worktree/viewed', {
       method: 'PATCH',
     });
-    const params = { params: { id: 'test-worktree' } };
+    const params = { params: Promise.resolve({ id: 'test-worktree' }) };
     const response = await patchViewed(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(200);
@@ -87,7 +87,7 @@ describe('PATCH /api/worktrees/:id/viewed (G4)', () => {
     const request = new Request('http://localhost:3000/api/worktrees/nonexistent/viewed', {
       method: 'PATCH',
     });
-    const params = { params: { id: 'nonexistent' } };
+    const params = { params: Promise.resolve({ id: 'nonexistent' }) };
     const response = await patchViewed(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(404);
@@ -103,7 +103,7 @@ describe('PATCH /api/worktrees/:id/viewed (G4)', () => {
     const request = new Request('http://localhost:3000/api/worktrees/test/viewed', {
       method: 'PATCH',
     });
-    const params = { params: { id: 'test' } };
+    const params = { params: Promise.resolve({ id: 'test' }) };
     const response = await patchViewed(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(500);

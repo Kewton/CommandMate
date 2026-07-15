@@ -121,10 +121,10 @@ describe('GET /api/worktrees/:id/logs/:filename', () => {
       'http://localhost:3000/api/worktrees/test-worktree/logs/test-worktree-2025-01-17.md'
     );
     const params = {
-      params: {
+      params: Promise.resolve({
         id: 'test-worktree',
         filename: 'test-worktree-2025-01-17.md',
-      },
+      }),
     };
     const response = await getLogFile(request as unknown as import('next/server').NextRequest, params);
 
@@ -143,10 +143,10 @@ describe('GET /api/worktrees/:id/logs/:filename', () => {
       'http://localhost:3000/api/worktrees/test-worktree/logs/../../../etc/passwd'
     );
     const params = {
-      params: {
+      params: Promise.resolve({
         id: 'test-worktree',
         filename: '../../../etc/passwd',
-      },
+      }),
     };
     const response = await getLogFile(request as unknown as import('next/server').NextRequest, params);
 
@@ -162,10 +162,10 @@ describe('GET /api/worktrees/:id/logs/:filename', () => {
       'http://localhost:3000/api/worktrees/test-worktree/logs/test-worktree-malicious.sh'
     );
     const params = {
-      params: {
+      params: Promise.resolve({
         id: 'test-worktree',
         filename: 'test-worktree-malicious.sh',
-      },
+      }),
     };
     const response = await getLogFile(request as unknown as import('next/server').NextRequest, params);
 
@@ -181,10 +181,10 @@ describe('GET /api/worktrees/:id/logs/:filename', () => {
       'http://localhost:3000/api/worktrees/test-worktree/logs/other-worktree-2025-01-17.md'
     );
     const params = {
-      params: {
+      params: Promise.resolve({
         id: 'test-worktree',
         filename: 'other-worktree-2025-01-17.md',
-      },
+      }),
     };
     const response = await getLogFile(request as unknown as import('next/server').NextRequest, params);
 
@@ -206,10 +206,10 @@ describe('GET /api/worktrees/:id/logs/:filename', () => {
       'http://localhost:3000/api/worktrees/test-worktree/logs/test-worktree-nonexistent.md'
     );
     const params = {
-      params: {
+      params: Promise.resolve({
         id: 'test-worktree',
         filename: 'test-worktree-nonexistent.md',
-      },
+      }),
     };
     const response = await getLogFile(request as unknown as import('next/server').NextRequest, params);
 
@@ -224,10 +224,10 @@ describe('GET /api/worktrees/:id/logs/:filename', () => {
       'http://localhost:3000/api/worktrees/nonexistent/logs/nonexistent-test.md'
     );
     const params = {
-      params: {
+      params: Promise.resolve({
         id: 'nonexistent',
         filename: 'nonexistent-test.md',
-      },
+      }),
     };
     const response = await getLogFile(request as unknown as import('next/server').NextRequest, params);
 
@@ -244,10 +244,10 @@ describe('GET /api/worktrees/:id/logs/:filename', () => {
       'http://localhost:3000/api/worktrees/test-worktree/logs/test-worktree-test.md'
     );
     const params = {
-      params: {
+      params: Promise.resolve({
         id: 'test-worktree',
         filename: 'test-worktree-test.md',
-      },
+      }),
     };
     const response = await getLogFile(request as unknown as import('next/server').NextRequest, params);
 

@@ -30,10 +30,11 @@ const FORBIDDEN_CONTROL_CHARS = /[\x00-\x08\x0B-\x1F\x7F]/;
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    if (!isValidWorktreeId(params.id)) {
+    const { id } = await params;
+    if (!isValidWorktreeId(id)) {
       return NextResponse.json(
         { error: 'Invalid worktree ID format' },
         { status: 400 }
@@ -41,7 +42,7 @@ export async function POST(
     }
 
     const db = getDbInstance();
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
 
     if (!worktree) {
       return NextResponse.json(

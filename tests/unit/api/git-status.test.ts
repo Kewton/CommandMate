@@ -80,7 +80,7 @@ describe('GET /api/worktrees/:id/git/status', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/invalid!id/git/status'),
-      { params: { id: 'invalid!id' } }
+      { params: Promise.resolve({ id: 'invalid!id' }) }
     );
 
     expect(response.status).toBe(400);
@@ -93,7 +93,7 @@ describe('GET /api/worktrees/:id/git/status', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/status'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(404);
@@ -104,7 +104,7 @@ describe('GET /api/worktrees/:id/git/status', () => {
   it('should return 200 with merged status + aheadBehind', async () => {
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/status'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(200);
@@ -118,7 +118,7 @@ describe('GET /api/worktrees/:id/git/status', () => {
   it('should pass worktree.path and initialBranch to getGitStatus', async () => {
     await GET(
       createRequest('/api/worktrees/test-id/git/status'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(getGitStatus).toHaveBeenCalledWith('/path/to/worktree', 'main');
@@ -130,7 +130,7 @@ describe('GET /api/worktrees/:id/git/status', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/status'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(200);
@@ -144,7 +144,7 @@ describe('GET /api/worktrees/:id/git/status', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/status'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(504);
@@ -157,7 +157,7 @@ describe('GET /api/worktrees/:id/git/status', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/status'),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
 
     expect(response.status).toBe(500);

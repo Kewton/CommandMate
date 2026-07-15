@@ -38,7 +38,7 @@ export interface UseTerminalScrollOptions {
  */
 export interface UseTerminalScrollReturn {
   /** Ref to attach to the scrollable container */
-  scrollRef: React.RefObject<HTMLDivElement>;
+  scrollRef: React.RefObject<HTMLDivElement | null>;
   /** Whether auto-scroll is currently enabled */
   autoScroll: boolean;
   /** Manually set auto-scroll state */

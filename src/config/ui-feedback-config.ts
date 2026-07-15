@@ -46,7 +46,7 @@ export const NAV_KEY_REFRESH_DELAY_MS = 100;
 /**
  * Duration (ms) of exit (fade-out) animations for overlay UI before unmount.
  * Issue #1114: JS-side twin of the CSS motion token `--motion-duration-base`
- * (globals.css, 200ms) and the tailwindcss-animate `duration-200` utilities
+ * (globals.css, 200ms) and the tw-animate-css `duration-200` utilities
  * used by the exit classes — keep the three in sync.
  * Sites: Modal, Toast (via useExitAnimation).
  */

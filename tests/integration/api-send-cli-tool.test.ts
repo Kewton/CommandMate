@@ -151,7 +151,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
         body: JSON.stringify({ content: 'Test message' }),
       });
 
-      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-worktree' } });
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-worktree' }) });
 
       expect(response.status).toBe(201);
 
@@ -186,7 +186,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
         body: JSON.stringify({ content: 'Test codex message' }),
       });
 
-      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'codex-worktree' } });
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'codex-worktree' }) });
 
       expect(response.status).toBe(201);
 
@@ -217,7 +217,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
         }),
       });
 
-      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-override' } });
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-override' }) });
 
       expect(response.status).toBe(201);
     });
@@ -242,7 +242,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
         body: JSON.stringify({ content: 'Test gemini message' }),
       });
 
-      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'gemini-worktree' } });
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'gemini-worktree' }) });
 
       expect(response.status).toBe(201);
 
@@ -272,7 +272,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
           body: JSON.stringify({ content: 'Test', imagePath: scheme }),
         });
 
-        const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-ssrf' } });
+        const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-ssrf' }) });
         expect(response.status).toBe(400);
         const data = await response.json();
         expect(data.error).toContain('URL schemes are not allowed');
@@ -295,7 +295,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
         body: JSON.stringify({ content: 'Test', imagePath: '../../../etc/passwd' }),
       });
 
-      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-traversal' } });
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-traversal' }) });
       expect(response.status).toBe(400);
     });
 
@@ -315,7 +315,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
         body: JSON.stringify({ content: 'Test', imagePath: '.commandmate/other/xxx.png' }),
       });
 
-      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-prefix' } });
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-prefix' }) });
       // Path validation catches this as invalid (either symlink check or whitelist check)
       expect(response.status).toBe(400);
     });
@@ -339,7 +339,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
         body: JSON.stringify({ content: 'Test', model: 'model; rm -rf /' }),
       });
 
-      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-model-invalid' } });
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-model-invalid' }) });
       expect(response.status).toBe(400);
       const data = await response.json();
       expect(data.error).toContain('model');
@@ -363,7 +363,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
         body: JSON.stringify({ content: 'Test', model: longModel }),
       });
 
-      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-model-long' } });
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-model-long' }) });
       expect(response.status).toBe(400);
       const data = await response.json();
       expect(data.error).toContain('model');
@@ -386,7 +386,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
         body: JSON.stringify({ content: 'Test', model: 'gpt-4\x00' }),
       });
 
-      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-model-ctrl' } });
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-model-ctrl' }) });
       expect(response.status).toBe(400);
     });
 
@@ -406,7 +406,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
         body: JSON.stringify({ content: 'Test', model: 'gpt-5-mini', cliToolId: 'claude' }),
       });
 
-      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-model-claude' } });
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-model-claude' }) });
       expect(response.status).toBe(400);
       const data = await response.json();
       expect(data.error).toContain('copilot');
@@ -429,7 +429,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
         body: JSON.stringify({ content: 'Test message', model: 'gpt-5-mini' }),
       });
 
-      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-model-valid' } });
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-model-valid' }) });
       // Should succeed (201) or at least not be 400
       // Note: might be 500 if copilot session fails to start in test env, but not 400
       expect(response.status).not.toBe(400);
@@ -454,7 +454,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
         body: JSON.stringify({ content: 'Test message', model: 'Gemini 3.1 Pro (High)' }),
       });
 
-      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-agy-model-new' } });
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-agy-model-new' }) });
       expect(response.status).toBe(201);
       expect(antigravityStartSession).toHaveBeenCalledWith(
         'test-agy-model-new',
@@ -482,7 +482,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
         body: JSON.stringify({ content: 'Test message', model: 'Gemini 3.1 Pro (High)' }),
       });
 
-      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-agy-model-running' } });
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-agy-model-running' }) });
       expect(response.status).toBe(400);
       const data = await response.json();
       expect(data.error).toContain('new session');
@@ -506,7 +506,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
         body: JSON.stringify({ content: 'Test message', model: "model'; rm -rf ~" }),
       });
 
-      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-agy-model-invalid' } });
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-agy-model-invalid' }) });
       expect(response.status).toBe(400);
       const data = await response.json();
       expect(data.error).toContain('model');
@@ -528,7 +528,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
         body: JSON.stringify({ content: 'Test', model: 'Gemini 3.1 Pro (High)', cliToolId: 'claude' }),
       });
 
-      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-agy-model-claude' } });
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-agy-model-claude' }) });
       expect(response.status).toBe(400);
       const data = await response.json();
       expect(data.error).toContain('antigravity');
@@ -555,7 +555,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
         }),
       });
 
-      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-invalid' } });
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-invalid' }) });
 
       expect(response.status).toBe(400);
 
@@ -598,7 +598,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
 
       const response = await sendMessage(
         request as unknown as import('next/server').NextRequest,
-        { params: { id: 'test-send-failure' } }
+        { params: Promise.resolve({ id: 'test-send-failure' }) }
       );
 
       expect(response.status).toBe(500);

@@ -194,7 +194,7 @@ export const MarkdownPreview = memo(function MarkdownPreview({
       img: ({ src, alt, width, height, ...props }) => {
         const w = (width ?? props.node?.properties?.width) as string | undefined;
         const h = (height ?? props.node?.properties?.height) as string | undefined;
-        if (src && !src.startsWith('http://') && !src.startsWith('https://') && !src.startsWith('data:')) {
+        if (typeof src === 'string' && !src.startsWith('http://') && !src.startsWith('https://') && !src.startsWith('data:')) {
           const filePath = currentFilePathRef.current;
           const wtId = worktreeIdRef.current;
           if (filePath && wtId) {

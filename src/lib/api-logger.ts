@@ -27,7 +27,7 @@ import { createLogger } from '@/lib/logger';
  */
 type ApiHandler<P extends Record<string, string> = Record<string, string>> = (
   request: NextRequest,
-  context: { params: P | Promise<P> }
+  context: { params: Promise<P> }
 ) => Promise<NextResponse>;
 
 /**
@@ -81,7 +81,7 @@ export function withLogging<P extends Record<string, string> = Record<string, st
     skipResponseBody = false,
   } = options ?? {};
 
-  return async (request: NextRequest, context: { params: P | Promise<P> }): Promise<NextResponse> => {
+  return async (request: NextRequest, context: { params: Promise<P> }): Promise<NextResponse> => {
     // Skip logging in non-development environments
     if (process.env.NODE_ENV !== 'development') {
       return handler(request, context);

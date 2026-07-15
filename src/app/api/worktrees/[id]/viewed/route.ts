@@ -13,23 +13,24 @@ const logger = createLogger('api/viewed');
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const db = getDbInstance();
 
     // MF1: Check if worktree exists
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${params.id}' not found` },
+        { error: `Worktree '${id}' not found` },
         { status: 404 }
       );
     }
 
     // Update last_viewed_at to current timestamp
     const viewedAt = new Date();
-    updateLastViewedAt(db, params.id, viewedAt);
+    updateLastViewedAt(db, id, viewedAt);
 
     // SF2: Log the viewed update
     logger.info('marked-worktree-as-viewed');

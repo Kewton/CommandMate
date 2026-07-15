@@ -68,7 +68,7 @@ describe('GET /api/worktrees/:id/git/show/:commitHash', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/invalid/git/show/abc1234'),
-      { params: { id: 'invalid', commitHash: 'abc1234' } }
+      { params: Promise.resolve({ id: 'invalid', commitHash: 'abc1234' }) }
     );
 
     expect(response.status).toBe(400);
@@ -79,7 +79,7 @@ describe('GET /api/worktrees/:id/git/show/:commitHash', () => {
   it('should return 400 for invalid commit hash (too short)', async () => {
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/show/abc'),
-      { params: { id: 'test-id', commitHash: 'abc' } }
+      { params: Promise.resolve({ id: 'test-id', commitHash: 'abc' }) }
     );
 
     expect(response.status).toBe(400);
@@ -90,7 +90,7 @@ describe('GET /api/worktrees/:id/git/show/:commitHash', () => {
   it('should return 400 for invalid commit hash (uppercase)', async () => {
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/show/ABC1234'),
-      { params: { id: 'test-id', commitHash: 'ABC1234' } }
+      { params: Promise.resolve({ id: 'test-id', commitHash: 'ABC1234' }) }
     );
 
     expect(response.status).toBe(400);
@@ -101,7 +101,7 @@ describe('GET /api/worktrees/:id/git/show/:commitHash', () => {
   it('should return 400 for invalid commit hash (special chars)', async () => {
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/show/abc123!'),
-      { params: { id: 'test-id', commitHash: 'abc123!' } }
+      { params: Promise.resolve({ id: 'test-id', commitHash: 'abc123!' }) }
     );
 
     expect(response.status).toBe(400);
@@ -118,7 +118,7 @@ describe('GET /api/worktrees/:id/git/show/:commitHash', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/show/abc1234'),
-      { params: { id: 'test-id', commitHash: 'abc1234' } }
+      { params: Promise.resolve({ id: 'test-id', commitHash: 'abc1234' }) }
     );
 
     expect(response.status).toBe(200);
@@ -134,7 +134,7 @@ describe('GET /api/worktrees/:id/git/show/:commitHash', () => {
 
     const response = await GET(
       createRequest(`/api/worktrees/test-id/git/show/${hash}`),
-      { params: { id: 'test-id', commitHash: hash } }
+      { params: Promise.resolve({ id: 'test-id', commitHash: hash }) }
     );
 
     expect(response.status).toBe(200);
@@ -145,7 +145,7 @@ describe('GET /api/worktrees/:id/git/show/:commitHash', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/show/abc1234'),
-      { params: { id: 'test-id', commitHash: 'abc1234' } }
+      { params: Promise.resolve({ id: 'test-id', commitHash: 'abc1234' }) }
     );
 
     expect(response.status).toBe(404);
@@ -158,7 +158,7 @@ describe('GET /api/worktrees/:id/git/show/:commitHash', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/show/abc1234'),
-      { params: { id: 'test-id', commitHash: 'abc1234' } }
+      { params: Promise.resolve({ id: 'test-id', commitHash: 'abc1234' }) }
     );
 
     expect(response.status).toBe(404);
@@ -175,7 +175,7 @@ describe('GET /api/worktrees/:id/git/show/:commitHash', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/show/abc1234'),
-      { params: { id: 'test-id', commitHash: 'abc1234' } }
+      { params: Promise.resolve({ id: 'test-id', commitHash: 'abc1234' }) }
     );
 
     expect(response.status).toBe(200);
@@ -189,7 +189,7 @@ describe('GET /api/worktrees/:id/git/show/:commitHash', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/show/abc1234'),
-      { params: { id: 'test-id', commitHash: 'abc1234' } }
+      { params: Promise.resolve({ id: 'test-id', commitHash: 'abc1234' }) }
     );
 
     expect(response.status).toBe(400);
@@ -200,7 +200,7 @@ describe('GET /api/worktrees/:id/git/show/:commitHash', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/show/abc1234'),
-      { params: { id: 'test-id', commitHash: 'abc1234' } }
+      { params: Promise.resolve({ id: 'test-id', commitHash: 'abc1234' }) }
     );
 
     expect(response.status).toBe(504);
@@ -211,7 +211,7 @@ describe('GET /api/worktrees/:id/git/show/:commitHash', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/show/abc1234'),
-      { params: { id: 'test-id', commitHash: 'abc1234' } }
+      { params: Promise.resolve({ id: 'test-id', commitHash: 'abc1234' }) }
     );
 
     expect(response.status).toBe(500);

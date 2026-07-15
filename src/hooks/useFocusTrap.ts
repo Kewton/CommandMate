@@ -59,7 +59,7 @@ export interface UseFocusTrapOptions {
  */
 export function useFocusTrap<T extends HTMLElement = HTMLElement>(
   options: UseFocusTrapOptions = {}
-): RefObject<T> {
+): RefObject<T | null> {
   const { active = true, initialFocus = true, restoreFocus = true } = options;
   const containerRef = useRef<T>(null);
 

@@ -68,18 +68,18 @@ describe('POST /api/worktrees/:id/git/fetch (Issue #783)', () => {
 
   it('returns 400 for an invalid worktree ID', async () => {
     (isValidWorktreeId as ReturnType<typeof vi.fn>).mockReturnValue(false);
-    const res = await POST(createRequest({}), { params: { id: 'bad!' } });
+    const res = await POST(createRequest({}), { params: Promise.resolve({ id: 'bad!' }) });
     expect(res.status).toBe(400);
   });
 
   it('returns 404 when the worktree is not found', async () => {
     (getWorktreeById as ReturnType<typeof vi.fn>).mockReturnValue(null);
-    const res = await POST(createRequest({}), { params: { id: 'test-id' } });
+    const res = await POST(createRequest({}), { params: Promise.resolve({ id: 'test-id' }) });
     expect(res.status).toBe(404);
   });
 
   it('fetches from origin by default (200)', async () => {
-    const res = await POST(createRequest({}), { params: { id: 'test-id' } });
+    const res = await POST(createRequest({}), { params: Promise.resolve({ id: 'test-id' }) });
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.success).toBe(true);
@@ -87,7 +87,7 @@ describe('POST /api/worktrees/:id/git/fetch (Issue #783)', () => {
   });
 
   it('forwards prune and a validated remote', async () => {
-    await POST(createRequest({ remote: 'upstream', prune: true }), { params: { id: 'test-id' } });
+    await POST(createRequest({ remote: 'upstream', prune: true }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(gitFetch).toHaveBeenCalledWith('/path/to/worktree', { remote: 'upstream', prune: true });
   });
 
@@ -95,7 +95,7 @@ describe('POST /api/worktrees/:id/git/fetch (Issue #783)', () => {
   it.each(['--upload-pack=x', '--exec=x', 'foo bar'])(
     'returns 400 invalid_branch_name for an option-injection remote %j',
     async (remote) => {
-      const res = await POST(createRequest({ remote }), { params: { id: 'test-id' } });
+      const res = await POST(createRequest({ remote }), { params: Promise.resolve({ id: 'test-id' }) });
       expect(res.status).toBe(400);
       const data = await res.json();
       expect(data.reason).toBe('invalid_branch_name');
@@ -107,7 +107,7 @@ describe('POST /api/worktrees/:id/git/fetch (Issue #783)', () => {
   it.each(['https://attacker.internal:8080/x', 'git@host:repo', 'file:///etc', '../evil'])(
     'returns 400 invalid_branch_name for a URL/path remote %j (SSRF closed)',
     async (remote) => {
-      const res = await POST(createRequest({ remote }), { params: { id: 'test-id' } });
+      const res = await POST(createRequest({ remote }), { params: Promise.resolve({ id: 'test-id' }) });
       expect(res.status).toBe(400);
       expect(gitFetch).not.toHaveBeenCalled();
     }
@@ -115,21 +115,21 @@ describe('POST /api/worktrees/:id/git/fetch (Issue #783)', () => {
 
   it('maps GitAuthFailedError to 401 auth_failed', async () => {
     (gitFetch as ReturnType<typeof vi.fn>).mockRejectedValue(new GitAuthFailedError());
-    const res = await POST(createRequest({}), { params: { id: 'test-id' } });
+    const res = await POST(createRequest({}), { params: Promise.resolve({ id: 'test-id' }) });
     expect(res.status).toBe(401);
     expect((await res.json()).reason).toBe('auth_failed');
   });
 
   it('maps GitNetworkError to 502 network', async () => {
     (gitFetch as ReturnType<typeof vi.fn>).mockRejectedValue(new GitNetworkError());
-    const res = await POST(createRequest({}), { params: { id: 'test-id' } });
+    const res = await POST(createRequest({}), { params: Promise.resolve({ id: 'test-id' }) });
     expect(res.status).toBe(502);
     expect((await res.json()).reason).toBe('network');
   });
 
   it('maps GitTimeoutError to 504', async () => {
     (gitFetch as ReturnType<typeof vi.fn>).mockRejectedValue(new GitTimeoutError('t'));
-    const res = await POST(createRequest({}), { params: { id: 'test-id' } });
+    const res = await POST(createRequest({}), { params: Promise.resolve({ id: 'test-id' }) });
     expect(res.status).toBe(504);
   });
 });

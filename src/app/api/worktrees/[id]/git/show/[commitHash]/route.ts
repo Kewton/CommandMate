@@ -13,11 +13,12 @@ import { COMMIT_HASH_PATTERN } from '@/types/git';
 
 export async function GET(
   _request: Request,
-  { params }: { params: { id: string; commitHash: string } }
+  { params }: { params: Promise<{ id: string; commitHash: string }> }
 ) {
   try {
     // Validate worktree ID format
-    if (!isValidWorktreeId(params.id)) {
+    const { id, commitHash } = await params;
+    if (!isValidWorktreeId(id)) {
       return NextResponse.json(
         { error: 'Invalid worktree ID format' },
         { status: 400 }
@@ -25,7 +26,7 @@ export async function GET(
     }
 
     // Validate commit hash format
-    if (!COMMIT_HASH_PATTERN.test(params.commitHash)) {
+    if (!COMMIT_HASH_PATTERN.test(commitHash)) {
       return NextResponse.json(
         { error: 'Invalid commit hash format' },
         { status: 400 }
@@ -33,7 +34,7 @@ export async function GET(
     }
 
     const db = getDbInstance();
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
 
     if (!worktree) {
       return NextResponse.json(
@@ -42,7 +43,7 @@ export async function GET(
       );
     }
 
-    const result = await getGitShow(worktree.path, params.commitHash);
+    const result = await getGitShow(worktree.path, commitHash);
 
     if (!result) {
       return NextResponse.json(

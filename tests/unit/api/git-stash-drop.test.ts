@@ -63,12 +63,12 @@ describe('DELETE /api/worktrees/:id/git/stash/:index (Issue #782)', () => {
 
   it('returns 404 when the worktree is not found', async () => {
     (getWorktreeById as ReturnType<typeof vi.fn>).mockReturnValue(null);
-    const response = await DELETE(createRequest(), { params: { id: 'test-id', index: '0' } });
+    const response = await DELETE(createRequest(), { params: Promise.resolve({ id: 'test-id', index: '0' }) });
     expect(response.status).toBe(404);
   });
 
   it('drops the stash at the string index and returns 200', async () => {
-    const response = await DELETE(createRequest(), { params: { id: 'test-id', index: '2' } });
+    const response = await DELETE(createRequest(), { params: Promise.resolve({ id: 'test-id', index: '2' }) });
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data.success).toBe(true);
@@ -77,7 +77,7 @@ describe('DELETE /api/worktrees/:id/git/stash/:index (Issue #782)', () => {
   });
 
   it('returns 400 invalid_stash_index for a non-numeric segment', async () => {
-    const response = await DELETE(createRequest(), { params: { id: 'test-id', index: 'abc' } });
+    const response = await DELETE(createRequest(), { params: Promise.resolve({ id: 'test-id', index: 'abc' }) });
     expect(response.status).toBe(400);
     const data = await response.json();
     expect(data.reason).toBe('invalid_stash_index');
@@ -85,19 +85,19 @@ describe('DELETE /api/worktrees/:id/git/stash/:index (Issue #782)', () => {
   });
 
   it('returns 400 invalid_stash_index for a decimal segment', async () => {
-    const response = await DELETE(createRequest(), { params: { id: 'test-id', index: '1.5' } });
+    const response = await DELETE(createRequest(), { params: Promise.resolve({ id: 'test-id', index: '1.5' }) });
     expect(response.status).toBe(400);
   });
 
   it('returns 409 when the index is locked', async () => {
     (stashDrop as ReturnType<typeof vi.fn>).mockRejectedValue(new GitIndexLockedError('locked'));
-    const response = await DELETE(createRequest(), { params: { id: 'test-id', index: '0' } });
+    const response = await DELETE(createRequest(), { params: Promise.resolve({ id: 'test-id', index: '0' }) });
     expect(response.status).toBe(409);
   });
 
   it('returns 504 on timeout', async () => {
     (stashDrop as ReturnType<typeof vi.fn>).mockRejectedValue(new GitTimeoutError('timeout'));
-    const response = await DELETE(createRequest(), { params: { id: 'test-id', index: '0' } });
+    const response = await DELETE(createRequest(), { params: Promise.resolve({ id: 'test-id', index: '0' }) });
     expect(response.status).toBe(504);
   });
 });

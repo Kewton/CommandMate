@@ -73,7 +73,7 @@ export function CodeBlockWithCopy({
   children,
   as = 'div',
   className = '',
-}: CodeBlockWithCopyProps): JSX.Element {
+}: CodeBlockWithCopyProps): React.JSX.Element {
   const Wrapper = as;
   const text = extractCodeText(children);
 

@@ -5,7 +5,7 @@
 
 'use client';
 
-import React, { useState } from 'react';
+import React, { use, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { ArrowLeft, Terminal, Monitor, Code, Bot, Zap, Sparkles, SquareTerminal } from 'lucide-react';
@@ -38,8 +38,9 @@ const TerminalComponent = dynamic(
 export default function TerminalPage({
   params
 }: {
-  params: { id: string }
+  params: Promise<{ id: string }>
 }) {
+  const { id } = use(params);
   const [selectedTool, setSelectedTool] = useState<string>('claude');
   const controlModeEnabled = isTmuxControlModeEnabledForClient();
   // Issue #915: terminal font size follows the PC display size selection.
@@ -60,7 +61,7 @@ export default function TerminalPage({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Link
-              href={`/worktrees/${params.id}`}
+              href={`/worktrees/${id}`}
               className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
             >
               <ArrowLeft size={20} />
@@ -70,7 +71,7 @@ export default function TerminalPage({
             <div className="flex items-center gap-2 text-white">
               <Terminal size={20} />
               <h1 className="text-lg font-semibold">
-                Terminal: {params.id}
+                Terminal: {id}
               </h1>
             </div>
           </div>
@@ -107,7 +108,7 @@ export default function TerminalPage({
         )}
         <div className="h-full bg-gray-800 rounded-lg overflow-hidden shadow-2xl">
           <TerminalComponent
-            worktreeId={params.id}
+            worktreeId={id}
             cliToolId={selectedTool}
             className="h-full"
             controlModeEnabled={controlModeEnabled}

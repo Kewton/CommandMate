@@ -85,6 +85,24 @@ CommandMate is a Progressive Web App. On a mobile browser, use **Add to Home Scr
 
 ---
 
+## Browser Support
+
+The web UI is built with Tailwind CSS 4, which targets modern browsers and relies on
+`@property` and `color-mix()` for its color and theming layer. The minimum supported
+versions are:
+
+| Browser | Minimum version |
+|---------|-----------------|
+| Safari (macOS / iOS) | 16.4+ |
+| Chrome / Edge | 111+ |
+| Firefox | 128+ |
+
+Older browsers will load the app but render it with degraded colors and spacing.
+CommandMate is a local developer tool, so this matches the browsers a current
+development machine or phone will already have.
+
+---
+
 ## How it works
 
 ```mermaid

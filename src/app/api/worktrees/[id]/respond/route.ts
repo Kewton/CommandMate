@@ -33,9 +33,10 @@ const logger = createLogger('api/respond');
  */
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
+    const { id } = await params;
     const { messageId, answer } = await req.json();
 
     // Validation
@@ -127,10 +128,10 @@ export async function POST(
     updatePromptData(db, messageId, updatedPromptData);
 
     // Get worktree to verify it exists
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${params.id}' not found` },
+        { error: `Worktree '${id}' not found` },
         { status: 404 }
       );
     }
@@ -147,7 +148,7 @@ export async function POST(
     const cliTool = manager.getTool(cliToolId);
 
     // Get session name for the CLI tool
-    const sessionName = cliTool.getSessionName(params.id, instanceId);
+    const sessionName = cliTool.getSessionName(id, instanceId);
 
     // Send answer to tmux via shared sendPromptAnswer() (Issue #616)
     try {
@@ -173,13 +174,13 @@ export async function POST(
     };
 
     broadcastMessage('message_updated', {
-      worktreeId: params.id,
+      worktreeId: id,
       message: updatedMessage,
     });
 
     // Resume polling for CLI tool's next response
-    startPolling(params.id, cliToolId, instanceId);
-    void broadcastTerminalSnapshotAfterInteraction(params.id, cliToolId, instanceId);
+    startPolling(id, cliToolId, instanceId);
+    void broadcastTerminalSnapshotAfterInteraction(id, cliToolId, instanceId);
 
     logger.info('resumed-polling-for');
 

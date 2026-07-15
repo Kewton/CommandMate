@@ -173,6 +173,46 @@ jobs:
           CI: 'true'
           NODE_OPTIONS: '--max-old-space-size=6144'
 
+  test-e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Issue #1180: the E2E suite drifted for months because it never ran in CI
+      # — same failure mode as the integration suite in #1102. Only chromium is
+      # installed: playwright.config.ts declares a single chromium project (see
+      # the comment there on why the Mobile Safari project was dropped).
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      # playwright.config.ts owns the isolation: it boots its own dev server on
+      # port 3177 with CM_DB_PATH/CM_ROOT_DIR pinned to a throwaway state dir, so
+      # no server or DB setup is needed here.
+      - name: Run E2E tests
+        run: npm run test:e2e
+        env:
+          CI: 'true'
+          NODE_OPTIONS: '--max-old-space-size=6144'
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
   build:
     name: Build
     runs-on: ubuntu-latest

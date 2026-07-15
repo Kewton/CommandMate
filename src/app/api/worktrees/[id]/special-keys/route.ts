@@ -24,9 +24,10 @@ const MAX_KEYS_LENGTH = 10;
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   // 0. JSON parse defense [DR4-002]
+  const { id } = await params;
   let body: Record<string, unknown>;
   try {
     body = await req.json();
@@ -84,7 +85,7 @@ export async function POST(
 
     // 4. DB existence check
     const db = getDbInstance();
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
         { error: 'Worktree not found' },
@@ -95,7 +96,7 @@ export async function POST(
     // 5. Session existence check
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(cliToolId);
-    const sessionName = cliTool.getSessionName(params.id, instanceId);
+    const sessionName = cliTool.getSessionName(id, instanceId);
 
     const sessionExists = await hasSession(sessionName);
     if (!sessionExists) {
@@ -107,7 +108,7 @@ export async function POST(
 
     // 6. Send special keys and invalidate cache [DR1-003]
     await sendSpecialKeysAndInvalidate(sessionName, keys);
-    void broadcastTerminalSnapshotAfterInteraction(params.id, cliToolId, instanceId as string | undefined);
+    void broadcastTerminalSnapshotAfterInteraction(id, cliToolId, instanceId as string | undefined);
 
     return NextResponse.json({ success: true });
   } catch (error) {

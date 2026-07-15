@@ -4,8 +4,8 @@
  * Verifies that:
  *  - globals.css defines every token in both `:root` (light) and `.dark`,
  *    using RGB channel values that mirror the current effective shades.
- *  - tailwind.config.js registers each token as a `rgb(var(--token) / <alpha-value>)`
- *    color and no longer exposes the removed `primary` / `cmd-bg-dark` colors.
+ *  - the `@theme` block registers each token as a `rgb(var(--token))` color and
+ *    no longer exposes the removed `primary` / `cmd-bg-dark` colors.
  *  - the body background was migrated to the `bg-background` token.
  *  - no source references the removed `bg-primary-*` / `bg-cmd-bg-dark` classes.
  *
@@ -15,7 +15,8 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import resolveConfig from 'tailwindcss/resolveConfig';
+import postcss from 'postcss';
+import tailwindcss from '@tailwindcss/postcss';
 
 const ROOT = path.resolve(__dirname, '../../..');
 
@@ -105,74 +106,96 @@ describe('Design tokens (Issue #1041)', () => {
       }
     });
 
-    it('uses RGB channel triplets (not hex) so <alpha-value> composition works', () => {
+    it('uses RGB channel triplets (not hex) so alpha composition works', () => {
       expect(root).not.toMatch(/--[a-z0-9-]+\s*:\s*#/i);
       expect(dark).not.toMatch(/--[a-z0-9-]+\s*:\s*#/i);
     });
   });
 
-  describe('tailwind.config.js color registration', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const config = require(path.join(ROOT, 'tailwind.config.js'));
-    const colors = resolveConfig(config).theme.colors as Record<string, unknown>;
+  /*
+   * [Issue #1178] Tailwind 4 is CSS-first: colors are registered in the `@theme`
+   * block of globals.css, not tailwind.config.js. The `<alpha-value>` placeholder
+   * no longer exists — Tailwind 4 composes opacity modifiers itself via
+   * color-mix() — so the registered form is a plain `rgb(var(--token))`.
+   * These assertions are compiled end-to-end (not just string-matched) so an
+   * unknown utility cannot slip through. See docs/design-system.md.
+   */
+  describe('@theme color registration', () => {
+    let css: string;
+    let compiled: string;
 
-    it('registers scalar semantic colors as rgb(var(--token) / <alpha-value>)', () => {
-      expect(colors.background).toBe('rgb(var(--background) / <alpha-value>)');
-      expect(colors.foreground).toBe('rgb(var(--foreground) / <alpha-value>)');
-      expect(colors.border).toBe('rgb(var(--border) / <alpha-value>)');
-      expect(colors.input).toBe('rgb(var(--input) / <alpha-value>)');
-      expect(colors.ring).toBe('rgb(var(--ring) / <alpha-value>)');
-      // [Issue #1112] status colors became nested scales (DEFAULT + tint roles);
-      // the DEFAULT keeps `text-success` etc. working unchanged.
+    beforeAll(async () => {
+      const cssPath = path.join(ROOT, 'src/app/globals.css');
+      css = fs.readFileSync(cssPath, 'utf-8');
+      const result = await postcss([tailwindcss({ base: ROOT, optimize: false })]).process(css, {
+        from: cssPath,
+      });
+      compiled = result.css;
+    }, 120_000);
+
+    function registers(token: string): boolean {
+      return css.includes(`--color-${token}: rgb(var(--${token}));`);
+    }
+
+    it('registers scalar semantic colors as rgb(var(--token))', () => {
+      for (const token of ['background', 'foreground', 'border', 'input', 'ring']) {
+        expect(registers(token), `--color-${token}`).toBe(true);
+      }
+      // [Issue #1112] status colors carry tint roles; the bare token keeps
+      // `text-success` etc. working unchanged.
       for (const status of ['success', 'warning', 'danger', 'info']) {
-        const scale = colors[status] as Record<string, string>;
-        expect(scale.DEFAULT).toBe(`rgb(var(--${status}) / <alpha-value>)`);
+        expect(registers(status), `--color-${status}`).toBe(true);
       }
     });
 
-    it('registers nested surface/muted/accent scales', () => {
-      const surface = colors.surface as Record<string, string>;
-      expect(surface.DEFAULT).toBe('rgb(var(--surface) / <alpha-value>)');
-      expect(surface.foreground).toBe('rgb(var(--surface-foreground) / <alpha-value>)');
-      expect(surface['2']).toBe('rgb(var(--surface-2) / <alpha-value>)');
-
-      const muted = colors.muted as Record<string, string>;
-      expect(muted.DEFAULT).toBe('rgb(var(--muted) / <alpha-value>)');
-      expect(muted.foreground).toBe('rgb(var(--muted-foreground) / <alpha-value>)');
-
-      const accent = colors.accent as Record<string, string>;
+    it('registers the surface/muted/accent scales', () => {
+      for (const token of ['surface', 'surface-foreground', 'surface-2', 'muted', 'muted-foreground']) {
+        expect(registers(token), `--color-${token}`).toBe(true);
+      }
       for (const shade of [50, 100, 200, 300, 400, 500, 600, 700]) {
-        expect(accent[String(shade)]).toBe(`rgb(var(--accent-${shade}) / <alpha-value>)`);
+        expect(registers(`accent-${shade}`), `--color-accent-${shade}`).toBe(true);
       }
     });
 
     // [Issue #1073] Round-trip guard: globals.css defines --sidebar-* (checked in
-    // the MODE_VARYING block above) AND tailwind.config.js must register the
-    // matching `sidebar` scale. Without this, `bg-sidebar` would be an unknown
-    // utility and the sidebar could silently render transparent while every
-    // other gate still passes (Must Fix S3-003).
+    // the MODE_VARYING block above) AND the theme must register the matching
+    // `sidebar` scale. Without this, `bg-sidebar` would be an unknown utility and
+    // the sidebar could silently render transparent while every other gate still
+    // passes (Must Fix S3-003).
     it('registers the sidebar color scale (Issue #1073)', () => {
-      const sidebar = colors.sidebar as Record<string, string>;
-      expect(sidebar.DEFAULT).toBe('rgb(var(--sidebar) / <alpha-value>)');
-      expect(sidebar.foreground).toBe('rgb(var(--sidebar-foreground) / <alpha-value>)');
-      expect(sidebar.border).toBe('rgb(var(--sidebar-border) / <alpha-value>)');
-      expect(sidebar.hover).toBe('rgb(var(--sidebar-hover) / <alpha-value>)');
-      expect(sidebar.muted).toBe('rgb(var(--sidebar-muted) / <alpha-value>)');
+      for (const token of [
+        'sidebar',
+        'sidebar-foreground',
+        'sidebar-border',
+        'sidebar-hover',
+        'sidebar-muted',
+      ]) {
+        expect(registers(token), `--color-${token}`).toBe(true);
+      }
+    });
+
+    it('emits bg-sidebar / bg-surface / text-muted-foreground as real utilities', () => {
+      // Compiling the real stylesheet proves the registration actually reaches
+      // the utility layer — a string match alone would not.
+      expect(compiled).toContain('.bg-sidebar');
+      expect(compiled).toContain('.bg-surface');
+      expect(compiled).toContain('.text-muted-foreground');
+      expect(compiled).toMatch(/\.bg-background\s*\{\s*background-color:\s*rgb\(var\(--background\)\)/);
     });
 
     it('no longer exposes the removed primary / cmd-bg-dark colors', () => {
-      expect(colors.primary).toBeUndefined();
-      expect(colors['cmd-bg-dark']).toBeUndefined();
+      expect(css).not.toContain('--color-primary:');
+      expect(css).not.toContain('cmd-bg-dark');
     });
 
     // [Issue #1074] The light page went gray + white cards, so shadow-sm must
     // read as a real 2-layer elevation (was the flat Tailwind default
-    // `0 1px 2px 0 rgb(0 0 0 / 0.05)`). boxShadow is mode-independent; the
+    // `0 1px 2px 0 rgb(0 0 0 / 0.05)`). The shadow scale is mode-independent; the
     // slate tint is near-invisible on the dark #0a0c12 base so dark is unchanged.
-    it('defines a custom 2-layer boxShadow.sm (Issue #1074)', () => {
-      const boxShadow = resolveConfig(config).theme.boxShadow as Record<string, string>;
-      const sm = boxShadow.sm;
-      expect(sm).toBeDefined();
+    it('defines a custom 2-layer --shadow-sm (Issue #1074)', () => {
+      const match = css.match(/--shadow-sm:\s*([^;]+);/);
+      expect(match, '--shadow-sm must be defined in @theme').not.toBeNull();
+      const sm = match![1];
       // No longer the flat single-layer Tailwind default.
       expect(sm).not.toBe('0 1px 2px 0 rgb(0 0 0 / 0.05)');
       // Two comma-separated shadow layers.

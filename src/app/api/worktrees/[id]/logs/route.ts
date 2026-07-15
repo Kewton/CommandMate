@@ -16,17 +16,17 @@ const logger = createLogger('api/logs');
 
 export const GET = withLogging<{ id: string }>(async (
   request: NextRequest,
-  { params }: { params: { id: string } | Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> }
 ) => {
   try {
-    const resolvedParams = await Promise.resolve(params);
+    const { id } = await params;
     const db = getDbInstance();
 
     // Check if worktree exists
-    const worktree = getWorktreeById(db, resolvedParams.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${resolvedParams.id}' not found` },
+        { error: `Worktree '${id}' not found` },
         { status: 404 }
       );
     }
@@ -36,7 +36,7 @@ export const GET = withLogging<{ id: string }>(async (
     const cliToolFilter = searchParams?.get('cliTool') || 'all';
 
     // Get log files using log-manager
-    const logPaths = await listLogs(resolvedParams.id, cliToolFilter);
+    const logPaths = await listLogs(id, cliToolFilter);
 
     // Extract filenames from full paths and get file info
     const logFiles = await Promise.all(

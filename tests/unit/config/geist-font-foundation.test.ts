@@ -1,9 +1,10 @@
 /**
  * Tests for Geist Font Foundation (Issue #1043)
  *
- * Verifies tailwind.config.js, layout.tsx, globals.css, Terminal.tsx and
- * package.json are correctly configured to self-host Geist Sans / Geist Mono
- * via next/font (geist package), with Japanese-capable fallbacks preserved.
+ * Verifies the Tailwind theme (globals.css, CSS-first since Issue #1178),
+ * layout.tsx, Terminal.tsx and package.json are correctly configured to
+ * self-host Geist Sans / Geist Mono via next/font (geist package), with
+ * Japanese-capable fallbacks preserved.
  *
  * @vitest-environment node
  */
@@ -24,32 +25,49 @@ describe('Geist Font Foundation (Issue #1043)', () => {
     });
   });
 
-  describe('tailwind.config.js fontFamily', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const config = require(path.join(ROOT, 'tailwind.config.js'));
-    const fontFamily = config.theme.extend.fontFamily;
+  /*
+   * [Issue #1178] Tailwind 4 is CSS-first: fontFamily moved from
+   * tailwind.config.js `theme.extend.fontFamily` to the `--font-sans` /
+   * `--font-mono` keys of the `@theme` block in globals.css.
+   */
+  describe('@theme fontFamily', () => {
+    let sans: string;
+    let mono: string;
+
+    beforeAll(() => {
+      const css = fs.readFileSync(path.join(ROOT, 'src/app/globals.css'), 'utf-8');
+      const grab = (name: string): string => {
+        const match = css.match(new RegExp(`--font-${name}:\\s*([^;]+);`));
+        expect(match, `--font-${name} must be defined in @theme`).not.toBeNull();
+        return match![1].replace(/\s+/g, ' ').trim();
+      };
+      sans = grab('sans');
+      mono = grab('mono');
+    });
+
+    const stack = (value: string): string[] => value.split(',').map((f) => f.trim());
 
     it('should resolve font-sans to Geist Sans first', () => {
-      expect(fontFamily.sans[0]).toBe('var(--font-geist-sans)');
+      expect(stack(sans)[0]).toBe('var(--font-geist-sans)');
     });
 
     it('should resolve font-mono to Geist Mono first', () => {
-      expect(fontFamily.mono[0]).toBe('var(--font-geist-mono)');
+      expect(stack(mono)[0]).toBe('var(--font-geist-mono)');
     });
 
     it('should keep Japanese fallback fonts in the sans stack', () => {
-      expect(fontFamily.sans).toContain('Hiragino Kaku Gothic ProN');
-      expect(fontFamily.sans).toContain('Noto Sans JP');
+      expect(sans).toContain('Hiragino Kaku Gothic ProN');
+      expect(sans).toContain('Noto Sans JP');
     });
 
     it('should end the sans stack with a generic sans-serif fallback', () => {
-      expect(fontFamily.sans[fontFamily.sans.length - 1]).toBe('sans-serif');
+      expect(stack(sans).at(-1)).toBe('sans-serif');
     });
 
     it('should preserve the previous monospace stack as mono fallback', () => {
-      expect(fontFamily.mono).toContain('ui-monospace');
-      expect(fontFamily.mono).toContain('Menlo');
-      expect(fontFamily.mono[fontFamily.mono.length - 1]).toBe('monospace');
+      expect(mono).toContain('ui-monospace');
+      expect(mono).toContain('Menlo');
+      expect(stack(mono).at(-1)).toBe('monospace');
     });
   });
 
@@ -87,7 +105,9 @@ describe('Geist Font Foundation (Issue #1043)', () => {
     });
 
     it('should reference the mono token for inline assistant code', () => {
-      expect(content).toContain("font-family: theme('fontFamily.mono')");
+      // [Issue #1178] Tailwind 4 replaces the v3 `theme()` function with a direct
+      // reference to the theme variable the @theme block generates.
+      expect(content).toContain('font-family: var(--font-mono)');
     });
 
     it('should no longer hardcode the SFMono monospace stack', () => {

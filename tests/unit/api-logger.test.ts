@@ -73,7 +73,7 @@ describe('withLogging', () => {
     const wrappedHandler = withLogging(handler);
 
     const request = createMockRequest('http://localhost:3000/api/worktrees/wt-1/logs?cliTool=claude');
-    const context = { params: { id: 'wt-1' } };
+    const context = { params: Promise.resolve({ id: 'wt-1' }) };
 
     await wrappedHandler(request, context);
 
@@ -103,7 +103,7 @@ describe('withLogging', () => {
     const wrappedHandler = withLogging(handler);
 
     const request = createMockRequest('http://localhost:3000/api/test');
-    const context = { params: {} };
+    const context = { params: Promise.resolve({}) };
 
     await wrappedHandler(request, context);
 
@@ -121,7 +121,7 @@ describe('withLogging', () => {
     const wrappedHandler = withLogging(handler);
 
     const request = createMockRequest('http://localhost:3000/api/test');
-    const context = { params: {} };
+    const context = { params: Promise.resolve({}) };
 
     await wrappedHandler(request, context);
 
@@ -139,7 +139,7 @@ describe('withLogging', () => {
     const wrappedHandler = withLogging(handler, { logLevel: 'debug' });
 
     const request = createMockRequest('http://localhost:3000/api/test');
-    const context = { params: {} };
+    const context = { params: Promise.resolve({}) };
 
     await wrappedHandler(request, context);
 
@@ -163,7 +163,7 @@ describe('withLogging', () => {
     const wrappedHandler = withLogging(handler, { maxResponseBodyLength: 1024 });
 
     const request = createMockRequest('http://localhost:3000/api/test');
-    const context = { params: {} };
+    const context = { params: Promise.resolve({}) };
 
     await wrappedHandler(request, context);
 
@@ -187,7 +187,7 @@ describe('withLogging', () => {
     const wrappedHandler = withLogging(handler, { skipResponseBody: true });
 
     const request = createMockRequest('http://localhost:3000/api/test');
-    const context = { params: {} };
+    const context = { params: Promise.resolve({}) };
 
     await wrappedHandler(request, context);
 
@@ -209,7 +209,7 @@ describe('withLogging', () => {
     const wrappedHandler = withLogging(handler);
 
     const request = createMockRequest('http://localhost:3000/api/test');
-    const context = { params: {} };
+    const context = { params: Promise.resolve({}) };
 
     const response = await wrappedHandler(request, context);
 
@@ -230,7 +230,7 @@ describe('withLogging', () => {
     const wrappedHandler = withLogging(handler);
 
     const request = createMockRequest('http://localhost:3000/api/test');
-    const context = { params: {} };
+    const context = { params: Promise.resolve({}) };
 
     await expect(wrappedHandler(request, context)).rejects.toThrow('Handler failed');
   });
@@ -254,7 +254,7 @@ describe('withLogging', () => {
     const wrappedHandler = withLogging<{ id: string; filename: string }>(handler);
 
     const request = createMockRequest('http://localhost:3000/api/worktrees/wt-1/logs/test.md');
-    const context = { params: { id: 'wt-1', filename: 'test.md' } };
+    const context = { params: Promise.resolve({ id: 'wt-1', filename: 'test.md' }) };
 
     const response = await wrappedHandler(request, context);
     const body = await response.json();

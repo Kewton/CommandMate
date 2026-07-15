@@ -8,7 +8,7 @@
  * '/', so a dynamic segment is appropriate here (unlike the #781 branch delete
  * which used POST + body because branch names contain '/').
  *
- * `params.index` is received as a STRING and validated with validateStashIndex
+ * The `index` route param is received as a STRING (`rawIndex`) and validated with validateStashIndex
  * (digits-only, <= MAX_STASH_INDEX) before being embedded as a number. Errors
  * map via handleGitApiError (400 invalid_stash_index / 409 index lock / 504
  * timeout / 500 generic).
@@ -21,15 +21,16 @@ import { validateStashIndex } from '@/lib/git/git-route-helpers';
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string; index: string } }
+  { params }: { params: Promise<{ id: string; index: string }> }
 ) {
   try {
-    const worktree = resolveWorktreeOr404(params.id);
+    const { id, index: rawIndex } = await params;
+    const worktree = resolveWorktreeOr404(id);
     if (worktree instanceof NextResponse) {
       return worktree;
     }
 
-    const index = validateStashIndex(params.index);
+    const index = validateStashIndex(rawIndex);
     if (index instanceof NextResponse) {
       return index;
     }

@@ -1,7 +1,7 @@
 /**
  * [Issue #1050] List entrance stagger helpers.
  *
- * Combines tailwindcss-animate entrance classes with a per-item animation
+ * Combines tw-animate-css entrance classes with a per-item animation
  * delay. `fill-mode-backwards` holds the hidden start frame only during the
  * delay window and reverts to base styles once the entrance finishes, so a
  * later `:hover` transform (e.g. interactive cards) is not clobbered by the
