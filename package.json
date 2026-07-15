@@ -38,7 +38,7 @@
     "build:all": "npm run build && npm run build:cli && npm run build:server",
     "prepublishOnly": "npm run build:all",
     "start": "NODE_ENV=production node dist/server/server.js",
-    "lint": "next lint",
+    "lint": "eslint src --ext .js,.jsx,.ts,.tsx",
     "test": "NODE_ENV=test vitest",
     "test:ui": "NODE_ENV=test vitest --ui",
     "test:coverage": "NODE_ENV=test vitest --coverage",
