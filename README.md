@@ -144,7 +144,7 @@ already running). Requires Node.js 20 or later.
 - Otherwise, open http://localhost:3000 in your browser.
 
 See the [CLI Setup Guide](./docs/en/user-guide/cli-setup-guide.md) for details.
-For Windows users, see the [WSL2 Setup Guide](./docs/user-guide/wsl2-setup.md).
+For Windows users, see the [WSL2 Setup Guide](./docs/en/user-guide/wsl2-setup.md) — CommandMate depends on tmux, so it runs on Windows via WSL2 (native Windows is not supported).
 
 </details>
 
@@ -244,6 +244,48 @@ Requires [gh CLI](https://cli.github.com/) to be installed.
 | `commandmate docs --all` | List all available sections |
 
 See `commandmate --help` for all options.
+
+</details>
+
+<details>
+<summary><strong>Update</strong></summary>
+
+If you installed globally (`npm install -g commandmate`), one command does everything —
+it stops the server, installs the latest version, restarts it, and checks that it came back up.
+
+```bash
+# See whether an update is available (changes nothing)
+commandmate update --check
+
+# Update (asks for confirmation)
+commandmate update
+
+# Non-interactive environments (CI, scripts) require --yes
+commandmate update --yes
+```
+
+**Your data is safe.** Database migrations run automatically the next time the server starts,
+so your worktrees, sessions, and settings carry over. There is no manual migration step.
+
+**Manual update (fallback)** — if `commandmate update` is unavailable:
+
+```bash
+commandmate stop
+npm install -g commandmate@latest
+commandmate start --daemon
+```
+
+Notes:
+
+- After updating, the server restarts using only your `.env`. If you had started it with flags
+  such as `--auth` / `--cert` / `--key` / `--allowed-ips` / `--trust-proxy` / `--port`, start it
+  again manually with those flags (`--auth` generates a new token on each start).
+- Worktree servers (`--issue`) are not stopped automatically. Stop them with
+  `commandmate stop --issue <number>` **before** updating.
+- On permission errors (EACCES), don't re-run with `sudo` — fix your npm global directory
+  permissions using the [CLI Setup Guide](./docs/en/user-guide/cli-setup-guide.md).
+
+See the [Deployment Guide](./docs/en/DEPLOYMENT.md) for exit codes and details.
 
 </details>
 

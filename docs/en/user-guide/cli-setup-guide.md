@@ -29,7 +29,6 @@ The following tools are required to use CommandMate.
 | npm | - | Yes | `npm -v` |
 | Git | - | Yes | `git --version` |
 | tmux | - | Yes | `tmux -V` |
-| openssl | - | Yes | `openssl version` |
 | Claude CLI | - | Optional | `claude --version` |
 | gh CLI | - | Optional | `gh --version` |
 
@@ -37,7 +36,7 @@ The following tools are required to use CommandMate.
 
 ```bash
 # Check all dependencies
-node -v && npm -v && git --version && tmux -V && openssl version
+node -v && npm -v && git --version && tmux -V
 ```
 
 ### Installing Each Tool
@@ -46,17 +45,17 @@ node -v && npm -v && git --version && tmux -V && openssl version
 
 ```bash
 # Using Homebrew
-brew install node git tmux openssl
+brew install node git tmux
 ```
 
 #### Ubuntu/Debian
 
 ```bash
 sudo apt update
-sudo apt install nodejs npm git tmux openssl
+sudo apt install nodejs npm git tmux
 ```
 
-> **Note**: Windows is not currently supported (due to tmux dependency). WSL2 has not been tested.
+> **Note**: Native Windows is not supported because CommandMate depends on tmux. On Windows, run CommandMate inside WSL2 — see the [WSL2 Setup Guide](./wsl2-setup.md).
 
 ---
 
