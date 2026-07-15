@@ -54,3 +54,31 @@ logs/
 # Auto-generated AI-agent dev logs (pm-auto-dev / issue / review / bug-fix / uat reports).
 # Machine output, not source — kept locally but never committed (Issue: repo bloat cleanup).
 /dev-reports/
+
+# --- UI検証で生成されるデバッグ生成物（リポジトリ直下）---
+# Playwright / MCP による画面検証で、リポジトリ直下にスクリーンショットや
+# aria スナップショットが生成され堆積する。docs/images/ の正規スクリーンショットは
+# 追跡対象のため、パターンは「直下のみ」に限定している（先頭の / が効いている）。
+/*.png
+/*.yml
+/*.yaml
+/*.log
+/scratchpad/
+
+# CommandMate 実行時データ（ユーザーがチャットに添付した画像の保存先）。
+# src/app/api/worktrees/[id]/send/route.ts が imagePath の許可パスとして参照する。
+# アプリが書き込み続けるランタイム生成物のためコミットしない（dev-reports/ と同扱い）。
+/.commandmate/
+
+# 直下の .md は既知のドキュメントのみ追跡する。
+# 検証用スナップショットは *-snapshot.md / snapshot-*.md / codex-tab-final.md のように
+# 命名が一定しないため、パターン列挙ではなく許可リスト方式で捕捉する。
+# 直下に新しいドキュメントを追加するときは、下に ! 行を足すこと。
+/*.md
+!/AGENTS.md
+!/CHANGELOG.md
+!/CLAUDE.md
+!/CODE_OF_CONDUCT.md
+!/CONTRIBUTING.md
+!/README.md
+!/SECURITY.md
