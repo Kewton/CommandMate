@@ -209,6 +209,8 @@ NODE_MODULE_VERSION 115.
 
 **Cause:** After switching the Node.js version with `nvm`, the native module is left built for the old version.
 
+**This normally recovers automatically (Issue #1263):** when the database connection hits this error, CommandMate runs `npm rebuild better-sqlite3` for you and continues. Only follow the steps below if the automatic rebuild fails.
+
 **Solution:**
 
 ```bash

@@ -9,6 +9,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import { runMigrations } from './db-migrations';
+import { openDatabaseWithAbiRecovery } from './abi-recovery';
 import { getEnv } from '@/lib/env';
 
 let dbInstance: Database.Database | null = null;
@@ -42,7 +43,8 @@ export function getDbInstance(): Database.Database {
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     }
 
-    dbInstance = new Database(dbPath);
+    // Issue #1263: recover from a better-sqlite3 ABI mismatch (Node.js version switch)
+    dbInstance = openDatabaseWithAbiRecovery(dbPath);
     // Issue #294: Enable foreign key enforcement BEFORE migrations
     // This ensures ON DELETE CASCADE works correctly for all tables
     dbInstance.pragma('foreign_keys = ON');
