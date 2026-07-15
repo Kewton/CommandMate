@@ -1517,6 +1517,12 @@ describe('GitPane', () => {
       render(<GitPane {...defaultProps} />);
       await waitFor(() => expect(screen.getByTestId('git-push-button')).toBeInTheDocument());
 
+      // The toggle is rendered from /git/staged, which resolves independently of the
+      // /git/status fetch the push button waits on — wait for it before asserting.
+      await waitFor(() =>
+        expect(screen.getByTestId('git-changes-toggle-button')).toBeInTheDocument()
+      );
+
       // The staged file's Unstage toggle is enabled (busy=false) initially.
       const toggleBefore = screen.getByTestId('git-changes-toggle-button');
       expect(toggleBefore).not.toBeDisabled();
@@ -1568,6 +1574,11 @@ describe('GitPane', () => {
       // Spinner appears (fetch in-flight) but the Unstage toggle stays enabled.
       await waitFor(() =>
         expect(screen.getByTestId('git-network-operation-spinner')).toBeInTheDocument()
+      );
+      // Same race as above: the toggle comes from /git/staged, not from the fetch
+      // the spinner tracks, so its presence must be awaited before asserting on it.
+      await waitFor(() =>
+        expect(screen.getByTestId('git-changes-toggle-button')).toBeInTheDocument()
       );
       expect(screen.getByTestId('git-changes-toggle-button')).not.toBeDisabled();
 
