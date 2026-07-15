@@ -115,7 +115,7 @@ export function Modal({
       {/* [Issue #1050/#1114] data-state drives the fade enter/exit animations. */}
       <div
         data-state={dataState}
-        className="fixed inset-0 bg-black bg-opacity-50 transition-opacity data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-200 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-200 data-[state=closed]:fill-mode-forwards"
+        className="fixed inset-0 bg-black/50 transition-opacity data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-200 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-200 data-[state=closed]:fill-mode-forwards"
         onClick={disableClose || isExiting ? undefined : onClose}
       />
 

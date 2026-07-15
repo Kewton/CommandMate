@@ -1,12 +1,227 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss' source(none);
+/*
+ * [Issue #1178] Tailwind CSS 4 (CSS-first). `source(none)` disables v4's
+ * automatic content detection so the scanned set stays exactly what the v3
+ * `content` globs covered — auto-detection would also scan docs/ and CHANGELOG,
+ * emitting utilities for class names that only appear in prose.
+ * Hooks are listed because usePromptAnimation returns animate-fade-in/out
+ * class names; without this they get purged (see Issue #1114).
+ */
+@source '../components/**/*.{js,ts,jsx,tsx,mdx}';
+@source './**/*.{js,ts,jsx,tsx,mdx}';
+@source '../hooks/**/*.{js,ts,jsx,tsx}';
+
+@plugin '@tailwindcss/typography';
+/*
+ * [Issue #1050] Micro-interaction utilities (animate-in/out, fade/zoom/slide,
+ * fill-mode, animation delay/duration) used by Modal, Radix data-state
+ * primitives, and list stagger. framer-motion intentionally not used.
+ * [Issue #1178] tw-animate-css replaces tailwindcss-animate, which is a v3-only
+ * JS plugin (peer `tailwindcss@>=3.0.0`) with no Tailwind 4 support. It is a
+ * drop-in port: identical class surface, so no call sites changed.
+ */
+@import 'tw-animate-css';
+
+/* [Issue #1178] Replaces v3 `darkMode: 'class'`. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * [Issue #1178] CSS-first theme, replacing tailwind.config.js.
+ *
+ * `inline` matters: it makes utilities emit `rgb(var(--background))` directly
+ * instead of `var(--color-background)`. Because the channel triplets are
+ * re-declared under `.dark` (below), the reference must resolve on the element
+ * rather than being frozen at `:root`, or theme switching would break.
+ *
+ * The v3 `<alpha-value>` placeholder is gone: Tailwind 4 composes opacity
+ * modifiers itself via `color-mix()`, so `bg-surface/50` still works from a
+ * plain `rgb(var(--surface))` value. The RGB-channel-triplet token layer in
+ * `@layer base` is unchanged — see docs/design-system.md.
+ */
+@theme inline {
+  /*
+   * Geist Sans first, then Japanese fallback (Geist lacks JP glyphs), then the
+   * system sans stack. CSS var is provided by next/font (geist) via the
+   * className applied to <html> in src/app/layout.tsx.
+   */
+  --font-sans: var(--font-geist-sans), 'Hiragino Kaku Gothic ProN', 'Noto Sans JP',
+    system-ui, -apple-system, sans-serif;
+  /* Geist Mono first, preserving the previous monospace stack as fallback. */
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco,
+    monospace;
+
+  /* [Issue #1041] Semantic tokens backed by CSS variables (see @layer base). */
+  --color-background: rgb(var(--background));
+  --color-foreground: rgb(var(--foreground));
+  --color-surface: rgb(var(--surface));
+  --color-surface-foreground: rgb(var(--surface-foreground));
+  --color-surface-2: rgb(var(--surface-2));
+  --color-muted: rgb(var(--muted));
+  --color-muted-foreground: rgb(var(--muted-foreground));
+
+  /*
+   * [Issue #1073] Sidebar surface scale (bg-sidebar / text-sidebar-foreground /
+   * border-sidebar-border / hover:bg-sidebar-hover / text-sidebar-muted).
+   */
+  --color-sidebar: rgb(var(--sidebar));
+  --color-sidebar-foreground: rgb(var(--sidebar-foreground));
+  --color-sidebar-border: rgb(var(--sidebar-border));
+  --color-sidebar-hover: rgb(var(--sidebar-hover));
+  --color-sidebar-muted: rgb(var(--sidebar-muted));
+
+  --color-border: rgb(var(--border));
+  --color-input: rgb(var(--input));
+  --color-ring: rgb(var(--ring));
+
+  --color-accent-50: rgb(var(--accent-50));
+  --color-accent-100: rgb(var(--accent-100));
+  --color-accent-200: rgb(var(--accent-200));
+  --color-accent-300: rgb(var(--accent-300));
+  --color-accent-400: rgb(var(--accent-400));
+  --color-accent-500: rgb(var(--accent-500));
+  --color-accent-600: rgb(var(--accent-600));
+  --color-accent-700: rgb(var(--accent-700));
+  --color-accent-800: rgb(var(--accent-800));
+  --color-accent-900: rgb(var(--accent-900));
+  --color-accent-950: rgb(var(--accent-950));
+
+  /*
+   * [Issue #1112] Status colors carry a tint scale (subtle/border/foreground)
+   * for alert surfaces; the bare token keeps `text-success` etc. working.
+   */
+  --color-success: rgb(var(--success));
+  --color-success-subtle: rgb(var(--success-subtle));
+  --color-success-border: rgb(var(--success-border));
+  --color-success-foreground: rgb(var(--success-foreground));
+  --color-warning: rgb(var(--warning));
+  --color-warning-subtle: rgb(var(--warning-subtle));
+  --color-warning-border: rgb(var(--warning-border));
+  --color-warning-foreground: rgb(var(--warning-foreground));
+  --color-danger: rgb(var(--danger));
+  --color-danger-subtle: rgb(var(--danger-subtle));
+  --color-danger-border: rgb(var(--danger-border));
+  --color-danger-foreground: rgb(var(--danger-foreground));
+  --color-info: rgb(var(--info));
+  --color-info-subtle: rgb(var(--info-subtle));
+  --color-info-border: rgb(var(--info-border));
+  --color-info-foreground: rgb(var(--info-foreground));
+
+  /*
+   * [Issue #1074] Light mode inverted to a gray page with white cards, so
+   * shadow-sm must read as a real 2-layer elevation instead of the flat
+   * Tailwind default. The slate tint (rgb(15 23 42)) is near-invisible on the
+   * dark #0a0c12 base, so dark is unchanged (dark separates surfaces by border,
+   * not shadow). md/lg stay Tailwind defaults — this is scoped to sm.
+   */
+  --shadow-sm: 0 1px 2px rgb(15 23 42 / 0.06), 0 1px 1px rgb(15 23 42 / 0.04);
+
+  --animate-slide-in: slide-in 0.3s ease-out;
+  --animate-slide-up: slide-up 0.25s ease-out;
+  /*
+   * [Issue #1114] Fade utilities consumed by usePromptAnimation (PromptPanel).
+   * Duration and easing reference the #1050 motion tokens; `both` fill keeps the
+   * end state until the JS unmount timer (same 200ms) fires, avoiding a 1-frame
+   * flash if the timer lands after the animation ends.
+   */
+  --animate-fade-in: fade-in var(--motion-duration-base) var(--motion-ease-out) both;
+  --animate-fade-out: fade-out var(--motion-duration-base) var(--motion-ease-out) both;
+  /*
+   * [Issue #1051] StatusDot "living" states. Infinite CSS animations so polling
+   * re-renders never restart them (no JS/inline-style keying). OS "reduce
+   * motion" is honored globally below (#1050), which freezes these to a static
+   * dot — do not re-implement the media query.
+   */
+  --animate-status-glow: status-glow 2.4s ease-in-out infinite;
+  --animate-status-blink: status-blink 1.6s ease-in-out infinite;
+
+  @keyframes slide-in {
+    0% {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    100% {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+  /*
+   * [Issue #1114] Plain opacity fades (no transform — PromptPanel layers its own
+   * translate via transition utilities).
+   */
+  @keyframes fade-in {
+    0% {
+      opacity: 0;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+  @keyframes fade-out {
+    0% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+  @keyframes slide-up {
+    0% {
+      transform: translateY(100%);
+    }
+    100% {
+      transform: translateY(0);
+    }
+  }
+  /*
+   * Pulsing box-shadow glow keyed to the dot's own color via currentColor, so a
+   * single keyframe works for any status color (running=green).
+   */
+  @keyframes status-glow {
+    0%,
+    100% {
+      box-shadow: 0 0 3px 0 currentColor;
+      opacity: 0.85;
+    }
+    50% {
+      box-shadow: 0 0 8px 2px currentColor;
+      opacity: 1;
+    }
+  }
+  /* Weak amber blink for the waiting state. */
+  @keyframes status-blink {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.45;
+    }
+  }
+}
+
+@layer base {
+  /*
+   * [Issue #1178] Tailwind 4 changed the Preflight default border color from
+   * gray-200 to `currentColor`. Restoring the v3 default keeps bare `border`
+   * utilities rendering exactly as before — this migration is intentionally
+   * visual-change-free. Removing this requires auditing every bare `border`.
+   */
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+}
 
 @layer base {
   /*
    * [Issue #1041] Semantic design tokens.
-   * Values are RGB channel triplets (not hex) so Tailwind can synthesize alpha
-   * via `rgb(var(--token) / <alpha-value>)`.
+   * Values are RGB channel triplets (not hex) so alpha can be composed on top of
+   * them — both by hand (`rgb(var(--token) / 0.5)`) and by Tailwind's opacity
+   * modifiers (`bg-surface/50`, synthesized via color-mix since Issue #1178).
+   * Registered as utilities in the `@theme inline` block above.
    * See docs/design-system.md for naming rules and the hardcoded-color policy.
    *
    * [Issue #1049] Surface/depth revision — the FIRST intentional visual change.
@@ -91,7 +306,7 @@
 
     /*
      * [Issue #1050] Motion tokens. Mode-independent, so defined once on :root.
-     * Durations map to the tailwindcss-animate `duration-*` scale used across
+     * Durations map to the tw-animate-css `duration-*` scale used across
      * Modal / Radix data-state primitives / list stagger. Easing is ease-out
      * biased for entrances. See docs/design-system.md (Motion section).
      */
@@ -403,7 +618,7 @@
     padding: 0.08em 0.35em;
     border-radius: 4px;
     font-size: 0.9em;
-    font-family: theme('fontFamily.mono');
+    font-family: var(--font-mono);
   }
   /*
    * Fenced code blocks carry rehype-highlight (github-dark) syntax tokens, which
@@ -461,7 +676,7 @@
  * Honors the OS "reduce motion" setting by neutralizing all animations and
  * transitions globally. Declared as plain CSS (outside @layer) so the
  * !important reset reliably wins over both core Tailwind and
- * tailwindcss-animate utilities. Keep this the single source of truth for
+ * tw-animate-css utilities. Keep this the single source of truth for
  * motion suppression — components should not re-implement the media query.
  */
 @media (prefers-reduced-motion: reduce) {
