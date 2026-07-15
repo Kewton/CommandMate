@@ -757,6 +757,17 @@ export interface UpdateCheckResponse {
 }
 
 /**
+ * Response of POST /api/app/update
+ * Issue #1198: one-click self-update
+ */
+export interface UpdateStartResponse {
+  status: 'started';
+  /** False when no PID file exists: the update installs but this server keeps running the old version */
+  willRestart: boolean;
+  logPath: string;
+}
+
+/**
  * App-level API client
  * Issue #257: Application-wide endpoints (not worktree-specific)
  */
@@ -776,6 +787,39 @@ export const appApi = {
     return fetchApi<UpdateCheckResponse>('/api/app/update-check', {
       method: 'GET',
     });
+  },
+
+  /**
+   * Start the self-update.
+   * Issue #1198: sends no body — the server runs a fixed command and ignores
+   * request content by construction. Do not add a payload here.
+   *
+   * @throws ApiError with status 400 (not a global install) or 409 (already running)
+   */
+  async startUpdate(): Promise<UpdateStartResponse> {
+    return fetchApi<UpdateStartResponse>('/api/app/update', {
+      method: 'POST',
+    });
+  },
+
+  /**
+   * Liveness probe used to watch the server go down and come back during an
+   * update. Issue #1198: `/api/auth/status` is an AUTH_EXCLUDED_PATH,
+   * force-dynamic, and touches no DB, so it answers both before and after the
+   * restart regardless of auth.
+   *
+   * Never throws: a rejected fetch during an update is the expected signal, not
+   * an error to surface.
+   *
+   * @returns true when the server answered
+   */
+  async ping(): Promise<boolean> {
+    try {
+      const response = await fetch('/api/auth/status', { cache: 'no-store' });
+      return response.ok;
+    } catch {
+      return false;
+    }
   },
 };
 
