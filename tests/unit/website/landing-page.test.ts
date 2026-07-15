@@ -4,7 +4,7 @@
  * The LP is plain HTML/CSS/JS with no build step, so these tests are the only
  * automated gate on it. They encode the Issue's machine-verifiable acceptance
  * criteria: the page must resolve every asset it references relative to
- * `website/`, must stay out of the Next.js type-check, and must respect the
+ * `website/`, must ship nothing that needs compiling, and must respect the
  * media budget that keeps the hero's LCP defensible.
  */
 import { describe, it, expect } from 'vitest';
@@ -52,9 +52,10 @@ describe('Issue #1200: landing page structure', () => {
     expect(fs.existsSync(INDEX_HTML)).toBe(true);
   });
 
-  it('contains no .ts/.tsx files, which the root tsconfig would type-check', () => {
-    // tsconfig.json includes **/*.ts and excludes only node_modules, so any
-    // TypeScript here would enter `npx tsc --noEmit` and break the existing CI.
+  it('ships no TypeScript, which has no build step here to compile it', () => {
+    // Not a type-check concern since #1265 anchored the root tsconfig include
+    // (tests/unit/config/tsconfig-scope.test.ts guards that). The reason now is
+    // Pages-specific: it serves website/ verbatim, so a .ts would never run.
     const typescriptFiles = walk(WEBSITE_DIR).filter((f) => /\.tsx?$/.test(f));
     expect(typescriptFiles).toEqual([]);
   });
