@@ -240,8 +240,9 @@ describe('UpdateNotificationBanner', () => {
     it('shows the updating state and hides the button once confirmed', async () => {
       startUpdate();
 
-      await waitFor(() => expect(screen.getByTestId('update-progress')).toBeDefined());
-      expect(screen.getByText('worktree.update.updating')).toBeDefined();
+      // `update-progress` also renders for `starting`, so it appears before
+      // startUpdate() resolves. Wait for the `updating` copy itself.
+      await waitFor(() => expect(screen.getByText('worktree.update.updating')).toBeDefined());
       expect(screen.queryByTestId('update-now-button')).toBeNull();
     });
 
@@ -253,7 +254,8 @@ describe('UpdateNotificationBanner', () => {
         .mockResolvedValue(true); // back on the new version
 
       startUpdate();
-      await waitFor(() => expect(screen.getByTestId('update-progress')).toBeDefined());
+      // Polling only starts in `updating`; `update-progress` shows up earlier.
+      await waitFor(() => expect(screen.getByText('worktree.update.updating')).toBeDefined());
 
       await waitFor(() => expect(reload).toHaveBeenCalledTimes(1), { timeout: 10_000 });
     }, 15_000);
@@ -267,7 +269,8 @@ describe('UpdateNotificationBanner', () => {
       vi.mocked(appApi.ping).mockResolvedValue(true);
 
       startUpdate();
-      await waitFor(() => expect(screen.getByTestId('update-progress')).toBeDefined());
+      // Polling only starts in `updating`; `update-progress` shows up earlier.
+      await waitFor(() => expect(screen.getByText('worktree.update.updating')).toBeDefined());
       await waitFor(() => expect(appApi.ping).toHaveBeenCalled(), { timeout: 10_000 });
 
       expect(reload).not.toHaveBeenCalled();
@@ -312,7 +315,9 @@ describe('UpdateNotificationBanner', () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
 
       startUpdate();
-      await waitFor(() => expect(screen.getByTestId('update-progress')).toBeDefined());
+      // The timeout watcher only starts once `state === 'updating'`, so the
+      // clock must not be advanced while the banner still says `starting`.
+      await waitFor(() => expect(screen.getByText('worktree.update.updating')).toBeDefined());
 
       await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 2000);
 
