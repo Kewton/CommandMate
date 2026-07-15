@@ -13,6 +13,8 @@ export enum ExitCode {
   CONFIG_ERROR = 2,
   START_FAILED = 3,
   STOP_FAILED = 4,
+  /** Update failed (npm install / version verification / registry query) - Issue #1194 (D-1) */
+  UPDATE_FAILED = 5,
   UNEXPECTED_ERROR = 99,
 }
 
@@ -82,6 +84,17 @@ export interface StatusOptions {
   issue?: number;
   /** Show status for all running servers (Issue #136) */
   all?: boolean;
+}
+
+/**
+ * Options for update command
+ * Issue #1194: commandmate update
+ */
+export interface UpdateOptions {
+  /** Only query the registry and report versions (no stop / install / start) */
+  check?: boolean;
+  /** Skip the confirmation prompt (required for non-interactive execution, D-2) */
+  yes?: boolean;
 }
 
 /**

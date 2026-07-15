@@ -11,6 +11,7 @@ import {
   PreflightResult,
 } from '../types';
 import { getDependencies } from '../config/cli-dependencies';
+import { compareVersions } from './semver';
 
 /**
  * Preflight checker for system dependencies
@@ -46,7 +47,7 @@ export class PreflightChecker {
       // Check minimum version if specified
       if (dep.minVersion && version) {
         const cleanVersion = version.replace(/^v/, '');
-        if (this.compareVersions(cleanVersion, dep.minVersion) < 0) {
+        if (compareVersions(cleanVersion, dep.minVersion) < 0) {
           return {
             name: dep.name,
             status: 'version_mismatch',
@@ -108,25 +109,6 @@ export class PreflightChecker {
     }
 
     return undefined;
-  }
-
-  /**
-   * Compare two version strings
-   * @returns -1 if a < b, 0 if a == b, 1 if a > b
-   */
-  private compareVersions(a: string, b: string): number {
-    const partsA = a.split('.').map(Number);
-    const partsB = b.split('.').map(Number);
-    const len = Math.max(partsA.length, partsB.length);
-
-    for (let i = 0; i < len; i++) {
-      const numA = partsA[i] || 0;
-      const numB = partsB[i] || 0;
-      if (numA > numB) return 1;
-      if (numA < numB) return -1;
-    }
-
-    return 0;
   }
 
   /**
