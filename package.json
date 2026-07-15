@@ -111,6 +111,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/better-sqlite3": "^7.6.13",
+    "@types/eslint": "^8.56.12",
     "@types/http-proxy": "^1.17.17",
     "@types/node": "20.19.35",
     "@types/react": "^19.2.17",

@@ -23,6 +23,13 @@
         "message": "Use useConfirm() / ConfirmDialog instead of window.confirm (Issue #1113)."
       }
     ],
+    "no-restricted-syntax": [
+      "warn",
+      {
+        "selector": ":matches(:matches(:matches(Program, ExportNamedDeclaration) > VariableDeclaration > VariableDeclarator, :matches(Program, ExportNamedDeclaration) > VariableDeclaration > VariableDeclarator > TSAsExpression) > :matches(ArrayExpression, ObjectExpression), :matches(:matches(Program, ExportNamedDeclaration) > VariableDeclaration > VariableDeclarator, :matches(Program, ExportNamedDeclaration) > VariableDeclaration > VariableDeclarator > TSAsExpression) > :matches(ArrayExpression, ObjectExpression) > ObjectExpression, :matches(:matches(Program, ExportNamedDeclaration) > VariableDeclaration > VariableDeclarator, :matches(Program, ExportNamedDeclaration) > VariableDeclaration > VariableDeclarator > TSAsExpression) > :matches(ArrayExpression, ObjectExpression) > Property > ObjectExpression, :matches(:matches(Program, ExportNamedDeclaration) > VariableDeclaration > VariableDeclarator, :matches(Program, ExportNamedDeclaration) > VariableDeclaration > VariableDeclarator > TSAsExpression) > :matches(ArrayExpression, ObjectExpression) > ObjectExpression > Property > ObjectExpression, :matches(:matches(Program, ExportNamedDeclaration) > VariableDeclaration > VariableDeclarator, :matches(Program, ExportNamedDeclaration) > VariableDeclaration > VariableDeclarator > TSAsExpression) > :matches(ArrayExpression, ObjectExpression) > Property > ArrayExpression > ObjectExpression) > Property[key.name=/^(label|title|description|placeholder|ariaLabel|tooltip|subtitle|heading)$/][value.type='Literal'][value.value=/[A-Za-z]/]",
+        "message": "i18n: モジュールスコープの const に表示文言が直書きされています。この位置では useTranslations() の t() を呼べないため英語が固定されます。`labelKey: 'nav.home'` のようにキーを持たせ、描画時に t(labelKey) で解決してください。技術的な値・キーコード表記など翻訳対象外の場合のみ eslint-disable-next-line に理由を添えて抑止してください (Issue #1271)。"
+      }
+    ],
     "@typescript-eslint/no-unused-vars": [
       "error",
       {
