@@ -9,6 +9,8 @@
 
 [English](../../README.md) | [日本語](./README.md)
 
+**[CommandMate 公式サイト（英語）→](https://kewton.github.io/CommandMate/)**
+
 <p align="center">
   <img src="../images/demo-desktop.gif" width="600" alt="CommandMate デスクトップデモ" />
 </p>
