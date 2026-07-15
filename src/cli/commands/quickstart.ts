@@ -7,7 +7,6 @@
  */
 
 import { existsSync } from 'fs';
-import { config as dotenvConfig } from 'dotenv';
 import { ExitCode, getErrorMessage, PreflightResult } from '../types';
 import { CLILogger } from '../utils/logger';
 import { DaemonManager } from '../utils/daemon';
@@ -65,11 +64,8 @@ async function runQuickstart(options: QuickstartOptions): Promise<number> {
       return configExitCode;
     }
 
-    // PID files hold only the PID, so port/bind must come from .env before any URL is resolved
-    const parsed = dotenvConfig({ path: getEnvPath() }).parsed || {};
-
     const daemonManager = new DaemonManager(getPidFilePath());
-    const started = await ensureServerRunning(daemonManager, { ...process.env, ...parsed });
+    const started = await ensureServerRunning(daemonManager);
     if (started.exitCode !== undefined) {
       return started.exitCode;
     }
@@ -107,32 +103,20 @@ async function ensureConfiguration(): Promise<ExitCode | null> {
 }
 
 /**
- * Resolve the server URL from the effective configuration, mirroring how daemon.ts
- * builds the child environment ({...process.env, ...parsed})
- */
-function resolveServerUrl(env: NodeJS.ProcessEnv): string {
-  const port = parseInt(env.CM_PORT || '3000', 10);
-  const bind = env.CM_BIND || '127.0.0.1';
-  const protocol = env.CM_HTTPS_CERT ? 'https' : 'http';
-  return `${protocol}://${bind === '0.0.0.0' ? '127.0.0.1' : bind}:${port}`;
-}
-
-/**
  * Start the server unless it is already up
  *
  * @returns The server URL, or an exit code to stop on
  */
 async function ensureServerRunning(
-  daemonManager: DaemonManager,
-  effectiveEnv: NodeJS.ProcessEnv
+  daemonManager: DaemonManager
 ): Promise<{ url?: string; exitCode?: ExitCode }> {
   if (await daemonManager.isRunning()) {
     // start.ts reports an already-running server as START_FAILED, so it must not be called here
     const status = await daemonManager.getStatus();
     logger.info(`Server is already running (PID: ${status?.pid})`);
-    // getStatus() reads process.env, which dotenv leaves untouched when CM_PORT is already
-    // exported, so it would report the shell's port rather than the one the server is on
-    return { url: resolveServerUrl(effectiveEnv) };
+    // Issue #1266: getStatus() now gives .env precedence over exported variables, so the URL
+    // it reports is the one the server is on; this no longer needs to be re-derived here
+    return { url: status?.url };
   }
 
   const result = await runStart({ daemon: true });

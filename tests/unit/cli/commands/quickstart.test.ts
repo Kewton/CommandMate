@@ -202,14 +202,13 @@ describe('quickstartCommand', () => {
       expect(mockExit).toHaveBeenCalledWith(ExitCode.START_FAILED);
     });
 
-    it('should load .env before resolving the server URL', async () => {
-      // PID files hold only the PID: port/bind are read from process.env (daemon.ts)
+    it('should announce the URL that runStart reports', async () => {
+      mockStartSucceeds('http://127.0.0.1:31951');
+
       await run();
 
-      expect(dotenvConfig).toHaveBeenCalledWith({ path: ENV_PATH });
-      expect(vi.mocked(dotenvConfig).mock.invocationCallOrder[0]).toBeLessThan(
-        vi.mocked(DaemonManager).mock.invocationCallOrder[0]
-      );
+      expect(output()).toContain('http://127.0.0.1:31951');
+      expect(openBrowser).toHaveBeenCalledWith('http://127.0.0.1:31951');
     });
   });
 
@@ -236,19 +235,25 @@ describe('quickstartCommand', () => {
       expect(waitForServer).not.toHaveBeenCalled();
     });
 
-    // getStatus() derives its URL from process.env, which dotenv will not overwrite when
-    // CM_PORT is exported, so the announced URL pointed at the shell's port instead.
-    it('should announce the .env url, not the exported CM_PORT that getStatus reports', async () => {
-      mockDaemon(true, 'http://127.0.0.1:3000');
+    // Issue #1266: getStatus() now gives .env precedence over an exported CM_PORT itself
+    // (see daemon.test.ts), so quickstart must announce the URL it reports rather than
+    // re-deriving one. Re-deriving from process.env is what announced the shell's port.
+    it('should announce the URL getStatus reports, not one derived from the environment', async () => {
+      mockDaemon(true, 'http://127.0.0.1:31951');
       vi.stubEnv('CM_PORT', '3000');
-      vi.mocked(dotenvConfig).mockReturnValue({
-        parsed: { CM_PORT: '31951', CM_BIND: '127.0.0.1' },
-      } as ReturnType<typeof dotenvConfig>);
 
       await run();
 
       expect(output()).toContain('http://127.0.0.1:31951');
       expect(openBrowser).toHaveBeenCalledWith('http://127.0.0.1:31951');
+    });
+
+    it('should not read .env itself now that getStatus resolves the URL', async () => {
+      mockDaemon(true);
+
+      await run();
+
+      expect(dotenvConfig).not.toHaveBeenCalled();
     });
   });
 

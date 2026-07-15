@@ -16,6 +16,7 @@ const daemon = vi.hoisted(() => ({
   ctor: vi.fn(),
   isRunning: vi.fn(),
   getStatus: vi.fn(),
+  getEffectiveEnv: vi.fn(),
   start: vi.fn(),
   stop: vi.fn(),
 }));
@@ -41,10 +42,11 @@ vi.mock('../../../../src/cli/utils/install-context', () => ({
 }));
 
 vi.mock('../../../../src/cli/utils/daemon', () => ({
-  DaemonManager: vi.fn(function (this: Record<string, unknown>, pidFilePath: string) {
-    daemon.ctor(pidFilePath);
+  DaemonManager: vi.fn(function (this: Record<string, unknown>, pidFilePath: string, envPath?: string) {
+    daemon.ctor(pidFilePath, envPath);
     this.isRunning = daemon.isRunning;
     this.getStatus = daemon.getStatus;
+    this.getEffectiveEnv = daemon.getEffectiveEnv;
     this.start = daemon.start;
     this.stop = daemon.stop;
   }),
@@ -75,6 +77,11 @@ const RUNNING: DaemonStatus = {
   uptime: 3600,
 };
 
+const envPath = (issueNo?: number) =>
+  issueNo !== undefined
+    ? path.join(homedir(), '.commandmate', 'envs', `${issueNo}.env`)
+    : path.join(homedir(), '.commandmate', '.env');
+
 const pidPath = (issueNo?: number) =>
   issueNo !== undefined
     ? path.join(homedir(), '.commandmate', 'pids', `${issueNo}.pid`)
@@ -88,6 +95,7 @@ describe('Status Command - Issue #136 Extensions', () => {
     vi.clearAllMocks();
     daemon.isRunning.mockResolvedValue(true);
     daemon.getStatus.mockResolvedValue(RUNNING);
+    daemon.getEffectiveEnv.mockReturnValue({});
     vi.mocked(dotenvConfig).mockReturnValue({ parsed: {} });
 
     output = [];
@@ -106,16 +114,16 @@ describe('Status Command - Issue #136 Extensions', () => {
     it('should construct DaemonManager with the worktree PID file', async () => {
       await statusCommand({ issue: 135 });
 
-      expect(daemon.ctor).toHaveBeenCalledWith(pidPath(135));
+      expect(daemon.ctor).toHaveBeenCalledWith(pidPath(135), envPath(135));
       expect(daemon.getStatus).toHaveBeenCalled();
     });
 
-    it('should load the worktree .env so getStatus sees the right CM_PORT', async () => {
+    // Issue #1266: the .env is no longer loaded here — the path is handed to DaemonManager,
+    // which resolves CM_PORT from it with .env taking precedence over exported variables
+    it('should hand the worktree .env to DaemonManager so getStatus sees the right CM_PORT', async () => {
       await statusCommand({ issue: 135 });
 
-      expect(dotenvConfig).toHaveBeenCalledWith({
-        path: path.join(homedir(), '.commandmate', 'envs', '135.env'),
-      });
+      expect(daemon.ctor).toHaveBeenCalledWith(expect.any(String), envPath(135));
     });
 
     it('should label the output with the issue number and report the status', async () => {
@@ -126,10 +134,19 @@ describe('Status Command - Issue #136 Extensions', () => {
       expect(output.join('\n')).toContain('Port:    3135');
     });
 
+    // The output assertions above all run before the command finishes, so they stay green
+    // even when it throws afterwards and exits 99. Only the exit code catches that.
+    it('should exit SUCCESS rather than fail after printing the status', async () => {
+      await statusCommand({ issue: 135 });
+
+      expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
+      expect(mockExit).not.toHaveBeenCalledWith(ExitCode.UNEXPECTED_ERROR);
+    });
+
     it('should use the main PID file when no issue is given', async () => {
       await statusCommand({});
 
-      expect(daemon.ctor).toHaveBeenCalledWith(pidPath());
+      expect(daemon.ctor).toHaveBeenCalledWith(pidPath(), envPath());
       expect(output.join('\n')).toContain('CommandMate Status - Main Server');
     });
 
@@ -163,9 +180,9 @@ describe('Status Command - Issue #136 Extensions', () => {
     it('should report the main server plus every worktree PID file', async () => {
       await statusCommand({ all: true });
 
-      expect(daemon.ctor).toHaveBeenCalledWith(pidPath());
-      expect(daemon.ctor).toHaveBeenCalledWith(pidPath(135));
-      expect(daemon.ctor).toHaveBeenCalledWith(pidPath(200));
+      expect(daemon.ctor).toHaveBeenCalledWith(pidPath(), envPath());
+      expect(daemon.ctor).toHaveBeenCalledWith(pidPath(135), envPath(135));
+      expect(daemon.ctor).toHaveBeenCalledWith(pidPath(200), envPath(200));
       expect(daemon.ctor).toHaveBeenCalledTimes(3);
 
       const text = output.join('\n');
