@@ -19,7 +19,8 @@
 | `src/lib/env.ts` | 環境変数取得・フォールバック処理、getDatabasePathWithDeprecationWarning() |
 | `src/lib/db/db-path-resolver.ts` | DBパス解決（getDefaultDbPath()、validateDbPath()） |
 | `src/lib/db/db-migration-path.ts` | DBマイグレーション（migrateDbIfNeeded()、getLegacyDbPaths()） |
-| `src/lib/db/db-instance.ts` | DBインスタンス管理（getEnv().CM_DB_PATH使用） |
+| `src/lib/db/db-instance.ts` | DBインスタンス管理（getEnv().CM_DB_PATH使用、DB接続は openDatabaseWithAbiRecovery() 経由） |
+| `src/lib/db/abi-recovery.ts` | better-sqlite3 ABI mismatch 検知と自動 rebuild（Issue #1263: isAbiMismatchError()＝code `ERR_DLOPEN_FAILED` かつ message に `NODE_MODULE_VERSION` を含む二条件、rebuildBetterSqlite3()＝`npm rebuild better-sqlite3` を process.execPath を PATH 先頭に固定して実行、openDatabaseWithAbiRecovery()＝正常時ゼロオーバーヘッド・rebuild はプロセス毎1回・失敗時は sudo を促さない手順を提示） |
 | `src/config/system-directories.ts` | システムディレクトリ定数（SYSTEM_DIRECTORIES、isSystemDirectory()） |
 | `src/config/status-colors.ts` | ステータス色の一元管理 |
 | `src/app/globals.css` | セマンティックデザイントークン（CSS変数）の定義・登録（Issue #1041）。Issue #1178 の Tailwind 4 CSS-first 移行で `tailwind.config.js` を廃止し `@theme inline` へ統合。詳細は [docs/design-system.md](./design-system.md) を参照 |
