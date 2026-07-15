@@ -1,13 +1,24 @@
 /**
  * Stop Command Tests - Issue #136 Extensions
- * TDD: Tests for --issue flag
+ * Tests for the --issue flag, exercised against the real stopCommand.
+ *
+ * Issue #1269: the DaemonManager mock must be built from `function` (or `class`),
+ * never an arrow fn. `vi.fn().mockImplementation(() => ({ ... }))` has no
+ * [[Construct]], so `new DaemonManager(pid)` throws "is not a constructor".
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import path from 'path';
 import { homedir } from 'os';
 
-// Mock file system operations
+const daemon = vi.hoisted(() => ({
+  ctor: vi.fn(),
+  isRunning: vi.fn(),
+  getStatus: vi.fn(),
+  start: vi.fn(),
+  stop: vi.fn(),
+}));
+
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
   return {
@@ -18,110 +29,141 @@ vi.mock('fs', async () => {
   };
 });
 
-// Mock install-context
 vi.mock('../../../../src/cli/utils/install-context', () => ({
   getConfigDir: vi.fn(() => path.join(homedir(), '.commandmate')),
   isGlobalInstall: vi.fn(() => true),
 }));
 
-// Mock daemon
 vi.mock('../../../../src/cli/utils/daemon', () => ({
-  DaemonManager: vi.fn().mockImplementation(() => ({
-    isRunning: vi.fn().mockResolvedValue(true),
-    getStatus: vi.fn().mockResolvedValue({ running: true, pid: 12345 }),
-    start: vi.fn().mockResolvedValue(12345),
-    stop: vi.fn().mockResolvedValue(true),
-  })),
+  DaemonManager: vi.fn(function (this: Record<string, unknown>, pidFilePath: string) {
+    daemon.ctor(pidFilePath);
+    this.isRunning = daemon.isRunning;
+    this.getStatus = daemon.getStatus;
+    this.start = daemon.start;
+    this.stop = daemon.stop;
+  }),
 }));
 
-// Mock security-logger
 vi.mock('../../../../src/cli/utils/security-logger', () => ({
   logSecurityEvent: vi.fn(),
 }));
 
-// Mock env-setup
 vi.mock('../../../../src/cli/utils/env-setup', () => ({
-  getEnvPath: vi.fn((issueNo?: number) => {
-    if (issueNo !== undefined) {
-      return path.join(homedir(), '.commandmate', 'envs', `${issueNo}.env`);
-    }
-    return path.join(homedir(), '.commandmate', '.env');
-  }),
-  getPidFilePath: vi.fn((issueNo?: number) => {
-    if (issueNo !== undefined) {
-      return path.join(homedir(), '.commandmate', 'pids', `${issueNo}.pid`);
-    }
-    return path.join(homedir(), '.commandmate', '.commandmate.pid');
-  }),
+  getEnvPath: vi.fn((issueNo?: number) =>
+    issueNo !== undefined
+      ? path.join(homedir(), '.commandmate', 'envs', `${issueNo}.env`)
+      : path.join(homedir(), '.commandmate', '.env')
+  ),
+  getPidFilePath: vi.fn((issueNo?: number) =>
+    issueNo !== undefined
+      ? path.join(homedir(), '.commandmate', 'pids', `${issueNo}.pid`)
+      : path.join(homedir(), '.commandmate', '.commandmate.pid')
+  ),
 }));
 
-import { StopOptions } from '../../../../src/cli/types';
-import { getPidFilePath } from '../../../../src/cli/utils/env-setup';
+import { stopCommand } from '../../../../src/cli/commands/stop';
+import { ExitCode } from '../../../../src/cli/types';
+import { logSecurityEvent } from '../../../../src/cli/utils/security-logger';
+
+const pidPath = (issueNo?: number) =>
+  issueNo !== undefined
+    ? path.join(homedir(), '.commandmate', 'pids', `${issueNo}.pid`)
+    : path.join(homedir(), '.commandmate', '.commandmate.pid');
 
 describe('Stop Command - Issue #136 Extensions', () => {
+  let mockExit: ReturnType<typeof vi.fn>;
+
   beforeEach(() => {
     vi.clearAllMocks();
-    // Reset process.exit mock
-    vi.spyOn(process, 'exit').mockImplementation(() => {
-      throw new Error('process.exit called');
-    });
+    daemon.isRunning.mockResolvedValue(true);
+    daemon.getStatus.mockResolvedValue({ running: true, pid: 12345 });
+    daemon.stop.mockResolvedValue(true);
+
+    mockExit = vi.fn();
+    vi.spyOn(process, 'exit').mockImplementation(mockExit as unknown as typeof process.exit);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  describe('StopOptions type', () => {
-    it('should accept issue option', () => {
-      const options: StopOptions = {
-        force: false,
-        issue: 135,
-      };
+  describe('--issue flag', () => {
+    it('should construct DaemonManager with the worktree PID file', async () => {
+      await stopCommand({ force: false, issue: 135 });
 
-      expect(options.issue).toBe(135);
+      expect(daemon.ctor).toHaveBeenCalledWith(pidPath(135));
+      expect(daemon.stop).toHaveBeenCalled();
+      expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
     });
 
-    it('should accept force and issue options together', () => {
-      const options: StopOptions = {
-        force: true,
-        issue: 200,
-      };
+    it('should use the main PID file when no issue is given', async () => {
+      await stopCommand({ force: false });
 
-      expect(options.force).toBe(true);
-      expect(options.issue).toBe(200);
+      expect(daemon.ctor).toHaveBeenCalledWith(pidPath());
     });
 
-    it('should work without issue option (backward compatibility)', () => {
-      const options: StopOptions = {
-        force: false,
-      };
+    it('should target different PID files for different issues', async () => {
+      await stopCommand({ force: false, issue: 135 });
+      await stopCommand({ force: false, issue: 200 });
 
-      expect(options.issue).toBeUndefined();
+      expect(daemon.ctor).toHaveBeenNthCalledWith(1, pidPath(135));
+      expect(daemon.ctor).toHaveBeenNthCalledWith(2, pidPath(200));
+    });
+
+    it('should reject an invalid issue number before touching DaemonManager', async () => {
+      await stopCommand({ force: false, issue: 0 });
+
+      expect(daemon.ctor).not.toHaveBeenCalled();
+      expect(daemon.stop).not.toHaveBeenCalled();
+      expect(mockExit).toHaveBeenCalledWith(ExitCode.STOP_FAILED);
     });
   });
 
-  describe('getPidFilePath with issueNo', () => {
-    it('should return main PID path when no issue specified', () => {
-      const pidPath = getPidFilePath();
-      expect(pidPath).toBe(
-        path.join(homedir(), '.commandmate', '.commandmate.pid')
+  describe('--force flag', () => {
+    it('should forward force=true to DaemonManager.stop and log a security warning', async () => {
+      await stopCommand({ force: true, issue: 135 });
+
+      expect(daemon.stop).toHaveBeenCalledWith(true);
+      expect(logSecurityEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          command: 'stop',
+          action: 'warning',
+          details: expect.stringContaining('Issue #135'),
+        })
       );
     });
 
-    it('should return worktree PID path when issue specified', () => {
-      const pidPath = getPidFilePath(135);
-      expect(pidPath).toBe(
-        path.join(homedir(), '.commandmate', 'pids', '135.pid')
-      );
+    it('should forward force=false when not forcing', async () => {
+      await stopCommand({ force: false, issue: 135 });
+
+      expect(daemon.stop).toHaveBeenCalledWith(false);
     });
+  });
 
-    it('should return different paths for different issues', () => {
-      const pidPath135 = getPidFilePath(135);
-      const pidPath200 = getPidFilePath(200);
+  describe('when not running', () => {
+    it('should exit SUCCESS without calling stop', async () => {
+      daemon.isRunning.mockResolvedValue(false);
+      daemon.getStatus.mockResolvedValue(null);
 
-      expect(pidPath135).not.toBe(pidPath200);
-      expect(pidPath135).toContain('135.pid');
-      expect(pidPath200).toContain('200.pid');
+      await stopCommand({ force: false, issue: 135 });
+
+      expect(daemon.stop).not.toHaveBeenCalled();
+      expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
+    });
+  });
+
+  describe('when stop fails', () => {
+    it('should exit STOP_FAILED and log a failure event', async () => {
+      daemon.stop.mockResolvedValue(false);
+
+      await stopCommand({ force: false, issue: 135 });
+
+      expect(mockExit).toHaveBeenCalledWith(ExitCode.STOP_FAILED);
+      expect(logSecurityEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ command: 'stop', action: 'failure' })
+      );
     });
   });
 });
