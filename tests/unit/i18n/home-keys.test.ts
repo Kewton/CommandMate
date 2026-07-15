@@ -76,4 +76,26 @@ describe('home i18n keys (Issue #1072)', () => {
       }
     }
   });
+
+  /**
+   * Issue #1199: OnboardingChecklist / RecentSessionsList resolve these at
+   * runtime. Same rationale as the block above — the echoing next-intl mock
+   * makes component tests blind to a missing dictionary entry.
+   */
+  it('includes the onboarding checklist and empty-state CTA keys', () => {
+    for (const locale of ['en', 'ja']) {
+      const keys = leafKeys(loadHome(locale));
+      for (const expected of [
+        'onboarding.title',
+        'onboarding.dismiss',
+        'onboarding.steps.registerRepository',
+        'onboarding.steps.sendFirstMessage',
+        'onboarding.actions.registerRepository',
+        'onboarding.actions.sendFirstMessage',
+        'recentSessions.cta',
+      ]) {
+        expect(keys, `${locale} missing ${expected}`).toContain(expected);
+      }
+    }
+  });
 });

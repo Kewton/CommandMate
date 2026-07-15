@@ -8,7 +8,20 @@
     "viewAll": "すべて表示"
   },
   "recentSessions": {
-    "empty": "最近のセッションはまだありません。"
+    "empty": "最近のセッションはまだありません。",
+    "cta": "まずリポジトリを登録しましょう"
+  },
+  "onboarding": {
+    "title": "はじめかた",
+    "dismiss": "はじめかたを閉じる",
+    "steps": {
+      "registerRepository": "リポジトリを登録する",
+      "sendFirstMessage": "エージェントに最初のメッセージを送る"
+    },
+    "actions": {
+      "registerRepository": "登録する",
+      "sendFirstMessage": "セッションを開く"
+    }
   },
   "assistant": {
     "clearHistoryConfirm": "このリポジトリとCLIのチャット履歴をすべて削除しますか？過去のメッセージはアシスタントに送信されなくなります。",

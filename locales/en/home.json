@@ -8,7 +8,20 @@
     "viewAll": "View all"
   },
   "recentSessions": {
-    "empty": "No recent sessions yet."
+    "empty": "No recent sessions yet.",
+    "cta": "Register a repository to get started"
+  },
+  "onboarding": {
+    "title": "Getting started",
+    "dismiss": "Dismiss getting started",
+    "steps": {
+      "registerRepository": "Register a repository",
+      "sendFirstMessage": "Send your first message to an agent"
+    },
+    "actions": {
+      "registerRepository": "Register",
+      "sendFirstMessage": "Open sessions"
+    }
   },
   "assistant": {
     "clearHistoryConfirm": "Clear all chat history for this repository and CLI? Past messages will no longer be sent back to the assistant.",

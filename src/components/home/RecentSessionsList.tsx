@@ -76,13 +76,24 @@ export function RecentSessionsList({ worktrees, limit = 5, isLoading = false }: 
   }
 
   if (recent.length === 0) {
+    // Issue #1199: the empty list always means zero repositories — `repositories`
+    // is derived from the worktrees table — so the CTA has a single destination.
     return (
-      <p
-        className="text-sm text-muted-foreground"
-        data-testid="recent-sessions-empty"
-      >
-        {t('recentSessions.empty')}
-      </p>
+      <div className="space-y-2">
+        <p
+          className="text-sm text-muted-foreground"
+          data-testid="recent-sessions-empty"
+        >
+          {t('recentSessions.empty')}
+        </p>
+        <Link
+          href="/repositories"
+          data-testid="recent-sessions-cta"
+          className="inline-block text-sm font-medium text-accent-600 transition-colors hover:text-accent-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-accent-400 dark:hover:text-accent-300"
+        >
+          {t('recentSessions.cta')}
+        </Link>
+      </div>
     );
   }
 
