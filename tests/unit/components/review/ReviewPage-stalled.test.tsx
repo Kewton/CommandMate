@@ -137,13 +137,14 @@ describe('Review page filters', () => {
 
     render(React.createElement(ReviewPage));
 
+    // The filter chips render before the fetch resolves (only the list below is
+    // gated on isLoading), so waiting on their existence would pass at count 0.
+    // Assert the counts inside waitFor so we wait on the data, not the markup.
     await waitFor(() => {
-      expect(screen.getByTestId('review-filter-in_review')).toBeDefined();
+      expect(screen.getByTestId('review-filter-in_review').textContent).toMatch(/2/);
+      expect(screen.getByTestId('review-filter-approval').textContent).toMatch(/1/);
+      expect(screen.getByTestId('review-filter-stalled').textContent).toMatch(/0/);
     });
-
-    expect(screen.getByTestId('review-filter-in_review').textContent).toMatch(/2/);
-    expect(screen.getByTestId('review-filter-approval').textContent).toMatch(/1/);
-    expect(screen.getByTestId('review-filter-stalled').textContent).toMatch(/0/);
   });
 
   it('should show in_review worktrees by default', async () => {
