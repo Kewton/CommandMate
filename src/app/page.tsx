@@ -11,6 +11,9 @@
  * with a live session subline (see HomeHeading). Future announcements should be
  * reintroduced as a version-keyed localStorage Announcement component rather
  * than a hard-coded dismissible banner.
+ * Issue #1199: OnboardingChecklist follows that rule with a data-keyed latch —
+ * it is derived from the cache below and disappears for good once complete, so
+ * it can never occupy the first fold of a user who has data to show.
  *
  * Session data is read from the shared worktrees cache
  * (`useWorktreesCacheContext`) instead of a page-local fetch, keeping a single
@@ -22,12 +25,13 @@
 import { AppShell } from '@/components/layout';
 import { useWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
 import { HomeHeading } from '@/components/home/HomeHeading';
+import { OnboardingChecklist } from '@/components/home/OnboardingChecklist';
 import { SessionOverviewTile } from '@/components/home/SessionOverviewTile';
 import { TodoWidget } from '@/components/home/TodoWidget';
 import { HomeQuickActions } from '@/components/home/HomeQuickActions';
 
 export default function Home() {
-  const { worktrees, isLoading } = useWorktreesCacheContext();
+  const { worktrees, repositories, isLoading, error } = useWorktreesCacheContext();
   // [Issue #1118] Skeletons only on the very first load; once the cache has
   // data, poll re-fetches keep the rendered content (non-blocking pattern).
   const isFirstLoad = isLoading && worktrees.length === 0;
@@ -37,6 +41,14 @@ export default function Home() {
       <div className="container-custom py-8 overflow-auto h-full">
         {/* Page heading */}
         <HomeHeading worktrees={worktrees} />
+
+        {/* First-run guidance; renders nothing once onboarding is complete. */}
+        <OnboardingChecklist
+          worktrees={worktrees}
+          repositories={repositories}
+          isLoading={isFirstLoad}
+          error={error}
+        />
 
         {/* Bento grid: 12-col on desktop, single stacked column on mobile.
             DOM order (mobile stack): Session Overview → ToDo → Quick actions. */}
