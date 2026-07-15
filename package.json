@@ -23,6 +23,9 @@
   "bin": {
     "commandmate": "./bin/commandmate.js"
   },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "files": [
     "bin/",
     "dist/",

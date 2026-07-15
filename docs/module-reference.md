@@ -380,9 +380,11 @@
 
 | モジュール | 説明 |
 |-----------|------|
-| `src/cli/index.ts` | CLIメインロジック（commander設定） |
-| `src/cli/commands/init.ts` | initコマンド（対話形式/非対話形式対応、Issue #119）。initコマンド（対話/非対話） |
-| `src/cli/commands/start.ts` | startコマンド（フォアグラウンド/デーモン起動、--issue対応 Issue #136）。startコマンド（--issue対応） |
+| `src/cli/index.ts` | CLIエントリポイント。`buildProgram().parse()` の副作用のみ（Issue #1195） |
+| `src/cli/program.ts` | commander設定・buildProgram()。ルート action / `--no-open` / helpCommand(true)（Issue #1195） |
+| `src/cli/commands/quickstart.ts` | 引数なし実行のガイド付き起動（init→start→readiness→ブラウザ、冪等）（Issue #1195） |
+| `src/cli/commands/init.ts` | initコマンド（対話/非対話、Issue #119）。runInit()はexitせずInitResultを返す（Issue #1195） |
+| `src/cli/commands/start.ts` | startコマンド（前景/デーモン、--issue対応 Issue #136）。runStart()はexitせずStartResultを返す（Issue #1195） |
 | `src/cli/commands/stop.ts` | stopコマンド（サーバー停止、--issue対応 Issue #136） |
 | `src/cli/commands/status.ts` | statusコマンド（状態確認、--issue/--all対応 Issue #136）。statusコマンド（--all対応） |
 | `src/cli/commands/update.ts` | updateコマンド（停止→npm install -g→再起動、--check/--yes）（Issue #1194） |
@@ -396,7 +398,9 @@
 | `src/cli/utils/pid-manager.ts` | PIDファイル管理（O_EXCLアトミック書き込み） |
 | `src/cli/utils/security-logger.ts` | セキュリティイベントログ |
 | `src/cli/utils/prompt.ts` | 対話形式プロンプトユーティリティ（Issue #119） |
-| `src/cli/utils/install-context.ts` | インストールコンテキスト検出（isGlobalInstall, getConfigDir）（Issue #136） |
+| `src/cli/utils/server-ready.ts` | サーバ起動完了待ち（waitForServer: TCPポーリング、throwしない）（Issue #1195） |
+| `src/cli/utils/browser.ts` | ブラウザ自動オープン（open/xdg-open、CI・SSH・DISPLAY判定、依存追加なし）（Issue #1195） |
+| `src/cli/utils/install-context.ts` | インストールコンテキスト検出（isGlobalInstall, getConfigDir。npxは global 扱い）（Issue #136, #1195） |
 | `src/cli/utils/input-validators.ts` | 入力検証（Issue番号、ブランチ名）（Issue #136） |
 | `src/cli/utils/resource-resolvers.ts` | リソースパス解決（DB、PID、Log）（Issue #136） |
 | `src/cli/utils/port-allocator.ts` | ポート自動割り当て（MAX_WORKTREES=10制限）（Issue #136） |
