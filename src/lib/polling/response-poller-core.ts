@@ -7,6 +7,7 @@ import {
   clearTuiAccumulator,
 } from '../tui-accumulator';
 import { clearPromptHashCache } from './prompt-dedup';
+import { clearResponseHashCache } from './response-dedup';
 import { checkForResponse } from './response-checker';
 import { broadcastTerminalSnapshot } from '@/lib/realtime/terminal-broadcast';
 
@@ -167,6 +168,10 @@ function stopPollingByKey(pollerKey: string): void {
 
   // Issue #565: Clear prompt hash cache to prevent stale dedup state
   clearPromptHashCache(pollerKey);
+
+  // Issue #1268: Clear response hash cache too, so the next turn can save a
+  // response even when its content is identical to the previous turn's.
+  clearResponseHashCache(pollerKey);
 }
 
 /**
