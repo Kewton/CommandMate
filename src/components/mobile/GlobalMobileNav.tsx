@@ -19,9 +19,10 @@ import { useCommandPalette } from '@/contexts/CommandPaletteContext';
 
 /**
  * Mobile navigation tab definition.
+ * `labelKey` resolves against the `common` namespace at render time.
  */
 interface MobileNavTab {
-  label: string;
+  labelKey: string;
   href: string;
   isActive: (pathname: string) => boolean;
   icon: React.ReactNode;
@@ -32,11 +33,11 @@ interface MobileNavTab {
  * Icons: lucide-react at 20px / strokeWidth 2 (see docs/design-system.md).
  */
 const MOBILE_NAV_TABS: MobileNavTab[] = [
-  { label: 'Home', href: '/', isActive: (p) => p === '/', icon: <Home size={20} aria-hidden="true" /> },
-  { label: 'Chat', href: '/chat', isActive: (p) => p.startsWith('/chat'), icon: <MessageSquare size={20} aria-hidden="true" /> },
-  { label: 'Sessions', href: '/sessions', isActive: (p) => p.startsWith('/sessions'), icon: <AlignJustify size={20} aria-hidden="true" /> },
-  { label: 'Review', href: '/review', isActive: (p) => p.startsWith('/review'), icon: <CircleCheck size={20} aria-hidden="true" /> },
-  { label: 'More', href: '/more', isActive: (p) => p.startsWith('/more'), icon: <MoreHorizontal size={20} aria-hidden="true" /> },
+  { labelKey: 'nav.home', href: '/', isActive: (p) => p === '/', icon: <Home size={20} aria-hidden="true" /> },
+  { labelKey: 'nav.chat', href: '/chat', isActive: (p) => p.startsWith('/chat'), icon: <MessageSquare size={20} aria-hidden="true" /> },
+  { labelKey: 'nav.sessions', href: '/sessions', isActive: (p) => p.startsWith('/sessions'), icon: <AlignJustify size={20} aria-hidden="true" /> },
+  { labelKey: 'nav.review', href: '/review', isActive: (p) => p.startsWith('/review'), icon: <CircleCheck size={20} aria-hidden="true" /> },
+  { labelKey: 'nav.more', href: '/more', isActive: (p) => p.startsWith('/more'), icon: <MoreHorizontal size={20} aria-hidden="true" /> },
 ];
 
 /**
@@ -47,6 +48,7 @@ export function GlobalMobileNav() {
   const pathname = usePathname();
   const { setOpen } = useCommandPalette();
   const t = useTranslations('commandPalette');
+  const tCommon = useTranslations('common');
 
   return (
     <nav
@@ -67,7 +69,7 @@ export function GlobalMobileNav() {
               }`}
             >
               {tab.icon}
-              <span className="mt-1">{tab.label}</span>
+              <span className="mt-1">{tCommon(tab.labelKey)}</span>
             </TransitionLink>
           );
         })}

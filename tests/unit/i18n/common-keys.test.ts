@@ -38,7 +38,37 @@ function resolve(dict: Record<string, unknown>, key: string): unknown {
 }
 
 /** Every nav key the palette and Home's quick actions request at runtime. */
-const NAV_KEYS = ['home', 'chat', 'sessions', 'repositories', 'review', 'more'];
+const NAV_KEYS = [
+  'home',
+  'chat',
+  'sessions',
+  'repositories',
+  'review',
+  'more',
+  // Issue #1206: Header renders abbreviated variants that must stay distinct
+  // from the full labels above — `repositories` ("Repositories") is ~2.4x too
+  // wide for the header's space-x-6 row, and `review` ("Review") would drop the
+  // "/Report" that tells users the page also covers reports.
+  'repositoriesShort',
+  'reviewReport',
+];
+
+/**
+ * Issue #1206 migrated Header / GlobalMobileNav from hardcoded English labels
+ * to `common.nav.*`. The migration must be display-neutral in English, so pin
+ * the exact pre-migration strings: any drift here is a user-visible regression
+ * that the component tests' mocked `t()` could never catch on its own.
+ */
+const EN_NAV_LABELS: Record<string, string> = {
+  home: 'Home',
+  chat: 'Chat',
+  sessions: 'Sessions',
+  repositories: 'Repositories',
+  review: 'Review',
+  more: 'More',
+  repositoriesShort: 'Repos',
+  reviewReport: 'Review/Report',
+};
 
 describe('common i18n keys (Issue #1197)', () => {
   it.each(['en', 'ja'])('%s/common.json has non-empty values for every leaf', (locale) => {
@@ -94,6 +124,24 @@ describe('common i18n keys (Issue #1197)', () => {
         `ja: nav.${key} is still the English string`
       ).not.toBe(resolve(en, `nav.${key}`));
     }
+  });
+
+  it('keeps every English nav label byte-identical to the pre-i18n markup (Issue #1206)', () => {
+    const en = loadCommon('en');
+    for (const [key, expected] of Object.entries(EN_NAV_LABELS)) {
+      expect(resolve(en, `nav.${key}`), `en: nav.${key} changed the rendered label`).toBe(expected);
+    }
+  });
+
+  /**
+   * The header deliberately abbreviates where the mobile bar does not, so the
+   * short keys must never collapse onto the full ones - that collapse is
+   * exactly what "just reuse nav.repositories" would silently do.
+   */
+  it('keeps the header abbreviations distinct from the full English labels (Issue #1206)', () => {
+    const en = loadCommon('en');
+    expect(resolve(en, 'nav.repositoriesShort')).not.toBe(resolve(en, 'nav.repositories'));
+    expect(resolve(en, 'nav.reviewReport')).not.toBe(resolve(en, 'nav.review'));
   });
 
   it('includes the repository list empty-state copy', () => {

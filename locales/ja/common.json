@@ -8,7 +8,9 @@
     "chat": "チャット",
     "sessions": "セッション",
     "repositories": "リポジトリ",
+    "repositoriesShort": "リポジトリ",
     "review": "レビュー",
+    "reviewReport": "レビュー/レポート",
     "more": "その他"
   },
   "repositories": {

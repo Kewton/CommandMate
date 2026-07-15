@@ -31,6 +31,14 @@ vi.mock('@/components/layout/PcDisplaySizeSelector', () => ({
   PcDisplaySizeSelector: () => <div data-testid="pc-display-size-selector" />,
 }));
 
+// Issue #1206: the accessible names below are the real English labels, so
+// resolve them through the real dictionary rather than the key-echoing global
+// mock in tests/setup.ts.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 const NAV_LABELS = ['Home', 'Chat', 'Sessions', 'Repos', 'Review/Report', 'More'] as const;
 
 const ROUTE_CASES: Array<{ pathname: string; activeLabel: (typeof NAV_LABELS)[number] }> = [

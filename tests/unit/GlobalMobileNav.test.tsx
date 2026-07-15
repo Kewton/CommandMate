@@ -26,12 +26,22 @@ vi.mock('next/link', () => ({
   ),
 }));
 
+// Issue #1206: resolve labels through the real dictionary instead of the global
+// key-echoing mock in tests/setup.ts, so the English assertions below only stay
+// green while common.nav.* renders the exact wording it replaced.
+const intlLocale = vi.hoisted(() => ({ current: 'en' }));
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock(() => intlLocale.current);
+});
+
 import { GlobalMobileNav } from '@/components/mobile/GlobalMobileNav';
 
 describe('GlobalMobileNav', () => {
   beforeEach(() => {
     mockPathname.mockReturnValue('/');
     mockRouterPush.mockClear();
+    intlLocale.current = 'en';
   });
 
   it('should render 5 tabs: Home, Chat, Sessions, Review, More', () => {
@@ -111,5 +121,43 @@ describe('GlobalMobileNav', () => {
     expect(cls).toContain('supports-[backdrop-filter]:bg-background/80');
     expect(cls).toContain('backdrop-blur-md');
     expect(cls).toContain('border-border');
+  });
+
+  describe('i18n (Issue #1206)', () => {
+    it('renders every tab label in Japanese under the ja locale', () => {
+      intlLocale.current = 'ja';
+      render(<GlobalMobileNav />);
+
+      expect(screen.getByText('ホーム')).toBeDefined();
+      expect(screen.getByText('チャット')).toBeDefined();
+      expect(screen.getByText('セッション')).toBeDefined();
+      expect(screen.getByText('レビュー')).toBeDefined();
+      expect(screen.getByText('その他')).toBeDefined();
+    });
+
+    it('leaves no English tab label behind under the ja locale', () => {
+      intlLocale.current = 'ja';
+      render(<GlobalMobileNav />);
+
+      for (const label of ['Home', 'Chat', 'Sessions', 'Review', 'More']) {
+        expect(screen.queryByText(label), `"${label}" is still hardcoded English`).toBeNull();
+      }
+    });
+
+    it('still omits Repositories under the ja locale', () => {
+      intlLocale.current = 'ja';
+      render(<GlobalMobileNav />);
+      expect(screen.queryByText('リポジトリ')).toBeNull();
+    });
+
+    it('keeps hrefs and active state locale-independent', () => {
+      intlLocale.current = 'ja';
+      mockPathname.mockReturnValue('/sessions');
+      render(<GlobalMobileNav />);
+
+      const sessionsLink = screen.getByText('セッション').closest('a');
+      expect(sessionsLink?.getAttribute('href')).toBe('/sessions');
+      expect(sessionsLink?.className).toContain('text-accent-600');
+    });
   });
 });
