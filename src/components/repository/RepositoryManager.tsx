@@ -7,6 +7,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { useTranslations } from 'next-intl';
 import { Button, Card, Input, Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui';
 import { repositoryApi, handleApiError } from '@/lib/api-client';
 import { UrlNormalizer } from '@/lib/url-normalizer';
@@ -28,6 +29,7 @@ type InputMode = 'local' | 'url';
  * ```
  */
 export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps) {
+  const t = useTranslations('common');
   const [showAddForm, setShowAddForm] = useState(false);
   const [inputMode, setInputMode] = useState<InputMode>('local');
   const [repositoryPath, setRepositoryPath] = useState('');
@@ -49,7 +51,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
       const status = await repositoryApi.getCloneStatus(jobId);
 
       if (status.status === 'completed') {
-        setSuccess('Repository cloned successfully');
+        setSuccess(t('repositories.cloneSuccess'));
         setIsCloning(false);
         setCloneJobId(null);
         setCloneUrl('');
@@ -60,7 +62,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
           onRepositoryAdded();
         }
       } else if (status.status === 'failed') {
-        setError(status.error?.message || 'Clone failed');
+        setError(status.error?.message || t('repositories.cloneFailed'));
         setIsCloning(false);
         setCloneJobId(null);
       } else if (status.status === 'running' || status.status === 'pending') {
@@ -72,7 +74,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
       setIsCloning(false);
       setCloneJobId(null);
     }
-  }, [onRepositoryAdded]);
+  }, [onRepositoryAdded, t]);
 
   /**
    * Start polling when we have a job ID
@@ -81,7 +83,11 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
     if (cloneJobId && isCloning) {
       pollCloneStatus(cloneJobId);
     }
-  }, [cloneJobId, isCloning, pollCloneStatus]);
+    // Keyed on the job, not pollCloneStatus: `t` churns identity every render,
+    // so keying on it re-enters polling per render — 5 re-renders during a clone
+    // left 6 concurrent setTimeout chains instead of 1 (Issue #1032).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloneJobId, isCloning]);
 
   /**
    * Handle adding a new repository (local path mode)
@@ -90,7 +96,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
     e.preventDefault();
 
     if (!repositoryPath.trim()) {
-      setError('Repository path is required');
+      setError(t('repositories.pathRequired'));
       return;
     }
 
@@ -123,16 +129,16 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
 
     // Validate URL
     if (!cloneUrl.trim()) {
-      setError('Clone URL is required');
+      setError(t('repositories.urlRequired'));
       return;
     }
 
     const validation = urlNormalizer.validate(cloneUrl.trim());
     if (!validation.valid) {
       if (validation.error === 'EMPTY_URL') {
-        setError('Clone URL is required');
+        setError(t('repositories.urlRequired'));
       } else {
-        setError('Invalid URL format');
+        setError(t('repositories.urlInvalid'));
       }
       return;
     }
@@ -195,7 +201,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
             size="sm"
             onClick={() => setShowAddForm(true)}
           >
-            + Add Repository
+            + {t('repositories.add')}
           </Button>
         )}
         <Button
@@ -204,7 +210,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
           onClick={handleSyncRepositories}
           disabled={isSyncing}
         >
-          {isSyncing ? 'Syncing...' : 'Sync All'}
+          {isSyncing ? t('repositories.syncing') : t('repositories.syncAll')}
         </Button>
       </div>
 
@@ -213,7 +219,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
         <Card padding="lg">
           <div className="space-y-4">
             <div>
-              <h3 className="text-lg font-semibold mb-2 text-foreground">Add New Repository</h3>
+              <h3 className="text-lg font-semibold mb-2 text-foreground">{t('repositories.addNewTitle')}</h3>
             </div>
 
             {/* Mode Toggle Tabs */}
@@ -222,8 +228,8 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
               onValueChange={(value) => setInputMode(value as InputMode)}
             >
               <TabsList className="w-full">
-                <TabsTrigger value="local">Local Path</TabsTrigger>
-                <TabsTrigger value="url">Clone URL</TabsTrigger>
+                <TabsTrigger value="local">{t('repositories.localPathTab')}</TabsTrigger>
+                <TabsTrigger value="url">{t('repositories.cloneUrlTab')}</TabsTrigger>
               </TabsList>
 
               {/* Local Path Mode */}
@@ -231,10 +237,10 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
                 <form onSubmit={handleAddRepository} className="space-y-4">
                   <div>
                     <p className="text-sm text-muted-foreground mb-4">
-                      Enter the absolute path to a git repository containing worktrees.
+                      {t('repositories.localPathDescription')}
                     </p>
                     <label htmlFor="repositoryPath" className="block text-sm font-medium text-foreground mb-2">
-                      Repository Path
+                      {t('repositories.localPathLabel')}
                     </label>
                     <Input
                       id="repositoryPath"
@@ -246,7 +252,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
                       disabled={isScanning}
                     />
                     <p className="text-xs text-muted-foreground mt-1">
-                      Example: /Users/username/projects/my-repo
+                      {t('repositories.localPathExample')}
                     </p>
                   </div>
 
@@ -256,7 +262,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
                       variant="primary"
                       disabled={isScanning || !repositoryPath.trim()}
                     >
-                      {isScanning ? 'Scanning...' : 'Scan & Add'}
+                      {isScanning ? t('repositories.scanning') : t('repositories.scan')}
                     </Button>
                     <Button
                       type="button"
@@ -264,7 +270,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
                       onClick={handleCancel}
                       disabled={isScanning}
                     >
-                      Cancel
+                      {t('cancel')}
                     </Button>
                   </div>
                 </form>
@@ -275,10 +281,10 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
                 <form onSubmit={handleCloneRepository} className="space-y-4">
                   <div>
                     <p className="text-sm text-muted-foreground mb-4">
-                      Enter a git clone URL to clone a remote repository.
+                      {t('repositories.cloneUrlDescription')}
                     </p>
                     <label htmlFor="cloneUrl" className="block text-sm font-medium text-foreground mb-2">
-                      Clone URL
+                      {t('repositories.cloneUrlLabel')}
                     </label>
                     <Input
                       id="cloneUrl"
@@ -290,7 +296,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
                       disabled={isCloning}
                     />
                     <p className="text-xs text-muted-foreground mt-1">
-                      Supports HTTPS and SSH URLs
+                      {t('repositories.cloneUrlHelp')}
                     </p>
                   </div>
 
@@ -300,7 +306,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
                       variant="primary"
                       disabled={isCloning || !cloneUrl.trim()}
                     >
-                      {isCloning ? 'Cloning...' : 'Clone'}
+                      {isCloning ? t('repositories.cloning') : t('repositories.clone')}
                     </Button>
                     <Button
                       type="button"
@@ -308,7 +314,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
                       onClick={handleCancel}
                       disabled={isCloning}
                     >
-                      Cancel
+                      {t('cancel')}
                     </Button>
                   </div>
                 </form>
