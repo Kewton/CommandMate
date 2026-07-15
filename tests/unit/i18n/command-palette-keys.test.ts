@@ -57,12 +57,24 @@ describe('command palette i18n keys (Issue #1053)', () => {
       'groups.navigation',
       'groups.worktrees',
       'groups.actions',
-      'nav.sessions',
       'actions.toLight',
       'actions.toDark',
       'mobileTrigger',
     ]) {
       expect(keys).toContain(expected);
+    }
+  });
+
+  /**
+   * Issue #1197: nav labels moved to the shared `common` namespace so Home's
+   * quick actions and the palette resolve the same strings. Keeping a stale
+   * copy here would let the two drift apart silently — `common-keys.test.ts`
+   * owns the nav guard now.
+   */
+  it('no longer carries its own nav.* copy (moved to common in Issue #1197)', () => {
+    for (const locale of ['en', 'ja']) {
+      const keys = leafKeys(loadCommandPalette(locale));
+      expect(keys.filter((k) => k.startsWith('nav.')), `${locale}`).toEqual([]);
     }
   });
 });

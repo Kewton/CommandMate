@@ -10,14 +10,6 @@
     "worktrees": "Worktrees",
     "actions": "Actions"
   },
-  "nav": {
-    "home": "Home",
-    "chat": "Chat",
-    "sessions": "Sessions",
-    "repositories": "Repositories",
-    "review": "Review",
-    "more": "More"
-  },
   "actions": {
     "toLight": "Switch to light theme",
     "toDark": "Switch to dark theme",

@@ -2,6 +2,14 @@
   "title": "Overview",
   "running": "running",
   "waiting": "waiting",
+  "sessionOverview": {
+    "title": "Session Overview",
+    "recentSessions": "Recent sessions",
+    "viewAll": "View all"
+  },
+  "recentSessions": {
+    "empty": "No recent sessions yet."
+  },
   "assistant": {
     "clearHistoryConfirm": "Clear all chat history for this repository and CLI? Past messages will no longer be sent back to the assistant.",
     "changeRepoConfirm": "Changing repository will stop the active conversation. Do you want to continue?"

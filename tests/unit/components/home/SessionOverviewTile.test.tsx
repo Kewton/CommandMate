@@ -57,12 +57,22 @@ describe('SessionOverviewTile', () => {
     expect(screen.getByTestId('session-overview-view-all').getAttribute('href')).toBe('/sessions');
   });
 
+  // Issue #1197: headings and the "View all" link resolve through next-intl.
+  it('renders headings and the view-all link via translation keys', () => {
+    render(<SessionOverviewTile worktrees={[]} />);
+    expect(screen.getByText('home.sessionOverview.title')).toBeDefined();
+    expect(screen.getByText('home.sessionOverview.recentSessions')).toBeDefined();
+    expect(screen.getByTestId('session-overview-view-all').textContent).toBe(
+      'home.sessionOverview.viewAll'
+    );
+  });
+
   it('renders stat/list skeletons with headings intact while loading (Issue #1118)', () => {
     render(<SessionOverviewTile worktrees={[]} isLoading />);
     expect(screen.getByTestId('home-session-summary-loading')).toBeDefined();
     expect(screen.getByTestId('recent-sessions-loading')).toBeDefined();
     // Chrome (headings, View all link) stays visible during loading
-    expect(screen.getByText('Session Overview')).toBeDefined();
+    expect(screen.getByText('home.sessionOverview.title')).toBeDefined();
     expect(screen.getByTestId('session-overview-view-all')).toBeDefined();
     expect(screen.queryByTestId('running-count')).toBeNull();
     expect(screen.queryByTestId('recent-sessions-empty')).toBeNull();
