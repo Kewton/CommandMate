@@ -69,7 +69,7 @@ export function GlobalMobileNav() {
               }`}
             >
               {tab.icon}
-              <span className="mt-1">{tCommon(tab.labelKey)}</span>
+              <span className="mt-1 whitespace-nowrap">{tCommon(tab.labelKey)}</span>
             </TransitionLink>
           );
         })}
@@ -83,7 +83,7 @@ export function GlobalMobileNav() {
           className="flex flex-col items-center justify-center flex-1 h-full text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
           <Search size={20} aria-hidden="true" />
-          <span className="mt-1">{t('mobileLabel')}</span>
+          <span className="mt-1 whitespace-nowrap">{t('mobileLabel')}</span>
         </button>
       </div>
     </nav>
