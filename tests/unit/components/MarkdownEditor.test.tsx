@@ -76,10 +76,22 @@ class MockResizeObserver {
   disconnect = resizeDisconnectSpy;
 }
 
-/** Simulate the preview pane container resizing to `width` px. */
-function fireResize(width: number) {
+/**
+ * Simulate the preview pane container resizing to `width` px.
+ *
+ * Waits for the observer to exist first: it is constructed by the preview pane's
+ * effect, which mounts later than the textarea `waitForEditorReady()` waits on.
+ * Since the mocked `observe` is a no-op, `fireResize` is the only thing that can
+ * ever set `widthAllowsToc` — firing before construction leaves it false forever
+ * and the caller times out 1s later on a missing TOC instead of seeing the cause.
+ */
+async function fireResize(width: number) {
+  await waitFor(() => {
+    expect(lastResizeObserverCallback).not.toBeNull();
+  });
   act(() => {
-    lastResizeObserverCallback?.([{ contentRect: { width } }]);
+    // Non-optional on purpose: a silent no-op here is the bug this guards against.
+    lastResizeObserverCallback!([{ contentRect: { width } }]);
   });
 }
 
@@ -1518,7 +1530,7 @@ def hello():
       render(<MarkdownEditor {...defaultProps} />);
       await waitForEditorReady();
 
-      fireResize(700);
+      await fireResize(700);
 
       await waitFor(() => {
         expect(screen.getByTestId('markdown-preview-toc')).toBeInTheDocument();
@@ -1532,7 +1544,7 @@ def hello():
       await waitForEditorReady();
 
       // Below TOC_SIDEBAR_MIN_WIDTH_PX (480): sidebar/toggle must stay hidden.
-      fireResize(400);
+      await fireResize(400);
 
       expect(screen.queryByTestId('markdown-preview-toc')).not.toBeInTheDocument();
       expect(screen.queryByTestId('markdown-preview-toc-toggle')).not.toBeInTheDocument();
@@ -1547,7 +1559,7 @@ def hello():
       render(<MarkdownEditor {...defaultProps} />);
       await waitForEditorReady();
 
-      fireResize(900);
+      await fireResize(900);
 
       expect(screen.queryByTestId('markdown-preview-toc')).not.toBeInTheDocument();
       expect(screen.queryByTestId('markdown-preview-toc-toggle')).not.toBeInTheDocument();
@@ -1557,7 +1569,7 @@ def hello():
       render(<MarkdownEditor {...defaultProps} />);
       await waitForEditorReady();
 
-      fireResize(700);
+      await fireResize(700);
       await waitFor(() => {
         expect(screen.getByTestId('markdown-preview-toc')).toBeInTheDocument();
       });
@@ -1579,7 +1591,7 @@ def hello():
       render(<MarkdownEditor {...defaultProps} />);
       await waitForEditorReady();
 
-      fireResize(700);
+      await fireResize(700);
 
       await waitFor(() => {
         expect(screen.getByTestId('markdown-preview-toc-toggle')).toBeInTheDocument();
