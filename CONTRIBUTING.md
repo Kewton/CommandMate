@@ -21,7 +21,6 @@ npm run dev
 - npm
 - tmux
 - git
-- openssl
 - Claude CLI（動作確認する場合）
 
 ## ブランチ戦略

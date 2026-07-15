@@ -51,7 +51,6 @@ commandmate start --daemon
 - [ ] npm がインストールされている
 - [ ] Git がインストールされている
 - [ ] tmux がインストールされている
-- [ ] openssl がインストールされている
 - [ ] Claude CLI (Claude Code) がインストールされている（オプション）
   ```bash
   claude --version
