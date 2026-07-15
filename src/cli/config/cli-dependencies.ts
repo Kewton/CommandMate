@@ -15,7 +15,7 @@ export const DEPENDENCIES: DependencyCheck[] = [
     command: 'node',
     versionArg: '-v',
     required: true,
-    minVersion: '20.0.0',
+    minVersion: '22.0.0',
   },
   {
     name: 'npm',

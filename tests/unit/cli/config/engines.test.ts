@@ -6,6 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { DEPENDENCIES } from '../../../../src/cli/config/cli-dependencies';
 
 interface PackageJson {
   engines?: {
@@ -22,7 +23,15 @@ describe('package.json engines', () => {
     expect(packageJson.engines).toBeDefined();
   });
 
-  it('should require Node.js >=20.0.0', () => {
-    expect(packageJson.engines?.node).toBe('>=20.0.0');
+  it('should require Node.js >=22.0.0', () => {
+    expect(packageJson.engines?.node).toBe('>=22.0.0');
+  });
+
+  // Issue #1264: engines and the CLI preflight floor are declared in two places.
+  // They drifted apart once already; this pins them together.
+  it('should match the Node.js minVersion enforced by the CLI preflight', () => {
+    const preflightMin = DEPENDENCIES.find(d => d.name === 'Node.js')?.minVersion;
+    expect(preflightMin).toBeDefined();
+    expect(packageJson.engines?.node).toBe(`>=${preflightMin}`);
   });
 });

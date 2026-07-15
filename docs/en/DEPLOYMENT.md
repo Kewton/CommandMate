@@ -21,7 +21,7 @@ The following tools must be installed:
 
 | Tool | Version | Required | Check Command |
 |------|---------|----------|---------------|
-| Node.js | v20+ | ✓ | `node -v` |
+| Node.js | v22+ | ✓ | `node -v` |
 | npm | - | ✓ | `npm -v` |
 | Git | - | ✓ | `git --version` |
 | tmux | - | ✓ | `tmux -V` |

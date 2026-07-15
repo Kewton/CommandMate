@@ -25,7 +25,7 @@ CommandMate を使用するには、以下のツールが必要です。
 
 | ツール | バージョン | 必須 | 確認コマンド |
 |--------|----------|------|------------|
-| Node.js | v20+ | ✓ | `node -v` |
+| Node.js | v22+ | ✓ | `node -v` |
 | npm | - | ✓ | `npm -v` |
 | Git | - | ✓ | `git --version` |
 | tmux | - | ✓ | `tmux -V` |
@@ -393,7 +393,7 @@ brew install tmux  # macOS
 sudo apt install tmux  # Ubuntu/Debian
 
 # Node.js のバージョンが古い
-node -v  # v20 以上が必要
+node -v  # v22 以上が必要
 ```
 
 ### データベースエラー

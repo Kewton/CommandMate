@@ -17,7 +17,7 @@ npm run dev
 
 ### 前提条件
 
-- Node.js v20+
+- Node.js v22+
 - npm
 - tmux
 - git

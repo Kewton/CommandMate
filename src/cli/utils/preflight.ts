@@ -116,7 +116,7 @@ export class PreflightChecker {
    */
   static getInstallHint(name: string): string {
     const hints: Record<string, string> = {
-      'Node.js': 'Install with: nvm install 20 or visit https://nodejs.org',
+      'Node.js': 'Install with: nvm install 22 or visit https://nodejs.org',
       npm: 'npm is included with Node.js. Install Node.js first.',
       tmux: 'Install with: brew install tmux (macOS) or apt install tmux (Linux)',
       git: 'Install with: brew install git (macOS) or apt install git (Linux)',

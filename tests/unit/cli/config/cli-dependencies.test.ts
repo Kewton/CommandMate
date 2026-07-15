@@ -46,7 +46,7 @@ describe('DEPENDENCIES', () => {
 
   it('should have minVersion for Node.js', () => {
     const nodejs = DEPENDENCIES.find(d => d.name === 'Node.js');
-    expect(nodejs?.minVersion).toBe('20.0.0');
+    expect(nodejs?.minVersion).toBe('22.0.0');
   });
 });
 

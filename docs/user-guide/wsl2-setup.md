@@ -69,7 +69,7 @@ gh --version
 gh auth login
 ```
 
-### Install Node.js (v20+)
+### Install Node.js (v22+)
 
 > **Note:** Ubuntu's default `apt` repository ships an outdated Node.js.
 > If you already have an old version installed via `apt`, remove it first:

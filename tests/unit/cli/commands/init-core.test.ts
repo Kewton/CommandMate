@@ -26,7 +26,7 @@ import { ExitCode } from '../../../../src/cli/types';
 function mockAllDependenciesFound(): void {
   vi.mocked(childProcess.spawnSync).mockReturnValue({
     status: 0,
-    stdout: 'v20.0.0',
+    stdout: 'v22.0.0',
     stderr: '',
     pid: 1234,
     output: [],
@@ -51,7 +51,7 @@ function mockMissingDependency(missing: string): void {
     }
     return {
       status: 0,
-      stdout: 'v20.0.0',
+      stdout: 'v22.0.0',
       stderr: '',
       pid: 1234,
       output: [],
