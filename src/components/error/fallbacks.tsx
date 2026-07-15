@@ -15,47 +15,6 @@ interface ErrorFallbackProps {
 }
 
 /**
- * Terminal-specific error fallback
- * Styled to match the terminal appearance
- */
-export function TerminalErrorFallback({
-  error,
-  onRetry,
-}: ErrorFallbackProps) {
-  const tError = useTranslations('error');
-  const tCommon = useTranslations('common');
-
-  return (
-    <div className="h-full flex items-center justify-center bg-gray-900 text-gray-100 p-4">
-      <div className="text-center">
-        <div className="text-red-400 mb-2">
-          <svg className="w-12 h-12 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-            />
-          </svg>
-        </div>
-        <h3 className="text-lg font-medium mb-2">{tError('terminal.displayError')}</h3>
-        <p className="text-sm text-gray-400 mb-4">
-          {error?.message || tError('terminal.outputError')}
-        </p>
-        {onRetry && (
-          <button
-            onClick={onRetry}
-            className="px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-600 transition-colors text-sm"
-          >
-            {tCommon('reload')}
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/**
  * History pane error fallback
  * Styled for the message history area
  */
@@ -67,9 +26,9 @@ export function HistoryErrorFallback({
   const tCommon = useTranslations('common');
 
   return (
-    <div className="h-full flex items-center justify-center bg-gray-50 p-4">
+    <div className="h-full flex items-center justify-center bg-surface p-4">
       <div className="text-center">
-        <div className="text-yellow-500 mb-2">
+        <div className="text-warning mb-2">
           <svg className="w-12 h-12 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
               strokeLinecap="round"
@@ -79,8 +38,8 @@ export function HistoryErrorFallback({
             />
           </svg>
         </div>
-        <h3 className="text-lg font-medium text-gray-800 mb-2">{tError('history.loadError')}</h3>
-        <p className="text-sm text-gray-600 mb-4">
+        <h3 className="text-lg font-medium text-foreground mb-2">{tError('history.loadError')}</h3>
+        <p className="text-sm text-muted-foreground mb-4">
           {error?.message || tError('history.displayError')}
         </p>
         {onRetry && (
@@ -108,8 +67,8 @@ export function PromptErrorFallback({
   const tCommon = useTranslations('common');
 
   return (
-    <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-      <div className="flex items-center gap-2 text-yellow-800 mb-2">
+    <div className="p-4 bg-warning-subtle border border-warning-border rounded-lg">
+      <div className="flex items-center gap-2 text-warning-foreground mb-2">
         <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
           <path
             fillRule="evenodd"
@@ -119,13 +78,13 @@ export function PromptErrorFallback({
         </svg>
         <span className="font-medium">{tError('prompt.responseError')}</span>
       </div>
-      <p className="text-sm text-yellow-700 mb-3">
+      <p className="text-sm text-warning-foreground/80 mb-3">
         {error?.message || tError('prompt.choiceDisplayError')}
       </p>
       {onRetry && (
         <button
           onClick={onRetry}
-          className="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 transition-colors text-sm"
+          className="px-4 py-2 bg-warning-foreground text-warning-subtle rounded hover:opacity-90 transition-opacity text-sm"
         >
           {tCommon('retry')}
         </button>
@@ -146,8 +105,8 @@ export function ConnectionErrorFallback({
   const tCommon = useTranslations('common');
 
   return (
-    <div className="p-4 bg-orange-50 border border-orange-200 rounded-lg">
-      <div className="flex items-center gap-2 text-orange-800 mb-2">
+    <div className="p-4 bg-warning-subtle border border-warning-border rounded-lg">
+      <div className="flex items-center gap-2 text-warning-foreground mb-2">
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
             strokeLinecap="round"
@@ -158,13 +117,13 @@ export function ConnectionErrorFallback({
         </svg>
         <span className="font-medium">{tError('connection.error')}</span>
       </div>
-      <p className="text-sm text-orange-700 mb-3">
+      <p className="text-sm text-warning-foreground/80 mb-3">
         {error?.message || tError('connection.serverError')}
       </p>
       {onRetry && (
         <button
           onClick={onRetry}
-          className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 transition-colors text-sm"
+          className="px-4 py-2 bg-warning-foreground text-warning-subtle rounded hover:opacity-90 transition-opacity text-sm"
         >
           {tCommon('reconnect')}
         </button>

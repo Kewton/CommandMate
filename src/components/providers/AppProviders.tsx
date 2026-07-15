@@ -17,7 +17,12 @@ import { SidebarProvider } from '@/contexts/SidebarContext';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { PcDisplaySizeProvider } from '@/contexts/PcDisplaySizeContext';
 import { CommandPaletteProvider } from '@/contexts/CommandPaletteContext';
+import { KeyboardShortcutsProvider } from '@/contexts/KeyboardShortcutsContext';
 import { WorktreesCacheProvider } from '@/components/providers/WorktreesCacheProvider';
+import { ViewTransitionsProvider } from '@/components/providers/ViewTransitionsProvider';
+import { RealtimeProvider } from '@/hooks/useRealtimeConnection';
+import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
+import { ServiceWorkerRegistrar } from '@/components/pwa/ServiceWorkerRegistrar';
 
 interface AppProvidersProps {
   children: ReactNode;
@@ -44,11 +49,28 @@ export function AppProviders({ children, locale, messages, timeZone, authEnabled
         <AuthProvider authEnabled={authEnabled}>
           <PcDisplaySizeProvider>
             <SidebarProvider>
-              <WorktreesCacheProvider>
-                <CommandPaletteProvider>
-                  {children}
-                </CommandPaletteProvider>
-              </WorktreesCacheProvider>
+              {/* Issue #1120: single shared WebSocket connection wrapping the
+                  worktrees cache so session-status / message / terminal pushes
+                  feed the sidebar and terminal panes; polling remains the
+                  fallback when disconnected. */}
+              <RealtimeProvider>
+                <WorktreesCacheProvider>
+                  <CommandPaletteProvider>
+                    {/* Issue #1130: `?` keyboard-shortcuts help overlay open state. */}
+                    <KeyboardShortcutsProvider>
+                      <ConfirmProvider>
+                        {/* Issue #1141: View Transitions wraps the routed content. */}
+                        <ViewTransitionsProvider>
+                          {children}
+                        </ViewTransitionsProvider>
+                        {/* Issue #1124: registers the Service Worker (prod only)
+                            and shows the update-available prompt. */}
+                        <ServiceWorkerRegistrar />
+                      </ConfirmProvider>
+                    </KeyboardShortcutsProvider>
+                  </CommandPaletteProvider>
+                </WorktreesCacheProvider>
+              </RealtimeProvider>
             </SidebarProvider>
           </PcDisplaySizeProvider>
         </AuthProvider>

@@ -1,5 +1,9 @@
 {
   "title": "概要",
   "running": "実行中",
-  "waiting": "待機中"
+  "waiting": "待機中",
+  "assistant": {
+    "clearHistoryConfirm": "このリポジトリとCLIのチャット履歴をすべて削除しますか？過去のメッセージはアシスタントに送信されなくなります。",
+    "changeRepoConfirm": "リポジトリを変更すると進行中の会話が停止します。続行しますか？"
+  }
 }

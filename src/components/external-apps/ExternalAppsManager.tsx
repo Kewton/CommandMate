@@ -7,7 +7,7 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import { Button, Card } from '@/components/ui';
+import { Button, Card, Spinner } from '@/components/ui';
 import { ExternalAppCard } from './ExternalAppCard';
 import { ExternalAppForm } from './ExternalAppForm';
 import type { ExternalApp } from '@/types/external-apps';
@@ -118,14 +118,14 @@ export function ExternalAppsManager() {
       {isLoading ? (
         <Card padding="lg">
           <div className="flex items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent-600" />
+            <Spinner size="xl" variant="accent" />
             <span className="ml-3 text-muted-foreground">Loading apps...</span>
           </div>
         </Card>
       ) : error ? (
         <Card padding="lg">
           <div className="text-center py-8">
-            <p className="text-red-600 dark:text-red-400 mb-4">Failed to load external apps</p>
+            <p className="text-danger-foreground mb-4">Failed to load external apps</p>
             <Button variant="secondary" size="sm" onClick={fetchApps}>
               Retry
             </Button>

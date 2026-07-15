@@ -13,7 +13,7 @@ import type { ChatMessage } from '@/types/models';
 import { format } from 'date-fns';
 import { getDateFnsLocale } from '@/lib/date-locale';
 import { getCliToolDisplayNameSafe } from '@/lib/cli-tools/types';
-import { Button } from '@/components/ui';
+import { Button, Spinner } from '@/components/ui';
 
 export interface PromptMessageProps {
   message: ChatMessage;
@@ -60,7 +60,7 @@ function SendingIndicator({ className = '' }: { className?: string }) {
   const t = useTranslations('prompt');
   return (
     <div className={`flex items-center gap-2 text-sm text-muted-foreground ${className}`.trim()}>
-      <div className="animate-spin rounded-full h-4 w-4 border-2 border-input border-t-accent-600" />
+      <Spinner size="sm" variant="accent" />
       <span>{t('sending')}</span>
     </div>
   );
@@ -83,7 +83,7 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
       await onRespond(answer);
     } catch (error) {
       console.error('Failed to respond:', error);
-      alert(t('failedToRespond'));
+      window.alert(t('failedToRespond'));
     } finally {
       setResponding(false);
     }
@@ -91,14 +91,14 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
 
   return (
     <div className="mb-4">
-      <div className="bg-yellow-50 dark:bg-muted border-2 border-yellow-300 dark:border-yellow-600 rounded-lg p-4 shadow-sm">
+      <div className="bg-warning-subtle border-2 border-warning-border rounded-lg p-4 shadow-sm">
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <TriangleAlert className="w-6 h-6 text-yellow-600 dark:text-yellow-400" aria-hidden="true" />
-            <span className="font-bold text-yellow-800 dark:text-yellow-300">{t('confirmationFrom', { toolName: getCliToolDisplayNameSafe(message.cliToolId, 'Claude') })}</span>
+            <TriangleAlert className="w-6 h-6 text-warning-foreground" aria-hidden="true" />
+            <span className="font-bold text-warning-foreground">{t('confirmationFrom', { toolName: getCliToolDisplayNameSafe(message.cliToolId, 'Claude') })}</span>
           </div>
-          <span className="text-xs text-yellow-600 dark:text-yellow-400">{timestamp}</span>
+          <span className="text-xs text-warning-foreground/80">{timestamp}</span>
         </div>
 
         {/* Instruction text (Issue #235: rawContent display) [SF-S2-004] */}
@@ -177,7 +177,7 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
         ) : (
           <div className="bg-surface border border-input rounded-lg px-4 py-2 inline-block">
             <span className="text-sm text-muted-foreground">
-              <CircleCheck size={16} className="inline align-[-3px] mr-1 text-green-600" aria-hidden="true" />{t('answered')}: <strong className="text-foreground">{prompt.answer}</strong>
+              <CircleCheck size={16} className="inline align-[-3px] mr-1 text-success" aria-hidden="true" />{t('answered')}: <strong className="text-foreground">{prompt.answer}</strong>
             </span>
           </div>
         )}

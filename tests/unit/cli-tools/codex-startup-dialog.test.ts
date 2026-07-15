@@ -26,6 +26,7 @@ vi.mock('@/lib/tmux/tmux', () => ({
   killSession: vi.fn(),
   sendSpecialKey: vi.fn(),
   sendSpecialKeys: vi.fn(),
+  reconcileSessionGeometry: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock('@/lib/pasted-text-helper', () => ({
@@ -47,7 +48,7 @@ vi.mock('util', async (importOriginal) => {
 });
 
 import { CodexTool } from '@/lib/cli-tools/codex';
-import { hasSession, createSession, sendKeys, sendSpecialKey, capturePane } from '@/lib/tmux/tmux';
+import { hasSession, createSession, sendKeys, sendSpecialKey, capturePane, reconcileSessionGeometry } from '@/lib/tmux/tmux';
 
 const WORKTREE_ID = 'test-worktree';
 const SESSION = 'mcbd-codex-test-worktree';
@@ -112,6 +113,18 @@ describe('CodexTool first-launch dialog handling (Issue #890)', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it('reconciles geometry when reusing an existing Codex session', async () => {
+    vi.mocked(hasSession).mockResolvedValue(true);
+
+    await tool.startSession(WORKTREE_ID, '/test/path', 'codex-2');
+
+    expect(createSession).not.toHaveBeenCalled();
+    expect(reconcileSessionGeometry).toHaveBeenCalledWith(
+      'mcbd-codex-test-worktree-2',
+      undefined,
+    );
   });
 
   describe('waitForReady (A: no stray Enter on number selections)', () => {

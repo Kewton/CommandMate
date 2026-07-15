@@ -145,7 +145,7 @@ export default function LoginPage() {
           </div>
 
           {displayError && (
-            <div className="text-red-600 dark:text-red-400 text-sm">
+            <div className="text-danger-foreground text-sm">
               {displayError}
               {retryAfter !== null && retryAfter > 0 && (
                 <div className="mt-1">

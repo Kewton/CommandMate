@@ -514,3 +514,143 @@ describe('TerminalSplitContainer action-bar layout (Issue #977)', () => {
     );
   });
 });
+
+// ===========================================================================
+// Issue #1152: the DesktopHeader instance switcher must drive the PRIMARY split
+// (which owns the display polling + message send), not just the worktree-global
+// active badge. The header publishes a token-stamped `headerInstanceSelection`;
+// the container applies it to split 0 (or focus-moves on an S1-002 collision).
+// Applying it to `split.instanceId` is the fix — the pane already resolves
+// `instanceId ?? cliToolId` into its /current-output poll + send (covered by
+// TerminalSplitPaneContent.test.tsx), so once the split reflects the header the
+// whole chain (display + send) follows.
+// ===========================================================================
+describe('TerminalSplitContainer header→split wiring (Issue #1152)', () => {
+  const DUAL_CLAUDE: AgentInstance[] = [
+    { id: 'claude', cliTool: 'claude', alias: 'Primary', order: 0 },
+    { id: 'claude-2', cliTool: 'claude', alias: 'Review', order: 1 },
+  ];
+
+  beforeEach(() => {
+    clearTerminalSplitsLocalStorage();
+  });
+  afterEach(() => {
+    clearTerminalSplitsLocalStorage();
+  });
+
+  /**
+   * Harness that owns the token-stamped `headerInstanceSelection` state exactly
+   * like WorktreeDetailDesktop, so tests exercise the real prop contract. The
+   * panes expose their resolved `instanceId` (the value that flows into polling +
+   * send) plus a button that drives the split-internal dropdown path.
+   */
+  function setupHeaderWiring(instances: AgentInstance[] = DUAL_CLAUDE) {
+    const onFocusedSplitChange = vi.fn();
+    function Harness() {
+      const [sel, setSel] = React.useState<{ instanceId: string; token: number } | null>(null);
+      const tokenRef = React.useRef(0);
+      const select = (id: string) => {
+        tokenRef.current += 1;
+        setSel({ instanceId: id, token: tokenRef.current });
+      };
+      return (
+        <>
+          <button type="button" data-testid="hdr-select-claude" onClick={() => select('claude')}>
+            claude
+          </button>
+          <button type="button" data-testid="hdr-select-claude-2" onClick={() => select('claude-2')}>
+            claude-2
+          </button>
+          <TerminalSplitContainer
+            worktreeId="w-1"
+            instances={instances}
+            headerInstanceSelection={sel}
+            onFocusedSplitChange={onFocusedSplitChange}
+            renderPane={({ splitIndex, instanceId, cliToolId, onInstanceChange, onFocus }) => (
+              <div data-split-index={splitIndex}>
+                <span data-testid={`pane-inst-${splitIndex}`}>{instanceId}</span>
+                <span data-testid={`pane-cli-${splitIndex}`}>{cliToolId}</span>
+                <button
+                  type="button"
+                  data-testid={`pane-dropdown-claude-2-${splitIndex}`}
+                  onClick={() => onInstanceChange('claude-2')}
+                >
+                  dropdown claude-2
+                </button>
+                <textarea data-testid={`ta-${splitIndex}`} onFocus={onFocus} />
+              </div>
+            )}
+          />
+        </>
+      );
+    }
+    const utils = render(<Harness />);
+    return { onFocusedSplitChange, ...utils };
+  }
+
+  it('header selection binds an unshown instance to the primary split (the wiring bug fix)', () => {
+    setupHeaderWiring();
+    // Default: split 0 shows the first roster instance.
+    expect(screen.getByTestId('pane-inst-0').textContent).toBe('claude');
+
+    // Select "Claude 2" in the header → the primary split switches to claude-2
+    // (previously the header updated only the active badge, leaving the split —
+    // and therefore display + send — on claude).
+    fireEvent.click(screen.getByTestId('hdr-select-claude-2'));
+    expect(screen.getByTestId('pane-inst-0').textContent).toBe('claude-2');
+
+    // And back to claude.
+    fireEvent.click(screen.getByTestId('hdr-select-claude'));
+    expect(screen.getByTestId('pane-inst-0').textContent).toBe('claude');
+  });
+
+  it('collision policy: selecting an instance already shown in another split focus-moves, no reassignment (S1-002)', () => {
+    const { onFocusedSplitChange } = setupHeaderWiring();
+    // Grow to 2 splits: [claude, claude-2].
+    fireEvent.click(screen.getByTestId('add-terminal-split'));
+    expect(screen.getByTestId('pane-inst-0').textContent).toBe('claude');
+    expect(screen.getByTestId('pane-inst-1').textContent).toBe('claude-2');
+
+    // Focus split 0 so the focus-move to split 1 is an observable change.
+    fireEvent.focus(screen.getByTestId('ta-0'));
+    onFocusedSplitChange.mockClear();
+
+    // Header selects claude-2, which already lives in split 1.
+    fireEvent.click(screen.getByTestId('hdr-select-claude-2'));
+
+    // Splits are untouched — no duplication, no reassignment.
+    expect(screen.getByTestId('pane-inst-0').textContent).toBe('claude');
+    expect(screen.getByTestId('pane-inst-1').textContent).toBe('claude-2');
+    // Focus moved to the split that already shows the selected instance.
+    expect(onFocusedSplitChange).toHaveBeenCalledWith(1);
+  });
+
+  it('no-op: selecting the instance already in the primary split changes nothing', () => {
+    const { onFocusedSplitChange } = setupHeaderWiring();
+    expect(screen.getByTestId('pane-inst-0').textContent).toBe('claude');
+    onFocusedSplitChange.mockClear();
+
+    fireEvent.click(screen.getByTestId('hdr-select-claude'));
+
+    expect(screen.getByTestId('pane-inst-0').textContent).toBe('claude');
+    expect(onFocusedSplitChange).not.toHaveBeenCalled();
+  });
+
+  it('regression: the split-internal dropdown still reassigns via onInstanceChange', () => {
+    setupHeaderWiring();
+    // split 0 starts as claude; the dropdown picks claude-2.
+    expect(screen.getByTestId('pane-inst-0').textContent).toBe('claude');
+    fireEvent.click(screen.getByTestId('pane-dropdown-claude-2-0'));
+    expect(screen.getByTestId('pane-inst-0').textContent).toBe('claude-2');
+  });
+
+  it('applies each header click once and is a no-op without a selection', () => {
+    // No selection (sel=null) → the default split is untouched.
+    setupHeaderWiring();
+    expect(screen.getByTestId('pane-inst-0').textContent).toBe('claude');
+    // Repeated selection of the same target is idempotent (token gate).
+    fireEvent.click(screen.getByTestId('hdr-select-claude-2'));
+    fireEvent.click(screen.getByTestId('hdr-select-claude-2'));
+    expect(screen.getByTestId('pane-inst-0').textContent).toBe('claude-2');
+  });
+});

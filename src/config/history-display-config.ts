@@ -5,7 +5,6 @@
  * - GET /api/worktrees/:id/messages (upper-bound validation)
  * - HistoryPane selector UI (selectable options)
  * - WorktreeDetailRefactored state (persisted to localStorage)
- * - useInfiniteMessages default page size
  *
  * Design decisions:
  * - MAX_MESSAGES_LIMIT is derived from HISTORY_DISPLAY_LIMIT_OPTIONS (no duplication).
@@ -17,8 +16,14 @@
 /**
  * Selectable history display limit options (ascending).
  * The first entry is the historical default; the last entry is the maximum.
+ *
+ * Issue #1123: the 250 ceiling was a performance mitigation for the previously
+ * flat-rendered HistoryPane. Now that the list is virtualized (render cost is
+ * O(visible rows), not O(total)), the ceiling is relaxed to 1000. The API still
+ * bounds the *fetch* by the maximum option (data volume); server-side paging is
+ * tracked separately.
  */
-export const HISTORY_DISPLAY_LIMIT_OPTIONS = [50, 100, 150, 200, 250] as const;
+export const HISTORY_DISPLAY_LIMIT_OPTIONS = [50, 100, 150, 200, 250, 500, 1000] as const;
 
 /**
  * Union type representing any selectable history display limit.
@@ -36,8 +41,7 @@ export const MAX_MESSAGES_LIMIT: HistoryDisplayLimit = Math.max(
 ) as HistoryDisplayLimit;
 
 /**
- * Default history display limit (used when no localStorage value is present
- * and as the default `pageSize` for `useInfiniteMessages`).
+ * Default history display limit (used when no localStorage value is present).
  */
 export const DEFAULT_MESSAGES_LIMIT: HistoryDisplayLimit = 50;
 

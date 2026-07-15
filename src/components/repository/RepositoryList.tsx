@@ -29,7 +29,7 @@
 
 import React, { memo, useCallback, useEffect, useState } from 'react';
 import { Pencil } from 'lucide-react';
-import { Button, Card, Input, StatusDot } from '@/components/ui';
+import { Button, Card, Input, Skeleton, StatusDot } from '@/components/ui';
 import { cn } from '@/lib/utils/cn';
 import {
   handleApiError,
@@ -78,6 +78,38 @@ const INITIAL_EDIT: EditState = {
  * />
  * ```
  */
+/** Shared by the loaded table and the loading skeleton (Issue #1118). */
+function RepositoryTableHead() {
+  return (
+    <thead className="bg-muted border-b border-border">
+      <tr>
+        <th className="px-4 py-2 text-left font-medium text-foreground">
+          Name
+        </th>
+        <th className="px-4 py-2 text-left font-medium text-foreground">
+          Display name
+        </th>
+        {/* Issue #690: Visibility column placed before Path so it is always reachable on narrow screens */}
+        <th className="px-4 py-2 text-left font-medium text-foreground">
+          Visibility
+        </th>
+        <th className="px-4 py-2 text-left font-medium text-foreground">
+          Path
+        </th>
+        <th className="px-4 py-2 text-left font-medium text-foreground">
+          Worktrees
+        </th>
+        <th className="px-4 py-2 text-left font-medium text-foreground">
+          Status
+        </th>
+        <th className="px-4 py-2 text-left font-medium text-foreground">
+          Actions
+        </th>
+      </tr>
+    </thead>
+  );
+}
+
 function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
   const [repositories, setRepositories] = useState<RepositoryListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -264,11 +296,33 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
   );
 
   if (loading && repositories.length === 0) {
+    // [Issue #1118] First-load skeleton: real table header + placeholder rows
+    // so the loaded table appears without a layout shift.
     return (
-      <Card padding="lg">
-        <p className="text-sm text-muted-foreground">
-          Loading repositories...
-        </p>
+      <Card padding="none">
+        <div
+          className="overflow-x-auto"
+          data-testid="repository-list-loading"
+          role="status"
+          aria-label="Loading repositories"
+        >
+          <table className="min-w-full text-sm">
+            <RepositoryTableHead />
+            <tbody>
+              {[0, 1, 2].map((i) => (
+                <tr key={i} className="border-b border-border">
+                  <td className="px-4 py-3 align-top"><Skeleton className="h-4 w-24" /></td>
+                  <td className="px-4 py-3 align-top"><Skeleton className="h-4 w-20" /></td>
+                  <td className="px-4 py-3 align-top"><Skeleton className="h-4 w-16" /></td>
+                  <td className="px-4 py-3 align-top"><Skeleton className="h-4 w-48" /></td>
+                  <td className="px-4 py-3 align-top"><Skeleton className="h-4 w-10" /></td>
+                  <td className="px-4 py-3 align-top"><Skeleton className="h-4 w-14" /></td>
+                  <td className="px-4 py-3 align-top"><Skeleton className="h-4 w-20" /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Card>
     );
   }
@@ -277,7 +331,7 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
     return (
       <Card padding="lg">
         <div className="space-y-3">
-          <p className="text-sm text-red-800 dark:text-red-300">
+          <p className="text-sm text-danger-foreground">
             Failed to load repositories: {loadError}
           </p>
           <Button variant="secondary" size="sm" onClick={() => void fetchRepositories()}>
@@ -295,8 +349,8 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
           role="status"
           className={`p-3 rounded-lg text-sm ${
             feedback.type === 'success'
-              ? 'bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-300'
-              : 'bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-300'
+              ? 'bg-success-subtle border border-success-border text-success-foreground'
+              : 'bg-danger-subtle border border-danger-border text-danger-foreground'
           }`}
         >
           {feedback.message}
@@ -306,32 +360,7 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
       <Card padding="none">
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
-            <thead className="bg-muted border-b border-border">
-              <tr>
-                <th className="px-4 py-2 text-left font-medium text-foreground">
-                  Name
-                </th>
-                <th className="px-4 py-2 text-left font-medium text-foreground">
-                  Display name
-                </th>
-                {/* Issue #690: Visibility column placed before Path so it is always reachable on narrow screens */}
-                <th className="px-4 py-2 text-left font-medium text-foreground">
-                  Visibility
-                </th>
-                <th className="px-4 py-2 text-left font-medium text-foreground">
-                  Path
-                </th>
-                <th className="px-4 py-2 text-left font-medium text-foreground">
-                  Worktrees
-                </th>
-                <th className="px-4 py-2 text-left font-medium text-foreground">
-                  Status
-                </th>
-                <th className="px-4 py-2 text-left font-medium text-foreground">
-                  Actions
-                </th>
-              </tr>
-            </thead>
+            <RepositoryTableHead />
             <tbody>
               {repositories.length === 0 && (
                 <tr>
@@ -367,7 +396,7 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                             onKeyDown={(e) => handleKeyDown(e, repo)}
                           />
                           {edit.error && (
-                            <p className="text-xs text-red-600 dark:text-red-400">
+                            <p className="text-xs text-danger-foreground">
                               {edit.error}
                             </p>
                           )}

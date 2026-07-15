@@ -15,7 +15,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Card, Checkbox, Input } from '@/components/ui';
+import { Button, Card, Checkbox, Input, Skeleton } from '@/components/ui';
 import { todoApi, type TodoItem } from '@/lib/api/todo-api';
 import { MAX_TODO_CONTENT_LENGTH } from '@/config/todo-config';
 
@@ -254,14 +254,29 @@ export function TodoWidget() {
           </div>
 
           {error && (
-            <p className="mb-2 text-xs text-red-600 dark:text-red-400" data-testid="todo-error">
+            <p className="mb-2 text-xs text-danger-foreground" data-testid="todo-error">
               {error}
             </p>
           )}
 
           {/* Todo list */}
-          {loading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
+          {loading && todos.length === 0 ? (
+            // [Issue #1118] First-load only skeleton (re-fetches after
+            // add/toggle keep the current list): rows mirror a todo item
+            // (checkbox + text).
+            <ul
+              className="space-y-1"
+              data-testid="todo-loading"
+              role="status"
+              aria-label="Loading todos"
+            >
+              {[0, 1, 2].map((i) => (
+                <li key={i} className="flex items-center gap-2 rounded-md px-1 py-1">
+                  <Skeleton className="h-4 w-4 shrink-0 rounded" />
+                  <Skeleton className={`h-4 ${i === 1 ? 'w-2/3' : 'w-5/6'}`} />
+                </li>
+              ))}
+            </ul>
           ) : todos.length === 0 ? (
             <p className="text-sm text-muted-foreground" data-testid="todo-empty">
               No todos yet.
@@ -316,7 +331,7 @@ export function TodoWidget() {
                       onClick={() => handleDelete(todo)}
                       aria-label="Delete todo"
                       data-testid="todo-delete"
-                      className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center text-muted-foreground opacity-100 transition-opacity hover:text-red-500 dark:hover:text-red-400 sm:min-h-0 sm:min-w-0 sm:opacity-0 sm:group-hover:opacity-100"
+                      className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center text-muted-foreground opacity-100 transition-opacity hover:text-danger-foreground sm:min-h-0 sm:min-w-0 sm:opacity-0 sm:group-hover:opacity-100"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

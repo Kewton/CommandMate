@@ -57,6 +57,9 @@ vi.mock('@/lib/session/claude-session', () => ({
 vi.mock('@/lib/ws-server', () => ({
   broadcastMessage: vi.fn(),
 }));
+vi.mock('@/lib/realtime/terminal-broadcast', () => ({
+  broadcastTerminalSnapshotAfterInteraction: vi.fn().mockResolvedValue(undefined),
+}));
 
 describe('POST /api/worktrees/:id/respond', () => {
   let db: Database.Database;

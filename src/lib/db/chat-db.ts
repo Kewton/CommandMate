@@ -414,6 +414,32 @@ export function clearLastUserMessage(
   stmt.run(worktreeId);
 }
 
+/**
+ * Recompute worktree's last_user_message from the remaining active (non-archived)
+ * user messages (Issue #1171).
+ *
+ * A targeted (single-instance / single-CLI) kill archives only that scope's
+ * messages, so other instances' un-archived user messages may still exist. In
+ * that case the sidebar's last_user_message must reflect the newest *remaining*
+ * message rather than being wiped — unconditionally clearing it (the pre-#1171
+ * behavior) would drop metadata that belongs to a still-running instance.
+ *
+ * When no active user message remains (e.g. a kill-all, or the last message was
+ * the archived one), this falls back to clearing the fields — matching the old
+ * behavior for that case.
+ */
+export function recomputeLastUserMessage(
+  db: Database.Database,
+  worktreeId: string
+): void {
+  const latest = getLastUserMessage(db, worktreeId);
+  if (latest) {
+    updateLastUserMessage(db, worktreeId, latest.content, latest.timestamp);
+  } else {
+    clearLastUserMessage(db, worktreeId);
+  }
+}
+
 /** Options for getMessagesByDateRange query */
 export interface GetMessagesByDateRangeOptions {
   after: Date;

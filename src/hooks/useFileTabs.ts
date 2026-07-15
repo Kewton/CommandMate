@@ -68,7 +68,8 @@ export type FileTabsAction =
   | { type: 'DELETE_FILE'; path: string }
   | { type: 'RESTORE'; paths: string[]; activePath: string | null }
   | { type: 'SET_DIRTY'; path: string; isDirty: boolean }
-  | { type: 'MOVE_TO_FRONT'; path: string };
+  | { type: 'MOVE_TO_FRONT'; path: string }
+  | { type: 'CLOSE_ALL' };
 
 // ============================================================================
 // Helper Functions
@@ -256,6 +257,13 @@ export function fileTabsReducer(state: FileTabsState, action: FileTabsAction): F
       return { tabs: newTabs, activeIndex: 0 };
     }
 
+    case 'CLOSE_ALL': {
+      // [Issue #1108] Full view reset closes every open tab. Short-circuit when
+      // already empty so upstream useReducer skips a needless re-render.
+      if (state.tabs.length === 0) return state;
+      return initialState;
+    }
+
     default:
       return state;
   }
@@ -275,6 +283,8 @@ export interface FileTabsActions {
   onFileDeleted: (path: string) => void;
   /** Move a tab to the front (index 0) [DR1-003, DR2-007] */
   moveToFront: (path: string) => void;
+  /** Close every open tab (Issue #1108 full view reset). */
+  closeAllTabs: () => void;
 }
 
 /** Read persisted tab data from localStorage */
@@ -385,9 +395,13 @@ export function useFileTabs(worktreeId: string): readonly [FileTabsState, FileTa
     dispatch({ type: 'MOVE_TO_FRONT', path });
   }, []);
 
+  const closeAllTabs = useCallback(() => {
+    dispatch({ type: 'CLOSE_ALL' });
+  }, []);
+
   const actions = useMemo<FileTabsActions>(
-    () => ({ dispatch, openFile, closeTab, activateTab, onFileRenamed, onFileDeleted, moveToFront }),
-    [dispatch, openFile, closeTab, activateTab, onFileRenamed, onFileDeleted, moveToFront],
+    () => ({ dispatch, openFile, closeTab, activateTab, onFileRenamed, onFileDeleted, moveToFront, closeAllTabs }),
+    [dispatch, openFile, closeTab, activateTab, onFileRenamed, onFileDeleted, moveToFront, closeAllTabs],
   );
 
   return [state, actions] as const;

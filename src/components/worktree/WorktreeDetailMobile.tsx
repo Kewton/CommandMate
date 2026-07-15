@@ -131,6 +131,8 @@ interface MobileContentProps {
   onUpload: (targetDir: string) => void;
   /** [Issue #162] Move callback */
   onMove?: (path: string, type: 'file' | 'directory') => void;
+  /** [Issue #1108] Reset the controller-owned Files view state (search + mobile viewer/editor). */
+  onFileTreeReset?: () => void;
   refreshTrigger: number;
   /** [Issue #21] File search hook return object */
   fileSearch: UseFileSearchReturn;
@@ -218,6 +220,8 @@ const MobileTerminalTab = memo(function MobileTerminalTab({
   disableAutoFollow?: boolean;
 }) {
   const { terminal, setAutoScroll } = useTerminalPanePolling({ worktreeId, cliToolId, instanceId });
+  // Issue #1172: compact the 1000-row layout padding for Claude/Codex (display only).
+  const compactTuiLayoutPadding = cliToolId === 'claude' || cliToolId === 'codex';
   return (
     <TerminalDisplay
       output={terminal.output}
@@ -226,6 +230,7 @@ const MobileTerminalTab = memo(function MobileTerminalTab({
       autoScroll={terminal.autoScroll}
       onScrollChange={setAutoScroll}
       disableAutoFollow={disableAutoFollow}
+      compactTuiLayoutPadding={compactTuiLayoutPadding}
       className="h-full"
     />
   );
@@ -248,6 +253,7 @@ export const MobileContent = memo(function MobileContent({
   onDelete,
   onUpload,
   onMove,
+  onFileTreeReset,
   refreshTrigger,
   fileSearch,
   showToast,
@@ -297,7 +303,9 @@ export const MobileContent = memo(function MobileContent({
             <button
               type="button"
               onClick={() => onHistorySubTabChange('message')}
-              className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
+              // Issue #1127: min-h-[44px] + touch-manipulation — ≥44px tap
+              // target (text stays text-xs) and no double-tap zoom delay.
+              className={`flex-1 min-h-[44px] px-3 py-1.5 text-xs font-medium transition-colors touch-manipulation ${
                 historySubTab === 'message'
                   ? 'text-accent-600 dark:text-accent-400 border-b-2 border-accent-600 dark:border-accent-400 bg-accent-50 dark:bg-accent-900/30'
                   : 'text-muted-foreground hover:text-foreground'
@@ -308,7 +316,9 @@ export const MobileContent = memo(function MobileContent({
             <button
               type="button"
               onClick={() => onHistorySubTabChange('git')}
-              className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
+              // Issue #1127: min-h-[44px] + touch-manipulation — ≥44px tap
+              // target (text stays text-xs) and no double-tap zoom delay.
+              className={`flex-1 min-h-[44px] px-3 py-1.5 text-xs font-medium transition-colors touch-manipulation ${
                 historySubTab === 'git'
                   ? 'text-accent-600 dark:text-accent-400 border-b-2 border-accent-600 dark:border-accent-400 bg-accent-50 dark:bg-accent-900/30'
                   : 'text-muted-foreground hover:text-foreground'
@@ -371,6 +381,7 @@ export const MobileContent = memo(function MobileContent({
               onDelete={onDelete}
               onUpload={onUpload}
               onMove={onMove}
+              onResetView={onFileTreeReset}
               refreshTrigger={refreshTrigger}
               pollingEnabled={activeTab === 'files'}
               searchQuery={fileSearch.query}

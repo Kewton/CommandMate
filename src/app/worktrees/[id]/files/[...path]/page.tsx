@@ -9,7 +9,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { List, BookOpen } from 'lucide-react';
-import { Card } from '@/components/ui';
+import { Card, Spinner } from '@/components/ui';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -159,7 +159,7 @@ export default function FileViewerPage() {
         {loading && (
           <Card padding="lg">
             <div className="flex items-center justify-center py-12">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 border-t-accent-600" />
+              <Spinner size="xl" variant="accent" />
               <p className="ml-3 text-gray-600">Loading file...</p>
             </div>
           </Card>
@@ -167,10 +167,10 @@ export default function FileViewerPage() {
 
         {error && (
           <Card padding="lg">
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <div className="bg-danger-subtle border border-danger-border rounded-lg p-4">
               <div className="flex items-center gap-2">
                 <svg
-                  className="w-5 h-5 text-red-600 flex-shrink-0"
+                  className="w-5 h-5 text-danger-foreground flex-shrink-0"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -182,7 +182,7 @@ export default function FileViewerPage() {
                     d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                   />
                 </svg>
-                <p className="text-sm text-red-800">{error}</p>
+                <p className="text-sm text-danger-foreground">{error}</p>
               </div>
             </div>
           </Card>

@@ -87,7 +87,8 @@
     "selectInstance": "Select agent instance for {split}",
     "moreActions": "More actions",
     "searchTerminal": "Search terminal",
-    "endSession": "End session"
+    "endSession": "End session",
+    "endSessionFor": "End session for {name}"
   },
   "todo": {
     "addPlaceholder": "Add a todo…",
@@ -116,5 +117,12 @@
     "updateError": "Failed to update todo",
     "deleteError": "Failed to delete todo",
     "reorderError": "Failed to reorder todos"
+  },
+  "htmlPreview": {
+    "interactiveModeConfirm": "Interactive mode executes scripts in the HTML file. Use Safe mode for untrusted HTML files."
+  },
+  "editor": {
+    "saveFailedCloseConfirm": "Save failed. Close anyway?",
+    "unsavedCloseConfirm": "You have unsaved changes. Are you sure you want to close?"
   }
 }

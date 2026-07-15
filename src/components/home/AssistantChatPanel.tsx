@@ -6,8 +6,10 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useTranslations } from 'next-intl';
 import { Trash2 } from 'lucide-react';
-import { Button, Card } from '@/components/ui';
+import { Button, Card, Skeleton } from '@/components/ui';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { AssistantMessageInput } from './AssistantMessageInput';
 import { AssistantMessageList } from './AssistantMessageList';
 import { assistantApi } from '@/lib/api/assistant-api';
@@ -34,6 +36,8 @@ interface RepositoryOption {
 }
 
 export function AssistantChatPanel() {
+  const t = useTranslations('home');
+  const confirm = useConfirm();
   const [repositories, setRepositories] = useState<RepositoryOption[]>([]);
   const [availableTools, setAvailableTools] = useState<AssistantToolInfo[]>([]);
   const [selectedRepoId, setSelectedRepoId] = useState('');
@@ -44,6 +48,15 @@ export function AssistantChatPanel() {
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [clearing, setClearing] = useState(false);
+  // [Issue #1118] History skeleton state, derived (not effect-toggled) so the
+  // empty state never flashes for a frame before the skeleton appears:
+  // loading until the repo list has answered, and, once a repo is selected,
+  // until the conversation for the current repo+tool key has been fetched.
+  const [reposLoaded, setReposLoaded] = useState(false);
+  const [loadedConversationKey, setLoadedConversationKey] = useState<string | null>(null);
+  const conversationKey = `${selectedRepoId}:${selectedTool}`;
+  const conversationLoading =
+    !reposLoaded || (selectedRepoId !== '' && loadedConversationKey !== conversationKey);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const conversationActive = conversation?.status === 'ready' || conversation?.status === 'running';
@@ -109,6 +122,8 @@ export function AssistantChatPanel() {
         }
       } catch {
         // Silent fetch failure
+      } finally {
+        setReposLoaded(true);
       }
     }
 
@@ -156,6 +171,10 @@ export function AssistantChatPanel() {
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load conversation');
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadedConversationKey(`${selectedRepoId}:${selectedTool}`);
         }
       }
     })();
@@ -244,9 +263,10 @@ export function AssistantChatPanel() {
       return;
     }
 
-    const confirmed = window.confirm(
-      'Clear all chat history for this repository and CLI? Past messages will no longer be sent back to the assistant.',
-    );
+    const confirmed = await confirm({
+      description: t('assistant.clearHistoryConfirm'),
+      variant: 'danger',
+    });
     if (!confirmed) {
       return;
     }
@@ -261,7 +281,7 @@ export function AssistantChatPanel() {
     } finally {
       setClearing(false);
     }
-  }, [clearing, conversation, executionRunning, loadConversation]);
+  }, [clearing, conversation, executionRunning, loadConversation, confirm, t]);
 
   const handleSendMessage = useCallback(
     async (message: string) => {
@@ -306,9 +326,9 @@ export function AssistantChatPanel() {
   const handleRepoChange = useCallback(
     async (newRepoId: string) => {
       if (conversationActive) {
-        const confirmed = window.confirm(
-          'Changing repository will stop the active conversation. Do you want to continue?',
-        );
+        const confirmed = await confirm({
+          description: t('assistant.changeRepoConfirm'),
+        });
         if (!confirmed) {
           return;
         }
@@ -324,7 +344,7 @@ export function AssistantChatPanel() {
       setSelectedRepoId(newRepoId);
       setError(null);
     },
-    [conversation, conversationActive, selectedTool],
+    [conversation, conversationActive, selectedTool, confirm, t],
   );
 
   return (
@@ -411,7 +431,7 @@ export function AssistantChatPanel() {
           </div>
 
           {error && (
-            <div className="rounded border border-red-500/40 bg-red-500/10 p-2 text-sm text-red-700 dark:text-red-200">
+            <div className="rounded border border-danger/40 bg-danger/10 p-2 text-sm text-danger-foreground">
               {error}
             </div>
           )}
@@ -436,14 +456,31 @@ export function AssistantChatPanel() {
             </div>
 
             <div className="min-h-0 flex-1 overflow-hidden">
-              <AssistantMessageList
-                messages={messages}
-                assistantLabel={assistantLabel}
-                sessionActive={conversationActive}
-                waitingForResponse={executionRunning}
-                canEdit={canSend}
-                onEditMessage={handleEditMessage}
-              />
+              {conversationLoading && messages.length === 0 ? (
+                // [Issue #1118] First-load skeleton mirroring the message list
+                // container and its chat bubbles (user right, assistant left).
+                <div
+                  className="h-full min-h-0 overflow-hidden rounded-xl border border-border bg-surface-2 p-3"
+                  data-testid="assistant-chat-loading"
+                  role="status"
+                  aria-label="Loading conversation"
+                >
+                  <div className="space-y-3">
+                    <Skeleton className="ml-auto h-10 w-3/5 rounded-2xl" />
+                    <Skeleton className="mr-auto h-16 w-4/5 rounded-2xl" />
+                    <Skeleton className="ml-auto h-10 w-2/5 rounded-2xl" />
+                  </div>
+                </div>
+              ) : (
+                <AssistantMessageList
+                  messages={messages}
+                  assistantLabel={assistantLabel}
+                  sessionActive={conversationActive}
+                  waitingForResponse={executionRunning}
+                  canEdit={canSend}
+                  onEditMessage={handleEditMessage}
+                />
+              )}
             </div>
 
             <div className="shrink-0">

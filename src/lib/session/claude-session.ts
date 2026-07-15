@@ -9,6 +9,7 @@ import {
   sendKeys,
   capturePane,
   killSession,
+  reconcileSessionGeometry,
 } from '@/lib/tmux/tmux';
 import {
   CLAUDE_PROMPT_PATTERN,
@@ -575,6 +576,7 @@ export async function startClaudeSession(
     // SF-S2-004: Health check on existing session
     const healthy = await ensureHealthySession(sessionName);
     if (healthy) {
+      await reconcileSessionGeometry(sessionName);
       logger.info('claude-session-sessionname');
       return;
     }

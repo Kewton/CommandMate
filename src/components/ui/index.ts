@@ -18,6 +18,9 @@ export type { StatusDotProps, StatusDotStatus, StatusDotSize } from './StatusDot
 export { Modal } from './Modal';
 export type { ModalProps } from './Modal';
 
+export { ConfirmDialog, ConfirmProvider, useConfirm } from './ConfirmDialog';
+export type { ConfirmDialogProps, ConfirmOptions, ConfirmVariant } from './ConfirmDialog';
+
 // Radix-based primitives (Issue #1046)
 export { Input, inputVariants } from './Input';
 export type { InputProps } from './Input';
@@ -27,6 +30,9 @@ export type { TextareaProps } from './Textarea';
 
 export { Skeleton } from './Skeleton';
 export type { SkeletonProps } from './Skeleton';
+
+export { Spinner } from './Spinner';
+export type { SpinnerProps, SpinnerSize, SpinnerVariant } from './Spinner';
 
 export { Switch } from './Switch';
 export type { SwitchProps } from './Switch';

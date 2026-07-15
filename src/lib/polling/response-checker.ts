@@ -42,6 +42,7 @@ import {
 } from '../tui-accumulator';
 import { isDuplicatePrompt, normalizePromptForDedup } from './prompt-dedup';
 import { getPollerKey, stopPolling, GEMINI_LOADING_INDICATORS } from './response-poller-core';
+import { notifyPushSubscribers } from '@/lib/push';
 
 // ============================================================================
 // Extraction types and helpers
@@ -521,6 +522,16 @@ export async function checkForResponse(
       updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
       broadcastMessage('message', { worktreeId, message });
 
+      // Web Push fan-out (Issue #1125): agent is now waiting for a prompt reply.
+      // Fire-and-forget — push is advisory and must never block/break the poller.
+      void notifyPushSubscribers({
+        worktreeId,
+        worktreeName: worktree.name,
+        kind: 'prompt',
+        agentName: resolvedInstanceId,
+        excerpt: promptDetection.promptData?.question ?? promptSaveContent,
+      }).catch(() => {});
+
       if (!isFullScreenTui) {
         stopPolling(worktreeId, cliToolId, instanceId);
       }
@@ -601,6 +612,16 @@ export async function checkForResponse(
 
     // Broadcast message to WebSocket clients
     broadcastMessage('message', { worktreeId, message });
+
+    // Web Push fan-out (Issue #1125): session completed (running → idle).
+    // Fire-and-forget — push is advisory and must never block/break the poller.
+    void notifyPushSubscribers({
+      worktreeId,
+      worktreeName: worktree.name,
+      kind: 'completion',
+      agentName: resolvedInstanceId,
+      excerpt: cleanedResponse,
+    }).catch(() => {});
 
     // Update session state
     updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);

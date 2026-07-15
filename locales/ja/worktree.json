@@ -87,7 +87,8 @@
     "selectInstance": "{split} のエージェントインスタンスを選択",
     "moreActions": "その他の操作",
     "searchTerminal": "ターミナル内を検索",
-    "endSession": "セッションを終了"
+    "endSession": "セッションを終了",
+    "endSessionFor": "{name}のセッションを終了"
   },
   "todo": {
     "addPlaceholder": "ToDoを追加…",
@@ -116,5 +117,12 @@
     "updateError": "ToDoの更新に失敗しました",
     "deleteError": "ToDoの削除に失敗しました",
     "reorderError": "ToDoの並び替えに失敗しました"
+  },
+  "htmlPreview": {
+    "interactiveModeConfirm": "Interactiveモードではスクリプトが実行されます。信頼できないHTMLファイルではSafeモードを使用してください。"
+  },
+  "editor": {
+    "saveFailedCloseConfirm": "保存に失敗しました。このまま閉じますか？",
+    "unsavedCloseConfirm": "未保存の変更があります。閉じてもよろしいですか？"
   }
 }

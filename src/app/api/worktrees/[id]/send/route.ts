@@ -25,6 +25,7 @@ import path from 'path';
 import { createLogger } from '@/lib/logger';
 import { AntigravityTool } from '@/lib/cli-tools/antigravity';
 import { validateCopilotModelName, validateAntigravityModelName } from '@/lib/cmate-cli-tool-parser';
+import { broadcastSessionStatus } from '@/lib/realtime/terminal-broadcast';
 
 const logger = createLogger('api/send');
 
@@ -245,6 +246,10 @@ export async function POST(
           { status: 500 }
         );
       }
+
+      // Issue #1120: push the running transition so sidebar status dots flip
+      // immediately instead of waiting for the next /api/worktrees poll.
+      broadcastSessionStatus(params.id, true, { cliTool: cliToolId, instance: instanceId ?? null });
     }
 
     // Issue #474: Validate imagePath if provided (HTTP-layer validation stays here)

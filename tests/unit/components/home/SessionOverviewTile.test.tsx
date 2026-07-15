@@ -56,4 +56,15 @@ describe('SessionOverviewTile', () => {
     render(<SessionOverviewTile worktrees={[]} />);
     expect(screen.getByTestId('session-overview-view-all').getAttribute('href')).toBe('/sessions');
   });
+
+  it('renders stat/list skeletons with headings intact while loading (Issue #1118)', () => {
+    render(<SessionOverviewTile worktrees={[]} isLoading />);
+    expect(screen.getByTestId('home-session-summary-loading')).toBeDefined();
+    expect(screen.getByTestId('recent-sessions-loading')).toBeDefined();
+    // Chrome (headings, View all link) stays visible during loading
+    expect(screen.getByText('Session Overview')).toBeDefined();
+    expect(screen.getByTestId('session-overview-view-all')).toBeDefined();
+    expect(screen.queryByTestId('running-count')).toBeNull();
+    expect(screen.queryByTestId('recent-sessions-empty')).toBeNull();
+  });
 });

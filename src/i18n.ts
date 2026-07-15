@@ -22,7 +22,7 @@ export default getRequestConfig(async ({ requestLocale }) => {
   }
 
   // Load all namespace files and merge them
-  const [common, worktree, autoYes, error, prompt, auth, schedule, commandPalette, home] = await Promise.all([
+  const [common, worktree, autoYes, error, prompt, auth, schedule, commandPalette, home, review, pwa, notifications, keyboardShortcuts] = await Promise.all([
     import(`../locales/${locale}/common.json`),
     import(`../locales/${locale}/worktree.json`),
     import(`../locales/${locale}/autoYes.json`),
@@ -32,6 +32,10 @@ export default getRequestConfig(async ({ requestLocale }) => {
     import(`../locales/${locale}/schedule.json`),
     import(`../locales/${locale}/commandPalette.json`),
     import(`../locales/${locale}/home.json`),
+    import(`../locales/${locale}/review.json`),
+    import(`../locales/${locale}/pwa.json`),
+    import(`../locales/${locale}/notifications.json`),
+    import(`../locales/${locale}/keyboardShortcuts.json`),
   ]);
 
   return {
@@ -48,6 +52,10 @@ export default getRequestConfig(async ({ requestLocale }) => {
       schedule: schedule.default,
       commandPalette: commandPalette.default,
       home: home.default,
+      review: review.default,
+      pwa: pwa.default,
+      notifications: notifications.default,
+      keyboardShortcuts: keyboardShortcuts.default,
     },
   };
 });

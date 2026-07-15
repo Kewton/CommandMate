@@ -1,0 +1,8 @@
+{
+  "report": {
+    "regenerateConfirm": "この日付のレポートは既に存在します。再生成して上書きしますか？"
+  },
+  "template": {
+    "deleteConfirm": "このテンプレートを削除しますか？"
+  }
+}

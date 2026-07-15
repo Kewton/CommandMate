@@ -298,51 +298,157 @@ export function getWorktreeById(
 }
 
 /**
- * Insert or update worktree
+ * Insert or update worktree.
+ *
+ * Issue #1151: A worktree ID is derived from its branch name
+ * (`generateWorktreeId`), so checking out a different branch in the *same*
+ * directory changes the ID even though the worktree (path) is unchanged. The
+ * previous implementation hard-deleted the existing same-path row before
+ * inserting the new ID, which CASCADE-deleted every child row (chat history,
+ * memos, todos, timers, schedules, execution logs, agent instances). To avoid
+ * that data loss we instead RENAME the existing same-path row to the new ID,
+ * carrying its child rows along, so history follows the directory across branch
+ * switches. The whole operation runs in a single transaction so the rename and
+ * the upsert are atomic.
  */
 export function upsertWorktree(
   db: Database.Database,
   worktree: Worktree
 ): void {
-  // First, remove any existing worktree with the same path but different ID
-  // This handles cases where the ID generation scheme has changed
-  db.prepare('DELETE FROM worktrees WHERE path = ? AND id != ?').run(worktree.path, worktree.id);
+  const run = db.transaction(() => {
+    // A branch switch (or a change to the ID scheme) yields a different ID for
+    // the same on-disk path. `path` is UNIQUE, so we must reconcile the stale
+    // row before inserting the new ID. Migrate it (id + child FK rows) instead
+    // of deleting so no history is lost.
+    const staleRows = db
+      .prepare('SELECT id FROM worktrees WHERE path = ? AND id != ?')
+      .all(worktree.path, worktree.id) as Array<{ id: string }>;
 
-  const stmt = db.prepare(`
-    INSERT INTO worktrees (
-      id, name, path, repository_path, repository_name, description,
-      last_user_message, last_user_message_at, last_message_summary, updated_at, cli_tool_id, branch
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-      name = excluded.name,
-      path = excluded.path,
-      repository_path = excluded.repository_path,
-      repository_name = excluded.repository_name,
-      description = COALESCE(excluded.description, worktrees.description),
-      last_user_message = COALESCE(excluded.last_user_message, worktrees.last_user_message),
-      last_user_message_at = COALESCE(excluded.last_user_message_at, worktrees.last_user_message_at),
-      last_message_summary = COALESCE(excluded.last_message_summary, worktrees.last_message_summary),
-      updated_at = COALESCE(excluded.updated_at, worktrees.updated_at),
-      cli_tool_id = COALESCE(excluded.cli_tool_id, worktrees.cli_tool_id),
-      -- Issue #1003: keep the last known branch when a non-sync writer omits it.
-      branch = COALESCE(excluded.branch, worktrees.branch)
-  `);
+    for (const { id: staleId } of staleRows) {
+      migrateWorktreeIdPreservingChildren(db, staleId, worktree.id);
+    }
 
-  stmt.run(
-    worktree.id,
-    worktree.name,
-    worktree.path,
-    worktree.repositoryPath || null,
-    worktree.repositoryName || null,
-    worktree.description || null,
-    worktree.lastUserMessage || null,
-    worktree.lastUserMessageAt?.getTime() || null,
-    worktree.lastMessageSummary || null,
-    worktree.updatedAt?.getTime() || null,
-    worktree.cliToolId || 'claude',
-    worktree.branch || null
-  );
+    const stmt = db.prepare(`
+      INSERT INTO worktrees (
+        id, name, path, repository_path, repository_name, description,
+        last_user_message, last_user_message_at, last_message_summary, updated_at, cli_tool_id, branch
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        path = excluded.path,
+        repository_path = excluded.repository_path,
+        repository_name = excluded.repository_name,
+        description = COALESCE(excluded.description, worktrees.description),
+        last_user_message = COALESCE(excluded.last_user_message, worktrees.last_user_message),
+        last_user_message_at = COALESCE(excluded.last_user_message_at, worktrees.last_user_message_at),
+        last_message_summary = COALESCE(excluded.last_message_summary, worktrees.last_message_summary),
+        updated_at = COALESCE(excluded.updated_at, worktrees.updated_at),
+        cli_tool_id = COALESCE(excluded.cli_tool_id, worktrees.cli_tool_id),
+        -- Issue #1003: keep the last known branch when a non-sync writer omits it.
+        branch = COALESCE(excluded.branch, worktrees.branch)
+    `);
+
+    stmt.run(
+      worktree.id,
+      worktree.name,
+      worktree.path,
+      worktree.repositoryPath || null,
+      worktree.repositoryName || null,
+      worktree.description || null,
+      worktree.lastUserMessage || null,
+      worktree.lastUserMessageAt?.getTime() || null,
+      worktree.lastMessageSummary || null,
+      worktree.updatedAt?.getTime() || null,
+      worktree.cliToolId || 'claude',
+      worktree.branch || null
+    );
+  });
+
+  run();
+}
+
+/**
+ * Discover every table that has a foreign key referencing `worktrees(id)`,
+ * along with the referencing column. Derived dynamically from the live schema
+ * so it never drifts out of sync with future migrations that add child tables.
+ *
+ * Issue #1151.
+ */
+function getWorktreeChildTables(
+  db: Database.Database
+): Array<{ table: string; column: string }> {
+  const tables = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+    .all() as Array<{ name: string }>;
+
+  const children: Array<{ table: string; column: string }> = [];
+  for (const { name } of tables) {
+    if (name === 'worktrees') continue;
+    // PRAGMA identifiers cannot be bound; `name` comes from sqlite_master, not
+    // user input, so string interpolation here is safe.
+    const fks = db.prepare(`PRAGMA foreign_key_list("${name}")`).all() as Array<{
+      table: string;
+      from: string;
+      to: string | null;
+    }>;
+    for (const fk of fks) {
+      if (fk.table === 'worktrees' && (fk.to === 'id' || fk.to === null)) {
+        children.push({ table: name, column: fk.from });
+      }
+    }
+  }
+  return children;
+}
+
+/**
+ * Rename a worktree row's primary key from `oldId` to `newId`, re-pointing every
+ * child table's foreign key so no CASCADE deletion occurs. This is what makes a
+ * same-directory branch switch preserve chat history and all related data
+ * instead of destroying it (Issue #1151).
+ *
+ * Must be called inside a transaction. `PRAGMA defer_foreign_keys` defers FK
+ * enforcement to COMMIT, letting us repoint the parent PK and its children in
+ * any order without needing `ON UPDATE CASCADE` on every constraint.
+ */
+export function migrateWorktreeIdPreservingChildren(
+  db: Database.Database,
+  oldId: string,
+  newId: string
+): void {
+  if (oldId === newId) return;
+
+  const oldExists = db.prepare('SELECT 1 FROM worktrees WHERE id = ?').get(oldId);
+  if (!oldExists) return;
+
+  // Defer FK checks until COMMIT so the parent PK and child FKs can be updated
+  // independently. Resets automatically at the end of the transaction.
+  db.pragma('defer_foreign_keys = ON');
+
+  const newExists = db.prepare('SELECT 1 FROM worktrees WHERE id = ?').get(newId);
+  const children = getWorktreeChildTables(db);
+
+  if (newExists) {
+    // Collision guard. `path` is UNIQUE so two rows for the same directory
+    // should never coexist, but if the DB is already inconsistent keep the
+    // destination row's data and fold in the source's non-conflicting children;
+    // conflicting leftovers are removed by CASCADE when the old row is deleted.
+    for (const { table, column } of children) {
+      db.prepare(
+        `UPDATE OR IGNORE "${table}" SET "${column}" = ? WHERE "${column}" = ?`
+      ).run(newId, oldId);
+    }
+    db.prepare('DELETE FROM worktrees WHERE id = ?').run(oldId);
+    return;
+  }
+
+  // Normal rename: move the parent PK, then repoint all child rows.
+  db.prepare('UPDATE worktrees SET id = ? WHERE id = ?').run(newId, oldId);
+  for (const { table, column } of children) {
+    db.prepare(
+      `UPDATE "${table}" SET "${column}" = ? WHERE "${column}" = ?`
+    ).run(newId, oldId);
+  }
 }
 
 /**
@@ -588,6 +694,28 @@ export function getWorktreeIdsByRepository(
 
   const rows = stmt.all(repositoryPath) as Array<{ id: string }>;
   return rows.map(r => r.id);
+}
+
+/**
+ * Get all worktree rows (id + path) for a given repository path.
+ *
+ * Issue #1151: sync decides which DB rows to prune. It must key that decision on
+ * the on-disk path, not the branch-derived ID, otherwise a branch switch in the
+ * same directory looks like a "removed" worktree and gets CASCADE-deleted.
+ *
+ * @param db - Database instance
+ * @param repositoryPath - Path of the repository
+ * @returns Array of `{ id, path }` for every worktree of the repository
+ */
+export function getWorktreesByRepository(
+  db: Database.Database,
+  repositoryPath: string
+): Array<{ id: string; path: string }> {
+  const stmt = db.prepare(`
+    SELECT id, path FROM worktrees WHERE repository_path = ?
+  `);
+
+  return stmt.all(repositoryPath) as Array<{ id: string; path: string }>;
 }
 
 /**

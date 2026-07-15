@@ -50,6 +50,7 @@ import { DesktopHeader, InfoModal } from '@/components/worktree/WorktreeDetailSu
 import { UPLOADABLE_EXTENSIONS } from '@/config/uploadable-extensions';
 import { deriveCliStatus } from '@/types/sidebar';
 import { getCliToolDisplayName, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
+import type { SessionKillTarget } from '@/types/terminal-split-pane';
 import type { AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
 import type { ShowToast } from '@/types/markdown-editor';
 import type { Worktree, FileContent } from '@/types/models';
@@ -137,6 +138,8 @@ export interface WorktreeDetailDesktopProps {
   onDelete: (path: string) => void;
   onUpload: (targetDir: string) => void;
   onMove: (path: string, type: 'file' | 'directory') => void;
+  /** [Issue #1108] Reset the controller-owned Files view state (search + tabs/viewer). */
+  onFileTreeReset: () => void;
 
   // Git activity
   onDiffSelect: (diff: string, filePath: string) => void;
@@ -157,10 +160,15 @@ export interface WorktreeDetailDesktopProps {
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileInputChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
 
-  // Kill session confirmation
-  /** Opens the kill confirmation modal for the active CLI session (Issue #784). */
+  // Kill session confirmation (Issue #1171: target-snapshot based)
+  /** Opens the kill confirmation modal for the active agent instance (DesktopHeader, Issue #784). */
   onKillSession: () => void;
-  showKillConfirm: boolean;
+  /** Issue #1171: open the confirm dialog for a specific split's snapshotted target. */
+  onRequestSessionEnd: (target: SessionKillTarget) => void;
+  /** Issue #1171: the snapshotted kill target; non-null opens the dialog (no separate boolean). */
+  killTarget: SessionKillTarget | null;
+  /** Issue #1171: true while the kill POST is in flight (disables Confirm, blocks double-submit). */
+  isKillPending: boolean;
   onKillCancel: () => void;
   onKillConfirm: () => void;
 
@@ -242,6 +250,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   onDelete,
   onUpload,
   onMove,
+  onFileTreeReset,
   onDiffSelect,
   onAgentInstancesChange,
   vibeLocalModel,
@@ -254,7 +263,9 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   fileInputRef,
   onFileInputChange,
   onKillSession,
-  showKillConfirm,
+  onRequestSessionEnd,
+  killTarget,
+  isKillPending,
   onKillCancel,
   onKillConfirm,
   moveTarget,
@@ -288,6 +299,35 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     [],
   );
   const handleAgentDragEnd = useCallback(() => setDraggedInstanceId(null), []);
+
+  /**
+   * Issue #1152: header instance switcher → terminal wiring.
+   *
+   * Previously the DesktopHeader instance pills called `setActiveInstanceId`
+   * only, which drives the header badge / kill target / Auto-Yes UI but is NOT
+   * connected to `useTerminalSplits` (owned inside TerminalSplitContainer). So
+   * selecting "Claude" in the header left the split — and therefore the display
+   * polling and message send — pinned to whatever instance the split held (e.g.
+   * `claude-2`). This handler keeps that existing active-instance behavior AND
+   * publishes a token-stamped selection the container applies to the primary
+   * split (see `headerInstanceSelection` on TerminalSplitContainer). The token
+   * bumps per click so the container applies it exactly once and does not confuse
+   * it with the split 0→active mirror / drop / reconcile paths.
+   */
+  const [headerInstanceSelection, setHeaderInstanceSelection] =
+    React.useState<{ instanceId: string; token: number } | null>(null);
+  const headerSelectTokenRef = React.useRef(0);
+  const handleHeaderInstanceSelect = useCallback(
+    (instanceId: string) => {
+      // Preserve existing behavior: kill / Auto-Yes UI / header badge follow the
+      // active instance (the controller also mirrors activeCliTab from its CLI).
+      setActiveInstanceId(instanceId);
+      // Route the same selection into the primary terminal split.
+      headerSelectTokenRef.current += 1;
+      setHeaderInstanceSelection({ instanceId, token: headerSelectTokenRef.current });
+    },
+    [setActiveInstanceId],
+  );
 
   /**
    * Issue #728 (R3-005): PC-only per-split polling fan-out.
@@ -398,6 +438,9 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           // the dragOver ring (D-2). The hover ring state stays child-local (D-3).
           onDropInstance={onDropInstance}
           draggedInstanceId={draggedInstanceId}
+          // Issue #1171: the split builds its own kill-target snapshot and calls
+          // this to open the confirm dialog for exactly the session it shows.
+          onRequestSessionEnd={onRequestSessionEnd}
         />
       );
     },
@@ -429,6 +472,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       // changes so each split's dragOver ring reflects the in-flight drag
       // (drag-time only, not a polling-cadence re-render).
       draggedInstanceId,
+      // Issue #1171: stable controller callback; listed for exhaustive-deps.
+      onRequestSessionEnd,
     ],
   );
 
@@ -446,12 +491,16 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
         // applied drop.
         showToast={showToast}
         onActiveInstanceChange={setActiveInstanceId}
+        // Issue #1152: route header pill selections into the primary split.
+        headerInstanceSelection={headerInstanceSelection}
       />
     ),
     // setFocusedSplitIndex / setActiveInstanceId are stable callbacks, and
     // showToast is a stable parent callback, so listing them does not
     // destabilize the memo beyond the existing per-render cadence.
-    [worktreeId, instances, rosterReady, renderSplitPane, setFocusedSplitIndex, showToast, setActiveInstanceId],
+    // headerInstanceSelection changes only on a header pill click (a user
+    // action, not the polling cadence), so re-creating the region then is fine.
+    [worktreeId, instances, rosterReady, renderSplitPane, setFocusedSplitIndex, showToast, setActiveInstanceId, headerInstanceSelection],
   );
 
   /**
@@ -539,6 +588,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             onDelete={onDelete}
             onUpload={onUpload}
             onMove={onMove}
+            onResetView={onFileTreeReset}
             refreshTrigger={fileTreeRefresh}
             pollingEnabled={activeActivity === 'files'}
             searchQuery={fileSearch.query}
@@ -610,6 +660,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       onDelete,
       onUpload,
       onMove,
+      onFileTreeReset,
       fileTreeRefresh,
       onDiffSelect,
       handleInsertToMessage,
@@ -669,7 +720,9 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             sessionStatusByInstance={worktree?.sessionStatusByInstance}
             instances={instances}
             activeInstanceId={activeInstanceId}
-            onActiveInstanceChange={setActiveInstanceId}
+            // Issue #1152: header pill selection now also drives the primary
+            // terminal split (display polling + send), not just the active badge.
+            onActiveInstanceChange={handleHeaderInstanceSelect}
             // Issue #786 / #869: publish the dragged agent's instanceId so each
             // terminal split can show its dragOver allowed/forbidden ring (D-2).
             onAgentDragStart={handleAgentDragStart}
@@ -722,9 +775,11 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           className="hidden"
           aria-label="Upload file"
         />
-        {/* Kill session confirmation dialog */}
+        {/* Kill session confirmation dialog (Issue #1171: target-snapshot based;
+            `killTarget !== null` is the single open-state source, and Confirm is
+            disabled while the POST is in flight to prevent a double-submit). */}
         <Modal
-          isOpen={showKillConfirm}
+          isOpen={killTarget !== null}
           onClose={onKillCancel}
           title={killDialogTitle}
           size="sm"
@@ -745,7 +800,9 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
               <button
                 type="button"
                 onClick={onKillConfirm}
-                className="px-4 py-2 text-sm font-medium rounded-md bg-red-600 hover:bg-red-700 text-white"
+                disabled={isKillPending}
+                data-testid="kill-session-confirm-button"
+                className="px-4 py-2 text-sm font-medium rounded-md bg-danger hover:bg-danger/90 text-white disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {endLabel}
               </button>

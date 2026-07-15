@@ -18,6 +18,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
 import { resetDetectPromptCache } from '@/lib/detection/prompt-detector';
+import { buildClaude1000RowPermissionFrame } from '../../fixtures/claude-1000-row-prompt';
 
 // Named constants for Unicode characters used in tmux output simulation.
 // These match the actual characters produced by Claude CLI and detected by cli-patterns.ts.
@@ -42,6 +43,25 @@ function activeThinking(activity: string): string {
 }
 
 describe('status-detector', () => {
+  describe('Issue #1167 1000-row Claude frame', () => {
+    it('classifies a permission prompt above a bottom task panel as waiting', () => {
+      const result = detectSessionStatus(buildClaude1000RowPermissionFrame(), 'claude');
+
+      expect(result.status).toBe('waiting');
+      expect(result.reason).toBe('prompt_detected');
+      expect(result.hasActivePrompt).toBe(true);
+      expect(result.promptDetection.promptData?.type).toBe('multiple_choice');
+    });
+
+    it('does not resurrect an old footer when a newer input prompt is below it', () => {
+      const output = `${buildClaude1000RowPermissionFrame()}\n❯\n? for shortcuts`;
+      const result = detectSessionStatus(output, 'claude');
+
+      expect(result.hasActivePrompt).toBe(false);
+      expect(result.status).toBe('ready');
+    });
+  });
+
   // Issue #402: Reset duplicate log suppression cache for test isolation
   beforeEach(() => {
     resetDetectPromptCache();
@@ -651,6 +671,235 @@ describe('status-detector', () => {
 
       expect(result.status).toBe('ready');
       expect(result.reason).toBe('input_prompt');
+    });
+  });
+
+  // =========================================================================
+  // Issue #1150: Codex processing status not detected (status-bar pattern drift)
+  //
+  // Codex v0.141 (gpt-5.5) dropped the "N% left ·" token from its status bar, so
+  // the previous pattern (/^\s*\S+.*\d+%\s+left\s+·/) never matched. The footer
+  // boundary stayed -1, the entire Codex running/idle block (priority 2.7) was
+  // skipped, and generating sessions fell through to the input-prompt check and
+  // were misreported as `ready` (static green dot, no glow).
+  //
+  // These fixtures use the REAL v0.141 bar and the legacy "% left" bar to guard
+  // against the next CLI-format drift (Acceptance Criteria: both must be covered).
+  // =========================================================================
+  describe('Issue #1150: Codex status-bar version drift', () => {
+    // Codex TUI: conversation content (top) | ~10 empty padding lines | status bar (bottom).
+    const codexFrame = (contentLines: string[], statusBar: string): string =>
+      [...contentLines, ...Array(10).fill(''), statusBar].join('\n');
+
+    // v0.141 status bar (gpt-5.5): "model effort · path", NO "% left".
+    const V0141_BAR = 'gpt-5.5 xhigh · ~/share/work/github_kewton/commandmate-issue-947';
+    // Legacy status bar (gpt-5.4 / o4-mini): includes "N% left ·".
+    const LEGACY_BAR = 'gpt-5.4 high · 21% left · ~/share/work/github_kewton/commandmate-issue-947';
+
+    it('should return running for a generating Codex frame with the v0.141 bar (fallback C)', () => {
+      // Command output (no › prompt, no • indicator in the last 5 lines) above the
+      // v0.141 bar → the status bar is located and the fallback marks it running.
+      const output = codexFrame(
+        ['Applying patch to src/foo.ts', 'Updated 3 files', 'Running build'],
+        V0141_BAR
+      );
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('running');
+      expect(result.confidence).toBe('high');
+      expect(result.reason).toBe('thinking_indicator');
+      expect(result.hasActivePrompt).toBe(false);
+    });
+
+    it('should return running/thinking_indicator when a Codex thinking marker sits above the v0.141 bar (>5 lines away)', () => {
+      // The • Working indicator is pushed beyond the narrow 5-line window by the
+      // padding, so only the wider priority-2.7 content scan (restored by the fix) sees it.
+      const output = codexFrame(
+        ['user: do the thing', '', '• Working (deciding next step)'],
+        V0141_BAR
+      );
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('running');
+      expect(result.reason).toBe('thinking_indicator');
+    });
+
+    it('should keep the idle Codex › prompt as ready with the v0.141 bar (no over-detection)', () => {
+      const output = codexFrame(['Here is the result.', '', '›'], V0141_BAR);
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('ready');
+      expect(result.reason).toBe('input_prompt');
+      expect(result.hasActivePrompt).toBe(false);
+    });
+
+    it('should still return running for a generating Codex frame with the legacy "% left" bar (regression)', () => {
+      const output = codexFrame(
+        ['Applying patch to src/foo.ts', 'Updated 3 files', 'Running build'],
+        LEGACY_BAR
+      );
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('running');
+      expect(result.reason).toBe('thinking_indicator');
+    });
+
+    it('should still keep the idle Codex › prompt as ready with the legacy "% left" bar (regression)', () => {
+      const output = codexFrame(['Here is the result.', '', '›'], LEGACY_BAR);
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('ready');
+      expect(result.reason).toBe('input_prompt');
+    });
+
+    it('mitigation B: should detect running from the Codex thinking marker even when NO status bar is present', () => {
+      // Defense-in-depth for a future status-bar format drift: no bar line at all,
+      // • Working pushed beyond the 5-line window, tail is command output (not ›).
+      const output = [
+        'user prompt',
+        '• Working (Esc to interrupt)',
+        'line a',
+        'line b',
+        'line c',
+        'line d',
+        'line e',
+        'tail output line',
+      ].join('\n');
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('running');
+      expect(result.reason).toBe('thinking_indicator');
+    });
+
+    it('mitigation B: should NOT over-detect running for an idle › tail when no status bar is present', () => {
+      // Stale • Ran sits above the 5-line window and the tail is the idle › prompt,
+      // so the status-bar-independent net must defer to the ready input-prompt check.
+      const output = [
+        'user prompt',
+        '• Ran npm test',
+        'output 1',
+        'output 2',
+        'output 3',
+        'output 4',
+        'output 5',
+        '›',
+      ].join('\n');
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('ready');
+      expect(result.reason).toBe('input_prompt');
+    });
+  });
+
+  // =========================================================================
+  // Issue #1160: Codex answered-approval-prompt staleness
+  //
+  // Codex keeps the answered "1. Yes / 2. No" block + "press number to confirm"
+  // footer in its transcript (historyLimit 50000) instead of repainting it away
+  // like Claude. detectPrompt()'s 50-line window then keeps matching that dead
+  // prompt, so priority-1 returned `waiting` even after the user answered and Codex
+  // resumed — the sidebar status dot stayed orange forever (the reported bug).
+  //
+  // The position guard treats the prompt as active only when it is the bottom-most
+  // interactive element: if a Codex thinking indicator (• Working / • Ran) sits below
+  // the prompt block, the prompt is stale and status detection falls through to the
+  // running/idle check. Unanswered prompts (nothing running below) still wait, so
+  // Auto-Yes is unaffected.
+  // =========================================================================
+  describe('Issue #1160: Codex answered approval prompt staleness', () => {
+    // Codex TUI: conversation content (top) | ~10 empty padding lines | status bar.
+    const codexFrame = (contentLines: string[], statusBar: string): string =>
+      [...contentLines, ...Array(10).fill(''), statusBar].join('\n');
+    const V0141_BAR = 'gpt-5.5 xhigh · ~/share/work/github_kewton/commandmate-issue-947';
+
+    const APPROVAL_BLOCK = [
+      'Allow Codex to run `rm -rf build`?',
+      '',
+      '1. Yes',
+      '2. No, and tell Codex what to do differently',
+      'press number to confirm · esc to cancel',
+    ];
+
+    it('answered approval + processing below → running (not the stale waiting)', () => {
+      // The • Ran indicator sits directly below the answered block: the prompt is
+      // stale scrollback, so the guard falls through to the running detection.
+      const output = codexFrame([...APPROVAL_BLOCK, '• Ran rm -rf build'], V0141_BAR);
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('running');
+      expect(result.confidence).toBe('high');
+      expect(result.reason).toBe('thinking_indicator');
+      expect(result.hasActivePrompt).toBe(false);
+      // Neutralized so Auto-Yes / the sidebar never act on the dead prompt
+      // (hasActivePrompt === promptDetection.isPrompt invariant).
+      expect(result.promptDetection.isPrompt).toBe(false);
+    });
+
+    it('answered approval + thinking indicator beyond the 5-line window → running (fallback C)', () => {
+      // The • Working indicator is pushed above the narrow 5-line thinking window by
+      // trailing command output, but the position guard still sees it below the prompt
+      // block, so the prompt is treated as stale and priority-2.7 fallback C runs.
+      const output = codexFrame(
+        [
+          ...APPROVAL_BLOCK,
+          '• Working (running the build)',
+          'compiling module a',
+          'compiling module b',
+          'compiling module c',
+          'compiling module d',
+          'compiling module e',
+        ],
+        V0141_BAR
+      );
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('running');
+      expect(result.reason).toBe('thinking_indicator');
+      expect(result.hasActivePrompt).toBe(false);
+      expect(result.promptDetection.isPrompt).toBe(false);
+    });
+
+    it('unanswered approval (nothing running below) → waiting (Auto-Yes preserved)', () => {
+      // No running indicator below the block: the prompt is the bottom-most element,
+      // so it must still be reported as waiting — the over-fix guardrail.
+      const output = codexFrame(APPROVAL_BLOCK, V0141_BAR);
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('waiting');
+      expect(result.confidence).toBe('high');
+      expect(result.reason).toBe('prompt_detected');
+      expect(result.hasActivePrompt).toBe(true);
+      expect(result.promptDetection.isPrompt).toBe(true);
+    });
+
+    it('answered approval + bare › input line below → running (detectPrompt barrier)', () => {
+      // A bare › below the answered block trips detectPrompt()'s user-input barrier
+      // (isPrompt=false) before the guard runs; Codex is still working, so the frame
+      // resolves to running rather than sticking at waiting.
+      const output = codexFrame(
+        [...APPROVAL_BLOCK, '›', '• Working (deciding next step)'],
+        V0141_BAR
+      );
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('running');
+      expect(result.reason).toBe('thinking_indicator');
+      expect(result.hasActivePrompt).toBe(false);
+      expect(result.promptDetection.isPrompt).toBe(false);
+    });
+
+    it('does not regress a genuine numbered prompt when a stale • Ran sits ABOVE it', () => {
+      // A leftover • Ran from a prior command above the current prompt block must not
+      // make the active prompt look stale (thinking is above, not below, the block).
+      const output = codexFrame(
+        ['• Ran npm test', 'All tests passed', '', ...APPROVAL_BLOCK],
+        V0141_BAR
+      );
+
+      const result = detectSessionStatus(output, 'codex');
+      expect(result.status).toBe('waiting');
+      expect(result.reason).toBe('prompt_detected');
+      expect(result.hasActivePrompt).toBe(true);
     });
   });
 });

@@ -14,9 +14,9 @@ const badgeVariants = cva(
   {
     variants: {
       variant: {
-        success: 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300',
-        warning: 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-300',
-        error: 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-300',
+        success: 'bg-success-subtle text-success-foreground',
+        warning: 'bg-warning-subtle text-warning-foreground',
+        error: 'bg-danger-subtle text-danger-foreground',
         info: 'bg-accent-100 dark:bg-accent-900 text-accent-800 dark:text-accent-300',
         gray: 'bg-muted text-muted-foreground',
       },
@@ -28,9 +28,9 @@ const badgeVariants = cva(
 );
 
 const dotColorStyles: Record<BadgeVariant, string> = {
-  success: 'bg-green-600',
-  warning: 'bg-yellow-600',
-  error: 'bg-red-600',
+  success: 'bg-success',
+  warning: 'bg-warning',
+  error: 'bg-danger',
   info: 'bg-info',
   gray: 'bg-muted-foreground',
 };

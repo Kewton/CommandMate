@@ -28,6 +28,12 @@ describe('TerminalEscapeHatch', () => {
     expect(screen.getByLabelText('Send q (quit)')).toBeInTheDocument();
   });
 
+  it('renders Escape only for Claude so q cannot reach the input prompt', () => {
+    render(<TerminalEscapeHatch worktreeId="w-1" cliToolId="claude" />);
+    expect(screen.getByLabelText('Send Escape')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Send q (quit)')).not.toBeInTheDocument();
+  });
+
   it('sends Escape via the special-keys API', async () => {
     render(<TerminalEscapeHatch worktreeId="w-1" cliToolId="codex" />);
     fireEvent.click(screen.getByLabelText('Send Escape'));

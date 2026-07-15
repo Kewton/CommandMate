@@ -19,7 +19,9 @@
 'use client';
 
 import React, { memo, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Modal } from '@/components/ui';
+import { useTranslations } from 'next-intl';
+import { Modal, Spinner } from '@/components/ui';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { FileContent } from '@/types/models';
 import { ImageViewer } from './ImageViewer';
 import { VideoViewer } from './VideoViewer';
@@ -128,17 +130,19 @@ function HtmlPreviewMobile({
   const [activeTab, setActiveTab] = useState<'source' | 'preview'>('preview');
   const [sandboxLevel, setSandboxLevel] = useState<SandboxLevel>('safe');
   const confirmedFilesRef = useRef<Set<string>>(new Set());
+  const tWorktree = useTranslations('worktree');
+  const confirm = useConfirm();
 
-  const handleSandboxChange = useCallback((newLevel: SandboxLevel) => {
+  const handleSandboxChange = useCallback(async (newLevel: SandboxLevel) => {
     if (newLevel === 'interactive' && !confirmedFilesRef.current.has(filePath)) {
-      const confirmed = window.confirm(
-        'Interactiveモードではスクリプトが実行されます。信頼できないHTMLファイルではSafeモードを使用してください。'
-      );
+      const confirmed = await confirm({
+        description: tWorktree('htmlPreview.interactiveModeConfirm'),
+      });
       if (!confirmed) return;
       confirmedFilesRef.current.add(filePath);
     }
     setSandboxLevel(newLevel);
-  }, [filePath]);
+  }, [filePath, confirm, tWorktree]);
 
   // In interactive mode, inject link click script; in safe mode, pass as-is
   const iframeSrcDoc = useMemo(() => {
@@ -213,8 +217,8 @@ function HtmlPreviewMobile({
               className={`px-2 py-1 text-xs font-medium rounded-md transition-colors ${
                 sandboxLevel === level
                   ? level === 'safe'
-                    ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300'
-                    : 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300'
+                    ? 'bg-success-subtle text-success-foreground'
+                    : 'bg-warning-subtle text-warning-foreground'
                   : 'text-muted-foreground hover:bg-muted'
               }`}
             >
@@ -557,10 +561,10 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
               const idx = lineNumber - 1;
               const isCurrent = lineNumber === currentMatchLine;
               const isMatch = matchSet.has(lineNumber);
-              const rowBg = isCurrent ? 'bg-orange-400/30' : isMatch ? 'bg-yellow-400/15' : '';
+              const rowBg = isCurrent ? 'bg-warning/30' : isMatch ? 'bg-warning/15' : '';
               return (
                 <tr key={lineNumber} data-line={lineNumber} className={rowBg}>
-                  <td className={`pl-3 pr-2 text-right select-none font-mono border-r border-border bg-muted dark:bg-muted/50 sticky left-0 align-top whitespace-nowrap ${isCurrent ? 'text-orange-300' : isMatch ? 'text-yellow-300' : 'text-muted-foreground'}`}>
+                  <td className={`pl-3 pr-2 text-right select-none font-mono border-r border-border bg-muted dark:bg-muted/50 sticky left-0 align-top whitespace-nowrap ${isCurrent ? 'text-warning-foreground' : isMatch ? 'text-warning-foreground' : 'text-muted-foreground'}`}>
                     {lineNumber}
                   </td>
                   <td className="px-4 text-foreground align-top">
@@ -619,7 +623,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
           title="Copy path"
         >
           {pathCopied ? (
-            <Check className="w-3.5 h-3.5 text-green-600" />
+            <Check className="w-3.5 h-3.5 text-success" />
           ) : (
             <ClipboardCopy className="w-3.5 h-3.5" />
           )}
@@ -659,7 +663,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
             title="Copy content"
           >
             {copied ? (
-              <Check className="w-3.5 h-3.5 text-green-600" />
+              <Check className="w-3.5 h-3.5 text-success" />
             ) : (
               <Copy className="w-3.5 h-3.5" />
             )}
@@ -719,16 +723,16 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
       <div className="max-h-[60vh] sm:max-h-[70vh] flex flex-col">
         {loading && (
           <div className="flex items-center justify-center py-12">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-muted border-t-accent-600 dark:border-t-accent-400" />
+            <Spinner size="xl" variant="accent" />
             <p className="ml-3 text-muted-foreground">Loading file...</p>
           </div>
         )}
 
         {error && (
-          <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg p-4">
+          <div className="bg-danger-subtle border border-danger-border rounded-lg p-4">
             <div className="flex items-center gap-2">
               <svg
-                className="w-5 h-5 text-red-600 dark:text-red-400"
+                className="w-5 h-5 text-danger-foreground"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -740,7 +744,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
                   d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                 />
               </svg>
-              <p className="text-sm text-red-800 dark:text-red-300">{error}</p>
+              <p className="text-sm text-danger-foreground">{error}</p>
             </div>
             {/* [Issue #1024] DL stays reachable even when preview fails
                 (e.g. oversize FILE_TOO_LARGE / unsupported / read error). */}

@@ -16,6 +16,8 @@ import {
   capturePane,
   killSession,
   ensureSession,
+  exactTarget,
+  reconcileSessionGeometry,
   SPECIAL_KEY_VALUES,
 } from '@/lib/tmux/tmux';
 
@@ -88,7 +90,7 @@ describe('tmux library', () => {
       expect(result).toBe(true);
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['has-session', '-t', 'test-session'],
+        ['has-session', '-t', '=test-session:'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -164,15 +166,32 @@ describe('tmux library', () => {
 
       await createSession('test-session', '/path/to/cwd');
 
+      // Issue #1163: default pane height is now TUI_PANE_HEIGHT (1000 rows)
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '200'],
+        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '1000'],
+        { timeout: 5000 },
+        expect.any(Function)
+      );
+      // Issue #1163: pin window-size manual (per session) so `window-size latest`
+      // never shrinks the pane when a small client attaches.
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['set-window-option', '-t', '=test-session:', 'window-size', 'manual'],
+        { timeout: 5000 },
+        expect.any(Function)
+      );
+      // Issue #1163: explicit resize-window locks in the intended geometry
+      // (the -y on new-session does not survive window-size latest on its own).
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['resize-window', '-t', '=test-session:', '-x', '200', '-y', '1000'],
         { timeout: 5000 },
         expect.any(Function)
       );
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['set-option', '-t', 'test-session', 'history-limit', '50000'],
+        ['set-option', '-t', '=test-session:', 'history-limit', '50000'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -191,15 +210,16 @@ describe('tmux library', () => {
         historyLimit: 100000,
       });
 
+      // Issue #1163: default pane height is now TUI_PANE_HEIGHT (1000 rows)
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '200'],
+        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '1000'],
         { timeout: 5000 },
         expect.any(Function)
       );
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['set-option', '-t', 'test-session', 'history-limit', '100000'],
+        ['set-option', '-t', '=test-session:', 'history-limit', '100000'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -225,9 +245,16 @@ describe('tmux library', () => {
         { timeout: 5000 },
         expect.any(Function)
       );
+      // Issue #1163: resize-window honors the explicit windowWidth/windowHeight too
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['resize-window', '-t', '=test-session:', '-x', '200', '-y', '50'],
+        { timeout: 5000 },
+        expect.any(Function)
+      );
     });
 
-    it('should use default window size (200x200) with legacy signature', async () => {
+    it('should use default window size (200x1000) with legacy signature', async () => {
       vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
         const callback = args[args.length - 1] as (err: Error | null, result: { stdout: string; stderr: string }) => void;
         callback(null, { stdout: '', stderr: '' });
@@ -236,9 +263,10 @@ describe('tmux library', () => {
 
       await createSession('test-session', '/path/to/cwd');
 
+      // Issue #1163: default height raised to TUI_PANE_HEIGHT (1000 rows)
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '200'],
+        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '1000'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -256,9 +284,10 @@ describe('tmux library', () => {
         workingDirectory: '/path/to/cwd',
       });
 
+      // Issue #1163: default height raised to TUI_PANE_HEIGHT (1000 rows)
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '200'],
+        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '1000'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -277,6 +306,175 @@ describe('tmux library', () => {
     });
   });
 
+  // Issue #1163: pane-height pinning so `window-size latest` cannot shrink the
+  // capturable rows of an alternate-screen TUI when a small client attaches.
+  describe('createSession window-size pinning (Issue #1163)', () => {
+    /** Record the tmux subcommand of each execFile call in order. */
+    function installOrderRecordingMock(): string[] {
+      const subcommands: string[] = [];
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const cmdArgs = args[1] as string[];
+        subcommands.push(cmdArgs[0]);
+        const callback = args[args.length - 1] as (
+          err: Error | null,
+          result: { stdout: string; stderr: string }
+        ) => void;
+        callback(null, { stdout: '', stderr: '' });
+        return {} as ReturnType<typeof execFile>;
+      });
+      return subcommands;
+    }
+
+    it('sets window-size manual then resize-window AFTER new-session (order matters)', async () => {
+      const subcommands = installOrderRecordingMock();
+
+      await createSession({
+        sessionName: 'test-session',
+        workingDirectory: '/path/to/cwd',
+      });
+
+      const newSessionIdx = subcommands.indexOf('new-session');
+      const setWinOptIdx = subcommands.indexOf('set-window-option');
+      const resizeIdx = subcommands.indexOf('resize-window');
+
+      expect(newSessionIdx).toBeGreaterThanOrEqual(0);
+      expect(setWinOptIdx).toBeGreaterThan(newSessionIdx);
+      expect(resizeIdx).toBeGreaterThan(setWinOptIdx);
+    });
+
+    it('targets the session exactly (=name:) for window-size manual and resize', async () => {
+      installOrderRecordingMock();
+
+      await createSession({
+        sessionName: 'mcbd-claude-wt',
+        workingDirectory: '/path/to/cwd',
+      });
+
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['set-window-option', '-t', '=mcbd-claude-wt:', 'window-size', 'manual'],
+        { timeout: 5000 },
+        expect.any(Function)
+      );
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['resize-window', '-t', '=mcbd-claude-wt:', '-x', '200', '-y', '1000'],
+        { timeout: 5000 },
+        expect.any(Function)
+      );
+    });
+
+    it('never touches the GLOBAL window-size option (-g)', async () => {
+      installOrderRecordingMock();
+
+      await createSession({
+        sessionName: 'test-session',
+        workingDirectory: '/path/to/cwd',
+      });
+
+      // No call may pass -g together with window-size (would leak to all sessions).
+      for (const call of vi.mocked(execFile).mock.calls) {
+        const cmdArgs = call[1] as string[];
+        if (cmdArgs.includes('window-size')) {
+          expect(cmdArgs).not.toContain('-g');
+        }
+      }
+    });
+
+    it('treats window-size/resize failure as non-fatal (session still created)', async () => {
+      // new-session + set-option succeed; the window-size/resize calls fail.
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const cmdArgs = args[1] as string[];
+        const subcommand = cmdArgs[0];
+        const callback = args[args.length - 1] as (
+          err: Error | null,
+          result: { stdout: string; stderr: string }
+        ) => void;
+        if (subcommand === 'set-window-option' || subcommand === 'resize-window') {
+          callback(new Error('resize not supported'), { stdout: '', stderr: '' });
+        } else {
+          callback(null, { stdout: '', stderr: '' });
+        }
+        return {} as ReturnType<typeof execFile>;
+      });
+
+      await expect(
+        createSession({ sessionName: 'test-session', workingDirectory: '/path/to/cwd' })
+      ).resolves.toBeUndefined();
+
+      // history-limit is still applied after the swallowed resize failure.
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['set-option', '-t', '=test-session:', 'history-limit', '50000'],
+        { timeout: 5000 },
+        expect.any(Function)
+      );
+    });
+  });
+
+  describe('reconcileSessionGeometry (Issue #1167)', () => {
+    function installGeometryMock(mode: string, size: string): void {
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const cmdArgs = args[1] as string[];
+        const callback = args[args.length - 1] as (
+          err: Error | null,
+          result: { stdout: string; stderr: string }
+        ) => void;
+        const stdout = cmdArgs[0] === 'show-window-options'
+          ? mode
+          : cmdArgs[0] === 'display-message'
+            ? size
+            : '';
+        callback(null, { stdout, stderr: '' });
+        return {} as ReturnType<typeof execFile>;
+      });
+    }
+
+    it('is a no-op when the existing session already has the expected geometry', async () => {
+      installGeometryMock('manual\n', '200|1000\n');
+
+      await expect(reconcileSessionGeometry('mcbd-claude-wt')).resolves.toBe(false);
+
+      const subcommands = vi.mocked(execFile).mock.calls.map(call => (call[1] as string[])[0]);
+      expect(subcommands).toEqual(['show-window-options', 'display-message']);
+    });
+
+    it('repairs a legacy latest/72-row session without touching global options', async () => {
+      installGeometryMock('latest\n', '271|72\n');
+
+      await expect(reconcileSessionGeometry('mcbd-claude-wt')).resolves.toBe(true);
+
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['set-window-option', '-t', '=mcbd-claude-wt:', 'window-size', 'manual'],
+        { timeout: 5000 },
+        expect.any(Function),
+      );
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['resize-window', '-t', '=mcbd-claude-wt:', '-x', '200', '-y', '1000'],
+        { timeout: 5000 },
+        expect.any(Function),
+      );
+      for (const call of vi.mocked(execFile).mock.calls) {
+        expect(call[1] as string[]).not.toContain('-g');
+      }
+    });
+
+    it('keeps the session usable when reconciliation fails', async () => {
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const callback = args[args.length - 1] as (
+          err: Error | null,
+          result: { stdout: string; stderr: string }
+        ) => void;
+        callback(new Error('resize denied'), { stdout: '', stderr: '' });
+        return {} as ReturnType<typeof execFile>;
+      });
+
+      await expect(reconcileSessionGeometry('mcbd-claude-wt')).resolves.toBe(false);
+    });
+  });
+
   describe('sendKeys', () => {
     it('should send keys with Enter', async () => {
       vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
@@ -289,7 +487,7 @@ describe('tmux library', () => {
 
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['send-keys', '-t', 'test-session', 'echo hello', 'C-m'],
+        ['send-keys', '-t', '=test-session:', 'echo hello', 'C-m'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -306,7 +504,7 @@ describe('tmux library', () => {
 
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['send-keys', '-t', 'test-session', 'echo hello'],
+        ['send-keys', '-t', '=test-session:', 'echo hello'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -324,7 +522,7 @@ describe('tmux library', () => {
 
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['send-keys', '-t', 'test-session', "echo 'hello'", 'C-m'],
+        ['send-keys', '-t', '=test-session:', "echo 'hello'", 'C-m'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -356,7 +554,7 @@ describe('tmux library', () => {
       expect(result).toBe('output');
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['capture-pane', '-t', 'test-session', '-p', '-e', '-S', '-1000', '-E', '-'],
+        ['capture-pane', '-t', '=test-session:', '-p', '-e', '-S', '-1000', '-E', '-'],
         { timeout: 5000, maxBuffer: 10 * 1024 * 1024 },
         expect.any(Function)
       );
@@ -374,7 +572,7 @@ describe('tmux library', () => {
       expect(result).toBe('output');
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['capture-pane', '-t', 'test-session', '-p', '-e', '-S', '-500', '-E', '-'],
+        ['capture-pane', '-t', '=test-session:', '-p', '-e', '-S', '-500', '-E', '-'],
         { timeout: 5000, maxBuffer: 10 * 1024 * 1024 },
         expect.any(Function)
       );
@@ -395,7 +593,7 @@ describe('tmux library', () => {
       expect(result).toBe('output');
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['capture-pane', '-t', 'test-session', '-p', '-e', '-S', '-10000', '-E', '-1'],
+        ['capture-pane', '-t', '=test-session:', '-p', '-e', '-S', '-10000', '-E', '-1'],
         { timeout: 5000, maxBuffer: 10 * 1024 * 1024 },
         expect.any(Function)
       );
@@ -425,7 +623,7 @@ describe('tmux library', () => {
       expect(result).toBe(true);
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['kill-session', '-t', 'test-session'],
+        ['kill-session', '-t', '=test-session:'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -484,8 +682,8 @@ describe('tmux library', () => {
 
       await ensureSession('test-session', '/path/to/cwd');
 
-      // Should call has-session, new-session, and set-option
-      expect(execFile).toHaveBeenCalledTimes(3);
+      // Includes two geometry inspection calls before the window-size writes.
+      expect(execFile).toHaveBeenCalledTimes(7);
     });
 
     it('should not create session if it already exists', async () => {
@@ -502,7 +700,7 @@ describe('tmux library', () => {
       expect(execFile).toHaveBeenCalledTimes(1);
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['has-session', '-t', 'test-session'],
+        ['has-session', '-t', '=test-session:'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -521,7 +719,7 @@ describe('tmux library', () => {
 
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['send-keys', '-t', 'test-session', 'Escape'],
+        ['send-keys', '-t', '=test-session:', 'Escape'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -538,7 +736,7 @@ describe('tmux library', () => {
 
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['send-keys', '-t', 'test-session', 'C-c'],
+        ['send-keys', '-t', '=test-session:', 'C-c'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -555,7 +753,7 @@ describe('tmux library', () => {
 
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['send-keys', '-t', 'test-session', 'C-d'],
+        ['send-keys', '-t', '=test-session:', 'C-d'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -609,7 +807,7 @@ describe('tmux library', () => {
 
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['send-keys', '-t', 'test-session', 'Down'],
+        ['send-keys', '-t', '=test-session:', 'Down'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -640,10 +838,11 @@ describe('tmux library', () => {
       const malicious = 'test"; rm -rf /; #';
       await hasSession(malicious);
 
-      // The malicious string is passed as a single argument element, not shell-interpreted
+      // The malicious string is passed as a single argument element, not shell-interpreted.
+      // Issue #1156: the target is exact-match prefixed (`=`) but still a single arg.
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['has-session', '-t', malicious],
+        ['has-session', '-t', `=${malicious}:`],
         expect.any(Object),
         expect.any(Function)
       );
@@ -662,10 +861,157 @@ describe('tmux library', () => {
       // The malicious command is passed as a single argument, not interpreted by shell
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['send-keys', '-t', 'test-session', maliciousCommand, 'C-m'],
+        ['send-keys', '-t', '=test-session:', maliciousCommand, 'C-m'],
         expect.any(Object),
         expect.any(Function)
       );
     });
+  });
+
+  // Issue #1156: prefix-collision session leakage prevention
+  describe('exactTarget helper (Issue #1156)', () => {
+    it('should prefix the session name with = for exact matching', () => {
+      expect(exactTarget('mcbd-claude-wt')).toBe('=mcbd-claude-wt:');
+    });
+
+    it('should produce distinct exact-match targets for primary and -2', () => {
+      // Both targets are exact-match forms; tmux will not resolve one from the other.
+      // (The behavioral guarantee is exercised by the leakage tests below.)
+      expect(exactTarget('mcbd-claude-wt')).toBe('=mcbd-claude-wt:');
+      expect(exactTarget('mcbd-claude-wt-2')).toBe('=mcbd-claude-wt-2:');
+      expect(exactTarget('mcbd-claude-wt')).not.toBe(exactTarget('mcbd-claude-wt-2'));
+    });
+  });
+
+  // Issue #1156: with a prefix-colliding pair (X and X-2), operations on the
+  // un-started primary X must NOT leak to the running X-2. We drive the real
+  // tmux functions through a mock that faithfully emulates tmux target
+  // resolution: a bare `-t <name>` falls back to prefix matching, while a
+  // `-t =<name>` target requires an exact session-name match.
+  describe('prefix collision session leakage (Issue #1156)', () => {
+    const PRIMARY = 'mcbd-claude-mycodebranchdesk-develop';
+    const SECOND = 'mcbd-claude-mycodebranchdesk-develop-2';
+
+    /**
+     * Resolve a tmux `-t` target against the set of live sessions, mirroring
+     * tmux semantics:
+     *   - `=name:` is exact-only and valid for BOTH session and window/pane
+     *     commands (the form this fix ships).
+     *   - `=name` (no trailing `:`) is exact-only for session commands but is
+     *     rejected by window/pane commands (capture-pane/send-keys) as an invalid
+     *     pane spec — the regression that shipped from the initial #1156 fix.
+     *   - a bare `name` matches exactly or, failing that, by prefix (the original
+     *     #1156 bug this fix closes).
+     */
+    function resolveTarget(
+      target: string,
+      liveSessions: Map<string, string>,
+      subcommand?: string
+    ): string | null {
+      if (target.startsWith('=')) {
+        const paneCommand = subcommand === 'capture-pane' || subcommand === 'send-keys';
+        const hasColon = target.endsWith(':');
+        // Real tmux rejects `=name` (no `:`) for pane/window commands.
+        if (paneCommand && !hasColon) return null;
+        const exact = target.slice(1).replace(/:$/, '');
+        return liveSessions.has(exact) ? exact : null;
+      }
+      if (liveSessions.has(target)) return target;
+      for (const name of liveSessions.keys()) {
+        if (name.startsWith(target)) return name;
+      }
+      return null;
+    }
+
+    /**
+     * Build an execFile mock backed by `liveSessions` (name -> pane content).
+     * Records every resolved target so tests can assert what a call touched.
+     */
+    function installTmuxMock(liveSessions: Map<string, string>): { resolvedTargets: Array<string | null> } {
+      const resolvedTargets: Array<string | null> = [];
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const cmdArgs = args[1] as string[];
+        const callback = args[args.length - 1] as (
+          err: Error | null,
+          result: { stdout: string; stderr: string }
+        ) => void;
+        const subcommand = cmdArgs[0];
+        const tIdx = cmdArgs.indexOf('-t');
+        if (tIdx === -1) {
+          callback(null, { stdout: '', stderr: '' });
+          return {} as ReturnType<typeof execFile>;
+        }
+        const target = cmdArgs[tIdx + 1];
+        const resolved = resolveTarget(target, liveSessions, subcommand);
+        resolvedTargets.push(resolved);
+        if (!resolved) {
+          callback(new Error(`can't find session: ${target.replace(/^=/, '').replace(/:$/, '')}`), {
+            stdout: '',
+            stderr: '',
+          });
+          return {} as ReturnType<typeof execFile>;
+        }
+        const stdout = subcommand === 'capture-pane' ? (liveSessions.get(resolved) ?? '') : '';
+        callback(null, { stdout, stderr: '' });
+        return {} as ReturnType<typeof execFile>;
+      });
+      return { resolvedTargets };
+    }
+
+    it('has-session on the un-started primary returns false (does not match -2)', async () => {
+      const { resolvedTargets } = installTmuxMock(new Map([[SECOND, 'second-content']]));
+
+      const result = await hasSession(PRIMARY);
+
+      expect(result).toBe(false);
+      expect(resolvedTargets).toEqual([null]);
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['has-session', '-t', `=${PRIMARY}:`],
+        { timeout: 5000 },
+        expect.any(Function)
+      );
+    });
+
+    it('capture-pane on the un-started primary does not return -2 content', async () => {
+      installTmuxMock(new Map([[SECOND, 'SECRET-OUTPUT-OF-INSTANCE-2']]));
+
+      await expect(capturePane(PRIMARY)).rejects.toThrow('Failed to capture pane');
+    });
+
+    it('send-keys on the un-started primary does not deliver to -2', async () => {
+      const { resolvedTargets } = installTmuxMock(new Map([[SECOND, 'second-content']]));
+
+      await expect(sendKeys(PRIMARY, 'hello')).rejects.toThrow('Failed to send keys');
+      // Never resolved to the -2 session
+      expect(resolvedTargets).toEqual([null]);
+    });
+
+    it('kill-session on the un-started primary does not kill -2', async () => {
+      const live = new Map([[SECOND, 'second-content']]);
+      installTmuxMock(live);
+
+      const killed = await killSession(PRIMARY);
+
+      expect(killed).toBe(false);
+      // The -2 session is untouched (still resolvable on its own exact target)
+      expect(resolveTargetHelper(`=${SECOND}:`, live)).toBe(SECOND);
+    });
+
+    // Regression guard for the normal case: when the primary IS running, all
+    // operations still resolve to it (the = prefix does not break exact matches).
+    it('operations still work when the primary session exists', async () => {
+      installTmuxMock(new Map([[PRIMARY, 'primary-content'], [SECOND, 'second-content']]));
+
+      expect(await hasSession(PRIMARY)).toBe(true);
+      expect(await capturePane(PRIMARY)).toBe('primary-content');
+      await expect(sendKeys(PRIMARY, 'hello')).resolves.not.toThrow();
+      expect(await killSession(PRIMARY)).toBe(true);
+    });
+
+    // Local mirror of resolveTarget for post-hoc assertions (kept in scope).
+    function resolveTargetHelper(target: string, liveSessions: Map<string, string>): string | null {
+      return resolveTarget(target, liveSessions);
+    }
   });
 });

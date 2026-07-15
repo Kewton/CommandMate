@@ -38,6 +38,7 @@ import {
 } from '@/components/worktree/WorktreeDetailSubComponents';
 import { UPLOADABLE_EXTENSIONS, getMaxFileSize, isUploadableExtension } from '@/config/uploadable-extensions';
 import { useToast } from '@/components/common/Toast';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { useAutoYes } from '@/hooks/useAutoYes';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { useUpdateCheck } from '@/hooks/useUpdateCheck';
@@ -48,9 +49,12 @@ import {
   isCliToolType,
   isValidInstanceId,
   agentInstancesFromSelectedAgents,
+  getActiveInstanceLabel,
   type CLIToolType,
   type AgentInstance,
 } from '@/lib/cli-tools/types';
+import { worktreeApi, ApiError } from '@/lib/api-client';
+import type { SessionKillTarget } from '@/types/terminal-split-pane';
 import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
 import { useMobileSelectedInstances } from '@/hooks/useMobileSelectedInstances';
 import { useTranslations } from 'next-intl';
@@ -149,6 +153,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const tError = useTranslations('error');
   const tCommon = useTranslations('common');
   const tAutoYes = useTranslations('autoYes');
+  const confirm = useConfirm();
 
   // Issue #839: Stale-while-revalidate priming. The worktree *list* is already
   // cached by useWorktreesCache (exposed via WorktreesCacheProvider). When the
@@ -804,6 +809,19 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     setEditorFilePath(null);
   }, []);
 
+  /**
+   * [Issue #1108] Controller-owned part of the Files full view reset. The
+   * FileTreeView toolbar button resets its own view state (expansion / cache /
+   * scroll) and then calls this to clear search and close open file surfaces:
+   * desktop tabs plus the mobile file viewer / editor (mobile has no tabs).
+   */
+  const resetFileTreeView = useCallback(() => {
+    fileSearch.clearSearch();
+    tabsActions.closeAllTabs();
+    setMobileFileViewerPath(null);
+    setEditorFilePath(null);
+  }, [fileSearch, tabsActions]);
+
   /** Handle file save in editor - refresh tree to reflect changes (savedPath accepted for callback interface compatibility) */
   const handleEditorSave = useCallback((_savedPath: string) => {
     setFileTreeRefresh(prev => prev + 1);
@@ -970,40 +988,92 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     [makeAutoYesToggleHandler, activeCliTab, activeInstanceId],
   );
 
-  /** Issue #4: Kill session confirmation dialog state */
-  const [showKillConfirm, setShowKillConfirm] = useState(false);
+  /**
+   * Issue #1171: kill-session confirmation is driven by a target *snapshot*
+   * value, not a separate boolean. `killTarget !== null` opens the dialog; the
+   * captured (cliToolId, instanceId, label) is the sole source of truth for what
+   * gets terminated — never re-derived from active/focus state at confirm time.
+   */
+  const [killTarget, setKillTarget] = useState<SessionKillTarget | null>(null);
+  /**
+   * Issue #1171: in-flight POST guard. Disables the Confirm button (prevents a
+   * double-submit) and makes Cancel/close a no-op so the target is preserved
+   * until the request settles. A ref mirror backs the SYNCHRONOUS guard: React
+   * state is stale within a rapid double-click's shared closure, so the ref is
+   * the authoritative "already submitting" check while `isKillPending` drives UI.
+   */
+  const [isKillPending, setIsKillPending] = useState(false);
+  const isKillPendingRef = useRef(false);
 
-  /** Issue #4: Show confirmation dialog before killing session */
-  const handleKillSession = useCallback((): void => {
-    setShowKillConfirm(true);
+  /**
+   * Issue #1171: open the confirm dialog for an explicit target snapshot. Used
+   * by each PC terminal split's End button, which builds its OWN target from its
+   * own instance so a non-focused split terminates exactly the session it shows.
+   */
+  const openKillConfirm = useCallback((target: SessionKillTarget): void => {
+    setKillTarget(target);
   }, []);
 
-  /** Issue #4: Execute session kill after confirmation */
-  const handleKillConfirm = useCallback(async (): Promise<void> => {
-    setShowKillConfirm(false);
-    try {
-      // Issue #874/#875: always scope the kill to the active agent instance, on
-      // PC as well as mobile. The primary instance uses instanceId === cliToolId
-      // (byte-identical session name), so this is unchanged for primary
-      // instances; for alias instances it terminates only that instance's
-      // session instead of every session of the backing CLI tool.
-      const killUrl =
-        `/api/worktrees/${worktreeId}/kill-session?cliTool=${activeCliTab}&instance=${encodeURIComponent(activeInstanceIdRef.current)}`;
-      const response = await fetch(killUrl, { method: 'POST' });
-      if (!response.ok) return;
-      actions.clearMessages();
-      // Issue #736: terminal reset reflected by useTerminalPanePolling on the
-      // next poll (session no longer running); only non-terminal state cleared here.
-      actions.clearPrompt();
-      await fetchWorktree();
-    } catch (err) {
-      console.error('[WorktreeDetailRefactored] Error killing session:', err);
-    }
-  }, [worktreeId, activeCliTab, actions, fetchWorktree]);
+  /**
+   * Issue #1171: open the confirm dialog for the CURRENT active agent instance.
+   * Used by the DesktopHeader / Mobile End buttons (whose target is the active
+   * instance). The target is snapshotted here at press time via refs.
+   */
+  const openActiveKillConfirm = useCallback((): void => {
+    const instanceId = activeInstanceIdRef.current;
+    const cliToolId = activeCliTabRef.current;
+    const label = getActiveInstanceLabel(agentInstancesRef.current, instanceId, cliToolId);
+    setKillTarget({ cliToolId, instanceId, label });
+  }, []);
 
-  /** Issue #4: Cancel session kill */
+  /** Issue #1171: execute the kill for the snapshotted target only. */
+  const handleKillConfirm = useCallback(async (): Promise<void> => {
+    const target = killTarget;
+    if (!target || isKillPendingRef.current) return;
+    isKillPendingRef.current = true;
+    setIsKillPending(true);
+
+    // Issue #1171: only wipe the GLOBAL (mobile-consumed / active-scoped) message
+    // + prompt state when the killed target IS the active instance. A PC split
+    // ending a non-active instance must not clear the active view's state.
+    const syncActiveGlobalState = () => {
+      if (target.instanceId === activeInstanceIdRef.current) {
+        actions.clearMessages();
+        // Issue #736: terminal reset is reflected per-split by
+        // useTerminalPanePolling; only non-terminal global state is cleared here.
+        actions.clearPrompt();
+      }
+    };
+
+    try {
+      // Issue #874/#875: always scope the kill to the target agent instance. The
+      // primary instance uses instanceId === cliToolId (byte-identical session
+      // name); alias instances terminate only that instance's session.
+      await worktreeApi.killSession(worktreeId, target.cliToolId, target.instanceId);
+      syncActiveGlobalState();
+      await fetchWorktree();
+      setKillTarget(null);
+    } catch (err) {
+      // Issue #1171: a 404 means the session already ended (natural-termination
+      // race). The goal is achieved, so re-sync and close rather than error.
+      if (err instanceof ApiError && err.status === 404) {
+        syncActiveGlobalState();
+        await fetchWorktree();
+        setKillTarget(null);
+      } else {
+        // Keep the target so the user can retry; surface a failure toast.
+        showToast(tWorktree('session.failedToKill'), 'error');
+      }
+    } finally {
+      isKillPendingRef.current = false;
+      setIsKillPending(false);
+    }
+  }, [killTarget, worktreeId, actions, fetchWorktree, showToast, tWorktree]);
+
+  /** Issue #1171: cancel — a no-op while a kill POST is in flight (keeps target). */
   const handleKillCancel = useCallback((): void => {
-    setShowKillConfirm(false);
+    if (isKillPendingRef.current) return;
+    setKillTarget(null);
   }, []);
 
   // ========================================================================
@@ -1104,7 +1174,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   /** Handle file/directory delete in FileTreeView */
   const handleDelete = useCallback(async (path: string) => {
     const name = path.split('/').pop() || path;
-    if (!window.confirm(tCommon('confirmDelete', { name }))) return;
+    if (!(await confirm({ description: tCommon('confirmDelete', { name }), variant: 'danger' }))) return;
 
     try {
       const response = await fetch(
@@ -1128,7 +1198,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       console.error('[WorktreeDetailRefactored] Failed to delete:', err);
       window.alert(tError('fileOps.failedToDelete'));
     }
-  }, [worktreeId, editorFilePath, tabsActions, tCommon, tError]);
+  }, [worktreeId, editorFilePath, tabsActions, tCommon, tError, confirm]);
 
   // Issue #314 / #499 Item 5: Show stop reason toast when pending (deferred from fetchCurrentOutput)
   useEffect(() => {
@@ -1453,13 +1523,17 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     handleInsertToSplit,
     handleKillCancel,
     handleKillConfirm,
-    handleKillSession,
+    openKillConfirm,
+    openActiveKillConfirm,
+    killTarget,
+    isKillPending,
     handleLoadContent,
     handleLoadError,
     handleMessageSent,
     handleMobileFileViewerClose,
     handleMobileTabChange,
     handleMove,
+    resetFileTreeView,
     handleMoveCancel,
     handleMoveConfirm,
     handleNewDirectory,
@@ -1509,7 +1583,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     setIsEditorMaximized,
     setWorktree,
     showArchived,
-    showKillConfirm,
     showNewFileDialog,
     showToast,
     state,

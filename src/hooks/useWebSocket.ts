@@ -1,128 +1,144 @@
 /**
- * WebSocket Custom Hook
- * React hook for managing WebSocket connections
+ * useWebSocket — low-level single WebSocket connection manager (Issue #1120).
+ *
+ * Owns exactly one same-origin WebSocket. Responsibilities:
+ *  - connect / reconnect with exponential backoff (base 1s .. max 30s)
+ *  - pause reconnection while the tab is hidden; reconnect immediately on visible
+ *  - subscription management (re-sends the subscribed room set on every (re)connect)
+ *  - parse the room broadcast envelope and dispatch inner events to `onEvent`
+ *
+ * Authentication is Cookie-based (Issue #331): the browser attaches
+ * `cm_auth_token` to the upgrade handshake automatically, and the server rejects
+ * unauthenticated upgrades with 401 (verified server-side).
+ *
+ * This hook is transport-only. Listener fan-out and subscription ref-counting
+ * live in `useRealtimeConnection` (the provider that owns the single instance).
  */
 
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
-import type { ChatMessage } from '@/types/models';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { parseRealtimeEvent, type RealtimeEvent, type RealtimeStatus } from '@/lib/realtime/types';
 
-export type WebSocketStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
+export type WebSocketStatus = RealtimeStatus;
 
-export interface SessionStatusPayload {
-  type: 'session_status_changed';
-  worktreeId: string;
-  isRunning: boolean;
-  messagesCleared?: boolean;
-  /** Issue #4: CLI tool that was terminated (null = all tools) */
-  cliTool?: string | null;
-}
-
-export interface ChatBroadcastPayload {
-  type: 'message' | 'message_updated';
-  worktreeId: string;
-  message: ChatMessage;
-}
-
-export type BroadcastPayload = SessionStatusPayload | ChatBroadcastPayload | Record<string, unknown>;
-
-export interface WebSocketMessage {
-  type: 'subscribe' | 'unsubscribe' | 'message' | 'broadcast' | 'error';
-  worktreeId?: string;
-  data?: BroadcastPayload;
-  error?: string;
-}
+export const DEFAULT_RECONNECT_BASE_DELAY_MS = 1000;
+export const DEFAULT_RECONNECT_MAX_DELAY_MS = 30000;
 
 export interface UseWebSocketOptions {
-  /**
-   * Worktree IDs to subscribe to
-   */
-  worktreeIds?: string[];
-
-  /**
-   * Callback when a message is received
-   */
-  onMessage?: (message: WebSocketMessage) => void;
-
-  /**
-   * Callback when connection status changes
-   */
+  /** Called for every parsed inbound realtime event. */
+  onEvent?: (event: RealtimeEvent) => void;
+  /** Called whenever the connection status changes. */
   onStatusChange?: (status: WebSocketStatus) => void;
-
-  /**
-   * Auto-reconnect on disconnect
-   */
+  /** Auto-reconnect on unexpected disconnect (default true). */
   autoReconnect?: boolean;
+  /** Base reconnect delay in ms (default 1000). */
+  reconnectBaseDelay?: number;
+  /** Max reconnect delay in ms (default 30000). */
+  reconnectMaxDelay?: number;
+  /** Disable the hook entirely (e.g. SSR / tests without a WS impl). */
+  enabled?: boolean;
+}
 
-  /**
-   * Reconnect delay in milliseconds
-   */
-  reconnectDelay?: number;
+export interface UseWebSocketReturn {
+  status: WebSocketStatus;
+  /** Subscribe to a worktree room. Idempotent; re-sent on reconnect. */
+  subscribe: (worktreeId: string) => void;
+  /** Unsubscribe from a worktree room. */
+  unsubscribe: (worktreeId: string) => void;
+  /** Send a raw control message (e.g. subscribe/unsubscribe/terminal_input). */
+  send: (message: Record<string, unknown>) => void;
+}
+
+/** Resolve the WebSocket constructor, allowing tests to stub globalThis.WebSocket. */
+function getWebSocketCtor(): typeof WebSocket | null {
+  if (typeof globalThis !== 'undefined' && typeof globalThis.WebSocket === 'function') {
+    return globalThis.WebSocket as typeof WebSocket;
+  }
+  return null;
 }
 
 /**
- * Custom hook for WebSocket connection
- *
- * @example
- * ```tsx
- * const { status, subscribe, unsubscribe, sendMessage } = useWebSocket({
- *   worktreeIds: ['main', 'feature-branch'],
- *   onMessage: (msg) => console.log('Received:', msg),
- * });
- * ```
+ * Compute exponential backoff delay for a given attempt (0-based), clamped to max.
  */
-export function useWebSocket(options: UseWebSocketOptions = {}) {
+export function computeBackoffDelay(attempt: number, baseDelay: number, maxDelay: number): number {
+  const exp = baseDelay * 2 ** Math.max(0, attempt);
+  return Math.min(exp, maxDelay);
+}
+
+export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketReturn {
   const {
-    worktreeIds = [],
-    onMessage,
+    onEvent,
     onStatusChange,
     autoReconnect = true,
-    reconnectDelay = 3000,
+    reconnectBaseDelay = DEFAULT_RECONNECT_BASE_DELAY_MS,
+    reconnectMaxDelay = DEFAULT_RECONNECT_MAX_DELAY_MS,
+    enabled = true,
   } = options;
 
   const [status, setStatus] = useState<WebSocketStatus>('disconnected');
+
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
-  const subscribedIdsRef = useRef<Set<string>>(new Set());
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const attemptRef = useRef(0);
+  const subscribedRef = useRef<Set<string>>(new Set());
+  const intentionalCloseRef = useRef(false);
 
-  /**
-   * Update status and trigger callback
-   */
-  const updateStatus = useCallback((newStatus: WebSocketStatus) => {
-    setStatus(newStatus);
-    onStatusChange?.(newStatus);
-  }, [onStatusChange]);
+  // Keep the latest callbacks in refs so connect() identity stays stable.
+  const onEventRef = useRef(onEvent);
+  onEventRef.current = onEvent;
+  const onStatusChangeRef = useRef(onStatusChange);
+  onStatusChangeRef.current = onStatusChange;
 
-  /**
-   * Connect to WebSocket server
-   */
+  const updateStatus = useCallback((next: WebSocketStatus) => {
+    setStatus(next);
+    onStatusChangeRef.current?.(next);
+  }, []);
+
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current !== null) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  }, []);
+
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    if (!enabled) return;
+    if (typeof window === 'undefined') return;
+    const Ctor = getWebSocketCtor();
+    if (!Ctor) return;
+    if (
+      wsRef.current &&
+      (wsRef.current.readyState === Ctor.OPEN || wsRef.current.readyState === Ctor.CONNECTING)
+    ) {
       return;
     }
 
+    clearReconnectTimer();
+    intentionalCloseRef.current = false;
     updateStatus('connecting');
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}`);
+    const ws = new Ctor(`${protocol}//${window.location.host}`);
+    wsRef.current = ws;
 
     ws.onopen = () => {
+      attemptRef.current = 0;
       updateStatus('connected');
-
-      // Re-subscribe to previously subscribed worktrees
-      subscribedIdsRef.current.forEach((id) => {
-        ws.send(JSON.stringify({ type: 'subscribe', worktreeId: id }));
+      // Re-send the full subscription set on every (re)connect.
+      subscribedRef.current.forEach((id) => {
+        try {
+          ws.send(JSON.stringify({ type: 'subscribe', worktreeId: id }));
+        } catch {
+          // best-effort; a failing send means the socket is already closing.
+        }
       });
     };
 
-    ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data) as WebSocketMessage;
-        onMessage?.(message);
-      } catch (error) {
-        console.error('Failed to parse WebSocket message:', error);
-      }
+    ws.onmessage = (event: MessageEvent) => {
+      const raw = typeof event.data === 'string' ? event.data : String(event.data);
+      const parsed = parseRealtimeEvent(raw);
+      if (parsed) onEventRef.current?.(parsed);
     };
 
     ws.onerror = () => {
@@ -130,93 +146,89 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     };
 
     ws.onclose = () => {
+      wsRef.current = null;
       updateStatus('disconnected');
-      wsRef.current = null;
-
-      // Auto-reconnect
-      if (autoReconnect) {
-        reconnectTimeoutRef.current = setTimeout(() => {
-          connect();
-        }, reconnectDelay);
+      if (intentionalCloseRef.current || !autoReconnect) return;
+      // Do not schedule reconnection while the tab is hidden — the
+      // visibilitychange handler reconnects on becoming visible again.
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return;
       }
+      const delay = computeBackoffDelay(attemptRef.current, reconnectBaseDelay, reconnectMaxDelay);
+      attemptRef.current += 1;
+      reconnectTimerRef.current = setTimeout(() => {
+        reconnectTimerRef.current = null;
+        connect();
+      }, delay);
     };
+  }, [enabled, autoReconnect, reconnectBaseDelay, reconnectMaxDelay, updateStatus, clearReconnectTimer]);
 
-    wsRef.current = ws;
-  }, [updateStatus, onMessage, autoReconnect, reconnectDelay]);
-
-  /**
-   * Disconnect from WebSocket server
-   */
   const disconnect = useCallback(() => {
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-    }
-
+    clearReconnectTimer();
+    intentionalCloseRef.current = true;
     if (wsRef.current) {
-      // Close with proper status code (1000 = Normal Closure)
-      // This prevents invalid close code errors on the server
-      wsRef.current.close(1000, 'Client disconnect');
+      try {
+        wsRef.current.close(1000, 'Client disconnect');
+      } catch {
+        // ignore
+      }
       wsRef.current = null;
     }
+  }, [clearReconnectTimer]);
 
-    updateStatus('disconnected');
-  }, [updateStatus]);
-
-  /**
-   * Subscribe to a worktree
-   */
-  const subscribe = useCallback((worktreeId: string) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'subscribe', worktreeId }));
-      subscribedIdsRef.current.add(worktreeId);
+  const send = useCallback((message: Record<string, unknown>) => {
+    const ws = wsRef.current;
+    const Ctor = getWebSocketCtor();
+    if (ws && Ctor && ws.readyState === Ctor.OPEN) {
+      try {
+        ws.send(JSON.stringify(message));
+      } catch {
+        // ignore transient send failures; reconnect resends subscriptions.
+      }
     }
   }, []);
 
-  /**
-   * Unsubscribe from a worktree
-   */
-  const unsubscribe = useCallback((worktreeId: string) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'unsubscribe', worktreeId }));
-      subscribedIdsRef.current.delete(worktreeId);
-    }
-  }, []);
+  const subscribe = useCallback(
+    (worktreeId: string) => {
+      if (subscribedRef.current.has(worktreeId)) return;
+      subscribedRef.current.add(worktreeId);
+      send({ type: 'subscribe', worktreeId });
+    },
+    [send],
+  );
 
-  /**
-   * Send a custom message
-   */
-  const sendMessage = useCallback((message: WebSocketMessage) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(message));
-    }
-  }, []);
+  const unsubscribe = useCallback(
+    (worktreeId: string) => {
+      if (!subscribedRef.current.has(worktreeId)) return;
+      subscribedRef.current.delete(worktreeId);
+      send({ type: 'unsubscribe', worktreeId });
+    },
+    [send],
+  );
 
-  // Connect on mount
+  // Mount: connect. Unmount: disconnect.
   useEffect(() => {
+    if (!enabled) return;
     connect();
-
     return () => {
       disconnect();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only run on mount/unmount
+  }, [enabled, connect, disconnect]);
 
-  // Subscribe to initial worktree IDs
+  // visibilitychange: reconnect immediately when the tab becomes visible if the
+  // connection dropped while hidden.
   useEffect(() => {
-    if (status === 'connected' && worktreeIds.length > 0) {
-      worktreeIds.forEach((id) => {
-        subscribe(id);
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, worktreeIds]); // Don't include subscribe to avoid re-subscription loops
+    if (!enabled) return;
+    if (typeof document === 'undefined') return;
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (wsRef.current) return;
+      attemptRef.current = 0;
+      connect();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [enabled, connect]);
 
-  return {
-    status,
-    subscribe,
-    unsubscribe,
-    sendMessage,
-    connect,
-    disconnect,
-  };
+  return { status, subscribe, unsubscribe, send };
 }

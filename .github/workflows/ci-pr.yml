@@ -25,32 +25,37 @@ jobs:
           echo "CLAUDE.md size: $SIZE bytes (under $LIMIT)"
 
   token-discipline:
-    name: Token discipline (raw gray/slate guard)
+    name: Token discipline (raw gray/slate + chromatic guard)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Guard against raw gray/slate in migrated directories
+      - name: Guard against raw gray/slate + chromatic colors in migrated directories
         run: |
-          # [Issue #1082] Hard-fail if raw Tailwind gray/slate color utilities
-          # (bg-/text-/border-/ring-<gray|slate>-<n>) reappear in directories that
-          # have already been migrated to semantic tokens. Same mechanism as the
-          # CLAUDE.md size check above. Fix violations with the semantic tokens in
-          # docs/design-system.md (foreground / muted / muted-foreground / border /
-          # surface / input / ring), NOT by editing this whitelist.
+          # [Issue #1082 / #1116] Hard-fail if raw Tailwind color utilities reappear
+          # in directories already migrated to semantic tokens. Same mechanism as the
+          # CLAUDE.md size check above.
+          #   - gray/slate  → neutral tokens (foreground / muted / muted-foreground /
+          #                   border / surface / input / ring). (#1082, #1061)
+          #   - chromatic (red/green/yellow/amber/orange/purple/violet/sky/blue)
+          #                 → status tint tokens (bg-{status}-subtle /
+          #                   border-{status}-border / text-{status}-foreground /
+          #                   bg-{status}, status = success|warning|danger|info). (#1116)
+          # Fix violations with the tokens in docs/design-system.md, NOT by editing
+          # this whitelist.
           #
-          # WHITELIST (guarded) = migrated dirs. #1061 extended this to the
-          # worktree/mobile/external-apps component trees.
-          # EXCLUDED (intentional always-dark islands / not yet migrated):
-          #   - *Terminal* source files (worktree/mobile): the terminal output
-          #     surfaces stay dark in BOTH themes, matching the fixed xterm theme
-          #     (#1079) — they use raw dark utilities on purpose.
-          #   - src/app/worktrees/**  (worktree detail route / terminal page,
-          #     incl. CLI brand colors) — out of #1061's component scope.
+          # WHITELIST (guarded) = migrated dirs. #1061 added worktree/mobile/
+          # external-apps; #1116 added error/ + auth/.
+          # EXCLUDED (intentional always-dark islands / out of scope):
+          #   - *Terminal* source files (incl. error/TerminalErrorFallback.tsx): the
+          #     terminal output surfaces stay dark in BOTH themes, matching the fixed
+          #     xterm theme (#1079) — they use raw dark utilities on purpose.
+          #   - src/app/worktrees/**  (worktree detail route / terminal page, incl.
+          #     CLI brand colors bg-purple-600/bg-blue-600/bg-green-600).
           # Test files (*.test.*, *.spec.*, __tests__) are excluded because they
           # assert on concrete class strings.
-          PATTERN='(bg|text|border|ring)-(gray|slate)-[0-9]'
+          PATTERN='(bg|text|border|ring)-(gray|slate|red|green|yellow|amber|orange|purple|violet|sky|blue)-[0-9]'
           MATCHES=$(git grep -nE "$PATTERN" -- \
             'src/app' \
             'src/components/ui' \
@@ -64,15 +69,17 @@ jobs:
             'src/components/worktree' \
             'src/components/mobile' \
             'src/components/external-apps' \
+            'src/components/error' \
+            'src/components/auth' \
             ':(exclude)src/app/worktrees' \
             | grep -vE '\.test\.|\.spec\.|__tests__' \
             | grep -vE '^[^:]*Terminal[^:]*:' || true)
           if [ -n "$MATCHES" ]; then
-            echo "::error::Raw gray/slate color utilities found in migrated directories (Issue #1082). Replace with semantic tokens — see docs/design-system.md."
+            echo "::error::Raw gray/slate or chromatic color utilities found in migrated directories (Issue #1082 / #1116). Replace with semantic tokens — see docs/design-system.md."
             echo "$MATCHES"
             exit 1
           fi
-          echo "Token discipline: no raw gray/slate utilities in migrated directories."
+          echo "Token discipline: no raw gray/slate or chromatic utilities in migrated directories."
 
   lint:
     name: Lint

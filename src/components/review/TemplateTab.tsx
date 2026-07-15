@@ -8,7 +8,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Button, Card, Input, Textarea } from '@/components/ui';
+import { useTranslations } from 'next-intl';
+import { Button, Card, Input, Skeleton, Textarea } from '@/components/ui';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import {
   MAX_TEMPLATES,
   MAX_TEMPLATE_NAME_LENGTH,
@@ -17,6 +19,8 @@ import {
 import type { TemplateData } from '@/hooks/useReportGeneration';
 
 export default function TemplateTab() {
+  const t = useTranslations('review');
+  const confirm = useConfirm();
   const [templates, setTemplates] = useState<TemplateData[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -123,7 +127,7 @@ export default function TemplateTab() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Delete this template?')) return;
+    if (!(await confirm({ description: t('template.deleteConfirm'), variant: 'danger' }))) return;
 
     setError(null);
     try {
@@ -149,7 +153,7 @@ export default function TemplateTab() {
     <div data-testid="template-tab">
       {/* Error display */}
       {error && (
-        <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-sm" data-testid="template-error">
+        <div className="mb-4 p-3 bg-danger-subtle text-danger-foreground rounded-lg text-sm" data-testid="template-error">
           {error}
         </div>
       )}
@@ -161,7 +165,23 @@ export default function TemplateTab() {
         </h2>
 
         {isLoading ? (
-          <div className="text-sm text-muted-foreground" data-testid="template-loading">Loading...</div>
+          // [Issue #1118] Card-shaped skeletons instead of naked loading text
+          <div
+            className="space-y-3"
+            data-testid="template-loading"
+            role="status"
+            aria-label="Loading templates"
+          >
+            {[0, 1].map((i) => (
+              <Card key={i} padding="md">
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-full" />
+                  <Skeleton className="h-3 w-2/3" />
+                </div>
+              </Card>
+            ))}
+          </div>
         ) : templates.length === 0 ? (
           <div className="text-sm text-muted-foreground" data-testid="template-empty">No templates yet.</div>
         ) : (

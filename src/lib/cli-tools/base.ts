@@ -8,7 +8,7 @@ import { promisify } from 'util';
 import type { ICLITool, CLIToolType } from './types';
 import { deriveSessionSuffix } from './types';
 import { validateSessionName } from './validation';
-import { sendSpecialKey } from '../tmux/tmux';
+import { reconcileSessionGeometry, sendSpecialKey, type SessionGeometryOptions } from '../tmux/tmux';
 
 const execAsync = promisify(exec);
 
@@ -66,6 +66,14 @@ export abstract class BaseCLITool implements ICLITool {
   abstract startSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void>;
   abstract sendMessage(worktreeId: string, message: string, instanceId?: string): Promise<void>;
   abstract killSession(worktreeId: string, instanceId?: string): Promise<void>;
+
+  /** Repair geometry when reusing a tmux session that predates the current defaults. */
+  protected async reconcileExistingSession(
+    sessionName: string,
+    options?: SessionGeometryOptions,
+  ): Promise<void> {
+    await reconcileSessionGeometry(sessionName, options);
+  }
 
   /**
    * Interrupt processing by sending Escape key

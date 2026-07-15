@@ -6,13 +6,49 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { invalidateCache } from './tmux-capture-cache';
+import { TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '@/config/tmux-pane-config';
+import { createLogger } from '@/lib/logger';
 
 const execFileAsync = promisify(execFile);
+const logger = createLogger('tmux');
 
 /**
  * Default timeout for tmux commands (5 seconds)
  */
 const DEFAULT_TIMEOUT = 5000;
+
+/**
+ * Build an exact-match tmux target specifier (Issue #1156).
+ *
+ * tmux resolves a bare `-t <name>` target with prefix/fnmatch matching whenever
+ * no session matches `<name>` exactly. Because instance session names are
+ * prefixes of one another (`mcbd-<cli>-<wt>` is a prefix of `mcbd-<cli>-<wt>-2`),
+ * an operation on the primary session silently leaks to the `-2` instance while
+ * the primary is not running: `has-session` reports it "running", `capture-pane`
+ * shows the wrong pane, `send-keys` delivers to the wrong instance, and
+ * `kill-session` can kill the wrong session.
+ *
+ * Prefixing the target with `=` disables that fuzzy matching and forces an exact
+ * session-name match. EVERY `-t` target in this module (and the control-mode
+ * attach in tmux-control-client.ts) MUST go through this helper so no call site
+ * can regress to prefix matching.
+ *
+ * The trailing `:` is REQUIRED, not cosmetic. tmux accepts a bare `=name` only
+ * where a session target is expected (has-session/kill-session/set-option). For
+ * commands that take a window/pane target (capture-pane/send-keys, and
+ * resize-window in opencode.ts), `=name` is parsed as a pane spec and tmux fails
+ * with `can't find pane: =name` — which broke ALL session display/send after the
+ * initial #1156 fix. `=name:` (session `name`, unspecified window → active) is a
+ * valid target for BOTH session and window/pane commands, and still forces exact
+ * session matching (a non-existent `=primary:` yields `can't find session`, so it
+ * never leaks to the prefix-colliding `-2` instance).
+ *
+ * @param sessionName - Exact tmux session name to target
+ * @returns Target specifier with the `=` exact-match prefix and `:` session terminator
+ */
+export function exactTarget(sessionName: string): string {
+  return `=${sessionName}:`;
+}
 
 /**
  * tmux session information
@@ -30,8 +66,81 @@ export interface CreateSessionOptions {
   sessionName: string;
   workingDirectory: string;
   historyLimit?: number;  // scrollback バッファサイズ（デフォルト: 50000）
-  windowWidth?: number;   // ペイン幅（デフォルト: 200）
-  windowHeight?: number;  // ペイン高さ（デフォルト: 200、alternate screen TUIで十分な表示領域を確保）
+  windowWidth?: number;   // ペイン幅（デフォルト: TUI_PANE_WIDTH）
+  windowHeight?: number;  // ペイン高さ（デフォルト: TUI_PANE_HEIGHT、alternate screen TUIで十分な表示行数を確保。Issue #1163）
+}
+
+export interface SessionGeometryOptions {
+  windowWidth?: number;
+  windowHeight?: number;
+}
+
+/**
+ * Reconcile a session's window geometry without disrupting the running process.
+ * Failures are intentionally non-fatal: geometry improves capture fidelity but
+ * must never make an otherwise healthy CLI session unusable.
+ *
+ * @returns true when at least one tmux option was changed.
+ */
+export async function reconcileSessionGeometry(
+  sessionName: string,
+  options: SessionGeometryOptions = {},
+): Promise<boolean> {
+  const windowWidth = options.windowWidth ?? TUI_PANE_WIDTH;
+  const windowHeight = options.windowHeight ?? TUI_PANE_HEIGHT;
+  const target = exactTarget(sessionName);
+
+  let currentMode: string | undefined;
+  let currentWidth: number | undefined;
+  let currentHeight: number | undefined;
+
+  try {
+    const modeResult = await execFileAsync(
+      'tmux',
+      ['show-window-options', '-v', '-t', target, 'window-size'],
+      { timeout: DEFAULT_TIMEOUT },
+    );
+    currentMode = modeResult.stdout.trim();
+
+    const sizeResult = await execFileAsync(
+      'tmux',
+      ['display-message', '-p', '-t', target, '#{window_width}|#{window_height}'],
+      { timeout: DEFAULT_TIMEOUT },
+    );
+    const [width, height] = sizeResult.stdout.trim().split('|').map(Number);
+    if (Number.isFinite(width)) currentWidth = width;
+    if (Number.isFinite(height)) currentHeight = height;
+  } catch {
+    // Query failure is not decisive. Attempt the idempotent set/resize below.
+  }
+
+  const modeMatches = currentMode === 'manual';
+  const sizeMatches = currentWidth === windowWidth && currentHeight === windowHeight;
+  if (modeMatches && sizeMatches) return false;
+
+  try {
+    if (!modeMatches) {
+      await execFileAsync(
+        'tmux',
+        ['set-window-option', '-t', target, 'window-size', 'manual'],
+        { timeout: DEFAULT_TIMEOUT },
+      );
+    }
+    if (!sizeMatches) {
+      await execFileAsync(
+        'tmux',
+        ['resize-window', '-t', target, '-x', String(windowWidth), '-y', String(windowHeight)],
+        { timeout: DEFAULT_TIMEOUT },
+      );
+    }
+    return true;
+  } catch (error: unknown) {
+    logger.warn('session-geometry:reconcile-failed', {
+      sessionName,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
 }
 
 /**
@@ -70,7 +179,7 @@ export async function isTmuxAvailable(): Promise<boolean> {
  */
 export async function hasSession(sessionName: string): Promise<boolean> {
   try {
-    await execFileAsync('tmux', ['has-session', '-t', sessionName], { timeout: DEFAULT_TIMEOUT });
+    await execFileAsync('tmux', ['has-session', '-t', exactTarget(sessionName)], { timeout: DEFAULT_TIMEOUT });
     return true;
   } catch {
     // tmux has-session returns non-zero exit code if session doesn't exist
@@ -169,15 +278,15 @@ export async function createSession(
     sessionName = sessionNameOrOptions;
     workingDirectory = cwd!;
     historyLimit = 50000;
-    windowWidth = 200;
-    windowHeight = 200;
+    windowWidth = TUI_PANE_WIDTH;
+    windowHeight = TUI_PANE_HEIGHT;
   } else {
     // New signature with options
     sessionName = sessionNameOrOptions.sessionName;
     workingDirectory = sessionNameOrOptions.workingDirectory;
     historyLimit = sessionNameOrOptions.historyLimit || 50000;
-    windowWidth = sessionNameOrOptions.windowWidth || 200;
-    windowHeight = sessionNameOrOptions.windowHeight || 200;
+    windowWidth = sessionNameOrOptions.windowWidth || TUI_PANE_WIDTH;
+    windowHeight = sessionNameOrOptions.windowHeight || TUI_PANE_HEIGHT;
   }
 
   try {
@@ -189,10 +298,23 @@ export async function createSession(
       { timeout: DEFAULT_TIMEOUT }
     );
 
+    // Issue #1163: Pin the pane to a fixed height so alternate-screen TUIs
+    // (Claude/Codex/etc.) keep enough visible rows for capture-pane.
+    //
+    // The `-x`/`-y` passed to `new-session` do NOT survive on their own: the
+    // server-global `window-size latest` immediately resizes a detached window
+    // to the most recently active client, so a small terminal that later attaches
+    // (or is already attached) shrinks the pane — and the capturable row count
+    // shrinks with it. Setting `window-size manual` PER SESSION disables that
+    // tracking (the global option is never touched), and an explicit
+    // `resize-window` then locks in the intended geometry. Best-effort: a failure
+    // here must not abort session creation (some environments restrict resize).
+    await reconcileSessionGeometry(sessionName, { windowWidth, windowHeight });
+
     // Set history limit
     await execFileAsync(
       'tmux',
-      ['set-option', '-t', sessionName, 'history-limit', String(historyLimit)],
+      ['set-option', '-t', exactTarget(sessionName), 'history-limit', String(historyLimit)],
       { timeout: DEFAULT_TIMEOUT }
     );
   } catch (error: unknown) {
@@ -225,8 +347,8 @@ export async function sendKeys(
   // execFile() passes arguments directly without shell interpretation,
   // so no shell-level escaping is needed
   const args = sendEnter
-    ? ['send-keys', '-t', sessionName, keys, 'C-m']
-    : ['send-keys', '-t', sessionName, keys];
+    ? ['send-keys', '-t', exactTarget(sessionName), keys, 'C-m']
+    : ['send-keys', '-t', exactTarget(sessionName), keys];
 
   try {
     await execFileAsync('tmux', args, { timeout: DEFAULT_TIMEOUT });
@@ -283,7 +405,7 @@ export async function sendSpecialKeys(
 
   try {
     for (let i = 0; i < keys.length; i++) {
-      await execFileAsync('tmux', ['send-keys', '-t', sessionName, keys[i]], { timeout: DEFAULT_TIMEOUT });
+      await execFileAsync('tmux', ['send-keys', '-t', exactTarget(sessionName), keys[i]], { timeout: DEFAULT_TIMEOUT });
       // Delay between key presses (skip after the last key)
       if (i < keys.length - 1) {
         await new Promise(resolve => setTimeout(resolve, SPECIAL_KEY_DELAY_MS));
@@ -355,7 +477,7 @@ export async function capturePane(
   try {
     const { stdout } = await execFileAsync(
       'tmux',
-      ['capture-pane', '-t', sessionName, '-p', '-e', '-S', String(startLine), '-E', String(endLine)],
+      ['capture-pane', '-t', exactTarget(sessionName), '-p', '-e', '-S', String(startLine), '-E', String(endLine)],
       {
         timeout: DEFAULT_TIMEOUT,
         maxBuffer: 10 * 1024 * 1024  // 10MB buffer for large Claude outputs
@@ -384,7 +506,7 @@ export async function capturePane(
  */
 export async function killSession(sessionName: string): Promise<boolean> {
   try {
-    await execFileAsync('tmux', ['kill-session', '-t', sessionName], {
+    await execFileAsync('tmux', ['kill-session', '-t', exactTarget(sessionName)], {
       timeout: DEFAULT_TIMEOUT,
     });
     return true;
@@ -478,7 +600,7 @@ export async function sendSpecialKey(
   }
 
   try {
-    await execFileAsync('tmux', ['send-keys', '-t', sessionName, key], { timeout: DEFAULT_TIMEOUT });
+    await execFileAsync('tmux', ['send-keys', '-t', exactTarget(sessionName), key], { timeout: DEFAULT_TIMEOUT });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to send special key: ${errorMessage}`);

@@ -23,6 +23,7 @@
 'use client';
 
 import React, { memo, useCallback, useMemo } from 'react';
+import { X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 import { TerminalSplitPane } from '@/components/worktree/TerminalSplitPane';
@@ -39,13 +40,16 @@ import {
   type PanePromptState,
 } from '@/hooks/useTerminalPanePolling';
 import { useSplitMessages } from '@/hooks/useSplitMessages';
+import { usePendingMessages, type OptimisticSendOptions } from '@/hooks/usePendingMessages';
 import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
+import { worktreeApi } from '@/lib/api-client';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
-import { getCliToolDisplayName } from '@/lib/cli-tools/types';
+import { getCliToolDisplayName, getInstanceLabel } from '@/lib/cli-tools/types';
 import type {
   TerminalSplitPaneCoreProps,
   SplitAutoYesProps,
   HistoryPaneProps,
+  SessionKillTarget,
 } from '@/types/terminal-split-pane';
 
 /**
@@ -86,6 +90,14 @@ export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProp
   onDropInstance?: (instanceId: string) => void;
   /** Issue #786 / #869 (D-2): published instanceId being dragged, for the dragOver ring. */
   draggedInstanceId?: string | null;
+  /**
+   * Issue #1171: request ending THIS split's session. The split builds its own
+   * {@link SessionKillTarget} snapshot (its cliToolId / resolved instanceId /
+   * alias-first label) and hands it up so the confirm dialog terminates exactly
+   * the session this split shows — never the globally-active one. Optional; when
+   * omitted the End (×) button is not rendered (backward compatible).
+   */
+  onRequestSessionEnd?: (target: SessionKillTarget) => void;
 }
 
 export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
@@ -106,6 +118,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   history,
   onDropInstance,
   draggedInstanceId,
+  onRequestSessionEnd,
 }: TerminalSplitPaneContentProps) {
   // Issue #869: resolve the instance id this split targets. Defaults to the
   // primary instance (`=== cliToolId`) so pre-#869 single-instance behavior —
@@ -161,6 +174,27 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     enabled: !disabled,
   });
 
+  // Issue #1121: optimistic-UI layer. Merges a just-sent message into this
+  // split's history as a pending bubble (< 100ms) before the send resolves, then
+  // reconciles it against the server echo (no duplicate) or surfaces a
+  // retry/discard error on failure. onSent refetches so reconciliation is prompt.
+  const sendMessageFn = useCallback(
+    (content: string, options: OptimisticSendOptions) =>
+      worktreeApi.sendMessage(worktreeId, content, options),
+    [worktreeId],
+  );
+  const {
+    messages: mergedMessages,
+    sendOptimistic,
+    retry: retryPending,
+    discard: discardPending,
+  } = usePendingMessages({
+    worktreeId,
+    serverMessages: splitMessages,
+    sendFn: sendMessageFn,
+    onSent: refreshSplitMessages,
+  });
+
   // Issue #744: History visible/width. MVP keeps this common across splits
   // (single useHistoryPaneState instance per pane, all reading the same
   // localStorage-backed state). Width is applied relative to THIS split's inner
@@ -185,6 +219,10 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // would hide the menus at the top of the screen.
   const disableAutoFollow = cliToolId === 'opencode' || cliToolId === 'copilot';
 
+  // Issue #1172: Claude/Codex pin a 1000-row pane and pad the layout with
+  // hundreds of blank rows; compact them for display only (raw output untouched).
+  const compactTuiLayoutPadding = cliToolId === 'claude' || cliToolId === 'codex';
+
   const handleAutoScrollChange = useCallback(
     (enabled: boolean) => setAutoScroll(enabled),
     [setAutoScroll],
@@ -199,6 +237,19 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       onMessageSent?.(sentCli);
     },
     [refresh, refreshSplitMessages, onMessageSent],
+  );
+
+  // Issue #1121: discarding a failed optimistic message removes its bubble and
+  // restores the text to the composer (via the existing insert-to-message
+  // pathway) so the user can edit and re-send.
+  const handleDiscardPending = useCallback(
+    (tempId: string) => {
+      const content = discardPending(tempId);
+      if (content) {
+        onHistoryInsertToMessage?.(content);
+      }
+    },
+    [discardPending, onHistoryInsertToMessage],
   );
 
   const handlePromptRespond = useCallback(
@@ -244,7 +295,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   const showEscapeHatch =
     terminal.isUnclassifiedActive &&
     !showNav &&
-    !showPrompt;
+    !prompt.visible;
 
   // Issue #744: the embedded HistoryPane for THIS split. Receives this split's
   // own messages (useSplitMessages) and the per-split highlight namespace via
@@ -253,13 +304,15 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   const historyPaneSlot = useMemo(
     () => (
       <HistoryPane
-        messages={splitMessages}
+        messages={mergedMessages}
         worktreeId={worktreeId}
         onFilePathClick={onFilePathClick ?? (() => {})}
         isLoading={splitMessagesLoading}
         className="h-full"
         showToast={showToast}
         onInsertToMessage={onHistoryInsertToMessage}
+        onRetryPending={retryPending}
+        onDiscardPending={handleDiscardPending}
         showArchived={showArchived}
         onShowArchivedChange={onShowArchivedChange}
         historyDisplayLimit={historyDisplayLimit}
@@ -272,7 +325,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       />
     ),
     [
-      splitMessages,
+      mergedMessages,
+      retryPending,
+      handleDiscardPending,
       worktreeId,
       onFilePathClick,
       splitMessagesLoading,
@@ -300,6 +355,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
         autoScroll={terminal.autoScroll}
         onScrollChange={handleAutoScrollChange}
         disableAutoFollow={disableAutoFollow}
+        compactTuiLayoutPadding={compactTuiLayoutPadding}
       />
     ),
     [
@@ -310,6 +366,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       terminal.autoScroll,
       handleAutoScrollChange,
       disableAutoFollow,
+      compactTuiLayoutPadding,
     ],
   );
 
@@ -427,6 +484,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
         <MessageInput
           worktreeId={worktreeId}
           onMessageSent={handleMessageSent}
+          // Issue #1121: delegate the send to the optimistic layer so a pending
+          // bubble appears in this split's history immediately.
+          onOptimisticSend={sendOptimistic}
           cliToolId={cliToolId}
           instanceId={resolvedInstanceId}
           isSessionRunning={terminal.isRunning}
@@ -471,6 +531,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       handlePromptRespond,
       handlePromptDismiss,
       handleMessageSent,
+      sendOptimistic,
       terminal.isRunning,
       pendingInsertText,
       onInsertConsumed,
@@ -485,6 +546,44 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     ],
   );
 
+  // Issue #1171: alias-first display name for THIS split's session, snapshotted
+  // into the kill target and shown in the End button tooltip / aria-label.
+  const endTargetLabel = getInstanceLabel(instance ?? { cliTool: cliToolId });
+
+  // Issue #1171: build this split's own kill-target snapshot and request the
+  // confirm dialog. Uses THIS split's cliToolId / resolved instanceId, so a
+  // non-focused split terminates exactly the session it displays.
+  const handleRequestSessionEnd = useCallback(() => {
+    onRequestSessionEnd?.({
+      cliToolId,
+      instanceId: resolvedInstanceId,
+      label: endTargetLabel,
+    });
+  }, [onRequestSessionEnd, cliToolId, resolvedInstanceId, endTargetLabel]);
+
+  // Issue #1171: the End (×) button, rendered as `headerExtras` (Dropdown-adjacent).
+  // Shown ONLY when THIS split's own session is running (terminal.isRunning) —
+  // independent of other splits or the DesktopHeader — and never during
+  // attaching / stopped states. Memoized so a steady polling tick (isRunning
+  // unchanged) does not recreate the element and re-render the memoized
+  // TerminalSplitPane.
+  const endSessionExtras = useMemo(() => {
+    if (!onRequestSessionEnd || !terminal.isRunning) return null;
+    const label = t('terminal.endSessionFor', { name: endTargetLabel });
+    return (
+      <button
+        type="button"
+        onClick={handleRequestSessionEnd}
+        aria-label={label}
+        title={label}
+        data-testid={`terminal-end-session-button-${splitIndex}`}
+        className="flex items-center justify-center p-0.5 rounded text-muted-foreground hover:text-danger focus:text-danger hover:bg-danger/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-danger/50 transition-colors"
+      >
+        <X size={14} aria-hidden="true" />
+      </button>
+    );
+  }, [onRequestSessionEnd, terminal.isRunning, t, endTargetLabel, handleRequestSessionEnd, splitIndex]);
+
   return (
     <TerminalSplitPane
       worktreeId={worktreeId}
@@ -494,6 +593,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       instance={instance}
       availableInstances={availableInstances}
       onInstanceChange={onInstanceChange}
+      headerExtras={endSessionExtras}
       // Issue #1079: the derived agent status now renders as a StatusDot inside
       // the selector trigger (session title bar). BranchStatus ⊂ StatusDotStatus.
       status={cliStatus}

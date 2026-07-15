@@ -10,7 +10,7 @@ import { useTranslations } from 'next-intl';
 import { worktreeApi, handleApiError } from '@/lib/api-client';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { Kbd } from '@/components/ui/Kbd';
-import { Button } from '@/components/ui';
+import { Button, Spinner } from '@/components/ui';
 import { SlashCommandSelector } from './SlashCommandSelector';
 import { InterruptButton } from './InterruptButton';
 import { useSlashCommands } from '@/hooks/useSlashCommands';
@@ -65,6 +65,19 @@ export interface MessageInputProps {
    * pills so Auto-Yes no longer occupies its own full-width row.
    */
   autoYesSlot?: React.ReactNode;
+  /**
+   * Issue #1121: optimistic-send hook. When provided, the composer delegates the
+   * actual send to this callback (which inserts a pending bubble into the history
+   * and fires the API in the background) instead of awaiting the send API itself.
+   * The composer clears immediately (optimistic); send failures surface on the
+   * pending bubble, not the composer's error banner. Omitted by callers without
+   * an optimistic-UI history (mobile / assistant chat), which keep the legacy
+   * await-then-clear behavior.
+   */
+  onOptimisticSend?: (
+    content: string,
+    options: { cliToolId: CLIToolType; instanceId?: string; imagePath?: string },
+  ) => void;
 }
 
 /**
@@ -116,7 +129,7 @@ function migrateLegacyDraftKey(worktreeId: string): void {
   }
 }
 
-export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast, autoYesSlot }: MessageInputProps) {
+export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast, autoYesSlot, onOptimisticSend }: MessageInputProps) {
   const t = useTranslations('worktree');
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
@@ -134,6 +147,12 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // Issue #4: Pass cliToolId to filter commands by CLI tool
   const isMobile = useIsMobile();
   const { groups } = useSlashCommands(worktreeId, cliToolId);
+
+  // Issue #1166: the composer no longer lifts itself with a translateY hack.
+  // The mobile shell (WorktreeDetailRefactored) now sizes its container to
+  // visualViewport.height and places this composer in normal flow at the bottom,
+  // so it docks above the software keyboard without any transform. This keeps
+  // the composer a plain in-flow element on every surface (mobile / PC / chat).
 
   // Issue #474: Image attachment hook
   const uploadFn = useCallback(
@@ -221,19 +240,40 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       return;
     }
 
+    const trimmed = message.trim();
+    const effectiveCliTool: CLIToolType = cliToolId || 'claude';
+    const options: { cliToolId: CLIToolType; instanceId?: string; imagePath?: string } = { cliToolId: effectiveCliTool };
+    // Issue #869: route to the specific instance when it differs from the primary.
+    if (instanceId && instanceId !== effectiveCliTool) {
+      options.instanceId = instanceId;
+    }
+    if (attachedImage) {
+      options.imagePath = attachedImage.path;
+    }
+
+    // Issue #1121: optimistic path. Hand the send to the history layer (which
+    // shows a pending bubble and fires the API in the background) and clear the
+    // composer immediately rather than blocking on the API. Send failures surface
+    // on the pending bubble, so the composer never sets its own error/sending
+    // state here.
+    if (onOptimisticSend) {
+      setError(null);
+      onOptimisticSend(trimmed, options);
+      setMessage('');
+      setIsFreeInputMode(false);
+      resetAfterSend();
+      try { window.localStorage.removeItem(getDraftKey(worktreeId, splitIndex)); } catch { /* ignore */ }
+      if (isProcessing) {
+        showToast?.(QUEUED_BUSY_TOAST_MESSAGE, 'warning');
+      }
+      onMessageSent?.(effectiveCliTool);
+      return;
+    }
+
     try {
       setSending(true);
       setError(null);
-      const effectiveCliTool: CLIToolType = cliToolId || 'claude';
-      const options: { cliToolId: CLIToolType; instanceId?: string; imagePath?: string } = { cliToolId: effectiveCliTool };
-      // Issue #869: route to the specific instance when it differs from the primary.
-      if (instanceId && instanceId !== effectiveCliTool) {
-        options.instanceId = instanceId;
-      }
-      if (attachedImage) {
-        options.imagePath = attachedImage.path;
-      }
-      await worktreeApi.sendMessage(worktreeId, message.trim(), options);
+      await worktreeApi.sendMessage(worktreeId, trimmed, options);
       setMessage('');
       setIsFreeInputMode(false);
       resetAfterSend();
@@ -250,7 +290,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     } finally {
       setSending(false);
     }
-  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, splitIndex, isProcessing, showToast]);
+  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, splitIndex, isProcessing, showToast, onOptimisticSend]);
 
   const handleSubmit = useCallback(async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -409,10 +449,14 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   }, [showCommandSelector, isFreeInputMode, isComposing, isMobile, submitMessage, handleCommandCancel]);
 
   return (
-    <div ref={containerRef} className="space-y-2 relative">
+    <div
+      ref={containerRef}
+      className="space-y-2 relative"
+      data-testid="message-input-container"
+    >
       {/* Error display (send error or image error) */}
       {(error || imageError) && (
-        <div className="p-2 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded text-sm text-red-800 dark:text-red-300">
+        <div className="p-2 bg-danger-subtle border border-danger-border rounded text-sm text-danger-foreground">
           {error || imageError}
         </div>
       )}
@@ -428,7 +472,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
           <button
             type="button"
             onClick={removeAttachment}
-            className="flex-shrink-0 p-0.5 text-accent-600 hover:text-red-500 dark:text-accent-400 dark:hover:text-red-400 rounded transition-colors"
+            className="flex-shrink-0 p-0.5 text-accent-600 hover:text-danger-foreground dark:text-accent-400 rounded transition-colors"
             aria-label="Remove attachment"
             data-testid="remove-attachment-button"
           >
@@ -482,10 +526,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
               data-testid="attach-image-button"
             >
               {isUploading ? (
-                <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
+                <Spinner size="md" />
               ) : (
                 <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
@@ -513,10 +554,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
             data-testid="attach-image-button"
           >
             {isUploading ? (
-              <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
+              <Spinner size="md" />
             ) : (
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
@@ -539,6 +577,10 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
             placeholder={t('composer.placeholder')}
             disabled={sending}
             rows={1}
+            // Issue #1128: mobile keyboard hints — the composer's primary action
+            // is to send, and it accepts free-form text.
+            inputMode="text"
+            enterKeyHint="send"
             className="flex-1 outline-none bg-transparent resize-none overflow-y-auto scrollbar-thin"
             style={{ minHeight: '36px', maxHeight: '160px', paddingTop: '8px', paddingBottom: '8px', lineHeight: '20px' }}
           />
@@ -567,10 +609,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
             aria-label="Send message"
           >
             {sending ? (
-              <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
+              <Spinner size="md" />
             ) : (
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />

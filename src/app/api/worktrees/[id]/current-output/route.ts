@@ -5,14 +5,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { getWorktreeById, getSessionState } from '@/lib/db';
-import { CLIToolManager } from '@/lib/cli-tools/manager';
+import { getWorktreeById } from '@/lib/db';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
-import { captureSessionOutput } from '@/lib/session/cli-session';
-import { detectSessionStatus, STATUS_REASON, SELECTION_LIST_REASONS } from '@/lib/detection/status-detector';
-import { getAutoYesState, getLastServerResponseTimestamp, isPollerActive, buildCompositeKey } from '@/lib/polling/auto-yes-manager';
+import { buildCurrentOutput } from '@/lib/session/current-output-builder';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
-import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/current-output');
@@ -60,126 +56,11 @@ export async function GET(
       );
     }
     const instanceId = instanceParam ?? undefined;
-    const resolvedInstanceId = instanceId ?? cliToolId;
 
-    const manager = CLIToolManager.getInstance();
-    const cliTool = manager.getTool(cliToolId);
-
-    // Check if CLI session is running
-    const running = await cliTool.isRunning(params.id, instanceId);
-    if (!running) {
-      return NextResponse.json(
-        {
-          isRunning: false,
-          content: '',
-          lineCount: 0,
-          cliToolId,
-          // Issue #520: Session status for CLI wait command completion detection
-          sessionStatus: 'idle' as const,
-          sessionStatusReason: 'session_not_running',
-        },
-        { status: 200 }
-      );
-    }
-
-    // Get session state (Issue #868: per-instance)
-    const sessionState = getSessionState(db, params.id, resolvedInstanceId);
-    const lastCapturedLine = sessionState?.lastCapturedLine || 0;
-
-    // Capture current output (Issue #868: per-instance session)
-    const output = await captureSessionOutput(params.id, cliToolId, STATUS_CAPTURE_LINES, instanceId);
-    const lines = output.split('\n');
-    const totalLines = lines.length;
-
-    // Extract new content since last capture
-    const newLines = lines.slice(Math.max(0, lastCapturedLine));
-    const newContent = newLines.join('\n');
-
-    // Issue #501, #525, #896: Get last server response timestamp using the
-    // per-instance compositeKey (alias instances build a 3-part key).
-    const compositeKey = buildCompositeKey(params.id, cliToolId, instanceId);
-    const lastServerResponseTimestamp = getLastServerResponseTimestamp(compositeKey);
-    const lastOutputTimestamp = lastServerResponseTimestamp ? new Date(lastServerResponseTimestamp) : undefined;
-
-    // DR-001: Unified priority-based status detection via detectSessionStatus().
-    // This replaced the inline thinking/prompt logic that had inconsistent priority
-    // ordering (Issue #188 root cause: thinking detected on full output instead of
-    // 5-line window, causing perpetual spinner when thinking summary was in scrollback).
-    const statusResult = detectSessionStatus(output, cliToolId, lastOutputTimestamp);
-    const thinking = statusResult.status === 'running' && statusResult.reason === STATUS_REASON.THINKING_INDICATOR;
-
-    // Issue #408: promptDetection is obtained from detectSessionStatus() return value.
-    // Previously, detectPrompt() was called separately here (SF-001 tradeoff).
-    // detectSessionStatus() internal priority order (prompt -> thinking) guarantees
-    // that promptDetection.isPrompt === false when thinking is detected.
-    // This implicitly maintains Issue #161 Layer 1 defense.
-
-    // SF-004: isPromptWaiting uses statusResult.hasActivePrompt (15-line window) as
-    // the single source of truth, ensuring consistency between status and prompt state.
-    const isPromptWaiting = statusResult.hasActivePrompt;
-
-    // Issue #473: Selection list active flag for TUI navigation (OpenCode + Claude)
-    const isSelectionListActive = statusResult.status === 'waiting'
-      && SELECTION_LIST_REASONS.has(statusResult.reason);
-
-    // Issue #1017: Codex pager / edit-previous mode flag. A subset of
-    // isSelectionListActive that additionally tells the client to surface the
-    // pager-specific keys (PgUp/PgDn/Home/End/q) in NavigationButtons.
-    const isPagerActive = statusResult.reason === STATUS_REASON.CODEX_PAGER;
-
-    // Issue #1017 (C-lite): "detection could not classify this frame" signal for the
-    // detection-independent Esc/q escape hatch. reason 'default' is the low-confidence
-    // fallback returned only when no prompt / selection list / thinking / input-prompt
-    // matched — i.e. the session is interactive but stuck in an unrecognized TUI mode.
-    // Normal generation is 'thinking_indicator' (the status bar is present), so this
-    // stays false during ordinary processing and only surfaces the safety net when
-    // detection genuinely gave up.
-    const isUnclassifiedActive = statusResult.status === 'running'
-      && statusResult.reason === STATUS_REASON.DEFAULT;
-
-    // Extract realtime snippet (last 100 lines for better context)
-    const realtimeSnippet = lines.slice(-100).join('\n');
-
-    // Get auto-yes state (Issue #525: per-agent, #896: per-instance)
-    const autoYesState = getAutoYesState(params.id, cliToolId, instanceId);
-
-    return NextResponse.json({
-      isRunning: true,
-      cliToolId,
-      // Issue #520: Session status for CLI wait command completion detection
-      sessionStatus: statusResult.status,
-      sessionStatusReason: statusResult.reason,
-      content: newContent,
-      fullOutput: output,
-      realtimeSnippet,
-      lineCount: totalLines,
-      lastCapturedLine,
-      // isComplete only true for prompts now
-      isComplete: isPromptWaiting,
-      // Show as generating only when thinking (not when input prompt showing)
-      isGenerating: thinking,
-      thinking,
-      thinkingMessage: thinking ? 'Claude is thinking...' : null,
-      // Prompt detection results
-      isPromptWaiting,
-      promptData: isPromptWaiting ? statusResult.promptDetection.promptData ?? null : null,
-      // Auto-yes state (Issue #314: stopReason added for stop condition notification)
-      autoYes: {
-        enabled: autoYesState?.enabled ?? false,
-        expiresAt: autoYesState?.enabled ? autoYesState.expiresAt : null,
-        stopReason: autoYesState?.stopReason,
-      },
-      // Issue #473: Selection list active flag for OpenCode TUI navigation
-      isSelectionListActive,
-      // Issue #1017: Codex pager/edit-previous mode -> show pager keys in NavigationButtons
-      isPagerActive,
-      // Issue #1017: unclassified interactive state -> show the Esc/q escape hatch
-      isUnclassifiedActive,
-      // Issue #138: Server-side response timestamp for duplicate prevention
-      lastServerResponseTimestamp,
-      // Issue #501, #525: Whether server-side auto-yes poller is active (per-agent)
-      serverPollerActive: isPollerActive(compositeKey),
-    });
+    // Issue #1120: payload assembly is shared with the WS terminal streamer via
+    // buildCurrentOutput() so the pull (HTTP) and push (WS) paths stay identical.
+    const payload = await buildCurrentOutput(db, params.id, cliToolId, instanceId);
+    return NextResponse.json(payload, { status: 200 });
   } catch (error: unknown) {
     logger.error('error-getting-current-output:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(

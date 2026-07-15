@@ -8,7 +8,8 @@
 import React, { useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { ArrowLeft, Terminal, Monitor, Code, Loader2, Bot, Zap, Sparkles, SquareTerminal } from 'lucide-react';
+import { ArrowLeft, Terminal, Monitor, Code, Bot, Zap, Sparkles, SquareTerminal } from 'lucide-react';
+import { Spinner } from '@/components/ui/Spinner';
 import { isTmuxControlModeEnabledForClient } from '@/lib/tmux/tmux-control-mode-flags';
 import { usePcDisplaySizeContext } from '@/contexts/PcDisplaySizeContext';
 import { getTerminalFontSize } from '@/hooks/usePcDisplaySize';
@@ -27,7 +28,7 @@ const TerminalComponent = dynamic(
     ssr: false,
     loading: () => (
       <div className="flex items-center justify-center h-full bg-gray-900 text-gray-400">
-        <Loader2 className="animate-spin h-6 w-6 mr-2" />
+        <Spinner size="lg" className="mr-2" />
         <span>Loading terminal...</span>
       </div>
     ),

@@ -10,6 +10,7 @@
  */
 
 import safeRegex from 'safe-regex2';
+import { TUI_PANE_HEIGHT } from '@/config/tmux-pane-config';
 
 /** Allowed Auto-Yes durations in milliseconds */
 export const ALLOWED_DURATIONS = [3600000, 10800000, 28800000] as const;
@@ -43,7 +44,10 @@ export function isAllowedDuration(value: unknown): value is AutoYesDuration {
 export const THINKING_POLLING_INTERVAL_MS = 5000;
 
 /** Reduced capture lines when stopPattern is not set (Issue #499 Item 3) */
-export const REDUCED_CAPTURE_LINES = 300;
+// Issue #1167: a 1000-row alternate-screen frame can place an active prompt
+// near the top and a task panel at the bottom. Capture the whole current frame
+// before applying semantic detection normalization.
+export const REDUCED_CAPTURE_LINES = TUI_PANE_HEIGHT;
 
 /** Full capture lines when stopPattern is set (Issue #499 Item 3) */
 export const FULL_CAPTURE_LINES = 5000;

@@ -15,7 +15,7 @@ import type { BranchInfo, BranchInclude } from '@/types/git';
 import { branchCreatePrompt, branchDeletePrompt } from '@/lib/git-ai-prompt-templates';
 import { AskAiButton, RefreshIcon } from '@/components/worktree/git/gitPaneShared';
 import { useGitPaneContext } from '@/components/worktree/git/GitPaneContext';
-import { Checkbox } from '@/components/ui';
+import { Checkbox, Spinner } from '@/components/ui';
 
 export interface GitBranchPanelProps {
   branches: BranchInfo[];
@@ -124,14 +124,14 @@ export const GitBranchPanel = memo(function GitBranchPanel({
 
           {loading && branches.length === 0 && (
             <div className="flex items-center gap-2 px-3 pb-2" role="status">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-accent-500" />
+              <Spinner size="sm" variant="accent" />
               <span className="sr-only">Loading branches...</span>
             </div>
           )}
 
           {error && (
             <div
-              className="px-3 pb-2 text-xs text-red-600 dark:text-red-400"
+              className="px-3 pb-2 text-xs text-danger-foreground"
               role="alert"
               data-testid="git-branches-error"
             >
@@ -141,7 +141,7 @@ export const GitBranchPanel = memo(function GitBranchPanel({
 
           {actionError && (
             <div
-              className="px-3 pb-2 text-xs text-red-600 dark:text-red-400"
+              className="px-3 pb-2 text-xs text-danger-foreground"
               role="alert"
               data-testid="git-branches-action-error"
             >
@@ -180,7 +180,7 @@ export const GitBranchPanel = memo(function GitBranchPanel({
                         setDeleteTarget(branch);
                       }}
                       disabled={deleteDisabled}
-                      className="shrink-0 px-1.5 py-0.5 text-xs rounded border border-input text-red-600 dark:text-red-400 hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="shrink-0 px-1.5 py-0.5 text-xs rounded border border-input text-danger-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
                       aria-label={`Delete ${branch.name}`}
                     >
                       Delete
@@ -302,7 +302,7 @@ export const GitBranchPanel = memo(function GitBranchPanel({
                 type="button"
                 onClick={confirmDelete}
                 disabled={busy}
-                className="px-3 py-1 text-xs font-medium rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                className="px-3 py-1 text-xs font-medium rounded bg-danger text-white hover:bg-danger/90 disabled:opacity-50"
                 data-testid="branch-delete-confirm-button"
               >
                 Delete

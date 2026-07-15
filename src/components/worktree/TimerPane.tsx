@@ -26,8 +26,10 @@ import {
 import { formatTimeRemaining } from '@/config/auto-yes-config';
 import type { CLIToolType, AgentInstance } from '@/lib/cli-tools/types';
 import { CLI_TOOL_IDS, agentInstancesFromSelectedAgents } from '@/lib/cli-tools/types';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { formatDelayLabel } from './timers/timer-format';
 import { TimerEditDialog } from './timers/TimerEditDialog';
+import { TimerDetailModal, type TimerItem } from './timers/TimerDetailModal';
 
 // =============================================================================
 // Types
@@ -45,18 +47,7 @@ interface TimerPaneProps {
   selectedAgents?: CLIToolType[];
 }
 
-interface TimerItem {
-  id: string;
-  cliToolId: string;
-  /** Target agent instance (Issue #942). Legacy rows fall back to cliToolId. */
-  instanceId: string;
-  message: string;
-  delayMs: number;
-  scheduledSendTime: number;
-  status: string;
-  createdAt: number;
-  sentAt: number | null;
-}
+// TimerItem is shared with TimerDetailModal (includes the Issue #1107 `error`).
 
 // =============================================================================
 // Helpers
@@ -65,11 +56,11 @@ interface TimerItem {
 function getStatusColor(status: string): string {
   switch (status) {
     case 'pending': return 'text-info';
-    case 'sending': return 'text-yellow-600 dark:text-yellow-400';
-    case 'sent': return 'text-green-600 dark:text-green-400';
-    case 'failed': return 'text-red-600 dark:text-red-400';
+    case 'sending': return 'text-warning-foreground';
+    case 'sent': return 'text-success-foreground';
+    case 'failed': return 'text-danger-foreground';
     case 'cancelled': return 'text-muted-foreground';
-    case 'no_session': return 'text-orange-600 dark:text-orange-400';
+    case 'no_session': return 'text-warning-foreground';
     default: return 'text-muted-foreground';
   }
 }
@@ -80,6 +71,7 @@ function getStatusColor(status: string): string {
 
 export const TimerPane = memo(function TimerPane({ worktreeId, instances }: TimerPaneProps) {
   const t = useTranslations('schedule');
+  const confirm = useConfirm();
 
   // Resolve the agent roster: explicit instances when configured, otherwise the
   // primary instance of every CLI tool (legacy behavior). Used here only to
@@ -94,6 +86,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
   const [timers, setTimers] = useState<TimerItem[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [selectedTimer, setSelectedTimer] = useState<TimerItem | null>(null);
   const [, setTick] = useState(0); // Force re-render for countdown
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -206,7 +199,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
 
   // [CS-SF-003] Clear history with confirmation (Issue #540)
   const handleClearHistory = useCallback(async () => {
-    if (!window.confirm(t('timer.clearConfirm'))) return;
+    if (!(await confirm({ description: t('timer.clearConfirm'), variant: 'danger' }))) return;
     try {
       const res = await fetch(`/api/worktrees/${worktreeId}/timers/history`, {
         method: 'DELETE',
@@ -217,7 +210,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
     } catch {
       // Error handled silently
     }
-  }, [worktreeId, fetchTimers, t]);
+  }, [worktreeId, fetchTimers, t, confirm]);
 
   // ==========================================================================
   // Derived state
@@ -257,7 +250,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
           {/* Header: new-timer button (disabled at capacity) + max-reached note */}
           <div className="flex items-center justify-end gap-2">
             {atMax && (
-              <span className="text-xs text-amber-600 dark:text-amber-400">
+              <span className="text-xs text-warning-foreground">
                 {t('timer.maxReached', { max: MAX_TIMERS_PER_WORKTREE })}
               </span>
             )}
@@ -276,7 +269,17 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
           {timers.map((timer) => (
             <div
               key={timer.id}
-              className="flex items-center gap-2 p-2 rounded-lg border border-border bg-surface"
+              role="button"
+              tabIndex={0}
+              data-testid="timer-row"
+              onClick={() => setSelectedTimer(timer)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setSelectedTimer(timer);
+                }
+              }}
+              className="flex items-center gap-2 p-2 rounded-lg border border-border bg-surface text-left cursor-pointer hover:bg-muted transition-colors"
             >
               <div className="flex-1 min-w-0">
                 <div className="text-sm text-foreground truncate">
@@ -303,8 +306,12 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
               {timer.status === 'pending' && (
                 <button
                   type="button"
-                  onClick={() => handleCancel(timer.id)}
-                  className="px-2 py-1 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
+                  onClick={(e) => {
+                    // Row click opens the detail modal; keep cancel isolated.
+                    e.stopPropagation();
+                    void handleCancel(timer.id);
+                  }}
+                  className="px-2 py-1 text-xs text-danger-foreground hover:bg-danger-subtle rounded transition-colors"
                 >
                   {t('timer.cancel')}
                 </button>
@@ -342,6 +349,12 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
         instances={instances}
         onClose={() => setDialogOpen(false)}
         onSaved={() => { void fetchTimers(); }}
+      />
+
+      <TimerDetailModal
+        timer={selectedTimer}
+        instances={resolvedInstances}
+        onClose={() => setSelectedTimer(null)}
       />
     </div>
   );

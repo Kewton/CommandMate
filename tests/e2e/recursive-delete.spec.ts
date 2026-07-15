@@ -49,7 +49,7 @@ test.describe('Recursive Delete Flow', () => {
 
       await expect(deleteOption).toBeVisible();
       // Delete option should have danger styling
-      await expect(deleteOption).toHaveClass(/text-red-600/);
+      await expect(deleteOption).toHaveClass(/text-danger/);
     });
 
     test('should show Delete option styled as danger action', async ({ page }) => {
@@ -83,7 +83,7 @@ test.describe('Recursive Delete Flow', () => {
       const deleteOption = contextMenu.getByRole('menuitem', { name: /Delete/i });
 
       // Should have red color indicating danger
-      await expect(deleteOption).toHaveCSS('color', 'rgb(220, 38, 38)'); // text-red-600
+      await expect(deleteOption).toHaveCSS('color', 'rgb(239, 68, 68)'); // text-danger (red-500)
     });
   });
 

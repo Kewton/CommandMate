@@ -18,6 +18,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { Spinner } from '@/components/ui/Spinner';
 
 export interface VideoViewerProps {
   /** Video source (Base64 data URI) */
@@ -79,7 +80,7 @@ export function VideoViewer({ src, onError }: VideoViewerProps) {
     <div className="flex flex-col items-center justify-center p-4">
       {isLoading && (
         <div className="flex items-center justify-center py-8">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-input border-t-accent-600" />
+          <Spinner size="xl" variant="accent" />
           <p className="ml-3 text-muted-foreground">Loading video...</p>
         </div>
       )}

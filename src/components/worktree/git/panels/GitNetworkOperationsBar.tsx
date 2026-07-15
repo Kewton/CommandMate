@@ -21,6 +21,7 @@
 import React, { memo, useEffect, useState } from 'react';
 import type { GitNetworkOperation } from '@/types/git';
 import { useGitPaneContext } from '@/components/worktree/git/GitPaneContext';
+import { Spinner } from '@/components/ui/Spinner';
 
 export interface GitNetworkOperationsBarProps {
   /** 3-value progress state from useGitPaneNetworkOps. */
@@ -116,7 +117,7 @@ export const GitNetworkOperationsBar = memo(function GitNetworkOperationsBar({
           type="button"
           onClick={onPush}
           disabled={running}
-          className="px-2 py-1 text-xs rounded border border-green-300 dark:border-green-700 text-green-700 dark:text-green-300 hover:bg-green-50 dark:hover:bg-green-900/30 disabled:opacity-50"
+          className="px-2 py-1 text-xs rounded border border-success-border text-success-foreground hover:bg-success-subtle disabled:opacity-50"
           data-testid="git-push-button"
           title={hasUpstream ? undefined : 'No upstream — will set upstream on push'}
         >
@@ -135,7 +136,7 @@ export const GitNetworkOperationsBar = memo(function GitNetworkOperationsBar({
           data-testid="git-network-progress-bar"
         >
           <span className="flex items-center gap-2" role="status" data-testid="git-network-operation-spinner">
-            <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-accent-500" aria-hidden="true" />
+            <Spinner size="sm" variant="accent" />
             <span>
               {operation === 'push' ? 'Pushing' : operation === 'pull' ? 'Pulling' : 'Fetching'}… {elapsed}s
             </span>
@@ -154,7 +155,7 @@ export const GitNetworkOperationsBar = memo(function GitNetworkOperationsBar({
       {/* Error (role=alert) — pull conflict is surfaced as a quasi-error here */}
       {progressState === 'error' && error && (
         <div
-          className="text-xs text-red-600 dark:text-red-400"
+          className="text-xs text-danger-foreground"
           role="alert"
           data-testid="git-network-operation-error"
         >
@@ -165,7 +166,7 @@ export const GitNetworkOperationsBar = memo(function GitNetworkOperationsBar({
       {/* Pull conflict (HTTP 200 quasi-error, DR1-010): list files + terminal guidance */}
       {conflict && (
         <div
-          className="text-xs text-orange-600 dark:text-orange-400"
+          className="text-xs text-warning-foreground"
           role="status"
           data-testid="git-network-conflict"
         >

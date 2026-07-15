@@ -31,6 +31,11 @@ export interface TimerMessage {
   status: TimerStatus;
   createdAt: number;
   sentAt: number | null;
+  /**
+   * Failure reason for `failed` timers (Issue #1107). NULL for every other
+   * status and for rows created before the v40 migration.
+   */
+  error: string | null;
 }
 
 /** Parameters for creating a new timer */
@@ -68,6 +73,8 @@ interface TimerMessageRow {
   status: string;
   created_at: number;
   sent_at: number | null;
+  /** Nullable failure reason (Issue #1107). NULL for pre-v40 rows. */
+  error: string | null;
 }
 
 // =============================================================================
@@ -75,7 +82,16 @@ interface TimerMessageRow {
 // =============================================================================
 
 /** SELECT column list for timer_messages queries */
-const TIMER_COLUMNS = 'id, worktree_id, cli_tool_id, instance_id, message, delay_ms, scheduled_send_time, status, created_at, sent_at';
+const TIMER_COLUMNS = 'id, worktree_id, cli_tool_id, instance_id, message, delay_ms, scheduled_send_time, status, created_at, sent_at, error';
+
+/**
+ * Fixed reason stored on timers recovered from a stuck 'sending' state after a
+ * server restart (Issue #1107). The original failure reason is unknowable at
+ * recovery time, so a stable English marker is used (shown verbatim in the UI,
+ * mirroring the Schedule side's raw `result`).
+ */
+export const STUCK_SENDING_RECOVERY_ERROR =
+  "Recovered from a stuck 'sending' state after a server restart.";
 
 // =============================================================================
 // Row Mapping
@@ -96,6 +112,7 @@ function mapRow(row: TimerMessageRow): TimerMessage {
     status: row.status as TimerStatus,
     createdAt: row.created_at,
     sentAt: row.sent_at,
+    error: row.error ?? null,
   };
 }
 
@@ -144,6 +161,8 @@ export function createTimer(
     status: 'pending',
     createdAt: now,
     sentAt: null,
+    // error column defaults to NULL (not listed in the INSERT above).
+    error: null,
   };
 }
 
@@ -210,23 +229,33 @@ export function getPendingTimers(
 }
 
 /**
- * Update timer status. Optionally set sentAt timestamp.
+ * Update timer status. Optionally set sentAt timestamp and/or a failure reason.
+ *
+ * Issue #1107: `error` is a trailing optional argument so existing 3-arg
+ * (status-only) and 4-arg (status + sentAt) call sites are unchanged. Only the
+ * `failed` transition passes a reason; it is written to the `error` column.
  */
 export function updateTimerStatus(
   db: Database.Database,
   id: string,
   status: TimerStatus,
-  sentAt?: number
+  sentAt?: number,
+  error?: string
 ): void {
+  const sets: string[] = ['status = ?'];
+  const params: (string | number)[] = [status];
+
   if (sentAt !== undefined) {
-    db.prepare(`
-      UPDATE timer_messages SET status = ?, sent_at = ? WHERE id = ?
-    `).run(status, sentAt, id);
-  } else {
-    db.prepare(`
-      UPDATE timer_messages SET status = ? WHERE id = ?
-    `).run(status, id);
+    sets.push('sent_at = ?');
+    params.push(sentAt);
   }
+  if (error !== undefined) {
+    sets.push('error = ?');
+    params.push(error);
+  }
+
+  params.push(id);
+  db.prepare(`UPDATE timer_messages SET ${sets.join(', ')} WHERE id = ?`).run(...params);
 }
 
 /**
@@ -321,9 +350,11 @@ export function clearTimerHistory(
 export function recoverStuckSendingTimers(
   db: Database.Database
 ): number {
+  // Issue #1107: record a stable recovery reason so the failure is explainable
+  // in the detail modal (the true cause is lost across the restart).
   const result = db.prepare(`
-    UPDATE timer_messages SET status = 'failed' WHERE status = 'sending'
-  `).run();
+    UPDATE timer_messages SET status = 'failed', error = ? WHERE status = 'sending'
+  `).run(STUCK_SENDING_RECOVERY_ERROR);
 
   return result.changes;
 }

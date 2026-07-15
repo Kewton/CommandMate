@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { FileTreeView } from '@/components/worktree/FileTreeView';
 import { FILE_TREE_POLL_INTERVAL_MS } from '@/config/file-polling-config';
+import { getFileTreeExpandedStorageKey } from '@/hooks/useFileTreeExpandedState';
 import type { TreeResponse } from '@/types/models';
 
 // Mock fetch globally
@@ -39,6 +40,9 @@ describe('FileTreeView', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // [Issue #1108] Expansion is now persisted per worktree in localStorage;
+    // clear it between tests so state does not leak across cases.
+    window.localStorage.clear();
     mockFetch.mockImplementation((url: string) => {
       if (url.includes('/tree/src')) {
         return Promise.resolve({
@@ -58,12 +62,20 @@ describe('FileTreeView', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    window.localStorage.clear();
   });
 
   describe('Basic rendering', () => {
     it('should render loading state initially', () => {
       render(<FileTreeView worktreeId="test-worktree" />);
       expect(screen.getByTestId('file-tree-loading')).toBeInTheDocument();
+    });
+
+    it('should render tree-row skeletons without naked loading text (Issue #1118)', () => {
+      render(<FileTreeView worktreeId="test-worktree" />);
+      const loading = screen.getByTestId('file-tree-loading');
+      expect(loading.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
+      expect(loading.textContent).not.toContain('Loading files');
     });
 
     it('should render tree items after loading', async () => {
@@ -1956,6 +1968,90 @@ describe('FileTreeView', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  // [Issue #1108] Per-worktree expansion persistence + full view reset.
+  describe('Expansion persistence + view reset (Issue #1108)', () => {
+    const WT = 'test-worktree';
+    const KEY = getFileTreeExpandedStorageKey(WT);
+
+    it('persists expanded directories to localStorage per worktree', async () => {
+      render(<FileTreeView worktreeId={WT} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('src')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByTestId('tree-item-src'));
+
+      await waitFor(() => {
+        expect(screen.getByText('components')).toBeInTheDocument();
+      });
+
+      await waitFor(() => {
+        const raw = window.localStorage.getItem(KEY);
+        expect(raw).not.toBeNull();
+        expect(JSON.parse(raw as string)).toContain('src');
+      });
+    });
+
+    it('restores persisted expansion on mount (re-fetches expanded dir)', async () => {
+      // Seed a previously-persisted expansion for this worktree.
+      window.localStorage.setItem(KEY, JSON.stringify(['src']));
+
+      render(<FileTreeView worktreeId={WT} />);
+
+      // 'components' (a child of src) appears without any click because the
+      // restored expansion drives the mount re-fetch (Issue #1108 S3-001).
+      await waitFor(() => {
+        expect(screen.getByText('components')).toBeInTheDocument();
+        expect(screen.getByText('index.ts')).toBeInTheDocument();
+      });
+    });
+
+    it('renders a reset button distinct from the refresh button', async () => {
+      render(<FileTreeView worktreeId={WT} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-reset-button')).toBeInTheDocument();
+        expect(screen.getByTestId('file-tree-refresh-button')).toBeInTheDocument();
+      });
+    });
+
+    it('reset collapses all folders and deletes the persisted key', async () => {
+      render(<FileTreeView worktreeId={WT} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('src')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByTestId('tree-item-src'));
+      await waitFor(() => {
+        expect(screen.getByText('components')).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(window.localStorage.getItem(KEY)).not.toBeNull();
+      });
+
+      fireEvent.click(screen.getByTestId('file-tree-reset-button'));
+
+      await waitFor(() => {
+        // Expanded children are gone (collapsed to initial state).
+        expect(screen.queryByText('components')).not.toBeInTheDocument();
+        // Persisted key is removed, not just emptied.
+        expect(window.localStorage.getItem(KEY)).toBeNull();
+      });
+    });
+
+    it('reset invokes onResetView so the parent can clear search / tabs', async () => {
+      const onResetView = vi.fn();
+      render(<FileTreeView worktreeId={WT} onResetView={onResetView} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-reset-button')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByTestId('file-tree-reset-button'));
+      expect(onResetView).toHaveBeenCalledTimes(1);
     });
   });
 });

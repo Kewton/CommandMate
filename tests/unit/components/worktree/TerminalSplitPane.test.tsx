@@ -155,11 +155,23 @@ describe('TerminalSplitPane', () => {
     expect(skeleton.getAttribute('role')).toBe('status');
   });
 
-  it('renders headerExtras after the search button', () => {
+  // Issue #1171: headerExtras (the per-split End button) moved to sit directly
+  // after the instance selector and BEFORE the search button.
+  it('renders headerExtras between the instance selector and the search button', () => {
     renderPane({
       headerExtras: <span data-testid="header-extras">X</span>,
     });
-    expect(screen.getByTestId('header-extras')).toBeInTheDocument();
+    const extras = screen.getByTestId('header-extras');
+    const selector = screen.getByTestId('cli-selector-0');
+    const search = screen.getByTestId('terminal-search-button-0');
+    expect(extras).toBeInTheDocument();
+    // DOM order: selector → headerExtras → search.
+    expect(
+      selector.compareDocumentPosition(extras) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      extras.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });
 

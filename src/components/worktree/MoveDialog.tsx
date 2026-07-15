@@ -14,10 +14,10 @@
 
 import React, { useState, useEffect, useCallback, memo } from 'react';
 import { Modal } from '@/components/ui/Modal';
-import { Button } from '@/components/ui';
+import { Button, Spinner } from '@/components/ui';
 import { useTranslations } from 'next-intl';
 import type { TreeItem } from '@/types/models';
-import { ChevronRight, Folder, FolderOpen, Loader2 } from 'lucide-react';
+import { ChevronRight, Folder, FolderOpen } from 'lucide-react';
 
 /**
  * Recursively update a directory tree node's children.
@@ -218,7 +218,7 @@ export const MoveDialog = memo(function MoveDialog({
             }}
           >
             {isLoading ? (
-              <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
+              <Spinner size="xs" variant="muted" />
             ) : (
               <ChevronRight
                 className={`w-3 h-3 text-muted-foreground transition-transform ${
@@ -228,9 +228,9 @@ export const MoveDialog = memo(function MoveDialog({
             )}
           </button>
           {isExpanded ? (
-            <FolderOpen className="w-4 h-4 text-yellow-500 flex-shrink-0" />
+            <FolderOpen className="w-4 h-4 text-warning flex-shrink-0" />
           ) : (
-            <Folder className="w-4 h-4 text-yellow-500 flex-shrink-0" />
+            <Folder className="w-4 h-4 text-warning flex-shrink-0" />
           )}
           <span className="truncate">{node.name}</span>
         </div>
@@ -267,13 +267,13 @@ export const MoveDialog = memo(function MoveDialog({
             }}
           >
             <span className="w-4 h-4" />
-            <Folder className="w-4 h-4 text-yellow-500 flex-shrink-0" />
+            <Folder className="w-4 h-4 text-warning flex-shrink-0" />
             <span>{t('fileTree.rootDirectory')}</span>
           </div>
 
           {rootLoading ? (
             <div className="flex items-center justify-center py-4">
-              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+              <Spinner size="md" variant="muted" />
             </div>
           ) : (
             directoryTree.map((node) => renderDirectoryNode(node, 1))

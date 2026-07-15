@@ -21,9 +21,9 @@ describe('Badge', () => {
   });
 
   it.each([
-    ['success', 'bg-green-100'],
-    ['warning', 'bg-yellow-100'],
-    ['error', 'bg-red-100'],
+    ['success', 'bg-success-subtle'],
+    ['warning', 'bg-warning-subtle'],
+    ['error', 'bg-danger-subtle'],
     ['info', 'bg-accent-100'],
     ['gray', 'bg-muted'],
   ] as const)('applies the %s variant classes', (variant, expected) => {
@@ -48,7 +48,7 @@ describe('Badge', () => {
     );
     const dot = screen.getByTestId('badge').querySelector('span[aria-hidden="true"]');
     expect(dot).not.toBeNull();
-    expect(dot?.className).toContain('bg-red-600');
+    expect(dot?.className).toContain('bg-danger');
     expect(dot?.className).toContain('rounded-full');
   });
 
@@ -59,7 +59,7 @@ describe('Badge', () => {
       </Badge>
     );
     const cls = screen.getByTestId('badge').className;
-    expect(cls).toContain('bg-green-100');
+    expect(cls).toContain('bg-success-subtle');
     expect(cls).toContain('ml-2');
   });
 });

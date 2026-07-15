@@ -14,6 +14,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MarkdownEditor } from '@/components/worktree/MarkdownEditor';
+import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 import type { ViewMode } from '@/types/markdown-editor';
 import {
   LOCAL_STORAGE_KEY,
@@ -745,9 +746,12 @@ describe('MarkdownEditor', () => {
 
     it('should warn before closing with unsaved changes', async () => {
       const onClose = vi.fn();
-      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
 
-      render(<MarkdownEditor {...defaultProps} onClose={onClose} />);
+      render(
+        <ConfirmProvider>
+          <MarkdownEditor {...defaultProps} onClose={onClose} />
+        </ConfirmProvider>
+      );
 
       await waitForEditorReady();
 
@@ -757,19 +761,23 @@ describe('MarkdownEditor', () => {
       const closeButton = screen.getByTestId('close-button');
       fireEvent.click(closeButton);
 
+      // ConfirmDialog appears; cancel keeps the editor open (Issue #1113)
+      fireEvent.click(await screen.findByTestId('confirm-dialog-cancel'));
+
       await waitFor(() => {
-        expect(confirmSpy).toHaveBeenCalled();
+        expect(screen.queryByTestId('confirm-dialog')).toBeNull();
       });
       expect(onClose).not.toHaveBeenCalled();
-
-      confirmSpy.mockRestore();
     });
 
     it('should close when user confirms unsaved changes', async () => {
       const onClose = vi.fn();
-      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
-      render(<MarkdownEditor {...defaultProps} onClose={onClose} />);
+      render(
+        <ConfirmProvider>
+          <MarkdownEditor {...defaultProps} onClose={onClose} />
+        </ConfirmProvider>
+      );
 
       await waitForEditorReady();
 
@@ -779,12 +787,11 @@ describe('MarkdownEditor', () => {
       const closeButton = screen.getByTestId('close-button');
       fireEvent.click(closeButton);
 
+      fireEvent.click(await screen.findByTestId('confirm-dialog-confirm'));
+
       await waitFor(() => {
-        expect(confirmSpy).toHaveBeenCalled();
         expect(onClose).toHaveBeenCalled();
       });
-
-      confirmSpy.mockRestore();
     });
   });
 
@@ -929,10 +936,10 @@ describe('MarkdownEditor', () => {
         fireEvent.click(copyButton);
       });
 
-      // After copy, the button should have a green check icon (text-green-500)
+      // After copy, the button should have a success check icon (text-success)
       await waitFor(() => {
         const buttonInner = copyButton.querySelector('svg');
-        expect(buttonInner?.parentElement).toHaveClass('text-green-500');
+        expect(buttonInner?.parentElement).toHaveClass('text-success');
       });
 
       // After 2 seconds, should revert back
@@ -942,7 +949,7 @@ describe('MarkdownEditor', () => {
 
       await waitFor(() => {
         const buttonInner = copyButton.querySelector('svg');
-        expect(buttonInner?.parentElement).not.toHaveClass('text-green-500');
+        expect(buttonInner?.parentElement).not.toHaveClass('text-success');
       });
     });
 
@@ -1337,7 +1344,11 @@ def hello():
             json: async () => ({ success: true, path: 'docs/readme.md' }),
           });
 
-        render(<MarkdownEditor {...defaultProps} onClose={onClose} />);
+        render(
+          <ConfirmProvider>
+            <MarkdownEditor {...defaultProps} onClose={onClose} />
+          </ConfirmProvider>
+        );
 
         await waitFor(() => {
           expect(screen.getByTestId('markdown-editor-textarea')).toBeInTheDocument();
@@ -1350,8 +1361,6 @@ def hello():
         const textarea = screen.getByTestId('markdown-editor-textarea');
         fireEvent.change(textarea, { target: { value: 'Auto-save close content' } });
 
-        const confirmSpy = vi.spyOn(window, 'confirm');
-
         // Click close button
         const closeButton = screen.getByTestId('close-button');
         fireEvent.click(closeButton);
@@ -1362,10 +1371,8 @@ def hello():
           expect(onClose).toHaveBeenCalled();
         });
 
-        // confirm should NOT have been called (auto-save mode saves automatically)
-        expect(confirmSpy).not.toHaveBeenCalled();
-
-        confirmSpy.mockRestore();
+        // ConfirmDialog should NOT be shown (auto-save mode saves automatically)
+        expect(screen.queryByTestId('confirm-dialog')).toBeNull();
       });
     });
 

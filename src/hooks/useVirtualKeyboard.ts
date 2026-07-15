@@ -16,6 +16,16 @@ export interface UseVirtualKeyboardReturn {
   isKeyboardVisible: boolean;
   /** Height of the virtual keyboard in pixels */
   keyboardHeight: number;
+  /**
+   * Issue #1166: current `visualViewport.height` in px, or `null` when the API
+   * is unavailable (SSR / older browsers). Consumers size a container to this
+   * value so a bottom-anchored composer follows the software keyboard — the
+   * visual viewport shrinks when the keyboard opens while the layout viewport
+   * does not (Android `resizes-visual` / iOS Safari). Mirrors the proven
+   * FullScreenModal viewport-tracking pattern and replaces the fixed+translateY
+   * lift that mis-referenced the layout-viewport bottom.
+   */
+  viewportHeight: number | null;
 }
 
 /**
@@ -54,6 +64,9 @@ const isVisualViewportSupported = (): boolean =>
 export function useVirtualKeyboard(): UseVirtualKeyboardReturn {
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  // Issue #1166: track the visible viewport height so callers can pin a layout
+  // container to it. `null` until measured (SSR / unsupported browsers).
+  const [viewportHeight, setViewportHeight] = useState<number | null>(null);
 
   /**
    * Calculate keyboard height and visibility
@@ -65,13 +78,15 @@ export function useVirtualKeyboard(): UseVirtualKeyboardReturn {
 
     const viewport = window.visualViewport!;
     const windowHeight = window.innerHeight;
-    const viewportHeight = viewport.height;
-    const heightDiff = windowHeight - viewportHeight;
+    const currentViewportHeight = viewport.height;
+    const heightDiff = windowHeight - currentViewportHeight;
 
     // Only consider keyboard visible if the difference exceeds threshold
     const isVisible = heightDiff > KEYBOARD_THRESHOLD;
     setIsKeyboardVisible(isVisible);
     setKeyboardHeight(isVisible ? heightDiff : 0);
+    // Issue #1166: expose the raw visible height for viewport-following layouts.
+    setViewportHeight(currentViewportHeight);
   }, []);
 
   /**
@@ -98,6 +113,7 @@ export function useVirtualKeyboard(): UseVirtualKeyboardReturn {
   return {
     isKeyboardVisible,
     keyboardHeight,
+    viewportHeight,
   };
 }
 

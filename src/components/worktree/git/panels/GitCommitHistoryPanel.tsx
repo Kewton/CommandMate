@@ -19,6 +19,7 @@ import {
   RefreshIcon,
 } from '@/components/worktree/git/gitPaneShared';
 import { useGitPaneContext } from '@/components/worktree/git/GitPaneContext';
+import { Spinner } from '@/components/ui/Spinner';
 
 export interface GitCommitHistoryPanelProps {
   commits: CommitInfo[];
@@ -102,14 +103,14 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
       {/* Loading state */}
       {commitListOpen && isLoading && (
         <div className="flex items-center justify-center py-8" role="status">
-          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-accent-500" />
+          <Spinner size="lg" variant="accent" />
           <span className="sr-only">Loading commit history...</span>
         </div>
       )}
 
       {/* Commit-level error state */}
       {commitListOpen && commitError && !isLoading && (
-        <div className="px-3 py-4 text-sm text-red-600 dark:text-red-400" role="alert">
+        <div className="px-3 py-4 text-sm text-danger-foreground" role="alert">
           {commitError}
         </div>
       )}
@@ -178,7 +179,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                         >
                           {inlineFilesLoading && (
                             <div className="flex items-center justify-center py-3" role="status">
-                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-accent-500" />
+                              <Spinner size="sm" variant="accent" />
                               <span className="sr-only">Loading changed files...</span>
                             </div>
                           )}
@@ -243,7 +244,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
 
                   {isLoadingFiles && (
                     <div className="flex items-center justify-center py-4" role="status">
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-accent-500" />
+                      <Spinner size="sm" variant="accent" />
                       <span className="sr-only">Loading changed files...</span>
                     </div>
                   )}
@@ -294,7 +295,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                     <>
                       {isLoadingDiff && (
                         <div className="flex items-center justify-center py-4" role="status">
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-accent-500" />
+                          <Spinner size="sm" variant="accent" />
                           <span className="sr-only">Loading diff...</span>
                         </div>
                       )}

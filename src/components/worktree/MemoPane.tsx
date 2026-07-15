@@ -20,6 +20,7 @@ import type { WorktreeMemo } from '@/types/models';
 import { MemoCard } from './MemoCard';
 import { MemoAddButton } from './MemoAddButton';
 import { MemoSearchBar } from './MemoSearchBar';
+import { Spinner } from '@/components/ui/Spinner';
 
 // ============================================================================
 // Types
@@ -229,7 +230,7 @@ export const MemoPane = memo(function MemoPane({
           data-testid="memo-loading"
           className="flex flex-col items-center gap-3"
         >
-          <div className="w-8 h-8 border-4 border-border border-t-accent-500 rounded-full animate-spin" />
+          <Spinner size="xl" variant="accent" />
           <span className="text-sm text-muted-foreground">Loading memos...</span>
         </div>
       </div>
@@ -245,7 +246,7 @@ export const MemoPane = memo(function MemoPane({
       >
         <div className="flex flex-col items-center gap-3 text-center">
           <svg
-            className="w-12 h-12 text-red-400"
+            className="w-12 h-12 text-danger"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -257,7 +258,7 @@ export const MemoPane = memo(function MemoPane({
               d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
             />
           </svg>
-          <span className="text-sm text-red-600 dark:text-red-400">{error}</span>
+          <span className="text-sm text-danger-foreground">{error}</span>
           <button
             type="button"
             onClick={handleRetry}
@@ -347,7 +348,7 @@ export const MemoPane = memo(function MemoPane({
 
       {/* Create error message */}
       {createError && (
-        <div className="text-center py-2 text-sm text-red-500">
+        <div className="text-center py-2 text-sm text-danger">
           {createError}
         </div>
       )}

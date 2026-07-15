@@ -32,9 +32,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { PromptData } from '@/types/models';
+import { useRealtime } from '@/hooks/useRealtimeConnection';
+import type { RealtimeEvent, TerminalSnapshotEvent, SessionStatusEvent } from '@/lib/realtime/types';
 
 export const ACTIVE_POLLING_INTERVAL_MS = 2000;
 export const IDLE_POLLING_INTERVAL_MS = 5000;
+
+/**
+ * Issue #1120: while a live WebSocket connection is established the terminal
+ * output streams via `terminal_snapshot` push, so the HTTP poll is throttled to
+ * a slow fallback that only recovers if push delivery stalls.
+ */
+export const WS_CONNECTED_POLLING_INTERVAL_MS = 15000;
+/** Push is unhealthy when no terminal snapshot heartbeat arrives in this window. */
+export const WS_PUSH_STALE_AFTER_MS = 5000;
+/** Require two consecutive low-confidence frames before exposing escape controls. */
+export const UNCLASSIFIED_CONFIRMATION_COUNT = 2;
+export const UNCLASSIFIED_CONFIRMATION_DELAY_MS = 500;
 
 export interface PaneTerminalState {
   output: string;
@@ -149,6 +163,93 @@ export function useTerminalPanePolling({
   const promptVisibleRef = useRef(prompt.visible);
   promptVisibleRef.current = prompt.visible;
 
+  // Issue #1120: realtime push integration. Terminal output streams via
+  // `terminal_snapshot` while a session generates; `version` guards against
+  // out-of-order deliveries (parity with the poll's requestId stale-guard).
+  const { connected, subscribe, unsubscribe, addListener } = useRealtime();
+  const lastSnapshotVersionRef = useRef(0);
+  const unclassifiedCountRef = useRef(0);
+  const unclassifiedSinceRef = useRef<number | null>(null);
+  const pushStaleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pushHealthy, setPushHealthy] = useState(false);
+
+  const markPushHealthy = useCallback(() => {
+    setPushHealthy(true);
+    if (pushStaleTimerRef.current !== null) {
+      clearTimeout(pushStaleTimerRef.current);
+    }
+    pushStaleTimerRef.current = setTimeout(() => {
+      pushStaleTimerRef.current = null;
+      setPushHealthy(false);
+    }, WS_PUSH_STALE_AFTER_MS);
+  }, []);
+
+  /**
+   * Apply a normalized output snapshot (from a poll response or a WS push) to the
+   * terminal / prompt state. Shared so push and poll behave identically.
+   */
+  const applySnapshot = useCallback(
+    (data: {
+      fullOutput?: string;
+      realtimeSnippet?: string;
+      isRunning?: boolean;
+      thinking?: boolean;
+      isSelectionListActive?: boolean;
+      isPagerActive?: boolean;
+      isUnclassifiedActive?: boolean;
+      isPromptWaiting?: boolean;
+      promptData?: PromptData | null;
+    }): void => {
+      const nextOutput = data.fullOutput ?? data.realtimeSnippet ?? '';
+      const rawUnclassified = data.isUnclassifiedActive === true
+        && data.isPromptWaiting !== true
+        && data.isSelectionListActive !== true
+        && data.isPagerActive !== true;
+      if (rawUnclassified) {
+        unclassifiedCountRef.current += 1;
+        unclassifiedSinceRef.current ??= Date.now();
+      } else {
+        unclassifiedCountRef.current = 0;
+        unclassifiedSinceRef.current = null;
+      }
+      const confirmedUnclassified =
+        unclassifiedCountRef.current >= UNCLASSIFIED_CONFIRMATION_COUNT
+        && unclassifiedSinceRef.current !== null
+        && Date.now() - unclassifiedSinceRef.current >= UNCLASSIFIED_CONFIRMATION_DELAY_MS;
+
+      setTerminal(prev => {
+        // Overwrite output if we have content or the session is still running.
+        // Issue #842: also overwrite (i.e. clear) once the session has stopped,
+        // so kill / natural-termination residue does not linger.
+        const sessionStopped = data.isRunning === false;
+        const writeOutput = !!nextOutput || !!data.isRunning || sessionStopped;
+        return {
+          ...prev,
+          output: writeOutput ? nextOutput : prev.output,
+          realtimeSnippet: data.realtimeSnippet ?? '',
+          isRunning: data.isRunning ?? false,
+          isThinking: data.thinking ?? false,
+          isSelectionListActive: data.isSelectionListActive ?? false,
+          isPagerActive: data.isPagerActive ?? false,
+          isUnclassifiedActive: confirmedUnclassified,
+          attaching: false,
+        };
+      });
+
+      if (data.isPromptWaiting && data.promptData) {
+        setPrompt(prev => ({
+          ...prev,
+          visible: true,
+          data: data.promptData ?? prev.data,
+          messageId: prev.messageId ?? `prompt-${Date.now()}`,
+        }));
+      } else if (!data.isPromptWaiting && promptVisibleRef.current) {
+        setPrompt({ visible: false, data: null, messageId: null, answering: false });
+      }
+    },
+    [],
+  );
+
   const fetchCurrentOutput = useCallback(async (): Promise<void> => {
     const requestedCli = cliToolId;
     const requestedInstance = resolvedInstanceId;
@@ -171,42 +272,7 @@ export function useTerminalPanePolling({
         return;
       }
 
-      const nextOutput = data.fullOutput ?? data.realtimeSnippet ?? '';
-
-      setTerminal(prev => {
-        // Overwrite output if we have content or the session is still running.
-        // Issue #842: also overwrite (i.e. clear) once the session has stopped,
-        // so kill / natural-termination residue does not linger. The prior guard
-        // only kept stale output in the "empty + stopped" case, which is exactly
-        // the kill case we need to clear. Running sessions are unaffected, so no
-        // meaningful flicker is introduced.
-        const sessionStopped = data.isRunning === false;
-        const writeOutput = !!nextOutput || !!data.isRunning || sessionStopped;
-        return {
-          ...prev,
-          output: writeOutput ? nextOutput : prev.output,
-          realtimeSnippet: data.realtimeSnippet ?? '',
-          isRunning: data.isRunning ?? false,
-          isThinking: data.thinking ?? false,
-          isSelectionListActive: data.isSelectionListActive ?? false,
-          isPagerActive: data.isPagerActive ?? false,
-          isUnclassifiedActive: data.isUnclassifiedActive ?? false,
-          // First successful fetch flips attaching off.
-          attaching: false,
-        };
-      });
-
-      // Prompt transitions.
-      if (data.isPromptWaiting && data.promptData) {
-        setPrompt(prev => ({
-          ...prev,
-          visible: true,
-          data: data.promptData ?? prev.data,
-          messageId: prev.messageId ?? `prompt-${Date.now()}`,
-        }));
-      } else if (!data.isPromptWaiting && promptVisibleRef.current) {
-        setPrompt({ visible: false, data: null, messageId: null, answering: false });
-      }
+      applySnapshot(data);
     } catch (err) {
       if (
         requestIdRef.current !== requestId ||
@@ -218,7 +284,7 @@ export function useTerminalPanePolling({
       // Network errors are swallowed; next interval will retry.
       console.error('[useTerminalPanePolling] fetch error:', err);
     }
-  }, [worktreeId, cliToolId, resolvedInstanceId]);
+  }, [worktreeId, cliToolId, resolvedInstanceId, applySnapshot]);
 
   // When (worktreeId, cliToolId) changes, treat it like a fresh attach.
   // We reset attaching=true and clear stale output/prompt so the new CLI starts
@@ -230,6 +296,16 @@ export function useTerminalPanePolling({
     prevCompositeKeyRef.current = compositeKey;
     // Bump the requestId so any in-flight prior-CLI promise is dropped.
     requestIdRef.current += 1;
+    // Issue #1120: reset the push version guard so the new session's snapshots
+    // (which restart their own version counter) are not rejected as stale.
+    lastSnapshotVersionRef.current = 0;
+    unclassifiedCountRef.current = 0;
+    unclassifiedSinceRef.current = null;
+    setPushHealthy(false);
+    if (pushStaleTimerRef.current !== null) {
+      clearTimeout(pushStaleTimerRef.current);
+      pushStaleTimerRef.current = null;
+    }
     setTerminal(prev => ({
       ...prev,
       output: '',
@@ -244,8 +320,100 @@ export function useTerminalPanePolling({
     setPrompt({ visible: false, data: null, messageId: null, answering: false });
   }, [compositeKey]);
 
+  // Issue #1120: subscribe to the worktree room so terminal snapshots stream in.
+  useEffect(() => {
+    if (!enabled) return;
+    subscribe(worktreeId);
+    return () => unsubscribe(worktreeId);
+  }, [enabled, worktreeId, subscribe, unsubscribe]);
+
+  // Issue #1120: a fresh connection resets the push version guard so snapshots
+  // are accepted after a server restart (which restarts server-side counters).
+  useEffect(() => {
+    lastSnapshotVersionRef.current = 0;
+    setPushHealthy(false);
+    if (pushStaleTimerRef.current !== null) {
+      clearTimeout(pushStaleTimerRef.current);
+      pushStaleTimerRef.current = null;
+    }
+  }, [connected]);
+
+  useEffect(() => () => {
+    if (pushStaleTimerRef.current !== null) {
+      clearTimeout(pushStaleTimerRef.current);
+    }
+  }, []);
+
+  // Issue #1120: apply pushed terminal snapshots for this exact pane.
+  useEffect(() => {
+    if (!enabled) return;
+    return addListener((event: RealtimeEvent) => {
+      if (event.type !== 'terminal_snapshot') return;
+      const snap = event as TerminalSnapshotEvent;
+      if (
+        snap.worktreeId !== worktreeId ||
+        snap.cliToolId !== inFlightCliToolRef.current ||
+        snap.instanceId !== inFlightInstanceRef.current
+      ) {
+        return;
+      }
+      // Version guard: drop out-of-order / stale deliveries.
+      if (snap.version <= lastSnapshotVersionRef.current) return;
+      lastSnapshotVersionRef.current = snap.version;
+      markPushHealthy();
+
+      const realtimeSnippet = snap.output.split('\n').slice(-100).join('\n');
+      applySnapshot({
+        fullOutput: snap.output,
+        realtimeSnippet,
+        isRunning: snap.isRunning,
+        thinking: snap.thinking,
+        isSelectionListActive: snap.isSelectionListActive,
+        isPagerActive: snap.isPagerActive,
+        isUnclassifiedActive: snap.isUnclassifiedActive,
+        isPromptWaiting: snap.isPromptWaiting,
+        promptData: snap.promptData ?? null,
+      });
+    });
+  }, [enabled, worktreeId, addListener, applySnapshot, markPushHealthy]);
+
+  // Issue #1171: apply a matching scoped session-stop event immediately so a
+  // targeted kill flips THIS pane to the terminated placeholder (#842) without
+  // waiting for the throttled HTTP fallback poll (up to 15s while a WS push is
+  // healthy). Matching rules: worktreeId exact; when the event carries an
+  // `instance` it must equal this pane's resolved instance; when it carries a
+  // `cliTool` it must equal this pane's cliTool. An unscoped kill-all
+  // (instance == null && cliTool == null) applies to every pane. Scoped events
+  // for another split are ignored, so a sibling's kill never blanks this pane.
+  useEffect(() => {
+    if (!enabled) return;
+    return addListener((event: RealtimeEvent) => {
+      if (event.type !== 'session_status_changed') return;
+      const evt = event as SessionStatusEvent;
+      if (evt.worktreeId !== worktreeId) return;
+      if (evt.isRunning !== false) return;
+      if (evt.instance != null && evt.instance !== inFlightInstanceRef.current) return;
+      if (evt.cliTool != null && evt.cliTool !== inFlightCliToolRef.current) return;
+      // Reset the push version guard so a subsequent restart's snapshots (which
+      // restart their own version counter) are not rejected as stale.
+      lastSnapshotVersionRef.current = 0;
+      applySnapshot({
+        fullOutput: '',
+        realtimeSnippet: '',
+        isRunning: false,
+        thinking: false,
+        isSelectionListActive: false,
+        isPagerActive: false,
+        isUnclassifiedActive: false,
+        isPromptWaiting: false,
+        promptData: null,
+      });
+    });
+  }, [enabled, worktreeId, addListener, applySnapshot]);
+
   // Initial + interval polling. Pauses when hidden, resumes on visible.
-  // Cadence depends on isRunning (active=2s, idle=5s).
+  // Cadence depends on isRunning (active=2s, idle=5s); while a WS push
+  // connection is up (Issue #1120) the poll is throttled to a slow fallback.
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
@@ -257,9 +425,16 @@ export function useTerminalPanePolling({
       }, ms);
     };
 
-    let intervalId: ReturnType<typeof setInterval> | null = startInterval(
-      terminal.isRunning ? ACTIVE_POLLING_INTERVAL_MS : IDLE_POLLING_INTERVAL_MS,
-    );
+    const interactionActive = prompt.visible
+      || terminal.isSelectionListActive
+      || terminal.isPagerActive
+      || terminal.isUnclassifiedActive;
+    const intervalMs = connected && pushHealthy && !interactionActive
+      ? WS_CONNECTED_POLLING_INTERVAL_MS
+      : terminal.isRunning || interactionActive
+        ? ACTIVE_POLLING_INTERVAL_MS
+        : IDLE_POLLING_INTERVAL_MS;
+    let intervalId: ReturnType<typeof setInterval> | null = startInterval(intervalMs);
 
     // Kick once immediately if the page is visible.
     if (typeof document !== 'undefined' && document.visibilityState !== 'hidden') {
@@ -284,8 +459,19 @@ export function useTerminalPanePolling({
     // We re-create the interval when:
     //   - enabled toggles
     //   - the cadence-driving isRunning flips
+    //   - the WS connection state flips (Issue #1120)
     //   - fetchCurrentOutput identity changes (cliToolId / worktreeId)
-  }, [enabled, terminal.isRunning, fetchCurrentOutput]);
+  }, [
+    enabled,
+    connected,
+    pushHealthy,
+    terminal.isRunning,
+    terminal.isSelectionListActive,
+    terminal.isPagerActive,
+    terminal.isUnclassifiedActive,
+    prompt.visible,
+    fetchCurrentOutput,
+  ]);
 
   const setAutoScroll = useCallback((next: boolean) => {
     setTerminal(prev => (prev.autoScroll === next ? prev : { ...prev, autoScroll: next }));

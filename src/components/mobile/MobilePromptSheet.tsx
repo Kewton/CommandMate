@@ -6,12 +6,14 @@
 
 'use client';
 
-import { useState, useCallback, useId, useMemo, useRef, useEffect, memo } from 'react';
+import { useState, useCallback, useId, useMemo, useEffect, memo } from 'react';
 import { useTranslations } from 'next-intl';
 import type { PromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
-import { RadioGroup, RadioGroupItem } from '@/components/ui';
+import { RadioGroup, RadioGroupItem, Spinner } from '@/components/ui';
 import { usePromptAnimation } from '@/hooks/usePromptAnimation';
+import { useFocusTrap } from '@/hooks/useFocusTrap';
+import { useSwipeGesture } from '@/hooks/useSwipeGesture';
 
 /** Animation duration for sheet transitions */
 const ANIMATION_DURATION_MS = 300;
@@ -22,7 +24,7 @@ const SWIPE_DISMISS_THRESHOLD = 100;
 /** Button style constants */
 const BUTTON_STYLES = {
   /** Common button base styles */
-  base: 'px-6 py-3 rounded-lg font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2',
+  base: 'px-6 py-3 rounded-lg font-medium transition-all touch-manipulation disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2',
   /** Primary button styles */
   primary: 'bg-accent-600 text-white hover:bg-accent-700 focus:ring-ring',
   /** Secondary button styles */
@@ -69,10 +71,20 @@ export const MobilePromptSheet = memo(function MobilePromptSheet({
   });
   const labelId = useId();
 
-  // Swipe handling state
-  const [touchStartY, setTouchStartY] = useState<number | null>(null);
+  const isActive = visible && promptData !== null;
+
+  // [Issue #1127] Trap keyboard focus within the sheet while it is the active
+  // modal surface (Tab cycling + focus restore); shares the single useFocusTrap
+  // implementation with ui/Modal. The ref doubles as the sheet element ref.
+  const sheetRef = useFocusTrap<HTMLDivElement>({
+    active: isActive,
+  });
+
+  // Swipe-to-dismiss (Issue #1128): unified on the shared useSwipeGesture hook
+  // (was an ad-hoc touch handler). Vertical axis + direction lock keeps a
+  // horizontal drag from dismissing; onSwipeMove drives the finger-follow
+  // translate, and a downward swipe past the threshold dismisses.
   const [translateY, setTranslateY] = useState(0);
-  const sheetRef = useRef<HTMLDivElement>(null);
 
   // Reset translate when visibility changes
   useEffect(() => {
@@ -81,38 +93,37 @@ export const MobilePromptSheet = memo(function MobilePromptSheet({
     }
   }, [visible]);
 
-  /**
-   * Handle touch start
-   */
-  const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    setTouchStartY(e.touches[0].clientY);
+  const handleSwipeMove = useCallback(({ deltaY }: { deltaX: number; deltaY: number }) => {
+    // Only follow downward drags (positive delta).
+    setTranslateY(deltaY > 0 ? deltaY : 0);
   }, []);
 
-  /**
-   * Handle touch move
-   */
-  const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    if (touchStartY === null) return;
+  const handleSwipeDismiss = useCallback(() => {
+    onDismiss?.();
+  }, [onDismiss]);
 
-    const currentY = e.touches[0].clientY;
-    const deltaY = currentY - touchStartY;
-
-    // Only allow swiping down (positive delta)
-    if (deltaY > 0) {
-      setTranslateY(deltaY);
-    }
-  }, [touchStartY]);
-
-  /**
-   * Handle touch end
-   */
-  const handleTouchEnd = useCallback(() => {
-    if (translateY > SWIPE_DISMISS_THRESHOLD && onDismiss) {
-      onDismiss();
-    }
+  const handleSwipeEnd = useCallback(() => {
     setTranslateY(0);
-    setTouchStartY(null);
-  }, [translateY, onDismiss]);
+  }, []);
+
+  const { ref: swipeRef } = useSwipeGesture({
+    axis: 'vertical',
+    threshold: SWIPE_DISMISS_THRESHOLD,
+    enabled: isActive,
+    onSwipeMove: handleSwipeMove,
+    onSwipeDown: handleSwipeDismiss,
+    onSwipeEnd: handleSwipeEnd,
+  });
+
+  // Merge the focus-trap container ref (#1127) with the swipe ref (#1128) onto
+  // the single sheet element without disturbing either hook's contract.
+  const setSheetRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      (sheetRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+      (swipeRef as React.MutableRefObject<HTMLElement | null>).current = el;
+    },
+    [sheetRef, swipeRef]
+  );
 
   /**
    * Handle overlay click
@@ -155,15 +166,12 @@ export const MobilePromptSheet = memo(function MobilePromptSheet({
 
       {/* Sheet */}
       <div
-        ref={sheetRef}
+        ref={setSheetRef}
         data-testid="mobile-prompt-sheet"
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelId}
         onClick={handleSheetClick}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
         style={{ transform: sheetTransform }}
         className={`fixed bottom-0 inset-x-0 bg-surface rounded-t-2xl z-50 pb-safe transform transition-transform duration-300 ${sheetAnimation}`}
       >
@@ -281,7 +289,7 @@ function PromptContent({
       {/* Answering indicator */}
       {isDisabled && (
         <div data-testid="answering-indicator" className="flex items-center gap-2 text-sm text-muted-foreground" role="status" aria-live="polite">
-          <div className="animate-spin rounded-full h-4 w-4 border-2 border-input border-t-accent-600" aria-hidden="true" />
+          <Spinner size="sm" variant="accent" />
           <span>{t('sending')}</span>
         </div>
       )}
@@ -439,6 +447,9 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
             onChange={(e) => onTextInputChange(e.target.value)}
             disabled={disabled}
             placeholder={t('enterValuePlaceholder')}
+            // Issue #1128: mobile keyboard hints for the custom-value field.
+            inputMode="text"
+            enterKeyHint="done"
             className="w-full px-4 py-3 border-2 border-input rounded-lg bg-surface text-foreground focus:outline-none focus:border-ring disabled:opacity-50"
           />
         </div>

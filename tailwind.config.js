@@ -5,6 +5,9 @@ module.exports = {
     './src/pages/**/*.{js,ts,jsx,tsx,mdx}',
     './src/components/**/*.{js,ts,jsx,tsx,mdx}',
     './src/app/**/*.{js,ts,jsx,tsx,mdx}',
+    // [Issue #1114] Hooks emit class names too (usePromptAnimation returns
+    // animate-fade-in/out), so they must be scanned or the utilities get purged.
+    './src/hooks/**/*.{js,ts,jsx,tsx}',
   ],
   theme: {
     extend: {
@@ -70,10 +73,32 @@ module.exports = {
           900: 'rgb(var(--accent-900) / <alpha-value>)',
           950: 'rgb(var(--accent-950) / <alpha-value>)',
         },
-        success: 'rgb(var(--success) / <alpha-value>)',
-        warning: 'rgb(var(--warning) / <alpha-value>)',
-        danger: 'rgb(var(--danger) / <alpha-value>)',
-        info: 'rgb(var(--info) / <alpha-value>)',
+        // [Issue #1112] Status colors carry a tint scale (subtle/border/foreground)
+        // for alert surfaces; DEFAULT keeps `text-success` etc. working unchanged.
+        success: {
+          DEFAULT: 'rgb(var(--success) / <alpha-value>)',
+          subtle: 'rgb(var(--success-subtle) / <alpha-value>)',
+          border: 'rgb(var(--success-border) / <alpha-value>)',
+          foreground: 'rgb(var(--success-foreground) / <alpha-value>)',
+        },
+        warning: {
+          DEFAULT: 'rgb(var(--warning) / <alpha-value>)',
+          subtle: 'rgb(var(--warning-subtle) / <alpha-value>)',
+          border: 'rgb(var(--warning-border) / <alpha-value>)',
+          foreground: 'rgb(var(--warning-foreground) / <alpha-value>)',
+        },
+        danger: {
+          DEFAULT: 'rgb(var(--danger) / <alpha-value>)',
+          subtle: 'rgb(var(--danger-subtle) / <alpha-value>)',
+          border: 'rgb(var(--danger-border) / <alpha-value>)',
+          foreground: 'rgb(var(--danger-foreground) / <alpha-value>)',
+        },
+        info: {
+          DEFAULT: 'rgb(var(--info) / <alpha-value>)',
+          subtle: 'rgb(var(--info-subtle) / <alpha-value>)',
+          border: 'rgb(var(--info-border) / <alpha-value>)',
+          foreground: 'rgb(var(--info-foreground) / <alpha-value>)',
+        },
       },
       // [Issue #1074] Light mode inverted to a gray page with white cards, so
       // shadow-sm must read as a real 2-layer elevation instead of the flat
@@ -87,6 +112,13 @@ module.exports = {
       animation: {
         'slide-in': 'slide-in 0.3s ease-out',
         'slide-up': 'slide-up 0.25s ease-out',
+        // [Issue #1114] Fade utilities consumed by usePromptAnimation
+        // (PromptPanel). Previously emitted but never defined (no-op). Duration
+        // and easing reference the #1050 motion tokens; `both` fill keeps the
+        // end state until the JS unmount timer (same 200ms) fires, avoiding a
+        // 1-frame flash if the timer lands after the animation ends.
+        'fade-in': 'fade-in var(--motion-duration-base) var(--motion-ease-out) both',
+        'fade-out': 'fade-out var(--motion-duration-base) var(--motion-ease-out) both',
         // [Issue #1051] StatusDot "living" states. Infinite CSS animations so
         // polling re-renders never restart them (no JS/inline-style keying).
         // OS "reduce motion" is honored globally in globals.css (#1050), which
@@ -98,6 +130,16 @@ module.exports = {
         'slide-in': {
           '0%': { transform: 'translateX(100%)', opacity: '0' },
           '100%': { transform: 'translateX(0)', opacity: '1' },
+        },
+        // [Issue #1114] Plain opacity fades (no transform — PromptPanel layers
+        // its own translate via transition utilities).
+        'fade-in': {
+          '0%': { opacity: '0' },
+          '100%': { opacity: '1' },
+        },
+        'fade-out': {
+          '0%': { opacity: '1' },
+          '100%': { opacity: '0' },
         },
         'slide-up': {
           '0%': { transform: 'translateY(100%)' },

@@ -7,7 +7,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Card, CardHeader, CardTitle, CardContent, Button, Badge, Input } from '@/components/ui';
+import { Card, CardHeader, CardTitle, CardContent, Button, Badge, Input, Spinner } from '@/components/ui';
 import { ToastContainer, useToast } from '@/components/common/Toast';
 import { worktreeApi, handleApiError } from '@/lib/api-client';
 import { copyToClipboard } from '@/lib/clipboard-utils';
@@ -172,7 +172,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
       // Add highlighted match (escaped)
       const matchText = fileContent.substring(match.index, match.index + match.length);
       const isCurrent = idx === currentMatchIndex;
-      result += `<mark class="${isCurrent ? 'bg-yellow-400 text-black' : 'bg-yellow-200 text-black'}" data-match-index="${idx}">${escapeHtml(matchText)}</mark>`;
+      result += `<mark class="${isCurrent ? 'bg-warning text-black' : 'bg-warning-border text-black'}" data-match-index="${idx}">${escapeHtml(matchText)}</mark>`;
 
       lastIndex = match.index + match.length;
     });
@@ -266,12 +266,12 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
         <CardContent>
           {loading && logFiles.length === 0 && (
             <div className="text-center py-4">
-              <div className="inline-block animate-spin rounded-full h-6 w-6 border-4 border-input border-t-accent-600" />
+              <Spinner size="lg" variant="accent" className="inline-block" />
             </div>
           )}
 
           {error && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded text-sm text-red-800">
+            <div className="p-3 bg-danger-subtle border border-danger-border rounded text-sm text-danger-foreground">
               {error}
             </div>
           )}
@@ -381,7 +381,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
           <CardContent>
             {loading && (
               <div className="text-center py-8">
-                <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-input border-t-accent-600" />
+                <Spinner size="xl" variant="accent" className="inline-block" />
               </div>
             )}
 

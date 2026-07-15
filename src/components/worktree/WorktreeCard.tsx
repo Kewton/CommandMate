@@ -8,6 +8,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardContent, Badge, Button } from '@/components/ui';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import type { Worktree } from '@/types/models';
 import { useTranslations } from 'next-intl';
 import { useLocale } from 'next-intl';
@@ -37,6 +38,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
   const currentStatus = status || null;
 
   const t = useTranslations();
+  const confirm = useConfirm();
   const locale = useLocale();
   const dateFnsLocale = getDateFnsLocale(locale);
 
@@ -56,7 +58,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
     e.preventDefault();
     e.stopPropagation();
 
-    if (!confirm(t('worktree.session.confirmKill', { name }))) {
+    if (!(await confirm({ description: t('worktree.session.confirmKill', { name }), variant: 'danger' }))) {
       return;
     }
 
@@ -70,7 +72,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
       }
     } catch (err) {
       const errorMessage = handleApiError(err);
-      alert(`${t('worktree.session.failedToKill')}: ${errorMessage}`);
+      window.alert(`${t('worktree.session.failedToKill')}: ${errorMessage}`);
     } finally {
       setIsKilling(false);
     }
@@ -90,7 +92,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
       setIsFavorite(newFavorite);
     } catch (err) {
       const errorMessage = handleApiError(err);
-      alert(`${t('worktree.errors.failedToUpdateFavorite')}: ${errorMessage}`);
+      window.alert(`${t('worktree.errors.failedToUpdateFavorite')}: ${errorMessage}`);
     } finally {
       setIsTogglingFavorite(false);
     }
@@ -118,12 +120,16 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
               <button
                 onClick={handleToggleFavorite}
                 disabled={isTogglingFavorite}
-                className="flex-shrink-0 transition-colors hover:scale-110"
+                className="flex-shrink-0 transition-colors hover:scale-110 touch-manipulation"
+                // Issue #1127: this control is icon-only, so its `title` tooltip
+                // is invisible on touch/SR. aria-label gives it a real
+                // accessible name reachable without hover.
+                aria-label={isFavorite ? t('common.favorites.remove') : t('common.favorites.add')}
                 title={isFavorite ? t('common.favorites.remove') : t('common.favorites.add')}
               >
                 <svg
                   className={`w-5 h-5 ${
-                    isFavorite ? 'fill-yellow-400 text-yellow-400' : 'fill-none text-muted-foreground'
+                    isFavorite ? 'fill-warning text-warning' : 'fill-none text-muted-foreground'
                   }`}
                   stroke="currentColor"
                   strokeWidth="2"
@@ -225,9 +231,9 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
               <div>
                 <span className={`px-2 py-1 text-xs font-medium rounded ${
                   currentStatus === 'done'
-                    ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300'
+                    ? 'bg-success-subtle text-success-foreground'
                     : currentStatus === 'in_review'
-                    ? 'bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300'
+                    ? 'bg-info-subtle text-info-foreground'
                     : currentStatus === 'in_progress'
                     ? 'bg-accent-100 dark:bg-accent-900 text-accent-700 dark:text-accent-300'
                     : 'bg-muted text-muted-foreground'

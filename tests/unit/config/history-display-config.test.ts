@@ -13,8 +13,8 @@ import {
 
 describe('history-display-config (Issue #701)', () => {
   describe('HISTORY_DISPLAY_LIMIT_OPTIONS', () => {
-    it('should expose [50, 100, 150, 200, 250] in ascending order', () => {
-      expect([...HISTORY_DISPLAY_LIMIT_OPTIONS]).toEqual([50, 100, 150, 200, 250]);
+    it('should expose [50, 100, 150, 200, 250, 500, 1000] in ascending order (Issue #1123)', () => {
+      expect([...HISTORY_DISPLAY_LIMIT_OPTIONS]).toEqual([50, 100, 150, 200, 250, 500, 1000]);
     });
 
     it('should not be empty', () => {
@@ -34,8 +34,8 @@ describe('history-display-config (Issue #701)', () => {
       expect(MAX_MESSAGES_LIMIT).toBe(Math.max(...HISTORY_DISPLAY_LIMIT_OPTIONS));
     });
 
-    it('should equal 250', () => {
-      expect(MAX_MESSAGES_LIMIT).toBe(250);
+    it('should equal 1000 (Issue #1123: relaxed after virtualization)', () => {
+      expect(MAX_MESSAGES_LIMIT).toBe(1000);
     });
   });
 

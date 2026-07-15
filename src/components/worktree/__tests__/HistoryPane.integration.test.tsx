@@ -5,10 +5,11 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { HistoryPane } from '../HistoryPane';
 import type { ChatMessage } from '@/types/models';
+import { installVirtualLayout } from '@tests/helpers/virtual-layout';
 
 // Helper to create test messages
 function createTestMessage(
@@ -39,8 +40,16 @@ const T6 = new Date('2024-01-01T10:05:00');
 describe('HistoryPane Integration', () => {
   const mockOnFilePathClick = vi.fn();
 
+  // [Issue #1123] Virtualized list needs a non-zero viewport under jsdom.
+  let restoreLayout: () => void;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    restoreLayout = installVirtualLayout();
+  });
+
+  afterEach(() => {
+    restoreLayout();
   });
 
   describe('conversation pair grouping', () => {

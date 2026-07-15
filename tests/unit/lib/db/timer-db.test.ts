@@ -37,7 +37,7 @@ function setupTestDb(): Database.Database {
     );
   `);
 
-  // Create timer_messages table (v23 migration + v35 instance_id, Issue #942)
+  // Create timer_messages table (v23 migration + v35 instance_id + v40 error)
   testDb.exec(`
     CREATE TABLE timer_messages (
       id TEXT PRIMARY KEY,
@@ -50,6 +50,7 @@ function setupTestDb(): Database.Database {
       status TEXT NOT NULL DEFAULT 'pending',
       created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
       sent_at INTEGER,
+      error TEXT,
       FOREIGN KEY (worktree_id) REFERENCES worktrees(id) ON DELETE CASCADE
     );
 
@@ -243,6 +244,62 @@ describe('timer-db', () => {
 
       const updated = getTimerById(db, timer.id);
       expect(updated!.status).toBe('failed');
+    });
+  });
+
+  // ==========================================================================
+  // Issue #1107: error column (failure reason persistence)
+  // ==========================================================================
+
+  describe('error column (Issue #1107)', () => {
+    it('should default error to null on createTimer', () => {
+      const timer = createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: 'Test', delayMs: 300000 });
+
+      expect(timer.error).toBeNull();
+      const fetched = getTimerById(db, timer.id);
+      expect(fetched!.error).toBeNull();
+    });
+
+    it('should persist error when updateTimerStatus is called with a reason', () => {
+      const timer = createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: 'Test', delayMs: 300000 });
+
+      updateTimerStatus(db, timer.id, 'failed', undefined, '[send] tmux session not found');
+
+      const updated = getTimerById(db, timer.id);
+      expect(updated!.status).toBe('failed');
+      expect(updated!.error).toBe('[send] tmux session not found');
+    });
+
+    it('should leave error null for non-failed transitions (backward compatible calls)', () => {
+      const timer = createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: 'Test', delayMs: 300000 });
+
+      // 3-arg and 4-arg calls (sending/sent) never touch error.
+      updateTimerStatus(db, timer.id, 'sending');
+      updateTimerStatus(db, timer.id, 'sent', Date.now());
+
+      const updated = getTimerById(db, timer.id);
+      expect(updated!.status).toBe('sent');
+      expect(updated!.error).toBeNull();
+    });
+
+    it('should expose the error column through getTimersByWorktree', () => {
+      const timer = createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: 'Test', delayMs: 300000 });
+      updateTimerStatus(db, timer.id, 'failed', undefined, 'boom');
+
+      const [row] = getTimersByWorktree(db, 'wt-1');
+      expect(row.error).toBe('boom');
+    });
+
+    it('should set a recovery reason when recovering stuck sending timers', () => {
+      const timer = createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: 'Test', delayMs: 300000 });
+      updateTimerStatus(db, timer.id, 'sending');
+
+      recoverStuckSendingTimers(db);
+
+      const updated = getTimerById(db, timer.id);
+      expect(updated!.status).toBe('failed');
+      expect(updated!.error).toBeTruthy();
+      expect(typeof updated!.error).toBe('string');
     });
   });
 

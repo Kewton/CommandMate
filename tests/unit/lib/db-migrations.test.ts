@@ -33,8 +33,8 @@ describe('db-migrations', () => {
   });
 
   describe('CURRENT_SCHEMA_VERSION', () => {
-    it('should be 39 after Migration #39 (worktree todo detail)', () => {
-      expect(CURRENT_SCHEMA_VERSION).toBe(39);
+    it('should be 41 after Migration #41 (push subscriptions)', () => {
+      expect(CURRENT_SCHEMA_VERSION).toBe(41);
     });
   });
 

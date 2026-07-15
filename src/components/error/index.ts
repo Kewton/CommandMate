@@ -3,8 +3,8 @@
  */
 
 export { ErrorBoundary } from './ErrorBoundary';
+export { TerminalErrorFallback } from './TerminalErrorFallback';
 export {
-  TerminalErrorFallback,
   HistoryErrorFallback,
   PromptErrorFallback,
   ConnectionErrorFallback,

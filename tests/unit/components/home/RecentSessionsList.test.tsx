@@ -76,4 +76,19 @@ describe('RecentSessionsList', () => {
     render(<RecentSessionsList worktrees={worktrees} />);
     expect(screen.getAllByTestId(/^recent-session-/)).toHaveLength(5);
   });
+
+  it('renders limit-many skeleton rows instead of the empty state while loading (Issue #1118)', () => {
+    render(<RecentSessionsList worktrees={[]} isLoading />);
+    const loading = screen.getByTestId('recent-sessions-loading');
+    expect(loading.querySelectorAll('li')).toHaveLength(5);
+    expect(loading.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
+    expect(screen.queryByTestId('recent-sessions-empty')).toBeNull();
+  });
+
+  it('swaps skeletons for real rows once loaded (Issue #1118)', () => {
+    const worktrees = [createMockWorktree({ id: 'wt-1' })];
+    render(<RecentSessionsList worktrees={worktrees} isLoading={false} />);
+    expect(screen.queryByTestId('recent-sessions-loading')).toBeNull();
+    expect(screen.getByTestId('recent-session-wt-1')).toBeDefined();
+  });
 });

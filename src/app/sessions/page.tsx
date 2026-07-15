@@ -18,6 +18,8 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { AppShell } from '@/components/layout';
+import { PullToRefresh } from '@/components/common/PullToRefresh';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import { useWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
 import { deriveCliStatus } from '@/types/sidebar';
 import { isWorkingStatus } from '@/lib/agent-status-display';
@@ -31,6 +33,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Skeleton,
   StatusDot,
 } from '@/components/ui';
 import { compareByTimestamp } from '@/lib/sidebar-utils';
@@ -104,8 +107,8 @@ function formatStatus(status: string | null | undefined): string {
 
 /** Status badge CSS classes keyed by status value */
 const STATUS_BADGE_CLASSES: Record<string, string> = {
-  done: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
-  in_review: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400',
+  done: 'bg-success-subtle text-success-foreground',
+  in_review: 'bg-info-subtle text-info-foreground',
   in_progress: 'bg-accent-100 dark:bg-accent-900/30 text-accent-700 dark:text-accent-400',
 };
 
@@ -117,7 +120,8 @@ const DEFAULT_BADGE_CLASS = 'bg-muted text-muted-foreground';
 
 export default function SessionsPage() {
   const tCommon = useTranslations('common');
-  const { worktrees, isLoading, error } = useWorktreesCacheContext();
+  const isMobile = useIsMobile();
+  const { worktrees, isLoading, error, refresh } = useWorktreesCacheContext();
   // [Issue #1050] Whether we have any data to keep mounted. Based on the raw
   // (unfiltered) list so an active text filter never unmounts the list.
   const hasWorktrees = worktrees.length > 0;
@@ -205,7 +209,14 @@ export default function SessionsPage() {
 
   return (
     <AppShell>
-      <div className="container-custom py-8 overflow-auto h-full">
+      {/* Issue #1128: pull-to-refresh (mobile) — the wrapper owns the scroll
+          container so the gesture only fires at the top and native PTR is
+          suppressed. `refresh` re-fetches the shared worktrees cache. */}
+      <PullToRefresh
+        onRefresh={refresh}
+        enabled={isMobile}
+        className="container-custom py-8 h-full"
+      >
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-foreground mb-2">Sessions</h1>
           <p className="text-sm text-muted-foreground">
@@ -223,6 +234,9 @@ export default function SessionsPage() {
             className="max-w-md flex-1"
             data-testid="sessions-filter"
             aria-label="Filter sessions by name or repository"
+            // Issue #1128: surface the search keyboard + "search" enter key on mobile.
+            inputMode="search"
+            enterKeyHint="search"
           />
           <Select value={sortKey} onValueChange={handleSortKeyChange}>
             <SelectTrigger
@@ -270,7 +284,7 @@ export default function SessionsPage() {
             {/* Non-blocking error banner (data already visible below) */}
             {error && (
               <div
-                className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-400"
+                className="mb-4 rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
                 role="status"
                 data-testid="sessions-error-banner"
               >
@@ -405,12 +419,37 @@ export default function SessionsPage() {
           <>
             {/* No data yet: loading / blocking error / empty are mutually exclusive. */}
             {isLoading && (
-              <div className="text-muted-foreground" data-testid="sessions-loading">
-                Loading sessions...
+              // [Issue #1118] First-load only (hasWorktrees keeps the list on
+              // re-fetch). Skeleton cards mirror the session card layout:
+              // name/branch lines + agent chip, then a message/time footer.
+              <div
+                className="space-y-2"
+                data-testid="sessions-loading"
+                role="status"
+                aria-label="Loading sessions"
+              >
+                {[0, 1, 2].map((i) => (
+                  <div
+                    key={i}
+                    className="block bg-surface rounded-lg p-4 border border-border shadow-sm"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0 flex-1 space-y-1.5">
+                        <Skeleton className="h-4 w-40 max-w-full" />
+                        <Skeleton className="h-3 w-56 max-w-full" />
+                      </div>
+                      <Skeleton className="ml-4 h-3 w-16 flex-shrink-0" />
+                    </div>
+                    <div className="mt-3 flex items-center gap-2">
+                      <Skeleton className="h-3 min-w-0 flex-1" />
+                      <Skeleton className="h-3 w-10 flex-shrink-0" />
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
             {!isLoading && error && (
-              <div className="text-red-500 dark:text-red-400" data-testid="sessions-error">
+              <div className="text-danger-foreground" data-testid="sessions-error">
                 Failed to load sessions: {error.message}
               </div>
             )}
@@ -421,7 +460,7 @@ export default function SessionsPage() {
             )}
           </>
         )}
-      </div>
+      </PullToRefresh>
     </AppShell>
   );
 }

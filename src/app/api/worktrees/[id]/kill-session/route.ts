@@ -11,7 +11,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { getWorktreeById, deleteSessionState, deleteAllMessages, deleteMessagesByCliTool, deleteMessagesByInstance, clearLastUserMessage, getAgentInstances, getAgentInstance } from '@/lib/db';
+import { getWorktreeById, deleteSessionState, deleteAllMessages, deleteMessagesByCliTool, deleteMessagesByInstance, recomputeLastUserMessage, getAgentInstances, getAgentInstance } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { killSession } from '@/lib/tmux/tmux';
 import { broadcast } from '@/lib/ws-server';
@@ -154,8 +154,11 @@ export async function POST(
       deleteAllMessages(db, params.id);
     }
 
-    // Issue #168: Clear last_user_message after archiving to prevent stale sidebar data
-    clearLastUserMessage(db, params.id);
+    // Issue #168 / #1171: recompute last_user_message from the remaining active
+    // messages after archiving. A targeted (instance / CLI) kill only archives
+    // that scope's messages, so other instances' un-archived user messages must
+    // keep driving the sidebar metadata; only when none remain is it cleared.
+    recomputeLastUserMessage(db, params.id);
 
     // Broadcast session status change via WebSocket
     // Issue #4: Include cliTool in payload for targeted updates

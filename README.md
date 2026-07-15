@@ -77,6 +77,14 @@ See the [Security Guide](./docs/security-guide.md) and [Trust & Safety](./docs/e
 
 ---
 
+## Install as an App (PWA)
+
+CommandMate is a Progressive Web App. On a mobile browser, use **Add to Home Screen** to launch it full-screen (standalone), which is ideal for monitoring agents on the go. A Service Worker precaches static assets and shows an offline fallback screen; API responses, the login page, and WebSocket traffic are never cached.
+
+> **HTTPS is required for installation.** Browsers only register a Service Worker (and offer install) on `https://` or `http://localhost`. When accessing a self-hosted instance over plain HTTP on the LAN (e.g. `http://192.168.x.x:3000`), install and offline support are disabled by the browser — use a tunnel or an HTTPS reverse proxy (see Security above) to enable them. The app itself remains fully usable without the PWA layer.
+
+---
+
 ## How it works
 
 ```mermaid

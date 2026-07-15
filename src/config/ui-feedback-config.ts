@@ -42,3 +42,19 @@ export const KEY_PRESS_FEEDBACK_RESET_MS = 150;
  * Site: NavigationButtons.
  */
 export const NAV_KEY_REFRESH_DELAY_MS = 100;
+
+/**
+ * Duration (ms) of exit (fade-out) animations for overlay UI before unmount.
+ * Issue #1114: JS-side twin of the CSS motion token `--motion-duration-base`
+ * (globals.css, 200ms) and the tailwindcss-animate `duration-200` utilities
+ * used by the exit classes — keep the three in sync.
+ * Sites: Modal, Toast (via useExitAnimation).
+ */
+export const EXIT_ANIMATION_DURATION_MS = 200;
+
+/**
+ * Exit duration (ms) for the file-tree ContextMenu, matching its faster
+ * `duration-100` enter animation.
+ * Site: ContextMenu (via useExitAnimation). Issue #1114.
+ */
+export const CONTEXT_MENU_EXIT_DURATION_MS = 100;

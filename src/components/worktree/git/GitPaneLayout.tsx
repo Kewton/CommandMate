@@ -82,7 +82,7 @@ export function GitPaneLayout({
       <div
         data-testid="git-group-read"
         data-git-group="read"
-        className="border-l-2 border-sky-400/60 dark:border-sky-500/40 bg-sky-50/40 dark:bg-sky-950/20"
+        className="border-l-2 border-info-border bg-info-subtle"
       >
         {statusSection}
       </div>
@@ -101,7 +101,7 @@ export function GitPaneLayout({
       <div
         data-testid="git-group-history"
         data-git-group="read"
-        className="flex-1 flex flex-col min-h-0 border-l-2 border-sky-400/60 dark:border-sky-500/40 bg-sky-50/30 dark:bg-sky-950/10"
+        className="flex-1 flex flex-col min-h-0 border-l-2 border-info-border bg-info-subtle"
       >
         {historySection}
       </div>

@@ -405,10 +405,14 @@ describe('timer-manager', () => {
 
       await vi.advanceTimersByTimeAsync(200);
 
+      // [Issue #1107] failed transition now persists the reason as the 5th arg
+      // (sentAt=undefined, error="[stage] message").
       expect(mockUpdateTimerStatus).toHaveBeenCalledWith(
         expect.anything(),
         timerId,
-        'failed'
+        'failed',
+        undefined,
+        '[send] tmux session not found'
       );
       // Must NOT mark as sent when the send failed
       expect(mockUpdateTimerStatus).not.toHaveBeenCalledWith(
@@ -448,10 +452,13 @@ describe('timer-manager', () => {
 
       await vi.advanceTimersByTimeAsync(200);
 
+      // [Issue #1107] thrown error message is persisted as the failure reason.
       expect(mockUpdateTimerStatus).toHaveBeenCalledWith(
         expect.anything(),
         timerId,
-        'failed'
+        'failed',
+        undefined,
+        'createMessage failed'
       );
     });
   });

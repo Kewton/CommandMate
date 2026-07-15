@@ -228,4 +228,25 @@ describe('TodoWidget mobile layout (Issue #909)', () => {
       expect(mockedApi.remove).toHaveBeenCalledWith('repo-a', 't1'),
     );
   });
+
+  it('shows skeleton rows while loading, then the loaded list (Issue #1118)', async () => {
+    let resolveList!: (todos: TodoItem[]) => void;
+    mockedApi.listAll.mockReturnValue(
+      new Promise<TodoItem[]>((resolve) => {
+        resolveList = resolve;
+      }),
+    );
+
+    render(<TodoWidget />);
+
+    // While listAll is pending: pulse skeleton rows, no naked "Loading…" text
+    const loading = await screen.findByTestId('todo-loading');
+    expect(loading.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Loading…')).toBeNull();
+
+    resolveList(TODOS);
+
+    expect(await screen.findByText('alpha task')).toBeInTheDocument();
+    expect(screen.queryByTestId('todo-loading')).toBeNull();
+  });
 });

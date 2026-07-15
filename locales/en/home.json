@@ -1,5 +1,9 @@
 {
   "title": "Overview",
   "running": "running",
-  "waiting": "waiting"
+  "waiting": "waiting",
+  "assistant": {
+    "clearHistoryConfirm": "Clear all chat history for this repository and CLI? Past messages will no longer be sent back to the assistant.",
+    "changeRepoConfirm": "Changing repository will stop the active conversation. Do you want to continue?"
+  }
 }

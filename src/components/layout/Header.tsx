@@ -9,12 +9,13 @@
 'use client';
 
 import React from 'react';
-import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { TransitionLink } from '@/components/view-transitions/TransitionLink';
 import { useTranslations } from 'next-intl';
 import { Folder, Github, Search } from 'lucide-react';
 import { PcDisplaySizeSelector } from './PcDisplaySizeSelector';
 import { ThemeToggle } from '@/components/common/ThemeToggle';
+import { ConnectionStatusIndicator } from '@/components/common/ConnectionStatusIndicator';
 import { Kbd } from '@/components/ui/Kbd';
 import { useCommandPalette } from '@/contexts/CommandPaletteContext';
 
@@ -64,12 +65,12 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
         <div className="flex items-center justify-between h-16">
           {/* Logo and Title */}
           <div className="flex items-center space-x-4">
-            <Link href="/" className="flex items-center space-x-2 hover:opacity-80 transition-opacity">
+            <TransitionLink href="/" className="flex items-center space-x-2 hover:opacity-80 transition-opacity">
               <div className="w-8 h-8 bg-accent-600 rounded-lg flex items-center justify-center">
                 <Folder size={20} strokeWidth={2} className="text-white" aria-hidden="true" />
               </div>
               <h1 className="text-xl font-bold text-foreground">{title}</h1>
-            </Link>
+            </TransitionLink>
           </div>
 
           {/* Navigation */}
@@ -77,17 +78,18 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
             {NAV_ITEMS.map((item) => {
               const active = item.isActive(pathname);
               return (
-                <Link
+                <TransitionLink
                   key={item.href}
                   href={item.href}
-                  className={`text-sm font-medium transition-colors ${
+                  aria-current={active ? 'page' : undefined}
+                  className={`relative py-1 text-sm font-medium transition-colors after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:bg-accent-600 dark:after:bg-accent-400 after:origin-center motion-safe:after:transition-transform after:duration-200 after:ease-[var(--motion-ease-out)] ${
                     active
-                      ? 'text-accent-600 dark:text-accent-400'
-                      : 'text-muted-foreground hover:text-foreground'
+                      ? 'text-accent-600 dark:text-accent-400 after:scale-x-100'
+                      : 'text-muted-foreground hover:text-foreground after:scale-x-0'
                   }`}
                 >
                   {item.label}
-                </Link>
+                </TransitionLink>
               );
             })}
             {/* ⌘K command palette entry point (Issue #1077) - desktop only */}
@@ -96,7 +98,7 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
               data-testid="header-command-palette-trigger"
               onClick={() => setOpen(true)}
               aria-label={t('mobileTrigger')}
-              className="hidden md:inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-surface-2 transition-colors"
+              className="hidden md:inline-flex items-center gap-2 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-surface-2 transition-colors"
             >
               <Search size={16} strokeWidth={2} aria-hidden="true" className="shrink-0" />
               <span>{t('searchAction')}</span>
@@ -107,6 +109,9 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
                 </span>
               )}
             </button>
+            {/* Realtime connection status (Issue #1120) - only shows when the
+                live push connection is down (polling fallback active). */}
+            <ConnectionStatusIndicator />
             {/* PC display size selector (Issue #915) - hidden on mobile */}
             <PcDisplaySizeSelector />
             {/* Theme toggle promoted to the header (Issue #1071) */}

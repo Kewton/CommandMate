@@ -27,6 +27,7 @@ import {
   DEFAULT_FILE_METADATA_DISPLAY,
   type FileMetadataDisplaySettings,
 } from '@/hooks/useFileMetadataDisplay';
+import { Spinner } from '@/components/ui/Spinner';
 
 // ============================================================================
 // Types
@@ -156,7 +157,7 @@ export const FolderIcon = memo(function FolderIcon({ open }: { open: boolean }) 
   return (
     <svg
       data-testid="folder-icon"
-      className="w-5 h-5 text-yellow-500"
+      className="w-5 h-5 text-warning"
       fill="currentColor"
       viewBox="0 0 24 24"
       aria-hidden="true"
@@ -193,7 +194,7 @@ export const HighlightedText = memo(function HighlightedText({
     <>
       {parts.map((part, i) =>
         part.toLowerCase() === query.toLowerCase() ? (
-          <mark key={i} className="bg-yellow-200 dark:bg-yellow-700 text-foreground px-0.5 rounded">
+          <mark key={i} className="bg-warning-border text-foreground px-0.5 rounded">
             {part}
           </mark>
         ) : (
@@ -212,14 +213,14 @@ export const FileIcon = memo(function FileIcon({ extension }: { extension?: stri
     const colorMap: Record<string, string> = {
       ts: 'text-info',
       tsx: 'text-info',
-      js: 'text-yellow-400',
-      jsx: 'text-yellow-400',
-      json: 'text-yellow-600',
+      js: 'text-warning',
+      jsx: 'text-warning',
+      json: 'text-warning',
       md: 'text-muted-foreground',
       css: 'text-pink-500',
       scss: 'text-pink-500',
-      html: 'text-orange-500',
-      py: 'text-green-500',
+      html: 'text-warning',
+      py: 'text-success',
     };
 
     return colorMap[extension] || 'text-muted-foreground';
@@ -395,7 +396,7 @@ export const TreeNode = memo(function TreeNode({
         {isDirectory ? (
           <span className="w-4 h-4 flex items-center justify-center">
             {loading ? (
-              <span className="w-3 h-3 border-2 border-input border-t-accent-500 rounded-full animate-spin" />
+              <Spinner size="xs" variant="accent" />
             ) : (
               <ChevronIcon expanded={isExpanded} />
             )}

@@ -16,18 +16,35 @@
 
 import { useCallback, useState } from 'react';
 import { AppShell } from '@/components/layout';
+import { PullToRefresh } from '@/components/common/PullToRefresh';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import { RepositoryList, RepositoryManager } from '@/components/repository';
 
+/** Issue #1128: minimum spinner hold so a pull reads as a real refresh. */
+const REPOSITORIES_REFRESH_MIN_MS = 500;
+
 export default function RepositoriesPage() {
+  const isMobile = useIsMobile();
   const [refreshKey, setRefreshKey] = useState(0);
 
   const handleChanged = useCallback(() => {
     setRefreshKey((k) => k + 1);
   }, []);
 
+  // Issue #1128: pull-to-refresh bumps refreshKey (which refetches the list) and
+  // holds the spinner briefly so the gesture reads as a refresh.
+  const handlePullRefresh = useCallback(async () => {
+    setRefreshKey((k) => k + 1);
+    await new Promise((resolve) => setTimeout(resolve, REPOSITORIES_REFRESH_MIN_MS));
+  }, []);
+
   return (
     <AppShell>
-      <div className="container-custom py-8 overflow-auto h-full">
+      <PullToRefresh
+        onRefresh={handlePullRefresh}
+        enabled={isMobile}
+        className="container-custom py-8 h-full"
+      >
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-foreground mb-2">Repositories</h1>
           <p className="text-sm text-muted-foreground">
@@ -39,7 +56,7 @@ export default function RepositoriesPage() {
           <RepositoryManager onRepositoryAdded={handleChanged} />
           <RepositoryList refreshKey={refreshKey} onChanged={handleChanged} />
         </div>
-      </div>
+      </PullToRefresh>
     </AppShell>
   );
 }

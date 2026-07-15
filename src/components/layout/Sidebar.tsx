@@ -13,8 +13,8 @@
 
 import React, { memo, useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useDeferredValue } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { useViewTransitionRouter } from '@/components/providers/ViewTransitionsProvider';
 import { Database } from 'lucide-react';
 import {
   DndContext,
@@ -162,7 +162,8 @@ function persistSidebarScrollTop(scrollTop: number): void {
  * ```
  */
 export const Sidebar = memo(function Sidebar() {
-  const router = useRouter();
+  // Worktree-detail navigation crossfades via the View Transitions API (#1122).
+  const router = useViewTransitionRouter();
   const {
     worktrees,
     repositories,
@@ -451,7 +452,7 @@ export const Sidebar = memo(function Sidebar() {
               <Link
                 href="/repositories"
                 aria-label="Repositories"
-                className="p-1 rounded text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover
+                className="p-1 rounded-md text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover
                   focus:outline-none focus:ring-2 focus:ring-ring
                   transition-colors inline-flex items-center"
               >
@@ -724,7 +725,7 @@ function ViewModeToggle({
         onClick={handleClick}
         aria-label={viewMode === 'grouped' ? 'Switch to flat view' : 'Switch to grouped view'}
         className="
-          p-1 rounded text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover
+          p-1 rounded-md text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover
           focus:outline-none focus:ring-2 focus:ring-ring
           transition-colors
         "
@@ -870,7 +871,7 @@ const SyncButton = memo(function SyncButton({
           onClick={handleSync}
           disabled={isSyncing}
           aria-label={t('syncButtonLabel')}
-          className="p-1 rounded text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover
+          className="p-1 rounded-md text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover
             focus:outline-none focus:ring-2 focus:ring-ring
             disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >

@@ -74,4 +74,18 @@ describe('HomeSessionSummary', () => {
     expect(screen.getByTestId('running-count').className).toContain('text-foreground');
     expect(screen.getByTestId('waiting-count').className).toContain('text-muted-foreground');
   });
+
+  it('renders two skeleton stat boxes instead of counts while loading (Issue #1118)', () => {
+    render(<HomeSessionSummary worktrees={[]} isLoading />);
+    const loading = screen.getByTestId('home-session-summary-loading');
+    expect(loading.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
+    expect(screen.queryByTestId('running-count')).toBeNull();
+    expect(screen.queryByTestId('waiting-count')).toBeNull();
+  });
+
+  it('shows real counts once isLoading is false (Issue #1118)', () => {
+    render(<HomeSessionSummary worktrees={[]} isLoading={false} />);
+    expect(screen.queryByTestId('home-session-summary-loading')).toBeNull();
+    expect(screen.getByTestId('running-count').textContent).toBe('0');
+  });
 });

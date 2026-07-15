@@ -28,7 +28,7 @@ import { LogViewer } from '@/components/worktree/LogViewer';
 import { VersionSection } from '@/components/worktree/VersionSection';
 import { FeedbackSection } from '@/components/worktree/FeedbackSection';
 import { Modal } from '@/components/ui/Modal';
-import { Button } from '@/components/ui';
+import { Button, Spinner } from '@/components/ui';
 import { worktreeApi } from '@/lib/api-client';
 import { truncateString } from '@/lib/utils';
 import { ClipboardCopy, Check } from 'lucide-react';
@@ -258,7 +258,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
             title={repoPathCopied ? 'Copied!' : 'Copy repository path'}
           >
             {repoPathCopied ? (
-              <Check className="w-3.5 h-3.5 text-green-600" />
+              <Check className="w-3.5 h-3.5 text-success" />
             ) : (
               <ClipboardCopy className="w-3.5 h-3.5" />
             )}
@@ -281,7 +281,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
             title={pathCopied ? 'Copied!' : 'Copy path'}
           >
             {pathCopied ? (
-              <Check className="w-3.5 h-3.5 text-green-600" />
+              <Check className="w-3.5 h-3.5 text-success" />
             ) : (
               <ClipboardCopy className="w-3.5 h-3.5" />
             )}
@@ -638,7 +638,7 @@ export const DesktopHeader = memo(function DesktopHeader({
                   {truncateString(gitStatus.currentBranch, DESKTOP_BRANCH_MAX_LENGTH)}
                 </span>
                 {gitStatus.isDirty && (
-                  <span className="text-amber-500" title="Uncommitted changes">*</span>
+                  <span className="text-warning" title="Uncommitted changes">*</span>
                 )}
               </>
             )}
@@ -805,7 +805,7 @@ export const DesktopHeader = memo(function DesktopHeader({
             variant="ghost"
             type="button"
             onClick={onKillSession}
-            className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium rounded-lg text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors flex-shrink-0"
+            className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium rounded-lg text-danger-foreground hover:bg-danger-subtle transition-colors flex-shrink-0"
             aria-label="End session"
             data-testid="desktop-kill-session"
           >
@@ -937,10 +937,7 @@ export const LoadingIndicator = memo(function LoadingIndicator() {
       aria-live="polite"
     >
       <div className="flex flex-col items-center gap-3">
-        <div
-          className="animate-spin rounded-full h-8 w-8 border-4 border-input border-t-accent-600 dark:border-t-accent-400"
-          aria-hidden="true"
-        />
+        <Spinner size="xl" variant="accent" />
         <p className="text-muted-foreground">Loading worktree...</p>
       </div>
     </div>
@@ -964,9 +961,9 @@ export const ErrorDisplay = memo(function ErrorDisplay({
       role="alert"
       aria-live="assertive"
     >
-      <div className="text-center p-6 bg-red-50 rounded-lg border border-red-200 max-w-md">
+      <div className="text-center p-6 bg-danger-subtle rounded-lg border border-danger-border max-w-md">
         <svg
-          className="mx-auto h-12 w-12 text-red-400 mb-4"
+          className="mx-auto h-12 w-12 text-danger-foreground/70 mb-4"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -979,14 +976,14 @@ export const ErrorDisplay = memo(function ErrorDisplay({
             d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
           />
         </svg>
-        <p className="text-red-600 font-medium">Error loading worktree</p>
-        <p className="text-red-500 text-sm mt-2">{message}</p>
+        <p className="text-danger-foreground font-medium">Error loading worktree</p>
+        <p className="text-danger-foreground/80 text-sm mt-2">{message}</p>
         {onRetry && (
           <Button
             variant="ghost"
             type="button"
             onClick={onRetry}
-            className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+            className="mt-4 px-4 py-2 bg-danger-foreground text-danger-subtle rounded-lg hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-danger focus:ring-offset-2 ring-offset-background"
           >
             Retry
           </Button>

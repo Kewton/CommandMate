@@ -29,6 +29,8 @@ import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
 import { Z_INDEX } from '@/config/z-index';
 import { COPY_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { Spinner } from '@/components/ui/Spinner';
 
 /** Fixed row height for the virtualized CodeViewer (px). Monospace + leading-6. */
 const CODE_VIEWER_ROW_HEIGHT_PX = 24;
@@ -37,7 +39,7 @@ const CODE_VIEWER_ROW_HEIGHT_PX = 24;
 function DynamicImportSpinner() {
   return (
     <div className="flex items-center justify-center py-12 bg-surface">
-      <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-input border-t-accent-600 dark:border-t-accent-400" />
+      <Spinner size="xl" variant="accent" />
     </div>
   );
 }
@@ -119,7 +121,7 @@ const MARP_FRONTMATTER_REGEX = /^---\s*\nmarp:\s*true/;
 function LoadingSpinner() {
   return (
     <div className="flex items-center justify-center py-12">
-      <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-input border-t-accent-600 dark:border-t-accent-400" />
+      <Spinner size="xl" variant="accent" />
       <p className="ml-3 text-muted-foreground">Loading file...</p>
     </div>
   );
@@ -128,10 +130,10 @@ function LoadingSpinner() {
 /** Error display */
 function ErrorDisplay({ error }: { error: string }) {
   return (
-    <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg p-4 m-4">
+    <div className="bg-danger-subtle border border-danger-border rounded-lg p-4 m-4">
       <div className="flex items-center gap-2">
         <svg
-          className="w-5 h-5 text-red-600 dark:text-red-400"
+          className="w-5 h-5 text-danger-foreground"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -143,7 +145,7 @@ function ErrorDisplay({ error }: { error: string }) {
             d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
           />
         </svg>
-        <p className="text-sm text-red-800 dark:text-red-300">{error}</p>
+        <p className="text-sm text-danger-foreground">{error}</p>
       </div>
     </div>
   );
@@ -197,7 +199,7 @@ function FileToolbar({ filePath, isMaximized, onToggleMaximize, copyableContent,
           aria-label="Copy file path"
           title="Copy path"
         >
-          {pathCopied ? <Check className="w-3.5 h-3.5 text-green-600" /> : <ClipboardCopy className="w-3.5 h-3.5" />}
+          {pathCopied ? <Check className="w-3.5 h-3.5 text-success" /> : <ClipboardCopy className="w-3.5 h-3.5" />}
         </button>
         {/* [Issue #852] title shows full path on hover when truncated */}
         <span className="text-xs text-muted-foreground font-mono truncate" title={filePath}>{filePath}</span>
@@ -223,7 +225,7 @@ function FileToolbar({ filePath, isMaximized, onToggleMaximize, copyableContent,
             aria-label="Copy file content"
             title="Copy content"
           >
-            {contentCopied ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}
+            {contentCopied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
           </button>
         )}
         <button
@@ -444,7 +446,7 @@ function CodeViewer({
           const isInLoaded = loadedIndex >= 0 && loadedIndex < loadedLineCount;
           const isCurrent = lineNumber === currentMatchLine;
           const isMatch = matchSet.has(lineNumber);
-          const rowBg = isCurrent ? 'bg-orange-400/30' : isMatch ? 'bg-yellow-400/15' : '';
+          const rowBg = isCurrent ? 'bg-warning/30' : isMatch ? 'bg-warning/15' : '';
           const html = isInLoaded ? getHighlightedLine(loadedIndex) : '';
           return (
             <div
@@ -462,7 +464,7 @@ function CodeViewer({
             >
               <div
                 className={`px-3 text-right select-none border-r border-border bg-muted dark:bg-muted/50 whitespace-nowrap ${
-                  isCurrent ? 'text-orange-300' : isMatch ? 'text-yellow-300' : 'text-muted-foreground'
+                  isCurrent ? 'text-warning-foreground' : isMatch ? 'text-warning-foreground' : 'text-muted-foreground'
                 }`}
                 style={{ minWidth: '4rem' }}
               >
@@ -476,7 +478,7 @@ function CodeViewer({
                     dangerouslySetInnerHTML={{ __html: html }}
                   />
                 ) : (
-                  <span className="text-muted-foreground italic">Loading…</span>
+                  <Skeleton className="h-4 w-3/4" />
                 )}
               </div>
             </div>

@@ -273,7 +273,7 @@ export const MemoCard = memo(function MemoCard({
           className="flex-shrink-0 p-1 text-muted-foreground hover:text-foreground transition-colors rounded"
         >
           {copied ? (
-            <Check className="w-4 h-4 text-green-600" />
+            <Check className="w-4 h-4 text-success" />
           ) : (
             <Copy className="w-4 h-4" />
           )}
@@ -282,7 +282,7 @@ export const MemoCard = memo(function MemoCard({
           type="button"
           onClick={handleDelete}
           aria-label="Delete memo"
-          className="flex-shrink-0 p-1 text-muted-foreground hover:text-red-500 transition-colors rounded"
+          className="flex-shrink-0 p-1 text-muted-foreground hover:text-danger transition-colors rounded"
         >
           <svg
             className="w-4 h-4"
@@ -313,7 +313,7 @@ export const MemoCard = memo(function MemoCard({
 
       {/* Error message */}
       {error && (
-        <div className="text-xs text-red-500">
+        <div className="text-xs text-danger">
           {error}
         </div>
       )}

@@ -93,6 +93,7 @@ export class GeminiTool extends BaseCLITool {
     // Check if session already exists
     const exists = await hasSession(sessionName);
     if (exists) {
+      await this.reconcileExistingSession(sessionName);
       logger.info('gemini-session-sessionname');
       return;
     }

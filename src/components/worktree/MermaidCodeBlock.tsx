@@ -11,11 +11,11 @@
 
 import React from 'react';
 import dynamic from 'next/dynamic';
-import { Loader2 } from 'lucide-react';
+import { Spinner } from '@/components/ui/Spinner';
 
 /**
  * Dynamic import of MermaidDiagram with SSR disabled
- * [SF2-004] Uses existing Loader2 spinner for consistent loading UI
+ * [SF2-004] Uses the shared Spinner primitive for consistent loading UI
  */
 const MermaidDiagram = dynamic(
   () =>
@@ -26,7 +26,7 @@ const MermaidDiagram = dynamic(
     ssr: false,
     loading: () => (
       <div className="mermaid-loading flex items-center gap-2 text-muted-foreground p-4">
-        <Loader2 className="animate-spin h-4 w-4" />
+        <Spinner size="sm" />
         <span>Loading diagram...</span>
       </div>
     ),

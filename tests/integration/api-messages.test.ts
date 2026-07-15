@@ -206,9 +206,9 @@ describe('GET /api/worktrees/:id/messages', () => {
 
   // Issue #701: Limit boundary tests
   describe('limit parameter boundary (Issue #701)', () => {
-    it('should accept limit=250 (upper bound) and return 200', async () => {
+    it('should accept limit=1000 (upper bound) and return 200 (Issue #1123)', async () => {
       const request = new Request(
-        'http://localhost:3000/api/worktrees/test-worktree/messages?limit=250'
+        'http://localhost:3000/api/worktrees/test-worktree/messages?limit=1000'
       );
       const params = { params: { id: 'test-worktree' } };
       const response = await getMessages(
@@ -218,9 +218,9 @@ describe('GET /api/worktrees/:id/messages', () => {
       expect(response.status).toBe(200);
     });
 
-    it('should reject limit=251 (above upper bound) with 400', async () => {
+    it('should reject limit=1001 (above upper bound) with 400 (Issue #1123)', async () => {
       const request = new Request(
-        'http://localhost:3000/api/worktrees/test-worktree/messages?limit=251'
+        'http://localhost:3000/api/worktrees/test-worktree/messages?limit=1001'
       );
       const params = { params: { id: 'test-worktree' } };
       const response = await getMessages(
@@ -230,7 +230,7 @@ describe('GET /api/worktrees/:id/messages', () => {
       expect(response.status).toBe(400);
       const data = await response.json();
       expect(data).toHaveProperty('error');
-      expect(data.error).toContain('250');
+      expect(data.error).toContain('1000');
     });
 
     it('should reject limit=0 (below lower bound) with 400', async () => {

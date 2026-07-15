@@ -176,13 +176,13 @@ export function AutoYesConfirmDialog({
             placeholder={t('stopPatternPlaceholder')}
             className={`w-full px-3 py-2 border rounded-md text-sm font-mono bg-surface dark:bg-surface-2 text-foreground ${
               regexError
-                ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
+                ? 'border-danger focus:ring-danger focus:border-danger'
                 : 'border-input focus:ring-ring focus:border-accent-500'
             } focus:outline-none focus:ring-1`}
             data-testid="stop-pattern-input"
           />
           {regexError && (
-            <p className="mt-1 text-xs text-red-600" data-testid="stop-pattern-error">
+            <p className="mt-1 text-xs text-danger" data-testid="stop-pattern-error">
               {regexError}
             </p>
           )}
@@ -195,8 +195,8 @@ export function AutoYesConfirmDialog({
           </p>
         </div>
 
-        <div className="bg-yellow-50 dark:bg-yellow-900/30 border-l-4 border-yellow-400 dark:border-yellow-600 p-3">
-          <p className="text-sm text-yellow-800 dark:text-yellow-300">
+        <div className="bg-warning-subtle border-l-4 border-warning p-3">
+          <p className="text-sm text-warning-foreground">
             <span className="font-medium">{t('disclaimer')}</span>
             {t('disclaimerText')}
           </p>
@@ -217,7 +217,7 @@ export function AutoYesConfirmDialog({
             className={`px-4 py-2 text-sm font-medium rounded-md text-white ${
               regexError
                 ? 'bg-muted-foreground cursor-not-allowed'
-                : 'bg-yellow-600 hover:bg-yellow-700'
+                : 'bg-warning hover:bg-warning/90'
             }`}
             data-testid="confirm-button"
           >

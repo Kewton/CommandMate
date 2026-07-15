@@ -28,9 +28,10 @@ import { computeMatchedPaths } from '@/lib/utils';
 import { useFilePolling } from '@/hooks/useFilePolling';
 import { useFileMetadataDisplay } from '@/hooks/useFileMetadataDisplay';
 import { FILE_TREE_POLL_INTERVAL_MS } from '@/config/file-polling-config';
+import { useFileTreeExpandedState } from '@/hooks/useFileTreeExpandedState';
 import { useLocale } from 'next-intl';
-import { FilePlus, FolderPlus, AlertCircle, RefreshCw } from 'lucide-react';
-import { Button } from '@/components/ui';
+import { FilePlus, FolderPlus, AlertCircle, RefreshCw, RotateCcw } from 'lucide-react';
+import { Button, Skeleton } from '@/components/ui';
 
 // ============================================================================
 // Types
@@ -73,6 +74,13 @@ export interface FileTreeViewProps {
   searchResults?: SearchResultItem[];
   /** [Issue #21] Callback when a search result is selected (optional) */
   onSearchResultSelect?: (filePath: string) => void;
+  /**
+   * [Issue #1108] Called by the toolbar reset button after the tree clears its
+   * own view state (expansion / cache / scroll). The parent uses it to reset
+   * the controller-owned parts of a full reset: clear search, close open file
+   * tabs / viewer. Optional so the tree still renders without it.
+   */
+  onResetView?: () => void;
 }
 
 /** Maximum number of concurrent directory fetches during tree reload */
@@ -113,6 +121,7 @@ export const FileTreeView = memo(function FileTreeView({
   searchMode,
   searchResults,
   onSearchResultSelect,
+  onResetView,
 }: FileTreeViewProps) {
   // [Issue #162] Get locale for date formatting
   const locale = useLocale();
@@ -123,8 +132,15 @@ export const FileTreeView = memo(function FileTreeView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rootItems, setRootItems] = useState<TreeItem[]>([]);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // [Issue #1108] Expansion set is persisted per worktree in localStorage so
+  // open folders survive activity switches / reloads / worktree round-trips.
+  const { expanded, setExpanded, resetExpanded } =
+    useFileTreeExpandedState(worktreeId);
   const [cache, setCache] = useState<Map<string, TreeItem[]>>(() => new Map());
+
+  // [Issue #1108] Ref to the scrollable tree container so the reset button can
+  // return the scroll position to the top.
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // [Issue #164] Ref to access current expanded state without adding to useEffect dependencies
   const expandedRef = useRef(expanded);
@@ -246,7 +262,7 @@ export const FileTreeView = memo(function FileTreeView({
         setLoading(false);
       }
     }
-  }, [fetchDirectory]);
+  }, [fetchDirectory, setExpanded]);
 
   useEffect(() => {
     void reloadTreeWithExpandedDirs();
@@ -303,7 +319,7 @@ export const FileTreeView = memo(function FileTreeView({
               // A directory we previously listed that now errors (deleted /
               // inaccessible) is itself a change — record a sentinel so the
               // comparison trips and the reload prunes the stale path.
-              return { dirPath, hash: ' unavailable' };
+              return { dirPath, hash: 'unavailable' };
             }
           })
         );
@@ -390,7 +406,20 @@ export const FileTreeView = memo(function FileTreeView({
       }
       return next;
     });
-  }, []);
+  }, [setExpanded]);
+
+  /**
+   * [Issue #1108] Full view reset: return the Files view to its initial state.
+   * Resets the tree-owned parts here (expansion + persisted key, cached
+   * children, scroll position) and delegates the controller-owned parts
+   * (search, open file tabs / viewer) to `onResetView`.
+   */
+  const handleResetView = useCallback(() => {
+    resetExpanded();
+    setCache(new Map());
+    scrollContainerRef.current?.scrollTo({ top: 0 });
+    onResetView?.();
+  }, [resetExpanded, onResetView]);
 
   /**
    * [Issue #21] Compute matched paths for content search
@@ -422,7 +451,7 @@ export const FileTreeView = memo(function FileTreeView({
         return next;
       });
     }
-  }, [matchedPaths, cache, searchResults]);
+  }, [matchedPaths, cache, searchResults, setExpanded]);
 
   /**
    * [Issue #21] Filter root items based on search
@@ -488,13 +517,26 @@ export const FileTreeView = memo(function FileTreeView({
   // rendered in the toolbar area instead (see below).
   const isInitialLoading = loading && rootItems.length === 0;
   if (isInitialLoading) {
+    // [Issue #1118] Skeleton rows shaped like tree nodes (chevron/icon +
+    // name at staggered indents) instead of a centered spinner, so the real
+    // tree replaces them without a layout jump.
     return (
       <div
         data-testid="file-tree-loading"
-        className={`flex items-center justify-center p-4 ${className}`}
+        className={`p-2 ${className}`}
+        role="status"
+        aria-label="Loading files"
       >
-        <span className="w-5 h-5 border-2 border-input border-t-cyan-500 rounded-full animate-spin" />
-        <span className="ml-2 text-sm text-muted-foreground">Loading files...</span>
+        {[0, 8, 16, 8, 0, 8].map((indent, i) => (
+          <div
+            key={i}
+            className="flex items-center gap-2 py-1.5 pr-2"
+            style={{ paddingLeft: `${8 + indent}px` }}
+          >
+            <Skeleton className="h-4 w-4 shrink-0 rounded" />
+            <Skeleton className={`h-4 ${i % 3 === 0 ? 'w-32' : i % 3 === 1 ? 'w-24' : 'w-40'} max-w-full`} />
+          </div>
+        ))}
       </div>
     );
   }
@@ -507,9 +549,9 @@ export const FileTreeView = memo(function FileTreeView({
     return (
       <div
         data-testid="file-tree-error"
-        className={`p-4 bg-red-50 border border-red-200 rounded-lg ${className}`}
+        className={`p-4 bg-danger-subtle border border-danger-border rounded-lg ${className}`}
       >
-        <p className="text-sm text-red-600">{error}</p>
+        <p className="text-sm text-danger">{error}</p>
       </div>
     );
   }
@@ -573,6 +615,7 @@ export const FileTreeView = memo(function FileTreeView({
 
   return (
     <div
+      ref={scrollContainerRef}
       data-testid="file-tree-view"
       role="tree"
       aria-label="File tree"
@@ -646,6 +689,22 @@ export const FileTreeView = memo(function FileTreeView({
               aria-hidden="true"
             />
           </button>
+          {/* [Issue #1108] Reset the Files view to its initial state: collapse
+              all folders (and drop the persisted key), clear the cache, scroll
+              to top, and clear search / open file tabs / viewer via onResetView.
+              Distinct from "更新" (refresh), which preserves expansion. Lives in
+              the always-visible toolbar so it stays reachable on touch devices. */}
+          {/* Issue #1061: dense toolbar icon control — base padding/hover-lift would change the dense feel — 残置 */}
+          <button
+            data-testid="file-tree-reset-button"
+            type="button"
+            onClick={handleResetView}
+            aria-label="Reset file tree view"
+            title="表示をリセット"
+            className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:bg-muted rounded transition-colors"
+          >
+            <RotateCcw className="w-4 h-4" aria-hidden="true" />
+          </button>
         </div>
       </div>
       {/* [Issue #706] Non-destructive refetch error banner. The previous
@@ -655,7 +714,7 @@ export const FileTreeView = memo(function FileTreeView({
         <div
           data-testid="file-tree-refetch-error"
           role="alert"
-          className="flex items-center gap-2 px-2 py-1 text-xs bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800 text-red-700 dark:text-red-300"
+          className="flex items-center gap-2 px-2 py-1 text-xs bg-danger-subtle border-b border-danger-border text-danger-foreground"
         >
           <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
           <span className="flex-1 truncate">{error}</span>
@@ -665,7 +724,7 @@ export const FileTreeView = memo(function FileTreeView({
             onClick={() => {
               void reloadTreeWithExpandedDirs();
             }}
-            className="px-2 py-0.5 text-xs rounded border border-red-300 dark:border-red-700 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
+            className="px-2 py-0.5 text-xs rounded border border-danger-border hover:bg-danger-subtle transition-colors"
           >
             再試行
           </Button>

@@ -2,6 +2,7 @@
 
 import type { DetectPromptOptions, PromptDetectionResult } from './types';
 import type { SubmitMode } from '@/types/models';
+import { normalizeTuiFrameForDetection } from './tui-detection-frame';
 
 // ============================================================================
 // Constants
@@ -602,6 +603,7 @@ export function detectMultipleChoicePrompt(
   options: DetectPromptOptions | undefined,
   truncateRawContentFn: (content: string) => string,
 ): PromptDetectionResult {
+  output = normalizeTuiFrameForDetection(output);
   // C-003: Use ?? true for readability instead of !== false double negation
   const requireDefault = options?.requireDefaultIndicator ?? true;
 

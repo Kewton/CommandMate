@@ -907,4 +907,58 @@ describe('MessageInput', () => {
       });
     });
   });
+
+  // ===== No self-lift transform (Issue #1166) =====
+  //
+  // The old #1128 translateY hack was removed: the mobile shell
+  // (WorktreeDetailRefactored) now sizes its container to visualViewport.height
+  // and places the composer in normal flow, so MessageInput must never apply a
+  // transform of its own regardless of the software-keyboard state.
+  describe('No self-lift transform (Issue #1166)', () => {
+    const originalVisualViewport = window.visualViewport;
+
+    afterEach(() => {
+      Object.defineProperty(window, 'visualViewport', {
+        value: originalVisualViewport,
+        configurable: true,
+        writable: true,
+      });
+    });
+
+    /** Mock a visualViewport shrunk by `heightDiff` (i.e. keyboard height). */
+    function mockKeyboard(heightDiff: number) {
+      Object.defineProperty(window, 'visualViewport', {
+        value: {
+          height: window.innerHeight - heightDiff,
+          width: 375,
+          offsetTop: 0,
+          offsetLeft: 0,
+          pageTop: 0,
+          pageLeft: 0,
+          scale: 1,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        },
+        configurable: true,
+        writable: true,
+      });
+    }
+
+    it('never applies an inline transform when the keyboard is open', () => {
+      mockKeyboard(300);
+      render(<MessageInput {...defaultProps} />);
+
+      const container = screen.getByTestId('message-input-container');
+      expect(container.style.transform).toBe('');
+    });
+
+    it('never applies an inline transform when the keyboard is closed', () => {
+      mockKeyboard(0);
+      render(<MessageInput {...defaultProps} />);
+
+      const container = screen.getByTestId('message-input-container');
+      expect(container.style.transform).toBe('');
+    });
+  });
 });

@@ -99,7 +99,7 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
         {isDirty && (
           <span
             data-testid="dirty-indicator"
-            className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-300 flex-shrink-0"
+            className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-warning-subtle text-warning-foreground flex-shrink-0"
           >
             Unsaved
           </span>
@@ -162,7 +162,7 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
           data-testid="copy-content-button"
           onClick={onCopy}
           className={`p-1.5 hover:bg-muted rounded ${
-            copied ? 'text-green-500' : 'text-muted-foreground hover:text-foreground'
+            copied ? 'text-success' : 'text-muted-foreground hover:text-foreground'
           }`}
           title="Copy content"
         >

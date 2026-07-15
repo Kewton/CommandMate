@@ -329,7 +329,7 @@ describe('MobilePromptSheet', () => {
     });
   });
 
-  describe('Swipe to Dismiss', () => {
+  describe('Swipe to Dismiss (Issue #1128: unified on useSwipeGesture)', () => {
     it('should handle swipe down gesture to dismiss when exceeding threshold', async () => {
       const onDismiss = vi.fn();
       render(
@@ -343,10 +343,11 @@ describe('MobilePromptSheet', () => {
 
       const sheet = screen.getByTestId('mobile-prompt-sheet');
 
-      // Simulate touch swipe down exceeding threshold (100px)
-      fireEvent.touchStart(sheet, { touches: [{ clientY: 0 }] });
-      fireEvent.touchMove(sheet, { touches: [{ clientY: 150 }] });
-      fireEvent.touchEnd(sheet);
+      // Simulate touch swipe down exceeding threshold (100px). The shared hook
+      // attaches native listeners and reads touchend from `changedTouches`.
+      fireEvent.touchStart(sheet, { touches: [{ clientX: 0, clientY: 0 }] });
+      fireEvent.touchMove(sheet, { touches: [{ clientX: 0, clientY: 150 }] });
+      fireEvent.touchEnd(sheet, { changedTouches: [{ clientX: 0, clientY: 150 }] });
 
       await waitFor(() => {
         expect(onDismiss).toHaveBeenCalled();
@@ -367,9 +368,31 @@ describe('MobilePromptSheet', () => {
       const sheet = screen.getByTestId('mobile-prompt-sheet');
 
       // Simulate small touch move (below threshold)
-      fireEvent.touchStart(sheet, { touches: [{ clientY: 0 }] });
-      fireEvent.touchMove(sheet, { touches: [{ clientY: 50 }] });
-      fireEvent.touchEnd(sheet);
+      fireEvent.touchStart(sheet, { touches: [{ clientX: 0, clientY: 0 }] });
+      fireEvent.touchMove(sheet, { touches: [{ clientX: 0, clientY: 50 }] });
+      fireEvent.touchEnd(sheet, { changedTouches: [{ clientX: 0, clientY: 50 }] });
+
+      expect(onDismiss).not.toHaveBeenCalled();
+    });
+
+    it('should NOT dismiss on a predominantly horizontal drag (direction lock)', () => {
+      const onDismiss = vi.fn();
+      render(
+        <MobilePromptSheet
+          {...defaultProps}
+          promptData={yesNoPrompt}
+          visible={true}
+          onDismiss={onDismiss}
+        />
+      );
+
+      const sheet = screen.getByTestId('mobile-prompt-sheet');
+
+      // A horizontal-dominant gesture commits to the horizontal axis and is
+      // cancelled by the vertical-axis direction lock — no dismiss.
+      fireEvent.touchStart(sheet, { touches: [{ clientX: 0, clientY: 0 }] });
+      fireEvent.touchMove(sheet, { touches: [{ clientX: 160, clientY: 20 }] });
+      fireEvent.touchEnd(sheet, { changedTouches: [{ clientX: 160, clientY: 120 }] });
 
       expect(onDismiss).not.toHaveBeenCalled();
     });
@@ -387,9 +410,9 @@ describe('MobilePromptSheet', () => {
 
       // Should not throw when no onDismiss is provided
       expect(() => {
-        fireEvent.touchStart(sheet, { touches: [{ clientY: 0 }] });
-        fireEvent.touchMove(sheet, { touches: [{ clientY: 150 }] });
-        fireEvent.touchEnd(sheet);
+        fireEvent.touchStart(sheet, { touches: [{ clientX: 0, clientY: 0 }] });
+        fireEvent.touchMove(sheet, { touches: [{ clientX: 0, clientY: 150 }] });
+        fireEvent.touchEnd(sheet, { changedTouches: [{ clientX: 0, clientY: 150 }] });
       }).not.toThrow();
     });
   });
@@ -421,6 +444,8 @@ describe('MobilePromptSheet', () => {
     });
 
     it('should trap focus within the sheet', () => {
+      // Issue #1127: Tab / Shift+Tab cycle within the sheet instead of escaping
+      // to the page behind the overlay.
       render(
         <MobilePromptSheet
           {...defaultProps}
@@ -429,8 +454,22 @@ describe('MobilePromptSheet', () => {
         />
       );
 
-      const buttons = screen.getAllByRole('button');
+      const sheet = screen.getByTestId('mobile-prompt-sheet');
+      // Initial focus lands on the sheet dialog itself.
+      expect(document.activeElement).toBe(sheet);
+
+      const buttons = Array.from(sheet.querySelectorAll('button'));
       expect(buttons.length).toBeGreaterThan(0);
+      const first = buttons[0];
+      const last = buttons[buttons.length - 1];
+
+      last.focus();
+      fireEvent.keyDown(document, { key: 'Tab' });
+      expect(document.activeElement).toBe(first);
+
+      first.focus();
+      fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+      expect(document.activeElement).toBe(last);
     });
   });
 

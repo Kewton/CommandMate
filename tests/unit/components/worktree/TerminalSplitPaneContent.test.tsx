@@ -10,7 +10,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import { TerminalSplitPaneContent } from '@/components/worktree/TerminalSplitPaneContent';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
@@ -330,8 +330,13 @@ describe('TerminalSplitPaneContent', () => {
   });
 
   it('renders the C-lite escape hatch for an unclassified running session (Issue #1017)', async () => {
-    mockFetch.mockImplementation(() =>
-      okJson({
+    let fetchCount = 0;
+    mockFetch.mockImplementation(async () => {
+      fetchCount += 1;
+      if (fetchCount > 1) {
+        await new Promise(resolve => setTimeout(resolve, 550));
+      }
+      return okJson({
         isRunning: true,
         fullOutput: 'stuck in an unknown TUI mode',
         thinking: false,
@@ -340,8 +345,8 @@ describe('TerminalSplitPaneContent', () => {
         isPagerActive: false,
         isPromptWaiting: false,
         isUnclassifiedActive: true,
-      }),
-    );
+      });
+    });
 
     render(
       <TerminalSplitPaneContent
@@ -357,7 +362,7 @@ describe('TerminalSplitPaneContent', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('terminal-escape-hatch')).toBeInTheDocument();
-    });
+    }, { timeout: 1500 });
     expect(screen.getByTestId('terminal-escape-hatch').getAttribute('data-cli-tool-id')).toBe('codex');
   });
 
@@ -433,6 +438,7 @@ describe('TerminalSplitPaneContent', () => {
         fullOutput: '',
         thinking: false,
         isPromptWaiting: true,
+        isUnclassifiedActive: true,
         promptData: { type: 'yes_no', question: 'Continue?' },
       }),
     );
@@ -452,6 +458,7 @@ describe('TerminalSplitPaneContent', () => {
       await Promise.resolve();
     });
     expect(screen.queryByTestId('prompt-panel')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('terminal-escape-hatch')).not.toBeInTheDocument();
   });
 
   it('shows attach skeleton until the first /current-output resolves', async () => {
@@ -849,6 +856,153 @@ describe('TerminalSplitPaneContent', () => {
       );
       const input = await screen.findByTestId('message-input-2');
       expect(input.getAttribute('data-pending-insert')).toBe('from-parent');
+    });
+  });
+
+  // Issue #1171: per-split session End (×) button.
+  describe('per-split End (×) button (Issue #1171)', () => {
+    const reviewInstance: AgentInstance = {
+      id: 'claude-2',
+      cliTool: 'claude',
+      alias: 'Review agent',
+      order: 1,
+    };
+
+    it('shows the End button only when THIS split session is running', async () => {
+      mockFetch.mockImplementation(() =>
+        okJson({ isRunning: true, fullOutput: 'live', thinking: false }),
+      );
+      render(
+        <TerminalSplitPaneContent
+          worktreeId="w-1"
+          splitIndex={0}
+          cliToolId="claude"
+          instanceId="claude"
+          instance={inst('claude')}
+          availableInstances={[inst('claude')]}
+          onInstanceChange={vi.fn()}
+          onFocus={vi.fn()}
+          autoYes={{ onToggle: vi.fn() }}
+          onRequestSessionEnd={vi.fn()}
+        />,
+      );
+      expect(await screen.findByTestId('terminal-end-session-button-0')).toBeInTheDocument();
+    });
+
+    it('hides the End button when the split session is not running', async () => {
+      mockFetch.mockImplementation(() =>
+        okJson({ isRunning: false, fullOutput: '', thinking: false }),
+      );
+      render(
+        <TerminalSplitPaneContent
+          worktreeId="w-1"
+          splitIndex={0}
+          cliToolId="claude"
+          availableInstances={[inst('claude')]}
+          onInstanceChange={vi.fn()}
+          onFocus={vi.fn()}
+          autoYes={{ onToggle: vi.fn() }}
+          onRequestSessionEnd={vi.fn()}
+        />,
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId('terminal-active').textContent).toBe('false'),
+      );
+      expect(screen.queryByTestId('terminal-end-session-button-0')).not.toBeInTheDocument();
+    });
+
+    it('does not render the End button when onRequestSessionEnd is omitted', async () => {
+      mockFetch.mockImplementation(() =>
+        okJson({ isRunning: true, fullOutput: 'live', thinking: false }),
+      );
+      render(
+        <TerminalSplitPaneContent
+          worktreeId="w-1"
+          splitIndex={0}
+          cliToolId="claude"
+          availableInstances={[inst('claude')]}
+          onInstanceChange={vi.fn()}
+          onFocus={vi.fn()}
+          autoYes={{ onToggle: vi.fn() }}
+        />,
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId('terminal-active').textContent).toBe('true'),
+      );
+      expect(screen.queryByTestId('terminal-end-session-button-0')).not.toBeInTheDocument();
+    });
+
+    it('requests session end with this split OWN snapshotted target (alias-first label)', async () => {
+      mockFetch.mockImplementation(() =>
+        okJson({ isRunning: true, fullOutput: 'live', thinking: false }),
+      );
+      const onRequestSessionEnd = vi.fn();
+      render(
+        <TerminalSplitPaneContent
+          worktreeId="w-1"
+          splitIndex={1}
+          cliToolId="claude"
+          instanceId="claude-2"
+          instance={reviewInstance}
+          availableInstances={[inst('claude'), reviewInstance]}
+          onInstanceChange={vi.fn()}
+          onFocus={vi.fn()}
+          autoYes={{ onToggle: vi.fn() }}
+          onRequestSessionEnd={onRequestSessionEnd}
+        />,
+      );
+      const btn = await screen.findByTestId('terminal-end-session-button-1');
+      // Localized aria-label / tooltip present (name interpolation via i18n key).
+      expect(btn.getAttribute('aria-label')).toBeTruthy();
+      fireEvent.click(btn);
+      expect(onRequestSessionEnd).toHaveBeenCalledWith({
+        cliToolId: 'claude',
+        instanceId: 'claude-2',
+        label: 'Review agent',
+      });
+    });
+
+    it('builds independent targets for split 0 (claude) and split 1 (claude-2)', async () => {
+      mockFetch.mockImplementation(() =>
+        okJson({ isRunning: true, fullOutput: 'live', thinking: false }),
+      );
+      const end0 = vi.fn();
+      const end1 = vi.fn();
+      render(
+        <>
+          <TerminalSplitPaneContent
+            worktreeId="w-1"
+            splitIndex={0}
+            cliToolId="claude"
+            instanceId="claude"
+            instance={inst('claude')}
+            availableInstances={[inst('claude'), reviewInstance]}
+            onInstanceChange={vi.fn()}
+            onFocus={vi.fn()}
+            autoYes={{ onToggle: vi.fn() }}
+            onRequestSessionEnd={end0}
+          />
+          <TerminalSplitPaneContent
+            worktreeId="w-1"
+            splitIndex={1}
+            cliToolId="claude"
+            instanceId="claude-2"
+            instance={reviewInstance}
+            availableInstances={[inst('claude'), reviewInstance]}
+            onInstanceChange={vi.fn()}
+            onFocus={vi.fn()}
+            autoYes={{ onToggle: vi.fn() }}
+            onRequestSessionEnd={end1}
+          />
+        </>,
+      );
+      fireEvent.click(await screen.findByTestId('terminal-end-session-button-0'));
+      fireEvent.click(await screen.findByTestId('terminal-end-session-button-1'));
+      expect(end0).toHaveBeenCalledWith({ cliToolId: 'claude', instanceId: 'claude', label: 'claude' });
+      expect(end1).toHaveBeenCalledWith({ cliToolId: 'claude', instanceId: 'claude-2', label: 'Review agent' });
+      // Split 0's button never fired split 1's handler and vice versa.
+      expect(end0).toHaveBeenCalledTimes(1);
+      expect(end1).toHaveBeenCalledTimes(1);
     });
   });
 });

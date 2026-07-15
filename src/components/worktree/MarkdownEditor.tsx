@@ -35,6 +35,8 @@ import { AlertTriangle, List } from 'lucide-react';
 import { debounce } from '@/lib/utils';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { ToastContainer, useToast } from '@/components/common/Toast';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
+import { Spinner } from '@/components/ui/Spinner';
 import { PaneResizer } from '@/components/worktree/PaneResizer';
 import { MarkdownToolbar } from '@/components/worktree/MarkdownToolbar';
 import {
@@ -252,6 +254,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   const isTextMode = fileType === 'text';
 
   const tWorktree = useTranslations('worktree');
+  const confirm = useConfirm();
 
   // State
   const [content, setContent] = useState('');
@@ -531,20 +534,24 @@ export const MarkdownEditor = memo(function MarkdownEditor({
       if (isDirty || isAutoSaving) {
         await saveNow();
         if (autoSaveError) {
-          const confirmed = window.confirm('Save failed. Close anyway?');
+          const confirmed = await confirm({
+            description: tWorktree('editor.saveFailedCloseConfirm'),
+            variant: 'danger',
+          });
           if (!confirmed) return;
         }
       }
     } else {
       if (isDirty) {
-        const confirmed = window.confirm(
-          'You have unsaved changes. Are you sure you want to close?'
-        );
+        const confirmed = await confirm({
+          description: tWorktree('editor.unsavedCloseConfirm'),
+          variant: 'danger',
+        });
         if (!confirmed) return;
       }
     }
     onClose?.();
-  }, [isAutoSaveEnabled, isDirty, isAutoSaving, saveNow, autoSaveError, onClose]);
+  }, [isAutoSaveEnabled, isDirty, isAutoSaving, saveNow, autoSaveError, onClose, confirm, tWorktree]);
 
   /**
    * Handle copy content to clipboard
@@ -797,7 +804,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         className="flex items-center justify-center h-full bg-surface"
       >
         <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-input border-t-accent-600 dark:border-t-accent-400" />
+          <Spinner size="xl" variant="accent" className="inline-block" />
           <p className="mt-4 text-muted-foreground">Loading...</p>
         </div>
       </div>
@@ -812,8 +819,8 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         className="flex items-center justify-center h-full bg-surface"
       >
         <div className="text-center">
-          <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-          <p className="text-red-600 dark:text-red-400">{error}</p>
+          <AlertTriangle className="h-12 w-12 text-danger mx-auto mb-4" />
+          <p className="text-danger-foreground">{error}</p>
           {onClose && (
             <button
               onClick={onClose}

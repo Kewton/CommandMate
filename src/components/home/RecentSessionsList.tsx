@@ -11,6 +11,7 @@
 
 import React, { useMemo } from 'react';
 import Link from 'next/link';
+import { Skeleton } from '@/components/ui';
 import { compareByTimestamp } from '@/lib/sidebar-utils';
 import { formatRelativeTimeShort } from '@/lib/date-utils';
 import type { Worktree } from '@/types/models';
@@ -20,6 +21,8 @@ export interface RecentSessionsListProps {
   worktrees: Worktree[];
   /** Max number of sessions to show (default 5) */
   limit?: number;
+  /** [Issue #1118] First-load skeleton (rows match the loaded list rows) */
+  isLoading?: boolean;
 }
 
 /** Recency signal for a worktree: last user message, falling back to update time. */
@@ -30,20 +33,44 @@ function recencyOf(wt: Worktree): Date | string | undefined {
 /** Small status dot reflecting whether the session is active/waiting. */
 function statusDotClass(wt: Worktree): string {
   if (wt.isWaitingForResponse) {
-    return 'bg-amber-500 dark:bg-amber-400';
+    return 'bg-warning';
   }
   if (wt.isSessionRunning) {
-    return 'bg-green-500 dark:bg-green-400';
+    return 'bg-success';
   }
   return 'bg-muted-foreground';
 }
 
-export function RecentSessionsList({ worktrees, limit = 5 }: RecentSessionsListProps) {
+export function RecentSessionsList({ worktrees, limit = 5, isLoading = false }: RecentSessionsListProps) {
   const recent = useMemo(() => {
     return [...worktrees]
       .sort((a, b) => compareByTimestamp(recencyOf(a), recencyOf(b)))
       .slice(0, limit);
   }, [worktrees, limit]);
+
+  if (isLoading) {
+    // Rows mirror the loaded link rows (dot + two text lines + time) so the
+    // list height does not jump when real sessions replace the skeleton.
+    return (
+      <ul
+        className="space-y-1"
+        data-testid="recent-sessions-loading"
+        role="status"
+        aria-label="Loading recent sessions"
+      >
+        {Array.from({ length: limit }, (_, i) => (
+          <li key={i} className="flex items-center gap-2 rounded-md px-2 py-1.5">
+            <Skeleton className="h-2 w-2 shrink-0 rounded-full" />
+            <span className="min-w-0 flex-1 space-y-1">
+              <Skeleton className="h-4 w-2/5" />
+              <Skeleton className="h-3 w-3/5" />
+            </span>
+            <Skeleton className="h-3 w-8 shrink-0" />
+          </li>
+        ))}
+      </ul>
+    );
+  }
 
   if (recent.length === 0) {
     return (

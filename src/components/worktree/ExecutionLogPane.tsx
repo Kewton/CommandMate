@@ -19,7 +19,8 @@ import { formatTimestamp } from '@/components/worktree/schedules/format';
 import { parseCmateContent } from '@/lib/cmate-validator';
 import { parseCliToolColumn } from '@/lib/cmate-cli-tool-parser';
 import type { AgentInstance } from '@/lib/cli-tools/types';
-import { Button } from '@/components/ui';
+import { Button, Spinner } from '@/components/ui';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 // ============================================================================
 // Types
@@ -102,6 +103,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
   instances,
 }: ExecutionLogPaneProps) {
   const t = useTranslations('schedule');
+  const confirm = useConfirm();
   const [logs, setLogs] = useState<ExecutionLog[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [activeSchedules, setActiveSchedules] = useState<ActiveSchedule[]>([]);
@@ -220,7 +222,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
 
   const handleDeleteSchedule = useCallback(
     async (name: string) => {
-      if (typeof window !== 'undefined' && !window.confirm(t('edit.confirmDelete', { name }))) {
+      if (!(await confirm({ description: t('edit.confirmDelete', { name }), variant: 'danger' }))) {
         return;
       }
       try {
@@ -234,7 +236,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
         console.error('Failed to delete schedule:', err);
       }
     },
-    [worktreeId, t, fetchData],
+    [worktreeId, t, fetchData, confirm],
   );
 
   const handleToggleSchedule = useCallback(
@@ -257,7 +259,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
     return (
       <div className={`flex items-center justify-center h-full p-4 ${className}`}>
         <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-4 border-border border-t-accent-500 rounded-full animate-spin" />
+          <Spinner size="xl" variant="accent" />
           <span className="text-sm text-muted-foreground">{t('loading')}</span>
         </div>
       </div>
@@ -268,7 +270,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
     return (
       <div className={`flex items-center justify-center h-full p-4 ${className}`}>
         <div className="text-center">
-          <span className="text-sm text-red-600 dark:text-red-400">{error}</span>
+          <span className="text-sm text-danger-foreground">{error}</span>
           <Button
             variant="ghost"
             type="button"
@@ -340,7 +342,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-medium text-sm text-foreground">{schedule.name}</span>
                         <div className="flex items-center gap-2">
-                          <span className={`text-xs px-2 py-0.5 rounded ${schedule.isCronActive ? 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300'}`}>
+                          <span className={`text-xs px-2 py-0.5 rounded ${schedule.isCronActive ? 'bg-success-subtle text-success-foreground' : 'bg-danger-subtle text-danger-foreground'}`}>
                             {schedule.isCronActive ? t('activeState.active') : t('activeState.inactive')}
                           </span>
                           {schedule.isExecuting && (
@@ -446,7 +448,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
                               data-testid={`schedule-toggle-${schedule.name}`}
                               onClick={() => void handleToggleSchedule(schedule)}
                               className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
-                                isEnabled ? 'bg-green-500' : 'bg-input'
+                                isEnabled ? 'bg-success' : 'bg-input'
                               }`}
                             >
                               <span
@@ -473,7 +475,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
                               aria-label={t('edit.delete')}
                               title={t('edit.delete')}
                               onClick={() => void handleDeleteSchedule(schedule.name)}
-                              className="p-1.5 text-muted-foreground hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
+                              className="p-1.5 text-muted-foreground hover:text-danger-foreground hover:bg-danger-subtle rounded transition-colors"
                             >
                               <DeleteIcon />
                             </Button>

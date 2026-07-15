@@ -12,6 +12,7 @@ import { startPolling } from '@/lib/polling/response-poller';
 import { getAnswerInput } from '@/lib/detection/prompt-detector';
 import { broadcastMessage } from '@/lib/ws-server';
 import { createLogger } from '@/lib/logger';
+import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 
 const logger = createLogger('api/respond');
 
@@ -178,6 +179,7 @@ export async function POST(
 
     // Resume polling for CLI tool's next response
     startPolling(params.id, cliToolId, instanceId);
+    void broadcastTerminalSnapshotAfterInteraction(params.id, cliToolId, instanceId);
 
     logger.info('resumed-polling-for');
 

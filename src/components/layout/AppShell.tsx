@@ -19,6 +19,7 @@ import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { GlobalMobileNav } from '@/components/mobile/GlobalMobileNav';
 import { CommandPalette } from '@/components/common/CommandPalette';
+import { KeyboardShortcutsOverlay } from '@/components/common/KeyboardShortcutsOverlay';
 import { Z_INDEX } from '@/config/z-index';
 
 // ============================================================================
@@ -125,7 +126,11 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
         )}
 
         {/* Main content */}
-        <main className={`flex-1 min-h-0 overflow-hidden ${showGlobalNav ? 'pb-14' : ''}`} role="main">
+        <main
+          className={`flex-1 min-h-0 overflow-hidden ${showGlobalNav ? 'pb-14' : ''}`}
+          role="main"
+          data-view-transition="content"
+        >
           {children}
         </main>
 
@@ -134,6 +139,8 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
 
         {/* Global command palette (⌘K / Ctrl+K) - single instance (Issue #1053) */}
         <CommandPalette />
+        {/* Global keyboard-shortcuts help overlay (?) - single instance (Issue #1130) */}
+        <KeyboardShortcutsOverlay />
       </div>
     );
   }
@@ -181,6 +188,7 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
           className="flex-1 min-w-0 h-full overflow-hidden transition-[padding] duration-300 ease-out"
           style={{ paddingLeft: showSidebar && isOpen ? `${displayWidth}px` : 0 }}
           role="main"
+          data-view-transition="content"
         >
           {children}
         </main>
@@ -188,6 +196,8 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
 
       {/* Global command palette (⌘K / Ctrl+K) - single instance (Issue #1053) */}
       <CommandPalette />
+      {/* Global keyboard-shortcuts help overlay (?) - single instance (Issue #1130) */}
+      <KeyboardShortcutsOverlay />
     </div>
   );
 });

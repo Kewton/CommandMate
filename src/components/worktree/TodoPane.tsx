@@ -43,8 +43,8 @@ export interface TodoPaneProps {
 const STATUS_CHIP_CLASS: Record<WorktreeTodoStatus, string> = {
   todo: 'border-input text-muted-foreground',
   doing:
-    'border-amber-400 bg-amber-50 text-amber-700 dark:border-amber-500/60 dark:bg-amber-500/10 dark:text-amber-300',
-  done: 'border-green-500 bg-green-50 text-green-700 dark:border-green-500/60 dark:bg-green-500/10 dark:text-green-300',
+    'border-warning-border bg-warning-subtle text-warning-foreground',
+  done: 'border-success-border bg-success-subtle text-success-foreground',
 };
 
 function nextStatus(status: WorktreeTodoStatus): WorktreeTodoStatus {
@@ -274,7 +274,7 @@ export const TodoPane = React.memo(function TodoPane({
       </div>
 
       {error && (
-        <p className="mb-2 text-xs text-red-600 dark:text-red-400" data-testid="todo-error">
+        <p className="mb-2 text-xs text-danger-foreground" data-testid="todo-error">
           {error}
         </p>
       )}
@@ -368,7 +368,7 @@ export const TodoPane = React.memo(function TodoPane({
                   onClick={() => handleDelete(todo)}
                   aria-label={t('todo.delete')}
                   data-testid="todo-delete"
-                  className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center text-muted-foreground opacity-100 transition-opacity hover:text-red-500 dark:hover:text-red-400 sm:min-h-0 sm:min-w-0 sm:opacity-0 sm:group-hover:opacity-100"
+                  className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center text-muted-foreground opacity-100 transition-opacity hover:text-danger-foreground sm:min-h-0 sm:min-w-0 sm:opacity-0 sm:group-hover:opacity-100"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

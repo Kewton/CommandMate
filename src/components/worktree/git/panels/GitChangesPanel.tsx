@@ -18,7 +18,7 @@ import {
   type ChangesDiffMode,
 } from '@/components/worktree/git/gitPaneShared';
 import { useGitPaneContext } from '@/components/worktree/git/GitPaneContext';
-import { Checkbox } from '@/components/ui';
+import { Checkbox, Spinner } from '@/components/ui';
 
 interface ChangedFileListProps {
   title: string;
@@ -158,12 +158,12 @@ const ChangedFileList = memo(function ChangedFileList({
                   >
                     {previewLoading && (
                       <div className="flex items-center gap-2 py-2" role="status">
-                        <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-accent-500" />
+                        <Spinner size="xs" variant="accent" />
                         <span className="sr-only">Loading diff preview...</span>
                       </div>
                     )}
                     {previewError && (
-                      <div className="py-2 text-xs text-red-600 dark:text-red-400" role="alert">
+                      <div className="py-2 text-xs text-danger-foreground" role="alert">
                         {previewError}
                       </div>
                     )}
@@ -278,14 +278,14 @@ export const GitChangesPanel = memo(function GitChangesPanel({
 
       {loading && !staged && (
         <div className="flex items-center gap-2 px-3 pb-2" role="status">
-          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-accent-500" />
+          <Spinner size="sm" variant="accent" />
           <span className="sr-only">Loading changes...</span>
         </div>
       )}
 
       {error && !staged && (
         <div
-          className="px-3 pb-2 text-xs text-red-600 dark:text-red-400"
+          className="px-3 pb-2 text-xs text-danger-foreground"
           role="alert"
           data-testid="git-changes-error"
         >
@@ -379,7 +379,7 @@ export const GitChangesPanel = memo(function GitChangesPanel({
             </div>
             {commitError && (
               <div
-                className="text-xs text-red-600 dark:text-red-400"
+                className="text-xs text-danger-foreground"
                 role="alert"
                 data-testid="git-commit-error"
               >

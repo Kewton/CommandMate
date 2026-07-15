@@ -1,0 +1,156 @@
+/**
+ * RealtimeProvider / useRealtime — single shared WebSocket connection for the app.
+ * Issue #1120.
+ *
+ * Owns one `useWebSocket` instance, fans inbound events out to registered
+ * listeners, and ref-counts room subscriptions so N components can subscribe to
+ * the same worktree with a single server-side subscribe/unsubscribe pair.
+ *
+ * Consumers degrade gracefully when no provider is mounted (e.g. isolated unit
+ * tests): `useRealtime()` returns a disconnected no-op value, so the polling
+ * fallback stays fully in charge.
+ */
+
+'use client';
+
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  type ReactNode,
+} from 'react';
+import { useWebSocket } from '@/hooks/useWebSocket';
+import type { RealtimeEvent, RealtimeStatus } from '@/lib/realtime/types';
+
+export type RealtimeListener = (event: RealtimeEvent) => void;
+
+export interface RealtimeContextValue {
+  status: RealtimeStatus;
+  /** True while a live push connection is established. */
+  connected: boolean;
+  subscribe: (worktreeId: string) => void;
+  unsubscribe: (worktreeId: string) => void;
+  addListener: (listener: RealtimeListener) => () => void;
+}
+
+const noop = () => {};
+
+const DEFAULT_VALUE: RealtimeContextValue = {
+  status: 'disconnected',
+  connected: false,
+  subscribe: noop,
+  unsubscribe: noop,
+  addListener: () => noop,
+};
+
+const RealtimeContext = createContext<RealtimeContextValue | null>(null);
+
+export interface RealtimeProviderProps {
+  children: ReactNode;
+  /** Disable the live connection (falls back to pure polling). */
+  enabled?: boolean;
+}
+
+export function RealtimeProvider({ children, enabled = true }: RealtimeProviderProps) {
+  const listenersRef = useRef<Set<RealtimeListener>>(new Set());
+  const refCountsRef = useRef<Map<string, number>>(new Map());
+
+  const handleEvent = useCallback((event: RealtimeEvent) => {
+    listenersRef.current.forEach((listener) => {
+      try {
+        listener(event);
+      } catch {
+        // Isolate one listener's failure from the others.
+      }
+    });
+  }, []);
+
+  const { status, subscribe: wsSubscribe, unsubscribe: wsUnsubscribe } = useWebSocket({
+    enabled,
+    onEvent: handleEvent,
+  });
+
+  const subscribe = useCallback(
+    (worktreeId: string) => {
+      const counts = refCountsRef.current;
+      const prev = counts.get(worktreeId) ?? 0;
+      counts.set(worktreeId, prev + 1);
+      if (prev === 0) wsSubscribe(worktreeId);
+    },
+    [wsSubscribe],
+  );
+
+  const unsubscribe = useCallback(
+    (worktreeId: string) => {
+      const counts = refCountsRef.current;
+      const prev = counts.get(worktreeId) ?? 0;
+      if (prev <= 1) {
+        counts.delete(worktreeId);
+        wsUnsubscribe(worktreeId);
+      } else {
+        counts.set(worktreeId, prev - 1);
+      }
+    },
+    [wsUnsubscribe],
+  );
+
+  const addListener = useCallback((listener: RealtimeListener) => {
+    listenersRef.current.add(listener);
+    return () => {
+      listenersRef.current.delete(listener);
+    };
+  }, []);
+
+  const value = useMemo<RealtimeContextValue>(
+    () => ({
+      status,
+      connected: status === 'connected',
+      subscribe,
+      unsubscribe,
+      addListener,
+    }),
+    [status, subscribe, unsubscribe, addListener],
+  );
+
+  return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;
+}
+
+/** Access the shared realtime connection. No-op/disconnected when no provider. */
+export function useRealtime(): RealtimeContextValue {
+  return useContext(RealtimeContext) ?? DEFAULT_VALUE;
+}
+
+/**
+ * Register a realtime event listener. The latest `listener` is always invoked,
+ * but the registration itself is stable across renders.
+ */
+export function useRealtimeListener(listener: RealtimeListener): void {
+  const { addListener } = useRealtime();
+  const listenerRef = useRef(listener);
+  listenerRef.current = listener;
+
+  useEffect(() => {
+    return addListener((event) => listenerRef.current(event));
+  }, [addListener]);
+}
+
+/**
+ * Subscribe to a set of worktree rooms for the lifetime of the component /
+ * while the id set is unchanged. Handles add/remove diffs across renders.
+ */
+export function useRealtimeSubscription(worktreeIds: readonly string[]): void {
+  const { subscribe, unsubscribe } = useRealtime();
+  // Stable key so we only re-diff when the set actually changes.
+  const key = [...worktreeIds].sort().join(' ');
+
+  useEffect(() => {
+    const ids = key.length > 0 ? key.split(' ') : [];
+    ids.forEach((id) => subscribe(id));
+    return () => {
+      ids.forEach((id) => unsubscribe(id));
+    };
+  }, [key, subscribe, unsubscribe]);
+}

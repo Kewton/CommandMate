@@ -282,6 +282,37 @@ export const CODEX_PAGER_FOOTER_PATTERN =
   /(?:↑\/↓|pgup\/pgdn|home\/end)\s+to\s+(?:scroll|page|jump)|to\s+edit\s+(?:prev|next|message)/i;
 
 /**
+ * Codex CLI status-bar line pattern (Issue #1150)
+ *
+ * The Codex TUI renders a status bar as the bottom-most content line, just above
+ * the input area. status-detector.ts uses it as the footer boundary that separates
+ * the conversation content (thinking indicators / idle "›" prompt) from the input
+ * area, so both the selection-list check (priority 0.8) and the running/idle check
+ * (priority 2.7) depend on locating it.
+ *
+ * The format drifted across Codex versions — the "N% left ·" token was DROPPED in
+ * v0.141 (gpt-5.5), which is exactly what broke Issue #1150:
+ *   - v0.141 (gpt-5.5): "gpt-5.5 xhigh · ~/share/work/github_kewton/commandmate-issue-947"
+ *   - legacy (gpt-5.4): "gpt-5.4 high · 21% left · ~/share/work/..."
+ *   - legacy (o4-mini): "  o4-mini            50% left · /path/to/project"
+ *
+ * The previous pattern required "\d+%\s+left\s+·", so v0.141 bars never matched:
+ * the footer boundary stayed -1 and the whole Codex running/idle block was skipped,
+ * leaving generating sessions misreported as `ready` (static green dot, no glow).
+ *
+ * Version-independent anchor: a leading model token, a middle-dot "·" separator,
+ * and a filesystem path ("~/…" or "/…") at the END of the line. Any "N% left ·"
+ * segment (legacy) is absorbed by ".*·" before the trailing path. Requiring the
+ * trailing path keeps this Codex-specific (guarded by cliToolId === 'codex' in
+ * status-detector.ts) and stops ordinary conversation lines that merely contain a
+ * "·" from being mistaken for the status bar.
+ *
+ * Single-line by design (no /m, no /g): status-detector.ts tests it per content
+ * line. No nested quantifiers (ReDoS-safe; adjacent greedy quantifiers only).
+ */
+export const CODEX_STATUS_BAR_PATTERN = /^\s*\S.*·\s*~?\/\S*\s*$/;
+
+/**
  * Pasted text pattern
  *
  * Claude CLI displays this when it detects multi-line text paste in the
@@ -742,30 +773,10 @@ export function getCliToolPatterns(cliToolId: CLIToolType): {
   }
 }
 
-/**
- * Strip ANSI escape codes from a string.
- * Optimized version at module level for performance.
- *
- * Covers:
- * - SGR sequences: ESC[Nm (colors, bold, underline, etc.)
- * - OSC sequences: ESC]...BEL (window title, hyperlinks, etc.)
- * - CSI sequences: ESC[...letter (cursor movement, erase, etc.)
- *
- * Known limitations (SEC-002):
- * - 8-bit CSI (0x9B): C1 control code form of CSI is not covered
- * - DEC private modes: ESC[?25h and similar are not covered
- * - Character set switching: ESC(0, ESC(B are not covered
- * - Some RGB color forms: ESC[38;2;r;g;bm may not be fully matched
- *
- * In practice, tmux capture-pane output rarely contains these sequences,
- * so the risk is low. Future consideration: adopt the `strip-ansi` npm package
- * for more comprehensive coverage.
- */
-const ANSI_PATTERN = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\[[0-9;]*m/g;
-
-export function stripAnsi(str: string): string {
-  return str.replace(ANSI_PATTERN, '');
-}
+// ANSI primitives live in a dependency-free leaf module so client components can
+// reuse the same tested pattern without pulling this file's server-only imports
+// (logger/db) into the browser bundle. Re-exported here for existing importers.
+export { stripAnsi, extractAnsiSequences } from './ansi';
 
 /**
  * Strip box-drawing border characters from CLI output.

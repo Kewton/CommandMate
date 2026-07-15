@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { Card } from '@/components/ui';
+import { Card, Skeleton } from '@/components/ui';
 import { cn } from '@/lib/utils/cn';
 import { REVIEW_POLL_INTERVAL_MS } from '@/config/review-config';
 import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
@@ -54,11 +54,11 @@ function CliDot({ status, label }: { status: BranchStatus; label: string }) {
 function getBadgeClass(filter: ReviewFilter): string {
   switch (filter) {
     case 'in_review':
-      return 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400';
+      return 'bg-info-subtle text-info-foreground';
     case 'approval':
-      return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400';
+      return 'bg-warning-subtle text-warning-foreground';
     case 'stalled':
-      return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400';
+      return 'bg-danger-subtle text-danger-foreground';
   }
 }
 
@@ -66,11 +66,11 @@ function getBadgeClass(filter: ReviewFilter): string {
 function getBorderClass(filter: ReviewFilter): string {
   switch (filter) {
     case 'in_review':
-      return 'border-purple-200 dark:border-purple-800 hover:border-purple-400 dark:hover:border-purple-600';
+      return 'border-info-border hover:border-info-border';
     case 'approval':
-      return 'border-yellow-200 dark:border-yellow-800 hover:border-yellow-400 dark:hover:border-yellow-600';
+      return 'border-warning-border hover:border-warning-border';
     case 'stalled':
-      return 'border-red-200 dark:border-red-800 hover:border-red-400 dark:hover:border-red-600';
+      return 'border-danger-border hover:border-danger-border';
   }
 }
 
@@ -170,10 +170,25 @@ export default function ReviewTab() {
         })}
       </div>
 
-      {/* Loading */}
+      {/* Loading — card-shaped skeletons mirroring review list items (Issue #1118) */}
       {isLoading && (
-        <div className="text-muted-foreground" data-testid="review-loading">
-          Loading...
+        <div
+          className="space-y-2"
+          data-testid="review-loading"
+          role="status"
+          aria-label="Loading reviews"
+        >
+          {[0, 1, 2].map((i) => (
+            <Card key={i} padding="md">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <Skeleton className="h-4 w-40 max-w-full" />
+                  <Skeleton className="h-3 w-24 max-w-full" />
+                </div>
+                <Skeleton className="ml-4 h-5 w-16 flex-shrink-0" />
+              </div>
+            </Card>
+          ))}
         </div>
       )}
 

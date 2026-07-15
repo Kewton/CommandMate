@@ -17,6 +17,8 @@ import { isValidWorktreeId } from '@/lib/security/path-validator';
 import type { PromptType, SubmitMode } from '@/types/models';
 import { isValidSubmitMode } from '@/types/models';
 import { createLogger } from '@/lib/logger';
+import { startPolling } from '@/lib/polling/response-poller';
+import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 
 const logger = createLogger('api/prompt-response');
 
@@ -151,6 +153,11 @@ export async function POST(
         { status: 500 }
       );
     }
+
+    // The prompt poller normally stops while waiting for input. Resume response
+    // persistence and independently push the TUI redraw after this interaction.
+    startPolling(params.id, cliToolId, instanceId);
+    void broadcastTerminalSnapshotAfterInteraction(params.id, cliToolId, instanceId);
 
     return NextResponse.json({
       success: true,
