@@ -34,13 +34,19 @@ export { isGlobalInstall, getConfigDir } from './install-context';
  * Default environment configuration values
  * SF-4: DRY - Centralized defaults
  *
- * Issue #135: CM_DB_PATH removed - use getDefaultDbPath() instead
- * for dynamic path resolution based on install type
+ * These are the static values `commandmate init` writes into a new .env file.
+ * They are not the runtime resolution order: getEnv() reads every CM_* value
+ * from the process environment regardless of what appears here.
+ *
+ * Issue #135: CM_DB_PATH has no static default - it depends on the install type,
+ * so it is resolved dynamically by getDefaultDbPath() instead.
  */
 export const ENV_DEFAULTS = {
   CM_PORT: 3000,
   CM_BIND: '127.0.0.1',
-  // CM_DB_PATH removed - Issue #135: use getDefaultDbPath() instead
+  // CM_DB_PATH: resolved by getDefaultDbPath() - see Issue #135 note above.
+  // This absence does not make CM_DB_PATH unsupported as an environment
+  // variable; getEnv() honours it (Issue #1267).
   CM_LOG_LEVEL: 'info',
   CM_LOG_FORMAT: 'text',
 } as const;

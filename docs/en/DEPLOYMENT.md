@@ -162,6 +162,26 @@ npm run build
 
 > **Note**: Legacy names (`MCBD_*`) are also supported for backward compatibility. See `.env.example` for details.
 
+#### `CM_DB_PATH` resolution order and constraints
+
+`CM_DB_PATH` is read from the process environment, so exporting it as an
+environment variable is equivalent to setting it in `.env` (dotenv loads `.env`
+into the process environment; neither one works to the exclusion of the other).
+
+1. `CM_DB_PATH` (or the legacy `MCBD_DB_PATH` alias)
+2. `DATABASE_PATH` (deprecated, emits a warning)
+3. The install-type default (see the table above)
+
+The location is constrained (SEC-001):
+
+- Global install: the path must be inside the home directory
+- Local install: the path must be outside `/etc` `/usr` `/bin` `/sbin` `/var` `/tmp` `/dev` `/sys` `/proc`
+
+A `CM_DB_PATH` outside those bounds **fails at startup with an error**. It is not
+silently replaced by the default, because that would open a different database
+than the one you asked for. A scratch DB therefore cannot live in `/tmp`; use a
+path under `$HOME` or the working directory instead.
+
 ## Build and Deploy
 
 ### Production Build
