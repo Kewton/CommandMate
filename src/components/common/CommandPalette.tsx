@@ -373,7 +373,7 @@ export function CommandPalette() {
             const nav = NAV_ITEMS.find((n) => n.key === entry.id);
             if (!nav) return null;
             const Icon = NAV_ICONS[nav.key];
-            const label = t(`nav.${nav.key}`);
+            const label = tCommon(`nav.${nav.key}`);
             return {
               id: `nav-${nav.key}`,
               value: `recent nav ${nav.key}`,
@@ -523,7 +523,7 @@ export function CommandPalette() {
 
                   <Command.Group heading={t('groups.navigation')}>
                     {NAV_ITEMS.map((item) => {
-                      const label = t(`nav.${item.key}`);
+                      const label = tCommon(`nav.${item.key}`);
                       const Icon = NAV_ICONS[item.key];
                       return (
                         <Command.Item

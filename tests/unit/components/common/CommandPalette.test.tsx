@@ -8,7 +8,9 @@
  * bottom-nav trigger.
  *
  * next-intl is globally mocked (tests/setup.ts) to echo the full key, so
- * assertions reference keys like `commandPalette.nav.sessions`.
+ * assertions reference keys like `common.nav.sessions`. Nav labels moved from
+ * the `commandPalette` namespace to the shared `common` one in Issue #1197 so
+ * Home's quick actions and the palette resolve the same strings.
  *
  * @vitest-environment jsdom
  */
@@ -263,7 +265,7 @@ describe('CommandPalette (Issue #1053)', () => {
     renderPalette();
     pressKey(window, { key: 'k', metaKey: true });
 
-    const sessions = screen.getByText('commandPalette.nav.sessions');
+    const sessions = screen.getByText('common.nav.sessions');
     fireEvent.click(sessions);
 
     expect(pushMock).toHaveBeenCalledWith('/sessions');
@@ -281,7 +283,7 @@ describe('CommandPalette (Issue #1053)', () => {
 
     fireEvent.change(input, { target: { value: 'sessions' } });
     await waitFor(() => {
-      expect(screen.queryByText('commandPalette.nav.home')).toBeNull();
+      expect(screen.queryByText('common.nav.home')).toBeNull();
     });
 
     // Enter on the focused element selects the single filtered item.
@@ -296,8 +298,8 @@ describe('CommandPalette (Issue #1053)', () => {
     fireEvent.change(input, { target: { value: 'sessions' } });
 
     await waitFor(() => {
-      expect(screen.getByText('commandPalette.nav.sessions')).toBeInTheDocument();
-      expect(screen.queryByText('commandPalette.nav.home')).toBeNull();
+      expect(screen.getByText('common.nav.sessions')).toBeInTheDocument();
+      expect(screen.queryByText('common.nav.home')).toBeNull();
     });
   });
 
@@ -340,7 +342,7 @@ describe('CommandPalette (Issue #1053)', () => {
     renderPalette();
     pressKey(window, { key: 'k', metaKey: true });
 
-    expect(screen.getByText('commandPalette.nav.sessions')).toBeInTheDocument();
+    expect(screen.getByText('common.nav.sessions')).toBeInTheDocument();
     expect(screen.queryByText('feature/login')).toBeNull();
     expect(screen.queryByText('commandPalette.groups.worktrees')).toBeNull();
   });
@@ -364,7 +366,7 @@ describe('CommandPalette (Issue #1053)', () => {
     renderPalette();
     pressKey(window, { key: 'k', metaKey: true });
     // Navigation still works; no worktrees group
-    expect(screen.getByText('commandPalette.nav.sessions')).toBeInTheDocument();
+    expect(screen.getByText('common.nav.sessions')).toBeInTheDocument();
     expect(screen.queryByText('commandPalette.groups.worktrees')).toBeNull();
   });
 
@@ -466,14 +468,14 @@ describe('CommandPalette (Issue #1053)', () => {
   it('records an executed command and surfaces it in the Recent group on reopen', () => {
     renderPalette();
     pressKey(window, { key: 'k', metaKey: true });
-    fireEvent.click(screen.getByText('commandPalette.nav.sessions'));
+    fireEvent.click(screen.getByText('common.nav.sessions'));
     expect(pushMock).toHaveBeenCalledWith('/sessions');
 
     // Reopen: the executed command now appears under the Recent group too.
     pressKey(window, { key: 'k', metaKey: true });
     expect(screen.getByText('commandPalette.groups.recent')).toBeInTheDocument();
     expect(
-      screen.getAllByText('commandPalette.nav.sessions').length
+      screen.getAllByText('common.nav.sessions').length
     ).toBeGreaterThanOrEqual(2);
   });
 

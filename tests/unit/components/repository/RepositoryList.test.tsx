@@ -166,7 +166,7 @@ describe('RepositoryList (Issue #644)', () => {
       render(<RepositoryList refreshKey={0} />);
 
       await waitFor(() => {
-        expect(screen.getByText(/no repositories registered/i)).toBeInTheDocument();
+        expect(screen.getByText('common.repositories.empty')).toBeInTheDocument();
       });
     });
 

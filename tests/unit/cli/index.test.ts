@@ -92,6 +92,8 @@ describe('buildProgram', () => {
       'start',
       'stop',
       'status',
+      // Issue #1194: registered in program.ts alongside the other core commands
+      'update',
       'issue',
       'docs',
       'ls',

@@ -165,6 +165,7 @@ For Windows users, see the [WSL2 Setup Guide](./docs/user-guide/wsl2-setup.md).
 | `commandmate stop` | Stop the server |
 | `commandmate stop --force` | Force stop (SIGKILL) |
 | `commandmate status` | Check status |
+| `commandmate update` | Update to the latest version |
 
 ### Worktree Parallel Development
 

@@ -387,7 +387,12 @@
 | `src/cli/commands/start.ts` | startコマンド（前景/デーモン、--issue対応 Issue #136）。runStart()はexitせずStartResultを返す（Issue #1195） |
 | `src/cli/commands/stop.ts` | stopコマンド（サーバー停止、--issue対応 Issue #136） |
 | `src/cli/commands/status.ts` | statusコマンド（状態確認、--issue/--all対応 Issue #136）。statusコマンド（--all対応） |
-| `src/cli/utils/preflight.ts` | システム依存関係チェック |
+| `src/cli/commands/update.ts` | updateコマンド（停止→npm install -g→再起動、--check/--yes）（Issue #1194） |
+| `src/cli/utils/preflight.ts` | システム依存関係チェック（compareVersionsはsemver.tsへ移譲、Issue #1194） |
+| `src/cli/utils/semver.ts` | semver 3方向比較（compareVersions/isComparableVersion）（Issue #1194） |
+| `src/cli/utils/npm-runner.ts` | npm実行ラッパ（viewLatestVersion/installGlobalLatest）（Issue #1194） |
+| `src/cli/utils/health-check.ts` | 更新後readiness確認（waitForReady: ready/degraded/timeout）（#1194） |
+| `src/cli/utils/worktree-servers.ts` | 稼働中worktreeサーバ列挙（listRunningWorktreeServers）（Issue #1194） |
 | `src/cli/utils/env-setup.ts` | 環境設定ファイル生成、getPidFilePath()、パストラバーサル対策（Issue #125, #136） |
 | `src/cli/utils/daemon.ts` | デーモンプロセス管理、dotenv読み込み、セキュリティ警告（Issue #125） |
 | `src/cli/utils/pid-manager.ts` | PIDファイル管理（O_EXCLアトミック書き込み） |
@@ -406,7 +411,7 @@
 | `src/cli/utils/docs-reader.ts` | ドキュメント読み取りユーティリティ（Issue #264: SECTION_MAPホワイトリスト、パストラバーサル防止、検索クエリ長制限） |
 | `src/cli/config/cli-dependencies.ts` | 依存関係定義（Issue #264: gh CLIをオプション依存として追加） |
 | `src/cli/config/ai-integration-messages.ts` | AIツール統合ガイドメッセージ（Issue #264: init完了後に表示） |
-| `src/cli/types/index.ts` | CLI共通型定義（ExitCode enum、StartOptions、StopOptions、StatusOptions、IssueCreateOptions、DocsOptions） |
+| `src/cli/types/index.ts` | CLI共通型定義（ExitCode enum: UPDATE_FAILED=5 追加 Issue #1194、各コマンドのOptions） |
 | `src/cli/commands/ls.ts` | lsコマンド（worktree一覧表示、--json/--quiet/--branch対応）（Issue #518） |
 | `src/cli/commands/send.ts` | sendコマンド（エージェントへのメッセージ送信、--auto-yes/--agent対応）（Issue #518） |
 | `src/cli/commands/wait.ts` | waitコマンド（エージェント完了/プロンプト検出待機、--timeout/--stall-timeout/--on-prompt対応）（Issue #518） |

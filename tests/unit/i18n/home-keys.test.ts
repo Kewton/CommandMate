@@ -56,4 +56,24 @@ describe('home i18n keys (Issue #1072)', () => {
       }
     }
   });
+
+  /**
+   * Issue #1197: SessionOverviewTile / RecentSessionsList resolve these at
+   * runtime. The global next-intl mock echoes keys, so a component test cannot
+   * catch a missing dictionary entry — only a real-dictionary assert like this
+   * stops `home.sessionOverview.title` from rendering verbatim in the UI.
+   */
+  it('includes the session overview tile and recent sessions keys', () => {
+    for (const locale of ['en', 'ja']) {
+      const keys = leafKeys(loadHome(locale));
+      for (const expected of [
+        'sessionOverview.title',
+        'sessionOverview.recentSessions',
+        'sessionOverview.viewAll',
+        'recentSessions.empty',
+      ]) {
+        expect(keys, `${locale} missing ${expected}`).toContain(expected);
+      }
+    }
+  });
 });

@@ -363,6 +363,30 @@ chmod 644 data/db.sqlite
 
 ### npm Global Install
 
+`commandmate update` stops the server, updates the package, restarts it, and verifies that it responds.
+
+```bash
+# Check for updates (changes nothing)
+commandmate update --check
+
+# Update (with a confirmation prompt)
+commandmate update
+
+# --yes is required in non-interactive environments (CI, scripts)
+commandmate update --yes
+```
+
+**Caveats**:
+
+- After the restart the server uses only the settings in `.env`. If you started it with `--auth`, `--cert`, `--key`, `--allowed-ips`, `--trust-proxy`, `--port` and so on, start it again manually after the update (`--auth` generates a new token on every start).
+- Worktree servers (`--issue`) are not stopped automatically. Stop them **before** updating with `commandmate stop --issue <number>`. The command warns when it detects running worktree servers.
+- On a permission error (EACCES), do not re-run with `sudo`; fix the npm global directory permissions as described in the [CLI setup guide](./user-guide/cli-setup-guide.md#permission-error-eacces).
+- Exit codes: `0` updated/skipped, `2` non-interactive without `--yes`, `3` post-restart verification failed, `4` stop failed (nothing changed), `5` update failed.
+
+#### Manual Update (fallback)
+
+If you cannot use `commandmate update`:
+
 ```bash
 # Stop server
 commandmate stop
@@ -376,6 +400,8 @@ commandmate start --daemon
 
 ### Development Environment (git clone)
 
+This is not a global install, so `commandmate update` prints the manual steps and exits without updating anything.
+
 ```bash
 # Get latest code
 git pull origin main
@@ -383,8 +409,8 @@ git pull origin main
 # Update dependencies
 npm install
 
-# Build
-npm run build
+# Build (Next.js + CLI + server)
+npm run build:all
 
 # When using PM2
 pm2 restart commandmate
@@ -392,6 +418,8 @@ pm2 restart commandmate
 # When using Systemd
 sudo systemctl restart commandmate
 ```
+
+> **Note**: `npm run build` only builds Next.js. Both PM2 and Systemd run `npm start` (= `node dist/server/server.js`), so use `npm run build:all` to also rebuild the server (`dist/server`) and the CLI (`dist/cli`).
 
 ## Backup
 

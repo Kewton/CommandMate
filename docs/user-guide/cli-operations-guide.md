@@ -63,6 +63,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Auto-Yesの制御 |
 | [`commandmate instances`](#commandmate-instances) | エージェントインスタンス（roster）の一覧・追加・削除・alias変更 |
 | [`commandmate report`](#commandmate-report) | 日次レポートの生成・表示・一覧 |
+| [`commandmate update`](#commandmate-update) | CommandMate本体の更新（停止 → 更新 → 再起動） |
 
 ---
 
@@ -459,6 +460,68 @@ commandmate report list --json                     # JSON出力
 
 ---
 
+## commandmate update
+
+CommandMate本体を最新バージョンに更新します（Issue #1194）。
+グローバルインストール環境では、停止 → `npm install -g commandmate@latest` → 再起動 → 応答確認を1コマンドで実行します。
+他のコマンドと異なり、操作対象は worktree ではなく**npm registry とローカルのデーモン**です（`--token` フラグはありません。再起動後の応答確認先 URL は `.env` / `CM_PORT` から解決され、`CM_AUTH_TOKEN` があれば Bearer トークンとして使用されます）。
+
+### 使用方法
+
+```bash
+commandmate update            # 確認プロンプトつきで更新
+commandmate update --check    # 更新の有無を確認するだけ（何も変更しない）
+commandmate update --yes      # 確認プロンプトをスキップ（非対話環境では必須）
+```
+
+### オプション
+
+| オプション | 説明 |
+|-----------|------|
+| `--check` | バージョンを表示するだけ。インストール・停止・再起動を行わない（registry照会に失敗した場合のみ exit 5） |
+| `-y, --yes` | 確認プロンプトをスキップ。TTYのない環境では必須（無い場合は exit 2） |
+
+### --check の出力
+
+```
+Current: v0.9.0
+Latest: v0.10.0
+Update available: yes
+```
+
+### 更新がスキップされる条件
+
+いずれも更新を実行せず exit 0 で終了します。
+
+| 条件 | 動作 |
+|------|------|
+| すでに最新 | `Already up to date` を表示 |
+| ローカルの方が新しい | ダウングレードせずスキップ |
+| ローカルまたはlatestがプレリリース | 比較不能としてスキップ |
+| 非グローバルインストール（git clone環境） | 手動更新手順（`git pull` → `npm install` → `npm run build:all` → 再起動）を案内 |
+
+### 終了コード
+
+| コード | 定数名 | 意味 |
+|:------:|--------|------|
+| 0 | SUCCESS | 更新完了・スキップ・キャンセル・`--check`（応答確認が緩和された場合も含む） |
+| 2 | CONFIG_ERROR | 非対話環境で `--yes` が指定されていない |
+| 3 | START_FAILED | 更新は成功したが、再起動後のサーバーを確認できない（ロールバック不要） |
+| 4 | STOP_FAILED | サーバーを停止できず中止（**何も変更していない**） |
+| 5 | UPDATE_FAILED | npm registry照会・`npm install -g`・バージョン検証のいずれかに失敗 |
+| 99 | UNEXPECTED_ERROR | 予期しないエラー |
+
+### 注意事項
+
+- **起動オプションは復元されません**: 再起動後は `.env` の設定のみで起動します。`--auth` / `--auth-expire` / `--cert` / `--key` / `--allow-http` / `--allowed-ips` / `--trust-proxy` / `--port` / `--dev` を使っていた場合は、update 後に手動で起動し直してください（`--auth` は起動のたびに新しいトークンが生成されます）。
+- **worktree用サーバー（`--issue`）は対象外**: 停止も再起動もされません。`npm install -g` がパッケージディレクトリ（`dist/` / `.next/`）を置換するため、稼働中のworktreeサーバーは異常終了する可能性があります。update **前**に `commandmate stop --issue <number>`、update 後に `commandmate start --issue <number>` を実行してください（稼働中の場合は警告が表示されます）。
+- **メインサーバーが停止中の場合**: 更新のみを行い、サーバーは起動しません。
+- **認証・IP制限・自己署名証明書の環境**: 再起動後の応答確認が「サーバー応答の確認のみ」に緩和され、警告付きで成功（exit 0）します。厳密に確認するには `CM_AUTH_TOKEN` を設定して実行してください。
+- **EACCES（権限エラー）**: `sudo` で再実行しないでください。[CLIセットアップガイドの権限エラー（EACCES）](./cli-setup-guide.md#権限エラーeacces) の手順で npm のグローバルディレクトリ権限を修正します。
+- **失敗時のロールバック**: 更新前のバージョンに戻すコマンドが表示されます（`npm install -g commandmate@<更新前のバージョン>`）。
+
+---
+
 ## 典型的なワークフロー
 
 ### 基本: send → wait → capture
@@ -632,6 +695,9 @@ commandmate ls --token your-token
 | 0 | SUCCESS | 正常完了 |
 | 1 | DEPENDENCY_ERROR | サーバー未起動等のインフラエラー |
 | 2 | CONFIG_ERROR | バリデーションエラー（不正なagent, duration等） |
+| 3 | START_FAILED | サーバーの起動・起動後の確認に失敗（`start` / `update`） |
+| 4 | STOP_FAILED | サーバーの停止に失敗（`stop` / `update`） |
+| 5 | UPDATE_FAILED | 更新に失敗（`update`: registry照会 / `npm install -g` / バージョン検証） |
 | 10 | PROMPT_DETECTED | wait中にプロンプトを検出 |
 | 99 | UNEXPECTED_ERROR | 予期しないエラー / リソース未検出 |
 | 124 | TIMEOUT | waitのタイムアウト |

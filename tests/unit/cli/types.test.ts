@@ -36,6 +36,11 @@ describe('ExitCode enum', () => {
     expect(ExitCode.STOP_FAILED).toBe(4);
   });
 
+  // Issue #1194 (D-1): update failure exit code
+  it('should have UPDATE_FAILED as 5', () => {
+    expect(ExitCode.UPDATE_FAILED).toBe(5);
+  });
+
   it('should have UNEXPECTED_ERROR as 99', () => {
     expect(ExitCode.UNEXPECTED_ERROR).toBe(99);
   });
