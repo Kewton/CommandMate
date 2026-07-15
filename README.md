@@ -9,6 +9,8 @@
 
 [English](./README.md) | [日本語](./docs/ja/README.md)
 
+**[commandmate website →](https://kewton.github.io/CommandMate/)**
+
 <p align="center">
   <img src="./docs/images/demo-desktop.gif" width="600" alt="CommandMate Desktop Demo" />
 </p>
