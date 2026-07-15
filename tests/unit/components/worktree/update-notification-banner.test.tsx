@@ -1,17 +1,30 @@
 /**
  * Unit tests for UpdateNotificationBanner component
  * Issue #257: Version update notification feature
+ * Issue #1198: one-click self-update state machine
  *
  * [MF-001] Tests that banner is independently testable
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+
+// ApiError is kept real: the banner branches on `instanceof ApiError`.
+vi.mock('@/lib/api-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/api-client')>()),
+  appApi: {
+    startUpdate: vi.fn(),
+    ping: vi.fn(),
+    checkForUpdate: vi.fn(),
+  },
+}));
+
 import {
   UpdateNotificationBanner,
   type UpdateNotificationBannerProps,
 } from '@/components/worktree/UpdateNotificationBanner';
+import { ApiError, appApi } from '@/lib/api-client';
 
 describe('UpdateNotificationBanner', () => {
   const defaultProps: UpdateNotificationBannerProps = {
@@ -140,5 +153,206 @@ describe('UpdateNotificationBanner', () => {
     );
 
     expect(screen.queryByText('npm install -g commandmate@latest')).toBeNull();
+  });
+
+  // =========================================================================
+  // Issue #1198: one-click self-update
+  // =========================================================================
+  describe('update button (Issue #1198)', () => {
+    const reload = vi.fn();
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      vi.mocked(appApi.ping).mockResolvedValue(true);
+      vi.mocked(appApi.startUpdate).mockResolvedValue({
+        status: 'started',
+        willRestart: true,
+        logPath: '/home/tester/.commandmate/update.log',
+      });
+      // jsdom throws "Not implemented: navigation" on the real reload.
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: { ...window.location, reload },
+      });
+    });
+
+    afterEach(() => {
+      cleanup();
+      vi.useRealTimers();
+    });
+
+    /** Click "Update now" and confirm the dialog. */
+    function startUpdate(props: Partial<UpdateNotificationBannerProps> = {}) {
+      render(<UpdateNotificationBanner {...defaultProps} {...props} />);
+      fireEvent.click(screen.getByTestId('update-now-button'));
+      fireEvent.click(screen.getByTestId('confirm-dialog-confirm'));
+    }
+
+    // --- visibility -------------------------------------------------------
+    it('renders the button for a global install', () => {
+      render(<UpdateNotificationBanner {...defaultProps} />);
+      expect(screen.getByTestId('update-now-button')).toBeDefined();
+    });
+
+    it.each(['local', 'unknown'] as const)(
+      'never renders the button for a %s install',
+      (installType) => {
+        render(
+          <UpdateNotificationBanner
+            {...defaultProps}
+            installType={installType}
+            updateCommand={null}
+          />
+        );
+        expect(screen.queryByTestId('update-now-button')).toBeNull();
+      }
+    );
+
+    // --- idle -> confirming ----------------------------------------------
+    it('opens a confirmation dialog rather than updating straight away', () => {
+      render(<UpdateNotificationBanner {...defaultProps} />);
+
+      expect(screen.queryByTestId('confirm-dialog')).toBeNull();
+      fireEvent.click(screen.getByTestId('update-now-button'));
+
+      expect(screen.getByTestId('confirm-dialog')).toBeDefined();
+      expect(appApi.startUpdate).not.toHaveBeenCalled();
+    });
+
+    it('cancelling returns to idle without starting an update', async () => {
+      render(<UpdateNotificationBanner {...defaultProps} />);
+
+      fireEvent.click(screen.getByTestId('update-now-button'));
+      fireEvent.click(screen.getByTestId('confirm-dialog-cancel'));
+
+      expect(appApi.startUpdate).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.getByTestId('update-now-button')).toBeDefined());
+    });
+
+    // --- confirming -> updating ------------------------------------------
+    it('posts with no body, so the request cannot influence the command', async () => {
+      startUpdate();
+
+      await waitFor(() => expect(appApi.startUpdate).toHaveBeenCalledTimes(1));
+      expect(vi.mocked(appApi.startUpdate).mock.calls[0]).toEqual([]);
+    });
+
+    it('shows the updating state and hides the button once confirmed', async () => {
+      startUpdate();
+
+      await waitFor(() => expect(screen.getByTestId('update-progress')).toBeDefined());
+      expect(screen.getByText('worktree.update.updating')).toBeDefined();
+      expect(screen.queryByTestId('update-now-button')).toBeNull();
+    });
+
+    // --- updating -> reload ----------------------------------------------
+    it('reloads once the server has gone down and come back', async () => {
+      vi.mocked(appApi.ping)
+        .mockResolvedValueOnce(false) // stopped for the update
+        .mockResolvedValueOnce(false)
+        .mockResolvedValue(true); // back on the new version
+
+      startUpdate();
+      await waitFor(() => expect(screen.getByTestId('update-progress')).toBeDefined());
+
+      await waitFor(() => expect(reload).toHaveBeenCalledTimes(1), { timeout: 10_000 });
+    }, 15_000);
+
+    /**
+     * The server answers throughout only when the update has not taken it down
+     * yet. Reloading here would just re-render the old version and dismiss the
+     * banner while the update is still running.
+     */
+    it('does not reload while the server has never gone down', async () => {
+      vi.mocked(appApi.ping).mockResolvedValue(true);
+
+      startUpdate();
+      await waitFor(() => expect(screen.getByTestId('update-progress')).toBeDefined());
+      await waitFor(() => expect(appApi.ping).toHaveBeenCalled(), { timeout: 10_000 });
+
+      expect(reload).not.toHaveBeenCalled();
+    }, 15_000);
+
+    // --- confirming -> no-restart (決定3) ---------------------------------
+    /**
+     * The Issue's headline pitfall: with no PID file the update never stops the
+     * server, so waiting for a restart would hang until the 5-minute timeout.
+     */
+    it('shows manual-restart guidance and never polls when willRestart is false', async () => {
+      vi.mocked(appApi.startUpdate).mockResolvedValue({
+        status: 'started',
+        willRestart: false,
+        logPath: '/home/tester/.commandmate/update.log',
+      });
+
+      startUpdate();
+
+      await waitFor(() => expect(screen.getByTestId('update-no-restart')).toBeDefined());
+      expect(screen.getByText('worktree.update.noRestartDescription')).toBeDefined();
+      expect(screen.queryByTestId('update-progress')).toBeNull();
+      expect(appApi.ping).not.toHaveBeenCalled();
+      expect(reload).not.toHaveBeenCalled();
+    });
+
+    it('surfaces the log path on the no-restart path', async () => {
+      vi.mocked(appApi.startUpdate).mockResolvedValue({
+        status: 'started',
+        willRestart: false,
+        logPath: '/home/tester/.commandmate/update.log',
+      });
+
+      startUpdate();
+
+      await waitFor(() => expect(screen.getByTestId('update-log-hint')).toBeDefined());
+    });
+
+    // --- updating -> timeout ---------------------------------------------
+    it('falls back to manual instructions when the server never returns', async () => {
+      vi.mocked(appApi.ping).mockResolvedValue(false);
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+
+      startUpdate();
+      await waitFor(() => expect(screen.getByTestId('update-progress')).toBeDefined());
+
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 2000);
+
+      await waitFor(() => expect(screen.getByTestId('update-timeout')).toBeDefined());
+      expect(screen.getByText('commandmate update')).toBeDefined();
+      expect(reload).not.toHaveBeenCalled();
+    });
+
+    // --- confirming -> error ---------------------------------------------
+    it.each([
+      [400, 'worktree.update.errorNotGlobal'],
+      [409, 'worktree.update.errorInProgress'],
+      [500, 'worktree.update.errorGeneric'],
+    ])('maps a %i response to its own message', async (status, expectedKey) => {
+      vi.mocked(appApi.startUpdate).mockRejectedValue(new ApiError('failed', status));
+
+      startUpdate();
+
+      await waitFor(() => expect(screen.getByTestId('update-error')).toBeDefined());
+      expect(screen.getByText(expectedKey)).toBeDefined();
+      expect(screen.getByText('commandmate update')).toBeDefined();
+    });
+
+    it('reports a generic error when the request never reaches the server', async () => {
+      vi.mocked(appApi.startUpdate).mockRejectedValue(new TypeError('Failed to fetch'));
+
+      startUpdate();
+
+      await waitFor(() => expect(screen.getByTestId('update-error')).toBeDefined());
+      expect(screen.getByText('worktree.update.errorGeneric')).toBeDefined();
+    });
+
+    it('never leaves the update running after an error', async () => {
+      vi.mocked(appApi.startUpdate).mockRejectedValue(new ApiError('failed', 409));
+
+      startUpdate();
+
+      await waitFor(() => expect(screen.getByTestId('update-error')).toBeDefined());
+      expect(screen.queryByTestId('update-progress')).toBeNull();
+      expect(appApi.ping).not.toHaveBeenCalled();
+    });
   });
 });
