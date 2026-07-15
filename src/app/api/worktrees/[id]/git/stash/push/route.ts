@@ -17,10 +17,11 @@ import { resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const worktree = resolveWorktreeOr404(params.id);
+    const { id } = await params;
+    const worktree = resolveWorktreeOr404(id);
     if (worktree instanceof NextResponse) {
       return worktree;
     }

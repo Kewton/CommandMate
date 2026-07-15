@@ -119,16 +119,17 @@ function validateImagePath(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const db = getDbInstance();
 
     // Check if worktree exists
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${params.id}' not found` },
+        { error: `Worktree '${id}' not found` },
         { status: 404 }
       );
     }
@@ -202,7 +203,7 @@ export async function POST(
     }
 
     // Check if CLI tool session is running
-    const running = await cliTool.isRunning(params.id, instanceId);
+    const running = await cliTool.isRunning(id, instanceId);
 
     // Issue #989: Antigravity has no in-session model-switch command (unlike
     // Copilot's /model), so --model can only be honored when starting a new
@@ -219,19 +220,19 @@ export async function POST(
       try {
         if (cliToolId === 'antigravity' && body.model) {
           const antigravityTool = cliTool as AntigravityTool;
-          await antigravityTool.startSession(params.id, worktree.path, instanceId, body.model);
+          await antigravityTool.startSession(id, worktree.path, instanceId, body.model);
         } else {
-          await cliTool.startSession(params.id, worktree.path, instanceId);
+          await cliTool.startSession(id, worktree.path, instanceId);
         }
 
         // Issue #111: Save initial branch at session start
         // Get current branch and save it if not already recorded
-        const existingInitialBranch = getInitialBranch(db, params.id);
+        const existingInitialBranch = getInitialBranch(db, id);
         if (existingInitialBranch === null) {
           try {
             const gitStatus = await getGitStatus(worktree.path, null);
             if (gitStatus.currentBranch !== '(unknown)' && gitStatus.currentBranch !== '(detached HEAD)') {
-              saveInitialBranch(db, params.id, gitStatus.currentBranch);
+              saveInitialBranch(db, id, gitStatus.currentBranch);
               logger.info('saved-initial-branch-for:');
             }
           } catch (gitError) {
@@ -249,7 +250,7 @@ export async function POST(
 
       // Issue #1120: push the running transition so sidebar status dots flip
       // immediately instead of waiting for the next /api/worktrees poll.
-      broadcastSessionStatus(params.id, true, { cliTool: cliToolId, instance: instanceId ?? null });
+      broadcastSessionStatus(id, true, { cliTool: cliToolId, instance: instanceId ?? null });
     }
 
     // Issue #474: Validate imagePath if provided (HTTP-layer validation stays here)
@@ -266,7 +267,7 @@ export async function POST(
     // sendUserMessage service so manual sends and Timer-fired sends (executeTimer)
     // record identically in chat_messages / Message History.
     const result = await sendUserMessage(db, {
-      worktreeId: params.id,
+      worktreeId: id,
       content: trimmedContent,
       cliToolId,
       instanceId,

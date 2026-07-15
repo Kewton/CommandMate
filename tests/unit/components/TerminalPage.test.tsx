@@ -13,7 +13,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 
 const mockIsTmuxControlModeEnabledForClient = vi.fn();
 
@@ -61,6 +61,21 @@ vi.mock('@/lib/tmux/tmux-control-mode-flags', () => ({
 
 // Import the component after mocks are set up
 import TerminalPage from '@/app/worktrees/[id]/terminal/page';
+
+// Next 15 passes `params` as a Promise, which the page unwraps with `use()`.
+// That suspends on first render, so render under a Suspense boundary and flush
+// the promise inside act() before asserting.
+const renderTerminalPage = async (id = 'test-worktree-123') => {
+  let result!: ReturnType<typeof render>;
+  await act(async () => {
+    result = render(
+      <React.Suspense fallback={null}>
+        <TerminalPage params={Promise.resolve({ id })} />
+      </React.Suspense>
+    );
+  });
+  return result;
+};
 
 describe('TerminalPage', () => {
   beforeEach(() => {
@@ -116,15 +131,15 @@ describe('TerminalPage', () => {
   });
 
   describe('Page Rendering', () => {
-    it('should render the terminal page with header', () => {
-      render(<TerminalPage params={{ id: 'test-worktree-123' }} />);
+    it('should render the terminal page with header', async () => {
+      await renderTerminalPage();
 
       expect(screen.getByText('Back')).toBeInTheDocument();
       expect(screen.getByText(/Terminal:/)).toBeInTheDocument();
     });
 
-    it('should render CLI tool selector buttons', () => {
-      render(<TerminalPage params={{ id: 'test-worktree-123' }} />);
+    it('should render CLI tool selector buttons', async () => {
+      await renderTerminalPage();
 
       expect(screen.getByText('Claude')).toBeInTheDocument();
       expect(screen.getByText('Codex')).toBeInTheDocument();
@@ -133,8 +148,8 @@ describe('TerminalPage', () => {
     });
 
     // Issue #1044: CLI tool tabs use lucide-react icons instead of emoji literals.
-    it('should render a lucide svg icon in each CLI tool button', () => {
-      render(<TerminalPage params={{ id: 'test-worktree-123' }} />);
+    it('should render a lucide svg icon in each CLI tool button', async () => {
+      await renderTerminalPage();
 
       for (const name of ['Claude', 'Codex', 'Gemini', 'Bash']) {
         const button = screen.getByText(name).closest('button');
@@ -143,44 +158,44 @@ describe('TerminalPage', () => {
       }
     });
 
-    it('should not render emoji icon literals in CLI tool buttons', () => {
-      const { container } = render(<TerminalPage params={{ id: 'test-worktree-123' }} />);
+    it('should not render emoji icon literals in CLI tool buttons', async () => {
+      const { container } = await renderTerminalPage();
 
       for (const emoji of ['🤖', '⚡', '✦', '💻']) {
         expect(container.textContent).not.toContain(emoji);
       }
     });
 
-    it('should render the dynamically imported TerminalComponent', () => {
-      render(<TerminalPage params={{ id: 'test-worktree-123' }} />);
+    it('should render the dynamically imported TerminalComponent', async () => {
+      await renderTerminalPage();
 
       expect(screen.getByTestId('terminal-component-mock')).toBeInTheDocument();
     });
 
-    it('should pass worktreeId to TerminalComponent', () => {
-      render(<TerminalPage params={{ id: 'test-worktree-123' }} />);
+    it('should pass worktreeId to TerminalComponent', async () => {
+      await renderTerminalPage();
 
       const terminal = screen.getByTestId('terminal-component-mock');
       expect(terminal.getAttribute('data-worktree-id')).toBe('test-worktree-123');
     });
 
-    it('should render status bar with terminal mode info', () => {
-      render(<TerminalPage params={{ id: 'test-worktree-123' }} />);
+    it('should render status bar with terminal mode info', async () => {
+      await renderTerminalPage();
 
       expect(screen.getByText('Control Mode')).toBeInTheDocument();
     });
 
-    it('should pass controlModeEnabled to TerminalComponent', () => {
-      render(<TerminalPage params={{ id: 'test-worktree-123' }} />);
+    it('should pass controlModeEnabled to TerminalComponent', async () => {
+      await renderTerminalPage();
 
       const terminal = screen.getByTestId('terminal-component-mock');
       expect(terminal.getAttribute('data-control-mode-enabled')).toBe('true');
     });
 
-    it('should render fallback banner and status when control mode is disabled', () => {
+    it('should render fallback banner and status when control mode is disabled', async () => {
       mockIsTmuxControlModeEnabledForClient.mockReturnValue(false);
 
-      render(<TerminalPage params={{ id: 'test-worktree-123' }} />);
+      await renderTerminalPage();
 
       expect(screen.getByText(/Tmux control mode is disabled for this client/)).toBeInTheDocument();
       expect(screen.getByText('Snapshot Fallback')).toBeInTheDocument();

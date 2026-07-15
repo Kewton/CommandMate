@@ -37,10 +37,11 @@ interface PromptResponseRequest {
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    if (!isValidWorktreeId(params.id)) {
+    const { id } = await params;
+    if (!isValidWorktreeId(id)) {
       return NextResponse.json(
         { error: 'Invalid worktree ID format' },
         { status: 400 }
@@ -81,10 +82,10 @@ export async function POST(
     const db = getDbInstance();
 
     // Get worktree to verify it exists
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${params.id}' not found` },
+        { error: `Worktree '${id}' not found` },
         { status: 404 }
       );
     }
@@ -99,7 +100,7 @@ export async function POST(
     const cliTool = manager.getTool(cliToolId);
 
     // Check if session is running (Issue #868: per-instance)
-    const running = await cliTool.isRunning(params.id, instanceId);
+    const running = await cliTool.isRunning(id, instanceId);
     if (!running) {
       return NextResponse.json(
         { error: `${cliTool.name} session is not running` },
@@ -108,7 +109,7 @@ export async function POST(
     }
 
     // Get session name for the CLI tool (Issue #868: per-instance)
-    const sessionName = cliTool.getSessionName(params.id, instanceId);
+    const sessionName = cliTool.getSessionName(id, instanceId);
 
     // Issue #161: Re-verify that a prompt is still active before sending keys.
     // This prevents a race condition where the prompt disappears between
@@ -116,7 +117,7 @@ export async function POST(
     // be typed at the Claude user input prompt instead of a tool permission prompt.
     let promptCheck: PromptDetectionResult | null = null;
     try {
-      const currentOutput = await captureSessionOutputFresh(params.id, cliToolId, undefined, instanceId);
+      const currentOutput = await captureSessionOutputFresh(id, cliToolId, undefined, instanceId);
       const cleanOutput = stripAnsi(currentOutput);
       const promptOptions = buildDetectPromptOptions(cliToolId);
       promptCheck = detectPrompt(stripBoxDrawing(cleanOutput), promptOptions);
@@ -156,8 +157,8 @@ export async function POST(
 
     // The prompt poller normally stops while waiting for input. Resume response
     // persistence and independently push the TUI redraw after this interaction.
-    startPolling(params.id, cliToolId, instanceId);
-    void broadcastTerminalSnapshotAfterInteraction(params.id, cliToolId, instanceId);
+    startPolling(id, cliToolId, instanceId);
+    void broadcastTerminalSnapshotAfterInteraction(id, cliToolId, instanceId);
 
     return NextResponse.json({
       success: true,

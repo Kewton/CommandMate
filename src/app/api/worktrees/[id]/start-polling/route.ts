@@ -19,16 +19,17 @@ interface StartPollingRequest {
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const db = getDbInstance();
 
     // Check if worktree exists
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${params.id}' not found` },
+        { error: `Worktree '${id}' not found` },
         { status: 404 }
       );
     }
@@ -46,7 +47,7 @@ export async function POST(
 
     // Start polling
     logger.info('manually-starting-polling-for');
-    startPolling(params.id, body.cliToolId);
+    startPolling(id, body.cliToolId);
 
     return NextResponse.json({
       success: true,

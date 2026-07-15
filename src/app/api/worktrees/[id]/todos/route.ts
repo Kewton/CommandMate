@@ -32,20 +32,21 @@ const logger = createLogger('api/worktree-todos');
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const db = getDbInstance();
 
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${params.id}' not found` },
+        { error: `Worktree '${id}' not found` },
         { status: 404 }
       );
     }
 
-    const todos = getTodosByWorktreeId(db, params.id);
+    const todos = getTodosByWorktreeId(db, id);
 
     return NextResponse.json({ todos }, { status: 200 });
   } catch (error) {
@@ -67,15 +68,16 @@ export async function GET(
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const db = getDbInstance();
 
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${params.id}' not found` },
+        { error: `Worktree '${id}' not found` },
         { status: 404 }
       );
     }
@@ -115,7 +117,7 @@ export async function POST(
     }
 
     // Enforce the per-worktree todo count limit.
-    const existing = getTodosByWorktreeId(db, params.id);
+    const existing = getTodosByWorktreeId(db, id);
     if (existing.length >= MAX_TODOS_PER_WORKTREE) {
       return NextResponse.json(
         { error: `Maximum todo limit (${MAX_TODOS_PER_WORKTREE}) reached` },
@@ -123,7 +125,7 @@ export async function POST(
       );
     }
 
-    const todo = createWorktreeTodo(db, params.id, {
+    const todo = createWorktreeTodo(db, id, {
       content: trimmed,
       detail: typeof detail === 'string' ? detail : undefined,
       position: existing.length,
@@ -152,15 +154,16 @@ export async function POST(
  */
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const db = getDbInstance();
 
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${params.id}' not found` },
+        { error: `Worktree '${id}' not found` },
         { status: 404 }
       );
     }
@@ -170,15 +173,15 @@ export async function PATCH(
 
     // The payload must be the complete set of the worktree's todo IDs, in the
     // desired order (no missing/extra/duplicate ids).
-    const existing = getTodosByWorktreeId(db, params.id);
+    const existing = getTodosByWorktreeId(db, id);
     const existingIds = existing.map((t) => t.id);
 
     if (
       !Array.isArray(todoIds) ||
-      todoIds.some((id) => typeof id !== 'string') ||
+      todoIds.some((todoId) => typeof todoId !== 'string') ||
       todoIds.length !== existingIds.length ||
       new Set(todoIds as string[]).size !== todoIds.length ||
-      !(todoIds as string[]).every((id) => existingIds.includes(id))
+      !(todoIds as string[]).every((todoId) => existingIds.includes(todoId))
     ) {
       return NextResponse.json(
         { error: 'todoIds must be the complete set of this worktree\'s todo ids' },
@@ -186,7 +189,7 @@ export async function PATCH(
       );
     }
 
-    reorderWorktreeTodos(db, params.id, todoIds as string[]);
+    reorderWorktreeTodos(db, id, todoIds as string[]);
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {

@@ -96,7 +96,7 @@ export const MemoCard = memo(function MemoCard({
 
   // Copy to clipboard state
   const [copied, setCopied] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Cleanup timer on unmount to prevent state updates on unmounted component
   useEffect(() => {

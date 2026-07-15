@@ -62,16 +62,16 @@ describe('POST /api/worktrees/:id/git/push (Issue #783)', () => {
 
   it('returns 400 for an invalid worktree ID', async () => {
     (isValidWorktreeId as ReturnType<typeof vi.fn>).mockReturnValue(false);
-    expect((await POST(createRequest({}), { params: { id: 'bad!' } })).status).toBe(400);
+    expect((await POST(createRequest({}), { params: Promise.resolve({ id: 'bad!' }) })).status).toBe(400);
   });
 
   it('returns 404 when the worktree is not found', async () => {
     (getWorktreeById as ReturnType<typeof vi.fn>).mockReturnValue(null);
-    expect((await POST(createRequest({}), { params: { id: 'test-id' } })).status).toBe(404);
+    expect((await POST(createRequest({}), { params: Promise.resolve({ id: 'test-id' }) })).status).toBe(404);
   });
 
   it('pushes origin + current branch by default (200)', async () => {
-    const res = await POST(createRequest({}), { params: { id: 'test-id' } });
+    const res = await POST(createRequest({}), { params: Promise.resolve({ id: 'test-id' }) });
     expect(res.status).toBe(200);
     expect((await res.json()).success).toBe(true);
     expect(gitPush).toHaveBeenCalledWith('/path/to/worktree', {
@@ -80,7 +80,7 @@ describe('POST /api/worktrees/:id/git/push (Issue #783)', () => {
   });
 
   it('forwards force / forceWithLease / setUpstream and a validated branch', async () => {
-    await POST(createRequest({ branch: 'feature/y', forceWithLease: true, setUpstream: true }), { params: { id: 'test-id' } });
+    await POST(createRequest({ branch: 'feature/y', forceWithLease: true, setUpstream: true }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(gitPush).toHaveBeenCalledWith('/path/to/worktree', {
       remote: 'origin', branch: 'feature/y', force: false, forceWithLease: true, setUpstream: true,
     });
@@ -90,14 +90,14 @@ describe('POST /api/worktrees/:id/git/push (Issue #783)', () => {
   it.each(['--receive-pack=x', 'foo bar', 'https://evil:1/x', 'git@h:r', '../e'])(
     'returns 400 invalid_branch_name for a malicious remote %j',
     async (remote) => {
-      const res = await POST(createRequest({ remote }), { params: { id: 'test-id' } });
+      const res = await POST(createRequest({ remote }), { params: Promise.resolve({ id: 'test-id' }) });
       expect(res.status).toBe(400);
       expect(gitPush).not.toHaveBeenCalled();
     }
   );
 
   it('returns 400 invalid_branch_name for an option-injection branch', async () => {
-    const res = await POST(createRequest({ branch: '--exec=x' }), { params: { id: 'test-id' } });
+    const res = await POST(createRequest({ branch: '--exec=x' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(res.status).toBe(400);
     expect((await res.json()).reason).toBe('invalid_branch_name');
     expect(gitPush).not.toHaveBeenCalled();
@@ -105,21 +105,21 @@ describe('POST /api/worktrees/:id/git/push (Issue #783)', () => {
 
   it('maps GitProtectedBranchError to 409 protected_branch', async () => {
     (gitPush as ReturnType<typeof vi.fn>).mockRejectedValue(new GitProtectedBranchError());
-    const res = await POST(createRequest({ branch: 'main', force: true }), { params: { id: 'test-id' } });
+    const res = await POST(createRequest({ branch: 'main', force: true }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(res.status).toBe(409);
     expect((await res.json()).reason).toBe('protected_branch');
   });
 
   it('maps GitNonFastForwardError to 409 non_fast_forward', async () => {
     (gitPush as ReturnType<typeof vi.fn>).mockRejectedValue(new GitNonFastForwardError());
-    const res = await POST(createRequest({}), { params: { id: 'test-id' } });
+    const res = await POST(createRequest({}), { params: Promise.resolve({ id: 'test-id' }) });
     expect(res.status).toBe(409);
     expect((await res.json()).reason).toBe('non_fast_forward');
   });
 
   it('maps GitForceWithLeaseStaleError to 409 force_with_lease_stale', async () => {
     (gitPush as ReturnType<typeof vi.fn>).mockRejectedValue(new GitForceWithLeaseStaleError());
-    const res = await POST(createRequest({ forceWithLease: true }), { params: { id: 'test-id' } });
+    const res = await POST(createRequest({ forceWithLease: true }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(res.status).toBe(409);
     expect((await res.json()).reason).toBe('force_with_lease_stale');
   });

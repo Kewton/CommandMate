@@ -118,7 +118,7 @@ describe('POST /api/worktrees/:id/respond', () => {
       });
 
       const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
-        params: { id: 'test-worktree' },
+        params: Promise.resolve({ id: 'test-worktree' }),
       });
 
       expect(response.status).toBe(200);
@@ -164,7 +164,7 @@ describe('POST /api/worktrees/:id/respond', () => {
       });
 
       const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
-        params: { id: 'test-worktree' },
+        params: Promise.resolve({ id: 'test-worktree' }),
       });
 
       expect(response.status).toBe(200);
@@ -200,7 +200,7 @@ describe('POST /api/worktrees/:id/respond', () => {
         }),
       });
 
-      await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: { id: 'test-worktree' } });
+      await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-worktree' }) });
 
       // Session name comes from the CLI tool (mcbd-<cliToolId>-<worktreeId>), and
       // the answer is sent first without Enter, then a separate Enter (Issue #616/#1102).
@@ -234,7 +234,7 @@ describe('POST /api/worktrees/:id/respond', () => {
         }),
       });
 
-      await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: { id: 'test-worktree' } });
+      await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-worktree' }) });
 
       // Answer sent without Enter, then a separate Enter (Issue #616/#1102).
       expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-test-worktree', 'n', false);
@@ -267,7 +267,7 @@ describe('POST /api/worktrees/:id/respond', () => {
         }),
       });
 
-      await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: { id: 'test-worktree' } });
+      await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-worktree' }) });
 
       expect(broadcastMessage).toHaveBeenCalledWith('message_updated', {
         worktreeId: 'test-worktree',
@@ -293,7 +293,7 @@ describe('POST /api/worktrees/:id/respond', () => {
       });
 
       const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
-        params: { id: 'test-worktree' },
+        params: Promise.resolve({ id: 'test-worktree' }),
       });
 
       expect(response.status).toBe(400);
@@ -311,7 +311,7 @@ describe('POST /api/worktrees/:id/respond', () => {
       });
 
       const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
-        params: { id: 'test-worktree' },
+        params: Promise.resolve({ id: 'test-worktree' }),
       });
 
       expect(response.status).toBe(400);
@@ -330,7 +330,7 @@ describe('POST /api/worktrees/:id/respond', () => {
       });
 
       const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
-        params: { id: 'test-worktree' },
+        params: Promise.resolve({ id: 'test-worktree' }),
       });
 
       expect(response.status).toBe(404);
@@ -358,7 +358,7 @@ describe('POST /api/worktrees/:id/respond', () => {
       });
 
       const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
-        params: { id: 'test-worktree' },
+        params: Promise.resolve({ id: 'test-worktree' }),
       });
 
       expect(response.status).toBe(400);
@@ -394,7 +394,7 @@ describe('POST /api/worktrees/:id/respond', () => {
       });
 
       const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
-        params: { id: 'test-worktree' },
+        params: Promise.resolve({ id: 'test-worktree' }),
       });
 
       expect(response.status).toBe(400);
@@ -427,7 +427,7 @@ describe('POST /api/worktrees/:id/respond', () => {
       });
 
       const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
-        params: { id: 'test-worktree' },
+        params: Promise.resolve({ id: 'test-worktree' }),
       });
 
       expect(response.status).toBe(400);
@@ -462,7 +462,7 @@ describe('POST /api/worktrees/:id/respond', () => {
       });
 
       const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
-        params: { id: 'test-worktree' },
+        params: Promise.resolve({ id: 'test-worktree' }),
       });
 
       expect(response.status).toBe(200);
@@ -495,7 +495,7 @@ describe('POST /api/worktrees/:id/respond', () => {
       });
 
       const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
-        params: { id: 'test-worktree' },
+        params: Promise.resolve({ id: 'test-worktree' }),
       });
 
       expect(response.status).toBe(200);

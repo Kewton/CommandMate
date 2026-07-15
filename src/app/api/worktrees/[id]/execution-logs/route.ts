@@ -20,18 +20,19 @@ const logger = createLogger('api/execution-logs');
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // [S4-010] 2-stage worktree ID validation
-    if (!isValidWorktreeId(params.id)) {
+    const { id } = await params;
+    if (!isValidWorktreeId(id)) {
       return NextResponse.json({ error: 'Invalid worktree ID format' }, { status: 400 });
     }
 
     const db = getDbInstance();
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
-      return NextResponse.json({ error: `Worktree '${params.id}' not found` }, { status: 404 });
+      return NextResponse.json({ error: `Worktree '${id}' not found` }, { status: 404 });
     }
 
     // [S1-014] Exclude result column from list API for performance
@@ -45,7 +46,7 @@ export async function GET(
       WHERE el.worktree_id = ?
       ORDER BY el.created_at DESC
       LIMIT 100
-    `).all(params.id);
+    `).all(id);
 
     return NextResponse.json({ logs }, { status: 200 });
   } catch (error) {

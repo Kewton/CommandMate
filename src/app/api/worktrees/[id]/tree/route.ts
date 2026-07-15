@@ -17,15 +17,16 @@ const logger = createLogger('api/tree');
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const db = getDbInstance();
 
     // Check if worktree exists
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
-      const errorResponse = createWorktreeNotFoundError(params.id);
+      const errorResponse = createWorktreeNotFoundError(id);
       return NextResponse.json(
         { error: errorResponse.error },
         { status: errorResponse.status }

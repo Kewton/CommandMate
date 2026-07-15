@@ -60,28 +60,28 @@ describe('POST /api/worktrees/:id/git/pull (Issue #783)', () => {
 
   it('returns 400 for an invalid worktree ID', async () => {
     (isValidWorktreeId as ReturnType<typeof vi.fn>).mockReturnValue(false);
-    expect((await POST(createRequest({}), { params: { id: 'bad!' } })).status).toBe(400);
+    expect((await POST(createRequest({}), { params: Promise.resolve({ id: 'bad!' }) })).status).toBe(400);
   });
 
   it('returns 404 when the worktree is not found', async () => {
     (getWorktreeById as ReturnType<typeof vi.fn>).mockReturnValue(null);
-    expect((await POST(createRequest({}), { params: { id: 'test-id' } })).status).toBe(404);
+    expect((await POST(createRequest({}), { params: Promise.resolve({ id: 'test-id' }) })).status).toBe(404);
   });
 
   it('pulls origin + current branch by default (200)', async () => {
-    const res = await POST(createRequest({}), { params: { id: 'test-id' } });
+    const res = await POST(createRequest({}), { params: Promise.resolve({ id: 'test-id' }) });
     expect(res.status).toBe(200);
     expect((await res.json()).success).toBe(true);
     expect(gitPull).toHaveBeenCalledWith('/path/to/worktree', { remote: 'origin', branch: 'main', rebase: false, ffOnly: false });
   });
 
   it('forwards rebase + validated remote/branch', async () => {
-    await POST(createRequest({ remote: 'upstream', branch: 'feature/x', rebase: true }), { params: { id: 'test-id' } });
+    await POST(createRequest({ remote: 'upstream', branch: 'feature/x', rebase: true }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(gitPull).toHaveBeenCalledWith('/path/to/worktree', { remote: 'upstream', branch: 'feature/x', rebase: true, ffOnly: false });
   });
 
   it('returns 400 invalid_options when rebase and ffOnly are both true', async () => {
-    const res = await POST(createRequest({ rebase: true, ffOnly: true }), { params: { id: 'test-id' } });
+    const res = await POST(createRequest({ rebase: true, ffOnly: true }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(res.status).toBe(400);
     expect((await res.json()).reason).toBe('invalid_options');
     expect(gitPull).not.toHaveBeenCalled();
@@ -89,7 +89,7 @@ describe('POST /api/worktrees/:id/git/pull (Issue #783)', () => {
 
   it('returns 200 conflict with conflictFiles', async () => {
     (gitPull as ReturnType<typeof vi.fn>).mockResolvedValue({ conflict: true, conflictFiles: ['src/a.ts'] });
-    const res = await POST(createRequest({}), { params: { id: 'test-id' } });
+    const res = await POST(createRequest({}), { params: Promise.resolve({ id: 'test-id' }) });
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.conflict).toBe(true);
@@ -100,14 +100,14 @@ describe('POST /api/worktrees/:id/git/pull (Issue #783)', () => {
   it.each(['--upload-pack=x', 'foo bar', 'https://evil:1/x', 'git@h:r', '../e'])(
     'returns 400 invalid_branch_name for a malicious remote %j',
     async (remote) => {
-      const res = await POST(createRequest({ remote }), { params: { id: 'test-id' } });
+      const res = await POST(createRequest({ remote }), { params: Promise.resolve({ id: 'test-id' }) });
       expect(res.status).toBe(400);
       expect(gitPull).not.toHaveBeenCalled();
     }
   );
 
   it('returns 400 invalid_branch_name for an option-injection branch', async () => {
-    const res = await POST(createRequest({ branch: '--exec=x' }), { params: { id: 'test-id' } });
+    const res = await POST(createRequest({ branch: '--exec=x' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(res.status).toBe(400);
     expect((await res.json()).reason).toBe('invalid_branch_name');
     expect(gitPull).not.toHaveBeenCalled();
@@ -115,18 +115,18 @@ describe('POST /api/worktrees/:id/git/pull (Issue #783)', () => {
 
   it('maps GitNonFastForwardError to 409 non_fast_forward', async () => {
     (gitPull as ReturnType<typeof vi.fn>).mockRejectedValue(new GitNonFastForwardError());
-    const res = await POST(createRequest({}), { params: { id: 'test-id' } });
+    const res = await POST(createRequest({}), { params: Promise.resolve({ id: 'test-id' }) });
     expect(res.status).toBe(409);
     expect((await res.json()).reason).toBe('non_fast_forward');
   });
 
   it('maps GitAuthFailedError to 401', async () => {
     (gitPull as ReturnType<typeof vi.fn>).mockRejectedValue(new GitAuthFailedError());
-    expect((await POST(createRequest({}), { params: { id: 'test-id' } })).status).toBe(401);
+    expect((await POST(createRequest({}), { params: Promise.resolve({ id: 'test-id' }) })).status).toBe(401);
   });
 
   it('maps GitIndexLockedError to 409', async () => {
     (gitPull as ReturnType<typeof vi.fn>).mockRejectedValue(new GitIndexLockedError('locked'));
-    expect((await POST(createRequest({}), { params: { id: 'test-id' } })).status).toBe(409);
+    expect((await POST(createRequest({}), { params: Promise.resolve({ id: 'test-id' }) })).status).toBe(409);
   });
 });

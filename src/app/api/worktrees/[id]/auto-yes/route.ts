@@ -78,18 +78,19 @@ function isValidCliTool(cliToolId: string | undefined): cliToolId is CLIToolType
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // [SEC4-SF-003] Validate worktree ID format
-    if (!isValidWorktreeId(params.id)) {
+    const { id } = await params;
+    if (!isValidWorktreeId(id)) {
       return NextResponse.json(
         { error: 'Invalid worktree ID format' },
         { status: 400 }
       );
     }
 
-    const notFound = validateWorktreeExists(params.id);
+    const notFound = validateWorktreeExists(id);
     if (notFound) return notFound;
 
     // Issue #525: cliToolId query parameter support
@@ -113,19 +114,19 @@ export async function GET(
           { status: 400 }
         );
       }
-      const state = getAutoYesState(params.id, cliToolIdParam, instanceIdParam);
+      const state = getAutoYesState(id, cliToolIdParam, instanceIdParam);
       return NextResponse.json(buildAutoYesResponse(state));
     }
 
     // No cliToolId: return maps keyed by agent (cliToolId) and by instance (Issue #896).
-    const compositeKeys = getCompositeKeysByWorktree(params.id);
+    const compositeKeys = getCompositeKeysByWorktree(id);
     const agentStates: Record<string, ReturnType<typeof buildAutoYesResponse>> = {};
     const instanceStates: Record<string, ReturnType<typeof buildAutoYesResponse>> = {};
     for (const key of compositeKeys) {
       const agentId = extractCliToolId(key);
       if (!agentId) continue;
       const instanceId = extractInstanceId(key) ?? agentId;
-      const state = getAutoYesState(params.id, agentId, instanceId);
+      const state = getAutoYesState(id, agentId, instanceId);
       instanceStates[instanceId] = buildAutoYesResponse(state);
       // Keep the cliTool-level map populated from the primary instance for backward compat.
       if (instanceId === agentId) {
@@ -134,7 +135,7 @@ export async function GET(
     }
 
     // For backward compatibility, also include top-level fields from default agent
-    const defaultState = getAutoYesState(params.id, 'claude');
+    const defaultState = getAutoYesState(id, 'claude');
     return NextResponse.json({
       ...buildAutoYesResponse(defaultState),
       agents: agentStates,
@@ -151,18 +152,19 @@ export async function GET(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // [SEC-MF-001] Validate worktree ID format before DB query
-    if (!isValidWorktreeId(params.id)) {
+    const { id } = await params;
+    if (!isValidWorktreeId(id)) {
       return NextResponse.json(
         { error: 'Invalid worktree ID format' },
         { status: 400 }
       );
     }
 
-    const notFound = validateWorktreeExists(params.id);
+    const notFound = validateWorktreeExists(id);
     if (notFound) return notFound;
 
     // [SEC-SF-001] JSON parse error handling
@@ -235,14 +237,14 @@ export async function POST(
     let state;
     if (body.enabled) {
       state = setAutoYesEnabled(
-        params.id,
+        id,
         cliToolId,
         true,
         duration,
         stopPattern,
         instanceId
       );
-      const result = startAutoYesPolling(params.id, cliToolId, instanceId);
+      const result = startAutoYesPolling(id, cliToolId, instanceId);
       pollingStarted = result.started;
       if (!result.started) {
         logger.warn('polling-not-started:');
@@ -251,23 +253,23 @@ export async function POST(
       // Issue #525, #896: instanceId/cliToolId specified -> stop that instance;
       // neither specified -> stop all instances for this worktree.
       if (body.instanceId) {
-        state = setAutoYesEnabled(params.id, cliToolId, false, undefined, undefined, instanceId);
-        const compositeKey = buildCompositeKey(params.id, cliToolId, instanceId);
+        state = setAutoYesEnabled(id, cliToolId, false, undefined, undefined, instanceId);
+        const compositeKey = buildCompositeKey(id, cliToolId, instanceId);
         stopAutoYesPolling(compositeKey);
       } else if (body.cliToolId) {
-        state = setAutoYesEnabled(params.id, cliToolId, false);
-        const compositeKey = buildCompositeKey(params.id, cliToolId);
+        state = setAutoYesEnabled(id, cliToolId, false);
+        const compositeKey = buildCompositeKey(id, cliToolId);
         stopAutoYesPolling(compositeKey);
       } else {
         // Disable all agents/instances for this worktree
-        const keys = getCompositeKeysByWorktree(params.id);
+        const keys = getCompositeKeysByWorktree(id);
         for (const key of keys) {
           const toolId = extractCliToolId(key);
           if (toolId) {
-            setAutoYesEnabled(params.id, toolId, false, undefined, undefined, extractInstanceId(key) ?? undefined);
+            setAutoYesEnabled(id, toolId, false, undefined, undefined, extractInstanceId(key) ?? undefined);
           }
         }
-        stopAutoYesPollingByWorktree(params.id);
+        stopAutoYesPollingByWorktree(id);
         state = { enabled: false, enabledAt: 0, expiresAt: 0 };
       }
     }

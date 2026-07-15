@@ -27,23 +27,24 @@ const logger = createLogger('api/schedules');
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     // [S4-010] 2-stage worktree ID validation
-    if (!isValidWorktreeId(params.id)) {
+    if (!isValidWorktreeId(id)) {
       return NextResponse.json({ error: 'Invalid worktree ID format' }, { status: 400 });
     }
 
     const db = getDbInstance();
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
-      return NextResponse.json({ error: `Worktree '${params.id}' not found` }, { status: 404 });
+      return NextResponse.json({ error: `Worktree '${id}' not found` }, { status: 404 });
     }
 
     const schedules = db.prepare(
       'SELECT * FROM scheduled_executions WHERE worktree_id = ? ORDER BY created_at DESC'
-    ).all(params.id);
+    ).all(id);
 
     return NextResponse.json({ schedules }, { status: 200 });
   } catch (error) {
@@ -65,18 +66,19 @@ export async function GET(
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id: worktreeId } = await params;
     // [S4-010] 2-stage worktree ID validation
-    if (!isValidWorktreeId(params.id)) {
+    if (!isValidWorktreeId(worktreeId)) {
       return NextResponse.json({ error: 'Invalid worktree ID format' }, { status: 400 });
     }
 
     const db = getDbInstance();
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, worktreeId);
     if (!worktree) {
-      return NextResponse.json({ error: `Worktree '${params.id}' not found` }, { status: 404 });
+      return NextResponse.json({ error: `Worktree '${worktreeId}' not found` }, { status: 404 });
     }
 
     const body = await request.json().catch(() => ({}));
@@ -118,7 +120,7 @@ export async function POST(
     db.prepare(`
       INSERT INTO scheduled_executions (id, worktree_id, name, message, cron_expression, cli_tool_id, enabled, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, params.id, name, message, cronExpression, toolId, enabledValue, now, now);
+    `).run(id, worktreeId, name, message, cronExpression, toolId, enabledValue, now, now);
 
     const schedule = db.prepare('SELECT * FROM scheduled_executions WHERE id = ?').get(id);
 

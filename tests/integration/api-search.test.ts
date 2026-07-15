@@ -101,7 +101,7 @@ describe('Search API Integration Tests', () => {
       });
 
       const request = createRequest({ q: 'hello', mode: 'content' });
-      const response = await GET(request, { params: { id: 'test-id' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'test-id' }) });
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -127,7 +127,7 @@ describe('Search API Integration Tests', () => {
       });
 
       const request = createRequest({ q: 'nonexistent', mode: 'content' });
-      const response = await GET(request, { params: { id: 'test-id' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'test-id' }) });
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -154,7 +154,7 @@ describe('Search API Integration Tests', () => {
       });
 
       const request = createRequest({ q: 'match', mode: 'content' });
-      const response = await GET(request, { params: { id: 'test-id' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'test-id' }) });
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -182,7 +182,7 @@ describe('Search API Integration Tests', () => {
       });
 
       const request = createRequest({ q: 'test', mode: 'content' });
-      const response = await GET(request, { params: { id: 'test-id' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'test-id' }) });
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -199,7 +199,7 @@ describe('Search API Integration Tests', () => {
   describe('Error Cases', () => {
     it('should return 400 for invalid mode', async () => {
       const request = createRequest({ q: 'test', mode: 'name' });
-      const response = await GET(request, { params: { id: 'test-id' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'test-id' }) });
       const data = await response.json();
 
       expect(response.status).toBe(400);
@@ -209,7 +209,7 @@ describe('Search API Integration Tests', () => {
 
     it('should return 400 for empty query', async () => {
       const request = createRequest({ q: '', mode: 'content' });
-      const response = await GET(request, { params: { id: 'test-id' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'test-id' }) });
       const data = await response.json();
 
       expect(response.status).toBe(400);
@@ -221,7 +221,7 @@ describe('Search API Integration Tests', () => {
       mockGetWorktreeById.mockReturnValue(null);
 
       const request = createRequest({ q: 'test', mode: 'content' });
-      const response = await GET(request, { params: { id: 'nonexistent' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'nonexistent' }) });
       const data = await response.json();
 
       expect(response.status).toBe(404);
@@ -238,7 +238,7 @@ describe('Search API Integration Tests', () => {
       mockSearchWithTimeout.mockRejectedValue(new SearchTimeoutError('Timeout'));
 
       const request = createRequest({ q: 'test', mode: 'content' });
-      const response = await GET(request, { params: { id: 'test-id' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'test-id' }) });
       const data = await response.json();
 
       expect(response.status).toBe(408);
@@ -255,7 +255,7 @@ describe('Search API Integration Tests', () => {
       mockSearchWithTimeout.mockRejectedValue(new Error('Internal error'));
 
       const request = createRequest({ q: 'test', mode: 'content' });
-      const response = await GET(request, { params: { id: 'test-id' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'test-id' }) });
       const data = await response.json();
 
       expect(response.status).toBe(500);
@@ -283,7 +283,7 @@ describe('Search API Integration Tests', () => {
       });
 
       const request = createRequest({ q: 'test', mode: 'content' });
-      const response = await GET(request, { params: { id: 'test-id' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'test-id' }) });
       const data = await response.json();
 
       // Verify all required fields are present
@@ -298,7 +298,7 @@ describe('Search API Integration Tests', () => {
       mockGetWorktreeById.mockReturnValue(null);
 
       const request = createRequest({ q: 'test', mode: 'content' });
-      const response = await GET(request, { params: { id: 'test-id' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'test-id' }) });
       const data = await response.json();
 
       // Verify error structure
@@ -329,7 +329,7 @@ describe('Search API Integration Tests', () => {
 
       // Request without mode parameter
       const request = createRequest({ q: 'test' });
-      const response = await GET(request, { params: { id: 'test-id' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'test-id' }) });
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -338,7 +338,7 @@ describe('Search API Integration Tests', () => {
 
     it('should handle missing query parameter as empty string', async () => {
       const request = createRequest({ mode: 'content' });
-      const response = await GET(request, { params: { id: 'test-id' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'test-id' }) });
       const data = await response.json();
 
       expect(response.status).toBe(400);

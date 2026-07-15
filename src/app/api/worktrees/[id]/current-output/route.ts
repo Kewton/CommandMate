@@ -20,11 +20,12 @@ function isCliTool(value: string | null): value is CLIToolType {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // [SEC-DS4-F006] Validate worktree ID format (Issue #314)
-    if (!isValidWorktreeId(params.id)) {
+    const { id } = await params;
+    if (!isValidWorktreeId(id)) {
       return NextResponse.json(
         { error: 'Invalid worktree ID format' },
         { status: 400 }
@@ -34,10 +35,10 @@ export async function GET(
     const db = getDbInstance();
 
     // Check if worktree exists
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${params.id}' not found` },
+        { error: `Worktree '${id}' not found` },
         { status: 404 }
       );
     }
@@ -59,7 +60,7 @@ export async function GET(
 
     // Issue #1120: payload assembly is shared with the WS terminal streamer via
     // buildCurrentOutput() so the pull (HTTP) and push (WS) paths stay identical.
-    const payload = await buildCurrentOutput(db, params.id, cliToolId, instanceId);
+    const payload = await buildCurrentOutput(db, id, cliToolId, instanceId);
     return NextResponse.json(payload, { status: 200 });
   } catch (error: unknown) {
     logger.error('error-getting-current-output:', { error: error instanceof Error ? error.message : String(error) });

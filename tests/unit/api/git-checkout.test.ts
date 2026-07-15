@@ -103,18 +103,18 @@ describe('POST /api/worktrees/:id/git/checkout (Issue #781)', () => {
 
   it('returns 400 for an invalid worktree ID', async () => {
     (isValidWorktreeId as ReturnType<typeof vi.fn>).mockReturnValue(false);
-    const response = await POST(createRequest({ branch: 'feature/x' }), { params: { id: 'bad!' } });
+    const response = await POST(createRequest({ branch: 'feature/x' }), { params: Promise.resolve({ id: 'bad!' }) });
     expect(response.status).toBe(400);
   });
 
   it('returns 404 when the worktree is not found', async () => {
     (getWorktreeById as ReturnType<typeof vi.fn>).mockReturnValue(null);
-    const response = await POST(createRequest({ branch: 'feature/x' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ branch: 'feature/x' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(404);
   });
 
   it('returns 400 invalid_branch_name for a missing branch', async () => {
-    const response = await POST(createRequest({}), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({}), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(400);
     const data = await response.json();
     expect(data.reason).toBe('invalid_branch_name');
@@ -122,14 +122,14 @@ describe('POST /api/worktrees/:id/git/checkout (Issue #781)', () => {
   });
 
   it('returns 400 invalid_branch_name for an option-injection branch name', async () => {
-    const response = await POST(createRequest({ branch: '-force' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ branch: '-force' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(400);
     const data = await response.json();
     expect(data.reason).toBe('invalid_branch_name');
   });
 
   it('returns 200 with currentBranch and isDirty on success', async () => {
-    const response = await POST(createRequest({ branch: 'feature/x' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ branch: 'feature/x' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data.success).toBe(true);
@@ -146,7 +146,7 @@ describe('POST /api/worktrees/:id/git/checkout (Issue #781)', () => {
   it('forwards createIfMissing / from / force options', async () => {
     await POST(
       createRequest({ branch: 'feature/new', createIfMissing: true, from: 'main', force: true }),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
     expect(checkoutBranch).toHaveBeenCalledWith('/path/to/worktree', {
       branch: 'feature/new',
@@ -159,7 +159,7 @@ describe('POST /api/worktrees/:id/git/checkout (Issue #781)', () => {
   it('validates the from ref as a branch name (400 invalid_branch_name)', async () => {
     const response = await POST(
       createRequest({ branch: 'feature/new', createIfMissing: true, from: '-bad' }),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
     expect(response.status).toBe(400);
     expect(checkoutBranch).not.toHaveBeenCalled();
@@ -167,7 +167,7 @@ describe('POST /api/worktrees/:id/git/checkout (Issue #781)', () => {
 
   it('returns 409 dirty when the tree is dirty', async () => {
     (checkoutBranch as ReturnType<typeof vi.fn>).mockRejectedValue(new GitDirtyError('dirty'));
-    const response = await POST(createRequest({ branch: 'feature/x' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ branch: 'feature/x' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(409);
     const data = await response.json();
     expect(data.reason).toBe('dirty');
@@ -177,7 +177,7 @@ describe('POST /api/worktrees/:id/git/checkout (Issue #781)', () => {
     (checkoutBranch as ReturnType<typeof vi.fn>).mockRejectedValue(
       new GitBranchCheckedOutElsewhereError('elsewhere', '/other/wt')
     );
-    const response = await POST(createRequest({ branch: 'feature/x' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ branch: 'feature/x' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(409);
     const data = await response.json();
     expect(data.reason).toBe('checked_out_elsewhere');
@@ -186,7 +186,7 @@ describe('POST /api/worktrees/:id/git/checkout (Issue #781)', () => {
 
   it('returns 404 branch_not_found for a missing branch', async () => {
     (checkoutBranch as ReturnType<typeof vi.fn>).mockRejectedValue(new GitBranchNotFoundError('nope'));
-    const response = await POST(createRequest({ branch: 'feature/nope' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ branch: 'feature/nope' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(404);
     const data = await response.json();
     expect(data.reason).toBe('branch_not_found');
@@ -196,7 +196,7 @@ describe('POST /api/worktrees/:id/git/checkout (Issue #781)', () => {
     (checkoutBranch as ReturnType<typeof vi.fn>).mockRejectedValue(
       new GitIndexLockedError('index.lock present')
     );
-    const response = await POST(createRequest({ branch: 'feature/x' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ branch: 'feature/x' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(409);
   });
 
@@ -204,13 +204,13 @@ describe('POST /api/worktrees/:id/git/checkout (Issue #781)', () => {
     (checkoutBranch as ReturnType<typeof vi.fn>).mockRejectedValue(
       new GitTimeoutError('timed out')
     );
-    const response = await POST(createRequest({ branch: 'feature/x' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ branch: 'feature/x' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(504);
   });
 
   it('returns 500 on a generic error', async () => {
     (checkoutBranch as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('boom'));
-    const response = await POST(createRequest({ branch: 'feature/x' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ branch: 'feature/x' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(500);
   });
 });

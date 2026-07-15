@@ -34,23 +34,24 @@ const logger = createLogger('api/worktree-todos');
  */
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string; todoId: string } }
+  { params }: { params: Promise<{ id: string; todoId: string }> }
 ) {
   try {
+    const { id, todoId } = await params;
     const db = getDbInstance();
 
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${params.id}' not found` },
+        { error: `Worktree '${id}' not found` },
         { status: 404 }
       );
     }
 
-    const existing = getWorktreeTodoById(db, params.todoId);
-    if (!existing || existing.worktreeId !== params.id) {
+    const existing = getWorktreeTodoById(db, todoId);
+    if (!existing || existing.worktreeId !== id) {
       return NextResponse.json(
-        { error: `Todo '${params.todoId}' not found` },
+        { error: `Todo '${todoId}' not found` },
         { status: 404 }
       );
     }
@@ -118,9 +119,9 @@ export async function PATCH(
       );
     }
 
-    updateWorktreeTodo(db, params.todoId, { content: trimmed, detail, done, status });
+    updateWorktreeTodo(db, todoId, { content: trimmed, detail, done, status });
 
-    const updatedTodo = getWorktreeTodoById(db, params.todoId);
+    const updatedTodo = getWorktreeTodoById(db, todoId);
 
     return NextResponse.json({ todo: updatedTodo }, { status: 200 });
   } catch (error) {
@@ -138,28 +139,29 @@ export async function PATCH(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string; todoId: string } }
+  { params }: { params: Promise<{ id: string; todoId: string }> }
 ) {
   try {
+    const { id, todoId } = await params;
     const db = getDbInstance();
 
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${params.id}' not found` },
+        { error: `Worktree '${id}' not found` },
         { status: 404 }
       );
     }
 
-    const existing = getWorktreeTodoById(db, params.todoId);
-    if (!existing || existing.worktreeId !== params.id) {
+    const existing = getWorktreeTodoById(db, todoId);
+    if (!existing || existing.worktreeId !== id) {
       return NextResponse.json(
-        { error: `Todo '${params.todoId}' not found` },
+        { error: `Todo '${todoId}' not found` },
         { status: 404 }
       );
     }
 
-    deleteWorktreeTodo(db, params.todoId);
+    deleteWorktreeTodo(db, todoId);
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {

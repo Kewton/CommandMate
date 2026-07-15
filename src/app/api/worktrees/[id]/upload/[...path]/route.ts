@@ -103,19 +103,20 @@ function createUploadErrorResponse(
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string; path: string[] } }
+  { params }: { params: Promise<{ id: string; path: string[] }> }
 ) {
   try {
     // Get worktree
+    const { id, path } = await params;
     const db = getDbInstance();
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
 
     if (!worktree) {
       return createUploadErrorResponse('WORKTREE_NOT_FOUND', 'Worktree not found');
     }
 
     // Validate target directory path
-    const targetDir = params.path.join('/');
+    const targetDir = path.join('/');
     const normalizedDir = normalize(targetDir);
 
     // [S3-S2] Auto-create .commandmate/attachments/ directory if needed

@@ -70,18 +70,18 @@ describe('POST /api/worktrees/:id/git/branch/create (Issue #781)', () => {
 
   it('returns 400 for an invalid worktree ID', async () => {
     (isValidWorktreeId as ReturnType<typeof vi.fn>).mockReturnValue(false);
-    const response = await POST(createRequest({ name: 'feature/x' }), { params: { id: 'bad!' } });
+    const response = await POST(createRequest({ name: 'feature/x' }), { params: Promise.resolve({ id: 'bad!' }) });
     expect(response.status).toBe(400);
   });
 
   it('returns 404 when the worktree is not found', async () => {
     (getWorktreeById as ReturnType<typeof vi.fn>).mockReturnValue(null);
-    const response = await POST(createRequest({ name: 'feature/x' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ name: 'feature/x' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(404);
   });
 
   it('returns 400 invalid_branch_name for a missing name', async () => {
-    const response = await POST(createRequest({}), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({}), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(400);
     const data = await response.json();
     expect(data.reason).toBe('invalid_branch_name');
@@ -89,12 +89,12 @@ describe('POST /api/worktrees/:id/git/branch/create (Issue #781)', () => {
   });
 
   it('returns 400 invalid_branch_name for a bad name', async () => {
-    const response = await POST(createRequest({ name: '-x' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ name: '-x' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(400);
   });
 
   it('returns 200 with the created branch on success', async () => {
-    const response = await POST(createRequest({ name: 'feature/new' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ name: 'feature/new' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data.success).toBe(true);
@@ -104,14 +104,14 @@ describe('POST /api/worktrees/:id/git/branch/create (Issue #781)', () => {
   });
 
   it('forwards a validated from ref', async () => {
-    await POST(createRequest({ name: 'feature/new', from: 'main' }), { params: { id: 'test-id' } });
+    await POST(createRequest({ name: 'feature/new', from: 'main' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(createBranch).toHaveBeenCalledWith('/path/to/worktree', { name: 'feature/new', from: 'main' });
   });
 
   it('rejects an invalid from ref with 400', async () => {
     const response = await POST(
       createRequest({ name: 'feature/new', from: '../escape' }),
-      { params: { id: 'test-id' } }
+      { params: Promise.resolve({ id: 'test-id' }) }
     );
     expect(response.status).toBe(400);
     expect(createBranch).not.toHaveBeenCalled();
@@ -119,7 +119,7 @@ describe('POST /api/worktrees/:id/git/branch/create (Issue #781)', () => {
 
   it('returns 404 branch_not_found when the from ref does not exist', async () => {
     (createBranch as ReturnType<typeof vi.fn>).mockRejectedValue(new GitBranchNotFoundError('nope'));
-    const response = await POST(createRequest({ name: 'feature/new', from: 'gone' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ name: 'feature/new', from: 'gone' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(404);
     const data = await response.json();
     expect(data.reason).toBe('branch_not_found');
@@ -127,7 +127,7 @@ describe('POST /api/worktrees/:id/git/branch/create (Issue #781)', () => {
 
   it('returns 500 on a generic error', async () => {
     (createBranch as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('boom'));
-    const response = await POST(createRequest({ name: 'feature/new' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ name: 'feature/new' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(500);
   });
 });

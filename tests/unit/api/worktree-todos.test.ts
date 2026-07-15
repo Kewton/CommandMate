@@ -79,7 +79,7 @@ describe('GET /api/worktrees/:id/todos', () => {
     const { GET } = await import('@/app/api/worktrees/[id]/todos/route');
     const res = await GET(
       asReq(new Request(`http://localhost/api/worktrees/${wtId}/todos`)),
-      { params: { id: wtId } },
+      { params: Promise.resolve({ id: wtId }) },
     );
     expect(res.status).toBe(200);
     const data = await res.json();
@@ -93,7 +93,7 @@ describe('GET /api/worktrees/:id/todos', () => {
     const { GET } = await import('@/app/api/worktrees/[id]/todos/route');
     const res = await GET(
       asReq(new Request(`http://localhost/api/worktrees/${wtId}/todos`)),
-      { params: { id: wtId } },
+      { params: Promise.resolve({ id: wtId }) },
     );
     expect(res.status).toBe(200);
     const data = await res.json();
@@ -114,7 +114,7 @@ describe('GET /api/worktrees/:id/todos', () => {
     const { GET } = await import('@/app/api/worktrees/[id]/todos/route');
     const res = await GET(
       asReq(new Request(`http://localhost/api/worktrees/${wtId}/todos`)),
-      { params: { id: wtId } },
+      { params: Promise.resolve({ id: wtId }) },
     );
     const data = await res.json();
     expect(data.todos.map((t: { content: string }) => t.content)).toEqual(['mine']);
@@ -124,7 +124,7 @@ describe('GET /api/worktrees/:id/todos', () => {
     const { GET } = await import('@/app/api/worktrees/[id]/todos/route');
     const res = await GET(
       asReq(new Request('http://localhost/api/worktrees/nope/todos')),
-      { params: { id: 'nope' } },
+      { params: Promise.resolve({ id: 'nope' }) },
     );
     expect(res.status).toBe(404);
     const data = await res.json();
@@ -136,7 +136,7 @@ describe('GET /api/worktrees/:id/todos', () => {
     const { GET } = await import('@/app/api/worktrees/[id]/todos/route');
     const res = await GET(
       asReq(new Request(`http://localhost/api/worktrees/${wtId}/todos`)),
-      { params: { id: wtId } },
+      { params: Promise.resolve({ id: wtId }) },
     );
     expect(res.status).toBe(500);
   });
@@ -153,7 +153,7 @@ describe('POST /api/worktrees/:id/todos', () => {
           body: JSON.stringify(body),
         }),
       ),
-      { params: { id } },
+      { params: Promise.resolve({ id }) },
     );
   };
 
@@ -238,7 +238,7 @@ describe('PATCH /api/worktrees/:id/todos/:todoId', () => {
           body: JSON.stringify(body),
         }),
       ),
-      { params: { id, todoId } },
+      { params: Promise.resolve({ id, todoId }) },
     );
   };
 
@@ -368,7 +368,7 @@ describe('DELETE /api/worktrees/:id/todos/:todoId', () => {
           method: 'DELETE',
         }),
       ),
-      { params: { id, todoId } },
+      { params: Promise.resolve({ id, todoId }) },
     );
   };
 
@@ -403,7 +403,7 @@ describe('PATCH /api/worktrees/:id/todos (reorder)', () => {
           body: JSON.stringify(body),
         }),
       ),
-      { params: { id } },
+      { params: Promise.resolve({ id }) },
     );
   };
 

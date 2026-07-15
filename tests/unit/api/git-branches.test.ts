@@ -77,18 +77,18 @@ describe('GET /api/worktrees/:id/git/branches (Issue #781)', () => {
 
   it('returns 400 for an invalid worktree ID', async () => {
     (isValidWorktreeId as ReturnType<typeof vi.fn>).mockReturnValue(false);
-    const response = await GET(createRequest(), { params: { id: 'bad!' } });
+    const response = await GET(createRequest(), { params: Promise.resolve({ id: 'bad!' }) });
     expect(response.status).toBe(400);
   });
 
   it('returns 404 when the worktree is not found', async () => {
     (getWorktreeById as ReturnType<typeof vi.fn>).mockReturnValue(null);
-    const response = await GET(createRequest(), { params: { id: 'test-id' } });
+    const response = await GET(createRequest(), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(404);
   });
 
   it('returns 200 with the branches and defaults include to local', async () => {
-    const response = await GET(createRequest(), { params: { id: 'test-id' } });
+    const response = await GET(createRequest(), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data.branches).toEqual(BRANCHES);
@@ -96,17 +96,17 @@ describe('GET /api/worktrees/:id/git/branches (Issue #781)', () => {
   });
 
   it('passes include=remote through', async () => {
-    await GET(createRequest('?include=remote'), { params: { id: 'test-id' } });
+    await GET(createRequest('?include=remote'), { params: Promise.resolve({ id: 'test-id' }) });
     expect(listBranches).toHaveBeenCalledWith('/path/to/worktree', 'remote');
   });
 
   it('passes include=all through', async () => {
-    await GET(createRequest('?include=all'), { params: { id: 'test-id' } });
+    await GET(createRequest('?include=all'), { params: Promise.resolve({ id: 'test-id' }) });
     expect(listBranches).toHaveBeenCalledWith('/path/to/worktree', 'all');
   });
 
   it('falls back to local for an invalid include value', async () => {
-    await GET(createRequest('?include=bogus'), { params: { id: 'test-id' } });
+    await GET(createRequest('?include=bogus'), { params: Promise.resolve({ id: 'test-id' }) });
     expect(listBranches).toHaveBeenCalledWith('/path/to/worktree', 'local');
   });
 });

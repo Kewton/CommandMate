@@ -27,25 +27,26 @@ const logger = createLogger('api/schedules');
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string; scheduleId: string } }
+  { params }: { params: Promise<{ id: string; scheduleId: string }> }
 ) {
   try {
-    if (!isValidWorktreeId(params.id)) {
+    const { id, scheduleId } = await params;
+    if (!isValidWorktreeId(id)) {
       return NextResponse.json({ error: 'Invalid worktree ID format' }, { status: 400 });
     }
-    if (!isValidUuidV4(params.scheduleId)) {
+    if (!isValidUuidV4(scheduleId)) {
       return NextResponse.json({ error: 'Invalid schedule ID format' }, { status: 400 });
     }
 
     const db = getDbInstance();
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
-      return NextResponse.json({ error: `Worktree '${params.id}' not found` }, { status: 404 });
+      return NextResponse.json({ error: `Worktree '${id}' not found` }, { status: 404 });
     }
 
     const schedule = db.prepare(
       'SELECT * FROM scheduled_executions WHERE id = ? AND worktree_id = ?'
-    ).get(params.scheduleId, params.id);
+    ).get(scheduleId, id);
 
     if (!schedule) {
       return NextResponse.json({ error: 'Schedule not found' }, { status: 404 });
@@ -64,25 +65,26 @@ export async function GET(
  */
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string; scheduleId: string } }
+  { params }: { params: Promise<{ id: string; scheduleId: string }> }
 ) {
   try {
-    if (!isValidWorktreeId(params.id)) {
+    const { id, scheduleId } = await params;
+    if (!isValidWorktreeId(id)) {
       return NextResponse.json({ error: 'Invalid worktree ID format' }, { status: 400 });
     }
-    if (!isValidUuidV4(params.scheduleId)) {
+    if (!isValidUuidV4(scheduleId)) {
       return NextResponse.json({ error: 'Invalid schedule ID format' }, { status: 400 });
     }
 
     const db = getDbInstance();
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
-      return NextResponse.json({ error: `Worktree '${params.id}' not found` }, { status: 404 });
+      return NextResponse.json({ error: `Worktree '${id}' not found` }, { status: 404 });
     }
 
     const existing = db.prepare(
       'SELECT * FROM scheduled_executions WHERE id = ? AND worktree_id = ?'
-    ).get(params.scheduleId, params.id);
+    ).get(scheduleId, id);
 
     if (!existing) {
       return NextResponse.json({ error: 'Schedule not found' }, { status: 404 });
@@ -129,8 +131,8 @@ export async function PUT(
 
     updates.push('updated_at = ?');
     values.push(now);
-    values.push(params.scheduleId);
-    values.push(params.id);
+    values.push(scheduleId);
+    values.push(id);
 
     db.prepare(
       `UPDATE scheduled_executions SET ${updates.join(', ')} WHERE id = ? AND worktree_id = ?`
@@ -138,7 +140,7 @@ export async function PUT(
 
     const updated = db.prepare(
       'SELECT * FROM scheduled_executions WHERE id = ? AND worktree_id = ?'
-    ).get(params.scheduleId, params.id);
+    ).get(scheduleId, id);
 
     return NextResponse.json({ schedule: updated }, { status: 200 });
   } catch (error) {
@@ -152,25 +154,26 @@ export async function PUT(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string; scheduleId: string } }
+  { params }: { params: Promise<{ id: string; scheduleId: string }> }
 ) {
   try {
-    if (!isValidWorktreeId(params.id)) {
+    const { id, scheduleId } = await params;
+    if (!isValidWorktreeId(id)) {
       return NextResponse.json({ error: 'Invalid worktree ID format' }, { status: 400 });
     }
-    if (!isValidUuidV4(params.scheduleId)) {
+    if (!isValidUuidV4(scheduleId)) {
       return NextResponse.json({ error: 'Invalid schedule ID format' }, { status: 400 });
     }
 
     const db = getDbInstance();
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, id);
     if (!worktree) {
-      return NextResponse.json({ error: `Worktree '${params.id}' not found` }, { status: 404 });
+      return NextResponse.json({ error: `Worktree '${id}' not found` }, { status: 404 });
     }
 
     const result = db.prepare(
       'DELETE FROM scheduled_executions WHERE id = ? AND worktree_id = ?'
-    ).run(params.scheduleId, params.id);
+    ).run(scheduleId, id);
 
     if (result.changes === 0) {
       return NextResponse.json({ error: 'Schedule not found' }, { status: 404 });

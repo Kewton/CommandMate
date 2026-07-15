@@ -81,7 +81,7 @@ describe('GET /api/worktrees/:id/files/:path (PDF branch)', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-wt/files/docs/sample.pdf'),
-      { params: { id: 'test-wt', path: ['docs', 'sample.pdf'] } },
+      { params: Promise.resolve({ id: 'test-wt', path: ['docs', 'sample.pdf'] }) },
     );
 
     expect(response.status).toBe(200);
@@ -101,7 +101,7 @@ describe('GET /api/worktrees/:id/files/:path (PDF branch)', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-wt/files/big.pdf'),
-      { params: { id: 'test-wt', path: ['big.pdf'] } },
+      { params: Promise.resolve({ id: 'test-wt', path: ['big.pdf'] }) },
     );
 
     expect(response.status).toBe(413);
@@ -117,7 +117,7 @@ describe('GET /api/worktrees/:id/files/:path (PDF branch)', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-wt/files/fake.pdf'),
-      { params: { id: 'test-wt', path: ['fake.pdf'] } },
+      { params: Promise.resolve({ id: 'test-wt', path: ['fake.pdf'] }) },
     );
 
     expect(response.status).toBe(400);
@@ -134,7 +134,7 @@ describe('GET /api/worktrees/:id/files/:path (PDF branch)', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/test-wt/files/missing.pdf'),
-      { params: { id: 'test-wt', path: ['missing.pdf'] } },
+      { params: Promise.resolve({ id: 'test-wt', path: ['missing.pdf'] }) },
     );
 
     expect(response.status).toBe(404);
@@ -148,7 +148,7 @@ describe('GET /api/worktrees/:id/files/:path (PDF branch)', () => {
 
     const response = await GET(
       createRequest('/api/worktrees/ghost/files/any.pdf'),
-      { params: { id: 'ghost', path: ['any.pdf'] } },
+      { params: Promise.resolve({ id: 'ghost', path: ['any.pdf'] }) },
     );
 
     expect(response.status).toBe(404);
@@ -179,7 +179,7 @@ describe('GET /api/worktrees/:id/files/:path (PDF branch)', () => {
     try {
       await GET(
         createRequest('/api/worktrees/test-wt/files/note.txt'),
-        { params: { id: 'test-wt', path: ['note.txt'] } },
+        { params: Promise.resolve({ id: 'test-wt', path: ['note.txt'] }) },
       );
     } catch {
       // Standard text path may throw because we don't fully mock

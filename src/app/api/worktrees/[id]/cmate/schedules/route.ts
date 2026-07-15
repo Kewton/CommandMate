@@ -64,9 +64,10 @@ function normalizeInput(body: Record<string, unknown>): ScheduleWriteInput {
  * POST /api/worktrees/:id/cmate/schedules
  * Insert or update a schedule row in CMATE.md.
  */
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const resolved = resolveWorktree(params.id);
+    const { id } = await params;
+    const resolved = resolveWorktree(id);
     if ('error' in resolved) return resolved.error;
 
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
@@ -98,9 +99,10 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
  * PATCH /api/worktrees/:id/cmate/schedules
  * Toggle a schedule's Enabled flag. Body: { name, enabled }.
  */
-export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const resolved = resolveWorktree(params.id);
+    const { id } = await params;
+    const resolved = resolveWorktree(id);
     if ('error' in resolved) return resolved.error;
 
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
@@ -128,9 +130,10 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
  * DELETE /api/worktrees/:id/cmate/schedules
  * Remove a schedule row. Body: { name }.
  */
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const resolved = resolveWorktree(params.id);
+    const { id } = await params;
+    const resolved = resolveWorktree(id);
     if ('error' in resolved) return resolved.error;
 
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;

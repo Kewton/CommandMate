@@ -215,7 +215,7 @@ describe('GET /api/worktrees/:id', () => {
     upsertWorktree(db, worktree);
 
     const request = new Request('http://localhost:3000/api/worktrees/feature-foo');
-    const params = { params: { id: 'feature-foo' } };
+    const params = { params: Promise.resolve({ id: 'feature-foo' }) };
     const response = await getWorktreeById(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(200);
@@ -237,7 +237,7 @@ describe('GET /api/worktrees/:id', () => {
     });
 
     const request = new Request('http://localhost:3000/api/worktrees/feature-foo');
-    const params = { params: { id: 'feature-foo' } };
+    const params = { params: Promise.resolve({ id: 'feature-foo' }) };
     const response = await getWorktreeById(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(200);
@@ -248,7 +248,7 @@ describe('GET /api/worktrees/:id', () => {
 
   it('should return 404 when worktree not found', async () => {
     const request = new Request('http://localhost:3000/api/worktrees/nonexistent');
-    const params = { params: { id: 'nonexistent' } };
+    const params = { params: Promise.resolve({ id: 'nonexistent' }) };
     const response = await getWorktreeById(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(404);
@@ -262,7 +262,7 @@ describe('GET /api/worktrees/:id', () => {
     db.close();
 
     const request = new Request('http://localhost:3000/api/worktrees/test');
-    const params = { params: { id: 'test' } };
+    const params = { params: Promise.resolve({ id: 'test' }) };
     const response = await getWorktreeById(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(500);
@@ -307,7 +307,7 @@ describe('PATCH /api/worktrees/:id', () => {
 
     const response = await patchWorktreeById(
       request as unknown as import('next/server').NextRequest,
-      { params: { id: 'feature-foo' } }
+      { params: Promise.resolve({ id: 'feature-foo' }) }
     );
 
     expect(response.status).toBe(400);
@@ -324,7 +324,7 @@ describe('PATCH /api/worktrees/:id', () => {
 
     const response = await patchWorktreeById(
       request as unknown as import('next/server').NextRequest,
-      { params: { id: 'feature-foo' } }
+      { params: Promise.resolve({ id: 'feature-foo' }) }
     );
 
     expect(response.status).toBe(400);
@@ -344,7 +344,7 @@ describe('PATCH /api/worktrees/:id', () => {
 
     const response = await patchWorktreeById(
       request as unknown as import('next/server').NextRequest,
-      { params: { id: 'feature-foo' } }
+      { params: Promise.resolve({ id: 'feature-foo' }) }
     );
 
     expect(response.status).toBe(200);

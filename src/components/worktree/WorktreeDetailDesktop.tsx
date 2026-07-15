@@ -157,7 +157,7 @@ export interface WorktreeDetailDesktopProps {
   onWorktreeUpdate: (updated: Worktree) => void;
 
   // File input
-  fileInputRef: React.RefObject<HTMLInputElement>;
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
   onFileInputChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
 
   // Kill session confirmation (Issue #1171: target-snapshot based)

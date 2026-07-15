@@ -92,18 +92,18 @@ describe('POST /api/worktrees/:id/git/branch/delete (Issue #781)', () => {
 
   it('returns 400 for an invalid worktree ID', async () => {
     (isValidWorktreeId as ReturnType<typeof vi.fn>).mockReturnValue(false);
-    const response = await POST(createRequest({ name: 'feature/x' }), { params: { id: 'bad!' } });
+    const response = await POST(createRequest({ name: 'feature/x' }), { params: Promise.resolve({ id: 'bad!' }) });
     expect(response.status).toBe(400);
   });
 
   it('returns 404 when the worktree is not found', async () => {
     (getWorktreeById as ReturnType<typeof vi.fn>).mockReturnValue(null);
-    const response = await POST(createRequest({ name: 'feature/x' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ name: 'feature/x' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(404);
   });
 
   it('returns 400 invalid_branch_name for a missing name', async () => {
-    const response = await POST(createRequest({}), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({}), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(400);
     const data = await response.json();
     expect(data.reason).toBe('invalid_branch_name');
@@ -111,7 +111,7 @@ describe('POST /api/worktrees/:id/git/branch/delete (Issue #781)', () => {
   });
 
   it('returns 200 with the deleted branch on success', async () => {
-    const response = await POST(createRequest({ name: 'feature/done' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ name: 'feature/done' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data.success).toBe(true);
@@ -120,13 +120,13 @@ describe('POST /api/worktrees/:id/git/branch/delete (Issue #781)', () => {
   });
 
   it('forwards the force flag', async () => {
-    await POST(createRequest({ name: 'feature/wip', force: true }), { params: { id: 'test-id' } });
+    await POST(createRequest({ name: 'feature/wip', force: true }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(deleteBranch).toHaveBeenCalledWith('/path/to/worktree', { name: 'feature/wip', force: true });
   });
 
   it('returns 409 not_merged for an unmerged branch deleted without force', async () => {
     (deleteBranch as ReturnType<typeof vi.fn>).mockRejectedValue(new GitBranchNotMergedError('not merged'));
-    const response = await POST(createRequest({ name: 'feature/x' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ name: 'feature/x' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(409);
     const data = await response.json();
     expect(data.reason).toBe('not_merged');
@@ -134,7 +134,7 @@ describe('POST /api/worktrees/:id/git/branch/delete (Issue #781)', () => {
 
   it('returns 409 current_branch when deleting the current branch', async () => {
     (deleteBranch as ReturnType<typeof vi.fn>).mockRejectedValue(new GitCurrentBranchError('current'));
-    const response = await POST(createRequest({ name: 'main' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ name: 'main' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(409);
     const data = await response.json();
     expect(data.reason).toBe('current_branch');
@@ -142,7 +142,7 @@ describe('POST /api/worktrees/:id/git/branch/delete (Issue #781)', () => {
 
   it('returns 409 default_branch when deleting the default branch', async () => {
     (deleteBranch as ReturnType<typeof vi.fn>).mockRejectedValue(new GitDefaultBranchError('default'));
-    const response = await POST(createRequest({ name: 'main' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ name: 'main' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(409);
     const data = await response.json();
     expect(data.reason).toBe('default_branch');
@@ -150,7 +150,7 @@ describe('POST /api/worktrees/:id/git/branch/delete (Issue #781)', () => {
 
   it('returns 500 on a generic error', async () => {
     (deleteBranch as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('boom'));
-    const response = await POST(createRequest({ name: 'feature/x' }), { params: { id: 'test-id' } });
+    const response = await POST(createRequest({ name: 'feature/x' }), { params: Promise.resolve({ id: 'test-id' }) });
     expect(response.status).toBe(500);
   });
 });
