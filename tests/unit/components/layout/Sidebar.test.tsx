@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import React from 'react';
 import { Sidebar, parseGroupCollapsed } from '@/components/layout/Sidebar';
 import { SidebarProvider } from '@/contexts/SidebarContext';
@@ -46,6 +46,22 @@ import { worktreeApi, repositoryApi, ApiError } from '@/lib/api-client';
 
 const originalLocation = window.location;
 const originalFetch = global.fetch;
+
+/**
+ * Waits for Sidebar's scroll-position restore to finish.
+ *
+ * Sidebar restores the persisted scrollTop inside a requestAnimationFrame that is
+ * scheduled once the branch list first renders items. A test that writes scrollTop
+ * before that frame runs has its value overwritten by the restore, so any test
+ * driving scrollTop must wait for both the items and this frame first.
+ */
+async function flushScrollRestore(): Promise<void> {
+  await act(async () => {
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
+}
 
 const mockWorktrees: Worktree[] = [
   {
@@ -363,12 +379,14 @@ describe('Sidebar', () => {
         </Wrapper>
       );
 
-      const branchList = await screen.findByTestId('branch-list');
-      branchList.scrollTop = 180;
-
       await waitFor(() => {
         expect(screen.getAllByText('feature/test-2').length).toBeGreaterThanOrEqual(1);
       });
+      await flushScrollRestore();
+
+      const branchList = screen.getByTestId('branch-list');
+      branchList.scrollTop = 180;
+
       const branchItem = screen.getAllByText('feature/test-2')[0].closest('[data-testid="branch-list-item"]');
       expect(branchItem).not.toBeNull();
 
@@ -384,7 +402,12 @@ describe('Sidebar', () => {
         </Wrapper>
       );
 
-      const firstBranchList = await screen.findByTestId('branch-list');
+      await waitFor(() => {
+        expect(screen.getAllByText('feature/test-2').length).toBeGreaterThanOrEqual(1);
+      });
+      await flushScrollRestore();
+
+      const firstBranchList = screen.getByTestId('branch-list');
       firstBranchList.scrollTop = 240;
       fireEvent.scroll(firstBranchList);
 
