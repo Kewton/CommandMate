@@ -23,7 +23,7 @@ CommandMate is a local control plane for agent CLIs.
 npx commandmate
 ```
 
-**From install to your first session in 60 seconds.** macOS / Linux / Windows (WSL2) · Node.js v20+ · npm · git · tmux
+**From install to your first session in 60 seconds.** macOS / Linux / Windows (WSL2) · Node.js v22+ · npm · git · tmux
 
 ---
 
@@ -138,7 +138,7 @@ your dependencies, asks a few setup questions on first use, starts the server in
 background, waits for it to come up, and opens the UI in your browser.
 
 Run it again later and it skips straight to opening the UI (or tells you the server is
-already running). Requires Node.js 20 or later.
+already running). Requires Node.js 22 or later.
 
 - Already have a `.env`? The setup questions are skipped.
 - Don't want the browser to open? Use `commandmate --no-open` (also skipped automatically

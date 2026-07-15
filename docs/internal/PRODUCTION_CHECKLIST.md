@@ -44,7 +44,7 @@ commandmate start --daemon
   # 開発環境（git clone）の場合のみ
   ./scripts/preflight-check.sh
   ```
-- [ ] Node.js 20.x 以上がインストールされている
+- [ ] Node.js 22.x 以上がインストールされている
   ```bash
   node -v
   ```

@@ -44,7 +44,7 @@ For contributors or self-building, see the [Deployment Guide](../DEPLOYMENT.md#d
   # For development environment (git clone) only
   ./scripts/preflight-check.sh
   ```
-- [ ] Node.js 20.x or later is installed
+- [ ] Node.js 22.x or later is installed
   ```bash
   node -v
   ```

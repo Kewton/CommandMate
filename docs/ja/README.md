@@ -23,7 +23,7 @@ CommandMate は、エージェント CLI のローカルコントロールプレ
 npx commandmate
 ```
 
-**インストールから最初のセッションまで 60 秒。** macOS / Linux / Windows (WSL2) · Node.js v20+ · npm · git · tmux
+**インストールから最初のセッションまで 60 秒。** macOS / Linux / Windows (WSL2) · Node.js v22+ · npm · git · tmux
 
 ---
 
@@ -112,7 +112,7 @@ commandmate start --daemon
 起動完了を待ってから、ブラウザで UI を開きます。
 
 2 回目以降は質問されず、UI を開くだけ（またはサーバー稼働中である旨の案内）になります。
-Node.js 20 以上が必要です。
+Node.js 22 以上が必要です。
 
 - `.env` が既にある場合、設定の質問はスキップされます
 - ブラウザを開きたくない場合は `commandmate --no-open`（CI・ヘッドレス環境では自動的にスキップ）

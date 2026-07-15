@@ -12,7 +12,7 @@ This document provides repository-level guidance for coding agents (including Co
 
 - Project: CommandMate
 - Stack: Next.js 14, TypeScript, Tailwind CSS, SQLite (`better-sqlite3`)
-- Runtime: Node.js 20+
+- Runtime: Node.js 22+
 - Main areas:
   - `src/app`: App Router pages and API routes
   - `src/lib`: core business logic and utilities

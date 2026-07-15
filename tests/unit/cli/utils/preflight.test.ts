@@ -26,7 +26,7 @@ describe('PreflightChecker', () => {
       // When encoding: 'utf-8' is used, stdout/stderr are strings
       vi.mocked(childProcess.spawnSync).mockReturnValue({
         status: 0,
-        stdout: 'v20.0.0',
+        stdout: 'v22.0.0',
         stderr: '',
         pid: 1234,
         output: [],
@@ -41,7 +41,7 @@ describe('PreflightChecker', () => {
       });
 
       expect(result.status).toBe('ok');
-      expect(result.version).toBe('20.0.0');
+      expect(result.version).toBe('22.0.0');
     });
 
     it('should return missing status when command not found', async () => {
@@ -92,7 +92,7 @@ describe('PreflightChecker', () => {
     it('should return ok when version meets minimum', async () => {
       vi.mocked(childProcess.spawnSync).mockReturnValue({
         status: 0,
-        stdout: 'v20.0.0',
+        stdout: 'v22.0.0',
         stderr: '',
         pid: 1234,
         output: [],
@@ -137,7 +137,7 @@ describe('PreflightChecker', () => {
       // Mock all dependencies as found
       vi.mocked(childProcess.spawnSync).mockReturnValue({
         status: 0,
-        stdout: 'v20.0.0',
+        stdout: 'v22.0.0',
         stderr: '',
         pid: 1234,
         output: [],
@@ -166,7 +166,7 @@ describe('PreflightChecker', () => {
         }
         return {
           status: 0,
-          stdout: 'v20.0.0',
+          stdout: 'v22.0.0',
           stderr: '',
           pid: 1234,
           output: [],
@@ -198,7 +198,7 @@ describe('PreflightChecker', () => {
         }
         return {
           status: 0,
-          stdout: 'v20.0.0',
+          stdout: 'v22.0.0',
           stderr: '',
           pid: 1234,
           output: [],
