@@ -122,7 +122,7 @@ Each Git worktree gets its own tmux session, so multiple tasks run in parallel w
 <summary><strong>Quick Start (detailed)</strong></summary>
 
 ```bash
-# Install & start in one command
+# Install & start in one command (guided setup)
 npx commandmate
 
 # Or install globally
@@ -131,7 +131,17 @@ commandmate init
 commandmate start --daemon
 ```
 
-Open http://localhost:3000 in your browser.
+Running `commandmate` with no arguments walks you through the whole first run: it checks
+your dependencies, asks a few setup questions on first use, starts the server in the
+background, waits for it to come up, and opens the UI in your browser.
+
+Run it again later and it skips straight to opening the UI (or tells you the server is
+already running). Requires Node.js 20 or later.
+
+- Already have a `.env`? The setup questions are skipped.
+- Don't want the browser to open? Use `commandmate --no-open` (also skipped automatically
+  on CI and headless sessions).
+- Otherwise, open http://localhost:3000 in your browser.
 
 See the [CLI Setup Guide](./docs/en/user-guide/cli-setup-guide.md) for details.
 For Windows users, see the [WSL2 Setup Guide](./docs/user-guide/wsl2-setup.md).

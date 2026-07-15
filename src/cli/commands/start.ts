@@ -55,20 +55,33 @@ Use --allow-http to suppress this warning.
 `;
 
 /**
- * Execute start command
+ * Result of a start run
+ * Issue #1195: allows callers to chain start with follow-up steps without exiting
+ */
+export interface StartResult {
+  ok: boolean;
+  exitCode: ExitCode;
+  url?: string;
+  pid?: number;
+  /** Foreground mode exits from the child 'close' handler, so the caller must not exit */
+  foreground?: boolean;
+}
+
+/**
+ * Run start without terminating the process (daemon mode returns a result)
+ * Issue #1195: extracted from startCommand so the quickstart flow can chain commands
  * Issue #125: Use getEnvPath and getPidFilePath for correct path resolution
  * Issue #136: Support --issue and --auto-port flags for worktree servers
  * Issue #331: Support --auth, --auth-expire, --https, --cert, --key, --allow-http
  */
-export async function startCommand(options: StartOptions): Promise<void> {
+export async function runStart(options: StartOptions): Promise<StartResult> {
   try {
     // Issue #136: Validate issue number if provided
     if (options.issue !== undefined) {
       const validation = validateIssueNoResult(options.issue);
       if (!validation.valid) {
         logger.error(`Invalid issue number: ${validation.error}`);
-        process.exit(ExitCode.START_FAILED);
-        return;
+        return { ok: false, exitCode: ExitCode.START_FAILED };
       }
     }
 
@@ -78,8 +91,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
         parseDuration(options.authExpire);
       } catch (error) {
         logger.error(`Invalid --auth-expire value: ${getErrorMessage(error)}`);
-        process.exit(ExitCode.CONFIG_ERROR);
-        return;
+        return { ok: false, exitCode: ExitCode.CONFIG_ERROR };
       }
     }
 
@@ -98,8 +110,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
     if (!existsSync(mainEnvPath)) {
       logger.error(`.env file not found at ${mainEnvPath}`);
       logger.info('Run "commandmate init" to create a configuration file');
-      process.exit(ExitCode.CONFIG_ERROR);
-      return;
+      return { ok: false, exitCode: ExitCode.CONFIG_ERROR };
     }
 
     const daemonManager = new DaemonManager(pidFilePath);
@@ -131,8 +142,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
     // Issue #331: Validate --cert/--key must be specified together
     if ((options.cert && !options.key) || (!options.cert && options.key)) {
       logger.error('--cert and --key must be specified together');
-      process.exit(ExitCode.CONFIG_ERROR);
-      return;
+      return { ok: false, exitCode: ExitCode.CONFIG_ERROR };
     }
 
     // Issue #331: Determine protocol (matches server.ts: cert+key → always HTTPS)
@@ -143,13 +153,11 @@ export async function startCommand(options: StartOptions): Promise<void> {
     if (hasCert) {
       if (!existsSync(options.cert!)) {
         logger.error(`Certificate file not found: ${options.cert}`);
-        process.exit(ExitCode.CONFIG_ERROR);
-        return;
+        return { ok: false, exitCode: ExitCode.CONFIG_ERROR };
       }
       if (!existsSync(options.key!)) {
         logger.error(`Key file not found: ${options.key}`);
-        process.exit(ExitCode.CONFIG_ERROR);
-        return;
+        return { ok: false, exitCode: ExitCode.CONFIG_ERROR };
       }
     }
 
@@ -187,8 +195,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
       if (await daemonManager.isRunning()) {
         const status = await daemonManager.getStatus();
         logger.error(`${serverLabel} is already running (PID: ${status?.pid})`);
-        process.exit(ExitCode.START_FAILED);
-        return;
+        return { ok: false, exitCode: ExitCode.START_FAILED };
       }
 
       logger.info(`Starting ${serverLabel} in background...`);
@@ -238,8 +245,16 @@ export async function startCommand(options: StartOptions): Promise<void> {
 
         logger.success(`${serverLabel} started in background (PID: ${pid})`);
 
-        const actualPort = port || parseInt(process.env.CM_PORT || '3000', 10);
-        const bind = process.env.CM_BIND || '127.0.0.1';
+        // dotenv never overrides a pre-existing process.env, but daemon.ts hands the child
+        // {...process.env, ...parsed}. Resolve with the same precedence or the reported URL
+        // points at whatever CM_PORT the shell exported instead of the port the server is on.
+        const effectiveEnv = {
+          ...process.env,
+          ...(mainEnvResult.parsed || {}),
+          ...(envResult.parsed || {}),
+        };
+        const actualPort = port || parseInt(effectiveEnv.CM_PORT || '3000', 10);
+        const bind = effectiveEnv.CM_BIND || '127.0.0.1';
         const url = `${protocol}://${bind === '0.0.0.0' ? '127.0.0.1' : bind}:${actualPort}`;
         logger.info(`URL: ${url}`);
 
@@ -255,7 +270,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
           details: `Daemon started (PID: ${pid})${options.issue !== undefined ? ` (Issue #${options.issue})` : ''}${options.auth ? ' [auth enabled]' : ''}`,
         });
 
-        process.exit(ExitCode.SUCCESS);
+        return { ok: true, exitCode: ExitCode.SUCCESS, url, pid };
       } catch (error) {
         const message = getErrorMessage(error);
         logger.error(`Failed to start daemon: ${message}`);
@@ -267,9 +282,8 @@ export async function startCommand(options: StartOptions): Promise<void> {
           details: message,
         });
 
-        process.exit(ExitCode.START_FAILED);
+        return { ok: false, exitCode: ExitCode.START_FAILED };
       }
-      return;
     }
 
     // Foreground mode (default)
@@ -366,6 +380,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
       process.exit(exitCode);
     });
 
+    return { ok: true, exitCode: ExitCode.SUCCESS, foreground: true };
   } catch (error) {
     const message = getErrorMessage(error);
     logger.error(`Start failed: ${message}`);
@@ -377,6 +392,20 @@ export async function startCommand(options: StartOptions): Promise<void> {
       details: message,
     });
 
-    process.exit(ExitCode.UNEXPECTED_ERROR);
+    return { ok: false, exitCode: ExitCode.UNEXPECTED_ERROR };
   }
+}
+
+/**
+ * Execute start command
+ */
+export async function startCommand(options: StartOptions): Promise<void> {
+  const result = await runStart(options);
+
+  // Foreground mode stays attached to the child process and exits from its handlers
+  if (result.foreground) {
+    return;
+  }
+
+  process.exit(result.exitCode);
 }

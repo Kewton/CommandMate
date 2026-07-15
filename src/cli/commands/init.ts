@@ -138,9 +138,21 @@ function displayConfigSummary(config: EnvConfig, envPath: string): void {
 }
 
 /**
- * Execute init command
+ * Result of an init run
+ * Issue #1195: allows callers to chain init -> start without exiting the process
  */
-export async function initCommand(options: InitOptions): Promise<void> {
+export interface InitResult {
+  ok: boolean;
+  exitCode: ExitCode;
+  config?: EnvConfig;
+  envPath?: string;
+}
+
+/**
+ * Run init without terminating the process
+ * Issue #1195: extracted from initCommand so the quickstart flow can chain commands
+ */
+export async function runInit(options: InitOptions): Promise<InitResult> {
   try {
     logger.header('CommandMate Init');
     logger.blank();
@@ -173,8 +185,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
         details: 'Preflight check failed',
       });
 
-      process.exit(ExitCode.DEPENDENCY_ERROR);
-      return;
+      return { ok: false, exitCode: ExitCode.DEPENDENCY_ERROR };
     }
 
     logger.blank();
@@ -224,8 +235,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
         details: `Validation failed: ${validationResult.errors.join(', ')}`,
       });
 
-      process.exit(ExitCode.CONFIG_ERROR);
-      return;
+      return { ok: false, exitCode: ExitCode.CONFIG_ERROR };
     }
 
     // Step 4: Create .env file
@@ -265,7 +275,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
       details: `Configuration initialized (interactive: ${useInteractive})`,
     });
 
-    process.exit(ExitCode.SUCCESS);
+    return { ok: true, exitCode: ExitCode.SUCCESS, config, envPath };
   } catch (error) {
     closeReadline(); // Ensure readline is closed on error
     const message = error instanceof Error ? error.message : String(error);
@@ -278,6 +288,14 @@ export async function initCommand(options: InitOptions): Promise<void> {
       details: message,
     });
 
-    process.exit(ExitCode.UNEXPECTED_ERROR);
+    return { ok: false, exitCode: ExitCode.UNEXPECTED_ERROR };
   }
+}
+
+/**
+ * Execute init command
+ */
+export async function initCommand(options: InitOptions): Promise<void> {
+  const result = await runInit(options);
+  process.exit(result.exitCode);
 }
