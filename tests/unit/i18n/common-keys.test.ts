@@ -70,6 +70,42 @@ const EN_NAV_LABELS: Record<string, string> = {
   reviewReport: 'Review/Report',
 };
 
+/**
+ * Issue #1219 migrated RepositoryManager from hardcoded English to
+ * `common.repositories.*`. Same contract as the nav labels above: English must
+ * stay byte-identical to the pre-migration markup, so a drift here is a
+ * user-visible regression rather than an intended copy change.
+ *
+ * `empty` predates this Issue (#1197, RepositoryList) and is pinned alongside
+ * the rest because it shares the section.
+ */
+const EN_REPOSITORY_LABELS: Record<string, string> = {
+  empty: 'No repositories registered yet.',
+  add: 'Add Repository',
+  syncAll: 'Sync All',
+  syncing: 'Syncing...',
+  addNewTitle: 'Add New Repository',
+  localPathTab: 'Local Path',
+  cloneUrlTab: 'Clone URL',
+  localPathDescription: 'Enter the absolute path to a git repository containing worktrees.',
+  localPathLabel: 'Repository Path',
+  localPathExample: 'Example: /Users/username/projects/my-repo',
+  scan: 'Scan & Add',
+  scanning: 'Scanning...',
+  cloneUrlDescription: 'Enter a git clone URL to clone a remote repository.',
+  cloneUrlLabel: 'Clone URL',
+  cloneUrlHelp: 'Supports HTTPS and SSH URLs',
+  clone: 'Clone',
+  cloning: 'Cloning...',
+  cloneSuccess: 'Repository cloned successfully',
+  cloneFailed: 'Clone failed',
+  pathRequired: 'Repository path is required',
+  urlRequired: 'Clone URL is required',
+  urlInvalid: 'Invalid URL format',
+};
+
+const REPOSITORY_KEYS = Object.keys(EN_REPOSITORY_LABELS);
+
 describe('common i18n keys (Issue #1197)', () => {
   it.each(['en', 'ja'])('%s/common.json has non-empty values for every leaf', (locale) => {
     const dict = loadCommon(locale);
@@ -149,5 +185,65 @@ describe('common i18n keys (Issue #1197)', () => {
       const value = resolve(loadCommon(locale), 'repositories.empty');
       expect(value, `${locale} missing repositories.empty`).toBeTruthy();
     }
+  });
+
+  describe('repository management copy (Issue #1219)', () => {
+    it('resolves every repository label in both locales', () => {
+      for (const locale of ['en', 'ja']) {
+        const dict = loadCommon(locale);
+        for (const key of REPOSITORY_KEYS) {
+          const value = resolve(dict, `repositories.${key}`);
+          expect(value, `${locale} missing repositories.${key}`).toBeTruthy();
+          expect(typeof value, `${locale}: repositories.${key} must be a string`).toBe('string');
+        }
+      }
+    });
+
+    it('never uses a raw key path as a repository label', () => {
+      for (const locale of ['en', 'ja']) {
+        const dict = loadCommon(locale);
+        for (const key of REPOSITORY_KEYS) {
+          const value = resolve(dict, `repositories.${key}`) as string;
+          expect(
+            value,
+            `${locale}: repositories.${key} looks like a key passthrough`
+          ).not.toMatch(/^(common\.)?repositories\./);
+        }
+      }
+    });
+
+    it('translates repository labels rather than leaving them in English', () => {
+      const en = loadCommon('en');
+      const ja = loadCommon('ja');
+      for (const key of REPOSITORY_KEYS) {
+        expect(
+          resolve(ja, `repositories.${key}`),
+          `ja: repositories.${key} is still the English string`
+        ).not.toBe(resolve(en, `repositories.${key}`));
+      }
+    });
+
+    it('keeps every English repository label byte-identical to the pre-i18n markup', () => {
+      const en = loadCommon('en');
+      for (const [key, expected] of Object.entries(EN_REPOSITORY_LABELS)) {
+        expect(
+          resolve(en, `repositories.${key}`),
+          `en: repositories.${key} changed the rendered label`
+        ).toBe(expected);
+      }
+    });
+
+    /**
+     * The sample path is a copy-paste value, not prose: both locales must keep
+     * it verbatim, so only the "Example:"/"例:" label may differ.
+     */
+    it('keeps the sample path verbatim in both locales', () => {
+      for (const locale of ['en', 'ja']) {
+        expect(
+          resolve(loadCommon(locale), 'repositories.localPathExample'),
+          `${locale}: sample path must stay copy-pasteable`
+        ).toContain('/Users/username/projects/my-repo');
+      }
+    });
   });
 });
