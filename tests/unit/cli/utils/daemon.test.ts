@@ -196,6 +196,66 @@ describe('DaemonManager', () => {
 
       expect(status).toBeNull();
     });
+
+    /**
+     * Issue #1266: getStatus() read process.env directly, which dotenv leaves untouched when
+     * CM_PORT is already exported, so it reported the shell's port while the server that
+     * start() spawned with {...process.env, ...parsed} was listening on the .env port.
+     */
+    describe('URL resolution (Issue #1266)', () => {
+      beforeEach(() => {
+        vi.mocked(fs.existsSync).mockReturnValue(true);
+        vi.mocked(fs.readFileSync).mockReturnValue('12345');
+        vi.spyOn(process, 'kill').mockImplementation(() => true);
+      });
+
+      afterEach(() => {
+        vi.unstubAllEnvs();
+      });
+
+      it('should report the .env port, not the exported CM_PORT', async () => {
+        vi.stubEnv('CM_PORT', '3000');
+        vi.mocked(dotenv.config).mockReturnValue({ parsed: { CM_PORT: '3101' } });
+
+        const status = await daemonManager.getStatus();
+
+        expect(status?.port).toBe(3101);
+        expect(status?.url).toBe('http://127.0.0.1:3101');
+      });
+
+      it('should report the .env bind address, not the exported CM_BIND', async () => {
+        vi.stubEnv('CM_BIND', '127.0.0.1');
+        vi.mocked(dotenv.config).mockReturnValue({
+          parsed: { CM_BIND: '192.168.1.5', CM_PORT: '3101' },
+        });
+
+        const status = await daemonManager.getStatus();
+
+        expect(status?.url).toBe('http://192.168.1.5:3101');
+      });
+
+      it('should keep an exported CM_PORT that .env does not override', async () => {
+        vi.stubEnv('CM_PORT', '4000');
+        vi.mocked(dotenv.config).mockReturnValue({ parsed: { CM_BIND: '127.0.0.1' } });
+
+        const status = await daemonManager.getStatus();
+
+        expect(status?.port).toBe(4000);
+      });
+
+      it('should read the worktree .env it was constructed with', async () => {
+        const worktreeManager = new DaemonManager(testPidPath, '/mock/.commandmate/envs/135.env');
+        vi.mocked(dotenv.config).mockImplementation(((options: { path: string }) =>
+          options.path === '/mock/.commandmate/envs/135.env'
+            ? { parsed: { CM_PORT: '3135' } }
+            : { parsed: { CM_PORT: '3101' } }) as unknown as typeof dotenv.config);
+
+        const status = await worktreeManager.getStatus();
+
+        expect(dotenv.config).toHaveBeenCalledWith({ path: '/mock/.commandmate/envs/135.env' });
+        expect(status?.port).toBe(3135);
+      });
+    });
   });
 
   describe('isRunning', () => {
@@ -214,6 +274,48 @@ describe('DaemonManager', () => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
 
       expect(await daemonManager.isRunning()).toBe(false);
+    });
+  });
+
+  /**
+   * Issue #1266: server.ts:160 upgrades to HTTPS only when both cert and key are set, so the
+   * startup banner must not announce a scheme the spawned child does not actually speak.
+   */
+  describe('start startup banner protocol (Issue #1266)', () => {
+    function mockSpawnableDaemon(parsed: Record<string, string>): void {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      vi.mocked(fs.openSync).mockReturnValue(3);
+      vi.mocked(fs.writeSync).mockReturnValue(5);
+      vi.mocked(fs.closeSync).mockReturnValue(undefined);
+      vi.mocked(dotenv.config).mockReturnValue({ parsed });
+      vi.mocked(childProcess.spawn).mockReturnValue({
+        pid: 12345,
+        unref: vi.fn(),
+        on: vi.fn(),
+      } as unknown as childProcess.ChildProcess);
+    }
+
+    it('should announce https when both cert and key are configured', async () => {
+      mockSpawnableDaemon({
+        CM_PORT: '3101',
+        CM_HTTPS_CERT: '/certs/localhost.pem',
+        CM_HTTPS_KEY: '/certs/localhost-key.pem',
+      });
+      const logSpy = vi.spyOn(console, 'log');
+
+      await daemonManager.start({});
+
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('https://127.0.0.1:3101'));
+    });
+
+    it('should announce http when a cert is configured without a key', async () => {
+      mockSpawnableDaemon({ CM_PORT: '3101', CM_HTTPS_CERT: '/certs/localhost.pem' });
+      const logSpy = vi.spyOn(console, 'log');
+
+      await daemonManager.start({});
+
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:3101'));
+      expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('https://'));
     });
   });
 

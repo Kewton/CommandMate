@@ -13,6 +13,7 @@
 import { DaemonManager } from './daemon';
 import { PidPathResolver, DbPathResolver } from './resource-resolvers';
 import { getEnvPath } from './env-setup';
+import type { ServerEnv } from './server-url';
 import type { DaemonStatus, StartOptions } from '../types';
 
 /**
@@ -39,6 +40,12 @@ export interface IDaemonManager {
    * @returns Status object or null if no PID file
    */
   getStatus(): Promise<DaemonStatus | null>;
+
+  /**
+   * Get the configuration this server runs with (Issue #1266)
+   * @returns The effective env, with .env taking precedence over exported variables
+   */
+  getEffectiveEnv(): ServerEnv;
 
   /**
    * Check if daemon is running
@@ -93,6 +100,10 @@ export class DaemonManagerWrapper implements IDaemonManager {
     return this.innerManager.getStatus();
   }
 
+  getEffectiveEnv(): ServerEnv {
+    return this.innerManager.getEffectiveEnv();
+  }
+
   async isRunning(): Promise<boolean> {
     return this.innerManager.isRunning();
   }
@@ -139,7 +150,8 @@ export class DaemonManagerFactory {
     const dbPath = this.dbResolver.resolve(issueNo);
 
     // MF-CONS-002: Use existing DaemonManager constructor
-    const innerManager = new DaemonManager(pidPath);
+    // Issue #1266: hand it the worktree .env so getStatus() reports the right port
+    const innerManager = new DaemonManager(pidPath, envPath);
 
     // Wrap with additional configuration
     return new DaemonManagerWrapper(innerManager, {

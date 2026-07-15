@@ -6,7 +6,6 @@
  * Display CommandMate server status
  */
 
-import { config as dotenvConfig } from 'dotenv';
 import { readdirSync } from 'fs';
 import { ExitCode, getErrorMessage, StatusOptions } from '../types';
 import { CLILogger } from '../utils/logger';
@@ -23,10 +22,9 @@ async function showSingleStatus(issueNo?: number): Promise<void> {
   const pidFilePath = getPidFilePath(issueNo);
   const envPath = getEnvPath(issueNo);
 
-  // Load .env so getStatus() can access correct CM_PORT and CM_BIND values
-  dotenvConfig({ path: envPath });
-
-  const daemonManager = new DaemonManager(pidFilePath);
+  // Issue #1266: getStatus() resolves CM_PORT/CM_BIND from this .env, giving it precedence
+  // over exported variables the way the server itself was started
+  const daemonManager = new DaemonManager(pidFilePath, envPath);
   const status = await daemonManager.getStatus();
 
   const serverLabel = issueNo !== undefined
@@ -122,10 +120,9 @@ export async function statusCommand(options: StatusOptions = {}): Promise<void> 
     const pidFilePath = getPidFilePath(options.issue);
     const envPath = getEnvPath(options.issue);
 
-    // Load .env so getStatus() can access correct CM_PORT and CM_BIND values
-    dotenvConfig({ path: envPath });
-
-    const daemonManager = new DaemonManager(pidFilePath);
+    // Issue #1266: getStatus() resolves CM_PORT/CM_BIND from this .env, giving it precedence
+    // over exported variables the way the server itself was started
+    const daemonManager = new DaemonManager(pidFilePath, envPath);
     const status = await daemonManager.getStatus();
 
     const serverLabel = options.issue !== undefined
@@ -168,8 +165,11 @@ export async function statusCommand(options: StatusOptions = {}): Promise<void> 
     }
 
     // Issue #332: Show IP restriction status
-    if (process.env.CM_ALLOWED_IPS) {
-      console.log(`IP ACL:  ${process.env.CM_ALLOWED_IPS}`);
+    // Issue #1266: read the env the server actually runs with. An exported CM_ALLOWED_IPS
+    // shadowed the .env one here, reporting an ACL the server does not enforce.
+    const allowedIps = daemonManager.getEffectiveEnv().CM_ALLOWED_IPS;
+    if (allowedIps) {
+      console.log(`IP ACL:  ${allowedIps}`);
     }
 
     console.log('');

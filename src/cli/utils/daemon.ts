@@ -13,6 +13,7 @@ import { getPackageRoot } from './paths';
 import { getEnvPath } from './env-setup';
 import { REVERSE_PROXY_WARNING } from '../config/security-messages';
 import { CLILogger } from './logger';
+import { loadEffectiveEnv, resolveServerEndpoint, ServerEnv } from './server-url';
 
 /**
  * Daemon manager for background server process
@@ -20,10 +21,30 @@ import { CLILogger } from './logger';
 export class DaemonManager {
   private pidManager: PidManager;
   private logger: CLILogger;
+  private envPath?: string;
+  private effectiveEnv?: ServerEnv;
 
-  constructor(pidFilePath: string) {
+  /**
+   * @param pidFilePath - PID file for this server
+   * @param envPath - Issue #1266: the worktree .env this server runs with, so getStatus()
+   *   reports the port it actually listens on; omit for the main server
+   */
+  constructor(pidFilePath: string, envPath?: string) {
     this.pidManager = new PidManager(pidFilePath);
     this.logger = new CLILogger();
+    this.envPath = envPath;
+  }
+
+  /**
+   * The configuration this server runs with, with .env taking precedence over exported
+   * variables exactly as start() hands it to the child process (Issue #1266).
+   *
+   * Read once per manager: a .env cannot change within a single CLI invocation, and reading
+   * it again would emit dotenv's banner a second time.
+   */
+  getEffectiveEnv(): ServerEnv {
+    this.effectiveEnv ??= loadEffectiveEnv(this.envPath);
+    return this.effectiveEnv;
   }
 
   /**
@@ -88,7 +109,10 @@ export class DaemonManager {
     // Issue #179: Security warning for external access - recommend reverse proxy
     const bindAddress = env.CM_BIND || '127.0.0.1';
     const port = env.CM_PORT || '3000';
-    const protocol = env.CM_HTTPS_CERT ? 'https' : 'http';
+    // Issue #1266: server.ts:160 needs both cert and key to serve HTTPS; announcing https on
+    // a lone cert told the user to visit a scheme the child does not speak. The bind address
+    // is logged as configured, so this deliberately does not reuse resolveServerEndpoint().
+    const protocol = env.CM_HTTPS_CERT && env.CM_HTTPS_KEY ? 'https' : 'http';
 
     // Issue #332: Suppress warning when CM_ALLOWED_IPS is set (IP restriction provides access control)
     if (bindAddress === '0.0.0.0' && !env.CM_AUTH_TOKEN_HASH && !env.CM_ALLOWED_IPS) {
@@ -177,12 +201,9 @@ export class DaemonManager {
       return { running: false };
     }
 
-    // Get port from environment or default
-    const port = parseInt(process.env.CM_PORT || '3000', 10);
-    const bind = process.env.CM_BIND || '127.0.0.1';
-    // Issue #331: Use HTTPS protocol if certificate is configured
-    const protocol = process.env.CM_HTTPS_CERT ? 'https' : 'http';
-    const url = `${protocol}://${bind === '0.0.0.0' ? '127.0.0.1' : bind}:${port}`;
+    // Issue #1266: resolve with the same precedence start() hands the child. Reading
+    // process.env directly reported the shell's CM_PORT, not the port the server is on.
+    const { port, url } = resolveServerEndpoint(this.getEffectiveEnv());
 
     // Note: Getting accurate uptime would require storing start time
     // For now, we don't track uptime

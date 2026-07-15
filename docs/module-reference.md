@@ -396,7 +396,8 @@
 | `src/cli/utils/health-check.ts` | 更新後readiness確認（waitForReady: ready/degraded/timeout）（#1194） |
 | `src/cli/utils/worktree-servers.ts` | 稼働中worktreeサーバ列挙（listRunningWorktreeServers）（Issue #1194） |
 | `src/cli/utils/env-setup.ts` | 環境設定ファイル生成、getPidFilePath()、パストラバーサル対策（Issue #125, #136） |
-| `src/cli/utils/daemon.ts` | デーモンプロセス管理、dotenv読み込み、セキュリティ警告（Issue #125） |
+| `src/cli/utils/daemon.ts` | デーモンプロセス管理、dotenv読み込み、セキュリティ警告、getEffectiveEnv()（Issue #125, #1266） |
+| `src/cli/utils/server-url.ts` | サーバURL解決の単一情報源（resolveServerEndpoint / loadEffectiveEnv: .env が環境変数より優先）（Issue #1266） |
 | `src/cli/utils/pid-manager.ts` | PIDファイル管理（O_EXCLアトミック書き込み） |
 | `src/cli/utils/security-logger.ts` | セキュリティイベントログ |
 | `src/cli/utils/prompt.ts` | 対話形式プロンプトユーティリティ（Issue #119） |

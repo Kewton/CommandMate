@@ -8,9 +8,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 
 vi.mock('fs');
+vi.mock('dotenv', () => ({ config: vi.fn(() => ({ parsed: {} })) }));
 vi.mock('../../../../src/cli/utils/security-logger');
+// stop.ts reads the PID via getStatus(), which resolves the server URL from .env (Issue #1266)
 vi.mock('../../../../src/cli/utils/env-setup', () => ({
   getPidFilePath: vi.fn(() => '/mock/home/.commandmate/.commandmate.pid'),
+  getEnvPath: vi.fn(() => '/mock/home/.commandmate/.env'),
 }));
 
 // Import after mocking
