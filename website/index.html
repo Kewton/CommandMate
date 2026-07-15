@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CommandMate — Orchestrate your agent CLIs, not your terminal tabs</title>
+    <meta
+      name="description"
+      content="CommandMate is a local control plane for agent CLIs. Run Claude Code, Codex, and Gemini CLI across Git worktrees in parallel, and steer every session from your desk or your phone."
+    />
+    <link rel="canonical" href="https://kewton.github.io/CommandMate/" />
+    <meta name="color-scheme" content="light dark" />
+
+    <!-- The app's own PWA icon. Declaring it also stops the browser probing
+         /favicon.ico at the domain root, which 404s under sub-path hosting. -->
+    <link rel="icon" href="assets/img/icon-192.png" sizes="192x192" />
+    <link rel="apple-touch-icon" href="assets/img/icon-192.png" />
+
+    <!-- OGP. og:image must be absolute; every other asset here is relative
+         because the site is served from the /CommandMate/ sub-path. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://kewton.github.io/CommandMate/" />
+    <meta property="og:title" content="CommandMate — Orchestrate your agent CLIs, not your terminal tabs" />
+    <meta
+      property="og:description"
+      content="A local control plane for agent CLIs. Run Claude Code, Codex, and Gemini CLI across Git worktrees in parallel, and steer every session from your phone."
+    />
+    <meta property="og:image" content="https://kewton.github.io/CommandMate/assets/img/demo-desktop-poster.webp" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <nav class="nav" aria-label="Primary">
+        <span class="wordmark">CommandMate</span>
+        <div class="nav-links">
+          <a href="#quick-start">Quick start</a>
+          <a href="#comparison">Comparison</a>
+          <a href="https://github.com/Kewton/CommandMate">GitHub</a>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <!-- 1. Hero -->
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="status-pill">Status: Beta</p>
+          <h1>Orchestrate your agent CLIs,<br />not your terminal tabs.</h1>
+          <p class="lede">CommandMate is a local control plane for agent CLIs.</p>
+
+          <div class="install" data-copy-root>
+            <code class="install-cmd" id="install-cmd">npx commandmate</code>
+            <button type="button" class="copy-btn" data-copy-target="install-cmd">
+              <span data-copy-label>Copy</span>
+            </button>
+          </div>
+          <p class="prereq">
+            From install to your first session in 60 seconds.<br />
+            macOS / Linux / Windows (WSL2) · Node.js v20+ · npm · git · tmux
+          </p>
+
+          <div class="cta-row">
+            <a class="btn btn-primary" href="https://github.com/Kewton/CommandMate">View on GitHub</a>
+            <a class="btn btn-ghost" href="https://www.npmjs.com/package/commandmate">View on npm</a>
+          </div>
+        </div>
+
+        <figure class="hero-media">
+          <!-- Decorative: everything this demo shows is stated in the copy above,
+               so it is aria-hidden rather than given a label a screen reader
+               would have to sit through. No autoplay attribute — main.js starts
+               playback only when prefers-reduced-motion allows. -->
+          <video
+            class="demo-video"
+            muted
+            loop
+            playsinline
+            preload="metadata"
+            poster="assets/img/demo-desktop-poster.webp"
+            aria-hidden="true"
+            tabindex="-1"
+            data-autoplay
+          >
+            <source src="assets/media/demo-desktop.mp4" type="video/mp4" />
+            <img src="assets/img/demo-desktop-poster.webp" alt="" width="1280" height="720" />
+          </video>
+        </figure>
+      </section>
+
+      <!-- 2. Three value propositions -->
+      <section class="section" aria-labelledby="why">
+        <h2 id="why">What it gives you</h2>
+        <div class="cards">
+          <article class="card">
+            <h3>Parallel issue development</h3>
+            <p>
+              One session per Git worktree, running in parallel. Multiple issues progress
+              simultaneously without interfering with each other.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Steer from your phone</h3>
+            <p>
+              Full session control from any browser. Monitor and steer from your desk or your phone —
+              review changes, answer prompts, send a screenshot with "fix this".
+            </p>
+          </article>
+          <article class="card">
+            <h3>Across agent CLIs</h3>
+            <p>
+              Choose Claude Code, Codex, Gemini, or local models per issue. CommandMate adds
+              orchestration on top of the CLIs you already use — it does not replace them.
+            </p>
+          </article>
+        </div>
+        <p class="note">
+          Runs 100% locally. No external server, no cloud relay, no account required — the only
+          network traffic is the agent CLI's own API calls.
+        </p>
+      </section>
+
+      <!-- 3. 60-second quick start -->
+      <section class="section" id="quick-start" aria-labelledby="quick-start-h">
+        <h2 id="quick-start-h">Quick start, in 60 seconds</h2>
+        <ol class="steps">
+          <li>
+            <h3>Install and start</h3>
+            <p>One command. It checks your dependencies and starts the server.</p>
+            <div class="install install-sm" data-copy-root>
+              <code class="install-cmd" id="step-install">npx commandmate</code>
+              <button type="button" class="copy-btn" data-copy-target="step-install">
+                <span data-copy-label>Copy</span>
+              </button>
+            </div>
+          </li>
+          <li>
+            <h3>Answer the setup questions</h3>
+            <p>
+              First run only, and skipped entirely if you already have a <code>.env</code>. Installing
+              globally instead? Run <code>commandmate init</code>.
+            </p>
+          </li>
+          <li>
+            <h3>Open the UI</h3>
+            <p>
+              Your browser opens automatically at <code>http://localhost:3000</code>. Run it again
+              later and it skips straight to the UI.
+            </p>
+          </li>
+        </ol>
+      </section>
+
+      <!-- 4. Screenshot gallery -->
+      <section class="section" aria-labelledby="gallery-h">
+        <h2 id="gallery-h">On desktop and on mobile</h2>
+        <p class="section-lede">
+          The same control plane in your browser, whichever screen you are on.
+        </p>
+
+        <div class="gallery">
+          <figure class="shot shot-wide">
+            <img
+              src="assets/img/screenshot-desktop.webp"
+              alt="CommandMate desktop dashboard listing worktree sessions and their status"
+              loading="lazy"
+              decoding="async"
+            />
+            <figcaption>Every session and its status, at a glance.</figcaption>
+          </figure>
+          <figure class="shot shot-wide">
+            <img
+              src="assets/img/screenshot-worktree-desktop.webp"
+              alt="CommandMate worktree detail view on desktop, showing an agent session terminal"
+              loading="lazy"
+              decoding="async"
+            />
+            <figcaption>Drill into a worktree and drive its agent session.</figcaption>
+          </figure>
+          <figure class="shot">
+            <img
+              src="assets/img/screenshot-mobile.webp"
+              alt="CommandMate session list on a phone"
+              loading="lazy"
+              decoding="async"
+            />
+            <figcaption>The session list on a phone.</figcaption>
+          </figure>
+          <figure class="shot">
+            <img
+              src="assets/img/screenshot-worktree-mobile.webp"
+              alt="CommandMate worktree detail view on a phone"
+              loading="lazy"
+              decoding="async"
+            />
+            <figcaption>Worktree detail, thumb-sized.</figcaption>
+          </figure>
+          <figure class="shot">
+            <img
+              src="assets/img/screenshot-worktree-mobile-terminal.webp"
+              alt="A live agent terminal session rendered on a phone"
+              loading="lazy"
+              decoding="async"
+            />
+            <figcaption>A live agent terminal, in your pocket.</figcaption>
+          </figure>
+        </div>
+
+        <figure class="mobile-demo">
+          <video
+            class="demo-video demo-video-phone"
+            muted
+            loop
+            playsinline
+            preload="none"
+            poster="assets/img/demo-mobile-poster.webp"
+            aria-hidden="true"
+            tabindex="-1"
+            data-autoplay
+          >
+            <source src="assets/media/demo-mobile.mp4" type="video/mp4" />
+            <img src="assets/img/demo-mobile-poster.webp" alt="" width="360" height="780" />
+          </video>
+          <figcaption>
+            Monitor and steer sessions from any browser, including your phone.
+          </figcaption>
+        </figure>
+      </section>
+
+      <!-- 5. Comparison -->
+      <section class="section" id="comparison" aria-labelledby="comparison-h">
+        <h2 id="comparison-h">How it compares</h2>
+        <div class="table-scroll" tabindex="0" role="region" aria-labelledby="comparison-h">
+          <table class="compare">
+            <thead>
+              <tr>
+                <th scope="col">Feature</th>
+                <th scope="col">CommandMate</th>
+                <th scope="col">Remote Control (Official)</th>
+                <th scope="col">Happy Coder</th>
+                <th scope="col">claude-squad</th>
+                <th scope="col">Omnara</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Auto Yes Mode</th>
+                <td class="yes">Yes</td><td>No</td><td>No</td><td>Yes (TUI only)</td><td>No</td>
+              </tr>
+              <tr>
+                <th scope="row">Git Worktree Management</th>
+                <td class="yes">Yes</td><td>No</td><td>No</td><td>Yes (TUI only)</td><td>No</td>
+              </tr>
+              <tr>
+                <th scope="row">Parallel Sessions</th>
+                <td class="yes">Yes</td><td>No (1 only)</td><td>Yes</td><td>Yes</td><td>No</td>
+              </tr>
+              <tr>
+                <th scope="row">Mobile Web UI</th>
+                <td class="yes">Yes</td><td>Yes (claude.ai)</td><td>Yes</td><td>No</td><td>Yes</td>
+              </tr>
+              <tr>
+                <th scope="row">File Viewer</th>
+                <td class="yes">Yes</td><td>No</td><td>No</td><td>No</td><td>No</td>
+              </tr>
+              <tr>
+                <th scope="row">Markdown Editor</th>
+                <td class="yes">Yes</td><td>No</td><td>No</td><td>No</td><td>No</td>
+              </tr>
+              <tr>
+                <th scope="row">Screenshot Instructions</th>
+                <td class="yes">Yes</td><td>No</td><td>No</td><td>Not possible</td><td>No</td>
+              </tr>
+              <tr>
+                <th scope="row">Scheduled Execution</th>
+                <td class="yes">Yes</td><td>No</td><td>No</td><td>No</td><td>No</td>
+              </tr>
+              <tr>
+                <th scope="row">Survives Laptop Close</th>
+                <td class="yes">Yes (daemon)</td><td>No (terminal must stay open)</td><td>Yes</td><td>Yes</td><td>Yes</td>
+              </tr>
+              <tr>
+                <th scope="row">Token Authentication</th>
+                <td class="yes">Yes</td><td>N/A (Anthropic account)</td><td>N/A (app)</td><td>No</td><td>N/A (cloud)</td>
+              </tr>
+              <tr>
+                <th scope="row">Free / OSS</th>
+                <td class="yes">Yes</td><td>Requires Pro/Max</td><td>Free + Paid</td><td>Yes</td><td>$20/mo</td>
+              </tr>
+              <tr>
+                <th scope="row">Runs 100% Locally</th>
+                <td class="yes">Yes</td><td>Via Anthropic API</td><td>Server-routed</td><td>Yes</td><td>Cloud fallback</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Closing CTA -->
+      <section class="section closing">
+        <h2>Start in one command</h2>
+        <div class="install install-lg" data-copy-root>
+          <code class="install-cmd" id="closing-cmd">npx commandmate</code>
+          <button type="button" class="copy-btn" data-copy-target="closing-cmd">
+            <span data-copy-label>Copy</span>
+          </button>
+        </div>
+        <div class="cta-row cta-center">
+          <a class="btn btn-primary" href="https://github.com/Kewton/CommandMate">Star on GitHub</a>
+          <a class="btn btn-ghost" href="https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/cli-setup-guide.md">Setup guide</a>
+        </div>
+      </section>
+    </main>
+
+    <!-- 6. Footer -->
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <div class="footer-brand">
+          <span class="wordmark">CommandMate</span>
+          <p>A local control plane for agent CLIs.</p>
+        </div>
+        <nav class="footer-links" aria-label="Footer">
+          <a href="https://github.com/Kewton/CommandMate">GitHub</a>
+          <a href="https://www.npmjs.com/package/commandmate">npm</a>
+          <a href="https://github.com/Kewton/CommandMate/tree/main/docs/en">Docs</a>
+          <a href="https://github.com/Kewton/CommandMate/blob/main/LICENSE">MIT License</a>
+        </nav>
+      </div>
+      <p class="copyright">MIT License · Copyright (c) 2026 Kewton</p>
+    </footer>
+
+    <script src="main.js"></script>
+  </body>
+</html>
