@@ -123,6 +123,47 @@ describe('GlobalMobileNav', () => {
     expect(cls).toContain('border-border');
   });
 
+  // Issue #1211: ja labels wrapped to 2 lines at 320px, colliding with the h-14 bar.
+  // These assert the class string only — jsdom does not lay out text, so it cannot
+  // observe wrapping (getBoundingClientRect always returns 0). The no-wrap behaviour
+  // itself was measured in a real browser (ja @320px/@280px, all labels on one line);
+  // these tests exist purely to catch the class being dropped later.
+  describe('label wrapping (Issue #1211)', () => {
+    it.each([
+      ['en', ['Home', 'Chat', 'Sessions', 'Review', 'More']],
+      ['ja', ['ホーム', 'チャット', 'セッション', 'レビュー', 'その他']],
+    ] as const)('keeps every %s tab label on one line', (locale, labels) => {
+      intlLocale.current = locale;
+      render(<GlobalMobileNav />);
+
+      for (const label of labels) {
+        expect(
+          screen.getByText(label).className,
+          `"${label}" may wrap to a second line`
+        ).toContain('whitespace-nowrap');
+      }
+    });
+
+    it.each(['en', 'ja'] as const)(
+      'keeps the command palette trigger label on one line under %s',
+      (locale) => {
+        intlLocale.current = locale;
+        render(<GlobalMobileNav />);
+
+        const span = screen.getByTestId('mobile-command-palette-trigger').querySelector('span');
+        expect(span?.className).toContain('whitespace-nowrap');
+      }
+    );
+
+    it('does not change the bar height or slot layout', () => {
+      render(<GlobalMobileNav />);
+
+      expect(screen.getByTestId('global-mobile-nav').querySelector('div')?.className).toContain('h-14');
+      expect(screen.getByText('Sessions').closest('a')?.className).toContain('flex-1');
+      expect(screen.getByText('Sessions').closest('a')?.className).toContain('text-xs');
+    });
+  });
+
   describe('i18n (Issue #1206)', () => {
     it('renders every tab label in Japanese under the ja locale', () => {
       intlLocale.current = 'ja';
