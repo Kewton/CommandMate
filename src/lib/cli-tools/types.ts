@@ -15,6 +15,38 @@ export const CLI_TOOL_IDS = ['claude', 'codex', 'gemini', 'vibe-local', 'opencod
  */
 export type CLIToolType = typeof CLI_TOOL_IDS[number];
 
+/**
+ * CLI tools that render inside the terminal's alternate screen (Issue #1268).
+ *
+ * These tools paint a fixed-size, full-screen TUI: tmux keeps no scrollback for
+ * them (`history_size` stays 0, `alternate_on` is 1), so `capture-pane` always
+ * returns exactly `pane_height` lines no matter how long the conversation gets.
+ * A captured line COUNT is therefore a screen-row count, not a monotonically
+ * growing cursor, and must never be used to decide "have I already saved this?".
+ *
+ * Claude Code moved to the alternate screen in v2; it was previously
+ * inline-rendered like Codex, which is why the poller's line-count bookkeeping
+ * silently stopped recording its responses (Issue #1268).
+ *
+ * @see usesAlternateScreen
+ */
+const ALTERNATE_SCREEN_CLI_TOOLS: ReadonlySet<CLIToolType> = new Set<CLIToolType>([
+  'claude',
+  'opencode',
+  'copilot',
+]);
+
+/**
+ * Whether a CLI tool renders in the terminal's alternate screen, making the
+ * captured line count useless as a "how far have I read" cursor (Issue #1268).
+ *
+ * @param cliToolId - CLI tool identifier
+ * @returns True when line counts must not be used for deduplication
+ */
+export function usesAlternateScreen(cliToolId: CLIToolType): boolean {
+  return ALTERNATE_SCREEN_CLI_TOOLS.has(cliToolId);
+}
+
 // ============================================================================
 // Agent Instances (Issue #868: multi-session foundation)
 // ============================================================================

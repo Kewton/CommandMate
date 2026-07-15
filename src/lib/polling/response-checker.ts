@@ -14,7 +14,7 @@ import { broadcastMessage } from '@/lib/ws-server';
 import { detectPrompt } from '@/lib/detection/prompt-detector';
 import type { PromptDetectionResult } from '@/lib/detection/prompt-detector';
 import { recordClaudeConversation } from '@/lib/conversation-logger';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import { usesAlternateScreen, type CLIToolType } from '@/lib/cli-tools/types';
 import { parseClaudeOutput } from '@/lib/claude-output';
 import {
   getCliToolPatterns,
@@ -41,6 +41,7 @@ import {
   clearTuiAccumulator,
 } from '../tui-accumulator';
 import { isDuplicatePrompt, normalizePromptForDedup } from './prompt-dedup';
+import { isDuplicateResponse } from './response-dedup';
 import { getPollerKey, stopPolling, GEMINI_LOADING_INDICATORS } from './response-poller-core';
 import { notifyPushSubscribers } from '@/lib/push';
 
@@ -475,12 +476,21 @@ export async function checkForResponse(
 
     const isFullScreenTui = cliToolId === 'opencode' || cliToolId === 'copilot';
 
+    // Issue #1268: line-count bookkeeping is only meaningful for tools that keep
+    // scrollback. Alternate-screen tools (claude since v2, opencode, copilot)
+    // always capture exactly pane_height lines, so lastCapturedLine saturates at
+    // the pane height on the first save and every later check would see
+    // `lineCount <= lastCapturedLine` and drop the response forever — leaving
+    // History stuck on "Waiting for response..." while the terminal shows the
+    // reply. Those tools dedup on response content instead (see below).
+    const lineCountIsCursor = !usesAlternateScreen(cliToolId);
+
     // Duplicate prevention
-    if (!isFullScreenTui && !result.bufferReset && result.lineCount === lastCapturedLine && !sessionState?.inProgressMessageId) {
+    if (lineCountIsCursor && !result.bufferReset && result.lineCount === lastCapturedLine && !sessionState?.inProgressMessageId) {
       return false;
     }
 
-    if (!result.bufferReset && !isFullScreenTui && result.lineCount <= lastCapturedLine) {
+    if (lineCountIsCursor && !result.bufferReset && result.lineCount <= lastCapturedLine) {
       logger.info('already-saved-up-to-line-lastcapturedlin');
       return false;
     }
@@ -578,6 +588,19 @@ export async function checkForResponse(
       return false;
     }
 
+    // Issue #1268: content-based dedup replaces the line-count cursor for
+    // alternate-screen tools. Once a turn finishes, the screen stays static, so
+    // every subsequent poll re-extracts byte-identical content; save it once.
+    // The cache is cleared by stopPolling(), i.e. per polling cycle, so an
+    // identical response in a later turn is still recorded.
+    if (usesAlternateScreen(cliToolId)) {
+      const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
+      if (isDuplicateResponse(pollerKey, cleanedResponse)) {
+        updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
+        return false;
+      }
+    }
+
     // Create Markdown log file for the conversation pair
     if (cleanedResponse) {
       await recordClaudeConversation(db, worktreeId, cleanedResponse, cliToolId);
@@ -589,9 +612,11 @@ export async function checkForResponse(
       logger.info('marked-answeredcount-pending');
     }
 
-    // Race condition prevention: re-check session state before saving
+    // Race condition prevention: re-check session state before saving.
+    // Issue #1268: skipped for alternate-screen tools for the same reason as the
+    // dedup gates above — their line count never grows past the pane height.
     const currentSessionState = getSessionState(db, worktreeId, resolvedInstanceId);
-    if (!isFullScreenTui && currentSessionState && result.lineCount <= currentSessionState.lastCapturedLine) {
+    if (lineCountIsCursor && currentSessionState && result.lineCount <= currentSessionState.lastCapturedLine) {
       logger.info('race-condition-detected-skipping-save-re');
       return false;
     }
