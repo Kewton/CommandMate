@@ -31,11 +31,22 @@ vi.mock('next-themes', () => ({
   useTheme: () => ({ theme: 'dark', setTheme: vi.fn() }),
 }));
 
+// Issue #1206: resolve labels through the real dictionary instead of the global
+// key-echoing mock in tests/setup.ts. The English assertions below are the
+// pre-i18n literals, so they only stay green while common.nav.* renders the
+// exact same wording it replaced.
+const intlLocale = vi.hoisted(() => ({ current: 'en' }));
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock(() => intlLocale.current);
+});
+
 import { Header } from '@/components/layout/Header';
 
 describe('Header', () => {
   beforeEach(() => {
     mockPathname.mockReturnValue('/');
+    intlLocale.current = 'en';
   });
 
   it('should render the logo and title', () => {
@@ -122,5 +133,39 @@ describe('Header', () => {
     expect(cls).toContain('supports-[backdrop-filter]:bg-background/80');
     expect(cls).toContain('backdrop-blur-md');
     expect(cls).toContain('border-border');
+  });
+
+  describe('i18n (Issue #1206)', () => {
+    it('renders every nav label in Japanese under the ja locale', () => {
+      intlLocale.current = 'ja';
+      render(<Header />);
+
+      expect(screen.getByText('ホーム')).toBeDefined();
+      expect(screen.getByText('チャット')).toBeDefined();
+      expect(screen.getByText('セッション')).toBeDefined();
+      expect(screen.getByText('リポジトリ')).toBeDefined();
+      expect(screen.getByText('レビュー/レポート')).toBeDefined();
+      expect(screen.getByText('その他')).toBeDefined();
+    });
+
+    it('leaves no English nav label behind under the ja locale', () => {
+      intlLocale.current = 'ja';
+      render(<Header />);
+
+      for (const label of ['Home', 'Chat', 'Sessions', 'Repos', 'Review/Report', 'More']) {
+        expect(screen.queryByText(label), `"${label}" is still hardcoded English`).toBeNull();
+      }
+    });
+
+    it('keeps hrefs and active state locale-independent', () => {
+      intlLocale.current = 'ja';
+      mockPathname.mockReturnValue('/repositories');
+      render(<Header />);
+
+      const reposLink = screen.getByText('リポジトリ').closest('a');
+      expect(reposLink?.getAttribute('href')).toBe('/repositories');
+      expect(reposLink?.className).toContain('text-accent-600');
+      expect(reposLink?.getAttribute('aria-current')).toBe('page');
+    });
   });
 });
