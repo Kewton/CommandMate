@@ -1,66 +1,42 @@
 # Landing page media — how these files are generated
 
-The files here are **generated artifacts**, re-encoded from the high-resolution originals in
-`docs/images/`. The originals (`demo-desktop.mp4` 22MB, `demo-mobile.mp4` 47MB) are far too large to
-serve and are deliberately **not** copied into `website/`. Regenerate with the commands below rather
-than editing these files by hand.
+The landing page ships **no video**. This directory holds only this note; the images the page
+does serve live in `website/assets/img/` and are generated with the commands below.
 
-Budget: **video < 1.5MB each**, **poster < 100KB each** (the poster is what Lighthouse measures as LCP).
+## Why there is no demo video (Issue #1272)
 
-## Video (h264 / mp4)
+The LP used to open on `demo-desktop.mp4` with `demo-desktop-poster.webp` as its poster, and
+carried a second `demo-mobile.mp4` below the gallery. Both were re-encoded from the recordings in
+`docs/images/`, which were captured on a **personal working machine**. They showed things that have
+no business on a public page:
 
-```bash
-# Desktop hero: 1920x1080/60fps/30s -> 1280x720/30fps  => 1.30 MB
-ffmpeg -y -i docs/images/demo-desktop.mp4 \
-  -vf "scale=1280:-2,fps=30" -an \
-  -c:v libx264 -crf 30 -preset slow -profile:v high -pix_fmt yuv420p -movflags +faststart \
-  website/assets/media/demo-desktop.mp4
+- Six private repository names (`MyCodeBranchDesk`, `CommandMate-Marketing`, `MyMLXServer`,
+  `self-hosted-runner`, `locallm-test`, `vibe-local`).
+- The **old product name** `MyCodeBranchDesk` in the hero breadcrumb — the very thing Issue #1221
+  set out to remove, sitting in the most prominent slot on the page.
+- Readable **private source code** in the mobile demo's diff view.
+- Personal browser chrome and the macOS menu bar.
 
-# Mobile: 1080x2340/120fps/33s -> 360x780/30fps  => 1.13 MB
-ffmpeg -y -i docs/images/demo-mobile.mp4 \
-  -vf "scale=360:-2,fps=30" -an \
-  -c:v libx264 -crf 33 -preset slow -profile:v high -pix_fmt yuv420p -movflags +faststart \
-  website/assets/media/demo-mobile.mp4
-```
+The desktop poster was also the `og:image`, so it was not merely "seen by people who visit the LP":
+it expanded as the preview card **every time the LP was linked** in Slack, X, or anywhere else.
 
-`-an` drops audio (the demos are silent). `-movflags +faststart` moves the moov atom to the front so
-playback can begin before the whole file arrives.
+Rather than re-record, the page now uses the screenshots from Issue #1221, which were captured in an
+isolated environment against CommandMate's own repository. `og:image` points at
+`screenshot-desktop.webp` for the same reason.
 
-### Why mp4 only, and no webm
+**If you ever add a video back**, re-record it in an isolated environment first — never re-encode
+from `docs/images/`. Those originals stay in the repository only because the README GIFs reference
+them; they are not a clean source.
 
-VP9/webm was encoded and measured, then dropped: on this content (dense terminal text) it was
-**bigger at equivalent quality**, so a `<source>` ordering that preferred it would have served the
-*larger* file.
-
-| Encode | Size | SSIM vs. downscaled reference |
-|---|---|---|
-| h264 CRF 30 | **1.30 MB** | 0.9852 |
-| VP9 CRF 45 | 1.40 MB | 0.9876 |
-| VP9 CRF 37 | 2.04 MB | — |
-
-+94KB for +0.0024 SSIM is not a trade worth a second artifact. h264/mp4 is supported by every browser
-in the project's support matrix (Safari 16.4+ / Chrome 111+ / Firefox 128+ — see README "Browser
-Support"), so the mp4 needs no companion format.
-
-Measured with:
+## Gallery images (webp)
 
 ```bash
-ffmpeg -i docs/images/demo-desktop.mp4 -vf "scale=1280:-2,fps=30" -an -c:v ffv1 /tmp/ref.mkv
-ffmpeg -i website/assets/media/demo-desktop.mp4 -i /tmp/ref.mkv -lavfi "[0:v][1:v]ssim" -f null -
-```
-
-## Posters and gallery images (webp)
-
-```bash
-# Poster frames sampled at t=8s, where the UI is populated
-ffmpeg -y -ss 8 -i docs/images/demo-desktop.mp4 -vf "scale=1280:-2" -frames:v 1 /tmp/poster-desktop.png
-ffmpeg -y -ss 8 -i docs/images/demo-mobile.mp4  -vf "scale=360:-2"  -frames:v 1 /tmp/poster-mobile.png
-cwebp -q 78 /tmp/poster-desktop.png -o website/assets/img/demo-desktop-poster.webp   # 54.9 KB
-cwebp -q 80 /tmp/poster-mobile.png  -o website/assets/img/demo-mobile-poster.webp    # 21.3 KB
-
-# Gallery: the five previously unused screenshots
 for n in screenshot-desktop screenshot-mobile screenshot-worktree-desktop \
          screenshot-worktree-mobile screenshot-worktree-mobile-terminal; do
   cwebp -q 82 "docs/images/$n.png" -o "website/assets/img/$n.webp"
 done
 ```
+
+Budget: **each image < 100KB**, except `screenshot-worktree-desktop.webp`. `screenshot-desktop.webp`
+is both the hero and the `og:image`, so it is what Lighthouse measures as LCP.
+`tests/unit/website/landing-page.test.ts` enforces the budget and the no-video rule.
