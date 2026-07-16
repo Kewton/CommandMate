@@ -8,14 +8,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { GitPane } from '@/components/worktree/GitPane';
-// Issue #817: SSOT prompt builders — imported so the "Ask AI" wiring tests
-// assert the right builder/context without duplicating the ja wording here.
-import {
-  branchCreatePrompt,
-  branchDeletePrompt,
-  resetPrompt,
-  revertPrompt,
-} from '@/lib/git-ai-prompt-templates';
+// Issue #1307: the "Ask AI" drafts are localized, and this file renders under
+// the real `en` dictionary — so these tests assert the literal English draft.
+// Rebuilding the expectation from the same builder (the #817 approach) could no
+// longer tell an English draft from a Japanese one, which is the whole bug.
+// The wording itself is pinned in tests/unit/lib/git-ai-prompt-templates.test.ts.
 
 // Issue #1277: GitPane now localizes the network-op failure guidance at the
 // render site (the hook reports `errorReason`; the wording comes from the
@@ -2182,7 +2179,9 @@ describe('GitPane', () => {
       fireEvent.click(screen.getByTestId('branch-create-ask-ai'));
 
       expect(onInsertToMessage).toHaveBeenCalledTimes(1);
-      expect(onInsertToMessage).toHaveBeenCalledWith(branchCreatePrompt('feature/created', ''));
+      expect(onInsertToMessage).toHaveBeenCalledWith(
+        'Create branch `feature/created` from the current HEAD and check it out.'
+      );
       // Modal closed; the create API was NOT called (delegated to the agent).
       expect(screen.queryByTestId('branch-create-name-input')).not.toBeInTheDocument();
       expect(postedTo('/git/branch/create')).toBe(false);
@@ -2234,7 +2233,7 @@ describe('GitPane', () => {
 
       fireEvent.click(screen.getByTestId('branch-delete-ask-ai'));
 
-      expect(onInsertToMessage).toHaveBeenCalledWith(branchDeletePrompt('feature/old', false));
+      expect(onInsertToMessage).toHaveBeenCalledWith('Delete branch `feature/old`.');
       expect(screen.queryByTestId('branch-delete-ask-ai')).not.toBeInTheDocument();
       expect(postedTo('/git/branch/delete')).toBe(false);
     });
@@ -2259,7 +2258,7 @@ describe('GitPane', () => {
 
       expect(onInsertToMessage).toHaveBeenCalledTimes(1);
       const inserted = onInsertToMessage.mock.calls[0][0] as string;
-      expect(inserted).toContain('古い stash entry');
+      expect(inserted).toContain('List the old stash entries');
       expect(inserted).toContain('stash@{0}: WIP on main: a');
     });
 
@@ -2298,7 +2297,7 @@ describe('GitPane', () => {
       fireEvent.click(screen.getByTestId('stash-conflict-ask-ai'));
 
       const inserted = onInsertToMessage.mock.calls[0][0] as string;
-      expect(inserted).toContain('conflict を解決してから commit してください。');
+      expect(inserted).toContain('Please resolve the conflict and then commit.');
       expect(inserted).toContain('a.ts');
     });
 
@@ -2313,7 +2312,9 @@ describe('GitPane', () => {
       // Default target HEAD + mixed mode.
       fireEvent.click(screen.getByTestId('reset-ask-ai'));
 
-      expect(onInsertToMessage).toHaveBeenCalledWith(resetPrompt('mixed', 'HEAD'));
+      expect(onInsertToMessage).toHaveBeenCalledWith(
+        'I want to run a mixed reset onto `HEAD`. Please do it safely.'
+      );
       expect(screen.queryByTestId('reset-confirm')).not.toBeInTheDocument();
       expect(postedTo('/git/reset')).toBe(false);
     });
@@ -2330,7 +2331,7 @@ describe('GitPane', () => {
       fireEvent.click(screen.getByTestId('reset-ask-ai'));
 
       const inserted = onInsertToMessage.mock.calls[0][0] as string;
-      expect(inserted).toContain('git reflog から復旧');
+      expect(inserted).toContain('recover it from git reflog');
       expect(postedTo('/git/reset')).toBe(false);
     });
 
@@ -2358,7 +2359,7 @@ describe('GitPane', () => {
 
       fireEvent.click(screen.getByTestId('revert-ask-ai'));
 
-      expect(onInsertToMessage).toHaveBeenCalledWith(revertPrompt('abc1234def'));
+      expect(onInsertToMessage).toHaveBeenCalledWith('Please revert commit `abc1234`.');
       expect(postedTo('/git/revert')).toBe(false);
     });
 

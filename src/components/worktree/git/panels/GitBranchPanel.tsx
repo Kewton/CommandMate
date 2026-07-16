@@ -245,7 +245,7 @@ export const GitBranchPanel = memo(function GitBranchPanel({
                   testId="branch-create-ask-ai"
                   disabled={createName.trim().length === 0}
                   onClick={() => {
-                    onAskAi(branchCreatePrompt(createName, createFrom));
+                    onAskAi(branchCreatePrompt(t, createName, createFrom));
                     setShowCreate(false);
                   }}
                 />
@@ -299,7 +299,7 @@ export const GitBranchPanel = memo(function GitBranchPanel({
                   className="mr-auto"
                   testId="branch-delete-ask-ai"
                   onClick={() => {
-                    onAskAi(branchDeletePrompt(deleteTarget.name, deleteForce));
+                    onAskAi(branchDeletePrompt(t, deleteTarget.name, deleteForce));
                     setDeleteTarget(null);
                     setDeleteForce(false);
                   }}

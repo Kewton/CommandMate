@@ -227,7 +227,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
                 disabled={resetTargetMissing}
                 onClick={() => {
                   if (!resetTarget) return;
-                  onAskAi(resetPrompt(resetMode, resetTarget));
+                  onAskAi(resetPrompt(t, resetMode, resetTarget));
                   setShowResetModal(false);
                   setConfirmBranch('');
                 }}
@@ -299,7 +299,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
                 className="mr-auto"
                 testId="revert-ask-ai"
                 onClick={() => {
-                  onAskAi(revertPrompt(selectedCommit));
+                  onAskAi(revertPrompt(t, selectedCommit));
                   setShowRevertModal(false);
                   setRevertNoCommit(false);
                 }}
@@ -368,7 +368,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
                 className="mr-auto"
                 testId="force-push-ask-ai"
                 onClick={() => {
-                  onAskAi(forcePushPrompt({ branch: currentBranch, ahead: aheadCount ?? null }));
+                  onAskAi(forcePushPrompt(t, { branch: currentBranch, ahead: aheadCount ?? null }));
                   setShowForcePushModal(false);
                 }}
               />
