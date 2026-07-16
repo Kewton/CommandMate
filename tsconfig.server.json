@@ -3,7 +3,11 @@
   "compilerOptions": {
     "outDir": "dist/server",
     "rootDir": ".",
-    "declaration": false
+    "declaration": false,
+    // push-sender statically imports the notification dictionaries; this also
+    // makes tsc emit them under dist/server/locales/, which `files: ["dist/"]`
+    // then ships (the repo-root locales/ dir is not itself published).
+    "resolveJsonModule": true
   },
   "include": [
     "server.ts",

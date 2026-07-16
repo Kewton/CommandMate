@@ -21,6 +21,8 @@ export interface PushSubscriptionRecord {
   deviceLabel: string | null;
   enabledPrompt: boolean;
   enabledCompletion: boolean;
+  /** Locale captured at registration. NULL for subscriptions predating v42. */
+  locale: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -31,6 +33,7 @@ export interface UpsertPushSubscriptionInput {
   p256dh: string;
   auth: string;
   deviceLabel?: string | null;
+  locale?: string | null;
 }
 
 interface PushSubscriptionRow {
@@ -41,6 +44,7 @@ interface PushSubscriptionRow {
   device_label: string | null;
   enabled_prompt: number;
   enabled_completion: number;
+  locale: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -53,6 +57,7 @@ function mapRow(row: PushSubscriptionRow): PushSubscriptionRecord {
     deviceLabel: row.device_label,
     enabledPrompt: row.enabled_prompt === 1,
     enabledCompletion: row.enabled_completion === 1,
+    locale: row.locale,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   };
@@ -60,13 +65,17 @@ function mapRow(row: PushSubscriptionRow): PushSubscriptionRecord {
 
 const SELECT_COLUMNS = `
   id, endpoint, p256dh, auth, device_label,
-  enabled_prompt, enabled_completion, created_at, updated_at
+  enabled_prompt, enabled_completion, locale, created_at, updated_at
 `;
 
 /**
  * Create or update a subscription keyed by endpoint. On conflict the encryption
  * keys and device label are refreshed but the per-type preferences are preserved
  * (a browser re-subscribe must not silently reset the user's toggles).
+ *
+ * Locale follows the keys, not the preferences: a re-registration carries the
+ * reader's current language, so a resolved locale overwrites the stored one.
+ * An *unresolved* locale must not clobber a good stored value, hence COALESCE.
  */
 export function upsertPushSubscription(
   db: Database.Database,
@@ -74,19 +83,21 @@ export function upsertPushSubscription(
 ): PushSubscriptionRecord {
   const now = Date.now();
   const deviceLabel = input.deviceLabel ?? null;
+  const locale = input.locale ?? null;
 
   db.prepare(`
     INSERT INTO push_subscriptions (
       id, endpoint, p256dh, auth, device_label,
-      enabled_prompt, enabled_completion, created_at, updated_at
+      enabled_prompt, enabled_completion, locale, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, 1, 1, ?, ?)
+    VALUES (?, ?, ?, ?, ?, 1, 1, ?, ?, ?)
     ON CONFLICT(endpoint) DO UPDATE SET
       p256dh = excluded.p256dh,
       auth = excluded.auth,
       device_label = excluded.device_label,
+      locale = COALESCE(excluded.locale, push_subscriptions.locale),
       updated_at = excluded.updated_at
-  `).run(randomUUID(), input.endpoint, input.p256dh, input.auth, deviceLabel, now, now);
+  `).run(randomUUID(), input.endpoint, input.p256dh, input.auth, deviceLabel, locale, now, now);
 
   const record = getPushSubscriptionByEndpoint(db, input.endpoint);
   if (!record) {
