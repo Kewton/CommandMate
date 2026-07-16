@@ -20,7 +20,7 @@
 CommandMate is a local control plane for agent CLIs.
 
 ```bash
-npx commandmate
+npx commandmate@latest
 ```
 
 **From install to your first session in 60 seconds.** macOS / Linux / Windows (WSL2) · Node.js v22+ · npm · git · tmux
@@ -124,14 +124,23 @@ Each Git worktree gets its own tmux session, so multiple tasks run in parallel w
 <summary><strong>Quick Start (detailed)</strong></summary>
 
 ```bash
-# Install & start in one command (guided setup)
-npx commandmate
+# Try it in one command (guided setup)
+npx commandmate@latest
 
-# Or install globally
+# Or install globally — recommended if you plan to keep the server running
 npm install -g commandmate
 commandmate init
 commandmate start --daemon
 ```
+
+Always write `npx commandmate@latest`, not bare `npx commandmate`. If CommandMate is already
+installed globally, bare `npx commandmate` runs that existing binary without ever checking the
+registry, so you silently keep running an old version. `@latest` forces npx to resolve the newest
+release. This only affects `npx` — `npm install -g commandmate` always resolves from the registry.
+
+For anything beyond a first look, prefer the global install. `npx` unpacks CommandMate into the npm
+cache, and `commandmate start --daemon` runs the background server out of that cache directory — a
+later `npx` run or a cache clean can delete it out from under the running server.
 
 Running `commandmate` with no arguments walks you through the whole first run: it checks
 your dependencies, asks a few setup questions on first use, starts the server in the

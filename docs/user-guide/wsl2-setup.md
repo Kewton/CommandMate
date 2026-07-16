@@ -101,19 +101,21 @@ npm -v
 
 ---
 
-## 3. Clone & Build
+## 3. Install CommandMate
 
 ```bash
-# Clone the repository
-git clone https://github.com/Kewton/CommandMate.git
-cd CommandMate
+# Install globally
+npm install -g commandmate
 
-# Install dependencies
-npm install
-
-# Build
-npm run build:all
+# Verify
+commandmate --version
 ```
+
+> **Note:** グローバルインストールを使ってください。`npx` は CommandMate を npm キャッシュに展開するため、
+> `start --daemon` のバックグラウンドサーバーもそのキャッシュディレクトリ上で動きます。後から `npx` を
+> 再実行したりキャッシュを削除すると、稼働中のサーバーの足元のファイルが消える可能性があります。
+> まず試すだけなら `npx commandmate@latest` を使ってください。`@latest` なしの `npx commandmate` は、
+> グローバルインストール済みの環境ではレジストリを参照せず既存のバイナリを実行してしまいます。
 
 ---
 
@@ -121,10 +123,10 @@ npm run build:all
 
 ```bash
 # Initialize (interactive setup)
-npx commandmate init
+commandmate init
 
 # Start the server
-npx commandmate start --daemon
+commandmate start --daemon
 ```
 
 The server starts at `http://localhost:3000` by default.
@@ -156,19 +158,24 @@ Then access `http://<WSL2_IP>:3000` from your Windows browser.
 To bind CommandMate to all interfaces (required if using the WSL2 IP):
 
 ```bash
-CM_BIND=0.0.0.0 npx commandmate start --daemon
+CM_BIND=0.0.0.0 commandmate start --daemon
 ```
 
 ---
 
 ## 6. Development Mode
 
-For development with hot-reload:
+CommandMate 自体を開発する場合は、グローバルインストールではなくソースからビルドします:
 
 ```bash
+# Clone the repository
+git clone https://github.com/Kewton/CommandMate.git
 cd CommandMate
 
-# Start dev server
+# Install dependencies
+npm install
+
+# Start dev server (hot-reload)
 npm run dev
 ```
 
@@ -217,15 +224,16 @@ NODE_MODULE_VERSION 115.
 # 現在のNodeバージョンを確認
 node -v
 
-# ネイティブモジュールを現在のバージョン向けにリビルド
-npm rebuild better-sqlite3
+# ネイティブモジュールを現在のバージョン向けにリビルド（グローバルインストールの場合）
+npm rebuild -g better-sqlite3
 
 # 再起動
-npx commandmate start
+commandmate start
 ```
 
-> **Tip:** `nvm` でバージョンを切り替えたら、必ず `npm rebuild better-sqlite3` を実行してください。
-> それでも解決しない場合は `rm -rf node_modules && npm install` で再インストールしてください。
+> **Tip:** `nvm` でバージョンを切り替えたら、必ず `npm rebuild -g better-sqlite3` を実行してください。
+> それでも解決しない場合は `npm install -g commandmate --force` で再インストールしてください。
+> ソースからビルドしている場合（Development Mode）は、リポジトリ内で `npm rebuild better-sqlite3` を実行してください。
 
 ### Port already in use
 
@@ -234,12 +242,12 @@ npx commandmate start
 ss -tlnp | grep :3000
 
 # Stop the existing server
-npx commandmate stop
+commandmate stop
 ```
 
 ### Cannot access from Windows browser
 
-1. Check the server is running: `npx commandmate status`
+1. Check the server is running: `commandmate status`
 2. Try the WSL2 IP address: `hostname -I`
 3. Start with `CM_BIND=0.0.0.0` to bind to all interfaces
 4. Check Windows Firewall is not blocking the port
