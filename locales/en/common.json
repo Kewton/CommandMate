@@ -1,7 +1,19 @@
 {
   "sessions": {
     "idleAgents": "{count} idle",
-    "activeAgents": "{count} active"
+    "activeAgents": "{count} active",
+    "title": "Sessions",
+    "description": "All worktree sessions across repositories.",
+    "filterPlaceholder": "Filter by name or repository...",
+    "filterAriaLabel": "Filter sessions by name or repository",
+    "sortByAriaLabel": "Sort by",
+    "sortAscending": "Sort ascending",
+    "sortDescending": "Sort descending",
+    "loadingAriaLabel": "Loading sessions",
+    "refreshError": "Failed to refresh sessions: {message}",
+    "loadError": "Failed to load sessions: {message}",
+    "noMatching": "No matching sessions found.",
+    "empty": "No sessions yet."
   },
   "nav": {
     "home": "Home",
@@ -105,7 +117,8 @@
     "updatedAt": "Updated",
     "repositoryName": "Repository",
     "branchName": "Branch",
-    "status": "Status"
+    "status": "Status",
+    "lastSent": "Last Sent"
   },
   "branchItem": {
     "cliToolStatus": "CLI tool status",
@@ -116,5 +129,8 @@
     "offline": "Offline",
     "reconnectingTooltip": "Re-establishing the live connection (running on polling)",
     "offlineTooltip": "No live connection (running on polling)"
+  },
+  "meta": {
+    "description": "Git worktree management with Claude CLI and tmux sessions"
   }
 }

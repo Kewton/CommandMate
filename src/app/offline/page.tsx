@@ -2,9 +2,10 @@ import type { Metadata } from 'next';
 import { getTranslations } from 'next-intl/server';
 import { OfflineReconnectButton } from '@/components/pwa/OfflineReconnectButton';
 
-export const metadata: Metadata = {
-  title: 'Offline',
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslations('pwa');
+  return { title: t('offline.metaTitle') };
+}
 
 /**
  * Offline fallback page (Issue #1124).

@@ -1,4 +1,13 @@
 {
+  "page": {
+    "title": "Review",
+    "description": "Worktrees that need your attention."
+  },
+  "tabs": {
+    "review": "Review",
+    "report": "Report",
+    "template": "Template"
+  },
   "status": {
     "done": "Done",
     "inReview": "In Review",

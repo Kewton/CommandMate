@@ -1,5 +1,6 @@
 {
   "offline": {
+    "metaTitle": "オフライン",
     "title": "オフラインです",
     "description": "サーバーに接続できません。接続を確認して再試行してください。",
     "reconnect": "再接続"

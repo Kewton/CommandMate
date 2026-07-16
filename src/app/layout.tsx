@@ -1,27 +1,34 @@
 import type { Metadata, Viewport } from 'next';
-import { getLocale, getMessages, getTimeZone } from 'next-intl/server';
+import { getLocale, getMessages, getTimeZone, getTranslations } from 'next-intl/server';
 import { GeistSans } from 'geist/font/sans';
 import { GeistMono } from 'geist/font/mono';
 import { AppProviders } from '@/components/providers/AppProviders';
 import './globals.css';
 
-export const metadata: Metadata = {
-  // [Issue #1082] Title template: per-page `title` renders as "<page> | CommandMate";
-  // pages without their own title fall back to `default`.
-  title: {
-    default: 'CommandMate',
-    template: '%s | CommandMate',
-  },
-  description: 'Git worktree management with Claude CLI and tmux sessions',
-  // [Issue #1124] iOS PWA: Safari ignores the Web App Manifest for standalone
-  // launch, so these emit apple-mobile-web-app-* meta tags for home-screen
-  // installs (Android/desktop rely on manifest.ts).
-  appleWebApp: {
-    capable: true,
-    title: 'CommandMate',
-    statusBarStyle: 'default',
-  },
-};
+// [Issue #1305] `description` is locale-dependent, and t() cannot be called at
+// module scope, so the static `metadata` export became `generateMetadata`.
+// "CommandMate" stays a literal on purpose: it is the product name, not copy.
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslations('common');
+
+  return {
+    // [Issue #1082] Title template: per-page `title` renders as "<page> | CommandMate";
+    // pages without their own title fall back to `default`.
+    title: {
+      default: 'CommandMate',
+      template: '%s | CommandMate',
+    },
+    description: t('meta.description'),
+    // [Issue #1124] iOS PWA: Safari ignores the Web App Manifest for standalone
+    // launch, so these emit apple-mobile-web-app-* meta tags for home-screen
+    // installs (Android/desktop rely on manifest.ts).
+    appleWebApp: {
+      capable: true,
+      title: 'CommandMate',
+      statusBarStyle: 'default',
+    },
+  };
+}
 
 // [Issue #1082] themeColor follows the light/dark --background token so the
 // browser chrome (mobile address bar / PWA) matches the active theme.
