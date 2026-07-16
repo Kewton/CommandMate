@@ -43,17 +43,17 @@ export default function TemplateTab() {
       const res = await fetch('/api/templates');
       if (!res.ok) {
         const data = await res.json();
-        setError(data.error || 'Failed to fetch templates');
+        setError(data.error || t('template.errors.fetch'));
         return;
       }
       const data = await res.json();
       setTemplates(data.templates || []);
     } catch {
-      setError('Failed to fetch templates');
+      setError(t('template.errors.fetch'));
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     fetchTemplates();
@@ -61,7 +61,7 @@ export default function TemplateTab() {
 
   const handleCreate = async () => {
     if (!newName.trim() || !newContent.trim()) {
-      setError('Name and content are required');
+      setError(t('template.errors.nameAndContentRequired'));
       return;
     }
 
@@ -76,7 +76,7 @@ export default function TemplateTab() {
 
       if (!res.ok) {
         const data = await res.json();
-        setError(data.error || 'Failed to create template');
+        setError(data.error || t('template.errors.create'));
         return;
       }
 
@@ -84,7 +84,7 @@ export default function TemplateTab() {
       setNewContent('');
       await fetchTemplates();
     } catch {
-      setError('Failed to create template');
+      setError(t('template.errors.create'));
     } finally {
       setIsCreating(false);
     }
@@ -98,7 +98,7 @@ export default function TemplateTab() {
 
   const handleSave = async () => {
     if (!editingId || !editName.trim() || !editContent.trim()) {
-      setError('Name and content are required');
+      setError(t('template.errors.nameAndContentRequired'));
       return;
     }
 
@@ -113,14 +113,14 @@ export default function TemplateTab() {
 
       if (!res.ok) {
         const data = await res.json();
-        setError(data.error || 'Failed to update template');
+        setError(data.error || t('template.errors.update'));
         return;
       }
 
       setEditingId(null);
       await fetchTemplates();
     } catch {
-      setError('Failed to update template');
+      setError(t('template.errors.update'));
     } finally {
       setIsSaving(false);
     }
@@ -134,12 +134,12 @@ export default function TemplateTab() {
       const res = await fetch(`/api/templates/${id}`, { method: 'DELETE' });
       if (!res.ok) {
         const data = await res.json();
-        setError(data.error || 'Failed to delete template');
+        setError(data.error || t('template.errors.delete'));
         return;
       }
       await fetchTemplates();
     } catch {
-      setError('Failed to delete template');
+      setError(t('template.errors.delete'));
     }
   };
 
@@ -161,7 +161,7 @@ export default function TemplateTab() {
       {/* Template list */}
       <div className="mb-6">
         <h2 className="text-lg font-semibold text-foreground mb-3">
-          Templates ({templates.length}/{MAX_TEMPLATES})
+          {t('template.heading', { count: templates.length, max: MAX_TEMPLATES })}
         </h2>
 
         {isLoading ? (
@@ -170,7 +170,7 @@ export default function TemplateTab() {
             className="space-y-3"
             data-testid="template-loading"
             role="status"
-            aria-label="Loading templates"
+            aria-label={t('template.loading')}
           >
             {[0, 1].map((i) => (
               <Card key={i} padding="md">
@@ -183,7 +183,7 @@ export default function TemplateTab() {
             ))}
           </div>
         ) : templates.length === 0 ? (
-          <div className="text-sm text-muted-foreground" data-testid="template-empty">No templates yet.</div>
+          <div className="text-sm text-muted-foreground" data-testid="template-empty">{t('template.empty')}</div>
         ) : (
           <div className="space-y-3" data-testid="template-list">
             {templates.map((template) => (
@@ -218,7 +218,7 @@ export default function TemplateTab() {
                         disabled={isSaving}
                         data-testid="edit-save-button"
                       >
-                        {isSaving ? 'Saving...' : 'Save'}
+                        {isSaving ? t('template.saving') : t('template.save')}
                       </Button>
                       <Button
                         variant="secondary"
@@ -226,7 +226,7 @@ export default function TemplateTab() {
                         onClick={handleCancelEdit}
                         data-testid="edit-cancel-button"
                       >
-                        Cancel
+                        {t('template.cancel')}
                       </Button>
                     </div>
                   </div>
@@ -243,7 +243,7 @@ export default function TemplateTab() {
                           onClick={() => handleEdit(template)}
                           data-testid={`edit-button-${template.id}`}
                         >
-                          Edit
+                          {t('template.edit')}
                         </Button>
                         <Button
                           variant="danger"
@@ -251,7 +251,7 @@ export default function TemplateTab() {
                           onClick={() => handleDelete(template.id)}
                           data-testid={`delete-button-${template.id}`}
                         >
-                          Delete
+                          {t('template.delete')}
                         </Button>
                       </div>
                     </div>
@@ -269,14 +269,14 @@ export default function TemplateTab() {
       {/* Create form (only shown when under limit) */}
       {templates.length < MAX_TEMPLATES && (
         <div className="p-4 bg-surface border border-border rounded-lg shadow-sm" data-testid="create-form">
-          <h3 className="text-sm font-semibold text-foreground mb-3">New Template</h3>
+          <h3 className="text-sm font-semibold text-foreground mb-3">{t('template.newHeading')}</h3>
           <div className="space-y-3">
             <Input
               type="text"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               maxLength={MAX_TEMPLATE_NAME_LENGTH}
-              placeholder="Template name"
+              placeholder={t('template.namePlaceholder')}
               data-testid="new-name-input"
             />
             <Textarea
@@ -284,7 +284,7 @@ export default function TemplateTab() {
               onChange={(e) => setNewContent(e.target.value)}
               maxLength={MAX_TEMPLATE_CONTENT_LENGTH}
               rows={3}
-              placeholder="Template content (instructions for report generation)"
+              placeholder={t('template.contentPlaceholder')}
               className="resize-y"
               data-testid="new-content-input"
             />
@@ -294,7 +294,7 @@ export default function TemplateTab() {
               disabled={isCreating || !newName.trim() || !newContent.trim()}
               data-testid="create-button"
             >
-              {isCreating ? 'Creating...' : 'Create Template'}
+              {isCreating ? t('template.creating') : t('template.create')}
             </Button>
           </div>
         </div>

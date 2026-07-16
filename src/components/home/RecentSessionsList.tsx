@@ -59,7 +59,7 @@ export function RecentSessionsList({ worktrees, limit = 5, isLoading = false }: 
         className="space-y-1"
         data-testid="recent-sessions-loading"
         role="status"
-        aria-label="Loading recent sessions"
+        aria-label={t('recentSessions.loading')}
       >
         {Array.from({ length: limit }, (_, i) => (
           <li key={i} className="flex items-center gap-2 rounded-md px-2 py-1.5">

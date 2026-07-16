@@ -20,6 +20,14 @@ import { WorktreeSelectionProvider } from '@/contexts/WorktreeSelectionContext';
 import type { Worktree } from '@/types/models';
 import type { RepositorySummary } from '@/lib/api-client';
 
+// Issue #1274: Sidebar wording resolves through `common.sidebar.*` /
+// `common.nav.repositories`. Back it with the real dictionary so the English
+// assertions prove the keys exist rather than echoing the global mock.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 vi.mock('next/navigation', () => ({
   useRouter: () => ({
     push: vi.fn(),

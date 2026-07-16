@@ -38,10 +38,12 @@ interface ReportData {
   updatedAt: string;
 }
 
-const MODE_OPTIONS: Array<{ value: GenerationMode; label: string }> = [
-  { value: 'none', label: 'No instruction' },
-  { value: 'template', label: 'Template' },
-  { value: 'custom', label: 'Custom' },
+/** `labelKey` rather than a literal: t() cannot be called at module scope,
+ * where a literal would pin the mode labels to English (Issue #1271/#1273). */
+const MODE_OPTIONS: Array<{ value: GenerationMode; labelKey: string }> = [
+  { value: 'none', labelKey: 'report.modes.none' },
+  { value: 'template', labelKey: 'report.modes.template' },
+  { value: 'custom', labelKey: 'report.modes.custom' },
 ];
 
 export default function ReportTab() {
@@ -84,7 +86,7 @@ export default function ReportTab() {
       const res = await fetch(`/api/daily-summary?date=${date}`);
       if (!res.ok) {
         const data = await res.json();
-        setError(data.error || 'Failed to fetch report');
+        setError(data.error || t('report.errors.fetch'));
         return;
       }
       const data = await res.json();
@@ -97,11 +99,11 @@ export default function ReportTab() {
       }
       setIsEditing(false);
     } catch {
-      setError('Failed to fetch report');
+      setError(t('report.errors.fetch'));
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     fetchReport(selectedDate);
@@ -146,13 +148,13 @@ export default function ReportTab() {
       });
 
       if (res.status === 429) {
-        setError('Another summary is being generated. Please wait.');
+        setError(t('report.errors.rateLimited'));
         return;
       }
 
       if (!res.ok) {
         const data = await res.json();
-        setError(data.error || 'Failed to generate summary');
+        setError(data.error || t('report.errors.generate'));
         return;
       }
 
@@ -161,7 +163,7 @@ export default function ReportTab() {
       setEditContent(data.report.content);
       setIsEditing(false);
     } catch {
-      setError('Failed to generate summary');
+      setError(t('report.errors.generate'));
     } finally {
       setIsGenerating(false);
     }
@@ -169,7 +171,7 @@ export default function ReportTab() {
 
   const handleSave = async () => {
     if (!editContent.trim()) {
-      setError('Content cannot be empty');
+      setError(t('report.errors.emptyContent'));
       return;
     }
 
@@ -184,7 +186,7 @@ export default function ReportTab() {
 
       if (!res.ok) {
         const data = await res.json();
-        setError(data.error || 'Failed to save report');
+        setError(data.error || t('report.errors.save'));
         return;
       }
 
@@ -192,7 +194,7 @@ export default function ReportTab() {
       setReport(data.report);
       setIsEditing(false);
     } catch {
-      setError('Failed to save report');
+      setError(t('report.errors.save'));
     } finally {
       setIsSaving(false);
     }
@@ -205,7 +207,7 @@ export default function ReportTab() {
         <ReportDatePicker value={selectedDate} onChange={handleDateChange} />
 
         <div className="flex items-center gap-2">
-          <label className="text-sm text-muted-foreground">Tool:</label>
+          <label className="text-sm text-muted-foreground">{t('report.toolLabel')}</label>
           <select
             value={selectedTool}
             onChange={(e) => setSelectedTool(e.target.value)}
@@ -221,7 +223,7 @@ export default function ReportTab() {
             <Input
               type="text"
               inputSize="sm"
-              placeholder="Model (optional)"
+              placeholder={t('report.modelPlaceholder')}
               value={modelInput}
               onChange={(e) => setModelInput(e.target.value)}
               className="w-auto"
@@ -235,7 +237,7 @@ export default function ReportTab() {
       {/* Generation mode selector */}
       <div className="mb-4" data-testid="generation-mode-selector">
         <label className="text-sm font-medium text-foreground mb-2 block">
-          Generation Mode
+          {t('report.generationMode')}
         </label>
         <RadioGroup
           value={mode}
@@ -246,7 +248,7 @@ export default function ReportTab() {
           {MODE_OPTIONS.map((option) => (
             <label key={option.value} className="flex items-center gap-2 text-sm cursor-pointer">
               <RadioGroupItem value={option.value} data-testid={`mode-radio-${option.value}`} />
-              <span className="text-foreground">{option.label}</span>
+              <span className="text-foreground">{t(option.labelKey)}</span>
             </label>
           ))}
         </RadioGroup>
@@ -256,18 +258,18 @@ export default function ReportTab() {
       {mode === 'template' && (
         <div className="mb-4" data-testid="template-selector">
           <label className="text-sm font-medium text-foreground mb-2 block">
-            Select Template
+            {t('report.selectTemplate')}
           </label>
           {isLoadingTemplates ? (
             <Skeleton
               className="h-9 w-full"
               data-testid="report-template-loading"
               role="status"
-              aria-label="Loading templates"
+              aria-label={t('report.loadingTemplates')}
               aria-hidden={undefined}
             />
           ) : templates.length === 0 ? (
-            <div className="text-sm text-muted-foreground">No templates available. Create one in the Template tab.</div>
+            <div className="text-sm text-muted-foreground">{t('report.noTemplates')}</div>
           ) : (
             <select
               value={selectedTemplateId || ''}
@@ -275,9 +277,9 @@ export default function ReportTab() {
               className="px-3 py-1 text-sm rounded border border-input bg-surface dark:bg-surface-2 text-surface-foreground"
               data-testid="template-select"
             >
-              <option value="">-- Select a template --</option>
-              {templates.map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
+              <option value="">{t('report.templatePlaceholderOption')}</option>
+              {templates.map((template) => (
+                <option key={template.id} value={template.id}>{template.name}</option>
               ))}
             </select>
           )}
@@ -295,8 +297,8 @@ export default function ReportTab() {
             readOnly={isUserInstructionReadOnly}
             placeholder={
               mode === 'template'
-                ? 'Select a template above to populate this field'
-                : 'Additional instructions for summary generation'
+                ? t('report.instructionPlaceholderTemplate')
+                : t('report.instructionPlaceholderCustom')
             }
             className={`resize-y ${
               isUserInstructionReadOnly ? 'bg-muted cursor-not-allowed' : ''
@@ -314,7 +316,7 @@ export default function ReportTab() {
           disabled={isGenerating || isRemoteGenerating || messageCount === 0}
           data-testid="generate-button"
         >
-          {isGenerating || isRemoteGenerating ? 'Generating...' : 'Generate Summary'}
+          {isGenerating || isRemoteGenerating ? t('report.generating') : t('report.generate')}
         </Button>
       </div>
 
@@ -323,9 +325,9 @@ export default function ReportTab() {
         {isLoading ? (
           <Skeleton className="h-4 w-48" />
         ) : messageCount === 0 ? (
-          'No messages for this date.'
+          t('report.noMessages')
         ) : (
-          `${messageCount} messages found for this date.`
+          t('report.messagesFound', { count: messageCount })
         )}
       </div>
 
@@ -341,8 +343,15 @@ export default function ReportTab() {
         <div className="flex items-center gap-2 mb-4 text-sm text-muted-foreground" data-testid="generating-spinner">
           <Spinner size="sm" variant="muted" />
           {isRemoteGenerating && remoteStatus.tool
-            ? `Generating report... (tool: ${remoteStatus.tool}${remoteStatus.startedAt ? `, started: ${Math.round((Date.now() - new Date(remoteStatus.startedAt).getTime()) / 1000)}s ago` : ''})`
-            : 'Generating summary...'}
+            ? remoteStatus.startedAt
+              ? t('report.generatingRemoteWithTime', {
+                  tool: remoteStatus.tool,
+                  seconds: Math.round(
+                    (Date.now() - new Date(remoteStatus.startedAt).getTime()) / 1000,
+                  ),
+                })
+              : t('report.generatingRemote', { tool: remoteStatus.tool })
+            : t('report.generatingSummary')}
         </div>
       )}
 
@@ -351,7 +360,7 @@ export default function ReportTab() {
         <Card data-testid="report-content">
           <div className="flex items-center justify-between mb-3">
             <div className="text-xs text-muted-foreground">
-              Generated by: {report.generatedByTool}
+              {t('report.generatedBy', { tool: report.generatedByTool })}
               {report.model && ` (${report.model})`}
             </div>
             <div className="flex items-center gap-2">
@@ -365,7 +374,7 @@ export default function ReportTab() {
                 }}
                 data-testid="copy-report-button"
               >
-                {copied ? 'Copied!' : 'Copy'}
+                {copied ? t('report.copied') : t('report.copy')}
               </Button>
               <Button
                 variant="secondary"
@@ -380,7 +389,7 @@ export default function ReportTab() {
                 disabled={isSaving}
                 data-testid="edit-save-button"
               >
-                {isSaving ? 'Saving...' : isEditing ? 'Save' : 'Edit'}
+                {isSaving ? t('report.saving') : isEditing ? t('report.save') : t('report.edit')}
               </Button>
             </div>
           </div>

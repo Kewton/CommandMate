@@ -348,5 +348,19 @@
     "mode": "Mode:",
     "modeName": "Name",
     "modeContent": "Content"
+  },
+  "tabs": {
+    "ariaLabel": "Mobile navigation",
+    "terminal": "Terminal",
+    "history": "History",
+    "files": "Files",
+    "memo": "Tools",
+    "info": "Info",
+    "newOutput": "New output available",
+    "promptWaiting": "Prompt waiting",
+    "updateAvailable": "Update available"
+  },
+  "git": {
+    "uncommittedChanges": "Uncommitted changes"
   }
 }

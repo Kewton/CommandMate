@@ -345,7 +345,7 @@ const YesNoActions = memo(function YesNoActions({
   const isNoDefault = promptData.defaultOption === 'no';
 
   return (
-    <div className="flex gap-3" role="group" aria-label="Yes or No options">
+    <div className="flex gap-3" role="group" aria-label={t('yesNoGroupLabel')}>
       <button
         type="button"
         onClick={onYes}
@@ -399,7 +399,7 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
   return (
     <div className="space-y-3">
       <fieldset>
-        <legend className="sr-only">Select an option</legend>
+        <legend className="sr-only">{t('selectAnOption')}</legend>
         <RadioGroup
           name={groupName}
           value={selectedOption != null ? String(selectedOption) : ''}
@@ -439,7 +439,7 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
       {/* Text input for options that require it */}
       {showTextInput && (
         <div className="mt-3">
-          <label htmlFor={`text-input-${groupName}`} className="sr-only">Custom value input</label>
+          <label htmlFor={`text-input-${groupName}`} className="sr-only">{t('customValueInput')}</label>
           <input
             id={`text-input-${groupName}`}
             type="text"

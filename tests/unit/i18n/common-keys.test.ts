@@ -137,6 +137,25 @@ const EN_SHARED_CHROME: Record<string, string> = {
   // Predates #1273; pinned because Modal / FullScreenModal now resolve their
   // close button through it, so a change here silently retitles both.
   close: 'Close',
+  // Issue #1274: Sidebar / SidebarToggle / MobileHeader / SimpleMessageInput
+  // migrated these from hardcoded JSX. `back` / `nav.repositories` predate the
+  // Issue and are reused rather than duplicated; `send` predates it and is now
+  // resolved by SimpleMessageInput, so a change here retitles that button too.
+  'sidebar.open': 'Open sidebar',
+  'sidebar.close': 'Close sidebar',
+  'sidebar.branchNavigation': 'Branch navigation',
+  'sidebar.branches': 'Branches',
+  'sidebar.searchBranches': 'Search branches...',
+  'sidebar.noBranchesFound': 'No branches found',
+  'sidebar.noBranchesAvailable': 'No branches available',
+  'sidebar.dragToReorderGroup': 'Drag to reorder group',
+  'sidebar.switchToFlatView': 'Switch to flat view',
+  'sidebar.switchToGroupedView': 'Switch to grouped view',
+  menu: 'Menu',
+  back: 'Back',
+  send: 'Send',
+  sending: 'Sending...',
+  sendMessagePlaceholder: 'Send a message...',
 };
 
 const SHARED_CHROME_KEYS = Object.keys(EN_SHARED_CHROME);

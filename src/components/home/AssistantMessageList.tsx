@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
@@ -48,6 +49,7 @@ interface UserMessageBubbleProps {
 }
 
 function UserMessageBubble({ message, canEdit, onEdit }: UserMessageBubbleProps) {
+  const t = useTranslations('home');
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.content);
   const [saving, setSaving] = useState(false);
@@ -55,10 +57,10 @@ function UserMessageBubble({ message, canEdit, onEdit }: UserMessageBubbleProps)
 
   const statusText = message.deliveryStatus
     ? message.deliveryStatus === 'pending'
-      ? 'Sending'
+      ? t('assistant.message.sending')
       : message.deliveryStatus === 'failed'
-        ? 'Failed'
-        : 'Sent'
+        ? t('assistant.message.failed')
+        : t('assistant.message.sent')
     : null;
 
   const handleStartEdit = useCallback(() => {
@@ -87,16 +89,16 @@ function UserMessageBubble({ message, canEdit, onEdit }: UserMessageBubbleProps)
       await onEdit(message, trimmed);
       setEditing(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to resubmit message');
+      setError(err instanceof Error ? err.message : t('assistant.errors.resubmitMessage'));
     } finally {
       setSaving(false);
     }
-  }, [draft, message, onEdit, saving]);
+  }, [draft, message, onEdit, saving, t]);
 
   return (
     <div className="group ml-auto max-w-[88%] rounded-2xl border border-accent-500/40 bg-accent-500/10 px-4 py-3 text-foreground shadow-sm">
       <div className="mb-2 flex items-center justify-between gap-3 text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
-        <span>You</span>
+        <span>{t('assistant.message.you')}</span>
         <span>{formatTimestamp(message.timestamp)}</span>
       </div>
 
@@ -118,7 +120,7 @@ function UserMessageBubble({ message, canEdit, onEdit }: UserMessageBubbleProps)
               disabled={saving}
               className="rounded border border-border bg-surface px-3 py-1 text-[11px] text-foreground transition-colors hover:bg-muted disabled:opacity-50"
             >
-              Cancel
+              {t('assistant.message.cancel')}
             </button>
             <button
               type="button"
@@ -127,7 +129,7 @@ function UserMessageBubble({ message, canEdit, onEdit }: UserMessageBubbleProps)
               className="rounded bg-accent-600 px-3 py-1 text-[11px] font-medium text-white transition-colors hover:bg-accent-700 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
               data-testid="assistant-edit-save"
             >
-              {saving ? 'Resending...' : 'Save & Resend'}
+              {saving ? t('assistant.message.resending') : t('assistant.message.saveAndResend')}
             </button>
           </div>
         </div>
@@ -151,12 +153,12 @@ function UserMessageBubble({ message, canEdit, onEdit }: UserMessageBubbleProps)
                   type="button"
                   onClick={handleStartEdit}
                   className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-foreground transition-colors hover:bg-muted"
-                  aria-label="Edit message"
+                  aria-label={t('assistant.message.editMessage')}
                   data-testid="assistant-edit-button"
-                  title="Edit and resend"
+                  title={t('assistant.message.editAndResend')}
                 >
                   <IconPencil />
-                  <span>Edit</span>
+                  <span>{t('assistant.message.edit')}</span>
                 </button>
               )}
             </div>
@@ -203,6 +205,7 @@ export function AssistantMessageList({
   canEdit = false,
   onEditMessage,
 }: AssistantMessageListProps) {
+  const t = useTranslations('home');
   const containerRef = useRef<HTMLDivElement>(null);
   const shouldStickToBottomRef = useRef(true);
 
@@ -229,11 +232,11 @@ export function AssistantMessageList({
       lastMessage.role === 'user' &&
       lastMessage.deliveryStatus !== 'failed'
     ) {
-      return 'Assistant is working...';
+      return t('assistant.working');
     }
 
-    return 'Select a repository and click Start to open an assistant session.';
-  }, [messages, sessionActive]);
+    return t('assistant.emptyState');
+  }, [messages, sessionActive, t]);
 
   return (
     <div
@@ -283,7 +286,7 @@ export function AssistantMessageList({
             >
               <Spinner size="sm" variant="accent" />
               <span className="text-sm text-foreground">
-                {assistantLabel} is thinking...
+                {t('assistant.thinking', { label: assistantLabel })}
               </span>
             </div>
           )}

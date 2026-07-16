@@ -7,6 +7,7 @@
 'use client';
 
 import { useCallback, useMemo, useRef } from 'react';
+import { useTranslations } from 'next-intl';
 import { SquareTerminal, Clock, Folder, Wrench, Info } from 'lucide-react';
 import { NotificationDot } from '@/components/common/NotificationDot';
 import type { DeepLinkPane } from '@/types/ui-state';
@@ -52,7 +53,10 @@ export interface MobileTabBarProps {
  */
 interface TabConfig {
   id: MobileTab;
-  label: string;
+  /** Key into the `worktree.tabs.*` dictionary. A literal here would pin the
+   * label to English at module scope, where t() cannot be called
+   * (Issue #1271/#1273). */
+  labelKey: string;
   icon: React.ReactNode;
 }
 
@@ -71,11 +75,11 @@ function toDeepLinkPane(tab: MobileTab): DeepLinkPane {
  * Icons: lucide-react at 20px / strokeWidth 2 (see docs/design-system.md).
  */
 const TABS: TabConfig[] = [
-  { id: 'terminal', label: 'Terminal', icon: <SquareTerminal size={20} aria-hidden="true" /> },
-  { id: 'history', label: 'History', icon: <Clock size={20} aria-hidden="true" /> },
-  { id: 'files', label: 'Files', icon: <Folder size={20} aria-hidden="true" /> },
-  { id: 'memo', label: 'Tools', icon: <Wrench size={20} aria-hidden="true" /> },
-  { id: 'info', label: 'Info', icon: <Info size={20} aria-hidden="true" /> },
+  { id: 'terminal', labelKey: 'tabs.terminal', icon: <SquareTerminal size={20} aria-hidden="true" /> },
+  { id: 'history', labelKey: 'tabs.history', icon: <Clock size={20} aria-hidden="true" /> },
+  { id: 'files', labelKey: 'tabs.files', icon: <Folder size={20} aria-hidden="true" /> },
+  { id: 'memo', labelKey: 'tabs.memo', icon: <Wrench size={20} aria-hidden="true" /> },
+  { id: 'info', labelKey: 'tabs.info', icon: <Info size={20} aria-hidden="true" /> },
 ];
 
 /**
@@ -93,6 +97,7 @@ export function MobileTabBar({
   onSearchParamsChange,
   inFlow = false,
 }: MobileTabBarProps) {
+  const t = useTranslations('worktree');
   // [Issue #1127] Button refs for the ARIA tabs roving-tabindex pattern: arrow
   // keys move focus (and selection) to the neighbouring tab element directly.
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -170,25 +175,25 @@ export function MobileTabBar({
           <span
             data-testid="new-output-badge"
             className="absolute top-1 right-1 w-2 h-2 bg-success rounded-full"
-            aria-label="New output available"
+            aria-label={t('tabs.newOutput')}
           />
         )}
         {hasPrompt && (
           <span
             data-testid="prompt-badge"
             className="absolute top-1 right-3 w-2 h-2 bg-warning rounded-full"
-            aria-label="Prompt waiting"
+            aria-label={t('tabs.promptWaiting')}
           />
         )}
       </>
     );
-  }, [hasNewOutput, hasPrompt]);
+  }, [hasNewOutput, hasPrompt, t]);
 
   return (
     <nav
       data-testid="mobile-tab-bar"
       role="tablist"
-      aria-label="Mobile navigation"
+      aria-label={t('tabs.ariaLabel')}
       // Issue #1166: `inFlow` renders the bar as a static bottom flex child so it
       // follows the visualViewport-sized shell above the keyboard; the default
       // keeps the legacy fixed-to-viewport-bottom positioning for other callers.
@@ -206,7 +211,7 @@ export function MobileTabBar({
           data-testid={`mobile-tab-${tab.id}`}
           role="tab"
           aria-selected={activeTab === tab.id}
-          aria-label={tab.label}
+          aria-label={t(tab.labelKey)}
           // Roving tabindex: only the active tab is in the page tab order; the
           // rest are reached with the arrow keys (Issue #1127).
           tabIndex={activeTab === tab.id ? 0 : -1}
@@ -221,13 +226,15 @@ export function MobileTabBar({
             />
           )}
           {tab.icon}
-          <span className="text-xs mt-1">{tab.label}</span>
+          {/* [Issue #1211] whitespace-nowrap: JA labels are wider than EN and
+              must not wrap inside a 320px-wide five-cell bar. */}
+          <span className="text-xs mt-1 whitespace-nowrap">{t(tab.labelKey)}</span>
           {tab.id === 'terminal' && renderBadges}
           {tab.id === 'info' && hasUpdate && (
             <NotificationDot
               data-testid="info-update-badge"
               className="absolute top-1 right-1"
-              aria-label="Update available"
+              aria-label={t('tabs.updateAvailable')}
             />
           )}
         </button>

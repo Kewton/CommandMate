@@ -53,9 +53,12 @@ export interface RealIntlMock {
   NextIntlClientProvider: (props: { children: unknown }) => unknown;
 }
 
+type Translate = (key: string, params?: Record<string, string | number>) => string;
+
 export function createRealIntlMock(locale: string | (() => string)): RealIntlMock {
   const currentLocale = typeof locale === 'function' ? locale : () => locale;
   const cache = new Map<string, Record<string, unknown>>();
+  const translatorCache = new Map<string, Translate>();
 
   const dictFor = (loc: string, namespace: string): Record<string, unknown> => {
     const cacheKey = `${loc}/${namespace}`;
@@ -67,21 +70,38 @@ export function createRealIntlMock(locale: string | (() => string)): RealIntlMoc
     return dict;
   };
 
+  const translatorFor = (loc: string, namespace: string): Translate => {
+    const cacheKey = `${loc}/${namespace}`;
+    let translate = translatorCache.get(cacheKey);
+    if (!translate) {
+      translate = (key, params) => {
+        const value = resolve(dictFor(loc, namespace), key);
+        if (typeof value !== 'string') {
+          throw new Error(`real-intl: ${loc}/${namespace}.json has no string at "${key}"`);
+        }
+        if (!params) return value;
+        return Object.entries(params).reduce(
+          (str, [k, v]) => str.replace(`{${k}}`, String(v)),
+          value
+        );
+      };
+      translatorCache.set(cacheKey, translate);
+    }
+    return translate;
+  };
+
   return {
-    useTranslations: (namespace?: string) => (key, params) => {
-      const loc = currentLocale();
+    // Real `useTranslations` memoizes the translator (use-intl wraps
+    // createBaseTranslator in useMemo), so `t` keeps a stable identity across
+    // renders and is safe to list in useCallback/useEffect deps. Cache per
+    // locale+namespace here so this mock upholds that contract too — minting a
+    // fresh closure per render turns a `[t]` dep into an infinite refetch loop
+    // that only reproduces under the mock.
+    useTranslations: (namespace?: string) => {
       if (!namespace) {
-        throw new Error(`real-intl: useTranslations() requires a namespace (key "${key}")`);
+        throw new Error('real-intl: useTranslations() requires a namespace');
       }
-      const value = resolve(dictFor(loc, namespace), key);
-      if (typeof value !== 'string') {
-        throw new Error(`real-intl: ${loc}/${namespace}.json has no string at "${key}"`);
-      }
-      if (!params) return value;
-      return Object.entries(params).reduce(
-        (str, [k, v]) => str.replace(`{${k}}`, String(v)),
-        value
-      );
+      return translatorFor(currentLocale(), namespace);
     },
     useLocale: () => currentLocale(),
     NextIntlClientProvider: ({ children }) => children,

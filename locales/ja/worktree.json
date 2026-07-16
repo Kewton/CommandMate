@@ -348,5 +348,19 @@
     "mode": "モード:",
     "modeName": "名前",
     "modeContent": "内容"
+  },
+  "tabs": {
+    "ariaLabel": "モバイルナビゲーション",
+    "terminal": "ターミナル",
+    "history": "履歴",
+    "files": "ファイル",
+    "memo": "ツール",
+    "info": "情報",
+    "newOutput": "新しい出力があります",
+    "promptWaiting": "プロンプト待機中",
+    "updateAvailable": "更新があります"
+  },
+  "git": {
+    "uncommittedChanges": "未コミットの変更"
   }
 }

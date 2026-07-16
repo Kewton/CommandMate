@@ -7,11 +7,19 @@
  * Issue #600: UX refresh - Home screen session summary
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import React from 'react';
 import { HomeSessionSummary } from '@/components/home/HomeSessionSummary';
 import type { Worktree } from '@/types/models';
+
+// Issue #1274: this component's wording resolves through the `home` namespace.
+// Back it with the real dictionary so the English assertions prove the keys
+// exist rather than echoing the global mock.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
 
 function createMockWorktree(overrides: Partial<Worktree> = {}): Worktree {
   return {
