@@ -24,7 +24,6 @@ import { useWorktreesCacheContext } from '@/components/providers/WorktreesCacheP
 import { deriveCliStatus } from '@/types/sidebar';
 import { isWorkingStatus } from '@/lib/agent-status-display';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
-import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
 import {
   Input,
@@ -49,11 +48,17 @@ import type { BranchStatus } from '@/types/sidebar';
 // Constants
 // ============================================================================
 
-/** Sort options for Sessions page (includes lastSent, no branchName/updatedAt) [CON-002] */
-const SESSIONS_SORT_OPTIONS: ReadonlyArray<{ key: SortKey; label: string }> = [
-  { key: 'repositoryName', label: 'Repository' },
-  { key: 'status', label: 'Status' },
-  { key: 'lastSent', label: 'Last Sent' },
+/**
+ * Sort options for Sessions page (includes lastSent, no branchName/updatedAt) [CON-002]
+ *
+ * Holds `common.sort.*` keys rather than labels, mirroring SIDEBAR_SORT_OPTIONS:
+ * this is module scope, where t() cannot be called, so a literal would pin the
+ * dropdown to English (Issue #1271/#1305).
+ */
+const SESSIONS_SORT_OPTIONS: ReadonlyArray<{ key: SortKey; labelKey: string }> = [
+  { key: 'repositoryName', labelKey: 'sort.repositoryName' },
+  { key: 'status', labelKey: 'sort.status' },
+  { key: 'lastSent', labelKey: 'sort.lastSent' },
 ];
 
 /** Default directions for Sessions sort keys */
@@ -77,10 +82,18 @@ const DEFAULT_STATUS_PRIORITY = 4;
 // Helpers
 // ============================================================================
 
-/** Small CLI status dot for Sessions list (Issue #1051: shared StatusDot). */
+/**
+ * Small CLI status dot for Sessions list (Issue #1051: shared StatusDot).
+ *
+ * The status half of the title comes from `common.status.*` — the same
+ * dictionary StatusDot resolves internally — rather than the English literals
+ * in status-colors.ts, so the tooltip translates without a second source of
+ * truth for these labels (Issue #1305, following #1277). `label` is the CLI
+ * tool's display name (e.g. "Claude"), a proper noun that is not translated.
+ */
 function CliDot({ status, label }: { status: BranchStatus; label: string }) {
   const tCommon = useTranslations('common');
-  const title = `${label}: ${tCommon(SIDEBAR_STATUS_CONFIG[status].labelKey)}`;
+  const title = `${label}: ${tCommon(`status.${status}`)}`;
   return <StatusDot status={status} size="md" label={title} />;
 }
 
@@ -92,18 +105,28 @@ function isWorktreeActive(wt: Worktree, agents: readonly CLIToolType[]): boolean
   });
 }
 
-/** Status display labels */
-const STATUS_LABELS: Record<string, string> = {
-  ready: 'Ready',
-  in_progress: 'In Progress',
-  in_review: 'In Review',
-  done: 'Done',
+/**
+ * Worktree lifecycle status -> `worktree.worktreeStatus.*` keys.
+ *
+ * Reuses the dictionary WorktreeCard/WorktreeDetail already own instead of
+ * duplicating the labels here (Issue #1305, following #1277). Module scope, so
+ * keys rather than literals (Issue #1271).
+ */
+const STATUS_LABEL_KEYS: Record<string, string> = {
+  ready: 'worktreeStatus.ready',
+  in_progress: 'worktreeStatus.inProgress',
+  in_review: 'worktreeStatus.inReview',
+  done: 'worktreeStatus.done',
 };
 
-/** Format status display label */
-function formatStatus(status: string | null | undefined): string {
+/** Format status display label. Unknown values fall back to the raw status. */
+function formatStatus(
+  status: string | null | undefined,
+  tWorktree: (key: string) => string
+): string {
   if (!status) return '';
-  return STATUS_LABELS[status] ?? status;
+  const labelKey = STATUS_LABEL_KEYS[status];
+  return labelKey ? tWorktree(labelKey) : status;
 }
 
 /** Status badge CSS classes keyed by status value */
@@ -121,6 +144,7 @@ const DEFAULT_BADGE_CLASS = 'bg-muted text-muted-foreground';
 
 export default function SessionsPage() {
   const tCommon = useTranslations('common');
+  const tWorktree = useTranslations('worktree');
   const isMobile = useIsMobile();
   const { worktrees, isLoading, error, refresh } = useWorktreesCacheContext();
   // [Issue #1050] Whether we have any data to keep mounted. Based on the raw
@@ -219,9 +243,9 @@ export default function SessionsPage() {
         className="container-custom py-8 h-full"
       >
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-foreground mb-2">Sessions</h1>
+          <h1 className="text-2xl font-bold text-foreground mb-2">{tCommon('sessions.title')}</h1>
           <p className="text-sm text-muted-foreground">
-            All worktree sessions across repositories.
+            {tCommon('sessions.description')}
           </p>
         </div>
 
@@ -229,12 +253,12 @@ export default function SessionsPage() {
         <div className="mb-6 flex items-center gap-3">
           <Input
             type="text"
-            placeholder="Filter by name or repository..."
+            placeholder={tCommon('sessions.filterPlaceholder')}
             value={filterText}
             onChange={handleFilterChange}
             className="max-w-md flex-1"
             data-testid="sessions-filter"
-            aria-label="Filter sessions by name or repository"
+            aria-label={tCommon('sessions.filterAriaLabel')}
             // Issue #1128: surface the search keyboard + "search" enter key on mobile.
             inputMode="search"
             enterKeyHint="search"
@@ -243,14 +267,14 @@ export default function SessionsPage() {
             <SelectTrigger
               className="w-40"
               data-testid="sessions-sort-select"
-              aria-label="Sort by"
+              aria-label={tCommon('sessions.sortByAriaLabel')}
             >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {SESSIONS_SORT_OPTIONS.map((opt) => (
                 <SelectItem key={opt.key} value={opt.key}>
-                  {opt.label}
+                  {tCommon(opt.labelKey)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -259,7 +283,11 @@ export default function SessionsPage() {
             type="button"
             onClick={toggleSortDirection}
             data-testid="sessions-sort-direction"
-            aria-label={sortDirection === 'asc' ? 'Sort ascending' : 'Sort descending'}
+            aria-label={
+              sortDirection === 'asc'
+                ? tCommon('sessions.sortAscending')
+                : tCommon('sessions.sortDescending')
+            }
             className="rounded-md border border-input bg-surface p-2 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {sortDirection === 'asc' ? (
@@ -289,13 +317,13 @@ export default function SessionsPage() {
                 role="status"
                 data-testid="sessions-error-banner"
               >
-                Failed to refresh sessions: {error.message}
+                {tCommon('sessions.refreshError', { message: error.message })}
               </div>
             )}
             <div className="space-y-2" data-testid="sessions-list">
               {filteredAndSorted.length === 0 ? (
                 <div className="text-muted-foreground py-8 text-center" data-testid="sessions-empty">
-                  No matching sessions found.
+                  {tCommon('sessions.noMatching')}
                 </div>
               ) : (
                 filteredAndSorted.map((wt: Worktree, index: number) => {
@@ -383,7 +411,7 @@ export default function SessionsPage() {
                         <span className={`px-2 py-0.5 text-xs font-medium rounded ${
                           STATUS_BADGE_CLASSES[wt.status ?? ''] ?? DEFAULT_BADGE_CLASS
                         }`}>
-                          {formatStatus(wt.status)}
+                          {formatStatus(wt.status, tWorktree)}
                         </span>
                       </div>
                     )}
@@ -427,7 +455,7 @@ export default function SessionsPage() {
                 className="space-y-2"
                 data-testid="sessions-loading"
                 role="status"
-                aria-label="Loading sessions"
+                aria-label={tCommon('sessions.loadingAriaLabel')}
               >
                 {[0, 1, 2].map((i) => (
                   <div
@@ -451,12 +479,12 @@ export default function SessionsPage() {
             )}
             {!isLoading && error && (
               <div className="text-danger-foreground" data-testid="sessions-error">
-                Failed to load sessions: {error.message}
+                {tCommon('sessions.loadError', { message: error.message })}
               </div>
             )}
             {!isLoading && !error && (
               <div className="text-muted-foreground py-8 text-center" data-testid="sessions-empty">
-                {filterText ? 'No matching sessions found.' : 'No sessions yet.'}
+                {filterText ? tCommon('sessions.noMatching') : tCommon('sessions.empty')}
               </div>
             )}
           </>

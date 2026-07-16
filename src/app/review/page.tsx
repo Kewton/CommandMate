@@ -12,6 +12,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { AppShell } from '@/components/layout';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui';
 import ReviewTab from '@/components/review/ReviewTab';
@@ -20,22 +21,25 @@ import TemplateTab from '@/components/review/TemplateTab';
 
 type PageTab = 'review' | 'report' | 'template';
 
-const PAGE_TABS: Array<{ value: PageTab; label: string }> = [
-  { value: 'review', label: 'Review' },
-  { value: 'report', label: 'Report' },
-  { value: 'template', label: 'Template' },
+// Holds `review.tabs.*` keys rather than labels: t() cannot be called at module
+// scope, so a literal would pin the tabs to English (Issue #1271/#1305).
+const PAGE_TABS: Array<{ value: PageTab; labelKey: string }> = [
+  { value: 'review', labelKey: 'tabs.review' },
+  { value: 'report', labelKey: 'tabs.report' },
+  { value: 'template', labelKey: 'tabs.template' },
 ];
 
 export default function ReviewPage() {
+  const t = useTranslations('review');
   const [pageTab, setPageTab] = useState<PageTab>('review');
 
   return (
     <AppShell>
       <div className="container-custom py-8 overflow-auto h-full">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-foreground mb-2">Review</h1>
+          <h1 className="text-2xl font-bold text-foreground mb-2">{t('page.title')}</h1>
           <p className="text-sm text-muted-foreground">
-            Worktrees that need your attention.
+            {t('page.description')}
           </p>
         </div>
 
@@ -51,7 +55,7 @@ export default function ReviewPage() {
                 value={tab.value}
                 data-testid={`page-tab-${tab.value}`}
               >
-                {tab.label}
+                {t(tab.labelKey)}
               </TabsTrigger>
             ))}
           </TabsList>

@@ -1,7 +1,19 @@
 {
   "sessions": {
     "idleAgents": "アイドル {count} 件",
-    "activeAgents": "稼働 {count} 件"
+    "activeAgents": "稼働 {count} 件",
+    "title": "セッション",
+    "description": "全リポジトリの worktree セッション。",
+    "filterPlaceholder": "名前またはリポジトリで絞り込み...",
+    "filterAriaLabel": "名前またはリポジトリでセッションを絞り込む",
+    "sortByAriaLabel": "並び替え",
+    "sortAscending": "昇順に並び替え",
+    "sortDescending": "降順に並び替え",
+    "loadingAriaLabel": "セッションを読み込み中",
+    "refreshError": "セッションの更新に失敗しました: {message}",
+    "loadError": "セッションの読み込みに失敗しました: {message}",
+    "noMatching": "一致するセッションがありません。",
+    "empty": "セッションがまだありません。"
   },
   "nav": {
     "home": "ホーム",
@@ -105,7 +117,8 @@
     "updatedAt": "更新日時",
     "repositoryName": "リポジトリ",
     "branchName": "ブランチ",
-    "status": "ステータス"
+    "status": "ステータス",
+    "lastSent": "最終送信"
   },
   "branchItem": {
     "cliToolStatus": "CLI ツールのステータス",
@@ -116,5 +129,8 @@
     "offline": "オフライン",
     "reconnectingTooltip": "ライブ接続を再確立しています（ポーリングで動作中）",
     "offlineTooltip": "ライブ接続なし（ポーリングで動作中）"
+  },
+  "meta": {
+    "description": "Claude CLI と tmux セッションによる Git worktree 管理"
   }
 }

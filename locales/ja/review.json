@@ -1,4 +1,13 @@
 {
+  "page": {
+    "title": "レビュー",
+    "description": "対応が必要な worktree。"
+  },
+  "tabs": {
+    "review": "レビュー",
+    "report": "レポート",
+    "template": "テンプレート"
+  },
   "status": {
     "done": "完了",
     "inReview": "レビュー中",
