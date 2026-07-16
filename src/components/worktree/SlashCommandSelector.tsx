@@ -11,6 +11,7 @@ import React, { memo, useState, useEffect, useCallback, useMemo, useRef } from '
 import { useTranslations } from 'next-intl';
 import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
 import { filterCommandGroups } from '@/lib/command-merger';
+import { resolveCommandDescription } from '@/lib/slash-command-format';
 import { SlashCommandList } from './SlashCommandList';
 
 export interface SlashCommandSelectorProps {
@@ -61,10 +62,11 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
   const t = useTranslations('worktree');
   const tCommon = useTranslations('common');
 
-  // Filter groups based on search (uses shared utility - DRY principle)
+  // Filter groups based on search (uses shared utility - DRY principle).
+  // Issue #1306: search the translated description, not the raw descriptionKey.
   const filteredGroups = useMemo(() => {
-    return filterCommandGroups(groups, filter);
-  }, [groups, filter]);
+    return filterCommandGroups(groups, filter, (cmd) => resolveCommandDescription(cmd, t));
+  }, [groups, filter, t]);
 
   // Flat list for keyboard navigation
   const flatCommands = useMemo(() => {

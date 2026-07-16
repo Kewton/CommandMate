@@ -7,7 +7,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { SlashCommandSelector } from '@/components/worktree/SlashCommandSelector';
+import { STANDARD_COMMANDS } from '@/lib/standard-commands';
 import type { SlashCommandGroup } from '@/types/slash-commands';
+
+// Issue #1306: search matches against the *translated* description, so the
+// global key-echoing mock would make the filter assertions meaningless. Back
+// the translator with the real dictionary.
+const locale = vi.hoisted(() => ({ current: 'en' }));
+
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock(() => locale.current);
+});
 
 describe('SlashCommandSelector', () => {
   const mockGroups: SlashCommandGroup[] = [
@@ -51,10 +62,12 @@ describe('SlashCommandSelector', () => {
   const mockOnClose = vi.fn();
 
   beforeEach(() => {
+    locale.current = 'en';
     vi.clearAllMocks();
   });
 
   afterEach(() => {
+    locale.current = 'en';
     vi.clearAllMocks();
   });
 
@@ -336,6 +349,72 @@ describe('SlashCommandSelector', () => {
       );
 
       expect(screen.getByTestId('free-input-button')).toBeInTheDocument();
+    });
+  });
+
+  // Issue #1306: built-in descriptions became keys. Search resolves them before
+  // matching, otherwise these commands would silently stop being findable by
+  // their description text. /doctor is the probe: its name shares no substring
+  // with "Check installation health", so it can only match via the description.
+  describe('Filtering built-in commands by translated description (Issue #1306)', () => {
+    const doctor = STANDARD_COMMANDS.find((cmd) => cmd.name === 'doctor')!;
+    const clear = STANDARD_COMMANDS.find((cmd) => cmd.name === 'clear')!;
+    const standardGroups: SlashCommandGroup[] = [
+      {
+        category: 'standard-util',
+        label: 'Standard (Utility)',
+        commands: [doctor, clear],
+      },
+    ];
+
+    const renderSelector = () =>
+      render(
+        <SlashCommandSelector
+          isOpen={true}
+          groups={standardGroups}
+          onSelect={mockOnSelect}
+          onClose={mockOnClose}
+        />
+      );
+
+    it('should match a built-in command by its translated description', async () => {
+      renderSelector();
+
+      fireEvent.change(screen.getByPlaceholderText(/search/i), {
+        target: { value: 'installation' },
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText('/doctor')).toBeInTheDocument();
+        expect(screen.queryByText('/clear')).not.toBeInTheDocument();
+      });
+    });
+
+    it('should match against the active locale rather than english', async () => {
+      locale.current = 'ja';
+      renderSelector();
+
+      fireEvent.change(screen.getByPlaceholderText(/検索/), {
+        target: { value: 'インストール' },
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText('/doctor')).toBeInTheDocument();
+        expect(screen.queryByText('/clear')).not.toBeInTheDocument();
+      });
+    });
+
+    it('should not expose the raw description key to search', async () => {
+      renderSelector();
+
+      fireEvent.change(screen.getByPlaceholderText(/search/i), {
+        target: { value: 'slashCommands.descriptions' },
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByText('/doctor')).not.toBeInTheDocument();
+        expect(screen.queryByText('/clear')).not.toBeInTheDocument();
+      });
     });
   });
 });

@@ -7,14 +7,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { SlashCommandList } from '@/components/worktree/SlashCommandList';
+import { STANDARD_COMMANDS } from '@/lib/standard-commands';
 import type { SlashCommandGroup } from '@/types/slash-commands';
 
 // Issue #1276: the empty state is dictionary-driven now. The global mock would
 // echo `worktree.slashCommands.empty`, which the /no commands/i assertion below
 // could never match — back it with the real dictionary so the key must resolve.
+// Issue #1306: descriptions resolve here too, so the locale is switchable to
+// prove the rendered text actually follows the dictionary.
+const locale = vi.hoisted(() => ({ current: 'en' }));
+
 vi.mock('next-intl', async () => {
   const { createRealIntlMock } = await import('@tests/helpers/real-intl');
-  return createRealIntlMock('en');
+  return createRealIntlMock(() => locale.current);
 });
 
 describe('SlashCommandList', () => {
@@ -64,10 +69,12 @@ describe('SlashCommandList', () => {
   const mockOnSelect = vi.fn();
 
   beforeEach(() => {
+    locale.current = 'en';
     vi.clearAllMocks();
   });
 
   afterEach(() => {
+    locale.current = 'en';
     vi.clearAllMocks();
   });
 
@@ -147,6 +154,65 @@ describe('SlashCommandList', () => {
       // No items should be highlighted
       const highlightedItems = document.querySelectorAll('[data-highlighted="true"]');
       expect(highlightedItems).toHaveLength(0);
+    });
+  });
+
+  // Issue #1306: built-in command descriptions moved into the dictionary and
+  // are resolved here at render time. These use the real STANDARD_COMMANDS
+  // definitions, so a broken key surfaces as a failing render, not a green test.
+  describe('Built-in command descriptions (Issue #1306)', () => {
+    const clearCommand = STANDARD_COMMANDS.find((cmd) => cmd.name === 'clear')!;
+    const standardGroups: SlashCommandGroup[] = [
+      {
+        category: 'standard-session',
+        label: 'Standard (Session)',
+        commands: [clearCommand],
+      },
+    ];
+
+    it('should render the translated description for a descriptionKey command', () => {
+      render(<SlashCommandList groups={standardGroups} onSelect={mockOnSelect} />);
+
+      expect(screen.getByText('Clear conversation history')).toBeInTheDocument();
+    });
+
+    it('should never leak the raw descriptionKey into the DOM', () => {
+      render(<SlashCommandList groups={standardGroups} onSelect={mockOnSelect} />);
+
+      expect(document.body.textContent).not.toContain('slashCommands.descriptions');
+    });
+
+    it('should follow the active locale', () => {
+      locale.current = 'ja';
+      render(<SlashCommandList groups={standardGroups} onSelect={mockOnSelect} />);
+
+      expect(screen.getByText('会話履歴をクリア')).toBeInTheDocument();
+      expect(screen.queryByText('Clear conversation history')).not.toBeInTheDocument();
+    });
+
+    it('should still render literal descriptions from user-authored commands', () => {
+      // Commands loaded from .md frontmatter are not translatable and keep
+      // their literal text alongside key-based built-ins in the same list.
+      const mixed: SlashCommandGroup[] = [
+        {
+          category: 'standard-session',
+          label: 'Standard (Session)',
+          commands: [
+            clearCommand,
+            {
+              name: 'my-command',
+              description: 'A user authored command',
+              category: 'standard-session',
+              filePath: '.claude/commands/my-command.md',
+            },
+          ],
+        },
+      ];
+
+      render(<SlashCommandList groups={mixed} onSelect={mockOnSelect} />);
+
+      expect(screen.getByText('Clear conversation history')).toBeInTheDocument();
+      expect(screen.getByText('A user authored command')).toBeInTheDocument();
     });
   });
 });
