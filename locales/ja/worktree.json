@@ -561,6 +561,21 @@
       "pop": "ポップ",
       "drop": "破棄",
       "dropConfirmSuffix": " を完全に削除します。この操作は取り消せません。"
+    },
+    "aiPrompts": {
+      "branchCreate": "{base} から {name} ブランチを作成して checkout してください。",
+      "branchCreateBaseHead": "現在の HEAD",
+      "branchDelete": "{name} ブランチを削除してください。",
+      "branchDeleteForce": "{name} ブランチを削除してください。（マージされていないコミットがあっても -D で強制削除してください）",
+      "stashCleanup": "古い stash entry をリストアップし、不要なものを削除する提案をしてください。",
+      "stashCleanupCurrent": "現在の stash:",
+      "stashConflict": "stash の pop / apply で conflict が発生しました。conflict を解決してから commit してください。",
+      "reset": "{target} に対して {mode} reset を行いたいです。安全に実行してください。",
+      "resetHard": "{target} に対して hard reset を行いたいです。安全に実行してください。 hard reset は作業内容を失う可能性があります。もし直前の hard reset を取り消したい場合は git reflog から復旧してください。",
+      "revert": "コミット {commit} を revert してください。",
+      "forcePush": "{branchRef} を force-with-lease で push したいです。事前に upstream（{upstream}）との差分を確認し、安全な場合のみ push してください。",
+      "forcePushAhead": "{branchRef}（↑{ahead}） を force-with-lease で push したいです。事前に upstream（{upstream}）との差分を確認し、安全な場合のみ push してください。",
+      "forcePushCurrentBranch": "現在のブランチ"
     }
   },
   "activityBar": {

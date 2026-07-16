@@ -215,6 +215,21 @@ const REQUIRED: Record<string, string[]> = {
     'git.stash.pop',
     'git.stash.drop',
     'git.stash.dropConfirmSuffix',
+    // Issue #1307: Ask AI draft prompts (src/lib/git-ai-prompt-templates.ts).
+    // The builders pick the key, so a grep of the panels cannot see these.
+    'git.aiPrompts.branchCreate',
+    'git.aiPrompts.branchCreateBaseHead',
+    'git.aiPrompts.branchDelete',
+    'git.aiPrompts.branchDeleteForce',
+    'git.aiPrompts.stashCleanup',
+    'git.aiPrompts.stashCleanupCurrent',
+    'git.aiPrompts.stashConflict',
+    'git.aiPrompts.reset',
+    'git.aiPrompts.resetHard',
+    'git.aiPrompts.revert',
+    'git.aiPrompts.forcePush',
+    'git.aiPrompts.forcePushAhead',
+    'git.aiPrompts.forcePushCurrentBranch',
     'activityBar.toggleSidebar',
     'activityBar.label',
     'branchMismatch.changedFrom',
@@ -297,6 +312,12 @@ const REQUIRED: Record<string, string[]> = {
     'memoSearchPrev',
     'memoSearchNext',
     'memoSearchClose',
+    // Issue #1307: Ask AI draft prompts (src/lib/schedule-ai-prompt-templates.ts).
+    // The builders pick the key, so a grep of the dialog cannot see these.
+    'edit.aiPrompts.cron',
+    'edit.aiPrompts.cronRefine',
+    'edit.aiPrompts.messageDraft',
+    'edit.aiPrompts.messageDraftNamed',
   ],
   common: [
     'connection.reconnecting',
@@ -384,6 +405,19 @@ describe('worktree git/panel i18n keys (Issue #1277)', () => {
     ['worktree', 'card.updated', ['{time}']],
     ['worktree', 'detail.statusPill', ['{label}', '{status}']],
     ['schedule', 'memoRemaining', ['{count}']],
+    // Issue #1307: the Ask AI drafts interpolate context (branch, target, cron
+    // input) mid-sentence, and en/ja order those clauses differently. A locale
+    // that drops a placeholder silently ships a draft missing its context.
+    ['worktree', 'git.aiPrompts.branchCreate', ['{base}', '{name}']],
+    ['worktree', 'git.aiPrompts.branchDelete', ['{name}']],
+    ['worktree', 'git.aiPrompts.branchDeleteForce', ['{name}']],
+    ['worktree', 'git.aiPrompts.reset', ['{target}', '{mode}']],
+    ['worktree', 'git.aiPrompts.resetHard', ['{target}']],
+    ['worktree', 'git.aiPrompts.revert', ['{commit}']],
+    ['worktree', 'git.aiPrompts.forcePush', ['{branchRef}', '{upstream}']],
+    ['worktree', 'git.aiPrompts.forcePushAhead', ['{branchRef}', '{upstream}', '{ahead}']],
+    ['schedule', 'edit.aiPrompts.cronRefine', ['{current}']],
+    ['schedule', 'edit.aiPrompts.messageDraftNamed', ['{name}']],
   ])('%s.%s keeps its placeholders in every locale', (namespace, key, placeholders) => {
     for (const locale of LOCALES) {
       const value = resolve(load(locale, namespace), key) as string;

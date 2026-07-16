@@ -561,6 +561,21 @@
       "pop": "Pop",
       "drop": "Drop",
       "dropConfirmSuffix": " will be permanently deleted. This operation cannot be undone."
+    },
+    "aiPrompts": {
+      "branchCreate": "Create branch {name} from {base} and check it out.",
+      "branchCreateBaseHead": "the current HEAD",
+      "branchDelete": "Delete branch {name}.",
+      "branchDeleteForce": "Delete branch {name}. Force-delete it with -D even if it still has unmerged commits.",
+      "stashCleanup": "List the old stash entries and suggest which ones are safe to drop.",
+      "stashCleanupCurrent": "Current stashes:",
+      "stashConflict": "A conflict occurred while running stash pop / apply. Please resolve the conflict and then commit.",
+      "reset": "I want to run a {mode} reset onto {target}. Please do it safely.",
+      "resetHard": "I want to run a hard reset onto {target}. Please do it safely. A hard reset can discard work in progress. If you need to undo the hard reset afterwards, recover it from git reflog.",
+      "revert": "Please revert commit {commit}.",
+      "forcePush": "I want to push {branchRef} with force-with-lease. Check the diff against its upstream ({upstream}) first, and push only if it is safe.",
+      "forcePushAhead": "I want to push {branchRef} (↑{ahead}) with force-with-lease. Check the diff against its upstream ({upstream}) first, and push only if it is safe.",
+      "forcePushCurrentBranch": "the current branch"
     }
   },
   "activityBar": {

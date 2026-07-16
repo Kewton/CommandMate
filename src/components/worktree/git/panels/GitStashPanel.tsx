@@ -77,7 +77,7 @@ export const GitStashPanel = memo(function GitStashPanel({
           {open && onAskAi && stashes.length > 0 && (
             <AskAiButton
               testId="stash-cleanup-ask-ai"
-              onClick={() => onAskAi(stashCleanupPrompt(stashes))}
+              onClick={() => onAskAi(stashCleanupPrompt(t, stashes))}
             />
           )}
           <button
@@ -112,7 +112,7 @@ export const GitStashPanel = memo(function GitStashPanel({
                 <AskAiButton
                   className="shrink-0"
                   testId="stash-conflict-ask-ai"
-                  onClick={() => onAskAi(stashConflictPrompt(conflictNotice))}
+                  onClick={() => onAskAi(stashConflictPrompt(t, conflictNotice))}
                 />
               )}
             </div>

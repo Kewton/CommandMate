@@ -15,6 +15,15 @@ import {
   type ScheduleEditDialogProps,
 } from '@/components/worktree/schedules/ScheduleEditDialog';
 
+// Issue #1307: the "Ask AI" drafts are now localized, so their assertions check
+// rendered wording. The global mock in tests/setup.ts echoes `schedule.<key>`
+// back and would stay green with the key absent from the dictionary — resolve
+// through the real `en` dictionary instead.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 function renderDialog(overrides: Partial<ScheduleEditDialogProps> = {}) {
   const props: ScheduleEditDialogProps = {
     isOpen: true,
@@ -338,8 +347,8 @@ describe('ScheduleEditDialog', () => {
       fireEvent.click(screen.getByTestId('schedule-cron-ask-ai'));
       expect(onInsertToMessage).toHaveBeenCalledTimes(1);
       // The drafted prompt echoes the current cron input (SSOT builder wiring).
-      expect(onInsertToMessage.mock.calls[0][0]).toContain('0 9 * * *');
-      expect(onInsertToMessage.mock.calls[0][0]).toContain('cron 式');
+      expect(onInsertToMessage.mock.calls[0][0]).toContain('The current input is `0 9 * * *`.');
+      expect(onInsertToMessage.mock.calls[0][0]).toContain('cron expression');
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 
@@ -353,8 +362,8 @@ describe('ScheduleEditDialog', () => {
       });
       fireEvent.click(screen.getByTestId('schedule-message-ask-ai'));
       expect(onInsertToMessage).toHaveBeenCalledTimes(1);
-      expect(onInsertToMessage.mock.calls[0][0]).toContain('daily-review');
-      expect(onInsertToMessage.mock.calls[0][0]).toContain('指示プロンプト');
+      expect(onInsertToMessage.mock.calls[0][0]).toContain('For the schedule `daily-review`');
+      expect(onInsertToMessage.mock.calls[0][0]).toContain('instruction prompt');
       expect(onClose).toHaveBeenCalledTimes(1);
     });
   });
