@@ -12,6 +12,7 @@
 'use client';
 
 import React, { memo } from 'react';
+import { useTranslations } from 'next-intl';
 import { GIT_PANE_TABS, type GitPaneTab } from '@/hooks/useGitPaneTabState';
 
 /** Common props for the inline SVG icons (mirrors the MobileTabBar pattern). */
@@ -48,12 +49,12 @@ const ICON_PATHS: Record<GitPaneTab, string> = {
     'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z',
 };
 
-/** Tab labels (kept here so order matches GIT_PANE_TABS). */
-const TAB_LABELS: Record<GitPaneTab, string> = {
-  status: 'Status',
-  changes: 'Changes',
-  history: 'History',
-  advanced: 'Advanced',
+/** Tab label dictionary keys (kept here so order matches GIT_PANE_TABS). */
+const TAB_LABEL_KEYS: Record<GitPaneTab, string> = {
+  status: 'git.tabs.status',
+  changes: 'git.tabs.changes',
+  history: 'git.tabs.history',
+  advanced: 'git.tabs.advanced',
 };
 
 /** Props for {@link GitPaneMobileTabs}. */
@@ -71,15 +72,17 @@ export const GitPaneMobileTabs = memo(function GitPaneMobileTabs({
   activeTab,
   onTabChange,
 }: GitPaneMobileTabsProps) {
+  const t = useTranslations('worktree');
   return (
     <div
       role="tablist"
-      aria-label="Git pane sections"
+      aria-label={t('git.paneSections')}
       data-testid="git-pane-mobile-tabs"
       className="flex shrink-0 border-b border-border bg-surface sticky top-0 z-30"
     >
       {GIT_PANE_TABS.map((tab) => {
         const isActive = tab === activeTab;
+        const label = t(TAB_LABEL_KEYS[tab]);
         return (
           // Issue #1061: segmented tab (role=tab/aria-selected) — 残置
           <button
@@ -87,7 +90,7 @@ export const GitPaneMobileTabs = memo(function GitPaneMobileTabs({
             type="button"
             role="tab"
             aria-selected={isActive}
-            aria-label={TAB_LABELS[tab]}
+            aria-label={label}
             data-testid={`git-tab-${tab}`}
             onClick={() => onTabChange(tab)}
             className={`flex flex-1 flex-col items-center justify-center gap-1 py-2 px-1 text-xs transition-colors border-b-2 ${
@@ -97,7 +100,7 @@ export const GitPaneMobileTabs = memo(function GitPaneMobileTabs({
             }`}
           >
             <TabIcon path={ICON_PATHS[tab]} />
-            <span>{TAB_LABELS[tab]}</span>
+            <span>{label}</span>
           </button>
         );
       })}

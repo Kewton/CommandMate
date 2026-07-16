@@ -20,10 +20,32 @@ import {
   type PushSubscriptionRecord,
 } from '@/lib/db';
 import { createLogger } from '@/lib/logger';
+import { LOCALE_COOKIE_NAME, resolveLocale } from '@/config/i18n-config';
 
 export const dynamic = 'force-dynamic';
 
 const logger = createLogger('api/push-subscriptions');
+
+/**
+ * The locale to notify this device in (Issue #1308).
+ *
+ * Registration is the last point where a request context exists — the poller
+ * that later sends the push has none — so the reader's language is resolved here
+ * and stored on the row. Uses the same resolver as `src/i18n.ts` so the push
+ * body always matches the language the UI is rendered in.
+ */
+function localeFromRequest(request: Request): string {
+  const cookieHeader = request.headers.get('cookie') ?? '';
+  const cookieLocale = cookieHeader
+    .split(';')
+    .map((part) => part.trim().split('='))
+    .find(([name]) => name === LOCALE_COOKIE_NAME)?.[1];
+
+  return resolveLocale(
+    cookieLocale && decodeURIComponent(cookieLocale),
+    request.headers.get('accept-language')
+  );
+}
 
 /** Public view of a subscription — excludes the encryption keys. */
 function serialize(record: PushSubscriptionRecord) {
@@ -81,7 +103,13 @@ export async function POST(request: Request) {
 
     const deviceLabel = isNonEmptyString(body.deviceLabel) ? body.deviceLabel : null;
 
-    const record = upsertPushSubscription(getDbInstance(), { endpoint, p256dh, auth, deviceLabel });
+    const record = upsertPushSubscription(getDbInstance(), {
+      endpoint,
+      p256dh,
+      auth,
+      deviceLabel,
+      locale: localeFromRequest(request),
+    });
     logger.info('push-subscription-registered');
     return NextResponse.json({ success: true, subscription: serialize(record) }, { status: 201 });
   } catch (error) {

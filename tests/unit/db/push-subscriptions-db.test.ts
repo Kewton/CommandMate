@@ -111,4 +111,52 @@ describe('push-subscriptions-db', () => {
   it('delete returns false when nothing was removed', () => {
     expect(deletePushSubscriptionByEndpoint(db, 'https://push.example/none')).toBe(false);
   });
+
+  // Issue #1308: the sender has no request context, so the locale must survive
+  // on the row for it to notify this device in the right language.
+  describe('locale', () => {
+    it('persists the locale captured at registration', () => {
+      const rec = upsertPushSubscription(db, { ...sub('https://push.example/a'), locale: 'ja' });
+      expect(rec.locale).toBe('ja');
+      expect(getPushSubscriptionByEndpoint(db, 'https://push.example/a')?.locale).toBe('ja');
+    });
+
+    it('stores NULL when no locale is supplied', () => {
+      expect(upsertPushSubscription(db, sub('https://push.example/a')).locale).toBeNull();
+    });
+
+    it('re-subscribing in a new language overwrites the stored locale', () => {
+      upsertPushSubscription(db, { ...sub('https://push.example/a'), locale: 'ja' });
+      const updated = upsertPushSubscription(db, {
+        ...sub('https://push.example/a'),
+        locale: 'en',
+      });
+      expect(updated.locale).toBe('en');
+    });
+
+    it('an unresolved locale does not clobber a stored one', () => {
+      upsertPushSubscription(db, { ...sub('https://push.example/a'), locale: 'ja' });
+      // COALESCE(excluded.locale, existing) — a re-registration that could not
+      // resolve a locale must not silently downgrade the device to the default.
+      const updated = upsertPushSubscription(db, {
+        ...sub('https://push.example/a'),
+        locale: null,
+      });
+      expect(updated.locale).toBe('ja');
+    });
+
+    it('backfills a locale onto a subscription that predates the column', () => {
+      upsertPushSubscription(db, sub('https://push.example/a'));
+      expect(getPushSubscriptionByEndpoint(db, 'https://push.example/a')?.locale).toBeNull();
+
+      const healed = upsertPushSubscription(db, { ...sub('https://push.example/a'), locale: 'ja' });
+      expect(healed.locale).toBe('ja');
+    });
+
+    it('exposes locale through the fan-out queries', () => {
+      upsertPushSubscription(db, { ...sub('https://push.example/a'), locale: 'ja' });
+      expect(getAllPushSubscriptions(db)[0].locale).toBe('ja');
+      expect(getPushSubscriptionsForKind(db, 'prompt')[0].locale).toBe('ja');
+    });
+  });
 });

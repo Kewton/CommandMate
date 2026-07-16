@@ -14,6 +14,15 @@ import { TRUNCATION_TOOLTIP_DELAY_MS } from '@/components/common/TruncationToolt
 import type { TreeItem } from '@/types/models';
 import type { FileMetadataDisplaySettings } from '@/hooks/useFileMetadataDisplay';
 
+// Issue #1275: this file asserts rendered wording (the directory item count),
+// so it must resolve keys through the real dictionary. The global mock in
+// tests/setup.ts echoes `worktree.<key>` back and would keep the assertion
+// green even if the key did not exist.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 const FILE: TreeItem = {
   name: 'app.ts',
   type: 'file',
@@ -98,10 +107,12 @@ describe('TreeNode metadata display [Issue #969]', () => {
       expect(tooltip).toHaveTextContent('app.ts');
       // Size line (formatFileSize(2048) === '2.0 KB')
       expect(tooltip).toHaveTextContent('2.0 KB');
-      // Localized labels resolve via the mocked useTranslations (key passthrough)
-      expect(tooltip).toHaveTextContent('worktree.fileTree.metadata.size');
-      expect(tooltip).toHaveTextContent('worktree.fileTree.metadata.created');
-      expect(tooltip).toHaveTextContent('worktree.fileTree.metadata.modified');
+      // Issue #1275: these now resolve through the real dictionary, so assert
+      // the wording a user actually sees rather than the mock's key echo — a
+      // key-echo assertion passes even when the key is missing from locales/.
+      expect(tooltip).toHaveTextContent('Size:');
+      expect(tooltip).toHaveTextContent('Created:');
+      expect(tooltip).toHaveTextContent('Modified:');
     });
 
     it('does not show a metadata tooltip on directory rows', () => {

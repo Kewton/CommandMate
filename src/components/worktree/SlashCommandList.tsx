@@ -7,8 +7,9 @@
 'use client';
 
 import React from 'react';
+import { useTranslations } from 'next-intl';
 import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
-import { getSlashCommandTrigger } from '@/lib/slash-command-format';
+import { getSlashCommandTrigger, resolveCommandDescription } from '@/lib/slash-command-format';
 
 export interface SlashCommandListProps {
   /** Command groups to display */
@@ -41,13 +42,14 @@ export function SlashCommandList({
   highlightedIndex = -1,
   className = '',
 }: SlashCommandListProps) {
+  const t = useTranslations('worktree');
   // Calculate flat index for each command
   let flatIndex = 0;
 
   if (groups.length === 0) {
     return (
       <div className={`text-sm text-muted-foreground p-4 text-center ${className}`}>
-        No commands available
+        {t('slashCommands.empty')}
       </div>
     );
   }
@@ -89,7 +91,7 @@ export function SlashCommandList({
                     </span>
                   )}
                   <span className="text-muted-foreground text-sm truncate">
-                    {command.description}
+                    {resolveCommandDescription(command, t)}
                   </span>
                 </button>
               );

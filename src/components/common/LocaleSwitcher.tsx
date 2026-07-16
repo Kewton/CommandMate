@@ -6,17 +6,23 @@
  */
 'use client';
 
+import { useTranslations } from 'next-intl';
 import { useLocaleSwitch } from '@/hooks/useLocaleSwitch';
 import { LOCALE_LABELS, SUPPORTED_LOCALES } from '@/config/i18n-config';
 
 export function LocaleSwitcher() {
   const { currentLocale, switchLocale } = useLocaleSwitch();
+  const t = useTranslations('common');
 
   return (
     <select
       value={currentLocale}
       onChange={(e) => switchLocale(e.target.value)}
-      aria-label="Language"
+      // Issue #1273: the aria-label is now translated, so it cannot double as a
+      // test selector — the e2e suite drives this control *after* switching to
+      // Japanese, where the label reads 言語.
+      data-testid="locale-switcher"
+      aria-label={t('language')}
       className="
         w-full px-3 py-2 rounded-md
         bg-sidebar text-sidebar-foreground

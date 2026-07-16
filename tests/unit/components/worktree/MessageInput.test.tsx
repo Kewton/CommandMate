@@ -33,6 +33,15 @@ import {
 // Mocks
 // ---------------------------------------------------------------------------
 
+// Issue #1276: the composer's aria-labels are dictionary-driven now. The
+// Accessibility block below asserts the send button's label is literally
+// "Send message" — under the echoing global mock that would read
+// `worktree.composer.sendMessage` and prove nothing, so use the real dictionary.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 vi.mock('@/lib/api-client', () => ({
   worktreeApi: {
     sendMessage: vi.fn().mockResolvedValue({}),
@@ -446,6 +455,14 @@ describe('MessageInput', () => {
           expect(worktreeApi.sendMessage).toHaveBeenCalled();
         });
 
+        // sendMessage having been *called* does not mean its promise resolved and the
+        // isFreeInputMode reset landed. Wait for the cleared input — opening the selector
+        // while free input mode is still on would suppress it. (Not wrapping the assertion
+        // below in waitFor: that would re-run openSelector and type "/" repeatedly.)
+        await waitFor(() => {
+          expect(getTextarea()).toHaveValue('');
+        });
+
         // After submit, typing '/' should show selector again
         openSelector();
         expect(queryDesktopSelector()).toBeInTheDocument();
@@ -829,8 +846,11 @@ describe('MessageInput', () => {
       typeMessage('queued while busy');
       pressEnter();
 
+      // submitMessage clears the input and fires the toast in the same block after
+      // `await sendMessage`, so a cleared input means the toast call has landed too.
+      // Asserting on sendMessage having merely been *called* would race the resolve.
       await waitFor(() => {
-        expect(worktreeApi.sendMessage).toHaveBeenCalled();
+        expect(getTextarea()).toHaveValue('');
       });
       expect(showToast).toHaveBeenCalledWith(
         expect.stringContaining('Queued (session busy)'),
@@ -853,8 +873,11 @@ describe('MessageInput', () => {
       typeMessage('sent while idle');
       pressEnter();
 
+      // Wait for the cleared input, not for sendMessage having been called: the toast
+      // would fire in the same block as the clear, so this is the point by which a
+      // wrongly-shown toast would exist. Asserting earlier passes vacuously.
       await waitFor(() => {
-        expect(worktreeApi.sendMessage).toHaveBeenCalled();
+        expect(getTextarea()).toHaveValue('');
       });
       expect(showToast).not.toHaveBeenCalled();
     });
@@ -868,8 +891,9 @@ describe('MessageInput', () => {
       typeMessage('no isProcessing prop');
       pressEnter();
 
+      // Same as above: wait for the clear so the negative assertion is not vacuous.
       await waitFor(() => {
-        expect(worktreeApi.sendMessage).toHaveBeenCalled();
+        expect(getTextarea()).toHaveValue('');
       });
       expect(showToast).not.toHaveBeenCalled();
     });

@@ -60,7 +60,7 @@ describe('initCommand', () => {
         }
         return {
           status: 0,
-          stdout: 'v20.0.0',
+          stdout: 'v22.0.0',
           stderr: '',
           pid: 1234,
           output: [],
@@ -80,7 +80,7 @@ describe('initCommand', () => {
     it('should continue when all dependencies are met', async () => {
       vi.mocked(childProcess.spawnSync).mockReturnValue({
         status: 0,
-        stdout: 'v20.0.0',
+        stdout: 'v22.0.0',
         stderr: '',
         pid: 1234,
         output: [],
@@ -105,7 +105,7 @@ describe('initCommand', () => {
     it('should use default values when --defaults is set', async () => {
       vi.mocked(childProcess.spawnSync).mockReturnValue({
         status: 0,
-        stdout: 'v20.0.0',
+        stdout: 'v22.0.0',
         stderr: '',
         pid: 1234,
         output: [],
@@ -134,7 +134,7 @@ describe('initCommand', () => {
     it('should backup existing .env when --force is set', async () => {
       vi.mocked(childProcess.spawnSync).mockReturnValue({
         status: 0,
-        stdout: 'v20.0.0',
+        stdout: 'v22.0.0',
         stderr: '',
         pid: 1234,
         output: [],

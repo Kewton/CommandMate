@@ -10,6 +10,7 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { Card } from '@/components/ui';
 import { HomeSessionSummary } from '@/components/home/HomeSessionSummary';
 import { RecentSessionsList } from '@/components/home/RecentSessionsList';
@@ -28,24 +29,26 @@ export interface SessionOverviewTileProps {
 }
 
 export function SessionOverviewTile({ worktrees, isLoading = false }: SessionOverviewTileProps) {
+  const t = useTranslations('home');
+
   return (
     <Card variant="elevated" className="h-full" data-testid="session-overview-tile">
       <h2 className="mb-3 text-lg font-semibold text-foreground">
-        Session Overview
+        {t('sessionOverview.title')}
       </h2>
 
       <HomeSessionSummary worktrees={worktrees} isLoading={isLoading} />
 
       <div className="mt-4 flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground">
-          Recent sessions
+          {t('sessionOverview.recentSessions')}
         </h3>
         <Link
           href="/sessions"
           className="text-xs text-accent-600 hover:underline dark:text-accent-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
           data-testid="session-overview-view-all"
         >
-          View all
+          {t('sessionOverview.viewAll')}
         </Link>
       </div>
       <div className="mt-2">

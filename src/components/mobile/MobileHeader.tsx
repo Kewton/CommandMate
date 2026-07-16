@@ -10,6 +10,7 @@
 'use client';
 
 import { memo } from 'react';
+import { useTranslations } from 'next-intl';
 import { type WorktreeStatusType } from '@/config/status-colors';
 import { Button } from '@/components/ui';
 import { StatusDot } from '@/components/ui/StatusDot';
@@ -93,6 +94,9 @@ export function MobileHeader({
   onBackClick,
   onMenuClick,
 }: MobileHeaderProps) {
+  const t = useTranslations('common');
+  const tWorktree = useTranslations('worktree');
+
   return (
     <header
       data-testid="mobile-header"
@@ -107,7 +111,7 @@ export function MobileHeader({
               variant="ghost"
               type="button"
               onClick={onBackClick}
-              aria-label="Back"
+              aria-label={t('back')}
               className="p-2 -ml-2 rounded-full hover:bg-muted transition-colors dark:text-foreground"
             >
               <Icon path={ICON_PATHS.back} />
@@ -152,7 +156,7 @@ export function MobileHeader({
                     {truncateString(gitStatus.currentBranch, MOBILE_BRANCH_MAX_LENGTH)}
                   </span>
                   {gitStatus.isDirty && (
-                    <span className="text-warning" title="Uncommitted changes">*</span>
+                    <span className="text-warning" title={tWorktree('git.uncommittedChanges')}>*</span>
                   )}
                 </>
               )}
@@ -167,7 +171,7 @@ export function MobileHeader({
               variant="ghost"
               type="button"
               onClick={onMenuClick}
-              aria-label="Menu"
+              aria-label={t('menu')}
               className="p-2 -mr-2 rounded-full hover:bg-muted transition-colors dark:text-foreground"
             >
               <Icon path={ICON_PATHS.menu} />

@@ -12,6 +12,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
+import { useTranslations } from 'next-intl';
 import { Search } from 'lucide-react';
 import { MAX_MEMOS } from '@/config/memo-config';
 import { memoApi, handleApiError } from '@/lib/api-client';
@@ -52,6 +53,10 @@ export const MemoPane = memo(function MemoPane({
   className = '',
   onInsertToMessage,
 }: MemoPaneProps) {
+  const t = useTranslations('schedule');
+  // Issue #1277: the error-state retry button reuses the shared common label.
+  const tCommon = useTranslations('common');
+
   // State
   const [memos, setMemos] = useState<WorktreeMemo[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -112,7 +117,7 @@ export const MemoPane = memo(function MemoPane({
 
     try {
       const newMemo = await memoApi.create(worktreeId, {
-        title: 'Memo',
+        title: t('memoDefaultTitle'),
         content: '',
       });
       setMemos((prev) => [...prev, newMemo]);
@@ -121,7 +126,7 @@ export const MemoPane = memo(function MemoPane({
     } finally {
       setIsAdding(false);
     }
-  }, [worktreeId]);
+  }, [worktreeId, t]);
 
   /**
    * Handle update memo
@@ -231,7 +236,7 @@ export const MemoPane = memo(function MemoPane({
           className="flex flex-col items-center gap-3"
         >
           <Spinner size="xl" variant="accent" />
-          <span className="text-sm text-muted-foreground">Loading memos...</span>
+          <span className="text-sm text-muted-foreground">{t('memoLoading')}</span>
         </div>
       </div>
     );
@@ -262,10 +267,10 @@ export const MemoPane = memo(function MemoPane({
           <button
             type="button"
             onClick={handleRetry}
-            aria-label="Retry"
+            aria-label={tCommon('retry')}
             className="px-4 py-2 text-sm font-medium text-white bg-accent-500 rounded-lg hover:bg-accent-600 transition-colors"
           >
-            Retry
+            {tCommon('retry')}
           </button>
         </div>
       </div>
@@ -301,7 +306,7 @@ export const MemoPane = memo(function MemoPane({
               type="button"
               data-testid="memo-search-toggle"
               onClick={handleToggleSearch}
-              aria-label="Search memos"
+              aria-label={t('memoSearchToggle')}
               className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded"
             >
               <Search className="w-4 h-4" aria-hidden="true" />
@@ -313,15 +318,15 @@ export const MemoPane = memo(function MemoPane({
       {/* Empty state (only when there are no memos and search is not filtering) */}
       {memos.length === 0 && !isSearchActive && !createError && (
         <div className="text-center py-8 text-muted-foreground">
-          <p>No memos yet.</p>
-          <p className="text-sm">Click the button below to add one.</p>
+          <p>{t('memoEmpty')}</p>
+          <p className="text-sm">{t('memoEmptyHint')}</p>
         </div>
       )}
 
       {/* No-results state while searching */}
       {isSearchActive && displayedMemos.length === 0 && (
         <div className="text-center py-8 text-muted-foreground">
-          <p>No memos match your search.</p>
+          <p>{t('memoNoMatch')}</p>
         </div>
       )}
 

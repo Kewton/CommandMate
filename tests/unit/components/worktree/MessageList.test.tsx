@@ -18,6 +18,15 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock }),
 }));
 
+// Issue #1276: assertions here name rendered wording ("You", "Send", "Session
+// running"). Under the echoing global mock they would pass against
+// `worktree.messages.you` even with the key absent from the dictionary, so back
+// them with the real one — the key must actually resolve to that literal.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 function createMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
   return {
     id: 'msg-1',
@@ -129,7 +138,7 @@ describe('MessageList (Issue #1117 visual unification)', () => {
 
     it('renders awaiting badge with warning tint tokens', () => {
       render(<MessageList messages={[createYesNoPrompt()]} worktreeId="wt-1" />);
-      const badge = screen.getByText('prompt.awaitingSelection');
+      const badge = screen.getByText('Awaiting selection');
       expect(badge.className).toContain('bg-warning-subtle');
       expect(badge.className).toContain('text-warning-foreground');
     });
@@ -143,7 +152,7 @@ describe('MessageList (Issue #1117 visual unification)', () => {
           onOptimisticUpdate={onOptimisticUpdate}
         />
       );
-      fireEvent.click(screen.getByRole('button', { name: /prompt\.yes/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Yes' }));
       await waitFor(() => {
         expect(onOptimisticUpdate).toHaveBeenCalled();
       });
@@ -167,7 +176,7 @@ describe('MessageList (Issue #1117 visual unification)', () => {
         },
       });
       render(<MessageList messages={[answered]} worktreeId="wt-1" />);
-      const box = screen.getByText(/prompt\.answered/).closest('div') as HTMLElement;
+      const box = screen.getByText(/Answered/).closest('div') as HTMLElement;
       expect(box.className).toContain('bg-success-subtle');
       expect(box.className).toContain('text-success-foreground');
     });
@@ -192,12 +201,12 @@ describe('MessageList (Issue #1117 visual unification)', () => {
 
       // Selecting the text-input option shows a textarea instead of sending
       fireEvent.click(screen.getByText('Custom'));
-      const textarea = screen.getByPlaceholderText('prompt.enterMessageHere');
+      const textarea = screen.getByPlaceholderText('Enter message here...');
       expect(textarea).toBeInTheDocument();
       expect(global.fetch).not.toHaveBeenCalled();
 
       // Send button disabled until text entered
-      const sendButton = screen.getByRole('button', { name: 'common.send' });
+      const sendButton = screen.getByRole('button', { name: 'Send' });
       expect(sendButton).toBeDisabled();
       fireEvent.change(textarea, { target: { value: 'my custom answer' } });
       expect(sendButton).not.toBeDisabled();
@@ -241,7 +250,7 @@ describe('MessageList (Issue #1117 visual unification)', () => {
           realtimeOutput="building project..."
         />
       );
-      expect(screen.getByText('worktree.session.running')).toBeInTheDocument();
+      expect(screen.getByText('Session running')).toBeInTheDocument();
       expect(screen.getByText('building project...')).toBeInTheDocument();
       expect(container.innerHTML).not.toMatch(RAW_PALETTE_PATTERN);
     });
@@ -255,7 +264,7 @@ describe('MessageList (Issue #1117 visual unification)', () => {
           isThinking
         />
       );
-      expect(screen.getByText('worktree.status.thinking')).toBeInTheDocument();
+      expect(screen.getByText('Thinking...')).toBeInTheDocument();
       expect(container.innerHTML).not.toMatch(RAW_PALETTE_PATTERN);
     });
   });

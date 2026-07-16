@@ -9,6 +9,7 @@
 'use client';
 
 import React, { useState, useCallback, useEffect, useRef, useMemo, memo } from 'react';
+import { useTranslations } from 'next-intl';
 
 // ============================================================================
 // Types
@@ -147,6 +148,7 @@ export const PaneResizer = memo(function PaneResizer({
   onDoubleClick,
   minRatio: _minRatio = 0.1,
 }: PaneResizerProps) {
+  const t = useTranslations('worktree');
   const [isDragging, setIsDragging] = useState(false);
   const startPositionRef = useRef<number>(0);
   const resizerRef = useRef<HTMLDivElement>(null);
@@ -298,7 +300,11 @@ export const PaneResizer = memo(function PaneResizer({
       aria-valuenow={ariaValueNow}
       aria-valuemin={0}
       aria-valuemax={100}
-      aria-label={`Resize panes. Use ${isHorizontal ? 'left and right' : 'up and down'} arrow keys to adjust.`}
+      aria-label={t('paneResizer.label', {
+        arrows: isHorizontal
+          ? t('paneResizer.arrowsHorizontal')
+          : t('paneResizer.arrowsVertical'),
+      })}
       tabIndex={0}
       className={className}
       onMouseDown={handleMouseDown}

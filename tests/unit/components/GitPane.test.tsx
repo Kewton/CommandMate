@@ -8,20 +8,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { GitPane } from '@/components/worktree/GitPane';
-import {
-  CHECKOUT_HISTORY_LOSS_WARNING,
-  CHECKOUT_RUNNING_SESSION_WARNING,
-  RESET_HARD_HISTORY_LOSS_WARNING,
-  PUSH_AUTH_FAILED_GUIDANCE,
-} from '@/config/git-status-config';
-// Issue #817: SSOT prompt builders — imported so the "Ask AI" wiring tests
-// assert the right builder/context without duplicating the ja wording here.
-import {
-  branchCreatePrompt,
-  branchDeletePrompt,
-  resetPrompt,
-  revertPrompt,
-} from '@/lib/git-ai-prompt-templates';
+// Issue #1307: the "Ask AI" drafts are localized, and this file renders under
+// the real `en` dictionary — so these tests assert the literal English draft.
+// Rebuilding the expectation from the same builder (the #817 approach) could no
+// longer tell an English draft from a Japanese one, which is the whole bug.
+// The wording itself is pinned in tests/unit/lib/git-ai-prompt-templates.test.ts.
+
+// Issue #1277: GitPane now localizes the network-op failure guidance at the
+// render site (the hook reports `errorReason`; the wording comes from the
+// dictionary). These assertions check rendered wording, so resolve keys through
+// the real dictionary — the global mock in tests/setup.ts echoes
+// `worktree.<key>` back and would stay green even for a nonexistent key.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
 
 // ----------------------------------------------------------------------------
 // URL-discriminating fetch mock (Issue #779 hard gate)
@@ -836,10 +837,12 @@ describe('GitPane', () => {
   // Issue #781: Branches section (list / checkout / create / delete)
   // --------------------------------------------------------------------------
   describe('Branches (Issue #781)', () => {
-    // S3-001 history-loss warning text (Japanese) that MUST appear in the checkout
-    // confirm dialog. Imported from the single source of truth so this assertion
-    // tracks the component verbatim (no drift between a test-local copy and the UI).
-    const HISTORY_LOSS_TEXT = CHECKOUT_HISTORY_LOSS_WARNING;
+    // S3-001 history-loss warning text that MUST appear in the checkout confirm
+    // dialog. Issue #1277: this was a hardcoded ja constant (shown to en users
+    // too); it now resolves through locales/en/worktree.json via the real-intl
+    // mock above, so this literal proves the key exists AND renders verbatim.
+    const HISTORY_LOSS_TEXT =
+      'Switching to another branch may permanently discard the chat history, memos, and schedules linked to this worktree on the next sync.';
 
     it('self-fetches /git/branches on mount', async () => {
       render(<GitPane {...defaultProps} />);
@@ -894,7 +897,7 @@ describe('GitPane', () => {
 
       await waitFor(() => {
         expect(screen.getByTestId('branch-session-warning')).toHaveTextContent(
-          CHECKOUT_RUNNING_SESSION_WARNING
+          'Switching to this branch changes the working files a running session is operating on.'
         );
       });
     });
@@ -1314,7 +1317,7 @@ describe('GitPane', () => {
       // Switch to hard mode -> warnings + confirm input appear.
       fireEvent.click(screen.getByTestId('reset-mode-hard'));
       expect(screen.getByTestId('reset-hard-history-loss-warning')).toHaveTextContent(
-        RESET_HARD_HISTORY_LOSS_WARNING
+        'A hard reset permanently discards uncommitted changes, and moving HEAD may also lose commits. This operation cannot be undone.'
       );
       expect(screen.getByTestId('reset-hard-branch-input')).toBeInTheDocument();
     });
@@ -1517,6 +1520,12 @@ describe('GitPane', () => {
       render(<GitPane {...defaultProps} />);
       await waitFor(() => expect(screen.getByTestId('git-push-button')).toBeInTheDocument());
 
+      // The toggle is rendered from /git/staged, which resolves independently of the
+      // /git/status fetch the push button waits on — wait for it before asserting.
+      await waitFor(() =>
+        expect(screen.getByTestId('git-changes-toggle-button')).toBeInTheDocument()
+      );
+
       // The staged file's Unstage toggle is enabled (busy=false) initially.
       const toggleBefore = screen.getByTestId('git-changes-toggle-button');
       expect(toggleBefore).not.toBeDisabled();
@@ -1568,6 +1577,11 @@ describe('GitPane', () => {
       // Spinner appears (fetch in-flight) but the Unstage toggle stays enabled.
       await waitFor(() =>
         expect(screen.getByTestId('git-network-operation-spinner')).toBeInTheDocument()
+      );
+      // Same race as above: the toggle comes from /git/staged, not from the fetch
+      // the spinner tracks, so its presence must be awaited before asserting on it.
+      await waitFor(() =>
+        expect(screen.getByTestId('git-changes-toggle-button')).toBeInTheDocument()
       );
       expect(screen.getByTestId('git-changes-toggle-button')).not.toBeDisabled();
 
@@ -1640,8 +1654,10 @@ describe('GitPane', () => {
       });
       fireEvent.click(screen.getByTestId('git-push-button'));
       await waitFor(() => {
+        // Issue #1277: the guidance is now localized at the GitPane render site
+        // (previously a hardcoded ja constant shown to en users too).
         expect(screen.getByTestId('git-network-operation-error')).toHaveTextContent(
-          PUSH_AUTH_FAILED_GUIDANCE
+          'Run push/pull once in the terminal to set up your credentials.'
         );
       });
     });
@@ -2163,7 +2179,9 @@ describe('GitPane', () => {
       fireEvent.click(screen.getByTestId('branch-create-ask-ai'));
 
       expect(onInsertToMessage).toHaveBeenCalledTimes(1);
-      expect(onInsertToMessage).toHaveBeenCalledWith(branchCreatePrompt('feature/created', ''));
+      expect(onInsertToMessage).toHaveBeenCalledWith(
+        'Create branch `feature/created` from the current HEAD and check it out.'
+      );
       // Modal closed; the create API was NOT called (delegated to the agent).
       expect(screen.queryByTestId('branch-create-name-input')).not.toBeInTheDocument();
       expect(postedTo('/git/branch/create')).toBe(false);
@@ -2215,7 +2233,7 @@ describe('GitPane', () => {
 
       fireEvent.click(screen.getByTestId('branch-delete-ask-ai'));
 
-      expect(onInsertToMessage).toHaveBeenCalledWith(branchDeletePrompt('feature/old', false));
+      expect(onInsertToMessage).toHaveBeenCalledWith('Delete branch `feature/old`.');
       expect(screen.queryByTestId('branch-delete-ask-ai')).not.toBeInTheDocument();
       expect(postedTo('/git/branch/delete')).toBe(false);
     });
@@ -2240,7 +2258,7 @@ describe('GitPane', () => {
 
       expect(onInsertToMessage).toHaveBeenCalledTimes(1);
       const inserted = onInsertToMessage.mock.calls[0][0] as string;
-      expect(inserted).toContain('古い stash entry');
+      expect(inserted).toContain('List the old stash entries');
       expect(inserted).toContain('stash@{0}: WIP on main: a');
     });
 
@@ -2279,7 +2297,7 @@ describe('GitPane', () => {
       fireEvent.click(screen.getByTestId('stash-conflict-ask-ai'));
 
       const inserted = onInsertToMessage.mock.calls[0][0] as string;
-      expect(inserted).toContain('conflict を解決してから commit してください。');
+      expect(inserted).toContain('Please resolve the conflict and then commit.');
       expect(inserted).toContain('a.ts');
     });
 
@@ -2294,7 +2312,9 @@ describe('GitPane', () => {
       // Default target HEAD + mixed mode.
       fireEvent.click(screen.getByTestId('reset-ask-ai'));
 
-      expect(onInsertToMessage).toHaveBeenCalledWith(resetPrompt('mixed', 'HEAD'));
+      expect(onInsertToMessage).toHaveBeenCalledWith(
+        'I want to run a mixed reset onto `HEAD`. Please do it safely.'
+      );
       expect(screen.queryByTestId('reset-confirm')).not.toBeInTheDocument();
       expect(postedTo('/git/reset')).toBe(false);
     });
@@ -2311,7 +2331,7 @@ describe('GitPane', () => {
       fireEvent.click(screen.getByTestId('reset-ask-ai'));
 
       const inserted = onInsertToMessage.mock.calls[0][0] as string;
-      expect(inserted).toContain('git reflog から復旧');
+      expect(inserted).toContain('recover it from git reflog');
       expect(postedTo('/git/reset')).toBe(false);
     });
 
@@ -2339,7 +2359,7 @@ describe('GitPane', () => {
 
       fireEvent.click(screen.getByTestId('revert-ask-ai'));
 
-      expect(onInsertToMessage).toHaveBeenCalledWith(revertPrompt('abc1234def'));
+      expect(onInsertToMessage).toHaveBeenCalledWith('Please revert commit `abc1234`.');
       expect(postedTo('/git/revert')).toBe(false);
     });
 

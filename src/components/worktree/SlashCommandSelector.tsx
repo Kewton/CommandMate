@@ -8,8 +8,10 @@
 'use client';
 
 import React, { memo, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useTranslations } from 'next-intl';
 import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
 import { filterCommandGroups } from '@/lib/command-merger';
+import { resolveCommandDescription } from '@/lib/slash-command-format';
 import { SlashCommandList } from './SlashCommandList';
 
 export interface SlashCommandSelectorProps {
@@ -57,11 +59,14 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
   const [filter, setFilter] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const t = useTranslations('worktree');
+  const tCommon = useTranslations('common');
 
-  // Filter groups based on search (uses shared utility - DRY principle)
+  // Filter groups based on search (uses shared utility - DRY principle).
+  // Issue #1306: search the translated description, not the raw descriptionKey.
   const filteredGroups = useMemo(() => {
-    return filterCommandGroups(groups, filter);
-  }, [groups, filter]);
+    return filterCommandGroups(groups, filter, (cmd) => resolveCommandDescription(cmd, t));
+  }, [groups, filter, t]);
 
   // Flat list for keyboard navigation
   const flatCommands = useMemo(() => {
@@ -152,11 +157,11 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
         >
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-            <h2 className="text-lg font-semibold text-foreground">Commands</h2>
+            <h2 className="text-lg font-semibold text-foreground">{t('slashCommands.title')}</h2>
             <button
               type="button"
               onClick={onClose}
-              aria-label="Close"
+              aria-label={tCommon('close')}
               className="p-2 rounded-full hover:bg-muted"
             >
               <svg
@@ -182,7 +187,7 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
               type="text"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
-              placeholder="Search commands..."
+              placeholder={t('slashCommands.searchPlaceholder')}
               className="w-full px-3 py-2 border border-input bg-surface dark:bg-surface-2 text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
@@ -200,7 +205,7 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                 </svg>
               </span>
-              <span className="text-muted-foreground">Enter custom command...</span>
+              <span className="text-muted-foreground">{t('slashCommands.enterCustomCommand')}</span>
             </button>
           )}
 
@@ -230,7 +235,7 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
           type="text"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="Search commands..."
+          placeholder={t('slashCommands.searchPlaceholder')}
           className="w-full px-3 py-1.5 text-sm border border-input bg-surface dark:bg-surface-2 text-foreground rounded focus:outline-none focus:ring-1 focus:ring-ring"
         />
       </div>
@@ -248,7 +253,7 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
             </svg>
           </span>
-          <span className="text-muted-foreground">Enter custom command...</span>
+          <span className="text-muted-foreground">{t('slashCommands.enterCustomCommand')}</span>
         </button>
       )}
 
@@ -263,10 +268,10 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
       {/* Keyboard hints */}
       <div className="px-3 py-1.5 border-t border-border text-xs text-muted-foreground flex gap-3">
         <span>
-          <kbd className="px-1 py-0.5 bg-muted rounded">Enter</kbd> select
+          <kbd className="px-1 py-0.5 bg-muted rounded">Enter</kbd> {t('slashCommands.selectHint')}
         </span>
         <span>
-          <kbd className="px-1 py-0.5 bg-muted rounded">Esc</kbd> close
+          <kbd className="px-1 py-0.5 bg-muted rounded">Esc</kbd> {t('slashCommands.closeHint')}
         </span>
       </div>
     </div>

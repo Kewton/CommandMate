@@ -69,7 +69,7 @@ gh --version
 gh auth login
 ```
 
-### Install Node.js (v20+)
+### Install Node.js (v22+)
 
 > **Note:** Ubuntu's default `apt` repository ships an outdated Node.js.
 > If you already have an old version installed via `apt`, remove it first:
@@ -208,6 +208,8 @@ NODE_MODULE_VERSION 115.
 ```
 
 **原因:** `nvm` でNode.jsバージョンを切り替えた後、ネイティブモジュールが古いバージョン向けのまま残っている。
+
+**通常は自動で復旧します（Issue #1263）**: DB接続時にこのエラーを検知すると `npm rebuild better-sqlite3` を自動実行して処理を継続します。自動復旧に失敗した場合のみ、以下を手動で実行してください。
 
 **解決方法:**
 

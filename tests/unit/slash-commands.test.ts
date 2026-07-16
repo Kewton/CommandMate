@@ -343,7 +343,7 @@ describe('filterCommands', () => {
     // All filtered commands should contain 'work' in name or description
     filtered.forEach((cmd) => {
       const matchesName = cmd.name.toLowerCase().includes('work');
-      const matchesDescription = cmd.description.toLowerCase().includes('work');
+      const matchesDescription = (cmd.description ?? '').toLowerCase().includes('work');
       expect(matchesName || matchesDescription).toBe(true);
     });
   });
@@ -547,7 +547,8 @@ describe('loadSkills', () => {
       // Name should be truncated to MAX_SKILL_NAME_LENGTH (100)
       expect(skills[0].name.length).toBeLessThanOrEqual(100);
       // Description should be truncated to MAX_SKILL_DESCRIPTION_LENGTH (500)
-      expect(skills[0].description.length).toBeLessThanOrEqual(500);
+      expect(skills[0].description).toBeDefined();
+      expect(skills[0].description?.length).toBeLessThanOrEqual(500);
     } finally {
       fs.rmSync(testDir, { recursive: true, force: true });
     }

@@ -11,6 +11,7 @@
 
 import React, { useMemo } from 'react';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { Skeleton } from '@/components/ui';
 import { compareByTimestamp } from '@/lib/sidebar-utils';
 import { formatRelativeTimeShort } from '@/lib/date-utils';
@@ -42,6 +43,8 @@ function statusDotClass(wt: Worktree): string {
 }
 
 export function RecentSessionsList({ worktrees, limit = 5, isLoading = false }: RecentSessionsListProps) {
+  const t = useTranslations('home');
+
   const recent = useMemo(() => {
     return [...worktrees]
       .sort((a, b) => compareByTimestamp(recencyOf(a), recencyOf(b)))
@@ -56,7 +59,7 @@ export function RecentSessionsList({ worktrees, limit = 5, isLoading = false }: 
         className="space-y-1"
         data-testid="recent-sessions-loading"
         role="status"
-        aria-label="Loading recent sessions"
+        aria-label={t('recentSessions.loading')}
       >
         {Array.from({ length: limit }, (_, i) => (
           <li key={i} className="flex items-center gap-2 rounded-md px-2 py-1.5">
@@ -73,13 +76,24 @@ export function RecentSessionsList({ worktrees, limit = 5, isLoading = false }: 
   }
 
   if (recent.length === 0) {
+    // Issue #1199: the empty list always means zero repositories — `repositories`
+    // is derived from the worktrees table — so the CTA has a single destination.
     return (
-      <p
-        className="text-sm text-muted-foreground"
-        data-testid="recent-sessions-empty"
-      >
-        No recent sessions yet.
-      </p>
+      <div className="space-y-2">
+        <p
+          className="text-sm text-muted-foreground"
+          data-testid="recent-sessions-empty"
+        >
+          {t('recentSessions.empty')}
+        </p>
+        <Link
+          href="/repositories"
+          data-testid="recent-sessions-cta"
+          className="inline-block text-sm font-medium text-accent-600 transition-colors hover:text-accent-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-accent-400 dark:hover:text-accent-300"
+        >
+          {t('recentSessions.cta')}
+        </Link>
+      </div>
     );
   }
 

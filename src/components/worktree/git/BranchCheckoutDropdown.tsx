@@ -12,11 +12,8 @@
 'use client';
 
 import React, { memo, useCallback, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import type { BranchInfo } from '@/types/git';
-import {
-  CHECKOUT_HISTORY_LOSS_WARNING,
-  CHECKOUT_RUNNING_SESSION_WARNING,
-} from '@/config/git-status-config';
 import { Button, Checkbox } from '@/components/ui';
 
 interface BranchCheckoutDropdownProps {
@@ -44,6 +41,8 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
   isMobile,
   onCheckout,
 }: BranchCheckoutDropdownProps) {
+  const t = useTranslations('worktree');
+  const tCommon = useTranslations('common');
   const [menuOpen, setMenuOpen] = useState(false);
   const [checkoutTarget, setCheckoutTarget] = useState<BranchInfo | null>(null);
   const [checkoutForce, setCheckoutForce] = useState(false);
@@ -74,9 +73,9 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
         data-testid="branch-checkout-dropdown-toggle"
         aria-haspopup="menu"
         aria-expanded={menuOpen}
-        aria-label="Checkout branch"
+        aria-label={t('git.checkout.ariaLabel')}
       >
-        Checkout
+        {t('git.checkout.action')}
         <span aria-hidden="true" className="text-[10px]">▾</span>
       </Button>
 
@@ -87,7 +86,7 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
           data-testid="branch-checkout-menu"
         >
           {options.length === 0 ? (
-            <div className="px-3 py-1.5 text-xs text-muted-foreground">No branches</div>
+            <div className="px-3 py-1.5 text-xs text-muted-foreground">{t('git.checkout.noBranches')}</div>
           ) : (
             <ul className="divide-y divide-border">
               {options.map((branch) => {
@@ -101,16 +100,20 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
                       onClick={() => openCheckout(branch)}
                       disabled={busy || checkedOutElsewhere}
                       className="w-full text-left px-3 py-1.5 font-mono text-xs text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                      aria-label={`Checkout ${branch.name}`}
+                      aria-label={t('git.checkout.checkoutBranch', { name: branch.name })}
                       title={
                         checkedOutElsewhere
-                          ? `Checked out in another worktree: ${branch.checkedOutWorktreePath}`
+                          ? t('git.checkout.checkedOutElsewhere', {
+                              path: branch.checkedOutWorktreePath ?? '',
+                            })
                           : undefined
                       }
                     >
                       {branch.name}
                       {branch.isDefault && (
-                        <span className="ml-1.5 text-[10px] text-muted-foreground">default</span>
+                        <span className="ml-1.5 text-[10px] text-muted-foreground">
+                          {t('git.checkout.defaultBadge')}
+                        </span>
                       )}
                     </button>
                   </li>
@@ -141,7 +144,9 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
         >
           <div className="w-full max-w-md rounded-lg bg-surface p-4 shadow-xl flex flex-col gap-3">
             <h3 className="text-sm font-medium text-foreground">
-              Checkout <span className="font-mono">{checkoutTarget.name}</span>?
+              {t('git.checkout.confirmTitlePrefix')}
+              <span className="font-mono">{checkoutTarget.name}</span>
+              {t('git.checkout.confirmTitleSuffix')}
             </h3>
 
             {/* S3-001: history-loss warning (verified verbatim by acceptance test). */}
@@ -150,7 +155,7 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
               role="alert"
               data-testid="branch-history-loss-warning"
             >
-              {CHECKOUT_HISTORY_LOSS_WARNING}
+              {t('git.checkout.historyLossWarning')}
             </div>
 
             {/* S3-002: running-session warning. */}
@@ -160,7 +165,7 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
                 role="alert"
                 data-testid="branch-session-warning"
               >
-                {CHECKOUT_RUNNING_SESSION_WARNING}
+                {t('git.checkout.runningSessionWarning')}
               </div>
             )}
 
@@ -170,7 +175,7 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
                 onCheckedChange={(checked) => setCheckoutForce(checked === true)}
                 data-testid="branch-checkout-force"
               />
-              Discard uncommitted changes (force) — 未コミットの変更は失われます
+              {t('git.checkout.forceLabel')}
             </label>
 
             <div className={`flex items-center justify-end gap-2 ${isMobile ? 'flex-wrap' : ''}`}>
@@ -180,7 +185,7 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
                 onClick={() => setCheckoutTarget(null)}
                 className="px-3 py-1 text-xs rounded border border-input text-foreground hover:bg-muted"
               >
-                Cancel
+                {tCommon('cancel')}
               </Button>
               <Button
                 variant="ghost"
@@ -190,7 +195,7 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
                 className="px-3 py-1 text-xs font-medium rounded bg-accent-600 text-white hover:bg-accent-700 disabled:opacity-50"
                 data-testid="branch-checkout-confirm-button"
               >
-                Checkout
+                {t('git.checkout.action')}
               </Button>
             </div>
           </div>

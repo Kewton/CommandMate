@@ -21,11 +21,10 @@
 
 | ツール | バージョン | 必須 | 確認コマンド |
 |--------|----------|------|------------|
-| Node.js | v20+ | ✓ | `node -v` |
+| Node.js | v22+ | ✓ | `node -v` |
 | npm | - | ✓ | `npm -v` |
 | Git | - | ✓ | `git --version` |
 | tmux | - | ✓ | `tmux -V` |
-| openssl | - | ✓ | `openssl version` |
 | Claude CLI | - | △ | `claude --version` |
 
 ## セットアップ手順
@@ -160,6 +159,24 @@ npm run build
 | `CM_LOG_FORMAT` | ログフォーマット | `json` |
 
 > **Note**: 旧名称（`MCBD_*`）も後方互換性のためサポートされています。詳細は `.env.example` を参照してください。
+
+#### `CM_DB_PATH` の解決順序と制約
+
+`CM_DB_PATH` は環境変数として読まれます（`.env` に書く場合と等価です。dotenv が `.env` を
+プロセス環境に読み込むためで、どちらか一方だけが効くということはありません）。
+
+1. `CM_DB_PATH`（旧名 `MCBD_DB_PATH` も可）
+2. `DATABASE_PATH`（非推奨。警告を出力）
+3. インストール種別ごとの既定値（上表）
+
+指定できる場所には制限があります（SEC-001）:
+
+- グローバルインストール: ホームディレクトリ配下であること
+- ローカルインストール: `/etc` `/usr` `/bin` `/sbin` `/var` `/tmp` `/dev` `/sys` `/proc` の外であること
+
+制限を外れた `CM_DB_PATH` は**起動時にエラーで停止**します。既定値へ黙って差し替えることはしません
+（差し替えると、指定したものとは別の DB をサーバーが開いてしまうため）。`/tmp` に隔離用 DB を
+置くことはできないので、`$HOME` 配下や作業ディレクトリ配下を使ってください。
 
 ## ビルドとデプロイ
 
@@ -361,6 +378,30 @@ chmod 644 data/db.sqlite
 
 ### npm グローバルインストールの場合
 
+`commandmate update` が停止 → 更新 → 再起動 → 応答確認までを実行します。
+
+```bash
+# 更新の有無を確認（何も変更しない）
+commandmate update --check
+
+# 更新（確認プロンプトあり）
+commandmate update
+
+# 非対話環境（CI・スクリプト等）では --yes が必須
+commandmate update --yes
+```
+
+**注意事項**:
+
+- 再起動後は `.env` の設定のみで起動します。`--auth` / `--cert` / `--key` / `--allowed-ips` / `--trust-proxy` / `--port` などを付けて起動していた場合は、update 後に手動で起動し直してください（`--auth` は起動のたびに新しいトークンが生成されます）。
+- worktree 用サーバー（`--issue`）は自動停止されません。update **前**に `commandmate stop --issue <number>` で停止してください（稼働中の場合は警告が表示されます）。
+- 権限エラー（EACCES）時は `sudo` で再実行せず、[CLIセットアップガイド](./user-guide/cli-setup-guide.md#権限エラーeacces) の手順で npm のグローバルディレクトリ権限を修正します。
+- 終了コード: `0` 成功/スキップ、`2` 非対話環境で `--yes` 無し、`3` 再起動後の確認失敗、`4` 停止失敗（未変更）、`5` 更新失敗。
+
+#### 手動アップデート（fallback）
+
+`commandmate update` が使えない場合:
+
 ```bash
 # サーバー停止
 commandmate stop
@@ -374,6 +415,8 @@ commandmate start --daemon
 
 ### 開発環境（git clone）の場合
 
+グローバルインストールではないため、`commandmate update` は更新を実行せず手動手順を案内して終了します。
+
 ```bash
 # 最新コードの取得
 git pull origin main
@@ -381,8 +424,8 @@ git pull origin main
 # 依存関係の更新
 npm install
 
-# ビルド
-npm run build
+# ビルド（Next.js + CLI + サーバー）
+npm run build:all
 
 # PM2使用時
 pm2 restart commandmate
@@ -390,6 +433,8 @@ pm2 restart commandmate
 # Systemd使用時
 sudo systemctl restart commandmate
 ```
+
+> **注意**: `npm run build` は Next.js のビルドのみです。PM2 / Systemd はいずれも `npm start`（= `node dist/server/server.js`）を実行するため、`npm run build:all` でサーバー本体（`dist/server`）と CLI（`dist/cli`）も更新してください。
 
 ## バックアップ
 

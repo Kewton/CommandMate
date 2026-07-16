@@ -266,6 +266,11 @@ commandmate start --daemon    # バックグラウンド
 commandmate stop
 commandmate status
 
+# 更新（グローバルインストール時: 停止 → npm install -g → 再起動、Issue #1194）
+commandmate update            # 確認プロンプトつきで更新
+commandmate update --check    # 更新の有無を表示するのみ（変更しない）
+commandmate update --yes      # 確認スキップ（非対話環境では必須。無い場合 exit 2）
+
 # Worktree並列開発（Issue #136）
 commandmate start --issue 135 --auto-port  # Issue #135用サーバー起動（自動ポート割当）
 commandmate start --issue 135 --port 3135  # 特定ポートで起動

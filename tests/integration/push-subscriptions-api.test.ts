@@ -78,6 +78,72 @@ describe('push subscriptions API', () => {
     expect(getAllPushSubscriptions(db)).toHaveLength(1);
   });
 
+  /**
+   * Issue #1308 — registration is the only place a request context exists, so
+   * this is where the reader's language has to be captured. These tests run the
+   * real route against a real DB and then build the real payload, which is the
+   * end-to-end claim the acceptance criteria make ("subscribe in English -> an
+   * English body arrives").
+   */
+  describe('locale capture', () => {
+    function requestWith(headers: Record<string, string>) {
+      return new Request(BASE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify(validSubscription),
+      });
+    }
+
+    async function register(headers: Record<string, string>) {
+      const { POST } = await import('@/app/api/push/subscriptions/route');
+      const res = await POST(requestWith(headers));
+      expect(res.status).toBe(201);
+      return getAllPushSubscriptions(db)[0];
+    }
+
+    it('stores the locale cookie', async () => {
+      expect((await register({ cookie: 'locale=ja' })).locale).toBe('ja');
+    });
+
+    it('prefers the locale cookie over Accept-Language', async () => {
+      const rec = await register({ cookie: 'locale=ja', 'accept-language': 'en-US,en;q=0.9' });
+      expect(rec.locale).toBe('ja');
+    });
+
+    it('picks the cookie out from among other cookies', async () => {
+      const rec = await register({ cookie: 'auth_token=abc; locale=ja; theme=dark' });
+      expect(rec.locale).toBe('ja');
+    });
+
+    it('falls back to Accept-Language when no cookie is set', async () => {
+      expect((await register({ 'accept-language': 'ja-JP,ja;q=0.9' })).locale).toBe('ja');
+    });
+
+    it('ignores an unsupported cookie locale', async () => {
+      expect((await register({ cookie: 'locale=fr' })).locale).toBe('en');
+    });
+
+    it('defaults to en when nothing identifies the reader', async () => {
+      expect((await register({})).locale).toBe('en');
+    });
+
+    it('delivers an English body to a device registered in English', async () => {
+      const rec = await register({ cookie: 'locale=en' });
+      const { buildPushPayload } = await import('@/lib/push/push-sender');
+      expect(buildPushPayload({ worktreeId: 'w', worktreeName: 'n', kind: 'prompt' }, rec.locale).body).toBe(
+        'Waiting for your reply'
+      );
+    });
+
+    it('delivers a Japanese body to a device registered in Japanese', async () => {
+      const rec = await register({ cookie: 'locale=ja' });
+      const { buildPushPayload } = await import('@/lib/push/push-sender');
+      expect(buildPushPayload({ worktreeId: 'w', worktreeName: 'n', kind: 'prompt' }, rec.locale).body).toBe(
+        '応答待ちです'
+      );
+    });
+  });
+
   it('POST rejects an invalid subscription body', async () => {
     const { POST } = await import('@/app/api/push/subscriptions/route');
     const res = await POST(jsonRequest('POST', { subscription: { endpoint: '' } }));

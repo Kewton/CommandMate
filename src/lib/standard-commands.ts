@@ -29,7 +29,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   // Session Management
   {
     name: 'clear',
-    description: 'Clear conversation history',
+    descriptionKey: 'slashCommands.descriptions.clear',
     category: 'standard-session',
     isStandard: true,
     source: 'standard',
@@ -38,7 +38,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'compact',
-    description: 'Compact context to reduce token usage',
+    descriptionKey: 'slashCommands.descriptions.compact',
     category: 'standard-session',
     isStandard: true,
     source: 'standard',
@@ -47,7 +47,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'resume',
-    description: 'Resume previous conversation',
+    descriptionKey: 'slashCommands.descriptions.resume',
     category: 'standard-session',
     isStandard: true,
     source: 'standard',
@@ -56,7 +56,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'rewind',
-    description: 'Rewind to previous conversation state',
+    descriptionKey: 'slashCommands.descriptions.rewind',
     category: 'standard-session',
     isStandard: true,
     source: 'standard',
@@ -66,7 +66,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   // Configuration
   {
     name: 'config',
-    description: 'Open configuration settings',
+    descriptionKey: 'slashCommands.descriptions.config',
     category: 'standard-config',
     isStandard: true,
     source: 'standard',
@@ -74,7 +74,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'model',
-    description: 'Switch AI model',
+    descriptionKey: 'slashCommands.descriptions.model',
     category: 'standard-config',
     isStandard: true,
     source: 'standard',
@@ -83,7 +83,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'permissions',
-    description: 'View or update tool permissions',
+    descriptionKey: 'slashCommands.descriptions.permissions',
     category: 'standard-config',
     isStandard: true,
     source: 'standard',
@@ -94,7 +94,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   // Monitoring
   {
     name: 'status',
-    description: 'Check session status',
+    descriptionKey: 'slashCommands.descriptions.status',
     category: 'standard-monitor',
     isStandard: true,
     source: 'standard',
@@ -103,7 +103,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'context',
-    description: 'Show context window usage',
+    descriptionKey: 'slashCommands.descriptions.context',
     category: 'standard-monitor',
     isStandard: true,
     source: 'standard',
@@ -111,7 +111,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'cost',
-    description: 'Display token and cost usage',
+    descriptionKey: 'slashCommands.descriptions.cost',
     category: 'standard-monitor',
     isStandard: true,
     source: 'standard',
@@ -121,7 +121,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   // Git/Review
   {
     name: 'review',
-    description: 'Review code changes',
+    descriptionKey: 'slashCommands.descriptions.review',
     category: 'standard-git',
     isStandard: true,
     source: 'standard',
@@ -130,7 +130,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'pr-comments',
-    description: 'Show PR comments',
+    descriptionKey: 'slashCommands.descriptions.pr-comments',
     category: 'standard-git',
     isStandard: true,
     source: 'standard',
@@ -140,7 +140,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   // Utility
   {
     name: 'help',
-    description: 'Show all available commands',
+    descriptionKey: 'slashCommands.descriptions.help',
     category: 'standard-util',
     isStandard: true,
     source: 'standard',
@@ -149,7 +149,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'doctor',
-    description: 'Check installation health',
+    descriptionKey: 'slashCommands.descriptions.doctor',
     category: 'standard-util',
     isStandard: true,
     source: 'standard',
@@ -157,7 +157,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'export',
-    description: 'Export conversation history',
+    descriptionKey: 'slashCommands.descriptions.export',
     category: 'standard-util',
     isStandard: true,
     source: 'standard',
@@ -165,7 +165,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'todos',
-    description: 'Show TODO list',
+    descriptionKey: 'slashCommands.descriptions.todos',
     category: 'standard-util',
     isStandard: true,
     source: 'standard',
@@ -179,7 +179,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   // Session Management - Claude only (new)
   {
     name: 'focus',
-    description: 'Toggle focus mode',
+    descriptionKey: 'slashCommands.descriptions.focus',
     category: 'standard-session',
     isStandard: true,
     source: 'standard',
@@ -190,7 +190,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   // Configuration - Claude only (new)
   {
     name: 'effort',
-    description: 'Adjust model thinking effort (high/medium/low)',
+    descriptionKey: 'slashCommands.descriptions.effort',
     category: 'standard-config',
     isStandard: true,
     source: 'standard',
@@ -199,7 +199,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'fast',
-    description: 'Switch to fast response mode',
+    descriptionKey: 'slashCommands.descriptions.fast',
     category: 'standard-config',
     isStandard: true,
     source: 'standard',
@@ -208,7 +208,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'lazy',
-    description: 'Toggle lazy mode',
+    descriptionKey: 'slashCommands.descriptions.lazy',
     category: 'standard-config',
     isStandard: true,
     source: 'standard',
@@ -223,7 +223,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   // Session Management - Codex only
   {
     name: 'new',
-    description: 'Start a new conversation',
+    descriptionKey: 'slashCommands.descriptions.new',
     category: 'standard-session',
     isStandard: true,
     source: 'standard',
@@ -232,7 +232,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'undo',
-    description: 'Undo the last Codex action',
+    descriptionKey: 'slashCommands.descriptions.undo',
     category: 'standard-session',
     isStandard: true,
     source: 'standard',
@@ -241,7 +241,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'logout',
-    description: 'Sign out from Codex',
+    descriptionKey: 'slashCommands.descriptions.logout',
     category: 'standard-session',
     isStandard: true,
     source: 'standard',
@@ -250,7 +250,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'quit',
-    description: 'Exit Codex CLI',
+    descriptionKey: 'slashCommands.descriptions.quit',
     category: 'standard-session',
     isStandard: true,
     source: 'standard',
@@ -261,7 +261,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   // Configuration - Codex only
   {
     name: 'approvals',
-    description: 'Change auto-execution approval level',
+    descriptionKey: 'slashCommands.descriptions.approvals',
     category: 'standard-config',
     isStandard: true,
     source: 'standard',
@@ -272,7 +272,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   // Git/Review - Codex only
   {
     name: 'diff',
-    description: 'Show Git diff (including untracked files)',
+    descriptionKey: 'slashCommands.descriptions.diff',
     category: 'standard-git',
     isStandard: true,
     source: 'standard',
@@ -283,7 +283,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   // Utility - Codex only
   {
     name: 'mention',
-    description: 'Attach file/folder for next interaction',
+    descriptionKey: 'slashCommands.descriptions.mention',
     category: 'standard-util',
     isStandard: true,
     source: 'standard',
@@ -292,7 +292,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'mcp',
-    description: 'List available MCP tools',
+    descriptionKey: 'slashCommands.descriptions.mcp',
     category: 'standard-util',
     isStandard: true,
     source: 'standard',
@@ -301,7 +301,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'init',
-    description: 'Generate AGENTS.md template in current directory',
+    descriptionKey: 'slashCommands.descriptions.init',
     category: 'standard-util',
     isStandard: true,
     source: 'standard',
@@ -310,7 +310,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'feedback',
-    description: 'Send feedback to Codex team',
+    descriptionKey: 'slashCommands.descriptions.feedback',
     category: 'standard-util',
     isStandard: true,
     source: 'standard',
@@ -325,7 +325,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   // Session Management - Codex only (new)
   {
     name: 'plan',
-    description: 'Toggle plan mode',
+    descriptionKey: 'slashCommands.descriptions.plan',
     category: 'standard-session',
     isStandard: true,
     source: 'standard',
@@ -334,7 +334,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'goal',
-    description: 'Set goal for current session',
+    descriptionKey: 'slashCommands.descriptions.goal',
     category: 'standard-session',
     isStandard: true,
     source: 'standard',
@@ -343,7 +343,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'agent',
-    description: 'Switch active agent (Codex)',
+    descriptionKey: 'slashCommands.descriptions.agent',
     category: 'standard-session',
     isStandard: true,
     source: 'standard',
@@ -352,7 +352,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'subagents',
-    description: 'Manage subagents',
+    descriptionKey: 'slashCommands.descriptions.subagents',
     category: 'standard-session',
     isStandard: true,
     source: 'standard',
@@ -361,7 +361,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'fork',
-    description: 'Fork current session',
+    descriptionKey: 'slashCommands.descriptions.fork',
     category: 'standard-session',
     isStandard: true,
     source: 'standard',
@@ -372,7 +372,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   // Configuration - Codex only (new)
   {
     name: 'memories',
-    description: 'Manage Codex memories',
+    descriptionKey: 'slashCommands.descriptions.memories',
     category: 'standard-config',
     isStandard: true,
     source: 'standard',
@@ -381,7 +381,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'skills',
-    description: 'Manage Codex skills',
+    descriptionKey: 'slashCommands.descriptions.skills',
     category: 'standard-config',
     isStandard: true,
     source: 'standard',
@@ -390,7 +390,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'hooks',
-    description: 'Manage Codex hooks',
+    descriptionKey: 'slashCommands.descriptions.hooks',
     category: 'standard-config',
     isStandard: true,
     source: 'standard',
@@ -405,7 +405,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   // Session Management - OpenCode only
   {
     name: 'sessions',
-    description: 'Browse conversation history',
+    descriptionKey: 'slashCommands.descriptions.sessions',
     category: 'standard-session',
     isStandard: true,
     source: 'standard',
@@ -414,7 +414,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'connect',
-    description: 'Connect to language server',
+    descriptionKey: 'slashCommands.descriptions.connect',
     category: 'standard-session',
     isStandard: true,
     source: 'standard',
@@ -423,7 +423,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'exit',
-    description: 'Exit OpenCode TUI',
+    descriptionKey: 'slashCommands.descriptions.exit',
     category: 'standard-session',
     isStandard: true,
     source: 'standard',
@@ -434,7 +434,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   // Configuration - OpenCode only
   {
     name: 'models',
-    description: 'Switch AI model',
+    descriptionKey: 'slashCommands.descriptions.models',
     category: 'standard-config',
     isStandard: true,
     source: 'standard',
@@ -443,7 +443,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'agents',
-    description: 'List/manage all available agents (OpenCode)',
+    descriptionKey: 'slashCommands.descriptions.agents',
     category: 'standard-config',
     isStandard: true,
     source: 'standard',
@@ -452,7 +452,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'themes',
-    description: 'Change TUI theme',
+    descriptionKey: 'slashCommands.descriptions.themes',
     category: 'standard-config',
     isStandard: true,
     source: 'standard',
@@ -463,7 +463,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   // Utility - OpenCode only
   {
     name: 'editor',
-    description: 'Open editor for long messages',
+    descriptionKey: 'slashCommands.descriptions.editor',
     category: 'standard-util',
     isStandard: true,
     source: 'standard',

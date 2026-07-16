@@ -25,11 +25,10 @@ CommandMate を使用するには、以下のツールが必要です。
 
 | ツール | バージョン | 必須 | 確認コマンド |
 |--------|----------|------|------------|
-| Node.js | v20+ | ✓ | `node -v` |
+| Node.js | v22+ | ✓ | `node -v` |
 | npm | - | ✓ | `npm -v` |
 | Git | - | ✓ | `git --version` |
 | tmux | - | ✓ | `tmux -V` |
-| openssl | - | ✓ | `openssl version` |
 | Claude CLI | - | △（オプション） | `claude --version` |
 | gh CLI | - | △（オプション） | `gh --version` |
 
@@ -37,7 +36,7 @@ CommandMate を使用するには、以下のツールが必要です。
 
 ```bash
 # すべての依存関係を確認
-node -v && npm -v && git --version && tmux -V && openssl version
+node -v && npm -v && git --version && tmux -V
 ```
 
 ### 各ツールのインストール
@@ -46,17 +45,17 @@ node -v && npm -v && git --version && tmux -V && openssl version
 
 ```bash
 # Homebrew を使用
-brew install node git tmux openssl
+brew install node git tmux
 ```
 
 #### Ubuntu/Debian
 
 ```bash
 sudo apt update
-sudo apt install nodejs npm git tmux openssl
+sudo apt install nodejs npm git tmux
 ```
 
-> **注意**: Windows は現在サポートされていません（tmux 依存のため）。WSL2 での動作は未検証です。
+> **注意**: ネイティブ Windows は tmux 依存のためサポートしていません。Windows では WSL2 上で CommandMate を実行してください（[WSL2 セットアップガイド](./wsl2-setup.md) を参照）。
 
 ---
 
@@ -259,6 +258,21 @@ commandmate status [options]
 | `-i, --issue <number>` | 指定Issueのworktree用サーバーの状態を表示（Issue #136） |
 | `-a, --all` | 全サーバー（main + worktree）の状態を表示 |
 
+### commandmate update
+
+最新バージョンに更新します（停止 → `npm install -g commandmate@latest` → 再起動）。
+
+```bash
+commandmate update [options]
+```
+
+| オプション | 説明 |
+|-----------|------|
+| `--check` | 更新の有無を確認するだけ（インストール・停止・再起動を行わない） |
+| `-y, --yes` | 確認プロンプトをスキップ（非対話環境では必須） |
+
+詳細と注意事項は [アップグレード](#アップグレード) を参照してください。
+
 ### commandmate issue
 
 GitHub Issue管理コマンドです（gh CLIが必要）。
@@ -379,7 +393,7 @@ brew install tmux  # macOS
 sudo apt install tmux  # Ubuntu/Debian
 
 # Node.js のバージョンが古い
-node -v  # v20 以上が必要
+node -v  # v22 以上が必要
 ```
 
 ### データベースエラー
@@ -394,23 +408,81 @@ commandmate init --force
 
 ## アップグレード
 
-最新バージョンにアップグレードするには：
+グローバルインストール（`npm install -g commandmate`）の場合は、`commandmate update` の 1 コマンドでアップグレードできます。
 
 ```bash
-npm install -g commandmate@latest
+commandmate update
 ```
+
+グローバルインストール環境では、次の順で実行されます。
+
+1. npm registry に最新バージョンを問い合わせ、現在のバージョンと比較する
+2. 更新がある場合のみ、注意事項を表示して確認を求める（デフォルトは「いいえ」）
+3. サーバーが稼働中であれば停止する
+4. `npm install -g commandmate@latest` を実行する
+5. インストールされたバージョンが最新版と一致するか検証する
+6. 停止したサーバーを再起動し、応答を確認する（最大 30 秒）
+
+更新前に稼働していなかった場合、サーバーは再起動されません（勝手に起動しません）。
+すでに最新の場合・ローカルの方が新しい場合・プレリリース版の場合は、更新せずに終了します。
+
+### 更新の有無だけを確認する
+
+`--check` を付けると、バージョンを表示するだけで何も変更しません。
+
+```bash
+commandmate update --check
+```
+
+```
+Current: v0.9.0
+Latest: v0.10.0
+Update available: yes
+```
+
+### 非対話環境での実行
+
+確認プロンプトをスキップするには `--yes` を付けます。
+
+```bash
+commandmate update --yes
+```
+
+TTY のない環境（CI・スクリプト等）で `--yes` を付けずに実行した場合、更新は実行されず終了コード `2` で終了します。
+
+### アップグレード時の注意
+
+- **起動オプションは復元されません**: 再起動後は `.env` の設定のみで起動します。`--auth` / `--auth-expire` / `--cert` / `--key` / `--allow-http` / `--allowed-ips` / `--trust-proxy` / `--port` / `--dev` を付けて起動していた場合は、update 後に手動で起動し直してください（`--auth` は起動のたびに新しいトークンが生成されるため、既存のトークンは無効になります）。
+- **worktree 用サーバー（`--issue`）は自動で停止・再起動されません**: `npm install -g` はパッケージディレクトリ（`dist/` / `.next/`）を置換するため、稼働中の worktree サーバーは異常終了する可能性があります。update **前**に `commandmate stop --issue <number>` で停止し、update 後に `commandmate start --issue <number>` で再起動してください（稼働中の場合は update が警告を表示します）。
+- **権限エラー（EACCES）**: `sudo` で再実行しないでください。[権限エラー（EACCES）](#権限エラーeacces) の手順で npm のグローバルディレクトリの権限を修正してから、再度 `commandmate update` を実行します。
+- **認証が有効な場合**: 再起動後の応答確認が「サーバー応答の確認のみ」に緩和され、警告付きで成功終了します。厳密に確認するには `CM_AUTH_TOKEN` を設定して実行してください（IP 制限・自己署名証明書の環境でも同様に緩和されます）。
+- **更新に失敗した場合**: 更新前のバージョンに戻すコマンド（`npm install -g commandmate@<更新前のバージョン>`）が表示されます。サーバーの停止に失敗した場合は、何も変更せずに中止されます。
+
+### 手動でアップグレードする（fallback）
+
+`commandmate update` を使えない場合は、従来どおり手動でアップグレードできます。
+
+```bash
+commandmate stop
+npm install -g commandmate@latest
+commandmate start --daemon
+```
+
+git clone した開発環境（グローバルインストールではない環境）では、`commandmate update` は更新を実行せず次の手順を案内して終了します。
+
+```bash
+git pull
+npm install
+npm run build:all
+commandmate stop && commandmate start --daemon   # または npm start
+```
+
+> `npm run build` ではなく `npm run build:all` を実行してください。`npm run build` は Next.js のビルドのみで、サーバー本体（`dist/server`）と CLI（`dist/cli`）が更新されません。
 
 アップグレード後、バージョンを確認：
 
 ```bash
 commandmate --version
-```
-
-サーバーを再起動：
-
-```bash
-commandmate stop
-commandmate start --daemon
 ```
 
 ---

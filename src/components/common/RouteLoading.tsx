@@ -22,6 +22,8 @@
  * which resets animation-duration/-delay — do not re-implement it here.
  */
 
+import { useTranslations } from 'next-intl';
+
 /**
  * Stagger for the indeterminate pulse. Whole literal class strings so the
  * Tailwind scanner picks them up.
@@ -33,11 +35,13 @@ const DOT_DELAYS = [
 ] as const;
 
 export function RouteLoading() {
+  const t = useTranslations('common');
+
   return (
     <div
       className="flex min-h-screen w-full items-center justify-center p-8"
       role="status"
-      aria-label="Loading page"
+      aria-label={t('loadingPage')}
       data-testid="route-loading"
     >
       <div className="flex items-center gap-2" aria-hidden="true">

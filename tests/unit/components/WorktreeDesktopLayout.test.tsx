@@ -16,6 +16,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { WorktreeDesktopLayout } from '@/components/worktree/WorktreeDesktopLayout';
 
+// Issue #1277: the pane aria-labels are dictionary-driven now, so resolve them
+// through the REAL locales/en/*.json (the global echo mock in tests/setup.ts
+// would return `worktree.desktopLayout.activityPane` for a nonexistent key).
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 const defaultProps = {
   activityPane: <div data-testid="activity-pane-content">ActivityPane</div>,
   rightPane: <div data-testid="right-pane-content">RightPane</div>,

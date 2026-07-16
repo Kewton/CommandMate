@@ -26,8 +26,15 @@ export type ActivityId = 'files' | 'git' | 'notes' | 'schedules' | 'agent' | 'ti
 export interface ActivityDefinition {
   /** Stable identifier */
   id: ActivityId;
-  /** Tooltip text */
-  label: string;
+  /**
+   * Tooltip / aria-label translation key within the `worktree` namespace
+   * (Issue #1277).
+   *
+   * The label is stored as a KEY rather than a literal because `t()` cannot be
+   * called at module scope; consumers resolve it at render time via
+   * `useTranslations('worktree')` — see `ActivityBar.tsx`.
+   */
+  labelKey: string;
   /** Lucide icon component reference */
   icon: ComponentType<SVGProps<SVGSVGElement> & { size?: number | string }>;
 }
@@ -38,15 +45,14 @@ export interface ActivityDefinition {
  * navigation order (ArrowDown/ArrowUp).
  */
 export const ACTIVITIES: readonly ActivityDefinition[] = [
-  { id: 'files', label: 'Files', icon: File },
-  { id: 'git', label: 'Git', icon: GitBranch },
-  { id: 'notes', label: 'Notes', icon: StickyNote },
-  { id: 'schedules', label: 'Schedules', icon: Calendar },
-  { id: 'agent', label: 'Agent', icon: Bot },
-  { id: 'timer', label: 'Timer', icon: Timer },
-  // Issue #1015: branch-scoped ToDo list. Label is hardcoded English (i18n
-  // non-transit), consistent with the other PC Activity Bar labels.
-  { id: 'todo', label: 'ToDo', icon: ListTodo },
+  { id: 'files', labelKey: 'activityBar.files', icon: File },
+  { id: 'git', labelKey: 'activityBar.git', icon: GitBranch },
+  { id: 'notes', labelKey: 'activityBar.notes', icon: StickyNote },
+  { id: 'schedules', labelKey: 'activityBar.schedules', icon: Calendar },
+  { id: 'agent', labelKey: 'activityBar.agent', icon: Bot },
+  { id: 'timer', labelKey: 'activityBar.timer', icon: Timer },
+  // Issue #1015: branch-scoped ToDo list.
+  { id: 'todo', labelKey: 'activityBar.todo', icon: ListTodo },
 ] as const;
 
 /**

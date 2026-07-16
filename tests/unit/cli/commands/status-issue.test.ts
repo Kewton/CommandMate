@@ -1,13 +1,26 @@
 /**
  * Status Command Tests - Issue #136 Extensions
- * TDD: Tests for --issue and --all flags
+ * Tests for --issue and --all flags, exercised against the real statusCommand.
+ *
+ * Issue #1269: the DaemonManager mock must be built from `function` (or `class`),
+ * never an arrow fn. `vi.fn().mockImplementation(() => ({ ... }))` has no
+ * [[Construct]], so `new DaemonManager(pid)` throws "is not a constructor".
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import path from 'path';
 import { homedir } from 'os';
+import type { DaemonStatus } from '../../../../src/cli/types';
 
-// Mock file system operations
+const daemon = vi.hoisted(() => ({
+  ctor: vi.fn(),
+  isRunning: vi.fn(),
+  getStatus: vi.fn(),
+  getEffectiveEnv: vi.fn(),
+  start: vi.fn(),
+  stop: vi.fn(),
+}));
+
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
   return {
@@ -15,62 +28,81 @@ vi.mock('fs', async () => {
     existsSync: vi.fn().mockReturnValue(true),
     mkdirSync: vi.fn(),
     realpathSync: vi.fn((p: string) => p),
-    readdirSync: vi.fn(() => ['135.pid', '200.pid', '300.pid']),
+    readdirSync: vi.fn(() => ['135.pid', '200.pid']),
   };
 });
 
-// Mock dotenv
 vi.mock('dotenv', () => ({
   config: vi.fn().mockReturnValue({ parsed: {} }),
 }));
 
-// Mock install-context
 vi.mock('../../../../src/cli/utils/install-context', () => ({
   getConfigDir: vi.fn(() => path.join(homedir(), '.commandmate')),
   isGlobalInstall: vi.fn(() => true),
 }));
 
-// Mock daemon
 vi.mock('../../../../src/cli/utils/daemon', () => ({
-  DaemonManager: vi.fn().mockImplementation(() => ({
-    isRunning: vi.fn().mockResolvedValue(true),
-    getStatus: vi.fn().mockResolvedValue({
-      running: true,
-      pid: 12345,
-      port: 3000,
-      uptime: 3600,
-    }),
-    start: vi.fn().mockResolvedValue(12345),
-    stop: vi.fn().mockResolvedValue(true),
-  })),
+  DaemonManager: vi.fn(function (this: Record<string, unknown>, pidFilePath: string, envPath?: string) {
+    daemon.ctor(pidFilePath, envPath);
+    this.isRunning = daemon.isRunning;
+    this.getStatus = daemon.getStatus;
+    this.getEffectiveEnv = daemon.getEffectiveEnv;
+    this.start = daemon.start;
+    this.stop = daemon.stop;
+  }),
 }));
 
-// Mock env-setup
 vi.mock('../../../../src/cli/utils/env-setup', () => ({
-  getEnvPath: vi.fn((issueNo?: number) => {
-    if (issueNo !== undefined) {
-      return path.join(homedir(), '.commandmate', 'envs', `${issueNo}.env`);
-    }
-    return path.join(homedir(), '.commandmate', '.env');
-  }),
-  getPidFilePath: vi.fn((issueNo?: number) => {
-    if (issueNo !== undefined) {
-      return path.join(homedir(), '.commandmate', 'pids', `${issueNo}.pid`);
-    }
-    return path.join(homedir(), '.commandmate', '.commandmate.pid');
-  }),
+  getEnvPath: vi.fn((issueNo?: number) =>
+    issueNo !== undefined
+      ? path.join(homedir(), '.commandmate', 'envs', `${issueNo}.env`)
+      : path.join(homedir(), '.commandmate', '.env')
+  ),
+  getPidFilePath: vi.fn((issueNo?: number) =>
+    issueNo !== undefined
+      ? path.join(homedir(), '.commandmate', 'pids', `${issueNo}.pid`)
+      : path.join(homedir(), '.commandmate', '.commandmate.pid')
+  ),
   getPidsDir: vi.fn(() => path.join(homedir(), '.commandmate', 'pids')),
 }));
 
-import { StatusOptions } from '../../../../src/cli/types';
-import { getPidFilePath } from '../../../../src/cli/utils/env-setup';
+import { statusCommand } from '../../../../src/cli/commands/status';
+import { ExitCode } from '../../../../src/cli/types';
+import { config as dotenvConfig } from 'dotenv';
+
+const RUNNING: DaemonStatus = {
+  running: true,
+  pid: 12345,
+  port: 3135,
+  uptime: 3600,
+};
+
+const envPath = (issueNo?: number) =>
+  issueNo !== undefined
+    ? path.join(homedir(), '.commandmate', 'envs', `${issueNo}.env`)
+    : path.join(homedir(), '.commandmate', '.env');
+
+const pidPath = (issueNo?: number) =>
+  issueNo !== undefined
+    ? path.join(homedir(), '.commandmate', 'pids', `${issueNo}.pid`)
+    : path.join(homedir(), '.commandmate', '.commandmate.pid');
 
 describe('Status Command - Issue #136 Extensions', () => {
+  let mockExit: ReturnType<typeof vi.fn>;
+  let output: string[];
+
   beforeEach(() => {
     vi.clearAllMocks();
-    // Reset process.exit mock
-    vi.spyOn(process, 'exit').mockImplementation(() => {
-      throw new Error('process.exit called');
+    daemon.isRunning.mockResolvedValue(true);
+    daemon.getStatus.mockResolvedValue(RUNNING);
+    daemon.getEffectiveEnv.mockReturnValue({});
+    vi.mocked(dotenvConfig).mockReturnValue({ parsed: {} });
+
+    output = [];
+    mockExit = vi.fn();
+    vi.spyOn(process, 'exit').mockImplementation(mockExit as unknown as typeof process.exit);
+    vi.spyOn(console, 'log').mockImplementation((msg?: unknown) => {
+      output.push(String(msg));
     });
   });
 
@@ -78,63 +110,96 @@ describe('Status Command - Issue #136 Extensions', () => {
     vi.restoreAllMocks();
   });
 
-  describe('StatusOptions type', () => {
-    it('should accept issue option', () => {
-      const options: StatusOptions = {
-        issue: 135,
-      };
+  describe('--issue flag', () => {
+    it('should construct DaemonManager with the worktree PID file', async () => {
+      await statusCommand({ issue: 135 });
 
-      expect(options.issue).toBe(135);
+      expect(daemon.ctor).toHaveBeenCalledWith(pidPath(135), envPath(135));
+      expect(daemon.getStatus).toHaveBeenCalled();
     });
 
-    it('should accept all option', () => {
-      const options: StatusOptions = {
-        all: true,
-      };
+    // Issue #1266: the .env is no longer loaded here — the path is handed to DaemonManager,
+    // which resolves CM_PORT from it with .env taking precedence over exported variables
+    it('should hand the worktree .env to DaemonManager so getStatus sees the right CM_PORT', async () => {
+      await statusCommand({ issue: 135 });
 
-      expect(options.all).toBe(true);
+      expect(daemon.ctor).toHaveBeenCalledWith(expect.any(String), envPath(135));
     });
 
-    it('should work without any options (backward compatibility)', () => {
-      const options: StatusOptions = {};
+    it('should label the output with the issue number and report the status', async () => {
+      await statusCommand({ issue: 135 });
 
-      expect(options.issue).toBeUndefined();
-      expect(options.all).toBeUndefined();
+      expect(output.join('\n')).toContain('CommandMate Status - Issue #135');
+      expect(output.join('\n')).toContain('Status:  Running (PID: 12345)');
+      expect(output.join('\n')).toContain('Port:    3135');
+    });
+
+    // The output assertions above all run before the command finishes, so they stay green
+    // even when it throws afterwards and exits 99. Only the exit code catches that.
+    it('should exit SUCCESS rather than fail after printing the status', async () => {
+      await statusCommand({ issue: 135 });
+
+      expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
+      expect(mockExit).not.toHaveBeenCalledWith(ExitCode.UNEXPECTED_ERROR);
+    });
+
+    it('should use the main PID file when no issue is given', async () => {
+      await statusCommand({});
+
+      expect(daemon.ctor).toHaveBeenCalledWith(pidPath(), envPath());
+      expect(output.join('\n')).toContain('CommandMate Status - Main Server');
+    });
+
+    it('should report stopped when getStatus returns null', async () => {
+      daemon.getStatus.mockResolvedValue(null);
+
+      await statusCommand({ issue: 135 });
+
+      expect(output.join('\n')).toContain('Status:  Stopped (no PID file)');
+      expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
+    });
+
+    it('should report a stale PID file and suggest the issue-specific start command', async () => {
+      daemon.getStatus.mockResolvedValue({ running: false, pid: 12345 });
+
+      await statusCommand({ issue: 135 });
+
+      expect(output.join('\n')).toContain('Status:  Not running (stale PID file)');
+      expect(output.join('\n')).toContain('commandmate start --issue 135');
+    });
+
+    it('should reject an invalid issue number before touching DaemonManager', async () => {
+      await statusCommand({ issue: -1 });
+
+      expect(daemon.ctor).not.toHaveBeenCalled();
+      expect(mockExit).toHaveBeenCalledWith(ExitCode.UNEXPECTED_ERROR);
     });
   });
 
-  describe('getPidFilePath with issueNo', () => {
-    it('should return main PID path when no issue specified', () => {
-      const pidPath = getPidFilePath();
-      expect(pidPath).toBe(
-        path.join(homedir(), '.commandmate', '.commandmate.pid')
-      );
-    });
+  describe('--all flag', () => {
+    it('should report the main server plus every worktree PID file', async () => {
+      await statusCommand({ all: true });
 
-    it('should return worktree PID path when issue specified', () => {
-      const pidPath = getPidFilePath(135);
-      expect(pidPath).toBe(
-        path.join(homedir(), '.commandmate', 'pids', '135.pid')
-      );
+      expect(daemon.ctor).toHaveBeenCalledWith(pidPath(), envPath());
+      expect(daemon.ctor).toHaveBeenCalledWith(pidPath(135), envPath(135));
+      expect(daemon.ctor).toHaveBeenCalledWith(pidPath(200), envPath(200));
+      expect(daemon.ctor).toHaveBeenCalledTimes(3);
+
+      const text = output.join('\n');
+      expect(text).toContain('CommandMate Status - Main Server');
+      expect(text).toContain('CommandMate Status - Issue #135');
+      expect(text).toContain('CommandMate Status - Issue #200');
+      expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
     });
   });
 
-  describe('Status --all flag behavior', () => {
-    it('should list all worktree PID files in pids directory', async () => {
-      const { getPidsDir } = await import(
-        '../../../../src/cli/utils/env-setup'
-      );
-      const pidsDir = getPidsDir();
+  describe('error handling', () => {
+    it('should exit with UNEXPECTED_ERROR when getStatus throws', async () => {
+      daemon.getStatus.mockRejectedValue(new Error('boom'));
 
-      expect(pidsDir).toBe(path.join(homedir(), '.commandmate', 'pids'));
-    });
+      await statusCommand({ issue: 135 });
 
-    it('should parse issue number from PID filename', () => {
-      // PID filename pattern: {issueNo}.pid
-      const filename = '135.pid';
-      const issueNo = parseInt(filename.replace('.pid', ''), 10);
-
-      expect(issueNo).toBe(135);
+      expect(mockExit).toHaveBeenCalledWith(ExitCode.UNEXPECTED_ERROR);
     });
   });
 });

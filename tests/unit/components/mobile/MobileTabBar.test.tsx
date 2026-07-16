@@ -11,6 +11,14 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { MobileTabBar } from '@/components/mobile/MobileTabBar';
 import type { MobileTabBarProps } from '@/components/mobile/MobileTabBar';
 
+// Issue #1274: this component's wording resolves through the `worktree` namespace.
+// Back it with the real dictionary so the English assertions prove the keys
+// exist rather than echoing the global mock.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 describe('MobileTabBar', () => {
   const defaultProps: MobileTabBarProps = {
     activeTab: 'terminal',

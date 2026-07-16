@@ -29,14 +29,16 @@ vi.mock('@/components/layout', () => ({
     React.createElement('div', { 'data-testid': 'app-shell' }, children),
 }));
 
-// Mock status-colors
+// Mock status-colors (Issue #1304: labels are `common.status.*` keys, resolved
+// at render — this suite asserts layout/behaviour, not wording, so the keys are
+// echoed by the global next-intl mock. Wording is covered by status-colors-keys.)
 vi.mock('@/config/status-colors', () => ({
   SIDEBAR_STATUS_CONFIG: {
-    idle: { type: 'dot', className: 'bg-gray-400', label: 'Idle' },
-    ready: { type: 'dot', className: 'bg-accent-500', label: 'Ready' },
-    running: { type: 'spinner', className: 'border-green-500', label: 'Running' },
-    waiting: { type: 'dot', className: 'bg-yellow-500', label: 'Waiting' },
-    generating: { type: 'spinner', className: 'border-info', label: 'Generating' },
+    idle: { type: 'dot', className: 'bg-gray-400', labelKey: 'status.idle' },
+    ready: { type: 'dot', className: 'bg-accent-500', labelKey: 'status.ready' },
+    running: { type: 'spinner', className: 'border-green-500', labelKey: 'status.running' },
+    waiting: { type: 'dot', className: 'bg-yellow-500', labelKey: 'status.waiting' },
+    generating: { type: 'spinner', className: 'border-info', labelKey: 'status.generating' },
   },
 }));
 

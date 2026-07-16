@@ -17,11 +17,10 @@ npm run dev
 
 ### 前提条件
 
-- Node.js v20+
+- Node.js v22+
 - npm
 - tmux
 - git
-- openssl
 - Claude CLI（動作確認する場合）
 
 ## ブランチ戦略

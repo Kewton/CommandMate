@@ -254,7 +254,15 @@ describe('Issue #288 Acceptance Tests: Free Input Mode prevents selector re-disp
         expect(worktreeApi.sendMessage).toHaveBeenCalled();
       });
 
-      // After submit, message is cleared and isFreeInputMode is reset
+      // After submit, message is cleared and isFreeInputMode is reset. sendMessage having
+      // been *called* does not mean its promise resolved and that reset landed, so wait for
+      // the cleared input — opening the selector while isFreeInputMode is still true would
+      // suppress it. (Not wrapping the assertion below in waitFor: that would re-run
+      // openSelector and type "/" repeatedly.)
+      await waitFor(() => {
+        expect(getTextarea()).toHaveValue('');
+      });
+
       openSelector();
       expect(queryDesktopSelector()).toBeInTheDocument();
     });

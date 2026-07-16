@@ -25,15 +25,19 @@ export interface HeaderProps {
 
 /**
  * Navigation items for the PC header.
- * Each entry maps a label to a href and a pathname match function.
+ * Each entry maps a `common` translation key to a href and a pathname match function.
+ *
+ * The header abbreviates where the mobile bar does not: `repositoriesShort`
+ * ("Repos") keeps the space-x-6 row from overflowing, and `reviewReport`
+ * ("Review/Report") preserves that /review also covers reports.
  */
-const NAV_ITEMS: Array<{ label: string; href: string; isActive: (pathname: string) => boolean }> = [
-  { label: 'Home', href: '/', isActive: (p) => p === '/' },
-  { label: 'Chat', href: '/chat', isActive: (p) => p.startsWith('/chat') },
-  { label: 'Sessions', href: '/sessions', isActive: (p) => p.startsWith('/sessions') },
-  { label: 'Repos', href: '/repositories', isActive: (p) => p.startsWith('/repositories') },
-  { label: 'Review/Report', href: '/review', isActive: (p) => p.startsWith('/review') },
-  { label: 'More', href: '/more', isActive: (p) => p.startsWith('/more') },
+const NAV_ITEMS: Array<{ labelKey: string; href: string; isActive: (pathname: string) => boolean }> = [
+  { labelKey: 'nav.home', href: '/', isActive: (p) => p === '/' },
+  { labelKey: 'nav.chat', href: '/chat', isActive: (p) => p.startsWith('/chat') },
+  { labelKey: 'nav.sessions', href: '/sessions', isActive: (p) => p.startsWith('/sessions') },
+  { labelKey: 'nav.repositoriesShort', href: '/repositories', isActive: (p) => p.startsWith('/repositories') },
+  { labelKey: 'nav.reviewReport', href: '/review', isActive: (p) => p.startsWith('/review') },
+  { labelKey: 'nav.more', href: '/more', isActive: (p) => p.startsWith('/more') },
 ];
 
 /**
@@ -47,6 +51,7 @@ const NAV_ITEMS: Array<{ label: string; href: string; isActive: (pathname: strin
 export function Header({ title = 'CommandMate' }: HeaderProps) {
   const pathname = usePathname();
   const t = useTranslations('commandPalette');
+  const tCommon = useTranslations('common');
   const { setOpen } = useCommandPalette();
 
   // Platform-specific modifier resolved after mount to avoid SSR hydration
@@ -88,7 +93,7 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
                       : 'text-muted-foreground hover:text-foreground after:scale-x-0'
                   }`}
                 >
-                  {item.label}
+                  {tCommon(item.labelKey)}
                 </TransitionLink>
               );
             })}

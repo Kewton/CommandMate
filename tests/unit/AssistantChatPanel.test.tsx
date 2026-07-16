@@ -8,6 +8,14 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { AssistantChatPanel } from '@/components/home/AssistantChatPanel';
 import { assistantApi } from '@/lib/api/assistant-api';
 
+// Issue #1274: this component's wording resolves through the `home` namespace.
+// Back it with the real dictionary so the English assertions prove the keys
+// exist rather than echoing the global mock.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 vi.mock('@/lib/api/assistant-api', () => ({
   assistantApi: {
     getInstalledTools: vi.fn(),

@@ -27,6 +27,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { PDF_IFRAME_SANDBOX } from '@/config/pdf-extensions';
 import { Spinner } from '@/components/ui/Spinner';
 
@@ -52,6 +53,7 @@ export interface PdfPreviewProps {
 export function PdfPreview({ dataUri, filePath, variant = 'iframe' }: PdfPreviewProps): React.JSX.Element {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [hasError, setHasError] = useState(false);
+  const t = useTranslations('worktree');
 
   useEffect(() => {
     let cancelled = false;
@@ -91,7 +93,7 @@ export function PdfPreview({ dataUri, filePath, variant = 'iframe' }: PdfPreview
         data-testid="pdf-preview-error"
       >
         <p className="text-sm text-danger-foreground">
-          PDFプレビューを読み込めませんでした。
+          {t('pdfPreview.loadError')}
         </p>
         <a
           href={dataUri}
@@ -99,7 +101,7 @@ export function PdfPreview({ dataUri, filePath, variant = 'iframe' }: PdfPreview
           className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-input text-sm text-foreground hover:bg-muted"
           rel="noopener"
         >
-          Download PDF
+          {t('pdfPreview.downloadPdf')}
         </a>
       </div>
     );
@@ -147,14 +149,14 @@ export function PdfPreview({ dataUri, filePath, variant = 'iframe' }: PdfPreview
             rel="noopener noreferrer"
             className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg bg-accent-600 hover:bg-accent-700 active:bg-accent-800 text-white text-sm font-medium transition-colors"
           >
-            PDFを新しいタブで開く
+            {t('pdfPreview.openInNewTab')}
           </a>
           <a
             href={blobUrl}
             download={fileName}
             className="inline-flex items-center justify-center gap-2 px-6 py-2 rounded-lg border border-input text-sm text-foreground hover:bg-muted transition-colors"
           >
-            ダウンロード
+            {t('pdfPreview.download')}
           </a>
         </div>
       </div>
@@ -165,7 +167,7 @@ export function PdfPreview({ dataUri, filePath, variant = 'iframe' }: PdfPreview
     <iframe
       src={blobUrl}
       sandbox={PDF_IFRAME_SANDBOX}
-      title={`PDF Preview: ${filePath}`}
+      title={t('pdfPreview.title', { path: filePath })}
       className="w-full h-full border-0 bg-white"
       data-testid="pdf-preview-iframe"
     />

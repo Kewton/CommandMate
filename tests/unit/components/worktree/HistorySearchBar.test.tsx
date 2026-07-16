@@ -9,6 +9,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { HistorySearchBar } from '@/components/worktree/HistorySearchBar';
 
+// Issue #1276: this bar shipped hardcoded Japanese, so its labels are now
+// dictionary-driven. The global mock would echo `worktree.history.search.next`
+// and every name-based query below would pass while resolving nothing — back it
+// with the real dictionary instead. Default locale is ja so the pre-migration
+// Japanese assertions keep their original meaning.
+const locale = vi.hoisted(() => ({ current: 'ja' }));
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock(() => locale.current);
+});
+
 function defaultProps(overrides: Partial<React.ComponentProps<typeof HistorySearchBar>> = {}) {
   return {
     query: '',
@@ -28,6 +39,7 @@ function defaultProps(overrides: Partial<React.ComponentProps<typeof HistorySear
 describe('HistorySearchBar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    locale.current = 'ja';
   });
 
   afterEach(() => {
@@ -73,6 +85,36 @@ describe('HistorySearchBar', () => {
         />
       );
       expect(screen.getByRole('status').textContent).toMatch(/500以上/);
+    });
+
+    it('shows the localized at-max count in en', () => {
+      locale.current = 'en';
+      render(
+        <HistorySearchBar
+          {...defaultProps({ matchCount: 500, currentIndex: 0, isAtMaxMatches: true })}
+        />
+      );
+      expect(screen.getByRole('status').textContent).toMatch(/1\/500\+/);
+    });
+  });
+
+  /**
+   * Issue #1276: the bar rendered Japanese regardless of locale before the
+   * migration. These pin the actual rendered wording per locale — the assertion
+   * the echoing global mock could never make.
+   */
+  describe('localization (Issue #1276)', () => {
+    it('renders Japanese labels under the ja locale', () => {
+      render(<HistorySearchBar {...defaultProps()} />);
+      expect(screen.getByRole('search')).toHaveAttribute('aria-label', '履歴内テキスト検索');
+      expect(screen.getByPlaceholderText('検索...')).toBeInTheDocument();
+    });
+
+    it('renders English labels under the en locale', () => {
+      locale.current = 'en';
+      render(<HistorySearchBar {...defaultProps()} />);
+      expect(screen.getByRole('search')).toHaveAttribute('aria-label', 'Search history text');
+      expect(screen.getByPlaceholderText('Search...')).toBeInTheDocument();
     });
   });
 

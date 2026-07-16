@@ -1,0 +1,51 @@
+name: Deploy Landing Page
+
+# Issue #1200: publishes website/ to GitHub Pages.
+#
+# One-time manual setup by a maintainer, deliberately outside this Issue's scope:
+#   Settings -> Pages -> Source: "GitHub Actions"
+# Until that is set, this workflow runs but the deploy step cannot publish.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; let an in-flight one finish rather than
+# cancelling it and leaving the site half-published.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The landing page is plain HTML/CSS/JS with no build step and no npm
+      # dependencies (Issue #1200), so website/ is uploaded as-is.
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: website
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

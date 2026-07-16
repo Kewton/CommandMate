@@ -2,8 +2,99 @@
   "title": "概要",
   "running": "実行中",
   "waiting": "待機中",
+  "sessionOverview": {
+    "title": "セッション概要",
+    "recentSessions": "最近のセッション",
+    "viewAll": "すべて表示"
+  },
+  "sessionSummary": {
+    "loading": "セッション概要を読み込み中",
+    "running": "実行中",
+    "waiting": "待機中"
+  },
+  "recentSessions": {
+    "empty": "最近のセッションはまだありません。",
+    "cta": "まずリポジトリを登録しましょう",
+    "loading": "最近のセッションを読み込み中"
+  },
+  "onboarding": {
+    "title": "はじめかた",
+    "dismiss": "はじめかたを閉じる",
+    "steps": {
+      "registerRepository": "リポジトリを登録する",
+      "sendFirstMessage": "エージェントに最初のメッセージを送る"
+    },
+    "actions": {
+      "registerRepository": "登録する",
+      "sendFirstMessage": "セッションを開く"
+    }
+  },
+  "todo": {
+    "title": "ToDo",
+    "repository": "リポジトリ",
+    "open": "残り{count}件",
+    "noRepositories": "リポジトリがまだありません。Repositories 画面から追加すると ToDo を登録できます。",
+    "inputPlaceholder": "ToDo を追加…",
+    "add": "追加",
+    "loading": "ToDo を読み込み中",
+    "empty": "ToDo はまだありません。",
+    "markAsDone": "完了にする",
+    "markAsNotDone": "未完了に戻す",
+    "delete": "ToDo を削除",
+    "errors": {
+      "load": "ToDo の読み込みに失敗しました",
+      "add": "ToDo の追加に失敗しました",
+      "update": "ToDo の更新に失敗しました",
+      "delete": "ToDo の削除に失敗しました"
+    }
+  },
   "assistant": {
     "clearHistoryConfirm": "このリポジトリとCLIのチャット履歴をすべて削除しますか？過去のメッセージはアシスタントに送信されなくなります。",
-    "changeRepoConfirm": "リポジトリを変更すると進行中の会話が停止します。続行しますか？"
+    "changeRepoConfirm": "リポジトリを変更すると進行中の会話が停止します。続行しますか？",
+    "repositoryLabel": "作業するリポジトリ",
+    "cliLabel": "アシスタント CLI",
+    "noRepositories": "リポジトリがありません",
+    "toolNotInstalled": "{name}（未インストール）",
+    "start": "開始",
+    "starting": "開始中...",
+    "stop": "停止",
+    "stopping": "停止中...",
+    "startDirectory": "開始ディレクトリ: {repository}（{path}）",
+    "startDirectoryHint": "アシスタントセッションの開始ディレクトリとして使うリポジトリを選択してください。",
+    "history": "履歴",
+    "clearHistory": "履歴を削除",
+    "clearing": "削除中...",
+    "loadingConversation": "会話を読み込み中",
+    "inputPlaceholder": "メッセージを入力...（Enter で送信）",
+    "inputPlaceholderWaiting": "実行中の処理が終わるのを待っています",
+    "inputPlaceholderNoSession": "先にセッションを開始してください",
+    "working": "アシスタントが処理中です...",
+    "emptyState": "リポジトリを選択して「開始」を押すとアシスタントセッションが開きます。",
+    "thinking": "{label} が考えています...",
+    "input": {
+      "defaultPlaceholder": "メッセージを入力...",
+      "send": "メッセージを送信"
+    },
+    "message": {
+      "you": "あなた",
+      "sending": "送信中",
+      "sent": "送信済み",
+      "failed": "失敗",
+      "cancel": "キャンセル",
+      "saveAndResend": "保存して再送信",
+      "resending": "再送信中...",
+      "edit": "編集",
+      "editMessage": "メッセージを編集",
+      "editAndResend": "編集して再送信"
+    },
+    "errors": {
+      "loadConversation": "会話の読み込みに失敗しました",
+      "startSession": "セッションの開始に失敗しました",
+      "stopSession": "セッションの停止に失敗しました",
+      "clearHistory": "履歴の削除に失敗しました",
+      "sendMessage": "メッセージの送信に失敗しました",
+      "notReadyToResend": "セッションがメッセージを再送信できる状態ではありません",
+      "resubmitMessage": "メッセージの再送信に失敗しました"
+    }
   }
 }

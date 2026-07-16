@@ -37,4 +37,22 @@ describe('HomeQuickActions', () => {
       expect(screen.getByTestId(`quick-action-${key}`).getAttribute('href')).toBe(href);
     }
   });
+
+  // Issue #1197: labels resolve from the shared `common.nav.*` namespace (the
+  // same keys the command palette uses) rather than module-scope English.
+  it('renders each label via the shared common.nav translation key', () => {
+    render(<HomeQuickActions />);
+    for (const key of ['chat', 'sessions', 'repositories', 'review', 'more']) {
+      expect(screen.getByText(`common.nav.${key}`)).toBeDefined();
+    }
+  });
+
+  it('labels each action link for screen readers via the same key', () => {
+    render(<HomeQuickActions />);
+    for (const key of ['chat', 'sessions', 'repositories', 'review', 'more']) {
+      expect(screen.getByTestId(`quick-action-${key}`).getAttribute('aria-label')).toBe(
+        `common.nav.${key}`
+      );
+    }
+  });
 });

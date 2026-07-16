@@ -23,6 +23,15 @@ import {
 } from '@/lib/cli-tools/types';
 import type { Worktree } from '@/types/models';
 
+// Issue #1277: DesktopHeader's wording (agent status pills, Home/Info, status
+// dropdown) is now dictionary-driven, so resolve keys through the REAL
+// locales/en/*.json — the global echo mock in tests/setup.ts would happily
+// return `worktree.detail.info` for a key that does not exist.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 type SessionStatusMap = NonNullable<Worktree['sessionStatusByCli']>;
 
 /**

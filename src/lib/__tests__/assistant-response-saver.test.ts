@@ -9,12 +9,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '../db/db-migrations';
 import { upsertWorktree, getMessages, updateSessionState, getSessionState } from '../db';
+import type { CLIToolType } from '../cli-tools/types';
 
 // The module we're testing - will be created
 import {
   savePendingAssistantResponse,
   cleanCliResponse,
-  extractAssistantResponseBeforeLastPrompt,
   detectBufferReset,
 } from '../assistant-response-saver';
 
@@ -59,173 +59,6 @@ describe('assistant-response-saver', () => {
 
   afterEach(() => {
     testDb.close();
-  });
-
-  /**
-   * Issue #54: extractAssistantResponseBeforeLastPrompt tests
-   *
-   * This function is the key fix for Issue #54 Problem 4:
-   * - cleanClaudeResponse() extracts AFTER the last prompt (for response-poller)
-   * - extractAssistantResponseBeforeLastPrompt() extracts BEFORE the last prompt (for savePendingAssistantResponse)
-   *
-   * Scenario:
-   * tmuxバッファの状態（ユーザーがメッセージBを送信した時点）:
-   * ─────────────────────────────────────
-   * ❯ メッセージA（前回のユーザー入力）
-   * [前回のassistant応答 - 保存したい内容]
-   * ───
-   * ❯ メッセージB（今回のユーザー入力）  ← 最後のプロンプト
-   * [Claude処理中...]
-   * ─────────────────────────────────────
-   *
-   * We want to extract the content BEFORE ❯ メッセージB
-   */
-  describe('extractAssistantResponseBeforeLastPrompt', () => {
-    describe('claude', () => {
-      it('should extract response BEFORE the last user prompt', () => {
-        // This is the main Issue #54 fix scenario
-        const output = `❯ First message
-Assistant response to first message
-This is the content we want to capture
-───
-❯ Second message
-`;
-        const result = extractAssistantResponseBeforeLastPrompt(output, 'claude');
-
-        // Should extract content BEFORE "❯ Second message"
-        expect(result).toContain('Assistant response to first message');
-        expect(result).toContain('This is the content we want to capture');
-        // Should NOT include the new user message
-        expect(result).not.toContain('Second message');
-      });
-
-      it('should return all content when no user prompt exists', () => {
-        const output = `Assistant response text
-More response content`;
-        const result = extractAssistantResponseBeforeLastPrompt(output, 'claude');
-
-        expect(result).toContain('Assistant response text');
-        expect(result).toContain('More response content');
-      });
-
-      it('should return empty string for empty input', () => {
-        const result = extractAssistantResponseBeforeLastPrompt('', 'claude');
-        expect(result).toBe('');
-      });
-
-      it('should return empty string when output only contains the new prompt', () => {
-        // Edge case: only the new user message, no previous assistant response
-        const output = `❯ New message
-`;
-        const result = extractAssistantResponseBeforeLastPrompt(output, 'claude');
-
-        // No content before the prompt
-        expect(result).toBe('');
-      });
-
-      it('should filter out Claude skip patterns (banners, separators)', () => {
-        const output = `╭───────────────────────────────────╮
-│ Claude Code v1.0.0               │
-╰───────────────────────────────────╯
-Welcome back!
-Tips for getting started
-? for shortcuts
-───────────────────────────────────
-Actual assistant response content
-More useful content
-───────────────────────────────────
-❯ New user message
-`;
-        const result = extractAssistantResponseBeforeLastPrompt(output, 'claude');
-
-        // Should filter out banner elements
-        expect(result).not.toContain('Claude Code v');
-        expect(result).not.toContain('Welcome back');
-        expect(result).not.toContain('Tips for getting started');
-        expect(result).not.toContain('╭');
-        expect(result).not.toContain('╯');
-        // Should keep actual response content
-        expect(result).toContain('Actual assistant response content');
-        expect(result).toContain('More useful content');
-      });
-
-      it('should filter out export and hook commands', () => {
-        const output = `export CLAUDE_HOOKS_test='value'
-/usr/local/bin/claude
-Actual response here
-───
-❯ New message
-`;
-        const result = extractAssistantResponseBeforeLastPrompt(output, 'claude');
-
-        expect(result).not.toContain('export CLAUDE_HOOKS');
-        expect(result).not.toContain('/bin/claude');
-        expect(result).toContain('Actual response here');
-      });
-
-      it('should handle ANSI escape codes', () => {
-        // ANSI code for bold text: \x1b[1m ... \x1b[0m
-        const output = `\x1b[1mBold text\x1b[0m normal text
-Response content
-───
-❯ New message
-`;
-        const result = extractAssistantResponseBeforeLastPrompt(output, 'claude');
-
-        // Should strip ANSI codes and extract content
-        expect(result).toContain('Response content');
-        // ANSI codes should be removed
-        expect(result).not.toContain('\x1b');
-      });
-
-      it('should handle multiple prompts and extract before the last one', () => {
-        const output = `❯ First message
-First response
-───
-❯ Second message
-Second response
-───
-❯ Third message
-`;
-        const result = extractAssistantResponseBeforeLastPrompt(output, 'claude');
-
-        // Should extract everything before "❯ Third message"
-        expect(result).toContain('First response');
-        expect(result).toContain('Second response');
-        expect(result).not.toContain('Third message');
-      });
-
-      it('should handle legacy > prompt character', () => {
-        const output = `> First message
-Assistant response
-───
-> Second message
-`;
-        // Note: The current implementation uses ❯, but we should verify behavior
-        // with legacy > character
-        const result = extractAssistantResponseBeforeLastPrompt(output, 'claude');
-
-        // The function uses ❯ pattern, so > won't be detected as user prompt
-        // This is expected behavior - legacy > is handled differently
-        expect(result).toBeDefined();
-      });
-    });
-
-    describe('non-claude tools', () => {
-      it('should return trimmed output for codex', () => {
-        const output = '  Codex response content  ';
-        const result = extractAssistantResponseBeforeLastPrompt(output, 'codex');
-
-        expect(result).toBe('Codex response content');
-      });
-
-      it('should return trimmed output for gemini', () => {
-        const output = '  Gemini response content  ';
-        const result = extractAssistantResponseBeforeLastPrompt(output, 'gemini');
-
-        expect(result).toBe('Gemini response content');
-      });
-    });
   });
 
   /**
@@ -413,7 +246,7 @@ More response
   describe('savePendingAssistantResponse', () => {
     it('should save assistant response when new output exists after lastCapturedLine', async () => {
       // Setup: lastCapturedLine = 10, current output = 20 lines
-      updateSessionState(testDb, 'test-worktree', 'claude', 10);
+      updateSessionState(testDb, 'test-worktree', 'codex', 10);
 
       // Create output with 20 lines
       const outputLines = [];
@@ -431,7 +264,7 @@ More response
       const result = await savePendingAssistantResponse(
         testDb,
         'test-worktree',
-        'claude',
+        'codex',
         userTimestamp
       );
 
@@ -448,7 +281,7 @@ More response
 
     it('should return null when no new output exists (currentLineCount <= lastCapturedLine)', async () => {
       // Setup: lastCapturedLine = 100, current output = 100 lines (no change)
-      updateSessionState(testDb, 'test-worktree', 'claude', 100);
+      updateSessionState(testDb, 'test-worktree', 'codex', 100);
 
       // Create output with exactly 100 lines
       const outputLines = [];
@@ -463,7 +296,7 @@ More response
       const result = await savePendingAssistantResponse(
         testDb,
         'test-worktree',
-        'claude',
+        'codex',
         userTimestamp
       );
 
@@ -477,34 +310,32 @@ More response
     });
 
     it('should return null when cleaned response is empty', async () => {
-      // Setup: lastCapturedLine = 0, but output is only banner/setup commands
-      updateSessionState(testDb, 'test-worktree', 'claude', 0);
+      // Setup: lastCapturedLine = 0, but output is only shell noise
+      updateSessionState(testDb, 'test-worktree', 'gemini', 0);
 
-      // Claude banner/setup content that will be cleaned away
-      // These patterns are all filtered out by cleanClaudeResponse
-      const bannerOutput = `
-export CLAUDE_HOOKS_completion_hook='...'
-/usr/local/bin/claude
+      // Shell prompt / error lines that cleanGeminiResponse filters away entirely
+      const noiseOutput = `
+zsh: command not found: foo
+zsh: no such file or directory
       `.trim();
 
-      mockCaptureSessionOutput.mockResolvedValue(bannerOutput);
+      mockCaptureSessionOutput.mockResolvedValue(noiseOutput);
 
       const userTimestamp = new Date();
       const result = await savePendingAssistantResponse(
         testDb,
         'test-worktree',
-        'claude',
+        'gemini',
         userTimestamp
       );
 
       // Assert: no message saved (cleaned content is empty)
-      // The export and /usr/local/bin patterns are filtered out
       expect(result).toBeNull();
     });
 
     it('should set assistant timestamp 1ms before user message timestamp', async () => {
       // Setup
-      updateSessionState(testDb, 'test-worktree', 'claude', 0);
+      updateSessionState(testDb, 'test-worktree', 'codex', 0);
 
       const mockOutput = 'Some valid assistant response content\nMore content';
       mockCaptureSessionOutput.mockResolvedValue(mockOutput);
@@ -513,7 +344,7 @@ export CLAUDE_HOOKS_completion_hook='...'
       const result = await savePendingAssistantResponse(
         testDb,
         'test-worktree',
-        'claude',
+        'codex',
         userTimestamp
       );
 
@@ -525,7 +356,7 @@ export CLAUDE_HOOKS_completion_hook='...'
 
     it('should update session state lastCapturedLine after saving', async () => {
       // Setup
-      updateSessionState(testDb, 'test-worktree', 'claude', 5);
+      updateSessionState(testDb, 'test-worktree', 'codex', 5);
 
       // Create output with 20 lines
       const outputLines = [];
@@ -540,18 +371,18 @@ export CLAUDE_HOOKS_completion_hook='...'
       await savePendingAssistantResponse(
         testDb,
         'test-worktree',
-        'claude',
+        'codex',
         userTimestamp
       );
 
       // Assert: session state updated
-      const sessionState = getSessionState(testDb, 'test-worktree', 'claude');
+      const sessionState = getSessionState(testDb, 'test-worktree', 'codex');
       expect(sessionState?.lastCapturedLine).toBe(20);
     });
 
     it('should broadcast message via WebSocket after saving', async () => {
       // Setup
-      updateSessionState(testDb, 'test-worktree', 'claude', 0);
+      updateSessionState(testDb, 'test-worktree', 'codex', 0);
 
       const mockOutput = 'Valid assistant response\nWith multiple lines';
       mockCaptureSessionOutput.mockResolvedValue(mockOutput);
@@ -560,7 +391,7 @@ export CLAUDE_HOOKS_completion_hook='...'
       await savePendingAssistantResponse(
         testDb,
         'test-worktree',
-        'claude',
+        'codex',
         userTimestamp
       );
 
@@ -575,7 +406,7 @@ export CLAUDE_HOOKS_completion_hook='...'
 
     it('should return null and not throw when captureSessionOutput fails', async () => {
       // Setup
-      updateSessionState(testDb, 'test-worktree', 'claude', 0);
+      updateSessionState(testDb, 'test-worktree', 'codex', 0);
 
       mockCaptureSessionOutput.mockRejectedValue(new Error('Session not found'));
 
@@ -583,7 +414,7 @@ export CLAUDE_HOOKS_completion_hook='...'
       const result = await savePendingAssistantResponse(
         testDb,
         'test-worktree',
-        'claude',
+        'codex',
         userTimestamp
       );
 
@@ -602,59 +433,13 @@ export CLAUDE_HOOKS_completion_hook='...'
       const result = await savePendingAssistantResponse(
         testDb,
         'test-worktree',
-        'claude',
+        'codex',
         userTimestamp
       );
 
       // Assert: still saves response (treats lastCapturedLine as 0)
       expect(result).not.toBeNull();
       expect(result?.role).toBe('assistant');
-    });
-
-    /**
-     * Issue #54 Key Fix Test
-     * This test verifies that savePendingAssistantResponse correctly extracts
-     * the assistant response BEFORE the new user prompt (not after it).
-     *
-     * Scenario:
-     * User sends message B -> tmux buffer contains:
-     *   ❯ Message A (previous user input)
-     *   [Previous assistant response - SHOULD BE SAVED]
-     *   ───
-     *   ❯ Message B (new user input)
-     *   [Claude processing...]
-     *
-     * Expected: Save "Previous assistant response" (content before ❯ Message B)
-     */
-    it('should extract and save response BEFORE the last user prompt (Issue #54 fix)', async () => {
-      // Setup
-      updateSessionState(testDb, 'test-worktree', 'claude', 0);
-
-      // Simulate tmux output when user sends a new message
-      // The new message (❯ New message) should trigger saving the PREVIOUS assistant response
-      const mockOutput = `❯ Previous question
-This is the assistant response we want to save
-This content should be captured
-───
-❯ New message from user
-`;
-
-      mockCaptureSessionOutput.mockResolvedValue(mockOutput);
-
-      const userTimestamp = new Date();
-      const result = await savePendingAssistantResponse(
-        testDb,
-        'test-worktree',
-        'claude',
-        userTimestamp
-      );
-
-      // Assert: should save the response BEFORE "❯ New message from user"
-      expect(result).not.toBeNull();
-      expect(result?.content).toContain('This is the assistant response we want to save');
-      expect(result?.content).toContain('This content should be captured');
-      // Should NOT include the new user message
-      expect(result?.content).not.toContain('New message from user');
     });
 
     it('should work with gemini CLI tool', async () => {
@@ -710,7 +495,7 @@ This content should be captured
     describe('buffer reset detection', () => {
       it('should save response when buffer shrinks significantly (1993 -> 608 lines)', async () => {
         // Setup: lastCapturedLine = 1993, but buffer was reset/cleared
-        updateSessionState(testDb, 'test-worktree', 'claude', 1993);
+        updateSessionState(testDb, 'test-worktree', 'codex', 1993);
 
         // Create output with 608 lines (buffer shrunk from 1993)
         const outputLines = [];
@@ -726,7 +511,7 @@ This content should be captured
         const result = await savePendingAssistantResponse(
           testDb,
           'test-worktree',
-          'claude',
+          'codex',
           userTimestamp
         );
 
@@ -735,13 +520,13 @@ This content should be captured
         expect(result?.role).toBe('assistant');
 
         // Verify session state was updated to current line count
-        const sessionState = getSessionState(testDb, 'test-worktree', 'claude');
+        const sessionState = getSessionState(testDb, 'test-worktree', 'codex');
         expect(sessionState?.lastCapturedLine).toBe(608);
       });
 
       it('should save response when session restarts (500 -> 30 lines)', async () => {
         // Setup: lastCapturedLine = 500, session was restarted
-        updateSessionState(testDb, 'test-worktree', 'claude', 500);
+        updateSessionState(testDb, 'test-worktree', 'codex', 500);
 
         // Create output with 30 lines (session restarted)
         const outputLines = [];
@@ -757,7 +542,7 @@ This content should be captured
         const result = await savePendingAssistantResponse(
           testDb,
           'test-worktree',
-          'claude',
+          'codex',
           userTimestamp
         );
 
@@ -769,7 +554,7 @@ This content should be captured
 
       it('should skip when currentLineCount equals lastCapturedLine (no change)', async () => {
         // Setup: Normal duplicate prevention case
-        updateSessionState(testDb, 'test-worktree', 'claude', 100);
+        updateSessionState(testDb, 'test-worktree', 'codex', 100);
 
         // Create output with exactly 100 lines (no new output)
         const outputLines = [];
@@ -784,7 +569,7 @@ This content should be captured
         const result = await savePendingAssistantResponse(
           testDb,
           'test-worktree',
-          'claude',
+          'codex',
           userTimestamp
         );
 
@@ -796,7 +581,7 @@ This content should be captured
         // Setup: lastCapturedLine = 50, current = 30
         // Difference is 20, but lastCapturedLine is not > 50 for session restart
         // and (30 + 25) >= 50 for buffer shrink check
-        updateSessionState(testDb, 'test-worktree', 'claude', 50);
+        updateSessionState(testDb, 'test-worktree', 'codex', 50);
 
         // Create output with 30 lines
         const outputLines = [];
@@ -811,7 +596,7 @@ This content should be captured
         const result = await savePendingAssistantResponse(
           testDb,
           'test-worktree',
-          'claude',
+          'codex',
           userTimestamp
         );
 
@@ -824,7 +609,7 @@ This content should be captured
         // For shrink check: (30 + 25) = 55, which is NOT < 55 (need strict <)
         // For restart check: lastCapturedLine (55) > 50 but currentLineCount (30) < 50
         // This WILL trigger session restart detection
-        updateSessionState(testDb, 'test-worktree', 'claude', 55);
+        updateSessionState(testDb, 'test-worktree', 'codex', 55);
 
         // Create output with 30 lines
         const outputLines = [];
@@ -840,7 +625,7 @@ This content should be captured
         const result = await savePendingAssistantResponse(
           testDb,
           'test-worktree',
-          'claude',
+          'codex',
           userTimestamp
         );
 
@@ -867,7 +652,7 @@ This content should be captured
         const result = await savePendingAssistantResponse(
           testDb,
           'test-worktree',
-          'claude',
+          'codex',
           userTimestamp
         );
 
@@ -878,7 +663,7 @@ This content should be captured
 
       it('should handle empty buffer (currentLineCount = 0)', async () => {
         // Setup: lastCapturedLine = 100, but buffer is now empty
-        updateSessionState(testDb, 'test-worktree', 'claude', 100);
+        updateSessionState(testDb, 'test-worktree', 'codex', 100);
 
         // Empty output
         const mockOutput = '';
@@ -889,7 +674,7 @@ This content should be captured
         const result = await savePendingAssistantResponse(
           testDb,
           'test-worktree',
-          'claude',
+          'codex',
           userTimestamp
         );
 
@@ -899,7 +684,7 @@ This content should be captured
 
       it('should save response on branch switch scenario (1000 -> 200 lines)', async () => {
         // Setup: Simulates switching branches where buffer is different
-        updateSessionState(testDb, 'test-worktree', 'claude', 1000);
+        updateSessionState(testDb, 'test-worktree', 'codex', 1000);
 
         // Create output with 200 lines (different branch context)
         const outputLines = [];
@@ -915,13 +700,104 @@ This content should be captured
         const result = await savePendingAssistantResponse(
           testDb,
           'test-worktree',
-          'claude',
+          'codex',
           userTimestamp
         );
 
         // Assert: should detect buffer reset and save response
         expect(result).not.toBeNull();
         expect(result?.content).toContain('Response in new branch context');
+      });
+    });
+
+    /**
+     * Issue #1292: alternate-screen tools are skipped entirely.
+     *
+     * This function reads the pane as a growing scrollback and treats
+     * lastCapturedLine as a read cursor. Alternate-screen tools (claude since v2,
+     * opencode, copilot) keep no scrollback: capture-pane always returns exactly
+     * pane_height lines, so the cursor saturates after the first save and the
+     * previous turns stay painted on screen.
+     *
+     * Measured against a real Claude session (pane_height=1000): the only message
+     * this path ever produced was the startup banner, saved on the first send —
+     * leaking model/plan, login expiry, MCP auth state and the local cwd into
+     * History. The response poller records these tools' replies instead (#1268).
+     */
+    describe('alternate-screen CLI tools (Issue #1292)', () => {
+      // Verbatim from a real Claude v2 session start (redacted paths aside).
+      const CLAUDE_STARTUP_BANNER = [
+        '▝▜█████▛▘  Opus 4.8 (1M context) with xhigh effort · Claude Max',
+        '  ▘▘ ▝▝    ~/cm-verify/CommandMate',
+        ' ⚠ 3 MCP servers need authentication · run /mcp',
+        ' ⚠ Your login expires in 5 days · run /login to renew',
+        '                                              ◉ xhigh · /effort',
+      ].join('\n');
+
+      it('should not save the Claude startup banner as an assistant message', async () => {
+        mockCaptureSessionOutput.mockResolvedValue(CLAUDE_STARTUP_BANNER);
+
+        const result = await savePendingAssistantResponse(
+          testDb,
+          'test-worktree',
+          'claude',
+          new Date()
+        );
+
+        expect(result).toBeNull();
+
+        const assistantMessages = getMessages(testDb, 'test-worktree')
+          .filter(m => m.role === 'assistant');
+        expect(assistantMessages).toHaveLength(0);
+        expect(mockBroadcastMessage).not.toHaveBeenCalled();
+      });
+
+      it('should keep private banner details out of history entirely', async () => {
+        mockCaptureSessionOutput.mockResolvedValue(CLAUDE_STARTUP_BANNER);
+
+        await savePendingAssistantResponse(testDb, 'test-worktree', 'claude', new Date());
+
+        const history = getMessages(testDb, 'test-worktree').map(m => m.content).join('\n');
+        for (const secret of [
+          'Your login expires',
+          'MCP servers need authentication',
+          'Claude Max',
+          '~/cm-verify/CommandMate',
+          '/effort',
+        ]) {
+          expect(history).not.toContain(secret);
+        }
+      });
+
+      it.each<CLIToolType>(['claude', 'opencode', 'copilot'])(
+        'should skip %s before even capturing the pane',
+        async (tool) => {
+          const result = await savePendingAssistantResponse(
+            testDb,
+            'test-worktree',
+            tool,
+            new Date()
+          );
+
+          expect(result).toBeNull();
+          // Proves the guard short-circuits ahead of any pane read, so no
+          // screen content can reach the cleaners at all.
+          expect(mockCaptureSessionOutput).not.toHaveBeenCalled();
+        }
+      );
+
+      it('should still save for scrollback tools (guard is not a blanket disable)', async () => {
+        mockCaptureSessionOutput.mockResolvedValue('Codex response content');
+
+        const result = await savePendingAssistantResponse(
+          testDb,
+          'test-worktree',
+          'codex',
+          new Date()
+        );
+
+        expect(result).not.toBeNull();
+        expect(mockCaptureSessionOutput).toHaveBeenCalled();
       });
     });
   });

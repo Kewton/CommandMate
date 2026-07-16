@@ -67,6 +67,8 @@ function FileViewerSearchBar({
   onNext: () => void;
   onClose: () => void;
 }) {
+  const t = useTranslations('worktree');
+
   return (
     <div className="flex items-center gap-1 px-2 py-1 bg-muted border-b border-border">
       <input
@@ -78,7 +80,7 @@ function FileViewerSearchBar({
           if (e.key === 'Escape') { onClose(); }
           if (e.key === 'Enter') { if (e.shiftKey) { onPrev(); } else { onNext(); } }
         }}
-        placeholder="検索..."
+        placeholder={t('fileSearch.placeholder')}
         className="flex-1 min-w-0 px-2 py-0.5 text-sm bg-surface dark:bg-surface-2 text-foreground border border-input rounded outline-none focus:ring-1 focus:ring-ring"
         autoComplete="off"
         autoCorrect="off"
@@ -88,9 +90,9 @@ function FileViewerSearchBar({
       <span className="text-xs text-muted-foreground min-w-[3rem] text-right">
         {searchMatches.length > 0 ? `${searchCurrentIdx + 1}/${searchMatches.length}` : '0/0'}
       </span>
-      <button onClick={onPrev} disabled={searchMatches.length === 0} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-muted-foreground hover:text-foreground disabled:text-muted-foreground" aria-label="前の結果">▲</button>
-      <button onClick={onNext} disabled={searchMatches.length === 0} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-muted-foreground hover:text-foreground disabled:text-muted-foreground" aria-label="次の結果">▼</button>
-      <button onClick={onClose} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-muted-foreground hover:text-foreground" aria-label="検索を閉じる"><X className="w-4 h-4" /></button>
+      <button onClick={onPrev} disabled={searchMatches.length === 0} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-muted-foreground hover:text-foreground disabled:text-muted-foreground" aria-label={t('fileSearch.prevMatch')}>▲</button>
+      <button onClick={onNext} disabled={searchMatches.length === 0} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-muted-foreground hover:text-foreground disabled:text-muted-foreground" aria-label={t('fileSearch.nextMatch')}>▼</button>
+      <button onClick={onClose} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-muted-foreground hover:text-foreground" aria-label={t('fileSearch.close')}><X className="w-4 h-4" /></button>
     </div>
   );
 }
@@ -204,7 +206,7 @@ function HtmlPreviewMobile({
                   : 'text-muted-foreground hover:bg-muted'
               }`}
             >
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              {tab === 'source' ? tWorktree('fileViewer.tabSource') : tWorktree('fileViewer.tabPreview')}
             </button>
           ))}
         </div>
@@ -222,7 +224,7 @@ function HtmlPreviewMobile({
                   : 'text-muted-foreground hover:bg-muted'
               }`}
             >
-              {level.charAt(0).toUpperCase() + level.slice(1)}
+              {level === 'safe' ? tWorktree('fileViewer.sandboxSafe') : tWorktree('fileViewer.sandboxInteractive')}
             </button>
           ))}
         </div>
@@ -257,7 +259,7 @@ function HtmlPreviewMobile({
             key={`${filePath}-${sandboxLevel}`}
             srcDoc={iframeSrcDoc}
             sandbox={SANDBOX_ATTRIBUTES[sandboxLevel]}
-            title={`HTML Preview: ${filePath}`}
+            title={tWorktree('htmlPreview.title', { path: filePath })}
             className="w-full h-full border-0 bg-white"
           />
         )}
@@ -298,6 +300,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
   const [marpCurrentSlide, setMarpCurrentSlide] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const codeContainerRef = useRef<HTMLDivElement>(null);
+  const t = useTranslations('worktree');
 
   // [Issue #723] Unified search hook (replaces previously inlined logic at
   // L242-318). Provides debounced (300ms, SEARCH_DEBOUNCE_MS) + minimum-2-char
@@ -395,14 +398,14 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
           const errorData = await response.json();
           const errMsg = typeof errorData.error === 'string'
             ? errorData.error
-            : errorData.error?.message || 'Failed to load file';
+            : errorData.error?.message || t('fileViewer.loadError');
           throw new Error(errMsg);
         }
 
         const data = await response.json();
         setContent(data);
       } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : 'Failed to load file');
+        setError(err instanceof Error ? err.message : t('fileViewer.loadError'));
       } finally {
         setLoading(false);
       }
@@ -522,7 +525,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
               disabled={marpCurrentSlide === 0}
               className="px-3 py-1 text-sm rounded-md bg-muted disabled:opacity-50 hover:bg-muted/80 transition-colors"
             >
-              Prev
+              {t('actions.prev')}
             </button>
             <span className="text-sm text-muted-foreground">
               {marpCurrentSlide + 1} / {marpSlides.length}
@@ -533,13 +536,13 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
               disabled={marpCurrentSlide === marpSlides.length - 1}
               className="px-3 py-1 text-sm rounded-md bg-muted disabled:opacity-50 hover:bg-muted/80 transition-colors"
             >
-              Next
+              {t('actions.next')}
             </button>
           </div>
           <iframe
             srcDoc={marpSlides[marpCurrentSlide]}
             sandbox=""
-            title={`${filePath} - Slide ${marpCurrentSlide + 1}`}
+            title={t('fileViewer.slideTitle', { name: filePath, number: marpCurrentSlide + 1 })}
             className="w-full border-0"
             style={{ height: isFullscreen ? 'calc(100vh - 100px)' : '50vh' }}
           />
@@ -591,9 +594,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
    * fetch above, plus `?download=1` so the server streams the RAW bytes as an
    * attachment (bypassing base64 preview size limits). Rendered independently
    * of `canCopy`/preview success so it is reachable in EVERY state (success,
-   * error, oversize FILE_TOO_LARGE, unsupported/binary). Labels are hardcoded
-   * because FileViewer does not use next-intl (consistent with the other
-   * toolbar buttons).
+   * error, oversize FILE_TOO_LARGE, unsupported/binary).
    */
   const downloadUrl = `/api/worktrees/${worktreeId}/files/${encodePathForUrl(filePath)}?download=1`;
   const downloadName = filePath ? filePath.split('/').pop() || filePath : '';
@@ -604,11 +605,11 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
       href={downloadUrl}
       download={downloadName}
       className={className}
-      aria-label="Download file"
-      title="Download"
+      aria-label={t('actions.downloadFile')}
+      title={t('actions.download')}
     >
       <Download className="w-3.5 h-3.5" />
-      {showLabel && <span>Download</span>}
+      {showLabel && <span>{t('actions.download')}</span>}
     </a>
   );
 
@@ -619,8 +620,8 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
         <button
           onClick={handleCopyPath}
           className="flex-shrink-0 p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-          aria-label="Copy file path"
-          title="Copy path"
+          aria-label={t('actions.copyFilePath')}
+          title={t('actions.copyPath')}
         >
           {pathCopied ? (
             <Check className="w-3.5 h-3.5 text-success" />
@@ -638,8 +639,8 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
           <button
             onClick={openSearch}
             className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-            aria-label="Search in file"
-            title="Search"
+            aria-label={t('actions.searchInFile')}
+            title={t('actions.search')}
           >
             <Search className="w-3.5 h-3.5" />
           </button>
@@ -648,8 +649,8 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
           <button
             onClick={handleEditMarkdown}
             className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-            aria-label="Edit file"
-            title="Edit"
+            aria-label={t('actions.editFile')}
+            title={t('actions.edit')}
           >
             <Pencil className="w-3.5 h-3.5" />
           </button>
@@ -659,8 +660,8 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
             data-testid="copy-content-button"
             onClick={handleCopy}
             className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-            aria-label="Copy file content"
-            title="Copy content"
+            aria-label={t('actions.copyFileContent')}
+            title={t('actions.copyContent')}
           >
             {copied ? (
               <Check className="w-3.5 h-3.5 text-success" />
@@ -676,8 +677,8 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
         <button
           onClick={toggleFullscreen}
           className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-          aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-          title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          aria-label={isFullscreen ? t('actions.exitFullscreen') : t('actions.fullscreen')}
+          title={isFullscreen ? t('actions.exitFullscreen') : t('actions.fullscreen')}
         >
           {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
         </button>
@@ -724,7 +725,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
         {loading && (
           <div className="flex items-center justify-center py-12">
             <Spinner size="xl" variant="accent" />
-            <p className="ml-3 text-muted-foreground">Loading file...</p>
+            <p className="ml-3 text-muted-foreground">{t('fileViewer.loading')}</p>
           </div>
         )}
 

@@ -19,8 +19,9 @@
 | `src/lib/env.ts` | 環境変数取得・フォールバック処理、getDatabasePathWithDeprecationWarning() |
 | `src/lib/db/db-path-resolver.ts` | DBパス解決（getDefaultDbPath()、validateDbPath()） |
 | `src/lib/db/db-migration-path.ts` | DBマイグレーション（migrateDbIfNeeded()、getLegacyDbPaths()） |
-| `src/lib/db/db-instance.ts` | DBインスタンス管理（getEnv().CM_DB_PATH使用） |
-| `src/config/system-directories.ts` | システムディレクトリ定数（SYSTEM_DIRECTORIES、isSystemDirectory()） |
+| `src/lib/db/db-instance.ts` | DBインスタンス管理（getEnv().CM_DB_PATH使用、DB接続は openDatabaseWithAbiRecovery() 経由） |
+| `src/lib/db/abi-recovery.ts` | better-sqlite3 ABI mismatch 検知と自動 rebuild（Issue #1263: isAbiMismatchError()＝code `ERR_DLOPEN_FAILED` かつ message に `NODE_MODULE_VERSION` を含む二条件、rebuildBetterSqlite3()＝`npm rebuild better-sqlite3` を process.execPath を PATH 先頭に固定して実行、openDatabaseWithAbiRecovery()＝正常時ゼロオーバーヘッド・rebuild はプロセス毎1回・失敗時は sudo を促さない手順を提示） |
+| `src/config/system-directories.ts` | システムディレクトリ定数（SYSTEM_DIRECTORIES、isSystemDirectory()、isPathWithin()）。Issue #1285: isSystemDirectory() は候補パスと SYSTEM_DIRECTORIES の**両方**を realpath 解決して境界一致で判定する（macOS の `/tmp`→`/private/tmp` 対策）。片側だけ解決すると素通しするため解決は呼び出し元でなく本関数に集約（I/O を伴う非純粋関数）。未作成パスは最近傍の実在祖先まで遡って解決 |
 | `src/config/status-colors.ts` | ステータス色の一元管理 |
 | `src/app/globals.css` | セマンティックデザイントークン（CSS変数）の定義・登録（Issue #1041）。Issue #1178 の Tailwind 4 CSS-first 移行で `tailwind.config.js` を廃止し `@theme inline` へ統合。詳細は [docs/design-system.md](./design-system.md) を参照 |
 | `src/lib/view-transitions/index.ts` | View Transitions APIガード（Issue #1122: supportsViewTransitions/prefersReducedMotion/startViewTransition。非対応・reduced-motion時は即時実行フォールバック、依存追加なしの薄いラッパでNext15/React19ネイティブへ移行容易）。ページ遷移クロスフェード基盤 |
@@ -51,7 +52,7 @@
 | `src/hooks/useAutoYes.ts` | Auto-Yesクライアント側フック（重複応答防止対応。**Issue #287: promptType/defaultOptionNumber送信** - prompt-response APIリクエストにpromptType/defaultOptionNumberを含め、promptCheck再検証失敗時のフォールバック対応。**Issue #306: generatePromptKey()使用** - promptKey生成をprompt-key.tsの共通ユーティリティに統一） |
 | `src/lib/prompt-response-body-builder.ts` | プロンプト応答リクエストボディ構築ユーティリティ（Issue #287: buildPromptResponseBody()関数でpromptType/defaultOptionNumberを含むリクエストボディを生成、DRY原則対応、useAutoYes/WorktreeDetailRefactoredから共通化） |
 | `src/lib/cli-tools/` | CLIツール抽象化（Strategy パターン） |
-| `src/lib/cli-tools/types.ts` | CLIツール型定義（Issue #368: CLI_TOOL_IDS=['claude','codex','gemini','vibe-local']、CLIToolType、CLI_TOOL_DISPLAY_NAMES、getCliToolDisplayName()で表示名共通化、isCliToolType()型ガード、getCliToolDisplayNameSafe()フォールバック付きラッパー。**Issue #374: VIBE_LOCAL_CONTEXT_WINDOW_MIN=128、VIBE_LOCAL_CONTEXT_WINDOW_MAX=2097152定数追加、isValidVibeLocalContextWindow(value:unknown):value is number 型ガード関数追加（API層・CLI層で共有）。Issue #379: CLI_TOOL_IDS=['claude','codex','gemini','vibe-local','opencode']（5ツール）、CLI_TOOL_DISPLAY_NAMES に opencode:'OpenCode' 追加。**Issue #545: CLI_TOOL_IDS に 'copilot' 追加（6ツール）、CLI_TOOL_DISPLAY_NAMES に copilot:'GitHub Copilot' 追加**。**Issue #988: CLI_TOOL_IDS に 'antigravity' 追加（7ツール）、CLI_TOOL_DISPLAY_NAMES に antigravity:'Antigravity' 追加**）。CLIツール型定義（IImageCapableCLITool/isImageCapableCLITool追加）（Issue #474）（Issue #988: antigravity追加、7ツール対応） |
+| `src/lib/cli-tools/types.ts` | CLIツール型定義（Issue #368: CLI_TOOL_IDS=['claude','codex','gemini','vibe-local']、CLIToolType、CLI_TOOL_DISPLAY_NAMES、getCliToolDisplayName()で表示名共通化、isCliToolType()型ガード、getCliToolDisplayNameSafe()フォールバック付きラッパー。**Issue #374: VIBE_LOCAL_CONTEXT_WINDOW_MIN=128、VIBE_LOCAL_CONTEXT_WINDOW_MAX=2097152定数追加、isValidVibeLocalContextWindow(value:unknown):value is number 型ガード関数追加（API層・CLI層で共有）。Issue #379: CLI_TOOL_IDS=['claude','codex','gemini','vibe-local','opencode']（5ツール）、CLI_TOOL_DISPLAY_NAMES に opencode:'OpenCode' 追加。**Issue #545: CLI_TOOL_IDS に 'copilot' 追加（6ツール）、CLI_TOOL_DISPLAY_NAMES に copilot:'GitHub Copilot' 追加**。**Issue #988: CLI_TOOL_IDS に 'antigravity' 追加（7ツール）、CLI_TOOL_DISPLAY_NAMES に antigravity:'Antigravity' 追加**）。CLIツール型定義（IImageCapableCLITool/isImageCapableCLITool追加）（Issue #474）（Issue #988: antigravity追加、7ツール対応）。**Issue #1268: usesAlternateScreen(cliToolId) 追加** - alternate screen で描画するツール（claude/opencode/copilot）を判定。これらは tmux が scrollback を持たない（history_size=0, alternate_on=1）ため capture-pane が常に pane_height 行を返し、行数は「読んだ位置」のカーソルにならない。response-checker の重複判定分岐に使用 |
 | `src/lib/cli-tools/vibe-local.ts` | Vibe Local CLIツール実装（Issue #368: VibeLocalTool、BaseCLITool継承、tmuxセッション管理。**Issue #374: startSession()で--context-windowオプション対応、DBからvibeLocalContextWindow取得、defense-in-depth バリデーション後 --context-window ${Number(ctxWindow)} を追加（tmuxセッションのみ、-pモードはスコープ外）**） |
 | `src/lib/cli-tools/opencode.ts` | OpenCode CLIツール実装（Issue #379: OpenCodeTool、BaseCLITool継承、tmuxセッション管理。startSession()でensureOpencodeConfig()+tmux 80カラム幅起動（サイドバー非表示）、sendMessage()でsend-keys+C-m+pasted-text検知、killSession()で/exitグレースフルシャットダウン→タイムアウト後tmux kill-sessionフォールバック（D1-006/D1-007）、interrupt()はBaseCLIToolのEscapeキー継承（D2-008）、OPENCODE_EXIT_COMMAND='/exit'、OPENCODE_INIT_WAIT_MS=15000） |
 | `src/lib/cli-tools/opencode-config.ts` | OpenCode設定自動生成モジュール（Issue #379: ensureOpencodeConfig()でOllama API/api/tagsからモデル取得→opencode.json生成（存在時はスキップ）。SEC-001 SSRF防止: OLLAMA_API_URL/OLLAMA_BASE_URLはハードコード定数。D4-003: OLLAMA_MODEL_PATTERN=/^[a-zA-Z0-9._:/-]{1,100}$/（長さ制限付き）。D4-004: validateWorktreePath()で3層パストラバーサル防御（path.resolve+lstatSync+realpathSync）。D4-005: JSON.stringify()でopencode.json生成（テンプレートリテラル禁止）。D4-007: レスポンスサイズ制限1MB+スキーマバリデーション。MAX_OLLAMA_MODELS=100でDoS防御。Ollama未起動時は非致命的エラーで続行。**Issue #398: LM Studio統合** - fetchOllamaModels()/fetchLmStudioModels()独立関数化（Promise.all並列取得、失敗時は空{}返却）、LM_STUDIO_API_URL='http://localhost:1234/v1/models'/LM_STUDIO_BASE_URL='http://localhost:1234/v1'（SEC-001 SSRFハードコード）、LM_STUDIO_MODEL_PATTERN=/^[a-zA-Z0-9._:/@-]{1,200}$/（@許可・200文字制限）、MAX_LM_STUDIO_MODELS=100、ProviderModels型エイリアス（Record<string,{name:string}>）、動的プロバイダー構成（0件プロバイダー省略・両方0件時opencode.json非生成）、lmstudioプロバイダー（npm:@ai-sdk/openai-compatible、name:'LM Studio (local)'））。OpenCode設定自動生成（Ollama/LM Studio） |
@@ -150,9 +151,9 @@
 | `src/lib/log-manager.ts` | Claude 出力の Markdown ログファイル管理（getLogFilePath/createLog/appendToLog/readLog/listLogs/cleanupOldLogs、CLIツール別ディレクトリ、date-fns でファイル名生成）。Markdownログファイル管理 |
 | `src/lib/conversation-logger.ts` | 会話ログヘルパー（recordClaudeConversation で Claude レスポンスを直近ユーザー入力とペアリングし Markdown ログに記録、エラーは握り潰し API 継続）。会話ログ記録 |
 | `src/lib/conversation-grouper.ts` | 会話グルーピング（groupMessagesIntoPairs でフラットなメッセージ配列を ConversationPair に変換、isCompletedPair/isPendingPair/isOrphanPair/getCombinedAssistantContent、UI 表示用）。会話ペアグルーピング |
-| `src/lib/assistant-response-saver.ts` | 保留アシスタントレスポンス保存（Issue #53: 次ユーザー入力トリガーパターン、extractAssistantResponseBeforeLastPrompt/detectBufferReset/cleanCliResponse/savePendingAssistantResponse、CLIツール別クリーニング＋timestamp 順序保証＋重複保存防止）。保留レスポンス保存 |
+| `src/lib/assistant-response-saver.ts` | 保留アシスタントレスポンス保存（Issue #53: 次ユーザー入力トリガーパターン、detectBufferReset/cleanCliResponse/savePendingAssistantResponse、CLIツール別クリーニング＋timestamp 順序保証＋重複保存防止）。scrollback 系ツール専用: alternate screen 系（claude/opencode/copilot）は lastCapturedLine がカーソルにならないため poller に委ね早期 return（Issue #1268/#1292） |
 | `src/lib/prompt-answer-sender.ts` | プロンプト応答送信共通モジュール（Issue #287 Bug2: route.ts/auto-yes-manager.ts から抽出、sendPromptAnswer で cursor-key/text ベース tmux 入力、SubmitMode 解決＋promptType/defaultOptionNumber フォールバック、送信後 invalidateCache）。プロンプト応答送信 |
-| `src/lib/standard-commands.ts` | 組み込みスラッシュコマンド静的定義（Issue #56, #4: STANDARD_COMMANDS、Claude/Codex 別 cliTools、FREQUENTLY_USED、getStandardCommandGroups/getFrequentlyUsedCommands。Issue #594: Codex 共有は cliTools 明示オプトイン）。標準CLIツールコマンド定義 |
+| `src/lib/standard-commands.ts` | 組み込みスラッシュコマンド静的定義（Issue #56, #4: STANDARD_COMMANDS、Claude/Codex 別 cliTools、FREQUENTLY_USED、getStandardCommandGroups/getFrequentlyUsedCommands。Issue #594: Codex 共有は cliTools 明示オプトイン。Issue #1306: description は持たず `descriptionKey: 'slashCommands.descriptions.<name>'` を持ち描画時に解決。`name` は翻訳対象外）。標準CLIツールコマンド定義 |
 | `src/lib/agent-instances-validator.ts` | エージェントインスタンスバリデータ（Issue #869: PATCH /api/worktrees/[id] の agentInstances 検証、validateAgentInstancesInput→{valid,value?,error?}、1..MAX_AGENT_INSTANCES、id 一意性／primary anchor の id===cliTool 整合／order 正規化）。agentInstances 検証 |
 | `src/lib/memo-reorder-validator.ts` | メモ並び替えバリデータ（Issue #944: PATCH /api/worktrees/[id]/memos の memoIds 検証、validateMemoReorderInput(memoIds, existingMemos)→{valid,error?}、非配列/非string/件数不一致/重複/worktree 既存 ID 集合との不一致を拒否。reorderMemos は無検証のため呼び出し側責務を分離。Next.js route は handler 以外 export 不可のため独立モジュール化）。memo 並び替え検証 |
 | `src/lib/git-ai-prompt-templates.ts` | Git「Ask AI」プロンプトテンプレート（Issue #817: GitPane の Ask AI ボタンが MessageInput に投入する日本語プロンプトの単一ソース、branchCreatePrompt/branchDeletePrompt/stashCleanupPrompt/resetPrompt/revertPrompt/forcePushPrompt 等の純粋文字列ビルダー）。Git Ask AI プロンプト |
@@ -173,7 +174,7 @@
 | `tests/helpers/message-input-test-utils.ts` | MessageInputテスト共通ヘルパー（Issue #288: モック定数、props factory、DOM queries、interaction helpers、DRY原則対応） |
 | `src/lib/slash-commands.ts` | スラッシュコマンドローダー（Issue #343: loadSkills()追加、safeParseFrontmatter()でgray-matter RCE対策[S001]、deduplicateByName()でcommand優先重複排除[D001]、skillsCacheをcommandsCacheと独立管理[D011]、MAX_SKILLS_COUNT=100/MAX_SKILL_FILE_SIZE_BYTES=64KB DoS防御[S002]、getSlashCommandGroups()でskills統合）。スラッシュコマンドローダー（.claude/commands, .claude/skills, .codex/skills対応、getCopilotBuiltinCommands追加）（Issue #166, #547）。Issue #790で `.codex/prompts/` ローダ（loadCodexPrompts/parseCodexPromptFile/CODEX_PROMPTS_SUBDIR）を廃止（Codex CLI が読まないディレクトリのため）。Codex skill は現行CLI標準の `.agents/skills/{name}/SKILL.md`（loadAgentsSkills、Issue #1165）と後方互換の `.codex/skills/{name}/SKILL.md`（loadCodexSkills）双方をスキャン。両者とも `~/.../.system/*` built-in を expandSystem 再帰スキャンし `source:'codex-skill'`/`cliTools:['codex']` 付与、deduplicateByName で name 重複排除。ローカル(worktree)は getSlashCommandGroups、グローバル(~)は slash-commands API route が担当 |
 | `src/types/slash-commands.ts` | スラッシュコマンド型定義（Issue #343: SlashCommandCategoryに'skill'追加、SlashCommandSourceに'skill'追加、CATEGORY_LABELSにskill:'Skills'追加） |
-| `src/lib/command-merger.ts` | コマンドマージロジック（Issue #343: CATEGORY_ORDERに'skill'をworkflowとstandard-sessionの間に追加） |
+| `src/lib/command-merger.ts` | コマンドマージロジック（Issue #343: CATEGORY_ORDERに'skill'をworkflowとstandard-sessionの間に追加。Issue #1306: filterCommandGroups は第3引数 resolveDescription で解決済み説明文を検索。未指定だと descriptionKey 方式のコマンドが説明文検索から漏れる） |
 | `src/lib/db/worktree-db.ts` | Worktree CRUD操作、archivedフィルタ対応（Issue #479, #168）、getRepositories に visible/enabled 追加（Issue #690） |
 | `src/lib/db/chat-db.ts` | チャットメッセージCRUD操作、論理削除（archived）・GetMessagesOptions・ACTIVE_FILTER（Issue #479, #168）、instance_id 列・getMessages の instanceId フィルタ・deleteMessagesByInstance（Issue #868） |
 | `src/lib/db/session-db.ts` | セッション状態管理（Issue #479）、PK を (worktree_id, instance_id) に拡張しインスタンス単位で状態保持（Issue #868） |
@@ -182,6 +183,7 @@
 | `src/lib/db/worktree-todo-db.ts` | ブランチ（worktree）単位 ToDo CRUD＋reorder（getTodosByWorktreeId/createTodo/updateTodo/deleteTodo/reorderTodos）。memo-db パターン踏襲・worktree_id キー・ON DELETE CASCADE。db.ts バレルは getWorktreeTodoById 等にエイリアスして repository todo-db と衝突回避（Issue #1015）。Issue #1032で status 3状態（todo/doing/done）を真値化・done は派生。Issue #1034（migration v39）で detail フィールド追加（既定 ''、createTodo/updateTodo/mapTodoRow で受理） |
 | `src/lib/db/template-db.ts` | レポートテンプレートCRUD操作（getAllTemplates, getTemplateById, createTemplate, updateTemplate, deleteTemplate, getTemplateCount）（Issue #618） |
 | `src/lib/polling/prompt-dedup.ts` | プロンプト重複検出（SHA-256ハッシュキャッシュ）（Issue #565） |
+| `src/lib/polling/response-dedup.ts` | assistant応答の重複検出（SHA-256ハッシュキャッシュ、isDuplicateResponse/clearResponseHashCache）。alternate screen 系ツールは行数カーソルが使えないため内容ハッシュで代替（Issue #1268）。キャッシュは stopPolling() でクリア＝1ポーリングサイクル（1ターン）限り。次ターンで同一内容の応答が来たら保存する（永続化すると #1268 の再発） |
 | `src/lib/response-extractor.ts` | レスポンス抽出ロジック（resolveExtractionStartIndex, isOpenCodeComplete）（Issue #479）、Copilot分岐追加（Issue #565）。Issue #988: antigravity分岐追加（branch 2a'＝user echoアンカー優先、未検出時lastCapturedLineフォールバック） |
 | `src/lib/response-cleaner.ts` | CLIツール別レスポンスクリーニング（cleanClaudeResponse, cleanCopilotResponse等）（Issue #479, #565） |
 | `src/lib/tui-accumulator.ts` | TUIアキュムレータ状態管理（Issue #479）、extractCopilotContentLines/normalizeCopilotLine追加（Issue #565） |
@@ -228,7 +230,7 @@
 | `src/app/login/page.tsx` | ログイン画面（Issue #331: トークン認証フォーム、Rate limit/ロックアウト表示、認証無効時は / へリダイレクト。Issue #383: ngrok 経由モバイルアクセス用 QR コードログイン）。ログインページ |
 | `src/lib/session-key-sender.ts` | Claudeセッションキー送信ロジック（Issue #479） |
 | `src/lib/prompt-answer-input.ts` | プロンプト応答入力ロジック（getAnswerInput）（Issue #479） |
-| `src/lib/slash-command-format.ts` | スラッシュコマンドトリガ表記（getSlashCommandTrigger）。Issue #790で Codex skill（`source==='codex-skill'`）は Codex CLI 公式構文 `$NAME`、その他（Claude/Copilot/Gemini）は `/NAME` を返す |
+| `src/lib/slash-command-format.ts` | スラッシュコマンドトリガ表記（getSlashCommandTrigger）。Issue #790で Codex skill（`source==='codex-skill'`）は Codex CLI 公式構文 `$NAME`、その他（Claude/Copilot/Gemini）は `/NAME` を返す。Issue #1306: resolveCommandDescription(command, t) が descriptionKey（組み込み）と description（ユーザー定義 frontmatter）の両方を解決 |
 | `src/lib/link-utils.ts` | リンク種別判定・相対パス解決・hrefサニタイズ（Issue #505） |
 | `src/lib/terminal-highlight.ts` | CSS Custom Highlight API ラッパー（Issue #47）XSS安全なターミナルハイライト。Issue #716で名前空間分離（HighlightNamespace型、HISTORY_SEARCH_NAMESPACE、applyHistoryHighlights/clearHistoryHighlights追加）。Issue #744で `makeHistoryNamespace(splitIndex)` ファクトリ追加（`history-search-${splitIndex}` 等の per-split namespace で `CSS.highlights` グローバルレジストリの上書き衝突を回避）、`applyHistoryHighlights`/`clearHistoryHighlights` に optional `namespace` 引数を additive 追加（default=`HISTORY_SEARCH_NAMESPACE`＝後方互換） |
 | `src/lib/git/git-route-helpers.ts` | Git API route 共有バリデーション（Issue #780）。`validateFilesBody(files, worktreePath)`＝stage/unstage 共通の `files[]` 検証（非空 string 配列／`MAX_GIT_FILES` 上限／per-file `isPathSafe`、不正時に status 付きエラーを返す）。`@/lib/git/git-utils` を `vi.mock` する route テストに shadow されないよう git-utils と分離した独立モジュール。Issue #781で `validateGitBranchName(name)` 追加＝checkout/create/delete 共通の branch 名検証（**CLI `validateBranchName` とは別名・別実装** S3-003：先頭 `-`／`..`／先頭末尾 `.`／末尾 `.lock`／`@{`／`~^:?*[\`／空白・制御文字／`//`／先頭末尾 `/`／len>255 を拒否、`.` を**許可**＝`release/1.2` OK。git check-ref-format サブセットを正規表現で内製・子プロセス無し）。戻り値＝検証済み string OR 400 `{error, reason:'invalid_branch_name'}` NextResponse。Issue #782で `validateStashIndex(index)` 追加＝stash pop/apply/drop 共通の index 検証（`number` body または `[index]` 動的セグメント string を受け、`/^\d+$/` 非負整数かつ `MAX_STASH_INDEX` 以下、不正時 400 `{error, reason:'invalid_stash_index'}`。検証済み number を返すため `stash@{N}` 埋め込みは injection-free） |
@@ -380,18 +382,28 @@
 
 | モジュール | 説明 |
 |-----------|------|
-| `src/cli/index.ts` | CLIメインロジック（commander設定） |
-| `src/cli/commands/init.ts` | initコマンド（対話形式/非対話形式対応、Issue #119）。initコマンド（対話/非対話） |
-| `src/cli/commands/start.ts` | startコマンド（フォアグラウンド/デーモン起動、--issue対応 Issue #136）。startコマンド（--issue対応） |
+| `src/cli/index.ts` | CLIエントリポイント。`buildProgram().parse()` の副作用のみ（Issue #1195） |
+| `src/cli/program.ts` | commander設定・buildProgram()。ルート action / `--no-open` / helpCommand(true)（Issue #1195） |
+| `src/cli/commands/quickstart.ts` | 引数なし実行のガイド付き起動（init→start→readiness→ブラウザ、冪等）（Issue #1195） |
+| `src/cli/commands/init.ts` | initコマンド（対話/非対話、Issue #119）。runInit()はexitせずInitResultを返す（Issue #1195） |
+| `src/cli/commands/start.ts` | startコマンド（前景/デーモン、--issue対応 Issue #136）。runStart()はexitせずStartResultを返す（Issue #1195） |
 | `src/cli/commands/stop.ts` | stopコマンド（サーバー停止、--issue対応 Issue #136） |
 | `src/cli/commands/status.ts` | statusコマンド（状態確認、--issue/--all対応 Issue #136）。statusコマンド（--all対応） |
-| `src/cli/utils/preflight.ts` | システム依存関係チェック |
+| `src/cli/commands/update.ts` | updateコマンド（停止→npm install -g→再起動、--check/--yes）（Issue #1194） |
+| `src/cli/utils/preflight.ts` | システム依存関係チェック（compareVersionsはsemver.tsへ移譲、Issue #1194） |
+| `src/cli/utils/semver.ts` | semver 3方向比較（compareVersions/isComparableVersion）（Issue #1194） |
+| `src/cli/utils/npm-runner.ts` | npm実行ラッパ（viewLatestVersion/installGlobalLatest）（Issue #1194） |
+| `src/cli/utils/health-check.ts` | 更新後readiness確認（waitForReady: ready/degraded/timeout）（#1194） |
+| `src/cli/utils/worktree-servers.ts` | 稼働中worktreeサーバ列挙（listRunningWorktreeServers）（Issue #1194） |
 | `src/cli/utils/env-setup.ts` | 環境設定ファイル生成、getPidFilePath()、パストラバーサル対策（Issue #125, #136） |
-| `src/cli/utils/daemon.ts` | デーモンプロセス管理、dotenv読み込み、セキュリティ警告（Issue #125） |
+| `src/cli/utils/daemon.ts` | デーモンプロセス管理、dotenv読み込み、セキュリティ警告、getEffectiveEnv()（Issue #125, #1266） |
+| `src/cli/utils/server-url.ts` | サーバURL解決の単一情報源（resolveServerEndpoint / loadEffectiveEnv: .env が環境変数より優先）（Issue #1266） |
 | `src/cli/utils/pid-manager.ts` | PIDファイル管理（O_EXCLアトミック書き込み） |
 | `src/cli/utils/security-logger.ts` | セキュリティイベントログ |
 | `src/cli/utils/prompt.ts` | 対話形式プロンプトユーティリティ（Issue #119） |
-| `src/cli/utils/install-context.ts` | インストールコンテキスト検出（isGlobalInstall, getConfigDir）（Issue #136） |
+| `src/cli/utils/server-ready.ts` | サーバ起動完了待ち（waitForServer: TCPポーリング、throwしない）（Issue #1195） |
+| `src/cli/utils/browser.ts` | ブラウザ自動オープン（open/xdg-open、CI・SSH・DISPLAY判定、依存追加なし）（Issue #1195） |
+| `src/cli/utils/install-context.ts` | インストールコンテキスト検出（isGlobalInstall, getConfigDir。npxは global 扱い）（Issue #136, #1195） |
 | `src/cli/utils/input-validators.ts` | 入力検証（Issue番号、ブランチ名）（Issue #136） |
 | `src/cli/utils/resource-resolvers.ts` | リソースパス解決（DB、PID、Log）（Issue #136） |
 | `src/cli/utils/port-allocator.ts` | ポート自動割り当て（MAX_WORKTREES=10制限）（Issue #136） |
@@ -402,7 +414,7 @@
 | `src/cli/utils/docs-reader.ts` | ドキュメント読み取りユーティリティ（Issue #264: SECTION_MAPホワイトリスト、パストラバーサル防止、検索クエリ長制限） |
 | `src/cli/config/cli-dependencies.ts` | 依存関係定義（Issue #264: gh CLIをオプション依存として追加） |
 | `src/cli/config/ai-integration-messages.ts` | AIツール統合ガイドメッセージ（Issue #264: init完了後に表示） |
-| `src/cli/types/index.ts` | CLI共通型定義（ExitCode enum、StartOptions、StopOptions、StatusOptions、IssueCreateOptions、DocsOptions） |
+| `src/cli/types/index.ts` | CLI共通型定義（ExitCode enum: UPDATE_FAILED=5 追加 Issue #1194、各コマンドのOptions） |
 | `src/cli/commands/ls.ts` | lsコマンド（worktree一覧表示、--json/--quiet/--branch対応）（Issue #518） |
 | `src/cli/commands/send.ts` | sendコマンド（エージェントへのメッセージ送信、--auto-yes/--agent対応）（Issue #518） |
 | `src/cli/commands/wait.ts` | waitコマンド（エージェント完了/プロンプト検出待機、--timeout/--stall-timeout/--on-prompt対応）（Issue #518） |

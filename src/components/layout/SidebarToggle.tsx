@@ -8,6 +8,7 @@
 'use client';
 
 import React, { memo } from 'react';
+import { useTranslations } from 'next-intl';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 
 // ============================================================================
@@ -25,13 +26,14 @@ import { useSidebarContext } from '@/contexts/SidebarContext';
  * ```
  */
 export const SidebarToggle = memo(function SidebarToggle() {
+  const t = useTranslations('common');
   const { isOpen, toggle } = useSidebarContext();
 
   return (
     <button
       data-testid="sidebar-toggle"
       onClick={toggle}
-      aria-label={isOpen ? 'Close sidebar' : 'Open sidebar'}
+      aria-label={isOpen ? t('sidebar.close') : t('sidebar.open')}
       aria-expanded={isOpen}
       className={`
         absolute z-10 p-2 rounded-md

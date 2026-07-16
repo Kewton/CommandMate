@@ -8,6 +8,7 @@
 'use client';
 
 import React, { memo, useState, useCallback, useRef } from 'react';
+import { useTranslations } from 'next-intl';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { Spinner } from '@/components/ui/Spinner';
 
@@ -53,6 +54,7 @@ export const InterruptButton = memo(function InterruptButton({
   disabled = false,
   onInterrupt,
 }: InterruptButtonProps) {
+  const t = useTranslations('worktree');
   const [isLoading, setIsLoading] = useState(false);
   const lastClickTimeRef = useRef<number>(0);
 
@@ -99,7 +101,7 @@ export const InterruptButton = memo(function InterruptButton({
       onClick={handleInterrupt}
       disabled={disabled || isLoading}
       className="flex-shrink-0 p-2 text-danger hover:bg-danger/10 rounded-full transition-colors disabled:text-muted-foreground/40 disabled:hover:bg-transparent"
-      aria-label="Stop processing"
+      aria-label={t('interrupt.stopProcessing')}
       data-testid="interrupt-button"
     >
       {isLoading ? (

@@ -9,6 +9,7 @@
 'use client';
 
 import React, { memo } from 'react';
+import { useTranslations } from 'next-intl';
 
 // ============================================================================
 // Types
@@ -54,13 +55,15 @@ export const DiffViewer = memo(function DiffViewer({
   filePath,
   onClose,
 }: DiffViewerProps) {
+  const t = useTranslations('worktree');
+
   return (
     <div className="h-full flex flex-col bg-surface">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-muted shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-xs font-medium text-accent-600 dark:text-accent-400 shrink-0">
-            DIFF
+            {t('diffViewer.badge')}
           </span>
           <span className="text-xs font-mono text-muted-foreground truncate">
             {filePath}
@@ -70,7 +73,7 @@ export const DiffViewer = memo(function DiffViewer({
           type="button"
           onClick={onClose}
           className="p-1 text-muted-foreground hover:text-foreground rounded shrink-0"
-          aria-label="Close diff view"
+          aria-label={t('diffViewer.close')}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

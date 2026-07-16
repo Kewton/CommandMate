@@ -11,6 +11,7 @@
 'use client';
 
 import { memo, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import type { ChangedFile, CommitInfo } from '@/types/git';
 import {
   STATUS_TEXT_COLOR,
@@ -73,6 +74,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
   isLoadingDiff,
 }: GitCommitHistoryPanelProps) {
   const { isMobile } = useGitPaneContext();
+  const t = useTranslations('worktree');
 
   // Collapsible section states (local UI concern for the detail view).
   const [changedFilesOpen, setChangedFilesOpen] = useState(true);
@@ -88,13 +90,13 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
           className="flex items-center gap-1 text-sm font-medium text-muted-foreground cursor-pointer hover:text-foreground"
         >
           <span className="text-xs w-4 text-center">{commitListOpen ? '▼' : '▶'}</span>
-          Commit History
+          {t('git.history.title')}
         </button>
         <button
           type="button"
           onClick={onRefresh}
           className="p-1 text-muted-foreground hover:text-foreground rounded"
-          aria-label="Refresh commit history"
+          aria-label={t('git.history.refresh')}
         >
           <RefreshIcon />
         </button>
@@ -104,7 +106,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
       {commitListOpen && isLoading && (
         <div className="flex items-center justify-center py-8" role="status">
           <Spinner size="lg" variant="accent" />
-          <span className="sr-only">Loading commit history...</span>
+          <span className="sr-only">{t('git.history.loading')}</span>
         </div>
       )}
 
@@ -118,7 +120,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
       {/* Empty state */}
       {commitListOpen && !isLoading && !commitError && commits.length === 0 && (
         <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-          No commits found
+          {t('git.history.empty')}
         </div>
       )}
 
@@ -163,11 +165,11 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                           type="button"
                           onClick={() => onToggleInlineDiff(commit.hash)}
                           className="shrink-0 px-2 text-xs text-accent-600 dark:text-accent-400 hover:bg-muted hover:underline"
-                          aria-label={`View diff for ${commit.shortHash}`}
+                          aria-label={t('git.history.viewDiffFor', { hash: commit.shortHash })}
                           aria-expanded={inlineOpen}
                           data-testid="git-commit-view-diff-button"
                         >
-                          {inlineOpen ? 'Hide diff' : 'View diff'}
+                          {inlineOpen ? t('git.history.hideDiff') : t('git.history.viewDiff')}
                         </button>
                       </div>
 
@@ -180,13 +182,13 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                           {inlineFilesLoading && (
                             <div className="flex items-center justify-center py-3" role="status">
                               <Spinner size="sm" variant="accent" />
-                              <span className="sr-only">Loading changed files...</span>
+                              <span className="sr-only">{t('git.history.loadingChangedFiles')}</span>
                             </div>
                           )}
                           {inlineFilesError && <InlineError message={inlineFilesError} />}
                           {!inlineFilesLoading && !inlineFilesError && inlineFiles.length === 0 && (
                             <div className="px-3 py-2 text-xs text-muted-foreground">
-                              No changed files
+                              {t('git.history.noChangedFiles')}
                             </div>
                           )}
                           {!inlineFilesLoading && inlineFiles.length > 0 && (
@@ -201,7 +203,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                                         ? 'bg-accent-50 dark:bg-accent-900/30'
                                         : ''
                                     }`}
-                                    aria-label={`Show commit diff for ${file.path}`}
+                                    aria-label={t('git.history.showCommitDiff', { path: file.path })}
                                     data-testid="git-commit-inline-file"
                                   >
                                     <span className={`inline-block w-14 font-medium ${STATUS_TEXT_COLOR[file.status]}`}>
@@ -234,7 +236,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                 className="w-full flex items-center gap-1 px-3 py-2 text-xs font-medium text-muted-foreground bg-surface-2 sticky top-0 z-10 cursor-pointer hover:text-foreground"
               >
                 <span className="w-4 text-center">{changedFilesOpen ? '▼' : '▶'}</span>
-                Changed Files
+                {t('git.history.changedFiles')}
               </button>
 
               {changedFilesOpen && (
@@ -245,12 +247,12 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                   {isLoadingFiles && (
                     <div className="flex items-center justify-center py-4" role="status">
                       <Spinner size="sm" variant="accent" />
-                      <span className="sr-only">Loading changed files...</span>
+                      <span className="sr-only">{t('git.history.loadingChangedFiles')}</span>
                     </div>
                   )}
                   {!isLoadingFiles && !detailError && changedFiles.length === 0 && (
                     <div className="px-3 py-2 text-xs text-muted-foreground">
-                      No changed files
+                      {t('git.history.noChangedFiles')}
                     </div>
                   )}
                   {!isLoadingFiles && changedFiles.length > 0 && (
@@ -289,14 +291,14 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                     className="w-full flex items-center gap-1 px-3 py-2 text-xs font-medium text-muted-foreground bg-surface-2 sticky top-0 z-10 cursor-pointer hover:text-foreground"
                   >
                     <span className="w-4 text-center">{diffOpen ? '▼' : '▶'}</span>
-                    Diff: {selectedFile}
+                    {t('git.history.diffLabel', { file: selectedFile })}
                   </button>
                   {diffOpen && (
                     <>
                       {isLoadingDiff && (
                         <div className="flex items-center justify-center py-4" role="status">
                           <Spinner size="sm" variant="accent" />
-                          <span className="sr-only">Loading diff...</span>
+                          <span className="sr-only">{t('git.history.loadingDiff')}</span>
                         </div>
                       )}
                       {!isLoadingDiff && diffContent && (
@@ -312,7 +314,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                       )}
                       {!isLoadingDiff && !diffContent && !detailError && (
                         <div className="px-3 py-2 text-xs text-muted-foreground">
-                          No diff available
+                          {t('git.history.noDiff')}
                         </div>
                       )}
                     </>
@@ -323,7 +325,9 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
               {/* PC: show selected file indicator */}
               {!isMobile && selectedFile && !detailError && (
                 <div className="px-3 py-2 text-xs text-muted-foreground border-t border-border">
-                  {isLoadingDiff ? 'Loading diff...' : `Diff displayed in file panel: ${selectedFile}`}
+                  {isLoadingDiff
+                    ? t('git.history.loadingDiff')
+                    : t('git.history.diffInFilePanel', { file: selectedFile })}
                 </div>
               )}
             </div>

@@ -10,6 +10,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import { PdfPreview } from '@/components/worktree/PdfPreview';
 
+// Issue #1275: this file asserts the rendered iframe title, so it must resolve
+// keys through the real dictionary. The global mock in tests/setup.ts echoes
+// `worktree.<key>` back and would keep the assertion green even if the key did
+// not exist.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 // ----------------------------------------------------------------------------
 // Test doubles for URL.createObjectURL / revokeObjectURL
 // ----------------------------------------------------------------------------

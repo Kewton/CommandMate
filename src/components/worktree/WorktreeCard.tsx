@@ -37,7 +37,8 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
   const [isTogglingFavorite, setIsTogglingFavorite] = useState(false);
   const currentStatus = status || null;
 
-  const t = useTranslations();
+  const t = useTranslations('worktree');
+  const tCommon = useTranslations('common');
   const confirm = useConfirm();
   const locale = useLocale();
   const dateFnsLocale = getDateFnsLocale(locale);
@@ -58,7 +59,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
     e.preventDefault();
     e.stopPropagation();
 
-    if (!(await confirm({ description: t('worktree.session.confirmKill', { name }), variant: 'danger' }))) {
+    if (!(await confirm({ description: t('session.confirmKill', { name }), variant: 'danger' }))) {
       return;
     }
 
@@ -72,7 +73,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
       }
     } catch (err) {
       const errorMessage = handleApiError(err);
-      window.alert(`${t('worktree.session.failedToKill')}: ${errorMessage}`);
+      window.alert(`${t('session.failedToKill')}: ${errorMessage}`);
     } finally {
       setIsKilling(false);
     }
@@ -92,7 +93,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
       setIsFavorite(newFavorite);
     } catch (err) {
       const errorMessage = handleApiError(err);
-      window.alert(`${t('worktree.errors.failedToUpdateFavorite')}: ${errorMessage}`);
+      window.alert(`${t('errors.failedToUpdateFavorite')}: ${errorMessage}`);
     } finally {
       setIsTogglingFavorite(false);
     }
@@ -124,8 +125,8 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
                 // Issue #1127: this control is icon-only, so its `title` tooltip
                 // is invisible on touch/SR. aria-label gives it a real
                 // accessible name reachable without hover.
-                aria-label={isFavorite ? t('common.favorites.remove') : t('common.favorites.add')}
-                title={isFavorite ? t('common.favorites.remove') : t('common.favorites.add')}
+                aria-label={isFavorite ? tCommon('favorites.remove') : tCommon('favorites.add')}
+                title={isFavorite ? tCommon('favorites.remove') : tCommon('favorites.add')}
               >
                 <svg
                   className={`w-5 h-5 ${
@@ -143,15 +144,15 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
                 </svg>
               </button>
               <span className="truncate">{name}</span>
-              {isMain && <Badge variant="info">Main</Badge>}
+              {isMain && <Badge variant="info">{t('card.main')}</Badge>}
               {isSessionRunning && isWaitingForResponse && (
                 <Badge variant="warning" dot>
-                  {t('worktree.status.waitingForResponse')}
+                  {t('status.waitingForResponse')}
                 </Badge>
               )}
               {isSessionRunning && !isWaitingForResponse && (
                 <Badge variant="success" dot>
-                  {t('worktree.status.responseCompleted')}
+                  {t('status.responseCompleted')}
                 </Badge>
               )}
             </CardTitle>
@@ -163,7 +164,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
                 disabled={isKilling}
                 className="flex-shrink-0"
               >
-                {isKilling ? t('common.ending') : t('common.end')}
+                {isKilling ? tCommon('ending') : tCommon('end')}
               </Button>
             )}
           </div>
@@ -194,7 +195,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
             {/* Description */}
             {description && (
               <div>
-                <p className="text-xs text-muted-foreground mb-1">Description</p>
+                <p className="text-xs text-muted-foreground mb-1">{t('card.description')}</p>
                 <p className="text-sm text-foreground line-clamp-2 whitespace-pre-wrap">{description}</p>
               </div>
             )}
@@ -202,11 +203,11 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
             {/* Link */}
             {link && (
               <div>
-                <p className="text-xs text-muted-foreground mb-1">Link</p>
+                <p className="text-xs text-muted-foreground mb-1">{t('card.link')}</p>
                 <button
                   onClick={handleLinkClick}
                   className="flex items-center gap-1 text-sm text-accent-600 dark:text-accent-400 hover:text-accent-800 dark:hover:text-accent-300 hover:underline transition-colors"
-                  title="Open link in new tab"
+                  title={t('card.openLink')}
                 >
                   <svg
                     className="w-4 h-4"
@@ -238,7 +239,13 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
                     ? 'bg-accent-100 dark:bg-accent-900 text-accent-700 dark:text-accent-300'
                     : 'bg-muted text-muted-foreground'
                 }`}>
-                  {currentStatus === 'in_progress' ? 'In Progress' : currentStatus === 'in_review' ? 'In Review' : currentStatus === 'ready' ? 'Ready' : 'Done'}
+                  {currentStatus === 'in_progress'
+                    ? t('worktreeStatus.inProgress')
+                    : currentStatus === 'in_review'
+                    ? t('worktreeStatus.inReview')
+                    : currentStatus === 'ready'
+                    ? t('worktreeStatus.ready')
+                    : t('worktreeStatus.done')}
                 </span>
               </div>
             )}
@@ -259,7 +266,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
                     d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
                   />
                 </svg>
-                <span>Updated {relativeTime}</span>
+                <span>{t('card.updated', { time: relativeTime })}</span>
               </div>
             )}
           </div>

@@ -163,15 +163,17 @@ test.describe('File Tree Operations', () => {
       const contextMenu = page.locator('[data-testid="context-menu"]');
       if (await contextMenu.count() === 0) return;
 
-      // Should have Rename and Delete options
-      const renameItem = contextMenu.getByRole('menuitem', { name: /Rename/i });
-      const deleteItem = contextMenu.getByRole('menuitem', { name: /Delete/i });
+      // Should have Rename and Delete options.
+      // Issue #1277: menu labels are translated, so select by the locale-stable
+      // data-testid rather than the (English-only) accessible name.
+      const renameItem = contextMenu.getByTestId('context-menu-rename');
+      const deleteItem = contextMenu.getByTestId('context-menu-delete');
 
       await expect(renameItem).toBeVisible();
       await expect(deleteItem).toBeVisible();
 
       // Should NOT have New File/New Directory (these are for directories only)
-      const newFileItem = contextMenu.getByRole('menuitem', { name: /New File/i });
+      const newFileItem = contextMenu.getByTestId('context-menu-new-file');
       await expect(newFileItem).not.toBeVisible();
     });
 
@@ -206,10 +208,11 @@ test.describe('File Tree Operations', () => {
       if (await contextMenu.count() === 0) return;
 
       // Should have all options for directories
-      const newFileItem = contextMenu.getByRole('menuitem', { name: /New File/i });
-      const newDirItem = contextMenu.getByRole('menuitem', { name: /New Directory/i });
-      const renameItem = contextMenu.getByRole('menuitem', { name: /Rename/i });
-      const deleteItem = contextMenu.getByRole('menuitem', { name: /Delete/i });
+      // Issue #1277: select by the locale-stable data-testid (labels are translated).
+      const newFileItem = contextMenu.getByTestId('context-menu-new-file');
+      const newDirItem = contextMenu.getByTestId('context-menu-new-directory');
+      const renameItem = contextMenu.getByTestId('context-menu-rename');
+      const deleteItem = contextMenu.getByTestId('context-menu-delete');
 
       await expect(newFileItem).toBeVisible();
       await expect(newDirItem).toBeVisible();

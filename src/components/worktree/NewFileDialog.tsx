@@ -12,6 +12,7 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useEffect, memo } from 'react';
+import { useTranslations } from 'next-intl';
 import { Modal } from '@/components/ui/Modal';
 import { EDITABLE_EXTENSIONS } from '@/config/editable-extensions';
 
@@ -55,6 +56,9 @@ export const NewFileDialog = memo(function NewFileDialog({
   onConfirm,
   onCancel,
 }: NewFileDialogProps) {
+  const t = useTranslations('worktree');
+  // Issue #1277: the cancel affordance reuses the shared common label.
+  const tCommon = useTranslations('common');
   const [fileName, setFileName] = useState('');
   const [selectedExt, setSelectedExt] = useState('.md');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -95,7 +99,7 @@ export const NewFileDialog = memo(function NewFileDialog({
     : resolvedName;
 
   return (
-    <Modal isOpen={isOpen} onClose={onCancel} title="New File" size="sm">
+    <Modal isOpen={isOpen} onClose={onCancel} title={t('newFileDialog.title')} size="sm">
       <div className="space-y-4">
         {/* File name input with extension dropdown */}
         <div>
@@ -103,7 +107,7 @@ export const NewFileDialog = memo(function NewFileDialog({
             htmlFor="new-file-name"
             className="block text-sm font-medium text-foreground mb-1"
           >
-            File name
+            {t('newFileDialog.fileNameLabel')}
           </label>
           <div className="flex gap-2">
             <input
@@ -114,7 +118,7 @@ export const NewFileDialog = memo(function NewFileDialog({
               value={fileName}
               onChange={(e) => setFileName(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="document"
+              placeholder={t('newFileDialog.placeholder')}
               className="flex-1 px-3 py-2 border border-input rounded-lg bg-surface text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
             />
             <select
@@ -146,7 +150,7 @@ export const NewFileDialog = memo(function NewFileDialog({
             onClick={onCancel}
             className="px-4 py-2 text-sm font-medium text-foreground bg-muted hover:bg-muted/80 rounded-lg transition-colors"
           >
-            Cancel
+            {tCommon('cancel')}
           </button>
           <button
             type="button"
@@ -155,7 +159,7 @@ export const NewFileDialog = memo(function NewFileDialog({
             disabled={!resolvedName}
             className="px-4 py-2 text-sm font-medium text-white bg-accent-600 hover:bg-accent-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
           >
-            Create
+            {t('newFileDialog.create')}
           </button>
         </div>
       </div>

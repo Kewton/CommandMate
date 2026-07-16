@@ -13,6 +13,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useId } from 'react';
+import { useTranslations } from 'next-intl';
 import mermaid from 'mermaid';
 import { MERMAID_CONFIG } from '@/config/mermaid-config';
 import { Spinner } from '@/components/ui/Spinner';
@@ -72,10 +73,17 @@ export function MermaidDiagram({
   code,
   id: providedId,
 }: MermaidDiagramProps): React.JSX.Element {
+  const t = useTranslations('worktree');
   const [svg, setSvg] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // [Issue #1275] `t` is a fresh closure on every render, so listing it in the
+  // render effect's deps would re-run mermaid.render on every render. Read it
+  // via a ref to keep the effect keyed on `code`/`diagramId` alone.
+  const tRef = useRef(t);
+  tRef.current = t;
 
   // Generate unique ID if not provided
   const reactId = useId();
@@ -94,7 +102,7 @@ export function MermaidDiagram({
       const trimmedCode = code?.trim() || '';
       if (!trimmedCode) {
         if (isMounted) {
-          setError('Diagram code is empty');
+          setError(tRef.current('mermaid.emptyCode'));
           setIsLoading(false);
         }
         return;
@@ -117,7 +125,7 @@ export function MermaidDiagram({
       } catch (err) {
         if (isMounted) {
           const message =
-            err instanceof Error ? err.message : 'Failed to render diagram';
+            err instanceof Error ? err.message : tRef.current('mermaid.renderError');
           setError(message);
           setIsLoading(false);
         }
@@ -140,7 +148,7 @@ export function MermaidDiagram({
       >
         <div className="flex items-center gap-2">
           <Spinner size="sm" variant="accent" />
-          <span>Rendering diagram...</span>
+          <span>{t('mermaid.rendering')}</span>
         </div>
       </div>
     );
@@ -153,7 +161,7 @@ export function MermaidDiagram({
         data-testid="mermaid-error"
         className="bg-danger-subtle border border-danger-border p-4 rounded"
       >
-        <p className="text-danger font-medium">Diagram Error</p>
+        <p className="text-danger font-medium">{t('mermaid.errorTitle')}</p>
         <pre className="text-sm text-danger mt-2 whitespace-pre-wrap break-words bg-danger-subtle">
           {error}
         </pre>

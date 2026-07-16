@@ -4,13 +4,18 @@
  *
  * This module implements the "next user input trigger" pattern:
  * When a user sends a new message, we first capture and save any pending
- * assistant response from the CLI tool (Claude/Codex/Gemini).
+ * assistant response from the CLI tool.
  *
  * Key responsibilities:
  * - Capture CLI output since last saved position
  * - Clean and validate the response based on CLI tool type
  * - Save as assistant message with proper timestamp ordering
  * - Update session state to prevent duplicate saves
+ *
+ * Scope: scrollback-rendering tools only (codex, gemini, vibe-local, antigravity).
+ * The whole pattern rests on `lastCapturedLine` being a read cursor into a growing
+ * buffer, which is false for alternate-screen tools — those are handled by the
+ * response poller instead (Issue #1268 / #1292; see savePendingAssistantResponse).
  */
 
 import Database from 'better-sqlite3';
@@ -22,101 +27,12 @@ import {
 } from './db';
 import { broadcastMessage } from './ws-server';
 // Issue #571 [DR1-05]: Import directly from response-cleaner instead of barrel re-export
-import { cleanClaudeResponse, cleanGeminiResponse, cleanOpenCodeResponse, cleanCopilotResponse, truncateMessage } from './response-cleaner';
-import { COPILOT_MAX_MESSAGE_LENGTH, COPILOT_TRUNCATION_MARKER } from '@/config/copilot-constants';
-import { stripAnsi } from './detection/cli-patterns';
-import type { CLIToolType } from './cli-tools/types';
+import { cleanClaudeResponse, cleanGeminiResponse, cleanOpenCodeResponse, cleanCopilotResponse } from './response-cleaner';
+import { usesAlternateScreen, type CLIToolType } from './cli-tools/types';
 import type { ChatMessage } from '@/types/models';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('assistant-response-saver');
-
-/**
- * Skip patterns for Claude-specific UI elements
- * Used by extractAssistantResponseBeforeLastPrompt to filter out non-response content
- * @remarks These patterns are specific to the "before prompt" extraction logic
- * and differ from cli-patterns.ts skipPatterns which are for "after prompt" extraction
- */
-const CLAUDE_SKIP_PATTERNS: readonly RegExp[] = [
-  /^[╭╮╰╯│─\s]+$/,  // Box drawing characters
-  /Claude Code v[\d.]+/,  // Version info
-  /^─{10,}$/,  // Separator lines
-  /^❯\s*$/,  // Empty prompt lines
-  /^\s*$/,  // Empty lines
-  /CLAUDE_HOOKS_/,
-  /\/bin\/claude/,
-  /@.*\s+%/,
-  /localhost/,
-  /:3000/,
-  /curl.*POST/,
-  /export\s+/,
-  /Tips for getting started/,
-  /Welcome back/,
-  /\?\s*for shortcuts/,
-];
-
-/**
- * Extract assistant response BEFORE the last user prompt
- *
- * This is the key fix for Issue #54 Problem 4:
- * - cleanClaudeResponse() extracts AFTER the last prompt (for response-poller)
- * - This function extracts BEFORE the last prompt (for savePendingAssistantResponse)
- *
- * Scenario:
- * tmuxバッファの状態（ユーザーがメッセージBを送信した時点）:
- * ─────────────────────────────────────
- * ❯ メッセージA（前回のユーザー入力）
- * [前回のassistant応答 - 保存したい内容]
- * ───
- * ❯ メッセージB（今回のユーザー入力）  ← 最後のプロンプト
- * [Claude処理中...]
- * ─────────────────────────────────────
- *
- * We want to extract the content BEFORE ❯ メッセージB
- *
- * @param output - Raw tmux output (new lines since last capture)
- * @param cliToolId - CLI tool ID
- * @returns Cleaned assistant response content
- */
-export function extractAssistantResponseBeforeLastPrompt(
-  output: string,
-  cliToolId: CLIToolType
-): string {
-  if (!output || output.trim() === '') {
-    return '';
-  }
-
-  if (cliToolId !== 'claude') {
-    // For non-Claude tools, strip ANSI escape codes and trim
-    // Gemini CLI uses 24-bit color ANSI codes (\x1b[38;2;r;g;bm) that must be removed
-    return stripAnsi(output).trim();
-  }
-
-  const cleanOutput = stripAnsi(output);
-  const lines = cleanOutput.split('\n');
-
-  // Find the LAST user prompt (the new message that triggered this save)
-  // User prompt pattern: ❯ followed by actual content
-  let lastUserPromptIndex = lines.length;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (/^❯\s+\S/.test(lines[i])) {
-      lastUserPromptIndex = i;
-      break;
-    }
-  }
-
-  // Extract lines BEFORE the last user prompt
-  const responseLines = lines.slice(0, lastUserPromptIndex);
-
-  // Filter out UI elements
-  const cleanedLines = responseLines.filter(line => {
-    const trimmed = line.trim();
-    if (!trimmed) return false;
-    return !CLAUDE_SKIP_PATTERNS.some(pattern => pattern.test(trimmed));
-  });
-
-  return cleanedLines.join('\n').trim();
-}
 
 /**
  * Default buffer size for capturing CLI session output (in lines)
@@ -237,12 +153,25 @@ export async function savePendingAssistantResponse(
   // primary instance uses instanceId === cliToolId, preserving legacy behavior.
   const resolvedInstanceId = instanceId ?? cliToolId;
   try {
-    // OpenCode runs in alternate screen mode (fixed-size pane, no scrollback).
-    // Previous conversation history remains visible in the TUI, making it impossible
-    // to distinguish "old" content from "pending new" content. The response poller
-    // handles OpenCode response capture via Build marker count tracking, so
-    // savePendingAssistantResponse would only create duplicate/stale messages.
-    if (cliToolId === 'opencode') {
+    // Issue #1292: this whole function assumes the pane is a growing scrollback —
+    // that `lastCapturedLine` is a read cursor and everything past it is unsaved.
+    // Alternate-screen tools (claude since v2, opencode, copilot) break that
+    // assumption at the root: tmux keeps no scrollback for them, so `capture-pane`
+    // always returns exactly `pane_height` lines and the previous turns stay
+    // painted on screen. "Old" and "pending new" content are therefore
+    // indistinguishable, and the line count is a screen-row constant rather than a
+    // cursor (Issue #1268).
+    //
+    // Measured on Claude (pane_height=1000): the first call saves at fromLine=0 and
+    // parks lastCapturedLine at 1000; every later call then trips the
+    // `currentLineCount <= lastCapturedLine` gate (1000 <= 1000) and returns null.
+    // So its only lifetime effect was persisting the startup banner — model, plan,
+    // login expiry, MCP auth state and cwd — as a bogus assistant message.
+    //
+    // The response poller is what actually records these tools' replies, deduping
+    // on response content instead of line counts (Issue #1268/#1289), so skipping
+    // here drops no coverage. OpenCode already opted out for this exact reason.
+    if (usesAlternateScreen(cliToolId)) {
       return null;
     }
 
@@ -303,19 +232,10 @@ export async function savePendingAssistantResponse(
     const newLines = lines.slice(effectiveLastCapturedLine);
     const newOutput = newLines.join('\n');
 
-    // 8. Clean the response
-    // Issue #54 FIX: For Claude, use extractAssistantResponseBeforeLastPrompt
-    // to extract content BEFORE the last user prompt (not after it)
-    // This fixes the issue where assistant responses were not being saved
-    // when user sends a new message
-    let cleanedResponse = cliToolId === 'claude'
-      ? extractAssistantResponseBeforeLastPrompt(newOutput, cliToolId)
-      : cleanCliResponse(newOutput, cliToolId);
-
-    // Issue #571: Apply size limit for Copilot messages
-    if (cliToolId === 'copilot') {
-      cleanedResponse = truncateMessage(cleanedResponse, COPILOT_MAX_MESSAGE_LENGTH, COPILOT_TRUNCATION_MARKER);
-    }
+    // 8. Clean the response.
+    // Only scrollback-rendering tools reach this point (Issue #1292), so the
+    // tool-specific cleaners in cleanCliResponse cover every remaining case.
+    const cleanedResponse = cleanCliResponse(newOutput, cliToolId);
 
     // 9. Check if cleaned response is empty
     if (!cleanedResponse || cleanedResponse.trim() === '') {

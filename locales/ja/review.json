@@ -1,8 +1,90 @@
 {
+  "page": {
+    "title": "レビュー",
+    "description": "対応が必要な worktree。"
+  },
+  "tabs": {
+    "review": "レビュー",
+    "report": "レポート",
+    "template": "テンプレート"
+  },
+  "status": {
+    "done": "完了",
+    "inReview": "レビュー中",
+    "approval": "承認待ち",
+    "stalled": "停滞"
+  },
+  "filters": {
+    "ariaLabel": "レビューフィルター",
+    "loading": "レビューを読み込み中"
+  },
+  "empty": {
+    "inReview": "レビュー中のワークツリーはありません。",
+    "approval": "承認待ちのワークツリーはありません。",
+    "stalled": "停滞しているワークツリーはありません。"
+  },
+  "datePicker": {
+    "previousDay": "前日",
+    "nextDay": "翌日"
+  },
   "report": {
-    "regenerateConfirm": "この日付のレポートは既に存在します。再生成して上書きしますか？"
+    "regenerateConfirm": "この日付のレポートは既に存在します。再生成して上書きしますか？",
+    "toolLabel": "ツール:",
+    "modelPlaceholder": "モデル（任意）",
+    "generationMode": "生成モード",
+    "modes": {
+      "none": "指示なし",
+      "template": "テンプレート",
+      "custom": "カスタム"
+    },
+    "selectTemplate": "テンプレートを選択",
+    "loadingTemplates": "テンプレートを読み込み中",
+    "noTemplates": "利用できるテンプレートがありません。Template タブで作成してください。",
+    "templatePlaceholderOption": "-- テンプレートを選択 --",
+    "instructionPlaceholderTemplate": "上でテンプレートを選択するとこの欄に反映されます",
+    "instructionPlaceholderCustom": "サマリー生成への追加指示",
+    "generate": "サマリーを生成",
+    "generating": "生成中...",
+    "noMessages": "この日付のメッセージはありません。",
+    "messagesFound": "この日付のメッセージが{count}件見つかりました。",
+    "generatingRemote": "レポートを生成中...（ツール: {tool}）",
+    "generatingRemoteWithTime": "レポートを生成中...（ツール: {tool}、開始: {seconds}秒前）",
+    "generatingSummary": "サマリーを生成中...",
+    "generatedBy": "生成ツール: {tool}",
+    "copy": "コピー",
+    "copied": "コピーしました！",
+    "edit": "編集",
+    "save": "保存",
+    "saving": "保存中...",
+    "errors": {
+      "fetch": "レポートの取得に失敗しました",
+      "rateLimited": "別のサマリーを生成中です。しばらくお待ちください。",
+      "generate": "サマリーの生成に失敗しました",
+      "emptyContent": "内容を入力してください",
+      "save": "レポートの保存に失敗しました"
+    }
   },
   "template": {
-    "deleteConfirm": "このテンプレートを削除しますか？"
+    "deleteConfirm": "このテンプレートを削除しますか？",
+    "heading": "テンプレート（{count}/{max}）",
+    "loading": "テンプレートを読み込み中",
+    "empty": "テンプレートはまだありません。",
+    "edit": "編集",
+    "delete": "削除",
+    "save": "保存",
+    "saving": "保存中...",
+    "cancel": "キャンセル",
+    "newHeading": "新規テンプレート",
+    "namePlaceholder": "テンプレート名",
+    "contentPlaceholder": "テンプレート本文（レポート生成への指示）",
+    "create": "テンプレートを作成",
+    "creating": "作成中...",
+    "errors": {
+      "fetch": "テンプレートの取得に失敗しました",
+      "nameAndContentRequired": "名前と本文は必須です",
+      "create": "テンプレートの作成に失敗しました",
+      "update": "テンプレートの更新に失敗しました",
+      "delete": "テンプレートの削除に失敗しました"
+    }
   }
 }

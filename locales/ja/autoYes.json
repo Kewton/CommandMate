@@ -1,4 +1,8 @@
 {
+  "label": "Auto Yes",
+  "toggleLabel": "Auto Yes モード",
+  "targetLabel": "Auto Yes の対象",
+  "timeRemaining": "残り時間",
   "enableTitle": "Auto Yesモードを有効にしますか？",
   "enableTitleWithTool": "Auto Yesモードを有効にしますか？（{toolName}）",
   "featureDescription": "機能説明",

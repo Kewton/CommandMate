@@ -86,6 +86,8 @@ export const MemoCard = memo(function MemoCard({
   canMoveDown = true,
 }: MemoCardProps) {
   const t = useTranslations('schedule');
+  // Issue #1277: the saving indicator reuses the shared worktree action label.
+  const tWorktree = useTranslations('worktree');
 
   // Issue #944: reorder controls are shown only when a move handler is provided.
   const showReorder = Boolean(onMoveUp || onMoveDown);
@@ -214,7 +216,7 @@ export const MemoCard = memo(function MemoCard({
           value={title}
           onChange={handleTitleChange}
           onBlur={handleTitleBlur}
-          placeholder="Memo title"
+          placeholder={t('memoTitlePlaceholder')}
           className="flex-1 min-w-0 text-sm font-medium text-foreground bg-transparent border-none focus:outline-none focus:ring-0 p-0"
         />
         {isSaving && (
@@ -222,7 +224,7 @@ export const MemoCard = memo(function MemoCard({
             data-testid="saving-indicator"
             className="text-xs text-muted-foreground"
           >
-            Saving...
+            {tWorktree('actions.saving')}
           </span>
         )}
         {/* Issue #944: Reorder buttons */}
@@ -258,9 +260,9 @@ export const MemoCard = memo(function MemoCard({
             type="button"
             data-testid="insert-memo-content"
             onClick={handleInsert}
-            aria-label="Insert to message"
+            aria-label={t('memoInsertToMessage')}
             className="flex-shrink-0 p-1 text-muted-foreground hover:text-accent-600 dark:hover:text-accent-400 transition-colors rounded"
-            title="Insert to message"
+            title={t('memoInsertToMessage')}
           >
             <ArrowDownToLine className="w-4 h-4" aria-hidden="true" />
           </button>
@@ -269,7 +271,7 @@ export const MemoCard = memo(function MemoCard({
         <button
           type="button"
           onClick={handleCopy}
-          aria-label="Copy memo content"
+          aria-label={t('memoCopyContent')}
           className="flex-shrink-0 p-1 text-muted-foreground hover:text-foreground transition-colors rounded"
         >
           {copied ? (
@@ -281,7 +283,7 @@ export const MemoCard = memo(function MemoCard({
         <button
           type="button"
           onClick={handleDelete}
-          aria-label="Delete memo"
+          aria-label={t('memoDelete')}
           className="flex-shrink-0 p-1 text-muted-foreground hover:text-danger transition-colors rounded"
         >
           <svg
@@ -306,7 +308,7 @@ export const MemoCard = memo(function MemoCard({
         value={content}
         onChange={handleContentChange}
         onBlur={handleContentBlur}
-        placeholder="Enter memo content..."
+        placeholder={t('memoContentPlaceholder')}
         rows={4}
         className="w-full text-sm text-foreground bg-muted border border-border rounded-md p-2 resize-y focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
       />

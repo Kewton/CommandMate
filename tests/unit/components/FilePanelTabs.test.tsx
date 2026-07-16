@@ -12,6 +12,15 @@ import { FilePanelTabs } from '@/components/worktree/FilePanelTabs';
 import type { FileTab } from '@/hooks/useFileTabs';
 import type { FileContent } from '@/types/models';
 
+// Issue #1275: this file asserts rendered wording (the per-tab close label), so
+// it must resolve keys through the real dictionary. The global mock in
+// tests/setup.ts echoes `worktree.<key>` back — it does not even interpolate
+// {name} — and would keep these assertions green even if the key did not exist.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 // Mock FilePanelContent [DR3-006]
 vi.mock('@/components/worktree/FilePanelContent', () => ({
   FilePanelContent: ({ tab, onOpenFile }: { tab: FileTab; onOpenFile?: (path: string) => void }) => (

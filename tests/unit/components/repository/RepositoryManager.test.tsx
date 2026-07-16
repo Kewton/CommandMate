@@ -10,6 +10,20 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { RepositoryManager } from '@/components/repository/RepositoryManager';
 
+/**
+ * Issue #1219: this file asserts the rendered wording, so it must resolve
+ * through the real dictionary — tests/setup.ts's global mock would echo
+ * `common.repositories.clone` back and every assertion below would pass
+ * against a dictionary that has no such key. Backing them with locales/
+ * turns the pre-existing English expectations into the byte-identity guard
+ * for the i18n migration.
+ */
+const locale = vi.hoisted(() => ({ current: 'en' }));
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock(() => locale.current);
+});
+
 // Mock api-client module
 vi.mock('@/lib/api-client', () => ({
   repositoryApi: {
@@ -56,6 +70,7 @@ describe('RepositoryManager', () => {
   const mockOnRepositoryAdded = vi.fn();
 
   beforeEach(() => {
+    locale.current = 'en';
     vi.clearAllMocks();
     vi.mocked(repositoryApi.scan).mockResolvedValue({
       success: true,
@@ -504,6 +519,40 @@ describe('RepositoryManager', () => {
       });
     });
 
+    /**
+     * Issue #1219: `t` is referentially unstable per render, so keying the
+     * clone-status effect on pollCloneStatus re-enters polling on every render
+     * and leaves a self-perpetuating setTimeout chain behind each time. Pins the
+     * effect to the job itself — without it, the re-renders below take this from
+     * 1 poll to 6.
+     */
+    it('should not restart polling when the component re-renders', async () => {
+      vi.mocked(repositoryApi.getCloneStatus).mockResolvedValue({
+        success: true,
+        jobId: 'job-123',
+        status: 'running',
+        progress: 50,
+      });
+
+      const { rerender } = render(<RepositoryManager onRepositoryAdded={mockOnRepositoryAdded} />);
+
+      fireEvent.click(screen.getByRole('button', { name: /add repository/i }));
+      fireEvent.mouseDown(screen.getByRole('tab', { name: /clone url/i }));
+      fireEvent.change(screen.getByPlaceholderText('https://github.com/user/repo.git'), {
+        target: { value: 'https://github.com/user/myrepo.git' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /^clone$/i }));
+
+      await waitFor(() => expect(repositoryApi.getCloneStatus).toHaveBeenCalled());
+      const pollsAfterStart = vi.mocked(repositoryApi.getCloneStatus).mock.calls.length;
+
+      for (let i = 0; i < 5; i++) {
+        rerender(<RepositoryManager onRepositoryAdded={mockOnRepositoryAdded} />);
+      }
+
+      expect(vi.mocked(repositoryApi.getCloneStatus).mock.calls.length).toBe(pollsAfterStart);
+    });
+
     it('should reset form after successful clone', async () => {
       vi.mocked(repositoryApi.getCloneStatus).mockResolvedValue({
         success: true,
@@ -640,6 +689,62 @@ describe('RepositoryManager', () => {
       // URL mode - should show Clone button
       expect(screen.getByRole('button', { name: /^clone$/i })).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /scan & add/i })).not.toBeInTheDocument();
+    });
+  });
+
+  /**
+   * Issue #1219: #1199's onboarding CTA is Japanese, so landing on an English
+   * form here is the reported defect. Everything above pins the English copy;
+   * these pin that `ja` actually resolves to Japanese.
+   */
+  describe('Japanese locale (Issue #1219)', () => {
+    beforeEach(() => {
+      locale.current = 'ja';
+    });
+
+    it('renders the add/sync actions in Japanese', () => {
+      render(<RepositoryManager onRepositoryAdded={mockOnRepositoryAdded} />);
+
+      expect(screen.getByRole('button', { name: '+ リポジトリを追加' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'すべて同期' })).toBeInTheDocument();
+    });
+
+    it('renders the add form heading, tabs and actions in Japanese', () => {
+      render(<RepositoryManager onRepositoryAdded={mockOnRepositoryAdded} />);
+      fireEvent.click(screen.getByRole('button', { name: '+ リポジトリを追加' }));
+
+      expect(screen.getByRole('heading', { name: 'リポジトリを新規追加' })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'ローカルパス' })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'クローン URL' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'スキャンして追加' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'キャンセル' })).toBeInTheDocument();
+    });
+
+    it('renders validation errors in Japanese', async () => {
+      render(<RepositoryManager onRepositoryAdded={mockOnRepositoryAdded} />);
+      fireEvent.click(screen.getByRole('button', { name: '+ リポジトリを追加' }));
+      fireEvent.mouseDown(screen.getByRole('tab', { name: 'クローン URL' }));
+
+      const urlInput = screen.getByPlaceholderText('https://github.com/user/repo.git');
+      fireEvent.change(urlInput, { target: { value: 'not-a-valid-url' } });
+      fireEvent.click(screen.getByRole('button', { name: 'クローン' }));
+
+      await waitFor(() => {
+        expect(screen.getByText('URL の形式が正しくありません')).toBeInTheDocument();
+      });
+    });
+
+    /**
+     * The example path and placeholders stay literal in both locales: they are
+     * copy-paste sample values, not prose, so translating them would only make
+     * them wrong to paste.
+     */
+    it('keeps the technical example values untranslated', () => {
+      render(<RepositoryManager onRepositoryAdded={mockOnRepositoryAdded} />);
+      fireEvent.click(screen.getByRole('button', { name: '+ リポジトリを追加' }));
+
+      expect(screen.getByPlaceholderText('/absolute/path/to/repository')).toBeInTheDocument();
+      expect(screen.getByText('例: /Users/username/projects/my-repo')).toBeInTheDocument();
     });
   });
 });

@@ -6,6 +6,7 @@ export {
   notifyPushSubscribers,
   buildPushPayload,
   buildExcerpt,
+  resolvePushLocale,
 } from './push-sender';
 export type { NotificationEvent, PushPayload } from './push-sender';
 export {

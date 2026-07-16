@@ -24,6 +24,7 @@ import { v38_migrations } from './v38-worktree-todo-status';
 import { v39_migrations } from './v39-worktree-todo-detail';
 import { v40_migrations } from './v40-timer-error';
 import { v41_migrations } from './v41-push-subscriptions';
+import { v42_migrations } from './v42-push-subscription-locale';
 
 /**
  * Complete ordered list of all migrations.
@@ -53,4 +54,5 @@ export const migrations: Migration[] = [
   ...v39_migrations,
   ...v40_migrations,
   ...v41_migrations,
+  ...v42_migrations,
 ];

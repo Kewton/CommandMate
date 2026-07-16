@@ -7,6 +7,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslations } from 'next-intl';
 import type { ExternalAppHealth } from '@/types/external-apps';
 
 export interface ExternalAppStatusProps {
@@ -35,6 +36,7 @@ export function ExternalAppStatus({
   showResponseTime = false,
   compact = false,
 }: ExternalAppStatusProps) {
+  const t = useTranslations('externalApps');
   const [health, setHealth] = useState<ExternalAppHealth | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -78,14 +80,14 @@ export function ExternalAppStatus({
     return (
       <div className="flex items-center gap-1.5">
         <span className="inline-block h-2.5 w-2.5 rounded-full bg-muted-foreground animate-pulse" />
-        {!compact && <span className="text-xs text-muted-foreground">Checking...</span>}
+        {!compact && <span className="text-xs text-muted-foreground">{t('status.checking')}</span>}
       </div>
     );
   }
 
   const isHealthy = health?.healthy ?? false;
   const statusColor = isHealthy ? 'bg-success' : 'bg-muted-foreground';
-  const statusText = isHealthy ? 'Running' : 'Stopped';
+  const statusText = isHealthy ? t('status.running') : t('status.stopped');
 
   if (compact) {
     return (

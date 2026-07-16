@@ -10,6 +10,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { Card, Skeleton } from '@/components/ui';
 import { cn } from '@/lib/utils/cn';
 import { REVIEW_POLL_INTERVAL_MS } from '@/config/review-config';
@@ -22,11 +23,18 @@ import type { BranchStatus } from '@/types/sidebar';
 
 type ReviewFilter = 'in_review' | 'approval' | 'stalled';
 
-const FILTER_TABS: Array<{ value: ReviewFilter; label: string }> = [
-  { value: 'in_review', label: 'In Review' },
-  { value: 'approval', label: 'Approval' },
-  { value: 'stalled', label: 'Stalled' },
-];
+/** Keys rather than literals: t() cannot be called at module scope, where a
+ * literal would pin the chip labels to English (Issue #1271/#1273). A total
+ * Record keyed by ReviewFilter so the active-filter badge and the chips read
+ * the same label from one place. */
+const FILTER_LABEL_KEYS: Record<ReviewFilter, string> = {
+  in_review: 'status.inReview',
+  approval: 'status.approval',
+  stalled: 'status.stalled',
+};
+
+/** Chip display order. */
+const FILTER_TABS: ReviewFilter[] = ['in_review', 'approval', 'stalled'];
 
 /** Membership predicate per filter. Shared by the visible list and the chip
  * counts so both always agree (counts are derived, never fetched separately). */
@@ -38,8 +46,9 @@ const FILTER_PREDICATES: Record<ReviewFilter, (wt: Worktree) => boolean> = {
 
 /** Small CLI status dot */
 function CliDot({ status, label }: { status: BranchStatus; label: string }) {
+  const tCommon = useTranslations('common');
   const config = SIDEBAR_STATUS_CONFIG[status];
-  const title = `${label}: ${config.label}`;
+  const title = `${label}: ${tCommon(config.labelKey)}`;
   const base = 'w-2.5 h-2.5 rounded-full flex-shrink-0';
 
   if (config.type === 'spinner') {
@@ -75,6 +84,7 @@ function getBorderClass(filter: ReviewFilter): string {
 }
 
 export default function ReviewTab() {
+  const t = useTranslations('review');
   const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState<ReviewFilter>('in_review');
@@ -121,13 +131,13 @@ export default function ReviewTab() {
   const emptyMessage = useMemo(() => {
     switch (activeFilter) {
       case 'in_review':
-        return 'No worktrees in review.';
+        return t('empty.inReview');
       case 'approval':
-        return 'No worktrees waiting for approval.';
+        return t('empty.approval');
       case 'stalled':
-        return 'No stalled worktrees detected.';
+        return t('empty.stalled');
     }
-  }, [activeFilter]);
+  }, [activeFilter, t]);
 
   return (
     <>
@@ -136,18 +146,18 @@ export default function ReviewTab() {
       <div
         className="mb-6 inline-flex items-center gap-1 rounded-lg bg-muted p-1"
         role="group"
-        aria-label="Review filters"
+        aria-label={t('filters.ariaLabel')}
         data-testid="review-filters"
       >
-        {FILTER_TABS.map((tab) => {
-          const isActive = activeFilter === tab.value;
+        {FILTER_TABS.map((filter) => {
+          const isActive = activeFilter === filter;
           return (
             <button
-              key={tab.value}
+              key={filter}
               type="button"
               aria-pressed={isActive}
-              onClick={() => setActiveFilter(tab.value)}
-              data-testid={`review-filter-${tab.value}`}
+              onClick={() => setActiveFilter(filter)}
+              data-testid={`review-filter-${filter}`}
               className={cn(
                 'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
                 'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
@@ -156,14 +166,14 @@ export default function ReviewTab() {
                   : 'text-muted-foreground hover:text-foreground'
               )}
             >
-              {tab.label}
+              {t(FILTER_LABEL_KEYS[filter])}
               <span
                 className={cn(
                   'text-xs font-semibold tabular-nums',
                   isActive ? 'text-accent-700 dark:text-accent-300' : 'text-muted-foreground'
                 )}
               >
-                {filterCounts[tab.value]}
+                {filterCounts[filter]}
               </span>
             </button>
           );
@@ -176,7 +186,7 @@ export default function ReviewTab() {
           className="space-y-2"
           data-testid="review-loading"
           role="status"
-          aria-label="Loading reviews"
+          aria-label={t('filters.loading')}
         >
           {[0, 1, 2].map((i) => (
             <Card key={i} padding="md">
@@ -221,7 +231,7 @@ export default function ReviewTab() {
                     </div>
                     <div className="flex items-center gap-2 ml-4 flex-shrink-0">
                       <span className={`px-2 py-0.5 text-xs font-medium rounded ${getBadgeClass(activeFilter)}`}>
-                        {FILTER_TABS.find((t) => t.value === activeFilter)?.label}
+                        {t(FILTER_LABEL_KEYS[activeFilter])}
                       </span>
                       {agents.map((agent) => {
                         const agentStatus = deriveCliStatus(wt.sessionStatusByCli?.[agent]);

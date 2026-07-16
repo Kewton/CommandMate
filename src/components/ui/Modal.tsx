@@ -7,6 +7,7 @@
 
 import React, { useEffect, useId } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslations } from 'next-intl';
 import { cva } from 'class-variance-authority';
 import { Z_INDEX } from '@/config/z-index';
 import { EXIT_ANIMATION_DURATION_MS } from '@/config/ui-feedback-config';
@@ -63,6 +64,7 @@ export function Modal({
   showCloseButton = true,
   disableClose = false,
 }: ModalProps) {
+  const t = useTranslations('common');
   const titleId = useId();
 
   // [Issue #1127] Trap keyboard focus inside the dialog while it is open (Tab
@@ -150,7 +152,7 @@ export function Modal({
               {showCloseButton && (
                 <button
                   onClick={onClose}
-                  aria-label="Close"
+                  aria-label={t('close')}
                   className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0 touch-manipulation"
                 >
                   <svg

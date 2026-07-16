@@ -10,6 +10,7 @@
 'use client';
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useTranslations } from 'next-intl';
 import { CheckCircle, XCircle, Info, AlertTriangle, X } from 'lucide-react';
 import { Z_INDEX } from '@/config/z-index';
 import { EXIT_ANIMATION_DURATION_MS } from '@/config/ui-feedback-config';
@@ -137,6 +138,7 @@ export function Toast({
   onClose,
   duration = DEFAULT_DURATION,
 }: ToastProps) {
+  const t = useTranslations('common');
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const styles = getToastStyles(type);
 
@@ -205,7 +207,7 @@ export function Toast({
       <button
         data-testid="toast-close-button"
         onClick={handleClose}
-        aria-label="Close notification"
+        aria-label={t('closeNotification')}
         className={`
           ${styles.textColor}
           hover:opacity-70

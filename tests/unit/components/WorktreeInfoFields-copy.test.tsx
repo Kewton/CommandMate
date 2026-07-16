@@ -11,6 +11,15 @@ import { render, screen, fireEvent, act, cleanup } from '@testing-library/react'
 import { WorktreeInfoFields, useDescriptionEditor } from '@/components/worktree/WorktreeDetailSubComponents';
 import type { Worktree } from '@/types/models';
 
+// Issue #1277: the copy buttons' aria-label / title wording now resolves
+// through the dictionary, so assert against the REAL locales/en/*.json rather
+// than the `namespace.key` echo mock in tests/setup.ts (which stays green even
+// for a key that does not exist).
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 // Mock clipboard-utils
 const mockCopyToClipboard = vi.fn().mockResolvedValue(undefined);
 vi.mock('@/lib/clipboard-utils', () => ({

@@ -11,6 +11,7 @@ import {
   PreflightResult,
 } from '../types';
 import { getDependencies } from '../config/cli-dependencies';
+import { compareVersions } from './semver';
 
 /**
  * Preflight checker for system dependencies
@@ -46,7 +47,7 @@ export class PreflightChecker {
       // Check minimum version if specified
       if (dep.minVersion && version) {
         const cleanVersion = version.replace(/^v/, '');
-        if (this.compareVersions(cleanVersion, dep.minVersion) < 0) {
+        if (compareVersions(cleanVersion, dep.minVersion) < 0) {
           return {
             name: dep.name,
             status: 'version_mismatch',
@@ -111,30 +112,11 @@ export class PreflightChecker {
   }
 
   /**
-   * Compare two version strings
-   * @returns -1 if a < b, 0 if a == b, 1 if a > b
-   */
-  private compareVersions(a: string, b: string): number {
-    const partsA = a.split('.').map(Number);
-    const partsB = b.split('.').map(Number);
-    const len = Math.max(partsA.length, partsB.length);
-
-    for (let i = 0; i < len; i++) {
-      const numA = partsA[i] || 0;
-      const numB = partsB[i] || 0;
-      if (numA > numB) return 1;
-      if (numA < numB) return -1;
-    }
-
-    return 0;
-  }
-
-  /**
    * Get installation hint for a dependency
    */
   static getInstallHint(name: string): string {
     const hints: Record<string, string> = {
-      'Node.js': 'Install with: nvm install 20 or visit https://nodejs.org',
+      'Node.js': 'Install with: nvm install 22 or visit https://nodejs.org',
       npm: 'npm is included with Node.js. Install Node.js first.',
       tmux: 'Install with: brew install tmux (macOS) or apt install tmux (Linux)',
       git: 'Install with: brew install git (macOS) or apt install git (Linux)',

@@ -15,3 +15,27 @@ export function getSlashCommandTrigger(command: SlashCommand): string {
 
   return `/${command.name}`;
 }
+
+/** Translator for the `worktree` namespace, narrowed to what description lookup needs. */
+export type CommandDescriptionTranslator = (key: string) => string;
+
+/**
+ * Return the description shown to users for a command (Issue #1306).
+ *
+ * Built-in commands are plain data defined outside React, so they carry a
+ * `descriptionKey` instead of translated text. User-authored commands keep the
+ * literal `description` from their frontmatter, which is not translatable.
+ *
+ * Callers that match user input against descriptions must go through this too,
+ * otherwise built-in commands become unsearchable by their description text.
+ */
+export function resolveCommandDescription(
+  command: SlashCommand,
+  t: CommandDescriptionTranslator
+): string {
+  if (command.descriptionKey) {
+    return t(command.descriptionKey);
+  }
+
+  return command.description ?? '';
+}

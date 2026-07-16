@@ -7,6 +7,8 @@
  * @vitest-environment node
  */
 
+import fs from 'fs';
+import path from 'path';
 import { describe, it, expect } from 'vitest';
 import {
   STANDARD_COMMANDS,
@@ -15,6 +17,20 @@ import {
   getFrequentlyUsedCommands,
 } from '@/lib/standard-commands';
 import type { SlashCommandCategory } from '@/types/slash-commands';
+
+const LOCALES = ['en', 'ja'] as const;
+
+/**
+ * Read the real `slashCommands.descriptions` block straight off disk.
+ *
+ * Issue #1306: these tests must fail when a key is missing from the shipped
+ * dictionary, so they read the actual JSON rather than a mocked translator.
+ */
+function loadDescriptions(locale: (typeof LOCALES)[number]): Record<string, string> {
+  const file = path.resolve(__dirname, `../../../locales/${locale}/worktree.json`);
+  const dict = JSON.parse(fs.readFileSync(file, 'utf8'));
+  return dict.slashCommands?.descriptions ?? {};
+}
 
 describe('STANDARD_COMMANDS', () => {
   it('should have 45 standard commands (12 Claude-only + 9 shared + 17 Codex-only + 7 OpenCode-only)', () => {
@@ -25,7 +41,10 @@ describe('STANDARD_COMMANDS', () => {
     STANDARD_COMMANDS.forEach((cmd) => {
       expect(cmd.name).toBeDefined();
       expect(cmd.name.length).toBeGreaterThan(0);
-      expect(cmd.description).toBeDefined();
+      // Issue #1306: descriptions moved into the dictionary; the definition
+      // carries a key, and the literal description is gone.
+      expect(cmd.descriptionKey).toBe(`slashCommands.descriptions.${cmd.name}`);
+      expect(cmd.description).toBeUndefined();
       expect(cmd.category).toBeDefined();
       expect(cmd.isStandard).toBe(true);
       expect(cmd.source).toBe('standard');
@@ -264,12 +283,21 @@ describe('STANDARD_COMMANDS', () => {
   });
 
   // Issue #689: agent (Codex) vs agents (OpenCode) differentiation (DR1-002)
+  // Issue #1306: distinct keys are not enough — two keys can hold identical
+  // text (see /model and /models), so assert the resolved text differs too.
   it('agent (Codex) and agents (OpenCode) should have distinct descriptions', () => {
     const agent = STANDARD_COMMANDS.find((c) => c.name === 'agent');
     const agents = STANDARD_COMMANDS.find((c) => c.name === 'agents');
     expect(agent).toBeDefined();
     expect(agents).toBeDefined();
-    expect(agent?.description).not.toBe(agents?.description);
+    expect(agent?.descriptionKey).not.toBe(agents?.descriptionKey);
+
+    for (const locale of LOCALES) {
+      const dict = loadDescriptions(locale);
+      expect(dict.agent).toBeTruthy();
+      expect(dict.agents).toBeTruthy();
+      expect(dict.agent).not.toBe(dict.agents);
+    }
   });
 
   // Issue #689: Security - allowlist validation (DR4-002)
@@ -288,14 +316,20 @@ describe('STANDARD_COMMANDS', () => {
   });
 
   // Issue #689: XSS regression - description safety (DR4-003)
+  // Issue #1306: the rendered text now lives in the dictionary, so the guard
+  // has to follow it there — checking the definitions would prove nothing.
   it('should have all descriptions without HTML tags or dangerous patterns', () => {
     const dangerousPatterns = [/<[^>]+>/, /javascript:/i, /onerror=/i, /onclick=/i];
-    STANDARD_COMMANDS.forEach((cmd) => {
-      expect(cmd.description).toBeTruthy();
-      dangerousPatterns.forEach((pattern) => {
-        expect(cmd.description).not.toMatch(pattern);
+    for (const locale of LOCALES) {
+      const dict = loadDescriptions(locale);
+      STANDARD_COMMANDS.forEach((cmd) => {
+        const description = dict[cmd.name];
+        expect(description).toBeTruthy();
+        dangerousPatterns.forEach((pattern) => {
+          expect(description).not.toMatch(pattern);
+        });
       });
-    });
+    }
   });
 
   // Issue #689: new Claude-only 4 commands should not have undefined cliTools (DR1-001)
@@ -453,5 +487,53 @@ describe('getFrequentlyUsedCommands', () => {
     const commands = getFrequentlyUsedCommands('opencode');
     // 'clear' is Claude-only (no cliTools), should not be in OpenCode list
     expect(commands.some((c) => c.name === 'clear')).toBe(false);
+  });
+});
+
+// Issue #1306: descriptions live in locales/{en,ja}/worktree.json and are
+// resolved by the renderer. These guards read the shipped dictionaries, so a
+// deleted/renamed/untranslated key fails here rather than shipping a raw key
+// into the UI.
+describe('STANDARD_COMMANDS description dictionary (Issue #1306)', () => {
+  it('should resolve every descriptionKey in every locale', () => {
+    for (const locale of LOCALES) {
+      const dict = loadDescriptions(locale);
+      for (const cmd of STANDARD_COMMANDS) {
+        expect(
+          typeof dict[cmd.name] === 'string' && dict[cmd.name].length > 0,
+          `${locale}/worktree.json is missing slashCommands.descriptions.${cmd.name}`
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('should not carry description keys that no command uses', () => {
+    const names = new Set(STANDARD_COMMANDS.map((cmd) => cmd.name));
+    for (const locale of LOCALES) {
+      const orphans = Object.keys(loadDescriptions(locale)).filter((key) => !names.has(key));
+      expect(orphans, `${locale} has orphaned description keys`).toEqual([]);
+    }
+  });
+
+  it('should keep en and ja description key sets identical', () => {
+    expect(Object.keys(loadDescriptions('ja')).sort()).toEqual(
+      Object.keys(loadDescriptions('en')).sort()
+    );
+  });
+
+  it('should have no CJK text in the en dictionary', () => {
+    const dict = loadDescriptions('en');
+    for (const [key, value] of Object.entries(dict)) {
+      expect(value, `en description "${key}" contains CJK text`).not.toMatch(
+        /[぀-ゟ゠-ヿ一-鿿]/
+      );
+    }
+  });
+
+  it('should actually translate every ja description rather than echoing en', () => {
+    const en = loadDescriptions('en');
+    const ja = loadDescriptions('ja');
+    const untranslated = Object.keys(en).filter((key) => en[key] === ja[key]);
+    expect(untranslated, 'ja descriptions identical to en').toEqual([]);
   });
 });

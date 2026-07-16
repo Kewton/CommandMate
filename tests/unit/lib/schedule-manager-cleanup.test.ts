@@ -12,11 +12,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock croner
+// Issue #1269: must be `function`, not an arrow fn — an arrow fn has no [[Construct]],
+// so `new Cron()` in createScheduleState() would throw "is not a constructor".
 vi.mock('croner', () => ({
-  Cron: vi.fn().mockImplementation(() => ({
-    stop: vi.fn(),
-    schedule: vi.fn(),
-  })),
+  Cron: vi.fn(function (this: Record<string, unknown>) {
+    this.stop = vi.fn();
+    this.schedule = vi.fn();
+  }),
 }));
 
 // Mock db-instance

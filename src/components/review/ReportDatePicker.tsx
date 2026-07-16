@@ -7,6 +7,7 @@
 
 'use client';
 
+import { useTranslations } from 'next-intl';
 import { Button, Input } from '@/components/ui';
 
 interface ReportDatePickerProps {
@@ -28,6 +29,7 @@ function getToday(): string {
 }
 
 export default function ReportDatePicker({ value, onChange }: ReportDatePickerProps) {
+  const t = useTranslations('review');
   const today = getToday();
   const isToday = value === today;
 
@@ -54,7 +56,7 @@ export default function ReportDatePicker({ value, onChange }: ReportDatePickerPr
         size="sm"
         onClick={handlePrev}
         data-testid="date-prev"
-        aria-label="Previous day"
+        aria-label={t('datePicker.previousDay')}
       >
         &lt;
       </Button>
@@ -73,7 +75,7 @@ export default function ReportDatePicker({ value, onChange }: ReportDatePickerPr
         onClick={handleNext}
         disabled={isToday}
         data-testid="date-next"
-        aria-label="Next day"
+        aria-label={t('datePicker.nextDay')}
       >
         &gt;
       </Button>

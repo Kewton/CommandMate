@@ -395,7 +395,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        throw new Error(data.error?.message || 'Failed to load file');
+        throw new Error(data.error?.message || tWorktree('editor.loadError'));
       }
 
       const fileContent = data.content || '';
@@ -409,12 +409,15 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         setShowLargeFileWarning(true);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to load file';
+      const message = err instanceof Error ? err.message : tWorktree('editor.loadError');
       setError(message);
     } finally {
       setIsLoading(false);
     }
-  }, [worktreeId, filePath]);
+    // tWorktree is intentionally omitted: it is only used for the fallback error
+    // message, and re-creating loadContent would re-fetch the file on every
+    // locale change (and loop under a non-memoized t).
+  }, [worktreeId, filePath]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * API save function shared by manual and auto-save.
@@ -433,15 +436,15 @@ export const MarkdownEditor = memo(function MarkdownEditor({
       );
       // Session expiry detection before JSON parsing
       if (response.status === 401 || response.redirected) {
-        throw new Error('Session expired. Please re-login.');
+        throw new Error(tWorktree('editor.sessionExpired'));
       }
       const data = await response.json();
       if (!response.ok || !data.success) {
-        throw new Error(data.error?.message || 'Failed to save file');
+        throw new Error(data.error?.message || tWorktree('editor.saveError'));
       }
       setOriginalContent(valueToSave);
     },
-    [worktreeId, filePath]
+    [worktreeId, filePath, tWorktree]
   );
 
   // Auto-save integration (dirty state reset is handled inside saveToApi)
@@ -479,18 +482,18 @@ export const MarkdownEditor = memo(function MarkdownEditor({
 
     try {
       await saveToApi(content);
-      showToast('File saved successfully', 'success');
+      showToast(tWorktree('editor.saveSuccess'), 'success');
 
       if (onSave) {
         onSave(filePath);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to save file';
+      const message = err instanceof Error ? err.message : tWorktree('editor.saveError');
       showToast(message, 'error');
     } finally {
       setIsSaving(false);
     }
-  }, [saveToApi, content, isDirty, isSaving, onSave, filePath, showToast]);
+  }, [saveToApi, content, isDirty, isSaving, onSave, filePath, showToast, tWorktree]);
 
   /** Line count for line number gutter */
   const lineCount = content.split('\n').length;
@@ -648,11 +651,11 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         onKeyDown={handleKeyDown}
         onScroll={handleEditorScroll}
         className={`flex-1 py-4 pr-4 pl-3 font-mono text-sm resize-none bg-surface text-foreground focus:outline-none leading-[1.5rem]${showFocusRing ? ' focus:ring-2 focus:ring-ring focus:ring-inset' : ''}`}
-        placeholder={isTextMode ? 'Start typing...' : 'Start typing markdown...'}
+        placeholder={isTextMode ? tWorktree('editor.placeholder') : tWorktree('editor.placeholderMarkdown')}
         spellCheck={false}
       />
     </>
-  ), [lineCount, content, handleContentChange, handleKeyDown, handleEditorScroll, isTextMode]);
+  ), [lineCount, content, handleContentChange, handleKeyDown, handleEditorScroll, isTextMode, tWorktree]);
 
   // Global ESC key handler for maximized mode
   useEffect(() => {
@@ -748,9 +751,9 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   useEffect(() => {
     if (autoSaveError && isAutoSaveEnabled) {
       setAutoSaveEnabled(false);
-      showToast('Auto-save failed. Switched to manual save.', 'error');
+      showToast(tWorktree('editor.autoSaveFailed'), 'error');
     }
-  }, [autoSaveError, isAutoSaveEnabled, setAutoSaveEnabled, showToast]);
+  }, [autoSaveError, isAutoSaveEnabled, setAutoSaveEnabled, showToast, tWorktree]);
 
   // Calculate container classes for maximized state
   const containerClasses = useMemo(() => {
@@ -805,7 +808,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
       >
         <div className="text-center">
           <Spinner size="xl" variant="accent" className="inline-block" />
-          <p className="mt-4 text-muted-foreground">Loading...</p>
+          <p className="mt-4 text-muted-foreground">{tWorktree('editor.loading')}</p>
         </div>
       </div>
     );
@@ -826,7 +829,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
               onClick={onClose}
               className="mt-4 px-4 py-2 bg-muted hover:bg-muted/80 rounded-lg text-foreground"
             >
-              Close
+              {tWorktree('actions.close')}
             </button>
           )}
         </div>

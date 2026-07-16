@@ -34,6 +34,7 @@ describe('statusCommand', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   describe('path resolution (Issue #125)', () => {
@@ -47,15 +48,28 @@ describe('statusCommand', () => {
     });
 
     it('should load .env using dotenv for correct settings display', async () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue('12345');
       vi.mocked(dotenv.config).mockReturnValue({
         parsed: { CM_PORT: '4000', CM_BIND: '127.0.0.1' },
       });
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
 
       await statusCommand();
 
       expect(dotenv.config).toHaveBeenCalledWith({ path: '/mock/home/.commandmate/.env' });
       expect(getEnvPath).toHaveBeenCalled();
+
+      killSpy.mockRestore();
+    });
+
+    // Issue #1266: with no PID file there is no server to describe, so .env is never read
+    it('should not read .env when there is no PID file', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+
+      await statusCommand();
+
+      expect(dotenv.config).not.toHaveBeenCalled();
     });
   });
 
@@ -74,45 +88,66 @@ describe('statusCommand', () => {
       killSpy.mockRestore();
     });
 
-    it('should display port number when available', async () => {
+    // Issue #1266: the exported CM_PORT deliberately disagrees with .env here. Setting both
+    // to the same value would pass whether or not .env is honoured.
+    it('should display the .env port, not the exported CM_PORT', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.readFileSync).mockReturnValue('12345');
       vi.mocked(dotenv.config).mockReturnValue({
         parsed: { CM_PORT: '4000' },
       });
-      // Set process.env for getStatus to pick up
-      process.env.CM_PORT = '4000';
+      vi.stubEnv('CM_PORT', '3000');
 
       const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
 
       await statusCommand();
 
-      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('4000'));
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Port:    4000'));
       expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
 
       killSpy.mockRestore();
-      delete process.env.CM_PORT;
     });
 
-    it('should display URL when available', async () => {
+    it('should display the URL of the port the server is actually on', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.readFileSync).mockReturnValue('12345');
       vi.mocked(dotenv.config).mockReturnValue({
-        parsed: { CM_PORT: '3000', CM_BIND: '127.0.0.1' },
+        parsed: { CM_PORT: '3101', CM_BIND: '127.0.0.1' },
       });
-      process.env.CM_PORT = '3000';
-      process.env.CM_BIND = '127.0.0.1';
+      vi.stubEnv('CM_PORT', '3000');
 
       const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
 
       await statusCommand();
 
-      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:3000'));
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:3101'));
+      expect(consoleSpy).not.toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:3000'));
       expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
 
       killSpy.mockRestore();
-      delete process.env.CM_PORT;
-      delete process.env.CM_BIND;
+    });
+
+    /**
+     * Issue #1266: reading process.env was only wrong when the two disagreed. dotenv does
+     * inject a .env value the shell never exported, so a .env-only ACL displayed correctly
+     * before this change; an exported one shadowed the ACL the server actually enforces.
+     */
+    it('should display the .env IP ACL, not the exported CM_ALLOWED_IPS', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue('12345');
+      vi.mocked(dotenv.config).mockReturnValue({
+        parsed: { CM_ALLOWED_IPS: '192.168.1.0/24' },
+      });
+      vi.stubEnv('CM_ALLOWED_IPS', '10.0.0.0/8');
+
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+
+      await statusCommand();
+
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('IP ACL:  192.168.1.0/24'));
+      expect(consoleSpy).not.toHaveBeenCalledWith(expect.stringContaining('10.0.0.0/8'));
+
+      killSpy.mockRestore();
     });
   });
 

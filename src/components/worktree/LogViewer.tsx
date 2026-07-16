@@ -7,6 +7,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useTranslations } from 'next-intl';
 import { Card, CardHeader, CardTitle, CardContent, Button, Badge, Input, Spinner } from '@/components/ui';
 import { ToastContainer, useToast } from '@/components/common/Toast';
 import { worktreeApi, handleApiError } from '@/lib/api-client';
@@ -36,6 +37,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
   const [cliToolFilter, setCliToolFilter] = useState<'all' | 'claude' | 'codex' | 'gemini' | 'antigravity'>('all');
   const [exporting, setExporting] = useState(false);
   const { toasts, showToast, removeToast } = useToast();
+  const t = useTranslations('worktree');
 
   /**
    * Fetch log files list
@@ -101,13 +103,13 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
       setExporting(true);
       const data = await worktreeApi.getLogFile(worktreeId, selectedFile, { sanitize: true });
       await copyToClipboard(data.content);
-      showToast('Log copied to clipboard (sanitized)', 'success');
+      showToast(t('logViewer.copied'), 'success');
     } catch (err) {
-      showToast(`Failed to export log: ${handleApiError(err)}`, 'error');
+      showToast(t('logViewer.exportError', { error: handleApiError(err) }), 'error');
     } finally {
       setExporting(false);
     }
-  }, [worktreeId, selectedFile, showToast]);
+  }, [worktreeId, selectedFile, showToast, t]);
 
   /**
    * Find all matches in content
@@ -219,7 +221,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
         <CardHeader>
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <CardTitle>Log Files</CardTitle>
+              <CardTitle>{t('logViewer.title')}</CardTitle>
               <Badge variant="gray">{filteredLogFiles.length}</Badge>
             </div>
 
@@ -230,35 +232,35 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
                 size="sm"
                 onClick={() => setCliToolFilter('all')}
               >
-                All ({logFiles.length})
+                {t('logViewer.all', { count: logFiles.length })}
               </Button>
               <Button
                 variant={cliToolFilter === 'claude' ? 'primary' : 'ghost'}
                 size="sm"
                 onClick={() => setCliToolFilter('claude')}
               >
-                Claude ({logFiles.filter(f => f.toLowerCase().includes('claude')).length})
+                {t('logViewer.toolCount', { tool: 'Claude', count: logFiles.filter(f => f.toLowerCase().includes('claude')).length })}
               </Button>
               <Button
                 variant={cliToolFilter === 'codex' ? 'primary' : 'ghost'}
                 size="sm"
                 onClick={() => setCliToolFilter('codex')}
               >
-                Codex ({logFiles.filter(f => f.toLowerCase().includes('codex')).length})
+                {t('logViewer.toolCount', { tool: 'Codex', count: logFiles.filter(f => f.toLowerCase().includes('codex')).length })}
               </Button>
               <Button
                 variant={cliToolFilter === 'gemini' ? 'primary' : 'ghost'}
                 size="sm"
                 onClick={() => setCliToolFilter('gemini')}
               >
-                Gemini ({logFiles.filter(f => f.toLowerCase().includes('gemini')).length})
+                {t('logViewer.toolCount', { tool: 'Gemini', count: logFiles.filter(f => f.toLowerCase().includes('gemini')).length })}
               </Button>
               <Button
                 variant={cliToolFilter === 'antigravity' ? 'primary' : 'ghost'}
                 size="sm"
                 onClick={() => setCliToolFilter('antigravity')}
               >
-                Antigravity ({logFiles.filter(f => f.toLowerCase().includes('antigravity')).length})
+                {t('logViewer.toolCount', { tool: 'Antigravity', count: logFiles.filter(f => f.toLowerCase().includes('antigravity')).length })}
               </Button>
             </div>
           </div>
@@ -278,7 +280,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
 
           {!loading && filteredLogFiles.length === 0 && !error && (
             <p className="text-sm text-muted-foreground text-center py-4">
-              {cliToolFilter === 'all' ? 'No log files found' : `No ${cliToolFilter} log files found`}
+              {cliToolFilter === 'all' ? t('logViewer.empty') : t('logViewer.emptyFiltered', { tool: cliToolFilter })}
             </p>
           )}
 
@@ -315,9 +317,9 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
                     size="sm"
                     onClick={handleExport}
                     disabled={!selectedFile || exporting}
-                    title="Copy sanitized log to clipboard"
+                    title={t('logViewer.copyTitle')}
                   >
-                    {exporting ? 'Exporting...' : 'Export'}
+                    {exporting ? t('logViewer.exporting') : t('logViewer.export')}
                   </Button>
                   <Button
                     variant="ghost"
@@ -329,7 +331,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
                       setCurrentMatchIndex(0);
                     }}
                   >
-                    Close
+                    {t('actions.close')}
                   </Button>
                 </div>
               </div>
@@ -342,7 +344,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     onKeyDown={handleSearchKeyDown}
-                    placeholder="Search in log file..."
+                    placeholder={t('logViewer.searchPlaceholder')}
                     className="w-full pr-20"
                   />
                   {matches.length > 0 && (
@@ -360,7 +362,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
                       size="sm"
                       onClick={goToPrevMatch}
                       disabled={matches.length === 0}
-                      title="Previous match (Shift+Enter)"
+                      title={t('logViewer.prevMatch')}
                     >
                       ↑
                     </Button>
@@ -369,7 +371,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
                       size="sm"
                       onClick={goToNextMatch}
                       disabled={matches.length === 0}
-                      title="Next match (Enter)"
+                      title={t('logViewer.nextMatch')}
                     >
                       ↓
                     </Button>
@@ -400,7 +402,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
 
             {!loading && searchQuery && matches.length === 0 && fileContent && (
               <div className="text-center py-4 text-sm text-muted-foreground">
-                No matches found for &quot;{searchQuery}&quot;
+                {t('logViewer.noMatches', { query: searchQuery })}
               </div>
             )}
           </CardContent>

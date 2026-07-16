@@ -220,7 +220,8 @@ export function getEnv(): Env {
   const bind = getEnvByKey('CM_BIND') || '127.0.0.1';
   // Issue #135: DB path resolution with proper fallback chain
   // Priority: CM_DB_PATH > DATABASE_PATH (deprecated) > getDefaultDbPath()
-  const databasePath = getEnvByKey('CM_DB_PATH')
+  const explicitDbPath = getEnvByKey('CM_DB_PATH');
+  const databasePath = explicitDbPath
     || getDatabasePathWithDeprecationWarning()
     || getDefaultDbPath();
 
@@ -241,9 +242,20 @@ export function getEnv(): Env {
   let validatedDbPath: string;
   try {
     validatedDbPath = validateDbPath(databasePath);
-  } catch {
-    // If validation fails, fall back to default path
-    // This can happen if DATABASE_PATH points to a system directory
+  } catch (error) {
+    // Issue #1267: A rejected CM_DB_PATH must fail closed. Falling back here
+    // handed the caller a different, fully usable database, so an isolated
+    // environment silently became the real one.
+    if (explicitDbPath !== undefined) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Invalid CM_DB_PATH: ${reason}. `
+        + `Set CM_DB_PATH to an allowed location, `
+        + `or unset it to use the default (${getDefaultDbPath()}).`
+      );
+    }
+    // DATABASE_PATH predates CM_DB_PATH and cannot be assumed deliberate,
+    // so it keeps the historical warn-and-fall-back behaviour.
     console.warn(`[Security] Invalid DB path "${databasePath}", using default.`);
     validatedDbPath = validateDbPath(getDefaultDbPath());
   }

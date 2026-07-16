@@ -11,6 +11,7 @@
 'use client';
 
 import React, { memo } from 'react';
+import { useTranslations } from 'next-intl';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui';
 
@@ -51,6 +52,8 @@ export const FileSearchBar = memo(function FileSearchBar({
   onPrevMatch,
   onClose,
 }: FileSearchBarProps) {
+  const t = useTranslations('worktree');
+
   return (
     <div className="flex items-center gap-1 px-2 py-1 bg-muted border-b border-input flex-shrink-0">
       <input
@@ -62,7 +65,7 @@ export const FileSearchBar = memo(function FileSearchBar({
           if (e.key === 'Escape') { onClose(); }
           if (e.key === 'Enter') { if (e.shiftKey) { onPrevMatch(); } else { onNextMatch(); } }
         }}
-        placeholder="検索..."
+        placeholder={t('fileSearch.placeholder')}
         className="flex-1 min-w-0 px-2 py-0.5 text-sm bg-surface dark:text-foreground border border-input rounded outline-none focus:ring-1 focus:ring-ring"
         autoComplete="off"
         autoCorrect="off"
@@ -72,9 +75,9 @@ export const FileSearchBar = memo(function FileSearchBar({
       <span className="text-xs text-muted-foreground min-w-[3rem] text-right">
         {matchCount > 0 ? `${currentIdx + 1}/${matchCount}` : '0/0'}
       </span>
-      <Button variant="ghost" type="button" onClick={onPrevMatch} disabled={matchCount === 0} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-muted-foreground hover:text-foreground dark:hover:text-white disabled:text-muted-foreground/50" aria-label="前の結果">▲</Button>
-      <Button variant="ghost" type="button" onClick={onNextMatch} disabled={matchCount === 0} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-muted-foreground hover:text-foreground dark:hover:text-white disabled:text-muted-foreground/50" aria-label="次の結果">▼</Button>
-      <Button variant="ghost" type="button" onClick={onClose} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-muted-foreground hover:text-foreground dark:hover:text-white" aria-label="検索を閉じる"><X className="w-4 h-4" /></Button>
+      <Button variant="ghost" type="button" onClick={onPrevMatch} disabled={matchCount === 0} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-muted-foreground hover:text-foreground dark:hover:text-white disabled:text-muted-foreground/50" aria-label={t('fileSearch.prevMatch')}>▲</Button>
+      <Button variant="ghost" type="button" onClick={onNextMatch} disabled={matchCount === 0} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-muted-foreground hover:text-foreground dark:hover:text-white disabled:text-muted-foreground/50" aria-label={t('fileSearch.nextMatch')}>▼</Button>
+      <Button variant="ghost" type="button" onClick={onClose} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-muted-foreground hover:text-foreground dark:hover:text-white" aria-label={t('fileSearch.close')}><X className="w-4 h-4" /></Button>
     </div>
   );
 });

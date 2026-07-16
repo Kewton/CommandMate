@@ -69,7 +69,7 @@ gh --version
 gh auth login
 ```
 
-### Install Node.js (v20+)
+### Install Node.js (v22+)
 
 > **Note:** Ubuntu's default `apt` repository ships an outdated Node.js.
 > If you already have an old version installed via `apt`, remove it first:
@@ -208,6 +208,8 @@ NODE_MODULE_VERSION 115.
 ```
 
 **Cause:** After switching the Node.js version with `nvm`, the native module is left built for the old version.
+
+**This normally recovers automatically (Issue #1263):** when the database connection hits this error, CommandMate runs `npm rebuild better-sqlite3` for you and continues. Only follow the steps below if the automatic rebuild fails.
 
 **Solution:**
 

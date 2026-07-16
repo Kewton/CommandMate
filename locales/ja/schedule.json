@@ -103,6 +103,12 @@
     "askAiCron": "AIに相談",
     "askAiMessage": "AIに下書きを依頼",
     "askAiHint": "AIチャットにプロンプトを下書きします（自動送信はされません）",
+    "aiPrompts": {
+      "cron": "スケジュール実行のタイミングを cron 式で表現したいです。自然言語の要望（例: 「毎週月曜 9 時」）を cron 式に変換し、候補をいくつか提案してください（例: 「毎週月曜 9 時」→ `0 9 * * 1`）。",
+      "cronRefine": "スケジュール実行のタイミングを cron 式で表現したいです。現在の入力は {current} です。これを踏まえて、自然言語の要望（例: 「毎週月曜 9 時」）を cron 式に変換し、候補をいくつか提案してください（例: 「毎週月曜 9 時」→ `0 9 * * 1`）。",
+      "messageDraft": "このスケジュールで CLI ツールに定期実行させる message（指示プロンプト）を作成したいです。まず用途を私に聞き取り、それを踏まえた message の内容を提案してください。",
+      "messageDraftNamed": "スケジュール {name} で CLI ツールに定期実行させる message（指示プロンプト）を作成したいです。まず用途を私に聞き取り、それを踏まえた message の内容を提案してください。"
+    },
     "cliTool": "CLIツール",
     "model": "モデル",
     "modelPlaceholder": "gpt-4.1",
@@ -167,5 +173,24 @@
     "createdTime": "作成時刻",
     "sentTime": "送信時刻",
     "failureReason": "失敗理由"
-  }
+  },
+  "memoAdd": "メモを追加",
+  "memoRemaining": "残り {count} 件",
+  "memoDefaultTitle": "メモ",
+  "memoTitlePlaceholder": "メモのタイトル",
+  "memoInsertToMessage": "メッセージに挿入",
+  "memoCopyContent": "メモの内容をコピー",
+  "memoDelete": "メモを削除",
+  "memoContentPlaceholder": "メモの内容を入力...",
+  "memoLoading": "メモを読み込み中...",
+  "memoSearchToggle": "メモを検索",
+  "memoEmpty": "メモはまだありません。",
+  "memoEmptyHint": "下のボタンから追加できます。",
+  "memoNoMatch": "検索条件に一致するメモがありません。",
+  "memoSearchLabel": "メモ検索",
+  "memoSearchPlaceholder": "検索...",
+  "memoSearchInputLabel": "メモを検索",
+  "memoSearchPrev": "前の一致（前へ）",
+  "memoSearchNext": "次の一致（次へ）",
+  "memoSearchClose": "検索を閉じる（閉じる）"
 }

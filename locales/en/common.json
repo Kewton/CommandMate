@@ -1,10 +1,59 @@
 {
   "sessions": {
     "idleAgents": "{count} idle",
-    "activeAgents": "{count} active"
+    "activeAgents": "{count} active",
+    "title": "Sessions",
+    "description": "All worktree sessions across repositories.",
+    "filterPlaceholder": "Filter by name or repository...",
+    "filterAriaLabel": "Filter sessions by name or repository",
+    "sortByAriaLabel": "Sort by",
+    "sortAscending": "Sort ascending",
+    "sortDescending": "Sort descending",
+    "loadingAriaLabel": "Loading sessions",
+    "refreshError": "Failed to refresh sessions: {message}",
+    "loadError": "Failed to load sessions: {message}",
+    "noMatching": "No matching sessions found.",
+    "empty": "No sessions yet."
+  },
+  "nav": {
+    "home": "Home",
+    "chat": "Chat",
+    "sessions": "Sessions",
+    "repositories": "Repositories",
+    "repositoriesShort": "Repos",
+    "review": "Review",
+    "reviewReport": "Review/Report",
+    "more": "More"
+  },
+  "repositories": {
+    "empty": "No repositories registered yet.",
+    "add": "Add Repository",
+    "syncAll": "Sync All",
+    "syncing": "Syncing...",
+    "addNewTitle": "Add New Repository",
+    "localPathTab": "Local Path",
+    "cloneUrlTab": "Clone URL",
+    "localPathDescription": "Enter the absolute path to a git repository containing worktrees.",
+    "localPathLabel": "Repository Path",
+    "localPathExample": "Example: /Users/username/projects/my-repo",
+    "scan": "Scan & Add",
+    "scanning": "Scanning...",
+    "cloneUrlDescription": "Enter a git clone URL to clone a remote repository.",
+    "cloneUrlLabel": "Clone URL",
+    "cloneUrlHelp": "Supports HTTPS and SSH URLs",
+    "clone": "Clone",
+    "cloning": "Cloning...",
+    "cloneSuccess": "Repository cloned successfully",
+    "cloneFailed": "Clone failed",
+    "pathRequired": "Repository path is required",
+    "urlRequired": "Clone URL is required",
+    "urlInvalid": "Invalid URL format",
+    "loading": "Loading repositories"
   },
   "cancel": "Cancel",
   "send": "Send",
+  "sending": "Sending...",
+  "sendMessagePlaceholder": "Send a message...",
   "end": "End",
   "ending": "Ending...",
   "retry": "Retry",
@@ -12,6 +61,19 @@
   "reconnect": "Reconnect",
   "close": "Close",
   "back": "Back",
+  "menu": "Menu",
+  "sidebar": {
+    "open": "Open sidebar",
+    "close": "Close sidebar",
+    "branchNavigation": "Branch navigation",
+    "branches": "Branches",
+    "searchBranches": "Search branches...",
+    "noBranchesFound": "No branches found",
+    "noBranchesAvailable": "No branches available",
+    "dragToReorderGroup": "Drag to reorder group",
+    "switchToFlatView": "Switch to flat view",
+    "switchToGroupedView": "Switch to grouped view"
+  },
   "confirmDelete": "Delete \"{name}\"?",
   "favorites": {
     "add": "Add to favorites",
@@ -37,5 +99,38 @@
   "confirmDialog": {
     "title": "Confirm",
     "confirm": "OK"
+  },
+  "language": "Language",
+  "loadingPage": "Loading page",
+  "closeNotification": "Close notification",
+  "status": {
+    "idle": "Idle",
+    "ready": "Ready",
+    "running": "Running",
+    "generating": "Generating",
+    "waiting": "Waiting for response",
+    "error": "Error",
+    "unknown": "Unknown"
+  },
+  "sort": {
+    "options": "Sort options",
+    "updatedAt": "Updated",
+    "repositoryName": "Repository",
+    "branchName": "Branch",
+    "status": "Status",
+    "lastSent": "Last Sent"
+  },
+  "branchItem": {
+    "cliToolStatus": "CLI tool status",
+    "hasUnread": "Has unread messages"
+  },
+  "connection": {
+    "reconnecting": "Reconnecting",
+    "offline": "Offline",
+    "reconnectingTooltip": "Re-establishing the live connection (running on polling)",
+    "offlineTooltip": "No live connection (running on polling)"
+  },
+  "meta": {
+    "description": "Git worktree management with Claude CLI and tmux sessions"
   }
 }

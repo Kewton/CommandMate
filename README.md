@@ -9,6 +9,8 @@
 
 [English](./README.md) | [日本語](./docs/ja/README.md)
 
+**[commandmate website →](https://kewton.github.io/CommandMate/)**
+
 <p align="center">
   <img src="./docs/images/demo-desktop.gif" width="600" alt="CommandMate Desktop Demo" />
 </p>
@@ -21,7 +23,7 @@ CommandMate is a local control plane for agent CLIs.
 npx commandmate
 ```
 
-**From install to your first session in 60 seconds.** macOS / Linux / Windows (WSL2) · Node.js v20+ · npm · git · tmux
+**From install to your first session in 60 seconds.** macOS / Linux / Windows (WSL2) · Node.js v22+ · npm · git · tmux
 
 ---
 
@@ -122,7 +124,7 @@ Each Git worktree gets its own tmux session, so multiple tasks run in parallel w
 <summary><strong>Quick Start (detailed)</strong></summary>
 
 ```bash
-# Install & start in one command
+# Install & start in one command (guided setup)
 npx commandmate
 
 # Or install globally
@@ -131,10 +133,20 @@ commandmate init
 commandmate start --daemon
 ```
 
-Open http://localhost:3000 in your browser.
+Running `commandmate` with no arguments walks you through the whole first run: it checks
+your dependencies, asks a few setup questions on first use, starts the server in the
+background, waits for it to come up, and opens the UI in your browser.
+
+Run it again later and it skips straight to opening the UI (or tells you the server is
+already running). Requires Node.js 22 or later.
+
+- Already have a `.env`? The setup questions are skipped.
+- Don't want the browser to open? Use `commandmate --no-open` (also skipped automatically
+  on CI and headless sessions).
+- Otherwise, open http://localhost:3000 in your browser.
 
 See the [CLI Setup Guide](./docs/en/user-guide/cli-setup-guide.md) for details.
-For Windows users, see the [WSL2 Setup Guide](./docs/user-guide/wsl2-setup.md).
+For Windows users, see the [WSL2 Setup Guide](./docs/en/user-guide/wsl2-setup.md) — CommandMate depends on tmux, so it runs on Windows via WSL2 (native Windows is not supported).
 
 </details>
 
@@ -155,6 +167,7 @@ For Windows users, see the [WSL2 Setup Guide](./docs/user-guide/wsl2-setup.md).
 | `commandmate stop` | Stop the server |
 | `commandmate stop --force` | Force stop (SIGKILL) |
 | `commandmate status` | Check status |
+| `commandmate update` | Update to the latest version |
 
 ### Worktree Parallel Development
 
@@ -233,6 +246,48 @@ Requires [gh CLI](https://cli.github.com/) to be installed.
 | `commandmate docs --all` | List all available sections |
 
 See `commandmate --help` for all options.
+
+</details>
+
+<details>
+<summary><strong>Update</strong></summary>
+
+If you installed globally (`npm install -g commandmate`), one command does everything —
+it stops the server, installs the latest version, restarts it, and checks that it came back up.
+
+```bash
+# See whether an update is available (changes nothing)
+commandmate update --check
+
+# Update (asks for confirmation)
+commandmate update
+
+# Non-interactive environments (CI, scripts) require --yes
+commandmate update --yes
+```
+
+**Your data is safe.** Database migrations run automatically the next time the server starts,
+so your worktrees, sessions, and settings carry over. There is no manual migration step.
+
+**Manual update (fallback)** — if `commandmate update` is unavailable:
+
+```bash
+commandmate stop
+npm install -g commandmate@latest
+commandmate start --daemon
+```
+
+Notes:
+
+- After updating, the server restarts using only your `.env`. If you had started it with flags
+  such as `--auth` / `--cert` / `--key` / `--allowed-ips` / `--trust-proxy` / `--port`, start it
+  again manually with those flags (`--auth` generates a new token on each start).
+- Worktree servers (`--issue`) are not stopped automatically. Stop them with
+  `commandmate stop --issue <number>` **before** updating.
+- On permission errors (EACCES), don't re-run with `sudo` — fix your npm global directory
+  permissions using the [CLI Setup Guide](./docs/en/user-guide/cli-setup-guide.md).
+
+See the [Deployment Guide](./docs/en/DEPLOYMENT.md) for exit codes and details.
 
 </details>
 

@@ -349,3 +349,70 @@ describe('getEnv with DB path resolution (Issue #135)', () => {
     expect(env.CM_DB_PATH.startsWith('/')).toBe(true);
   });
 });
+
+// Issue #1267: An explicitly configured CM_DB_PATH must never be silently
+// swapped for a different database. Callers that pointed CM_DB_PATH at a
+// rejected location used to get <cwd>/data/cm.db back with only a console.warn,
+// so they believed they were isolated while reading and writing the real DB.
+describe('getEnv with a rejected CM_DB_PATH (Issue #1267)', () => {
+  beforeEach(() => {
+    resetWarnedKeys();
+    resetDatabasePathWarning();
+    process.env.CM_ROOT_DIR = '/test/path';
+  });
+
+  it('should throw instead of silently falling back to the default path', () => {
+    process.env.CM_DB_PATH = '/etc/cm.db';
+
+    expect(() => getEnv()).toThrow(/CM_DB_PATH/);
+  });
+
+  it('should not resolve to the default path when CM_DB_PATH is rejected', () => {
+    process.env.CM_DB_PATH = '/etc/cm.db';
+
+    // The precise failure this guards: returning a *different, usable* DB path.
+    let resolved: string | undefined;
+    try {
+      resolved = getEnv().CM_DB_PATH;
+    } catch {
+      resolved = undefined;
+    }
+
+    expect(resolved).toBeUndefined();
+  });
+
+  it('should name the rejected path and the reason in the error', () => {
+    process.env.CM_DB_PATH = '/etc/cm.db';
+
+    expect(() => getEnv()).toThrow(/\/etc\/cm\.db/);
+    expect(() => getEnv()).toThrow(/system directory/);
+  });
+
+  it('should honour the MCBD_DB_PATH alias as an explicit setting', () => {
+    delete process.env.CM_DB_PATH;
+    process.env.MCBD_DB_PATH = '/etc/cm.db';
+
+    expect(() => getEnv()).toThrow(/CM_DB_PATH/);
+  });
+
+  it('should still warn and fall back for the deprecated DATABASE_PATH', () => {
+    delete process.env.CM_DB_PATH;
+    delete process.env.MCBD_DB_PATH;
+    process.env.DATABASE_PATH = '/etc/cm.db';
+
+    // Backward compatibility: the fallback exists for DATABASE_PATH, which
+    // predates CM_DB_PATH and cannot be assumed to be deliberate.
+    const env = getEnv();
+
+    expect(env.CM_DB_PATH.endsWith('data/cm.db')).toBe(true);
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining('[Security] Invalid DB path')
+    );
+  });
+
+  it('should accept an explicit CM_DB_PATH in an allowed location', () => {
+    process.env.CM_DB_PATH = '/custom/cm.db';
+
+    expect(getEnv().CM_DB_PATH).toBe('/custom/cm.db');
+  });
+});

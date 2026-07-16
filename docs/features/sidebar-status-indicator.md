@@ -31,21 +31,23 @@
 > OS の「視差効果を減らす」設定時は `globals.css`（Issue #1050）が全アニメを無効化し、
 > 静的ドットへフォールバックする（このとき `running` はリングで `ready` と識別できる）。
 
-### 表示の適用範囲と既知の不整合（Issue #1051 時点）
+### 表示の適用範囲（Issue #1078 で統一済み）
 
-Issue #1051 の StatusDot 化は **サイドバー / Home / Sessions のみ**。以下は今回移行しておらず、
-**従来の `src/config/status-colors.ts`（`MOBILE_STATUS_CONFIG` / `DESKTOP_STATUS_CONFIG`）** のままで、
-今後の追随対象。全面的な表示統一はまだ達成していない点に注意。
+Issue #1051 の StatusDot 化は当初 **サイドバー / Home / Sessions のみ**で、worktree詳細と
+`MobileHeader` は独自の色設定（青スピナー / `bg-yellow-500`）のまま併存していた。
+Issue #1078 で両者とも `<StatusDot>` へ移行し、この不整合は解消済み。
 
-| 箇所 | `running` / `generating` | `waiting` |
-|------|--------------------------|-----------|
-| サイドバー / Home / Sessions（StatusDot） | 緑グロー + パルス（発光ドット） | amber（`bg-warning`）・弱点滅 |
-| worktree詳細（`WorktreeDetailRefactored` 等）・`MobileHeader` | 青スピナー（`border-info`, `animate-spin`） | 黄（`bg-yellow-500`）・静的 |
+`src/config/status-colors.ts` に残るのは以下の2つ:
 
-- **`running` の色/表現差**: StatusDot 側は緑の発光ドット、worktree詳細/MobileHeader 側は青スピナーのまま。
-- **`waiting` の色差**: StatusDot は amber（`bg-warning`）、worktree詳細/MobileHeader は `bg-yellow-500`。
-  さらに `Terminal.tsx` / `MobileTabBar.tsx` は `bg-yellow-500` をハードコードしている。
-  完全統一には `status-colors.ts` とこれらのハードコード双方の変更が必要なため、追随作業まで保留。
+| export | 用途 |
+|--------|------|
+| `SIDEBAR_STATUS_CONFIG` | `ReviewTab` / Sessions のエージェント status dot（色・dot/spinner・`labelKey`） |
+| `DESKTOP_STATUS_LABEL_KEYS` | worktree詳細 DesktopHeader の長文ラベル（`worktree.detailStatus.*`）のみ |
+
+- **ラベルは辞書キー**: モジュールスコープでは `t()` を呼べないため、config はキーだけを持ち
+  描画側が解決する（Issue #1271 / #1304）。汎用6語は `common.status.*`（Issue #1273）を再利用する。
+- **`waiting` の色**: `src/components/Terminal.tsx` は今も `bg-yellow-500` をハードコードしており、
+  トークン（`bg-warning`）への統一は未着手（`MobileTabBar.tsx` は解消済み）。
 
 ## ブランチ左の集約ステータスアイコン（Issue #867）
 

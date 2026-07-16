@@ -1,0 +1,54 @@
+{
+  "status": {
+    "checking": "Checking...",
+    "running": "Running",
+    "stopped": "Stopped"
+  },
+  "card": {
+    "status": "Status",
+    "port": "Port",
+    "path": "Path",
+    "websocket": "WebSocket",
+    "enabled": "Enabled",
+    "disabledNotice": "This app is disabled",
+    "deleteConfirm": "Delete \"{name}\"?",
+    "delete": "Delete",
+    "open": "Open",
+    "settings": "Settings"
+  },
+  "manager": {
+    "addApp": "+ Add App",
+    "loading": "Loading apps...",
+    "loadError": "Failed to load external apps",
+    "empty": "No external apps registered yet.",
+    "emptyHelp": "Add an external app to proxy requests to other frontend applications.",
+    "addFirst": "Add Your First App"
+  },
+  "form": {
+    "editTitle": "Edit External App",
+    "addTitle": "Add External App",
+    "securityWarning": "Proxied apps run under the CommandMate origin and can access CommandMate APIs. Only register trusted applications.",
+    "displayName": "Display Name",
+    "displayNamePlaceholder": "My App",
+    "identifierName": "Identifier Name",
+    "identifierNamePlaceholder": "my-app",
+    "identifierNameHelp": "Alphanumeric and hyphens only. Cannot be changed later.",
+    "pathPrefix": "Path Prefix",
+    "pathPrefixPlaceholder": "app-name",
+    "pathPrefixHelp": "URL path for accessing this app. Cannot be changed later.",
+    "portNumber": "Port Number",
+    "portNumberPlaceholder": "5173",
+    "portNumberHelp": "Target port ({min}-{max})",
+    "appType": "App Type",
+    "appTypePlaceholder": "Select app type...",
+    "description": "Description",
+    "descriptionPlaceholder": "Optional description...",
+    "websocketLabel": "Enable WebSocket support",
+    "enabledLabel": "App is enabled",
+    "save": "Save Changes",
+    "add": "Add App",
+    "updateFailed": "Failed to update app",
+    "createFailed": "Failed to create app",
+    "genericError": "An error occurred"
+  }
+}

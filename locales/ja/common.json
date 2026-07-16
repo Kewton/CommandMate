@@ -1,10 +1,59 @@
 {
   "sessions": {
     "idleAgents": "アイドル {count} 件",
-    "activeAgents": "稼働 {count} 件"
+    "activeAgents": "稼働 {count} 件",
+    "title": "セッション",
+    "description": "全リポジトリの worktree セッション。",
+    "filterPlaceholder": "名前またはリポジトリで絞り込み...",
+    "filterAriaLabel": "名前またはリポジトリでセッションを絞り込む",
+    "sortByAriaLabel": "並び替え",
+    "sortAscending": "昇順に並び替え",
+    "sortDescending": "降順に並び替え",
+    "loadingAriaLabel": "セッションを読み込み中",
+    "refreshError": "セッションの更新に失敗しました: {message}",
+    "loadError": "セッションの読み込みに失敗しました: {message}",
+    "noMatching": "一致するセッションがありません。",
+    "empty": "セッションがまだありません。"
+  },
+  "nav": {
+    "home": "ホーム",
+    "chat": "チャット",
+    "sessions": "セッション",
+    "repositories": "リポジトリ",
+    "repositoriesShort": "リポジトリ",
+    "review": "レビュー",
+    "reviewReport": "レビュー/レポート",
+    "more": "その他"
+  },
+  "repositories": {
+    "empty": "リポジトリが登録されていません。",
+    "add": "リポジトリを追加",
+    "syncAll": "すべて同期",
+    "syncing": "同期中...",
+    "addNewTitle": "リポジトリを新規追加",
+    "localPathTab": "ローカルパス",
+    "cloneUrlTab": "クローン URL",
+    "localPathDescription": "worktree を含む git リポジトリの絶対パスを入力してください。",
+    "localPathLabel": "リポジトリパス",
+    "localPathExample": "例: /Users/username/projects/my-repo",
+    "scan": "スキャンして追加",
+    "scanning": "スキャン中...",
+    "cloneUrlDescription": "リモートリポジトリをクローンする git の URL を入力してください。",
+    "cloneUrlLabel": "クローン URL",
+    "cloneUrlHelp": "HTTPS と SSH の URL に対応しています",
+    "clone": "クローン",
+    "cloning": "クローン中...",
+    "cloneSuccess": "リポジトリをクローンしました",
+    "cloneFailed": "クローンに失敗しました",
+    "pathRequired": "リポジトリパスを入力してください",
+    "urlRequired": "クローン URL を入力してください",
+    "urlInvalid": "URL の形式が正しくありません",
+    "loading": "リポジトリを読み込み中"
   },
   "cancel": "キャンセル",
   "send": "送信",
+  "sending": "送信中...",
+  "sendMessagePlaceholder": "メッセージを送信...",
   "end": "終了する",
   "ending": "終了中...",
   "retry": "再試行",
@@ -12,6 +61,19 @@
   "reconnect": "再接続",
   "close": "閉じる",
   "back": "戻る",
+  "menu": "メニュー",
+  "sidebar": {
+    "open": "サイドバーを開く",
+    "close": "サイドバーを閉じる",
+    "branchNavigation": "ブランチナビゲーション",
+    "branches": "ブランチ",
+    "searchBranches": "ブランチを検索...",
+    "noBranchesFound": "ブランチが見つかりません",
+    "noBranchesAvailable": "ブランチがありません",
+    "dragToReorderGroup": "ドラッグでグループを並べ替え",
+    "switchToFlatView": "フラット表示に切り替え",
+    "switchToGroupedView": "グループ表示に切り替え"
+  },
   "confirmDelete": "「{name}」を削除しますか？",
   "favorites": {
     "add": "お気に入りに追加",
@@ -37,5 +99,38 @@
   "confirmDialog": {
     "title": "確認",
     "confirm": "OK"
+  },
+  "language": "言語",
+  "loadingPage": "ページを読み込み中",
+  "closeNotification": "通知を閉じる",
+  "status": {
+    "idle": "アイドル",
+    "ready": "準備完了",
+    "running": "実行中",
+    "generating": "生成中",
+    "waiting": "応答待ち",
+    "error": "エラー",
+    "unknown": "不明"
+  },
+  "sort": {
+    "options": "並び替えオプション",
+    "updatedAt": "更新日時",
+    "repositoryName": "リポジトリ",
+    "branchName": "ブランチ",
+    "status": "ステータス",
+    "lastSent": "最終送信"
+  },
+  "branchItem": {
+    "cliToolStatus": "CLI ツールのステータス",
+    "hasUnread": "未読メッセージあり"
+  },
+  "connection": {
+    "reconnecting": "再接続中",
+    "offline": "オフライン",
+    "reconnectingTooltip": "ライブ接続を再確立しています（ポーリングで動作中）",
+    "offlineTooltip": "ライブ接続なし（ポーリングで動作中）"
+  },
+  "meta": {
+    "description": "Claude CLI と tmux セッションによる Git worktree 管理"
   }
 }

@@ -25,5 +25,11 @@
     "disabled": "Notifications turned off on this device",
     "error": "Could not enable notifications",
     "updated": "Notification settings updated"
+  },
+  "push": {
+    "promptWaitingWithExcerpt": "Waiting for reply: {excerpt}",
+    "promptWaiting": "Waiting for your reply",
+    "completionWithExcerpt": "Done: {excerpt}",
+    "completion": "Session complete"
   }
 }

@@ -10,6 +10,7 @@
 'use client';
 
 import React, { memo, useState, useRef, useEffect, useCallback } from 'react';
+import { useTranslations } from 'next-intl';
 import { Tooltip } from '@/components/common/Tooltip';
 import type { SortKey, SortDirection } from '@/lib/sidebar-utils';
 
@@ -76,6 +77,7 @@ export const SortSelectorBase = memo(function SortSelectorBase({
   tooltip,
   iconClassName = 'w-3 h-3',
 }: SortSelectorBaseProps) {
+  const t = useTranslations('common');
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -187,7 +189,7 @@ export const SortSelectorBase = memo(function SortSelectorBase({
       {isOpen && (
         <div
           role="listbox"
-          aria-label="Sort options"
+          aria-label={t('sort.options')}
           className="
             absolute right-0 top-full mt-1 z-50
             min-w-[140px] py-1 rounded-md shadow-lg

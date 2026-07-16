@@ -17,6 +17,15 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { MemoCard } from '@/components/worktree/MemoCard';
 import type { WorktreeMemo } from '@/types/models';
 
+// Issue #1277: this file asserts rendered wording (placeholders, aria-labels,
+// the saving indicator), so it must resolve keys through the real dictionary.
+// The global mock in tests/setup.ts echoes `<namespace>.<key>` back and would
+// keep these assertions green even if the key did not exist.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 // Must match COPY_FEEDBACK_DURATION_MS in MemoCard.tsx
 const COPY_FEEDBACK_DURATION_MS = 2000;
 

@@ -9,23 +9,25 @@
 
 'use client';
 
+import { useTranslations } from 'next-intl';
 import { useRealtime } from '@/hooks/useRealtimeConnection';
 
 export function ConnectionStatusIndicator() {
   const { status } = useRealtime();
+  const t = useTranslations('common');
 
   // While connected the push path is healthy — no indicator needed.
   if (status === 'connected') return null;
 
   const isConnecting = status === 'connecting';
-  const label = isConnecting ? '再接続中' : 'オフライン';
+  const label = isConnecting ? t('connection.reconnecting') : t('connection.offline');
 
   return (
     <span
       data-testid="connection-status-indicator"
       role="status"
       aria-live="polite"
-      title={isConnecting ? 'ライブ接続を再確立しています（ポーリングで動作中）' : 'ライブ接続なし（ポーリングで動作中）'}
+      title={isConnecting ? t('connection.reconnectingTooltip') : t('connection.offlineTooltip')}
       className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-2 py-0.5 text-xs text-muted-foreground"
     >
       <span

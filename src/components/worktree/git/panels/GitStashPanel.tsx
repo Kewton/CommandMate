@@ -10,9 +10,9 @@
 'use client';
 
 import { memo, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import type { StashInfo } from '@/types/git';
 import { stashCleanupPrompt, stashConflictPrompt } from '@/lib/git-ai-prompt-templates';
-import { DANGER_ZONE_RUNNING_SESSION_WARNING } from '@/config/git-status-config';
 import { AskAiButton, RefreshIcon } from '@/components/worktree/git/gitPaneShared';
 import { useGitPaneContext } from '@/components/worktree/git/GitPaneContext';
 import { Checkbox } from '@/components/ui';
@@ -47,6 +47,8 @@ export const GitStashPanel = memo(function GitStashPanel({
   onDrop,
 }: GitStashPanelProps) {
   const { isMobile, onInsertToMessage: onAskAi } = useGitPaneContext();
+  const t = useTranslations('worktree');
+  const tCommon = useTranslations('common');
   const [open, setOpen] = useState(!isMobile);
   const [pushMessage, setPushMessage] = useState('');
   const [includeUntracked, setIncludeUntracked] = useState(false);
@@ -64,20 +66,25 @@ export const GitStashPanel = memo(function GitStashPanel({
           className="flex items-center gap-1 text-sm font-medium text-muted-foreground cursor-pointer hover:text-foreground"
         >
           <span className="text-xs w-4 text-center">{open ? '▼' : '▶'}</span>
-          Stash {stashes.length > 0 && <span className="text-xs text-muted-foreground">({stashes.length})</span>}
+          {t('git.stash.titlePrefix')}
+          {stashes.length > 0 && (
+            <span className="text-xs text-muted-foreground">
+              {t('git.stash.count', { count: stashes.length })}
+            </span>
+          )}
         </button>
         <div className="flex items-center gap-1">
           {open && onAskAi && stashes.length > 0 && (
             <AskAiButton
               testId="stash-cleanup-ask-ai"
-              onClick={() => onAskAi(stashCleanupPrompt(stashes))}
+              onClick={() => onAskAi(stashCleanupPrompt(t, stashes))}
             />
           )}
           <button
             type="button"
             onClick={onRefresh}
             className="p-1 text-muted-foreground hover:text-foreground rounded"
-            aria-label="Refresh stash list"
+            aria-label={t('git.stash.refresh')}
           >
             <RefreshIcon />
           </button>
@@ -105,7 +112,7 @@ export const GitStashPanel = memo(function GitStashPanel({
                 <AskAiButton
                   className="shrink-0"
                   testId="stash-conflict-ask-ai"
-                  onClick={() => onAskAi(stashConflictPrompt(conflictNotice))}
+                  onClick={() => onAskAi(stashConflictPrompt(t, conflictNotice))}
                 />
               )}
             </div>
@@ -117,7 +124,7 @@ export const GitStashPanel = memo(function GitStashPanel({
               type="text"
               value={pushMessage}
               onChange={(e) => setPushMessage(e.target.value)}
-              placeholder="Stash message (optional)"
+              placeholder={t('git.stash.messagePlaceholder')}
               className="w-full px-2 py-1 text-xs border border-input rounded bg-surface dark:bg-surface-2 text-foreground"
               data-testid="git-stash-push-message"
             />
@@ -128,7 +135,7 @@ export const GitStashPanel = memo(function GitStashPanel({
                   onCheckedChange={(checked) => setIncludeUntracked(checked === true)}
                   data-testid="git-stash-include-untracked"
                 />
-                Include untracked
+                {t('git.stash.includeUntracked')}
               </label>
               <button
                 type="button"
@@ -141,7 +148,7 @@ export const GitStashPanel = memo(function GitStashPanel({
                 className="px-2 py-1 text-xs rounded bg-accent-600 hover:bg-accent-700 text-white disabled:opacity-50"
                 data-testid="stash-push-button"
               >
-                Stash
+                {t('git.stash.push')}
               </button>
             </div>
           </div>
@@ -149,10 +156,10 @@ export const GitStashPanel = memo(function GitStashPanel({
           {/* Stash list */}
           {loading ? (
             <div className="py-3 text-center text-xs text-muted-foreground" role="status">
-              Loading stashes...
+              {t('git.stash.loading')}
             </div>
           ) : stashes.length === 0 ? (
-            <div className="py-3 text-center text-xs text-muted-foreground">No stashes</div>
+            <div className="py-3 text-center text-xs text-muted-foreground">{t('git.stash.empty')}</div>
           ) : (
             <ul className="divide-y divide-border">
               {stashes.map((stash) => (
@@ -174,7 +181,7 @@ export const GitStashPanel = memo(function GitStashPanel({
                         className="px-1.5 py-0.5 text-xs rounded border border-input hover:bg-muted disabled:opacity-50"
                         data-testid="stash-apply-button"
                       >
-                        Apply
+                        {t('git.stash.apply')}
                       </button>
                       <button
                         type="button"
@@ -183,7 +190,7 @@ export const GitStashPanel = memo(function GitStashPanel({
                         className="px-1.5 py-0.5 text-xs rounded border border-input hover:bg-muted disabled:opacity-50"
                         data-testid="stash-pop-button"
                       >
-                        Pop
+                        {t('git.stash.pop')}
                       </button>
                       <button
                         type="button"
@@ -192,7 +199,7 @@ export const GitStashPanel = memo(function GitStashPanel({
                         className="px-1.5 py-0.5 text-xs rounded border border-danger-border text-danger-foreground hover:bg-danger-subtle disabled:opacity-50"
                         data-testid="stash-drop-button"
                       >
-                        Drop
+                        {t('git.stash.drop')}
                       </button>
                     </div>
                   </div>
@@ -211,14 +218,14 @@ export const GitStashPanel = memo(function GitStashPanel({
           role="dialog"
         >
           <p className="text-xs text-danger-foreground">
-            stash@{'{'}{dropConfirm}{'}'} を完全に削除します。この操作は取り消せません。
+            stash@{'{'}{dropConfirm}{'}'}{t('git.stash.dropConfirmSuffix')}
           </p>
           {hasRunningSession && (
             <p
               className="mt-1 text-xs text-danger-foreground"
               data-testid="git-stash-drop-session-warning"
             >
-              {DANGER_ZONE_RUNNING_SESSION_WARNING}
+              {t('git.danger.runningSessionWarning')}
             </p>
           )}
           <div className="mt-2 flex items-center gap-2">
@@ -232,14 +239,14 @@ export const GitStashPanel = memo(function GitStashPanel({
               className="px-2 py-1 text-xs rounded bg-danger hover:bg-danger/90 text-white disabled:opacity-50"
               data-testid="git-stash-drop-confirm-button"
             >
-              Drop
+              {t('git.stash.drop')}
             </button>
             <button
               type="button"
               onClick={() => setDropConfirm(null)}
               className="px-2 py-1 text-xs rounded border border-input hover:bg-muted"
             >
-              Cancel
+              {tCommon('cancel')}
             </button>
           </div>
         </div>

@@ -7,6 +7,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { Card, Button, Badge } from '@/components/ui';
 import { ExternalAppStatus } from './ExternalAppStatus';
 import type { ExternalApp, ExternalAppType } from '@/types/external-apps';
@@ -60,6 +61,8 @@ function getAppTypeBadgeVariant(appType: ExternalAppType): 'success' | 'warning'
  * ```
  */
 export function ExternalAppCard({ app, onEdit, onDelete }: ExternalAppCardProps) {
+  const t = useTranslations('externalApps');
+  const tCommon = useTranslations('common');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -95,28 +98,28 @@ export function ExternalAppCard({ app, onEdit, onDelete }: ExternalAppCardProps)
       {/* Info */}
       <div className="space-y-2 mb-4">
         <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">Status</span>
+          <span className="text-sm text-muted-foreground">{t('card.status')}</span>
           <ExternalAppStatus appId={app.id} pollInterval={30000} />
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">Port</span>
+          <span className="text-sm text-muted-foreground">{t('card.port')}</span>
           <span className="text-sm font-mono text-foreground">:{app.targetPort}</span>
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">Path</span>
+          <span className="text-sm text-muted-foreground">{t('card.path')}</span>
           <span className="text-sm font-mono text-foreground truncate max-w-[150px]">
             /proxy/{app.pathPrefix}/
           </span>
         </div>
         {app.websocketEnabled && (
           <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">WebSocket</span>
-            <Badge variant="info">Enabled</Badge>
+            <span className="text-sm text-muted-foreground">{t('card.websocket')}</span>
+            <Badge variant="info">{t('card.enabled')}</Badge>
           </div>
         )}
         {!app.enabled && (
           <div className="mt-2 py-1 px-2 bg-warning-subtle border border-warning-border rounded text-xs text-warning-foreground">
-            This app is disabled
+            {t('card.disabledNotice')}
           </div>
         )}
       </div>
@@ -125,7 +128,7 @@ export function ExternalAppCard({ app, onEdit, onDelete }: ExternalAppCardProps)
       {showDeleteConfirm ? (
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">
-            Delete &quot;{app.displayName}&quot;?
+            {t('card.deleteConfirm', { name: app.displayName })}
           </p>
           <div className="flex gap-2">
             <Button
@@ -135,7 +138,7 @@ export function ExternalAppCard({ app, onEdit, onDelete }: ExternalAppCardProps)
               disabled={isDeleting}
               loading={isDeleting}
             >
-              Delete
+              {t('card.delete')}
             </Button>
             <Button
               variant="ghost"
@@ -143,7 +146,7 @@ export function ExternalAppCard({ app, onEdit, onDelete }: ExternalAppCardProps)
               onClick={() => setShowDeleteConfirm(false)}
               disabled={isDeleting}
             >
-              Cancel
+              {tCommon('cancel')}
             </Button>
           </div>
         </div>
@@ -155,14 +158,14 @@ export function ExternalAppCard({ app, onEdit, onDelete }: ExternalAppCardProps)
             onClick={() => window.open(proxyUrl, '_blank')}
             disabled={!app.enabled}
           >
-            Open
+            {t('card.open')}
           </Button>
           <Button
             variant="secondary"
             size="sm"
             onClick={() => onEdit(app)}
           >
-            Settings
+            {t('card.settings')}
           </Button>
           <Button
             variant="ghost"
@@ -170,7 +173,7 @@ export function ExternalAppCard({ app, onEdit, onDelete }: ExternalAppCardProps)
             onClick={() => setShowDeleteConfirm(true)}
             className="text-danger-foreground hover:bg-danger-subtle"
           >
-            Delete
+            {t('card.delete')}
           </Button>
         </div>
       )}

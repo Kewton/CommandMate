@@ -14,6 +14,7 @@
 'use client';
 
 import React, { memo, useState, useCallback, useRef, useEffect } from 'react';
+import { useTranslations } from 'next-intl';
 import { Button, Spinner } from '@/components/ui';
 
 export interface AssistantMessageInputProps {
@@ -21,15 +22,17 @@ export interface AssistantMessageInputProps {
   onSend: (message: string) => Promise<void>;
   /** Whether the input should be disabled */
   disabled?: boolean;
-  /** Placeholder text */
+  /** Placeholder text. Falls back to the translated default when omitted — a
+   * default parameter cannot call t(), which would pin it to English. */
   placeholder?: string;
 }
 
 export const AssistantMessageInput = memo(function AssistantMessageInput({
   onSend,
   disabled = false,
-  placeholder = 'Type your message...',
+  placeholder,
 }: AssistantMessageInputProps) {
+  const t = useTranslations('home');
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [isComposing, setIsComposing] = useState(false);
@@ -129,7 +132,7 @@ export const AssistantMessageInput = memo(function AssistantMessageInput({
         onKeyDown={handleKeyDown}
         onCompositionStart={handleCompositionStart}
         onCompositionEnd={handleCompositionEnd}
-        placeholder={placeholder}
+        placeholder={placeholder ?? t('assistant.input.defaultPlaceholder')}
         disabled={sending || disabled}
         rows={1}
         className="flex-1 outline-none bg-transparent resize-none overflow-y-auto scrollbar-thin text-sm"
@@ -148,7 +151,7 @@ export const AssistantMessageInput = memo(function AssistantMessageInput({
         variant="ghost"
         disabled={!message.trim() || sending || disabled}
         className="flex-shrink-0 rounded-full p-1.5 text-accent-600 hover:bg-accent-50 dark:text-accent-400 dark:hover:bg-accent-900/30 disabled:text-muted-foreground disabled:hover:bg-transparent"
-        aria-label="Send message"
+        aria-label={t('assistant.input.send')}
         data-testid="assistant-send-button"
       >
         {sending ? (

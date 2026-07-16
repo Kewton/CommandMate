@@ -10,6 +10,14 @@ import { render, screen } from '@testing-library/react';
 import { ConversationPairCard } from '@/components/worktree/ConversationPairCard';
 import type { ConversationPair } from '@/types/conversation';
 
+// Issue #1276: the "You" / "Assistant" role labels resolve through the
+// dictionary now. The global mock echoes `worktree.conversation.you`, so these
+// role-label lookups need the real dictionary to keep meaning what they say.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 describe('ConversationPairCard', () => {
   const mockOnFilePathClick = vi.fn();
 

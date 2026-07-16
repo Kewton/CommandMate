@@ -103,6 +103,12 @@
     "askAiCron": "Ask AI",
     "askAiMessage": "Ask AI to draft",
     "askAiHint": "Drafts a prompt into the AI chat (no auto-send)",
+    "aiPrompts": {
+      "cron": "I want to express the schedule timing as a cron expression. Convert a plain-language request (e.g. \"every Monday at 9\") into a cron expression and suggest a few candidates (e.g. \"every Monday at 9\" → `0 9 * * 1`).",
+      "cronRefine": "I want to express the schedule timing as a cron expression. The current input is {current}. Building on that, convert a plain-language request (e.g. \"every Monday at 9\") into a cron expression and suggest a few candidates (e.g. \"every Monday at 9\" → `0 9 * * 1`).",
+      "messageDraft": "For this schedule, I want to write the message (the instruction prompt) that the CLI tool will run on a schedule. First ask me what it is for, then propose the message content based on my answer.",
+      "messageDraftNamed": "For the schedule {name}, I want to write the message (the instruction prompt) that the CLI tool will run on a schedule. First ask me what it is for, then propose the message content based on my answer."
+    },
     "cliTool": "CLI Tool",
     "model": "Model",
     "modelPlaceholder": "gpt-4.1",
@@ -167,5 +173,24 @@
     "createdTime": "Created",
     "sentTime": "Sent",
     "failureReason": "Failure Reason"
-  }
+  },
+  "memoAdd": "Add Memo",
+  "memoRemaining": "{count} remaining",
+  "memoDefaultTitle": "Memo",
+  "memoTitlePlaceholder": "Memo title",
+  "memoInsertToMessage": "Insert to message",
+  "memoCopyContent": "Copy memo content",
+  "memoDelete": "Delete memo",
+  "memoContentPlaceholder": "Enter memo content...",
+  "memoLoading": "Loading memos...",
+  "memoSearchToggle": "Search memos",
+  "memoEmpty": "No memos yet.",
+  "memoEmptyHint": "Click the button below to add one.",
+  "memoNoMatch": "No memos match your search.",
+  "memoSearchLabel": "Memo search",
+  "memoSearchPlaceholder": "Search...",
+  "memoSearchInputLabel": "Search memos",
+  "memoSearchPrev": "Previous match (prev)",
+  "memoSearchNext": "Next match (next)",
+  "memoSearchClose": "Close search (close)"
 }

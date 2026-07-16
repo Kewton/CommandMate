@@ -2,8 +2,99 @@
   "title": "Overview",
   "running": "running",
   "waiting": "waiting",
+  "sessionOverview": {
+    "title": "Session Overview",
+    "recentSessions": "Recent sessions",
+    "viewAll": "View all"
+  },
+  "sessionSummary": {
+    "loading": "Loading session summary",
+    "running": "Running",
+    "waiting": "Waiting"
+  },
+  "recentSessions": {
+    "empty": "No recent sessions yet.",
+    "cta": "Register a repository to get started",
+    "loading": "Loading recent sessions"
+  },
+  "onboarding": {
+    "title": "Getting started",
+    "dismiss": "Dismiss getting started",
+    "steps": {
+      "registerRepository": "Register a repository",
+      "sendFirstMessage": "Send your first message to an agent"
+    },
+    "actions": {
+      "registerRepository": "Register",
+      "sendFirstMessage": "Open sessions"
+    }
+  },
+  "todo": {
+    "title": "ToDo",
+    "repository": "Repository",
+    "open": "{count} open",
+    "noRepositories": "No repositories yet. Add one from the Repositories screen to start adding todos.",
+    "inputPlaceholder": "Add a todo…",
+    "add": "Add",
+    "loading": "Loading todos",
+    "empty": "No todos yet.",
+    "markAsDone": "Mark as done",
+    "markAsNotDone": "Mark as not done",
+    "delete": "Delete todo",
+    "errors": {
+      "load": "Failed to load todos",
+      "add": "Failed to add todo",
+      "update": "Failed to update todo",
+      "delete": "Failed to delete todo"
+    }
+  },
   "assistant": {
     "clearHistoryConfirm": "Clear all chat history for this repository and CLI? Past messages will no longer be sent back to the assistant.",
-    "changeRepoConfirm": "Changing repository will stop the active conversation. Do you want to continue?"
+    "changeRepoConfirm": "Changing repository will stop the active conversation. Do you want to continue?",
+    "repositoryLabel": "Repository to Work In",
+    "cliLabel": "Assistant CLI",
+    "noRepositories": "No repositories",
+    "toolNotInstalled": "{name} (not installed)",
+    "start": "Start",
+    "starting": "Starting...",
+    "stop": "Stop",
+    "stopping": "Stopping...",
+    "startDirectory": "Start directory: {repository} ({path})",
+    "startDirectoryHint": "Select the repository used as the assistant session start directory.",
+    "history": "History",
+    "clearHistory": "Clear history",
+    "clearing": "Clearing...",
+    "loadingConversation": "Loading conversation",
+    "inputPlaceholder": "Type your message... (Enter to send)",
+    "inputPlaceholderWaiting": "Waiting for the current run to finish",
+    "inputPlaceholderNoSession": "Start a session first",
+    "working": "Assistant is working...",
+    "emptyState": "Select a repository and click Start to open an assistant session.",
+    "thinking": "{label} is thinking...",
+    "input": {
+      "defaultPlaceholder": "Type your message...",
+      "send": "Send message"
+    },
+    "message": {
+      "you": "You",
+      "sending": "Sending",
+      "sent": "Sent",
+      "failed": "Failed",
+      "cancel": "Cancel",
+      "saveAndResend": "Save & Resend",
+      "resending": "Resending...",
+      "edit": "Edit",
+      "editMessage": "Edit message",
+      "editAndResend": "Edit and resend"
+    },
+    "errors": {
+      "loadConversation": "Failed to load conversation",
+      "startSession": "Failed to start session",
+      "stopSession": "Failed to stop session",
+      "clearHistory": "Failed to clear history",
+      "sendMessage": "Failed to send message",
+      "notReadyToResend": "Session is not ready to resend messages",
+      "resubmitMessage": "Failed to resubmit message"
+    }
   }
 }

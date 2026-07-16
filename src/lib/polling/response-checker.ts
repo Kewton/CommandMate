@@ -14,10 +14,11 @@ import { broadcastMessage } from '@/lib/ws-server';
 import { detectPrompt } from '@/lib/detection/prompt-detector';
 import type { PromptDetectionResult } from '@/lib/detection/prompt-detector';
 import { recordClaudeConversation } from '@/lib/conversation-logger';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import { usesAlternateScreen, type CLIToolType } from '@/lib/cli-tools/types';
 import { parseClaudeOutput } from '@/lib/claude-output';
 import {
   getCliToolPatterns,
+  findClaudeChromeStart,
   stripAnsi,
   stripBoxDrawing,
   buildDetectPromptOptions,
@@ -41,6 +42,7 @@ import {
   clearTuiAccumulator,
 } from '../tui-accumulator';
 import { isDuplicatePrompt, normalizePromptForDedup } from './prompt-dedup';
+import { isDuplicateResponse } from './response-dedup';
 import { getPollerKey, stopPolling, GEMINI_LOADING_INDICATORS } from './response-poller-core';
 import { notifyPushSubscribers } from '@/lib/push';
 
@@ -155,6 +157,16 @@ export function extractResponse(
   const lines = rawLines.slice(0, trimmedLength);
   const totalLines = lines.length;
 
+  // Issue #1289: Claude Code pins a footer (rotating hint row, input box, status
+  // bar) to the bottom of the pane. It is chrome, not transcript, and its hint
+  // row rotates while the conversation is idle — so letting it reach the saved
+  // response both stores terminal furniture and re-hashes on every poll tick,
+  // defeating the content dedup from #1268. Completion detection below still
+  // reads the untouched buffer: it keys off that very footer (the input box
+  // supplies `hasPrompt`, its rules supply `hasSeparator`).
+  const chromeStart = cliToolId === 'claude' ? findClaudeChromeStart(lines) : -1;
+  const contentEnd = chromeStart >= 0 ? chromeStart : totalLines;
+
   const BUFFER_RESET_TOLERANCE = 25;
   const bufferShrank = totalLines > 0 && lastCapturedLine > BUFFER_RESET_TOLERANCE && (totalLines + BUFFER_RESET_TOLERANCE) < lastCapturedLine;
   const sessionRestarted = totalLines > 0 && lastCapturedLine > 50 && totalLines < 50;
@@ -196,7 +208,11 @@ export function extractResponse(
       userPromptPattern = /^[>❯]\s+\S/;
     }
 
-    for (let i = totalLines - 1; i >= Math.max(0, totalLines - windowSize); i--) {
+    // Issue #1289: for Claude the search stops above the footer. The text the
+    // user just typed sits in the footer's input box and matches the same "❯ …"
+    // shape as the transcript echo; anchoring on it would treat the footer as
+    // the newest turn and extract the status bar as its reply.
+    for (let i = contentEnd - 1; i >= Math.max(0, contentEnd - windowSize); i--) {
       const cleanLine = stripAnsi(lines[i]);
       if (userPromptPattern.test(cleanLine)) {
         return i;
@@ -240,7 +256,9 @@ export function extractResponse(
 
     let endIndex = totalLines;
 
-    for (let i = startIndex; i < totalLines; i++) {
+    // `contentEnd` bounds the content only; `endIndex` keeps reporting the full
+    // buffer so lineCount bookkeeping in session_states is unchanged (#1289).
+    for (let i = startIndex; i < contentEnd; i++) {
       const line = lines[i];
       const cleanLine = stripAnsi(line);
 
@@ -375,7 +393,8 @@ export function extractResponse(
     ? (recentPromptIndex >= 0 ? recentPromptIndex + 1 : Math.max(0, endIndex - 80))
     : Math.max(0, lastCapturedLine);
 
-  for (let i = startIndex; i < endIndex; i++) {
+  // Partial (still-streaming) content is bounded by the footer too (#1289).
+  for (let i = startIndex; i < Math.min(endIndex, contentEnd); i++) {
     const line = lines[i];
     const cleanLine = stripAnsi(line);
 
@@ -475,12 +494,21 @@ export async function checkForResponse(
 
     const isFullScreenTui = cliToolId === 'opencode' || cliToolId === 'copilot';
 
+    // Issue #1268: line-count bookkeeping is only meaningful for tools that keep
+    // scrollback. Alternate-screen tools (claude since v2, opencode, copilot)
+    // always capture exactly pane_height lines, so lastCapturedLine saturates at
+    // the pane height on the first save and every later check would see
+    // `lineCount <= lastCapturedLine` and drop the response forever — leaving
+    // History stuck on "Waiting for response..." while the terminal shows the
+    // reply. Those tools dedup on response content instead (see below).
+    const lineCountIsCursor = !usesAlternateScreen(cliToolId);
+
     // Duplicate prevention
-    if (!isFullScreenTui && !result.bufferReset && result.lineCount === lastCapturedLine && !sessionState?.inProgressMessageId) {
+    if (lineCountIsCursor && !result.bufferReset && result.lineCount === lastCapturedLine && !sessionState?.inProgressMessageId) {
       return false;
     }
 
-    if (!result.bufferReset && !isFullScreenTui && result.lineCount <= lastCapturedLine) {
+    if (lineCountIsCursor && !result.bufferReset && result.lineCount <= lastCapturedLine) {
       logger.info('already-saved-up-to-line-lastcapturedlin');
       return false;
     }
@@ -578,6 +606,19 @@ export async function checkForResponse(
       return false;
     }
 
+    // Issue #1268: content-based dedup replaces the line-count cursor for
+    // alternate-screen tools. Once a turn finishes, the screen stays static, so
+    // every subsequent poll re-extracts byte-identical content; save it once.
+    // The cache is cleared by stopPolling(), i.e. per polling cycle, so an
+    // identical response in a later turn is still recorded.
+    if (usesAlternateScreen(cliToolId)) {
+      const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
+      if (isDuplicateResponse(pollerKey, cleanedResponse)) {
+        updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
+        return false;
+      }
+    }
+
     // Create Markdown log file for the conversation pair
     if (cleanedResponse) {
       await recordClaudeConversation(db, worktreeId, cleanedResponse, cliToolId);
@@ -589,9 +630,11 @@ export async function checkForResponse(
       logger.info('marked-answeredcount-pending');
     }
 
-    // Race condition prevention: re-check session state before saving
+    // Race condition prevention: re-check session state before saving.
+    // Issue #1268: skipped for alternate-screen tools for the same reason as the
+    // dedup gates above — their line count never grows past the pane height.
     const currentSessionState = getSessionState(db, worktreeId, resolvedInstanceId);
-    if (!isFullScreenTui && currentSessionState && result.lineCount <= currentSessionState.lastCapturedLine) {
+    if (lineCountIsCursor && currentSessionState && result.lineCount <= currentSessionState.lastCapturedLine) {
       logger.info('race-condition-detected-skipping-save-re');
       return false;
     }

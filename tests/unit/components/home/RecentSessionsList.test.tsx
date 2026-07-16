@@ -34,6 +34,33 @@ describe('RecentSessionsList', () => {
     expect(screen.queryByTestId('recent-sessions')).toBeNull();
   });
 
+  // Issue #1197: the empty copy must resolve through next-intl, not be inlined.
+  it('renders the empty state copy via a translation key', () => {
+    render(<RecentSessionsList worktrees={[]} />);
+    expect(screen.getByTestId('recent-sessions-empty').textContent).toBe(
+      'home.recentSessions.empty'
+    );
+  });
+
+  // Issue #1199: an empty list always means zero repositories, so the CTA points
+  // at the only productive next action.
+  it('offers a CTA to register a repository from the empty state', () => {
+    render(<RecentSessionsList worktrees={[]} />);
+    const cta = screen.getByTestId('recent-sessions-cta');
+    expect(cta.getAttribute('href')).toBe('/repositories');
+    expect(cta.textContent).toBe('home.recentSessions.cta');
+  });
+
+  it('does not render the CTA once sessions exist', () => {
+    render(<RecentSessionsList worktrees={[createMockWorktree()]} />);
+    expect(screen.queryByTestId('recent-sessions-cta')).toBeNull();
+  });
+
+  it('does not render the CTA while loading', () => {
+    render(<RecentSessionsList worktrees={[]} isLoading />);
+    expect(screen.queryByTestId('recent-sessions-cta')).toBeNull();
+  });
+
   it('links each recent session to its worktree detail page', () => {
     const worktrees = [
       createMockWorktree({ id: 'wt-1', name: 'feature/a' }),

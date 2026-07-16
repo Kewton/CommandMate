@@ -28,6 +28,7 @@
 'use client';
 
 import React, { memo, useCallback, useEffect, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { Pencil } from 'lucide-react';
 import { Button, Card, Input, Skeleton, StatusDot } from '@/components/ui';
 import { cn } from '@/lib/utils/cn';
@@ -111,6 +112,7 @@ function RepositoryTableHead() {
 }
 
 function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
+  const t = useTranslations('common');
   const [repositories, setRepositories] = useState<RepositoryListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -304,7 +306,7 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
           className="overflow-x-auto"
           data-testid="repository-list-loading"
           role="status"
-          aria-label="Loading repositories"
+          aria-label={t('repositories.loading')}
         >
           <table className="min-w-full text-sm">
             <RepositoryTableHead />
@@ -368,7 +370,7 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                     colSpan={7}
                     className="px-4 py-6 text-center text-muted-foreground"
                   >
-                    No repositories registered yet.
+                    {t('repositories.empty')}
                   </td>
                 </tr>
               )}

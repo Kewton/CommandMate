@@ -147,11 +147,12 @@ export interface HistoryPaneProps {
  * being restructured by Issue #1117, so only the outer shape is mimicked.
  */
 function LoadingIndicator() {
+  const t = useTranslations('worktree');
   return (
     <div
       data-testid="loading-indicator"
       role="status"
-      aria-label="Loading messages"
+      aria-label={t('history.loading')}
     >
       {[0, 1, 2].map((i) => (
         <div
@@ -174,6 +175,7 @@ function LoadingIndicator() {
 }
 
 function EmptyState() {
+  const t = useTranslations('worktree');
   return (
     <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
       <svg
@@ -190,7 +192,7 @@ function EmptyState() {
           d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
         />
       </svg>
-      <p className="text-sm">No messages yet</p>
+      <p className="text-sm">{t('history.empty')}</p>
     </div>
   );
 }
@@ -520,14 +522,22 @@ export const HistoryPane = memo(function HistoryPane({
     [toggleExpand]
   );
 
+  // `t` churns identity every render (Issue #1219 / #1032), and handleCopy is
+  // handed to the memoized ConversationPairCard for every virtualized row —
+  // keying on `t` would re-render the whole list on each parent render. Read the
+  // translator through a ref so the callback stays stable but the toast text is
+  // still resolved fresh at click time (locale switches included).
+  const tRef = useRef(t);
+  tRef.current = t;
+
   const handleCopy = useCallback(
     async (content: string) => {
       try {
         await copyToClipboard(content);
-        showToast?.('Copied to clipboard', 'success');
+        showToast?.(tRef.current('history.copied'), 'success');
       } catch {
         console.error('[HistoryPane] Failed to copy to clipboard');
-        showToast?.('Failed to copy', 'error');
+        showToast?.(tRef.current('history.copyFailed'), 'error');
       }
     },
     [showToast]
@@ -633,20 +643,20 @@ export const HistoryPane = memo(function HistoryPane({
   return (
     <div
       role="region"
-      aria-label="Message history"
+      aria-label={t('history.regionLabel')}
       className={containerClasses}
     >
       {/* Header — fixed row, always pinned at the top (Issue #1019) */}
       <div className="flex-shrink-0 bg-surface-2 border-b border-border px-4 py-2 flex items-center justify-between flex-wrap gap-1">
-        <h3 className="text-sm font-medium text-foreground">Message History</h3>
+        <h3 className="text-sm font-medium text-foreground">{t('history.title')}</h3>
         <div className="flex items-center gap-2 flex-wrap">
           {onHistoryDisplayLimitChange && historyDisplayLimit !== undefined && (
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
-              <span>Show</span>
+              <span>{t('history.show')}</span>
               <select
                 value={historyDisplayLimit}
                 onChange={handleHistoryDisplayLimitSelectChange}
-                aria-label="History display limit"
+                aria-label={t('history.displayLimit')}
                 className="rounded border border-input bg-surface text-foreground text-xs px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-ring"
               >
                 {HISTORY_DISPLAY_LIMIT_OPTIONS.map((opt) => (
@@ -664,21 +674,21 @@ export const HistoryPane = memo(function HistoryPane({
                 onCheckedChange={(checked) => onShowArchivedChange(checked === true)}
                 className="h-3.5 w-3.5"
               />
-              Show archived
+              {t('history.showArchived')}
             </label>
           )}
           {onHistoryUserOnlyChange && (
             <button
               type="button"
               onClick={() => onHistoryUserOnlyChange(!historyUserOnly)}
-              aria-label="Show user messages only"
+              aria-label={t('history.showUserOnly')}
               aria-pressed={historyUserOnly}
               className={`p-1 rounded transition-colors ${
                 historyUserOnly
                   ? 'bg-accent-500/15 text-accent-700 dark:text-accent-300'
                   : 'text-muted-foreground hover:text-foreground'
               }`}
-              title={historyUserOnly ? 'Show all messages' : 'Show user messages only'}
+              title={historyUserOnly ? t('history.showAllMessages') : t('history.showUserOnly')}
             >
               {historyUserOnly ? (
                 <UserCheck size={14} aria-hidden="true" />
@@ -690,10 +700,10 @@ export const HistoryPane = memo(function HistoryPane({
           <button
             type="button"
             onClick={handleToggleSearch}
-            aria-label={isSearchOpen ? 'Close search' : 'Open search'}
+            aria-label={isSearchOpen ? t('history.closeSearch') : t('history.openSearch')}
             aria-pressed={isSearchOpen}
             className="p-1 text-muted-foreground hover:text-foreground rounded transition-colors"
-            title={isSearchOpen ? 'Close search' : 'Open search'}
+            title={isSearchOpen ? t('history.closeSearch') : t('history.openSearch')}
           >
             <Search size={14} aria-hidden="true" />
           </button>

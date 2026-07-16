@@ -460,7 +460,7 @@ export function ScheduleEditDialog({
               testId="schedule-cron-ask-ai"
               label={t('edit.askAiCron')}
               title={t('edit.askAiHint')}
-              onClick={() => handleAskAi(cronPrompt(form.cronExpression))}
+              onClick={() => handleAskAi(cronPrompt(t, form.cronExpression))}
             />
           )}
         </div>
@@ -582,7 +582,7 @@ export function ScheduleEditDialog({
             testId="schedule-message-ask-ai"
             label={t('edit.askAiMessage')}
             title={t('edit.askAiHint')}
-            onClick={() => handleAskAi(messageDraftPrompt(form.name))}
+            onClick={() => handleAskAi(messageDraftPrompt(t, form.name))}
           />
         )}
       </div>
