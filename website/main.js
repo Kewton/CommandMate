@@ -42,23 +42,30 @@
     var idleLabel = label.textContent;
     var timer = null;
 
-    button.addEventListener('click', function () {
-      copyText(source.textContent.trim()).then(
-        function () {
-          label.textContent = 'Copied';
-          button.setAttribute('data-copied', 'true');
-        },
-        function () {
-          // Never claim success we did not get: tell the user to copy by hand.
-          label.textContent = 'Press Ctrl+C';
-        },
-      );
-
+    // Only ever armed once the label has actually changed, so the countdown
+    // measures how long the user saw the feedback rather than how long the
+    // clipboard took to answer.
+    function scheduleReset() {
       window.clearTimeout(timer);
       timer = window.setTimeout(function () {
         label.textContent = idleLabel;
         button.removeAttribute('data-copied');
       }, COPIED_MS);
+    }
+
+    button.addEventListener('click', function () {
+      copyText(source.textContent.trim()).then(
+        function () {
+          label.textContent = 'Copied';
+          button.setAttribute('data-copied', 'true');
+          scheduleReset();
+        },
+        function () {
+          // Never claim success we did not get: tell the user to copy by hand.
+          label.textContent = 'Press Ctrl+C';
+          scheduleReset();
+        },
+      );
     });
   });
 })();
