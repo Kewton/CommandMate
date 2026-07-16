@@ -5,10 +5,19 @@
  */
 
 import React from 'react';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { StatusDot } from '@/components/ui/StatusDot';
 import type { StatusDotStatus } from '@/components/ui/StatusDot';
+
+// Issue #1273: the default labels now resolve through `common.status.*`. The
+// global mock in tests/setup.ts would echo the key back, so the English
+// assertions below would pass against a dictionary that never had the entry —
+// back the component with the real dictionary instead.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
 
 describe('StatusDot', () => {
   describe('Rendering', () => {

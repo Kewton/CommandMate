@@ -10,6 +10,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 
+// Issue #1273: the add-app action's wording now comes from
+// `externalApps.manager.addApp`. This test matches on the rendered wording, so
+// back it with the real dictionary — the global passthrough mock would echo the
+// key and the /add app/i match would depend on the key's spelling, not the copy.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 // Mock AppShell to a passthrough so we don't pull in the full layout tree.
 vi.mock('@/components/layout', () => ({
   AppShell: ({ children }: { children: React.ReactNode }) =>

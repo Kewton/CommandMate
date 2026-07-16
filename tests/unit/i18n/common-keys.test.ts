@@ -106,6 +106,41 @@ const EN_REPOSITORY_LABELS: Record<string, string> = {
 
 const REPOSITORY_KEYS = Object.keys(EN_REPOSITORY_LABELS);
 
+/**
+ * Issue #1273 migrated the shared chrome in components/{ui,common,sidebar} off
+ * hardcoded English. Same contract as the sections above: every value is the
+ * byte-exact pre-migration literal, lifted from `git show HEAD:<file>` rather
+ * than retyped, so a drift here is a user-visible regression.
+ *
+ * `status.*` is deliberately generic rather than StatusDot-specific: the same
+ * six words are still hardcoded in `src/config/status-colors.ts`, so that
+ * migration reuses these keys instead of forking a second set of translations.
+ */
+const EN_SHARED_CHROME: Record<string, string> = {
+  'status.idle': 'Idle',
+  'status.ready': 'Ready',
+  'status.running': 'Running',
+  'status.generating': 'Generating',
+  'status.waiting': 'Waiting for response',
+  'status.error': 'Error',
+  'status.unknown': 'Unknown',
+  'sort.options': 'Sort options',
+  'sort.updatedAt': 'Updated',
+  'sort.repositoryName': 'Repository',
+  'sort.branchName': 'Branch',
+  'sort.status': 'Status',
+  'branchItem.cliToolStatus': 'CLI tool status',
+  'branchItem.hasUnread': 'Has unread messages',
+  language: 'Language',
+  loadingPage: 'Loading page',
+  closeNotification: 'Close notification',
+  // Predates #1273; pinned because Modal / FullScreenModal now resolve their
+  // close button through it, so a change here silently retitles both.
+  close: 'Close',
+};
+
+const SHARED_CHROME_KEYS = Object.keys(EN_SHARED_CHROME);
+
 describe('common i18n keys (Issue #1197)', () => {
   it.each(['en', 'ja'])('%s/common.json has non-empty values for every leaf', (locale) => {
     const dict = loadCommon(locale);
@@ -243,6 +278,63 @@ describe('common i18n keys (Issue #1197)', () => {
           resolve(loadCommon(locale), 'repositories.localPathExample'),
           `${locale}: sample path must stay copy-pasteable`
         ).toContain('/Users/username/projects/my-repo');
+      }
+    });
+  });
+
+  describe('shared chrome copy (Issue #1273)', () => {
+    it('resolves every shared-chrome key in both locales', () => {
+      for (const locale of ['en', 'ja']) {
+        const dict = loadCommon(locale);
+        for (const key of SHARED_CHROME_KEYS) {
+          const value = resolve(dict, key);
+          expect(value, `${locale} missing ${key}`).toBeTruthy();
+          expect(typeof value, `${locale}: ${key} must be a string`).toBe('string');
+        }
+      }
+    });
+
+    it('never uses a raw key path as a shared-chrome label', () => {
+      for (const locale of ['en', 'ja']) {
+        const dict = loadCommon(locale);
+        for (const key of SHARED_CHROME_KEYS) {
+          expect(
+            resolve(dict, key) as string,
+            `${locale}: ${key} looks like a key passthrough`
+          ).not.toMatch(/^(common\.)?(status|sort|branchItem)\./);
+        }
+      }
+    });
+
+    it('translates shared-chrome labels rather than leaving them in English', () => {
+      const en = loadCommon('en');
+      const ja = loadCommon('ja');
+      for (const key of SHARED_CHROME_KEYS) {
+        expect(resolve(ja, key), `ja: ${key} is still the English string`).not.toBe(
+          resolve(en, key)
+        );
+      }
+    });
+
+    it('keeps every English shared-chrome label byte-identical to the pre-i18n markup', () => {
+      const en = loadCommon('en');
+      for (const [key, expected] of Object.entries(EN_SHARED_CHROME)) {
+        expect(resolve(en, key), `en: ${key} changed the rendered label`).toBe(expected);
+      }
+    });
+
+    /**
+     * Every status label must stay distinct: the dot's colour alone does not
+     * separate running from ready under prefers-reduced-motion, so the
+     * accessible label is the only cue a screen-reader user gets.
+     */
+    it('gives every status a distinct label in both locales', () => {
+      for (const locale of ['en', 'ja']) {
+        const dict = loadCommon(locale);
+        const labels = SHARED_CHROME_KEYS.filter((k) => k.startsWith('status.')).map((k) =>
+          resolve(dict, k)
+        );
+        expect(new Set(labels).size, `${locale}: two statuses share a label`).toBe(labels.length);
       }
     });
   });

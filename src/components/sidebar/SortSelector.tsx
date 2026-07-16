@@ -9,11 +9,11 @@
 
 'use client';
 
-import React, { memo } from 'react';
+import React, { memo, useMemo } from 'react';
 import { useTranslations } from 'next-intl';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { SortSelectorBase } from './SortSelectorBase';
-import type { SortOption } from './SortSelectorBase';
+import type { SortKey } from '@/lib/sidebar-utils';
 
 // ============================================================================
 // Constants
@@ -22,12 +22,17 @@ import type { SortOption } from './SortSelectorBase';
 /**
  * Sort options for sidebar (does NOT include lastSent) [CON-002]
  * lastSent is only available in Sessions page via SESSIONS_SORT_OPTIONS.
+ *
+ * Holds `common.sort.*` keys rather than labels: this is module scope, where
+ * t() cannot be called, so a literal would pin the dropdown to English
+ * (Issue #1271/#1273). SortSelectorBase still takes resolved `label` strings,
+ * so the Sessions page's own options are unaffected.
  */
-const SIDEBAR_SORT_OPTIONS: ReadonlyArray<SortOption> = [
-  { key: 'updatedAt', label: 'Updated' },
-  { key: 'repositoryName', label: 'Repository' },
-  { key: 'branchName', label: 'Branch' },
-  { key: 'status', label: 'Status' },
+const SIDEBAR_SORT_OPTIONS: ReadonlyArray<{ key: SortKey; labelKey: string }> = [
+  { key: 'updatedAt', labelKey: 'sort.updatedAt' },
+  { key: 'repositoryName', labelKey: 'sort.repositoryName' },
+  { key: 'branchName', labelKey: 'sort.branchName' },
+  { key: 'status', labelKey: 'sort.status' },
 ];
 
 /** Default directions for sidebar sort keys */
@@ -52,13 +57,18 @@ export const SortSelector = memo(function SortSelector() {
   const { sortKey, sortDirection, setSortKey, setSortDirection } = useSidebarContext();
   const t = useTranslations('common');
 
+  const options = useMemo(
+    () => SIDEBAR_SORT_OPTIONS.map(({ key, labelKey }) => ({ key, label: t(labelKey) })),
+    [t]
+  );
+
   return (
     <SortSelectorBase
       sortKey={sortKey}
       sortDirection={sortDirection}
       onSortKeyChange={setSortKey}
       onSortDirectionChange={setSortDirection}
-      options={SIDEBAR_SORT_OPTIONS}
+      options={options}
       defaultDirections={SIDEBAR_DEFAULT_DIRECTIONS}
       compact
       tooltip={t('tooltips.sort')}

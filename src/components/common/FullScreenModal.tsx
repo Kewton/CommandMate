@@ -16,6 +16,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslations } from 'next-intl';
 import { X } from 'lucide-react';
 import { Z_INDEX } from '@/config/z-index';
 
@@ -37,6 +38,7 @@ export function FullScreenModal({
   footer,
   showCloseButton = true,
 }: FullScreenModalProps) {
+  const t = useTranslations('common');
   // Track the visual viewport so the sticky footer stays above the mobile keyboard.
   const [viewportHeight, setViewportHeight] = useState<number | null>(null);
 
@@ -104,7 +106,7 @@ export function FullScreenModal({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t('close')}
             data-testid="full-screen-modal-close"
             className="flex-shrink-0 -mr-1 p-1 text-muted-foreground hover:text-foreground transition-colors"
           >

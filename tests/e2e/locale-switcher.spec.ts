@@ -20,7 +20,7 @@
  *      session subline (`home.running` / `home.waiting`), which are on this page
  *      and are translated.
  *
- * The `select[aria-label="Language"]` lives in the sidebar, which is a closed
+ * The `[data-testid="locale-switcher"]` lives in the sidebar, which is a closed
  * drawer on mobile — so only the desktop specs assert on it.
  */
 
@@ -35,7 +35,7 @@ test.describe('Locale Switcher', () => {
     await page.waitForLoadState('networkidle');
 
     // LocaleSwitcher select should exist with value "en"
-    const select = page.locator('select[aria-label="Language"]');
+    const select = page.locator('[data-testid="locale-switcher"]');
     await expect(select).toBeVisible();
     await expect(select).toHaveValue('en');
 
@@ -62,7 +62,7 @@ test.describe('Locale Switcher', () => {
     await expect(page.getByTestId('home-subline')).toContainText('待機中');
 
     // LocaleSwitcher should show "ja"
-    const select = page.locator('select[aria-label="Language"]');
+    const select = page.locator('[data-testid="locale-switcher"]');
     await expect(select).toHaveValue('ja');
   });
 
@@ -72,14 +72,14 @@ test.describe('Locale Switcher', () => {
 
     // Switch through the UI so the cookie under test is the one the app writes
     // (setLocaleCookie), not one the test planted. selectOption triggers a reload.
-    await page.locator('select[aria-label="Language"]').selectOption('ja');
+    await page.locator('[data-testid="locale-switcher"]').selectOption('ja');
     await expect(page.getByRole('heading', { name: '概要', level: 1 })).toBeVisible();
 
     // Reload and verify persistence
     await page.reload();
     await page.waitForLoadState('networkidle');
     await expect(page.getByRole('heading', { name: '概要', level: 1 })).toBeVisible();
-    await expect(page.locator('select[aria-label="Language"]')).toHaveValue('ja');
+    await expect(page.locator('[data-testid="locale-switcher"]')).toHaveValue('ja');
 
     // Verify the security flags setLocaleCookie promises
     const cookies = await context.cookies();
@@ -104,7 +104,7 @@ test.describe('Locale Switcher', () => {
     // Should fallback to English
     await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible();
 
-    const select = page.locator('select[aria-label="Language"]');
+    const select = page.locator('[data-testid="locale-switcher"]');
     await expect(select).toHaveValue('en');
   });
 });

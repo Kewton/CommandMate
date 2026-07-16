@@ -71,5 +71,28 @@
   "confirmDialog": {
     "title": "Confirm",
     "confirm": "OK"
+  },
+  "language": "Language",
+  "loadingPage": "Loading page",
+  "closeNotification": "Close notification",
+  "status": {
+    "idle": "Idle",
+    "ready": "Ready",
+    "running": "Running",
+    "generating": "Generating",
+    "waiting": "Waiting for response",
+    "error": "Error",
+    "unknown": "Unknown"
+  },
+  "sort": {
+    "options": "Sort options",
+    "updatedAt": "Updated",
+    "repositoryName": "Repository",
+    "branchName": "Branch",
+    "status": "Status"
+  },
+  "branchItem": {
+    "cliToolStatus": "CLI tool status",
+    "hasUnread": "Has unread messages"
   }
 }

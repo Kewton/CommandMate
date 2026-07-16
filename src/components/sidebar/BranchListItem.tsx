@@ -9,6 +9,7 @@
 
 import React, { memo, useRef, useState, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
+import { useTranslations } from 'next-intl';
 import type { SidebarBranchItem } from '@/types/sidebar';
 import { aggregateCliStatus, formatCliStatusBreakdown } from '@/types/sidebar';
 import { BranchStatusIndicator } from '@/components/sidebar/BranchStatusIndicator';
@@ -141,6 +142,7 @@ export const BranchListItem = memo(function BranchListItem({
   onClick,
   showRepositoryName = true,
 }: BranchListItemProps) {
+  const t = useTranslations('common');
   const tooltipId = `tooltip-${branch.id}`;
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [isTooltipVisible, setIsTooltipVisible] = useState(false);
@@ -247,7 +249,7 @@ export const BranchListItem = memo(function BranchListItem({
           reveals the per-agent breakdown via the indicator's title/aria-label.
         */}
         {branch.cliStatus && Object.keys(branch.cliStatus).length > 0 && (
-          <div className="flex items-center justify-center flex-shrink-0 w-4" aria-label="CLI tool status">
+          <div className="flex items-center justify-center flex-shrink-0 w-4" aria-label={t('branchItem.cliToolStatus')}>
             <BranchStatusIndicator
               status={aggregateCliStatus(branch.cliStatus)}
               label={formatCliStatusBreakdown(branch.cliStatus, branch.cliStatusLabels)}
@@ -272,7 +274,7 @@ export const BranchListItem = memo(function BranchListItem({
           <span
             data-testid="unread-indicator"
             className="w-2 h-2 rounded-full bg-accent-500 flex-shrink-0"
-            aria-label="Has unread messages"
+            aria-label={t('branchItem.hasUnread')}
           />
         )}
       </div>

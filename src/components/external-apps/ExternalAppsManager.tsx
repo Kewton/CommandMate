@@ -7,6 +7,7 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
+import { useTranslations } from 'next-intl';
 import { Button, Card, Spinner } from '@/components/ui';
 import { ExternalAppCard } from './ExternalAppCard';
 import { ExternalAppForm } from './ExternalAppForm';
@@ -23,6 +24,8 @@ import { EXTERNAL_APPS_POLL_INTERVAL_MS } from '@/config/external-apps-config';
  * ```
  */
 export function ExternalAppsManager() {
+  const t = useTranslations('externalApps');
+  const tCommon = useTranslations('common');
   // Data state
   const [apps, setApps] = useState<ExternalApp[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -110,7 +113,7 @@ export function ExternalAppsManager() {
           provides the add-app action to avoid a duplicate "External Apps" title. */}
       <div className="flex items-center justify-end">
         <Button variant="primary" size="sm" onClick={handleAdd}>
-          + Add App
+          {t('manager.addApp')}
         </Button>
       </div>
 
@@ -119,15 +122,15 @@ export function ExternalAppsManager() {
         <Card padding="lg">
           <div className="flex items-center justify-center py-8">
             <Spinner size="xl" variant="accent" />
-            <span className="ml-3 text-muted-foreground">Loading apps...</span>
+            <span className="ml-3 text-muted-foreground">{t('manager.loading')}</span>
           </div>
         </Card>
       ) : error ? (
         <Card padding="lg">
           <div className="text-center py-8">
-            <p className="text-danger-foreground mb-4">Failed to load external apps</p>
+            <p className="text-danger-foreground mb-4">{t('manager.loadError')}</p>
             <Button variant="secondary" size="sm" onClick={fetchApps}>
-              Retry
+              {tCommon('retry')}
             </Button>
           </div>
         </Card>
@@ -135,14 +138,13 @@ export function ExternalAppsManager() {
         <Card padding="lg">
           <div className="text-center py-8">
             <p className="text-muted-foreground mb-4">
-              No external apps registered yet.
+              {t('manager.empty')}
             </p>
             <p className="text-sm text-muted-foreground mb-4">
-              Add an external app to proxy requests to other frontend
-              applications.
+              {t('manager.emptyHelp')}
             </p>
             <Button variant="primary" size="sm" onClick={handleAdd}>
-              Add Your First App
+              {t('manager.addFirst')}
             </Button>
           </div>
         </Card>

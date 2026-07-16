@@ -11,6 +11,14 @@ import React from 'react';
 import { BranchListItem, __resetMouseEnterSuppression } from '@/components/sidebar/BranchListItem';
 import type { SidebarBranchItem } from '@/types/sidebar';
 
+// Issue #1273: the CLI-status wrapper and the nested StatusDot labels resolve
+// through `common.*`. Back them with the real dictionary so the English
+// assertions prove the keys exist rather than echoing the global mock.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 describe('BranchListItem', () => {
   const defaultBranch: SidebarBranchItem = {
     id: 'feature-test',
