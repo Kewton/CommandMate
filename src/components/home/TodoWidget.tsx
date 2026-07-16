@@ -15,6 +15,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { Button, Card, Checkbox, Input, Skeleton } from '@/components/ui';
 import { todoApi, type TodoItem } from '@/lib/api/todo-api';
 import { MAX_TODO_CONTENT_LENGTH } from '@/config/todo-config';
@@ -39,6 +40,7 @@ function todoRepoLabel(todo: TodoItem): string {
 }
 
 export function TodoWidget() {
+  const t = useTranslations('home');
   const [repositories, setRepositories] = useState<RepositoryOption[]>([]);
   const [selectedRepoId, setSelectedRepoId] = useState('');
   const [todos, setTodos] = useState<TodoItem[]>([]);
@@ -99,12 +101,12 @@ export function TodoWidget() {
       const items = await todoApi.listAll();
       setTodos(items);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load todos');
+      setError(err instanceof Error ? err.message : t('todo.errors.load'));
       setTodos([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   // Load all todos once on mount; the list is repository-agnostic.
   useEffect(() => {
@@ -134,11 +136,11 @@ export function TodoWidget() {
       setInput('');
       await loadTodos();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to add todo');
+      setError(err instanceof Error ? err.message : t('todo.errors.add'));
     } finally {
       setBusy(false);
     }
-  }, [input, selectedRepoId, busy, loadTodos]);
+  }, [input, selectedRepoId, busy, loadTodos, t]);
 
   const handleToggle = useCallback(
     async (todo: TodoItem) => {
@@ -152,11 +154,11 @@ export function TodoWidget() {
         // so cross-repo todos toggle correctly (Issue #907).
         await todoApi.update(todo.repositoryId, todo.id, { done: !todo.done });
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to update todo');
+        setError(err instanceof Error ? err.message : t('todo.errors.update'));
         void loadTodos();
       }
     },
-    [loadTodos],
+    [loadTodos, t],
   );
 
   const handleDelete = useCallback(async (todo: TodoItem) => {
@@ -166,9 +168,9 @@ export function TodoWidget() {
       await todoApi.remove(todo.repositoryId, todo.id);
       setTodos((prev) => prev.filter((t) => t.id !== todo.id));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete todo');
+      setError(err instanceof Error ? err.message : t('todo.errors.delete'));
     }
-  }, []);
+  }, [t]);
 
   const handleInputKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -187,7 +189,7 @@ export function TodoWidget() {
     <Card className="h-full" data-testid="home-todo-widget">
       {/* Tile heading — parity with the Session Overview tile (Issue #1052). */}
       <h2 className="mb-3 text-lg font-semibold text-foreground">
-        ToDo
+        {t('todo.title')}
       </h2>
 
       {/* Repository selector + remaining count.
@@ -199,7 +201,7 @@ export function TodoWidget() {
         data-testid="todo-selector-row"
       >
         <label className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
-          <span className="shrink-0">Repository</span>
+          <span className="shrink-0">{t('todo.repository')}</span>
           <select
             value={selectedRepoId}
             onChange={(e) => setSelectedRepoId(e.target.value)}
@@ -216,15 +218,14 @@ export function TodoWidget() {
         </label>
         {hasRepositories && (
           <span className="shrink-0 text-xs text-muted-foreground" data-testid="todo-remaining">
-            {remainingCount} open
+            {t('todo.open', { count: remainingCount })}
           </span>
         )}
       </div>
 
       {!hasRepositories ? (
         <p className="text-sm text-muted-foreground">
-          No repositories yet. Add one from the Repositories screen to start
-          adding todos.
+          {t('todo.noRepositories')}
         </p>
       ) : (
         <>
@@ -236,7 +237,7 @@ export function TodoWidget() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleInputKeyDown}
               maxLength={MAX_TODO_CONTENT_LENGTH}
-              placeholder="Add a todo…"
+              placeholder={t('todo.inputPlaceholder')}
               data-testid="todo-input"
               className="w-auto flex-1 min-w-0"
             />
@@ -249,7 +250,7 @@ export function TodoWidget() {
               data-testid="todo-add-button"
               className="shrink-0"
             >
-              Add
+              {t('todo.add')}
             </Button>
           </div>
 
@@ -268,7 +269,7 @@ export function TodoWidget() {
               className="space-y-1"
               data-testid="todo-loading"
               role="status"
-              aria-label="Loading todos"
+              aria-label={t('todo.loading')}
             >
               {[0, 1, 2].map((i) => (
                 <li key={i} className="flex items-center gap-2 rounded-md px-1 py-1">
@@ -279,7 +280,7 @@ export function TodoWidget() {
             </ul>
           ) : todos.length === 0 ? (
             <p className="text-sm text-muted-foreground" data-testid="todo-empty">
-              No todos yet.
+              {t('todo.empty')}
             </p>
           ) : (
             <ul className="space-y-1" data-testid="todo-list">
@@ -299,7 +300,7 @@ export function TodoWidget() {
                         checked={todo.done}
                         onCheckedChange={() => handleToggle(todo)}
                         data-testid="todo-checkbox"
-                        aria-label={todo.done ? 'Mark as not done' : 'Mark as done'}
+                        aria-label={todo.done ? t('todo.markAsNotDone') : t('todo.markAsDone')}
                       />
                     </label>
                     <span
@@ -329,7 +330,7 @@ export function TodoWidget() {
                     <button
                       type="button"
                       onClick={() => handleDelete(todo)}
-                      aria-label="Delete todo"
+                      aria-label={t('todo.delete')}
                       data-testid="todo-delete"
                       className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center text-muted-foreground opacity-100 transition-opacity hover:text-danger-foreground sm:min-h-0 sm:min-w-0 sm:opacity-0 sm:group-hover:opacity-100"
                     >

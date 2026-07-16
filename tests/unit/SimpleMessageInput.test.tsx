@@ -31,6 +31,14 @@ vi.mock('@/hooks/useSendMessage', () => ({
 
 import { SimpleMessageInput } from '@/components/review/SimpleMessageInput';
 
+// Issue #1274: this component's wording resolves through the `common` namespace.
+// Back it with the real dictionary so the English assertions prove the keys
+// exist rather than echoing the global mock.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 describe('SimpleMessageInput', () => {
   beforeEach(() => {
     mockSend.mockClear();

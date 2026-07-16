@@ -39,6 +39,8 @@
   },
   "cancel": "Cancel",
   "send": "Send",
+  "sending": "Sending...",
+  "sendMessagePlaceholder": "Send a message...",
   "end": "End",
   "ending": "Ending...",
   "retry": "Retry",
@@ -46,6 +48,19 @@
   "reconnect": "Reconnect",
   "close": "Close",
   "back": "Back",
+  "menu": "Menu",
+  "sidebar": {
+    "open": "Open sidebar",
+    "close": "Close sidebar",
+    "branchNavigation": "Branch navigation",
+    "branches": "Branches",
+    "searchBranches": "Search branches...",
+    "noBranchesFound": "No branches found",
+    "noBranchesAvailable": "No branches available",
+    "dragToReorderGroup": "Drag to reorder group",
+    "switchToFlatView": "Switch to flat view",
+    "switchToGroupedView": "Switch to grouped view"
+  },
   "confirmDelete": "Delete \"{name}\"?",
   "favorites": {
     "add": "Add to favorites",

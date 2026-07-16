@@ -12,6 +12,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
+import { useTranslations } from 'next-intl';
 import { Button, Input } from '@/components/ui';
 import { useSendMessage } from '@/hooks/useSendMessage';
 
@@ -27,6 +28,7 @@ export interface SimpleMessageInputProps {
  * onSuccess clears the input text; no other side effects.
  */
 export function SimpleMessageInput({ worktreeId, cliToolId }: SimpleMessageInputProps) {
+  const t = useTranslations('common');
   const [text, setText] = useState('');
 
   const onSuccess = useCallback(() => {
@@ -63,7 +65,7 @@ export function SimpleMessageInput({ worktreeId, cliToolId }: SimpleMessageInput
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Send a message..."
+        placeholder={t('sendMessagePlaceholder')}
         disabled={isSending}
         className="w-auto flex-1"
       />
@@ -72,10 +74,10 @@ export function SimpleMessageInput({ worktreeId, cliToolId }: SimpleMessageInput
         size="sm"
         onClick={handleSend}
         disabled={isSending || !text.trim()}
-        aria-label="Send"
+        aria-label={t('send')}
         className="shrink-0"
       >
-        {isSending ? 'Sending...' : 'Send'}
+        {isSending ? t('sending') : t('send')}
       </Button>
     </div>
   );

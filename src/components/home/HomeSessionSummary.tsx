@@ -14,6 +14,7 @@
 'use client';
 
 import React, { useMemo } from 'react';
+import { useTranslations } from 'next-intl';
 import { Skeleton, StatusDot } from '@/components/ui';
 import { cn } from '@/lib/utils/cn';
 import type { Worktree } from '@/types/models';
@@ -29,6 +30,7 @@ export interface HomeSessionSummaryProps {
  * Displays Running and Waiting session counts as compact inline stats.
  */
 export function HomeSessionSummary({ worktrees, isLoading = false }: HomeSessionSummaryProps) {
+  const t = useTranslations('home');
   const { runningCount, waitingCount } = useMemo(() => {
     let running = 0;
     let waiting = 0;
@@ -51,7 +53,7 @@ export function HomeSessionSummary({ worktrees, isLoading = false }: HomeSession
         className="grid grid-cols-2 gap-3"
         data-testid="home-session-summary-loading"
         role="status"
-        aria-label="Loading session summary"
+        aria-label={t('sessionSummary.loading')}
       >
         {[0, 1].map((i) => (
           <div key={i} className="rounded-lg border border-border bg-surface-2 px-3 py-2">
@@ -71,8 +73,12 @@ export function HomeSessionSummary({ worktrees, isLoading = false }: HomeSession
     <div className="grid grid-cols-2 gap-3" data-testid="home-session-summary">
       <div className="rounded-lg border border-border bg-surface-2 px-3 py-2">
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <StatusDot status={runningCount > 0 ? 'running' : 'idle'} size="sm" label="Running" />
-          Running
+          <StatusDot
+            status={runningCount > 0 ? 'running' : 'idle'}
+            size="sm"
+            label={t('sessionSummary.running')}
+          />
+          {t('sessionSummary.running')}
         </div>
         <div
           className={cn(
@@ -86,8 +92,12 @@ export function HomeSessionSummary({ worktrees, isLoading = false }: HomeSession
       </div>
       <div className="rounded-lg border border-border bg-surface-2 px-3 py-2">
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <StatusDot status={waitingCount > 0 ? 'waiting' : 'idle'} size="sm" label="Waiting" />
-          Waiting
+          <StatusDot
+            status={waitingCount > 0 ? 'waiting' : 'idle'}
+            size="sm"
+            label={t('sessionSummary.waiting')}
+          />
+          {t('sessionSummary.waiting')}
         </div>
         <div
           className={cn(

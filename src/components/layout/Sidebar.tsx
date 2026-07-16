@@ -428,7 +428,7 @@ export const Sidebar = memo(function Sidebar() {
   return (
     <nav
       data-testid="sidebar"
-      aria-label="Branch navigation"
+      aria-label={t('sidebar.branchNavigation')}
       className="h-full flex flex-col bg-sidebar text-sidebar-foreground"
       role="navigation"
     >
@@ -443,7 +443,7 @@ export const Sidebar = memo(function Sidebar() {
             and the actions group keeps everything within the sidebar width
             without an overflow clip (which would crop the Sort dropdown). */}
         <div className="flex flex-wrap items-center justify-between gap-y-2">
-          <h2 className="min-w-0 truncate text-lg font-semibold text-sidebar-foreground">Branches</h2>
+          <h2 className="min-w-0 truncate text-lg font-semibold text-sidebar-foreground">{t('sidebar.branches')}</h2>
           <div className="flex flex-wrap items-center gap-1">
             <ViewModeToggle viewMode={viewMode} onToggle={setViewMode} />
             <SortSelector />
@@ -451,7 +451,7 @@ export const Sidebar = memo(function Sidebar() {
             <Tooltip content={t('tooltips.repositories')} placement="bottom">
               <Link
                 href="/repositories"
-                aria-label="Repositories"
+                aria-label={t('nav.repositories')}
                 className="p-1 rounded-md text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover
                   focus:outline-none focus:ring-2 focus:ring-ring
                   transition-colors inline-flex items-center"
@@ -471,7 +471,7 @@ export const Sidebar = memo(function Sidebar() {
             panel (in dark the primitive's recessed surface already contrasts). */}
         <Input
           type="text"
-          placeholder="Search branches..."
+          placeholder={t('sidebar.searchBranches')}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="bg-background shadow-none"
@@ -489,7 +489,7 @@ export const Sidebar = memo(function Sidebar() {
       >
         {isEmpty ? (
           <div className="px-4 py-8 text-center text-sidebar-muted">
-            {searchQuery ? 'No branches found' : 'No branches available'}
+            {searchQuery ? t('sidebar.noBranchesFound') : t('sidebar.noBranchesAvailable')}
           </div>
         ) : viewMode === 'grouped' && groupedBranches ? (
           // Grouped view with DnD reordering
@@ -662,6 +662,8 @@ function GroupHeader({
   dragHandleListeners?: React.HTMLAttributes<HTMLElement>;
   dragHandleAttributes?: React.HTMLAttributes<HTMLElement>;
 }) {
+  const t = useTranslations('common');
+
   return (
     <div className="flex items-center w-full">
       {/* Drag handle — separate from the clickable header button */}
@@ -670,7 +672,7 @@ function GroupHeader({
           ref={dragHandleRef}
           {...dragHandleListeners}
           {...dragHandleAttributes}
-          aria-label="Drag to reorder group"
+          aria-label={t('sidebar.dragToReorderGroup')}
           className="
             flex-shrink-0 flex items-center justify-center
             w-6 h-full pl-2 cursor-grab active:cursor-grabbing
@@ -723,7 +725,7 @@ function ViewModeToggle({
         data-testid="view-mode-toggle"
         type="button"
         onClick={handleClick}
-        aria-label={viewMode === 'grouped' ? 'Switch to flat view' : 'Switch to grouped view'}
+        aria-label={viewMode === 'grouped' ? t('sidebar.switchToFlatView') : t('sidebar.switchToGroupedView')}
         className="
           p-1 rounded-md text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover
           focus:outline-none focus:ring-2 focus:ring-ring

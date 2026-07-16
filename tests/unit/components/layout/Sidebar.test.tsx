@@ -13,6 +13,14 @@ import { SidebarProvider } from '@/contexts/SidebarContext';
 import { WorktreeSelectionProvider } from '@/contexts/WorktreeSelectionContext';
 import type { Worktree } from '@/types/models';
 
+// Issue #1274: Sidebar wording resolves through `common.sidebar.*` /
+// `common.nav.repositories`. Back it with the real dictionary so the English
+// assertions prove the keys exist rather than echoing the global mock.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 // Mock Next.js navigation
 const mockPush = vi.fn();
 vi.mock('next/navigation', () => ({
@@ -622,7 +630,7 @@ describe('Sidebar', () => {
           </Wrapper>
         );
 
-        const syncButton = await screen.findByLabelText('common.syncButtonLabel');
+        const syncButton = await screen.findByLabelText('Sync branches');
         const svg = syncButton.querySelector('svg');
         expect(svg?.getAttribute('class')).toContain('w-4');
         expect(svg?.getAttribute('class')).toContain('h-4');
@@ -645,7 +653,7 @@ describe('Sidebar', () => {
       fireEvent.mouseEnter(link);
 
       const tooltip = await screen.findByRole('tooltip', { hidden: true });
-      expect(tooltip).toHaveTextContent('common.tooltips.repositories');
+      expect(tooltip).toHaveTextContent('Manage repositories (add / sync)');
     });
 
     it('drops the native title on the Repositories link but keeps aria-label', async () => {
@@ -673,7 +681,7 @@ describe('Sidebar', () => {
 
       fireEvent.mouseEnter(toggle);
       const tooltip = await screen.findByRole('tooltip', { hidden: true });
-      expect(tooltip).toHaveTextContent('common.tooltips.viewMode');
+      expect(tooltip).toHaveTextContent('Toggle view mode (grouped / flat)');
     });
 
     it('shows an action tooltip when hovering the sync button', async () => {
@@ -683,11 +691,11 @@ describe('Sidebar', () => {
         </Wrapper>
       );
 
-      const syncButton = await screen.findByLabelText('common.syncButtonLabel');
+      const syncButton = await screen.findByLabelText('Sync branches');
       fireEvent.mouseEnter(syncButton);
 
       const tooltip = await screen.findByRole('tooltip', { hidden: true });
-      expect(tooltip).toHaveTextContent('common.tooltips.sync');
+      expect(tooltip).toHaveTextContent('Sync worktrees');
     });
   });
 
@@ -1189,8 +1197,8 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        // The mock useTranslations('common') returns 'common.syncButtonLabel' for t('syncButtonLabel')
-        expect(screen.getByLabelText('common.syncButtonLabel')).toBeInTheDocument();
+        // t('syncButtonLabel') resolves to "Sync branches" via locales/en/common.json
+        expect(screen.getByLabelText('Sync branches')).toBeInTheDocument();
       });
     });
 
@@ -1202,10 +1210,10 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByLabelText('common.syncButtonLabel')).toBeInTheDocument();
+        expect(screen.getByLabelText('Sync branches')).toBeInTheDocument();
       });
 
-      const syncButton = screen.getByLabelText('common.syncButtonLabel');
+      const syncButton = screen.getByLabelText('Sync branches');
       fireEvent.click(syncButton);
 
       await waitFor(() => {
@@ -1222,13 +1230,13 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByLabelText('common.syncButtonLabel')).toBeInTheDocument();
+        expect(screen.getByLabelText('Sync branches')).toBeInTheDocument();
       });
 
       // Clear initial call count from mount
       (worktreeApi.getAll as ReturnType<typeof vi.fn>).mockClear();
 
-      const syncButton = screen.getByLabelText('common.syncButtonLabel');
+      const syncButton = screen.getByLabelText('Sync branches');
       fireEvent.click(syncButton);
 
       await waitFor(() => {
@@ -1256,10 +1264,10 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByLabelText('common.syncButtonLabel')).toBeInTheDocument();
+        expect(screen.getByLabelText('Sync branches')).toBeInTheDocument();
       });
 
-      const syncButton = screen.getByLabelText('common.syncButtonLabel');
+      const syncButton = screen.getByLabelText('Sync branches');
       fireEvent.click(syncButton);
 
       // Button should be disabled while syncing
@@ -1279,16 +1287,16 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByLabelText('common.syncButtonLabel')).toBeInTheDocument();
+        expect(screen.getByLabelText('Sync branches')).toBeInTheDocument();
       });
 
-      const syncButton = screen.getByLabelText('common.syncButtonLabel');
+      const syncButton = screen.getByLabelText('Sync branches');
       fireEvent.click(syncButton);
 
       await waitFor(() => {
-        // The mock useTranslations replaces {count} in the key string
-        // t('syncSuccess', { count: 3 }) => 'common.syncSuccess' with {count} replaced to '3'
-        expect(screen.getByText('common.syncSuccess')).toBeInTheDocument();
+        // t('syncSuccess', { count: 3 }) resolves through locales/en/common.json
+        // ("Synced {count} worktrees") with {count} interpolated.
+        expect(screen.getByText('Synced 3 worktrees')).toBeInTheDocument();
       });
     });
 
@@ -1304,14 +1312,14 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByLabelText('common.syncButtonLabel')).toBeInTheDocument();
+        expect(screen.getByLabelText('Sync branches')).toBeInTheDocument();
       });
 
-      const syncButton = screen.getByLabelText('common.syncButtonLabel');
+      const syncButton = screen.getByLabelText('Sync branches');
       fireEvent.click(syncButton);
 
       await waitFor(() => {
-        expect(screen.getByText('common.syncError')).toBeInTheDocument();
+        expect(screen.getByText('Sync failed')).toBeInTheDocument();
       });
     });
 
@@ -1334,10 +1342,10 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByLabelText('common.syncButtonLabel')).toBeInTheDocument();
+        expect(screen.getByLabelText('Sync branches')).toBeInTheDocument();
       });
 
-      const syncButton = screen.getByLabelText('common.syncButtonLabel');
+      const syncButton = screen.getByLabelText('Sync branches');
 
       // Click twice rapidly
       fireEvent.click(syncButton);
@@ -1364,14 +1372,14 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByLabelText('common.syncButtonLabel')).toBeInTheDocument();
+        expect(screen.getByLabelText('Sync branches')).toBeInTheDocument();
       });
 
-      const syncButton = screen.getByLabelText('common.syncButtonLabel');
+      const syncButton = screen.getByLabelText('Sync branches');
       fireEvent.click(syncButton);
 
       await waitFor(() => {
-        expect(screen.getByText('common.syncAuthError')).toBeInTheDocument();
+        expect(screen.getByText('Authentication error')).toBeInTheDocument();
       });
     });
   });

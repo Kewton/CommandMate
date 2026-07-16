@@ -170,7 +170,7 @@ export function AssistantChatPanel() {
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load conversation');
+          setError(err instanceof Error ? err.message : t('assistant.errors.loadConversation'));
         }
       } finally {
         if (!cancelled) {
@@ -182,7 +182,7 @@ export function AssistantChatPanel() {
     return () => {
       cancelled = true;
     };
-  }, [selectedRepoId, selectedTool]);
+  }, [selectedRepoId, selectedTool, t]);
 
   useEffect(() => {
     if (pollIntervalRef.current) {
@@ -235,11 +235,11 @@ export function AssistantChatPanel() {
       setConversation(result.conversation);
       await loadMessages(result.conversation.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start session');
+      setError(err instanceof Error ? err.message : t('assistant.errors.startSession'));
     } finally {
       setStarting(false);
     }
-  }, [loadMessages, selectedRepoId, selectedTool, starting]);
+  }, [loadMessages, selectedRepoId, selectedTool, starting, t]);
 
   const handleStop = useCallback(async () => {
     if (!conversation || stopping) {
@@ -252,11 +252,11 @@ export function AssistantChatPanel() {
       await assistantApi.stopSession(selectedTool, conversation.id);
       await loadConversation();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to stop session');
+      setError(err instanceof Error ? err.message : t('assistant.errors.stopSession'));
     } finally {
       setStopping(false);
     }
-  }, [conversation, loadConversation, selectedTool, stopping]);
+  }, [conversation, loadConversation, selectedTool, stopping, t]);
 
   const handleClearHistory = useCallback(async () => {
     if (!conversation || clearing || executionRunning) {
@@ -277,7 +277,7 @@ export function AssistantChatPanel() {
       await assistantApi.clearMessages(conversation.id);
       await loadConversation();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to clear history');
+      setError(err instanceof Error ? err.message : t('assistant.errors.clearHistory'));
     } finally {
       setClearing(false);
     }
@@ -298,17 +298,17 @@ export function AssistantChatPanel() {
           loadConversation(),
         ]);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to send message');
+        setError(err instanceof Error ? err.message : t('assistant.errors.sendMessage'));
         throw err;
       }
     },
-    [canSend, conversation, loadConversation, loadMessages, selectedTool],
+    [canSend, conversation, loadConversation, loadMessages, selectedTool, t],
   );
 
   const handleEditMessage = useCallback(
     async (target: AssistantMessage, newContent: string) => {
       if (!conversation || !canSend) {
-        throw new Error('Session is not ready to resend messages');
+        throw new Error(t('assistant.errors.notReadyToResend'));
       }
 
       setError(null);
@@ -320,7 +320,7 @@ export function AssistantChatPanel() {
         loadConversation(),
       ]);
     },
-    [canSend, conversation, loadConversation, loadMessages, selectedTool],
+    [canSend, conversation, loadConversation, loadMessages, selectedTool, t],
   );
 
   const handleRepoChange = useCallback(
@@ -336,7 +336,7 @@ export function AssistantChatPanel() {
         try {
           await assistantApi.stopSession(selectedTool, conversation.id);
         } catch (err) {
-          setError(err instanceof Error ? err.message : 'Failed to stop session');
+          setError(err instanceof Error ? err.message : t('assistant.errors.stopSession'));
           return;
         }
       }
@@ -360,10 +360,10 @@ export function AssistantChatPanel() {
           <div className="flex flex-col gap-1">
             <div className="grid gap-3 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_auto]">
               <span className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                Repository to Work In
+                {t('assistant.repositoryLabel')}
               </span>
               <span className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                Assistant CLI
+                {t('assistant.cliLabel')}
               </span>
               <span className="hidden md:block" />
             </div>
@@ -376,7 +376,7 @@ export function AssistantChatPanel() {
                 className="w-full rounded-lg border border-input bg-surface px-3 py-2 text-sm text-foreground shadow-sm transition-colors focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
                 data-testid="assistant-repo-select"
               >
-                {repositories.length === 0 && <option value="">No repositories</option>}
+                {repositories.length === 0 && <option value="">{t('assistant.noRepositories')}</option>}
                 {repositories.map((repo) => (
                   <option key={repo.id} value={repo.id}>
                     {repo.displayName || repo.name}
@@ -393,7 +393,7 @@ export function AssistantChatPanel() {
               >
                 {allowedTools.map((tool) => (
                   <option key={tool.id} value={tool.id} disabled={!tool.installed}>
-                    {tool.name}{!tool.installed ? ' (not installed)' : ''}
+                    {tool.installed ? tool.name : t('assistant.toolNotInstalled', { name: tool.name })}
                   </option>
                 ))}
               </select>
@@ -407,7 +407,7 @@ export function AssistantChatPanel() {
                     className="w-full md:w-auto"
                     data-testid="assistant-start-button"
                   >
-                    {starting ? 'Starting...' : 'Start'}
+                    {starting ? t('assistant.starting') : t('assistant.start')}
                   </Button>
                 ) : (
                   <Button
@@ -417,7 +417,7 @@ export function AssistantChatPanel() {
                     className="w-full md:w-auto"
                     data-testid="assistant-stop-button"
                   >
-                    {stopping ? 'Stopping...' : 'Stop'}
+                    {stopping ? t('assistant.stopping') : t('assistant.stop')}
                   </Button>
                 )}
               </div>
@@ -425,8 +425,11 @@ export function AssistantChatPanel() {
 
             <p className="text-xs text-muted-foreground">
               {selectedRepository
-                ? `Start directory: ${selectedRepository.displayName || selectedRepository.name} (${selectedRepository.path})`
-                : 'Select the repository used as the assistant session start directory.'}
+                ? t('assistant.startDirectory', {
+                    repository: selectedRepository.displayName || selectedRepository.name,
+                    path: selectedRepository.path,
+                  })
+                : t('assistant.startDirectoryHint')}
             </p>
           </div>
 
@@ -439,7 +442,7 @@ export function AssistantChatPanel() {
           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
             <div className="flex shrink-0 items-center justify-between">
               <span className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
-                History
+                {t('assistant.history')}
               </span>
               <Button
                 type="button"
@@ -451,7 +454,7 @@ export function AssistantChatPanel() {
                 data-testid="assistant-clear-button"
               >
                 <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                {clearing ? 'Clearing...' : 'Clear history'}
+                {clearing ? t('assistant.clearing') : t('assistant.clearHistory')}
               </Button>
             </div>
 
@@ -463,7 +466,7 @@ export function AssistantChatPanel() {
                   className="h-full min-h-0 overflow-hidden rounded-xl border border-border bg-surface-2 p-3"
                   data-testid="assistant-chat-loading"
                   role="status"
-                  aria-label="Loading conversation"
+                  aria-label={t('assistant.loadingConversation')}
                 >
                   <div className="space-y-3">
                     <Skeleton className="ml-auto h-10 w-3/5 rounded-2xl" />
@@ -487,7 +490,13 @@ export function AssistantChatPanel() {
               <AssistantMessageInput
                 onSend={handleSendMessage}
                 disabled={!canSend}
-                placeholder={canSend ? 'Type your message... (Enter to send)' : conversationActive ? 'Waiting for the current run to finish' : 'Start a session first'}
+                placeholder={
+                  canSend
+                    ? t('assistant.inputPlaceholder')
+                    : conversationActive
+                      ? t('assistant.inputPlaceholderWaiting')
+                      : t('assistant.inputPlaceholderNoSession')
+                }
               />
             </div>
           </div>

@@ -9,6 +9,7 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { Card } from '@/components/ui';
 import type { ReviewStatus } from '@/lib/session/next-action-helper';
 
@@ -39,15 +40,6 @@ const STATUS_COLORS: Record<ReviewStatus, string> = {
 };
 
 /**
- * Status badge label mapping.
- */
-const STATUS_LABELS: Record<ReviewStatus, string> = {
-  done: 'Done',
-  approval: 'Approval',
-  stalled: 'Stalled',
-};
-
-/**
  * ReviewCard displays a worktree's review status with optional inline reply.
  */
 export function ReviewCard({
@@ -59,6 +51,8 @@ export function ReviewCard({
   cliToolId,
   children,
 }: ReviewCardProps) {
+  const t = useTranslations('review');
+
   return (
     <Card data-testid="review-card">
       <div className="flex items-start justify-between gap-4">
@@ -88,7 +82,7 @@ export function ReviewCard({
           data-testid="review-status-badge"
           className={`text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${STATUS_COLORS[status]}`}
         >
-          {STATUS_LABELS[status]}
+          {t(`status.${status}`)}
         </span>
       </div>
       {children && <div className="mt-3 pt-3 border-t border-border">{children}</div>}

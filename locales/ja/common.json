@@ -39,6 +39,8 @@
   },
   "cancel": "キャンセル",
   "send": "送信",
+  "sending": "送信中...",
+  "sendMessagePlaceholder": "メッセージを送信...",
   "end": "終了する",
   "ending": "終了中...",
   "retry": "再試行",
@@ -46,6 +48,19 @@
   "reconnect": "再接続",
   "close": "閉じる",
   "back": "戻る",
+  "menu": "メニュー",
+  "sidebar": {
+    "open": "サイドバーを開く",
+    "close": "サイドバーを閉じる",
+    "branchNavigation": "ブランチナビゲーション",
+    "branches": "ブランチ",
+    "searchBranches": "ブランチを検索...",
+    "noBranchesFound": "ブランチが見つかりません",
+    "noBranchesAvailable": "ブランチがありません",
+    "dragToReorderGroup": "ドラッグでグループを並べ替え",
+    "switchToFlatView": "フラット表示に切り替え",
+    "switchToGroupedView": "グループ表示に切り替え"
+  },
   "confirmDelete": "「{name}」を削除しますか？",
   "favorites": {
     "add": "お気に入りに追加",
