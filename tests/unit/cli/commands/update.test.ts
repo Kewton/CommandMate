@@ -22,6 +22,7 @@ vi.mock('../../../../src/cli/utils/paths', () => ({
 }));
 vi.mock('../../../../src/cli/utils/install-context', () => ({
   isGlobalInstall: vi.fn(() => true),
+  isNpxExecution: vi.fn(() => false),
 }));
 vi.mock('../../../../src/cli/utils/env-setup', () => ({
   getEnvPath: vi.fn(() => '/mock/home/.commandmate/.env'),
@@ -41,7 +42,7 @@ vi.mock('../../../../src/cli/utils/prompt', () => ({
 // Import after mocking
 import { updateCommand } from '../../../../src/cli/commands/update';
 import { ExitCode, type UpdateOptions } from '../../../../src/cli/types';
-import { isGlobalInstall } from '../../../../src/cli/utils/install-context';
+import { isGlobalInstall, isNpxExecution } from '../../../../src/cli/utils/install-context';
 import { getDaemonManagerFactory } from '../../../../src/cli/utils/daemon-factory';
 import { getEnvPath } from '../../../../src/cli/utils/env-setup';
 import { listRunningWorktreeServers } from '../../../../src/cli/utils/worktree-servers';
@@ -195,6 +196,7 @@ describe('updateCommand', () => {
     } as unknown as ReturnType<typeof getDaemonManagerFactory>);
 
     vi.mocked(isGlobalInstall).mockReturnValue(true);
+    vi.mocked(isNpxExecution).mockReturnValue(false);
     vi.mocked(isInteractive).mockReturnValue(true);
     vi.mocked(confirm).mockResolvedValue(true);
     vi.mocked(listRunningWorktreeServers).mockResolvedValue([]);
@@ -211,6 +213,67 @@ describe('updateCommand', () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     delete process.env.CM_AUTH_TOKEN;
+  });
+
+  // Issue #1319: `npx commandmate update` reached the global branch because the npx
+  // cache satisfies isGlobalInstall() (Issue #1195 pins that). It rewrote the user's
+  // global install and then reported UPDATE_FAILED, because the post-install check
+  // re-read the npx cache's package.json (still the old version) rather than the new
+  // global one. The npx gate runs before every other step.
+  describe('npx execution (Issue #1319)', () => {
+    beforeEach(() => {
+      vi.mocked(isNpxExecution).mockReturnValue(true);
+      // The npx cache reports the version npx happened to fetch, and the registry
+      // has a newer one: without the gate this is the "update available" path.
+      mockPackageJson('0.9.0', '0.9.0');
+      mockNpm({ latest: '1.0.0' });
+    });
+
+    it('should not run npm install -g', async () => {
+      await updateCommand({ yes: true });
+
+      expect(installCalls()).toHaveLength(0);
+    });
+
+    it('should not stop or start the server', async () => {
+      await updateCommand({ yes: true });
+
+      expect(daemon.stop).not.toHaveBeenCalled();
+      expect(daemon.start).not.toHaveBeenCalled();
+    });
+
+    it('should exit SUCCESS instead of UPDATE_FAILED', async () => {
+      await updateCommand({ yes: true });
+
+      expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
+      expect(mockExit).not.toHaveBeenCalledWith(ExitCode.UPDATE_FAILED);
+      expect(output()).not.toContain('npm install は成功したが');
+    });
+
+    it('should explain that npx needs no update and how to update a global install', async () => {
+      await updateCommand({ yes: true });
+
+      expect(output()).toContain('npx');
+      expect(output()).toContain('npm install -g commandmate@latest');
+    });
+
+    it('should gate --check as well, since the npx cache version is not the install', async () => {
+      await updateCommand({ check: true });
+
+      expect(output()).not.toContain('Current: v0.9.0');
+      expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
+      expect(installCalls()).toHaveLength(0);
+    });
+
+    it('should not prompt for confirmation in a non-interactive npx run', async () => {
+      vi.mocked(isInteractive).mockReturnValue(false);
+
+      await updateCommand({});
+
+      expect(confirm).not.toHaveBeenCalled();
+      expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
+      expect(mockExit).not.toHaveBeenCalledWith(ExitCode.CONFIG_ERROR);
+    });
   });
 
   describe('--check (D-7)', () => {

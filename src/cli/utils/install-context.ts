@@ -45,6 +45,30 @@ export function isGlobalInstall(): boolean {
 }
 
 /**
+ * Check if the running code was resolved from the npx cache
+ * Issue #1319: `npx commandmate` must not be treated as an installed CLI
+ *
+ * npm resolves `npx <pkg>` under `<npm-cache>/_npx/<hash>/node_modules/<pkg>`,
+ * which isGlobalInstall() reports as global on purpose (Issue #1195: config and
+ * db must still land in ~/.commandmate). This answers a narrower question that
+ * isGlobalInstall() cannot: is this process a throwaway npx run rather than the
+ * user's own install? Callers that would mutate the installation need both.
+ *
+ * @returns true if running from the npx cache
+ *
+ * @example
+ * ```typescript
+ * if (isNpxExecution()) {
+ *   // Do not modify the user's install from a throwaway process
+ * }
+ * ```
+ */
+export function isNpxExecution(): boolean {
+  const currentPath = dirname(__dirname);
+  return currentPath.includes('/_npx/') || currentPath.includes('\\_npx\\');
+}
+
+/**
  * Get the config directory path
  * Issue #119: Returns ~/.commandmate for global, cwd for local
  * Issue #125: Added symlink resolution for security (path traversal protection)
