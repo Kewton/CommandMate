@@ -1,4 +1,8 @@
 {
+  "label": "Auto Yes",
+  "toggleLabel": "Auto Yes mode",
+  "targetLabel": "Auto Yes target",
+  "timeRemaining": "Time remaining",
   "enableTitle": "Enable Auto Yes mode?",
   "enableTitleWithTool": "Enable Auto Yes mode? ({toolName})",
   "featureDescription": "Feature description",

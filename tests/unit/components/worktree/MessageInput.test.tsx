@@ -33,6 +33,15 @@ import {
 // Mocks
 // ---------------------------------------------------------------------------
 
+// Issue #1276: the composer's aria-labels are dictionary-driven now. The
+// Accessibility block below asserts the send button's label is literally
+// "Send message" — under the echoing global mock that would read
+// `worktree.composer.sendMessage` and prove nothing, so use the real dictionary.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 vi.mock('@/lib/api-client', () => ({
   worktreeApi: {
     sendMessage: vi.fn().mockResolvedValue({}),

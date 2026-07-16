@@ -11,5 +11,8 @@
   "enterCustomMessage": "Enter custom message",
   "enterMessageHere": "Enter message here...",
   "enterValuePlaceholder": "Enter a value...",
-  "submit": "Submit"
+  "submit": "Submit",
+  "yesNoGroupLabel": "Yes or No options",
+  "selectAnOption": "Select an option",
+  "customValueInput": "Custom value input"
 }

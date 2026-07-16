@@ -117,7 +117,7 @@ describe('AutoYesToggle', () => {
         />
       );
 
-      const timeDisplay = screen.getByLabelText('Time remaining');
+      const timeDisplay = screen.getByLabelText('autoYes.timeRemaining');
       // Should be in MM:SS format (no hours prefix)
       expect(timeDisplay.textContent).toMatch(/^\d{2}:\d{2}$/);
     });
@@ -132,7 +132,7 @@ describe('AutoYesToggle', () => {
         />
       );
 
-      const timeDisplay = screen.getByLabelText('Time remaining');
+      const timeDisplay = screen.getByLabelText('autoYes.timeRemaining');
       // Should be in H:MM:SS format
       expect(timeDisplay.textContent).toMatch(/^\d+:\d{2}:\d{2}$/);
     });
@@ -147,7 +147,7 @@ describe('AutoYesToggle', () => {
         />
       );
 
-      const timeDisplay = screen.getByLabelText('Time remaining');
+      const timeDisplay = screen.getByLabelText('autoYes.timeRemaining');
       // Should start with 7 or 8 (depending on exact timing)
       expect(timeDisplay.textContent).toMatch(/^[78]:\d{2}:\d{2}$/);
     });
@@ -167,7 +167,7 @@ describe('AutoYesToggle', () => {
         />
       );
 
-      const target = screen.getByLabelText('Auto Yes target');
+      const target = screen.getByLabelText('autoYes.targetLabel');
       expect(target.textContent).toContain('Claude');
     });
 
@@ -180,7 +180,7 @@ describe('AutoYesToggle', () => {
         />
       );
 
-      const target = screen.getByLabelText('Auto Yes target');
+      const target = screen.getByLabelText('autoYes.targetLabel');
       expect(target.textContent).toContain('Claude');
     });
 
@@ -192,7 +192,7 @@ describe('AutoYesToggle', () => {
         />
       );
 
-      expect(screen.queryByLabelText('Auto Yes target')).toBeNull();
+      expect(screen.queryByLabelText('autoYes.targetLabel')).toBeNull();
     });
 
     it('should pass cliToolName to confirm dialog for per-agent title', () => {
@@ -225,7 +225,7 @@ describe('AutoYesToggle', () => {
 
       // Initially ON with a visible countdown.
       expect(screen.getByRole('switch').getAttribute('aria-checked')).toBe('true');
-      expect(screen.getByLabelText('Time remaining')).toBeDefined();
+      expect(screen.getByLabelText('autoYes.timeRemaining')).toBeDefined();
 
       // Advance to the exact expiration instant and let the 1s tick fire.
       act(() => {
@@ -235,7 +235,7 @@ describe('AutoYesToggle', () => {
 
       // UI now presents as OFF and the countdown is gone.
       expect(screen.getByRole('switch').getAttribute('aria-checked')).toBe('false');
-      expect(screen.queryByLabelText('Time remaining')).toBeNull();
+      expect(screen.queryByLabelText('autoYes.timeRemaining')).toBeNull();
     });
 
     it('invokes onExpire exactly once when the countdown reaches zero', () => {

@@ -98,6 +98,7 @@ const MessageBubble = React.memo(function MessageBubble({
   const dateFnsLocale = getDateFnsLocale(locale);
   const tPrompt = useTranslations('prompt');
   const tCommon = useTranslations('common');
+  const tWorktree = useTranslations('worktree');
   const timestamp = formatMessageTimestamp(new Date(message.timestamp), dateFnsLocale);
 
   // State for handling text input options
@@ -209,7 +210,7 @@ const MessageBubble = React.memo(function MessageBubble({
               isUser ? 'text-accent-700 dark:text-accent-400' : 'text-muted-foreground'
             }`}
           >
-            {isUser ? 'You' : getCliToolDisplayNameSafe(message.cliToolId)}
+            {isUser ? tWorktree('messages.you') : getCliToolDisplayNameSafe(message.cliToolId)}
           </span>
           <span className="text-xs text-muted-foreground">{timestamp}</span>
           <div className={TOOLBAR_CLASSES}>
@@ -218,8 +219,8 @@ const MessageBubble = React.memo(function MessageBubble({
               data-testid={isUser ? 'copy-user-message' : 'copy-assistant-message'}
               onClick={handleCopy}
               className="p-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors"
-              aria-label="Copy message"
-              title="Copy"
+              aria-label={tWorktree('messages.copyMessage')}
+              title={tWorktree('messages.copy')}
             >
               <Copy size={14} aria-hidden="true" />
             </button>
@@ -260,7 +261,7 @@ const MessageBubble = React.memo(function MessageBubble({
               rel="noopener noreferrer"
               className="text-xs text-accent-700 dark:text-accent-400 hover:text-accent-600 dark:hover:text-accent-300 hover:underline"
             >
-              View log file →
+              {tWorktree('messages.viewLogFile')}
             </a>
           </div>
         )}
@@ -511,7 +512,7 @@ export function MessageList({
       <Card padding="lg">
         <div className="text-center py-8">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-input border-t-accent-600" />
-          <p className="mt-4 text-muted-foreground">Loading messages...</p>
+          <p className="mt-4 text-muted-foreground">{tWorktree('messages.loading')}</p>
         </div>
       </Card>
     );
@@ -522,7 +523,7 @@ export function MessageList({
       <Card padding="lg">
         <div className="text-center py-8">
           <MessageCircle size={48} className="mx-auto text-muted-foreground" aria-hidden="true" />
-          <p className="mt-4 text-muted-foreground">No messages yet</p>
+          <p className="mt-4 text-muted-foreground">{tWorktree('messages.empty')}</p>
         </div>
       </Card>
     );

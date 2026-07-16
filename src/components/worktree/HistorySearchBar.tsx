@@ -10,6 +10,7 @@
 'use client';
 
 import React, { useRef, useEffect, useCallback } from 'react';
+import { useTranslations } from 'next-intl';
 import { TERMINAL_SEARCH_MAX_MATCHES } from '@/hooks/useTerminalSearch';
 
 export interface HistorySearchBarProps {
@@ -48,6 +49,7 @@ export function HistorySearchBar({
   onCompositionEnd,
 }: HistorySearchBarProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const t = useTranslations('worktree');
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -71,7 +73,12 @@ export function HistorySearchBar({
 
   const countDisplay = (() => {
     if (matchCount === 0) return '0/0';
-    if (isAtMaxMatches) return `${currentIndex + 1}/${TERMINAL_SEARCH_MAX_MATCHES}以上`;
+    if (isAtMaxMatches) {
+      return t('history.search.countAtMax', {
+        current: currentIndex + 1,
+        max: TERMINAL_SEARCH_MAX_MATCHES,
+      });
+    }
     return `${currentIndex + 1}/${matchCount}`;
   })();
 
@@ -79,7 +86,7 @@ export function HistorySearchBar({
     <div
       className="flex items-center gap-1 px-2 py-1 bg-surface border border-border rounded shadow-lg"
       role="search"
-      aria-label="履歴内テキスト検索"
+      aria-label={t('history.search.regionLabel')}
     >
       <input
         ref={inputRef}
@@ -89,9 +96,9 @@ export function HistorySearchBar({
         onKeyDown={handleKeyDown}
         onCompositionStart={onCompositionStart}
         onCompositionEnd={onCompositionEnd}
-        placeholder="検索..."
+        placeholder={t('history.search.placeholder')}
         className="bg-transparent text-foreground text-sm outline-none w-32 sm:w-40 placeholder-muted-foreground"
-        aria-label="検索キーワード"
+        aria-label={t('history.search.keywordLabel')}
         autoComplete="off"
         autoCorrect="off"
         autoCapitalize="off"
@@ -111,7 +118,7 @@ export function HistorySearchBar({
         type="button"
         onClick={onPrev}
         disabled={matchCount === 0}
-        aria-label="前の結果 (prev)"
+        aria-label={t('history.search.prev')}
         className="text-muted-foreground hover:text-foreground disabled:opacity-40 min-w-[36px] min-h-[36px] flex items-center justify-center text-base"
       >
         ▲
@@ -121,7 +128,7 @@ export function HistorySearchBar({
         type="button"
         onClick={onNext}
         disabled={matchCount === 0}
-        aria-label="次の結果 (next)"
+        aria-label={t('history.search.next')}
         className="text-muted-foreground hover:text-foreground disabled:opacity-40 min-w-[36px] min-h-[36px] flex items-center justify-center text-base"
       >
         ▼
@@ -130,7 +137,7 @@ export function HistorySearchBar({
       <button
         type="button"
         onClick={onClose}
-        aria-label="検索を閉じる (close)"
+        aria-label={t('history.search.close')}
         className="text-muted-foreground hover:text-foreground min-w-[36px] min-h-[36px] flex items-center justify-center text-base ml-1"
       >
         ✕

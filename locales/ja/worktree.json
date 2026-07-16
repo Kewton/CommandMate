@@ -12,7 +12,75 @@
   "composer": {
     "placeholder": "メッセージを入力…",
     "commandsHint": "コマンド",
-    "newlineHint": "改行"
+    "newlineHint": "改行",
+    "removeAttachment": "添付を削除",
+    "showSlashCommands": "スラッシュコマンドを表示",
+    "attachImage": "画像を添付",
+    "sendMessage": "メッセージを送信"
+  },
+  "interrupt": {
+    "stopProcessing": "処理を中断"
+  },
+  "history": {
+    "title": "メッセージ履歴",
+    "regionLabel": "メッセージ履歴",
+    "loading": "メッセージを読み込み中",
+    "empty": "メッセージはまだありません",
+    "show": "表示件数",
+    "displayLimit": "履歴の表示件数",
+    "showArchived": "アーカイブを表示",
+    "showUserOnly": "ユーザーのメッセージのみ表示",
+    "showAllMessages": "すべてのメッセージを表示",
+    "openSearch": "検索を開く",
+    "closeSearch": "検索を閉じる",
+    "copied": "クリップボードにコピーしました",
+    "copyFailed": "コピーに失敗しました",
+    "search": {
+      "regionLabel": "履歴内テキスト検索",
+      "placeholder": "検索...",
+      "keywordLabel": "検索キーワード",
+      "prev": "前の結果 (prev)",
+      "next": "次の結果 (next)",
+      "close": "検索を閉じる (close)",
+      "countAtMax": "{current}/{max}以上"
+    }
+  },
+  "conversation": {
+    "waitingForResponse": "レスポンス待ち...",
+    "you": "あなた",
+    "assistant": "アシスタント",
+    "sending": "送信中…",
+    "failedToSend": "送信に失敗しました",
+    "retrySending": "メッセージを再送信",
+    "discard": "破棄",
+    "discardMessage": "メッセージを破棄",
+    "insertToMessage": "メッセージ欄に挿入",
+    "copy": "コピー",
+    "copyMessage": "メッセージをコピー",
+    "collapse": "折りたたむ",
+    "expand": "展開",
+    "collapseMessage": "メッセージを折りたたむ",
+    "expandMessage": "メッセージを展開",
+    "systemMessage": "システムメッセージ",
+    "systemMessageLabel": "システムメッセージ",
+    "openFile": "ファイルを開く: {path}",
+    "conversationLabel": "会話: {preview}"
+  },
+  "messages": {
+    "loading": "メッセージを読み込み中...",
+    "empty": "メッセージはまだありません",
+    "you": "あなた",
+    "copy": "コピー",
+    "copyMessage": "メッセージをコピー",
+    "viewLogFile": "ログファイルを表示 →"
+  },
+  "slashCommands": {
+    "title": "コマンド",
+    "searchPlaceholder": "コマンドを検索...",
+    "enterCustomCommand": "カスタムコマンドを入力...",
+    "selectHint": "選択",
+    "closeHint": "閉じる",
+    "empty": "利用可能なコマンドがありません"
   },
   "session": {
     "confirmKill": "「{name}」のセッションを終了しますか？\n\n※全てのメッセージ履歴が削除されます。ログファイルは保持されます。",
