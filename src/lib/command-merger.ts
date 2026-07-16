@@ -146,11 +146,16 @@ export function countCommands(groups: SlashCommandGroup[]): number {
  *
  * @param groups - Array of SlashCommandGroup objects
  * @param query - Search query string
+ * @param resolveDescription - Maps a command to the description text the user
+ *   actually sees. Callers rendering translated descriptions (Issue #1306) must
+ *   pass a resolver, otherwise built-in commands carrying a `descriptionKey`
+ *   match against nothing and become unsearchable by description.
  * @returns Filtered groups containing only matching commands
  */
 export function filterCommandGroups(
   groups: SlashCommandGroup[],
-  query: string
+  query: string,
+  resolveDescription: (cmd: SlashCommand) => string = (cmd) => cmd.description ?? ''
 ): SlashCommandGroup[] {
   if (!query.trim()) {
     return groups;
@@ -163,7 +168,7 @@ export function filterCommandGroups(
       ...group,
       commands: group.commands.filter((cmd) => {
         const nameMatch = cmd.name.toLowerCase().includes(lowerQuery);
-        const descMatch = cmd.description.toLowerCase().includes(lowerQuery);
+        const descMatch = resolveDescription(cmd).toLowerCase().includes(lowerQuery);
         return nameMatch || descMatch;
       }),
     }))

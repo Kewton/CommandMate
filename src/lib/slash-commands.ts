@@ -606,7 +606,7 @@ export function filterCommands(query: string): SlashCommand[] {
 
   return commands.filter((cmd) => {
     const nameMatch = cmd.name.toLowerCase().includes(lowerQuery);
-    const descMatch = cmd.description.toLowerCase().includes(lowerQuery);
+    const descMatch = (cmd.description ?? '').toLowerCase().includes(lowerQuery);
     return nameMatch || descMatch;
   });
 }

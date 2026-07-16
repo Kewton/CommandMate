@@ -38,8 +38,18 @@ export interface SlashCommand {
   name: string;
   /** Command invocation format in the target CLI */
   invocation?: 'slash';
-  /** Command description from frontmatter */
-  description: string;
+  /**
+   * Literal command description, as authored in a command file's frontmatter.
+   * Mutually exclusive with descriptionKey: user-authored commands carry text,
+   * built-in commands carry a key. Resolve via resolveCommandDescription().
+   */
+  description?: string;
+  /**
+   * i18n key for the description, relative to the `worktree` namespace.
+   * Built-in commands are defined outside React and cannot call t() at
+   * definition time, so they carry a key resolved by the renderer instead.
+   */
+  descriptionKey?: string;
   /** Command category for grouping */
   category: SlashCommandCategory;
   /** Model requirement (e.g., 'opus', 'sonnet') */
