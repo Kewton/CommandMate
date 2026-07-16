@@ -61,7 +61,20 @@
       "showSize": "ファイルサイズ",
       "showCreated": "作成日時",
       "showModified": "更新日時"
-    }
+    },
+    "loading": "ファイルを読み込み中",
+    "empty": "ファイルが見つかりません",
+    "newFile": "新規ファイル",
+    "newDirectory": "新規ディレクトリ",
+    "noResultsMatching": "「{query}」に一致するファイルはありません",
+    "noResultsContaining": "「{query}」を含むファイルはありません",
+    "label": "ファイルツリー",
+    "refreshing": "ファイルを更新中",
+    "refreshLabel": "ファイルツリーを更新",
+    "resetViewLabel": "ファイルツリーの表示をリセット",
+    "loadError": "ファイルの読み込みに失敗しました",
+    "loadDirectoryError": "ディレクトリの読み込みに失敗しました: {status}",
+    "itemCount": "{count} 項目"
   },
   "update": {
     "available": "新しいバージョンが利用可能です",
@@ -135,10 +148,137 @@
     "reorderError": "ToDoの並び替えに失敗しました"
   },
   "htmlPreview": {
-    "interactiveModeConfirm": "Interactiveモードではスクリプトが実行されます。信頼できないHTMLファイルではSafeモードを使用してください。"
+    "interactiveModeConfirm": "Interactiveモードではスクリプトが実行されます。信頼できないHTMLファイルではSafeモードを使用してください。",
+    "title": "HTML プレビュー: {path}",
+    "modeSource": "ソース",
+    "modePreview": "プレビュー",
+    "modeSplit": "分割",
+    "sandboxSafe": "セーフ",
+    "sandboxInteractive": "インタラクティブ"
   },
   "editor": {
     "saveFailedCloseConfirm": "保存に失敗しました。このまま閉じますか？",
-    "unsavedCloseConfirm": "未保存の変更があります。閉じてもよろしいですか？"
+    "unsavedCloseConfirm": "未保存の変更があります。閉じてもよろしいですか？",
+    "loading": "読み込み中...",
+    "placeholder": "入力を開始...",
+    "placeholderMarkdown": "Markdown の入力を開始...",
+    "saveSuccess": "ファイルを保存しました",
+    "saveError": "ファイルの保存に失敗しました",
+    "loadError": "ファイルの読み込みに失敗しました",
+    "sessionExpired": "セッションの有効期限が切れました。再ログインしてください。",
+    "autoSaveFailed": "自動保存に失敗しました。手動保存に切り替えます。",
+    "unsaved": "未保存",
+    "auto": "自動",
+    "splitView": "分割表示",
+    "editorOnly": "エディタのみ",
+    "previewOnly": "プレビューのみ",
+    "enterFullscreen": "全画面にする (Ctrl+Shift+F)",
+    "exitFullscreen": "全画面を終了 (ESC)"
+  },
+  "actions": {
+    "copyPath": "パスをコピー",
+    "copyContent": "内容をコピー",
+    "copyFilePath": "ファイルパスをコピー",
+    "copyFileContent": "ファイルの内容をコピー",
+    "search": "検索",
+    "searchInFile": "ファイル内を検索",
+    "edit": "編集",
+    "editFile": "ファイルを編集",
+    "download": "ダウンロード",
+    "downloadFile": "ファイルをダウンロード",
+    "close": "閉じる",
+    "save": "保存",
+    "saving": "保存中...",
+    "saved": "保存済み",
+    "prev": "前へ",
+    "next": "次へ",
+    "fullscreen": "全画面",
+    "exitFullscreen": "全画面を終了",
+    "minimize": "最小化",
+    "maximize": "最大化",
+    "retry": "再試行",
+    "refresh": "更新",
+    "resetView": "表示をリセット"
+  },
+  "fileSearch": {
+    "placeholder": "検索...",
+    "prevMatch": "前の結果",
+    "nextMatch": "次の結果",
+    "close": "検索を閉じる"
+  },
+  "fileViewer": {
+    "loading": "ファイルを読み込み中...",
+    "loadError": "ファイルの読み込みに失敗しました",
+    "tabSource": "ソース",
+    "tabPreview": "プレビュー",
+    "sandboxSafe": "セーフ",
+    "sandboxInteractive": "インタラクティブ",
+    "slideTitle": "{name} - スライド {number}",
+    "noSlides": "{fileName} にスライドが見つかりません",
+    "slides": "スライド",
+    "editor": "エディタ"
+  },
+  "fileTabs": {
+    "unsavedChanges": "未保存の変更",
+    "closeTab": "{name} を閉じる"
+  },
+  "markdownPreview": {
+    "loadingImage": "[画像を読み込み中...]",
+    "editor": "エディタ",
+    "preview": "プレビュー",
+    "exitFullscreenHint": "ESC キーで全画面を終了",
+    "exitFullscreenHintSwipe": "(または下にスワイプ)",
+    "largeFileWarning": "大きなファイル: パフォーマンスに影響する場合があります。"
+  },
+  "mermaid": {
+    "rendering": "図を描画中...",
+    "loading": "図を読み込み中...",
+    "errorTitle": "図のエラー",
+    "emptyCode": "図のコードが空です",
+    "renderError": "図の描画に失敗しました"
+  },
+  "imageViewer": {
+    "loadError": "画像の読み込みに失敗しました"
+  },
+  "videoViewer": {
+    "loadError": "動画の読み込みに失敗しました",
+    "loading": "動画を読み込み中...",
+    "unsupported": "お使いのブラウザは video タグに対応していません。"
+  },
+  "logViewer": {
+    "title": "ログファイル",
+    "all": "すべて ({count})",
+    "toolCount": "{tool} ({count})",
+    "empty": "ログファイルが見つかりません",
+    "emptyFiltered": "{tool} のログファイルが見つかりません",
+    "copyTitle": "サニタイズしたログをクリップボードにコピー",
+    "export": "エクスポート",
+    "exporting": "エクスポート中...",
+    "copied": "ログをクリップボードにコピーしました (サニタイズ済み)",
+    "exportError": "ログのエクスポートに失敗しました: {error}",
+    "searchPlaceholder": "ログファイル内を検索...",
+    "prevMatch": "前の一致 (Shift+Enter)",
+    "nextMatch": "次の一致 (Enter)",
+    "noMatches": "「{query}」に一致するものはありません"
+  },
+  "pdfPreview": {
+    "title": "PDF プレビュー: {path}",
+    "loadError": "PDFプレビューを読み込めませんでした。",
+    "openInNewTab": "PDFを新しいタブで開く",
+    "download": "ダウンロード",
+    "downloadPdf": "PDF をダウンロード"
+  },
+  "diffViewer": {
+    "badge": "DIFF",
+    "close": "差分表示を閉じる"
+  },
+  "search": {
+    "searching": "検索中...",
+    "placeholder": "ファイルを検索...",
+    "label": "ファイルを検索",
+    "clear": "検索をクリア",
+    "mode": "モード:",
+    "modeName": "名前",
+    "modeContent": "内容"
   }
 }

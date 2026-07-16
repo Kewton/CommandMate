@@ -15,6 +15,7 @@
 'use client';
 
 import React, { memo } from 'react';
+import { useTranslations } from 'next-intl';
 import {
   Save,
   X,
@@ -90,6 +91,7 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
   onClose,
   hideViewModeToggle,
 }: MarkdownToolbarProps) {
+  const t = useTranslations('worktree');
   return (
     <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted">
       {/* File path and dirty indicator */}
@@ -101,7 +103,7 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
             data-testid="dirty-indicator"
             className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-warning-subtle text-warning-foreground flex-shrink-0"
           >
-            Unsaved
+            {t('editor.unsaved')}
           </span>
         )}
       </div>
@@ -121,7 +123,7 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
                   ? 'bg-white dark:bg-input shadow-sm text-accent-600 dark:text-accent-400'
                   : 'text-muted-foreground hover:text-foreground'
               }`}
-              title="Split view"
+              title={t('editor.splitView')}
             >
               <Columns className="h-4 w-4" />
             </button>
@@ -135,7 +137,7 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
                   ? 'bg-white dark:bg-input shadow-sm text-accent-600 dark:text-accent-400'
                   : 'text-muted-foreground hover:text-foreground'
               }`}
-              title="Editor only"
+              title={t('editor.editorOnly')}
             >
               <FileText className="h-4 w-4" />
             </button>
@@ -149,7 +151,7 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
                   ? 'bg-white dark:bg-input shadow-sm text-accent-600 dark:text-accent-400'
                   : 'text-muted-foreground hover:text-foreground'
               }`}
-              title="Preview only"
+              title={t('editor.previewOnly')}
             >
               <Eye className="h-4 w-4" />
             </button>
@@ -164,7 +166,7 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
           className={`p-1.5 hover:bg-muted rounded ${
             copied ? 'text-success' : 'text-muted-foreground hover:text-foreground'
           }`}
-          title="Copy content"
+          title={t('actions.copyContent')}
         >
           {copied ? (
             <Check className="h-4 w-4" />
@@ -179,7 +181,7 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
           data-testid="maximize-button"
           onClick={onToggleFullscreen}
           className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded"
-          title={isMaximized ? 'Exit fullscreen (ESC)' : 'Enter fullscreen (Ctrl+Shift+F)'}
+          title={isMaximized ? t('editor.exitFullscreen') : t('editor.enterFullscreen')}
           aria-pressed={isMaximized}
         >
           {isMaximized ? (
@@ -191,7 +193,7 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
 
         {/* Auto-save toggle */}
         <div className="flex items-center gap-1.5">
-          <span className="text-xs text-muted-foreground">Auto</span>
+          <span className="text-xs text-muted-foreground">{t('editor.auto')}</span>
           {/* Issue #1061: role=switch aria-checked トグルトラック（knob 描画）— 残置 */}
           <button
             data-testid="auto-save-toggle"
@@ -211,7 +213,7 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
         {/* Save button OR auto-save indicator */}
         {isAutoSaveEnabled ? (
           <span data-testid="auto-save-indicator" className="text-sm text-muted-foreground">
-            {isAutoSaving ? 'Saving...' : isDirty ? '' : 'Saved'}
+            {isAutoSaving ? t('actions.saving') : isDirty ? '' : t('actions.saved')}
           </span>
         ) : (
           <Button
@@ -226,7 +228,7 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
             }`}
           >
             <Save className="h-4 w-4" />
-            {isSaving ? 'Saving...' : 'Save'}
+            {isSaving ? t('actions.saving') : t('actions.save')}
           </Button>
         )}
 
@@ -237,7 +239,7 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
             data-testid="close-button"
             onClick={onClose}
             className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded"
-            title="Close"
+            title={t('actions.close')}
           >
             <X className="h-4 w-4" />
           </Button>

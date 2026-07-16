@@ -24,6 +24,15 @@ import {
   AUTO_SAVE_DEBOUNCE_MS,
 } from '@/types/markdown-editor';
 
+// Issue #1275: this file asserts rendered wording (the save toast, the ESC
+// hint), so it must resolve keys through the real dictionary. The global mock
+// in tests/setup.ts echoes `worktree.<key>` back and would keep these
+// assertions green even if the key did not exist.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 // Mock fetch API
 const mockFetch = vi.fn();
 global.fetch = mockFetch;

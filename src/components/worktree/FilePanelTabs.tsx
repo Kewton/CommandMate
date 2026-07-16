@@ -12,6 +12,7 @@
 'use client';
 
 import React, { memo, useCallback, useState, useEffect, useRef } from 'react';
+import { useTranslations } from 'next-intl';
 import { X, ChevronDown } from 'lucide-react';
 import { FilePanelContent } from './FilePanelContent';
 import type { FileTab } from '@/hooks/useFileTabs';
@@ -70,6 +71,8 @@ const TabButton = memo(function TabButton({
   onActivate: (path: string) => void;
   onClose: (path: string) => void;
 }) {
+  const t = useTranslations('worktree');
+
   const handleClick = useCallback(() => {
     if (!isActive) {
       onActivate(tab.path);
@@ -103,14 +106,14 @@ const TabButton = memo(function TabButton({
         <span
           data-testid={`file-tab-dirty-${tab.path}`}
           className="w-2 h-2 rounded-full bg-warning flex-shrink-0"
-          title="Unsaved changes"
+          title={t('fileTabs.unsavedChanges')}
         />
       )}
       <button
         type="button"
         onClick={handleClose}
         className="ml-1 p-0.5 rounded-sm hover:bg-muted transition-colors"
-        aria-label={`Close ${tab.name}`}
+        aria-label={t('fileTabs.closeTab', { name: tab.name })}
       >
         <X className="w-3 h-3" />
       </button>

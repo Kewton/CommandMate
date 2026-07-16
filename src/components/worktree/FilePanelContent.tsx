@@ -12,6 +12,7 @@
 
 import React, { useEffect, useRef, memo, useState, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
+import { useTranslations } from 'next-intl';
 import { Maximize2, Minimize2, ClipboardCopy, Check, Copy, Search } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { FileTab } from '@/hooks/useFileTabs';
@@ -119,10 +120,11 @@ const MARP_FRONTMATTER_REGEX = /^---\s*\nmarp:\s*true/;
 
 /** Loading spinner */
 function LoadingSpinner() {
+  const t = useTranslations('worktree');
   return (
     <div className="flex items-center justify-center py-12">
       <Spinner size="xl" variant="accent" />
-      <p className="ml-3 text-muted-foreground">Loading file...</p>
+      <p className="ml-3 text-muted-foreground">{t('fileViewer.loading')}</p>
     </div>
   );
 }
@@ -153,6 +155,7 @@ function ErrorDisplay({ error }: { error: string }) {
 
 /** Toolbar with path copy, content copy, search, and maximize/minimize buttons */
 function FileToolbar({ filePath, isMaximized, onToggleMaximize, copyableContent, onSearch }: { filePath: string; isMaximized: boolean; onToggleMaximize: () => void; copyableContent?: string; onSearch?: () => void }) {
+  const t = useTranslations('worktree');
   const [pathCopied, setPathCopied] = useState(false);
   const [contentCopied, setContentCopied] = useState(false);
   const pathTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -196,8 +199,8 @@ function FileToolbar({ filePath, isMaximized, onToggleMaximize, copyableContent,
           type="button"
           onClick={handleCopyPath}
           className="flex-shrink-0 p-1 rounded-md hover:bg-muted text-muted-foreground transition-colors"
-          aria-label="Copy file path"
-          title="Copy path"
+          aria-label={t('actions.copyFilePath')}
+          title={t('actions.copyPath')}
         >
           {pathCopied ? <Check className="w-3.5 h-3.5 text-success" /> : <ClipboardCopy className="w-3.5 h-3.5" />}
         </button>
@@ -211,8 +214,8 @@ function FileToolbar({ filePath, isMaximized, onToggleMaximize, copyableContent,
             type="button"
             onClick={onSearch}
             className="flex-shrink-0 p-1 rounded-md hover:bg-muted text-muted-foreground transition-colors"
-            aria-label="Search in file"
-            title="Search"
+            aria-label={t('actions.searchInFile')}
+            title={t('actions.search')}
           >
             <Search className="w-3.5 h-3.5" />
           </button>
@@ -222,8 +225,8 @@ function FileToolbar({ filePath, isMaximized, onToggleMaximize, copyableContent,
             type="button"
             onClick={handleCopyContent}
             className="flex-shrink-0 p-1 rounded-md hover:bg-muted text-muted-foreground transition-colors"
-            aria-label="Copy file content"
-            title="Copy content"
+            aria-label={t('actions.copyFileContent')}
+            title={t('actions.copyContent')}
           >
             {contentCopied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
           </button>
@@ -232,8 +235,8 @@ function FileToolbar({ filePath, isMaximized, onToggleMaximize, copyableContent,
           type="button"
           onClick={onToggleMaximize}
           className="flex-shrink-0 p-1.5 rounded-md hover:bg-muted text-muted-foreground transition-colors"
-          aria-label={isMaximized ? 'Minimize' : 'Maximize'}
-          title={isMaximized ? 'Minimize' : 'Maximize'}
+          aria-label={isMaximized ? t('actions.minimize') : t('actions.maximize')}
+          title={isMaximized ? t('actions.minimize') : t('actions.maximize')}
         >
           {isMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
         </button>
@@ -497,6 +500,7 @@ function MarpPreview({
   slides: string[];
   fileName: string;
 }) {
+  const t = useTranslations('worktree');
   const [currentSlide, setCurrentSlide] = useState(0);
 
   const handlePrev = () => {
@@ -508,7 +512,7 @@ function MarpPreview({
   };
 
   if (slides.length === 0) {
-    return <div className="p-4 text-muted-foreground">No slides found in {fileName}</div>;
+    return <div className="p-4 text-muted-foreground">{t('fileViewer.noSlides', { fileName })}</div>;
   }
 
   return (
@@ -520,7 +524,7 @@ function MarpPreview({
           disabled={currentSlide === 0}
           className="px-3 py-1 text-sm rounded-md bg-muted disabled:opacity-50 hover:bg-muted/80 transition-colors"
         >
-          Prev
+          {t('actions.prev')}
         </button>
         <span className="text-sm text-muted-foreground">
           {currentSlide + 1} / {slides.length}
@@ -531,14 +535,14 @@ function MarpPreview({
           disabled={currentSlide === slides.length - 1}
           className="px-3 py-1 text-sm rounded-md bg-muted disabled:opacity-50 hover:bg-muted/80 transition-colors"
         >
-          Next
+          {t('actions.next')}
         </button>
       </div>
       <div className="flex-1 overflow-hidden">
         <iframe
           srcDoc={slides[currentSlide]}
           sandbox=""
-          title={`${fileName} - Slide ${currentSlide + 1}`}
+          title={t('fileViewer.slideTitle', { name: fileName, number: currentSlide + 1 })}
           className="w-full h-full border-0"
         />
       </div>
@@ -571,6 +575,7 @@ function MarpEditorWithSlides({
   onDirtyChange?: (isDirty: boolean) => void;
   onOpenFile?: (path: string) => void;
 }) {
+  const t = useTranslations('worktree');
   const [marpViewMode, setMarpViewMode] = useState<'slides' | 'editor'>('slides');
 
   return (
@@ -586,7 +591,7 @@ function MarpEditorWithSlides({
                 : 'text-muted-foreground hover:bg-muted'
             }`}
           >
-            Slides
+            {t('fileViewer.slides')}
           </button>
           <button
             type="button"
@@ -597,7 +602,7 @@ function MarpEditorWithSlides({
                 : 'text-muted-foreground hover:bg-muted'
             }`}
           >
-            Editor
+            {t('fileViewer.editor')}
           </button>
         </div>
         <FileToolbar filePath={filePath} isMaximized={isMaximized} onToggleMaximize={onToggleMaximize} copyableContent={contentText} />
@@ -787,6 +792,12 @@ export const FilePanelContent = memo(function FilePanelContent({
   onDirtyChange,
   onOpenFile,
 }: FilePanelContentProps) {
+  const t = useTranslations('worktree');
+  // [Issue #1275] `t` is a fresh closure on every render, so listing it in the
+  // auto-fetch effect's deps would re-run that effect on every render. Read it
+  // via a ref to keep the effect keyed on the tab/worktree inputs alone.
+  const tRef = useRef(t);
+  tRef.current = t;
   const fetchingRef = useRef(false);
   const [marpSlides, setMarpSlides] = useState<string[] | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
@@ -839,7 +850,7 @@ export const FilePanelContent = memo(function FilePanelContent({
           const errorData = await response.json();
           const errMsg = typeof errorData.error === 'string'
             ? errorData.error
-            : errorData.error?.message || 'Failed to load file';
+            : errorData.error?.message || tRef.current('fileViewer.loadError');
           onLoadError(tab.path, errMsg);
           return;
         }
@@ -849,7 +860,7 @@ export const FilePanelContent = memo(function FilePanelContent({
       } catch (err: unknown) {
         onLoadError(
           tab.path,
-          err instanceof Error ? err.message : 'Failed to load file',
+          err instanceof Error ? err.message : tRef.current('fileViewer.loadError'),
         );
       } finally {
         fetchingRef.current = false;

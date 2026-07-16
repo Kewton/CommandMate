@@ -435,7 +435,7 @@ export const TreeNode = memo(function TreeNode({
             className="text-xs text-muted-foreground flex-shrink-0"
           >
             {isDirectory
-              ? item.itemCount !== undefined && `${item.itemCount} items`
+              ? item.itemCount !== undefined && t('fileTree.itemCount', { count: item.itemCount })
               : formatFileSize(item.size)}
           </span>
         )}

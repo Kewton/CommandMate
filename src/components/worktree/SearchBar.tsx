@@ -12,6 +12,7 @@
 'use client';
 
 import React, { memo, useCallback, useRef, useEffect } from 'react';
+import { useTranslations } from 'next-intl';
 import { MOBILE_BREAKPOINT } from '@/hooks/useIsMobile';
 import type { SearchMode } from '@/types/models';
 import { Spinner } from '@/components/ui/Spinner';
@@ -84,6 +85,8 @@ const ClearIcon = memo(function ClearIcon() {
 });
 
 const LoadingSpinner = memo(function LoadingSpinner() {
+  const t = useTranslations('worktree');
+
   return (
     <Spinner
       size="sm"
@@ -91,7 +94,7 @@ const LoadingSpinner = memo(function LoadingSpinner() {
       data-testid="search-loading"
       role="status"
       aria-hidden={false}
-      aria-label="Searching..."
+      aria-label={t('search.searching')}
     />
   );
 });
@@ -123,10 +126,11 @@ export const SearchBar = memo(function SearchBar({
   onQueryChange,
   onModeChange,
   onClear,
-  placeholder = 'Search files...',
+  placeholder,
   className = '',
 }: SearchBarProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const t = useTranslations('worktree');
 
   // Handle input change
   const handleInputChange = useCallback(
@@ -189,9 +193,9 @@ export const SearchBar = memo(function SearchBar({
           value={query}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder}
+          placeholder={placeholder ?? t('search.placeholder')}
           className="flex-1 min-w-0 px-2 py-1 text-sm bg-muted text-foreground border border-input rounded focus:outline-none focus:ring-1 focus:ring-ring focus:border-accent-500"
-          aria-label="Search files"
+          aria-label={t('search.label')}
           aria-busy={isSearching}
         />
 
@@ -205,7 +209,7 @@ export const SearchBar = memo(function SearchBar({
               data-testid="search-clear"
               onClick={handleClear}
               className="p-1 text-muted-foreground hover:text-foreground rounded transition-colors"
-              aria-label="Clear search"
+              aria-label={t('search.clear')}
             >
               <ClearIcon />
             </button>
@@ -215,7 +219,7 @@ export const SearchBar = memo(function SearchBar({
 
       {/* Mode Toggle Row */}
       <div className="flex items-center gap-1">
-        <span className="text-xs text-muted-foreground mr-1">Mode:</span>
+        <span className="text-xs text-muted-foreground mr-1">{t('search.mode')}</span>
         <button
           type="button"
           data-testid="mode-name"
@@ -227,7 +231,7 @@ export const SearchBar = memo(function SearchBar({
           }`}
           aria-pressed={mode === 'name'}
         >
-          Name
+          {t('search.modeName')}
         </button>
         <button
           type="button"
@@ -240,7 +244,7 @@ export const SearchBar = memo(function SearchBar({
           }`}
           aria-pressed={mode === 'content'}
         >
-          Content
+          {t('search.modeContent')}
         </button>
       </div>
 
