@@ -220,6 +220,9 @@ a {
   color: var(--fg);
   overflow-x: auto;
   white-space: nowrap;
+  /* Without this the nowrap text sets an unshrinkable min-content floor, so a
+     long command widens the whole page on a phone instead of scrolling here. */
+  min-width: 0;
 }
 
 .install-cmd::before {
@@ -332,7 +335,6 @@ a {
 }
 
 .section > h2 + .cards,
-.section > h2 + .steps,
 .section > h2 + .table-scroll {
   margin-top: 2rem;
 }
@@ -371,6 +373,58 @@ a {
   font-size: 0.9rem;
 }
 
+/* ---------- quick start tracks ---------- */
+
+.tracks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.track {
+  padding: 1.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.track-tag {
+  margin: 0 0 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.track h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.track-lede {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 0.94rem;
+}
+
+.track-note {
+  margin: 0.9rem 0 0;
+  color: var(--fg-muted);
+  font-size: 0.88rem;
+}
+
+/* Inline code only: .install-cmd sits inside a box that already frames it. */
+.track code:not(.install-cmd),
+.note code {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.1rem 0.35rem;
+}
+
 /* ---------- steps ---------- */
 
 .steps {
@@ -405,7 +459,26 @@ a {
   font-weight: 700;
 }
 
-.steps h3 {
+/* One column, badge beside the content rather than above it. Must stay after
+   the `.steps > li` rules above: same specificity, so order decides. */
+.steps-stack {
+  /* minmax(0, …) rather than 1fr: a grid item's auto minimum would otherwise
+     let a wide command box stretch the column past the card. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.1rem;
+  margin-top: 1.25rem;
+}
+
+.steps-stack > li {
+  padding-top: 0;
+  padding-left: 2.75rem;
+}
+
+.steps-stack > li::before {
+  top: 0.1rem;
+}
+
+.steps h4 {
   margin: 0 0 0.4rem;
   font-size: 1.02rem;
   font-weight: 700;
@@ -417,11 +490,31 @@ a {
   font-size: 0.92rem;
 }
 
-.steps code {
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 0.1rem 0.35rem;
+/* A command box the card can't show in full is worse than no button at all. */
+.track .install {
+  max-width: none;
+}
+
+/* On a phone the button and the command cannot share a line without the command
+   scrolling out of sight — which defeats a section that exists to be read and
+   copied. Give the command the width and let the button sit under it. */
+@media (max-width: 30rem) {
+  .track {
+    padding: 1.25rem;
+  }
+
+  .steps-stack > li {
+    padding-left: 2.25rem;
+  }
+
+  .install {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .install-cmd {
+    flex: 1 0 100%;
+  }
 }
 
 /* ---------- gallery ---------- */
