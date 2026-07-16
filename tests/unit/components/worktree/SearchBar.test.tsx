@@ -9,6 +9,15 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { SearchBar } from '@/components/worktree/SearchBar';
 
+// Issue #1275: this file asserts rendered wording (aria-labels, the default
+// placeholder), so it must resolve keys through the real dictionary. The global
+// mock in tests/setup.ts echoes `worktree.<key>` back and would keep these
+// assertions green even if the key did not exist.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 describe('SearchBar', () => {
   const defaultProps = {
     query: '',

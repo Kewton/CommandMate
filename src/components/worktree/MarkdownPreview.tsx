@@ -21,6 +21,7 @@
 'use client';
 
 import React, { memo, useMemo, useCallback, useRef, useState, useEffect } from 'react';
+import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -93,6 +94,7 @@ function isMermaidPreChild(children: React.ReactNode): boolean {
  * The file API returns JSON with a Base64 data URI in the `content` field.
  */
 function WorktreeImage({ apiUrl, alt, width, height }: { apiUrl: string; alt: string; width?: string; height?: string }) {
+  const t = useTranslations('worktree');
   const [dataUri, setDataUri] = useState<string | null>(null);
 
   useEffect(() => {
@@ -108,7 +110,7 @@ function WorktreeImage({ apiUrl, alt, width, height }: { apiUrl: string; alt: st
     return () => { cancelled = true; };
   }, [apiUrl]);
 
-  if (!dataUri) return <span style={{ color: '#999' }}>[loading image...]</span>;
+  if (!dataUri) return <span style={{ color: '#999' }}>{t('markdownPreview.loadingImage')}</span>;
   // eslint-disable-next-line @next/next/no-img-element
   return <img src={dataUri} alt={alt} width={width} height={height} style={{ maxWidth: width || '100%' }} />;
 }
@@ -265,6 +267,7 @@ export const MobileTabBar = memo(function MobileTabBar({
   mobileTab,
   onTabChange,
 }: MobileTabBarProps) {
+  const t = useTranslations('worktree');
   return (
     <div className="flex border-b border-border">
       <button
@@ -277,7 +280,7 @@ export const MobileTabBar = memo(function MobileTabBar({
         }`}
       >
         <FileText className="h-4 w-4 inline-block mr-1" />
-        Editor
+        {t('markdownPreview.editor')}
       </button>
       <button
         data-testid="mobile-tab-preview"
@@ -289,7 +292,7 @@ export const MobileTabBar = memo(function MobileTabBar({
         }`}
       >
         <Eye className="h-4 w-4 inline-block mr-1" />
-        Preview
+        {t('markdownPreview.preview')}
       </button>
     </div>
   );
@@ -305,12 +308,13 @@ export const MobileTabBar = memo(function MobileTabBar({
 export const MaximizeHint = memo(function MaximizeHint({
   isMobile,
 }: MaximizeHintProps) {
+  const t = useTranslations('worktree');
   return (
     <div
       data-testid="maximize-hint"
       className="flex items-center justify-center px-4 py-1 bg-muted text-muted-foreground text-xs"
     >
-      Press ESC to exit fullscreen {isMobile && '(or swipe down)'}
+      {t('markdownPreview.exitFullscreenHint')} {isMobile && t('markdownPreview.exitFullscreenHintSwipe')}
     </div>
   );
 });
@@ -325,13 +329,14 @@ export const MaximizeHint = memo(function MaximizeHint({
 export const LargeFileWarning = memo(function LargeFileWarning({
   onDismiss,
 }: LargeFileWarningProps) {
+  const t = useTranslations('worktree');
   return (
     <div
       data-testid="large-file-warning"
       className="flex items-center gap-2 px-4 py-2 bg-warning-subtle border-b border-warning-border text-warning-foreground text-sm"
     >
       <AlertTriangle className="h-4 w-4" />
-      Large file: Performance may be affected.
+      {t('markdownPreview.largeFileWarning')}
       <button
         onClick={onDismiss}
         className="ml-auto text-warning hover:text-warning"

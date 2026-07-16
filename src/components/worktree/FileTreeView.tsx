@@ -29,7 +29,7 @@ import { useFilePolling } from '@/hooks/useFilePolling';
 import { useFileMetadataDisplay } from '@/hooks/useFileMetadataDisplay';
 import { FILE_TREE_POLL_INTERVAL_MS } from '@/config/file-polling-config';
 import { useFileTreeExpandedState } from '@/hooks/useFileTreeExpandedState';
-import { useLocale } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { FilePlus, FolderPlus, AlertCircle, RefreshCw, RotateCcw } from 'lucide-react';
 import { Button, Skeleton } from '@/components/ui';
 
@@ -125,6 +125,7 @@ export const FileTreeView = memo(function FileTreeView({
 }: FileTreeViewProps) {
   // [Issue #162] Get locale for date formatting
   const locale = useLocale();
+  const t = useTranslations('worktree');
   // [Issue #969] Inline metadata column visibility (size / created / modified),
   // localStorage-persisted and synced across hook instances.
   const { settings: metadataDisplay, toggle: toggleMetadata } =
@@ -146,6 +147,13 @@ export const FileTreeView = memo(function FileTreeView({
   const expandedRef = useRef(expanded);
   expandedRef.current = expanded;
 
+  // [Issue #1275] `t` is a fresh closure on every render, so listing it in the
+  // dep arrays below would rebuild fetchDirectory -> reloadTreeWithExpandedDirs
+  // on every render and re-fire the reload effect in a loop. Read it via a ref
+  // to keep the "stable as long as worktreeId is unchanged" invariant intact.
+  const tRef = useRef(t);
+  tRef.current = t;
+
   // [Issue #164] Ref to track in-progress fetches and prevent duplicate requests
   const loadingPathsRef = useRef<Set<string>>(new Set());
 
@@ -165,7 +173,7 @@ export const FileTreeView = memo(function FileTreeView({
         const response = await fetch(url);
 
         if (!response.ok) {
-          throw new Error(`Failed to load directory: ${response.status}`);
+          throw new Error(tRef.current('fileTree.loadDirectoryError', { status: response.status }));
         }
 
         return await response.json();
@@ -255,7 +263,7 @@ export const FileTreeView = memo(function FileTreeView({
       }
     } catch (err) {
       if (mountedRef.current) {
-        setError(err instanceof Error ? err.message : 'Failed to load files');
+        setError(err instanceof Error ? err.message : tRef.current('fileTree.loadError'));
       }
     } finally {
       if (mountedRef.current) {
@@ -525,7 +533,7 @@ export const FileTreeView = memo(function FileTreeView({
         data-testid="file-tree-loading"
         className={`p-2 ${className}`}
         role="status"
-        aria-label="Loading files"
+        aria-label={t('fileTree.loading')}
       >
         {[0, 8, 16, 8, 0, 8].map((indent, i) => (
           <div
@@ -567,7 +575,7 @@ export const FileTreeView = memo(function FileTreeView({
         data-testid="file-tree-empty"
         className={`p-4 text-center text-muted-foreground ${className}`}
       >
-        <p className="text-sm">No files found</p>
+        <p className="text-sm">{t('fileTree.empty')}</p>
         {/* Action buttons for empty state - only show when callbacks are provided */}
         {(onNewFile || onNewDirectory) && (
           <div className="flex flex-col gap-2 mt-4">
@@ -579,7 +587,7 @@ export const FileTreeView = memo(function FileTreeView({
                 className="flex items-center justify-center gap-2 px-3 py-2 text-sm text-foreground bg-surface border border-input rounded-md hover:bg-muted transition-colors"
               >
                 <FilePlus className="w-4 h-4" aria-hidden="true" />
-                <span>New File</span>
+                <span>{t('fileTree.newFile')}</span>
               </Button>
             )}
             {onNewDirectory && (
@@ -590,7 +598,7 @@ export const FileTreeView = memo(function FileTreeView({
                 className="flex items-center justify-center gap-2 px-3 py-2 text-sm text-foreground bg-surface border border-input rounded-md hover:bg-muted transition-colors"
               >
                 <FolderPlus className="w-4 h-4" aria-hidden="true" />
-                <span>New Directory</span>
+                <span>{t('fileTree.newDirectory')}</span>
               </Button>
             )}
           </div>
@@ -607,7 +615,9 @@ export const FileTreeView = memo(function FileTreeView({
         className={`p-4 text-center text-muted-foreground ${className}`}
       >
         <p className="text-sm">
-          No {searchMode === 'content' ? 'files containing' : 'files matching'} &quot;{searchQuery}&quot;
+          {searchMode === 'content'
+            ? t('fileTree.noResultsContaining', { query: searchQuery })
+            : t('fileTree.noResultsMatching', { query: searchQuery })}
         </p>
       </div>
     );
@@ -618,7 +628,7 @@ export const FileTreeView = memo(function FileTreeView({
       ref={scrollContainerRef}
       data-testid="file-tree-view"
       role="tree"
-      aria-label="File tree"
+      aria-label={t('fileTree.label')}
       className={`overflow-auto bg-surface ${className}`}
     >
       {/* [Issue #300/#888] Toolbar: root-level create actions + manual refresh.
@@ -636,7 +646,7 @@ export const FileTreeView = memo(function FileTreeView({
             className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:bg-muted rounded transition-colors"
           >
             <FilePlus className="w-4 h-4" aria-hidden="true" />
-            <span>New File</span>
+            <span>{t('fileTree.newFile')}</span>
           </button>
         )}
         {onNewDirectory && (
@@ -647,7 +657,7 @@ export const FileTreeView = memo(function FileTreeView({
             className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:bg-muted rounded transition-colors"
           >
             <FolderPlus className="w-4 h-4" aria-hidden="true" />
-            <span>New Directory</span>
+            <span>{t('fileTree.newDirectory')}</span>
           </button>
         )}
         {/* Right-aligned group: metadata toggle + refetch indicator + manual refresh button. */}
@@ -667,7 +677,7 @@ export const FileTreeView = memo(function FileTreeView({
                 aria-hidden="true"
                 className="w-3 h-3 border-2 border-input border-t-cyan-500 rounded-full animate-spin"
               />
-              <span className="sr-only">Refreshing files</span>
+              <span className="sr-only">{t('fileTree.refreshing')}</span>
             </div>
           )}
           {/* [Issue #888] Manual refresh: re-fetch the root + all expanded
@@ -680,8 +690,8 @@ export const FileTreeView = memo(function FileTreeView({
               void reloadTreeWithExpandedDirs();
             }}
             disabled={isRefetching}
-            aria-label="Refresh file tree"
-            title="更新"
+            aria-label={t('fileTree.refreshLabel')}
+            title={t('actions.refresh')}
             className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:bg-muted rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <RefreshCw
@@ -699,8 +709,8 @@ export const FileTreeView = memo(function FileTreeView({
             data-testid="file-tree-reset-button"
             type="button"
             onClick={handleResetView}
-            aria-label="Reset file tree view"
-            title="表示をリセット"
+            aria-label={t('fileTree.resetViewLabel')}
+            title={t('actions.resetView')}
             className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:bg-muted rounded transition-colors"
           >
             <RotateCcw className="w-4 h-4" aria-hidden="true" />
@@ -726,7 +736,7 @@ export const FileTreeView = memo(function FileTreeView({
             }}
             className="px-2 py-0.5 text-xs rounded border border-danger-border hover:bg-danger-subtle transition-colors"
           >
-            再試行
+            {t('actions.retry')}
           </Button>
         </div>
       )}

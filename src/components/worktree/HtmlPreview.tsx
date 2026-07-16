@@ -58,6 +58,13 @@ document.addEventListener('click', function(e) {
 
 export type HtmlViewMode = 'source' | 'preview' | 'split';
 
+/** i18n key for each view mode label */
+const VIEW_MODE_LABEL_KEYS: Record<HtmlViewMode, string> = {
+  source: 'htmlPreview.modeSource',
+  preview: 'htmlPreview.modePreview',
+  split: 'htmlPreview.modeSplit',
+};
+
 export interface HtmlPreviewProps {
   worktreeId: string;
   filePath: string;
@@ -126,12 +133,14 @@ function HtmlIframePreview({
   sandboxLevel: SandboxLevel;
   filePath: string;
 }) {
+  const tWorktree = useTranslations('worktree');
+
   return (
     <iframe
       key={`${filePath}-${sandboxLevel}`}
       srcDoc={htmlContent}
       sandbox={SANDBOX_ATTRIBUTES[sandboxLevel]}
-      title={`HTML Preview: ${filePath}`}
+      title={tWorktree('htmlPreview.title', { path: filePath })}
       className="w-full h-full border-0 bg-white"
       data-testid="html-iframe-preview"
     />
@@ -264,7 +273,7 @@ export function HtmlPreview({
                   : 'text-muted-foreground hover:bg-muted'
               }`}
             >
-              {mode.charAt(0).toUpperCase() + mode.slice(1)}
+              {tWorktree(VIEW_MODE_LABEL_KEYS[mode])}
             </button>
           ))}
         </div>
@@ -284,7 +293,7 @@ export function HtmlPreview({
                   : 'text-muted-foreground hover:bg-muted'
               }`}
             >
-              {level.charAt(0).toUpperCase() + level.slice(1)}
+              {level === 'safe' ? tWorktree('htmlPreview.sandboxSafe') : tWorktree('htmlPreview.sandboxInteractive')}
             </button>
           ))}
         </div>

@@ -11,6 +11,7 @@
 
 import React from 'react';
 import dynamic from 'next/dynamic';
+import { useTranslations } from 'next-intl';
 import { Spinner } from '@/components/ui/Spinner';
 
 /**
@@ -24,12 +25,15 @@ const MermaidDiagram = dynamic(
     })),
   {
     ssr: false,
-    loading: () => (
-      <div className="mermaid-loading flex items-center gap-2 text-muted-foreground p-4">
-        <Spinner size="sm" />
-        <span>Loading diagram...</span>
-      </div>
-    ),
+    loading: function MermaidDiagramLoading() {
+      const t = useTranslations('worktree');
+      return (
+        <div className="mermaid-loading flex items-center gap-2 text-muted-foreground p-4">
+          <Spinner size="sm" />
+          <span>{t('mermaid.loading')}</span>
+        </div>
+      );
+    },
   }
 );
 

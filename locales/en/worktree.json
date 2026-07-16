@@ -61,7 +61,20 @@
       "showSize": "File size",
       "showCreated": "Created date",
       "showModified": "Modified date"
-    }
+    },
+    "loading": "Loading files",
+    "empty": "No files found",
+    "newFile": "New File",
+    "newDirectory": "New Directory",
+    "noResultsMatching": "No files matching \"{query}\"",
+    "noResultsContaining": "No files containing \"{query}\"",
+    "label": "File tree",
+    "refreshing": "Refreshing files",
+    "refreshLabel": "Refresh file tree",
+    "resetViewLabel": "Reset file tree view",
+    "loadError": "Failed to load files",
+    "loadDirectoryError": "Failed to load directory: {status}",
+    "itemCount": "{count} items"
   },
   "update": {
     "available": "A new version is available",
@@ -135,10 +148,137 @@
     "reorderError": "Failed to reorder todos"
   },
   "htmlPreview": {
-    "interactiveModeConfirm": "Interactive mode executes scripts in the HTML file. Use Safe mode for untrusted HTML files."
+    "interactiveModeConfirm": "Interactive mode executes scripts in the HTML file. Use Safe mode for untrusted HTML files.",
+    "title": "HTML Preview: {path}",
+    "modeSource": "Source",
+    "modePreview": "Preview",
+    "modeSplit": "Split",
+    "sandboxSafe": "Safe",
+    "sandboxInteractive": "Interactive"
   },
   "editor": {
     "saveFailedCloseConfirm": "Save failed. Close anyway?",
-    "unsavedCloseConfirm": "You have unsaved changes. Are you sure you want to close?"
+    "unsavedCloseConfirm": "You have unsaved changes. Are you sure you want to close?",
+    "loading": "Loading...",
+    "placeholder": "Start typing...",
+    "placeholderMarkdown": "Start typing markdown...",
+    "saveSuccess": "File saved successfully",
+    "saveError": "Failed to save file",
+    "loadError": "Failed to load file",
+    "sessionExpired": "Session expired. Please re-login.",
+    "autoSaveFailed": "Auto-save failed. Switched to manual save.",
+    "unsaved": "Unsaved",
+    "auto": "Auto",
+    "splitView": "Split view",
+    "editorOnly": "Editor only",
+    "previewOnly": "Preview only",
+    "enterFullscreen": "Enter fullscreen (Ctrl+Shift+F)",
+    "exitFullscreen": "Exit fullscreen (ESC)"
+  },
+  "actions": {
+    "copyPath": "Copy path",
+    "copyContent": "Copy content",
+    "copyFilePath": "Copy file path",
+    "copyFileContent": "Copy file content",
+    "search": "Search",
+    "searchInFile": "Search in file",
+    "edit": "Edit",
+    "editFile": "Edit file",
+    "download": "Download",
+    "downloadFile": "Download file",
+    "close": "Close",
+    "save": "Save",
+    "saving": "Saving...",
+    "saved": "Saved",
+    "prev": "Prev",
+    "next": "Next",
+    "fullscreen": "Fullscreen",
+    "exitFullscreen": "Exit fullscreen",
+    "minimize": "Minimize",
+    "maximize": "Maximize",
+    "retry": "Retry",
+    "refresh": "Refresh",
+    "resetView": "Reset view"
+  },
+  "fileSearch": {
+    "placeholder": "Search...",
+    "prevMatch": "Previous match",
+    "nextMatch": "Next match",
+    "close": "Close search"
+  },
+  "fileViewer": {
+    "loading": "Loading file...",
+    "loadError": "Failed to load file",
+    "tabSource": "Source",
+    "tabPreview": "Preview",
+    "sandboxSafe": "Safe",
+    "sandboxInteractive": "Interactive",
+    "slideTitle": "{name} - Slide {number}",
+    "noSlides": "No slides found in {fileName}",
+    "slides": "Slides",
+    "editor": "Editor"
+  },
+  "fileTabs": {
+    "unsavedChanges": "Unsaved changes",
+    "closeTab": "Close {name}"
+  },
+  "markdownPreview": {
+    "loadingImage": "[loading image...]",
+    "editor": "Editor",
+    "preview": "Preview",
+    "exitFullscreenHint": "Press ESC to exit fullscreen",
+    "exitFullscreenHintSwipe": "(or swipe down)",
+    "largeFileWarning": "Large file: Performance may be affected."
+  },
+  "mermaid": {
+    "rendering": "Rendering diagram...",
+    "loading": "Loading diagram...",
+    "errorTitle": "Diagram Error",
+    "emptyCode": "Diagram code is empty",
+    "renderError": "Failed to render diagram"
+  },
+  "imageViewer": {
+    "loadError": "Failed to load image"
+  },
+  "videoViewer": {
+    "loadError": "Failed to load video",
+    "loading": "Loading video...",
+    "unsupported": "Your browser does not support the video tag."
+  },
+  "logViewer": {
+    "title": "Log Files",
+    "all": "All ({count})",
+    "toolCount": "{tool} ({count})",
+    "empty": "No log files found",
+    "emptyFiltered": "No {tool} log files found",
+    "copyTitle": "Copy sanitized log to clipboard",
+    "export": "Export",
+    "exporting": "Exporting...",
+    "copied": "Log copied to clipboard (sanitized)",
+    "exportError": "Failed to export log: {error}",
+    "searchPlaceholder": "Search in log file...",
+    "prevMatch": "Previous match (Shift+Enter)",
+    "nextMatch": "Next match (Enter)",
+    "noMatches": "No matches found for \"{query}\""
+  },
+  "pdfPreview": {
+    "title": "PDF Preview: {path}",
+    "loadError": "Could not load the PDF preview.",
+    "openInNewTab": "Open PDF in a new tab",
+    "download": "Download",
+    "downloadPdf": "Download PDF"
+  },
+  "diffViewer": {
+    "badge": "DIFF",
+    "close": "Close diff view"
+  },
+  "search": {
+    "searching": "Searching...",
+    "placeholder": "Search files...",
+    "label": "Search files",
+    "clear": "Clear search",
+    "mode": "Mode:",
+    "modeName": "Name",
+    "modeContent": "Content"
   }
 }

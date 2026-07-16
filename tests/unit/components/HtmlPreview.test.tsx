@@ -12,6 +12,15 @@ import { render, screen, act, cleanup, fireEvent, waitFor } from '@testing-libra
 import { HtmlPreview } from '@/components/worktree/HtmlPreview';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 
+// Issue #1275: this file drives the UI by rendered wording ("Interactive" mode
+// button) and asserts the iframe title, so it must resolve keys through the
+// real dictionary. The global mock in tests/setup.ts echoes `worktree.<key>`
+// back and would keep these assertions green even if the key did not exist.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 describe('HtmlPreview - postMessage link handling', () => {
   const defaultProps = {
     worktreeId: 'test-wt',

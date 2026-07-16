@@ -18,6 +18,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { Spinner } from '@/components/ui/Spinner';
 
 export interface VideoViewerProps {
@@ -42,6 +43,7 @@ export interface VideoViewerProps {
  * ```
  */
 export function VideoViewer({ src, onError }: VideoViewerProps) {
+  const t = useTranslations('worktree');
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
 
@@ -71,7 +73,7 @@ export function VideoViewer({ src, onError }: VideoViewerProps) {
             d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
           />
         </svg>
-        <p className="text-sm">Failed to load video</p>
+        <p className="text-sm">{t('videoViewer.loadError')}</p>
       </div>
     );
   }
@@ -81,7 +83,7 @@ export function VideoViewer({ src, onError }: VideoViewerProps) {
       {isLoading && (
         <div className="flex items-center justify-center py-8">
           <Spinner size="xl" variant="accent" />
-          <p className="ml-3 text-muted-foreground">Loading video...</p>
+          <p className="ml-3 text-muted-foreground">{t('videoViewer.loading')}</p>
         </div>
       )}
       {/* [KISS] src on <video> is sufficient; <source> would be redundant for a single format */}
@@ -97,7 +99,7 @@ export function VideoViewer({ src, onError }: VideoViewerProps) {
         }}
         className="rounded-lg shadow-sm"
       >
-        Your browser does not support the video tag.
+        {t('videoViewer.unsupported')}
       </video>
     </div>
   );
