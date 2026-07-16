@@ -5,11 +5,17 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { buildExcerpt, buildPushPayload } from '@/lib/push/push-sender';
+import {
+  buildExcerpt,
+  buildPushPayload,
+  resolvePushLocale,
+  type NotificationEvent,
+} from '@/lib/push/push-sender';
 import {
   shouldSendNotification,
   resetNotificationDedup,
 } from '@/lib/push/notification-dedup';
+import { DEFAULT_LOCALE, SUPPORTED_LOCALES } from '@/config/i18n-config';
 
 describe('buildExcerpt', () => {
   it('returns empty string for undefined', () => {
@@ -32,6 +38,7 @@ describe('buildPushPayload', () => {
   it('builds a minimal prompt payload with deep-link url and tag', () => {
     const payload = buildPushPayload(
       { worktreeId: 'wt-1', worktreeName: 'feature-x', kind: 'prompt', agentName: 'claude', excerpt: 'Continue?' },
+      'ja',
       1000
     );
     expect(payload).toEqual({
@@ -48,6 +55,7 @@ describe('buildPushPayload', () => {
   it('builds a completion payload and never includes full terminal text', () => {
     const payload = buildPushPayload(
       { worktreeId: 'wt-2', worktreeName: 'bugfix', kind: 'completion', excerpt: 'x'.repeat(500) },
+      'ja',
       2000
     );
     expect(payload.kind).toBe('completion');
@@ -57,12 +65,83 @@ describe('buildPushPayload', () => {
   });
 
   it('falls back to a generic body when excerpt is empty', () => {
-    expect(buildPushPayload({ worktreeId: 'w', worktreeName: 'n', kind: 'prompt' }).body).toBe(
-      '応答待ちです'
+    expect(
+      buildPushPayload({ worktreeId: 'w', worktreeName: 'n', kind: 'prompt' }, 'ja').body
+    ).toBe('応答待ちです');
+    expect(
+      buildPushPayload({ worktreeId: 'w', worktreeName: 'n', kind: 'completion' }, 'ja').body
+    ).toBe('セッションが完了しました');
+  });
+});
+
+/**
+ * Locale selection (Issue #1308).
+ *
+ * These assert real wording, not key strings: push-sender imports the
+ * dictionaries directly rather than through next-intl, so the global mock in
+ * tests/setup.ts cannot mask a missing key here — a wrong or absent entry
+ * changes `body` and fails.
+ */
+describe('buildPushPayload locale selection', () => {
+  const prompt: NotificationEvent = {
+    worktreeId: 'w',
+    worktreeName: 'n',
+    kind: 'prompt',
+    excerpt: 'Continue?',
+  };
+  const completion: NotificationEvent = { worktreeId: 'w', worktreeName: 'n', kind: 'completion' };
+
+  it('renders English bodies for an en subscription', () => {
+    expect(buildPushPayload(prompt, 'en').body).toBe('Waiting for reply: Continue?');
+    expect(buildPushPayload({ ...prompt, excerpt: undefined }, 'en').body).toBe(
+      'Waiting for your reply'
     );
-    expect(buildPushPayload({ worktreeId: 'w', worktreeName: 'n', kind: 'completion' }).body).toBe(
-      'セッションが完了しました'
-    );
+    expect(buildPushPayload({ ...completion, excerpt: 'Built' }, 'en').body).toBe('Done: Built');
+    expect(buildPushPayload(completion, 'en').body).toBe('Session complete');
+  });
+
+  it('renders Japanese bodies for a ja subscription', () => {
+    expect(buildPushPayload(prompt, 'ja').body).toBe('応答待ち: Continue?');
+    expect(buildPushPayload({ ...prompt, excerpt: undefined }, 'ja').body).toBe('応答待ちです');
+    expect(buildPushPayload({ ...completion, excerpt: 'Built' }, 'ja').body).toBe('完了: Built');
+    expect(buildPushPayload(completion, 'ja').body).toBe('セッションが完了しました');
+  });
+
+  it('never leaves the {excerpt} placeholder unsubstituted', () => {
+    for (const locale of SUPPORTED_LOCALES) {
+      expect(buildPushPayload(prompt, locale).body).not.toContain('{excerpt}');
+      expect(buildPushPayload({ ...completion, excerpt: 'x' }, locale).body).not.toContain(
+        '{excerpt}'
+      );
+    }
+  });
+
+  it('falls back to English for subscriptions predating the locale column', () => {
+    // v42 added `locale` with no backfill, so existing rows read back as NULL.
+    expect(buildPushPayload(prompt, null).body).toBe('Waiting for reply: Continue?');
+    expect(buildPushPayload(prompt, undefined).body).toBe('Waiting for reply: Continue?');
+  });
+
+  it('falls back to English for an unsupported stored locale', () => {
+    expect(buildPushPayload(prompt, 'fr').body).toBe('Waiting for reply: Continue?');
+    expect(buildPushPayload(prompt, '').body).toBe('Waiting for reply: Continue?');
+  });
+
+  it('defaults to English when no locale is passed at all', () => {
+    expect(buildPushPayload(prompt).body).toBe('Waiting for reply: Continue?');
+  });
+});
+
+describe('resolvePushLocale', () => {
+  it('passes through supported locales', () => {
+    expect(resolvePushLocale('en')).toBe('en');
+    expect(resolvePushLocale('ja')).toBe('ja');
+  });
+
+  it('collapses NULL/unknown to the default locale', () => {
+    expect(resolvePushLocale(null)).toBe(DEFAULT_LOCALE);
+    expect(resolvePushLocale(undefined)).toBe(DEFAULT_LOCALE);
+    expect(resolvePushLocale('de')).toBe(DEFAULT_LOCALE);
   });
 });
 

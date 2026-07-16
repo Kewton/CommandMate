@@ -25,5 +25,11 @@
     "disabled": "この端末の通知をオフにしました",
     "error": "通知を有効にできませんでした",
     "updated": "通知設定を更新しました"
+  },
+  "push": {
+    "promptWaitingWithExcerpt": "応答待ち: {excerpt}",
+    "promptWaiting": "応答待ちです",
+    "completionWithExcerpt": "完了: {excerpt}",
+    "completion": "セッションが完了しました"
   }
 }

@@ -178,6 +178,73 @@ describe('push notification flow', () => {
     expect(sendNotification).toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * Issue #1308. One agent event fans out to every device at once, but the
+   * devices need not share a language — so the body is resolved per
+   * subscription, not once for the whole batch.
+   */
+  describe('per-subscription locale', () => {
+    /** Bodies actually handed to web-push, keyed by endpoint. */
+    function sentByEndpoint(): Record<string, string> {
+      return Object.fromEntries(
+        sendNotification.mock.calls.map(([target, payload]) => [
+          (target as { endpoint: string }).endpoint,
+          (JSON.parse(payload as string) as { body: string }).body,
+        ])
+      );
+    }
+
+    const event = {
+      worktreeId: 'wt-1',
+      worktreeName: 'feature-x',
+      kind: 'prompt' as const,
+      excerpt: 'Continue?',
+    };
+
+    it('gives each device the body in its own language', async () => {
+      upsertPushSubscription(db, { ...sub('https://push.example/en'), locale: 'en' });
+      upsertPushSubscription(db, { ...sub('https://push.example/ja'), locale: 'ja' });
+
+      const { notifyPushSubscribers } = await import('@/lib/push');
+      await notifyPushSubscribers(event);
+
+      expect(sendNotification).toHaveBeenCalledTimes(2);
+      expect(sentByEndpoint()).toEqual({
+        'https://push.example/en': 'Waiting for reply: Continue?',
+        'https://push.example/ja': '応答待ち: Continue?',
+      });
+    });
+
+    it('sends English to a subscription that predates the locale column', async () => {
+      // Registered before v42 — reads back as NULL, must not break or go blank.
+      upsertPushSubscription(db, sub('https://push.example/legacy'));
+
+      const { notifyPushSubscribers } = await import('@/lib/push');
+      await notifyPushSubscribers(event);
+
+      expect(sentByEndpoint()).toEqual({
+        'https://push.example/legacy': 'Waiting for reply: Continue?',
+      });
+    });
+
+    it('still reaches every device when locales are mixed with legacy rows', async () => {
+      upsertPushSubscription(db, { ...sub('https://push.example/ja'), locale: 'ja' });
+      upsertPushSubscription(db, sub('https://push.example/legacy'));
+      upsertPushSubscription(db, { ...sub('https://push.example/en'), locale: 'en' });
+
+      const { notifyPushSubscribers } = await import('@/lib/push');
+      await notifyPushSubscribers(event);
+
+      // Grouping by locale must not drop or duplicate anyone.
+      expect(sendNotification).toHaveBeenCalledTimes(3);
+      expect(sentByEndpoint()).toEqual({
+        'https://push.example/ja': '応答待ち: Continue?',
+        'https://push.example/legacy': 'Waiting for reply: Continue?',
+        'https://push.example/en': 'Waiting for reply: Continue?',
+      });
+    });
+  });
+
   it('is a no-op when push is not configured', async () => {
     delete process.env.CM_VAPID_PUBLIC_KEY;
     delete process.env.CM_VAPID_PRIVATE_KEY;

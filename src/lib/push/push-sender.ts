@@ -7,6 +7,18 @@
  * VAPID secrets.
  *
  * Server-only: imports web-push (Node) and the DB. Do not import from client code.
+ *
+ * Localization (Issue #1308): bodies are built here, in the background poller,
+ * which has no request scope — so next-intl's request APIs are unavailable
+ * (`getTranslations` outside the react-server condition is a stub that throws).
+ * The locale therefore rides on the subscription row, captured at registration.
+ *
+ * The dictionaries are imported statically and interpolated by hand rather than
+ * via next-intl's `createTranslator`: this module is compiled to CommonJS for
+ * `dist/server` (what `npm start` runs) and next-intl is ESM-only, so importing
+ * it here would `require()` an ES module — fatal below Node 22.12, which our
+ * `engines: ">=22.0.0"` still admits. These four strings only ever substitute
+ * `{excerpt}`, so a dependency-free replace covers them.
  */
 
 import webpush from 'web-push';
@@ -18,12 +30,32 @@ import {
   type PushNotificationKind,
 } from '@/lib/db/push-subscriptions-db';
 import { createLogger } from '@/lib/logger';
+import { DEFAULT_LOCALE, isSupportedLocale, type SupportedLocale } from '@/config/i18n-config';
+import enNotifications from '../../../locales/en/notifications.json';
+import jaNotifications from '../../../locales/ja/notifications.json';
 import { getVapidConfig } from './vapid';
 import { shouldSendNotification } from './notification-dedup';
 
 const logger = createLogger('push/sender');
 
 const MAX_EXCERPT_LENGTH = 120;
+
+/** The notification bodies, per locale. Keyed by SupportedLocale so a new locale
+ *  fails the type check (and the dictionary guard test) instead of silently
+ *  falling back to English. */
+const PUSH_MESSAGES: Record<SupportedLocale, typeof enNotifications.push> = {
+  en: enNotifications.push,
+  ja: jaNotifications.push,
+};
+
+/**
+ * Narrow a stored subscription locale to one we can actually render.
+ * Subscriptions registered before v42 have `locale = NULL` and land on
+ * DEFAULT_LOCALE; they self-heal when the browser next re-registers.
+ */
+export function resolvePushLocale(locale: string | null | undefined): SupportedLocale {
+  return isSupportedLocale(locale) ? locale : DEFAULT_LOCALE;
+}
 
 /** The agent event that triggers a notification. */
 export interface NotificationEvent {
@@ -55,19 +87,24 @@ export function buildExcerpt(text: string | undefined, maxLength = MAX_EXCERPT_L
   return collapsed.slice(0, maxLength - 1).trimEnd() + '…';
 }
 
-/** Build the minimal notification payload for an event. */
-export function buildPushPayload(event: NotificationEvent, now: number = Date.now()): PushPayload {
+/** Build the minimal notification payload for an event, in the reader's language. */
+export function buildPushPayload(
+  event: NotificationEvent,
+  locale: string | null | undefined = DEFAULT_LOCALE,
+  now: number = Date.now()
+): PushPayload {
   const excerpt = buildExcerpt(event.excerpt);
   const agentSuffix = event.agentName ? ` (${event.agentName})` : '';
   const title = `${event.worktreeName}${agentSuffix}`;
+  const messages = PUSH_MESSAGES[resolvePushLocale(locale)];
   const body =
     event.kind === 'prompt'
       ? excerpt
-        ? `応答待ち: ${excerpt}`
-        : '応答待ちです'
+        ? messages.promptWaitingWithExcerpt.replace('{excerpt}', excerpt)
+        : messages.promptWaiting
       : excerpt
-        ? `完了: ${excerpt}`
-        : 'セッションが完了しました';
+        ? messages.completionWithExcerpt.replace('{excerpt}', excerpt)
+        : messages.completion;
 
   return {
     kind: event.kind,
@@ -120,9 +157,23 @@ export async function notifyPushSubscribers(event: NotificationEvent): Promise<v
     if (subscriptions.length === 0) return;
 
     webpush.setVapidDetails(config.subject, config.publicKey, config.privateKey);
-    const payload = JSON.stringify(buildPushPayload(event));
 
-    await Promise.all(subscriptions.map((sub) => sendToOne(sub, payload)));
+    // Devices can be registered in different languages, so the body is built per
+    // distinct locale rather than once for the whole fan-out.
+    const byLocale = new Map<SupportedLocale, PushSubscriptionRecord[]>();
+    for (const sub of subscriptions) {
+      const locale = resolvePushLocale(sub.locale);
+      const group = byLocale.get(locale);
+      if (group) group.push(sub);
+      else byLocale.set(locale, [sub]);
+    }
+
+    await Promise.all(
+      Array.from(byLocale, ([locale, subs]) => {
+        const payload = JSON.stringify(buildPushPayload(event, locale));
+        return Promise.all(subs.map((sub) => sendToOne(sub, payload)));
+      })
+    );
   } catch (err) {
     logger.warn('push-fanout-error', {
       error: err instanceof Error ? err.message : String(err),
