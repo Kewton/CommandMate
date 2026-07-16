@@ -14,7 +14,7 @@
 import React, { useEffect, useCallback, useState, memo, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { type WorktreeStatus } from '@/components/mobile/MobileHeader';
-import { DESKTOP_STATUS_CONFIG, SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
+import { DESKTOP_STATUS_CONFIG } from '@/config/status-colors';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { Tooltip } from '@/components/common/Tooltip';
 import {
@@ -49,6 +49,23 @@ import { PcDisplaySizeSelector } from '@/components/layout/PcDisplaySizeSelector
 const APP_VERSION_DISPLAY = process.env.NEXT_PUBLIC_APP_VERSION
   ? `v${process.env.NEXT_PUBLIC_APP_VERSION}`
   : '-';
+
+/**
+ * Worktree status options for the status dropdowns (Issue #1277: `labelKey` is
+ * resolved against the `worktree` namespace at the call site, so the options
+ * list stays a single source of truth for both the desktop header dropdown and
+ * the WorktreeInfoFields dropdown without pinning either to English).
+ */
+const WORKTREE_STATUS_OPTIONS: Array<{
+  value: 'ready' | 'in_progress' | 'in_review' | 'done' | null;
+  labelKey: string;
+}> = [
+  { value: null, labelKey: 'worktreeStatus.notSet' },
+  { value: 'ready', labelKey: 'worktreeStatus.ready' },
+  { value: 'in_progress', labelKey: 'worktreeStatus.inProgress' },
+  { value: 'in_review', labelKey: 'worktreeStatus.inReview' },
+  { value: 'done', labelKey: 'worktreeStatus.done' },
+];
 
 // ============================================================================
 // Helper Functions
@@ -202,6 +219,8 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
   onWorktreeUpdate,
 }: WorktreeInfoFieldsProps) {
   const { isEditing, text, setText, isSaving, handleSave, handleCancel, startEditing } = descriptionEditor;
+  const tWorktree = useTranslations('worktree');
+  const tCommon = useTranslations('common');
 
   const [pathCopied, setPathCopied] = useState(false);
   const [repoPathCopied, setRepoPathCopied] = useState(false);
@@ -241,21 +260,21 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
     <>
       {/* Worktree Name */}
       <div className={cardClassName}>
-        <h2 className="text-sm font-medium text-muted-foreground mb-1">Worktree</h2>
+        <h2 className="text-sm font-medium text-muted-foreground mb-1">{tWorktree('detail.worktree')}</h2>
         <p className="text-lg font-semibold text-foreground">{worktree.name}</p>
       </div>
 
       {/* Repository Info */}
       <div className={cardClassName}>
         <div className="flex items-center gap-1.5 mb-1">
-          <h2 className="text-sm font-medium text-muted-foreground">Repository</h2>
+          <h2 className="text-sm font-medium text-muted-foreground">{tWorktree('detail.repository')}</h2>
           <Button
             variant="ghost"
             type="button"
             onClick={handleCopyRepoPath}
             className="flex-shrink-0 p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-            aria-label="Copy repository path"
-            title={repoPathCopied ? 'Copied!' : 'Copy repository path'}
+            aria-label={tWorktree('detail.copyRepositoryPath')}
+            title={repoPathCopied ? tWorktree('detail.copied') : tWorktree('detail.copyRepositoryPath')}
           >
             {repoPathCopied ? (
               <Check className="w-3.5 h-3.5 text-success" />
@@ -271,14 +290,14 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
       {/* Path */}
       <div className={cardClassName}>
         <div className="flex items-center gap-1.5 mb-1">
-          <h2 className="text-sm font-medium text-muted-foreground">Path</h2>
+          <h2 className="text-sm font-medium text-muted-foreground">{tWorktree('detail.path')}</h2>
           <Button
             variant="ghost"
             type="button"
             onClick={handleCopyPath}
             className="flex-shrink-0 p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-            aria-label="Copy worktree path"
-            title={pathCopied ? 'Copied!' : 'Copy path'}
+            aria-label={tWorktree('detail.copyWorktreePath')}
+            title={pathCopied ? tWorktree('detail.copied') : tWorktree('detail.copyPath')}
           >
             {pathCopied ? (
               <Check className="w-3.5 h-3.5 text-success" />
@@ -292,7 +311,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
 
       {/* Status - dropdown for mobile */}
       <div className={cardClassName}>
-        <h2 className="text-sm font-medium text-muted-foreground mb-1">Status</h2>
+        <h2 className="text-sm font-medium text-muted-foreground mb-1">{tWorktree('detail.status')}</h2>
         <select
           value={worktree.status ?? ''}
           onChange={async (e) => {
@@ -314,20 +333,20 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
           }}
           className="text-sm px-3 py-1.5 rounded-lg border border-input bg-surface text-foreground focus:ring-2 focus:ring-ring focus:border-transparent w-full"
           data-testid="mobile-status-dropdown"
-          aria-label="Worktree status"
+          aria-label={tWorktree('detail.worktreeStatusLabel')}
         >
-          <option value="">Not set</option>
-          <option value="ready">Ready</option>
-          <option value="in_progress">In Progress</option>
-          <option value="in_review">In Review</option>
-          <option value="done">Done</option>
+          {WORKTREE_STATUS_OPTIONS.map((opt) => (
+            <option key={opt.labelKey} value={opt.value ?? ''}>
+              {tWorktree(opt.labelKey)}
+            </option>
+          ))}
         </select>
       </div>
 
       {/* Description - Editable */}
       <div className={cardClassName}>
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-medium text-muted-foreground">Description</h2>
+          <h2 className="text-sm font-medium text-muted-foreground">{tWorktree('detail.description')}</h2>
           {!isEditing && (
             /* Issue #1061: borderless text-link — Button base padding/hover-lift would distort the inline link — 残置 */
             <button
@@ -335,7 +354,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
               onClick={startEditing}
               className="text-sm text-accent-600 hover:text-accent-800 dark:text-accent-400 dark:hover:text-accent-300"
             >
-              Edit
+              {tWorktree('actions.edit')}
             </button>
           )}
         </div>
@@ -344,7 +363,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder="Add notes about this branch..."
+              placeholder={tWorktree('detail.addNotesPlaceholder')}
               className="w-full min-h-[150px] p-3 border border-input dark:bg-surface dark:text-foreground rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
               autoFocus
             />
@@ -356,7 +375,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
                 disabled={isSaving}
                 className="px-4 py-2 bg-accent-600 text-white rounded-lg hover:bg-accent-700 disabled:opacity-50 text-sm font-medium"
               >
-                {isSaving ? 'Saving...' : 'Save'}
+                {isSaving ? tWorktree('actions.saving') : tWorktree('actions.save')}
               </Button>
               <Button
                 variant="ghost"
@@ -365,7 +384,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
                 disabled={isSaving}
                 className="px-4 py-2 bg-muted text-foreground rounded-lg hover:bg-border disabled:opacity-50 text-sm font-medium"
               >
-                Cancel
+                {tCommon('cancel')}
               </Button>
             </div>
           </div>
@@ -374,7 +393,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
             {worktree.description ? (
               <p className="text-sm text-foreground whitespace-pre-wrap">{worktree.description}</p>
             ) : (
-              <p className="text-sm text-muted-foreground italic">No description added yet</p>
+              <p className="text-sm text-muted-foreground italic">{tWorktree('detail.noDescription')}</p>
             )}
           </div>
         )}
@@ -383,7 +402,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
       {/* Link */}
       {worktree.link && (
         <div className={cardClassName}>
-          <h2 className="text-sm font-medium text-muted-foreground mb-1">Link</h2>
+          <h2 className="text-sm font-medium text-muted-foreground mb-1">{tWorktree('detail.link')}</h2>
           <a
             href={worktree.link}
             target="_blank"
@@ -398,7 +417,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
       {/* Last Updated */}
       {worktree.updatedAt && (
         <div className={cardClassName}>
-          <h2 className="text-sm font-medium text-muted-foreground mb-1">Last Updated</h2>
+          <h2 className="text-sm font-medium text-muted-foreground mb-1">{tWorktree('detail.lastUpdated')}</h2>
           <p className="text-sm text-foreground">
             {new Date(worktree.updatedAt).toLocaleString()}
           </p>
@@ -414,14 +433,14 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
       {/* Logs */}
       <div className={cardClassName}>
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-medium text-muted-foreground">Logs</h2>
+          <h2 className="text-sm font-medium text-muted-foreground">{tWorktree('detail.logs')}</h2>
           {/* Issue #1061: borderless text-link — Button base padding/hover-lift would distort the inline link — 残置 */}
           <button
             type="button"
             onClick={onToggleLogs}
             className="text-sm text-accent-600 hover:text-accent-800"
           >
-            {showLogs ? 'Hide' : 'Show'}
+            {showLogs ? tWorktree('detail.hide') : tWorktree('detail.show')}
           </button>
         </div>
         {showLogs && <LogViewer worktreeId={worktreeId} />}
@@ -495,15 +514,6 @@ interface DesktopHeaderProps {
   onKillSession?: () => void;
 }
 
-/** Worktree status options for dropdown */
-const WORKTREE_STATUS_OPTIONS: Array<{ value: 'ready' | 'in_progress' | 'in_review' | 'done' | null; label: string }> = [
-  { value: null, label: 'Not set' },
-  { value: 'ready', label: 'Ready' },
-  { value: 'in_progress', label: 'In Progress' },
-  { value: 'in_review', label: 'In Review' },
-  { value: 'done', label: 'Done' },
-];
-
 /** Status indicator configuration is imported from @/config/status-colors (SF1) */
 
 /**
@@ -535,6 +545,11 @@ export const DesktopHeader = memo(function DesktopHeader({
   onKillSession,
 }: DesktopHeaderProps) {
   const tWorktree = useTranslations('worktree');
+  // Issue #1277: agent-instance status labels resolve through the generic
+  // `common.status.*` keys (defined by #1273) rather than the hardcoded English
+  // `.label` on SIDEBAR_STATUS_CONFIG, so the wording has a single source of
+  // truth. The config keeps owning the colour/type mapping.
+  const tCommon = useTranslations('common');
   const statusConfig = DESKTOP_STATUS_CONFIG[status];
   // Issue #111: DRY - Use shared truncateString utility
   const DESKTOP_BRANCH_MAX_LENGTH = 30;
@@ -592,7 +607,8 @@ export const DesktopHeader = memo(function DesktopHeader({
           type="button"
           onClick={onBackClick}
           className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
-          aria-label="Go back to worktree list"
+          aria-label={tWorktree('detail.goBack')}
+          data-testid="worktree-back-button"
         >
           <svg
             className="w-5 h-5"
@@ -608,7 +624,7 @@ export const DesktopHeader = memo(function DesktopHeader({
               d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1h-2z"
             />
           </svg>
-          <span className="text-sm font-medium">Home</span>
+          <span className="text-sm font-medium">{tWorktree('detail.home')}</span>
         </button>
         <div className="w-px h-6 bg-border" aria-hidden="true" />
         {/* Worktree-level status (Issue #1078: unified StatusDot visual language) */}
@@ -638,7 +654,7 @@ export const DesktopHeader = memo(function DesktopHeader({
                   {truncateString(gitStatus.currentBranch, DESKTOP_BRANCH_MAX_LENGTH)}
                 </span>
                 {gitStatus.isDirty && (
-                  <span className="text-warning" title="Uncommitted changes">*</span>
+                  <span className="text-warning" title={tWorktree('git.uncommittedChanges')}>*</span>
                 )}
               </>
             )}
@@ -697,7 +713,10 @@ export const DesktopHeader = memo(function DesktopHeader({
                 if (c.slot === 'overflow') return null;
                 const inst = c.item;
                 const label = getInstanceLabel(inst);
-                const fullLabel = `${label}: ${SIDEBAR_STATUS_CONFIG[c.status].label}`;
+                const fullLabel = tWorktree('detail.statusPill', {
+                  label,
+                  status: tCommon(`status.${c.status}`),
+                });
                 const isActive = c.isActive;
                 // Issue #786: drag source. click and drag are mutually exclusive
                 // in HTML; a plain click (no drag) still fires onClick exactly
@@ -776,7 +795,10 @@ export const DesktopHeader = memo(function DesktopHeader({
                   <DropdownMenuContent align="end">
                     {overflow.map((c) => {
                       const inst = c.item;
-                      const fullLabel = `${getInstanceLabel(inst)}: ${SIDEBAR_STATUS_CONFIG[c.status].label}`;
+                      const fullLabel = tWorktree('detail.statusPill', {
+                        label: getInstanceLabel(inst),
+                        status: tCommon(`status.${c.status}`),
+                      });
                       return (
                         <DropdownMenuItem
                           key={inst.id}
@@ -806,11 +828,11 @@ export const DesktopHeader = memo(function DesktopHeader({
             type="button"
             onClick={onKillSession}
             className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium rounded-lg text-danger-foreground hover:bg-danger-subtle transition-colors flex-shrink-0"
-            aria-label="End session"
+            aria-label={tWorktree('terminal.endSession')}
             data-testid="desktop-kill-session"
           >
             <span aria-hidden="true">&#x2715;</span>
-            End
+            {tCommon('end')}
           </Button>
         )}
         {/* Worktree status dropdown */}
@@ -824,11 +846,11 @@ export const DesktopHeader = memo(function DesktopHeader({
             onClick={(e) => e.stopPropagation()}
             className="text-xs px-2 py-1.5 rounded-lg border border-input bg-surface text-foreground focus:ring-2 focus:ring-ring focus:border-transparent cursor-pointer"
             data-testid="desktop-status-dropdown"
-            aria-label="Worktree status"
+            aria-label={tWorktree('detail.worktreeStatusLabel')}
           >
             {WORKTREE_STATUS_OPTIONS.map((opt) => (
-              <option key={opt.label} value={opt.value ?? ''}>
-                {opt.label}
+              <option key={opt.labelKey} value={opt.value ?? ''}>
+                {tWorktree(opt.labelKey)}
               </option>
             ))}
           </select>
@@ -843,7 +865,7 @@ export const DesktopHeader = memo(function DesktopHeader({
         type="button"
         onClick={onInfoClick}
         className="relative flex items-center gap-1.5 px-3 py-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
-        aria-label="View worktree information"
+        aria-label={tWorktree('detail.viewInfo')}
       >
         <svg
           className="w-5 h-5"
@@ -859,12 +881,12 @@ export const DesktopHeader = memo(function DesktopHeader({
             d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
           />
         </svg>
-        <span className="text-sm font-medium">Info</span>
+        <span className="text-sm font-medium">{tWorktree('detail.info')}</span>
         {hasUpdate && (
           <NotificationDot
             data-testid="info-update-indicator"
             className="absolute top-0 right-0"
-            aria-label="Update available"
+            aria-label={tWorktree('tabs.updateAvailable')}
           />
         )}
       </Button>
@@ -894,6 +916,7 @@ export const InfoModal = memo(function InfoModal({
   onWorktreeUpdate,
 }: InfoModalProps) {
   const [showLogs, setShowLogs] = useState(false);
+  const tWorktree = useTranslations('worktree');
 
   // Track previous isOpen state to detect modal opening
   const prevIsOpenRef = useRef(isOpen);
@@ -912,8 +935,10 @@ export const InfoModal = memo(function InfoModal({
   if (!worktree) return null;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Worktree Information" size="md">
-      <div className="space-y-4 max-h-[70vh] overflow-y-auto">
+    <Modal isOpen={isOpen} onClose={onClose} title={tWorktree('detail.infoModalTitle')} size="md">
+      {/* Issue #1277: stable hook for the E2E spec — the modal heading text is
+          now localized, so tests must not select it by its English wording. */}
+      <div className="space-y-4 max-h-[70vh] overflow-y-auto" data-testid="worktree-info-modal">
         <WorktreeInfoFields
           worktreeId={worktreeId}
           worktree={worktree}
@@ -930,6 +955,7 @@ export const InfoModal = memo(function InfoModal({
 
 /** Loading indicator with spinner and text */
 export const LoadingIndicator = memo(function LoadingIndicator() {
+  const tWorktree = useTranslations('worktree');
   return (
     <div
       className="flex items-center justify-center h-full min-h-[200px]"
@@ -938,7 +964,7 @@ export const LoadingIndicator = memo(function LoadingIndicator() {
     >
       <div className="flex flex-col items-center gap-3">
         <Spinner size="xl" variant="accent" />
-        <p className="text-muted-foreground">Loading worktree...</p>
+        <p className="text-muted-foreground">{tWorktree('detail.loading')}</p>
       </div>
     </div>
   );
@@ -955,6 +981,8 @@ export const ErrorDisplay = memo(function ErrorDisplay({
   message,
   onRetry,
 }: ErrorDisplayProps) {
+  const tWorktree = useTranslations('worktree');
+  const tCommon = useTranslations('common');
   return (
     <div
       className="flex items-center justify-center h-full min-h-[200px]"
@@ -976,7 +1004,7 @@ export const ErrorDisplay = memo(function ErrorDisplay({
             d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
           />
         </svg>
-        <p className="text-danger-foreground font-medium">Error loading worktree</p>
+        <p className="text-danger-foreground font-medium">{tWorktree('detail.errorLoading')}</p>
         <p className="text-danger-foreground/80 text-sm mt-2">{message}</p>
         {onRetry && (
           <Button
@@ -985,7 +1013,7 @@ export const ErrorDisplay = memo(function ErrorDisplay({
             onClick={onRetry}
             className="mt-4 px-4 py-2 bg-danger-foreground text-danger-subtle rounded-lg hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-danger focus:ring-offset-2 ring-offset-background"
           >
-            Retry
+            {tCommon('retry')}
           </Button>
         )}
       </div>

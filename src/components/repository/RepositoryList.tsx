@@ -306,7 +306,7 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
           className="overflow-x-auto"
           data-testid="repository-list-loading"
           role="status"
-          aria-label="Loading repositories"
+          aria-label={t('repositories.loading')}
         >
           <table className="min-w-full text-sm">
             <RepositoryTableHead />

@@ -9,11 +9,15 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import React from 'react';
 
-// Mock next-intl
-vi.mock('next-intl', () => ({
-  useTranslations: () => (key: string) => key,
-  useLocale: () => 'en',
-}));
+// Issue #1277: WorktreeCard's wording (Main / Description / Link / status
+// badge / "Updated …") is dictionary-driven, so resolve keys through the REAL
+// locales/en/*.json. The previous local echo mock returned the key itself, so a
+// nonexistent key would have gone unnoticed — and it also accepted the
+// un-namespaced `useTranslations()` this component no longer uses.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
 
 // Mock next/link
 vi.mock('next/link', () => ({

@@ -11,6 +11,7 @@
  */
 
 import { useCallback, useMemo, useState, type KeyboardEvent } from 'react';
+import { useTranslations } from 'next-intl';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { NavigationKey } from '@/lib/tmux/tmux';
 import { useSpecialKeys } from '@/hooks/useSpecialKeys';
@@ -35,8 +36,32 @@ export interface NavigationButtonsProps {
   showPagerKeys?: boolean;
 }
 
+/**
+ * A single navigation button.
+ *
+ * Issue #1277: `label` and `ariaLabel` carry PHYSICAL KEY notation (the key cap
+ * glyph and the key's own name \u2014 Left / Esc / PgUp / q). Those are identical in
+ * every locale and stay literals. Entries whose accessible name is real prose
+ * instead carry `ariaLabelKey`, resolved through t() at render time because t()
+ * cannot be called at module scope.
+ */
+interface NavButtonDef {
+  key: NavigationKey;
+  /** Key cap shown inside the button (glyph or key name) \u2014 never translated. */
+  label: string;
+  /** Physical key name used verbatim. Mutually exclusive with `ariaLabelKey`. */
+  ariaLabel?: string;
+  /** Translation key in the `worktree` namespace. Wins over `ariaLabel`. */
+  ariaLabelKey?: string;
+}
+
+/* eslint-disable no-restricted-syntax -- i18n(#1271): these literals are physical
+   key names / key-cap notation (Left, Esc, PgUp, q), not translatable prose; they
+   are identical in every locale. The one prose label ("Quit pager") uses
+   ariaLabelKey below and IS resolved via t() at render time. */
+
 /** Base navigation button configuration (arrow-key selection lists). */
-const NAVIGATION_BUTTONS: ReadonlyArray<{ key: NavigationKey; label: string; ariaLabel: string }> = [
+const NAVIGATION_BUTTONS: ReadonlyArray<NavButtonDef> = [
   { key: 'Left', label: '\u25C0', ariaLabel: 'Left' },
   { key: 'Up', label: '\u25B2', ariaLabel: 'Up' },
   { key: 'Down', label: '\u25BC', ariaLabel: 'Down' },
@@ -49,15 +74,20 @@ const NAVIGATION_BUTTONS: ReadonlyArray<{ key: NavigationKey; label: string; ari
  * Issue #1017: Codex pager / edit-previous mode keys, appended when showPagerKeys
  * is set. PgUp/PgDn/Home/End scroll the transcript; 'q' quits the pager.
  */
-const PAGER_BUTTONS: ReadonlyArray<{ key: NavigationKey; label: string; ariaLabel: string }> = [
+const PAGER_BUTTONS: ReadonlyArray<NavButtonDef> = [
   { key: 'PageUp', label: 'PgUp', ariaLabel: 'Page Up' },
   { key: 'PageDown', label: 'PgDn', ariaLabel: 'Page Down' },
   { key: 'Home', label: 'Home', ariaLabel: 'Home' },
   { key: 'End', label: 'End', ariaLabel: 'End' },
-  { key: 'q', label: 'q', ariaLabel: 'Quit pager' },
+  // 'q' is a key cap, but its accessible name describes an action, so it is
+  // translated (Issue #1277).
+  { key: 'q', label: 'q', ariaLabelKey: 'navigation.quitPager' },
 ];
 
+/* eslint-enable no-restricted-syntax */
+
 export function NavigationButtons({ worktreeId, cliToolId, instanceId, onKeysSent, showPagerKeys = false }: NavigationButtonsProps) {
+  const t = useTranslations('worktree');
   const [activeKey, setActiveKey] = useState<string | null>(null);
 
   const send = useSpecialKeys(worktreeId, cliToolId, instanceId, onKeysSent);
@@ -97,10 +127,10 @@ export function NavigationButtons({ worktreeId, cliToolId, instanceId, onKeysSen
       className="flex flex-wrap items-center gap-1.5 py-1.5 bg-muted rounded-lg"
       onKeyDown={handleKeyDown}
       role="toolbar"
-      aria-label="TUI Navigation"
+      aria-label={t('navigation.toolbarLabel')}
     >
-      <span className="text-xs text-muted-foreground mx-2">Nav</span>
-      {buttons.map(({ key, label, ariaLabel }) => (
+      <span className="text-xs text-muted-foreground mx-2">{t('navigation.caption')}</span>
+      {buttons.map(({ key, label, ariaLabel, ariaLabelKey }) => (
         <button
           key={key}
           type="button"
@@ -112,7 +142,7 @@ export function NavigationButtons({ worktreeId, cliToolId, instanceId, onKeysSen
               ? 'bg-accent-500 text-white border-accent-500 scale-95'
               : 'bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted'
             }`}
-          aria-label={ariaLabel}
+          aria-label={ariaLabelKey ? t(ariaLabelKey) : ariaLabel}
           onClick={() => sendKeys([key])}
         >
           {label}

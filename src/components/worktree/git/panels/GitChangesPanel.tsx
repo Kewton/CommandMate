@@ -9,6 +9,7 @@
 'use client';
 
 import { memo, useCallback, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import type { ChangedFile, GitStagedResponse } from '@/types/git';
 import {
   STATUS_TEXT_COLOR,
@@ -62,6 +63,7 @@ const ChangedFileList = memo(function ChangedFileList({
   onToggleStage,
   onPreview,
 }: ChangedFileListProps) {
+  const t = useTranslations('worktree');
   const [open, setOpen] = useState(defaultOpen);
 
   // Issue #816 (C): inline preview state. Only one row is previewed at a time.
@@ -87,12 +89,12 @@ const ChangedFileList = memo(function ChangedFileList({
         const text = await onPreview(filePath, mode);
         setPreviewText(text ?? '');
       } catch {
-        setPreviewError('Failed to load preview');
+        setPreviewError(t('git.changes.previewFailed'));
       } finally {
         setPreviewLoading(false);
       }
     },
-    [previewPath, onPreview, mode]
+    [previewPath, onPreview, mode, t]
   );
 
   return (
@@ -103,10 +105,10 @@ const ChangedFileList = memo(function ChangedFileList({
         className="w-full flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
       >
         <span className="w-4 text-center">{open ? '▼' : '▶'}</span>
-        {title} ({files.length})
+        {t('git.changes.listHeader', { title, count: files.length })}
       </button>
       {open && files.length === 0 && (
-        <div className="px-3 py-1.5 text-xs text-muted-foreground">None</div>
+        <div className="px-3 py-1.5 text-xs text-muted-foreground">{t('git.changes.empty')}</div>
       )}
       {open && files.length > 0 && (
         <ul className="divide-y divide-border">
@@ -125,7 +127,7 @@ const ChangedFileList = memo(function ChangedFileList({
                     type="button"
                     onClick={() => togglePreview(file.path)}
                     className="shrink-0 w-5 text-center text-xs text-muted-foreground hover:text-foreground"
-                    aria-label={`Toggle diff preview for ${file.path}`}
+                    aria-label={t('git.changes.togglePreview', { path: file.path })}
                     aria-expanded={previewOpen}
                     data-testid="git-changes-preview-toggle"
                   >
@@ -135,17 +137,17 @@ const ChangedFileList = memo(function ChangedFileList({
                     type="button"
                     onClick={() => onDiff(file.path, mode)}
                     className="shrink-0 px-1.5 py-0.5 text-xs text-accent-600 dark:text-accent-400 hover:underline"
-                    aria-label={`Show diff for ${file.path}`}
+                    aria-label={t('git.changes.showDiff', { path: file.path })}
                     data-testid="git-changes-diff-button"
                   >
-                    Diff
+                    {t('git.changes.diff')}
                   </button>
                   <button
                     type="button"
                     onClick={() => onToggleStage(file.path)}
                     disabled={busy}
                     className="shrink-0 px-1.5 py-0.5 text-xs rounded border border-input text-foreground hover:bg-muted disabled:opacity-50"
-                    aria-label={`${actionLabel} ${file.path}`}
+                    aria-label={t('git.changes.fileAction', { action: actionLabel, path: file.path })}
                     data-testid="git-changes-toggle-button"
                   >
                     {actionLabel}
@@ -159,7 +161,7 @@ const ChangedFileList = memo(function ChangedFileList({
                     {previewLoading && (
                       <div className="flex items-center gap-2 py-2" role="status">
                         <Spinner size="xs" variant="accent" />
-                        <span className="sr-only">Loading diff preview...</span>
+                        <span className="sr-only">{t('git.changes.loadingPreview')}</span>
                       </div>
                     )}
                     {previewError && (
@@ -169,7 +171,7 @@ const ChangedFileList = memo(function ChangedFileList({
                     )}
                     {!previewLoading && !previewError && previewText !== null && (
                       previewText.trim() === '' ? (
-                        <div className="py-2 text-xs text-muted-foreground">No diff available</div>
+                        <div className="py-2 text-xs text-muted-foreground">{t('git.changes.noDiff')}</div>
                       ) : (
                         <div className="overflow-x-auto">
                           <pre className="text-xs">
@@ -186,7 +188,7 @@ const ChangedFileList = memo(function ChangedFileList({
                               className="mt-1 text-xs text-accent-600 dark:text-accent-400 hover:underline"
                               data-testid="git-changes-preview-more"
                             >
-                              … truncated — open full diff
+                              {t('git.changes.truncated')}
                             </button>
                           )}
                         </div>
@@ -249,6 +251,7 @@ export const GitChangesPanel = memo(function GitChangesPanel({
   onCommitAndPush,
 }: GitChangesPanelProps) {
   const { isMobile } = useGitPaneContext();
+  const t = useTranslations('worktree');
   const stagedFiles = staged?.staged ?? [];
   const unstagedFiles = staged?.unstaged ?? [];
   const untrackedFiles = staged?.untracked ?? [];
@@ -265,12 +268,12 @@ export const GitChangesPanel = memo(function GitChangesPanel({
       data-testid="git-changes-section"
     >
       <div className="flex items-center justify-between px-3 py-2">
-        <span className="text-sm font-medium text-foreground">Changes</span>
+        <span className="text-sm font-medium text-foreground">{t('git.changes.title')}</span>
         <button
           type="button"
           onClick={onRefresh}
           className="p-1 text-muted-foreground hover:text-foreground rounded"
-          aria-label="Refresh changes"
+          aria-label={t('git.changes.refresh')}
         >
           <RefreshIcon />
         </button>
@@ -279,7 +282,7 @@ export const GitChangesPanel = memo(function GitChangesPanel({
       {loading && !staged && (
         <div className="flex items-center gap-2 px-3 pb-2" role="status">
           <Spinner size="sm" variant="accent" />
-          <span className="sr-only">Loading changes...</span>
+          <span className="sr-only">{t('git.changes.loading')}</span>
         </div>
       )}
 
@@ -296,10 +299,10 @@ export const GitChangesPanel = memo(function GitChangesPanel({
       {staged && (
         <>
           <ChangedFileList
-            title="Staged"
+            title={t('git.changes.staged')}
             testId="git-staged-list"
             files={stagedFiles}
-            actionLabel="Unstage"
+            actionLabel={t('git.changes.unstage')}
             mode="staged"
             defaultOpen={defaultOpen}
             busy={busy}
@@ -308,10 +311,10 @@ export const GitChangesPanel = memo(function GitChangesPanel({
             onToggleStage={onUnstage}
           />
           <ChangedFileList
-            title="Unstaged"
+            title={t('git.changes.unstaged')}
             testId="git-unstaged-list"
             files={unstagedFiles}
-            actionLabel="Stage"
+            actionLabel={t('git.changes.stage')}
             mode="unstaged"
             defaultOpen={defaultOpen}
             busy={busy}
@@ -320,10 +323,10 @@ export const GitChangesPanel = memo(function GitChangesPanel({
             onToggleStage={onStage}
           />
           <ChangedFileList
-            title="Untracked"
+            title={t('git.changes.untracked')}
             testId="git-untracked-list"
             files={untrackedFiles}
-            actionLabel="Stage"
+            actionLabel={t('git.changes.stage')}
             mode="untracked"
             defaultOpen={defaultOpen}
             busy={busy}
@@ -337,11 +340,11 @@ export const GitChangesPanel = memo(function GitChangesPanel({
             <textarea
               value={commitMessage}
               onChange={(e) => onCommitMessageChange(e.target.value)}
-              placeholder="Commit message"
+              placeholder={t('git.changes.commitMessage')}
               rows={isMobile ? 2 : 3}
               className="w-full resize-y rounded border border-input bg-surface dark:bg-surface-2 px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               data-testid="git-commit-message"
-              aria-label="Commit message"
+              aria-label={t('git.changes.commitMessage')}
             />
             <div className="flex items-center justify-between gap-2">
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -350,7 +353,7 @@ export const GitChangesPanel = memo(function GitChangesPanel({
                   onCheckedChange={(checked) => onAmendChange(checked === true)}
                   data-testid="git-amend-checkbox"
                 />
-                Amend
+                {t('git.changes.amend')}
               </label>
               <div className="flex items-center gap-2">
                 <button
@@ -360,7 +363,7 @@ export const GitChangesPanel = memo(function GitChangesPanel({
                   className="px-3 py-1 text-xs font-medium rounded bg-accent-600 text-white hover:bg-accent-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   data-testid="git-commit-button"
                 >
-                  {committing ? 'Committing...' : 'Commit'}
+                  {committing ? t('git.changes.committing') : t('git.changes.commit')}
                 </button>
                 {/* Issue #816 (A): one-shot commit + push. The push runs only if
                     the commit succeeds; if the push then fails, the commit is
@@ -369,11 +372,11 @@ export const GitChangesPanel = memo(function GitChangesPanel({
                   type="button"
                   onClick={onCommitAndPush}
                   disabled={!canCommit || busy}
-                  title="Commit, then push. If the push fails the commit is already saved — just retry Push."
+                  title={t('git.changes.commitAndPushTooltip')}
                   className="px-3 py-1 text-xs font-medium rounded border border-accent-600 text-accent-700 dark:text-accent-300 hover:bg-accent-50 dark:hover:bg-accent-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
                   data-testid="git-commit-push-button"
                 >
-                  Commit + Push
+                  {t('git.changes.commitAndPush')}
                 </button>
               </div>
             </div>

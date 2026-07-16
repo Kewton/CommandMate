@@ -18,10 +18,10 @@
 
 import React, { memo, useCallback, useState } from 'react';
 import dynamic from 'next/dynamic';
+import { useTranslations } from 'next-intl';
 import { MoreHorizontal } from 'lucide-react';
 import { Spinner } from '@/components/ui/Spinner';
 import { MobileHeader } from '@/components/mobile/MobileHeader';
-import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { MobileTabBar } from '@/components/mobile/MobileTabBar';
 import { MobilePromptSheet } from '@/components/mobile/MobilePromptSheet';
@@ -31,6 +31,23 @@ import { MessageInput } from '@/components/worktree/MessageInput';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { FileViewer } from '@/components/worktree/FileViewer';
 
+
+/**
+ * Loading fallback for the dynamically imported MarkdownEditor.
+ *
+ * Issue #1277: extracted into a real component so it can call `useTranslations`
+ * — next/dynamic renders `loading` as a component, and the main orchestrator's
+ * `tWorktree` (from useWorktreeDetailController) is not in scope at module level.
+ */
+function MarkdownEditorLoading() {
+  const tWorktree = useTranslations('worktree');
+  return (
+    <div className="flex items-center justify-center h-full bg-surface text-muted-foreground">
+      <Spinner size="lg" className="mr-2" />
+      <span>{tWorktree('detail.loadingEditor')}</span>
+    </div>
+  );
+}
 
 /**
  * Dynamic import of MarkdownEditor with SSR disabled.
@@ -44,12 +61,7 @@ const MarkdownEditor = dynamic(
     })),
   {
     ssr: false,
-    loading: () => (
-      <div className="flex items-center justify-center h-full bg-surface text-muted-foreground">
-        <Spinner size="lg" className="mr-2" />
-        <span>Loading editor...</span>
-      </div>
-    ),
+    loading: () => <MarkdownEditorLoading />,
   }
 );
 import {
@@ -417,7 +429,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           <Modal
             isOpen={true}
             onClose={handleEditorClose}
-            title={editorFilePath.split('/').pop() || 'Editor'}
+            title={editorFilePath.split('/').pop() || tWorktree('fileViewer.editor')}
             size="full"
             disableClose={isEditorMaximized}
           >
@@ -491,13 +503,16 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               Issue #960: status resolved per-instance優先（PC版と整合）. */}
           <nav
             className="flex gap-1 flex-1 min-w-0 overflow-x-auto scrollbar-hide"
-            aria-label="Agent Instance Selection"
+            aria-label={tWorktree('detail.agentInstanceSelection')}
           >
             {displayedInstances.map((inst) => {
               const toolStatus = deriveCliStatus(
                 worktree?.sessionStatusByInstance?.[inst.id] ?? worktree?.sessionStatusByCli?.[inst.cliTool]
               );
-              const statusLabel = SIDEBAR_STATUS_CONFIG[toolStatus].label;
+              // Issue #1277: the status wording comes from the generic
+              // `common.status.*` keys (#1273), not the hardcoded English
+              // `.label` on SIDEBAR_STATUS_CONFIG — one source of truth.
+              const statusLabel = tCommon(`status.${toolStatus}`);
               const isActive = activeInstanceId === inst.id;
               return (
                 <button
@@ -515,7 +530,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                   aria-current={isActive ? 'page' : undefined}
                 >
                   {/* Issue #1078: unified StatusDot visual language (was blue spinner) */}
-                  <StatusDot status={toolStatus} size="sm" label={`${getInstanceLabel(inst)}: ${statusLabel}`} />
+                  <StatusDot
+                    status={toolStatus}
+                    size="sm"
+                    label={tWorktree('detail.statusPill', {
+                      label: getInstanceLabel(inst),
+                      status: statusLabel,
+                    })}
+                  />
                   {getInstanceLabel(inst)}
                 </button>
               );
@@ -684,7 +706,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           <Modal
             isOpen={true}
             onClose={handleEditorClose}
-            title={editorFilePath.split('/').pop() || 'Editor'}
+            title={editorFilePath.split('/').pop() || tWorktree('fileViewer.editor')}
             size="full"
             disableClose={isEditorMaximized}
           >
@@ -707,7 +729,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           accept={UPLOADABLE_EXTENSIONS.join(',')}
           onChange={handleFileInputChange}
           className="hidden"
-          aria-label="Upload file"
+          aria-label={tWorktree('detail.uploadFile')}
         />
         {/* Kill session confirmation dialog (Mobile) — Issue #1171: same
             target-snapshot model as PC (killTarget drives open-state + title;

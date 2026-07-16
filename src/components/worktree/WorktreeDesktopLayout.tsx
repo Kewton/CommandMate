@@ -17,6 +17,7 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useMemo, memo, ReactNode } from 'react';
+import { useTranslations } from 'next-intl';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { PaneResizer } from './PaneResizer';
 
@@ -72,6 +73,7 @@ export const WorktreeDesktopLayout = memo(function WorktreeDesktopLayout({
   className = '',
 }: WorktreeDesktopLayoutProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const t = useTranslations('worktree');
 
   // Internal width state (controlled fallback when no on*Resize callback is provided).
   const [localActivityWidth, setLocalActivityWidth] = useState(activityPaneWidth);
@@ -114,7 +116,7 @@ export const WorktreeDesktopLayout = memo(function WorktreeDesktopLayout({
             <div
               id={ACTIVITY_PANE_ID}
               data-testid="activity-pane-slot"
-              aria-label="Activity pane"
+              aria-label={t('desktopLayout.activityPane')}
               style={{ width: `${effectiveActivityWidth}%` }}
               className="flex-shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out"
             >
@@ -132,7 +134,7 @@ export const WorktreeDesktopLayout = memo(function WorktreeDesktopLayout({
         <div
           id={RIGHT_PANE_ID}
           data-testid="right-pane-slot"
-          aria-label="Terminal pane"
+          aria-label={t('desktopLayout.terminalPane')}
           className="flex-grow overflow-hidden min-w-0"
         >
           <ErrorBoundary componentName="TerminalPane">{rightPane}</ErrorBoundary>

@@ -12,6 +12,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 
+// Issue #1277: this file asserts rendered wording (the "Nav" caption, the
+// toolbar aria-label, "Quit pager"), so it must resolve keys through the real
+// dictionary. The global mock in tests/setup.ts echoes `<namespace>.<key>` back
+// and would keep these assertions green even if the key did not exist.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 describe('NavigationButtons', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 

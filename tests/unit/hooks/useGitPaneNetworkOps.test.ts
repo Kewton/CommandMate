@@ -11,16 +11,17 @@
  * caller re-syncs Status/Commits/Branches (DR1-009: abort means "result
  * unknown", so re-sync the real git state).
  *
+ * Issue #1277: the hook no longer produces user-facing prose. It classifies the
+ * failure into `errorReason` and keeps `error` for the server-supplied fixed
+ * string only; the RENDERING component (GitNetworkOperationsBar) translates the
+ * reason. These tests therefore assert the tag, not the wording.
+ *
  * @vitest-environment jsdom
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useGitPaneNetworkOps } from '@/hooks/useGitPaneNetworkOps';
-import {
-  PUSH_AUTH_FAILED_GUIDANCE,
-  PUSH_PROTECTED_BRANCH_WARNING,
-} from '@/config/git-status-config';
 
 type MockFetchResponse = {
   ok: boolean;
@@ -67,6 +68,7 @@ describe('useGitPaneNetworkOps (Issue #783)', () => {
     expect(result.current.progressState).toBe('idle');
     expect(result.current.operation).toBeNull();
     expect(result.current.error).toBeNull();
+    expect(result.current.errorReason).toBeNull();
     expect(result.current.conflict).toBe(false);
     expect(result.current.conflictFiles).toEqual([]);
   });
@@ -229,9 +231,9 @@ describe('useGitPaneNetworkOps (Issue #783)', () => {
   });
 
   // --------------------------------------------------------------------------
-  // error mapping by reason
+  // error classification by reason (Issue #1277: a tag, never prose)
   // --------------------------------------------------------------------------
-  it('surfaces the auth_failed guidance when push fails with reason auth_failed', async () => {
+  it('classifies reason auth_failed as errorReason (no prose from the hook)', async () => {
     mockFetch.mockImplementation(() =>
       errJson({ error: 'Authentication failed', reason: 'auth_failed' }, 401),
     );
@@ -244,10 +246,13 @@ describe('useGitPaneNetworkOps (Issue #783)', () => {
     });
 
     expect(result.current.progressState).toBe('error');
-    expect(result.current.error).toBe(PUSH_AUTH_FAILED_GUIDANCE);
+    expect(result.current.errorReason).toBe('auth_failed');
+    // `error` carries the server's fixed string only; the guidance wording is
+    // the rendering component's job (localized via the dictionary).
+    expect(result.current.error).toBe('Authentication failed');
   });
 
-  it('surfaces the protected-branch warning when push fails with reason protected_branch', async () => {
+  it('classifies reason protected_branch as errorReason (no prose from the hook)', async () => {
     mockFetch.mockImplementation(() =>
       errJson(
         { error: 'Force push to the default branch is not allowed', reason: 'protected_branch' },
@@ -263,10 +268,11 @@ describe('useGitPaneNetworkOps (Issue #783)', () => {
     });
 
     expect(result.current.progressState).toBe('error');
-    expect(result.current.error).toBe(PUSH_PROTECTED_BRANCH_WARNING);
+    expect(result.current.errorReason).toBe('protected_branch');
+    expect(result.current.error).toBe('Force push to the default branch is not allowed');
   });
 
-  it('falls back to the server error string for other reasons', async () => {
+  it('leaves errorReason null and keeps the server error string for other reasons', async () => {
     mockFetch.mockImplementation(() =>
       errJson(
         { error: 'Push rejected (non-fast-forward); pull/rebase first', reason: 'non_fast_forward' },
@@ -282,7 +288,25 @@ describe('useGitPaneNetworkOps (Issue #783)', () => {
     });
 
     expect(result.current.progressState).toBe('error');
+    expect(result.current.errorReason).toBeNull();
     expect(result.current.error).toBe('Push rejected (non-fast-forward); pull/rebase first');
+  });
+
+  it('reports a bodyless network failure with no reason and no server string', async () => {
+    // A thrown (non-abort) fetch rejection: nothing to fall back on, so the
+    // consumer renders the generic localized `git.network.failed` message.
+    mockFetch.mockImplementation(() => Promise.reject(new Error('boom')));
+    const { result } = renderHook(() =>
+      useGitPaneNetworkOps('w-1', { onCascade: vi.fn() }),
+    );
+
+    await act(async () => {
+      await result.current.runPush({});
+    });
+
+    expect(result.current.progressState).toBe('error');
+    expect(result.current.errorReason).toBeNull();
+    expect(result.current.error).toBeNull();
   });
 
   it('still runs cascade after an error (re-sync real git state)', async () => {
@@ -358,6 +382,7 @@ describe('useGitPaneNetworkOps (Issue #783)', () => {
     });
     expect(result.current.progressState).toBe('idle');
     expect(result.current.error).toBeNull();
+    expect(result.current.errorReason).toBeNull();
     expect(result.current.conflict).toBe(false);
   });
 });

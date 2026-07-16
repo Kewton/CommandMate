@@ -35,7 +35,8 @@
     "cloneFailed": "Clone failed",
     "pathRequired": "Repository path is required",
     "urlRequired": "Clone URL is required",
-    "urlInvalid": "Invalid URL format"
+    "urlInvalid": "Invalid URL format",
+    "loading": "Loading repositories"
   },
   "cancel": "Cancel",
   "send": "Send",
@@ -109,5 +110,11 @@
   "branchItem": {
     "cliToolStatus": "CLI tool status",
     "hasUnread": "Has unread messages"
+  },
+  "connection": {
+    "reconnecting": "Reconnecting",
+    "offline": "Offline",
+    "reconnectingTooltip": "Re-establishing the live connection (running on polling)",
+    "offlineTooltip": "No live connection (running on polling)"
   }
 }

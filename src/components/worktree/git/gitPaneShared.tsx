@@ -10,6 +10,7 @@
 'use client';
 
 import { memo } from 'react';
+import { useTranslations } from 'next-intl';
 import { Sparkles } from 'lucide-react';
 import type { ChangedFile } from '@/types/git';
 
@@ -74,6 +75,7 @@ export const AskAiButton = memo(function AskAiButton({
   testId?: string;
   className?: string;
 }) {
+  const t = useTranslations('worktree');
   return (
     <button
       type="button"
@@ -81,10 +83,10 @@ export const AskAiButton = memo(function AskAiButton({
       onClick={onClick}
       className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded border border-info-border text-info-foreground hover:bg-info-subtle disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
       data-testid={testId}
-      title="現在の状況を AI チャットに下書きします（自動送信はされません）"
+      title={t('git.askAiTooltip')}
     >
       <Sparkles size={14} aria-hidden="true" />
-      Ask AI
+      {t('git.askAi')}
     </button>
   );
 });

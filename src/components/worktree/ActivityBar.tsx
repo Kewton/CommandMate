@@ -35,6 +35,7 @@
 'use client';
 
 import React, { memo, useCallback, useRef } from 'react';
+import { useTranslations } from 'next-intl';
 import { Menu } from 'lucide-react';
 import { ACTIVITIES, type ActivityId } from '@/config/activity-bar-config';
 import { Tooltip } from '@/components/common/Tooltip';
@@ -62,6 +63,7 @@ export const ActivityBar = memo(function ActivityBar({
   onToggle,
   className = '',
 }: ActivityBarProps) {
+  const t = useTranslations('worktree');
   const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   // Issue #747: the Branches-sidebar toggle is hosted at the top of the
@@ -109,12 +111,12 @@ export const ActivityBar = memo(function ActivityBar({
       {/* Issue #747: Sidebar (Branches) toggle. Rendered OUTSIDE the tablist so
           it is excluded from the roving-tabindex Arrow/Home/End navigation and
           does not change the tab count or WAI-ARIA tablist semantics. */}
-      <Tooltip content="Toggle sidebar" placement="right">
+      <Tooltip content={t('activityBar.toggleSidebar')} placement="right">
         <button
           type="button"
           data-testid="activity-bar-toggle-sidebar"
           onClick={toggleSidebar}
-          aria-label="Toggle sidebar"
+          aria-label={t('activityBar.toggleSidebar')}
           aria-expanded={isSidebarOpen}
           className="flex items-center justify-center h-12 w-12 text-muted-foreground transition-colors hover:text-surface-foreground hover:bg-muted-foreground/10 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-inset"
         >
@@ -130,14 +132,17 @@ export const ActivityBar = memo(function ActivityBar({
         id={ACTIVITY_BAR_ID}
         role="tablist"
         aria-orientation="vertical"
-        aria-label="Activity Bar"
+        aria-label={t('activityBar.label')}
         className="flex flex-col items-stretch"
       >
         {ACTIVITIES.map((activity, index) => {
           const Icon = activity.icon;
           const isActive = active === activity.id;
+          // Issue #1277: ACTIVITIES stores a translation key (t() cannot be
+          // called at the module scope where the list is defined).
+          const label = t(activity.labelKey);
           return (
-            <Tooltip key={activity.id} content={activity.label} placement="right">
+            <Tooltip key={activity.id} content={label} placement="right">
               <button
                 ref={(el) => {
                   buttonRefs.current[index] = el;
@@ -145,7 +150,7 @@ export const ActivityBar = memo(function ActivityBar({
                 type="button"
                 role="tab"
                 aria-selected={isActive}
-                aria-label={activity.label}
+                aria-label={label}
                 aria-controls={ACTIVITY_PANE_ID}
                 tabIndex={isActive || (active === null && index === 0) ? 0 : -1}
                 onClick={() => onToggle(activity.id)}

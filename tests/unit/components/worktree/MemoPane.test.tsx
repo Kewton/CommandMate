@@ -11,6 +11,15 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { MemoPane } from '@/components/worktree/MemoPane';
 import type { WorktreeMemo } from '@/types/models';
 
+// Issue #1277: this file asserts rendered wording (empty/loading/no-match copy,
+// aria-labels), so it must resolve keys through the real dictionary. The global
+// mock in tests/setup.ts echoes `<namespace>.<key>` back and would keep these
+// assertions green even if the key did not exist.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 // Mock memoApi
 const mockGetAll = vi.fn();
 const mockCreate = vi.fn();

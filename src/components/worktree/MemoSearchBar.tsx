@@ -12,6 +12,7 @@
 'use client';
 
 import React, { useRef, useEffect, useCallback } from 'react';
+import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui';
 
 export interface MemoSearchBarProps {
@@ -46,6 +47,7 @@ export function MemoSearchBar({
   onCompositionStart,
   onCompositionEnd,
 }: MemoSearchBarProps) {
+  const t = useTranslations('schedule');
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -78,7 +80,7 @@ export function MemoSearchBar({
     <div
       className="flex items-center gap-1 px-2 py-1 bg-muted border border-input rounded"
       role="search"
-      aria-label="Memo search"
+      aria-label={t('memoSearchLabel')}
     >
       <input
         ref={inputRef}
@@ -88,9 +90,9 @@ export function MemoSearchBar({
         onKeyDown={handleKeyDown}
         onCompositionStart={onCompositionStart}
         onCompositionEnd={onCompositionEnd}
-        placeholder="Search..."
+        placeholder={t('memoSearchPlaceholder')}
         className="flex-1 min-w-0 bg-transparent text-foreground text-sm outline-none placeholder-muted-foreground"
-        aria-label="Search memos"
+        aria-label={t('memoSearchInputLabel')}
         autoComplete="off"
         autoCorrect="off"
         autoCapitalize="off"
@@ -111,7 +113,7 @@ export function MemoSearchBar({
         type="button"
         onClick={onPrev}
         disabled={matchCount === 0}
-        aria-label="Previous match (prev)"
+        aria-label={t('memoSearchPrev')}
         className="text-muted-foreground hover:text-foreground dark:hover:text-white disabled:text-muted-foreground/50 min-w-[36px] min-h-[36px] flex items-center justify-center text-base"
       >
         ▲
@@ -122,7 +124,7 @@ export function MemoSearchBar({
         type="button"
         onClick={onNext}
         disabled={matchCount === 0}
-        aria-label="Next match (next)"
+        aria-label={t('memoSearchNext')}
         className="text-muted-foreground hover:text-foreground dark:hover:text-white disabled:text-muted-foreground/50 min-w-[36px] min-h-[36px] flex items-center justify-center text-base"
       >
         ▼
@@ -132,7 +134,7 @@ export function MemoSearchBar({
         variant="ghost"
         type="button"
         onClick={onClose}
-        aria-label="Close search (close)"
+        aria-label={t('memoSearchClose')}
         className="text-muted-foreground hover:text-foreground dark:hover:text-white min-w-[36px] min-h-[36px] flex items-center justify-center text-base ml-1"
       >
         ✕

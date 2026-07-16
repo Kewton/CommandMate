@@ -9,6 +9,15 @@ import { ActivityBar } from '@/components/worktree/ActivityBar';
 import { ACTIVITIES } from '@/config/activity-bar-config';
 import { TOOLTIP_DELAY_MS } from '@/components/common/Tooltip';
 
+// Issue #1277: this file asserts rendered wording (tab aria-labels / tooltips
+// resolved from ACTIVITIES[].labelKey), so it must go through the real
+// dictionary. The global mock in tests/setup.ts echoes `worktree.<key>` back and
+// would keep these assertions green even if the key did not exist.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 // Issue #747: ActivityBar now reads/controls the sidebar via useSidebarContext().
 // Mock the hook so the component can render without a SidebarProvider and so the
 // toggle behaviour (click → toggle, aria-expanded ← isOpen) can be asserted.

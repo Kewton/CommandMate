@@ -8,12 +8,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { GitPane } from '@/components/worktree/GitPane';
-import {
-  CHECKOUT_HISTORY_LOSS_WARNING,
-  CHECKOUT_RUNNING_SESSION_WARNING,
-  RESET_HARD_HISTORY_LOSS_WARNING,
-  PUSH_AUTH_FAILED_GUIDANCE,
-} from '@/config/git-status-config';
 // Issue #817: SSOT prompt builders — imported so the "Ask AI" wiring tests
 // assert the right builder/context without duplicating the ja wording here.
 import {
@@ -22,6 +16,16 @@ import {
   resetPrompt,
   revertPrompt,
 } from '@/lib/git-ai-prompt-templates';
+
+// Issue #1277: GitPane now localizes the network-op failure guidance at the
+// render site (the hook reports `errorReason`; the wording comes from the
+// dictionary). These assertions check rendered wording, so resolve keys through
+// the real dictionary — the global mock in tests/setup.ts echoes
+// `worktree.<key>` back and would stay green even for a nonexistent key.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
 
 // ----------------------------------------------------------------------------
 // URL-discriminating fetch mock (Issue #779 hard gate)
@@ -836,10 +840,12 @@ describe('GitPane', () => {
   // Issue #781: Branches section (list / checkout / create / delete)
   // --------------------------------------------------------------------------
   describe('Branches (Issue #781)', () => {
-    // S3-001 history-loss warning text (Japanese) that MUST appear in the checkout
-    // confirm dialog. Imported from the single source of truth so this assertion
-    // tracks the component verbatim (no drift between a test-local copy and the UI).
-    const HISTORY_LOSS_TEXT = CHECKOUT_HISTORY_LOSS_WARNING;
+    // S3-001 history-loss warning text that MUST appear in the checkout confirm
+    // dialog. Issue #1277: this was a hardcoded ja constant (shown to en users
+    // too); it now resolves through locales/en/worktree.json via the real-intl
+    // mock above, so this literal proves the key exists AND renders verbatim.
+    const HISTORY_LOSS_TEXT =
+      'Switching to another branch may permanently discard the chat history, memos, and schedules linked to this worktree on the next sync.';
 
     it('self-fetches /git/branches on mount', async () => {
       render(<GitPane {...defaultProps} />);
@@ -894,7 +900,7 @@ describe('GitPane', () => {
 
       await waitFor(() => {
         expect(screen.getByTestId('branch-session-warning')).toHaveTextContent(
-          CHECKOUT_RUNNING_SESSION_WARNING
+          'Switching to this branch changes the working files a running session is operating on.'
         );
       });
     });
@@ -1314,7 +1320,7 @@ describe('GitPane', () => {
       // Switch to hard mode -> warnings + confirm input appear.
       fireEvent.click(screen.getByTestId('reset-mode-hard'));
       expect(screen.getByTestId('reset-hard-history-loss-warning')).toHaveTextContent(
-        RESET_HARD_HISTORY_LOSS_WARNING
+        'A hard reset permanently discards uncommitted changes, and moving HEAD may also lose commits. This operation cannot be undone.'
       );
       expect(screen.getByTestId('reset-hard-branch-input')).toBeInTheDocument();
     });
@@ -1651,8 +1657,10 @@ describe('GitPane', () => {
       });
       fireEvent.click(screen.getByTestId('git-push-button'));
       await waitFor(() => {
+        // Issue #1277: the guidance is now localized at the GitPane render site
+        // (previously a hardcoded ja constant shown to en users too).
         expect(screen.getByTestId('git-network-operation-error')).toHaveTextContent(
-          PUSH_AUTH_FAILED_GUIDANCE
+          'Run push/pull once in the terminal to set up your credentials.'
         );
       });
     });
