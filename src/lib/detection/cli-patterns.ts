@@ -6,6 +6,7 @@
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { DetectPromptOptions } from './types';
 import { createLogger } from '@/lib/logger';
+import { stripAnsi } from './ansi';
 
 const logger = createLogger('cli-patterns');
 
@@ -77,6 +78,76 @@ export const CLAUDE_PROMPT_PATTERN = /^[>❯](\s*$|\s+\S)/m;
  * Claude separator pattern
  */
 export const CLAUDE_SEPARATOR_PATTERN = /^─{10,}$/m;
+
+/** How far above the last line the input box's closing separator may sit. */
+const CLAUDE_STATUS_BAR_MAX_ROWS = 4;
+
+/** How many rows the input box may span before the block stops looking like the footer. */
+const CLAUDE_INPUT_BOX_MAX_ROWS = 40;
+
+/**
+ * Locate the start of Claude Code's bottom-pinned footer within a captured pane.
+ *
+ * Claude Code v2 draws in the alternate screen and reserves the last rows of the
+ * pane for a footer that is never transcript content:
+ *
+ *     <hint row>            ← "◉ xhigh · /effort", "tmux detected · …", or blank
+ *     ────────────────────  ← separator
+ *     ❯ <input box>         ← one or more rows
+ *     ────────────────────  ← separator
+ *     ⏸ manual mode on · ? for shortcuts · ← for agents        focus
+ *
+ * The hint row rotates every few seconds while the conversation sits idle, so
+ * keeping the footer in an extracted response makes its content hash change on
+ * every poll tick. That defeated the content-based dedup added in #1268 and
+ * re-saved the same reply once per tick (#1289).
+ *
+ * The boundary is found structurally rather than by matching hint text: the hint
+ * strings are Claude Code's to change, and pattern-matching them is what let this
+ * regression through (`? for shortcuts` was already listed as a skip pattern, but
+ * the real status bar embeds it mid-line so the anchors never matched). The row
+ * above the opening separator is reserved by Claude Code's layout and stays blank
+ * even when a reply fills the whole pane, so it is always safe to drop.
+ *
+ * @param lines - Captured pane lines; trailing blank rows are tolerated
+ * @returns Index of the first footer row, or -1 when no footer is present
+ */
+export function findClaudeChromeStart(lines: string[]): number {
+  const isSeparator = (line: string): boolean => /^─{10,}$/.test(stripAnsi(line).trimEnd());
+
+  // Callers pass both trimmed panes and raw captures padded with blank rows.
+  let lastRow = lines.length - 1;
+  while (lastRow >= 0 && lines[lastRow].trim() === '') lastRow--;
+  if (lastRow < 0) return -1;
+
+  // The input box's closing separator sits just above the status bar.
+  let closingSeparator = -1;
+  for (let i = lastRow; i >= Math.max(0, lastRow - CLAUDE_STATUS_BAR_MAX_ROWS); i--) {
+    if (isSeparator(lines[i])) {
+      closingSeparator = i;
+      break;
+    }
+  }
+  if (closingSeparator < 0) return -1;
+
+  // Walk up over the input box to the opening separator.
+  let openingSeparator = -1;
+  for (let i = closingSeparator - 1; i >= Math.max(0, closingSeparator - CLAUDE_INPUT_BOX_MAX_ROWS); i--) {
+    if (isSeparator(lines[i])) {
+      openingSeparator = i;
+      break;
+    }
+  }
+  if (openingSeparator < 0) return -1;
+
+  // Confirm the rows between the separators really are the input box rather than
+  // a reply that happens to be fenced by two horizontal rules — truncating one of
+  // those would silently swallow the tail of a genuine response.
+  if (!/^[>❯]/.test(stripAnsi(lines[openingSeparator + 1] ?? ''))) return -1;
+
+  // Include the reserved hint row directly above the opening separator.
+  return Math.max(0, openingSeparator - 1);
+}
 
 /**
  * Claude trust dialog pattern (Issue #201)

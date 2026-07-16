@@ -8,6 +8,7 @@
 
 import {
   stripAnsi,
+  findClaudeChromeStart,
   PASTED_TEXT_PATTERN,
   OPENCODE_SKIP_PATTERNS,
   OPENCODE_RESPONSE_COMPLETE,
@@ -32,7 +33,14 @@ export function cleanClaudeResponse(response: string): string {
 
   // Find the LAST user prompt (> followed by content) and extract only the response after it
   // This ensures we only get the latest response, not the entire conversation history
-  const lines = cleanedResponse.split('\n');
+  const allLines = cleanedResponse.split('\n');
+
+  // Issue #1289: drop Claude Code's bottom-pinned footer before anything else.
+  // Its rotating hint row would otherwise change the saved content — and so its
+  // hash — on every poll tick, and the text sitting in its input box matches the
+  // same "❯ …" shape as the transcript echo searched for below.
+  const chromeStart = findClaudeChromeStart(allLines);
+  const lines = chromeStart >= 0 ? allLines.slice(0, chromeStart) : allLines;
 
   // Find the last user prompt line index
   let lastUserPromptIndex = -1;

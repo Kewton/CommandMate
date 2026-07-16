@@ -18,6 +18,7 @@ import { usesAlternateScreen, type CLIToolType } from '@/lib/cli-tools/types';
 import { parseClaudeOutput } from '@/lib/claude-output';
 import {
   getCliToolPatterns,
+  findClaudeChromeStart,
   stripAnsi,
   stripBoxDrawing,
   buildDetectPromptOptions,
@@ -156,6 +157,16 @@ export function extractResponse(
   const lines = rawLines.slice(0, trimmedLength);
   const totalLines = lines.length;
 
+  // Issue #1289: Claude Code pins a footer (rotating hint row, input box, status
+  // bar) to the bottom of the pane. It is chrome, not transcript, and its hint
+  // row rotates while the conversation is idle — so letting it reach the saved
+  // response both stores terminal furniture and re-hashes on every poll tick,
+  // defeating the content dedup from #1268. Completion detection below still
+  // reads the untouched buffer: it keys off that very footer (the input box
+  // supplies `hasPrompt`, its rules supply `hasSeparator`).
+  const chromeStart = cliToolId === 'claude' ? findClaudeChromeStart(lines) : -1;
+  const contentEnd = chromeStart >= 0 ? chromeStart : totalLines;
+
   const BUFFER_RESET_TOLERANCE = 25;
   const bufferShrank = totalLines > 0 && lastCapturedLine > BUFFER_RESET_TOLERANCE && (totalLines + BUFFER_RESET_TOLERANCE) < lastCapturedLine;
   const sessionRestarted = totalLines > 0 && lastCapturedLine > 50 && totalLines < 50;
@@ -197,7 +208,11 @@ export function extractResponse(
       userPromptPattern = /^[>❯]\s+\S/;
     }
 
-    for (let i = totalLines - 1; i >= Math.max(0, totalLines - windowSize); i--) {
+    // Issue #1289: for Claude the search stops above the footer. The text the
+    // user just typed sits in the footer's input box and matches the same "❯ …"
+    // shape as the transcript echo; anchoring on it would treat the footer as
+    // the newest turn and extract the status bar as its reply.
+    for (let i = contentEnd - 1; i >= Math.max(0, contentEnd - windowSize); i--) {
       const cleanLine = stripAnsi(lines[i]);
       if (userPromptPattern.test(cleanLine)) {
         return i;
@@ -241,7 +256,9 @@ export function extractResponse(
 
     let endIndex = totalLines;
 
-    for (let i = startIndex; i < totalLines; i++) {
+    // `contentEnd` bounds the content only; `endIndex` keeps reporting the full
+    // buffer so lineCount bookkeeping in session_states is unchanged (#1289).
+    for (let i = startIndex; i < contentEnd; i++) {
       const line = lines[i];
       const cleanLine = stripAnsi(line);
 
@@ -376,7 +393,8 @@ export function extractResponse(
     ? (recentPromptIndex >= 0 ? recentPromptIndex + 1 : Math.max(0, endIndex - 80))
     : Math.max(0, lastCapturedLine);
 
-  for (let i = startIndex; i < endIndex; i++) {
+  // Partial (still-streaming) content is bounded by the footer too (#1289).
+  for (let i = startIndex; i < Math.min(endIndex, contentEnd); i++) {
     const line = lines[i];
     const cleanLine = stripAnsi(line);
 
