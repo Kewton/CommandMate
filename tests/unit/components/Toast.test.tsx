@@ -11,6 +11,14 @@ import { Toast, ToastContainer, useToast } from '@/components/common/Toast';
 import { EXIT_ANIMATION_DURATION_MS } from '@/config/ui-feedback-config';
 import type { ToastType } from '@/types/markdown-editor';
 
+// Issue #1273: the close button's aria-label resolves through
+// `common.closeNotification`. Back it with the real dictionary so the English
+// assertion proves the key exists rather than echoing the global mock.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 // Helper component to test useToast hook
 function TestComponent() {
   const { showToast, toasts, removeToast } = useToast();

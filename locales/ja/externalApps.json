@@ -1,0 +1,54 @@
+{
+  "status": {
+    "checking": "確認中...",
+    "running": "起動中",
+    "stopped": "停止中"
+  },
+  "card": {
+    "status": "ステータス",
+    "port": "ポート",
+    "path": "パス",
+    "websocket": "WebSocket 通信",
+    "enabled": "有効",
+    "disabledNotice": "このアプリは無効になっています",
+    "deleteConfirm": "「{name}」を削除しますか？",
+    "delete": "削除",
+    "open": "開く",
+    "settings": "設定"
+  },
+  "manager": {
+    "addApp": "+ アプリを追加",
+    "loading": "アプリを読み込み中...",
+    "loadError": "外部アプリの読み込みに失敗しました",
+    "empty": "外部アプリが登録されていません。",
+    "emptyHelp": "外部アプリを追加すると、他のフロントエンドアプリへリクエストをプロキシできます。",
+    "addFirst": "最初のアプリを追加"
+  },
+  "form": {
+    "editTitle": "外部アプリを編集",
+    "addTitle": "外部アプリを追加",
+    "securityWarning": "プロキシされたアプリは CommandMate と同一オリジンで動作し、CommandMate の API にアクセスできます。信頼できるアプリのみを登録してください。",
+    "displayName": "表示名",
+    "displayNamePlaceholder": "My App",
+    "identifierName": "識別名",
+    "identifierNamePlaceholder": "my-app",
+    "identifierNameHelp": "英数字とハイフンのみ使用できます。後から変更できません。",
+    "pathPrefix": "パスプレフィックス",
+    "pathPrefixPlaceholder": "app-name",
+    "pathPrefixHelp": "このアプリにアクセスする URL パスです。後から変更できません。",
+    "portNumber": "ポート番号",
+    "portNumberPlaceholder": "5173",
+    "portNumberHelp": "接続先ポート（{min}-{max}）",
+    "appType": "アプリ種別",
+    "appTypePlaceholder": "アプリ種別を選択...",
+    "description": "説明",
+    "descriptionPlaceholder": "説明（任意）...",
+    "websocketLabel": "WebSocket 通信を有効にする",
+    "enabledLabel": "アプリを有効にする",
+    "save": "変更を保存",
+    "add": "アプリを追加",
+    "updateFailed": "アプリの更新に失敗しました",
+    "createFailed": "アプリの作成に失敗しました",
+    "genericError": "エラーが発生しました"
+  }
+}

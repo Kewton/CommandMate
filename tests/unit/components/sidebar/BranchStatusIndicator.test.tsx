@@ -11,6 +11,14 @@ import React from 'react';
 import { BranchStatusIndicator } from '@/components/sidebar/BranchStatusIndicator';
 import type { BranchStatus } from '@/types/sidebar';
 
+// Issue #1273: StatusDot's default labels resolve through `common.status.*`.
+// Back them with the real dictionary so the English assertions below prove the
+// keys exist rather than echoing the global mock's passthrough.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 describe('BranchStatusIndicator', () => {
   beforeEach(() => {
     vi.clearAllMocks();

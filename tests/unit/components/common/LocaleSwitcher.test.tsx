@@ -8,6 +8,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { LocaleSwitcher } from '@/components/common/LocaleSwitcher';
 
+// Issue #1273: the select's aria-label resolves through `common.language`.
+// Back it with the real dictionary so the English assertions prove the key
+// exists rather than echoing the global mock's passthrough.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 // Mock useLocaleSwitch hook
 const mockSwitchLocale = vi.fn();
 vi.mock('@/hooks/useLocaleSwitch', () => ({

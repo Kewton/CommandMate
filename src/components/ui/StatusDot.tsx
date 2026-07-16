@@ -18,6 +18,7 @@
  */
 
 import React from 'react';
+import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils/cn';
 
 export type StatusDotStatus =
@@ -36,13 +37,15 @@ interface StatusDotVisual {
   colorClass: string;
   /** Optional infinite animation utility. */
   animationClass?: string;
-  /** Default accessible label. */
-  label: string;
+  /** Key into the `common.status.*` dictionary for the default accessible
+   * label. A literal here would pin the label to English at module scope,
+   * where t() cannot be called (Issue #1271/#1273). */
+  labelKey: string;
 }
 
 const STATUS_DOT_CONFIG: Record<StatusDotStatus, StatusDotVisual> = {
-  idle: { colorClass: 'bg-muted-foreground', label: 'Idle' },
-  ready: { colorClass: 'bg-success', label: 'Ready' },
+  idle: { colorClass: 'bg-muted-foreground', labelKey: 'status.idle' },
+  ready: { colorClass: 'bg-success', labelKey: 'status.ready' },
   // running/generating add a static `ring` as a MOTION-INDEPENDENT
   // differentiator: the pulsing glow (animate-status-glow) sets box-shadow
   // directly and overrides the ring while animating, but when the pulse is
@@ -52,25 +55,25 @@ const STATUS_DOT_CONFIG: Record<StatusDotStatus, StatusDotVisual> = {
   running: {
     colorClass: 'bg-success text-success ring-2 ring-success/40',
     animationClass: 'animate-status-glow',
-    label: 'Running',
+    labelKey: 'status.running',
   },
   generating: {
     colorClass: 'bg-success text-success ring-2 ring-success/40',
     animationClass: 'animate-status-glow',
-    label: 'Generating',
+    labelKey: 'status.generating',
   },
   waiting: {
     colorClass: 'bg-warning',
     animationClass: 'animate-status-blink',
-    label: 'Waiting for response',
+    labelKey: 'status.waiting',
   },
-  error: { colorClass: 'bg-danger', label: 'Error' },
+  error: { colorClass: 'bg-danger', labelKey: 'status.error' },
 };
 
 /** Fallback for unrecognized state values (edge case: unknown status → gray). */
 const FALLBACK_VISUAL: StatusDotVisual = {
   colorClass: 'bg-muted-foreground',
-  label: 'Unknown',
+  labelKey: 'status.unknown',
 };
 
 const SIZE_CLASSES: Record<StatusDotSize, string> = {
@@ -105,8 +108,9 @@ export function StatusDot({
   className,
   ...rest
 }: StatusDotProps) {
+  const t = useTranslations('common');
   const visual = STATUS_DOT_CONFIG[status] ?? FALLBACK_VISUAL;
-  const accessibleLabel = label ?? visual.label;
+  const accessibleLabel = label ?? t(visual.labelKey);
 
   return (
     <span

@@ -6,9 +6,16 @@
  */
 
 import React from 'react';
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import { RouteLoading } from '@/components/common/RouteLoading';
+
+// Issue #1273: the status label resolves through `common.loadingPage`. Back it
+// with the real dictionary so the English assertion proves the key exists.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
 
 afterEach(() => cleanup());
 

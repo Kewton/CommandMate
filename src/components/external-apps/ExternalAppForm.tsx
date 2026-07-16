@@ -9,6 +9,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useTranslations } from 'next-intl';
 import { Button, Input, Modal, Switch, Textarea, inputVariants } from '@/components/ui';
 import { cn } from '@/lib/utils/cn';
 import {
@@ -70,6 +71,8 @@ export function ExternalAppForm({
   editApp,
   onSave,
 }: ExternalAppFormProps) {
+  const t = useTranslations('externalApps');
+  const tCommon = useTranslations('common');
   const isEdit = !!editApp;
 
   // Form state
@@ -156,7 +159,7 @@ export function ExternalAppForm({
 
         if (!response.ok) {
           const data = await response.json();
-          throw new Error(data.error || 'Failed to update app');
+          throw new Error(data.error || t('form.updateFailed'));
         }
       } else {
         // Create new app
@@ -178,7 +181,7 @@ export function ExternalAppForm({
 
         if (!response.ok) {
           const data = await response.json();
-          throw new Error(data.error || 'Failed to create app');
+          throw new Error(data.error || t('form.createFailed'));
         }
       }
 
@@ -186,7 +189,7 @@ export function ExternalAppForm({
       onClose();
     } catch (error) {
       setSubmitError(
-        error instanceof Error ? error.message : 'An error occurred'
+        error instanceof Error ? error.message : t('form.genericError')
       );
     } finally {
       setIsSubmitting(false);
@@ -197,14 +200,14 @@ export function ExternalAppForm({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={isEdit ? 'Edit External App' : 'Add External App'}
+      title={isEdit ? t('form.editTitle') : t('form.addTitle')}
       size="md"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* Issue #395: Security warning about same-origin proxy risks */}
         <div className="rounded-md bg-warning-subtle p-3 mb-4 border border-warning-border">
           <p className="text-sm text-warning-foreground">
-            Proxied apps run under the CommandMate origin and can access CommandMate APIs. Only register trusted applications.
+            {t('form.securityWarning')}
           </p>
         </div>
 
@@ -214,7 +217,7 @@ export function ExternalAppForm({
             htmlFor="displayName"
             className="block text-sm font-medium text-foreground mb-1"
           >
-            Display Name <span className="text-danger">*</span>
+            {t('form.displayName')} <span className="text-danger">*</span>
           </label>
           <Input
             id="displayName"
@@ -222,7 +225,7 @@ export function ExternalAppForm({
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             className={errors.displayName ? 'border-danger' : ''}
-            placeholder="My App"
+            placeholder={t('form.displayNamePlaceholder')}
             disabled={isSubmitting}
           />
           {errors.displayName && (
@@ -237,7 +240,7 @@ export function ExternalAppForm({
               htmlFor="name"
               className="block text-sm font-medium text-foreground mb-1"
             >
-              Identifier Name <span className="text-danger">*</span>
+              {t('form.identifierName')} <span className="text-danger">*</span>
             </label>
             <Input
               id="name"
@@ -245,11 +248,11 @@ export function ExternalAppForm({
               value={name}
               onChange={(e) => setName(e.target.value)}
               className={`font-mono ${errors.name ? 'border-danger' : ''}`}
-              placeholder="my-app"
+              placeholder={t('form.identifierNamePlaceholder')}
               disabled={isSubmitting}
             />
             <p className="mt-1 text-xs text-muted-foreground">
-              Alphanumeric and hyphens only. Cannot be changed later.
+              {t('form.identifierNameHelp')}
             </p>
             {errors.name && (
               <p className="mt-1 text-xs text-danger">{errors.name}</p>
@@ -264,7 +267,7 @@ export function ExternalAppForm({
               htmlFor="pathPrefix"
               className="block text-sm font-medium text-foreground mb-1"
             >
-              Path Prefix <span className="text-danger">*</span>
+              {t('form.pathPrefix')} <span className="text-danger">*</span>
             </label>
             <div className="flex items-center">
               <span className="text-sm text-muted-foreground mr-1">/proxy/</span>
@@ -274,13 +277,13 @@ export function ExternalAppForm({
                 value={pathPrefix}
                 onChange={(e) => setPathPrefix(e.target.value)}
                 className={`w-auto flex-1 font-mono ${errors.pathPrefix ? 'border-danger' : ''}`}
-                placeholder="app-name"
+                placeholder={t('form.pathPrefixPlaceholder')}
                 disabled={isSubmitting}
               />
               <span className="text-sm text-muted-foreground ml-1">/</span>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              URL path for accessing this app. Cannot be changed later.
+              {t('form.pathPrefixHelp')}
             </p>
             {errors.pathPrefix && (
               <p className="mt-1 text-xs text-danger">{errors.pathPrefix}</p>
@@ -294,7 +297,7 @@ export function ExternalAppForm({
             htmlFor="targetPort"
             className="block text-sm font-medium text-foreground mb-1"
           >
-            Port Number <span className="text-danger">*</span>
+            {t('form.portNumber')} <span className="text-danger">*</span>
           </label>
           <Input
             id="targetPort"
@@ -304,13 +307,16 @@ export function ExternalAppForm({
               setTargetPort(e.target.value ? parseInt(e.target.value, 10) : '')
             }
             className={`font-mono ${errors.targetPort ? 'border-danger' : ''}`}
-            placeholder="5173"
+            placeholder={t('form.portNumberPlaceholder')}
             min={PORT_CONSTRAINTS.MIN}
             max={PORT_CONSTRAINTS.MAX}
             disabled={isSubmitting}
           />
           <p className="mt-1 text-xs text-muted-foreground">
-            Target port ({PORT_CONSTRAINTS.MIN}-{PORT_CONSTRAINTS.MAX})
+            {t('form.portNumberHelp', {
+              min: PORT_CONSTRAINTS.MIN,
+              max: PORT_CONSTRAINTS.MAX,
+            })}
           </p>
           {errors.targetPort && (
             <p className="mt-1 text-xs text-danger">{errors.targetPort}</p>
@@ -324,7 +330,7 @@ export function ExternalAppForm({
               htmlFor="appType"
               className="block text-sm font-medium text-foreground mb-1"
             >
-              App Type <span className="text-danger">*</span>
+              {t('form.appType')} <span className="text-danger">*</span>
             </label>
             <select
               id="appType"
@@ -333,7 +339,7 @@ export function ExternalAppForm({
               className={cn(inputVariants(), errors.appType && 'border-danger')}
               disabled={isSubmitting}
             >
-              <option value="">Select app type...</option>
+              <option value="">{t('form.appTypePlaceholder')}</option>
               {appTypeOptions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -352,13 +358,13 @@ export function ExternalAppForm({
             htmlFor="description"
             className="block text-sm font-medium text-foreground mb-1"
           >
-            Description
+            {t('form.description')}
           </label>
           <Textarea
             id="description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Optional description..."
+            placeholder={t('form.descriptionPlaceholder')}
             rows={2}
             disabled={isSubmitting}
           />
@@ -376,7 +382,7 @@ export function ExternalAppForm({
             htmlFor="websocketEnabled"
             className="text-sm text-foreground"
           >
-            Enable WebSocket support
+            {t('form.websocketLabel')}
           </label>
         </div>
 
@@ -390,7 +396,7 @@ export function ExternalAppForm({
               disabled={isSubmitting}
             />
             <label htmlFor="enabled" className="text-sm text-foreground">
-              App is enabled
+              {t('form.enabledLabel')}
             </label>
           </div>
         )}
@@ -410,10 +416,10 @@ export function ExternalAppForm({
             onClick={onClose}
             disabled={isSubmitting}
           >
-            Cancel
+            {tCommon('cancel')}
           </Button>
           <Button type="submit" variant="primary" loading={isSubmitting}>
-            {isEdit ? 'Save Changes' : 'Add App'}
+            {isEdit ? t('form.save') : t('form.add')}
           </Button>
         </div>
       </form>

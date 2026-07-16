@@ -6,17 +6,19 @@
  */
 'use client';
 
+import { useTranslations } from 'next-intl';
 import { useLocaleSwitch } from '@/hooks/useLocaleSwitch';
 import { LOCALE_LABELS, SUPPORTED_LOCALES } from '@/config/i18n-config';
 
 export function LocaleSwitcher() {
   const { currentLocale, switchLocale } = useLocaleSwitch();
+  const t = useTranslations('common');
 
   return (
     <select
       value={currentLocale}
       onChange={(e) => switchLocale(e.target.value)}
-      aria-label="Language"
+      aria-label={t('language')}
       className="
         w-full px-3 py-2 rounded-md
         bg-sidebar text-sidebar-foreground
