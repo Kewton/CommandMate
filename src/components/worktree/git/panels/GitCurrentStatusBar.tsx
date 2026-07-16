@@ -11,6 +11,7 @@
 'use client';
 
 import { memo } from 'react';
+import { useTranslations } from 'next-intl';
 import type { GitStatus } from '@/types/models';
 import { RefreshIcon } from '@/components/worktree/git/gitPaneShared';
 import { useGitPaneContext } from '@/components/worktree/git/GitPaneContext';
@@ -30,6 +31,7 @@ export const GitCurrentStatusBar = memo(function GitCurrentStatusBar({
   onRefresh,
 }: GitCurrentStatusBarProps) {
   const { isMobile } = useGitPaneContext();
+  const t = useTranslations('worktree');
   return (
     <div
       className="flex flex-col gap-1.5 px-3 py-2 border-b border-border"
@@ -37,13 +39,13 @@ export const GitCurrentStatusBar = memo(function GitCurrentStatusBar({
     >
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-muted-foreground">
-          Current Status
+          {t('git.currentStatus.title')}
         </span>
         <button
           type="button"
           onClick={onRefresh}
           className="p-1 text-muted-foreground hover:text-foreground rounded"
-          aria-label="Refresh git status"
+          aria-label={t('git.currentStatus.refresh')}
         >
           <RefreshIcon />
         </button>
@@ -53,7 +55,7 @@ export const GitCurrentStatusBar = memo(function GitCurrentStatusBar({
       {statusLoading && !gitStatus && (
         <div className="flex items-center gap-2 py-1" role="status">
           <Spinner size="sm" variant="accent" />
-          <span className="sr-only">Loading git status...</span>
+          <span className="sr-only">{t('git.currentStatus.loading')}</span>
         </div>
       )}
 
@@ -86,7 +88,7 @@ export const GitCurrentStatusBar = memo(function GitCurrentStatusBar({
                 className="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-warning-subtle text-warning-foreground"
                 data-testid="git-status-dirty-badge"
               >
-                uncommitted
+                {t('git.currentStatus.uncommitted')}
               </span>
             )}
 
@@ -96,8 +98,8 @@ export const GitCurrentStatusBar = memo(function GitCurrentStatusBar({
                 className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-mono bg-muted text-foreground"
                 data-testid="git-status-ahead-behind"
               >
-                <span title="commits ahead of upstream">↑{gitStatus.aheadBehind.ahead}</span>
-                <span title="commits behind upstream">↓{gitStatus.aheadBehind.behind}</span>
+                <span title={t('git.currentStatus.aheadTooltip')}>↑{gitStatus.aheadBehind.ahead}</span>
+                <span title={t('git.currentStatus.behindTooltip')}>↓{gitStatus.aheadBehind.behind}</span>
               </span>
             )}
           </div>
@@ -111,9 +113,9 @@ export const GitCurrentStatusBar = memo(function GitCurrentStatusBar({
             >
               <span aria-hidden="true">⚠</span>
               <span>
-                Branch changed from{' '}
+                {t('branchMismatch.changedFrom')}{' '}
                 <span className="font-medium">{gitStatus.initialBranch}</span>
-                {' '}to{' '}
+                {' '}{t('branchMismatch.to')}{' '}
                 <span className="font-medium">{gitStatus.currentBranch}</span>
               </span>
             </div>

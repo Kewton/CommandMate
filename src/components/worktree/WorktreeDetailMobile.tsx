@@ -16,6 +16,7 @@
 'use client';
 
 import React, { memo, useRef, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
 import { HistoryPane } from '@/components/worktree/HistoryPane';
@@ -56,6 +57,7 @@ export const MobileInfoContent = memo(function MobileInfoContent({
   onWorktreeUpdate,
 }: MobileInfoContentProps) {
   const [showLogs, setShowLogs] = useState(false);
+  const tWorktree = useTranslations('worktree');
 
   // Track previous worktree ID to detect worktree changes
   const prevWorktreeIdRef = useRef(worktree?.id);
@@ -79,7 +81,7 @@ export const MobileInfoContent = memo(function MobileInfoContent({
   if (!worktree) {
     return (
       <div className="text-muted-foreground text-center py-8">
-        Loading worktree info...
+        {tWorktree('detail.loadingInfo')}
       </div>
     );
   }
@@ -283,6 +285,9 @@ export const MobileContent = memo(function MobileContent({
   visibleInstanceIds,
   onToggleInstanceVisible,
 }: MobileContentProps) {
+  // Unconditional hook call — must stay above the `activeTab` switch below.
+  const tWorktree = useTranslations('worktree');
+
   switch (activeTab) {
     case 'terminal':
       return (
@@ -311,7 +316,7 @@ export const MobileContent = memo(function MobileContent({
                   : 'text-muted-foreground hover:text-foreground'
               }`}
             >
-              Message
+              {tWorktree('detail.subTabMessage')}
             </button>
             <button
               type="button"
@@ -324,7 +329,7 @@ export const MobileContent = memo(function MobileContent({
                   : 'text-muted-foreground hover:text-foreground'
               }`}
             >
-              Git
+              {tWorktree('detail.subTabGit')}
             </button>
           </div>
           {historySubTab === 'message' ? (

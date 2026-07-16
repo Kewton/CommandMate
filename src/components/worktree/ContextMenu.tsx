@@ -16,6 +16,7 @@
 'use client';
 
 import React, { memo, useCallback, useEffect, useRef } from 'react';
+import { useTranslations } from 'next-intl';
 import { FilePlus, FolderPlus, Pencil, Trash2, Upload, FolderInput } from 'lucide-react';
 import { Z_INDEX } from '@/config/z-index';
 import { CONTEXT_MENU_EXIT_DURATION_MS } from '@/config/ui-feedback-config';
@@ -94,6 +95,7 @@ export const ContextMenu = memo(function ContextMenu({
   onUpload,
   onMove,
 }: ContextMenuProps) {
+  const t = useTranslations('worktree');
   const menuRef = useRef<HTMLDivElement>(null);
 
   // [Issue #1114] Keep the menu mounted briefly after close so the fade-out
@@ -122,21 +124,23 @@ export const ContextMenu = memo(function ContextMenu({
   const menuItems: MenuItem[] = [
     {
       id: 'new-file',
-      label: 'New File',
+      // Issue #1277: reuses the existing fileTree.* entries (same wording as the
+      // file tree's own New File / New Directory affordances).
+      label: t('fileTree.newFile'),
       icon: <FilePlus className="w-4 h-4" aria-hidden="true" role="img" />,
       onClick: () => handleItemClick(onNewFile),
       showFor: ['directory'],
     },
     {
       id: 'new-directory',
-      label: 'New Directory',
+      label: t('fileTree.newDirectory'),
       icon: <FolderPlus className="w-4 h-4" aria-hidden="true" role="img" />,
       onClick: () => handleItemClick(onNewDirectory),
       showFor: ['directory'],
     },
     {
       id: 'upload',
-      label: 'Upload File',
+      label: t('contextMenu.uploadFile'),
       icon: <Upload className="w-4 h-4" aria-hidden="true" role="img" />,
       onClick: () => handleItemClick(onUpload),
       showFor: ['directory'],
@@ -144,13 +148,13 @@ export const ContextMenu = memo(function ContextMenu({
     },
     {
       id: 'rename',
-      label: 'Rename',
+      label: t('contextMenu.rename'),
       icon: <Pencil className="w-4 h-4" aria-hidden="true" role="img" />,
       onClick: () => handleItemClick(onRename),
     },
     {
       id: 'move',
-      label: 'Move',
+      label: t('contextMenu.move'),
       icon: <FolderInput className="w-4 h-4" aria-hidden="true" role="img" />,
       onClick: () => {
         if (onMove && targetPath && targetType) {
@@ -162,7 +166,7 @@ export const ContextMenu = memo(function ContextMenu({
     },
     {
       id: 'delete',
-      label: 'Delete',
+      label: t('contextMenu.delete'),
       icon: <Trash2 className="w-4 h-4" aria-hidden="true" role="img" />,
       onClick: () => handleItemClick(onDelete),
       variant: 'danger',
@@ -240,7 +244,7 @@ export const ContextMenu = memo(function ContextMenu({
       ref={menuRef}
       data-testid="context-menu"
       role="menu"
-      aria-label="File actions"
+      aria-label={t('contextMenu.label')}
       className={`fixed min-w-[160px] py-1 bg-surface rounded-lg shadow-lg border border-border ${animationClasses}`}
       style={{
         zIndex: Z_INDEX.CONTEXT_MENU,
@@ -252,6 +256,9 @@ export const ContextMenu = memo(function ContextMenu({
         <React.Fragment key={item.id}>
           <button
             role="menuitem"
+            // Issue #1277: locale-stable hook for e2e. The visible label is
+            // translated, so text selectors would break under a non-en locale.
+            data-testid={`context-menu-${item.id}`}
             onClick={item.onClick}
             disabled={!targetPath}
             className={`w-full flex items-center gap-3 px-3 py-2 text-sm transition-colors focus:outline-none focus:bg-muted ${

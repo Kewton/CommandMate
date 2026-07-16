@@ -12,6 +12,7 @@
 'use client';
 
 import React, { memo } from 'react';
+import { useTranslations } from 'next-intl';
 import { Spinner } from '@/components/ui/Spinner';
 
 // ============================================================================
@@ -54,6 +55,7 @@ export const MemoAddButton = memo(function MemoAddButton({
   isLoading = false,
   className = '',
 }: MemoAddButtonProps) {
+  const t = useTranslations('schedule');
   const remaining = Math.max(0, maxCount - currentCount);
   const isDisabled = currentCount >= maxCount || isLoading;
 
@@ -75,7 +77,7 @@ export const MemoAddButton = memo(function MemoAddButton({
         type="button"
         onClick={handleClick}
         disabled={isDisabled}
-        aria-label="Add Memo"
+        aria-label={t('memoAdd')}
         aria-disabled={isDisabled}
         className={`
           flex items-center gap-2 px-4 py-2 rounded-lg border-2 border-dashed
@@ -104,10 +106,10 @@ export const MemoAddButton = memo(function MemoAddButton({
             />
           </svg>
         )}
-        <span className="text-sm font-medium">Add Memo</span>
+        <span className="text-sm font-medium">{t('memoAdd')}</span>
       </button>
       <span className="text-xs text-muted-foreground">
-        {remaining} remaining
+        {t('memoRemaining', { count: remaining })}
       </span>
     </div>
   );

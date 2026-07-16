@@ -35,7 +35,8 @@
     "cloneFailed": "クローンに失敗しました",
     "pathRequired": "リポジトリパスを入力してください",
     "urlRequired": "クローン URL を入力してください",
-    "urlInvalid": "URL の形式が正しくありません"
+    "urlInvalid": "URL の形式が正しくありません",
+    "loading": "リポジトリを読み込み中"
   },
   "cancel": "キャンセル",
   "send": "送信",
@@ -109,5 +110,11 @@
   "branchItem": {
     "cliToolStatus": "CLI ツールのステータス",
     "hasUnread": "未読メッセージあり"
+  },
+  "connection": {
+    "reconnecting": "再接続中",
+    "offline": "オフライン",
+    "reconnectingTooltip": "ライブ接続を再確立しています（ポーリングで動作中）",
+    "offlineTooltip": "ライブ接続なし（ポーリングで動作中）"
   }
 }

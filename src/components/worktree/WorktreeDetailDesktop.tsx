@@ -23,6 +23,7 @@
 'use client';
 
 import React, { memo, useCallback, useMemo } from 'react';
+import { useTranslations } from 'next-intl';
 import { WorktreeDesktopLayout } from '@/components/worktree/WorktreeDesktopLayout';
 import { TerminalContainer } from '@/components/worktree/TerminalContainer';
 import { type WorktreeStatus } from '@/components/mobile/MobileHeader';
@@ -283,6 +284,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   cancelLabel,
   endLabel,
 }: WorktreeDetailDesktopProps) {
+  const tWorktree = useTranslations('worktree');
+
   /**
    * Issue #786 / #869: the agent instanceId currently being dragged from a
    * DesktopHeader instance tab. Published here so each split can drive its
@@ -707,7 +710,11 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           {/* Desktop Header with back button, status, and info */}
           <DesktopHeader
             worktreeName={worktreeName}
-            repositoryName={worktree?.repositoryDisplayName ?? worktree?.repositoryName ?? 'Unknown'}
+            repositoryName={
+              worktree?.repositoryDisplayName ??
+              worktree?.repositoryName ??
+              tWorktree('detail.unknownRepository')
+            }
             description={worktree?.description}
             status={worktreeStatus}
             gitStatus={worktree?.gitStatus}
@@ -773,7 +780,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           accept={UPLOADABLE_EXTENSIONS.join(',')}
           onChange={onFileInputChange}
           className="hidden"
-          aria-label="Upload file"
+          aria-label={tWorktree('detail.uploadFile')}
         />
         {/* Kill session confirmation dialog (Issue #1171: target-snapshot based;
             `killTarget !== null` is the single open-state source, and Confirm is

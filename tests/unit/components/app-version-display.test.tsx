@@ -18,6 +18,15 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 // Save original env
 const originalEnv = { ...process.env };
 
+// Issue #1277: this suite drives the Info button / modal by their English
+// wording, which is now dictionary-driven. Resolve keys through the REAL
+// locales/en/*.json so a missing key fails loudly here instead of being echoed
+// back as `worktree.detail.viewInfo` by the global mock in tests/setup.ts.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 // Mock next/navigation
 const mockPush = vi.fn();
 vi.mock('next/navigation', () => ({
@@ -255,10 +264,11 @@ describe('APP_VERSION_DISPLAY', () => {
       const infoButton = screen.getByLabelText('View worktree information');
       fireEvent.click(infoButton);
 
-      // Check for version display (i18n mock returns key path)
+      // Check for version display
       await waitFor(() => {
-        // Issue #257: VersionSection uses i18n key "worktree.update.version"
-        expect(screen.getByText('worktree.update.version')).toBeInTheDocument();
+        // Issue #257: VersionSection renders the i18n key "worktree.update.version",
+        // which resolves to "Version" via the real en dictionary (Issue #1277).
+        expect(screen.getByText('Version')).toBeInTheDocument();
         expect(screen.getByText('v0.1.12')).toBeInTheDocument();
       });
     });
@@ -281,8 +291,9 @@ describe('APP_VERSION_DISPLAY', () => {
       fireEvent.click(infoButton);
 
       await waitFor(() => {
-        // Issue #257: VersionSection uses i18n key
-        const versionHeadings = screen.getAllByText('worktree.update.version');
+        // Issue #257: VersionSection renders the i18n key "worktree.update.version",
+        // which resolves to "Version" via the real en dictionary (Issue #1277).
+        const versionHeadings = screen.getAllByText('Version');
         expect(versionHeadings.length).toBeGreaterThan(0);
         // Find the Version section and check value is "-"
         const versionSection = versionHeadings[0].closest('div');
@@ -318,10 +329,11 @@ describe('APP_VERSION_DISPLAY', () => {
       const infoTab = screen.getByTestId('tab-info');
       fireEvent.click(infoTab);
 
-      // Check for version display (i18n mock returns key path)
+      // Check for version display
       await waitFor(() => {
-        // Issue #257: VersionSection uses i18n key
-        expect(screen.getByText('worktree.update.version')).toBeInTheDocument();
+        // Issue #257: VersionSection renders the i18n key "worktree.update.version",
+        // which resolves to "Version" via the real en dictionary (Issue #1277).
+        expect(screen.getByText('Version')).toBeInTheDocument();
         expect(screen.getByText('v0.1.12')).toBeInTheDocument();
       });
     });
@@ -345,8 +357,9 @@ describe('APP_VERSION_DISPLAY', () => {
       fireEvent.click(infoTab);
 
       await waitFor(() => {
-        // Issue #257: VersionSection uses i18n key
-        const versionHeadings = screen.getAllByText('worktree.update.version');
+        // Issue #257: VersionSection renders the i18n key "worktree.update.version",
+        // which resolves to "Version" via the real en dictionary (Issue #1277).
+        const versionHeadings = screen.getAllByText('Version');
         expect(versionHeadings.length).toBeGreaterThan(0);
         const versionSection = versionHeadings[0].closest('div');
         expect(versionSection).not.toBeNull();

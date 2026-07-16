@@ -167,5 +167,24 @@
     "createdTime": "Created",
     "sentTime": "Sent",
     "failureReason": "Failure Reason"
-  }
+  },
+  "memoAdd": "Add Memo",
+  "memoRemaining": "{count} remaining",
+  "memoDefaultTitle": "Memo",
+  "memoTitlePlaceholder": "Memo title",
+  "memoInsertToMessage": "Insert to message",
+  "memoCopyContent": "Copy memo content",
+  "memoDelete": "Delete memo",
+  "memoContentPlaceholder": "Enter memo content...",
+  "memoLoading": "Loading memos...",
+  "memoSearchToggle": "Search memos",
+  "memoEmpty": "No memos yet.",
+  "memoEmptyHint": "Click the button below to add one.",
+  "memoNoMatch": "No memos match your search.",
+  "memoSearchLabel": "Memo search",
+  "memoSearchPlaceholder": "Search...",
+  "memoSearchInputLabel": "Search memos",
+  "memoSearchPrev": "Previous match (prev)",
+  "memoSearchNext": "Next match (next)",
+  "memoSearchClose": "Close search (close)"
 }

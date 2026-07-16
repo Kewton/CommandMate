@@ -167,5 +167,24 @@
     "createdTime": "作成時刻",
     "sentTime": "送信時刻",
     "failureReason": "失敗理由"
-  }
+  },
+  "memoAdd": "メモを追加",
+  "memoRemaining": "残り {count} 件",
+  "memoDefaultTitle": "メモ",
+  "memoTitlePlaceholder": "メモのタイトル",
+  "memoInsertToMessage": "メッセージに挿入",
+  "memoCopyContent": "メモの内容をコピー",
+  "memoDelete": "メモを削除",
+  "memoContentPlaceholder": "メモの内容を入力...",
+  "memoLoading": "メモを読み込み中...",
+  "memoSearchToggle": "メモを検索",
+  "memoEmpty": "メモはまだありません。",
+  "memoEmptyHint": "下のボタンから追加できます。",
+  "memoNoMatch": "検索条件に一致するメモがありません。",
+  "memoSearchLabel": "メモ検索",
+  "memoSearchPlaceholder": "検索...",
+  "memoSearchInputLabel": "メモを検索",
+  "memoSearchPrev": "前の一致（前へ）",
+  "memoSearchNext": "次の一致（次へ）",
+  "memoSearchClose": "検索を閉じる（閉じる）"
 }

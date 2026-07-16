@@ -12,16 +12,19 @@
 'use client';
 
 import { memo, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import type { GitResetMode } from '@/types/git';
 import { resetPrompt, revertPrompt, forcePushPrompt } from '@/lib/git-ai-prompt-templates';
-import {
-  RESET_HARD_HISTORY_LOSS_WARNING,
-  DANGER_ZONE_RUNNING_SESSION_WARNING,
-  PUSH_PROTECTED_BRANCH_WARNING,
-} from '@/config/git-status-config';
 import { AskAiButton } from '@/components/worktree/git/gitPaneShared';
 import { useGitPaneContext } from '@/components/worktree/git/GitPaneContext';
 import { Checkbox, RadioGroup, RadioGroupItem } from '@/components/ui';
+
+/** Dictionary keys for the reset mode radios. */
+const RESET_MODE_KEYS: Record<GitResetMode, string> = {
+  soft: 'git.danger.modeSoft',
+  mixed: 'git.danger.modeMixed',
+  hard: 'git.danger.modeHard',
+};
 
 export interface GitDangerZonePanelProps {
   /** The currently selected commit (full %H) from the Commit History list. */
@@ -39,7 +42,7 @@ export interface GitDangerZonePanelProps {
    * Issue #783: force-push the current branch. `--force-with-lease` is the
    * default (forceWithLease=true); the lease check is a second safety net. The
    * server refuses a force push to the default branch with 409 protected_branch
-   * (PUSH_PROTECTED_BRANCH_WARNING). When omitted, the force-push UI is hidden.
+   * (`git.danger.protectedBranchWarning`). When omitted, the force-push UI is hidden.
    */
   onForcePush?: (forceWithLease: boolean) => void;
 }
@@ -57,6 +60,8 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
   onForcePush,
 }: GitDangerZonePanelProps) {
   const { isMobile, onInsertToMessage: onAskAi } = useGitPaneContext();
+  const t = useTranslations('worktree');
+  const tCommon = useTranslations('common');
   const [open, setOpen] = useState(false); // default closed
   const [resetMode, setResetMode] = useState<GitResetMode>('mixed');
   const [resetUseHead, setResetUseHead] = useState(true);
@@ -85,7 +90,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
         data-testid="git-danger-zone-toggle"
       >
         <span className="text-xs w-4 text-center">{open ? '▼' : '▶'}</span>
-        Danger Zone
+        {t('git.danger.title')}
       </button>
 
       {open && (
@@ -107,7 +112,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
               className="px-2 py-1 text-xs rounded border border-danger-border text-danger-foreground hover:bg-danger-subtle"
               data-testid="git-danger-zone-reset-open"
             >
-              Reset…
+              {t('git.danger.resetOpen')}
             </button>
             <button
               type="button"
@@ -116,7 +121,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
               className="px-2 py-1 text-xs rounded border border-danger-border text-danger-foreground hover:bg-danger-subtle disabled:opacity-50"
               data-testid="git-danger-zone-revert-open"
             >
-              Revert…
+              {t('git.danger.revertOpen')}
             </button>
             {onForcePush && (
               <button
@@ -126,13 +131,13 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
                 className="px-2 py-1 text-xs rounded border border-danger-border text-danger-foreground hover:bg-danger-subtle disabled:opacity-50"
                 data-testid="git-force-push-open"
               >
-                Force Push…
+                {t('git.danger.forcePushOpen')}
               </button>
             )}
           </div>
           {!selectedCommit && (
             <p className="text-xs text-muted-foreground">
-              Select a commit in Commit History to enable revert / reset-to-commit.
+              {t('git.danger.selectCommitHint')}
             </p>
           )}
         </div>
@@ -145,7 +150,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
           data-testid="reset-confirm"
           role="dialog"
         >
-          <p className="text-sm font-medium text-danger-foreground mb-2">Reset</p>
+          <p className="text-sm font-medium text-danger-foreground mb-2">{t('git.danger.resetTitle')}</p>
 
           {/* Target selection */}
           <RadioGroup
@@ -156,7 +161,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
           >
             <label className="flex items-center gap-1 text-xs text-foreground">
               <RadioGroupItem value="head" data-testid="reset-target-head" />
-              HEAD
+              {t('git.danger.resetTargetHead')}
             </label>
             <label className="flex items-center gap-1 text-xs text-foreground">
               <RadioGroupItem
@@ -164,7 +169,10 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
                 disabled={!selectedCommit}
                 data-testid="reset-target-commit"
               />
-              Selected commit {selectedCommit ? `(${selectedCommit.slice(0, 7)})` : '(none selected)'}
+              {t('git.danger.resetTargetSelectedPrefix')}
+              {selectedCommit
+                ? t('git.danger.resetTargetSelectedHash', { hash: selectedCommit.slice(0, 7) })
+                : t('git.danger.resetTargetNoneSelected')}
             </label>
           </RadioGroup>
 
@@ -178,7 +186,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
             {(['soft', 'mixed', 'hard'] as GitResetMode[]).map((m) => (
               <label key={m} className="flex items-center gap-1 text-xs text-foreground">
                 <RadioGroupItem value={m} data-testid={`reset-mode-${m}`} />
-                {m}
+                {t(RESET_MODE_KEYS[m])}
               </label>
             ))}
           </RadioGroup>
@@ -190,21 +198,21 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
                 className="text-xs text-danger-foreground"
                 data-testid="reset-hard-history-loss-warning"
               >
-                {RESET_HARD_HISTORY_LOSS_WARNING}
+                {t('git.danger.resetHardWarning')}
               </p>
               {hasRunningSession && (
                 <p
                   className="text-xs text-danger-foreground"
                   data-testid="reset-hard-session-warning"
                 >
-                  {DANGER_ZONE_RUNNING_SESSION_WARNING}
+                  {t('git.danger.runningSessionWarning')}
                 </p>
               )}
               <input
                 type="text"
                 value={confirmBranch}
                 onChange={(e) => setConfirmBranch(e.target.value)}
-                placeholder={`Type "${currentBranch ?? ''}" to confirm`}
+                placeholder={t('git.danger.confirmPlaceholder', { branch: currentBranch ?? '' })}
                 className="w-full px-2 py-1 text-xs border border-danger-border rounded bg-surface dark:bg-surface-2 text-foreground"
                 data-testid="reset-hard-branch-input"
               />
@@ -241,7 +249,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
               className="px-2 py-1 text-xs rounded bg-danger hover:bg-danger/90 text-white disabled:opacity-50"
               data-testid="reset-confirm-button"
             >
-              Reset
+              {t('git.danger.reset')}
             </button>
             <button
               type="button"
@@ -251,7 +259,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
               }}
               className="px-2 py-1 text-xs rounded border border-border hover:bg-muted"
             >
-              Cancel
+              {tCommon('cancel')}
             </button>
           </div>
         </div>
@@ -264,16 +272,17 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
           data-testid="revert-confirm"
           role="dialog"
         >
-          <p className="text-sm font-medium text-danger-foreground mb-2">Revert</p>
+          <p className="text-sm font-medium text-danger-foreground mb-2">{t('git.danger.revertTitle')}</p>
           <p className="text-xs text-foreground mb-2">
-            Revert commit <span className="font-mono">{selectedCommit.slice(0, 7)}</span>
+            {t('git.danger.revertBodyPrefix')}
+            <span className="font-mono">{selectedCommit.slice(0, 7)}</span>
           </p>
           {hasRunningSession && (
             <p
               className="mb-2 text-xs text-danger-foreground"
               data-testid="revert-session-warning"
             >
-              {DANGER_ZONE_RUNNING_SESSION_WARNING}
+              {t('git.danger.runningSessionWarning')}
             </p>
           )}
           <label className="flex items-center gap-1 text-xs text-foreground mb-2">
@@ -282,7 +291,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
               onCheckedChange={(checked) => setRevertNoCommit(checked === true)}
               data-testid="revert-no-commit"
             />
-            No commit (leave staged)
+            {t('git.danger.revertNoCommit')}
           </label>
           <div className="flex items-center gap-2">
             {onAskAi && (
@@ -307,7 +316,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
               className="px-2 py-1 text-xs rounded bg-danger hover:bg-danger/90 text-white disabled:opacity-50"
               data-testid="revert-confirm-button"
             >
-              Revert
+              {t('git.danger.revert')}
             </button>
             <button
               type="button"
@@ -317,7 +326,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
               }}
               className="px-2 py-1 text-xs rounded border border-border hover:bg-muted"
             >
-              Cancel
+              {tCommon('cancel')}
             </button>
           </div>
         </div>
@@ -330,19 +339,19 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
           data-testid="force-push-confirm"
           role="dialog"
         >
-          <p className="text-sm font-medium text-danger-foreground mb-2">Force Push</p>
+          <p className="text-sm font-medium text-danger-foreground mb-2">{t('git.danger.forcePushTitle')}</p>
           <p
             className="mb-2 text-xs text-danger-foreground"
             data-testid="force-push-protected-branch-warning"
           >
-            {PUSH_PROTECTED_BRANCH_WARNING}
+            {t('git.danger.protectedBranchWarning')}
           </p>
           {hasRunningSession && (
             <p
               className="mb-2 text-xs text-danger-foreground"
               data-testid="force-push-session-warning"
             >
-              {DANGER_ZONE_RUNNING_SESSION_WARNING}
+              {t('git.danger.runningSessionWarning')}
             </p>
           )}
           <label className="flex items-center gap-1 text-xs text-foreground mb-2">
@@ -351,7 +360,7 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
               onCheckedChange={(checked) => setForceWithLease(checked === true)}
               data-testid="force-push-with-lease"
             />
-            Use --force-with-lease (recommended — refuses if the remote moved)
+            {t('git.danger.forceWithLease')}
           </label>
           <div className="flex items-center gap-2">
             {onAskAi && (
@@ -374,14 +383,14 @@ export const GitDangerZonePanel = memo(function GitDangerZonePanel({
               className="px-2 py-1 text-xs rounded bg-danger hover:bg-danger/90 text-white disabled:opacity-50"
               data-testid="force-push-confirm-button"
             >
-              Force Push
+              {t('git.danger.forcePush')}
             </button>
             <button
               type="button"
               onClick={() => setShowForcePushModal(false)}
               className="px-2 py-1 text-xs rounded border border-border hover:bg-muted"
             >
-              Cancel
+              {tCommon('cancel')}
             </button>
           </div>
         </div>

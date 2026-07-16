@@ -19,6 +19,7 @@
 'use client';
 
 import React, { memo, useEffect, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import type { GitNetworkOperation } from '@/types/git';
 import { useGitPaneContext } from '@/components/worktree/git/GitPaneContext';
 import { Spinner } from '@/components/ui/Spinner';
@@ -28,7 +29,12 @@ export interface GitNetworkOperationsBarProps {
   progressState: 'idle' | 'running' | 'error';
   /** The in-flight operation tag (for the spinner label), or null. */
   operation: GitNetworkOperation | null;
-  /** Friendly error message (mapped by reason), or null. */
+  /**
+   * The error message to show, already resolved by the caller. Issue #1277: the
+   * hook classifies the failure (`errorReason`) and the caller translates it;
+   * null means "no specific message", so we render the generic
+   * `git.network.failed` fallback rather than an empty alert.
+   */
   error: string | null;
   /** Pull conflict flag (HTTP 200 quasi-error, DR1-010). */
   conflict: boolean;
@@ -65,7 +71,13 @@ export const GitNetworkOperationsBar = memo(function GitNetworkOperationsBar({
   extraActions,
 }: GitNetworkOperationsBarProps) {
   const { isMobile } = useGitPaneContext();
+  const t = useTranslations('worktree');
   const running = progressState === 'running';
+
+  // Issue #1277: the hook no longer invents prose, so `error` can be null for a
+  // failure it could not classify and the server did not describe. Keep the
+  // alert meaningful with a generic localized message rather than blank.
+  const errorMessage = error ?? t('git.network.failed');
 
   // DR3-005: elapsed-seconds tick isolated to this section. A plain spinner is
   // sufficient, but the elapsed seconds reassure the user during a long op. The
@@ -87,7 +99,7 @@ export const GitNetworkOperationsBar = memo(function GitNetworkOperationsBar({
       data-testid="git-network-section"
     >
       <span className="text-xs font-medium text-muted-foreground">
-        Quick actions
+        {t('git.network.quickActions')}
       </span>
 
       <div className={`flex items-center ${isMobile ? 'flex-wrap gap-1.5' : 'gap-2'}`}>
@@ -101,7 +113,7 @@ export const GitNetworkOperationsBar = memo(function GitNetworkOperationsBar({
             className="px-2 py-1 text-xs rounded border border-border text-foreground hover:bg-muted disabled:opacity-50"
             data-testid="git-fetch-button"
           >
-            Fetch
+            {t('git.network.fetch')}
           </button>
         )}
         <button
@@ -111,7 +123,7 @@ export const GitNetworkOperationsBar = memo(function GitNetworkOperationsBar({
           className="px-2 py-1 text-xs rounded border border-accent-300 dark:border-accent-700 text-accent-700 dark:text-accent-300 hover:bg-accent-50 dark:hover:bg-accent-900/30 disabled:opacity-50"
           data-testid="git-pull-button"
         >
-          Pull
+          {t('git.network.pull')}
         </button>
         <button
           type="button"
@@ -119,9 +131,9 @@ export const GitNetworkOperationsBar = memo(function GitNetworkOperationsBar({
           disabled={running}
           className="px-2 py-1 text-xs rounded border border-success-border text-success-foreground hover:bg-success-subtle disabled:opacity-50"
           data-testid="git-push-button"
-          title={hasUpstream ? undefined : 'No upstream — will set upstream on push'}
+          title={hasUpstream ? undefined : t('git.network.noUpstreamTooltip')}
         >
-          Push
+          {t('git.network.push')}
         </button>
         {/* Issue #815: core BranchCheckoutDropdown slotted beside Quick actions. */}
         {extraActions}
@@ -138,7 +150,15 @@ export const GitNetworkOperationsBar = memo(function GitNetworkOperationsBar({
           <span className="flex items-center gap-2" role="status" data-testid="git-network-operation-spinner">
             <Spinner size="sm" variant="accent" />
             <span>
-              {operation === 'push' ? 'Pushing' : operation === 'pull' ? 'Pulling' : 'Fetching'}… {elapsed}s
+              {t('git.network.progress', {
+                operation:
+                  operation === 'push'
+                    ? t('git.network.pushing')
+                    : operation === 'pull'
+                      ? t('git.network.pulling')
+                      : t('git.network.fetching'),
+                elapsed,
+              })}
             </span>
           </span>
           <button
@@ -147,19 +167,19 @@ export const GitNetworkOperationsBar = memo(function GitNetworkOperationsBar({
             className="ml-auto px-1.5 py-0.5 rounded border border-accent-400 dark:border-accent-600 hover:bg-accent-100 dark:hover:bg-accent-900/40"
             data-testid="git-network-abort-button"
           >
-            Abort
+            {t('git.network.abort')}
           </button>
         </div>
       )}
 
       {/* Error (role=alert) — pull conflict is surfaced as a quasi-error here */}
-      {progressState === 'error' && error && (
+      {progressState === 'error' && (
         <div
           className="text-xs text-danger-foreground"
           role="alert"
           data-testid="git-network-operation-error"
         >
-          {error}
+          {errorMessage}
         </div>
       )}
 
@@ -170,7 +190,7 @@ export const GitNetworkOperationsBar = memo(function GitNetworkOperationsBar({
           role="status"
           data-testid="git-network-conflict"
         >
-          Pull produced conflicts: {conflictFiles.join(', ')}. Resolve them in the terminal.
+          {t('git.network.conflicts', { files: conflictFiles.join(', ') })}
         </div>
       )}
     </div>

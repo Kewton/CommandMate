@@ -24,10 +24,13 @@
  * (success) but is a "quasi-error" in the UI. We surface conflict + conflictFiles
  * on a channel SEPARATE from progressState (progressState stays idle, not error).
  *
- * Error messages (§3.4 / DR4-003): the backend never returns raw stderr. We read
- * `{ reason }` from the JSON body to surface a friendly message
- * (auth_failed -> PUSH_AUTH_FAILED_GUIDANCE; protected_branch ->
- * PUSH_PROTECTED_BRANCH_WARNING; otherwise the server's fixed `error` string).
+ * Error classification (§3.4 / DR4-003): the backend never returns raw stderr. We
+ * read `{ reason }` from the JSON body and expose it as a machine-readable
+ * `errorReason` tag. Issue #1277: this hook produces NO user-facing prose — the
+ * rendering component translates `errorReason` (auth_failed ->
+ * `git.network.authFailedGuidance`; protected_branch ->
+ * `git.danger.protectedBranchWarning`) and falls back to the server's fixed
+ * `error` string, then to `git.network.failed`, when `errorReason` is null.
  */
 
 'use client';
@@ -38,10 +41,12 @@ import type {
   GitNetworkProgressState,
   PullResponse,
 } from '@/types/git';
-import {
-  PUSH_AUTH_FAILED_GUIDANCE,
-  PUSH_PROTECTED_BRANCH_WARNING,
-} from '@/config/git-status-config';
+
+/**
+ * Machine-readable failure classification (Issue #1277). The hook never renders
+ * prose; the consuming component maps this tag to a localized message.
+ */
+export type GitNetworkErrorReason = 'auth_failed' | 'protected_branch' | null;
 
 export interface FetchOpts {
   remote?: string;
@@ -77,8 +82,16 @@ export interface UseGitPaneNetworkOpsReturn {
   operation: GitNetworkOperation | null;
   /** 3-value progress state (DR1-004). */
   progressState: GitNetworkProgressState;
-  /** Friendly error message (mapped by reason), or null. */
+  /**
+   * The server's fixed `error` string, or null. NOT localized — it is only a
+   * fallback for failures the hook could not classify (see `errorReason`).
+   */
   error: string | null;
+  /**
+   * Classified failure reason (Issue #1277), or null when the failure was not
+   * one of the known reasons. The RENDERING component translates this.
+   */
+  errorReason: GitNetworkErrorReason;
   /** Pull conflict flag (HTTP 200 quasi-error, DR1-010). */
   conflict: boolean;
   /** Files in conflict after a pull (empty unless conflict). */
@@ -91,15 +104,22 @@ export interface UseGitPaneNetworkOpsReturn {
 }
 
 /**
- * Map a server `{ reason, error }` body to a friendly UI message. The backend
- * never returns raw stderr (DR4-003), so we either pick a single-source-of-truth
- * guidance string by reason or fall back to the server's fixed `error` string.
+ * Classify a server `{ reason }` body into a machine-readable tag (Issue #1277).
+ * Unknown reasons return null, which makes the consumer fall back to the
+ * server's fixed `error` string (then to a generic localized message).
  */
-function messageForReason(reason: unknown, serverError: unknown): string {
-  if (reason === 'auth_failed') return PUSH_AUTH_FAILED_GUIDANCE;
-  if (reason === 'protected_branch') return PUSH_PROTECTED_BRANCH_WARNING;
-  if (typeof serverError === 'string' && serverError.length > 0) return serverError;
-  return 'Git network operation failed';
+function classifyReason(reason: unknown): GitNetworkErrorReason {
+  if (reason === 'auth_failed') return 'auth_failed';
+  if (reason === 'protected_branch') return 'protected_branch';
+  return null;
+}
+
+/**
+ * The backend never returns raw stderr (DR4-003), so its `error` string is a
+ * fixed, safe fallback. Returns null when absent/empty.
+ */
+function serverErrorString(serverError: unknown): string | null {
+  return typeof serverError === 'string' && serverError.length > 0 ? serverError : null;
 }
 
 export function useGitPaneNetworkOps(
@@ -111,6 +131,7 @@ export function useGitPaneNetworkOps(
   const [operation, setOperation] = useState<GitNetworkOperation | null>(null);
   const [progressState, setProgressState] = useState<GitNetworkProgressState>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [errorReason, setErrorReason] = useState<GitNetworkErrorReason>(null);
   const [conflict, setConflict] = useState(false);
   const [conflictFiles, setConflictFiles] = useState<string[]>([]);
 
@@ -139,6 +160,7 @@ export function useGitPaneNetworkOps(
     ): Promise<void> => {
       // A new op clears the previous error / conflict channels.
       setError(null);
+      setErrorReason(null);
       setConflict(false);
       setConflictFiles([]);
       setOperation(op);
@@ -160,7 +182,8 @@ export function useGitPaneNetworkOps(
 
         if (!response.ok) {
           const data = await response.json().catch(() => ({}));
-          setError(messageForReason(data?.reason, data?.error));
+          setErrorReason(classifyReason(data?.reason));
+          setError(serverErrorString(data?.error));
           setProgressState('error');
           return;
         }
@@ -178,7 +201,10 @@ export function useGitPaneNetworkOps(
         if (err instanceof Error && err.name === 'AbortError') {
           setProgressState('idle');
         } else {
-          setError('Git network operation failed');
+          // No server body to fall back on: the consumer renders the generic
+          // localized `git.network.failed` message (Issue #1277).
+          setError(null);
+          setErrorReason(null);
           setProgressState('error');
         }
       } finally {
@@ -235,6 +261,7 @@ export function useGitPaneNetworkOps(
     operation,
     progressState,
     error,
+    errorReason,
     conflict,
     conflictFiles,
     runFetch,

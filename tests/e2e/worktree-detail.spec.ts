@@ -36,10 +36,13 @@ test.describe('Worktree Detail Page', () => {
     // Wait a bit for page to load
     await page.waitForTimeout(500);
 
-    // Check for back link (even if worktree doesn't exist)
-    const backLink = page.getByRole('link', { name: /Back/i });
+    // Check for the back control (even if worktree doesn't exist).
+    // Issue #1277: selected by data-testid — its accessible name is now
+    // localized (worktree.detail.goBack), so matching English text would break
+    // under any non-en locale.
+    const backLink = page.getByTestId('worktree-back-button');
 
-    // Back link should exist in the layout
+    // Back control should exist in the layout
     if (await backLink.count() > 0) {
       await expect(backLink).toBeVisible();
     }
@@ -149,11 +152,14 @@ test.describe('Worktree Detail Page', () => {
     await page.goto('/worktrees/test-worktree');
     await page.waitForTimeout(500);
 
-    // Check for Information heading in sidebar
-    const infoHeading = page.getByRole('heading', { name: /Information/i });
+    // Check for the worktree info panel.
+    // Issue #1277: selected by data-testid — the modal heading is now localized
+    // (worktree.detail.infoModalTitle), so /Information/i would only ever match
+    // the English dictionary.
+    const infoPanel = page.getByTestId('worktree-info-modal');
 
-    if (await infoHeading.count() > 0) {
-      await expect(infoHeading).toBeVisible();
+    if (await infoPanel.count() > 0) {
+      await expect(infoPanel).toBeVisible();
     }
   });
 
@@ -177,11 +183,14 @@ test.describe('Worktree Detail Page', () => {
     await page.waitForTimeout(500);
 
     // Page should still be accessible on mobile
-    // Check if any key elements are visible
-    const backLink = page.getByRole('link', { name: /Back/i });
+    // Check if any key elements are visible.
+    // Issue #1277: this viewport renders MobileHeader (not the DesktopHeader
+    // back control), so assert on the mobile header's existing stable testid
+    // rather than an English accessible name.
+    const mobileHeader = page.getByTestId('mobile-header');
 
-    if (await backLink.count() > 0) {
-      await expect(backLink).toBeVisible();
+    if (await mobileHeader.count() > 0) {
+      await expect(mobileHeader).toBeVisible();
     }
   });
 

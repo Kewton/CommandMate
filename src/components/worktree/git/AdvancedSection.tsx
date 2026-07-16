@@ -13,6 +13,7 @@
 'use client';
 
 import React, { memo } from 'react';
+import { useTranslations } from 'next-intl';
 
 interface AdvancedSectionProps {
   /** Whether the advanced group is expanded. */
@@ -27,6 +28,7 @@ export const AdvancedSection = memo(function AdvancedSection({
   onToggle,
   children,
 }: AdvancedSectionProps) {
+  const t = useTranslations('worktree');
   return (
     <div
       className="flex flex-col border-t border-border"
@@ -40,7 +42,7 @@ export const AdvancedSection = memo(function AdvancedSection({
         aria-expanded={open}
       >
         <span className="text-xs w-4 text-center">{open ? '▼' : '▶'}</span>
-        Advanced operations
+        {t('git.advancedOperations')}
       </button>
 
       {open && (

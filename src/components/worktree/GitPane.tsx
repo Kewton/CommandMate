@@ -24,6 +24,7 @@
 'use client';
 
 import { memo, useCallback, useMemo } from 'react';
+import { useTranslations } from 'next-intl';
 import type { GitNetworkOperation } from '@/types/git';
 import type { Worktree } from '@/types/models';
 import { useFilePolling } from '@/hooks/useFilePolling';
@@ -90,6 +91,8 @@ export const GitPane = memo(function GitPane({
   onInsertToMessage,
   className = '',
 }: GitPaneProps) {
+  const t = useTranslations('worktree');
+
   // Issue #818: consolidated GitPane UI persistence — mobile active tab plus the
   // Commit History / Advanced collapse states. SSR-safe (defaults, hydrate on mount).
   const {
@@ -261,7 +264,8 @@ export const GitPane = memo(function GitPane({
   const {
     operation: networkOperation,
     progressState: networkProgressState,
-    error: networkError,
+    error: networkOpError,
+    errorReason: networkErrorReason,
     conflict: networkConflict,
     conflictFiles: networkConflictFiles,
     runFetch: runNetworkFetch,
@@ -269,6 +273,19 @@ export const GitPane = memo(function GitPane({
     runPush: runNetworkPush,
     abort: abortNetworkOp,
   } = useGitPaneNetworkOps(worktreeId, { onCascade: handleNetworkCascade });
+
+  /**
+   * Issue #1277: the hook reports WHY a network op failed (`errorReason`) and
+   * leaves the wording to the render site, which is the only place `t()` can be
+   * called. Reasons we recognize map to localized guidance; anything else falls
+   * back to the server's own fixed `error` string.
+   */
+  const networkError =
+    networkErrorReason === 'auth_failed'
+      ? t('git.network.authFailedGuidance')
+      : networkErrorReason === 'protected_branch'
+        ? t('git.danger.protectedBranchWarning')
+        : networkOpError;
 
   // DR3-004: a push/pull holds the per-worktree writeChain up to 60s; disable
   // sibling section writes while in-flight by composing this lock into each
@@ -405,7 +422,7 @@ export const GitPane = memo(function GitPane({
         className="flex flex-col gap-1.5 px-3 py-2 border-b border-border"
         data-testid="git-advanced-fetch"
       >
-        <span className="text-xs font-medium text-muted-foreground">Remote</span>
+        <span className="text-xs font-medium text-muted-foreground">{t('git.remote')}</span>
         <div>
           <Button
             variant="ghost"
@@ -415,7 +432,7 @@ export const GitPane = memo(function GitPane({
             className="px-2 py-1 text-xs rounded border border-input text-foreground hover:bg-muted disabled:opacity-50"
             data-testid="git-fetch-button"
           >
-            Fetch
+            {t('git.network.fetch')}
           </Button>
         </div>
       </div>

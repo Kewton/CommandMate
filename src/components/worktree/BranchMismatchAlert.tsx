@@ -13,6 +13,7 @@
 'use client';
 
 import { useState, useEffect, memo } from 'react';
+import { useTranslations } from 'next-intl';
 import { AlertTriangle, X } from 'lucide-react';
 
 /**
@@ -42,6 +43,7 @@ export const BranchMismatchAlert = memo(function BranchMismatchAlert({
   currentBranch,
   initialBranch,
 }: BranchMismatchAlertProps) {
+  const t = useTranslations('worktree');
   const [dismissed, setDismissed] = useState(false);
 
   // Reset dismissed state when currentBranch changes
@@ -66,9 +68,9 @@ export const BranchMismatchAlert = memo(function BranchMismatchAlert({
       <AlertTriangle className="w-5 h-5 text-warning flex-shrink-0" />
       <div className="flex-1 min-w-0">
         <span className="text-sm">
-          Branch changed from{' '}
+          {t('branchMismatch.changedFrom')}{' '}
           <span className="font-medium">{initialBranch}</span>
-          {' '}to{' '}
+          {' '}{t('branchMismatch.to')}{' '}
           <span className="font-medium">{currentBranch}</span>
         </span>
       </div>
@@ -76,7 +78,7 @@ export const BranchMismatchAlert = memo(function BranchMismatchAlert({
         type="button"
         onClick={() => setDismissed(true)}
         className="p-1 rounded hover:bg-warning-subtle transition-colors"
-        aria-label="Dismiss alert"
+        aria-label={t('branchMismatch.dismiss')}
       >
         <X className="w-4 h-4" />
       </button>
