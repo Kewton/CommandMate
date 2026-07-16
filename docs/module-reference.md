@@ -389,7 +389,7 @@
 | `src/cli/commands/start.ts` | startコマンド（前景/デーモン、--issue対応 Issue #136）。runStart()はexitせずStartResultを返す（Issue #1195） |
 | `src/cli/commands/stop.ts` | stopコマンド（サーバー停止、--issue対応 Issue #136） |
 | `src/cli/commands/status.ts` | statusコマンド（状態確認、--issue/--all対応 Issue #136）。statusコマンド（--all対応） |
-| `src/cli/commands/update.ts` | updateコマンド（停止→npm install -g→再起動、--check/--yes）（Issue #1194） |
+| `src/cli/commands/update.ts` | updateコマンド（停止→npm install -g→再起動、--check/--yes。npx実行時は何もせず案内して正常終了）（Issue #1194, #1319） |
 | `src/cli/utils/preflight.ts` | システム依存関係チェック（compareVersionsはsemver.tsへ移譲、Issue #1194） |
 | `src/cli/utils/semver.ts` | semver 3方向比較（compareVersions/isComparableVersion）（Issue #1194） |
 | `src/cli/utils/npm-runner.ts` | npm実行ラッパ（viewLatestVersion/installGlobalLatest）（Issue #1194） |
@@ -403,7 +403,7 @@
 | `src/cli/utils/prompt.ts` | 対話形式プロンプトユーティリティ（Issue #119） |
 | `src/cli/utils/server-ready.ts` | サーバ起動完了待ち（waitForServer: TCPポーリング、throwしない）（Issue #1195） |
 | `src/cli/utils/browser.ts` | ブラウザ自動オープン（open/xdg-open、CI・SSH・DISPLAY判定、依存追加なし）（Issue #1195） |
-| `src/cli/utils/install-context.ts` | インストールコンテキスト検出（isGlobalInstall, getConfigDir。npxは global 扱い）（Issue #136, #1195） |
+| `src/cli/utils/install-context.ts` | インストールコンテキスト検出（isGlobalInstall, getConfigDir。npxは global 扱い。isNpxExecutionでnpx実行を別途判定）（Issue #136, #1195, #1319） |
 | `src/cli/utils/input-validators.ts` | 入力検証（Issue番号、ブランチ名）（Issue #136） |
 | `src/cli/utils/resource-resolvers.ts` | リソースパス解決（DB、PID、Log）（Issue #136） |
 | `src/cli/utils/port-allocator.ts` | ポート自動割り当て（MAX_WORKTREES=10制限）（Issue #136） |

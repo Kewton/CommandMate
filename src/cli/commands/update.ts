@@ -22,7 +22,7 @@ import { readFileSync } from 'fs';
 import { ExitCode, getErrorMessage, type UpdateOptions } from '../types';
 import { CLILogger } from '../utils/logger';
 import { getPackageJsonPath } from '../utils/paths';
-import { isGlobalInstall } from '../utils/install-context';
+import { isGlobalInstall, isNpxExecution } from '../utils/install-context';
 import { getEnvPath } from '../utils/env-setup';
 import { getDaemonManagerFactory } from '../utils/daemon-factory';
 import { viewLatestVersion, installGlobalLatest } from '../utils/npm-runner';
@@ -44,6 +44,19 @@ const PACKAGE_NAME = 'commandmate';
  */
 export async function updateCommand(options: UpdateOptions = {}): Promise<void> {
   try {
+    // --- Step 0: npx gate (Issue #1319) -------------------------------------
+    // `npx commandmate` runs from the npx cache, which isGlobalInstall() reports
+    // as global (Issue #1195). Without this gate step 1 lets a throwaway process
+    // rewrite the user's global install, and step 8 then fails its own check by
+    // re-reading the npx cache's package.json instead of the new global one.
+    // The gate covers --check too: "current version" under npx is whatever npx
+    // happened to cache, which says nothing about the user's install.
+    if (isNpxExecution()) {
+      printNpxGuidance();
+      process.exit(ExitCode.SUCCESS);
+      return;
+    }
+
     // --- Step 1: install type gate -----------------------------------------
     // Known limitation (D-17 / S3-009): isGlobalInstall() also returns true for
     // a project-local `npm install commandmate`. Step 8 catches that case.
@@ -305,6 +318,26 @@ function tryReadInstalledVersion(): string {
  */
 function stripV(version: string): string {
   return version.replace(/^v/, '');
+}
+
+/**
+ * Guidance for an `npx commandmate update` run (Issue #1319).
+ *
+ * Nothing is changed: npx already fetched the requested version, and updating
+ * the user's global install from here would be a side effect they never asked
+ * this throwaway process to perform.
+ */
+function printNpxGuidance(): void {
+  console.log('');
+  console.log(`This is an npx run, so "${PACKAGE_NAME} update" will not change anything.`);
+  console.log('npx fetches the requested version every time, so it has nothing to update.');
+  console.log('');
+  console.log(`To update a globally installed ${PACKAGE_NAME}, run:`);
+  console.log(`  npm install -g ${PACKAGE_NAME}@latest`);
+  console.log('');
+  console.log(`Once it is installed globally, "${PACKAGE_NAME} update" handles this for you`);
+  console.log('(stop the server -> install -> restart).');
+  console.log('');
 }
 
 /**

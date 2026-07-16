@@ -20,6 +20,7 @@ vi.mock('path', async () => {
 
 // Import will happen after mock setup
 let isGlobalInstall: () => boolean;
+let isNpxExecution: () => boolean;
 let getConfigDir: () => string;
 
 describe('install-context', () => {
@@ -30,6 +31,7 @@ describe('install-context', () => {
     // Dynamic import to pick up mocks
     const module = await import('../../../../src/cli/utils/install-context');
     isGlobalInstall = module.isGlobalInstall;
+    isNpxExecution = module.isNpxExecution;
     getConfigDir = module.getConfigDir;
   });
 
@@ -55,6 +57,50 @@ describe('install-context', () => {
       const result = isGlobalInstall();
       // Just verify it returns without error and is boolean
       expect(typeof result).toBe('boolean');
+    });
+  });
+
+  // Issue #1319: a separate detector so `update` can refuse to rewrite the user's
+  // install from a throwaway npx process. isGlobalInstall() must keep answering
+  // true for the npx cache (Issue #1195), so it cannot carry this distinction.
+  describe('isNpxExecution (Issue #1319)', () => {
+    it('should detect the npx cache path', () => {
+      vi.mocked(path.dirname).mockReturnValue(
+        '/Users/tester/.npm/_npx/a1b2c3d4e5f6a7b8/node_modules/commandmate/dist/cli'
+      );
+
+      expect(isNpxExecution()).toBe(true);
+    });
+
+    it('should detect the npx cache path on Windows', () => {
+      vi.mocked(path.dirname).mockReturnValue(
+        'C:\\Users\\tester\\AppData\\Local\\npm-cache\\_npx\\a1b2c3d4\\node_modules\\commandmate\\dist\\cli'
+      );
+
+      expect(isNpxExecution()).toBe(true);
+    });
+
+    it('should not treat a global install as an npx execution', () => {
+      vi.mocked(path.dirname).mockReturnValue(
+        '/usr/local/lib/node_modules/commandmate/dist/cli'
+      );
+
+      expect(isNpxExecution()).toBe(false);
+      expect(isGlobalInstall()).toBe(true);
+    });
+
+    it('should not treat a development checkout as an npx execution', () => {
+      vi.mocked(path.dirname).mockReturnValue('/Users/tester/src/commandmate/src/cli');
+
+      expect(isNpxExecution()).toBe(false);
+    });
+
+    it('should not match a directory that merely contains "npx"', () => {
+      vi.mocked(path.dirname).mockReturnValue(
+        '/Users/tester/projects/npx-playground/node_modules/commandmate/dist/cli'
+      );
+
+      expect(isNpxExecution()).toBe(false);
     });
   });
 
@@ -119,6 +165,12 @@ describe('install-context', () => {
 
     it('should detect a global install when running from the npx cache', () => {
       expect(isGlobalInstall()).toBe(true);
+    });
+
+    // Issue #1319: isNpxExecution() answers the question isGlobalInstall() cannot,
+    // for callers that would mutate the installation (commands/update.ts).
+    it('should also report an npx execution for the same path', () => {
+      expect(isNpxExecution()).toBe(true);
     });
 
     it('should place .env under ~/.commandmate when run via npx', () => {
