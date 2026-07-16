@@ -243,4 +243,19 @@ describe('Issue #1200: metadata and honest copy', () => {
     const html = readIndexHtml();
     expect(html).toMatch(/Beta/);
   });
+
+  it('quotes the same Node major that package.json engines requires', () => {
+    // #1264 raised engines to >=22 but its sweep did not reach website/, so the
+    // LP kept telling newcomers "Node.js v20+" while the very install it
+    // advertises refuses to run on 20. The LP is the entry point for people who
+    // read nothing else, so its prerequisite has to track engines rather than be
+    // remembered.
+    const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf-8'));
+    const enginesMajor = /(\d+)/.exec(pkg.engines.node)?.[1];
+    expect(enginesMajor).toBeDefined();
+
+    const quoted = /Node\.js v(\d+)\+/.exec(readIndexHtml())?.[1];
+    expect(quoted).toBeDefined();
+    expect(quoted).toBe(enginesMajor);
+  });
 });
