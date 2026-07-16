@@ -389,7 +389,11 @@ export const MAX_DISABLED_REPOSITORIES = 1000;
  * All path normalization is centralized here to prevent inconsistencies.
  *
  * NOTE: path.resolve() removes trailing slashes and resolves relative paths
- * but does NOT resolve symlinks. For symlink resolution, use fs.realpathSync().
+ * but does NOT resolve symlinks, so the returned value is the lexical path the
+ * caller asked for. This is deliberate: the stored repository path stays the
+ * one the user supplied. Issue #1285: the system-directory guard no longer
+ * relies on this value being physical — isSystemDirectory() resolves symlinks
+ * itself, so a lexical path here is safe to hand it.
  * See design policy Section 7 for the symlink handling policy.
  *
  * SF-001: DRY - centralized path normalization
