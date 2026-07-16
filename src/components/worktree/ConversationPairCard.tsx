@@ -9,7 +9,7 @@
 
 import React, { useMemo, useCallback, memo } from 'react';
 import { Copy, ArrowDownToLine, ChevronDown, Loader2, AlertCircle, RotateCcw, X } from 'lucide-react';
-import { useLocale } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import type { ConversationPair } from '@/types/conversation';
 import type { ChatMessage } from '@/types/models';
 import { getDateFnsLocale } from '@/lib/date-locale';
@@ -167,6 +167,7 @@ const MessageContent = memo(function MessageContent({
   content: string;
   onFilePathClick: (path: string) => void;
 }) {
+  const t = useTranslations('worktree');
   const parts = useMemo(() => parseContentParts(content), [content]);
 
   const handlePathClick = useCallback(
@@ -183,7 +184,7 @@ const MessageContent = memo(function MessageContent({
             type="button"
             onClick={handlePathClick(part.content)}
             className="text-accent-700 dark:text-accent-400 hover:text-accent-600 dark:hover:text-accent-300 hover:underline cursor-pointer font-mono text-sm"
-            aria-label={`Open file: ${part.content}`}
+            aria-label={t('conversation.openFile', { path: part.content })}
           >
             {part.content}
           </button>
@@ -200,6 +201,7 @@ const MessageContent = memo(function MessageContent({
  * Displays animated dots to indicate that a response is being awaited.
  */
 function PendingIndicator() {
+  const t = useTranslations('worktree');
   return (
     <div
       data-testid="pending-indicator"
@@ -216,7 +218,7 @@ function PendingIndicator() {
           style={{ animationDelay: '300ms' }}
         />
       </div>
-      <span className="text-sm">Waiting for response...</span>
+      <span className="text-sm">{t('conversation.waitingForResponse')}</span>
     </div>
   );
 }
@@ -244,6 +246,8 @@ const UserMessageSection = memo(function UserMessageSection({
   onDiscardPending?: (tempId: string) => void;
 }) {
   const locale = useLocale();
+  const t = useTranslations('worktree');
+  const tCommon = useTranslations('common');
   const dateFnsLocale = getDateFnsLocale(locale);
   const formattedTime = formatMessageTimestamp(message.timestamp, dateFnsLocale);
 
@@ -262,7 +266,7 @@ const UserMessageSection = memo(function UserMessageSection({
   return (
     <div className={sectionClassName}>
       <div className="flex items-center gap-2 mb-1">
-        <span className="text-xs font-medium text-accent-700 dark:text-accent-400">You</span>
+        <span className="text-xs font-medium text-accent-700 dark:text-accent-400">{t('conversation.you')}</span>
         <span className="text-xs text-muted-foreground">{formattedTime}</span>
         {/* Issue #1121: send-state chip (before the action toolbar). */}
         {sendState === 'sending' && (
@@ -271,7 +275,7 @@ const UserMessageSection = memo(function UserMessageSection({
             className="flex items-center gap-1 text-xs text-muted-foreground"
           >
             <Loader2 size={12} className="animate-spin" aria-hidden="true" />
-            <span>Sending…</span>
+            <span>{t('conversation.sending')}</span>
           </span>
         )}
         {sendState === 'error' && (
@@ -280,7 +284,7 @@ const UserMessageSection = memo(function UserMessageSection({
             className="flex items-center gap-1 text-xs text-danger-foreground"
           >
             <AlertCircle size={12} aria-hidden="true" />
-            <span>Failed to send</span>
+            <span>{t('conversation.failedToSend')}</span>
           </span>
         )}
         {/* Issue #1121: on a failed send, retry/discard replace the hover toolbar
@@ -293,11 +297,11 @@ const UserMessageSection = memo(function UserMessageSection({
                 data-testid="pending-retry"
                 onClick={() => onRetryPending(message.id)}
                 className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-accent-700 dark:text-accent-400 hover:bg-muted transition-colors"
-                aria-label="Retry sending message"
-                title="Retry"
+                aria-label={t('conversation.retrySending')}
+                title={tCommon('retry')}
               >
                 <RotateCcw size={12} aria-hidden="true" />
-                Retry
+                {tCommon('retry')}
               </button>
             )}
             {onDiscardPending && (
@@ -306,11 +310,11 @@ const UserMessageSection = memo(function UserMessageSection({
                 data-testid="pending-discard"
                 onClick={() => onDiscardPending(message.id)}
                 className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-danger-foreground hover:bg-muted transition-colors"
-                aria-label="Discard message"
-                title="Discard"
+                aria-label={t('conversation.discardMessage')}
+                title={t('conversation.discard')}
               >
                 <X size={12} aria-hidden="true" />
-                Discard
+                {t('conversation.discard')}
               </button>
             )}
           </div>
@@ -326,8 +330,8 @@ const UserMessageSection = memo(function UserMessageSection({
                 data-testid="insert-user-message"
                 onClick={() => onInsertToMessage(message.content)}
                 className="p-1 text-muted-foreground hover:text-accent-600 dark:hover:text-accent-400 hover:bg-muted rounded transition-colors"
-                aria-label="Insert to message"
-                title="Insert to message"
+                aria-label={t('conversation.insertToMessage')}
+                title={t('conversation.insertToMessage')}
               >
                 <ArrowDownToLine size={14} aria-hidden="true" />
               </button>
@@ -338,8 +342,8 @@ const UserMessageSection = memo(function UserMessageSection({
                 data-testid="copy-user-message"
                 onClick={() => onCopy(message.content)}
                 className="p-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors"
-                aria-label="Copy message"
-                title="Copy"
+                aria-label={t('conversation.copyMessage')}
+                title={t('conversation.copy')}
               >
                 <Copy size={14} aria-hidden="true" />
               </button>
@@ -388,6 +392,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
   onToggleExpand?: () => void;
 }) {
   const locale = useLocale();
+  const t = useTranslations('worktree');
   const dateFnsLocale = getDateFnsLocale(locale);
   const formattedTime = formatMessageTimestamp(message.timestamp, dateFnsLocale);
 
@@ -404,7 +409,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
   return (
     <div className="assistant-message-item group relative">
       <div className="flex items-center gap-2 mb-1">
-        <span className="text-xs font-medium text-muted-foreground">Assistant</span>
+        <span className="text-xs font-medium text-muted-foreground">{t('conversation.assistant')}</span>
         <span className="text-xs text-muted-foreground">{formattedTime}</span>
         {total > 1 && (
           <span className="text-xs text-muted-foreground">
@@ -420,14 +425,14 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
               onClick={onToggleExpand}
               className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-accent-700 dark:text-accent-400 hover:text-accent-600 dark:hover:text-accent-300 hover:bg-muted transition-colors"
               aria-expanded={isExpanded}
-              aria-label={isExpanded ? 'Collapse message' : 'Expand message'}
+              aria-label={isExpanded ? t('conversation.collapseMessage') : t('conversation.expandMessage')}
             >
               <ChevronDown
                 size={12}
                 className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`}
                 aria-hidden="true"
               />
-              {isExpanded ? 'Collapse' : 'Expand'}
+              {isExpanded ? t('conversation.collapse') : t('conversation.expand')}
             </button>
           )}
           {onCopy && (
@@ -436,8 +441,8 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
               data-testid="copy-assistant-message"
               onClick={() => onCopy(message.content)}
               className="p-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors"
-              aria-label="Copy message"
-              title="Copy"
+              aria-label={t('conversation.copyMessage')}
+              title={t('conversation.copy')}
             >
               <Copy size={14} aria-hidden="true" />
             </button>
@@ -511,6 +516,7 @@ const AssistantMessagesSection = memo(function AssistantMessagesSection({
  * Displays a warning indicator for assistant messages without user input.
  */
 function OrphanHeader() {
+  const t = useTranslations('worktree');
   return (
     <div
       data-testid="orphan-indicator"
@@ -530,7 +536,7 @@ function OrphanHeader() {
           d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
         />
       </svg>
-      <span>System Message</span>
+      <span>{t('conversation.systemMessage')}</span>
     </div>
   );
 }
@@ -568,6 +574,7 @@ export const ConversationPairCard = memo(function ConversationPairCard({
   onRetryPending,
   onDiscardPending,
 }: ConversationPairCardProps) {
+  const t = useTranslations('worktree');
   // Issue #1121: an optimistic (unsent / failed) user message drives special
   // styling and suppresses the "Waiting for response…" block — it is not yet
   // waiting on the assistant, it is waiting on the server to confirm the send.
@@ -600,14 +607,16 @@ export const ConversationPairCard = memo(function ConversationPairCard({
     return `${base} ${statusClass}`.trim();
   }, [pair.status]);
 
-  // Truncated user message for aria-label
-  const ariaLabel = useMemo(() => {
-    if (pair.userMessage) {
-      const preview = pair.userMessage.content.substring(0, 50);
-      return `Conversation: ${preview}${pair.userMessage.content.length > 50 ? '...' : ''}`;
-    }
-    return 'System message';
-  }, [pair.userMessage]);
+  // Truncated user message for aria-label. Not memoized: `t` churns identity
+  // every render (Issue #1219), so a deps array holding it would recompute
+  // anyway — and omitting it would freeze the label on a locale switch.
+  const ariaLabel = pair.userMessage
+    ? t('conversation.conversationLabel', {
+        preview: `${pair.userMessage.content.substring(0, 50)}${
+          pair.userMessage.content.length > 50 ? '...' : ''
+        }`,
+      })
+    : t('conversation.systemMessageLabel');
 
   return (
     <div

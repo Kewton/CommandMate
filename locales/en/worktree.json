@@ -12,7 +12,75 @@
   "composer": {
     "placeholder": "Type your message…",
     "commandsHint": "commands",
-    "newlineHint": "newline"
+    "newlineHint": "newline",
+    "removeAttachment": "Remove attachment",
+    "showSlashCommands": "Show slash commands",
+    "attachImage": "Attach image",
+    "sendMessage": "Send message"
+  },
+  "interrupt": {
+    "stopProcessing": "Stop processing"
+  },
+  "history": {
+    "title": "Message History",
+    "regionLabel": "Message history",
+    "loading": "Loading messages",
+    "empty": "No messages yet",
+    "show": "Show",
+    "displayLimit": "History display limit",
+    "showArchived": "Show archived",
+    "showUserOnly": "Show user messages only",
+    "showAllMessages": "Show all messages",
+    "openSearch": "Open search",
+    "closeSearch": "Close search",
+    "copied": "Copied to clipboard",
+    "copyFailed": "Failed to copy",
+    "search": {
+      "regionLabel": "Search history text",
+      "placeholder": "Search...",
+      "keywordLabel": "Search keyword",
+      "prev": "Previous result",
+      "next": "Next result",
+      "close": "Close search bar",
+      "countAtMax": "{current}/{max}+"
+    }
+  },
+  "conversation": {
+    "waitingForResponse": "Waiting for response...",
+    "you": "You",
+    "assistant": "Assistant",
+    "sending": "Sending…",
+    "failedToSend": "Failed to send",
+    "retrySending": "Retry sending message",
+    "discard": "Discard",
+    "discardMessage": "Discard message",
+    "insertToMessage": "Insert to message",
+    "copy": "Copy",
+    "copyMessage": "Copy message",
+    "collapse": "Collapse",
+    "expand": "Expand",
+    "collapseMessage": "Collapse message",
+    "expandMessage": "Expand message",
+    "systemMessage": "System Message",
+    "systemMessageLabel": "System message",
+    "openFile": "Open file: {path}",
+    "conversationLabel": "Conversation: {preview}"
+  },
+  "messages": {
+    "loading": "Loading messages...",
+    "empty": "No messages yet",
+    "you": "You",
+    "copy": "Copy",
+    "copyMessage": "Copy message",
+    "viewLogFile": "View log file →"
+  },
+  "slashCommands": {
+    "title": "Commands",
+    "searchPlaceholder": "Search commands...",
+    "enterCustomCommand": "Enter custom command...",
+    "selectHint": "select",
+    "closeHint": "close",
+    "empty": "No commands available"
   },
   "session": {
     "confirmKill": "End session for \"{name}\"?\n\nAll message history will be deleted. Log files will be retained.",

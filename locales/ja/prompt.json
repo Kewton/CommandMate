@@ -11,5 +11,8 @@
   "enterCustomMessage": "カスタムメッセージを入力してください",
   "enterMessageHere": "ここにメッセージを入力...",
   "enterValuePlaceholder": "値を入力してください...",
-  "submit": "送信"
+  "submit": "送信",
+  "yesNoGroupLabel": "はい / いいえ の選択肢",
+  "selectAnOption": "選択肢を選んでください",
+  "customValueInput": "カスタム値の入力"
 }

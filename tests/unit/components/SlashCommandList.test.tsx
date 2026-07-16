@@ -9,6 +9,14 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { SlashCommandList } from '@/components/worktree/SlashCommandList';
 import type { SlashCommandGroup } from '@/types/slash-commands';
 
+// Issue #1276: the empty state is dictionary-driven now. The global mock would
+// echo `worktree.slashCommands.empty`, which the /no commands/i assertion below
+// could never match — back it with the real dictionary so the key must resolve.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 describe('SlashCommandList', () => {
   const mockGroups: SlashCommandGroup[] = [
     {

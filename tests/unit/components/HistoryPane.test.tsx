@@ -12,6 +12,15 @@ import { HistoryPane } from '@/components/worktree/HistoryPane';
 import type { ChatMessage } from '@/types/models';
 import { installVirtualLayout } from '@tests/helpers/virtual-layout';
 
+// Issue #1276: HistoryPane and ConversationPairCard now resolve their wording
+// through the dictionary. The global mock echoes `worktree.conversation.openFile`
+// and drops interpolation entirely, which would make the file-path aria-label
+// assertions below vacuous — they must prove the label actually carries the path.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 // [Issue #744] Spy on the highlight engine so we can assert which namespace a
 // given HistoryPane uses (legacy global vs per-split). We keep the real
 // implementation (via importOriginal) so the engine still behaves normally.
@@ -561,9 +570,11 @@ describe('HistoryPane', () => {
       fireEvent.click(toggle);
 
       expect(screen.getByRole('search')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /close search/i })).toBeInTheDocument();
+      // Exact match: the search bar's own dismiss control ("Close search bar")
+      // also lives in this region, so a loose /close search/i would be ambiguous.
+      expect(screen.getByRole('button', { name: 'Close search' })).toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole('button', { name: /close search/i }));
+      fireEvent.click(screen.getByRole('button', { name: 'Close search' }));
       expect(screen.queryByRole('search')).not.toBeInTheDocument();
     });
 
@@ -666,7 +677,7 @@ describe('HistoryPane', () => {
         />
       );
       fireEvent.click(screen.getByRole('button', { name: /open search/i }));
-      const input = screen.getByLabelText('検索キーワード') as HTMLInputElement;
+      const input = screen.getByLabelText('Search keyword') as HTMLInputElement;
       fireEvent.change(input, { target: { value: 'sentinel' } });
       return utils;
     }

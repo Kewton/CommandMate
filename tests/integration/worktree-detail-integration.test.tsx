@@ -24,6 +24,14 @@ const mockPush = vi.fn();
 const mockOpenMobileDrawer = vi.fn();
 const mockToggle = vi.fn();
 
+// Issue #1276: HistoryPane's region label is dictionary-driven now, so the
+// /message history/i role lookup below needs the real dictionary rather than the
+// global mock's `worktree.history.regionLabel` echo.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
 vi.mock('next/navigation', () => ({
   useRouter: () => ({
     push: mockPush,
@@ -610,7 +618,7 @@ describe('WorktreeDetailRefactored Integration', () => {
         fireEvent.click(optionRadio);
       });
 
-      const submitButton = screen.getByRole('button', { name: /prompt\.submit/i });
+      const submitButton = screen.getByRole('button', { name: /submit/i });
       await act(async () => {
         fireEvent.click(submitButton);
       });

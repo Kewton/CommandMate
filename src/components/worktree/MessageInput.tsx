@@ -473,7 +473,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
             type="button"
             onClick={removeAttachment}
             className="flex-shrink-0 p-0.5 text-accent-600 hover:text-danger-foreground dark:text-accent-400 rounded transition-colors"
-            aria-label="Remove attachment"
+            aria-label={t('composer.removeAttachment')}
             data-testid="remove-attachment-button"
           >
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -509,7 +509,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
                 setShowCommandSelector(true);
               }}
               className="flex-shrink-0 p-2 text-muted-foreground hover:text-accent-600 hover:bg-accent-50 dark:hover:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors"
-              aria-label="Show slash commands"
+              aria-label={t('composer.showSlashCommands')}
               data-testid="mobile-command-button"
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -522,7 +522,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
               onClick={openFileDialog}
               disabled={isUploading || sending}
               className="flex-shrink-0 p-2 text-muted-foreground hover:text-accent-600 hover:bg-accent-50 dark:hover:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
-              aria-label="Attach image"
+              aria-label={t('composer.attachImage')}
               data-testid="attach-image-button"
             >
               {isUploading ? (
@@ -550,7 +550,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
             onClick={openFileDialog}
             disabled={isUploading || sending}
             className="flex-shrink-0 p-2 text-muted-foreground hover:text-accent-600 hover:bg-accent-50 dark:hover:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
-            aria-label="Attach image"
+            aria-label={t('composer.attachImage')}
             data-testid="attach-image-button"
           >
             {isUploading ? (
@@ -606,7 +606,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
                 ? 'bg-accent-600 text-white hover:bg-accent-700 shadow-sm'
                 : 'text-muted-foreground/50'
             }`}
-            aria-label="Send message"
+            aria-label={t('composer.sendMessage')}
           >
             {sending ? (
               <Spinner size="md" />

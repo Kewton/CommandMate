@@ -220,7 +220,7 @@ function YesNoPromptActions({
   const noButtonClasses = `${BUTTON_BASE_STYLES} ${isNoDefault ? 'bg-foreground text-background hover:bg-foreground/90 primary default highlighted' : BUTTON_SECONDARY_STYLES}`;
 
   return (
-    <div className="flex items-center gap-3" role="group" aria-label="Yes or No options">
+    <div className="flex items-center gap-3" role="group" aria-label={t('yesNoGroupLabel')}>
       <Button
         variant="ghost"
         type="button"
@@ -284,7 +284,7 @@ function MultipleChoicePromptActions({
   return (
     <div className="space-y-3">
       <fieldset>
-        <legend className="sr-only">Select an option</legend>
+        <legend className="sr-only">{t('selectAnOption')}</legend>
         <RadioGroup
           name={groupName}
           value={selectedOption != null ? String(selectedOption) : ''}
@@ -318,7 +318,7 @@ function MultipleChoicePromptActions({
       {/* Text input for options that require it */}
       {showTextInput && (
         <div className="mt-3">
-          <label htmlFor={`text-input-${groupName}`} className="sr-only">Custom value input</label>
+          <label htmlFor={`text-input-${groupName}`} className="sr-only">{t('customValueInput')}</label>
           <input
             id={`text-input-${groupName}`}
             type="text"

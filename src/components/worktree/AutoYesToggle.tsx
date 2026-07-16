@@ -11,6 +11,7 @@
 'use client';
 
 import React, { memo, useEffect, useState, useCallback } from 'react';
+import { useTranslations } from 'next-intl';
 import { Switch } from '@/components/ui/Switch';
 import { AutoYesConfirmDialog } from './AutoYesConfirmDialog';
 import { formatTimeRemaining, AUTO_YES_COUNTDOWN_INTERVAL_MS } from '@/config/auto-yes-config';
@@ -63,6 +64,7 @@ export const AutoYesToggle = memo(function AutoYesToggle({
   showToolName = true,
   onExpire,
 }: AutoYesToggleProps) {
+  const t = useTranslations('autoYes');
   const [timeRemaining, setTimeRemaining] = useState<string>('');
   const [notification, setNotification] = useState<string | null>(null);
   const [toggling, setToggling] = useState(false);
@@ -152,20 +154,20 @@ export const AutoYesToggle = memo(function AutoYesToggle({
         checked={displayEnabled}
         onCheckedChange={handleToggle}
         disabled={toggling}
-        aria-label="Auto Yes mode"
+        aria-label={t('toggleLabel')}
       />
-      <span className="text-sm font-medium text-foreground">Auto Yes</span>
+      <span className="text-sm font-medium text-foreground">{t('label')}</span>
 
       {/* Active CLI tool indicator (Issue #525: show regardless of enabled state) */}
       {showToolName && cliToolName && (
-        <span className="text-xs text-accent-600 dark:text-accent-400 font-medium" aria-label="Auto Yes target">
+        <span className="text-xs text-accent-600 dark:text-accent-400 font-medium" aria-label={t('targetLabel')}>
           ({getCliToolDisplayNameSafe(cliToolName, '')})
         </span>
       )}
 
       {/* Countdown timer */}
       {displayEnabled && timeRemaining && (
-        <span className="text-sm text-muted-foreground" aria-label="Time remaining">
+        <span className="text-sm text-muted-foreground" aria-label={t('timeRemaining')}>
           {timeRemaining}
         </span>
       )}
