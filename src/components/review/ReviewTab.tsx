@@ -46,8 +46,9 @@ const FILTER_PREDICATES: Record<ReviewFilter, (wt: Worktree) => boolean> = {
 
 /** Small CLI status dot */
 function CliDot({ status, label }: { status: BranchStatus; label: string }) {
+  const tCommon = useTranslations('common');
   const config = SIDEBAR_STATUS_CONFIG[status];
-  const title = `${label}: ${config.label}`;
+  const title = `${label}: ${tCommon(config.labelKey)}`;
   const base = 'w-2.5 h-2.5 rounded-full flex-shrink-0';
 
   if (config.type === 'spinner') {

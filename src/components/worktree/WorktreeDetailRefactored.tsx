@@ -510,8 +510,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 worktree?.sessionStatusByInstance?.[inst.id] ?? worktree?.sessionStatusByCli?.[inst.cliTool]
               );
               // Issue #1277: the status wording comes from the generic
-              // `common.status.*` keys (#1273), not the hardcoded English
-              // `.label` on SIDEBAR_STATUS_CONFIG — one source of truth.
+              // `common.status.*` keys (#1273) — one source of truth, shared
+              // with SIDEBAR_STATUS_CONFIG's labelKey (#1304).
               const statusLabel = tCommon(`status.${toolStatus}`);
               const isActive = activeInstanceId === inst.id;
               return (

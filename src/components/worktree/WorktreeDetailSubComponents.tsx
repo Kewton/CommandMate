@@ -14,7 +14,7 @@
 import React, { useEffect, useCallback, useState, memo, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { type WorktreeStatus } from '@/components/mobile/MobileHeader';
-import { DESKTOP_STATUS_CONFIG } from '@/config/status-colors';
+import { DESKTOP_STATUS_LABEL_KEYS } from '@/config/status-colors';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { Tooltip } from '@/components/common/Tooltip';
 import {
@@ -546,11 +546,15 @@ export const DesktopHeader = memo(function DesktopHeader({
 }: DesktopHeaderProps) {
   const tWorktree = useTranslations('worktree');
   // Issue #1277: agent-instance status labels resolve through the generic
-  // `common.status.*` keys (defined by #1273) rather than the hardcoded English
-  // `.label` on SIDEBAR_STATUS_CONFIG, so the wording has a single source of
-  // truth. The config keeps owning the colour/type mapping.
+  // `common.status.*` keys (defined by #1273), so the wording has a single
+  // source of truth. The config keeps owning the color/type mapping.
   const tCommon = useTranslations('common');
-  const statusConfig = DESKTOP_STATUS_CONFIG[status];
+  // Issue #1304: the worktree-level dot shows a long-form description
+  // ("Idle - No active session"). `error` has no entry — its label is the
+  // generic `common.status.error`, which StatusDot resolves itself when `label`
+  // is omitted, so we pass undefined rather than duplicating that wording.
+  const statusLabelKey = DESKTOP_STATUS_LABEL_KEYS[status];
+  const statusLabel = statusLabelKey ? tWorktree(statusLabelKey) : undefined;
   // Issue #111: DRY - Use shared truncateString utility
   const DESKTOP_BRANCH_MAX_LENGTH = 30;
   const DESCRIPTION_MAX_LENGTH = 50;
@@ -632,7 +636,7 @@ export const DesktopHeader = memo(function DesktopHeader({
           data-testid="desktop-status-indicator"
           status={status}
           size="lg"
-          label={statusConfig.label}
+          label={statusLabel}
         />
         {/* Worktree name, memo, and repository */}
         <div className="flex flex-col min-w-0">

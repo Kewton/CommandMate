@@ -606,5 +606,11 @@
     "statusPill": "{label}: {status}",
     "subTabMessage": "メッセージ",
     "subTabGit": "Git"
+  },
+  "detailStatus": {
+    "idle": "アイドル - セッションなし",
+    "ready": "準備完了 - 入力待ち",
+    "running": "実行中 - 処理しています",
+    "waiting": "待機中 - ユーザー入力が必要です"
   }
 }
