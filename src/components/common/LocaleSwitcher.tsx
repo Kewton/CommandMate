@@ -18,6 +18,10 @@ export function LocaleSwitcher() {
     <select
       value={currentLocale}
       onChange={(e) => switchLocale(e.target.value)}
+      // Issue #1273: the aria-label is now translated, so it cannot double as a
+      // test selector — the e2e suite drives this control *after* switching to
+      // Japanese, where the label reads 言語.
+      data-testid="locale-switcher"
       aria-label={t('language')}
       className="
         w-full px-3 py-2 rounded-md
