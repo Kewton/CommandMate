@@ -6,6 +6,10 @@
  * criteria: the page must resolve every asset it references relative to
  * `website/`, must ship nothing that needs compiling, and must respect the
  * media budget that keeps the hero's LCP defensible.
+ *
+ * Issue #1272 removed the demo videos and pinned the hero/og:image to an
+ * isolated-environment screenshot; the guards against that regressing live in
+ * the `Issue #1272` block at the bottom.
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
@@ -15,8 +19,13 @@ const REPO_ROOT = path.resolve(__dirname, '../../..');
 const WEBSITE_DIR = path.join(REPO_ROOT, 'website');
 const INDEX_HTML = path.join(WEBSITE_DIR, 'index.html');
 
-const VIDEO_BUDGET_BYTES = 1_500_000;
-const POSTER_BUDGET_BYTES = 100_000;
+/** The hero image is the LCP element and the og:image, so it carries a budget. */
+const HERO_BUDGET_BYTES = 100_000;
+const HERO_IMAGE = 'assets/img/screenshot-desktop.webp';
+const PAGES_BASE_URL = 'https://kewton.github.io/CommandMate/';
+
+/** The LP's own source, i.e. everything Pages actually serves as the page. */
+const LP_SOURCE_FILES = ['index.html', 'styles.css', 'main.js'];
 
 /** Every file under website/, recursively, as paths relative to website/. */
 function walk(dir: string, base = dir): string[] {
@@ -109,22 +118,10 @@ describe('Issue #1200: asset references resolve under sub-path hosting', () => {
 });
 
 describe('Issue #1200: media budget', () => {
-  it('keeps each video under 1.5MB', () => {
-    const oversized = walk(WEBSITE_DIR)
-      .filter((f) => f.endsWith('.mp4'))
-      .map((f) => ({ file: f, bytes: fs.statSync(path.join(WEBSITE_DIR, f)).size }))
-      .filter((v) => v.bytes >= VIDEO_BUDGET_BYTES);
+  it('keeps the hero image under 100KB, since it is the LCP element', () => {
+    const bytes = fs.statSync(path.join(WEBSITE_DIR, HERO_IMAGE)).size;
 
-    expect(oversized).toEqual([]);
-  });
-
-  it('keeps each poster under 100KB, since the poster is the LCP element', () => {
-    const oversized = walk(WEBSITE_DIR)
-      .filter((f) => f.includes('poster'))
-      .map((f) => ({ file: f, bytes: fs.statSync(path.join(WEBSITE_DIR, f)).size }))
-      .filter((p) => p.bytes >= POSTER_BUDGET_BYTES);
-
-    expect(oversized).toEqual([]);
+    expect(bytes).toBeLessThan(HERO_BUDGET_BYTES);
   });
 
   it('never copies the 22MB/47MB originals into website/', () => {
@@ -136,66 +133,90 @@ describe('Issue #1200: media budget', () => {
   });
 });
 
-describe('Issue #1200: video element behaviour', () => {
-  it('gives every video a poster so there is an LCP frame before playback', () => {
-    const html = readIndexHtml();
-    const videos = html.match(/<video[^>]*>/g) ?? [];
-
-    expect(videos.length).toBeGreaterThan(0);
-    for (const video of videos) {
-      expect(video).toMatch(/poster="/);
-    }
-  });
-
-  it('does not preload="auto", which would pull megabytes before interaction', () => {
-    const html = readIndexHtml();
-    const videos = html.match(/<video[^>]*>/g) ?? [];
-
-    for (const video of videos) {
-      expect(video).toMatch(/preload="(metadata|none)"/);
-      expect(video).not.toMatch(/preload="auto"/);
-    }
-  });
-
-  it('omits the autoplay attribute so reduced-motion can be honoured before playback', () => {
-    // Playback is started from main.js only when prefers-reduced-motion allows.
-    // A literal autoplay attribute would play frames before that check runs.
-    const html = readIndexHtml();
-    const videos = html.match(/<video[^>]*>/g) ?? [];
-
-    for (const video of videos) {
-      // Must not match the native attribute, but `data-autoplay` (the hook
-      // main.js selects on) is a different attribute and is expected here.
-      expect(video).not.toMatch(/(?<![-\w])autoplay\b/);
-      expect(video).toMatch(/data-autoplay\b/);
-    }
-  });
-
-  it('honours prefers-reduced-motion in the playback script', () => {
-    const mainJs = fs.readFileSync(path.join(WEBSITE_DIR, 'main.js'), 'utf-8');
-    expect(mainJs).toMatch(/prefers-reduced-motion/);
-  });
-
-  it('gates playback on visibility, since play() forces a full download', () => {
-    // Without this, preload="none" on the below-the-fold phone demo is a lie:
-    // an unconditional play() on load pulls the whole file anyway.
-    const mainJs = fs.readFileSync(path.join(WEBSITE_DIR, 'main.js'), 'utf-8');
-    expect(mainJs).toMatch(/IntersectionObserver/);
-  });
-
+describe('Issue #1200: page-level markup', () => {
   it('declares an icon so the browser stops probing /favicon.ico at the root', () => {
     const html = readIndexHtml();
     expect(html).toMatch(/<link\s+rel="icon"\s+href="[^/][^"]*"/);
   });
+});
 
-  it('falls back to a still image where video is unsupported', () => {
+/**
+ * Issue #1272 — the demo videos were re-encodes of recordings made on a personal
+ * machine: six private repo names, readable private source, and the retired
+ * product name `MyCodeBranchDesk` in the hero. The desktop poster doubled as the
+ * og:image, so it expanded as the preview card every time the LP was linked.
+ *
+ * These tests exist to stop that material coming back. They are deliberately
+ * blunt — anything named `demo-*` under website/, or any `<video>` on the page,
+ * fails — because the safe way to add a video back is to re-record in an
+ * isolated environment and revisit this rule on purpose, not to quietly reuse
+ * `docs/images/` (which still holds the tainted originals for the README GIFs).
+ */
+describe('Issue #1272: the LP ships no demo media', () => {
+  it('references demo-desktop/demo-mobile from nowhere in the LP source', () => {
+    const offenders = LP_SOURCE_FILES.flatMap((file) => {
+      const body = fs.readFileSync(path.join(WEBSITE_DIR, file), 'utf-8');
+      return body.split('\n').flatMap((line, i) =>
+        /demo-desktop|demo-mobile/.test(line) ? [`${file}:${i + 1}: ${line.trim()}`] : [],
+      );
+    });
+
+    expect(offenders).toEqual([]);
+  });
+
+  it('ships no file named demo-* under website/', () => {
+    const demoFiles = walk(WEBSITE_DIR).filter((f) => path.basename(f).startsWith('demo-'));
+
+    expect(demoFiles).toEqual([]);
+  });
+
+  it('ships no video file under website/ at all', () => {
+    const videos = walk(WEBSITE_DIR).filter((f) => /\.(mp4|webm|mov|m4v|ogv)$/i.test(f));
+
+    expect(videos).toEqual([]);
+  });
+
+  it('embeds no <video> element, so no playback script is needed', () => {
     const html = readIndexHtml();
-    const videoBlocks = html.match(/<video[\s\S]*?<\/video>/g) ?? [];
 
-    expect(videoBlocks.length).toBeGreaterThan(0);
-    for (const block of videoBlocks) {
-      expect(block).toMatch(/<img\b/);
-    }
+    expect(html).not.toMatch(/<video\b/);
+  });
+
+  it('points og:image at the isolated-environment hero screenshot', () => {
+    const html = readIndexHtml();
+    const ogImage = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/);
+
+    expect(ogImage).not.toBeNull();
+    expect(ogImage![1]).toBe(`${PAGES_BASE_URL}${HERO_IMAGE}`);
+  });
+
+  it('resolves og:image to a file that exists, which no other test covers', () => {
+    // og:image is the one reference that must be absolute, so `isExternal`
+    // filters it out of the broken-link sweep above. Deleting its target would
+    // otherwise ship a silently broken social preview — exactly the shape of
+    // the #1272 regression.
+    const html = readIndexHtml();
+    const ogImage = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/);
+
+    expect(ogImage).not.toBeNull();
+    expect(ogImage![1].startsWith(PAGES_BASE_URL)).toBe(true);
+
+    const relative = ogImage![1].slice(PAGES_BASE_URL.length);
+    expect(fs.existsSync(path.join(WEBSITE_DIR, relative))).toBe(true);
+  });
+
+  it('serves the hero image eagerly and at a reserved size', () => {
+    // It is the LCP element: lazy-loading it delays the largest paint, and
+    // dropping width/height reflows the fold once the bytes land.
+    const html = readIndexHtml();
+    const heroFigure = html.match(/<figure class="hero-media">[\s\S]*?<\/figure>/);
+
+    expect(heroFigure).not.toBeNull();
+    expect(heroFigure![0]).toMatch(/<img\b/);
+    expect(heroFigure![0]).toContain(HERO_IMAGE);
+    expect(heroFigure![0]).not.toMatch(/loading="lazy"/);
+    expect(heroFigure![0]).toMatch(/width="\d+"/);
+    expect(heroFigure![0]).toMatch(/height="\d+"/);
   });
 });
 
@@ -221,5 +242,20 @@ describe('Issue #1200: metadata and honest copy', () => {
     // README.md:8 says "Status: Beta"; the LP must not imply more than that.
     const html = readIndexHtml();
     expect(html).toMatch(/Beta/);
+  });
+
+  it('quotes the same Node major that package.json engines requires', () => {
+    // #1264 raised engines to >=22 but its sweep did not reach website/, so the
+    // LP kept telling newcomers "Node.js v20+" while the very install it
+    // advertises refuses to run on 20. The LP is the entry point for people who
+    // read nothing else, so its prerequisite has to track engines rather than be
+    // remembered.
+    const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf-8'));
+    const enginesMajor = /(\d+)/.exec(pkg.engines.node)?.[1];
+    expect(enginesMajor).toBeDefined();
+
+    const quoted = /Node\.js v(\d+)\+/.exec(readIndexHtml())?.[1];
+    expect(quoted).toBeDefined();
+    expect(quoted).toBe(enginesMajor);
   });
 });

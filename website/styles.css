@@ -300,8 +300,9 @@ a {
   margin: 0;
 }
 
-.demo-video {
+.hero-media img {
   width: 100%;
+  height: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
@@ -455,24 +456,10 @@ a {
   background: var(--bg-subtle);
 }
 
-.shot figcaption,
-.mobile-demo figcaption {
+.shot figcaption {
   margin-top: 0.6rem;
   color: var(--fg-muted);
   font-size: 0.85rem;
-}
-
-.mobile-demo {
-  margin: 2.5rem 0 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-}
-
-.demo-video-phone {
-  width: min(300px, 70vw);
-  border-radius: 20px;
 }
 
 /* ---------- comparison table ---------- */

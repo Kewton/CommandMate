@@ -25,7 +25,7 @@
       property="og:description"
       content="A local control plane for agent CLIs. Run Claude Code, Codex, and Gemini CLI across Git worktrees in parallel, and steer every session from your phone."
     />
-    <meta property="og:image" content="https://kewton.github.io/CommandMate/assets/img/demo-desktop-poster.webp" />
+    <meta property="og:image" content="https://kewton.github.io/CommandMate/assets/img/screenshot-desktop.webp" />
     <meta name="twitter:card" content="summary_large_image" />
 
     <link rel="stylesheet" href="styles.css" />
@@ -61,7 +61,7 @@
           </div>
           <p class="prereq">
             From install to your first session in 60 seconds.<br />
-            macOS / Linux / Windows (WSL2) · Node.js v20+ · npm · git · tmux
+            macOS / Linux / Windows (WSL2) · Node.js v22+ · npm · git · tmux
           </p>
 
           <div class="cta-row">
@@ -71,24 +71,18 @@
         </div>
 
         <figure class="hero-media">
-          <!-- Decorative: everything this demo shows is stated in the copy above,
-               so it is aria-hidden rather than given a label a screen reader
-               would have to sit through. No autoplay attribute — main.js starts
-               playback only when prefers-reduced-motion allows. -->
-          <video
-            class="demo-video"
-            muted
-            loop
-            playsinline
-            preload="metadata"
-            poster="assets/img/demo-desktop-poster.webp"
-            aria-hidden="true"
-            tabindex="-1"
-            data-autoplay
-          >
-            <source src="assets/media/demo-desktop.mp4" type="video/mp4" />
-            <img src="assets/img/demo-desktop-poster.webp" alt="" width="1280" height="720" />
-          </video>
+          <!-- The LCP element: no lazy loading, and width/height are the file's
+               intrinsic size so the box is reserved before the bytes land. This
+               is also the og:image, so what it shows is what social previews
+               show — keep it to CommandMate's own repository (Issue #1272). -->
+          <img
+            src="assets/img/screenshot-desktop.webp"
+            alt="CommandMate desktop dashboard listing worktree sessions and their status"
+            width="2560"
+            height="1600"
+            decoding="async"
+            fetchpriority="high"
+          />
         </figure>
       </section>
 
@@ -165,15 +159,6 @@
         <div class="gallery">
           <figure class="shot shot-wide">
             <img
-              src="assets/img/screenshot-desktop.webp"
-              alt="CommandMate desktop dashboard listing worktree sessions and their status"
-              loading="lazy"
-              decoding="async"
-            />
-            <figcaption>Every session and its status, at a glance.</figcaption>
-          </figure>
-          <figure class="shot shot-wide">
-            <img
               src="assets/img/screenshot-worktree-desktop.webp"
               alt="CommandMate worktree detail view on desktop, showing an agent session terminal"
               loading="lazy"
@@ -209,26 +194,6 @@
             <figcaption>A live agent terminal, in your pocket.</figcaption>
           </figure>
         </div>
-
-        <figure class="mobile-demo">
-          <video
-            class="demo-video demo-video-phone"
-            muted
-            loop
-            playsinline
-            preload="none"
-            poster="assets/img/demo-mobile-poster.webp"
-            aria-hidden="true"
-            tabindex="-1"
-            data-autoplay
-          >
-            <source src="assets/media/demo-mobile.mp4" type="video/mp4" />
-            <img src="assets/img/demo-mobile-poster.webp" alt="" width="360" height="780" />
-          </video>
-          <figcaption>
-            Monitor and steer sessions from any browser, including your phone.
-          </figcaption>
-        </figure>
       </section>
 
       <!-- 5. Comparison -->
