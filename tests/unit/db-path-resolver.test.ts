@@ -122,6 +122,22 @@ describe('db-path-resolver', () => {
 
         expect(() => validateDbPath(systemPath)).toThrow('Security error');
       });
+
+      it('should reject a sibling directory sharing the home prefix (Issue #1285)', () => {
+        mockIsGlobalInstall.mockReturnValue(true);
+
+        // startsWith() had no path boundary, so this was accepted as "within home".
+        const invalidPath = `${homedir()}-backup/data/cm.db`;
+
+        expect(() => validateDbPath(invalidPath)).toThrow('Security error');
+        expect(() => validateDbPath(invalidPath)).toThrow('home directory');
+      });
+
+      it('should accept the home directory itself for global install', () => {
+        mockIsGlobalInstall.mockReturnValue(true);
+
+        expect(validateDbPath(homedir())).toBe(homedir());
+      });
     });
 
     describe('local install - system directory protection (SEC-001)', () => {

@@ -12,7 +12,7 @@
 import path from 'path';
 import { homedir } from 'os';
 import { isGlobalInstall, getConfigDir } from '@/cli/utils/install-context';
-import { isSystemDirectory } from '@/config/system-directories';
+import { isPathWithin, isSystemDirectory } from '@/config/system-directories';
 
 /**
  * Get the default database path based on install type
@@ -81,8 +81,11 @@ export function validateDbPath(dbPath: string): string {
 
   if (isGlobalInstall()) {
     // Global install: DB path must be within home directory
+    // Issue #1285: startsWith() had no path boundary, so a sibling directory
+    // sharing the home prefix (e.g. /Users/alice-backup for /Users/alice) was
+    // accepted as "within home".
     const homeDir = homedir();
-    if (!resolvedPath.startsWith(homeDir)) {
+    if (!isPathWithin(resolvedPath, homeDir)) {
       throw new Error(
         `Security error: DB path must be within home directory: ${resolvedPath}`
       );

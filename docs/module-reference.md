@@ -21,7 +21,7 @@
 | `src/lib/db/db-migration-path.ts` | DBマイグレーション（migrateDbIfNeeded()、getLegacyDbPaths()） |
 | `src/lib/db/db-instance.ts` | DBインスタンス管理（getEnv().CM_DB_PATH使用、DB接続は openDatabaseWithAbiRecovery() 経由） |
 | `src/lib/db/abi-recovery.ts` | better-sqlite3 ABI mismatch 検知と自動 rebuild（Issue #1263: isAbiMismatchError()＝code `ERR_DLOPEN_FAILED` かつ message に `NODE_MODULE_VERSION` を含む二条件、rebuildBetterSqlite3()＝`npm rebuild better-sqlite3` を process.execPath を PATH 先頭に固定して実行、openDatabaseWithAbiRecovery()＝正常時ゼロオーバーヘッド・rebuild はプロセス毎1回・失敗時は sudo を促さない手順を提示） |
-| `src/config/system-directories.ts` | システムディレクトリ定数（SYSTEM_DIRECTORIES、isSystemDirectory()） |
+| `src/config/system-directories.ts` | システムディレクトリ定数（SYSTEM_DIRECTORIES、isSystemDirectory()、isPathWithin()）。Issue #1285: isSystemDirectory() は候補パスと SYSTEM_DIRECTORIES の**両方**を realpath 解決して境界一致で判定する（macOS の `/tmp`→`/private/tmp` 対策）。片側だけ解決すると素通しするため解決は呼び出し元でなく本関数に集約（I/O を伴う非純粋関数）。未作成パスは最近傍の実在祖先まで遡って解決 |
 | `src/config/status-colors.ts` | ステータス色の一元管理 |
 | `src/app/globals.css` | セマンティックデザイントークン（CSS変数）の定義・登録（Issue #1041）。Issue #1178 の Tailwind 4 CSS-first 移行で `tailwind.config.js` を廃止し `@theme inline` へ統合。詳細は [docs/design-system.md](./design-system.md) を参照 |
 | `src/lib/view-transitions/index.ts` | View Transitions APIガード（Issue #1122: supportsViewTransitions/prefersReducedMotion/startViewTransition。非対応・reduced-motion時は即時実行フォールバック、依存追加なしの薄いラッパでNext15/React19ネイティブへ移行容易）。ページ遷移クロスフェード基盤 |
