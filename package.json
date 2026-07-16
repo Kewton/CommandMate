@@ -30,6 +30,7 @@
     "bin/",
     "dist/",
     ".next/",
+    "!.next/cache",
     "public/",
     ".env.example"
   ],
