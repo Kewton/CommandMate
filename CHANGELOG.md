@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-16
+
+> **Highlight**: v0.9.1（フレームワーク基盤更新）に続く**アプリケーション層の充実リリース**。中心は**多言語対応（i18n）基盤の全面確立**で、`src/app` / `src/lib` / `src/config` および各種コンポーネント・パネル・ダイアログの英語ハードコード文言を next-intl 辞書（en/ja）へ全面移行し、namespace 方針を確定。EN をキー byte-identical に保つ実辞書ガードと、モジュールスコープ const の literal label を検出する ESLint ルールで規律を固定した。あわせて**インストール／アップデート／オンボーディング体験**を改善（`commandmate update` コマンド、引数なし実行のガイド付きクイックスタート、初回オンボーディング導線、アップデート通知バナーの更新ボタン）、**GitHub Pages ランディングページ**を新設、**堅牢性**を強化（better-sqlite3 の ABI mismatch 自動 rebuild、システムディレクトリ判定のパス境界＋symlink 解決、不正 `CM_DB_PATH` の fail-closed、Node 20 EOL に伴う `engines >=22` 引き上げ）。プッシュ通知のロケール対応に伴い **DB マイグレーション v42** を追加し `CURRENT_SCHEMA_VERSION` を 41→42 に更新した。
+
+### Added
+
+- feat(cli): **`commandmate update` コマンドを追加**。グローバルインストール時に 停止 → `npm install -g` → 再起動 で自己更新する。`--check`（更新有無の表示のみ）／`--yes`（非対話環境向けに確認スキップ）に対応 (#1194)
+- feat(cli): **引数なし実行をガイド付きクイックスタート化**し `engines` を追加。初回利用者が `commandmate` だけで導入手順に到達できるようにした (#1195)
+- feat(ui): **初回オンボーディング導線を追加**（空状態 CTA ＋ セットアップチェックリスト） (#1199)
+- feat(ui): **アップデート通知バナーに「今すぐアップデート」ボタンを追加** (#1198)
+- feat(lp): **GitHub Pages ランディングページを構築** (#1200)
+- feat(db): **better-sqlite3 の ABI mismatch を検知して自動 rebuild** する起動時ガードを追加。Node 更新後の native モジュール不整合による起動失敗を自己修復する (#1263)
+- feat(i18n): **プッシュ通知をロケール対応化**。購読時に locale を保存し、サーバサイド（React request scope 外のバックグラウンド送信）は `createTranslator` で解決する。DB マイグレーション v42 を追加し `CURRENT_SCHEMA_VERSION` を 42 に更新 (#1308)
+
+### Changed
+
+- feat(i18n): **アプリ全体の英語ハードコード文言を next-intl 辞書（en/ja）へ全面移行**。対象は Home/Repository (#1197)、Header/GlobalMobileNav (#1206)、RepositoryManager (#1219)、ui/common/sidebar/external-apps (#1273)、home/review/mobile/layout (#1274)、worktree ファイル閲覧・編集系 (#1275)、worktree セッション・メッセージ系 (#1276)、worktree パネル・ダイアログ系と git (#1277)、status-colors ラベル (#1304)、src/app（sessions/review/layout/offline）(#1305)、standard-commands のスラッシュコマンド description (#1306)、git/schedule の AI プロンプトテンプレート (#1307)。あわせて namespace 方針を確定し、EN をキー byte-identical に保つ実辞書ガード（テストのキー素通しモックでは検出できない欠落キーを捕捉）を導入
+- chore(lint): **モジュールスコープ const の literal label を検出する ESLint ルールを追加**。`t()` を呼べない module scope での英語直書きを防止し、i18n 移行の後戻りを止める (#1271)
+- chore(engines): **Node 20 EOL のため `engines` を `>=22.0.0` に引き上げ** (#1264)
+- chore(build): **tsconfig の `include` を実ディレクトリ（src/tests/scripts）に限定**し、spike/生成物のスコープ混入を防止 (#1265)
+- chore(deps): **package-lock.json の `engines` を package.json に同期** (#1293)
+- docs: **ドキュメント間の矛盾を解消し README に Update セクションを追加** (#1196)
+- research(db): **better-sqlite3 → node:sqlite 移行を調査**（判定: No-Go・時期尚早） (#1201)
+
+### Fixed
+
+- fix(polling): **Claude の応答が History に反映されない問題を修正** (#1268)
+- fix(polling): **Claude のフッターを抽出時点で落とし、応答の重複保存を防止** (#1289)
+- fix(polling): **起動バナーを assistant message として保存しない**よう修正 (#1292)
+- fix(security): **`isSystemDirectory` をパス境界＋symlink 解決で判定**し、`/tmp` `/var` `/etc` 等の誤判定・バイパスを解消 (#1285)
+- fix(config): **不正な `CM_DB_PATH` を黙って既定値に差し替えず、起動時に停止**（fail-closed） (#1267)
+- fix(cli): **`status` が実際の起動ポートを報告**するよう `.env` の優先順位を是正 (#1266)
+- fix(mobile): **下部ナビのラベルに折返し防止を追加**し、320px 日本語での 2 行折返しを解消 (#1211)
+- fix(website): **LP から動画を外し、ヒーロー/og:image を隔離環境の素材へ差し替え** (#1272)
+- test: **CI 限定でフレークするテストを複数修正**（UpdateNotificationBanner #1287、MessageInput #1222、MarkdownEditor TOC #1216、issue-288 Scenario 5 #1209、GitPane DR3-004 #1204）。あわせて start-issue/status-issue/stop-issue が実装を検証していない問題を修正 (#1269)
+
 ## [0.9.1] - 2026-07-15
 
 > **Highlight**: **フレームワーク基盤の更新（#1129）** を中心としたメンテナンスリリース。**Next.js 14.2 → 15.5 / React 18.3 → 19.2**（#1177）で async request APIs に追随し `src/app/api` の 66 route を全件 `await params` へ移行、**Tailwind CSS 3.4 → 4.3**（#1178）で `tailwind.config.js` を廃止し CSS-first（`@theme inline`）へ移行した（いずれも見た目・挙動は不変）。あわせて **E2E スイートの drift 修復と CI 組込み**（#1180）を行い、ローカル実行が稼働中の本番サーバを再利用して**本番 DB を破壊し得た構成**を専用ポート 3177 ＋ スクラッチ DB ＋ リポジトリ外 `CM_ROOT_DIR` で隔離。**ルート遷移で偽の Home がちらつく問題**（#1184）を修正し、Next.js 15 で deprecated となった `next lint` を **ESLint CLI へ移行**（#1181）した。機能追加および DB マイグレーションはなし（`CURRENT_SCHEMA_VERSION` は 41 のまま）。
