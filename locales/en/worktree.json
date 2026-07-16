@@ -606,5 +606,11 @@
     "statusPill": "{label}: {status}",
     "subTabMessage": "Message",
     "subTabGit": "Git"
+  },
+  "detailStatus": {
+    "idle": "Idle - No active session",
+    "ready": "Ready - Waiting for input",
+    "running": "Running - Processing",
+    "waiting": "Waiting - User input required"
   }
 }

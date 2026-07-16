@@ -79,7 +79,8 @@ const DEFAULT_STATUS_PRIORITY = 4;
 
 /** Small CLI status dot for Sessions list (Issue #1051: shared StatusDot). */
 function CliDot({ status, label }: { status: BranchStatus; label: string }) {
-  const title = `${label}: ${SIDEBAR_STATUS_CONFIG[status].label}`;
+  const tCommon = useTranslations('common');
+  const title = `${label}: ${tCommon(SIDEBAR_STATUS_CONFIG[status].labelKey)}`;
   return <StatusDot status={status} size="md" label={title} />;
 }
 
