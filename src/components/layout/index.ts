@@ -12,6 +12,8 @@ export type { MainLayoutProps } from './MainLayout';
 export { AppShell } from './AppShell';
 export type { AppShellProps } from './AppShell';
 
+export { VersionMismatchBanner } from './VersionMismatchBanner';
+
 export { Sidebar } from './Sidebar';
 
 export { SidebarToggle } from './SidebarToggle';

@@ -13,6 +13,33 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 
 export type RealtimeStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
+/**
+ * Client → server hello carrying the client bundle version, sent on every
+ * (re)connect so the server can detect a version drift (#1356). Kept as a shared
+ * constant so the client sender and the server handler cannot drift apart.
+ */
+export const CLIENT_VERSION_MESSAGE_TYPE = 'client_version' as const;
+
+/**
+ * Server → client notice that the running server version differs from this
+ * tab's bundle version (#1338/#1356). Drives the reload banner.
+ */
+export const VERSION_MISMATCH_EVENT_TYPE = 'version_mismatch' as const;
+
+/**
+ * Whether the running server version and this tab's bundle version have drifted
+ * apart and the user should be nudged to reload (#1338/#1356).
+ *
+ * Conservative on purpose (受入条件: 版が一致している間は誤検知しない): an empty or
+ * `'0.0.0'` fallback on either side means "version unknown" and is never treated
+ * as a mismatch, so a server that cannot resolve its own version stays silent.
+ */
+export function isVersionMismatch(serverVersion: string, clientVersion: string): boolean {
+  if (!serverVersion || !clientVersion) return false;
+  if (serverVersion === '0.0.0' || clientVersion === '0.0.0') return false;
+  return serverVersion !== clientVersion;
+}
+
 /** Session running/stopped transition (sidebar status dots). */
 export interface SessionStatusEvent {
   type: 'session_status_changed';
@@ -59,11 +86,24 @@ export interface RepositoryDeletedEvent {
   deletedWorktreeIds?: string[];
 }
 
+/**
+ * Server-initiated notice that the running server version no longer matches the
+ * version this tab's bundle was built from (#1338/#1356). Sent directly (not via
+ * the room broadcast envelope) in response to the client's {@link
+ * CLIENT_VERSION_MESSAGE_TYPE} hello. The reload banner listens for this.
+ */
+export interface VersionMismatchEvent {
+  type: typeof VERSION_MISMATCH_EVENT_TYPE;
+  serverVersion: string;
+  clientVersion: string;
+}
+
 export type RealtimeEvent =
   | SessionStatusEvent
   | MessageBroadcastEvent
   | TerminalSnapshotEvent
   | RepositoryDeletedEvent
+  | VersionMismatchEvent
   | { type: string; worktreeId?: string; [key: string]: unknown };
 
 /**

@@ -20,6 +20,7 @@ import { Header } from './Header';
 import { GlobalMobileNav } from '@/components/mobile/GlobalMobileNav';
 import { CommandPalette } from '@/components/common/CommandPalette';
 import { KeyboardShortcutsOverlay } from '@/components/common/KeyboardShortcutsOverlay';
+import { VersionMismatchBanner } from './VersionMismatchBanner';
 import { Z_INDEX } from '@/config/z-index';
 
 // ============================================================================
@@ -141,6 +142,8 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
         <CommandPalette />
         {/* Global keyboard-shortcuts help overlay (?) - single instance (Issue #1130) */}
         <KeyboardShortcutsOverlay />
+        {/* Version-drift reload nudge (#1338/#1356) - app-wide, single instance. */}
+        <VersionMismatchBanner />
       </div>
     );
   }
@@ -198,6 +201,8 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
       <CommandPalette />
       {/* Global keyboard-shortcuts help overlay (?) - single instance (Issue #1130) */}
       <KeyboardShortcutsOverlay />
+      {/* Version-drift reload nudge (#1338/#1356) - app-wide, single instance. */}
+      <VersionMismatchBanner />
     </div>
   );
 });
