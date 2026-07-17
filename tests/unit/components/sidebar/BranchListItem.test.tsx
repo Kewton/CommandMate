@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
-import { BranchListItem, __resetMouseEnterSuppression } from '@/components/sidebar/BranchListItem';
+import { BranchListItem, clampAxis, __resetMouseEnterSuppression } from '@/components/sidebar/BranchListItem';
 import type { SidebarBranchItem } from '@/types/sidebar';
 
 // Issue #1273: the CLI-status wrapper and the nested StatusDot labels resolve
@@ -719,6 +719,169 @@ describe('BranchListItem', () => {
 
       fireEvent.blur(button);
       expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Tooltip viewport clamping (Issue #1361)', () => {
+    const ORIGINAL_INNER_WIDTH = window.innerWidth;
+    const ORIGINAL_INNER_HEIGHT = window.innerHeight;
+
+    /** Build a DOMRect-like value (jsdom does no layout, so every rect is mocked). */
+    function rect(left: number, top: number, width: number, height: number): DOMRect {
+      return {
+        left,
+        top,
+        width,
+        height,
+        right: left + width,
+        bottom: top + height,
+        x: left,
+        y: top,
+        toJSON: () => ({}),
+      } as DOMRect;
+    }
+
+    function setViewport(width: number, height: number): void {
+      Object.defineProperty(window, 'innerWidth', { value: width, configurable: true, writable: true });
+      Object.defineProperty(window, 'innerHeight', { value: height, configurable: true, writable: true });
+    }
+
+    /**
+     * jsdom reports zero-sized rects for everything, which would make the clamp
+     * maths trivially pass. Feed it the anchor / bubble geometry each scenario
+     * describes instead.
+     */
+    function setGeometry(anchor: DOMRect, bubble: DOMRect): void {
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement
+      ) {
+        if (this.getAttribute('role') === 'tooltip') return bubble;
+        if (this.dataset.testid === 'branch-list-item') return anchor;
+        return rect(0, 0, 0, 0);
+      });
+    }
+
+    /** Force `:focus-visible` to match, as jsdom never sets it programmatically. */
+    function mockFocusVisible(): void {
+      const realMatches = HTMLElement.prototype.matches;
+      vi.spyOn(HTMLElement.prototype, 'matches').mockImplementation(function (
+        this: Element,
+        selector: string
+      ) {
+        if (selector === ':focus-visible') return true;
+        return realMatches.call(this, selector);
+      });
+    }
+
+    function renderItem(branch: SidebarBranchItem = defaultBranch) {
+      render(<BranchListItem branch={branch} isSelected={false} onClick={() => {}} />);
+    }
+
+    afterEach(() => {
+      setViewport(ORIGINAL_INNER_WIDTH, ORIGINAL_INNER_HEIGHT);
+    });
+
+    it('should keep the default right-side placement when the bubble fits', async () => {
+      setViewport(1440, 900);
+      setGeometry(rect(0, 100, 280, 56), rect(0, 0, 384, 120));
+      renderItem();
+
+      fireEvent.mouseEnter(screen.getByRole('button'));
+      const tooltip = await screen.findByRole('tooltip');
+
+      // rect.right (280) + 8px gap; top follows the anchor. Unchanged behaviour.
+      await waitFor(() => expect(tooltip.style.left).toBe('288px'));
+      expect(tooltip.style.top).toBe('100px');
+      expect(tooltip.style.maxWidth).toBe('384px');
+    });
+
+    it('should clamp to the right edge with a 480px sidebar (condition 1)', async () => {
+      // Sidebar at MAX_SIDEBAR_WIDTH on a 768px-wide viewport: the 384px bubble
+      // would open at 488 and run to 872, well past the right edge.
+      setViewport(768, 1024);
+      setGeometry(rect(0, 100, 480, 56), rect(0, 0, 384, 120));
+      renderItem();
+
+      fireEvent.mouseEnter(screen.getByRole('button'));
+      const tooltip = await screen.findByRole('tooltip');
+
+      await waitFor(() => expect(tooltip.style.left).toBe('376px'));
+      // The bubble's right edge lands exactly on the 8px viewport margin.
+      expect(parseInt(tooltip.style.left, 10) + 384).toBeLessThanOrEqual(768 - 8);
+    });
+
+    it('should clamp to the bottom edge for the last list item (condition 2)', async () => {
+      // Bottom-most item: top: rect.top would put a tall bubble at 700..900.
+      setViewport(1440, 768);
+      setGeometry(rect(0, 700, 280, 56), rect(0, 0, 384, 200));
+      renderItem({ ...defaultBranch, description: 'a long description'.repeat(20) });
+
+      fireEvent.mouseEnter(screen.getByRole('button'));
+      const tooltip = await screen.findByRole('tooltip');
+
+      await waitFor(() => expect(tooltip.style.top).toBe('560px'));
+      expect(parseInt(tooltip.style.top, 10) + 200).toBeLessThanOrEqual(768 - 8);
+    });
+
+    it('should keep the bubble on screen inside the 375px mobile drawer (condition 3)', async () => {
+      // Drawer is w-72 (288px): the bubble opened at left≈296 and ran to 680,
+      // almost entirely off a 375px screen.
+      setViewport(375, 667);
+      setGeometry(rect(0, 120, 288, 56), rect(0, 0, 359, 140));
+      renderItem();
+
+      fireEvent.mouseEnter(screen.getByRole('button'));
+      const tooltip = await screen.findByRole('tooltip');
+
+      await waitFor(() => expect(tooltip.style.left).toBe('8px'));
+      // Clamping alone cannot fit 384px into 375px, so the width is capped too.
+      expect(tooltip.style.maxWidth).toBe('359px');
+      expect(8 + 359).toBeLessThanOrEqual(375 - 8);
+    });
+
+    it('should clamp on focus-visible too, not only on hover (condition 3)', async () => {
+      setViewport(375, 667);
+      setGeometry(rect(0, 120, 288, 56), rect(0, 0, 359, 140));
+      mockFocusVisible();
+      renderItem();
+
+      fireEvent.focus(screen.getByRole('button'));
+      const tooltip = await screen.findByRole('tooltip');
+
+      await waitFor(() => expect(tooltip.style.left).toBe('8px'));
+      expect(tooltip.style.maxWidth).toBe('359px');
+    });
+
+    it('should flip to the left side when the right overflows but the left has room', async () => {
+      setViewport(1000, 800);
+      setGeometry(rect(600, 100, 100, 56), rect(0, 0, 384, 120));
+      renderItem();
+
+      fireEvent.mouseEnter(screen.getByRole('button'));
+      const tooltip = await screen.findByRole('tooltip');
+
+      // rect.left (600) - 8px gap - 384px bubble; preferred over clamping,
+      // which would have overlapped the anchor.
+      await waitFor(() => expect(tooltip.style.left).toBe('208px'));
+    });
+  });
+
+  describe('clampAxis (Issue #1361)', () => {
+    it('should leave a value that already fits untouched', () => {
+      expect(clampAxis(100, 200, 800)).toBe(100);
+    });
+
+    it('should clamp a value that overflows the end edge', () => {
+      expect(clampAxis(700, 200, 768)).toBe(560);
+    });
+
+    it('should clamp a value that overflows the start edge', () => {
+      expect(clampAxis(-50, 200, 768)).toBe(8);
+    });
+
+    it('should pin to the start margin when the bubble is larger than the viewport', () => {
+      // Nothing fits; showing the start of the bubble beats showing its middle.
+      expect(clampAxis(100, 700, 667)).toBe(8);
     });
   });
 
