@@ -49,6 +49,15 @@ export function getDbInstance(): Database.Database {
     // This ensures ON DELETE CASCADE works correctly for all tables
     db.pragma('foreign_keys = ON');
 
+    // Issue #1360: harden against SQLITE_BUSY when the same DB file is opened by
+    // more than one process (e.g. a misconfigured worktree server sharing
+    // CM_DB_PATH). WAL lets readers and a single writer coexist instead of
+    // taking an exclusive lock, and busy_timeout makes a contended write wait
+    // for the lock (up to 5s) rather than failing immediately with the default
+    // busy_timeout of 0. Set before migrations so migration writes benefit too.
+    db.pragma('journal_mode = WAL');
+    db.pragma('busy_timeout = 5000');
+
     // Issue #1353: only publish the connection once its schema is verified.
     // Assigning before runMigrations() cached a database whose migrations had
     // thrown, so every later caller was handed it back without the failure —

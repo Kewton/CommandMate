@@ -12,9 +12,14 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import {
   isNewerVersion,
   getCurrentVersion,
+  getServerVersion,
+  getClientVersion,
   validateReleaseUrl,
   sanitizeReleaseName,
   checkForUpdate,
@@ -22,6 +27,13 @@ import {
   GITHUB_RELEASE_URL_PREFIX,
   resetCacheForTesting,
 } from '@/lib/version-checker';
+
+/**
+ * Issue #1359: a directory guaranteed to have no CommandMate package.json, so
+ * getServerVersion() falls back to the baked NEXT_PUBLIC_APP_VERSION. readFileSync
+ * throws ENOENT for the missing package.json, which is caught internally.
+ */
+const NO_PKG_DIR = join(tmpdir(), 'cm-version-checker-no-pkg-dir');
 
 describe('version-checker', () => {
   // =========================================================================
@@ -124,10 +136,27 @@ describe('version-checker', () => {
   // =========================================================================
   // getCurrentVersion() tests
   // =========================================================================
-  describe('getCurrentVersion', () => {
+  // Issue #1359: server runtime version (package.json) vs client baked version
+  describe('version resolution (Issue #1359)', () => {
     const originalEnv = process.env.NEXT_PUBLIC_APP_VERSION;
+    let tmpDir: string;
+    let cwdSpy: ReturnType<typeof vi.spyOn>;
+
+    /** Point process.cwd() at tmpDir and write a package.json there. */
+    const withRuntimePkg = (contents: unknown): void => {
+      writeFileSync(join(tmpDir, 'package.json'), JSON.stringify(contents), 'utf-8');
+      cwdSpy.mockReturnValue(tmpDir);
+    };
+
+    beforeEach(() => {
+      tmpDir = mkdtempSync(join(tmpdir(), 'cm-version-'));
+      // Default: cwd has no CommandMate package.json → runtime read fails.
+      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(NO_PKG_DIR);
+    });
 
     afterEach(() => {
+      cwdSpy.mockRestore();
+      rmSync(tmpDir, { recursive: true, force: true });
       if (originalEnv !== undefined) {
         process.env.NEXT_PUBLIC_APP_VERSION = originalEnv;
       } else {
@@ -135,14 +164,70 @@ describe('version-checker', () => {
       }
     });
 
-    it('should return NEXT_PUBLIC_APP_VERSION when set', () => {
-      process.env.NEXT_PUBLIC_APP_VERSION = '1.2.3';
-      expect(getCurrentVersion()).toBe('1.2.3');
+    describe('getClientVersion', () => {
+      it('should return the baked NEXT_PUBLIC_APP_VERSION, ignoring runtime package.json', () => {
+        process.env.NEXT_PUBLIC_APP_VERSION = '1.2.3';
+        withRuntimePkg({ name: 'commandmate', version: '9.9.9' });
+        expect(getClientVersion()).toBe('1.2.3');
+      });
+
+      it('should return 0.0.0 when the env var is not set', () => {
+        delete process.env.NEXT_PUBLIC_APP_VERSION;
+        expect(getClientVersion()).toBe('0.0.0');
+      });
     });
 
-    it('should return 0.0.0 as fallback when env var is not set', () => {
-      delete process.env.NEXT_PUBLIC_APP_VERSION;
-      expect(getCurrentVersion()).toBe('0.0.0');
+    describe('getServerVersion', () => {
+      it('should read the version from the installed package.json at runtime', () => {
+        process.env.NEXT_PUBLIC_APP_VERSION = '1.2.3'; // baked value must NOT win
+        withRuntimePkg({ name: 'commandmate', version: '9.9.9' });
+        expect(getServerVersion()).toBe('9.9.9');
+      });
+
+      it('should fall back to the baked version when package.json is a different package', () => {
+        process.env.NEXT_PUBLIC_APP_VERSION = '1.2.3';
+        withRuntimePkg({ name: 'some-user-project', version: '9.9.9' });
+        expect(getServerVersion()).toBe('1.2.3');
+      });
+
+      it('should fall back to the baked version when package.json is missing', () => {
+        process.env.NEXT_PUBLIC_APP_VERSION = '1.2.3';
+        // cwd defaults to NO_PKG_DIR (no package.json)
+        expect(getServerVersion()).toBe('1.2.3');
+      });
+
+      it('should fall back to the baked version when package.json is malformed', () => {
+        process.env.NEXT_PUBLIC_APP_VERSION = '1.2.3';
+        writeFileSync(join(tmpDir, 'package.json'), '{ not valid json', 'utf-8');
+        cwdSpy.mockReturnValue(tmpDir);
+        expect(getServerVersion()).toBe('1.2.3');
+      });
+
+      it('should fall back to the baked version when the version field is missing', () => {
+        process.env.NEXT_PUBLIC_APP_VERSION = '1.2.3';
+        withRuntimePkg({ name: 'commandmate' });
+        expect(getServerVersion()).toBe('1.2.3');
+      });
+
+      it('should return 0.0.0 when neither runtime nor baked version is available', () => {
+        delete process.env.NEXT_PUBLIC_APP_VERSION;
+        withRuntimePkg({ name: 'other', version: '9.9.9' });
+        expect(getServerVersion()).toBe('0.0.0');
+      });
+    });
+
+    describe('getCurrentVersion', () => {
+      it('should delegate to getServerVersion (runtime package.json wins over baked env)', () => {
+        process.env.NEXT_PUBLIC_APP_VERSION = '1.2.3';
+        withRuntimePkg({ name: 'commandmate', version: '9.9.9' });
+        expect(getCurrentVersion()).toBe('9.9.9');
+      });
+
+      it('should fall back to 0.0.0 when nothing is resolvable', () => {
+        delete process.env.NEXT_PUBLIC_APP_VERSION;
+        // cwd defaults to NO_PKG_DIR (no package.json)
+        expect(getCurrentVersion()).toBe('0.0.0');
+      });
     });
   });
 
@@ -254,6 +339,11 @@ describe('version-checker', () => {
       resetCacheForTesting();
       process.env.NEXT_PUBLIC_APP_VERSION = '0.2.3';
       vi.restoreAllMocks();
+      // Issue #1359: getCurrentVersion() now resolves package.json at runtime.
+      // Point cwd at a directory with no CommandMate package.json so these tests
+      // exercise the baked-env fallback (currentVersion === '0.2.3'), keeping the
+      // network/cache assertions independent of the repo's real version.
+      vi.spyOn(process, 'cwd').mockReturnValue(NO_PKG_DIR);
     });
 
     afterEach(() => {

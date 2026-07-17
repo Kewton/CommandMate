@@ -85,16 +85,24 @@ export async function GET() {
 export async function DELETE(request: NextRequest) {
   try {
     const body = await request.json();
-    const { repositoryPath } = body;
 
     // Validate and resolve repository path (DRY: shared validation)
-    const validation = validateRepositoryPath(repositoryPath);
+    const validation = validateRepositoryPath(body.repositoryPath);
     if (!validation.valid) {
       return NextResponse.json(
         { success: false, error: validation.error },
         { status: 400 }
       );
     }
+
+    // Issue #1347: use the resolved (canonical) path as the single key for every
+    // operation below. worktrees.repository_path is stored path.resolve()'d, and
+    // disableRepository / disableExistingRepository normalize internally (#1346).
+    // A raw client path (trailing slash, relative, ".." segment) fails the worktree
+    // WHERE match, so getWorktreeIdsByRepository / deleteRepositoryWorktrees would
+    // find nothing and leave the worktrees orphaned. validation.resolvedPath is
+    // guaranteed to be set when validation.valid is true.
+    const repositoryPath = validation.resolvedPath!;
 
     const db = getDbInstance();
 

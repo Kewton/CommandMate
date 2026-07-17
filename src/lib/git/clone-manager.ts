@@ -24,6 +24,8 @@ import {
   getRepositoryByNormalizedUrl,
   getRepositoryByPath,
   createRepository,
+  deleteRepository,
+  countWorktreesByRepositoryPath,
   type CloneJobDB,
   type Repository,
 } from '@/lib/db/db-repository';
@@ -336,6 +338,38 @@ export class CloneManager {
   }
 
   /**
+   * Remove a "ghost" repositories row if the given row is one (Issue #1350).
+   *
+   * A duplicate check (by URL or by path) can match a row whose on-disk
+   * directory has been deleted and that has no worktrees left. Such a row is
+   * unrecoverable dead weight: it blocks re-cloning the same URL/path forever,
+   * and before #1350 there was no way to remove it from the UI or API. When we
+   * detect one, physically delete it so the clone can proceed.
+   *
+   * A row is treated as LIVE (kept, and the caller must reject as a duplicate)
+   * when either:
+   *   - its directory still exists on disk — a real, working repository, or
+   *   - it still has worktrees registered — deleting it could drop worktree
+   *     records for a repository whose directory is only transiently missing
+   *     (e.g. an unmounted volume). This mirrors migration v43 (#1339), which
+   *     also refuses to treat a row with worktrees as a ghost.
+   *
+   * @returns true if a ghost row was removed (caller may proceed with the
+   *          clone), false if the row is live (caller must reject).
+   */
+  private removeIfGhostRepository(repo: Repository): boolean {
+    if (existsSync(repo.path)) {
+      return false; // Directory exists: a real repository, not a ghost.
+    }
+    if (countWorktreesByRepositoryPath(this.db, repo.path) > 0) {
+      return false; // Still has worktrees: keep for safety.
+    }
+    deleteRepository(this.db, repo.id);
+    logger.info('clone:ghost-repository-removed', { repositoryId: repo.id, name: repo.name });
+    return true;
+  }
+
+  /**
    * Check if there's an active clone job for this URL
    */
   checkActiveCloneJob(normalizedUrl: string): CloneJobDB | null {
@@ -382,9 +416,12 @@ export class CloneManager {
     const normalizedUrl = validation.normalizedUrl!;
     const repoName = validation.repoName!;
 
-    // 2. Check for duplicate repository
+    // 2. Check for duplicate repository (by normalized URL)
+    // Issue #1350: a row whose directory was deleted and that has no worktrees
+    // left is a ghost — removeIfGhostRepository() clears it so the same URL can
+    // be re-cloned instead of being rejected forever.
     const existingRepo = this.checkDuplicateRepository(normalizedUrl);
-    if (existingRepo) {
+    if (existingRepo && !this.removeIfGhostRepository(existingRepo)) {
       return {
         success: false,
         error: {
@@ -427,8 +464,11 @@ export class CloneManager {
 
     // 6. Check for an existing repositories row at the target path (Issue #1340)
     // [D4-001] Report the registered repository name only; targetPath must not leak.
+    // Issue #1350: step 5 guarantees targetPath has no directory, so a row found
+    // here is a ghost unless it still has worktrees — removeIfGhostRepository()
+    // clears the ghost so the path can be reused; otherwise we reject.
     const repoAtPath = this.checkRepositoryAtPath(targetPath);
-    if (repoAtPath) {
+    if (repoAtPath && !this.removeIfGhostRepository(repoAtPath)) {
       return {
         success: false,
         error: {

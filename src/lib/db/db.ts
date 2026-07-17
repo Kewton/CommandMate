@@ -88,6 +88,7 @@ export {
   updateMemo,
   deleteMemo,
   reorderMemos,
+  MemoDbError,
 } from './memo-db';
 
 // todo-db (repository-scoped Home ToDo widget)
