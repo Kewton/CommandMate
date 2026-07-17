@@ -32,9 +32,18 @@ vi.mock('@/lib/session-cleanup', () => ({
   syncWorktreesAndCleanup: vi.fn(),
 }));
 
+// Issue #1348: the scan route now registers a `repositories` row for each
+// discovered repository. Mock the db-repository layer so the route's DB access
+// is exercised without a real better-sqlite3 instance.
+vi.mock('@/lib/db/db-repository', () => ({
+  getRepositoryByPath: vi.fn(),
+  createRepository: vi.fn(),
+}));
+
 import { POST } from '@/app/api/repositories/scan/route';
 import { scanWorktrees } from '@/lib/git/worktrees';
 import { syncWorktreesAndCleanup } from '@/lib/session-cleanup';
+import { getRepositoryByPath, createRepository } from '@/lib/db/db-repository';
 
 function postRequest(body: unknown): NextRequest {
   return new NextRequest('http://localhost:3000/api/repositories/scan', {
@@ -128,5 +137,106 @@ describe('POST /api/repositories/scan', () => {
     const response = await POST(postRequest({ repositoryPath: `${CM_ROOT_DIR}/empty` }));
 
     expect(response.status).toBe(404);
+    // No worktrees -> nothing to register.
+    expect(createRepository).not.toHaveBeenCalled();
+  });
+
+  // Issue #1348: scan must leave a `repositories` row behind (like the clone/env
+  // routes) so the repository shows up in the management screen and is picked up
+  // by subsequent sync runs.
+  describe('repositories row registration (Issue #1348)', () => {
+    beforeEach(() => {
+      vi.mocked(syncWorktreesAndCleanup).mockResolvedValue({
+        syncResult: { deletedIds: [], upsertedCount: 1 },
+        cleanupWarnings: [],
+      } as never);
+    });
+
+    it('registers a repositories row for a newly scanned repository', async () => {
+      vi.mocked(scanWorktrees).mockResolvedValue([
+        {
+          id: 'repo-a-main',
+          repositoryPath: `${CM_ROOT_DIR}/repo-a`,
+          repositoryName: 'repo-a',
+        },
+      ] as never);
+      // No existing row -> a fresh one must be created.
+      vi.mocked(getRepositoryByPath).mockReturnValue(null);
+
+      const response = await POST(postRequest({ repositoryPath: `${CM_ROOT_DIR}/repo-a` }));
+
+      expect(response.status).toBe(200);
+      expect(getRepositoryByPath).toHaveBeenCalledWith(expect.anything(), `${CM_ROOT_DIR}/repo-a`);
+      // Mirrors the clone path: local source, enabled + visible by default.
+      expect(createRepository).toHaveBeenCalledTimes(1);
+      expect(createRepository).toHaveBeenCalledWith(expect.anything(), {
+        name: 'repo-a',
+        path: `${CM_ROOT_DIR}/repo-a`,
+        cloneSource: 'local',
+        enabled: true,
+        visible: true,
+      });
+      // Registration must not replace the existing worktree sync.
+      expect(syncWorktreesAndCleanup).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not overwrite an existing repositories row (idempotent)', async () => {
+      vi.mocked(scanWorktrees).mockResolvedValue([
+        {
+          id: 'repo-a-main',
+          repositoryPath: `${CM_ROOT_DIR}/repo-a`,
+          repositoryName: 'repo-a',
+        },
+      ] as never);
+      // A row already exists (possibly disabled/hidden by the user).
+      vi.mocked(getRepositoryByPath).mockReturnValue({ id: 'existing' } as never);
+
+      const response = await POST(postRequest({ repositoryPath: `${CM_ROOT_DIR}/repo-a` }));
+
+      expect(response.status).toBe(200);
+      expect(createRepository).not.toHaveBeenCalled();
+      expect(syncWorktreesAndCleanup).toHaveBeenCalledTimes(1);
+    });
+
+    it('registers each repository once even with multiple worktrees', async () => {
+      vi.mocked(scanWorktrees).mockResolvedValue([
+        {
+          id: 'repo-a-main',
+          repositoryPath: `${CM_ROOT_DIR}/repo-a`,
+          repositoryName: 'repo-a',
+        },
+        {
+          id: 'repo-a-feature',
+          repositoryPath: `${CM_ROOT_DIR}/repo-a`,
+          repositoryName: 'repo-a',
+        },
+      ] as never);
+      vi.mocked(getRepositoryByPath).mockReturnValue(null);
+
+      const response = await POST(postRequest({ repositoryPath: `${CM_ROOT_DIR}/repo-a` }));
+
+      expect(response.status).toBe(200);
+      // De-duplicated by repositoryPath -> a single row.
+      expect(createRepository).toHaveBeenCalledTimes(1);
+    });
+
+    it('falls back to the path basename when repositoryName is empty', async () => {
+      vi.mocked(scanWorktrees).mockResolvedValue([
+        {
+          id: 'repo-c-main',
+          repositoryPath: `${CM_ROOT_DIR}/repo-c`,
+          repositoryName: '',
+        },
+      ] as never);
+      vi.mocked(getRepositoryByPath).mockReturnValue(null);
+
+      const response = await POST(postRequest({ repositoryPath: `${CM_ROOT_DIR}/repo-c` }));
+
+      expect(response.status).toBe(200);
+      expect(createRepository).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ name: 'repo-c', path: `${CM_ROOT_DIR}/repo-c` })
+      );
+    });
   });
 });
