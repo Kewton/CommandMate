@@ -7,13 +7,35 @@
  */
 
 import { readdirSync } from 'fs';
-import { ExitCode, getErrorMessage, StatusOptions } from '../types';
+import { DaemonStatus, ExitCode, getErrorMessage, StatusOptions } from '../types';
 import { CLILogger } from '../utils/logger';
 import { DaemonManager } from '../utils/daemon';
 import { getPidFilePath, getEnvPath, getPidsDir } from '../utils/env-setup';
+import { readPackageVersion } from '../utils/package-info';
 import { validateIssueNoResult } from '../utils/input-validators';
 
 const logger = new CLILogger();
+
+/**
+ * Print the running daemon's version and, when it differs from the installed CLI, a warning.
+ * Issue #1354: a new CLI over a still-running old daemon otherwise reports only "Running", so
+ * users cannot tell the server is not on the latest version.
+ */
+function printVersionInfo(status: DaemonStatus): void {
+  if (!status.version) {
+    return;
+  }
+
+  console.log(`Version: ${status.version}`);
+
+  const cliVersion = readPackageVersion();
+  if (cliVersion && cliVersion !== status.version) {
+    logger.warn(
+      `Installed CLI is v${cliVersion} but the running server is v${status.version}. ` +
+        'Restart the server ("commandmate stop && commandmate start") to run the current version.'
+    );
+  }
+}
 
 /**
  * Show status for a single server (main or issue-specific)
@@ -51,6 +73,8 @@ async function showSingleStatus(issueNo?: number): Promise<void> {
   }
 
   console.log(`Status:  Running (PID: ${status.pid})`);
+
+  printVersionInfo(status);
 
   if (status.port) {
     console.log(`Port:    ${status.port}`);
@@ -151,6 +175,8 @@ export async function statusCommand(options: StatusOptions = {}): Promise<void> 
     }
 
     console.log(`Status:  Running (PID: ${status.pid})`);
+
+    printVersionInfo(status);
 
     if (status.port) {
       console.log(`Port:    ${status.port}`);

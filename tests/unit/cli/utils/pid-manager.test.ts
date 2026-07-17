@@ -72,14 +72,63 @@ describe('PidManager', () => {
     });
   });
 
-  describe('writePid', () => {
-    it('should write PID to file with atomic flag', () => {
+  describe('readState', () => {
+    it('should parse a JSON state file with all fields', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(
+        JSON.stringify({
+          pid: 12345,
+          version: '1.2.3',
+          port: 4000,
+          bind: '127.0.0.1',
+          protocol: 'https',
+          auth: true,
+          startTime: 'Sat Jul 18 01:03:24 2026',
+        })
+      );
+
+      const state = pidManager.readState();
+
+      expect(state).toEqual({
+        pid: 12345,
+        version: '1.2.3',
+        port: 4000,
+        bind: '127.0.0.1',
+        protocol: 'https',
+        auth: true,
+        startTime: 'Sat Jul 18 01:03:24 2026',
+      });
+    });
+
+    it('should read a legacy bare-integer PID file (backward compat)', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue('12345');
+
+      expect(pidManager.readState()).toEqual({ pid: 12345 });
+    });
+
+    it('should return null for JSON without a valid pid', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ version: '1.2.3' }));
+
+      expect(pidManager.readState()).toBeNull();
+    });
+
+    it('should return null when file is missing', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+
+      expect(pidManager.readState()).toBeNull();
+    });
+  });
+
+  describe('writeState', () => {
+    it('should write JSON state to file with atomic flag', () => {
       const mockFd = 3;
       vi.mocked(fs.openSync).mockReturnValue(mockFd);
       vi.mocked(fs.writeSync).mockReturnValue(5);
       vi.mocked(fs.closeSync).mockReturnValue(undefined);
 
-      const result = pidManager.writePid(12345);
+      const result = pidManager.writeState({ pid: 12345, version: '1.2.3', port: 4000 });
 
       expect(result).toBe(true);
       expect(fs.openSync).toHaveBeenCalledWith(
@@ -87,7 +136,8 @@ describe('PidManager', () => {
         expect.any(Number), // O_WRONLY | O_CREAT | O_EXCL
         0o600
       );
-      expect(fs.writeSync).toHaveBeenCalledWith(mockFd, '12345');
+      const written = vi.mocked(fs.writeSync).mock.calls[0][1] as string;
+      expect(JSON.parse(written)).toEqual({ pid: 12345, version: '1.2.3', port: 4000 });
       expect(fs.closeSync).toHaveBeenCalledWith(mockFd);
     });
 
@@ -96,7 +146,7 @@ describe('PidManager', () => {
       error.code = 'EEXIST';
       vi.mocked(fs.openSync).mockImplementation(() => { throw error; });
 
-      const result = pidManager.writePid(12345);
+      const result = pidManager.writeState({ pid: 12345 });
 
       expect(result).toBe(false);
     });
@@ -106,7 +156,17 @@ describe('PidManager', () => {
       error.code = 'EACCES';
       vi.mocked(fs.openSync).mockImplementation(() => { throw error; });
 
-      expect(() => pidManager.writePid(12345)).toThrow('permission denied');
+      expect(() => pidManager.writeState({ pid: 12345 })).toThrow('permission denied');
+    });
+  });
+
+  describe('getStartTime', () => {
+    it('should delegate to the injected start-time reader', () => {
+      const reader = vi.fn().mockReturnValue('Sat Jul 18 01:03:24 2026');
+      const manager = new PidManager(testPidPath, reader);
+
+      expect(manager.getStartTime(12345)).toBe('Sat Jul 18 01:03:24 2026');
+      expect(reader).toHaveBeenCalledWith(12345);
     });
   });
 
@@ -162,17 +222,88 @@ describe('PidManager', () => {
       expect(pidManager.isProcessRunning()).toBe(false);
     });
 
-    it('should throw for permission errors', () => {
+    it('should treat EPERM as stale (Issue #1358), not throw', () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.readFileSync).mockReturnValue('12345');
 
+      // EPERM: the PID was reused by a process we do not own
       const error = new Error('permission denied') as NodeJS.ErrnoException;
       error.code = 'EPERM';
       const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => { throw error; });
 
-      expect(() => pidManager.isProcessRunning()).toThrow('permission denied');
+      expect(pidManager.isProcessRunning()).toBe(false);
 
       killSpy.mockRestore();
+    });
+
+    it('should still throw for genuinely unexpected errors', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue('12345');
+
+      const error = new Error('boom') as NodeJS.ErrnoException;
+      error.code = 'EIO';
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => { throw error; });
+
+      expect(() => pidManager.isProcessRunning()).toThrow('boom');
+
+      killSpy.mockRestore();
+    });
+
+    describe('process identity (Issue #1358)', () => {
+      const state = {
+        pid: 12345,
+        startTime: 'Sat Jul 18 01:03:24 2026',
+      };
+
+      it('should return true when the live start time matches the recorded one', () => {
+        vi.mocked(fs.existsSync).mockReturnValue(true);
+        vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(state));
+        const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+        const reader = vi.fn().mockReturnValue(state.startTime);
+        const manager = new PidManager(testPidPath, reader);
+
+        expect(manager.isProcessRunning()).toBe(true);
+        expect(reader).toHaveBeenCalledWith(12345);
+
+        killSpy.mockRestore();
+      });
+
+      it('should return false when the PID was reused (start time differs)', () => {
+        vi.mocked(fs.existsSync).mockReturnValue(true);
+        vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(state));
+        const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+        const reader = vi.fn().mockReturnValue('Sat Jul 18 09:59:59 2026');
+        const manager = new PidManager(testPidPath, reader);
+
+        expect(manager.isProcessRunning()).toBe(false);
+
+        killSpy.mockRestore();
+      });
+
+      it('should stay best-effort (running) when the start time cannot be read', () => {
+        vi.mocked(fs.existsSync).mockReturnValue(true);
+        vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(state));
+        const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+        const reader = vi.fn().mockReturnValue(null);
+        const manager = new PidManager(testPidPath, reader);
+
+        expect(manager.isProcessRunning()).toBe(true);
+
+        killSpy.mockRestore();
+      });
+
+      it('should skip the identity check for a legacy file with no start time', () => {
+        vi.mocked(fs.existsSync).mockReturnValue(true);
+        vi.mocked(fs.readFileSync).mockReturnValue('12345');
+        const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+        const reader = vi.fn();
+        const manager = new PidManager(testPidPath, reader);
+
+        expect(manager.isProcessRunning()).toBe(true);
+        expect(reader).not.toHaveBeenCalled();
+
+        killSpy.mockRestore();
+      });
     });
   });
 });

@@ -16,6 +16,10 @@ vi.mock('dotenv');
 vi.mock('../../../../src/cli/utils/env-setup', () => ({
   getEnvPath: vi.fn(() => '/mock/.commandmate/.env'),
 }));
+// Issue #1354: the daemon records the installed version into the state file at start()
+vi.mock('../../../../src/cli/utils/package-info', () => ({
+  readPackageVersion: () => '1.2.3',
+}));
 
 // Import after mocking
 import { DaemonManager } from '../../../../src/cli/utils/daemon';
@@ -75,6 +79,41 @@ describe('DaemonManager', () => {
       await expect(daemonManager.start({})).rejects.toThrow('already running');
 
       killSpy.mockRestore();
+    });
+
+    it('should persist version, effective settings, and identity to the state file (Issue #1354/#1355/#1358)', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      vi.mocked(fs.openSync).mockReturnValue(3);
+      vi.mocked(fs.writeSync).mockReturnValue(5);
+      vi.mocked(fs.closeSync).mockReturnValue(undefined);
+      vi.mocked(dotenv.config).mockReturnValue({
+        parsed: {
+          CM_PORT: '4000',
+          CM_BIND: '127.0.0.1',
+          CM_HTTPS_CERT: '/certs/localhost.pem',
+          CM_HTTPS_KEY: '/certs/localhost-key.pem',
+          CM_AUTH_TOKEN_HASH: 'deadbeef',
+        },
+      });
+      vi.mocked(childProcess.spawn).mockReturnValue({
+        pid: 12345,
+        unref: vi.fn(),
+        on: vi.fn(),
+      } as unknown as childProcess.ChildProcess);
+
+      await daemonManager.start({});
+
+      const written = vi.mocked(fs.writeSync).mock.calls[0][1] as string;
+      const state = JSON.parse(written);
+      expect(state).toMatchObject({
+        pid: 12345,
+        version: '1.2.3',
+        port: 4000,
+        bind: '127.0.0.1',
+        protocol: 'https',
+        auth: true,
+      });
+      expect(typeof state.startedAt).toBe('string');
     });
 
     it('should use dev mode when specified', async () => {
@@ -254,6 +293,58 @@ describe('DaemonManager', () => {
 
         expect(dotenv.config).toHaveBeenCalledWith({ path: '/mock/.commandmate/envs/135.env' });
         expect(status?.port).toBe(3135);
+      });
+    });
+
+    /**
+     * Issue #1354/#1355: a state file records the version and effective settings the daemon was
+     * started with, so getStatus() reports the real server instead of re-deriving from .env.
+     */
+    describe('recorded state (Issue #1354/#1355)', () => {
+      it('should report version, protocol, auth and the recorded URL', async () => {
+        vi.mocked(fs.existsSync).mockReturnValue(true);
+        vi.mocked(fs.readFileSync).mockReturnValue(
+          JSON.stringify({
+            pid: 12345,
+            version: '1.2.3',
+            port: 4000,
+            bind: '0.0.0.0',
+            protocol: 'https',
+            auth: true,
+          })
+        );
+        const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+
+        const status = await daemonManager.getStatus();
+
+        expect(status).toMatchObject({
+          running: true,
+          pid: 12345,
+          version: '1.2.3',
+          port: 4000,
+          protocol: 'https',
+          auth: true,
+          url: 'https://127.0.0.1:4000',
+        });
+
+        killSpy.mockRestore();
+      });
+
+      it('should prefer the recorded port over the current .env port (Issue #1355)', async () => {
+        vi.mocked(fs.existsSync).mockReturnValue(true);
+        vi.mocked(fs.readFileSync).mockReturnValue(
+          JSON.stringify({ pid: 12345, port: 4000, bind: '127.0.0.1', protocol: 'http' })
+        );
+        // .env now says 3000, but the server was started on 4000
+        vi.mocked(dotenv.config).mockReturnValue({ parsed: { CM_PORT: '3000' } });
+        const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+
+        const status = await daemonManager.getStatus();
+
+        expect(status?.port).toBe(4000);
+        expect(status?.url).toBe('http://127.0.0.1:4000');
+
+        killSpy.mockRestore();
       });
     });
   });

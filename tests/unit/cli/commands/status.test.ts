@@ -14,11 +14,16 @@ vi.mock('../../../../src/cli/utils/env-setup', () => ({
   getPidFilePath: vi.fn(() => '/mock/home/.commandmate/.commandmate.pid'),
   getEnvPath: vi.fn(() => '/mock/home/.commandmate/.env'),
 }));
+// Issue #1354: status compares the running daemon's recorded version to the installed CLI's
+vi.mock('../../../../src/cli/utils/package-info', () => ({
+  readPackageVersion: vi.fn(() => '0.10.3'),
+}));
 
 // Import after mocking
 import { statusCommand } from '../../../../src/cli/commands/status';
 import { ExitCode } from '../../../../src/cli/types';
 import { getPidFilePath, getEnvPath } from '../../../../src/cli/utils/env-setup';
+import { readPackageVersion } from '../../../../src/cli/utils/package-info';
 
 describe('statusCommand', () => {
   let mockExit: ReturnType<typeof vi.fn>;
@@ -146,6 +151,66 @@ describe('statusCommand', () => {
 
       expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('IP ACL:  192.168.1.0/24'));
       expect(consoleSpy).not.toHaveBeenCalledWith(expect.stringContaining('10.0.0.0/8'));
+
+      killSpy.mockRestore();
+    });
+
+    // Issue #1354: display the version the running daemon was started with
+    it('should display the running server version from the state file', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(
+        JSON.stringify({ pid: 12345, version: '0.10.3', port: 3000, bind: '127.0.0.1', protocol: 'http' })
+      );
+      vi.mocked(dotenv.config).mockReturnValue({ parsed: {} });
+      vi.mocked(readPackageVersion).mockReturnValue('0.10.3');
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+
+      await statusCommand();
+
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Version: 0.10.3'));
+
+      killSpy.mockRestore();
+    });
+
+    // Issue #1354: warn when a stale daemon of a different version is still running
+    it('should warn when the server version differs from the installed CLI', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(
+        JSON.stringify({ pid: 12345, version: '0.9.0', port: 3000, bind: '127.0.0.1', protocol: 'http' })
+      );
+      vi.mocked(dotenv.config).mockReturnValue({ parsed: {} });
+      vi.mocked(readPackageVersion).mockReturnValue('0.10.3');
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+
+      await statusCommand();
+
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Version: 0.9.0'));
+      // logger.warn is emitted via console.log with a [WARN] tag
+      const warned = consoleSpy.mock.calls.some(
+        (call: unknown[]) =>
+          typeof call[0] === 'string' && call[0].includes('[WARN]') && call[0].includes('0.9.0')
+      );
+      expect(warned).toBe(true);
+
+      killSpy.mockRestore();
+    });
+
+    // Issue #1354: no warning when the running server is already the installed version
+    it('should not warn when the server version matches the installed CLI', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(
+        JSON.stringify({ pid: 12345, version: '0.10.3', port: 3000, bind: '127.0.0.1', protocol: 'http' })
+      );
+      vi.mocked(dotenv.config).mockReturnValue({ parsed: {} });
+      vi.mocked(readPackageVersion).mockReturnValue('0.10.3');
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+
+      await statusCommand();
+
+      const warned = consoleSpy.mock.calls.some(
+        (call: unknown[]) => typeof call[0] === 'string' && call[0].includes('[WARN]')
+      );
+      expect(warned).toBe(false);
 
       killSpy.mockRestore();
     });
