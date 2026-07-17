@@ -12,7 +12,7 @@
  * ../config/cli-tool-ids.ts.
  */
 
-import type { ApiClient } from './api-client';
+import { assertResponseShape, type ApiClient } from './api-client';
 import type { AgentInstance, WorktreeDetailResponse } from '../types/api-responses';
 import { MAX_AGENT_INSTANCES, MAX_AGENT_ALIAS_LENGTH, getCliToolDisplayName, type CLIToolType } from '../../lib/cli-tools/types';
 import { MIN_AGENT_INSTANCES } from '../../lib/agent-instances-validator';
@@ -24,7 +24,17 @@ export { MAX_AGENT_INSTANCES, MAX_AGENT_ALIAS_LENGTH, MIN_AGENT_INSTANCES };
  */
 export async function fetchAgentInstances(client: ApiClient, worktreeId: string): Promise<AgentInstance[]> {
   const worktree = await client.get<WorktreeDetailResponse>(`/api/worktrees/${worktreeId}`);
-  return worktree.agentInstances ?? [];
+  // Issue #1357: a current daemon always includes agentInstances (an empty array
+  // when the worktree has no instances). Its absence means the running daemon
+  // predates the roster API, so silently returning [] here would look to the user
+  // like "no instances" and mask the real cause. Validate the field's presence so
+  // a stale daemon surfaces as an actionable version-skew error instead.
+  const validated = assertResponseShape<WorktreeDetailResponse>(
+    worktree,
+    ['agentInstances'],
+    'GET /api/worktrees/:id (agent-instance roster)'
+  );
+  return validated.agentInstances;
 }
 
 /**

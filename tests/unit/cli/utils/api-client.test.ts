@@ -11,7 +11,11 @@ import {
   ApiClient,
   ApiError,
   MAX_STOP_PATTERN_LENGTH,
+  assertResponseShape,
+  fetchDaemonVersion,
+  warnIfVersionSkew,
 } from '../../../../src/cli/utils/api-client';
+import { readPackageVersion } from '../../../../src/cli/utils/package-info';
 import { ExitCode } from '../../../../src/cli/types';
 import { mockFetchResponse, mockFetchError, restoreFetch } from '../../../helpers/mock-api';
 
@@ -284,6 +288,108 @@ describe('ApiClient', () => {
     expect(consoleSpy).not.toHaveBeenCalledWith(
       expect.stringContaining('plaintext')
     );
+    consoleSpy.mockRestore();
+  });
+});
+
+// Issue #1357: shape validation + version-skew detection
+describe('assertResponseShape', () => {
+  it('returns the value when all required fields are present', () => {
+    const value = { agentInstances: [], id: 'wt1' };
+    const result = assertResponseShape<{ agentInstances: unknown[] }>(
+      value,
+      ['agentInstances'],
+      'GET /api/worktrees/:id'
+    );
+    expect(result).toBe(value);
+  });
+
+  it('treats a present-but-empty field as valid (not missing)', () => {
+    // Distinguishes "field absent" (stale daemon) from "field is []" (no data).
+    const value = { agentInstances: [] };
+    expect(() =>
+      assertResponseShape<{ agentInstances: unknown[] }>(value, ['agentInstances'], 'ctx')
+    ).not.toThrow();
+  });
+
+  it('throws a version-skew ApiError when a required field is absent', () => {
+    expect(() =>
+      assertResponseShape<{ agentInstances: unknown[] }>({ id: 'wt1' }, ['agentInstances'], 'ctx')
+    ).toThrow(/older version/);
+    try {
+      assertResponseShape<{ agentInstances: unknown[] }>({ id: 'wt1' }, ['agentInstances'], 'ctx');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).exitCode).toBe(ExitCode.UNEXPECTED_ERROR);
+      expect((err as ApiError).message).toContain('agentInstances');
+    }
+  });
+
+  it('throws when the value is not an object', () => {
+    expect(() => assertResponseShape<object>(null, [], 'ctx')).toThrow(ApiError);
+    expect(() => assertResponseShape<object>('nope', [], 'ctx')).toThrow(/older version/);
+  });
+});
+
+describe('fetchDaemonVersion', () => {
+  afterEach(() => {
+    restoreFetch();
+  });
+
+  it('returns currentVersion from GET /api/app/update-check', async () => {
+    mockFetchResponse({ currentVersion: '9.9.9', status: 'success' });
+    const client = new ApiClient();
+    await expect(fetchDaemonVersion(client)).resolves.toBe('9.9.9');
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/app/update-check'),
+      expect.objectContaining({ method: 'GET' })
+    );
+  });
+
+  it('returns undefined when currentVersion is absent (older daemon)', async () => {
+    mockFetchResponse({ status: 'degraded' });
+    const client = new ApiClient();
+    await expect(fetchDaemonVersion(client)).resolves.toBeUndefined();
+  });
+
+  it('returns undefined (never throws) when the request fails', async () => {
+    mockFetchError('connect ECONNREFUSED 127.0.0.1:3000');
+    const client = new ApiClient();
+    await expect(fetchDaemonVersion(client)).resolves.toBeUndefined();
+  });
+});
+
+describe('warnIfVersionSkew', () => {
+  afterEach(() => {
+    restoreFetch();
+  });
+
+  it('warns on stderr when the daemon version differs from the CLI', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockFetchResponse({ currentVersion: '0.0.0-different', status: 'success' });
+    const client = new ApiClient();
+    await warnIfVersionSkew(client);
+    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('0.0.0-different'));
+    consoleSpy.mockRestore();
+  });
+
+  it('stays silent when the daemon version matches the CLI', async () => {
+    const cliVersion = readPackageVersion();
+    expect(cliVersion).toBeTruthy();
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockFetchResponse({ currentVersion: cliVersion, status: 'success' });
+    const client = new ApiClient();
+    await warnIfVersionSkew(client);
+    expect(consoleSpy).not.toHaveBeenCalled();
+    consoleSpy.mockRestore();
+  });
+
+  it('stays silent when the daemon version is unknown', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockFetchResponse({ status: 'degraded' });
+    const client = new ApiClient();
+    await warnIfVersionSkew(client);
+    expect(consoleSpy).not.toHaveBeenCalled();
     consoleSpy.mockRestore();
   });
 });
