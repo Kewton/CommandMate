@@ -34,11 +34,39 @@ export interface BranchListItemProps {
 // Sub-components
 // ============================================================================
 
+/** Gap (px) between the anchor item and the tooltip bubble. */
+const TOOLTIP_GAP = 8;
+
+/** Minimum margin (px) kept between the bubble and the viewport edges. */
+const VIEWPORT_MARGIN = 8;
+
+/** Max bubble width in px (Tailwind `max-w-sm` = 24rem). */
+const TOOLTIP_MAX_WIDTH = 384;
+
+/**
+ * Clamp one axis so `[value, value + bubbleSize]` stays inside the viewport,
+ * leaving `VIEWPORT_MARGIN` at both edges (Issue #1361).
+ *
+ * When the bubble is larger than the space available it is pinned to the
+ * start edge: showing its beginning beats showing its middle.
+ */
+export function clampAxis(value: number, bubbleSize: number, viewportSize: number): number {
+  const maxStart = viewportSize - VIEWPORT_MARGIN - bubbleSize;
+  if (maxStart <= VIEWPORT_MARGIN) return VIEWPORT_MARGIN;
+  return Math.min(Math.max(value, VIEWPORT_MARGIN), maxStart);
+}
+
 /**
  * Tooltip shown on hover/focus with branch details (Issue #651, #676).
  * Rendered via React portal to escape the sidebar's overflow-y:auto clipping.
  * Only mounted into the DOM while `isVisible` is true (Issue #676 fix) to avoid
  * stuck-tooltip states caused by missed `mouseleave`/`blur` events.
+ *
+ * Issue #1361: the position is measured from the real bubble size and clamped
+ * to the viewport. The unconditional `left: rect.right + 8` / `top: rect.top`
+ * placement overflowed the screen with a wide sidebar (up to 480px), on the
+ * bottom-most list item, and — worst — inside the 375px mobile drawer, where a
+ * 384px bubble opening at left≈296 ran almost entirely off-screen.
  */
 function BranchTooltip({
   id,
@@ -53,14 +81,35 @@ function BranchTooltip({
 }) {
   // Start off-screen so tooltip is never briefly visible at (0,0) before coords are set
   const [coords, setCoords] = useState({ top: -9999, left: -9999 });
+  const bubbleRef = useRef<HTMLDivElement>(null);
 
   // Update position when tooltip becomes visible
   // (Hook ordering kept intact: this effect runs unconditionally on every render.)
   useEffect(() => {
-    if (isVisible && anchorRef.current) {
-      const rect = anchorRef.current.getBoundingClientRect();
-      setCoords({ top: rect.top, left: rect.right + 8 });
+    if (!isVisible || !anchorRef.current) return;
+
+    const rect = anchorRef.current.getBoundingClientRect();
+    // The bubble is already mounted (off-screen) by the time this effect runs,
+    // and its max-width is capped below, so this measures the true rendered size.
+    const bubble = bubbleRef.current?.getBoundingClientRect();
+    const bubbleWidth = bubble?.width ?? 0;
+    const bubbleHeight = bubble?.height ?? 0;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    // Horizontal: prefer the right side, flip to the left when it would overflow
+    // and the left side has room. Otherwise clamp (narrow viewports have room
+    // on neither side).
+    let left = rect.right + TOOLTIP_GAP;
+    if (left + bubbleWidth > viewportWidth - VIEWPORT_MARGIN) {
+      const flipped = rect.left - TOOLTIP_GAP - bubbleWidth;
+      if (flipped >= VIEWPORT_MARGIN) left = flipped;
     }
+
+    setCoords({
+      top: clampAxis(rect.top, bubbleHeight, viewportHeight),
+      left: clampAxis(left, bubbleWidth, viewportWidth),
+    });
   }, [isVisible, anchorRef]);
 
   // Portals require document — skip during SSR
@@ -71,8 +120,13 @@ function BranchTooltip({
   // `isTooltipVisible=true` can never cause the tooltip to linger in the DOM.
   if (!isVisible) return null;
 
+  // Issue #1361: clamping alone cannot fit a 384px bubble into a 375px mobile
+  // viewport, so cap the width too. Wider screens keep the `max-w-sm` size.
+  const maxWidth = Math.min(TOOLTIP_MAX_WIDTH, Math.max(0, window.innerWidth - VIEWPORT_MARGIN * 2));
+
   return ReactDOM.createPortal(
     <div
+      ref={bubbleRef}
       id={id}
       role="tooltip"
       className="
@@ -85,6 +139,7 @@ function BranchTooltip({
       style={{
         top: coords.top,
         left: coords.left,
+        maxWidth,
       }}
     >
       <p className="font-medium text-sidebar-foreground whitespace-nowrap">{branch.name}</p>
