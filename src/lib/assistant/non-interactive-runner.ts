@@ -12,6 +12,7 @@ import {
   updateAssistantExecution,
   updateAssistantMessageStatus,
 } from '@/lib/db';
+import { createLogger } from '@/lib/logger';
 import { buildNonInteractivePrompt } from './non-interactive-prompt-builder';
 import {
   cancelAssistantExecutionProcess,
@@ -24,6 +25,8 @@ import {
   parseClaudeStructuredOutput,
   parseCodexStructuredOutput,
 } from './non-interactive-output-parser';
+
+const logger = createLogger('assistant/non-interactive-runner');
 
 const EXECUTION_TIMEOUT_MS = 15 * 60 * 1000;
 
@@ -121,106 +124,198 @@ export async function startNonInteractiveAssistantExecution(params: {
   const processEntry = child as ChildProcessWithoutNullStreams;
   registerAssistantExecutionProcess(execution.id, conversationId, processEntry);
 
-  updateAssistantExecution(db, execution.id, {
-    status: 'running',
-    pid: child.pid ?? null,
-    startedAt,
-  });
-  updateAssistantConversation(db, conversationId, {
-    status: 'running',
-    lastStartedAt: startedAt,
-    lastExecutionId: execution.id,
-  });
-  updateAssistantMessageStatus(db, userMessageId, 'sent');
-
   let stdout = '';
   let stderr = '';
 
-  child.stdout.on('data', (chunk: Buffer | string) => {
-    stdout += chunk.toString();
-    updateAssistantExecution(db, execution.id, { stdoutText: stdout });
-  });
+  // Issue #1344: only the first of the startup rollback / 'error' / 'close'
+  // paths may write the terminal state. Without this a late event could flip a
+  // conversation back to 'ready' while a newer execution is already running.
+  let settled = false;
 
-  child.stderr.on('data', (chunk: Buffer | string) => {
-    stderr += chunk.toString();
-    updateAssistantExecution(db, execution.id, { stderrText: stderr });
-  });
+  const runSafely = (event: string, action: () => void): void => {
+    try {
+      action();
+    } catch (error) {
+      logger.error(event, {
+        executionId: execution.id,
+        conversationId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
 
-  child.on('error', (error) => {
-    unregisterAssistantExecutionProcess(execution.id);
-    updateAssistantExecution(db, execution.id, {
-      status: 'failed',
-      stderrText: `${stderr}\n${error.message}`.trim(),
-      finishedAt: new Date(),
-    });
-    updateAssistantMessageStatus(db, userMessageId, 'failed');
-    updateAssistantConversation(db, conversationId, {
-      status: 'ready',
-    });
-  });
-
-  child.on('close', (exitCode) => {
-    const cancelled = isAssistantExecutionCancellationRequested(execution.id);
-    const finishedAt = new Date();
+  // Issue #1344: releases the conversation lock when a state transition throws.
+  // The conversation would otherwise stay 'running' forever and the terminal
+  // route (which requires 'ready') would reject every subsequent message.
+  // Unregisters first so that the reconciler can still recover the conversation
+  // if the DB writes below are what is failing.
+  const finalizeAsFailed = (event: string, error: unknown): void => {
+    settled = true;
     unregisterAssistantExecutionProcess(execution.id);
 
-    if (cancelled) {
-      const latestConversation = getAssistantConversationById(db, conversationId);
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error(event, { executionId: execution.id, conversationId, error: message });
+
+    runSafely('finalize-execution-failed', () => {
       updateAssistantExecution(db, execution.id, {
-        status: 'cancelled',
-        stdoutText: stdout,
-        stderrText: stderr,
-        exitCode,
-        finishedAt,
+        status: 'failed',
+        stderrText: `${stderr}\n${message}`.trim(),
+        finishedAt: new Date(),
       });
-      if (latestConversation?.status !== 'stopped') {
-        updateAssistantConversation(db, conversationId, {
-          status: 'ready',
-          resumeSessionId: null,
-        });
-      }
-      return;
-    }
-
-    const parsed = parseExecutionOutput(cliToolId, stdout);
-    const completed = exitCode === 0 && parsed.finalMessage;
-
-    updateAssistantExecution(db, execution.id, {
-      status: completed ? 'completed' : 'failed',
-      stdoutText: stdout,
-      stderrText: stderr,
-      finalMessageText: parsed.finalMessage,
-      exitCode,
-      resumeSessionIdAfter: parsed.resumeSessionId,
-      finishedAt,
     });
-
-    if (!completed) {
+    runSafely('finalize-message-failed', () => {
       updateAssistantMessageStatus(db, userMessageId, 'failed');
-      updateAssistantConversation(db, conversationId, {
-        status: 'ready',
-        resumeSessionId: null,
-      });
-      return;
-    }
-
-    createAssistantMessage(db, {
-      conversationId,
-      role: 'assistant',
-      content: parsed.finalMessage!,
-      messageType: 'normal',
-      timestamp: finishedAt,
     });
+    runSafely('finalize-conversation-ready', () => {
+      updateAssistantConversation(db, conversationId, { status: 'ready' });
+    });
+  };
 
+  // The child is being discarded, so swallow its late 'error'/EPIPE events:
+  // when the startup fails before the handlers below are wired up, nothing
+  // would listen for them and Node rethrows them as uncaught exceptions.
+  const stopStartedProcess = (): void => {
+    runSafely('start-failure-detach-failed', () => {
+      child.on('error', () => {});
+      child.stdin.on('error', () => {});
+    });
+    runSafely('start-failure-kill-failed', () => {
+      if (!child.killed) {
+        child.kill('SIGTERM');
+      }
+    });
+  };
+
+  try {
+    updateAssistantExecution(db, execution.id, {
+      status: 'running',
+      pid: child.pid ?? null,
+      startedAt,
+    });
     updateAssistantConversation(db, conversationId, {
-      status: 'ready',
-      resumeSessionId: parsed.resumeSessionId ?? conversation.resumeSessionId ?? null,
+      status: 'running',
+      lastStartedAt: startedAt,
       lastExecutionId: execution.id,
     });
-  });
+    updateAssistantMessageStatus(db, userMessageId, 'sent');
 
-  child.stdin.write(promptText);
-  child.stdin.end();
+    child.stdout.on('data', (chunk: Buffer | string) => {
+      stdout += chunk.toString();
+      updateAssistantExecution(db, execution.id, { stdoutText: stdout });
+    });
+
+    child.stderr.on('data', (chunk: Buffer | string) => {
+      stderr += chunk.toString();
+      updateAssistantExecution(db, execution.id, { stderrText: stderr });
+    });
+
+    child.on('error', (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      unregisterAssistantExecutionProcess(execution.id);
+
+      try {
+        updateAssistantExecution(db, execution.id, {
+          status: 'failed',
+          stderrText: `${stderr}\n${error.message}`.trim(),
+          finishedAt: new Date(),
+        });
+        updateAssistantMessageStatus(db, userMessageId, 'failed');
+        updateAssistantConversation(db, conversationId, {
+          status: 'ready',
+        });
+      } catch (handlerError) {
+        finalizeAsFailed('error-handler-failed', handlerError);
+      }
+    });
+
+    child.on('close', (exitCode) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+
+      const cancelled = isAssistantExecutionCancellationRequested(execution.id);
+      const finishedAt = new Date();
+      unregisterAssistantExecutionProcess(execution.id);
+
+      // Issue #1344 (2): parseExecutionOutput and createAssistantMessage can
+      // throw. Without this catch neither the execution nor the conversation
+      // reaches a terminal state. The reconciler heals the conversation on the
+      // next API call (the process is unregistered above), but it stays locked
+      // until then, so finalize it here instead.
+      try {
+        if (cancelled) {
+          const latestConversation = getAssistantConversationById(db, conversationId);
+          updateAssistantExecution(db, execution.id, {
+            status: 'cancelled',
+            stdoutText: stdout,
+            stderrText: stderr,
+            exitCode,
+            finishedAt,
+          });
+          if (latestConversation?.status !== 'stopped') {
+            updateAssistantConversation(db, conversationId, {
+              status: 'ready',
+              resumeSessionId: null,
+            });
+          }
+          return;
+        }
+
+        const parsed = parseExecutionOutput(cliToolId, stdout);
+        const completed = exitCode === 0 && parsed.finalMessage;
+
+        updateAssistantExecution(db, execution.id, {
+          status: completed ? 'completed' : 'failed',
+          stdoutText: stdout,
+          stderrText: stderr,
+          finalMessageText: parsed.finalMessage,
+          exitCode,
+          resumeSessionIdAfter: parsed.resumeSessionId,
+          finishedAt,
+        });
+
+        if (!completed) {
+          updateAssistantMessageStatus(db, userMessageId, 'failed');
+          updateAssistantConversation(db, conversationId, {
+            status: 'ready',
+            resumeSessionId: null,
+          });
+          return;
+        }
+
+        createAssistantMessage(db, {
+          conversationId,
+          role: 'assistant',
+          content: parsed.finalMessage!,
+          messageType: 'normal',
+          timestamp: finishedAt,
+        });
+
+        updateAssistantConversation(db, conversationId, {
+          status: 'ready',
+          resumeSessionId: parsed.resumeSessionId ?? conversation.resumeSessionId ?? null,
+          lastExecutionId: execution.id,
+        });
+      } catch (error) {
+        finalizeAsFailed('close-handler-failed', error);
+      }
+    });
+
+    child.stdin.write(promptText);
+    child.stdin.end();
+  } catch (error) {
+    // Issue #1344 (1): the process is already registered, so the reconciler
+    // ('running' execution with no registered process) never fires for it. Kill
+    // the child — it would hang on stdin forever — and roll the conversation
+    // back to 'ready' before handing the failure to the caller.
+    finalizeAsFailed('execution-start-failed', error);
+    stopStartedProcess();
+    throw error;
+  }
 
   const timeout = setTimeout(() => {
     cancelAssistantExecutionProcess(conversationId);
