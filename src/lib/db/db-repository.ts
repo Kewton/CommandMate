@@ -562,26 +562,43 @@ export function registerAndFilterRepositories(
  * SF-002: SRP - disable logic encapsulated
  */
 export function disableRepository(db: Database.Database, repositoryPath: string): void {
+  if (disableExistingRepository(db, repositoryPath)) {
+    return;
+  }
+
+  const resolvedPath = resolveRepositoryPath(repositoryPath);
+  // SEC-SF-004: Check disabled repository count limit before creating new record
+  const disabledCount = db.prepare(
+    'SELECT COUNT(*) as count FROM repositories WHERE enabled = 0'
+  ).get() as { count: number };
+  if (disabledCount.count >= MAX_DISABLED_REPOSITORIES) {
+    throw new Error('Disabled repository limit exceeded');
+  }
+  createRepository(db, {
+    name: path.basename(resolvedPath),
+    path: resolvedPath,
+    cloneSource: 'local',
+    isEnvManaged: false,
+    enabled: false,  // Explicit: do not rely on undefined -> 1 default
+  });
+}
+
+/**
+ * Disable a repository only when it is already registered (enabled=0).
+ *
+ * Unlike disableRepository(), this never creates a record, so callers that may be
+ * handed a path that was never registered do not leave a ghost `enabled=0` row behind.
+ *
+ * Issue #1346
+ *
+ * @returns true if a registered repository was disabled, false if none was registered
+ */
+export function disableExistingRepository(db: Database.Database, repositoryPath: string): boolean {
   const resolvedPath = resolveRepositoryPath(repositoryPath);
   const repo = getRepositoryByPath(db, resolvedPath);
-  if (repo) {
-    updateRepository(db, repo.id, { enabled: false });
-  } else {
-    // SEC-SF-004: Check disabled repository count limit before creating new record
-    const disabledCount = db.prepare(
-      'SELECT COUNT(*) as count FROM repositories WHERE enabled = 0'
-    ).get() as { count: number };
-    if (disabledCount.count >= MAX_DISABLED_REPOSITORIES) {
-      throw new Error('Disabled repository limit exceeded');
-    }
-    createRepository(db, {
-      name: path.basename(resolvedPath),
-      path: resolvedPath,
-      cloneSource: 'local',
-      isEnvManaged: false,
-      enabled: false,  // Explicit: do not rely on undefined -> 1 default
-    });
-  }
+  if (!repo) return false;
+  updateRepository(db, repo.id, { enabled: false });
+  return true;
 }
 
 /**
