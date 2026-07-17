@@ -297,6 +297,26 @@ describe('DesktopHeader per-instance status row (Issue #749 / #869)', () => {
       expect(codex.closest('[data-testid="tooltip-wrapper"]')).not.toBeNull();
     });
 
+    // Issue #1364: this `placement="bottom"` tooltip sits in the header's
+    // horizontally-packed instance row and was missing from #1341's impact
+    // list. Like the sidebar's, it must escape to document.body on hover rather
+    // than render as a clipped absolute child.
+    it('portals the idle-instance tooltip to document.body on hover (Issue #1364)', async () => {
+      render(<DesktopHeader {...baseProps} instances={mkInstances(['claude', 'codex'])} />);
+
+      const codex = screen.getByTestId('desktop-agent-status-codex');
+      fireEvent.mouseEnter(codex.closest('[data-testid="tooltip-wrapper"]')!);
+
+      const tooltip = await screen.findByRole('tooltip', { hidden: true });
+      expect(tooltip).toHaveTextContent('Codex: Idle');
+      expect(tooltip).toHaveAttribute('data-placement', 'bottom');
+      expect(tooltip.parentElement).toBe(document.body);
+      expect(tooltip.className).toMatch(/\bfixed\b/);
+      // a11y (#730): the label is not double-announced via aria-describedby.
+      expect(tooltip).toHaveAttribute('aria-hidden', 'true');
+      expect(codex).not.toHaveAttribute('aria-describedby');
+    });
+
     it('row container uses gap-2 (Issue #751)', () => {
       render(<DesktopHeader {...baseProps} instances={mkInstances(['claude'])} />);
       const row = screen.getByTestId('desktop-agent-status-row');
