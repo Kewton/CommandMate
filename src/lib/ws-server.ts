@@ -21,6 +21,12 @@ import { getControlModeTmuxTransport } from './tmux/control-mode-tmux-transport'
 import { isTmuxControlModeEnabled } from './tmux/tmux-control-mode-flags';
 import { getExternalAppCache } from './external-apps/cache';
 import type { ExternalApp } from '@/types/external-apps';
+import { getServerVersion } from '@/lib/version-checker';
+import {
+  CLIENT_VERSION_MESSAGE_TYPE,
+  VERSION_MISMATCH_EVENT_TYPE,
+  isVersionMismatch,
+} from '@/lib/realtime/types';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('ws-server');
@@ -30,6 +36,7 @@ interface WebSocketMessage {
     | 'subscribe'
     | 'unsubscribe'
     | 'broadcast'
+    | typeof CLIENT_VERSION_MESSAGE_TYPE
     | 'terminal_subscribe'
     | 'terminal_input'
     | 'terminal_resize'
@@ -39,6 +46,8 @@ interface WebSocketMessage {
   data?: unknown;
   cols?: number;
   rows?: number;
+  /** Client bundle version carried by a {@link CLIENT_VERSION_MESSAGE_TYPE} hello. */
+  version?: string;
 }
 
 interface TerminalSubscription {
@@ -444,6 +453,10 @@ function handleMessage(ws: WebSocket, message: WebSocketMessage): void {
       handleBroadcast(message.worktreeId, message.data);
       break;
 
+    case CLIENT_VERSION_MESSAGE_TYPE:
+      handleClientVersion(ws, message);
+      break;
+
     case 'terminal_subscribe':
       void handleTerminalSubscribe(ws, message);
       break;
@@ -462,6 +475,38 @@ function handleMessage(ws: WebSocket, message: WebSocketMessage): void {
 
     default:
       logger.warn('message:unknown-type');
+  }
+}
+
+/**
+ * Handle a client-version hello (#1338/#1356).
+ *
+ * The client announces its baked bundle version on every (re)connect. If the
+ * server's actually-running version (runtime package.json, resolved by
+ * getServerVersion) has drifted from it, reply with a version_mismatch event so
+ * the tab can surface a reload nudge. Stays silent when the versions match or
+ * either side is an unknown/fallback version (受入条件: 誤検知しない).
+ */
+function handleClientVersion(ws: WebSocket, message: WebSocketMessage): void {
+  const clientVersion = typeof message.version === 'string' ? message.version : '';
+  if (!clientVersion) return;
+
+  const serverVersion = getServerVersion();
+  if (!isVersionMismatch(serverVersion, clientVersion)) return;
+
+  if (ws.readyState !== WebSocket.OPEN) return;
+  try {
+    ws.send(
+      JSON.stringify({
+        type: VERSION_MISMATCH_EVENT_TYPE,
+        serverVersion,
+        clientVersion,
+      }),
+    );
+  } catch (error) {
+    logger.error('version:notify-failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
@@ -868,6 +913,7 @@ export function closeWebSocket(): void {
 
 export const __internal = {
   handleMessage,
+  handleClientVersion,
   handleProxyUpgrade,
   handleTerminalSubscribe,
   handleTerminalInput,

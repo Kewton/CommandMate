@@ -130,6 +130,12 @@
     "reconnectingTooltip": "Re-establishing the live connection (running on polling)",
     "offlineTooltip": "No live connection (running on polling)"
   },
+  "versionMismatch": {
+    "title": "A new version is running",
+    "description": "The server is now on {serverVersion}, but this tab is still on {clientVersion}. Reload to get the latest.",
+    "reload": "Reload",
+    "dismiss": "Dismiss"
+  },
   "meta": {
     "description": "Git worktree management with Claude CLI and tmux sessions"
   }

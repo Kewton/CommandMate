@@ -130,6 +130,12 @@
     "reconnectingTooltip": "ライブ接続を再確立しています（ポーリングで動作中）",
     "offlineTooltip": "ライブ接続なし（ポーリングで動作中）"
   },
+  "versionMismatch": {
+    "title": "新しいバージョンが起動しています",
+    "description": "サーバーは {serverVersion} になりましたが、このタブは {clientVersion} のままです。最新の状態にするには再読み込みしてください。",
+    "reload": "再読み込み",
+    "dismiss": "閉じる"
+  },
   "meta": {
     "description": "Claude CLI と tmux セッションによる Git worktree 管理"
   }
