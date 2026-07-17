@@ -6,7 +6,7 @@
  */
 
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { FilePanelTabs } from '@/components/worktree/FilePanelTabs';
 import type { FileTab } from '@/hooks/useFileTabs';
@@ -188,5 +188,84 @@ describe('FilePanelTabs', () => {
 
       expect(onMoveToFront).toHaveBeenCalledWith('file6.ts');
     });
+  });
+});
+
+/**
+ * [Issue #1365] The overflow dropdown is anchored `absolute right-0 top-full`
+ * off the "+N" button at the right end of the tab bar. With many tabs open it
+ * can reach past the bottom of the viewport, so once open it is measured and
+ * nudged back with a transform. It stays absolutely positioned (rather than
+ * portalled) because the click-outside handler asks whether the click landed
+ * inside the dropdown's container.
+ */
+describe('FilePanelTabs overflow dropdown clamping (Issue #1365)', () => {
+  const defaultProps = {
+    worktreeId: 'test-wt',
+    onClose: vi.fn(),
+    onActivate: vi.fn(),
+    onLoadContent: vi.fn(),
+    onLoadError: vi.fn(),
+    onSetLoading: vi.fn(),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 768 });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function makeRect(overrides: Partial<DOMRect>): DOMRect {
+    return {
+      top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0,
+      ...overrides,
+      toJSON: () => ({}),
+    } as DOMRect;
+  }
+
+  /** Only the dropdown menu reports a box; everything else is zeroed. */
+  function menuRect(rect: Partial<DOMRect>): void {
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: Element
+    ) {
+      return this.getAttribute('data-testid') === 'tab-dropdown-menu'
+        ? makeRect(rect)
+        : makeRect({});
+    });
+  }
+
+  /** 7 tabs => 5 in the bar, 2 in the dropdown. */
+  const overflowingTabs = [
+    'a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts', 'f.ts', 'g.ts',
+  ].map((p) => createTab(p));
+
+  function openDropdown(): HTMLElement {
+    render(<FilePanelTabs tabs={overflowingTabs} activeIndex={0} {...defaultProps} />);
+    fireEvent.click(screen.getByTestId('tab-dropdown-button'));
+    return screen.getByTestId('tab-dropdown-menu');
+  }
+
+  it('does not shift a dropdown that already fits on screen', () => {
+    menuRect({ top: 40, left: 700, width: 200, height: 300 });
+
+    expect(openDropdown().style.transform).toBe('');
+  });
+
+  it('pulls a dropdown that overflows the bottom edge back into view', () => {
+    // 600 + 300 + 8 - 768 = 140 over the bottom; horizontally it still fits.
+    menuRect({ top: 600, left: 700, width: 200, height: 300 });
+
+    expect(openDropdown().style.transform).toBe('translate(0px, -140px)');
+  });
+
+  it('pulls a dropdown that overflows the right edge back into view', () => {
+    // 900 + 200 + 8 - 1024 = 84 over the right edge.
+    menuRect({ top: 40, left: 900, width: 200, height: 300 });
+
+    expect(openDropdown().style.transform).toBe('translate(-84px, 0px)');
   });
 });

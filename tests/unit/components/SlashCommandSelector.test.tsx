@@ -418,3 +418,103 @@ describe('SlashCommandSelector', () => {
     });
   });
 });
+
+/**
+ * [Issue #1365] The desktop dropdown is 320px wide and opens upward from the
+ * message input (`bottom: 100%`), so a tall command list can run past the top
+ * of the viewport and a right-aligned input can push it past the right edge.
+ * Once open it is measured and nudged back with a transform. The mobile bottom
+ * sheet is `fixed` and always on screen, so it must stay untouched.
+ */
+describe('SlashCommandSelector viewport clamping (Issue #1365)', () => {
+  const groups: SlashCommandGroup[] = [
+    {
+      category: 'planning',
+      label: 'Planning',
+      commands: [
+        {
+          name: 'work-plan',
+          description: 'Plan the work',
+          category: 'planning',
+          filePath: '.claude/commands/work-plan.md',
+        },
+      ],
+    },
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 768 });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function makeRect(overrides: Partial<DOMRect>): DOMRect {
+    return {
+      top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0,
+      ...overrides,
+      toJSON: () => ({}),
+    } as DOMRect;
+  }
+
+  /** Only the dropdown reports a box; everything else is zeroed. */
+  function dropdownRect(rect: Partial<DOMRect>): void {
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: Element
+    ) {
+      return this.getAttribute('data-testid') === 'slash-command-dropdown'
+        ? makeRect(rect)
+        : makeRect({});
+    });
+  }
+
+  function renderDropdown(isMobile = false) {
+    return render(
+      <SlashCommandSelector
+        isOpen
+        groups={groups}
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+        isMobile={isMobile}
+      />
+    );
+  }
+
+  it('does not shift a dropdown that already fits on screen', () => {
+    dropdownRect({ top: 200, left: 40, width: 320, height: 380 });
+    renderDropdown();
+
+    expect(screen.getByTestId('slash-command-dropdown').style.transform).toBe('');
+  });
+
+  it('pushes a dropdown that opens past the top of the viewport back down', () => {
+    // The list is taller than the space above the input: top -30 => nudged to 8.
+    dropdownRect({ top: -30, left: 40, width: 320, height: 380 });
+    renderDropdown();
+
+    expect(screen.getByTestId('slash-command-dropdown').style.transform).toBe(
+      'translate(0px, 38px)'
+    );
+  });
+
+  it('pulls a dropdown anchored near the right edge back into view', () => {
+    // 760 + 320 + 8 - 1024 = 64 over the right edge.
+    dropdownRect({ top: 200, left: 760, width: 320, height: 380 });
+    renderDropdown();
+
+    expect(screen.getByTestId('slash-command-dropdown').style.transform).toBe(
+      'translate(-64px, 0px)'
+    );
+  });
+
+  it('leaves the mobile bottom sheet alone', () => {
+    dropdownRect({ top: -30, left: 760, width: 320, height: 380 });
+    renderDropdown(true);
+
+    expect(screen.queryByTestId('slash-command-dropdown')).not.toBeInTheDocument();
+    expect(screen.getByTestId('slash-command-bottom-sheet').style.transform).toBe('');
+  });
+});

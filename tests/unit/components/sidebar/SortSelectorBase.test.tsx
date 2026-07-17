@@ -222,3 +222,70 @@ describe('SortSelectorBase', () => {
     });
   });
 });
+
+/**
+ * [Issue #1365] The dropdown is anchored to the trigger with `absolute
+ * right-0 top-full`. The sidebar header has no overflow clipping, so nothing
+ * cuts the menu off — but a selector sitting low in the viewport, or hard
+ * against an edge, can still open partly off-screen. Once open the menu is
+ * measured and nudged back with a transform.
+ */
+describe('SortSelectorBase viewport clamping (Issue #1365)', () => {
+  const VIEWPORT_WIDTH = 1024;
+  const VIEWPORT_HEIGHT = 768;
+
+  beforeEach(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: VIEWPORT_WIDTH });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: VIEWPORT_HEIGHT });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function makeRect(overrides: Partial<DOMRect>): DOMRect {
+    return {
+      top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0,
+      ...overrides,
+      toJSON: () => ({}),
+    } as DOMRect;
+  }
+
+  /** Only the dropdown (role=listbox) reports a box; everything else is zeroed. */
+  function menuRect(rect: Partial<DOMRect>): void {
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: Element
+    ) {
+      return this.getAttribute('role') === 'listbox' ? makeRect(rect) : makeRect({});
+    });
+  }
+
+  function openMenu(): HTMLElement {
+    fireEvent.click(screen.getByLabelText(/^Sort by/));
+    return screen.getByRole('listbox');
+  }
+
+  it('does not shift a dropdown that already fits on screen', () => {
+    menuRect({ top: 100, left: 400, width: 140, height: 120 });
+    renderSelector();
+
+    expect(openMenu().style.transform).toBe('');
+  });
+
+  it('pulls a dropdown that overflows the bottom and right edges back into view', () => {
+    // bottom: 700 + 120 + 8 - 768 = 60 over. right: 900 + 140 + 8 - 1024 = 24 over.
+    menuRect({ top: 700, left: 900, width: 140, height: 120 });
+    renderSelector();
+
+    expect(openMenu()).toHaveStyle({ transform: 'translate(-24px, -60px)' });
+  });
+
+  it('keeps the leading edge of a dropdown taller than the viewport on screen', () => {
+    // A 900px menu cannot fit: it is pinned at the top margin rather than
+    // having its head pushed off-screen.
+    menuRect({ top: 100, left: 400, width: 140, height: 900 });
+    renderSelector();
+
+    expect(openMenu()).toHaveStyle({ transform: 'translate(0px, -92px)' });
+  });
+});

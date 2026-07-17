@@ -299,3 +299,98 @@ describe('TruncationTooltip (Issue #859)', () => {
     expect(screen.queryByRole('tooltip', { hidden: true })).not.toBeInTheDocument();
   });
 });
+
+/**
+ * [Issue #1365] The bubble is placed below the trigger at show time, but its
+ * height is only known once it has been rendered. A second measuring pass flips
+ * it above the trigger when it would otherwise spill past the bottom of the
+ * viewport (a file row near the foot of the tree, especially with metadata
+ * lines). The pre-existing horizontal clamp must keep working untouched.
+ */
+describe('TruncationTooltip vertical clamping (Issue #1365)', () => {
+  const GAP = 4;
+  const VIEWPORT_HEIGHT = 768;
+  const VIEWPORT_WIDTH = 1024;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: VIEWPORT_HEIGHT });
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: VIEWPORT_WIDTH });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  function makeRect(overrides: Partial<DOMRect>): DOMRect {
+    return {
+      top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0,
+      ...overrides,
+      toJSON: () => ({}),
+    } as DOMRect;
+  }
+
+  /**
+   * Marks the trigger as truncated and pins its own box. Setting an *own*
+   * `getBoundingClientRect` keeps the trigger out of reach of the prototype
+   * spy below, which therefore only ever answers for the portalled bubble.
+   */
+  function anchorAt(el: HTMLElement, rect: Partial<DOMRect>): void {
+    Object.defineProperty(el, 'scrollWidth', { configurable: true, value: 200 });
+    Object.defineProperty(el, 'clientWidth', { configurable: true, value: 100 });
+    el.getBoundingClientRect = () => makeRect(rect);
+  }
+
+  /** Give the (not-yet-existing) bubble a measurable height. */
+  function withBubbleHeight(height: number): void {
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(
+      makeRect({ height })
+    );
+  }
+
+  function showTooltip(text: string, anchor: Partial<DOMRect>, height: number): HTMLElement {
+    render(
+      <TruncationTooltip content={text} className="truncate">
+        {text}
+      </TruncationTooltip>
+    );
+    anchorAt(screen.getByText(text), anchor);
+    withBubbleHeight(height);
+    fireEvent.mouseEnter(screen.getByText(text));
+    act(() => {
+      vi.advanceTimersByTime(TRUNCATION_TOOLTIP_DELAY_MS);
+    });
+    return screen.getByRole('tooltip', { hidden: true });
+  }
+
+  it('keeps the tooltip below the trigger when it fits there', () => {
+    // Trigger near the top: 30 + 4 + 120 is far short of the 768px viewport.
+    const tooltip = showTooltip('near-top.tsx', { top: 10, bottom: 30, left: 20, width: 100 }, 120);
+
+    expect(tooltip).toHaveStyle({ top: `${30 + GAP}px` });
+  });
+
+  it('flips the tooltip above the trigger when it would spill past the bottom', () => {
+    // 720 + 4 + 120 = 844 > 768, so it must flip: 700 - 4 - 120 = 576.
+    const tooltip = showTooltip('near-bottom.tsx', { top: 700, bottom: 720, left: 20, width: 100 }, 120);
+
+    expect(tooltip).toHaveStyle({ top: '576px' });
+  });
+
+  it('pins the tooltip to the bottom margin when it fits neither below nor above', () => {
+    // A 720px bubble fits neither under (60+4+720 > 768) nor over (40-4-720 < 0)
+    // the trigger, so it is pinned at 768 - 720 - 4 = 44 and its head stays on screen.
+    const tooltip = showTooltip('huge.tsx', { top: 40, bottom: 60, left: 20, width: 100 }, 720);
+
+    expect(tooltip).toHaveStyle({ top: '44px' });
+  });
+
+  it('leaves the existing horizontal clamp intact while flipping vertically', () => {
+    // left 1000 would push a 384px-wide bubble off-screen: clamped to
+    // 1024 - 384 - 4 = 636. The vertical flip must not disturb that.
+    const tooltip = showTooltip('right-edge.tsx', { top: 700, bottom: 720, left: 1000, width: 100 }, 120);
+
+    expect(tooltip).toHaveStyle({ left: '636px', top: '576px' });
+  });
+});
