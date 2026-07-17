@@ -8,9 +8,10 @@
 import { spawn } from 'child_process';
 import { config as dotenvConfig } from 'dotenv';
 import { DaemonStatus, StartOptions } from '../types';
-import { PidManager } from './pid-manager';
+import { DaemonState, PidManager } from './pid-manager';
 import { getPackageRoot } from './paths';
 import { getEnvPath } from './env-setup';
+import { readPackageVersion } from './package-info';
 import { REVERSE_PROXY_WARNING } from '../config/security-messages';
 import { CLILogger } from './logger';
 import { loadEffectiveEnv, resolveServerEndpoint, ServerEnv } from './server-url';
@@ -135,9 +136,24 @@ export class DaemonManager {
 
     const pid = child.pid!;
 
-    // Write PID file atomically
-    if (!this.pidManager.writePid(pid)) {
-      // Failed to write PID - another process may have started
+    // Issue #1354/#1355/#1358: persist the daemon's version, effective settings, and a
+    // process-identity signature so status/stop/start can report and verify the actual server,
+    // not re-derive it from a possibly-diverged .env. The port/protocol/auth recorded here are
+    // exactly what start() handed the child above.
+    const state: DaemonState = {
+      pid,
+      version: readPackageVersion(),
+      port: parseInt(port, 10),
+      bind: bindAddress,
+      protocol,
+      auth: !!env.CM_AUTH_TOKEN_HASH,
+      startedAt: new Date().toISOString(),
+      startTime: this.pidManager.getStartTime(pid) ?? undefined,
+    };
+
+    // Write state file atomically
+    if (!this.pidManager.writeState(state)) {
+      // Failed to write state - another process may have started
       try {
         process.kill(pid, 'SIGTERM');
       } catch {
@@ -189,9 +205,9 @@ export class DaemonManager {
    * @returns Status object or null if no PID file
    */
   async getStatus(): Promise<DaemonStatus | null> {
-    const pid = this.pidManager.readPid();
+    const state = this.pidManager.readState();
 
-    if (pid === null) {
+    if (state === null) {
       return null;
     }
 
@@ -201,18 +217,38 @@ export class DaemonManager {
       return { running: false };
     }
 
-    // Issue #1266: resolve with the same precedence start() hands the child. Reading
-    // process.env directly reported the shell's CM_PORT, not the port the server is on.
-    const { port, url } = resolveServerEndpoint(this.getEffectiveEnv());
+    let port: number;
+    let url: string;
+
+    if (state.port !== undefined) {
+      // Issue #1355: report the effective settings the server was started with, recorded in the
+      // state file, rather than re-deriving them from a .env that may have changed since.
+      port = state.port;
+      const protocol = state.protocol ?? 'http';
+      const bind = state.bind ?? '127.0.0.1';
+      const host = bind === '0.0.0.0' ? '127.0.0.1' : bind;
+      url = `${protocol}://${host}:${port}`;
+    } else {
+      // Legacy state file (PID only, e.g. a daemon started before this change): fall back to
+      // Issue #1266's .env resolution, which gives .env precedence exactly as start() does.
+      const resolved = resolveServerEndpoint(this.getEffectiveEnv());
+      port = resolved.port;
+      url = resolved.url;
+    }
 
     // Note: Getting accurate uptime would require storing start time
     // For now, we don't track uptime
 
     return {
       running: true,
-      pid,
+      pid: state.pid,
       port,
       url,
+      // Issue #1354: surface the version the daemon actually runs, so status can flag a stale
+      // daemon of a different version than the installed CLI.
+      version: state.version,
+      protocol: state.protocol,
+      auth: state.auth,
     };
   }
 

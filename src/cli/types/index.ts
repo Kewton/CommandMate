@@ -111,6 +111,12 @@ export interface DaemonStatus {
   uptime?: number;
   /** URL to access the server (if running) */
   url?: string;
+  /** Package version the running daemon was started with (Issue #1354) */
+  version?: string;
+  /** Protocol the running server speaks (Issue #1355) */
+  protocol?: 'http' | 'https';
+  /** Whether the running server has token authentication enabled (Issue #1355) */
+  auth?: boolean;
 }
 
 /**
