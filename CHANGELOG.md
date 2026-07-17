@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-07-17
+
+> **Highlight**: **v0.10.2 で公開したチュートリアルの Step 1 が動作しない問題を修正するパッチリリース**。`npx commandmate@latest` で起動した環境では、リポジトリのクローンが `exit 128`（`fatal: Unable to read current working directory`）で必ず失敗していた。`CloneManager` が `cwd` を指定せずに git を spawn しており、**npm キャッシュ配下にあるサーバープロセスの cwd を継承**していたことが原因。LP からチュートリアルへ送客している状態で新規ユーザーの最初の操作が止まっていたため、緊急度が高い。DB マイグレーションなし。
+
+### Fixed
+
+- fix(clone): **git spawn に `cwd` を明示しクローン失敗（exit 128）を解消** (#1334)。`executeClone` が `cwd` 未指定で git を spawn していたため、子プロセスがサーバープロセスの cwd を継承していた。`npx` 起動時のサーバーの cwd は npm キャッシュ配下（`daemon.ts` の `cwd: packageRoot`）であり、`npx commandmate@latest` の再実行で `node_modules` が作り直されると削除済み inode を指したままになる。git は起動時に cwd を読もうとして失敗するため、**クローン先が絶対パスであっても関係なく落ちていた**。直前に存在を保証している `parentDir` を `cwd` として明示する。`src/lib/git/` の他の git 実行は `git-exec.ts` の `execFileAsync` に集約され全経路が `cwd` を渡しており、`clone-manager.ts` だけが生の `spawn` を直接呼ぶ唯一の例外だった。cwd 未指定の他の外部プロセス呼び出し（`ps` / `gh --version` / `tmux`）は親の cwd 消滅下でも成功することを実測で確認済みで、影響を受けるのは git clone のみ
+
 ## [0.10.2] - 2026-07-17
 
 > **Highlight**: **新規ユーザーの導線を整えるリリース**。v0.10.1 で `npx commandmate@latest` を案内できるようにしたが、サーバーが起動した後に何をすればよいかが示されていなかった。**チュートリアル**（意図的にバグを仕込んだサンプルリポジトリ [Kewton/commandmate-tutorial](https://github.com/Kewton/commandmate-tutorial) を clone → エージェントに直させる → External Apps でブラウザ確認 → worktree で並列化）を新設し、LP から導線を繋いだ。あわせて **LP の Track A** が内部で何を自動実行するかを可視化。また `CM_ROOT_DIR` が**3つの役割を兼ねたまま1つが壊れていた**問題を整理し、「管理範囲」に定義を統一した。DB マイグレーションなし。
