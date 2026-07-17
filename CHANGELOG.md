@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-07-17
+
+> **Highlight**: **新規ユーザーの導線を整えるリリース**。v0.10.1 で `npx commandmate@latest` を案内できるようにしたが、サーバーが起動した後に何をすればよいかが示されていなかった。**チュートリアル**（意図的にバグを仕込んだサンプルリポジトリ [Kewton/commandmate-tutorial](https://github.com/Kewton/commandmate-tutorial) を clone → エージェントに直させる → External Apps でブラウザ確認 → worktree で並列化）を新設し、LP から導線を繋いだ。あわせて **LP の Track A** が内部で何を自動実行するかを可視化。また `CM_ROOT_DIR` が**3つの役割を兼ねたまま1つが壊れていた**問題を整理し、「管理範囲」に定義を統一した。DB マイグレーションなし。
+
+### Added
+
+- feat(docs): **チュートリアルを新設**（`docs/user-guide/tutorial.md`、ja/en）。サンプルリポジトリ [Kewton/commandmate-tutorial](https://github.com/Kewton/commandmate-tutorial)（依存ゼロ・`npm install` 不要・意図的に2つのバグを仕込み済み）を clone し、clone → エージェントによる修正 → External Apps によるブラウザ確認 → worktree による並列化 の4ステップで主要機能を一通り体験できる。Claude Code / Codex 向けに `worktree-new` スキルを同梱（Antigravity では動作未確認のため代替の指示文を用意）。LP からも導線を追加 (#1329)
+- feat(website): **LP の Track A に自動実行される内容を可視化**。`npx commandmate@latest` の1コマンドが内部で行うこと（依存チェック → セットアップ質問 → サーバー起動 → ブラウザ起動）を明示し、Track B と情報量を揃えた。copy 可能なコマンドは1つのまま（並べると誤実行を招くため） (#1327)
+
+### Changed
+
+- fix(config): **`CM_ROOT_DIR` の定義を「管理範囲」に統一**。`.env.example` / `concept.md` / `DEPLOYMENT.md`（ja/en）と `commandmate init` の案内文を、①UI からリポジトリを登録できる境界 ②クローン先の親ディレクトリ という実際の役割に合わせた。`init` の「Directory will be validated when adding repositories」は**存在しない後続検証**を指していたため削除 (#1328)
+- docs: **リリース手順を実態に合わせて更新**（`/release` スキルと `docs/release-guide.md`、ja/en）。記述が v0.9.1 世代のままで、main 直 push を前提にしていた（pre-push フックが拒否する）、npm publish の記載が皆無だった（`publish.yml` が GitHub Release 契機で OIDC 自動 publish する）、squash による祖先切れを復元するマージバックが無かった、等の乖離を解消。ロールバック手順の「GitHub Release とタグを削除」は **npm 上のパッケージを消さない**ため誤りであり、publish 済みの場合は修正して次のパッチをリリースするのが正しい旨に訂正した (#1326)
+
+### Fixed
+
+- fix(config): **`CM_ROOT_DIR` の壊れた自動発見を削除** (#1328)。`CM_ROOT_DIR` は「①登録境界 ②クローン先 ③自動発見」の3役を兼ねていたが、③だけが `CM_ROOT_DIR` を**単一のリポジトリパス**として `git worktree list` の cwd に渡しており、①②が扱う**コンテナ**を指定すると常に 0 件を返していた（ディレクトリ走査は実装されていない）。両解釈は排他的で、アプリ全体が強制しているのは①②のため③を削除する。「コンテナを走査する」実装に直す案は、worktree を多用する実環境で**同一リポジトリの worktree 同士が別リポジトリとして二重登録される**ため却下した。`WORKTREE_REPOS`（リポジトリの明示列挙）は意味が一貫しているため維持。既存の `is_env_managed` 行は後方互換のため残す
+- docs(tutorial): **チュートリアルの「ループ」が事実でなかった問題を修正** (#1332)。旧 Step 2/3 は修正してから起動する順序だったため「修正前 → 修正後」の変化を読者が観測できず、また `server.js` は `greet` をプロセス起動時に一度だけ import するため、先に起動した読者はコードを直しても画面が変わらない状況に必ず遭遇していた。起動を修正より前に置き、再起動を理由つきの明示的な手順にした
+
 ## [0.10.1] - 2026-07-17
 
 > **Highlight**: **`npx` 導線の実効性を回復するパッチリリース**。v0.10.0 で新設したランディングページと README が案内していた `npx commandmate` は、**グローバル導入済みの環境では既存の binary を実行しレジストリを一切参照しない**ため、利用者が気づかないまま旧版を使い続けていた（実測: 最新 0.10.0 に対し 0.3.5 が実行された）。全案内を `npx commandmate@latest` に統一した。あわせて**公開パッケージから Next.js のビルドキャッシュ `.next/cache` を除外**し、配布サイズを **89.8MB → 5.5MB（−94%）／展開後 656.3MB → 24.4MB** に削減。quick start を「試す／常用する」の2トラックへ再構成し `commandmate init` / `start --daemon` / `stop` を copy 可能にした。`npx` 実行時に `update` がユーザーのグローバル導入を書き換えたうえで `UPDATE_FAILED` を返す不具合も修正している。
