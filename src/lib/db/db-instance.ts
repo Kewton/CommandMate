@@ -44,11 +44,22 @@ export function getDbInstance(): Database.Database {
     }
 
     // Issue #1263: recover from a better-sqlite3 ABI mismatch (Node.js version switch)
-    dbInstance = openDatabaseWithAbiRecovery(dbPath);
+    const db = openDatabaseWithAbiRecovery(dbPath);
     // Issue #294: Enable foreign key enforcement BEFORE migrations
     // This ensures ON DELETE CASCADE works correctly for all tables
-    dbInstance.pragma('foreign_keys = ON');
-    runMigrations(dbInstance);
+    db.pragma('foreign_keys = ON');
+
+    // Issue #1353: only publish the connection once its schema is verified.
+    // Assigning before runMigrations() cached a database whose migrations had
+    // thrown, so every later caller was handed it back without the failure —
+    // the guard would fire once and be bypassed for the rest of the process.
+    try {
+      runMigrations(db);
+    } catch (error) {
+      db.close();
+      throw error;
+    }
+    dbInstance = db;
   }
 
   return dbInstance;

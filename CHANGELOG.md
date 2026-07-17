@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- fix(db): **将来版スキーマの DB を検知して起動を停止する** (#1353)。`runMigrations()` は `migration.version > currentVersion` で前進のみを見ており、DB の `MAX(schema_version)` が `CURRENT_SCHEMA_VERSION`（現在 42）を**超えていても「Schema is up to date」と判断してそのまま開いていた**。新版が DB を進めた後に旧ビルド（古い dev チェックアウト / PATH に残った旧 global / npx キャッシュ / `CM_DB_PATH` 共有の worktree サーバー）が同じ DB を開くと、起動は成功し、改名・削除済みカラム前提のクエリが**実行時に**診断困難な 500 として初めて表面化していた。版読み取り後・マイグレーション書き込み前にガードを置き、版・対応上限・復旧手段（`commandmate update`）を明示したエラーで起動を止める。あわせて `getDbInstance()` が **`runMigrations()` より前に singleton を代入していた**問題を修正した。マイグレーションが throw しても未検証の接続が module-level キャッシュに残るため、最初の呼び出し元だけがエラーを見て**以降の呼び出し元には同じ DB がエラーなしで返っており**、ガードは一度だけ発火してプロセスの残りの間バイパスされる状態だった。スキーマ検証後にのみ代入し、失敗時は接続を閉じて再 throw する
+
 ## [0.10.3] - 2026-07-17
 
 > **Highlight**: **v0.10.2 で公開したチュートリアルの Step 1 が動作しない問題を修正するパッチリリース**。`npx commandmate@latest` で起動した環境では、リポジトリのクローンが `exit 128`（`fatal: Unable to read current working directory`）で必ず失敗していた。`CloneManager` が `cwd` を指定せずに git を spawn しており、**npm キャッシュ配下にあるサーバープロセスの cwd を継承**していたことが原因。LP からチュートリアルへ送客している状態で新規ユーザーの最初の操作が止まっていたため、緊急度が高い。DB マイグレーションなし。
