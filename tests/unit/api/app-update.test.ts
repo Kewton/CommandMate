@@ -38,7 +38,7 @@ vi.mock('fs', async (importOriginal) => ({
 import { spawn } from 'child_process';
 import { closeSync, openSync } from 'fs';
 import { POST, dynamic } from '@/app/api/app/update/route';
-import { isGlobalInstall } from '@/cli/utils/install-context';
+import { ensureConfigDir, isGlobalInstall } from '@/cli/utils/install-context';
 import { acquireUpdateLock, releaseUpdateLock } from '@/lib/app-update/update-lock';
 import { getDaemonManagerFactory } from '@/cli/utils/daemon-factory';
 import { AUTH_EXCLUDED_PATHS } from '@/config/auth-config';
@@ -59,6 +59,9 @@ function mockDaemon(isRunning: boolean | Error) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(isGlobalInstall).mockReturnValue(true);
+  // Re-set here, not only at the vi.mock factory: clearAllMocks keeps
+  // implementations, so a test that makes this throw would leak into the next.
+  vi.mocked(ensureConfigDir).mockReturnValue('/home/tester/.commandmate');
   vi.mocked(acquireUpdateLock).mockReturnValue(true);
   vi.mocked(openSync).mockReturnValue(42);
   vi.mocked(spawn).mockReturnValue({ unref } as unknown as ReturnType<typeof spawn>);
@@ -175,6 +178,36 @@ describe('POST /api/app/update - concurrency lock', () => {
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toMatchObject({ code: 'spawn_failed' });
     expect(releaseUpdateLock).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * Issue #1345: the log path is resolved after the lock is taken. When
+   * ensureConfigDir() throws (unwritable config dir), the lock used to be left
+   * behind and every retry was refused until it expired.
+   */
+  it('releases the lock when the log path cannot be resolved', async () => {
+    vi.mocked(ensureConfigDir).mockImplementation(() => {
+      throw new Error('EACCES: permission denied');
+    });
+
+    const response = await POST();
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({ code: 'spawn_failed' });
+    expect(releaseUpdateLock).toHaveBeenCalledTimes(1);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('surfaces the underlying reason when the log path cannot be resolved', async () => {
+    vi.mocked(ensureConfigDir).mockImplementation(() => {
+      throw new Error('EACCES: permission denied');
+    });
+
+    const response = await POST();
+
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringContaining('EACCES: permission denied') as unknown as string,
+    });
   });
 });
 

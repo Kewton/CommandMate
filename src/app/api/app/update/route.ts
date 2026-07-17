@@ -136,12 +136,18 @@ export async function POST(): Promise<NextResponse<UpdateResponse>> {
     );
   }
 
-  // Resolved before the spawn: once the child stops the server, this process
-  // can be gone before it would have had a chance to answer.
-  const willRestart = await willUpdateRestartServer();
-  const logPath = join(ensureConfigDir(), UPDATE_LOG_FILENAME);
+  // Everything from here to the spawn runs under the lock, so every failure
+  // path in between must release it — ensureConfigDir() throws on an
+  // unwritable config dir, and a lock left behind blocks retries for
+  // UPDATE_LOCK_TIMEOUT_MS [FIX-1345].
+  let willRestart: boolean;
+  let logPath: string;
 
   try {
+    // Resolved before the spawn: once the child stops the server, this process
+    // can be gone before it would have had a chance to answer.
+    willRestart = await willUpdateRestartServer();
+    logPath = join(ensureConfigDir(), UPDATE_LOG_FILENAME);
     spawnUpdate(logPath);
   } catch (error) {
     // Nothing was started, so the lock must not sit until it expires.
