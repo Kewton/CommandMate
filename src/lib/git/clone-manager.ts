@@ -22,6 +22,7 @@ import {
   updateCloneJob,
   getActiveCloneJobByUrl,
   getRepositoryByNormalizedUrl,
+  getRepositoryByPath,
   createRepository,
   type CloneJobDB,
   type Repository,
@@ -122,6 +123,16 @@ const ERROR_DEFINITIONS: Record<string, CloneError> = {
     recoverable: false,
     suggestedAction: 'Use the existing repository instead',
   },
+  // Issue #1340: repositories.path は UNIQUE。clone URL を持たない行がその path に
+  // 残っていると URL 重複チェックをすり抜け、クローン完了後の createRepository が
+  // UNIQUE 違反で throw する。事前検証で明示的なエラーとして返す。
+  DUPLICATE_REPOSITORY_PATH: {
+    category: 'validation',
+    code: 'DUPLICATE_REPOSITORY_PATH',
+    message: 'Another repository is already registered at the target location',
+    recoverable: true,
+    suggestedAction: 'Choose a different directory, or remove the existing repository registration',
+  },
   CLONE_IN_PROGRESS: {
     category: 'validation',
     code: 'CLONE_IN_PROGRESS',
@@ -179,6 +190,16 @@ const ERROR_DEFINITIONS: Record<string, CloneError> = {
     message: 'Failed to prepare the clone target directory',
     recoverable: true,
     suggestedAction: 'Check the permissions and free space of the target directory, then try again',
+  },
+  // Issue #1340: git clone 自体は成功した後の後処理（リポジトリ登録・ジョブ完了記録）が
+  // throw した場合。[D4-001] 原因の詳細はパス情報を含むためログのみに出し、
+  // クライアントには定型文を返す。
+  CLONE_REGISTRATION_FAILED: {
+    category: 'system',
+    code: 'CLONE_REGISTRATION_FAILED',
+    message: 'The repository was cloned but could not be registered',
+    recoverable: true,
+    suggestedAction: 'Remove the cloned directory and try again',
   },
 };
 
@@ -303,6 +324,18 @@ export class CloneManager {
   }
 
   /**
+   * Check if a repository row already occupies the target path (Issue #1340)
+   *
+   * `repositories.path` is UNIQUE, and a row can exist without a clone URL
+   * (UI registration / disableRepository / ensureEnvRepositoriesRegistered).
+   * Such a row passes the URL duplicate check but makes createRepository()
+   * throw a UNIQUE violation after the clone has already finished.
+   */
+  checkRepositoryAtPath(targetPath: string): Repository | null {
+    return getRepositoryByPath(this.db, targetPath);
+  }
+
+  /**
    * Check if there's an active clone job for this URL
    */
   checkActiveCloneJob(normalizedUrl: string): CloneJobDB | null {
@@ -392,14 +425,27 @@ export class CloneManager {
       return { success: false, error: ERROR_DEFINITIONS.DIRECTORY_EXISTS };
     }
 
-    // 6. Create clone job
+    // 6. Check for an existing repositories row at the target path (Issue #1340)
+    // [D4-001] Report the registered repository name only; targetPath must not leak.
+    const repoAtPath = this.checkRepositoryAtPath(targetPath);
+    if (repoAtPath) {
+      return {
+        success: false,
+        error: {
+          ...ERROR_DEFINITIONS.DUPLICATE_REPOSITORY_PATH,
+          message: `Another repository is already registered at the target location as "${repoAtPath.name}"`,
+        },
+      };
+    }
+
+    // 7. Create clone job
     const job = this.createCloneJob({
       cloneUrl,
       normalizedCloneUrl: normalizedUrl,
       targetPath,
     });
 
-    // 7. Start clone in background (don't await)
+    // 8. Start clone in background (don't await)
     this.executeClone(job.id, cloneUrl, targetPath).catch((error) => {
       logger.error('clone:job-failed', { jobId: job.id, error: error instanceof Error ? error.message : String(error) });
     });
@@ -517,8 +563,15 @@ export class CloneManager {
 
         if (code === 0) {
           // Success - create repository record and scan worktrees
-          await this.onCloneSuccess(jobId, cloneUrl, targetPath);
-          resolve();
+          // Issue #1340: onCloneSuccess の throw をここで拾わないと、この async リスナーが
+          // 返す誰も待たない Promise が reject されるだけで、executeClone の Promise は
+          // resolve も reject もされないまま残る（ジョブが running で固着する）。
+          try {
+            await this.onCloneSuccess(jobId, cloneUrl, targetPath);
+            resolve();
+          } catch (err) {
+            reject(err);
+          }
         } else {
           // Failure - parse error
           const error = this.parseGitError(stderr, code);
@@ -561,47 +614,62 @@ export class CloneManager {
 
   /**
    * Handle successful clone
+   *
+   * Issue #1340: ここでの throw は startCloneJob の .catch()（ログのみ）にしか届かない。
+   * 握り潰すとディスク上のクローンだけが成功し、ジョブは running のまま残って UI が沈黙する。
+   * どこで失敗しても必ず failed へ落とし、構造化エラーとして呼び出し元へ伝える。
    */
   private async onCloneSuccess(jobId: string, cloneUrl: string, targetPath: string): Promise<void> {
-    const job = getCloneJob(this.db, jobId);
-    if (!job) return;
-
-    // Determine clone source from URL type
-    const urlType = this.urlNormalizer.getUrlType(cloneUrl);
-    const cloneSource = urlType || 'https';
-
-    // Create repository record
-    const repo = createRepository(this.db, {
-      name: path.basename(targetPath),
-      path: targetPath,
-      cloneUrl,
-      normalizedCloneUrl: job.normalizedCloneUrl,
-      cloneSource: cloneSource as 'local' | 'https' | 'ssh',
-    });
-
-    // Issue #526: Scan and register worktrees with cleanup (MF-001, IA-MF-002)
     try {
-      const worktrees = await scanWorktrees(targetPath);
-      if (worktrees.length > 0) {
-        const { syncResult, cleanupWarnings } = await syncWorktreesAndCleanup(this.db, worktrees);
-        logger.info('clone:worktrees-registered', { count: worktrees.length, upserted: syncResult.upsertedCount });
-        if (cleanupWarnings.length > 0) {
-          logger.warn('clone:cleanup-warnings', { cleanupWarnings });
-        }
-      }
-    } catch (error) {
-      // IA-MF-002: syncWorktreesAndCleanup failure should not break clone success
-      logger.error('clone:worktree-scan-failed', { targetPath, error: error instanceof Error ? error.message : String(error) });
-      // Continue even if worktree scan fails - the repository is still registered
-    }
+      const job = getCloneJob(this.db, jobId);
+      if (!job) return;
 
-    // Update job as completed
-    updateCloneJob(this.db, jobId, {
-      status: 'completed',
-      progress: 100,
-      repositoryId: repo.id,
-      completedAt: new Date(),
-    });
+      // Determine clone source from URL type
+      const urlType = this.urlNormalizer.getUrlType(cloneUrl);
+      const cloneSource = urlType || 'https';
+
+      // Create repository record
+      // repositories.path is UNIQUE - a row already occupying targetPath throws here.
+      const repo = createRepository(this.db, {
+        name: path.basename(targetPath),
+        path: targetPath,
+        cloneUrl,
+        normalizedCloneUrl: job.normalizedCloneUrl,
+        cloneSource: cloneSource as 'local' | 'https' | 'ssh',
+      });
+
+      // Issue #526: Scan and register worktrees with cleanup (MF-001, IA-MF-002)
+      try {
+        const worktrees = await scanWorktrees(targetPath);
+        if (worktrees.length > 0) {
+          const { syncResult, cleanupWarnings } = await syncWorktreesAndCleanup(this.db, worktrees);
+          logger.info('clone:worktrees-registered', { count: worktrees.length, upserted: syncResult.upsertedCount });
+          if (cleanupWarnings.length > 0) {
+            logger.warn('clone:cleanup-warnings', { cleanupWarnings });
+          }
+        }
+      } catch (error) {
+        // IA-MF-002: syncWorktreesAndCleanup failure should not break clone success
+        logger.error('clone:worktree-scan-failed', { targetPath, error: error instanceof Error ? error.message : String(error) });
+        // Continue even if worktree scan fails - the repository is still registered
+      }
+
+      // Update job as completed
+      updateCloneJob(this.db, jobId, {
+        status: 'completed',
+        progress: 100,
+        repositoryId: repo.id,
+        completedAt: new Date(),
+      });
+    } catch (error) {
+      // [D4-001] 原因の詳細（パス・SQL 文）はログのみ。ジョブに載せる message は定型文。
+      logger.error('clone:registration-failed', {
+        jobId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      this.markJobFailed(jobId, ERROR_DEFINITIONS.CLONE_REGISTRATION_FAILED);
+      throw new CloneManagerError(ERROR_DEFINITIONS.CLONE_REGISTRATION_FAILED);
+    }
   }
 
   /**
