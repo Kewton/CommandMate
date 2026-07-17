@@ -128,7 +128,15 @@ function createScheduleState(
   };
 
   cronJob.schedule(() => {
-    void executeSchedule(state);
+    // Issue #1343: executeSchedule() rejects if its own error handling fails
+    // (e.g. the DB is still down when writing the 'failed' log). Without this
+    // catch the rejection is silently unhandled.
+    void executeSchedule(state).catch((error: unknown) => {
+      logger.error('execution:unhandled', {
+        name: entry.name,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   });
 
   return state;
