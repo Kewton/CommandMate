@@ -7,9 +7,10 @@
  */
 
 import { existsSync } from 'fs';
-import { ExitCode, getErrorMessage, PreflightResult } from '../types';
+import { DaemonStatus, ExitCode, getErrorMessage, PreflightResult } from '../types';
 import { CLILogger } from '../utils/logger';
 import { DaemonManager } from '../utils/daemon';
+import { readPackageVersion } from '../utils/package-info';
 import { PreflightChecker } from '../utils/preflight';
 import { getEnvPath, getPidFilePath } from '../utils/env-setup';
 import { isInteractive } from '../utils/prompt';
@@ -114,6 +115,10 @@ async function ensureServerRunning(
     // start.ts reports an already-running server as START_FAILED, so it must not be called here
     const status = await daemonManager.getStatus();
     logger.info(`Server is already running (PID: ${status?.pid})`);
+    // Issue #1337: this branch returns the existing server's URL without restarting it, so
+    // running `npx commandmate@latest` over a still-running old daemon silently never delivers
+    // the newer code. Surface that mismatch so the user is not led to believe they are up to date.
+    warnOnVersionMismatch(status);
     // Issue #1266: getStatus() now gives .env precedence over exported variables, so the URL
     // it reports is the one the server is on; this no longer needs to be re-derived here
     return { url: status?.url };
@@ -127,6 +132,32 @@ async function ensureServerRunning(
   await waitUntilReady(result.url);
 
   return { url: result.url };
+}
+
+/**
+ * Warn when the already-running daemon is a different version than this CLI.
+ *
+ * Issue #1337: `npx commandmate@latest` over a still-running old daemon returns the existing URL
+ * without restarting, so a published fix silently never reaches the user, while `--version`
+ * reports the freshly-fetched CLI and hides the discrepancy. #1354 recorded the daemon's version
+ * in its state file; getStatus() surfaces it here so the mismatch becomes visible. This only
+ * warns — restarting automatically would kill any in-flight sessions the running server holds.
+ */
+function warnOnVersionMismatch(status: DaemonStatus | null): void {
+  const runningVersion = status?.version;
+  if (!runningVersion) {
+    // Legacy daemons (started before #1354) record no version; nothing to compare against.
+    return;
+  }
+
+  const cliVersion = readPackageVersion();
+  if (cliVersion && cliVersion !== runningVersion) {
+    logger.warn(
+      `The running server is v${runningVersion} but this CLI is v${cliVersion}. ` +
+        'This command does not restart it, so the running server stays on the old version. ' +
+        'To update the running server, run "commandmate update".'
+    );
+  }
 }
 
 /**
