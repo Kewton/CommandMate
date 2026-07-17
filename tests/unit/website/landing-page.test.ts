@@ -56,19 +56,51 @@ function extractRefs(html: string): string[] {
 const isExternal = (ref: string) =>
   /^(https?:)?\/\//.test(ref) || ref.startsWith('mailto:') || ref.startsWith('#');
 
+interface CopyableBox {
+  id: string;
+  text: string;
+  /** Marked `.install-url`: pasted into the CommandMate UI, not into a shell. */
+  isUrl: boolean;
+}
+
 /**
- * The shell commands the page offers a working copy button for, as command text.
- * A command box only counts if a `.copy-btn` actually targets its id — markup
- * that renders a command without wiring the button is what this catches.
+ * Every `.install-cmd` box the page offers a working copy button for. A box only
+ * counts if a `.copy-btn` actually targets its id — markup that renders a
+ * command without wiring the button is what this catches.
+ *
+ * The class match is deliberately open-ended (`install-cmd[^"]*`): pinning it to
+ * exactly `class="install-cmd"` meant any added modifier dropped the box out of
+ * this sweep silently, which is a guard that passes by going blind.
  */
-function copyableCommands(html: string): string[] {
+function copyableBoxes(html: string): CopyableBox[] {
   const targeted = new Set(
     Array.from(html.matchAll(/data-copy-target="([^"]+)"/g), (match) => match[1]),
   );
 
-  return Array.from(html.matchAll(/<code class="install-cmd" id="([^"]+)">([^<]+)<\/code>/g))
-    .filter(([, id]) => targeted.has(id))
-    .map(([, , command]) => command.trim());
+  return Array.from(html.matchAll(/<code class="(install-cmd[^"]*)" id="([^"]+)">([^<]+)<\/code>/g))
+    .filter(([, , id]) => targeted.has(id))
+    .map(([, classes, id, text]) => ({
+      id,
+      text: text.trim(),
+      isUrl: classes.split(/\s+/).includes('install-url'),
+    }));
+}
+
+/** The shell commands the page offers a working copy button for, as command text. */
+function copyableCommands(html: string): string[] {
+  return copyableBoxes(html)
+    .filter((box) => !box.isUrl)
+    .map((box) => box.text);
+}
+
+/** Track A's card, i.e. everything the `Just try it` track renders. */
+function trackAMarkup(): string {
+  const article = readIndexHtml().match(
+    /<article class="track" aria-labelledby="track-try-h">[\s\S]*?<\/article>/,
+  );
+
+  expect(article, 'Track A card not found in index.html').not.toBeNull();
+  return article![0];
 }
 
 describe('Issue #1200: landing page structure', () => {
@@ -269,6 +301,66 @@ describe('Issue #1316/#1317: quick start tracks', () => {
 
     expect(html).toMatch(/commandmate stop/);
     expect(html).toMatch(/commandmate status/);
+  });
+});
+
+/**
+ * Issue #1327 — Track A was a prose sentence next to Track B's numbered steps,
+ * so it read as the thinner option when it is in fact the whole flow automated.
+ * It now lists what `npx commandmate@latest` runs (src/cli/commands/quickstart.ts:
+ * preflight -> init on first run -> start --daemon -> wait -> open browser).
+ *
+ * The list describes work the command already does, so it must not grow copy
+ * buttons: a reader who copies them runs an `init` they do not need, and a
+ * `start --daemon` out of npm's `_npx` cache — the fragile form #1318 removed
+ * from the docs. Track A earns its place by being one command; this is the test
+ * that keeps it one.
+ */
+describe('Issue #1327: Track A shows what its one command does', () => {
+  it('still offers exactly one copyable command', () => {
+    expect(copyableCommands(trackAMarkup())).toEqual(['npx commandmate@latest']);
+  });
+
+  it('enumerates the automated steps, rather than burying them in prose', () => {
+    // steps-stack is Track B's list markup: the point of the Issue was that the
+    // two tracks should carry the same weight.
+    const list = trackAMarkup().match(/<ol class="steps steps-stack">([\s\S]*?)<\/ol>/);
+
+    expect(list, 'Track A renders no steps-stack list').not.toBeNull();
+    expect(list![1].match(/<li>/g) ?? []).toHaveLength(4);
+  });
+});
+
+/**
+ * Issue #1329 — the LP sends a reader to a running server and stops there, with
+ * nothing to point the agent at. The tutorial repo is that something. The URL is
+ * pasted into the Repositories screen rather than a shell, so what matters is
+ * that it is copyable at all — an uncopyable URL means transcribing it by hand,
+ * which is the whole reason the copy buttons exist.
+ */
+describe('Issue #1329: tutorial entry point', () => {
+  const TUTORIAL_CLONE_URL = 'https://github.com/Kewton/commandmate-tutorial.git';
+
+  it('wires a copy button to the tutorial clone URL', () => {
+    const box = copyableBoxes(readIndexHtml()).find((b) => b.text === TUTORIAL_CLONE_URL);
+
+    expect(box, `no copy-wired box renders ${TUTORIAL_CLONE_URL}`).toBeDefined();
+  });
+
+  it('marks the clone URL as a URL, so it renders without a shell prompt', () => {
+    // .install-cmd::before prepends "$ ", which would present the URL as a
+    // command to run. .install-url is what suppresses it (styles.css).
+    const box = copyableBoxes(readIndexHtml()).find((b) => b.text === TUTORIAL_CLONE_URL);
+
+    expect(box?.isUrl).toBe(true);
+  });
+
+  it('links out to the tutorial rather than inlining its steps', () => {
+    // The LP has no build step, so every step spelled out here is one more thing
+    // to keep in sync by hand with the doc that already carries it.
+    expect(readIndexHtml()).toMatch(
+      /href="https:\/\/github\.com\/Kewton\/CommandMate\/blob\/main\/docs\/en\/user-guide\/tutorial\.md"/,
+    );
   });
 });
 

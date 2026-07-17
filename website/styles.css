@@ -517,6 +517,27 @@ a {
   }
 }
 
+/* ---------- tutorial ---------- */
+
+/* Must stay after `.install-sm`: same specificity, so source order decides. The
+   clone URL is the one thing this section hands over, and at 20rem half of it
+   would sit behind a scroll. */
+.install-wide {
+  max-width: 34rem;
+}
+
+/* A URL, not a shell command — it goes into the Repositories screen, so the
+   `$ ` prompt the other boxes carry would be telling the reader to run it. */
+.install-cmd.install-url::before {
+  content: none;
+}
+
+.tutorial-note {
+  margin: 0.9rem 0 0;
+  color: var(--fg-muted);
+  font-size: 0.9rem;
+}
+
 /* ---------- gallery ---------- */
 
 .gallery {
