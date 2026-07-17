@@ -24,8 +24,8 @@ This document follows the four steps in the sample repository's README, and adds
 | Step | CommandMate feature |
 |------|---------------------|
 | 1 | Clone a repository into the managed root |
-| 2 | Run an agent CLI in a session, from any browser |
-| 3 | External Apps — proxy your dev server through CommandMate |
+| 2 | External Apps — proxy your dev server through CommandMate |
+| 3 | Run an agent CLI in a session, from any browser |
 | 4 | One session per worktree, running in parallel |
 
 ---
@@ -49,7 +49,42 @@ It lands inside CommandMate's managed root (`CM_ROOT_DIR`) and shows up in the l
 
 ---
 
-## Step 2: Let an agent fix a failing test
+## Step 2: Run it and watch it in the browser
+
+Start the app:
+
+```bash
+npm start
+```
+
+It listens on **port 4173**. Register it so CommandMate can serve it for you.
+
+1. Open External Apps on the **More** screen
+2. Add an app with these values:
+
+| Field | Value |
+|-------|-------|
+| Display Name | `Tutorial` |
+| Identifier Name | `tutorial` |
+| Path Prefix | `tutorial` |
+| Port Number | `4173` |
+| App Type | `Other` |
+
+3. Turn **Enable app** on and save
+
+It becomes available at `/proxy/tutorial/`. No separate tab on a raw port, and the same URL works from your phone.
+
+The heading is missing its exclamation mark:
+
+> # Hello, CommandMate
+
+That is bug number one, and **you can see it**. Leave the page open.
+
+> **Security**: A proxied app runs on the same origin as CommandMate and can reach CommandMate's API. Only register apps you trust.
+
+---
+
+## Step 3: Let an agent fix it, then restart
 
 Two tests in this repository **fail on purpose**.
 
@@ -73,41 +108,17 @@ The fix is one character in `src/greet.js`. The point is not the difficulty — 
 
 Leave the second failure (`shout()` is not implemented) alone for now: Step 4 uses it.
 
----
+### The page only changes after a restart
 
-## Step 3: See the change in the browser
+Fixing the code is not enough: reloading the page you opened in Step 2 still shows **the same heading**. Restart the app (`Ctrl+C`, then `npm start` again).
 
-Start the app:
+Restart, reload, and the heading changes:
 
-```bash
-npm start
-```
+> # Hello, CommandMate!
 
-It listens on **port 4173**. Register it so CommandMate can serve it for you.
+That is the loop: **an agent changes code → you restart → you see the result.**
 
-1. Open External Apps on the **More** screen
-2. Add an app with these values:
-
-| Field | Value |
-|-------|-------|
-| Display Name | `Tutorial` |
-| Identifier Name | `tutorial` |
-| Path Prefix | `tutorial` |
-| Port Number | `4173` |
-| App Type | `Other` |
-
-3. Turn on **App is enabled** and save
-
-It is now reachable at `/proxy/tutorial/`. No separate tab on a raw port, and the same URL works from your phone.
-
-The heading on the page comes from the `greet()` you fixed in Step 2:
-
-- Before: `Hello, CommandMate`
-- After: `Hello, CommandMate!`
-
-That is the loop: **an agent changes code → you see the result.**
-
-> **Security**: proxied apps run under the CommandMate origin and can access CommandMate APIs. Only register applications you trust.
+> **Why the restart?** `src/server.js` imports `greet` once, when the process starts, so a running server keeps serving the code it booted with no matter what is on disk. This is not a quirk of the tutorial — it is the same reason a real dev server needs restarting when you change code it loaded at boot.
 
 ---
 
