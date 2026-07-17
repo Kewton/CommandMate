@@ -421,8 +421,12 @@ export class CloneManager {
 
     return new Promise<void>((resolve, reject) => {
       // Spawn git clone process
+      // Issue #1334: cwd を省略するとサーバープロセスの cwd を継承する。npx 起動時の cwd は
+      // npm キャッシュ配下であり、消滅すると git が起動時に cwd を読めず exit 128 で失敗する。
+      // 直前に存在を保証した parentDir を明示する。
       const gitProcess = spawn('git', ['clone', '--progress', cloneUrl, targetPath], {
         stdio: ['ignore', 'pipe', 'pipe'],
+        cwd: parentDir,
       });
 
       this.activeProcesses.set(jobId, gitProcess);
