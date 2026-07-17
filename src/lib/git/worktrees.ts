@@ -5,10 +5,16 @@
 
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import fs from 'fs';
 import path from 'path';
 import type { Worktree } from '@/types/models';
 import type Database from 'better-sqlite3';
-import { upsertWorktree, getWorktreesByRepository, deleteWorktreesByIds } from '@/lib/db';
+import {
+  upsertWorktree,
+  getWorktreesByRepository,
+  deleteWorktreesByIds,
+  getRepositories,
+} from '@/lib/db';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('worktrees');
@@ -346,4 +352,97 @@ export function syncWorktreesToDB(
   }
 
   return { deletedIds: allDeletedIds, upsertedCount };
+}
+
+/**
+ * Whether a repository still exists on disk as a git working tree.
+ *
+ * Returns `false` only when the directory itself is gone OR its `.git` entry is
+ * missing (a de-gitified directory). Every other state — including a present
+ * directory whose `.git` is intact — is reported as "still there", so a
+ * transient git failure (a locked index, a momentarily-unavailable network
+ * drive whose mount point is still present, …) never satisfies the prune
+ * condition. Issue #1349: fall on the side of NOT pruning whenever the on-disk
+ * state is inconclusive.
+ *
+ * @param repoPath - Canonical repository path (as stored in
+ *   `worktrees.repository_path`, i.e. already `path.resolve()`d by
+ *   {@link scanWorktrees}; see #1347)
+ * @returns `true` if the repository still looks present on disk
+ */
+export function repositoryExistsOnDisk(repoPath: string): boolean {
+  if (!repoPath) return false;
+  try {
+    return fs.existsSync(repoPath) && fs.existsSync(path.join(repoPath, '.git'));
+  } catch {
+    // Inconclusive filesystem read (e.g. EACCES): be conservative and keep rows.
+    return true;
+  }
+}
+
+/**
+ * Prune DB worktree rows for repositories that have vanished from disk.
+ *
+ * Issue #1349: when a repository directory is deleted or de-gitified,
+ * {@link scanWorktrees} returns `[]` (git exit 128), so the repository silently
+ * drops out of the scan and {@link syncWorktreesToDB} never reaches its per-repo
+ * prune for it — the rows linger as ghost entries in the sidebar. The global
+ * early-return in `syncWorktreesToDB` only fires when *every* repository is
+ * empty, so a single vanished repository among healthy ones is never cleaned up.
+ *
+ * This runs as the global-sync reconciliation step: it enumerates every
+ * `repository_path` that still owns worktree rows and, for those that produced
+ * no worktrees in the current scan, deletes the rows **only when the repository
+ * directory (or its `.git`) is genuinely gone** (see
+ * {@link repositoryExistsOnDisk}). A repository that still exists but merely
+ * errored in git is left untouched, so a transient failure — a network drive
+ * blip, a locked repo — never destroys history.
+ *
+ * Intended for the full-scan endpoint (`POST /api/repositories/sync`) only.
+ * Single-repository callers (scan/restore) must NOT run this: they hold no
+ * authority over repositories outside their own scan, and running it there would
+ * prune repositories that merely weren't part of that request.
+ *
+ * Row keys stay consistent with #1347: {@link getRepositories} returns the
+ * stored (already `path.resolve()`d) `repository_path`, and every subsequent DB
+ * and filesystem lookup uses that same canonical value.
+ *
+ * @param db - Database instance
+ * @param liveWorktrees - Worktrees produced by the current scan; their
+ *   repositories are known-present and therefore skipped
+ * @returns IDs of worktrees deleted for vanished repositories
+ */
+export function pruneStaleRepositoryWorktrees(
+  db: Database.Database,
+  liveWorktrees: Worktree[]
+): string[] {
+  // Repositories that produced at least one worktree this scan are alive by
+  // definition (git listed them), so they are never candidates for pruning.
+  const liveRepoPaths = new Set(
+    liveWorktrees
+      .map(wt => wt.repositoryPath)
+      .filter((p): p is string => !!p)
+  );
+
+  const deletedIds: string[] = [];
+
+  for (const repo of getRepositories(db)) {
+    const repoPath = repo.path;
+    if (!repoPath) continue;
+    if (liveRepoPaths.has(repoPath)) continue;
+    // Conservative guard: keep rows unless the directory/.git is truly gone.
+    if (repositoryExistsOnDisk(repoPath)) continue;
+
+    const ids = getWorktreesByRepository(db, repoPath).map(row => row.id);
+    if (ids.length === 0) continue;
+
+    const result = deleteWorktreesByIds(db, ids);
+    deletedIds.push(...ids);
+    logger.info('worktree:stale-repo-pruned', {
+      repoPath,
+      deletedCount: result.deletedCount,
+    });
+  }
+
+  return deletedIds;
 }
