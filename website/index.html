@@ -53,8 +53,8 @@
           <h1>Orchestrate your agent CLIs,<br />not your terminal tabs.</h1>
           <p class="lede">CommandMate is a local control plane for agent CLIs.</p>
 
-          <div class="install" data-copy-root>
-            <code class="install-cmd" id="install-cmd">npx commandmate</code>
+          <div class="install">
+            <code class="install-cmd" id="install-cmd">npx commandmate@latest</code>
             <button type="button" class="copy-btn" data-copy-target="install-cmd">
               <span data-copy-label>Copy</span>
             </button>
@@ -121,32 +121,75 @@
       <!-- 3. 60-second quick start -->
       <section class="section" id="quick-start" aria-labelledby="quick-start-h">
         <h2 id="quick-start-h">Quick start, in 60 seconds</h2>
-        <ol class="steps">
-          <li>
-            <h3>Install and start</h3>
-            <p>One command. It checks your dependencies and starts the server.</p>
-            <div class="install install-sm" data-copy-root>
-              <code class="install-cmd" id="step-install">npx commandmate</code>
-              <button type="button" class="copy-btn" data-copy-target="step-install">
+        <p class="section-lede">
+          Two ways in. Take Track A to see it working, Track B once you keep coming back.
+        </p>
+
+        <div class="tracks">
+          <article class="track" aria-labelledby="track-try-h">
+            <p class="track-tag">Track A</p>
+            <h3 id="track-try-h">Just try it</h3>
+            <p class="track-lede">
+              One command, nothing installed first. It checks your dependencies, walks you through
+              setup, starts the server, and opens your browser.
+            </p>
+            <div class="install install-sm">
+              <code class="install-cmd" id="try-cmd">npx commandmate@latest</code>
+              <button type="button" class="copy-btn" data-copy-target="try-cmd">
                 <span data-copy-label>Copy</span>
               </button>
             </div>
-          </li>
-          <li>
-            <h3>Answer the setup questions</h3>
-            <p>
-              First run only, and skipped entirely if you already have a <code>.env</code>. Installing
-              globally instead? Run <code>commandmate init</code>.
+            <p class="track-note">
+              The questions are first-run only. Run it again later and it goes straight to the UI at
+              <code>http://localhost:3000</code>.
             </p>
-          </li>
-          <li>
-            <h3>Open the UI</h3>
-            <p>
-              Your browser opens automatically at <code>http://localhost:3000</code>. Run it again
-              later and it skips straight to the UI.
+          </article>
+
+          <article class="track" aria-labelledby="track-daily-h">
+            <p class="track-tag">Track B</p>
+            <h3 id="track-daily-h">Install it for daily use</h3>
+            <p class="track-lede">
+              Track A runs the server out of npm's cache, where a later <code>npx</code> can swap the
+              files under it. A global install gives a long-running server somewhere stable to live.
             </p>
-          </li>
-        </ol>
+            <ol class="steps steps-stack">
+              <li>
+                <h4>Install globally</h4>
+                <div class="install install-sm">
+                  <code class="install-cmd" id="install-global-cmd">npm install -g commandmate</code>
+                  <button type="button" class="copy-btn" data-copy-target="install-global-cmd">
+                    <span data-copy-label>Copy</span>
+                  </button>
+                </div>
+              </li>
+              <li>
+                <h4>Answer the setup questions</h4>
+                <p>First run only, and skipped entirely if you already have a <code>.env</code>.</p>
+                <div class="install install-sm">
+                  <code class="install-cmd" id="init-cmd">commandmate init</code>
+                  <button type="button" class="copy-btn" data-copy-target="init-cmd">
+                    <span data-copy-label>Copy</span>
+                  </button>
+                </div>
+              </li>
+              <li>
+                <h4>Start in the background</h4>
+                <p>Keeps serving after you close the terminal.</p>
+                <div class="install install-sm">
+                  <code class="install-cmd" id="start-cmd">commandmate start --daemon</code>
+                  <button type="button" class="copy-btn" data-copy-target="start-cmd">
+                    <span data-copy-label>Copy</span>
+                  </button>
+                </div>
+              </li>
+            </ol>
+          </article>
+        </div>
+
+        <p class="note">
+          Either track leaves a server running in the background. <code>commandmate status</code>
+          tells you whether one is up, and <code>commandmate stop</code> shuts it down.
+        </p>
       </section>
 
       <!-- 4. Screenshot gallery -->
@@ -268,8 +311,8 @@
       <!-- Closing CTA -->
       <section class="section closing">
         <h2>Start in one command</h2>
-        <div class="install install-lg" data-copy-root>
-          <code class="install-cmd" id="closing-cmd">npx commandmate</code>
+        <div class="install install-lg">
+          <code class="install-cmd" id="closing-cmd">npx commandmate@latest</code>
           <button type="button" class="copy-btn" data-copy-target="closing-cmd">
             <span data-copy-label>Copy</span>
           </button>

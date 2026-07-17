@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-07-17
+
+> **Highlight**: **`npx` 導線の実効性を回復するパッチリリース**。v0.10.0 で新設したランディングページと README が案内していた `npx commandmate` は、**グローバル導入済みの環境では既存の binary を実行しレジストリを一切参照しない**ため、利用者が気づかないまま旧版を使い続けていた（実測: 最新 0.10.0 に対し 0.3.5 が実行された）。全案内を `npx commandmate@latest` に統一した。あわせて**公開パッケージから Next.js のビルドキャッシュ `.next/cache` を除外**し、配布サイズを **89.8MB → 5.5MB（−94%）／展開後 656.3MB → 24.4MB** に削減。quick start を「試す／常用する」の2トラックへ再構成し `commandmate init` / `start --daemon` / `stop` を copy 可能にした。`npx` 実行時に `update` がユーザーのグローバル導入を書き換えたうえで `UPDATE_FAILED` を返す不具合も修正している。
+
+### Added
+
+- feat(website): **quick start を2トラック化**し `commandmate init` / `start --daemon` / `stop` を copy 可能にした。`npx commandmate` は init も daemon 起動も自動実行するため、旧 step 2 の `commandmate init` は「グローバル導入派向けの分岐」にすぎず誤実行を招いていた。Track A（`npx commandmate@latest` の1コマンド）と Track B（グローバル導入して常用）に分離し、各コマンドが正しい文脈に収まる形にした。従来 LP に記載の無かった停止方法（`commandmate stop` / `status`）も追記 (#1317)
+
+### Changed
+
+- fix(docs): **README / wsl2-setup の npx 案内を `@latest` に統一**。あわせて WSL2 ガイドの主経路を clone+build からグローバル導入（`npm install -g commandmate`）へ変更し、clone+build は Development Mode セクションへ隔離。`npx` 実行時の daemon は npm キャッシュ配下から起動し、npx 再実行やキャッシュ削除で足元の `.next/` が消えるため、常駐用途はグローバル導入を案内する (#1318)
+
+### Fixed
+
+- fix: **公開パッケージから `.next/cache` を除外**。`files` が `.next/` を whitelist していたため Next.js の webpack ビルドキャッシュ（実行時には読まれない）が丸ごと publish され、`npx` 利用者が毎回 633MB を展開していた。`npm pack` 実測で 656.3MB → 22.8MB（unpacked）／89.8MB → 5.3MB（packed）。packed tarball を隔離環境へ導入して実起動を検証済み。npm は `files` を順序で解決し後勝ちで上書きするため、`'!.next/cache'` の位置をテストで固定した (#1315)
+- fix(website): **LP の npx コマンドを `npx commandmate@latest` に統一**。bare `npx commandmate` はグローバル導入済みの環境で既存 binary を実行しレジストリを参照しないため、旧版が黙って使われ続けていた (#1316)
+- fix(cli): **`npx` 実行時の `update` を検出して誤動作を防ぐ**。`isGlobalInstall()` は npx キャッシュのパスにも意図的に true を返す（#1195: config/DB を `~/.commandmate` に置くため）ため、`update` が global ブランチに入り、使い捨ての npx プロセスがユーザーのグローバル導入を書き換えたうえで、インストール後検証が npx キャッシュ側を読み直して `UPDATE_FAILED` (exit 5) になっていた。`isGlobalInstall()` は変更せず `isNpxExecution()` を別途追加して gate する (#1319)
+- chore(website): **copy ボタンの timeout race を修正**。`setTimeout` が click 時に同期スケジュールされ clipboard promise の解決前にカウントを開始していたため、各 `.then` コールバック内へ移動した。参照されていない `data-copy-root` 属性も削除 (#1320)
+
 ## [0.10.0] - 2026-07-16
 
 > **Highlight**: v0.9.1（フレームワーク基盤更新）に続く**アプリケーション層の充実リリース**。中心は**多言語対応（i18n）基盤の全面確立**で、`src/app` / `src/lib` / `src/config` および各種コンポーネント・パネル・ダイアログの英語ハードコード文言を next-intl 辞書（en/ja）へ全面移行し、namespace 方針を確定。EN をキー byte-identical に保つ実辞書ガードと、モジュールスコープ const の literal label を検出する ESLint ルールで規律を固定した。あわせて**インストール／アップデート／オンボーディング体験**を改善（`commandmate update` コマンド、引数なし実行のガイド付きクイックスタート、初回オンボーディング導線、アップデート通知バナーの更新ボタン）、**GitHub Pages ランディングページ**を新設、**堅牢性**を強化（better-sqlite3 の ABI mismatch 自動 rebuild、システムディレクトリ判定のパス境界＋symlink 解決、不正 `CM_DB_PATH` の fail-closed、Node 20 EOL に伴う `engines >=22` 引き上げ）。プッシュ通知のロケール対応に伴い **DB マイグレーション v42** を追加し `CURRENT_SCHEMA_VERSION` を 41→42 に更新した。

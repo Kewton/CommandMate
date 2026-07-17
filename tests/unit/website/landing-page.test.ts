@@ -56,6 +56,21 @@ function extractRefs(html: string): string[] {
 const isExternal = (ref: string) =>
   /^(https?:)?\/\//.test(ref) || ref.startsWith('mailto:') || ref.startsWith('#');
 
+/**
+ * The shell commands the page offers a working copy button for, as command text.
+ * A command box only counts if a `.copy-btn` actually targets its id — markup
+ * that renders a command without wiring the button is what this catches.
+ */
+function copyableCommands(html: string): string[] {
+  const targeted = new Set(
+    Array.from(html.matchAll(/data-copy-target="([^"]+)"/g), (match) => match[1]),
+  );
+
+  return Array.from(html.matchAll(/<code class="install-cmd" id="([^"]+)">([^<]+)<\/code>/g))
+    .filter(([, id]) => targeted.has(id))
+    .map(([, , command]) => command.trim());
+}
+
 describe('Issue #1200: landing page structure', () => {
   it('has an index.html at the website root', () => {
     expect(fs.existsSync(INDEX_HTML)).toBe(true);
@@ -217,6 +232,43 @@ describe('Issue #1272: the LP ships no demo media', () => {
     expect(heroFigure![0]).not.toMatch(/loading="lazy"/);
     expect(heroFigure![0]).toMatch(/width="\d+"/);
     expect(heroFigure![0]).toMatch(/height="\d+"/);
+  });
+});
+
+/**
+ * Issue #1316 — a bare `npx commandmate` runs an already-installed global bin
+ * without consulting the registry at all, so a reader following the LP on a
+ * machine that once installed CommandMate silently gets whatever version is
+ * already there (0.3.5 against a current 0.10.0, as measured). `@latest` is what
+ * forces the resolve, and the LP advertises npx in three places, so the pin has
+ * to hold in all of them rather than in whichever one was edited last.
+ *
+ * Issue #1317 — the quick start is two tracks, and Track B only earns its place
+ * by being copy-pasteable: it exists so a long-running daemon is launched from a
+ * stable global install rather than from npm's `_npx` cache, which a later npx
+ * run replaces underneath the running server.
+ */
+describe('Issue #1316/#1317: quick start tracks', () => {
+  it('pins every npx invocation to @latest', () => {
+    const invocations = readIndexHtml().match(/npx commandmate[^\s<]*/g) ?? [];
+
+    expect(invocations.length).toBeGreaterThan(0);
+    expect([...new Set(invocations)]).toEqual(['npx commandmate@latest']);
+  });
+
+  it('gives every Track B command its own copy button', () => {
+    const copyable = copyableCommands(readIndexHtml());
+
+    for (const command of ['npm install -g commandmate', 'commandmate init', 'commandmate start --daemon']) {
+      expect(copyable).toContain(command);
+    }
+  });
+
+  it('tells the reader how to stop the server both tracks leave running', () => {
+    const html = readIndexHtml();
+
+    expect(html).toMatch(/commandmate stop/);
+    expect(html).toMatch(/commandmate status/);
   });
 });
 
