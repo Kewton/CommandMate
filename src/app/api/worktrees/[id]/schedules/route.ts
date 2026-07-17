@@ -113,6 +113,19 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid CLI tool' }, { status: 400 });
     }
 
+    // Reject duplicate names up-front: scheduled_executions has a
+    // UNIQUE(worktree_id, name) constraint, so a raw INSERT of a same-named
+    // schedule would otherwise surface as an opaque 500 (Issue #1351).
+    const existing = db.prepare(
+      'SELECT id FROM scheduled_executions WHERE worktree_id = ? AND name = ?'
+    ).get(worktreeId, name);
+    if (existing) {
+      return NextResponse.json(
+        { error: `A schedule named "${name}" already exists`, code: 'DUPLICATE_NAME' },
+        { status: 409 }
+      );
+    }
+
     const now = Date.now();
     const id = randomUUID();
     const enabledValue = enabled !== false ? 1 : 0;
@@ -126,6 +139,14 @@ export async function POST(
 
     return NextResponse.json({ schedule }, { status: 201 });
   } catch (error) {
+    // INSERT-side guard: covers a race between the pre-check and the insert
+    // where a concurrent request took the same name (Issue #1351).
+    if (error instanceof Error && error.message.includes('UNIQUE constraint')) {
+      return NextResponse.json(
+        { error: 'A schedule with this name already exists', code: 'DUPLICATE_NAME' },
+        { status: 409 }
+      );
+    }
     logger.error('error-creating-schedule:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: 'Failed to create schedule' }, { status: 500 });
   }
