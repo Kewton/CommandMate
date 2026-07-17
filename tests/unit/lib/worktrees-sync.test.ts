@@ -15,6 +15,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import Database from 'better-sqlite3';
 import {
   upsertWorktree,
@@ -23,7 +26,11 @@ import {
   migrateWorktreeIdPreservingChildren,
 } from '@/lib/db';
 import { runMigrations } from '@/lib/db/db-migrations';
-import { syncWorktreesToDB } from '@/lib/git/worktrees';
+import {
+  syncWorktreesToDB,
+  pruneStaleRepositoryWorktrees,
+  repositoryExistsOnDisk,
+} from '@/lib/git/worktrees';
 import type { Worktree } from '@/types/models';
 
 const REPO_PATH = '/repos/anvil';
@@ -311,5 +318,157 @@ describe('Issue #1151: branch-switch history preservation', () => {
       // No rows left orphaned on the old ID.
       expect(countChildData(db, 'wt-old').chat_messages).toBe(0);
     });
+  });
+});
+
+/**
+ * Issue #1349: a repository whose directory is deleted or de-gitified makes
+ * `scanWorktrees` return `[]` (git exit 128). The repository then never appears
+ * in the scan handed to `syncWorktreesToDB`, so its worktree rows are never
+ * pruned and survive forever as ghost rows in the sidebar. `syncWorktreesToDB`'s
+ * global early-return only fires when *every* repository is empty, so a single
+ * vanished repository among healthy ones is never reconciled.
+ *
+ * `pruneStaleRepositoryWorktrees` is the global-sync reconciliation step. These
+ * tests exercise it against a real in-memory SQLite database plus real temp
+ * directories, asserting that:
+ *   - a vanished directory (or a de-gitified one) is pruned (CASCADE),
+ *   - a directory that still exists is NEVER pruned even when the scan is empty
+ *     (transient git error / network-drive blip → keep, do not destroy history),
+ *   - a repository present in the current scan is treated as alive regardless of
+ *     the filesystem, and other repositories are left untouched.
+ */
+describe('Issue #1349: pruneStaleRepositoryWorktrees', () => {
+  let db: Database.Database;
+  const tempDirs: string[] = [];
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    runMigrations(db);
+    // Mirror production (src/lib/db/db-instance.ts): enforce FK so CASCADE fires.
+    db.pragma('foreign_keys = ON');
+  });
+
+  afterEach(() => {
+    db.close();
+    for (const dir of tempDirs.splice(0)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /** Create a real temp repo directory (optionally with a `.git` entry). */
+  function makeRepoDir(withGit = true): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-1349-'));
+    if (withGit) fs.mkdirSync(path.join(dir, '.git'));
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  function repoWorktree(repoPath: string, id: string, branch: string): Worktree {
+    return {
+      id,
+      name: branch,
+      branch,
+      path: repoPath,
+      repositoryPath: repoPath,
+      repositoryName: path.basename(repoPath),
+    };
+  }
+
+  describe('repositoryExistsOnDisk', () => {
+    it('is true only when both the directory and its .git exist', () => {
+      const withGit = makeRepoDir(true);
+      const noGit = makeRepoDir(false);
+
+      expect(repositoryExistsOnDisk(withGit)).toBe(true);
+      expect(repositoryExistsOnDisk(noGit)).toBe(false); // de-gitified
+      expect(repositoryExistsOnDisk('/definitely/not/here/cm-1349')).toBe(false);
+      expect(repositoryExistsOnDisk('')).toBe(false);
+    });
+  });
+
+  it('prunes worktree rows (CASCADE) when the repository directory is deleted', () => {
+    const repo = makeRepoDir();
+    syncWorktreesToDB(db, [repoWorktree(repo, 'r-main', 'main')]);
+    seedChildData(db, 'r-main');
+    expect(getWorktreeById(db, 'r-main')).not.toBeNull();
+    expect(totalChildRows(db)).toBe(CHILD_TABLES.length);
+
+    // Directory deleted → next global sync scans it to [] (absent from live set).
+    fs.rmSync(repo, { recursive: true, force: true });
+    const deleted = pruneStaleRepositoryWorktrees(db, []);
+
+    expect(deleted).toContain('r-main');
+    expect(getWorktreeById(db, 'r-main')).toBeNull();
+    // Child data is CASCADE-deleted with the row.
+    expect(countChildData(db, 'r-main').chat_messages).toBe(0);
+    expect(totalChildRows(db)).toBe(0);
+  });
+
+  it('prunes when the directory exists but .git was removed (de-gitified)', () => {
+    const repo = makeRepoDir();
+    syncWorktreesToDB(db, [repoWorktree(repo, 'r-main', 'main')]);
+
+    fs.rmSync(path.join(repo, '.git'), { recursive: true, force: true });
+    const deleted = pruneStaleRepositoryWorktrees(db, []);
+
+    expect(deleted).toContain('r-main');
+    expect(getWorktreeById(db, 'r-main')).toBeNull();
+  });
+
+  it('does NOT prune when the directory + .git still exist but the scan is empty', () => {
+    // Conservative guard: a present repository that merely errored in git (or a
+    // transiently-invisible network drive whose mount point is still present)
+    // must never be pruned.
+    const repo = makeRepoDir();
+    syncWorktreesToDB(db, [repoWorktree(repo, 'r-main', 'main')]);
+    seedChildData(db, 'r-main');
+
+    const deleted = pruneStaleRepositoryWorktrees(db, []);
+
+    expect(deleted).toEqual([]);
+    expect(getWorktreeById(db, 'r-main')).not.toBeNull();
+    expect(totalChildRows(db)).toBe(CHILD_TABLES.length);
+  });
+
+  it('prunes only the vanished repository, leaving live repositories untouched', () => {
+    const gone = makeRepoDir();
+    const alive = makeRepoDir();
+    syncWorktreesToDB(db, [
+      repoWorktree(gone, 'gone-main', 'main'),
+      repoWorktree(alive, 'alive-main', 'main'),
+    ]);
+    seedChildData(db, 'gone-main');
+    seedChildData(db, 'alive-main');
+
+    fs.rmSync(gone, { recursive: true, force: true });
+    // Current scan reports only the alive repository.
+    const deleted = pruneStaleRepositoryWorktrees(db, [
+      repoWorktree(alive, 'alive-main', 'main'),
+    ]);
+
+    expect(deleted).toEqual(['gone-main']);
+    expect(getWorktreeById(db, 'gone-main')).toBeNull();
+    expect(getWorktreeById(db, 'alive-main')).not.toBeNull();
+    expect(countChildData(db, 'alive-main').chat_messages).toBe(1);
+  });
+
+  it('treats a repository present in the scan as alive even if its dir check would fail', () => {
+    // A repo that produced worktrees was listed by git and is alive by
+    // definition; the scan result wins over a racing filesystem read.
+    const repo = makeRepoDir();
+    syncWorktreesToDB(db, [repoWorktree(repo, 'r-main', 'main')]);
+
+    fs.rmSync(repo, { recursive: true, force: true });
+    const deleted = pruneStaleRepositoryWorktrees(db, [
+      repoWorktree(repo, 'r-main', 'main'),
+    ]);
+
+    expect(deleted).toEqual([]);
+    expect(getWorktreeById(db, 'r-main')).not.toBeNull();
+  });
+
+  it('returns an empty array when there is nothing to prune', () => {
+    expect(pruneStaleRepositoryWorktrees(db, [])).toEqual([]);
   });
 });

@@ -5,7 +5,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { mockFetchResponse, restoreFetch } from '../../../helpers/mock-api';
-import { ApiClient } from '../../../../src/cli/utils/api-client';
+import { ApiClient, ApiError } from '../../../../src/cli/utils/api-client';
 import {
   fetchAgentInstances,
   saveAgentInstances,
@@ -64,11 +64,22 @@ describe('fetchAgentInstances', () => {
     );
   });
 
-  it('returns an empty array when agentInstances is missing', async () => {
-    mockFetchResponse({ id: 'wt1', name: 'main' });
+  it('returns an empty array when agentInstances is present but empty', async () => {
+    // A current daemon always includes the field; an empty array means the
+    // worktree genuinely has no instances (Issue #1357).
+    mockFetchResponse({ id: 'wt1', name: 'main', agentInstances: [] });
     const client = new ApiClient();
     const result = await fetchAgentInstances(client, 'wt1');
     expect(result).toEqual([]);
+  });
+
+  it('throws a version-skew error when agentInstances is absent (stale daemon)', async () => {
+    // Issue #1357: a daemon predating the roster API omits the field entirely.
+    // The old `?? []` masked this as "no instances"; now it must surface.
+    mockFetchResponse({ id: 'wt1', name: 'main' });
+    const client = new ApiClient();
+    await expect(fetchAgentInstances(client, 'wt1')).rejects.toThrow(ApiError);
+    await expect(fetchAgentInstances(client, 'wt1')).rejects.toThrow(/older version/);
   });
 });
 

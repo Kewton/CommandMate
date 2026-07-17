@@ -25,6 +25,7 @@ vi.mock('../../../../src/cli/utils/browser', () => ({
   openBrowser: vi.fn(),
 }));
 vi.mock('../../../../src/cli/utils/daemon', () => ({ DaemonManager: vi.fn() }));
+vi.mock('../../../../src/cli/utils/package-info', () => ({ readPackageVersion: vi.fn() }));
 vi.mock('../../../../src/cli/utils/preflight', () => {
   const PreflightChecker = vi.fn();
   (PreflightChecker as unknown as { getInstallHint: unknown }).getInstallHint = vi.fn(
@@ -42,6 +43,7 @@ import { runStart } from '../../../../src/cli/commands/start';
 import { waitForServer } from '../../../../src/cli/utils/server-ready';
 import { openBrowser, shouldOpenBrowser } from '../../../../src/cli/utils/browser';
 import { DaemonManager } from '../../../../src/cli/utils/daemon';
+import { readPackageVersion } from '../../../../src/cli/utils/package-info';
 import { PreflightChecker } from '../../../../src/cli/utils/preflight';
 import { isInteractive } from '../../../../src/cli/utils/prompt';
 import { buildProgram } from '../../../../src/cli/program';
@@ -61,10 +63,16 @@ function mockEnvExists(exists: boolean): void {
 
 // Mock implementations used with `new` must be plain functions: vitest constructs them via
 // Reflect.construct, which rejects arrow functions.
-function mockDaemon(running: boolean, url: string = SERVER_URL): { isRunning: Mock; getStatus: Mock } {
+function mockDaemon(
+  running: boolean,
+  url: string = SERVER_URL,
+  version?: string
+): { isRunning: Mock; getStatus: Mock } {
   const instance = {
     isRunning: vi.fn().mockResolvedValue(running),
-    getStatus: vi.fn().mockResolvedValue(running ? { running: true, pid: 4321, port: 3000, url } : null),
+    getStatus: vi.fn().mockResolvedValue(
+      running ? { running: true, pid: 4321, port: 3000, url, version } : null
+    ),
   };
   vi.mocked(DaemonManager).mockImplementation(function (): DaemonManager {
     return instance as unknown as DaemonManager;
@@ -124,6 +132,9 @@ describe('quickstartCommand', () => {
     mockEnvExists(true);
     mockPreflight(true);
     mockDaemon(false);
+    // Default: this CLI reports a concrete version so the mismatch check has both sides to
+    // compare; individual tests override the daemon's recorded version to drive the branch.
+    vi.mocked(readPackageVersion).mockReturnValue('0.10.3');
     vi.mocked(buildProgram).mockReturnValue({ outputHelp: vi.fn() } as unknown as ReturnType<typeof buildProgram>);
   });
 
@@ -254,6 +265,66 @@ describe('quickstartCommand', () => {
       await run();
 
       expect(dotenvConfig).not.toHaveBeenCalled();
+    });
+  });
+
+  // Issue #1337: `npx commandmate@latest` over a still-running old daemon returns the existing
+  // URL without restarting, so the running server silently stays on the old version. #1354
+  // recorded the daemon's version; quickstart must surface the mismatch rather than open the
+  // browser as if everything is up to date.
+  describe('interactive, server already running, version mismatch', () => {
+    it('should warn when the running daemon is an older version than this CLI', async () => {
+      vi.mocked(readPackageVersion).mockReturnValue('0.10.3');
+      mockDaemon(true, SERVER_URL, '0.10.0');
+
+      await run();
+
+      const text = output();
+      expect(text).toContain('0.10.0');
+      expect(text).toContain('0.10.3');
+      expect(text).toContain('commandmate update');
+      // It still opens the URL — the warning informs, it does not block.
+      expect(openBrowser).toHaveBeenCalledWith(SERVER_URL);
+      expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
+    });
+
+    it('should not warn when the running daemon matches this CLI', async () => {
+      vi.mocked(readPackageVersion).mockReturnValue('0.10.3');
+      mockDaemon(true, SERVER_URL, '0.10.3');
+
+      await run();
+
+      expect(output()).not.toContain('commandmate update');
+      expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
+    });
+
+    it('should not warn for a legacy daemon that recorded no version', async () => {
+      vi.mocked(readPackageVersion).mockReturnValue('0.10.3');
+      mockDaemon(true, SERVER_URL, undefined);
+
+      await run();
+
+      expect(output()).not.toContain('commandmate update');
+      expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
+    });
+
+    it('should not warn when this CLI version cannot be resolved', async () => {
+      vi.mocked(readPackageVersion).mockReturnValue(undefined);
+      mockDaemon(true, SERVER_URL, '0.10.0');
+
+      await run();
+
+      expect(output()).not.toContain('commandmate update');
+      expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
+    });
+
+    it('should never restart or start the server just because versions differ', async () => {
+      vi.mocked(readPackageVersion).mockReturnValue('0.10.3');
+      mockDaemon(true, SERVER_URL, '0.10.0');
+
+      await run();
+
+      expect(runStart).not.toHaveBeenCalled();
     });
   });
 
