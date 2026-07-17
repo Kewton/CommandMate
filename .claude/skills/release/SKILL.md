@@ -1,6 +1,6 @@
 ---
 name: release
-description: "git worktree + commandmatedev でリリースを自動実行"
+description: "develop → main の PR 経由でリリースを実行する（版上げ・CHANGELOG・タグ・GitHub Release・マージバック）"
 disable-model-invocation: true
 allowed-tools: "Bash, Read, Edit, Write"
 argument-hint: "[version-type] (major|minor|patch) or [version] (e.g., 1.2.3)"
@@ -8,239 +8,287 @@ argument-hint: "[version-type] (major|minor|patch) or [version] (e.g., 1.2.3)"
 
 # リリーススキル
 
-git worktree 環境を作成し、commandmatedev 経由でエージェントにリリース準備を委譲、完了後にマージ・タグ・push を実行してリリースを完了するスキルです。
+`develop` でバージョンを上げ、`develop → main` の PR 経由で main へ反映し、タグ・GitHub Release・develop へのマージバックまでを実行するスキルです。
+
+> **npm publish は行いません。** `.github/workflows/publish.yml` が GitHub Release の `published` を契機に OIDC（npm Trusted Publishers）で自動 publish します。ローカルには publish 用の認証が無いため、`npm publish` を手元で実行してはいけません。
 
 ## 使用方法
 
 ```bash
-/release patch      # パッチバージョンアップ (0.4.9 → 0.4.10)
-/release minor      # マイナーバージョンアップ (0.4.9 → 0.5.0)
-/release major      # メジャーバージョンアップ (0.4.9 → 1.0.0)
+/release patch      # パッチバージョンアップ (0.10.0 → 0.10.1)
+/release minor      # マイナーバージョンアップ (0.10.0 → 0.11.0)
+/release major      # メジャーバージョンアップ (0.10.0 → 1.0.0)
 /release 1.0.0      # 直接バージョン指定
 ```
 
 ## 前提条件
 
-- `main` ブランチが最新であること
-- commandmatedev サーバが起動していること
-- `npm run lint && npx tsc --noEmit && npm run test:unit && npm run build` が通る状態であること
+- **`develop` ブランチ**が最新で、`origin/develop` と同期していること（リリースは develop 基点。main 基点ではない）
+- 作業ツリーがクリーンであること
+- `npm run lint && npx tsc --noEmit && npm run test:unit && npm run build` が通ること
 
-## 実行内容
+## この手順が「なぜこの形か」
 
-あなたはリリースマネージャーです。以下の3フェーズでリリースを実行してください。
+| 事実 | 理由 |
+|---|---|
+| main へ直接 push しない | `.git/hooks/pre-push` が `protected_branch='main'` で拒否する。**PR 経由が唯一の経路** |
+| PR は `develop → main` | v0.10.0 以降の実績（#1314 / #1325）。`release/vX.Y.Z` ブランチを切る旧手順（#1202）は使わない |
+| squash マージ | 上記 PR は squash される。その結果 **develop の祖先が切れる**ため、マージバックが必須になる |
+| マージバックは `-s ours` | squash 後は main の tree が develop と同一なので、内容ではなく**祖先関係だけを復元**する |
+| Release ノートは CHANGELOG 転記 | v0.10.0 以降の実績。`--generate-notes` は v0.9.1 までの形式 |
+| npm publish しない | `publish.yml` が Release 契機で自動実行する（OIDC / provenance 付き） |
 
 ---
 
-### Phase 1: worktree 作成 & 登録確認
+## Phase 1: 事前確認
 
-#### 1-1. commandmatedev サーバ疎通確認
+### 1-1. develop を最新化し、クリーンか確認
 
 ```bash
-commandmatedev ls 2>&1
+git checkout develop
+git pull origin develop
+git status --porcelain          # 空であること
+git rev-list --left-right --count develop...origin/develop   # 0  0 であること
 ```
 
-失敗した場合はエラーメッセージを表示して中断：
-```
-Error: commandmatedev server is not running.
-Run `commandmatedev start --daemon` first.
-```
-
-#### 1-2. 現在バージョンの取得 & 次バージョン計算
+### 1-2. 次バージョンの計算
 
 ```bash
 CURRENT_VERSION=$(node -p "require('./package.json').version")
 ```
 
-引数（patch/minor/major）に応じて次バージョンを計算する。
+引数（patch/minor/major）に応じて `NEXT_VERSION` を計算する。
 
-セマンティックバージョニングのルール：
-- `patch`: `0.4.9` → `0.4.10`
-- `minor`: `0.4.9` → `0.5.0`
-- `major`: `0.4.9` → `1.0.0`
+- `patch`: `0.10.0` → `0.10.1`
+- `minor`: `0.10.0` → `0.11.0`
+- `major`: `0.10.0` → `1.0.0`
 
-計算結果を `NEXT_VERSION` 変数に格納する。
-
-#### 1-3. main ブランチを最新化
+### 1-3. 安全ガード
 
 ```bash
-git checkout main
-git pull origin main
+# タグが既に存在したら中断
+git fetch origin --tags
+git tag -l "v${NEXT_VERSION}"   # 空であること。あればエラー表示して中断
 ```
 
-#### 1-4. release ブランチ & worktree 作成
+以下を確認し、満たさなければ中断する:
 
-```bash
-RELEASE_BRANCH="release/v${NEXT_VERSION}"
-WORKTREE_DIR="../commandmate-release-v${NEXT_VERSION}"
-git worktree add -b "$RELEASE_BRANCH" "$WORKTREE_DIR" main
-```
+- 現在のブランチが `develop` であること
+- `main` に未反映の変更が実際に存在すること（`git diff --stat origin/main..origin/develop` が空でない）
 
-worktree内で依存関係をインストール:
-
-```bash
-cd "$WORKTREE_DIR" && npm install
-```
-
-#### 1-5. worktree 登録確認
-
-worktree が commandmatedev に認識されるまで待つ。認識されない場合はリポジトリ同期を実行する。
-
-```bash
-# 同期を試行
-curl -s -X POST http://localhost:3000/api/repositories/sync
-
-# 登録確認
-commandmatedev ls --branch "release/v${NEXT_VERSION}" --quiet
-```
-
-WT ID を取得できない場合は、ユーザーに commandmatedev のブラウザ UI で worktree を確認するよう案内する。
+> **注意**: `git log origin/main..origin/develop` は squash の影響で実態より遥かに多くのコミットを表示する。**tree 差分（`git diff`）が正**。
 
 ---
 
-### Phase 2: エージェントによるリリース準備
+## Phase 2: バージョン更新（develop 上で直接）
 
-#### 2-1. リリースタスクをエージェントに送信
-
-```bash
-WT=$(commandmatedev ls --branch "release/v${NEXT_VERSION}" --quiet)
-```
-
-以下のプロンプトを送信する：
+### 2-1. package.json / package-lock.json
 
 ```bash
-commandmatedev send "$WT" "v${NEXT_VERSION} のリリース準備を実行してください。
-
-以下の手順を順番に実行してください：
-
-1. package.json の version を \"${NEXT_VERSION}\" に更新
-2. npm install --package-lock-only で package-lock.json を更新
-3. git log でmainの直近の変更内容を確認し、CHANGELOG.md に v${NEXT_VERSION} のエントリを追加
-   - feat, fix, refactor, docs 等のカテゴリ別に整理
-   - 既存のCHANGELOGのフォーマットに合わせる
-4. 以下の品質チェックを実行し、全てパスすることを確認：
-   - npm run lint
-   - npx tsc --noEmit
-   - npm run test:unit
-   - npm run build
-5. 全パスしたら以下でコミット：
-   git add package.json package-lock.json CHANGELOG.md
-   git commit -m 'chore: release v${NEXT_VERSION}'
-6. 失敗した場合は修正してリトライ
-
-完了したら「リリース準備完了」と報告してください。" \
-  --auto-yes --duration 1h
+npm version "${NEXT_VERSION}" --no-git-tag-version
 ```
 
-#### 2-2. 完了待ち
+`npm version` は package.json と package-lock.json の**2箇所（root と `packages[""]`）を同時に整合**させる。手で書き換えないこと。
+
+### 2-2. CHANGELOG.md
+
+`## [Unreleased]` の直後に新セクションを挿入する。
+
+```markdown
+## [Unreleased]
+
+## [X.Y.Z] - YYYY-MM-DD
+
+> **Highlight**: このリリースの中心を2〜4文で。何が問題で、何を変えたか。可能なら実測値を入れる。
+
+### Added
+- feat(scope): **要点**。詳細説明 (#Issue番号)
+
+### Changed
+- ...
+
+### Fixed
+- ...
+
+## [前のバージョン] - ...
+```
+
+規約:
+
+- **リンク参照（`[X.Y.Z]: https://github.com/...compare/...`）は追加しない**。0.5.2 で止まっており、近年のリリースでは付けていない
+- 日付は JST 基準
+- 該当が無いカテゴリの見出しは書かない
+- 各項目末尾に Issue 番号を `(#1234)` 形式で入れる
+
+`templates/changelog-entry.md` も参照。
+
+### 2-3. 品質ゲート
+
+全て通ること。1つでも落ちたら修正してから進む。
 
 ```bash
-commandmatedev wait "$WT" --timeout 600 --on-prompt agent
+npm run lint
+npx tsc --noEmit
+npm run test:unit
+npm run build
 ```
 
-**exit code による分岐:**
-
-| exit code | 状況 | 対応 |
-|---|---|---|
-| `0` | 完了 | Phase 3 に進む |
-| `10` | プロンプト検知 | `commandmatedev capture "$WT" --json` で内容確認し、ユーザーに判断を委ねる |
-| `124` | タイムアウト | `commandmatedev capture "$WT"` で状況確認し、ユーザーに報告 |
-
-#### 2-3. 結果確認
+### 2-4. コミット & push
 
 ```bash
-commandmatedev capture "$WT"
+git add package.json package-lock.json CHANGELOG.md
+git commit -m "chore: release v${NEXT_VERSION}"
+git push origin develop
 ```
 
-出力を確認し、コミットが完了しているか検証する。コミットが確認できない場合はユーザーに報告して中断する。
+変更は**この3ファイルのみ**であること（`git diff --stat` で確認）。
 
 ---
 
-### Phase 3: マージ & タグ & push
+## Phase 3: リリース PR
 
-#### 3-1. main にマージ
+### 3-1. PR 作成
 
 ```bash
-git checkout main
-git merge "release/v${NEXT_VERSION}" --no-ff -m "release: v${NEXT_VERSION}"
+gh pr create --repo Kewton/CommandMate --base main --head develop \
+  --title "release: v${NEXT_VERSION}" \
+  --body-file <(...)
 ```
 
-#### 3-2. タグ打ち
+PR 本文に含める要素:
+
+- **リリース概要**: 何のためのリリースか
+- **バージョン**: `X.Y.Z → X.Y.Z+1`（patch/minor/major の別）
+- **DB マイグレーション**: 有無（有る場合は `CURRENT_SCHEMA_VERSION` の遷移）
+- **実差分**: `git diff --stat origin/main..origin/develop` の実数。「squash 履歴のため `main..develop` のコミット数は実態より多く表示される」旨を注記
+- **対応 Issue** 一覧
+- **主な変更**: Added / Changed / Fixed
+- **品質チェック**結果
+
+### 3-2. CI 通過を確認
 
 ```bash
-git tag -a "v${NEXT_VERSION}" -m "v${NEXT_VERSION}"
+gh pr checks <PR番号> --repo Kewton/CommandMate --watch
 ```
 
-#### 3-3. push（main + タグ）
+### 3-3. マージはユーザーに委ねる
+
+**main 向け PR はレビュー1名以上の承認が必須**（CLAUDE.md のルール）。スキルからマージしてはいけない。CI 通過を報告し、ユーザーの承認・マージを待つ。
+
+---
+
+## Phase 4: マージ後（タグ・Release・マージバック）
+
+> ここから先は**ユーザーが PR をマージした後**に実行する。
+
+### 4-1. マージ確認と tree 一致検証
 
 ```bash
-git push origin main
+git fetch origin --tags
+MERGE_SHA=$(gh pr view <PR番号> --repo Kewton/CommandMate --json mergeCommit -q '.mergeCommit.oid')
+
+# main と develop の tree が一致していること（内容ドリフトが無いことの証明）
+[ "$(git rev-parse origin/main^{tree})" = "$(git rev-parse origin/develop^{tree})" ] \
+  && echo "tree 一致 OK" || echo "tree 不一致 — 調査すること"
+```
+
+### 4-2. annotated タグを main の squash コミットに作成
+
+```bash
+git tag -a "v${NEXT_VERSION}" "$MERGE_SHA" -m "v${NEXT_VERSION}"
 git push origin "v${NEXT_VERSION}"
 ```
 
-#### 3-4. develop に逆マージ
+lightweight ではなく **annotated**（`-a`）であること。過去タグは全て annotated。
+
+### 4-3. GitHub Release 作成 → **これが npm publish のトリガー**
+
+ノートは CHANGELOG の該当セクションを転記する（`--generate-notes` は使わない）。
+
+```bash
+awk '/^## \['"${NEXT_VERSION}"'\]/{f=1} /^## \['"${CURRENT_VERSION}"'\]/{f=0} f' CHANGELOG.md > /tmp/release-notes.md
+
+gh release create "v${NEXT_VERSION}" --repo Kewton/CommandMate \
+  --title "v${NEXT_VERSION}" \
+  --notes-file /tmp/release-notes.md
+```
+
+> ⚠️ **この時点で `publish.yml` が発火し npm publish が始まる。** Release 作成は「npm への公開を実行する」ことと等価。**ユーザーの明示的な合意なしに Release を作成してはいけない。**
+
+### 4-4. publish ワークフローの完走を確認
+
+```bash
+gh run list --repo Kewton/CommandMate --workflow=publish.yml --limit 1
+# status=completed conclusion=success になるまで待つ
+npm view commandmate version    # NEXT_VERSION になること
+```
+
+失敗した場合はユーザーに報告する。**`npm publish` を手元で実行して回避しようとしないこと**（OIDC は CI 内でしか成立せず、provenance も付かない）。
+
+### 4-5. main を develop へマージバック（祖先復元）
+
+**必須。** squash により main のコミットは develop の祖先ではなくなっており、放置すると次回の develop → main PR で幻コンフリクトが出る。
 
 ```bash
 git checkout develop
 git pull origin develop
-git merge main --no-ff -m "chore: merge release v${NEXT_VERSION} to develop"
+git merge -s ours origin/main -m "chore: merge release v${NEXT_VERSION} to develop (restore ancestry)"
+
+# tree が壊れていないことを検証（-s ours は develop の tree を保持する）
+[ "$(git rev-parse origin/main^{tree})" = "$(git rev-parse develop^{tree})" ] \
+  && echo "tree 一致 OK" || echo "tree が壊れた — push しないこと"
+
 git push origin develop
 ```
 
-#### 3-5. GitHub Releases 作成
+### 4-6. 効果検証
 
 ```bash
-gh release create "v${NEXT_VERSION}" --title "v${NEXT_VERSION}" --generate-notes
-```
-
-#### 3-6. worktree クリーンアップ
-
-```bash
-git worktree remove "$WORKTREE_DIR"
-git branch -d "$RELEASE_BRANCH"
-```
-
-#### 3-7. CommandMate 同期
-
-```bash
-curl -s -X POST http://localhost:3000/api/repositories/sync
+git fetch origin
+git merge-base --is-ancestor origin/main origin/develop \
+  && echo "祖先切れ解消 OK" || echo "まだ切れている"
 ```
 
 ---
 
 ## 完了報告
 
-以下の形式で報告する：
-
 ```
 Release v${NEXT_VERSION} completed!
 
-  Tag:      v${NEXT_VERSION}
+  Tag:      v${NEXT_VERSION} → <squash SHA>
   Release:  https://github.com/Kewton/CommandMate/releases/tag/v${NEXT_VERSION}
+  npm:      <npm view commandmate version の実測値>
 
-  Worktree: cleaned up
-  Branches: main ✓, develop ✓ (synced)
+  Branches: main ✓, develop ✓ (ancestry restored, tree一致検証済み)
 ```
 
 ## エラー時の対応
 
 | エラー | 対応 |
 |---|---|
-| commandmatedev サーバ未起動 | `commandmatedev start --daemon` を案内して中断 |
-| worktree が登録されない | ブラウザ UI での確認を案内 |
-| エージェントがタイムアウト | `commandmatedev capture` で状況確認し報告 |
-| 品質チェック失敗 | エージェントが自動修正を試みる。3回失敗で中断 |
-| マージコンフリクト | ユーザーに手動解消を依頼 |
-| タグが既に存在する | エラー表示し、別バージョンの指定を促す |
+| `develop` 以外で実行 | 中断。develop に切り替えてもらう |
+| 作業ツリーが汚れている | 中断。**stash しない**（他エージェント稼働中だと破損の恐れ） |
+| タグが既に存在 | 中断。別バージョンの指定を促す |
+| `main..develop` の tree 差分が空 | リリースする変更が無い。中断 |
+| 品質ゲート失敗 | 修正してリトライ。3回失敗で中断 |
+| main へ push しようとして hook に拒否された | **手順の誤り**。PR 経由に戻る |
+| publish ワークフロー失敗 | ユーザーに報告。ローカル `npm publish` で回避しない |
+| マージバック後に tree 不一致 | push せずユーザーに報告 |
 
 ## 安全ガード
 
-- main ブランチ以外からのリリースは拒否
-- worktree 作成前に既存の同名 worktree がないか確認
+- **main 直 push は行わない**（hook が拒否する。PR が唯一の経路）
+- **PR のマージはユーザーに委ねる**（main 向けは承認必須）
+- **GitHub Release の作成 = npm publish の実行**。ユーザーの明示的合意を得てから行う
+- **`npm publish` をローカル実行しない**（OIDC / provenance が CI 前提）
 - タグが既に存在する場合は中断
-- Phase 3 に進む前にエージェントのコミットを検証
+- マージバック後は必ず tree 一致を検証してから push
 
 ## 参考
 
-- [リリースガイド](../../docs/release-guide.md)
+- [リリースガイド](../../../docs/release-guide.md)
+- `.github/workflows/publish.yml` — Release 契機の自動 publish（OIDC）
+- `.git/hooks/pre-push` — main 直 push の拒否
 - [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/)
 - [Semantic Versioning](https://semver.org/lang/ja/)

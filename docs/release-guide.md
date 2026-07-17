@@ -37,116 +37,237 @@ MAJOR.MINOR.PATCH
 
 ---
 
+## リリースフロー全体像
+
+```
+develop でバージョン更新（package.json / package-lock.json / CHANGELOG.md）
+   ↓  chore: release vX.Y.Z
+PR "release: vX.Y.Z"（develop → main）※レビュー承認必須
+   ↓  squash マージ
+main にタグ vX.Y.Z（annotated）
+   ↓
+GitHub Release 作成  ──→  publish.yml が発火 ──→ npm publish（自動・OIDC）
+   ↓
+main を develop へマージバック（-s ours・祖先復元）
+```
+
+### 押さえるべき3つの前提
+
+| 前提 | 根拠 |
+|---|---|
+| **main へ直接 push できない** | `.git/hooks/pre-push` が `protected_branch='main'` で拒否する。PR が唯一の経路 |
+| **GitHub Release の作成 = npm への公開** | `.github/workflows/publish.yml` が `release: [published]` で発火し `npm publish` する。Release 作成は公開の実行と等価 |
+| **マージバックが必須** | develop → main の PR は squash されるため develop の祖先が切れる。放置すると次回 PR で幻コンフリクトが出る |
+
+---
+
 ## リリース手順
 
 ### 事前準備
 
-1. **全てのPRがmainにマージされていることを確認**
+1. **`develop` を最新化**（リリースは develop 基点。main 基点ではない）
+
    ```bash
-   git checkout main
-   git pull origin main
-   git status
+   git checkout develop
+   git pull origin develop
+   git rev-list --left-right --count develop...origin/develop   # 0  0 であること
    ```
 
 2. **未コミットの変更がないことを確認**
+
    ```bash
-   git status
-   # "nothing to commit, working tree clean" を確認
+   git status --porcelain    # 空であること
    ```
 
-3. **テストが全てパスすることを確認**
+   > `git stash` は避けてください。他のエージェントが同じ作業ツリーで稼働している場合、作業内容を破損させます。
+
+3. **品質チェックが全てパスすることを確認**
+
    ```bash
    npm run lint
+   npx tsc --noEmit
    npm run test:unit
    npm run build
    ```
 
+4. **main に未反映の変更が実際にあることを確認**
+
+   ```bash
+   git fetch origin
+   git diff --stat origin/main..origin/develop
+   ```
+
+   > **注意**: `git log origin/main..origin/develop` は squash の影響で実態より遥かに多くのコミットを表示します（実差分15ファイルに対し136コミット等）。**tree 差分（`git diff`）が正**です。
+
 ### Step 1: バージョン決定
 
-現在のバージョンを確認し、新バージョンを決定します。
-
 ```bash
-# 現在のバージョンを確認
-cat package.json | grep '"version"'
+node -p "require('./package.json').version"
 ```
 
-### Step 2: package.jsonの更新
+上記の判断基準に従って次バージョンを決定します。
+
+### Step 2: package.json / package-lock.json の更新
 
 ```bash
-# package.jsonのversionを更新
-# 例: 0.1.0 → 0.2.0
+npm version 0.10.1 --no-git-tag-version
 ```
 
-### Step 3: package-lock.jsonの更新
+`npm version` は package.json と package-lock.json の**2箇所（root と `packages[""]`）を同時に整合**させます。手で書き換えないでください。
 
-```bash
-npm install --package-lock-only
-```
+`--no-git-tag-version` は必須です。これが無いと npm がタグを打ち、後段の PR フローと衝突します。
 
-### Step 4: CHANGELOG.mdの更新
+### Step 3: CHANGELOG.md の更新
 
-1. `[Unreleased]`セクションの内容を新バージョンセクションに移動
-2. リリース日を追記（YYYY-MM-DD形式）
-3. 比較リンクを追加
+`## [Unreleased]` の直後に新セクションを挿入します。
 
-**変更前:**
 ```markdown
 ## [Unreleased]
 
-### Added
-- 新機能の説明
+## [0.10.1] - 2026-07-17
 
-### Fixed
-- バグ修正の説明
-```
-
-**変更後:**
-```markdown
-## [Unreleased]
-
-## [0.2.0] - 2026-01-30
+> **Highlight**: このリリースの中心を2〜4文で。何が問題で、何を変えたか。実測値があれば入れる。
 
 ### Added
-- 新機能の説明
+
+- feat(scope): **要点を太字で**。補足説明 (#1234)
+
+### Changed
+
+- fix(docs): **要点**。補足説明 (#1234)
 
 ### Fixed
-- バグ修正の説明
+
+- fix(cli): **要点**。補足説明 (#1234)
+
+## [0.10.0] - 2026-07-16
 ```
 
-**比較リンクの追加（ファイル末尾）:**
-```markdown
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/Kewton/CommandMate/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/Kewton/CommandMate/releases/tag/v0.1.0
-```
+規約:
 
-### Step 5: コミット作成
+- **比較リンク（`[X.Y.Z]: https://github.com/.../compare/...`）は追加しない**。`0.5.2` で止まっており、以降のリリースでは付けていません（既存の古いリンクはそのまま残す）
+- Issue 番号は **`(#1234)` 形式**。`(Issue #1234)` は v0.9.1 以前の旧表記
+- conventional prefix（`feat(scope):` / `fix(scope):` 等）を付ける
+- 日付は JST 基準
+- 該当が無いカテゴリの見出しは書かない
+
+詳細は [`templates/changelog-entry.md`](../.claude/skills/release/templates/changelog-entry.md) を参照。
+
+### Step 4: コミット & push
 
 ```bash
 git add package.json package-lock.json CHANGELOG.md
-git commit -m "chore: release v0.2.0"
+git commit -m "chore: release v0.10.1"
+git push origin develop
 ```
+
+変更は**この3ファイルのみ**であることを `git diff --stat` で確認してください。
+
+### Step 5: リリース PR（develop → main）
+
+```bash
+gh pr create --repo Kewton/CommandMate --base main --head develop \
+  --title "release: v0.10.1" \
+  --body-file <(...)
+```
+
+PR 本文に含める要素:
+
+- **リリース概要**: 何のためのリリースか
+- **バージョン**: `0.10.0 → 0.10.1`（patch/minor/major の別）
+- **DB マイグレーション**: 有無（有る場合は `CURRENT_SCHEMA_VERSION` の遷移）
+- **実差分**: `git diff --stat origin/main..origin/develop` の実数。「squash 履歴のため `main..develop` のコミット数は実態より多く表示される」旨を注記
+- **対応 Issue** 一覧
+- **主な変更**: Added / Changed / Fixed
+- **品質チェック**結果
+
+CI 通過を確認します。
+
+```bash
+gh pr checks <PR番号> --repo Kewton/CommandMate --watch
+```
+
+> **main 向け PR はレビュー1名以上の承認が必須**です（[CLAUDE.md](../CLAUDE.md) のルール）。承認後に **squash** でマージします。
 
 ### Step 6: タグ作成・プッシュ
 
-```bash
-# タグ作成
-git tag v0.2.0
-
-# mainブランチとタグをプッシュ
-git push origin main
-git push origin v0.2.0
-```
-
-### Step 7: GitHub Releases作成
+マージ後に実行します。
 
 ```bash
-# リリースノートを自動生成
-gh release create v0.2.0 --title "v0.2.0" --generate-notes
+git fetch origin --tags
+MERGE_SHA=$(gh pr view <PR番号> --repo Kewton/CommandMate --json mergeCommit -q '.mergeCommit.oid')
 
-# または、CHANGELOG.mdの内容を使用
-gh release create v0.2.0 --title "v0.2.0" --notes "$(sed -n '/## \[0.2.0\]/,/## \[0.1.0\]/p' CHANGELOG.md | head -n -1)"
+# main と develop の tree が一致していること（内容ドリフトが無いことの証明）
+[ "$(git rev-parse origin/main^{tree})" = "$(git rev-parse origin/develop^{tree})" ] && echo "tree 一致 OK"
+
+git tag -a "v0.10.1" "$MERGE_SHA" -m "v0.10.1"
+git push origin "v0.10.1"
 ```
+
+**annotated タグ（`-a`）**であること。過去のタグは全て annotated です。
+
+### Step 7: GitHub Releases 作成 → npm publish のトリガー
+
+リリースノートは **CHANGELOG の該当セクションを転記**します（`--generate-notes` は v0.9.1 までの形式）。
+
+```bash
+awk '/^## \[0\.10\.1\]/{f=1} /^## \[0\.10\.0\]/{f=0} f' CHANGELOG.md > /tmp/release-notes.md
+
+gh release create "v0.10.1" --repo Kewton/CommandMate \
+  --title "v0.10.1" \
+  --notes-file /tmp/release-notes.md
+```
+
+> ⚠️ **この時点で `publish.yml` が発火し npm publish が始まります。** Release の作成は「npm への公開を実行する」ことと等価です。取り消しは効きません（後述）。
+
+### Step 8: publish ワークフローの完走確認
+
+```bash
+gh run list --repo Kewton/CommandMate --workflow=publish.yml --limit 1
+# status=completed conclusion=success になるまで待つ
+
+npm view commandmate version    # 新バージョンになること
+```
+
+### Step 9: main を develop へマージバック（祖先復元）
+
+**必須。** squash により main のコミットは develop の祖先ではなくなっています。放置すると次回の develop → main PR で幻コンフリクトが出ます。
+
+```bash
+git checkout develop
+git pull origin develop
+git merge -s ours origin/main -m "chore: merge release v0.10.1 to develop (restore ancestry)"
+
+# tree が壊れていないことを検証（-s ours は develop の tree を保持する）
+[ "$(git rev-parse origin/main^{tree})" = "$(git rev-parse develop^{tree})" ] && echo "tree 一致 OK"
+
+git push origin develop
+```
+
+効果を確認します。
+
+```bash
+git fetch origin
+git merge-base --is-ancestor origin/main origin/develop && echo "祖先切れ解消 OK"
+```
+
+---
+
+## npm への公開について
+
+**`npm publish` を手元で実行しないでください。**
+
+`.github/workflows/publish.yml` が GitHub Release の `published` を契機に、npm Trusted Publishers（OIDC 認証）で `npm publish --provenance --access public` を実行します。
+
+- ローカルには publish 用の認証がありません
+- OIDC は GitHub Actions 実行時にしか成立しません
+- ローカル実行では provenance（来歴証明）が付きません
+
+ワークフローが失敗した場合も、ローカル publish で回避せず、原因を修正してください。
+
+### ワークフローの内容
+
+`npm ci` → `npm audit --audit-level=critical` → `npm run test:unit` → `npm run build` → `npm run build:cli` → `npm run build:server` → パッケージサイズ確認 → `npm publish --provenance --access public`
 
 ---
 
@@ -154,99 +275,93 @@ gh release create v0.2.0 --title "v0.2.0" --notes "$(sed -n '/## \[0.2.0\]/,/## 
 
 ```bash
 # タグ一覧の確認
-git tag -l
+git tag -l --sort=-v:refname | head -3
 
-# 最新タグの確認
-git describe --tags --abbrev=0
+# GitHub Releases の確認
+gh release view v0.10.1
 
-# GitHub Releasesの確認
-gh release list
+# npm の反映確認
+npm view commandmate version
+npm view commandmate@0.10.1 dist --json    # サイズ・provenance
 
-# 特定リリースの詳細確認
-gh release view v0.2.0
+# クリーンな環境で実際に取得できるか（中立ディレクトリで実行すること）
+cd $(mktemp -d) && npx --yes commandmate@latest --version
 ```
+
+> `npx` の検証は**リポジトリ外の中立ディレクトリ**で行ってください。CommandMate のリポジトリ内で実行すると、npx がローカルの `bin` を解決してしまい、公開物を検証したことになりません。
 
 ---
 
 ## Claude Code Skillを使用したリリース
 
-`/release`スキルを使用すると、上記の手順を自動化できます。
+[`/release`](../.claude/skills/release/SKILL.md) スキルを使用すると、上記の手順を実行できます。
 
 ```bash
-# パッチバージョンアップ (0.1.0 → 0.1.1)
-/release patch
-
-# マイナーバージョンアップ (0.1.0 → 0.2.0)
-/release minor
-
-# メジャーバージョンアップ (0.1.0 → 1.0.0)
-/release major
-
-# 直接バージョン指定
-/release 1.0.0
+/release patch      # パッチバージョンアップ (0.10.0 → 0.10.1)
+/release minor      # マイナーバージョンアップ (0.10.0 → 0.11.0)
+/release major      # メジャーバージョンアップ (0.10.0 → 1.0.0)
+/release 1.0.0      # 直接バージョン指定
 ```
 
----
-
-## npm versionコマンド（オプション）
-
-npm versionコマンドを使用すると、バージョン更新とタグ作成を一括で行えます。
-
-```bash
-# パッチバージョンアップ
-npm version patch -m "chore: release v%s"
-
-# マイナーバージョンアップ
-npm version minor -m "chore: release v%s"
-
-# メジャーバージョンアップ
-npm version major -m "chore: release v%s"
-
-# タグをプッシュ
-git push origin main --tags
-```
-
-**注意**: npm versionはCHANGELOG.mdを自動更新しないため、別途更新が必要です。
+スキルも PR のマージは行いません（承認が必須のため）。
 
 ---
 
 ## トラブルシューティング
 
+### main へ push しようとして拒否された
+
+```
+❌ Error: Direct push to 'main' is not allowed.
+   Please create a Pull Request instead.
+```
+
+`.git/hooks/pre-push` による正しい拒否です。**`--no-verify` で回避しないでください。** Step 5 の PR フローに戻ってください。
+
 ### タグが既に存在する場合
 
 ```bash
-# エラー: fatal: tag 'v0.2.0' already exists
-# 対処: 別のバージョンを指定するか、既存タグを削除
-
-# 既存タグの削除（注意: 履歴を書き換えるため慎重に）
-git tag -d v0.2.0
-git push origin :refs/tags/v0.2.0
+# エラー: fatal: tag 'v0.10.1' already exists
+# 対処: 別のバージョンを指定する
 ```
+
+既存タグの削除は、**npm へ publish 済みの場合は無意味**です（下記参照）。
+
+### publish ワークフローが失敗した場合
+
+```bash
+gh run view <run-id> --repo Kewton/CommandMate --log-failed
+```
+
+原因を修正し、新しいパッチバージョンでリリースし直してください。**同一バージョン番号での再公開はできません。**
 
 ### リリースのロールバック
 
-リリース後に重大な問題が発覚した場合：
+> ⚠️ **npm へ publish 済みの場合、実質的にロールバックできません。**
+>
+> - npm は公開済みバージョンの unpublish を厳しく制限しています（72時間以内などの条件付き）
+> - **一度使ったバージョン番号は、unpublish しても再利用できません**
+> - **GitHub Release やタグを削除しても、npm 上のパッケージは消えません**
+>
+> したがって、問題が見つかった場合の正しい対処は **修正して新しいパッチバージョンをリリースする**ことです。
 
-1. **GitHub Releasesの削除**
-   ```bash
-   gh release delete v0.2.0 --yes
-   ```
+publish 前（Release 作成前）であれば、以下で巻き戻せます。
 
-2. **タグの削除**
-   ```bash
-   git tag -d v0.2.0
-   git push origin :refs/tags/v0.2.0
-   ```
+```bash
+git tag -d v0.10.1
+git push origin :refs/tags/v0.10.1
+```
 
-3. **修正後、新しいパッチバージョンでリリース**
-   ```bash
-   /release patch  # v0.2.1 としてリリース
-   ```
+publish 後は、修正後に次のパッチバージョンでリリースしてください。
 
 ---
 
 ## 関連ドキュメント
 
+- [`/release` スキル](../.claude/skills/release/SKILL.md) — 手順の自動化
+- [CHANGELOGエントリテンプレート](../.claude/skills/release/templates/changelog-entry.md)
+- `.github/workflows/publish.yml` — Release 契機の自動 publish（OIDC）
+- `.git/hooks/pre-push` — main 直 push の拒否
 - [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/)
 - [Semantic Versioning](https://semver.org/lang/ja/)
 - [CHANGELOG.md](../CHANGELOG.md)
