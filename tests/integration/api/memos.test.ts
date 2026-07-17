@@ -232,6 +232,52 @@ describe('POST /api/worktrees/:id/memos', () => {
     expect(data.memo.position).toBe(2);
   });
 
+  it('should return 409 when an explicit position is already in use (Issue #1351)', async () => {
+    // Occupy position 0 so an explicit request for the same position collides
+    // with the UNIQUE(worktree_id, position) constraint.
+    createMemo(db, 'test-worktree', { title: 'Existing', position: 0 });
+
+    const { POST } = await import('@/app/api/worktrees/[id]/memos/route');
+
+    const request = new Request('http://localhost:3000/api/worktrees/test-worktree/memos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Duplicate', position: 0 }),
+    });
+    const params = { params: Promise.resolve({ id: 'test-worktree' }) };
+    const response = await POST(request as unknown as import('next/server').NextRequest, params);
+
+    // Explicit, actionable status/code instead of an opaque 500.
+    expect(response.status).toBe(409);
+
+    const data = await response.json();
+    expect(data.code).toBe('DUPLICATE_POSITION');
+    expect(data.error).toContain('position');
+
+    // The colliding memo must not have been created.
+    const memos = getMemosByWorktreeId(db, 'test-worktree');
+    expect(memos).toHaveLength(1);
+    expect(memos[0].title).toBe('Existing');
+  });
+
+  it('should still auto-assign a free position when none is requested (Issue #1351 regression)', async () => {
+    createMemo(db, 'test-worktree', { title: 'At 0', position: 0 });
+
+    const { POST } = await import('@/app/api/worktrees/[id]/memos/route');
+
+    const request = new Request('http://localhost:3000/api/worktrees/test-worktree/memos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Auto' }),
+    });
+    const params = { params: Promise.resolve({ id: 'test-worktree' }) };
+    const response = await POST(request as unknown as import('next/server').NextRequest, params);
+
+    expect(response.status).toBe(201);
+    const data = await response.json();
+    expect(data.memo.position).toBe(1);
+  });
+
   it('should return 400 when memo limit (20) exceeded', async () => {
     // Create 20 memos (the maximum allowed)
     for (let i = 0; i < 20; i++) {

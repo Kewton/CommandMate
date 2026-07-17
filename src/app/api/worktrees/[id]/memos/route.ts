@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { getWorktreeById, getMemosByWorktreeId, createMemo, reorderMemos } from '@/lib/db';
+import { getWorktreeById, getMemosByWorktreeId, createMemo, reorderMemos, MemoDbError } from '@/lib/db';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { validateMemoReorderInput } from '@/lib/memo-reorder-validator';
 import { createLogger } from '@/lib/logger';
@@ -112,13 +112,26 @@ export async function POST(
       );
     }
 
+    const usedPositions = new Set(existingMemos.map((m) => m.position));
+
     // Determine position: use requested position or next available
     let position: number;
     if (requestedPosition !== undefined && typeof requestedPosition === 'number') {
+      // An explicit position must not collide with the UNIQUE(worktree_id, position)
+      // constraint; return an explicit 409 instead of letting the raw INSERT surface
+      // as an opaque 500 (Issue #1351).
+      if (usedPositions.has(requestedPosition)) {
+        return NextResponse.json(
+          {
+            error: `Memo position ${requestedPosition} is already in use`,
+            code: 'DUPLICATE_POSITION',
+          },
+          { status: 409 }
+        );
+      }
       position = requestedPosition;
     } else {
       // Find next available position
-      const usedPositions = new Set(existingMemos.map((m) => m.position));
       position = 0;
       while (usedPositions.has(position) && position < MAX_MEMOS) {
         position++;
@@ -134,6 +147,14 @@ export async function POST(
 
     return NextResponse.json({ memo }, { status: 201 });
   } catch (error) {
+    // INSERT-side guard: covers a race between the pre-check and the insert
+    // where a concurrent request took the same position (Issue #1351).
+    if (error instanceof MemoDbError && error.code === 'DUPLICATE_POSITION') {
+      return NextResponse.json(
+        { error: 'Memo position is already in use', code: 'DUPLICATE_POSITION' },
+        { status: 409 }
+      );
+    }
     logger.error('error-creating-memo:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to create memo' },

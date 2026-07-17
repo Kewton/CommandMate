@@ -10,6 +10,26 @@ import Database from 'better-sqlite3';
 import type { WorktreeMemo } from '@/types/models';
 
 /**
+ * Database error for memo operations.
+ *
+ * Issue #1351: `createMemo` writes to a table with a
+ * `UNIQUE(worktree_id, position)` constraint. Converting the driver's opaque
+ * "UNIQUE constraint failed" message into a typed, coded error lets API callers
+ * map the collision to an explicit 409 instead of a generic 500. Mirrors
+ * `ExternalAppDbError` in `src/lib/external-apps/db.ts`.
+ */
+export class MemoDbError extends Error {
+  constructor(
+    message: string,
+    public readonly code: 'DUPLICATE_POSITION',
+    public readonly cause?: Error
+  ) {
+    super(message);
+    this.name = 'MemoDbError';
+  }
+}
+
+/**
  * Database row type for worktree memos
  */
 type WorktreeMemoRow = {
@@ -103,7 +123,20 @@ export function createMemo(
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
-  stmt.run(id, worktreeId, title, content, options.position, now, now);
+  try {
+    stmt.run(id, worktreeId, title, content, options.position, now, now);
+  } catch (error) {
+    // UNIQUE(worktree_id, position) violation -> typed DUPLICATE error (Issue #1351).
+    // Other failures (e.g. FOREIGN KEY) are re-thrown unchanged.
+    if (error instanceof Error && error.message.includes('UNIQUE constraint')) {
+      throw new MemoDbError(
+        `Memo position ${options.position} is already in use for worktree "${worktreeId}"`,
+        'DUPLICATE_POSITION',
+        error
+      );
+    }
+    throw error;
+  }
 
   return {
     id,
