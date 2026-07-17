@@ -125,7 +125,12 @@ export async function POST(request: NextRequest): Promise<NextResponse<CloneStar
     if (!result.success) {
       // Determine HTTP status based on error type
       let status = 400;
-      if (result.error?.code === 'DUPLICATE_CLONE_URL' || result.error?.code === 'CLONE_IN_PROGRESS') {
+      if (
+        result.error?.code === 'DUPLICATE_CLONE_URL' ||
+        result.error?.code === 'CLONE_IN_PROGRESS' ||
+        // Issue #1340: 既存 repositories 行が targetPath を占有している状態も競合
+        result.error?.code === 'DUPLICATE_REPOSITORY_PATH'
+      ) {
         status = 409;
       }
 

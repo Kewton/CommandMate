@@ -23,6 +23,12 @@ vi.mock('child_process', () => ({
   exec: vi.fn(),
 }));
 
+// Issue #1340: scanWorktrees は promisify(exec) 越しに git を呼ぶ。exec は mock 済みで
+// callback を返さないため、mock しないとクローン成功パスが永久に解決しない。
+vi.mock('@/lib/git/worktrees', () => ({
+  scanWorktrees: vi.fn().mockResolvedValue([]),
+}));
+
 // Issue #526: Mock session-cleanup to prevent deep import chain
 vi.mock('@/lib/session-cleanup', () => ({
   syncWorktreesAndCleanup: vi.fn().mockResolvedValue({
@@ -260,6 +266,38 @@ describe('CloneManager', () => {
       expect(result.error?.code).toBe('INVALID_TARGET_PATH');
     });
 
+    // Issue #1340: repositories.path は UNIQUE。clone URL を持たない行が残っていると
+    // URL 重複チェックをすり抜け、クローン完了後に UNIQUE 違反で throw する。
+    it('should reject with an explicit error when a repository row occupies the target path', async () => {
+      createRepository(db, {
+        name: 'repo',
+        path: '/tmp/repos/repo',
+        cloneSource: 'local', // clone URL を持たない行（UI 登録 / disableRepository 由来）
+      });
+
+      const result = await cloneManager.startCloneJob('https://github.com/test/repo.git');
+
+      expect(result.success).toBe(false);
+      expect(result.error?.category).toBe('validation');
+      expect(result.error?.code).toBe('DUPLICATE_REPOSITORY_PATH');
+      // 例外ではなく事前検証で返るので、クローンは開始されない
+      expect(spawn).not.toHaveBeenCalled();
+    });
+
+    // [D4-001] basePath を含む targetPath はクライアントに返さない
+    it('should keep the target path out of the duplicate-path error message', async () => {
+      createRepository(db, {
+        name: 'repo',
+        path: '/tmp/repos/repo',
+        cloneSource: 'local',
+      });
+
+      const result = await cloneManager.startCloneJob('https://github.com/test/repo.git');
+
+      expect(result.error?.message).not.toContain('/tmp/repos');
+      expect(result.error?.message).toContain('repo');
+    });
+
     it('should return jobId for active clone when rejecting', async () => {
       const existingJob = createCloneJob(db, {
         cloneUrl: 'https://github.com/test/activeclone.git',
@@ -451,6 +489,81 @@ describe('CloneManager', () => {
         expect(mockLogger.error).toHaveBeenCalledWith(
           'clone:job-status-update-failed',
           expect.objectContaining({ jobId: job.id, errorCode: 'CLONE_SETUP_FAILED' })
+        );
+      });
+    });
+
+    // Issue #1340: git clone 自体は成功した後の後処理（リポジトリ登録）の throw は
+    // startCloneJob の .catch()（ログのみ）にしか届かない。握り潰すとディスク上の
+    // クローンだけが成功し、ジョブは running のまま残って UI が沈黙する。
+    describe('post-clone registration failures (Issue #1340)', () => {
+      const cloneUrl = 'https://github.com/test/repo.git';
+      const targetPath = '/tmp/repos/repo';
+
+      function startCloneAndFinishGit(jobId: string): Promise<void> {
+        const proc = stubGitProcess();
+        const promise = cloneManager.executeClone(jobId, cloneUrl, targetPath);
+        proc.emit('close', 0); // git clone exit 0 = ディスク上のクローンは成功
+        return promise;
+      }
+
+      function createJob(): { id: string } {
+        return createCloneJob(db, {
+          cloneUrl,
+          normalizedCloneUrl: 'https://github.com/test/repo',
+          targetPath,
+        });
+      }
+
+      // clone URL を持たない repositories 行が同じ path を占有している状態
+      // （UI 登録 / disableRepository / ensureEnvRepositoriesRegistered 由来）。
+      // repositories.path は UNIQUE なので createRepository が throw する。
+      function occupyTargetPath(): void {
+        createRepository(db, {
+          name: 'repo',
+          path: targetPath,
+          cloneSource: 'local',
+        });
+      }
+
+      it('should complete the job when registration succeeds', async () => {
+        const job = createJob();
+
+        await expect(startCloneAndFinishGit(job.id)).resolves.toBeUndefined();
+
+        const status = cloneManager.getCloneJobStatus(job.id);
+        expect(status?.status).toBe('completed');
+        expect(status?.repositoryId).toBeDefined();
+      });
+
+      it('should not leave the job running when repository registration throws', async () => {
+        occupyTargetPath();
+        const job = createJob();
+
+        // 例外が握り潰されると executeClone の Promise は settle しないまま残るため、
+        // ここで reject を待てること自体が固着していないことの検証になる。
+        await expect(startCloneAndFinishGit(job.id)).rejects.toBeInstanceOf(CloneManagerError);
+
+        const status = cloneManager.getCloneJobStatus(job.id);
+        expect(status?.status).toBe('failed');
+        expect(status?.error?.code).toBe('CLONE_REGISTRATION_FAILED');
+        expect(status?.error?.category).toBe('system');
+        expect(getCloneJob(db, job.id)?.completedAt).toBeDefined();
+      });
+
+      // [D4-001] SQLite の UNIQUE 違反メッセージは path/SQL を含む。クライアントに返る
+      // errorMessage へ載せず、詳細はサーバーログのみに出す。
+      it('should keep the filesystem path out of the client-facing error message', async () => {
+        occupyTargetPath();
+        const job = createJob();
+
+        await expect(startCloneAndFinishGit(job.id)).rejects.toThrow();
+
+        const status = cloneManager.getCloneJobStatus(job.id);
+        expect(status?.error?.message).not.toContain('/tmp/repos');
+        expect(mockLogger.error).toHaveBeenCalledWith(
+          'clone:registration-failed',
+          expect.objectContaining({ jobId: job.id })
         );
       });
     });
