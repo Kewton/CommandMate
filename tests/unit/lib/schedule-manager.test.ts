@@ -43,7 +43,11 @@ vi.mock('../../../src/lib/cmate-parser', () => ({
 }));
 
 vi.mock('../../../src/lib/job-executor', () => ({
-  executeSchedule: vi.fn(),
+  // executeSchedule is async, so createScheduleState() attaches .catch() to whatever
+  // it returns (Issue #1343). A bare vi.fn() returns undefined, which throws inside
+  // the cron callback once a fake timer fires it — only under CI's fileParallelism:false
+  // timing, so it surfaced as a flake. Keep the mock's return type faithful.
+  executeSchedule: vi.fn().mockResolvedValue(undefined),
   recoverRunningLogs: vi.fn(),
 }));
 
