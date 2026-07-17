@@ -3,16 +3,39 @@
  *
  * PC: Dropdown selector for slash commands
  * Mobile: Bottom sheet selector for slash commands
+ *
+ * [Issue #1365] The desktop dropdown opens upward from the message input and is
+ * 320px wide, so it can run past the top or the right edge of the viewport. It
+ * is measured once open and nudged back with a transform. The mobile bottom
+ * sheet is `fixed inset-x-0` and always on screen, so it is left alone.
  */
 
 'use client';
 
-import React, { memo, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { memo, useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
 import { filterCommandGroups } from '@/lib/command-merger';
 import { resolveCommandDescription } from '@/lib/slash-command-format';
 import { SlashCommandList } from './SlashCommandList';
+
+/** Space (px) kept between the dropdown and the viewport edge. [Issue #1365] */
+const VIEWPORT_MARGIN = 8;
+
+/**
+ * Offset needed to pull a `[start, start + size]` span back inside a viewport
+ * of `viewport` px on one axis, keeping `VIEWPORT_MARGIN` clear at both ends.
+ * Returns 0 when the span already fits. A span longer than the viewport is
+ * never pushed past the leading margin, so its head stays visible.
+ * `size <= 0` means the element has not been laid out — nothing to correct.
+ */
+function clampShift(start: number, size: number, viewport: number): number {
+  if (size <= 0 || viewport <= 0) return 0;
+  const overflow = start + size + VIEWPORT_MARGIN - viewport;
+  if (overflow > 0) return -Math.min(overflow, Math.max(0, start - VIEWPORT_MARGIN));
+  if (start < VIEWPORT_MARGIN) return VIEWPORT_MARGIN - start;
+  return 0;
+}
 
 export interface SlashCommandSelectorProps {
   /** Whether the selector is open */
@@ -59,6 +82,9 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
   const [filter, setFilter] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const shiftRef = useRef({ x: 0, y: 0 });
+  const [shift, setShift] = useState({ x: 0, y: 0 });
   const t = useTranslations('worktree');
   const tCommon = useTranslations('common');
 
@@ -134,6 +160,29 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isOpen, handleKeyDown]);
+
+  // Keep the desktop dropdown inside the viewport. Re-measured when the filter
+  // changes, because the list grows and shrinks while the selector is open.
+  // [Issue #1365]
+  useLayoutEffect(() => {
+    const applyShift = (next: { x: number; y: number }): void => {
+      shiftRef.current = next;
+      setShift((prev) => (prev.x === next.x && prev.y === next.y ? prev : next));
+    };
+    if (!isOpen || isMobile) {
+      applyShift({ x: 0, y: 0 });
+      return;
+    }
+    const el = dropdownRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    // Subtract the shift already applied so the measurement describes the
+    // dropdown's uncorrected position and re-running stays idempotent.
+    applyShift({
+      x: clampShift(rect.left - shiftRef.current.x, rect.width, window.innerWidth),
+      y: clampShift(rect.top - shiftRef.current.y, rect.height, window.innerHeight),
+    });
+  }, [isOpen, isMobile, filteredGroups, position?.top, position?.left]);
 
   if (!isOpen) {
     return null;
@@ -222,11 +271,21 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
   }
 
   // Desktop: Dropdown
+  const basePosition: React.CSSProperties = position
+    ? { top: position.top, left: position.left }
+    : { bottom: '100%', left: 0, marginBottom: '4px' };
+
   return (
     <div
+      ref={dropdownRef}
       role="listbox"
+      data-testid="slash-command-dropdown"
       className="absolute bg-surface border border-border rounded-lg shadow-lg z-50 w-80 max-h-96 flex flex-col"
-      style={position ? { top: position.top, left: position.left } : { bottom: '100%', left: 0, marginBottom: '4px' }}
+      style={
+        shift.x !== 0 || shift.y !== 0
+          ? { ...basePosition, transform: `translate(${shift.x}px, ${shift.y}px)` }
+          : basePosition
+      }
     >
       {/* Search */}
       <div className="px-3 py-2 border-b border-border">

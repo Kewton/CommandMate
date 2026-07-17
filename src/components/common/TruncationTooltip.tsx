@@ -21,6 +21,11 @@
  *   - The tooltip is rendered through a React portal to `document.body` with
  *     `position: fixed`, mirroring `BranchListItem`'s approach, so it is never
  *     clipped by the file tree's `overflow-y: auto` scroll container.
+ *   - [Issue #1365] The bubble sits below the trigger and is clamped
+ *     horizontally at show time. Its height is only knowable once rendered, so
+ *     a second measuring pass flips it above the trigger when it would spill
+ *     past the bottom of the viewport (a row near the foot of the file tree
+ *     with several metadata lines).
  *   - The default delay is 200ms (see issue): long enough to avoid flicker on
  *     fast pointer moves, short enough to feel responsive.
  *   - The tooltip element is `aria-hidden` and the trigger gains no
@@ -33,7 +38,7 @@
 
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 /** Default delay (ms) before the tooltip becomes visible after hover. */
@@ -91,7 +96,11 @@ export function TruncationTooltip({
   metadata,
 }: TruncationTooltipProps): React.ReactElement {
   const triggerRef = useRef<HTMLSpanElement>(null);
+  const bubbleRef = useRef<HTMLSpanElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Vertical extent of the trigger captured when the tooltip is shown, so the
+  // flip pass below can position the bubble relative to it. [Issue #1365]
+  const anchorRef = useRef<{ top: number; bottom: number } | null>(null);
   const [visible, setVisible] = useState(false);
   // Start off-screen so the tooltip is never briefly painted at (0,0)
   // before its coordinates are computed.
@@ -121,6 +130,7 @@ export function TruncationTooltip({
         typeof window !== 'undefined'
           ? Math.max(TOOLTIP_GAP, window.innerWidth - TOOLTIP_MAX_WIDTH - TOOLTIP_GAP)
           : rect.left;
+      anchorRef.current = { top: rect.top, bottom: rect.bottom };
       setCoords({
         top: rect.bottom + TOOLTIP_GAP,
         left: Math.min(rect.left, maxLeft),
@@ -129,6 +139,32 @@ export function TruncationTooltip({
       timerRef.current = null;
     }, delay);
   }, [clearTimer, delay, metadata]);
+
+  /**
+   * [Issue #1365] Second pass, once the bubble has real dimensions: if it would
+   * run past the bottom of the viewport, flip it above the trigger; if it does
+   * not fit there either (a bubble taller than the space above), pin it to the
+   * bottom edge so its head stays reachable. Runs in a layout effect so the
+   * corrected position is painted in the same frame as the bubble itself.
+   * `left` is untouched — the horizontal clamp above already owns that axis.
+   */
+  useLayoutEffect(() => {
+    if (!visible) return;
+    const bubble = bubbleRef.current;
+    const anchor = anchorRef.current;
+    if (!bubble || !anchor) return;
+    const { height } = bubble.getBoundingClientRect();
+    // jsdom (and a not-yet-laid-out bubble) reports 0 — nothing to correct.
+    if (height <= 0) return;
+    const viewportHeight = window.innerHeight;
+    if (anchor.bottom + TOOLTIP_GAP + height + TOOLTIP_GAP <= viewportHeight) return;
+    const above = anchor.top - TOOLTIP_GAP - height;
+    const top =
+      above >= TOOLTIP_GAP
+        ? above
+        : Math.max(TOOLTIP_GAP, viewportHeight - height - TOOLTIP_GAP);
+    setCoords((prev) => (prev.top === top ? prev : { ...prev, top }));
+  }, [visible]);
 
   const handleMouseLeave = useCallback(() => {
     clearTimer();
@@ -150,6 +186,7 @@ export function TruncationTooltip({
         typeof document !== 'undefined' &&
         createPortal(
           <span
+            ref={bubbleRef}
             role="tooltip"
             aria-hidden="true"
             className="fixed z-[9999] max-w-md px-2 py-1 text-xs font-medium rounded bg-foreground text-background shadow-lg pointer-events-none"
