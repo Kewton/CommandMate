@@ -189,9 +189,14 @@ export async function executeSchedule(state: ScheduleState): Promise<void> {
   }
 
   state.isExecuting = true;
-  const logId = createExecutionLog(state.scheduleId, state.worktreeId, state.entry.message);
+  // Issue #1343: createExecutionLog() must stay inside the try so that a DB
+  // failure still reaches the finally that resets isExecuting. Otherwise the
+  // schedule is skipped by the guard above until the server restarts.
+  let logId: string | undefined;
 
   try {
+    logId = createExecutionLog(state.scheduleId, state.worktreeId, state.entry.message);
+
     const db = getLazyDbInstance();
     const worktree = db.prepare('SELECT path, vibe_local_model FROM worktrees WHERE id = ?').get(state.worktreeId) as WorktreeRow | undefined;
 
@@ -217,7 +222,9 @@ export async function executeSchedule(state: ScheduleState): Promise<void> {
     logger.info('execution:completed', { name: state.entry.name, status: result.status });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    updateExecutionLog(logId, 'failed', errorMessage, null);
+    if (logId !== undefined) {
+      updateExecutionLog(logId, 'failed', errorMessage, null);
+    }
     logger.error('execution:failed', { name: state.entry.name, error: errorMessage });
   } finally {
     state.isExecuting = false;
