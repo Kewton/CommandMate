@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- fix(clone): **`executeClone` 冒頭の同期例外でクローンジョブが `running` のまま固着するのを防止** (#1342)。`executeClone` はジョブを `running` に更新した直後、`Promise` を生成する前に `mkdirSync`（親ディレクトリ作成）を同期実行していた。ここで throw すると（親ディレクトリの権限不足・ディスク障害等）、失敗は呼び出し元 `startCloneJob` の `.catch()`（ログ出力のみ）に吸われ、**ジョブは terminal state へ一切遷移しない**。利用者には「終わらないクローン」だけが見え、エラーは UI に出ない。準備処理を `try` で包み、例外時に `failed` / `CLONE_SETUP_FAILED`（category: `filesystem`）へ遷移させる。原因の詳細はパス情報を含むためサーバーログのみに出し（`clone:setup-failed`）、ジョブに載せる `errorMessage` は定型文とする（[D4-001] に準拠）。なお `updateCloneJob` 自身が throw する DB 障害時は `failed` の書き込みも成立しないため `pending` のまま残るが、二次例外で原因を握り潰さず構造化エラーとして呼び出し元へ伝える
+
 ## [0.10.3] - 2026-07-17
 
 > **Highlight**: **v0.10.2 で公開したチュートリアルの Step 1 が動作しない問題を修正するパッチリリース**。`npx commandmate@latest` で起動した環境では、リポジトリのクローンが `exit 128`（`fatal: Unable to read current working directory`）で必ず失敗していた。`CloneManager` が `cwd` を指定せずに git を spawn しており、**npm キャッシュ配下にあるサーバープロセスの cwd を継承**していたことが原因。LP からチュートリアルへ送客している状態で新規ユーザーの最初の操作が止まっていたため、緊急度が高い。DB マイグレーションなし。

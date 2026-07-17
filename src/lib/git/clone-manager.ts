@@ -171,6 +171,15 @@ const ERROR_DEFINITIONS: Record<string, CloneError> = {
     recoverable: true,
     suggestedAction: 'Try again or clone a smaller repository',
   },
+  // Issue #1342: executeClone の準備処理（status 更新・親ディレクトリ作成）が throw した場合。
+  // [D4-001] 原因の詳細はパス情報を含むためログのみに出し、クライアントには定型文を返す。
+  CLONE_SETUP_FAILED: {
+    category: 'filesystem',
+    code: 'CLONE_SETUP_FAILED',
+    message: 'Failed to prepare the clone target directory',
+    recoverable: true,
+    suggestedAction: 'Check the permissions and free space of the target directory, then try again',
+  },
 };
 
 /**
@@ -402,21 +411,59 @@ export class CloneManager {
   }
 
   /**
+   * Mark a job as failed, tolerating a failing DB write.
+   *
+   * Issue #1342: 呼び出し元は失敗パスの最中なので、ここでの throw は元の原因を握り潰す。
+   * DB 書き込みが失敗した場合はログに残すだけにして、元のエラーを伝播させる。
+   */
+  private markJobFailed(jobId: string, error: CloneError): void {
+    try {
+      updateCloneJob(this.db, jobId, {
+        status: 'failed',
+        errorCategory: error.category,
+        errorCode: error.code,
+        errorMessage: error.message,
+        completedAt: new Date(),
+      });
+    } catch (dbError) {
+      logger.error('clone:job-status-update-failed', {
+        jobId,
+        errorCode: error.code,
+        dbError: dbError instanceof Error ? dbError.message : String(dbError),
+      });
+    }
+  }
+
+  /**
    * Execute git clone operation
    *
    * This method runs asynchronously and updates the job status.
    */
   async executeClone(jobId: string, cloneUrl: string, targetPath: string): Promise<void> {
-    // Update job status to running
-    updateCloneJob(this.db, jobId, {
-      status: 'running',
-      startedAt: new Date(),
-    });
+    // Issue #1342: ここは Promise 生成前の同期処理。throw すると失敗が
+    // startCloneJob の .catch()（ログのみ）に吸われ、ジョブが terminal state へ
+    // 遷移しないまま running / pending で固着する。必ず failed へ落とす。
+    let parentDir: string;
+    try {
+      // Update job status to running
+      updateCloneJob(this.db, jobId, {
+        status: 'running',
+        startedAt: new Date(),
+      });
 
-    // Ensure parent directory exists
-    const parentDir = path.dirname(targetPath);
-    if (!existsSync(parentDir)) {
-      mkdirSync(parentDir, { recursive: true });
+      // Ensure parent directory exists
+      parentDir = path.dirname(targetPath);
+      if (!existsSync(parentDir)) {
+        mkdirSync(parentDir, { recursive: true });
+      }
+    } catch (err) {
+      // [D4-001] 原因の詳細（パスを含む）はログのみ。ジョブに載せる message は定型文。
+      logger.error('clone:setup-failed', {
+        jobId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      this.markJobFailed(jobId, ERROR_DEFINITIONS.CLONE_SETUP_FAILED);
+      throw new CloneManagerError(ERROR_DEFINITIONS.CLONE_SETUP_FAILED);
     }
 
     return new Promise<void>((resolve, reject) => {

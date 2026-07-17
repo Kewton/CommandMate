@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import { spawn, type ChildProcess } from 'child_process';
+import { mkdirSync } from 'fs';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { CloneManager, CloneManagerError, resetWorktreeBasePathWarning, resolveCustomTargetPath } from '@/lib/git/clone-manager';
@@ -357,6 +358,101 @@ describe('CloneManager', () => {
 
       expect(options.cwd).toBe('/tmp/repos/group');
       expect(options.cwd).not.toBe(process.cwd());
+    });
+
+    // Issue #1342: Promise 生成前の同期例外は startCloneJob の .catch()（ログのみ）に吸われる。
+    // failed へ遷移させないと、ジョブは running / pending のまま永久に残る。
+    describe('synchronous setup failures (Issue #1342)', () => {
+      it('should mark the job as failed when mkdirSync throws', async () => {
+        stubGitProcess();
+        const cloneUrl = 'https://github.com/test/repo.git';
+        const targetPath = '/tmp/repos/repo';
+        const job = createCloneJob(db, {
+          cloneUrl,
+          normalizedCloneUrl: 'https://github.com/test/repo',
+          targetPath,
+        });
+        vi.mocked(mkdirSync).mockImplementationOnce(() => {
+          throw new Error("EACCES: permission denied, mkdir '/tmp/repos'");
+        });
+
+        await expect(cloneManager.executeClone(job.id, cloneUrl, targetPath)).rejects.toBeInstanceOf(
+          CloneManagerError
+        );
+
+        const status = cloneManager.getCloneJobStatus(job.id);
+        expect(status?.status).toBe('failed');
+        expect(status?.error?.code).toBe('CLONE_SETUP_FAILED');
+        expect(status?.error?.category).toBe('filesystem');
+        expect(getCloneJob(db, job.id)?.completedAt).toBeDefined();
+      });
+
+      it('should not spawn git when the setup fails', async () => {
+        stubGitProcess();
+        const cloneUrl = 'https://github.com/test/repo.git';
+        const targetPath = '/tmp/repos/repo';
+        const job = createCloneJob(db, {
+          cloneUrl,
+          normalizedCloneUrl: 'https://github.com/test/repo',
+          targetPath,
+        });
+        vi.mocked(mkdirSync).mockImplementationOnce(() => {
+          throw new Error('EACCES: permission denied');
+        });
+
+        await expect(cloneManager.executeClone(job.id, cloneUrl, targetPath)).rejects.toThrow();
+
+        expect(spawn).not.toHaveBeenCalled();
+      });
+
+      // [D4-001] mkdirSync のエラーメッセージは basePath を含む。クライアントに返る
+      // errorMessage へ載せず、詳細はサーバーログのみに出す。
+      it('should keep the filesystem path out of the client-facing error message', async () => {
+        stubGitProcess();
+        const cloneUrl = 'https://github.com/test/repo.git';
+        const targetPath = '/tmp/repos/repo';
+        const job = createCloneJob(db, {
+          cloneUrl,
+          normalizedCloneUrl: 'https://github.com/test/repo',
+          targetPath,
+        });
+        vi.mocked(mkdirSync).mockImplementationOnce(() => {
+          throw new Error("EACCES: permission denied, mkdir '/tmp/repos'");
+        });
+
+        await expect(cloneManager.executeClone(job.id, cloneUrl, targetPath)).rejects.toThrow();
+
+        const status = cloneManager.getCloneJobStatus(job.id);
+        expect(status?.error?.message).not.toContain('/tmp/repos');
+        expect(mockLogger.error).toHaveBeenCalledWith(
+          'clone:setup-failed',
+          expect.objectContaining({ jobId: job.id })
+        );
+      });
+
+      // DB が壊れている場合は failed への書き込み自体も失敗する（pending のまま残るのは避けられない）。
+      // 少なくとも二次例外で原因を握り潰さず、構造化エラーとして呼び出し元へ伝えること。
+      it('should reject with a structured error when the status update itself throws', async () => {
+        stubGitProcess();
+        const cloneUrl = 'https://github.com/test/repo.git';
+        const targetPath = '/tmp/repos/repo';
+        const job = createCloneJob(db, {
+          cloneUrl,
+          normalizedCloneUrl: 'https://github.com/test/repo',
+          targetPath,
+        });
+        db.close(); // updateCloneJob を throw させる
+
+        await expect(cloneManager.executeClone(job.id, cloneUrl, targetPath)).rejects.toBeInstanceOf(
+          CloneManagerError
+        );
+
+        expect(spawn).not.toHaveBeenCalled();
+        expect(mockLogger.error).toHaveBeenCalledWith(
+          'clone:job-status-update-failed',
+          expect.objectContaining({ jobId: job.id, errorCode: 'CLONE_SETUP_FAILED' })
+        );
+      });
     });
   });
 
