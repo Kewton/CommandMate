@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import { spawn, type ChildProcess } from 'child_process';
-import { mkdirSync } from 'fs';
+import { existsSync, mkdirSync } from 'fs';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { CloneManager, CloneManagerError, resetWorktreeBasePathWarning, resolveCustomTargetPath } from '@/lib/git/clone-manager';
@@ -15,7 +15,10 @@ import {
   getCloneJob,
   createCloneJob,
   updateCloneJob,
+  getRepositoryByNormalizedUrl,
+  getRepositoryByPath,
 } from '@/lib/db/db-repository';
+import { upsertWorktree } from '@/lib/db/worktree-db';
 
 // Mock child_process
 vi.mock('child_process', () => ({
@@ -73,6 +76,10 @@ describe('CloneManager', () => {
     runMigrations(db);
     cloneManager = new CloneManager(db, { basePath: '/tmp/repos' });
     vi.clearAllMocks();
+    // clearAllMocks() resets call history but NOT return values set via
+    // mockReturnValue(), so restore the default (directory does not exist) here
+    // to keep per-test existsSync overrides from leaking into later tests.
+    vi.mocked(existsSync).mockReturnValue(false);
   });
 
   afterEach(() => {
@@ -197,6 +204,12 @@ describe('CloneManager', () => {
     });
 
     it('should reject duplicate repository', async () => {
+      const { existsSync } = await import('fs');
+      // Issue #1350: a duplicate is only rejected when the existing repository's
+      // directory is still on disk (a live repo). A row whose directory is gone
+      // is a ghost and gets cleaned up instead — covered separately below.
+      vi.mocked(existsSync).mockReturnValue(true);
+
       createRepository(db, {
         name: 'existing-repo',
         path: '/path/to/existing-repo',
@@ -268,11 +281,20 @@ describe('CloneManager', () => {
 
     // Issue #1340: repositories.path は UNIQUE。clone URL を持たない行が残っていると
     // URL 重複チェックをすり抜け、クローン完了後に UNIQUE 違反で throw する。
+    // Issue #1350: そのような行でも worktree を持つ間は「実体を伴う登録」として拒否し続ける
+    // （幽霊掃除の対象外）。worktree を登録して live 行を再現する。
     it('should reject with an explicit error when a repository row occupies the target path', async () => {
       createRepository(db, {
         name: 'repo',
         path: '/tmp/repos/repo',
         cloneSource: 'local', // clone URL を持たない行（UI 登録 / disableRepository 由来）
+      });
+      upsertWorktree(db, {
+        id: 'wt-live',
+        name: 'main',
+        path: '/tmp/repos/repo/main',
+        repositoryPath: '/tmp/repos/repo',
+        repositoryName: 'repo',
       });
 
       const result = await cloneManager.startCloneJob('https://github.com/test/repo.git');
@@ -290,6 +312,13 @@ describe('CloneManager', () => {
         name: 'repo',
         path: '/tmp/repos/repo',
         cloneSource: 'local',
+      });
+      upsertWorktree(db, {
+        id: 'wt-live',
+        name: 'main',
+        path: '/tmp/repos/repo/main',
+        repositoryPath: '/tmp/repos/repo',
+        repositoryName: 'repo',
       });
 
       const result = await cloneManager.startCloneJob('https://github.com/test/repo.git');
@@ -309,6 +338,93 @@ describe('CloneManager', () => {
 
       expect(result.success).toBe(false);
       expect(result.jobId).toBe(existingJob.id);
+    });
+  });
+
+  // Issue #1350: worktree 全滅後にディスク上の実体が消えた repositories 行（幽霊）は、
+  // 物理削除経路が無いため同一 URL の再 clone を恒久的に封鎖していた。重複判定時に
+  // 幽霊（ディレクトリ不存在 かつ worktree 0 件）を検出し物理削除して clone を許可する。
+  describe('ghost repository cleanup (Issue #1350)', () => {
+    it('should remove a ghost URL row (directory gone, no worktrees) and allow re-clone', async () => {
+      vi.mocked(existsSync).mockReturnValue(false); // directory no longer exists on disk
+
+      createRepository(db, {
+        name: 'repo',
+        path: '/tmp/repos/repo',
+        cloneUrl: 'https://github.com/test/repo.git',
+        normalizedCloneUrl: 'https://github.com/test/repo',
+        cloneSource: 'https',
+      });
+
+      const result = await cloneManager.startCloneJob('https://github.com/test/repo.git');
+
+      expect(result.success).toBe(true);
+      expect(result.jobId).toBeDefined();
+      // The ghost row is physically removed so the URL is registrable again.
+      expect(getRepositoryByNormalizedUrl(db, 'https://github.com/test/repo')).toBeNull();
+    });
+
+    it('should NOT remove a URL row whose directory still exists (real duplicate)', async () => {
+      vi.mocked(existsSync).mockReturnValue(true); // directory is live
+
+      createRepository(db, {
+        name: 'repo',
+        path: '/tmp/repos/repo',
+        cloneUrl: 'https://github.com/test/repo.git',
+        normalizedCloneUrl: 'https://github.com/test/repo',
+        cloneSource: 'https',
+      });
+
+      const result = await cloneManager.startCloneJob('https://github.com/test/repo.git');
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('DUPLICATE_CLONE_URL');
+      expect(getRepositoryByNormalizedUrl(db, 'https://github.com/test/repo')).not.toBeNull();
+      expect(spawn).not.toHaveBeenCalled();
+    });
+
+    it('should NOT remove a URL row that still has worktrees registered', async () => {
+      vi.mocked(existsSync).mockReturnValue(false); // directory gone...
+
+      createRepository(db, {
+        name: 'repo',
+        path: '/tmp/repos/repo',
+        cloneUrl: 'https://github.com/test/repo.git',
+        normalizedCloneUrl: 'https://github.com/test/repo',
+        cloneSource: 'https',
+      });
+      // ...but a worktree is still registered → treat as live, keep the row.
+      upsertWorktree(db, {
+        id: 'wt-1',
+        name: 'main',
+        path: '/tmp/repos/repo/main',
+        repositoryPath: '/tmp/repos/repo',
+        repositoryName: 'repo',
+      });
+
+      const result = await cloneManager.startCloneJob('https://github.com/test/repo.git');
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('DUPLICATE_CLONE_URL');
+      expect(getRepositoryByNormalizedUrl(db, 'https://github.com/test/repo')).not.toBeNull();
+    });
+
+    it('should remove a ghost path row (no clone URL) so the target path can be reused', async () => {
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      // A URL-less row (UI registration / disableRepository origin) occupying the
+      // default target path, with no worktrees and no directory on disk.
+      createRepository(db, {
+        name: 'repo',
+        path: '/tmp/repos/repo',
+        cloneSource: 'local',
+      });
+
+      const result = await cloneManager.startCloneJob('https://github.com/test/repo.git');
+
+      expect(result.success).toBe(true);
+      expect(result.jobId).toBeDefined();
+      expect(getRepositoryByPath(db, '/tmp/repos/repo')).toBeNull();
     });
   });
 

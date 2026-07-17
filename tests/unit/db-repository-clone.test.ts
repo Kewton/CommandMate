@@ -13,12 +13,16 @@ import {
   getRepositoryByPath,
   updateRepository,
   getAllRepositories,
+  deleteRepository,
+  countWorktreesByRepositoryPath,
+  RepositoryDbError,
   createCloneJob,
   updateCloneJob,
   getCloneJob,
   getActiveCloneJobByUrl,
   getCloneJobsByStatus,
 } from '@/lib/db/db-repository';
+import { upsertWorktree } from '@/lib/db/worktree-db';
 import type { CloneJobStatus } from '@/types/clone';
 
 describe('Repository DB Operations', () => {
@@ -90,7 +94,10 @@ describe('Repository DB Operations', () => {
       expect(repo.enabled).toBe(false);
     });
 
-    it('should throw error for duplicate path', () => {
+    // Issue #1352: a raw better-sqlite3 UNIQUE error used to propagate. It is now
+    // converted to a typed RepositoryDbError('DUPLICATE') so a concurrent clone
+    // loser fails explicitly instead of throwing an opaque SqliteError.
+    it('should throw RepositoryDbError(DUPLICATE) for duplicate path', () => {
       createRepository(db, {
         name: 'repo1',
         path: '/path/to/repo',
@@ -103,10 +110,24 @@ describe('Repository DB Operations', () => {
           path: '/path/to/repo',
           cloneSource: 'local',
         });
-      }).toThrow();
+      }).toThrow(RepositoryDbError);
+
+      try {
+        createRepository(db, {
+          name: 'repo3',
+          path: '/path/to/repo',
+          cloneSource: 'local',
+        });
+        throw new Error('expected createRepository to throw');
+      } catch (error) {
+        expect(error).toBeInstanceOf(RepositoryDbError);
+        expect((error as RepositoryDbError).code).toBe('DUPLICATE');
+        // The original SqliteError is preserved as the cause.
+        expect((error as RepositoryDbError).cause).toBeInstanceOf(Error);
+      }
     });
 
-    it('should throw error for duplicate normalized clone URL', () => {
+    it('should throw RepositoryDbError(DUPLICATE) for duplicate normalized clone URL', () => {
       createRepository(db, {
         name: 'repo1',
         path: '/path/to/repo1',
@@ -115,7 +136,7 @@ describe('Repository DB Operations', () => {
         cloneSource: 'https',
       });
 
-      expect(() => {
+      try {
         createRepository(db, {
           name: 'repo2',
           path: '/path/to/repo2',
@@ -123,7 +144,68 @@ describe('Repository DB Operations', () => {
           normalizedCloneUrl: 'https://github.com/test/repo',
           cloneSource: 'ssh',
         });
-      }).toThrow();
+        throw new Error('expected createRepository to throw');
+      } catch (error) {
+        expect(error).toBeInstanceOf(RepositoryDbError);
+        expect((error as RepositoryDbError).code).toBe('DUPLICATE');
+      }
+    });
+  });
+
+  describe('deleteRepository (Issue #1350)', () => {
+    it('should physically delete a repository row and return true', () => {
+      const repo = createRepository(db, {
+        name: 'ghost',
+        path: '/path/to/ghost',
+        cloneUrl: 'https://github.com/test/ghost.git',
+        normalizedCloneUrl: 'https://github.com/test/ghost',
+        cloneSource: 'https',
+      });
+
+      const deleted = deleteRepository(db, repo.id);
+
+      expect(deleted).toBe(true);
+      expect(getRepositoryById(db, repo.id)).toBeNull();
+      // The URL is registrable again after the row is physically removed.
+      expect(getRepositoryByNormalizedUrl(db, 'https://github.com/test/ghost')).toBeNull();
+    });
+
+    it('should return false when no row matches the id', () => {
+      expect(deleteRepository(db, 'non-existent-id')).toBe(false);
+    });
+  });
+
+  describe('countWorktreesByRepositoryPath (Issue #1350)', () => {
+    it('should return 0 when the repository has no worktrees', () => {
+      expect(countWorktreesByRepositoryPath(db, '/path/to/repo')).toBe(0);
+    });
+
+    it('should count worktrees linked by repository_path', () => {
+      const repoPath = '/path/to/repo';
+      upsertWorktree(db, {
+        id: 'wt-1',
+        name: 'main',
+        path: `${repoPath}/main`,
+        repositoryPath: repoPath,
+        repositoryName: 'repo',
+      });
+      upsertWorktree(db, {
+        id: 'wt-2',
+        name: 'feature',
+        path: `${repoPath}/feature`,
+        repositoryPath: repoPath,
+        repositoryName: 'repo',
+      });
+      // A worktree for a different repository must not be counted.
+      upsertWorktree(db, {
+        id: 'wt-other',
+        name: 'main',
+        path: '/other/repo/main',
+        repositoryPath: '/other/repo',
+        repositoryName: 'other',
+      });
+
+      expect(countWorktreesByRepositoryPath(db, repoPath)).toBe(2);
     });
   });
 
