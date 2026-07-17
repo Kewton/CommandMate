@@ -7,14 +7,50 @@
  * history-loss warning, S3-002 running-session warning, and the force checkbox —
  * is preserved verbatim (same data-testids, same onCheckout contract) from the
  * original BranchesSection. No handler/API behavior changes.
+ *
+ * [Issue #1363] The menu was `absolute top-full z-20` inside the Git pane's
+ * `overflow-y-auto` scroll container, so it was clipped by that ancestor, ran
+ * off the bottom of the viewport when the trigger sat low (up to 256px of menu
+ * with no flip), and sat below other overlays. It is now rendered through a
+ * portal to `document.body` as a `fixed` element that flips above the trigger
+ * when it does not fit below and is clamped into the viewport on both axes.
  */
 
 'use client';
 
-import React, { memo, useCallback, useState } from 'react';
+import React, { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import type { BranchInfo } from '@/types/git';
 import { Button, Checkbox } from '@/components/ui';
+
+/**
+ * `useLayoutEffect` is a no-op on the server and React warns when it is called
+ * during server rendering; fall back to `useEffect` there. Mirrors the same
+ * guard in `useIsMobile`.
+ */
+const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
+
+/** Gap (px) between the trigger and the portaled menu. */
+const MENU_GAP = 4;
+
+/** Viewport inset (px) kept clear on every side when clamping the menu. */
+const VIEWPORT_MARGIN = 8;
+
+interface MenuCoords {
+  top: number;
+  left: number;
+}
+
+/**
+ * Clamps one axis of the menu's start edge so the whole bubble stays inside the
+ * viewport. When the menu is larger than the viewport the lower bound wins, so
+ * its start (top / left) stays reachable rather than being pushed off-screen.
+ */
+function clampAxis(value: number, menuSize: number, viewportSize: number): number {
+  const max = viewportSize - menuSize - VIEWPORT_MARGIN;
+  return Math.max(VIEWPORT_MARGIN, Math.min(value, max));
+}
 
 interface BranchCheckoutDropdownProps {
   branches: BranchInfo[];
@@ -46,9 +82,61 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
   const [menuOpen, setMenuOpen] = useState(false);
   const [checkoutTarget, setCheckoutTarget] = useState<BranchInfo | null>(null);
   const [checkoutForce, setCheckoutForce] = useState(false);
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // `null` until measured; the menu is parked off-screen meanwhile so it is
+  // never painted at (0,0) first. [Issue #1363]
+  const [coords, setCoords] = useState<MenuCoords | null>(null);
 
   // Checkout-able branches = everything except the one currently checked out here.
   const options = branches.filter((b) => !b.isCurrent);
+
+  /**
+   * Measures the trigger and the (already mounted, off-screen) menu, flips the
+   * menu above the trigger when it does not fit below, and clamps both axes
+   * into the viewport. [Issue #1363]
+   */
+  const updatePosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    const menu = menuRef.current;
+    if (!trigger || !menu || typeof window === 'undefined') return;
+
+    const triggerRect = trigger.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - triggerRect.bottom;
+    const spaceAbove = triggerRect.top;
+
+    // Flip up only when the menu genuinely does not fit below AND there is more
+    // room above — otherwise keep the familiar downward placement.
+    const flipUp =
+      spaceBelow < menuRect.height + MENU_GAP + VIEWPORT_MARGIN && spaceAbove > spaceBelow;
+    const top = flipUp
+      ? triggerRect.top - menuRect.height - MENU_GAP
+      : triggerRect.bottom + MENU_GAP;
+
+    setCoords({
+      top: clampAxis(top, menuRect.height, window.innerHeight),
+      left: clampAxis(triggerRect.left, menuRect.width, window.innerWidth),
+    });
+  }, []);
+
+  useIsomorphicLayoutEffect(() => {
+    if (!menuOpen) {
+      setCoords(null);
+      return;
+    }
+    updatePosition();
+    // The menu is `fixed` and no longer travels with the Git pane's scroll
+    // container, so follow ancestor scrolls (capture: true) and viewport
+    // resizes to keep it anchored to the trigger.
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+    // `options.length` re-measures when the branch list loads while the menu is open.
+  }, [menuOpen, options.length, updatePosition]);
 
   const openCheckout = useCallback((branch: BranchInfo) => {
     setCheckoutForce(false);
@@ -63,7 +151,7 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
   }, [checkoutTarget, checkoutForce, onCheckout]);
 
   return (
-    <div className="relative" data-testid="branch-checkout-dropdown">
+    <div className="relative" ref={triggerRef} data-testid="branch-checkout-dropdown">
       <Button
         variant="ghost"
         type="button"
@@ -79,50 +167,57 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
         <span aria-hidden="true" className="text-[10px]">▾</span>
       </Button>
 
-      {menuOpen && (
-        <div
-          className="absolute left-0 top-full z-20 mt-1 min-w-[12rem] max-h-64 overflow-y-auto rounded border border-border bg-surface shadow-lg"
-          role="menu"
-          data-testid="branch-checkout-menu"
-        >
-          {options.length === 0 ? (
-            <div className="px-3 py-1.5 text-xs text-muted-foreground">{t('git.checkout.noBranches')}</div>
-          ) : (
-            <ul className="divide-y divide-border">
-              {options.map((branch) => {
-                const checkedOutElsewhere = branch.checkedOutWorktreePath !== null;
-                return (
-                  <li key={`${branch.isRemote ? 'r' : 'l'}:${branch.name}`}>
-                    {/* Issue #1061: full-width left-aligned menu row — 残置 */}
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => openCheckout(branch)}
-                      disabled={busy || checkedOutElsewhere}
-                      className="w-full text-left px-3 py-1.5 font-mono text-xs text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                      aria-label={t('git.checkout.checkoutBranch', { name: branch.name })}
-                      title={
-                        checkedOutElsewhere
-                          ? t('git.checkout.checkedOutElsewhere', {
-                              path: branch.checkedOutWorktreePath ?? '',
-                            })
-                          : undefined
-                      }
-                    >
-                      {branch.name}
-                      {branch.isDefault && (
-                        <span className="ml-1.5 text-[10px] text-muted-foreground">
-                          {t('git.checkout.defaultBadge')}
-                        </span>
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-      )}
+      {menuOpen &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="fixed z-50 min-w-[12rem] max-w-[calc(100vw-1rem)] max-h-64 overflow-y-auto rounded border border-border bg-surface shadow-lg"
+            style={{ top: coords?.top ?? -9999, left: coords?.left ?? -9999 }}
+            role="menu"
+            data-testid="branch-checkout-menu"
+          >
+            {options.length === 0 ? (
+              <div className="px-3 py-1.5 text-xs text-muted-foreground">
+                {t('git.checkout.noBranches')}
+              </div>
+            ) : (
+              <ul className="divide-y divide-border">
+                {options.map((branch) => {
+                  const checkedOutElsewhere = branch.checkedOutWorktreePath !== null;
+                  return (
+                    <li key={`${branch.isRemote ? 'r' : 'l'}:${branch.name}`}>
+                      {/* Issue #1061: full-width left-aligned menu row — 残置 */}
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => openCheckout(branch)}
+                        disabled={busy || checkedOutElsewhere}
+                        className="w-full text-left px-3 py-1.5 font-mono text-xs text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                        aria-label={t('git.checkout.checkoutBranch', { name: branch.name })}
+                        title={
+                          checkedOutElsewhere
+                            ? t('git.checkout.checkedOutElsewhere', {
+                                path: branch.checkedOutWorktreePath ?? '',
+                              })
+                            : undefined
+                        }
+                      >
+                        {branch.name}
+                        {branch.isDefault && (
+                          <span className="ml-1.5 text-[10px] text-muted-foreground">
+                            {t('git.checkout.defaultBadge')}
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>,
+          document.body
+        )}
 
       {actionError && (
         <div

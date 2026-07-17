@@ -15,7 +15,14 @@
 
 'use client';
 
-import React, { memo, useCallback, useEffect, useRef } from 'react';
+import React, {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslations } from 'next-intl';
 import { FilePlus, FolderPlus, Pencil, Trash2, Upload, FolderInput } from 'lucide-react';
 import { Z_INDEX } from '@/config/z-index';
@@ -49,6 +56,36 @@ export interface ContextMenuProps {
   onUpload?: (targetPath: string) => void;
   /** Move file/directory callback [Issue #162] */
   onMove?: (path: string, type: 'file' | 'directory') => void;
+}
+
+/** Gap kept between the menu and the viewport edge (px) */
+const VIEWPORT_MARGIN_PX = 8;
+
+/**
+ * Keep one axis of the menu inside the viewport.
+ *
+ * [Issue #1362] The menu is `position: fixed` at the pointer, so a right-click
+ * (or long press) near the right/bottom edge would otherwise place part of it
+ * off screen with no way to scroll to it.
+ *
+ * @param start - Requested start offset (left or top) in px
+ * @param size - Measured menu size on this axis in px
+ * @param viewportSize - Viewport size on this axis in px
+ * @returns Start offset clamped into the viewport
+ */
+function clampAxis(start: number, size: number, viewportSize: number): number {
+  const maxStart = viewportSize - size - VIEWPORT_MARGIN_PX;
+  // Menu taller/wider than the viewport: pin to the near edge so the first
+  // items stay reachable rather than pushing the top-left off screen.
+  if (maxStart < VIEWPORT_MARGIN_PX) return VIEWPORT_MARGIN_PX;
+  return Math.min(Math.max(start, VIEWPORT_MARGIN_PX), maxStart);
+}
+
+/** Measured placement, tagged with the anchor it was measured for */
+interface Placement {
+  key: string;
+  left: number;
+  top: number;
 }
 
 /**
@@ -104,6 +141,33 @@ export const ContextMenu = memo(function ContextMenu({
     isOpen,
     CONTEXT_MENU_EXIT_DURATION_MS
   );
+
+  // [Issue #1362] Placement measured for the current anchor. The item set
+  // depends on targetType, so the size must be re-measured when it changes.
+  const placementKey = `${position.x}:${position.y}:${targetType}`;
+  const [placement, setPlacement] = useState<Placement | null>(null);
+  const placed = placement?.key === placementKey ? placement : null;
+
+  /**
+   * [Issue #1362] Measure the menu and clamp it into the viewport.
+   *
+   * Runs before paint, so the pre-measure render at the origin is never
+   * visible. Measuring at (0, 0) rather than at the anchor is deliberate: a
+   * fixed box shrinks to the space left of the viewport edge, so measuring it
+   * near the edge would report a narrower menu than it actually needs.
+   */
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    const el = menuRef.current;
+    if (!el) return;
+
+    const rect = el.getBoundingClientRect();
+    setPlacement({
+      key: placementKey,
+      left: clampAxis(position.x, rect.width, window.innerWidth),
+      top: clampAxis(position.y, rect.height, window.innerHeight),
+    });
+  }, [isOpen, placementKey, position.x, position.y]);
 
   /**
    * Handle menu item click
@@ -248,8 +312,10 @@ export const ContextMenu = memo(function ContextMenu({
       className={`fixed min-w-[160px] py-1 bg-surface rounded-lg shadow-lg border border-border ${animationClasses}`}
       style={{
         zIndex: Z_INDEX.CONTEXT_MENU,
-        left: `${position.x}px`,
-        top: `${position.y}px`,
+        // [Issue #1362] Before the measure pass completes the menu sits at the
+        // origin; useLayoutEffect moves it to the clamped anchor before paint.
+        left: `${placed ? placed.left : 0}px`,
+        top: `${placed ? placed.top : 0}px`,
       }}
     >
       {visibleItems.map((item, index) => (

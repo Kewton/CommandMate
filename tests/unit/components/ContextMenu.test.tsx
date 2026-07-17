@@ -5,7 +5,7 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { ContextMenu } from '@/components/worktree/ContextMenu';
 import { CONTEXT_MENU_EXIT_DURATION_MS } from '@/config/ui-feedback-config';
@@ -88,6 +88,135 @@ describe('ContextMenu', () => {
 
       const menu = screen.getByTestId('context-menu');
       expect(menu).toHaveClass('fixed');
+    });
+  });
+
+  // [Issue #1362] A right-click / long press near a viewport edge must not push
+  // the menu off screen: it is `position: fixed`, so anything past the edge is
+  // unreachable (no scrolling brings it back).
+  describe('viewport clamping', () => {
+    const originalInnerWidth = window.innerWidth;
+    const originalInnerHeight = window.innerHeight;
+
+    /** Report a fixed menu size, since jsdom lays everything out as 0x0. */
+    const mockMenuSize = (width: number, height: number) => {
+      vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
+        width,
+        height,
+        top: 0,
+        left: 0,
+        right: width,
+        bottom: height,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect);
+    };
+
+    const mockViewport = (width: number, height: number) => {
+      Object.defineProperty(window, 'innerWidth', {
+        value: width,
+        writable: true,
+        configurable: true,
+      });
+      Object.defineProperty(window, 'innerHeight', {
+        value: height,
+        writable: true,
+        configurable: true,
+      });
+    };
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      mockViewport(originalInnerWidth, originalInnerHeight);
+    });
+
+    it('should keep the menu on screen when opened near the bottom-right corner', () => {
+      // iPhone-sized viewport: the long-press case from the issue report.
+      mockViewport(375, 667);
+      mockMenuSize(180, 240);
+
+      render(<ContextMenu {...defaultProps} position={{ x: 360, y: 640 }} />);
+
+      const menu = screen.getByTestId('context-menu');
+      // 375 - 180 - 8 = 187, 667 - 240 - 8 = 419
+      expect(menu).toHaveStyle({ left: '187px', top: '419px' });
+    });
+
+    it('should keep the menu on screen when opened past the top-left edge', () => {
+      mockViewport(375, 667);
+      mockMenuSize(180, 240);
+
+      render(<ContextMenu {...defaultProps} position={{ x: 2, y: 1 }} />);
+
+      const menu = screen.getByTestId('context-menu');
+      expect(menu).toHaveStyle({ left: '8px', top: '8px' });
+    });
+
+    it('should leave the menu at the pointer when it already fits', () => {
+      mockViewport(1024, 768);
+      mockMenuSize(180, 240);
+
+      render(<ContextMenu {...defaultProps} position={{ x: 300, y: 400 }} />);
+
+      const menu = screen.getByTestId('context-menu');
+      expect(menu).toHaveStyle({ left: '300px', top: '400px' });
+    });
+
+    it('should pin the menu to the near edge when it is larger than the viewport', () => {
+      // Tiny viewport: clamping to the far edge would push the first items
+      // off screen, so the near edge wins.
+      mockViewport(150, 200);
+      mockMenuSize(180, 240);
+
+      render(<ContextMenu {...defaultProps} position={{ x: 120, y: 150 }} />);
+
+      const menu = screen.getByTestId('context-menu');
+      expect(menu).toHaveStyle({ left: '8px', top: '8px' });
+    });
+
+    it('should re-clamp when reopened at a different anchor', () => {
+      mockViewport(375, 667);
+      mockMenuSize(180, 240);
+
+      const { rerender } = render(
+        <ContextMenu {...defaultProps} position={{ x: 360, y: 640 }} />
+      );
+      expect(screen.getByTestId('context-menu')).toHaveStyle({ left: '187px' });
+
+      rerender(<ContextMenu {...defaultProps} position={{ x: 40, y: 60 }} />);
+
+      expect(screen.getByTestId('context-menu')).toHaveStyle({
+        left: '40px',
+        top: '60px',
+      });
+    });
+
+    it('should hold its clamped position while the exit animation plays', () => {
+      vi.useFakeTimers();
+      try {
+        mockViewport(375, 667);
+        mockMenuSize(180, 240);
+
+        const { rerender } = render(
+          <ContextMenu {...defaultProps} position={{ x: 360, y: 640 }} />
+        );
+        rerender(
+          <ContextMenu
+            {...defaultProps}
+            position={{ x: 360, y: 640 }}
+            isOpen={false}
+          />
+        );
+
+        // Still mounted for the fade-out; it must not snap back to the origin.
+        expect(screen.getByTestId('context-menu')).toHaveStyle({
+          left: '187px',
+          top: '419px',
+        });
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
