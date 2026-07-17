@@ -226,5 +226,25 @@ describe('ActivityBar', () => {
       expect(tooltip).toHaveAttribute('aria-hidden', 'true');
       expect(tooltip).toHaveTextContent(/git/i);
     });
+
+    // Issue #1341: portalling the shared Tooltip must not regress the
+    // ActivityBar, whose tooltips open to the `right` of the leftmost column
+    // and were never clipped. The bubble now lives on document.body, but the
+    // placement and the #730 a11y contract are unchanged.
+    it('keeps placement="right" and the a11y contract after portalling', () => {
+      render(<ActivityBar active="files" onToggle={() => {}} />);
+      const tab = screen.getByTestId('activity-bar-button-git');
+      fireEvent.mouseEnter(tab);
+      act(() => {
+        vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+      });
+      const tooltip = screen.getByRole('tooltip', { hidden: true });
+      expect(tooltip).toHaveAttribute('data-placement', 'right');
+      expect(tooltip.parentElement).toBe(document.body);
+      // The button keeps its own aria-label and gains no aria-describedby, so
+      // screen readers announce the label exactly once.
+      expect(tab).toHaveAttribute('aria-label');
+      expect(tab).not.toHaveAttribute('aria-describedby');
+    });
   });
 });
