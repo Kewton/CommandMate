@@ -14,26 +14,50 @@ This project follows [Semantic Versioning](https://semver.org/).
 MAJOR.MINOR.PATCH
 ```
 
-| Type | When to Update | Example |
-|------|---------------|---------|
-| **MAJOR** | Breaking changes (backward-incompatible changes) | v1.0.0 → v2.0.0 |
+| Type | When to bump | Example |
+|------|--------------|---------|
+| **MAJOR** | Breaking changes (backward-incompatible) | v1.0.0 → v2.0.0 |
 | **MINOR** | Backward-compatible feature additions | v1.0.0 → v1.1.0 |
 | **PATCH** | Backward-compatible bug fixes | v1.0.0 → v1.0.1 |
 
 ### Version Decision Criteria
 
-| Change | Version Type |
-|--------|-------------|
-| API removal/modification | MAJOR |
-| Configuration file format changes | MAJOR |
-| Environment variable name changes (without fallback) | MAJOR |
-| New feature additions | MINOR |
-| New API additions | MINOR |
-| New configuration options | MINOR |
-| Bug fixes | PATCH |
-| Documentation fixes | PATCH |
-| Refactoring (no behavior change) | PATCH |
-| Dependency updates (no behavior change) | PATCH |
+| Change | Version type |
+|--------|--------------|
+| Removing or changing an API | MAJOR |
+| Changing a config file format | MAJOR |
+| Renaming an environment variable (without fallback) | MAJOR |
+| Adding a feature | MINOR |
+| Adding an API | MINOR |
+| Adding a config option | MINOR |
+| Bug fix | PATCH |
+| Documentation fix | PATCH |
+| Refactoring (no behaviour change) | PATCH |
+| Dependency update (no behaviour change) | PATCH |
+
+---
+
+## Release Flow Overview
+
+```
+Bump version on develop (package.json / package-lock.json / CHANGELOG.md)
+   ↓  chore: release vX.Y.Z
+PR "release: vX.Y.Z" (develop → main)  -- review approval required
+   ↓  squash merge
+Tag vX.Y.Z on main (annotated)
+   ↓
+Create GitHub Release  --->  publish.yml fires  --->  npm publish (automatic, OIDC)
+   ↓
+Merge main back into develop (-s ours, restores ancestry)
+```
+
+### Three premises to internalise
+
+| Premise | Why |
+|---|---|
+| **You cannot push to main directly** | `.git/hooks/pre-push` rejects it via `protected_branch='main'`. A PR is the only path |
+| **Creating a GitHub Release publishes to npm** | `.github/workflows/publish.yml` fires on `release: [published]` and runs `npm publish`. Creating the Release *is* publishing |
+| **The back-merge is mandatory** | The develop → main PR is squashed, which severs develop's ancestry. Skip it and the next PR shows phantom conflicts |
 
 ---
 
@@ -41,212 +65,303 @@ MAJOR.MINOR.PATCH
 
 ### Preparation
 
-1. **Verify all PRs are merged into main**
+1. **Bring `develop` up to date** (releases are cut from develop, not main)
+
    ```bash
-   git checkout main
-   git pull origin main
-   git status
+   git checkout develop
+   git pull origin develop
+   git rev-list --left-right --count develop...origin/develop   # must be 0  0
    ```
 
-2. **Verify no uncommitted changes**
+2. **Confirm there are no uncommitted changes**
+
    ```bash
-   git status
-   # Verify "nothing to commit, working tree clean"
+   git status --porcelain    # must be empty
    ```
 
-3. **Verify all tests pass**
+   > Avoid `git stash`. If another agent is working in the same tree, it will corrupt their work.
+
+3. **Confirm all quality checks pass**
+
    ```bash
    npm run lint
+   npx tsc --noEmit
    npm run test:unit
    npm run build
    ```
 
+4. **Confirm there are actually changes not yet on main**
+
+   ```bash
+   git fetch origin
+   git diff --stat origin/main..origin/develop
+   ```
+
+   > **Note**: `git log origin/main..origin/develop` reports far more commits than reality because of squashing (e.g. 136 commits for a 15-file diff). **The tree diff (`git diff`) is authoritative.**
+
 ### Step 1: Determine Version
 
-Check the current version and decide on the new version.
-
 ```bash
-# Check current version
-cat package.json | grep '"version"'
+node -p "require('./package.json').version"
 ```
 
-### Step 2: Update package.json
+Pick the next version using the criteria above.
+
+### Step 2: Update package.json / package-lock.json
 
 ```bash
-# Update the version in package.json
-# Example: 0.1.0 → 0.2.0
+npm version 0.10.1 --no-git-tag-version
 ```
 
-### Step 3: Update package-lock.json
+`npm version` keeps package.json and **both places in package-lock.json (root and `packages[""]`)** consistent. Do not hand-edit them.
 
-```bash
-npm install --package-lock-only
-```
+`--no-git-tag-version` is required — without it npm creates a tag, which collides with the PR flow below.
 
-### Step 4: Update CHANGELOG.md
+### Step 3: Update CHANGELOG.md
 
-1. Move content from the `[Unreleased]` section to a new version section
-2. Add release date (YYYY-MM-DD format)
-3. Add comparison links
+Insert a new section directly below `## [Unreleased]`.
 
-**Before:**
 ```markdown
 ## [Unreleased]
 
-### Added
-- New feature description
+## [0.10.1] - 2026-07-17
 
-### Fixed
-- Bug fix description
-```
-
-**After:**
-```markdown
-## [Unreleased]
-
-## [0.2.0] - 2026-01-30
+> **Highlight**: Two to four sentences on what this release is about -- what was wrong and what changed. Include measured numbers where you have them.
 
 ### Added
-- New feature description
+
+- feat(scope): **Bold the point**. Supporting detail (#1234)
+
+### Changed
+
+- fix(docs): **The point**. Supporting detail (#1234)
 
 ### Fixed
-- Bug fix description
+
+- fix(cli): **The point**. Supporting detail (#1234)
+
+## [0.10.0] - 2026-07-16
 ```
 
-**Adding comparison links (at end of file):**
-```markdown
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/Kewton/CommandMate/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/Kewton/CommandMate/releases/tag/v0.1.0
-```
+Conventions:
 
-### Step 5: Create Commit
+- **Do not add compare links** (`[X.Y.Z]: https://github.com/.../compare/...`). They stop at `0.5.2` and have not been added since (leave the existing old ones in place)
+- Issue references use the **`(#1234)` form**. `(Issue #1234)` is the pre-v0.9.1 style
+- Prefix each entry with a conventional-commit scope (`feat(scope):`, `fix(scope):`, ...)
+- Dates are JST-based
+- Omit category headings that have no entries
+
+See [`templates/changelog-entry.md`](../../.claude/skills/release/templates/changelog-entry.md) for details.
+
+### Step 4: Commit & push
 
 ```bash
 git add package.json package-lock.json CHANGELOG.md
-git commit -m "chore: release v0.2.0"
+git commit -m "chore: release v0.10.1"
+git push origin develop
 ```
 
-### Step 6: Create and Push Tag
+Verify with `git diff --stat` that **only these three files** changed.
+
+### Step 5: Release PR (develop → main)
 
 ```bash
-# Create tag
-git tag v0.2.0
-
-# Push main branch and tag
-git push origin main
-git push origin v0.2.0
+gh pr create --repo Kewton/CommandMate --base main --head develop \
+  --title "release: v0.10.1" \
+  --body-file <(...)
 ```
 
-### Step 7: Create GitHub Release
+The PR body should cover:
+
+- **Summary**: what this release is for
+- **Version**: `0.10.0 → 0.10.1` (patch/minor/major)
+- **DB migration**: whether there is one (and the `CURRENT_SCHEMA_VERSION` transition if so)
+- **Actual diff**: the real numbers from `git diff --stat origin/main..origin/develop`, with a note that the commit count in `main..develop` is inflated by squash history
+- **Issues covered**
+- **Main changes**: Added / Changed / Fixed
+- **Quality check** results
+
+Then watch CI:
 
 ```bash
-# Auto-generate release notes
-gh release create v0.2.0 --title "v0.2.0" --generate-notes
+gh pr checks <PR-number> --repo Kewton/CommandMate --watch
+```
 
-# Or use CHANGELOG.md content
-gh release create v0.2.0 --title "v0.2.0" --notes "$(sed -n '/## \[0.2.0\]/,/## \[0.1.0\]/p' CHANGELOG.md | head -n -1)"
+> **PRs targeting main require at least one review approval** (see [CLAUDE.md](../../CLAUDE.md)). Merge with **squash** once approved.
+
+### Step 6: Create and push the tag
+
+Run this after the merge.
+
+```bash
+git fetch origin --tags
+MERGE_SHA=$(gh pr view <PR-number> --repo Kewton/CommandMate --json mergeCommit -q '.mergeCommit.oid')
+
+# main and develop must have identical trees (proves there is no content drift)
+[ "$(git rev-parse origin/main^{tree})" = "$(git rev-parse origin/develop^{tree})" ] && echo "trees match"
+
+git tag -a "v0.10.1" "$MERGE_SHA" -m "v0.10.1"
+git push origin "v0.10.1"
+```
+
+The tag must be **annotated** (`-a`) -- every existing tag is.
+
+### Step 7: Create the GitHub Release -- this triggers npm publish
+
+Release notes are the **CHANGELOG section, transcribed verbatim** (`--generate-notes` is the pre-v0.10.0 style).
+
+```bash
+awk '/^## \[0\.10\.1\]/{f=1} /^## \[0\.10\.0\]/{f=0} f' CHANGELOG.md > /tmp/release-notes.md
+
+gh release create "v0.10.1" --repo Kewton/CommandMate \
+  --title "v0.10.1" \
+  --notes-file /tmp/release-notes.md
+```
+
+> ⚠️ **`publish.yml` fires at this moment and npm publish begins.** Creating the Release *is* publishing to npm. It cannot be undone (see below).
+
+### Step 8: Confirm the publish workflow completed
+
+```bash
+gh run list --repo Kewton/CommandMate --workflow=publish.yml --limit 1
+# wait for status=completed conclusion=success
+
+npm view commandmate version    # should be the new version
+```
+
+### Step 9: Merge main back into develop (restore ancestry)
+
+**Mandatory.** Squashing means main's commit is no longer an ancestor of develop. Skip this and the next develop → main PR will show phantom conflicts.
+
+```bash
+git checkout develop
+git pull origin develop
+git merge -s ours origin/main -m "chore: merge release v0.10.1 to develop (restore ancestry)"
+
+# verify the tree survived (-s ours keeps develop's tree)
+[ "$(git rev-parse origin/main^{tree})" = "$(git rev-parse develop^{tree})" ] && echo "trees match"
+
+git push origin develop
+```
+
+Confirm it worked:
+
+```bash
+git fetch origin
+git merge-base --is-ancestor origin/main origin/develop && echo "ancestry restored"
 ```
 
 ---
 
-## Post-Release Verification
+## About publishing to npm
 
-```bash
-# List all tags
-git tag -l
+**Do not run `npm publish` locally.**
 
-# Check latest tag
-git describe --tags --abbrev=0
+`.github/workflows/publish.yml` runs `npm publish --provenance --access public` via npm Trusted Publishers (OIDC authentication), triggered by the GitHub Release `published` event.
 
-# Check GitHub Releases
-gh release list
+- There are no publish credentials locally
+- OIDC only works inside a GitHub Actions run
+- A local publish would ship without provenance
 
-# View specific release details
-gh release view v0.2.0
-```
+If the workflow fails, fix the cause -- do not work around it with a local publish.
 
----
+### What the workflow does
 
-## Release Using Claude Code Skill
-
-The `/release` skill can automate the above procedure.
-
-```bash
-# Patch version bump (0.1.0 → 0.1.1)
-/release patch
-
-# Minor version bump (0.1.0 → 0.2.0)
-/release minor
-
-# Major version bump (0.1.0 → 1.0.0)
-/release major
-
-# Direct version specification
-/release 1.0.0
-```
+`npm ci` → `npm audit --audit-level=critical` → `npm run test:unit` → `npm run build` → `npm run build:cli` → `npm run build:server` → package size check → `npm publish --provenance --access public`
 
 ---
 
-## npm version Command (Optional)
-
-The `npm version` command can perform version updates and tag creation in one step.
+## Post-release verification
 
 ```bash
-# Patch version bump
-npm version patch -m "chore: release v%s"
+# tags
+git tag -l --sort=-v:refname | head -3
 
-# Minor version bump
-npm version minor -m "chore: release v%s"
+# GitHub Release
+gh release view v0.10.1
 
-# Major version bump
-npm version major -m "chore: release v%s"
+# npm
+npm view commandmate version
+npm view commandmate@0.10.1 dist --json    # size and provenance
 
-# Push tags
-git push origin main --tags
+# fetch it for real from a clean environment (run this OUTSIDE the repo)
+cd $(mktemp -d) && npx --yes commandmate@latest --version
 ```
 
-**Note**: `npm version` does not automatically update CHANGELOG.md, so a separate update is required.
+> Run the `npx` check from a **neutral directory outside the repository**. Inside the CommandMate repo, npx resolves the local `bin` instead, so you would not be verifying the published artifact at all.
+
+---
+
+## Releasing with the Claude Code Skill
+
+The [`/release`](../../.claude/skills/release/SKILL.md) skill runs the procedure above.
+
+```bash
+/release patch      # patch bump (0.10.0 → 0.10.1)
+/release minor      # minor bump (0.10.0 → 0.11.0)
+/release major      # major bump (0.10.0 → 1.0.0)
+/release 1.0.0      # explicit version
+```
+
+The skill does not merge the PR either -- approval is required.
 
 ---
 
 ## Troubleshooting
 
-### Tag Already Exists
+### Push to main was rejected
 
-```bash
-# Error: fatal: tag 'v0.2.0' already exists
-# Solution: Specify a different version or delete the existing tag
-
-# Delete existing tag (caution: this rewrites history)
-git tag -d v0.2.0
-git push origin :refs/tags/v0.2.0
+```
+❌ Error: Direct push to 'main' is not allowed.
+   Please create a Pull Request instead.
 ```
 
-### Release Rollback
+This is `.git/hooks/pre-push` doing its job. **Do not bypass it with `--no-verify`.** Go back to the PR flow in Step 5.
 
-If a critical issue is discovered after release:
+### The tag already exists
 
-1. **Delete GitHub Release**
-   ```bash
-   gh release delete v0.2.0 --yes
-   ```
+```bash
+# error: fatal: tag 'v0.10.1' already exists
+# fix: pick a different version
+```
 
-2. **Delete the tag**
-   ```bash
-   git tag -d v0.2.0
-   git push origin :refs/tags/v0.2.0
-   ```
+Deleting the existing tag is pointless once the version is published to npm (see below).
 
-3. **After fixing, release as a new patch version**
-   ```bash
-   /release patch  # Release as v0.2.1
-   ```
+### The publish workflow failed
+
+```bash
+gh run view <run-id> --repo Kewton/CommandMate --log-failed
+```
+
+Fix the cause and release again as a new patch version. **The same version number cannot be republished.**
+
+### Rolling back a release
+
+> ⚠️ **Once published to npm, a release cannot meaningfully be rolled back.**
+>
+> - npm heavily restricts unpublishing (only within 72 hours, under conditions)
+> - **A version number, once used, cannot be reused even after unpublishing**
+> - **Deleting the GitHub Release or the tag does not remove the package from npm**
+>
+> The correct response to a problem found after release is to **fix it and ship a new patch version**.
+
+Before publishing (i.e. before the Release is created), you can unwind with:
+
+```bash
+git tag -d v0.10.1
+git push origin :refs/tags/v0.10.1
+```
+
+After publishing, release the fix as the next patch version.
 
 ---
 
 ## Related Documents
 
+- [`/release` skill](../../.claude/skills/release/SKILL.md) -- automates this procedure
+- [CHANGELOG entry template](../../.claude/skills/release/templates/changelog-entry.md)
+- `.github/workflows/publish.yml` -- Release-triggered automatic publish (OIDC)
+- `.git/hooks/pre-push` -- rejects direct pushes to main
 - [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - [Semantic Versioning](https://semver.org/)
 - [CHANGELOG.md](../../CHANGELOG.md)

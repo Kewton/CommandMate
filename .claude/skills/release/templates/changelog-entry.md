@@ -1,82 +1,87 @@
 # CHANGELOGエントリテンプレート
 
-このテンプレートは、リリース時にCHANGELOG.mdを更新する際の形式を示します。
+リリース時に `CHANGELOG.md` を更新する際の形式です。**実際の直近リリース（v0.10.0 / v0.10.1）の書式に準拠**しています。
 
 ## バージョンセクションの形式
+
+`## [Unreleased]` の直後に挿入します。
 
 ```markdown
 ## [X.Y.Z] - YYYY-MM-DD
 
+> **Highlight**: このリリースの中心を2〜4文で。何が問題で、何を変えたか。**実測値があれば必ず入れる**。
+
 ### Added
-- 新機能の説明 (Issue #XX)
+
+- feat(scope): **要点を太字で**。補足説明 (#1234)
 
 ### Changed
-- 変更内容の説明 (Issue #XX)
 
-### Deprecated
-- 非推奨になった機能の説明
-
-### Removed
-- 削除された機能の説明
+- fix(docs): **要点**。補足説明 (#1234)
 
 ### Fixed
-- バグ修正の説明 (Issue #XX)
 
-### Security
-- セキュリティ関連の修正
+- fix(cli): **要点**。補足説明 (#1234)
 ```
 
-## セクションの説明
+- 日付は **JST 基準**
+- 該当が無いカテゴリの見出しは**書かない**
+- 各カテゴリ見出しの後は**空行を1行**入れる
 
-| セクション | 内容 |
-|-----------|------|
-| **Added** | 新機能 |
-| **Changed** | 既存機能の変更 |
-| **Deprecated** | 将来削除予定の機能 |
-| **Removed** | 削除された機能 |
-| **Fixed** | バグ修正 |
-| **Security** | セキュリティ関連の修正 |
+## セクション
+
+| セクション | 内容 | 使用実績 |
+|---|---|---|
+| **Added** | 新機能 | 頻繁 |
+| **Changed** | 既存機能の変更 | 頻繁 |
+| **Fixed** | バグ修正 | 頻繁 |
+| **Security** | セキュリティ関連の修正 | 6回 |
+| **Removed** | 削除された機能 | 3回 |
+| **Deprecated** | 将来削除予定の機能 | 1回 |
 
 ## 記載ルール
 
-1. **過去形で記載**: 「追加した」「修正した」ではなく「追加」「修正」
-2. **Issue番号を併記**: 可能な限り関連Issue番号を記載
-3. **ユーザー視点で記載**: 技術的な詳細ではなく、ユーザーへの影響を記載
-4. **BREAKING CHANGEの明示**: 破壊的変更は `**BREAKING**:` プレフィックスを付与
+1. **conventional prefix を付ける**: `feat(scope):` / `fix(scope):` / `chore(scope):` / `docs:` / `refactor(scope):` 等。直近3バージョンの全29項目が prefix 付き
+2. **Issue 番号は `(#1234)` 形式**: `(Issue #1234)` は v0.9.1 以前の旧表記。**新規では使わない**
+3. **要点を `**太字**` で**: 項目の冒頭に結論を置き、詳細はその後ろに続ける
+4. **ユーザー視点＋根拠**: 「何が起きていたか」「何がどう変わるか」を書く。実測値・計測結果があれば入れる
+5. **BREAKING CHANGE の明示**: 破壊的変更は `**BREAKING**:` プレフィックスを付与
+
+## 比較リンクは追加しない
+
+ファイル末尾の比較リンク（`[X.Y.Z]: https://github.com/.../compare/...`）は **`0.5.2` で止まっており、以降のリリースでは付けていません**。新規リリースでも**追加しないでください**（既存の古いリンクはそのまま残す）。
 
 ## 例
 
-### 良い例
+### 良い例（実際の v0.10.1 より）
 
 ```markdown
-### Added
-- リリーススキル `/release` を追加 (Issue #86)
-- 環境変数フォールバック機能を追加 (Issue #76)
-
-### Changed
-- **BREAKING**: 環境変数名を `MCBD_*` から `CM_*` に変更 (Issue #77)
-
 ### Fixed
-- サイドバーのステータス表示が更新されない問題を修正 (Issue #31)
+
+- fix: **公開パッケージから `.next/cache` を除外**。`files` が `.next/` を whitelist していたため Next.js の webpack ビルドキャッシュ（実行時には読まれない）が丸ごと publish され、`npx` 利用者が毎回 633MB を展開していた。`npm pack` 実測で 656.3MB → 22.8MB（unpacked）／89.8MB → 5.3MB（packed） (#1315)
 ```
+
+要点が太字、prefix あり、**実測値が入っている**、`(#1315)` 形式。
 
 ### 悪い例
 
 ```markdown
 ### Added
-- release skill added  <!-- 英語/小文字始まり -->
-- src/lib/env.ts に getEnvWithFallback() を追加  <!-- 技術的すぎる -->
+- release skill added                          <!-- 英語・prefix なし -->
+- src/lib/env.ts に getEnvWithFallback() を追加   <!-- 技術詳細のみでユーザー影響が不明 -->
 
 ### Fixed
-- バグを修正  <!-- 具体性がない -->
+- バグを修正 (Issue #31)                        <!-- 具体性なし・旧 Issue 表記 -->
 ```
 
-## 比較リンクの形式
+## Highlight の書き方
 
-ファイル末尾に以下の形式で比較リンクを追加：
+リリース全体の要約です。GitHub Release ノートにもそのまま転記されるため、**そのリリースを一言で説明する文**にします。
 
-```markdown
-[unreleased]: https://github.com/Kewton/CommandMate/compare/vX.Y.Z...HEAD
-[X.Y.Z]: https://github.com/Kewton/CommandMate/compare/vA.B.C...vX.Y.Z
-[A.B.C]: https://github.com/Kewton/CommandMate/releases/tag/vA.B.C
-```
+実例（v0.10.1）:
+
+> **Highlight**: **`npx` 導線の実効性を回復するパッチリリース**。v0.10.0 で新設したランディングページと README が案内していた `npx commandmate` は、**グローバル導入済みの環境では既存の binary を実行しレジストリを一切参照しない**ため、利用者が気づかないまま旧版を使い続けていた（実測: 最新 0.10.0 に対し 0.3.5 が実行された）。全案内を `npx commandmate@latest` に統一した。…
+
+- 中心テーマを冒頭に置く
+- **問題 → 変更**の順で書く
+- DB マイグレーションがあれば必ず記載（`CURRENT_SCHEMA_VERSION` の遷移も）
