@@ -684,6 +684,27 @@ describe('Sidebar', () => {
       expect(tooltip).toHaveTextContent('Toggle view mode (grouped / flat)');
     });
 
+    // Issue #1341: this tooltip is the widest of the header actions and used to
+    // be clipped by the sidebar (default 224px / min 160px) because it rendered
+    // as an absolutely-positioned child. It now escapes to document.body.
+    it('portals the view mode tooltip out of the sidebar so it cannot be clipped', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      const toggle = await screen.findByTestId('view-mode-toggle');
+      fireEvent.mouseEnter(toggle);
+
+      const tooltip = await screen.findByRole('tooltip', { hidden: true });
+      expect(tooltip.parentElement).toBe(document.body);
+      expect(tooltip.className).toMatch(/\bfixed\b/);
+      // The trigger itself stays put inside the sidebar.
+      expect(screen.getByTestId('sidebar')).toContainElement(toggle);
+      expect(screen.getByTestId('sidebar')).not.toContainElement(tooltip);
+    });
+
     it('shows an action tooltip when hovering the sync button', async () => {
       render(
         <Wrapper>

@@ -17,6 +17,7 @@ import {
   ensureEnvRepositoriesRegistered,
   filterExcludedPaths,
   disableRepository,
+  disableExistingRepository,
   getExcludedRepositoryPaths,
   getExcludedRepositories,
   restoreRepository,
@@ -366,6 +367,63 @@ describe('disableRepository', () => {
     // Should NOT throw - existing repo just needs update
     expect(() => {
       disableRepository(testDb, '/home/user/repos/enabled-repo');
+    }).not.toThrow();
+  });
+});
+
+// ============================================================
+// disableExistingRepository()
+// Issue #1346
+// ============================================================
+
+describe('disableExistingRepository', () => {
+  it('should disable an existing repository and return true', () => {
+    createRepository(testDb, {
+      name: 'repo1',
+      path: '/home/user/repos/repo1',
+      cloneSource: 'local',
+      enabled: true,
+    });
+
+    expect(disableExistingRepository(testDb, '/home/user/repos/repo1')).toBe(true);
+
+    const repo = getRepositoryByPath(testDb, '/home/user/repos/repo1');
+    expect(repo!.enabled).toBe(false);
+  });
+
+  it('should not create a record for an unregistered repository and return false', () => {
+    expect(disableExistingRepository(testDb, '/home/user/repos/unknown')).toBe(false);
+
+    expect(getRepositoryByPath(testDb, '/home/user/repos/unknown')).toBeNull();
+    expect(getAllRepositories(testDb)).toHaveLength(0);
+  });
+
+  it('should use path normalization', () => {
+    createRepository(testDb, {
+      name: 'repo1',
+      path: '/home/user/repos/repo1',
+      cloneSource: 'local',
+      enabled: true,
+    });
+
+    expect(disableExistingRepository(testDb, '/home/user/repos/repo1/')).toBe(true);
+
+    const repo = getRepositoryByPath(testDb, '/home/user/repos/repo1');
+    expect(repo!.enabled).toBe(false);
+  });
+
+  it('should never throw the MAX_DISABLED_REPOSITORIES error (SEC-SF-004: no record is created)', () => {
+    for (let i = 0; i < MAX_DISABLED_REPOSITORIES; i++) {
+      createRepository(testDb, {
+        name: `repo-${i}`,
+        path: `/home/user/repos/repo-${i}`,
+        cloneSource: 'local',
+        enabled: false,
+      });
+    }
+
+    expect(() => {
+      expect(disableExistingRepository(testDb, '/home/user/repos/new-repo')).toBe(false);
     }).not.toThrow();
   });
 });
