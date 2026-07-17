@@ -113,7 +113,7 @@ npm install
 ```
 
 Interactively configures:
-- `CM_ROOT_DIR`: Worktree root directory
+- `CM_ROOT_DIR`: Managed repository directory (clone destination and registration boundary)
 - `CM_PORT`: Server port (default: 3000)
 - `CM_BIND`: Bind address (0.0.0.0 when external access is enabled)
 
@@ -148,7 +148,7 @@ npm run build
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `CM_ROOT_DIR` | Worktree root directory | `/home/user/projects` |
+| `CM_ROOT_DIR` | Managed repository directory. Repositories must be under it to be registered, and clones are saved into it. It is a container of repositories and is not scanned for them, so setting it does not discover anything on its own. | `/home/user/repos` |
 | `CM_BIND` | Bind address (use `0.0.0.0` for production) | `0.0.0.0` |
 
 ### Optional Variables

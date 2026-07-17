@@ -9,7 +9,6 @@ import path from 'path';
 import type { Worktree } from '@/types/models';
 import type Database from 'better-sqlite3';
 import { upsertWorktree, getWorktreesByRepository, deleteWorktreesByIds } from '@/lib/db';
-import { getEnvByKey } from '@/lib/env';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('worktrees');
@@ -120,33 +119,35 @@ export function parseWorktreeOutput(output: string): ParsedWorktree[] {
 
 /**
  * Get repository paths from environment variables
- * Supports both WORKTREE_REPOS (comma-separated) and CM_ROOT_DIR (single path)
  *
- * @returns Array of repository root paths
+ * WORKTREE_REPOS (comma-separated) is the only source: it enumerates repository
+ * roots explicitly, so every entry is a path `git worktree list` can run in.
+ *
+ * CM_ROOT_DIR is deliberately NOT consulted here (Issue #1328). It denotes the
+ * managed scope — the directory that *contains* repositories — and is used as
+ * the registration boundary (POST /api/repositories/scan) and the clone
+ * destination (CloneManager). Those two treat it as a container; discovery
+ * treated it as a single repository and passed it straight to `git worktree
+ * list` as cwd, which returns nothing for any container directory. The two
+ * readings are mutually exclusive, and the container reading is the one the
+ * rest of the app enforces. Repositories under CM_ROOT_DIR are found by
+ * registering them (UI scan or clone); callers scan the repositories table.
+ *
+ * @returns Array of repository root paths (empty when WORKTREE_REPOS is unset)
  *
  * @example
  * ```typescript
  * // WORKTREE_REPOS="/path/to/repo1,/path/to/repo2"
  * getRepositoryPaths(); // => ['/path/to/repo1', '/path/to/repo2']
- *
- * // CM_ROOT_DIR="/path/to/repo"
- * getRepositoryPaths(); // => ['/path/to/repo']
  * ```
  */
 export function getRepositoryPaths(): string[] {
-  // Try WORKTREE_REPOS first (supports multiple repos)
   const worktreeRepos = process.env.WORKTREE_REPOS;
   if (worktreeRepos && worktreeRepos.trim()) {
     return worktreeRepos
       .split(',')
       .map(p => p.trim())
       .filter(p => p.length > 0);
-  }
-
-  // Fallback to CM_ROOT_DIR / MCBD_ROOT_DIR (Issue #76: env fallback support)
-  const rootDir = getEnvByKey('CM_ROOT_DIR');
-  if (rootDir && rootDir.trim()) {
-    return [rootDir.trim()];
   }
 
   return [];

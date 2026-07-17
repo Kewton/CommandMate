@@ -55,16 +55,23 @@ async function promptForConfig(): Promise<EnvConfig> {
   logger.info('--- Required Settings ---');
   logger.blank();
 
-  // CM_ROOT_DIR
-  const rootDirInput = await prompt('Repository root directory (CM_ROOT_DIR)', {
+  // CM_ROOT_DIR: the managed scope. Repositories must live under this directory
+  // to be registered, and clones are placed here (Issue #1328).
+  logger.info('CommandMate only manages repositories located under this directory,');
+  logger.info('and cloned repositories are saved into it.');
+  const rootDirInput = await prompt('Managed repository directory (CM_ROOT_DIR)', {
     default: DEFAULT_ROOT_DIR.replace(homedir(), '~'),
   });
   const rootDir = resolvePath(rootDirInput || DEFAULT_ROOT_DIR);
 
-  // Check if path exists
+  // Check if path exists. CommandMate does not create it here: cloning creates
+  // it on demand, so a missing directory is only a problem for registering
+  // repositories that are supposed to already be inside it.
   if (!existsSync(rootDir)) {
     logger.warn(`Directory does not exist: ${rootDir}`);
-    const createDir = await confirm('Directory will be validated when adding repositories. Continue?', {
+    logger.info('  It is created automatically when you clone a repository into it.');
+    logger.info('  To register existing repositories, they must be moved under it first.');
+    const createDir = await confirm('Continue?', {
       default: true,
     });
     if (!createDir) {

@@ -3,7 +3,7 @@
  * TDD Approach: Write tests first (Red), then implement (Green), then refactor
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { exec } from 'child_process';
 import type { Worktree } from '@/types/models';
 
@@ -17,6 +17,7 @@ vi.mock('child_process', () => ({
 // Import functions after mocking
 import {
   generateWorktreeId,
+  getRepositoryPaths,
   parseWorktreeOutput,
   scanWorktrees,
   scanMultipleRepositories,
@@ -349,6 +350,75 @@ invalid line
       deferred.get('/repo1')!();
 
       await expect(promise).resolves.toEqual([]);
+    });
+  });
+
+  describe('getRepositoryPaths', () => {
+    // Issue #1328: CM_ROOT_DIR is the managed scope (a directory that contains
+    // repositories), not a repository. It must never reach `git worktree list`
+    // as a cwd.
+    const ENV_KEYS = ['WORKTREE_REPOS', 'CM_ROOT_DIR', 'MCBD_ROOT_DIR'] as const;
+    const saved: Record<string, string | undefined> = {};
+
+    beforeEach(() => {
+      for (const key of ENV_KEYS) {
+        saved[key] = process.env[key];
+        delete process.env[key];
+      }
+    });
+
+    afterEach(() => {
+      for (const key of ENV_KEYS) {
+        if (saved[key] === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = saved[key];
+        }
+      }
+    });
+
+    it('should return the repositories listed in WORKTREE_REPOS', () => {
+      process.env.WORKTREE_REPOS = '/path/to/repo1,/path/to/repo2';
+
+      expect(getRepositoryPaths()).toEqual(['/path/to/repo1', '/path/to/repo2']);
+    });
+
+    it('should trim whitespace and drop empty WORKTREE_REPOS entries', () => {
+      process.env.WORKTREE_REPOS = ' /path/to/repo1 , ,/path/to/repo2,';
+
+      expect(getRepositoryPaths()).toEqual(['/path/to/repo1', '/path/to/repo2']);
+    });
+
+    it('should return an empty array when no repository env var is set', () => {
+      expect(getRepositoryPaths()).toEqual([]);
+    });
+
+    it('should not derive any repository path from CM_ROOT_DIR', () => {
+      // CM_ROOT_DIR points at a container of repositories. Scanning it directly
+      // yields nothing, so it must contribute no paths at all.
+      process.env.CM_ROOT_DIR = '/path/to/container';
+
+      expect(getRepositoryPaths()).toEqual([]);
+    });
+
+    it('should not derive any repository path from the deprecated MCBD_ROOT_DIR', () => {
+      process.env.MCBD_ROOT_DIR = '/path/to/container';
+
+      expect(getRepositoryPaths()).toEqual([]);
+    });
+
+    it('should ignore CM_ROOT_DIR even when WORKTREE_REPOS is also set', () => {
+      process.env.CM_ROOT_DIR = '/path/to/container';
+      process.env.WORKTREE_REPOS = '/path/to/repo1';
+
+      expect(getRepositoryPaths()).toEqual(['/path/to/repo1']);
+    });
+
+    it('should return an empty array when WORKTREE_REPOS is blank, regardless of CM_ROOT_DIR', () => {
+      process.env.WORKTREE_REPOS = '   ';
+      process.env.CM_ROOT_DIR = '/path/to/container';
+
+      expect(getRepositoryPaths()).toEqual([]);
     });
   });
 });
