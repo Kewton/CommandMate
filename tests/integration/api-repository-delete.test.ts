@@ -2,6 +2,7 @@
  * API repository delete integration tests
  * Issue #69: Repository delete feature
  * Issue #190: Repository exclusion on sync (disableRepository, security validation)
+ * Issue #1346: No ghost repository record when DELETE answers 404
  * TDD Approach: Write tests first (Red), then implement (Green), then refactor
  */
 
@@ -11,7 +12,12 @@ import Database from 'better-sqlite3';
 import { DELETE } from '@/app/api/repositories/route';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree, createMessage, getWorktrees } from '@/lib/db';
-import { getRepositoryByPath } from '@/lib/db/db-repository';
+import {
+  getRepositoryByPath,
+  getAllRepositories,
+  ensureEnvRepositoriesRegistered,
+  filterExcludedPaths,
+} from '@/lib/db/db-repository';
 
 // Mock db-instance to use test database
 let testDb: Database.Database;
@@ -315,8 +321,12 @@ describe('DELETE /api/repositories', () => {
     expect(repo!.enabled).toBe(false);
   });
 
-  it('should disable repository even when returning 404 for no worktrees (Issue #190 SF-C01)', async () => {
+  it('should disable a registered repository even when returning 404 for no worktrees (Issue #190 SF-C01)', async () => {
     const repoPath = '/path/to/no-worktrees-repo';
+
+    // Env repositories are registered at server startup (server.ts initializeWorktrees),
+    // so a never-synced repository is registered here but has no worktree records.
+    ensureEnvRepositoriesRegistered(testDb, [repoPath]);
 
     const request = new NextRequest('http://localhost:3000/api/repositories', {
       method: 'DELETE',
@@ -326,10 +336,69 @@ describe('DELETE /api/repositories', () => {
     const response = await DELETE(request);
     expect(response.status).toBe(404);
 
-    // Despite 404, repository should be disabled in repositories table
+    // Despite 404, repository should be disabled so Sync All does not resurrect it
     const repo = getRepositoryByPath(testDb, repoPath);
     expect(repo).not.toBeNull();
     expect(repo!.enabled).toBe(false);
+    expect(filterExcludedPaths(testDb, [repoPath])).toEqual([]);
+  });
+
+  // ============================================================
+  // Issue #1346: No ghost record when answering 404
+  // ============================================================
+
+  it('should not create a repository record when returning 404 for an unregistered path (Issue #1346)', async () => {
+    const repoPath = '/path/to/never-registered-repo';
+
+    const request = new NextRequest('http://localhost:3000/api/repositories', {
+      method: 'DELETE',
+      body: JSON.stringify({ repositoryPath: repoPath }),
+    });
+
+    const response = await DELETE(request);
+    expect(response.status).toBe(404);
+
+    // No ghost "Disabled / 0 worktrees" row must be left behind
+    expect(getRepositoryByPath(testDb, repoPath)).toBeNull();
+    expect(getAllRepositories(testDb)).toHaveLength(0);
+  });
+
+  it('should not create records for repeated 404 deletes of unregistered paths (Issue #1346)', async () => {
+    for (let i = 0; i < 3; i++) {
+      const request = new NextRequest('http://localhost:3000/api/repositories', {
+        method: 'DELETE',
+        body: JSON.stringify({ repositoryPath: `/path/to/unknown-${i}` }),
+      });
+      const response = await DELETE(request);
+      expect(response.status).toBe(404);
+    }
+
+    expect(getAllRepositories(testDb)).toHaveLength(0);
+  });
+
+  it('should still create a disabled record when worktrees exist but the repository is unregistered (Issue #190)', async () => {
+    const repoPath = '/path/to/unregistered-with-worktrees';
+
+    upsertWorktree(testDb, {
+      id: 'wt-1',
+      name: 'main',
+      path: '/path/to/unregistered-with-worktrees/main',
+      repositoryPath: repoPath,
+      repositoryName: 'unregistered-with-worktrees',
+    });
+
+    const request = new NextRequest('http://localhost:3000/api/repositories', {
+      method: 'DELETE',
+      body: JSON.stringify({ repositoryPath: repoPath }),
+    });
+
+    const response = await DELETE(request);
+    expect(response.status).toBe(200);
+
+    const repo = getRepositoryByPath(testDb, repoPath);
+    expect(repo).not.toBeNull();
+    expect(repo!.enabled).toBe(false);
+    expect(filterExcludedPaths(testDb, [repoPath])).toEqual([]);
   });
 
   it('should return 400 for null byte in repositoryPath (SEC-MF-001)', async () => {
