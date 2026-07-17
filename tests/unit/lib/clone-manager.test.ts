@@ -4,6 +4,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { EventEmitter } from 'events';
+import { spawn, type ChildProcess } from 'child_process';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { CloneManager, CloneManagerError, resetWorktreeBasePathWarning, resolveCustomTargetPath } from '@/lib/git/clone-manager';
@@ -312,6 +314,49 @@ describe('CloneManager', () => {
       expect(status?.error).toBeDefined();
       expect(status?.error?.category).toBe('auth');
       expect(status?.error?.code).toBe('AUTH_FAILED');
+    });
+  });
+
+  describe('executeClone', () => {
+    // Issue #1334: cwd 未指定だとサーバープロセスの cwd を継承する。npx 起動時の cwd は
+    // npm キャッシュ配下で、消滅すると git clone が exit 128 で失敗する。
+    function stubGitProcess(): EventEmitter & { stderr: EventEmitter; pid: number } {
+      const proc = new EventEmitter() as EventEmitter & { stderr: EventEmitter; pid: number };
+      proc.stderr = new EventEmitter();
+      proc.pid = 4242;
+      vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess);
+      return proc;
+    }
+
+    // spawn の引数は clone の成否より前に確定するため、後片付けの要らない失敗パスで確認する
+    // （成功パスは scanWorktrees が mock 済み exec を待ち続けて解決しない）。
+    async function runCloneAndCaptureSpawnOptions(targetPath: string): Promise<{ cwd?: string }> {
+      const proc = stubGitProcess();
+      const cloneUrl = 'https://github.com/test/repo.git';
+      const job = createCloneJob(db, {
+        cloneUrl,
+        normalizedCloneUrl: 'https://github.com/test/repo',
+        targetPath,
+      });
+
+      const promise = cloneManager.executeClone(job.id, cloneUrl, targetPath);
+      proc.emit('close', 1);
+      await expect(promise).rejects.toBeInstanceOf(CloneManagerError);
+
+      return vi.mocked(spawn).mock.calls[0][2] as { cwd?: string };
+    }
+
+    it('should spawn git with cwd set to the target parent directory', async () => {
+      const options = await runCloneAndCaptureSpawnOptions('/tmp/repos/repo');
+
+      expect(options.cwd).toBe('/tmp/repos');
+    });
+
+    it('should set cwd for nested target paths rather than inheriting the server process cwd', async () => {
+      const options = await runCloneAndCaptureSpawnOptions('/tmp/repos/group/nested');
+
+      expect(options.cwd).toBe('/tmp/repos/group');
+      expect(options.cwd).not.toBe(process.cwd());
     });
   });
 
