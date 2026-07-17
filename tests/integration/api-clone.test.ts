@@ -115,6 +115,13 @@ describe('Clone API', () => {
         cloneSource: 'https',
       });
 
+      // Issue #1350: a duplicate is only rejected when the existing repository's
+      // directory is still on disk. The single existsSync() call in the duplicate
+      // path is for the existing repo's directory — make it report a live
+      // directory so this stays a real duplicate rather than a cleaned-up ghost.
+      const { existsSync } = await import('fs');
+      vi.mocked(existsSync).mockReturnValueOnce(true);
+
       const request = new NextRequest('http://localhost/api/repositories/clone', {
         method: 'POST',
         body: JSON.stringify({ cloneUrl: 'https://github.com/test/repo.git' }),
