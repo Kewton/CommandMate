@@ -162,6 +162,9 @@ cd CommandMate
 npm install
 
 # Configure (.env)
+# CM_ROOT_DIR is the scope CommandMate may manage: repositories must live under
+# it to be registered, and clones are saved into it. Setting it does not itself
+# discover repositories - register them from the UI or clone into it.
 CM_ROOT_DIR=/path/to/your/repos
 CM_BIND=0.0.0.0
 # External access: configure reverse proxy authentication (see docs/security-guide.md)

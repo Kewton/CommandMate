@@ -52,7 +52,12 @@ export const ENV_DEFAULTS = {
 } as const;
 
 /**
- * Default root directory for worktrees
+ * Default managed repository directory (CM_ROOT_DIR).
+ *
+ * CM_ROOT_DIR is the scope CommandMate may manage: repositories must be inside
+ * it to be registered, and clones are placed under it. It is a container of
+ * repositories, not a repository itself, and is never scanned directly
+ * (Issue #1328).
  */
 export const DEFAULT_ROOT_DIR = join(homedir(), 'repos');
 
