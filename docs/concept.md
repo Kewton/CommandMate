@@ -162,6 +162,9 @@ cd CommandMate
 npm install
 
 # 設定（.env）
+# CM_ROOT_DIR は CommandMate が扱ってよい管理範囲。配下のリポジトリのみ登録でき、
+# クローン先もここになる。設定しただけではリポジトリは自動発見されないため、
+# UI から登録するかここにクローンすること。
 CM_ROOT_DIR=/path/to/your/repos
 CM_BIND=0.0.0.0
 # External access: configure reverse proxy authentication (see docs/security-guide.md)
