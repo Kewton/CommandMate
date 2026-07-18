@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **npx 起動サーバの GUI ワンクリック更新** (#1395): `npx commandmate` で起動したサーバでも、アップデート通知バナーの「今すぐアップデート」ボタンからその場更新できるようにした。グローバル入替ではなく「新しい npx キャッシュを取得 → 旧デーモン停止 → 新デーモン起動 → GUI 自動リロード」方式。停止前に版検証を行い、stale/失敗時はダウンタイム0で abort。#1198 のセキュリティ不変条件（固定 argv・多重実行ロック・認証は middleware 任せ）を維持。素の CLI `commandmate update`（npx）は従来どおり案内のみの no-op（#1319）。
+
 ## [0.10.4] - 2026-07-18
 
 > **Highlight**: **v0.10.3 以降に蓄積した 26 件のバグ修正をまとめたパッチリリース**。柱は4つ。① DB 整合性（`repositories`/`worktrees` 行のライフサイクル、幽霊行の掃除・同一 URL 再 clone 封鎖の解消、将来版スキーマの検知で起動停止、`busy_timeout`+WAL による `SQLITE_BUSY` 対策）。② 版アイデンティティ（サーバー `currentVersion` の実行時解決、デーモン state ファイルへの版・実効設定・プロセス同一性の記録、CLI/quickstart/status の版照合、旧タブ・WebSocket の版不一致検知とリロード導線）。③ clone / schedule / assistant / update が例外で `running`・ロック固着する不具合の一掃。④ フローティング UI（共有ツールチップ・ブランチツールチップ・checkout ドロップダウン・右クリックメニュー・残存フローティング要素）のビューポート clamp とポータル化。あわせて同名スキルが `.claude/skills`（Claude）/`.agents/skills`（Codex）で共存できずスラッシュ候補に出ない不具合を修正した。DB マイグレーション **v43**（`CM_ROOT_DIR` 由来の幽霊リポジトリ行の掃除、#1339）を含む。

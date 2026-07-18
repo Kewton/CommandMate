@@ -4,7 +4,7 @@
  * Issue #1195: Extracted from index.ts so the program can be built without parsing argv
  */
 
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { initCommand } from './commands/init';
 import { startCommand } from './commands/start';
 import { stopCommand } from './commands/stop';
@@ -188,10 +188,18 @@ export function buildProgram(): Command {
     .description('Update CommandMate to the latest version')
     .option('--check', 'Only check for updates (no install, stop or restart)')
     .option('-y, --yes', 'Skip the confirmation prompt (required for non-interactive use)')
+    // Issue #1395: hidden — the GUI update route uses this to relaunch an
+    // npx-launched server from a fresh npx cache. Hidden so the user-facing
+    // `commandmate update` under npx stays a no-op (§6). Fixed argv, no request
+    // input reaches it (§5).
+    .addOption(
+      new Option('--relaunch-npx', 'Internal: relaunch an npx server from a fresh cache').hideHelp()
+    )
     .action(async (options) => {
       await updateCommand({
         check: options.check,
         yes: options.yes,
+        relaunchNpx: options.relaunchNpx,
       });
     });
 

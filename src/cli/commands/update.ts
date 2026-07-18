@@ -18,7 +18,7 @@
  */
 
 import { config as dotenvConfig } from 'dotenv';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { ExitCode, getErrorMessage, type UpdateOptions } from '../types';
 import { CLILogger } from '../utils/logger';
 import { getPackageJsonPath } from '../utils/paths';
@@ -26,11 +26,16 @@ import { isGlobalInstall, isNpxExecution } from '../utils/install-context';
 import { getEnvPath } from '../utils/env-setup';
 import { getDaemonManagerFactory } from '../utils/daemon-factory';
 import { viewLatestVersion, installGlobalLatest } from '../utils/npm-runner';
+import { warmNpxLatest, spawnNpxDaemon } from '../utils/npx-runner';
 import { compareVersions, isComparableVersion } from '../utils/semver';
 import { waitForReady } from '../utils/health-check';
 import { listRunningWorktreeServers } from '../utils/worktree-servers';
 import { confirm, isInteractive, closeReadline } from '../utils/prompt';
 import { resolveAuthToken } from '../utils/api-client';
+// Relative import (not '@/'): the CLI build has no path alias / tsc-alias step.
+// Only the abort paths of the npx relaunch touch this — success leaves the lock
+// to expire, exactly like the global flow (Issue #1395 §5.2).
+import { releaseUpdateLock } from '../../lib/app-update/update-lock';
 
 const logger = new CLILogger();
 
@@ -44,7 +49,7 @@ const PACKAGE_NAME = 'commandmate';
  */
 export async function updateCommand(options: UpdateOptions = {}): Promise<void> {
   try {
-    // --- Step 0: npx gate (Issue #1319) -------------------------------------
+    // --- Step 0: npx gate (Issue #1319 / #1395) -----------------------------
     // `npx commandmate` runs from the npx cache, which isGlobalInstall() reports
     // as global (Issue #1195). Without this gate step 1 lets a throwaway process
     // rewrite the user's global install, and step 8 then fails its own check by
@@ -52,6 +57,14 @@ export async function updateCommand(options: UpdateOptions = {}): Promise<void> 
     // The gate covers --check too: "current version" under npx is whatever npx
     // happened to cache, which says nothing about the user's install.
     if (isNpxExecution()) {
+      // Issue #1395: the GUI update route spawns this with the hidden
+      // --relaunch-npx flag to actually update in place (fetch a fresh npx cache
+      // and relaunch the daemon from it). The bare user-facing `commandmate
+      // update` under npx stays the #1319 no-op (§6).
+      if (options.relaunchNpx) {
+        await runNpxSelfUpdate();
+        return;
+      }
       printNpxGuidance();
       process.exit(ExitCode.SUCCESS);
       return;
@@ -285,6 +298,152 @@ export async function updateCommand(options: UpdateOptions = {}): Promise<void> 
 }
 
 /**
+ * npx in-place self-update orchestrator (Issue #1395, design §2.1).
+ *
+ * Runs detached from the server it replaces (the GUI route spawns it with
+ * `detached + unref`), so stopping the old daemon does not kill this process.
+ * The sequence is fail-fast: the new version is fetched and verified BEFORE the
+ * old daemon is stopped, so a stale/failed fetch aborts with zero downtime.
+ *
+ * Lock policy (§5.2): the route already holds the update lock. Abort paths here
+ * release it so a retry is not blocked for 10 minutes; a successful relaunch
+ * leaves it to expire, exactly like the global flow (a competing retry must not
+ * stop the freshly-started daemon). npx env hygiene lives inside npx-runner.
+ */
+async function runNpxSelfUpdate(): Promise<void> {
+  // .env must exist and be loaded before status/auth resolution so the health
+  // check URL and token resolve correctly (mirrors step 6).
+  const envPath = getEnvPath();
+  if (!existsSync(envPath)) {
+    logger.error('No .env configuration was found, so the server cannot be relaunched.');
+    logger.info('Nothing was changed.');
+    printNpxManualRelaunch();
+    releaseUpdateLock();
+    process.exit(ExitCode.CONFIG_ERROR);
+    return;
+  }
+  dotenvConfig({ path: envPath });
+
+  // Expected version = the registry's latest (honours the user's .npmrc).
+  const view = viewLatestVersion(PACKAGE_NAME);
+  if (!view.success || !view.version) {
+    logger.error(`Failed to query the npm registry: ${view.error ?? 'unknown error'}`);
+    logger.info('Nothing was changed. Check your network/npm configuration and try again.');
+    releaseUpdateLock();
+    process.exit(ExitCode.UPDATE_FAILED);
+    return;
+  }
+  const expected = view.version;
+
+  // --- Warmup + version verify BEFORE the stop (fail-fast, zero downtime) ----
+  logger.info(`Fetching ${PACKAGE_NAME}@latest via npx (this may take a minute)...`);
+  const warm = warmNpxLatest(PACKAGE_NAME);
+  if (!warm.success || !warm.version) {
+    logger.error(`Failed to fetch the latest version via npx: ${warm.error ?? 'unknown error'}`);
+    printNpxStaleGuidance();
+    releaseUpdateLock();
+    process.exit(ExitCode.UPDATE_FAILED);
+    return;
+  }
+  if (stripV(warm.version) !== stripV(expected)) {
+    logger.error(
+      `npx returned v${warm.version} but the registry latest is v${expected} (a stale npx cache is likely).`
+    );
+    printNpxStaleGuidance();
+    releaseUpdateLock();
+    process.exit(ExitCode.UPDATE_FAILED);
+    return;
+  }
+
+  // --- Stop the current daemon (a brief outage starts here) ------------------
+  const daemonManager = getDaemonManagerFactory().create();
+  const wasRunning = await daemonManager.isRunning();
+  if (wasRunning) {
+    logger.info('Stopping the current server...');
+    const stopped = await daemonManager.stop();
+    if (!stopped) {
+      logger.error('Failed to stop the server. Update aborted (nothing was changed).');
+      logger.info(`Run "${PACKAGE_NAME} stop --force" and try again.`);
+      releaseUpdateLock();
+      process.exit(ExitCode.STOP_FAILED);
+      return;
+    }
+    logger.success('Server stopped');
+  }
+
+  // --- Relaunch from the freshly-cached version ------------------------------
+  logger.info(`Starting ${PACKAGE_NAME}@latest from the npx cache...`);
+  const relaunch = spawnNpxDaemon(PACKAGE_NAME);
+  if (!relaunch.success) {
+    logger.error(`Failed to start the new server: ${relaunch.error ?? 'unknown error'}`);
+    // The old server was stopped, so it is down: release the lock so the user
+    // can retry immediately.
+    printNpxManualRelaunch();
+    releaseUpdateLock();
+    process.exit(ExitCode.START_FAILED);
+    return;
+  }
+
+  // (a) liveness is a precondition for the HTTP probe
+  if (!(await daemonManager.isRunning())) {
+    logger.error('The new server could not be detected after the relaunch.');
+    printNpxManualRelaunch();
+    releaseUpdateLock();
+    process.exit(ExitCode.START_FAILED);
+    return;
+  }
+
+  // (b) base URL comes from getStatus(), never re-derived here (D-13)
+  const status = await daemonManager.getStatus();
+  const baseUrl = status?.url;
+  if (!baseUrl) {
+    logger.error('The server started but its address could not be confirmed.');
+    printNpxManualRelaunch();
+    releaseUpdateLock();
+    process.exit(ExitCode.START_FAILED);
+    return;
+  }
+
+  // Post-start version verify (belt-and-suspenders, §4.2). A mismatch is a
+  // warning, not a rollback: the new daemon is up and the GUI will reload onto
+  // whatever it is now running.
+  if (status?.version && stripV(status.version) !== stripV(expected)) {
+    logger.warn(
+      `The running server reports v${status.version}, but v${expected} was expected. ` +
+        `Verify with "${PACKAGE_NAME} status".`
+    );
+  }
+
+  // (c) poll until readiness is proven
+  logger.info('Waiting for the server to become ready...');
+  const readiness = await waitForReady(baseUrl, { token: resolveAuthToken() });
+
+  if (readiness === 'ready') {
+    logger.success(`CommandMate v${status?.version ?? expected} is ready at ${baseUrl}`);
+    printNpxPostUpdateNotes();
+    process.exit(ExitCode.SUCCESS);
+    return;
+  }
+
+  // (d) degrade: the server answers but readiness cannot be proven (auth/IP/TLS)
+  if (readiness === 'degraded') {
+    logger.warn(
+      'サーバは応答していますが、マイグレーション完了は確認できませんでした（認証有効時はトークンが必要です）。'
+    );
+    logger.info(`"${PACKAGE_NAME} status" で確認してください。`);
+    printNpxPostUpdateNotes();
+    process.exit(ExitCode.SUCCESS);
+    return;
+  }
+
+  // (e) timeout: the relaunch itself succeeded and the new daemon is up, so the
+  // lock is left to expire (a retry must not stop the fresh server).
+  logger.error('The server started but did not answer in time.');
+  printNpxManualRelaunch();
+  process.exit(ExitCode.START_FAILED);
+}
+
+/**
  * Read the version from the installed package.json.
  * @throws if package.json cannot be read or has no version
  */
@@ -337,6 +496,45 @@ function printNpxGuidance(): void {
   console.log('');
   console.log(`Once it is installed globally, "${PACKAGE_NAME} update" handles this for you`);
   console.log('(stop the server -> install -> restart).');
+  console.log('');
+}
+
+/**
+ * Guidance when npx could not fetch the expected latest (Issue #1395).
+ * The old server is untouched, so this only tells the user how to retry.
+ */
+function printNpxStaleGuidance(): void {
+  console.log('');
+  console.log('The latest version could not be fetched cleanly (a stale npx cache is likely).');
+  console.log('Nothing was changed — the current server is still running.');
+  console.log('Try again in a moment, or clear the npx/npm cache first:');
+  console.log(`  npm cache clean --force`);
+  console.log(`  npx --yes --prefer-online ${PACKAGE_NAME}@latest`);
+  console.log('');
+}
+
+/**
+ * Guidance when the relaunch could not be completed/confirmed (Issue #1395).
+ * Under npx there is no global install to roll back to; the recovery path is to
+ * relaunch with npx by hand. Config/db under ~/.commandmate are preserved.
+ */
+function printNpxManualRelaunch(): void {
+  console.log('');
+  console.log('Finish the update by relaunching the server manually:');
+  console.log(`  npx ${PACKAGE_NAME}@latest`);
+  console.log('Your configuration and database under ~/.commandmate are preserved.');
+  console.log('');
+}
+
+/**
+ * Completion notes for the npx relaunch (Issue #1395 §7.2).
+ * Startup options are not fully re-derived from CLI flags after a relaunch, so
+ * point the user at status rather than asserting anything was lost/kept.
+ */
+function printNpxPostUpdateNotes(): void {
+  console.log('');
+  console.log('Note: 再起動後は .env と引き継がれた設定で起動しています。');
+  console.log(`  ${PACKAGE_NAME} status で稼働先（ポート等）を確認してください。`);
   console.log('');
 }
 

@@ -156,42 +156,40 @@ describe('UpdateNotificationBanner', () => {
   });
 
   // =========================================================================
-  // Issue #1394: npx guidance (no in-place update)
+  // Issue #1395: npx updates in place now (button + restart notice)
   // =========================================================================
-  describe('npx guidance (Issue #1394)', () => {
+  describe('npx relaunch (Issue #1395)', () => {
     const npxProps: UpdateNotificationBannerProps = {
       ...defaultProps,
       installType: 'npx',
       updateCommand: null,
     };
 
-    it('shows the npx guidance block instead of the update button', () => {
+    it('shows the update button for an npx install (in-place update is supported now)', () => {
       render(<UpdateNotificationBanner {...npxProps} />);
 
-      expect(screen.getByTestId('update-npx')).toBeDefined();
-      expect(screen.queryByTestId('update-now-button')).toBeNull();
+      expect(screen.getByTestId('update-now-button')).toBeDefined();
     });
 
-    it('displays the correct relaunch command (npx commandmate@latest, not commandmate update)', () => {
+    it('shows the npx restart notice (port/flags may change) alongside the button', () => {
       render(<UpdateNotificationBanner {...npxProps} />);
 
-      expect(screen.getByText('npx commandmate@latest')).toBeDefined();
-      expect(screen.queryByText('commandmate update')).toBeNull();
-    });
-
-    it('renders the npx title and description', () => {
-      render(<UpdateNotificationBanner {...npxProps} />);
-
-      expect(screen.getByText('worktree.update.npxTitle')).toBeDefined();
-      expect(screen.getByText('worktree.update.npxDescription')).toBeDefined();
+      expect(screen.getByTestId('update-npx-notice')).toBeDefined();
+      expect(screen.getByText('worktree.update.npxRestartNotice')).toBeDefined();
     });
 
     it.each(['global', 'local', 'unknown'] as const)(
-      'never shows the npx block for a %s install',
+      'does not show the npx restart notice for a %s install',
       (installType) => {
-        render(<UpdateNotificationBanner {...defaultProps} installType={installType} />);
+        render(
+          <UpdateNotificationBanner
+            {...defaultProps}
+            installType={installType}
+            updateCommand={null}
+          />
+        );
 
-        expect(screen.queryByTestId('update-npx')).toBeNull();
+        expect(screen.queryByTestId('update-npx-notice')).toBeNull();
       }
     );
   });
@@ -235,7 +233,14 @@ describe('UpdateNotificationBanner', () => {
       expect(screen.getByTestId('update-now-button')).toBeDefined();
     });
 
-    it.each(['local', 'npx', 'unknown'] as const)(
+    it('renders the button for an npx install (Issue #1395)', () => {
+      render(
+        <UpdateNotificationBanner {...defaultProps} installType="npx" updateCommand={null} />
+      );
+      expect(screen.getByTestId('update-now-button')).toBeDefined();
+    });
+
+    it.each(['local', 'unknown'] as const)(
       'never renders the button for a %s install',
       (installType) => {
         render(
@@ -399,6 +404,35 @@ describe('UpdateNotificationBanner', () => {
       await waitFor(() => expect(screen.getByTestId('update-error')).toBeDefined());
       expect(screen.queryByTestId('update-progress')).toBeNull();
       expect(appApi.ping).not.toHaveBeenCalled();
+    });
+
+    // --- Issue #1395: npx-specific manual command on timeout/error --------
+    /**
+     * §4.3: the fixed `commandmate update` is a no-op under npx, so the manual
+     * fallback for an npx server must show `npx commandmate@latest` instead.
+     */
+    it('shows the npx relaunch command (not commandmate update) on timeout for npx', async () => {
+      vi.mocked(appApi.ping).mockResolvedValue(false);
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+
+      startUpdate({ installType: 'npx', updateCommand: null });
+      await waitFor(() => expect(screen.getByText('worktree.update.updating')).toBeDefined());
+
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 2000);
+
+      await waitFor(() => expect(screen.getByTestId('update-timeout')).toBeDefined());
+      expect(screen.getByText('npx commandmate@latest')).toBeDefined();
+      expect(screen.queryByText('commandmate update')).toBeNull();
+    });
+
+    it('shows the npx relaunch command on error for npx', async () => {
+      vi.mocked(appApi.startUpdate).mockRejectedValue(new ApiError('failed', 500));
+
+      startUpdate({ installType: 'npx', updateCommand: null });
+
+      await waitFor(() => expect(screen.getByTestId('update-error')).toBeDefined());
+      expect(screen.getByText('npx commandmate@latest')).toBeDefined();
+      expect(screen.queryByText('commandmate update')).toBeNull();
     });
   });
 });

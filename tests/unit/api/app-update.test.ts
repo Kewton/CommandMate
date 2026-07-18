@@ -122,40 +122,59 @@ describe('POST /api/app/update - fixed command guarantee', () => {
   });
 });
 
-describe('POST /api/app/update - npx gate (Issue #1394)', () => {
+describe('POST /api/app/update - npx relaunch branch (Issue #1395)', () => {
   /**
    * A server started with `npx commandmate` runs from the npx cache, which
-   * isGlobalInstall() reports as global (Issue #1195). Without this gate the
-   * request passes the global check, spawns a no-op `commandmate update`, and
-   * still answers 202 — hanging the banner until its 5-minute timeout.
+   * isGlobalInstall() reports as global (Issue #1195). It cannot rewrite a
+   * global install, so instead of refusing (#1394) it now takes a dedicated
+   * relaunch path: the detached child fetches a fresh npx cache and restarts
+   * the daemon (§2.1). npx is checked first so the global gate cannot misroute
+   * it (§5.1).
    */
-  it('returns 400 with code "npx" for an npx run and spawns nothing', async () => {
+  it('starts the update (202) for an npx run', async () => {
     vi.mocked(isNpxExecution).mockReturnValue(true);
-    // npx makes isGlobalInstall() true too; the npx gate must win.
     vi.mocked(isGlobalInstall).mockReturnValue(true);
 
     const response = await POST();
 
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toMatchObject({ code: 'npx' });
-    expect(spawn).not.toHaveBeenCalled();
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({ status: 'started' });
   });
 
-  it('checks npx before taking the lock, so no lock is left behind', async () => {
+  it('spawns the hidden --relaunch-npx command with a fixed argv and no shell', async () => {
     vi.mocked(isNpxExecution).mockReturnValue(true);
 
     await POST();
 
-    expect(acquireUpdateLock).not.toHaveBeenCalled();
+    expect(spawn).toHaveBeenCalledTimes(1);
+    const [command, args, options] = vi.mocked(spawn).mock.calls[0];
+    expect(command).toBe(process.execPath);
+    expect(args).toEqual([
+      `${process.cwd()}/bin/commandmate.js`,
+      'update',
+      '--yes',
+      '--relaunch-npx',
+    ]);
+    expect(options).not.toHaveProperty('shell', true);
+    expect(options?.detached).toBe(true);
+    expect(unref).toHaveBeenCalledTimes(1);
   });
 
-  it('reports npx (not not_global) so the banner can show the right command', async () => {
+  it('takes the update lock for an npx run (concurrency is guarded)', async () => {
     vi.mocked(isNpxExecution).mockReturnValue(true);
-    vi.mocked(isGlobalInstall).mockReturnValue(true);
+
+    await POST();
+
+    expect(acquireUpdateLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports willRestart: true when the npx daemon is running', async () => {
+    vi.mocked(isNpxExecution).mockReturnValue(true);
+    mockDaemon(true);
 
     const response = await POST();
 
-    await expect(response.json()).resolves.toMatchObject({ code: 'npx' });
+    await expect(response.json()).resolves.toMatchObject({ willRestart: true });
   });
 
   it('falls through to the global gate when npx detection fails (fails to "not npx")', async () => {
