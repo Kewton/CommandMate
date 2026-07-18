@@ -44,6 +44,26 @@ describe('useWebSocket', () => {
     expect(onStatusChange).toHaveBeenCalledWith('connected');
   });
 
+  it('announces the client bundle version on every (re)connect (#1338/#1356)', () => {
+    const { result } = renderHook(() => useWebSocket({ reconnectBaseDelay: 1000 }));
+    const ws1 = MockWebSocket.last();
+    act(() => ws1.mockOpen());
+
+    const helloOf = (ws: MockWebSocket) =>
+      ws.sent.map((f) => JSON.parse(f)).find((m) => m.type === 'client_version');
+    expect(helloOf(ws1)).toMatchObject({ type: 'client_version' });
+    expect(typeof helloOf(ws1)?.version).toBe('string');
+
+    // Drop + reconnect: the hello must be re-sent on the fresh socket, since a
+    // reconnect right after a server swap is exactly when detection matters.
+    act(() => ws1.mockServerClose());
+    act(() => vi.advanceTimersByTime(1000));
+    const ws2 = MockWebSocket.last();
+    expect(ws2).not.toBe(ws1);
+    act(() => ws2.mockOpen());
+    expect(helloOf(ws2)).toMatchObject({ type: 'client_version' });
+  });
+
   it('sends subscribe frames and resends them on reconnect', () => {
     const { result } = renderHook(() => useWebSocket({ reconnectBaseDelay: 1000 }));
     const ws1 = MockWebSocket.last();

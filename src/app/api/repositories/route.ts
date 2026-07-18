@@ -6,6 +6,7 @@
  * Issue #69: Repository delete feature
  * Issue #190: Repository exclusion on sync (disableRepository before worktree check)
  * Issue #644: Repository list display
+ * Issue #1346: No ghost repository record when DELETE answers 404
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -17,6 +18,7 @@ import {
 import {
   validateRepositoryPath,
   disableRepository,
+  disableExistingRepository,
   getAllRepositoriesWithWorktreeCount,
 } from '@/lib/db/db-repository';
 import { cleanupMultipleWorktrees, killWorktreeSession } from '@/lib/session-cleanup';
@@ -83,10 +85,9 @@ export async function GET() {
 export async function DELETE(request: NextRequest) {
   try {
     const body = await request.json();
-    const { repositoryPath } = body;
 
     // Validate and resolve repository path (DRY: shared validation)
-    const validation = validateRepositoryPath(repositoryPath);
+    const validation = validateRepositoryPath(body.repositoryPath);
     if (!validation.valid) {
       return NextResponse.json(
         { success: false, error: validation.error },
@@ -94,21 +95,37 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const db = getDbInstance();
+    // Issue #1347: use the resolved (canonical) path as the single key for every
+    // operation below. worktrees.repository_path is stored path.resolve()'d, and
+    // disableRepository / disableExistingRepository normalize internally (#1346).
+    // A raw client path (trailing slash, relative, ".." segment) fails the worktree
+    // WHERE match, so getWorktreeIdsByRepository / deleteRepositoryWorktrees would
+    // find nothing and leave the worktrees orphaned. validation.resolvedPath is
+    // guaranteed to be set when validation.valid is true.
+    const repositoryPath = validation.resolvedPath!;
 
-    // Issue #190: Disable repository BEFORE worktreeIds check (SF-C01)
-    // This ensures exclusion registration even when worktrees table has no records
-    disableRepository(db, repositoryPath);
+    const db = getDbInstance();
 
     // Get all worktree IDs for this repository
     const worktreeIds = getWorktreeIdsByRepository(db, repositoryPath);
 
     if (worktreeIds.length === 0) {
+      // Issue #190 (SF-C01): a repository registered in the repositories table can be
+      // resurrected by Sync All even when the worktrees table has no records, so the
+      // exclusion must still be registered here.
+      // Issue #1346: an unregistered path has nothing to exclude - creating a record for
+      // it would leave a ghost "Disabled / 0 worktrees" row behind a 404 response.
+      disableExistingRepository(db, repositoryPath);
+
       return NextResponse.json(
         { success: false, error: 'Repository not found' },
         { status: 404 }
       );
     }
+
+    // Issue #190: Register the exclusion before deleting the worktrees, so a repository
+    // with worktrees is never resurrected by a Sync All that races the deletion below.
+    disableRepository(db, repositoryPath);
 
     logger.info('repository:delete-start', { repositoryPath, worktreeCount: worktreeIds.length });
 

@@ -2,6 +2,7 @@
  * API repository delete integration tests
  * Issue #69: Repository delete feature
  * Issue #190: Repository exclusion on sync (disableRepository, security validation)
+ * Issue #1346: No ghost repository record when DELETE answers 404
  * TDD Approach: Write tests first (Red), then implement (Green), then refactor
  */
 
@@ -11,7 +12,12 @@ import Database from 'better-sqlite3';
 import { DELETE } from '@/app/api/repositories/route';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree, createMessage, getWorktrees } from '@/lib/db';
-import { getRepositoryByPath } from '@/lib/db/db-repository';
+import {
+  getRepositoryByPath,
+  getAllRepositories,
+  ensureEnvRepositoriesRegistered,
+  filterExcludedPaths,
+} from '@/lib/db/db-repository';
 
 // Mock db-instance to use test database
 let testDb: Database.Database;
@@ -315,8 +321,12 @@ describe('DELETE /api/repositories', () => {
     expect(repo!.enabled).toBe(false);
   });
 
-  it('should disable repository even when returning 404 for no worktrees (Issue #190 SF-C01)', async () => {
+  it('should disable a registered repository even when returning 404 for no worktrees (Issue #190 SF-C01)', async () => {
     const repoPath = '/path/to/no-worktrees-repo';
+
+    // Env repositories are registered at server startup (server.ts initializeWorktrees),
+    // so a never-synced repository is registered here but has no worktree records.
+    ensureEnvRepositoriesRegistered(testDb, [repoPath]);
 
     const request = new NextRequest('http://localhost:3000/api/repositories', {
       method: 'DELETE',
@@ -326,10 +336,69 @@ describe('DELETE /api/repositories', () => {
     const response = await DELETE(request);
     expect(response.status).toBe(404);
 
-    // Despite 404, repository should be disabled in repositories table
+    // Despite 404, repository should be disabled so Sync All does not resurrect it
     const repo = getRepositoryByPath(testDb, repoPath);
     expect(repo).not.toBeNull();
     expect(repo!.enabled).toBe(false);
+    expect(filterExcludedPaths(testDb, [repoPath])).toEqual([]);
+  });
+
+  // ============================================================
+  // Issue #1346: No ghost record when answering 404
+  // ============================================================
+
+  it('should not create a repository record when returning 404 for an unregistered path (Issue #1346)', async () => {
+    const repoPath = '/path/to/never-registered-repo';
+
+    const request = new NextRequest('http://localhost:3000/api/repositories', {
+      method: 'DELETE',
+      body: JSON.stringify({ repositoryPath: repoPath }),
+    });
+
+    const response = await DELETE(request);
+    expect(response.status).toBe(404);
+
+    // No ghost "Disabled / 0 worktrees" row must be left behind
+    expect(getRepositoryByPath(testDb, repoPath)).toBeNull();
+    expect(getAllRepositories(testDb)).toHaveLength(0);
+  });
+
+  it('should not create records for repeated 404 deletes of unregistered paths (Issue #1346)', async () => {
+    for (let i = 0; i < 3; i++) {
+      const request = new NextRequest('http://localhost:3000/api/repositories', {
+        method: 'DELETE',
+        body: JSON.stringify({ repositoryPath: `/path/to/unknown-${i}` }),
+      });
+      const response = await DELETE(request);
+      expect(response.status).toBe(404);
+    }
+
+    expect(getAllRepositories(testDb)).toHaveLength(0);
+  });
+
+  it('should still create a disabled record when worktrees exist but the repository is unregistered (Issue #190)', async () => {
+    const repoPath = '/path/to/unregistered-with-worktrees';
+
+    upsertWorktree(testDb, {
+      id: 'wt-1',
+      name: 'main',
+      path: '/path/to/unregistered-with-worktrees/main',
+      repositoryPath: repoPath,
+      repositoryName: 'unregistered-with-worktrees',
+    });
+
+    const request = new NextRequest('http://localhost:3000/api/repositories', {
+      method: 'DELETE',
+      body: JSON.stringify({ repositoryPath: repoPath }),
+    });
+
+    const response = await DELETE(request);
+    expect(response.status).toBe(200);
+
+    const repo = getRepositoryByPath(testDb, repoPath);
+    expect(repo).not.toBeNull();
+    expect(repo!.enabled).toBe(false);
+    expect(filterExcludedPaths(testDb, [repoPath])).toEqual([]);
   });
 
   it('should return 400 for null byte in repositoryPath (SEC-MF-001)', async () => {
@@ -356,5 +425,103 @@ describe('DELETE /api/repositories', () => {
 
     expect(response.status).toBe(400);
     expect(data.error).toBe('Invalid repository path');
+  });
+
+  // ============================================================
+  // Issue #1347: DELETE must normalize the path so worktrees are
+  // never left orphaned when the client sends a non-canonical path.
+  // worktrees.repository_path is stored path.resolve()'d (scanWorktrees),
+  // so the WHERE lookups must key on the resolved path, not the raw input.
+  // ============================================================
+
+  it('should delete worktrees when the path has a trailing slash (Issue #1347)', async () => {
+    // Worktrees are stored with the canonical (resolved) repository path.
+    const canonicalPath = '/path/to/repo';
+
+    upsertWorktree(testDb, {
+      id: 'wt-1',
+      name: 'main',
+      path: '/path/to/repo/main',
+      repositoryPath: canonicalPath,
+      repositoryName: 'repo',
+    });
+    upsertWorktree(testDb, {
+      id: 'wt-2',
+      name: 'feature',
+      path: '/path/to/repo/feature',
+      repositoryPath: canonicalPath,
+      repositoryName: 'repo',
+    });
+
+    // Client sends a non-canonical variant (trailing slash) that resolves to
+    // canonicalPath. Before the fix this missed the WHERE match and returned 404,
+    // leaving both worktrees orphaned in the DB.
+    const request = new NextRequest('http://localhost:3000/api/repositories', {
+      method: 'DELETE',
+      body: JSON.stringify({ repositoryPath: '/path/to/repo/' }),
+    });
+
+    const response = await DELETE(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data.success).toBe(true);
+    expect(data.deletedWorktreeCount).toBe(2);
+    expect(data.deletedWorktreeIds).toEqual(expect.arrayContaining(['wt-1', 'wt-2']));
+
+    // No worktree may remain behind
+    expect(getWorktrees(testDb)).toHaveLength(0);
+  });
+
+  it('should delete worktrees when the path contains ".." segments (Issue #1347)', async () => {
+    const canonicalPath = '/path/to/repo';
+
+    upsertWorktree(testDb, {
+      id: 'wt-1',
+      name: 'main',
+      path: '/path/to/repo/main',
+      repositoryPath: canonicalPath,
+      repositoryName: 'repo',
+    });
+
+    // "/path/to/sub/../repo" resolves to "/path/to/repo".
+    const request = new NextRequest('http://localhost:3000/api/repositories', {
+      method: 'DELETE',
+      body: JSON.stringify({ repositoryPath: '/path/to/sub/../repo' }),
+    });
+
+    const response = await DELETE(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data.success).toBe(true);
+    expect(data.deletedWorktreeCount).toBe(1);
+    expect(getWorktrees(testDb)).toHaveLength(0);
+  });
+
+  it('should disable the repository under its resolved path for a non-canonical delete (Issue #1347)', async () => {
+    const canonicalPath = '/path/to/repo';
+
+    upsertWorktree(testDb, {
+      id: 'wt-1',
+      name: 'main',
+      path: '/path/to/repo/main',
+      repositoryPath: canonicalPath,
+      repositoryName: 'repo',
+    });
+
+    const request = new NextRequest('http://localhost:3000/api/repositories', {
+      method: 'DELETE',
+      body: JSON.stringify({ repositoryPath: '/path/to/repo/' }),
+    });
+
+    await DELETE(request);
+
+    // The exclusion record must be keyed on the resolved path so Sync All
+    // (which uses resolved paths) does not resurrect the repository.
+    const repo = getRepositoryByPath(testDb, canonicalPath);
+    expect(repo).not.toBeNull();
+    expect(repo!.enabled).toBe(false);
+    expect(filterExcludedPaths(testDb, [canonicalPath])).toEqual([]);
   });
 });

@@ -11,6 +11,28 @@ import type { CloneJobStatus } from '@/types/clone';
 import { isSystemDirectory } from '@/config/system-directories';
 
 /**
+ * Typed error for repositories-table operations.
+ *
+ * Issue #1352: `createRepository()` used to let a raw better-sqlite3
+ * `SqliteError: UNIQUE constraint failed` propagate. A concurrent clone of the
+ * same URL has a TOCTOU window where both jobs pass the duplicate checks and
+ * the losing `createRepository()` throws that raw error, which the background
+ * clone path only logs (#1340). Convert UNIQUE violations to an explicit
+ * `DUPLICATE` code here so callers can distinguish the collision from other DB
+ * failures. Mirrors `ExternalAppDbError` in `external-apps/db.ts`.
+ */
+export class RepositoryDbError extends Error {
+  constructor(
+    message: string,
+    public readonly code: 'DUPLICATE' | 'DB_ERROR',
+    public readonly cause?: Error
+  ) {
+    super(message);
+    this.name = 'RepositoryDbError';
+  }
+}
+
+/**
  * Repository model
  */
 export interface Repository {
@@ -29,6 +51,13 @@ export interface Repository {
   cloneUrl?: string;
   normalizedCloneUrl?: string;
   cloneSource: 'local' | 'https' | 'ssh';
+  /**
+   * @deprecated Issue #1352: effectively write-only. Since #1328 removed env
+   * auto-registration no read path branches on this flag except migration v43
+   * (#1339), which targets the `CM_ROOT_DIR` ghost specifically. Kept for
+   * backward compatibility and as a potential discriminator for future ghost
+   * cleanup; do not add new behavior that depends on it without revisiting.
+   */
   isEnvManaged: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -172,19 +201,41 @@ export function createRepository(
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  stmt.run(
-    id,
-    data.name,
-    data.path,
-    data.enabled !== false ? 1 : 0,
-    data.visible !== false ? 1 : 0,
-    data.cloneUrl || null,
-    data.normalizedCloneUrl || null,
-    data.cloneSource,
-    data.isEnvManaged ? 1 : 0,
-    now,
-    now
-  );
+  // Issue #1352: `repositories.path` is UNIQUE and `normalized_clone_url` has a
+  // partial UNIQUE index. A concurrent clone of the same URL can race past the
+  // duplicate checks and reach here twice; the loser must fail with an explicit
+  // DUPLICATE rather than a raw SqliteError. These DB constraints are what
+  // serialize the final registration — the guard turns the collision into a
+  // typed error instead of preventing it.
+  try {
+    stmt.run(
+      id,
+      data.name,
+      data.path,
+      data.enabled !== false ? 1 : 0,
+      data.visible !== false ? 1 : 0,
+      data.cloneUrl || null,
+      data.normalizedCloneUrl || null,
+      data.cloneSource,
+      data.isEnvManaged ? 1 : 0,
+      now,
+      now
+    );
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('UNIQUE constraint')) {
+      throw new RepositoryDbError(
+        `A repository is already registered at path "${data.path}"` +
+          (data.normalizedCloneUrl ? ` or for URL "${data.normalizedCloneUrl}"` : ''),
+        'DUPLICATE',
+        error
+      );
+    }
+    throw new RepositoryDbError(
+      `Failed to create repository: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      'DB_ERROR',
+      error instanceof Error ? error : undefined
+    );
+  }
 
   return {
     id,
@@ -247,6 +298,44 @@ export function getRepositoryByPath(
 
   const row = stmt.get(path) as RepositoryRow | undefined;
   return row ? mapRepositoryRow(row) : null;
+}
+
+/**
+ * Physically delete a repositories row by id.
+ *
+ * Issue #1350: before this, the only way to "remove" a repository was
+ * `disableRepository()` (enabled=0) — the row itself was never deleted. A row
+ * whose on-disk directory has been removed and that has no worktrees left
+ * ("ghost") therefore lingered forever and blocked re-cloning the same URL,
+ * with no removal path in the UI or API. This gives callers a real delete so a
+ * ghost can be cleared. Linkage of worktrees/child rows is by
+ * `worktrees.repository_path` (TEXT), not a FK to `repositories`, so deleting
+ * the row does not cascade — callers must confirm the row is a ghost first.
+ *
+ * @returns true if a row was deleted, false if no row matched the id.
+ */
+export function deleteRepository(db: Database.Database, id: string): boolean {
+  const result = db.prepare('DELETE FROM repositories WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
+/**
+ * Count the worktrees associated with a repository path.
+ *
+ * Repository ↔ worktree linkage is by matching `repositories.path` against
+ * `worktrees.repository_path` (TEXT) — see `getAllRepositoriesWithWorktreeCount`.
+ * Issue #1350 uses this to tell a recoverable "ghost" (directory gone AND zero
+ * worktrees) apart from a repository that still has worktrees registered, which
+ * must never be silently deleted.
+ */
+export function countWorktreesByRepositoryPath(
+  db: Database.Database,
+  repositoryPath: string
+): number {
+  const row = db
+    .prepare('SELECT COUNT(*) AS count FROM worktrees WHERE repository_path = ?')
+    .get(repositoryPath) as { count: number };
+  return Number(row.count) || 0;
 }
 
 /**
@@ -562,26 +651,43 @@ export function registerAndFilterRepositories(
  * SF-002: SRP - disable logic encapsulated
  */
 export function disableRepository(db: Database.Database, repositoryPath: string): void {
+  if (disableExistingRepository(db, repositoryPath)) {
+    return;
+  }
+
+  const resolvedPath = resolveRepositoryPath(repositoryPath);
+  // SEC-SF-004: Check disabled repository count limit before creating new record
+  const disabledCount = db.prepare(
+    'SELECT COUNT(*) as count FROM repositories WHERE enabled = 0'
+  ).get() as { count: number };
+  if (disabledCount.count >= MAX_DISABLED_REPOSITORIES) {
+    throw new Error('Disabled repository limit exceeded');
+  }
+  createRepository(db, {
+    name: path.basename(resolvedPath),
+    path: resolvedPath,
+    cloneSource: 'local',
+    isEnvManaged: false,
+    enabled: false,  // Explicit: do not rely on undefined -> 1 default
+  });
+}
+
+/**
+ * Disable a repository only when it is already registered (enabled=0).
+ *
+ * Unlike disableRepository(), this never creates a record, so callers that may be
+ * handed a path that was never registered do not leave a ghost `enabled=0` row behind.
+ *
+ * Issue #1346
+ *
+ * @returns true if a registered repository was disabled, false if none was registered
+ */
+export function disableExistingRepository(db: Database.Database, repositoryPath: string): boolean {
   const resolvedPath = resolveRepositoryPath(repositoryPath);
   const repo = getRepositoryByPath(db, resolvedPath);
-  if (repo) {
-    updateRepository(db, repo.id, { enabled: false });
-  } else {
-    // SEC-SF-004: Check disabled repository count limit before creating new record
-    const disabledCount = db.prepare(
-      'SELECT COUNT(*) as count FROM repositories WHERE enabled = 0'
-    ).get() as { count: number };
-    if (disabledCount.count >= MAX_DISABLED_REPOSITORIES) {
-      throw new Error('Disabled repository limit exceeded');
-    }
-    createRepository(db, {
-      name: path.basename(resolvedPath),
-      path: resolvedPath,
-      cloneSource: 'local',
-      isEnvManaged: false,
-      enabled: false,  // Explicit: do not rely on undefined -> 1 default
-    });
-  }
+  if (!repo) return false;
+  updateRepository(db, repo.id, { enabled: false });
+  return true;
 }
 
 /**

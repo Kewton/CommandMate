@@ -14,6 +14,9 @@
  * @module version-checker
  */
 
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
 // =============================================================================
 // Constants
 // =============================================================================
@@ -48,6 +51,14 @@ const CACHE_TTL_MS = 60 * 60 * 1000;
 
 /** Fetch timeout: 5 seconds */
 const FETCH_TIMEOUT_MS = 5000;
+
+/**
+ * npm package name. [Issue #1359] Used to verify that a package.json resolved at
+ * runtime is CommandMate's own manifest and not an unrelated project's — a guard
+ * against an unexpected process.cwd() (e.g. a dev run started from a user's
+ * project directory) leaking a foreign version.
+ */
+const PACKAGE_NAME = 'commandmate';
 
 // =============================================================================
 // Types
@@ -123,13 +134,79 @@ export function isNewerVersion(current: string, latest: string): boolean {
 }
 
 /**
- * Get the current application version.
- * [CONS-002] Uses process.env.NEXT_PUBLIC_APP_VERSION (same as client-side).
+ * Read CommandMate's version from the installed package.json at runtime.
+ *
+ * [Issue #1359] `NEXT_PUBLIC_APP_VERSION` is baked into the bundle at
+ * `next build` time, so it reflects "the version present when the client bundle
+ * was last built", not the version of the server code actually running. Reading
+ * package.json on each call reflects the real installed version, which is what
+ * the update-check API must report as `currentVersion`.
+ *
+ * The server is spawned with cwd = package root (start.ts), so
+ * `process.cwd()/package.json` is the installed manifest. We verify
+ * `name === 'commandmate'` so an unexpected cwd can never leak an unrelated
+ * project's version; on any mismatch or read failure the caller falls back to
+ * the baked value.
+ *
+ * @returns Runtime version string, or null when unreadable / not CommandMate's package.json
+ */
+function readRuntimeServerVersion(): string | null {
+  try {
+    const raw = readFileSync(join(process.cwd(), 'package.json'), 'utf-8');
+    const parsed = JSON.parse(raw) as { name?: unknown; version?: unknown };
+    if (
+      parsed.name === PACKAGE_NAME &&
+      typeof parsed.version === 'string' &&
+      parsed.version.length > 0
+    ) {
+      return parsed.version;
+    }
+    return null;
+  } catch {
+    // Unreadable / malformed package.json: fall back to the baked value.
+    return null;
+  }
+}
+
+/**
+ * Get the client bundle version (baked at build time).
+ * [CONS-002] `NEXT_PUBLIC_APP_VERSION` is injected by next.config.js from
+ * package.json at `next build` time. This is the correct value to describe
+ * "the version of the bundle this page was served from" and is intentionally
+ * left build-time baked (Issue #1359).
+ *
+ * @returns Client bundle version string (e.g., "0.2.3"), or "0.0.0" as fallback
+ */
+export function getClientVersion(): string {
+  return process.env.NEXT_PUBLIC_APP_VERSION ?? '0.0.0';
+}
+
+/**
+ * Get the server's actually-running version, resolved at runtime.
+ * [Issue #1359] Prefers the installed package.json (runtime truth) over the
+ * build-time baked `NEXT_PUBLIC_APP_VERSION`, so update-check reports the version
+ * of the server code that is really running. Separating this from
+ * getClientVersion() is the basis for version-mismatch detection (#1338/#1356).
+ *
+ * Resolution order:
+ *   1. Runtime package.json (name === "commandmate")
+ *   2. Baked NEXT_PUBLIC_APP_VERSION
+ *   3. "0.0.0"
+ *
+ * @returns Server runtime version string (e.g., "0.2.3"), or "0.0.0" as fallback
+ */
+export function getServerVersion(): string {
+  return readRuntimeServerVersion() ?? getClientVersion();
+}
+
+/**
+ * Get the current application version (server runtime version).
+ * Retained for backward compatibility; delegates to getServerVersion().
  *
  * @returns Current version string (e.g., "0.2.3"), or "0.0.0" as fallback
  */
 export function getCurrentVersion(): string {
-  return process.env.NEXT_PUBLIC_APP_VERSION ?? '0.0.0';
+  return getServerVersion();
 }
 
 /**

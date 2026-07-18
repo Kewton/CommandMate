@@ -9,6 +9,7 @@
  */
 
 import { ExitCode } from '../types';
+import { readPackageVersion } from './package-info';
 
 /** Maximum stop-pattern length [SEC4-06] */
 export const MAX_STOP_PATTERN_LENGTH = 500;
@@ -285,4 +286,103 @@ export class ApiError extends Error {
     super(message);
     this.name = 'ApiError';
   }
+}
+
+// =============================================================================
+// Response shape validation & version-skew detection (Issue #1357)
+// =============================================================================
+
+/**
+ * Build the message shown when a daemon response is malformed or the CLI/daemon
+ * versions disagree. Always names the most likely cause — a stale daemon still
+ * running an older build than the installed CLI — and the concrete recovery.
+ */
+function versionSkewMessage(detail: string): string {
+  return (
+    `${detail}. The running CommandMate server may be an older version than this CLI. ` +
+    `Restart it to pick up the current version: commandmate stop && commandmate start`
+  );
+}
+
+/**
+ * Assert that a parsed API response contains the given required top-level fields
+ * (Issue #1357).
+ *
+ * get<T>/post<T>/patch<T> cast the parsed body with `as T` and perform no runtime
+ * validation, so a response from a stale daemon that omits a field silently
+ * degrades to `undefined` downstream (e.g. a missing roster read as an empty
+ * roster). Route responses whose fields you depend on through this guard so a
+ * missing field surfaces as an actionable version-skew error instead of a silent
+ * wrong value.
+ *
+ * @param value - Parsed response body
+ * @param fields - Required top-level field names
+ * @param context - Short endpoint/response label included in the error message
+ * @returns value, typed as T, when it is an object and every required field is present
+ * @throws ApiError when value is not an object or a required field is absent
+ */
+export function assertResponseShape<T>(
+  value: unknown,
+  fields: ReadonlyArray<keyof T & string>,
+  context: string
+): T {
+  if (value === null || typeof value !== 'object') {
+    throw new ApiError(
+      versionSkewMessage(`${context}: expected an object from the server`),
+      ExitCode.UNEXPECTED_ERROR
+    );
+  }
+  const record = value as Record<string, unknown>;
+  for (const field of fields) {
+    if (!(field in record)) {
+      throw new ApiError(
+        versionSkewMessage(`${context}: the server response is missing the "${field}" field`),
+        ExitCode.UNEXPECTED_ERROR
+      );
+    }
+  }
+  return value as T;
+}
+
+/** Minimal shape of GET /api/app/update-check that the CLI relies on (Issue #1357). */
+interface DaemonVersionInfo {
+  currentVersion: string;
+}
+
+/**
+ * Read the version the running daemon reports via GET /api/app/update-check.
+ * Issue #1359 made that field a runtime package.json read, so it reflects the
+ * daemon's actual running code rather than a build-time constant.
+ *
+ * Returns undefined when the endpoint is unreachable or omits currentVersion (an
+ * older daemon predating the field) — callers treat that as "unknown", never as
+ * an error. Never throws.
+ */
+export async function fetchDaemonVersion(client: ApiClient): Promise<string | undefined> {
+  try {
+    const info = await client.get<Partial<DaemonVersionInfo>>('/api/app/update-check');
+    return typeof info?.currentVersion === 'string' && info.currentVersion.length > 0
+      ? info.currentVersion
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Compare this CLI's version against the running daemon's and print a stderr
+ * warning when they differ (Issue #1357). Advisory only: never throws, and stays
+ * silent when either version is unknown. Intended to run once per CLI invocation
+ * that connects to the server, so a stale daemon serving an older API is called
+ * out before its responses are misread.
+ */
+export async function warnIfVersionSkew(client: ApiClient): Promise<void> {
+  const cliVersion = readPackageVersion();
+  if (!cliVersion) return;
+  const daemonVersion = await fetchDaemonVersion(client);
+  if (!daemonVersion || daemonVersion === cliVersion) return;
+  console.error(
+    `Warning: this CLI is version ${cliVersion} but the running CommandMate server is version ${daemonVersion}. ` +
+    `Restart the server to pick up the current version: commandmate stop && commandmate start`
+  );
 }

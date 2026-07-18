@@ -7,11 +7,12 @@
  * Issue #438: PC file display panel with tabs
  * Issue #469: isDirty indicator for unsaved edits
  * Issue #505: Dropdown for 6+ tabs, onMoveToFront, onOpenFile passthrough
+ * Issue #1365: Overflow dropdown clamped to the viewport
  */
 
 'use client';
 
-import React, { memo, useCallback, useState, useEffect, useRef } from 'react';
+import React, { memo, useCallback, useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { X, ChevronDown } from 'lucide-react';
 import { FilePanelContent } from './FilePanelContent';
@@ -24,6 +25,24 @@ import type { FileContent } from '@/types/models';
 
 /** Number of tabs shown in the tab bar before overflow into dropdown */
 const VISIBLE_TAB_COUNT = 5;
+
+/** Space (px) kept between the overflow dropdown and the viewport edge. [Issue #1365] */
+const VIEWPORT_MARGIN = 8;
+
+/**
+ * Offset needed to pull a `[start, start + size]` span back inside a viewport
+ * of `viewport` px on one axis, keeping `VIEWPORT_MARGIN` clear at both ends.
+ * Returns 0 when the span already fits. A span longer than the viewport is
+ * never pushed past the leading margin, so its head stays visible.
+ * `size <= 0` means the element has not been laid out — nothing to correct.
+ */
+function clampShift(start: number, size: number, viewport: number): number {
+  if (size <= 0 || viewport <= 0) return 0;
+  const overflow = start + size + VIEWPORT_MARGIN - viewport;
+  if (overflow > 0) return -Math.min(overflow, Math.max(0, start - VIEWPORT_MARGIN));
+  if (start < VIEWPORT_MARGIN) return VIEWPORT_MARGIN - start;
+  return 0;
+}
 
 // ============================================================================
 // Types
@@ -148,6 +167,9 @@ export const FilePanelTabs = memo(function FilePanelTabs({
 }: FilePanelTabsProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const shiftRef = useRef({ x: 0, y: 0 });
+  const [shift, setShift] = useState({ x: 0, y: 0 });
 
   const activeTab = activeIndex !== null && activeIndex >= 0 && activeIndex < tabs.length
     ? tabs[activeIndex]
@@ -166,6 +188,29 @@ export const FilePanelTabs = memo(function FilePanelTabs({
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [dropdownOpen]);
+
+  // Keep the overflow dropdown inside the viewport. It stays absolutely
+  // positioned rather than portalled, because the click-outside handler above
+  // asks whether the click landed inside `dropdownRef`. [Issue #1365]
+  useLayoutEffect(() => {
+    const applyShift = (next: { x: number; y: number }): void => {
+      shiftRef.current = next;
+      setShift((prev) => (prev.x === next.x && prev.y === next.y ? prev : next));
+    };
+    if (!dropdownOpen) {
+      applyShift({ x: 0, y: 0 });
+      return;
+    }
+    const el = menuRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    // Subtract the shift already applied so the measurement describes the
+    // dropdown's uncorrected position and re-running stays idempotent.
+    applyShift({
+      x: clampShift(rect.left - shiftRef.current.x, rect.width, window.innerWidth),
+      y: clampShift(rect.top - shiftRef.current.y, rect.height, window.innerHeight),
+    });
   }, [dropdownOpen]);
 
   const handleDropdownSelect = useCallback((path: string) => {
@@ -205,7 +250,16 @@ export const FilePanelTabs = memo(function FilePanelTabs({
               <span>+{overflowTabs.length}</span>
             </button>
             {dropdownOpen && (
-              <div className="absolute right-0 top-full mt-1 bg-surface border border-border rounded-md shadow-lg z-50 min-w-[200px] max-h-[300px] overflow-y-auto">
+              <div
+                ref={menuRef}
+                data-testid="tab-dropdown-menu"
+                className="absolute right-0 top-full mt-1 bg-surface border border-border rounded-md shadow-lg z-50 min-w-[200px] max-h-[300px] overflow-y-auto"
+                style={
+                  shift.x !== 0 || shift.y !== 0
+                    ? { transform: `translate(${shift.x}px, ${shift.y}px)` }
+                    : undefined
+                }
+              >
                 {overflowTabs.map(tab => (
                   <button
                     key={tab.path}

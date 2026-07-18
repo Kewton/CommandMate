@@ -87,10 +87,37 @@ export function groupByCategory(commands: SlashCommand[]): SlashCommandGroup[] {
 }
 
 /**
+ * Build a deduplication key from a command's name + normalized CLI tool scope.
+ *
+ * Issue #800, #1380: The key is `name + cliTools` (not name alone). Undefined or
+ * empty cliTools (= Claude-only, backward compatible) collapse to the `claude`
+ * sentinel so they stay distinct from CLI-specific entries that share the same
+ * name. cliTools order is normalized (sorted) so `['codex','gemini']` and
+ * `['gemini','codex']` produce the same key.
+ *
+ * Shared by deduplicateByName() (slash-commands.ts) and mergeCommandGroups()
+ * below so both dedup layers use the same key granularity (DRY). Without this,
+ * mergeCommandGroups() keyed on name alone would collapse a Claude entry
+ * (cliTools undefined) and a Codex entry (cliTools ['codex']) that share a name
+ * into one, silently dropping the Claude side (Issue #1380).
+ *
+ * @param c - Command to derive a key for
+ * @returns Deduplication key in the form `name::toolsKey`
+ */
+export function keyOf(c: SlashCommand): string {
+  const toolsKey =
+    c.cliTools && c.cliTools.length > 0 ? [...c.cliTools].sort().join(',') : 'claude';
+  return `${c.name}::${toolsKey}`;
+}
+
+/**
  * Merge standard and worktree command groups
  *
- * SF-1: Worktree commands take priority over standard commands.
- * When a command name exists in both, the worktree version is used.
+ * SF-1: Worktree commands take priority over standard commands within the same
+ * CLI tool scope. When a command name AND CLI tool scope exist in both, the
+ * worktree version is used. Entries that share a name but target disjoint CLI
+ * tools (e.g. a Claude command with cliTools undefined and a Codex skill with
+ * cliTools ['codex']) coexist instead of one overriding the other (Issue #1380).
  *
  * @param standardGroups - Standard command groups
  * @param worktreeGroups - Worktree-specific command groups
@@ -100,23 +127,24 @@ export function mergeCommandGroups(
   standardGroups: SlashCommandGroup[],
   worktreeGroups: SlashCommandGroup[]
 ): SlashCommandGroup[] {
-  // Use a Map to deduplicate by command name
+  // Use a Map to deduplicate by command name + CLI tool scope (Issue #1380)
   const commandMap = new Map<string, SlashCommand>();
 
   // 1. Register standard commands first
   for (const group of standardGroups) {
     for (const cmd of group.commands) {
-      commandMap.set(cmd.name, {
+      commandMap.set(keyOf(cmd), {
         ...cmd,
         source: cmd.source || 'standard',
       });
     }
   }
 
-  // 2. Worktree commands override standard commands (SF-1)
+  // 2. Worktree commands override standard commands with the same name AND same
+  //    CLI tool scope (SF-1); disjoint scopes coexist (Issue #1380)
   for (const group of worktreeGroups) {
     for (const cmd of group.commands) {
-      commandMap.set(cmd.name, {
+      commandMap.set(keyOf(cmd), {
         ...cmd,
         source: cmd.source || 'worktree',
       });

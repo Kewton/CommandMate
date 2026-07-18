@@ -44,11 +44,31 @@ export function getDbInstance(): Database.Database {
     }
 
     // Issue #1263: recover from a better-sqlite3 ABI mismatch (Node.js version switch)
-    dbInstance = openDatabaseWithAbiRecovery(dbPath);
+    const db = openDatabaseWithAbiRecovery(dbPath);
     // Issue #294: Enable foreign key enforcement BEFORE migrations
     // This ensures ON DELETE CASCADE works correctly for all tables
-    dbInstance.pragma('foreign_keys = ON');
-    runMigrations(dbInstance);
+    db.pragma('foreign_keys = ON');
+
+    // Issue #1360: harden against SQLITE_BUSY when the same DB file is opened by
+    // more than one process (e.g. a misconfigured worktree server sharing
+    // CM_DB_PATH). WAL lets readers and a single writer coexist instead of
+    // taking an exclusive lock, and busy_timeout makes a contended write wait
+    // for the lock (up to 5s) rather than failing immediately with the default
+    // busy_timeout of 0. Set before migrations so migration writes benefit too.
+    db.pragma('journal_mode = WAL');
+    db.pragma('busy_timeout = 5000');
+
+    // Issue #1353: only publish the connection once its schema is verified.
+    // Assigning before runMigrations() cached a database whose migrations had
+    // thrown, so every later caller was handed it back without the failure —
+    // the guard would fire once and be bypassed for the rest of the process.
+    try {
+      runMigrations(db);
+    } catch (error) {
+      db.close();
+      throw error;
+    }
+    dbInstance = db;
   }
 
   return dbInstance;

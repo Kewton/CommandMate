@@ -7,7 +7,7 @@
 
 import { NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { getRepositoryPaths, scanMultipleRepositories } from '@/lib/git/worktrees';
+import { getRepositoryPaths, scanMultipleRepositories, pruneStaleRepositoryWorktrees } from '@/lib/git/worktrees';
 import { registerAndFilterRepositories, getAllRepositories } from '@/lib/db/db-repository';
 import { syncWorktreesAndCleanup } from '@/lib/session-cleanup';
 import { createLogger } from '@/lib/logger';
@@ -48,6 +48,13 @@ export async function POST() {
     // Issue #526: Sync to database and clean up sessions for deleted worktrees
     const { syncResult, cleanupWarnings } = await syncWorktreesAndCleanup(db, allWorktrees);
 
+    // Issue #1349: a deleted / de-gitified repository scans to [] (git exit 128),
+    // so its worktree rows never reach syncWorktreesToDB's per-repo prune and
+    // linger as ghost rows in the sidebar. Reconcile them here — on the global
+    // sync, which is the only caller with authority over every repository —
+    // deleting rows only for repositories whose directory is genuinely gone.
+    const staleDeletedIds = pruneStaleRepositoryWorktrees(db, allWorktrees);
+
     // Get unique repository count
     const uniqueRepos = new Set(allWorktrees.map(wt => wt.repositoryPath));
 
@@ -58,7 +65,7 @@ export async function POST() {
         worktreeCount: allWorktrees.length,
         repositoryCount: uniqueRepos.size,
         repositories: Array.from(uniqueRepos),
-        deletedCount: syncResult.deletedIds.length,
+        deletedCount: syncResult.deletedIds.length + staleDeletedIds.length,
         cleanupWarnings,
       },
       { status: 200 }

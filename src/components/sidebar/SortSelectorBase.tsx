@@ -9,7 +9,7 @@
 
 'use client';
 
-import React, { memo, useState, useRef, useEffect, useCallback } from 'react';
+import React, { memo, useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
 import { Tooltip } from '@/components/common/Tooltip';
 import type { SortKey, SortDirection } from '@/lib/sidebar-utils';
@@ -22,6 +22,28 @@ import type { SortKey, SortDirection } from '@/lib/sidebar-utils';
 export interface SortOption {
   key: SortKey;
   label: string;
+}
+
+// ============================================================================
+// Viewport clamping
+// ============================================================================
+
+/** Space (px) kept between the dropdown and the viewport edge. [Issue #1365] */
+const VIEWPORT_MARGIN = 8;
+
+/**
+ * Offset needed to pull a `[start, start + size]` span back inside a viewport
+ * of `viewport` px on one axis, keeping `VIEWPORT_MARGIN` clear at both ends.
+ * Returns 0 when the span already fits. A span longer than the viewport is
+ * never pushed past the leading margin, so its head stays visible.
+ * `size <= 0` means the element has not been laid out — nothing to correct.
+ */
+function clampShift(start: number, size: number, viewport: number): number {
+  if (size <= 0 || viewport <= 0) return 0;
+  const overflow = start + size + VIEWPORT_MARGIN - viewport;
+  if (overflow > 0) return -Math.min(overflow, Math.max(0, start - VIEWPORT_MARGIN));
+  if (start < VIEWPORT_MARGIN) return VIEWPORT_MARGIN - start;
+  return 0;
 }
 
 /** Props for SortSelectorBase */
@@ -80,6 +102,9 @@ export const SortSelectorBase = memo(function SortSelectorBase({
   const t = useTranslations('common');
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const shiftRef = useRef({ x: 0, y: 0 });
+  const [shift, setShift] = useState({ x: 0, y: 0 });
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -107,6 +132,32 @@ export const SortSelectorBase = memo(function SortSelectorBase({
       document.addEventListener('keydown', handleEscape);
       return () => document.removeEventListener('keydown', handleEscape);
     }
+  }, [isOpen]);
+
+  // Keep the dropdown inside the viewport. The sidebar header deliberately has
+  // no overflow clipping, so the menu is not cut off — but a selector sitting
+  // low or hard against an edge can still open partly off-screen. It stays
+  // absolutely positioned rather than portalled, because the click-outside
+  // handler above asks whether the click landed inside `containerRef`.
+  // [Issue #1365]
+  useLayoutEffect(() => {
+    const applyShift = (next: { x: number; y: number }): void => {
+      shiftRef.current = next;
+      setShift((prev) => (prev.x === next.x && prev.y === next.y ? prev : next));
+    };
+    if (!isOpen) {
+      applyShift({ x: 0, y: 0 });
+      return;
+    }
+    const el = menuRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    // Subtract the shift already applied so the measurement describes the
+    // menu's uncorrected position and re-running stays idempotent.
+    applyShift({
+      x: clampShift(rect.left - shiftRef.current.x, rect.width, window.innerWidth),
+      y: clampShift(rect.top - shiftRef.current.y, rect.height, window.innerHeight),
+    });
   }, [isOpen]);
 
   const handleToggle = useCallback(() => {
@@ -188,6 +239,7 @@ export const SortSelectorBase = memo(function SortSelectorBase({
       {/* Dropdown menu */}
       {isOpen && (
         <div
+          ref={menuRef}
           role="listbox"
           aria-label={t('sort.options')}
           className="
@@ -195,6 +247,11 @@ export const SortSelectorBase = memo(function SortSelectorBase({
             min-w-[140px] py-1 rounded-md shadow-lg
             bg-sidebar border border-sidebar-border
           "
+          style={
+            shift.x !== 0 || shift.y !== 0
+              ? { transform: `translate(${shift.x}px, ${shift.y}px)` }
+              : undefined
+          }
         >
           {options.map((option) => (
             <button

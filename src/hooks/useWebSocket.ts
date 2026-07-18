@@ -18,9 +18,27 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { parseRealtimeEvent, type RealtimeEvent, type RealtimeStatus } from '@/lib/realtime/types';
+import {
+  CLIENT_VERSION_MESSAGE_TYPE,
+  parseRealtimeEvent,
+  type RealtimeEvent,
+  type RealtimeStatus,
+} from '@/lib/realtime/types';
 
 export type WebSocketStatus = RealtimeStatus;
+
+/**
+ * Version of the client bundle this tab was built from (#1338/#1356).
+ *
+ * Mirrors `version-checker.getClientVersion()` but reads the baked env directly:
+ * version-checker.ts imports `fs`/`path` at module scope (it resolves the server's
+ * runtime package.json), so importing it here would drag Node built-ins into the
+ * client bundle. `NEXT_PUBLIC_APP_VERSION` is inlined at build time, so this is
+ * exactly the bundle's own version.
+ */
+function getClientBundleVersion(): string {
+  return process.env.NEXT_PUBLIC_APP_VERSION ?? '0.0.0';
+}
 
 export const DEFAULT_RECONNECT_BASE_DELAY_MS = 1000;
 export const DEFAULT_RECONNECT_MAX_DELAY_MS = 30000;
@@ -125,6 +143,16 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
     ws.onopen = () => {
       attemptRef.current = 0;
       updateStatus('connected');
+      // Announce this tab's bundle version so the server can flag a version
+      // drift after a server upgrade (#1338/#1356). Sent on every (re)connect —
+      // a reconnect right after a server swap is exactly when detection matters.
+      try {
+        ws.send(
+          JSON.stringify({ type: CLIENT_VERSION_MESSAGE_TYPE, version: getClientBundleVersion() }),
+        );
+      } catch {
+        // best-effort; a failing send means the socket is already closing.
+      }
       // Re-send the full subscription set on every (re)connect.
       subscribedRef.current.forEach((id) => {
         try {

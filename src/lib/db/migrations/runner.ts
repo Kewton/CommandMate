@@ -24,7 +24,7 @@ export interface Migration {
  * Current schema version
  * Increment this when adding new migrations
  */
-export const CURRENT_SCHEMA_VERSION = 42;
+export const CURRENT_SCHEMA_VERSION = 43;
 
 /**
  * Get current schema version from database
@@ -70,6 +70,19 @@ export function runMigrations(db: Database.Database, migrations: Migration[]): v
   const currentVersion = getCurrentVersion(db);
 
   console.log(`Current schema version: ${currentVersion}`);
+
+  // Issue #1353: refuse a database written by a newer build.
+  // Migrations only move forward, so this build has no definition for the
+  // schema it is looking at: queries still written against renamed/dropped
+  // columns would fail at runtime, long after startup reported success.
+  // The check sits after the version read but before any migration writes.
+  if (currentVersion > CURRENT_SCHEMA_VERSION) {
+    throw new Error(
+      `This database (schema v${currentVersion}) was created by a newer version of CommandMate ` +
+      `(this build supports up to v${CURRENT_SCHEMA_VERSION}). ` +
+      `Please update: commandmate update`
+    );
+  }
 
   // Find pending migrations
   const pendingMigrations = migrations.filter(

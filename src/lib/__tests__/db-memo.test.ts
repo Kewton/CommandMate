@@ -18,6 +18,7 @@ import {
   updateMemo,
   deleteMemo,
   reorderMemos,
+  MemoDbError,
 } from '../db';
 
 describe('Database Memo Operations', () => {
@@ -166,12 +167,22 @@ describe('Database Memo Operations', () => {
       expect(memo.updatedAt.getTime()).toBeLessThanOrEqual(after);
     });
 
-    it('should throw error when creating memo at occupied position', () => {
+    it('should throw MemoDbError(DUPLICATE_POSITION) when creating memo at occupied position', () => {
+      // Issue #1351: the raw UNIQUE(worktree_id, position) failure is converted
+      // into a typed, coded error so the API can map it to a 409 instead of a 500.
       createMemo(testDb, 'test-worktree', { position: 0 });
 
-      expect(() => {
+      let caught: unknown;
+      try {
         createMemo(testDb, 'test-worktree', { position: 0 });
-      }).toThrow(/UNIQUE constraint failed/);
+      } catch (error) {
+        caught = error;
+      }
+
+      expect(caught).toBeInstanceOf(MemoDbError);
+      expect((caught as MemoDbError).code).toBe('DUPLICATE_POSITION');
+      // The original driver error is preserved as the cause for diagnostics.
+      expect((caught as MemoDbError).cause?.message).toMatch(/UNIQUE constraint failed/);
     });
 
     it('should allow creating memo at next available position', () => {
