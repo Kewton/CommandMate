@@ -57,7 +57,7 @@ import { useLocaleSwitch } from '@/hooks/useLocaleSwitch';
 import { repositoryApi } from '@/lib/api-client';
 import { StatusDot, type StatusDotStatus } from '@/components/ui/StatusDot';
 import { Kbd } from '@/components/ui/Kbd';
-import { useToast, ToastContainer } from '@/components/common/Toast';
+import { useToast } from '@/components/common/Toast';
 import type { Worktree } from '@/types/models';
 
 /** Navigation targets shown in the palette (mirrors Header / GlobalMobileNav). */
@@ -207,7 +207,7 @@ export function CommandPalette() {
   // Read from the shared worktrees cache (always fresh + auto-retried). Optional
   // so the palette degrades gracefully when no provider is present (unit tests).
   const worktreesCache = useOptionalWorktreesCacheContext();
-  const { toasts, showToast, removeToast } = useToast();
+  const { showToast } = useToast();
 
   const [mounted, setMounted] = useState(false);
   const [search, setSearch] = useState('');
@@ -630,10 +630,6 @@ export function CommandPalette() {
           </div>
         </div>
       )}
-
-      {/* Persistent so a toast (e.g. Sync repositories) survives the palette
-          closing after the command runs. */}
-      <ToastContainer toasts={toasts} onClose={removeToast} />
     </>,
     document.body
   );

@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import { Toast, ToastContainer, useToast } from '@/components/common/Toast';
+import { Toast, ToastContainer, ToastProvider, useToast } from '@/components/common/Toast';
 import { EXIT_ANIMATION_DURATION_MS } from '@/config/ui-feedback-config';
 import type { ToastType } from '@/types/markdown-editor';
 
@@ -39,6 +39,17 @@ function TestComponent() {
       </button>
       <ToastContainer toasts={toasts} onClose={removeToast} />
     </div>
+  );
+}
+
+// [Issue #1400] Consumer that emits toasts through the shared context only — it
+// renders NO container of its own, relying on the single host in ToastProvider.
+function ProviderConsumer({ label, message }: { label: string; message: string }) {
+  const { showToast } = useToast();
+  return (
+    <button data-testid={label} onClick={() => showToast(message, 'success')}>
+      {label}
+    </button>
   );
 }
 
@@ -496,6 +507,45 @@ describe('Toast Component', () => {
       expect(toast).toHaveClass('fade-out-0');
       expect(toast).toHaveClass('slide-out-to-right-full');
       expect(toast).not.toHaveClass('animate-slide-in');
+    });
+  });
+
+  // [Issue #1400] The app-wide provider owns one shared queue + a single
+  // container host; consumers get showToast via context and render no container.
+  describe('ToastProvider', () => {
+    it('renders exactly one container host and surfaces a consumer toast', () => {
+      render(
+        <ToastProvider>
+          <ProviderConsumer label="a" message="From A" />
+        </ToastProvider>
+      );
+
+      expect(screen.getAllByTestId('toast-container')).toHaveLength(1);
+      expect(screen.queryByText('From A')).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId('a'));
+
+      expect(screen.getByText('From A')).toBeInTheDocument();
+      // Still a single host after showing a toast.
+      expect(screen.getAllByTestId('toast-container')).toHaveLength(1);
+    });
+
+    it('shares one queue across multiple consumers', () => {
+      render(
+        <ToastProvider>
+          <ProviderConsumer label="a" message="From A" />
+          <ProviderConsumer label="b" message="From B" />
+        </ToastProvider>
+      );
+
+      fireEvent.click(screen.getByTestId('a'));
+      fireEvent.click(screen.getByTestId('b'));
+
+      const container = screen.getByTestId('toast-container');
+      expect(container).toHaveTextContent('From A');
+      expect(container).toHaveTextContent('From B');
+      // Both toasts stack in the same single container.
+      expect(container.children).toHaveLength(2);
     });
   });
 });

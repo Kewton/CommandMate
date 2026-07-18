@@ -71,7 +71,6 @@ import {
 import { MobileContent } from '@/components/worktree/WorktreeDetailMobile';
 import { WorktreeDetailDesktop } from '@/components/worktree/WorktreeDetailDesktop';
 import { UPLOADABLE_EXTENSIONS } from '@/config/uploadable-extensions';
-import { ToastContainer } from '@/components/common/Toast';
 import { Modal } from '@/components/ui/Modal';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
@@ -230,7 +229,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     openMobileDrawer,
     pendingInsertText,
     pendingInsertTextMap,
-    removeToast,
     rosterReady,
     setActiveInstanceId,
     setEditorFilePath,
@@ -247,7 +245,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     tabsActions,
     tabsState,
     resetFileTreeView,
-    toasts,
     toggleInstanceVisible,
     vibeLocalContextWindow,
     vibeLocalModel,
@@ -415,8 +412,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           newFileParentPath={newFileParentPath}
           onNewFileConfirm={handleNewFileConfirm}
           onNewFileCancel={handleNewFileCancel}
-          toasts={toasts}
-          onToastClose={removeToast}
           killDialogTitle={tWorktree('session.confirmEnd', { tool: killDialogLabel })}
           killDialogWarning={tWorktree('session.endWarning')}
           cancelLabel={tCommon('cancel')}
@@ -782,8 +777,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           onConfirm={handleNewFileConfirm}
           onCancel={handleNewFileCancel}
         />
-        {/* Toast notifications (Mobile) */}
-        <ToastContainer toasts={toasts} onClose={removeToast} />
       </div>
     </ErrorBoundary>
   );
