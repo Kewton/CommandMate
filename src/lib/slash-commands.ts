@@ -25,7 +25,7 @@ import type {
   SlashCommandGroup,
 } from '@/types/slash-commands';
 import { COMMAND_CATEGORIES } from '@/types/slash-commands';
-import { groupByCategory } from '@/lib/command-merger';
+import { groupByCategory, keyOf } from '@/lib/command-merger';
 import { isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
 import { truncateString } from '@/lib/utils';
 import { createLogger } from '@/lib/logger';
@@ -507,14 +507,9 @@ export function getGeminiBuiltinCommands(): SlashCommand[] {
 export function deduplicateByName(skills: SlashCommand[], commands: SlashCommand[]): SlashCommand[] {
   const map = new Map<string, SlashCommand>();
 
-  // Build a key from name + normalized CLI tool scope. Undefined/empty cliTools
-  // (= Claude-only, backward compatible) collapse to the 'claude' sentinel so
-  // they stay distinct from CLI-specific entries that share the same name.
-  const keyOf = (c: SlashCommand): string => {
-    const toolsKey =
-      c.cliTools && c.cliTools.length > 0 ? [...c.cliTools].sort().join(',') : 'claude';
-    return `${c.name}::${toolsKey}`;
-  };
+  // Key = name + normalized CLI tool scope (see keyOf in command-merger.ts).
+  // Shared with mergeCommandGroups() so both dedup layers agree on granularity
+  // (Issue #800, #1380).
 
   // Register skills first
   for (const skill of skills) {
