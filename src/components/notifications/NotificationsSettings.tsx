@@ -12,7 +12,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Bell } from 'lucide-react';
 import { Button, Card, Spinner, Switch } from '@/components/ui';
-import { useToast, ToastContainer } from '@/components/common/Toast';
+import { useToast } from '@/components/common/Toast';
 import {
   urlBase64ToUint8Array,
   isPushSupported,
@@ -26,7 +26,7 @@ interface Prefs {
 
 export function NotificationsSettings() {
   const t = useTranslations('notifications');
-  const { showToast, toasts, removeToast } = useToast();
+  const { showToast } = useToast();
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -292,7 +292,6 @@ export function NotificationsSettings() {
   return (
     <Card>
       {renderBody()}
-      <ToastContainer toasts={toasts} onClose={removeToast} />
     </Card>
   );
 }

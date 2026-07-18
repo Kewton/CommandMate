@@ -9,7 +9,17 @@
 
 'use client';
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+  useRef,
+  type ReactNode,
+} from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import { CheckCircle, XCircle, Info, AlertTriangle, X } from 'lucide-react';
 import { Z_INDEX } from '@/config/z-index';
@@ -240,7 +250,20 @@ export interface ToastContainerProps {
  * ```
  */
 export function ToastContainer({ toasts, onClose }: ToastContainerProps) {
-  return (
+  // [Issue #1399] Render through a portal to `document.body` so the container's
+  // `position: fixed` resolves against the viewport. When mounted inside a
+  // transformed ancestor (AppShell's `<aside data-testid="sidebar-container">`
+  // uses a transform), that ancestor becomes the containing block for `fixed`,
+  // pinning the toasts to the sidebar's box and clipping their left edge instead
+  // of the intended bottom-right of the screen. Guarded on `mounted` so the
+  // server render (where `document` is absent) yields null and the portal only
+  // appears after client hydration — the same pattern as CommandPalette / Modal.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const container = (
     <div
       data-testid="toast-container"
       aria-live="polite"
@@ -259,36 +282,35 @@ export function ToastContainer({ toasts, onClose }: ToastContainerProps) {
       ))}
     </div>
   );
+
+  if (!mounted) return null;
+
+  return createPortal(container, document.body);
 }
 
 /**
- * Hook for managing toast notifications
- *
- * @example
- * ```tsx
- * function MyComponent() {
- *   const { showToast, toasts, removeToast } = useToast();
- *
- *   const handleSave = () => {
- *     showToast('File saved successfully', 'success');
- *   };
- *
- *   return (
- *     <>
- *       <button onClick={handleSave}>Save</button>
- *       <ToastContainer toasts={toasts} onClose={removeToast} />
- *     </>
- *   );
- * }
- * ```
+ * Shared shape for the toast controls returned by {@link useToast} and provided
+ * by {@link ToastProvider}.
  */
-export function useToast() {
+export interface ToastContextValue {
+  /** Currently visible toasts */
+  toasts: ToastItem[];
+  /** Show a new toast notification; returns the generated id */
+  showToast: (message: string, type?: ToastType, duration?: number) => string;
+  /** Remove a toast by id */
+  removeToast: (id: string) => void;
+  /** Clear all toasts */
+  clearToasts: () => void;
+}
+
+/**
+ * Internal state machine for toast notifications. Backs both the shared
+ * {@link ToastProvider} and the provider-less fallback in {@link useToast}.
+ */
+function useToastState(): ToastContextValue {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const idCounterRef = useRef(0);
 
-  /**
-   * Show a new toast notification
-   */
   const showToast = useCallback(
     (message: string, type: ToastType = 'info', duration: number = DEFAULT_DURATION) => {
       const id = `toast-${++idCounterRef.current}-${Date.now()}`;
@@ -304,26 +326,62 @@ export function useToast() {
     []
   );
 
-  /**
-   * Remove a toast by ID
-   */
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   }, []);
 
-  /**
-   * Clear all toasts
-   */
   const clearToasts = useCallback(() => {
     setToasts([]);
   }, []);
 
-  return {
-    toasts,
-    showToast,
-    removeToast,
-    clearToasts,
-  };
+  return useMemo(
+    () => ({ toasts, showToast, removeToast, clearToasts }),
+    [toasts, showToast, removeToast, clearToasts]
+  );
+}
+
+const ToastContext = createContext<ToastContextValue | null>(null);
+
+/**
+ * ToastProvider (Issue #1400)
+ *
+ * Holds a single app-wide toast queue and renders the one and only
+ * <ToastContainer> (portaled to `document.body`, per Issue #1399, so it escapes
+ * any transformed ancestor and pins to the viewport's bottom-right). Mount it
+ * once above the app (see AppProviders); every useToast() below then shares the
+ * same queue instead of spawning its own detached container.
+ */
+export function ToastProvider({ children }: { children: ReactNode }) {
+  const value = useToastState();
+  return (
+    <ToastContext.Provider value={value}>
+      {children}
+      <ToastContainer toasts={value.toasts} onClose={value.removeToast} />
+    </ToastContext.Provider>
+  );
+}
+
+/**
+ * Hook for showing toast notifications.
+ *
+ * Returns the shared controls from the nearest {@link ToastProvider} (the normal
+ * case — AppProviders mounts one globally, so a single container renders every
+ * toast). With no provider above it falls back to a local, self-contained
+ * instance so isolated components/tests still work; render your own
+ * <ToastContainer> in that case.
+ *
+ * @example
+ * ```tsx
+ * function SaveButton() {
+ *   const { showToast } = useToast();
+ *   return <button onClick={() => showToast('Saved', 'success')}>Save</button>;
+ * }
+ * ```
+ */
+export function useToast(): ToastContextValue {
+  const ctx = useContext(ToastContext);
+  const local = useToastState();
+  return ctx ?? local;
 }
 
 // Re-export types for convenience

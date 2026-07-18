@@ -22,6 +22,7 @@ import { WorktreesCacheProvider } from '@/components/providers/WorktreesCachePro
 import { ViewTransitionsProvider } from '@/components/providers/ViewTransitionsProvider';
 import { RealtimeProvider } from '@/hooks/useRealtimeConnection';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
+import { ToastProvider } from '@/components/common/Toast';
 import { ServiceWorkerRegistrar } from '@/components/pwa/ServiceWorkerRegistrar';
 
 interface AppProvidersProps {
@@ -45,36 +46,41 @@ interface AppProvidersProps {
 export function AppProviders({ children, locale, messages, timeZone, authEnabled = false }: AppProvidersProps) {
   return (
     <NextIntlClientProvider locale={locale} messages={messages} timeZone={timeZone}>
-      <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-        <AuthProvider authEnabled={authEnabled}>
-          <PcDisplaySizeProvider>
-            <SidebarProvider>
-              {/* Issue #1120: single shared WebSocket connection wrapping the
-                  worktrees cache so session-status / message / terminal pushes
-                  feed the sidebar and terminal panes; polling remains the
-                  fallback when disconnected. */}
-              <RealtimeProvider>
-                <WorktreesCacheProvider>
-                  <CommandPaletteProvider>
-                    {/* Issue #1130: `?` keyboard-shortcuts help overlay open state. */}
-                    <KeyboardShortcutsProvider>
-                      <ConfirmProvider>
-                        {/* Issue #1141: View Transitions wraps the routed content. */}
-                        <ViewTransitionsProvider>
-                          {children}
-                        </ViewTransitionsProvider>
-                        {/* Issue #1124: registers the Service Worker (prod only)
-                            and shows the update-available prompt. */}
-                        <ServiceWorkerRegistrar />
-                      </ConfirmProvider>
-                    </KeyboardShortcutsProvider>
-                  </CommandPaletteProvider>
-                </WorktreesCacheProvider>
-              </RealtimeProvider>
-            </SidebarProvider>
-          </PcDisplaySizeProvider>
-        </AuthProvider>
-      </ThemeProvider>
+      {/* Issue #1400: single app-wide toast queue + one portaled ToastContainer.
+          Sits inside NextIntlClientProvider so the toast close-button aria-label
+          resolves, and wraps everything so any useToast() below shares it. */}
+      <ToastProvider>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          <AuthProvider authEnabled={authEnabled}>
+            <PcDisplaySizeProvider>
+              <SidebarProvider>
+                {/* Issue #1120: single shared WebSocket connection wrapping the
+                    worktrees cache so session-status / message / terminal pushes
+                    feed the sidebar and terminal panes; polling remains the
+                    fallback when disconnected. */}
+                <RealtimeProvider>
+                  <WorktreesCacheProvider>
+                    <CommandPaletteProvider>
+                      {/* Issue #1130: `?` keyboard-shortcuts help overlay open state. */}
+                      <KeyboardShortcutsProvider>
+                        <ConfirmProvider>
+                          {/* Issue #1141: View Transitions wraps the routed content. */}
+                          <ViewTransitionsProvider>
+                            {children}
+                          </ViewTransitionsProvider>
+                          {/* Issue #1124: registers the Service Worker (prod only)
+                              and shows the update-available prompt. */}
+                          <ServiceWorkerRegistrar />
+                        </ConfirmProvider>
+                      </KeyboardShortcutsProvider>
+                    </CommandPaletteProvider>
+                  </WorktreesCacheProvider>
+                </RealtimeProvider>
+              </SidebarProvider>
+            </PcDisplaySizeProvider>
+          </AuthProvider>
+        </ThemeProvider>
+      </ToastProvider>
     </NextIntlClientProvider>
   );
 }

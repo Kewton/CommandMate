@@ -9,7 +9,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
 import { Card, CardHeader, CardTitle, CardContent, Button, Badge, Input, Spinner } from '@/components/ui';
-import { ToastContainer, useToast } from '@/components/common/Toast';
+import { useToast } from '@/components/common/Toast';
 import { worktreeApi, handleApiError } from '@/lib/api-client';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { escapeRegExp, escapeHtml } from '@/lib/utils';
@@ -36,7 +36,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
   const [currentMatchIndex, setCurrentMatchIndex] = useState<number>(0);
   const [cliToolFilter, setCliToolFilter] = useState<'all' | 'claude' | 'codex' | 'gemini' | 'antigravity'>('all');
   const [exporting, setExporting] = useState(false);
-  const { toasts, showToast, removeToast } = useToast();
+  const { showToast } = useToast();
   const t = useTranslations('worktree');
 
   /**
@@ -408,9 +408,6 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
           </CardContent>
         </Card>
       )}
-
-      {/* Toast notifications */}
-      <ToastContainer toasts={toasts} onClose={removeToast} />
     </div>
   );
 }
