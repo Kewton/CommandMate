@@ -20,7 +20,7 @@ import { closeSync, openSync } from 'fs';
 import { join } from 'path';
 import { NextResponse } from 'next/server';
 // Cross-layer import from the CLI utils, matching the update-check route [CONS-001].
-import { ensureConfigDir, isGlobalInstall } from '@/cli/utils/install-context';
+import { ensureConfigDir, isGlobalInstall, isNpxExecution } from '@/cli/utils/install-context';
 import { getDaemonManagerFactory } from '@/cli/utils/daemon-factory';
 import { acquireUpdateLock, releaseUpdateLock } from '@/lib/app-update/update-lock';
 
@@ -50,7 +50,7 @@ export interface UpdateStartResponse {
 /** Failure payload */
 export interface UpdateErrorResponse {
   error: string;
-  code: 'not_global' | 'in_progress' | 'spawn_failed';
+  code: 'not_global' | 'npx' | 'in_progress' | 'spawn_failed';
 }
 
 type UpdateResponse = UpdateStartResponse | UpdateErrorResponse;
@@ -63,6 +63,25 @@ type UpdateResponse = UpdateStartResponse | UpdateErrorResponse;
 function isGlobalInstallSafe(): boolean {
   try {
     return isGlobalInstall();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * npx detection that treats a detection failure as "not npx", so a failure
+ * falls through to the global-install gate rather than mislabeling the error.
+ *
+ * Issue #1394: a server started with `npx commandmate` runs from the npx cache,
+ * which isGlobalInstall() reports as global (Issue #1195). Spawning
+ * `commandmate update` there is a no-op — the child hits update.ts's own npx
+ * gate (update.ts:54) and exits SUCCESS without touching the install — yet this
+ * route would still answer 202, hanging the banner until its 5-minute timeout.
+ * Refuse it here, before the lock and the spawn.
+ */
+function isNpxExecutionSafe(): boolean {
+  try {
+    return isNpxExecution();
   } catch {
     return false;
   }
@@ -119,6 +138,20 @@ function spawnUpdate(logPath: string): void {
  * parameter — the fixed-command guarantee rests on it.
  */
 export async function POST(): Promise<NextResponse<UpdateResponse>> {
+  // Issue #1394: npx first — under npx isGlobalInstall() is also true (Issue
+  // #1195), so the global gate below would let a throwaway process through to a
+  // no-op spawn. Refuse before the lock/spawn with a dedicated code.
+  if (isNpxExecutionSafe()) {
+    return NextResponse.json(
+      {
+        error:
+          'CommandMate is running via npx and cannot update in place. Relaunch with `npx commandmate@latest`.',
+        code: 'npx' as const,
+      },
+      { status: 400 }
+    );
+  }
+
   if (!isGlobalInstallSafe()) {
     return NextResponse.json(
       {

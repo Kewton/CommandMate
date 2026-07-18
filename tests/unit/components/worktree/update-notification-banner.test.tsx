@@ -156,6 +156,47 @@ describe('UpdateNotificationBanner', () => {
   });
 
   // =========================================================================
+  // Issue #1394: npx guidance (no in-place update)
+  // =========================================================================
+  describe('npx guidance (Issue #1394)', () => {
+    const npxProps: UpdateNotificationBannerProps = {
+      ...defaultProps,
+      installType: 'npx',
+      updateCommand: null,
+    };
+
+    it('shows the npx guidance block instead of the update button', () => {
+      render(<UpdateNotificationBanner {...npxProps} />);
+
+      expect(screen.getByTestId('update-npx')).toBeDefined();
+      expect(screen.queryByTestId('update-now-button')).toBeNull();
+    });
+
+    it('displays the correct relaunch command (npx commandmate@latest, not commandmate update)', () => {
+      render(<UpdateNotificationBanner {...npxProps} />);
+
+      expect(screen.getByText('npx commandmate@latest')).toBeDefined();
+      expect(screen.queryByText('commandmate update')).toBeNull();
+    });
+
+    it('renders the npx title and description', () => {
+      render(<UpdateNotificationBanner {...npxProps} />);
+
+      expect(screen.getByText('worktree.update.npxTitle')).toBeDefined();
+      expect(screen.getByText('worktree.update.npxDescription')).toBeDefined();
+    });
+
+    it.each(['global', 'local', 'unknown'] as const)(
+      'never shows the npx block for a %s install',
+      (installType) => {
+        render(<UpdateNotificationBanner {...defaultProps} installType={installType} />);
+
+        expect(screen.queryByTestId('update-npx')).toBeNull();
+      }
+    );
+  });
+
+  // =========================================================================
   // Issue #1198: one-click self-update
   // =========================================================================
   describe('update button (Issue #1198)', () => {
@@ -194,7 +235,7 @@ describe('UpdateNotificationBanner', () => {
       expect(screen.getByTestId('update-now-button')).toBeDefined();
     });
 
-    it.each(['local', 'unknown'] as const)(
+    it.each(['local', 'npx', 'unknown'] as const)(
       'never renders the button for a %s install',
       (installType) => {
         render(

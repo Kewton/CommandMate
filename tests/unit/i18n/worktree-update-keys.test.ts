@@ -47,6 +47,9 @@ const UPDATE_KEYS = [
   'version',
   // Issue #1198 (one-click self-update)
   'updateNow',
+  // Issue #1394 (npx guidance)
+  'npxTitle',
+  'npxDescription',
   'confirmTitle',
   'confirmDescription',
   'confirmButton',

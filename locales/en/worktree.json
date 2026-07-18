@@ -201,6 +201,8 @@
     "installTypeGlobal": "npm (global)",
     "installTypeLocal": "Local (git pull)",
     "updateNow": "Update now",
+    "npxTitle": "Running via npx",
+    "npxDescription": "This server was started with npx, which runs from a throwaway cache and cannot update itself in place. Stop it and relaunch with the latest version:",
     "confirmTitle": "Update CommandMate?",
     "confirmDescription": "CommandMate will be updated to v{version}. The server stops, the new version installs, and the server starts again. This takes a few minutes.",
     "confirmButton": "Update",
