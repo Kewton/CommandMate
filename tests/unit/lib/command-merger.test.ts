@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { mergeCommandGroups, groupByCategory, filterCommandGroups, filterCommandsByCliTool, CATEGORY_ORDER } from '@/lib/command-merger';
+import { mergeCommandGroups, groupByCategory, filterCommandGroups, filterCommandsByCliTool, keyOf, CATEGORY_ORDER } from '@/lib/command-merger';
 import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
 
 describe('mergeCommandGroups', () => {
@@ -120,6 +120,145 @@ describe('mergeCommandGroups', () => {
   it('should handle both empty groups', () => {
     const result = mergeCommandGroups([], []);
     expect(result).toEqual([]);
+  });
+
+  it('should keep same-name Claude and Codex skills both when scopes are disjoint (Issue #1380)', () => {
+    // Regression: .claude/skills/worktree-new (Claude, cliTools undefined) and
+    // .agents/skills/worktree-new (Codex, cliTools: ['codex']) share a name.
+    // Keyed on name alone the later (Codex) entry silently overrode the Claude
+    // one, so Claude Code showed nothing after the CLI-tool filter. They must
+    // coexist because their CLI tool scopes are disjoint.
+    const claudeSkillGroups: SlashCommandGroup[] = [
+      {
+        category: 'skill',
+        label: 'Skills',
+        commands: [
+          {
+            name: 'worktree-new',
+            description: 'Claude worktree-new skill',
+            category: 'skill',
+            source: 'skill',
+            filePath: '.claude/skills/worktree-new/SKILL.md',
+          },
+        ],
+      },
+    ];
+    const codexSkillGroups: SlashCommandGroup[] = [
+      {
+        category: 'skill',
+        label: 'Skills',
+        commands: [
+          {
+            name: 'worktree-new',
+            description: 'Codex worktree-new skill',
+            category: 'skill',
+            source: 'codex-skill',
+            cliTools: ['codex'],
+            filePath: '.agents/skills/worktree-new/SKILL.md',
+          },
+        ],
+      },
+    ];
+
+    // Claude first, Codex second (matches getSlashCommandGroups ordering)
+    const result = mergeCommandGroups(claudeSkillGroups, codexSkillGroups);
+    const worktreeNew = result.flatMap((g) => g.commands).filter((c) => c.name === 'worktree-new');
+
+    // Both versions survive the merge
+    expect(worktreeNew).toHaveLength(2);
+
+    const claudeEntry = worktreeNew.find((c) => c.cliTools === undefined);
+    const codexEntry = worktreeNew.find((c) => c.cliTools?.includes('codex'));
+    expect(claudeEntry?.description).toBe('Claude worktree-new skill');
+    expect(codexEntry?.description).toBe('Codex worktree-new skill');
+
+    // And each is visible for its own CLI tool after filtering (Issue #1380)
+    const claudeNames = filterCommandsByCliTool(result, 'claude').flatMap((g) =>
+      g.commands.map((c) => c.name),
+    );
+    const codexNames = filterCommandsByCliTool(result, 'codex').flatMap((g) =>
+      g.commands.map((c) => c.name),
+    );
+    expect(claudeNames).toContain('worktree-new');
+    expect(codexNames).toContain('worktree-new');
+  });
+
+  it('should still let a worktree command override a standard command within the same CLI tool scope (SF-1)', () => {
+    // SF-1 must not regress: same name + same (Codex) scope => worktree wins.
+    const standardCodexGroups: SlashCommandGroup[] = [
+      {
+        category: 'standard-session',
+        label: 'Standard (Session)',
+        commands: [
+          {
+            name: 'compact',
+            description: 'Standard compact',
+            category: 'standard-session',
+            source: 'standard',
+            cliTools: ['codex'],
+            filePath: '',
+          },
+        ],
+      },
+    ];
+    const worktreeCodexGroups: SlashCommandGroup[] = [
+      {
+        category: 'skill',
+        label: 'Skills',
+        commands: [
+          {
+            name: 'compact',
+            description: 'Worktree compact',
+            category: 'skill',
+            source: 'worktree',
+            cliTools: ['codex'],
+            filePath: '.claude/commands/compact.md',
+          },
+        ],
+      },
+    ];
+
+    const result = mergeCommandGroups(standardCodexGroups, worktreeCodexGroups);
+    const compacts = result.flatMap((g) => g.commands).filter((c) => c.name === 'compact');
+
+    expect(compacts).toHaveLength(1);
+    expect(compacts[0].description).toBe('Worktree compact');
+    expect(compacts[0].source).toBe('worktree');
+  });
+});
+
+describe('keyOf', () => {
+  it('collapses undefined/empty cliTools to the claude sentinel', () => {
+    const undefinedTools: SlashCommand = {
+      name: 'x',
+      description: '',
+      category: 'skill',
+      filePath: '',
+    };
+    const emptyTools: SlashCommand = { ...undefinedTools, cliTools: [] };
+
+    expect(keyOf(undefinedTools)).toBe('x::claude');
+    expect(keyOf(emptyTools)).toBe('x::claude');
+  });
+
+  it('distinguishes disjoint CLI tool scopes for the same name', () => {
+    const claude: SlashCommand = { name: 'x', description: '', category: 'skill', filePath: '' };
+    const codex: SlashCommand = { ...claude, cliTools: ['codex'] };
+
+    expect(keyOf(claude)).not.toBe(keyOf(codex));
+  });
+
+  it('normalizes cliTools order so equivalent sets share a key', () => {
+    const a: SlashCommand = {
+      name: 'x',
+      description: '',
+      category: 'skill',
+      filePath: '',
+      cliTools: ['codex', 'gemini'],
+    };
+    const b: SlashCommand = { ...a, cliTools: ['gemini', 'codex'] };
+
+    expect(keyOf(a)).toBe(keyOf(b));
   });
 });
 
