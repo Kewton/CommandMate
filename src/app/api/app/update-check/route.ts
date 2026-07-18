@@ -18,7 +18,7 @@
 import { NextResponse } from 'next/server';
 import { checkForUpdate, getCurrentVersion } from '@/lib/version-checker';
 // [CONS-001] CLI layer utility. Cross-layer import precedent: db-path-resolver.ts
-import { isGlobalInstall } from '@/cli/utils/install-context';
+import { isGlobalInstall, isNpxExecution } from '@/cli/utils/install-context';
 import type { UpdateCheckResult } from '@/lib/version-checker';
 
 // [FIX-270] Force dynamic route to prevent static prerendering at build time.
@@ -30,8 +30,14 @@ export const dynamic = 'force-dynamic';
 // Types
 // =============================================================================
 
-/** Install type union used across the API response */
-type InstallType = 'global' | 'local' | 'unknown';
+/**
+ * Install type union used across the API response.
+ * 'npx' (Issue #1394): running from the npx cache. isGlobalInstall() reports it
+ * as global on purpose (Issue #1195: config/db still land in ~/.commandmate),
+ * but a throwaway npx process cannot update in place — the banner must show
+ * npx-specific guidance instead of the one-click update button.
+ */
+type InstallType = 'global' | 'local' | 'npx' | 'unknown';
 
 /**
  * API Response type.
@@ -63,6 +69,10 @@ export interface UpdateCheckResponse {
  */
 function detectInstallType(): InstallType {
   try {
+    // Issue #1394: npx first — under npx isGlobalInstall() is also true
+    // (Issue #1195), so testing global first would mislabel it 'global' and
+    // surface a one-click update button that no-ops on a throwaway process.
+    if (isNpxExecution()) return 'npx';
     return isGlobalInstall() ? 'global' : 'local';
   } catch {
     return 'unknown';

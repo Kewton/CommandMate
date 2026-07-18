@@ -1,6 +1,10 @@
 /**
  * POST /api/app/update
  * Issue #1198: one-click self-update from the update notification banner.
+ * Issue #1395: an npx-launched server updates in place too — it takes a
+ * dedicated relaunch path (fetch a fresh npx cache + restart the daemon) via the
+ * hidden `update --relaunch-npx` command, instead of being refused (#1394). All
+ * of the #1198 security invariants below hold unchanged for that path.
  *
  * Security constraints (Issue #1198 決定1 / 決定2):
  * - Authentication is middleware's job (`src/middleware.ts` matches every
@@ -20,7 +24,7 @@ import { closeSync, openSync } from 'fs';
 import { join } from 'path';
 import { NextResponse } from 'next/server';
 // Cross-layer import from the CLI utils, matching the update-check route [CONS-001].
-import { ensureConfigDir, isGlobalInstall } from '@/cli/utils/install-context';
+import { ensureConfigDir, isGlobalInstall, isNpxExecution } from '@/cli/utils/install-context';
 import { getDaemonManagerFactory } from '@/cli/utils/daemon-factory';
 import { acquireUpdateLock, releaseUpdateLock } from '@/lib/app-update/update-lock';
 
@@ -50,6 +54,8 @@ export interface UpdateStartResponse {
 /** Failure payload */
 export interface UpdateErrorResponse {
   error: string;
+  // Issue #1395: 'npx' is gone — an npx run now takes the relaunch path (202)
+  // instead of being refused (#1394).
   code: 'not_global' | 'in_progress' | 'spawn_failed';
 }
 
@@ -63,6 +69,25 @@ type UpdateResponse = UpdateStartResponse | UpdateErrorResponse;
 function isGlobalInstallSafe(): boolean {
   try {
     return isGlobalInstall();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * npx detection that treats a detection failure as "not npx", so a failure
+ * falls through to the global-install gate rather than mislabeling the run.
+ *
+ * Issue #1394/#1395: a server started with `npx commandmate` runs from the npx
+ * cache, which isGlobalInstall() reports as global (Issue #1195). It cannot
+ * rewrite a global install, so instead of refusing it (#1394) the POST handler
+ * routes it to the relaunch path: the detached child runs `update --yes
+ * --relaunch-npx`, which fetches a fresh npx cache and restarts the daemon
+ * (§2.1). npx is checked first so the global gate cannot misroute it (§5.1).
+ */
+function isNpxExecutionSafe(): boolean {
+  try {
+    return isNpxExecution();
   } catch {
     return false;
   }
@@ -92,14 +117,25 @@ async function willUpdateRestartServer(): Promise<boolean> {
  * (daemon.ts:102-107), `bin/commandmate.js` is the package's declared bin
  * entry, and process.execPath avoids depending on PATH. No shell is involved.
  *
+ * Issue #1395: the argv is one of two fixed literal arrays, selected by the
+ * runtime install type (never by request input) — an npx run adds the hidden
+ * `--relaunch-npx` flag so the child fetches a fresh npx cache and restarts the
+ * daemon instead of running the global `npm install -g` path. The fixed-command
+ * guarantee (§5) holds either way.
+ *
  * @param logPath - File the child's stdout/stderr are appended to
+ * @param relaunchNpx - true for an npx run (adds --relaunch-npx)
  */
-function spawnUpdate(logPath: string): void {
+function spawnUpdate(logPath: string, relaunchNpx: boolean): void {
+  const args = relaunchNpx
+    ? ['update', '--yes', '--relaunch-npx']
+    : ['update', '--yes'];
+
   const logFd = openSync(logPath, 'a');
   try {
     const child = spawn(
       process.execPath,
-      [join(process.cwd(), 'bin', 'commandmate.js'), 'update', '--yes'],
+      [join(process.cwd(), 'bin', 'commandmate.js'), ...args],
       {
         detached: true,
         stdio: ['ignore', logFd, logFd],
@@ -119,7 +155,14 @@ function spawnUpdate(logPath: string): void {
  * parameter — the fixed-command guarantee rests on it.
  */
 export async function POST(): Promise<NextResponse<UpdateResponse>> {
-  if (!isGlobalInstallSafe()) {
+  // Issue #1394/#1395: npx first — under npx isGlobalInstall() is also true
+  // (Issue #1195), so testing global first would misroute an npx run into the
+  // global flow. An npx run is allowed here: it takes the relaunch path below
+  // (spawnUpdate with relaunchNpx). Only a run that is neither npx nor global is
+  // refused (§5.1).
+  const isNpx = isNpxExecutionSafe();
+
+  if (!isNpx && !isGlobalInstallSafe()) {
     return NextResponse.json(
       {
         error: 'CommandMate is not installed globally and cannot update itself.',
@@ -148,7 +191,9 @@ export async function POST(): Promise<NextResponse<UpdateResponse>> {
     // can be gone before it would have had a chance to answer.
     willRestart = await willUpdateRestartServer();
     logPath = join(ensureConfigDir(), UPDATE_LOG_FILENAME);
-    spawnUpdate(logPath);
+    // The argv is chosen from runtime install state (isNpx), never from request
+    // input, so the fixed-command guarantee holds (§5).
+    spawnUpdate(logPath, isNpx);
   } catch (error) {
     // Nothing was started, so the lock must not sit until it expires.
     releaseUpdateLock();

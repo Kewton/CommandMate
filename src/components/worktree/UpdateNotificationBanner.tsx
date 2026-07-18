@@ -25,7 +25,7 @@ export interface UpdateNotificationBannerProps {
   latestVersion: string | null;
   releaseUrl: string | null;
   updateCommand: string | null;
-  installType: 'global' | 'local' | 'unknown';
+  installType: 'global' | 'local' | 'npx' | 'unknown';
 }
 
 /**
@@ -50,6 +50,14 @@ const UPDATE_TIMEOUT_MS = 5 * 60 * 1000;
 
 /** Fixed command shown when the user has to finish the update by hand */
 const MANUAL_UPDATE_COMMAND = 'commandmate update';
+
+/**
+ * Fixed command an npx-launched server is relaunched with. Issue #1395 made the
+ * one-click update work for npx, so this is no longer the primary path — it is
+ * the manual fallback shown on timeout/error, where `commandmate update` would
+ * be a no-op under npx (§4.3).
+ */
+const NPX_UPDATE_COMMAND = 'npx commandmate@latest';
 
 /**
  * Banner displaying version update notification.
@@ -80,6 +88,13 @@ export function UpdateNotificationBanner({
   const seenDownRef = useRef(false);
 
   const isGlobal = installType === 'global';
+  // Issue #1395: an npx server can update in place now — the route relaunches it
+  // from a fresh npx cache — so it gets the update button like a global install.
+  const isNpx = installType === 'npx';
+  const canSelfUpdate = isGlobal || isNpx;
+  // Issue #1395: `commandmate update` is a no-op under npx (§4.3), so the manual
+  // fallback shown on timeout/error must be the npx relaunch command instead.
+  const manualCommand = isNpx ? NPX_UPDATE_COMMAND : MANUAL_UPDATE_COMMAND;
 
   const handleConfirm = useCallback(async () => {
     setState('starting');
@@ -166,7 +181,7 @@ export function UpdateNotificationBanner({
         </p>
       )}
 
-      {isGlobal && state === 'idle' && (
+      {canSelfUpdate && state === 'idle' && (
         <Button
           variant="primary"
           size="sm"
@@ -176,6 +191,12 @@ export function UpdateNotificationBanner({
         >
           {t('update.updateNow')}
         </Button>
+      )}
+
+      {isNpx && state === 'idle' && (
+        <p className="text-xs text-accent-600 mb-2" data-testid="update-npx-notice">
+          {t('update.npxRestartNotice')}
+        </p>
       )}
 
       {isBusy && (
@@ -202,7 +223,7 @@ export function UpdateNotificationBanner({
           <p className="text-sm font-medium text-accent-800">{t('update.timeoutTitle')}</p>
           <p className="text-xs text-accent-600 mt-1">{t('update.timeoutDescription')}</p>
           <code className="block bg-accent-100 rounded px-2 py-1 mt-1 text-xs text-accent-900 font-mono">
-            {MANUAL_UPDATE_COMMAND}
+            {manualCommand}
           </code>
         </div>
       )}
@@ -212,7 +233,7 @@ export function UpdateNotificationBanner({
           <p className="text-sm font-medium text-accent-800">{t('update.errorTitle')}</p>
           <p className="text-xs text-accent-600 mt-1">{errorMessage}</p>
           <code className="block bg-accent-100 rounded px-2 py-1 mt-1 text-xs text-accent-900 font-mono">
-            {MANUAL_UPDATE_COMMAND}
+            {manualCommand}
           </code>
         </div>
       )}

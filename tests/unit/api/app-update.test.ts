@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/cli/utils/install-context', () => ({
   isGlobalInstall: vi.fn().mockReturnValue(true),
+  isNpxExecution: vi.fn().mockReturnValue(false),
   ensureConfigDir: vi.fn().mockReturnValue('/home/tester/.commandmate'),
 }));
 
@@ -38,7 +39,7 @@ vi.mock('fs', async (importOriginal) => ({
 import { spawn } from 'child_process';
 import { closeSync, openSync } from 'fs';
 import { POST, dynamic } from '@/app/api/app/update/route';
-import { ensureConfigDir, isGlobalInstall } from '@/cli/utils/install-context';
+import { ensureConfigDir, isGlobalInstall, isNpxExecution } from '@/cli/utils/install-context';
 import { acquireUpdateLock, releaseUpdateLock } from '@/lib/app-update/update-lock';
 import { getDaemonManagerFactory } from '@/cli/utils/daemon-factory';
 import { AUTH_EXCLUDED_PATHS } from '@/config/auth-config';
@@ -59,6 +60,7 @@ function mockDaemon(isRunning: boolean | Error) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(isGlobalInstall).mockReturnValue(true);
+  vi.mocked(isNpxExecution).mockReturnValue(false);
   // Re-set here, not only at the vi.mock factory: clearAllMocks keeps
   // implementations, so a test that makes this throw would leak into the next.
   vi.mocked(ensureConfigDir).mockReturnValue('/home/tester/.commandmate');
@@ -117,6 +119,76 @@ describe('POST /api/app/update - fixed command guarantee', () => {
     expect(vi.mocked(spawn).mock.calls[0][2]?.stdio).toEqual(['ignore', 42, 42]);
     // The fd is handed to the child; leaving it open would leak it per request.
     expect(closeSync).toHaveBeenCalledWith(42);
+  });
+});
+
+describe('POST /api/app/update - npx relaunch branch (Issue #1395)', () => {
+  /**
+   * A server started with `npx commandmate` runs from the npx cache, which
+   * isGlobalInstall() reports as global (Issue #1195). It cannot rewrite a
+   * global install, so instead of refusing (#1394) it now takes a dedicated
+   * relaunch path: the detached child fetches a fresh npx cache and restarts
+   * the daemon (§2.1). npx is checked first so the global gate cannot misroute
+   * it (§5.1).
+   */
+  it('starts the update (202) for an npx run', async () => {
+    vi.mocked(isNpxExecution).mockReturnValue(true);
+    vi.mocked(isGlobalInstall).mockReturnValue(true);
+
+    const response = await POST();
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({ status: 'started' });
+  });
+
+  it('spawns the hidden --relaunch-npx command with a fixed argv and no shell', async () => {
+    vi.mocked(isNpxExecution).mockReturnValue(true);
+
+    await POST();
+
+    expect(spawn).toHaveBeenCalledTimes(1);
+    const [command, args, options] = vi.mocked(spawn).mock.calls[0];
+    expect(command).toBe(process.execPath);
+    expect(args).toEqual([
+      `${process.cwd()}/bin/commandmate.js`,
+      'update',
+      '--yes',
+      '--relaunch-npx',
+    ]);
+    expect(options).not.toHaveProperty('shell', true);
+    expect(options?.detached).toBe(true);
+    expect(unref).toHaveBeenCalledTimes(1);
+  });
+
+  it('takes the update lock for an npx run (concurrency is guarded)', async () => {
+    vi.mocked(isNpxExecution).mockReturnValue(true);
+
+    await POST();
+
+    expect(acquireUpdateLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports willRestart: true when the npx daemon is running', async () => {
+    vi.mocked(isNpxExecution).mockReturnValue(true);
+    mockDaemon(true);
+
+    const response = await POST();
+
+    await expect(response.json()).resolves.toMatchObject({ willRestart: true });
+  });
+
+  it('falls through to the global gate when npx detection fails (fails to "not npx")', async () => {
+    vi.mocked(isNpxExecution).mockImplementation(() => {
+      throw new Error('__dirname not available');
+    });
+    vi.mocked(isGlobalInstall).mockReturnValue(false);
+
+    const response = await POST();
+
+    // Not treated as npx; the ordinary non-global gate answers instead.
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ code: 'not_global' });
+    expect(spawn).not.toHaveBeenCalled();
   });
 });
 

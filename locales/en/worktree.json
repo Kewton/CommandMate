@@ -201,6 +201,7 @@
     "installTypeGlobal": "npm (global)",
     "installTypeLocal": "Local (git pull)",
     "updateNow": "Update now",
+    "npxRestartNotice": "This server runs via npx. The update fetches the latest version and restarts the server. Some startup settings (such as the port) may change; if the page does not reconnect on its own, run \"commandmate status\" to find where the server is running.",
     "confirmTitle": "Update CommandMate?",
     "confirmDescription": "CommandMate will be updated to v{version}. The server stops, the new version installs, and the server starts again. This takes a few minutes.",
     "confirmButton": "Update",

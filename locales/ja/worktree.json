@@ -201,6 +201,7 @@
     "installTypeGlobal": "npm（グローバル）",
     "installTypeLocal": "ローカル（git pull）",
     "updateNow": "今すぐアップデート",
+    "npxRestartNotice": "このサーバは npx で起動しています。アップデートは最新版を取得してサーバを再起動します。ポートなど一部の起動設定は変わることがあります。自動で再接続しない場合は「commandmate status」で稼働先を確認してください。",
     "confirmTitle": "CommandMate をアップデートしますか？",
     "confirmDescription": "CommandMate を v{version} に更新します。サーバを停止し、新しいバージョンをインストールして、再度起動します。数分かかります。",
     "confirmButton": "アップデート",

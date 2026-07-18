@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-18
+
+> **Highlight**: **npx 起動サーバの GUI アップデート対応**。`npx commandmate` で起動したサーバの GUI アップデート機能を2段で整備した。#1394 で npx を正しく検知して誤動作（「今すぐアップデート」が `202 started` を返すのに no-op → 5 分 timeout・`commandmate update` の誤案内）を解消し、#1395 で同ボタンから npx サーバをその場更新（新しい npx キャッシュ取得 → 旧デーモン停止 → 新デーモン起動 → GUI 自動リロード）できるようにした。停止前に版検証してダウンタイム0で fail-fast し、#1198 のセキュリティ不変条件（固定 argv・多重実行ロック・認証は middleware 任せ）を維持する。素の CLI `commandmate update`（npx）は従来どおり案内のみの no-op（#1319）。
+
+### Added
+
+- **npx 起動サーバの GUI ワンクリック更新** (#1395): `npx commandmate` で起動したサーバでも、アップデート通知バナーの「今すぐアップデート」ボタンからその場更新できるようにした。グローバル入替ではなく「新しい npx キャッシュを取得 → 旧デーモン停止 → 新デーモン起動 → GUI 自動リロード」方式。停止前に版検証を行い、stale/失敗時はダウンタイム0で abort。#1198 のセキュリティ不変条件（固定 argv・多重実行ロック・認証は middleware 任せ）を維持。素の CLI `commandmate update`（npx）は従来どおり案内のみの no-op（#1319）。
+
+### Fixed
+
+- **npx 起動時に GUI アップデートが誤動作する問題を修正** (#1394): #1319 で CLI に入れた npx ガードが GUI 経路（`update-check` / `update` route）に未反映で、npx 起動サーバが自身を global インストールと誤認していた。「今すぐアップデート」ボタンが `202 started` を返すのに実体は no-op（spawn した `commandmate update` が npx ゲートで即終了）となり、バナーは 5 分 timeout に陥り、案内コマンド `commandmate update` も npx では no-op という誤案内だった。両 route に `isNpxExecution()` ガードを追加し `installType: 'npx'` を新設。update route は `400 code:'npx'` で拒否し、バナーは更新ボタンを出さず `npx commandmate@latest` の正しい案内を表示する（この「正しく案内する」状態を #1395 が「実際に更新する」へ引き上げる）。
+
 ## [0.10.4] - 2026-07-18
 
 > **Highlight**: **v0.10.3 以降に蓄積した 26 件のバグ修正をまとめたパッチリリース**。柱は4つ。① DB 整合性（`repositories`/`worktrees` 行のライフサイクル、幽霊行の掃除・同一 URL 再 clone 封鎖の解消、将来版スキーマの検知で起動停止、`busy_timeout`+WAL による `SQLITE_BUSY` 対策）。② 版アイデンティティ（サーバー `currentVersion` の実行時解決、デーモン state ファイルへの版・実効設定・プロセス同一性の記録、CLI/quickstart/status の版照合、旧タブ・WebSocket の版不一致検知とリロード導線）。③ clone / schedule / assistant / update が例外で `running`・ロック固着する不具合の一掃。④ フローティング UI（共有ツールチップ・ブランチツールチップ・checkout ドロップダウン・右クリックメニュー・残存フローティング要素）のビューポート clamp とポータル化。あわせて同名スキルが `.claude/skills`（Claude）/`.agents/skills`（Codex）で共存できずスラッシュ候補に出ない不具合を修正した。DB マイグレーション **v43**（`CM_ROOT_DIR` 由来の幽霊リポジトリ行の掃除、#1339）を含む。
