@@ -41,7 +41,7 @@ import { TruncationTooltip } from '@/components/common/TruncationTooltip';
 import { LocaleSwitcher } from '@/components/common/LocaleSwitcher';
 import { ThemeToggle } from '@/components/common/ThemeToggle';
 import { LogoutButton } from '@/components/common/LogoutButton';
-import { useToast, ToastContainer } from '@/components/common/Toast';
+import { useToast } from '@/components/common/Toast';
 import { repositoryApi, ApiError } from '@/lib/api-client';
 import { toBranchItem } from '@/types/sidebar';
 import type { SidebarBranchItem } from '@/types/sidebar';
@@ -838,7 +838,7 @@ const SyncButton = memo(function SyncButton({
 }) {
   const [isSyncing, setIsSyncing] = useState(false);
   const isSyncingRef = useRef(false);
-  const { showToast, toasts, removeToast } = useToast();
+  const { showToast } = useToast();
   const t = useTranslations('common');
 
   const handleSync = useCallback(async () => {
@@ -880,7 +880,6 @@ const SyncButton = memo(function SyncButton({
           <SyncIcon className={isSyncing ? 'animate-spin' : ''} />
         </button>
       </Tooltip>
-      <ToastContainer toasts={toasts} onClose={removeToast} />
     </>
   );
 });

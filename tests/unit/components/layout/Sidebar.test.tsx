@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import React from 'react';
 import { Sidebar, parseGroupCollapsed } from '@/components/layout/Sidebar';
+import { ToastProvider } from '@/components/common/Toast';
 import { SidebarProvider } from '@/contexts/SidebarContext';
 import { WorktreeSelectionProvider } from '@/contexts/WorktreeSelectionContext';
 import type { Worktree } from '@/types/models';
@@ -100,11 +101,14 @@ const mockWorktrees: Worktree[] = [
 ];
 
 const Wrapper = ({ children }: { children: React.ReactNode }) => (
-  <SidebarProvider>
-    <WorktreeSelectionProvider>
-      {children}
-    </WorktreeSelectionProvider>
-  </SidebarProvider>
+  // Issue #1400: SyncButton toasts now render in the app-wide ToastProvider host.
+  <ToastProvider>
+    <SidebarProvider>
+      <WorktreeSelectionProvider>
+        {children}
+      </WorktreeSelectionProvider>
+    </SidebarProvider>
+  </ToastProvider>
 );
 
 describe('Sidebar', () => {

@@ -46,7 +46,6 @@ import { Modal } from '@/components/ui/Modal';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
 import { MoveDialog } from '@/components/worktree/MoveDialog';
 import { NewFileDialog } from '@/components/worktree/NewFileDialog';
-import { ToastContainer, type ToastItem } from '@/components/common/Toast';
 import { DesktopHeader, InfoModal } from '@/components/worktree/WorktreeDetailSubComponents';
 import { UPLOADABLE_EXTENSIONS } from '@/config/uploadable-extensions';
 import { deriveCliStatus } from '@/types/sidebar';
@@ -185,10 +184,6 @@ export interface WorktreeDetailDesktopProps {
   onNewFileConfirm: (finalName: string) => void;
   onNewFileCancel: () => void;
 
-  // Toasts
-  toasts: ToastItem[];
-  onToastClose: (id: string) => void;
-
   // i18n strings (resolved by parent to avoid duplicate translation namespaces)
   killDialogTitle: string;
   killDialogWarning: string;
@@ -277,8 +272,6 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   newFileParentPath,
   onNewFileConfirm,
   onNewFileCancel,
-  toasts,
-  onToastClose,
   killDialogTitle,
   killDialogWarning,
   cancelLabel,
@@ -834,8 +827,6 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           onConfirm={onNewFileConfirm}
           onCancel={onNewFileCancel}
         />
-        {/* Toast notifications */}
-        <ToastContainer toasts={toasts} onClose={onToastClose} />
       </div>
     </ErrorBoundary>
   );

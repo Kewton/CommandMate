@@ -14,6 +14,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MarkdownEditor } from '@/components/worktree/MarkdownEditor';
+import { ToastProvider } from '@/components/common/Toast';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 import type { ViewMode } from '@/types/markdown-editor';
 import {
@@ -273,7 +274,12 @@ describe('MarkdownEditor', () => {
           json: async () => ({ success: true, path: 'docs/readme.md' }),
         });
 
-      render(<MarkdownEditor {...defaultProps} onSave={onSave} />);
+      // Issue #1400: the save toast now renders in the app-wide ToastProvider host.
+      render(
+        <ToastProvider>
+          <MarkdownEditor {...defaultProps} onSave={onSave} />
+        </ToastProvider>
+      );
 
       await waitForEditorReady();
 
@@ -376,7 +382,12 @@ describe('MarkdownEditor', () => {
           }),
         });
 
-      render(<MarkdownEditor {...defaultProps} />);
+      // Issue #1400: the save toast now renders in the app-wide ToastProvider host.
+      render(
+        <ToastProvider>
+          <MarkdownEditor {...defaultProps} />
+        </ToastProvider>
+      );
 
       await waitForEditorReady();
 

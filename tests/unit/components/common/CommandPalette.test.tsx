@@ -76,6 +76,7 @@ vi.mock('@/hooks/useLocaleSwitch', () => ({
 }));
 
 import { CommandPalette, isTypingTarget } from '@/components/common/CommandPalette';
+import { ToastProvider } from '@/components/common/Toast';
 import { CommandPaletteProvider } from '@/contexts/CommandPaletteContext';
 import { KeyboardShortcutsProvider } from '@/contexts/KeyboardShortcutsContext';
 import { KeyboardShortcutsOverlay } from '@/components/common/KeyboardShortcutsOverlay';
@@ -100,9 +101,13 @@ function makeCache(overrides: Partial<MockCache> = {}): MockCache {
 
 function renderPalette() {
   return render(
-    <CommandPaletteProvider>
-      <CommandPalette />
-    </CommandPaletteProvider>
+    // Issue #1400: the toast now lives in the app-wide ToastProvider, not inside
+    // CommandPalette, so the sync-success assertion needs the shared host.
+    <ToastProvider>
+      <CommandPaletteProvider>
+        <CommandPalette />
+      </CommandPaletteProvider>
+    </ToastProvider>
   );
 }
 

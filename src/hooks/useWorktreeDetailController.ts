@@ -738,7 +738,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   }, [historyDisplayLimit, fetchMessages]);
 
   // Toast state for notifications (moved before event handlers that reference showToast)
-  const { toasts, showToast, removeToast } = useToast();
+  const { showToast } = useToast();
 
   // ========================================================================
   // Event Handlers
@@ -1573,7 +1573,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     openMobileDrawer,
     pendingInsertText,
     pendingInsertTextMap,
-    removeToast,
     selectedAgents,
     setActiveCliTab,
     setActiveInstanceId,
@@ -1590,7 +1589,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     tWorktree,
     tabsActions,
     tabsState,
-    toasts,
     toggleInstanceVisible,
     vibeLocalContextWindow,
     vibeLocalModel,

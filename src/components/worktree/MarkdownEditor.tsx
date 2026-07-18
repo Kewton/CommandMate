@@ -34,7 +34,7 @@ import { useTranslations } from 'next-intl';
 import { AlertTriangle, List } from 'lucide-react';
 import { debounce } from '@/lib/utils';
 import { copyToClipboard } from '@/lib/clipboard-utils';
-import { ToastContainer, useToast } from '@/components/common/Toast';
+import { useToast } from '@/components/common/Toast';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { Spinner } from '@/components/ui/Spinner';
 import { PaneResizer } from '@/components/worktree/PaneResizer';
@@ -278,7 +278,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
 
   // Toast hook
-  const { toasts, showToast, removeToast } = useToast();
+  const { showToast } = useToast();
 
   // Refs
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -970,9 +970,6 @@ export const MarkdownEditor = memo(function MarkdownEditor({
           </div>
         )}
       </div>
-
-      {/* Toast notifications */}
-      <ToastContainer toasts={toasts} onClose={removeToast} />
     </div>
   );
 
