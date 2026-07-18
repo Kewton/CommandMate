@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-07-19
+
+> **Highlight**: **サイドバー同期トーストの見切れ修正と Toast のグローバル1本化**。サイドバーの同期ボタン押下時に表示されるトーストが、`transform` を持つ祖先（`AppShell` のサイドバー枠）の containing block に閉じ込められてビューポート右下ではなくサイドバー基準に配置され、左端が見切れていた問題を解消した。#1399 で `ToastContainer` を `document.body` への `createPortal` 化（`mounted` ガードで SSR 安全）して根本修正し、#1400 で散在していた `ToastContainer`/`useToast` を単一の `ToastProvider` ＋ 単一 Portal ホストへ統合して、描画位置がツリー構造に依存しなくなるようにし再発を構造的に防止した。
+
+### Fixed
+
+- **サイドバー同期トーストの見切れを修正** (#1399): 同期ボタンのトーストは `position: fixed` だが、描画元 `SyncButton` の祖先 `<aside data-testid="sidebar-container">`（`AppShell`）が `transform`（スライド演出）を持つため、CSS 仕様上その祖先が `fixed` の containing block となり、トーストがビューポートではなくサイドバー枠（既定幅 224px）基準に配置され、`min-w-[300px]` の左端が画面外へはみ出していた。`ToastContainer` を `createPortal(..., document.body)` で描画するよう変更（`mounted` ガードでクライアントマウント後のみ portal、`Modal`/`CommandPalette` と同パターン）し、呼び出し元のツリー位置に関わらず `fixed` がビューポート基準となるようにした。
+
+### Changed
+
+- **Toast をグローバル1本化（`ToastProvider` + 単一 Portal ホスト）** (#1400): 各コンポーネントでローカルに生成していた `ToastContainer`/`useToast` を、単一の `ToastProvider`（Context）＋ 1 箇所だけ描画する Portal ホストへ統合した。`useToast()` は共有 Context を返すフックに変更（Provider 外でもクラッシュしないフォールバック付き）。`Sidebar`・`CommandPalette`・`NotificationsSettings`・`worktree` 配下の各 consumer からローカルの `ToastContainer` を撤去し、共有 Context 経由に置き換え。fixed トーストホストが 1 つに集約され、位置の一貫性・スタッキング制御・重複排除を実現し、`transform` 祖先による見切れ等の再発を構造的に防止する。
+
 ## [0.11.0] - 2026-07-18
 
 > **Highlight**: **npx 起動サーバの GUI アップデート対応**。`npx commandmate` で起動したサーバの GUI アップデート機能を2段で整備した。#1394 で npx を正しく検知して誤動作（「今すぐアップデート」が `202 started` を返すのに no-op → 5 分 timeout・`commandmate update` の誤案内）を解消し、#1395 で同ボタンから npx サーバをその場更新（新しい npx キャッシュ取得 → 旧デーモン停止 → 新デーモン起動 → GUI 自動リロード）できるようにした。停止前に版検証してダウンタイム0で fail-fast し、#1198 のセキュリティ不変条件（固定 argv・多重実行ロック・認証は middleware 任せ）を維持する。素の CLI `commandmate update`（npx）は従来どおり案内のみの no-op（#1319）。
