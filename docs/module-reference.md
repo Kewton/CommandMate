@@ -44,7 +44,7 @@
 | `src/hooks/useFragmentLogin.ts` | フラグメントベース自動ログインフック（Issue #383: URLフラグメント#token=xxxからトークン抽出、history.replaceState API前実行[S002]、processedRef重複防止[React Strict Mode]、decodeURIComponent try-catch、256文字上限、FragmentLoginErrorKey型、401/429/error対応） |
 | `src/components/auth/QrCodeGenerator.tsx` | QRコード生成UIコンポーネント（Issue #383: react-qr-code使用、ngrok URL+トークン入力、QRデフォルト非表示[S001]、HTTPS警告、useTranslations('auth')直接使用、クライアントサイドのみ） |
 | `src/components/worktree/VersionSection.tsx` | バージョン表示+通知統合コンポーネント（Issue #257: SF-001 DRY準拠、InfoModal/MobileInfoContent共通化） |
-| `src/components/worktree/UpdateNotificationBanner.tsx` | アップデート通知バナーUI（Issue #257: MF-001 SRP準拠、i18n対応、GitHub Releasesリンク） |
+| `src/components/worktree/UpdateNotificationBanner.tsx` | アップデート通知バナーUI（Issue #257: MF-001 SRP準拠、i18n対応、GitHub Releasesリンク。#1198ワンクリック更新、#1395でnpxも更新ボタン＋再起動注意喚起・timeout/error文言は`npx commandmate@latest`） |
 | `src/lib/polling/auto-yes-manager.ts` | Auto-Yes状態管理とサーバー側ポーリング（Issue #138）、thinking状態のprompt検出スキップ（Issue #161）。**Issue #306: 重複応答防止** - AutoYesPollerStateにlastAnsweredPromptKey追加、isDuplicatePrompt()ヘルパー、プロンプト非検出時nullリセット、COOLDOWN_INTERVAL_MS=5000クールダウン、scheduleNextPoll()にoverride_interval下限値ガード付き）。**Issue #314: Stop条件機能追加** - AutoYesStateにstopPattern/stopReason追加、disableAutoYes()専用関数（全フィールド明示設定）、checkStopCondition()独立関数（@internal export、safe-regex2+タイムアウト保護）、executeRegexWithTimeout()タイムアウト保護付き評価、pollAutoYes()にStop条件チェック挿入（thinking後・プロンプト検出前）、AutoYesStopReason型をauto-yes-config.tsに移動）。**Issue #323: pollAutoYes()リファクタリング** - 関数群方式（設計選択肢B）による責務分割。validatePollingContext()/captureAndCleanOutput()/processStopConditionDelta()/detectAndRespondToPrompt()（全て@internal export）、getPollerState()内部ヘルパー追加。**Issue #404: globalThis Mapリーク対策** - deleteAutoYesState(worktreeId: string): boolean追加（isValidWorktreeId()バリデーション[SEC-404-001]、autoYesStates.delete()実行）、getAutoYesStateWorktreeIds(): string[]追加（@internal、定期クリーンアップ用）、getAutoYesPollerWorktreeIds(): string[]追加（@internal、定期クリーンアップ用）。**Issue #405: キャッシュ無効化** - detectAndRespondToPrompt()内のsendPromptAnswer()呼び出し後にtry-finallyパターンでinvalidateCache(sessionName)を実行（成功・失敗に関わらずキャッシュクリアを保証））。Auto-Yes状態管理・バレルファイル・複合キーヘルパー（Issue #479, #525） |
 | `src/config/auto-yes-config.ts` | Auto-Yes設定定数・共通バリデーション（ALLOWED_DURATIONS、DEFAULT_AUTO_YES_DURATION、isAllowedDuration、formatTimeRemaining）。**Issue #314: Stop条件バリデーション追加** - MAX_STOP_PATTERN_LENGTH=500定数、AutoYesStopReason型（クライアント/サーバー共用）、validateStopPattern()共通バリデーション関数（safe-regex2 ReDoS検出・構文検証・エラーメッセージ固定文字列））。Auto-Yes設定定数・バリデーション、AUTO_YES_COUNTDOWN_INTERVAL_MS追加（Issue #760） |
 | `src/lib/detection/prompt-key.ts` | promptKeyデduplication共通ユーティリティ（Issue #306: generatePromptKey()でtype:questionキー生成、クライアント/サーバー間DRY原則対応、PromptKeyInput interface）。promptKey重複排除ユーティリティ |
@@ -389,10 +389,11 @@
 | `src/cli/commands/start.ts` | startコマンド（前景/デーモン、--issue対応 Issue #136）。runStart()はexitせずStartResultを返す（Issue #1195） |
 | `src/cli/commands/stop.ts` | stopコマンド（サーバー停止、--issue対応 Issue #136） |
 | `src/cli/commands/status.ts` | statusコマンド（状態確認、--issue/--all対応 Issue #136）。statusコマンド（--all対応） |
-| `src/cli/commands/update.ts` | updateコマンド（停止→npm install -g→再起動、--check/--yes。npx実行時は何もせず案内して正常終了）（Issue #1194, #1319） |
+| `src/cli/commands/update.ts` | updateコマンド（停止→npm install -g→再起動、--check/--yes。素のnpx実行は案内のみで正常終了。隠しフラグ--relaunch-npxでnpx再取得→停止→再起動し、abort系はreleaseUpdateLock）（Issue #1194, #1319, #1395） |
 | `src/cli/utils/preflight.ts` | システム依存関係チェック（compareVersionsはsemver.tsへ移譲、Issue #1194） |
 | `src/cli/utils/semver.ts` | semver 3方向比較（compareVersions/isComparableVersion）（Issue #1194） |
 | `src/cli/utils/npm-runner.ts` | npm実行ラッパ（viewLatestVersion/installGlobalLatest）（Issue #1194） |
+| `src/cli/utils/npx-runner.ts` | npx実行ラッパ（warmNpxLatest=`npx --yes <pkg>@latest --version`で取得＆版検証、spawnNpxDaemon=`start --daemon`再起動、sanitizeNpxEnvでnpm_*除去）（Issue #1395） |
 | `src/cli/utils/health-check.ts` | 更新後readiness確認（waitForReady: ready/degraded/timeout）（#1194） |
 | `src/cli/utils/worktree-servers.ts` | 稼働中worktreeサーバ列挙（listRunningWorktreeServers）（Issue #1194） |
 | `src/cli/utils/env-setup.ts` | 環境設定ファイル生成、getPidFilePath()、パストラバーサル対策（Issue #125, #136） |
@@ -403,7 +404,7 @@
 | `src/cli/utils/prompt.ts` | 対話形式プロンプトユーティリティ（Issue #119） |
 | `src/cli/utils/server-ready.ts` | サーバ起動完了待ち（waitForServer: TCPポーリング、throwしない）（Issue #1195） |
 | `src/cli/utils/browser.ts` | ブラウザ自動オープン（open/xdg-open、CI・SSH・DISPLAY判定、依存追加なし）（Issue #1195） |
-| `src/cli/utils/install-context.ts` | インストールコンテキスト検出（isGlobalInstall, getConfigDir。npxは global 扱い。isNpxExecutionでnpx実行を別途判定）（Issue #136, #1195, #1319） |
+| `src/cli/utils/install-context.ts` | インストールコンテキスト検出（isGlobalInstall, getConfigDir。npxは global 扱い。isNpxExecutionでnpx実行を別途判定し、GUI更新はnpx再起動へ分岐）（Issue #136, #1195, #1319, #1395） |
 | `src/cli/utils/input-validators.ts` | 入力検証（Issue番号、ブランチ名）（Issue #136） |
 | `src/cli/utils/resource-resolvers.ts` | リソースパス解決（DB、PID、Log）（Issue #136） |
 | `src/cli/utils/port-allocator.ts` | ポート自動割り当て（MAX_WORKTREES=10制限）（Issue #136） |

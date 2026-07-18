@@ -95,6 +95,13 @@ export interface UpdateOptions {
   check?: boolean;
   /** Skip the confirmation prompt (required for non-interactive execution, D-2) */
   yes?: boolean;
+  /**
+   * Hidden flag (Issue #1395): under npx, stop the current daemon and relaunch it
+   * from a freshly-fetched `npx commandmate@latest` cache instead of the no-op
+   * guidance. Set only by the GUI update route; the bare user-facing
+   * `commandmate update` under npx stays a no-op (§6).
+   */
+  relaunchNpx?: boolean;
 }
 
 /**

@@ -14,7 +14,10 @@
 
 import { closeSync, constants, openSync, readFileSync, unlinkSync, writeSync } from 'fs';
 import { join } from 'path';
-import { ensureConfigDir } from '@/cli/utils/install-context';
+// Relative (not '@/') so the CLI build (tsconfig.cli.json has no path alias and
+// no tsc-alias step) can pull this module into `commandmate update --relaunch-npx`
+// to release the lock on an npx abort path (Issue #1395 §5.2).
+import { ensureConfigDir } from '../../cli/utils/install-context';
 
 /** Lock file name inside the config directory */
 export const UPDATE_LOCK_FILENAME = 'update.lock';
