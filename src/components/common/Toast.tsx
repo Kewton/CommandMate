@@ -10,6 +10,7 @@
 'use client';
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import { CheckCircle, XCircle, Info, AlertTriangle, X } from 'lucide-react';
 import { Z_INDEX } from '@/config/z-index';
@@ -240,7 +241,20 @@ export interface ToastContainerProps {
  * ```
  */
 export function ToastContainer({ toasts, onClose }: ToastContainerProps) {
-  return (
+  // [Issue #1399] Render through a portal to `document.body` so the container's
+  // `position: fixed` resolves against the viewport. When mounted inside a
+  // transformed ancestor (AppShell's `<aside data-testid="sidebar-container">`
+  // uses a transform), that ancestor becomes the containing block for `fixed`,
+  // pinning the toasts to the sidebar's box and clipping their left edge instead
+  // of the intended bottom-right of the screen. Guarded on `mounted` so the
+  // server render (where `document` is absent) yields null and the portal only
+  // appears after client hydration — the same pattern as CommandPalette / Modal.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const container = (
     <div
       data-testid="toast-container"
       aria-live="polite"
@@ -259,6 +273,10 @@ export function ToastContainer({ toasts, onClose }: ToastContainerProps) {
       ))}
     </div>
   );
+
+  if (!mounted) return null;
+
+  return createPortal(container, document.body);
 }
 
 /**
