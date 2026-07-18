@@ -7,9 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-18
+
+> **Highlight**: **npx 起動サーバの GUI アップデート対応**。`npx commandmate` で起動したサーバの GUI アップデート機能を2段で整備した。#1394 で npx を正しく検知して誤動作（「今すぐアップデート」が `202 started` を返すのに no-op → 5 分 timeout・`commandmate update` の誤案内）を解消し、#1395 で同ボタンから npx サーバをその場更新（新しい npx キャッシュ取得 → 旧デーモン停止 → 新デーモン起動 → GUI 自動リロード）できるようにした。停止前に版検証してダウンタイム0で fail-fast し、#1198 のセキュリティ不変条件（固定 argv・多重実行ロック・認証は middleware 任せ）を維持する。素の CLI `commandmate update`（npx）は従来どおり案内のみの no-op（#1319）。
+
 ### Added
 
 - **npx 起動サーバの GUI ワンクリック更新** (#1395): `npx commandmate` で起動したサーバでも、アップデート通知バナーの「今すぐアップデート」ボタンからその場更新できるようにした。グローバル入替ではなく「新しい npx キャッシュを取得 → 旧デーモン停止 → 新デーモン起動 → GUI 自動リロード」方式。停止前に版検証を行い、stale/失敗時はダウンタイム0で abort。#1198 のセキュリティ不変条件（固定 argv・多重実行ロック・認証は middleware 任せ）を維持。素の CLI `commandmate update`（npx）は従来どおり案内のみの no-op（#1319）。
+
+### Fixed
+
+- **npx 起動時に GUI アップデートが誤動作する問題を修正** (#1394): #1319 で CLI に入れた npx ガードが GUI 経路（`update-check` / `update` route）に未反映で、npx 起動サーバが自身を global インストールと誤認していた。「今すぐアップデート」ボタンが `202 started` を返すのに実体は no-op（spawn した `commandmate update` が npx ゲートで即終了）となり、バナーは 5 分 timeout に陥り、案内コマンド `commandmate update` も npx では no-op という誤案内だった。両 route に `isNpxExecution()` ガードを追加し `installType: 'npx'` を新設。update route は `400 code:'npx'` で拒否し、バナーは更新ボタンを出さず `npx commandmate@latest` の正しい案内を表示する（この「正しく案内する」状態を #1395 が「実際に更新する」へ引き上げる）。
 
 ## [0.10.4] - 2026-07-18
 
