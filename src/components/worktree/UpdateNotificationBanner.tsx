@@ -25,7 +25,7 @@ export interface UpdateNotificationBannerProps {
   latestVersion: string | null;
   releaseUrl: string | null;
   updateCommand: string | null;
-  installType: 'global' | 'local' | 'unknown';
+  installType: 'global' | 'local' | 'npx' | 'unknown';
 }
 
 /**
@@ -50,6 +50,13 @@ const UPDATE_TIMEOUT_MS = 5 * 60 * 1000;
 
 /** Fixed command shown when the user has to finish the update by hand */
 const MANUAL_UPDATE_COMMAND = 'commandmate update';
+
+/**
+ * Fixed command an npx-launched server must be relaunched with (Issue #1394).
+ * npx runs from a throwaway cache and cannot update in place, so the banner
+ * shows this guidance instead of the one-click update button.
+ */
+const NPX_UPDATE_COMMAND = 'npx commandmate@latest';
 
 /**
  * Banner displaying version update notification.
@@ -80,6 +87,8 @@ export function UpdateNotificationBanner({
   const seenDownRef = useRef(false);
 
   const isGlobal = installType === 'global';
+  // Issue #1394: npx cannot self-update; show guidance, never the update button.
+  const isNpx = installType === 'npx';
 
   const handleConfirm = useCallback(async () => {
     setState('starting');
@@ -176,6 +185,16 @@ export function UpdateNotificationBanner({
         >
           {t('update.updateNow')}
         </Button>
+      )}
+
+      {isNpx && state === 'idle' && (
+        <div className="mb-2" data-testid="update-npx">
+          <p className="text-sm font-medium text-accent-800">{t('update.npxTitle')}</p>
+          <p className="text-xs text-accent-600 mt-1">{t('update.npxDescription')}</p>
+          <code className="block bg-accent-100 rounded px-2 py-1 mt-1 text-xs text-accent-900 font-mono">
+            {NPX_UPDATE_COMMAND}
+          </code>
+        </div>
       )}
 
       {isBusy && (

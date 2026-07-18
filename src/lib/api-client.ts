@@ -752,7 +752,8 @@ export interface UpdateCheckResponse {
   releaseUrl: string | null;
   releaseName: string | null;
   publishedAt: string | null;
-  installType: 'global' | 'local' | 'unknown';
+  /** 'npx' (Issue #1394): running from the npx cache — no in-place update */
+  installType: 'global' | 'local' | 'npx' | 'unknown';
   updateCommand: string | null;
 }
 

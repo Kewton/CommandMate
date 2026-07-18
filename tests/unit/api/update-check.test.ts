@@ -21,11 +21,12 @@ vi.mock('@/lib/version-checker', () => ({
 // Mock install-context [CONS-001]
 vi.mock('@/cli/utils/install-context', () => ({
   isGlobalInstall: vi.fn().mockReturnValue(false),
+  isNpxExecution: vi.fn().mockReturnValue(false),
 }));
 
 import { GET, dynamic } from '@/app/api/app/update-check/route';
 import { checkForUpdate, getCurrentVersion } from '@/lib/version-checker';
-import { isGlobalInstall } from '@/cli/utils/install-context';
+import { isGlobalInstall, isNpxExecution } from '@/cli/utils/install-context';
 import type { UpdateCheckResult } from '@/lib/version-checker';
 
 // =============================================================================
@@ -49,6 +50,7 @@ describe('GET /api/app/update-check', () => {
     vi.clearAllMocks();
     (getCurrentVersion as ReturnType<typeof vi.fn>).mockReturnValue('0.2.3');
     (isGlobalInstall as ReturnType<typeof vi.fn>).mockReturnValue(false);
+    (isNpxExecution as ReturnType<typeof vi.fn>).mockReturnValue(false);
   });
 
   describe('success response (update available)', () => {
@@ -155,6 +157,60 @@ describe('GET /api/app/update-check', () => {
       const data = await response.json();
 
       expect(data.installType).toBe('unknown');
+    });
+  });
+
+  // Issue #1394: npx runs from the npx cache, which isGlobalInstall() reports as
+  // global (Issue #1195). The route must label it 'npx', not 'global', so the
+  // banner shows guidance instead of a one-click button that would no-op.
+  describe('installType: npx (Issue #1394)', () => {
+    it('returns installType: npx when isNpxExecution is true, even though isGlobalInstall is also true', async () => {
+      const mockResult: UpdateCheckResult = {
+        hasUpdate: true,
+        currentVersion: '0.2.3',
+        latestVersion: '0.3.0',
+        releaseUrl: 'https://github.com/Kewton/CommandMate/releases/tag/v0.3.0',
+        releaseName: 'v0.3.0',
+        publishedAt: '2026-02-10T00:00:00Z',
+      };
+      (checkForUpdate as ReturnType<typeof vi.fn>).mockResolvedValue(mockResult);
+      // npx makes both true; the route must prefer 'npx'.
+      (isNpxExecution as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      (isGlobalInstall as ReturnType<typeof vi.fn>).mockReturnValue(true);
+
+      const response = await GET();
+      const data = await response.json();
+
+      expect(data.installType).toBe('npx');
+    });
+
+    it('never emits an updateCommand for an npx run, so the banner shows no in-place command', async () => {
+      const mockResult: UpdateCheckResult = {
+        hasUpdate: true,
+        currentVersion: '0.2.3',
+        latestVersion: '0.3.0',
+        releaseUrl: 'https://github.com/Kewton/CommandMate/releases/tag/v0.3.0',
+        releaseName: 'v0.3.0',
+        publishedAt: '2026-02-10T00:00:00Z',
+      };
+      (checkForUpdate as ReturnType<typeof vi.fn>).mockResolvedValue(mockResult);
+      (isNpxExecution as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      (isGlobalInstall as ReturnType<typeof vi.fn>).mockReturnValue(true);
+
+      const response = await GET();
+      const data = await response.json();
+
+      expect(data.updateCommand).toBeNull();
+    });
+
+    it('is checked before isGlobalInstall (npx short-circuits)', async () => {
+      (checkForUpdate as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+      (isNpxExecution as ReturnType<typeof vi.fn>).mockReturnValue(true);
+
+      await GET();
+
+      // Preferring npx means the global check is not even consulted.
+      expect(isGlobalInstall).not.toHaveBeenCalled();
     });
   });
 

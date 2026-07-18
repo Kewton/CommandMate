@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/cli/utils/install-context', () => ({
   isGlobalInstall: vi.fn().mockReturnValue(true),
+  isNpxExecution: vi.fn().mockReturnValue(false),
   ensureConfigDir: vi.fn().mockReturnValue('/home/tester/.commandmate'),
 }));
 
@@ -38,7 +39,7 @@ vi.mock('fs', async (importOriginal) => ({
 import { spawn } from 'child_process';
 import { closeSync, openSync } from 'fs';
 import { POST, dynamic } from '@/app/api/app/update/route';
-import { ensureConfigDir, isGlobalInstall } from '@/cli/utils/install-context';
+import { ensureConfigDir, isGlobalInstall, isNpxExecution } from '@/cli/utils/install-context';
 import { acquireUpdateLock, releaseUpdateLock } from '@/lib/app-update/update-lock';
 import { getDaemonManagerFactory } from '@/cli/utils/daemon-factory';
 import { AUTH_EXCLUDED_PATHS } from '@/config/auth-config';
@@ -59,6 +60,7 @@ function mockDaemon(isRunning: boolean | Error) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(isGlobalInstall).mockReturnValue(true);
+  vi.mocked(isNpxExecution).mockReturnValue(false);
   // Re-set here, not only at the vi.mock factory: clearAllMocks keeps
   // implementations, so a test that makes this throw would leak into the next.
   vi.mocked(ensureConfigDir).mockReturnValue('/home/tester/.commandmate');
@@ -117,6 +119,57 @@ describe('POST /api/app/update - fixed command guarantee', () => {
     expect(vi.mocked(spawn).mock.calls[0][2]?.stdio).toEqual(['ignore', 42, 42]);
     // The fd is handed to the child; leaving it open would leak it per request.
     expect(closeSync).toHaveBeenCalledWith(42);
+  });
+});
+
+describe('POST /api/app/update - npx gate (Issue #1394)', () => {
+  /**
+   * A server started with `npx commandmate` runs from the npx cache, which
+   * isGlobalInstall() reports as global (Issue #1195). Without this gate the
+   * request passes the global check, spawns a no-op `commandmate update`, and
+   * still answers 202 — hanging the banner until its 5-minute timeout.
+   */
+  it('returns 400 with code "npx" for an npx run and spawns nothing', async () => {
+    vi.mocked(isNpxExecution).mockReturnValue(true);
+    // npx makes isGlobalInstall() true too; the npx gate must win.
+    vi.mocked(isGlobalInstall).mockReturnValue(true);
+
+    const response = await POST();
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ code: 'npx' });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('checks npx before taking the lock, so no lock is left behind', async () => {
+    vi.mocked(isNpxExecution).mockReturnValue(true);
+
+    await POST();
+
+    expect(acquireUpdateLock).not.toHaveBeenCalled();
+  });
+
+  it('reports npx (not not_global) so the banner can show the right command', async () => {
+    vi.mocked(isNpxExecution).mockReturnValue(true);
+    vi.mocked(isGlobalInstall).mockReturnValue(true);
+
+    const response = await POST();
+
+    await expect(response.json()).resolves.toMatchObject({ code: 'npx' });
+  });
+
+  it('falls through to the global gate when npx detection fails (fails to "not npx")', async () => {
+    vi.mocked(isNpxExecution).mockImplementation(() => {
+      throw new Error('__dirname not available');
+    });
+    vi.mocked(isGlobalInstall).mockReturnValue(false);
+
+    const response = await POST();
+
+    // Not treated as npx; the ordinary non-global gate answers instead.
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ code: 'not_global' });
+    expect(spawn).not.toHaveBeenCalled();
   });
 });
 
