@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-07-18
+
+> **Highlight**: **v0.10.3 以降に蓄積した 26 件のバグ修正をまとめたパッチリリース**。柱は4つ。① DB 整合性（`repositories`/`worktrees` 行のライフサイクル、幽霊行の掃除・同一 URL 再 clone 封鎖の解消、将来版スキーマの検知で起動停止、`busy_timeout`+WAL による `SQLITE_BUSY` 対策）。② 版アイデンティティ（サーバー `currentVersion` の実行時解決、デーモン state ファイルへの版・実効設定・プロセス同一性の記録、CLI/quickstart/status の版照合、旧タブ・WebSocket の版不一致検知とリロード導線）。③ clone / schedule / assistant / update が例外で `running`・ロック固着する不具合の一掃。④ フローティング UI（共有ツールチップ・ブランチツールチップ・checkout ドロップダウン・右クリックメニュー・残存フローティング要素）のビューポート clamp とポータル化。あわせて同名スキルが `.claude/skills`（Claude）/`.agents/skills`（Codex）で共存できずスラッシュ候補に出ない不具合を修正した。DB マイグレーション **v43**（`CM_ROOT_DIR` 由来の幽霊リポジトリ行の掃除、#1339）を含む。
+
 ### Fixed
 
 - fix(slash): **同名スキルが `.claude/skills` と `.agents/skills` に併存すると Claude Code の候補に出ない不具合を修正** (#1380)。`deduplicateByName()`（キーは `name + cliTools`、#800）と `mergeCommandGroups()`（キーは `name` のみ）で重複排除の粒度が食い違い、マージ層で `.agents/skills` の Codex 版（`cliTools: ['codex']`）が `.claude/skills` の Claude 版（`cliTools` undefined）を同名で上書きしていたため、後段の `filterCommandsByCliTool(..., 'claude')` で Claude 版が消え候補が空になっていた（Codex 選択時のみ表示）。重複排除キー生成 `keyOf`（name + 正規化 cliTools スコープ、undefined/空は `claude` sentinel）を `command-merger.ts` に切り出し、両関数で共有（DRY）。これにより Claude 版と Codex 版が共存し、SF-1（worktree コマンドが同一 CLI tool scope の同名 standard を override）も従来どおり保たれる。`mergeCommandGroups()` の name 衝突（Claude vs Codex）を検証する回帰テストを追加
