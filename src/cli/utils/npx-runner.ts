@@ -20,6 +20,7 @@
  */
 
 import { spawnSync, type SpawnSyncReturns } from 'child_process';
+import { homedir } from 'os';
 
 /**
  * Upper bound for the warmup download.
@@ -90,6 +91,23 @@ export function sanitizeNpxEnv(
  * @param packageName - Package name (a literal constant, e.g. `commandmate`)
  * @returns The fetched version, or a classified failure
  */
+/**
+ * Working directory for the npx spawns (Issue #1410).
+ *
+ * The server — and the detached update process it spawns — run from the npx
+ * cache package dir (`~/.npm/_npx/<hash>/node_modules/commandmate`). While
+ * `warmNpxLatest` fetches the new version, npx deletes/replaces that dir, so a
+ * later npx spawn that inherited it crashes when npm calls `process.cwd()`
+ * (`ENOENT: uv_cwd`) during bootstrap, aborting the relaunch after the old
+ * server is already stopped. Running the npx spawns from the always-present home
+ * directory keeps `process.cwd()` valid regardless of npx cache churn. The
+ * relaunched daemon sets its own cwd to the (new) package root, so this does not
+ * change where the server ultimately runs.
+ */
+export function stableNpxCwd(): string {
+  return homedir();
+}
+
 export function warmNpxLatest(packageName: string): NpxWarmResult {
   const result = spawnSync(
     'npx',
@@ -97,6 +115,7 @@ export function warmNpxLatest(packageName: string): NpxWarmResult {
     {
       encoding: 'utf-8',
       timeout: NPX_WARMUP_TIMEOUT_MS,
+      cwd: stableNpxCwd(),
       env: sanitizeNpxEnv(),
     }
   );
@@ -147,6 +166,7 @@ export function spawnNpxDaemon(packageName: string): NpxDaemonResult {
     ['--yes', `${packageName}@latest`, 'start', '--daemon'],
     {
       encoding: 'utf-8',
+      cwd: stableNpxCwd(),
       env: sanitizeNpxEnv(),
     }
   );
