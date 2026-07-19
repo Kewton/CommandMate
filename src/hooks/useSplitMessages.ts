@@ -96,7 +96,10 @@ export function useSplitMessages({
     const requestedInstance = resolvedInstanceId;
     const requestId = ++requestIdRef.current;
     try {
-      const params = new URLSearchParams({ cliTool: requestedCli, instance: requestedInstance });
+      // Issue #1407: History renders conversation-pair cards, so the limit must be
+      // counted in pairs (turns), not raw rows — otherwise codex's many-assistant-rows
+      // -per-turn collapses `limit` rows into far fewer cards.
+      const params = new URLSearchParams({ cliTool: requestedCli, instance: requestedInstance, unit: 'pairs' });
       if (limit !== undefined) {
         params.set('limit', String(limit));
       }

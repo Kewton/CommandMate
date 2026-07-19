@@ -24,6 +24,15 @@ export interface GetMessagesOptions {
   /** Issue #868: scope to a single agent instance (overrides cliToolId filtering when set). */
   instanceId?: string;
   includeArchived?: boolean;
+  /**
+   * Issue #1407: unit that `limit` counts.
+   * - 'messages' (default): bounds the number of raw chat rows returned (legacy behavior).
+   * - 'pairs': bounds the number of conversation turns. The newest `limit` user
+   *   messages in scope are located and every row at or after the oldest of them is
+   *   returned, so grouping into conversation pairs yields up to `limit` cards
+   *   regardless of how many assistant rows each turn produced (e.g. codex prompts).
+   */
+  limitUnit?: 'messages' | 'pairs';
 }
 
 type ChatMessageRow = {
@@ -197,35 +206,66 @@ export function getMessages(
   worktreeId: string,
   options: GetMessagesOptions = {}
 ): ChatMessage[] {
-  const { before, limit = 50, cliToolId, instanceId, includeArchived = false } = options;
+  const { before, limit = 50, cliToolId, instanceId, includeArchived = false, limitUnit = 'messages' } = options;
 
-  let query = `
-    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, instance_id, archived
-    FROM chat_messages
-    WHERE worktree_id = ? AND (? IS NULL OR timestamp < ?)
-  `;
+  // Build the shared scope clause (worktree + before cursor + archived + instance/cli
+  // filter) and its bound params. Used for both the message-unit and pair-unit paths
+  // so their filtering stays identical.
+  const buildScope = (): { clause: string; params: (string | number | null)[] } => {
+    let clause = `FROM chat_messages
+    WHERE worktree_id = ? AND (? IS NULL OR timestamp < ?)`;
+    const params: (string | number | null)[] = [worktreeId, before?.getTime() || null, before?.getTime() || null];
 
-  const params: (string | number | null)[] = [worktreeId, before?.getTime() || null, before?.getTime() || null];
+    // archived filter (default: non-archived only)
+    if (!includeArchived) {
+      clause += ` ${ACTIVE_FILTER}`;
+    }
 
-  // archived filter (default: non-archived only)
-  if (!includeArchived) {
-    query += ` ${ACTIVE_FILTER}`;
+    // Issue #868: instance filter takes precedence; otherwise fall back to CLI tool filter.
+    if (instanceId) {
+      clause += ` AND instance_id = ?`;
+      params.push(instanceId);
+    } else if (cliToolId) {
+      clause += ` AND cli_tool_id = ?`;
+      params.push(cliToolId);
+    }
+
+    return { clause, params };
+  };
+
+  const SELECT_COLS = `SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, instance_id, archived`;
+
+  // Issue #1407: pair-unit paging. Resolve a timestamp cutoff so the newest `limit`
+  // user turns are fully included (with all their assistant rows). This keeps the
+  // rendered conversation-pair count equal to `limit` even when a single turn emits
+  // many assistant rows (codex prompts/intermediate outputs). Falls back to
+  // message-unit paging when no user messages exist in scope.
+  if (limitUnit === 'pairs') {
+    const scope = buildScope();
+    const cutoffRow = db
+      .prepare(
+        `SELECT MIN(timestamp) AS cutoff FROM (
+          SELECT timestamp ${scope.clause} AND role = 'user'
+          ORDER BY timestamp DESC LIMIT ?
+        )`
+      )
+      .get(...scope.params, limit) as { cutoff: number | null } | undefined;
+
+    const cutoff = cutoffRow?.cutoff ?? null;
+    if (cutoff !== null) {
+      const full = buildScope();
+      const rows = db
+        .prepare(`${SELECT_COLS} ${full.clause} AND timestamp >= ? ORDER BY timestamp DESC`)
+        .all(...full.params, cutoff) as ChatMessageRow[];
+      return rows.map(mapChatMessage);
+    }
+    // No user messages in scope → fall through to message-unit behavior below.
   }
 
-  // Issue #868: instance filter takes precedence; otherwise fall back to CLI tool filter.
-  if (instanceId) {
-    query += ` AND instance_id = ?`;
-    params.push(instanceId);
-  } else if (cliToolId) {
-    query += ` AND cli_tool_id = ?`;
-    params.push(cliToolId);
-  }
-
-  query += ` ORDER BY timestamp DESC LIMIT ?`;
-  params.push(limit);
-
-  const stmt = db.prepare(query);
-  const rows = stmt.all(...params) as ChatMessageRow[];
+  const scope = buildScope();
+  const rows = db
+    .prepare(`${SELECT_COLS} ${scope.clause} ORDER BY timestamp DESC LIMIT ?`)
+    .all(...scope.params, limit) as ChatMessageRow[];
 
   return rows.map(mapChatMessage);
 }

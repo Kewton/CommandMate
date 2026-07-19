@@ -274,6 +274,78 @@ describe('GET /api/worktrees/:id/messages', () => {
     });
   });
 
+  // Issue #1407: unit parameter (pairs vs messages)
+  describe('unit parameter (Issue #1407)', () => {
+    const seedTurns = () => {
+      let clock = 0;
+      const add = (role: 'user' | 'assistant', content: string) =>
+        createMessage(db, {
+          worktreeId: 'test-worktree',
+          role,
+          content,
+          timestamp: new Date(++clock),
+          messageType: 'normal',
+          cliToolId: 'codex',
+          instanceId: 'codex',
+        });
+      // 2 user turns, each with 3 assistant rows (6 assistant rows total).
+      add('user', 't1-user');
+      add('assistant', 't1-a0');
+      add('assistant', 't1-a1');
+      add('assistant', 't1-a2');
+      add('user', 't2-user');
+      add('assistant', 't2-a0');
+      add('assistant', 't2-a1');
+      add('assistant', 't2-a2');
+    };
+
+    it('unit=pairs returns whole turns, not just `limit` raw rows', async () => {
+      seedTurns();
+      const request = new Request(
+        'http://localhost:3000/api/worktrees/test-worktree/messages?limit=1&unit=pairs&cliTool=codex'
+      );
+      const params = { params: Promise.resolve({ id: 'test-worktree' }) };
+      const response = await getMessages(
+        request as unknown as import('next/server').NextRequest,
+        params
+      );
+      expect(response.status).toBe(200);
+      const data: ChatMessage[] = await response.json();
+      // Newest turn = 1 user + 3 assistant rows (raw-row limit=1 would have returned 1).
+      expect(data).toHaveLength(4);
+      expect(data.filter((m) => m.role === 'user').map((m) => m.content)).toEqual(['t2-user']);
+    });
+
+    it('default (message unit) still bounds by raw rows', async () => {
+      seedTurns();
+      const request = new Request(
+        'http://localhost:3000/api/worktrees/test-worktree/messages?limit=1&cliTool=codex'
+      );
+      const params = { params: Promise.resolve({ id: 'test-worktree' }) };
+      const response = await getMessages(
+        request as unknown as import('next/server').NextRequest,
+        params
+      );
+      expect(response.status).toBe(200);
+      const data: ChatMessage[] = await response.json();
+      expect(data).toHaveLength(1);
+    });
+
+    it('should reject an invalid unit with 400', async () => {
+      const request = new Request(
+        'http://localhost:3000/api/worktrees/test-worktree/messages?unit=bogus'
+      );
+      const params = { params: Promise.resolve({ id: 'test-worktree' }) };
+      const response = await getMessages(
+        request as unknown as import('next/server').NextRequest,
+        params
+      );
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data).toHaveProperty('error');
+    });
+  });
+
   it('should return 500 on database error', async () => {
     db.close();
 

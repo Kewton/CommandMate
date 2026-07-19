@@ -468,7 +468,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     const requestedInstance = activeInstanceIdRef.current;
     const requestId = ++latestMessagesRequestIdRef.current;
     try {
-      const params = new URLSearchParams({ cliTool: requestedCliTool });
+      // Issue #1407: History renders conversation-pair cards, so count the limit in
+      // pairs (turns) rather than raw rows (see useSplitMessages).
+      const params = new URLSearchParams({ cliTool: requestedCliTool, unit: 'pairs' });
       if (onMobile) {
         params.set('instance', requestedInstance);
       }

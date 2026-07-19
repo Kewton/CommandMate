@@ -60,6 +60,18 @@ export async function GET(
     }
     const instanceId = instanceParam ?? undefined;
 
+    // Issue #1407: optional unit for `limit`. 'pairs' counts conversation turns so
+    // the History pane renders `limit` cards; 'messages' (default) keeps the legacy
+    // raw-row semantics for other API consumers.
+    const unitParam = searchParams.get('unit');
+    if (unitParam !== null && unitParam !== 'messages' && unitParam !== 'pairs') {
+      return NextResponse.json(
+        { error: 'Invalid unit parameter (must be "messages" or "pairs")' },
+        { status: 400 }
+      );
+    }
+    const limitUnit = (unitParam ?? 'messages') as 'messages' | 'pairs';
+
     // Validate limit. Upper bound is MAX_MESSAGES_LIMIT (Issue #701).
     if (isNaN(limit) || limit < 1 || limit > MAX_MESSAGES_LIMIT) {
       return NextResponse.json(
@@ -69,7 +81,7 @@ export async function GET(
     }
 
     // Get messages with optional CLI tool / instance filter
-    const messages = getMessages(db, id, { before, limit, cliToolId, instanceId, includeArchived });
+    const messages = getMessages(db, id, { before, limit, cliToolId, instanceId, includeArchived, limitUnit });
 
     // Filter out messages with empty content (defensive programming)
     const validMessages = messages.filter((m) => m.content && m.content.trim() !== '');
