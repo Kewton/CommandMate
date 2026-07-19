@@ -112,6 +112,17 @@ describe('POST /api/app/update - fixed command guarantee', () => {
     expect(unref).toHaveBeenCalledTimes(1);
   });
 
+  it('runs the detached child from the stable config dir, not the npx cache cwd (Issue #1410)', async () => {
+    await POST();
+
+    const options = vi.mocked(spawn).mock.calls[0][2];
+    // The server's cwd under npx is the npx cache package dir, which npx deletes
+    // while fetching the new version; a child that inherited it would crash on
+    // process.cwd() (ENOENT: uv_cwd) at relaunch. The preserved config dir is stable.
+    expect(options?.cwd).toBe('/home/tester/.commandmate');
+    expect(options?.cwd).not.toBe(process.cwd());
+  });
+
   it('redirects child output to the update log instead of inheriting pipes', async () => {
     await POST();
 

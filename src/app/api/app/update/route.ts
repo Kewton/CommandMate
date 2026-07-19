@@ -131,15 +131,25 @@ function spawnUpdate(logPath: string, relaunchNpx: boolean): void {
     ? ['update', '--yes', '--relaunch-npx']
     : ['update', '--yes'];
 
+  // Issue #1410: resolve the bin from the package root (this process's cwd) at
+  // spawn time, but run the child from a STABLE directory. Under npx the server's
+  // cwd is the npx cache package dir (~/.npm/_npx/<hash>/node_modules/commandmate),
+  // which npx deletes/replaces while fetching the new version; a child that
+  // inherited that cwd then crashes on process.cwd() (ENOENT: uv_cwd) at relaunch,
+  // after the old server has already been stopped. The config dir always exists
+  // (ensureConfigDir created it) and is preserved across updates.
+  const binPath = join(process.cwd(), 'bin', 'commandmate.js');
+  const stableCwd = ensureConfigDir();
+
   const logFd = openSync(logPath, 'a');
   try {
     const child = spawn(
       process.execPath,
-      [join(process.cwd(), 'bin', 'commandmate.js'), ...args],
+      [binPath, ...args],
       {
         detached: true,
         stdio: ['ignore', logFd, logFd],
-        cwd: process.cwd(),
+        cwd: stableCwd,
       }
     );
     child.unref();
