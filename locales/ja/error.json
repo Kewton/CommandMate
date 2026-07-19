@@ -3,6 +3,14 @@
     "errorOccurredIn": "{componentName}でエラーが発生しました",
     "errorOccurred": "エラーが発生しました"
   },
+  "chunkReload": {
+    "title": "最新バージョンに更新しています",
+    "description": "CommandMate の新しいバージョンが利用可能です。最新の状態にするため再読み込みします…"
+  },
+  "unexpected": {
+    "title": "問題が発生しました",
+    "description": "予期しないエラーが発生しました。もう一度お試しいただくか、ページを再読み込みしてください。"
+  },
   "fileOps": {
     "failedToCreateFile": "ファイルの作成に失敗しました",
     "failedToCreateDirectory": "ディレクトリの作成に失敗しました",

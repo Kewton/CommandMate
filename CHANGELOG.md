@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-07-19
+
+> **Highlight**: **GUI アップデート後の client-side exception を解消**。`npx commandmate` の GUI アップデートでサーバが新ビルドに差し替わる一方、開いたままの旧タブが旧ハッシュの chunk / RSC を新サーバへ要求して `ChunkLoadError` になり、App Router のエラー境界が無いため `Application error: a client-side exception has occurred` の未処理クラッシュになっていた。#1404 で `error.tsx` / `global-error.tsx` を新設し、`ChunkLoadError` を検知したら 30 秒ガード付きで一度だけ自動リロードして自己回復する安全網を追加した（無限ループ防止・SSR / Safari プライベート安全）。
+
+### Fixed
+
+- **GUI アップデート後の client-side exception を解消** (#1404): 版入替で旧タブが旧ビルドの chunk / RSC を新サーバへ要求すると `ChunkLoadError` が発生するが、アプリに App Router のエラー境界が1つも無かったため未処理クラッシュ（`Application error: a client-side exception`）になっていた。`src/lib/error/chunk-reload.ts`（`ChunkLoadError` 検知＋ sessionStorage による 30 秒ガード付きの一度きり回復）と、`src/app/error.tsx`（セグメント境界、`next-intl` 対応）／`src/app/global-error.tsx`（root 境界、`<html>`/`<body>` 自前・Provider 非依存フォールバック辞書・inline スタイルでテーマ追従）を新設。ChunkLoadError 以外は自動リロードせず手動リロード導線を表示する。補強策（更新バナーの reload 条件拡張・`VersionMismatchBanner` の自動リロード・Service Worker の `/offline` バージョニング）は本リリースのスコープ外。
+
 ## [0.11.1] - 2026-07-19
 
 > **Highlight**: **サイドバー同期トーストの見切れ修正と Toast のグローバル1本化**。サイドバーの同期ボタン押下時に表示されるトーストが、`transform` を持つ祖先（`AppShell` のサイドバー枠）の containing block に閉じ込められてビューポート右下ではなくサイドバー基準に配置され、左端が見切れていた問題を解消した。#1399 で `ToastContainer` を `document.body` への `createPortal` 化（`mounted` ガードで SSR 安全）して根本修正し、#1400 で散在していた `ToastContainer`/`useToast` を単一の `ToastProvider` ＋ 単一 Portal ホストへ統合して、描画位置がツリー構造に依存しなくなるようにし再発を構造的に防止した。

@@ -3,6 +3,14 @@
     "errorOccurredIn": "An error occurred in {componentName}",
     "errorOccurred": "An error occurred"
   },
+  "chunkReload": {
+    "title": "Updating to the latest version",
+    "description": "A newer version of CommandMate is available. Reloading to get the latest update…"
+  },
+  "unexpected": {
+    "title": "Something went wrong",
+    "description": "An unexpected error occurred. Try again, or reload the page."
+  },
   "fileOps": {
     "failedToCreateFile": "Failed to create file",
     "failedToCreateDirectory": "Failed to create directory",
