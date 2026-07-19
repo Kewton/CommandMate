@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.3] - 2026-07-19
+
+> **Highlight**: **History 表示上限が会話ペア数と一致しない問題を修正**。表示上限セレクタ（50/100/…）の値は生メッセージ行数の LIMIT として扱われていたため、codex のように 1 会話ターンあたり assistant 行を多数生成するエージェント（実測 assistant:user ≈ 6.8:1）では、50 を選んでも約 10 枚の会話ペアカードしか表示されなかった。取得単位を「会話ペア（ターン）」に変更し、表示カード枚数＝選択値に一致させた。
+
+### Fixed
+
+- **History 表示上限を会話ペア単位で数えるよう修正** (#1407): 表示上限は `messages` API の `limit`（生の chat 行数 LIMIT）として渡され、History は取得メッセージを会話ペア（user＋続く assistant 群）にまとめて表示するため、assistant 行が多いエージェント（codex 等）では選択値より大幅に少ないカードしか表示されなかった。`getMessages` に `limitUnit:'pairs'` を追加（最新 N 件の user メッセージの timestamp を cutoff に以降の全行を返す／既定の `messages` 単位は不変／user メッセージ無しのスコープはフォールバック）、`messages` route に `unit`（`messages`|`pairs`）パラメータを追加、History 取得系（`useSplitMessages` / `useWorktreeDetailController`）が `unit=pairs` を送るようにして、表示カード枚数＝セレクタ選択値に一致させた。
+
 ## [0.11.2] - 2026-07-19
 
 > **Highlight**: **GUI アップデート後の client-side exception を解消**。`npx commandmate` の GUI アップデートでサーバが新ビルドに差し替わる一方、開いたままの旧タブが旧ハッシュの chunk / RSC を新サーバへ要求して `ChunkLoadError` になり、App Router のエラー境界が無いため `Application error: a client-side exception has occurred` の未処理クラッシュになっていた。#1404 で `error.tsx` / `global-error.tsx` を新設し、`ChunkLoadError` を検知したら 30 秒ガード付きで一度だけ自動リロードして自己回復する安全網を追加した（無限ループ防止・SSR / Safari プライベート安全）。
