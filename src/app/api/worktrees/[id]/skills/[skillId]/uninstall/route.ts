@@ -428,14 +428,21 @@ export async function POST(
         },
       });
     } catch (error) {
+      if (!committed) {
+        // Deletion never started: the receipt and every file are intact, so
+        // nothing changed on disk. Drop the journal entry to keep the key
+        // reusable, exactly as a failed plan consume above does (Issue #1428),
+        // rather than pinning it to a 409 on replay until retention.
+        deleteSkillOperationJournal(entry.idempotencyKey);
+        throw error;
+      }
+
+      // Deletion had already begun, so the receipt and the surviving files are
+      // the diagnostic record; reconciliation converges from there.
       entry = transitionSkillOperation(entry, 'FAILED_RECONCILABLE', {
         error: { code: errorCodeOf(error), message: messageOf(error) },
       });
       recordAuditSafely(entry, 'failed');
-      if (!committed) throw error;
-
-      // Deletion had already begun, so the receipt and the surviving files are
-      // the diagnostic record; reconciliation converges from there.
       logger.error('skill-uninstall-partial', {
         operationId: entry.operationId,
         error: redactSkillOperationText(messageOf(error)),

@@ -437,11 +437,11 @@ export async function POST(
       });
     } catch (error) {
       // Nothing was published: the staging directory is already gone and the
-      // destination was never touched.
-      entry = transitionSkillOperation(entry, 'FAILED_RECONCILABLE', {
-        error: { code: errorCodeOf(error), message: messageOf(error) },
-      });
-      recordAuditSafely(entry, 'failed');
+      // destination was never touched. Drop the journal entry so the key stays
+      // reusable, exactly as a failed plan consume above does (Issue #1428) —
+      // leaving a terminal FAILED entry here would pin the key to a 409 on
+      // replay until retention, for a failure that changed nothing on disk.
+      deleteSkillOperationJournal(entry.idempotencyKey);
       throw error;
     }
 
@@ -577,12 +577,6 @@ function answerReplay(
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function errorCodeOf(error: unknown): string {
-  if (isSkillInstallError(error) || isSkillPlanError(error)) return error.code;
-  if (isSkillPackageError(error) || isSkillFetchError(error)) return error.code;
-  return 'SKILL_INSTALL_INTERNAL_ERROR';
 }
 
 /** Audit failures must not mask the outcome they are describing. */

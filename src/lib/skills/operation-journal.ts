@@ -247,6 +247,52 @@ export function deleteSkillOperationJournal(
   }
 }
 
+/**
+ * How long a terminal journal entry is kept before it becomes collectable.
+ *
+ * The journal is the crash-recovery and idempotency record, not the audit trail
+ * (that lives in the append-only `skill_operations` table). A terminal entry is
+ * only still useful for the window during which a client might retry the same
+ * idempotency key; past it, the entry is pure growth. Seven days comfortably
+ * covers realistic retry and support windows while bounding the directory to the
+ * operations of one window rather than of all time (Issue #1428).
+ */
+export const SKILL_JOURNAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Collect terminal journal entries whose retention window has elapsed.
+ *
+ * Only {@link isSkillOperationTerminal} entries are eligible: SUCCEEDED, and a
+ * pre-commit FAILED_RECONCILABLE that rolled back cleanly. A FAILED_RECONCILABLE
+ * that *did* commit to the filesystem is non-terminal — it still owes the
+ * reconciler an index write — and is never pruned, so a genuine
+ * payload-on-disk/no-index inconsistency is not silently discarded. Retention is
+ * measured from `updatedAt`, which for a terminal entry is the moment it reached
+ * its terminal state and never moves again.
+ *
+ * Uniform retention across both terminal outcomes is deliberate (Issue #1428):
+ * a SUCCEEDED entry that were deleted immediately would let a delayed retry of
+ * the *same* idempotency key re-run the install and hit a spurious
+ * DESTINATION_EXISTS, so success and failure expire on the same clock and a key
+ * becomes reusable at a single, predictable time regardless of outcome.
+ *
+ * @returns the idempotency keys of the entries that were pruned.
+ */
+export function pruneExpiredSkillOperationJournal(
+  options: SkillJournalOptions & { retentionMs?: number } = {}
+): string[] {
+  const now = options.now ?? Date.now();
+  const retentionMs = options.retentionMs ?? SKILL_JOURNAL_RETENTION_MS;
+  const pruned: string[] = [];
+  for (const entry of listSkillOperationJournal(options)) {
+    if (!isSkillOperationTerminal(entry)) continue;
+    if (now - entry.updatedAt <= retentionMs) continue;
+    deleteSkillOperationJournal(entry.idempotencyKey, options);
+    pruned.push(entry.idempotencyKey);
+  }
+  return pruned;
+}
+
 export type SkillOperationBeginResult =
   | { ok: true; entry: SkillOperationJournalEntry; replayed: boolean }
   | { ok: false; reason: 'IDEMPOTENCY_KEY_CONFLICT'; entry: SkillOperationJournalEntry };

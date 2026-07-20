@@ -186,6 +186,34 @@ app.prepare().then(() => {
       const db = getDbInstance();
       runMigrations(db);
 
+      // Issue #1428: converge Skill install/uninstall operations that a crash
+      // left mid-flight, and garbage-collect expired journal entries. Runs after
+      // migrations (the audit table is migration-owned) and is fail-open in its
+      // own try/catch so a reconciliation error cannot stop the server — nor
+      // abort the worktree sync that follows in the outer try.
+      try {
+        // Loaded via dynamic import, NOT a top-level static import: pulling the
+        // skills module graph into server.ts's eval-time graph perturbs Next's
+        // AsyncLocalStorage bootstrap under `tsx server.ts` (dev/E2E), so the
+        // first request that compiles middleware crashes with
+        // "AsyncLocalStorage accessed in runtime where it is not available".
+        // Deferring the import to here (after app.prepare()) avoids it. Do not
+        // hoist this back to a static import.
+        const { runSkillStartupReconciliation } = await import(
+          './src/lib/skills/startup-reconcile'
+        );
+        const skillReport = runSkillStartupReconciliation(db);
+        if (skillReport.scanned > 0 || skillReport.pruned > 0) {
+          console.log(
+            `Skill operations reconciled: scanned=${skillReport.scanned} ` +
+              `converged=${skillReport.converged} failed=${skillReport.failed} ` +
+              `pruned=${skillReport.pruned} orphanLocks=${skillReport.orphanLocksReleased.length}`
+          );
+        }
+      } catch (error) {
+        console.error('Error reconciling Skill operations:', error);
+      }
+
       // Get repository paths from environment variables
       const repositoryPaths = getRepositoryPaths();
 

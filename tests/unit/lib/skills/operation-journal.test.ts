@@ -17,6 +17,7 @@ import {
   hasSkillFilesystemCommit,
   isSkillOperationTerminal,
   listSkillOperationJournal,
+  pruneExpiredSkillOperationJournal,
   readSkillOperationJournal,
   transitionSkillOperation,
   type SkillOperationBinding,
@@ -298,5 +299,64 @@ describe('journal content is safe to persist', () => {
     begin({ idempotencyKey: 'k1' });
     writeFileSync(join(root, SKILL_JOURNAL_DIRNAME, 'garbage.json'), 'not json');
     expect(listSkillOperationJournal({ root })).toHaveLength(1);
+  });
+});
+
+describe('retention', () => {
+  function succeed(key: string, at: number): void {
+    const started = begin({ idempotencyKey: key });
+    if (!started.ok) throw new Error('seed failed');
+    let entry = transitionSkillOperation(started.entry, 'FS_COMMITTED', {}, { root, now: at });
+    entry = transitionSkillOperation(entry, 'INDEXED', {}, { root, now: at });
+    transitionSkillOperation(entry, 'SUCCEEDED', {}, { root, now: at });
+  }
+
+  it('collects terminal entries past the window and returns their keys', () => {
+    succeed('old', T0);
+    const pruned = pruneExpiredSkillOperationJournal({ root, now: T0 + 1_001, retentionMs: 1_000 });
+    expect(pruned).toEqual(['old']);
+    expect(readSkillOperationJournal('old', { root })).toBeNull();
+  });
+
+  it('keeps a terminal entry that is still inside the window', () => {
+    succeed('recent', T0);
+    const pruned = pruneExpiredSkillOperationJournal({ root, now: T0 + 999, retentionMs: 1_000 });
+    expect(pruned).toEqual([]);
+    expect(readSkillOperationJournal('recent', { root })?.state).toBe('SUCCEEDED');
+  });
+
+  it('never collects a FAILED_RECONCILABLE that still owes an index write', () => {
+    // Committed to the filesystem, then the DB write failed: non-terminal, the
+    // reconciler must still converge it, so retention must not delete it however
+    // old it is.
+    const started = begin({ idempotencyKey: 'committed-failure' });
+    if (!started.ok) throw new Error('seed failed');
+    const committed = transitionSkillOperation(started.entry, 'FS_COMMITTED', {}, { root, now: T0 });
+    const stalled = transitionSkillOperation(
+      committed,
+      'FAILED_RECONCILABLE',
+      { error: { code: 'SKILL_INDEX_FAILED', message: 'locked' } },
+      { root, now: T0 }
+    );
+    expect(isSkillOperationTerminal(stalled)).toBe(false);
+
+    const pruned = pruneExpiredSkillOperationJournal({ root, now: T0 + 10_000_000, retentionMs: 1_000 });
+    expect(pruned).toEqual([]);
+    expect(readSkillOperationJournal('committed-failure', { root })?.state).toBe('FAILED_RECONCILABLE');
+  });
+
+  it('collects a pre-commit rollback once it is past the window', () => {
+    const started = begin({ idempotencyKey: 'rolled-back' });
+    if (!started.ok) throw new Error('seed failed');
+    const failed = transitionSkillOperation(
+      started.entry,
+      'FAILED_RECONCILABLE',
+      { error: { code: 'SKILL_DOWNLOAD_FAILED', message: 'reset' } },
+      { root, now: T0 }
+    );
+    expect(isSkillOperationTerminal(failed)).toBe(true);
+
+    const pruned = pruneExpiredSkillOperationJournal({ root, now: T0 + 2_000, retentionMs: 1_000 });
+    expect(pruned).toEqual(['rolled-back']);
   });
 });
