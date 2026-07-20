@@ -24,6 +24,10 @@ import {
 import { AGENT_SUPPORT_LABEL_KEYS, PERMISSION_DECLARATION_NOTICE_KEY } from '@/lib/skills/constants';
 import { SKILL_COMPATIBILITY_MESSAGE_KEYS } from '@/lib/skills/compatibility';
 import { SKILL_PLAN_HIGH_RISK_MESSAGE_KEY } from '@/lib/skills/install-plan';
+import {
+  SKILL_INSTALL_NEXT_ACTION_KEYS,
+  SKILL_INSTALL_RELOAD_MESSAGE_KEYS,
+} from '@/lib/skills/install-apply';
 
 const ROOT = path.resolve(__dirname, '../../../..');
 const LOCALES_DIR = path.join(ROOT, 'locales');
@@ -87,6 +91,10 @@ function contractKeys(): string[] {
     // Emitted by the Install Plan API (#1233) rather than written at a call
     // site: the plan tells the client which confirmation to show.
     SKILL_PLAN_HIGH_RISK_MESSAGE_KEY,
+    // Emitted by the install apply API (#1235): the response names the reload
+    // instruction per agent and the next action per outcome.
+    ...Object.values(SKILL_INSTALL_RELOAD_MESSAGE_KEYS),
+    ...Object.values(SKILL_INSTALL_NEXT_ACTION_KEYS),
   ]
     .map(resolveSkillMessageKey)
     .concat(Object.values(RECOMMENDATION_LABEL_KEY))

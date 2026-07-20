@@ -133,6 +133,19 @@
   "plan": {
     "highRiskAcknowledgement": "CommandMate rated this package high risk after inspecting its contents. Review the files, scripts and declared permissions below, then confirm explicitly that you want to install it into this worktree."
   },
+  "install": {
+    "reload": {
+      "native": "{agent} loads Skills from the worktree at startup. Restart the {agent} session in this worktree to make {skillId} {version} available.",
+      "commandmateRuntime": "{agent} runs this Skill through the CommandMate runtime. Restart the {agent} session in this worktree so the runtime picks up {skillId} {version}.",
+      "unsupported": "{agent} does not support this Skill. The files are installed, but {skillId} {version} will not be offered in {agent} sessions.",
+      "unknown": "Support for {agent} has not been verified. The files are installed; restart the {agent} session and check whether {skillId} {version} is offered."
+    },
+    "nextAction": {
+      "succeeded": "The Skill is installed and recorded. Restart the agent sessions listed below to start using it.",
+      "committedReconciling": "The files were written and are already in the worktree, but the installation record is incomplete. CommandMate will finish it automatically; no reinstall is needed.",
+      "failed": "Nothing was written to the worktree. Review the reason and build a new install plan."
+    }
+  },
   "card": {
     "provider": "by {provider}",
     "noRecommendedVersion": "No installable version"
