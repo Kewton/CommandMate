@@ -26,6 +26,7 @@ import { v40_migrations } from './v40-timer-error';
 import { v41_migrations } from './v41-push-subscriptions';
 import { v42_migrations } from './v42-push-subscription-locale';
 import { v43_migrations } from './v43-remove-cm-root-dir-ghost-repository';
+import { v44_migrations } from './v44-skill-operations';
 
 /**
  * Complete ordered list of all migrations.
@@ -57,4 +58,5 @@ export const migrations: Migration[] = [
   ...v41_migrations,
   ...v42_migrations,
   ...v43_migrations,
+  ...v44_migrations,
 ];
