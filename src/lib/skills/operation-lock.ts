@@ -6,12 +6,14 @@
  *
  * - **Owner nonce.** Release and renew require the caller to present the nonce
  *   written at acquisition, so no process can drop a lock it does not hold.
- * - **Lease heartbeat.** A long install renews its lease, so "old" never means
- *   "abandoned". Age alone is not sufficient evidence to reclaim.
+ * - **Lease heartbeat.** {@link renewSkillOperationLease} can extend a lease so
+ *   a long operation is not reclaimed by age. It is not yet wired into the
+ *   routes, so owner liveness below — not the heartbeat — is what currently
+ *   keeps a live operation safe (Issue #1427).
  * - **Owner liveness.** A lock whose lease expired is reclaimed only when the
  *   owning PID is verifiably gone on this host. A live owner that missed a
- *   heartbeat keeps its lock: reclaiming it would let two processes write the
- *   same payload.
+ *   heartbeat keeps its lock, including a same-process concurrent operation:
+ *   reclaiming it would let two processes write the same payload.
  *
  * The lock key is a digest of the *resolved* worktree path and the validated
  * Skill ID, so no untrusted name ever reaches a filename.
@@ -187,7 +189,30 @@ export function describeSkillLockHolder(record: SkillOperationLockRecord): Skill
  * Decide how an observed record may be treated, given the clock and liveness.
  *
  * Ordering matters: a valid lease short-circuits every other consideration, so
- * a live holder is never reclaimed regardless of what its PID looks like.
+ * a live holder is never reclaimed regardless of what its PID looks like. Once
+ * the lease has lapsed on this host, PID liveness is the *only* remaining
+ * evidence — a lock is reclaimed only when its owning process is verifiably gone.
+ *
+ * Same-process locks are deliberately not shortcut to RECLAIMABLE (Issue #1427).
+ * Every Next.js route handler runs in one shared process and none renews its
+ * lease ({@link renewSkillOperationLease} has no production caller), so a lapsed
+ * lease is not evidence that a *concurrent* same-process operation abandoned its
+ * lock. Shortcutting it to reclaimable let a second request steal a live
+ * install's lock ~one lease window in and write the same payload underneath it.
+ * A same-process owner that is still alive now resolves to HELD_BY_LIVE_OWNER
+ * and is left alone.
+ *
+ * Tradeoff: this process can no longer instantly reclaim a lock it truly leaked
+ * (acquired but never released). While the process stays alive such a lock reads
+ * as HELD_BY_LIVE_OWNER; it clears only on an explicit release or after the
+ * process exits — a later process then sees the dead PID and reclaims it. Note
+ * this is stronger than "next acquire waits at most one lease window": with no
+ * heartbeat there is no time-based signal, so within one live process the lock
+ * is held until release/exit, not merely until the lease lapses. In practice the
+ * acquire path always releases in a `finally`, so the only real remnant is a
+ * crash — and crash orphans are unaffected: a new process has a different
+ * generation and finds the old PID gone, so the liveness branch below reclaims
+ * them exactly as before.
  */
 export function evaluateSkillLock(
   record: SkillOperationLockRecord | null,
@@ -205,11 +230,6 @@ export function evaluateSkillLock(
     return expiredFor > SKILL_LOCK_FOREIGN_HOST_GRACE_MS
       ? 'RECLAIMABLE'
       : 'HELD_UNVERIFIABLE_OWNER';
-  }
-
-  // Our own abandoned lock: this process is demonstrably past that operation.
-  if (record.owner.processGeneration === PROCESS_GENERATION && record.owner.pid === process.pid) {
-    return 'RECLAIMABLE';
   }
 
   return isAlive(record.owner.pid) ? 'HELD_BY_LIVE_OWNER' : 'RECLAIMABLE';
