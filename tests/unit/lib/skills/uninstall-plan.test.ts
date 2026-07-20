@@ -43,8 +43,10 @@ import {
   consumeSkillUninstallPlan,
   createSkillUninstallPlan,
   getSkillUninstallPlan,
+  getSkillUninstallPlanCount,
   readSkillReceiptDigest,
   resetSkillUninstallPlanCacheForTesting,
+  sweepSkillUninstallPlans,
 } from '@/lib/skills/uninstall-plan';
 import { buildPackage } from '../../../fixtures/skills/malicious-packages/package';
 import type { PackageFileSpec } from '../../../fixtures/skills/malicious-packages/package';
@@ -356,6 +358,29 @@ describe('createSkillUninstallPlan', () => {
     }
     expect(isSkillPlanError(thrown)).toBe(true);
     expect((thrown as { code: string }).code).toBe('SKILL_PLAN_NOT_FOUND');
+  });
+});
+
+describe('the uninstall cache lets go on its own schedule (Issue #1429)', () => {
+  it('drops an expired plan without a second plan being created', () => {
+    install();
+    const record = plan();
+    expect(getSkillUninstallPlanCount()).toBe(1);
+
+    expect(sweepSkillUninstallPlans({ now: record.expiresAt - 1 })).toBe(0);
+    expect(sweepSkillUninstallPlans({ now: record.expiresAt })).toBe(1);
+    expect(getSkillUninstallPlanCount()).toBe(0);
+  });
+
+  it('reclaims an expired plan on an unrelated token lookup', () => {
+    install();
+    const record = plan();
+
+    expect(() =>
+      getSkillUninstallPlan('0'.repeat(48), { now: record.expiresAt + 1 })
+    ).toThrowError(/SKILL_PLAN_NOT_FOUND/);
+
+    expect(getSkillUninstallPlanCount()).toBe(0);
   });
 });
 

@@ -147,6 +147,17 @@ function requireRoot(): string {
   return state.rootDir;
 }
 
+/**
+ * Whether a data root has been resolved.
+ *
+ * For callers that may run before the first artifact download — the background
+ * sweeper starts with the process, the store only on first use — and must skip
+ * rather than treat an untouched store as an error.
+ */
+export function isSkillSnapshotStoreInitialized(): boolean {
+  return state.rootDir !== null;
+}
+
 /** Remove every snapshot file the in-memory index does not account for. */
 function purgeOrphanFiles(): void {
   const rootDir = requireRoot();
@@ -371,9 +382,9 @@ export function resolveSkillSnapshotPath(snapshotId: string): string {
  *
  * @returns Number of snapshots removed
  */
-export function sweepSkillSnapshots(): number {
+export function sweepSkillSnapshots(options: { now?: number } = {}): number {
   requireRoot();
-  const now = Date.now();
+  const now = options.now ?? Date.now();
   let removed = 0;
   for (const record of [...state.records.values()]) {
     if (record.refCount === 0 && now >= record.expiresAt) {

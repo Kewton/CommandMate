@@ -459,10 +459,26 @@ export const SKILL_UNINSTALL_PLAN_TOKEN_PATTERN = /^[0-9a-f]{48}$/;
 
 const SKILL_UNINSTALL_PLAN_TOKEN_BYTES = 24;
 
-function sweep(now: number): void {
+/**
+ * Drop every expired plan.
+ *
+ * @param keep Token to leave in place so its own lookup can still answer
+ *   `EXPIRED` rather than the ambiguous `NOT_FOUND`
+ * @returns Number of plans dropped
+ */
+function sweepExpired(now: number, keep?: string): number {
+  let dropped = 0;
   for (const record of [...cache.records.values()]) {
-    if (now >= record.expiresAt) cache.records.delete(record.token);
+    if (record.token !== keep && now >= record.expiresAt) {
+      cache.records.delete(record.token);
+      dropped += 1;
+    }
   }
+  return dropped;
+}
+
+function sweep(now: number): void {
+  sweepExpired(now);
   while (cache.records.size >= SKILL_PLAN_MAX_ENTRIES) {
     const oldest = [...cache.records.values()].sort((a, b) => a.createdAt - b.createdAt)[0];
     if (!oldest) break;
@@ -470,11 +486,27 @@ function sweep(now: number): void {
   }
 }
 
+/**
+ * Reclaim expired plans without creating one.
+ *
+ * The install cache's counterpart ({@link module:lib/skills/install-plan}).
+ * An uninstall plan pins no snapshot, but it does hold the assessed tree, and
+ * the two caches must not diverge in when they let go of it.
+ *
+ * @returns Number of plans dropped
+ */
+export function sweepSkillUninstallPlans(options: { now?: number } = {}): number {
+  return sweepExpired(options.now ?? Date.now());
+}
+
 function requireRecord(token: string, now: number): SkillUninstallPlanRecord {
   if (!SKILL_UNINSTALL_PLAN_TOKEN_PATTERN.test(token)) {
     throw new SkillPlanError(SkillPlanErrorCode.NOT_FOUND);
   }
   const record = cache.records.get(token);
+  // Every token access reclaims the siblings that expired meanwhile, so a plan
+  // nobody applies is not held until the next plan is created.
+  sweepExpired(now, token);
   if (!record) throw new SkillPlanError(SkillPlanErrorCode.NOT_FOUND);
 
   const presented = Buffer.from(token, 'utf-8');

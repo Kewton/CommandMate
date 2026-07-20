@@ -43,6 +43,7 @@ import {
   type SkillInstallPlanDto,
   type SkillPlanActor,
 } from '@/lib/skills/install-plan';
+import { ensureSkillPlanSweeper } from '@/lib/skills/plan-sweeper';
 import { getServerVersion } from '@/lib/version-checker';
 import { SKILL_API_NO_STORE_HEADERS, skillApiError } from '@/lib/api/skills-api';
 
@@ -156,6 +157,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; skillId: string }> }
 ): Promise<NextResponse> {
+  ensureSkillPlanSweeper();
+
   let snapshotId: string | null = null;
   try {
     const { id, skillId } = await params;

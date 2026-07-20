@@ -30,6 +30,7 @@ import {
   isSkillUninstallError,
   resolveSkillUninstallTarget,
 } from '@/lib/skills/uninstall-apply';
+import { ensureSkillPlanSweeper } from '@/lib/skills/plan-sweeper';
 import { SKILL_API_NO_STORE_HEADERS, skillApiError } from '@/lib/api/skills-api';
 
 export const dynamic = 'force-dynamic';
@@ -99,6 +100,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; skillId: string }> }
 ): Promise<NextResponse> {
+  ensureSkillPlanSweeper();
+
   try {
     const { id, skillId } = await params;
 

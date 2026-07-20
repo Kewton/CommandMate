@@ -379,15 +379,44 @@ function dropRecord(record: SkillInstallPlanRecord): void {
   if (record.consumedAt === null) releaseSkillSnapshot(record.binding.snapshotId);
 }
 
-function sweep(now: number): void {
+/**
+ * Drop every expired plan, releasing the snapshot each one pinned.
+ *
+ * @param keep Token to leave in place so its own lookup can still answer
+ *   `EXPIRED` rather than the ambiguous `NOT_FOUND`
+ * @returns Number of plans dropped
+ */
+function sweepExpired(now: number, keep?: string): number {
+  let dropped = 0;
   for (const record of [...cache.records.values()]) {
-    if (now >= record.expiresAt) dropRecord(record);
+    if (record.token !== keep && now >= record.expiresAt) {
+      dropRecord(record);
+      dropped += 1;
+    }
   }
+  return dropped;
+}
+
+function sweep(now: number): void {
+  sweepExpired(now);
   while (cache.records.size >= SKILL_PLAN_MAX_ENTRIES) {
     const oldest = [...cache.records.values()].sort((a, b) => a.createdAt - b.createdAt)[0];
     if (!oldest) break;
     dropRecord(oldest);
   }
+}
+
+/**
+ * Reclaim expired plans without creating one.
+ *
+ * Creating a plan is not the only thing that should free a snapshot: a plan
+ * left unapplied would otherwise pin its artifact bytes for the life of the
+ * process. Called from every token access and from the background sweeper.
+ *
+ * @returns Number of plans dropped
+ */
+export function sweepSkillInstallPlans(options: { now?: number } = {}): number {
+  return sweepExpired(options.now ?? Date.now());
 }
 
 /**
@@ -402,6 +431,9 @@ function requireRecord(token: string, now: number): SkillInstallPlanRecord {
     throw new SkillPlanError(SkillPlanErrorCode.NOT_FOUND);
   }
   const record = cache.records.get(token);
+  // Every token access reclaims the siblings that expired meanwhile, so a plan
+  // nobody applies is not held until the next plan is created.
+  sweepExpired(now, token);
   if (!record) throw new SkillPlanError(SkillPlanErrorCode.NOT_FOUND);
 
   const presented = Buffer.from(token, 'utf-8');
