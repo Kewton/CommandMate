@@ -224,6 +224,17 @@ function setHead(commit: string | null): void {
   });
 }
 
+/**
+ * The route resolves the worktree through the DB; since #1430 the install index
+ * has a foreign key to it, so the row has to be in the test database too.
+ */
+function seedWorktreeRow(db: Database.Database): void {
+  db.prepare(
+    `INSERT INTO worktrees (id, name, path, repository_path, repository_name)
+     VALUES (?, 'demo-worktree', ?, ?, 'commandmate')`
+  ).run(WORKTREE_ID, worktreeDir, path.dirname(worktreeDir));
+}
+
 function makeWorktree(): Worktree {
   return {
     id: WORKTREE_ID,
@@ -276,6 +287,7 @@ beforeEach(() => {
 
   db = new Database(':memory:');
   runMigrations(db);
+  seedWorktreeRow(db);
   getDbInstanceMock.mockReturnValue(db);
   getWorktreeByIdMock.mockReturnValue(makeWorktree());
 

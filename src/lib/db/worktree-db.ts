@@ -720,8 +720,11 @@ export function getWorktreesByRepository(
 
 /**
  * Delete all worktrees for a given repository path
- * Related data (chat_messages, session_states, worktree_memos, worktree_todos)
- * will be automatically deleted via CASCADE foreign key constraints.
+ * Related data is automatically deleted via ON DELETE CASCADE in every table
+ * holding a foreign key to worktrees(id) — chat_messages, session_states,
+ * worktree_memos, worktree_todos, agent_instances, scheduled_executions,
+ * execution_logs, timer_messages and skill_installations (#1430). The live list
+ * is whatever `PRAGMA foreign_key_list` reports; see getWorktreeChildTables.
  *
  * @param db - Database instance
  * @param repositoryPath - Path of the repository to delete
@@ -741,8 +744,10 @@ export function deleteRepositoryWorktrees(
 
 /**
  * Delete worktrees by their IDs
- * Related data (chat_messages, session_states, worktree_memos, worktree_todos)
- * will be automatically deleted via CASCADE foreign key constraints.
+ * Related data is automatically deleted via ON DELETE CASCADE in every table
+ * holding a foreign key to worktrees(id) — including skill_installations, whose
+ * rows used to survive the worktree and make a re-created worktree at the same
+ * path un-installable (#1430). See getWorktreeChildTables for the live list.
  *
  * @param db - Database instance
  * @param worktreeIds - Array of worktree IDs to delete

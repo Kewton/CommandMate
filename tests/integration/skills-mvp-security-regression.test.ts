@@ -79,6 +79,7 @@ import {
   initGitRepo,
   installRootOf,
   removeTestRoot,
+  seedWorktreeRow,
   residueReport,
   snapshotTree,
   treeDelta,
@@ -213,6 +214,7 @@ beforeEach(() => {
 
   db = new Database(':memory:');
   runMigrations(db);
+  seedWorktreeRow(db, worktreeDir);
   getDbInstanceMock.mockReturnValue(db);
   getWorktreeByIdMock.mockReturnValue(makeWorktree());
 

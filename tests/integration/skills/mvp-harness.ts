@@ -32,6 +32,7 @@ import {
 } from 'fs';
 import { homedir } from 'os';
 import path from 'path';
+import type Database from 'better-sqlite3';
 import { SKILL_INSTALL_ROOT_PREFIX, SKILL_STAGING_DIRNAME } from '@/lib/skills/constants';
 import type { SkillCatalog, SkillCatalogVersion } from '@/types/skills';
 import { buildPackage, type PackageOptions } from '../../fixtures/skills/malicious-packages/package';
@@ -54,6 +55,24 @@ export const MVP_SKILLS = [
 
 export const WORKTREE_ID = 'wt-00000000-0000-4000-8000-000000000001';
 export const CATALOG_REPOSITORY = 'Kewton/commandmate-skills';
+
+/**
+ * Insert the worktree row the mocked `getWorktreeById` pretends to read.
+ *
+ * Since #1430 `skill_installations.worktree_id` is a foreign key, so the row the
+ * routes resolve must also exist in the test database — in production both come
+ * from the same connection.
+ */
+export function seedWorktreeRow(
+  db: Database.Database,
+  worktreePath: string,
+  id: string = WORKTREE_ID
+): void {
+  db.prepare(
+    `INSERT OR REPLACE INTO worktrees (id, name, path, repository_path, repository_name)
+     VALUES (?, 'demo-worktree', ?, ?, 'commandmate')`
+  ).run(id, worktreePath, path.dirname(worktreePath));
+}
 
 /** Deterministic 40-hex commit per Skill, so receipts are reproducible. */
 export function commitFor(skillId: string): string {
