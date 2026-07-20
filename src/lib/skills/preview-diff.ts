@@ -310,7 +310,7 @@ interface TreeHashInput {
 export function computeSkillTreeHash(files: readonly TreeHashInput[]): string {
   const canonical = [...files]
     .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
-    .map((file) => `${file.path} ${file.sha256} ${file.executable ? '1' : '0'}`)
+    .map((file) => `${file.path}\x00${file.sha256}\x00${file.executable ? '1' : '0'}`)
     .join('\n');
   return createHash('sha256').update(`skill-tree-v1\n${canonical}`).digest('hex');
 }
