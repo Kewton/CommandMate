@@ -111,6 +111,28 @@
       "blockedNoVersion": "Install is unavailable because no published version applies to the CommandMate you are running."
     }
   },
+  "target": {
+    "heading": "Install target",
+    "loading": "Loading registered worktrees…",
+    "empty": "No worktree is registered yet. Register one before installing a Skill.",
+    "errorNotice": "The list of registered worktrees could not be loaded, so no install target can be chosen right now.",
+    "retry": "Retry",
+    "selected": "Selected",
+    "repository": "Repository",
+    "branch": "Branch",
+    "branchUnknown": "Not recorded",
+    "agents": "Agents",
+    "agentsNone": "None configured",
+    "workingTree": "Working tree",
+    "workingTreeClean": "No uncommitted changes",
+    "workingTreeDirty": "Has uncommitted changes",
+    "workingTreeUnknown": "Not inspected",
+    "sessionRunning": "A session is currently running in this worktree.",
+    "branchFreshnessNotice": "The branch shown here comes from the last worktree scan. CommandMate resolves the live branch and commit when it builds the install plan, and reports any difference there."
+  },
+  "plan": {
+    "highRiskAcknowledgement": "CommandMate rated this package high risk after inspecting its contents. Review the files, scripts and declared permissions below, then confirm explicitly that you want to install it into this worktree."
+  },
   "card": {
     "provider": "by {provider}",
     "noRecommendedVersion": "No installable version"
