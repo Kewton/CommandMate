@@ -152,6 +152,23 @@ describe('a live owner is never reclaimed', () => {
     expect(readSkillOperationLock(KEY, { root })?.owner.nonce).toBe('foreign-nonce');
   });
 
+  it('does not reclaim a same-process lease-expired lock while this process is alive', () => {
+    // Issue #1427: the lock is written by THIS process (real generation + pid).
+    // Route handlers share one process and never renew, so a lapsed lease is not
+    // proof that a concurrent same-process operation abandoned it — it stays held.
+    const first = acquireSkillOperationLock({ key: KEY, operationId: 'op-1' }, { root, now: T0 });
+    expect(first.ok).toBe(true);
+    const contender = acquireSkillOperationLock(
+      { key: KEY, operationId: 'op-2' },
+      { root, now: T0 + SKILL_LOCK_LEASE_MS + 1, isProcessAlive: ALIVE }
+    );
+    expect(contender.ok).toBe(false);
+    if (contender.ok) return;
+    expect(contender.reason).toBe('HELD_BY_LIVE_OWNER');
+    // Nothing was stolen: op-1 still owns the lock.
+    expect(readSkillOperationLock(KEY, { root })?.operationId).toBe('op-1');
+  });
+
   it('a renewed lease keeps the lock out of reach', () => {
     const first = acquireSkillOperationLock({ key: KEY, operationId: 'op-1' }, { root, now: T0 });
     expect(first.ok).toBe(true);
@@ -212,16 +229,51 @@ describe('stale reclaim', () => {
     expect(later.ok).toBe(true);
   });
 
-  it('reclaims this process own abandoned lock without a liveness probe', () => {
+  it('reclaims a lease-expired lock this process wrote once its owning pid is gone', () => {
+    // Models a crash: the lock file this process wrote outlives its owner. Reclaim
+    // is now driven purely by liveness — the same-generation shortcut is gone
+    // (Issue #1427) — so a dead owner is still recovered.
     const first = acquireSkillOperationLock({ key: KEY, operationId: 'op-1' }, { root, now: T0 });
     expect(first.ok).toBe(true);
     const again = acquireSkillOperationLock(
       { key: KEY, operationId: 'op-2' },
-      { root, now: T0 + SKILL_LOCK_LEASE_MS + 1, isProcessAlive: ALIVE }
+      { root, now: T0 + SKILL_LOCK_LEASE_MS + 1, isProcessAlive: DEAD }
     );
     expect(again.ok).toBe(true);
     if (!again.ok) return;
     expect(again.reclaimed).toBe(true);
+    expect(readSkillOperationLock(KEY, { root })?.operationId).toBe('op-2');
+  });
+});
+
+describe('concurrent same-process requests never steal a live lock', () => {
+  // Issue #1427: two requests for the same (worktree, skill) hit one shared
+  // process. The install/uninstall route turns any denied acquire into
+  // SKILL_INSTALL_LOCKED (409); these pin that the *second* request is always
+  // denied rather than winning the lock, at both lease phases.
+  it('denies the second request while the first lease is still valid', () => {
+    const first = acquireSkillOperationLock({ key: KEY, operationId: 'op-1' }, { root, now: T0 });
+    expect(first.ok).toBe(true);
+    const second = acquireSkillOperationLock(
+      { key: KEY, operationId: 'op-2' },
+      { root, now: T0 + 5_000, isProcessAlive: ALIVE }
+    );
+    expect(second.ok).toBe(false);
+    if (second.ok) return;
+    expect(second.reason).toBe('HELD');
+  });
+
+  it('still denies the second request after the first lease lapses', () => {
+    const first = acquireSkillOperationLock({ key: KEY, operationId: 'op-1' }, { root, now: T0 });
+    expect(first.ok).toBe(true);
+    const second = acquireSkillOperationLock(
+      { key: KEY, operationId: 'op-2' },
+      { root, now: T0 + SKILL_LOCK_LEASE_MS + 5_000, isProcessAlive: ALIVE }
+    );
+    expect(second.ok).toBe(false);
+    if (second.ok) return;
+    expect(second.reason).toBe('HELD_BY_LIVE_OWNER');
+    expect(readSkillOperationLock(KEY, { root })?.operationId).toBe('op-1');
   });
 });
 
@@ -314,5 +366,22 @@ describe('orphan lock cleanup', () => {
 describe('evaluateSkillLock', () => {
   it('reports FREE for a missing record', () => {
     expect(evaluateSkillLock(null, { now: T0 })).toBe('FREE');
+  });
+
+  it('reclaims a crash orphan from another generation once its pid is gone', () => {
+    // A record left by a crashed prior process: same host, different generation,
+    // lease long expired. Liveness — not generation — is the deciding evidence,
+    // so crash recovery is preserved after the shortcut removal (Issue #1427).
+    const orphan = writeForeignLock();
+    expect(
+      evaluateSkillLock(orphan, { now: T0 + SKILL_LOCK_LEASE_MS + 1, isProcessAlive: DEAD })
+    ).toBe('RECLAIMABLE');
+  });
+
+  it('keeps a crash orphan whose pid was reused by a live process', () => {
+    const orphan = writeForeignLock();
+    expect(
+      evaluateSkillLock(orphan, { now: T0 + SKILL_LOCK_LEASE_MS + 1, isProcessAlive: ALIVE })
+    ).toBe('HELD_BY_LIVE_OWNER');
   });
 });
