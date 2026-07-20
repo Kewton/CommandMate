@@ -378,6 +378,38 @@
 
 ---
 
+### Agent Skills 配布・管理（Issue #1227 Phase 1）
+
+`src/lib/skills/index.ts`（barrel）は**契約 surface のみ**を再輸出する。schema / types / constants / errors / semver は Node builtin に依存しないため client component から import してよい。**server-only モジュール（`fs` / `zlib` / `os` / `crypto` に依存）は barrel に載せず具体 module を直接 import する**。barrel へ載せると `use client` な `src/components/skills/` にも Node builtin が引き込まれる。
+
+| モジュール | 責務 |
+|---|---|
+| `src/types/skills.ts` | manifest / Catalog / 検査結果 / installed receipt の型（Issue #1228） |
+| `src/lib/skills/schema.ts` | schema_version 1 の fail-closed validator 群と cross-document 規則（#1228） |
+| `src/lib/skills/json-schema.ts` | 公開 JSON Schema (draft 2020-12)（#1228） |
+| `src/lib/skills/semver.ts` | 厳格 SemVer 2.0 と AND 限定 range。`version-checker.ts` は SemVer 2.0 ではないため流用しない（#1228） |
+| `src/lib/skills/constants.ts` | 上限・pattern・予約名・archive layout・`SKILL_YAML_SAFE_PROFILE`（#1228） |
+| `src/lib/skills/errors.ts` | 契約違反の安定エラーコードと `SkillValidationResult`（#1228） |
+| `src/lib/skills/artifact-downloader.ts` | allowlist / redirect 毎再検証 / credential 除去 / size 上限つき stream 取得（#1229、server-only） |
+| `src/lib/skills/snapshot-store.ts` | 0700 data root 配下の read-only snapshot と TTL / refcount / quota / LRU（#1229、server-only） |
+| `src/lib/skills/integrity.ts` | streaming SHA-256、timing-safe digest 比較、URL redaction（#1229、server-only） |
+| `src/config/skill-security-config.ts` | 公式 host / owner / repository / asset path allowlist と転送上限（#1229） |
+| `src/lib/skills/package-reader.ts` | tar.gz の entry table 構築と特殊 file / mode / 容量 / collision 拒否（#1230、server-only） |
+| `src/lib/skills/package-validator.ts` | manifest と package の双方向完全照合、staging への安全な materialize（#1230、server-only） |
+| `src/lib/skills/safe-yaml.ts` | `SKILL_YAML_SAFE_PROFILE` を満たす YAML 部分集合 parser（#1230、新規依存なし） |
+| `src/lib/skills/catalog-client.ts` | 条件付き GET / TTL / last-known-good / single-flight / rate limit back-off（#1231） |
+| `src/lib/skills/compatibility.ts` | compatible / incompatible / unknown の 3 値判定と version 解決（#1231、pure） |
+| `src/lib/api/skills-api.ts` | Catalog document → wire 形式の単一 mapping。artifact URL を含めない（#1231） |
+| `src/config/skill-catalog-config.ts` | Catalog endpoint の完全一致 allowlist と TTL / size cap / rate limit（#1231） |
+| `src/app/api/skills/route.ts` / `[id]/route.ts` | read-only Catalog API。UI と CLI が同じ結果を参照する（#1231） |
+| `src/components/skills/` | Catalog 一覧・詳細・badge・freshness banner・表示語彙。changelog は `stripRemoteMedia()` 適用（#1232） |
+| `src/lib/skills/operation-lock.ts` | owner nonce / lease / process generation つき cross-process lock（#1234、server-only） |
+| `src/lib/skills/operation-journal.ts` | typed state transition と idempotency key binding（#1234、server-only） |
+| `src/lib/skills/operation-store.ts` | service-owned state root（0700/0600）、atomic write、staging 分離（#1234、server-only） |
+| `src/lib/skills/operation-audit.ts` | append-only `skill_operations` への記録（#1234、server-only） |
+| `src/lib/skills/operation-reconciler.ts` | startup / on-demand reconciliation と orphan cleanup（#1234、server-only） |
+| `src/lib/db/migrations/v44-skill-operations.ts` | `skill_operations` テーブル。trigger で追記専用を DB 側から強制（#1234） |
+
 ## CLIモジュール（Issue #96, #136）
 
 | モジュール | 説明 |
