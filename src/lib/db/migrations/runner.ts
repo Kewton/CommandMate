@@ -24,7 +24,7 @@ export interface Migration {
  * Current schema version
  * Increment this when adding new migrations
  */
-export const CURRENT_SCHEMA_VERSION = 44;
+export const CURRENT_SCHEMA_VERSION = 45;
 
 /**
  * Get current schema version from database

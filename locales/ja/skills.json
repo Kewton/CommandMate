@@ -133,6 +133,19 @@
   "plan": {
     "highRiskAcknowledgement": "CommandMateはpackageの内容を検査した結果、このSkillをhigh riskと判定しました。以下のファイル・スクリプト・宣言された権限を確認したうえで、このworktreeへ導入することを明示的に承認してください。"
   },
+  "install": {
+    "reload": {
+      "native": "{agent} は起動時にworktreeからSkillを読み込みます。{skillId} {version} を利用するには、このworktreeの {agent} セッションを再起動してください。",
+      "commandmateRuntime": "{agent} はCommandMate runtime経由でこのSkillを実行します。runtimeが {skillId} {version} を認識するよう、このworktreeの {agent} セッションを再起動してください。",
+      "unsupported": "{agent} はこのSkillに対応していません。ファイルは配置されましたが、{agent} セッションでは {skillId} {version} は提示されません。",
+      "unknown": "{agent} での対応状況は未検証です。ファイルは配置済みです。{agent} セッションを再起動し、{skillId} {version} が提示されるか確認してください。"
+    },
+    "nextAction": {
+      "succeeded": "Skillのインストールと記録が完了しました。以下のagentセッションを再起動すると利用を開始できます。",
+      "committedReconciling": "ファイルの書き込みは完了しworktreeに存在しますが、インストール記録が未完了です。CommandMateが自動的に完了させるため、再インストールは不要です。",
+      "failed": "worktreeへの書き込みは行われていません。理由を確認し、新しいInstall Planを作成してください。"
+    }
+  },
   "card": {
     "provider": "提供元: {provider}",
     "noRecommendedVersion": "導入可能なversionなし"
