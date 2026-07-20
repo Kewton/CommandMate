@@ -24,6 +24,14 @@ function tableNames(db: Database.Database): string[] {
   ).map((r) => r.name);
 }
 
+/** v46 made worktree_id a real foreign key, so the parent row must exist. */
+function insertWorktree(db: Database.Database, id: string): void {
+  db.prepare(
+    `INSERT INTO worktrees (id, name, path, repository_path, repository_name)
+     VALUES (?, ?, ?, '/tmp/cm-1235/repo', 'repo')`
+  ).run(id, id, `/tmp/cm-1235/repo/${id}`);
+}
+
 function insertRow(
   db: Database.Database,
   id: string,
@@ -104,6 +112,8 @@ describe('migration v45: one row per (worktree, skill)', () => {
   beforeEach(() => {
     db = new Database(':memory:');
     runMigrations(db);
+    insertWorktree(db, 'wt-1');
+    insertWorktree(db, 'wt-2');
     insertRow(db, 'install-1');
   });
 

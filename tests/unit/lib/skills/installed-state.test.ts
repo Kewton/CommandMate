@@ -62,9 +62,19 @@ function makeReceipt(overrides: Partial<SkillInstallReceipt> = {}): SkillInstall
   };
 }
 
+/** Since #1430 a row is tied to a live worktree, so the parents must exist. */
+function insertWorktree(db: Database.Database, id: string): void {
+  db.prepare(
+    `INSERT INTO worktrees (id, name, path, repository_path, repository_name)
+     VALUES (?, ?, ?, '/tmp/cm-1235/repo', 'repo')`
+  ).run(id, id, `/tmp/cm-1235/repo/${id}`);
+}
+
 beforeEach(() => {
   db = new Database(':memory:');
   runMigrations(db);
+  insertWorktree(db, 'wt-1');
+  insertWorktree(db, 'wt-2');
   dir = mkdtempSync(path.join(tmpdir(), 'cm-installed-state-'));
 });
 
