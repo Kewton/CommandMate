@@ -1,0 +1,84 @@
+{
+  "case": "Windows-style separators are rejected",
+  "expectedErrorCode": "SKILL_FILE_PATH_UNSAFE",
+  "expectedPath": "/files/1/path",
+  "document": {
+    "schema_version": 1,
+    "id": "release-notes",
+    "name": "release-notes",
+    "version": "1.2.0",
+    "summary": "Draft release notes from merged pull requests.",
+    "description": "Collects merged pull requests since the previous tag, groups them by change type and drafts a Keep a Changelog entry for review.",
+    "capabilities": [
+      "Group merged pull requests by conventional commit type",
+      "Draft a Keep a Changelog entry for the next release"
+    ],
+    "expected_outcomes": [
+      "Release note drafting drops from ~30 minutes to a single review pass",
+      "Changelog entries stay consistent across releases"
+    ],
+    "provider": {
+      "name": "CommandMate",
+      "url": "https://github.com/Kewton/CommandMate",
+      "contact": "skills@commandmate.invalid"
+    },
+    "license": "MIT",
+    "homepage": "https://github.com/Kewton/commandmate-skills",
+    "keywords": [
+      "release",
+      "changelog"
+    ],
+    "compatibility": {
+      "commandmate": ">=0.11.0 <1.0.0",
+      "agents": [
+        {
+          "agent": "claude",
+          "support": "native",
+          "evidence": "SKILL.md discovery verified on claude CLI 2.x"
+        },
+        {
+          "agent": "codex",
+          "support": "native",
+          "evidence": "Loaded from .agents/skills by codex CLI"
+        },
+        {
+          "agent": "gemini",
+          "support": "unknown",
+          "evidence": "Not verified for this release"
+        }
+      ]
+    },
+    "requirements": {
+      "commands": [
+        {
+          "name": "git",
+          "version_range": ">=2.30.0"
+        }
+      ],
+      "network_hosts": []
+    },
+    "declared_permissions": [
+      "filesystem_read"
+    ],
+    "declared_risk": "low",
+    "risk_rationale": "Reads repository history only and writes no files.",
+    "files": [
+      {
+        "path": "SKILL.md",
+        "sha256": "b82b4e56d9af25454236e5a05e2d04534bdb94cb05a2c0e542743c0f4c26ca1f",
+        "size": 2048,
+        "kind": "skill_md",
+        "executable": false,
+        "script": false
+      },
+      {
+        "path": "references\\format.md",
+        "sha256": "adab9b1ee6042369511dafa9783b3688e5c667fce0d67d0e3d9c8ecc060b5bf3",
+        "size": 1024,
+        "kind": "instruction",
+        "executable": false,
+        "script": false
+      }
+    ]
+  }
+}

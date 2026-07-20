@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Agent Skills 配布契約（Skill manifest・Catalog・receipt・脅威モデル）を定義** (#1228): SKILL.md との互換性を保ったまま、CommandMate 固有の配布・Runtime metadata を同一 Skill root の `commandmate.skill.yaml` に分離する契約を確定した。`src/types/skills.ts` に4文書（manifest / Catalog / 検査結果 / installed receipt）の型、`src/lib/skills/` に schema_version 1 の fail-closed validator・厳格 SemVer 2.0・公開 JSON Schema・エラーコードを追加。Skill ID は lowercase ASCII slug（最大64文字・予約名・case/Unicode 衝突検出）、artifact は `tar.gz` / `<skill-id>-<version>.tar.gz` / `application/gzip` / root 1ディレクトリに固定、artifact 全体の SHA-256 は Catalog、個別 payload file の digest は manifest が持ち manifest 自身の digest は要求しない。tag ではなく resolved commit SHA を必須とし、receipt は timestamp・actor・machine absolute path・signed URL を持たない決定的な文書とした。権限は宣言であって enforcement ではないことを命名（`declared_permissions` / `declared_risk`）と UI 注記で区別し、実効 risk は宣言と算出の高い方とする。決定表と脅威モデルは [docs/design/agent-skills-distribution.md](./docs/design/agent-skills-distribution.md)、valid/invalid fixture は `tests/fixtures/skills/contract/` に置いた。本 Issue は契約定義のみで、Catalog 取得・download・install・UI は含まない。
+
 ## [0.11.4] - 2026-07-20
 
 > **Highlight**: **npx 起動サーバの GUI ワンクリック更新が「冷キャッシュ（対象版が未取得）」で失敗する問題を修正**。npx 起動サーバの cwd は npx キャッシュ内のパッケージ dir で、更新の warm（新版取得）時に npx がその dir を掃除/置換するため、続く再起動の npx 起動で `process.cwd()` が `ENOENT (uv_cwd)` を投げてクラッシュし、旧サーバ停止済みのまま再起動に失敗していた（対象版がキャッシュ済みの時のみ成功）。更新プロセスと npx サブ起動を安定 dir（homedir / ~/.commandmate）から実行するようにして解消した。

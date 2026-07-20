@@ -1,0 +1,107 @@
+{
+  "case": "The artifact media type is fixed for schema_version 1",
+  "expectedErrorCode": "SKILL_ARTIFACT_INVALID",
+  "expectedPath": "/entries/0/versions/0/artifact/content_type",
+  "document": {
+    "schema_version": 1,
+    "entries": [
+      {
+        "id": "release-notes",
+        "name": "release-notes",
+        "summary": "Draft release notes from merged pull requests.",
+        "provider": {
+          "name": "CommandMate",
+          "url": "https://github.com/Kewton/CommandMate",
+          "contact": "skills@commandmate.invalid"
+        },
+        "license": "MIT",
+        "homepage": "https://github.com/Kewton/commandmate-skills",
+        "keywords": [
+          "release",
+          "changelog"
+        ],
+        "latest": "1.2.0",
+        "versions": [
+          {
+            "version": "1.1.0",
+            "changelog": "Release 1.1.0: grouping rules updated.",
+            "published_at": "2026-07-16T09:30:00Z",
+            "source": {
+              "repository": "Kewton/commandmate-skills",
+              "ref": "release-notes-v1.1.0",
+              "commit": "ef754e3638b357eee53a626541aca267bd57e45c"
+            },
+            "artifact": {
+              "asset_name": "release-notes-1.1.0.tar.gz",
+              "url": "https://github.com/Kewton/commandmate-skills/releases/download/release-notes-v1.1.0/release-notes-1.1.0.tar.gz",
+              "sha256": "481be185fb462c8d41c09e118ed631a7e10d670c13413f669dce72ba3aeee97e",
+              "size": 4096,
+              "content_type": "application/zip",
+              "format": "tar.gz"
+            },
+            "compatibility": {
+              "commandmate": ">=0.11.0 <1.0.0",
+              "agents": [
+                {
+                  "agent": "claude",
+                  "support": "native",
+                  "evidence": "SKILL.md discovery verified on claude CLI 2.x"
+                },
+                {
+                  "agent": "codex",
+                  "support": "native",
+                  "evidence": "Loaded from .agents/skills by codex CLI"
+                },
+                {
+                  "agent": "gemini",
+                  "support": "unknown",
+                  "evidence": "Not verified for this release"
+                }
+              ]
+            },
+            "declared_risk": "low"
+          },
+          {
+            "version": "1.2.0",
+            "changelog": "Release 1.2.0: grouping rules updated.",
+            "published_at": "2026-07-16T09:30:00Z",
+            "source": {
+              "repository": "Kewton/commandmate-skills",
+              "ref": "release-notes-v1.2.0",
+              "commit": "7dba1ec2e66342ef578ab57bbdaa9b4327897d47"
+            },
+            "artifact": {
+              "asset_name": "release-notes-1.2.0.tar.gz",
+              "url": "https://github.com/Kewton/commandmate-skills/releases/download/release-notes-v1.2.0/release-notes-1.2.0.tar.gz",
+              "sha256": "4bdb91f46683de4df48783d57b75248f7c7e8c34619e5cbb090ba69a6c781c21",
+              "size": 4096,
+              "content_type": "application/gzip",
+              "format": "tar.gz"
+            },
+            "compatibility": {
+              "commandmate": ">=0.11.0 <1.0.0",
+              "agents": [
+                {
+                  "agent": "claude",
+                  "support": "native",
+                  "evidence": "SKILL.md discovery verified on claude CLI 2.x"
+                },
+                {
+                  "agent": "codex",
+                  "support": "native",
+                  "evidence": "Loaded from .agents/skills by codex CLI"
+                },
+                {
+                  "agent": "gemini",
+                  "support": "unknown",
+                  "evidence": "Not verified for this release"
+                }
+              ]
+            },
+            "declared_risk": "low"
+          }
+        ]
+      }
+    ]
+  }
+}

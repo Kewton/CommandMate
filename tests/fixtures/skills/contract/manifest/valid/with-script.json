@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "id": "dependency-audit",
+  "name": "dependency-audit",
+  "version": "2.0.0-rc.1",
+  "summary": "Audit dependencies for known advisories.",
+  "description": "Collects merged pull requests since the previous tag, groups them by change type and drafts a Keep a Changelog entry for review.",
+  "capabilities": [
+    "Group merged pull requests by conventional commit type",
+    "Draft a Keep a Changelog entry for the next release"
+  ],
+  "expected_outcomes": [
+    "Release note drafting drops from ~30 minutes to a single review pass",
+    "Changelog entries stay consistent across releases"
+  ],
+  "provider": {
+    "name": "CommandMate",
+    "url": "https://github.com/Kewton/CommandMate",
+    "contact": "skills@commandmate.invalid"
+  },
+  "license": "MIT",
+  "compatibility": {
+    "commandmate": ">=0.11.0 <1.0.0",
+    "agents": [
+      {
+        "agent": "claude",
+        "support": "native",
+        "evidence": "SKILL.md discovery verified on claude CLI 2.x"
+      },
+      {
+        "agent": "codex",
+        "support": "native",
+        "evidence": "Loaded from .agents/skills by codex CLI"
+      },
+      {
+        "agent": "gemini",
+        "support": "unknown",
+        "evidence": "Not verified for this release"
+      }
+    ]
+  },
+  "requirements": {
+    "commands": [
+      {
+        "name": "npm",
+        "version_range": ">=10.0.0"
+      }
+    ],
+    "network_hosts": [
+      "registry.npmjs.org"
+    ]
+  },
+  "declared_permissions": [
+    "filesystem_read",
+    "network_access",
+    "process_execution"
+  ],
+  "declared_risk": "moderate",
+  "risk_rationale": "Runs a helper script and contacts the public npm registry.",
+  "files": [
+    {
+      "path": "SKILL.md",
+      "sha256": "2931ec37d3c82dffcea771601b15c65b97292a609d89eae5219e4780d9d627ca",
+      "size": 3072,
+      "kind": "skill_md",
+      "executable": false,
+      "script": false
+    },
+    {
+      "path": "scripts/collect.sh",
+      "sha256": "1d51fa4ee9b198e9c1f926faa1ca5b582b192229549eb9a42571b73dfb69780f",
+      "size": 512,
+      "kind": "script",
+      "executable": true,
+      "script": true
+    }
+  ]
+}
