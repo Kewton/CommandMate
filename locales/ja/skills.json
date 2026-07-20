@@ -1,0 +1,147 @@
+{
+  "page": {
+    "title": "スキル",
+    "description": "公式Skill Catalogを閲覧します。各Skillの内容、提供元、必要なCommandMateのversion、提供元が宣言するriskを確認できます。",
+    "backToCatalog": "Catalogに戻る"
+  },
+  "search": {
+    "label": "Skillを検索",
+    "placeholder": "名前・概要・キーワード・提供元",
+    "resultCount": "{total}件中{shown}件を表示"
+  },
+  "filters": {
+    "compatibility": "CommandMate互換性",
+    "risk": "提供元が宣言したrisk",
+    "agent": "Agent対応",
+    "all": "すべて",
+    "reset": "絞り込みを解除"
+  },
+  "compatibility": {
+    "label": "CommandMate互換性",
+    "native": "Agent単体で実行可能",
+    "commandmateRuntime": "CommandMate Runtime経由で実行",
+    "unsupported": "非対応",
+    "unknown": "未検証",
+    "status": {
+      "compatible": "互換あり",
+      "incompatible": "互換なし",
+      "unknown": "未検証"
+    },
+    "requiredRange": "必要なCommandMate: {range}",
+    "currentVersion": "稼働中のCommandMate: {version}",
+    "currentVersionUnknown": "稼働中のCommandMateのversionを特定できませんでした。",
+    "unverifiedNotice": "「未検証」は「互換あり」ではありません。CommandMateが判定できなかった状態であり、動作しない可能性があります。",
+    "agentsHeading": "Agent対応状況",
+    "agentsNotice": "Agent対応状況は提供元による申告であり、根拠として提示された内容をそのまま表示しています。CommandMateは検証していません。",
+    "agentsUnknown": "このversionにはAgent対応の宣言がありません。",
+    "evidence": "根拠",
+    "reason": {
+      "satisfied": "CommandMate {currentVersion} は要求範囲 {range} を満たしています。",
+      "hostVersionOutOfRange": "このSkillはCommandMate {range} を要求しますが、稼働中のversionは {currentVersion} です。",
+      "hostVersionUnknown": "稼働中のCommandMateのversionを特定できないため、{range} との互換性は未検証です。",
+      "rangeUnsupported": "このSkillはCommandMateが解釈できないversion範囲 {range} を宣言しているため、互換性は未検証です。"
+    }
+  },
+  "risk": {
+    "declaredLabel": "宣言risk: {level}",
+    "declaredHeading": "提供元が宣言したrisk",
+    "level": {
+      "low": "低",
+      "moderate": "中",
+      "high": "高"
+    },
+    "declaredNotice": "このrisk水準はSkillの提供元による自己申告です。CommandMateによる評価ではありません。",
+    "computedHeading": "CommandMateが算出するrisk",
+    "computedUnavailable": "Catalogからは取得できません。CommandMateはpackageの内容を検査してriskを算出しますが、それはpackageをダウンロードした後に行われます。",
+    "highWarning": "提供元はこのSkillをhigh riskと宣言しています。導入前に更新履歴と提供元の情報を確認してください。"
+  },
+  "permissions": {
+    "heading": "宣言された権限",
+    "declarationOnlyNotice": "権限は提供元が記載した宣言であり、CommandMateが強制する制限ではありません。Skillを導入してもsandboxで隔離されるわけではありません。",
+    "unavailable": "Catalogは宣言された権限を保持していません。権限はpackage内のSkill manifestに記載されており、CommandMateはダウンロード後に読み取ります。"
+  },
+  "capabilities": {
+    "heading": "このSkillでできること",
+    "unavailable": "詳細な能力と期待効果はpackage内のSkill manifestに記載されており、Catalogには含まれていません。以下はCatalogが公開している概要です。"
+  },
+  "requirements": {
+    "heading": "必要なコマンドとネットワークアクセス",
+    "unavailable": "Catalogは実行時の要件を保持していません。必要なコマンドや接続先hostはpackage内のSkill manifestに記載されています。"
+  },
+  "contents": {
+    "heading": "ファイルとスクリプト",
+    "unavailable": "Catalogはpackageの中身を列挙していません。ファイル・スクリプト・実行可能ファイルは、CommandMateがpackageをダウンロードして検査した時点で列挙されます。"
+  },
+  "detail": {
+    "overview": "概要",
+    "provider": "提供元",
+    "providerContact": "連絡先",
+    "license": "ライセンス",
+    "homepage": "ホームページ",
+    "keywords": "キーワード",
+    "skillId": "Skill ID",
+    "latestVersion": "公開されている最新version",
+    "recommendedVersion": "推奨version",
+    "recommendedVersionNone": "なし",
+    "requiredRangeLabel": "必要なCommandMateのversion範囲",
+    "publishedAt": "公開日時",
+    "sourceRepository": "リポジトリ",
+    "sourceRef": "Ref",
+    "sourceCommit": "コミット",
+    "packageAsset": "アセット名",
+    "packageDigest": "SHA-256",
+    "packageSize": "サイズ",
+    "packageBytes": "{bytes} バイト",
+    "versionsHeading": "更新履歴",
+    "versionsEmpty": "このCommandMateに適用できる公開versionがありません。",
+    "changelogHeading": "変更内容",
+    "changelogEmpty": "このversionには変更内容の記載がありません。",
+    "mediaStripped": "Catalog由来のテキストから画像と埋め込みメディアを除去しているため、外部ホストからの読み込みは発生しません。",
+    "prerelease": "プレリリース",
+    "recommendation": {
+      "highestCompatible": "稼働中のCommandMateで動作する、最も新しい公開versionです。",
+      "latestUnverified": "稼働中のCommandMateのversionを特定できなかったため、互換性を確認せずに提供元の最新versionを表示しています。",
+      "noneCompatible": "稼働中のCommandMateで動作する公開versionはありません。",
+      "noVersions": "このCommandMateに適用できる公開versionがありません。"
+    },
+    "install": {
+      "action": "導入先を選択",
+      "unavailableYet": "導入先の選択はまだ利用できません。この画面はCatalogの閲覧のみを扱います。",
+      "blockedIncompatible": "導入できません: {reason}",
+      "blockedNoVersion": "稼働中のCommandMateに適用できる公開versionがないため導入できません。"
+    }
+  },
+  "card": {
+    "provider": "提供元: {provider}",
+    "noRecommendedVersion": "導入可能なversionなし"
+  },
+  "state": {
+    "loading": "Skill Catalogを読み込んでいます…",
+    "empty": "公式Catalogにはまだ公開されているSkillがありません。",
+    "noResults": "現在の検索条件と絞り込みに一致するSkillはありません。",
+    "noResultsHint": "キーワードを変えるか、絞り込みを解除してください。",
+    "errorHeading": "Skill Catalogを読み込めませんでした",
+    "errorNotice": "これは取得に失敗した状態であり、Catalogが空であることを意味しません。どのSkillが存在するかは判断できません。",
+    "errorCode": "エラーコード: {code}",
+    "retry": "再試行",
+    "notFoundHeading": "Skillが見つかりません",
+    "notFoundNotice": "このIDに一致するSkillは公式Catalogに存在しません。"
+  },
+  "catalog": {
+    "staleHeading": "キャッシュされたCatalogを表示しています",
+    "staleNotice": "このCatalogが最新であることを確認できなかったため、内容が古い可能性があります。",
+    "offlineNotice": "直近の試行ではCatalogの取得元に到達できませんでした。",
+    "freshLabel": "Catalogは最新であることを確認済み",
+    "fetchedAt": "最終検証: {timestamp}",
+    "revalidatedAt": "最新であることを最後に確認: {timestamp}",
+    "sourceLabel": "取得元: {repository} ({ref})",
+    "reason": {
+      "fetchFailed": "Catalogを取得できませんでした。",
+      "rateLimited": "Catalogの取得元がレート制限を適用しています。",
+      "oversized": "Catalogの応答が許容サイズを超えました。",
+      "malformed": "Catalogの応答が正しいJSONではありませんでした。",
+      "invalidSchema": "Catalogの応答が契約検証に失敗しました。",
+      "unknown": "理由は報告されていません。"
+    }
+  }
+}

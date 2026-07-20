@@ -23,7 +23,8 @@
     "repositoriesShort": "Repos",
     "review": "Review",
     "reviewReport": "Review/Report",
-    "more": "More"
+    "more": "More",
+    "skills": "Skills"
   },
   "repositories": {
     "empty": "No repositories registered yet.",

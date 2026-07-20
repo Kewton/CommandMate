@@ -17,6 +17,8 @@ import { NotificationsSettings } from '@/components/notifications';
 
 export default function MorePage() {
   const tNotifications = useTranslations('notifications');
+  const tCommon = useTranslations('common');
+  const tSkills = useTranslations('skills');
   return (
     <AppShell>
       <div className="container-custom py-8 overflow-auto h-full">
@@ -39,6 +41,12 @@ export default function MorePage() {
               <Card hover className="transition-colors hover:border-accent-300 dark:hover:border-accent-700">
                 <div className="text-sm font-medium text-foreground">Repositories</div>
                 <div className="text-xs text-muted-foreground">Manage repositories and worktrees</div>
+              </Card>
+            </Link>
+            <Link href="/skills" className="block" data-testid="more-link-skills">
+              <Card hover className="transition-colors hover:border-accent-300 dark:hover:border-accent-700">
+                <div className="text-sm font-medium text-foreground">{tCommon('nav.skills')}</div>
+                <div className="text-xs text-muted-foreground">{tSkills('page.description')}</div>
               </Card>
             </Link>
           </div>

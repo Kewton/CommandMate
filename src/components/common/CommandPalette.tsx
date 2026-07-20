@@ -36,6 +36,7 @@ import {
   AlignJustify,
   FolderGit2,
   CircleCheck,
+  Sparkles,
   MoreHorizontal,
   GitBranch,
   Sun,
@@ -67,6 +68,7 @@ const NAV_ITEMS = [
   { key: 'sessions', href: '/sessions' },
   { key: 'repositories', href: '/repositories' },
   { key: 'review', href: '/review' },
+  { key: 'skills', href: '/skills' },
   { key: 'more', href: '/more' },
 ] as const;
 
@@ -77,6 +79,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   sessions: AlignJustify,
   repositories: FolderGit2,
   review: CircleCheck,
+  skills: Sparkles,
   more: MoreHorizontal,
 };
 
