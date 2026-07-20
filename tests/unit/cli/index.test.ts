@@ -104,6 +104,8 @@ describe('buildProgram', () => {
       'auto-yes',
       'report',
       'instances',
+      // Issue #1237: Skill management (list/info/plan/install/uninstall/status)
+      'skill',
     ];
 
     it.each(expectedCommands)('should register the %s command', (name) => {

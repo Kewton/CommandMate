@@ -167,3 +167,208 @@ export interface ChatMessage {
   cliToolId?: string;
   createdAt?: string;
 }
+
+// =============================================================================
+// Skill management [Issue #1237]
+//
+// Mirrors: src/lib/api/skills-api.ts (Catalog), src/lib/skills/install-plan.ts,
+// src/lib/skills/uninstall-plan.ts and the four skill route modules.
+//
+// Only the fields the CLI reads are declared. `--json` prints the server body
+// verbatim rather than a re-serialization of these types, so the JSON contract
+// is the API's and cannot drift from what these declarations happen to cover.
+// =============================================================================
+
+/** Mirrors: src/lib/skills/compatibility.ts SkillCompatibilityStatus. */
+export type SkillCompatibilityStatus = 'compatible' | 'incompatible' | 'unknown';
+
+/** Mirrors: src/lib/skills/compatibility.ts SkillCommandMateCompatibility (subset). */
+export interface SkillCompatibilityView {
+  status: SkillCompatibilityStatus;
+  /** English fallback message built server-side from code, range and host version. */
+  message: string;
+  requiredRange: string;
+}
+
+/** Mirrors: src/lib/api/skills-api.ts SkillCatalogMetaDto (subset). */
+export interface SkillCatalogMeta {
+  stale: boolean;
+  offline: boolean;
+  state: string;
+  /** Why the served Catalog is stale, or null when it was confirmed current. */
+  staleReason: string | null;
+  fetchedAt: string;
+  revalidatedAt: string;
+  source: { repository: string; ref: string; revision: string | null };
+}
+
+/** Mirrors: src/lib/api/skills-api.ts SkillVersionDto (subset; artifact.url is never served). */
+export interface SkillCatalogVersionSummary {
+  version: string;
+  declaredRisk: string;
+  prerelease: boolean;
+  publishedAt: string;
+  compatibility: { commandmate: SkillCompatibilityView };
+}
+
+/** Mirrors: src/lib/api/skills-api.ts SkillDto (subset). */
+export interface SkillCatalogSummary {
+  id: string;
+  name: string;
+  summary: string;
+  provider: { name: string };
+  license: string;
+  homepage: string | null;
+  latest: string;
+  recommendedVersion: string | null;
+  recommendedReason: string;
+  compatibility: SkillCompatibilityView | null;
+  versions: SkillCatalogVersionSummary[];
+}
+
+/** Mirrors: src/app/api/skills/route.ts GET response. */
+export interface SkillListResponse {
+  catalog: SkillCatalogMeta;
+  skills: SkillCatalogSummary[];
+}
+
+/** Mirrors: src/app/api/skills/[id]/route.ts GET response. */
+export interface SkillDetailResponse {
+  catalog: SkillCatalogMeta;
+  skill: SkillCatalogSummary;
+}
+
+/** A typed reason an operation is refused, with the repository-relative path responsible. */
+export interface SkillPlanBlocker {
+  code: string;
+  path: string | null;
+}
+
+/** Mirrors: src/lib/skills/install-plan.ts SkillInstallPlanDto (subset). */
+export interface SkillInstallPlan {
+  /** Single-use token the apply step presents unchanged. The CLI never inspects it. */
+  token: string;
+  expiresAt: string;
+  installable: boolean;
+  requiresRiskAcknowledgement: boolean;
+  riskAcknowledged: boolean;
+  blockers: SkillPlanBlocker[];
+  warnings: string[];
+  target: {
+    worktreeId: string;
+    worktreeName: string;
+    repositoryName: string;
+    branch: string | null;
+    headState: string;
+    workingTreeDirty: boolean;
+    /** Repository-relative; the server never serves a machine-absolute path. */
+    installRoot: string;
+    existingInstall: { version: string; receiptDigest: string } | null;
+  };
+  skill: {
+    id: string;
+    name: string;
+    version: string;
+    summary: string;
+    license: string;
+    declaredPermissions: string[];
+    effectiveRisk: string;
+    riskRationale: string;
+    scriptPaths: string[];
+    executablePaths: string[];
+    requirements: {
+      commands: Array<{ name: string; versionRange: string | null }>;
+      networkHosts: string[];
+    };
+    compatibility: {
+      commandmate: SkillCompatibilityView;
+      agents: Array<{ agent: string; support: string }>;
+    };
+  };
+  stats: {
+    added: number;
+    modified: number;
+    unchanged: number;
+    conflicted: number;
+    unmanaged: number;
+  };
+}
+
+/** Mirrors: src/app/api/worktrees/[id]/skills/[skillId]/plan/route.ts POST response. */
+export interface SkillInstallPlanResponse {
+  plan: SkillInstallPlan;
+}
+
+/**
+ * Mirrors: SkillInstallOperationDto / SkillUninstallOperationDto (subset).
+ * `committed_reconciling` means the worktree already changed — never reported as a failure.
+ */
+export interface SkillOperationResult {
+  operationId: string;
+  state: string;
+  result: 'succeeded' | 'committed_reconciling';
+  committed: boolean;
+  reconcilePending: boolean;
+  nextActionKey: string;
+  replayed: boolean;
+}
+
+/**
+ * Mirrors: src/app/api/worktrees/[id]/skills/[skillId]/install/route.ts POST response.
+ * `files` is absent from the narrower replay body, and `install` is null when a
+ * replay finds no index row.
+ */
+export interface SkillInstallResponse {
+  operation: SkillOperationResult;
+  install: {
+    skillId: string;
+    version: string;
+    installRoot: string;
+    files?: Array<{ path: string }>;
+  } | null;
+}
+
+/** Mirrors: src/lib/skills/uninstall-plan.ts SkillUninstallPlanDto (subset). */
+export interface SkillUninstallPlan {
+  token: string;
+  expiresAt: string;
+  removable: boolean;
+  blockers: SkillPlanBlocker[];
+  nextActionKey: string;
+  target: {
+    worktreeId: string;
+    worktreeName: string;
+    repositoryName: string;
+    branch: string | null;
+    workingTreeDirty: boolean;
+    installRoot: string;
+  };
+  skill: { id: string; version: string; effectiveRisk: string };
+  removals: Array<{ path: string }>;
+  retained: Array<{ path: string; reason: string }>;
+  stats: {
+    removable: number;
+    modified: number;
+    missing: number;
+    unknown: number;
+    irregular: number;
+  };
+}
+
+/** Mirrors: src/app/api/worktrees/[id]/skills/[skillId]/uninstall-plan/route.ts POST response. */
+export interface SkillUninstallPlanResponse {
+  plan: SkillUninstallPlan;
+}
+
+/** Mirrors: src/app/api/worktrees/[id]/skills/[skillId]/uninstall/route.ts POST response. */
+export interface SkillUninstallResponse {
+  operation: SkillOperationResult;
+  uninstall: {
+    skillId: string;
+    version: string | null;
+    installRoot?: string;
+    removedFiles?: Array<{ path: string }>;
+    retained?: Array<{ path: string; reason: string }>;
+    fullyRemoved?: boolean;
+  } | null;
+}

@@ -206,7 +206,8 @@ export class ApiClient {
 
       if (!response.ok) {
         const errResult = handleApiError(null, response.status);
-        throw new ApiError(errResult.message, errResult.exitCode, response.status);
+        const payload = await readErrorPayload(response);
+        throw new ApiError(errResult.message, errResult.exitCode, response.status, payload);
       }
 
       return (await response.json()) as T;
@@ -231,7 +232,8 @@ export class ApiClient {
 
       if (!response.ok) {
         const errResult = handleApiError(null, response.status);
-        throw new ApiError(errResult.message, errResult.exitCode, response.status);
+        const payload = await readErrorPayload(response);
+        throw new ApiError(errResult.message, errResult.exitCode, response.status, payload);
       }
 
       // Handle 204 No Content
@@ -260,7 +262,8 @@ export class ApiClient {
 
       if (!response.ok) {
         const errResult = handleApiError(null, response.status);
-        throw new ApiError(errResult.message, errResult.exitCode, response.status);
+        const payload = await readErrorPayload(response);
+        throw new ApiError(errResult.message, errResult.exitCode, response.status, payload);
       }
 
       const text = await response.text();
@@ -275,6 +278,40 @@ export class ApiClient {
 }
 
 /**
+ * Machine-readable part of a failed API response (Issue #1237).
+ * Every Skill route answers `{ error, code }`; the uninstall routes add `blockers`.
+ */
+export interface ApiErrorPayload {
+  code?: string;
+  error?: string;
+  blockers?: Array<{ code: string; path: string | null }>;
+}
+
+/**
+ * Read the typed error body of a failed response.
+ *
+ * The generic status-to-message mapping in {@link handleApiError} cannot tell
+ * "a local file is in the way" from "the version does not exist" — both are 409
+ * or 404 — so commands that need a stable exit code read the server's `code`
+ * from here. Never throws: a body that is absent, truncated or not JSON simply
+ * yields undefined and the status-based classification stands.
+ */
+async function readErrorPayload(response: Response): Promise<ApiErrorPayload | undefined> {
+  try {
+    const text = await response.text();
+    if (!text) return undefined;
+    const parsed: unknown = JSON.parse(text);
+    if (parsed === null || typeof parsed !== 'object') return undefined;
+    const record = parsed as ApiErrorPayload;
+    return typeof record.code === 'string' || typeof record.error === 'string'
+      ? record
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * API Error with exit code for CLI process.exit()
  */
 export class ApiError extends Error {
@@ -282,9 +319,16 @@ export class ApiError extends Error {
     message: string,
     public readonly exitCode: number,
     public readonly statusCode?: number,
+    /** Typed error body, when the server sent one (Issue #1237). */
+    public readonly payload?: ApiErrorPayload,
   ) {
     super(message);
     this.name = 'ApiError';
+  }
+
+  /** Stable machine code the server assigned to this failure, if any. */
+  get apiCode(): string | undefined {
+    return this.payload?.code;
   }
 }
 
