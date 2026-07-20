@@ -1,0 +1,147 @@
+{
+  "page": {
+    "title": "Skills",
+    "description": "Browse the official Skill Catalog. Each entry shows what a Skill is, who publishes it, which CommandMate versions it needs, and what its publisher declares about risk.",
+    "backToCatalog": "Back to the Catalog"
+  },
+  "search": {
+    "label": "Search Skills",
+    "placeholder": "Name, summary, keyword or provider",
+    "resultCount": "Showing {shown} of {total} Skills"
+  },
+  "filters": {
+    "compatibility": "CommandMate compatibility",
+    "risk": "Publisher-declared risk",
+    "agent": "Agent support",
+    "all": "All",
+    "reset": "Reset filters"
+  },
+  "compatibility": {
+    "label": "CommandMate compatibility",
+    "native": "Runs natively",
+    "commandmateRuntime": "Runs via CommandMate Runtime",
+    "unsupported": "Not supported",
+    "unknown": "Not verified",
+    "status": {
+      "compatible": "Compatible",
+      "incompatible": "Incompatible",
+      "unknown": "Unverified"
+    },
+    "requiredRange": "Requires CommandMate {range}",
+    "currentVersion": "Running CommandMate {version}",
+    "currentVersionUnknown": "The running CommandMate version could not be determined.",
+    "unverifiedNotice": "Unverified is not the same as compatible. CommandMate could not decide, so this Skill may fail to run.",
+    "agentsHeading": "Agent support",
+    "agentsNotice": "Agent support is a claim made by the publisher, shown with the evidence they supplied. CommandMate does not verify it.",
+    "agentsUnknown": "No Agent support is declared for this version.",
+    "evidence": "Evidence",
+    "reason": {
+      "satisfied": "CommandMate {currentVersion} satisfies the required range {range}.",
+      "hostVersionOutOfRange": "This Skill requires CommandMate {range}, but CommandMate {currentVersion} is running.",
+      "hostVersionUnknown": "The running CommandMate version could not be determined, so compatibility with {range} is unverified.",
+      "rangeUnsupported": "This Skill declares the version range {range}, which CommandMate cannot interpret, so compatibility is unverified."
+    }
+  },
+  "risk": {
+    "declaredLabel": "Declared risk: {level}",
+    "declaredHeading": "Publisher-declared risk",
+    "level": {
+      "low": "Low",
+      "moderate": "Moderate",
+      "high": "High"
+    },
+    "declaredNotice": "This level is declared by the publisher of the Skill. It is a claim, not a CommandMate assessment.",
+    "computedHeading": "CommandMate-computed risk",
+    "computedUnavailable": "Not available from the Catalog. CommandMate computes its own risk level by inspecting the package contents, which only happens once the package has been downloaded.",
+    "highWarning": "The publisher declares this Skill as high risk. Read the changelog and the source coordinates before installing it."
+  },
+  "permissions": {
+    "heading": "Declared permissions",
+    "declarationOnlyNotice": "Permissions are declarations written by the publisher, not restrictions CommandMate enforces. Installing a Skill does not sandbox what it can do.",
+    "unavailable": "The Catalog does not carry declared permissions. They live in the Skill manifest inside the package, which CommandMate only reads after downloading it."
+  },
+  "capabilities": {
+    "heading": "What this Skill does",
+    "unavailable": "Detailed capabilities and expected outcomes live in the Skill manifest inside the package and are not part of the Catalog. The summary below is what the Catalog publishes."
+  },
+  "requirements": {
+    "heading": "Required commands and network access",
+    "unavailable": "The Catalog does not carry runtime requirements. Required commands and network hosts live in the Skill manifest inside the package."
+  },
+  "contents": {
+    "heading": "Files and scripts",
+    "unavailable": "The Catalog does not list package contents. Files, scripts and executables are enumerated when CommandMate downloads and inspects the package."
+  },
+  "detail": {
+    "overview": "Overview",
+    "provider": "Provider",
+    "providerContact": "Contact",
+    "license": "License",
+    "homepage": "Homepage",
+    "keywords": "Keywords",
+    "skillId": "Skill ID",
+    "latestVersion": "Latest published version",
+    "recommendedVersion": "Recommended version",
+    "recommendedVersionNone": "None",
+    "requiredRangeLabel": "Required CommandMate range",
+    "publishedAt": "Published",
+    "sourceRepository": "Repository",
+    "sourceRef": "Ref",
+    "sourceCommit": "Commit",
+    "packageAsset": "Asset name",
+    "packageDigest": "SHA-256",
+    "packageSize": "Size",
+    "packageBytes": "{bytes} bytes",
+    "versionsHeading": "Version history",
+    "versionsEmpty": "This Skill lists no published versions that apply to this CommandMate.",
+    "changelogHeading": "Changelog",
+    "changelogEmpty": "This version publishes no changelog.",
+    "mediaStripped": "Images and embedded media are removed from Catalog text, so nothing is loaded from an external host.",
+    "prerelease": "Prerelease",
+    "recommendation": {
+      "highestCompatible": "This is the newest published version that works with the CommandMate you are running.",
+      "latestUnverified": "The running CommandMate version could not be determined, so the publisher's latest version is offered without a compatibility check.",
+      "noneCompatible": "No published version of this Skill works with the CommandMate you are running.",
+      "noVersions": "No published version of this Skill applies to this CommandMate."
+    },
+    "install": {
+      "action": "Choose an install target",
+      "unavailableYet": "Choosing an install target is not available yet. This screen covers browsing the Catalog only.",
+      "blockedIncompatible": "Install is unavailable: {reason}",
+      "blockedNoVersion": "Install is unavailable because no published version applies to the CommandMate you are running."
+    }
+  },
+  "card": {
+    "provider": "by {provider}",
+    "noRecommendedVersion": "No installable version"
+  },
+  "state": {
+    "loading": "Loading the Skill Catalog…",
+    "empty": "The official Catalog publishes no Skills yet.",
+    "noResults": "No Skill matches the current search and filters.",
+    "noResultsHint": "Try a different keyword or reset the filters.",
+    "errorHeading": "The Skill Catalog could not be loaded",
+    "errorNotice": "This is a retrieval failure, not an empty Catalog. No conclusion can be drawn about which Skills exist.",
+    "errorCode": "Error code: {code}",
+    "retry": "Retry",
+    "notFoundHeading": "Skill not found",
+    "notFoundNotice": "The official Catalog has no Skill with this ID."
+  },
+  "catalog": {
+    "staleHeading": "Showing a cached Catalog",
+    "staleNotice": "CommandMate could not confirm this Catalog is current, so what you see may be out of date.",
+    "offlineNotice": "The Catalog origin could not be reached on the last attempt.",
+    "freshLabel": "Catalog confirmed current",
+    "fetchedAt": "Last validated: {timestamp}",
+    "revalidatedAt": "Last confirmed current: {timestamp}",
+    "sourceLabel": "Source: {repository} at {ref}",
+    "reason": {
+      "fetchFailed": "The Catalog could not be retrieved.",
+      "rateLimited": "The Catalog origin is rate limiting requests.",
+      "oversized": "The Catalog response exceeded the allowed size.",
+      "malformed": "The Catalog response was not valid JSON.",
+      "invalidSchema": "The Catalog response failed contract validation.",
+      "unknown": "The reason was not reported."
+    }
+  }
+}

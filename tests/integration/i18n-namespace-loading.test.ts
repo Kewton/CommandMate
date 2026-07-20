@@ -24,8 +24,9 @@ const LOCALES_DIR = path.resolve(__dirname, '../../locales');
  * Issue #1125: Added 'notifications' namespace
  * Issue #1130: Added 'keyboardShortcuts' namespace
  * Issue #1273: Added 'externalApps' namespace
+ * Issue #1232: Added 'skills' namespace
  */
-const EXPECTED_NAMESPACES = ['common', 'worktree', 'autoYes', 'error', 'prompt', 'auth', 'schedule', 'commandPalette', 'home', 'review', 'pwa', 'notifications', 'keyboardShortcuts', 'externalApps'] as const;
+const EXPECTED_NAMESPACES = ['common', 'worktree', 'autoYes', 'error', 'prompt', 'auth', 'schedule', 'commandPalette', 'home', 'review', 'pwa', 'notifications', 'keyboardShortcuts', 'externalApps', 'skills'] as const;
 
 describe('i18n Namespace Loading', () => {
   for (const locale of SUPPORTED_LOCALES) {
