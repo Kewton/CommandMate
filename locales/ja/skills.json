@@ -146,6 +146,33 @@
       "failed": "worktreeへの書き込みは行われていません。理由を確認し、新しいInstall Planを作成してください。"
     }
   },
+  "uninstall": {
+    "reason": {
+      "managedUnchanged": "CommandMateが配置し、その後変更されていないため安全に削除できます。",
+      "localModification": "インストール後に編集されています。CommandMateは変更内容を削除しません。",
+      "receiptOrphan": "インストール記録に載っているファイルがworktreeに存在しません。ディスク上の状態は記録されたインストールと一致していません。",
+      "unmanagedFile": "Skillディレクトリ内にありますが、CommandMateが配置したファイルではないため削除対象にしません。",
+      "notARegularFile": "このパスはシンボリックリンクなど通常ファイル以外です。CommandMateは削除対象の判定でリンクをたどりません。",
+      "notInstalled": "このworktreeにはCommandMate管理下のインストールがありません。",
+      "receiptMissing": "SkillディレクトリにCommandMateのインストール記録がないため、どのファイルがSkillのものか証明できません。",
+      "receiptUnreadable": "インストール記録を読み取れないため、ファイルの所有関係を確定できません。",
+      "receiptForeign": "このディレクトリのインストール記録は別のSkillを指しています。",
+      "treeScanTruncated": "Skillディレクトリが大きすぎるか深すぎて完全に検査できないため、管理外ファイルがないと確認できません。"
+    },
+    "nextAction": {
+      "removable": "このディレクトリのファイルはすべてCommandMateが配置し、変更されていません。確認のうえ削除してください。",
+      "blocked": "何も削除していません。以下のファイルを退避または復元してから、新しいUninstall Planを作成してください。",
+      "succeeded": "Skillを削除し、記録を消去しました。以下のagentセッションを再起動すると提示されなくなります。",
+      "committedReconciling": "削除の途中で処理が停止しました。診断のためインストール記録は残しています。CommandMateが自動的に完了させます。",
+      "failed": "worktreeからは何も削除していません。理由を確認し、新しいUninstall Planを作成してください。"
+    },
+    "reload": {
+      "native": "{agent} は起動時にworktreeからSkillを読み込みます。{skillId} が提示されなくなるよう、このworktreeの {agent} セッションを再起動してください。",
+      "commandmateRuntime": "{agent} はCommandMate runtime経由でこのSkillを実行していました。runtimeが {skillId} を解放するよう、このworktreeの {agent} セッションを再起動してください。",
+      "unsupported": "{agent} はこのSkillに対応していなかったため、{skillId} の削除による {agent} セッションへの影響はありません。",
+      "unknown": "{agent} での対応状況は未検証でした。ファイルは削除済みです。{skillId} がまだ提示される場合は {agent} セッションを再起動してください。"
+    }
+  },
   "card": {
     "provider": "提供元: {provider}",
     "noRecommendedVersion": "導入可能なversionなし"

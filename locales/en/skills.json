@@ -146,6 +146,33 @@
       "failed": "Nothing was written to the worktree. Review the reason and build a new install plan."
     }
   },
+  "uninstall": {
+    "reason": {
+      "managedUnchanged": "Installed by CommandMate and unchanged since, so it can be removed safely.",
+      "localModification": "This file has been edited since it was installed. CommandMate will not delete your changes.",
+      "receiptOrphan": "The install record lists this file but it is no longer in the worktree, so what is on disk is no longer the installation CommandMate recorded.",
+      "unmanagedFile": "This file is inside the Skill directory but was not installed by CommandMate, so it is not CommandMate's to delete.",
+      "notARegularFile": "This path is a symbolic link or another non-regular entry. CommandMate will not follow it to decide what to delete.",
+      "notInstalled": "No CommandMate-managed installation of this Skill exists in this worktree.",
+      "receiptMissing": "The Skill directory has no CommandMate install record, so nothing proves which files belong to the Skill.",
+      "receiptUnreadable": "The install record could not be read, so file ownership cannot be established.",
+      "receiptForeign": "The install record in this directory describes a different Skill.",
+      "treeScanTruncated": "The Skill directory is too large or too deep to inspect completely, so CommandMate cannot rule out files it does not own."
+    },
+    "nextAction": {
+      "removable": "Every file in this directory was installed by CommandMate and is unchanged. Confirm to remove them.",
+      "blocked": "Nothing has been deleted. Move or restore the files listed below, then build a new uninstall plan.",
+      "succeeded": "The Skill was removed and its record cleared. Restart the agent sessions listed below so they stop offering it.",
+      "committedReconciling": "Files were already being removed when the operation stopped. The install record is still in place for diagnosis; CommandMate will finish automatically.",
+      "failed": "Nothing was deleted from the worktree. Review the reason and build a new uninstall plan."
+    },
+    "reload": {
+      "native": "{agent} loads Skills from the worktree at startup. Restart the {agent} session in this worktree so it stops offering {skillId}.",
+      "commandmateRuntime": "{agent} ran this Skill through the CommandMate runtime. Restart the {agent} session in this worktree so the runtime drops {skillId}.",
+      "unsupported": "{agent} did not support this Skill, so removing {skillId} changes nothing for {agent} sessions.",
+      "unknown": "Support for {agent} was never verified. The files are removed; restart the {agent} session if {skillId} is still offered."
+    }
+  },
   "card": {
     "provider": "by {provider}",
     "noRecommendedVersion": "No installable version"
