@@ -24,6 +24,8 @@ import { createAutoYesCommand } from './commands/auto-yes';
 import { createReportCommand } from './commands/report';
 // Issue #1000: Agent-instance roster management (discover/add/remove/alias/kill)
 import { createInstancesCommand } from './commands/instances';
+// Issue #1237: Skill management as a thin client over the Skill APIs
+import { createSkillCommand } from './commands/skill';
 // Issue #1195: Guided quickstart for bare `npx commandmate`
 import { quickstartCommand } from './commands/quickstart';
 import { isInteractive } from './utils/prompt';
@@ -221,6 +223,9 @@ export function buildProgram(): Command {
 
   // Issue #1000: Agent-instance roster management
   program.addCommand(createInstancesCommand());
+
+  // Issue #1237: Skill management (catalog / plan / install / uninstall / status)
+  program.addCommand(createSkillCommand());
 
   // Issue #264: AI Tool Integration help section
   program.addHelpText('after', `
