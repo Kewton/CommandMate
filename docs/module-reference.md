@@ -409,6 +409,15 @@
 | `src/lib/skills/operation-audit.ts` | append-only `skill_operations` への記録（#1234、server-only） |
 | `src/lib/skills/operation-reconciler.ts` | startup / on-demand reconciliation と orphan cleanup（#1234、server-only） |
 | `src/lib/db/migrations/v44-skill-operations.ts` | `skill_operations` テーブル。trigger で追記専用を DB 側から強制（#1234） |
+| `src/lib/skills/install-plan.ts` | 決定的 receipt bytes 確定、plan token の server-side state（TTL/1回性/LRU）、drift 検出（#1233、server-only） |
+| `src/lib/skills/preview-diff.ts` | install root 走査・live branch/HEAD 解決・git ignore 判定・virtual unified diff・tree hash（#1233、server-only） |
+| `src/lib/skills/install-apply.ts` | `O_EXCL\|O_NOFOLLOW` write・same-filesystem staging・destination 不存在の自前証明・atomic rename（#1235、server-only） |
+| `src/lib/skills/installed-state.ts` | `skill_installations` の idempotent upsert。読み取り公開 route は未整備（#1248 待ち）（#1235） |
+| `src/lib/skills/uninstall-plan.ts` | receipt 照合による remove/modified/missing/unknown/irregular 分類。drift 観測に receipt digest を含む（#1236、server-only） |
+| `src/lib/skills/uninstall-apply.ts` | unlink 直前の lstat/mode/digest 再照合、`rmdir(2)` のみ使用、receipt を最後に削除（#1236、server-only） |
+| `src/lib/db/migrations/v45-skill-installations.ts` | `skill_installations` テーブル（#1235） |
+| `src/app/api/worktrees/[id]/skills/[skillId]/plan\|install\|uninstall-plan\|uninstall/route.ts` | plan/apply の 4 route。手順は journal → lock → 再読込&token 消費 → filesystem → index&audit（#1233/#1235/#1236） |
+| `src/cli/commands/skill.ts` / `skill-guards.ts` / `skill-format.ts` | `commandmate skill` の wiring / 確認規約・typed error mapping / 表示。非TTY は `--yes` 必須、high-risk は `--ack-risk` 必須（#1237） |
 
 ## CLIモジュール（Issue #96, #136）
 
