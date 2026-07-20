@@ -9,6 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as childProcess from 'child_process';
+import { homedir } from 'os';
 
 vi.mock('child_process');
 
@@ -16,6 +17,7 @@ import {
   warmNpxLatest,
   spawnNpxDaemon,
   sanitizeNpxEnv,
+  stableNpxCwd,
   NPX_WARMUP_TIMEOUT_MS,
 } from '../../../../src/cli/utils/npx-runner';
 
@@ -136,6 +138,14 @@ describe('sanitizeNpxEnv', () => {
   });
 });
 
+describe('stableNpxCwd (Issue #1410)', () => {
+  it('returns an absolute home directory (never the npx cache package dir)', () => {
+    const cwd = stableNpxCwd();
+    expect(cwd).toBe(homedir());
+    expect(cwd).not.toMatch(/_npx/);
+  });
+});
+
 describe('warmNpxLatest', () => {
   it('invokes `npx --yes <pkg>@latest --version` with array argv and no shell', () => {
     mockSpawn(spawnResult({ stdout: '0.10.4\n', status: 0 }));
@@ -159,6 +169,16 @@ describe('warmNpxLatest', () => {
     const env = options.env as NodeJS.ProcessEnv;
     expect(env).toBeDefined();
     expect(Object.keys(env).some((k) => /^npm_/i.test(k))).toBe(false);
+  });
+
+  it('runs from a stable cwd (home dir) so npx cache churn cannot invalidate process.cwd() — Issue #1410', () => {
+    mockSpawn(spawnResult({ stdout: '0.10.4\n', status: 0 }));
+
+    warmNpxLatest(PACKAGE_NAME);
+
+    // The inherited cwd would be the npx cache package dir, which npx deletes
+    // while fetching; an absolute stable cwd keeps the child's process.cwd() valid.
+    expect(lastOptions().cwd).toBe(homedir());
   });
 
   it('keeps the warmup timeout comfortably under the GUI 5-minute timeout', () => {
@@ -235,6 +255,16 @@ describe('spawnNpxDaemon', () => {
 
     const env = lastOptions().env as NodeJS.ProcessEnv;
     expect(Object.keys(env).some((k) => /^npm_/i.test(k))).toBe(false);
+  });
+
+  it('runs from a stable cwd (home dir) so a deleted npx cache dir does not crash the relaunch — Issue #1410', () => {
+    mockSpawn(spawnResult({ status: 0 }));
+
+    spawnNpxDaemon(PACKAGE_NAME);
+
+    // This is the step that crashed with ENOENT (uv_cwd) when it inherited the
+    // (now-deleted) npx cache dir as its cwd; a stable absolute cwd prevents it.
+    expect(lastOptions().cwd).toBe(homedir());
   });
 
   it('reports success when the relaunch exits 0', () => {
