@@ -61,7 +61,13 @@ import { Kbd } from '@/components/ui/Kbd';
 import { useToast } from '@/components/common/Toast';
 import type { Worktree } from '@/types/models';
 
-/** Navigation targets shown in the palette (mirrors Header / GlobalMobileNav). */
+/**
+ * Navigation targets shown in the palette.
+ *
+ * Mirrors Header / GlobalMobileNav except for Skills, which is reachable from
+ * More and this palette only: #1232 kept it out of the primary nav rather than
+ * spend one of the few top-level slots on it.
+ */
 const NAV_ITEMS = [
   { key: 'home', href: '/' },
   { key: 'chat', href: '/chat' },

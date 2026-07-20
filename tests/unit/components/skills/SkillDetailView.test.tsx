@@ -211,14 +211,25 @@ describe('SkillDetailView install gating', () => {
     expect(reason).toHaveTextContent('skills.compatibility.reason.rangeUnsupported');
   });
 
-  it('keeps install disabled even when the Skill is compatible, since this screen only browses', async () => {
+  it('mounts the install flow when the Skill is compatible (Issue #1431)', async () => {
     fetchMock.mockResolvedValue(mockDetail(makeSkill()));
     render(<SkillDetailView skillId="release-helper" />);
 
-    expect(await screen.findByTestId('skill-install-action')).toBeDisabled();
+    expect(await screen.findByTestId('skill-install-panel')).toBeInTheDocument();
+    // Still nothing to install into until a target has been chosen, and the
+    // reason says so rather than claiming the feature does not exist.
+    expect(screen.getByTestId('skill-install-action')).toBeDisabled();
     expect(screen.getByTestId('skill-install-reason')).toHaveTextContent(
-      'skills.detail.install.unavailableYet'
+      'skills.plan.chooseTarget'
     );
+  });
+
+  it('offers uninstall even for a Skill the Catalog rules out installing', async () => {
+    fetchMock.mockResolvedValue(mockDetail(makeIncompatibleSkill()));
+    render(<SkillDetailView skillId="future-skill" />);
+
+    await screen.findByTestId('skill-install-panel');
+    expect(screen.getByTestId('skill-uninstall-action')).toBeInTheDocument();
   });
 });
 
