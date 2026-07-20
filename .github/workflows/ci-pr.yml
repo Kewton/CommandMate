@@ -24,6 +24,26 @@ jobs:
           fi
           echo "CLAUDE.md size: $SIZE bytes (under $LIMIT)"
 
+  control-chars:
+    name: Control character check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # [Issue #1432] Hard-fail if a raw C0 control byte reappears in src/.
+      # operation-lock.ts / preview-diff.ts carried a raw NUL (0x00) as a hash
+      # separator, so file(1) called them `data` and grep/rg skipped them without
+      # a word — hiding ~870 lines from every grep-based audit and codemod here.
+      # `\x00` evaluates to the same byte, so escaping costs nothing.
+      #
+      # tests/ is intentionally out of scope: some suites need a raw control byte
+      # as the fixture under test (NUL-rejection inputs, binary-content payloads),
+      # and escaping those would change what is being asserted.
+      # The script is dependency-free, so no npm install is needed.
+      - name: Check for raw control characters in src/
+        run: node scripts/check-control-chars.mjs
+
   token-discipline:
     name: Token discipline (raw gray/slate + chromatic guard)
     runs-on: ubuntu-latest
