@@ -111,6 +111,28 @@
       "blockedNoVersion": "稼働中のCommandMateに適用できる公開versionがないため導入できません。"
     }
   },
+  "target": {
+    "heading": "導入先",
+    "loading": "登録済みworktreeを読み込んでいます…",
+    "empty": "登録済みのworktreeがありません。Skillを導入する前にworktreeを登録してください。",
+    "errorNotice": "登録済みworktreeの一覧を読み込めませんでした。現在は導入先を選択できません。",
+    "retry": "再試行",
+    "selected": "選択中",
+    "repository": "リポジトリ",
+    "branch": "ブランチ",
+    "branchUnknown": "記録されていません",
+    "agents": "Agent",
+    "agentsNone": "設定されていません",
+    "workingTree": "作業ツリー",
+    "workingTreeClean": "未コミットの変更なし",
+    "workingTreeDirty": "未コミットの変更あり",
+    "workingTreeUnknown": "未確認",
+    "sessionRunning": "このworktreeではセッションが稼働中です。",
+    "branchFreshnessNotice": "ここに表示しているブランチは直近のworktree同期時点の値です。CommandMateはinstall plan生成時に現在のブランチとコミットを解決し、差異があればそこで報告します。"
+  },
+  "plan": {
+    "highRiskAcknowledgement": "CommandMateはpackageの内容を検査した結果、このSkillをhigh riskと判定しました。以下のファイル・スクリプト・宣言された権限を確認したうえで、このworktreeへ導入することを明示的に承認してください。"
+  },
   "card": {
     "provider": "提供元: {provider}",
     "noRecommendedVersion": "導入可能なversionなし"
