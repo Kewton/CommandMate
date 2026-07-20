@@ -391,7 +391,7 @@
 | `src/lib/skills/constants.ts` | 上限・pattern・予約名・archive layout・`SKILL_YAML_SAFE_PROFILE`（#1228） |
 | `src/lib/skills/errors.ts` | 契約違反の安定エラーコードと `SkillValidationResult`（#1228） |
 | `src/lib/skills/artifact-downloader.ts` | allowlist / redirect 毎再検証 / credential 除去 / size 上限つき stream 取得（#1229、server-only） |
-| `src/lib/skills/snapshot-store.ts` | 0700 data root 配下の read-only snapshot と TTL / refcount / quota / LRU（#1229、server-only） |
+| `src/lib/skills/snapshot-store.ts` | 0700 data root 配下の read-only snapshot と TTL / refcount / quota / LRU。TTL sweep は `plan-sweeper` から定期実行（#1229 / #1429、server-only） |
 | `src/lib/skills/integrity.ts` | streaming SHA-256、timing-safe digest 比較、URL redaction（#1229、server-only） |
 | `src/config/skill-security-config.ts` | 公式 host / owner / repository / asset path allowlist と転送上限（#1229） |
 | `src/lib/skills/package-reader.ts` | tar.gz の entry table 構築と特殊 file / mode / 容量 / collision 拒否（#1230、server-only） |
@@ -403,11 +403,11 @@
 | `src/config/skill-catalog-config.ts` | Catalog endpoint の完全一致 allowlist と TTL / size cap / rate limit（#1231） |
 | `src/app/api/skills/route.ts` / `[id]/route.ts` | read-only Catalog API。UI と CLI が同じ結果を参照する（#1231） |
 | `src/components/skills/` | Catalog 一覧・詳細・badge・freshness banner・表示語彙。changelog は `stripRemoteMedia()` 適用（#1232） |
-| `src/lib/skills/operation-lock.ts` | owner nonce / lease / process generation つき cross-process lock（#1234、server-only） |
-| `src/lib/skills/operation-journal.ts` | typed state transition と idempotency key binding（#1234、server-only） |
+| `src/lib/skills/operation-lock.ts` | owner nonce / lease / process generation つき cross-process lock。lease 失効後も owner 生存中は reclaim しない（same-process 含む。#1427 で same-pid ショートカット除去）。hash separator は `\x00` エスケープ（#1432）（#1234、server-only） |
+| `src/lib/skills/operation-journal.ts` | typed state transition と idempotency key binding。terminal entry は retention（7日）で自動 prune（#1234 / #1428、server-only） |
 | `src/lib/skills/operation-store.ts` | service-owned state root（0700/0600）、atomic write、staging 分離（#1234、server-only） |
 | `src/lib/skills/operation-audit.ts` | append-only `skill_operations` への記録（#1234、server-only） |
-| `src/lib/skills/operation-reconciler.ts` | startup / on-demand reconciliation と orphan cleanup（#1234、server-only） |
+| `src/lib/skills/operation-reconciler.ts` | on-demand reconciliation ロジックと orphan cleanup。起動時実行は `startup-reconcile` 経由（#1234 / #1428、server-only） |
 | `src/lib/db/migrations/v44-skill-operations.ts` | `skill_operations` テーブル。trigger で追記専用を DB 側から強制（#1234） |
 | `src/lib/skills/install-plan.ts` | 決定的 receipt bytes 確定、plan token の server-side state（TTL/1回性/LRU）、drift 検出（#1233、server-only） |
 | `src/lib/skills/preview-diff.ts` | install root 走査・live branch/HEAD 解決・git ignore 判定・virtual unified diff・tree hash（#1233、server-only） |
@@ -416,7 +416,10 @@
 | `src/lib/skills/uninstall-plan.ts` | receipt 照合による remove/modified/missing/unknown/irregular 分類。drift 観測に receipt digest を含む（#1236、server-only） |
 | `src/lib/skills/uninstall-apply.ts` | unlink 直前の lstat/mode/digest 再照合、`rmdir(2)` のみ使用、receipt を最後に削除（#1236、server-only） |
 | `src/lib/db/migrations/v45-skill-installations.ts` | `skill_installations` テーブル（#1235） |
-| `src/app/api/worktrees/[id]/skills/[skillId]/plan\|install\|uninstall-plan\|uninstall/route.ts` | plan/apply の 4 route。手順は journal → lock → 再読込&token 消費 → filesystem → index&audit（#1233/#1235/#1236） |
+| `src/lib/db/migrations/v46-skill-installations-cascade.ts` | `skill_installations` に `worktree_id` FK + `ON DELETE CASCADE` を付与（table rebuild）、既存 dangling 行も一掃（#1430） |
+| `src/lib/skills/startup-reconcile.ts` | 起動時 reconciliation の assembly。`server.ts` から `await import()` で遅延読込し reconciler へ port（payload probe / reindex）を注入。receipt からの reindex もここで実装（#1428、server-only） |
+| `src/lib/skills/plan-sweeper.ts` | install/uninstall plan cache と snapshot store を 60秒ごと（＋token アクセス時）に sweep する `unref()` 済み timer。route から lazy 起動（#1429、server-only） |
+| `src/app/api/worktrees/[id]/skills/[skillId]/plan\|install\|uninstall-plan\|uninstall/route.ts` | plan/apply の 4 route。手順は journal → lock → 再読込&token 消費 → filesystem → index&audit。各 handler 冒頭で `ensureSkillPlanSweeper()` を lazy 起動（#1233/#1235/#1236/#1429） |
 | `src/cli/commands/skill.ts` / `skill-guards.ts` / `skill-format.ts` | `commandmate skill` の wiring / 確認規約・typed error mapping / 表示。非TTY は `--yes` 必須、high-risk は `--ack-risk` 必須。`install` は `--version` 必須（#1237） |
 | `tests/integration/skills/mvp-harness.ts` | MVP 統合 suite の共有 harness。実 git リポジトリ生成、fixture Catalog/artifact 組立、tree 差分・残留物の観測。root は `$HOME` 配下（`system-directories` が `/tmp`・`/var` を拒否するため）（#1242） |
 | `tests/integration/skills-mvp-{install-flow,security-regression,source-integrity}.test.ts` | MVP 出荷判定 gate。層を実物のまま繋いだ E2E / 悪性 corpus 59 件の fail closed と不変条件 / wire 上の allowlist・redirect・checksum・size・offline（#1242） |
