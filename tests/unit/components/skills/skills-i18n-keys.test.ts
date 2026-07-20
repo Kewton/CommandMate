@@ -28,6 +28,11 @@ import {
   SKILL_INSTALL_NEXT_ACTION_KEYS,
   SKILL_INSTALL_RELOAD_MESSAGE_KEYS,
 } from '@/lib/skills/install-apply';
+import {
+  SKILL_UNINSTALL_NEXT_ACTION_KEYS,
+  SKILL_UNINSTALL_REASON_MESSAGE_KEYS,
+  SKILL_UNINSTALL_RELOAD_MESSAGE_KEYS,
+} from '@/lib/skills/uninstall-plan';
 
 const ROOT = path.resolve(__dirname, '../../../..');
 const LOCALES_DIR = path.join(ROOT, 'locales');
@@ -95,6 +100,11 @@ function contractKeys(): string[] {
     // instruction per agent and the next action per outcome.
     ...Object.values(SKILL_INSTALL_RELOAD_MESSAGE_KEYS),
     ...Object.values(SKILL_INSTALL_NEXT_ACTION_KEYS),
+    // Emitted by the uninstall plan/apply API (#1236): the plan names why each
+    // retained path could not be removed, and the response what to do next.
+    ...Object.values(SKILL_UNINSTALL_REASON_MESSAGE_KEYS),
+    ...Object.values(SKILL_UNINSTALL_NEXT_ACTION_KEYS),
+    ...Object.values(SKILL_UNINSTALL_RELOAD_MESSAGE_KEYS),
   ]
     .map(resolveSkillMessageKey)
     .concat(Object.values(RECOMMENDATION_LABEL_KEY))
@@ -133,6 +143,10 @@ const PLACEHOLDERS: Record<string, string[]> = {
   'catalog.fetchedAt': ['{timestamp}'],
   'catalog.revalidatedAt': ['{timestamp}'],
   'catalog.sourceLabel': ['{repository}', '{ref}'],
+  'uninstall.reload.native': ['{agent}', '{skillId}'],
+  'uninstall.reload.commandmateRuntime': ['{agent}', '{skillId}'],
+  'uninstall.reload.unsupported': ['{agent}', '{skillId}'],
+  'uninstall.reload.unknown': ['{agent}', '{skillId}'],
 };
 
 /**
