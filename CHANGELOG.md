@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.4] - 2026-07-20
+
+> **Highlight**: **npx 起動サーバの GUI ワンクリック更新が「冷キャッシュ（対象版が未取得）」で失敗する問題を修正**。npx 起動サーバの cwd は npx キャッシュ内のパッケージ dir で、更新の warm（新版取得）時に npx がその dir を掃除/置換するため、続く再起動の npx 起動で `process.cwd()` が `ENOENT (uv_cwd)` を投げてクラッシュし、旧サーバ停止済みのまま再起動に失敗していた（対象版がキャッシュ済みの時のみ成功）。更新プロセスと npx サブ起動を安定 dir（homedir / ~/.commandmate）から実行するようにして解消した。
+
+### Fixed
+
+- **npx 自己更新の再起動段クラッシュ（`process.cwd()` ENOENT/uv_cwd）を修正** (#1410): npx 起動サーバは npx キャッシュ内のパッケージ dir（`~/.npm/_npx/<hash>/node_modules/commandmate`）を cwd に持ち、分離起動される更新プロセスがこれを継承する。`warmNpxLatest` の新版取得で npx がその dir を掃除/置換するため、続く `spawnNpxDaemon` の npx 起動で npm が `process.cwd()` を呼んだ瞬間 `ENOENT (uv_cwd)` でクラッシュし、旧サーバ停止済みのまま再起動に失敗していた。`npx-runner` の warm/relaunch spawn に安定 cwd（`homedir()`、`stableNpxCwd()`）を明示し、更新プロセス自体も `ensureConfigDir()`（`~/.commandmate`）から起動するようにして解消。再起動先の daemon は従来どおり自身の cwd を package root に設定するため、サーバの実行位置は不変。
+
 ## [0.11.3] - 2026-07-19
 
 > **Highlight**: **History 表示上限が会話ペア数と一致しない問題を修正**。表示上限セレクタ（50/100/…）の値は生メッセージ行数の LIMIT として扱われていたため、codex のように 1 会話ターンあたり assistant 行を多数生成するエージェント（実測 assistant:user ≈ 6.8:1）では、50 を選んでも約 10 枚の会話ペアカードしか表示されなかった。取得単位を「会話ペア（ターン）」に変更し、表示カード枚数＝選択値に一致させた。
