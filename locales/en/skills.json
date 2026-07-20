@@ -106,7 +106,6 @@
     },
     "install": {
       "action": "Choose an install target",
-      "unavailableYet": "Choosing an install target is not available yet. This screen covers browsing the Catalog only.",
       "blockedIncompatible": "Install is unavailable: {reason}",
       "blockedNoVersion": "Install is unavailable because no published version applies to the CommandMate you are running."
     }
@@ -131,7 +130,87 @@
     "branchFreshnessNotice": "The branch shown here comes from the last worktree scan. CommandMate resolves the live branch and commit when it builds the install plan, and reports any difference there."
   },
   "plan": {
-    "highRiskAcknowledgement": "CommandMate rated this package high risk after inspecting its contents. Review the files, scripts and declared permissions below, then confirm explicitly that you want to install it into this worktree."
+    "highRiskAcknowledgement": "CommandMate rated this package high risk after inspecting its contents. Review the files, scripts and declared permissions below, then confirm explicitly that you want to install it into this worktree.",
+    "build": "Build install plan",
+    "building": "Building the install plan…",
+    "chooseTarget": "Choose the worktree this Skill would be installed into.",
+    "ready": "Building a plan writes nothing. It downloads the package, inspects it and reports exactly what installing would change.",
+    "heading": "Install plan",
+    "expiresAt": "This plan is valid until {timestamp}. After that, build a new one.",
+    "targetHeading": "Where this would be installed",
+    "headStateLabel": "Git HEAD",
+    "headState": {
+      "attached": "On a branch",
+      "detached": "Detached HEAD",
+      "unborn": "No commit yet",
+      "unknown": "Could not be resolved"
+    },
+    "installRoot": "Install directory",
+    "existingInstall": "Already installed here",
+    "existingInstallNone": "Nothing installed here yet",
+    "existingInstallVersion": "Version {version}",
+    "riskHeading": "Risk",
+    "riskDeclared": "Declared",
+    "riskComputed": "Computed",
+    "riskEffective": "Effective",
+    "riskNotice": "The computed level comes from inspecting the downloaded package. Where it disagrees with the publisher's claim, the higher of the two is the effective level.",
+    "permission": {
+      "filesystemRead": "Reads files",
+      "filesystemWrite": "Writes files",
+      "networkAccess": "Accesses the network",
+      "processExecution": "Runs other programs",
+      "environmentRead": "Reads environment variables",
+      "credentialAccess": "Accesses credentials"
+    },
+    "permissionsNone": "The manifest declares no permissions.",
+    "requirementsNone": "The manifest requires no commands and no network access.",
+    "requirementsCommands": "Commands",
+    "requirementsHosts": "Network hosts",
+    "commandAnyVersion": "(any version)",
+    "scriptsHeading": "Scripts and executables in the package",
+    "scriptsNone": "The package contains no scripts and no executable files.",
+    "warningsHeading": "Caveats",
+    "warning": {
+      "detachedHead": "This worktree is not on a branch, so the install would not belong to any branch history.",
+      "unbornHead": "This worktree has no commit yet.",
+      "headUnresolved": "The current commit could not be resolved.",
+      "workingTreeDirty": "This worktree has uncommitted changes, so the install would mix with work in progress.",
+      "pathGitIgnored": "Some destination paths are ignored by git, so the installed files would not show up in git status.",
+      "diffTruncated": "Some diffs were too large to show in full.",
+      "binaryContent": "Some files are binary, so no diff can be shown for them.",
+      "lineEndingCrlf": "Some files use CRLF line endings.",
+      "treeScanTruncated": "The destination directory was too large to inspect completely."
+    },
+    "filesHeading": "What this install would write",
+    "stats": "{added} added, {modified} modified, {unchanged} unchanged, {conflicted} conflicting, {unmanaged} unmanaged",
+    "filesEmpty": "This plan writes no files.",
+    "fileGenerated": "Install record",
+    "gitIgnored": "This path is ignored by git.",
+    "diffToggle": "Show the diff (+{additions} / -{deletions})",
+    "diffTruncated": "This diff was truncated.",
+    "diffBinary": "Binary file, so no diff is shown.",
+    "change": {
+      "add": "Add",
+      "modify": "Modify",
+      "unchanged": "Unchanged",
+      "conflict": "Conflict",
+      "unmanaged": "Unmanaged"
+    },
+    "diffReason": {
+      "newFile": "Nothing is at this path, so the file would simply be created.",
+      "contentIdentical": "What is already there is byte-identical to what would be written.",
+      "managedUpdate": "CommandMate installed this file and it is unchanged, so it would be replaced.",
+      "localModification": "This file has been edited since it was installed. CommandMate will not overwrite your changes.",
+      "unmanagedSkill": "A Skill directory is already here that CommandMate did not install, so it is not CommandMate's to replace.",
+      "receiptOrphan": "The install record lists this file but it is no longer on disk, so the recorded installation no longer matches the worktree.",
+      "notARegularFile": "This path is a symbolic link or another non-regular entry. CommandMate will not follow it."
+    },
+    "blockersHeading": "What stops this install",
+    "blockedNotice": "Nothing has been written. Resolve the paths above, then build a new plan.",
+    "acknowledgeLabel": "I have reviewed the files, scripts and declared permissions above, and I want to install this high-risk Skill into this worktree.",
+    "confirm": "Install into this worktree",
+    "confirming": "Installing…",
+    "discard": "Discard this plan"
   },
   "install": {
     "reload": {
@@ -171,6 +250,27 @@
       "commandmateRuntime": "{agent} ran this Skill through the CommandMate runtime. Restart the {agent} session in this worktree so the runtime drops {skillId}.",
       "unsupported": "{agent} did not support this Skill, so removing {skillId} changes nothing for {agent} sessions.",
       "unknown": "Support for {agent} was never verified. The files are removed; restart the {agent} session if {skillId} is still offered."
+    },
+    "build": "Build uninstall plan",
+    "building": "Building the uninstall plan…",
+    "heading": "Uninstall plan",
+    "expiresAt": "This plan is valid until {timestamp}. After that, build a new one.",
+    "installedVersion": "Installed version",
+    "versionUnknown": "Not recorded",
+    "stats": "{removable} removable, {modified} modified, {missing} missing, {unknown} unknown, {irregular} not a regular file",
+    "removalsHeading": "What would be deleted",
+    "removalsEmpty": "This plan deletes nothing.",
+    "retainedHeading": "What would stay",
+    "retainedEmpty": "Nothing would be left behind.",
+    "blockersHeading": "What stops this uninstall",
+    "confirm": "Remove from this worktree",
+    "confirming": "Removing…",
+    "disposition": {
+      "remove": "Delete",
+      "modified": "Keep (edited)",
+      "missing": "Already gone",
+      "unknown": "Keep (not recorded)",
+      "irregular": "Keep (not a regular file)"
     }
   },
   "card": {
@@ -204,6 +304,41 @@
       "malformed": "The Catalog response was not valid JSON.",
       "invalidSchema": "The Catalog response failed contract validation.",
       "unknown": "The reason was not reported."
+    }
+  },
+  "operation": {
+    "errorHeading": "The operation was refused",
+    "reloadHeading": "Restart these agent sessions",
+    "installedHeading": "Installed",
+    "uninstalledHeading": "Removed",
+    "replayNotice": "This answers a request CommandMate had already carried out, so the per-file list is not repeated.",
+    "filesWritten": "{count} files written",
+    "filesRemoved": "{count} files removed",
+    "startOver": "Choose another target",
+    "error": {
+      "planStale": "The worktree changed after this plan was built, so the plan no longer describes what would happen. Nothing was written. Build a new plan.",
+      "planExpired": "This plan is too old to spend. Nothing was written. Build a new plan.",
+      "planConsumed": "This plan has already been used. Nothing was written a second time.",
+      "planNotFound": "CommandMate no longer holds this plan. Nothing was written. Build a new plan.",
+      "planBindingMismatch": "This plan was built for a different request and cannot be spent here. Build a new plan from this screen.",
+      "planNotInstallable": "This plan reports blockers, so it cannot be applied. Nothing was written.",
+      "planRiskNotAcknowledged": "This package is high risk and the install was not explicitly acknowledged. Nothing was written.",
+      "installLocked": "Another Skill operation is running in this worktree. Nothing was written. Try again once it finishes.",
+      "installInProgress": "An earlier attempt at this exact install is still running. Wait for it rather than starting a second one.",
+      "installDestinationExists": "Something is already at the install path. Nothing was written; CommandMate does not overwrite what it did not install.",
+      "installDestinationUnmanaged": "A Skill directory that CommandMate did not install is already at this path. Nothing was written.",
+      "installIdempotencyConflict": "This retry does not match the request it repeats. Nothing was written. Build a new plan.",
+      "installFailed": "An earlier attempt at this install failed and nothing was written. Build a new plan.",
+      "uninstallLocked": "Another Skill operation is running in this worktree. Nothing was deleted. Try again once it finishes.",
+      "uninstallInProgress": "An earlier attempt at this exact uninstall is still running. Wait for it rather than starting a second one.",
+      "uninstallIdempotencyConflict": "This retry does not match the request it repeats. Nothing was deleted. Build a new plan.",
+      "uninstallNotInstalled": "CommandMate has no record of this Skill in this worktree, so there is nothing for it to remove.",
+      "uninstallBlocked": "Nothing was deleted. Some paths are not CommandMate's to remove.",
+      "uninstallDrift": "The worktree no longer matches the install record, so CommandMate cannot tell which files it owns. Nothing was deleted.",
+      "uninstallFileChanged": "A file changed after the plan was built. Nothing was deleted. Build a new plan.",
+      "uninstallFailed": "An earlier attempt at this uninstall failed and nothing was deleted. Build a new plan.",
+      "requestFailed": "The request did not reach CommandMate, or it answered without naming a reason. Nothing is known to have changed.",
+      "unexpected": "CommandMate reported a failure it has no explanation for. Treat the worktree as unchanged only after checking it."
     }
   }
 }

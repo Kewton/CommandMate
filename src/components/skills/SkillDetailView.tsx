@@ -34,6 +34,7 @@ import type { SkillCommandMateCompatibility } from '@/lib/skills/compatibility';
 import { AgentSupportBadge, SkillCompatibilityBadge, SkillRiskBadge } from './SkillBadges';
 import { CatalogStatusBanner } from './CatalogStatusBanner';
 import { SkillChangelog } from './SkillChangelog';
+import { SkillInstallPanel } from './SkillInstallPanel';
 import { SkillNotice } from './SkillNotice';
 import { fetchSkillDetail, type SkillFetchFailure } from './skills-client';
 import { RECOMMENDATION_LABEL_KEY, resolveSkillMessageKey } from './skill-vocabulary';
@@ -255,7 +256,7 @@ export function SkillDetailView({ skillId }: SkillDetailViewProps) {
             currentVersion: compatibility.currentVersion ?? '',
           }),
         })
-      : t('detail.install.unavailableYet');
+      : null;
 
   return (
     <div className="space-y-4">
@@ -272,17 +273,11 @@ export function SkillDetailView({ skillId }: SkillDetailViewProps) {
       </div>
 
       <SectionCard title={t('detail.install.action')} testId="skill-install-section">
-        <Button
-          variant="primary"
-          disabled
-          data-testid="skill-install-action"
-          aria-describedby="skill-install-reason"
-        >
-          {t('detail.install.action')}
-        </Button>
-        <p id="skill-install-reason" className="text-sm text-muted-foreground" data-testid="skill-install-reason">
-          {installBlockedReason}
-        </p>
+        <SkillInstallPanel
+          skillId={skill.id}
+          version={skill.recommendedVersion}
+          blockedReason={installBlockedReason}
+        />
       </SectionCard>
 
       <SectionCard title={t('capabilities.heading')} testId="skill-capabilities-section">

@@ -16,11 +16,22 @@ import fs from 'fs';
 import path from 'path';
 import {
   COMPATIBILITY_LABEL_KEY,
+  DIFF_CHANGE_LABEL_KEY,
+  DIFF_REASON_LABEL_KEY,
+  HEAD_STATE_LABEL_KEY,
+  OPERATION_ERROR_LABEL_KEY,
+  PERMISSION_LABEL_KEY,
+  PREVIEW_WARNING_LABEL_KEY,
   RECOMMENDATION_LABEL_KEY,
   RISK_LABEL_KEY,
+  UNINSTALL_DISPOSITION_LABEL_KEY,
+  UNINSTALL_REASON_LABEL_KEY,
   catalogReasonLabelKey,
+  operationErrorLabelKey,
   resolveSkillMessageKey,
 } from '@/components/skills/skill-vocabulary';
+import { SkillDiffReason, SkillPreviewWarning } from '@/lib/skills/preview-diff';
+import { SkillUninstallReason } from '@/lib/skills/uninstall-plan';
 import { AGENT_SUPPORT_LABEL_KEYS, PERMISSION_DECLARATION_NOTICE_KEY } from '@/lib/skills/constants';
 import { SKILL_COMPATIBILITY_MESSAGE_KEYS } from '@/lib/skills/compatibility';
 import { SKILL_PLAN_HIGH_RISK_MESSAGE_KEY } from '@/lib/skills/install-plan';
@@ -110,6 +121,18 @@ function contractKeys(): string[] {
     .concat(Object.values(RECOMMENDATION_LABEL_KEY))
     .concat(Object.values(COMPATIBILITY_LABEL_KEY))
     .concat(Object.values(RISK_LABEL_KEY))
+    // Wire values the install/uninstall flow (#1431) maps to prose: the plan
+    // and the apply responses name a change, a reason, a warning or a refusal
+    // by code, and the screen looks the label up rather than writing it inline.
+    .concat(Object.values(DIFF_CHANGE_LABEL_KEY))
+    .concat(Object.values(DIFF_REASON_LABEL_KEY))
+    .concat(Object.values(PREVIEW_WARNING_LABEL_KEY))
+    .concat(Object.values(PERMISSION_LABEL_KEY))
+    .concat(Object.values(HEAD_STATE_LABEL_KEY))
+    .concat(Object.values(UNINSTALL_DISPOSITION_LABEL_KEY))
+    .concat(Object.values(UNINSTALL_REASON_LABEL_KEY))
+    .concat(Object.values(OPERATION_ERROR_LABEL_KEY))
+    .concat([operationErrorLabelKey('SKILL_SOMETHING_UNMAPPED')])
     .concat(
       [
         'SKILL_CATALOG_FETCH_FAILED',
@@ -147,6 +170,18 @@ const PLACEHOLDERS: Record<string, string[]> = {
   'uninstall.reload.commandmateRuntime': ['{agent}', '{skillId}'],
   'uninstall.reload.unsupported': ['{agent}', '{skillId}'],
   'uninstall.reload.unknown': ['{agent}', '{skillId}'],
+  'install.reload.native': ['{agent}', '{skillId}', '{version}'],
+  'install.reload.commandmateRuntime': ['{agent}', '{skillId}', '{version}'],
+  'install.reload.unsupported': ['{agent}', '{skillId}', '{version}'],
+  'install.reload.unknown': ['{agent}', '{skillId}', '{version}'],
+  'plan.expiresAt': ['{timestamp}'],
+  'plan.existingInstallVersion': ['{version}'],
+  'plan.stats': ['{added}', '{modified}', '{unchanged}', '{conflicted}', '{unmanaged}'],
+  'plan.diffToggle': ['{additions}', '{deletions}'],
+  'uninstall.expiresAt': ['{timestamp}'],
+  'uninstall.stats': ['{removable}', '{modified}', '{missing}', '{unknown}', '{irregular}'],
+  'operation.filesWritten': ['{count}'],
+  'operation.filesRemoved': ['{count}'],
 };
 
 /**
@@ -226,6 +261,26 @@ describe('skills i18n keys (Issue #1232)', () => {
       );
       expect(new Set(labels).size, `${locale}: two risk levels share a label`).toBe(3);
     }
+  });
+
+  it('labels every diff reason, preview warning and uninstall reason the contract can emit', () => {
+    // The screens cannot import these enums as values (their modules read the
+    // filesystem), so the maps are written out by hand. This is what stops a
+    // new contract code from reaching the user as a raw identifier.
+    expect(Object.keys(DIFF_REASON_LABEL_KEY).sort()).toEqual(
+      Object.values(SkillDiffReason).slice().sort()
+    );
+    expect(Object.keys(PREVIEW_WARNING_LABEL_KEY).sort()).toEqual(
+      Object.values(SkillPreviewWarning).slice().sort()
+    );
+    expect(Object.keys(UNINSTALL_REASON_LABEL_KEY).sort()).toEqual(
+      Object.values(SkillUninstallReason).slice().sort()
+    );
+  });
+
+  it('falls back to an explicit message for an unmapped operation code', () => {
+    expect(operationErrorLabelKey('SKILL_PLAN_STALE')).toBe('operation.error.planStale');
+    expect(operationErrorLabelKey('SKILL_WHAT_IS_THIS')).toBe('operation.error.unexpected');
   });
 
   it('defines the shared Skills navigation label in both locales', () => {
