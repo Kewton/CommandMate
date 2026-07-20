@@ -1,0 +1,59 @@
+{
+  "case": "effective_risk is the higher of declared and computed risk",
+  "expectedErrorCode": "SKILL_INCONSISTENT_VALUE",
+  "expectedPath": "/effective_risk",
+  "document": {
+    "schema_version": 1,
+    "skill_id": "release-notes",
+    "version": "1.2.0",
+    "install_root": ".agents/skills/release-notes",
+    "source": {
+      "repository": "Kewton/commandmate-skills",
+      "ref": "release-notes-v1.2.0",
+      "commit": "7dba1ec2e66342ef578ab57bbdaa9b4327897d47"
+    },
+    "artifact": {
+      "asset_name": "release-notes-1.2.0.tar.gz",
+      "sha256": "4bdb91f46683de4df48783d57b75248f7c7e8c34619e5cbb090ba69a6c781c21",
+      "size": 4096,
+      "format": "tar.gz"
+    },
+    "files": [
+      {
+        "path": "SKILL.md",
+        "sha256": "b82b4e56d9af25454236e5a05e2d04534bdb94cb05a2c0e542743c0f4c26ca1f",
+        "size": 2048,
+        "executable": false
+      },
+      {
+        "path": "references/changelog-format.md",
+        "sha256": "adab9b1ee6042369511dafa9783b3688e5c667fce0d67d0e3d9c8ecc060b5bf3",
+        "size": 1024,
+        "executable": false
+      }
+    ],
+    "declared_risk": "low",
+    "computed_risk": "high",
+    "effective_risk": "low",
+    "declared_permissions": [
+      "filesystem_read"
+    ],
+    "agent_compatibility": [
+      {
+        "agent": "claude",
+        "support": "native",
+        "evidence": "SKILL.md discovery verified on claude CLI 2.x"
+      },
+      {
+        "agent": "codex",
+        "support": "native",
+        "evidence": "Loaded from .agents/skills by codex CLI"
+      },
+      {
+        "agent": "gemini",
+        "support": "unknown",
+        "evidence": "Not verified for this release"
+      }
+    ]
+  }
+}

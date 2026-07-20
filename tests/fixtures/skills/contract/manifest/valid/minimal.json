@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "id": "commit-lint",
+  "name": "commit-lint",
+  "version": "0.1.0",
+  "summary": "Check commit messages against the project convention.",
+  "description": "Validates the subject line format of staged commits.",
+  "capabilities": [
+    "Report commit messages that break the convention"
+  ],
+  "expected_outcomes": [
+    "Convention violations are caught before review"
+  ],
+  "provider": {
+    "name": "CommandMate"
+  },
+  "license": "Apache-2.0",
+  "compatibility": {
+    "commandmate": "^0.11.0",
+    "agents": [
+      {
+        "agent": "claude",
+        "support": "native",
+        "evidence": "Standard SKILL.md discovery"
+      }
+    ]
+  },
+  "requirements": {
+    "commands": [],
+    "network_hosts": []
+  },
+  "declared_permissions": [],
+  "declared_risk": "low",
+  "risk_rationale": "No scripts and no network access.",
+  "files": [
+    {
+      "path": "SKILL.md",
+      "sha256": "4fa2b764cec8420953c3b7006542a70f94357be5af3796a45a493a25bd6f80ea",
+      "size": 900,
+      "kind": "skill_md",
+      "executable": false,
+      "script": false
+    }
+  ]
+}
