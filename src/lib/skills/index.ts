@@ -1,9 +1,24 @@
 /**
  * Public API of the Agent Skills distribution contract (Issue #1228)
  *
- * Downstream issues (#1229 catalog fetch, #1231 install, #1234 audit, #1232 UI)
- * import from `@/lib/skills` only. Anything not re-exported here is an internal
- * detail and may change without a contract revision.
+ * This barrel is the *contract* surface only: schema, types, constants, error
+ * codes, and SemVer. It is isomorphic — it pulls in no Node builtin — so client
+ * components can import from it safely.
+ *
+ * Deliberately NOT re-exported here (import the concrete module instead):
+ *
+ * | module | why it stays out of the barrel |
+ * | --- | --- |
+ * | `artifact-downloader`, `snapshot-store`, `integrity` (#1229) | `fs` / `crypto`, transitively `version-checker` (`fs`, `path`) |
+ * | `package-reader`, `package-validator` (#1230) | `zlib` / `fs` |
+ * | `operation-lock`, `operation-journal`, `operation-store`, `operation-audit`, `operation-reconciler` (#1234) | `fs` / `os`, service-owned state root |
+ * | `catalog-client`, `compatibility` (#1231) | server-side cache ownership; `compatibility` is pure but is paired with the client |
+ * | `safe-yaml` (#1230) | pure, but only meaningful together with `package-reader` |
+ *
+ * Re-exporting those would drag `fs` / `zlib` into any consumer of
+ * `@/lib/skills`, including the `use client` components under
+ * `src/components/skills/`. Keep server-only modules concrete:
+ * `import { … } from '@/lib/skills/snapshot-store'`.
  *
  * @module lib/skills
  */
