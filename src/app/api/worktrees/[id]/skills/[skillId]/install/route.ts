@@ -84,6 +84,7 @@ import {
   getSkillInstallation,
   upsertSkillInstallation,
 } from '@/lib/skills/installed-state';
+import { ensureSkillPlanSweeper } from '@/lib/skills/plan-sweeper';
 import { SKILL_API_NO_STORE_HEADERS, skillApiError } from '@/lib/api/skills-api';
 import type { SkillInstalledFile } from '@/types/skills';
 
@@ -292,6 +293,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; skillId: string }> }
 ): Promise<NextResponse> {
+  ensureSkillPlanSweeper();
+
   let snapshotId: string | null = null;
   let lock: ReturnType<typeof acquireSkillOperationLock> | null = null;
 

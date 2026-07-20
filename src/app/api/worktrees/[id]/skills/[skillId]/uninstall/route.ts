@@ -74,6 +74,7 @@ import {
   type SkillUninstallRetainedPath,
 } from '@/lib/skills/uninstall-apply';
 import { deleteSkillInstallation } from '@/lib/skills/installed-state';
+import { ensureSkillPlanSweeper } from '@/lib/skills/plan-sweeper';
 import { SKILL_API_NO_STORE_HEADERS, skillApiError } from '@/lib/api/skills-api';
 import type { SkillAgentSupport } from '@/types/skills';
 
@@ -292,6 +293,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; skillId: string }> }
 ): Promise<NextResponse> {
+  ensureSkillPlanSweeper();
+
   let lock: ReturnType<typeof acquireSkillOperationLock> | null = null;
 
   try {

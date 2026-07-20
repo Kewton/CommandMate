@@ -39,6 +39,7 @@ import {
   parseInstalledReceipt,
   resetSkillInstallPlanCacheForTesting,
   serializeSkillInstallReceipt,
+  sweepSkillInstallPlans,
   type CreateSkillInstallPlanInput,
   type SkillPlanActor,
 } from '@/lib/skills/install-plan';
@@ -595,6 +596,26 @@ describe('plan token lifecycle', () => {
     const record = await createSkillInstallPlan(makeInput());
     consumeSkillInstallPlan(record.token, expected, observed(record));
     discardSkillInstallPlan(record.token);
+    expect(releaseSkillSnapshotMock).not.toHaveBeenCalled();
+  });
+
+  it('releases the artifact reference on the sweeper alone (Issue #1429)', async () => {
+    const record = await createSkillInstallPlan(makeInput());
+
+    expect(sweepSkillInstallPlans({ now: record.expiresAt - 1 })).toBe(0);
+    expect(releaseSkillSnapshotMock).not.toHaveBeenCalled();
+
+    expect(sweepSkillInstallPlans({ now: record.expiresAt })).toBe(1);
+    expect(releaseSkillSnapshotMock).toHaveBeenCalledWith(SNAPSHOT_ID);
+    expect(sweepSkillInstallPlans({ now: record.expiresAt })).toBe(0);
+    expect(releaseSkillSnapshotMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the artifact reference when the sweeper meets a consumed plan', async () => {
+    const record = await createSkillInstallPlan(makeInput());
+    consumeSkillInstallPlan(record.token, expected, observed(record));
+
+    expect(sweepSkillInstallPlans({ now: record.expiresAt })).toBe(1);
     expect(releaseSkillSnapshotMock).not.toHaveBeenCalled();
   });
 });

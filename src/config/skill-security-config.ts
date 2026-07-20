@@ -169,6 +169,14 @@ export const SKILL_SNAPSHOT_ID_BYTES = 16;
 /** Opaque snapshot ID grammar: lowercase hex of {@link SKILL_SNAPSHOT_ID_BYTES}. */
 export const SKILL_SNAPSHOT_ID_PATTERN = /^[0-9a-f]{32}$/;
 
+/**
+ * How often the background sweeper reclaims expired plans and snapshots.
+ *
+ * Short relative to both TTLs so an abandoned plan releases its snapshot within
+ * a minute of expiring, rather than waiting for the next plan to be created.
+ */
+export const SKILL_PLAN_SWEEP_INTERVAL_MS = 60 * 1000;
+
 // =============================================================================
 // URL construction
 // =============================================================================
