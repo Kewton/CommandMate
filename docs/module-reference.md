@@ -417,7 +417,12 @@
 | `src/lib/skills/uninstall-apply.ts` | unlink 直前の lstat/mode/digest 再照合、`rmdir(2)` のみ使用、receipt を最後に削除（#1236、server-only） |
 | `src/lib/db/migrations/v45-skill-installations.ts` | `skill_installations` テーブル（#1235） |
 | `src/app/api/worktrees/[id]/skills/[skillId]/plan\|install\|uninstall-plan\|uninstall/route.ts` | plan/apply の 4 route。手順は journal → lock → 再読込&token 消費 → filesystem → index&audit（#1233/#1235/#1236） |
-| `src/cli/commands/skill.ts` / `skill-guards.ts` / `skill-format.ts` | `commandmate skill` の wiring / 確認規約・typed error mapping / 表示。非TTY は `--yes` 必須、high-risk は `--ack-risk` 必須（#1237） |
+| `src/cli/commands/skill.ts` / `skill-guards.ts` / `skill-format.ts` | `commandmate skill` の wiring / 確認規約・typed error mapping / 表示。非TTY は `--yes` 必須、high-risk は `--ack-risk` 必須。`install` は `--version` 必須（#1237） |
+| `tests/integration/skills/mvp-harness.ts` | MVP 統合 suite の共有 harness。実 git リポジトリ生成、fixture Catalog/artifact 組立、tree 差分・残留物の観測。root は `$HOME` 配下（`system-directories` が `/tmp`・`/var` を拒否するため）（#1242） |
+| `tests/integration/skills-mvp-{install-flow,security-regression,source-integrity}.test.ts` | MVP 出荷判定 gate。層を実物のまま繋いだ E2E / 悪性 corpus 59 件の fail closed と不変条件 / wire 上の allowlist・redirect・checksum・size・offline（#1242） |
+
+Skill の support matrix・MVP 既知制約・rollback 手順は [docs/user-guide/skills.md](./user-guide/skills.md)、
+受入判定と人手検証の未実施項目は [docs/qa/skills-mvp-uat-report.md](./qa/skills-mvp-uat-report.md) を参照。
 
 ## CLIモジュール（Issue #96, #136）
 
