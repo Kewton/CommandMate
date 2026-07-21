@@ -29,6 +29,7 @@ import { v43_migrations } from './v43-remove-cm-root-dir-ghost-repository';
 import { v44_migrations } from './v44-skill-operations';
 import { v45_migrations } from './v45-skill-installations';
 import { v46_migrations } from './v46-skill-installations-cascade';
+import { v47_migrations } from './v47-skill-installations-roots';
 
 /**
  * Complete ordered list of all migrations.
@@ -63,4 +64,5 @@ export const migrations: Migration[] = [
   ...v44_migrations,
   ...v45_migrations,
   ...v46_migrations,
+  ...v47_migrations,
 ];

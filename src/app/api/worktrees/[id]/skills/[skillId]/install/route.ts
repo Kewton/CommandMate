@@ -118,7 +118,10 @@ export interface SkillInstallOperationDto {
 export interface SkillInstallPayloadDto {
   skillId: string;
   version: string;
+  /** Primary repository-relative install root (`.agents/skills/<id>`). */
   installRoot: string;
+  /** Every root the package was placed into, primary first (#1460). */
+  installRoots: string[];
   receipt: { path: string; sha256: string; size: number };
   files: SkillInstalledFile[];
   treeHash: string;
@@ -143,6 +146,7 @@ export interface SkillInstallReplayResponse {
     skillId: string;
     version: string;
     installRoot: string;
+    installRoots: string[];
     receipt: { path: string; sha256: string };
   } | null;
 }
@@ -434,6 +438,9 @@ export async function POST(
         snapshot,
         receiptBytes: consumed.receiptBytes,
         plannedTreeHash: consumed.binding.plannedTreeHash,
+        // Place the package into every root the plan targeted (#1460); a legacy
+        // plan with no rootPrefixes falls back to the single primary root.
+        rootPrefixes: consumed.rootPrefixes,
       });
     } catch (error) {
       // Nothing was published: the staging directory is already gone and the
@@ -449,30 +456,49 @@ export async function POST(
       receiptDigest: result.receiptSha256,
     });
 
-    try {
-      const db = getDbInstance();
-      upsertSkillInstallation(db, {
-        worktreeId: worktree.id,
-        receipt: consumed.receipt,
-        receiptSha256: result.receiptSha256,
-        operationId: entry.operationId,
-        installedAt: entry.fsCommittedAt ?? Date.now(),
-      });
-      entry = transitionSkillOperation(entry, 'INDEXED');
-      entry = transitionSkillOperation(entry, 'SUCCEEDED', { error: null });
-      recordAuditSafely(entry, 'succeeded');
-    } catch (error) {
-      // The rename already landed. Reporting this as a failed install would
-      // contradict what the user can see on disk, so the operation is handed to
-      // #1234 reconciliation instead of being rolled back.
+    if (result.reconciling) {
+      // The primary root committed but a secondary root's rename did not: the
+      // install is on disk and usable for the primary Agent, and #1234
+      // reconciliation converges the remaining root(s) forward from the primary
+      // (#1460). Indexing is deferred to that pass so the list does not claim a
+      // root that is not yet present.
       entry = transitionSkillOperation(entry, 'FAILED_RECONCILABLE', {
-        error: { code: 'SKILL_INSTALL_INDEX_FAILED', message: messageOf(error) },
+        error: {
+          code: 'SKILL_INSTALL_SECONDARY_ROOT_PENDING',
+          message: 'a secondary install root was not written',
+        },
       });
       recordAuditSafely(entry, 'failed');
-      logger.error('skill-install-index-failed', {
+      logger.warn('skill-install-secondary-root-pending', {
         operationId: entry.operationId,
-        error: redactSkillOperationText(messageOf(error)),
+        pendingRoots: result.pendingRoots.join(','),
       });
+    } else {
+      try {
+        const db = getDbInstance();
+        upsertSkillInstallation(db, {
+          worktreeId: worktree.id,
+          receipt: consumed.receipt,
+          receiptSha256: result.receiptSha256,
+          operationId: entry.operationId,
+          installedAt: entry.fsCommittedAt ?? Date.now(),
+        });
+        entry = transitionSkillOperation(entry, 'INDEXED');
+        entry = transitionSkillOperation(entry, 'SUCCEEDED', { error: null });
+        recordAuditSafely(entry, 'succeeded');
+      } catch (error) {
+        // The rename already landed. Reporting this as a failed install would
+        // contradict what the user can see on disk, so the operation is handed to
+        // #1234 reconciliation instead of being rolled back.
+        entry = transitionSkillOperation(entry, 'FAILED_RECONCILABLE', {
+          error: { code: 'SKILL_INSTALL_INDEX_FAILED', message: messageOf(error) },
+        });
+        recordAuditSafely(entry, 'failed');
+        logger.error('skill-install-index-failed', {
+          operationId: entry.operationId,
+          error: redactSkillOperationText(messageOf(error)),
+        });
+      }
     }
 
     const response: SkillInstallResponse = {
@@ -481,6 +507,7 @@ export async function POST(
         skillId: consumed.receipt.skill_id,
         version: consumed.receipt.version,
         installRoot: result.installRoot,
+        installRoots: result.installRoots,
         receipt: {
           path: result.receiptPath,
           sha256: result.receiptSha256,
@@ -561,6 +588,7 @@ function answerReplay(
           skillId: installation.skillId,
           version: installation.version,
           installRoot: installation.installRoot,
+          installRoots: installation.installRoots,
           receipt: {
             path: `${installation.installRoot}/${SKILL_RECEIPT_FILENAME}`,
             sha256: installation.receiptSha256,

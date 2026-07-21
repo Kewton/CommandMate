@@ -103,6 +103,15 @@ function formatList(label: string, values: readonly string[]): string {
   return `${label}${values.length > 0 ? values.join(', ') : '(none)'}`;
 }
 
+/**
+ * Render the install root(s). A dual-root install (#1460) lists every root so
+ * the user sees the package lands for both Codex and Claude; a single-root plan
+ * reads exactly as before.
+ */
+export function formatInstallRoots(roots: readonly string[] | undefined, primary: string): string {
+  return roots && roots.length > 1 ? roots.join(', ') : primary;
+}
+
 /** The install preview: what lands, where, at what risk, and what stands in the way. */
 export function formatInstallPlan(plan: SkillInstallPlan): string {
   const { skill, target, stats } = plan;
@@ -112,7 +121,7 @@ export function formatInstallPlan(plan: SkillInstallPlan): string {
     '',
     `Target:       ${target.repositoryName} / ${target.worktreeName} (${target.worktreeId})`,
     `Branch:       ${target.branch ?? `(${target.headState})`}${target.workingTreeDirty ? ' [working tree dirty]' : ''}`,
-    `Install root: ${target.installRoot}`,
+    `Install root: ${formatInstallRoots(target.installRoots, target.installRoot)}`,
     `Risk:         ${skill.effectiveRisk} — ${skill.riskRationale}`,
     `Compatibility: ${skill.compatibility.commandmate.status} — ${skill.compatibility.commandmate.message}`,
     formatList('Permissions:  ', skill.declaredPermissions),

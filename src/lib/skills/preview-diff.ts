@@ -24,10 +24,11 @@ import { lstatSync, readFileSync, readdirSync } from 'fs';
 import path from 'path';
 import { execFileAsync, execGitCommand } from '@/lib/git/git-exec';
 import {
-  SKILL_FILE_MAX_SIZE,
   SKILL_ID_MAX_LENGTH,
   SKILL_ID_PATTERN,
   SKILL_INSTALL_ROOT_PREFIX,
+  SKILL_INSTALL_ROOT_PREFIXES,
+  SKILL_FILE_MAX_SIZE,
 } from '@/lib/skills/constants';
 import { computeSha256Hex } from '@/lib/skills/integrity';
 import { isSkillInstallStagingPath } from '@/lib/skills/operation-store';
@@ -217,35 +218,78 @@ export interface SkillPreviewDiff {
 // Paths
 // =============================================================================
 
-/** Repository-relative install root for a validated Skill ID. */
+/** Repository-relative install root for a validated Skill ID under one root prefix (#1460). */
+export function skillInstallRootFor(rootPrefix: string, skillId: string): string {
+  return `${rootPrefix}/${skillId}`;
+}
+
+/** Repository-relative install root under the primary `.agents/skills` prefix. */
 export function skillInstallRoot(skillId: string): string {
-  return `${SKILL_INSTALL_ROOT_PREFIX}/${skillId}`;
+  return skillInstallRootFor(SKILL_INSTALL_ROOT_PREFIX, skillId);
 }
 
 /**
- * Absolute install root inside a server-resolved worktree.
+ * Absolute install root for a Skill ID under one root prefix (#1460).
  *
  * The ID is re-checked against the slug grammar rather than only comparing the
- * joined result: `path.join` normalizes `..` away, so `.agents/skills/../x`
- * and `.agents/x` compare equal and a containment check alone would accept an
- * ID that walked out of the Skills directory. Rejecting the grammar first makes
- * traversal unrepresentable; the containment check then covers the rest.
+ * joined result: `path.join` normalizes `..` away, so `<prefix>/../x` and the
+ * sibling `x` compare equal and a containment check alone would accept an ID
+ * that walked out of the Skills directory. Rejecting the grammar first makes
+ * traversal unrepresentable; the containment check then covers the rest. The
+ * containment check is applied per root prefix, so the `.claude/skills` root
+ * gets exactly the escape rejection the `.agents/skills` root always had.
  */
-export function resolveSkillInstallRoot(worktreePath: string, skillId: string): string {
+export function resolveSkillInstallRootFor(
+  worktreePath: string,
+  rootPrefix: string,
+  skillId: string
+): string {
   if (!SKILL_ID_PATTERN.test(skillId) || skillId.length > SKILL_ID_MAX_LENGTH) {
     throw new Error('Skill ID is not a valid install root segment');
   }
   const root = path.resolve(worktreePath);
-  const target = path.resolve(root, SKILL_INSTALL_ROOT_PREFIX, skillId);
+  const target = path.resolve(root, rootPrefix, skillId);
   const relative = path.relative(root, target);
   if (
-    relative !== path.join(SKILL_INSTALL_ROOT_PREFIX, skillId) ||
+    relative !== path.join(rootPrefix, skillId) ||
     relative.startsWith('..') ||
     path.isAbsolute(relative)
   ) {
     throw new Error('Skill install root escapes the worktree');
   }
   return target;
+}
+
+/** Absolute install root under the primary `.agents/skills` prefix. */
+export function resolveSkillInstallRoot(worktreePath: string, skillId: string): string {
+  return resolveSkillInstallRootFor(worktreePath, SKILL_INSTALL_ROOT_PREFIX, skillId);
+}
+
+/** One resolved install root: its prefix, repository-relative path and absolute path. */
+export interface ResolvedSkillInstallRoot {
+  prefix: string;
+  rel: string;
+  abs: string;
+}
+
+/**
+ * Resolve every root a Skill would be placed into, primary first (#1460).
+ *
+ * Each root is containment-checked independently, so a malformed prefix or ID is
+ * rejected before any of them is used. The default is the full product set
+ * ({@link SKILL_INSTALL_ROOT_PREFIXES}); callers migrating from the single-root
+ * API pass a narrower set.
+ */
+export function resolveSkillInstallRoots(
+  worktreePath: string,
+  skillId: string,
+  rootPrefixes: readonly string[] = SKILL_INSTALL_ROOT_PREFIXES
+): ResolvedSkillInstallRoot[] {
+  return rootPrefixes.map((prefix) => ({
+    prefix,
+    rel: skillInstallRootFor(prefix, skillId),
+    abs: resolveSkillInstallRootFor(worktreePath, prefix, skillId),
+  }));
 }
 
 // =============================================================================
@@ -588,6 +632,8 @@ export function buildUnifiedDiff(
 interface BuildPreviewInput {
   skillId: string;
   worktreePath: string;
+  /** Root prefix this diff is computed for; defaults to the primary `.agents/skills` (#1460). */
+  installRootPrefix?: string;
   /** Everything the install would write, receipt included. */
   plannedFiles: readonly SkillPlannedFile[];
   existing: SkillExistingTree;
@@ -632,7 +678,10 @@ function classify(
  * unaware of it.
  */
 export function buildSkillPreviewDiff(input: BuildPreviewInput): SkillPreviewDiff {
-  const installRoot = skillInstallRoot(input.skillId);
+  const installRoot = skillInstallRootFor(
+    input.installRootPrefix ?? SKILL_INSTALL_ROOT_PREFIX,
+    input.skillId
+  );
   const plannedByPath = new Map(input.plannedFiles.map((file) => [file.relativePath, file]));
   const existingByPath = new Map(input.existing.files.map((file) => [file.path, file]));
 

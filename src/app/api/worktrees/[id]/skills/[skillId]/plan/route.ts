@@ -21,6 +21,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createLogger } from '@/lib/logger';
 import { resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
+import { SKILL_INSTALL_ROOT_PREFIXES } from '@/lib/skills/constants';
 import { getSkillCatalog } from '@/lib/skills/catalog-client';
 import {
   findSkillCatalogEntry,
@@ -232,6 +233,9 @@ export async function POST(
       snapshotId: handle.snapshotId,
       compatibility: selected.compatibility,
       riskAcknowledged: parsed.body.acknowledgeRisk,
+      // Place the package into every discovery root so the install is usable by
+      // both Claude (.claude/skills) and Codex (.agents/skills) (#1460).
+      targets: SKILL_INSTALL_ROOT_PREFIXES,
     });
 
     // Ownership of the snapshot reference has passed to the plan record.

@@ -80,6 +80,39 @@ export const RESERVED_SKILL_IDS: readonly string[] = [
 /** Skill payload root inside a worktree, resolved from a registered worktree ID. */
 export const SKILL_INSTALL_ROOT_PREFIX = '.agents/skills';
 
+/**
+ * Claude Code Skill discovery root inside a worktree (Issue #1460).
+ *
+ * The counterpart of {@link SKILL_INSTALL_ROOT_PREFIX}: Claude reads
+ * `.claude/skills/<id>/SKILL.md` (#343) where Codex reads `.agents/skills`
+ * (#1165). Placing a package into both makes the same install discoverable by
+ * both Agents.
+ */
+export const SKILL_CLAUDE_INSTALL_ROOT_PREFIX = '.claude/skills';
+
+/**
+ * Ordered set of roots an official Skill is placed into by default (#1460).
+ *
+ * Order is significant. `.agents/skills` is first and is the *primary* root: it
+ * remains the single atomic-rename commit point and the backward-compatible
+ * anchor every legacy single-root receipt names. `.claude/skills` is a
+ * *secondary* root, converged forward from the primary by reconciliation if a
+ * crash lands only one of the two renames. Adding an Agent (Gemini, OpenCode …)
+ * is a one-line addition here.
+ */
+export const SKILL_INSTALL_ROOT_PREFIXES: readonly string[] = [
+  SKILL_INSTALL_ROOT_PREFIX,
+  SKILL_CLAUDE_INSTALL_ROOT_PREFIX,
+];
+
+/** The primary root that stays the commit point and the receipt's `install_root`. */
+export const SKILL_PRIMARY_INSTALL_ROOT_PREFIX = SKILL_INSTALL_ROOT_PREFIX;
+
+/** Whether a repository-relative root prefix is one CommandMate installs into. */
+export function isKnownSkillInstallRootPrefix(prefix: string): boolean {
+  return SKILL_INSTALL_ROOT_PREFIXES.includes(prefix);
+}
+
 /** Manifest filename, placed at the Skill root next to SKILL.md. */
 export const SKILL_MANIFEST_FILENAME = 'commandmate.skill.yaml';
 

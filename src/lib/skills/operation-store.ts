@@ -18,7 +18,11 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
-import { SKILL_INSTALL_ROOT_PREFIX, SKILL_STAGING_DIRNAME } from '@/lib/skills/constants';
+import {
+  SKILL_INSTALL_ROOT_PREFIX,
+  SKILL_INSTALL_ROOT_PREFIXES,
+  SKILL_STAGING_DIRNAME,
+} from '@/lib/skills/constants';
 import { ensureConfigDir } from '@/cli/utils/install-context';
 
 /** Directory under the config root that holds all Skill operation state. */
@@ -74,28 +78,40 @@ export function getSkillPackageStagingRoot(options: SkillOperationStoreOptions =
 }
 
 /**
- * Worktree-local install commit staging root.
+ * Worktree-local install commit staging root, under one install root prefix.
+ *
+ * Each install root gets its own staging namespace so the atomic rename stays on
+ * the same filesystem as *that* root's destination (#1460). The default is the
+ * primary `.agents/skills` root, preserving the single-root callers.
  *
  * @param worktreePath - Absolute path of a *server-resolved* worktree. Callers
  *   must never pass a client-supplied path.
+ * @param rootPrefix - Install root prefix; defaults to the primary root.
  */
-export function getSkillInstallStagingRoot(worktreePath: string): string {
-  return join(worktreePath, SKILL_INSTALL_ROOT_PREFIX, SKILL_STAGING_DIRNAME);
+export function getSkillInstallStagingRoot(
+  worktreePath: string,
+  rootPrefix: string = SKILL_INSTALL_ROOT_PREFIX
+): string {
+  return join(worktreePath, rootPrefix, SKILL_STAGING_DIRNAME);
 }
 
-/** Repository-relative form of the reserved install staging root. */
+/** Repository-relative form of the reserved install staging root (primary). */
 export const SKILL_INSTALL_STAGING_REL_PATH = `${SKILL_INSTALL_ROOT_PREFIX}/${SKILL_STAGING_DIRNAME}`;
 
+/** Repository-relative staging namespace under every install root prefix (#1460). */
+export const SKILL_INSTALL_STAGING_REL_PATHS: readonly string[] = SKILL_INSTALL_ROOT_PREFIXES.map(
+  (prefix) => `${prefix}/${SKILL_STAGING_DIRNAME}`
+);
+
 /**
- * Whether a repository-relative path belongs to the reserved install staging
- * namespace. Slash-command loading, installed status and diff previews must
- * treat a true result as "not payload".
+ * Whether a repository-relative path belongs to a reserved install staging
+ * namespace under any install root. Slash-command loading, installed status and
+ * diff previews must treat a true result as "not payload".
  */
 export function isSkillInstallStagingPath(relativePath: string): boolean {
   const normalized = relativePath.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '');
-  return (
-    normalized === SKILL_INSTALL_STAGING_REL_PATH ||
-    normalized.startsWith(`${SKILL_INSTALL_STAGING_REL_PATH}/`)
+  return SKILL_INSTALL_STAGING_REL_PATHS.some(
+    (rel) => normalized === rel || normalized.startsWith(`${rel}/`)
   );
 }
 

@@ -71,7 +71,7 @@ import {
 } from '@/lib/skills/snapshot-store';
 import { getSkillInstallation, listSkillInstallations } from '@/lib/skills/installed-state';
 import { listSkillOperationAudit } from '@/lib/skills/operation-audit';
-import { loadAgentsSkills } from '@/lib/slash-commands';
+import { loadAgentsSkills, loadSkills } from '@/lib/slash-commands';
 import { validateSkillInstallReceipt } from '@/lib/skills/schema';
 import type { Worktree } from '@/types/models';
 import {
@@ -306,18 +306,31 @@ describe('Skill MVP: Catalog → install → discovery → uninstall', () => {
     expect(audit[0].operation).toBe('install');
   });
 
-  it('surfaces the installed Skill to Agent discovery from .agents/skills', async () => {
+  it('surfaces the installed Skill to both Agent discovery paths (#1460)', async () => {
     expect(await loadAgentsSkills(worktreeDir)).toHaveLength(0);
+    expect(await loadSkills(worktreeDir)).toHaveLength(0);
 
     for (const skill of MVP_SKILLS) await installViaApi(skill.id);
 
-    const discovered = await loadAgentsSkills(worktreeDir);
-    expect(discovered.map((command) => command.name).sort()).toEqual(
+    // Codex reads .agents/skills.
+    const codex = await loadAgentsSkills(worktreeDir);
+    expect(codex.map((command) => command.name).sort()).toEqual(
       MVP_SKILLS.map((skill) => skill.name).sort()
     );
     for (const skill of MVP_SKILLS) {
-      const entry = discovered.find((command) => command.name === skill.name);
+      const entry = codex.find((command) => command.name === skill.name);
       expect(entry?.filePath).toContain(path.join('.agents', 'skills', skill.id, 'SKILL.md'));
+    }
+
+    // Claude reads .claude/skills (#343): the same install is now discoverable
+    // there too, which is the whole point of #1460.
+    const claude = await loadSkills(worktreeDir);
+    expect(claude.map((command) => command.name).sort()).toEqual(
+      MVP_SKILLS.map((skill) => skill.name).sort()
+    );
+    for (const skill of MVP_SKILLS) {
+      const entry = claude.find((command) => command.name === skill.name);
+      expect(entry?.filePath).toContain(path.join('.claude', 'skills', skill.id, 'SKILL.md'));
     }
   });
 
@@ -345,7 +358,7 @@ describe('Skill MVP: Catalog → install → discovery → uninstall', () => {
 // =============================================================================
 
 describe('Skill MVP: change containment', () => {
-  it('changes nothing in the worktree outside .agents/skills/<id>', async () => {
+  it('changes nothing in the worktree outside the skill discovery roots', async () => {
     const before = snapshotTree(worktreeDir);
     for (const skill of MVP_SKILLS) await installViaApi(skill.id);
     const after = snapshotTree(worktreeDir);
@@ -354,14 +367,18 @@ describe('Skill MVP: change containment', () => {
     expect(delta.removed).toEqual([]);
     expect(delta.changed).toEqual([]);
 
-    const allowedPrefixes = MVP_SKILLS.map((skill) => `.agents/skills/${skill.id}/`);
+    // The install lands in both discovery roots (#1460): Codex and Claude.
+    const rootPrefixes = ['.agents/skills', '.claude/skills'];
+    const allowedPrefixes = MVP_SKILLS.flatMap((skill) =>
+      rootPrefixes.map((root) => `${root}/${skill.id}/`)
+    );
     const outside = delta.added.filter(
       (file) => !allowedPrefixes.some((prefix) => file.startsWith(prefix))
     );
     expect(outside).toEqual([]);
 
-    // Every added file is either a declared payload file or the one managed
-    // metadata file the contract names.
+    // Every added file — in either root — is a declared payload file or the one
+    // managed metadata file the contract names; both roots get the same set.
     for (const skill of MVP_SKILLS) {
       const receipt = JSON.parse(
         readFileSync(
@@ -369,14 +386,16 @@ describe('Skill MVP: change containment', () => {
           'utf-8'
         )
       ) as { files: { path: string }[] };
-      const declared = new Set([
-        ...receipt.files.map((file) => `.agents/skills/${skill.id}/${file.path}`),
-        `.agents/skills/${skill.id}/${SKILL_RECEIPT_FILENAME}`,
-      ]);
-      const forSkill = delta.added.filter((file) =>
-        file.startsWith(`.agents/skills/${skill.id}/`)
-      );
-      expect(forSkill.filter((file) => !declared.has(file))).toEqual([]);
+      for (const root of rootPrefixes) {
+        const declared = new Set([
+          ...receipt.files.map((file) => `${root}/${skill.id}/${file.path}`),
+          `${root}/${skill.id}/${SKILL_RECEIPT_FILENAME}`,
+        ]);
+        const forSkill = delta.added.filter((file) => file.startsWith(`${root}/${skill.id}/`));
+        expect(forSkill.filter((file) => !declared.has(file))).toEqual([]);
+        // Both roots must actually receive the full package (#1460).
+        expect(forSkill.length).toBe(declared.size);
+      }
     }
   });
 
@@ -384,8 +403,10 @@ describe('Skill MVP: change containment', () => {
     for (const skill of MVP_SKILLS) await installViaApi(skill.id);
 
     const status = git(worktreeDir, ['status', '--porcelain']);
-    const lines = status.split('\n').filter((line) => line.length > 0);
-    expect(lines).toEqual(['?? .agents/']);
+    const lines = status.split('\n').filter((line) => line.length > 0).sort();
+    // The install lands in both discovery roots: `.agents/skills` (Codex) and
+    // `.claude/skills` (Claude), each untracked and self-contained (#1460).
+    expect(lines).toEqual(['?? .agents/', '?? .claude/']);
 
     // Nothing tracked was modified: the diff against HEAD is empty.
     expect(git(worktreeDir, ['diff', 'HEAD', '--name-only'])).toBe('');

@@ -114,6 +114,8 @@ describe('migration v46: fresh DB end state', () => {
       'operation_id',
       'installed_at',
       'updated_at',
+      // Added by v47 (#1460); the full migration chain runs through it here.
+      'install_roots',
     ]);
   });
 
@@ -180,7 +182,9 @@ describe('migration v46: upgrading a v45 database', () => {
     runMigrations(db);
 
     const after = db.prepare('SELECT * FROM skill_installations WHERE id = ?').get('install-live');
-    expect(after).toEqual(before);
+    // v47 (#1460) adds a nullable install_roots column; every value carried by
+    // v46 is still intact, which is what this test guards.
+    expect(after).toMatchObject(before as Record<string, unknown>);
   });
 
   it('frees the (worktree, skill) pair a swept row was holding', () => {

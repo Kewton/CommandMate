@@ -43,6 +43,7 @@ import {
   SKILL_ID_MAX_LENGTH,
   SKILL_ID_PATTERN,
   SKILL_INSTALL_ROOT_PREFIX,
+  SKILL_INSTALL_ROOT_PREFIXES,
   SKILL_KEYWORD_MAX_LENGTH,
   SKILL_KEYWORDS_MAX_COUNT,
   SKILL_MANIFEST_FILENAME,
@@ -147,6 +148,7 @@ const RECEIPT_FIELDS = [
   'skill_id',
   'version',
   'install_root',
+  'install_roots',
   'source',
   'artifact',
   'files',
@@ -209,7 +211,7 @@ export const SKILL_OPTIONAL_FIELDS = {
   catalog: [],
   catalogEntry: ['homepage', 'keywords'],
   catalogVersion: [],
-  receipt: [],
+  receipt: ['install_roots'],
   provider: ['url', 'contact'],
   compatibility: [],
   agentCompatibility: [],
@@ -1461,6 +1463,14 @@ export function validateSkillInstallReceipt(
     errors.push(skillError(SkillContractErrorCode.VERSION_INVALID, '/version', 'version must be SemVer 2.0'));
   }
   const installRoot = readString(obj, 'install_root', '', errors, { maxLength: 200 });
+  // Optional (#1460): absent means a single-root install rooted at install_root.
+  const installRootsPresent = obj['install_roots'] !== undefined;
+  const installRoots = installRootsPresent
+    ? readStringList(obj, 'install_roots', '', errors, {
+        maxItems: SKILL_INSTALL_ROOT_PREFIXES.length,
+        maxLength: 200,
+      })
+    : undefined;
   const source = readSource(obj, '', errors);
   const artifact = readReceiptArtifact(obj, '', errors);
   const files = readInstalledFiles(obj, '', errors);
@@ -1506,6 +1516,48 @@ export function validateSkillInstallReceipt(
         )
       );
     }
+  }
+
+  // Multi-root receipt (#1460): if present, install_roots must be the ordered set
+  // of known-prefix roots for this skill, primary first and equal to install_root.
+  if (idResult.ok && installRoot !== undefined && installRoots !== undefined) {
+    const allowed = SKILL_INSTALL_ROOT_PREFIXES.map((prefix) => `${prefix}/${idResult.value}`);
+    if (installRoots.length === 0) {
+      errors.push(
+        skillError(SkillContractErrorCode.INCONSISTENT_VALUE, '/install_roots', 'install_roots must not be empty')
+      );
+    } else if (installRoots[0] !== installRoot) {
+      errors.push(
+        skillError(
+          SkillContractErrorCode.INCONSISTENT_VALUE,
+          '/install_roots/0',
+          'install_roots[0] must equal install_root (the primary root)',
+          { expected: installRoot }
+        )
+      );
+    }
+    const seen = new Set<string>();
+    installRoots.forEach((root, index) => {
+      if (!allowed.includes(root)) {
+        errors.push(
+          skillError(
+            SkillContractErrorCode.INCONSISTENT_VALUE,
+            `/install_roots/${index}`,
+            'install_roots entry must be a known repository-relative skill root'
+          )
+        );
+      }
+      if (seen.has(root)) {
+        errors.push(
+          skillError(
+            SkillContractErrorCode.INCONSISTENT_VALUE,
+            `/install_roots/${index}`,
+            'install_roots must not repeat a root'
+          )
+        );
+      }
+      seen.add(root);
+    });
   }
 
   if (idResult.ok && version !== undefined && artifact !== undefined) {
@@ -1562,6 +1614,7 @@ export function validateSkillInstallReceipt(
     skill_id: idResult.value,
     version,
     install_root: installRoot,
+    ...(installRoots !== undefined ? { install_roots: installRoots } : {}),
     source,
     artifact,
     files,

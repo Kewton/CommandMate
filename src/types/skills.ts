@@ -247,8 +247,23 @@ export interface SkillInstallReceipt {
   schema_version: number;
   skill_id: string;
   version: string;
-  /** Repository-relative install root, always `.agents/skills/<skill-id>`. */
+  /**
+   * Repository-relative primary install root, always `.agents/skills/<skill-id>`.
+   *
+   * Kept for backward compatibility and as the primary/commit-point anchor. When
+   * a package is placed into more than one root (#1460), the full ordered set is
+   * in {@link install_roots} and this equals its first element.
+   */
   install_root: string;
+  /**
+   * Every repository-relative root this package was placed into, primary first
+   * (#1460), e.g. `['.agents/skills/<id>', '.claude/skills/<id>']`. Omitted for a
+   * single-root install, where {@link install_root} is the sole root; a reader
+   * treats its absence as `[install_root]`. The payload written to every root is
+   * byte-identical, so the {@link files} inventory and this receipt's own digest
+   * describe each root equally.
+   */
+  install_roots?: string[];
   source: SkillSourceRef;
   artifact: SkillReceiptArtifact;
   files: SkillInstalledFile[];

@@ -263,6 +263,8 @@ export interface SkillInstallPlan {
     workingTreeDirty: boolean;
     /** Repository-relative; the server never serves a machine-absolute path. */
     installRoot: string;
+    /** Every root the package is placed into, primary first (#1460). */
+    installRoots?: string[];
     existingInstall: { version: string; receiptDigest: string } | null;
   };
   skill: {
@@ -324,6 +326,7 @@ export interface SkillInstallResponse {
     skillId: string;
     version: string;
     installRoot: string;
+    installRoots?: string[];
     files?: Array<{ path: string }>;
   } | null;
 }

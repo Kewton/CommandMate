@@ -45,6 +45,7 @@ import { TOKEN_WARNING } from '../utils/command-helpers';
 import {
   formatCatalogFreshness,
   formatInstallPlan,
+  formatInstallRoots,
   formatSkillDetail,
   formatSkillTable,
   formatUninstallPlan,
@@ -255,7 +256,7 @@ async function installSkill(skillId: string, options: SkillInstallOptions): Prom
   }
 
   const outcome = await resolveWriteConfirmation(
-    `Install ${plan.skill.id} ${plan.skill.version} into ${plan.target.worktreeId} (${plan.target.installRoot})?`,
+    `Install ${plan.skill.id} ${plan.skill.version} into ${plan.target.worktreeId} (${formatInstallRoots(plan.target.installRoots, plan.target.installRoot)})?`,
     options
   );
   if (outcome === 'non_interactive') {
@@ -288,7 +289,7 @@ async function installSkill(skillId: string, options: SkillInstallOptions): Prom
     console.log(JSON.stringify(body, null, 2));
   } else {
     console.log(
-      `Installed ${body.install?.skillId ?? target.skillId} ${body.install?.version ?? plan.skill.version} into ${body.install?.installRoot ?? plan.target.installRoot}`
+      `Installed ${body.install?.skillId ?? target.skillId} ${body.install?.version ?? plan.skill.version} into ${formatInstallRoots(body.install?.installRoots, body.install?.installRoot ?? plan.target.installRoot)}`
     );
   }
 

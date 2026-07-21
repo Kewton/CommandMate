@@ -38,8 +38,11 @@ import {
   SKILL_INSTALL_ROOT_PREFIX,
 } from '@/lib/skills/constants';
 import { computeSha256Hex, digestMatches } from '@/lib/skills/integrity';
-import { SKILL_RECEIPT_FILENAME } from '@/lib/skills/install-plan';
-import { readExistingSkillTree, resolveSkillInstallRoot } from '@/lib/skills/preview-diff';
+import {
+  SKILL_RECEIPT_FILENAME,
+  receiptInstallRoots,
+} from '@/lib/skills/install-plan';
+import { readExistingSkillTree, resolveSkillInstallRootFor } from '@/lib/skills/preview-diff';
 import {
   assessSkillUninstall,
   type SkillUninstallAssessment,
@@ -127,11 +130,20 @@ function fail(
  * walked out of the Skills directory.
  */
 export function resolveSkillUninstallTarget(worktreePath: string, skillId: string): string {
+  return resolveSkillUninstallTargetFor(worktreePath, SKILL_INSTALL_ROOT_PREFIX, skillId);
+}
+
+/** Absolute install root for a Skill ID under one root prefix (#1460). */
+export function resolveSkillUninstallTargetFor(
+  worktreePath: string,
+  rootPrefix: string,
+  skillId: string
+): string {
   if (!SKILL_ID_PATTERN.test(skillId) || skillId.length > SKILL_ID_MAX_LENGTH) {
     fail(SkillUninstallErrorCode.TARGET_UNSAFE, { reason: 'skill-id' });
   }
   try {
-    return resolveSkillInstallRoot(worktreePath, skillId);
+    return resolveSkillInstallRootFor(worktreePath, rootPrefix, skillId);
   } catch {
     return fail(SkillUninstallErrorCode.TARGET_UNSAFE, { reason: 'install-root' });
   }
@@ -146,7 +158,8 @@ export function resolveSkillUninstallTarget(worktreePath: string, skillId: strin
  */
 export function assertSkillUninstallAncestors(
   worktreeRealPath: string,
-  worktreePath: string
+  worktreePath: string,
+  rootPrefix: string = SKILL_INSTALL_ROOT_PREFIX
 ): void {
   let resolved: string;
   try {
@@ -159,7 +172,7 @@ export function assertSkillUninstallAncestors(
   }
 
   let walked = worktreeRealPath;
-  for (const segment of SKILL_INSTALL_ROOT_PREFIX.split('/')) {
+  for (const segment of rootPrefix.split('/')) {
     walked = path.join(walked, segment);
     let stats;
     try {
@@ -380,7 +393,10 @@ export interface SkillUninstallRetainedPath {
 
 /** What the delete produced. */
 export interface SkillUninstallApplyResult {
+  /** Primary repository-relative install root (`.agents/skills/<id>`). */
   installRoot: string;
+  /** Every recorded root the uninstall acted on, primary first (#1460). */
+  installRoots: string[];
   version: string;
   removedFiles: SkillUninstallRemovedFile[];
   /** Repository-relative directories removed because they became empty. */
@@ -388,7 +404,7 @@ export interface SkillUninstallApplyResult {
   /** Directories that could not be collected, so the user knows what is left. */
   retained: SkillUninstallRetainedPath[];
   receiptRemoved: boolean;
-  /** The install root itself is gone. */
+  /** Every recorded root's install directory is gone. */
   fullyRemoved: boolean;
 }
 
@@ -405,34 +421,113 @@ export interface SkillUninstallApplyResult {
 export function applySkillUninstall(
   input: SkillUninstallApplyInput
 ): SkillUninstallApplyResult {
-  const installRootAbs = resolveSkillUninstallTarget(input.worktreePath, input.skillId);
+  // The primary root anchors the plan: its receipt names every root, and its
+  // tree hash and receipt digest are what the plan bound the token to.
+  const primaryAbs = resolveSkillUninstallTarget(input.worktreePath, input.skillId);
   assertSkillUninstallAncestors(input.worktreeRealPath, input.worktreePath);
 
-  const assessment: SkillUninstallAssessment = assessSkillUninstall(
-    installRootAbs,
-    input.skillId,
-    { existing: readExistingSkillTree(installRootAbs) }
-  );
-  if (!assessment.present) {
-    fail(SkillUninstallErrorCode.NOT_INSTALLED, undefined, assessment.blockers);
+  const primary: SkillUninstallAssessment = assessSkillUninstall(primaryAbs, input.skillId, {
+    existing: readExistingSkillTree(primaryAbs),
+  });
+  if (!primary.present) {
+    fail(SkillUninstallErrorCode.NOT_INSTALLED, undefined, primary.blockers);
   }
-  if (!assessment.removable || assessment.receipt === null) {
-    fail(SkillUninstallErrorCode.BLOCKED, undefined, assessment.blockers);
+  if (!primary.removable || primary.receipt === null) {
+    fail(SkillUninstallErrorCode.BLOCKED, undefined, primary.blockers);
   }
-  if (assessment.currentTreeHash !== input.expectedTreeHash) {
+  if (primary.currentTreeHash !== input.expectedTreeHash) {
     fail(SkillUninstallErrorCode.DRIFT, { reason: 'tree-hash' });
   }
-  const receipt = assessment.receipt;
-  const receiptDigest = assessment.receiptDigest;
+  const receipt = primary.receipt;
+  const receiptDigest = primary.receiptDigest;
   if (receiptDigest === null || !digestMatches(receiptDigest, input.expectedReceiptDigest)) {
     fail(SkillUninstallErrorCode.DRIFT, { reason: 'receipt-digest' });
   }
 
+  // Resolve and assess every recorded root before deleting anything (#1460). An
+  // absent root is already gone and skipped; any present root that is not
+  // provably managed-and-unchanged blocks the whole operation, so "zero-delete
+  // on ambiguity" holds across roots, not just within one.
+  const installRoots = receiptInstallRoots(receipt);
+  const planned: Array<{ abs: string; assessment: SkillUninstallAssessment }> = [];
+  for (const rootRel of installRoots) {
+    const rootPrefix = rootRel.slice(0, Math.max(0, rootRel.length - input.skillId.length - 1));
+    const abs =
+      rootPrefix === SKILL_INSTALL_ROOT_PREFIX
+        ? primaryAbs
+        : resolveSkillUninstallTargetFor(input.worktreePath, rootPrefix, input.skillId);
+    assertSkillUninstallAncestors(input.worktreeRealPath, input.worktreePath, rootPrefix);
+    const assessment =
+      rootPrefix === SKILL_INSTALL_ROOT_PREFIX
+        ? primary
+        : assessSkillUninstall(abs, input.skillId, {
+            existing: readExistingSkillTree(abs),
+            rootPrefix,
+          });
+    // A recorded root already removed is not an error: convergence may have
+    // deleted it, or a legacy single-root receipt never wrote it.
+    if (!assessment.present) continue;
+    if (!assessment.removable || assessment.receipt === null) {
+      fail(SkillUninstallErrorCode.BLOCKED, undefined, assessment.blockers);
+    }
+    // Every root holds the byte-identical payload, so each must match the same
+    // tree hash and receipt digest the plan bound; anything else is drift.
+    if (assessment.currentTreeHash !== input.expectedTreeHash) {
+      fail(SkillUninstallErrorCode.DRIFT, { reason: 'tree-hash' });
+    }
+    if (
+      assessment.receiptDigest === null ||
+      !digestMatches(assessment.receiptDigest, input.expectedReceiptDigest)
+    ) {
+      fail(SkillUninstallErrorCode.DRIFT, { reason: 'receipt-digest' });
+    }
+    planned.push({ abs, assessment });
+  }
+
+  input.onCommitPoint?.();
+
+  const removedFiles: SkillUninstallRemovedFile[] = [];
+  const removedDirectories: string[] = [];
+  const retained: SkillUninstallRetainedPath[] = [];
+  let allFullyRemoved = true;
+  let primaryReceiptRemoved = false;
+
+  for (const { abs, assessment } of planned) {
+    const removed = deleteSkillInstallRoot(abs, assessment, receiptDigest);
+    removedFiles.push(...removed.removedFiles);
+    removedDirectories.push(...removed.removedDirectories);
+    retained.push(...removed.retained);
+    if (!removed.fullyRemoved) allFullyRemoved = false;
+    if (abs === primaryAbs) primaryReceiptRemoved = removed.receiptRemoved;
+  }
+
+  return {
+    installRoot: primary.installRoot,
+    installRoots,
+    version: receipt.version,
+    removedFiles,
+    removedDirectories,
+    retained,
+    receiptRemoved: primaryReceiptRemoved,
+    fullyRemoved: allFullyRemoved,
+  };
+}
+
+/** Delete every managed file in one root, receipt last. All checks already passed. */
+function deleteSkillInstallRoot(
+  installRootAbs: string,
+  assessment: SkillUninstallAssessment,
+  receiptDigest: string
+): {
+  removedFiles: SkillUninstallRemovedFile[];
+  removedDirectories: string[];
+  retained: SkillUninstallRetainedPath[];
+  receiptRemoved: boolean;
+  fullyRemoved: boolean;
+} {
   const payload = assessment.entries.filter(
     (entry) => entry.disposition === 'remove' && !entry.generated
   );
-
-  input.onCommitPoint?.();
 
   const removedFiles: SkillUninstallRemovedFile[] = [];
   for (const entry of payload) {
@@ -444,9 +539,7 @@ export function applySkillUninstall(
   }
 
   const removedDirectories: string[] = [];
-  for (const relative of directoriesImpliedByReceipt(
-    payload.map((entry) => entry.relativePath)
-  )) {
+  for (const relative of directoriesImpliedByReceipt(payload.map((entry) => entry.relativePath))) {
     if (removeIfEmpty(path.join(installRootAbs, relative))) {
       removedDirectories.push(`${assessment.installRoot}/${relative}`);
     }
@@ -467,13 +560,9 @@ export function applySkillUninstall(
   }
 
   const fullyRemoved = removeIfEmpty(installRootAbs);
-  const retained: SkillUninstallRetainedPath[] = fullyRemoved
-    ? []
-    : listRetainedPaths(installRootAbs, assessment.installRoot);
+  const retained = fullyRemoved ? [] : listRetainedPaths(installRootAbs, assessment.installRoot);
 
   return {
-    installRoot: assessment.installRoot,
-    version: receipt.version,
     removedFiles,
     removedDirectories,
     retained,

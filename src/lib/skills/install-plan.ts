@@ -32,15 +32,18 @@ import type {
 import type { SkillPackageSnapshot } from '@/lib/skills/package-validator';
 import type { SkillCommandMateCompatibility } from '@/lib/skills/compatibility';
 import { canonicalizeSkillReceipt } from '@/lib/skills/schema';
-import { SKILL_SCHEMA_VERSION } from '@/lib/skills/constants';
+import {
+  SKILL_INSTALL_ROOT_PREFIX,
+  SKILL_SCHEMA_VERSION,
+} from '@/lib/skills/constants';
 import { releaseSkillSnapshot } from '@/lib/skills/snapshot-store';
 import {
   buildSkillPreviewDiff,
   findGitIgnoredPaths,
   readExistingSkillTree,
   readSkillGitTargetState,
-  resolveSkillInstallRoot,
-  skillInstallRoot,
+  resolveSkillInstallRootFor,
+  skillInstallRootFor,
   type SkillDiffEntry,
   type SkillDiffStats,
   type SkillGitTargetState,
@@ -188,6 +191,25 @@ export function computeSkillPlanBindingHash(binding: SkillPlanBinding): string {
 export interface SkillReceiptInput {
   snapshot: SkillPackageSnapshot;
   version: SkillCatalogVersion;
+  /**
+   * Root prefixes the package is placed into, primary first (#1460), e.g.
+   * `['.agents/skills', '.claude/skills']`. Defaults to the single primary root,
+   * which omits `install_roots` from the receipt so a single-root install stays
+   * byte-identical to a pre-#1460 one.
+   */
+  rootPrefixes?: readonly string[];
+}
+
+/**
+ * The roots a receipt records, primary first (#1460).
+ *
+ * A pre-#1460 receipt has no `install_roots`; it is read as the single root it
+ * names in `install_root`.
+ */
+export function receiptInstallRoots(receipt: SkillInstallReceipt): string[] {
+  return receipt.install_roots && receipt.install_roots.length > 0
+    ? [...receipt.install_roots]
+    : [receipt.install_root];
 }
 
 /**
@@ -211,11 +233,21 @@ export function buildSkillInstallReceipt(input: SkillReceiptInput): SkillInstall
     evidence: agent.evidence,
   }));
 
+  // Primary first; the primary root stays `install_root` for backward
+  // compatibility. `install_roots` is recorded only for a genuine multi-root
+  // install (#1460) so a single-root receipt is byte-identical to a pre-#1460 one.
+  const rootPrefixes =
+    input.rootPrefixes && input.rootPrefixes.length > 0
+      ? [...input.rootPrefixes]
+      : [SKILL_INSTALL_ROOT_PREFIX];
+  const installRoots = rootPrefixes.map((prefix) => skillInstallRootFor(prefix, snapshot.skillId));
+
   return {
     schema_version: SKILL_SCHEMA_VERSION,
     skill_id: snapshot.skillId,
     version: snapshot.version,
-    install_root: skillInstallRoot(snapshot.skillId),
+    install_root: installRoots[0],
+    ...(installRoots.length > 1 ? { install_roots: installRoots } : {}),
     source: {
       repository: version.source.repository,
       ref: version.source.ref,
@@ -270,8 +302,10 @@ export interface SkillPlanTargetDto {
   headState: SkillGitTargetState['headState'];
   headCommit: string | null;
   workingTreeDirty: boolean;
-  /** Repository-relative install root. */
+  /** Repository-relative primary install root (`.agents/skills/<id>`). */
   installRoot: string;
+  /** Every repository-relative root the package will be placed into, primary first (#1460). */
+  installRoots: string[];
   currentTreeHash: string;
   plannedTreeHash: string;
   /** Version and receipt digest of an install already present, if any. */
@@ -351,6 +385,8 @@ export interface SkillInstallPlanRecord {
   consumedAt: number | null;
   /** Server-resolved worktree path. Apply's only source of truth for where to write. */
   worktreePath: string;
+  /** Root prefixes apply must write, primary first (#1460). */
+  rootPrefixes: string[];
   receipt: SkillInstallReceipt;
   receiptBytes: Uint8Array;
   dto: SkillInstallPlanDto;
@@ -575,6 +611,12 @@ export interface CreateSkillInstallPlanInput {
   compatibility: SkillCommandMateCompatibility;
   /** The request already acknowledged a high effective risk. */
   riskAcknowledged?: boolean;
+  /**
+   * Root prefixes to place the package into, primary first (#1460). Defaults to
+   * the single primary root; the route passes the full product set so a user
+   * install lands in both `.agents/skills` and `.claude/skills`.
+   */
+  targets?: readonly string[];
   now?: number;
 }
 
@@ -592,14 +634,26 @@ export async function createSkillInstallPlan(
   const now = input.now ?? Date.now();
   const { snapshot } = input;
 
-  let installRootAbs: string;
+  const rootPrefixes =
+    input.targets && input.targets.length > 0
+      ? [...input.targets]
+      : [SKILL_INSTALL_ROOT_PREFIX];
+
+  // Every root's absolute path is derived and containment-checked up front, so a
+  // malformed target fails the plan before any tree is read (#1460).
+  let rootTargets: Array<{ prefix: string; abs: string; rel: string }>;
   try {
-    installRootAbs = resolveSkillInstallRoot(input.worktree.path, snapshot.skillId);
+    rootTargets = rootPrefixes.map((prefix) => ({
+      prefix,
+      abs: resolveSkillInstallRootFor(input.worktree.path, prefix, snapshot.skillId),
+      rel: skillInstallRootFor(prefix, snapshot.skillId),
+    }));
   } catch {
     throw new SkillPlanError(SkillPlanErrorCode.TARGET_UNSAFE);
   }
 
-  const receipt = buildSkillInstallReceipt({ snapshot, version: input.version });
+  // The receipt is byte-identical across roots and records the full root set.
+  const receipt = buildSkillInstallReceipt({ snapshot, version: input.version, rootPrefixes });
   const receiptBytes = serializeSkillInstallReceipt(receipt);
   const receiptDigest = createHash('sha256').update(receiptBytes).digest('hex');
 
@@ -622,43 +676,74 @@ export async function createSkillInstallPlan(
     },
   ];
 
-  const existing = readExistingSkillTree(installRootAbs);
-  const installedReceipt = readInstalledReceipt(existing);
-  const receiptFiles = installedReceipt
-    ? new Map(
-        [
-          ...installedReceipt.receipt.files.map(
-            (file) => [file.path, { sha256: file.sha256, executable: file.executable }] as const
-          ),
-          // The receipt does not list itself, but it is CommandMate-managed:
-          // without this the previous receipt would read as an unmanaged file
-          // and block every legitimate re-install.
-          [
-            SKILL_RECEIPT_FILENAME,
-            { sha256: installedReceipt.digest, executable: false },
-          ] as const,
-        ]
-      )
-    : null;
-
-  const installRootRel = skillInstallRoot(snapshot.skillId);
   const git = await readSkillGitTargetState(input.worktree.path);
   const gitIgnoredPaths = await findGitIgnoredPaths(
     input.worktree.path,
-    plannedFiles.map((file) => `${installRootRel}/${file.relativePath}`)
+    rootTargets.flatMap((root) =>
+      plannedFiles.map((file) => `${root.rel}/${file.relativePath}`)
+    )
   );
 
-  const preview = buildSkillPreviewDiff({
-    skillId: snapshot.skillId,
-    worktreePath: input.worktree.path,
-    plannedFiles,
-    existing,
-    receiptFiles,
-    git,
-    gitIgnoredPaths,
+  // One preview per root. The payload is identical, but each root has its own
+  // existing tree, its own receipt and its own conflicts (#1460).
+  const perRoot = rootTargets.map((root) => {
+    const existing = readExistingSkillTree(root.abs);
+    const installedReceipt = readInstalledReceipt(existing);
+    const receiptFiles = installedReceipt
+      ? new Map(
+          [
+            ...installedReceipt.receipt.files.map(
+              (file) => [file.path, { sha256: file.sha256, executable: file.executable }] as const
+            ),
+            // The receipt does not list itself, but it is CommandMate-managed:
+            // without this the previous receipt would read as an unmanaged file
+            // and block every legitimate re-install.
+            [
+              SKILL_RECEIPT_FILENAME,
+              { sha256: installedReceipt.digest, executable: false },
+            ] as const,
+          ]
+        )
+      : null;
+    const preview = buildSkillPreviewDiff({
+      skillId: snapshot.skillId,
+      worktreePath: input.worktree.path,
+      installRootPrefix: root.prefix,
+      plannedFiles,
+      existing,
+      receiptFiles,
+      git,
+      gitIgnoredPaths,
+    });
+    return { root, installedReceipt, preview };
   });
 
-  const blockers: SkillInstallPlanDto['blockers'] = preview.entries
+  // The primary root anchors the binding's tree hashes and the receipt path; the
+  // route re-reads the primary tree before spending the token.
+  const primary = perRoot[0];
+  const installRootRel = primary.root.rel;
+  const installedReceipt = primary.installedReceipt;
+  const installRoots = rootTargets.map((root) => root.rel);
+
+  const mergedEntries: SkillDiffEntry[] = perRoot
+    .flatMap((r) => [...r.preview.entries])
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const mergedStats: SkillDiffStats = perRoot.reduce(
+    (acc, r) => ({
+      added: acc.added + r.preview.stats.added,
+      modified: acc.modified + r.preview.stats.modified,
+      unchanged: acc.unchanged + r.preview.stats.unchanged,
+      conflicted: acc.conflicted + r.preview.stats.conflicted,
+      unmanaged: acc.unmanaged + r.preview.stats.unmanaged,
+      binaryFiles: acc.binaryFiles + r.preview.stats.binaryFiles,
+      truncatedFiles: acc.truncatedFiles + r.preview.stats.truncatedFiles,
+      diffBytes: acc.diffBytes + r.preview.stats.diffBytes,
+    }),
+    { added: 0, modified: 0, unchanged: 0, conflicted: 0, unmanaged: 0, binaryFiles: 0, truncatedFiles: 0, diffBytes: 0 }
+  );
+  const mergedWarnings = [...new Set(perRoot.flatMap((r) => [...r.preview.warnings]))];
+
+  const blockers: SkillInstallPlanDto['blockers'] = mergedEntries
     .filter((entry) => entry.change === 'conflict' || entry.change === 'unmanaged')
     .map((entry) => ({ code: entry.reason as string, path: entry.path }));
   if (input.compatibility.status !== 'compatible') {
@@ -680,8 +765,8 @@ export async function createSkillInstallPlan(
     snapshotId: input.snapshotId,
     branch: git.branch,
     headCommit: git.headCommit,
-    currentTreeHash: preview.currentTreeHash,
-    plannedTreeHash: preview.plannedTreeHash,
+    currentTreeHash: primary.preview.currentTreeHash,
+    plannedTreeHash: primary.preview.plannedTreeHash,
     receiptDigest,
     riskAcknowledged,
   };
@@ -696,7 +781,7 @@ export async function createSkillInstallPlan(
       ? SKILL_PLAN_HIGH_RISK_MESSAGE_KEY
       : null,
     blockers,
-    warnings: [...preview.warnings],
+    warnings: mergedWarnings,
     target: {
       worktreeId: input.worktree.id,
       worktreeName: input.worktree.name,
@@ -706,9 +791,10 @@ export async function createSkillInstallPlan(
       headState: git.headState,
       headCommit: git.headCommit,
       workingTreeDirty: git.dirty,
-      installRoot: preview.installRoot,
-      currentTreeHash: preview.currentTreeHash,
-      plannedTreeHash: preview.plannedTreeHash,
+      installRoot: primary.preview.installRoot,
+      installRoots,
+      currentTreeHash: primary.preview.currentTreeHash,
+      plannedTreeHash: primary.preview.plannedTreeHash,
       existingInstall: installedReceipt
         ? { version: installedReceipt.receipt.version, receiptDigest: installedReceipt.digest }
         : null,
@@ -719,8 +805,8 @@ export async function createSkillInstallPlan(
       sha256: receiptDigest,
       size: receiptBytes.byteLength,
     },
-    files: [...preview.entries],
-    stats: preview.stats,
+    files: mergedEntries,
+    stats: mergedStats,
   };
 
   const record: SkillInstallPlanRecord = {
@@ -731,6 +817,7 @@ export async function createSkillInstallPlan(
     expiresAt,
     consumedAt: null,
     worktreePath: input.worktree.path,
+    rootPrefixes,
     receipt,
     receiptBytes,
     dto,

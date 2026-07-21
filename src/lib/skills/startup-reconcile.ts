@@ -21,16 +21,18 @@
  * @module lib/skills/startup-reconcile
  */
 
-import { readFileSync } from 'fs';
+import { readFileSync, realpathSync } from 'fs';
 import { join } from 'path';
 import type Database from 'better-sqlite3';
 import { getWorktreeById } from '@/lib/db';
+import { createLogger } from '@/lib/logger';
 import { computeSha256Hex } from '@/lib/skills/integrity';
 import {
   SKILL_RECEIPT_FILENAME,
   parseInstalledReceipt,
 } from '@/lib/skills/install-plan';
 import {
+  completeSecondarySkillInstallRoots,
   hasCommittedSkillPayload,
   resolveSkillInstallTarget,
 } from '@/lib/skills/install-apply';
@@ -50,6 +52,8 @@ import {
   type SkillReconcileReport,
   type SkillReconcilerPorts,
 } from '@/lib/skills/operation-reconciler';
+
+const reconcileLogger = createLogger('lib/skills/startup-reconcile');
 
 /** Options for the startup assembly. Tests inject the clock, liveness and root. */
 export interface SkillStartupReconcileOptions extends SkillReconcileOptions {
@@ -119,6 +123,22 @@ export function buildSkillReconcilerPorts(
       const worktreePath = resolveWorktreePath(entry.target.worktreeId);
       if (worktreePath === null) {
         throw new Error('worktree path is unavailable for reindex');
+      }
+      // Converge any secondary root a partial multi-root install did not reach,
+      // copying the byte-identical payload forward from the committed primary
+      // (#1460). Best-effort: a root blocked by a user file must not stall the
+      // index write, which is what actually makes the install visible.
+      try {
+        completeSecondarySkillInstallRoots(
+          worktreePath,
+          realpathSync(worktreePath),
+          entry.target.skillId
+        );
+      } catch (error) {
+        reconcileLogger.warn('skill-secondary-root-convergence-failed', {
+          operationId: entry.operationId,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
       // The index row is rebuilt from the receipt that actually landed rather
       // than from the journal, which never carried the full receipt. The receipt
