@@ -51,6 +51,10 @@ export type {
   SkillUninstallReplayResponse,
   SkillUninstallResponse,
 } from '@/app/api/worktrees/[id]/skills/[skillId]/uninstall/route';
+export type {
+  InstalledSkillDto,
+  InstalledSkillListResponse,
+} from '@/app/api/worktrees/[id]/skills/route';
 
 import type {
   SkillInstallReplayResponse,
