@@ -39,6 +39,7 @@ import {
   SKILL_FILES_MAX_COUNT,
   SKILL_ID_MAX_LENGTH,
   SKILL_ID_PATTERN,
+  SKILL_INSTALL_ROOT_PREFIXES,
   SKILL_KEYWORD_MAX_LENGTH,
   SKILL_KEYWORDS_MAX_COUNT,
   SKILL_NAME_MAX_LENGTH,
@@ -371,6 +372,13 @@ export const SKILL_RECEIPT_JSON_SCHEMA: SkillJsonSchemaDocument = {
     install_root: {
       type: 'string',
       description: 'Repository-relative .agents/skills/<skill-id>. Never a machine-absolute path.',
+    },
+    install_roots: {
+      type: 'array',
+      maxItems: SKILL_INSTALL_ROOT_PREFIXES.length,
+      description:
+        'Optional (#1460): every repository-relative root the package was placed into, primary first. Absent for a single-root install.',
+      items: { type: 'string', maxLength: 200 },
     },
     source: { $ref: '#/$defs/sourceRef' },
     artifact: {

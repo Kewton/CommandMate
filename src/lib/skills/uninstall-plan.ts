@@ -36,10 +36,11 @@ import {
   parseInstalledReceipt,
   type SkillPlanActor,
 } from '@/lib/skills/install-plan';
+import { SKILL_INSTALL_ROOT_PREFIX } from '@/lib/skills/constants';
 import {
   computeSkillTreeHash,
   readExistingSkillTree,
-  skillInstallRoot,
+  skillInstallRootFor,
   type SkillExistingTree,
   type SkillGitTargetState,
 } from '@/lib/skills/preview-diff';
@@ -212,9 +213,9 @@ const DISPOSITION_STAT: Record<ScannedDisposition, keyof SkillUninstallStats> = 
 export function assessSkillUninstall(
   installRootAbs: string,
   skillId: string,
-  options: { existing?: SkillExistingTree } = {}
+  options: { existing?: SkillExistingTree; rootPrefix?: string } = {}
 ): SkillUninstallAssessment {
-  const installRoot = skillInstallRoot(skillId);
+  const installRoot = skillInstallRootFor(options.rootPrefix ?? SKILL_INSTALL_ROOT_PREFIX, skillId);
   const existing = options.existing ?? readExistingSkillTree(installRootAbs);
   const currentTreeHash = computeSkillTreeHash(existing.files);
 

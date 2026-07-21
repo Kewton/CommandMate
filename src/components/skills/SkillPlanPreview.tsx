@@ -142,7 +142,16 @@ export function SkillInstallPlanPreview({ plan }: SkillInstallPlanPreviewProps) 
             {target.workingTreeDirty ? t('target.workingTreeDirty') : t('target.workingTreeClean')}
           </Field>
           <Field label={t('plan.installRoot')}>
-            <span className="break-all font-mono text-xs">{target.installRoot}</span>
+            <span className="break-all font-mono text-xs">
+              {(target.installRoots && target.installRoots.length > 0
+                ? target.installRoots
+                : [target.installRoot]
+              ).map((root) => (
+                <span key={root} className="block">
+                  {root}
+                </span>
+              ))}
+            </span>
           </Field>
           <Field label={t('plan.existingInstall')}>
             {target.existingInstall

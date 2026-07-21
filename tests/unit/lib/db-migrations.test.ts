@@ -33,8 +33,8 @@ describe('db-migrations', () => {
   });
 
   describe('CURRENT_SCHEMA_VERSION', () => {
-    it('should be 46 after Migration #46 (skill_installations cascade)', () => {
-      expect(CURRENT_SCHEMA_VERSION).toBe(46);
+    it('should be 47 after Migration #47 (skill_installations install_roots, #1460)', () => {
+      expect(CURRENT_SCHEMA_VERSION).toBe(47);
     });
   });
 

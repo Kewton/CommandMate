@@ -48,20 +48,26 @@ import {
   rmdirSync,
   writeSync,
 } from 'fs';
+import { randomBytes } from 'crypto';
 import path from 'path';
 import {
   SKILL_ID_MAX_LENGTH,
   SKILL_ID_PATTERN,
   SKILL_INSTALL_ROOT_PREFIX,
+  SKILL_INSTALL_ROOT_PREFIXES,
 } from '@/lib/skills/constants';
 import { computeSha256Hex, digestMatches } from '@/lib/skills/integrity';
 import { getSkillInstallStagingRoot } from '@/lib/skills/operation-store';
 import {
   computeSkillTreeHash,
-  resolveSkillInstallRoot,
-  skillInstallRoot,
+  resolveSkillInstallRootFor,
+  skillInstallRootFor,
 } from '@/lib/skills/preview-diff';
-import { SKILL_RECEIPT_FILENAME, parseInstalledReceipt } from '@/lib/skills/install-plan';
+import {
+  SKILL_RECEIPT_FILENAME,
+  parseInstalledReceipt,
+  receiptInstallRoots,
+} from '@/lib/skills/install-plan';
 import type { SkillPackageSnapshot } from '@/lib/skills/package-validator';
 import type { SkillAgentSupport, SkillInstallReceipt, SkillInstalledFile } from '@/types/skills';
 
@@ -220,11 +226,26 @@ export function buildSkillReloadGuidance(receipt: SkillInstallReceipt): SkillRel
  * call without a plan, for instance from reconciliation.
  */
 export function resolveSkillInstallTarget(worktreePath: string, skillId: string): string {
+  return resolveSkillInstallTargetFor(worktreePath, SKILL_INSTALL_ROOT_PREFIX, skillId);
+}
+
+/**
+ * Absolute install root for a validated Skill ID under one root prefix (#1460).
+ *
+ * The per-root generalization of {@link resolveSkillInstallTarget}: `.claude/skills`
+ * gets exactly the grammar re-check and containment rejection `.agents/skills`
+ * always had, so neither root can be walked out of by a crafted ID.
+ */
+export function resolveSkillInstallTargetFor(
+  worktreePath: string,
+  rootPrefix: string,
+  skillId: string
+): string {
   if (!SKILL_ID_PATTERN.test(skillId) || skillId.length > SKILL_ID_MAX_LENGTH) {
     fail(SkillInstallErrorCode.TARGET_UNSAFE, { reason: 'skill-id' });
   }
   try {
-    return resolveSkillInstallRoot(worktreePath, skillId);
+    return resolveSkillInstallRootFor(worktreePath, rootPrefix, skillId);
   } catch {
     return fail(SkillInstallErrorCode.TARGET_UNSAFE, { reason: 'install-root' });
   }
@@ -237,7 +258,11 @@ export function resolveSkillInstallTarget(worktreePath: string, skillId: string)
  * would let the rename publish the payload outside the registered worktree, and
  * `realpath` alone would silently *follow* it instead of refusing.
  */
-function assertAncestorsAreRealDirectories(worktreeRealPath: string, worktreePath: string): void {
+function assertAncestorsAreRealDirectories(
+  worktreeRealPath: string,
+  worktreePath: string,
+  rootPrefix: string = SKILL_INSTALL_ROOT_PREFIX
+): void {
   let resolved: string;
   try {
     resolved = realpathSync(worktreePath);
@@ -249,7 +274,7 @@ function assertAncestorsAreRealDirectories(worktreeRealPath: string, worktreePat
   }
 
   let walked = worktreeRealPath;
-  for (const segment of SKILL_INSTALL_ROOT_PREFIX.split('/')) {
+  for (const segment of rootPrefix.split('/')) {
     walked = path.join(walked, segment);
     let stats;
     try {
@@ -455,11 +480,29 @@ export interface SkillInstallApplyInput {
   receiptBytes: Uint8Array;
   /** Tree hash the plan committed the destination to. */
   plannedTreeHash: string;
+  /**
+   * Root prefixes to place the package into, primary first (#1460). Defaults to
+   * the single primary `.agents/skills` root, so a caller that has not migrated
+   * gets exactly the pre-#1460 single-root commit.
+   */
+  rootPrefixes?: readonly string[];
 }
 
 /** What the commit produced. Paths are repository-relative. */
 export interface SkillInstallApplyResult {
+  /** Primary repository-relative install root (`.agents/skills/<id>`). */
   installRoot: string;
+  /** Every root the package was targeted at, primary first (#1460). */
+  installRoots: string[];
+  /** Roots whose atomic rename landed. */
+  committedRoots: string[];
+  /**
+   * Roots not yet written because a secondary rename failed *after* the primary
+   * committed. Reconciliation converges these forward from the primary (#1460).
+   */
+  pendingRoots: string[];
+  /** A secondary root is still owed: the operation committed but is reconciling. */
+  reconciling: boolean;
   receiptPath: string;
   receiptSha256: string;
   receiptSize: number;
@@ -482,8 +525,144 @@ export function applySkillInstall(input: SkillInstallApplyInput): SkillInstallAp
     fail(SkillInstallErrorCode.STAGING_IO, { reason: 'operation-id' });
   }
 
-  const installRootAbs = resolveSkillInstallTarget(input.worktreePath, input.skillId);
-  assertAncestorsAreRealDirectories(input.worktreeRealPath, input.worktreePath);
+  const rootPrefixes =
+    input.rootPrefixes && input.rootPrefixes.length > 0
+      ? [...input.rootPrefixes]
+      : [SKILL_INSTALL_ROOT_PREFIX];
+
+  // The payload is identical across roots: read and digest-verify it once, then
+  // stage the same bytes into each root (#1460).
+  const payload: PayloadFile[] = input.snapshot.files.map((file) => {
+    const bytes = input.snapshot.readFile(file.path);
+    if (!digestMatches(computeSha256Hex(bytes), file.sha256)) {
+      fail(SkillInstallErrorCode.PAYLOAD_MISMATCH, { reason: 'snapshot-digest' });
+    }
+    return { relativePath: file.path, bytes, executable: file.executable };
+  });
+  const directories = directoriesFor(input.snapshot.files.map((f) => f.path), input.snapshot.directories);
+
+  // Every destination is proven safe and absent *before* the primary commits, so
+  // a secondary that is already blocked cannot leave a committed primary behind.
+  for (const prefix of rootPrefixes) {
+    const abs = resolveSkillInstallTargetFor(input.worktreePath, prefix, input.skillId);
+    assertAncestorsAreRealDirectories(input.worktreeRealPath, input.worktreePath, prefix);
+    const destination = inspectSkillDestination(abs);
+    if (destination.present) {
+      fail(
+        destination.managed
+          ? SkillInstallErrorCode.DESTINATION_EXISTS
+          : SkillInstallErrorCode.DESTINATION_UNMANAGED,
+        destination.version ? { version: destination.version } : undefined
+      );
+    }
+  }
+
+  const committedRoots: string[] = [];
+  const pendingRoots: string[] = [];
+  for (let index = 0; index < rootPrefixes.length; index += 1) {
+    const prefix = rootPrefixes[index];
+    try {
+      stageAndCommitSkillRoot({
+        worktreePath: input.worktreePath,
+        worktreeRealPath: input.worktreeRealPath,
+        rootPrefix: prefix,
+        skillId: input.skillId,
+        operationId: input.operationId,
+        payload,
+        directories,
+        receiptBytes: input.receiptBytes,
+        plannedTreeHash: input.plannedTreeHash,
+      });
+      committedRoots.push(skillInstallRootFor(prefix, input.skillId));
+    } catch (error) {
+      // The primary rename is the commit point. A failure there published
+      // nothing, so it rolls back cleanly and is rethrown. A failure at a
+      // secondary root leaves the primary committed: the operation is
+      // *committed, reconciling*, and the remaining roots are handed to #1234.
+      if (index === 0) throw error;
+      for (let rest = index; rest < rootPrefixes.length; rest += 1) {
+        pendingRoots.push(skillInstallRootFor(rootPrefixes[rest], input.skillId));
+      }
+      break;
+    }
+  }
+
+  const installRoots = rootPrefixes.map((prefix) => skillInstallRootFor(prefix, input.skillId));
+  const installRootRel = installRoots[0];
+  const receiptSha256 = computeSha256Hex(input.receiptBytes);
+  return {
+    installRoot: installRootRel,
+    installRoots,
+    committedRoots,
+    pendingRoots,
+    reconciling: pendingRoots.length > 0,
+    receiptPath: `${installRootRel}/${SKILL_RECEIPT_FILENAME}`,
+    receiptSha256,
+    receiptSize: input.receiptBytes.byteLength,
+    files: input.snapshot.files.map((file) => ({
+      path: file.path,
+      sha256: file.sha256,
+      size: file.size,
+      executable: file.executable,
+    })),
+    treeHash: input.plannedTreeHash,
+  };
+}
+
+/** One payload file with its verified bytes, ready to stage into any root. */
+interface PayloadFile {
+  relativePath: string;
+  bytes: Uint8Array;
+  executable: boolean;
+}
+
+/** Sorted set of directories a payload implies, plus any the package declared. */
+function directoriesFor(
+  filePaths: readonly string[],
+  declared: readonly string[] = []
+): string[] {
+  const directories = new Set<string>(declared);
+  for (const filePath of filePaths) {
+    const parents = filePath.split('/').slice(0, -1);
+    let walked = '';
+    for (const segment of parents) {
+      walked = walked === '' ? segment : `${walked}/${segment}`;
+      directories.add(walked);
+    }
+  }
+  return [...directories].sort();
+}
+
+/** Everything one root's stage-and-commit needs. Bytes are already verified. */
+interface StageAndCommitRootInput {
+  worktreePath: string;
+  worktreeRealPath: string;
+  rootPrefix: string;
+  skillId: string;
+  operationId: string;
+  payload: readonly PayloadFile[];
+  directories: readonly string[];
+  receiptBytes: Uint8Array;
+  plannedTreeHash: string;
+}
+
+/**
+ * Stage the verified payload into one root and atomically publish it (#1460).
+ *
+ * The single-root commit #1235 built, lifted to take the root prefix as a
+ * parameter: staging lives under *that* root's reserved namespace so the rename
+ * stays on one filesystem, and every check — ancestor lstat walk, exclusive
+ * no-follow writes, tree-hash gate, destination-absent, same-filesystem — is
+ * applied per root. Throws {@link SkillInstallError} on any failure, having
+ * removed its own staging; the destination is untouched unless the rename ran.
+ */
+function stageAndCommitSkillRoot(input: StageAndCommitRootInput): void {
+  const installRootAbs = resolveSkillInstallTargetFor(
+    input.worktreePath,
+    input.rootPrefix,
+    input.skillId
+  );
+  assertAncestorsAreRealDirectories(input.worktreeRealPath, input.worktreePath, input.rootPrefix);
 
   const destinationBefore = inspectSkillDestination(installRootAbs);
   if (destinationBefore.present) {
@@ -495,7 +674,7 @@ export function applySkillInstall(input: SkillInstallApplyInput): SkillInstallAp
     );
   }
 
-  const stagingRoot = getSkillInstallStagingRoot(input.worktreePath);
+  const stagingRoot = getSkillInstallStagingRoot(input.worktreePath, input.rootPrefix);
   makeDirectory(path.dirname(stagingRoot), 0o755, true);
   makeDirectory(stagingRoot, SKILL_INSTALL_DIR_MODE, true);
 
@@ -505,27 +684,14 @@ export function applySkillInstall(input: SkillInstallApplyInput): SkillInstallAp
   makeDirectory(stagingDir, SKILL_INSTALL_DIR_MODE, false);
 
   try {
-    const directories = new Set<string>(input.snapshot.directories);
-    for (const file of input.snapshot.files) {
-      const parents = file.path.split('/').slice(0, -1);
-      let walked = '';
-      for (const segment of parents) {
-        walked = walked === '' ? segment : `${walked}/${segment}`;
-        directories.add(walked);
-      }
-    }
-    for (const directory of [...directories].sort()) {
+    for (const directory of input.directories) {
       makeDirectory(path.join(stagingDir, directory), SKILL_INSTALL_DIR_MODE, false);
     }
 
-    for (const file of input.snapshot.files) {
-      const bytes = input.snapshot.readFile(file.path);
-      if (!digestMatches(computeSha256Hex(bytes), file.sha256)) {
-        fail(SkillInstallErrorCode.PAYLOAD_MISMATCH, { reason: 'snapshot-digest' });
-      }
+    for (const file of input.payload) {
       // The execute bit comes from the reconciled inventory, which is also what
       // the plan hashed — never from the archive header, which is attacker data.
-      writeSkillPayloadFile(path.join(stagingDir, file.path), bytes, file.executable);
+      writeSkillPayloadFile(path.join(stagingDir, file.relativePath), file.bytes, file.executable);
     }
 
     // The receipt is written last and from the plan's own bytes: rebuilding it
@@ -544,7 +710,7 @@ export function applySkillInstall(input: SkillInstallApplyInput): SkillInstallAp
     // Re-checked immediately before the rename rather than only at entry: the
     // exclusive lock keeps CommandMate out, but nothing keeps the user's own
     // editor from creating this directory while the payload was being staged.
-    assertAncestorsAreRealDirectories(input.worktreeRealPath, input.worktreePath);
+    assertAncestorsAreRealDirectories(input.worktreeRealPath, input.worktreePath, input.rootPrefix);
     const destinationNow = inspectSkillDestination(installRootAbs);
     if (destinationNow.present) {
       fail(
@@ -566,22 +732,74 @@ export function applySkillInstall(input: SkillInstallApplyInput): SkillInstallAp
   }
 
   pruneStagingRoot(stagingRoot);
+}
 
-  const installRootRel = skillInstallRoot(input.skillId);
-  const receiptSha256 = computeSha256Hex(input.receiptBytes);
-  return {
-    installRoot: installRootRel,
-    receiptPath: `${installRootRel}/${SKILL_RECEIPT_FILENAME}`,
-    receiptSha256,
-    receiptSize: input.receiptBytes.byteLength,
-    files: input.snapshot.files.map((file) => ({
+/**
+ * Converge a committed install's secondary roots forward from the primary (#1460).
+ *
+ * The reconciliation primitive for a partial multi-root install: when the
+ * primary `.agents/skills` root committed but a secondary rename did not, this
+ * reads the primary's own on-disk payload — proven byte-for-byte against the
+ * receipt inventory — and atomically writes it into every declared root that is
+ * still absent. A root already present (the correct managed copy, or a user's
+ * conflict) is left untouched, so convergence is forward-only and never
+ * overwrites. Idempotent: a second call after a partial pass completes the rest.
+ *
+ * @returns repository-relative roots this call wrote
+ */
+export function completeSecondarySkillInstallRoots(
+  worktreePath: string,
+  worktreeRealPath: string,
+  skillId: string
+): { completed: string[] } {
+  const primaryAbs = resolveSkillInstallTarget(worktreePath, skillId);
+  const receiptBytes = readFileSync(path.join(primaryAbs, SKILL_RECEIPT_FILENAME));
+  const receipt = parseInstalledReceipt(receiptBytes);
+  if (receipt === null) {
+    fail(SkillInstallErrorCode.PAYLOAD_MISMATCH, { reason: 'primary-receipt-unreadable' });
+  }
+
+  // Read the primary payload from disk and prove it against the receipt before
+  // it is copied anywhere: a copy of a tampered primary must not propagate.
+  const payload: PayloadFile[] = receipt.files.map((file) => {
+    const bytes = readFileSync(path.join(primaryAbs, file.path));
+    if (!digestMatches(computeSha256Hex(bytes), file.sha256)) {
+      fail(SkillInstallErrorCode.PAYLOAD_MISMATCH, { reason: 'primary-file-digest' });
+    }
+    return { relativePath: file.path, bytes, executable: file.executable };
+  });
+  const directories = directoriesFor(receipt.files.map((file) => file.path));
+  const plannedTreeHash = computeSkillTreeHash([
+    ...receipt.files.map((file) => ({
       path: file.path,
       sha256: file.sha256,
-      size: file.size,
       executable: file.executable,
     })),
-    treeHash: input.plannedTreeHash,
-  };
+    { path: SKILL_RECEIPT_FILENAME, sha256: computeSha256Hex(receiptBytes), executable: false },
+  ]);
+
+  const operationId = randomBytes(16).toString('hex');
+  const completed: string[] = [];
+  for (const rootRel of receiptInstallRoots(receipt)) {
+    const prefix = rootRel.slice(0, Math.max(0, rootRel.length - skillId.length - 1));
+    const abs = resolveSkillInstallTargetFor(worktreePath, prefix, skillId);
+    // Present already: either the correct managed copy or a user conflict. Both
+    // are left alone — convergence only fills absent roots.
+    if (inspectSkillDestination(abs).present) continue;
+    stageAndCommitSkillRoot({
+      worktreePath,
+      worktreeRealPath,
+      rootPrefix: prefix,
+      skillId,
+      operationId,
+      payload,
+      directories,
+      receiptBytes,
+      plannedTreeHash,
+    });
+    completed.push(rootRel);
+  }
+  return { completed };
 }
 
 /**
@@ -625,19 +843,22 @@ function pruneStagingRoot(stagingRoot: string): void {
  * @returns Number of staging directories removed
  */
 export function cleanupSkillInstallStaging(worktreePath: string): number {
-  const stagingRoot = getSkillInstallStagingRoot(worktreePath);
-  let entries: string[];
-  try {
-    entries = readdirSync(stagingRoot);
-  } catch {
-    return 0;
-  }
   let removed = 0;
-  for (const entry of entries) {
-    if (!SKILL_INSTALL_OPERATION_ID_PATTERN.test(entry)) continue;
-    rmSync(path.join(stagingRoot, entry), { recursive: true, force: true });
-    removed += 1;
+  // Each install root has its own staging namespace (#1460); clean all of them.
+  for (const rootPrefix of SKILL_INSTALL_ROOT_PREFIXES) {
+    const stagingRoot = getSkillInstallStagingRoot(worktreePath, rootPrefix);
+    let entries: string[];
+    try {
+      entries = readdirSync(stagingRoot);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!SKILL_INSTALL_OPERATION_ID_PATTERN.test(entry)) continue;
+      rmSync(path.join(stagingRoot, entry), { recursive: true, force: true });
+      removed += 1;
+    }
+    pruneStagingRoot(stagingRoot);
   }
-  pruneStagingRoot(stagingRoot);
   return removed;
 }

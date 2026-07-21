@@ -27,7 +27,10 @@ export interface SkillInstallationRecord {
   worktreeId: string;
   skillId: string;
   version: string;
+  /** Primary repository-relative install root (`.agents/skills/<id>`). */
   installRoot: string;
+  /** Every root the package was placed into, primary first (#1460). */
+  installRoots: string[];
   receiptSha256: string;
   sourceRepository: string;
   sourceRef: string;
@@ -45,6 +48,7 @@ interface SkillInstallationRow {
   skill_id: string;
   version: string;
   install_root: string;
+  install_roots: string | null;
   receipt_sha256: string;
   source_repository: string;
   source_ref: string;
@@ -57,10 +61,28 @@ interface SkillInstallationRow {
 }
 
 const SELECT_COLUMNS = `
-  id, worktree_id, skill_id, version, install_root, receipt_sha256,
+  id, worktree_id, skill_id, version, install_root, install_roots, receipt_sha256,
   source_repository, source_ref, source_commit, artifact_sha256,
   effective_risk, operation_id, installed_at, updated_at
 `;
+
+/** Parse the JSON `install_roots` column, falling back to the single primary root. */
+function parseInstallRoots(raw: string | null, installRoot: string): string[] {
+  if (raw === null) return [installRoot];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      Array.isArray(parsed) &&
+      parsed.length > 0 &&
+      parsed.every((item) => typeof item === 'string')
+    ) {
+      return parsed as string[];
+    }
+  } catch {
+    // Fall through to the single-root reading below.
+  }
+  return [installRoot];
+}
 
 function mapRow(row: SkillInstallationRow): SkillInstallationRecord {
   return {
@@ -69,6 +91,7 @@ function mapRow(row: SkillInstallationRow): SkillInstallationRecord {
     skillId: row.skill_id,
     version: row.version,
     installRoot: row.install_root,
+    installRoots: parseInstallRoots(row.install_roots, row.install_root),
     receiptSha256: row.receipt_sha256,
     sourceRepository: row.source_repository,
     sourceRef: row.source_ref,
@@ -104,15 +127,22 @@ export function upsertSkillInstallation(
   input: SkillInstallationInput
 ): SkillInstallationRecord {
   const { receipt } = input;
+  // Primary first; a pre-#1460 receipt with no install_roots is read as its
+  // single install_root, so the column is always a non-empty JSON array.
+  const installRoots =
+    receipt.install_roots && receipt.install_roots.length > 0
+      ? receipt.install_roots
+      : [receipt.install_root];
   db.prepare(
     `INSERT INTO skill_installations (
-       id, worktree_id, skill_id, version, install_root, receipt_sha256,
+       id, worktree_id, skill_id, version, install_root, install_roots, receipt_sha256,
        source_repository, source_ref, source_commit, artifact_sha256,
        effective_risk, operation_id, installed_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (worktree_id, skill_id) DO UPDATE SET
        version = excluded.version,
        install_root = excluded.install_root,
+       install_roots = excluded.install_roots,
        receipt_sha256 = excluded.receipt_sha256,
        source_repository = excluded.source_repository,
        source_ref = excluded.source_ref,
@@ -127,6 +157,7 @@ export function upsertSkillInstallation(
     receipt.skill_id,
     receipt.version,
     receipt.install_root,
+    JSON.stringify(installRoots),
     input.receiptSha256,
     receipt.source.repository,
     receipt.source.ref,

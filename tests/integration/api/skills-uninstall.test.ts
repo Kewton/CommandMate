@@ -128,6 +128,11 @@ function installRootAbs(): string {
   return path.join(worktreeDir, '.agents', 'skills', SKILL_ID);
 }
 
+/** The Claude discovery root the install also writes to (#1460). */
+function claudeInstallRootAbs(): string {
+  return path.join(worktreeDir, '.claude', 'skills', SKILL_ID);
+}
+
 function makeCatalog(): SkillCatalog {
   return {
     schema_version: 1,
@@ -487,7 +492,10 @@ describe('POST …/uninstall — nothing is deleted when anything is ambiguous',
 
   it('refuses when a different version was installed between plan and apply', async () => {
     const { token } = await issueUninstallPlan();
+    // Clear both discovery roots so the different-version re-install has empty
+    // destinations to write into (#1460).
     rmSync(installRootAbs(), { recursive: true });
+    rmSync(claudeInstallRootAbs(), { recursive: true, force: true });
     resetSkillInstallPlanCacheForTesting();
     useArtifact([{ path: 'reference/notes.md', content: '# Different package\n' }]);
     await installSkill('install-key-00000002');
