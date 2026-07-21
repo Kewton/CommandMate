@@ -135,6 +135,7 @@
   },
   "timerTab": "Timer",
   "todoTab": "ToDo",
+  "skillsTab": "Skills",
   "timer": {
     "title": "遅延メッセージ",
     "titleCreate": "タイマー作成",
