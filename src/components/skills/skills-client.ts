@@ -14,6 +14,7 @@
  */
 
 import type {
+  InstalledSkillListResponse,
   SkillApiErrorResponse,
   SkillDetailResponse,
   SkillInstallApplyResponse,
@@ -151,6 +152,31 @@ export function fetchSkillDetail(
   return request(
     () => getJson<SkillDetailResponse>(`/api/skills/${encodeURIComponent(skillId)}`, signal),
     SKILL_CATALOG_UNREACHABLE,
+    signal
+  );
+}
+
+/**
+ * List the Skills installed in one worktree.
+ *
+ * Reads the installed-Skill index (#1235) through `GET /api/worktrees/[id]/skills`.
+ * The worktree ID is the only input; the server resolves it to a trusted path and
+ * returns receipt/index facts only — the browser never supplies or receives a
+ * filesystem path or artifact URL. A transport failure is a distinct result from
+ * an empty install list, so the UI can say "could not load" rather than render a
+ * reassuring empty state.
+ */
+export function fetchWorktreeInstalledSkills(
+  worktreeId: string,
+  signal?: AbortSignal
+): Promise<SkillFetchResult<InstalledSkillListResponse>> {
+  return request(
+    () =>
+      getJson<InstalledSkillListResponse>(
+        `/api/worktrees/${encodeURIComponent(worktreeId)}/skills`,
+        signal
+      ),
+    SKILL_REQUEST_FAILED,
     signal
   );
 }
