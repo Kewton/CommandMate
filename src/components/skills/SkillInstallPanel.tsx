@@ -21,7 +21,7 @@
 
 'use client';
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button, Card, Checkbox } from '@/components/ui';
 import { getCliToolDisplayNameSafe } from '@/lib/cli-tools/types';
@@ -162,11 +162,25 @@ export interface SkillInstallPanelProps {
    * one a user needs to be able to remove.
    */
   blockedReason: string | null;
+  /**
+   * Issue #1441: when set, the panel installs into exactly this worktree and the
+   * target picker is not rendered — the caller (e.g. the worktree detail Skills
+   * pane) already knows which checkout it is acting on. When omitted the panel
+   * keeps its original behavior and asks the user to pick a target.
+   */
+  worktreeId?: string;
 }
 
-export function SkillInstallPanel({ skillId, version, blockedReason }: SkillInstallPanelProps) {
+export function SkillInstallPanel({
+  skillId,
+  version,
+  blockedReason,
+  worktreeId: fixedWorktreeId,
+}: SkillInstallPanelProps) {
   const t = useTranslations('skills');
-  const [state, setState] = useState<PanelState>(INITIAL_STATE);
+  const [state, setState] = useState<PanelState>(() =>
+    fixedWorktreeId ? { ...INITIAL_STATE, worktreeId: fixedWorktreeId } : INITIAL_STATE
+  );
 
   const selectTarget = useCallback((worktreeId: string) => {
     setState((current) =>
@@ -175,6 +189,14 @@ export function SkillInstallPanel({ skillId, version, blockedReason }: SkillInst
         : clearOutcome({ ...current, worktreeId, busy: null })
     );
   }, []);
+
+  // Keep the fixed target in step if the caller swaps worktrees without
+  // remounting. Guarded so it is a no-op once state already holds it (the
+  // initializer set it on mount), which keeps the ordinary picker path — where
+  // fixedWorktreeId is undefined — completely untouched.
+  useEffect(() => {
+    if (fixedWorktreeId) selectTarget(fixedWorktreeId);
+  }, [fixedWorktreeId, selectTarget]);
 
   const buildInstallPlan = useCallback(async () => {
     const worktreeId = state.worktreeId;
@@ -265,11 +287,16 @@ export function SkillInstallPanel({ skillId, version, blockedReason }: SkillInst
 
   return (
     <div className="space-y-3" data-testid="skill-install-panel">
-      <SkillTargetSelector
-        selectedWorktreeId={state.worktreeId}
-        onSelect={selectTarget}
-        disabled={busy}
-      />
+      {/* Issue #1441: with a fixed worktreeId the caller has already chosen the
+          target, so the picker is suppressed and the panel acts on that worktree
+          directly. Without it, the original target-selection flow is preserved. */}
+      {!fixedWorktreeId && (
+        <SkillTargetSelector
+          selectedWorktreeId={state.worktreeId}
+          onSelect={selectTarget}
+          disabled={busy}
+        />
+      )}
 
       <div className="flex flex-wrap gap-2">
         <Button

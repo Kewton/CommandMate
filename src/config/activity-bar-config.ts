@@ -13,12 +13,20 @@
  */
 
 import type { ComponentType, SVGProps } from 'react';
-import { File, GitBranch, StickyNote, Calendar, Bot, Timer, ListTodo } from 'lucide-react';
+import { File, GitBranch, StickyNote, Calendar, Bot, Timer, ListTodo, Sparkles } from 'lucide-react';
 
 /**
  * Unique identifier for an activity in the Activity Bar.
  */
-export type ActivityId = 'files' | 'git' | 'notes' | 'schedules' | 'agent' | 'timer' | 'todo';
+export type ActivityId =
+  | 'files'
+  | 'git'
+  | 'notes'
+  | 'schedules'
+  | 'agent'
+  | 'timer'
+  | 'todo'
+  | 'skills';
 
 /**
  * Metadata for a single Activity Bar icon.
@@ -53,6 +61,8 @@ export const ACTIVITIES: readonly ActivityDefinition[] = [
   { id: 'timer', labelKey: 'activityBar.timer', icon: Timer },
   // Issue #1015: branch-scoped ToDo list.
   { id: 'todo', labelKey: 'activityBar.todo', icon: ListTodo },
+  // Issue #1441: worktree-scoped Skill install/uninstall management.
+  { id: 'skills', labelKey: 'activityBar.skills', icon: Sparkles },
 ] as const;
 
 /**

@@ -277,6 +277,15 @@
     "provider": "提供元: {provider}",
     "noRecommendedVersion": "導入可能なversionなし"
   },
+  "worktreePane": {
+    "installedHeading": "このワークツリーに導入済み",
+    "installedError": "このワークツリーの導入済みSkillを読み込めませんでした。",
+    "installedEmpty": "このワークツリーにはまだSkillが導入されていません。",
+    "catalogHeading": "Catalogから導入",
+    "installedBadge": "導入済み",
+    "version": "バージョン {version}",
+    "back": "Skill一覧へ戻る"
+  },
   "state": {
     "loading": "Skill Catalogを読み込んでいます…",
     "empty": "公式Catalogにはまだ公開されているSkillがありません。",
