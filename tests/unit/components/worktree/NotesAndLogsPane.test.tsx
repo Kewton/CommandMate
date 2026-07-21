@@ -2,6 +2,7 @@
  * Tests for NotesAndLogsPane extension
  * Issue #368: Adds 'agent' sub-tab for Agent settings
  * Issue #874: Adds instance-management mode (mobile) for the 'agent' sub-tab
+ * Issue #1442: Adds 'skills' sub-tab (mobile) + horizontal-scroll tab row
  * @vitest-environment jsdom
  */
 
@@ -29,6 +30,12 @@ vi.mock('@/components/worktree/ExecutionLogPane', () => ({
 vi.mock('@/components/worktree/AgentSettingsPane', () => ({
   AgentSettingsPane: ({ worktreeId }: { worktreeId: string }) => (
     <div data-testid="agent-settings-pane">AgentSettingsPane: {worktreeId}</div>
+  ),
+}));
+
+vi.mock('@/components/skills/WorktreeSkillsPane', () => ({
+  WorktreeSkillsPane: ({ worktreeId }: { worktreeId: string }) => (
+    <div data-testid="worktree-skills-pane">WorktreeSkillsPane: {worktreeId}</div>
   ),
 }));
 
@@ -80,6 +87,54 @@ describe('NotesAndLogsPane', () => {
       render(<NotesAndLogsPane {...defaultProps} />);
       expect(screen.getByText('schedule.agentTab')).toBeDefined();
     });
+
+    // Issue #1442
+    it('should render Skills tab', () => {
+      render(<NotesAndLogsPane {...defaultProps} />);
+      expect(screen.getByText('schedule.skillsTab')).toBeDefined();
+    });
+  });
+
+  // Issue #1442: six sub-tabs must remain fully reachable on ~320px mobile
+  // widths. The row scrolls horizontally instead of squeezing/wrapping tabs, so
+  // the container carries the scroll classes and every tab keeps its natural
+  // width (never `flex-1`, never wrapping).
+  describe('Narrow-width tab layout (Issue #1442)', () => {
+    const TAB_LABELS = [
+      'schedule.notes',
+      'schedule.logs',
+      'schedule.agentTab',
+      'schedule.timerTab',
+      'schedule.todoTab',
+      'schedule.skillsTab',
+    ];
+
+    it('renders all six sub-tabs', () => {
+      render(<NotesAndLogsPane {...defaultProps} />);
+      for (const label of TAB_LABELS) {
+        expect(screen.getByText(label)).toBeInTheDocument();
+      }
+    });
+
+    it('lays the tab row out as a horizontal scroller (no equal-split squeeze)', () => {
+      render(<NotesAndLogsPane {...defaultProps} />);
+      // The row is the shared parent of every tab button.
+      const row = screen.getByText('schedule.notes').parentElement as HTMLElement;
+      expect(row.className).toContain('overflow-x-auto');
+      expect(row.className).toContain('scrollbar-hide');
+      expect(row.className).not.toContain('flex-1');
+    });
+
+    it('keeps every tab at its natural width so labels never wrap or truncate', () => {
+      render(<NotesAndLogsPane {...defaultProps} />);
+      for (const label of TAB_LABELS) {
+        const button = screen.getByText(label).closest('button') as HTMLElement;
+        expect(button.className).toContain('flex-shrink-0');
+        expect(button.className).toContain('whitespace-nowrap');
+        // The old equal-split layout would starve tabs on narrow screens.
+        expect(button.className).not.toContain('flex-1');
+      }
+    });
   });
 
   describe('Insert to message propagation (Issue #485)', () => {
@@ -114,6 +169,17 @@ describe('NotesAndLogsPane', () => {
       render(<NotesAndLogsPane {...defaultProps} />);
       fireEvent.click(screen.getByText('schedule.agentTab'));
       expect(screen.getByTestId('agent-settings-pane')).toBeDefined();
+    });
+
+    // Issue #1442: the skills tab mounts the shared worktree-scoped Skills pane
+    // (#1441) with this screen's worktree fixed.
+    it('should show WorktreeSkillsPane (with this worktreeId) when skills tab is clicked', () => {
+      render(<NotesAndLogsPane {...defaultProps} />);
+      expect(screen.queryByTestId('worktree-skills-pane')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByText('schedule.skillsTab'));
+      const pane = screen.getByTestId('worktree-skills-pane');
+      expect(pane).toBeInTheDocument();
+      expect(pane.textContent).toContain('test-worktree');
     });
   });
 
