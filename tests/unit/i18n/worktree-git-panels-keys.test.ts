@@ -72,6 +72,7 @@ const DYNAMIC: Record<string, string[]> = {
     'activityBar.agent',
     'activityBar.timer',
     'activityBar.todo',
+    'activityBar.skills',
     // WorktreeInfoFields / DesktopHeader <- WORKTREE_STATUS_OPTIONS[].labelKey
     'worktreeStatus.notSet',
     'worktreeStatus.ready',

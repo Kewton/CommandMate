@@ -475,3 +475,57 @@ describe('SkillInstallPanel state hygiene', () => {
     expect(screen.queryByTestId('skill-operation-error')).not.toBeInTheDocument();
   });
 });
+
+// Issue #1441: the worktree detail Skills pane mounts the panel with the target
+// already fixed, so no picker is shown and no worktree list is fetched.
+describe('SkillInstallPanel fixed worktreeId (Issue #1441)', () => {
+  it('hides the target picker and never fetches the worktree list', async () => {
+    // No '/api/worktrees' route is defined: routeFetch throws on any unexpected
+    // request, so a stray picker fetch would fail the test loudly.
+    routeFetch({ '/plan': { body: { plan: makeInstallPlan() } } });
+
+    render(
+      <SkillInstallPanel
+        skillId="release-helper"
+        version="1.2.0"
+        blockedReason={null}
+        worktreeId="demo-wt"
+      />
+    );
+
+    // The picker is gone, and the plan can be built without selecting a target.
+    expect(screen.queryByTestId('skill-target-selector')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('skill-target-loading')).not.toBeInTheDocument();
+    expect(screen.getByTestId('skill-install-action')).toBeEnabled();
+    expect(requestsTo('/api/worktrees')).toBe(0);
+  });
+
+  it('plans against the fixed worktree without a target selection', async () => {
+    routeFetch({
+      '/plan': { body: { plan: makeInstallPlan() } },
+      '/install': { body: makeInstallResponse() },
+    });
+
+    render(
+      <SkillInstallPanel
+        skillId="release-helper"
+        version="1.2.0"
+        blockedReason={null}
+        worktreeId="demo-wt"
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('skill-install-action'));
+    await screen.findByTestId('skill-install-plan');
+
+    const planCall = fetchMock.mock.calls.find((call: unknown[]) =>
+      (call[0] as string).endsWith('/plan')
+    );
+    expect(planCall?.[0]).toBe('/api/worktrees/demo-wt/skills/release-helper/plan');
+
+    fireEvent.click(screen.getByTestId('skill-install-confirm'));
+    expect(await screen.findByTestId('skill-install-result')).toHaveTextContent(
+      'skills.install.nextAction.succeeded'
+    );
+  });
+});

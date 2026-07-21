@@ -277,6 +277,15 @@
     "provider": "by {provider}",
     "noRecommendedVersion": "No installable version"
   },
+  "worktreePane": {
+    "installedHeading": "Installed in this worktree",
+    "installedError": "The installed Skills for this worktree could not be loaded.",
+    "installedEmpty": "No Skills are installed in this worktree yet.",
+    "catalogHeading": "Install from the Catalog",
+    "installedBadge": "Installed",
+    "version": "Version {version}",
+    "back": "Back to Skills"
+  },
   "state": {
     "loading": "Loading the Skill Catalog…",
     "empty": "The official Catalog publishes no Skills yet.",
