@@ -46,6 +46,9 @@ db.sqlite-journal
 server.log
 .claude_logs/
 /data/
+# Skill operation journal/locks/staging (Issue #1234). In local dev getConfigDir()
+# resolves to the repo cwd, so this service-owned runtime state lands at the repo root.
+/skills/
 /temp/
 /workspace/
 .playwright-mcp/
