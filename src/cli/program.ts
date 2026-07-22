@@ -78,6 +78,13 @@ export function buildProgram(): Command {
   program
     .name('commandmate')
     .description('Git worktree management with Claude CLI and tmux sessions')
+    // Issue #1462: parse root options only before the command name, then hand the
+    // rest to the matched subcommand. Without this, commander's default lets the
+    // root's `--version` flag (from .version() below) swallow a subcommand's
+    // `--version <v>` in space form (`skill install X --version 0.1.0`), printing
+    // the CLI version and exiting 0 — a silent no-op. Positional parsing leaves
+    // options after the command name for the subcommand that owns them.
+    .enablePositionalOptions()
     .version(pkg.version)
     // Issue #1195: commander drops its implicit `help [command]` as soon as a root action
     // exists, so it is re-enabled explicitly to keep `commandmate help <cmd>` working
