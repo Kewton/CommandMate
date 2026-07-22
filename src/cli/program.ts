@@ -24,6 +24,8 @@ import { createAutoYesCommand } from './commands/auto-yes';
 import { createReportCommand } from './commands/report';
 // Issue #1000: Agent-instance roster management (discover/add/remove/alias/kill)
 import { createInstancesCommand } from './commands/instances';
+// Issue #1237: Skill management as a thin client over the Skill APIs
+import { createSkillCommand } from './commands/skill';
 // Issue #1195: Guided quickstart for bare `npx commandmate`
 import { quickstartCommand } from './commands/quickstart';
 import { isInteractive } from './utils/prompt';
@@ -76,6 +78,13 @@ export function buildProgram(): Command {
   program
     .name('commandmate')
     .description('Git worktree management with Claude CLI and tmux sessions')
+    // Issue #1462: parse root options only before the command name, then hand the
+    // rest to the matched subcommand. Without this, commander's default lets the
+    // root's `--version` flag (from .version() below) swallow a subcommand's
+    // `--version <v>` in space form (`skill install X --version 0.1.0`), printing
+    // the CLI version and exiting 0 — a silent no-op. Positional parsing leaves
+    // options after the command name for the subcommand that owns them.
+    .enablePositionalOptions()
     .version(pkg.version)
     // Issue #1195: commander drops its implicit `help [command]` as soon as a root action
     // exists, so it is re-enabled explicitly to keep `commandmate help <cmd>` working
@@ -221,6 +230,9 @@ export function buildProgram(): Command {
 
   // Issue #1000: Agent-instance roster management
   program.addCommand(createInstancesCommand());
+
+  // Issue #1237: Skill management (catalog / plan / install / uninstall / status)
+  program.addCommand(createSkillCommand());
 
   // Issue #264: AI Tool Integration help section
   program.addHelpText('after', `

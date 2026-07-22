@@ -588,7 +588,8 @@
     "schedules": "Schedules",
     "agent": "Agent",
     "timer": "Timer",
-    "todo": "ToDo"
+    "todo": "ToDo",
+    "skills": "Skills"
   },
   "branchMismatch": {
     "changedFrom": "Branch changed from",

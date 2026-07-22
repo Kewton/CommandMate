@@ -19,14 +19,15 @@ import { ExecutionLogPane } from './ExecutionLogPane';
 import { AgentSettingsPane } from './AgentSettingsPane';
 import { MobileAgentInstancesPane } from './MobileAgentInstancesPane';
 import { TimerPane } from './TimerPane';
+import { WorktreeSkillsPane } from '@/components/skills/WorktreeSkillsPane';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 
 // ============================================================================
 // Types
 // ============================================================================
 
-/** Issue #368: Extended with 'agent' sub-tab. Issue #534: Extended with 'timer' sub-tab. Issue #1015: 'todo' sub-tab */
-type SubTab = 'notes' | 'logs' | 'agent' | 'timer' | 'todo';
+/** Issue #368: Extended with 'agent' sub-tab. Issue #534: Extended with 'timer' sub-tab. Issue #1015: 'todo' sub-tab. Issue #1442: 'skills' sub-tab (mobile) */
+type SubTab = 'notes' | 'logs' | 'agent' | 'timer' | 'todo' | 'skills';
 
 /** Configuration for a sub-tab button */
 interface SubTabConfig {
@@ -89,6 +90,9 @@ const SUB_TABS: readonly SubTabConfig[] = [
   // Issue #1015: branch-scoped ToDo list. Label resolves from schedule.json
   // `todoTab` (added to BOTH en and ja, [S3-003]).
   { id: 'todo', labelKey: 'todoTab' },
+  // Issue #1442: worktree-scoped Skills surface (mobile). Reuses the PC pane
+  // (#1441). Label resolves from schedule.json `skillsTab` (BOTH en and ja).
+  { id: 'skills', labelKey: 'skillsTab' },
 ] as const;
 
 /** CSS class for the active sub-tab button */
@@ -129,14 +133,21 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
 
   return (
     <div className={`flex flex-col h-full ${className}`}>
-      {/* Sub-tab switcher */}
-      <div className="flex border-b border-border bg-surface dark:bg-surface-2 flex-shrink-0">
+      {/* Sub-tab switcher. Issue #1442: six tabs no longer fit a `flex-1`
+          equal-split on narrow (≈320px) mobile widths, so the row scrolls
+          horizontally (`overflow-x-auto scrollbar-hide`, mirroring the
+          agent-instance tabs in WorktreeDetailRefactored) and each button stays
+          at its natural width (`flex-shrink-0 whitespace-nowrap`) instead of
+          being squeezed/wrapped. `scrollbar-hide` is defined in globals.css.
+          Tabs use plain `onClick` with no hover-gated visibility, so every tab
+          stays tappable on touch devices. */}
+      <div className="flex overflow-x-auto scrollbar-hide border-b border-border bg-surface dark:bg-surface-2 flex-shrink-0">
         {SUB_TABS.map((tab) => (
           <button
             key={tab.id}
             type="button"
             onClick={() => handleSubTabChange(tab.id)}
-            className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
+            className={`flex-shrink-0 whitespace-nowrap px-3 py-2 text-sm font-medium transition-colors ${
               activeSubTab === tab.id ? ACTIVE_TAB_CLASS : INACTIVE_TAB_CLASS
             }`}
           >
@@ -197,6 +208,11 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
         )}
         {activeSubTab === 'todo' && (
           <TodoPane worktreeId={worktreeId} className="h-full" />
+        )}
+        {/* Issue #1442: same worktree-scoped Skills pane the PC Activity Bar
+            mounts (#1441); the worktree is fixed by this screen. */}
+        {activeSubTab === 'skills' && (
+          <WorktreeSkillsPane worktreeId={worktreeId} className="h-full" />
         )}
       </div>
     </div>

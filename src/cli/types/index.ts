@@ -264,6 +264,74 @@ export interface AutoYesOptions {
   token?: string;
 }
 
+/**
+ * skill command exit codes [Issue #1237]
+ *
+ * Follows the WaitExitCode precedent: infrastructure and input failures keep
+ * using {@link ExitCode}, while these name outcomes a caller must be able to
+ * distinguish without parsing stderr. Values start at 11 so they cannot collide
+ * with WaitExitCode.PROMPT_DETECTED.
+ */
+export const SkillExitCode = {
+  SUCCESS: 0,
+  /**
+   * The target worktree refused the operation: an unmanaged or locally modified
+   * file, an occupied destination, a concurrent operation, or a plan whose world
+   * moved. Distinct from a network/API failure (ExitCode.DEPENDENCY_ERROR) so an
+   * automation can retry the latter but must not retry the former blindly.
+   */
+  BLOCKED: 11,
+  /** The write was never confirmed: non-TTY without --yes, missing/mismatched --ack-risk, or a declined prompt. */
+  CONFIRMATION_REQUIRED: 12,
+  /** The payload reached the worktree but the operation did not finish cleanly (`committed_reconciling`). */
+  COMMITTED_RECONCILING: 13,
+} as const;
+export type SkillExitCode = typeof SkillExitCode[keyof typeof SkillExitCode];
+
+/** Shared by every skill subcommand [Issue #1237] */
+export interface SkillCommonOptions {
+  json?: boolean;
+  token?: string;
+}
+
+/** skill list options [Issue #1237] */
+export interface SkillListOptions extends SkillCommonOptions {
+  prerelease?: boolean;
+}
+
+/** skill info options [Issue #1237] */
+export interface SkillInfoOptions extends SkillListOptions {
+  version?: string;
+}
+
+/** skill plan options [Issue #1237] */
+export interface SkillPlanOptions extends SkillListOptions {
+  worktree?: string;
+  version?: string;
+}
+
+/** skill install options [Issue #1237] */
+export interface SkillInstallOptions extends SkillPlanOptions {
+  /** Build the plan and stop; never writes. */
+  dryRun?: boolean;
+  /** Skip the interactive confirmation. Required to write from a non-TTY. */
+  yes?: boolean;
+  /** Explicit `<skill-id>@<version>` acknowledgement, demanded on top of --yes for high risk. */
+  ackRisk?: string;
+}
+
+/** skill uninstall options [Issue #1237] */
+export interface SkillUninstallOptions extends SkillCommonOptions {
+  worktree?: string;
+  dryRun?: boolean;
+  yes?: boolean;
+}
+
+/** skill status options [Issue #1237] */
+export interface SkillStatusOptions extends SkillCommonOptions {
+  worktree?: string;
+}
+
 /** instances command options [Issue #1000] */
 export interface InstancesOptions {
   json?: boolean;

@@ -42,6 +42,7 @@ import { ExecutionLogPane } from '@/components/worktree/ExecutionLogPane';
 import { TimerPane } from '@/components/worktree/TimerPane';
 import { AgentInstancesPane } from '@/components/worktree/AgentInstancesPane';
 import { GitPane } from '@/components/worktree/GitPane';
+import { WorktreeSkillsPane } from '@/components/skills/WorktreeSkillsPane';
 import { Modal } from '@/components/ui/Modal';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
 import { MoveDialog } from '@/components/worktree/MoveDialog';
@@ -636,6 +637,10 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       // would NOT be a tsc error — it would silently render an empty pane. Keep
       // both this map entry and `worktreeId` in the deps array below.
       todo: <TodoPane worktreeId={worktreeId} className="h-full" />,
+      // Issue #1441: worktree-scoped Skill install/uninstall. The pane is fixed
+      // to the parent-owned worktreeId, so it plans/installs against this
+      // checkout without a target picker.
+      skills: <WorktreeSkillsPane worktreeId={worktreeId} className="h-full" />,
     }),
     [
       worktreeId,

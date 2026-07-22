@@ -23,7 +23,8 @@
     "repositoriesShort": "リポジトリ",
     "review": "レビュー",
     "reviewReport": "レビュー/レポート",
-    "more": "その他"
+    "more": "その他",
+    "skills": "スキル"
   },
   "repositories": {
     "empty": "リポジトリが登録されていません。",

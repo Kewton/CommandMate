@@ -588,7 +588,8 @@
     "schedules": "スケジュール",
     "agent": "エージェント",
     "timer": "タイマー",
-    "todo": "ToDo"
+    "todo": "ToDo",
+    "skills": "スキル"
   },
   "branchMismatch": {
     "changedFrom": "ブランチが",

@@ -1,0 +1,353 @@
+{
+  "page": {
+    "title": "スキル",
+    "description": "公式Skill Catalogを閲覧します。各Skillの内容、提供元、必要なCommandMateのversion、提供元が宣言するriskを確認できます。",
+    "backToCatalog": "Catalogに戻る"
+  },
+  "search": {
+    "label": "Skillを検索",
+    "placeholder": "名前・概要・キーワード・提供元",
+    "resultCount": "{total}件中{shown}件を表示"
+  },
+  "filters": {
+    "compatibility": "CommandMate互換性",
+    "risk": "提供元が宣言したrisk",
+    "agent": "Agent対応",
+    "all": "すべて",
+    "reset": "絞り込みを解除"
+  },
+  "compatibility": {
+    "label": "CommandMate互換性",
+    "native": "Agent単体で実行可能",
+    "commandmateRuntime": "CommandMate Runtime経由で実行",
+    "unsupported": "非対応",
+    "unknown": "未検証",
+    "status": {
+      "compatible": "互換あり",
+      "incompatible": "互換なし",
+      "unknown": "未検証"
+    },
+    "requiredRange": "必要なCommandMate: {range}",
+    "currentVersion": "稼働中のCommandMate: {version}",
+    "currentVersionUnknown": "稼働中のCommandMateのversionを特定できませんでした。",
+    "unverifiedNotice": "「未検証」は「互換あり」ではありません。CommandMateが判定できなかった状態であり、動作しない可能性があります。",
+    "agentsHeading": "Agent対応状況",
+    "agentsNotice": "Agent対応状況は提供元による申告であり、根拠として提示された内容をそのまま表示しています。CommandMateは検証していません。",
+    "agentsUnknown": "このversionにはAgent対応の宣言がありません。",
+    "evidence": "根拠",
+    "reason": {
+      "satisfied": "CommandMate {currentVersion} は要求範囲 {range} を満たしています。",
+      "hostVersionOutOfRange": "このSkillはCommandMate {range} を要求しますが、稼働中のversionは {currentVersion} です。",
+      "hostVersionUnknown": "稼働中のCommandMateのversionを特定できないため、{range} との互換性は未検証です。",
+      "rangeUnsupported": "このSkillはCommandMateが解釈できないversion範囲 {range} を宣言しているため、互換性は未検証です。"
+    }
+  },
+  "risk": {
+    "declaredLabel": "宣言risk: {level}",
+    "declaredHeading": "提供元が宣言したrisk",
+    "level": {
+      "low": "低",
+      "moderate": "中",
+      "high": "高"
+    },
+    "declaredNotice": "このrisk水準はSkillの提供元による自己申告です。CommandMateによる評価ではありません。",
+    "computedHeading": "CommandMateが算出するrisk",
+    "computedUnavailable": "Catalogからは取得できません。CommandMateはpackageの内容を検査してriskを算出しますが、それはpackageをダウンロードした後に行われます。",
+    "highWarning": "提供元はこのSkillをhigh riskと宣言しています。導入前に更新履歴と提供元の情報を確認してください。"
+  },
+  "permissions": {
+    "heading": "宣言された権限",
+    "declarationOnlyNotice": "権限は提供元が記載した宣言であり、CommandMateが強制する制限ではありません。Skillを導入してもsandboxで隔離されるわけではありません。",
+    "unavailable": "Catalogは宣言された権限を保持していません。権限はpackage内のSkill manifestに記載されており、CommandMateはダウンロード後に読み取ります。"
+  },
+  "capabilities": {
+    "heading": "このSkillでできること",
+    "unavailable": "詳細な能力と期待効果はpackage内のSkill manifestに記載されており、Catalogには含まれていません。以下はCatalogが公開している概要です。"
+  },
+  "requirements": {
+    "heading": "必要なコマンドとネットワークアクセス",
+    "unavailable": "Catalogは実行時の要件を保持していません。必要なコマンドや接続先hostはpackage内のSkill manifestに記載されています。"
+  },
+  "contents": {
+    "heading": "ファイルとスクリプト",
+    "unavailable": "Catalogはpackageの中身を列挙していません。ファイル・スクリプト・実行可能ファイルは、CommandMateがpackageをダウンロードして検査した時点で列挙されます。"
+  },
+  "detail": {
+    "overview": "概要",
+    "provider": "提供元",
+    "providerContact": "連絡先",
+    "license": "ライセンス",
+    "homepage": "ホームページ",
+    "keywords": "キーワード",
+    "skillId": "Skill ID",
+    "latestVersion": "公開されている最新version",
+    "recommendedVersion": "推奨version",
+    "recommendedVersionNone": "なし",
+    "requiredRangeLabel": "必要なCommandMateのversion範囲",
+    "publishedAt": "公開日時",
+    "sourceRepository": "リポジトリ",
+    "sourceRef": "Ref",
+    "sourceCommit": "コミット",
+    "packageAsset": "アセット名",
+    "packageDigest": "SHA-256",
+    "packageSize": "サイズ",
+    "packageBytes": "{bytes} バイト",
+    "versionsHeading": "更新履歴",
+    "versionsEmpty": "このCommandMateに適用できる公開versionがありません。",
+    "changelogHeading": "変更内容",
+    "changelogEmpty": "このversionには変更内容の記載がありません。",
+    "mediaStripped": "Catalog由来のテキストから画像と埋め込みメディアを除去しているため、外部ホストからの読み込みは発生しません。",
+    "prerelease": "プレリリース",
+    "recommendation": {
+      "highestCompatible": "稼働中のCommandMateで動作する、最も新しい公開versionです。",
+      "latestUnverified": "稼働中のCommandMateのversionを特定できなかったため、互換性を確認せずに提供元の最新versionを表示しています。",
+      "noneCompatible": "稼働中のCommandMateで動作する公開versionはありません。",
+      "noVersions": "このCommandMateに適用できる公開versionがありません。"
+    },
+    "install": {
+      "action": "導入先を選択",
+      "blockedIncompatible": "導入できません: {reason}",
+      "blockedNoVersion": "稼働中のCommandMateに適用できる公開versionがないため導入できません。"
+    }
+  },
+  "target": {
+    "heading": "導入先",
+    "loading": "登録済みworktreeを読み込んでいます…",
+    "empty": "登録済みのworktreeがありません。Skillを導入する前にworktreeを登録してください。",
+    "errorNotice": "登録済みworktreeの一覧を読み込めませんでした。現在は導入先を選択できません。",
+    "retry": "再試行",
+    "selected": "選択中",
+    "repository": "リポジトリ",
+    "branch": "ブランチ",
+    "branchUnknown": "記録されていません",
+    "agents": "Agent",
+    "agentsNone": "設定されていません",
+    "workingTree": "作業ツリー",
+    "workingTreeClean": "未コミットの変更なし",
+    "workingTreeDirty": "未コミットの変更あり",
+    "workingTreeUnknown": "未確認",
+    "sessionRunning": "このworktreeではセッションが稼働中です。",
+    "branchFreshnessNotice": "ここに表示しているブランチは直近のworktree同期時点の値です。CommandMateはinstall plan生成時に現在のブランチとコミットを解決し、差異があればそこで報告します。"
+  },
+  "plan": {
+    "highRiskAcknowledgement": "CommandMateはpackageの内容を検査した結果、このSkillをhigh riskと判定しました。以下のファイル・スクリプト・宣言された権限を確認したうえで、このworktreeへ導入することを明示的に承認してください。",
+    "build": "install planを作成",
+    "building": "install planを作成しています…",
+    "chooseTarget": "このSkillを導入するworktreeを選択してください。",
+    "ready": "planの作成では何も書き込みません。packageを取得して内容を検査し、導入した場合に何が変わるかだけを報告します。",
+    "heading": "install planの内容",
+    "expiresAt": "このplanは{timestamp}まで有効です。それ以降は作り直してください。",
+    "targetHeading": "導入先",
+    "headStateLabel": "Git HEADの状態",
+    "headState": {
+      "attached": "ブランチ上",
+      "detached": "detached HEAD",
+      "unborn": "コミットがまだありません",
+      "unknown": "解決できませんでした"
+    },
+    "installRoot": "導入先ディレクトリ",
+    "existingInstall": "既存の導入",
+    "existingInstallNone": "まだ導入されていません",
+    "existingInstallVersion": "version {version}",
+    "riskHeading": "リスク",
+    "riskDeclared": "publisher申告",
+    "riskComputed": "CommandMate判定",
+    "riskEffective": "実効",
+    "riskNotice": "判定値は取得したpackageの内容を検査した結果です。publisherの申告と食い違う場合は、高いほうを実効値として扱います。",
+    "permission": {
+      "filesystemRead": "ファイルを読み取る",
+      "filesystemWrite": "ファイルを書き込む",
+      "networkAccess": "ネットワークへ接続する",
+      "processExecution": "他のプログラムを実行する",
+      "environmentRead": "環境変数を読み取る",
+      "credentialAccess": "認証情報へアクセスする"
+    },
+    "permissionsNone": "manifestは権限を宣言していません。",
+    "requirementsNone": "manifestは必要なコマンドもネットワーク接続も宣言していません。",
+    "requirementsCommands": "コマンド",
+    "requirementsHosts": "ネットワークホスト",
+    "commandAnyVersion": "（version不問）",
+    "scriptsHeading": "package内のスクリプト・実行ファイル",
+    "scriptsNone": "packageにスクリプトも実行ファイルも含まれていません。",
+    "warningsHeading": "留意点",
+    "warning": {
+      "detachedHead": "このworktreeはブランチ上にないため、導入内容はどのブランチ履歴にも属しません。",
+      "unbornHead": "このworktreeにはまだコミットがありません。",
+      "headUnresolved": "現在のコミットを解決できませんでした。",
+      "workingTreeDirty": "このworktreeには未コミットの変更があるため、導入内容が作業中の変更と混ざります。",
+      "pathGitIgnored": "一部の書き込み先はgitのignore対象です。導入したファイルはgit statusに現れません。",
+      "diffTruncated": "一部の差分は大きすぎるため省略されています。",
+      "binaryContent": "一部のファイルはバイナリのため差分を表示できません。",
+      "lineEndingCrlf": "一部のファイルの改行コードはCRLFです。",
+      "treeScanTruncated": "書き込み先ディレクトリが大きすぎるため、完全には検査できませんでした。"
+    },
+    "filesHeading": "導入によって書き込まれる内容",
+    "stats": "追加{added}件 / 変更{modified}件 / 変更なし{unchanged}件 / 衝突{conflicted}件 / 管理外{unmanaged}件",
+    "filesEmpty": "このplanはファイルを書き込みません。",
+    "fileGenerated": "導入記録",
+    "gitIgnored": "このパスはgitのignore対象です。",
+    "diffToggle": "差分を表示（+{additions} / -{deletions}）",
+    "diffTruncated": "この差分は途中で打ち切られています。",
+    "diffBinary": "バイナリファイルのため差分は表示できません。",
+    "change": {
+      "add": "追加",
+      "modify": "変更",
+      "unchanged": "変更なし",
+      "conflict": "衝突",
+      "unmanaged": "管理外"
+    },
+    "diffReason": {
+      "newFile": "このパスには何もないため、ファイルは新規作成されます。",
+      "contentIdentical": "既にあるファイルは書き込む内容とバイト単位で同一です。",
+      "managedUpdate": "CommandMateが導入したファイルで変更もないため、置き換えます。",
+      "localModification": "導入後に編集されたファイルです。CommandMateはあなたの変更を上書きしません。",
+      "unmanagedSkill": "CommandMateが導入していないSkillディレクトリが既にあります。CommandMateが置き換えてよいものではありません。",
+      "receiptOrphan": "導入記録にはあるファイルですが、ディスク上には存在しません。記録された導入内容とworktreeが一致していません。",
+      "notARegularFile": "このパスはシンボリックリンク等の通常ファイル以外です。CommandMateはこれをたどりません。"
+    },
+    "blockersHeading": "導入できない理由",
+    "blockedNotice": "何も書き込んでいません。上記のパスを解消してからplanを作り直してください。",
+    "acknowledgeLabel": "上記のファイル・スクリプト・宣言された権限を確認したうえで、このhigh riskのSkillをこのworktreeへ導入します。",
+    "confirm": "このworktreeへ導入する",
+    "confirming": "導入しています…",
+    "discard": "このplanを破棄"
+  },
+  "install": {
+    "reload": {
+      "native": "{agent} は起動時にworktreeからSkillを読み込みます。{skillId} {version} を利用するには、このworktreeの {agent} セッションを再起動してください。",
+      "commandmateRuntime": "{agent} はCommandMate runtime経由でこのSkillを実行します。runtimeが {skillId} {version} を認識するよう、このworktreeの {agent} セッションを再起動してください。",
+      "unsupported": "{agent} はこのSkillに対応していません。ファイルは配置されましたが、{agent} セッションでは {skillId} {version} は提示されません。",
+      "unknown": "{agent} での対応状況は未検証です。ファイルは配置済みです。{agent} セッションを再起動し、{skillId} {version} が提示されるか確認してください。"
+    },
+    "nextAction": {
+      "succeeded": "Skillのインストールと記録が完了しました。以下のagentセッションを再起動すると利用を開始できます。",
+      "committedReconciling": "ファイルの書き込みは完了しworktreeに存在しますが、インストール記録が未完了です。CommandMateが自動的に完了させるため、再インストールは不要です。",
+      "failed": "worktreeへの書き込みは行われていません。理由を確認し、新しいInstall Planを作成してください。"
+    }
+  },
+  "uninstall": {
+    "reason": {
+      "managedUnchanged": "CommandMateが配置し、その後変更されていないため安全に削除できます。",
+      "localModification": "インストール後に編集されています。CommandMateは変更内容を削除しません。",
+      "receiptOrphan": "インストール記録に載っているファイルがworktreeに存在しません。ディスク上の状態は記録されたインストールと一致していません。",
+      "unmanagedFile": "Skillディレクトリ内にありますが、CommandMateが配置したファイルではないため削除対象にしません。",
+      "notARegularFile": "このパスはシンボリックリンクなど通常ファイル以外です。CommandMateは削除対象の判定でリンクをたどりません。",
+      "notInstalled": "このworktreeにはCommandMate管理下のインストールがありません。",
+      "receiptMissing": "SkillディレクトリにCommandMateのインストール記録がないため、どのファイルがSkillのものか証明できません。",
+      "receiptUnreadable": "インストール記録を読み取れないため、ファイルの所有関係を確定できません。",
+      "receiptForeign": "このディレクトリのインストール記録は別のSkillを指しています。",
+      "treeScanTruncated": "Skillディレクトリが大きすぎるか深すぎて完全に検査できないため、管理外ファイルがないと確認できません。"
+    },
+    "nextAction": {
+      "removable": "このディレクトリのファイルはすべてCommandMateが配置し、変更されていません。確認のうえ削除してください。",
+      "blocked": "何も削除していません。以下のファイルを退避または復元してから、新しいUninstall Planを作成してください。",
+      "succeeded": "Skillを削除し、記録を消去しました。以下のagentセッションを再起動すると提示されなくなります。",
+      "committedReconciling": "削除の途中で処理が停止しました。診断のためインストール記録は残しています。CommandMateが自動的に完了させます。",
+      "failed": "worktreeからは何も削除していません。理由を確認し、新しいUninstall Planを作成してください。"
+    },
+    "reload": {
+      "native": "{agent} は起動時にworktreeからSkillを読み込みます。{skillId} が提示されなくなるよう、このworktreeの {agent} セッションを再起動してください。",
+      "commandmateRuntime": "{agent} はCommandMate runtime経由でこのSkillを実行していました。runtimeが {skillId} を解放するよう、このworktreeの {agent} セッションを再起動してください。",
+      "unsupported": "{agent} はこのSkillに対応していなかったため、{skillId} の削除による {agent} セッションへの影響はありません。",
+      "unknown": "{agent} での対応状況は未検証でした。ファイルは削除済みです。{skillId} がまだ提示される場合は {agent} セッションを再起動してください。"
+    },
+    "build": "uninstall planを作成",
+    "building": "uninstall planを作成しています…",
+    "heading": "uninstall planの内容",
+    "expiresAt": "このplanは{timestamp}まで有効です。それ以降は作り直してください。",
+    "installedVersion": "導入済みversion",
+    "versionUnknown": "記録されていません",
+    "stats": "削除可能{removable}件 / 変更済み{modified}件 / 消失{missing}件 / 未記録{unknown}件 / 通常ファイル以外{irregular}件",
+    "removalsHeading": "削除される対象",
+    "removalsEmpty": "このplanは何も削除しません。",
+    "retainedHeading": "残す対象",
+    "retainedEmpty": "残るものはありません。",
+    "blockersHeading": "削除できない理由",
+    "confirm": "このworktreeから削除する",
+    "confirming": "削除しています…",
+    "disposition": {
+      "remove": "削除",
+      "modified": "残す（編集済み）",
+      "missing": "既に存在しません",
+      "unknown": "残す（未記録）",
+      "irregular": "残す（通常ファイル以外）"
+    }
+  },
+  "card": {
+    "provider": "提供元: {provider}",
+    "noRecommendedVersion": "導入可能なversionなし"
+  },
+  "worktreePane": {
+    "installedHeading": "このワークツリーに導入済み",
+    "installedError": "このワークツリーの導入済みSkillを読み込めませんでした。",
+    "installedEmpty": "このワークツリーにはまだSkillが導入されていません。",
+    "catalogHeading": "Catalogから導入",
+    "installedBadge": "導入済み",
+    "version": "バージョン {version}",
+    "back": "Skill一覧へ戻る"
+  },
+  "state": {
+    "loading": "Skill Catalogを読み込んでいます…",
+    "empty": "公式Catalogにはまだ公開されているSkillがありません。",
+    "noResults": "現在の検索条件と絞り込みに一致するSkillはありません。",
+    "noResultsHint": "キーワードを変えるか、絞り込みを解除してください。",
+    "errorHeading": "Skill Catalogを読み込めませんでした",
+    "errorNotice": "これは取得に失敗した状態であり、Catalogが空であることを意味しません。どのSkillが存在するかは判断できません。",
+    "errorCode": "エラーコード: {code}",
+    "retry": "再試行",
+    "notFoundHeading": "Skillが見つかりません",
+    "notFoundNotice": "このIDに一致するSkillは公式Catalogに存在しません。"
+  },
+  "catalog": {
+    "staleHeading": "キャッシュされたCatalogを表示しています",
+    "staleNotice": "このCatalogが最新であることを確認できなかったため、内容が古い可能性があります。",
+    "offlineNotice": "直近の試行ではCatalogの取得元に到達できませんでした。",
+    "freshLabel": "Catalogは最新であることを確認済み",
+    "fetchedAt": "最終検証: {timestamp}",
+    "revalidatedAt": "最新であることを最後に確認: {timestamp}",
+    "sourceLabel": "取得元: {repository} ({ref})",
+    "reason": {
+      "fetchFailed": "Catalogを取得できませんでした。",
+      "rateLimited": "Catalogの取得元がレート制限を適用しています。",
+      "oversized": "Catalogの応答が許容サイズを超えました。",
+      "malformed": "Catalogの応答が正しいJSONではありませんでした。",
+      "invalidSchema": "Catalogの応答が契約検証に失敗しました。",
+      "unknown": "理由は報告されていません。"
+    }
+  },
+  "operation": {
+    "errorHeading": "操作は実行されませんでした",
+    "reloadHeading": "以下のagentセッションを再起動してください",
+    "installedHeading": "導入しました",
+    "uninstalledHeading": "削除しました",
+    "replayNotice": "既に実行済みの要求に対する応答のため、ファイル単位の一覧は再掲されません。",
+    "filesWritten": "{count}件のファイルを書き込みました",
+    "filesRemoved": "{count}件のファイルを削除しました",
+    "startOver": "別の導入先を選ぶ",
+    "error": {
+      "planStale": "plan作成後にworktreeが変化したため、planは現状を説明していません。何も書き込んでいません。planを作り直してください。",
+      "planExpired": "このplanは有効期限切れです。何も書き込んでいません。planを作り直してください。",
+      "planConsumed": "このplanは既に使用済みです。二重には書き込んでいません。",
+      "planNotFound": "CommandMateはこのplanを保持していません。何も書き込んでいません。planを作り直してください。",
+      "planBindingMismatch": "このplanは別の要求向けに作成されたもので、ここでは使用できません。この画面からplanを作り直してください。",
+      "planNotInstallable": "このplanには阻害要因があるため適用できません。何も書き込んでいません。",
+      "planRiskNotAcknowledged": "high riskのpackageですが導入の明示的な承認がありません。何も書き込んでいません。",
+      "installLocked": "このworktreeでは別のSkill操作が実行中です。何も書き込んでいません。完了後に再試行してください。",
+      "installInProgress": "同一内容の導入が既に実行中です。二重に開始せず完了を待ってください。",
+      "installDestinationExists": "導入先には既に何かが存在します。CommandMateは自身が導入していないものを上書きしないため、何も書き込んでいません。",
+      "installDestinationUnmanaged": "CommandMateが導入していないSkillディレクトリが導入先にあります。何も書き込んでいません。",
+      "installIdempotencyConflict": "この再試行は元の要求と内容が一致しません。何も書き込んでいません。planを作り直してください。",
+      "installFailed": "先行する導入が失敗しており、何も書き込まれていません。planを作り直してください。",
+      "uninstallLocked": "このworktreeでは別のSkill操作が実行中です。何も削除していません。完了後に再試行してください。",
+      "uninstallInProgress": "同一内容の削除が既に実行中です。二重に開始せず完了を待ってください。",
+      "uninstallIdempotencyConflict": "この再試行は元の要求と内容が一致しません。何も削除していません。planを作り直してください。",
+      "uninstallNotInstalled": "このworktreeにこのSkillの導入記録がないため、削除する対象がありません。",
+      "uninstallBlocked": "何も削除していません。CommandMateが削除してよくないパスが含まれています。",
+      "uninstallDrift": "worktreeが導入記録と一致しなくなっており、どのファイルがCommandMate管理下か判別できません。何も削除していません。",
+      "uninstallFileChanged": "plan作成後にファイルが変更されました。何も削除していません。planを作り直してください。",
+      "uninstallFailed": "先行する削除が失敗しており、何も削除されていません。planを作り直してください。",
+      "requestFailed": "要求がCommandMateに届かなかったか、理由を伴わない応答が返りました。変更が起きたとは確認できていません。",
+      "unexpected": "CommandMateが説明を持たない失敗を報告しました。worktreeを確認したうえで、変更なしと判断してください。"
+    }
+  }
+}

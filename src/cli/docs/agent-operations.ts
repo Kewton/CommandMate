@@ -116,6 +116,42 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
 
   See "Multi-Session" below for the ID convention and roster semantics.
 
+### commandmate skill <subcommand>
+  Manage official Agent Skills. Every subcommand is a thin client over the same
+  APIs the browser UI uses: the CLI never downloads, extracts, writes or deletes
+  anything itself, and never sends a filesystem path, artifact URL, file list or
+  checksum (the API rejects those outright).
+
+  commandmate skill list [--json] [--prerelease]
+  commandmate skill info <skill-id> [--version <v>] [--json]
+  commandmate skill plan <skill-id> --worktree <id> [--version <v>] [--json]
+  commandmate skill install <skill-id> --worktree <id> --version <exact> [--dry-run] [--yes] [--ack-risk <id>@<version>] [--json]
+  commandmate skill uninstall <skill-id> --worktree <id> [--dry-run] [--yes] [--json]
+  commandmate skill status <skill-id> --worktree <id> [--json]
+
+  Confirmation contract (writes = install / uninstall):
+    - A plan is always built and shown first. --dry-run stops there.
+    - Without a TTY, a write REQUIRES --yes. A missing --yes is refused, never
+      assumed: an environment that cannot prompt must not install silently.
+    - A high-risk Skill additionally requires --ack-risk <skill-id>@<version>
+      with the exact id and version. --yes alone never carries a high-risk
+      install, in a TTY or out of one.
+
+  Exit codes:
+    0   success
+    1   the server or the Catalog could not be reached (retryable)
+    2   invalid arguments, unknown Skill or unknown version
+    11  the worktree refused it (local change, conflict, lock, plan drift)
+    12  the write was never confirmed (no --yes, declined, or missing --ack-risk)
+    13  files changed but the operation needs reconciliation
+
+  --json prints the API response body verbatim on stdout; diagnostics, prompts
+  and errors always go to stderr, so a failed --json run leaves stdout empty.
+
+  'skill status' reports one Skill in one worktree, read from the install
+  receipt on disk. There is no per-worktree listing endpoint yet, so <skill-id>
+  is required.
+
 ## Multi-Session (1 agent, multiple sessions)
 
   A worktree can run several sessions of the same CLI tool concurrently. Each

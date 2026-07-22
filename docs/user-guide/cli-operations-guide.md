@@ -63,6 +63,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Auto-Yesの制御 |
 | [`commandmate instances`](#commandmate-instances) | エージェントインスタンス（roster）の一覧・追加・削除・alias変更 |
 | [`commandmate report`](#commandmate-report) | 日次レポートの生成・表示・一覧 |
+| [`commandmate skill`](#commandmate-skill) | 公式Skillのカタログ参照・Install Plan・install・uninstall・status |
 | [`commandmate update`](#commandmate-update) | CommandMate本体の更新（停止 → 更新 → 再起動） |
 
 ---
@@ -457,6 +458,84 @@ commandmate report list --json                     # JSON出力
 2026-06-20  [no report]  messages=3
 2026-06-19  [report] tool=codex  messages=8
 ```
+
+---
+
+## commandmate skill
+
+公式 Agent Skill を CLI から管理します。ブラウザ UI と**同一の API / domain service** を利用する thin client であり、
+CLI 側で download / extract / write / delete は一切行いません。
+
+filesystem path・artifact URL・file list・checksum は API 側で明示的に拒否されるため、CLI はそれらを再構成しません。
+plan で server が発行した plan token を、そのまま install / uninstall へ渡します。
+
+### 使用方法
+
+```bash
+# カタログ参照
+commandmate skill list                                    # 一覧（表形式）
+commandmate skill list --json                             # JSON（API レスポンスそのまま）
+commandmate skill list --prerelease                       # prerelease を含める
+commandmate skill info <skill-id>                         # 能力・提供元・version・互換性
+commandmate skill info <skill-id> --version 1.2.0
+
+# Install Plan（書き込みなし）
+commandmate skill plan <skill-id> --worktree <worktree-id>
+commandmate skill plan <skill-id> --worktree <worktree-id> --version 1.2.0 --json
+
+# install（plan → 確認 → apply）
+commandmate skill install <skill-id> --worktree <worktree-id> --version 1.2.0
+commandmate skill install <skill-id> --worktree <worktree-id> --version 1.2.0 --dry-run
+commandmate skill install <skill-id> --worktree <worktree-id> --version 1.2.0 --yes
+commandmate skill install <skill-id> --worktree <worktree-id> --version 1.2.0 \
+  --yes --ack-risk <skill-id>@1.2.0                       # high-risk Skill
+
+# uninstall / status
+commandmate skill uninstall <skill-id> --worktree <worktree-id> --dry-run
+commandmate skill uninstall <skill-id> --worktree <worktree-id> --yes
+commandmate skill status <skill-id> --worktree <worktree-id> --json
+```
+
+### 確認規約（install / uninstall）
+
+| 状況 | 挙動 |
+|------|------|
+| 常に | 先に plan を構築して内容を表示する |
+| `--dry-run` | plan までで停止し、書き込み・削除を行わない |
+| TTY かつ `--yes` なし | plan summary を表示してから確認プロンプト（stderr）を出す |
+| **非TTY かつ `--yes` なし** | **書き込まず exit 12**。プロンプトを出せない環境で暗黙実行しない |
+| **high-risk Skill** | `--yes` に加えて `--ack-risk <skill-id>@<version>` の**完全一致**が必要。`--yes` だけでは通らない（TTY で承諾しても同じ） |
+
+### オプション
+
+| オプション | 対象サブコマンド | 説明 |
+|-----------|-----------------|------|
+| `--worktree <id>` | plan / install / uninstall / status | 対象worktree ID（`commandmate ls` で確認） |
+| `--version <version>` | info / plan / install | install では**必須**（exact version） |
+| `--dry-run` | install / uninstall | plan までで停止 |
+| `-y, --yes` | install / uninstall | 確認プロンプトをスキップ（非対話環境では必須） |
+| `--ack-risk <id>@<version>` | install | high-risk Skill の明示的な承認 |
+| `--prerelease` | list / info / plan / install | prerelease version を対象に含める |
+| `--json` | 全サブコマンド | JSON出力（API レスポンスをそのまま出力） |
+| `--token <token>` | 全サブコマンド | 認証トークン（`CM_AUTH_TOKEN` 環境変数を推奨） |
+
+### 終了コード
+
+| コード | 意味 | 対処 |
+|-------|------|------|
+| 0 | 成功 | - |
+| 1 | サーバー／Catalog へ到達できない | リトライ可 |
+| 2 | 引数不正・Skill / version が存在しない | argv を修正 |
+| 11 | worktree 側が拒否（local変更・衝突・lock・plan drift） | 該当pathを解消して再 plan |
+| 12 | 書き込みが確認されなかった（`--yes` なし・拒否・`--ack-risk` 不一致） | 明示的に承認して再実行 |
+| 13 | ファイルは変更されたが reconciliation が必要 | 状態を確認（自動収束する） |
+
+> **stdout / stderr の分離**: `--json` 成功時の stdout は parse 可能な JSON のみになります。
+> plan summary・確認プロンプト・警告・エラー（typed code と blocker path を含む）はすべて stderr に出るため、
+> `--json` 実行が失敗した場合の stdout は空です。
+
+> **`skill status` について**: 1 worktree × 1 Skill の導入状態を、install receipt（ディスク上の実体）から報告します。
+> worktree 単位で導入済み Skill を一覧する API は未提供のため、`<skill-id>` は必須です。
 
 ---
 

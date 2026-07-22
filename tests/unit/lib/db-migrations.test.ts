@@ -33,8 +33,8 @@ describe('db-migrations', () => {
   });
 
   describe('CURRENT_SCHEMA_VERSION', () => {
-    it('should be 43 after Migration #43 (remove CM_ROOT_DIR ghost repository)', () => {
-      expect(CURRENT_SCHEMA_VERSION).toBe(43);
+    it('should be 47 after Migration #47 (skill_installations install_roots, #1460)', () => {
+      expect(CURRENT_SCHEMA_VERSION).toBe(47);
     });
   });
 
