@@ -11,6 +11,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { handleApiError } from '@/lib/api-client';
 import { filterCommandGroups } from '@/lib/command-merger';
+import { SKILL_INSTALLED_EVENT, type SkillInstalledEventDetail } from '@/lib/skill-events';
 import type { SlashCommand, SlashCommandGroup, CatalogStaleness } from '@/types/slash-commands';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
@@ -103,7 +104,10 @@ export function useSlashCommands(
         endpoint += `?cliTool=${cliToolId}`;
       }
 
-      const response = await fetch(endpoint);
+      // Issue #1477: never serve a cached command list. Installing a Skill
+      // changes what the API returns, and a memory/http cache hit here would
+      // keep the palette showing the pre-install set even after a refetch.
+      const response = await fetch(endpoint, { cache: 'no-store' });
       if (!response.ok) {
         throw new Error(`HTTP error ${response.status}`);
       }
@@ -127,6 +131,25 @@ export function useSlashCommands(
   useEffect(() => {
     void fetchCommands();
   }, [fetchCommands]);
+
+  /**
+   * Refetch when a Skill is installed into the worktree this palette is showing
+   * (Issue #1477). The install flow lives in a separate component tree, so it
+   * signals through a window event instead of a shared React path. Only a
+   * matching worktreeId refetches: an install into a different checkout, or the
+   * global (worktree-less) command list, must not disturb this palette.
+   */
+  useEffect(() => {
+    if (!worktreeId) return;
+    const handleSkillInstalled = (event: Event): void => {
+      const detail = (event as CustomEvent<SkillInstalledEventDetail>).detail;
+      if (detail?.worktreeId === worktreeId) {
+        void fetchCommands();
+      }
+    };
+    window.addEventListener(SKILL_INSTALLED_EVENT, handleSkillInstalled);
+    return () => window.removeEventListener(SKILL_INSTALLED_EVENT, handleSkillInstalled);
+  }, [worktreeId, fetchCommands]);
 
   /**
    * Flat list of all commands

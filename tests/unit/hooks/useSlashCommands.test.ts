@@ -92,7 +92,7 @@ describe('useSlashCommands', () => {
 
       expect(result.current.groups).toEqual(mockGroups);
       expect(result.current.error).toBeNull();
-      expect(mockFetch).toHaveBeenCalledWith('/api/slash-commands');
+      expect(mockFetch).toHaveBeenCalledWith('/api/slash-commands', { cache: 'no-store' });
     });
 
     it('should handle API errors', async () => {
@@ -138,7 +138,9 @@ describe('useSlashCommands', () => {
         expect(result.current.loading).toBe(false);
       });
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/worktrees/worktree-123/slash-commands');
+      expect(mockFetch).toHaveBeenCalledWith('/api/worktrees/worktree-123/slash-commands', {
+        cache: 'no-store',
+      });
     });
 
     it('should use default API when worktreeId is not provided', async () => {
@@ -153,7 +155,7 @@ describe('useSlashCommands', () => {
         expect(result.current.loading).toBe(false);
       });
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/slash-commands');
+      expect(mockFetch).toHaveBeenCalledWith('/api/slash-commands', { cache: 'no-store' });
     });
   });
 
@@ -303,6 +305,99 @@ describe('useSlashCommands', () => {
 
       // Should have called fetch again
       expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('skill:installed event (Issue #1477)', () => {
+    it('refetches and surfaces the newly installed skill when the worktree matches', async () => {
+      const newSkillGroups: SlashCommandGroup[] = [
+        ...mockGroups,
+        {
+          category: 'skill',
+          label: 'Skills',
+          commands: [
+            {
+              name: 'release-helper',
+              description: 'Release helper skill',
+              category: 'skill',
+              source: 'skill',
+              filePath: '.claude/skills/release-helper/SKILL.md',
+            },
+          ],
+        },
+      ];
+
+      // First load: skill is absent. After install: present.
+      mockFetch
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ groups: mockGroups }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ groups: newSkillGroups }) });
+
+      const { result } = renderHook(() => useSlashCommands('worktree-123'));
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.allCommands.some((c) => c.name === 'release-helper')).toBe(false);
+
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent('skill:installed', { detail: { worktreeId: 'worktree-123' } })
+        );
+      });
+
+      await waitFor(() => {
+        expect(result.current.allCommands.some((c) => c.name === 'release-helper')).toBe(true);
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('ignores an install into a different worktree', async () => {
+      mockFetch.mockResolvedValue({ ok: true, json: async () => ({ groups: mockGroups }) });
+
+      const { result } = renderHook(() => useSlashCommands('worktree-123'));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent('skill:installed', { detail: { worktreeId: 'other-worktree' } })
+        );
+      });
+
+      // No refetch for a mismatched worktree.
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores the event for the global (worktree-less) command list', async () => {
+      mockFetch.mockResolvedValue({ ok: true, json: async () => ({ groups: mockGroups }) });
+
+      const { result } = renderHook(() => useSlashCommands());
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent('skill:installed', { detail: { worktreeId: 'worktree-123' } })
+        );
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('stops listening after unmount', async () => {
+      mockFetch.mockResolvedValue({ ok: true, json: async () => ({ groups: mockGroups }) });
+
+      const { result, unmount } = renderHook(() => useSlashCommands('worktree-123'));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      unmount();
+
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent('skill:installed', { detail: { worktreeId: 'worktree-123' } })
+        );
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
     });
   });
 });
