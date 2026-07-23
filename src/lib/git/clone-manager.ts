@@ -30,6 +30,7 @@ import {
   type Repository,
 } from '@/lib/db/db-repository';
 import { scanWorktrees } from './worktrees';
+import { gitRemoteAdd } from './git-remote';
 import { syncWorktreesAndCleanup } from '@/lib/session-cleanup';
 import type { CloneError, CloneErrorCategory, CloneJobStatus } from '@/types/clone';
 import { createLogger } from '@/lib/logger';
@@ -69,6 +70,18 @@ export interface CloneJobStatusResponse {
     code: string;
     message: string;
   };
+}
+
+/**
+ * Options for startCloneJob (Issue #1480)
+ */
+export interface StartCloneJobOptions {
+  /**
+   * When set, an `upstream` remote pointing at this URL is registered after a
+   * successful clone. Used by the fork flow so origin stays the user's fork while
+   * upstream tracks the original repository (fetch/pull).
+   */
+  upstreamUrl?: string;
 }
 
 /**
@@ -259,6 +272,12 @@ export class CloneManager {
   private urlNormalizer: UrlNormalizer;
   private config: CloneManagerConfig;
   private activeProcesses: Map<string, ChildProcess>;
+  /**
+   * Issue #1480: upstream URL to register (as the `upstream` remote) once the
+   * clone for a given job succeeds. Kept in memory — mirroring activeProcesses —
+   * because clone jobs run in-process and this needs no persistence.
+   */
+  private pendingUpstreamUrls: Map<string, string>;
 
   constructor(db: Database.Database, config: CloneManagerConfig = {}) {
     this.db = db;
@@ -268,6 +287,7 @@ export class CloneManager {
       timeout: config.timeout || 10 * 60 * 1000, // 10 minutes
     };
     this.activeProcesses = new Map();
+    this.pendingUpstreamUrls = new Map();
   }
 
   /**
@@ -403,7 +423,11 @@ export class CloneManager {
    * 3. Creates a job record
    * 4. Returns immediately (clone runs in background)
    */
-  async startCloneJob(cloneUrl: string, customTargetPath?: string): Promise<CloneResult> {
+  async startCloneJob(
+    cloneUrl: string,
+    customTargetPath?: string,
+    options?: StartCloneJobOptions
+  ): Promise<CloneResult> {
     // 1. Validate URL
     const validation = this.validateCloneRequest(cloneUrl);
     if (!validation.valid) {
@@ -485,6 +509,11 @@ export class CloneManager {
       targetPath,
     });
 
+    // Issue #1480: remember the upstream URL to register once this job succeeds.
+    if (options?.upstreamUrl) {
+      this.pendingUpstreamUrls.set(job.id, options.upstreamUrl);
+    }
+
     // 8. Start clone in background (don't await)
     this.executeClone(job.id, cloneUrl, targetPath).catch((error) => {
       logger.error('clone:job-failed', { jobId: job.id, error: error instanceof Error ? error.message : String(error) });
@@ -503,6 +532,9 @@ export class CloneManager {
    * DB 書き込みが失敗した場合はログに残すだけにして、元のエラーを伝播させる。
    */
   private markJobFailed(jobId: string, error: CloneError): void {
+    // Issue #1480: a job that never reaches onCloneSuccess must not leak its
+    // pending upstream entry.
+    this.pendingUpstreamUrls.delete(jobId);
     try {
       updateCloneJob(this.db, jobId, {
         status: 'failed',
@@ -593,6 +625,7 @@ export class CloneManager {
           completedAt: new Date(),
         });
         this.activeProcesses.delete(jobId);
+        this.pendingUpstreamUrls.delete(jobId);
         reject(new CloneManagerError(ERROR_DEFINITIONS.CLONE_TIMEOUT));
       }, this.config.timeout);
 
@@ -614,6 +647,7 @@ export class CloneManager {
           }
         } else {
           // Failure - parse error
+          this.pendingUpstreamUrls.delete(jobId);
           const error = this.parseGitError(stderr, code);
           updateCloneJob(this.db, jobId, {
             status: 'failed',
@@ -630,6 +664,7 @@ export class CloneManager {
       gitProcess.on('error', (err) => {
         clearTimeout(timeout);
         this.activeProcesses.delete(jobId);
+        this.pendingUpstreamUrls.delete(jobId);
 
         const error: CloneError = {
           category: 'system',
@@ -677,6 +712,23 @@ export class CloneManager {
         normalizedCloneUrl: job.normalizedCloneUrl,
         cloneSource: cloneSource as 'local' | 'https' | 'ssh',
       });
+
+      // Issue #1480: register the upstream remote for the fork flow. Best-effort:
+      // a failure here (e.g. the remote already exists) must not fail the clone,
+      // which has already succeeded and been registered.
+      const upstreamUrl = this.pendingUpstreamUrls.get(jobId);
+      if (upstreamUrl) {
+        this.pendingUpstreamUrls.delete(jobId);
+        try {
+          await gitRemoteAdd(targetPath, 'upstream', upstreamUrl);
+          logger.info('clone:upstream-registered', { jobId });
+        } catch (error) {
+          logger.warn('clone:upstream-register-failed', {
+            jobId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
 
       // Issue #526: Scan and register worktrees with cleanup (MF-001, IA-MF-002)
       try {

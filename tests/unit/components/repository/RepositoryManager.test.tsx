@@ -302,7 +302,43 @@ describe('RepositoryManager', () => {
       fireEvent.click(cloneButton);
 
       await waitFor(() => {
-        expect(repositoryApi.clone).toHaveBeenCalledWith('https://github.com/user/myrepo.git');
+        expect(repositoryApi.clone).toHaveBeenCalledWith('https://github.com/user/myrepo.git', {
+          fork: false,
+        });
+      });
+    });
+
+    it('should default the fork checkbox to unchecked', async () => {
+      render(<RepositoryManager onRepositoryAdded={mockOnRepositoryAdded} />);
+
+      fireEvent.click(screen.getByRole('button', { name: /add repository/i }));
+      fireEvent.mouseDown(screen.getByRole('tab', { name: /clone url/i }));
+
+      const forkCheckbox = screen.getByRole('checkbox', { name: /fork before adding/i });
+      expect(forkCheckbox).not.toBeChecked();
+    });
+
+    it('should call clone with fork:true and show the fork button label when checked', async () => {
+      render(<RepositoryManager onRepositoryAdded={mockOnRepositoryAdded} />);
+
+      fireEvent.click(screen.getByRole('button', { name: /add repository/i }));
+      fireEvent.mouseDown(screen.getByRole('tab', { name: /clone url/i }));
+
+      const urlInput = screen.getByPlaceholderText('https://github.com/user/repo.git');
+      fireEvent.change(urlInput, { target: { value: 'https://github.com/user/myrepo.git' } });
+
+      const forkCheckbox = screen.getByRole('checkbox', { name: /fork before adding/i });
+      fireEvent.click(forkCheckbox);
+      expect(forkCheckbox).toBeChecked();
+
+      // Button label switches to the fork variant once the option is enabled.
+      const forkButton = screen.getByRole('button', { name: /fork & add/i });
+      fireEvent.click(forkButton);
+
+      await waitFor(() => {
+        expect(repositoryApi.clone).toHaveBeenCalledWith('https://github.com/user/myrepo.git', {
+          fork: true,
+        });
       });
     });
 
