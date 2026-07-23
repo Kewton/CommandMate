@@ -518,3 +518,46 @@ describe('SlashCommandSelector viewport clamping (Issue #1365)', () => {
     expect(screen.getByTestId('slash-command-bottom-sheet').style.transform).toBe('');
   });
 });
+
+// Issue #1476: catalog staleness hint
+describe('SlashCommandSelector — catalog staleness hint', () => {
+  const mockOnSelect = vi.fn();
+  const mockOnClose = vi.fn();
+  const mockGroups: SlashCommandGroup[] = [
+    {
+      category: 'standard-util',
+      label: 'Standard (Utility)',
+      commands: [
+        { name: 'help', description: 'Show help', category: 'standard-util', filePath: '', source: 'standard' },
+      ],
+    },
+  ];
+
+  beforeEach(() => {
+    locale.current = 'en';
+    vi.clearAllMocks();
+  });
+
+  it('does not render the stale note by default', () => {
+    render(
+      <SlashCommandSelector isOpen groups={mockGroups} onSelect={mockOnSelect} onClose={mockOnClose} />
+    );
+    expect(screen.queryByTestId('slash-command-stale-note')).not.toBeInTheDocument();
+  });
+
+  it('renders the stale note in the desktop dropdown when isCatalogStale', () => {
+    render(
+      <SlashCommandSelector isOpen groups={mockGroups} onSelect={mockOnSelect} onClose={mockOnClose} isCatalogStale />
+    );
+    const note = screen.getByTestId('slash-command-stale-note');
+    expect(note).toBeInTheDocument();
+    expect(note.textContent).toMatch(/~\/\.commandmate\/slash-commands\//);
+  });
+
+  it('renders the stale note in the mobile bottom sheet when isCatalogStale', () => {
+    render(
+      <SlashCommandSelector isOpen groups={mockGroups} onSelect={mockOnSelect} onClose={mockOnClose} isMobile isCatalogStale />
+    );
+    expect(screen.getByTestId('slash-command-stale-note')).toBeInTheDocument();
+  });
+});

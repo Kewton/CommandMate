@@ -90,6 +90,15 @@ export function SlashCommandList({
                       Codex
                     </span>
                   )}
+                  {/* Issue #1476: mark user extension commands so they are distinguishable from bundled ones */}
+                  {command.source === 'user-catalog' && (
+                    <span
+                      data-testid="user-catalog-badge"
+                      className="mt-0.5 rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                    >
+                      {t('slashCommands.sourceBadge.userCatalog')}
+                    </span>
+                  )}
                   <span className="text-muted-foreground text-sm truncate">
                     {resolveCommandDescription(command, t)}
                   </span>

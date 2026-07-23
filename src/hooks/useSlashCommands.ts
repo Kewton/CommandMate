@@ -11,7 +11,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { handleApiError } from '@/lib/api-client';
 import { filterCommandGroups } from '@/lib/command-merger';
-import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
+import type { SlashCommand, SlashCommandGroup, CatalogStaleness } from '@/types/slash-commands';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 /**
@@ -36,6 +36,11 @@ export interface UseSlashCommandsResult {
   refresh: () => void;
   /** Currently loaded CLI tool */
   cliTool: CLIToolType;
+  /**
+   * Whether the installed CLI is newer than the bundled catalog for any tool
+   * (Issue #1476). Drives the non-intrusive "list may be out of date" hint.
+   */
+  isCatalogStale: boolean;
 }
 
 /**
@@ -76,6 +81,7 @@ export function useSlashCommands(
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
   const [currentCliTool, setCurrentCliTool] = useState<CLIToolType>(cliToolId || 'claude');
+  const [catalogStaleness, setCatalogStaleness] = useState<CatalogStaleness>({});
 
   /**
    * Fetch commands from API
@@ -104,9 +110,12 @@ export function useSlashCommands(
       const data = await response.json();
       setGroups(data.groups);
       setCurrentCliTool(data.cliTool || cliToolId || 'claude');
+      // Issue #1476: only the worktree endpoint returns catalogStaleness.
+      setCatalogStaleness(data.catalogStaleness ?? {});
     } catch (err) {
       setError(handleApiError(err));
       setGroups([]);
+      setCatalogStaleness({});
     } finally {
       setLoading(false);
     }
@@ -135,6 +144,13 @@ export function useSlashCommands(
   }, [groups, filter]);
 
   /**
+   * Whether any tool's installed CLI is newer than the bundled catalog.
+   */
+  const isCatalogStale = useMemo(() => {
+    return Object.values(catalogStaleness).some((entry) => entry.stale);
+  }, [catalogStaleness]);
+
+  /**
    * Refresh commands
    */
   const refresh = useCallback(() => {
@@ -151,5 +167,6 @@ export function useSlashCommands(
     setFilter,
     refresh,
     cliTool: currentCliTool,
+    isCatalogStale,
   };
 }

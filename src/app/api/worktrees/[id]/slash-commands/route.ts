@@ -18,10 +18,11 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { getSlashCommandGroups, loadCodexSkills, loadAgentsSkills, getCopilotBuiltinCommands, getGeminiBuiltinCommands } from '@/lib/slash-commands';
 import { getStandardCommandGroups } from '@/lib/standard-commands';
+import { loadUserCatalogCommands, composeStandardLayer, getCatalogStaleness } from '@/lib/slash-command-catalog';
 import { mergeCommandGroups, filterCommandsByCliTool, groupByCategory } from '@/lib/command-merger';
 import { isValidWorktreePath } from '@/lib/security/worktree-path-validator';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
-import type { SlashCommandGroup } from '@/types/slash-commands';
+import type { SlashCommandGroup, CatalogStaleness } from '@/types/slash-commands';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/slash-commands');
@@ -41,8 +42,15 @@ interface SlashCommandsResponse {
     mcbd: number;
     skill: number;  // Issue #343: Skills source count
     codexSkill: number;  // Issue #166: Codex skills source count
+    userCatalog: number;  // Issue #1476: user extension entries
   };
   cliTool: CLIToolType;
+  /**
+   * Issue #1476: per-tool staleness of the built-in catalog. Additive and
+   * backward compatible — a tool appears only when its CLI version could be
+   * read, so an empty object means "nothing known to be stale".
+   */
+  catalogStaleness: CatalogStaleness;
 }
 
 /**
@@ -89,8 +97,14 @@ export async function GET(
     // Issue #4: Get CLI tool from query parameter
     const cliTool = validateCliTool(request.nextUrl.searchParams.get('cliTool'));
 
-    // Get standard command groups
-    const standardGroups = getStandardCommandGroups();
+    // Get standard command groups, then fold in user extension commands
+    // (Issue #1476). User entries override bundled entries that share the same
+    // name + CLI tool scope, but stay part of the standard layer so worktree
+    // commands still take priority (SF-1 invariant preserved by the merge below).
+    const standardGroups = composeStandardLayer(
+      getStandardCommandGroups(),
+      loadUserCatalogCommands()
+    );
 
     // Get worktree-specific command groups (includes local Codex skills via getSlashCommandGroups)
     let worktreeGroups: SlashCommandGroup[] = [];
@@ -134,15 +148,19 @@ export async function GET(
     const filteredGroups = filterCommandsByCliTool(mergedGroups, cliTool);
 
     // Calculate source counts in a single pass
-    const sourceCounts = { standard: 0, worktree: 0, skill: 0, codexSkill: 0 };
+    const sourceCounts = { standard: 0, worktree: 0, skill: 0, codexSkill: 0, userCatalog: 0 };
     for (const group of filteredGroups) {
       for (const cmd of group.commands) {
         if (cmd.source === 'standard') sourceCounts.standard++;
         else if (cmd.source === 'worktree') sourceCounts.worktree++;
         else if (cmd.source === 'skill') sourceCounts.skill++;
         else if (cmd.source === 'codex-skill') sourceCounts.codexSkill++;
+        else if (cmd.source === 'user-catalog') sourceCounts.userCatalog++;
       }
     }
+
+    // Issue #1476: lazy, process-cached staleness probe. Never fails the request.
+    const catalogStaleness = await getCatalogStaleness().catch(() => ({} as CatalogStaleness));
 
     return NextResponse.json({
       groups: filteredGroups,
@@ -151,6 +169,7 @@ export async function GET(
         mcbd: 0, // MCBD commands are loaded separately via /api/slash-commands
       },
       cliTool,
+      catalogStaleness,
     });
   } catch (error) {
     logger.error('error:', { error: error instanceof Error ? error.message : String(error) });
