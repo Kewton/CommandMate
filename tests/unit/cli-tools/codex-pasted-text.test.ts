@@ -1,7 +1,7 @@
 /**
- * Unit tests for CodexTool.sendMessage() - Pasted text detection
- * Issue #212: Pasted text detection for Codex CLI
- * Issue #393: Updated to use sendSpecialKey instead of direct exec()
+ * Unit tests for CodexTool.sendMessage() - submit-verified sending
+ * Issue #212 -> #1471: paste recovery + submit verification is now handled by the
+ * shared submit-verified sender, applied to EVERY message (no `\n` gate).
  *
  * Separate test file to avoid vi.mock affecting existing codex.test.ts
  * tests (SF-S3-002: isRunning test uses real tmux).
@@ -12,7 +12,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock tmux module
-// Issue #393: Added sendSpecialKey and sendSpecialKeys (codex.ts no longer uses child_process directly)
 vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn(),
   createSession: vi.fn(),
@@ -23,9 +22,9 @@ vi.mock('@/lib/tmux/tmux', () => ({
   sendSpecialKeys: vi.fn(),
 }));
 
-// Mock pasted-text-helper (MF-S2-002: codex.ts only imports the helper)
-vi.mock('@/lib/pasted-text-helper', () => ({
-  detectAndResendIfPastedText: vi.fn().mockResolvedValue(undefined),
+// Mock the shared submit-verified sender (Issue #1471: codex delegates to it)
+vi.mock('@/lib/cli-tools/submit-verified-sender', () => ({
+  sendMessageWithSubmitVerification: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock sendSpecialKey from tmux (needed by base class)
@@ -35,12 +34,12 @@ vi.mock('@/lib/cli-tools/validation', () => ({
 
 import { CodexTool } from '@/lib/cli-tools/codex';
 import { hasSession, sendKeys, sendSpecialKey, capturePane } from '@/lib/tmux/tmux';
-import { detectAndResendIfPastedText } from '@/lib/pasted-text-helper';
+import { sendMessageWithSubmitVerification } from '@/lib/cli-tools/submit-verified-sender';
 
 const TEST_WORKTREE_ID = 'test-worktree';
 const TEST_SESSION_NAME = 'mcbd-codex-test-worktree';
 
-describe('CodexTool.sendMessage() - Pasted text detection (Issue #212)', () => {
+describe('CodexTool.sendMessage() - submit-verified sending (Issue #1471)', () => {
   let tool: CodexTool;
 
   beforeEach(() => {
@@ -49,6 +48,7 @@ describe('CodexTool.sendMessage() - Pasted text detection (Issue #212)', () => {
     vi.mocked(hasSession).mockResolvedValue(true);
     vi.mocked(sendKeys).mockResolvedValue();
     vi.mocked(sendSpecialKey).mockResolvedValue();
+    vi.mocked(sendMessageWithSubmitVerification).mockResolvedValue(undefined);
     // waitForPrompt needs capturePane to return output matching CODEX_PROMPT_PATTERN (›)
     vi.mocked(capturePane).mockResolvedValue('› ');
   });
@@ -57,60 +57,45 @@ describe('CodexTool.sendMessage() - Pasted text detection (Issue #212)', () => {
     vi.restoreAllMocks();
   });
 
-  // MF-001: Single-line messages should skip detection
-  it('should skip Pasted text detection for single-line messages', async () => {
+  // No `\n` gate anymore: single-line messages are verified too.
+  it('should delegate single-line messages to the submit-verified sender', async () => {
     await tool.sendMessage(TEST_WORKTREE_ID, 'hello');
 
-    // detectAndResendIfPastedText should NOT be called
-    expect(detectAndResendIfPastedText).not.toHaveBeenCalled();
+    expect(sendMessageWithSubmitVerification).toHaveBeenCalledTimes(1);
+    expect(sendMessageWithSubmitVerification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionName: TEST_SESSION_NAME,
+        message: 'hello',
+        cliToolId: 'codex',
+      })
+    );
   });
 
-  // Multi-line messages should trigger detection
-  it('should call detectAndResendIfPastedText for multi-line messages', async () => {
+  it('should delegate multi-line messages to the submit-verified sender', async () => {
     await tool.sendMessage(TEST_WORKTREE_ID, 'line1\nline2');
 
-    // detectAndResendIfPastedText should be called after sendSpecialKey(C-m)
-    expect(detectAndResendIfPastedText).toHaveBeenCalledWith(TEST_SESSION_NAME);
-    expect(detectAndResendIfPastedText).toHaveBeenCalledTimes(1);
+    expect(sendMessageWithSubmitVerification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionName: TEST_SESSION_NAME,
+        message: 'line1\nline2',
+        cliToolId: 'codex',
+      })
+    );
   });
 
-  // SF-003: Verify call order - sendKeys(message) -> sendSpecialKey(C-m) -> detectAndResendIfPastedText
-  // Issue #393: Updated from execAsync(C-m) to sendSpecialKey(C-m)
-  it('should call detectAndResendIfPastedText after sendSpecialKey(C-m)', async () => {
-    const callOrder: string[] = [];
-
-    vi.mocked(sendKeys).mockImplementation(async () => {
-      callOrder.push('sendKeys');
-    });
-
-    vi.mocked(sendSpecialKey).mockImplementation(async () => {
-      callOrder.push('sendSpecialKey');
-    });
-
-    vi.mocked(detectAndResendIfPastedText).mockImplementation(async () => {
-      callOrder.push('detectAndResendIfPastedText');
-    });
-
-    await tool.sendMessage(TEST_WORKTREE_ID, 'line1\nline2');
-
-    // Verify order: capturePane (waitForPrompt) -> sendKeys (message) -> sendSpecialKey (C-m Enter) -> detectAndResendIfPastedText
-    expect(callOrder).toContain('sendKeys');
-    expect(callOrder).toContain('sendSpecialKey');
-    expect(callOrder).toContain('detectAndResendIfPastedText');
-    const sendKeysIdx = callOrder.indexOf('sendKeys');
-    const sendSpecialKeyIdx = callOrder.indexOf('sendSpecialKey');
-    const pastedTextIdx = callOrder.indexOf('detectAndResendIfPastedText');
-    expect(sendKeysIdx).toBeLessThan(sendSpecialKeyIdx);
-    expect(sendSpecialKeyIdx).toBeLessThan(pastedTextIdx);
-  });
-
-  // Verify existing send flow is maintained
-  it('should maintain existing sendKeys + sendSpecialKey flow for message delivery', async () => {
+  // The raw body+C-m batch must never be issued directly by the tool anymore.
+  it('should not issue a batched body+Enter send-keys itself', async () => {
     await tool.sendMessage(TEST_WORKTREE_ID, 'single line');
 
-    // sendKeys should be called once for the message
-    expect(sendKeys).toHaveBeenCalledWith(TEST_SESSION_NAME, 'single line', false);
-    // sendSpecialKey should be called for C-m (Enter)
-    expect(sendSpecialKey).toHaveBeenCalledWith(TEST_SESSION_NAME, 'C-m');
+    // sendKeys is only used for dialog handling / launch, never `(session, msg, true)`.
+    expect(sendKeys).not.toHaveBeenCalledWith(TEST_SESSION_NAME, 'single line', true);
+  });
+
+  // waitForPrompt must still run before delegating (readiness gate preserved).
+  it('should verify prompt readiness before delegating the send', async () => {
+    await tool.sendMessage(TEST_WORKTREE_ID, 'hello');
+
+    expect(capturePane).toHaveBeenCalled();
+    expect(sendMessageWithSubmitVerification).toHaveBeenCalled();
   });
 });

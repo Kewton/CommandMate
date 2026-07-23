@@ -17,15 +17,13 @@ import {
   sendSpecialKey,
   killSession,
 } from '../tmux/tmux';
-import { detectAndResendIfPastedText } from '../pasted-text-helper';
+import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { getDbInstance } from '../db/db-instance';
 import { getWorktreeById } from '../db';
 import { createLogger } from '@/lib/logger';
 import {
   TUI_SESSION_CREATE_WAIT_MS,
-  TUI_TEXT_INPUT_WAIT_MS,
-  TUI_MESSAGE_PROCESSED_WAIT_MS,
   TUI_INTERRUPT_SETTLE_MS,
   TUI_EXIT_WAIT_MS,
   VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS,
@@ -149,26 +147,17 @@ export class VibeLocalTool extends BaseCLITool {
     }
 
     try {
-      // Send message to vibe-local (without Enter)
-      await sendKeys(sessionName, message, false);
-
-      // Wait a moment for the text to be typed
-      await new Promise((resolve) => setTimeout(resolve, TUI_TEXT_INPUT_WAIT_MS));
-
-      // vibe-local uses IME mode: first Enter creates a new line,
-      // second Enter on empty line submits the message.
-      // Send Enter twice with a short delay between.
-      await sendSpecialKey(sessionName, 'C-m');
-      await new Promise((resolve) => setTimeout(resolve, VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS));
-      await sendSpecialKey(sessionName, 'C-m');
-
-      // Wait a moment for the message to be processed
-      await new Promise((resolve) => setTimeout(resolve, TUI_MESSAGE_PROCESSED_WAIT_MS));
-
-      // Detect [Pasted text] and resend Enter for multi-line messages
-      if (message.includes('\n')) {
-        await detectAndResendIfPastedText(sessionName);
-      }
+      // Issue #1471: Body/Enter separation + read-back submit verification via the
+      // shared helper. vibe-local's IME mode needs TWO Enter presses (first Enter
+      // inserts a newline, the second submits), preserved via submitEnterCount: 2
+      // + the same inter-press wait (VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS).
+      await sendMessageWithSubmitVerification({
+        sessionName,
+        message,
+        cliToolId: 'vibe-local',
+        submitEnterCount: 2,
+        interEnterWaitMs: VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS,
+      });
 
       // Issue #405: Invalidate cache after sending message
       invalidateCache(sessionName);

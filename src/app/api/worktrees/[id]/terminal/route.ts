@@ -18,6 +18,7 @@ import { getWorktreeById } from '@/lib/db';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { hasSession, sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
 import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
+import { sendMessageWithSubmitVerification } from '@/lib/cli-tools/submit-verified-sender';
 import { createLogger } from '@/lib/logger';
 import { COPILOT_SEND_ENTER_DELAY_MS } from '@/config/copilot-constants';
 
@@ -80,7 +81,7 @@ export async function POST(
       );
     }
 
-    // Send command to tmux session via sendKeys (non-blocking for all tools)
+    // Send command to tmux session (non-blocking for all tools).
     // Note: copilot sendMessage() was reverted due to waitForPrompt blocking issues (#559)
     if (cliToolId === 'copilot') {
       // Copilot CLI auto-enters multi-line mode when text exceeds pane width.
@@ -92,7 +93,21 @@ export async function POST(
       await new Promise(resolve => setTimeout(resolve, COPILOT_SEND_ENTER_DELAY_MS));
       await sendSpecialKeys(sessionName, ['Enter']);
     } else {
-      await sendKeys(sessionName, command);
+      // Issue #1470: the old `sendKeys(command)` batched body+C-m into a single
+      // send-keys, which TUIs (claude/codex/gemini/opencode/vibe-local/antigravity)
+      // treat as a bracketed paste that swallows the Enter — typed but unsent, yet
+      // this route still returned { success: true }. Delegate to the shared
+      // submit-verified helper so the body and Enter are separated and the submit
+      // is read-back verified. A bounded, quick verify profile keeps the route
+      // non-blocking (it must not re-introduce waitForPrompt-style blocking, #559);
+      // if submit cannot be confirmed the helper throws -> 500 (never a false success).
+      await sendMessageWithSubmitVerification({
+        sessionName,
+        message: command,
+        cliToolId,
+        verifyAttempts: 2,
+        verifyDelayMs: 200,
+      });
     }
 
     // Issue #405: Invalidate cache after sending command

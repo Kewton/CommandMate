@@ -39,9 +39,15 @@ vi.mock('@/lib/tmux/tmux', () => ({
   sendSpecialKeys: vi.fn(),
 }));
 
+// Issue #1470: the non-copilot branch delegates to the shared submit-verified sender.
+vi.mock('@/lib/cli-tools/submit-verified-sender', () => ({
+  sendMessageWithSubmitVerification: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { POST } from '@/app/api/worktrees/[id]/terminal/route';
 import { getWorktreeById } from '@/lib/db';
 import { hasSession, sendKeys } from '@/lib/tmux/tmux';
+import { sendMessageWithSubmitVerification } from '@/lib/cli-tools/submit-verified-sender';
 import { isCliToolType } from '@/lib/cli-tools/types';
 
 function createRequest(body: Record<string, unknown>): NextRequest {
@@ -60,17 +66,23 @@ describe('POST /api/worktrees/[id]/terminal', () => {
     vi.mocked(getWorktreeById).mockReturnValue({ id: 'wt-1', name: 'test', path: '/path' } as ReturnType<typeof getWorktreeById>);
     vi.mocked(hasSession).mockResolvedValue(true);
     vi.mocked(sendKeys).mockResolvedValue(undefined);
+    vi.mocked(sendMessageWithSubmitVerification).mockResolvedValue(undefined);
     mockSendMessage.mockResolvedValue(undefined);
   });
 
-  it('should send command successfully with valid cliToolId', async () => {
+  it('should send command successfully with valid cliToolId (delegated + submit-verified)', async () => {
     const req = createRequest({ cliToolId: 'claude', command: 'echo hello' });
     const res = await POST(req, defaultParams);
     const json = await res.json();
 
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
-    expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-wt-1', 'echo hello');
+    // Issue #1470: non-copilot tools delegate to the submit-verified sender with a
+    // bounded (non-blocking) verify profile — never a raw batched `sendKeys(command)`.
+    expect(sendMessageWithSubmitVerification).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionName: 'mcbd-claude-wt-1', message: 'echo hello', cliToolId: 'claude' })
+    );
+    expect(sendKeys).not.toHaveBeenCalledWith('mcbd-claude-wt-1', 'echo hello');
   });
 
   it('should return 400 for invalid cliToolId (shell metacharacters)', async () => {
@@ -137,7 +149,7 @@ describe('POST /api/worktrees/[id]/terminal', () => {
   });
 
   it('should return 500 with fixed-string error on internal error', async () => {
-    vi.mocked(sendKeys).mockRejectedValue(new Error('internal tmux failure'));
+    vi.mocked(sendMessageWithSubmitVerification).mockRejectedValue(new Error('internal tmux failure'));
     const req = createRequest({ cliToolId: 'claude', command: 'echo hello' });
     const res = await POST(req, defaultParams);
     const json = await res.json();
@@ -146,6 +158,20 @@ describe('POST /api/worktrees/[id]/terminal', () => {
     // R4F002: Fixed-string error, no error.message exposure
     expect(json.error).toBe('Failed to send command to terminal');
     expect(json.error).not.toContain('internal tmux failure');
+  });
+
+  // Issue #1470: an unconfirmed submit must NOT be reported as success.
+  it('should NOT return { success: true } when submit cannot be confirmed', async () => {
+    vi.mocked(sendMessageWithSubmitVerification).mockRejectedValue(
+      new Error('Message submit could not be confirmed (typed but unsent)')
+    );
+    const req = createRequest({ cliToolId: 'codex', command: 'a long typed-but-unsent message' });
+    const res = await POST(req, defaultParams);
+    const json = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(json.success).toBeUndefined();
+    expect(json.error).toBe('Failed to send command to terminal');
   });
 
   // Issue #559: Copilot uses sendKeys directly (not sendMessage) to avoid waitForPrompt blocking
@@ -174,14 +200,31 @@ describe('POST /api/worktrees/[id]/terminal', () => {
       expect(mockSendMessage).not.toHaveBeenCalled();
     });
 
-    it('should use sendKeys for non-copilot tools too', async () => {
+    it('should delegate non-copilot tools to the submit-verified sender (no batched send-keys)', async () => {
       const req = createRequest({ cliToolId: 'claude', command: '/model' });
       const res = await POST(req, defaultParams);
       const json = await res.json();
 
       expect(res.status).toBe(200);
       expect(json.success).toBe(true);
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-wt-1', '/model');
+      // Issue #1470: regression guard — the old single `sendKeys(command)` batch
+      // (body + C-m in one send-keys) must be gone for non-copilot tools.
+      expect(sendMessageWithSubmitVerification).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionName: 'mcbd-claude-wt-1', message: '/model', cliToolId: 'claude' })
+      );
+      expect(sendKeys).not.toHaveBeenCalledWith('mcbd-claude-wt-1', '/model');
+      expect(sendKeys).not.toHaveBeenCalledWith('mcbd-claude-wt-1', '/model', true);
+    });
+
+    it('should keep the terminal-route verify bounded (non-blocking, #559)', async () => {
+      const req = createRequest({ cliToolId: 'gemini', command: 'hello world' });
+      await POST(req, defaultParams);
+
+      // The route passes a small, bounded verify profile so it never re-introduces
+      // long waitForPrompt-style blocking.
+      const call = vi.mocked(sendMessageWithSubmitVerification).mock.calls[0][0];
+      expect(call.verifyAttempts).toBeLessThanOrEqual(2);
+      expect(call.verifyDelayMs).toBeLessThanOrEqual(200);
     });
   });
 });

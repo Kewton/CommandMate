@@ -16,8 +16,8 @@ vi.mock('@/lib/tmux/tmux', () => ({
   reconcileSessionGeometry: vi.fn().mockResolvedValue(false),
 }));
 
-vi.mock('@/lib/pasted-text-helper', () => ({
-  detectAndResendIfPastedText: vi.fn().mockResolvedValue(undefined),
+vi.mock('@/lib/cli-tools/submit-verified-sender', () => ({
+  sendMessageWithSubmitVerification: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@/lib/cli-tools/validation', () => ({

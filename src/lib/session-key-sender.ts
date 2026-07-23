@@ -19,7 +19,7 @@ import {
   CLAUDE_PROMPT_PATTERN,
   stripAnsi,
 } from './detection/cli-patterns';
-import { detectAndResendIfPastedText } from './pasted-text-helper';
+import { sendMessageWithSubmitVerification } from './cli-tools/submit-verified-sender';
 import { invalidateCache } from './tmux/tmux-capture-cache';
 import { getErrorMessage } from './errors';
 import { CLAUDE_ENV_SANITIZE_WAIT_MS, TUI_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
@@ -143,15 +143,16 @@ export async function sendMessageToSession(
   // Stability delay after prompt detection
   await new Promise((resolve) => setTimeout(resolve, postPromptDelay));
 
-  // Send message using sendKeys consistently (CONS-001)
-  await sendKeys(sessionName, message, false);
-  await sendKeys(sessionName, '', true);
-
-  // Issue #212: Detect [Pasted text] and resend Enter for multi-line messages
-  // MF-001: Single-line messages skip detection (+0ms overhead)
-  if (message.includes('\n')) {
-    await detectAndResendIfPastedText(sessionName);
-  }
+  // Issue #1469: Body and Enter are sent as SEPARATE tmux commands (never a
+  // single body+C-m batch) and the submit is read-back verified. This replaces
+  // the old fire-and-forget `sendKeys(message,false)` + `sendKeys('',true)` that
+  // let Claude's ink TUI swallow the trailing C-m as a bracketed-paste newline,
+  // leaving the message typed but unsent. Throws if submit cannot be confirmed.
+  await sendMessageWithSubmitVerification({
+    sessionName,
+    message,
+    cliToolId: 'claude',
+  });
 
   // Issue #405: Invalidate cache after sending message
   invalidateCache(sessionName);
