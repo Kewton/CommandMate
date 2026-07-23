@@ -81,6 +81,12 @@
     "selectHint": "select",
     "closeHint": "close",
     "empty": "No commands available",
+    "catalogStale": {
+      "hint": "Your CLI is newer than this list. Add missing commands in ~/.commandmate/slash-commands/."
+    },
+    "sourceBadge": {
+      "userCatalog": "Custom"
+    },
     "descriptions": {
       "clear": "Clear conversation history",
       "compact": "Compact context to reduce token usage",

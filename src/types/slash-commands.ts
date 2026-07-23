@@ -27,8 +27,39 @@ export type SlashCommandCategory =
 
 /**
  * Command source type (Issue #56)
+ *
+ * Issue #1476: 'user-catalog' entries come from the user's editable extension
+ * files (~/.commandmate/slash-commands/*.json) and are merged into the standard
+ * layer, overriding bundled entries that share the same name + CLI tool scope.
  */
-export type SlashCommandSource = 'standard' | 'mcbd' | 'worktree' | 'skill' | 'codex-skill' | 'builtin';
+export type SlashCommandSource =
+  | 'standard'
+  | 'mcbd'
+  | 'worktree'
+  | 'skill'
+  | 'codex-skill'
+  | 'builtin'
+  | 'user-catalog';
+
+/**
+ * Per-tool built-in catalog staleness (Issue #1476).
+ *
+ * Present only for tools whose CLI version could be read; a missing binary,
+ * timeout, or unparseable output leaves the tool out entirely (never reported
+ * as stale). `stale` is true when the installed CLI is newer than the version
+ * the bundled catalog was verified against.
+ */
+export interface CatalogStalenessEntry {
+  /** Installed CLI version (major.minor.patch). */
+  current: string;
+  /** Version the bundled catalog was last verified against. */
+  verifiedAgainst: string;
+  /** Installed CLI is newer than the verified version. */
+  stale: boolean;
+}
+
+/** Map of CLI tool id → staleness info (Issue #1476). */
+export type CatalogStaleness = Record<string, CatalogStalenessEntry>;
 
 /**
  * Slash command definition
