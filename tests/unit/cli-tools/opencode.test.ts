@@ -21,9 +21,9 @@ vi.mock('@/lib/cli-tools/opencode-config', () => ({
   ensureOpencodeConfig: vi.fn(),
 }));
 
-// Mock pasted-text-helper
-vi.mock('@/lib/pasted-text-helper', () => ({
-  detectAndResendIfPastedText: vi.fn(),
+// Mock submit-verified sender (Issue #1471: shared body/Enter + submit verification)
+vi.mock('@/lib/cli-tools/submit-verified-sender', () => ({
+  sendMessageWithSubmitVerification: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock child_process (exec for BaseCLITool.isInstalled(), execFile for OpenCodeTool.startSession())
@@ -44,11 +44,10 @@ import {
   hasSession,
   createSession,
   sendKeys,
-  sendSpecialKey,
   killSession,
 } from '@/lib/tmux/tmux';
 import { ensureOpencodeConfig } from '@/lib/cli-tools/opencode-config';
-import { detectAndResendIfPastedText } from '@/lib/pasted-text-helper';
+import { sendMessageWithSubmitVerification } from '@/lib/cli-tools/submit-verified-sender';
 
 describe('OpenCodeTool', () => {
   let tool: OpenCodeTool;
@@ -154,45 +153,45 @@ describe('OpenCodeTool', () => {
         .rejects.toThrow('does not exist');
     });
 
-    it('should send message via sendKeys and Enter', async () => {
+    it('should delegate sending to the submit-verified sender', async () => {
       vi.mocked(hasSession).mockResolvedValue(true);
-      vi.mocked(sendKeys).mockResolvedValue(undefined);
-      vi.mocked(sendSpecialKey).mockResolvedValue(undefined);
 
-      vi.useFakeTimers();
-      const promise = tool.sendMessage('test-123', 'hello');
-      await vi.runAllTimersAsync();
-      vi.useRealTimers();
+      await tool.sendMessage('test-123', 'hello');
 
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-test-123', 'hello', false);
-      expect(sendSpecialKey).toHaveBeenCalledWith('mcbd-opencode-test-123', 'C-m');
+      // Issue #1471: opencode delegates body/Enter separation + submit verification.
+      expect(sendMessageWithSubmitVerification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionName: 'mcbd-opencode-test-123',
+          message: 'hello',
+          cliToolId: 'opencode',
+        })
+      );
     });
 
-    it('should call detectAndResendIfPastedText for multi-line messages', async () => {
+    it('should apply submit verification to multi-line messages', async () => {
       vi.mocked(hasSession).mockResolvedValue(true);
-      vi.mocked(sendKeys).mockResolvedValue(undefined);
-      vi.mocked(sendSpecialKey).mockResolvedValue(undefined);
-      vi.mocked(detectAndResendIfPastedText).mockResolvedValue(undefined);
 
-      vi.useFakeTimers();
-      const promise = tool.sendMessage('test-123', 'line1\nline2');
-      await vi.runAllTimersAsync();
-      vi.useRealTimers();
+      await tool.sendMessage('test-123', 'line1\nline2');
 
-      expect(detectAndResendIfPastedText).toHaveBeenCalledWith('mcbd-opencode-test-123');
+      expect(sendMessageWithSubmitVerification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionName: 'mcbd-opencode-test-123',
+          message: 'line1\nline2',
+          cliToolId: 'opencode',
+        })
+      );
     });
 
-    it('should NOT call detectAndResendIfPastedText for single-line messages', async () => {
+    it('should apply submit verification to single-line messages too (no `\\n` gate)', async () => {
       vi.mocked(hasSession).mockResolvedValue(true);
-      vi.mocked(sendKeys).mockResolvedValue(undefined);
-      vi.mocked(sendSpecialKey).mockResolvedValue(undefined);
 
-      vi.useFakeTimers();
-      const promise = tool.sendMessage('test-123', 'single line');
-      await vi.runAllTimersAsync();
-      vi.useRealTimers();
+      await tool.sendMessage('test-123', 'single line');
 
-      expect(detectAndResendIfPastedText).not.toHaveBeenCalled();
+      // The old `message.includes('\n')` gate is gone — every message is verified.
+      expect(sendMessageWithSubmitVerification).toHaveBeenCalledTimes(1);
+      expect(sendMessageWithSubmitVerification).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'single line', cliToolId: 'opencode' })
+      );
     });
   });
 

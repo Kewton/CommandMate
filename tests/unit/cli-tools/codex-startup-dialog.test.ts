@@ -29,8 +29,8 @@ vi.mock('@/lib/tmux/tmux', () => ({
   reconcileSessionGeometry: vi.fn().mockResolvedValue(false),
 }));
 
-vi.mock('@/lib/pasted-text-helper', () => ({
-  detectAndResendIfPastedText: vi.fn().mockResolvedValue(undefined),
+vi.mock('@/lib/cli-tools/submit-verified-sender', () => ({
+  sendMessageWithSubmitVerification: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@/lib/cli-tools/validation', () => ({
@@ -49,6 +49,7 @@ vi.mock('util', async (importOriginal) => {
 
 import { CodexTool } from '@/lib/cli-tools/codex';
 import { hasSession, createSession, sendKeys, sendSpecialKey, capturePane, reconcileSessionGeometry } from '@/lib/tmux/tmux';
+import { sendMessageWithSubmitVerification } from '@/lib/cli-tools/submit-verified-sender';
 
 const WORKTREE_ID = 'test-worktree';
 const SESSION = 'mcbd-codex-test-worktree';
@@ -198,9 +199,10 @@ describe('CodexTool first-launch dialog handling (Issue #890)', () => {
       // both dialog frames.
       expect(vi.mocked(capturePane).mock.calls.length).toBeGreaterThanOrEqual(3);
 
-      // Message is delivered without Enter; Enter is sent separately as C-m.
-      expect(sendKeys).toHaveBeenCalledWith(SESSION, 'hello world', false);
-      expect(sendSpecialKey).toHaveBeenCalledWith(SESSION, 'C-m');
+      // Once the prompt is ready, sending is delegated to the submit-verified sender.
+      expect(sendMessageWithSubmitVerification).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionName: SESSION, message: 'hello world', cliToolId: 'codex' })
+      );
     });
   });
 
@@ -243,8 +245,9 @@ describe('CodexTool first-launch dialog handling (Issue #890)', () => {
       // Ready on the first poll -> no 15s timeout wait (regressed pattern would poll
       // ~30 times until the waitForPrompt timeout before sending anyway).
       expect(vi.mocked(capturePane).mock.calls.length).toBeLessThanOrEqual(2);
-      expect(sendKeys).toHaveBeenCalledWith(SESSION, 'hello world', false);
-      expect(sendSpecialKey).toHaveBeenCalledWith(SESSION, 'C-m');
+      expect(sendMessageWithSubmitVerification).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionName: SESSION, message: 'hello world', cliToolId: 'codex' })
+      );
     });
   });
 
@@ -306,10 +309,11 @@ describe('CodexTool first-launch dialog handling (Issue #890)', () => {
         vi.useRealTimers();
       }
 
-      // No "2" prefix is injected; the message is delivered cleanly.
+      // No "2" prefix is injected; the message is delegated cleanly to the sender.
       expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '2', false);
-      expect(sendKeys).toHaveBeenCalledWith(SESSION, 'explain this branch', false);
-      expect(sendSpecialKey).toHaveBeenCalledWith(SESSION, 'C-m');
+      expect(sendMessageWithSubmitVerification).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionName: SESSION, message: 'explain this branch', cliToolId: 'codex' })
+      );
     });
   });
 
@@ -332,9 +336,9 @@ describe('CodexTool first-launch dialog handling (Issue #890)', () => {
         vi.useRealTimers();
       }
 
-      // The whole point: on timeout the message is NOT typed and Enter is NOT sent.
+      // The whole point: on timeout the send is never delegated (message not typed).
+      expect(sendMessageWithSubmitVerification).not.toHaveBeenCalled();
       expect(sendKeys).not.toHaveBeenCalledWith(SESSION, 'should never be typed', false);
-      expect(sendSpecialKey).not.toHaveBeenCalledWith(SESSION, 'C-m');
     });
   });
 });
