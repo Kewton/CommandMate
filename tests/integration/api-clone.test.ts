@@ -61,9 +61,17 @@ vi.mock('child_process', async (importOriginal) => ({
   })),
 }));
 
+// Issue #1480: mock forkRepository (network gh call) while keeping the real
+// ForkError class so the route's `instanceof ForkError` branch works.
+vi.mock('@/lib/git/fork-manager', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/git/fork-manager')>()),
+  forkRepository: vi.fn(),
+}));
+
 // Import routes after mocking
 import { POST as postClone } from '@/app/api/repositories/clone/route';
 import { GET as getCloneStatus } from '@/app/api/repositories/clone/[jobId]/route';
+import { forkRepository, ForkError } from '@/lib/git/fork-manager';
 
 describe('Clone API', () => {
   beforeEach(() => {
@@ -174,6 +182,110 @@ describe('Clone API', () => {
       const job = getCloneJob(mockDb, data.jobId);
       expect(job).not.toBeNull();
       expect(job?.cloneUrl).toBe('https://github.com/test/new-repo.git');
+    });
+
+    describe('fork option (Issue #1480)', () => {
+      it('clones the resolved fork and records upstream when fork:true', async () => {
+        vi.mocked(forkRepository).mockResolvedValue({
+          forkUrl: 'https://github.com/me/new-repo.git',
+          upstreamUrl: 'https://github.com/test/new-repo.git',
+          forkFullName: 'me/new-repo',
+        });
+
+        const request = new NextRequest('http://localhost/api/repositories/clone', {
+          method: 'POST',
+          body: JSON.stringify({ cloneUrl: 'https://github.com/test/new-repo.git', fork: true }),
+        });
+
+        const response = await postClone(request);
+        const data = await response.json();
+
+        expect(response.status).toBe(202);
+        expect(data.success).toBe(true);
+        expect(forkRepository).toHaveBeenCalledWith('https://github.com/test/new-repo.git');
+
+        // The background clone job targets the fork URL, not the original.
+        const job = getCloneJob(mockDb, data.jobId);
+        expect(job?.cloneUrl).toBe('https://github.com/me/new-repo.git');
+      });
+
+      it('does not fork when fork flag is omitted', async () => {
+        const request = new NextRequest('http://localhost/api/repositories/clone', {
+          method: 'POST',
+          body: JSON.stringify({ cloneUrl: 'https://github.com/test/plain-repo.git' }),
+        });
+
+        await postClone(request);
+
+        expect(forkRepository).not.toHaveBeenCalled();
+      });
+
+      it('returns 401 when gh is not authenticated', async () => {
+        vi.mocked(forkRepository).mockRejectedValue(
+          new ForkError('GH_NOT_AUTHENTICATED', 'GitHub CLI is not authenticated.')
+        );
+
+        const request = new NextRequest('http://localhost/api/repositories/clone', {
+          method: 'POST',
+          body: JSON.stringify({ cloneUrl: 'https://github.com/test/new-repo.git', fork: true }),
+        });
+
+        const response = await postClone(request);
+        const data = await response.json();
+
+        expect(response.status).toBe(401);
+        expect(data.success).toBe(false);
+        expect(data.error.code).toBe('GH_NOT_AUTHENTICATED');
+        expect(data.error.category).toBe('auth');
+      });
+
+      it('returns 400 when gh is not installed', async () => {
+        vi.mocked(forkRepository).mockRejectedValue(
+          new ForkError('GH_NOT_AVAILABLE', 'gh is not installed.')
+        );
+
+        const request = new NextRequest('http://localhost/api/repositories/clone', {
+          method: 'POST',
+          body: JSON.stringify({ cloneUrl: 'https://github.com/test/new-repo.git', fork: true }),
+        });
+
+        const response = await postClone(request);
+        const data = await response.json();
+
+        expect(response.status).toBe(400);
+        expect(data.error.code).toBe('GH_NOT_AVAILABLE');
+      });
+
+      it('returns 422 when the fork operation fails', async () => {
+        vi.mocked(forkRepository).mockRejectedValue(
+          new ForkError('FORK_FAILED', 'Failed to fork test/new-repo: HTTP 403')
+        );
+
+        const request = new NextRequest('http://localhost/api/repositories/clone', {
+          method: 'POST',
+          body: JSON.stringify({ cloneUrl: 'https://github.com/test/new-repo.git', fork: true }),
+        });
+
+        const response = await postClone(request);
+        const data = await response.json();
+
+        expect(response.status).toBe(422);
+        expect(data.error.code).toBe('FORK_FAILED');
+      });
+
+      it('returns 400 when fork flag is not a boolean', async () => {
+        const request = new NextRequest('http://localhost/api/repositories/clone', {
+          method: 'POST',
+          body: JSON.stringify({ cloneUrl: 'https://github.com/test/new-repo.git', fork: 'yes' }),
+        });
+
+        const response = await postClone(request);
+        const data = await response.json();
+
+        expect(response.status).toBe(400);
+        expect(data.error.code).toBe('INVALID_FORK_FLAG');
+        expect(forkRepository).not.toHaveBeenCalled();
+      });
     });
 
     it('should return 400 when targetDir is not a string (D4-002)', async () => {

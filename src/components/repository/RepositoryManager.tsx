@@ -34,6 +34,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
   const [inputMode, setInputMode] = useState<InputMode>('local');
   const [repositoryPath, setRepositoryPath] = useState('');
   const [cloneUrl, setCloneUrl] = useState('');
+  const [forkBeforeClone, setForkBeforeClone] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isCloning, setIsCloning] = useState(false);
@@ -55,6 +56,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
         setIsCloning(false);
         setCloneJobId(null);
         setCloneUrl('');
+        setForkBeforeClone(false);
         setShowAddForm(false);
 
         // Notify parent to refresh
@@ -148,7 +150,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
     setIsCloning(true);
 
     try {
-      const result = await repositoryApi.clone(cloneUrl.trim());
+      const result = await repositoryApi.clone(cloneUrl.trim(), { fork: forkBeforeClone });
       setCloneJobId(result.jobId);
       // Polling will be started by useEffect
     } catch (err) {
@@ -187,6 +189,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
     setShowAddForm(false);
     setRepositoryPath('');
     setCloneUrl('');
+    setForkBeforeClone(false);
     setError(null);
     setInputMode('local');
   };
@@ -300,13 +303,34 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
                     </p>
                   </div>
 
+                  <div className="flex items-start gap-2">
+                    <input
+                      id="forkBeforeClone"
+                      type="checkbox"
+                      checked={forkBeforeClone}
+                      onChange={(e) => setForkBeforeClone(e.target.checked)}
+                      disabled={isCloning}
+                      className="mt-1"
+                    />
+                    <label htmlFor="forkBeforeClone" className="text-sm text-foreground">
+                      {t('repositories.forkOptionLabel')}
+                      <span className="block text-xs text-muted-foreground">
+                        {t('repositories.forkOptionHelp')}
+                      </span>
+                    </label>
+                  </div>
+
                   <div className="flex gap-2">
                     <Button
                       type="submit"
                       variant="primary"
                       disabled={isCloning || !cloneUrl.trim()}
                     >
-                      {isCloning ? t('repositories.cloning') : t('repositories.clone')}
+                      {isCloning
+                        ? t('repositories.cloning')
+                        : forkBeforeClone
+                          ? t('repositories.forkAndClone')
+                          : t('repositories.clone')}
                     </Button>
                     <Button
                       type="button"

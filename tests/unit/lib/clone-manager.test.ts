@@ -19,6 +19,7 @@ import {
   getRepositoryByPath,
 } from '@/lib/db/db-repository';
 import { upsertWorktree } from '@/lib/db/worktree-db';
+import { gitRemoteAdd } from '@/lib/git/git-remote';
 
 // Mock child_process
 vi.mock('child_process', () => ({
@@ -38,6 +39,11 @@ vi.mock('@/lib/session-cleanup', () => ({
     syncResult: { deletedIds: [], upsertedCount: 0 },
     cleanupWarnings: [],
   }),
+}));
+
+// Issue #1480: mock git-remote so upstream registration does not touch real git.
+vi.mock('@/lib/git/git-remote', () => ({
+  gitRemoteAdd: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock logger module (Issue #480)
@@ -697,6 +703,68 @@ describe('CloneManager', () => {
       const path = manager.getTargetPath('my-repo');
 
       expect(path).toBe('/custom/base/my-repo');
+    });
+  });
+
+  describe('upstream remote registration (Issue #1480)', () => {
+    function stubProc(): EventEmitter & { stderr: EventEmitter; pid: number } {
+      const proc = new EventEmitter() as EventEmitter & { stderr: EventEmitter; pid: number };
+      proc.stderr = new EventEmitter();
+      proc.pid = 5151;
+      vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess);
+      return proc;
+    }
+
+    it('registers the upstream remote after a successful clone when upstreamUrl is set', async () => {
+      const proc = stubProc();
+      const result = await cloneManager.startCloneJob(
+        'https://github.com/me/repo.git',
+        undefined,
+        { upstreamUrl: 'https://github.com/orig/repo.git' }
+      );
+      expect(result.success).toBe(true);
+
+      proc.emit('close', 0);
+      await vi.waitFor(() =>
+        expect(getCloneJob(db, result.jobId!)?.status).toBe('completed')
+      );
+
+      expect(gitRemoteAdd).toHaveBeenCalledWith(
+        expect.any(String),
+        'upstream',
+        'https://github.com/orig/repo.git'
+      );
+    });
+
+    it('does not register an upstream remote when upstreamUrl is absent', async () => {
+      const proc = stubProc();
+      const result = await cloneManager.startCloneJob('https://github.com/me/repo2.git');
+      expect(result.success).toBe(true);
+
+      proc.emit('close', 0);
+      await vi.waitFor(() =>
+        expect(getCloneJob(db, result.jobId!)?.status).toBe('completed')
+      );
+
+      expect(gitRemoteAdd).not.toHaveBeenCalled();
+    });
+
+    it('still completes the clone when upstream registration fails', async () => {
+      vi.mocked(gitRemoteAdd).mockRejectedValueOnce(
+        new Error('remote upstream already exists')
+      );
+      const proc = stubProc();
+      const result = await cloneManager.startCloneJob(
+        'https://github.com/me/repo3.git',
+        undefined,
+        { upstreamUrl: 'https://github.com/orig/repo.git' }
+      );
+
+      proc.emit('close', 0);
+      await vi.waitFor(() =>
+        expect(getCloneJob(db, result.jobId!)?.status).toBe('completed')
+      );
+      expect(gitRemoteAdd).toHaveBeenCalled();
     });
   });
 

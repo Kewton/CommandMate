@@ -38,7 +38,7 @@ vi.mock('util', () => ({
   promisify: () => mockExecFileAsync,
 }));
 
-import { gitFetch, gitPull, gitPush } from '@/lib/git/git-remote';
+import { gitFetch, gitPull, gitPush, gitRemoteAdd } from '@/lib/git/git-remote';
 import {
   GitTimeoutError,
   GitNotRepoError,
@@ -77,6 +77,34 @@ function mockGitByArgs(map: Record<string, string | (() => Promise<{ stdout: str
 // execGitNetworkAware is exercised through gitFetch / gitPush (it is not
 // exported). gitPull goes through execGitConflictAware (timeout param).
 // ============================================================================
+
+describe('gitRemoteAdd (Issue #1480)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExistsSync.mockReturnValue(false);
+  });
+
+  it('runs git remote add <name> <url>', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '' });
+    await gitRemoteAdd('/repo', 'upstream', 'https://github.com/orig/repo.git');
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['remote', 'add', 'upstream', 'https://github.com/orig/repo.git'],
+      expect.objectContaining({ cwd: '/repo' })
+    );
+    // Local operation -> not serialized, so index.lock is never consulted.
+    expect(mockExistsSync).not.toHaveBeenCalled();
+  });
+
+  it('propagates an error when the remote already exists', async () => {
+    mockExecFileAsync.mockRejectedValue(
+      Object.assign(new Error('x'), { stderr: 'error: remote upstream already exists.' })
+    );
+    await expect(
+      gitRemoteAdd('/repo', 'upstream', 'https://github.com/orig/repo.git')
+    ).rejects.toThrow();
+  });
+});
 
 describe('gitFetch (Issue #783, Part 2)', () => {
   beforeEach(() => {
