@@ -18,14 +18,12 @@ import {
   killSession,
   capturePane,
 } from '../tmux/tmux';
-import { detectAndResendIfPastedText } from '../pasted-text-helper';
+import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { GEMINI_PROMPT_PATTERN, stripAnsi } from '../detection/cli-patterns';
 import { createLogger } from '@/lib/logger';
 import {
   TUI_SESSION_CREATE_WAIT_MS,
-  TUI_TEXT_INPUT_WAIT_MS,
-  TUI_MESSAGE_PROCESSED_WAIT_MS,
   TUI_INTERRUPT_SETTLE_MS,
   TUI_EXIT_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
@@ -204,22 +202,13 @@ export class GeminiTool extends BaseCLITool {
       // Verify Gemini is at prompt state before sending
       await this.waitForPrompt(sessionName);
 
-      // Send message to Gemini (without Enter)
-      await sendKeys(sessionName, message, false);
-
-      // Wait a moment for the text to be typed
-      await new Promise((resolve) => setTimeout(resolve, TUI_TEXT_INPUT_WAIT_MS));
-
-      // Send Enter key separately
-      await sendSpecialKey(sessionName, 'C-m');
-
-      // Wait a moment for the message to be processed
-      await new Promise((resolve) => setTimeout(resolve, TUI_MESSAGE_PROCESSED_WAIT_MS));
-
-      // Detect [Pasted text] and resend Enter for multi-line messages
-      if (message.includes('\n')) {
-        await detectAndResendIfPastedText(sessionName);
-      }
+      // Issue #1471: Body/Enter separation + read-back submit verification via the
+      // shared helper (replaces the old type -> C-m -> `\n`-gated paste recovery).
+      await sendMessageWithSubmitVerification({
+        sessionName,
+        message,
+        cliToolId: 'gemini',
+      });
 
       // Issue #405: Invalidate cache after sending message
       invalidateCache(sessionName);

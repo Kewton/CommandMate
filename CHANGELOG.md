@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-07-24
+
+### Fixed
+
+- **`commandmate send`（および Timer / Web UI チャット / terminal API）で長文・単一行メッセージが submit されず worker が起動しない問題を修正** (#1469, #1470, #1471): tmux `send-keys` が本文と Enter(`C-m`) を単一コマンドで送ると、Claude Code 等の ink/React TUI が本文を bracketed paste として扱い、直後の `C-m` を貼り付けバッファ内の改行として消費するため、メッセージが入力欄に置かれたまま submit されない（typed-but-unsent）。既存の貼り付け回復ロジックは (1) `message.includes('\n')` ゲートで単一行を対象外、(2) Claude 固有・版依存の `[Pasted text #\d+` 文字列照合に依存、(3) 送信後の submit 未検証（fire-and-forget）という3点で穴があった。`src/lib/cli-tools/submit-verified-sender.ts` を新設し、本文と Enter を分離送信（本文→遅延→`sendSpecialKeys(['Enter'])`）、`\n` ゲートを撤廃して全メッセージへ貼り付け回復を適用、read-back で submit を検証（入力欄が空 or generating へ遷移を確認、未 submit なら Enter 再送、確定不能なら明示エラー）、版依存パターンへの依存を排除した。claude（`session-key-sender.ts`）・codex/gemini/copilot/opencode/vibe-local/antigravity の各 `sendMessage()`・terminal route（`terminal/route.ts`）へ一貫適用し、7 箇所に複製されていた `\n` ゲートを共通ヘルパへ集約した。ツール固有挙動（vibe-local の二重 Enter、copilot の選択リスト分岐・改行潰し）は維持。#212 の pasted-text 検出の不完全修正の再燃を解消。
+
 ## [0.12.0] - 2026-07-22
 
 ### Added

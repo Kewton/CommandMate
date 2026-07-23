@@ -18,7 +18,7 @@ import {
   killSession,
   capturePane,
 } from '../tmux/tmux';
-import { detectAndResendIfPastedText } from '../pasted-text-helper';
+import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { COPILOT_PROMPT_PATTERN, COPILOT_SELECTION_LIST_PATTERN, stripAnsi } from '../detection/cli-patterns';
 import { COPILOT_TEXT_INPUT_DELAY_MS, COPILOT_SEND_ENTER_DELAY_MS, COPILOT_MODEL_SWITCH_TIMEOUT_MS } from '@/config/copilot-constants';
@@ -274,22 +274,17 @@ export class CopilotTool extends BaseCLITool {
         return;
       }
 
-      // Send message to Copilot (without Enter)
-      await sendKeys(sessionName, message, false);
-
-      // Wait a moment for the text to be typed
-      await new Promise((resolve) => setTimeout(resolve, COPILOT_TEXT_INPUT_DELAY_MS));
-
-      // Send Enter key separately
-      await sendSpecialKey(sessionName, 'C-m');
-
-      // Wait a moment for the message to be processed
-      await new Promise((resolve) => setTimeout(resolve, COPILOT_SEND_ENTER_DELAY_MS));
-
-      // Detect [Pasted text] and resend Enter for multi-line messages
-      if (message.includes('\n')) {
-        await detectAndResendIfPastedText(sessionName);
-      }
+      // Issue #1471: Body/Enter separation + read-back submit verification via the
+      // shared helper (replaces the old type -> C-m -> `\n`-gated paste recovery).
+      // Copilot's own text-input / post-Enter delays are preserved. The selection
+      // list slash-command branch above is intentionally NOT routed through here.
+      await sendMessageWithSubmitVerification({
+        sessionName,
+        message,
+        cliToolId: 'copilot',
+        textInputWaitMs: COPILOT_TEXT_INPUT_DELAY_MS,
+        verifyDelayMs: COPILOT_SEND_ENTER_DELAY_MS,
+      });
 
       // Invalidate cache after sending message
       invalidateCache(sessionName);

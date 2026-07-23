@@ -18,8 +18,8 @@ vi.mock('@/lib/tmux/tmux', () => ({
   reconcileSessionGeometry: vi.fn().mockResolvedValue(false),
 }));
 
-vi.mock('@/lib/pasted-text-helper', () => ({
-  detectAndResendIfPastedText: vi.fn().mockResolvedValue(undefined),
+vi.mock('@/lib/cli-tools/submit-verified-sender', () => ({
+  sendMessageWithSubmitVerification: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@/lib/tmux/tmux-capture-cache', () => ({
@@ -255,10 +255,11 @@ describe('AntigravityTool', () => {
       await expect(tool.sendMessage('test-wt', 'hello')).rejects.toThrow(/does not exist/);
     });
 
-    it('should type the message, send Enter, and invalidate the capture cache', async () => {
+    it('should delegate to the submit-verified sender and invalidate the capture cache', async () => {
       vi.useFakeTimers();
       try {
-        const { hasSession, sendKeys, sendSpecialKey, capturePane } = await import('@/lib/tmux/tmux');
+        const { hasSession, capturePane } = await import('@/lib/tmux/tmux');
+        const { sendMessageWithSubmitVerification } = await import('@/lib/cli-tools/submit-verified-sender');
         const { invalidateCache } = await import('@/lib/tmux/tmux-capture-cache');
         vi.mocked(hasSession).mockResolvedValue(true);
         vi.mocked(capturePane).mockResolvedValue(IDLE_FOOTER);
@@ -267,8 +268,10 @@ describe('AntigravityTool', () => {
         await vi.advanceTimersByTimeAsync(20000);
         await promise;
 
-        expect(sendKeys).toHaveBeenCalledWith(SESSION, 'hello', false);
-        expect(sendSpecialKey).toHaveBeenCalledWith(SESSION, 'C-m');
+        // Issue #1471: body/Enter separation + submit verification is delegated.
+        expect(sendMessageWithSubmitVerification).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionName: SESSION, message: 'hello', cliToolId: 'antigravity' })
+        );
         // Contract: sendMessage MUST invalidate the capture cache.
         expect(invalidateCache).toHaveBeenCalledWith(SESSION);
       } finally {
@@ -276,11 +279,11 @@ describe('AntigravityTool', () => {
       }
     });
 
-    it('should resend Enter for multi-line (pasted) messages', async () => {
+    it('should apply submit verification to multi-line (pasted) messages too', async () => {
       vi.useFakeTimers();
       try {
         const { hasSession, capturePane } = await import('@/lib/tmux/tmux');
-        const { detectAndResendIfPastedText } = await import('@/lib/pasted-text-helper');
+        const { sendMessageWithSubmitVerification } = await import('@/lib/cli-tools/submit-verified-sender');
         vi.mocked(hasSession).mockResolvedValue(true);
         vi.mocked(capturePane).mockResolvedValue(IDLE_FOOTER);
 
@@ -288,7 +291,10 @@ describe('AntigravityTool', () => {
         await vi.advanceTimersByTimeAsync(20000);
         await promise;
 
-        expect(detectAndResendIfPastedText).toHaveBeenCalledWith(SESSION);
+        // No `\n` gate anymore — the helper runs for every message.
+        expect(sendMessageWithSubmitVerification).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionName: SESSION, message: 'line1\nline2', cliToolId: 'antigravity' })
+        );
       } finally {
         vi.useRealTimers();
       }

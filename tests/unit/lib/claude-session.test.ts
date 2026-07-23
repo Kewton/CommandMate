@@ -21,9 +21,9 @@ vi.mock('@/lib/tmux/tmux', () => ({
   reconcileSessionGeometry: vi.fn().mockResolvedValue(false),
 }));
 
-// Mock pasted-text-helper (Issue #212)
-vi.mock('@/lib/pasted-text-helper', () => ({
-  detectAndResendIfPastedText: vi.fn().mockResolvedValue(undefined),
+// Mock the shared submit-verified sender (Issue #1469: claude delegates to it)
+vi.mock('@/lib/cli-tools/submit-verified-sender', () => ({
+  sendMessageWithSubmitVerification: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock fs/promises for isValidClaudePath (Issue #265)
@@ -77,7 +77,7 @@ import {
   CLAUDE_SESSION_ERROR_PATTERNS,
   CLAUDE_SESSION_ERROR_REGEX_PATTERNS,
 } from '@/lib/detection/cli-patterns';
-import { detectAndResendIfPastedText } from '@/lib/pasted-text-helper';
+import { sendMessageWithSubmitVerification } from '@/lib/cli-tools/submit-verified-sender';
 
 // ----- Shared test constants (DRY) -----
 const TEST_WORKTREE_ID = 'test-worktree';
@@ -395,7 +395,7 @@ describe('claude-session - Issue #152 improvements', () => {
       expect(callCount).toBeGreaterThanOrEqual(2);
     });
 
-    it('should use sendKeys for Enter instead of execAsync (CONS-001)', async () => {
+    it('should delegate body/Enter separation + submit verification to the shared sender (Issue #1469)', async () => {
       vi.mocked(capturePane).mockResolvedValue('> ');
 
       const promise = sendMessageToClaude(TEST_WORKTREE_ID, 'Hello Claude');
@@ -405,10 +405,16 @@ describe('claude-session - Issue #152 improvements', () => {
 
       await promise;
 
-      // Should call sendKeys twice: once for message, once for Enter
-      expect(sendKeys).toHaveBeenCalledTimes(2);
-      expect(sendKeys).toHaveBeenNthCalledWith(1, TEST_SESSION_NAME, 'Hello Claude', false);
-      expect(sendKeys).toHaveBeenNthCalledWith(2, TEST_SESSION_NAME, '', true);
+      // Issue #1469: the old `sendKeys(msg,false)` + `sendKeys('',true)` batch is gone.
+      // sendMessageToSession no longer types/Enters directly — it delegates.
+      expect(sendKeys).not.toHaveBeenCalledWith(TEST_SESSION_NAME, '', true);
+      expect(sendMessageWithSubmitVerification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionName: TEST_SESSION_NAME,
+          message: 'Hello Claude',
+          cliToolId: 'claude',
+        })
+      );
     });
 
     it('should throw error if session does not exist', async () => {
@@ -447,16 +453,16 @@ describe('claude-session - Issue #152 improvements', () => {
 
       const promise = sendMessageToClaude(TEST_WORKTREE_ID, 'Hello');
 
-      // sendKeys should NOT be called yet (waiting for stability delay)
-      expect(sendKeys).not.toHaveBeenCalled();
+      // The send (now delegated) should NOT happen yet (waiting for stability delay)
+      expect(sendMessageWithSubmitVerification).not.toHaveBeenCalled();
 
       // Advance through stability delay
       await vi.advanceTimersByTimeAsync(CLAUDE_POST_PROMPT_DELAY);
 
       await promise;
 
-      // Now sendKeys should have been called
-      expect(sendKeys).toHaveBeenCalledTimes(2);
+      // Now the delegated send should have happened exactly once
+      expect(sendMessageWithSubmitVerification).toHaveBeenCalledTimes(1);
     });
 
     it('should wait CLAUDE_POST_PROMPT_DELAY after waitForPrompt returns (Path B)', async () => {
@@ -476,15 +482,15 @@ describe('claude-session - Issue #152 improvements', () => {
       // Advance through waitForPrompt polling (one full poll cycle needed)
       await vi.advanceTimersByTimeAsync(CLAUDE_PROMPT_POLL_INTERVAL);
 
-      // sendKeys should NOT be called yet (waiting for stability delay)
-      expect(sendKeys).not.toHaveBeenCalled();
+      // The delegated send should NOT happen yet (waiting for stability delay)
+      expect(sendMessageWithSubmitVerification).not.toHaveBeenCalled();
 
       // Advance through stability delay
       await vi.advanceTimersByTimeAsync(CLAUDE_POST_PROMPT_DELAY);
 
       await promise;
 
-      expect(sendKeys).toHaveBeenCalledTimes(2);
+      expect(sendMessageWithSubmitVerification).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -592,46 +598,48 @@ describe('claude-session - Issue #152 improvements', () => {
     });
   });
 
-  // Issue #212: Pasted text detection in sendMessageToClaude
-  describe('sendMessageToClaude() - Pasted text detection (Issue #212)', () => {
+  // Issue #1469: submit-verified send delegation (replaces the old #212 `\n`-gated
+  // paste detection — recovery + verification now apply to EVERY message).
+  describe('sendMessageToClaude() - submit-verified delegation (Issue #1469)', () => {
     beforeEach(() => {
       vi.mocked(hasSession).mockResolvedValue(true);
       vi.mocked(sendKeys).mockResolvedValue();
       vi.mocked(capturePane).mockResolvedValue('> ');
     });
 
-    // MF-001: Single-line messages should skip detection
-    it('should skip Pasted text detection for single-line messages', async () => {
+    // No `\n` gate anymore: single-line messages are verified too.
+    it('should delegate single-line messages to the submit-verified sender', async () => {
       const promise = sendMessageToClaude(TEST_WORKTREE_ID, 'hello');
       await vi.advanceTimersByTimeAsync(CLAUDE_POST_PROMPT_DELAY);
       await promise;
 
-      // detectAndResendIfPastedText should NOT be called for single-line
-      expect(detectAndResendIfPastedText).not.toHaveBeenCalled();
-      // Standard sendKeys should still be called (message + Enter)
-      expect(sendKeys).toHaveBeenCalledTimes(2);
+      expect(sendMessageWithSubmitVerification).toHaveBeenCalledTimes(1);
+      expect(sendMessageWithSubmitVerification).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionName: TEST_SESSION_NAME, message: 'hello', cliToolId: 'claude' })
+      );
     });
 
-    // Multi-line messages should trigger detection
-    it('should run Pasted text detection for multi-line messages', async () => {
+    it('should delegate multi-line messages to the submit-verified sender', async () => {
       const promise = sendMessageToClaude(TEST_WORKTREE_ID, 'line1\nline2');
       await vi.advanceTimersByTimeAsync(CLAUDE_POST_PROMPT_DELAY);
       await promise;
 
-      // detectAndResendIfPastedText should be called with session name
-      expect(detectAndResendIfPastedText).toHaveBeenCalledWith(TEST_SESSION_NAME);
-      expect(detectAndResendIfPastedText).toHaveBeenCalledTimes(1);
+      expect(sendMessageWithSubmitVerification).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionName: TEST_SESSION_NAME, message: 'line1\nline2', cliToolId: 'claude' })
+      );
     });
 
-    // Existing flow should not be affected
-    it('should not affect existing message sending flow', async () => {
+    // The body must be passed verbatim to the sender (no direct batched send-keys).
+    it('should pass the full multi-line body to the sender without a batched send-keys', async () => {
       const promise = sendMessageToClaude(TEST_WORKTREE_ID, 'line1\nline2\nline3');
       await vi.advanceTimersByTimeAsync(CLAUDE_POST_PROMPT_DELAY);
       await promise;
 
-      // sendKeys order: message first, then Enter
-      expect(sendKeys).toHaveBeenNthCalledWith(1, TEST_SESSION_NAME, 'line1\nline2\nline3', false);
-      expect(sendKeys).toHaveBeenNthCalledWith(2, TEST_SESSION_NAME, '', true);
+      expect(sendMessageWithSubmitVerification).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'line1\nline2\nline3', cliToolId: 'claude' })
+      );
+      // No raw `sendKeys(session, '', true)` Enter batch is issued anymore.
+      expect(sendKeys).not.toHaveBeenCalledWith(TEST_SESSION_NAME, '', true);
     });
   });
 });
