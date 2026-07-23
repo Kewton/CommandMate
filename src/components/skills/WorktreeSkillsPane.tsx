@@ -109,6 +109,17 @@ export function WorktreeSkillsPane({ worktreeId, className = '' }: WorktreeSkill
     () => new Set(installed.skills.map((skill) => skill.skillId)),
     [installed.skills]
   );
+  // Phase 2 (#1479): the installed index carries no name or summary, so borrow
+  // them from the Catalog by id. Only Skills still listed in the Catalog resolve
+  // — an install whose Catalog entry has since disappeared falls back to its
+  // skillId with no summary. A permanent fix would persist these at install time.
+  const catalogInfoById = useMemo(
+    () =>
+      new Map(
+        catalog.skills.map((skill) => [skill.id, { name: skill.name, summary: skill.summary }])
+      ),
+    [catalog.skills]
+  );
   const selectedCatalogSkill = useMemo(
     () => catalog.skills.find((skill) => skill.id === selectedSkillId) ?? null,
     [catalog.skills, selectedSkillId]
@@ -209,26 +220,37 @@ export function WorktreeSkillsPane({ worktreeId, className = '' }: WorktreeSkill
             </Card>
           ) : (
             <ul className="space-y-2">
-              {installed.skills.map((skill) => (
-                <li key={skill.skillId}>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedSkillId(skill.skillId)}
-                    data-testid={`worktree-skills-installed-${skill.skillId}`}
-                    className="w-full rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="break-all text-sm font-semibold text-foreground">
-                        {skill.skillId}
-                      </span>
-                      <SkillRiskBadge risk={skill.effectiveRisk} />
-                    </div>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {t('worktreePane.version', { version: skill.version })}
-                    </p>
-                  </button>
-                </li>
-              ))}
+              {installed.skills.map((skill) => {
+                const catalogInfo = catalogInfoById.get(skill.skillId);
+                return (
+                  <li key={skill.skillId}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedSkillId(skill.skillId)}
+                      data-testid={`worktree-skills-installed-${skill.skillId}`}
+                      className="w-full rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="break-all text-sm font-semibold text-foreground">
+                          {catalogInfo?.name ?? skill.skillId}
+                        </span>
+                        <SkillRiskBadge risk={skill.effectiveRisk} />
+                      </div>
+                      {catalogInfo?.summary && (
+                        <p
+                          className="mt-0.5 text-xs text-muted-foreground line-clamp-2"
+                          data-testid={`worktree-skills-installed-summary-${skill.skillId}`}
+                        >
+                          {catalogInfo.summary}
+                        </p>
+                      )}
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {t('worktreePane.version', { version: skill.version })}
+                      </p>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>
@@ -288,6 +310,14 @@ export function WorktreeSkillsPane({ worktreeId, className = '' }: WorktreeSkill
                       <p className="mt-0.5 truncate text-xs text-muted-foreground">
                         {t('card.provider', { provider: skill.provider.name })}
                       </p>
+                      {skill.summary && (
+                        <p
+                          className="mt-1 text-xs text-muted-foreground line-clamp-2"
+                          data-testid={`worktree-skills-catalog-summary-${skill.id}`}
+                        >
+                          {skill.summary}
+                        </p>
+                      )}
                       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                         {skill.compatibility && (
                           <SkillCompatibilityBadge status={skill.compatibility.status} />

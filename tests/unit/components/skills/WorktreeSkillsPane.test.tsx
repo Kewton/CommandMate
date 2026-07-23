@@ -114,6 +114,47 @@ describe('WorktreeSkillsPane list', () => {
     expect(screen.getByTestId('worktree-skills-installed-empty')).toBeInTheDocument();
   });
 
+  it('shows each Catalog Skill summary in the DOM (Phase 1)', async () => {
+    routeFetch({ '/api/skills': CATALOG, '/api/worktrees/wt-1/skills': INSTALLED_EMPTY });
+
+    render(<WorktreeSkillsPane worktreeId="wt-1" />);
+
+    // The summary is what tells a user what a Skill does before installing —
+    // assert the real text lands in the DOM, not merely that state updated.
+    const summary = await screen.findByTestId('worktree-skills-catalog-summary-release-helper');
+    expect(summary).toHaveTextContent('Walks an agent through the release checklist.');
+  });
+
+  it('borrows name and summary from the Catalog for installed Skills (Phase 2)', async () => {
+    routeFetch({ '/api/skills': CATALOG, '/api/worktrees/wt-1/skills': INSTALLED });
+
+    render(<WorktreeSkillsPane worktreeId="wt-1" />);
+
+    const row = await screen.findByTestId('worktree-skills-installed-release-helper');
+    // The install index only carries a skillId; the Catalog supplies the name.
+    expect(row).toHaveTextContent('Release Helper');
+    expect(
+      screen.getByTestId('worktree-skills-installed-summary-release-helper')
+    ).toHaveTextContent('Walks an agent through the release checklist.');
+  });
+
+  it('falls back to the skillId with no summary when the Catalog lacks the installed Skill (Phase 2 limit)', async () => {
+    routeFetch({
+      '/api/skills': CATALOG,
+      '/api/worktrees/wt-1/skills': {
+        body: { worktreeId: 'wt-1', skills: [makeInstalled({ skillId: 'ghost-skill' })] },
+      },
+    });
+
+    render(<WorktreeSkillsPane worktreeId="wt-1" />);
+
+    const row = await screen.findByTestId('worktree-skills-installed-ghost-skill');
+    expect(row).toHaveTextContent('ghost-skill');
+    expect(
+      screen.queryByTestId('worktree-skills-installed-summary-ghost-skill')
+    ).not.toBeInTheDocument();
+  });
+
   it('surfaces an installed-list failure without falling back to an empty list', async () => {
     routeFetch({
       '/api/skills': CATALOG,
