@@ -8,7 +8,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getEnv } from '@/lib/env';
 import { CloneManager } from '@/lib/git/clone-manager';
-import type { CloneError } from '@/types/clone';
+import { forkRepository, ForkError, type ForkErrorCode } from '@/lib/git/fork-manager';
+import type { CloneError, CloneErrorCategory } from '@/types/clone';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/repositories-clone');
@@ -41,12 +42,56 @@ interface CloneErrorResponse {
 }
 
 /**
+ * Map a ForkError to an HTTP status and a CloneError-shaped body so the UI can
+ * render `error.message` uniformly with clone errors (Issue #1480).
+ */
+function forkErrorToResponse(err: ForkError): { status: number; error: CloneError } {
+  const map: Record<
+    ForkErrorCode,
+    { status: number; category: CloneErrorCategory; suggestedAction: string }
+  > = {
+    GH_NOT_AVAILABLE: {
+      status: 400,
+      category: 'system',
+      suggestedAction: 'Install the GitHub CLI (gh) and try again.',
+    },
+    GH_NOT_AUTHENTICATED: {
+      status: 401,
+      category: 'auth',
+      suggestedAction: 'Run `gh auth login` and try again.',
+    },
+    INVALID_SOURCE_URL: {
+      status: 400,
+      category: 'validation',
+      suggestedAction: 'Provide a GitHub repository URL (https or ssh).',
+    },
+    FORK_FAILED: {
+      status: 422,
+      category: 'git',
+      suggestedAction: 'Check your permissions to fork this repository, then retry.',
+    },
+  };
+  const meta = map[err.code];
+  return {
+    status: meta.status,
+    error: {
+      category: meta.category,
+      code: err.code,
+      message: err.message,
+      recoverable: true,
+      suggestedAction: meta.suggestedAction,
+    },
+  };
+}
+
+/**
  * POST /api/repositories/clone
  *
  * Request body:
  * {
  *   cloneUrl: string  // Git clone URL (HTTPS or SSH)
  *   targetDir?: string  // Optional custom target directory (P3 feature)
+ *   fork?: boolean  // Issue #1480: fork into the authenticated user's namespace first
  * }
  *
  * Response:
@@ -58,7 +103,7 @@ interface CloneErrorResponse {
 export async function POST(request: NextRequest): Promise<NextResponse<CloneStartResponse | CloneErrorResponse>> {
   try {
     const body = await request.json();
-    const { cloneUrl, targetDir } = body;
+    const { cloneUrl, targetDir, fork } = body;
 
     // Validate cloneUrl is provided
     if (!cloneUrl || typeof cloneUrl !== 'string' || cloneUrl.trim() === '') {
@@ -71,6 +116,23 @@ export async function POST(request: NextRequest): Promise<NextResponse<CloneStar
             message: 'Clone URL is required',
             recoverable: true,
             suggestedAction: 'Please enter a valid git clone URL',
+          },
+        },
+        { status: 400 }
+      );
+    }
+
+    // Issue #1480: validate fork flag type (prevent object/array injection)
+    if (fork !== undefined && typeof fork !== 'boolean') {
+      return NextResponse.json(
+        {
+          success: false,
+          error: {
+            category: 'validation',
+            code: 'INVALID_FORK_FLAG',
+            message: 'fork must be a boolean',
+            recoverable: true,
+            suggestedAction: 'Provide a boolean value for fork',
           },
         },
         { status: 400 }
@@ -120,7 +182,31 @@ export async function POST(request: NextRequest): Promise<NextResponse<CloneStar
       );
     }
 
-    const result = await cloneManager.startCloneJob(cloneUrl.trim(), trimmedTargetDir);
+    // Issue #1480: when fork is requested, create (or reuse) a fork in the
+    // authenticated user's namespace and clone THAT, registering the original URL
+    // as upstream. Done synchronously so gh auth / fork failures surface as a
+    // clear error before the background clone job starts.
+    let effectiveCloneUrl = cloneUrl.trim();
+    let upstreamUrl: string | undefined;
+    if (fork === true) {
+      try {
+        const forkResult = await forkRepository(cloneUrl.trim());
+        effectiveCloneUrl = forkResult.forkUrl;
+        upstreamUrl = forkResult.upstreamUrl;
+        logger.info('clone:fork-resolved', { forkFullName: forkResult.forkFullName });
+      } catch (forkErr) {
+        if (forkErr instanceof ForkError) {
+          const { status, error } = forkErrorToResponse(forkErr);
+          logger.warn('clone:fork-failed', { code: forkErr.code });
+          return NextResponse.json({ success: false, error }, { status });
+        }
+        throw forkErr;
+      }
+    }
+
+    const result = await cloneManager.startCloneJob(effectiveCloneUrl, trimmedTargetDir, {
+      upstreamUrl,
+    });
 
     if (!result.success) {
       // Determine HTTP status based on error type

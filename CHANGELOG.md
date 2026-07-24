@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-24
+
+### Added
+
+- **組み込みスラッシュコマンドのカタログ・データファイル化＋ユーザー拡張＋陳腐化検知** (#1476): ハードコードだった `STANDARD_COMMANDS` を同梱 JSON カタログ（`src/config/slash-commands-catalog.json`）へ外部化し、`~/.commandmate/slash-commands/*.json`（グローバル install 時）でユーザーがコマンドを追記・上書きできるようにした（`source: user-catalog`、同名同スコープはユーザー定義優先、壊れたファイルは警告＋スキップで一覧継続）。claude / codex / antigravity の実 CLI 版を取得し `verifiedAgainst` と比較して、カタログが古い場合に API レスポンス（`catalogStaleness`）と UI へ非侵襲に表出する。
+- **Skills ペインでスキル概要を表示** (#1479): worktree の Skills ペイン（PC アクティビティバー／モバイル Tools）で、Catalog 節・Installed 節の各スキルに概要（summary）を表示するようにした。
+- **リポジトリ追加に fork（gh repo fork）オプションを追加** (#1480): Clone URL での追加時に「Fork before adding」を選ぶと、認証済み GitHub CLI で自分のアカウントへ fork してからクローンし、origin=自分の fork / upstream=元リポジトリに設定する。push 先が自分の fork になり upstream を汚さない。
+
+### Fixed
+
+- **スキルインストール後、リロードせずスラッシュコマンドパレットへ反映** (#1477): サーバは常に最新を返すのにクライアント（`useSlashCommands`）が install 後に再取得しなかった問題を、`skill:installed` CustomEvent（worktreeId スコープ）→ `refresh()` の配線と fetch の `{cache:'no-store'}` 化で解消した。表示テストは実 DOM に新スキル候補が出るところまで検証する。
+
+### Changed
+
+- **チュートリアルを fork 前提＋Skills 活用シナリオへ改修** (#1478): サンプルリポジトリを先に fork してからクローンする手順に変更し（upstream 非汚染）、Skills を UI から install して使う体験を追加した（ja / en 対訳）。
+
 ## [0.12.1] - 2026-07-24
 
 ### Fixed

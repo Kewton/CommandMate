@@ -498,14 +498,17 @@ export const repositoryApi = {
   /**
    * Start a clone job for a remote repository
    * Issue #71: Clone URL registration feature
+   * Issue #1480: optional fork-and-add
    *
    * @param cloneUrl - Git clone URL (HTTPS or SSH)
+   * @param options.fork - When true, fork into the authenticated user's namespace
+   *   first and clone that fork (origin = own fork, upstream = original)
    * @returns Clone job response with job ID
    */
-  async clone(cloneUrl: string): Promise<CloneStartResponse> {
+  async clone(cloneUrl: string, options?: { fork?: boolean }): Promise<CloneStartResponse> {
     return fetchApi<CloneStartResponse>('/api/repositories/clone', {
       method: 'POST',
-      body: JSON.stringify({ cloneUrl }),
+      body: JSON.stringify({ cloneUrl, fork: options?.fork ?? false }),
     });
   },
 

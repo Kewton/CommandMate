@@ -28,6 +28,7 @@ import { COMMAND_CATEGORIES } from '@/types/slash-commands';
 import { groupByCategory, keyOf } from '@/lib/command-merger';
 import { isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
 import { truncateString } from '@/lib/utils';
+import { clearCatalogCache } from '@/lib/slash-command-catalog';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('slash-commands');
@@ -578,6 +579,8 @@ export function getCachedCommands(): SlashCommand[] | null {
 export function clearCache(): void {
   commandsCache = null;
   skillsCache = null;
+  // Issue #1476: keep the user-catalog / staleness caches in lockstep.
+  clearCatalogCache();
 }
 
 /**

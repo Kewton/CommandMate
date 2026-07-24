@@ -82,6 +82,7 @@ describe('MessageInput', () => {
       setFilter: vi.fn(),
       refresh: vi.fn(),
       cliTool: 'claude',
+      isCatalogStale: false,
     });
   });
 
@@ -415,6 +416,7 @@ describe('MessageInput', () => {
           setFilter: vi.fn(),
           refresh: vi.fn(),
           cliTool: 'codex',
+          isCatalogStale: false,
         });
 
         render(<MessageInput {...defaultProps} cliToolId="codex" />);

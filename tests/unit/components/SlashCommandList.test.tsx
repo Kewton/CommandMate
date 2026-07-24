@@ -108,6 +108,21 @@ describe('SlashCommandList', () => {
       expect(screen.getByText('Codex')).toBeInTheDocument();
     });
 
+    // Issue #1476: user extension commands carry a source badge.
+    it('should render a user-catalog badge for user extension commands', () => {
+      const groups: SlashCommandGroup[] = [
+        {
+          category: 'standard-util',
+          label: 'Standard (Utility)',
+          commands: [
+            { name: 'loop', description: 'Run on a recurring interval', category: 'standard-util', filePath: '', source: 'user-catalog', cliTools: ['claude'] },
+          ],
+        },
+      ];
+      render(<SlashCommandList groups={groups} onSelect={mockOnSelect} />);
+      expect(screen.getByTestId('user-catalog-badge')).toBeInTheDocument();
+    });
+
     it('should render empty state when no groups', () => {
       render(<SlashCommandList groups={[]} onSelect={mockOnSelect} />);
 

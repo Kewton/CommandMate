@@ -52,6 +52,11 @@ export interface SlashCommandSelectorProps {
   position?: { top: number; left: number };
   /** Callback for free input mode (Issue #56, #288: passes current filter text) */
   onFreeInput?: (filterText: string) => void;
+  /**
+   * Whether the built-in command catalog looks out of date for the active CLI
+   * (Issue #1476). Renders a non-intrusive one-line hint at the end of the list.
+   */
+  isCatalogStale?: boolean;
 }
 
 /**
@@ -78,6 +83,7 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
   isMobile = false,
   position,
   onFreeInput,
+  isCatalogStale = false,
 }: SlashCommandSelectorProps) {
   const [filter, setFilter] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
@@ -188,6 +194,18 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
     return null;
   }
 
+  // Issue #1476: non-intrusive hint shown at the end of the list when the
+  // installed CLI is newer than the bundled catalog. Guides users to the user
+  // extension directory for commands the snapshot has not caught up to.
+  const staleNote = isCatalogStale ? (
+    <div
+      data-testid="slash-command-stale-note"
+      className="px-3 py-2 border-t border-border text-xs text-muted-foreground"
+    >
+      {t('slashCommands.catalogStale.hint')}
+    </div>
+  ) : null;
+
   // Mobile: Bottom sheet
   if (isMobile) {
     return (
@@ -265,6 +283,8 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
             highlightedIndex={highlightedIndex}
             className="flex-1 overflow-y-auto pb-20"
           />
+
+          {staleNote}
         </div>
       </>
     );
@@ -323,6 +343,8 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
         highlightedIndex={highlightedIndex}
         className="flex-1 overflow-y-auto"
       />
+
+      {staleNote}
 
       {/* Keyboard hints */}
       <div className="px-3 py-1.5 border-t border-border text-xs text-muted-foreground flex gap-3">

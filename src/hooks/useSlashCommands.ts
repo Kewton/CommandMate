@@ -11,7 +11,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { handleApiError } from '@/lib/api-client';
 import { filterCommandGroups } from '@/lib/command-merger';
-import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
+import { SKILL_INSTALLED_EVENT, type SkillInstalledEventDetail } from '@/lib/skill-events';
+import type { SlashCommand, SlashCommandGroup, CatalogStaleness } from '@/types/slash-commands';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 /**
@@ -36,6 +37,11 @@ export interface UseSlashCommandsResult {
   refresh: () => void;
   /** Currently loaded CLI tool */
   cliTool: CLIToolType;
+  /**
+   * Whether the installed CLI is newer than the bundled catalog for any tool
+   * (Issue #1476). Drives the non-intrusive "list may be out of date" hint.
+   */
+  isCatalogStale: boolean;
 }
 
 /**
@@ -76,6 +82,7 @@ export function useSlashCommands(
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
   const [currentCliTool, setCurrentCliTool] = useState<CLIToolType>(cliToolId || 'claude');
+  const [catalogStaleness, setCatalogStaleness] = useState<CatalogStaleness>({});
 
   /**
    * Fetch commands from API
@@ -97,16 +104,22 @@ export function useSlashCommands(
         endpoint += `?cliTool=${cliToolId}`;
       }
 
-      const response = await fetch(endpoint);
+      // Issue #1477: never serve a cached command list. Installing a Skill
+      // changes what the API returns, and a memory/http cache hit here would
+      // keep the palette showing the pre-install set even after a refetch.
+      const response = await fetch(endpoint, { cache: 'no-store' });
       if (!response.ok) {
         throw new Error(`HTTP error ${response.status}`);
       }
       const data = await response.json();
       setGroups(data.groups);
       setCurrentCliTool(data.cliTool || cliToolId || 'claude');
+      // Issue #1476: only the worktree endpoint returns catalogStaleness.
+      setCatalogStaleness(data.catalogStaleness ?? {});
     } catch (err) {
       setError(handleApiError(err));
       setGroups([]);
+      setCatalogStaleness({});
     } finally {
       setLoading(false);
     }
@@ -118,6 +131,25 @@ export function useSlashCommands(
   useEffect(() => {
     void fetchCommands();
   }, [fetchCommands]);
+
+  /**
+   * Refetch when a Skill is installed into the worktree this palette is showing
+   * (Issue #1477). The install flow lives in a separate component tree, so it
+   * signals through a window event instead of a shared React path. Only a
+   * matching worktreeId refetches: an install into a different checkout, or the
+   * global (worktree-less) command list, must not disturb this palette.
+   */
+  useEffect(() => {
+    if (!worktreeId) return;
+    const handleSkillInstalled = (event: Event): void => {
+      const detail = (event as CustomEvent<SkillInstalledEventDetail>).detail;
+      if (detail?.worktreeId === worktreeId) {
+        void fetchCommands();
+      }
+    };
+    window.addEventListener(SKILL_INSTALLED_EVENT, handleSkillInstalled);
+    return () => window.removeEventListener(SKILL_INSTALLED_EVENT, handleSkillInstalled);
+  }, [worktreeId, fetchCommands]);
 
   /**
    * Flat list of all commands
@@ -133,6 +165,13 @@ export function useSlashCommands(
   const filteredGroups = useMemo(() => {
     return filterCommandGroups(groups, filter);
   }, [groups, filter]);
+
+  /**
+   * Whether any tool's installed CLI is newer than the bundled catalog.
+   */
+  const isCatalogStale = useMemo(() => {
+    return Object.values(catalogStaleness).some((entry) => entry.stale);
+  }, [catalogStaleness]);
 
   /**
    * Refresh commands
@@ -151,5 +190,6 @@ export function useSlashCommands(
     setFilter,
     refresh,
     cliTool: currentCliTool,
+    isCatalogStale,
   };
 }

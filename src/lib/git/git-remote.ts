@@ -14,6 +14,7 @@ import {
 } from '@/config/git-status-config';
 import { createLogger } from '@/lib/logger';
 import {
+  execGitCommandTyped,
   execGitConflictAware,
   execGitNetworkAware,
   runSerializedWrite,
@@ -47,6 +48,31 @@ export async function gitFetch(worktreePath: string, options: FetchOptions): Pro
   if (prune) args.push('--prune');
   args.push(remote, '--');
   await execGitNetworkAware(args, worktreePath, GIT_FETCH_TIMEOUT_MS);
+}
+
+/** Timeout for `git remote add`, a local (non-network) operation (Issue #1480). */
+const GIT_REMOTE_ADD_TIMEOUT_MS = 5000;
+
+/**
+ * Add a remote: `git remote add <name> <url>` (Issue #1480).
+ *
+ * Local operation (no network), so it is exempt from runSerializedWrite. `name`
+ * is a server-controlled constant (e.g. 'upstream') and `url` is a clone URL that
+ * has already passed UrlNormalizer validation — it cannot begin with '-', so no
+ * option-injection is possible. execFile (array args) means no shell involvement.
+ *
+ * @throws {Error} when the remote already exists or git fails otherwise.
+ */
+export async function gitRemoteAdd(
+  worktreePath: string,
+  name: string,
+  url: string
+): Promise<void> {
+  await execGitCommandTyped(
+    ['remote', 'add', name, url],
+    worktreePath,
+    GIT_REMOTE_ADD_TIMEOUT_MS
+  );
 }
 
 /** Options for gitPull (Issue #783). */

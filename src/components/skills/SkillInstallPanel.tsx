@@ -25,6 +25,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button, Card, Checkbox } from '@/components/ui';
 import { getCliToolDisplayNameSafe } from '@/lib/cli-tools/types';
+import { dispatchSkillInstalled } from '@/lib/skill-events';
 import { SkillNotice } from './SkillNotice';
 import { SkillTargetSelector } from './SkillTargetSelector';
 import { SkillInstallPlanPreview, SkillUninstallPlanPreview } from './SkillPlanPreview';
@@ -230,6 +231,12 @@ export function SkillInstallPanel({
       acknowledgeRisk: plan.requiresRiskAcknowledgement ? true : undefined,
       idempotencyKey: idempotencyKey('skill-install', plan.token),
     });
+    // Issue #1477: the newly installed Skill is a new slash command. Tell any
+    // palette showing this worktree to refetch, so the command appears without
+    // a full page reload.
+    if (result.ok) {
+      dispatchSkillInstalled(worktreeId);
+    }
     setState((current) => ({
       ...current,
       busy: null,

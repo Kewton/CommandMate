@@ -146,7 +146,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // Hooks for slash command functionality
   // Issue #4: Pass cliToolId to filter commands by CLI tool
   const isMobile = useIsMobile();
-  const { groups } = useSlashCommands(worktreeId, cliToolId);
+  const { groups, isCatalogStale } = useSlashCommands(worktreeId, cliToolId);
 
   // Issue #1166: the composer no longer lifts itself with a translateY hack.
   // The mobile shell (WorktreeDetailRefactored) now sizes its container to
@@ -649,6 +649,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         onClose={handleCommandCancel}
         isMobile={isMobile}
         onFreeInput={handleFreeInput}
+        isCatalogStale={isCatalogStale}
       />
     </div>
   );

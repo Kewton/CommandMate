@@ -81,6 +81,12 @@
     "selectHint": "選択",
     "closeHint": "閉じる",
     "empty": "利用可能なコマンドがありません",
+    "catalogStale": {
+      "hint": "お使いのCLIがこの一覧より新しい可能性があります。表示されないコマンドは ~/.commandmate/slash-commands/ で追加できます。"
+    },
+    "sourceBadge": {
+      "userCatalog": "カスタム"
+    },
     "descriptions": {
       "clear": "会話履歴をクリア",
       "compact": "コンテキストを圧縮してトークン使用量を削減",
