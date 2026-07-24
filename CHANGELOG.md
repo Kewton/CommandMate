@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **orchestrate 監視レシピを実行可能 Skill 化** (#1512): `/orchestrate` 運用で実証済みの監視ノウハウ（capture 解析・状態判定・介入判断・完了/スコープ検証）を、セッションメモリ依存から `.claude/skills/orchestrate-monitor/`（SKILL.md＋bash 3.2 互換スクリプト群）へ資産化した。判定ロジックを fixture ベースで単体テスト化し、既知の誤報2パターン（未起動 idle の COMPLETE 誤報／検証ガード自身の偽陽性）を回帰テストで固定。CI で `bash -n` 構文チェックを回す。#1452 Harness Pack の移植元となる自家用 Skill（公式カタログ配布は後続 #1513）。
+
 ## [0.14.1] - 2026-07-24
 
 ### Fixed
