@@ -94,6 +94,10 @@ npm run catalog:refresh -- --check
 ```
 
 - 追加候補・`verifiedAgainst` 更新・ソース未掲載（要レビュー）の差分が表示される。
+- **幻コマンド確認（#1503）**: 「In catalog but not in source（review — not auto-deleted）」に
+  出た項目は、現行 CLI に存在しない幻コマンドの候補。自動削除はされない（隠しエイリアスの
+  誤検出があるため）ので、実機で「完全入力してもポップアップに一致行が出ない」ものは
+  カタログ・`locales/{en,ja}/worktree.json`・`frequentlyUsed` から手動除去を検討する。
 - ソースが到達不能・体裁変更の場合は **fail-soft**（warn を出して既存カタログ据え置き、
   exit 0）。この場合はリコンサイルをスキップしてそのまま Phase 2 へ進む。
 

@@ -14,10 +14,10 @@
     ],
     "codex": [
       "new",
-      "undo",
       "diff",
-      "approvals",
-      "plan"
+      "plan",
+      "status",
+      "review"
     ],
     "opencode": [
       "models",
@@ -128,13 +128,6 @@
       "source": "standard"
     },
     {
-      "name": "cost",
-      "descriptionKey": "slashCommands.descriptions.cost",
-      "category": "standard-monitor",
-      "isStandard": true,
-      "source": "standard"
-    },
-    {
       "name": "review",
       "descriptionKey": "slashCommands.descriptions.review",
       "category": "standard-git",
@@ -142,13 +135,6 @@
         "claude",
         "codex"
       ],
-      "isStandard": true,
-      "source": "standard"
-    },
-    {
-      "name": "pr-comments",
-      "descriptionKey": "slashCommands.descriptions.pr-comments",
-      "category": "standard-git",
       "isStandard": true,
       "source": "standard"
     },
@@ -178,13 +164,6 @@
       "source": "standard"
     },
     {
-      "name": "todos",
-      "descriptionKey": "slashCommands.descriptions.todos",
-      "category": "standard-util",
-      "isStandard": true,
-      "source": "standard"
-    },
-    {
       "name": "focus",
       "descriptionKey": "slashCommands.descriptions.focus",
       "category": "standard-session",
@@ -207,16 +186,6 @@
     {
       "name": "fast",
       "descriptionKey": "slashCommands.descriptions.fast",
-      "category": "standard-config",
-      "cliTools": [
-        "claude"
-      ],
-      "isStandard": true,
-      "source": "standard"
-    },
-    {
-      "name": "lazy",
-      "descriptionKey": "slashCommands.descriptions.lazy",
       "category": "standard-config",
       "cliTools": [
         "claude"
@@ -305,32 +274,12 @@
       "source": "standard"
     },
     {
-      "name": "agents",
-      "descriptionKey": "slashCommands.descriptions.agents",
-      "category": "standard-config",
-      "cliTools": [
-        "claude"
-      ],
-      "isStandard": true,
-      "source": "standard"
-    },
-    {
       "name": "new",
       "descriptionKey": "slashCommands.descriptions.new",
       "category": "standard-session",
       "cliTools": [
         "codex",
         "opencode"
-      ],
-      "isStandard": true,
-      "source": "standard"
-    },
-    {
-      "name": "undo",
-      "descriptionKey": "slashCommands.descriptions.undo",
-      "category": "standard-session",
-      "cliTools": [
-        "codex"
       ],
       "isStandard": true,
       "source": "standard"
@@ -349,16 +298,6 @@
       "name": "quit",
       "descriptionKey": "slashCommands.descriptions.quit",
       "category": "standard-session",
-      "cliTools": [
-        "codex"
-      ],
-      "isStandard": true,
-      "source": "standard"
-    },
-    {
-      "name": "approvals",
-      "descriptionKey": "slashCommands.descriptions.approvals",
-      "category": "standard-config",
       "cliTools": [
         "codex"
       ],
