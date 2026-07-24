@@ -113,6 +113,7 @@
       "terminal-setup": "Shift+Enter などのターミナルキーバインドを設定",
       "statusline": "ステータスラインの表示を設定",
       "usage": "セッションのコスト・プラン使用量・アクティビティ統計を表示",
+      "tasks": "バックグラウンドタスクを表示・管理",
       "memory": "CLAUDE.md メモリファイルを編集し auto-memory を管理",
       "new": "新しい会話を開始",
       "undo": "直前の Codex の操作を取り消す",
