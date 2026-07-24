@@ -286,12 +286,13 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   const showNav = terminal.isSelectionListActive;
   const showPrompt = prompt.visible && !autoYesEnabled;
 
-  // Issue #1017 (C-lite): detection-independent Esc/q safety net. Shown only when
-  // the session is interactive but detection could not classify the frame
-  // (isUnclassifiedActive) — the "stuck in an unrecognized TUI mode" case — and no
-  // selection list / prompt panel is already driving it. Stays hidden during normal
-  // generation ('thinking_indicator') and at an idle input prompt ('ready'), so it
-  // is neither noisy nor able to insert a stray 'q' at the composer.
+  // Issue #1017 / #1494: detection-independent navigation safety net (←/→/↑/↓/Enter/
+  // Esc, plus Codex 'q'). Shown only when the session is interactive but detection
+  // could not classify the frame (isUnclassifiedActive) — the "stuck in an
+  // unrecognized TUI overlay" case such as Claude `/help`, where NavigationButtons is
+  // not rendered — and no selection list / prompt panel is already driving it. Stays
+  // hidden during normal generation ('thinking_indicator') and at an idle input prompt
+  // ('ready'), so Enter/'q' can never reach the composer.
   const showEscapeHatch =
     terminal.isUnclassifiedActive &&
     !showNav &&

@@ -17,8 +17,7 @@
 
 import React, { memo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
-import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
+import { MobileTerminalTab } from '@/components/worktree/MobileTerminalTab';
 import { HistoryPane } from '@/components/worktree/HistoryPane';
 import { type MobileTab } from '@/components/mobile/MobileTabBar';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
@@ -200,43 +199,9 @@ interface MobileContentProps {
   onToggleInstanceVisible?: (instanceId: string) => void;
 }
 
-/**
- * [Issue #736] Mobile terminal tab content.
- *
- * Owns a per-(worktreeId, cliToolId) `useTerminalPanePolling` instance — the
- * same hook the PC split panes use (#728) — replacing the removed
- * terminal reducer slice. Mounted only while the terminal tab is
- * active, so the poller stops when the user is on another mobile tab (and the
- * hook self-resets on a cliToolId change, mirroring the PC compositeKey reset).
- */
-const MobileTerminalTab = memo(function MobileTerminalTab({
-  worktreeId,
-  cliToolId,
-  instanceId,
-  disableAutoFollow,
-}: {
-  worktreeId: string;
-  cliToolId: CLIToolType;
-  /** Issue #874: agent instance id for this tab (defaults to primary === cliToolId). */
-  instanceId?: string;
-  disableAutoFollow?: boolean;
-}) {
-  const { terminal, setAutoScroll } = useTerminalPanePolling({ worktreeId, cliToolId, instanceId });
-  // Issue #1172: compact the 1000-row layout padding for Claude/Codex (display only).
-  const compactTuiLayoutPadding = cliToolId === 'claude' || cliToolId === 'codex';
-  return (
-    <TerminalDisplay
-      output={terminal.output}
-      isActive={terminal.isRunning}
-      isThinking={terminal.isThinking}
-      autoScroll={terminal.autoScroll}
-      onScrollChange={setAutoScroll}
-      disableAutoFollow={disableAutoFollow}
-      compactTuiLayoutPadding={compactTuiLayoutPadding}
-      className="h-full"
-    />
-  );
-});
+// Issue #1494 / #1496: MobileTerminalTab moved to its own module so the mobile
+// terminal tab (now carrying the detection-independent navigation hatch) can be
+// unit-tested without the full mobile detail dependency graph. Imported above.
 
 /** Renders content based on active mobile tab */
 export const MobileContent = memo(function MobileContent({
