@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-07-24
+
 ### Fixed
 
 - **端末オーバーレイの矢印ナビを検出非依存化（デスクトップ＋モバイル）** (#1494, #1496): `/help`・`/model` 等の未分類 TUI オーバーレイで ESC しか送れず ←/→/↑/↓/Enter が送れなかった問題を、`TerminalEscapeHatch` を Esc 専用から汎用ナビパッド（←/↑/↓/→/Enter/Esc、Codex は追加で `q`）へ拡張して解消した。`isUnclassifiedActive` ゲートは従来どおりで、選択リスト／プロンプト検出時は非表示。モバイルパスは `MobileTerminalTab` を独立モジュール化し、デスクトップと同一ゲート（`isUnclassifiedActive && !prompt.visible`）でハッチを描画してデスクトップと同等の到達性を与えた。
@@ -17,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **submit-verified-sender が TUI 補完置換を誤判定して別コマンド実行／残留する不具合を修正** (#1501): 存在しないスラッシュコマンド送信時、TUI ポップアップが入力を別コマンドへ置換（`/status`→`/statusline`、`/review`→`/teamwork-preview`）するのを検証ループが判別できず、Enter 再送で別コマンド誤実行（フレーバーA）または残留（フレーバーB）していた。判定を submitted/pending/replaced の3値化（`classifySubmit`）し、入力行が body の前方一致でない `/…` コマンドに置換されたら Enter を再送せず `clearInputLine`（内部専用 `C-u`、special-keys API 非露出）で入力行をクリアして throw する。正当な typed-but-unsent 回復（body 前方一致→Enter 再送）は非回帰。
 - **グローバル `~/.claude/skills` がパレットに出ない非対称を修正** (#1505): codex のグローバル skills（`~/.codex/skills`・`~/.agents/skills`）は表示されるのに claude のグローバル skills（`~/.claude/skills`）を読む経路が無く、claude セッションのパレットに worktree 配下しか出なかった。route に `loadSkills(os.homedir())` を追加し `~/.claude/skills` を `source:'skill'`（cliTools 未定義＝claude のみ）としてマージ。worktree の同名 skill が優先されるよう global グループを worktree より前に置き（`mergeCommandGroups` は後勝ち）二重表示を防止。codex/antigravity には非表示、`$HOME` 側 dir 不在でもエラーにならない。
 - **slash-commands カタログの claude/codex 幻コマンド計7件を除去** (#1503): `verifiedAgainst` と同一版の実機で不在を確認した claude の `/cost`・`/lazy`・`/todos`・`/pr-comments`・（`(removed)` スタブの）`/agents` と codex の `/approvals`・`/undo` をカタログから削除（`agents` の opencode 版は無関係なので保持）。未使用化した `descriptionKey` を en/ja 辞書から削除し、`frequentlyUsed` からも除去。隠しコマンド `/clear`・`/quit`・`/subagents`（codex）は「完全入力で一致する実在コマンド」なので誤削除しないことをテストで担保。再発防止として `/release` の確認手順（`missingFromSource` の目視）を SKILL.md に追記。
+
+## [0.14.0] - 2026-07-24
 
 ### Added
 
