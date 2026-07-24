@@ -16,7 +16,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db';
-import { getSlashCommandGroups, loadCodexSkills, loadAgentsSkills, getCopilotBuiltinCommands, getGeminiBuiltinCommands } from '@/lib/slash-commands';
+import { getSlashCommandGroups, loadCodexSkills, loadAgentsSkills, mergeCodexFamilySkills, getCopilotBuiltinCommands, getGeminiBuiltinCommands } from '@/lib/slash-commands';
 import { getStandardCommandGroups } from '@/lib/standard-commands';
 import { loadUserCatalogCommands, composeStandardLayer, getCatalogStaleness } from '@/lib/slash-command-catalog';
 import { mergeCommandGroups, filterCommandsByCliTool, groupByCategory } from '@/lib/command-merger';
@@ -115,14 +115,15 @@ export async function GET(
       worktreeGroups = [];
     }
 
-    // Load global Codex skills: current ~/.agents/skills/ (Issue #1165) and legacy
-    // ~/.codex/skills/ (Issue #166, #790). Both surface codex-skill entries; duplicates
-    // by name are collapsed downstream by mergeCommandGroups.
+    // Load global Codex-family skills: current ~/.agents/skills/ (Issue #1165,
+    // codex+antigravity) and legacy ~/.codex/skills/ (Issue #166, #790, codex-only).
+    // mergeCodexFamilySkills collapses same-named entries whose cliTools scopes now
+    // differ (Issue #1504) so they are not shown twice in codex sessions.
     // .codex/prompts/ is intentionally NOT loaded: Codex CLI never reads it, so
     // surfacing those entries in the palette only misleads users.
     const globalCodexSkills = await loadCodexSkills().catch(() => []);
     const globalAgentsSkills = await loadAgentsSkills().catch(() => []);
-    const globalSkills = [...globalCodexSkills, ...globalAgentsSkills];
+    const globalSkills = mergeCodexFamilySkills(globalCodexSkills, globalAgentsSkills);
 
     // SF-1: Merge with worktree commands taking priority
     // Include global Codex skills in worktree groups (local ones already included via getSlashCommandGroups)

@@ -113,6 +113,7 @@
       "terminal-setup": "Configure terminal keybindings for Shift+Enter and other shortcuts",
       "statusline": "Configure the status line display",
       "usage": "Show session cost, plan usage limits, and activity stats",
+      "tasks": "View and manage background tasks",
       "memory": "Edit CLAUDE.md memory files and manage auto-memory",
       "new": "Start a new conversation",
       "undo": "Undo the last Codex action",

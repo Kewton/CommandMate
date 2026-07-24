@@ -15,6 +15,7 @@
 import React, { memo, useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
+import type { CLIToolType } from '@/lib/cli-tools/types';
 import { filterCommandGroups } from '@/lib/command-merger';
 import { resolveCommandDescription } from '@/lib/slash-command-format';
 import { SlashCommandList } from './SlashCommandList';
@@ -57,6 +58,12 @@ export interface SlashCommandSelectorProps {
    * (Issue #1476). Renders a non-intrusive one-line hint at the end of the list.
    */
   isCatalogStale?: boolean;
+  /**
+   * Active CLI tool for the session (Issue #1504). Forwarded to SlashCommandList
+   * so the displayed trigger matches what gets inserted — antigravity sessions
+   * show `/NAME` for `.agents/skills` entries instead of codex's `$NAME`.
+   */
+  cliToolId?: CLIToolType;
 }
 
 /**
@@ -84,6 +91,7 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
   position,
   onFreeInput,
   isCatalogStale = false,
+  cliToolId,
 }: SlashCommandSelectorProps) {
   const [filter, setFilter] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
@@ -282,6 +290,7 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
             onSelect={handleSelect}
             highlightedIndex={highlightedIndex}
             className="flex-1 overflow-y-auto pb-20"
+            cliToolId={cliToolId}
           />
 
           {staleNote}
@@ -342,6 +351,7 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
         onSelect={handleSelect}
         highlightedIndex={highlightedIndex}
         className="flex-1 overflow-y-auto"
+        cliToolId={cliToolId}
       />
 
       {staleNote}

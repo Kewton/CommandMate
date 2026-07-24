@@ -186,6 +186,65 @@ describe('GET /api/worktrees/[id]/slash-commands', () => {
     }
   });
 
+  // Issue #1504: .agents/skills entries are read by agy and must surface in
+  // antigravity sessions, while staying invisible to claude (Issue #1458 premise).
+  it('should surface .agents/skills entries when cliTool=antigravity but not for claude', async () => {
+    const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'commandmate-test-'));
+    const originalHome = process.env.HOME;
+    process.env.HOME = isolatedHome;
+
+    const agySkillDir = path.join(isolatedHome, '.agents', 'skills', 'my-agy-skill');
+
+    try {
+      fs.mkdirSync(agySkillDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(agySkillDir, 'SKILL.md'),
+        '---\nname: my-agy-skill\ndescription: An agy skill\n---\nBody'
+      );
+
+      const { getWorktreeById } = await import('@/lib/db');
+      vi.mocked(getWorktreeById).mockReturnValue({
+        id: 'test-id',
+        name: 'test',
+        path: '/Users/test/projects/my-project',
+        repositoryPath: '/Users/test/projects/my-project',
+        repositoryName: 'my-project',
+        cliToolId: 'antigravity',
+      });
+
+      const { GET } = await import(
+        '@/app/api/worktrees/[id]/slash-commands/route'
+      );
+
+      type CommandEntry = { name: string; source: string; cliTools?: string[] };
+
+      // Antigravity session: skill is visible with codex+antigravity scope.
+      const agyRequest = new NextRequest('http://localhost:3000/api/worktrees/test-id/slash-commands?cliTool=antigravity');
+      const agyResponse = await GET(agyRequest, { params: Promise.resolve({ id: 'test-id' }) });
+      expect(agyResponse.status).toBe(200);
+      const agyData = await agyResponse.json();
+      const agyCommands: CommandEntry[] = agyData.groups.flatMap(
+        (group: { commands: CommandEntry[] }) => group.commands
+      );
+      const agySkill = agyCommands.find((c) => c.name === 'my-agy-skill');
+      expect(agySkill).toBeDefined();
+      expect(agySkill?.source).toBe('codex-skill');
+      expect(agySkill?.cliTools).toEqual(['codex', 'antigravity']);
+
+      // Claude session: the same entry must not leak in (Issue #1458).
+      const claudeRequest = new NextRequest('http://localhost:3000/api/worktrees/test-id/slash-commands?cliTool=claude');
+      const claudeResponse = await GET(claudeRequest, { params: Promise.resolve({ id: 'test-id' }) });
+      const claudeData = await claudeResponse.json();
+      const claudeCommands: CommandEntry[] = claudeData.groups.flatMap(
+        (group: { commands: CommandEntry[] }) => group.commands
+      );
+      expect(claudeCommands.find((c) => c.name === 'my-agy-skill')).toBeUndefined();
+    } finally {
+      process.env.HOME = originalHome;
+      fs.rmSync(isolatedHome, { recursive: true, force: true });
+    }
+  });
+
   it('should return Gemini builtins and gemini-tagged worktree commands when cliTool=gemini', async () => {
     const testDir = path.resolve(__dirname, '../fixtures/test-gemini-worktree-slash-commands');
     const commandsDir = path.join(testDir, '.claude', 'commands');

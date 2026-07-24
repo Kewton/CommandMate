@@ -509,4 +509,43 @@ describe('filterCommandsByCliTool', () => {
     expect(result).toHaveLength(2);
     expect(result[1].commands).toHaveLength(1);
   });
+
+  // Issue #1504: .agents/skills entries carry cliTools ['codex', 'antigravity'].
+  const agentsSkillGroups: SlashCommandGroup[] = [
+    {
+      category: 'skill',
+      label: 'Skills',
+      commands: [
+        {
+          name: 'my-agents-skill',
+          description: 'A skill from .agents/skills',
+          category: 'skill',
+          source: 'codex-skill',
+          filePath: '',
+          cliTools: ['codex', 'antigravity'],
+        },
+      ],
+    },
+  ];
+
+  it('should surface .agents/skills entries in antigravity sessions (Issue #1504)', () => {
+    const result = filterCommandsByCliTool(agentsSkillGroups, 'antigravity');
+    const names = result.flatMap((group) => group.commands.map((cmd) => cmd.name));
+
+    expect(names).toContain('my-agents-skill');
+  });
+
+  it('should still surface .agents/skills entries in codex sessions (Issue #1504)', () => {
+    const result = filterCommandsByCliTool(agentsSkillGroups, 'codex');
+    const names = result.flatMap((group) => group.commands.map((cmd) => cmd.name));
+
+    expect(names).toContain('my-agents-skill');
+  });
+
+  it('should not surface .agents/skills entries in claude sessions (Issue #1458 premise)', () => {
+    const result = filterCommandsByCliTool(agentsSkillGroups, 'claude');
+    const names = result.flatMap((group) => group.commands.map((cmd) => cmd.name));
+
+    expect(names).not.toContain('my-agents-skill');
+  });
 });
