@@ -1,5 +1,6 @@
 /**
- * Tests for TerminalEscapeHatch (Issue #1017, C-lite safety net)
+ * Tests for TerminalEscapeHatch (Issue #1017 safety net, extended to a
+ * detection-independent navigation pad in Issue #1494).
  *
  * @vitest-environment jsdom
  */
@@ -22,26 +23,47 @@ describe('TerminalEscapeHatch', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders the Esc and q escape keys', () => {
+  // Issue #1494: the hatch is the on-screen way to drive an unclassified overlay
+  // (e.g. Claude `/help`) where NavigationButtons is not rendered, so it must
+  // expose the arrow / Enter keys, not just Esc.
+  it('renders the arrow, Enter and Escape navigation keys (Issue #1494)', () => {
+    render(<TerminalEscapeHatch worktreeId="w-1" cliToolId="claude" />);
+    expect(screen.getByLabelText('Send Left')).toBeInTheDocument();
+    expect(screen.getByLabelText('Send Up')).toBeInTheDocument();
+    expect(screen.getByLabelText('Send Down')).toBeInTheDocument();
+    expect(screen.getByLabelText('Send Right')).toBeInTheDocument();
+    expect(screen.getByLabelText('Send Enter')).toBeInTheDocument();
+    expect(screen.getByLabelText('Send Escape')).toBeInTheDocument();
+  });
+
+  it('renders the Esc and q keys for Codex', () => {
     render(<TerminalEscapeHatch worktreeId="w-1" cliToolId="codex" />);
     expect(screen.getByLabelText('Send Escape')).toBeInTheDocument();
     expect(screen.getByLabelText('Send q (quit)')).toBeInTheDocument();
   });
 
-  it('renders Escape only for Claude so q cannot reach the input prompt', () => {
+  it('exposes q only for Codex so it cannot reach another CLI input prompt', () => {
     render(<TerminalEscapeHatch worktreeId="w-1" cliToolId="claude" />);
     expect(screen.getByLabelText('Send Escape')).toBeInTheDocument();
     expect(screen.queryByLabelText('Send q (quit)')).not.toBeInTheDocument();
   });
 
-  it('sends Escape via the special-keys API', async () => {
-    render(<TerminalEscapeHatch worktreeId="w-1" cliToolId="codex" />);
-    fireEvent.click(screen.getByLabelText('Send Escape'));
+  it.each([
+    ['Send Left', 'Left'],
+    ['Send Right', 'Right'],
+    ['Send Enter', 'Enter'],
+    ['Send Escape', 'Escape'],
+  ])('sends %s via the special-keys API as key %s (Issue #1494)', async (ariaLabel, expectedKey) => {
+    render(<TerminalEscapeHatch worktreeId="w-1" cliToolId="claude" />);
+    fireEvent.click(screen.getByLabelText(ariaLabel));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const [url, options] = fetchMock.mock.calls[0];
     expect(url).toBe('/api/worktrees/w-1/special-keys');
-    expect(JSON.parse((options as RequestInit).body as string)).toEqual({ cliToolId: 'codex', keys: ['Escape'] });
+    expect(JSON.parse((options as RequestInit).body as string)).toEqual({
+      cliToolId: 'claude',
+      keys: [expectedKey],
+    });
   });
 
   it('sends q and targets a non-primary instance (Issue #869)', async () => {

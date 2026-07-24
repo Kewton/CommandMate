@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **端末オーバーレイの矢印ナビを検出非依存化（デスクトップ＋モバイル）** (#1494, #1496): `/help`・`/model` 等の未分類 TUI オーバーレイで ESC しか送れず ←/→/↑/↓/Enter が送れなかった問題を、`TerminalEscapeHatch` を Esc 専用から汎用ナビパッド（←/↑/↓/→/Enter/Esc、Codex は追加で `q`）へ拡張して解消した。`isUnclassifiedActive` ゲートは従来どおりで、選択リスト／プロンプト検出時は非表示。モバイルパスは `MobileTerminalTab` を独立モジュール化し、デスクトップと同一ゲート（`isUnclassifiedActive && !prompt.visible`）でハッチを描画してデスクトップと同等の到達性を与えた。
+
 ## [0.14.0] - 2026-07-24
 
 ### Added
