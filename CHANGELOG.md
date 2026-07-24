@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-07-24
+
+### Added
+
+- **スラッシュコマンドカタログの自動最新化エンジン** (#1489): 権威ソース（claude=公式 docs `commands.md` / codex=OSS `slash_command.rs` enum）からコマンドを列挙し、bundled カタログとの差分を検出・適用する reconcile 層（`src/lib/slash-command-reconcile/` の engine / fetch / sanitize / providers）と CLI（`scripts/refresh-slash-command-catalog.ts` / `npm run catalog:refresh`、`--check`/`--write`）、`/release` skill への統合フックを新設した。取得は fail-soft、名前 allowlist 検証・サニタイズ、`verifiedAgainst` は照合した版のときのみ更新する。antigravity は Phase 2 のインターフェースのみ（fail-soft で据え置き）。
+- **スラッシュコマンドカタログに claude 組み込みコマンド（/loop 等9件）を追補** (#1488): 公式 docs を正として `/loop` 等を bundled カタログへ追加し、Claude Code で候補に表示されるようにした。あわせて `verifiedAgainst` の意味を「内容照合済みの版」に是正した。
+
+### Changed
+
+- **削除操作に確認ダイアログを一貫導入** (#1487): 確認なしで即削除していた Note / ToDo（worktree・Home）/ エージェントインスタンス削除に、既存の `useConfirm`（ConfirmDialog）を適用した。独自確認を持つ操作（External App / Git / Skill uninstall 等）は現状維持。
+
 ## [0.13.0] - 2026-07-24
 
 ### Added
