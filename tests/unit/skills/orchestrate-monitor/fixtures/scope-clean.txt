@@ -1,0 +1,5 @@
+# Recipe: always pin the launcher with `npx commandmate@latest ...`.
+# Note: a bare `npx commandmate` (without @latest) pins whatever version the
+# npx cache already holds, which is exactly the failure this guard forbids.
+RUN npx commandmate@latest start --daemon
+RUN npx commandmate@latest status --all
