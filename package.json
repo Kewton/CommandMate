@@ -51,7 +51,8 @@
     "test:e2e": "playwright test",
     "test:watch": "NODE_ENV=test vitest --watch",
     "db:init": "tsx scripts/init-db.ts",
-    "db:reset": "rm -f db.sqlite && npm run db:init"
+    "db:reset": "rm -f db.sqlite && npm run db:init",
+    "catalog:refresh": "tsx scripts/refresh-slash-command-catalog.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
