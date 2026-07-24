@@ -297,4 +297,160 @@ describe('GET /api/worktrees/[id]/slash-commands', () => {
       fs.rmSync(testDir, { recursive: true, force: true });
     }
   });
+
+  // Issue #1505: global ~/.claude/skills must surface in claude sessions
+  // (symmetric with the global codex-family scan) and stay invisible to
+  // codex/antigravity (cliTools undefined => claude-only).
+  it('should surface ~/.claude/skills entries for claude but not codex/antigravity', async () => {
+    const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'commandmate-test-'));
+    const originalHome = process.env.HOME;
+    process.env.HOME = isolatedHome;
+
+    const globalSkillDir = path.join(isolatedHome, '.claude', 'skills', 'my-global-skill');
+
+    try {
+      fs.mkdirSync(globalSkillDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(globalSkillDir, 'SKILL.md'),
+        '---\nname: my-global-skill\ndescription: A global claude skill\n---\nBody'
+      );
+
+      const { getWorktreeById } = await import('@/lib/db');
+      vi.mocked(getWorktreeById).mockReturnValue({
+        id: 'test-id',
+        name: 'test',
+        path: '/Users/test/projects/my-project',
+        repositoryPath: '/Users/test/projects/my-project',
+        repositoryName: 'my-project',
+        cliToolId: 'claude',
+      });
+
+      const { GET } = await import(
+        '@/app/api/worktrees/[id]/slash-commands/route'
+      );
+
+      type CommandEntry = { name: string; source: string; cliTools?: string[] };
+
+      // Claude session: skill is visible with claude-only scope (cliTools undefined).
+      const claudeRequest = new NextRequest('http://localhost:3000/api/worktrees/test-id/slash-commands?cliTool=claude');
+      const claudeResponse = await GET(claudeRequest, { params: Promise.resolve({ id: 'test-id' }) });
+      expect(claudeResponse.status).toBe(200);
+      const claudeData = await claudeResponse.json();
+      const claudeCommands: CommandEntry[] = claudeData.groups.flatMap(
+        (group: { commands: CommandEntry[] }) => group.commands
+      );
+      const globalSkill = claudeCommands.find((c) => c.name === 'my-global-skill');
+      expect(globalSkill).toBeDefined();
+      expect(globalSkill?.source).toBe('skill');
+      // Undefined cliTools drops out of the JSON payload entirely.
+      expect(globalSkill?.cliTools).toBeUndefined();
+      expect(claudeData.sources.skill).toBeGreaterThan(0);
+
+      // Codex session: the claude skill must not leak in.
+      const codexRequest = new NextRequest('http://localhost:3000/api/worktrees/test-id/slash-commands?cliTool=codex');
+      const codexResponse = await GET(codexRequest, { params: Promise.resolve({ id: 'test-id' }) });
+      const codexData = await codexResponse.json();
+      const codexCommands: CommandEntry[] = codexData.groups.flatMap(
+        (group: { commands: CommandEntry[] }) => group.commands
+      );
+      expect(codexCommands.find((c) => c.name === 'my-global-skill')).toBeUndefined();
+
+      // Antigravity session: the claude skill must not leak in.
+      const agyRequest = new NextRequest('http://localhost:3000/api/worktrees/test-id/slash-commands?cliTool=antigravity');
+      const agyResponse = await GET(agyRequest, { params: Promise.resolve({ id: 'test-id' }) });
+      const agyData = await agyResponse.json();
+      const agyCommands: CommandEntry[] = agyData.groups.flatMap(
+        (group: { commands: CommandEntry[] }) => group.commands
+      );
+      expect(agyCommands.find((c) => c.name === 'my-global-skill')).toBeUndefined();
+    } finally {
+      process.env.HOME = originalHome;
+      fs.rmSync(isolatedHome, { recursive: true, force: true });
+    }
+  });
+
+  // Issue #1505: a worktree .claude/skills entry must win over a same-named
+  // global ~/.claude/skills entry (worktree優先), shown exactly once.
+  it('should let worktree .claude/skills win over a same-named global skill (no duplicate)', async () => {
+    const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'commandmate-test-'));
+    const originalHome = process.env.HOME;
+    process.env.HOME = isolatedHome;
+
+    const globalSkillDir = path.join(isolatedHome, '.claude', 'skills', 'dup-skill');
+    const worktreeDir = path.resolve(__dirname, '../fixtures/test-global-claude-skill-worktree');
+    const worktreeSkillDir = path.join(worktreeDir, '.claude', 'skills', 'dup-skill');
+
+    try {
+      fs.mkdirSync(globalSkillDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(globalSkillDir, 'SKILL.md'),
+        '---\nname: dup-skill\ndescription: GLOBAL version\n---\nBody'
+      );
+      fs.mkdirSync(worktreeSkillDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(worktreeSkillDir, 'SKILL.md'),
+        '---\nname: dup-skill\ndescription: WORKTREE version\n---\nBody'
+      );
+
+      const { getWorktreeById } = await import('@/lib/db');
+      vi.mocked(getWorktreeById).mockReturnValue({
+        id: 'test-id',
+        name: 'test',
+        path: worktreeDir,
+        repositoryPath: worktreeDir,
+        repositoryName: 'my-project',
+        cliToolId: 'claude',
+      });
+
+      const { GET } = await import(
+        '@/app/api/worktrees/[id]/slash-commands/route'
+      );
+
+      type CommandEntry = { name: string; description: string };
+      const request = new NextRequest('http://localhost:3000/api/worktrees/test-id/slash-commands?cliTool=claude');
+      const response = await GET(request, { params: Promise.resolve({ id: 'test-id' }) });
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      const dupEntries: CommandEntry[] = data.groups
+        .flatMap((group: { commands: CommandEntry[] }) => group.commands)
+        .filter((c: CommandEntry) => c.name === 'dup-skill');
+
+      expect(dupEntries).toHaveLength(1);
+      expect(dupEntries[0].description).toBe('WORKTREE version');
+    } finally {
+      process.env.HOME = originalHome;
+      fs.rmSync(isolatedHome, { recursive: true, force: true });
+      fs.rmSync(worktreeDir, { recursive: true, force: true });
+    }
+  });
+
+  // Issue #1505: a missing ~/.claude/skills directory must not fail the request.
+  it('should not error when ~/.claude/skills is absent', async () => {
+    const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'commandmate-test-'));
+    const originalHome = process.env.HOME;
+    process.env.HOME = isolatedHome; // no .claude/skills created
+
+    try {
+      const { getWorktreeById } = await import('@/lib/db');
+      vi.mocked(getWorktreeById).mockReturnValue({
+        id: 'test-id',
+        name: 'test',
+        path: '/Users/test/projects/my-project',
+        repositoryPath: '/Users/test/projects/my-project',
+        repositoryName: 'my-project',
+        cliToolId: 'claude',
+      });
+
+      const { GET } = await import(
+        '@/app/api/worktrees/[id]/slash-commands/route'
+      );
+
+      const request = new NextRequest('http://localhost:3000/api/worktrees/test-id/slash-commands?cliTool=claude');
+      const response = await GET(request, { params: Promise.resolve({ id: 'test-id' }) });
+      expect(response.status).toBe(200);
+    } finally {
+      process.env.HOME = originalHome;
+      fs.rmSync(isolatedHome, { recursive: true, force: true });
+    }
+  });
 });
