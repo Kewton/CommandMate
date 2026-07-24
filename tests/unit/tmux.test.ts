@@ -13,6 +13,7 @@ import {
   sendKeys,
   sendSpecialKey,
   sendSpecialKeys,
+  clearInputLine,
   capturePane,
   killSession,
   ensureSession,
@@ -537,6 +538,38 @@ describe('tmux library', () => {
 
       await expect(sendKeys('test-session', 'echo hello')).rejects.toThrow(
         'Failed to send keys to tmux session'
+      );
+    });
+  });
+
+  describe('clearInputLine (Issue #1501)', () => {
+    it('sends a single C-u to the exact target', async () => {
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const callback = args[args.length - 1] as (err: Error | null, result: { stdout: string; stderr: string }) => void;
+        callback(null, { stdout: '', stderr: '' });
+        return {} as ReturnType<typeof execFile>;
+      });
+
+      await clearInputLine('test-session');
+
+      expect(execFile).toHaveBeenCalledTimes(1);
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['send-keys', '-t', '=test-session:', 'C-u'],
+        { timeout: 5000 },
+        expect.any(Function)
+      );
+    });
+
+    it('throws on failure', async () => {
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const callback = args[args.length - 1] as (err: Error | null, result: { stdout: string; stderr: string }) => void;
+        callback(new Error('session not found'), { stdout: '', stderr: '' });
+        return {} as ReturnType<typeof execFile>;
+      });
+
+      await expect(clearInputLine('test-session')).rejects.toThrow(
+        'Failed to clear tmux input line'
       );
     });
   });
