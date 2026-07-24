@@ -28,9 +28,18 @@
  * `[Pasted text #\d+` placeholder. That placeholder is used only as one
  * "still pending" positive signal (broadened to be version-resilient); the
  * primary decision is "is the message still sitting on the input line?".
+ *
+ * Issue #1501 hardens the "still pending" branch. A TUI completion popup can
+ * REPLACE the typed body with a different command (`/status` -> `/statusline`,
+ * `/review` -> `/teamwork-preview`) when Enter selects a highlighted suggestion.
+ * The old substring check misread the replacement as "still typed" and resent
+ * Enter (executing the wrong command), or as "submitted" and left the residual
+ * behind (detonating on the next send). The decision is now three-valued —
+ * submitted / pending / replaced — and a `replaced` verdict clears the input
+ * line and THROWS instead of resending Enter (see classifySubmit).
  */
 
-import { sendKeys, sendSpecialKeys, capturePane } from '../tmux/tmux';
+import { sendKeys, sendSpecialKeys, capturePane, clearInputLine } from '../tmux/tmux';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { stripAnsi, detectThinking } from '../detection/cli-patterns';
 import type { CLIToolType } from './types';
@@ -54,6 +63,19 @@ const logger = createLogger('cli-tools/submit-verified-sender');
 const PASTE_PLACEHOLDER_PATTERN = /\[Pasted text[\s#]/;
 
 /**
+ * A slash-command sitting on the input line (Issue #1501).
+ *
+ * TUI completion popups replace a typed slash command with a highlighted menu
+ * item (`/status` -> `/statusline`, `/review` -> `/teamwork-preview`); the
+ * result is always another slash command. Scoping the "replaced" verdict to
+ * `/…` text keeps idle-prompt placeholders that some TUIs paint on an empty
+ * composer (gemini's "Type your message or @path", claude's hints, "? for
+ * shortcuts") — none of which start with `/` — from being mistaken for a
+ * substitution, so a genuinely-submitted message never fails spuriously.
+ */
+const REPLACEMENT_COMMAND_PATTERN = /^\/[A-Za-z]/;
+
+/**
  * Prompt input-line markers across the supported TUIs.
  * claude/gemini/copilot: `>` or `❯`; codex: `›`; antigravity: `>`;
  * vibe-local: `ctx:N% ❯`. Leading whitespace is tolerated (tmux padding).
@@ -66,9 +88,16 @@ const VERIFY_WINDOW_LINES = 12;
 /** Default bounded read-back attempts before giving up (throwing). */
 const DEFAULT_VERIFY_ATTEMPTS = 4;
 
-/** Minimum fragment length used to decide the body is still on the input line. */
-const MIN_FRAGMENT_LENGTH = 3;
-const MAX_FRAGMENT_LENGTH = 24;
+/**
+ * Three-valued classification of the read-back pane (Issue #1501).
+ *
+ *   submitted - the message left the input box (or the tool is generating).
+ *   pending   - the message is still verbatim on the input line -> resend Enter.
+ *   replaced  - the input line holds DIFFERENT text than we typed (a TUI popup
+ *               autocompleted/replaced the command) -> clear the line and throw,
+ *               never resend Enter.
+ */
+export type SubmitState = 'submitted' | 'pending' | 'replaced';
 
 export interface SubmitVerifiedSendParams {
   /** tmux session name (already validated by the caller chain). */
@@ -101,17 +130,17 @@ export interface SubmitVerifiedSendParams {
 }
 
 /**
- * First non-blank fragment of the message, used to decide whether the body is
- * still sitting on the input line. Only the first line matters because that is
- * what a TUI shows on the prompt line before folding into a paste placeholder.
+ * First non-blank line of the message, trimmed. This is what a TUI shows on the
+ * prompt line before the body folds into a paste placeholder. NOT truncated:
+ * the replacement check (inputMatchesBody) needs the full first line so that a
+ * completion suffix (`/status` -> `/statusline`) is not mistaken for the body.
  */
-function comparableFragment(message: string): string {
-  const firstLine = message
+function firstNonBlankLine(message: string): string {
+  const line = message
     .split('\n')
     .map((l) => l.trim())
     .find((l) => l.length > 0);
-  if (!firstLine) return '';
-  return firstLine.slice(0, MAX_FRAGMENT_LENGTH);
+  return line ?? '';
 }
 
 /**
@@ -129,43 +158,100 @@ function findInputLine(windowLines: string[]): string | null {
   return null;
 }
 
+/** Input line text with the prompt marker stripped and surrounding space trimmed. */
+function stripInputMarker(inputLine: string): string {
+  return inputLine.replace(INPUT_LINE_MARKER, '').trim();
+}
+
 /**
- * Decide whether a captured pane shows the message as submitted.
+ * Whether the (marker-stripped, non-empty) input-line text is still our
+ * unsent body rather than a TUI-substituted command.
+ *
+ * The still-unsent body appears verbatim on the input line. Line wrapping can
+ * visually truncate it to a PREFIX of the first line, but a completion popup
+ * always produces a DIFFERENT string — the body plus a completion suffix
+ * (`/status` -> `/statusline`) or an unrelated command (`/review` ->
+ * `/teamwork-preview`) — which is never a prefix of the body. So the body is
+ * "still there" iff the input text is a prefix of (or equals) the body's first
+ * line. This deliberately rejects `/statusline` for a `/status` body: the safe
+ * rule is "input text that is not the body (or a prefix of it) is NOT resent".
+ */
+function inputMatchesBody(strippedInput: string, message: string): boolean {
+  const bodyFirstLine = firstNonBlankLine(message);
+  if (bodyFirstLine.length === 0) return false;
+  return bodyFirstLine.startsWith(strippedInput);
+}
+
+/**
+ * Classify a captured pane into submitted / pending / replaced (Issue #1501).
  *
  * Version-independent by design — does NOT require the paste placeholder:
- *   A. The tool is generating a response          -> submitted.
- *   B. A paste placeholder is on the input line    -> NOT submitted (Enter eaten).
- *   C. The body fragment is still on the input line -> NOT submitted.
- *   D. Otherwise (empty input line / moved to history) -> submitted.
+ *   A. The tool is generating a response              -> submitted.
+ *   B. No input line, or the input line is empty       -> submitted.
+ *   C. A paste placeholder is folded on the input line -> pending (Enter eaten).
+ *   D. The body is still verbatim on the input line    -> pending (resend Enter).
+ *   E. A DIFFERENT slash command is on the input line  -> replaced (TUI popup
+ *      autocompleted the command; clear the line and throw, never resend Enter).
+ *   F. Any other non-empty text (idle placeholder/hint) -> submitted (unchanged
+ *      pre-#1501 permissive default, so normal sends never spuriously fail).
  *
- * B and C are scoped to the input line only, so the user-message echo that a
- * TUI prints into its history above the prompt never causes a false "pending".
+ * C–F are scoped to the input line only, so the user-message echo that a TUI
+ * prints into its history above the prompt never causes a false verdict.
  */
-export function isSubmitted(output: string, cliToolId: CLIToolType, message: string): boolean {
+export function classifySubmit(
+  output: string,
+  cliToolId: CLIToolType,
+  message: string
+): SubmitState {
   const clean = stripAnsi(output);
   const windowLines = clean.split('\n').slice(-VERIFY_WINDOW_LINES);
   const windowStr = windowLines.join('\n');
 
   // A. Actively generating a response => the message was accepted.
   if (detectThinking(cliToolId, windowStr)) {
-    return true;
+    return 'submitted';
   }
 
   const inputLine = findInputLine(windowLines);
-  if (inputLine) {
-    // B. A paste placeholder is still folded on the input line => not submitted.
-    if (PASTE_PLACEHOLDER_PATTERN.test(inputLine)) {
-      return false;
-    }
-    // C. The typed body is still sitting on the input line => not submitted.
-    const fragment = comparableFragment(message);
-    if (fragment.length >= MIN_FRAGMENT_LENGTH && inputLine.includes(fragment)) {
-      return false;
-    }
+  // B. No input line visible => the prompt scrolled off / moved on => submitted.
+  if (!inputLine) {
+    return 'submitted';
   }
 
-  // D. Input line is clear (or absent) and nothing is generating => submitted.
-  return true;
+  const strippedInput = stripInputMarker(inputLine);
+  // B. Empty input line => the message left the box => submitted.
+  if (strippedInput.length === 0) {
+    return 'submitted';
+  }
+
+  // C. A paste placeholder is still folded on the input line => body is there.
+  if (PASTE_PLACEHOLDER_PATTERN.test(inputLine)) {
+    return 'pending';
+  }
+
+  // D. The typed body is still sitting on the input line => resend Enter.
+  if (inputMatchesBody(strippedInput, message)) {
+    return 'pending';
+  }
+
+  // E. A different slash command is on the input line => a completion popup
+  //    replaced what we typed. (Scoped to `/…` so idle-prompt placeholders that
+  //    some TUIs paint on an empty composer are never mistaken for this.)
+  if (REPLACEMENT_COMMAND_PATTERN.test(strippedInput)) {
+    return 'replaced';
+  }
+
+  // F. Non-empty, non-command steady-state text (idle placeholder / hint) =>
+  //    submitted, preserving the pre-#1501 permissive default.
+  return 'submitted';
+}
+
+/**
+ * Backward-compatible boolean view of {@link classifySubmit}: submitted vs not.
+ * A `replaced` verdict is NOT "submitted", so this returns false for it too.
+ */
+export function isSubmitted(output: string, cliToolId: CLIToolType, message: string): boolean {
+  return classifySubmit(output, cliToolId, message) === 'submitted';
 }
 
 /**
@@ -215,12 +301,36 @@ export async function sendMessageWithSubmitVerification(
     await new Promise((resolve) => setTimeout(resolve, verifyDelayMs));
 
     const output = await capturePane(sessionName, { startLine: -VERIFY_WINDOW_LINES });
-    if (isSubmitted(output, cliToolId, message)) {
+    const state = classifySubmit(output, cliToolId, message);
+
+    if (state === 'submitted') {
       invalidateCache(sessionName);
       return;
     }
 
-    // Still typed-but-unsent — resend a single Enter and re-check.
+    if (state === 'replaced') {
+      // A TUI completion popup replaced our command with a different one.
+      // Resending Enter would EXECUTE that command (Issue #1501 flavor A);
+      // leaving it in place lets the residual detonate on the next send
+      // (flavor B). Clear the input line (best-effort) and surface the failure
+      // to the caller instead of ever resending Enter.
+      try {
+        await clearInputLine(sessionName);
+      } catch (clearError: unknown) {
+        logger.error('submit-clear-input-failed', {
+          sessionName,
+          cliToolId,
+          error: clearError instanceof Error ? clearError.message : String(clearError),
+        });
+      }
+      invalidateCache(sessionName);
+      logger.error('submit-replaced-by-tui-completion', { sessionName, cliToolId, attempt });
+      throw new Error(
+        `Message was replaced by a TUI autocompletion for session ${sessionName}; the input no longer matches the sent text. Cleared the input line without submitting to avoid executing a different command.`
+      );
+    }
+
+    // state === 'pending' — still typed-but-unsent, resend a single Enter and re-check.
     logger.warn('submit-not-confirmed:resending-enter', {
       sessionName,
       cliToolId,

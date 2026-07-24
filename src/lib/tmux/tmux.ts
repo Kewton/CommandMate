@@ -608,6 +608,31 @@ export async function sendSpecialKey(
 }
 
 /**
+ * Clear whatever text is currently sitting on the TUI input line (Issue #1501).
+ *
+ * Sends a single `C-u` (kill-line-before-cursor) so the prompt is wiped. Used by
+ * the submit-verified sender when it detects that a TUI popup autocompleted the
+ * typed command into a DIFFERENT one (e.g. `/status` -> `/statusline`): the
+ * residual text must be removed so it can neither be executed by a stray Enter
+ * nor detonate on the next send.
+ *
+ * `C-u` is a fixed literal passed via execFile (no shell, no injection) and is
+ * intentionally NOT added to ALLOWED_SPECIAL_KEYS / NAVIGATION_KEY_VALUES — it is
+ * an internal recovery primitive, never exposed through the special-keys API.
+ *
+ * @param sessionName - Target session name
+ * @throws {Error} If the tmux command fails
+ */
+export async function clearInputLine(sessionName: string): Promise<void> {
+  try {
+    await execFileAsync('tmux', ['send-keys', '-t', exactTarget(sessionName), 'C-u'], { timeout: DEFAULT_TIMEOUT });
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to clear tmux input line: ${errorMessage}`);
+  }
+}
+
+/**
  * Allowed navigation key names for special-keys API validation.
  * Used for TUI navigation sequences (e.g., Up/Down cursor, Enter/Escape selection).
  *
