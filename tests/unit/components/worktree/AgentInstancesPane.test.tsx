@@ -13,6 +13,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { AgentInstancesPane } from '@/components/worktree/AgentInstancesPane';
+import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 import {
   MAX_AGENT_INSTANCES,
   getCliToolDisplayName,
@@ -172,19 +173,39 @@ describe('AgentInstancesPane (Issue #869)', () => {
   });
 
   describe('delete instance', () => {
-    it('PATCHes the roster without the deleted instance (order re-normalized)', async () => {
+    it('PATCHes the roster without the deleted instance after confirmation (Issue #1487)', async () => {
       render(
-        <AgentInstancesPane
-          {...baseProps}
-          instances={[primary('claude', 0), primary('codex', 1), primary('gemini', 2)]}
-        />,
+        <ConfirmProvider>
+          <AgentInstancesPane
+            {...baseProps}
+            instances={[primary('claude', 0), primary('codex', 1), primary('gemini', 2)]}
+          />
+        </ConfirmProvider>,
       );
       openRowMenu('claude');
       fireEvent.click(screen.getByTestId('agent-instance-delete-claude'));
+      // Deletion is gated behind the shared ConfirmDialog.
+      fireEvent.click(await screen.findByTestId('confirm-dialog-confirm'));
       await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
       const body = patchBody();
       expect(body.agentInstances.map((i) => i.id)).toEqual(['codex', 'gemini']);
       expect(body.agentInstances.map((i) => i.order)).toEqual([0, 1]);
+    });
+
+    it('does not PATCH when the delete ConfirmDialog is cancelled (Issue #1487)', async () => {
+      render(
+        <ConfirmProvider>
+          <AgentInstancesPane
+            {...baseProps}
+            instances={[primary('claude', 0), primary('codex', 1), primary('gemini', 2)]}
+          />
+        </ConfirmProvider>,
+      );
+      openRowMenu('claude');
+      fireEvent.click(screen.getByTestId('agent-instance-delete-claude'));
+      fireEvent.click(await screen.findByTestId('confirm-dialog-cancel'));
+      await waitFor(() => expect(screen.queryByTestId('confirm-dialog')).toBeNull());
+      expect(mockFetch).not.toHaveBeenCalled();
     });
 
     it('disables delete at MIN (single instance) and shows the min hint', () => {
@@ -266,14 +287,17 @@ describe('AgentInstancesPane (Issue #869)', () => {
       mockFetch.mockResolvedValue({ ok: false, json: () => Promise.resolve({}) });
       const onInstancesChange = vi.fn();
       render(
-        <AgentInstancesPane
-          {...baseProps}
-          onInstancesChange={onInstancesChange}
-          instances={[primary('claude', 0), primary('codex', 1)]}
-        />,
+        <ConfirmProvider>
+          <AgentInstancesPane
+            {...baseProps}
+            onInstancesChange={onInstancesChange}
+            instances={[primary('claude', 0), primary('codex', 1)]}
+          />
+        </ConfirmProvider>,
       );
       openRowMenu('claude');
       fireEvent.click(screen.getByTestId('agent-instance-delete-claude'));
+      fireEvent.click(await screen.findByTestId('confirm-dialog-confirm'));
       await waitFor(() =>
         expect(screen.getByTestId('agent-instances-error')).toBeInTheDocument(),
       );

@@ -22,6 +22,7 @@ import { MemoCard } from './MemoCard';
 import { MemoAddButton } from './MemoAddButton';
 import { MemoSearchBar } from './MemoSearchBar';
 import { Spinner } from '@/components/ui/Spinner';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 // ============================================================================
 // Types
@@ -56,6 +57,7 @@ export const MemoPane = memo(function MemoPane({
   const t = useTranslations('schedule');
   // Issue #1277: the error-state retry button reuses the shared common label.
   const tCommon = useTranslations('common');
+  const confirm = useConfirm();
 
   // State
   const [memos, setMemos] = useState<WorktreeMemo[]>([]);
@@ -146,6 +148,15 @@ export const MemoPane = memo(function MemoPane({
    */
   const handleDeleteMemo = useCallback(
     async (memoId: string) => {
+      const target = memos.find((m) => m.id === memoId);
+      if (
+        !(await confirm({
+          description: tCommon('confirmDelete', { name: target?.title ?? '' }),
+          variant: 'danger',
+        }))
+      ) {
+        return;
+      }
       try {
         await memoApi.delete(worktreeId, memoId);
         setMemos((prev) => prev.filter((m) => m.id !== memoId));
@@ -153,7 +164,7 @@ export const MemoPane = memo(function MemoPane({
         console.error('Failed to delete memo:', err);
       }
     },
-    [worktreeId]
+    [worktreeId, memos, confirm, tCommon]
   );
 
   /**

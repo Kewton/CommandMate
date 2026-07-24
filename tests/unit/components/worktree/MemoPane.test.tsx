@@ -9,6 +9,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { MemoPane } from '@/components/worktree/MemoPane';
+import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 import type { WorktreeMemo } from '@/types/models';
 
 // Issue #1277: this file asserts rendered wording (empty/loading/no-match copy,
@@ -239,9 +240,13 @@ describe('MemoPane', () => {
     });
   });
 
-  describe('Delete memo', () => {
-    it('should call delete API when delete is clicked', async () => {
-      render(<MemoPane {...defaultProps} />);
+  describe('Delete memo (Issue #1487: ConfirmDialog)', () => {
+    it('should call delete API after the ConfirmDialog is confirmed', async () => {
+      render(
+        <ConfirmProvider>
+          <MemoPane {...defaultProps} />
+        </ConfirmProvider>
+      );
 
       await waitFor(() => {
         expect(screen.getAllByRole('button', { name: /delete/i })).toHaveLength(2);
@@ -250,13 +255,20 @@ describe('MemoPane', () => {
       const deleteButtons = screen.getAllByRole('button', { name: /delete/i });
       fireEvent.click(deleteButtons[0]);
 
+      // The delete must be gated behind an explicit confirmation.
+      fireEvent.click(await screen.findByTestId('confirm-dialog-confirm'));
+
       await waitFor(() => {
         expect(mockDelete).toHaveBeenCalledWith('worktree-1', 'memo-1');
       });
     });
 
-    it('should remove memo from list after deletion', async () => {
-      render(<MemoPane {...defaultProps} />);
+    it('should remove memo from list after confirmed deletion', async () => {
+      render(
+        <ConfirmProvider>
+          <MemoPane {...defaultProps} />
+        </ConfirmProvider>
+      );
 
       await waitFor(() => {
         expect(screen.getAllByTestId('memo-card')).toHaveLength(2);
@@ -264,10 +276,33 @@ describe('MemoPane', () => {
 
       const deleteButtons = screen.getAllByRole('button', { name: /delete/i });
       fireEvent.click(deleteButtons[0]);
+      fireEvent.click(await screen.findByTestId('confirm-dialog-confirm'));
 
       await waitFor(() => {
         expect(screen.getAllByTestId('memo-card')).toHaveLength(1);
       });
+    });
+
+    it('should NOT call delete API when the ConfirmDialog is cancelled', async () => {
+      render(
+        <ConfirmProvider>
+          <MemoPane {...defaultProps} />
+        </ConfirmProvider>
+      );
+
+      await waitFor(() => {
+        expect(screen.getAllByTestId('memo-card')).toHaveLength(2);
+      });
+
+      const deleteButtons = screen.getAllByRole('button', { name: /delete/i });
+      fireEvent.click(deleteButtons[0]);
+      fireEvent.click(await screen.findByTestId('confirm-dialog-cancel'));
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('confirm-dialog')).toBeNull();
+      });
+      expect(mockDelete).not.toHaveBeenCalled();
+      expect(screen.getAllByTestId('memo-card')).toHaveLength(2);
     });
   });
 

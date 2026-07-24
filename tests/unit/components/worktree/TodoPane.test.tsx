@@ -12,6 +12,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { TodoPane } from '@/components/worktree/TodoPane';
+import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 import { worktreeTodoApi, type WorktreeTodoItem } from '@/lib/api/todo-api';
 
 // Hoisted so the vi.mock factory (itself hoisted above imports) can reference it.
@@ -131,13 +132,20 @@ describe('TodoPane', () => {
     expect(screen.getByTestId('todo-count-done')).toHaveTextContent('1');
   });
 
-  it('deletes a todo via worktreeTodoApi.remove', async () => {
+  it('deletes a todo via worktreeTodoApi.remove after the ConfirmDialog is confirmed (Issue #1487)', async () => {
     mockedApi.remove.mockResolvedValue(undefined);
-    render(<TodoPane worktreeId="wt-1" />);
+    render(
+      <ConfirmProvider>
+        <TodoPane worktreeId="wt-1" />
+      </ConfirmProvider>,
+    );
     await screen.findByText('first task');
 
     const deleteButtons = screen.getAllByTestId('todo-delete');
     fireEvent.click(deleteButtons[0]);
+
+    // A confirmation dialog must appear before any API call is made.
+    fireEvent.click(await screen.findByTestId('confirm-dialog-confirm'));
 
     await waitFor(() => {
       expect(mockedApi.remove).toHaveBeenCalledWith('wt-1', 't1');
@@ -145,6 +153,26 @@ describe('TodoPane', () => {
     await waitFor(() => {
       expect(screen.queryByText('first task')).not.toBeInTheDocument();
     });
+  });
+
+  it('does not delete when the ConfirmDialog is cancelled (Issue #1487)', async () => {
+    mockedApi.remove.mockResolvedValue(undefined);
+    render(
+      <ConfirmProvider>
+        <TodoPane worktreeId="wt-1" />
+      </ConfirmProvider>,
+    );
+    await screen.findByText('first task');
+
+    fireEvent.click(screen.getAllByTestId('todo-delete')[0]);
+    fireEvent.click(await screen.findByTestId('confirm-dialog-cancel'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('confirm-dialog')).toBeNull();
+    });
+    expect(mockedApi.remove).not.toHaveBeenCalled();
+    // The item is still present because the delete was aborted.
+    expect(screen.getByText('first task')).toBeInTheDocument();
   });
 
   it('reorders todos via worktreeTodoApi.reorder when moving down', async () => {
