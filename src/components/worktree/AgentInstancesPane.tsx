@@ -29,6 +29,7 @@ import {
 import { MIN_AGENT_INSTANCES } from '@/lib/agent-instances-validator';
 import { VibeLocalSettings } from '@/components/worktree/VibeLocalSettings';
 import { Spinner } from '@/components/ui/Spinner';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { TruncationTooltip } from '@/components/common/TruncationTooltip';
 import {
   DropdownMenu,
@@ -100,6 +101,8 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
   onVibeLocalContextWindowChange,
 }: AgentInstancesPaneProps) {
   const t = useTranslations('schedule');
+  const tCommon = useTranslations('common');
+  const confirm = useConfirm();
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -151,11 +154,20 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
   }, [addToolId, instances, persist]);
 
   const handleDelete = useCallback(
-    (id: string) => {
+    async (id: string) => {
       if (instances.length <= MIN_AGENT_INSTANCES) return;
+      const target = instances.find((inst) => inst.id === id);
+      if (
+        !(await confirm({
+          description: tCommon('confirmDelete', { name: target?.alias ?? '' }),
+          variant: 'danger',
+        }))
+      ) {
+        return;
+      }
       void persist(instances.filter((inst) => inst.id !== id));
     },
-    [instances, persist]
+    [instances, persist, confirm, tCommon]
   );
 
   const handleMove = useCallback(
@@ -296,7 +308,9 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
                   <DropdownMenuItem
                     data-testid={`agent-instance-delete-${inst.id}`}
                     disabled={atMin}
-                    onSelect={() => handleDelete(inst.id)}
+                    onSelect={() => {
+                      void handleDelete(inst.id);
+                    }}
                     className="text-danger-foreground focus:text-danger-foreground"
                   >
                     <Trash2 className="w-4 h-4" />

@@ -239,10 +239,12 @@ describe('composeStandardLayer', () => {
     expect(focus?.description).toBe('user override of focus');
   });
 
-  it('adds a brand-new user command (e.g. /loop) that is not in the bundled catalog', () => {
+  it('adds a brand-new user command (not in the bundled catalog)', () => {
+    // Issue #1488: /loop is now a bundled built-in, so use a clearly-synthetic
+    // name to keep exercising the add (not override) path.
     const bundled = getStandardCommandGroups();
-    const loop: SlashCommand = {
-      name: 'loop',
+    const custom: SlashCommand = {
+      name: 'my-user-macro',
       description: 'Run on a recurring interval',
       category: 'standard-util',
       cliTools: ['claude'],
@@ -250,8 +252,8 @@ describe('composeStandardLayer', () => {
       isStandard: false,
       filePath: '',
     };
-    const names = flatten(composeStandardLayer(bundled, [loop])).map((c) => c.name);
-    expect(names).toContain('loop');
+    const names = flatten(composeStandardLayer(bundled, [custom])).map((c) => c.name);
+    expect(names).toContain('my-user-macro');
   });
 
   it('keeps SF-1: a worktree command still overrides a user-catalog entry', () => {

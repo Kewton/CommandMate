@@ -16,6 +16,7 @@ import {
   getStandardCommandGroups,
   getFrequentlyUsedCommands,
 } from '@/lib/standard-commands';
+import { keyOf } from '@/lib/command-merger';
 import type { SlashCommandCategory } from '@/types/slash-commands';
 
 const LOCALES = ['en', 'ja'] as const;
@@ -33,8 +34,10 @@ function loadDescriptions(locale: (typeof LOCALES)[number]): Record<string, stri
 }
 
 describe('STANDARD_COMMANDS', () => {
-  it('should have 45 standard commands (12 Claude-only + 9 shared + 17 Codex-only + 7 OpenCode-only)', () => {
-    expect(STANDARD_COMMANDS.length).toBe(45);
+  // Issue #1488: +9 Claude built-ins (loop, add-dir, mcp, usage, memory,
+  // statusline, terminal-setup, hooks, agents), all cliTools: ['claude'].
+  it('should have 54 standard commands (21 Claude-only + 8 shared + 17 Codex-only + 7 OpenCode-only + 1 Codex/OpenCode)', () => {
+    expect(STANDARD_COMMANDS.length).toBe(54);
   });
 
   it('should have all required properties for each command', () => {
@@ -142,7 +145,8 @@ describe('STANDARD_COMMANDS', () => {
       'hooks',
     ];
     codexOnlyCommands.forEach((name) => {
-      const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
+      // Issue #1488: mcp/hooks also have a Claude entry now; select the Codex one.
+      const cmd = STANDARD_COMMANDS.find((c) => c.name === name && c.cliTools?.includes('codex'));
       expect(cmd).toBeDefined();
       expect(cmd?.cliTools).toEqual(['codex']);
     });
@@ -163,7 +167,8 @@ describe('STANDARD_COMMANDS', () => {
       'editor',
     ];
     opencodeOnlyCommands.forEach((name) => {
-      const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
+      // Issue #1488: /agents also has a Claude entry now; select the OpenCode one.
+      const cmd = STANDARD_COMMANDS.find((c) => c.name === name && c.cliTools?.includes('opencode'));
       expect(cmd).toBeDefined();
       expect(cmd?.cliTools).toEqual(['opencode']);
     });
@@ -228,10 +233,12 @@ describe('STANDARD_COMMANDS', () => {
     });
   });
 
-  it('should not have duplicate command names', () => {
-    const names = STANDARD_COMMANDS.map((c) => c.name);
-    const uniqueNames = new Set(names);
-    expect(names.length).toBe(uniqueNames.size);
+  // Issue #1488: mcp/hooks/agents now carry a Claude entry alongside the
+  // existing Codex/OpenCode one, so uniqueness is by name + cliTools scope
+  // (keyOf) — the same dedup granularity command-merger/slash-commands use.
+  it('should not have duplicate name + cliTools keys', () => {
+    const keys = STANDARD_COMMANDS.map(keyOf);
+    expect(keys.length).toBe(new Set(keys).size);
   });
 
   // Issue #689: New Claude commands with explicit cliTools: ['claude'] (DR1-001)
@@ -267,7 +274,8 @@ describe('STANDARD_COMMANDS', () => {
     });
     const configCommands = ['memories', 'skills', 'hooks'];
     configCommands.forEach((name) => {
-      const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
+      // Issue #1488: /hooks also has a Claude entry now; select the Codex one.
+      const cmd = STANDARD_COMMANDS.find((c) => c.name === name && c.cliTools?.includes('codex'));
       expect(cmd).toBeDefined();
       expect(cmd?.category).toBe('standard-config');
       expect(cmd?.cliTools).toEqual(['codex']);
@@ -275,11 +283,12 @@ describe('STANDARD_COMMANDS', () => {
   });
 
   // Issue #689: Claude display total = 20 (DR2-001)
-  it('should have 20 commands available for Claude', () => {
+  // Issue #1488: +9 Claude built-ins → 29.
+  it('should have 29 commands available for Claude', () => {
     const claudeCommands = STANDARD_COMMANDS.filter(
       (cmd) => !cmd.cliTools || cmd.cliTools.includes('claude')
     );
-    expect(claudeCommands.length).toBe(20);
+    expect(claudeCommands.length).toBe(29);
   });
 
   // Issue #689: agent (Codex) vs agents (OpenCode) differentiation (DR1-002)
@@ -340,6 +349,75 @@ describe('STANDARD_COMMANDS', () => {
       expect(cmd).toBeDefined();
       expect(cmd?.cliTools).toBeDefined();
     });
+  });
+});
+
+// Issue #1488: add missing Claude built-ins (/loop etc.) to the bundled catalog.
+// Verified against the official docs for Claude Code 2.1.218 (= verifiedAgainst.claude).
+describe('Claude built-in catalog additions (Issue #1488)', () => {
+  const NEW_CLAUDE_BUILTINS: Array<{ name: string; category: SlashCommandCategory }> = [
+    { name: 'loop', category: 'standard-util' },
+    { name: 'add-dir', category: 'standard-util' },
+    { name: 'mcp', category: 'standard-util' },
+    { name: 'usage', category: 'standard-monitor' },
+    { name: 'memory', category: 'standard-config' },
+    { name: 'statusline', category: 'standard-config' },
+    { name: 'terminal-setup', category: 'standard-config' },
+    { name: 'hooks', category: 'standard-config' },
+    { name: 'agents', category: 'standard-config' },
+  ];
+
+  it('registers each new built-in with cliTools: ["claude"], the right category, and a name-derived key', () => {
+    for (const { name, category } of NEW_CLAUDE_BUILTINS) {
+      const claudeEntry = STANDARD_COMMANDS.find(
+        (c) => c.name === name && c.cliTools?.length === 1 && c.cliTools[0] === 'claude'
+      );
+      expect(claudeEntry, `missing Claude entry for /${name}`).toBeDefined();
+      expect(claudeEntry?.category).toBe(category);
+      expect(claudeEntry?.descriptionKey).toBe(`slashCommands.descriptions.${name}`);
+      expect(claudeEntry?.isStandard).toBe(true);
+      expect(claudeEntry?.source).toBe('standard');
+    }
+  });
+
+  it('surfaces every new built-in in the Claude-visible set', () => {
+    const claudeVisible = new Set(
+      STANDARD_COMMANDS.filter((c) => !c.cliTools || c.cliTools.includes('claude')).map((c) => c.name)
+    );
+    for (const { name } of NEW_CLAUDE_BUILTINS) {
+      expect(claudeVisible.has(name), `/${name} is not Claude-visible`).toBe(true);
+    }
+  });
+
+  it('resolves each new built-in description in en and ja without leaking the raw key', () => {
+    for (const locale of LOCALES) {
+      const dict = loadDescriptions(locale);
+      for (const { name } of NEW_CLAUDE_BUILTINS) {
+        const text = dict[name];
+        expect(typeof text === 'string' && text.length > 0, `${locale} missing /${name}`).toBe(true);
+        expect(text).not.toBe(`slashCommands.descriptions.${name}`);
+      }
+    }
+  });
+
+  // The Claude variants of mcp/hooks/agents coexist with the pre-existing
+  // Codex/OpenCode entries via keyOf (name + cliTools); those must be untouched.
+  it('keeps the Codex/OpenCode variants of mcp/hooks/agents intact (no regression)', () => {
+    const codexMcp = STANDARD_COMMANDS.find((c) => c.name === 'mcp' && c.cliTools?.includes('codex'));
+    const codexHooks = STANDARD_COMMANDS.find((c) => c.name === 'hooks' && c.cliTools?.includes('codex'));
+    const opencodeAgents = STANDARD_COMMANDS.find(
+      (c) => c.name === 'agents' && c.cliTools?.includes('opencode')
+    );
+    expect(codexMcp?.cliTools).toEqual(['codex']);
+    expect(codexHooks?.cliTools).toEqual(['codex']);
+    expect(opencodeAgents?.cliTools).toEqual(['opencode']);
+  });
+
+  // /schedule is deliberately out of scope; /vim was removed upstream in v2.1.92
+  // so it must not ship in a catalog verified against 2.1.218.
+  it('does not add /schedule or /vim', () => {
+    expect(STANDARD_COMMANDS.some((c) => c.name === 'schedule')).toBe(false);
+    expect(STANDARD_COMMANDS.some((c) => c.name === 'vim')).toBe(false);
   });
 });
 
