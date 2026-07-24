@@ -331,10 +331,12 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
    * Handle slash command selection
    */
   const handleCommandSelect = useCallback((command: SlashCommand) => {
-    setMessage(`${getSlashCommandTrigger(command)} `);
+    // Issue #1504: antigravity sessions insert `.agents/skills` entries as /NAME,
+    // not codex's $NAME. cliToolId disambiguates codex-skill sources per session.
+    setMessage(`${getSlashCommandTrigger(command, cliToolId)} `);
     setShowCommandSelector(false);
     textareaRef.current?.focus();
-  }, []);
+  }, [cliToolId]);
 
   /**
    * Handle slash command selector cancel
@@ -650,6 +652,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         isMobile={isMobile}
         onFreeInput={handleFreeInput}
         isCatalogStale={isCatalogStale}
+        cliToolId={cliToolId}
       />
     </div>
   );

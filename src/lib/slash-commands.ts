@@ -373,13 +373,17 @@ export async function loadCodexSkills(basePath?: string): Promise<SlashCommand[]
 /**
  * Load Codex skills from .agents/skills/{name}/SKILL.md (Issue #1165)
  *
- * `.agents/skills` is the directory the current Codex CLI scans for skills
- * ($REPO_ROOT/.agents/skills and $HOME/.agents/skills). Loaded alongside the
- * legacy .codex/skills scan (loadCodexSkills) so both locations are surfaced;
- * duplicates by name are collapsed via deduplicateByName().
+ * `.agents/skills` is the directory both the current Codex CLI and the
+ * Antigravity CLI (agy) scan for skills ($REPO_ROOT/.agents/skills and
+ * $HOME/.agents/skills). agy exposes each skill as a `/<name>` slash command,
+ * so these entries are surfaced to both codex and antigravity sessions
+ * (cliTools ['codex', 'antigravity'], Issue #1504). The legacy .codex/skills
+ * scan (loadCodexSkills) stays codex-only because agy does not read it.
  *
- * Reuses the codex-skill source so the $NAME trigger, category aggregation, and
- * codex CLI filter all apply. Also scans .system/ for built-in Codex skills.
+ * Reuses the codex-skill source; the insert trigger is disambiguated per
+ * session by getSlashCommandTrigger() ($NAME for codex, /NAME for antigravity).
+ * Also scans .system/ for built-in Codex skills. Same-named entries across
+ * .codex/skills and .agents/skills are collapsed by mergeCodexFamilySkills().
  *
  * @param basePath - Optional base path. If not provided, uses os.homedir()
  * @returns Promise resolving to array of SlashCommand objects
@@ -389,10 +393,35 @@ export async function loadAgentsSkills(basePath?: string): Promise<SlashCommand[
   const skillsDir = path.join(root, AGENTS_SKILLS_SUBDIR);
   return scanSkillDirs(
     skillsDir,
-    { source: 'codex-skill', cliTools: ['codex'] },
+    { source: 'codex-skill', cliTools: ['codex', 'antigravity'] },
     'agents-skills-count-limit',
     true,
   );
+}
+
+/**
+ * Collapse skills that exist in both .codex/skills and .agents/skills (Issue #1504).
+ *
+ * The two locations feed the same codex-skill palette, but .agents/skills entries
+ * carry cliTools ['codex', 'antigravity'] while legacy .codex/skills entries stay
+ * ['codex']. The downstream dedup key (keyOf) is name + cliTools scope, so a
+ * same-named skill in both dirs no longer collapses on its own and would appear
+ * twice in codex sessions. Drop the .codex/skills entry when a matching name
+ * exists in .agents/skills; the .agents/skills entry wins because it is also
+ * visible to antigravity. Callers pass the results into deduplicateByName /
+ * mergeCommandGroups exactly as before.
+ *
+ * @param codexSkills - Skills loaded from .codex/skills (loadCodexSkills)
+ * @param agentsSkills - Skills loaded from .agents/skills (loadAgentsSkills)
+ * @returns Combined list with name collisions resolved in favor of .agents/skills
+ */
+export function mergeCodexFamilySkills(
+  codexSkills: SlashCommand[],
+  agentsSkills: SlashCommand[],
+): SlashCommand[] {
+  const agentsNames = new Set(agentsSkills.map((s) => s.name));
+  const codexOnly = codexSkills.filter((s) => !agentsNames.has(s.name));
+  return [...codexOnly, ...agentsSkills];
 }
 
 /**
@@ -542,11 +571,15 @@ export async function getSlashCommandGroups(basePath?: string): Promise<SlashCom
   if (basePath) {
     const commands = await loadSlashCommands(basePath);
     const skills = await loadSkills(basePath);
-    // Local Codex skills: current .agents/skills (Issue #1165) + legacy .codex/skills (Issue #166)
+    // Local Codex-family skills: current .agents/skills (Issue #1165, codex+antigravity)
+    // + legacy .codex/skills (Issue #166, codex-only). Collapse same-named entries so a
+    // skill present in both dirs is shown once, even though their cliTools scopes differ
+    // after Issue #1504 (mergeCodexFamilySkills, .agents/skills wins).
     const codexLocalSkills = await loadCodexSkills(basePath);
     const agentsLocalSkills = await loadAgentsSkills(basePath);
+    const codexFamilySkills = mergeCodexFamilySkills(codexLocalSkills, agentsLocalSkills);
     const deduplicated = deduplicateByName(
-      [...skills, ...codexLocalSkills, ...agentsLocalSkills],
+      [...skills, ...codexFamilySkills],
       commands,
     );
     return groupByCategory(deduplicated);
