@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-07-24
+
+### Fixed
+
+- **端末オーバーレイの矢印ナビを検出非依存化（デスクトップ＋モバイル）** (#1494, #1496): `/help`・`/model` 等の未分類 TUI オーバーレイで ESC しか送れず ←/→/↑/↓/Enter が送れなかった問題を、`TerminalEscapeHatch` を Esc 専用から汎用ナビパッド（←/↑/↓/→/Enter/Esc、Codex は追加で `q`）へ拡張して解消した。`isUnclassifiedActive` ゲートは従来どおりで、選択リスト／プロンプト検出時は非表示。モバイルパスは `MobileTerminalTab` を独立モジュール化し、デスクトップと同一ゲート（`isUnclassifiedActive && !prompt.visible`）でハッチを描画してデスクトップと同等の到達性を与えた。
+- **Auto-Yes が Claude `/model` オーバーレイを誤って自動応答しデフォルトモデルを変更する不具合を修正** (#1495): `/model` の番号付きモデル一覧を `detectMultipleChoicePrompt` が本物の multiple_choice と誤検出し、Auto-Yes が Enter 確定して既定モデルを無断変更していた。実機 Claude Code v2.1.218 のフッタ「Enter to set as default …」を検出したら `detectPrompt` を非プロンプト扱いにして Auto-Yes を停止し、あわせて `CLAUDE_SELECTION_LIST_FOOTER` に同フッタを追加して `/model` を Claude selection list（NavigationButtons＋ESC ハッチ／`hasActivePrompt=false`）へ再分類する。権限確認・trust ダイアログ・AskUserQuestion・Gemini `/model` 等の本物のプロンプトは非回帰（実キャプチャ fixture で検証）。
+- **未分類 TUI が5秒静止でナビハッチ消滅する不具合を修正** (#1497): 未分類オーバーレイ（`/help` 等）が静止すると Auto-Yes の `lastServerResponseTimestamp` 更新後に `ready`/`no_recent_output` へ降格し、`isUnclassifiedActive` が落ちてナビハッチ（#1017/#1494）が消えていた。真の idle プロンプト（`❯`）は降格前に `input_prompt` として分類されるため、`no_recent_output` フォールバックは未分類フレームでしか起きない。よって `current-output-builder` の `isUnclassifiedActive` ゲートを `ready`/`no_recent_output` も含めるよう緩和し、静止中もハッチを表示し続ける。実キャプチャ fixture ＋ stale timestamp で単体テスト（真の idle 非回帰込み）。
+- **slash-commands カタログの antigravity 幻コマンド3件を除去＋実在コマンド追補** (#1502): agy 1.1.3 に存在しない `/compact`・`/status`・`/review` を antigravity スコープから除去（`/status`→`/statusline`・`/review`→`/teamwork-preview` の別コマンド誤実行を防止）。あわせて実在する `/help`・`/usage`・`/mcp`・`/hooks`・`/diff`・`/fork`・`/plan`・`/rewind`・`/tasks` を追補し、`frequentlyUsed.antigravity` を新設。en/ja 辞書に不足していた `tasks` の説明を追加。claude/codex のカタログは非回帰。
+- **antigravity セッションで skills がパレットに出ない不具合を修正** (#1504): `.agents/skills` 由来 entry を codex 専用扱い（`cliTools: ['codex']`）していたため、agy（`.agents/skills` を読む）のパレットに skill が一切出なかった。`loadAgentsSkills` を `['codex', 'antigravity']` に広げ、挿入トリガ `getSlashCommandTrigger(command, cliToolId)` を拡張して antigravity では `/name`（codex は従来どおり `$name`）を挿入。cliTools 拡張で dedup キーが割れ codex セッションで `.codex/skills` と `.agents/skills` の同名 skill が二重表示する副作用を `mergeCodexFamilySkills`（同名は `.agents/skills` 優先で collapse）で解消。claude は `.agents/skills` を読まない前提を維持（非表示）。
+- **submit-verified-sender が TUI 補完置換を誤判定して別コマンド実行／残留する不具合を修正** (#1501): 存在しないスラッシュコマンド送信時、TUI ポップアップが入力を別コマンドへ置換（`/status`→`/statusline`、`/review`→`/teamwork-preview`）するのを検証ループが判別できず、Enter 再送で別コマンド誤実行（フレーバーA）または残留（フレーバーB）していた。判定を submitted/pending/replaced の3値化（`classifySubmit`）し、入力行が body の前方一致でない `/…` コマンドに置換されたら Enter を再送せず `clearInputLine`（内部専用 `C-u`、special-keys API 非露出）で入力行をクリアして throw する。正当な typed-but-unsent 回復（body 前方一致→Enter 再送）は非回帰。
+- **グローバル `~/.claude/skills` がパレットに出ない非対称を修正** (#1505): codex のグローバル skills（`~/.codex/skills`・`~/.agents/skills`）は表示されるのに claude のグローバル skills（`~/.claude/skills`）を読む経路が無く、claude セッションのパレットに worktree 配下しか出なかった。route に `loadSkills(os.homedir())` を追加し `~/.claude/skills` を `source:'skill'`（cliTools 未定義＝claude のみ）としてマージ。worktree の同名 skill が優先されるよう global グループを worktree より前に置き（`mergeCommandGroups` は後勝ち）二重表示を防止。codex/antigravity には非表示、`$HOME` 側 dir 不在でもエラーにならない。
+- **slash-commands カタログの claude/codex 幻コマンド計7件を除去** (#1503): `verifiedAgainst` と同一版の実機で不在を確認した claude の `/cost`・`/lazy`・`/todos`・`/pr-comments`・（`(removed)` スタブの）`/agents` と codex の `/approvals`・`/undo` をカタログから削除（`agents` の opencode 版は無関係なので保持）。未使用化した `descriptionKey` を en/ja 辞書から削除し、`frequentlyUsed` からも除去。隠しコマンド `/clear`・`/quit`・`/subagents`（codex）は「完全入力で一致する実在コマンド」なので誤削除しないことをテストで担保。再発防止として `/release` の確認手順（`missingFromSource` の目視）を SKILL.md に追記。
+
 ## [0.14.0] - 2026-07-24
 
 ### Added

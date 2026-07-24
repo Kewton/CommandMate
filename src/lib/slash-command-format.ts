@@ -1,4 +1,5 @@
 import type { SlashCommand } from '@/types/slash-commands';
+import type { CLIToolType } from '@/lib/cli-tools/types';
 
 /**
  * Return the command string shown to users and inserted into the input.
@@ -7,9 +8,21 @@ import type { SlashCommand } from '@/types/slash-commands';
  * ~/.codex/skills/.system/* skills) are invoked with the `$NAME` syntax that
  * Codex CLI recognizes. Every other command (Claude/Copilot/Gemini commands and
  * skills) uses the `/NAME` form (Issue #790).
+ *
+ * `.agents/skills` entries also carry the `codex-skill` source but are surfaced
+ * to antigravity sessions as well (Issue #1504). The Antigravity CLI (agy)
+ * triggers skills with `/NAME`, not codex's `$NAME`, so when the active session
+ * is antigravity a codex-skill resolves to the slash form. Codex sessions keep
+ * `$NAME` (non-regression); callers that omit `cliToolId` also keep `$NAME`.
  */
-export function getSlashCommandTrigger(command: SlashCommand): string {
+export function getSlashCommandTrigger(
+  command: SlashCommand,
+  cliToolId?: CLIToolType
+): string {
   if (command.source === 'codex-skill') {
+    if (cliToolId === 'antigravity') {
+      return `/${command.name}`;
+    }
     return `$${command.name}`;
   }
 

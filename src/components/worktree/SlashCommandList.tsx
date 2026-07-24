@@ -9,6 +9,7 @@
 import React from 'react';
 import { useTranslations } from 'next-intl';
 import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
+import type { CLIToolType } from '@/lib/cli-tools/types';
 import { getSlashCommandTrigger, resolveCommandDescription } from '@/lib/slash-command-format';
 
 export interface SlashCommandListProps {
@@ -20,6 +21,12 @@ export interface SlashCommandListProps {
   highlightedIndex?: number;
   /** Optional className for the container */
   className?: string;
+  /**
+   * Active CLI tool for the session (Issue #1504). Passed to getSlashCommandTrigger
+   * so the displayed trigger matches insertion — antigravity shows `/NAME` for
+   * `.agents/skills` entries while codex keeps `$NAME`.
+   */
+  cliToolId?: CLIToolType;
 }
 
 /**
@@ -41,6 +48,7 @@ export function SlashCommandList({
   onSelect,
   highlightedIndex = -1,
   className = '',
+  cliToolId,
 }: SlashCommandListProps) {
   const t = useTranslations('worktree');
   // Calculate flat index for each command
@@ -83,7 +91,7 @@ export function SlashCommandList({
                   }`}
                 >
                   <span className="text-accent-600 dark:text-accent-400 font-mono text-sm flex-shrink-0">
-                    {getSlashCommandTrigger(command)}
+                    {getSlashCommandTrigger(command, cliToolId)}
                   </span>
                   {command.cliTools?.length === 1 && command.cliTools[0] === 'codex' && (
                     <span className="mt-0.5 rounded border border-accent-200 bg-accent-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-700 dark:border-accent-800 dark:bg-accent-950/40 dark:text-accent-300">

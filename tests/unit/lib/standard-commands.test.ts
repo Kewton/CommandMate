@@ -36,8 +36,12 @@ function loadDescriptions(locale: (typeof LOCALES)[number]): Record<string, stri
 describe('STANDARD_COMMANDS', () => {
   // Issue #1488: +9 Claude built-ins (loop, add-dir, mcp, usage, memory,
   // statusline, terminal-setup, hooks, agents), all cliTools: ['claude'].
-  it('should have 54 standard commands (21 Claude-only + 8 shared + 17 Codex-only + 7 OpenCode-only + 1 Codex/OpenCode)', () => {
-    expect(STANDARD_COMMANDS.length).toBe(54);
+  // Issue #1502: +9 Antigravity real commands (help, usage, mcp, hooks, diff,
+  // fork, plan, rewind, tasks), all cliTools: ['antigravity'].
+  // Issue #1503: -7 phantom entries removed — claude cost/lazy/todos/pr-comments
+  // + the "(removed)" claude /agents stub, and codex approvals/undo. 63 -> 56.
+  it('should have 56 standard commands (Issue #1503: 63 - 7 phantom)', () => {
+    expect(STANDARD_COMMANDS.length).toBe(56);
   });
 
   it('should have all required properties for each command', () => {
@@ -59,11 +63,8 @@ describe('STANDARD_COMMANDS', () => {
       'rewind',
       'config',
       'context',
-      'cost',
-      'pr-comments',
       'doctor',
       'export',
-      'todos',
     ];
     claudeOnlyCommands.forEach((name) => {
       const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
@@ -90,16 +91,10 @@ describe('STANDARD_COMMANDS', () => {
   });
 
   // Issue #990 (Phase C): Antigravity shares the universal claude/codex commands.
-  it('should have shared session/config/monitor/git commands including "antigravity"', () => {
-    const antigravitySharedCommands = [
-      'clear',
-      'compact',
-      'resume',
-      'model',
-      'permissions',
-      'status',
-      'review',
-    ];
+  // Issue #1502: compact/status/review were phantom on agy 1.1.3 and were
+  // removed from the antigravity scope, so only these four remain shared.
+  it('should have shared session/config commands including "antigravity"', () => {
+    const antigravitySharedCommands = ['clear', 'resume', 'model', 'permissions'];
     antigravitySharedCommands.forEach((name) => {
       const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
       expect(cmd).toBeDefined();
@@ -107,11 +102,34 @@ describe('STANDARD_COMMANDS', () => {
     });
   });
 
-  it('should have 7 commands available for Antigravity', () => {
+  // Issue #1502: these three do not exist in agy 1.1.3 (/compact = "No matches",
+  // /status -> /statusline, /review -> /teamwork-preview). They must not be
+  // offered to antigravity, or the palette drives a mis-execution on send.
+  it('should NOT expose phantom commands (compact/status/review) to Antigravity', () => {
+    ['compact', 'status', 'review'].forEach((name) => {
+      const antigravityEntry = STANDARD_COMMANDS.find(
+        (c) => c.name === name && c.cliTools?.includes('antigravity')
+      );
+      expect(antigravityEntry, `/${name} must not be antigravity-visible`).toBeUndefined();
+    });
+  });
+
+  // Issue #1502: real agy 1.1.3 commands added with cliTools: ['antigravity'].
+  it('should expose the real agy 1.1.3 commands to Antigravity', () => {
+    const realAgyAdded = ['help', 'usage', 'mcp', 'hooks', 'diff', 'fork', 'plan', 'rewind', 'tasks'];
+    realAgyAdded.forEach((name) => {
+      const cmd = STANDARD_COMMANDS.find(
+        (c) => c.name === name && c.cliTools?.includes('antigravity')
+      );
+      expect(cmd, `/${name} must be antigravity-visible`).toBeDefined();
+    });
+  });
+
+  it('should have 13 commands available for Antigravity (Issue #1502: 4 shared + 9 real)', () => {
     const antigravityCommands = STANDARD_COMMANDS.filter(
       (cmd) => cmd.cliTools?.includes('antigravity')
     );
-    expect(antigravityCommands.length).toBe(7);
+    expect(antigravityCommands.length).toBe(13);
   });
 
   it('should have commands shared between Claude and OpenCode', () => {
@@ -125,10 +143,8 @@ describe('STANDARD_COMMANDS', () => {
 
   it('should have Codex commands with cliTools including "codex"', () => {
     const codexOnlyCommands = [
-      'undo',
       'logout',
       'quit',
-      'approvals',
       'diff',
       'mention',
       'mcp',
@@ -181,11 +197,12 @@ describe('STANDARD_COMMANDS', () => {
     expect(opencodeCommands.length).toBe(10);
   });
 
-  it('should have 25 commands available for Codex', () => {
+  // Issue #1503: -2 codex phantoms (approvals/undo) removed → 23.
+  it('should have 23 commands available for Codex (Issue #1503: 25 - 2 phantom)', () => {
     const codexCommands = STANDARD_COMMANDS.filter(
       (cmd) => cmd.cliTools?.includes('codex')
     );
-    expect(codexCommands.length).toBe(25);
+    expect(codexCommands.length).toBe(23);
   });
 
   it('should include session management commands', () => {
@@ -207,7 +224,7 @@ describe('STANDARD_COMMANDS', () => {
   });
 
   it('should include monitor commands', () => {
-    const monitorCommands = ['status', 'context', 'cost'];
+    const monitorCommands = ['status', 'context'];
     monitorCommands.forEach((name) => {
       const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
       expect(cmd).toBeDefined();
@@ -216,7 +233,7 @@ describe('STANDARD_COMMANDS', () => {
   });
 
   it('should include git commands', () => {
-    const gitCommands = ['review', 'pr-comments'];
+    const gitCommands = ['review'];
     gitCommands.forEach((name) => {
       const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
       expect(cmd).toBeDefined();
@@ -225,7 +242,7 @@ describe('STANDARD_COMMANDS', () => {
   });
 
   it('should include utility commands', () => {
-    const utilCommands = ['help', 'doctor', 'export', 'todos'];
+    const utilCommands = ['help', 'doctor', 'export'];
     utilCommands.forEach((name) => {
       const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
       expect(cmd).toBeDefined();
@@ -241,9 +258,31 @@ describe('STANDARD_COMMANDS', () => {
     expect(keys.length).toBe(new Set(keys).size);
   });
 
+  // Issue #1503: /clear, /quit, /subagents are REAL on codex 0.144.6 — hidden
+  // aliases the bare "/" popup does not list but that match on full input. They
+  // must survive the phantom purge; deleting them strips real commands.
+  it('keeps codex hidden real commands /clear, /quit, /subagents (Issue #1503 regression)', () => {
+    for (const name of ['clear', 'quit', 'subagents']) {
+      const cmd = STANDARD_COMMANDS.find((c) => c.name === name && c.cliTools?.includes('codex'));
+      expect(cmd, `/${name} must remain codex-visible`).toBeDefined();
+    }
+  });
+
+  // Issue #1503: these 6 entries did not exist on claude 2.1.218 / codex 0.144.6
+  // and were purged; the "(removed)" claude /agents stub went too, leaving only
+  // the opencode /agents. None of them may reappear in the catalog.
+  it('does not carry the Issue #1503 phantom commands', () => {
+    for (const name of ['cost', 'lazy', 'todos', 'pr-comments', 'approvals', 'undo']) {
+      expect(STANDARD_COMMANDS.some((c) => c.name === name), `/${name} must be gone`).toBe(false);
+    }
+    const agentsEntries = STANDARD_COMMANDS.filter((c) => c.name === 'agents');
+    expect(agentsEntries.length).toBe(1);
+    expect(agentsEntries[0].cliTools).toEqual(['opencode']);
+  });
+
   // Issue #689: New Claude commands with explicit cliTools: ['claude'] (DR1-001)
-  it('should have new Claude-only commands (effort/fast/focus/lazy) with explicit cliTools: ["claude"]', () => {
-    const newClaudeCommands = ['effort', 'fast', 'focus', 'lazy'];
+  it('should have new Claude-only commands (effort/fast/focus) with explicit cliTools: ["claude"]', () => {
+    const newClaudeCommands = ['effort', 'fast', 'focus'];
     newClaudeCommands.forEach((name) => {
       const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
       expect(cmd).toBeDefined();
@@ -252,7 +291,7 @@ describe('STANDARD_COMMANDS', () => {
   });
 
   it('should have new Claude commands in correct categories (DR1-003)', () => {
-    const configCommands = ['effort', 'fast', 'lazy'];
+    const configCommands = ['effort', 'fast'];
     configCommands.forEach((name) => {
       const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
       expect(cmd).toBeDefined();
@@ -284,11 +323,13 @@ describe('STANDARD_COMMANDS', () => {
 
   // Issue #689: Claude display total = 20 (DR2-001)
   // Issue #1488: +9 Claude built-ins → 29.
-  it('should have 29 commands available for Claude', () => {
+  // Issue #1503: -5 Claude-visible phantoms (cost/lazy/todos/pr-comments + the
+  // "(removed)" /agents stub) → 24.
+  it('should have 24 commands available for Claude (Issue #1503: 29 - 5 phantom)', () => {
     const claudeCommands = STANDARD_COMMANDS.filter(
       (cmd) => !cmd.cliTools || cmd.cliTools.includes('claude')
     );
-    expect(claudeCommands.length).toBe(29);
+    expect(claudeCommands.length).toBe(24);
   });
 
   // Issue #689: agent (Codex) vs agents (OpenCode) differentiation (DR1-002)
@@ -343,7 +384,7 @@ describe('STANDARD_COMMANDS', () => {
 
   // Issue #689: new Claude-only 4 commands should not have undefined cliTools (DR1-001)
   it('should not have new commands with undefined cliTools (DR1-001: no new undefined)', () => {
-    const newCommandNames = ['effort', 'fast', 'focus', 'lazy', 'plan', 'goal', 'agent', 'subagents', 'fork', 'memories', 'skills', 'hooks'];
+    const newCommandNames = ['effort', 'fast', 'focus', 'plan', 'goal', 'agent', 'subagents', 'fork', 'memories', 'skills', 'hooks'];
     newCommandNames.forEach((name) => {
       const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
       expect(cmd).toBeDefined();
@@ -364,7 +405,8 @@ describe('Claude built-in catalog additions (Issue #1488)', () => {
     { name: 'statusline', category: 'standard-config' },
     { name: 'terminal-setup', category: 'standard-config' },
     { name: 'hooks', category: 'standard-config' },
-    { name: 'agents', category: 'standard-config' },
+    // Issue #1503: /agents was a "(removed)" stub on claude 2.1.218 and was
+    // purged; the opencode /agents entry stays (asserted separately below).
   ];
 
   it('registers each new built-in with cliTools: ["claude"], the right category, and a name-derived key', () => {
@@ -449,10 +491,14 @@ describe('FREQUENTLY_USED', () => {
     expect(FREQUENTLY_USED.claude).toContain('compact');
   });
 
-  it('Codex frequently used should include new, undo and plan (not mcp)', () => {
+  // Issue #1503: /undo and /approvals were phantom on codex 0.144.6 and were
+  // dropped from frequentlyUsed; /status and /review backfill to keep the list at 5.
+  it('Codex frequently used should include new, plan, status (not undo/approvals/mcp)', () => {
     expect(FREQUENTLY_USED.codex).toContain('new');
-    expect(FREQUENTLY_USED.codex).toContain('undo');
     expect(FREQUENTLY_USED.codex).toContain('plan');
+    expect(FREQUENTLY_USED.codex).toContain('status');
+    expect(FREQUENTLY_USED.codex).not.toContain('undo');
+    expect(FREQUENTLY_USED.codex).not.toContain('approvals');
     expect(FREQUENTLY_USED.codex).not.toContain('mcp');
   });
 
@@ -462,6 +508,23 @@ describe('FREQUENTLY_USED', () => {
     expect(FREQUENTLY_USED.opencode).toContain('compact');
     expect(FREQUENTLY_USED.opencode).toContain('help');
     expect(FREQUENTLY_USED.opencode).toContain('exit');
+  });
+
+  // Issue #1502: antigravity gets its own frequentlyUsed list (was falling back
+  // to Claude's, which surfaced the phantom /compact, /status, /review).
+  it('Antigravity frequently used should be 5 real, antigravity-visible commands (Issue #1502)', () => {
+    expect(FREQUENTLY_USED.antigravity).toBeDefined();
+    expect(FREQUENTLY_USED.antigravity.length).toBe(5);
+    FREQUENTLY_USED.antigravity.forEach((name) => {
+      const visible = STANDARD_COMMANDS.some(
+        (c) => c.name === name && c.cliTools?.includes('antigravity')
+      );
+      expect(visible, `frequentlyUsed /${name} is not antigravity-visible`).toBe(true);
+    });
+    // None of the phantom commands may leak back in via this list.
+    ['compact', 'status', 'review'].forEach((phantom) => {
+      expect(FREQUENTLY_USED.antigravity).not.toContain(phantom);
+    });
   });
 });
 
@@ -534,7 +597,7 @@ describe('getFrequentlyUsedCommands', () => {
     const commands = getFrequentlyUsedCommands('codex');
     expect(commands.length).toBe(5);
     expect(commands.some((c) => c.name === 'new')).toBe(true);
-    expect(commands.some((c) => c.name === 'undo')).toBe(true);
+    expect(commands.some((c) => c.name === 'status')).toBe(true);
     // All returned commands should be available for Codex
     commands.forEach((cmd) => {
       expect(cmd.cliTools).toContain('codex');
@@ -565,6 +628,19 @@ describe('getFrequentlyUsedCommands', () => {
     const commands = getFrequentlyUsedCommands('opencode');
     // 'clear' is Claude-only (no cliTools), should not be in OpenCode list
     expect(commands.some((c) => c.name === 'clear')).toBe(false);
+  });
+
+  // Issue #1502: antigravity now has its own list; resolve it to real entries.
+  it('should return Antigravity commands when cliToolId is antigravity', () => {
+    const commands = getFrequentlyUsedCommands('antigravity');
+    expect(commands.length).toBe(5);
+    commands.forEach((cmd) => {
+      expect(cmd.cliTools).toContain('antigravity');
+    });
+    // No phantom command survives resolution.
+    ['compact', 'status', 'review'].forEach((phantom) => {
+      expect(commands.some((c) => c.name === phantom)).toBe(false);
+    });
   });
 });
 

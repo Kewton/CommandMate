@@ -1123,7 +1123,7 @@ describe('loadAgentsSkills', () => {
     expect(skills).toEqual([]);
   });
 
-  it('should load .agents/skills with source codex-skill and cliTools codex', async () => {
+  it('should load .agents/skills with source codex-skill and cliTools codex+antigravity (Issue #1504)', async () => {
     const testDir = path.resolve(__dirname, '../fixtures/test-agents-skills');
     const skillDir = path.join(testDir, '.agents', 'skills', 'my-agents-skill');
     try {
@@ -1141,7 +1141,8 @@ describe('loadAgentsSkills', () => {
       expect(skills[0].description).toBe('An agents skill');
       expect(skills[0].category).toBe('skill');
       expect(skills[0].source).toBe('codex-skill');
-      expect(skills[0].cliTools).toEqual(['codex']);
+      // .agents/skills is read by both Codex and Antigravity (agy) CLIs.
+      expect(skills[0].cliTools).toEqual(['codex', 'antigravity']);
     } finally {
       fs.rmSync(testDir, { recursive: true, force: true });
     }
@@ -1168,7 +1169,7 @@ describe('loadAgentsSkills', () => {
       expect(skills).toHaveLength(1);
       expect(skills[0].name).toBe('home-agents-skill');
       expect(skills[0].source).toBe('codex-skill');
-      expect(skills[0].cliTools).toEqual(['codex']);
+      expect(skills[0].cliTools).toEqual(['codex', 'antigravity']);
     } finally {
       fs.rmSync(testDir, { recursive: true, force: true });
     }
@@ -1193,6 +1194,60 @@ describe('loadAgentsSkills', () => {
     } finally {
       fs.rmSync(testDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('mergeCodexFamilySkills (Issue #1504)', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  const codexSkill = (name: string, description: string): SlashCommand => ({
+    name,
+    description,
+    category: 'skill',
+    source: 'codex-skill',
+    cliTools: ['codex'],
+    filePath: '',
+  });
+
+  const agentsSkill = (name: string, description: string): SlashCommand => ({
+    name,
+    description,
+    category: 'skill',
+    source: 'codex-skill',
+    cliTools: ['codex', 'antigravity'],
+    filePath: '',
+  });
+
+  it('keeps codex-only and agents-only skills that do not collide', async () => {
+    const { mergeCodexFamilySkills } = await import('@/lib/slash-commands');
+    const result = mergeCodexFamilySkills(
+      [codexSkill('legacy', 'legacy codex skill')],
+      [agentsSkill('modern', 'modern agents skill')]
+    );
+
+    expect(result).toHaveLength(2);
+    const names = result.map((s) => s.name).sort();
+    expect(names).toEqual(['legacy', 'modern']);
+  });
+
+  it('drops the .codex/skills entry when the same name exists in .agents/skills', async () => {
+    const { mergeCodexFamilySkills } = await import('@/lib/slash-commands');
+    const result = mergeCodexFamilySkills(
+      [codexSkill('shared', 'from codex')],
+      [agentsSkill('shared', 'from agents')]
+    );
+
+    // Collapsed to one; the .agents/skills entry (antigravity-visible) wins.
+    expect(result).toHaveLength(1);
+    expect(result[0].description).toBe('from agents');
+    expect(result[0].cliTools).toEqual(['codex', 'antigravity']);
+  });
+
+  it('returns an empty array when both inputs are empty', async () => {
+    const { mergeCodexFamilySkills } = await import('@/lib/slash-commands');
+    expect(mergeCodexFamilySkills([], [])).toEqual([]);
   });
 });
 
@@ -1222,13 +1277,14 @@ describe('getSlashCommandGroups with Codex skills', () => {
       const agentsSkill = allCommands.find((c) => c.name === 'agents-only-skill');
       expect(agentsSkill).toBeDefined();
       expect(agentsSkill?.source).toBe('codex-skill');
-      expect(agentsSkill?.cliTools).toEqual(['codex']);
+      // Issue #1504: .agents/skills entries are visible to codex and antigravity.
+      expect(agentsSkill?.cliTools).toEqual(['codex', 'antigravity']);
     } finally {
       fs.rmSync(testDir, { recursive: true, force: true });
     }
   });
 
-  it('should deduplicate a skill present in both .agents/skills and .codex/skills', async () => {
+  it('should collapse a skill present in both .agents/skills and .codex/skills to the agents entry (Issue #1504)', async () => {
     const testDir = path.resolve(__dirname, '../fixtures/test-agents-codex-dedup');
     const agentsSkillDir = path.join(testDir, '.agents', 'skills', 'shared-skill');
     const codexSkillDir = path.join(testDir, '.codex', 'skills', 'shared-skill');
@@ -1247,10 +1303,15 @@ describe('getSlashCommandGroups with Codex skills', () => {
       const { getSlashCommandGroups } = await import('@/lib/slash-commands');
       const groups = await getSlashCommandGroups(testDir);
 
+      // Even though the two entries now have different cliTools scopes
+      // (.agents/skills -> ['codex','antigravity'], .codex/skills -> ['codex']),
+      // mergeCodexFamilySkills collapses them so codex sessions show one entry.
       const shared = groups.flatMap((g) => g.commands).filter((c) => c.name === 'shared-skill');
       expect(shared).toHaveLength(1);
       expect(shared[0].source).toBe('codex-skill');
-      expect(shared[0].cliTools).toEqual(['codex']);
+      // The .agents/skills entry wins (also visible to antigravity).
+      expect(shared[0].cliTools).toEqual(['codex', 'antigravity']);
+      expect(shared[0].description).toBe('From agents');
     } finally {
       fs.rmSync(testDir, { recursive: true, force: true });
     }

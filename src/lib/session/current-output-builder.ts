@@ -100,8 +100,17 @@ export async function buildCurrentOutput(
   const isSelectionListActive =
     statusResult.status === 'waiting' && SELECTION_LIST_REASONS.has(statusResult.reason);
   const isPagerActive = statusResult.reason === STATUS_REASON.CODEX_PAGER;
+  // Issue #1497: the detection-independent nav hatch (#1017/#1494) is gated on
+  // isUnclassifiedActive. A static, unrecognized TUI overlay (e.g. Claude `/help`)
+  // whose frame stops changing degrades from `running`/`default` to `ready`/
+  // `no_recent_output` once the Auto-Yes poller has stamped lastOutputTimestamp
+  // (its sole writer, auto-yes-poller.ts). That is still an interactive-but-
+  // unclassified frame — a real idle prompt (`❯`) is classified earlier as
+  // `input_prompt`, never as `no_recent_output` — so treat the timed-out fallback
+  // as unclassified too and keep the hatch open instead of stranding the user.
   const isUnclassifiedActive =
-    statusResult.status === 'running' && statusResult.reason === STATUS_REASON.DEFAULT;
+    (statusResult.status === 'running' && statusResult.reason === STATUS_REASON.DEFAULT) ||
+    (statusResult.status === 'ready' && statusResult.reason === STATUS_REASON.NO_RECENT_OUTPUT);
 
   const realtimeSnippet = lines.slice(-100).join('\n');
   const autoYesState = getAutoYesState(worktreeId, cliToolId, instanceId);
