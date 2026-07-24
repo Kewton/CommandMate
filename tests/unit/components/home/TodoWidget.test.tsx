@@ -13,6 +13,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { TodoWidget } from '@/components/home/TodoWidget';
+import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 import { todoApi, type TodoItem } from '@/lib/api/todo-api';
 
 // Issue #1274: this component's wording resolves through the `home` namespace.
@@ -122,18 +123,40 @@ describe('TodoWidget (Issue #907)', () => {
     );
   });
 
-  it('deletes a todo using its own repositoryId', async () => {
+  it('deletes a todo using its own repositoryId after confirmation (Issue #1487)', async () => {
     mockedApi.remove.mockResolvedValue(undefined);
-    render(<TodoWidget />);
+    render(
+      <ConfirmProvider>
+        <TodoWidget />
+      </ConfirmProvider>,
+    );
     await screen.findByText('alpha task');
 
     // First delete button corresponds to the Alpha (repo-a) todo.
     const deleteButtons = screen.getAllByTestId('todo-delete');
     fireEvent.click(deleteButtons[0]);
+    fireEvent.click(await screen.findByTestId('confirm-dialog-confirm'));
 
     await waitFor(() =>
       expect(mockedApi.remove).toHaveBeenCalledWith('repo-a', 't1'),
     );
+  });
+
+  it('does not delete a todo when the ConfirmDialog is cancelled (Issue #1487)', async () => {
+    mockedApi.remove.mockResolvedValue(undefined);
+    render(
+      <ConfirmProvider>
+        <TodoWidget />
+      </ConfirmProvider>,
+    );
+    await screen.findByText('alpha task');
+
+    fireEvent.click(screen.getAllByTestId('todo-delete')[0]);
+    fireEvent.click(await screen.findByTestId('confirm-dialog-cancel'));
+
+    await waitFor(() => expect(screen.queryByTestId('confirm-dialog')).toBeNull());
+    expect(mockedApi.remove).not.toHaveBeenCalled();
+    expect(screen.getByText('alpha task')).toBeInTheDocument();
   });
 
   it('creates a todo for the selected dropdown repository and refreshes via listAll', async () => {
@@ -223,7 +246,11 @@ describe('TodoWidget mobile layout (Issue #909)', () => {
   it('still toggles and deletes via each todo own repositoryId after the layout change', async () => {
     mockedApi.update.mockResolvedValue(TODOS[1]);
     mockedApi.remove.mockResolvedValue(undefined);
-    render(<TodoWidget />);
+    render(
+      <ConfirmProvider>
+        <TodoWidget />
+      </ConfirmProvider>,
+    );
     await screen.findByText('beta task');
 
     fireEvent.click(screen.getAllByTestId('todo-checkbox')[1]);
@@ -232,6 +259,7 @@ describe('TodoWidget mobile layout (Issue #909)', () => {
     );
 
     fireEvent.click(screen.getAllByTestId('todo-delete')[0]);
+    fireEvent.click(await screen.findByTestId('confirm-dialog-confirm'));
     await waitFor(() =>
       expect(mockedApi.remove).toHaveBeenCalledWith('repo-a', 't1'),
     );

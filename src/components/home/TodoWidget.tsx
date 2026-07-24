@@ -17,6 +17,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button, Card, Checkbox, Input, Skeleton } from '@/components/ui';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { todoApi, type TodoItem } from '@/lib/api/todo-api';
 import { MAX_TODO_CONTENT_LENGTH } from '@/config/todo-config';
 
@@ -41,6 +42,8 @@ function todoRepoLabel(todo: TodoItem): string {
 
 export function TodoWidget() {
   const t = useTranslations('home');
+  const tCommon = useTranslations('common');
+  const confirm = useConfirm();
   const [repositories, setRepositories] = useState<RepositoryOption[]>([]);
   const [selectedRepoId, setSelectedRepoId] = useState('');
   const [todos, setTodos] = useState<TodoItem[]>([]);
@@ -162,6 +165,14 @@ export function TodoWidget() {
   );
 
   const handleDelete = useCallback(async (todo: TodoItem) => {
+    if (
+      !(await confirm({
+        description: tCommon('confirmDelete', { name: todo.content }),
+        variant: 'danger',
+      }))
+    ) {
+      return;
+    }
     setError(null);
     try {
       // Use the todo's own repository id so cross-repo deletes don't 404.
@@ -170,7 +181,7 @@ export function TodoWidget() {
     } catch (err) {
       setError(err instanceof Error ? err.message : t('todo.errors.delete'));
     }
-  }, [t]);
+  }, [t, confirm, tCommon]);
 
   const handleInputKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {

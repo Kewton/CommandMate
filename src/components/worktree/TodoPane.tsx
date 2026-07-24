@@ -24,6 +24,7 @@ import {
 import { MAX_TODO_CONTENT_LENGTH, MAX_TODO_DETAIL_LENGTH } from '@/config/todo-config';
 import { Modal } from '@/components/ui/Modal';
 import { CopyButton } from '@/components/common/CopyButton';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 /**
  * Restyle CopyButton for the light/dark TodoPane modal — its defaults assume a
@@ -57,6 +58,8 @@ export const TodoPane = React.memo(function TodoPane({
   className = '',
 }: TodoPaneProps) {
   const t = useTranslations('worktree');
+  const tCommon = useTranslations('common');
+  const confirm = useConfirm();
   const [todos, setTodos] = useState<WorktreeTodoItem[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
@@ -145,6 +148,14 @@ export const TodoPane = React.memo(function TodoPane({
 
   const handleDelete = useCallback(
     async (todo: WorktreeTodoItem) => {
+      if (
+        !(await confirm({
+          description: tCommon('confirmDelete', { name: todo.content }),
+          variant: 'danger',
+        }))
+      ) {
+        return;
+      }
       setError(null);
       try {
         await worktreeTodoApi.remove(worktreeId, todo.id);
@@ -153,7 +164,7 @@ export const TodoPane = React.memo(function TodoPane({
         setError(err instanceof Error ? err.message : t('todo.deleteError'));
       }
     },
-    [worktreeId, t],
+    [worktreeId, t, confirm, tCommon],
   );
 
   const openEditor = useCallback((todo: WorktreeTodoItem) => {
