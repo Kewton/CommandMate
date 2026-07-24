@@ -36,8 +36,10 @@ function loadDescriptions(locale: (typeof LOCALES)[number]): Record<string, stri
 describe('STANDARD_COMMANDS', () => {
   // Issue #1488: +9 Claude built-ins (loop, add-dir, mcp, usage, memory,
   // statusline, terminal-setup, hooks, agents), all cliTools: ['claude'].
-  it('should have 54 standard commands (21 Claude-only + 8 shared + 17 Codex-only + 7 OpenCode-only + 1 Codex/OpenCode)', () => {
-    expect(STANDARD_COMMANDS.length).toBe(54);
+  // Issue #1502: +9 Antigravity real commands (help, usage, mcp, hooks, diff,
+  // fork, plan, rewind, tasks), all cliTools: ['antigravity'].
+  it('should have 63 standard commands (54 prior + 9 Antigravity-only, Issue #1502)', () => {
+    expect(STANDARD_COMMANDS.length).toBe(63);
   });
 
   it('should have all required properties for each command', () => {
@@ -90,16 +92,10 @@ describe('STANDARD_COMMANDS', () => {
   });
 
   // Issue #990 (Phase C): Antigravity shares the universal claude/codex commands.
-  it('should have shared session/config/monitor/git commands including "antigravity"', () => {
-    const antigravitySharedCommands = [
-      'clear',
-      'compact',
-      'resume',
-      'model',
-      'permissions',
-      'status',
-      'review',
-    ];
+  // Issue #1502: compact/status/review were phantom on agy 1.1.3 and were
+  // removed from the antigravity scope, so only these four remain shared.
+  it('should have shared session/config commands including "antigravity"', () => {
+    const antigravitySharedCommands = ['clear', 'resume', 'model', 'permissions'];
     antigravitySharedCommands.forEach((name) => {
       const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
       expect(cmd).toBeDefined();
@@ -107,11 +103,34 @@ describe('STANDARD_COMMANDS', () => {
     });
   });
 
-  it('should have 7 commands available for Antigravity', () => {
+  // Issue #1502: these three do not exist in agy 1.1.3 (/compact = "No matches",
+  // /status -> /statusline, /review -> /teamwork-preview). They must not be
+  // offered to antigravity, or the palette drives a mis-execution on send.
+  it('should NOT expose phantom commands (compact/status/review) to Antigravity', () => {
+    ['compact', 'status', 'review'].forEach((name) => {
+      const antigravityEntry = STANDARD_COMMANDS.find(
+        (c) => c.name === name && c.cliTools?.includes('antigravity')
+      );
+      expect(antigravityEntry, `/${name} must not be antigravity-visible`).toBeUndefined();
+    });
+  });
+
+  // Issue #1502: real agy 1.1.3 commands added with cliTools: ['antigravity'].
+  it('should expose the real agy 1.1.3 commands to Antigravity', () => {
+    const realAgyAdded = ['help', 'usage', 'mcp', 'hooks', 'diff', 'fork', 'plan', 'rewind', 'tasks'];
+    realAgyAdded.forEach((name) => {
+      const cmd = STANDARD_COMMANDS.find(
+        (c) => c.name === name && c.cliTools?.includes('antigravity')
+      );
+      expect(cmd, `/${name} must be antigravity-visible`).toBeDefined();
+    });
+  });
+
+  it('should have 13 commands available for Antigravity (Issue #1502: 4 shared + 9 real)', () => {
     const antigravityCommands = STANDARD_COMMANDS.filter(
       (cmd) => cmd.cliTools?.includes('antigravity')
     );
-    expect(antigravityCommands.length).toBe(7);
+    expect(antigravityCommands.length).toBe(13);
   });
 
   it('should have commands shared between Claude and OpenCode', () => {
@@ -463,6 +482,23 @@ describe('FREQUENTLY_USED', () => {
     expect(FREQUENTLY_USED.opencode).toContain('help');
     expect(FREQUENTLY_USED.opencode).toContain('exit');
   });
+
+  // Issue #1502: antigravity gets its own frequentlyUsed list (was falling back
+  // to Claude's, which surfaced the phantom /compact, /status, /review).
+  it('Antigravity frequently used should be 5 real, antigravity-visible commands (Issue #1502)', () => {
+    expect(FREQUENTLY_USED.antigravity).toBeDefined();
+    expect(FREQUENTLY_USED.antigravity.length).toBe(5);
+    FREQUENTLY_USED.antigravity.forEach((name) => {
+      const visible = STANDARD_COMMANDS.some(
+        (c) => c.name === name && c.cliTools?.includes('antigravity')
+      );
+      expect(visible, `frequentlyUsed /${name} is not antigravity-visible`).toBe(true);
+    });
+    // None of the phantom commands may leak back in via this list.
+    ['compact', 'status', 'review'].forEach((phantom) => {
+      expect(FREQUENTLY_USED.antigravity).not.toContain(phantom);
+    });
+  });
 });
 
 describe('getStandardCommandGroups', () => {
@@ -565,6 +601,19 @@ describe('getFrequentlyUsedCommands', () => {
     const commands = getFrequentlyUsedCommands('opencode');
     // 'clear' is Claude-only (no cliTools), should not be in OpenCode list
     expect(commands.some((c) => c.name === 'clear')).toBe(false);
+  });
+
+  // Issue #1502: antigravity now has its own list; resolve it to real entries.
+  it('should return Antigravity commands when cliToolId is antigravity', () => {
+    const commands = getFrequentlyUsedCommands('antigravity');
+    expect(commands.length).toBe(5);
+    commands.forEach((cmd) => {
+      expect(cmd.cliTools).toContain('antigravity');
+    });
+    // No phantom command survives resolution.
+    ['compact', 'status', 'review'].forEach((phantom) => {
+      expect(commands.some((c) => c.name === phantom)).toBe(false);
+    });
   });
 });
 
