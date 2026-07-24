@@ -3,6 +3,7 @@
 import type { DetectPromptOptions, PromptDetectionResult } from './types';
 import type { SubmitMode } from '@/types/models';
 import { normalizeTuiFrameForDetection } from './tui-detection-frame';
+import { CLAUDE_MODEL_OVERLAY_FOOTER_PATTERN } from './cli-patterns';
 
 // ============================================================================
 // Constants
@@ -645,6 +646,26 @@ export function detectMultipleChoicePrompt(
     }
   }
   const scanWindow = lines.slice(scanStart, effectiveEnd);
+
+  // [Issue #1495] Claude `/model` local-settings overlay guard.
+  // The `/model` overlay renders a ❯-marked numbered model list ("1. Default …
+  // 5. Haiku") under a "Select model" header, which the option-collection logic
+  // below would otherwise return as a genuine multiple_choice prompt. Auto-Yes
+  // (detectAndRespondToPrompt) calls detectPrompt() directly and would resolve +
+  // Enter-confirm the default option — silently changing the user's default model.
+  // The overlay-unique "Enter to set as default …" footer never appears in real
+  // confirmation prompts (permission dialogs, the trust dialog, AskUserQuestion),
+  // so bailing out here stops Auto-Yes without touching any real-prompt path. The
+  // overlay is modal — no genuine prompt can be active at the same time, and the
+  // Claude TUI repaints the overlay away on close, so a stale footer cannot linger
+  // in the captured pane. status-detector then reclassifies it as a Claude
+  // selection list via CLAUDE_SELECTION_LIST_FOOTER (NavigationButtons + ESC hatch).
+  for (const rawLine of scanWindow) {
+    if (CLAUDE_MODEL_OVERLAY_FOOTER_PATTERN.test(rawLine)) {
+      return noPromptResult(output);
+    }
+  }
+
   // Single-pass footer detection: identify both confirmation footer presence and
   // specific "press number to confirm" variant in one iteration (Issue #616).
   let hasConfirmationFooter = false;

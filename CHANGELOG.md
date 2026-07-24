@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Auto-Yes が Claude `/model` オーバーレイを誤って自動応答しデフォルトモデルを変更する不具合を修正** (#1495): `/model` の番号付きモデル一覧を `detectMultipleChoicePrompt` が本物の multiple_choice と誤検出し、Auto-Yes が Enter 確定して既定モデルを無断変更していた。実機 Claude Code v2.1.218 のフッタ「Enter to set as default …」を検出したら `detectPrompt` を非プロンプト扱いにして Auto-Yes を停止し、あわせて `CLAUDE_SELECTION_LIST_FOOTER` に同フッタを追加して `/model` を Claude selection list（NavigationButtons＋ESC ハッチ／`hasActivePrompt=false`）へ再分類する。権限確認・trust ダイアログ・AskUserQuestion・Gemini `/model` 等の本物のプロンプトは非回帰（実キャプチャ fixture で検証）。
+
 ## [0.14.0] - 2026-07-24
 
 ### Added
