@@ -221,6 +221,96 @@
       "source": "standard"
     },
     {
+      "name": "loop",
+      "descriptionKey": "slashCommands.descriptions.loop",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "add-dir",
+      "descriptionKey": "slashCommands.descriptions.add-dir",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "mcp",
+      "descriptionKey": "slashCommands.descriptions.mcp",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "usage",
+      "descriptionKey": "slashCommands.descriptions.usage",
+      "category": "standard-monitor",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "memory",
+      "descriptionKey": "slashCommands.descriptions.memory",
+      "category": "standard-config",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "statusline",
+      "descriptionKey": "slashCommands.descriptions.statusline",
+      "category": "standard-config",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "terminal-setup",
+      "descriptionKey": "slashCommands.descriptions.terminal-setup",
+      "category": "standard-config",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "hooks",
+      "descriptionKey": "slashCommands.descriptions.hooks",
+      "category": "standard-config",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "agents",
+      "descriptionKey": "slashCommands.descriptions.agents",
+      "category": "standard-config",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
       "name": "new",
       "descriptionKey": "slashCommands.descriptions.new",
       "category": "standard-session",

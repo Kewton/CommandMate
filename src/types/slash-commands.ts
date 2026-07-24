@@ -52,7 +52,11 @@ export type SlashCommandSource =
 export interface CatalogStalenessEntry {
   /** Installed CLI version (major.minor.patch). */
   current: string;
-  /** Version the bundled catalog was last verified against. */
+  /**
+   * CLI version whose `/help` output was last collated against catalog content
+   * (Issue #1488) — the baseline the installed CLI is compared against, not the
+   * version the catalog code was written for.
+   */
   verifiedAgainst: string;
   /** Installed CLI is newer than the verified version. */
   stale: boolean;

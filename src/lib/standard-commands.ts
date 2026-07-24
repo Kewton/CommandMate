@@ -33,6 +33,12 @@ interface CatalogCommandEntry {
 
 /** Shape of the bundled catalog file. */
 interface SlashCommandsCatalog {
+  /**
+   * Per-tool CLI version whose `/help` output was last collated against this
+   * catalog's *content* — NOT the version the catalog mechanism was built on
+   * (Issue #1488). Only bump a tool's value when its entries were re-checked
+   * against that CLI, so the staleness signal reflects content drift, not code.
+   */
   verifiedAgainst: Record<string, string>;
   frequentlyUsed: Record<string, string[]>;
   commands: CatalogCommandEntry[];
@@ -41,8 +47,10 @@ interface SlashCommandsCatalog {
 const catalog = catalogJson as SlashCommandsCatalog;
 
 /**
- * CLI versions the bundled catalog was last verified against (Issue #1476).
- * Consumed by the staleness check in slash-command-catalog.ts.
+ * CLI versions whose `/help` output was last collated against catalog *content*
+ * (Issue #1476, semantics clarified in Issue #1488). Consumed by the staleness
+ * check in slash-command-catalog.ts. Bump a tool only after re-checking its
+ * entries against that CLI — not merely because the catalog code changed.
  */
 export const CATALOG_VERIFIED_AGAINST: Record<string, string> = catalog.verifiedAgainst;
 
