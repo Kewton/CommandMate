@@ -25,6 +25,13 @@
       "compact",
       "help",
       "exit"
+    ],
+    "antigravity": [
+      "clear",
+      "help",
+      "usage",
+      "diff",
+      "model"
     ]
   },
   "commands": [
@@ -47,8 +54,7 @@
       "cliTools": [
         "claude",
         "codex",
-        "opencode",
-        "antigravity"
+        "opencode"
       ],
       "isStandard": true,
       "source": "standard"
@@ -109,8 +115,7 @@
       "category": "standard-monitor",
       "cliTools": [
         "claude",
-        "codex",
-        "antigravity"
+        "codex"
       ],
       "isStandard": true,
       "source": "standard"
@@ -135,8 +140,7 @@
       "category": "standard-git",
       "cliTools": [
         "claude",
-        "codex",
-        "antigravity"
+        "codex"
       ],
       "isStandard": true,
       "source": "standard"
@@ -557,6 +561,96 @@
       "category": "standard-util",
       "cliTools": [
         "opencode"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "help",
+      "descriptionKey": "slashCommands.descriptions.help",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "usage",
+      "descriptionKey": "slashCommands.descriptions.usage",
+      "category": "standard-monitor",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "mcp",
+      "descriptionKey": "slashCommands.descriptions.mcp",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "hooks",
+      "descriptionKey": "slashCommands.descriptions.hooks",
+      "category": "standard-config",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "diff",
+      "descriptionKey": "slashCommands.descriptions.diff",
+      "category": "standard-git",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "fork",
+      "descriptionKey": "slashCommands.descriptions.fork",
+      "category": "standard-session",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "plan",
+      "descriptionKey": "slashCommands.descriptions.plan",
+      "category": "standard-session",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "rewind",
+      "descriptionKey": "slashCommands.descriptions.rewind",
+      "category": "standard-session",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "tasks",
+      "descriptionKey": "slashCommands.descriptions.tasks",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
       ],
       "isStandard": true,
       "source": "standard"
