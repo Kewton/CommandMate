@@ -505,6 +505,24 @@ export const OPENCODE_PROCESSING_INDICATOR = /esc interrupt/;
 export const OPENCODE_SELECTION_LIST_PATTERN = /^\s*(Select\s+(model|provider)|Connect\s+a\s+provider)/m;
 
 /**
+ * [Issue #1495] Footer signature of Claude Code's `/model` local-settings overlay.
+ * Verified against a real Claude Code v2.1.218 capture, the footer reads:
+ *   "Enter to set as default · s to use this session only · Esc to cancel"
+ *
+ * The overlay renders a ❯-marked numbered model list ("1. Default … 5. Haiku")
+ * under a "Select model" header that detectMultipleChoicePrompt() otherwise
+ * matches as a genuine multiple_choice prompt — which let Auto-Yes Enter-confirm
+ * a selection and silently change the user's default model. This "set as default"
+ * phrasing is unique to the model picker: genuine confirmation prompts never
+ * contain it (the trust dialog uses "Enter to confirm · Esc to cancel", Bash-tool
+ * approvals use "Esc to cancel · Tab to amend", AskUserQuestion uses
+ * "Enter to select · … to navigate"), so it is a safe exclusion signal.
+ *
+ * Linear pattern, no nested quantifiers — ReDoS safe (S4-001).
+ */
+export const CLAUDE_MODEL_OVERLAY_FOOTER_PATTERN = /Enter\s+to\s+set\s+as\s+default\b/i;
+
+/**
  * Claude CLI selection list footer pattern
  * Detects Claude CLI's interactive selection prompts that require
  * arrow key navigation and Enter to select/toggle.
@@ -512,9 +530,16 @@ export const OPENCODE_SELECTION_LIST_PATTERN = /^\s*(Select\s+(model|provider)|C
  * Matches footer instruction lines (known variants):
  *   "Enter to select · Tab/Arrow keys to navigate · Esc to cancel"
  *   "Enter to select · ↑/↓ to navigate · n to add notes · Esc to cancel"
- *   "Enter to confirm · Esc to exit"  (/model command)
+ *   "Enter to confirm · Esc to exit"  (legacy /model command footer)
+ *   "Enter to set as default · s to use this session only · Esc to cancel"
+ *     (/model command footer as of Claude Code v2.1.218 — Issue #1495)
+ *
+ * The "set as default" branch lets status-detector classify the `/model` overlay
+ * as a Claude selection list (NavigationButtons + ESC hatch, hasActivePrompt=false)
+ * once detectPrompt() no longer reports it as a prompt (see
+ * CLAUDE_MODEL_OVERLAY_FOOTER_PATTERN).
  */
-export const CLAUDE_SELECTION_LIST_FOOTER = /Enter\s+to\s+(?:select\s+.*to\s+navigate|confirm\s+·\s+Esc)/;
+export const CLAUDE_SELECTION_LIST_FOOTER = /Enter\s+to\s+(?:select\s+.*to\s+navigate|confirm\s+·\s+Esc|set\s+as\s+default)/;
 
 /**
  * OpenCode TUI separator pattern (Issue #379)
