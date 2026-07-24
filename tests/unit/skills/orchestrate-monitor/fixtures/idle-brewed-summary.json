@@ -1,0 +1,25 @@
+{
+  "isRunning": true,
+  "cliToolId": "claude",
+  "sessionStatus": "ready",
+  "sessionStatusReason": "no_recent_output",
+  "content": "",
+  "realtimeSnippet": "⏺ Done. All unit tests pass and the build is green.\n\n✻ Brewed for 8m 55s · ↑ 2.1k tokens\n\nIMPL_COMPLETED\n\n> ",
+  "lineCount": 320,
+  "lastCapturedLine": 320,
+  "isComplete": false,
+  "isGenerating": false,
+  "thinking": false,
+  "thinkingMessage": null,
+  "isPromptWaiting": false,
+  "promptData": null,
+  "autoYes": {
+    "enabled": true,
+    "expiresAt": 1790000000000
+  },
+  "isSelectionListActive": false,
+  "isPagerActive": false,
+  "isUnclassifiedActive": false,
+  "lastServerResponseTimestamp": 1790000000000,
+  "serverPollerActive": true
+}

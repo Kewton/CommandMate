@@ -1,0 +1,25 @@
+{
+  "isRunning": true,
+  "cliToolId": "claude",
+  "sessionStatus": "running",
+  "sessionStatusReason": "thinking_indicator",
+  "content": "⏺ Reading src/lib/session/current-output-builder.ts\n",
+  "realtimeSnippet": "⏺ Reading src/lib/session/current-output-builder.ts\n\n· Cerebrating… (esc to interrupt)\n  ↓ 1.4k tokens",
+  "lineCount": 152,
+  "lastCapturedLine": 150,
+  "isComplete": false,
+  "isGenerating": true,
+  "thinking": true,
+  "thinkingMessage": "Claude is thinking...",
+  "isPromptWaiting": false,
+  "promptData": null,
+  "autoYes": {
+    "enabled": true,
+    "expiresAt": 1790000000000
+  },
+  "isSelectionListActive": false,
+  "isPagerActive": false,
+  "isUnclassifiedActive": false,
+  "lastServerResponseTimestamp": 1790000000000,
+  "serverPollerActive": true
+}
