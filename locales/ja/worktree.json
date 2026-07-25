@@ -296,7 +296,11 @@
     "editorOnly": "エディタのみ",
     "previewOnly": "プレビューのみ",
     "enterFullscreen": "全画面にする (Ctrl+Shift+F)",
-    "exitFullscreen": "全画面を終了 (ESC)"
+    "exitFullscreen": "全画面を終了 (ESC)",
+    "indent": "インデント (Tab)",
+    "outdent": "アウトデント (Shift+Tab)",
+    "tabMovesFocusOn": "Tab はフォーカス移動 (Ctrl+M でインデントに切替)",
+    "tabMovesFocusOff": "Tab はインデント (Ctrl+M でフォーカス移動に切替)"
   },
   "actions": {
     "copyPath": "パスをコピー",

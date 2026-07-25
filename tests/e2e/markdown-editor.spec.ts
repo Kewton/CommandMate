@@ -5,7 +5,13 @@
  * Phase 5 - Task 5.1
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
+import {
+  mockEditorApi,
+  E2E_EDITOR_WORKTREE,
+  E2E_EDITOR_FILE,
+  E2E_EDITOR_CONTENT,
+} from './fixtures/markdown-editor-helpers';
 
 test.describe('Markdown Editor', () => {
   /**
@@ -376,6 +382,155 @@ test.describe('Markdown Editor', () => {
       const dirtyIndicator = page.locator('[data-testid="dirty-indicator"]');
       // Note: This may still show if there's an error, so we check visibility
       // The actual save test would need a proper backend setup
+    });
+  });
+
+  /**
+   * Issue #1518: Tab indent / Shift+Tab outdent, driven by real key presses.
+   *
+   * The unit suite uses `fireEvent`, which can dispatch to an element that is
+   * not focused and so hide keyboard bugs entirely. These tests type into a
+   * real browser: they assert the value changes, that focus *stays* in the
+   * textarea, that one Ctrl+Z reverts the edit, and that Ctrl+M hands Tab back
+   * to focus navigation.
+   */
+  test.describe('Tab Indentation (Issue #1518)', () => {
+    // The dev server compiles the worktree route on first hit.
+    test.describe.configure({ timeout: 90_000 });
+
+    /** Open the fixture file and return the (visible) editor textarea. */
+    async function openEditor(page: Page): Promise<Locator> {
+      await mockEditorApi(page);
+      await page.goto(`/worktrees/${E2E_EDITOR_WORKTREE}`);
+
+      // Files is the default activity, so the tree appears on its own once the
+      // page hydrates. Clicking the activity button here would toggle it shut.
+      const treeItem = page.locator(`[data-testid="tree-item-${E2E_EDITOR_FILE}"]`);
+      await expect(treeItem).toBeVisible({ timeout: 60_000 });
+      await treeItem.click();
+
+      // .md files mount in preview mode, which hides the editor pane.
+      const editorViewButton = page.locator('[data-testid="view-mode-editor"]');
+      await expect(editorViewButton).toBeVisible({ timeout: 30_000 });
+      await editorViewButton.click();
+
+      const textarea = page.locator('[data-testid="markdown-editor-textarea"]');
+      await expect(textarea).toBeVisible({ timeout: 30_000 });
+      await expect(textarea).toHaveValue(E2E_EDITOR_CONTENT);
+      return textarea;
+    }
+
+    /** Place the caret without relying on platform-specific Home/End keys. */
+    async function setCaret(textarea: Locator, start: number, end = start) {
+      await textarea.evaluate(
+        (el, range) => {
+          const field = el as HTMLTextAreaElement;
+          field.focus();
+          field.setSelectionRange(range.start, range.end);
+        },
+        { start, end }
+      );
+    }
+
+    function focusedTestId(page: Page) {
+      return page.evaluate(() => document.activeElement?.getAttribute('data-testid') ?? null);
+    }
+
+    test('indents with Tab and keeps focus in the textarea', async ({ page }) => {
+      const textarea = await openEditor(page);
+      await setCaret(textarea, 0);
+
+      await page.keyboard.press('Tab');
+
+      await expect(textarea).toHaveValue('  alpha\nbeta\n');
+      expect(await focusedTestId(page)).toBe('markdown-editor-textarea');
+      expect(await textarea.inputValue()).not.toContain('\t');
+    });
+
+    test('applies exactly one indent per Tab press', async ({ page }) => {
+      // Regression: handleKeyDown is bound to both the textarea and the root
+      // div, so an unguarded handler indents twice for one keystroke.
+      const textarea = await openEditor(page);
+      await setCaret(textarea, 0);
+
+      await page.keyboard.press('Tab');
+
+      await expect(textarea).toHaveValue('  alpha\nbeta\n');
+    });
+
+    test('reverts an indent with a single undo', async ({ page }) => {
+      const textarea = await openEditor(page);
+      await setCaret(textarea, 0);
+
+      await page.keyboard.press('Tab');
+      await expect(textarea).toHaveValue('  alpha\nbeta\n');
+
+      await page.keyboard.press('ControlOrMeta+z');
+
+      await expect(textarea).toHaveValue(E2E_EDITOR_CONTENT);
+    });
+
+    test('outdents with Shift+Tab', async ({ page }) => {
+      const textarea = await openEditor(page);
+      await setCaret(textarea, 0);
+      await page.keyboard.press('Tab');
+      await expect(textarea).toHaveValue('  alpha\nbeta\n');
+
+      await page.keyboard.press('Shift+Tab');
+
+      await expect(textarea).toHaveValue(E2E_EDITOR_CONTENT);
+      expect(await focusedTestId(page)).toBe('markdown-editor-textarea');
+    });
+
+    test('indents a multi-line selection and keeps it selected', async ({ page }) => {
+      const textarea = await openEditor(page);
+      await setCaret(textarea, 0, E2E_EDITOR_CONTENT.length);
+
+      await page.keyboard.press('Tab');
+
+      await expect(textarea).toHaveValue('  alpha\n  beta\n');
+      const selection = await textarea.evaluate((el) => {
+        const field = el as HTMLTextAreaElement;
+        return { start: field.selectionStart, end: field.selectionEnd };
+      });
+      expect(selection.start).toBe(0);
+      expect(selection.end).toBeGreaterThan(0);
+    });
+
+    test('Ctrl+M gives Tab back to focus navigation', async ({ page }) => {
+      const textarea = await openEditor(page);
+      await setCaret(textarea, 0);
+
+      await page.keyboard.press('Control+m');
+      await expect(page.locator('[data-testid="editor-tab-focus-toggle"]')).toHaveAttribute(
+        'aria-pressed',
+        'true'
+      );
+
+      await page.keyboard.press('Tab');
+
+      await expect(textarea).toHaveValue(E2E_EDITOR_CONTENT);
+      expect(await focusedTestId(page)).not.toBe('markdown-editor-textarea');
+    });
+
+    test('Shift+Tab with nothing to remove escapes the textarea', async ({ page }) => {
+      const textarea = await openEditor(page);
+      await setCaret(textarea, 0);
+
+      await page.keyboard.press('Shift+Tab');
+
+      await expect(textarea).toHaveValue(E2E_EDITOR_CONTENT);
+      expect(await focusedTestId(page)).not.toBe('markdown-editor-textarea');
+    });
+
+    test('indents from the toolbar button without losing the caret', async ({ page }) => {
+      const textarea = await openEditor(page);
+      await setCaret(textarea, 0);
+
+      await page.click('[data-testid="editor-indent-button"]');
+
+      await expect(textarea).toHaveValue('  alpha\nbeta\n');
+      expect(await focusedTestId(page)).toBe('markdown-editor-textarea');
     });
   });
 });

@@ -1,0 +1,25 @@
+{
+  "isRunning": true,
+  "cliToolId": "claude",
+  "sessionStatus": "running",
+  "sessionStatusReason": "thinking_indicator",
+  "content": "",
+  "realtimeSnippet": "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\u001b[49m\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\u001b[38;5;211m✻\u001b[39m \u001b[38;5;211m529 Overloaded\u001b[38;5;246m · Retrying in 4s · attempt 7/10\u001b[39m\n\u001b[38;5;246m  ⎿  If it persists, check https://status.claude.com.\u001b[39m\n\n  \u001b[38;5;239m\u001b[48;5;237m❯ \u001b[38;5;231ma\u001b[39m                                                                                                                                                                                                 \u001b[49m\n\n\u001b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[38;5;246m❯ \u001b[2m\u001b[39mPress up to edit queued messages\u001b[0m\n\u001b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[39m  \u001b[38;5;246m⏸ manual mode on · esc to interrupt · ← for agents\u001b[39m                                                                                                                                        \u001b[38;5;114m\u001b]8;id=1dg3gre;https://claude.ai/code/session_FIXTUREONLY000000000000\u001b\\/rc\u001b[38;5;246m\u001b]8;;\u001b\\ · focus\u001b[39m\n",
+  "lineCount": 1001,
+  "lastCapturedLine": 1000,
+  "isComplete": false,
+  "isGenerating": true,
+  "thinking": true,
+  "thinkingMessage": "Claude is thinking...",
+  "isPromptWaiting": false,
+  "promptData": null,
+  "autoYes": {
+    "enabled": true,
+    "expiresAt": 1784997322906
+  },
+  "isSelectionListActive": false,
+  "isPagerActive": false,
+  "isUnclassifiedActive": false,
+  "lastServerResponseTimestamp": null,
+  "serverPollerActive": true
+}

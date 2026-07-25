@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **orchestrate 監視レシピを実行可能 Skill 化** (#1512): `/orchestrate` 運用で実証済みの監視ノウハウ（capture 解析・状態判定・介入判断・完了/スコープ検証）を、セッションメモリ依存から `.claude/skills/orchestrate-monitor/`（SKILL.md＋bash 3.2 互換スクリプト群）へ資産化した。判定ロジックを fixture ベースで単体テスト化し、既知の誤報2パターン（未起動 idle の COMPLETE 誤報／検証ガード自身の偽陽性）を回帰テストで固定。CI で `bash -n` 構文チェックを回す。#1452 Harness Pack の移植元となる自家用 Skill（公式カタログ配布は後続 #1513）。
+- **Markdown/テキスト編集で Tab インデント・Shift+Tab アウトデントを可能に** (#1518): 素の `<textarea>` に自前実装した。インデント計算は純関数 `src/lib/editor/indent.ts`（複数行選択は各行を字下げして選択を維持、単一行はタブストップ揃え、CRLF の `\r` を保持、空行はスキップ）。挿入は常に **2 スペース固定**でタブ文字を入れない（同じエディタが YAML を編集するため）が、アウトデントは既存ファイル中の先頭タブも 1 単位として除去する。適用は `document.execCommand('insertText')` を第一手にして **Ctrl+Z 1 手で戻る**ようにし、非対応環境では React state ＋ `setSelectionRange()` 復元へフォールバックする。`handleKeyDown` が textarea とルート div の両方に張られて 1 打鍵で 2 回発火していた既存不具合をガードで解消（副産物として Ctrl+S の二重発火も解消）。キーボードトラップ回避として **Ctrl+M**（Cmd+M は macOS のウィンドウ最小化と衝突するため不採用）で Tab をフォーカス移動へ戻すトグルを追加し、no-op な Shift+Tab は既定動作に委ねる。モバイル向けに `MarkdownToolbar` へ 44px のインデント/アウトデントボタンを追加し、`keyboard-shortcuts` に `editor` scope を新設（未登録だった Ctrl+S / Ctrl+Shift+F も登録）。
 
 ### Changed
 
@@ -18,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **GitPane の ahead/behind が「リモート先行なのに ↓0」「チップごと消える」問題を修正** (#1515): 原因は実装バグではなく、アプリがリモートを一度も見に行っていなかったこと（自動 `git fetch` が不在で `@{upstream}` が古いまま）と、`getAheadBehind` が全失敗を `null` に潰して UI がチップを丸ごと隠していたこと。(A-1) Current Status の 🔄 を「fetch → status 再取得」に変更し、実行中はスピナー＋非活性化。(A-3) `lastFetchAt` を payload に追加し「最終 fetch: ◯分前」を併記（linked worktree では `.git/worktrees/<name>/FETCH_HEAD` と共有 gitdir の新しい方を採用）。(B) `aheadBehindReason`（`no_upstream` / `upstream_gone` / `detached` / `error`）を API に追加し、未プッシュ／リモート削除済み／detached をバッジで説明する（stderr は分類後に破棄し、enum 以外はクライアントへ出さない）。(D-1) ahead/behind ツールチップに「最後に fetch した時点との比較」である旨を ja/en 双方で明記。(E-1) `execGitNetworkAware` に `GIT_TERMINAL_PROMPT=0` を設定し、認証情報の無い HTTPS remote で fetch が端末プロンプト待ちにならないようにした。自動 fetch（A-2）・導線変更（C-1）・ブランチ一覧への描画（D-2）は本 Issue のスコープ外。
+- **orchestrate-monitor の状態判定が実セッションで機能しない問題を修正** (#1522): #1512 で追加した監視 Skill は単体テストが全緑のまま**実機では一度も生成中を検知できていなかった**。根本原因は正規表現ではなく **fixture** で、ANSI を剥がした手書き payload をテストしていたため「製品が出力しない形」を検証していた。実 TUI は `↓` と数値の間に色リセットを挟むので `↓ [0-9]` は永久に一致しない。(1) `ml_strip_ansi` を追加してアンカー照合を ANSI 除去後に行う。(2) トークン出力前でも生成中を検知できるよう `esc to interrupt`（ターン実行中のみ出るフッタ）をアンカーに追加。(3) `ml_is_retrying` を追加し、CLI 自身の 5xx バックオフ中は生存扱いにする（介入しても再開せず stray メッセージが queue されるだけのため）。(4) リトライ枯渇死（terminal API error ＋ idle プロンプト）を検知して再送する経路を追加。(5) `ml_has_rate_limit` の裸の `rate.?limit` が**ワーカーの表示中ソースや作業指示文に誤マッチ**して健全なセッションへ入力を注入していたため、バナー固有の言い回しに限定し、`RATE_LIMIT` は生成中を否定してから最後に評価する。あわせて fixture を**実機採取の ANSI 付き payload**へ差し替え、`fixture-fidelity.test.ts` で「live fixture は ANSI を保持し、素朴なアンカーでは一致しないこと」を固定して同じ盲点の再生産を防ぐ。
 
 ## [0.14.1] - 2026-07-24
 
