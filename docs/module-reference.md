@@ -97,7 +97,8 @@
 | `src/lib/utils.ts` | 汎用ユーティリティ関数（debounce、truncateString、escapeHtml等）。汎用ユーティリティ（withTimeout追加: Issue #627） |
 | `src/config/editable-extensions.ts` | 編集可能ファイル拡張子設定。編集可能拡張子定義・バリデーション（EDITABLE_EXTENSIONS, EXTENSION_VALIDATORS, isEditableExtension, validateContent）。.yaml/.yml 追加・YAML危険タグバリデーション（Issue #646）。TEXT_MAX_SIZE_BYTES を 2MB に引き上げ・PUT/GET 共通定数化（Issue #723） |
 | `src/config/file-operations.ts` | 再帰削除の安全設定 |
-| `src/types/markdown-editor.ts` | マークダウンエディタ関連型定義（Issue #389: LOCAL_STORAGE_KEY_AUTO_SAVE='commandmate:md-editor-auto-save'、AUTO_SAVE_DEBOUNCE_MS=3000定数追加） |
+| `src/types/markdown-editor.ts` | マークダウンエディタ関連型定義（Issue #389: LOCAL_STORAGE_KEY_AUTO_SAVE='commandmate:md-editor-auto-save'、AUTO_SAVE_DEBOUNCE_MS=3000定数追加）。Issue #1518: INDENT_UNIT=2スペース、LOCAL_STORAGE_KEY_TAB_MOVES_FOCUS 追加 |
+| `src/lib/editor/indent.ts` | textarea のインデント計算純関数（Issue #1518: applyIndent/applyOutdent、IndentEdit を返し DOM 非依存。複数行選択は行頭に unit 挿入・単一行はタブストップ揃え、アウトデントは先頭タブも1文字として除去、削るものが無く選択も無い場合は null（WCAG 2.1.2 の逃げ道）、CRLF は \n 基準で行頭算出し \r 保持、空行はスキップ＝Markdown の hard break 化を防ぐ） |
 | `src/hooks/useContextMenu.ts` | コンテキストメニュー状態管理フック（MouseEvent/TouchEvent対応） |
 | `src/hooks/useExitAnimation.ts` | exit（消滅）アニメーション用アンマウント遅延フック（Issue #1114）。`useExitAnimation(open, duration)` → `{shouldRender, isExiting}`。閉要求後もduration ms描画を維持しexitアニメ再生を保証、再openでタイマー解除。Modal/Toast/ContextMenuで共用 |
 | `src/hooks/useFileOperations.ts` | ファイル操作フック（Issue #162: move操作の状態管理、MoveTarget型、UIロジック分離） |

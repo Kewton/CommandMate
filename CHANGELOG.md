@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **orchestrate 監視レシピを実行可能 Skill 化** (#1512): `/orchestrate` 運用で実証済みの監視ノウハウ（capture 解析・状態判定・介入判断・完了/スコープ検証）を、セッションメモリ依存から `.claude/skills/orchestrate-monitor/`（SKILL.md＋bash 3.2 互換スクリプト群）へ資産化した。判定ロジックを fixture ベースで単体テスト化し、既知の誤報2パターン（未起動 idle の COMPLETE 誤報／検証ガード自身の偽陽性）を回帰テストで固定。CI で `bash -n` 構文チェックを回す。#1452 Harness Pack の移植元となる自家用 Skill（公式カタログ配布は後続 #1513）。
+- **Markdown/テキスト編集で Tab インデント・Shift+Tab アウトデントを可能に** (#1518): 素の `<textarea>` に自前実装した。インデント計算は純関数 `src/lib/editor/indent.ts`（複数行選択は各行を字下げして選択を維持、単一行はタブストップ揃え、CRLF の `\r` を保持、空行はスキップ）。挿入は常に **2 スペース固定**でタブ文字を入れない（同じエディタが YAML を編集するため）が、アウトデントは既存ファイル中の先頭タブも 1 単位として除去する。適用は `document.execCommand('insertText')` を第一手にして **Ctrl+Z 1 手で戻る**ようにし、非対応環境では React state ＋ `setSelectionRange()` 復元へフォールバックする。`handleKeyDown` が textarea とルート div の両方に張られて 1 打鍵で 2 回発火していた既存不具合をガードで解消（副産物として Ctrl+S の二重発火も解消）。キーボードトラップ回避として **Ctrl+M**（Cmd+M は macOS のウィンドウ最小化と衝突するため不採用）で Tab をフォーカス移動へ戻すトグルを追加し、no-op な Shift+Tab は既定動作に委ねる。モバイル向けに `MarkdownToolbar` へ 44px のインデント/アウトデントボタンを追加し、`keyboard-shortcuts` に `editor` scope を新設（未登録だった Ctrl+S / Ctrl+Shift+F も登録）。
 
 ### Changed
 

@@ -14,7 +14,7 @@
  */
 
 /** Grouping bucket for a shortcut in the help overlay. */
-export type ShortcutScope = 'global' | 'terminal' | 'composer';
+export type ShortcutScope = 'global' | 'terminal' | 'composer' | 'editor';
 
 /** Placeholder key cap that renders as ⌘ (macOS) or Ctrl (everywhere else). */
 export const MOD_KEY_TOKEN = 'MOD';
@@ -33,6 +33,7 @@ export const SHORTCUT_SCOPES: readonly ShortcutScope[] = [
   'global',
   'terminal',
   'composer',
+  'editor',
 ] as const;
 
 /**
@@ -40,6 +41,7 @@ export const SHORTCUT_SCOPES: readonly ShortcutScope[] = [
  *   - command palette toggle + Escape (CommandPalette.tsx)
  *   - terminal search (TerminalDisplay.tsx)
  *   - composer submit / newline (MessageInput.tsx)
+ *   - file editor indent / outdent / save / fullscreen (MarkdownEditor.tsx)
  */
 export const KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
   { id: 'commandPalette', keys: [MOD_KEY_TOKEN, 'K'], scope: 'global' },
@@ -49,6 +51,13 @@ export const KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
   { id: 'terminalSearch', keys: [MOD_KEY_TOKEN, 'F'], scope: 'terminal' },
   { id: 'sendMessage', keys: ['↵'], scope: 'composer' },
   { id: 'composerNewline', keys: ['Shift', '↵'], scope: 'composer' },
+  { id: 'editorIndent', keys: ['Tab'], scope: 'editor' },
+  { id: 'editorOutdent', keys: ['Shift', 'Tab'], scope: 'editor' },
+  // Literal Ctrl, not MOD_KEY_TOKEN: Cmd+M minimises the window on macOS, so the
+  // binding is Ctrl+M on every platform (Issue #1518).
+  { id: 'editorTabFocus', keys: ['Ctrl', 'M'], scope: 'editor' },
+  { id: 'editorSave', keys: [MOD_KEY_TOKEN, 'S'], scope: 'editor' },
+  { id: 'editorFullscreen', keys: [MOD_KEY_TOKEN, 'Shift', 'F'], scope: 'editor' },
 ] as const;
 
 /**
