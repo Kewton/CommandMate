@@ -8,9 +8,16 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
+import { FolderOpen } from 'lucide-react';
 import { Button, Card, Input, Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui';
-import { repositoryApi, handleApiError } from '@/lib/api-client';
+import {
+  repositoryApi,
+  fsApi,
+  handleApiError,
+  type ValidatePathResponse,
+} from '@/lib/api-client';
 import { UrlNormalizer } from '@/lib/url-normalizer';
+import { DirectoryPickerModal } from './DirectoryPickerModal';
 import { CLONE_STATUS_POLL_INTERVAL_MS } from '@/config/repository-config';
 
 export interface RepositoryManagerProps {
@@ -19,6 +26,52 @@ export interface RepositoryManagerProps {
 
 /** Input mode type */
 type InputMode = 'local' | 'url';
+
+/** Debounce for the while-typing path check (Issue #1517). */
+const PATH_VALIDATION_DEBOUNCE_MS = 400;
+
+/** Fallback example when the allowed roots have not loaded yet. */
+const FALLBACK_PATH_EXAMPLE = '/Users/username/projects/my-repo';
+
+type Translate = ReturnType<typeof useTranslations<'common'>>;
+
+/**
+ * Turn a validate-path result into the single line shown under the input.
+ * `intent` picks the colour so a rejected path never reads as neutral help text.
+ */
+function describeValidation(
+  t: Translate,
+  validation: ValidatePathResponse
+): { message: string; intent: 'ok' | 'warn' | 'error' } {
+  if (!validation.valid) {
+    if (validation.reason === 'not-found') {
+      return { message: t('repositories.validationNotFound'), intent: 'error' };
+    }
+    return {
+      message: t('repositories.validationOutsideRoots', {
+        roots: validation.allowedRootsLabel,
+      }),
+      intent: 'error',
+    };
+  }
+
+  if (!validation.isGitRepo) {
+    return { message: t('repositories.validationNotGitRepo'), intent: 'warn' };
+  }
+
+  return {
+    message: t('repositories.validationGitRepo', {
+      count: validation.worktreeCount ?? 1,
+    }),
+    intent: 'ok',
+  };
+}
+
+const VALIDATION_INTENT_CLASS = {
+  ok: 'text-success-foreground',
+  warn: 'text-warning-foreground',
+  error: 'text-danger-foreground',
+} as const;
 
 /**
  * Repository management component
@@ -41,6 +94,9 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
   const [cloneJobId, setCloneJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [allowedRoots, setAllowedRoots] = useState<string[]>([]);
+  const [pathValidation, setPathValidation] = useState<ValidatePathResponse | null>(null);
 
   const urlNormalizer = UrlNormalizer.getInstance();
 
@@ -90,6 +146,55 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
     // left 6 concurrent setTimeout chains instead of 1 (Issue #1032).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cloneJobId, isCloning]);
+
+  /**
+   * Issue #1517: the allowed roots drive the example path and the hint, so a
+   * repository outside them stops looking like a typo.
+   */
+  useEffect(() => {
+    if (!showAddForm) return;
+
+    let cancelled = false;
+    fsApi
+      .browse()
+      .then((listing) => {
+        if (!cancelled) setAllowedRoots(listing.roots);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showAddForm]);
+
+  /**
+   * Issue #1517: answer "will Scan & Add accept this?" while the user types,
+   * instead of after they submit.
+   */
+  useEffect(() => {
+    const candidate = repositoryPath.trim();
+    if (!candidate) {
+      setPathValidation(null);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      repositoryApi
+        .validatePath(candidate)
+        .then((result) => {
+          if (!cancelled) setPathValidation(result);
+        })
+        .catch(() => {
+          if (!cancelled) setPathValidation(null);
+        });
+    }, PATH_VALIDATION_DEBOUNCE_MS);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [repositoryPath]);
 
   /**
    * Handle adding a new repository (local path mode)
@@ -194,6 +299,8 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
     setInputMode('local');
   };
 
+  const validationDisplay = pathValidation ? describeValidation(t, pathValidation) : null;
+
   return (
     <div className="space-y-4">
       {/* Action Buttons */}
@@ -245,18 +352,48 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
                     <label htmlFor="repositoryPath" className="block text-sm font-medium text-foreground mb-2">
                       {t('repositories.localPathLabel')}
                     </label>
-                    <Input
-                      id="repositoryPath"
-                      type="text"
-                      value={repositoryPath}
-                      onChange={(e) => setRepositoryPath(e.target.value)}
-                      placeholder="/absolute/path/to/repository"
-                      className="font-mono"
-                      disabled={isScanning}
-                    />
+                    {/* The free-text field stays: it is the only way to reach a
+                        path on a differently-mounted host (Issue #1517). */}
+                    <div className="flex gap-2">
+                      <Input
+                        id="repositoryPath"
+                        type="text"
+                        value={repositoryPath}
+                        onChange={(e) => setRepositoryPath(e.target.value)}
+                        placeholder="/absolute/path/to/repository"
+                        className="font-mono flex-1"
+                        disabled={isScanning}
+                      />
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => setIsPickerOpen(true)}
+                        disabled={isScanning}
+                        className="min-h-[44px] flex-shrink-0"
+                      >
+                        <FolderOpen className="w-4 h-4 mr-1" aria-hidden />
+                        {t('repositories.browse')}
+                      </Button>
+                    </div>
                     <p className="text-xs text-muted-foreground mt-1">
-                      {t('repositories.localPathExample')}
+                      {t('repositories.localPathExample', {
+                        example: allowedRoots[0]
+                          ? `${allowedRoots[0]}/my-repo`
+                          : FALLBACK_PATH_EXAMPLE,
+                      })}
                     </p>
+                    {allowedRoots.length > 0 && (
+                      <p className="text-xs text-muted-foreground mt-1 font-mono break-all">
+                        {t('repositories.localPathAllowedRoots', {
+                          roots: allowedRoots.join(', '),
+                        })}
+                      </p>
+                    )}
+                    {validationDisplay && (
+                      <p className={`text-xs mt-1 ${VALIDATION_INTENT_CLASS[validationDisplay.intent]}`}>
+                        {validationDisplay.message}
+                      </p>
+                    )}
                   </div>
 
                   <div className="flex gap-2">
@@ -361,6 +498,15 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
           <p className="text-sm text-danger-foreground">{error}</p>
         </div>
       )}
+
+      <DirectoryPickerModal
+        isOpen={isPickerOpen}
+        onClose={() => setIsPickerOpen(false)}
+        onSelect={(selectedPath) => {
+          setRepositoryPath(selectedPath);
+          setError(null);
+        }}
+      />
     </div>
   );
 }

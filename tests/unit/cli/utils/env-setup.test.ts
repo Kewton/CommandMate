@@ -18,6 +18,7 @@ import {
   getPidFilePath,
   resolveSecurePath,
   getDefaultDbPath,
+  normalizeBrowseRoots,
   DEFAULT_ROOT_DIR,
 } from '../../../../src/cli/utils/env-setup';
 import { homedir } from 'os';
@@ -117,6 +118,66 @@ describe('EnvSetup', () => {
       );
 
       expect(fs.writeFileSync).toHaveBeenCalled();
+    });
+
+    // Issue #1517: browsing works out of the box because CM_ROOT_DIR is always
+    // an allowed root, so an unset CM_BROWSE_ROOTS must not appear in the file
+    // and imply otherwise.
+    it('should omit CM_BROWSE_ROOTS when it is not configured', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      vi.mocked(fs.writeFileSync).mockReturnValue(undefined);
+      vi.mocked(fs.chmodSync).mockReturnValue(undefined);
+
+      await envSetup.createEnvFile({
+        CM_ROOT_DIR: '/path/to/repos',
+        CM_PORT: 3000,
+        CM_BIND: '127.0.0.1',
+        CM_DB_PATH: './data/cm.db',
+        CM_LOG_LEVEL: 'info',
+        CM_LOG_FORMAT: 'text',
+      });
+
+      const written = vi.mocked(fs.writeFileSync).mock.calls[0][1] as string;
+      expect(written).not.toContain('CM_BROWSE_ROOTS');
+    });
+
+    it('should write CM_BROWSE_ROOTS when extra roots are configured', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      vi.mocked(fs.writeFileSync).mockReturnValue(undefined);
+      vi.mocked(fs.chmodSync).mockReturnValue(undefined);
+
+      await envSetup.createEnvFile({
+        CM_ROOT_DIR: '/path/to/repos',
+        CM_BROWSE_ROOTS: '/mnt/work,/opt/src',
+        CM_PORT: 3000,
+        CM_BIND: '127.0.0.1',
+        CM_DB_PATH: './data/cm.db',
+        CM_LOG_LEVEL: 'info',
+        CM_LOG_FORMAT: 'text',
+      });
+
+      const written = vi.mocked(fs.writeFileSync).mock.calls[0][1] as string;
+      expect(written).toContain('CM_BROWSE_ROOTS=/mnt/work,/opt/src');
+    });
+  });
+
+  describe('normalizeBrowseRoots (Issue #1517)', () => {
+    it('returns undefined for an unset or blank value', () => {
+      expect(normalizeBrowseRoots(undefined)).toBeUndefined();
+      expect(normalizeBrowseRoots('')).toBeUndefined();
+      expect(normalizeBrowseRoots(' , , ')).toBeUndefined();
+    });
+
+    it('trims entries and de-duplicates', () => {
+      expect(normalizeBrowseRoots(' /mnt/work , /opt/src , /mnt/work ')).toBe(
+        '/mnt/work,/opt/src'
+      );
+    });
+
+    it('applies the supplied resolver to each entry', () => {
+      expect(normalizeBrowseRoots('~/work,~/src', (entry) => entry.replace('~', '/home/u'))).toBe(
+        '/home/u/work,/home/u/src'
+      );
     });
   });
 
