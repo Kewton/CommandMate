@@ -508,11 +508,23 @@
     },
     "currentStatus": {
       "title": "Current Status",
-      "refresh": "Refresh git status",
+      "refresh": "Check the remote and refresh (git fetch)",
+      "refreshing": "Checking the remote...",
       "loading": "Loading git status...",
       "uncommitted": "uncommitted",
-      "aheadTooltip": "commits ahead of upstream",
-      "behindTooltip": "commits behind upstream"
+      "aheadTooltip": "commits ahead of upstream as of the last fetch (the live remote may differ)",
+      "behindTooltip": "commits behind upstream as of the last fetch (the live remote may differ)",
+      "lastFetch": "Last fetch: {relative}",
+      "lastFetchNever": "Last fetch: never",
+      "lastFetchTooltip": "ahead/behind compares against the remote information from this moment. Use the refresh button to update it.",
+      "noUpstreamBadge": "not pushed",
+      "noUpstreamTooltip": "This branch has no upstream, so ahead/behind cannot be computed (it has never been pushed)",
+      "upstreamGoneBadge": "remote deleted",
+      "upstreamGoneTooltip": "The configured upstream has no remote-tracking branch anymore (it was likely deleted on the remote)",
+      "detachedBadge": "detached",
+      "detachedTooltip": "HEAD does not point to a branch, so ahead/behind cannot be computed",
+      "aheadBehindErrorBadge": "unavailable",
+      "aheadBehindErrorTooltip": "Could not read ahead/behind (timeout or similar). Use the refresh button to retry."
     },
     "danger": {
       "title": "Danger Zone",

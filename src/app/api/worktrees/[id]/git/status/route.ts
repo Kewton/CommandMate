@@ -7,13 +7,22 @@
  * Structural skeleton (validation / DB / error handling) follows git/log/route.ts.
  * The getInitialBranch -> getGitStatus part follows worktrees/[id]/route.ts:50-59.
  * ahead/behind is computed ONLY here (never in getGitStatus / GET /api/worktrees/[id]).
+ *
+ * Issue #1515: the payload additionally carries `aheadBehindReason` (why the
+ * counts are absent, B-1) and `lastFetchAt` (how old the remote-tracking
+ * snapshot the counts compare against is, A-3).
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById, getInitialBranch } from '@/lib/db';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
-import { getGitStatus, getAheadBehind, handleGitApiError } from '@/lib/git/git-utils';
+import {
+  getGitStatus,
+  getAheadBehind,
+  getLastFetchAt,
+  handleGitApiError,
+} from '@/lib/git/git-utils';
 
 export async function GET(
   request: NextRequest,
@@ -40,12 +49,28 @@ export async function GET(
     }
 
     const initialBranch = getInitialBranch(db, id);
-    const status = await getGitStatus(worktree.path, initialBranch);
-    // null allowed: no upstream / detached HEAD / error -> aheadBehind=null + HTTP 200.
-    // The null reason is intentionally not disclosed to the client.
-    const aheadBehind = await getAheadBehind(worktree.path);
+    // Independent reads -> run them together (each is its own short git call).
+    const [status, aheadBehindResult, lastFetchAt] = await Promise.all([
+      getGitStatus(worktree.path, initialBranch),
+      // null allowed: no upstream / detached HEAD / error -> aheadBehind=null + HTTP 200.
+      // Issue #1515 (B-1): the CLASSIFIED reason ('no_upstream' | 'upstream_gone' |
+      // 'detached' | 'error') IS disclosed so the UI can explain the missing chip.
+      // Raw git stderr is still never disclosed — getAheadBehind maps it to this
+      // fixed enum server-side and discards the text.
+      getAheadBehind(worktree.path),
+      // Issue #1515 (A-3): dates the ahead/behind comparison (FETCH_HEAD mtime).
+      getLastFetchAt(worktree.path),
+    ]);
 
-    return NextResponse.json({ ...status, aheadBehind }, { status: 200 });
+    return NextResponse.json(
+      {
+        ...status,
+        aheadBehind: aheadBehindResult.aheadBehind,
+        aheadBehindReason: aheadBehindResult.reason,
+        lastFetchAt,
+      },
+      { status: 200 }
+    );
   } catch (error) {
     return handleGitApiError(error, 'GET /api/worktrees/:id/git/status');
   }

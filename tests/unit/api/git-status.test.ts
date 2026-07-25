@@ -33,6 +33,7 @@ vi.mock('@/lib/git/git-utils', async () => {
   return {
     getGitStatus: vi.fn(),
     getAheadBehind: vi.fn(),
+    getLastFetchAt: vi.fn(),
     GitTimeoutError,
     GitNotRepoError,
     handleGitApiError: (error: unknown, logPrefix: string) => {
@@ -51,7 +52,12 @@ vi.mock('@/lib/git/git-utils', async () => {
 import { GET } from '@/app/api/worktrees/[id]/git/status/route';
 import { getWorktreeById, getInitialBranch } from '@/lib/db';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
-import { getGitStatus, getAheadBehind, GitTimeoutError } from '@/lib/git/git-utils';
+import {
+  getGitStatus,
+  getAheadBehind,
+  getLastFetchAt,
+  GitTimeoutError,
+} from '@/lib/git/git-utils';
 
 function createRequest(url: string): NextRequest {
   return new NextRequest(new URL(url, 'http://localhost:3000'));
@@ -72,7 +78,11 @@ describe('GET /api/worktrees/:id/git/status', () => {
     (getWorktreeById as ReturnType<typeof vi.fn>).mockReturnValue({ id: 'test-id', path: '/path/to/worktree' });
     (getInitialBranch as ReturnType<typeof vi.fn>).mockReturnValue('main');
     (getGitStatus as ReturnType<typeof vi.fn>).mockResolvedValue(BASE_STATUS);
-    (getAheadBehind as ReturnType<typeof vi.fn>).mockResolvedValue({ ahead: 2, behind: 1 });
+    (getAheadBehind as ReturnType<typeof vi.fn>).mockResolvedValue({
+      aheadBehind: { ahead: 2, behind: 1 },
+      reason: null,
+    });
+    (getLastFetchAt as ReturnType<typeof vi.fn>).mockResolvedValue(1_700_000_000_000);
   });
 
   it('should return 400 for invalid worktree ID', async () => {
@@ -112,6 +122,8 @@ describe('GET /api/worktrees/:id/git/status', () => {
     expect(data).toEqual({
       ...BASE_STATUS,
       aheadBehind: { ahead: 2, behind: 1 },
+      aheadBehindReason: null,
+      lastFetchAt: 1_700_000_000_000,
     });
   });
 
@@ -123,10 +135,14 @@ describe('GET /api/worktrees/:id/git/status', () => {
 
     expect(getGitStatus).toHaveBeenCalledWith('/path/to/worktree', 'main');
     expect(getAheadBehind).toHaveBeenCalledWith('/path/to/worktree');
+    expect(getLastFetchAt).toHaveBeenCalledWith('/path/to/worktree');
   });
 
-  it('should return 200 with aheadBehind=null when getAheadBehind returns null', async () => {
-    (getAheadBehind as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+  it('should return 200 with aheadBehind=null when the counts are unavailable', async () => {
+    (getAheadBehind as ReturnType<typeof vi.fn>).mockResolvedValue({
+      aheadBehind: null,
+      reason: 'no_upstream',
+    });
 
     const response = await GET(
       createRequest('/api/worktrees/test-id/git/status'),
@@ -137,6 +153,42 @@ describe('GET /api/worktrees/:id/git/status', () => {
     const data = await response.json();
     expect(data.aheadBehind).toBeNull();
     expect(data.currentBranch).toBe('feature/test');
+  });
+
+  // Issue #1515 (B-1): the reason CODE is disclosed (so the UI can explain the
+  // missing chip) while raw git stderr still is not.
+  it.each(['no_upstream', 'upstream_gone', 'detached', 'error'])(
+    'should surface aheadBehindReason=%s',
+    async (reason) => {
+      (getAheadBehind as ReturnType<typeof vi.fn>).mockResolvedValue({
+        aheadBehind: null,
+        reason,
+      });
+
+      const response = await GET(
+        createRequest('/api/worktrees/test-id/git/status'),
+        { params: Promise.resolve({ id: 'test-id' }) }
+      );
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.aheadBehindReason).toBe(reason);
+      expect(data.aheadBehind).toBeNull();
+    }
+  );
+
+  // Issue #1515 (A-3): freshness of the compared snapshot.
+  it('should return lastFetchAt=null when the worktree has never fetched', async () => {
+    (getLastFetchAt as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+    const response = await GET(
+      createRequest('/api/worktrees/test-id/git/status'),
+      { params: Promise.resolve({ id: 'test-id' }) }
+    );
+
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.lastFetchAt).toBeNull();
   });
 
   it('should return 504 on timeout (GitTimeoutError)', async () => {

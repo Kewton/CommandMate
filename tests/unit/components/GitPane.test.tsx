@@ -535,22 +535,27 @@ describe('GitPane', () => {
       render(<GitPane {...defaultProps} />);
 
       await waitFor(() => {
-        expect(screen.getByLabelText('Refresh git status')).toBeInTheDocument();
+        expect(screen.getByTestId('git-status-refresh-button')).toBeInTheDocument();
       });
+      // Issue #1515 (A-1): the label states that it contacts the remote.
+      expect(screen.getByTestId('git-status-refresh-button')).toHaveAttribute(
+        'aria-label',
+        'Check the remote and refresh (git fetch)'
+      );
     });
 
     it('should refetch /git/status when the status refresh button is clicked', async () => {
       render(<GitPane {...defaultProps} />);
 
       await waitFor(() => {
-        expect(screen.getByLabelText('Refresh git status')).toBeInTheDocument();
+        expect(screen.getByTestId('git-status-refresh-button')).toBeInTheDocument();
       });
 
       const statusCallsBefore = mockFetch.mock.calls.filter(
         (call) => typeof call[0] === 'string' && call[0].includes('/git/status')
       ).length;
 
-      fireEvent.click(screen.getByLabelText('Refresh git status'));
+      fireEvent.click(screen.getByTestId('git-status-refresh-button'));
 
       await waitFor(() => {
         const statusCallsAfter = mockFetch.mock.calls.filter(
@@ -558,6 +563,185 @@ describe('GitPane', () => {
         ).length;
         expect(statusCallsAfter).toBe(statusCallsBefore + 1);
       });
+    });
+
+    // ------------------------------------------------------------------------
+    // Issue #1515: the refresh button contacts the remote (A-1), the section
+    // dates the comparison (A-3), and a null ahead/behind is explained (B-2).
+    // ------------------------------------------------------------------------
+
+    it('A-1: should POST /git/fetch BEFORE re-reading status (not a local-only re-read)', async () => {
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-status-refresh-button')).toBeInTheDocument();
+      });
+      mockFetch.mockClear();
+
+      fireEvent.click(screen.getByTestId('git-status-refresh-button'));
+
+      await waitFor(() => {
+        const fetchCall = mockFetch.mock.calls.find(
+          (call) => typeof call[0] === 'string' && call[0].includes('/git/fetch')
+        );
+        expect(fetchCall).toBeDefined();
+        expect((fetchCall?.[1] as { method?: string })?.method).toBe('POST');
+      });
+      // ...and the status is re-read afterwards, so the fresh counts land in the UI.
+      await waitFor(() => {
+        const statusCalls = mockFetch.mock.calls.filter(
+          (call) => typeof call[0] === 'string' && call[0].includes('/git/status')
+        );
+        expect(statusCalls.length).toBeGreaterThan(0);
+      });
+    });
+
+    it('A-1: should still re-read status when the fetch FAILS (UI never gets stuck)', async () => {
+      setEndpoints({
+        netFetch: { ok: false, json: { error: 'Could not reach the remote', reason: 'network' } },
+      });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-status-refresh-button')).toBeInTheDocument();
+      });
+      mockFetch.mockClear();
+
+      fireEvent.click(screen.getByTestId('git-status-refresh-button'));
+
+      await waitFor(() => {
+        const statusCalls = mockFetch.mock.calls.filter(
+          (call) => typeof call[0] === 'string' && call[0].includes('/git/status')
+        );
+        expect(statusCalls.length).toBeGreaterThan(0);
+      });
+      // The button comes back out of its busy state (not left disabled forever).
+      await waitFor(() => {
+        expect(screen.getByTestId('git-status-refresh-button')).not.toBeDisabled();
+      });
+    });
+
+    it('A-1: should show a busy refresh button while the fetch is in flight', async () => {
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-status-refresh-button')).toBeInTheDocument();
+      });
+
+      // Hold the fetch open so the in-flight state is observable.
+      let releaseFetch: (() => void) | undefined;
+      mockFetch.mockImplementation((url: string, init?: { method?: string }) => {
+        if (url.includes('/git/fetch') && init?.method === 'POST') {
+          return new Promise((resolve) => {
+            releaseFetch = () => resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
+          });
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(DEFAULT_STATUS) });
+      });
+
+      fireEvent.click(screen.getByTestId('git-status-refresh-button'));
+
+      await waitFor(() => {
+        const button = screen.getByTestId('git-status-refresh-button');
+        expect(button).toBeDisabled();
+        expect(button).toHaveAttribute('aria-label', 'Checking the remote...');
+        expect(button).toHaveAttribute('aria-busy', 'true');
+      });
+
+      releaseFetch?.();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-status-refresh-button')).not.toBeDisabled();
+      });
+    });
+
+    it('A-3: should show how long ago the last fetch was', async () => {
+      const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
+      setEndpoints({
+        status: { ok: true, json: { ...DEFAULT_STATUS, lastFetchAt: twoHoursAgo } },
+      });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-status-last-fetch')).toHaveTextContent(
+          'Last fetch: about 2 hours ago'
+        );
+      });
+    });
+
+    it('A-3: should say the remote has never been fetched when lastFetchAt is null', async () => {
+      setEndpoints({
+        status: { ok: true, json: { ...DEFAULT_STATUS, lastFetchAt: null } },
+      });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-status-last-fetch')).toHaveTextContent('Last fetch: never');
+      });
+    });
+
+    it.each([
+      ['no_upstream', 'not pushed'],
+      ['upstream_gone', 'remote deleted'],
+      ['detached', 'detached'],
+      ['error', 'unavailable'],
+    ])('B-2: should explain a null ahead/behind with a %s badge', async (reason, label) => {
+      setEndpoints({
+        status: {
+          ok: true,
+          json: { ...DEFAULT_STATUS, aheadBehind: null, aheadBehindReason: reason },
+        },
+      });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        const badge = screen.getByTestId('git-status-ahead-behind-reason');
+        expect(badge).toHaveAttribute('data-reason', reason);
+        expect(badge).toHaveTextContent(label);
+      });
+      // The badge REPLACES the chip; they are never shown together.
+      expect(screen.queryByTestId('git-status-ahead-behind')).not.toBeInTheDocument();
+    });
+
+    it('B-2: should NOT show a reason badge when the counts are available', async () => {
+      setEndpoints({
+        status: {
+          ok: true,
+          json: {
+            ...DEFAULT_STATUS,
+            aheadBehind: { ahead: 0, behind: 3 },
+            aheadBehindReason: null,
+          },
+        },
+      });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-status-ahead-behind')).toHaveTextContent('3');
+      });
+      expect(screen.queryByTestId('git-status-ahead-behind-reason')).not.toBeInTheDocument();
+    });
+
+    it('D-1: should date the ahead/behind tooltips to the last fetch', async () => {
+      setEndpoints({
+        status: {
+          ok: true,
+          json: { ...DEFAULT_STATUS, aheadBehind: { ahead: 1, behind: 2 } },
+        },
+      });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-status-ahead-behind')).toBeInTheDocument();
+      });
+      expect(screen.getByTitle(/commits ahead of upstream as of the last fetch/)).toBeInTheDocument();
+      expect(screen.getByTitle(/commits behind upstream as of the last fetch/)).toBeInTheDocument();
     });
 
     it('should render compact current status in mobile mode', async () => {

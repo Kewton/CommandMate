@@ -3,10 +3,15 @@
  * Issue #921: extracted from git-utils.ts (god-module split, P1-a).
  */
 
-import type { GitStatus, AheadBehind } from '@/types/models';
+import path from 'path';
+import { stat } from 'fs/promises';
+import type { GitStatus, AheadBehind, AheadBehindReason } from '@/types/models';
 import type { ChangedFile, GitStagedResponse } from '@/types/git';
 import { GIT_WRITE_TIMEOUT_MS } from '@/config/git-status-config';
-import { execGitCommand, execGitCommandTyped } from './git-exec';
+import { createLogger } from '@/lib/logger';
+import { execGitCommand, execGitCommandCapture, execGitCommandTyped } from './git-exec';
+
+const logger = createLogger('git-status');
 
 /**
  * Get git status for a worktree
@@ -69,6 +74,45 @@ export async function getGitStatus(
 // ============================================================================
 
 /**
+ * Result of {@link getAheadBehind} (Issue #1515, B-1).
+ *
+ * `reason` is non-null EXACTLY when `aheadBehind` is null, so the UI can explain
+ * the missing `↑N ↓N` chip instead of silently rendering nothing.
+ */
+export interface AheadBehindResult {
+  aheadBehind: AheadBehind | null;
+  /** null when `aheadBehind` was computed successfully. */
+  reason: AheadBehindReason | null;
+}
+
+/**
+ * Classify a `git rev-list @{upstream}...HEAD` failure into a coarse reason
+ * (Issue #1515, B-1). Best-effort: unrecognized wording falls back to 'error'.
+ *
+ * The wordings below were measured on git 2.49 (`fatal:` prefix omitted):
+ * - no upstream configured for branch 'x'                    -> no_upstream
+ * - HEAD does not point to a branch                          -> detached
+ * - ambiguous argument '@{upstream}...HEAD': unknown revision -> upstream_gone
+ *   (an upstream IS configured, but `refs/remotes/<remote>/<branch>` is gone)
+ *
+ * SECURITY: the stderr is read for matching ONLY. The returned value is a fixed
+ * enum member — no stderr text is ever propagated to the caller (and from there
+ * to the HTTP body).
+ */
+function classifyAheadBehindStderr(stderr: string): AheadBehindReason {
+  if (/no upstream/i.test(stderr)) {
+    return 'no_upstream';
+  }
+  if (/HEAD does not point to a branch|not point to a branch/i.test(stderr)) {
+    return 'detached';
+  }
+  if (/unknown revision|ambiguous argument|bad revision/i.test(stderr)) {
+    return 'upstream_gone';
+  }
+  return 'error';
+}
+
+/**
  * Get ahead/behind commit counts relative to the upstream branch.
  * Issue #779: git status API + GitPane Current Status (Phase 1/5).
  *
@@ -77,41 +121,116 @@ export async function getGitStatus(
  * upstream = behind, and right = commits only on HEAD = ahead.
  * (Verified empirically: local ahead2/behind1 -> '1\t2'.)
  *
+ * IMPORTANT (Issue #1515): `@{upstream}` resolves to the LOCAL remote-tracking
+ * ref, i.e. the last `git fetch` snapshot. Without a fetch these counts never
+ * change no matter how far the remote has moved — see {@link getLastFetchAt},
+ * which the API returns alongside so the UI can date the comparison.
+ *
  * @param worktreePath - Path to worktree directory (MUST be from DB, trusted source)
- * @returns AheadBehind counts, or null when there is no upstream / detached HEAD /
- *          remote ref missing / timeout / parse failure. NEVER throws.
+ * @returns `{ aheadBehind, reason }`: counts on success, else `aheadBehind: null`
+ *          plus the classified reason (no upstream / upstream gone / detached
+ *          HEAD / timeout / parse failure). NEVER throws.
  *
  * @remarks
  * - Static arg-array (no string concatenation, no @{upstream} substitution) for
  *   command-injection safety (execFile, trusted path only).
- * - Reuses the existing non-throwing execGitCommand (1s timeout); all failures -> null.
- * - The strict parse below (tab-count check + Number.isInteger guard) collapses every
- *   malformed/empty/corrupt output to null, never disclosing the failure reason.
+ * - Issue #1515 (B-1): uses execGitCommandCapture (same 1s timeout, still
+ *   non-throwing) instead of execGitCommand so the stderr can be CLASSIFIED. The
+ *   raw stderr never leaves this function — only the enum does.
+ * - The strict parse below (tab-count check + Number.isInteger guard) maps every
+ *   malformed/empty/corrupt output to `reason: 'error'`.
  */
 export async function getAheadBehind(
   worktreePath: string
-): Promise<AheadBehind | null> {
-  const output = await execGitCommand(
+): Promise<AheadBehindResult> {
+  const outcome = await execGitCommandCapture(
     ['rev-list', '--left-right', '--count', '@{upstream}...HEAD'],
     worktreePath
   );
 
-  if (output === null) {
-    return null;
+  if (!outcome.ok) {
+    const reason = outcome.timedOut ? 'error' : classifyAheadBehindStderr(outcome.stderr);
+    // Server-side breadcrumb with the CLASSIFIED reason only (no stderr, which
+    // can carry credential-bearing URLs). debug level because a branch with no
+    // upstream is an expected state re-polled every few seconds.
+    logger.debug('git:ahead-behind-unavailable', { reason });
+    return { aheadBehind: null, reason };
   }
 
-  const parts = output.split('\t');
+  const parts = outcome.stdout.split('\t');
   if (parts.length !== 2) {
-    return null;
+    return { aheadBehind: null, reason: 'error' };
   }
 
   const behind = parseInt(parts[0], 10);
   const ahead = parseInt(parts[1], 10);
   if (!Number.isInteger(behind) || !Number.isInteger(ahead)) {
+    return { aheadBehind: null, reason: 'error' };
+  }
+
+  return { aheadBehind: { ahead, behind }, reason: null };
+}
+
+/**
+ * Get when this worktree last fetched from a remote, as epoch milliseconds
+ * (Issue #1515, A-3). Returns null when nothing has ever been fetched, and NEVER
+ * throws.
+ *
+ * Uses the mtime of `FETCH_HEAD`, which git rewrites on EVERY fetch — including
+ * a fetch that brought nothing new (verified empirically on git 2.49). That
+ * makes it a true "when did we last look at the remote?" signal, which is
+ * exactly what dates the {@link getAheadBehind} comparison.
+ *
+ * Two FETCH_HEAD files are considered because CommandMate's worktrees are LINKED
+ * worktrees (verified empirically):
+ * - `<gitdir>/FETCH_HEAD` (`--git-path FETCH_HEAD`) — written when the fetch ran
+ *   in THIS worktree (e.g. via the Current Status refresh button)
+ * - `<common-dir>/FETCH_HEAD` — written when the fetch ran in the repository root
+ * A fetch in either place updates the SHARED `refs/remotes/*` that ahead/behind
+ * reads, so the freshest of the two is the honest answer. (A fetch run from a
+ * *sibling* worktree is not visible here; it would read as older, never newer.)
+ *
+ * @param worktreePath - Path to worktree directory (MUST be from DB, trusted source)
+ * @returns Epoch ms of the newest FETCH_HEAD, or null if none exists / git failed
+ */
+export async function getLastFetchAt(worktreePath: string): Promise<number | null> {
+  const output = await execGitCommand(
+    ['rev-parse', '--git-path', 'FETCH_HEAD', '--git-common-dir'],
+    worktreePath
+  );
+  if (output === null) {
     return null;
   }
 
-  return { ahead, behind };
+  const lines = output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (lines.length === 0) {
+    return null;
+  }
+
+  // `git rev-parse --git-path` prints a path relative to the worktree for a
+  // normal repo and an absolute one for a linked worktree; path.resolve handles
+  // both. The Set collapses the two candidates when they coincide (normal repo).
+  const candidates = new Set<string>([path.resolve(worktreePath, lines[0])]);
+  if (lines[1]) {
+    candidates.add(path.resolve(worktreePath, lines[1], 'FETCH_HEAD'));
+  }
+
+  let latest: number | null = null;
+  for (const candidate of candidates) {
+    try {
+      const { mtimeMs } = await stat(candidate);
+      if (latest === null || mtimeMs > latest) {
+        latest = mtimeMs;
+      }
+    } catch {
+      // Missing FETCH_HEAD = never fetched through that gitdir. Not an error.
+    }
+  }
+
+  return latest === null ? null : Math.round(latest);
 }
 
 // ============================================================================

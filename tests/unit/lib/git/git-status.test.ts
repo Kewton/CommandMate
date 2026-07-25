@@ -7,9 +7,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Hoist mock functions so they are available in vi.mock() factories
-const { mockExistsSync, mockExecFileAsync, mockLogger } = vi.hoisted(() => ({
+const { mockExistsSync, mockExecFileAsync, mockStat, mockLogger } = vi.hoisted(() => ({
   mockExistsSync: vi.fn(),
   mockExecFileAsync: vi.fn(),
+  mockStat: vi.fn(),
   mockLogger: {
     debug: vi.fn(),
     info: vi.fn(),
@@ -31,6 +32,11 @@ vi.mock('fs', () => ({
   existsSync: (...args: unknown[]) => mockExistsSync(...args),
 }));
 
+// Issue #1515 (A-3): getLastFetchAt stats FETCH_HEAD through fs/promises.
+vi.mock('fs/promises', () => ({
+  stat: (...args: unknown[]) => mockStat(...args),
+}));
+
 vi.mock('child_process', () => ({
   execFile: vi.fn(),
 }));
@@ -38,7 +44,13 @@ vi.mock('util', () => ({
   promisify: () => mockExecFileAsync,
 }));
 
-import { parsePorcelainStatus, getStagedStatus, getGitStatus } from '@/lib/git/git-status';
+import {
+  parsePorcelainStatus,
+  getStagedStatus,
+  getGitStatus,
+  getAheadBehind,
+  getLastFetchAt,
+} from '@/lib/git/git-status';
 
 // ============================================================================
 // Issue #780: parsePorcelainStatus
@@ -202,5 +214,160 @@ describe('getGitStatus byte-invariant (Issue #781 regression)', () => {
     expect(status.commitHash).toBe('abc1234');
     expect(status.isDirty).toBe(false);
     expect(status.isBranchMismatch).toBe(true);
+  });
+});
+
+// ============================================================================
+// Issue #1515 (B-1): getAheadBehind classifies WHY the counts are missing
+// ============================================================================
+
+describe('getAheadBehind reason classification (Issue #1515, B-1)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExistsSync.mockReturnValue(false);
+  });
+
+  /** Reject the way execFile does: stderr on the error object. */
+  function rejectWithStderr(stderr: string, extra: Record<string, unknown> = {}) {
+    mockExecFileAsync.mockRejectedValue(Object.assign(new Error('exit 128'), { stderr, ...extra }));
+  }
+
+  it('returns the counts and reason=null on success', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '1\t2\n', stderr: '' });
+
+    const result = await getAheadBehind('/repo');
+
+    expect(result).toEqual({ aheadBehind: { ahead: 2, behind: 1 }, reason: null });
+  });
+
+  // Wordings measured against git 2.49 (see the doc comment on the classifier).
+  it.each([
+    ["fatal: no upstream configured for branch 'feature/x'", 'no_upstream'],
+    ['fatal: HEAD does not point to a branch', 'detached'],
+    [
+      "fatal: ambiguous argument '@{upstream}...HEAD': unknown revision or path not in the working tree.",
+      'upstream_gone',
+    ],
+    ['fatal: something nobody has ever seen', 'error'],
+  ])('classifies %s as %s', async (stderr, expected) => {
+    rejectWithStderr(stderr);
+
+    const result = await getAheadBehind('/repo');
+
+    expect(result).toEqual({ aheadBehind: null, reason: expected });
+  });
+
+  it('classifies a timeout as error (never as a git-state reason)', async () => {
+    // A killed process can still have "no upstream" text in its message; the
+    // timeout check must win so a slow repo is not reported as "not pushed".
+    rejectWithStderr('no upstream configured', { killed: true });
+
+    const result = await getAheadBehind('/repo');
+
+    expect(result).toEqual({ aheadBehind: null, reason: 'error' });
+  });
+
+  it.each([
+    ['1 2', 'wrong separator'],
+    ['1\t2\t3', 'too many fields'],
+    ['abc\txyz', 'non-integer'],
+    ['', 'empty'],
+  ])('maps unparsable output (%s: %s) to reason=error', async (stdout) => {
+    mockExecFileAsync.mockResolvedValue({ stdout, stderr: '' });
+
+    const result = await getAheadBehind('/repo');
+
+    expect(result).toEqual({ aheadBehind: null, reason: 'error' });
+  });
+
+  it('never leaks git stderr (only the classified enum is returned or logged)', async () => {
+    const leak = "fatal: unable to access 'https://ci-bot:glpat-SECRET@gitlab/repo.git'";
+    rejectWithStderr(leak);
+
+    const result = await getAheadBehind('/repo');
+
+    expect(JSON.stringify(result)).not.toContain('glpat-SECRET');
+    const logged = JSON.stringify([
+      ...mockLogger.debug.mock.calls,
+      ...mockLogger.info.mock.calls,
+      ...mockLogger.warn.mock.calls,
+      ...mockLogger.error.mock.calls,
+    ]);
+    expect(logged).not.toContain('glpat-SECRET');
+    expect(logged).not.toContain('ci-bot');
+  });
+
+  it('never throws', async () => {
+    mockExecFileAsync.mockRejectedValue(new Error('catastrophic git failure'));
+
+    await expect(getAheadBehind('/repo')).resolves.toEqual({
+      aheadBehind: null,
+      reason: 'error',
+    });
+  });
+});
+
+// ============================================================================
+// Issue #1515 (A-3): getLastFetchAt — how old the compared snapshot is
+// ============================================================================
+
+describe('getLastFetchAt (Issue #1515, A-3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExistsSync.mockReturnValue(false);
+  });
+
+  it('asks git for both FETCH_HEAD paths and returns the mtime', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '.git/FETCH_HEAD\n.git\n', stderr: '' });
+    mockStat.mockResolvedValue({ mtimeMs: 1_700_000_000_123 });
+
+    const result = await getLastFetchAt('/repo');
+
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['rev-parse', '--git-path', 'FETCH_HEAD', '--git-common-dir'],
+      expect.objectContaining({ cwd: '/repo' })
+    );
+    // Normal repo: both candidates resolve to the same file -> stat'd once.
+    expect(mockStat).toHaveBeenCalledTimes(1);
+    expect(mockStat).toHaveBeenCalledWith('/repo/.git/FETCH_HEAD');
+    expect(result).toBe(1_700_000_000_123);
+  });
+
+  it('takes the NEWEST of the linked-worktree and common-dir FETCH_HEAD', async () => {
+    // A linked worktree gets absolute paths from `rev-parse --git-path`; a fetch
+    // run in the repo root only touches the common-dir file, so both matter.
+    mockExecFileAsync.mockResolvedValue({
+      stdout: '/repo/.git/worktrees/wt/FETCH_HEAD\n/repo/.git\n',
+      stderr: '',
+    });
+    mockStat.mockImplementation(async (target: string) =>
+      target === '/repo/.git/FETCH_HEAD' ? { mtimeMs: 2000 } : { mtimeMs: 1000 }
+    );
+
+    const result = await getLastFetchAt('/repo/wt');
+
+    expect(mockStat).toHaveBeenCalledTimes(2);
+    expect(result).toBe(2000);
+  });
+
+  it('returns null when FETCH_HEAD does not exist (never fetched)', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '.git/FETCH_HEAD\n.git\n', stderr: '' });
+    mockStat.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+
+    await expect(getLastFetchAt('/repo')).resolves.toBeNull();
+  });
+
+  it('returns null (never throws) when the git call fails', async () => {
+    mockExecFileAsync.mockRejectedValue(new Error('not a git repository'));
+
+    await expect(getLastFetchAt('/repo')).resolves.toBeNull();
+    expect(mockStat).not.toHaveBeenCalled();
+  });
+
+  it('returns null when git prints nothing usable', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '\n', stderr: '' });
+
+    await expect(getLastFetchAt('/repo')).resolves.toBeNull();
   });
 });
