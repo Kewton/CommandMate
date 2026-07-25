@@ -280,6 +280,20 @@ export const LOCAL_STORAGE_KEY_AUTO_SAVE = 'commandmate:md-editor-auto-save';
 export const AUTO_SAVE_DEBOUNCE_MS = 3000;
 
 /**
+ * Local storage key for the "Tab moves focus" accessibility toggle (Issue #1518)
+ */
+export const LOCAL_STORAGE_KEY_TAB_MOVES_FOCUS = 'commandmate:md-editor-tab-moves-focus';
+
+/**
+ * Indent unit inserted by Tab (Issue #1518).
+ *
+ * Spaces, never a tab character: the same textarea edits YAML in text mode and
+ * YAML forbids tabs, and a literal tab renders at the browser's default 8-column
+ * `tab-size` which breaks Markdown nested lists.
+ */
+export const INDENT_UNIT = '  ';
+
+/**
  * Default editor layout state
  */
 export const DEFAULT_LAYOUT_STATE: EditorLayoutState = {

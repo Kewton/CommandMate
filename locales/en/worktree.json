@@ -296,7 +296,11 @@
     "editorOnly": "Editor only",
     "previewOnly": "Preview only",
     "enterFullscreen": "Enter fullscreen (Ctrl+Shift+F)",
-    "exitFullscreen": "Exit fullscreen (ESC)"
+    "exitFullscreen": "Exit fullscreen (ESC)",
+    "indent": "Indent (Tab)",
+    "outdent": "Outdent (Shift+Tab)",
+    "tabMovesFocusOn": "Tab moves focus (Ctrl+M to indent instead)",
+    "tabMovesFocusOff": "Tab indents (Ctrl+M to move focus instead)"
   },
   "actions": {
     "copyPath": "Copy path",

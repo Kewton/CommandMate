@@ -3,7 +3,8 @@
   "scopes": {
     "global": "Global",
     "terminal": "Terminal",
-    "composer": "Composer"
+    "composer": "Composer",
+    "editor": "File editor"
   },
   "shortcuts": {
     "commandPalette": "Open command palette",
@@ -12,6 +13,11 @@
     "navigateList": "Move selection up / down",
     "terminalSearch": "Search terminal output",
     "sendMessage": "Send message",
-    "composerNewline": "Insert a new line"
+    "composerNewline": "Insert a new line",
+    "editorIndent": "Indent line or selection",
+    "editorOutdent": "Outdent line or selection",
+    "editorTabFocus": "Toggle whether Tab moves focus",
+    "editorSave": "Save file",
+    "editorFullscreen": "Toggle fullscreen editor"
   }
 }
