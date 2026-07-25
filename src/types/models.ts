@@ -18,6 +18,20 @@ export interface AheadBehind {
 }
 
 /**
+ * Why ahead/behind could not be computed (Issue #1515, B-1).
+ *
+ * A CLASSIFICATION CODE ONLY — never raw git stderr (which can carry a
+ * credential-bearing remote URL or absolute paths). The API returns this so the
+ * UI can say WHY the `↑N ↓N` chip is absent instead of rendering nothing:
+ * - `no_upstream`:   the branch has no upstream configured (never pushed)
+ * - `upstream_gone`: an upstream IS configured but its remote-tracking ref is
+ *                    missing (`[gone]` — e.g. deleted after a merge)
+ * - `detached`:      HEAD does not point to a branch
+ * - `error`:         timeout / unparsable output / anything unclassified
+ */
+export type AheadBehindReason = 'no_upstream' | 'upstream_gone' | 'detached' | 'error';
+
+/**
  * Git status information for a worktree
  * Issue #111: Branch visualization feature
  *
@@ -44,8 +58,24 @@ export interface GitStatus {
    * - undefined: not computed (getGitStatus path / GET /api/worktrees/[id] payload)
    * - null: computed but no upstream / detached HEAD / error
    * - AheadBehind: successfully computed
+   *
+   * NOTE (Issue #1515): these counts compare HEAD against the LOCAL
+   * remote-tracking ref, i.e. the last `git fetch` snapshot — not the live
+   * remote. `lastFetchAt` tells the reader how old that snapshot is.
    */
   aheadBehind?: AheadBehind | null;
+  /**
+   * Why `aheadBehind` is null (Issue #1515, B-1). Non-null ONLY when
+   * `aheadBehind` is null; a classification code, never raw git stderr.
+   * - undefined: not computed (paths that do not compute aheadBehind at all)
+   */
+  aheadBehindReason?: AheadBehindReason | null;
+  /**
+   * When this worktree last fetched from a remote (Issue #1515, A-3), as epoch
+   * milliseconds — the mtime of `FETCH_HEAD`. null means "never fetched" (no
+   * FETCH_HEAD yet), undefined means "not computed".
+   */
+  lastFetchAt?: number | null;
 }
 
 /**

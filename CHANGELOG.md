@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **ブランチ追加時のデフォルトエージェントを claude / codex / antigravity の3件に変更** (#1516): `DEFAULT_SELECTED_AGENTS` から gemini / opencode / copilot を外し、新規ブランチのエージェントタブが3つになるようにした。選択可能プール（`CLI_TOOL_IDS`）は変更していないので、外した3つも設定画面から後から選べる。効果があるのは `selected_agents` が NULL かつ `agent_instances` 行が無い worktree のみで、ユーザーが明示設定済みの worktree とロスター保持済みの worktree は従来どおり（既存分を揃えるマイグレーションは別 Issue）。
 
+### Fixed
+
+- **GitPane の ahead/behind が「リモート先行なのに ↓0」「チップごと消える」問題を修正** (#1515): 原因は実装バグではなく、アプリがリモートを一度も見に行っていなかったこと（自動 `git fetch` が不在で `@{upstream}` が古いまま）と、`getAheadBehind` が全失敗を `null` に潰して UI がチップを丸ごと隠していたこと。(A-1) Current Status の 🔄 を「fetch → status 再取得」に変更し、実行中はスピナー＋非活性化。(A-3) `lastFetchAt` を payload に追加し「最終 fetch: ◯分前」を併記（linked worktree では `.git/worktrees/<name>/FETCH_HEAD` と共有 gitdir の新しい方を採用）。(B) `aheadBehindReason`（`no_upstream` / `upstream_gone` / `detached` / `error`）を API に追加し、未プッシュ／リモート削除済み／detached をバッジで説明する（stderr は分類後に破棄し、enum 以外はクライアントへ出さない）。(D-1) ahead/behind ツールチップに「最後に fetch した時点との比較」である旨を ja/en 双方で明記。(E-1) `execGitNetworkAware` に `GIT_TERMINAL_PROMPT=0` を設定し、認証情報の無い HTTPS remote で fetch が端末プロンプト待ちにならないようにした。自動 fetch（A-2）・導線変更（C-1）・ブランチ一覧への描画（D-2）は本 Issue のスコープ外。
+
 ## [0.14.1] - 2026-07-24
 
 ### Fixed

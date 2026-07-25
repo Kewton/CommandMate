@@ -56,6 +56,16 @@ const DYNAMIC: Record<string, string[]> = {
     'git.tabs.changes',
     'git.tabs.history',
     'git.tabs.advanced',
+    // GitCurrentStatusBar REASON_KEYS (Issue #1515 B-2): the AheadBehindReason
+    // code selects the key pair, so a grep of the panel cannot see them.
+    'git.currentStatus.noUpstreamBadge',
+    'git.currentStatus.noUpstreamTooltip',
+    'git.currentStatus.upstreamGoneBadge',
+    'git.currentStatus.upstreamGoneTooltip',
+    'git.currentStatus.detachedBadge',
+    'git.currentStatus.detachedTooltip',
+    'git.currentStatus.aheadBehindErrorBadge',
+    'git.currentStatus.aheadBehindErrorTooltip',
     // GitBranchPanel include-filter tabs
     'git.branches.filterLocal',
     'git.branches.filterRemote',
@@ -169,6 +179,11 @@ const REQUIRED: Record<string, string[]> = {
     'git.currentStatus.uncommitted',
     'git.currentStatus.aheadTooltip',
     'git.currentStatus.behindTooltip',
+    // Issue #1515: fetch-aware refresh (A-1/A-3) + null-reason badges (B-2).
+    'git.currentStatus.refreshing',
+    'git.currentStatus.lastFetch',
+    'git.currentStatus.lastFetchNever',
+    'git.currentStatus.lastFetchTooltip',
     'git.danger.title',
     'git.danger.resetOpen',
     'git.danger.revertOpen',
@@ -400,6 +415,9 @@ describe('worktree git/panel i18n keys (Issue #1277)', () => {
     ['worktree', 'git.danger.confirmPlaceholder', ['{branch}']],
     ['worktree', 'git.danger.resetTargetSelectedHash', ['{hash}']],
     ['worktree', 'git.network.progress', ['{operation}', '{elapsed}']],
+    // Issue #1515 (A-3): a locale that drops {relative} shows "Last fetch:" with
+    // no time at all — the exact ambiguity this label exists to remove.
+    ['worktree', 'git.currentStatus.lastFetch', ['{relative}']],
     ['worktree', 'git.network.conflicts', ['{files}']],
     ['worktree', 'git.stash.count', ['{count}']],
     ['worktree', 'paneResizer.label', ['{arrows}']],
