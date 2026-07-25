@@ -3,21 +3,30 @@
  *
  * Issue #1328: CM_ROOT_DIR's repository auto-discovery was removed, but the two
  * roles that make CM_ROOT_DIR the "managed scope" must survive:
- *   1. the registration boundary enforced here (isPathSafe against CM_ROOT_DIR)
+ *   1. the registration boundary enforced here (the allowed-root check)
  *   2. the clone destination (covered by tests/unit/lib/clone-manager.test.ts)
  *
- * These tests pin role 1. `@/lib/security/path-validator` is intentionally NOT
- * mocked: the point is that the route really rejects out-of-scope paths, not
- * merely that it calls a collaborator.
+ * These tests pin role 1. Neither `@/lib/security/path-validator` nor
+ * `@/lib/fs/browse-roots` is mocked: the point is that the route really rejects
+ * out-of-scope paths, not merely that it calls a collaborator.
+ *
+ * Issue #1517 widened the boundary from CM_ROOT_DIR alone to the allowed-root
+ * set, and that check now also resolves symlinks — so the root has to be a real
+ * directory here rather than a string literal.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { mkdtempSync, mkdirSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import path2 from 'path';
 import { NextRequest } from 'next/server';
 
-const CM_ROOT_DIR = '/Users/testuser/repos';
+/** Assigned in beforeAll; read lazily by the getEnv mock below. */
+let CM_ROOT_DIR = '';
 
-vi.mock('@/lib/env', () => ({
-  getEnv: vi.fn(() => ({ CM_ROOT_DIR })),
+vi.mock('@/lib/env', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/env')>()),
+  getEnv: () => ({ CM_ROOT_DIR }),
 }));
 
 vi.mock('@/lib/db/db-instance', () => ({
@@ -54,24 +63,41 @@ function postRequest(body: unknown): NextRequest {
 }
 
 describe('POST /api/repositories/scan', () => {
+  let sandbox: string;
+
+  beforeAll(() => {
+    sandbox = mkdtempSync(path2.join(tmpdir(), 'cm-1517-scan-'));
+    CM_ROOT_DIR = path2.join(sandbox, 'repos');
+    mkdirSync(CM_ROOT_DIR, { recursive: true });
+  });
+
+  afterAll(() => {
+    rmSync(sandbox, { recursive: true, force: true });
+    delete process.env.CM_BROWSE_ROOTS;
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.CM_BROWSE_ROOTS;
   });
 
   describe('CM_ROOT_DIR registration boundary (Issue #1328 role 1)', () => {
     // Paths measured on a real deployment in Issue #1328; each must stay a 400.
+    // Thunks, because CM_ROOT_DIR is only known once beforeAll has run.
     it.each([
-      ['a repository outside the managed scope', '/tmp/repos/my-flask_app'],
-      ['a system directory', '/etc'],
-      ['a relative traversal escape', '../../../etc'],
-      ['a traversal escape that re-enters the root', '/Users/testuser/repos/../../../etc'],
-    ])('should reject %s with 400', async (_label, repositoryPath) => {
-      const response = await POST(postRequest({ repositoryPath }));
+      ['a repository outside the managed scope', () => '/tmp/repos/my-flask_app'],
+      ['a system directory', () => '/etc'],
+      ['a relative traversal escape', () => '../../../etc'],
+      ['a traversal escape that re-enters the root', () => `${CM_ROOT_DIR}/../../../etc`],
+    ])('should reject %s with 400', async (_label, makePath) => {
+      const response = await POST(postRequest({ repositoryPath: makePath() }));
 
       expect(response.status).toBe(400);
-      await expect(response.json()).resolves.toEqual({
-        error: 'Invalid or unsafe repository path',
-      });
+      // Issue #1517: the message now names the allowed roots, so a path that is
+      // merely out of scope no longer reads as a typo.
+      const body = await response.json();
+      expect(body.error).toContain('Invalid or unsafe repository path');
+      expect(body.error).toContain(CM_ROOT_DIR);
       // The boundary must reject before any git command runs.
       expect(scanWorktrees).not.toHaveBeenCalled();
     });

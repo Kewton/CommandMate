@@ -171,6 +171,12 @@ export interface PreflightResult {
  */
 export interface EnvConfig {
   CM_ROOT_DIR: string;
+  /**
+   * Issue #1517: extra absolute directories (comma-separated) the web UI may
+   * browse and register repositories from. CM_ROOT_DIR is always allowed, so
+   * this stays undefined unless the operator adds locations outside it.
+   */
+  CM_BROWSE_ROOTS?: string;
   CM_PORT: number;
   CM_BIND: string;
   CM_DB_PATH: string;

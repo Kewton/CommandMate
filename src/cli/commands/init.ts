@@ -18,6 +18,7 @@ import {
   getEnvPath,
   sanitizePath,
   getDefaultDbPath,
+  normalizeBrowseRoots,
 } from '../utils/env-setup';
 import {
   prompt,
@@ -39,6 +40,7 @@ const logger = new CLILogger();
 function createDefaultConfig(): EnvConfig {
   return {
     CM_ROOT_DIR: sanitizePath(process.env.CM_ROOT_DIR || DEFAULT_ROOT_DIR),
+    CM_BROWSE_ROOTS: normalizeBrowseRoots(process.env.CM_BROWSE_ROOTS),
     CM_PORT: ENV_DEFAULTS.CM_PORT,
     CM_BIND: ENV_DEFAULTS.CM_BIND,
     CM_DB_PATH: getDefaultDbPath(), // Issue #135: Use absolute path
@@ -79,6 +81,17 @@ async function promptForConfig(): Promise<EnvConfig> {
     }
   }
 
+  // CM_BROWSE_ROOTS: extra locations the web UI's folder picker may reach
+  // (Issue #1517). CM_ROOT_DIR is always browsable, so this is opt-in and blank
+  // by default.
+  logger.blank();
+  logger.info('Repositories kept outside the managed directory can still be registered');
+  logger.info('if you list their parent directories here (comma-separated). Leave blank to skip.');
+  const browseRootsInput = await prompt('Additional browsable directories (CM_BROWSE_ROOTS)', {
+    default: '',
+  });
+  const browseRoots = normalizeBrowseRoots(browseRootsInput, resolvePath);
+
   logger.blank();
   logger.info('--- Server Settings ---');
   logger.blank();
@@ -116,6 +129,7 @@ async function promptForConfig(): Promise<EnvConfig> {
 
   return {
     CM_ROOT_DIR: rootDir,
+    CM_BROWSE_ROOTS: browseRoots,
     CM_PORT: port,
     CM_BIND: bind,
     CM_DB_PATH: dbPath,
@@ -135,6 +149,9 @@ function displayConfigSummary(config: EnvConfig, envPath: string): void {
   logger.info('==================================');
   logger.blank();
   logger.info(`  CM_ROOT_DIR:  ${config.CM_ROOT_DIR}`);
+  if (config.CM_BROWSE_ROOTS) {
+    logger.info(`  CM_BROWSE_ROOTS: ${config.CM_BROWSE_ROOTS}`);
+  }
   logger.info(`  CM_PORT:      ${config.CM_PORT}`);
   logger.info(`  CM_BIND:      ${config.CM_BIND}`);
   logger.info(`  CM_DB_PATH:   ${config.CM_DB_PATH}`);

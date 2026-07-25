@@ -90,6 +90,10 @@
 | `src/types/sidebar.ts` | サイドバーステータス判定 |
 | `src/types/clone.ts` | クローン関連型定義（CloneJob, CloneError等） |
 | `src/lib/security/path-validator.ts` | パスバリデーション（isPathSafe()レキシカル検証、validateWorktreePath()ラッパー。**Issue #394: resolveAndValidateRealPath()追加** - realpathSyncによるsymlinkトラバーサル防御、祖先走査フォールバック（create/upload用）、isWithinRoot()境界チェックヘルパー、macOS tmpdir互換性、fail-safe設計、[SEC-394]ログ出力）。パスバリデーション・symlink防御 |
+| `src/lib/fs/browse-roots.ts` | 許可ルート集合の単一評価点（Issue #1517）。`getAllowedBrowseRoots()`＝`CM_BROWSE_ROOTS`（カンマ区切り）∪ `CM_ROOT_DIR`（CM_ROOT_DIR を先頭に置き相対パスは従来どおり管理スコープ基準で解決）。`resolveAllowedPath(target)`＝`validateWorktreePath`（レキシカル＋URLデコード＋null byte）→`resolveAndValidateRealPath`（symlink脱出）の2層を全ルートで OR 評価し `{ok, resolvedPath, root, roots}` / `{ok:false, reason:'invalid'|'outside-roots'|'symlink-escape', roots}` を返す。存在しないルートはスキップ（reason 誤報防止）。`BROWSE_ENTRY_LIMIT=500`、`formatAllowedRoots()`。**`/api/fs/browse`・`/api/repositories/validate-path`・`/api/repositories/scan` は必ずこの関数を通る**（3箇所に判定を分散させると「picker で選べたのに登録は400」が発生する） |
+| `src/lib/fs/browse-directory.ts` | ディレクトリ一覧（Issue #1517）。`listDirectories(absPath, root)`＝**ディレクトリのみ**返却（ファイル名は一切返さない）、dotfile 既定非表示、`BROWSE_ENTRY_LIMIT` 打ち切り＋`truncated`、symlink は `resolveAndValidateRealPath` でルート内に留まる場合のみ列挙、name 昇順。`isGitRepositoryPath()`＝`.git` 存在判定（worktrees.ts と同慣習）。`countWorktrees()`＝`1 + count(.git/worktrees/*)` を statで算出（`git worktree list` の件数と一致・子プロセス起動なし、linked worktree は1） |
+| `src/lib/security/request-rate-limiter.ts` | 固定ウィンドウのリクエストレートリミッタ（Issue #1517）。`createRequestRateLimiter({limit, windowMs})` → `check(key)`。auth.ts の `createRateLimiter()`（ログイン失敗回数＋15分ロックアウト）とは別物で、**成功リクエスト自体**に上限を設ける用途。cleanup timer は unref |
+| `src/lib/api/api-auth.ts` | ルートレベル認証ガード（Issue #1517）。`isApiRequestAuthenticated(request)`＝Cookie → Bearer の順に `verifyToken`、`isAuthEnabled()` false（`CM_AUTH_TOKEN_HASH` 未設定）なら true。middleware は Edge runtime＋regex matcher なので、FS を読む `/api/fs/*` は Node runtime で再チェックする |
 | `src/lib/file-operations.ts` | ファイル操作（読取/更新/作成/削除/リネーム/移動）、Issue #162: moveFileOrDirectory()追加、5層セキュリティ（SEC-005〜009: 保護ディレクトリ/シンボリック/自己移動/最終パス/TOCTOU検証）、validateFileOperation()共通検証、mapFsError()エラーマッピング。**Issue #394: checkPathSafety()追加** - isPathSafe+resolveAndValidateRealPathの二重検証をDRY化、readFileContent/updateFileContent/createFileOrDirectory/deleteFileOrDirectory/writeBinaryFile/validateFileOperationに統合。ファイルCRUD操作（5層セキュリティ）、`readFileLineRange` で行範囲ストリーミング読み取り（createReadStream + readline、メモリO(チャンク)）（Issue #723） |
 | `src/lib/date-utils.ts` | 相対時刻フォーマット（Issue #162: formatRelativeTime()、date-fnsベース、ロケール対応、無効日付ガード）。相対時刻フォーマット（formatRelativeTime）、メッセージタイムスタンプフォーマット（formatMessageTimestamp、'PPp'フォーマット・ロケール対応）（Issue #687） |
 | `src/lib/file-tree.ts` | ディレクトリツリー構造生成（Issue #162: readDirectory()でbirthtime取得、TreeItem.birthtimeフィールド対応） |
@@ -148,7 +152,7 @@
 | `src/lib/logger.ts` | 構造化ロギング基盤（Issue #41: createLogger(module)/generateRequestId、LogLevel/LogEntry/Logger型、sanitize による機密データフィルタ、Server/Client ログ分離、withContext）。構造化ロギング |
 | `src/lib/ws-server.ts` | WebSocket サーバ（リアルタイム通信・room ベースブロードキャスト。Issue #331: Cookie ヘッダ認証＋IP制限。setupWebSocket/broadcast/broadcastMessage/cleanupRooms/closeWebSocket、handleProxyUpgrade で外部アプリ WebSocket プロキシ）。WebSocket サーバ |
 | `src/lib/errors.ts` | アプリケーション共通エラー定義（Issue #136: ErrorCode 定数/ErrorCodeType、AppError クラス、createAppError/isAppError/wrapError/getErrorMessage。SF-SEC-003: クライアント向け/内部エラーメッセージ分離） |
-| `src/lib/api-client.ts` | 型安全 fetch ラッパー（worktreeApi/repositoryApi、RepositorySummary/WorktreesResponse/ApiError、Issue #690: visible/enabled フラグ surface）。バックエンドAPIクライアント |
+| `src/lib/api-client.ts` | 型安全 fetch ラッパー（worktreeApi/repositoryApi、RepositorySummary/WorktreesResponse/ApiError、Issue #690: visible/enabled フラグ surface）。Issue #1517 で `fsApi`（`browse(path?)`／`addRecentPath(path)`）と `repositoryApi.validatePath()`、`BrowseResponse`/`BrowseEntry`/`ValidatePathResponse` 型を追加。バックエンドAPIクライアント |
 | `src/lib/message-sync.ts` | メッセージ同期ユーティリティ（Issue #54: mergeMessages で ID 重複排除＋timestamp ソート、addOptimisticMessage/confirmOptimisticMessage/removeOptimisticMessage で楽観的UI更新、MAX_MESSAGES=200 でメモリ上限）。メッセージマージ・楽観的更新 |
 | `src/lib/claude-output.ts` | Claude CLI 出力パース（parseClaudeOutput→ParsedClaudeOutput、logFileName/requestId/summary をtmuxキャプチャから抽出、webhook/polling 間で共有）。Claude出力メタデータ抽出 |
 | `src/lib/log-manager.ts` | Claude 出力の Markdown ログファイル管理（getLogFilePath/createLog/appendToLog/readLog/listLogs/cleanupOldLogs、CLIツール別ディレクトリ、date-fns でファイル名生成）。Markdownログファイル管理 |
@@ -361,6 +365,7 @@
 | `src/components/review/TemplateTab.tsx` | テンプレート管理UI（一覧・作成・編集・削除、最大5件制限）（Issue #618） |
 | `src/components/worktree/WorktreeDetailHeader.tsx` | Worktree詳細ヘッダー（Repository名・Branch名・Agent・Status・次アクション）（Issue #600） |
 | `src/components/providers/WorktreesCacheProvider.tsx` | Worktreesキャッシュプロバイダー（Issue #600）、repositories伝播追加（Issue #690） |
+| `src/components/repository/DirectoryPickerModal.tsx` | サーバ側 FS のフォルダ選択モーダル（Issue #1517）。パンくず＋1階層リスト＋「ここを選択」。`ui/Modal`（portal/ESC/`useFocusTrap`）にそのまま乗せ独自フォーカス制御を持たない（#1127 の不変条件を壊さないため）。初期表示は `recentPaths[0]`、確定時に `fsApi.addRecentPath`（失敗しても選択は成立）。行は 44px タップターゲット、git リポジトリは worktree 件数バッジ |
 | `src/components/repository/RepositoryList.tsx` | リポジトリ一覧表示・インライン別名編集UI（Issue #644）、Visibility列トグルUI追加・楽観的更新・エラーロー��バック（Issue #690） |
 | `src/app/sessions/page.tsx` | Sessions画面（Issue #600） |
 | `src/app/repositories/page.tsx` | Repositories画面（Issue #600, #644: RepositoryList上部配置・refreshKey連携） |
@@ -455,7 +460,7 @@ Skill の support matrix・MVP 既知制約・rollback 手順は [docs/user-guid
 | `src/cli/utils/npx-runner.ts` | npx実行ラッパ（warmNpxLatest=`npx --yes <pkg>@latest --version`で取得＆版検証、spawnNpxDaemon=`start --daemon`再起動、sanitizeNpxEnvでnpm_*除去）（Issue #1395） |
 | `src/cli/utils/health-check.ts` | 更新後readiness確認（waitForReady: ready/degraded/timeout）（#1194） |
 | `src/cli/utils/worktree-servers.ts` | 稼働中worktreeサーバ列挙（listRunningWorktreeServers）（Issue #1194） |
-| `src/cli/utils/env-setup.ts` | 環境設定ファイル生成、getPidFilePath()、パストラバーサル対策（Issue #125, #136） |
+| `src/cli/utils/env-setup.ts` | 環境設定ファイル生成、getPidFilePath()、パストラバーサル対策（Issue #125, #136）。Issue #1517 で `normalizeBrowseRoots(input, resolveEntry?)`（カンマ区切り整形・重複除去）追加、`createEnvFile` は `CM_BROWSE_ROOTS` を**設定時のみ**出力 |
 | `src/cli/utils/daemon.ts` | デーモンプロセス管理、dotenv読み込み、セキュリティ警告、getEffectiveEnv()（Issue #125, #1266） |
 | `src/cli/utils/server-url.ts` | サーバURL解決の単一情報源（resolveServerEndpoint / loadEffectiveEnv: .env が環境変数より優先）（Issue #1266） |
 | `src/cli/utils/pid-manager.ts` | PIDファイル管理（O_EXCLアトミック書き込み） |

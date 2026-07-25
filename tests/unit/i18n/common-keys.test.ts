@@ -89,7 +89,9 @@ const EN_REPOSITORY_LABELS: Record<string, string> = {
   cloneUrlTab: 'Clone URL',
   localPathDescription: 'Enter the absolute path to a git repository containing worktrees.',
   localPathLabel: 'Repository Path',
-  localPathExample: 'Example: /Users/username/projects/my-repo',
+  // Issue #1517: the sample path is now generated from the server's actual
+  // allowed roots, so the literal moved out of the dictionary into a parameter.
+  localPathExample: 'Example: {example}',
   scan: 'Scan & Add',
   scanning: 'Scanning...',
   cloneUrlDescription: 'Enter a git clone URL to clone a remote repository.',
@@ -288,15 +290,19 @@ describe('common i18n keys (Issue #1197)', () => {
     });
 
     /**
-     * The sample path is a copy-paste value, not prose: both locales must keep
-     * it verbatim, so only the "Example:"/"例:" label may differ.
+     * The sample path is a copy-paste value, not prose. Issue #1517 made it the
+     * caller's job to build one from the real allowed roots — a hardcoded
+     * `/Users/username/...` is useless to copy when registration only accepts
+     * paths under CM_ROOT_DIR — so what both locales must keep is the
+     * `{example}` slot, not a literal. A locale that inlines a path again would
+     * silently show a path the server would reject.
      */
-    it('keeps the sample path verbatim in both locales', () => {
+    it('leaves the sample path to the caller in both locales', () => {
       for (const locale of ['en', 'ja']) {
         expect(
           resolve(loadCommon(locale), 'repositories.localPathExample'),
-          `${locale}: sample path must stay copy-pasteable`
-        ).toContain('/Users/username/projects/my-repo');
+          `${locale}: sample path must come from the allowed roots`
+        ).toContain('{example}');
       }
     });
   });

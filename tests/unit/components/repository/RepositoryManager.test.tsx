@@ -31,6 +31,13 @@ vi.mock('@/lib/api-client', () => ({
     sync: vi.fn(),
     clone: vi.fn(),
     getCloneStatus: vi.fn(),
+    // Issue #1517: the Local Path form checks the path while the user types.
+    validatePath: vi.fn(() => new Promise(() => {})),
+  },
+  // Issue #1517: opening the add form fetches the allowed roots for the hint.
+  fsApi: {
+    browse: vi.fn(() => new Promise(() => {})),
+    addRecentPath: vi.fn(),
   },
   handleApiError: vi.fn((err) => {
     if (err instanceof Error) {

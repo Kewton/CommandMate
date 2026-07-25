@@ -262,6 +262,7 @@ Before exposing CommandMate to external networks:
 - [ ] WebSocket upgrade headers are configured in proxy (if using reverse proxy)
 - [ ] Access logs are enabled on the reverse proxy (if using reverse proxy)
 - [ ] `CM_ROOT_DIR` points only to intended repositories
+- [ ] `CM_BROWSE_ROOTS` lists only directories whose folder names may be exposed to authenticated clients (unset is safest)
 
 ---
 
