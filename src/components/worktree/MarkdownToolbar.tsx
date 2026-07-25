@@ -70,6 +70,8 @@ export interface MarkdownToolbarProps {
   onClose?: () => void;
   /** Hide view mode toggle buttons (for text-only mode, Issue #646) */
   hideViewModeToggle?: boolean;
+  /** Hide the maximize button when a host owns that control (Issue #1519) */
+  hideMaximizeButton?: boolean;
   /** Indent the editor selection (Issue #1518; the only route on touch devices) */
   onIndent: () => void;
   /** Outdent the editor selection (Issue #1518) */
@@ -101,6 +103,7 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
   onSave,
   onClose,
   hideViewModeToggle,
+  hideMaximizeButton,
   onIndent,
   onOutdent,
   tabMovesFocus,
@@ -233,20 +236,22 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
         </Button>
 
         {/* Maximize button */}
-        <Button
-          variant="ghost"
-          data-testid="maximize-button"
-          onClick={onToggleFullscreen}
-          className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded"
-          title={isMaximized ? t('editor.exitFullscreen') : t('editor.enterFullscreen')}
-          aria-pressed={isMaximized}
-        >
-          {isMaximized ? (
-            <Minimize2 className="h-4 w-4" />
-          ) : (
-            <Maximize2 className="h-4 w-4" />
-          )}
-        </Button>
+        {!hideMaximizeButton && (
+          <Button
+            variant="ghost"
+            data-testid="maximize-button"
+            onClick={onToggleFullscreen}
+            className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded"
+            title={isMaximized ? t('editor.exitFullscreen') : t('editor.enterFullscreen')}
+            aria-pressed={isMaximized}
+          >
+            {isMaximized ? (
+              <Minimize2 className="h-4 w-4" />
+            ) : (
+              <Maximize2 className="h-4 w-4" />
+            )}
+          </Button>
+        )}
 
         {/* Auto-save toggle */}
         <div className="flex items-center gap-1.5">

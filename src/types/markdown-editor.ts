@@ -91,10 +91,29 @@ export interface EditorProps {
   fileType?: EditorFileType;
   /** Callback when editor is closed */
   onClose?: () => void;
-  /** Callback when file is saved successfully */
-  onSave?: (filePath: string) => void;
+  /** Callback when file is saved successfully; receives the persisted content */
+  onSave?: (filePath: string, content: string) => void;
   /** Optional initial view mode */
   initialViewMode?: ViewMode;
+  /**
+   * Content to start from instead of fetching (Issue #1519).
+   *
+   * When set, the editor skips its own GET so a host that already holds the
+   * file (the mobile `FileViewer`) stays the single source of truth and mode
+   * switches cost no network round-trip. Only read on mount — remount via
+   * `key` to load a different file.
+   */
+  initialContent?: string;
+  /**
+   * Render as a child of a host that owns the surrounding chrome (Issue #1519).
+   *
+   * The host supplies the view-mode switch and the maximize control, so the
+   * editor hides both and ignores the persisted maximize flag rather than
+   * fighting the host for the same screen.
+   */
+  embedded?: boolean;
+  /** Callback on every content edit, for hosts mirroring the draft (Issue #1519) */
+  onContentChange?: (content: string) => void;
   /**
    * Callback when maximized state changes (Issue #104)
    * Used to notify parent (Modal) to disable its ESC/backdrop handlers

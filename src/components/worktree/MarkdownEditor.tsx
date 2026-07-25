@@ -49,6 +49,7 @@ import {
 import { MarkdownToc } from '@/components/worktree/MarkdownToc';
 import { extractToc, TOC_VISIBLE_STORAGE_KEY } from '@/lib/markdown-toc';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { useIsPortrait } from '@/hooks/useIsPortrait';
 import { useFullscreen } from '@/hooks/useFullscreen';
 import { useLocalStorageState } from '@/hooks/useLocalStorageState';
 import { useAutoSave } from '@/hooks/useAutoSave';
@@ -251,6 +252,9 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   onMaximizedChange,
   onDirtyChange,
   onOpenFile,
+  initialContent,
+  embedded = false,
+  onContentChange,
 }: EditorProps) {
   // Resolve file type: explicit prop > auto-detect from extension (Issue #646)
   const fileType = fileTypeProp ?? detectFileType(filePath);
@@ -259,17 +263,22 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   const tWorktree = useTranslations('worktree');
   const confirm = useConfirm();
 
-  // State
-  const [content, setContent] = useState('');
-  const [originalContent, setOriginalContent] = useState('');
-  const [previewContent, setPreviewContent] = useState('');
+  // State. When the host supplies `initialContent` (Issue #1519) the editor is
+  // seeded from it and never fetches, so switching modes costs no round-trip.
+  const isHostedContent = initialContent !== undefined;
+  const seedContent = initialContent ?? '';
+  const [content, setContent] = useState(seedContent);
+  const [originalContent, setOriginalContent] = useState(seedContent);
+  const [previewContent, setPreviewContent] = useState(seedContent);
   const [viewMode, setViewMode] = useState<ViewMode>(() =>
-    isTextMode ? 'editor' : getInitialViewMode(initialViewMode)
+    isTextMode || embedded ? 'editor' : getInitialViewMode(initialViewMode)
   );
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(!isHostedContent);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showLargeFileWarning, setShowLargeFileWarning] = useState(false);
+  const [showLargeFileWarning, setShowLargeFileWarning] = useState(
+    () => isHostedContent && new Blob([seedContent]).size > FILE_SIZE_LIMITS.WARNING_THRESHOLD
+  );
 
   // Copy to clipboard state
   const [copied, setCopied] = useState(false);
@@ -294,6 +303,9 @@ export const MarkdownEditor = memo(function MarkdownEditor({
 
   // Mobile detection
   const isMobile = useIsMobile();
+  // Issue #1519: rotation-aware, unlike the render-time innerHeight comparison
+  // it replaces (which never re-evaluated after the device turned).
+  const isPortrait = useIsPortrait();
 
   // Issue #549: Default to preview tab on mobile
   useEffect(() => {
@@ -381,7 +393,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   }, [isDirty, onDirtyChange]);
 
   // In mobile portrait mode with split view, use tab switching (not in text mode)
-  const isMobilePortrait = isMobile && typeof window !== 'undefined' && window.innerHeight > window.innerWidth;
+  const isMobilePortrait = isMobile && isPortrait;
   const showMobileTabs = !isTextMode && isMobilePortrait && viewMode === 'split';
 
   /**
@@ -499,7 +511,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
       showToast(tWorktree('editor.saveSuccess'), 'success');
 
       if (onSave) {
-        onSave(filePath);
+        onSave(filePath, content);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : tWorktree('editor.saveError');
@@ -527,8 +539,9 @@ export const MarkdownEditor = memo(function MarkdownEditor({
       const newContent = e.target.value;
       setContent(newContent);
       updatePreview(newContent);
+      onContentChange?.(newContent);
     },
-    [updatePreview]
+    [updatePreview, onContentChange]
   );
 
   /**
@@ -628,7 +641,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         if (isAutoSaveEnabled) {
           void (async () => {
             await saveNow();
-            onSave?.(filePath);
+            onSave?.(filePath, content);
           })();
         } else {
           saveContent();
@@ -648,7 +661,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         return;
       }
     },
-    [saveContent, isAutoSaveEnabled, saveNow, onSave, filePath, toggleFullscreen, exitFullscreen, isMaximized]
+    [saveContent, isAutoSaveEnabled, saveNow, onSave, filePath, content, toggleFullscreen, exitFullscreen, isMaximized]
   );
 
   /**
@@ -692,8 +705,9 @@ export const MarkdownEditor = memo(function MarkdownEditor({
       pendingSelectionRef.current = { start: edit.selectionStart, end: edit.selectionEnd };
       setContent(edit.value);
       updatePreview(edit.value);
+      onContentChange?.(edit.value);
     },
-    [updatePreview]
+    [updatePreview, onContentChange]
   );
 
   const handleIndent = useCallback(() => {
@@ -810,8 +824,11 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     };
   }, [isMaximized, exitFullscreen]);
 
-  // Restore maximized state from localStorage on mount
+  // Restore maximized state from localStorage on mount. Skipped when embedded:
+  // the host owns maximize there, and a restored fullscreen would fight it
+  // (Issue #1519).
   useEffect(() => {
+    if (embedded) return;
     if (isMaximizedPersisted && !isMaximized) {
       enterFullscreen();
     }
@@ -847,10 +864,11 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     onMaximizedChange?.(isMaximized);
   }, [isMaximized, onMaximizedChange]);
 
-  // Load content on mount
+  // Load content on mount, unless the host already handed it over (Issue #1519)
   useEffect(() => {
+    if (isHostedContent) return;
     loadContent();
-  }, [loadContent]);
+  }, [loadContent, isHostedContent]);
 
   // Manage beforeunload handler based on unsaved state
   useEffect(() => {
@@ -1004,7 +1022,8 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         isSaving={isSaving}
         onSave={saveContent}
         onClose={onClose ? handleClose : undefined}
-        hideViewModeToggle={isTextMode}
+        hideViewModeToggle={isTextMode || embedded}
+        hideMaximizeButton={embedded}
         onIndent={handleIndent}
         onOutdent={handleOutdent}
         tabMovesFocus={tabMovesFocus}
