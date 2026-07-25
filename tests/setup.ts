@@ -58,6 +58,13 @@ beforeAll(() => {
   // `resize` keep working without per-file matchMedia mocks.
   if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
     const evaluate = (query: string): boolean => {
+      // Issue #1519: orientation queries (useIsPortrait) resolve from the
+      // viewport aspect ratio, mirroring how browsers answer them.
+      const orientationMatch = query.match(/orientation:\s*(portrait|landscape)/);
+      if (orientationMatch) {
+        const portrait = window.innerHeight >= window.innerWidth;
+        return orientationMatch[1] === 'portrait' ? portrait : !portrait;
+      }
       const maxMatch = query.match(/max-width:\s*(\d+(?:\.\d+)?)px/);
       const minMatch = query.match(/min-width:\s*(\d+(?:\.\d+)?)px/);
       const width = window.innerWidth;

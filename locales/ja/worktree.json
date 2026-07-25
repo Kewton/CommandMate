@@ -343,7 +343,11 @@
     "slideTitle": "{name} - スライド {number}",
     "noSlides": "{fileName} にスライドが見つかりません",
     "slides": "スライド",
-    "editor": "エディタ"
+    "editor": "エディタ",
+    "modeSwitch": "表示モードの切替",
+    "modeViewer": "ビュワー",
+    "modeEditor": "編集",
+    "moreActions": "その他の操作"
   },
   "fileTabs": {
     "unsavedChanges": "未保存の変更",

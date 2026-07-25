@@ -343,7 +343,11 @@
     "slideTitle": "{name} - Slide {number}",
     "noSlides": "No slides found in {fileName}",
     "slides": "Slides",
-    "editor": "Editor"
+    "editor": "Editor",
+    "modeSwitch": "Switch display mode",
+    "modeViewer": "Viewer",
+    "modeEditor": "Edit",
+    "moreActions": "More actions"
   },
   "fileTabs": {
     "unsavedChanges": "Unsaved changes",

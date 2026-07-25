@@ -303,7 +303,9 @@ describe('MarkdownEditor', () => {
         expect(screen.getByText(/saved/i)).toBeInTheDocument();
       });
 
-      expect(onSave).toHaveBeenCalledWith('docs/readme.md');
+      // Issue #1519: the persisted content rides along so a host holding the
+      // file (mobile FileViewer) can refresh without re-fetching.
+      expect(onSave).toHaveBeenCalledWith('docs/readme.md', 'Modified content');
     });
 
     it('should handle Ctrl+S keyboard shortcut', async () => {
@@ -1358,7 +1360,7 @@ def hello():
 
         // onSave should be called (file tree refresh)
         await waitFor(() => {
-          expect(onSave).toHaveBeenCalledWith('docs/readme.md');
+          expect(onSave).toHaveBeenCalledWith('docs/readme.md', 'Auto-save Ctrl+S content');
         });
       });
     });
