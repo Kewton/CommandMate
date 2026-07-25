@@ -13,14 +13,11 @@ import {
 } from '@/lib/selected-agents-validator';
 
 
-describe('DEFAULT_SELECTED_AGENTS (Issue #989)', () => {
-  it('should default to 6 PC agents: claude/codex/gemini/opencode/copilot/antigravity', () => {
+describe('DEFAULT_SELECTED_AGENTS (Issue #1516)', () => {
+  it('should default to 3 agents: claude/codex/antigravity', () => {
     expect(DEFAULT_SELECTED_AGENTS).toEqual([
       'claude',
       'codex',
-      'gemini',
-      'opencode',
-      'copilot',
       'antigravity',
     ]);
   });

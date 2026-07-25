@@ -267,6 +267,12 @@ const mockWorktree = {
   repositoryPath: '/path/to/repo',
   repositoryName: 'TestRepo',
   selectedAgents: ['claude', 'copilot'],
+  // The real GET always returns a roster; supply one so the CLI selector lists
+  // this fixture's agents instead of the DEFAULT_SELECTED_AGENTS seed.
+  agentInstances: [
+    { id: 'claude', cliTool: 'claude', alias: 'Claude', order: 0 },
+    { id: 'copilot', cliTool: 'copilot', alias: 'Copilot', order: 1 },
+  ],
   sessionStatusByCli: {
     claude: { isRunning: true },
     copilot: { isRunning: true },
