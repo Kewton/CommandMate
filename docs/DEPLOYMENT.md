@@ -154,11 +154,28 @@ npm run build
 | 変数名 | 説明 | デフォルト |
 |--------|------|-----------|
 | `CM_PORT` | サーバーポート | `3000` |
+| `CM_BROWSE_ROOTS` | フォルダ選択・登録を許可する追加ディレクトリ（カンマ区切り）。`CM_ROOT_DIR` は常に含まれる。 | 未設定（`CM_ROOT_DIR` のみ） |
 | `CM_DB_PATH` | SQLiteデータベースのパス | グローバル: `~/.commandmate/data/cm.db`、ローカル: `./data/cm.db` |
 | `CM_LOG_LEVEL` | ログレベル | `info` |
 | `CM_LOG_FORMAT` | ログフォーマット | `json` |
 
 > **Note**: 旧名称（`MCBD_*`）も後方互換性のためサポートされています。詳細は `.env.example` を参照してください。
+
+#### `CM_BROWSE_ROOTS`（許可ルート）
+
+Repositories 画面の「参照…」で辿れる範囲、および Local Path 登録が受け付ける範囲を決めます。
+`CM_ROOT_DIR` は常に暗黙で含まれるため、管理ディレクトリ配下だけを使う場合は設定不要です。
+
+```bash
+# ~/repos の外にあるリポジトリも登録したい場合
+CM_BROWSE_ROOTS=/Users/me/work,/opt/src
+```
+
+- 許可ルートは `GET /api/fs/browse`・`POST /api/repositories/validate-path`・
+  `POST /api/repositories/scan` で共通に評価されます。「参照で選べたのに登録できない」は起きません。
+- ここに指定したディレクトリは、認証済みクライアントに**ディレクトリ名が読める**ことを意味します
+  （ファイル名は返しません）。必要最小限の範囲に絞り、`/` のような広すぎる指定は避けてください。
+- clone 先は `CM_BROWSE_ROOTS` の影響を受けず、常に `CM_ROOT_DIR` です。
 
 #### `CM_DB_PATH` の解決順序と制約
 

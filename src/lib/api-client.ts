@@ -606,6 +606,89 @@ export const repositoryApi = {
       }
     );
   },
+
+  /**
+   * Check a local path before scanning it (Issue #1517).
+   *
+   * Answers the question `scan` will answer — is this inside an allowed root,
+   * is it a git repository, how many worktrees — so the form can say so while
+   * the user types instead of failing after submit.
+   */
+  async validatePath(repositoryPath: string): Promise<ValidatePathResponse> {
+    return fetchApi<ValidatePathResponse>('/api/repositories/validate-path', {
+      method: 'POST',
+      body: JSON.stringify({ repositoryPath }),
+    });
+  },
+};
+
+/**
+ * Result of POST /api/repositories/validate-path (Issue #1517)
+ */
+export interface ValidatePathResponse {
+  valid: boolean;
+  /** Present when `valid` is false. */
+  reason?: 'invalid' | 'outside-roots' | 'symlink-escape' | 'not-found';
+  resolvedPath?: string;
+  roots: string[];
+  /** Allowed roots pre-joined for display. */
+  allowedRootsLabel: string;
+  isGitRepo: boolean;
+  worktreeCount: number | null;
+}
+
+/**
+ * A browsable directory returned by GET /api/fs/browse (Issue #1517).
+ * Only directories are ever returned — never file names.
+ */
+export interface BrowseEntry {
+  name: string;
+  path: string;
+  isGitRepo: boolean;
+  worktreeCount: number | null;
+}
+
+/**
+ * Result of GET /api/fs/browse (Issue #1517).
+ * `path === null` is the top level, whose entries are the allowed roots.
+ */
+export interface BrowseResponse {
+  path: string | null;
+  parent: string | null;
+  roots: string[];
+  recentPaths: string[];
+  entries: BrowseEntry[];
+  truncated: boolean;
+  entryLimit: number;
+}
+
+/**
+ * Server filesystem browse API client (Issue #1517).
+ *
+ * The directory being chosen lives on the server, which may be a different host
+ * from the browser, so `showDirectoryPicker()` / `<input webkitdirectory>`
+ * cannot supply it.
+ */
+export const fsApi = {
+  /**
+   * List directories under `browsePath`, or the allowed roots when omitted.
+   */
+  async browse(browsePath?: string): Promise<BrowseResponse> {
+    const query = browsePath
+      ? `?path=${encodeURIComponent(browsePath)}`
+      : '';
+    return fetchApi<BrowseResponse>(`/api/fs/browse${query}`);
+  },
+
+  /**
+   * Remember a directory so the picker reopens there next time.
+   */
+  async addRecentPath(browsePath: string): Promise<{ success: boolean }> {
+    return fetchApi<{ success: boolean }>('/api/fs/recent-paths', {
+      method: 'POST',
+      body: JSON.stringify({ path: browsePath }),
+    });
+  },
 };
 
 /**

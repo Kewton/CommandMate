@@ -156,11 +156,33 @@ npm run build
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `CM_PORT` | Server port | `3000` |
+| `CM_BROWSE_ROOTS` | Extra directories (comma-separated) the folder picker may browse and register from. `CM_ROOT_DIR` is always included. | Unset (`CM_ROOT_DIR` only) |
 | `CM_DB_PATH` | SQLite database path | Global: `~/.commandmate/data/cm.db`, Local: `./data/cm.db` |
 | `CM_LOG_LEVEL` | Log level | `info` |
 | `CM_LOG_FORMAT` | Log format | `json` |
 
 > **Note**: Legacy names (`MCBD_*`) are also supported for backward compatibility. See `.env.example` for details.
+
+#### `CM_BROWSE_ROOTS` (allowed roots)
+
+Defines what the Repositories screen's "Browse…" picker can reach, and what a
+Local Path registration will accept. `CM_ROOT_DIR` is always included, so this
+stays unset if every repository lives under the managed directory.
+
+```bash
+# Register repositories that live outside ~/repos
+CM_BROWSE_ROOTS=/Users/me/work,/opt/src
+```
+
+- The allowed roots are evaluated by one shared function used by
+  `GET /api/fs/browse`, `POST /api/repositories/validate-path` and
+  `POST /api/repositories/scan`, so "the picker offered it but registration
+  failed" cannot happen.
+- Listing a directory here means authenticated clients can read **directory
+  names** under it (file names are never returned). Keep the set as narrow as
+  possible and avoid overly broad values such as `/`.
+- The clone destination is unaffected by `CM_BROWSE_ROOTS` and remains
+  `CM_ROOT_DIR`.
 
 #### `CM_DB_PATH` resolution order and constraints
 

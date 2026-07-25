@@ -10,8 +10,7 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { scanWorktrees } from '@/lib/git/worktrees';
 import type { Worktree } from '@/types/models';
 import { getRepositoryByPath, createRepository } from '@/lib/db/db-repository';
-import { isPathSafe } from '@/lib/security/path-validator';
-import { getEnv } from '@/lib/env';
+import { resolveAllowedPath, formatAllowedRoots } from '@/lib/fs/browse-roots';
 import { syncWorktreesAndCleanup } from '@/lib/session-cleanup';
 import { createLogger } from '@/lib/logger';
 
@@ -75,17 +74,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { CM_ROOT_DIR } = getEnv();
-
-    // Security: Validate path safety relative to configured root
-    if (!isPathSafe(repositoryPath, CM_ROOT_DIR)) {
+    // Issue #1517: the same allowed-root evaluation the picker and
+    // validate-path use. Anything the picker can offer must register here, so
+    // the check lives in one function rather than being restated per route.
+    const resolved = resolveAllowedPath(repositoryPath);
+    if (!resolved.ok) {
       return NextResponse.json(
-        { error: 'Invalid or unsafe repository path' },
+        {
+          error: `Invalid or unsafe repository path. Allowed roots: ${formatAllowedRoots(resolved.roots)}`,
+          reason: resolved.reason,
+          roots: resolved.roots,
+        },
         { status: 400 }
       );
     }
 
-    const normalizedPath = path.resolve(CM_ROOT_DIR, repositoryPath);
+    const normalizedPath = resolved.resolvedPath;
 
     // Scan for worktrees
     const worktrees = await scanWorktrees(normalizedPath);
