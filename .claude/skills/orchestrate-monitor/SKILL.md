@@ -20,7 +20,7 @@ allowed-tools: Bash(.claude/skills/orchestrate-monitor/scripts/*), Bash(git work
 .claude/skills/orchestrate-monitor/
 ├── SKILL.md
 └── scripts/
-    ├── monitor-lib.sh       # 共有ヘルパー（JSON scalar 抽出・アンカー検出・違反カウント）
+    ├── monitor-lib.sh       # 共有ヘルパー（JSON scalar 抽出・ANSI 正規化・アンカー検出・違反カウント）
     ├── classify-state.sh    # capture --json 1 ポーリング → 状態トークン
     ├── verify-completion.sh # STARTED ガード付き完了判定（回帰#1）
     ├── verify-scope.sh      # 偽陽性しないスコープ検証（回帰#2）
@@ -28,7 +28,9 @@ allowed-tools: Bash(.claude/skills/orchestrate-monitor/scripts/*), Bash(git work
     └── monitor.sh           # オペレータ用監視ループ（temp ファイル状態）
 ```
 
-テスト: `tests/unit/skills/orchestrate-monitor/`（fixture は実 `capture --json` 形状に忠実）。
+テスト: `tests/unit/skills/orchestrate-monitor/`。fixture は**実 `capture --json` を採取した生 payload
+（ANSI エスケープを含む）**で、`fixture-fidelity.test.ts` が ANSI の残存を CI で強制する
+（ANSI を剥がした fixture は「製品が出力しない形」を検証してしまう＝回帰#3 の再生産）。
 `npm run test:unit` に含まれ、`bash -n` 構文チェックも `syntax.test.ts` として同梱される。
 
 ## 使い方
@@ -45,8 +47,16 @@ commandmate capture <id> --json > poll.json
 #   -> NOT_RUNNING | RATE_LIMIT | GENERATING | PROMPT | IDLE
 ```
 
+判定順（`classify-state.sh`）。**順序自体がガード**であり、各分岐は入力注入か抑止のどちらかを
+引き起こすので、早すぎる発火は健全なセッションを壊す:
+
+```
+NOT_RUNNING → is_retrying(→GENERATING) → PROMPT → GENERATING → RATE_LIMIT → IDLE
+```
+
 `monitor.sh` の `count_commits` / `count_uncommitted` は運用の checkout に合わせて配線するフック。
 既定は 0 を返す（ループ単体で動く）ので、実運用では worker の作業ツリーに向ける。
+`--resend-message` / `--max-resends` はリトライ枯渇死からの再送設定（既定 `continue` / 2 回）。
 
 ---
 
@@ -58,7 +68,22 @@ commandmate capture <id> --json > poll.json
 
 1. **主シグナルは `commandmate capture <id> --json`**。参照フィールドは `content` / `realtimeSnippet`。
    `output` / `text` は**存在しない**（`src/lib/session/current-output-builder.ts` の payload で確認）。
-2. **生成中アンカーは `↓ [0-9]`**（トークンカウンタ `↓ 1.4k tokens`）と `Waiting for [0-9]+ background agent`。
+2. **アンカー照合は ANSI 除去後に行う**（`ml_strip_ansi`）。実 TUI は矢印と数値の間に色リセットを挟む:
+   `(4m 25s · ↓\u001b[39m \u001b[38;5;246m14.9k tokens`（`\u001b` は生 JSON 中の 6 文字） → 生 JSON への `↓ [0-9]` grep は**実機で一度も
+   発火しない**。#1512 の初版は ANSI を除去済みの手書き fixture を持っていたため単体テストだけが緑で、
+   実運用では**全ワーカーが IDLE 誤分類**され `NOT_STARTED` を鳴らし続けた（Issue #1522 / 回帰#3）。
+   TUI がマーカーと値の間に挟む**ノーブレークスペース**（`❯` の直後、`\u00a0`）も同じ理由で正規化する。
+3. **アンカーは「いま画面に出ているもの」＝`realtimeSnippet` に限定する**（`ml_pane_text`）。
+   `content` は *lastCapturedLine 以降の差分*なので、ループの初回ポーリングは**バッファ全体**＝
+   orchestrator が送ったタスク指示文まで返す。その指示文に識別子 `ml_has_rate_limit` が含まれていたため
+   `rate.?limit` が一致し、**健全な生成中ワーカー2件に `a` が撃ち込まれた**（Issue #1522 / 回帰#7）。
+   逆向きの事故も同時に防ぐ：履歴に流れた spinner 行（`↓ 14.9k tokens`）を拾うと終了済みセッションを
+   永久に GENERATING と誤判定する。
+4. **生成中アンカーは 3 つ**：トークンカウンタ `↓ 14.9k tokens` / `Waiting for [0-9]+ background agent` /
+   フッタヒント `esc to interrupt`。
+   - `esc to interrupt` は**ターン実行中のみ**表示される（idle 時は `? for shortcuts`）。トークン出力前に
+     数分思考するワーカー（`✳ Cascading… (19s)` にはカウンタが無い）を拾うための唯一の手段
+     （回帰#4）。
    - `[0-9]+m [0-9]+s` は**使わない**：完了後の集計行 `✻ Brewed for 8m 55s` に誤マッチし、
      終了済みセッションを永久に「生成中」と誤判定する（`feedback_orchestrate_monitor_recipe`）。
      → 回帰 fixture: `idle-brewed-summary.json` は IDLE に分類される。
@@ -66,31 +91,53 @@ commandmate capture <id> --json > poll.json
      狭い条件でしか true にならず、生成中でも false になりうる。だから text アンカーを一次シグナルにする
      （`feedback_orchestrate_monitor_started_guard`）。→ fixture `generating-bg-agent.json` は
      `isGenerating:false` でもアンカーで GENERATING。
-3. **STARTED ガード**：生成アンカーを一度も観測していない idle を COMPLETE と誤報しない。
+5. **CLI 自身のリトライ中（`ml_is_retrying`）は「生存」＝ GENERATING**。
+   `✻ 529 Overloaded · Retrying in 4s · attempt 7/10` の間セッションは生きているので、介入は**再開でなく
+   queue** される（実測: `❯ a` が composer に残り `Press up to edit queued messages`。リトライ成功後に
+   配信され、ワーカーが契約外の作業を始めうる）。`rate-limit` 分岐より**前**に評価する（回帰#5）。
+   - `attempt 10/10` は枯渇後も画面に残るため、**idle フッタ（`? for shortcuts`）を veto** に使う。
+     これが無いと死んだセッションが永久に「生存」と読まれ、再送経路に到達できない。
+6. **`RATE_LIMIT` は生成中を否定してから最後に評価し、アンカーはバナー固有の言い回しに限定する**。
+   本物の usage limit は**ターンを停止させる**ので、`esc to interrupt` が出ているフレームのバナー風文字列は
+   定義上ワーカーが読み書きしているコード／散文である。裸の `rate.?limit` は削除した：`rate_limit` /
+   `rate-limit` を含むソースや散文に一致して**健全なワーカーへ入力を注入した**（Issue #1522）。これは
+   `ml_count_violations` について既に明記していた「散文一致の誤報」と同型の失敗（回帰#7）。
+7. **STARTED ガード**：生成アンカーを一度も観測していない idle を COMPLETE と誤報しない。
    `commits=0 かつ uncommitted=0` は**完了ではなく未起動の兆候**（`send` がタスクを composer に残し
    Enter 未確定で worker が起動しない）（`feedback_orchestrate_monitor_started_guard`）。
    → 回帰#1: `verify-completion.sh`、fixture 相当は `verify-completion.test.ts`。
-4. **AskUserQuestion 停滞**：`❯ 1. Submit answers` は製品の prompt 検出（`isPromptWaiting`）に**非マッチ**。
+8. **AskUserQuestion 停滞**：`❯ 1. Submit answers` は製品の prompt 検出（`isPromptWaiting`）に**非マッチ**。
    text marker `❯ [0-9]+\.` で PROMPT と判定する（`feedback_orchestrate_askuserquestion_and_ci_522`）。
    → fixture `prompt-submit-answers.json`（`isPromptWaiting:false` でも PROMPT）。
+   **`PROMPT` は `GENERATING` より先に評価する**：権限プロンプト表示中もフッタは `esc to interrupt` のままで
+   `isPromptWaiting` / `isSelectionListActive` は false（実測）。逆順だとプロンプトが永久に承認されない。
 
 ### 介入・自動復旧（`monitor.sh`）
 
-5. **権限プロンプト自動承認**：worker 停滞の主因は Claude Code 権限プロンプト。Enter 自動承認を**サイレント＋
+9. **権限プロンプト自動承認**：worker 停滞の主因は Claude Code 権限プロンプト。Enter 自動承認を**サイレント＋
    カウンタ化**し、通知を氾濫させない（`feedback_worker_permission_prompt_autoapprove` /
    `feedback_orchestrate_monitor_recipe`）。承認は commit 必須ゲート（＝完了検証）とセットで扱う。
-6. **Rate limit は待たず即 "a" 送信**で再開。「1M context credits 必須」ブロッカーは credits 有効化＋"a"
-   （`feedback_rate_limit_immediate_retry` / `feedback_orchestrate_1m_context_credits`）。
-7. **完了待機は `commandmate wait <id> --on-prompt human`**。既定は prompt 検出で即返るため監督ループが
-   空回りする（`feedback_orchestrate_wait_on_prompt_human`）。
+10. **Rate limit は待たず即 "a" 送信**で再開。「1M context credits 必須」ブロッカーは credits 有効化＋"a"
+    （`feedback_rate_limit_immediate_retry` / `feedback_orchestrate_1m_context_credits`）。
+    ただし**撃つ前に GENERATING を否定する**こと（上記 6）。
+11. **リトライ枯渇死からは再送で復帰する**（`--resend-message` / `--max-resends`）。`attempt 10/10` 失敗後は
+    idle プロンプトに落ち、誰も再送しないので放置される。放置より悪いのは、作業途中の uncommitted 変更が
+    残った状態で idle streak が閾値を超え **COMPLETE と誤報**されることなので、完了判定より前に再送する。
+    入力を注入する分岐なので条件は最小に絞る（Issue #1522）:
+    - `IDLE` のみ（＝リトライ中 `GENERATING` とプロンプトには絶対に触らない）
+    - idle 閾値に到達済み（一瞬のフレームでは撃たない）
+    - `ml_has_terminal_api_error` は**現在のペインのみ**を見る（再開後に画面外へ流れたエラーは対象外）
+    - `--max-resends` で打ち切り、以後はオペレータへエスカレーション
+12. **完了待機は `commandmate wait <id> --on-prompt human`**。既定は prompt 検出で即返るため監督ループが
+    空回りする（`feedback_orchestrate_wait_on_prompt_human`）。
 
 ### 完了検証（`verify-completion.sh` / `verify-scope.sh`）
 
-8. **merge 成否は state=MERGED を確認してから Issue close**（未マージ Issue の誤クローズ防止）
-   （`feedback_orchestrate_changelog_conflict_close_guard`）。
-9. **スコープ完遂は受入ゲートでなく grep 実数で検証**。NUL 混入ファイルで grep がバイナリ扱いするため
-   `grep -a` を使う（`feedback_orchestrate_scope_completeness` / `reference_grep_blind_nul_test_file`）。
-10. **検証ガード自身の偽陽性に注意**（回帰#2、`verify-scope.sh`）：
+13. **merge 成否は state=MERGED を確認してから Issue close**（未マージ Issue の誤クローズ防止）
+    （`feedback_orchestrate_changelog_conflict_close_guard`）。
+14. **スコープ完遂は受入ゲートでなく grep 実数で検証**。NUL 混入ファイルで grep がバイナリ扱いするため
+    `grep -a` を使う（`feedback_orchestrate_scope_completeness` / `reference_grep_blind_nul_test_file`）。
+15. **検証ガード自身の偽陽性に注意**（回帰#2、`verify-scope.sh`）：
     - 禁止パターンが**散文・コメント中**に出現しただけで違反と数える誤報
       （bare `npx commandmate` が「なぜ @latest が必要か」を説明する文に一致した実例）。
       → コメント行（`^[[:space:]]*#`）を除外する。fixture `scope-clean.txt` は CLEAN。
@@ -100,25 +147,32 @@ commandmate capture <id> --json > poll.json
 
 ### スクリプト品質（実装制約）
 
-11. **bash 3.2 互換**（macOS 既定の `/bin/bash` は 3.2.57）：連想配列 `declare -A` 不可・`mapfile` 不可・
+16. **bash 3.2 互換**（macOS 既定の `/bin/bash` は 3.2.57）：連想配列 `declare -A` 不可・`mapfile` 不可・
     `${var,,}` 不可。状態は**整数 index の並列配列と temp ファイル**で持つ
     （`feedback_monitor_bash32_no_assoc_arrays`）。CI は `syntax.test.ts` が `bash -n` を回す。
-12. **ループ変数に `path` 等の特殊名を使わない**：zsh/bash で `path` は `PATH` に tie され、curl/tmux が
+17. **ループ変数に `path` 等の特殊名を使わない**：zsh/bash で `path` は `PATH` に tie され、curl/tmux が
     command not found 化して health check が偽陰性になる（`feedback_zsh_path_loop_var_clobbers_path`）。
-13. **品質ゲートで exit code を隠さない**（`quality-gate.sh`）：`cmd | grep ...` は `$?` を grep に渡し
+18. **品質ゲートで exit code を隠さない**（`quality-gate.sh`）：`cmd | grep ...` は `$?` を grep に渡し
     非ゼロ終了を隠す。vitest は「全テスト緑・Unhandled Rejection で exit 1」を出しうる。
     `cmd > log 2>&1; echo $?` で実測する（`feedback_quality_gate_grep_hides_exit_code`）。
+19. **`sed` は `LC_ALL=C` で回す**：ペイン capture には途中で切れたマルチバイト文字が混じりうる。
+    UTF-8 ロケールの BSD sed はそこで `illegal byte sequence` を吐いて停止する。
 
 ---
 
-## 回帰テスト（red→green で固定した 2 パターン）
+## 回帰テスト（red→green で固定したパターン）
 
-| # | 誤報 | 出所 | ガード | テスト |
+| # | 誤報／実害 | 出所 | ガード | テスト |
 |---|------|------|--------|--------|
 | 1 | 未起動 idle を COMPLETE と誤報 | `feedback_orchestrate_monitor_started_guard` | `verify-completion.sh` の STARTED ガード | `verify-completion.test.ts` |
 | 2 | 検証ガード自身の偽陽性（散文一致・`\|\| echo 0`） | 同上 / `feedback_sed_grep_guard_false_pass` | `verify-scope.sh` のコメント除外＋素の `grep -c` | `verify-scope.test.ts` |
+| 3 | ANSI 除去済み手書き fixture が「製品が出ない形」を検証し、生成中を全て IDLE 誤分類 | #1522 | `ml_strip_ansi` ＋ 生 capture fixture | `fixture-fidelity.test.ts` / `live-generating-token.json` |
+| 4 | トークン出力前の生成中を IDLE 誤分類 | #1522 | 生成中アンカーに `esc to interrupt` | `live-generating-pre-token.json` |
+| 5 | CLI 自身の 5xx バックオフを停止と誤認し、介入が queue される | #1522 | `ml_is_retrying`（idle フッタ veto つき）を最優先 | `live-retrying-529.json` / `monitor-lib.test.ts` |
+| 6 | リトライ枯渇死が放置される／半端な作業で COMPLETE 誤報 | #1522 | `ml_has_terminal_api_error` ＋ `monitor.sh` の再送 | `live-api-error-exhausted.json` / `monitor-resend.test.ts` |
+| 7 | `rate.?limit` が散文・ソースに一致し**健全なワーカーへ `a` を注入** | #1522 | バナー限定アンカー ＋ `RATE_LIMIT` を最後に評価 ＋ `ml_pane_text` | `live-idle-rate-limit-source.json` / `live-generating-task-text-scrollback.json` |
 
-いずれも naive 実装で red（本 Skill 初回コミット）→ ガード実装で green にした。
+いずれも naive 実装で red → ガード実装で green にした（#3〜#7 は #1512 の初版実装に対して red）。
 
 ## fixture の作り方（実機採取）
 
@@ -128,3 +182,12 @@ fixture は**使い捨てセッションで capture** する。実 worker sessio
 ```bash
 commandmate capture <throwaway-id> --json | tee tests/unit/skills/orchestrate-monitor/fixtures/<name>.json
 ```
+
+**手で書かないこと。ANSI を剥がさないこと。** これが本 Skill 唯一の致命的な失敗モードで、#1512 の初版は
+実際にこれを踏んだ（単体テスト全 green のまま実運用では 1 度もアンカーが発火しなかった）。
+
+- ステータス行・フッタ行・composer 行の ANSI エスケープと NBSP は**そのまま残す**。1 つ剥がすと fixture は
+  「製品が出力しない形」になり、テストの意味が消える。`fixture-fidelity.test.ts` が CI で残存を強制する。
+- 実 capture には**作業指示文・絶対パス・セッション ID** が載る。コミット前に無関係な本文だけを短いダミーへ
+  置換する（ANSI を壊さないよう、値の文字列単位で差し替える）。
+- 派生 fixture（実フレームの一部を差し替えて作った異常系）は、テスト側のコメントに**何を差し替えたか**を書く。

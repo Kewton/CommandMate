@@ -11,8 +11,18 @@
 #   - loop variables are never named `path` (that special-var name clobbers PATH
 #     under zsh/bash and breaks curl/tmux lookups; feedback_zsh_path_loop_var)
 #
+# Interventions, in order of how much damage a false positive does:
+#   PROMPT      -> Enter (silent auto-approve, counted)
+#   RATE_LIMIT  -> "a" immediately, never sleep through a limit
+#   IDLE + terminal API error at the idle threshold -> resend --resend-message,
+#               capped by --max-resends. This is the only recovery from the CLI
+#               exhausting its own retries (Issue #1522): a live backoff is
+#               classified GENERATING and must NOT be touched, because input sent
+#               mid-backoff is queued and then delivered after the retry succeeds.
+#
 # Usage:
 #   monitor.sh [--interval 20] [--idle-threshold 8] [--session-prefix cm] \
+#              [--resend-message continue] [--max-resends 2] \
 #              <worktree-id> [<worktree-id> ...]
 #
 # Env:
@@ -23,6 +33,8 @@ set -u
 INTERVAL=20
 IDLE_THRESHOLD=8          # 150s+ of idle at 20s polls; xhigh workers think long
 SESSION_PREFIX="cm"
+RESEND_MESSAGE="continue"  # sent after the CLI exhausts its own retries
+MAX_RESENDS=2
 CM=${CM:-"npx commandmate@latest"}
 
 while [ $# -gt 0 ]; do
@@ -30,6 +42,8 @@ while [ $# -gt 0 ]; do
     --interval) shift; INTERVAL=${1:-20};;
     --idle-threshold) shift; IDLE_THRESHOLD=${1:-8};;
     --session-prefix) shift; SESSION_PREFIX=${1:-cm};;
+    --resend-message) shift; RESEND_MESSAGE=${1:-continue};;
+    --max-resends) shift; MAX_RESENDS=${1:-2};;
     --) shift; break;;
     -*) echo "monitor.sh: unknown flag $1" >&2; exit 2;;
     *) break;;
@@ -45,10 +59,11 @@ fi
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 CLASSIFY="$SCRIPT_DIR/classify-state.sh"
 VERIFY="$SCRIPT_DIR/verify-completion.sh"
+. "$SCRIPT_DIR/monitor-lib.sh"
 
 STATE_DIR=$(mktemp -d -t cm-monitor.XXXXXX)
 cleanup() { rm -rf "$STATE_DIR"; }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 # Integer-indexed parallel arrays (bash 3.2 has no associative arrays).
 IDS=("$@")
@@ -60,6 +75,7 @@ while [ "$i" -lt "$n_ids" ]; do
   echo "0" > "$STATE_DIR/$wid.streak"
   echo "0" > "$STATE_DIR/$wid.started"
   echo "0" > "$STATE_DIR/$wid.approvals"
+  echo "0" > "$STATE_DIR/$wid.resends"
   i=$((i + 1))
 done
 
@@ -77,7 +93,7 @@ count_commits() {
   echo 0
 }
 
-echo "monitor: watching $n_ids worker(s), interval=${INTERVAL}s, idle-threshold=${IDLE_THRESHOLD}"
+echo "monitor: watching $n_ids worker(s), interval=${INTERVAL}s, idle-threshold=${IDLE_THRESHOLD}, max-resends=${MAX_RESENDS}"
 
 done_count=0
 while [ "$done_count" -lt "$n_ids" ]; do
@@ -124,7 +140,38 @@ while [ "$done_count" -lt "$n_ids" ]; do
         tmux send-keys -t "${SESSION_PREFIX}-${wid}" Enter 2>/dev/null || true
         echo "0" > "$STATE_DIR/$wid.streak"
         ;;
-      NOT_RUNNING|IDLE)
+      IDLE)
+        streak=$((streak + 1))
+        echo "$streak" > "$STATE_DIR/$wid.streak"
+        # Retry-exhaustion death: the CLI burned through its own backoff
+        # (`attempt 10/10`), printed a terminal API error and fell back to an idle
+        # prompt. Nothing resumes from here on its own, and without a resend the
+        # worker is either left forever or — worse — reported COMPLETE with
+        # half-finished uncommitted work once the streak crosses the threshold.
+        # Deliberately narrow, because this branch injects input:
+        #   - IDLE only, so a live backoff (GENERATING via ml_is_retrying) and an
+        #     open prompt are never interrupted;
+        #   - the idle threshold must already be reached, so a transient frame
+        #     cannot trigger it;
+        #   - ml_has_terminal_api_error reads the current pane only, so an error
+        #     that has scrolled out of view after a successful resume no longer
+        #     counts;
+        #   - capped by --max-resends, then escalated to the operator.
+        if [ "$streak" -ge "$IDLE_THRESHOLD" ] && ml_has_terminal_api_error "$poll"; then
+          resends=$(read_state "$wid" resends)
+          if [ "$resends" -lt "$MAX_RESENDS" ]; then
+            resends=$((resends + 1))
+            echo "$resends" > "$STATE_DIR/$wid.resends"
+            echo "monitor[$wid]: terminal API error at an idle prompt -> resending ($resends/$MAX_RESENDS)"
+            tmux send-keys -t "${SESSION_PREFIX}-${wid}" "$RESEND_MESSAGE" Enter 2>/dev/null || true
+            echo "0" > "$STATE_DIR/$wid.streak"
+          else
+            echo "monitor[$wid]: terminal API error and resend budget spent ($MAX_RESENDS) — operator needed"
+          fi
+        fi
+        ;;
+      NOT_RUNNING)
+        # No pane to type into; the streak drives the NOT_STARTED report instead.
         streak=$((streak + 1))
         echo "$streak" > "$STATE_DIR/$wid.streak"
         ;;
