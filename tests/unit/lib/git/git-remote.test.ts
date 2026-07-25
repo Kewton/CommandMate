@@ -160,6 +160,21 @@ describe('gitFetch (Issue #783, Part 2)', () => {
     await expect(gitFetch('/repo', { remote: 'origin' })).rejects.toBeInstanceOf(GitAuthFailedError);
   });
 
+  /**
+   * Issue #1515 (E-1): the Current Status refresh button now fetches on a user
+   * click, so a credential-less HTTPS remote must fail fast instead of blocking
+   * on an invisible terminal prompt until the 30s timeout. Asserted on fetch AND
+   * push because both go through execGitNetworkAware.
+   */
+  it('runs with GIT_TERMINAL_PROMPT=0 (never blocks on a credential prompt)', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '' });
+    await gitFetch('/repo', { remote: 'origin' });
+    const options = mockExecFileAsync.mock.calls[0][2] as { env: Record<string, string> };
+    expect(options.env.GIT_TERMINAL_PROMPT).toBe('0');
+    // The rest of the parent environment is preserved (PATH etc. still resolve).
+    expect(options.env.PATH).toBe(process.env.PATH);
+  });
+
   it('does NOT log raw stderr/message containing a credential URL', async () => {
     const leak = "fatal: unable to access 'https://ci-bot:glpat-SECRET@gitlab/repo.git'";
     mockExecFileAsync.mockRejectedValue(Object.assign(new Error(leak), { stderr: leak }));
@@ -291,6 +306,14 @@ describe('gitPush (Issue #783, Part 2)', () => {
     expect(pushCall?.[1]).toContain('feature:refs/heads/feature');
     expect(pushCall?.[1]).not.toContain('feature:refs/heads/main');
     expect(pushCall?.[1].join(' ')).not.toContain(':refs/heads/main');
+  });
+
+  // Issue #1515 (E-1): same non-interactive guarantee on the push path.
+  it('runs with GIT_TERMINAL_PROMPT=0', async () => {
+    mockGitByArgs({ 'symbolic-ref': 'origin/main', 'push': '' });
+    await gitPush('/repo', { remote: 'origin', branch: 'feature' });
+    const pushCall = mockExecFileAsync.mock.calls.find((c) => c[1][0] === 'push');
+    expect((pushCall?.[2] as { env: Record<string, string> }).env.GIT_TERMINAL_PROMPT).toBe('0');
   });
 
   it('adds -u when setUpstream is true', async () => {

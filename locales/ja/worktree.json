@@ -508,11 +508,23 @@
     },
     "currentStatus": {
       "title": "現在の状況",
-      "refresh": "Git ステータスを更新",
+      "refresh": "リモートを確認して更新（git fetch）",
+      "refreshing": "リモートを確認中...",
       "loading": "Git ステータスを読み込み中...",
       "uncommitted": "未コミット",
-      "aheadTooltip": "アップストリームより先行しているコミット数",
-      "behindTooltip": "アップストリームより遅れているコミット数"
+      "aheadTooltip": "最後に fetch した時点のアップストリームより先行しているコミット数（リモートの最新状態とは異なる場合があります）",
+      "behindTooltip": "最後に fetch した時点のアップストリームより遅れているコミット数（リモートの最新状態とは異なる場合があります）",
+      "lastFetch": "最終 fetch: {relative}",
+      "lastFetchNever": "最終 fetch: まだ実行していません",
+      "lastFetchTooltip": "ahead/behind はこの時点のリモート情報との比較です。更新ボタンで再取得できます。",
+      "noUpstreamBadge": "未プッシュ",
+      "noUpstreamTooltip": "このブランチにはアップストリームが設定されていないため、ahead/behind を計算できません（まだ push していません）",
+      "upstreamGoneBadge": "リモート削除済み",
+      "upstreamGoneTooltip": "設定されたアップストリームのリモート追跡ブランチが存在しません（リモート側で削除された可能性があります）",
+      "detachedBadge": "detached",
+      "detachedTooltip": "HEAD がブランチを指していないため、ahead/behind を計算できません",
+      "aheadBehindErrorBadge": "比較できません",
+      "aheadBehindErrorTooltip": "ahead/behind の取得に失敗しました（タイムアウトなど）。更新ボタンで再試行できます。"
     },
     "danger": {
       "title": "危険な操作",

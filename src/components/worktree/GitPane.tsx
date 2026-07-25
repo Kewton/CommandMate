@@ -299,6 +299,20 @@ export const GitPane = memo(function GitPane({
   const hasUpstream = gitStatus?.aheadBehind != null;
 
   /**
+   * Issue #1515 (A-1): the Current Status 🔄 used to be a LOCAL-ONLY re-read of
+   * the same remote-tracking refs, so "behind" could never change no matter how
+   * many times it was pressed. It now runs a real `git fetch` first; the fetch
+   * cascade (handleNetworkCascade above) re-reads status + branches on EVERY
+   * settle — success, failure, or abort — so the UI never waits on the remote to
+   * cooperate. Fast failure on a credential-less remote is guaranteed by
+   * GIT_TERMINAL_PROMPT=0 in execGitNetworkAware (E-1), and the fetch error
+   * itself is surfaced by the Quick actions bar (same tab on mobile).
+   */
+  const handleStatusRefresh = useCallback(() => {
+    void runNetworkFetch({});
+  }, [runNetworkFetch]);
+
+  /**
    * Issue #816 (A): commit, then push in one action. The push runs ONLY if the
    * commit succeeds; commitAndPush owns the `committing` flag. Defined here
    * (after the network hook) so runNetworkPush / hasUpstream are in scope.
@@ -328,13 +342,16 @@ export const GitPane = memo(function GitPane({
     [isMobile, onDiffSelect, onInsertToMessage]
   );
 
-  // Current Status (Issue #779) - orientation header (read).
+  // Current Status (Issue #779) - orientation header (read). Its refresh does a
+  // remote fetch first (Issue #1515 A-1), so it is disabled while ANY network op
+  // is in flight rather than stacking a second one.
   const statusSection = (
     <GitCurrentStatusBar
       gitStatus={gitStatus}
       statusLoading={statusLoading}
       statusError={statusError}
-      onRefresh={fetchStatus}
+      onRefresh={handleStatusRefresh}
+      refreshing={networkProgressState === 'running'}
     />
   );
 

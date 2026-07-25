@@ -195,7 +195,7 @@ describe('git-utils', () => {
       const { getAheadBehind } = await import('@/lib/git/git-utils');
       const result = await getAheadBehind('/path/to/worktree');
 
-      expect(result).toEqual({ ahead: 2, behind: 1 });
+      expect(result).toEqual({ aheadBehind: { ahead: 2, behind: 1 }, reason: null });
     });
 
     it('should return {ahead:0, behind:0} for in-sync upstream', async () => {
@@ -204,70 +204,74 @@ describe('git-utils', () => {
       const { getAheadBehind } = await import('@/lib/git/git-utils');
       const result = await getAheadBehind('/path/to/worktree');
 
-      expect(result).toEqual({ ahead: 0, behind: 0 });
+      expect(result).toEqual({ aheadBehind: { ahead: 0, behind: 0 }, reason: null });
     });
 
-    it('should return null when command fails (no upstream / detached HEAD)', async () => {
-      // execGitCommand returns null on rejection (e.g., @{upstream} resolution failure)
+    // Issue #1515 (B-1): failures still yield aheadBehind=null, but now carry a
+    // classified reason so the UI can explain the missing chip.
+    it('should report reason=no_upstream when the branch has no upstream', async () => {
       execFileMock.mockRejectedValue(new Error('no upstream configured'));
 
       const { getAheadBehind } = await import('@/lib/git/git-utils');
       const result = await getAheadBehind('/path/to/worktree');
 
-      expect(result).toBeNull();
+      expect(result).toEqual({ aheadBehind: null, reason: 'no_upstream' });
     });
 
-    it('should return null on timeout', async () => {
+    it('should report reason=error on timeout', async () => {
       const timeoutError = Object.assign(new Error('timed out'), { killed: true });
       execFileMock.mockRejectedValue(timeoutError);
 
       const { getAheadBehind } = await import('@/lib/git/git-utils');
       const result = await getAheadBehind('/path/to/worktree');
 
-      expect(result).toBeNull();
+      expect(result).toEqual({ aheadBehind: null, reason: 'error' });
     });
 
-    it('should return null when output has wrong tab-count (parse failure)', async () => {
+    it('should report reason=error when output has wrong tab-count (parse failure)', async () => {
       execFileMock.mockResolvedValue({ stdout: '1 2', stderr: '' });
 
       const { getAheadBehind } = await import('@/lib/git/git-utils');
       const result = await getAheadBehind('/path/to/worktree');
 
-      expect(result).toBeNull();
+      expect(result).toEqual({ aheadBehind: null, reason: 'error' });
     });
 
-    it('should return null when output has too many tab fields', async () => {
+    it('should report reason=error when output has too many tab fields', async () => {
       execFileMock.mockResolvedValue({ stdout: '1\t2\t3', stderr: '' });
 
       const { getAheadBehind } = await import('@/lib/git/git-utils');
       const result = await getAheadBehind('/path/to/worktree');
 
-      expect(result).toBeNull();
+      expect(result).toEqual({ aheadBehind: null, reason: 'error' });
     });
 
-    it('should return null when output contains non-integer values', async () => {
+    it('should report reason=error when output contains non-integer values', async () => {
       execFileMock.mockResolvedValue({ stdout: 'abc\txyz', stderr: '' });
 
       const { getAheadBehind } = await import('@/lib/git/git-utils');
       const result = await getAheadBehind('/path/to/worktree');
 
-      expect(result).toBeNull();
+      expect(result).toEqual({ aheadBehind: null, reason: 'error' });
     });
 
-    it('should return null for empty output', async () => {
+    it('should report reason=error for empty output', async () => {
       execFileMock.mockResolvedValue({ stdout: '', stderr: '' });
 
       const { getAheadBehind } = await import('@/lib/git/git-utils');
       const result = await getAheadBehind('/path/to/worktree');
 
-      expect(result).toBeNull();
+      expect(result).toEqual({ aheadBehind: null, reason: 'error' });
     });
 
-    it('should never throw (all failure modes resolve to null)', async () => {
+    it('should never throw (all failure modes resolve to a null-count result)', async () => {
       execFileMock.mockRejectedValue(new Error('catastrophic git failure'));
 
       const { getAheadBehind } = await import('@/lib/git/git-utils');
-      await expect(getAheadBehind('/path/to/worktree')).resolves.toBeNull();
+      await expect(getAheadBehind('/path/to/worktree')).resolves.toEqual({
+        aheadBehind: null,
+        reason: 'error',
+      });
     });
   });
 
