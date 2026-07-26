@@ -22,8 +22,17 @@
 #
 # Usage:
 #   monitor.sh [--interval 20] [--idle-threshold 8] [--session-prefix cm] \
-#              [--resend-message continue] [--max-resends 2] \
+#              [--resend-message continue] [--max-resends 2] [--max-polls 0] \
 #              <worktree-id> [<worktree-id> ...]
+#
+#   --max-polls N  stop after N poll rounds and exit 0 even if workers are still
+#                  working; 0 (default) keeps polling until every worker is
+#                  COMPLETE, i.e. the operator behaviour is unchanged. A bounded
+#                  run ends on its own instead of having to be killed from the
+#                  outside, which is what lets the loop be tested deterministically
+#                  (Issue #1527) and doubles as a one-shot `--max-polls 1` probe.
+#                  It only adds a stop condition — no state or intervention rule
+#                  looks at it.
 #
 # Env:
 #   CM  — commandmate launcher (default: "npx commandmate@latest"; pinned so the
@@ -35,6 +44,7 @@ IDLE_THRESHOLD=8          # 150s+ of idle at 20s polls; xhigh workers think long
 SESSION_PREFIX="cm"
 RESEND_MESSAGE="continue"  # sent after the CLI exhausts its own retries
 MAX_RESENDS=2
+MAX_POLLS=0               # 0 = poll until every worker is COMPLETE (operator default)
 CM=${CM:-"npx commandmate@latest"}
 
 while [ $# -gt 0 ]; do
@@ -44,6 +54,7 @@ while [ $# -gt 0 ]; do
     --session-prefix) shift; SESSION_PREFIX=${1:-cm};;
     --resend-message) shift; RESEND_MESSAGE=${1:-continue};;
     --max-resends) shift; MAX_RESENDS=${1:-2};;
+    --max-polls) shift; MAX_POLLS=${1:-0};;
     --) shift; break;;
     -*) echo "monitor.sh: unknown flag $1" >&2; exit 2;;
     *) break;;
@@ -95,6 +106,7 @@ count_commits() {
 
 echo "monitor: watching $n_ids worker(s), interval=${INTERVAL}s, idle-threshold=${IDLE_THRESHOLD}, max-resends=${MAX_RESENDS}"
 
+poll_round=0
 done_count=0
 while [ "$done_count" -lt "$n_ids" ]; do
   done_count=0
@@ -198,6 +210,16 @@ while [ "$done_count" -lt "$n_ids" ]; do
         ;;
     esac
   done
+
+  poll_round=$((poll_round + 1))
+  # Deterministic stop for bounded runs: end the loop from the inside after
+  # MAX_POLLS rounds rather than relying on something outside to kill it. Checked
+  # after the completion tally so a run that finishes on its final round still
+  # reports "all complete"; skipped entirely when MAX_POLLS is 0.
+  if [ "$done_count" -lt "$n_ids" ] && [ "$MAX_POLLS" -gt 0 ] && [ "$poll_round" -ge "$MAX_POLLS" ]; then
+    echo "monitor: reached --max-polls ($MAX_POLLS) after $poll_round poll round(s); stopping"
+    exit 0
+  fi
 
   [ "$done_count" -lt "$n_ids" ] && sleep "$INTERVAL"
 done

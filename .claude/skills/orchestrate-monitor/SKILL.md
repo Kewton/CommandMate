@@ -57,6 +57,10 @@ NOT_RUNNING → is_retrying(→GENERATING) → PROMPT → GENERATING → RATE_LI
 `monitor.sh` の `count_commits` / `count_uncommitted` は運用の checkout に合わせて配線するフック。
 既定は 0 を返す（ループ単体で動く）ので、実運用では worker の作業ツリーに向ける。
 `--resend-message` / `--max-resends` はリトライ枯渇死からの再送設定（既定 `continue` / 2 回）。
+`--max-polls N` は N 回ポーリングしたら（ワーカーが未完了でも）exit 0 で抜ける停止条件。既定 0 =
+全ワーカーが COMPLETE になるまで回り続ける（運用時の挙動は従来どおり）。判定ロジックには一切
+関与せず、ループを外部から kill せずに決定論的に終わらせるためのもの（#1527 の単体テストと、
+`--max-polls 1` の 1 回だけ様子を見るプローブで使う）。
 
 ---
 
