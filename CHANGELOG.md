@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **orchestrate-monitor の `monitor-resend.test.ts` が壁時計 timeout に判定を委ねていた問題を修正** (#1527): ループが COMPLETE 以外で終わらないため、テストは `spawnSync` の 2.5 秒 timeout で監視ループを kill し、その時点までに何ポーリング進めたかで判定していた。マシン負荷次第で 2 回目のポーリングに届かず「`resend budget spent` を含むこと」が低頻度で落ちる一方、否定的アサーション2件（`expect(tmuxCalls).toEqual([])`）は**ループが0回でも無条件で PASS** する偽の緑だった。(1) `monitor.sh` に `--max-polls N`（既定 0 = 従来どおり全ワーカー COMPLETE まで継続）を追加し、ループが内側から決定論的に exit 0 できるようにした。停止条件のみの追加で状態判定・介入条件は不変、bash 3.2 互換も維持。(2) テスト側は `--interval 0` ＋ `--idle-threshold 1` ＋ ケースごとに必要なポーリング回数を定数化し、**launcher shim の呼び出し回数・exit 0・`--max-polls` 到達ログを検証してからでないと空を主張しない** gate を通す。ループを1回で打ち切る／必ず介入する変異を注入すると当該テストが実際に赤くなることを確認済み。実行時間も 12.5s → 2.8s に短縮した。
+
 ## [0.15.0] - 2026-07-26
 
 > **Highlight**: モバイルとリポジトリ登録まわりの体験を厚くしたリリース。**リポジトリ登録の Local Path を GUI で選べる**ようになり（`CM_BROWSE_ROOTS` 新設、認証必須のディレクトリ一覧 API 込み）、**Markdown 編集で Tab インデント**が効くようになり、**モバイルの Markdown 閲覧/編集が1画面に統合**された。あわせて GitPane の ahead/behind が「なぜ数字が出ないのか」を説明するようになり（🔄 が実際に `git fetch` するよう変更、最終 fetch 時刻とバッジを追加）、新規ブランチの既定エージェントを実際に使う3件へ絞った。並列オーケストレーション運用中に発見した監視 Skill の欠陥5件と、モバイル統合の回帰1件も同時に修正している。
