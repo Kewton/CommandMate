@@ -986,22 +986,30 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
               />
             </div>
           </div>
-        </div>
 
-        <MobileFileActionsSheet
-          open={actionsOpen}
-          onClose={() => setActionsOpen(false)}
-          onSearch={() => {
-            setMarkdownMode('viewer');
-            openSearch();
-          }}
-          onCopyContent={handleCopy}
-          onCopyPath={handleCopyPath}
-          downloadUrl={downloadUrl}
-          downloadName={downloadName}
-          contentCopied={copied}
-          pathCopied={pathCopied}
-        />
+          {/* Must stay INSIDE this screen. The screen is fixed at
+              Z_INDEX.MAXIMIZED_EDITOR (55) with an opaque background, so the
+              sheet's own z-50 only outranks the document body while it shares
+              this stacking context. Rendered as a sibling it paints *behind*
+              the screen: every row stays in the a11y tree but hit-testing
+              lands on the markdown content, so all four actions are dead
+              (#1528). jsdom has no paint order, so only a real-browser e2e
+              catches a regression here. */}
+          <MobileFileActionsSheet
+            open={actionsOpen}
+            onClose={() => setActionsOpen(false)}
+            onSearch={() => {
+              setMarkdownMode('viewer');
+              openSearch();
+            }}
+            onCopyContent={handleCopy}
+            onCopyPath={handleCopyPath}
+            downloadUrl={downloadUrl}
+            downloadName={downloadName}
+            contentCopied={copied}
+            pathCopied={pathCopied}
+          />
+        </div>
       </>
     );
   }
