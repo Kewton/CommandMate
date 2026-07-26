@@ -190,6 +190,32 @@ export function sanitizePath(input: string): string {
 }
 
 /**
+ * Normalize a comma-separated CM_BROWSE_ROOTS value (Issue #1517).
+ *
+ * @param input - Raw comma-separated directories, or undefined.
+ * @param resolveEntry - Per-entry resolver; pass `resolvePath` to expand `~`.
+ * @returns Normalized comma-separated value, or undefined when empty.
+ */
+export function normalizeBrowseRoots(
+  input: string | undefined,
+  resolveEntry: (entry: string) => string = sanitizePath
+): string | undefined {
+  if (!input) return undefined;
+
+  const roots = Array.from(
+    new Set(
+      input
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0)
+        .map(resolveEntry)
+    )
+  );
+
+  return roots.length > 0 ? roots.join(',') : undefined;
+}
+
+/**
  * Validate port number
  * SF-SEC-3: Port validation
  */
@@ -251,6 +277,12 @@ export class EnvSetup {
       `CM_LOG_LEVEL=${config.CM_LOG_LEVEL}`,
       `CM_LOG_FORMAT=${config.CM_LOG_FORMAT}`,
     ];
+
+    // Issue #1517: omitted entirely when unset, so the file does not imply that
+    // browsing needs configuring — CM_ROOT_DIR is always browsable.
+    if (config.CM_BROWSE_ROOTS) {
+      lines.push(`CM_BROWSE_ROOTS=${escapeEnvValue(config.CM_BROWSE_ROOTS)}`);
+    }
 
     lines.push('');
 

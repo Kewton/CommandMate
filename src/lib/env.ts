@@ -173,6 +173,13 @@ export interface Env {
   /** Root directory for worktree scanning */
   CM_ROOT_DIR: string;
 
+  /**
+   * Issue #1517: extra comma-separated directories the folder picker may browse
+   * and register from. Read via `getAllowedBrowseRoots()`, which always unions
+   * it with CM_ROOT_DIR.
+   */
+  CM_BROWSE_ROOTS?: string;
+
   /** Server port */
   CM_PORT: number;
 

@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, createEvent } from '@testing-library/react';
 import { MarkdownEditor } from '@/components/worktree/MarkdownEditor';
 import { ToastProvider } from '@/components/common/Toast';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
@@ -303,7 +303,9 @@ describe('MarkdownEditor', () => {
         expect(screen.getByText(/saved/i)).toBeInTheDocument();
       });
 
-      expect(onSave).toHaveBeenCalledWith('docs/readme.md');
+      // Issue #1519: the persisted content rides along so a host holding the
+      // file (mobile FileViewer) can refresh without re-fetching.
+      expect(onSave).toHaveBeenCalledWith('docs/readme.md', 'Modified content');
     });
 
     it('should handle Ctrl+S keyboard shortcut', async () => {
@@ -1358,7 +1360,7 @@ def hello():
 
         // onSave should be called (file tree refresh)
         await waitFor(() => {
-          expect(onSave).toHaveBeenCalledWith('docs/readme.md');
+          expect(onSave).toHaveBeenCalledWith('docs/readme.md', 'Auto-save Ctrl+S content');
         });
       });
     });
@@ -1617,6 +1619,227 @@ def hello():
         expect(screen.getByTestId('markdown-preview-toc-toggle')).toBeInTheDocument();
       });
       expect(screen.queryByTestId('markdown-preview-toc')).not.toBeInTheDocument();
+    });
+  });
+
+  /**
+   * Issue #1518: Tab indent / Shift+Tab outdent.
+   *
+   * jsdom has no `document.execCommand`, so the plain cases exercise the React
+   * fallback path; the native path is covered by stubbing execCommand and
+   * asserting the textarea is handed the right replacement range.
+   */
+  describe('Tab indentation (Issue #1518)', () => {
+    // An earlier suite swaps in a getItem stub that ignores the backing store and
+    // survives clearAllMocks; reset restores vi.fn's original implementation.
+    beforeEach(() => {
+      localStorageMock.getItem.mockReset();
+    });
+
+    /** Put the caret / selection where the test needs it before pressing Tab. */
+    function selectRange(textarea: HTMLTextAreaElement, start: number, end: number) {
+      textarea.focus();
+      textarea.setSelectionRange(start, end);
+    }
+
+    async function renderWithContent(value: string) {
+      render(<MarkdownEditor {...defaultProps} />);
+      await waitForEditorReady();
+      const textarea = screen.getByTestId('markdown-editor-textarea') as HTMLTextAreaElement;
+      fireEvent.change(textarea, { target: { value } });
+      return textarea;
+    }
+
+    it('inserts two spaces at the caret and keeps focus in the textarea', async () => {
+      const textarea = await renderWithContent('hello');
+      selectRange(textarea, 0, 0);
+
+      fireEvent.keyDown(textarea, { key: 'Tab' });
+
+      await waitFor(() => expect(textarea.value).toBe('  hello'));
+      expect(textarea.value).not.toContain('\t');
+      expect(document.activeElement).toBe(textarea);
+      expect(textarea.selectionStart).toBe(2);
+    });
+
+    it('applies exactly one indent per keystroke (double-application regression)', async () => {
+      // handleKeyDown is bound to the textarea AND the root div, so the same
+      // native event reaches two handlers. One press must still indent once.
+      const textarea = await renderWithContent('hello');
+      selectRange(textarea, 0, 0);
+
+      fireEvent.keyDown(textarea, { key: 'Tab' });
+
+      await waitFor(() => expect(textarea.value).toBe('  hello'));
+      expect(textarea.value).not.toBe('    hello');
+    });
+
+    it('saves once per Ctrl+S despite the handler being bound twice', async () => {
+      const textarea = await renderWithContent('Modified content');
+
+      fireEvent.keyDown(textarea, { key: 's', ctrlKey: true });
+
+      await waitFor(() => {
+        const puts = mockFetch.mock.calls.filter((call) => call[1]?.method === 'PUT');
+        expect(puts).toHaveLength(1);
+      });
+    });
+
+    it('indents every line of a multi-line selection and keeps it selected', async () => {
+      const value = 'one\ntwo';
+      const textarea = await renderWithContent(value);
+      selectRange(textarea, 0, value.length);
+
+      fireEvent.keyDown(textarea, { key: 'Tab' });
+
+      await waitFor(() => expect(textarea.value).toBe('  one\n  two'));
+      expect(textarea.selectionStart).toBe(0);
+      expect(textarea.selectionEnd).toBe('  one\n  two'.length);
+    });
+
+    it('outdents on Shift+Tab', async () => {
+      const textarea = await renderWithContent('    deep');
+      selectRange(textarea, 8, 8);
+
+      fireEvent.keyDown(textarea, { key: 'Tab', shiftKey: true });
+
+      await waitFor(() => expect(textarea.value).toBe('  deep'));
+    });
+
+    it('lets Shift+Tab move focus when there is nothing to outdent', async () => {
+      const textarea = await renderWithContent('flush');
+      selectRange(textarea, 3, 3);
+
+      const event = createEvent.keyDown(textarea, { key: 'Tab', shiftKey: true });
+      fireEvent(textarea, event);
+
+      expect(event.defaultPrevented).toBe(false);
+      expect(textarea.value).toBe('flush');
+    });
+
+    it('uses execCommand so a single Ctrl+Z undoes the indent', async () => {
+      const execCommand = vi.fn().mockReturnValue(true);
+      Object.defineProperty(document, 'execCommand', {
+        value: execCommand,
+        configurable: true,
+        writable: true,
+      });
+
+      try {
+        const textarea = await renderWithContent('hello');
+        selectRange(textarea, 0, 0);
+
+        fireEvent.keyDown(textarea, { key: 'Tab' });
+
+        expect(execCommand).toHaveBeenCalledTimes(1);
+        expect(execCommand).toHaveBeenCalledWith('insertText', false, '  ');
+        // The native path must not also write React state, or the edit lands twice.
+        expect(textarea.value).toBe('hello');
+      } finally {
+        delete (document as { execCommand?: unknown }).execCommand;
+      }
+    });
+
+    it('falls back to React state when execCommand reports failure', async () => {
+      const execCommand = vi.fn().mockReturnValue(false);
+      Object.defineProperty(document, 'execCommand', {
+        value: execCommand,
+        configurable: true,
+        writable: true,
+      });
+
+      try {
+        const textarea = await renderWithContent('hello');
+        selectRange(textarea, 0, 0);
+
+        fireEvent.keyDown(textarea, { key: 'Tab' });
+
+        await waitFor(() => expect(textarea.value).toBe('  hello'));
+        expect(textarea.selectionStart).toBe(2);
+      } finally {
+        delete (document as { execCommand?: unknown }).execCommand;
+      }
+    });
+
+    it('marks the file dirty so preview and auto-save stay wired up', async () => {
+      const textarea = await renderWithContent('hello');
+      selectRange(textarea, 0, 0);
+
+      fireEvent.keyDown(textarea, { key: 'Tab' });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('dirty-indicator')).toBeInTheDocument();
+      });
+    });
+
+    it('indents from the toolbar button without stealing focus from the textarea', async () => {
+      const textarea = await renderWithContent('hello');
+      selectRange(textarea, 0, 0);
+
+      fireEvent.click(screen.getByTestId('editor-indent-button'));
+
+      await waitFor(() => expect(textarea.value).toBe('  hello'));
+      expect(document.activeElement).toBe(textarea);
+    });
+
+    it('outdents from the toolbar button', async () => {
+      const textarea = await renderWithContent('    deep');
+      selectRange(textarea, 8, 8);
+
+      fireEvent.click(screen.getByTestId('editor-outdent-button'));
+
+      await waitFor(() => expect(textarea.value).toBe('  deep'));
+    });
+
+    it('Ctrl+M gives Tab back to focus navigation and persists the choice', async () => {
+      const textarea = await renderWithContent('hello');
+      selectRange(textarea, 0, 0);
+
+      fireEvent.keyDown(textarea, { key: 'm', ctrlKey: true });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('editor-tab-focus-toggle')).toHaveAttribute(
+          'aria-pressed',
+          'true'
+        );
+      });
+      expect(localStorageMock.setItem).toHaveBeenCalledWith(
+        'commandmate:md-editor-tab-moves-focus',
+        'true'
+      );
+
+      const event = createEvent.keyDown(textarea, { key: 'Tab' });
+      fireEvent(textarea, event);
+
+      expect(event.defaultPrevented).toBe(false);
+      expect(textarea.value).toBe('hello');
+    });
+
+    it('restores the persisted Tab-moves-focus setting on mount', async () => {
+      localStorageMock.setItem('commandmate:md-editor-tab-moves-focus', 'true');
+
+      const textarea = await renderWithContent('hello');
+      selectRange(textarea, 0, 0);
+
+      const event = createEvent.keyDown(textarea, { key: 'Tab' });
+      fireEvent(textarea, event);
+
+      expect(event.defaultPrevented).toBe(false);
+      expect(textarea.value).toBe('hello');
+    });
+
+    it('indents yaml text mode without inserting a tab character', async () => {
+      render(<MarkdownEditor worktreeId="test-worktree-123" filePath="config.yaml" />);
+      await waitForEditorReady();
+
+      const textarea = screen.getByTestId('markdown-editor-textarea') as HTMLTextAreaElement;
+      fireEvent.change(textarea, { target: { value: 'key:\nvalue' } });
+      selectRange(textarea, 5, 5);
+
+      fireEvent.keyDown(textarea, { key: 'Tab' });
+
+      await waitFor(() => expect(textarea.value).toBe('key:\n  value'));
+      expect(textarea.value).not.toContain('\t');
     });
   });
 });

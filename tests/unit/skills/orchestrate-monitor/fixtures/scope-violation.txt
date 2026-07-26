@@ -1,0 +1,3 @@
+# Deploy step below forgot to pin the launcher version.
+RUN npx commandmate start --daemon
+RUN npx commandmate@latest status --all

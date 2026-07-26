@@ -70,6 +70,66 @@ export async function execGitCommand(
 }
 
 /**
+ * Outcome of {@link execGitCommandCapture}: a non-throwing read that keeps the
+ * stderr so the caller can CLASSIFY the failure (Issue #1515, B-1).
+ *
+ * SECURITY: `stderr` is server-side material only. git stderr can contain
+ * credential-bearing remote URLs and absolute paths, so it must never be placed
+ * in an HTTP body or a log — callers read it for regex matching and discard it.
+ */
+export interface GitCommandOutcome {
+  /** True when git exited 0. */
+  ok: boolean;
+  /** Trimmed stdout (empty string when the command failed). */
+  stdout: string;
+  /** Raw stderr. SERVER-SIDE ONLY — never return or log this verbatim. */
+  stderr: string;
+  /** True when the process was killed by the timeout. */
+  timedOut: boolean;
+}
+
+/**
+ * Execute a READ-ONLY git command like {@link execGitCommand} (never throws,
+ * same default 1s timeout) but return the stderr alongside the outcome instead
+ * of collapsing every failure into `null` (Issue #1515, B-1).
+ *
+ * execGitCommand is intentionally left untouched: its all-failures-to-null
+ * contract is relied on by the high-frequency getGitStatus path. This variant
+ * exists for the single caller (getAheadBehind) that must tell "no upstream"
+ * apart from "upstream gone" / "detached" / "error".
+ *
+ * Deliberately does NOT log: the failures it reports are EXPECTED states
+ * (a branch with no upstream) polled every few seconds, and its caller logs a
+ * classified reason instead of the raw stderr.
+ *
+ * @param args - Git command arguments (static array; no shell)
+ * @param cwd - Working directory (must be from DB, trusted source)
+ * @param timeout - Timeout in ms (defaults to the 1s status-read timeout)
+ */
+export async function execGitCommandCapture(
+  args: string[],
+  cwd: string,
+  timeout: number = GIT_COMMAND_TIMEOUT_MS
+): Promise<GitCommandOutcome> {
+  try {
+    const { stdout, stderr } = await execFileAsync('git', args, { cwd, timeout });
+    return { ok: true, stdout: stdout.trim(), stderr: stderr ?? '', timedOut: false };
+  } catch (error) {
+    const err = error as Error & { code?: string | number; killed?: boolean; stderr?: string };
+    const timedOut =
+      err.killed === true ||
+      err.code === 'ERR_CHILD_PROCESS_EXEC_TIMEOUT' ||
+      err.code === 'ETIMEDOUT';
+    return {
+      ok: false,
+      stdout: '',
+      stderr: `${err.stderr ?? ''} ${err.message ?? ''}`,
+      timedOut,
+    };
+  }
+}
+
+/**
  * Execute a git command with timeout, distinguishing error types
  * Unlike execGitCommand, this throws typed errors for API-level error handling.
  *
@@ -312,6 +372,12 @@ export async function execGitConflictAware(
  * Does NOT use execGitCommandTyped (whose preserve regex stays unmodified) and
  * does NOT log the raw stderr/message (DR4-002): a failed network op's stderr can
  * echo a credential-bearing remote URL, and the typed error carries no message.
+ *
+ * Issue #1515 (E-1): runs with `GIT_TERMINAL_PROMPT=0` so a remote that needs
+ * credentials fails FAST with "could not read Username" (-> GitAuthFailedError,
+ * 401) instead of blocking on an interactive prompt until the timeout. This is
+ * load-bearing for the Current Status refresh button, which now fetches (A-1) on
+ * a user click and must never leave the UI waiting on an invisible prompt.
  */
 export async function execGitNetworkAware(
   args: string[],
@@ -319,7 +385,11 @@ export async function execGitNetworkAware(
   timeout: number
 ): Promise<string> {
   try {
-    const { stdout } = await execFileAsync('git', args, { cwd: worktreePath, timeout });
+    const { stdout } = await execFileAsync('git', args, {
+      cwd: worktreePath,
+      timeout,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    });
     return stdout;
   } catch (error) {
     const err = error as Error & { code?: string | number; killed?: boolean; stderr?: string };

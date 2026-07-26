@@ -231,7 +231,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     pendingInsertTextMap,
     rosterReady,
     setActiveInstanceId,
-    setEditorFilePath,
     setFocusedSplitIndex,
     setHistorySubTab,
     setIsEditorMaximized,
@@ -688,35 +687,16 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           endDisabled={!activeSessionRunning}
         />
 
-        {/* File Viewer Modal (Mobile only) */}
+        {/* Issue #1519: single mobile file screen — markdown viewing and editing
+            now live inside FileViewer, so there is no separate editor modal. */}
         <FileViewer
           isOpen={mobileFileViewerPath !== null}
           onClose={handleMobileFileViewerClose}
           worktreeId={worktreeId}
           filePath={mobileFileViewerPath ?? ''}
-          onEditMarkdown={setEditorFilePath}
+          onFileSaved={handleEditorSave}
+          onOpenFile={handleFilePathClick}
         />
-        {/* Markdown Editor Modal (Mobile) - Issue #104: disableClose when editor is maximized */}
-        {editorFilePath && (
-          <Modal
-            isOpen={true}
-            onClose={handleEditorClose}
-            title={editorFilePath.split('/').pop() || tWorktree('fileViewer.editor')}
-            size="full"
-            disableClose={isEditorMaximized}
-          >
-            <div className="h-[80vh]">
-              <MarkdownEditor
-                worktreeId={worktreeId}
-                filePath={editorFilePath}
-                onClose={handleEditorClose}
-                onSave={handleEditorSave}
-                onMaximizedChange={setIsEditorMaximized}
-                initialViewMode="split"
-              />
-            </div>
-          </Modal>
-        )}
         {/* Hidden file input for upload (Mobile) */}
         <input
           ref={fileInputRef}

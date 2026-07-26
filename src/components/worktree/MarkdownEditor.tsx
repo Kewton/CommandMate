@@ -49,6 +49,7 @@ import {
 import { MarkdownToc } from '@/components/worktree/MarkdownToc';
 import { extractToc, TOC_VISIBLE_STORAGE_KEY } from '@/lib/markdown-toc';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { useIsPortrait } from '@/hooks/useIsPortrait';
 import { useFullscreen } from '@/hooks/useFullscreen';
 import { useLocalStorageState } from '@/hooks/useLocalStorageState';
 import { useAutoSave } from '@/hooks/useAutoSave';
@@ -56,6 +57,7 @@ import { useSwipeGesture } from '@/hooks/useSwipeGesture';
 import { useVirtualKeyboard } from '@/hooks/useVirtualKeyboard';
 import { Z_INDEX } from '@/config/z-index';
 import { COPY_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
+import { applyIndent, applyOutdent, type IndentEdit } from '@/lib/editor/indent';
 import type { EditorProps, EditorFileType, ViewMode } from '@/types/markdown-editor';
 import {
   VIEW_MODE_STRATEGIES,
@@ -63,6 +65,8 @@ import {
   LOCAL_STORAGE_KEY_SPLIT_RATIO,
   LOCAL_STORAGE_KEY_MAXIMIZED,
   LOCAL_STORAGE_KEY_AUTO_SAVE,
+  LOCAL_STORAGE_KEY_TAB_MOVES_FOCUS,
+  INDENT_UNIT,
   AUTO_SAVE_DEBOUNCE_MS,
   PREVIEW_DEBOUNCE_MS,
   FILE_SIZE_LIMITS,
@@ -248,6 +252,9 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   onMaximizedChange,
   onDirtyChange,
   onOpenFile,
+  initialContent,
+  embedded = false,
+  onContentChange,
 }: EditorProps) {
   // Resolve file type: explicit prop > auto-detect from extension (Issue #646)
   const fileType = fileTypeProp ?? detectFileType(filePath);
@@ -256,17 +263,22 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   const tWorktree = useTranslations('worktree');
   const confirm = useConfirm();
 
-  // State
-  const [content, setContent] = useState('');
-  const [originalContent, setOriginalContent] = useState('');
-  const [previewContent, setPreviewContent] = useState('');
+  // State. When the host supplies `initialContent` (Issue #1519) the editor is
+  // seeded from it and never fetches, so switching modes costs no round-trip.
+  const isHostedContent = initialContent !== undefined;
+  const seedContent = initialContent ?? '';
+  const [content, setContent] = useState(seedContent);
+  const [originalContent, setOriginalContent] = useState(seedContent);
+  const [previewContent, setPreviewContent] = useState(seedContent);
   const [viewMode, setViewMode] = useState<ViewMode>(() =>
-    isTextMode ? 'editor' : getInitialViewMode(initialViewMode)
+    isTextMode || embedded ? 'editor' : getInitialViewMode(initialViewMode)
   );
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(!isHostedContent);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showLargeFileWarning, setShowLargeFileWarning] = useState(false);
+  const [showLargeFileWarning, setShowLargeFileWarning] = useState(
+    () => isHostedContent && new Blob([seedContent]).size > FILE_SIZE_LIMITS.WARNING_THRESHOLD
+  );
 
   // Copy to clipboard state
   const [copied, setCopied] = useState(false);
@@ -286,9 +298,14 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   const beforeUnloadRef = useRef<((e: BeforeUnloadEvent) => void) | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const contentAreaRef = useRef<HTMLDivElement>(null);
+  /** Selection to restore once a fallback-path indent has re-rendered. */
+  const pendingSelectionRef = useRef<{ start: number; end: number } | null>(null);
 
   // Mobile detection
   const isMobile = useIsMobile();
+  // Issue #1519: rotation-aware, unlike the render-time innerHeight comparison
+  // it replaces (which never re-evaluated after the device turned).
+  const isPortrait = useIsPortrait();
 
   // Issue #549: Default to preview tab on mobile
   useEffect(() => {
@@ -334,6 +351,15 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     validate: isValidBoolean,
   });
 
+  // Issue #1518: WCAG 2.1.2 escape hatch — when on, Tab keeps its default
+  // focus-move behaviour instead of indenting. Escape is already taken (it
+  // exits fullscreen), so the toggle is Ctrl+M.
+  const { value: tabMovesFocus, setValue: setTabMovesFocus } = useLocalStorageState({
+    key: LOCAL_STORAGE_KEY_TAB_MOVES_FOCUS,
+    defaultValue: false,
+    validate: isValidBoolean,
+  });
+
   // Inline preview TOC visibility, shared with the standalone file viewer
   // (Issue #1007 / #1009) so toggling one keeps the other in sync.
   const { value: tocVisible, setValue: setTocVisible } = useLocalStorageState({
@@ -367,7 +393,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   }, [isDirty, onDirtyChange]);
 
   // In mobile portrait mode with split view, use tab switching (not in text mode)
-  const isMobilePortrait = isMobile && typeof window !== 'undefined' && window.innerHeight > window.innerWidth;
+  const isMobilePortrait = isMobile && isPortrait;
   const showMobileTabs = !isTextMode && isMobilePortrait && viewMode === 'split';
 
   /**
@@ -485,7 +511,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
       showToast(tWorktree('editor.saveSuccess'), 'success');
 
       if (onSave) {
-        onSave(filePath);
+        onSave(filePath, content);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : tWorktree('editor.saveError');
@@ -513,8 +539,9 @@ export const MarkdownEditor = memo(function MarkdownEditor({
       const newContent = e.target.value;
       setContent(newContent);
       updatePreview(newContent);
+      onContentChange?.(newContent);
     },
-    [updatePreview]
+    [updatePreview, onContentChange]
   );
 
   /**
@@ -603,12 +630,18 @@ export const MarkdownEditor = memo(function MarkdownEditor({
    */
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // This handler is bound to both the textarea and the root div, so a
+      // keystroke inside the textarea would otherwise run it twice — one Tab
+      // press indenting twice, one Ctrl+S saving twice (Issue #1518).
+      // Events from anywhere else still reach it via the root div.
+      if (e.target === textareaRef.current && e.currentTarget !== e.target) return;
+
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
         if (isAutoSaveEnabled) {
           void (async () => {
             await saveNow();
-            onSave?.(filePath);
+            onSave?.(filePath, content);
           })();
         } else {
           saveContent();
@@ -628,8 +661,124 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         return;
       }
     },
-    [saveContent, isAutoSaveEnabled, saveNow, onSave, filePath, toggleFullscreen, exitFullscreen, isMaximized]
+    [saveContent, isAutoSaveEnabled, saveNow, onSave, filePath, content, toggleFullscreen, exitFullscreen, isMaximized]
   );
+
+  /**
+   * Apply a computed indent/outdent edit to the textarea (Issue #1518).
+   *
+   * `execCommand('insertText')` is the first choice because it goes through the
+   * browser's own editing pipeline: one Ctrl+Z reverts the indent, and the
+   * resulting input event drives `handleContentChange`, so preview, dirty state
+   * and auto-save stay wired up with no extra plumbing.
+   */
+  const applyEditorEdit = useCallback(
+    (edit: IndentEdit) => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+
+      if (edit.value === textarea.value) {
+        textarea.setSelectionRange(edit.selectionStart, edit.selectionEnd);
+        return;
+      }
+
+      textarea.focus();
+      textarea.setSelectionRange(edit.replaceStart, edit.replaceEnd);
+
+      let insertedNatively = false;
+      try {
+        insertedNatively =
+          typeof document.execCommand === 'function' &&
+          document.execCommand('insertText', false, edit.replacement);
+      } catch {
+        insertedNatively = false;
+      }
+
+      if (insertedNatively) {
+        textarea.setSelectionRange(edit.selectionStart, edit.selectionEnd);
+        return;
+      }
+
+      // Fallback where execCommand is unavailable (jsdom, older engines): drive
+      // React state and restore the caret after the controlled re-render, since
+      // replacing the value would otherwise park it at the end.
+      pendingSelectionRef.current = { start: edit.selectionStart, end: edit.selectionEnd };
+      setContent(edit.value);
+      updatePreview(edit.value);
+      onContentChange?.(edit.value);
+    },
+    [updatePreview, onContentChange]
+  );
+
+  const handleIndent = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    applyEditorEdit(
+      applyIndent(textarea.value, textarea.selectionStart, textarea.selectionEnd, INDENT_UNIT)
+    );
+  }, [applyEditorEdit]);
+
+  const handleOutdent = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const edit = applyOutdent(
+      textarea.value,
+      textarea.selectionStart,
+      textarea.selectionEnd,
+      INDENT_UNIT
+    );
+    if (edit) applyEditorEdit(edit);
+  }, [applyEditorEdit]);
+
+  const handleToggleTabMovesFocus = useCallback(() => {
+    setTabMovesFocus((prev) => !prev);
+  }, [setTabMovesFocus]);
+
+  /**
+   * Textarea-only key handling: Tab indent / Shift+Tab outdent plus the Ctrl+M
+   * escape-hatch toggle. Other shortcuts fall through to {@link handleKeyDown}.
+   */
+  const handleTextareaKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // Ctrl, never Cmd: Cmd+M minimises the window on macOS.
+      if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'm' || e.key === 'M')) {
+        e.preventDefault();
+        handleToggleTabMovesFocus();
+        return;
+      }
+
+      if (e.key === 'Tab' && !tabMovesFocus && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const textarea = e.currentTarget;
+        const edit = e.shiftKey
+          ? applyOutdent(textarea.value, textarea.selectionStart, textarea.selectionEnd, INDENT_UNIT)
+          : applyIndent(textarea.value, textarea.selectionStart, textarea.selectionEnd, INDENT_UNIT);
+
+        // A null outdent means there was nothing to remove: leave the default
+        // backwards focus move alone so the editor is never a keyboard trap.
+        if (edit) {
+          e.preventDefault();
+          applyEditorEdit(edit);
+        }
+        return;
+      }
+
+      handleKeyDown(e);
+    },
+    [tabMovesFocus, handleToggleTabMovesFocus, applyEditorEdit, handleKeyDown]
+  );
+
+  // Restore the selection a fallback-path edit asked for, once the controlled
+  // textarea has re-rendered with the new value.
+  useEffect(() => {
+    const pending = pendingSelectionRef.current;
+    if (!pending) return;
+    pendingSelectionRef.current = null;
+
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.focus();
+    textarea.setSelectionRange(pending.start, pending.end);
+  }, [content]);
 
   /** Shared line number gutter + textarea rendering (DRY: used by both mobile and desktop layouts) */
   const renderEditorInner = useCallback((showFocusRing: boolean) => (
@@ -648,14 +797,14 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         data-testid="markdown-editor-textarea"
         value={content}
         onChange={handleContentChange}
-        onKeyDown={handleKeyDown}
+        onKeyDown={handleTextareaKeyDown}
         onScroll={handleEditorScroll}
         className={`flex-1 py-4 pr-4 pl-3 font-mono text-sm resize-none bg-surface text-foreground focus:outline-none leading-[1.5rem]${showFocusRing ? ' focus:ring-2 focus:ring-ring focus:ring-inset' : ''}`}
         placeholder={isTextMode ? tWorktree('editor.placeholder') : tWorktree('editor.placeholderMarkdown')}
         spellCheck={false}
       />
     </>
-  ), [lineCount, content, handleContentChange, handleKeyDown, handleEditorScroll, isTextMode, tWorktree]);
+  ), [lineCount, content, handleContentChange, handleTextareaKeyDown, handleEditorScroll, isTextMode, tWorktree]);
 
   // Global ESC key handler for maximized mode
   useEffect(() => {
@@ -675,8 +824,11 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     };
   }, [isMaximized, exitFullscreen]);
 
-  // Restore maximized state from localStorage on mount
+  // Restore maximized state from localStorage on mount. Skipped when embedded:
+  // the host owns maximize there, and a restored fullscreen would fight it
+  // (Issue #1519).
   useEffect(() => {
+    if (embedded) return;
     if (isMaximizedPersisted && !isMaximized) {
       enterFullscreen();
     }
@@ -712,10 +864,11 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     onMaximizedChange?.(isMaximized);
   }, [isMaximized, onMaximizedChange]);
 
-  // Load content on mount
+  // Load content on mount, unless the host already handed it over (Issue #1519)
   useEffect(() => {
+    if (isHostedContent) return;
     loadContent();
-  }, [loadContent]);
+  }, [loadContent, isHostedContent]);
 
   // Manage beforeunload handler based on unsaved state
   useEffect(() => {
@@ -869,7 +1022,12 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         isSaving={isSaving}
         onSave={saveContent}
         onClose={onClose ? handleClose : undefined}
-        hideViewModeToggle={isTextMode}
+        hideViewModeToggle={isTextMode || embedded}
+        hideMaximizeButton={embedded}
+        onIndent={handleIndent}
+        onOutdent={handleOutdent}
+        tabMovesFocus={tabMovesFocus}
+        onToggleTabMovesFocus={handleToggleTabMovesFocus}
       />
 
       {/* ESC hint when maximized */}

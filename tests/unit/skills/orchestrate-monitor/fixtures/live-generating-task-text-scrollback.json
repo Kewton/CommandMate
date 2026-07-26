@@ -1,0 +1,25 @@
+{
+  "isRunning": true,
+  "cliToolId": "claude",
+  "sessionStatus": "running",
+  "sessionStatusReason": "thinking_indicator",
+  "content": "\n\u001b[38;5;174m ▐\u001b[48;5;16m▛███▜\u001b[49m▌\u001b[39m   \u001b[1mClaude Code\u001b[0m \u001b[38;5;246mv2.1.220\u001b[39m\n\u001b[38;5;174m▝▜\u001b[48;5;16m█████\u001b[49m▛▘\u001b[39m  \u001b[38;5;246mOpus 5 (1M context) with xhigh effort · Claude Max\u001b[39m\n\u001b[38;5;174m  ▘▘ ▝▝  \u001b[39m  \u001b[38;5;246m~/work/example-repo\u001b[39m\n\n\u001b[38;5;239m\u001b[48;5;237m❯\u001b[39m \u001b[38;5;231m/bug-fix 9999\u001b[39m\n\n\u001b[38;5;231m### Task (fixture dummy)\u001b[39m\n\u001b[38;5;231mFix the monitor state detection so live sessions are classified correctly.\u001b[39m\n\u001b[38;5;231mNarrow `ml_has_rate_limit` so the rate-limit anchor stops matching prose.\u001b[39m\n\u001b[38;5;231mThe bare `rate.?limit` alternative also matched `rate_limit` inside this\u001b[39m\n\u001b[38;5;231mvery instruction text, which is how a healthy worker got an `a` injected.\u001b[39m\n",
+  "realtimeSnippet": "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\u001b[1m\u001b[38;5;220m✻\u001b[0m \u001b[38;5;220mSublimating… \u001b[38;5;246m(4m 25s · ↓\u001b[39m \u001b[38;5;246m14.9k tokens · \u001b[38;5;220mthinking more with xhigh effort\u001b[38;5;246m)\u001b[39m\n\u001b[38;5;246m  ⎿  Tip: Use /btw to ask a quick side question without interrupting Claude's current work\u001b[39m\n\n\u001b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[38;5;246m❯ \u001b[39m\n\u001b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[39m  \u001b[38;5;246m⏸ manual mode on · esc to interrupt · ← for agents\u001b[39m                                                                                                                                        \u001b[38;5;114m\u001b]8;id=1p3x3n;https://claude.ai/code/session_FIXTUREONLY000000000000\u001b\\/rc\u001b[38;5;246m\u001b]8;;\u001b\\ · focus\u001b[39m\n",
+  "lineCount": 1001,
+  "lastCapturedLine": 0,
+  "isComplete": false,
+  "isGenerating": true,
+  "thinking": true,
+  "thinkingMessage": "Claude is thinking...",
+  "isPromptWaiting": false,
+  "promptData": null,
+  "autoYes": {
+    "enabled": true,
+    "expiresAt": 1784996477555
+  },
+  "isSelectionListActive": false,
+  "isPagerActive": false,
+  "isUnclassifiedActive": false,
+  "lastServerResponseTimestamp": 1784985842219,
+  "serverPollerActive": true
+}

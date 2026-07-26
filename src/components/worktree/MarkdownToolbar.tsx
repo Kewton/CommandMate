@@ -26,6 +26,9 @@ import {
   Minimize2,
   Copy,
   Check,
+  IndentIncrease,
+  IndentDecrease,
+  Keyboard,
 } from 'lucide-react';
 import type { ViewMode } from '@/types/markdown-editor';
 import { Button } from '@/components/ui';
@@ -67,6 +70,16 @@ export interface MarkdownToolbarProps {
   onClose?: () => void;
   /** Hide view mode toggle buttons (for text-only mode, Issue #646) */
   hideViewModeToggle?: boolean;
+  /** Hide the maximize button when a host owns that control (Issue #1519) */
+  hideMaximizeButton?: boolean;
+  /** Indent the editor selection (Issue #1518; the only route on touch devices) */
+  onIndent: () => void;
+  /** Outdent the editor selection (Issue #1518) */
+  onOutdent: () => void;
+  /** Whether Tab moves focus instead of indenting */
+  tabMovesFocus: boolean;
+  /** Toggle the Tab-moves-focus accessibility setting */
+  onToggleTabMovesFocus: () => void;
 }
 
 // ============================================================================
@@ -90,8 +103,16 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
   onSave,
   onClose,
   hideViewModeToggle,
+  hideMaximizeButton,
+  onIndent,
+  onOutdent,
+  tabMovesFocus,
+  onToggleTabMovesFocus,
 }: MarkdownToolbarProps) {
   const t = useTranslations('worktree');
+  // Keeping the textarea focused is what makes these buttons work at all: they
+  // act on its live selection, and a focus loss would collapse it (Issue #1518).
+  const keepEditorFocus = (e: React.MouseEvent) => e.preventDefault();
   return (
     <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted">
       {/* File path and dirty indicator */}
@@ -158,6 +179,45 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
           </div>
         )}
 
+        {/* Indent / outdent (Issue #1518). Sized to the 44px minimum tap
+            target because touch keyboards have no Tab key. */}
+        <Button
+          variant="ghost"
+          data-testid="editor-indent-button"
+          onMouseDown={keepEditorFocus}
+          onClick={onIndent}
+          className="flex min-h-[44px] min-w-[44px] items-center justify-center p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded"
+          title={t('editor.indent')}
+          aria-label={t('editor.indent')}
+        >
+          <IndentIncrease className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          data-testid="editor-outdent-button"
+          onMouseDown={keepEditorFocus}
+          onClick={onOutdent}
+          className="flex min-h-[44px] min-w-[44px] items-center justify-center p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded"
+          title={t('editor.outdent')}
+          aria-label={t('editor.outdent')}
+        >
+          <IndentDecrease className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          data-testid="editor-tab-focus-toggle"
+          onMouseDown={keepEditorFocus}
+          onClick={onToggleTabMovesFocus}
+          aria-pressed={tabMovesFocus}
+          className={`flex min-h-[44px] min-w-[44px] items-center justify-center p-1.5 hover:bg-muted rounded ${
+            tabMovesFocus ? 'text-accent-600 dark:text-accent-400' : 'text-muted-foreground hover:text-foreground'
+          }`}
+          title={tabMovesFocus ? t('editor.tabMovesFocusOn') : t('editor.tabMovesFocusOff')}
+          aria-label={tabMovesFocus ? t('editor.tabMovesFocusOn') : t('editor.tabMovesFocusOff')}
+        >
+          <Keyboard className="h-4 w-4" />
+        </Button>
+
         {/* Copy content button */}
         <Button
           variant="ghost"
@@ -176,20 +236,22 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
         </Button>
 
         {/* Maximize button */}
-        <Button
-          variant="ghost"
-          data-testid="maximize-button"
-          onClick={onToggleFullscreen}
-          className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded"
-          title={isMaximized ? t('editor.exitFullscreen') : t('editor.enterFullscreen')}
-          aria-pressed={isMaximized}
-        >
-          {isMaximized ? (
-            <Minimize2 className="h-4 w-4" />
-          ) : (
-            <Maximize2 className="h-4 w-4" />
-          )}
-        </Button>
+        {!hideMaximizeButton && (
+          <Button
+            variant="ghost"
+            data-testid="maximize-button"
+            onClick={onToggleFullscreen}
+            className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded"
+            title={isMaximized ? t('editor.exitFullscreen') : t('editor.enterFullscreen')}
+            aria-pressed={isMaximized}
+          >
+            {isMaximized ? (
+              <Minimize2 className="h-4 w-4" />
+            ) : (
+              <Maximize2 className="h-4 w-4" />
+            )}
+          </Button>
+        )}
 
         {/* Auto-save toggle */}
         <div className="flex items-center gap-1.5">

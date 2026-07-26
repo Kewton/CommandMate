@@ -18,9 +18,10 @@ export const MAX_SELECTED_AGENTS = 6;
 
 /**
  * Default selected agents when DB value is missing or invalid.
- * Issue #989: PC default expands to 6 agents (claude/codex/gemini/opencode/copilot/antigravity).
+ * Issue #1516: narrowed to the 3 agents in routine use (claude/codex/antigravity).
+ * The others stay selectable via CLI_TOOL_IDS — they are just not preselected.
  */
-export const DEFAULT_SELECTED_AGENTS: CLIToolType[] = ['claude', 'codex', 'gemini', 'opencode', 'copilot', 'antigravity'];
+export const DEFAULT_SELECTED_AGENTS: CLIToolType[] = ['claude', 'codex', 'antigravity'];
 
 /**
  * Core validation function for CLI tool ID arrays (R1-001)

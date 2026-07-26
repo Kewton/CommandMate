@@ -1,0 +1,8 @@
+{
+  "isRunning": false,
+  "content": "",
+  "lineCount": 0,
+  "cliToolId": "claude",
+  "sessionStatus": "idle",
+  "sessionStatusReason": "session_not_running"
+}

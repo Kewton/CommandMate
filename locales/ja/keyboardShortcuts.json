@@ -3,7 +3,8 @@
   "scopes": {
     "global": "グローバル",
     "terminal": "ターミナル",
-    "composer": "入力欄"
+    "composer": "入力欄",
+    "editor": "ファイルエディタ"
   },
   "shortcuts": {
     "commandPalette": "コマンドパレットを開く",
@@ -12,6 +13,11 @@
     "navigateList": "選択を上下に移動",
     "terminalSearch": "ターミナル出力を検索",
     "sendMessage": "メッセージを送信",
-    "composerNewline": "改行を挿入"
+    "composerNewline": "改行を挿入",
+    "editorIndent": "行・選択範囲をインデント",
+    "editorOutdent": "行・選択範囲をアウトデント",
+    "editorTabFocus": "Tab キーのフォーカス移動を切り替え",
+    "editorSave": "ファイルを保存",
+    "editorFullscreen": "全画面エディタを切り替え"
   }
 }

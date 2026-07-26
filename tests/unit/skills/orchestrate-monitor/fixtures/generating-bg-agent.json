@@ -1,0 +1,25 @@
+{
+  "isRunning": true,
+  "cliToolId": "claude",
+  "sessionStatus": "running",
+  "sessionStatusReason": "default",
+  "content": "⏺ Dispatching workers\n",
+  "realtimeSnippet": "⏺ Dispatching workers\n\n· Waiting for 3 background agents to finish (esc to interrupt)",
+  "lineCount": 210,
+  "lastCapturedLine": 208,
+  "isComplete": false,
+  "isGenerating": false,
+  "thinking": false,
+  "thinkingMessage": null,
+  "isPromptWaiting": false,
+  "promptData": null,
+  "autoYes": {
+    "enabled": true,
+    "expiresAt": 1790000000000
+  },
+  "isSelectionListActive": false,
+  "isPagerActive": false,
+  "isUnclassifiedActive": true,
+  "lastServerResponseTimestamp": 1790000000000,
+  "serverPollerActive": true
+}
