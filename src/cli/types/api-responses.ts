@@ -331,6 +331,33 @@ export interface SkillInstallResponse {
   } | null;
 }
 
+/** Mirrors: api/worktrees/[id]/skills/[skillId]/git-workflow prepare response (Issue #1247). */
+export interface SkillGitWorkflowPrepareResponse {
+  workflowToken: string;
+  target: {
+    mode: string;
+    branch: string;
+    baseBranch: string | null;
+    headCommit: string;
+    branchCreated: boolean;
+    remote: string;
+  };
+}
+
+/** Mirrors: api/worktrees/[id]/skills/[skillId]/git-workflow apply response (Issue #1247). */
+export interface SkillGitWorkflowApplyResponse {
+  result: {
+    branch: string;
+    baseBranch: string | null;
+    changedPaths: string[];
+    committed: boolean;
+    commitSha: string;
+    pushed: boolean;
+    pullRequestUrl: string | null;
+    pullRequestExisted: boolean;
+  };
+}
+
 /** Mirrors: src/lib/skills/uninstall-plan.ts SkillUninstallPlanDto (subset). */
 export interface SkillUninstallPlan {
   token: string;

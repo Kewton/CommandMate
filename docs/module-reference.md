@@ -436,6 +436,9 @@
 | `src/lib/db/migrations/v48-skill-operations-audit-index.ts` | `skill_operations` に `from_version`/`to_version` を追加し、横断 feed 用 `(recorded_at DESC, id DESC)` と `(result, recorded_at DESC)` を index 化。`ALTER TABLE` のため既存行は NULL 遷移で読める（#1248） |
 | `src/lib/skills/startup-reconcile.ts` | 起動時 reconciliation の assembly。`server.ts` から `await import()` で遅延読込し reconciler へ port（payload probe / reindex）を注入。receipt からの reindex もここで実装（#1428、server-only） |
 | `src/lib/skills/plan-sweeper.ts` | install/uninstall plan cache と snapshot store を 60秒ごと（＋token アクセス時）に sweep する `unref()` 済み timer。route から lazy 起動（#1429、server-only） |
+| `src/lib/skills/git-workflow.ts` | Skill 導入の branch/commit/push flow。prepare（plan 生成前に branch 確定）→ apply（receipt 由来 pathspec だけを stage/commit）。clean-index 前提・active session ガード・commit message / PR 本文生成・prepared target store（#1247、server-only） |
+| `src/lib/skills/pull-request-service.ts` | `gh` を argv で呼ぶ唯一の module。draft PR 作成と open PR 検索のみ。失敗は throw せず reason を返す（#1247、server-only） |
+| `src/app/api/worktrees/[id]/skills/[skillId]/git-workflow/route.ts` | prepare/apply の 2 phase を 1 endpoint で提供。branch/path/remote URL の client 指定を明示拒否し、apply は token だけを受ける（#1247） |
 | `src/app/api/worktrees/[id]/skills/[skillId]/plan\|install\|uninstall-plan\|uninstall/route.ts` | plan/apply の 4 route。手順は journal → lock → 再読込&token 消費 → filesystem → index&audit。各 handler 冒頭で `ensureSkillPlanSweeper()` を lazy 起動（#1233/#1235/#1236/#1429） |
 | `src/app/api/skills/installations\|operations\|reindex/route.ts` | 適用状態 dashboard の 3 route。installations は横断走査＋worktree/skill/status 絞り込み（Catalog 不達は 500 にせず `catalogAvailable:false` で更新判定のみ無効化）、operations は監査 feed（不正な filter 値は 400 で拒否）、reindex は POST で index 再構築＋走査 cache 無効化（#1248） |
 | `src/components/skills/SkillInstallationsDashboard.tsx` / `SkillOperationHistory.tsx` | `/skills/installed` の適用状態一覧（install root を root ごとに個別描画、要対応順に整列）と操作履歴（version 遷移・取得元・error code・再試行導線）。走査失敗を空一覧に退化させない（#1248） |

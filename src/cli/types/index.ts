@@ -324,6 +324,12 @@ export interface SkillInstallOptions extends SkillPlanOptions {
   yes?: boolean;
   /** Explicit `<skill-id>@<version>` acknowledgement, demanded on top of --yes for high risk. */
   ackRisk?: string;
+  /** Git side effects to run after the install (Issue #1247). Absent means none. */
+  git?: string;
+  /** Push the commit to the remote. Only meaningful with --git. */
+  push?: boolean;
+  /** Open a draft PR for the pushed branch. Implies --push. */
+  pr?: boolean;
 }
 
 /** skill uninstall options [Issue #1237] */
