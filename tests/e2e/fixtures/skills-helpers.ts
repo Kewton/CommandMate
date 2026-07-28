@@ -31,7 +31,11 @@ import type {
   SkillUninstallResponse,
   SkillVersionDto,
 } from '@/components/skills/types';
+import { describeAgentCompatibility } from '@/lib/skills/compatibility';
 import type { Worktree } from '@/types/models';
+
+/** Fixed instant, so evidence staleness never depends on when the suite runs. */
+const FIXTURE_NOW = new Date('2026-07-29T00:00:00Z');
 
 /** iPhone-class width. AppShell switches to its mobile layout below 768px. */
 export const MOBILE_VIEWPORT = { width: 390, height: 844 } as const;
@@ -87,20 +91,23 @@ export function makeVersion(overrides: Partial<SkillVersionDto> = {}): SkillVers
       },
       // Only the two Agents the publisher declares. Everything else must stay
       // absent rather than be rendered as unsupported (see skills-catalog.spec).
-      agents: [
-        {
-          agent: 'claude',
-          support: 'native',
-          labelKey: 'skills.compatibility.native',
-          evidence: 'Discovered from .claude/skills on Claude Code 2.1.220.',
-        },
-        {
-          agent: 'codex',
-          support: 'native',
-          labelKey: 'skills.compatibility.native',
-          evidence: 'Discovered from .agents/skills on Codex CLI 0.145.0.',
-        },
-      ],
+      // Built through the production reconciler so the measured evidence the UI
+      // renders is the real matrix, not a hand-written copy of it (#1246).
+      agents: describeAgentCompatibility(
+        [
+          {
+            agent: 'claude',
+            support: 'native',
+            evidence: 'Discovered from .claude/skills on Claude Code 2.1.220.',
+          },
+          {
+            agent: 'codex',
+            support: 'native',
+            evidence: 'Discovered from .agents/skills on Codex CLI 0.145.0.',
+          },
+        ],
+        FIXTURE_NOW
+      ),
     },
     ...overrides,
   };

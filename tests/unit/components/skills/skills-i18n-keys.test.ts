@@ -33,7 +33,18 @@ import {
 import { SkillDiffReason, SkillPreviewWarning } from '@/lib/skills/preview-diff';
 import { SkillUninstallReason } from '@/lib/skills/uninstall-plan';
 import { AGENT_SUPPORT_LABEL_KEYS, PERMISSION_DECLARATION_NOTICE_KEY } from '@/lib/skills/constants';
-import { SKILL_COMPATIBILITY_MESSAGE_KEYS } from '@/lib/skills/compatibility';
+import {
+  SKILL_AGENT_VERIFICATION_MESSAGE_KEYS,
+  SKILL_COMPATIBILITY_MESSAGE_KEYS,
+} from '@/lib/skills/compatibility';
+import {
+  AGENT_AXIS_LABEL_KEYS,
+  AGENT_AXIS_OUTCOME_LABEL_KEYS,
+  AGENT_EVIDENCE_KIND_LABEL_KEYS,
+  AGENT_LIMITATION_MESSAGE_KEYS,
+  AGENT_RELOAD_MESSAGE_KEYS,
+  getSkillAgentMatrix,
+} from '@/lib/skills/compatibility-matrix';
 import { SKILL_PLAN_HIGH_RISK_MESSAGE_KEY } from '@/lib/skills/install-plan';
 import {
   SKILL_INSTALL_NEXT_ACTION_KEYS,
@@ -99,10 +110,39 @@ function callSiteKeys(): string[] {
  * site. `src/lib/skills` publishes them namespace-qualified so UI and CLI share
  * one vocabulary; the screens strip the prefix before resolving them.
  */
+/**
+ * Every message key reachable from the measured discovery matrix (#1246).
+ *
+ * Swept from the matrix itself rather than listed, so adding an Agent row with
+ * a new reload or limitation key fails here instead of rendering a key path.
+ */
+function matrixKeys(): string[] {
+  const keys = new Set<string>();
+  for (const entry of getSkillAgentMatrix()) {
+    keys.add(entry.reloadKey);
+    if (entry.skipReasonKey) keys.add(entry.skipReasonKey);
+    for (const axis of [entry.discovery, entry.invocation]) {
+      keys.add(axis.labelKey);
+      keys.add(axis.evidenceKindKey);
+      if (axis.limitationKey) keys.add(axis.limitationKey);
+    }
+  }
+  return [...keys];
+}
+
 function contractKeys(): string[] {
   return [
     ...Object.values(SKILL_COMPATIBILITY_MESSAGE_KEYS),
     ...Object.values(AGENT_SUPPORT_LABEL_KEYS),
+    // Agent discovery evidence (#1246): the two axes, their outcomes, how
+    // strong the evidence is, the reload step and the known limitations.
+    ...Object.values(SKILL_AGENT_VERIFICATION_MESSAGE_KEYS),
+    ...Object.values(AGENT_AXIS_LABEL_KEYS),
+    ...Object.values(AGENT_AXIS_OUTCOME_LABEL_KEYS),
+    ...Object.values(AGENT_EVIDENCE_KIND_LABEL_KEYS),
+    ...Object.values(AGENT_RELOAD_MESSAGE_KEYS),
+    ...Object.values(AGENT_LIMITATION_MESSAGE_KEYS),
+    ...matrixKeys(),
     PERMISSION_DECLARATION_NOTICE_KEY,
     // Emitted by the Install Plan API (#1233) rather than written at a call
     // site: the plan tells the client which confirmation to show.
@@ -158,6 +198,15 @@ const PLACEHOLDERS: Record<string, string[]> = {
   'compatibility.reason.hostVersionOutOfRange': ['{range}', '{currentVersion}'],
   'compatibility.reason.hostVersionUnknown': ['{range}'],
   'compatibility.reason.rangeUnsupported': ['{range}'],
+  'compatibility.declaredLabel': ['{support}'],
+  'compatibility.testedVersion': ['{agent}', '{version}'],
+  'compatibility.testedDate': ['{date}'],
+  'compatibility.discoveryRoots': ['{roots}'],
+  'compatibility.evidenceStale': ['{days}'],
+  'compatibility.reloadHeading': ['{agent}'],
+  'compatibility.reload.sessionRestart': ['{agent}'],
+  'compatibility.reload.sessionRestartNoSlash': ['{agent}'],
+  'compatibility.reload.unknown': ['{agent}'],
   'risk.declaredLabel': ['{level}'],
   'detail.packageBytes': ['{bytes}'],
   'detail.install.blockedIncompatible': ['{reason}'],

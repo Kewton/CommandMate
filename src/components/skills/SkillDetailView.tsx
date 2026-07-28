@@ -33,6 +33,7 @@ import { PERMISSION_DECLARATION_NOTICE_KEY } from '@/lib/skills/constants';
 import type { SkillCommandMateCompatibility } from '@/lib/skills/compatibility';
 import { AgentSupportBadge, SkillCompatibilityBadge, SkillRiskBadge } from './SkillBadges';
 import { CatalogStatusBanner } from './CatalogStatusBanner';
+import { CompatibilityEvidence } from './CompatibilityEvidence';
 import { SkillChangelog } from './SkillChangelog';
 import { SkillInstallPanel } from './SkillInstallPanel';
 import { SkillNotice } from './SkillNotice';
@@ -277,6 +278,7 @@ export function SkillDetailView({ skillId }: SkillDetailViewProps) {
           skillId={skill.id}
           version={skill.recommendedVersion}
           blockedReason={installBlockedReason}
+          agents={recommended?.compatibility.agents ?? []}
         />
       </SectionCard>
 
@@ -378,13 +380,11 @@ export function SkillDetailView({ skillId }: SkillDetailViewProps) {
                   <AgentSupportBadge key={agent.agent} agent={agent} />
                 ))}
               </div>
-              <ul className="space-y-1">
+              <div className="space-y-3">
                 {recommended.compatibility.agents.map((agent) => (
-                  <li key={agent.agent} className="text-xs text-muted-foreground break-words">
-                    {t('compatibility.evidence')}: {agent.evidence}
-                  </li>
+                  <CompatibilityEvidence key={agent.agent} agent={agent} />
                 ))}
-              </ul>
+              </div>
             </>
           ) : (
             <p className="text-xs text-muted-foreground">{t('compatibility.agentsUnknown')}</p>

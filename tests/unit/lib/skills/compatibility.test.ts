@@ -8,17 +8,30 @@
 import { describe, it, expect } from 'vitest';
 import {
   SKILL_COMPATIBILITY_MESSAGE_KEYS,
+  SkillAgentVerification,
   SkillCompatibilityReason,
   SkillRecommendationReason,
+  capSupportByMeasurement,
   describeAgentCompatibility,
   evaluateCommandMateCompatibility,
   evaluateVersionCompatibility,
   findSkillCatalogEntry,
   normalizeHostVersion,
+  reconcileAgentSupport,
   resolveSkillVersions,
 } from '@/lib/skills/compatibility';
-import { AGENT_SUPPORT_LABEL_KEYS, SKILL_AGENT_SUPPORT_VALUES } from '@/lib/skills/constants';
-import type { SkillCatalog, SkillCatalogEntry, SkillCatalogVersion } from '@/types/skills';
+import {
+  AGENT_SUPPORT_LABEL_KEYS,
+  SKILL_AGENT_SUPPORT_VALUES,
+  SKILL_CLAUDE_INSTALL_ROOT_PREFIX,
+} from '@/lib/skills/constants';
+import type {
+  SkillAgentCompatibility,
+  SkillAgentSupport,
+  SkillCatalog,
+  SkillCatalogEntry,
+  SkillCatalogVersion,
+} from '@/types/skills';
 
 function makeVersion(
   version: string,
@@ -169,6 +182,139 @@ describe('describeAgentCompatibility', () => {
       expect(view.support).toBe(support);
       expect(view.labelKey).toBe(AGENT_SUPPORT_LABEL_KEYS[support]);
     }
+  });
+});
+
+describe('capSupportByMeasurement (Issue #1246)', () => {
+  // Exhaustive over the vocabulary rather than sampled: this rule is what keeps
+  // an evidence-free claim from rendering as supported, so every pairing of a
+  // declaration and a measurement needs a stated outcome.
+  const RANK: Record<SkillAgentSupport, number> = {
+    unsupported: 0,
+    unknown: 1,
+    commandmate_runtime: 2,
+    native: 3,
+  };
+
+  it('shows the weaker of the declaration and the measurement, for every pairing', () => {
+    for (const declared of SKILL_AGENT_SUPPORT_VALUES) {
+      for (const measured of SKILL_AGENT_SUPPORT_VALUES) {
+        const { support } = capSupportByMeasurement(declared, measured);
+        expect(RANK[support], `declared=${declared} measured=${measured}`).toBe(
+          Math.min(RANK[declared], RANK[measured])
+        );
+      }
+    }
+  });
+
+  it('reports a weaker measurement as a restriction and shows the measurement', () => {
+    const restricted = capSupportByMeasurement('native', 'unsupported');
+    expect(restricted).toEqual({
+      support: 'unsupported',
+      verification: SkillAgentVerification.RESTRICTED,
+    });
+    expect(capSupportByMeasurement('native', 'unknown').support).toBe('unknown');
+    expect(capSupportByMeasurement('unknown', 'unsupported').support).toBe('unsupported');
+  });
+
+  it('reports a stronger measurement as a stale declaration and keeps the declaration', () => {
+    expect(capSupportByMeasurement('unknown', 'native')).toEqual({
+      support: 'unknown',
+      verification: SkillAgentVerification.STALE_DECLARATION,
+    });
+    expect(capSupportByMeasurement('unsupported', 'native').support).toBe('unsupported');
+  });
+
+  it('confirms an exact agreement', () => {
+    for (const support of SKILL_AGENT_SUPPORT_VALUES) {
+      expect(capSupportByMeasurement(support, support)).toEqual({
+        support,
+        verification: SkillAgentVerification.CONFIRMED,
+      });
+    }
+  });
+
+  it('ranks unknown above unsupported, so "we could not tell" is not "it fails"', () => {
+    expect(capSupportByMeasurement('unknown', 'unsupported').support).toBe('unsupported');
+    expect(capSupportByMeasurement('unsupported', 'unknown').support).toBe('unsupported');
+  });
+});
+
+describe('reconcileAgentSupport against the measured matrix (Issue #1246)', () => {
+  const NOW = new Date('2026-07-27T00:00:00Z');
+
+  function view(agent: string, support: SkillAgentSupport, evidence = 'declared') {
+    return reconcileAgentSupport(
+      { agent: agent as SkillAgentCompatibility['agent'], support, evidence },
+      NOW
+    );
+  }
+
+  it('confirms a declaration the measurement agrees with', () => {
+    const claude = view('claude', 'native');
+    expect(claude.support).toBe('native');
+    expect(claude.verification).toBe(SkillAgentVerification.CONFIRMED);
+    expect(claude.measured?.testedVersion).toBe('2.1.220');
+    expect(claude.measured?.discoveryRoots).toEqual([SKILL_CLAUDE_INSTALL_ROOT_PREFIX]);
+  });
+
+  it('keeps the publisher evidence string alongside the measurement', () => {
+    const claude = view('claude', 'native', 'Publisher ran the conformance suite.');
+    expect(claude.evidence).toBe('Publisher ran the conformance suite.');
+    expect(claude.measured?.evidenceSource).toContain('github.com/Kewton/CommandMate');
+  });
+
+  it('surfaces both axes separately, so a discovered-but-unlisted Skill reads as such', () => {
+    const codex = view('codex', 'native');
+    expect(codex.measured?.discovery.outcome).toBe('verified');
+    expect(codex.measured?.invocation.outcome).toBe('unsupported');
+    expect(codex.measured?.invocation.limitationKey).toEqual(expect.any(String));
+    // The support verdict still says native: it runs, it just is not in the palette.
+    expect(codex.support).toBe('native');
+  });
+
+  it('never raises a declaration to match a stronger measurement', () => {
+    // Only the publisher can widen what their package claims. CommandMate says
+    // the declaration has fallen behind instead of rewriting it.
+    const modest = view('claude', 'unknown');
+    expect(modest.support).toBe('unknown');
+    expect(modest.declaredSupport).toBe('unknown');
+    expect(modest.verification).toBe(SkillAgentVerification.STALE_DECLARATION);
+    // The measurement is still attached, so the user can see the discrepancy.
+    expect(modest.measured?.discovery.outcome).toBe('verified');
+  });
+
+  it('marks an unmeasured Agent unverified and says why, without downgrading it', () => {
+    const gemini = view('gemini', 'native');
+    expect(gemini.support).toBe('native');
+    expect(gemini.measured).toBeNull();
+    expect(gemini.verification).toBe(SkillAgentVerification.UNVERIFIED);
+    expect(gemini.skipReasonKey).toEqual(expect.any(String));
+  });
+
+  it('gives an Agent id that is not a CLI tool the unverified treatment, not a crash', () => {
+    const stranger = view('not-an-agent', 'unknown');
+    expect(stranger.measured).toBeNull();
+    expect(stranger.verification).toBe(SkillAgentVerification.UNVERIFIED);
+    expect(stranger.reloadKey).toEqual(expect.any(String));
+  });
+
+  it('always offers a reload instruction, measured or not', () => {
+    for (const agent of ['claude', 'codex', 'gemini', 'opencode']) {
+      expect(view(agent, 'unknown').reloadKey, agent).toMatch(/^skills\.compatibility\.reload\./);
+    }
+  });
+
+  it('reports staleness from the instant it is given, not from the clock', () => {
+    const fresh = view('claude', 'native');
+    expect(fresh.measured?.stale).toBe(false);
+    expect(fresh.measured?.ageDays).toBe(1);
+
+    const later = reconcileAgentSupport(
+      { agent: 'claude', support: 'native', evidence: 'x' },
+      new Date('2030-01-01T00:00:00Z')
+    );
+    expect(later.measured?.stale).toBe(true);
   });
 });
 

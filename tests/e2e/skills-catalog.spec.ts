@@ -147,6 +147,38 @@ test.describe('Skill detail', () => {
     await expect(compatibility).toContainText('Codex CLI 0.145.0');
   });
 
+  test('reaches the measurement and the reload steps from each Agent status', async ({ page }) => {
+    // 受入条件 (#1246, 手動確認): 各 support status から根拠と reload 手順へ到達できる.
+    // Pinned in a real browser because the evidence block is what turns a badge
+    // into something a reader can check — a badge alone is just an assertion.
+    const compatibility = page.getByTestId('skill-compatibility-section');
+
+    for (const agent of ['claude', 'codex']) {
+      await expect(compatibility.getByTestId(`skill-agent-evidence-${agent}`)).toBeVisible();
+    }
+
+    // Discovery and slash-command exposure are separate facts on the page, not
+    // one merged verdict: Codex 0.145.0 finds the Skill and does not list it.
+    const codex = compatibility.getByTestId('skill-agent-evidence-codex');
+    await expect(codex.getByTestId('skill-agent-axis-discovery-verified')).toBeVisible();
+    await expect(codex.getByTestId('skill-agent-axis-invocation-unsupported')).toBeVisible();
+    await expect(codex.getByTestId('skill-agent-axis-invocation-limitation')).toBeVisible();
+
+    // The measurement CommandMate took, not the publisher's prose.
+    await expect(codex).toContainText('0.145.0');
+    await expect(codex).toContainText('2026-07-26');
+    await expect(codex).toContainText('.agents/skills');
+
+    // Claude was measured against the other root, and says so.
+    await expect(
+      compatibility.getByTestId('skill-agent-evidence-claude')
+    ).toContainText('.claude/skills');
+
+    // Reload guidance is also stated before the install, not only afterwards.
+    await expect(page.getByTestId('skill-install-reload-preview')).toBeVisible();
+    await expect(page.getByTestId('skill-agent-reload-codex')).toBeVisible();
+  });
+
   test('warns on a high declared risk', async ({ page }) => {
     await routeSkillApis(page, {
       skills: [makeSkill({ versions: [makeVersion({ declaredRisk: 'high' })] })],
