@@ -32,9 +32,48 @@
     "currentVersionUnknown": "The running CommandMate version could not be determined.",
     "unverifiedNotice": "Unverified is not the same as compatible. CommandMate could not decide, so this Skill may fail to run.",
     "agentsHeading": "Agent support",
-    "agentsNotice": "Agent support is a claim made by the publisher, shown with the evidence they supplied. CommandMate does not verify it.",
+    "agentsNotice": "Agent support starts as a claim made by the publisher, shown with the evidence they supplied. Where CommandMate has measured the Agent itself, that measurement is shown alongside it and caps what the claim can assert.",
     "agentsUnknown": "No Agent support is declared for this version.",
     "evidence": "Evidence",
+    "declaredLabel": "Publisher declares: {support}",
+    "measuredHeading": "Measured by CommandMate",
+    "testedVersion": "Tested against {agent} {version}",
+    "testedDate": "Measured on {date}",
+    "evidenceSource": "Evidence",
+    "discoveryRoots": "Reads from {roots}",
+    "evidenceStale": "This measurement is {days} days old. The Agent may have changed since it was taken.",
+    "reloadHeading": "How to make {agent} pick it up",
+    "axis": {
+      "discovery": "Discovery",
+      "invocation": "Slash command"
+    },
+    "axisOutcome": {
+      "verified": "Confirmed",
+      "unsupported": "Not available",
+      "unknown": "Not measured"
+    },
+    "evidenceKind": {
+      "mechanical": "machine-checked",
+      "selfReport": "reported by the Agent",
+      "notMeasured": "no measurement"
+    },
+    "verification": {
+      "confirmed": "CommandMate measured this Agent and the result matches what the publisher declares.",
+      "restricted": "CommandMate measured less support than the publisher declares, so the lower result is shown.",
+      "staleDeclaration": "CommandMate measured more support than the publisher declares. The declaration is shown as-is; only the publisher can raise it.",
+      "unverified": "CommandMate has not measured this Agent, so only the publisher's claim is shown."
+    },
+    "limitation": {
+      "noSlashCommand": "This Agent version finds the Skill but does not list it as a slash command. Ask for it by name instead."
+    },
+    "skipReason": {
+      "notMeasured": "This Agent has not been measured against a CommandMate install, so its discovery behaviour is unknown rather than unsupported."
+    },
+    "reload": {
+      "sessionRestart": "Start a new {agent} session in this repository. Skills are scanned when a session starts.",
+      "sessionRestartNoSlash": "Start a new {agent} session in this repository, then ask for the Skill by name — this version does not list Skills as slash commands.",
+      "unknown": "CommandMate has not measured how {agent} reloads Skills. Restarting the session is the safe assumption."
+    },
     "reason": {
       "satisfied": "CommandMate {currentVersion} satisfies the required range {range}.",
       "hostVersionOutOfRange": "This Skill requires CommandMate {range}, but CommandMate {currentVersion} is running.",

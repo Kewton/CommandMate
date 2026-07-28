@@ -2,8 +2,8 @@
  * CommandMate compatibility judgement and version resolution (Issue #1231)
  *
  * Pure functions: no filesystem, no network, no process state. The host version
- * is always an explicit argument so UI, API and CLI can evaluate the same
- * Catalog against the same rules and reach the same verdict.
+ * and the current instant are always explicit arguments so UI, API and CLI can
+ * evaluate the same Catalog against the same rules and reach the same verdict.
  *
  * Every verdict carries a stable machine code *and* a human-readable message
  * (受入条件: "互換性NGの理由がmachine-readable codeとhuman-readable messageで返る").
@@ -16,6 +16,20 @@
 // Sibling modules of the same package are imported directly rather than through
 // the `@/lib/skills` barrel, so adding this module to the barrel later can never
 // introduce an import cycle. External callers still go through the barrel.
+import {
+  deriveMatrixAgentSupport,
+  evidenceAgeInDays,
+  findSkillAgentMatrixEntry,
+  isAgentMeasured,
+  isEvidenceStale,
+  AGENT_AXIS_LABEL_KEYS,
+  AGENT_RELOAD_MESSAGE_KEYS,
+  type SkillAgentAxis,
+  type SkillAgentAxisEvidence,
+  type SkillAgentAxisOutcome,
+  type SkillAgentMatrixEntry,
+  type SkillEvidenceKind,
+} from '@/lib/skills/compatibility-matrix';
 import { AGENT_SUPPORT_LABEL_KEYS } from '@/lib/skills/constants';
 import {
   compareSemVer,
@@ -194,24 +208,211 @@ export function evaluateVersionCompatibility(
 // Agent compatibility
 // =============================================================================
 
-/** Agent support claim enriched with its shared label key (UX-05). */
+/**
+ * How the publisher's declaration stands up against what CommandMate measured
+ * (Issue #1246).
+ */
+export const SkillAgentVerification = {
+  /** Declaration and measurement agree. */
+  CONFIRMED: 'SKILL_AGENT_EVIDENCE_CONFIRMED',
+  /** Measurement is weaker than the declaration, so the declaration is capped. */
+  RESTRICTED: 'SKILL_AGENT_EVIDENCE_RESTRICTED',
+  /** Measurement is stronger than the declaration; the manifest has fallen behind. */
+  STALE_DECLARATION: 'SKILL_AGENT_EVIDENCE_STALE_DECLARATION',
+  /** CommandMate has never measured this Agent. */
+  UNVERIFIED: 'SKILL_AGENT_EVIDENCE_UNVERIFIED',
+} as const;
+
+export type SkillAgentVerificationCode =
+  (typeof SkillAgentVerification)[keyof typeof SkillAgentVerification];
+
+export const SKILL_AGENT_VERIFICATION_MESSAGE_KEYS: Record<SkillAgentVerificationCode, string> = {
+  [SkillAgentVerification.CONFIRMED]: 'skills.compatibility.verification.confirmed',
+  [SkillAgentVerification.RESTRICTED]: 'skills.compatibility.verification.restricted',
+  [SkillAgentVerification.STALE_DECLARATION]: 'skills.compatibility.verification.staleDeclaration',
+  [SkillAgentVerification.UNVERIFIED]: 'skills.compatibility.verification.unverified',
+};
+
+/**
+ * Ordering used to cap a declaration by a measurement. Higher is stronger.
+ *
+ * `unknown` outranks `unsupported` because "we could not tell" leaves more room
+ * than "we established it does not work".
+ */
+const AGENT_SUPPORT_RANK: Record<SkillAgentSupport, number> = {
+  unsupported: 0,
+  unknown: 1,
+  commandmate_runtime: 2,
+  native: 3,
+};
+
+/** What the reconciler decided and why. */
+export interface SkillAgentSupportReconciliation {
+  support: SkillAgentSupport;
+  verification: SkillAgentVerificationCode;
+}
+
+/**
+ * Cap a publisher's declaration by what CommandMate measured.
+ *
+ * Downward only. A weaker measurement wins, which is what keeps an
+ * evidence-free `native` off the screen. A stronger one does not: raising a
+ * package's own claim is the publisher's call, so the mismatch is reported as
+ * a declaration that has fallen behind.
+ */
+export function capSupportByMeasurement(
+  declared: SkillAgentSupport,
+  measured: SkillAgentSupport
+): SkillAgentSupportReconciliation {
+  const declaredRank = AGENT_SUPPORT_RANK[declared];
+  const measuredRank = AGENT_SUPPORT_RANK[measured];
+
+  if (measuredRank < declaredRank) {
+    return { support: measured, verification: SkillAgentVerification.RESTRICTED };
+  }
+  if (measuredRank > declaredRank) {
+    return { support: declared, verification: SkillAgentVerification.STALE_DECLARATION };
+  }
+  return { support: declared, verification: SkillAgentVerification.CONFIRMED };
+}
+
+/** One measured axis, ready to render. */
+export interface SkillAgentAxisView {
+  axis: SkillAgentAxis;
+  axisKey: string;
+  outcome: SkillAgentAxisOutcome;
+  outcomeKey: string;
+  evidenceKind: SkillEvidenceKind;
+  evidenceKindKey: string;
+  /** i18n key for a known limitation of this outcome, or null. */
+  limitationKey: string | null;
+}
+
+/** What CommandMate measured for one Agent, with the age of that measurement. */
+export interface SkillAgentMeasuredView {
+  discovery: SkillAgentAxisView;
+  invocation: SkillAgentAxisView;
+  /** Install root prefixes the Agent was measured to read. */
+  discoveryRoots: string[];
+  testedVersion: string | null;
+  testedDate: string | null;
+  evidenceSource: string | null;
+  /** Whole days since the measurement, or null when it cannot be computed. */
+  ageDays: number | null;
+  stale: boolean;
+}
+
+/** Agent support claim enriched with its shared label key (UX-05) and evidence. */
 export interface SkillAgentCompatibilityView {
   agent: SkillAgentCompatibility['agent'];
+  /**
+   * The support level CommandMate is willing to show, never above what evidence
+   * carries. Equal to {@link declaredSupport} unless a measurement caps it.
+   */
   support: SkillAgentSupport;
   labelKey: string;
   evidence: string;
+  /** The publisher's own claim, kept so a capped verdict can still be explained. */
+  declaredSupport: SkillAgentSupport;
+  declaredLabelKey: string;
+  verification: SkillAgentVerificationCode;
+  verificationKey: string;
+  /** CommandMate's measurement, or null when this Agent has never been measured. */
+  measured: SkillAgentMeasuredView | null;
+  /** i18n key for why no measurement exists; null when measured. */
+  skipReasonKey: string | null;
+  /** i18n key for how to make the Agent pick up the installed Skill. */
+  reloadKey: string;
 }
 
-/** Attach the shared i18n label key to each Agent support claim. */
+function toAxisView(axis: SkillAgentAxis, evidence: SkillAgentAxisEvidence): SkillAgentAxisView {
+  return {
+    axis,
+    axisKey: AGENT_AXIS_LABEL_KEYS[axis],
+    outcome: evidence.outcome,
+    outcomeKey: evidence.labelKey,
+    evidenceKind: evidence.evidenceKind,
+    evidenceKindKey: evidence.evidenceKindKey,
+    limitationKey: evidence.limitationKey,
+  };
+}
+
+function toMeasuredView(entry: SkillAgentMatrixEntry, now: Date): SkillAgentMeasuredView {
+  return {
+    discovery: toAxisView('discovery', entry.discovery),
+    invocation: toAxisView('invocation', entry.invocation),
+    discoveryRoots: [...entry.discoveryRoots],
+    testedVersion: entry.testedVersion,
+    testedDate: entry.testedDate,
+    evidenceSource: entry.evidenceSource,
+    ageDays: evidenceAgeInDays(entry, now),
+    stale: isEvidenceStale(entry, now),
+  };
+}
+
+/**
+ * Reconcile one declared Agent claim with the measured discovery matrix.
+ *
+ * The declaration is never rewritten upward: a measurement stronger than the
+ * manifest is reported as a stale declaration, not silently promoted, because
+ * the publisher is the one who decides what their package claims to support.
+ * It *is* capped downward, which is what keeps "evidence-free native" off the
+ * screen when a manifest asserts an Agent CommandMate measured as unsupported.
+ */
+export function reconcileAgentSupport(
+  declared: SkillAgentCompatibility,
+  now: Date
+): SkillAgentCompatibilityView {
+  const entry = findSkillAgentMatrixEntry(declared.agent);
+  const base = {
+    agent: declared.agent,
+    evidence: declared.evidence,
+    declaredSupport: declared.support,
+    declaredLabelKey: AGENT_SUPPORT_LABEL_KEYS[declared.support],
+  };
+
+  if (entry === null || !isAgentMeasured(entry)) {
+    return {
+      ...base,
+      support: declared.support,
+      labelKey: AGENT_SUPPORT_LABEL_KEYS[declared.support],
+      verification: SkillAgentVerification.UNVERIFIED,
+      verificationKey:
+        SKILL_AGENT_VERIFICATION_MESSAGE_KEYS[SkillAgentVerification.UNVERIFIED],
+      measured: null,
+      skipReasonKey: entry?.skipReasonKey ?? null,
+      reloadKey: entry?.reloadKey ?? AGENT_RELOAD_MESSAGE_KEYS.UNKNOWN,
+    };
+  }
+
+  const { support, verification } = capSupportByMeasurement(
+    declared.support,
+    deriveMatrixAgentSupport(entry)
+  );
+
+  return {
+    ...base,
+    support,
+    labelKey: AGENT_SUPPORT_LABEL_KEYS[support],
+    verification,
+    verificationKey: SKILL_AGENT_VERIFICATION_MESSAGE_KEYS[verification],
+    measured: toMeasuredView(entry, now),
+    skipReasonKey: null,
+    reloadKey: entry.reloadKey,
+  };
+}
+
+/**
+ * Attach the shared i18n label key and the measured evidence to each claim.
+ *
+ * @param now - Evaluated against for evidence staleness. Passed explicitly by
+ *   tests so a verdict never depends on when the suite runs.
+ */
 export function describeAgentCompatibility(
-  agents: readonly SkillAgentCompatibility[]
+  agents: readonly SkillAgentCompatibility[],
+  now: Date = new Date()
 ): SkillAgentCompatibilityView[] {
-  return agents.map((entry) => ({
-    agent: entry.agent,
-    support: entry.support,
-    labelKey: AGENT_SUPPORT_LABEL_KEYS[entry.support],
-    evidence: entry.evidence,
-  }));
+  return agents.map((entry) => reconcileAgentSupport(entry, now));
 }
 
 // =============================================================================

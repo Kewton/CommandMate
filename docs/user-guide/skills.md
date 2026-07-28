@@ -64,13 +64,17 @@ Agent CLI の discovery 実装そのものは保証対象外である。
 `tests/unit/lib/skills/compatibility.test.ts` と `tests/e2e/skills-catalog.spec.ts` が固定している。
 
 manifest の `native` 宣言は **提供元の申告**であり、CommandMate が version ごとに動作確認した
-結果ではない。UI（`SkillDetailView`）は Agent 対応 badge の直下に「提供元による申告であり
-CommandMate は検証していない」旨の注記と `evidence` 原文を常時表示する。
-Agent 別 discovery matrix の継続的な自動検証は #1246 の責務。
+結果ではない。UI（`SkillDetailView`）は Agent 対応 badge の直下に、申告と `evidence` 原文に加えて
+**上表の実測結果**（発見 / 呼出の 2 軸・実測 version・計測日・証跡・reload 手順）を併記する（#1246）。
+申告が実測を上回る場合は実測側に制限して表示し、下回る場合は申告のまま「申告が追いついていない」
+と示す。matrix 本体は `src/lib/skills/compatibility-matrix.ts`、詳細は
+[skill-agent-compatibility.md](../reference/skill-agent-compatibility.md) を参照。
 
 CI が担保しているのは **両 root の `SKILL.md` が discovery 経路（`loadAgentsSkills()` /
-`loadSkills()`）から見えること**までであり、実 Agent CLI が実際にその Skill を提示・実行する
-ことは担保していない。
+`loadSkills()`）から見えること**と、**上表の discovery root が実際にその経路へ結び付いていること**
+（`tests/unit/lib/skills/agent-discovery-regression.test.ts`）までであり、実 Agent CLI が実際に
+その Skill を提示・実行することは担保していない。実 CLI の再計測は
+`CM_SKILL_DISCOVERY_PROBE=1` を付けたときだけ走る opt-in プローブが version 差分のみを検出する。
 
 ### 2-3. 変更範囲の保証
 
@@ -257,6 +261,7 @@ browser 側で stub して**描画された製品**を検証する。前者は�
 実 Catalog・実 release を叩く検証は opt-in で、`CM_SKILLS_E2E_REAL_CATALOG=1` を設定した時だけ
 実行される。未設定時は skip 理由つきで skip される。
 
-自動化されていないのは、初見利用者の UX 調査（被験者を要する）と、実 Agent CLI を
-継続的に回す discovery 実測（#1246）である。実施状況は
+自動化されていないのは、初見利用者の UX 調査（被験者を要する）と、実 Agent CLI の対話 TUI を
+操作する呼出実測（#1246 で opt-in の version 差分プローブまでを自動化し、palette 露出の
+再計測は隔離環境での手動作業として残した）である。実施状況は
 [docs/qa/skills-mvp-uat-report.md](../qa/skills-mvp-uat-report.md) を参照。

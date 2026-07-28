@@ -411,7 +411,8 @@
 | `src/lib/skills/package-validator.ts` | manifest と package の双方向完全照合、staging への安全な materialize（#1230、server-only） |
 | `src/lib/skills/safe-yaml.ts` | `SKILL_YAML_SAFE_PROFILE` を満たす YAML 部分集合 parser（#1230、新規依存なし） |
 | `src/lib/skills/catalog-client.ts` | 条件付き GET / TTL / last-known-good / single-flight / rate limit back-off（#1231） |
-| `src/lib/skills/compatibility.ts` | compatible / incompatible / unknown の 3 値判定と version 解決（#1231、pure） |
+| `src/lib/skills/compatibility.ts` | compatible / incompatible / unknown の 3 値判定と version 解決（#1231、pure）。#1246: `reconcileAgentSupport()` が manifest 申告を実測 matrix で**下方向にのみ**制限（`capSupportByMeasurement()`）し、CONFIRMED / RESTRICTED / STALE_DECLARATION / UNVERIFIED を返す。`now` は明示引数 |
+| `src/lib/skills/compatibility-matrix.ts` | Agent 別 discovery 実測 matrix（#1246、pure data）。**発見と呼出を別軸**で記録（Codex 0.145.0 は発見のみ成立）。support 値は discovery 軸だけで決まり、呼出制約は known limitation。全 `CLI_TOOL_IDS` を網羅し未計測は `unknown` + skip 理由。`SKILL_EVIDENCE_MAX_AGE_DAYS`=180 |
 | `src/lib/api/skills-api.ts` | Catalog document → wire 形式の単一 mapping。artifact URL を含めない（#1231） |
 | `src/config/skill-catalog-config.ts` | Catalog endpoint の完全一致 allowlist と TTL / size cap / rate limit（#1231） |
 | `src/app/api/skills/route.ts` / `[id]/route.ts` | read-only Catalog API。UI と CLI が同じ結果を参照する（#1231） |

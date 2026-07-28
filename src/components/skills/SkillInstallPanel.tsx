@@ -26,6 +26,8 @@ import { useTranslations } from 'next-intl';
 import { Button, Card, Checkbox } from '@/components/ui';
 import { getCliToolDisplayNameSafe } from '@/lib/cli-tools/types';
 import { dispatchSkillInstalled } from '@/lib/skill-events';
+import type { SkillAgentCompatibilityView } from '@/lib/skills/compatibility';
+import { CompatibilityEvidence } from './CompatibilityEvidence';
 import { SkillNotice } from './SkillNotice';
 import { SkillTargetSelector } from './SkillTargetSelector';
 import { SkillInstallPlanPreview, SkillUninstallPlanPreview } from './SkillPlanPreview';
@@ -170,6 +172,12 @@ export interface SkillInstallPanelProps {
    * keeps its original behavior and asks the user to pick a target.
    */
   worktreeId?: string;
+  /**
+   * Issue #1246: Agent support for the version about to be installed, used to
+   * state the reload step *before* the install rather than only in the result
+   * (UX-01). Optional so callers without a Catalog version keep working.
+   */
+  agents?: readonly SkillAgentCompatibilityView[];
 }
 
 export function SkillInstallPanel({
@@ -177,6 +185,7 @@ export function SkillInstallPanel({
   version,
   blockedReason,
   worktreeId: fixedWorktreeId,
+  agents = [],
 }: SkillInstallPanelProps) {
   const t = useTranslations('skills');
   const [state, setState] = useState<PanelState>(() =>
@@ -331,6 +340,19 @@ export function SkillInstallPanel({
       >
         {planReason}
       </p>
+
+      {agents.length > 0 && (
+        <div className="space-y-1" data-testid="skill-install-reload-preview">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {t('operation.reloadHeading')}
+          </h4>
+          <ul className="space-y-1">
+            {agents.map((agent) => (
+              <CompatibilityEvidence key={agent.agent} agent={agent} variant="reload" />
+            ))}
+          </ul>
+        </div>
+      )}
 
       {state.failure && <FailureNotice failure={state.failure} />}
 
