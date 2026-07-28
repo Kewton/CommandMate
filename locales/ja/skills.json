@@ -388,5 +388,76 @@
       "requestFailed": "要求がCommandMateに届かなかったか、理由を伴わない応答が返りました。変更が起きたとは確認できていません。",
       "unexpected": "CommandMateが説明を持たない失敗を報告しました。worktreeを確認したうえで、変更なしと判断してください。"
     }
+  },
+  "dashboard": {
+    "title": "導入済みSkill",
+    "description": "どのworktreeにどのSkillが適用されているか、導入時の内容と一致しているかを確認します。",
+    "scannedAt": "走査時刻 {timestamp}",
+    "worktreeCount": "worktree {count} 件",
+    "rescan": "再走査",
+    "reindex": "indexを再構築",
+    "reindexRunning": "再構築中…",
+    "reindexDone": "receiptから再構築しました: {indexed} 件登録、{removed} 件削除、{skipped} 件スキップ。",
+    "reindexFailed": "indexを再構築できませんでした。",
+    "errorNotice": "導入済みSkillの適用状態を読み取れませんでした。Skillが未導入であることとは異なります。",
+    "catalogUnavailable": "Catalogに接続できないため、更新の有無を判定できません。それ以外の情報はディスク上のreceiptに基づいています。",
+    "truncated": "走査が上限に達したため、この一覧は不完全です。",
+    "unreadableWorktrees": "登録済みですがディスク上に存在しないため走査していないworktree: {worktrees}",
+    "empty": "登録済みworktreeにSkillは導入されていません。",
+    "filterSkill": "Skill名",
+    "filterWorktree": "worktree",
+    "filterStatus": "状態",
+    "all": "すべて",
+    "rootPresent": "配置済み",
+    "rootMissing": "未検出",
+    "rootTruncated": "走査打ち切り",
+    "driftSummary": "変更 {modified} / 欠落 {missing} / 未管理 {unmanaged} / 不正 {irregular}",
+    "status": {
+      "installed": "導入済み",
+      "modified": "ローカル変更あり",
+      "missing": "payload欠落",
+      "unmanaged": "index未登録",
+      "updateAvailable": "更新あり"
+    },
+    "statusHint": {
+      "installed": "receiptが記録するすべてのinstall rootが一致しています。",
+      "modified": "install root配下のファイルがreceiptと異なります。更新・削除の前に差分を確認してください。",
+      "missing": "receiptが記録するinstall rootにpayloadがありません。そのrootからはSkillが検出されません。",
+      "unmanaged": "indexに対応する記録がないpayloadがディスク上にあります。indexを再構築して取り込むか、手動で削除してください。",
+      "updateAvailable": "導入内容は健全で、Catalogに互換性のある新しいversionがあります。"
+    }
+  },
+  "history": {
+    "heading": "操作履歴",
+    "loading": "操作ログを読み込み中…",
+    "empty": "Skillの操作記録はまだありません。",
+    "errorNotice": "操作ログを読み取れませんでした。操作が行われていないこととは異なります。",
+    "filterOperation": "操作",
+    "filterResult": "結果",
+    "loadMore": "過去の記録を読み込む",
+    "recordedAt": "{timestamp}",
+    "transitionLabel": "version",
+    "transition": "{from} → {to}",
+    "actorLabel": "実行元",
+    "origin": "取得元",
+    "sourceCommit": "コミット",
+    "artifactDigest": "artifactダイジェスト",
+    "retry": "Skillを開いて再試行する",
+    "none": "—",
+    "operation": {
+      "install": "導入",
+      "uninstall": "削除",
+      "update": "更新"
+    },
+    "result": {
+      "succeeded": "成功",
+      "failed": "失敗",
+      "reconciled": "整合済み"
+    },
+    "actor": {
+      "user": "Web画面",
+      "cli": "CLI",
+      "system": "CommandMate"
+    }
   }
 }

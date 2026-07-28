@@ -217,6 +217,7 @@ describe('createSkillCommand', () => {
       'install',
       'list',
       'plan',
+      'reindex',
       'status',
       'uninstall',
     ]);
@@ -644,5 +645,67 @@ describe('skill status', () => {
       installed: false,
     });
     expect(mockExit).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// reindex (Issue #1248)
+// =============================================================================
+
+const reindexResult = {
+  scannedWorktrees: 2,
+  indexed: 3,
+  removed: 1,
+  skipped: [
+    {
+      worktreeId: 'wt-1',
+      skillId: 'bare-skill',
+      root: '.agents/skills/bare-skill',
+      reason: 'SKILL_REINDEX_RECEIPT_MISSING',
+    },
+  ],
+  unreadableWorktreeIds: ['wt-gone'],
+};
+
+describe('skill reindex', () => {
+  it('asks the server to rebuild and summarises what it did', async () => {
+    mockFetchResponse(reindexResult);
+
+    await run(['reindex']);
+
+    const out = mockConsoleLog.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(out).toContain('Scanned 2 worktree(s).');
+    expect(out).toContain('Indexed:  3');
+    expect(out).toContain('Removed:  1');
+  });
+
+  it('POSTs the rebuild without supplying a path of its own', async () => {
+    mockFetchResponse(reindexResult);
+
+    await run(['reindex']);
+
+    const call = (global.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls[0];
+    expect(call[0]).toContain('/api/skills/reindex');
+    expect((call[1] as { method?: string }).method).toBe('POST');
+    expect(requestBody(0)).toEqual({});
+  });
+
+  it('reports skipped directories and unscanned worktrees on stderr', async () => {
+    mockFetchResponse(reindexResult);
+
+    await run(['reindex']);
+
+    const err = mockConsoleError.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(err).toContain('SKILL_REINDEX_RECEIPT_MISSING');
+    expect(err).toContain('wt-gone');
+  });
+
+  it('prints the API body verbatim with --json, keeping stdout pure JSON', async () => {
+    mockFetchResponse(reindexResult);
+
+    await run(['reindex', '--json']);
+
+    const out = mockConsoleLog.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(JSON.parse(out)).toEqual(reindexResult);
   });
 });

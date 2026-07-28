@@ -19,7 +19,12 @@ import {
   DIFF_CHANGE_LABEL_KEY,
   DIFF_REASON_LABEL_KEY,
   HEAD_STATE_LABEL_KEY,
+  INSTALLATION_STATUS_HINT_KEY,
+  INSTALLATION_STATUS_LABEL_KEY,
+  OPERATION_ACTOR_LABEL_KEY,
   OPERATION_ERROR_LABEL_KEY,
+  OPERATION_KIND_LABEL_KEY,
+  OPERATION_RESULT_LABEL_KEY,
   PERMISSION_LABEL_KEY,
   PREVIEW_WARNING_LABEL_KEY,
   RECOMMENDATION_LABEL_KEY,
@@ -172,6 +177,14 @@ function contractKeys(): string[] {
     .concat(Object.values(UNINSTALL_DISPOSITION_LABEL_KEY))
     .concat(Object.values(UNINSTALL_REASON_LABEL_KEY))
     .concat(Object.values(OPERATION_ERROR_LABEL_KEY))
+    // Applied state and audit vocabulary (#1248): the dashboard names a status,
+    // an operation kind, an outcome and an actor by wire value and looks the
+    // label up, so none of these reach the extractor as a literal call site.
+    .concat(Object.values(INSTALLATION_STATUS_LABEL_KEY))
+    .concat(Object.values(INSTALLATION_STATUS_HINT_KEY))
+    .concat(Object.values(OPERATION_KIND_LABEL_KEY))
+    .concat(Object.values(OPERATION_RESULT_LABEL_KEY))
+    .concat(Object.values(OPERATION_ACTOR_LABEL_KEY))
     .concat([operationErrorLabelKey('SKILL_SOMETHING_UNMAPPED')])
     .concat(
       [
@@ -231,6 +244,13 @@ const PLACEHOLDERS: Record<string, string[]> = {
   'uninstall.stats': ['{removable}', '{modified}', '{missing}', '{unknown}', '{irregular}'],
   'operation.filesWritten': ['{count}'],
   'operation.filesRemoved': ['{count}'],
+  'dashboard.scannedAt': ['{timestamp}'],
+  'dashboard.worktreeCount': ['{count}'],
+  'dashboard.reindexDone': ['{indexed}', '{removed}', '{skipped}'],
+  'dashboard.unreadableWorktrees': ['{worktrees}'],
+  'dashboard.driftSummary': ['{modified}', '{missing}', '{unmanaged}', '{irregular}'],
+  'history.recordedAt': ['{timestamp}'],
+  'history.transition': ['{from}', '{to}'],
 };
 
 /**
@@ -238,7 +258,18 @@ const PLACEHOLDERS: Record<string, string[]> = {
  * format or identifier, not a concept, and localizing them would misdescribe
  * what the adjacent value literally is.
  */
-const UNTRANSLATED_BY_DESIGN = ['detail.skillId', 'detail.sourceRef', 'detail.packageDigest'];
+const UNTRANSLATED_BY_DESIGN = [
+  'detail.skillId',
+  'detail.sourceRef',
+  'detail.packageDigest',
+  // Pure formats and product/interface names (#1248): these render a value or
+  // name an identifier, so translating them would misdescribe what is shown.
+  'history.recordedAt',
+  'history.transition',
+  'history.none',
+  'history.actor.cli',
+  'history.actor.system',
+];
 
 describe('skills i18n keys (Issue #1232)', () => {
   it.each(['en', 'ja'])('%s/skills.json has non-empty values for every leaf', (locale) => {

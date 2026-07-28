@@ -310,3 +310,68 @@ export function collectAgentOptions(skills: SkillDto[]): string[] {
   }
   return [...agents].sort();
 }
+
+// =============================================================================
+// Applied state and audit (Issue #1248)
+// =============================================================================
+
+/**
+ * Applied state of one Skill, keyed by `SkillInstallationStatus`.
+ *
+ * The screens cannot import the scanner's union as a value — its module reads
+ * the filesystem — so the map is written out here and the i18n guard asserts it
+ * against the shipped dictionary.
+ */
+export const INSTALLATION_STATUS_LABEL_KEY: Record<string, string> = {
+  installed: 'dashboard.status.installed',
+  modified: 'dashboard.status.modified',
+  missing: 'dashboard.status.missing',
+  unmanaged: 'dashboard.status.unmanaged',
+  update_available: 'dashboard.status.updateAvailable',
+};
+
+/** Why a Skill is in that state, so drift is explained rather than just flagged (UX-07). */
+export const INSTALLATION_STATUS_HINT_KEY: Record<string, string> = {
+  installed: 'dashboard.statusHint.installed',
+  modified: 'dashboard.statusHint.modified',
+  missing: 'dashboard.statusHint.missing',
+  unmanaged: 'dashboard.statusHint.unmanaged',
+  update_available: 'dashboard.statusHint.updateAvailable',
+};
+
+/** Badge tone per applied state. `installed` is the only unremarkable one. */
+export const INSTALLATION_STATUS_TONE: Record<string, 'success' | 'warning' | 'error' | 'info'> = {
+  installed: 'success',
+  modified: 'warning',
+  missing: 'error',
+  unmanaged: 'warning',
+  update_available: 'info',
+};
+
+/** Operation kind, keyed by `SkillOperationKind`. */
+export const OPERATION_KIND_LABEL_KEY: Record<string, string> = {
+  install: 'history.operation.install',
+  uninstall: 'history.operation.uninstall',
+  update: 'history.operation.update',
+};
+
+/** Outcome, keyed by `SkillOperationAuditResult`. */
+export const OPERATION_RESULT_LABEL_KEY: Record<string, string> = {
+  succeeded: 'history.result.succeeded',
+  failed: 'history.result.failed',
+  reconciled: 'history.result.reconciled',
+};
+
+/** Badge tone per outcome. */
+export const OPERATION_RESULT_TONE: Record<string, 'success' | 'warning' | 'error'> = {
+  succeeded: 'success',
+  failed: 'error',
+  reconciled: 'warning',
+};
+
+/** Who asked, keyed by the journal's actor type. */
+export const OPERATION_ACTOR_LABEL_KEY: Record<string, string> = {
+  user: 'history.actor.user',
+  cli: 'history.actor.cli',
+  system: 'history.actor.system',
+};
