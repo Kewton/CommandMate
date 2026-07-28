@@ -17,7 +17,7 @@ import {
   normalizeHostVersion,
   resolveSkillVersions,
 } from '@/lib/skills/compatibility';
-import { AGENT_SUPPORT_LABEL_KEYS } from '@/lib/skills/constants';
+import { AGENT_SUPPORT_LABEL_KEYS, SKILL_AGENT_SUPPORT_VALUES } from '@/lib/skills/constants';
 import type { SkillCatalog, SkillCatalogEntry, SkillCatalogVersion } from '@/types/skills';
 
 function makeVersion(
@@ -145,6 +145,30 @@ describe('describeAgentCompatibility', () => {
     expect(views[0].labelKey).toBe(AGENT_SUPPORT_LABEL_KEYS.native);
     expect(views[1].labelKey).toBe(AGENT_SUPPORT_LABEL_KEYS.unknown);
     expect(views[1].support).toBe('unknown');
+  });
+
+  it('invents no verdict for an Agent the manifest does not mention', () => {
+    // Issue #1242: as of 2026-07-26 only Claude Code and Codex CLI have been
+    // measured. Gemini, OpenCode and vibe-local have not, and a fabricated
+    // `unsupported` would be a measurement CommandMate never made, while
+    // `commandmate_runtime` would be a capability Phase 1 does not ship. Silence
+    // in the manifest has to stay silence on the wire.
+    const views = describeAgentCompatibility([
+      { agent: 'claude', support: 'native', evidence: 'measured on 2.1.220' },
+    ]);
+
+    expect(views).toHaveLength(1);
+    expect(views.map((view) => view.agent)).toEqual(['claude']);
+  });
+
+  it('carries a declared claim through unchanged rather than re-judging it', () => {
+    // The support value is the publisher's declaration. Rewriting it here would
+    // turn an unverified claim into a CommandMate verdict.
+    for (const support of SKILL_AGENT_SUPPORT_VALUES) {
+      const [view] = describeAgentCompatibility([{ agent: 'codex', support, evidence: 'e' }]);
+      expect(view.support).toBe(support);
+      expect(view.labelKey).toBe(AGENT_SUPPORT_LABEL_KEYS[support]);
+    }
   });
 });
 

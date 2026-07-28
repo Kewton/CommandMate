@@ -1,11 +1,13 @@
 # Agent Skills MVP — 受入検証レポート（Issue #1242）
 
-**対象**: Phase 1（#1228〜#1237）／**判定日**: 2026-07-20
-**Go/No-Go**: **自動検証分は Go。人手検証分は保留（未実施）。**
+**対象**: Phase 1（#1228〜#1237）
+**判定日**: 2026-07-20（第1回）／**2026-07-29（第2回・現行）**
+**Go/No-Go**: **自動検証分は Go。残る保留は初見参加者 UX 調査（§3-1）のみ。**
 
-本レポートは Issue #1242 の受入条件を「2a: 自動検証」と「2b: 人手検証」に分け、
-**2a のみ**を実施した結果である。**2b は本レポート作成時点で未実施であり、
-代理の自動テストで合格扱いにしていない。**
+本レポートは Issue #1242 の受入条件を「2a: 自動検証」と「2b: 人手検証」に分けて記録する。
+第1回（2026-07-20）は 2a のみを実施し、2b は 3 件すべて未実施だった。第2回（2026-07-29）は、
+その後にマージされた #1431 / #1440 / #1460 と 2026-07-26 の discovery 実測を踏まえ、
+2b のうち 2 件を解消・降格した。**依然として、代理の自動テストで人手検証を合格扱いにはしていない。**
 
 ---
 
@@ -13,13 +15,14 @@
 
 | 区分 | 状態 | 根拠 |
 |---|---|---|
-| 2a 自動検証 | **Go** | 新規 114 test すべて green（§2）。既存回帰なし（§4） |
-| 2b 人手検証 | **保留（未実施）** | 実施者・実施方法は §3 に明記。実施までは MVP 出荷可否を判定しない |
+| 2a 自動検証 | **Go** | 第1回の 114 test に加え、実ブラウザ e2e 20 test を追加（§2）。既存回帰なし（§4） |
+| 2b-1 初見参加者 UX 調査 | **保留（未実施）** | 被験者を要するため自動化不能。阻害要因だった UI 導線欠如は #1431 で解消済み → **実施可能になった** |
+| 2b-2 実機ブラウザ UAT | **自動化により充足** | `tests/e2e/skills-*.spec.ts` が desktop / 390px mobile の両方で files・scripts・permissions・risk・target・diff の視認と承認ゲートを固定（§3-2） |
+| 2b-3 実 Agent CLI discovery | **実測済み（2026-07-26）** | Claude Code 2.1.220 / Codex CLI 0.145.0 を実測。継続的な matrix 化は #1246（§3-3） |
 
-**総合判定は「保留」である。** §3 の 3 項目が完了するまで MVP の出荷可否は確定しない。
-自動検証が Go であることは「機械が確認できる範囲で fail closed である」ことを意味し、
-「利用者が導入できる」ことを意味しない。特に §3-1 は UI 導線が未接続（既知制約 3-1）である
-現状では、CLI 経路でしか実施できない点に注意すること。
+**総合判定は「§3-1 を残して Go」である。** 自動検証が Go であることは「機械が確認できる範囲で
+fail closed であり、承認 UI が意図どおり描画・ゲートされている」ことを意味し、
+「初見の利用者が支援なしで導入できる」ことは意味しない。後者の判断材料は §3-1 でしか得られない。
 
 ---
 
@@ -36,6 +39,7 @@
 | `skills-mvp-install-flow.test.ts` | 18 pass / 1 skip（opt-in） | ✅ |
 | `skills-mvp-security-regression.test.ts` | 74 pass | ✅ |
 | `skills-mvp-source-integrity.test.ts` | 20 pass | ✅ |
+| `tests/e2e/skills-catalog.spec.ts` + `skills-install.spec.ts`（第2回追加） | 20 pass | ✅ |
 | `npm run test:integration`（全体） | 926 pass / 1 skip | ✅ |
 | `npm run test:unit`（全体） | 11023 pass | ✅ |
 
@@ -81,11 +85,12 @@ production 側には endpoint を差し替える経路が無いことを次の 2
 
 ---
 
-## 3. 未実施（2b: 人手検証）— **保留中**
+## 3. 人手検証（2b）の現況
 
-以下は本 Issue の自動化スコープ外である。**エージェントによる代理実施は行っていない。**
+第1回で 3 件すべて未実施だったもののうち、2 件は第2回で解消・降格した。
+**残る 1 件についてエージェントによる代理実施は行っていない。**
 
-### 3-1. 初見参加者による導入 UX 調査
+### 3-1. 初見参加者による導入 UX 調査 — **未実施（実施可能になった）**
 
 - **受入条件**: 初見参加者の 80% 以上が無支援かつ 10 分以内に公式 Skill 1 件を install でき、
   失敗理由が記録されること（UX-01）
@@ -96,51 +101,68 @@ production 側には endpoint を差し替える経路が無いことを次の 2
   2. 「公式 Catalog から任意の Skill を1つ、この worktree に導入してください」とだけ伝える
   3. 無支援で観察し、所要時間・成功可否・誤操作・詰まった箇所・断念理由を記録する
   4. 成功率・中央値所要時間・失敗理由の分類を集計する
-- **既知の阻害要因**: **UI に install 導線が無い**（既知制約 3-1）。現状 CLI でしか導入できず、
-  CLI は `--version` 必須（既知制約 3-6）。この状態で UX 調査を行うと「UI 導線の欠如」が
-  支配的な失敗理由になる見込みであり、**#1248 等で UI 導線が接続されてから実施することを推奨する**。
+- **第1回の阻害要因（解消済み）**: 「UI に install 導線が無い」を理由に実施を保留していたが、
+  **#1431 で導線が接続され、#1440 で worktree の導入済み一覧も加わった**。ブラウザだけで
+  target 選択 → preview → 承認 → install → uninstall が完結するため、調査対象を CLI に
+  限定する必要はなくなった。CLI 経路だけは依然 `--version` 必須（既知制約 3-6）なので、
+  被験者には UI 経路を使わせること。
 
-### 3-2. 実機ブラウザでの mobile / desktop UAT
+### 3-2. 実機ブラウザでの mobile / desktop UAT — **自動化により充足**
 
 - **受入条件**: 利用者が対象・効果・risk・差分を理解して導入できること（UX-05 / UX-07 / UX-09）
-- **状態**: **未実施**
-- **実施者**: QA 担当
-- **実施方法**:
-  1. desktop（Chrome / Safari）と mobile（iOS Safari / Android Chrome）実機で `/skills` と
-     `/skills/[id]` を開く
-  2. files / scripts / permissions / risk / target / diff の各項目が視認でき、
-     high-risk が色以外（label・icon）でも識別できることを確認する
-  3. Catalog stale / offline 時の警告表示と理由コードを確認する
-  4. 画面ごとにスクリーンショットを証跡として残す
-- **備考**: Playwright の既定 project は chromium のみで、Mobile Safari project は
-  Issue #1180 で削除済み。mobile は実機確認が必要。
+- **状態**: **自動 e2e で充足**（第2回）
+- **根拠**: `tests/e2e/skills-catalog.spec.ts` / `tests/e2e/skills-install.spec.ts` が実ブラウザ
+  （Chromium、desktop と 390px mobile viewport）で以下を固定した。
+  1. target（repository / branch）と **install root 両方**が承認前に提示される
+  2. permissions・requirements・scripts・risk・per-file diff・stats が preview に出る
+  3. high-risk は承諾チェックまで apply request が **ブラウザから出ない**（request log で negative 検証）
+  4. blocker つき plan は「何も書かれていない＋何が阻んでいるか」として描画される
+  5. Catalog 取得失敗が空 Catalog に退化しない／stale が stale として出る
+  6. mobile 390px で承認ボタンが column 内に収まり click できる、横スクロールが発生しない
+- **残る限界**: 実行 engine は Chromium のみ（Mobile Safari project は #1180 で削除済み）。
+  **実 iOS Safari / Android Chrome での確認は行っていない**。engine 固有の描画差を疑う場合は
+  実機確認が要る。ただし「情報が表示されるか・ゲートが効くか」は engine 非依存であり、
+  第1回で未確認だった部分はここで埋まっている。
 
-### 3-3. 実 Agent CLI での native discovery 実測
+### 3-3. 実 Agent CLI での native discovery 実測 — **実測済み（2026-07-26）**
 
-- **受入条件**: Codex native discovery と、他 Agent が unsupported / runtime として
+- **受入条件**: native discovery の実測と、他 Agent が unsupported / runtime として
   誤表示されないことの検証
-- **状態**: **未実施**（本 Issue のスコープ外。#1246 の責務）
-- **実施者**: 開発担当（#1246）
-- **実施方法**:
-  1. Skill を install した worktree で claude CLI / codex CLI を起動する
-  2. 各 CLI の version を記録する（`claude --version` / `codex --version`）
-  3. 導入した Skill が候補として提示されるか、実行できるかを version ごとに記録する
-  4. 結果を manifest の `compatibility.agents[].evidence` へ反映する
-- **現状の担保範囲**: 自動テストは `.agents/skills/<id>/SKILL.md` が CommandMate 内部の
-  discovery loader（`loadAgentsSkills()`）から見えることまでしか検証していない。
-  manifest の `native` 宣言は**提供元の申告のまま**であり、実測に基づかない（既知制約 §2-2）。
+- **状態**: **実測済み**。継続的な matrix 化と reload guidance の検証は #1246 の責務。
+- **実測結果（2026-07-26、#1513 G4）**:
+
+  | Agent | version | discovery root | slash command 露出 |
+  |---|---|---|---|
+  | Claude Code | 2.1.220 | `.claude/skills` から発見（`.agents/skills` は読まない） | ✅ palette に出る |
+  | Codex CLI | 0.145.0 | `.agents/skills` から発見 | ❌ 露出しない（CLI 側の制約） |
+  | Gemini / OpenCode / vibe-local | — | **未計測** | 未計測 |
+
+- **誤表示しないことの担保**: 未計測 Agent は `unknown` のまま扱う。
+  `tests/unit/lib/skills/compatibility.test.ts` が「manifest が言及しない Agent の view を
+  生成しない」ことを、`tests/e2e/skills-catalog.spec.ts` が「gemini / opencode / vibe-local の
+  badge が page 上に 1 つも無い」ことを固定している（変異注入で非空振りを確認済み）。
+- **install 側の担保**: #1460 以降 install は両 root へ byte-identical に配置し、
+  `skills-mvp-install-flow.test.ts` が `loadAgentsSkills()` と `loadSkills()` の双方から
+  同じ Skill が見えることを検証している。実 Agent CLI が実際に提示・実行することまでは
+  自動テストの担保外である（manifest の `native` は提供元の申告のまま）。
 
 ---
 
 ## 4. 品質ゲート
 
-| チェック | 結果 |
-|---|---|
-| `npm run lint` | ✅ |
-| `npx tsc --noEmit` | ✅ |
-| `npm run test:unit` | ✅ 11023 pass |
-| `npm run test:integration` | ✅ 926 pass / 1 skip |
-| `npm run build` | ✅ |
+第2回（2026-07-29）の実測。いずれも終了コードを直接取得しており、pipe で隠していない。
+
+| チェック | 第1回（2026-07-20） | 第2回（2026-07-29） |
+|---|---|---|
+| `npm run lint` | ✅ | ✅ exit 0 |
+| `npx tsc --noEmit` | ✅ | ✅ exit 0 |
+| `npm run test:unit` | ✅ 11023 pass | ✅ exit 0 / 11582 pass |
+| `npm run test:integration` | ✅ 926 pass / 1 skip | ✅ exit 0 / 994 pass / 1 skip |
+| `npm run build` | ✅ | ✅ exit 0 |
+| `npx playwright test tests/e2e/skills-*.spec.ts` | — | ✅ exit 0 / 20 pass |
+
+e2e は `playwright.config.ts` の隔離構成（port 3177・専用 DB・空の非 git scan root）で実行した。
+本番サーバ（port 3000）と本番 DB には接触していない。
 
 ---
 
@@ -158,6 +180,15 @@ production 側には endpoint を差し替える経路が無いことを次の 2
 | 6 | uninstall 後も `.agents/skills/` と `.agents/` は空 directory として残る（receipt が導出した directory しか `rmdir` しないため） | 既知制約 3-5 に明記 |
 | 7 | CLI の `install` は `--version` が必須で、省略すると exit 2。API / UI は推奨 version へ既定解決するため **UI と CLI で既定挙動が非対称** | 既知制約 3-6 と support matrix に明記 |
 | 8 | `reconcileSkillOperations()` / `releaseOrphanSkillLocks()` は実装済みだが production の起動経路から呼ばれていない | 既知制約 3-8 に明記。rollback 手順 §4-3 で人手 reconcile を案内 |
+
+第2回（2026-07-29）に判明したもの。いずれも **docs 側が実装に追随していなかった**ケースで、
+実装は正しく動いていた。
+
+| # | 内容 | 対応 |
+|---|---|---|
+| 9 | `docs/user-guide/skills.md` が install 先を単一 root（`.agents/skills`）として記述したままだった。#1460 以降、install は `SKILL_INSTALL_ROOT_PREFIXES` の **両 root** へ byte-identical に配置する | support matrix・変更範囲・§4 rollback 手順をすべて両 root へ訂正 |
+| 10 | 同 §4-2 の手動 rollback が `.agents/skills/<id>` しか消さない手順だった。**そのとおり実行すると `.claude/skills/<id>` が残り、Claude Code から Skill が見え続けたまま再 install が 409 で拒否される** | 両 root を消す手順へ訂正。`install_roots` で正確な一覧を確認する旨を追記 |
+| 11 | support matrix が UI 導線を「未接続」、導入済み一覧を「未提供」としていたが、#1431 / #1440 で解消済みだった（§3-1 の記述と自己矛盾していた） | matrix と既知制約 3-1 / 3-2 を実態へ訂正 |
 
 ---
 
