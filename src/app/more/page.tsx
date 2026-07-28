@@ -49,6 +49,12 @@ export default function MorePage() {
                 <div className="text-xs text-muted-foreground">{tSkills('page.description')}</div>
               </Card>
             </Link>
+            <Link href="/skills/installed" className="block" data-testid="more-link-skills-installed">
+              <Card hover className="transition-colors hover:border-accent-300 dark:hover:border-accent-700">
+                <div className="text-sm font-medium text-foreground">{tSkills('dashboard.title')}</div>
+                <div className="text-xs text-muted-foreground">{tSkills('dashboard.description')}</div>
+              </Card>
+            </Link>
           </div>
         </div>
 

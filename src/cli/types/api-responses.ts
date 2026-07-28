@@ -375,3 +375,19 @@ export interface SkillUninstallResponse {
     fullyRemoved?: boolean;
   } | null;
 }
+
+/** Mirrors: src/app/api/skills/reindex/route.ts POST response [Issue #1248]. */
+export interface SkillReindexResult {
+  scannedWorktrees: number;
+  indexed: number;
+  removed: number;
+  skipped: Array<{
+    worktreeId: string;
+    skillId: string;
+    /** Repository-relative root the directory was found at. */
+    root: string;
+    reason: string;
+  }>;
+  /** Registered worktrees whose directory is gone; their rows were left untouched. */
+  unreadableWorktreeIds: string[];
+}

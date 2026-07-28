@@ -388,5 +388,76 @@
       "requestFailed": "The request did not reach CommandMate, or it answered without naming a reason. Nothing is known to have changed.",
       "unexpected": "CommandMate reported a failure it has no explanation for. Treat the worktree as unchanged only after checking it."
     }
+  },
+  "dashboard": {
+    "title": "Installed Skills",
+    "description": "Which Skill is applied in which worktree, and whether it still matches what was installed.",
+    "scannedAt": "Scanned {timestamp}",
+    "worktreeCount": "{count} worktrees",
+    "rescan": "Rescan",
+    "reindex": "Rebuild index",
+    "reindexRunning": "Rebuilding…",
+    "reindexDone": "Rebuilt from receipts: {indexed} indexed, {removed} removed, {skipped} skipped.",
+    "reindexFailed": "The index could not be rebuilt.",
+    "errorNotice": "The applied state of installed Skills could not be read. This is not the same as having no Skills installed.",
+    "catalogUnavailable": "The Catalog is unreachable, so available updates cannot be determined. Everything else on this page still reflects the receipts on disk.",
+    "truncated": "The scan stopped at its size limit, so this list is incomplete.",
+    "unreadableWorktrees": "These registered worktrees no longer exist on disk and were not scanned: {worktrees}",
+    "empty": "No Skill is installed in any registered worktree.",
+    "filterSkill": "Skill",
+    "filterWorktree": "Worktree",
+    "filterStatus": "State",
+    "all": "All",
+    "rootPresent": "Present",
+    "rootMissing": "Not found",
+    "rootTruncated": "Scan truncated",
+    "driftSummary": "{modified} modified, {missing} missing, {unmanaged} unmanaged, {irregular} irregular",
+    "status": {
+      "installed": "Installed",
+      "modified": "Changed locally",
+      "missing": "Payload missing",
+      "unmanaged": "Not indexed",
+      "updateAvailable": "Update available"
+    },
+    "statusHint": {
+      "installed": "Every recorded install root matches the receipt.",
+      "modified": "Files under an install root differ from the receipt. Review the changes before updating or removing.",
+      "missing": "An install root recorded in the receipt has no payload on disk. The Skill will not be discovered from that root.",
+      "unmanaged": "A payload is on disk with no index entry behind it. Rebuild the index to adopt it, or remove it by hand.",
+      "updateAvailable": "The install is intact and the Catalog offers a newer compatible version."
+    }
+  },
+  "history": {
+    "heading": "Operation history",
+    "loading": "Reading the operation log…",
+    "empty": "No Skill operation has been recorded yet.",
+    "errorNotice": "The operation log could not be read. This is not the same as nothing having happened.",
+    "filterOperation": "Operation",
+    "filterResult": "Outcome",
+    "loadMore": "Load older",
+    "recordedAt": "{timestamp}",
+    "transitionLabel": "Version",
+    "transition": "{from} → {to}",
+    "actorLabel": "Requested by",
+    "origin": "Origin",
+    "sourceCommit": "Commit",
+    "artifactDigest": "Artifact digest",
+    "retry": "Open the Skill to try again",
+    "none": "—",
+    "operation": {
+      "install": "Install",
+      "uninstall": "Uninstall",
+      "update": "Update"
+    },
+    "result": {
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "reconciled": "Reconciled"
+    },
+    "actor": {
+      "user": "Web UI",
+      "cli": "CLI",
+      "system": "CommandMate"
+    }
   }
 }

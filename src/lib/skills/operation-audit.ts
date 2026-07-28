@@ -41,6 +41,10 @@ export interface SkillOperationAuditRecord {
   worktreeId: string;
   skillId: string;
   skillVersion: string | null;
+  /** Version present before the operation; null when nothing was installed. */
+  fromVersion: string | null;
+  /** Version present after the operation; null for an uninstall. */
+  toVersion: string | null;
   sourceOrigin: string | null;
   sourceRepository: string | null;
   sourceRef: string | null;
@@ -69,6 +73,8 @@ interface SkillOperationRow {
   worktree_id: string;
   skill_id: string;
   skill_version: string | null;
+  from_version: string | null;
+  to_version: string | null;
   source_origin: string | null;
   source_repository: string | null;
   source_ref: string | null;
@@ -93,6 +99,8 @@ function mapRow(row: SkillOperationRow): SkillOperationAuditRecord {
     worktreeId: row.worktree_id,
     skillId: row.skill_id,
     skillVersion: row.skill_version,
+    fromVersion: row.from_version,
+    toVersion: row.to_version,
     sourceOrigin: row.source_origin,
     sourceRepository: row.source_repository,
     sourceRef: row.source_ref,
@@ -106,7 +114,7 @@ function mapRow(row: SkillOperationRow): SkillOperationAuditRecord {
 
 const SELECT_COLUMNS = `
   id, operation_id, idempotency_key, binding_hash, operation, state, result,
-  actor_type, actor_id, worktree_id, skill_id, skill_version,
+  actor_type, actor_id, worktree_id, skill_id, skill_version, from_version, to_version,
   source_origin, source_repository, source_ref, source_commit, artifact_sha256,
   error_code, error_message, recorded_at
 `;
@@ -114,12 +122,20 @@ const SELECT_COLUMNS = `
 /**
  * Build an audit input from a journal entry, so the two records cannot drift.
  * The journal already holds the actor, target, source and typed error.
+ *
+ * The version transition (#1248) is derived from the journal rather than passed
+ * in, because for the two operations that exist today the journal fully
+ * determines it: an install ends at its target version and starts nowhere, an
+ * uninstall starts at the version it removes and ends nowhere. An `update` is
+ * the one case where `fromVersion` is not derivable — it has no writer yet
+ * (#1243/#1244), and whoever adds one has to supply the replaced version here.
  */
 export function buildSkillOperationAuditInput(
   entry: SkillOperationJournalEntry,
   result: SkillOperationAuditResult,
   recordedAt?: number
 ): SkillOperationAuditInput {
+  const isUninstall = entry.operation === 'uninstall';
   return {
     operationId: entry.operationId,
     idempotencyKey: entry.idempotencyKey,
@@ -132,6 +148,8 @@ export function buildSkillOperationAuditInput(
     worktreeId: entry.target.worktreeId,
     skillId: entry.target.skillId,
     skillVersion: entry.target.version,
+    fromVersion: isUninstall ? entry.target.version : null,
+    toVersion: isUninstall ? null : entry.target.version,
     sourceOrigin: entry.source?.origin ?? null,
     sourceRepository: entry.source?.repository ?? null,
     sourceRef: entry.source?.ref ?? null,
@@ -159,10 +177,10 @@ export function recordSkillOperationAudit(
   db.prepare(
     `INSERT INTO skill_operations (
       id, operation_id, idempotency_key, binding_hash, operation, state, result,
-      actor_type, actor_id, worktree_id, skill_id, skill_version,
+      actor_type, actor_id, worktree_id, skill_id, skill_version, from_version, to_version,
       source_origin, source_repository, source_ref, source_commit, artifact_sha256,
       error_code, error_message, recorded_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     record.id,
     record.operationId,
@@ -176,6 +194,8 @@ export function recordSkillOperationAudit(
     record.worktreeId,
     record.skillId,
     record.skillVersion,
+    record.fromVersion,
+    record.toVersion,
     record.sourceOrigin,
     record.sourceRepository,
     record.sourceRef,
@@ -203,27 +223,134 @@ export function getSkillOperationAuditByOperationId(
   return rows.map(mapRow);
 }
 
+/** Default page size for an audit query. */
+export const SKILL_AUDIT_DEFAULT_LIMIT = 50;
+
+/** Hard ceiling on one audit page, so a client cannot ask for the whole log. */
+export const SKILL_AUDIT_MAX_LIMIT = 200;
+
+/**
+ * Position in the newest-first feed, as the last row of the previous page.
+ *
+ * A bare timestamp would be ambiguous: two rows can share `recorded_at`, and a
+ * cursor that only compared timestamps would either skip or repeat them. The ID
+ * is the tiebreak, matching the `(recorded_at DESC, id DESC)` ordering exactly.
+ */
+export interface SkillOperationAuditCursor {
+  recordedAt: number;
+  id: string;
+}
+
+/** What to select from the log. Every field narrows; omitting all reads everything. */
+export interface SkillOperationAuditQuery {
+  /** Omit to read across every worktree — what the dashboard feed does. */
+  worktreeId?: string;
+  skillId?: string;
+  operation?: SkillOperationKind;
+  result?: SkillOperationAuditResult;
+  /** Inclusive lower bound on `recordedAt`. */
+  since?: number;
+  /** Exclusive upper bound on `recordedAt`. */
+  until?: number;
+  /** Read the page immediately after this position. */
+  after?: SkillOperationAuditCursor;
+  limit?: number;
+}
+
+/** One page of the feed. */
+export interface SkillOperationAuditPage {
+  records: SkillOperationAuditRecord[];
+  /** Another page exists behind this one. */
+  hasMore: boolean;
+  /** Position to pass back as `after`, or null when the feed is exhausted. */
+  nextCursor: SkillOperationAuditCursor | null;
+}
+
+function buildAuditWhere(query: SkillOperationAuditQuery): {
+  clause: string;
+  params: Array<string | number>;
+} {
+  const conditions: string[] = [];
+  const params: Array<string | number> = [];
+
+  if (query.worktreeId !== undefined) {
+    conditions.push('worktree_id = ?');
+    params.push(query.worktreeId);
+  }
+  if (query.skillId !== undefined) {
+    conditions.push('skill_id = ?');
+    params.push(query.skillId);
+  }
+  if (query.operation !== undefined) {
+    conditions.push('operation = ?');
+    params.push(query.operation);
+  }
+  if (query.result !== undefined) {
+    conditions.push('result = ?');
+    params.push(query.result);
+  }
+  if (query.since !== undefined) {
+    conditions.push('recorded_at >= ?');
+    params.push(query.since);
+  }
+  if (query.until !== undefined) {
+    conditions.push('recorded_at < ?');
+    params.push(query.until);
+  }
+  if (query.after !== undefined) {
+    conditions.push('(recorded_at < ? OR (recorded_at = ? AND id < ?))');
+    params.push(query.after.recordedAt, query.after.recordedAt, query.after.id);
+  }
+
+  return {
+    clause: conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '',
+    params,
+  };
+}
+
+/**
+ * One page of the audit feed, newest first.
+ *
+ * Fetches one row beyond the page to decide `hasMore` without a second COUNT
+ * over a table that only ever grows.
+ */
+export function querySkillOperationAudit(
+  db: Database.Database,
+  query: SkillOperationAuditQuery = {}
+): SkillOperationAuditPage {
+  const limit = Math.min(
+    Math.max(1, Math.trunc(query.limit ?? SKILL_AUDIT_DEFAULT_LIMIT)),
+    SKILL_AUDIT_MAX_LIMIT
+  );
+  const { clause, params } = buildAuditWhere(query);
+
+  const rows = db
+    .prepare(
+      `SELECT ${SELECT_COLUMNS} FROM skill_operations
+       ${clause}
+       ORDER BY recorded_at DESC, id DESC LIMIT ?`
+    )
+    .all(...params, limit + 1) as SkillOperationRow[];
+
+  const hasMore = rows.length > limit;
+  const records = (hasMore ? rows.slice(0, limit) : rows).map(mapRow);
+  const last = records[records.length - 1];
+
+  return {
+    records,
+    hasMore,
+    nextCursor: hasMore && last ? { recordedAt: last.recordedAt, id: last.id } : null,
+  };
+}
+
 /** Audit trail for one Skill in one worktree, newest first. */
 export function listSkillOperationAudit(
   db: Database.Database,
   filter: { worktreeId: string; skillId?: string; limit?: number }
 ): SkillOperationAuditRecord[] {
-  const limit = filter.limit ?? 100;
-  const rows = (
-    filter.skillId === undefined
-      ? db
-          .prepare(
-            `SELECT ${SELECT_COLUMNS} FROM skill_operations
-             WHERE worktree_id = ? ORDER BY recorded_at DESC, id DESC LIMIT ?`
-          )
-          .all(filter.worktreeId, limit)
-      : db
-          .prepare(
-            `SELECT ${SELECT_COLUMNS} FROM skill_operations
-             WHERE worktree_id = ? AND skill_id = ?
-             ORDER BY recorded_at DESC, id DESC LIMIT ?`
-          )
-          .all(filter.worktreeId, filter.skillId, limit)
-  ) as SkillOperationRow[];
-  return rows.map(mapRow);
+  return querySkillOperationAudit(db, {
+    worktreeId: filter.worktreeId,
+    skillId: filter.skillId,
+    limit: filter.limit ?? 100,
+  }).records;
 }

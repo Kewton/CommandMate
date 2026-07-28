@@ -56,6 +56,16 @@ export type {
   InstalledSkillListResponse,
 } from '@/app/api/worktrees/[id]/skills/route';
 
+export type {
+  SkillInstallRootStatus,
+  SkillInstallationStatus,
+  SkillInstallationStatusEntry,
+} from '@/lib/skills/status-scanner';
+export type { SkillOperationAuditRecord } from '@/lib/skills/operation-audit';
+export type { SkillInstallationsResponse } from '@/app/api/skills/installations/route';
+export type { SkillOperationsResponse } from '@/app/api/skills/operations/route';
+export type { SkillReindexResponse } from '@/app/api/skills/reindex/route';
+
 import type {
   SkillInstallReplayResponse,
   SkillInstallResponse,

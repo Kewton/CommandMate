@@ -420,24 +420,29 @@
 | `src/lib/skills/operation-lock.ts` | owner nonce / lease / process generation つき cross-process lock。lease 失効後も owner 生存中は reclaim しない（same-process 含む。#1427 で same-pid ショートカット除去）。hash separator は `\x00` エスケープ（#1432）（#1234、server-only） |
 | `src/lib/skills/operation-journal.ts` | typed state transition と idempotency key binding。terminal entry は retention（7日）で自動 prune（#1234 / #1428、server-only） |
 | `src/lib/skills/operation-store.ts` | service-owned state root（0700/0600）、atomic write、staging 分離（#1234、server-only） |
-| `src/lib/skills/operation-audit.ts` | append-only `skill_operations` への記録（#1234、server-only） |
+| `src/lib/skills/operation-audit.ts` | append-only `skill_operations` への記録と読み取り。`querySkillOperationAudit` は worktree 省略で横断、operation/result/期間で絞り込み、`(recordedAt,id)` 複合 cursor で改ページ（同一 ms の tie でも重複・欠落なし）（#1234 / #1248、server-only） |
 | `src/lib/skills/operation-reconciler.ts` | on-demand reconciliation ロジックと orphan cleanup。起動時実行は `startup-reconcile` 経由（#1234 / #1428、server-only） |
 | `src/lib/db/migrations/v44-skill-operations.ts` | `skill_operations` テーブル。trigger で追記専用を DB 側から強制（#1234） |
 | `src/lib/skills/install-plan.ts` | 決定的 receipt bytes 確定、plan token の server-side state（TTL/1回性/LRU）、drift 検出（#1233、server-only） |
 | `src/lib/skills/preview-diff.ts` | install root 走査・live branch/HEAD 解決・git ignore 判定・virtual unified diff・tree hash（#1233、server-only） |
 | `src/lib/skills/install-apply.ts` | `O_EXCL\|O_NOFOLLOW` write・same-filesystem staging・destination 不存在の自前証明・atomic rename（#1235、server-only） |
 | `src/lib/skills/installed-state.ts` | `skill_installations` の idempotent upsert と `listSkillInstallations`（worktree 単位の読み取り）。読み取りは #1440 の GET route から配線済み（#1235 / #1440） |
+| `src/lib/skills/status-scanner.ts` | 全登録 worktree 横断の適用状態走査。`installed`/`modified`/`missing`/`unmanaged`/`update_available` を算出。**走査 root は receipt の `install_roots` を正とし全 root を見る**（片側 root だけでは secondary の drift を見逃す）。走査は同期 I/O のため worker pool ではなく上限＋worktree 毎の event loop yield＋TTL cache で保護し、打ち切りは `truncated` で報告（#1248、server-only） |
+| `src/lib/skills/reindex.ts` | receipt から `skill_installations` を再構築。DB 削除後も復旧でき、復元 root 集合は receipt の `install_roots` と一致する。receipt 不在/破損/他 Skill 宛は index せず skip 理由付きで報告。payload と append-only log には一切書かない（#1248、server-only） |
 | `src/lib/skills/uninstall-plan.ts` | receipt 照合による remove/modified/missing/unknown/irregular 分類。drift 観測に receipt digest を含む（#1236、server-only） |
 | `src/lib/skills/uninstall-apply.ts` | unlink 直前の lstat/mode/digest 再照合、`rmdir(2)` のみ使用、receipt を最後に削除（#1236、server-only） |
 | `src/lib/db/migrations/v45-skill-installations.ts` | `skill_installations` テーブル（#1235） |
 | `src/lib/db/migrations/v46-skill-installations-cascade.ts` | `skill_installations` に `worktree_id` FK + `ON DELETE CASCADE` を付与（table rebuild）、既存 dangling 行も一掃（#1430） |
+| `src/lib/db/migrations/v48-skill-operations-audit-index.ts` | `skill_operations` に `from_version`/`to_version` を追加し、横断 feed 用 `(recorded_at DESC, id DESC)` と `(result, recorded_at DESC)` を index 化。`ALTER TABLE` のため既存行は NULL 遷移で読める（#1248） |
 | `src/lib/skills/startup-reconcile.ts` | 起動時 reconciliation の assembly。`server.ts` から `await import()` で遅延読込し reconciler へ port（payload probe / reindex）を注入。receipt からの reindex もここで実装（#1428、server-only） |
 | `src/lib/skills/plan-sweeper.ts` | install/uninstall plan cache と snapshot store を 60秒ごと（＋token アクセス時）に sweep する `unref()` 済み timer。route から lazy 起動（#1429、server-only） |
 | `src/app/api/worktrees/[id]/skills/[skillId]/plan\|install\|uninstall-plan\|uninstall/route.ts` | plan/apply の 4 route。手順は journal → lock → 再読込&token 消費 → filesystem → index&audit。各 handler 冒頭で `ensureSkillPlanSweeper()` を lazy 起動（#1233/#1235/#1236/#1429） |
+| `src/app/api/skills/installations\|operations\|reindex/route.ts` | 適用状態 dashboard の 3 route。installations は横断走査＋worktree/skill/status 絞り込み（Catalog 不達は 500 にせず `catalogAvailable:false` で更新判定のみ無効化）、operations は監査 feed（不正な filter 値は 400 で拒否）、reindex は POST で index 再構築＋走査 cache 無効化（#1248） |
+| `src/components/skills/SkillInstallationsDashboard.tsx` / `SkillOperationHistory.tsx` | `/skills/installed` の適用状態一覧（install root を root ごとに個別描画、要対応順に整列）と操作履歴（version 遷移・取得元・error code・再試行導線）。走査失敗を空一覧に退化させない（#1248） |
 | `src/app/api/worktrees/[id]/skills/route.ts` | worktree 導入済み Skill 一覧 GET。`listSkillInstallations` を呼び receipt/index 由来 DTO を返す。installRoot は repository-relative のみ、絶対 path・artifact URL 不含、no-store（#1440） |
 | `src/components/skills/WorktreeSkillsPane.tsx` | worktree-scoped Skills 管理ペイン（Catalog 一覧 ＋ `fetchWorktreeInstalledSkills` の導入済み一覧 ＋ worktreeId 固定 prop 版 `SkillInstallPanel`）。PC（アクティビティバー #1441）とモバイル（Tools サブタブ #1442）の両方から再利用される client component（#1441） |
 | `src/components/skills/SkillInstallPanel.tsx` | Catalog からの install/uninstall フロー。`worktreeId?` 固定 prop 指定時は `SkillTargetSelector` を出さず渡された worktree で動作、未指定時は従来の picker 挙動（#1431 / #1441）。#1477: install 成功時に `dispatchSkillInstalled(worktreeId)` で palette へ refetch を通知 |
-| `src/cli/commands/skill.ts` / `skill-guards.ts` / `skill-format.ts` | `commandmate skill` の wiring / 確認規約・typed error mapping / 表示。非TTY は `--yes` 必須、high-risk は `--ack-risk` 必須。`install` は `--version` 必須（#1237） |
+| `src/cli/commands/skill.ts` / `skill-guards.ts` / `skill-format.ts` | `commandmate skill` の wiring / 確認規約・typed error mapping / 表示。非TTY は `--yes` 必須、high-risk は `--ack-risk` 必須。`install` は `--version` 必須（#1237）。`reindex` は `POST /api/skills/reindex` の薄い client（#1248） |
 | `tests/integration/skills/mvp-harness.ts` | MVP 統合 suite の共有 harness。実 git リポジトリ生成、fixture Catalog/artifact 組立、tree 差分・残留物の観測。root は `$HOME` 配下（`system-directories` が `/tmp`・`/var` を拒否するため）（#1242） |
 | `tests/integration/skills-mvp-{install-flow,security-regression,source-integrity}.test.ts` | MVP 出荷判定 gate。層を実物のまま繋いだ E2E / 悪性 corpus 59 件の fail closed と不変条件 / wire 上の allowlist・redirect・checksum・size・offline（#1242） |
 

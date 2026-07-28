@@ -8,6 +8,7 @@
  *   commandmate skill install <skill-id> --worktree <id> --version <exact> [--dry-run] [--yes] [--ack-risk <id>@<version>]
  *   commandmate skill uninstall <skill-id> --worktree <id> [--dry-run] [--yes] [--json]
  *   commandmate skill status <skill-id> --worktree <id> [--json]
+ *   commandmate skill reindex [--json]
  *
  * The CLI never downloads, extracts, writes or deletes anything: it asks the
  * server for a plan, shows it, and presents the token the server issued back to
@@ -22,6 +23,7 @@
 
 import { Command } from 'commander';
 import type {
+  SkillCommonOptions,
   SkillInfoOptions,
   SkillInstallOptions,
   SkillListOptions,
@@ -36,6 +38,7 @@ import type {
   SkillInstallPlanResponse,
   SkillInstallResponse,
   SkillListResponse,
+  SkillReindexResult,
   SkillUninstallPlan,
   SkillUninstallPlanResponse,
   SkillUninstallResponse,
@@ -207,6 +210,44 @@ async function showStatus(skillId: string, options: SkillStatusOptions): Promise
       `Removable:    ${plan.removable ? 'yes' : 'no'}`,
     ].join('\n')
   );
+}
+
+/**
+ * Rebuild the installed-Skill index from the receipts on disk (Issue #1248).
+ *
+ * Like every other subcommand this is a thin client: the server decides which
+ * worktrees to visit and reads the receipts itself. The CLI supplies no path and
+ * reconstructs nothing, so there is no way for it to index something the API
+ * would have refused.
+ */
+async function reindexSkills(options: SkillCommonOptions): Promise<void> {
+  const client = new ApiClient({ token: options.token });
+  const response = await client.post<unknown>('/api/skills/reindex');
+  const body = assertResponseShape<SkillReindexResult>(
+    response,
+    ['scannedWorktrees', 'indexed', 'removed', 'skipped'],
+    'POST /api/skills/reindex'
+  );
+
+  if (options.json) {
+    console.log(JSON.stringify(body, null, 2));
+    return;
+  }
+
+  console.log(
+    [
+      `Scanned ${body.scannedWorktrees} worktree(s).`,
+      `Indexed:  ${body.indexed}`,
+      `Removed:  ${body.removed}`,
+      `Skipped:  ${body.skipped.length}`,
+    ].join('\n')
+  );
+  for (const skip of body.skipped) {
+    console.error(`  skipped ${skip.worktreeId}/${skip.root}: ${skip.reason}`);
+  }
+  for (const worktreeId of body.unreadableWorktreeIds) {
+    console.error(`  not scanned (worktree directory missing): ${worktreeId}`);
+  }
 }
 
 // =============================================================================
@@ -474,6 +515,19 @@ export function createSkillCommand(): Command {
     .action(async (skillId: string, options: SkillStatusOptions) => {
       try {
         await showStatus(skillId, options);
+      } catch (error) {
+        handleSkillCommandError(error);
+      }
+    });
+
+  skill
+    .command('reindex')
+    .description('Rebuild the installed-Skill index from the receipts on disk')
+    .option('--json', 'JSON output')
+    .option('--token <token>', TOKEN_WARNING)
+    .action(async (options: SkillCommonOptions) => {
+      try {
+        await reindexSkills(options);
       } catch (error) {
         handleSkillCommandError(error);
       }
