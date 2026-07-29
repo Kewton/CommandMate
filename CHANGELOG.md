@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **デモ動画収録スキル `demo-video` の基盤を追加** (#1553): 隔離デモ環境（使い捨て seed repo・専用ポート・$HOME 配下 DB・自前プロセスグループ）、キャプチャ済み ANSI カセットを tmux pane へ再生してサーバの status-detector／response poller／UI を実物のまま駆動する偽エージェント（LLM のみ差し替え・モックゼロ）、@playwright/test をライブラリとして使う scene 単位 webm 録画の 3 点。`.claude/skills` と `.agents/skills` へ byte-identical 配置。
 
+- **`demo-video` に絵コンテ・日英テロップ・ffmpeg 合成・30 秒尺検証ゲートを追加** (#1554): `demo-video.sh` 一発で `demo-30s.ja.mp4` / `demo-30s.en.mp4` が出る。文言の編集点は `storyboard/default.yaml` だけで、シーンの尺もテロップの in/out も合成の切り貼りもそこから機械算出する（手書きタイムコードは無い）。ロケールはフル録画方式で、UI ごと切り替えて 2 回撮り、遷移ごとに `<html lang>` を実測して不一致ならテイクを失敗させる（「UI 言語がテロップ言語と一致」を目視でなく機械で担保）。テロップは HTML→透過 PNG→ffmpeg overlay で焼き込み（drawtext の日本語 fontfile／エスケープ問題を回避し意匠を CSS 1 箇所に集約、文字列は `textContent` 注入なので絵コンテがマークアップを注入できない）。尺は `ffprobe` 実測が 30.0±0.5s を外れたら **exit 1**。承認シーン用にカセットへ実キャプチャ由来の承認プロンプトを追加し、`{{TASK}}` 置換（承認後も元の指示を echo し続ける）と `Scene.prepare`（API 待ちを録画開始前に行う）を導入した。生成物はリポジトリ外に出しコミットしない（配布は Release アセット）。
+
 ## [0.16.0] - 2026-07-29
 
 > **Highlight**: **Skill 配布 MVP を「入れられる」から「運用できる」へ引き上げたリリース。** 導入先 Agent の対応状況を manifest の申告だけでなく CommandMate 側の実測で裏付ける互換 matrix（#1246）、どの worktree に何が入っていて導入時のままかを横断確認する監査 dashboard と receipt からの reindex（#1248、DB migration v48）、Skill 導入を review 可能な commit / draft PR に載せる専用 git workflow（#1247）を追加した。あわせて、uninstall した Skill を再 install すると **exit 0 で「Installed」と報告しながら 1 バイトも書かれない** journal replay の欠陥（#1552）を修正し、対になる uninstall 経路の同型欠陥も同時に塞いだ。

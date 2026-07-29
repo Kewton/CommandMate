@@ -79,7 +79,7 @@ describe('argument handling', () => {
 });
 
 describe('schedule', () => {
-  function trace(args: string[], input = 'hello\n'): string[] {
+  function trace(args: string[], input = 'hello\ny\n'): string[] {
     const result = run([CASSETTE, '--once', '--dry-run', ...args], input);
     expect(result.status).toBe(0);
     return result.stderr.trim().split('\n');
@@ -89,7 +89,8 @@ describe('schedule', () => {
     const lines = trace([]);
     expect(lines[0]).toMatch(/^trace step=1 kind=sleep ms=0$/);
     expect(lines[1]).toBe('trace step=2 kind=input');
-    expect(lines.filter((l) => l.includes('kind=input'))).toHaveLength(1);
+    // Two barriers: the instruction, then the answer to the approval prompt.
+    expect(lines.filter((l) => l.includes('kind=input'))).toHaveLength(2);
   });
 
   it('divides every delay by --speed', () => {
@@ -98,8 +99,8 @@ describe('schedule', () => {
     expect(doubled).toHaveLength(baseline.length);
 
     const ms = (line: string) => Number(/ms=(\d+)$/.exec(line)![1]);
-    expect(baseline.map(ms)).toEqual([0, 600, 2200, 2200, 2200, 2200, 6000]);
-    expect(doubled.map(ms)).toEqual([0, 300, 1100, 1100, 1100, 1100, 3000]);
+    expect(baseline.map(ms)).toEqual([0, 600, 2200, 2200, 2200, 2200, 2200, 6000]);
+    expect(doubled.map(ms)).toEqual([0, 300, 1100, 1100, 1100, 1100, 1100, 3000]);
   });
 
   it('actually sleeps when --dry-run is not given', () => {
@@ -136,13 +137,16 @@ describe('composer echo', () => {
 });
 
 describe('the committed cassette drives the real status detector', () => {
-  const result = run([CASSETTE, '--once', '--dry-run'], 'Add a dark mode toggle to the header\n');
+  const result = run(
+    [CASSETTE, '--once', '--dry-run'],
+    'Add a dark mode toggle to the header\ny\n',
+  );
   const frames = result.stdout.split(CLEAR).filter((frame) => frame.trim() !== '');
   const statuses = frames.map((frame) => detectSessionStatus(frame, 'claude'));
 
   it('emits every frame', () => {
     expect(result.status).toBe(0);
-    expect(frames).toHaveLength(8);
+    expect(frames).toHaveLength(10);
   });
 
   it('opens ready, so the session survives isSessionHealthy and is not killed', () => {
@@ -152,10 +156,23 @@ describe('the committed cassette drives the real status detector', () => {
     expect(statuses[0].reason).toBe('input_prompt');
   });
 
-  it('reports running for the whole generation stretch', () => {
-    const generating = statuses.slice(2, 6);
-    expect(generating.map((s) => s.status)).toEqual(['running', 'running', 'running', 'running']);
-    expect(generating.every((s) => s.confidence === 'high')).toBe(true);
+  it('walks ready -> running -> waiting -> running -> ready', () => {
+    // Exactly the arc the storyboard films: sessions-overview and
+    // send-and-generate need `running`, respond-from-mobile needs `waiting`,
+    // and complete needs the return to `ready`.
+    expect(statuses.map((s) => s.status)).toEqual([
+      'ready',
+      'ready',
+      'running',
+      'running',
+      'running',
+      'waiting',
+      'running',
+      'running',
+      'ready',
+      'ready',
+    ]);
+    expect(statuses.every((s) => s.confidence === 'high')).toBe(true);
   });
 
   it('returns to ready once the reply lands', () => {
@@ -163,8 +180,54 @@ describe('the committed cassette drives the real status detector', () => {
     expect(statuses.at(-1)!.reason).toBe('input_prompt');
   });
 
-  it('never reports waiting, which would park the demo on an approval prompt', () => {
-    expect(statuses.map((s) => s.status)).not.toContain('waiting');
+  it('parks on the approval prompt with an active prompt the mobile sheet can render', () => {
+    // MobilePromptSheet is driven by isPromptWaiting, which
+    // current-output-builder.ts takes verbatim from hasActivePrompt. Without a
+    // prompt payload the respond-from-mobile scene would have nothing to tap.
+    const waiting = statuses.find((s) => s.status === 'waiting')!;
+    expect(waiting.reason).toBe('prompt_detected');
+    expect(waiting.hasActivePrompt).toBe(true);
+    expect(waiting.promptDetection.promptData?.type).toBe('multiple_choice');
+    expect(waiting.promptDetection.promptData?.question).toContain('Do you want to proceed?');
+  });
+
+  it('keeps the rendered question short enough to read on a phone', () => {
+    // detectMultipleChoicePrompt walks upward through continuation lines and
+    // folds them into the question. With the transcript left above the prompt
+    // it produced a 100-character run-on that MobilePromptSheet would show
+    // verbatim; the frame keeps the live capture's shape (tool call, blank
+    // line, question) precisely so that stays short.
+    const waiting = statuses.find((s) => s.status === 'waiting')!;
+    expect(waiting.promptDetection.promptData!.question.length).toBeLessThan(60);
+  });
+
+  it('pre-selects the affirmative option, so approving really is one tap', () => {
+    // MobilePromptSheet seeds its radio group from `isDefault`. Without the
+    // U+276F marker on option 1 the submit button starts disabled and the
+    // storyboard's "one tap" telop would be a lie.
+    const waiting = statuses.find((s) => s.status === 'waiting')!;
+    const options = waiting.promptDetection.promptData!.options as Array<{
+      number: number;
+      label: string;
+      isDefault: boolean;
+    }>;
+    expect(options.map((option) => option.label)).toEqual([
+      'Yes',
+      'No, and tell Claude what to do differently',
+    ]);
+    expect(options.find((option) => option.isDefault)).toMatchObject({ number: 1, label: 'Yes' });
+  });
+
+  it('blocks on input at the approval prompt rather than timing it', () => {
+    // The recorder needs however long a browser launch and a mobile navigation
+    // take. A numeric delay here would make the take a race against Playwright.
+    const rows = fs
+      .readFileSync(CASSETTE, 'utf8')
+      .split('\n')
+      .filter((line) => line.trim() !== '' && !line.startsWith('#'));
+    const waitingIndex = statuses.findIndex((s) => s.status === 'waiting');
+    expect(waitingIndex).toBeGreaterThan(0);
+    expect(rows[waitingIndex + 1].split('\t')[0]).toBe('@input');
   });
 
   it('holds the running frames on screen for longer than the capture cache', () => {
@@ -202,31 +265,72 @@ describe('the committed cassette drives the real status detector', () => {
   });
 });
 
-describe('mutating the cassette breaks the run/ready contract', () => {
-  // Without this, every assertion above is also satisfied by a detector that
-  // simply never returns `running`.
-  it('loses the running frames when "esc to interrupt" and the spinner go away', () => {
-    const raw = fs.readFileSync(CASSETTE, 'utf8');
-    const broken = raw
-      .replace(/esc to interrupt/g, '? for shortcuts')
-      .replace(/\\u2026|…/g, '');
-    const file = tmpCassette(broken);
-    const result = run([file, '--once', '--dry-run'], 'hi\n');
-    const statuses = result.stdout
+describe('mutating the cassette breaks the run/ready/waiting contract', () => {
+  // Without these, every assertion above is also satisfied by a detector that
+  // simply never returns the status in question.
+  function statusesOf(contents: string): string[] {
+    const file = tmpCassette(contents);
+    const result = run([file, '--once', '--dry-run'], 'hi\ny\n');
+    return result.stdout
       .split(CLEAR)
       .filter((frame) => frame.trim() !== '')
       .map((frame) => detectSessionStatus(frame, 'claude').status);
-    expect(statuses).not.toContain('running');
+  }
+
+  it('loses the running frames when "esc to interrupt" and the spinner go away', () => {
+    const raw = fs.readFileSync(CASSETTE, 'utf8');
+    expect(
+      statusesOf(raw.replace(/esc to interrupt/g, '? for shortcuts').replace(/\\u2026|…/g, '')),
+    ).not.toContain('running');
   });
 
   it('loses the ready frames when the prompt marker goes away', () => {
     const raw = fs.readFileSync(CASSETTE, 'utf8');
-    const file = tmpCassette(raw.replace(/❯/g, '|'));
-    const result = run([file, '--once', '--dry-run'], 'hi\n');
-    const statuses = result.stdout
-      .split(CLEAR)
-      .filter((frame) => frame.trim() !== '')
-      .map((frame) => detectSessionStatus(frame, 'claude').status);
-    expect(statuses).not.toContain('ready');
+    expect(statusesOf(raw.replace(/❯/g, '|'))).not.toContain('ready');
+  });
+
+  it('loses the waiting frame when the numbered options go away', () => {
+    // Proves the approval beat is detected because of the option block the live
+    // capture recorded, not because some unrelated bytes happen to trip the
+    // detector.
+    const raw = fs.readFileSync(CASSETTE, 'utf8');
+    const flattened = raw
+      .replace(/1\. Yes/g, 'yes')
+      .replace(/2\. No, and tell Claude what to do differently/g, 'no');
+    expect(statusesOf(flattened)).not.toContain('waiting');
+  });
+
+  it('loses the waiting frame when the question line goes away', () => {
+    const raw = fs.readFileSync(CASSETTE, 'utf8');
+    expect(statusesOf(raw.replace(/Do you want to proceed\?/g, 'Proceeding'))).not.toContain(
+      'waiting',
+    );
+  });
+});
+
+describe('{{TASK}} substitution', () => {
+  it('keeps echoing the original instruction after a second input arrives', () => {
+    // {{INPUT}} is the answer by then. Echoing "y" as the instruction would put
+    // a claim on screen the product never made.
+    const file = tmpCassette(
+      ['@input\ta:{{INPUT}}/{{TASK}}\\n', '@input\tb:{{INPUT}}/{{TASK}}\\n', ''].join('\n'),
+    );
+    const result = run([file, '--once'], 'do the thing\ny\n');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('a:do the thing/do the thing\nb:y/do the thing\n');
+  });
+
+  it('resets the task between passes so a looping cassette does not leak the old one', () => {
+    const file = tmpCassette('@input\t[{{TASK}}]\\n');
+    const result = run([file], 'first\nsecond\n');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('[first]\n[second]\n');
+  });
+
+  it('the committed cassette echoes the task, not the answer, after the approval', () => {
+    const result = run([CASSETTE, '--once', '--dry-run'], 'Add a dark mode toggle to the header\ny\n');
+    const frames = result.stdout.split(CLEAR).filter((frame) => frame.trim() !== '');
+    expect(frames.at(-1)).toContain('Add a dark mode toggle to the header');
+    expect(frames.at(-1)).not.toMatch(/❯\s+y\s*$/m);
   });
 });

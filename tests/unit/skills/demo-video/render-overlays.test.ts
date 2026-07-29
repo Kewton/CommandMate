@@ -1,0 +1,148 @@
+/**
+ * render-overlays.ts — telop/card PNG planning and the HTML templates (#1554).
+ *
+ * The screenshot itself needs a browser and belongs to the dogfood run, not to
+ * `npm run test:unit`. What is pinned here is everything that can silently go
+ * wrong without a browser: which PNG each scene expects, and the two template
+ * invariants that would only show up as a wrong-looking video — an external
+ * font request that fails offline, and a missing injection target.
+ *
+ * @vitest-environment node
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+import {
+  overlayJobs,
+  parseRenderArgs,
+  templatePath,
+} from '../../../../.claude/skills/demo-video/scripts/render-overlays';
+import {
+  DEFAULT_STORYBOARD_PATH,
+  buildPlan,
+  parseStoryboard,
+} from '../../../../.claude/skills/demo-video/scripts/storyboard';
+
+const STORYBOARD = parseStoryboard(fs.readFileSync(DEFAULT_STORYBOARD_PATH, 'utf8')).storyboard!;
+const FRAME = { width: 1280, height: 800 };
+
+describe('overlayJobs', () => {
+  const jobs = overlayJobs(buildPlan(STORYBOARD, 'ja'), {
+    storyboardPath: DEFAULT_STORYBOARD_PATH,
+    outDir: '/tmp/overlays',
+    locale: 'ja',
+    frame: FRAME,
+  });
+
+  it('produces exactly one PNG per scene', () => {
+    expect(jobs).toHaveLength(STORYBOARD.scenes.length);
+    expect(jobs.map((job) => job.sceneId)).toEqual(STORYBOARD.scenes.map((scene) => scene.id));
+  });
+
+  it('names the files compose.sh goes looking for', () => {
+    // compose.sh derives these paths independently. A rename on either side
+    // shows up here rather than as "missing telop image" mid-take.
+    expect(jobs.map((job) => path.basename(job.file))).toEqual([
+      'card-title.ja.png',
+      'telop-sessions-overview.ja.png',
+      'telop-send-and-generate.ja.png',
+      'telop-respond-from-mobile.ja.png',
+      'telop-complete.ja.png',
+      'card-outro.ja.png',
+    ]);
+  });
+
+  it('keeps the two locales in separate files', () => {
+    const en = overlayJobs(buildPlan(STORYBOARD, 'en'), {
+      storyboardPath: DEFAULT_STORYBOARD_PATH,
+      outDir: '/tmp/overlays',
+      locale: 'en',
+      frame: FRAME,
+    });
+    expect(en.map((job) => job.file)).not.toEqual(jobs.map((job) => job.file));
+    expect(en[1].text).toBe('All your agents at a glance');
+    expect(jobs[1].text).toBe('複数エージェントの状態をひと目で');
+  });
+
+  it('renders the mobile scene telop at the output frame size, not the phone size', () => {
+    // The mobile take is letterboxed into the 1280x800 frame by compose.sh, so
+    // a band sized to 390x844 would be composited into the wrong place.
+    const mobile = jobs.find((job) => job.sceneId === 'respond-from-mobile')!;
+    expect(mobile.width).toBe(FRAME.width);
+    expect(mobile.height).toBe(FRAME.height);
+  });
+
+  it('draws cards as full frames and telops as bands', () => {
+    expect(jobs.filter((job) => job.kind === 'card').map((job) => job.sceneId)).toEqual([
+      'title',
+      'outro',
+    ]);
+  });
+});
+
+describe('parseRenderArgs', () => {
+  it('requires an output directory', () => {
+    expect(() => parseRenderArgs([])).toThrow(/--out is required/);
+  });
+
+  it.each([
+    [['--out', '/tmp/x', '--locale', 'fr'], /--locale must be one of ja\|en/],
+    [['--out', '/tmp/x', '--frame', '1280'], /--frame must look like/],
+    [['--out'], /--out needs a value/],
+    [['--out', '/tmp/x', '--nope'], /unknown argument/],
+  ])('rejects %j', (argv, message) => {
+    expect(() => parseRenderArgs(argv)).toThrow(message);
+  });
+
+  it('defaults to the committed storyboard at the recording frame size', () => {
+    const options = parseRenderArgs(['--out', '/tmp/x']);
+    expect(options.storyboardPath).toBe(DEFAULT_STORYBOARD_PATH);
+    expect(options.frame).toEqual(FRAME);
+    expect(options.locale).toBe('ja');
+  });
+});
+
+describe('templates', () => {
+  const templates = (['telop', 'card'] as const).map((kind) => ({
+    kind,
+    file: templatePath(kind),
+    html: fs.readFileSync(templatePath(kind), 'utf8'),
+  }));
+
+  it('both exist where render-overlays.ts looks for them', () => {
+    expect(templates).toHaveLength(2);
+    for (const template of templates) expect(fs.existsSync(template.file)).toBe(true);
+  });
+
+  it.each(templates)('$kind.html carries the element the renderer injects into', ({ kind, html }) => {
+    expect(html).toContain(kind === 'card' ? 'id="card-text"' : 'id="telop-text"');
+  });
+
+  it.each(templates)('$kind.html requests nothing over the network', ({ html }) => {
+    // A webfont or CDN stylesheet would fail silently offline and change the
+    // line width between the ja and en passes — a difference nobody would
+    // attribute to the template.
+    expect(html).not.toMatch(/https?:\/\//);
+    expect(html).not.toMatch(/@import/);
+    expect(html).not.toMatch(/<(script|link|img)\b/i);
+  });
+
+  it.each(templates)('$kind.html names a Japanese-capable system font', ({ html }) => {
+    expect(html).toMatch(/Hiragino Sans|Noto Sans JP|Yu Gothic/);
+  });
+
+  it('the telop template does not paint its own background', () => {
+    // `omitBackground: true` only produces a transparent PNG if the page itself
+    // is transparent; an opaque body would cover the footage entirely.
+    const telop = templates.find((template) => template.kind === 'telop')!;
+    expect(telop.html).toMatch(/background:\s*transparent/);
+  });
+
+  it('the network guard is not vacuous', () => {
+    // A typo in the patterns above would let every template pass regardless.
+    const offending = '<link rel="stylesheet" href="https://fonts.example/x.css" />';
+    expect(offending).toMatch(/https?:\/\//);
+    expect(offending).toMatch(/<(script|link|img)\b/i);
+  });
+});
