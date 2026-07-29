@@ -40,10 +40,17 @@ describe('demo-video skill mirroring', () => {
     expect(claudeFiles).toEqual([
       'SKILL.md',
       'fixtures/claude-session-sample.cast',
+      'scripts/compose.sh',
+      'scripts/demo-video.sh',
       'scripts/env-down.sh',
       'scripts/env-up.sh',
       'scripts/fake-agent.sh',
       'scripts/record-scenes.ts',
+      'scripts/render-overlays.ts',
+      'scripts/storyboard.ts',
+      'storyboard/default.yaml',
+      'templates/card.html',
+      'templates/telop.html',
     ]);
   });
 

@@ -47,8 +47,10 @@ Usage: fake-agent.sh <cassette> [--speed N] [--once] [--dry-run]
   --cwd DIR       working directory for --session (default: current directory).
 
 Cassette rows are "<delayMs>|@input <TAB> <payload>"; `#` rows and blank rows
-are ignored. Payloads go through `printf %b`, and `{{INPUT}}` is replaced with
-the last line read from stdin.
+are ignored. Payloads go through `printf %b`. `{{INPUT}}` is replaced with the
+last line read from stdin and `{{TASK}}` with the first line of the pass — a
+cassette that answers a mid-run approval prompt still has to echo the original
+instruction afterwards, not the "y" that cleared the prompt.
 USAGE
 }
 
@@ -143,6 +145,10 @@ if [ -t 0 ]; then
 fi
 
 LAST_INPUT=""
+# The first message of a pass. Everything after a mid-run approval prompt has to
+# keep echoing the original instruction, but LAST_INPUT has by then been
+# overwritten by the answer ("y").
+TASK_INPUT=""
 
 emit() {
   # Expand the cassette's escapes FIRST, then splice the captured message in as
@@ -152,7 +158,8 @@ emit() {
   # The `_` sentinel survives command substitution's trailing-newline stripping.
   emit_expanded="$(printf '%b_' "$1")"
   emit_expanded="${emit_expanded%_}"
-  printf '%s' "${emit_expanded//\{\{INPUT\}\}/$LAST_INPUT}"
+  emit_expanded="${emit_expanded//\{\{INPUT\}\}/$LAST_INPUT}"
+  printf '%s' "${emit_expanded//\{\{TASK\}\}/$TASK_INPUT}"
 }
 
 # Returns 1 when stdin closed while waiting for a message, so callers stop
@@ -160,6 +167,7 @@ emit() {
 play_once() {
   local step=0
   local delay payload scaled
+  TASK_INPUT=""
   # The cassette is read on fd 3: fd 0 has to stay attached to the pane so
   # `@input` rows can read what CommandMate sent.
   while IFS="$TAB" read -r delay payload <&3 || [ -n "$delay" ]; do
@@ -171,6 +179,7 @@ play_once() {
     if [ "$delay" = "@input" ]; then
       [ "$DRY_RUN" -eq 1 ] && printf 'trace step=%d kind=input\n' "$step" >&2
       IFS= read -r LAST_INPUT || return 1
+      [ -n "$TASK_INPUT" ] || TASK_INPUT="$LAST_INPUT"
       emit "$payload"
       continue
     fi
