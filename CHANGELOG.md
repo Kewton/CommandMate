@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **デモ動画収録スキル `demo-video` の基盤を追加** (#1553): 隔離デモ環境（使い捨て seed repo・専用ポート・$HOME 配下 DB・自前プロセスグループ）、キャプチャ済み ANSI カセットを tmux pane へ再生してサーバの status-detector／response poller／UI を実物のまま駆動する偽エージェント（LLM のみ差し替え・モックゼロ）、@playwright/test をライブラリとして使う scene 単位 webm 録画の 3 点。`.claude/skills` と `.agents/skills` へ byte-identical 配置。
+
 ## [0.16.0] - 2026-07-29
 
 > **Highlight**: **Skill 配布 MVP を「入れられる」から「運用できる」へ引き上げたリリース。** 導入先 Agent の対応状況を manifest の申告だけでなく CommandMate 側の実測で裏付ける互換 matrix（#1246）、どの worktree に何が入っていて導入時のままかを横断確認する監査 dashboard と receipt からの reindex（#1248、DB migration v48）、Skill 導入を review 可能な commit / draft PR に載せる専用 git workflow（#1247）を追加した。あわせて、uninstall した Skill を再 install すると **exit 0 で「Installed」と報告しながら 1 バイトも書かれない** journal replay の欠陥（#1552）を修正し、対になる uninstall 経路の同型欠陥も同時に塞いだ。
