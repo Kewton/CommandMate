@@ -354,6 +354,80 @@ describe('Skill MVP: Catalog → install → discovery → uninstall', () => {
 });
 
 // =============================================================================
+// Reinstalling what was uninstalled (Issue #1552)
+// =============================================================================
+
+/**
+ * The CLI supplies no idempotency key, so the journal derives one from the
+ * binding — actor, operation, target, plan hash. Every one of those inputs is
+ * back to its original value once the Skill is uninstalled, so the install that
+ * follows derives the *same* key as the install before it. These cases run the
+ * cycle through the real routes with no key in the body, which is exactly what
+ * `commandmate skill install` sends.
+ */
+describe('Skill MVP: uninstall then do it again (#1552)', () => {
+  const skill = MVP_SKILLS[0];
+
+  function receiptPaths(): string[] {
+    return [
+      path.join(worktreeDir, '.agents', 'skills', skill.id, SKILL_RECEIPT_FILENAME),
+      path.join(worktreeDir, '.claude', 'skills', skill.id, SKILL_RECEIPT_FILENAME),
+    ];
+  }
+
+  it('installs again for real instead of replaying the first install', async () => {
+    await installViaApi(skill.id, true);
+    await uninstallViaApi(skill.id, true);
+    for (const receipt of receiptPaths()) expect(existsSync(receipt)).toBe(false);
+
+    const body = await installViaApi(skill.id, true);
+
+    // A replay would answer 200 from the first install's journal entry and
+    // write nothing: exit 0, "Installed …", an empty install root.
+    expect((body.operation as Record<string, unknown>).replayed).toBe(false);
+    expect((body.operation as Record<string, string>).result).toBe('succeeded');
+    for (const receipt of receiptPaths()) expect(existsSync(receipt)).toBe(true);
+    expect(existsSync(path.join(installRootOf(worktreeDir, skill.id), 'SKILL.md'))).toBe(true);
+
+    // The install the CLI reported is the one the index and discovery agree on.
+    expect(getSkillInstallation(db, WORKTREE_ID, skill.id)).not.toBeNull();
+    expect((await loadAgentsSkills(worktreeDir)).map((command) => command.name)).toEqual([
+      skill.name,
+    ]);
+    expect((await loadSkills(worktreeDir)).map((command) => command.name)).toEqual([skill.name]);
+  });
+
+  it('uninstalls again for real instead of replaying the first uninstall', async () => {
+    await installViaApi(skill.id, true);
+    await uninstallViaApi(skill.id, true);
+    await installViaApi(skill.id, true);
+
+    const body = await uninstallViaApi(skill.id, true);
+
+    expect((body.operation as Record<string, unknown>).replayed).toBe(false);
+    expect((body.uninstall as Record<string, boolean>).fullyRemoved).toBe(true);
+    for (const receipt of receiptPaths()) expect(existsSync(receipt)).toBe(false);
+    expect(existsSync(installRootOf(worktreeDir, skill.id))).toBe(false);
+    expect(getSkillInstallation(db, WORKTREE_ID, skill.id)).toBeNull();
+    expect(await loadAgentsSkills(worktreeDir)).toHaveLength(0);
+  });
+
+  it('audits every cycle rather than collapsing them onto the first', async () => {
+    await installViaApi(skill.id, true);
+    await uninstallViaApi(skill.id, true);
+    await installViaApi(skill.id, true);
+    await uninstallViaApi(skill.id, true);
+
+    const audit = listSkillOperationAudit(db, { worktreeId: WORKTREE_ID, skillId: skill.id });
+    expect(audit.filter((row) => row.operation === 'install')).toHaveLength(2);
+    expect(audit.filter((row) => row.operation === 'uninstall')).toHaveLength(2);
+    expect(audit.every((row) => row.result === 'succeeded')).toBe(true);
+    // Four distinct operations, not one operation reported four times.
+    expect(new Set(audit.map((row) => row.operationId)).size).toBe(4);
+  });
+});
+
+// =============================================================================
 // Change containment
 // =============================================================================
 

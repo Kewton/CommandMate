@@ -171,6 +171,92 @@ describe('beginSkillOperation', () => {
     expect(files).toHaveLength(1);
     expect(files[0]).toMatch(/^[0-9a-f]{64}\.json$/);
   });
+
+  // Issue #1552: the derived key is a function of the binding, so a genuinely
+  // new request arrives under the key of the finished one it repeats.
+  it('supersedes a recorded outcome the caller says is no longer true', () => {
+    const first = begin({ idempotencyKey: 'client-key-1' });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    let entry = transitionSkillOperation(first.entry, 'FS_COMMITTED', {}, { root, now: T0 + 1 });
+    entry = transitionSkillOperation(entry, 'INDEXED', {}, { root, now: T0 + 2 });
+    transitionSkillOperation(entry, 'SUCCEEDED', {}, { root, now: T0 + 3 });
+
+    const second = beginSkillOperation(
+      {
+        idempotencyKey: 'client-key-1',
+        binding: BINDING,
+        lockKey: 'lock-key',
+        isReplayable: () => false,
+      },
+      { root, now: T0 + 4 }
+    );
+
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.replayed).toBe(false);
+    expect(second.entry.state).toBe('PREPARING');
+    expect(second.entry.operationId).not.toBe(first.entry.operationId);
+    // The superseded entry is gone rather than kept alongside its replacement.
+    expect(listSkillOperationJournal({ root })).toHaveLength(1);
+  });
+
+  it('replays when the caller says the recorded outcome still holds', () => {
+    begin({ idempotencyKey: 'client-key-1' });
+
+    const second = beginSkillOperation(
+      {
+        idempotencyKey: 'client-key-1',
+        binding: BINDING,
+        lockKey: 'lock-key',
+        isReplayable: () => true,
+      },
+      { root, now: T0 + 4 }
+    );
+
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.replayed).toBe(true);
+  });
+
+  it('never supersedes an operation that is still running', () => {
+    const first = begin({ idempotencyKey: 'client-key-1' });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    const second = beginSkillOperation(
+      {
+        idempotencyKey: 'client-key-1',
+        binding: BINDING,
+        lockKey: 'lock-key',
+        isReplayable: () => false,
+      },
+      { root, now: T0 + 4 }
+    );
+
+    // PREPARING is owned by a request that may still be in flight; dropping its
+    // journal entry would lose the crash-recovery record for live work.
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.replayed).toBe(true);
+    expect(second.entry.operationId).toBe(first.entry.operationId);
+  });
+
+  it('still rejects a conflicting binding before consulting the caller', () => {
+    begin({ idempotencyKey: 'client-key-1' });
+    const conflicting = beginSkillOperation(
+      {
+        idempotencyKey: 'client-key-1',
+        binding: { ...BINDING, planHash: 'e'.repeat(64) },
+        lockKey: 'lock-key',
+        isReplayable: () => false,
+      },
+      { root, now: T0 + 5 }
+    );
+
+    expect(conflicting.ok).toBe(false);
+    expect(listSkillOperationJournal({ root })).toHaveLength(1);
+  });
 });
 
 describe('state machine', () => {

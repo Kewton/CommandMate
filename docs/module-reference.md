@@ -418,7 +418,8 @@
 | `src/app/api/skills/route.ts` / `[id]/route.ts` | read-only Catalog API。UI と CLI が同じ結果を参照する（#1231） |
 | `src/components/skills/` | Catalog 一覧・詳細・badge・freshness banner・表示語彙。changelog は `stripRemoteMedia()` 適用（#1232） |
 | `src/lib/skills/operation-lock.ts` | owner nonce / lease / process generation つき cross-process lock。lease 失効後も owner 生存中は reclaim しない（same-process 含む。#1427 で same-pid ショートカット除去）。hash separator は `\x00` エスケープ（#1432）（#1234、server-only） |
-| `src/lib/skills/operation-journal.ts` | typed state transition と idempotency key binding。terminal entry は retention（7日）で自動 prune（#1234 / #1428、server-only） |
+| `src/lib/skills/operation-journal.ts` | typed state transition と idempotency key binding。terminal entry は retention（7日）で自動 prune。`beginSkillOperation` の `isReplayable` が false の entry は supersede（PREPARING は対象外）（#1234 / #1428 / #1552、server-only） |
+| `src/lib/skills/operation-replay.ts` | replay 前提条件。commit 済み entry の主張を primary root の receipt 実在/digest で照合し、uninstall 後の再 install（と再 uninstall）を replay で握り潰さない（#1552、server-only） |
 | `src/lib/skills/operation-store.ts` | service-owned state root（0700/0600）、atomic write、staging 分離（#1234、server-only） |
 | `src/lib/skills/operation-audit.ts` | append-only `skill_operations` への記録と読み取り。`querySkillOperationAudit` は worktree 省略で横断、operation/result/期間で絞り込み、`(recordedAt,id)` 複合 cursor で改ページ（同一 ms の tie でも重複・欠落なし）（#1234 / #1248、server-only） |
 | `src/lib/skills/operation-reconciler.ts` | on-demand reconciliation ロジックと orphan cleanup。起動時実行は `startup-reconcile` 経由（#1234 / #1428、server-only） |

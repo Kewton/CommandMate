@@ -631,6 +631,52 @@ describe('POST …/install — idempotency', () => {
     expect((await response.json()).code).toBe('SKILL_INSTALL_IDEMPOTENCY_CONFLICT');
   });
 
+  // Issue #1552: a replay is only honest while the outcome it records is still
+  // true. The reported symptom was exit 0, "Installed …" and an empty install
+  // root, because the key survived the uninstall that emptied it.
+  it('installs again when the payload the recorded success claims is gone', async () => {
+    const { token } = await issuePlan();
+    const key = 'install-demo-skill-0003';
+    expect(
+      (await requestInstall({ planToken: token, version: VERSION, idempotencyKey: key })).status
+    ).toBe(200);
+
+    // What an uninstall leaves behind: both roots gone, index row gone.
+    rmSync(path.join(worktreeDir, '.agents', 'skills', SKILL_ID), { recursive: true, force: true });
+    rmSync(path.join(worktreeDir, '.claude', 'skills', SKILL_ID), { recursive: true, force: true });
+    db.prepare('DELETE FROM skill_installations WHERE worktree_id = ?').run(WORKTREE_ID);
+
+    const { token: second } = await issuePlan();
+    const response = await requestInstall({
+      planToken: second,
+      version: VERSION,
+      idempotencyKey: key,
+    });
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.operation).toMatchObject({ replayed: false, state: 'SUCCEEDED' });
+    expect(existsSync(path.join(installRootAbs(), SKILL_RECEIPT_FILENAME))).toBe(true);
+    expect(getSkillInstallation(db, WORKTREE_ID, SKILL_ID)).not.toBeNull();
+    // A second real operation, not the first one reported twice.
+    expect(listSkillOperationAudit(db, { worktreeId: WORKTREE_ID })).toHaveLength(2);
+  });
+
+  it('still replays rather than reinstalling when the payload is untouched', async () => {
+    const { token } = await issuePlan();
+    const key = 'install-demo-skill-0004';
+    await requestInstall({ planToken: token, version: VERSION, idempotencyKey: key });
+    const before = readFileSync(path.join(installRootAbs(), SKILL_RECEIPT_FILENAME));
+
+    // The same request delivered twice — a network retry, not new work.
+    const replay = await requestInstall({ planToken: token, version: VERSION, idempotencyKey: key });
+
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).operation.replayed).toBe(true);
+    expect(readFileSync(path.join(installRootAbs(), SKILL_RECEIPT_FILENAME))).toEqual(before);
+    expect(listSkillOperationAudit(db, { worktreeId: WORKTREE_ID })).toHaveLength(1);
+  });
+
   it('rejects a key that is not a safe identifier', async () => {
     const { token } = await issuePlan();
 
