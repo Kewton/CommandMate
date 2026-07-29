@@ -1,0 +1,5 @@
+# No options: block at all, so every default applies (skipInPrimaryCheckout=true).
+version: 1
+gates:
+  - id: sidefx
+    command: touch "$CMATE_VERIFY_TEST_MARKER"

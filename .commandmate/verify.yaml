@@ -1,0 +1,23 @@
+# .commandmate/verify.yaml — v1
+# 仕様: docs/design/verification-config.md
+# ランナー: .claude/skills/cmate-verify/scripts/verify-run.sh
+#
+# ゲートは CI（.github/workflows/ci-pr.yml）の lint / type-check / test-unit ジョブと
+# 同じコマンドを宣言している。build は稼働サーバの足元で走らせると配信中の成果物を
+# 壊すため、skipInPrimaryCheckout が守る linked worktree でのみ意味を持つ。
+version: 1
+gates:
+  - id: lint
+    command: "npm run lint"
+    timeoutSec: 900
+  - id: typecheck
+    command: "npx tsc --noEmit"
+    timeoutSec: 900
+  - id: unit
+    command: "npm run test:unit"
+    timeoutSec: 3600
+options:
+  baseRef: origin/develop
+  skipInPrimaryCheckout: true
+  # 8192 では vitest の失敗サマリが途中で切れ、2 件の失敗のうち 1 件しか読めなかった。
+  maxLogTailBytes: 32768
