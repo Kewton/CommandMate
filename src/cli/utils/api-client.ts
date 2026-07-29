@@ -285,6 +285,8 @@ export interface ApiErrorPayload {
   code?: string;
   error?: string;
   blockers?: Array<{ code: string; path: string | null }>;
+  /** Issue #1544: run already in flight, sent with the verify route's 409. */
+  runningRunId?: number;
 }
 
 /**

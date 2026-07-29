@@ -297,6 +297,10 @@ commandmate wait <worktree-id> --timeout 300                   # 300秒でタイ
 commandmate wait <worktree-id> --stall-timeout 60              # 60秒出力変化なしでタイムアウト
 commandmate wait <worktree-id> --on-prompt human               # プロンプト検出時も待機継続
 commandmate wait <id1> <id2>                                   # 複数worktree同時待機
+commandmate wait <worktree-id> --verify                        # 完了検知後に検証ゲート実行（不合格 exit 20 / 作業証跡ゼロ exit 21）
+
+# 検証ゲート（.commandmate/verify.yaml、Issue #1544、詳細は docs/user-guide/cli-operations-guide.md）
+commandmate verify <worktree-id> [--gates lint,unit] [--json]  # 合格 0 / 不合格 20 / 作業証跡ゼロ 21
 
 # プロンプト応答
 commandmate respond <worktree-id> "yes"                        # プロンプトに応答

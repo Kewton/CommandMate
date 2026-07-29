@@ -59,6 +59,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate send`](#commandmate-send) | エージェントへのメッセージ送信 |
 | [`commandmate wait`](#commandmate-wait) | エージェント完了の待機 |
 | [`commandmate respond`](#commandmate-respond) | プロンプトへの応答 |
+| [`commandmate verify`](#commandmate-verify) | 検証ゲート（.commandmate/verify.yaml）の実行 |
 | [`commandmate capture`](#commandmate-capture) | ターミナル出力の取得 |
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Auto-Yesの制御 |
 | [`commandmate instances`](#commandmate-instances) | エージェントインスタンス（roster）の一覧・追加・削除・alias変更 |
@@ -168,6 +169,8 @@ commandmate wait <id1> <id2> --timeout 600          # 複数同時待機
 commandmate wait <worktree-id> --on-prompt agent     # プロンプト検出で返却（デフォルト）
 commandmate wait <worktree-id> --on-prompt human     # プロンプトは人間がUIで応答
 commandmate wait <worktree-id> --stall-timeout 120   # 出力変化なしの検出
+commandmate wait <worktree-id> --verify               # 完了検知後に全ゲートを実行
+commandmate wait <worktree-id> --require-work         # 完了検知後に work-evidence のみ実行
 ```
 
 ### オプション
@@ -178,14 +181,39 @@ commandmate wait <worktree-id> --stall-timeout 120   # 出力変化なしの検�
 | `--on-prompt <mode>` | プロンプト検出時の動作（agent / human） | agent |
 | `--stall-timeout <sec>` | 出力変化なしのタイムアウト（秒） | - |
 | `--instance <id>` | 対象インスタンスID（`<agent>` または `<agent>-<n>`） | エージェントのプライマリインスタンス |
+| `--verify` | 完了検知後に検証ゲートを全件実行し、その判定で終了コードを決める | 無効 |
+| `--require-work` | 完了検知後に work-evidence ゲートのみ実行する | 無効 |
 
 ### 終了コード
 
 | コード | 意味 | 次のアクション |
 |:------:|------|---------------|
-| 0 | 正常完了（エージェントが入力待ちに戻った） | `capture` で結果取得 |
+| 0 | 正常完了（`--verify` 指定時は検証にも合格） | `capture` で結果取得 |
 | 10 | プロンプト検出（`--on-prompt agent` 時） | `respond` で応答し、再度 `wait` |
+| 20 | 検証ゲート不合格（`--verify`） | `verify --json` で失敗ゲートを確認し修正 |
+| 21 | 作業証跡ゼロ（コミットも未コミット変更も無い） | エージェントが着手していない。再度 `send` |
 | 124 | タイムアウト | `capture` で状況確認、再度 `wait` or 中断 |
+
+### --verify / --require-work（Issue #1544）
+
+`wait` の成功条件を「エージェントが止まった」から「**検証に合格した**」へ引き上げます。
+
+- `--verify`: 全ゲート（work-evidence + `.commandmate/verify.yaml` の宣言ゲート）を実行
+- `--require-work`: work-evidence ゲートのみ実行。全ゲートを回す前の安価な事前確認に使う
+- 両方を同時指定してもエラーにはならない。work-evidence は常に全ゲートに含まれるため `--verify` が包含する
+- 検証は**完了検知できたときだけ**走る。プロンプト検出（10）やタイムアウト（124）はそのまま返し、検証しない
+- 複数 worktree を指定した場合、完了検知は並行・検証は**直列**。サーバ側が同時実行数を制限しているため
+- 複数 worktree の終了コードは優先順位 **10 > 20 > 21 > 124** で集約される
+
+```bash
+commandmate wait "$WT" --timeout 1800 --verify
+case $? in
+  0)  echo "検証合格" ;;
+  10) commandmate respond "$WT" "yes" ;;
+  20) commandmate verify "$WT" --json ;;   # 失敗ゲートの詳細
+  21) echo "エージェントが何も作っていない" ;;
+esac
+```
 
 ### --on-prompt の動作
 
@@ -240,6 +268,73 @@ commandmate respond <worktree-id> "yes" --agent codex --instance codex-2  # 追�
 |:------:|------|
 | 0 | 応答成功 |
 | 99 | プロンプトが既に消えている（`prompt_no_longer_active`）|
+
+---
+
+## commandmate verify
+
+`.commandmate/verify.yaml` に宣言された検証ゲートを worktree の作業ディレクトリで実行し、終了コードで合否を返します。
+
+サーバは検証要求に対して 202 と runId のみを返す（ゲートはテストスイートやビルドで数分かかる）ため、CLI は run が終端ステータスに達するまで 5 秒間隔でポーリングします。
+
+### 使用方法
+
+```bash
+commandmate verify <worktree-id>                       # 全ゲート実行
+commandmate verify <worktree-id> --gates lint,unit     # ゲートを絞る
+commandmate verify <worktree-id> --json                # run + gate results を JSON 出力
+commandmate verify <worktree-id> --timeout 1800        # 超過で exit 124
+```
+
+### オプション
+
+| オプション | 説明 | デフォルト |
+|-----------|------|-----------|
+| `--gates <id1,id2>` | 実行するゲートID（カンマ区切り） | work-evidence + 宣言された全ゲート |
+| `--instance <id>` | run を紐づけるエージェントインスタンスID | なし（worktree 単位の run） |
+| `--timeout <sec>` | ポーリングを打ち切るまでの秒数 | 無制限 |
+| `--json` | run と gate results を stdout に JSON 出力 | 無効 |
+
+### 終了コード
+
+| コード | 意味 | 次のアクション |
+|:------:|------|---------------|
+| 0 | 全ゲート合格 | - |
+| 20 | ゲート不合格（failed / timeout / error） | 失敗ゲートの logTail を見て修正 |
+| 21 | work-evidence 不合格（コミットも未コミット変更も無い） | エージェントが着手していない |
+| 99 | 判定不能（verify.yaml 不正、全ゲート skipped、cancelled） | verify.yaml と実行ディレクトリを確認 |
+| 124 | `--timeout` 超過（サーバ側の run は継続中） | 時間をおいて再確認 |
+
+`error` / `cancelled` を 20 ではなく 99 に割り当てているのは、「判定できなかった」が「判定した結果ダメだった」として読まれないようにするためです。
+
+### 出力
+
+進捗（GATE 行）は stderr、判定（RESULT 行）は stdout に出力されます。不合格ゲートは logTail も stderr に続けて出力します。
+
+```
+# stderr:
+Verifying: myrepo-feature-101 (run 42)
+GATE work-evidence PASS (commits=3, uncommitted=2)
+GATE lint PASS (exit=0, 12.3s)
+GATE unit FAIL (exit=1, 45.0s)
+
+# stdout:
+RESULT failed
+```
+
+### 実行中コンフリクト（409）
+
+1つの worktree に対して同時に走らせられる run は1つだけです。既に走っている場合は実行中の runId を含むメッセージで終了します。
+
+```
+Error: A verification run is already in progress for 'myrepo-feature-101' (run 41). Wait for it to finish, then retry.
+```
+
+### 稼働サーバの作業ディレクトリでは走らない
+
+`verify.yaml` の `options.skipInPrimaryCheckout: true` は、サーバプロセス自身の作業ディレクトリと一致する worktree でコマンドゲートを `skipped` にします。配信中のビルド成果物を `npm run build` が差し替えて画面を壊す事故を防ぐためです。
+
+skipped を含む run は `passed` ではなく `error`（exit 99）になります。「検証しなかった」が「検証して問題なかった」として読まれないようにするためです。
 
 ---
 

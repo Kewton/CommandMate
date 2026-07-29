@@ -63,10 +63,14 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     --timeout <seconds>        Maximum wait time
     --on-prompt <mode>         agent (default) or human
     --stall-timeout <seconds>  Max time without output change
+    --verify                   After completion, run every verification gate
+    --require-work             After completion, run only the work-evidence gate
 
   Exit codes:
-    0   - Completed (agent idle/ready)
+    0   - Completed (agent idle/ready), and verified when --verify was given
     10  - Prompt detected (--on-prompt agent mode)
+    20  - A verification gate failed (--verify)
+    21  - Nothing to verify: no commits, no uncommitted changes
     124 - Timeout exceeded
 
   --on-prompt modes:
@@ -75,6 +79,38 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
 
   Prompt JSON output (exit 10):
     {"worktreeId":"...","cliToolId":"claude","type":"yes_no","question":"...","options":["yes","no"],"status":"pending"}
+
+  --verify turns "the agent stopped" into "the work passes the repository's own
+  checks". Verification only runs when completion was detected: a prompt (10) or
+  a timeout (124) is reported as-is and never verified. With several worktrees,
+  gates run one worktree at a time because the server caps concurrent runs.
+
+### commandmate verify <worktree-id>
+  Run the gates declared in .commandmate/verify.yaml against a worktree.
+
+  Options:
+    --gates <id1,id2>     Gate ids to run (default: work-evidence + all declared)
+    --instance <id>       Attribute the run to an agent instance
+    --timeout <seconds>   Stop polling after N seconds (exit 124)
+    --json                Print the run and its gate results as JSON on stdout
+
+  Exit codes:
+    0   - Every gate passed
+    20  - A gate failed, timed out, or errored
+    21  - work-evidence found nothing to verify (no commits, no changes)
+    99  - The run produced no verdict (bad verify.yaml, gates skipped, cancelled)
+    124 - --timeout elapsed while the run was still going
+
+  Output (progress on stderr, verdict on stdout):
+    GATE work-evidence PASS (commits=3, uncommitted=2)
+    GATE lint PASS (exit=0, 12.3s)
+    GATE unit FAIL (exit=1, 45.0s)
+    RESULT failed
+
+  Gates run in the worktree's own directory. Gates are skipped (run status 99,
+  never 0) in the checkout the server itself runs from when verify.yaml sets
+  options.skipInPrimaryCheckout, so a 'build' gate cannot replace the assets the
+  live app is serving.
 
 ### commandmate respond <worktree-id> "<answer>"
   Respond to an agent's prompt.
@@ -184,8 +220,13 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   1   DEPENDENCY_ERROR - Server not running
   2   CONFIG_ERROR     - Validation error (invalid agent, duration, etc.)
   10  PROMPT_DETECTED  - Prompt detected during wait
-  99  UNEXPECTED_ERROR - Unexpected error / resource not found
-  124 TIMEOUT          - Wait timeout exceeded
+  20  VERIFY_FAILED    - A verification gate failed (verify, wait --verify)
+  21  NOT_STARTED      - Nothing to verify: no commits, no uncommitted changes
+  99  UNEXPECTED_ERROR - Unexpected error / resource not found / no verdict
+  124 TIMEOUT          - Wait or verification timeout exceeded
+
+  When one 'wait' covers several worktrees, the reported code is the highest
+  priority one observed: 10 > 20 > 21 > 124.
 
 ## Troubleshooting
 
@@ -303,4 +344,24 @@ Copy and adapt these patterns for your use case.
 
   # Clean up when done
   commandmate instances "$WT" remove codex-2 --kill
+
+## 8. Verify the work instead of trusting "the agent stopped"
+
+  WT=$(commandmate ls --branch feature/101 --quiet)
+  commandmate send "$WT" "Implement Issue #101 with TDD" --auto-yes
+
+  # One call: wait for completion, then run every gate in .commandmate/verify.yaml
+  commandmate wait "$WT" --timeout 1800 --verify
+  case $? in
+    0)  echo "Verified" ;;
+    10) commandmate respond "$WT" "yes" ;;
+    20) echo "A gate failed"; commandmate verify "$WT" --json ;;
+    21) echo "The agent produced nothing" ;;
+  esac
+
+  # Cheap pre-check: is there any work at all, before paying for the full suite?
+  commandmate wait "$WT" --require-work || echo "no commits and no changes"
+
+  # Re-run a subset after a fix, without waiting on the agent
+  commandmate verify "$WT" --gates lint,unit
 `;

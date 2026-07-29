@@ -206,6 +206,50 @@ export const WaitExitCode = {
 } as const;
 export type WaitExitCode = typeof WaitExitCode[keyof typeof WaitExitCode];
 
+/**
+ * verify command exit codes (Issue #1544).
+ *
+ * Follows the WaitExitCode precedent: infrastructure failures keep using
+ * {@link ExitCode}, while these name verdicts a caller must be able to branch
+ * on. `error` and `cancelled` runs produce no verdict at all and therefore map
+ * to ExitCode.UNEXPECTED_ERROR rather than to VERIFY_FAILED — "we could not
+ * judge" must not read as "we judged it and it failed".
+ */
+export const VerifyExitCode = {
+  SUCCESS: 0,
+  /** At least one gate failed, timed out, or errored. */
+  VERIFY_FAILED: 20,
+  /** The work-evidence gate failed: no commits and no uncommitted changes. */
+  NOT_STARTED: 21,
+  TIMEOUT: 124,
+} as const;
+export type VerifyExitCode = typeof VerifyExitCode[keyof typeof VerifyExitCode];
+
+/**
+ * Non-zero exit codes ordered by which one wins when several worktrees produce
+ * different verdicts in one `wait` invocation (Issue #1544). Codes absent from
+ * this list (infrastructure failures such as 1/2/99) rank after every listed
+ * code, and among themselves the first one observed wins.
+ */
+export const WAIT_EXIT_CODE_PRIORITY: readonly number[] = [
+  WaitExitCode.PROMPT_DETECTED,
+  VerifyExitCode.VERIFY_FAILED,
+  VerifyExitCode.NOT_STARTED,
+  WaitExitCode.TIMEOUT,
+];
+
+/** verify command options [Issue #1544] */
+export interface VerifyOptions {
+  /** Agent instance the run is attributed to. */
+  instance?: string;
+  /** Comma-separated gate ids; omitted means work-evidence plus every declared gate. */
+  gates?: string;
+  json?: boolean;
+  /** Seconds to wait for the run to reach a terminal status before exiting 124. */
+  timeout?: number;
+  token?: string;
+}
+
 /** ls command options [Issue #518] */
 export interface LsOptions {
   json?: boolean;
@@ -239,6 +283,13 @@ export interface WaitOptions {
   token?: string;
   /** Issue #868: agent instance ID or alias (defaults to the agent's primary instance) */
   instance?: string;
+  /**
+   * Issue #1544: after completion is detected, run every verification gate and
+   * decide the exit code from the verdict instead of from "the agent stopped".
+   */
+  verify?: boolean;
+  /** Issue #1544: run only the work-evidence gate. Subsumed by {@link verify}. */
+  requireWork?: boolean;
 }
 
 /** respond command options [Issue #518] */

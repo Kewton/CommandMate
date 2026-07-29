@@ -418,3 +418,70 @@ export interface SkillReindexResult {
   /** Registered worktrees whose directory is gone; their rows were left untouched. */
   unreadableWorktreeIds: string[];
 }
+
+// =============================================================================
+// Verification (Issue #1544)
+// =============================================================================
+
+/** Mirrors: src/app/api/worktrees/[id]/verify/route.ts POST 202 response. */
+export interface VerifyStartResponse {
+  runId: number;
+}
+
+/**
+ * Mirrors: src/lib/db/verification-db.ts VerificationRunStatus.
+ * Declared here rather than imported so the CLI bundle stays free of the
+ * server's better-sqlite3 dependency graph.
+ */
+export type VerificationRunStatus =
+  | 'running'
+  | 'passed'
+  | 'failed'
+  | 'not_started'
+  | 'error'
+  | 'cancelled';
+
+/** Mirrors: src/lib/db/verification-db.ts VerificationGateStatus. */
+export type VerificationGateStatus =
+  | 'running'
+  | 'passed'
+  | 'failed'
+  | 'timeout'
+  | 'skipped'
+  | 'error';
+
+/**
+ * Mirrors: src/lib/db/verification-db.ts VerificationGateResult.
+ * Dates arrive as ISO strings because the route serializes them through JSON.
+ */
+export interface VerificationGateResultView {
+  id: number;
+  runId: number;
+  gateId: string;
+  command: string;
+  status: VerificationGateStatus;
+  exitCode: number | null;
+  durationMs: number | null;
+  logTail: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+/** Mirrors: src/lib/db/verification-db.ts VerificationRunWithGates. */
+export interface VerificationRunView {
+  id: number;
+  worktreeId: string;
+  instanceId: string | null;
+  taskId: string | null;
+  trigger: string;
+  status: VerificationRunStatus;
+  baseRef: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  gates: VerificationGateResultView[];
+}
+
+/** Mirrors: src/app/api/worktrees/[id]/verify/runs/[runId]/route.ts GET response. */
+export interface VerifyRunResponse {
+  run: VerificationRunView;
+}

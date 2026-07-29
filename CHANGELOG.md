@@ -21,7 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **デモ動画収録スキル `demo-video` の基盤を追加** (#1553): 隔離デモ環境（使い捨て seed repo・専用ポート・$HOME 配下 DB・自前プロセスグループ）、キャプチャ済み ANSI カセットを tmux pane へ再生してサーバの status-detector／response poller／UI を実物のまま駆動する偽エージェント（LLM のみ差し替え・モックゼロ）、@playwright/test をライブラリとして使う scene 単位 webm 録画の 3 点。`.claude/skills` と `.agents/skills` へ byte-identical 配置。
 
+### Added
+
 - **`demo-video` に絵コンテ・日英テロップ・ffmpeg 合成・30 秒尺検証ゲートを追加** (#1554): `demo-video.sh` 一発で `demo-30s.ja.mp4` / `demo-30s.en.mp4` が出る。文言の編集点は `storyboard/default.yaml` だけで、シーンの尺もテロップの in/out も合成の切り貼りもそこから機械算出する（手書きタイムコードは無い）。ロケールはフル録画方式で、UI ごと切り替えて 2 回撮り、遷移ごとに `<html lang>` を実測して不一致ならテイクを失敗させる（「UI 言語がテロップ言語と一致」を目視でなく機械で担保）。テロップは HTML→透過 PNG→ffmpeg overlay で焼き込み（drawtext の日本語 fontfile／エスケープ問題を回避し意匠を CSS 1 箇所に集約、文字列は `textContent` 注入なので絵コンテがマークアップを注入できない）。尺は `ffprobe` 実測が 30.0±0.5s を外れたら **exit 1**。承認シーン用にカセットへ実キャプチャ由来の承認プロンプトを追加し、`{{TASK}}` 置換（承認後も元の指示を echo し続ける）と `Scene.prepare`（API 待ちを録画開始前に行う）を導入した。生成物はリポジトリ外に出しコミットしない（配布は Release アセット）。
+
+- **`commandmate verify` コマンドと `wait --verify` / `--require-work` を追加** (#1544): 検証ゲートを CLI から起動し、`wait` の成功条件を「エージェントが止まった」から「検証に合格した」へ引き上げる。exit code は 合格 0 / ゲート不合格 20 / 作業証跡ゼロ 21 / タイムアウト 124 で、判定不能（`error`・`cancelled`）は 20 ではなく 99 に倒す（「判定できなかった」を「判定してダメだった」と読ませないため）。検証は**完了検知できた worktree だけ**に走り、プロンプト検出(10)やタイムアウト(124)はそのまま返す。複数 worktree では完了検知は並行・検証は直列（サーバ側が同時実行数 2 に制限しているため並行させても queue するだけ）、集約の優先順位は 10 > 20 > 21 > 124。直列実行の並行化・`not_started`→0 への写像・優先順位の入れ替え・プロンプト時のガード除去・timeout 判定を終端 status 判定より前に置く、の 5 種の変異注入でテストが実際に赤くなることを確認済み。
 
 ## [0.16.0] - 2026-07-29
 
