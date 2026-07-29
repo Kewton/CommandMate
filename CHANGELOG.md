@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **検証ゲートの実行結果を永続化する `verification_runs` / `verification_gate_results` テーブルと DB アクセサを追加** (#1542): exit code を持つ実行記録は `execution_logs`（スケジュール実行）と `assistant_executions`（非対話アシスタント）にしか無く、インタラクティブなエージェント作業は `chat_messages` しか残らないため「終わった」と「要求を満たした」を区別できなかった。migration **v49** で 1 検証試行 = `verification_runs` 1行 / その中の 1 コマンド = `verification_gate_results` 1行として記録する。gate results は run に `ON DELETE CASCADE`（run 抜きの gate 行は記録ではなくノイズであるため）。status / trigger の語彙は writer 側の検証だけでなく DB の CHECK 制約で固定した — この表の存在意義は語彙が区別する内容そのものであり、typo が新しい status 値として着地すると誰も query しないバケツが黙って生まれる。run の `not_started`（作業証跡ゼロでそもそも検証対象が無い）は `failed`（判定した上で不合格）と別値、`error` はゲート実行以前の内部エラー、gate の `skipped` は意図的スキップで理由を `log_tail` に残す（スキップが PASS と読まれないため）。`task_id` は Phase 2（#1545）の `tasks` 到着まで FK を張らない自由カラムとした（存在しない表への REFERENCES は `foreign_keys` ON 下で全 INSERT を失敗させる）。アクセサ `src/lib/db/verification-db.ts` は create* が `running` で開き finish* が閉じる二段構成とし（途中クラッシュを recoverable な `running` 行として残すため）、finish* は対象行が無ければ throw する（黙って no-op にすると、記録していない verdict を記録したと呼び出し側が信じる — まさにこの表が防ぐべき失敗）。`listVerificationRuns` は `started_at DESC, id DESC` で、同一 ms の tie でも順序が全順序になるよう id を tiebreak に使う。id tiebreak 削除・`?? null` を `||` 化（exit code 0 が NULL に化ける）・finish* の存在チェック削除・CHECK 制約削除・CASCADE 削除・index 削除・feed の ORDER BY 差し替え 3種・gate の run スコープ喪失、計 11 種の変異注入でテストが実際に赤くなることを確認済み。
+
 ## [0.16.0] - 2026-07-29
 
 > **Highlight**: **Skill 配布 MVP を「入れられる」から「運用できる」へ引き上げたリリース。** 導入先 Agent の対応状況を manifest の申告だけでなく CommandMate 側の実測で裏付ける互換 matrix（#1246）、どの worktree に何が入っていて導入時のままかを横断確認する監査 dashboard と receipt からの reindex（#1248、DB migration v48）、Skill 導入を review 可能な commit / draft PR に載せる専用 git workflow（#1247）を追加した。あわせて、uninstall した Skill を再 install すると **exit 0 で「Installed」と報告しながら 1 バイトも書かれない** journal replay の欠陥（#1552）を修正し、対になる uninstall 経路の同型欠陥も同時に塞いだ。

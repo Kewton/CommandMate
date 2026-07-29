@@ -193,6 +193,7 @@
 | `src/lib/db/memo-db.ts` | メモ管理CRUD（Issue #479） |
 | `src/lib/db/worktree-todo-db.ts` | ブランチ（worktree）単位 ToDo CRUD＋reorder（getTodosByWorktreeId/createTodo/updateTodo/deleteTodo/reorderTodos）。memo-db パターン踏襲・worktree_id キー・ON DELETE CASCADE。db.ts バレルは getWorktreeTodoById 等にエイリアスして repository todo-db と衝突回避（Issue #1015）。Issue #1032で status 3状態（todo/doing/done）を真値化・done は派生。Issue #1034（migration v39）で detail フィールド追加（既定 ''、createTodo/updateTodo/mapTodoRow で受理） |
 | `src/lib/db/template-db.ts` | レポートテンプレートCRUD操作（getAllTemplates, getTemplateById, createTemplate, updateTemplate, deleteTemplate, getTemplateCount）（Issue #618） |
+| `src/lib/db/verification-db.ts` | 検証ゲート実行結果の永続化（createVerificationRun/finishVerificationRun/createGateResult/finishGateResult/getVerificationRun/listVerificationRuns）。create* は running で開き finish* が閉じる（途中クラッシュを running 行として残すため）。finish* は対象行が無ければ throw（黙って no-op にすると記録していない verdict を記録したと信じられる）。list は `started_at DESC, id DESC`（同 ms tie で順序が崩れないよう id を tiebreak に使う）・既定 limit 20（Issue #1542、migration v49） |
 | `src/lib/polling/prompt-dedup.ts` | プロンプト重複検出（SHA-256ハッシュキャッシュ）（Issue #565） |
 | `src/lib/polling/response-dedup.ts` | assistant応答の重複検出（SHA-256ハッシュキャッシュ、isDuplicateResponse/clearResponseHashCache）。alternate screen 系ツールは行数カーソルが使えないため内容ハッシュで代替（Issue #1268）。キャッシュは stopPolling() でクリア＝1ポーリングサイクル（1ターン）限り。次ターンで同一内容の応答が来たら保存する（永続化すると #1268 の再発） |
 | `src/lib/response-extractor.ts` | レスポンス抽出ロジック（resolveExtractionStartIndex, isOpenCodeComplete）（Issue #479）、Copilot分岐追加（Issue #565）。Issue #988: antigravity分岐追加（branch 2a'＝user echoアンカー優先、未検出時lastCapturedLineフォールバック） |
@@ -435,6 +436,7 @@
 | `src/lib/db/migrations/v45-skill-installations.ts` | `skill_installations` テーブル（#1235） |
 | `src/lib/db/migrations/v46-skill-installations-cascade.ts` | `skill_installations` に `worktree_id` FK + `ON DELETE CASCADE` を付与（table rebuild）、既存 dangling 行も一掃（#1430） |
 | `src/lib/db/migrations/v48-skill-operations-audit-index.ts` | `skill_operations` に `from_version`/`to_version` を追加し、横断 feed 用 `(recorded_at DESC, id DESC)` と `(result, recorded_at DESC)` を index 化。`ALTER TABLE` のため既存行は NULL 遷移で読める（#1248） |
+| `src/lib/db/migrations/v49-verification-runs.ts` | `verification_runs` / `verification_gate_results` テーブル。gate results は run に `ON DELETE CASCADE`。status/trigger は CHECK で語彙固定（run の `not_started`＝作業証跡ゼロ、`error`＝ゲート実行以前の内部エラー、gate の `skipped`＝意図的スキップで理由は log_tail）。`task_id` は Phase 2（#1545）の tasks 到着まで FK 無しの自由カラム（#1542） |
 | `src/lib/skills/startup-reconcile.ts` | 起動時 reconciliation の assembly。`server.ts` から `await import()` で遅延読込し reconciler へ port（payload probe / reindex）を注入。receipt からの reindex もここで実装（#1428、server-only） |
 | `src/lib/skills/plan-sweeper.ts` | install/uninstall plan cache と snapshot store を 60秒ごと（＋token アクセス時）に sweep する `unref()` 済み timer。route から lazy 起動（#1429、server-only） |
 | `src/lib/skills/git-workflow.ts` | Skill 導入の branch/commit/push flow。prepare（plan 生成前に branch 確定）→ apply（receipt 由来 pathspec だけを stage/commit）。clean-index 前提・active session ガード・commit message / PR 本文生成・prepared target store（#1247、server-only） |
