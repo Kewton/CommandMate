@@ -1,0 +1,6 @@
+version: 1
+gates:
+  - id: a
+    command: echo hi
+options:
+  skipInPrimaryCheckout: maybe

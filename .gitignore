@@ -71,7 +71,11 @@ logs/
 # CommandMate 実行時データ（ユーザーがチャットに添付した画像の保存先）。
 # src/app/api/worktrees/[id]/send/route.ts が imagePath の許可パスとして参照する。
 # アプリが書き込み続けるランタイム生成物のためコミットしない（dev-reports/ と同扱い）。
-/.commandmate/
+# verify.yaml だけは検証ゲートの宣言（設定であって生成物ではない）なので追跡する。
+# ディレクトリごと除外すると git がその中を走査せず ! 行が効かないため、
+# 除外は /.commandmate/*（中身単位）で書く必要がある。
+/.commandmate/*
+!/.commandmate/verify.yaml
 
 # 直下の .md は既知のドキュメントのみ追跡する。
 # 検証用スナップショットは *-snapshot.md / snapshot-*.md / codex-tab-final.md のように

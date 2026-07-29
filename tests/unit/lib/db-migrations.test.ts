@@ -33,8 +33,8 @@ describe('db-migrations', () => {
   });
 
   describe('CURRENT_SCHEMA_VERSION', () => {
-    it('should be 48 after Migration #48 (skill_operations audit index, #1248)', () => {
-      expect(CURRENT_SCHEMA_VERSION).toBe(48);
+    it('should be 49 after Migration #49 (verification_runs, #1542)', () => {
+      expect(CURRENT_SCHEMA_VERSION).toBe(49);
     });
   });
 
