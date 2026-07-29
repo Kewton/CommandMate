@@ -132,8 +132,8 @@ fi
 
 if [ -n "$VERIFY_FILE" ]; then
   [ -n "$EXPECT" ] || die "--verify also needs --expect"
-  require_tool ffprobe
   [ -f "$VERIFY_FILE" ] || die "no such file: $VERIFY_FILE"
+  require_tool ffprobe
   ACTUAL="$(probe_duration "$VERIFY_FILE")"
   [ -n "$ACTUAL" ] || die "ffprobe could not read a duration from $VERIFY_FILE"
   if within_tolerance "$ACTUAL" "$EXPECT" "$TOLERANCE"; then
@@ -144,9 +144,6 @@ if [ -n "$VERIFY_FILE" ]; then
     "$ACTUAL" "$EXPECT" "$TOLERANCE" >&2
   exit 1
 fi
-
-require_tool ffmpeg
-require_tool ffprobe
 
 [ -n "$PLAN" ] || { usage >&2; die "--plan is required"; }
 [ -n "$SCENES_DIR" ] || die "--scenes is required"
@@ -163,6 +160,17 @@ TOTAL="$(awk -F'\t' '$1 == "#total" { print $2; exit }' "$PLAN")"
 
 OUT_DIR="$(cd "$(dirname "$OUT")" && pwd)" || die "output directory does not exist: $(dirname "$OUT")"
 OUT="$OUT_DIR/$(basename "$OUT")"
+
+# Dependencies are checked *after* the arguments, and only once there is real
+# work to do. Checking first made every argument mistake report itself as
+# "required command not found: ffmpeg" on a machine that has no ffmpeg — which
+# is every CI runner and no developer machine, so it passed locally and failed
+# only in CI (PR #1562). A wrong flag is a wrong flag whether or not ffmpeg is
+# installed, and the operator would rather learn about both problems in the
+# order they can fix them.
+require_tool ffmpeg
+require_tool ffprobe
+
 if [ -z "$WORK_DIR" ]; then
   WORK_DIR="$OUT_DIR/.compose-work-$LOCALE"
 fi

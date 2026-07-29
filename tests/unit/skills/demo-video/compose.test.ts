@@ -34,8 +34,36 @@ afterAll(() => {
   fs.rmSync(SCRATCH, { recursive: true, force: true });
 });
 
-function compose(args: string[]) {
-  return spawnSync('bash', [COMPOSE, ...args], { encoding: 'utf8', timeout: 300_000 });
+/** Absolute, so a test that strips PATH can still start the shell. */
+const BASH = spawnSync('command', ['-v', 'bash'], { shell: true, encoding: 'utf8' }).stdout.trim() || '/bin/bash';
+
+function compose(args: string[], pathOverride?: string) {
+  return spawnSync(BASH, [COMPOSE, ...args], {
+    encoding: 'utf8',
+    timeout: 300_000,
+    ...(pathOverride === undefined
+      ? {}
+      : { env: { ...process.env, PATH: pathOverride } }),
+  });
+}
+
+/**
+ * A PATH holding everything compose.sh legitimately needs *except* ffmpeg and
+ * ffprobe — the CI runner's situation, reproduced on a developer machine where
+ * `brew install ffmpeg` has already happened.
+ *
+ * Symlinking an allowlist rather than filtering the real PATH: ffmpeg lives in
+ * /opt/homebrew/bin here and could live in /usr/bin elsewhere, and dropping the
+ * directory that holds awk too would make every case below fail for the wrong
+ * reason.
+ */
+function pathWithoutFfmpeg(): string {
+  const dir = fs.mkdtempSync(path.join(SCRATCH, 'no-ffmpeg-bin-'));
+  for (const tool of ['awk', 'cat', 'tail', 'dirname', 'basename', 'rm', 'mkdir']) {
+    const found = spawnSync('command', ['-v', tool], { shell: true, encoding: 'utf8' }).stdout.trim();
+    if (found) fs.symlinkSync(found, path.join(dir, tool));
+  }
+  return dir;
 }
 
 function ffmpeg(args: string[]): void {
@@ -84,6 +112,110 @@ describe('argument handling', () => {
     const result = compose(['--compare', '30.2']);
     expect(result.status).toBe(1);
     expect(result.stderr).toMatch(/--compare also needs --expect/);
+  });
+});
+
+/**
+ * The regression from PR #1562: compose.sh checked for ffmpeg *before* it looked
+ * at its arguments, so every argument error came back as "required command not
+ * found" on a machine without ffmpeg. It passed on every developer machine and
+ * failed only in CI — the same shape as #1553's ANSI mismatch.
+ *
+ * These cases are the ones above, re-run with ffmpeg taken off PATH. Argument
+ * validation needs no external binary, so it must produce the same message
+ * either way.
+ */
+describe('argument handling with no ffmpeg on PATH', () => {
+  const NO_FFMPEG = pathWithoutFfmpeg();
+
+  it('really has removed ffmpeg, and really has kept awk', () => {
+    // Without this, a typo that emptied PATH would make every case below "pass"
+    // by failing for an entirely different reason.
+    const probe = (tool: string) =>
+      spawnSync(BASH, ['-c', `command -v ${tool}`], {
+        encoding: 'utf8',
+        env: { ...process.env, PATH: NO_FFMPEG },
+      }).status;
+    expect(probe('ffmpeg')).not.toBe(0);
+    expect(probe('ffprobe')).not.toBe(0);
+    expect(probe('awk')).toBe(0);
+  });
+
+  it('refuses to write anything but an mp4', () => {
+    const plan = path.join(SCRATCH, 'stem-noffmpeg.tsv');
+    fs.writeFileSync(plan, '#total\t3.000\n');
+    const result = compose(
+      ['--plan', plan, '--scenes', SCRATCH, '--overlays', SCRATCH, '--out', path.join(SCRATCH, 'x.mov')],
+      NO_FFMPEG,
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/must end in \.mp4/);
+  });
+
+  it('refuses a plan that storyboard.ts did not produce', () => {
+    const plan = path.join(SCRATCH, 'no-total-noffmpeg.tsv');
+    fs.writeFileSync(plan, 'title\tcard\tpc\t0.000\t3.000\tHello\n');
+    const result = compose(
+      ['--plan', plan, '--scenes', SCRATCH, '--overlays', SCRATCH, '--out', path.join(SCRATCH, 'x.mp4')],
+      NO_FFMPEG,
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/no '#total' row/);
+  });
+
+  it('reports a missing plan file as a missing plan file', () => {
+    const result = compose(
+      ['--plan', path.join(SCRATCH, 'absent.tsv'), '--scenes', SCRATCH, '--overlays', SCRATCH,
+        '--out', path.join(SCRATCH, 'x.mp4')],
+      NO_FFMPEG,
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/no such plan/);
+  });
+
+  it('rejects an unknown argument', () => {
+    const result = compose(['--frobnicate'], NO_FFMPEG);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('unknown argument');
+  });
+
+  it('still runs the --compare gate, which needs only awk', () => {
+    expect(compose(['--compare', '30.2', '--expect', '30'], NO_FFMPEG).status).toBe(0);
+    expect(compose(['--compare', '30.6', '--expect', '30'], NO_FFMPEG).status).toBe(1);
+  });
+
+  it('reports the missing file before the missing ffprobe under --verify', () => {
+    const result = compose(
+      ['--verify', path.join(SCRATCH, 'absent.mp4'), '--expect', '30'],
+      NO_FFMPEG,
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/no such file/);
+  });
+
+  // The other direction. Moving the dependency check must not delete it: once
+  // the arguments are right, the run cannot proceed without ffmpeg and has to
+  // say so rather than failing somewhere inside a filter graph.
+  it('still stops on the missing dependency when the arguments are valid', () => {
+    const plan = path.join(SCRATCH, 'valid-noffmpeg.tsv');
+    fs.writeFileSync(
+      plan,
+      ['#id\ttype\tviewport\tstart\tduration\ttelop', '#total\t3.000', 'intro\tcard\tpc\t0.000\t3.000\tはじめに', ''].join('\n'),
+    );
+    const result = compose(
+      ['--plan', plan, '--scenes', SCRATCH, '--overlays', SCRATCH, '--out', path.join(SCRATCH, 'valid.mp4')],
+      NO_FFMPEG,
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/required command not found: ffmpeg/);
+  });
+
+  it('still stops on the missing dependency when --verify names a real file', () => {
+    const real = path.join(SCRATCH, 'real-but-unreadable.mp4');
+    fs.writeFileSync(real, 'not really an mp4, but it exists');
+    const result = compose(['--verify', real, '--expect', '30'], NO_FFMPEG);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/required command not found: ffprobe/);
   });
 });
 

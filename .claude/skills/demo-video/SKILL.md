@@ -151,6 +151,7 @@ npx tsx .claude/skills/demo-video/scripts/storyboard.ts --locale ja --format pla
 - **タイムコードは絵コンテから機械算出**。手書きのタイムコードはどこにも無い。絵コンテで尺を変えれば以降のテロップ位置も自動で動く。
 - **尺検証ゲート**: `ffprobe` の実測が `duration ± 0.5s` を外れたら **exit 1**。落ちたときはシートごとの宣言尺と実測尺の差分表を stderr に出し、中間ファイルを残す。
 - 単体でゲートだけ回すこともできる: `compose.sh --verify out.mp4 --expect 30`、測定済みの秒数なら `--compare 30.2 --expect 30`。
+- **引数の検証は ffmpeg / ffprobe の存在確認より先**に行う。逆順にすると、ffmpeg の無い環境では引数の誤りがすべて `required command not found: ffmpeg` として返り、開発機では踏めず CI でだけ落ちる（PR #1562 で実際に発生）。依存チェック自体は合成の直前に残してある。
 
 ### 5. 出力を確認
 
