@@ -32,9 +32,48 @@
     "currentVersionUnknown": "稼働中のCommandMateのversionを特定できませんでした。",
     "unverifiedNotice": "「未検証」は「互換あり」ではありません。CommandMateが判定できなかった状態であり、動作しない可能性があります。",
     "agentsHeading": "Agent対応状況",
-    "agentsNotice": "Agent対応状況は提供元による申告であり、根拠として提示された内容をそのまま表示しています。CommandMateは検証していません。",
+    "agentsNotice": "Agent対応状況は出発点として提供元による申告であり、根拠として提示された内容をそのまま表示しています。CommandMateが実機で計測したAgentについては、その実測結果を併記し、申告が実測を超えないように制限します。",
     "agentsUnknown": "このversionにはAgent対応の宣言がありません。",
     "evidence": "根拠",
+    "declaredLabel": "提供元の申告: {support}",
+    "measuredHeading": "CommandMateの実測結果",
+    "testedVersion": "実測対象: {agent} {version}",
+    "testedDate": "計測日: {date}",
+    "evidenceSource": "証跡",
+    "discoveryRoots": "読み取り先: {roots}",
+    "evidenceStale": "この実測から {days} 日が経過しています。Agent側の挙動が変わっている可能性があります。",
+    "reloadHeading": "{agent} に読み込ませる方法",
+    "axis": {
+      "discovery": "発見",
+      "invocation": "スラッシュコマンド"
+    },
+    "axisOutcome": {
+      "verified": "確認済み",
+      "unsupported": "利用不可",
+      "unknown": "未計測"
+    },
+    "evidenceKind": {
+      "mechanical": "機械的に確認",
+      "selfReport": "Agentの自己申告",
+      "notMeasured": "実測なし"
+    },
+    "verification": {
+      "confirmed": "CommandMateの実測結果と提供元の申告が一致しています。",
+      "restricted": "CommandMateの実測結果が提供元の申告より低いため、低い方を表示しています。",
+      "staleDeclaration": "CommandMateの実測結果は提供元の申告より高い水準です。申告はそのまま表示します（引き上げられるのは提供元だけです）。",
+      "unverified": "CommandMateはこのAgentを実測していないため、提供元の申告のみを表示しています。"
+    },
+    "limitation": {
+      "noSlashCommand": "このversionのAgentはSkillを発見しますが、スラッシュコマンドとしては表示しません。名前を指定して呼び出してください。"
+    },
+    "skipReason": {
+      "notMeasured": "このAgentはCommandMateのinstall環境で実測していないため、非対応ではなく未検証（unknown）として扱います。"
+    },
+    "reload": {
+      "sessionRestart": "このrepositoryで {agent} のセッションを開始し直してください。Skillはセッション開始時に走査されます。",
+      "sessionRestartNoSlash": "このrepositoryで {agent} のセッションを開始し直したうえで、Skillを名前で指定して呼び出してください。このversionはSkillをスラッシュコマンドとして表示しません。",
+      "unknown": "CommandMateは {agent} のSkill再読み込み方法を実測していません。セッションの再起動が安全な前提です。"
+    },
     "reason": {
       "satisfied": "CommandMate {currentVersion} は要求範囲 {range} を満たしています。",
       "hostVersionOutOfRange": "このSkillはCommandMate {range} を要求しますが、稼働中のversionは {currentVersion} です。",
@@ -348,6 +387,77 @@
       "uninstallFailed": "先行する削除が失敗しており、何も削除されていません。planを作り直してください。",
       "requestFailed": "要求がCommandMateに届かなかったか、理由を伴わない応答が返りました。変更が起きたとは確認できていません。",
       "unexpected": "CommandMateが説明を持たない失敗を報告しました。worktreeを確認したうえで、変更なしと判断してください。"
+    }
+  },
+  "dashboard": {
+    "title": "導入済みSkill",
+    "description": "どのworktreeにどのSkillが適用されているか、導入時の内容と一致しているかを確認します。",
+    "scannedAt": "走査時刻 {timestamp}",
+    "worktreeCount": "worktree {count} 件",
+    "rescan": "再走査",
+    "reindex": "indexを再構築",
+    "reindexRunning": "再構築中…",
+    "reindexDone": "receiptから再構築しました: {indexed} 件登録、{removed} 件削除、{skipped} 件スキップ。",
+    "reindexFailed": "indexを再構築できませんでした。",
+    "errorNotice": "導入済みSkillの適用状態を読み取れませんでした。Skillが未導入であることとは異なります。",
+    "catalogUnavailable": "Catalogに接続できないため、更新の有無を判定できません。それ以外の情報はディスク上のreceiptに基づいています。",
+    "truncated": "走査が上限に達したため、この一覧は不完全です。",
+    "unreadableWorktrees": "登録済みですがディスク上に存在しないため走査していないworktree: {worktrees}",
+    "empty": "登録済みworktreeにSkillは導入されていません。",
+    "filterSkill": "Skill名",
+    "filterWorktree": "worktree",
+    "filterStatus": "状態",
+    "all": "すべて",
+    "rootPresent": "配置済み",
+    "rootMissing": "未検出",
+    "rootTruncated": "走査打ち切り",
+    "driftSummary": "変更 {modified} / 欠落 {missing} / 未管理 {unmanaged} / 不正 {irregular}",
+    "status": {
+      "installed": "導入済み",
+      "modified": "ローカル変更あり",
+      "missing": "payload欠落",
+      "unmanaged": "index未登録",
+      "updateAvailable": "更新あり"
+    },
+    "statusHint": {
+      "installed": "receiptが記録するすべてのinstall rootが一致しています。",
+      "modified": "install root配下のファイルがreceiptと異なります。更新・削除の前に差分を確認してください。",
+      "missing": "receiptが記録するinstall rootにpayloadがありません。そのrootからはSkillが検出されません。",
+      "unmanaged": "indexに対応する記録がないpayloadがディスク上にあります。indexを再構築して取り込むか、手動で削除してください。",
+      "updateAvailable": "導入内容は健全で、Catalogに互換性のある新しいversionがあります。"
+    }
+  },
+  "history": {
+    "heading": "操作履歴",
+    "loading": "操作ログを読み込み中…",
+    "empty": "Skillの操作記録はまだありません。",
+    "errorNotice": "操作ログを読み取れませんでした。操作が行われていないこととは異なります。",
+    "filterOperation": "操作",
+    "filterResult": "結果",
+    "loadMore": "過去の記録を読み込む",
+    "recordedAt": "{timestamp}",
+    "transitionLabel": "version",
+    "transition": "{from} → {to}",
+    "actorLabel": "実行元",
+    "origin": "取得元",
+    "sourceCommit": "コミット",
+    "artifactDigest": "artifactダイジェスト",
+    "retry": "Skillを開いて再試行する",
+    "none": "—",
+    "operation": {
+      "install": "導入",
+      "uninstall": "削除",
+      "update": "更新"
+    },
+    "result": {
+      "succeeded": "成功",
+      "failed": "失敗",
+      "reconciled": "整合済み"
+    },
+    "actor": {
+      "user": "Web画面",
+      "cli": "CLI",
+      "system": "CommandMate"
     }
   }
 }

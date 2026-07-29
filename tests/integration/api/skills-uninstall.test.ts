@@ -578,6 +578,40 @@ describe('POST …/uninstall — the token contract', () => {
     );
     expect(uninstalls).toHaveLength(1);
   });
+
+  // Issue #1552, the mirror of the install-side defect: the recorded removal
+  // stops describing the worktree the moment the Skill is installed again.
+  it('removes the payload again when the Skill came back after the recorded removal', async () => {
+    const key = 'uninstall-cycle-key-0001';
+    const first = await issueUninstallPlan();
+    expect(
+      (await post(applyUninstall, 'uninstall', { planToken: first.token, idempotencyKey: key }))
+        .status
+    ).toBe(200);
+    await installSkill('install-key-00000002');
+    expect(existsSync(path.join(installRootAbs(), SKILL_RECEIPT_FILENAME))).toBe(true);
+
+    const second = await issueUninstallPlan();
+    const response = await post(applyUninstall, 'uninstall', {
+      planToken: second.token,
+      idempotencyKey: key,
+    });
+
+    // A replay would answer "Removed …" while leaving every file in place.
+    expect(response.status).toBe(200);
+    expect((await response.json()).operation).toMatchObject({
+      replayed: false,
+      state: 'SUCCEEDED',
+    });
+    expect(existsSync(installRootAbs())).toBe(false);
+    expect(existsSync(claudeInstallRootAbs())).toBe(false);
+    expect(getSkillInstallation(db, WORKTREE_ID, SKILL_ID)).toBeNull();
+    expect(
+      listSkillOperationAudit(db, { worktreeId: WORKTREE_ID }).filter(
+        (row) => row.operation === 'uninstall'
+      )
+    ).toHaveLength(2);
+  });
 });
 
 // =============================================================================

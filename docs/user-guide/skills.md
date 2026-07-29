@@ -1,8 +1,14 @@
 # Agent Skills 配布（Phase 1 / MVP）
 
 CommandMate は公式 Catalog から Agent Skill を取得し、選んだ worktree の
-`.agents/skills/<skill-id>/` へ導入・削除する。本ドキュメントは **Phase 1（MVP）時点**の
+**install root 集合**（`.agents/skills/<skill-id>/` と `.claude/skills/<skill-id>/` の両方）へ
+byte-identical に導入・削除する。Agent ごとに読む directory が違うため、片方だけでは
+一部の Agent から見えない（#1460）。本ドキュメントは **Phase 1（MVP）時点**の
 support matrix・既知制約・rollback 手順を扱う。
+
+install root 集合の定義は `SKILL_INSTALL_ROOT_PREFIXES`（`src/lib/skills/constants.ts`）が
+単一の source of truth であり、receipt の `install_roots` と DB の
+`skill_installations.install_roots` にも記録される。
 
 設計判断そのものは [docs/design/agent-skills-distribution.md](../design/agent-skills-distribution.md)、
 module 単位の責務は [docs/module-reference.md](../module-reference.md) を参照。
@@ -17,8 +23,8 @@ module 単位の責務は [docs/module-reference.md](../module-reference.md) を
 | download | server | Catalog 宣言の SHA-256 / size と完全一致した artifact だけを受理する |
 | 検査 | server | archive を展開せずに全 entry を解析し、manifest と双方向照合する |
 | plan | server | live branch / HEAD と配置予定 file を固定した期限つき plan を発行する |
-| install | server | staging へ書いてから atomic rename で `.agents/skills/<id>/` へ commit する |
-| Agent 認識 | Agent CLI | 各 Agent が起動時に `.agents/skills/` を読む（**セッション再起動が必要**） |
+| install | server | staging へ書いてから atomic rename で各 install root へ commit する（primary = `.agents/skills/<id>/`） |
+| Agent 認識 | Agent CLI | 各 Agent が起動時に自分の discovery root を読む（**セッション再起動が必要**、§2-2） |
 
 **download / install / uninstall のいずれも、package 内の script や hook を実行しない。**
 `declared_permissions` は提供元の *申告* であって CommandMate による enforcement ではない。
@@ -33,34 +39,48 @@ module 単位の責務は [docs/module-reference.md](../module-reference.md) を
 |---|---|---|---|
 | Catalog 一覧・検索 | ✅ `/skills` | ✅ `list` | |
 | 詳細・risk・互換性表示 | ✅ `/skills/[id]` | ✅ `info` | |
-| Install Plan の preview | ⚠️ 導線未接続（§3-1） | ✅ `plan` / `install --dry-run` | |
-| install | ⚠️ 導線未接続（§3-1） | ✅ `install` | **CLI は `--version` 必須**（§3-6） |
-| uninstall | ⚠️ 導線未接続（§3-1） | ✅ `uninstall` | |
-| 導入済み一覧 | ❌ 未提供 | ❌ 未提供（`status` は単体照会） | #1248 待ち（§3-2） |
+| Install Plan の preview | ✅ `/skills/[id]`（§3-1） | ✅ `plan` / `install --dry-run` | |
+| install | ✅ `/skills/[id]`・worktree 詳細の Skills pane | ✅ `install` | **CLI は `--version` 必須**（§3-6） |
+| uninstall | ✅ 同上 | ✅ `uninstall` | |
+| 導入済み一覧 | ✅ worktree 詳細の Skills pane（#1440） | ⚠️ `status` は単体照会のみ（§3-2） | |
 | update / rollback | ❌ 未提供 | ❌ 未提供 | Phase 2（#1243 / #1244） |
 
 ### 2-2. Agent 対応状況
 
-| Agent | manifest の宣言 | CommandMate による実測検証 |
-|---|---|---|
-| claude | `native`（根拠は「`.agents/skills` からの標準 SKILL.md discovery」という一般論） | **未実施**（#1246） |
-| codex | `native`（同上） | **未実施**（#1246） |
-| 上記以外 | 宣言なし = `unknown` | — |
+install は `.agents/skills/<id>/` と `.claude/skills/<id>/` の両方へ同じ payload を配置する。
+Agent 側がどちらを読むかは Agent の実装依存であり、下表は **2026-07-26 に実機で計測した結果**
+（#1513 G4）である。CommandMate が保証するのは「両 root に配置したこと」までで、
+Agent CLI の discovery 実装そのものは保証対象外である。
 
-`native` は **提供元の申告**であり、CommandMate が version ごとに動作確認した結果ではない。
-UI（`SkillDetailView`）は Agent 対応 badge の直下に「提供元による申告であり CommandMate は
-検証していない」旨の注記と `evidence` 原文を常時表示しており、宣言を「検証済み」として
-提示してはいない。実測は #1246 の責務。
+| Agent | 実測 version | discovery root | slash command として露出 | 計測日 |
+|---|---|---|---|---|
+| Claude Code | 2.1.220 | `.claude/skills` を読む。`.agents/skills` は読まない | ✅ palette に出る | 2026-07-26 |
+| Codex CLI | 0.145.0 | `.agents/skills` を読む | ❌ 露出しない（CLI 側の制約） | 2026-07-26 |
+| Gemini / OpenCode / vibe-local | — | **未計測（unknown）** | 未計測 | — |
 
-自動テストが担保しているのは **`.agents/skills/<id>/SKILL.md` が discovery 経路
-（`loadAgentsSkills()`）から見えること**までであり、実 Agent CLI が実際にその Skill を
-提示・実行することは担保していない。
+未計測の Agent は `unknown` のままにしてある。CommandMate は未計測を `unsupported` とも
+`commandmate_runtime` とも表示しない（前者は行っていない計測の主張、後者は Phase 1 に
+存在しない機能の主張になるため）。この不変条件は
+`tests/unit/lib/skills/compatibility.test.ts` と `tests/e2e/skills-catalog.spec.ts` が固定している。
+
+manifest の `native` 宣言は **提供元の申告**であり、CommandMate が version ごとに動作確認した
+結果ではない。UI（`SkillDetailView`）は Agent 対応 badge の直下に、申告と `evidence` 原文に加えて
+**上表の実測結果**（発見 / 呼出の 2 軸・実測 version・計測日・証跡・reload 手順）を併記する（#1246）。
+申告が実測を上回る場合は実測側に制限して表示し、下回る場合は申告のまま「申告が追いついていない」
+と示す。matrix 本体は `src/lib/skills/compatibility-matrix.ts`、詳細は
+[skill-agent-compatibility.md](../reference/skill-agent-compatibility.md) を参照。
+
+CI が担保しているのは **両 root の `SKILL.md` が discovery 経路（`loadAgentsSkills()` /
+`loadSkills()`）から見えること**と、**上表の discovery root が実際にその経路へ結び付いていること**
+（`tests/unit/lib/skills/agent-discovery-regression.test.ts`）までであり、実 Agent CLI が実際に
+その Skill を提示・実行することは担保していない。実 CLI の再計測は
+`CM_SKILL_DISCOVERY_PROBE=1` を付けたときだけ走る opt-in プローブが version 差分のみを検出する。
 
 ### 2-3. 変更範囲の保証
 
 | 範囲 | 保証 |
 |---|---|
-| 対象 worktree 内 | `.agents/skills/<skill-id>/` 配下のみ。payload file と `.commandmate-receipt.json` 以外は作らない |
+| 対象 worktree 内 | install root 集合（`.agents/skills/<skill-id>/` と `.claude/skills/<skill-id>/`）配下のみ。payload file と `.commandmate-receipt.json` 以外は作らない |
 | 対象 worktree 内（tracked file） | 一切変更しない（`git diff HEAD` は空） |
 | worktree 外 | service-owned state root のみ（`<config>/skills/{locks,journal,package-staging}`、`<config>/data/skill-snapshots`） |
 | permission | state root と snapshot root は `0700`、snapshot file は `0400` |
@@ -76,14 +96,19 @@ UI（`SkillDetailView`）は Agent 対応 badge の直下に「提供元によ�
 > uninstall ができる。high-risk Skill は確認チェックボックス未チェックの間 request を送出しない。
 
 component test（fetch モック、実 route と同一の request/response 型）で happy path・blockers・
-high-risk 確認・typed error 表示分岐を固定している。**実 Catalog fetch と実 download を伴う
-ブラウザ実機 UAT は未実施**（サンドボックスで安定再現できないため。#1242 の人手検証 3-1 の対象）。
+high-risk 確認・typed error 表示分岐を固定し、さらに `tests/e2e/skills-install.spec.ts` が
+実ブラウザ（desktop / 390px mobile）で target→preview→承認の完走と承認ゲートを固定している。
+**実 Catalog fetch と実 download を伴うブラウザ実機 UAT は未実施**（e2e は Catalog と書き込み
+route を browser 側で stub するため）。初見利用者の UX 調査も未実施で、#1242 の人手検証 3-1 の対象。
 
-### 3-2. 導入済み Skill を一覧する読み取り API が無い
+### 3-2.（一部解消 #1440）CLI に worktree 単位の導入済み一覧が無い
 
-`listSkillInstallations()` は実装済みだが公開 route が無い。`commandmate skill status <id>` は
-worktree 単位の一覧ではなく **単体照会** であり、内部的に uninstall plan を1件生成するため
-**plan token を1つ消費する副作用**がある。一覧 API は #1248。
+> **#1440 で解消（Web UI / API）**: `GET /api/worktrees/[id]/skills` が公開され、
+> worktree 詳細の Skills pane（`WorktreeSkillsPane`）が導入済み Skill を一覧する。
+
+**CLI 側は未対応のまま。** `commandmate skill status <id>` は worktree 単位の一覧ではなく
+**単体照会** であり、内部的に uninstall plan を1件生成するため
+**plan token を1つ消費する副作用**がある。導入監査履歴と適用状態 dashboard は #1248。
 
 ### 3-3. 再インストール・update の手段が無い
 
@@ -101,10 +126,12 @@ CommandMate の認証は共有 token 単一で per-user identity を持たない
 「誰が preview したか」は記録できない。UI が発行した token を CLI が提示した場合は
 `SKILL_PLAN_BINDING_MISMATCH`（409）で拒否される。
 
-### 3-5. uninstall は空になった `.agents/skills/` を回収しない
+### 3-5. uninstall は空になった install root の親 directory を回収しない
 
 uninstall は receipt が導出した directory だけを `rmdir(2)` で回収する。したがって
-`.agents/skills/<id>/` は消えるが、**`.agents/skills/` と `.agents/` は空のまま残る**。
+`.agents/skills/<id>/` と `.claude/skills/<id>/` は消えるが、
+**`.agents/skills/`・`.agents/`・`.claude/skills/`・`.claude/` は空のまま残る**。
+`.claude/` は利用者の設定や別の Skill が同居する directory でもあり、
 利用者や他ツールが作った directory を巻き込まないための意図的な挙動である。
 
 ### 3-6. CLI の `install` は `--version` が必須
@@ -157,26 +184,34 @@ unmanaged / irregular があれば何も削除せず停止する**（zero-delete
 
 ### 4-2. 手動での取り消し
 
-CommandMate を経由せずに戻す場合は、対象 worktree で以下を消す。
+CommandMate を経由せずに戻す場合は、対象 worktree で **install root 集合の両方**を消す。
 **worktree 外の CommandMate 内部 state は消さなくてよい**（journal は append-only の記録、
 lock と snapshot は自然に回収される）。
 
 ```bash
-rm -rf <worktree>/.agents/skills/<skill-id>
+rm -rf <worktree>/.agents/skills/<skill-id> <worktree>/.claude/skills/<skill-id>
 ```
+
+片方だけ消すと、残った root から Agent が引き続き Skill を発見する一方で、
+再 install は残った側の destination が既存であるため `SKILL_INSTALL_DESTINATION_EXISTS`（409）で
+拒否される。正確な root 一覧は `<worktree>/.agents/skills/<skill-id>/.commandmate-receipt.json`
+の `install_roots` で確認できる。
 
 この場合 DB の `skill_installations` に行が残る。次に同じ Skill を install すると
 destination が無いため成功し、行は upsert で更新される。
 
 ### 4-3. `committed_reconciling` で終わった場合
 
-payload の rename は完了しているが index / audit の書き込みに失敗した状態。
-**worktree の中身は正しく配置済み**である。
+primary root（`.agents/skills/<id>/`）への rename は完了しているが、secondary root への配置か
+index / audit の書き込みに失敗した状態。**primary root の中身は正しく配置済み**である。
 
 1. `.agents/skills/<skill-id>/.commandmate-receipt.json` が存在することを確認する。
-2. 存在すれば install は物理的に完了している。`skill_installations` の行だけが欠けている。
-3. 取り消したい場合は §4-2 の手動削除を行う。
-4. 保持したい場合は現状のままで Agent からは利用できる（index の欠落は §3-2 の一覧機能にのみ影響）。
+2. 存在すれば install は commit 済みである。欠けているのは `skill_installations` の行か、
+   secondary root（`.claude/skills/<skill-id>/`）のいずれかである。
+3. secondary root が欠けている間は、その root を読む Agent（2026-07-26 実測では Claude Code）
+   から Skill が見えない。起動時 reconciliation（§3-8）が secondary root の配置を完了させる。
+4. 取り消したい場合は §4-2 の手動削除を行う（両 root を消す）。
+5. 保持したい場合は現状のままでよい（index の欠落は §3-2 の一覧機能にのみ影響）。
 
 CommandMate は commit 後の失敗を rollback と偽らない。「変更なし」と報告されるのは
 rename 前に失敗した場合だけである。
@@ -187,7 +222,8 @@ rename 前に失敗した場合だけである。
 
 | path | 意味 |
 |---|---|
-| `<worktree>/.agents/skills/.commandmate-staging/` | install 途中の staging |
+| `<worktree>/.agents/skills/.commandmate-staging/` | install 途中の staging（primary root） |
+| `<worktree>/.claude/skills/.commandmate-staging/` | install 途中の staging（secondary root） |
 | `<config>/skills/locks/*.lock` | 操作中の排他 lock |
 | `<config>/skills/package-staging/` | package 検査用 staging |
 
@@ -202,7 +238,7 @@ rename 前に失敗した場合だけである。
 v46 適用より前に発生した宙吊り（worktree 削除で新 UUID になり、disk に receipt が残るのに
 DB 上は「未導入」で再 install も `SKILL_INSTALL_DESTINATION_EXISTS` で拒否される状態）は、
 v46 の migration が既存の dangling 行を一掃するため起動時に自動解消される。なお手動で戻す
-場合は対象 worktree の `.agents/skills/<skill-id>/` を削除してから再 install すればよい。
+場合は §4-2 のとおり両 install root を削除してから再 install すればよい。
 
 ---
 
@@ -215,10 +251,17 @@ Phase 1 の MVP gate として、以下が CI で毎回実行される（すべ�
 | `tests/integration/skills-mvp-install-flow.test.ts` | 3 Skill の Catalog→install→receipt→discovery→uninstall、変更範囲の allowlist、残留物 0、UI/CLI の同一 route 経由での一致 |
 | `tests/integration/skills-mvp-security-regression.test.ts` | 悪性 archive corpus 59 件、unmanaged / local change / drift / plan expiry / 単回性 / 同時 install / high-risk 未承諾 |
 | `tests/integration/skills-mvp-source-integrity.test.ts` | allowlist、redirect 毎再検証、content-type、size 上限、checksum、offline / stale Catalog |
+| `tests/e2e/skills-catalog.spec.ts` | 実ブラウザでの Catalog 一覧・検索・詳細、stale 表示、未計測 Agent の非表示、mobile（390px）での可読性 |
+| `tests/e2e/skills-install.spec.ts` | 実ブラウザでの target→preview→承認、install root 両方の提示、high-risk 承諾ゲート、blocker 表示、uninstall、mobile での完走 |
+
+integration suite は route handler を直接駆動し、e2e suite は Catalog / 書き込み route を
+browser 側で stub して**描画された製品**を検証する。前者は「server が fail closed か」、
+後者は「利用者が何を見て承認するか」を担当し、範囲が重ならないよう分けてある。
 
 実 Catalog・実 release を叩く検証は opt-in で、`CM_SKILLS_E2E_REAL_CATALOG=1` を設定した時だけ
 実行される。未設定時は skip 理由つきで skip される。
 
-人手でしか確認できない項目（初見利用者の UX 調査、実機ブラウザ UAT、実 Agent CLI での
-discovery 実測）は自動化されていない。実施状況は
+自動化されていないのは、初見利用者の UX 調査（被験者を要する）と、実 Agent CLI の対話 TUI を
+操作する呼出実測（#1246 で opt-in の version 差分プローブまでを自動化し、palette 露出の
+再計測は隔離環境での手動作業として残した）である。実施状況は
 [docs/qa/skills-mvp-uat-report.md](../qa/skills-mvp-uat-report.md) を参照。

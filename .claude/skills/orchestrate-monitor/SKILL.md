@@ -25,7 +25,8 @@ allowed-tools: Bash(.claude/skills/orchestrate-monitor/scripts/*), Bash(git work
     ├── verify-completion.sh # STARTED ガード付き完了判定（回帰#1）
     ├── verify-scope.sh      # 偽陽性しないスコープ検証（回帰#2）
     ├── quality-gate.sh      # exit code を実測する品質ゲート
-    └── monitor.sh           # オペレータ用監視ループ（temp ファイル状態）
+    ├── monitor.sh           # オペレータ用監視ループ（temp ファイル状態）
+    └── hooks-git.sh         # 完了フックの参考実装（worktree-id → 実 checkout の commit / 変更数）
 ```
 
 テスト: `tests/unit/skills/orchestrate-monitor/`。fixture は**実 `capture --json` を採取した生 payload
@@ -54,9 +55,87 @@ commandmate capture <id> --json > poll.json
 NOT_RUNNING → is_retrying(→GENERATING) → PROMPT → GENERATING → RATE_LIMIT → IDLE
 ```
 
-`monitor.sh` の `count_commits` / `count_uncommitted` は運用の checkout に合わせて配線するフック。
-既定は 0 を返す（ループ単体で動く）ので、実運用では worker の作業ツリーに向ける。
 `--resend-message` / `--max-resends` はリトライ枯渇死からの再送設定（既定 `continue` / 2 回）。
+`--max-polls N` は N 回ポーリングしたら（ワーカーが未完了でも）exit 0 で抜ける停止条件。既定 0 =
+全ワーカーが COMPLETE になるまで回り続ける（運用時の挙動は従来どおり）。判定ロジックには一切
+関与せず、ループを外部から kill せずに決定論的に終わらせるためのもの（#1527 の単体テストと、
+`--max-polls 1` の 1 回だけ様子を見るプローブで使う）。
+
+### `--verbose`: ポーリングごとの状態ログ（#1533）
+
+既定の stdout は**介入・capture 失敗・終局判定（COMPLETE / NOT_STARTED）・起動/停止**だけで、
+「何回ポーリングして各状態が何回出たか」は残らない。`--verbose` を付けると 1 ポーリング 1 行の
+固定フォーマットが追加される（**opt-in。付けない限り既定出力は 1 バイトも変わらない**）:
+
+```
+monitor[<wid>]: poll <N> -> <STATE> started=<0|1> streak=<n> commits=<n> uncommitted=<n> verdict=<VERDICT>
+```
+
+`<STATE>` は `classify-state.sh` の出力、`<VERDICT>` は `verify-completion.sh` の出力、間の
+key=value は**その判定に実際に渡した入力**。だから「なぜ COMPLETE にならないのか」を
+verdict だけでなく根拠つきで読める。集計はそのまま awk / sort に流せる:
+
+```bash
+# 状態分類の分布
+grep -oE 'poll [0-9]+ -> [A-Z_]+' monitor.log | awk '{print $4}' | sort | uniq -c
+# 総ポーリング数（worker 別）
+grep -cE '^monitor\[w1\]: poll ' monitor.log
+```
+
+### `--hooks` / `MONITOR_HOOKS`: 完了フックの配線（#1533）
+
+`monitor.sh` の `count_commits` / `count_uncommitted` は**既定でスタブ（常に 0）**。ループ単体で
+動かすための既定値だが、`verify-completion.sh` は `commits=0 かつ uncommitted=0` を
+**「タスクが送られていない」兆候**として扱う（STARTED ガード、下記 7）ため、**素の実行では
+COMPLETE 分岐に到達しない**。実運用では必ずフックを供給する:
+
+```bash
+# 同梱の参考実装をそのまま使う
+MONITOR_HOOKS_BASE=origin/develop \
+  .claude/skills/orchestrate-monitor/scripts/monitor.sh \
+  --hooks .claude/skills/orchestrate-monitor/scripts/hooks-git.sh <worktree-id> ...
+
+# env でも指定できる（両方あればフラグが勝つ）
+MONITOR_HOOKS=.../hooks-git.sh .../monitor.sh <worktree-id> ...
+```
+
+指定されたファイルは**スタブ定義の後に source** される。定義した関数だけが上書きされ、片方だけ
+定義したファイルでももう片方はスタブのまま動く。指定したのにファイルが無い場合は
+**exit 2 で即座に失敗**する（黙ってスタブに落ちると「全 worker が NOT_STARTED」という
+一見もっともらしい嘘の観測になるため）。
+
+`hooks-git.sh` は worktree-id を `git worktree list --porcelain` から実 checkout に解決し
+（id = `<repo>-<branch>` の slug ＝ `generateWorktreeId()` と同じ正規化。`<repo>` はメイン
+worktree のディレクトリ名）、`git -C <path> log --oneline <base>..HEAD` と
+`git -C <path> status --porcelain` で数える。`MONITOR_HOOKS_BASE`（既定 `origin/develop`）/
+`MONITOR_HOOKS_REPO`（既定 `.`）/ `MONITOR_WORKTREE_ROOT` で調整する。base ref が解決できない
+場合は起動時に stderr へ警告する（黙って 0 を返すと、全部コミット済みの worker が
+uncommitted=0 と合わさって最後に NOT_STARTED と誤報されるため）。
+
+### #1513 G2 の証拠採取レシピ
+
+G2（「監視の誤報 0 を実運用で示す」）が要求する 4 点 —— **総ポーリング数・状態分類の分布・介入全件・
+完了判定の根拠** —— は、この 1 コマンドで 1 本のログに揃う:
+
+```bash
+MONITOR_HOOKS_BASE=origin/develop \
+.claude/skills/orchestrate-monitor/scripts/monitor.sh \
+  --verbose \
+  --hooks .claude/skills/orchestrate-monitor/scripts/hooks-git.sh \
+  --interval 20 --idle-threshold 8 \
+  <worktree-id> ... 2>&1 | tee monitor.log
+```
+
+| G2 の要求 | ログからの取り出し方 |
+|---|---|
+| 総ポーリング数 | `grep -cE '^monitor\[<wid>\]: poll ' monitor.log` |
+| 状態分類の分布 | `grep -oE 'poll [0-9]+ -> [A-Z_]+' monitor.log \| awk '{print $4}' \| sort \| uniq -c` |
+| 介入全件 | `grep -E "sending 'a'\|resending\|resend budget spent" monitor.log`（承認 Enter はサイレント。総数は COMPLETE 行の `approvals=` に出る） |
+| 完了判定の根拠 | poll 行の `started= / streak= / commits= / uncommitted= / verdict=`。COMPLETE した poll 行がその worker の判定根拠そのもの |
+| capture 失敗 | `grep -c 'capture failed' monitor.log`（poll 行は出ないので、総ポーリング数と別に数える） |
+
+**`--hooks` を付け忘れると誤報 0 は測れない**：commits/uncommitted が常に 0 になり、完走した
+worker まで NOT_STARTED として記録される。G2 のログは必ずフック付きで採ること。
 
 ---
 
@@ -171,8 +250,12 @@ NOT_RUNNING → is_retrying(→GENERATING) → PROMPT → GENERATING → RATE_LI
 | 5 | CLI 自身の 5xx バックオフを停止と誤認し、介入が queue される | #1522 | `ml_is_retrying`（idle フッタ veto つき）を最優先 | `live-retrying-529.json` / `monitor-lib.test.ts` |
 | 6 | リトライ枯渇死が放置される／半端な作業で COMPLETE 誤報 | #1522 | `ml_has_terminal_api_error` ＋ `monitor.sh` の再送 | `live-api-error-exhausted.json` / `monitor-resend.test.ts` |
 | 7 | `rate.?limit` が散文・ソースに一致し**健全なワーカーへ `a` を注入** | #1522 | バナー限定アンカー ＋ `RATE_LIMIT` を最後に評価 ＋ `ml_pane_text` | `live-idle-rate-limit-source.json` / `live-generating-task-text-scrollback.json` |
+| 8 | `count_commits`/`count_uncommitted` がスタブ固定で、**COMPLETE 分岐が実運用で一度も発火しない**（完走した worker まで NOT_STARTED と記録される） | #1533 | `--hooks` / `MONITOR_HOOKS` で供給、参考実装 `hooks-git.sh` を同梱 | `monitor-observability.test.ts`（フック無しで COMPLETE 到達不能 ⇄ フック有りで到達、を両方向で固定） |
 
 いずれも naive 実装で red → ガード実装で green にした（#3〜#7 は #1512 の初版実装に対して red）。
+#8 は両方向テスト（対照＋変異注入）で固定している：`--verbose` を既定 ON にする / フックをスタブより
+先に source する / poll 行の書式を変える / 参考フックの commit 数を 0 固定にする、のいずれの変異でも
+該当テストが実際に赤くなることを確認済み。
 
 ## fixture の作り方（実機採取）
 

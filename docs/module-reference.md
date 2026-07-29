@@ -411,32 +411,42 @@
 | `src/lib/skills/package-validator.ts` | manifest と package の双方向完全照合、staging への安全な materialize（#1230、server-only） |
 | `src/lib/skills/safe-yaml.ts` | `SKILL_YAML_SAFE_PROFILE` を満たす YAML 部分集合 parser（#1230、新規依存なし） |
 | `src/lib/skills/catalog-client.ts` | 条件付き GET / TTL / last-known-good / single-flight / rate limit back-off（#1231） |
-| `src/lib/skills/compatibility.ts` | compatible / incompatible / unknown の 3 値判定と version 解決（#1231、pure） |
+| `src/lib/skills/compatibility.ts` | compatible / incompatible / unknown の 3 値判定と version 解決（#1231、pure）。#1246: `reconcileAgentSupport()` が manifest 申告を実測 matrix で**下方向にのみ**制限（`capSupportByMeasurement()`）し、CONFIRMED / RESTRICTED / STALE_DECLARATION / UNVERIFIED を返す。`now` は明示引数 |
+| `src/lib/skills/compatibility-matrix.ts` | Agent 別 discovery 実測 matrix（#1246、pure data）。**発見と呼出を別軸**で記録（Codex 0.145.0 は発見のみ成立）。support 値は discovery 軸だけで決まり、呼出制約は known limitation。全 `CLI_TOOL_IDS` を網羅し未計測は `unknown` + skip 理由。`SKILL_EVIDENCE_MAX_AGE_DAYS`=180 |
 | `src/lib/api/skills-api.ts` | Catalog document → wire 形式の単一 mapping。artifact URL を含めない（#1231） |
 | `src/config/skill-catalog-config.ts` | Catalog endpoint の完全一致 allowlist と TTL / size cap / rate limit（#1231） |
 | `src/app/api/skills/route.ts` / `[id]/route.ts` | read-only Catalog API。UI と CLI が同じ結果を参照する（#1231） |
 | `src/components/skills/` | Catalog 一覧・詳細・badge・freshness banner・表示語彙。changelog は `stripRemoteMedia()` 適用（#1232） |
 | `src/lib/skills/operation-lock.ts` | owner nonce / lease / process generation つき cross-process lock。lease 失効後も owner 生存中は reclaim しない（same-process 含む。#1427 で same-pid ショートカット除去）。hash separator は `\x00` エスケープ（#1432）（#1234、server-only） |
-| `src/lib/skills/operation-journal.ts` | typed state transition と idempotency key binding。terminal entry は retention（7日）で自動 prune（#1234 / #1428、server-only） |
+| `src/lib/skills/operation-journal.ts` | typed state transition と idempotency key binding。terminal entry は retention（7日）で自動 prune。`beginSkillOperation` の `isReplayable` が false の entry は supersede（PREPARING は対象外）（#1234 / #1428 / #1552、server-only） |
+| `src/lib/skills/operation-replay.ts` | replay 前提条件。commit 済み entry の主張を primary root の receipt 実在/digest で照合し、uninstall 後の再 install（と再 uninstall）を replay で握り潰さない（#1552、server-only） |
 | `src/lib/skills/operation-store.ts` | service-owned state root（0700/0600）、atomic write、staging 分離（#1234、server-only） |
-| `src/lib/skills/operation-audit.ts` | append-only `skill_operations` への記録（#1234、server-only） |
+| `src/lib/skills/operation-audit.ts` | append-only `skill_operations` への記録と読み取り。`querySkillOperationAudit` は worktree 省略で横断、operation/result/期間で絞り込み、`(recordedAt,id)` 複合 cursor で改ページ（同一 ms の tie でも重複・欠落なし）（#1234 / #1248、server-only） |
 | `src/lib/skills/operation-reconciler.ts` | on-demand reconciliation ロジックと orphan cleanup。起動時実行は `startup-reconcile` 経由（#1234 / #1428、server-only） |
 | `src/lib/db/migrations/v44-skill-operations.ts` | `skill_operations` テーブル。trigger で追記専用を DB 側から強制（#1234） |
 | `src/lib/skills/install-plan.ts` | 決定的 receipt bytes 確定、plan token の server-side state（TTL/1回性/LRU）、drift 検出（#1233、server-only） |
 | `src/lib/skills/preview-diff.ts` | install root 走査・live branch/HEAD 解決・git ignore 判定・virtual unified diff・tree hash（#1233、server-only） |
 | `src/lib/skills/install-apply.ts` | `O_EXCL\|O_NOFOLLOW` write・same-filesystem staging・destination 不存在の自前証明・atomic rename（#1235、server-only） |
 | `src/lib/skills/installed-state.ts` | `skill_installations` の idempotent upsert と `listSkillInstallations`（worktree 単位の読み取り）。読み取りは #1440 の GET route から配線済み（#1235 / #1440） |
+| `src/lib/skills/status-scanner.ts` | 全登録 worktree 横断の適用状態走査。`installed`/`modified`/`missing`/`unmanaged`/`update_available` を算出。**走査 root は receipt の `install_roots` を正とし全 root を見る**（片側 root だけでは secondary の drift を見逃す）。走査は同期 I/O のため worker pool ではなく上限＋worktree 毎の event loop yield＋TTL cache で保護し、打ち切りは `truncated` で報告（#1248、server-only） |
+| `src/lib/skills/reindex.ts` | receipt から `skill_installations` を再構築。DB 削除後も復旧でき、復元 root 集合は receipt の `install_roots` と一致する。receipt 不在/破損/他 Skill 宛は index せず skip 理由付きで報告。payload と append-only log には一切書かない（#1248、server-only） |
 | `src/lib/skills/uninstall-plan.ts` | receipt 照合による remove/modified/missing/unknown/irregular 分類。drift 観測に receipt digest を含む（#1236、server-only） |
 | `src/lib/skills/uninstall-apply.ts` | unlink 直前の lstat/mode/digest 再照合、`rmdir(2)` のみ使用、receipt を最後に削除（#1236、server-only） |
 | `src/lib/db/migrations/v45-skill-installations.ts` | `skill_installations` テーブル（#1235） |
 | `src/lib/db/migrations/v46-skill-installations-cascade.ts` | `skill_installations` に `worktree_id` FK + `ON DELETE CASCADE` を付与（table rebuild）、既存 dangling 行も一掃（#1430） |
+| `src/lib/db/migrations/v48-skill-operations-audit-index.ts` | `skill_operations` に `from_version`/`to_version` を追加し、横断 feed 用 `(recorded_at DESC, id DESC)` と `(result, recorded_at DESC)` を index 化。`ALTER TABLE` のため既存行は NULL 遷移で読める（#1248） |
 | `src/lib/skills/startup-reconcile.ts` | 起動時 reconciliation の assembly。`server.ts` から `await import()` で遅延読込し reconciler へ port（payload probe / reindex）を注入。receipt からの reindex もここで実装（#1428、server-only） |
 | `src/lib/skills/plan-sweeper.ts` | install/uninstall plan cache と snapshot store を 60秒ごと（＋token アクセス時）に sweep する `unref()` 済み timer。route から lazy 起動（#1429、server-only） |
+| `src/lib/skills/git-workflow.ts` | Skill 導入の branch/commit/push flow。prepare（plan 生成前に branch 確定）→ apply（receipt 由来 pathspec だけを stage/commit）。clean-index 前提・active session ガード・commit message / PR 本文生成・prepared target store（#1247、server-only） |
+| `src/lib/skills/pull-request-service.ts` | `gh` を argv で呼ぶ唯一の module。draft PR 作成と open PR 検索のみ。失敗は throw せず reason を返す（#1247、server-only） |
+| `src/app/api/worktrees/[id]/skills/[skillId]/git-workflow/route.ts` | prepare/apply の 2 phase を 1 endpoint で提供。branch/path/remote URL の client 指定を明示拒否し、apply は token だけを受ける（#1247） |
 | `src/app/api/worktrees/[id]/skills/[skillId]/plan\|install\|uninstall-plan\|uninstall/route.ts` | plan/apply の 4 route。手順は journal → lock → 再読込&token 消費 → filesystem → index&audit。各 handler 冒頭で `ensureSkillPlanSweeper()` を lazy 起動（#1233/#1235/#1236/#1429） |
+| `src/app/api/skills/installations\|operations\|reindex/route.ts` | 適用状態 dashboard の 3 route。installations は横断走査＋worktree/skill/status 絞り込み（Catalog 不達は 500 にせず `catalogAvailable:false` で更新判定のみ無効化）、operations は監査 feed（不正な filter 値は 400 で拒否）、reindex は POST で index 再構築＋走査 cache 無効化（#1248） |
+| `src/components/skills/SkillInstallationsDashboard.tsx` / `SkillOperationHistory.tsx` | `/skills/installed` の適用状態一覧（install root を root ごとに個別描画、要対応順に整列）と操作履歴（version 遷移・取得元・error code・再試行導線）。走査失敗を空一覧に退化させない（#1248） |
 | `src/app/api/worktrees/[id]/skills/route.ts` | worktree 導入済み Skill 一覧 GET。`listSkillInstallations` を呼び receipt/index 由来 DTO を返す。installRoot は repository-relative のみ、絶対 path・artifact URL 不含、no-store（#1440） |
 | `src/components/skills/WorktreeSkillsPane.tsx` | worktree-scoped Skills 管理ペイン（Catalog 一覧 ＋ `fetchWorktreeInstalledSkills` の導入済み一覧 ＋ worktreeId 固定 prop 版 `SkillInstallPanel`）。PC（アクティビティバー #1441）とモバイル（Tools サブタブ #1442）の両方から再利用される client component（#1441） |
 | `src/components/skills/SkillInstallPanel.tsx` | Catalog からの install/uninstall フロー。`worktreeId?` 固定 prop 指定時は `SkillTargetSelector` を出さず渡された worktree で動作、未指定時は従来の picker 挙動（#1431 / #1441）。#1477: install 成功時に `dispatchSkillInstalled(worktreeId)` で palette へ refetch を通知 |
-| `src/cli/commands/skill.ts` / `skill-guards.ts` / `skill-format.ts` | `commandmate skill` の wiring / 確認規約・typed error mapping / 表示。非TTY は `--yes` 必須、high-risk は `--ack-risk` 必須。`install` は `--version` 必須（#1237） |
+| `src/cli/commands/skill.ts` / `skill-guards.ts` / `skill-format.ts` | `commandmate skill` の wiring / 確認規約・typed error mapping / 表示。非TTY は `--yes` 必須、high-risk は `--ack-risk` 必須。`install` は `--version` 必須（#1237）。`reindex` は `POST /api/skills/reindex` の薄い client（#1248） |
 | `tests/integration/skills/mvp-harness.ts` | MVP 統合 suite の共有 harness。実 git リポジトリ生成、fixture Catalog/artifact 組立、tree 差分・残留物の観測。root は `$HOME` 配下（`system-directories` が `/tmp`・`/var` を拒否するため）（#1242） |
 | `tests/integration/skills-mvp-{install-flow,security-regression,source-integrity}.test.ts` | MVP 出荷判定 gate。層を実物のまま繋いだ E2E / 悪性 corpus 59 件の fail closed と不変条件 / wire 上の allowlist・redirect・checksum・size・offline（#1242） |
 

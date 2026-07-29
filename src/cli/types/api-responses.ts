@@ -331,6 +331,33 @@ export interface SkillInstallResponse {
   } | null;
 }
 
+/** Mirrors: api/worktrees/[id]/skills/[skillId]/git-workflow prepare response (Issue #1247). */
+export interface SkillGitWorkflowPrepareResponse {
+  workflowToken: string;
+  target: {
+    mode: string;
+    branch: string;
+    baseBranch: string | null;
+    headCommit: string;
+    branchCreated: boolean;
+    remote: string;
+  };
+}
+
+/** Mirrors: api/worktrees/[id]/skills/[skillId]/git-workflow apply response (Issue #1247). */
+export interface SkillGitWorkflowApplyResponse {
+  result: {
+    branch: string;
+    baseBranch: string | null;
+    changedPaths: string[];
+    committed: boolean;
+    commitSha: string;
+    pushed: boolean;
+    pullRequestUrl: string | null;
+    pullRequestExisted: boolean;
+  };
+}
+
 /** Mirrors: src/lib/skills/uninstall-plan.ts SkillUninstallPlanDto (subset). */
 export interface SkillUninstallPlan {
   token: string;
@@ -374,4 +401,20 @@ export interface SkillUninstallResponse {
     retained?: Array<{ path: string; reason: string }>;
     fullyRemoved?: boolean;
   } | null;
+}
+
+/** Mirrors: src/app/api/skills/reindex/route.ts POST response [Issue #1248]. */
+export interface SkillReindexResult {
+  scannedWorktrees: number;
+  indexed: number;
+  removed: number;
+  skipped: Array<{
+    worktreeId: string;
+    skillId: string;
+    /** Repository-relative root the directory was found at. */
+    root: string;
+    reason: string;
+  }>;
+  /** Registered worktrees whose directory is gone; their rows were left untouched. */
+  unreadableWorktreeIds: string[];
 }

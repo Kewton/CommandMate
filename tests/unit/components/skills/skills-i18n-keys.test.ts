@@ -19,7 +19,12 @@ import {
   DIFF_CHANGE_LABEL_KEY,
   DIFF_REASON_LABEL_KEY,
   HEAD_STATE_LABEL_KEY,
+  INSTALLATION_STATUS_HINT_KEY,
+  INSTALLATION_STATUS_LABEL_KEY,
+  OPERATION_ACTOR_LABEL_KEY,
   OPERATION_ERROR_LABEL_KEY,
+  OPERATION_KIND_LABEL_KEY,
+  OPERATION_RESULT_LABEL_KEY,
   PERMISSION_LABEL_KEY,
   PREVIEW_WARNING_LABEL_KEY,
   RECOMMENDATION_LABEL_KEY,
@@ -33,7 +38,18 @@ import {
 import { SkillDiffReason, SkillPreviewWarning } from '@/lib/skills/preview-diff';
 import { SkillUninstallReason } from '@/lib/skills/uninstall-plan';
 import { AGENT_SUPPORT_LABEL_KEYS, PERMISSION_DECLARATION_NOTICE_KEY } from '@/lib/skills/constants';
-import { SKILL_COMPATIBILITY_MESSAGE_KEYS } from '@/lib/skills/compatibility';
+import {
+  SKILL_AGENT_VERIFICATION_MESSAGE_KEYS,
+  SKILL_COMPATIBILITY_MESSAGE_KEYS,
+} from '@/lib/skills/compatibility';
+import {
+  AGENT_AXIS_LABEL_KEYS,
+  AGENT_AXIS_OUTCOME_LABEL_KEYS,
+  AGENT_EVIDENCE_KIND_LABEL_KEYS,
+  AGENT_LIMITATION_MESSAGE_KEYS,
+  AGENT_RELOAD_MESSAGE_KEYS,
+  getSkillAgentMatrix,
+} from '@/lib/skills/compatibility-matrix';
 import { SKILL_PLAN_HIGH_RISK_MESSAGE_KEY } from '@/lib/skills/install-plan';
 import {
   SKILL_INSTALL_NEXT_ACTION_KEYS,
@@ -99,10 +115,39 @@ function callSiteKeys(): string[] {
  * site. `src/lib/skills` publishes them namespace-qualified so UI and CLI share
  * one vocabulary; the screens strip the prefix before resolving them.
  */
+/**
+ * Every message key reachable from the measured discovery matrix (#1246).
+ *
+ * Swept from the matrix itself rather than listed, so adding an Agent row with
+ * a new reload or limitation key fails here instead of rendering a key path.
+ */
+function matrixKeys(): string[] {
+  const keys = new Set<string>();
+  for (const entry of getSkillAgentMatrix()) {
+    keys.add(entry.reloadKey);
+    if (entry.skipReasonKey) keys.add(entry.skipReasonKey);
+    for (const axis of [entry.discovery, entry.invocation]) {
+      keys.add(axis.labelKey);
+      keys.add(axis.evidenceKindKey);
+      if (axis.limitationKey) keys.add(axis.limitationKey);
+    }
+  }
+  return [...keys];
+}
+
 function contractKeys(): string[] {
   return [
     ...Object.values(SKILL_COMPATIBILITY_MESSAGE_KEYS),
     ...Object.values(AGENT_SUPPORT_LABEL_KEYS),
+    // Agent discovery evidence (#1246): the two axes, their outcomes, how
+    // strong the evidence is, the reload step and the known limitations.
+    ...Object.values(SKILL_AGENT_VERIFICATION_MESSAGE_KEYS),
+    ...Object.values(AGENT_AXIS_LABEL_KEYS),
+    ...Object.values(AGENT_AXIS_OUTCOME_LABEL_KEYS),
+    ...Object.values(AGENT_EVIDENCE_KIND_LABEL_KEYS),
+    ...Object.values(AGENT_RELOAD_MESSAGE_KEYS),
+    ...Object.values(AGENT_LIMITATION_MESSAGE_KEYS),
+    ...matrixKeys(),
     PERMISSION_DECLARATION_NOTICE_KEY,
     // Emitted by the Install Plan API (#1233) rather than written at a call
     // site: the plan tells the client which confirmation to show.
@@ -132,6 +177,14 @@ function contractKeys(): string[] {
     .concat(Object.values(UNINSTALL_DISPOSITION_LABEL_KEY))
     .concat(Object.values(UNINSTALL_REASON_LABEL_KEY))
     .concat(Object.values(OPERATION_ERROR_LABEL_KEY))
+    // Applied state and audit vocabulary (#1248): the dashboard names a status,
+    // an operation kind, an outcome and an actor by wire value and looks the
+    // label up, so none of these reach the extractor as a literal call site.
+    .concat(Object.values(INSTALLATION_STATUS_LABEL_KEY))
+    .concat(Object.values(INSTALLATION_STATUS_HINT_KEY))
+    .concat(Object.values(OPERATION_KIND_LABEL_KEY))
+    .concat(Object.values(OPERATION_RESULT_LABEL_KEY))
+    .concat(Object.values(OPERATION_ACTOR_LABEL_KEY))
     .concat([operationErrorLabelKey('SKILL_SOMETHING_UNMAPPED')])
     .concat(
       [
@@ -158,6 +211,15 @@ const PLACEHOLDERS: Record<string, string[]> = {
   'compatibility.reason.hostVersionOutOfRange': ['{range}', '{currentVersion}'],
   'compatibility.reason.hostVersionUnknown': ['{range}'],
   'compatibility.reason.rangeUnsupported': ['{range}'],
+  'compatibility.declaredLabel': ['{support}'],
+  'compatibility.testedVersion': ['{agent}', '{version}'],
+  'compatibility.testedDate': ['{date}'],
+  'compatibility.discoveryRoots': ['{roots}'],
+  'compatibility.evidenceStale': ['{days}'],
+  'compatibility.reloadHeading': ['{agent}'],
+  'compatibility.reload.sessionRestart': ['{agent}'],
+  'compatibility.reload.sessionRestartNoSlash': ['{agent}'],
+  'compatibility.reload.unknown': ['{agent}'],
   'risk.declaredLabel': ['{level}'],
   'detail.packageBytes': ['{bytes}'],
   'detail.install.blockedIncompatible': ['{reason}'],
@@ -182,6 +244,13 @@ const PLACEHOLDERS: Record<string, string[]> = {
   'uninstall.stats': ['{removable}', '{modified}', '{missing}', '{unknown}', '{irregular}'],
   'operation.filesWritten': ['{count}'],
   'operation.filesRemoved': ['{count}'],
+  'dashboard.scannedAt': ['{timestamp}'],
+  'dashboard.worktreeCount': ['{count}'],
+  'dashboard.reindexDone': ['{indexed}', '{removed}', '{skipped}'],
+  'dashboard.unreadableWorktrees': ['{worktrees}'],
+  'dashboard.driftSummary': ['{modified}', '{missing}', '{unmanaged}', '{irregular}'],
+  'history.recordedAt': ['{timestamp}'],
+  'history.transition': ['{from}', '{to}'],
 };
 
 /**
@@ -189,7 +258,18 @@ const PLACEHOLDERS: Record<string, string[]> = {
  * format or identifier, not a concept, and localizing them would misdescribe
  * what the adjacent value literally is.
  */
-const UNTRANSLATED_BY_DESIGN = ['detail.skillId', 'detail.sourceRef', 'detail.packageDigest'];
+const UNTRANSLATED_BY_DESIGN = [
+  'detail.skillId',
+  'detail.sourceRef',
+  'detail.packageDigest',
+  // Pure formats and product/interface names (#1248): these render a value or
+  // name an identifier, so translating them would misdescribe what is shown.
+  'history.recordedAt',
+  'history.transition',
+  'history.none',
+  'history.actor.cli',
+  'history.actor.system',
+];
 
 describe('skills i18n keys (Issue #1232)', () => {
   it.each(['en', 'ja'])('%s/skills.json has non-empty values for every leaf', (locale) => {

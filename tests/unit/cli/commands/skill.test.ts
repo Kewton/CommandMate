@@ -217,6 +217,7 @@ describe('createSkillCommand', () => {
       'install',
       'list',
       'plan',
+      'reindex',
       'status',
       'uninstall',
     ]);
@@ -644,5 +645,186 @@ describe('skill status', () => {
       installed: false,
     });
     expect(mockExit).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// reindex (Issue #1248)
+// =============================================================================
+
+const reindexResult = {
+  scannedWorktrees: 2,
+  indexed: 3,
+  removed: 1,
+  skipped: [
+    {
+      worktreeId: 'wt-1',
+      skillId: 'bare-skill',
+      root: '.agents/skills/bare-skill',
+      reason: 'SKILL_REINDEX_RECEIPT_MISSING',
+    },
+  ],
+  unreadableWorktreeIds: ['wt-gone'],
+};
+
+describe('skill reindex', () => {
+  it('asks the server to rebuild and summarises what it did', async () => {
+    mockFetchResponse(reindexResult);
+
+    await run(['reindex']);
+
+    const out = mockConsoleLog.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(out).toContain('Scanned 2 worktree(s).');
+    expect(out).toContain('Indexed:  3');
+    expect(out).toContain('Removed:  1');
+  });
+
+  it('POSTs the rebuild without supplying a path of its own', async () => {
+    mockFetchResponse(reindexResult);
+
+    await run(['reindex']);
+
+    const call = (global.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls[0];
+    expect(call[0]).toContain('/api/skills/reindex');
+    expect((call[1] as { method?: string }).method).toBe('POST');
+    expect(requestBody(0)).toEqual({});
+  });
+
+  it('reports skipped directories and unscanned worktrees on stderr', async () => {
+    mockFetchResponse(reindexResult);
+
+    await run(['reindex']);
+
+    const err = mockConsoleError.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(err).toContain('SKILL_REINDEX_RECEIPT_MISSING');
+    expect(err).toContain('wt-gone');
+  });
+
+  it('prints the API body verbatim with --json, keeping stdout pure JSON', async () => {
+    mockFetchResponse(reindexResult);
+
+    await run(['reindex', '--json']);
+
+    const out = mockConsoleLog.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(JSON.parse(out)).toEqual(reindexResult);
+  });
+});
+
+// =============================================================================
+// Git workflow flags (Issue #1247)
+// =============================================================================
+
+const gitPrepareResponse = {
+  workflowToken: 'c'.repeat(48),
+  target: {
+    mode: 'dedicated_branch',
+    branch: 'skills/install-cmate-repository-analysis-v1.2.0',
+    baseBranch: 'develop',
+    headCommit: 'a'.repeat(40),
+    branchCreated: true,
+    remote: 'origin',
+  },
+};
+
+const gitApplyResponse = {
+  result: {
+    branch: 'skills/install-cmate-repository-analysis-v1.2.0',
+    baseBranch: 'develop',
+    changedPaths: ['.agents/skills/cmate-repository-analysis/SKILL.md'],
+    committed: true,
+    commitSha: 'b'.repeat(40),
+    pushed: true,
+    pullRequestUrl: 'https://github.com/Kewton/CommandMate/pull/1',
+    pullRequestExisted: false,
+  },
+};
+
+describe('skill install --git (Issue #1247)', () => {
+  it('prepares the branch before re-planning, then applies after the install', async () => {
+    mockFetchSequence([
+      { data: installPlan() },
+      { data: gitPrepareResponse },
+      { data: installPlan() },
+      { data: installResult },
+      { data: gitApplyResponse },
+    ]);
+
+    await run([
+      'install', 'cmate-repository-analysis',
+      '--worktree', 'anvil-develop', '--version', '1.2.0', '--yes',
+      '--git', 'dedicated', '--pr',
+    ]);
+
+    const urls = (global.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.map(
+      (call) => String(call[0])
+    );
+    // The prepare lands BEFORE the plan the install actually spends: a plan built
+    // ahead of the checkout would be stale by construction.
+    expect(urls[0]).toContain('/plan');
+    expect(urls[1]).toContain('/git-workflow');
+    expect(urls[2]).toContain('/plan');
+    expect(urls[3]).toContain('/install');
+    expect(urls[4]).toContain('/git-workflow');
+
+    expect(requestBody(1)).toEqual({
+      phase: 'prepare',
+      mode: 'dedicated_branch',
+      version: '1.2.0',
+      push: true,
+    });
+    expect(requestBody(4)).toEqual({
+      phase: 'apply',
+      workflowToken: 'c'.repeat(48),
+      push: true,
+      createPullRequest: true,
+    });
+    expect(mockConsoleLog.mock.calls.flat().join('\n')).toContain(
+      'https://github.com/Kewton/CommandMate/pull/1'
+    );
+  });
+
+  it('touches git only when --git is given', async () => {
+    mockFetchSequence([{ data: installPlan() }, { data: installResult }]);
+    await run([
+      'install', 'cmate-repository-analysis',
+      '--worktree', 'anvil-develop', '--version', '1.2.0', '--yes',
+    ]);
+
+    const urls = (global.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.map(
+      (call) => String(call[0])
+    );
+    expect(urls.some((url) => url.includes('/git-workflow'))).toBe(false);
+  });
+
+  it('refuses --push without --git rather than guessing a mode', async () => {
+    mockFetchSequence([{ data: installPlan() }, { data: installResult }]);
+    await run([
+      'install', 'cmate-repository-analysis',
+      '--worktree', 'anvil-develop', '--version', '1.2.0', '--yes', '--push',
+    ]);
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(mockExit).toHaveBeenCalled();
+  });
+
+  it('refuses an unknown --git mode', async () => {
+    mockFetchSequence([{ data: installPlan() }]);
+    await run([
+      'install', 'cmate-repository-analysis',
+      '--worktree', 'anvil-develop', '--version', '1.2.0', '--yes', '--git', 'main',
+    ]);
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(mockExit).toHaveBeenCalled();
+  });
+
+  it('never prepares a branch on --dry-run', async () => {
+    mockFetchSequence([{ data: installPlan() }]);
+    await run([
+      'install', 'cmate-repository-analysis',
+      '--worktree', 'anvil-develop', '--version', '1.2.0', '--dry-run', '--git', 'dedicated',
+    ]);
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 });

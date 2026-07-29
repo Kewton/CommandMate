@@ -53,6 +53,7 @@ import {
   transitionSkillOperation,
   type SkillOperationJournalEntry,
 } from '@/lib/skills/operation-journal';
+import { mayReplaySkillUninstall } from '@/lib/skills/operation-replay';
 import {
   buildSkillOperationAuditInput,
   recordSkillOperationAudit,
@@ -311,11 +312,19 @@ export async function POST(
 
     const actor = resolveActor(request);
 
+    // The mirror of the install route's precondition: a recorded removal may
+    // only be replayed while it is still true of the worktree, so a Skill that
+    // has since been installed again is removed again (Issue #1552).
+    const isReplayable = (entry: SkillOperationJournalEntry): boolean =>
+      mayReplaySkillUninstall(entry, worktree.path, idResult.value);
+
     // A retried request must be answered from its recorded outcome, not by
     // spending a token that is already gone.
     if (parsed.body.idempotencyKey !== null) {
       const replay = readSkillOperationJournal(parsed.body.idempotencyKey);
-      if (replay !== null) return answerReplay(replay, worktree.id, idResult.value);
+      if (replay !== null && isReplayable(replay)) {
+        return answerReplay(replay, worktree.id, idResult.value);
+      }
     }
 
     let worktreeRealPath: string;
@@ -360,6 +369,7 @@ export async function POST(
         planHash: plan.bindingHash,
       },
       lockKey,
+      isReplayable,
       source: {
         origin: 'github-release',
         repository: plan.receipt.source.repository,

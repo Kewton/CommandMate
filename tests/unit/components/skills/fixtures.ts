@@ -16,7 +16,11 @@ import type {
   SkillUninstallResponse,
   SkillVersionDto,
 } from '@/components/skills/types';
+import { describeAgentCompatibility } from '@/lib/skills/compatibility';
 import type { Worktree } from '@/types/models';
+
+/** Fixed instant, so evidence staleness never depends on when the suite runs. */
+export const FIXTURE_NOW = new Date('2026-07-29T00:00:00Z');
 
 export function makeCatalogMeta(overrides: Partial<SkillCatalogMetaDto> = {}): SkillCatalogMetaDto {
   return {
@@ -59,14 +63,16 @@ export function makeVersion(overrides: Partial<SkillVersionDto> = {}): SkillVers
         requiredRange: '>=0.11.0',
         currentVersion: '0.11.4',
       },
-      agents: [
-        {
-          agent: 'claude',
-          support: 'native',
-          labelKey: 'skills.compatibility.native',
-          evidence: 'Verified against the Agent Skills specification.',
-        },
-      ],
+      agents: describeAgentCompatibility(
+        [
+          {
+            agent: 'claude',
+            support: 'native',
+            evidence: 'Verified against the Agent Skills specification.',
+          },
+        ],
+        FIXTURE_NOW
+      ),
     },
     ...overrides,
   };
@@ -105,14 +111,10 @@ export function makeIncompatibleSkill(): SkillDto {
         requiredRange: '>=9.0.0',
         currentVersion: '0.11.4',
       },
-      agents: [
-        {
-          agent: 'codex',
-          support: 'unknown',
-          labelKey: 'skills.compatibility.unknown',
-          evidence: 'Not verified.',
-        },
-      ],
+      agents: describeAgentCompatibility(
+        [{ agent: 'codex', support: 'unknown', evidence: 'Not verified.' }],
+        FIXTURE_NOW
+      ),
     },
   });
   return makeSkill({

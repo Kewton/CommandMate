@@ -19,7 +19,10 @@ import type {
   SkillDetailResponse,
   SkillInstallApplyResponse,
   SkillInstallPlanResponse,
+  SkillInstallationsResponse,
   SkillListResponse,
+  SkillOperationsResponse,
+  SkillReindexResponse,
   SkillUninstallApplyResponse,
   SkillUninstallBlocker,
   SkillUninstallPlanResponse,
@@ -176,6 +179,89 @@ export function fetchWorktreeInstalledSkills(
         `/api/worktrees/${encodeURIComponent(worktreeId)}/skills`,
         signal
       ),
+    SKILL_REQUEST_FAILED,
+    signal
+  );
+}
+
+/** Filters the applied-state dashboard narrows its scan with (#1248). */
+export interface SkillInstallationsQuery {
+  worktreeId?: string;
+  skillId?: string;
+  status?: string;
+  /** Walk the disk again instead of reading the server's short-lived scan cache. */
+  refresh?: boolean;
+}
+
+function toQueryString(params: Record<string, string | undefined>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== '') search.set(key, value);
+  }
+  const encoded = search.toString();
+  return encoded ? `?${encoded}` : '';
+}
+
+/**
+ * Applied Skill state across every worktree.
+ *
+ * The scan is the server's to run: the browser names filters, never a worktree
+ * path, and receives repository-relative roots only.
+ */
+export function fetchSkillInstallations(
+  query: SkillInstallationsQuery = {},
+  signal?: AbortSignal
+): Promise<SkillFetchResult<SkillInstallationsResponse>> {
+  const search = toQueryString({
+    worktreeId: query.worktreeId,
+    skillId: query.skillId,
+    status: query.status,
+    refresh: query.refresh ? 'true' : undefined,
+  });
+  return request(
+    () => getJson<SkillInstallationsResponse>(`/api/skills/installations${search}`, signal),
+    SKILL_REQUEST_FAILED,
+    signal
+  );
+}
+
+/** Filters and paging position for the operation log (#1248). */
+export interface SkillOperationsQuery {
+  worktreeId?: string;
+  skillId?: string;
+  operation?: string;
+  result?: string;
+  /** Token from a previous page's `nextCursor`. */
+  cursor?: string;
+  limit?: number;
+}
+
+/** One page of the append-only operation log, newest first. */
+export function fetchSkillOperations(
+  query: SkillOperationsQuery = {},
+  signal?: AbortSignal
+): Promise<SkillFetchResult<SkillOperationsResponse>> {
+  const search = toQueryString({
+    worktreeId: query.worktreeId,
+    skillId: query.skillId,
+    operation: query.operation,
+    result: query.result,
+    cursor: query.cursor,
+    limit: query.limit === undefined ? undefined : String(query.limit),
+  });
+  return request(
+    () => getJson<SkillOperationsResponse>(`/api/skills/operations${search}`, signal),
+    SKILL_REQUEST_FAILED,
+    signal
+  );
+}
+
+/** Rebuild the installed-Skill index from the receipts on disk. */
+export function rebuildSkillIndex(
+  signal?: AbortSignal
+): Promise<SkillFetchResult<SkillReindexResponse>> {
+  return request(
+    () => postJson<SkillReindexResponse>('/api/skills/reindex', {}, signal),
     SKILL_REQUEST_FAILED,
     signal
   );

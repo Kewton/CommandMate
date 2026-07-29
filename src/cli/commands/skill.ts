@@ -5,9 +5,10 @@
  *   commandmate skill list [--json]
  *   commandmate skill info <skill-id> [--version <v>] [--json]
  *   commandmate skill plan <skill-id> --worktree <id> [--version <v>] [--json]
- *   commandmate skill install <skill-id> --worktree <id> --version <exact> [--dry-run] [--yes] [--ack-risk <id>@<version>]
+ *   commandmate skill install <skill-id> --worktree <id> --version <exact> [--dry-run] [--yes] [--ack-risk <id>@<version>] [--git current|dedicated] [--push] [--pr]
  *   commandmate skill uninstall <skill-id> --worktree <id> [--dry-run] [--yes] [--json]
  *   commandmate skill status <skill-id> --worktree <id> [--json]
+ *   commandmate skill reindex [--json]
  *
  * The CLI never downloads, extracts, writes or deletes anything: it asks the
  * server for a plan, shows it, and presents the token the server issued back to
@@ -22,6 +23,7 @@
 
 import { Command } from 'commander';
 import type {
+  SkillCommonOptions,
   SkillInfoOptions,
   SkillInstallOptions,
   SkillListOptions,
@@ -32,10 +34,13 @@ import type {
 import { ExitCode, SkillExitCode } from '../types';
 import type {
   SkillDetailResponse,
+  SkillGitWorkflowApplyResponse,
+  SkillGitWorkflowPrepareResponse,
   SkillInstallPlan,
   SkillInstallPlanResponse,
   SkillInstallResponse,
   SkillListResponse,
+  SkillReindexResult,
   SkillUninstallPlan,
   SkillUninstallPlanResponse,
   SkillUninstallResponse,
@@ -209,6 +214,147 @@ async function showStatus(skillId: string, options: SkillStatusOptions): Promise
   );
 }
 
+/**
+ * Rebuild the installed-Skill index from the receipts on disk (Issue #1248).
+ *
+ * Like every other subcommand this is a thin client: the server decides which
+ * worktrees to visit and reads the receipts itself. The CLI supplies no path and
+ * reconstructs nothing, so there is no way for it to index something the API
+ * would have refused.
+ */
+async function reindexSkills(options: SkillCommonOptions): Promise<void> {
+  const client = new ApiClient({ token: options.token });
+  const response = await client.post<unknown>('/api/skills/reindex');
+  const body = assertResponseShape<SkillReindexResult>(
+    response,
+    ['scannedWorktrees', 'indexed', 'removed', 'skipped'],
+    'POST /api/skills/reindex'
+  );
+
+  if (options.json) {
+    console.log(JSON.stringify(body, null, 2));
+    return;
+  }
+
+  console.log(
+    [
+      `Scanned ${body.scannedWorktrees} worktree(s).`,
+      `Indexed:  ${body.indexed}`,
+      `Removed:  ${body.removed}`,
+      `Skipped:  ${body.skipped.length}`,
+    ].join('\n')
+  );
+  for (const skip of body.skipped) {
+    console.error(`  skipped ${skip.worktreeId}/${skip.root}: ${skip.reason}`);
+  }
+  for (const worktreeId of body.unreadableWorktreeIds) {
+    console.error(`  not scanned (worktree directory missing): ${worktreeId}`);
+  }
+}
+
+// =============================================================================
+// Git workflow (Issue #1247)
+// =============================================================================
+
+/** How `--git` maps onto the API's mode. Absent means no Git side effects at all. */
+const GIT_MODES: Record<string, 'current_branch' | 'dedicated_branch'> = {
+  current: 'current_branch',
+  dedicated: 'dedicated_branch',
+};
+
+interface GitWorkflowChoice {
+  mode: 'current_branch' | 'dedicated_branch';
+  push: boolean;
+  createPullRequest: boolean;
+}
+
+/**
+ * Read the Git side effects off the flags, or null when none were asked for.
+ *
+ * `--git` has no default: committing to the user's branch is a consequence they
+ * must name, which is the same rule the API enforces (UX-09). `--pr` implies
+ * `--push` because a pull request for an unpushed branch cannot exist.
+ */
+function resolveGitChoice(options: SkillInstallOptions): GitWorkflowChoice | null | 'invalid' {
+  if (!options.git) {
+    if (options.push || options.pr) {
+      refuse(
+        '--push / --pr require --git <current|dedicated>.',
+        ExitCode.CONFIG_ERROR
+      );
+      return 'invalid';
+    }
+    return null;
+  }
+  const mode = GIT_MODES[options.git];
+  if (!mode) {
+    refuse('--git must be `current` or `dedicated`.', ExitCode.CONFIG_ERROR);
+    return 'invalid';
+  }
+  const createPullRequest = options.pr === true;
+  return { mode, push: createPullRequest || options.push === true, createPullRequest };
+}
+
+function gitWorkflowPath(target: { skillId: string; worktreeId: string }): string {
+  return `/api/worktrees/${encodeURIComponent(target.worktreeId)}/skills/${encodeURIComponent(target.skillId)}/git-workflow`;
+}
+
+/** Fix the branch before the plan exists, so the plan is never stale by construction. */
+async function prepareGitWorkflow(
+  client: ApiClient,
+  target: { skillId: string; worktreeId: string },
+  version: string,
+  choice: GitWorkflowChoice
+): Promise<SkillGitWorkflowPrepareResponse> {
+  const response = await client.post<SkillGitWorkflowPrepareResponse>(gitWorkflowPath(target), {
+    phase: 'prepare',
+    mode: choice.mode,
+    version,
+    push: choice.push,
+  });
+  return assertResponseShape<SkillGitWorkflowPrepareResponse>(
+    response,
+    ['workflowToken', 'target'],
+    'POST .../skills/git-workflow (prepare)'
+  );
+}
+
+async function applyGitWorkflow(
+  client: ApiClient,
+  target: { skillId: string; worktreeId: string },
+  workflowToken: string,
+  choice: GitWorkflowChoice
+): Promise<SkillGitWorkflowApplyResponse> {
+  const response = await client.post<SkillGitWorkflowApplyResponse>(gitWorkflowPath(target), {
+    phase: 'apply',
+    workflowToken,
+    push: choice.push,
+    createPullRequest: choice.createPullRequest,
+  });
+  return assertResponseShape<SkillGitWorkflowApplyResponse>(
+    response,
+    ['result'],
+    'POST .../skills/git-workflow (apply)'
+  );
+}
+
+function describeGitOutcome(result: SkillGitWorkflowApplyResponse['result']): string {
+  const lines = [
+    result.committed
+      ? `Committed ${result.changedPaths.length} file(s) to ${result.branch} (${result.commitSha.slice(0, 12)})`
+      : `Already committed on ${result.branch} (${result.commitSha.slice(0, 12)})`,
+  ];
+  if (result.pushed) lines.push(`Pushed ${result.branch}`);
+  if (result.pullRequestUrl) {
+    lines.push(
+      result.pullRequestExisted
+        ? `Pull request already open: ${result.pullRequestUrl}`
+        : `Draft pull request: ${result.pullRequestUrl}`
+    );
+  }
+  return lines.join('\n');
+}
+
 // =============================================================================
 // Write commands
 // =============================================================================
@@ -224,8 +370,11 @@ async function installSkill(skillId: string, options: SkillInstallOptions): Prom
     return;
   }
 
+  const gitChoice = resolveGitChoice(options);
+  if (gitChoice === 'invalid') return;
+
   const client = new ApiClient({ token: options.token });
-  const plan = await requestInstallPlan(client, target, options);
+  let plan = await requestInstallPlan(client, target, options);
 
   // --dry-run stops here by construction: the plan is the whole output and no
   // token is ever presented back to the server.
@@ -271,6 +420,22 @@ async function installSkill(skillId: string, options: SkillInstallOptions): Prom
     return;
   }
 
+  // The branch is fixed only once the user has agreed to the install, and the
+  // plan shown above is then discarded: a plan is bound to the branch and HEAD
+  // it was built against, so re-planning is what keeps the checkout from making
+  // SKILL_PLAN_STALE the guaranteed outcome (Issue #1247).
+  let workflowToken: string | null = null;
+  if (gitChoice !== null) {
+    const prepared = await prepareGitWorkflow(client, target, plan.skill.version, gitChoice);
+    workflowToken = prepared.workflowToken;
+    console.error(
+      prepared.target.branchCreated
+        ? `Created branch ${prepared.target.branch} from ${prepared.target.baseBranch ?? 'HEAD'}`
+        : `Committing to the current branch ${prepared.target.branch}`
+    );
+    plan = await requestInstallPlan(client, target, { ...options, version: plan.skill.version });
+  }
+
   const response = await client.post<SkillInstallResponse>(
     `/api/worktrees/${encodeURIComponent(target.worktreeId)}/skills/${encodeURIComponent(target.skillId)}/install`,
     {
@@ -300,6 +465,11 @@ async function installSkill(skillId: string, options: SkillInstallOptions): Prom
       `Warning: the files landed but the operation did not finish cleanly (${body.operation.nextActionKey}). Reconciliation will converge it.`
     );
     process.exit(SkillExitCode.COMMITTED_RECONCILING);
+  }
+
+  if (workflowToken !== null && gitChoice !== null) {
+    const git = await applyGitWorkflow(client, target, workflowToken, gitChoice);
+    console.log(describeGitOutcome(git.result));
   }
 }
 
@@ -436,6 +606,12 @@ export function createSkillCommand(): Command {
       '--ack-risk <skill-id@version>',
       'Explicitly acknowledge a high-risk Skill. Required in addition to --yes.'
     )
+    .option(
+      '--git <mode>',
+      'Commit the install: `current` (this branch) or `dedicated` (a new Skill branch)'
+    )
+    .option('--push', 'Push the commit to origin (requires --git)')
+    .option('--pr', 'Open a draft pull request for the pushed branch (implies --push)')
     .option('--json', 'JSON output (the API response body, verbatim)')
     .option('--prerelease', 'Allow a prerelease --version')
     .option('--token <token>', TOKEN_WARNING)
@@ -474,6 +650,19 @@ export function createSkillCommand(): Command {
     .action(async (skillId: string, options: SkillStatusOptions) => {
       try {
         await showStatus(skillId, options);
+      } catch (error) {
+        handleSkillCommandError(error);
+      }
+    });
+
+  skill
+    .command('reindex')
+    .description('Rebuild the installed-Skill index from the receipts on disk')
+    .option('--json', 'JSON output')
+    .option('--token <token>', TOKEN_WARNING)
+    .action(async (options: SkillCommonOptions) => {
+      try {
+        await reindexSkills(options);
       } catch (error) {
         handleSkillCommandError(error);
       }
