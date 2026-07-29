@@ -198,6 +198,9 @@ export {
   finishGateResult,
   getVerificationRun,
   listVerificationRuns,
+  getRunningVerificationRun,
+  listRunningVerificationRuns,
+  VERIFICATION_TRIGGERS,
 } from './verification-db';
 export type {
   VerificationRun,
