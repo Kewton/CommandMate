@@ -31,6 +31,7 @@ import { v45_migrations } from './v45-skill-installations';
 import { v46_migrations } from './v46-skill-installations-cascade';
 import { v47_migrations } from './v47-skill-installations-roots';
 import { v48_migrations } from './v48-skill-operations-audit-index';
+import { v49_migrations } from './v49-verification-runs';
 
 /**
  * Complete ordered list of all migrations.
@@ -67,4 +68,5 @@ export const migrations: Migration[] = [
   ...v46_migrations,
   ...v47_migrations,
   ...v48_migrations,
+  ...v49_migrations,
 ];

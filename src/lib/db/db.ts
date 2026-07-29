@@ -189,3 +189,26 @@ export type {
   UpsertPushSubscriptionInput,
   PushNotificationKind,
 } from './push-subscriptions-db';
+
+// verification-db (verification gate runs, Issue #1542)
+export {
+  createVerificationRun,
+  finishVerificationRun,
+  createGateResult,
+  finishGateResult,
+  getVerificationRun,
+  listVerificationRuns,
+} from './verification-db';
+export type {
+  VerificationRun,
+  VerificationRunWithGates,
+  VerificationGateResult,
+  VerificationTrigger,
+  VerificationRunStatus,
+  VerificationRunTerminalStatus,
+  VerificationGateStatus,
+  VerificationGateTerminalStatus,
+  CreateVerificationRunInput,
+  CreateGateResultInput,
+  FinishGateResultPatch,
+} from './verification-db';
