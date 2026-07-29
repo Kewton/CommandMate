@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
 - **検証ゲート Skill `cmate-verify` と `.commandmate/verify.yaml` v1 仕様を追加** (#1540): 検証ゲートの設定形式を製品実装（Phase 1）より先に実地検証するための先行 Skill。`docs/design/verification-config.md` を正準仕様とし、`.claude/skills/cmate-verify/` と `.agents/skills/cmate-verify/` へ byte-identical に配置（Claude は前者、Codex / Antigravity は後者しか読まない）。ランナーは bash 3.2 互換で、ゲートを定義順に逐次実行し**失敗しても残りを実行して全結果を報告**、判定は必ず実 exit code で行う（出力の grep は `$?` を隠す）。macOS に `timeout(1)` が無い前提で、job control による**プロセスグループ単位**の timeout kill を実装（直接の子だけを kill すると孫が生き残る／signal 送出前に pgid が pid と一致することを確認して無関係なプロセスグループを巻き込まない）。組み込みゲート `work-evidence` が「作業の痕跡ゼロ」を `not_started` として弾き、`skipInPrimaryCheckout` がメイン checkout でのコマンド実行を止める（全 skip は `passed` ではなく `skipped`）。fixture ベースの自己完結テスト 123 アサーション（vitest 非依存）＋ vitest ラッパで CI からも実行。
+
+- **検証ゲートの実行結果を永続化する `verification_runs` / `verification_gate_results` テーブルと DB アクセサを追加** (#1542): exit code を持つ実行記録は `execution_logs`（スケジュール実行）と `assistant_executions`（非対話アシスタント）にしか無く、インタラクティブなエージェント作業は `chat_messages` しか残らないため「終わった」と「要求を満たした」を区別できなかった。migration **v49** で 1 検証試行 = `verification_runs` 1行 / その中の 1 コマンド = `verification_gate_results` 1行として記録する。gate results は run に `ON DELETE CASCADE`（run 抜きの gate 行は記録ではなくノイズであるため）。status / trigger の語彙は writer 側の検証だけでなく DB の CHECK 制約で固定した — この表の存在意義は語彙が区別する内容そのものであり、typo が新しい status 値として着地すると誰も query しないバケツが黙って生まれる。run の `not_started`（作業証跡ゼロでそもそも検証対象が無い）は `failed`（判定した上で不合格）と別値、`error` はゲート実行以前の内部エラー、gate の `skipped` は意図的スキップで理由を `log_tail` に残す（スキップが PASS と読まれないため）。`task_id` は Phase 2（#1545）の `tasks` 到着まで FK を張らない自由カラムとした（存在しない表への REFERENCES は `foreign_keys` ON 下で全 INSERT を失敗させる）。アクセサ `src/lib/db/verification-db.ts` は create* が `running` で開き finish* が閉じる二段構成とし（途中クラッシュを recoverable な `running` 行として残すため）、finish* は対象行が無ければ throw する（黙って no-op にすると、記録していない verdict を記録したと呼び出し側が信じる — まさにこの表が防ぐべき失敗）。`listVerificationRuns` は `started_at DESC, id DESC` で、同一 ms の tie でも順序が全順序になるよう id を tiebreak に使う。id tiebreak 削除・`?? null` を `||` 化（exit code 0 が NULL に化ける）・finish* の存在チェック削除・CHECK 制約削除・CASCADE 削除・index 削除・feed の ORDER BY 差し替え 3種・gate の run スコープ喪失、計 11 種の変異注入でテストが実際に赤くなることを確認済み。
 
 ## [0.16.0] - 2026-07-29
 
