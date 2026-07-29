@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 const SCRIPTS = path.join(REPO_ROOT, '.claude/skills/demo-video/scripts');
@@ -99,6 +99,17 @@ afterEach(() => {
     }
     fs.rmSync(STATE_FILE, { force: true });
   }
+});
+
+// The scratch dir has to sit under $HOME (env-up refuses anything else, because
+// validateDbPath rejects /tmp and /var), which makes leaving it behind a leak
+// into a real user's home: one directory per `npm run test:unit`, never
+// collected. afterAll still runs when a test — or beforeAll — fails, and the
+// removal is force/recursive so it cannot throw and mask that failure.
+// `no-home-leftovers.test.ts` runs this file in a child process and asserts the
+// directory is gone afterwards, so deleting this hook turns that test red.
+afterAll(() => {
+  fs.rmSync(DEMO_HOME, { recursive: true, force: true });
 });
 
 const stubEnv = {
