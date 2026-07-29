@@ -16,8 +16,16 @@
 
 import Database from 'better-sqlite3';
 
-/** What caused a verification run to start. */
-export type VerificationTrigger = 'manual' | 'wait' | 'api' | 'task';
+/**
+ * What caused a verification run to start.
+ *
+ * The runtime tuple mirrors the `trigger` CHECK constraint in migration v49 and
+ * is the single source callers validate untrusted input against, so a new
+ * trigger cannot be accepted by an API route and then rejected by SQLite.
+ */
+export const VERIFICATION_TRIGGERS = ['manual', 'wait', 'api', 'task'] as const;
+
+export type VerificationTrigger = (typeof VERIFICATION_TRIGGERS)[number];
 
 /**
  * Overall verdict of a run.
@@ -296,6 +304,48 @@ export function getVerificationRun(
     .all(runId) as VerificationGateResultRow[];
 
   return { ...mapRunRow(runRow), gates: gateRows.map(mapGateRow) };
+}
+
+/**
+ * The open run for a worktree, or null when none is in flight.
+ *
+ * A worktree admits one run at a time: two runs sharing a working tree would
+ * see each other's build output and their exit codes would describe neither.
+ * `id DESC` is a safety net — the invariant says there is at most one row, and
+ * if a bug ever breaks it the newest is the one a caller means.
+ */
+export function getRunningVerificationRun(
+  db: Database.Database,
+  worktreeId: string
+): VerificationRun | null {
+  const row = db
+    .prepare(`
+      SELECT ${RUN_COLUMNS} FROM verification_runs
+      WHERE worktree_id = ? AND status = 'running'
+      ORDER BY id DESC
+      LIMIT 1
+    `)
+    .get(worktreeId) as VerificationRunRow | undefined;
+
+  return row ? mapRunRow(row) : null;
+}
+
+/**
+ * Every run still marked `running`, across all worktrees, oldest first.
+ *
+ * Used by startup reconciliation: after a restart no run is actually in flight,
+ * so every row this returns is an orphan whose verdict was lost.
+ */
+export function listRunningVerificationRuns(db: Database.Database): VerificationRun[] {
+  const rows = db
+    .prepare(`
+      SELECT ${RUN_COLUMNS} FROM verification_runs
+      WHERE status = 'running'
+      ORDER BY id ASC
+    `)
+    .all() as VerificationRunRow[];
+
+  return rows.map(mapRunRow);
 }
 
 /**
