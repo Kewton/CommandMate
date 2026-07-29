@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **デモ動画収録スキル `demo-video` の基盤を追加** (#1553): 隔離デモ環境（使い捨て seed repo・専用ポート・$HOME 配下 DB・自前プロセスグループ）、キャプチャ済み ANSI カセットを tmux pane へ再生してサーバの status-detector／response poller／UI を実物のまま駆動する偽エージェント（LLM のみ差し替え・モックゼロ）、@playwright/test をライブラリとして使う scene 単位 webm 録画の 3 点。`.claude/skills` と `.agents/skills` へ byte-identical 配置。
 
+- **`commandmate verify` コマンドと `wait --verify` / `--require-work` を追加** (#1544): 検証ゲートを CLI から起動し、`wait` の成功条件を「エージェントが止まった」から「検証に合格した」へ引き上げる。exit code は 合格 0 / ゲート不合格 20 / 作業証跡ゼロ 21 / タイムアウト 124 で、判定不能（`error`・`cancelled`）は 20 ではなく 99 に倒す（「判定できなかった」を「判定してダメだった」と読ませないため）。検証は**完了検知できた worktree だけ**に走り、プロンプト検出(10)やタイムアウト(124)はそのまま返す。複数 worktree では完了検知は並行・検証は直列（サーバ側が同時実行数 2 に制限しているため並行させても queue するだけ）、集約の優先順位は 10 > 20 > 21 > 124。直列実行の並行化・`not_started`→0 への写像・優先順位の入れ替え・プロンプト時のガード除去・timeout 判定を終端 status 判定より前に置く、の 5 種の変異注入でテストが実際に赤くなることを確認済み。
+
 ## [0.16.0] - 2026-07-29
 
 > **Highlight**: **Skill 配布 MVP を「入れられる」から「運用できる」へ引き上げたリリース。** 導入先 Agent の対応状況を manifest の申告だけでなく CommandMate 側の実測で裏付ける互換 matrix（#1246）、どの worktree に何が入っていて導入時のままかを横断確認する監査 dashboard と receipt からの reindex（#1248、DB migration v48）、Skill 導入を review 可能な commit / draft PR に載せる専用 git workflow（#1247）を追加した。あわせて、uninstall した Skill を再 install すると **exit 0 で「Installed」と報告しながら 1 バイトも書かれない** journal replay の欠陥（#1552）を修正し、対になる uninstall 経路の同型欠陥も同時に塞いだ。

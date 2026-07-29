@@ -6,15 +6,18 @@
  * - 0: SUCCESS (agent completed)
  * - 10: PROMPT_DETECTED (agent waiting for user input)
  * - 124: TIMEOUT (--timeout exceeded)
+ * Issue #1544 adds --verify / --require-work, which can turn a detected
+ * completion into 20 (VERIFY_FAILED) or 21 (NOT_STARTED).
  * Infrastructure errors use ExitCode (1, 2, 99)
  */
 
 import { Command } from 'commander';
-import { ExitCode, WaitExitCode } from '../types';
+import { ExitCode, WAIT_EXIT_CODE_PRIORITY, WaitExitCode } from '../types';
 import type { WaitOptions } from '../types';
 import type { CurrentOutputResponse, WaitPromptOutput } from '../types/api-responses';
 import { ApiClient, ApiError, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
+import { runVerification, WORK_EVIDENCE_GATE_ID } from '../utils/verify-runner';
 
 /** [IA3-02] Polling interval 5 seconds (matches tmux-capture-cache TTL=2s) */
 const POLL_INTERVAL_MS = 5000;
@@ -112,6 +115,64 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/** True when the caller asked for a verdict rather than "the agent stopped". */
+function verifyRequested(options: WaitOptions): boolean {
+  return Boolean(options.verify || options.requireWork);
+}
+
+/**
+ * Run verification for one worktree after its completion was detected.
+ *
+ * Swallows ApiError into an exit code: with several worktrees in flight, one
+ * unreachable run must not abort the verdicts of the others.
+ */
+async function verifyAfterWait(
+  client: ApiClient,
+  worktreeId: string,
+  options: WaitOptions,
+): Promise<number> {
+  // --verify runs every gate, and work-evidence is always part of "every gate",
+  // so combining it with --require-work is a superset rather than a conflict.
+  const gateIds = options.verify ? undefined : [WORK_EVIDENCE_GATE_ID];
+  try {
+    const outcome = await runVerification(client, {
+      worktreeId,
+      trigger: 'wait',
+      instanceId: options.instance,
+      gateIds,
+      // stdout stays reserved for the prompt JSON contract.
+      resultStream: 'stderr',
+    });
+    return outcome.exitCode;
+  } catch (error) {
+    if (error instanceof ApiError) {
+      console.error(`Error: ${error.message}`);
+      return error.exitCode;
+    }
+    console.error(
+      `Error: verification of ${worktreeId} failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return ExitCode.UNEXPECTED_ERROR;
+  }
+}
+
+/**
+ * Fold one worktree's exit code into the aggregate.
+ *
+ * Ranked codes (see WAIT_EXIT_CODE_PRIORITY) beat unranked infrastructure
+ * codes, and among equals the first one observed stands.
+ */
+function mergeExitCode(current: number, candidate: number): number {
+  if (candidate === WaitExitCode.SUCCESS) return current;
+  if (current === WaitExitCode.SUCCESS) return candidate;
+
+  const rank = (code: number): number => {
+    const index = WAIT_EXIT_CODE_PRIORITY.indexOf(code);
+    return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+  };
+  return rank(candidate) < rank(current) ? candidate : current;
+}
+
 export function createWaitCommand(): Command {
   const cmd = new Command('wait');
   cmd
@@ -121,6 +182,8 @@ export function createWaitCommand(): Command {
     .option('--on-prompt <mode>', 'Prompt handling: agent (default) or human')
     .option('--stall-timeout <seconds>', 'Maximum time without output change', parseInt)
     .option('--instance <id>', 'Agent instance ID: <agent> or <agent>-<n> (e.g. claude-2). Defaults to the agent\'s primary instance.')
+    .option('--verify', 'After completion, run every verification gate; exit 20 when a gate fails, 21 when there is nothing to verify')
+    .option('--require-work', 'After completion, run only the work-evidence gate; exit 21 when the worktree has no commits and no uncommitted changes')
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeIds: string[], options: WaitOptions) => {
       try {
@@ -129,6 +192,7 @@ export function createWaitCommand(): Command {
           if (!isValidWorktreeId(id)) {
             console.error(`Error: Invalid worktree ID format: ${id}`);
             process.exit(ExitCode.CONFIG_ERROR);
+            return;
           }
         }
 
@@ -136,6 +200,7 @@ export function createWaitCommand(): Command {
         if (options.instance && !isValidInstanceId(options.instance)) {
           console.error('Error: Invalid --instance. Must be an alphanumeric/underscore/hyphen identifier (max 64 chars).');
           process.exit(ExitCode.CONFIG_ERROR);
+          return;
         }
 
         const client = new ApiClient({ token: options.token });
@@ -147,7 +212,13 @@ export function createWaitCommand(): Command {
             // stdout for result (JSON output)
             console.log(JSON.stringify(result.output));
           }
-          process.exit(result.exitCode);
+          // Issue #1544: only a detected completion is worth verifying — a
+          // prompt or a timeout means the agent never claimed to be done.
+          const exitCode = result.exitCode === WaitExitCode.SUCCESS && verifyRequested(options)
+            ? await verifyAfterWait(client, worktreeIds[0], options)
+            : result.exitCode;
+          process.exit(exitCode);
+          return;
         }
 
         // [DR1-07] Multiple worktrees: Promise.allSettled for error isolation
@@ -158,25 +229,32 @@ export function createWaitCommand(): Command {
         // Collect results
         const outputs: WaitPromptOutput[] = [];
         let finalExitCode: number = WaitExitCode.SUCCESS;
+        const verifyTargets: string[] = [];
 
-        for (const result of results) {
+        results.forEach((result, index) => {
           if (result.status === 'fulfilled') {
             if (result.value.output) {
               outputs.push(result.value.output);
             }
-            if (result.value.exitCode === WaitExitCode.PROMPT_DETECTED) {
-              finalExitCode = WaitExitCode.PROMPT_DETECTED;
-            } else if (result.value.exitCode !== WaitExitCode.SUCCESS && finalExitCode === WaitExitCode.SUCCESS) {
-              finalExitCode = result.value.exitCode;
+            if (result.value.exitCode === WaitExitCode.SUCCESS && verifyRequested(options)) {
+              verifyTargets.push(worktreeIds[index]);
+              return;
             }
+            finalExitCode = mergeExitCode(finalExitCode, result.value.exitCode);
           } else {
             const err = result.reason;
-            if (err instanceof ApiError && finalExitCode === WaitExitCode.SUCCESS) {
-              finalExitCode = err.exitCode;
-            } else if (finalExitCode === WaitExitCode.SUCCESS) {
-              finalExitCode = ExitCode.UNEXPECTED_ERROR;
-            }
+            finalExitCode = mergeExitCode(
+              finalExitCode,
+              err instanceof ApiError ? err.exitCode : ExitCode.UNEXPECTED_ERROR,
+            );
           }
+        });
+
+        // Issue #1544: serial on purpose. The server caps concurrent runs
+        // process-wide, so firing them together only queues them behind each
+        // other while every gate competes for the same machine.
+        for (const id of verifyTargets) {
+          finalExitCode = mergeExitCode(finalExitCode, await verifyAfterWait(client, id, options));
         }
 
         if (outputs.length > 0) {

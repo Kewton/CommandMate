@@ -102,6 +102,8 @@ describe('buildProgram', () => {
       'respond',
       'capture',
       'auto-yes',
+      // Issue #1544: verification gates (.commandmate/verify.yaml)
+      'verify',
       'report',
       'instances',
       // Issue #1237: Skill management (list/info/plan/install/uninstall/status)

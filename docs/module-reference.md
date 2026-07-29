@@ -328,6 +328,7 @@
 | `src/components/worktree/NavigationButtons.tsx` | OpenCode TUI選択リストナビゲーションボタン、Left/Right対応（Issue #473, #592） |
 | `src/cli/utils/api-client.ts` | CLI用HTTPクライアント（認証トークン解決・エラー分類・ApiClient/ApiError）（Issue #518） |
 | `src/cli/utils/command-helpers.ts` | CLI共通ヘルパー（TOKEN_WARNING定数・handleCommandError統一エラーハンドラ）（Issue #518） |
+| `src/cli/utils/verify-runner.ts` | verify / wait --verify 共通の検証ドライバ（Issue #1544: runVerification）。POST /verify（202+runId）→ GET /verify/runs/{runId} を VERIFY_POLL_INTERVAL_MS=5000 でポーリングし終端 status まで待つ。exitCodeForRunStatus: passed→0 / failed→20 / not_started→21 / **error・cancelled→99**（「判定できなかった」を「判定してダメだった」と読ませない）。timeout 判定は終端 status 判定の**後**（締切ちょうどに出た verdict を捨てないため）。ゲート行は terminal 到達時に1回だけ stderr へ出し、work-evidence は logTail から commits/uncommitted を抽出、不合格ゲートは logTail も出す。RESULT 行は既定 stdout（wait からは stderr＝stdout のプロンプト JSON 契約を守る）。409 は handleApiError の汎用文言（Unexpected HTTP status: 409）を捨てて実行中 runId 入りの文言に差し替える |
 | `src/cli/config/duration-constants.ts` | CLI側duration定数（DURATION_MAP, parseDurationToMs）（Issue #518） |
 | `src/cli/config/cli-tool-ids.ts` | CLI側ツールID定義（CLI_TOOL_IDS, isCliToolId、antigravity含む7ツール）（Issue #518, #545, #988）。Issue #757で literal copy を撤廃し `src/lib/cli-tools/types.ts`（単一ソース）からの**相対パス re-export**（`@/` 不可、`isCliToolType as isCliToolId`/`CLIToolType as CLIToolId` エイリアス）に変更。cross-validation test は参照同一性で単一ソース契約を保証 |
 | `src/cli/config/model-validation.ts` | CLI側model名バリデーション（validateCopilotModelName、MODEL_NAME_PATTERN、クロスバリデーション対象）（Issue #588） |
@@ -499,7 +500,8 @@ Skill の support matrix・MVP 既知制約・rollback 手順は [docs/user-guid
 | `src/cli/types/index.ts` | CLI共通型定義（ExitCode enum: UPDATE_FAILED=5 追加 Issue #1194、各コマンドのOptions） |
 | `src/cli/commands/ls.ts` | lsコマンド（worktree一覧表示、--json/--quiet/--branch対応）（Issue #518） |
 | `src/cli/commands/send.ts` | sendコマンド（エージェントへのメッセージ送信、--auto-yes/--agent対応）（Issue #518） |
-| `src/cli/commands/wait.ts` | waitコマンド（エージェント完了/プロンプト検出待機、--timeout/--stall-timeout/--on-prompt対応）（Issue #518） |
+| `src/cli/commands/wait.ts` | waitコマンド（エージェント完了/プロンプト検出待機、--timeout/--stall-timeout/--on-prompt対応）（Issue #518）。Issue #1544 で `--verify`（全ゲート）/`--require-work`（work-evidence のみ、gateIds=['work-evidence']）を追加: **完了検知(SUCCESS)したものだけ**を検証し、プロンプト(10)/タイムアウト(124)はそのまま返す。複数 worktree では検知は並行・検証は直列（サーバの MAX_CONCURRENT_VERIFICATIONS で queue するだけなので）。集約は mergeExitCode が WAIT_EXIT_CODE_PRIORITY(10>20>21>124) で決め、未登録コード（1/2/99）は最下位・先着優先 |
+| `src/cli/commands/verify.ts` | verifyコマンド（Issue #1544: `commandmate verify <id> [--gates a,b] [--instance] [--json] [--timeout]`）。引数検証（worktree id / instance / --gates が0件）を HTTP 前に済ませ、実処理は verify-runner に委譲する薄いラッパ |
 | `src/cli/commands/respond.ts` | respondコマンド（エージェントプロンプトへの応答、--agent対応）（Issue #518） |
 | `src/cli/commands/capture.ts` | captureコマンド（ターミナル出力取得、--json/--agent対応）（Issue #518） |
 | `src/cli/commands/auto-yes.ts` | auto-yesコマンド（Auto-Yes制御、--enable/--disable/--duration/--stop-pattern対応）（Issue #518） |
