@@ -505,6 +505,14 @@ Skill の support matrix・MVP 既知制約・rollback 手順は [docs/user-guid
 
 ---
 
+## リポジトリ同梱 Skill（`.claude/skills` / `.agents/skills`）
+
+| モジュール | 説明 |
+|-----------|------|
+| `.claude/skills/demo-video/` | デモ動画収録基盤（Issue #1553 Phase A）。`.agents/skills/demo-video/` へ byte-identical に複製し `tests/unit/skills/demo-video/mirror.test.ts` が無差分を固定。`env-up.sh` は使い捨て seed repo＋`WORKTREE_REPOS`/`CM_DB_PATH`（$HOME 配下）/`CM_PORT`（3000 は拒否）で `tsx server.ts` を自前プロセスグループ起動し `curl /` で Ready 判定。`env-down.sh` は記録 PID の `ps -o command=` 照合に通った場合のみ PGID へ signal（pkill 不使用・PID 再利用対策）。`fake-agent.sh` は「遅延ms/@input TAB ペイロード」カセットを tmux pane へ再生し、`mcbd-claude-<worktreeId>` 名で作った既存セッションをサーバに採用させることで status-detector／response poller／UI を実物のまま駆動する（LLM のみ差し替え・モックゼロ）。`{{INPUT}}` 差し込みは `printf %b` 展開の**後**（先だとメッセージ中の `%`/`\e[` が解釈される）。`record-scenes.ts` は @playwright/test をライブラリとして使い scene 単位に `recordVideo` context を張る。同期点は `/api/worktrees` の `isProcessing`（状態ドットの読み上げ名はローカライズ・エージェント別内訳で上書きされるため UI 文字列に同期しない）。カセットの running 窓は `CACHE_TTL_MS`（5s の capture キャッシュ）より長く保つ必要があり、テストが実測で固定している |
+
+---
+
 ## テストヘルパー（Issue #256）
 
 | モジュール | 説明 |
