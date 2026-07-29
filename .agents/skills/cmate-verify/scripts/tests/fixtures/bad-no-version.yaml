@@ -1,0 +1,3 @@
+gates:
+  - id: a
+    command: echo hi

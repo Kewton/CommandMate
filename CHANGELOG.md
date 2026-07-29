@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **検証ゲート Skill `cmate-verify` と `.commandmate/verify.yaml` v1 仕様を追加** (#1540): 検証ゲートの設定形式を製品実装（Phase 1）より先に実地検証するための先行 Skill。`docs/design/verification-config.md` を正準仕様とし、`.claude/skills/cmate-verify/` と `.agents/skills/cmate-verify/` へ byte-identical に配置（Claude は前者、Codex / Antigravity は後者しか読まない）。ランナーは bash 3.2 互換で、ゲートを定義順に逐次実行し**失敗しても残りを実行して全結果を報告**、判定は必ず実 exit code で行う（出力の grep は `$?` を隠す）。macOS に `timeout(1)` が無い前提で、job control による**プロセスグループ単位**の timeout kill を実装（直接の子だけを kill すると孫が生き残る／signal 送出前に pgid が pid と一致することを確認して無関係なプロセスグループを巻き込まない）。組み込みゲート `work-evidence` が「作業の痕跡ゼロ」を `not_started` として弾き、`skipInPrimaryCheckout` がメイン checkout でのコマンド実行を止める（全 skip は `passed` ではなく `skipped`）。fixture ベースの自己完結テスト 123 アサーション（vitest 非依存）＋ vitest ラッパで CI からも実行。
+
 ## [0.16.0] - 2026-07-29
 
 > **Highlight**: **Skill 配布 MVP を「入れられる」から「運用できる」へ引き上げたリリース。** 導入先 Agent の対応状況を manifest の申告だけでなく CommandMate 側の実測で裏付ける互換 matrix（#1246）、どの worktree に何が入っていて導入時のままかを横断確認する監査 dashboard と receipt からの reindex（#1248、DB migration v48）、Skill 導入を review 可能な commit / draft PR に載せる専用 git workflow（#1247）を追加した。あわせて、uninstall した Skill を再 install すると **exit 0 で「Installed」と報告しながら 1 バイトも書かれない** journal replay の欠陥（#1552）を修正し、対になる uninstall 経路の同型欠陥も同時に塞いだ。
