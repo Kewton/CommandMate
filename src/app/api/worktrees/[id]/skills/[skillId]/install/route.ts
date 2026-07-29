@@ -67,6 +67,7 @@ import {
   transitionSkillOperation,
   type SkillOperationJournalEntry,
 } from '@/lib/skills/operation-journal';
+import { mayReplaySkillInstall } from '@/lib/skills/operation-replay';
 import {
   buildSkillOperationAuditInput,
   recordSkillOperationAudit,
@@ -316,13 +317,19 @@ export async function POST(
 
     const actor = resolveActor(request);
 
+    // Only a recorded outcome that is still true of the worktree may be
+    // replayed. An install whose payload has since been uninstalled must be
+    // done again, not reported from the entry the first one left (Issue #1552).
+    const isReplayable = (entry: SkillOperationJournalEntry): boolean =>
+      mayReplaySkillInstall(entry, worktree.path, idResult.value);
+
     // A retried request must be answered from its recorded outcome, not by
     // spending a token that is already gone: the plan is single-use, so without
     // this the second delivery of the *same* request would look like a replay
     // attack rather than the network retry it is.
     if (parsed.body.idempotencyKey !== null) {
       const replay = readSkillOperationJournal(parsed.body.idempotencyKey);
-      if (replay !== null) {
+      if (replay !== null && isReplayable(replay)) {
         return answerReplay(replay, worktree.id, idResult.value, parsed.body.version);
       }
     }
@@ -356,6 +363,7 @@ export async function POST(
         planHash: plan.bindingHash,
       },
       lockKey,
+      isReplayable,
       source: {
         origin: 'github-release',
         repository: plan.dto.skill.source.repository,

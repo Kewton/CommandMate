@@ -302,6 +302,15 @@ export type SkillOperationBeginResult =
  *
  * A replay hands back the recorded entry so the caller can answer with the
  * original outcome instead of writing the payload a second time.
+ *
+ * `isReplayable` is how the caller says the recorded outcome is no longer true
+ * of the world (Issue #1552). A derived key is a function of the binding alone,
+ * so a genuinely new request — the install that follows an uninstall — arrives
+ * under the key of the old one; without this it would be answered from an entry
+ * describing a payload that is no longer there. An entry rejected this way is
+ * superseded: it is dropped and a fresh operation is opened, because the request
+ * really is new work. A PREPARING entry is never superseded, whatever the
+ * predicate says: the operation that owns it may still be running.
  */
 export function beginSkillOperation(
   input: {
@@ -309,6 +318,7 @@ export function beginSkillOperation(
     binding: SkillOperationBinding;
     lockKey: string;
     source?: SkillOperationSource | null;
+    isReplayable?: (entry: SkillOperationJournalEntry) => boolean;
   },
   options: SkillJournalOptions = {}
 ): SkillOperationBeginResult {
@@ -321,7 +331,12 @@ export function beginSkillOperation(
     if (existing.bindingHash !== bindingHash) {
       return { ok: false, reason: 'IDEMPOTENCY_KEY_CONFLICT', entry: existing };
     }
-    return { ok: true, entry: existing, replayed: true };
+    const supersede =
+      existing.state !== 'PREPARING' && input.isReplayable?.(existing) === false;
+    if (!supersede) {
+      return { ok: true, entry: existing, replayed: true };
+    }
+    deleteSkillOperationJournal(idempotencyKey, options);
   }
 
   const now = options.now ?? Date.now();
