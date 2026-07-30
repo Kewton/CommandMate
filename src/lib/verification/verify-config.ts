@@ -38,8 +38,16 @@ export interface VerifyConfig {
  */
 export const WORK_EVIDENCE_GATE_ID = 'work-evidence';
 
+/**
+ * Built-in gate that reconciles the changed files against the contract's
+ * `scope.allow` / `scope.deny` (#1546). Declared alongside work-evidence for the
+ * same reason: `lib/tasks/contract-message.ts` has to name it while resolving a
+ * contract's gate list, and must not pull the engine in to do so.
+ */
+export const SCOPE_GATE_ID = 'scope';
+
 /** Gate IDs reserved for built-in gates; using one in `gates` is a config error. */
-export const RESERVED_GATE_IDS = [WORK_EVIDENCE_GATE_ID, 'scope'] as const;
+export const RESERVED_GATE_IDS = [WORK_EVIDENCE_GATE_ID, SCOPE_GATE_ID] as const;
 
 export const VERIFY_CONFIG_RELATIVE_PATH = '.commandmate/verify.yaml';
 
