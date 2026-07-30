@@ -30,8 +30,16 @@ export interface VerifyConfig {
   options: VerifyOptions;
 }
 
+/**
+ * Built-in gate that answers "is there any work here to verify?".
+ *
+ * Declared here rather than in the runner so modules that only reason *about*
+ * gate selection (task contracts) can name it without importing the engine.
+ */
+export const WORK_EVIDENCE_GATE_ID = 'work-evidence';
+
 /** Gate IDs reserved for built-in gates; using one in `gates` is a config error. */
-export const RESERVED_GATE_IDS = ['work-evidence', 'scope'] as const;
+export const RESERVED_GATE_IDS = [WORK_EVIDENCE_GATE_ID, 'scope'] as const;
 
 export const VERIFY_CONFIG_RELATIVE_PATH = '.commandmate/verify.yaml';
 

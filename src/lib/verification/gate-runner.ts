@@ -29,17 +29,25 @@ import {
   createVerificationRun,
   finishGateResult,
   finishVerificationRun,
+  getActiveTask,
   getRunningVerificationRun,
+  getTask,
+  isTerminalTaskStatus,
+  updateTaskStatus,
+  type Task,
+  type TaskStatus,
   type VerificationGateTerminalStatus,
   type VerificationRunTerminalStatus,
   type VerificationTrigger,
 } from '@/lib/db';
 import { resolveDefaultBranchName } from '@/lib/git/git-default-branch';
 import { createLogger } from '@/lib/logger';
+import { resolveContractGateIds } from '@/lib/tasks/contract-message';
 import {
   loadVerifyConfig,
   VERIFY_CONFIG_RELATIVE_PATH,
   VerifyConfigError,
+  WORK_EVIDENCE_GATE_ID,
   type VerifyConfig,
   type VerifyGate,
 } from './verify-config';
@@ -48,10 +56,11 @@ const logger = createLogger('lib/verification/gate-runner');
 
 /**
  * Built-in gate that answers "is there any work here to verify?" before the
- * expensive gates run. Reserved in {@link RESERVED_GATE_IDS} so a verify.yaml
- * cannot shadow it.
+ * expensive gates run. Defined in verify-config (where RESERVED_GATE_IDS keeps
+ * a verify.yaml from shadowing it) and re-exported here, which is where callers
+ * have always imported it from.
  */
-export const WORK_EVIDENCE_GATE_ID = 'work-evidence';
+export { WORK_EVIDENCE_GATE_ID };
 
 /**
  * Pseudo-gate used to carry a config-load failure into the run record.
@@ -81,10 +90,17 @@ export interface RunVerificationInput {
   /** Absolute path the gates execute in. */
   worktreePath: string;
   instanceId?: string;
-  /** Free field until the `tasks` table lands in Phase 2 (#1545). */
+  /**
+   * Task the run belongs to. Omitted means "resolve the worktree's active task"
+   * (#1545), which is what lets `wait --verify` verify against a contract
+   * without the CLI knowing a task exists.
+   */
   taskId?: string;
   trigger: VerificationTrigger;
-  /** Gate ids to run; omitted means work-evidence plus every verify.yaml gate. */
+  /**
+   * Gate ids to run. Omitted falls back to the resolved task's contract
+   * `verify.gates`, and then to work-evidence plus every verify.yaml gate.
+   */
   gateIds?: string[];
 }
 
@@ -525,6 +541,68 @@ async function executeRun(
   return aggregateRunStatus(statuses);
 }
 
+// =============================================================================
+// Task contracts (#1545)
+// =============================================================================
+
+/**
+ * Translate a run verdict into the task's terminal status.
+ *
+ * `error` maps to `failed`: no verdict was reached, and a task that could not be
+ * verified is not a task that passed. Leaving it in `verifying` forever would be
+ * a worse lie than calling it failed — the reason is recorded in the run's
+ * `config` gate log_tail.
+ */
+function taskStatusForRunStatus(status: VerificationRunTerminalStatus): TaskStatus {
+  switch (status) {
+    case 'passed':
+      return 'succeeded';
+    case 'not_started':
+      return 'not_started';
+    case 'cancelled':
+      return 'cancelled';
+    default:
+      return 'failed';
+  }
+}
+
+/**
+ * Record a task transition, tolerating a task that vanished mid-run.
+ *
+ * A deleted worktree takes its tasks with it; the run's own record is already
+ * written by then, so failing here would lose a verdict that exists.
+ */
+function recordTaskTransition(
+  db: Database.Database,
+  taskId: string,
+  status: TaskStatus,
+  runId?: number
+): void {
+  try {
+    updateTaskStatus(db, taskId, status, runId === undefined ? {} : { lastVerificationRunId: runId });
+  } catch (error) {
+    logger.warn('task-transition-failed', {
+      taskId,
+      status,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Resolve the task this run belongs to.
+ *
+ * An explicit `taskId` wins even when the row is gone — the caller asserted the
+ * attribution and the run should record it — so a missing row yields no task to
+ * transition, not an error.
+ */
+function resolveTask(db: Database.Database, input: RunVerificationInput): Task | null {
+  if (input.taskId !== undefined) {
+    return getTask(db, input.taskId);
+  }
+  return getActiveTask(db, input.worktreeId);
+}
+
 /**
  * Open a verification run and execute it in the background.
  *
@@ -544,6 +622,13 @@ export async function startVerification(
     throw new VerificationConflictError(input.worktreeId, existing.id);
   }
 
+  const task = resolveTask(db, input);
+  const taskId = input.taskId ?? task?.id ?? null;
+  // An explicit gateIds always wins: `verify --gates lint` must mean lint even
+  // when the contract asks for more.
+  const gateIds =
+    input.gateIds ?? (task ? resolveContractGateIds(task.contract) ?? undefined : undefined);
+
   let config: VerifyConfig | null = null;
   let configFailure: string | null = null;
   try {
@@ -562,7 +647,7 @@ export async function startVerification(
 
   let selection: GateSelection | null = null;
   if (config && !configFailure) {
-    const selected = selectGates(config, input.gateIds);
+    const selected = selectGates(config, gateIds);
     if (typeof selected === 'string') {
       configFailure = selected;
     } else {
@@ -576,9 +661,14 @@ export async function startVerification(
     worktreeId: input.worktreeId,
     trigger: input.trigger,
     instanceId: input.instanceId ?? null,
-    taskId: input.taskId ?? null,
+    taskId,
     baseRef,
   });
+
+  // A task already in a terminal state is history: re-verifying it must not
+  // reopen it, or a `succeeded` task could be silently walked back by an
+  // unrelated manual run.
+  const trackedTask = task && !isTerminalTaskStatus(task.status) ? task : null;
 
   if (!config || !selection) {
     // Closed synchronously: there is no work to schedule, and leaving the row
@@ -596,13 +686,22 @@ export async function startVerification(
     });
     finishVerificationRun(db, run.id, 'error');
     logger.warn('verification-config-unusable', { runId: run.id, worktreeId: input.worktreeId });
+    if (trackedTask) {
+      // An unusable config means this task can never be shown to have passed.
+      recordTaskTransition(db, trackedTask.id, 'failed', run.id);
+    }
     return { runId: run.id };
+  }
+
+  if (trackedTask) {
+    recordTaskTransition(db, trackedTask.id, 'verifying', run.id);
   }
 
   const resolvedConfig = config;
   const resolvedSelection = selection;
   const completion = (async (): Promise<VerificationRunTerminalStatus> => {
     await acquireSlot();
+    let terminalStatus: VerificationRunTerminalStatus = 'error';
     try {
       const status = await executeRun(
         db,
@@ -612,6 +711,7 @@ export async function startVerification(
         resolvedSelection,
         baseRef
       );
+      terminalStatus = status;
       finishVerificationRun(db, run.id, status);
       return status;
     } catch (error) {
@@ -626,6 +726,11 @@ export async function startVerification(
       }
       return 'error';
     } finally {
+      // Phase 2-1 writes the task status directly; Phase 3-1 replaces this with
+      // a state-machine transition (docs/design/task-contract.md §6).
+      if (trackedTask) {
+        recordTaskTransition(db, trackedTask.id, taskStatusForRunStatus(terminalStatus), run.id);
+      }
       releaseSlot();
       inFlight.delete(run.id);
     }

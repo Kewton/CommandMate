@@ -273,6 +273,26 @@ export interface SendOptions {
   instance?: string;
   /** Issue #1000: register the ad-hoc --instance session into the roster after sending */
   register?: boolean;
+  /**
+   * Issue #1545: path to an execution contract, relative to the worktree root
+   * (e.g. `.commandmate/tasks/my-task.yaml`). The contract's goal replaces the
+   * message argument, so the two are mutually exclusive.
+   */
+  contract?: string;
+}
+
+/** task list command options [Issue #1545] */
+export interface TaskListOptions {
+  json?: boolean;
+  /** Maximum tasks to list, newest first. */
+  limit?: number;
+  token?: string;
+}
+
+/** task show command options [Issue #1545] */
+export interface TaskShowOptions {
+  json?: boolean;
+  token?: string;
 }
 
 /** wait command options [Issue #518] */
