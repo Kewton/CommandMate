@@ -33,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`commandmate verify` コマンドと `wait --verify` / `--require-work` を追加** (#1544): 検証ゲートを CLI から起動し、`wait` の成功条件を「エージェントが止まった」から「検証に合格した」へ引き上げる。exit code は 合格 0 / ゲート不合格 20 / 作業証跡ゼロ 21 / タイムアウト 124 で、判定不能（`error`・`cancelled`）は 20 ではなく 99 に倒す（「判定できなかった」を「判定してダメだった」と読ませないため）。検証は**完了検知できた worktree だけ**に走り、プロンプト検出(10)やタイムアウト(124)はそのまま返す。複数 worktree では完了検知は並行・検証は直列（サーバ側が同時実行数 2 に制限しているため並行させても queue するだけ）、集約の優先順位は 10 > 20 > 21 > 124。直列実行の並行化・`not_started`→0 への写像・優先順位の入れ替え・プロンプト時のガード除去・timeout 判定を終端 status 判定より前に置く、の 5 種の変異注入でテストが実際に赤くなることを確認済み。
 
+### Changed
+
+- **セッション状態語彙の変換を `src/lib/session/status-mapping.ts` へ一元化** (#1550): `SessionStatus`（検出）・boolean 三つ組（`isRunning` / `isWaitingForResponse` / `isProcessing`）・`BranchStatus`（表示）の相互変換が 3 ファイルに散在していたため、変換だけを 1 モジュールへ移して対応表をゴールデンテストで固定した（挙動変更ゼロ）。`deriveCliStatus` は `@/types/sidebar` から移設し同名で re-export（既存 import と既存テストは無修正）、`worktree-status-helper.ts` の `status === 'waiting'` / `=== 'running'` インライン式は `sessionStatusToActivityFlags()`（`satisfies never` で exhaustive）に置換、`src/app/api/worktrees/route.ts` に private 定義されていた**逆方向**の `deriveSessionStatus`（三つ組 → SessionStatus）も同モジュールへ移した。`UIPhase` は `waiting → receiving → complete` が履歴依存のシーケンスであり `SessionStatus` の写像ではないので、唯一の表引き（プロンプト検出 → `prompt`）を持つ `worktreeUIReducer` に残し、本モジュールには写像関数を作っていない。既存の `worktree-status-helper.test.ts` は検出器を常に `status: 'ready'` でモックしており移設対象の `running` / `waiting` 分岐を一度も通らないため、SessionStatus 全値を helper 経由で駆動する回帰テストを別ファイルで追加した。マッピング 4 種＋ helper 配線 1 種の変異注入で、追加したテストが実際に赤くなることを確認済み。
+
 ## [0.16.0] - 2026-07-29
 
 > **Highlight**: **Skill 配布 MVP を「入れられる」から「運用できる」へ引き上げたリリース。** 導入先 Agent の対応状況を manifest の申告だけでなく CommandMate 側の実測で裏付ける互換 matrix（#1246）、どの worktree に何が入っていて導入時のままかを横断確認する監査 dashboard と receipt からの reindex（#1248、DB migration v48）、Skill 導入を review 可能な commit / draft PR に載せる専用 git workflow（#1247）を追加した。あわせて、uninstall した Skill を再 install すると **exit 0 で「Installed」と報告しながら 1 バイトも書かれない** journal replay の欠陥（#1552）を修正し、対になる uninstall 経路の同型欠陥も同時に塞いだ。

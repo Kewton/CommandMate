@@ -14,6 +14,12 @@ import {
   type AgentInstance,
 } from '@/lib/cli-tools/types';
 import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
+import { deriveCliStatus } from '@/lib/session/status-mapping';
+
+// Issue #1550: the status-vocabulary conversions now live in
+// `@/lib/session/status-mapping`. Re-exported here so existing importers of
+// `@/types/sidebar` keep working; that module holds the only definition.
+export { deriveCliStatus };
 
 /**
  * Branch status in sidebar
@@ -24,27 +30,6 @@ import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
  * - generating: AI is generating response
  */
 export type BranchStatus = 'idle' | 'ready' | 'running' | 'waiting' | 'generating';
-
-/** Per-CLI tool status input shape */
-interface CLIToolStatusInput {
-  isRunning: boolean;
-  isWaitingForResponse: boolean;
-  isProcessing: boolean;
-}
-
-/**
- * Derive BranchStatus from per-CLI tool session status flags.
- * Shared by sidebar (toBranchItem) and WorktreeDetailRefactored tab dots.
- */
-export function deriveCliStatus(
-  toolStatus?: CLIToolStatusInput
-): BranchStatus {
-  if (!toolStatus) return 'idle';
-  if (toolStatus.isWaitingForResponse) return 'waiting';
-  if (toolStatus.isProcessing) return 'running';
-  if (toolStatus.isRunning) return 'ready';
-  return 'idle';
-}
 
 /**
  * Aggregate per-agent CLI statuses into a single representative BranchStatus

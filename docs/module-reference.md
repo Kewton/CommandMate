@@ -340,6 +340,7 @@
 | `src/cli/config/model-validation.ts` | CLI側model名バリデーション（validateCopilotModelName、MODEL_NAME_PATTERN、クロスバリデーション対象）（Issue #588） |
 | `src/config/review-config.ts` | Review設定定数・テンプレート定数（STALLED_THRESHOLD_MS, REVIEW_POLL_INTERVAL_MS, MAX_TEMPLATES, MAX_TEMPLATE_NAME_LENGTH, MAX_TEMPLATE_CONTENT_LENGTH）（Issue #600, #618）、MAX_COMMIT_LOG_LENGTH/GIT_LOG_TOTAL_TIMEOUT_MS追加（Issue #627） |
 | `src/lib/session/next-action-helper.ts` | 次アクション算出ヘルパー（getNextAction, getReviewStatus, ReviewStatus型）（Issue #600） |
+| `src/lib/session/status-mapping.ts` | セッション状態語彙の変換を一元化（sessionStatusToActivityFlags / deriveCliStatus / deriveSessionStatus / deriveBranchStatus）。SessionStatus ↔ boolean三つ組 ↔ BranchStatus の唯一の定義箇所で、`@/types/sidebar` は deriveCliStatus を re-export するのみ。UIPhase は状態機械のため写像化せず reducer に残す（Issue #1550） |
 | `src/lib/detection/stalled-detector.ts` | Stalled判定（isWorktreeStalled）（Issue #600） |
 | `src/lib/deep-link-validator.ts` | Deep linkバリデーション（isDeepLinkPane, normalizeDeepLinkPane, VALID_PANES, DeepLinkPane型）（Issue #600） |
 | `src/lib/api/worktrees-include-parser.ts` | API includeパラメータパーサー（Issue #600） |
