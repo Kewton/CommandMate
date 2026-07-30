@@ -143,6 +143,44 @@ export interface SerializedReport {
   updatedAt: string;
 }
 
+// Mirrors: src/lib/metrics/vibe-metrics.ts VibeMetrics [Issue #1551]
+// Restated rather than imported: tsconfig.cli.json compiles src/cli alone with
+// no `@/` paths, so the CLI cannot reach src/lib.
+export interface VibeMetrics {
+  periodDays: number;
+  tasks: {
+    total: number;
+    succeeded: number;
+    failed: number;
+    notStarted: number;
+    cancelled: number;
+    /** 0..1 fraction; null when no tasks were created in the window. */
+    successRate: number | null;
+    /** null when nothing failed in the window. */
+    avgRetryLoops: number | null;
+  };
+  verification: {
+    runs: number;
+    passed: number;
+    failed: number;
+    notStarted: number;
+    /** 0..1 fraction; null when no runs started in the window. */
+    passRate: number | null;
+    gateFailBreakdown: Array<{ gateId: string; failCount: number }>;
+  };
+  intervention: {
+    humanResponds: number;
+    autoAnswered: number;
+    /** Always null in v1: the policy suppression log is not persisted. */
+    suppressedByPolicy: number | null;
+  };
+}
+
+// Mirrors: src/app/api/metrics/vibe/route.ts GET response [Issue #1551]
+export interface VibeMetricsResponse {
+  metrics: VibeMetrics;
+}
+
 // Mirrors: src/app/api/templates/[id]/route.ts GET response [Issue #636]
 export interface TemplateResponse {
   id: string;

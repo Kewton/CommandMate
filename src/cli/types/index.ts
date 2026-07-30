@@ -506,6 +506,13 @@ export interface ReportListOptions {
   token?: string;
 }
 
+/** report metrics options [Issue #1551] */
+export interface ReportMetricsOptions {
+  days?: number;
+  json?: boolean;
+  token?: string;
+}
+
 /**
  * Extract error message from unknown error
  * Issue #125: DRY - centralized error message extraction

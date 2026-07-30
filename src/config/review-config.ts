@@ -93,6 +93,15 @@ export const MAX_USER_DATA_LENGTH = 6000;
 export const MAX_ISSUE_CONTEXT_LENGTH = 3000;
 
 /**
+ * Maximum character length for verification_metrics section in summary prompt.
+ * Issue #1551: Eval metrics in report
+ *
+ * The section is a fixed set of counters plus at most ten gate names, so this
+ * only binds when a `verify.yaml` carries unusually long gate ids.
+ */
+export const MAX_METRICS_SECTION_LENGTH = 800;
+
+/**
  * Maximum character length for issue body summary in prompt.
  * Issue #630: Issue context in report
  */
