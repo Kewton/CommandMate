@@ -154,8 +154,12 @@ describe('POST /api/worktrees/:id/verify', () => {
     const { run } = await detail.json();
     expect(run.status).toBe('passed');
     expect(run.trigger).toBe('api');
-    expect(run.gates.map((g: { gateId: string }) => g.gateId)).toEqual(['work-evidence', 'quick']);
-    expect(run.gates[1].exitCode).toBe(0);
+    expect(run.gates.map((g: { gateId: string }) => g.gateId)).toEqual([
+      'work-evidence',
+      'scope',
+      'quick',
+    ]);
+    expect(run.gates[2].exitCode).toBe(0);
   });
 
   it('reports a failing gate through the API rather than an error status', async () => {

@@ -100,23 +100,32 @@ function addWork(): void {
 }
 
 function seedTask(
-  options: { gates?: string[]; status?: TaskStatus; requireWorkEvidence?: boolean } = {}
+  options: {
+    gates?: string[];
+    status?: TaskStatus;
+    requireWorkEvidence?: boolean;
+    requireScopeClean?: boolean;
+    allow?: string[];
+    contractPath?: string;
+  } = {}
 ): Task {
   const gates = options.gates ? `verify:\n  gates: [${options.gates.join(', ')}]\n` : '';
-  const success =
-    options.requireWorkEvidence === undefined
-      ? ''
-      : `success:\n  requireWorkEvidence: ${options.requireWorkEvidence}\n`;
+  const flags = (['requireWorkEvidence', 'requireScopeClean'] as const)
+    .filter((key) => options[key] !== undefined)
+    .map((key) => `  ${key}: ${options[key]}\n`)
+    .join('');
+  const success = flags === '' ? '' : `success:\n${flags}`;
+  const allow = JSON.stringify(options.allow ?? ['**']);
   return createTask(db, {
     worktreeId: wtId,
     cliToolId: 'claude',
-    contractPath: '.commandmate/tasks/t.yaml',
+    contractPath: options.contractPath ?? '.commandmate/tasks/t.yaml',
     contract: parseTaskContract(
       `version: 1
 title: contract run
 goal: do the work
 scope:
-  allow: ["**"]
+  allow: ${allow}
 ${gates}${success}`,
       'task.yaml'
     ),
@@ -176,14 +185,18 @@ describe('task resolution', () => {
 
     const run = getVerificationRun(db, await runToCompletion());
     // fail-gate is declared in verify.yaml but not in the contract, so a run
-    // that ignored the contract would have failed here. work-evidence is added
-    // because the contract's success.requireWorkEvidence defaults to true.
-    expect(run?.gates.map((gate) => gate.gateId)).toEqual(['work-evidence', 'pass-gate']);
+    // that ignored the contract would have failed here. work-evidence and scope
+    // are added because the contract's success flags both default to true.
+    expect(run?.gates.map((gate) => gate.gateId)).toEqual([
+      'work-evidence',
+      'scope',
+      'pass-gate',
+    ]);
     expect(run?.status).toBe('passed');
   });
 
-  it('omits work-evidence when the contract does not require it', async () => {
-    seedTask({ gates: ['pass-gate'], requireWorkEvidence: false });
+  it('omits the built-in gates when the contract does not require them', async () => {
+    seedTask({ gates: ['pass-gate'], requireWorkEvidence: false, requireScopeClean: false });
     // No addWork(): without the work-evidence gate an empty worktree still passes.
 
     const run = getVerificationRun(db, await runToCompletion());
@@ -207,6 +220,7 @@ describe('task resolution', () => {
     expect(run?.taskId).toBeNull();
     expect(run?.gates.map((gate) => gate.gateId)).toEqual([
       'work-evidence',
+      'scope',
       'pass-gate',
       'fail-gate',
     ]);
@@ -278,6 +292,136 @@ describe('task status transitions', () => {
     expect(updated?.lastVerificationRunId).toBeNull();
   });
 
+  it('moves a task to failed when the work went outside the contract scope', async () => {
+    const task = seedTask({ gates: ['pass-gate'], allow: ['allowed/**'] });
+    addWork(); // work.txt, which "allowed/**" does not cover
+
+    const runId = await runToCompletion();
+    const run = getVerificationRun(db, runId);
+    expect(run?.status).toBe('failed');
+    // Every gate still runs: one report should list every problem.
+    expect(run?.gates.map((gate) => gate.gateId)).toEqual([
+      'work-evidence',
+      'scope',
+      'pass-gate',
+    ]);
+    const scope = run?.gates.find((gate) => gate.gateId === 'scope');
+    expect(scope?.status).toBe('failed');
+    expect(scope?.logTail).toContain('  - work.txt');
+    expect(getTask(db, task.id)?.status).toBe('failed');
+  });
+
+  it('passes a task whose work stayed inside the contract scope', async () => {
+    // The paired case: without it, a gate that failed unconditionally would
+    // satisfy the assertion above.
+    const task = seedTask({ gates: ['pass-gate'], allow: ['allowed/**'] });
+    mkdirSync(join(repo, 'allowed'), { recursive: true });
+    writeFileSync(join(repo, 'allowed', 'work.txt'), 'agent output\n');
+
+    const run = getVerificationRun(db, await runToCompletion());
+    expect(run?.gates.find((gate) => gate.gateId === 'scope')?.status).toBe('passed');
+    expect(run?.status).toBe('passed');
+    expect(getTask(db, task.id)?.status).toBe('succeeded');
+  });
+});
+
+describe('scope gate selection', () => {
+  it('skips scope without failing a contract-less run', async () => {
+    // The default selection always includes scope, so counting its skip would
+    // turn every verification in a repository without contracts into an error.
+    writeFileSync(
+      join(repo, '.commandmate', 'verify.yaml'),
+      `version: 1
+gates:
+  - id: pass-gate
+    command: "sh -c 'exit 0'"
+options:
+  baseRef: main
+  skipInPrimaryCheckout: false
+`
+    );
+    addWork();
+
+    const run = getVerificationRun(db, await runToCompletion());
+    expect(run?.gates.map((gate) => gate.gateId)).toEqual([
+      'work-evidence',
+      'scope',
+      'pass-gate',
+    ]);
+    expect(run?.gates.find((gate) => gate.gateId === 'scope')?.status).toBe('skipped');
+    expect(run?.status).toBe('passed');
+  });
+
+  it('errors when scope was asked for by name and could not be judged', async () => {
+    // "We declined to check" must not read as "we checked and it was fine".
+    addWork();
+
+    const run = getVerificationRun(db, await runToCompletion({ gateIds: ['scope'] }));
+    expect(run?.gates.map((gate) => gate.gateId)).toEqual(['scope']);
+    expect(run?.status).toBe('error');
+  });
+
+  it('runs scope alone when asked for by name and a contract exists', async () => {
+    seedTask({ allow: ['allowed/**'] });
+    addWork();
+
+    const run = getVerificationRun(db, await runToCompletion({ gateIds: ['scope'] }));
+    expect(run?.gates.map((gate) => gate.gateId)).toEqual(['scope']);
+    expect(run?.status).toBe('failed');
+  });
+
+  it('drops scope from the selection when the contract switches it off', async () => {
+    const task = seedTask({ gates: ['pass-gate'], allow: ['allowed/**'], requireScopeClean: false });
+    addWork(); // outside allow, but the contract does not ask for a clean scope
+
+    const run = getVerificationRun(db, await runToCompletion());
+    expect(run?.gates.map((gate) => gate.gateId)).toEqual(['work-evidence', 'pass-gate']);
+    expect(run?.status).toBe('passed');
+    expect(getTask(db, task.id)?.status).toBe('succeeded');
+  });
+
+  it('skips scope on requireScopeClean: false even when the gate is in the selection', async () => {
+    // A contract that names no gates runs every gate, so the flag has to be
+    // honoured by the gate itself and not only by the selection above it.
+    const task = seedTask({ allow: ['allowed/**'], requireScopeClean: false });
+    addWork(); // outside allow
+
+    const run = getVerificationRun(db, await runToCompletion({ gateIds: ['scope'] }));
+    const scope = run?.gates.find((gate) => gate.gateId === 'scope');
+    expect(scope?.status).toBe('skipped');
+    expect(scope?.logTail).toContain('requireScopeClean: false');
+    // Asked for by name and declined, so the run must not read as a pass.
+    expect(run?.status).toBe('error');
+    expect(getTask(db, task.id)?.status).toBe('failed');
+  });
+
+  it('does not count the contract file against a scope that does not list it', async () => {
+    const task = seedTask({
+      gates: ['pass-gate'],
+      allow: ['allowed/**'],
+      contractPath: 'custom/t.yaml',
+    });
+    mkdirSync(join(repo, 'custom'), { recursive: true });
+    writeFileSync(join(repo, 'custom', 't.yaml'), 'version: 1\n');
+
+    const run = getVerificationRun(db, await runToCompletion());
+    expect(run?.gates.find((gate) => gate.gateId === 'scope')?.status).toBe('passed');
+    expect(getTask(db, task.id)?.status).toBe('succeeded');
+  });
+
+  it('records scope as skipped when work-evidence stopped the run', async () => {
+    seedTask({ gates: ['pass-gate'], allow: ['allowed/**'] });
+    // No work at all: the run never reaches a scope judgement.
+
+    const run = getVerificationRun(db, await runToCompletion());
+    expect(run?.status).toBe('not_started');
+    const scope = run?.gates.find((gate) => gate.gateId === 'scope');
+    expect(scope?.status).toBe('skipped');
+    expect(scope?.logTail).toContain('work-evidence');
+  });
+});
+
+describe('task status transitions (continued)', () => {
   it('records a run against an explicit task id whose row is gone', async () => {
     addWork();
     const missingTaskId = '00000000-0000-4000-8000-000000000000';

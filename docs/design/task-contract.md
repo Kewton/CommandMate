@@ -10,9 +10,10 @@
 変更してよいのか」「何が満たされたら完了なのか」を **送信前に宣言** し、`send → wait → verify`
 のパイプラインがその宣言を参照できるようにする。
 
-> パーサ（v1）は全フィールドを**検証して保持する**。強制は分けて入る:
-> `scope` のゲート化は Phase 2-2（#1546）、`autoYes` の enforcement は Phase 2-3（#1547、
-> 実装済み — §2.4 の enforcement）。
+> パーサ（v1）は全フィールドを**検証して保持する**。強制は別フェーズで入り、いずれも実装済み:
+> `scope` は Phase 2-2（#1546）の組み込みゲート `scope`（`src/lib/verification/scope-gate.ts`）が
+> 変更ファイル集合を `scope.allow` / `scope.deny` と突き合わせ、`success.requireScopeClean` が
+> true の契約で自動的に走る（§2.2）。`autoYes` は Phase 2-3（#1547）で enforcement される（§2.4）。
 
 ---
 
@@ -39,7 +40,7 @@ autoYes:
   denyPatterns: []                 # 質問文/選択肢にマッチしたら自動応答せずエスカレート（正規表現）
 success:
   requireWorkEvidence: true        # 省略時 true
-  requireScopeClean: true          # 省略時 true（scope ゲートは Phase 2-2。それまで無視される）
+  requireScopeClean: true          # 省略時 true（組み込み scope ゲートが変更ファイルを突合。§2.2）
 ```
 
 契約ファイルは `.commandmate/tasks/*.yaml` として **Git 追跡対象**である
@@ -83,8 +84,105 @@ success:
 - `..` を含むパス（`../other-repo/**`）
 - NUL バイトを含む文字列
 
-契約は worktree の内側についてのみ語れる。外を指すパターンは Phase 2-2 のゲートでも
-判定不能なので、宣言時点で弾く。
+契約は worktree の内側についてのみ語れる。外を指すパターンはゲートでも判定不能なので、
+宣言時点で弾く。
+
+#### 2.2.1 glob の意味（実装: `src/lib/verification/scope-gate.ts`）
+
+glob ライブラリではなく、**この表に閉じた小さな部分集合**を自前で解釈する
+（理由は §2.2.5）。
+
+| 記法 | 意味 |
+|---|---|
+| `**` | パスセグメント全体を占めるときだけディレクトリ境界を越える。**0 個のセグメントにもマッチ**（`a/**/b` は `a/b` にマッチ、`**/*.ts` は `x.ts` にマッチ） |
+| `*` | `/` を含まない任意の文字列 |
+| `?` | `/` 以外の 1 文字 |
+| `{a,b}` | 選択（入れ子可）。**括弧が閉じていなければリテラル**（シェルと同じ。`src/{a` は「波括弧を含むパス」） |
+| `[` `]` | **リテラル**。文字クラスではない |
+| 先頭の `.` | 普通の文字。`.github/**` や `**/*.yml` はそのまま読める通りに動く |
+
+大文字小文字は区別する。バックスラッシュによるエスケープは無い。
+
+`[` をリテラルにしているのは本リポジトリの都合ではなく**誤判定を避けるため**である。
+Next.js の動的セグメントは `src/app/proxy/[...path]/` のように書かれる。これを文字クラスと
+解釈すると、当該ディレクトリを指すパターンは**何にもマッチせず**（`[...path]` は
+`.` `p` `a` `t` `h` のうち 1 文字を意味するため）、代わりに `src/app/proxy/p/` のような
+無関係なパスにマッチする。黙って外れる glob はこのゲートが防ぐべき失敗そのものである。
+
+**ディレクトリを指すパターンは、その配下すべてにマッチする。** つまり `src/lib`・`src/lib/`・
+`src/lib/**` はすべて同義である。この規則が無いと、契約作者がディレクトリを書く最も自然な
+表記 `allow: ["src/lib/verification"]` が、その中の全ファイルを違反にしてしまう。
+代償として `X/*` で「直下のみ」を表すことはできない（拡張子で絞る `docs/*.md` は意図通り動く）。
+
+#### 2.2.2 判定対象の変更ファイル集合
+
+worktree の cwd で以下を実行し、**和集合**を取る:
+
+1. `git merge-base <baseRef> HEAD` → `git diff --name-only -z --no-renames <merge-base> HEAD`
+2. `git status --porcelain -z --untracked-files=all`
+
+コミット済みだけを見ると未コミットの逸脱を見逃し、作業ツリーだけを見るとコミット済みの
+逸脱を見逃す。オプションはいずれも偽の判定を避けるために必要である:
+
+- **`-z`**: 人間向け書式は空白を含むパスを `"a b.md"` と C クォートし、rename を
+  `old -> new` と 1 行に繋ぐ。空白で分割すると**存在しないファイル**が生まれる
+- **`--untracked-files=all`**: 既定では新規ディレクトリが `?? dir/` の 1 エントリに畳まれ、
+  ゲートがファイルではなくディレクトリ名を判定してしまう
+- **`--no-renames`**（diff 側）: rename 検出が働くと `--name-only` は移動先だけを出す。
+  移動元ディレクトリが空になった事実が消える
+- rename / copy は**両方のパス**を判定対象にする。許可されたディレクトリから
+  ファイルを持ち出すことは、そのディレクトリへの変更である。
+  `-z` の porcelain では `R  <new>NUL<old>NUL` の順（人間向け表示の逆）で並ぶ
+
+`.gitignore` されたファイルは `git status` が報告しないため、そもそも判定対象にならない。
+
+#### 2.2.3 常に許可されるパス
+
+`.commandmate/` 配下と、その契約ファイル自身（`tasks.contract_path`）は
+**`allow` の要求から除外**する。契約はそこに置かれるので、`allow` に書き忘れた契約が
+自分自身の保管場所を違反にしてしまうのを防ぐ。
+
+ただし**明示的な `deny` は効く**。deny は意図的な禁止であり、事故を防ぐための除外規則が
+意図的な宣言を無効化するほうが害が大きい。
+
+#### 2.2.4 ゲートの判定
+
+| 状況 | gate status |
+|---|---|
+| 違反 0 件 | `passed` |
+| 違反 1 件以上 | `failed`（`log_tail` に**最大 100 件**を列挙し、残りは件数で示す） |
+| 変更ファイル 0 件 | `passed`（「何も起きていない」の判定は `work-evidence` の仕事。ここでも落とすと 1 つの問題が 2 件に見える） |
+| run に契約が紐づいていない | `skipped` |
+| `success.requireScopeClean: false` | `skipped` |
+| `baseRef` 未解決 / git が答えられない | `error` |
+
+`scope` は `work-evidence` の直後・コマンド系ゲートの前に走る。ゲートが失敗しても run は
+打ち切らない（1 往復で問題が 1 件ずつ判明する体験を避けるため）。
+
+**`skipped` の集計は例外扱いである。** 通常 `skipped` が 1 つでもあれば run は `passed` に
+ならず `error` になる（§4・「チェックしなかった」を「チェックして問題なかった」と
+読ませないため）。しかし `scope` は既定のゲート集合に常に含まれるので、契約を使っていない
+リポジトリの検証がすべて `error` になってしまう。そこで **`gateIds` で名指しされた場合の
+`skipped` だけを集計に数える** — 名指しされたのに判定しなかったのは「断った」ことだが、
+契約が無いのは「判定すべき宣言が存在しない」ことであって、断ったわけではない。
+
+#### 2.2.5 glob ライブラリを直接依存に足さなかった理由
+
+Issue #1546 本文は `picomatch` を dependencies に追加するよう指示しているが、着手時に実測した
+以下の条件により、**上表の部分集合を自前で解釈する**方針を採った。
+
+- `picomatch` / `minimatch` はいずれも**直接依存ではなく推移依存**（`next-intl` →
+  `@parcel/watcher` 経由）。直接 import するには `package.json` と `package-lock.json` の
+  両方を更新する必要がある（`npm ci` は両者の不整合で落ちる）
+- `picomatch` は型定義を同梱しておらず `@types/picomatch` は `node_modules` に存在しない。
+  `strict: true` 下で使うには実ネットワークインストールが必要
+- この worktree の `node_modules` は**兄弟 worktree と 14 本の hardlink を共有**しており、
+  並列ワーカーが同時に build / test を回している最中の再展開は他の作業を壊しうる
+
+代わりに、`[` をリテラルにする・ディレクトリを配下ごと含める、といった**このゲートに
+固有の判断**を明示的に選べる利点を得た。glob 解釈の 6 種の変異注入（`*` が `/` を越える、
+globstar が 0 セグメントにマッチしない、括弧を文字クラスとして解釈する等）で、
+テストが実際に赤くなることを確認している。
 
 ### 2.3 `verify`
 
@@ -98,11 +196,14 @@ success:
 ゲート id が `.commandmate/verify.yaml` に**実在するか**は、契約の送信時
 （`send --contract`）に照合される（§5）。パーサ単体は verify.yaml を読まない。
 
-組み込みゲート `work-evidence` の実行有無は**このリストではなく
-`success.requireWorkEvidence` が決める**。`requireWorkEvidence: true`（既定）の契約が
-`gates: [lint, unit]` と書いた場合、解決後のゲート集合は `[work-evidence, lint, unit]` になる。
-そうしないと「作業証跡を要求する」と宣言しているのに何もそれを確認しない契約が成立してしまう。
-明示的に `gates` に `work-evidence` を書いた場合は重複しない。
+組み込みゲート `work-evidence` / `scope` の実行有無は**このリストではなく
+`success.requireWorkEvidence` / `success.requireScopeClean` が決める**。両方 true（既定）の
+契約が `gates: [lint, unit]` と書いた場合、解決後のゲート集合は
+`[work-evidence, scope, lint, unit]` になる。そうしないと「作業証跡を要求する」
+「スコープを守る」と宣言しているのに何もそれを確認しない契約が成立してしまう。
+明示的に `gates` に書いた場合も重複せず、**組み込みは常に実行順で先頭に並ぶ**
+（解決後のリストは §5 で「実際に走るコマンドの順序」として提示されるため、
+契約の記述順がその順序を偽ってはならない）。
 
 ### 2.4 `autoYes`
 
@@ -161,10 +262,10 @@ enforcement が「契約が無いから従来動作」と「契約が off と言
 | キー | 型 | 既定 | 意味 |
 |---|---|---|---|
 | `requireWorkEvidence` | boolean | `true` | commit も差分も無い「作業ゼロ」を不合格とする（`work-evidence` ゲート） |
-| `requireScopeClean` | boolean | `true` | `scope` 外の変更を不合格とする（**Phase 2-2 まで無視される**） |
+| `requireScopeClean` | boolean | `true` | `scope` 外の変更を不合格とする（組み込み `scope` ゲート。§2.2） |
 
-`requireWorkEvidence` は §2.3 のとおり `verify.gates` に `work-evidence` を自動で足す。
-このフラグが単独で意味を持つ（ゲートリストと矛盾しない）ようにするための規則である。
+両フラグは §2.3 のとおり `verify.gates` に対応する組み込みゲートを自動で足す。
+フラグが単独で意味を持つ（ゲートリストと矛盾しない）ようにするための規則である。
 
 `requireScopeClean` が true のとき `scope.allow` が空なら契約エラー。
 「スコープを守れ」と言いながらスコープを 1 つも挙げていない契約は、
@@ -255,9 +356,8 @@ Phase 2-2 のゲートが有効になった瞬間に**あらゆる変更を不�
 
 ## 7. Phase 2-2 以降への申し送り
 
-- `scope` ゲート（#1546）: `allow` / `deny` は本仕様の形で既に保持されている。
-  ゲートは `git diff --name-only <baseRef>...HEAD` と `git status --porcelain` の
-  両方を対象にすること（commit 済みだけを見ると未 commit の逸脱を見逃す）。
+- `scope` ゲート（#1546）: **実装済み**。§2.2 が正準仕様
+  （`src/lib/verification/scope-gate.ts` / `tests/unit/verification/scope-gate.test.ts`）。
 - `autoYes` enforcement（#1547）: **実装済み**（§2.4 の enforcement を参照）。
   Auto-Yes は `status-detector` を経由せず `detectPrompt` を直接呼ぶため、
   配線先は `auto-yes-poller.ts` の `detectAndRespondToPrompt` である。
