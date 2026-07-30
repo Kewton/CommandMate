@@ -10,11 +10,10 @@
 変更してよいのか」「何が満たされたら完了なのか」を **送信前に宣言** し、`send → wait → verify`
 のパイプラインがその宣言を参照できるようにする。
 
-> **`scope` は Phase 2-2（#1546）で強制されるようになった。**
-> 組み込みゲート `scope`（`src/lib/verification/scope-gate.ts`）が変更ファイル集合を
-> `scope.allow` / `scope.deny` と突き合わせ、`success.requireScopeClean` が true の契約では
-> 自動的に走る（§2.2）。`autoYes` の enforcement は Phase 2-3（#1547）で、
-> v1 のパーサはこのフィールドを**検証して保持するだけ**である。
+> パーサ（v1）は全フィールドを**検証して保持する**。強制は別フェーズで入り、いずれも実装済み:
+> `scope` は Phase 2-2（#1546）の組み込みゲート `scope`（`src/lib/verification/scope-gate.ts`）が
+> 変更ファイル集合を `scope.allow` / `scope.deny` と突き合わせ、`success.requireScopeClean` が
+> true の契約で自動的に走る（§2.2）。`autoYes` は Phase 2-3（#1547）で enforcement される（§2.4）。
 
 ---
 
@@ -225,6 +224,39 @@ enforcement が「契約が無いから従来動作」と「契約が off と言
 `allowPromptTypes` は `mode: allow-listed` 以外では無視される（エラーではない）。
 モードを一時的に落として実験する運用を、リストを消さずに行えるようにするため。
 
+#### enforcement（#1547 で実装済み）
+
+判定は `resolveAutoAnswerWithPolicy()`（`src/lib/polling/auto-yes-resolver.ts`）が行う。
+**ポリシーは抑止しかしない**: 従来ルールが `null` を返すプロンプトを応答に変えることはない。
+
+1. 従来ルールで答えが出ないプロンプト（選択肢ゼロ、テキスト入力必須）はそのまま `null`
+2. `mode: off` → 常に抑止
+3. `denyPatterns` のいずれかがマッチ → 抑止。マッチ対象は**質問文・`instructionText`・
+   全選択肢ラベル**。Claude の許可プロンプトは承認対象のコマンドを質問文の上（=
+   `instructionText`）に置くため、質問文だけでは効かない
+4. `mode: safe` → `yes_no` のみ従来ルール、他は抑止（#1495 の `/model` オーバーレイ誤検出は
+   この型に該当する）
+5. `mode: allow-listed` → `allowPromptTypes` に含まれる型のみ従来ルール
+
+`denyPatterns` は **`mode: null` でも効く**。パターンを書いた契約は既にポリシーを述べており、
+「列挙したのに何も守らない」は契約の最悪の失敗モードだから。`mode: null` かつ
+`denyPatterns` 空（= `autoYes` ブロックの無い契約）はどの分岐にも入らず、契約なし運用と
+**完全に同一の挙動**になる。
+
+パターンは実行前に `validateStopPattern()`（長さ・safe-regex2 による指数バックトラック検出・
+構文）で審査し、**評価できないパターンは抑止側に倒す**（`deny-pattern-unusable`）。
+無視すると契約が要求した保護が黙って消えるため。マッチ対象テキストは 1 フィールド
+20,000 文字までを見る（プロンプト文は実際には数百文字。上限は病的な pane が毎 poll
+メガバイトを走査させないための決定的な境界）。
+
+抑止時は `auto-yes-poller` が `poller:auto-yes-suppressed-by-policy` を理由付きで警告ログに
+出す。エージェントへのキーストロークは送られず、**人間への通知は既存経路**
+（`polling/response-checker.ts` の prompt 保存 → WS broadcast → Web Push）が担う。
+
+適用範囲は**サーバ側 Auto-Yes ポーラーのみ**。クライアント側 `hooks/useAutoYes.ts` は
+サーバポーラーが動いていないときだけ応答するフォールバックで、DB を読めないためポリシーを
+知らない（`src/hooks/useAutoYes.ts` の注記を参照）。
+
 ### 2.5 `success`
 
 | キー | 型 | 既定 | 意味 |
@@ -326,8 +358,8 @@ Phase 2-2 のゲートが有効になった瞬間に**あらゆる変更を不�
 
 - `scope` ゲート（#1546）: **実装済み**。§2.2 が正準仕様
   （`src/lib/verification/scope-gate.ts` / `tests/unit/verification/scope-gate.test.ts`）。
-- `autoYes` enforcement（#1547）: Auto-Yes は `status-detector` を経由せず
-  `detectPrompt` を直接呼ぶ経路がある。ポリシーは `detectPrompt` 側の経路に効かせないと
-  自動応答は止まらない。
+- `autoYes` enforcement（#1547）: **実装済み**（§2.4 の enforcement を参照）。
+  Auto-Yes は `status-detector` を経由せず `detectPrompt` を直接呼ぶため、
+  配線先は `auto-yes-poller.ts` の `detectAndRespondToPrompt` である。
 - 状態機械（#1548 系 / Phase 3-1）: 本仕様の `status` 語彙をそのまま使い、
   `updateTaskStatus` の直接呼び出しを状態機械の遷移関数に置き換える。

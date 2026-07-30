@@ -287,3 +287,43 @@ export function getActiveTask(
 
   return row ? mapTaskRow(row) : null;
 }
+
+/**
+ * The active task governing one agent instance, or null.
+ *
+ * Distinct from {@link getActiveTask} because the primary instance is recorded
+ * two different ways: `instance_id` is NULL when no `--instance` was given, and
+ * the tool id itself (`'claude'`) when `--instance claude` was. Both mean the
+ * primary instance, so both must match — `= ?` cannot express either, since
+ * `instance_id = NULL` is never true in SQL.
+ *
+ * Auto-Yes needs this precision: a contract sent to `codex-2` must not govern
+ * the auto-answering of `codex`, and taking the worktree's most recent active
+ * task would do exactly that.
+ *
+ * @param instanceId - Agent instance id; pass the tool id itself for the primary
+ */
+export function getActiveTaskForInstance(
+  db: Database.Database,
+  worktreeId: string,
+  cliToolId: string,
+  instanceId: string
+): Task | null {
+  const isPrimary = instanceId === cliToolId;
+  const placeholders = ACTIVE_TASK_STATUSES.map(() => '?').join(', ');
+  const row = db
+    .prepare(`
+      SELECT ${TASK_COLUMNS} FROM tasks
+      WHERE worktree_id = ?
+        AND cli_tool_id = ?
+        AND (instance_id = ? OR (instance_id IS NULL AND ?))
+        AND status IN (${placeholders})
+      ORDER BY updated_at DESC, created_at DESC, rowid DESC
+      LIMIT 1
+    `)
+    .get(worktreeId, cliToolId, instanceId, isPrimary ? 1 : 0, ...ACTIVE_TASK_STATUSES) as
+    | TaskRow
+    | undefined;
+
+  return row ? mapTaskRow(row) : null;
+}

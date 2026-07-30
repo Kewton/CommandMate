@@ -63,6 +63,12 @@ vi.mock('@/lib/cli-tools/manager', () => ({
     }),
   },
 }));
+// Issue #1547: the poller now reads the active task's autoYes policy before
+// answering. Stubbed to "no task", which is the unconstrained behaviour these
+// tests assert; without it the lookup would open the database CM_DB_PATH names.
+vi.mock('@/lib/db/db-instance', () => ({
+  getDbInstance: () => ({ prepare: () => ({ get: () => undefined }) }),
+}));
 
 describe('auto-yes-manager', () => {
   beforeEach(() => {
@@ -899,8 +905,8 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendKeys).mockResolvedValue(undefined);
       vi.mocked(sendSpecialKeys).mockResolvedValue(undefined);
 
-      // Mock resolveAutoAnswer to return '3' (target option 3, default is 1)
-      vi.spyOn(autoYesResolver, 'resolveAutoAnswer').mockReturnValue('3');
+      // Mock the resolver to return '3' (target option 3, default is 1)
+      vi.spyOn(autoYesResolver, 'resolveAutoAnswerWithPolicy').mockReturnValue({ answer: '3', suppressedBy: null });
 
       // Advance timer to trigger pollAutoYes
       await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
@@ -915,7 +921,7 @@ describe('auto-yes-manager', () => {
 
       // Cleanup
       stopAutoYesPolling('wt-offset-down:claude');
-      vi.mocked(autoYesResolver.resolveAutoAnswer).mockRestore();
+      vi.mocked(autoYesResolver.resolveAutoAnswerWithPolicy).mockRestore();
     });
 
     it('should calculate correct Up arrow offset (default=3, target=1 -> 2x Up + Enter)', async () => {
@@ -942,8 +948,8 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendKeys).mockResolvedValue(undefined);
       vi.mocked(sendSpecialKeys).mockResolvedValue(undefined);
 
-      // Mock resolveAutoAnswer to return '1' (target option 1, default is 3)
-      vi.spyOn(autoYesResolver, 'resolveAutoAnswer').mockReturnValue('1');
+      // Mock the resolver to return '1' (target option 1, default is 3)
+      vi.spyOn(autoYesResolver, 'resolveAutoAnswerWithPolicy').mockReturnValue({ answer: '1', suppressedBy: null });
 
       // Advance timer to trigger pollAutoYes
       await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
@@ -958,7 +964,7 @@ describe('auto-yes-manager', () => {
 
       // Cleanup
       stopAutoYesPolling('wt-offset-up:claude');
-      vi.mocked(autoYesResolver.resolveAutoAnswer).mockRestore();
+      vi.mocked(autoYesResolver.resolveAutoAnswerWithPolicy).mockRestore();
     });
 
     it('should send just Enter when default=target (offset=0)', async () => {
@@ -985,8 +991,8 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendKeys).mockResolvedValue(undefined);
       vi.mocked(sendSpecialKeys).mockResolvedValue(undefined);
 
-      // Mock resolveAutoAnswer to return '2' (target=2, default=2, offset=0)
-      vi.spyOn(autoYesResolver, 'resolveAutoAnswer').mockReturnValue('2');
+      // Mock the resolver to return '2' (target=2, default=2, offset=0)
+      vi.spyOn(autoYesResolver, 'resolveAutoAnswerWithPolicy').mockReturnValue({ answer: '2', suppressedBy: null });
 
       // Advance timer to trigger pollAutoYes
       await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
@@ -1001,7 +1007,7 @@ describe('auto-yes-manager', () => {
 
       // Cleanup
       stopAutoYesPolling('wt-offset-zero:claude');
-      vi.mocked(autoYesResolver.resolveAutoAnswer).mockRestore();
+      vi.mocked(autoYesResolver.resolveAutoAnswerWithPolicy).mockRestore();
     });
   });
 
