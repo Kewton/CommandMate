@@ -13,6 +13,7 @@ import { getAnswerInput } from '@/lib/detection/prompt-detector';
 import { broadcastMessage } from '@/lib/ws-server';
 import { createLogger } from '@/lib/logger';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
+import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 
 const logger = createLogger('api/respond');
 
@@ -166,6 +167,13 @@ export async function POST(
         { status: 500 }
       );
     }
+
+    // Issue #1548: a person answered. This route is reached only from the chat
+    // prompt buttons (MessageList) and needs a stored messageId, so unlike
+    // /prompt-response it has no automated caller to be confused with.
+    applyEventToActiveTask(db, id, cliToolId, instanceId, 'prompt_answered_human', {
+      promptType: message.promptData.type,
+    });
 
     // Broadcast updated message
     const updatedMessage = {

@@ -45,6 +45,7 @@ import { isDuplicatePrompt, normalizePromptForDedup } from './prompt-dedup';
 import { isDuplicateResponse } from './response-dedup';
 import { getPollerKey, stopPolling, GEMINI_LOADING_INDICATORS } from './response-poller-core';
 import { notifyPushSubscribers } from '@/lib/push';
+import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 
 // ============================================================================
 // Extraction types and helpers
@@ -549,6 +550,14 @@ export async function checkForResponse(
 
       updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
       broadcastMessage('message', { worktreeId, message });
+
+      // Issue #1548: the agent is blocked on input. Raised after the dedup and
+      // save above, so the task log counts prompts the system actually recorded
+      // rather than every poll that saw the same one still on screen. No-ops
+      // when this instance is not running a contract.
+      applyEventToActiveTask(db, worktreeId, cliToolId, resolvedInstanceId, 'prompt_detected', {
+        promptType: promptDetection.promptData?.type,
+      });
 
       // Web Push fan-out (Issue #1125): agent is now waiting for a prompt reply.
       // Fire-and-forget — push is advisory and must never block/break the poller.

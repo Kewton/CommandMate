@@ -49,7 +49,12 @@ vi.mock('@/lib/logger', () => ({
   }),
 }));
 
-import { createTask, updateTaskStatus, type Task, type TaskStatus } from '@/lib/db';
+import { createTask, type Task, type TaskStatus } from '@/lib/db';
+// updateTaskStatus is closed out of the @/lib/db barrel (#1548): only
+// applyTaskEvent may write a status in production. Fixtures need to place a
+// task in an arbitrary state the machine would refuse, so they take the direct
+// module path.
+import { updateTaskStatus } from '@/lib/db/tasks-db';
 import { parseTaskContract } from '@/lib/tasks/contract-parser';
 import { clearAutoYesPolicyCache, invalidateSessionAutoYesPolicy } from '@/lib/polling/auto-yes-policy';
 import { detectAndRespondToPrompt, type AutoYesPollerState } from '@/lib/auto-yes-poller';

@@ -20,7 +20,9 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import type { NextRequest } from 'next/server';
 import { runMigrations } from '@/lib/db/db-migrations';
-import { getTask, updateTaskStatus, upsertWorktree } from '@/lib/db';
+import { getTask, upsertWorktree } from '@/lib/db';
+// See tasks-db.test.ts: fixtures reach past the barrel on purpose (#1548).
+import { updateTaskStatus } from '@/lib/db/tasks-db';
 
 declare module '@/lib/db/db-instance' {
   export function setMockDb(db: Database.Database): void;

@@ -221,7 +221,6 @@ export {
   createTask,
   getTask,
   listTasks,
-  updateTaskStatus,
   getActiveTask,
   getActiveTaskForInstance,
   isTerminalTaskStatus,
@@ -236,3 +235,11 @@ export type {
   CreateTaskInput,
   UpdateTaskStatusPatch,
 } from './tasks-db';
+
+// task-events-db (task state machine log, Issue #1548).
+// `updateTaskStatus` and `insertTaskEvent` are intentionally absent from this
+// barrel: `applyTaskEvent` (@/lib/tasks/task-transition-service) is the only
+// writer of either, and reaching around it would put a status in the table with
+// no event explaining it.
+export { listTaskEvents } from './task-events-db';
+export type { TaskEventRecord, TaskEventPayload, InsertTaskEventInput } from './task-events-db';
