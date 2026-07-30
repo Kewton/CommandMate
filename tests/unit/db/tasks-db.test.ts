@@ -12,6 +12,27 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
+
+/**
+ * Ids `createTask` will hand out, oldest first. Empty means "use the real
+ * randomUUID", so only the tie-break tests below take control of them.
+ *
+ * The tie-break tests cannot use real ids: `id DESC` over random UUIDs matches
+ * insertion order roughly half the time for two rows, so a test built on them
+ * passes or fails by coin flip and guards nothing.
+ */
+const { queuedIds } = vi.hoisted(() => ({ queuedIds: [] as string[] }));
+
+vi.mock('crypto', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('crypto')>();
+  return {
+    ...actual,
+    default: actual,
+    randomUUID: (...args: unknown[]): string =>
+      queuedIds.shift() ??
+      (actual.randomUUID as unknown as (...a: unknown[]) => string)(...args),
+  };
+});
 import {
   createTask,
   getActiveTask,
@@ -59,7 +80,50 @@ function seed(
   });
 }
 
+/**
+ * Ids whose descending lexicographic order is NOT reverse insertion order.
+ *
+ * Inserted A → B → C, an insertion-order tie-break yields C, B, A while an
+ * `id DESC` tie-break yields B, C, A. The two disagree in the first position, so
+ * a test asserting the former fails deterministically under the latter — which
+ * is the whole point of pinning the ids.
+ */
+const ID_A = 'aaaaaaaa-0000-4000-8000-000000000001';
+const ID_B = 'cccccccc-0000-4000-8000-000000000002';
+const ID_C = 'bbbbbbbb-0000-4000-8000-000000000003';
+
+/** Hand `createTask` the next ids to use, in order. */
+function queueIds(...ids: string[]): void {
+  queuedIds.length = 0;
+  queuedIds.push(...ids);
+}
+
+/**
+ * Create three tasks that share `created_at` and `updated_at` to the
+ * millisecond, so only the tie-break can decide their order.
+ */
+function seedTiedTrio(status?: TaskStatus): void {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-07-30T00:00:00Z'));
+  queueIds(ID_A, ID_B, ID_C);
+
+  const created = [
+    seed({ title: 'A', status }),
+    seed({ title: 'B', status }),
+    seed({ title: 'C', status }),
+  ];
+
+  // Without this the pinned ids are silently not in effect (a broken module
+  // mock, a changed id source) and the tie-break assertions below would be back
+  // to comparing random UUIDs — passing by luck.
+  expect(created.map((task) => task.id)).toEqual([ID_A, ID_B, ID_C]);
+  const timestamps = created.map((task) => task.createdAt.getTime());
+  expect(new Set(timestamps).size).toBe(1);
+  expect(created.map((task) => task.updatedAt.getTime())).toEqual(timestamps);
+}
+
 beforeEach(() => {
+  queuedIds.length = 0;
   db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
   runMigrations(db);
@@ -117,13 +181,21 @@ describe('getTask / listTasks', () => {
     expect(listTasks(db, 'wt-1', 2).map((t) => t.id)).toEqual([third.id, second.id]);
   });
 
-  it('orders same-millisecond tasks by insertion, since ids are random UUIDs', () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-07-30T00:00:00Z'));
-    const first = seed({ title: 'one' });
-    const second = seed({ title: 'two' });
+  it('breaks a same-millisecond tie by insertion order, not by id', () => {
+    seedTiedTrio();
 
-    expect(listTasks(db, 'wt-1').map((t) => t.id)).toEqual([second.id, first.id]);
+    // Insertion order reversed. An `id DESC` tie-break would return
+    // [ID_B, ID_C, ID_A] here: ids are random UUIDs in production, so ordering
+    // by them puts same-millisecond tasks in an order nothing chose.
+    expect(listTasks(db, 'wt-1').map((task) => task.id)).toEqual([ID_C, ID_B, ID_A]);
+  });
+
+  it('applies the limit to the tie-broken order, not to an arbitrary one', () => {
+    seedTiedTrio();
+
+    // The newest two by insertion. Under an `id DESC` tie-break the second slot
+    // would be ID_C, so a truncated list would silently drop the wrong task.
+    expect(listTasks(db, 'wt-1', 2).map((task) => task.id)).toEqual([ID_C, ID_B]);
   });
 
   it('does not leak tasks across worktrees', () => {
@@ -210,6 +282,25 @@ describe('getActiveTask', () => {
     vi.setSystemTime(new Date('2026-07-30T00:00:02Z'));
     updateTaskStatus(db, older.id, 'waiting_input');
     expect(getActiveTask(db, 'wt-1')?.id).toBe(older.id);
+  });
+
+  it('breaks a same-millisecond tie by insertion order, not by id', () => {
+    seedTiedTrio('running');
+
+    // The last task sent is the one a verification run belongs to. An `id DESC`
+    // tie-break would answer ID_B here — a task that was superseded before the
+    // run started, so the run would be judged against the wrong contract.
+    expect(getActiveTask(db, 'wt-1')?.id).toBe(ID_C);
+  });
+
+  it('still prefers a later update over the insertion tie-break', () => {
+    seedTiedTrio('running');
+
+    // The tie-break only decides when updated_at is equal; touching an older
+    // task must still win outright.
+    vi.setSystemTime(new Date('2026-07-30T00:00:01Z'));
+    updateTaskStatus(db, ID_A, 'waiting_input');
+    expect(getActiveTask(db, 'wt-1')?.id).toBe(ID_A);
   });
 
   it('scopes to the worktree', () => {
