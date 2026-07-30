@@ -12,8 +12,9 @@
 
 import type { ChatMessage } from '@/types/models';
 import type { RepositoryCommitLogs, IssueInfo } from '@/types/git';
+import type { VibeMetrics } from '@/lib/metrics/vibe-metrics';
 import { MAX_MESSAGE_LENGTH } from '@/lib/session/claude-executor';
-import { MAX_COMMIT_LOG_LENGTH, MAX_PROMPT_LENGTH, MAX_USER_DATA_LENGTH, MAX_ISSUE_CONTEXT_LENGTH } from '@/config/review-config';
+import { MAX_COMMIT_LOG_LENGTH, MAX_PROMPT_LENGTH, MAX_USER_DATA_LENGTH, MAX_ISSUE_CONTEXT_LENGTH, MAX_METRICS_SECTION_LENGTH } from '@/config/review-config';
 
 // =============================================================================
 // Constants
@@ -23,7 +24,7 @@ import { MAX_COMMIT_LOG_LENGTH, MAX_PROMPT_LENGTH, MAX_USER_DATA_LENGTH, MAX_ISS
 export const MAX_TOTAL_MESSAGE_LENGTH = MAX_USER_DATA_LENGTH;
 
 /** Tags to escape in user-supplied content (DR4-003) */
-const ESCAPED_TAGS = ['user_data', 'commit_log', 'issue_context'] as const;
+const ESCAPED_TAGS = ['user_data', 'commit_log', 'issue_context', 'verification_metrics'] as const;
 
 // =============================================================================
 // Sanitization (private)
@@ -54,6 +55,64 @@ export function sanitizeMessage(msg: string): string {
 }
 
 // =============================================================================
+// Verification metrics section (Issue #1551)
+// =============================================================================
+
+/** A 0..1 rate as a percentage string, or `n/a` when the denominator was zero. */
+function formatRate(value: number | null): string {
+  return value === null ? 'n/a' : `${(value * 100).toFixed(1)}%`;
+}
+
+/**
+ * Render the `<verification_metrics>` section, or `''` when there is nothing
+ * to say.
+ *
+ * A day on which no task was created, no verification ran and nobody answered
+ * a prompt produces no section at all rather than a wall of zeros: zeros in a
+ * prompt invite the model to narrate an absence as a finding.
+ *
+ * Gate ids come from a repository's `verify.yaml`, so they are sanitized like
+ * any other user-supplied string. The counters are integers this module
+ * computed and are interpolated directly.
+ *
+ * @internal Exported for testing only
+ */
+export function buildMetricsSection(metrics: VibeMetrics): string {
+  const { tasks, verification, intervention } = metrics;
+
+  const nothingHappened =
+    tasks.total === 0 &&
+    verification.runs === 0 &&
+    intervention.humanResponds === 0 &&
+    intervention.autoAnswered === 0;
+  if (nothingHappened) return '';
+
+  const lines = [
+    `Period: last ${metrics.periodDays} day(s)`,
+    `Tasks: total=${tasks.total} succeeded=${tasks.succeeded} failed=${tasks.failed} not_started=${tasks.notStarted} cancelled=${tasks.cancelled} success_rate=${formatRate(tasks.successRate)}`,
+    `Verification: runs=${verification.runs} passed=${verification.passed} failed=${verification.failed} not_started=${verification.notStarted} pass_rate=${formatRate(verification.passRate)}`,
+  ];
+
+  if (verification.gateFailBreakdown.length > 0) {
+    const breakdown = verification.gateFailBreakdown
+      .map((gate) => `${sanitizeMessage(gate.gateId)}=${gate.failCount}`)
+      .join(', ');
+    lines.push(`Gate failures: ${breakdown}`);
+  }
+
+  lines.push(
+    `Intervention: human_responses=${intervention.humanResponds} auto_answered=${intervention.autoAnswered}`
+  );
+
+  if (tasks.avgRetryLoops !== null) {
+    lines.push(`Retry loops: avg_per_failed_task=${tasks.avgRetryLoops.toFixed(1)}`);
+  }
+
+  const body = lines.join('\n').slice(0, MAX_METRICS_SECTION_LENGTH);
+  return `\n\n<verification_metrics>\n${body}\n</verification_metrics>`;
+}
+
+// =============================================================================
 // Prompt Builder
 // =============================================================================
 
@@ -72,7 +131,8 @@ export function buildSummaryPrompt(
   worktrees: Map<string, string>,
   userInstruction?: string,
   commitLogs?: RepositoryCommitLogs,
-  issueInfos?: IssueInfo[]
+  issueInfos?: IssueInfo[],
+  metrics?: VibeMetrics
 ): string {
   const systemPrompt = `You are a technical report generator. Summarize the following work logs into a concise daily report in Japanese Markdown format.
 
@@ -201,9 +261,12 @@ ${sections.join('\n\n')}${truncationNote}
     commitLogSection = `\n\n<commit_log>\n${logLines.join('\n')}${truncNote}\n</commit_log>`;
   }
 
+  // Build verification metrics section (Issue #1551)
+  const metricsSection = metrics ? buildMetricsSection(metrics) : '';
+
   // Issue #634: Each section is individually truncated, so assemble them directly.
   // Fallback: if total exceeds MAX_PROMPT_LENGTH, shrink user_data.
-  const fullPrompt = `${systemPrompt}${instructionSection}\n\n${dataSection}${issueContextSection}${commitLogSection}`;
+  const fullPrompt = `${systemPrompt}${instructionSection}\n\n${dataSection}${issueContextSection}${commitLogSection}${metricsSection}`;
   if (fullPrompt.length <= MAX_PROMPT_LENGTH) {
     return fullPrompt;
   }
@@ -212,5 +275,5 @@ ${sections.join('\n\n')}${truncationNote}
   const overhead = fullPrompt.length - dataSection.length;
   const allowedDataLength = Math.max(0, MAX_PROMPT_LENGTH - overhead);
   const trimmedDataSection = dataSection.slice(0, allowedDataLength);
-  return `${systemPrompt}${instructionSection}\n\n${trimmedDataSection}${issueContextSection}${commitLogSection}`.slice(0, MAX_PROMPT_LENGTH);
+  return `${systemPrompt}${instructionSection}\n\n${trimmedDataSection}${issueContextSection}${commitLogSection}${metricsSection}`.slice(0, MAX_PROMPT_LENGTH);
 }

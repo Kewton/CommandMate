@@ -108,6 +108,17 @@ vi.mock('@/lib/summary-prompt-builder', () => ({
   buildSummaryPrompt: (...args: unknown[]) => mockBuildSummaryPrompt(...args),
 }));
 
+// Mock vibe-metrics - Issue #1551.
+// `mockDb` here is `{}`, so the real aggregator (which queries sqlite_master)
+// cannot run against it. The seam that actually matters — real rows becoming
+// real numbers in the prompt — is covered in daily-summary-metrics.test.ts
+// against a real database.
+const mockComputeVibeMetrics = vi.fn((..._args: unknown[]) => ({ periodDays: 1 }));
+vi.mock('@/lib/metrics/vibe-metrics', () => ({
+  computeVibeMetrics: (...args: unknown[]) => mockComputeVibeMetrics(...args),
+  MS_PER_DAY: 86_400_000,
+}));
+
 import {
   generateDailySummary,
   isGenerating,
@@ -424,7 +435,8 @@ describe('daily-summary-generator', () => {
         expect.any(Map),
         'Focus on testing',
         expect.any(Map),
-        expect.any(Array)
+        expect.any(Array),
+        expect.any(Object) // metrics (Issue #1551)
       );
     });
 
@@ -467,7 +479,8 @@ describe('daily-summary-generator', () => {
         expect.any(Map),
         undefined,
         mockCommitLogs,
-        expect.any(Array)
+        expect.any(Array),
+        expect.any(Object) // metrics (Issue #1551)
       );
     });
 
@@ -500,7 +513,8 @@ describe('daily-summary-generator', () => {
         expect.any(Map),
         undefined,
         expect.any(Map),
-        expect.any(Array)
+        expect.any(Array),
+        expect.any(Object) // metrics (Issue #1551)
       );
     });
 
@@ -543,7 +557,8 @@ describe('daily-summary-generator', () => {
         expect.any(Map),
         undefined,
         expect.any(Map),
-        mockIssueInfos
+        mockIssueInfos,
+        expect.any(Object) // metrics (Issue #1551)
       );
     });
 
@@ -577,7 +592,8 @@ describe('daily-summary-generator', () => {
         expect.any(Map),
         undefined,
         expect.any(Map),
-        [] // graceful degradation: empty array
+        [], // graceful degradation: empty array
+        expect.any(Object) // metrics (Issue #1551)
       );
     });
   });

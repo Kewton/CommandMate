@@ -64,7 +64,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate capture`](#commandmate-capture) | ターミナル出力の取得 |
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Auto-Yesの制御 |
 | [`commandmate instances`](#commandmate-instances) | エージェントインスタンス（roster）の一覧・追加・削除・alias変更 |
-| [`commandmate report`](#commandmate-report) | 日次レポートの生成・表示・一覧 |
+| [`commandmate report`](#commandmate-report) | 日次レポートの生成・表示・一覧、Eval メトリクス集計 |
 | [`commandmate skill`](#commandmate-skill) | 公式Skillのカタログ参照・Install Plan・install・uninstall・status |
 | [`commandmate update`](#commandmate-update) | CommandMate本体の更新（停止 → 更新 → 再起動） |
 
@@ -603,6 +603,10 @@ commandmate report show --date 2026-06-21 --json   # 日付指定＋JSON出力
 commandmate report list                            # 直近7日を一覧
 commandmate report list --days 30                  # 直近30日を一覧
 commandmate report list --json                     # JSON出力
+
+commandmate report metrics                         # 直近7日の Eval メトリクス
+commandmate report metrics --days 30               # 期間指定（1〜90日）
+commandmate report metrics --json                  # JSON出力
 ```
 
 ### サブコマンド
@@ -612,6 +616,7 @@ commandmate report list --json                     # JSON出力
 | `generate` | 指定日のレポートを生成し、内容を標準出力に表示 |
 | `show` | 既存レポートを表示（未生成なら `No report found` を表示） |
 | `list` | 直近 N 日分のレポート有無・メッセージ件数・生成ツールを一覧 |
+| `metrics` | タスク成功率・検証合格率・人間介入回数を集計（Issue #1551） |
 
 ### generate オプション
 
@@ -643,6 +648,44 @@ commandmate report list --json                     # JSON出力
 2026-06-20  [no report]  messages=3
 2026-06-19  [report] tool=codex  messages=8
 ```
+
+### metrics（Eval メトリクス、Issue #1551）
+
+「ハーネスがどれだけエージェントを放置したまま完走させられているか」を、`tasks` / `verification_runs` /
+`task_events` の実記録から集計します。**読み取り専用**で、集計のためのテーブル追加はありません。
+
+| オプション | 説明 | デフォルト |
+|-----------|------|-----------|
+| `--days <days>` | 集計期間（1〜90）。範囲外・非整数は `exit 2` | 7 |
+| `--json` | JSON形式で出力 | - |
+| `--token <token>` | 認証トークン（`CM_AUTH_TOKEN` 環境変数を推奨） | - |
+
+```
+$ commandmate report metrics
+Vibe Metrics (last 7 days)
+Tasks:        12 total / 9 succeeded / 2 failed / 1 not-started  (success 75.0%)
+Verification: 31 runs, pass 80.6%  (top fails: unit x4, lint x2)
+Intervention: 5 human responds / 23 auto answered
+Retry loops:  avg 1.3 per failed task
+```
+
+読み方:
+
+- **Tasks** — 期間内に作成された `tasks` 行。`total` には未完了（pending / running）も含まれる。
+  `success` は `succeeded / total`
+- **Verification** — 期間内に開始された検証 run。`top fails` は `failed` / `timeout` に終わったゲートの上位10件
+  （`skipped` と `error` は「判定していない」ので数えない）
+- **Intervention** — `prompt_answered_human`（人間が答えた）と `prompt_answered_auto`（Auto-Yes が答えた）の件数。
+  ポリシーで抑止された件数（`suppressedByPolicy`）は DB 化されていないため v1 では常に `null`
+- **Retry loops** — 不合格になったタスク 1 件あたりの平均再指示回数（`failed` / `not_started` からの `message_sent`）
+
+> **分母ゼロは `n/a`** — `0.0%` とは表示しません。「12件中0件成功」と「そもそも0件」を同じ文字列で報告しないためです。
+
+> **旧 DB でも動きます** — migration v49〜v51 が未適用のデータベースでは、該当セクションが 0 と `n/a` になるだけで
+> エラーにはなりません。
+
+日次レポート（`report generate`）のプロンプトにも、当日分の同じ集計が `<verification_metrics>` セクションとして
+渡されます。活動がゼロの日はセクション自体が省略されます。
 
 ---
 
