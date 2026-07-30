@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-### Added
+- **`.commandmate/tasks/*.yaml`（実行契約）を Git 追跡対象にし、追跡ポリシーを可視化** (#1545 の前提整備): `.commandmate/` はランタイムデータ置き場のため全体を除外しているが、その中の**設定**（`verify.yaml`・実行契約）はチームで共有すべきものなので追跡する必要がある。Phase 2-1 が契約を `.commandmate/tasks/<name>.yaml` に置く設計のため、着手前に規則を整えた。**負パターンを 1 行足すだけでは効かない** — git は除外されたディレクトリの中を走査しないので、ディレクトリを除外解除 → 中身を再除外 → 拡張子で許可、の 2 段構えが要る（#1540 で verify.yaml が踏んだ罠と同型）。利用者が状態を知る手段として `scripts/check-commandmate-tracking.sh`（`npm run check:tracking`）を追加し、追跡されるべきファイルと隣に置かれうる無視されるべきファイルの両方を一覧で報告する。規則を壊すと正しい書き方のヒントつきで exit 1 で落ちる。CI ガード `tests/unit/config/commandmate-tracking.test.ts` と設計文書 `docs/design/commandmate-directory-tracking.md` も追加した。判定には **`git check-ignore --no-index`** を使う — 既定では index が参照され、**すでに追跡済みのファイルはルールに関係なく「無視されない」と報告される**ため、`verify.yaml` の例外行を削除する変異を注入してもテストが緑のままだった（空振り緑）。`--no-index` 追加後は当該変異を含む 3 種の変異注入すべてでテストが実際に赤くなることを確認済み。
+
 
 - **検証ゲート Skill `cmate-verify` と `.commandmate/verify.yaml` v1 仕様を追加** (#1540): 検証ゲートの設定形式を製品実装（Phase 1）より先に実地検証するための先行 Skill。`docs/design/verification-config.md` を正準仕様とし、`.claude/skills/cmate-verify/` と `.agents/skills/cmate-verify/` へ byte-identical に配置（Claude は前者、Codex / Antigravity は後者しか読まない）。ランナーは bash 3.2 互換で、ゲートを定義順に逐次実行し**失敗しても残りを実行して全結果を報告**、判定は必ず実 exit code で行う（出力の grep は `$?` を隠す）。macOS に `timeout(1)` が無い前提で、job control による**プロセスグループ単位**の timeout kill を実装（直接の子だけを kill すると孫が生き残る／signal 送出前に pgid が pid と一致することを確認して無関係なプロセスグループを巻き込まない）。組み込みゲート `work-evidence` が「作業の痕跡ゼロ」を `not_started` として弾き、`skipInPrimaryCheckout` がメイン checkout でのコマンド実行を止める（全 skip は `passed` ではなく `skipped`）。fixture ベースの自己完結テスト 123 アサーション（vitest 非依存）＋ vitest ラッパで CI からも実行。
 
@@ -21,7 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **デモ動画収録スキル `demo-video` の基盤を追加** (#1553): 隔離デモ環境（使い捨て seed repo・専用ポート・$HOME 配下 DB・自前プロセスグループ）、キャプチャ済み ANSI カセットを tmux pane へ再生してサーバの status-detector／response poller／UI を実物のまま駆動する偽エージェント（LLM のみ差し替え・モックゼロ）、@playwright/test をライブラリとして使う scene 単位 webm 録画の 3 点。`.claude/skills` と `.agents/skills` へ byte-identical 配置。
 
-### Added
 
 - **`demo-video` に絵コンテ・日英テロップ・ffmpeg 合成・30 秒尺検証ゲートを追加** (#1554): `demo-video.sh` 一発で `demo-30s.ja.mp4` / `demo-30s.en.mp4` が出る。文言の編集点は `storyboard/default.yaml` だけで、シーンの尺もテロップの in/out も合成の切り貼りもそこから機械算出する（手書きタイムコードは無い）。ロケールはフル録画方式で、UI ごと切り替えて 2 回撮り、遷移ごとに `<html lang>` を実測して不一致ならテイクを失敗させる（「UI 言語がテロップ言語と一致」を目視でなく機械で担保）。テロップは HTML→透過 PNG→ffmpeg overlay で焼き込み（drawtext の日本語 fontfile／エスケープ問題を回避し意匠を CSS 1 箇所に集約、文字列は `textContent` 注入なので絵コンテがマークアップを注入できない）。尺は `ffprobe` 実測が 30.0±0.5s を外れたら **exit 1**。承認シーン用にカセットへ実キャプチャ由来の承認プロンプトを追加し、`{{TASK}}` 置換（承認後も元の指示を echo し続ける）と `Scene.prepare`（API 待ちを録画開始前に行う）を導入した。生成物はリポジトリ外に出しコミットしない（配布は Release アセット）。
 
