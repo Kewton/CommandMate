@@ -27,6 +27,12 @@ vi.mock('@/lib/detection/prompt-detector', () => ({
 }));
 vi.mock('@/lib/polling/auto-yes-resolver', () => ({
   resolveAutoAnswer: vi.fn().mockReturnValue(null),
+  resolveAutoAnswerWithPolicy: vi.fn().mockReturnValue({ answer: null, suppressedBy: null }),
+}));
+// Issue #1547: the poller reads the active task's contract before answering.
+// Without this stub the lookup would open the real database CM_DB_PATH names.
+vi.mock('@/lib/db/db-instance', () => ({
+  getDbInstance: vi.fn(() => ({ prepare: () => ({ get: () => undefined }) })),
 }));
 vi.mock('@/lib/prompt-answer-sender', () => ({
   sendPromptAnswer: vi.fn().mockResolvedValue(undefined),

@@ -92,6 +92,11 @@ export function useAutoYes({
     const promptKey = generatePromptKey({ type: promptData.type, question: promptData.question });
     if (lastAutoRespondedRef.current === promptKey) return;
 
+    // Issue #1547: no contract policy is applied here. This branch only runs
+    // when the server-side poller is absent (see the serverPollerActive guard
+    // above), and a browser cannot read the task row the policy comes from.
+    // Policy enforcement lives in auto-yes-poller.ts, which is what answers
+    // prompts whenever Auto-Yes is enabled through the API.
     const answer = resolveAutoAnswer(promptData);
     if (answer === null) return;
 

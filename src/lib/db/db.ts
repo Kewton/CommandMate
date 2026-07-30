@@ -223,6 +223,7 @@ export {
   listTasks,
   updateTaskStatus,
   getActiveTask,
+  getActiveTaskForInstance,
   isTerminalTaskStatus,
   TASK_STATUSES,
   TERMINAL_TASK_STATUSES,
