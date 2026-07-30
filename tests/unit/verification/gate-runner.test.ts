@@ -35,6 +35,7 @@ import type { VerificationGateResult } from '@/lib/db';
 import {
   CONFIG_GATE_ID,
   MAX_CONCURRENT_VERIFICATIONS,
+  SCOPE_GATE_ID,
   startVerification,
   VerificationConflictError,
   waitForVerification,
@@ -180,7 +181,10 @@ describe('startVerification — passing gates', () => {
     expect(run?.finishedAt).not.toBeNull();
 
     const gates = gatesById(runId);
-    expect([...gates.keys()]).toEqual([WORK_EVIDENCE_GATE_ID, 'first', 'second']);
+    // scope sits between the built-in evidence check and the command gates, and
+    // skips here because no contract is attached to the run (#1546).
+    expect([...gates.keys()]).toEqual([WORK_EVIDENCE_GATE_ID, SCOPE_GATE_ID, 'first', 'second']);
+    expect(gates.get(SCOPE_GATE_ID)?.status).toBe('skipped');
     expect(gates.get('first')?.status).toBe('passed');
     expect(gates.get('first')?.exitCode).toBe(0);
     expect(gates.get('second')?.status).toBe('passed');

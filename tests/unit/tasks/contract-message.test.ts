@@ -51,9 +51,11 @@ describe('validateContractAgainstVerifyConfig', () => {
     expect(validateContractAgainstVerifyConfig(contract(), CONFIG)).toEqual([]);
   });
 
-  it('accepts declared gate ids and the built-in work-evidence gate', () => {
+  it('accepts declared gate ids and the built-in gates', () => {
+    // The built-ins cannot appear in verify.yaml (RESERVED_GATE_IDS rejects
+    // them), so a contract naming one has to be accepted from this list alone.
     const issues = validateContractAgainstVerifyConfig(
-      contract('verify:\n  gates: [work-evidence, lint]\n'),
+      contract('verify:\n  gates: [work-evidence, scope, lint]\n'),
       CONFIG
     );
     expect(issues).toEqual([]);
@@ -86,27 +88,59 @@ describe('resolveContractGateIds', () => {
     expect(resolveContractGateIds(contract())).toBeNull();
   });
 
-  it('adds work-evidence when the contract requires it but forgot to list it', () => {
-    // A contract that says requireWorkEvidence while listing only [lint] would
-    // otherwise declare a rule no gate checks.
+  it('adds the built-in gates when the contract requires them but forgot to list them', () => {
+    // A contract that says requireWorkEvidence / requireScopeClean while listing
+    // only [lint] would otherwise declare rules no gate checks.
     expect(resolveContractGateIds(contract('verify:\n  gates: [lint]\n'))).toEqual([
       'work-evidence',
+      'scope',
       'lint',
     ]);
   });
 
-  it('does not duplicate work-evidence when the contract already lists it', () => {
+  it('does not duplicate a built-in gate the contract already lists', () => {
     expect(
       resolveContractGateIds(contract('verify:\n  gates: [work-evidence, lint]\n'))
-    ).toEqual(['work-evidence', 'lint']);
+    ).toEqual(['work-evidence', 'scope', 'lint']);
   });
 
-  it('leaves the list alone when work evidence is not required', () => {
+  it('lists the built-in gates in execution order, not in the order the contract typed them', () => {
+    // The list is what resolveGateCommands turns into "the commands that will
+    // run, in order", so a contract's typing order must not misreport the run.
+    expect(
+      resolveContractGateIds(contract('verify:\n  gates: [lint, scope, work-evidence]\n'))
+    ).toEqual(['work-evidence', 'scope', 'lint']);
+  });
+
+  it('keeps a built-in the contract listed even when its success flag is off', () => {
+    expect(
+      resolveContractGateIds(
+        contract('verify:\n  gates: [scope, lint]\nsuccess:\n  requireWorkEvidence: false\n')
+      )
+    ).toEqual(['scope', 'lint']);
+  });
+
+  it('leaves the list alone when neither built-in gate is required', () => {
+    expect(
+      resolveContractGateIds(
+        contract(
+          'verify:\n  gates: [lint]\nsuccess:\n  requireWorkEvidence: false\n  requireScopeClean: false\n'
+        )
+      )
+    ).toEqual(['lint']);
+  });
+
+  it('adds only the built-in gate whose flag is set', () => {
     expect(
       resolveContractGateIds(
         contract('verify:\n  gates: [lint]\nsuccess:\n  requireWorkEvidence: false\n')
       )
-    ).toEqual(['lint']);
+    ).toEqual(['scope', 'lint']);
+    expect(
+      resolveContractGateIds(
+        contract('verify:\n  gates: [lint]\nsuccess:\n  requireScopeClean: false\n')
+      )
+    ).toEqual(['work-evidence', 'lint']);
   });
 });
 
@@ -114,22 +148,37 @@ describe('resolveGateCommands', () => {
   it('expands the selected gate ids into their commands, in the declared order', () => {
     expect(
       resolveGateCommands(
-        contract('verify:\n  gates: [unit, lint]\nsuccess:\n  requireWorkEvidence: false\n'),
+        contract(
+          'verify:\n  gates: [unit, lint]\nsuccess:\n  requireWorkEvidence: false\n  requireScopeClean: false\n'
+        ),
         CONFIG
       )
     ).toEqual(['npm run test:unit', 'npm run lint']);
   });
 
-  it('expands an omitted gates list into work-evidence plus every gate', () => {
+  it('expands an omitted gates list into the built-in gates plus every gate', () => {
     const commands = resolveGateCommands(contract(), CONFIG);
     expect(commands[0]).toContain('work-evidence');
-    expect(commands.slice(1)).toEqual(['npm run lint', 'npm run test:unit']);
+    expect(commands[1]).toContain('scope');
+    expect(commands.slice(2)).toEqual(['npm run lint', 'npm run test:unit']);
   });
 
-  it('names the required work-evidence gate even when the contract omitted it', () => {
+  it('names the required built-in gates even when the contract omitted them', () => {
     const commands = resolveGateCommands(contract('verify:\n  gates: [lint]\n'), CONFIG);
     expect(commands[0]).toContain('work-evidence');
-    expect(commands[1]).toBe('npm run lint');
+    expect(commands[1]).toContain('scope');
+    expect(commands[2]).toBe('npm run lint');
+  });
+
+  it('leaves the scope gate unnamed when the contract does not require a clean scope', () => {
+    // Naming a gate that will skip would tell the agent a completion criterion
+    // the run does not apply.
+    const commands = resolveGateCommands(
+      contract('success:\n  requireScopeClean: false\n'),
+      CONFIG
+    );
+    expect(commands.some((command) => command.includes('scope'))).toBe(false);
+    expect(commands.slice(1)).toEqual(['npm run lint', 'npm run test:unit']);
   });
 });
 

@@ -12,6 +12,8 @@ goal: |
   受入条件は「何が満たされたら完了か」を検証可能な形で書くこと。
 scope:
   # worktree ルートからの相対 glob。絶対パスと .. は契約エラーになる。
+  # `src/lib/tasks` のようにディレクトリを書けば配下すべてが対象。glob の意味は
+  # docs/design/task-contract.md §2.2.1（[ ] はリテラル。文字クラスではない）。
   allow:
     - "src/lib/tasks/**"
     - "tests/unit/tasks/**"
@@ -29,5 +31,5 @@ autoYes:
   denyPatterns: []
 success:
   requireWorkEvidence: true
-  # scope ゲートは Phase 2-2（#1546）。それまでこのフラグは判定に使われない。
+  # true なら組み込み scope ゲートが走り、上の allow / deny の外を触った時点で不合格。
   requireScopeClean: true

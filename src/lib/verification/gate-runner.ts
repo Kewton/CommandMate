@@ -43,8 +43,10 @@ import {
 import { resolveDefaultBranchName } from '@/lib/git/git-default-branch';
 import { createLogger } from '@/lib/logger';
 import { resolveContractGateIds } from '@/lib/tasks/contract-message';
+import { evaluateScope } from './scope-gate';
 import {
   loadVerifyConfig,
+  SCOPE_GATE_ID,
   VERIFY_CONFIG_RELATIVE_PATH,
   VerifyConfigError,
   WORK_EVIDENCE_GATE_ID,
@@ -55,12 +57,11 @@ import {
 const logger = createLogger('lib/verification/gate-runner');
 
 /**
- * Built-in gate that answers "is there any work here to verify?" before the
- * expensive gates run. Defined in verify-config (where RESERVED_GATE_IDS keeps
- * a verify.yaml from shadowing it) and re-exported here, which is where callers
- * have always imported it from.
+ * Built-in gates. Defined in verify-config (where RESERVED_GATE_IDS keeps a
+ * verify.yaml from shadowing them) and re-exported here, which is where callers
+ * have always imported them from.
  */
-export { WORK_EVIDENCE_GATE_ID };
+export { WORK_EVIDENCE_GATE_ID, SCOPE_GATE_ID };
 
 /**
  * Pseudo-gate used to carry a config-load failure into the run record.
@@ -71,6 +72,15 @@ export { WORK_EVIDENCE_GATE_ID };
  * the path where zero real gates run, so it cannot collide with a user gate.
  */
 export const CONFIG_GATE_ID = 'config';
+
+/**
+ * What the built-in gates record in `command`.
+ *
+ * Neither runs a shell command, but the column is what a reader consults to see
+ * what a gate did, so it names the plumbing instead of being left null.
+ */
+const WORK_EVIDENCE_GATE_COMMAND = 'git merge-base / rev-list / status --porcelain';
+const SCOPE_GATE_COMMAND = 'git diff --name-only / status --porcelain × contract scope';
 
 /**
  * Concurrent runs allowed process-wide.
@@ -415,8 +425,20 @@ async function resolveBaseRef(config: VerifyConfig, worktreePath: string): Promi
   return defaultBranch ? `origin/${defaultBranch}` : null;
 }
 
+/**
+ * How the scope gate got into the selection.
+ *
+ * The distinction only matters when the gate skips. `explicit` means the caller
+ * asked for scope by name and did not get it, which is the "we declined to
+ * check" case {@link aggregateRunStatus} exists to keep out of `passed`.
+ * `implicit` means scope was in the default selection and no contract declared
+ * one — nothing was declined, because there was nothing to judge.
+ */
+type ScopeRequest = 'explicit' | 'implicit' | 'off';
+
 interface GateSelection {
   runWorkEvidence: boolean;
+  scope: ScopeRequest;
   gates: VerifyGate[];
 }
 
@@ -430,10 +452,14 @@ interface GateSelection {
  */
 function selectGates(config: VerifyConfig, gateIds: string[] | undefined): GateSelection | string {
   if (!gateIds) {
-    return { runWorkEvidence: true, gates: config.gates };
+    return { runWorkEvidence: true, scope: 'implicit', gates: config.gates };
   }
 
-  const known = new Set<string>([WORK_EVIDENCE_GATE_ID, ...config.gates.map((g) => g.id)]);
+  const known = new Set<string>([
+    WORK_EVIDENCE_GATE_ID,
+    SCOPE_GATE_ID,
+    ...config.gates.map((g) => g.id),
+  ]);
   const unknown = gateIds.filter((id) => !known.has(id));
   if (unknown.length > 0) {
     return `Unknown gate id(s): ${unknown.join(', ')}. Declared gates: ${[...known].join(', ')}.`;
@@ -442,9 +468,10 @@ function selectGates(config: VerifyConfig, gateIds: string[] | undefined): GateS
   const requested = new Set(gateIds);
   const selection: GateSelection = {
     runWorkEvidence: requested.has(WORK_EVIDENCE_GATE_ID),
+    scope: requested.has(SCOPE_GATE_ID) ? 'explicit' : 'off',
     gates: config.gates.filter((gate) => requested.has(gate.id)),
   };
-  if (!selection.runWorkEvidence && selection.gates.length === 0) {
+  if (!selection.runWorkEvidence && selection.scope === 'off' && selection.gates.length === 0) {
     return 'gateIds selected no gates; a run with no gates has nothing to report.';
   }
   return selection;
@@ -472,7 +499,8 @@ async function executeRun(
   worktreePath: string,
   config: VerifyConfig,
   selection: GateSelection,
-  baseRef: string | null
+  baseRef: string | null,
+  task: Task | null
 ): Promise<VerificationRunTerminalStatus> {
   const { maxLogTailBytes, skipInPrimaryCheckout } = config.options;
   const { runWorkEvidence, gates } = selection;
@@ -496,22 +524,48 @@ async function executeRun(
 
   if (runWorkEvidence) {
     const outcome = await evaluateWorkEvidence(worktreePath, baseRef);
-    record(WORK_EVIDENCE_GATE_ID, 'git merge-base / rev-list / status --porcelain', outcome);
+    record(WORK_EVIDENCE_GATE_ID, WORK_EVIDENCE_GATE_COMMAND, outcome);
 
     if (outcome.status !== 'passed') {
       // Nothing was produced, so every command gate below would be judging the
       // base commit. Record them as skipped so the run shows what was not run.
+      const notRun = `skipped: the ${WORK_EVIDENCE_GATE_ID} gate did not pass.`;
+      if (selection.scope !== 'off') {
+        record(SCOPE_GATE_ID, SCOPE_GATE_COMMAND, {
+          status: 'skipped',
+          exitCode: null,
+          durationMs: 0,
+          logTail: notRun,
+        });
+      }
       for (const gate of gates) {
         record(gate.id, gate.command, {
           status: 'skipped',
           exitCode: null,
           durationMs: 0,
-          logTail: `skipped: the ${WORK_EVIDENCE_GATE_ID} gate did not pass.`,
+          logTail: notRun,
         });
       }
       return outcome.status === 'failed' ? 'not_started' : 'error';
     }
     statuses.push(outcome.status);
+  }
+
+  if (selection.scope !== 'off') {
+    const outcome = await evaluateScope(
+      worktreePath,
+      task?.contract.scope ?? null,
+      task?.contract.success.requireScopeClean ?? false,
+      baseRef,
+      task?.contractPath ?? null
+    );
+    record(SCOPE_GATE_ID, SCOPE_GATE_COMMAND, outcome);
+    // A skipped scope gate in the default selection is not a declined check:
+    // no contract declared a scope, so there was no assertion to test. Counting
+    // it would turn every contract-less run into `error` (see aggregateRunStatus).
+    if (outcome.status !== 'skipped' || selection.scope === 'explicit') {
+      statuses.push(outcome.status);
+    }
   }
 
   const isPrimaryCheckout = skipInPrimaryCheckout && sameRealPath(worktreePath, process.cwd());
@@ -709,7 +763,8 @@ export async function startVerification(
         input.worktreePath,
         resolvedConfig,
         resolvedSelection,
-        baseRef
+        baseRef,
+        task
       );
       terminalStatus = status;
       finishVerificationRun(db, run.id, status);

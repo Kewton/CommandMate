@@ -15,30 +15,43 @@
  */
 
 import {
+  SCOPE_GATE_ID,
   VERIFY_CONFIG_RELATIVE_PATH,
   WORK_EVIDENCE_GATE_ID,
   type VerifyConfig,
 } from '@/lib/verification/verify-config';
 import type { TaskContract } from './contract-parser';
 
-/** How the built-in gate reads in the preamble; it runs git plumbing, not a shell command. */
+/** How the built-in gates read in the preamble; they run git plumbing, not shell commands. */
 const WORK_EVIDENCE_LABEL = `${WORK_EVIDENCE_GATE_ID}（commit または未 commit の変更が存在すること）`;
+const SCOPE_LABEL = `${SCOPE_GATE_ID}（変更ファイルが scope.allow の内側に収まっていること）`;
 
 /**
  * The gate ids a contract asks for, or null for "every gate".
  *
- * `success.requireWorkEvidence` — not the `verify.gates` list — decides whether
- * the built-in work-evidence gate runs. A contract that required work evidence
- * while listing only `[lint, unit]` would otherwise declare a rule that nothing
- * checked: the flag would read as enforced and the gate would never run.
+ * The `success` flags — not the `verify.gates` list — decide whether the built-in
+ * gates run. A contract that required work evidence or a clean scope while
+ * listing only `[lint, unit]` would otherwise declare rules that nothing
+ * checked: the flags would read as enforced and the gates would never run.
  */
 export function resolveContractGateIds(contract: TaskContract): string[] | null {
   const gates = contract.verify.gates;
   if (!gates) return null;
-  if (!contract.success.requireWorkEvidence || gates.includes(WORK_EVIDENCE_GATE_ID)) {
-    return gates;
-  }
-  return [WORK_EVIDENCE_GATE_ID, ...gates];
+
+  const builtIns = [
+    [WORK_EVIDENCE_GATE_ID, contract.success.requireWorkEvidence],
+    [SCOPE_GATE_ID, contract.success.requireScopeClean],
+  ] as const;
+
+  // Built-ins are listed first and in their execution order even when the
+  // contract already named one, so the resolved list reads as the order the run
+  // will actually take rather than the order the contract happened to type.
+  const selected = builtIns
+    .filter(([id, required]) => required || gates.includes(id))
+    .map(([id]) => id as string);
+  const rest = gates.filter((id) => !builtIns.some(([builtIn]) => builtIn === id));
+
+  return [...selected, ...rest];
 }
 
 /**
@@ -65,7 +78,11 @@ export function validateContractAgainstVerifyConfig(
     ];
   }
 
-  const known = new Set<string>([WORK_EVIDENCE_GATE_ID, ...config.gates.map((gate) => gate.id)]);
+  const known = new Set<string>([
+    WORK_EVIDENCE_GATE_ID,
+    SCOPE_GATE_ID,
+    ...config.gates.map((gate) => gate.id),
+  ]);
   const unknown = gates.filter((id) => !known.has(id));
   if (unknown.length === 0) return [];
 
@@ -87,15 +104,22 @@ export function resolveGateCommands(
 ): string[] {
   if (!config) return [];
 
+  const builtInLabels = new Map<string, string>([
+    [WORK_EVIDENCE_GATE_ID, WORK_EVIDENCE_LABEL],
+    [SCOPE_GATE_ID, SCOPE_LABEL],
+  ]);
+
   const selected = resolveContractGateIds(contract);
   if (!selected) {
-    return [WORK_EVIDENCE_LABEL, ...config.gates.map((gate) => gate.command)];
+    // An omitted gates list runs every gate, and the built-ins are still governed
+    // by the success flags rather than by the (absent) list.
+    const builtIns = [WORK_EVIDENCE_LABEL];
+    if (contract.success.requireScopeClean) builtIns.push(SCOPE_LABEL);
+    return [...builtIns, ...config.gates.map((gate) => gate.command)];
   }
 
   const byId = new Map(config.gates.map((gate) => [gate.id, gate.command] as const));
-  return selected.map((id) =>
-    id === WORK_EVIDENCE_GATE_ID ? WORK_EVIDENCE_LABEL : (byId.get(id) as string)
-  );
+  return selected.map((id) => builtInLabels.get(id) ?? (byId.get(id) as string));
 }
 
 /**
