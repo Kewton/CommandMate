@@ -43,6 +43,7 @@
     "prepublishOnly": "npm run build:all",
     "start": "NODE_ENV=production node dist/server/server.js",
     "lint": "eslint src --ext .js,.jsx,.ts,.tsx",
+    "check:tracking": "./scripts/check-commandmate-tracking.sh",
     "test": "NODE_ENV=test vitest",
     "test:ui": "NODE_ENV=test vitest --ui",
     "test:coverage": "NODE_ENV=test vitest --coverage",
