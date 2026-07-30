@@ -16,6 +16,7 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from './cli-session';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
+import { sessionStatusToActivityFlags } from './status-mapping';
 import { OPENCODE_PANE_HEIGHT } from '@/lib/cli-tools/opencode';
 import { GEMINI_PANE_HEIGHT } from '@/lib/cli-tools/gemini';
 import { STATUS_DETECTION_CAPTURE_LINES } from '@/config/status-capture-config';
@@ -129,8 +130,8 @@ async function detectInstanceSessionStatus(
       const lastServerResponseTs = getLastServerResponseTimestamp(compositeKey);
       const lastOutputTimestamp = lastServerResponseTs ? new Date(lastServerResponseTs) : undefined;
       const statusResult = detectSessionStatus(output, cliToolId, lastOutputTimestamp);
-      isWaitingForResponse = statusResult.status === 'waiting';
-      isProcessing = statusResult.status === 'running';
+      // Issue #1550: SessionStatus → activity flags lives in status-mapping.ts
+      ({ isWaitingForResponse, isProcessing } = sessionStatusToActivityFlags(statusResult.status));
 
       // Clean up stale pending prompts (scoped to this instance) if none is showing
       if (!statusResult.hasActivePrompt) {
