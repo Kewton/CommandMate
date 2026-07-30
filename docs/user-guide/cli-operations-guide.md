@@ -60,6 +60,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate wait`](#commandmate-wait) | エージェント完了の待機 |
 | [`commandmate respond`](#commandmate-respond) | プロンプトへの応答 |
 | [`commandmate verify`](#commandmate-verify) | 検証ゲート（.commandmate/verify.yaml）の実行 |
+| [`commandmate task`](#commandmate-task) | 実行契約（.commandmate/tasks/*.yaml）の一覧・詳細 |
 | [`commandmate capture`](#commandmate-capture) | ターミナル出力の取得 |
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Auto-Yesの制御 |
 | [`commandmate instances`](#commandmate-instances) | エージェントインスタンス（roster）の一覧・追加・削除・alias変更 |
@@ -335,6 +336,95 @@ Error: A verification run is already in progress for 'myrepo-feature-101' (run 4
 `verify.yaml` の `options.skipInPrimaryCheckout: true` は、サーバプロセス自身の作業ディレクトリと一致する worktree でコマンドゲートを `skipped` にします。配信中のビルド成果物を `npm run build` が差し替えて画面を壊す事故を防ぐためです。
 
 skipped を含む run は `passed` ではなく `error`（exit 99）になります。「検証しなかった」が「検証して問題なかった」として読まれないようにするためです。
+
+---
+
+## commandmate task
+
+`.commandmate/tasks/<name>.yaml` に宣言した**実行契約**を送信し、記録された task を参照します。
+
+契約は「目的・変更許可スコープ・合格条件・Auto-Yes ポリシー」を**送信前に宣言**するもので、
+送信メッセージにそのまま埋め込まれ、`verify` の既定ゲートにもなります。
+正準仕様は [docs/design/task-contract.md](../design/task-contract.md)。
+
+> 本フェーズ（#1545）の契約は**宣言**であって**強制**ではありません。
+> scope のゲート化は #1546、autoYes の enforcement は #1547 です。
+
+### 契約付き送信（`send --contract`）
+
+```bash
+# 契約を送る。message 引数は取らない（契約の goal が本文になる）
+commandmate send myrepo-feature-101 --contract .commandmate/tasks/loader.yaml
+
+# task id は stdout に出るので変数に取れる
+TASK=$(commandmate send myrepo-feature-101 --contract .commandmate/tasks/loader.yaml)
+
+# 既存オプションと併用できる
+commandmate send myrepo-feature-101 --contract .commandmate/tasks/loader.yaml \
+  --agent codex --instance codex-2 --auto-yes --duration 3h
+```
+
+エージェントには契約前文＋goal が送られます。前文の「完了条件」行は
+`verify.yaml` の `gates[].command` を解決した**実コマンド**で書かれます。
+
+```
+## 実行契約
+- 変更してよいのは次のパスのみ: src/lib/tasks/**, tests/unit/tasks/**
+- 作業完了後は必ず commit すること（未 commit の作業は未完了とみなされる）
+- 完了条件: 次の検証コマンドがすべて成功すること: npm run lint / npx tsc --noEmit
+
+## タスク
+（契約の goal）
+```
+
+契約が不正な場合は **exit 2** で、違反が**全件**表示されます（task は作られません）。
+`verify.gates` が `verify.yaml` に無いゲート id を指している場合もここで弾かれます。
+
+```
+Error: invalid task contract:
+  - version: must be 1 (got 3)
+  - scope.allow: at least one pattern is required while success.requireScopeClean is true
+```
+
+### 一覧・詳細
+
+```bash
+commandmate task list <worktree-id>              # 新しい順（TSV: id / status / agent / gates / title）
+commandmate task list <worktree-id> --limit 5
+commandmate task list <worktree-id> --json
+commandmate task show <task-id>                 # 契約＋最後に判定した検証ランの要約
+commandmate task show <task-id> --json
+```
+
+### status の意味
+
+| status | 意味 |
+|--------|------|
+| `pending` | task 行はあるが未送信 |
+| `running` | 送信済み。エージェントが作業中 |
+| `waiting_input` | プロンプト待ち（Phase 3-1 で使用） |
+| `verifying` | 検証ラン実行中 |
+| `succeeded` | 検証ランが `passed` |
+| `failed` | 検証ランが `failed`、または送信・検証が成立しなかった |
+| `not_started` | 検証ランが `not_started`（作業証跡ゼロ） |
+| `cancelled` | 明示的に中止 |
+
+`succeeded` は検証ランだけが与えられる判定です。CLI やクライアントから
+`succeeded` を報告することはできません（API が 400 で拒否します）。
+
+### wait --verify との連携
+
+`wait --verify` は CLI 側に追加指定は要りません。サーバが worktree の
+active task（`running` / `waiting_input` / `verifying` の最新1件）を解決し、
+契約の `verify.gates` を既定のゲート集合として検証し、結果で task を遷移させます。
+
+```bash
+commandmate send <id> --contract .commandmate/tasks/loader.yaml
+commandmate wait <id> --on-prompt human --verify   # 合格 0 / 不合格 20 / 作業証跡ゼロ 21
+commandmate task show "$TASK"                      # succeeded / failed / not_started
+```
+
+`verify --gates` を明示した場合は契約より明示指定が優先されます。
 
 ---
 

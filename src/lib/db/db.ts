@@ -215,3 +215,23 @@ export type {
   CreateGateResultInput,
   FinishGateResultPatch,
 } from './verification-db';
+
+// tasks-db (execution contracts, Issue #1545)
+export {
+  createTask,
+  getTask,
+  listTasks,
+  updateTaskStatus,
+  getActiveTask,
+  isTerminalTaskStatus,
+  TASK_STATUSES,
+  TERMINAL_TASK_STATUSES,
+  ACTIVE_TASK_STATUSES,
+} from './tasks-db';
+export type {
+  Task,
+  TaskStatus,
+  TerminalTaskStatus,
+  CreateTaskInput,
+  UpdateTaskStatusPatch,
+} from './tasks-db';

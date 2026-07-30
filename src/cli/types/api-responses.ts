@@ -485,3 +485,71 @@ export interface VerificationRunView {
 export interface VerifyRunResponse {
   run: VerificationRunView;
 }
+
+// =============================================================================
+// Task contracts (Issue #1545)
+// =============================================================================
+
+/** Mirrors: src/lib/db/tasks-db.ts TaskStatus. */
+export type TaskStatus =
+  | 'pending'
+  | 'running'
+  | 'waiting_input'
+  | 'verifying'
+  | 'succeeded'
+  | 'failed'
+  | 'not_started'
+  | 'cancelled';
+
+/**
+ * Mirrors: src/lib/tasks/contract-parser.ts TaskContract.
+ * The snapshot taken at send time, as stored in `tasks.contract_json`.
+ */
+export interface TaskContractView {
+  version: number;
+  title: string;
+  goal: string;
+  scope: { allow: string[]; deny: string[] };
+  verify: { gates: string[] | null };
+  autoYes: { mode: string | null; allowPromptTypes: string[]; denyPatterns: string[] };
+  success: { requireWorkEvidence: boolean; requireScopeClean: boolean };
+}
+
+/**
+ * Mirrors: src/lib/db/tasks-db.ts Task.
+ * Dates arrive as ISO strings because the route serializes them through JSON.
+ */
+export interface TaskView {
+  id: string;
+  worktreeId: string;
+  cliToolId: string;
+  instanceId: string | null;
+  title: string;
+  goal: string;
+  contractPath: string | null;
+  contract: TaskContractView;
+  status: TaskStatus;
+  lastVerificationRunId: number | null;
+  createdAt: string;
+  updatedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+/** Mirrors: src/app/api/worktrees/[id]/tasks/route.ts POST response. */
+export interface TaskCreateResponse {
+  task: TaskView;
+  /** Contract preamble + goal, composed server-side; this is what gets sent. */
+  message: string;
+}
+
+/** Mirrors: src/app/api/worktrees/[id]/tasks/route.ts GET response. */
+export interface TaskListResponse {
+  tasks: TaskView[];
+}
+
+/** Mirrors: src/app/api/tasks/[taskId]/route.ts GET response. */
+export interface TaskDetailResponse {
+  task: TaskView;
+  lastVerificationRun: VerificationRunView | null;
+}

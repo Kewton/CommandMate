@@ -287,6 +287,12 @@ export interface ApiErrorPayload {
   blockers?: Array<{ code: string; path: string | null }>;
   /** Issue #1544: run already in flight, sent with the verify route's 409. */
   runningRunId?: number;
+  /**
+   * Issue #1545: every task-contract violation, sent with the tasks route's 400.
+   * Printed in full so a broken contract is fixed in one pass, not one round
+   * trip per mistake.
+   */
+  issues?: string[];
 }
 
 /**
