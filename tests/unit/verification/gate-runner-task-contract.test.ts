@@ -22,11 +22,13 @@ import {
   createTask,
   getTask,
   getVerificationRun,
-  updateTaskStatus,
+  listTaskEvents,
   upsertWorktree,
   type Task,
   type TaskStatus,
 } from '@/lib/db';
+// See tasks-db.test.ts: fixtures reach past the barrel on purpose (#1548).
+import { updateTaskStatus } from '@/lib/db/tasks-db';
 import { parseTaskContract } from '@/lib/tasks/contract-parser';
 import { startVerification, waitForVerification } from '@/lib/verification/gate-runner';
 
@@ -428,5 +430,97 @@ describe('task status transitions (continued)', () => {
 
     const runId = await runToCompletion({ taskId: missingTaskId });
     expect(getVerificationRun(db, runId)?.taskId).toBe(missingTaskId);
+  });
+});
+
+/**
+ * Issue #1548: the run is the source of the verify_* events, so the log has to
+ * show a task entering verification and leaving it with a named verdict — not
+ * just the final status, which cannot distinguish "the gates failed" from
+ * "something wrote failed".
+ */
+describe('task events raised by a run', () => {
+  const eventLog = (taskId: string) =>
+    listTaskEvents(db, taskId).map((e) => [e.event, e.toStatus]);
+
+  it('brackets a passing run with verify_started and verify_passed', async () => {
+    const task = seedTask({ gates: ['work-evidence', 'pass-gate'] });
+    addWork();
+
+    const runId = await runToCompletion();
+    expect(eventLog(task.id)).toEqual([
+      ['verify_started', 'verifying'],
+      ['verify_passed', 'succeeded'],
+    ]);
+    expect(listTaskEvents(db, task.id).every((e) => e.payload?.runId === runId)).toBe(true);
+  });
+
+  it('names the verdict for a failing run', async () => {
+    const task = seedTask({ gates: ['fail-gate'] });
+    addWork();
+
+    await runToCompletion();
+    expect(eventLog(task.id)).toEqual([
+      ['verify_started', 'verifying'],
+      ['verify_failed', 'failed'],
+    ]);
+  });
+
+  it('names the verdict when the agent produced nothing', async () => {
+    const task = seedTask({ gates: ['work-evidence', 'pass-gate'] });
+
+    await runToCompletion();
+    expect(eventLog(task.id)).toEqual([
+      ['verify_started', 'verifying'],
+      ['verify_not_started', 'not_started'],
+    ]);
+  });
+
+  it('still passes through verifying when the config is unusable', async () => {
+    // The run opened and errored immediately. Jumping straight to a verdict
+    // would be a transition the machine has no rule for, so the task would
+    // never leave `running` at all.
+    const task = seedTask();
+    addWork();
+    writeFileSync(join(repo, '.commandmate', 'verify.yaml'), 'version: 1\ngates: []\n');
+
+    await runToCompletion();
+    expect(eventLog(task.id)).toEqual([
+      ['verify_started', 'verifying'],
+      ['verify_failed', 'failed'],
+    ]);
+  });
+
+  it('records the refusal when a run targets an already-succeeded task', async () => {
+    const task = seedTask({ gates: ['pass-gate'] });
+    updateTaskStatus(db, task.id, 'succeeded');
+    addWork();
+
+    await runToCompletion({ taskId: task.id });
+    // Both events are refused, and both are on the record: a run that tried to
+    // reopen a closed task is exactly the thing worth being able to find later.
+    expect(eventLog(task.id)).toEqual([
+      ['verify_started', null],
+      ['verify_passed', null],
+    ]);
+    expect(getTask(db, task.id)?.status).toBe('succeeded');
+  });
+
+  it('reopens a failed task for a re-run, which a terminal-status check could not', async () => {
+    const task = seedTask({ gates: ['pass-gate'] });
+    updateTaskStatus(db, task.id, 'failed');
+    addWork();
+
+    await runToCompletion({ taskId: task.id });
+    expect(eventLog(task.id)).toEqual([
+      ['verify_started', 'verifying'],
+      ['verify_passed', 'succeeded'],
+    ]);
+  });
+
+  it('writes no events at all when no task governs the run', async () => {
+    addWork();
+    await runToCompletion();
+    expect(db.prepare('SELECT COUNT(*) AS n FROM task_events').get()).toEqual({ n: 0 });
   });
 });

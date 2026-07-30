@@ -19,6 +19,7 @@ import { isValidSubmitMode } from '@/types/models';
 import { createLogger } from '@/lib/logger';
 import { startPolling } from '@/lib/polling/response-poller';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
+import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 
 const logger = createLogger('api/prompt-response');
 
@@ -154,6 +155,18 @@ export async function POST(
         { status: 500 }
       );
     }
+
+    // Issue #1548: a person answered. Attributed to the instance that was asked
+    // — `instanceId` is undefined for the primary, which `getActiveTaskForInstance`
+    // expects to be named by the tool id.
+    //
+    // Caveat: the browser-side Auto-Yes fallback (`useAutoYes`) posts here too,
+    // and is recorded as human. It only runs when the server poller is absent,
+    // which is also when nothing else would record the answer at all — an
+    // over-count is preferable to a gap in the log.
+    applyEventToActiveTask(db, id, cliToolId, instanceId ?? cliToolId, 'prompt_answered_human', {
+      promptType: promptCheck?.promptData?.type,
+    });
 
     // The prompt poller normally stops while waiting for input. Resume response
     // persistence and independently push the TUI redraw after this interaction.

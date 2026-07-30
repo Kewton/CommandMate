@@ -39,10 +39,14 @@ import {
   getTask,
   isTerminalTaskStatus,
   listTasks,
-  updateTaskStatus,
   type Task,
   type TaskStatus,
 } from '@/lib/db';
+// `updateTaskStatus` is deliberately not re-exported from the `@/lib/db` barrel
+// (#1548): production code must go through `applyTaskEvent`, which is the only
+// writer that also records why the status moved. These tests are the unit tests
+// *of* `updateTaskStatus`, so they take the module's own path.
+import { updateTaskStatus } from '@/lib/db/tasks-db';
 import { parseTaskContract, type TaskContract } from '@/lib/tasks/contract-parser';
 
 let db: Database.Database;

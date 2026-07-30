@@ -7,7 +7,15 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { POST as respondToPrompt } from '@/app/api/worktrees/[id]/respond/route';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
-import { upsertWorktree, createMessage, getMessageById } from '@/lib/db';
+import {
+  upsertWorktree,
+  createMessage,
+  getMessageById,
+  createTask,
+  getTask,
+  listTaskEvents,
+} from '@/lib/db';
+import { parseTaskContract } from '@/lib/tasks/contract-parser';
 import type { Worktree } from '@/types/models';
 
 // Declare mock function type
@@ -499,6 +507,81 @@ describe('POST /api/worktrees/:id/respond', () => {
       });
 
       expect(response.status).toBe(200);
+    });
+  });
+
+  /**
+   * Issue #1548: this route is the human half of the prompt loop, and Phase 4
+   * counts human interventions from these rows. The contract-less case matters
+   * more than the contracted one — it is what every user without a contract
+   * hits, and it must produce no rows at all.
+   */
+  describe('task events', () => {
+    const seedPrompt = () =>
+      createMessage(db, {
+        worktreeId: 'test-worktree',
+        role: 'assistant',
+        content: 'Do you want to proceed?',
+        messageType: 'prompt',
+        promptData: {
+          type: 'yes_no',
+          question: 'Do you want to proceed?',
+          options: ['yes', 'no'],
+          status: 'pending',
+        },
+        timestamp: new Date(),
+      });
+
+    const seedTask = (status: 'waiting_input' | 'succeeded') =>
+      createTask(db, {
+        worktreeId: 'test-worktree',
+        cliToolId: 'claude',
+        instanceId: null,
+        contractPath: '.commandmate/tasks/t.yaml',
+        contract: parseTaskContract(
+          'version: 1\ntitle: t\ngoal: do it\nscope:\n  allow: ["src/**"]\n',
+          'task.yaml'
+        ),
+        status,
+      });
+
+    const respond = async (messageId: string) =>
+      respondToPrompt(
+        new Request('http://localhost:3000/api/worktrees/test-worktree/respond', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messageId, answer: 'yes' }),
+        }) as unknown as import('next/server').NextRequest,
+        { params: Promise.resolve({ id: 'test-worktree' }) }
+      );
+
+    it('records prompt_answered_human against the waiting task', async () => {
+      const task = seedTask('waiting_input');
+      const message = seedPrompt();
+
+      expect((await respond(message.id)).status).toBe(200);
+
+      expect(getTask(db, task.id)?.status).toBe('running');
+      expect(listTaskEvents(db, task.id).map((e) => [e.event, e.toStatus])).toEqual([
+        ['prompt_answered_human', 'running'],
+      ]);
+    });
+
+    it('answers normally and writes nothing when no contract is running', async () => {
+      const message = seedPrompt();
+
+      expect((await respond(message.id)).status).toBe(200);
+      expect(getMessageById(db, message.id)?.promptData?.status).toBe('answered');
+      expect(db.prepare('SELECT COUNT(*) AS n FROM task_events').get()).toEqual({ n: 0 });
+    });
+
+    it('leaves a closed task closed, without recording a phantom answer', async () => {
+      const task = seedTask('succeeded');
+      const message = seedPrompt();
+
+      expect((await respond(message.id)).status).toBe(200);
+      expect(getTask(db, task.id)?.status).toBe('succeeded');
+      expect(listTaskEvents(db, task.id)).toHaveLength(0);
     });
   });
 });

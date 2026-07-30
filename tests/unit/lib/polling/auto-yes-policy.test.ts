@@ -24,7 +24,9 @@ vi.mock('@/lib/db/db-instance', () => ({
   },
 }));
 
-import { createTask, updateTaskStatus, type Task, type TaskStatus } from '@/lib/db';
+import { createTask, type Task, type TaskStatus } from '@/lib/db';
+// See tasks-db.test.ts: fixtures reach past the barrel on purpose (#1548).
+import { updateTaskStatus } from '@/lib/db/tasks-db';
 import { parseTaskContract, type TaskContract } from '@/lib/tasks/contract-parser';
 import {
   AUTO_YES_POLICY_CACHE_TTL_MS,

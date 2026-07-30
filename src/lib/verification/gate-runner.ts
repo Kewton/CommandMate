@@ -32,10 +32,7 @@ import {
   getActiveTask,
   getRunningVerificationRun,
   getTask,
-  isTerminalTaskStatus,
-  updateTaskStatus,
   type Task,
-  type TaskStatus,
   type VerificationGateTerminalStatus,
   type VerificationRunTerminalStatus,
   type VerificationTrigger,
@@ -43,6 +40,8 @@ import {
 import { resolveDefaultBranchName } from '@/lib/git/git-default-branch';
 import { createLogger } from '@/lib/logger';
 import { resolveContractGateIds } from '@/lib/tasks/contract-message';
+import type { TaskEvent } from '@/lib/tasks/task-state-machine';
+import { applyTaskEvent } from '@/lib/tasks/task-transition-service';
 import { evaluateScope } from './scope-gate';
 import {
   loadVerifyConfig,
@@ -600,44 +599,48 @@ async function executeRun(
 // =============================================================================
 
 /**
- * Translate a run verdict into the task's terminal status.
+ * Translate a run verdict into the event that closes the task.
  *
- * `error` maps to `failed`: no verdict was reached, and a task that could not be
- * verified is not a task that passed. Leaving it in `verifying` forever would be
- * a worse lie than calling it failed — the reason is recorded in the run's
- * `config` gate log_tail.
+ * `error` maps to `verify_failed`: no verdict was reached, and a task that could
+ * not be verified is not a task that passed. Leaving it in `verifying` forever
+ * would be a worse lie than calling it failed — the reason is recorded in the
+ * run's `config` gate log_tail.
  */
-function taskStatusForRunStatus(status: VerificationRunTerminalStatus): TaskStatus {
+function taskEventForRunStatus(status: VerificationRunTerminalStatus): TaskEvent {
   switch (status) {
     case 'passed':
-      return 'succeeded';
+      return 'verify_passed';
     case 'not_started':
-      return 'not_started';
+      return 'verify_not_started';
     case 'cancelled':
-      return 'cancelled';
+      return 'cancel';
     default:
-      return 'failed';
+      return 'verify_failed';
   }
 }
 
 /**
- * Record a task transition, tolerating a task that vanished mid-run.
+ * Raise a task event, tolerating a task that vanished mid-run.
  *
  * A deleted worktree takes its tasks with it; the run's own record is already
  * written by then, so failing here would lose a verdict that exists.
+ *
+ * Whether the event is allowed is the state machine's decision, not this
+ * module's — a run against an already-`succeeded` task is refused there, and the
+ * refusal is recorded in `task_events` instead of vanishing.
  */
 function recordTaskTransition(
   db: Database.Database,
   taskId: string,
-  status: TaskStatus,
+  event: TaskEvent,
   runId?: number
 ): void {
   try {
-    updateTaskStatus(db, taskId, status, runId === undefined ? {} : { lastVerificationRunId: runId });
+    applyTaskEvent(db, taskId, event, runId === undefined ? undefined : { runId });
   } catch (error) {
     logger.warn('task-transition-failed', {
       taskId,
-      status,
+      event,
       error: error instanceof Error ? error.message : String(error),
     });
   }
@@ -719,10 +722,12 @@ export async function startVerification(
     baseRef,
   });
 
-  // A task already in a terminal state is history: re-verifying it must not
-  // reopen it, or a `succeeded` task could be silently walked back by an
-  // unrelated manual run.
-  const trackedTask = task && !isTerminalTaskStatus(task.status) ? task : null;
+  // Whether this run may move the task is the state machine's call (#1548).
+  // It refuses `verify_started` from `succeeded`/`cancelled`, so an unrelated
+  // manual run still cannot walk back a recorded verdict — while a `failed`
+  // task, which a retry legitimately reopens, is no longer excluded by a status
+  // check that could not tell the two apart.
+  const trackedTask = task;
 
   if (!config || !selection) {
     // Closed synchronously: there is no work to schedule, and leaving the row
@@ -741,14 +746,18 @@ export async function startVerification(
     finishVerificationRun(db, run.id, 'error');
     logger.warn('verification-config-unusable', { runId: run.id, worktreeId: input.worktreeId });
     if (trackedTask) {
-      // An unusable config means this task can never be shown to have passed.
-      recordTaskTransition(db, trackedTask.id, 'failed', run.id);
+      // The run opened and immediately errored, so the task passes through
+      // `verifying` the same way it would for gates that ran: an unusable config
+      // means this task can never be shown to have passed, and going straight to
+      // `verify_failed` would be a transition the machine has no rule for.
+      recordTaskTransition(db, trackedTask.id, 'verify_started', run.id);
+      recordTaskTransition(db, trackedTask.id, 'verify_failed', run.id);
     }
     return { runId: run.id };
   }
 
   if (trackedTask) {
-    recordTaskTransition(db, trackedTask.id, 'verifying', run.id);
+    recordTaskTransition(db, trackedTask.id, 'verify_started', run.id);
   }
 
   const resolvedConfig = config;
@@ -781,10 +790,8 @@ export async function startVerification(
       }
       return 'error';
     } finally {
-      // Phase 2-1 writes the task status directly; Phase 3-1 replaces this with
-      // a state-machine transition (docs/design/task-contract.md §6).
       if (trackedTask) {
-        recordTaskTransition(db, trackedTask.id, taskStatusForRunStatus(terminalStatus), run.id);
+        recordTaskTransition(db, trackedTask.id, taskEventForRunStatus(terminalStatus), run.id);
       }
       releaseSlot();
       inFlight.delete(run.id);
