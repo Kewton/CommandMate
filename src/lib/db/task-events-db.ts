@@ -25,6 +25,14 @@ export interface TaskEventPayload {
   promptType?: string;
   /** Why a caller raised the event, when that is not obvious from the event. */
   reason?: string;
+  /**
+   * Which detection path produced the event (#1549).
+   *
+   * Only `hook` is written today: the agent CLI told us directly. Screen-scraped
+   * detections deliberately leave it unset, so a query for hook-sourced rows
+   * cannot accidentally include them while the two sources run side by side.
+   */
+  source?: 'hook';
 }
 
 export interface TaskEventRecord {

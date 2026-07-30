@@ -32,6 +32,7 @@
     ".next/",
     "!.next/cache",
     "public/",
+    "scripts/hooks/",
     ".env.example"
   ],
   "scripts": {

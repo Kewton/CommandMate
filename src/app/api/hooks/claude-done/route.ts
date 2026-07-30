@@ -1,6 +1,12 @@
 /**
  * API Route: POST /api/hooks/claude-done
  * Webhook called when Claude CLI completes a request
+ *
+ * Superseded by `/api/hooks/agent-event` (Issue #1549) and kept for the hook
+ * configurations already pointing here. It still owns what it always owned —
+ * capturing the pane and turning it into a message — and delegates the stop
+ * event itself to the shared handler, so a task governed by a contract reaches
+ * the same state whichever endpoint the agent was wired to.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -10,6 +16,7 @@ import { captureClaudeOutput } from '@/lib/session/claude-session';
 import { broadcastMessage } from '@/lib/ws-server';
 import { parseClaudeOutput } from '@/lib/claude-output';
 import { recordClaudeConversation } from '@/lib/conversation-logger';
+import { applyAgentStopEvent } from '@/lib/hooks/agent-event-service';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/hooks-claude-done');
@@ -83,6 +90,11 @@ export async function POST(request: NextRequest) {
       worktreeId: body.worktreeId,
       message,
     });
+
+    // Same effects as POST /api/hooks/agent-event with {tool:'claude',event:'stop'}.
+    // Runs last so a task-log or verification failure cannot cost this endpoint
+    // the message it exists to record.
+    await applyAgentStopEvent(db, worktree, 'claude', 'claude');
 
     logger.info('processed-claude-response-for-worktree:');
 

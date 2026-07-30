@@ -20,6 +20,7 @@ import {
   buildCompositeKey,
 } from '@/lib/polling/auto-yes-manager';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
+import { getLastStopEventAt } from '@/lib/session/agent-event-state';
 import type { PromptData } from '@/types/models';
 
 export interface CurrentOutputPayload {
@@ -48,6 +49,16 @@ export interface CurrentOutputPayload {
   isUnclassifiedActive?: boolean;
   lastServerResponseTimestamp?: number | null;
   serverPollerActive?: boolean;
+  /**
+   * Epoch ms of the last `POST /api/hooks/agent-event` stop event, or null when
+   * the agent has no hook wired up (Issue #1549).
+   *
+   * Exposed only. `sessionStatus` and every completion decision downstream still
+   * come from the string analysis above; this is the second opinion, published
+   * so the two can be compared on real sessions before either is trusted over
+   * the other.
+   */
+  lastStopEventAt: number | null;
 }
 
 /**
@@ -68,6 +79,8 @@ export async function buildCurrentOutput(
   const manager = CLIToolManager.getInstance();
   const cliTool = manager.getTool(cliToolId);
 
+  const stopEventAt = getLastStopEventAt(worktreeId, cliToolId, instanceId);
+
   const running = await cliTool.isRunning(worktreeId, instanceId);
   if (!running) {
     return {
@@ -77,6 +90,7 @@ export async function buildCurrentOutput(
       cliToolId,
       sessionStatus: 'idle',
       sessionStatusReason: 'session_not_running',
+      lastStopEventAt: stopEventAt,
     };
   }
 
@@ -141,5 +155,6 @@ export async function buildCurrentOutput(
     isUnclassifiedActive,
     lastServerResponseTimestamp,
     serverPollerActive: isPollerActive(compositeKey),
+    lastStopEventAt: stopEventAt,
   };
 }

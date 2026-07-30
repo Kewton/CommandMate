@@ -71,7 +71,7 @@ describe('parseTaskContract — valid documents', () => {
       scope: { allow: ['src/lib/tasks/**'], deny: [] },
       verify: { gates: null },
       autoYes: { mode: null, allowPromptTypes: [], denyPatterns: [] },
-      success: { requireWorkEvidence: true, requireScopeClean: true },
+      success: { requireWorkEvidence: true, requireScopeClean: true, autoVerifyOnStop: false },
     });
   });
 
@@ -92,6 +92,7 @@ autoYes:
 success:
   requireWorkEvidence: false
   requireScopeClean: false
+  autoVerifyOnStop: true
 `,
       'task.yaml'
     );
@@ -103,7 +104,11 @@ success:
       allowPromptTypes: ['yes_no', 'approval'],
       denyPatterns: ['force.?push', 'rm -rf'],
     });
-    expect(contract.success).toEqual({ requireWorkEvidence: false, requireScopeClean: false });
+    expect(contract.success).toEqual({
+      requireWorkEvidence: false,
+      requireScopeClean: false,
+      autoVerifyOnStop: true,
+    });
   });
 
   it('treats childless sub-maps as "all defaults"', () => {
@@ -122,7 +127,43 @@ success:
 
     expect(contract.verify.gates).toBeNull();
     expect(contract.autoYes.mode).toBeNull();
-    expect(contract.success).toEqual({ requireWorkEvidence: true, requireScopeClean: true });
+    expect(contract.success).toEqual({
+      requireWorkEvidence: true,
+      requireScopeClean: true,
+      autoVerifyOnStop: false,
+    });
+  });
+
+  it('defaults autoVerifyOnStop to false while its siblings default to true', () => {
+    // The asymmetry is deliberate (#1549): this is the one success flag that
+    // makes the server start a verification run rather than judge one, so a
+    // contract written before the field existed must stay inert.
+    const contract = parseTaskContract(MINIMAL, 'task.yaml');
+
+    expect(contract.success.autoVerifyOnStop).toBe(false);
+    expect(contract.success.requireWorkEvidence).toBe(true);
+  });
+
+  it('accepts autoVerifyOnStop as a boolean and as a quoted boolean', () => {
+    for (const literal of ['true', '"true"']) {
+      const contract = parseTaskContract(
+        `${MINIMAL}success:\n  autoVerifyOnStop: ${literal}\n`,
+        'task.yaml'
+      );
+      expect(contract.success.autoVerifyOnStop, `for ${literal}`).toBe(true);
+    }
+    expect(
+      parseTaskContract(`${MINIMAL}success:\n  autoVerifyOnStop: false\n`, 'task.yaml').success
+        .autoVerifyOnStop
+    ).toBe(false);
+  });
+
+  it('rejects a non-boolean autoVerifyOnStop instead of coercing it', () => {
+    // "yes it should verify" quietly becoming false would be a contract that
+    // reads as configured and is not.
+    expect(() =>
+      parseTaskContract(`${MINIMAL}success:\n  autoVerifyOnStop: sometimes\n`, 'task.yaml')
+    ).toThrow(/autoVerifyOnStop: must be true or false/);
   });
 
   it('allows an empty scope only when requireScopeClean is false', () => {
