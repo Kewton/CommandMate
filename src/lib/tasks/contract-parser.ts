@@ -86,6 +86,15 @@ export interface TaskContractSuccess {
   requireWorkEvidence: boolean;
   /** Honoured by the scope gate in Phase 2-2 (#1546); ignored until then. */
   requireScopeClean: boolean;
+  /**
+   * Run the verification gates when the agent reports it stopped (#1549).
+   *
+   * Defaults to false while its siblings default to true, because it is the one
+   * flag that makes the server *do* something rather than judge something: a
+   * contract written before this field existed must not start spawning
+   * verification runs the moment a Stop hook is configured.
+   */
+  autoVerifyOnStop: boolean;
 }
 
 export interface TaskContract {
@@ -111,7 +120,7 @@ const TOP_LEVEL_KEYS = ['version', 'title', 'goal', 'scope', 'verify', 'autoYes'
 const SCOPE_KEYS = ['allow', 'deny'];
 const VERIFY_KEYS = ['gates'];
 const AUTO_YES_KEYS = ['mode', 'allowPromptTypes', 'denyPatterns'];
-const SUCCESS_KEYS = ['requireWorkEvidence', 'requireScopeClean'];
+const SUCCESS_KEYS = ['requireWorkEvidence', 'requireScopeClean', 'autoVerifyOnStop'];
 
 /** Mirrors GATE_ID_PATTERN in verify-config.ts: a contract can only name ids that could exist. */
 const GATE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
@@ -358,7 +367,11 @@ function validateAutoYes(value: unknown, issues: string[]): TaskContractAutoYes 
 }
 
 function validateSuccess(value: unknown, issues: string[]): TaskContractSuccess {
-  const success: TaskContractSuccess = { requireWorkEvidence: true, requireScopeClean: true };
+  const success: TaskContractSuccess = {
+    requireWorkEvidence: true,
+    requireScopeClean: true,
+    autoVerifyOnStop: false,
+  };
   if (value === undefined || value === null) return success;
 
   if (!isMapping(value)) {

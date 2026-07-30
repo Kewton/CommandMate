@@ -41,6 +41,7 @@ autoYes:
 success:
   requireWorkEvidence: true        # 省略時 true
   requireScopeClean: true          # 省略時 true（組み込み scope ゲートが変更ファイルを突合。§2.2）
+  autoVerifyOnStop: false          # 省略時 false（エージェント停止イベントで検証を自動起動。§2.5）
 ```
 
 契約ファイルは `.commandmate/tasks/*.yaml` として **Git 追跡対象**である
@@ -263,13 +264,18 @@ enforcement が「契約が無いから従来動作」と「契約が off と言
 |---|---|---|---|
 | `requireWorkEvidence` | boolean | `true` | commit も差分も無い「作業ゼロ」を不合格とする（`work-evidence` ゲート） |
 | `requireScopeClean` | boolean | `true` | `scope` 外の変更を不合格とする（組み込み `scope` ゲート。§2.2） |
+| `autoVerifyOnStop` | boolean | `false` | `POST /api/hooks/agent-event`（`event: stop`）受信時に検証ランを自動起動する（Issue #1549） |
 
-両フラグは §2.3 のとおり `verify.gates` に対応する組み込みゲートを自動で足す。
+前 2 つのフラグは §2.3 のとおり `verify.gates` に対応する組み込みゲートを自動で足す。
 フラグが単独で意味を持つ（ゲートリストと矛盾しない）ようにするための規則である。
 
 `requireScopeClean` が true のとき `scope.allow` が空なら契約エラー。
 「スコープを守れ」と言いながらスコープを 1 つも挙げていない契約は、
 Phase 2-2 のゲートが有効になった瞬間に**あらゆる変更を不合格**にする。
+
+`autoVerifyOnStop` だけ既定が false なのは、他の 2 つが「判定基準」なのに対し
+これは**サーバに動作を起こさせる**唯一のフラグだからである。本フィールドが存在しなかった
+時代に書かれた契約が、Stop hook を設定した途端に検証ランを走らせ始めてはならない。
 
 ---
 
