@@ -1,0 +1,43 @@
+version: 1
+duration: 20
+output: cm-08-tmux-in-browser
+scenes:
+  - id: title
+    type: card
+    duration: 3
+    telop:
+      ja: "tmux を捨てなくていい"
+      en: "You do not have to give up tmux"
+  - id: sessions-overview
+    type: record
+    duration: 3
+    viewport: pc
+    telop:
+      ja: "既存の環境の上に載る"
+      en: "It sits on top of your setup"
+  - id: send-and-generate
+    type: record
+    duration: 8
+    viewport: pc
+    telop:
+      ja: "端末がそのままブラウザに"
+      en: "Your terminal, in the browser"
+  - id: respond-from-mobile
+    type: record
+    duration: 2
+    viewport: mobile
+    telop:
+      ja: "生ログをそのまま見る"
+      en: "Read the raw output"
+  - id: complete
+    type: record
+    duration: 2
+    telop:
+      ja: "中身はいつもの tmux"
+      en: "It is your usual tmux inside"
+  - id: outro
+    type: card
+    duration: 2
+    telop:
+      ja: "github.com/Kewton/CommandMate"
+      en: "github.com/Kewton/CommandMate"
