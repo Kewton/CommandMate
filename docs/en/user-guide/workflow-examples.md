@@ -304,6 +304,115 @@ TDD Implementation Complete
 
 ---
 
+## 7. Contract-Based Parallel Development Flow
+
+Delegate several issues to separate worktrees in parallel and decide whether each
+one is done **from an exit code rather than by reading the agent's report**. The
+gates in `.commandmate/verify.yaml` adjudicate — not the worker's "all done!"
+message.
+
+Prerequisite: `commandmatedev send --help` lists `--contract` and `wait --help`
+lists `--verify` (the contract flags exist only on develop builds).
+
+### Step 1: Draft an execution contract and place it in the worktree
+
+Write `.commandmate/tasks/issue-<N>.yaml` **inside the target worktree**, one per
+issue. The spec is [task-contract.md](../../design/task-contract.md); a worked
+example ships as `.commandmate/tasks/example.yaml`.
+
+```yaml
+version: 1
+title: "Issue #1600: add a dark mode toggle"
+goal: |
+  Implement https://github.com/Kewton/CommandMate/issues/1600.
+  Acceptance criteria:
+  - a toggle appears in the header
+  - the selected theme survives a reload
+scope:
+  allow:
+    - "src/components/layout/**"
+    - "tests/unit/components/**"
+  deny: []
+verify:
+  gates: [lint, typecheck, unit]   # omit the key to run every gate (recommended)
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
+```
+
+The contract does not have to be committed. The `work-evidence` and `scope` gates
+exclude the contract file itself from the change set, so dropping a contract into
+a worktree never makes it look like work was done.
+
+### Step 2: Send with the contract
+
+`--contract` composes the goal into the message body, so **do not pass a message
+argument** (passing both exits 2). The task id is printed on stdout.
+
+```bash
+WT=$(commandmatedev ls --branch "feature/1600" --quiet)
+TASK_ID=$(commandmatedev send "$WT" \
+  --contract .commandmate/tasks/issue-1600.yaml \
+  --agent claude --auto-yes --duration 3h)
+```
+
+Right after sending, run `commandmatedev capture "$WT"` to confirm the worker
+actually started. `send` can exit 0 while the text sits unsubmitted in the composer.
+
+### Step 3: Wait, then verify
+
+```bash
+commandmatedev wait "$WT" --on-prompt human --verify --timeout 10800
+echo "exit=$?"
+```
+
+Without `--on-prompt human`, every detected prompt returns exit 10 immediately.
+`--verify` runs every gate **after** completion is detected and turns the result
+into the exit code.
+
+### Step 4: Branch on the exit code
+
+| exit | Meaning | What to do |
+|------|---------|-----------|
+| `0` | Done, verification passed | Move on to the PR (`/create-pr`) |
+| `20` | Verification failed | `commandmatedev verify "$WT" --json` to find the failing gate, then re-instruct with its `logTail`. Cap at 2 retries |
+| `21` | No work evidence | `commandmatedev capture "$WT"` to tell an unsubmitted composer from a permission prompt or a session that never launched |
+| `10` | Prompt detected | `commandmatedev respond "$WT" "yes"`, then wait again |
+| `124` | Timed out | Inspect with capture |
+
+```bash
+# On exit 20: which gate failed?
+commandmatedev verify "$WT" --json
+```
+
+The verdict stays queryable afterwards, and a worktree id is enough — you never
+need to have kept the task id:
+
+```bash
+commandmatedev task list "$WT" --limit 5     # id / status / agent / gates / title
+commandmatedev task show "$TASK_ID"          # contract + the verification run that judged it
+```
+
+### Running them in parallel
+
+Repeat steps 1–4 per issue: independent issues in parallel, strongly dependent
+ones in sequence. If you supervise with the
+[orchestrate-monitor skill](../../../.claude/skills/orchestrate-monitor/SKILL.md),
+give it the task-status hook as well:
+
+```bash
+.claude/skills/orchestrate-monitor/scripts/monitor.sh \
+  --hooks .claude/skills/orchestrate-monitor/scripts/hooks-git.sh \
+  --hooks .claude/skills/orchestrate-monitor/scripts/hooks-task.sh \
+  --session-prefix mcbd-claude \
+  --interval 20 --idle-threshold 8 "$WT" ...
+```
+
+**The monitor's `COMPLETE` is not a merge verdict.** The verdict is the exit code
+from step 3. The monitor only decides when to go look.
+
+---
+
 ## Best Practices for Command Usage
 
 ### 1. Start with a Plan
