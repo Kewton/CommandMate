@@ -5,7 +5,11 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { reconcileCatalog } from '@/lib/slash-command-reconcile/engine';
+import {
+  reconcileCatalog,
+  formatNoticesForReport,
+  isSuspectDescription,
+} from '@/lib/slash-command-reconcile/engine';
 import type {
   ProviderResult,
   SlashCommandsCatalog,
@@ -189,5 +193,153 @@ describe('reconcileCatalog', () => {
     expect(result.catalog.commands.find((c) => c.name === 'focus')?.category).toBe(
       'standard-config'
     );
+  });
+});
+
+// Issue #1603: an authoritative source lists more than its current commands.
+describe('reconcileCatalog — active/canonical filter', () => {
+  const withRows = (...commands: ProviderResult['commands']): ProviderResult => ({
+    tool: 'claude',
+    ok: true,
+    commands,
+    warnings: [],
+  });
+
+  it('never adds a row the source marks as removed, and says why', () => {
+    const result = reconcileCatalog(baseCatalog(), [
+      withRows(
+        { name: 'vim', description: 'Removed in v2.1.92', maxVersion: '2.1.91', status: 'removed' },
+        { name: 'focus', description: 'Toggle focus mode' }
+      ),
+    ]);
+
+    expect(result.diff.added.map((a) => a.name)).toEqual(['focus']);
+    expect(result.catalog.commands.some((c) => c.name === 'vim')).toBe(false);
+    expect(result.localeAdditions.some((l) => l.key.endsWith('.vim'))).toBe(false);
+
+    const notice = result.notices.find((n) => n.name === 'vim');
+    expect(notice?.category).toBe('removed-row');
+    expect(notice?.message).toContain('2.1.91');
+  });
+
+  it('never adds an alias row, and says which command it points at', () => {
+    const result = reconcileCatalog(baseCatalog(), [
+      withRows({ name: 'cost', description: 'Alias for /usage', aliasOf: 'usage' }),
+    ]);
+
+    expect(result.diff.added).toEqual([]);
+    expect(result.changed).toBe(false);
+    expect(result.notices).toContainEqual({
+      category: 'alias-row',
+      tool: 'claude',
+      name: 'cost',
+      message: 'alias for /usage; not added',
+    });
+  });
+
+  it('reports a refused row that the catalog still ships, without deleting it', () => {
+    const result = reconcileCatalog(baseCatalog(), [
+      withRows({ name: 'loop', description: 'Removed in v9.9.9', status: 'removed' }),
+    ]);
+
+    expect(result.catalog.commands.some((c) => c.name === 'loop')).toBe(true);
+    expect(result.notices.find((n) => n.name === 'loop')?.message).toContain(
+      'the catalog still lists it'
+    );
+  });
+
+  it('drops a marker-like description but keeps the command', () => {
+    const result = reconcileCatalog(baseCatalog(), [
+      withRows({ name: 'simplify', description: 'Skill' }),
+    ]);
+
+    expect(result.diff.added.map((a) => a.name)).toEqual(['simplify']);
+    expect(result.diff.added[0].enDescription).toBeUndefined();
+    expect(result.localeAdditions).toContainEqual({
+      key: 'slashCommands.descriptions.simplify',
+      en: 'simplify',
+      ja: '[要レビュー] simplify',
+    });
+    expect(result.notices.find((n) => n.name === 'simplify')?.category).toBe(
+      'suspect-description'
+    );
+  });
+
+  it('refuses to let one tool\'s description win an i18n key another tool shares', () => {
+    const claudeSide: ProviderResult = {
+      tool: 'claude',
+      ok: true,
+      commands: [{ name: 'vim', description: 'Enter Vim mode' }],
+      warnings: [],
+    };
+    const codexSide: ProviderResult = {
+      tool: 'codex',
+      ok: true,
+      commands: [{ name: 'vim', description: 'toggle vim keybindings in the composer' }],
+      warnings: [],
+    };
+    const result = reconcileCatalog(baseCatalog(), [claudeSide, codexSide]);
+
+    const locale = result.localeAdditions.filter(
+      (l) => l.key === 'slashCommands.descriptions.vim'
+    );
+    expect(locale).toHaveLength(1);
+    // Neither sentence is shipped under the shared key.
+    expect(locale[0]).toEqual({
+      key: 'slashCommands.descriptions.vim',
+      en: 'vim',
+      ja: '[要レビュー] vim',
+    });
+    expect(result.notices.find((n) => n.category === 'description-conflict')?.name).toBe('vim');
+    // Both tools still get their catalog entry.
+    expect(result.catalog.commands.filter((c) => c.name === 'vim')).toHaveLength(2);
+  });
+
+  it('reports one conflict per key, not one per extra tool', () => {
+    const three: ProviderResult[] = ['claude', 'codex', 'antigravity'].map((tool, i) => ({
+      tool,
+      ok: true,
+      commands: [{ name: 'vim', description: `description ${i}` }],
+      warnings: [],
+    }));
+    const result = reconcileCatalog(baseCatalog(), three);
+    expect(result.notices.filter((n) => n.category === 'description-conflict')).toHaveLength(1);
+  });
+});
+
+describe('isSuspectDescription', () => {
+  it('flags badge leftovers and self-referential markers', () => {
+    for (const value of ['Skill', 'workflow', 'Removed in v2.1.92', 'Alias for /usage', 'Deprecated. Use /x']) {
+      expect(isSuspectDescription(value), value).toBe(true);
+    }
+  });
+
+  it('leaves a real purpose alone', () => {
+    for (const value of ['Review the changed code for cleanup opportunities', 'Skills are listed here', undefined]) {
+      expect(isSuspectDescription(value), String(value)).toBe(false);
+    }
+  });
+});
+
+describe('formatNoticesForReport', () => {
+  it('groups notices by category in a fixed order', () => {
+    const lines = formatNoticesForReport([
+      { category: 'alias-row', tool: 'claude', name: 'cost', message: 'alias for /usage' },
+      { category: 'removed-row', tool: 'claude', name: 'vim', message: 'documented as removed' },
+      { category: 'description-conflict', name: 'shared', message: 'tools disagree' },
+    ]);
+
+    expect(lines).toEqual([
+      '[removed-row] (1)',
+      '  - [claude] /vim: documented as removed',
+      '[alias-row] (1)',
+      '  - [claude] /cost: alias for /usage',
+      '[description-conflict] (1)',
+      '  - /shared: tools disagree',
+    ]);
+  });
+
+  it('returns nothing when there is nothing to report', () => {
+    expect(formatNoticesForReport([])).toEqual([]);
   });
 });

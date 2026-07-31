@@ -25,6 +25,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {
   runReconcile,
+  formatNoticesForReport,
   type LocaleAddition,
   type ReconcileResult,
   type SlashCommandsCatalog,
@@ -123,7 +124,18 @@ function applyLocaleAdditions(
 
 function printSummary(result: ReconcileResult, args: CliArgs): void {
   if (args.json) {
-    console.log(JSON.stringify({ changed: result.changed, diff: result.diff, warnings: result.warnings }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          changed: result.changed,
+          diff: result.diff,
+          warnings: result.warnings,
+          notices: result.notices,
+        },
+        null,
+        2
+      )
+    );
     return;
   }
 
@@ -134,6 +146,14 @@ function printSummary(result: ReconcileResult, args: CliArgs): void {
   if (result.warnings.length > 0) {
     console.log('\nWarnings (fail-soft — affected sources left untouched):');
     for (const warning of result.warnings) console.log(`  ! ${warning}`);
+  }
+
+  // Issue #1603: rows the reconcile refused, by category, so a history or alias
+  // row is visibly *rejected* rather than silently absent from the add list.
+  const noticeLines = formatNoticesForReport(result.notices);
+  if (noticeLines.length > 0) {
+    console.log('\nNot added / needs review (by category):');
+    for (const line of noticeLines) console.log(`  ${line}`);
   }
 
   if (diff.added.length === 0) {
