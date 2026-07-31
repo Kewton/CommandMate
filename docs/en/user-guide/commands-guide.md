@@ -42,6 +42,7 @@ A command that creates a detailed work plan on a per-issue basis and formulates 
 3. **Dependency diagram** - Mermaid-format dependencies
 4. **Quality check items** - Required checks list
 5. **Deliverables checklist** - Completion criteria
+6. **Execution contract** - Declares the goal, the allowed change scope, and the verification gates (spec: [task-contract.md](../../design/task-contract.md))
 
 ### Output Example
 
@@ -60,7 +61,8 @@ A command that creates a detailed work plan on a per-issue basis and formulates 
 
 ### Output Location
 
-`dev-reports/issue/{issue_number}/work-plan.md`
+- Work plan: `dev-reports/issue/{issue_number}/work-plan.md`
+- Execution contract: `.commandmate/tasks/issue-{issue_number}.yaml` (Git-tracked; include it in PR review)
 
 ### Best Practices
 
