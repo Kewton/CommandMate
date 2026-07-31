@@ -20,7 +20,7 @@ allowed-tools: Bash(.claude/skills/orchestrate-monitor/scripts/*), Bash(git work
 .claude/skills/orchestrate-monitor/
 ├── SKILL.md
 └── scripts/
-    ├── monitor-lib.sh       # 共有ヘルパー（JSON scalar 抽出・ANSI 正規化・アンカー検出・違反カウント）
+    ├── monitor-lib.sh       # 共有ヘルパー（JSON scalar 抽出・ANSI 正規化・アンカー検出・違反カウント・介入先セッション導出）
     ├── classify-state.sh    # capture --json 1 ポーリング → 状態トークン
     ├── verify-completion.sh # タスク状態を一次ソースとする完了判定（＋STARTED ガード、回帰#1）
     ├── verify-scope.sh      # 偽陽性しないスコープ検証（回帰#2）
@@ -38,11 +38,13 @@ allowed-tools: Bash(.claude/skills/orchestrate-monitor/scripts/*), Bash(git work
 ## 使い方
 
 ```bash
-# 1 つ以上の worktree-id を監督する
+# 1 つ以上の worktree-id を監督する（フラグ無しで正しいセッションへ介入する）
 CM="npx commandmate@latest" \
   .claude/skills/orchestrate-monitor/scripts/monitor.sh \
-  --session-prefix mcbd-claude \
   --interval 20 --idle-threshold 8 <worktree-id> [<worktree-id> ...]
+
+# 既定インスタンス以外を見るときだけ <worktree-id>@<instance-id> で指定する
+.claude/skills/orchestrate-monitor/scripts/monitor.sh w1 w2@codex-2
 
 # 中核だけを個別に使う（Claude が監督中に呼ぶのはこちら）
 commandmate capture <id> --json > poll.json
@@ -57,11 +59,35 @@ commandmate capture <id> --json > poll.json
 NOT_RUNNING → is_retrying(→GENERATING) → PROMPT → GENERATING → RATE_LIMIT → IDLE
 ```
 
-**`--session-prefix` は実測して渡すこと。** 介入（承認 Enter / rate limit の `a` / 再送）は
-`tmux send-keys -t <prefix>-<worktree-id>` で撃つが、CommandMate の実セッション名は
-`mcbd-<エージェント>-<worktree-id>` である（`src/lib/session/claude-session.ts` の `getSessionName()`）。
-既定の `cm` は一致しないうえ `tmux send-keys` の失敗は握り潰されるので、**介入が 1 回も届かないまま
-監視が続く**。`tmux ls` で実名を確認してから渡す。
+### 介入先セッションは**導出**する（#1601）
+
+介入（承認 Enter / rate limit の `a` / 再送）は `tmux send-keys` で撃つ。その宛先は**フラグではなく
+そのポーリングの capture ペイロードから導出**される:
+
+```
+mcbd-<cliToolId>-<worktree-id>[-<instance suffix>]      # getSessionName() と同じ組み立て
+```
+
+`cliToolId` は capture --json のトップレベルフィールド（＝**サーバがそのポーリングで解決したツール**）
+なので、**分類したペインと介入するペインが一致することが構造的に保証される**。claude と codex が
+混在するフリートでもフラグは要らない。解決結果はワーカーごとに 1 回
+`monitor[<wid>]: intervention target = <session>` として stdout に出る。
+
+- **`<worktree-id>@<instance-id>`**: 既定インスタンス以外を見るときに使う。capture 側（`--agent` /
+  `--instance`）と送信先セッションの**両方**を切り替える。同じ worktree を別インスタンスで 2 行
+  並べてよい（状態とログのキーは `<id>@<instance>`）。instance id からエージェントを復元して
+  `--agent` を付けるのは、サーバが `--agent` 省略時に worktree 行の既定ツールで解決するため
+  （instance id からは解決しない）。
+- **`--session-prefix` は後方互換の逃げ道**。渡すと導出された `mcbd-<cliToolId>` の頭だけが置き換わる
+  （instance suffix は付いたまま）。本ツールが作っていないセッションを見るとき以外は不要。
+
+> **#1601 で直したもの**: 既定が `SESSION_PREFIX="cm"` だったため、送信先は**一度も存在したことのない**
+> `cm-<worktree-id>` だった。しかも 3 箇所すべてが `2>/dev/null || true` で失敗を握り潰し、ログは送信の
+> **前**に「送った」と出していたので、**空振りが成功に見えていた**。承認カウンタも送信前に加算していたため
+> **一度も承認していないのに `approvals=` が増えた**。現在は `tmux has-session` で存在を検証し、
+> **失敗は stderr に `NOT delivered` として報告**、ログとカウンタは**配信できたときだけ**動く。
+> 宛先は `=<name>:`（exact match、#1156）で撃つ。素の `-t <name>` は前方一致にフォールバックし、
+> 停止中の primary 宛の入力が `-2` インスタンスへ流れ込む。
 
 `--resend-message` / `--max-resends` はリトライ枯渇死からの再送設定（既定 `continue` / 2 回）。
 `--max-polls N` は N 回ポーリングしたら（ワーカーが未完了でも）exit 0 で抜ける停止条件。既定 0 =
@@ -71,7 +97,7 @@ NOT_RUNNING → is_retrying(→GENERATING) → PROMPT → GENERATING → RATE_LI
 
 ### `--verbose`: ポーリングごとの状態ログ（#1533）
 
-既定の stdout は**介入・capture 失敗・終局判定（COMPLETE / VERIFY_FAILED / NOT_STARTED）・起動/停止**だけで、
+既定の stdout は**介入・介入先セッション・capture 失敗・終局判定（COMPLETE / VERIFY_FAILED / NOT_STARTED）・起動/停止**だけで、
 「何回ポーリングして各状態が何回出たか」は残らない。`--verbose` を付けると 1 ポーリング 1 行の
 固定フォーマットが追加される（**opt-in。付けない限り既定出力は 1 バイトも変わらない**）:
 
@@ -171,16 +197,18 @@ MONITOR_HOOKS_BASE=origin/develop \
 .claude/skills/orchestrate-monitor/scripts/monitor.sh \
   --verbose \
   --hooks .claude/skills/orchestrate-monitor/scripts/hooks-git.sh \
-  --session-prefix mcbd-claude \
   --interval 20 --idle-threshold 8 \
   <worktree-id> ... 2>&1 | tee monitor.log
 ```
+
+`2>&1` は必須。**未配信の介入は stderr に出る**（stdout は「起きた介入」だけの流れなので、
+届かなかった介入をそこに混ぜない）。落とすと「介入 0 件」と「介入が全部失敗」が区別できない。
 
 | G2 の要求 | ログからの取り出し方 |
 |---|---|
 | 総ポーリング数 | `grep -cE '^monitor\[<wid>\]: poll ' monitor.log` |
 | 状態分類の分布 | `grep -oE 'poll [0-9]+ -> [A-Z_]+' monitor.log \| awk '{print $4}' \| sort \| uniq -c` |
-| 介入全件 | `grep -E "sending 'a'\|resending\|resend budget spent" monitor.log`（承認 Enter はサイレント。総数は COMPLETE 行の `approvals=` に出る） |
+| 介入全件 | `grep -E "sent 'a'\|resent to\|resend budget spent" monitor.log`（承認 Enter はサイレント。総数は COMPLETE 行の `approvals=` に出る。**未配信は `grep 'NOT delivered'`** で別に数える） |
 | 完了判定の根拠 | poll 行の `started= / streak= / commits= / uncommitted= / task= / verdict=`。COMPLETE した poll 行がその worker の判定根拠そのもの |
 | capture 失敗 | `grep -c 'capture failed' monitor.log`（poll 行は出ないので、総ポーリング数と別に数える） |
 
@@ -246,6 +274,8 @@ worker まで NOT_STARTED として記録される。G2 のログは必ずフッ
 9. **権限プロンプト自動承認**：worker 停滞の主因は Claude Code 権限プロンプト。Enter 自動承認を**サイレント＋
    カウンタ化**し、通知を氾濫させない（`feedback_worker_permission_prompt_autoapprove` /
    `feedback_orchestrate_monitor_recipe`）。承認は commit 必須ゲート（＝完了検証）とセットで扱う。
+   **カウンタは配信できたときだけ動かす**（#1601）：送信前に加算すると、届かなかった承認まで
+   `approvals=` に乗り、プロンプトで止まったままの worker が「承認済み」に見える。
 10. **Rate limit は待たず即 "a" 送信**で再開。「1M context credits 必須」ブロッカーは credits 有効化＋"a"
     （`feedback_rate_limit_immediate_retry` / `feedback_orchestrate_1m_context_credits`）。
     ただし**撃つ前に GENERATING を否定する**こと（上記 6）。
@@ -257,19 +287,30 @@ worker まで NOT_STARTED として記録される。G2 のログは必ずフッ
     - idle 閾値に到達済み（一瞬のフレームでは撃たない）
     - `ml_has_terminal_api_error` は**現在のペインのみ**を見る（再開後に画面外へ流れたエラーは対象外）
     - `--max-resends` で打ち切り、以後はオペレータへエスカレーション
-12. **完了待機は `commandmate wait <id> --on-prompt human`**。既定は prompt 検出で即返るため監督ループが
+12. **介入先は導出し、送信は結果を検証し、ログとカウンタは配信できたものだけを数える**（#1601）。
+    固定 prefix の連結（旧既定 `cm-<worktree-id>`）は**実在しないセッション**を指し、`2>/dev/null || true`
+    が失敗を握り潰し、ログは送信の**前**に出ていた——**空振りが成功として記録される**三点セット。
+    - 宛先は capture ペイロードの `cliToolId` から `mcbd-<cliToolId>-<worktree-id>[-<suffix>]` を組み立てる。
+      **分類したペインへ介入する**という不変条件はこれで構造的に保つ（既定値の変更では保てない：
+      1 つの prefix は claude と codex の混在フリートにも `--instance codex-2` にも同時に一致しない）。
+    - 送信前に `tmux has-session` で存在を検証し、**失敗は stderr に `NOT delivered` として報告**する。
+    - 宛先は `=<name>:`（exact match、#1156）。素の `-t <name>` は前方一致にフォールバックし、
+      `mcbd-claude-w1` 宛の入力が `mcbd-claude-w1-2` のペインへ流れ込む。
+    - 再送予算は**配信できた再送だけ**が消費する。空振りで予算を使うと、実際には一度も再送していないのに
+      「budget spent — operator needed」へエスカレーションする。
+13. **完了待機は `commandmate wait <id> --on-prompt human`**。既定は prompt 検出で即返るため監督ループが
     空回りする（`feedback_orchestrate_wait_on_prompt_human`）。
 
 ### 完了検証（`verify-completion.sh` / `verify-scope.sh`）
 
-13. **契約付き委任では完了判定の一次ソースはタスク状態**（`hooks-task.sh`）で、capture 解析は
+14. **契約付き委任では完了判定の一次ソースはタスク状態**（`hooks-task.sh`）で、capture 解析は
     フォールバック。マージ可否の最終裁定は `wait --verify` の exit code であり、monitor の
     `COMPLETE` ではない。詳細は上記「タスク状態を一次ソースにする（#1581）」。
-14. **merge 成否は state=MERGED を確認してから Issue close**（未マージ Issue の誤クローズ防止）
+15. **merge 成否は state=MERGED を確認してから Issue close**（未マージ Issue の誤クローズ防止）
     （`feedback_orchestrate_changelog_conflict_close_guard`）。
-15. **スコープ完遂は受入ゲートでなく grep 実数で検証**。NUL 混入ファイルで grep がバイナリ扱いするため
+16. **スコープ完遂は受入ゲートでなく grep 実数で検証**。NUL 混入ファイルで grep がバイナリ扱いするため
     `grep -a` を使う（`feedback_orchestrate_scope_completeness` / `reference_grep_blind_nul_test_file`）。
-16. **検証ガード自身の偽陽性に注意**（回帰#2、`verify-scope.sh`）：
+17. **検証ガード自身の偽陽性に注意**（回帰#2、`verify-scope.sh`）：
     - 禁止パターンが**散文・コメント中**に出現しただけで違反と数える誤報
       （bare `npx commandmate` が「なぜ @latest が必要か」を説明する文に一致した実例）。
       → コメント行（`^[[:space:]]*#`）を除外する。fixture `scope-clean.txt` は CLEAN。
@@ -279,15 +320,15 @@ worker まで NOT_STARTED として記録される。G2 のログは必ずフッ
 
 ### スクリプト品質（実装制約）
 
-17. **bash 3.2 互換**（macOS 既定の `/bin/bash` は 3.2.57）：連想配列 `declare -A` 不可・`mapfile` 不可・
+18. **bash 3.2 互換**（macOS 既定の `/bin/bash` は 3.2.57）：連想配列 `declare -A` 不可・`mapfile` 不可・
     `${var,,}` 不可。状態は**整数 index の並列配列と temp ファイル**で持つ
     （`feedback_monitor_bash32_no_assoc_arrays`）。CI は `syntax.test.ts` が `bash -n` を回す。
-18. **ループ変数に `path` 等の特殊名を使わない**：zsh/bash で `path` は `PATH` に tie され、curl/tmux が
+19. **ループ変数に `path` 等の特殊名を使わない**：zsh/bash で `path` は `PATH` に tie され、curl/tmux が
     command not found 化して health check が偽陰性になる（`feedback_zsh_path_loop_var_clobbers_path`）。
-19. **品質ゲートで exit code を隠さない**（`quality-gate.sh`）：`cmd | grep ...` は `$?` を grep に渡し
+20. **品質ゲートで exit code を隠さない**（`quality-gate.sh`）：`cmd | grep ...` は `$?` を grep に渡し
     非ゼロ終了を隠す。vitest は「全テスト緑・Unhandled Rejection で exit 1」を出しうる。
     `cmd > log 2>&1; echo $?` で実測する（`feedback_quality_gate_grep_hides_exit_code`）。
-20. **`sed` は `LC_ALL=C` で回す**：ペイン capture には途中で切れたマルチバイト文字が混じりうる。
+21. **`sed` は `LC_ALL=C` で回す**：ペイン capture には途中で切れたマルチバイト文字が混じりうる。
     UTF-8 ロケールの BSD sed はそこで `illegal byte sequence` を吐いて停止する。
 
 ---
@@ -306,11 +347,15 @@ worker まで NOT_STARTED として記録される。G2 のログは必ずフッ
 | 8 | `count_commits`/`count_uncommitted` がスタブ固定で、**COMPLETE 分岐が実運用で一度も発火しない**（完走した worker まで NOT_STARTED と記録される） | #1533 | `--hooks` / `MONITOR_HOOKS` で供給、参考実装 `hooks-git.sh` を同梱 | `monitor-observability.test.ts`（フック無しで COMPLETE 到達不能 ⇄ フック有りで到達、を両方向で固定） |
 | 9 | **ゲート不合格の worker を COMPLETE と報告**（commit も idle streak も「完了」に見えるので、capture 由来の信号だけでは検証不合格と区別できない） | #1581 | タスク状態を一次ソースにし、`failed` / `cancelled` を `VERIFY_FAILED` として分離 | `verify-completion.test.ts` / `monitor-task-source.test.ts` |
 | 10 | 古い契約の終局ステータスを現在の裁定として読み、**生成中の worker を COMPLETE と誤報** | #1581 | 生存ペイン（`GENERATING`/`PROMPT`/`RATE_LIMIT`）をタスク状態より先に評価 | `verify-completion.test.ts`（stale veto）/ `monitor-task-source.test.ts` |
+| 11 | **介入が 1 回も届かないまま「送った」と記録される**（既定 prefix `cm` が実在しないセッションを指し、失敗は握り潰され、ログとカウンタは送信前に動いていた） | #1601 | `cliToolId` からのセッション導出 ＋ `has-session` 検証 ＋ 送信後ログ ＋ 配信時のみカウント ＋ `=name:` exact match | `monitor-session-target.test.ts` / `monitor-lib.test.ts`（導出）/ `monitor-resend.test.ts` |
 
 いずれも naive 実装で red → ガード実装で green にした（#3〜#7 は #1512 の初版実装に対して red）。
 #8 は両方向テスト（対照＋変異注入）で固定している：`--verbose` を既定 ON にする / フックをスタブより
 先に source する / poll 行の書式を変える / 参考フックの commit 数を 0 固定にする、のいずれの変異でも
 該当テストが実際に赤くなることを確認済み。
+#11 も同じ方法で確認済み（既定を `cm` に戻す / `has-session` 検証を外して `|| true` に戻す /
+承認カウンタを送信前に加算する / ログを送信前に出す / ツール id 一覧を欠落させる /
+`=name:` を素の名前に戻す の 6 変異で、いずれも該当テストだけが赤くなる）。
 
 ## fixture の作り方（実機採取）
 
