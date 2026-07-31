@@ -124,6 +124,27 @@ git log --oneline -10
 - カバレッジ改善率
 - 静的解析エラー削減
 
+#### 検証メトリクス（対象期間の実績）
+
+対象期間の Eval メトリクス（#1551）を取得します。**取れなくてもレポート生成は止めません。**
+
+```bash
+commandmate report metrics --days <対象期間の日数> --json > /tmp/vibe-metrics.json 2>&1; echo $?
+```
+
+- `--days` は **1..90 の整数のみ**。範囲外はクランプされず `exit 2` で失敗するので、
+  期間を計算した側で 1..90 に丸めてから渡す。
+- `> ファイル 2>&1; echo $?` の形を崩さないこと。`| grep` に繋ぐと exit code が消え、失敗を成功として読む。
+- **exit code が 0 以外なら「検証メトリクス」セクションごと省略する**（サーバ未稼働は `1`、
+  認証エラー・範囲外は `2`、`commandmate` 不在は `127`）。失敗時のファイルには JSON ではなく
+  エラー文が入るため、パースしてから判断してはいけない。
+- exit 0 でも `tasks.total` / `verification.runs` / `intervention.humanResponds` /
+  `intervention.autoAnswered` が**すべて 0** なら、同じく**セクションごと省略する**
+  （日次レポートの `buildMetricsSection()` と同じ方針。ゼロの羅列は「何も起きていない」を
+  「発見」として語らせるため）。
+- 比率は分母ゼロのとき `0` ではなく `null` で返る。`null` は `n/a` と書き、**`0%` と書いてはいけない**。
+- `intervention.suppressedByPolicy` は v1 では常に `null`（抑止ログが未 DB 化）なので載せない。
+
 ---
 
 ### Phase 4: ブロッカー/課題の特定
@@ -226,6 +247,20 @@ fi
 - 静的解析エラー: **0件**
 - すべての受入条件達成
 - コード品質改善完了
+
+---
+
+## 検証メトリクス
+
+> 取得できなかった場合（exit code ≠ 0）と、全カウンタが 0 の場合は**この見出しごと省略**する。
+
+**対象期間**: 直近 7 日
+
+| 群 | 実績 |
+|------|------|
+| tasks | total=3 / succeeded=1 / failed=1 / not_started=1 / success_rate=**33.3%** / avg_retry_loops=0.0 |
+| verification | runs=6 / pass_rate=**66.7%** / top fails: `lint` x1, `work-evidence` x1 |
+| intervention | human_responds=**0** / auto_answered=1 |
 
 ---
 
