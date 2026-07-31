@@ -304,6 +304,109 @@ TDD実装完了
 
 ---
 
+## 7. 契約付き並列開発フロー
+
+複数 Issue を worktree に分けて並列に委任し、**完了したかどうかを目視ではなく exit code で判定する**
+フローです。ワーカーの「できました」という報告文ではなく、`.commandmate/verify.yaml` のゲートが
+裁定します。
+
+前提: `commandmatedev send --help` に `--contract`、`wait --help` に `--verify` があること
+（契約系フラグは develop 系にのみ存在します）。
+
+### Step 1: 実行契約を起案して worktree に置く
+
+Issue ごとに `.commandmate/tasks/issue-<N>.yaml` を作り、**対象 worktree の中に**配置します。
+仕様は [task-contract.md](../design/task-contract.md)、見本は `.commandmate/tasks/example.yaml`。
+
+```yaml
+version: 1
+title: "Issue #1600: ダークモードのトグル追加"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/1600 を実装する。
+  受入条件:
+  - ヘッダーにトグルが表示される
+  - 選択したテーマがリロード後も保持される
+scope:
+  allow:
+    - "src/components/layout/**"
+    - "tests/unit/components/**"
+  deny: []
+verify:
+  gates: [lint, typecheck, unit]   # 省略すると全ゲート（推奨）
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
+```
+
+契約はコミットしなくて構いません。`work-evidence` / `scope` ゲートは変更集合から契約ファイル自身を
+除外するので、契約を置いただけの worktree が「作業済み」と誤判定されることはありません。
+
+### Step 2: 契約付きで送信する
+
+`--contract` は goal を送信本文として組み立てるので、**メッセージ引数は渡しません**（両方渡すと
+exit 2）。task id が stdout に出ます。
+
+```bash
+WT=$(commandmatedev ls --branch "feature/1600" --quiet)
+TASK_ID=$(commandmatedev send "$WT" \
+  --contract .commandmate/tasks/issue-1600.yaml \
+  --agent claude --auto-yes --duration 3h)
+```
+
+送信直後に `commandmatedev capture "$WT"` で**ワーカーが実際に動き出したこと**を確認します。
+send が exit 0 でも本文が composer に残って Enter 未確定のことがあります。
+
+### Step 3: 完了を待って検証する
+
+```bash
+commandmatedev wait "$WT" --on-prompt human --verify --timeout 10800
+echo "exit=$?"
+```
+
+`--on-prompt human` が無いと、プロンプト検出のたびに exit 10 で返ってきます。
+`--verify` は完了検出**後**に全ゲートを実行し、その結果を exit code にします。
+
+### Step 4: exit code で分岐する
+
+| exit | 意味 | 対応 |
+|------|------|------|
+| `0` | 完了・検証合格 | PR 作成へ（`/create-pr`） |
+| `20` | 検証不合格 | `commandmatedev verify "$WT" --json` で失敗ゲートを特定し、`logTail` を添えて再指示。上限2回 |
+| `21` | 作業証跡ゼロ | `commandmatedev capture "$WT"` で composer 未確定・権限プロンプト・未起動を切り分け |
+| `10` | プロンプト検出 | `commandmatedev respond "$WT" "yes"` で応答し、再度 wait |
+| `124` | タイムアウト | capture で状況確認 |
+
+```bash
+# exit 20 のとき: どのゲートが落ちたかを見る
+commandmatedev verify "$WT" --json
+```
+
+タスクの裁定結果は後からも引けます（worktree だけ分かれば十分で、task id は不要）:
+
+```bash
+commandmatedev task list "$WT" --limit 5     # id / status / agent / gates / title
+commandmatedev task show "$TASK_ID"          # 契約 + 最後に裁定した検証ラン（ゲート別 exit code）
+```
+
+### 並列で回す
+
+Issue ごとに Step 1–4 を繰り返します。独立した Issue は並列に、強依存の Issue は直列に。
+監視ループを使う場合は [orchestrate-monitor skill](../../.claude/skills/orchestrate-monitor/SKILL.md) に
+タスク状態フックを渡します。
+
+```bash
+.claude/skills/orchestrate-monitor/scripts/monitor.sh \
+  --hooks .claude/skills/orchestrate-monitor/scripts/hooks-git.sh \
+  --hooks .claude/skills/orchestrate-monitor/scripts/hooks-task.sh \
+  --session-prefix mcbd-claude \
+  --interval 20 --idle-threshold 8 "$WT" ...
+```
+
+**monitor の `COMPLETE` はマージ可否の裁定ではありません。** 最終裁定は Step 3 の
+`wait --verify` の exit code です。monitor は「いつ見に行くか」を決めるための道具です。
+
+---
+
 ## コマンド使用のベストプラクティス
 
 ### 1. 計画から始める

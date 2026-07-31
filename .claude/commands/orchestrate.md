@@ -20,6 +20,13 @@ developブランチをオーケストレーターとして、複数Issueの並�
 - developブランチ上で実行すること
 - CommandMateサーバーが稼働していること（`commandmatedev ls` で確認）
 - GitHubリポジトリ（https://github.com/Kewton/CommandMate）にアクセス可能
+- **契約系フラグが使えること**を最初に確認する。`--contract` / `--verify` は develop 系にのみ存在し、
+  v0.16.0 リリースには含まれない。無ければ委任は素の send にフォールバックする（完了判定は目視に戻る）:
+  ```bash
+  commandmatedev send --help | grep -q -- --contract && commandmatedev wait --help | grep -q -- --verify \
+    && echo "contract delegation: available" || echo "contract delegation: UNAVAILABLE (fallback to plain send)"
+  ```
+- 委任先リポジトリに `.commandmate/verify.yaml` があること（無ければ `/cmate-verify` で起案する）
 
 ## 実行内容
 
@@ -38,9 +45,9 @@ TodoWriteツールで作業計画を作成：
 
 ```
 - [ ] Phase 1: 依存関係分析・実行計画（ラベル分類含む）
-- [ ] Phase 2: Worktree準備
+- [ ] Phase 2: Worktree準備・実行契約の起案
 - [ ] Phase 2.5: 根本原因分析（バグIssueのみ、他エージェント経由）
-- [ ] Phase 3: 並列開発（バグ: /bug-fix、機能: /pm-auto-issue2dev）
+- [ ] Phase 3: 並列開発（契約付き send → wait --verify）
 - [ ] Phase 4: 設計突合（バリア）
 - [ ] Phase 5: 品質確認
 - [ ] Phase 6: PR作成・マージ（/pr-merge-pipeline）
@@ -149,6 +156,39 @@ commandmatedev ls --branch feature/
 
 全worktreeが表示されることを確認。
 
+### 2-4. 実行契約の起案
+
+各Issueについて、オーケストレーターが実行契約 `.commandmate/tasks/issue-<N>.yaml` を起案し、
+**対象 worktree の中に**配置する。正準仕様は `docs/design/task-contract.md`（v1）、見本は
+`.commandmate/tasks/example.yaml`。
+
+```yaml
+version: 1
+title: "Issue #<N>: <Issueタイトル>"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/<N> を実装する。
+  <Issue本文の受入条件チェックリストをそのまま転記する>
+scope:
+  allow:               # Issueの影響範囲。requireScopeClean が true なら1件以上必須
+    - "src/lib/<module>/**"
+    - "tests/unit/<module>/**"
+    - "docs/module-reference.md"
+  deny: []
+verify:
+  # キーごと省略が既定（= 全ゲート）。時間制約がある時だけ絞る
+  gates: [lint, typecheck, unit]
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
+```
+
+- **契約は未コミットで配ってよい**。`work-evidence` / `scope` ゲートは変更集合から契約ファイル自身を
+  除外する（#1580）ので、契約を置いただけの worktree が「作業済み」に見えることはない。
+- `scope.allow` は**Issueが触ると宣言した範囲**を書く。広すぎる allow は scope ゲートを無力化し、
+  狭すぎる allow は正当な変更を不合格にする。迷ったら Phase 1 の依存関係分析で洗い出した
+  ファイル集合をそのまま使う。
+- `verify.gates` を絞ると**絞ったゲートしか裁定しない**。既定（省略）を第一選択にする。
+
 ---
 
 ## Phase 2.5: 根本原因分析（バグIssueのみ）
@@ -157,6 +197,10 @@ Phase 1-2 で `bug` ラベルと分類されたIssueに対して、他エージ�
 機能Issue（FEATURE_ISSUES）はこのフェーズをスキップする。
 
 ### 2.5-1. 他エージェントに分析依頼
+
+**このフェーズは契約を使わない（素の send のまま）。** 分析はコードを変更しない依頼であり、
+`--verify` は必ず `work-evidence` ゲートを含む（`--gates` で外そうとしても `wait --verify` は
+全ゲート要求になる）ため、成功した分析ほど exit 21 になる。契約付き委任は**変更を伴う委任**にだけ使う。
 
 develop worktree上でバグIssueごとに根本原因分析を実行する：
 
@@ -199,25 +243,34 @@ gh issue edit "$bug_issue" --repo Kewton/CommandMate --body "${CURRENT_BODY}${AN
 
 ## Phase 3: 並列開発
 
-### 3-1. 各ワーカーにタスク送信
+### 3-1. 各ワーカーにタスク送信（契約付き）
 
-**Issue種別に応じて異なるコマンドを送信する（エージェント指定ルールに従う）：**
+**標準経路は契約付き send。** 契約は Phase 2-4 で worktree に配置済み。
+`--contract` は goal を送信メッセージ本文として組み立てるので、**メッセージ引数は渡さない**
+（両方渡すと exit 2）。stdout に task id が出るので控える（stderr の `Task created:` は人間向け）。
 
 ```bash
-# バグIssue: /bug-fix を送信（Phase 2.5の分析結果を参照して修正）
-for bug_issue in $BUG_ISSUES:
-  WT=$(commandmatedev ls --branch "feature/{N}" --quiet)
-  commandmatedev send "$WT" "/bug-fix ${bug_issue}" \
-    --agent claude --auto-yes --duration 3h
-
-# 機能Issue: /pm-auto-issue2dev を送信（従来通り）
-for feature_issue in $FEATURE_ISSUES:
-  WT=$(commandmatedev ls --branch "feature/{N}" --quiet)
-  commandmatedev send "$WT" "/pm-auto-issue2dev ${feature_issue}" \
-    --agent claude --auto-yes --duration 3h
+for issue in $ISSUES; do
+  WT=$(commandmatedev ls --branch "feature/${issue}" --quiet)
+  TASK_ID=$(commandmatedev send "$WT" \
+    --contract ".commandmate/tasks/issue-${issue}.yaml" \
+    --agent claude --auto-yes --duration 3h)
+  echo "$issue $WT $TASK_ID" >> "workspace/orchestration/runs/$DATE/tasks.tsv"
+done
 ```
 
-独立したIssueは並列で送信する。強依存のIssueは直列実行（先行Issue完了後に送信）。
+契約の goal だけでは足りない Issue（`/bug-fix` の調査手順、Phase 2.5 の分析結果の参照など）は、
+**goal 本文にその指示を書く**。契約は送信メッセージそのものなので、素の send で送っていた文面は
+すべて goal に入る。Issue種別ごとのスラッシュコマンド（`/bug-fix`・`/pm-auto-issue2dev`）も
+goal の先頭行に書けばよい。
+
+- **スラッシュコマンドは CommandMate リポジトリの worktree でのみ有効**。外部リポジトリの worker に
+  送ると `Unknown command` で無反応になる（send は exit 0、composer も空なので気づけない）。
+  外部リポジトリには素のプロンプトを書く。
+- 独立したIssueは並列で送信する。強依存のIssueは直列実行（先行Issue完了後に送信）。
+- **送信後 `started=1`（＝ワーカーが実際に生成を開始したこと）を確認する**。send が exit 0 でも
+  composer に本文が残って Enter 未確定のことがある。確認は `commandmatedev capture "$WT"` か
+  orchestrate-monitor skill の `classify-state.sh`。
 
 ### 3-2. 進捗監視
 
@@ -227,24 +280,68 @@ for feature_issue in $FEATURE_ISSUES:
 commandmatedev ls --branch feature/
 ```
 
-### 3-3. 完了待機
+より詳細な監視は orchestrate-monitor skill を使う。契約付き委任では**タスク状態を一次ソース**に
+できるので、`hooks-task.sh` を併せて読み込む:
 
-全ワーカーの完了を待つ：
+```bash
+MONITOR_HOOKS_BASE=origin/develop \
+.claude/skills/orchestrate-monitor/scripts/monitor.sh \
+  --verbose \
+  --hooks .claude/skills/orchestrate-monitor/scripts/hooks-git.sh \
+  --hooks .claude/skills/orchestrate-monitor/scripts/hooks-task.sh \
+  --session-prefix mcbd-claude \
+  --interval 20 --idle-threshold 8 <worktree-id> ... 2>&1 | tee monitor.log
+```
+
+**monitor の COMPLETE 判定をマージ可否の裁定に使わないこと。** 裁定は 3-3 の
+`wait --verify` の exit code である。
+
+### 3-3. 完了待機と検証（`wait --verify`）
 
 ```bash
 for each worktree:
-  commandmatedev wait <worktree-id> --timeout 10800
+  commandmatedev wait "$WT" --on-prompt human --verify --timeout 10800
+  echo "exit=$?"
 ```
 
-### 3-4. プロンプト対応
+- `--on-prompt human` を必ず付ける。既定（`agent`）はプロンプト検出で即 exit 10 を返すため、
+  監督ループが空回りする。
+- `--verify` は完了検出**後**に全ゲート（`work-evidence` ＋ `scope` ＋ verify.yaml の宣言ゲート）を
+  実行し、その結果を exit code にする。ここが「完了したが壊れていた」を目視から exit code へ
+  移す一点である。
 
-`commandmatedev wait` が exit code 10 を返した場合、プロンプト内容を確認して応答：
+### 3-4. exit code 分岐
+
+| exit | 意味 | 対応 |
+|------|------|------|
+| `0` | 完了・検証合格 | Phase 4（設計突合）／Phase 6（マージ）へ進む |
+| `20` | 検証不合格（ゲートが落ちた） | 下記「20 の対応」。**再指示は上限2回**、超えたら人間へエスカレーション |
+| `21` | 作業証跡ゼロ（未着手） | 下記「21 の対応」 |
+| `10` | プロンプト検出 | `commandmatedev capture <WT>` で内容確認 → `commandmatedev respond <WT> "yes"` → 再度 wait |
+| `124` | タイムアウト | capture で状況確認 → 追加指示 or ユーザーに報告 |
+
+**20 の対応**（検証不合格）:
 
 ```bash
-commandmatedev wait <worktree-id> --timeout 60 --on-prompt agent
-# exit 10 → プロンプト検出
-commandmatedev respond <worktree-id> "yes"
+commandmatedev verify "$WT" --json    # 失敗したゲートと exit code を特定
 ```
+
+失敗ゲートと `logTail` を添えて同じ worker に再指示する（契約は据え置き。再送は素の send でよい）。
+再指示は **同一 worktree につき最大2回**。3回目に到達したら worker を止め、ユーザーに判断を仰ぐ。
+
+**21 の対応**（作業証跡ゼロ）: ワーカーは1行も書いていない。ほぼ常に起動側の問題なので capture で切り分ける。
+
+```bash
+commandmatedev capture "$WT"
+```
+
+- **composer に本文が残っている** → Enter 未確定。`tmux send-keys -t "mcbd-claude-$WT" Enter` で確定させる
+  （`commandmatedev respond` は空文字を受け付けず exit 2 になるのでここでは使えない）。
+  tmux セッション名は `mcbd-<エージェント>-<worktree-id>` である
+- **権限プロンプトで停止** → Enter で承認。monitor.sh に自動承認させる場合は
+  `--session-prefix mcbd-claude` を渡すこと（既定の `cm` はこの製品のセッション名と一致しない）
+- **セッションが起動していない** → `commandmatedev ls` で存在確認、必要なら再送
+- 判別のための知見は orchestrate-monitor skill の STARTED ガード（`verify-completion.sh`）を参照
 
 **`--phase design` 指定時**: 全ワーカーの設計フェーズ完了を確認して終了。
 
@@ -278,37 +375,34 @@ commandmatedev send <worktree-id> "設計書の以下の点を修正してくだ
   --auto-yes --duration 1h
 ```
 
+修正指示は**契約を作り直さない**（契約は Issue 単位の宣言であり、1往復の指摘ではない）。
+指示の反映は次の `wait --verify` で裁定される。
+
 **`--phase impl` 指定時**: 全ワーカーの実装完了を確認して終了。
 
 ---
 
 ## Phase 5: 品質確認
 
-### 5-1. 各ワーカーに品質チェック送信
+### 5-1. 検証ゲートの実行
 
-```bash
-QUALITY_CMD="以下を順に実行し結果を報告してください:
-1. npm run lint
-2. npx tsc --noEmit
-3. npm run test:unit
-4. npm run build
-最後に Pass/Fail のサマリーを出力してください。"
-
-for each worktree:
-  commandmatedev send <worktree-id> "$QUALITY_CMD" --auto-yes --duration 1h
-```
-
-### 5-2. 結果収集
+Phase 3 で `wait --verify` が exit 0 を返していれば、そのワーカーの品質は**既に裁定済み**なので
+このフェーズは飛ばしてよい。契約無しで委任した場合（`--contract` が使えない CLI など）だけ、
+オーケストレーターが直接ゲートを回す:
 
 ```bash
 for each worktree:
-  commandmatedev wait <worktree-id> --timeout 600
-  commandmatedev capture <worktree-id>
+  commandmatedev verify "$WT" --json > "verify-${WT}.json"; echo "exit=$?"
 ```
 
-### 5-3. 品質NGの場合
+**ワーカーに「lint/tsc/test を実行して結果を報告して」と送らないこと。** 報告文の解析は
+「全部 Pass です」という散文を信じることであり、`wait --verify` / `verify` の exit code が
+置き換えた当のもの。exit code は `0`=合格 / `20`=不合格 / `21`=作業証跡ゼロ。
 
-ワーカーに修正を指示し、再度品質チェック。最大3回まで自動リトライ。
+### 5-2. 品質NGの場合
+
+`--json` の失敗ゲートと `logTail` を添えてワーカーに修正を指示し、再度 `verify`。
+最大3回まで自動リトライ。
 
 ---
 
@@ -414,7 +508,10 @@ npm run build
 | developブランチでない | エラー表示し中断 |
 | CommandMateサーバー未起動 | `commandmatedev start --daemon` を案内 |
 | worktree作成失敗 | エラー表示、手動作成を案内 |
-| ワーカーのタイムアウト | captureで状況確認→追加指示 or ユーザーに報告 |
+| ワーカーのタイムアウト（exit 124） | captureで状況確認→追加指示 or ユーザーに報告 |
+| 検証不合格（exit 20） | `verify --json` で失敗ゲートを特定し再指示。上限2回で人間へエスカレーション |
+| 作業証跡ゼロ（exit 21） | captureでcomposer未確定・権限プロンプト・未起動を切り分け（Phase 3-4） |
+| 契約エラー（send が exit 2） | 契約の全エラーが一度に出るので、`docs/design/task-contract.md` と突き合わせて修正し再送 |
 | 品質チェック3回連続失敗 | ユーザーに報告して中断 |
 | コンフリクト解消失敗 | ユーザーに報告して中断 |
 | UAT 4回連続FAIL | ユーザーに判断を仰ぐ |
@@ -423,7 +520,7 @@ npm run build
 
 ## 完了条件
 
-- [ ] 全Issueの開発が完了している
+- [ ] 全Issueの開発が完了している（契約付き委任は `wait --verify` が exit 0）
 - [ ] 品質チェック全パス（ESLint, TypeScript, テスト, ビルド）
 - [ ] 全IssueのPRがdevelopにマージ済み
 - [ ] developブランチでの統合ビルド・テストが全パス
