@@ -43,8 +43,9 @@ Follow the instructions in the core prompt exactly.
 1. **概要** - Issue番号、イテレーション、ステータス
 2. **フェーズ別結果** - TDD、受入テスト、リファクタリング
 3. **総合品質メトリクス** - カバレッジ、静的解析エラー
-4. **ブロッカー** - 問題点、課題（あれば）
-5. **次のステップ** - 具体的なアクション提案
+4. **検証メトリクス** - `commandmate report metrics` の tasks / verification / intervention（取得失敗時・全ゼロ時は省略）
+5. **ブロッカー** - 問題点、課題（あれば）
+6. **次のステップ** - 具体的なアクション提案
 
 ---
 
