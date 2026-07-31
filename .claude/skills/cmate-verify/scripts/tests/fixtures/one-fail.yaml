@@ -1,0 +1,13 @@
+# The middle gate prints a green-looking summary and exits non-zero: the exact
+# shape that a grep-based verdict would call PASS. `after` proves that the run
+# continues past a failure so one invocation reports every finding.
+version: 1
+gates:
+  - id: ok
+    command: echo fine
+  - id: broken
+    command: echo "Tests 100 passed"; exit 3
+  - id: after
+    command: echo ran-after-failure
+options:
+  skipInPrimaryCheckout: false

@@ -71,7 +71,21 @@ logs/
 # CommandMate 実行時データ（ユーザーがチャットに添付した画像の保存先）。
 # src/app/api/worktrees/[id]/send/route.ts が imagePath の許可パスとして参照する。
 # アプリが書き込み続けるランタイム生成物のためコミットしない（dev-reports/ と同扱い）。
-/.commandmate/
+#
+# 例外は「設定」であって「生成物」でないファイルだけ。追跡ポリシーの解説と
+# 手元での確認方法は docs/design/commandmate-directory-tracking.md を参照。
+#
+# 【重要】サブディレクトリの中身を追跡したいときは ! を 1 行足すだけでは効かない。
+# git は除外されたディレクトリの中を走査しないため、まずディレクトリ自体を
+# 除外解除してから中身を絞り込む 2 段構えが要る（下の tasks/ がその形）。
+# 規則を変更したら scripts/check-commandmate-tracking.sh で確認すること。
+/.commandmate/*
+!/.commandmate/verify.yaml
+# 実行契約（Issue #1545 / Phase 2-1）。「誰がどんな制約で作業させたか」の記録なので
+# レビュー可能な形で追跡する。.yaml 以外（ログ等の副産物）は除外したままにする。
+!/.commandmate/tasks/
+/.commandmate/tasks/*
+!/.commandmate/tasks/*.yaml
 
 # 直下の .md は既知のドキュメントのみ追跡する。
 # 検証用スナップショットは *-snapshot.md / snapshot-*.md / codex-tab-final.md のように

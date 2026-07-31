@@ -1,0 +1,57 @@
+# demo-video storyboard (Issue #1554)
+#
+# This file is the only place wording is edited. Durations, telop timecodes and
+# the ffmpeg cut are all derived from it — never hand-written elsewhere.
+#
+# Validated by scripts/storyboard.ts before anything is composed:
+#   - scene durations must sum to `duration`
+#   - every telop needs both ja and en (a missing one would ship a video with a
+#     foreign telop, which no reviewer would catch)
+#   - telop budget: record scenes ja <= 20 chars / en <= 8 words,
+#     card scenes ja <= 40 chars / en <= 12 words
+#   - every `type: record` id must exist in record-scenes.ts SCENES. The reverse
+#     does not hold (#1575): a storyboard is a cut, not a manifest of the whole
+#     scene library, and demo-video.sh only films the ids listed here
+#
+# Translations are written by hand in both languages on purpose. Machine
+# translating at generation time would put text on screen that nobody reviewed.
+
+version: 1
+duration: 30
+output: demo-30s
+scenes:
+  - id: title
+    type: card
+    duration: 3
+    telop: { ja: "CommandMate", en: "CommandMate" }
+  - id: sessions-overview
+    type: record
+    duration: 7
+    viewport: pc
+    telop:
+      ja: "複数エージェントの状態をひと目で"
+      en: "All your agents at a glance"
+  - id: send-and-generate
+    type: record
+    duration: 8
+    viewport: pc
+    telop:
+      ja: "指示を送るとエージェントが作業開始"
+      en: "Send a task and agents get to work"
+  - id: respond-from-mobile
+    type: record
+    duration: 6
+    viewport: mobile
+    telop:
+      ja: "承認はスマホからワンタップ"
+      en: "Approve from your phone"
+  - id: complete
+    type: record
+    duration: 3
+    telop:
+      ja: "完了を自動検知"
+      en: "Completion, detected"
+  - id: outro
+    type: card
+    duration: 3
+    telop: { ja: "github.com/Kewton/CommandMate", en: "github.com/Kewton/CommandMate" }

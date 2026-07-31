@@ -1,0 +1,20 @@
+# Tutorial Step 3 (verification) — confirm what the agent changed (Issue #1575)
+
+version: 1
+duration: 12
+output: cm-t5-review-changes
+scenes:
+  - id: complete
+    type: record
+    duration: 5
+    viewport: pc
+    telop:
+      ja: "完了を自動で検知"
+      en: "Completion, detected automatically"
+  - id: review-diff
+    type: record
+    duration: 7
+    viewport: pc
+    telop:
+      ja: "Git ペインで差分を確認"
+      en: "Review the diff in the Git pane"

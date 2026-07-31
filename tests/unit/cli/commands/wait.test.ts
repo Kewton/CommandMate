@@ -5,7 +5,7 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mockFetchSequence, restoreFetch } from '../../../helpers/mock-api';
-import { WaitExitCode } from '../../../../src/cli/types';
+import { VerifyExitCode, WaitExitCode } from '../../../../src/cli/types';
 
 const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -316,5 +316,284 @@ describe('Issue #520: sessionStatus completion detection', () => {
     expect(mockConsoleError).toHaveBeenCalledWith(
       expect.stringContaining('status=running')
     );
+  });
+});
+
+// =============================================================================
+// Issue #1544: --verify / --require-work
+// =============================================================================
+
+interface Route {
+  match: (url: string, method: string) => boolean;
+  data: unknown;
+  status?: number;
+}
+
+/**
+ * Route fetch by URL instead of by call order.
+ *
+ * Multi-worktree waits poll concurrently, so a positional sequence cannot
+ * express "wt1 completed, wt2 is still running" without encoding an
+ * interleaving the implementation is free to change.
+ */
+function mockFetchRoutes(routes: Route[]) {
+  const fn = vi.fn(async (url: unknown, init?: { method?: string }) => {
+    const u = String(url);
+    const method = init?.method ?? 'GET';
+    const route = routes.find(r => r.match(u, method));
+    if (!route) throw new Error(`unmocked request: ${method} ${u}`);
+    const status = route.status ?? 200;
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      json: () => Promise.resolve(route.data),
+      text: () => Promise.resolve(JSON.stringify(route.data)),
+    };
+  });
+  global.fetch = fn as unknown as typeof fetch;
+  return fn;
+}
+
+function callSignatures(fn: ReturnType<typeof mockFetchRoutes>): string[] {
+  return fn.mock.calls.map(call => {
+    const init = call[1] as { method?: string } | undefined;
+    return `${init?.method ?? 'GET'} ${new URL(String(call[0])).pathname}`;
+  });
+}
+
+function verifyRun(over: Record<string, unknown> = {}) {
+  return {
+    id: 1,
+    worktreeId: 'wt1',
+    instanceId: null,
+    taskId: null,
+    trigger: 'wait',
+    status: 'passed',
+    baseRef: 'origin/develop',
+    startedAt: '2026-07-30T00:00:00.000Z',
+    finishedAt: '2026-07-30T00:01:00.000Z',
+    gates: [],
+    ...over,
+  };
+}
+
+const completedOutput = { ...baseOutput, isRunning: false, sessionStatus: 'idle' as const };
+
+/** current-output + verify routes for one worktree that completes immediately. */
+function completedWorktreeRoutes(id: string, runId: number, status: string): Route[] {
+  return [
+    { match: u => u.includes(`/api/worktrees/${id}/current-output`), data: completedOutput },
+    {
+      match: (u, m) => m === 'POST' && u.endsWith(`/api/worktrees/${id}/verify`),
+      data: { runId },
+      status: 202,
+    },
+    {
+      match: u => u.endsWith(`/api/worktrees/${id}/verify/runs/${runId}`),
+      data: { run: verifyRun({ id: runId, worktreeId: id, status }) },
+    },
+  ];
+}
+
+describe('Issue #1544: wait --verify / --require-work', () => {
+  it('declares both options', async () => {
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    const flags = createWaitCommand().options.map(opt => opt.long);
+    expect(flags).toEqual(expect.arrayContaining(['--verify', '--require-work']));
+  });
+
+  it('does not verify at all without --verify / --require-work', async () => {
+    const fetchMock = mockFetchRoutes([
+      { match: u => u.includes('/current-output'), data: completedOutput },
+    ]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+    expect(callSignatures(fetchMock)).toEqual(['GET /api/worktrees/wt1/current-output']);
+  });
+
+  it('chains verify after completion and exits 20 when a gate fails', async () => {
+    const fetchMock = mockFetchRoutes(completedWorktreeRoutes('wt1', 1, 'failed'));
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1', '--verify']);
+
+    expect(mockExit).toHaveBeenCalledWith(VerifyExitCode.VERIFY_FAILED);
+    expect(mockExit).not.toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+    expect(callSignatures(fetchMock)).toEqual([
+      'GET /api/worktrees/wt1/current-output',
+      'POST /api/worktrees/wt1/verify',
+      'GET /api/worktrees/wt1/verify/runs/1',
+    ]);
+  });
+
+  it('exits 0 when every gate passes', async () => {
+    mockFetchRoutes(completedWorktreeRoutes('wt1', 1, 'passed'));
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1', '--verify']);
+
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+  });
+
+  it('sends trigger=wait and all gates for --verify', async () => {
+    const fetchMock = mockFetchRoutes(completedWorktreeRoutes('wt1', 1, 'passed'));
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1', '--verify']);
+
+    const post = fetchMock.mock.calls.find(c => (c[1] as { method?: string })?.method === 'POST');
+    expect(JSON.parse((post![1] as { body: string }).body)).toEqual({
+      trigger: 'wait',
+      instanceId: undefined,
+      gateIds: undefined,
+    });
+  });
+
+  it('--require-work alone runs only the work-evidence gate and exits 21 when it fails', async () => {
+    const fetchMock = mockFetchRoutes(completedWorktreeRoutes('wt1', 1, 'not_started'));
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1', '--require-work']);
+
+    expect(mockExit).toHaveBeenCalledWith(VerifyExitCode.NOT_STARTED);
+    const post = fetchMock.mock.calls.find(c => (c[1] as { method?: string })?.method === 'POST');
+    expect(JSON.parse((post![1] as { body: string }).body).gateIds).toEqual(['work-evidence']);
+  });
+
+  it('--verify subsumes --require-work rather than erroring on the pair', async () => {
+    const fetchMock = mockFetchRoutes(completedWorktreeRoutes('wt1', 1, 'passed'));
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1', '--verify', '--require-work']);
+
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+    const post = fetchMock.mock.calls.find(c => (c[1] as { method?: string })?.method === 'POST');
+    expect(JSON.parse((post![1] as { body: string }).body).gateIds).toBeUndefined();
+  });
+
+  it('does not verify when a prompt is detected (exit 10 wins)', async () => {
+    const promptOutput = {
+      ...baseOutput,
+      isRunning: true,
+      isPromptWaiting: true,
+      sessionStatus: 'waiting' as const,
+      promptData: { type: 'yes_no', question: 'Continue?', options: ['yes', 'no'], status: 'pending' },
+    };
+    const fetchMock = mockFetchRoutes([
+      { match: u => u.includes('/current-output'), data: promptOutput },
+    ]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1', '--verify']);
+
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+    // Decidable proof that verify never ran: exactly one request was made.
+    expect(callSignatures(fetchMock)).toEqual(['GET /api/worktrees/wt1/current-output']);
+  });
+
+  it('runs verify serially across worktrees', async () => {
+    const fetchMock = mockFetchRoutes([
+      ...completedWorktreeRoutes('wt1', 1, 'passed'),
+      ...completedWorktreeRoutes('wt2', 2, 'passed'),
+    ]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1', 'wt2', '--verify']);
+
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+    // Concurrent verification would interleave the two POSTs before either GET.
+    expect(callSignatures(fetchMock)).toEqual([
+      'GET /api/worktrees/wt1/current-output',
+      'GET /api/worktrees/wt2/current-output',
+      'POST /api/worktrees/wt1/verify',
+      'GET /api/worktrees/wt1/verify/runs/1',
+      'POST /api/worktrees/wt2/verify',
+      'GET /api/worktrees/wt2/verify/runs/2',
+    ]);
+  });
+
+  it('aggregates: PROMPT_DETECTED(10) outranks VERIFY_FAILED(20)', async () => {
+    const promptOutput = {
+      ...baseOutput,
+      isRunning: true,
+      isPromptWaiting: true,
+      sessionStatus: 'waiting' as const,
+      promptData: { type: 'yes_no', question: 'Continue?', options: ['yes'], status: 'pending' },
+    };
+    const fetchMock = mockFetchRoutes([
+      { match: u => u.includes('/api/worktrees/wt1/current-output'), data: promptOutput },
+      ...completedWorktreeRoutes('wt2', 2, 'failed'),
+    ]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1', 'wt2', '--verify']);
+
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+    expect(mockExit).not.toHaveBeenCalledWith(VerifyExitCode.VERIFY_FAILED);
+    // wt2 was still verified; the priority is about the aggregate, not about skipping work.
+    expect(callSignatures(fetchMock)).toContain('POST /api/worktrees/wt2/verify');
+  });
+
+  it('aggregates: VERIFY_FAILED(20) outranks NOT_STARTED(21)', async () => {
+    mockFetchRoutes([
+      ...completedWorktreeRoutes('wt1', 1, 'not_started'),
+      ...completedWorktreeRoutes('wt2', 2, 'failed'),
+    ]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1', 'wt2', '--verify']);
+
+    expect(mockExit).toHaveBeenCalledWith(VerifyExitCode.VERIFY_FAILED);
+    expect(mockExit).not.toHaveBeenCalledWith(VerifyExitCode.NOT_STARTED);
+  });
+
+  it('aggregates: NOT_STARTED(21) outranks TIMEOUT(124)', async () => {
+    vi.useFakeTimers();
+    const runningOutput = {
+      ...baseOutput,
+      isRunning: true,
+      isComplete: false,
+      sessionStatus: 'running' as const,
+    };
+    mockFetchRoutes([
+      ...completedWorktreeRoutes('wt1', 1, 'not_started'),
+      { match: u => u.includes('/api/worktrees/wt2/current-output'), data: runningOutput },
+    ]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    const promise = createWaitCommand().parseAsync([
+      'node', 'wait', 'wt1', 'wt2', '--verify', '--timeout', '5',
+    ]);
+    await vi.advanceTimersByTimeAsync(5000);
+    await promise;
+
+    expect(mockExit).toHaveBeenCalledWith(VerifyExitCode.NOT_STARTED);
+    expect(mockExit).not.toHaveBeenCalledWith(WaitExitCode.TIMEOUT);
+  });
+
+  it('a verify API failure yields its exit code instead of a false success', async () => {
+    const fetchMock = mockFetchRoutes([
+      { match: u => u.includes('/current-output'), data: completedOutput },
+      {
+        match: (u, m) => m === 'POST' && u.endsWith('/api/worktrees/wt1/verify'),
+        data: { error: "Verification run 9 is already running for worktree 'wt1'", runningRunId: 9 },
+        status: 409,
+      },
+    ]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1', '--verify']);
+
+    expect(mockExit).not.toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      expect.stringContaining("already in progress for 'wt1' (run 9)")
+    );
+    expect(callSignatures(fetchMock)).toEqual([
+      'GET /api/worktrees/wt1/current-output',
+      'POST /api/worktrees/wt1/verify',
+    ]);
   });
 });

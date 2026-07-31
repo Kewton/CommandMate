@@ -189,3 +189,64 @@ export type {
   UpsertPushSubscriptionInput,
   PushNotificationKind,
 } from './push-subscriptions-db';
+
+// verification-db (verification gate runs, Issue #1542)
+export {
+  createVerificationRun,
+  finishVerificationRun,
+  createGateResult,
+  finishGateResult,
+  getVerificationRun,
+  listVerificationRuns,
+  getRunningVerificationRun,
+  listRunningVerificationRuns,
+  listVerificationRunsForPeriod,
+  DEFAULT_RUN_HISTORY_LIMIT,
+  MAX_RUN_HISTORY_LIMIT,
+  MAX_RUN_HISTORY_DAYS,
+  VERIFICATION_TRIGGERS,
+} from './verification-db';
+export type {
+  VerificationRun,
+  VerificationRunWithGates,
+  VerificationRunWithGateSummaries,
+  VerificationGateResult,
+  VerificationGateSummary,
+  ListVerificationRunsForPeriodOptions,
+  VerificationTrigger,
+  VerificationRunStatus,
+  VerificationRunTerminalStatus,
+  VerificationGateStatus,
+  VerificationGateTerminalStatus,
+  CreateVerificationRunInput,
+  CreateGateResultInput,
+  FinishGateResultPatch,
+} from './verification-db';
+
+// tasks-db (execution contracts, Issue #1545)
+export {
+  createTask,
+  getTask,
+  listTasks,
+  getActiveTask,
+  getActiveTaskForInstance,
+  isTerminalTaskStatus,
+  TASK_STATUSES,
+  TERMINAL_TASK_STATUSES,
+  ACTIVE_TASK_STATUSES,
+} from './tasks-db';
+export type {
+  Task,
+  TaskStatus,
+  TerminalTaskStatus,
+  CreateTaskInput,
+  UpdateTaskStatusPatch,
+} from './tasks-db';
+
+// task-events-db (task state machine log, Issue #1548).
+// `updateTaskStatus` and `insertTaskEvent` are intentionally absent from this
+// barrel: `applyTaskEvent` (@/lib/tasks/task-transition-service) is the only
+// writer of either, and reaching around it would put a status in the table with
+// no event explaining it.
+export { listTaskEvents } from './task-events-db';
+export type { TaskEventRecord, TaskEventPayload, InsertTaskEventInput } from './task-events-db';

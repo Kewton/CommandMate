@@ -1,11 +1,26 @@
 /* CommandMate landing page behaviour (Issue #1200).
-   One job only: copy-to-clipboard on the install commands. The motion-safe
-   video playback that used to live here went away with the demo videos
-   (Issue #1272) — the page is static imagery now. No dependencies, no build
-   step. */
+   Two jobs: copy-to-clipboard on the install commands, and honouring
+   prefers-reduced-motion for the feature demos (Issue #1577). No dependencies,
+   no build step. */
 
 (function () {
   'use strict';
+
+  /* ---------- motion-safe demo playback (Issue #1577) ---------- */
+
+  // CSS cannot stop an autoplaying video, so the attribute has to come off in
+  // script. Dropping it alone is not enough once playback has begun, hence the
+  // pause; `controls` is what leaves the reader a way to watch on purpose.
+  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+  if (reduceMotion && reduceMotion.matches) {
+    Array.prototype.forEach.call(document.querySelectorAll('video[autoplay]'), function (video) {
+      video.autoplay = false;
+      video.removeAttribute('autoplay');
+      video.loop = false;
+      video.controls = true;
+      video.pause();
+    });
+  }
 
   /* ---------- copy buttons ---------- */
 

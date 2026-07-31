@@ -20,6 +20,8 @@ import { createWaitCommand } from './commands/wait';
 import { createRespondCommand } from './commands/respond';
 import { createCaptureCommand } from './commands/capture';
 import { createAutoYesCommand } from './commands/auto-yes';
+import { createVerifyCommand } from './commands/verify';
+import { createTaskCommand } from './commands/task';
 // Issue #636: Report command
 import { createReportCommand } from './commands/report';
 // Issue #1000: Agent-instance roster management (discover/add/remove/alias/kill)
@@ -224,6 +226,12 @@ export function buildProgram(): Command {
   program.addCommand(createRespondCommand());
   program.addCommand(createCaptureCommand());
   program.addCommand(createAutoYesCommand());
+
+  // Issue #1544: verification gates (.commandmate/verify.yaml)
+  program.addCommand(createVerifyCommand());
+
+  // Issue #1545: execution contracts (.commandmate/tasks/<name>.yaml)
+  program.addCommand(createTaskCommand());
 
   // Issue #636: Report command
   program.addCommand(createReportCommand());

@@ -116,6 +116,31 @@ export function validateStopPattern(pattern: string): StopPatternValidation {
   }
 }
 
+/**
+ * Execute a regex test with timeout protection.
+ * Uses synchronous execution with safe-regex2 pre-validation as the primary defense.
+ *
+ * Lives here rather than in auto-yes-state.ts (Issue #1547) so the auto-yes
+ * resolver can use it: the resolver is imported by a 'use client' hook, and
+ * auto-yes-state pulls in path-validator, which imports `fs`.
+ *
+ * @param regex - Pre-compiled RegExp to test
+ * @param text - Text to test against
+ * @param _timeoutMs - Reserved for future timeout implementation (default: 100ms)
+ * @returns true/false for match result, null if execution failed
+ */
+export function executeRegexWithTimeout(
+  regex: RegExp,
+  text: string,
+  _timeoutMs: number = 100
+): boolean | null {
+  try {
+    return regex.test(text);
+  } catch {
+    return null;
+  }
+}
+
 // =============================================================================
 // Time Formatting
 // =============================================================================

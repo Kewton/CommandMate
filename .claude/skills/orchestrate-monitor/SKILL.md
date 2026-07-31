@@ -22,11 +22,12 @@ allowed-tools: Bash(.claude/skills/orchestrate-monitor/scripts/*), Bash(git work
 └── scripts/
     ├── monitor-lib.sh       # 共有ヘルパー（JSON scalar 抽出・ANSI 正規化・アンカー検出・違反カウント）
     ├── classify-state.sh    # capture --json 1 ポーリング → 状態トークン
-    ├── verify-completion.sh # STARTED ガード付き完了判定（回帰#1）
+    ├── verify-completion.sh # タスク状態を一次ソースとする完了判定（＋STARTED ガード、回帰#1）
     ├── verify-scope.sh      # 偽陽性しないスコープ検証（回帰#2）
     ├── quality-gate.sh      # exit code を実測する品質ゲート
     ├── monitor.sh           # オペレータ用監視ループ（temp ファイル状態）
-    └── hooks-git.sh         # 完了フックの参考実装（worktree-id → 実 checkout の commit / 変更数）
+    ├── hooks-git.sh         # 作業量フックの参考実装（worktree-id → 実 checkout の commit / 変更数）
+    └── hooks-task.sh        # タスク状態フック（worktree-id → 実行契約の裁定済みステータス）
 ```
 
 テスト: `tests/unit/skills/orchestrate-monitor/`。fixture は**実 `capture --json` を採取した生 payload
@@ -40,6 +41,7 @@ allowed-tools: Bash(.claude/skills/orchestrate-monitor/scripts/*), Bash(git work
 # 1 つ以上の worktree-id を監督する
 CM="npx commandmate@latest" \
   .claude/skills/orchestrate-monitor/scripts/monitor.sh \
+  --session-prefix mcbd-claude \
   --interval 20 --idle-threshold 8 <worktree-id> [<worktree-id> ...]
 
 # 中核だけを個別に使う（Claude が監督中に呼ぶのはこちら）
@@ -55,6 +57,12 @@ commandmate capture <id> --json > poll.json
 NOT_RUNNING → is_retrying(→GENERATING) → PROMPT → GENERATING → RATE_LIMIT → IDLE
 ```
 
+**`--session-prefix` は実測して渡すこと。** 介入（承認 Enter / rate limit の `a` / 再送）は
+`tmux send-keys -t <prefix>-<worktree-id>` で撃つが、CommandMate の実セッション名は
+`mcbd-<エージェント>-<worktree-id>` である（`src/lib/session/claude-session.ts` の `getSessionName()`）。
+既定の `cm` は一致しないうえ `tmux send-keys` の失敗は握り潰されるので、**介入が 1 回も届かないまま
+監視が続く**。`tmux ls` で実名を確認してから渡す。
+
 `--resend-message` / `--max-resends` はリトライ枯渇死からの再送設定（既定 `continue` / 2 回）。
 `--max-polls N` は N 回ポーリングしたら（ワーカーが未完了でも）exit 0 で抜ける停止条件。既定 0 =
 全ワーカーが COMPLETE になるまで回り続ける（運用時の挙動は従来どおり）。判定ロジックには一切
@@ -63,12 +71,12 @@ NOT_RUNNING → is_retrying(→GENERATING) → PROMPT → GENERATING → RATE_LI
 
 ### `--verbose`: ポーリングごとの状態ログ（#1533）
 
-既定の stdout は**介入・capture 失敗・終局判定（COMPLETE / NOT_STARTED）・起動/停止**だけで、
+既定の stdout は**介入・capture 失敗・終局判定（COMPLETE / VERIFY_FAILED / NOT_STARTED）・起動/停止**だけで、
 「何回ポーリングして各状態が何回出たか」は残らない。`--verbose` を付けると 1 ポーリング 1 行の
 固定フォーマットが追加される（**opt-in。付けない限り既定出力は 1 バイトも変わらない**）:
 
 ```
-monitor[<wid>]: poll <N> -> <STATE> started=<0|1> streak=<n> commits=<n> uncommitted=<n> verdict=<VERDICT>
+monitor[<wid>]: poll <N> -> <STATE> started=<0|1> streak=<n> commits=<n> uncommitted=<n> task=<status|-> verdict=<VERDICT>
 ```
 
 `<STATE>` は `classify-state.sh` の出力、`<VERDICT>` は `verify-completion.sh` の出力、間の
@@ -104,6 +112,10 @@ MONITOR_HOOKS=.../hooks-git.sh .../monitor.sh <worktree-id> ...
 **exit 2 で即座に失敗**する（黙ってスタブに落ちると「全 worker が NOT_STARTED」という
 一見もっともらしい嘘の観測になるため）。
 
+**`--hooks` は繰り返し指定でき、左から順に source される**（フラグを1つでも与えると
+`MONITOR_HOOKS` の既定は捨てられる）。契約付き委任では作業量とタスク状態の両方が要るので、
+`hooks-git.sh` と `hooks-task.sh` を並べて渡す（下記「タスク状態を一次ソースにする」）。
+
 `hooks-git.sh` は worktree-id を `git worktree list --porcelain` から実 checkout に解決し
 （id = `<repo>-<branch>` の slug ＝ `generateWorktreeId()` と同じ正規化。`<repo>` はメイン
 worktree のディレクトリ名）、`git -C <path> log --oneline <base>..HEAD` と
@@ -111,6 +123,43 @@ worktree のディレクトリ名）、`git -C <path> log --oneline <base>..HEAD
 `MONITOR_HOOKS_REPO`（既定 `.`）/ `MONITOR_WORKTREE_ROOT` で調整する。base ref が解決できない
 場合は起動時に stderr へ警告する（黙って 0 を返すと、全部コミット済みの worker が
 uncommitted=0 と合わさって最後に NOT_STARTED と誤報されるため）。
+
+### タスク状態を一次ソースにする（#1581）
+
+`send --contract` で委任した worktree では、サーバが検証ゲートを回してタスクに**終局ステータス**を
+記録する。これは裁定結果であって推定ではないので、**完了判定の一次ソースはこちら**であり、
+capture のテキスト解析は契約無しの委任と未終局タスクのためのフォールバックに降格する
+（#1539 設計原則 4「文字列解析の降格」）。
+
+```bash
+.claude/skills/orchestrate-monitor/scripts/monitor.sh \
+  --hooks .../hooks-git.sh --hooks .../hooks-task.sh <worktree-id> ...
+```
+
+`hooks-task.sh` は `commandmate task list <worktree-id> --limit 1` を引く。**task id は要らない**
+（`send --contract` が stdout に出す id を監視ループへ渡す必要がない）: `task list` は worktree だけで
+答えられ、新しい順に返すので 1 行目が実行中の契約である。API（`GET /api/worktrees/:id/tasks`）でも
+同じ情報は取れるが、シェルからは CLI の方が素直（base URL と認証トークンの解決を CLI が持っている）。
+
+| タスク状態 | verdict | 意味 |
+|---|---|---|
+| `succeeded` | `COMPLETE` | ゲート合格。work-evidence もサーバ側で済んでいるので commit 数の裏取りは不要 |
+| `failed` / `cancelled` | `VERIFY_FAILED` | 終局だが**マージ不可**。`commandmate verify <id> --json` で失敗ゲートを見て再指示 |
+| `not_started` | `NOT_STARTED` | 作業証跡ゼロ |
+| `pending` / `running` / `waiting_input` / `verifying` | （フォールバック） | 未終局。capture ヒューリスティクスが判定する |
+| 空 / 未知 | （フォールバック） | 契約無し・ledger 無し・旧 CLI。**必ず従来動作に落ちる**（勝手な verdict を作らない） |
+
+2 つの落とし穴を明示的に塞いでいる:
+
+- **`COMPLETE` ≠ 「終わった」**。`VERIFY_FAILED` を別トークンにしたのは、「ワーカーが止まった」と
+  「成果物が正しい」を同じ信号として読まないため。これが #1539 が exit code に移した当のもの。
+- **生存中のペインは終局ステータスに勝つ**。`task list --limit 1` は最新のタスクを返すので、
+  過去の契約のあとに素の send をした worktree では古い裁定を読みうる。`verify-completion.sh` は
+  `GENERATING` / `PROMPT` / `RATE_LIMIT` を**タスク状態より先に**評価してこれを拒否する。
+
+> **monitor の COMPLETE をマージ可否の裁定に使わないこと。** 契約付き委任の最終裁定は
+> `commandmate wait <id> --on-prompt human --verify` の exit code（`0` 合格 / `20` 検証不合格 /
+> `21` 作業証跡ゼロ）である。monitor は「いつ見に行くか」を決める道具であって、合否を決める道具ではない。
 
 ### #1513 G2 の証拠採取レシピ
 
@@ -122,6 +171,7 @@ MONITOR_HOOKS_BASE=origin/develop \
 .claude/skills/orchestrate-monitor/scripts/monitor.sh \
   --verbose \
   --hooks .claude/skills/orchestrate-monitor/scripts/hooks-git.sh \
+  --session-prefix mcbd-claude \
   --interval 20 --idle-threshold 8 \
   <worktree-id> ... 2>&1 | tee monitor.log
 ```
@@ -131,7 +181,7 @@ MONITOR_HOOKS_BASE=origin/develop \
 | 総ポーリング数 | `grep -cE '^monitor\[<wid>\]: poll ' monitor.log` |
 | 状態分類の分布 | `grep -oE 'poll [0-9]+ -> [A-Z_]+' monitor.log \| awk '{print $4}' \| sort \| uniq -c` |
 | 介入全件 | `grep -E "sending 'a'\|resending\|resend budget spent" monitor.log`（承認 Enter はサイレント。総数は COMPLETE 行の `approvals=` に出る） |
-| 完了判定の根拠 | poll 行の `started= / streak= / commits= / uncommitted= / verdict=`。COMPLETE した poll 行がその worker の判定根拠そのもの |
+| 完了判定の根拠 | poll 行の `started= / streak= / commits= / uncommitted= / task= / verdict=`。COMPLETE した poll 行がその worker の判定根拠そのもの |
 | capture 失敗 | `grep -c 'capture failed' monitor.log`（poll 行は出ないので、総ポーリング数と別に数える） |
 
 **`--hooks` を付け忘れると誤報 0 は測れない**：commits/uncommitted が常に 0 になり、完走した
@@ -212,11 +262,14 @@ worker まで NOT_STARTED として記録される。G2 のログは必ずフッ
 
 ### 完了検証（`verify-completion.sh` / `verify-scope.sh`）
 
-13. **merge 成否は state=MERGED を確認してから Issue close**（未マージ Issue の誤クローズ防止）
+13. **契約付き委任では完了判定の一次ソースはタスク状態**（`hooks-task.sh`）で、capture 解析は
+    フォールバック。マージ可否の最終裁定は `wait --verify` の exit code であり、monitor の
+    `COMPLETE` ではない。詳細は上記「タスク状態を一次ソースにする（#1581）」。
+14. **merge 成否は state=MERGED を確認してから Issue close**（未マージ Issue の誤クローズ防止）
     （`feedback_orchestrate_changelog_conflict_close_guard`）。
-14. **スコープ完遂は受入ゲートでなく grep 実数で検証**。NUL 混入ファイルで grep がバイナリ扱いするため
+15. **スコープ完遂は受入ゲートでなく grep 実数で検証**。NUL 混入ファイルで grep がバイナリ扱いするため
     `grep -a` を使う（`feedback_orchestrate_scope_completeness` / `reference_grep_blind_nul_test_file`）。
-15. **検証ガード自身の偽陽性に注意**（回帰#2、`verify-scope.sh`）：
+16. **検証ガード自身の偽陽性に注意**（回帰#2、`verify-scope.sh`）：
     - 禁止パターンが**散文・コメント中**に出現しただけで違反と数える誤報
       （bare `npx commandmate` が「なぜ @latest が必要か」を説明する文に一致した実例）。
       → コメント行（`^[[:space:]]*#`）を除外する。fixture `scope-clean.txt` は CLEAN。
@@ -226,15 +279,15 @@ worker まで NOT_STARTED として記録される。G2 のログは必ずフッ
 
 ### スクリプト品質（実装制約）
 
-16. **bash 3.2 互換**（macOS 既定の `/bin/bash` は 3.2.57）：連想配列 `declare -A` 不可・`mapfile` 不可・
+17. **bash 3.2 互換**（macOS 既定の `/bin/bash` は 3.2.57）：連想配列 `declare -A` 不可・`mapfile` 不可・
     `${var,,}` 不可。状態は**整数 index の並列配列と temp ファイル**で持つ
     （`feedback_monitor_bash32_no_assoc_arrays`）。CI は `syntax.test.ts` が `bash -n` を回す。
-17. **ループ変数に `path` 等の特殊名を使わない**：zsh/bash で `path` は `PATH` に tie され、curl/tmux が
+18. **ループ変数に `path` 等の特殊名を使わない**：zsh/bash で `path` は `PATH` に tie され、curl/tmux が
     command not found 化して health check が偽陰性になる（`feedback_zsh_path_loop_var_clobbers_path`）。
-18. **品質ゲートで exit code を隠さない**（`quality-gate.sh`）：`cmd | grep ...` は `$?` を grep に渡し
+19. **品質ゲートで exit code を隠さない**（`quality-gate.sh`）：`cmd | grep ...` は `$?` を grep に渡し
     非ゼロ終了を隠す。vitest は「全テスト緑・Unhandled Rejection で exit 1」を出しうる。
     `cmd > log 2>&1; echo $?` で実測する（`feedback_quality_gate_grep_hides_exit_code`）。
-19. **`sed` は `LC_ALL=C` で回す**：ペイン capture には途中で切れたマルチバイト文字が混じりうる。
+20. **`sed` は `LC_ALL=C` で回す**：ペイン capture には途中で切れたマルチバイト文字が混じりうる。
     UTF-8 ロケールの BSD sed はそこで `illegal byte sequence` を吐いて停止する。
 
 ---
@@ -251,6 +304,8 @@ worker まで NOT_STARTED として記録される。G2 のログは必ずフッ
 | 6 | リトライ枯渇死が放置される／半端な作業で COMPLETE 誤報 | #1522 | `ml_has_terminal_api_error` ＋ `monitor.sh` の再送 | `live-api-error-exhausted.json` / `monitor-resend.test.ts` |
 | 7 | `rate.?limit` が散文・ソースに一致し**健全なワーカーへ `a` を注入** | #1522 | バナー限定アンカー ＋ `RATE_LIMIT` を最後に評価 ＋ `ml_pane_text` | `live-idle-rate-limit-source.json` / `live-generating-task-text-scrollback.json` |
 | 8 | `count_commits`/`count_uncommitted` がスタブ固定で、**COMPLETE 分岐が実運用で一度も発火しない**（完走した worker まで NOT_STARTED と記録される） | #1533 | `--hooks` / `MONITOR_HOOKS` で供給、参考実装 `hooks-git.sh` を同梱 | `monitor-observability.test.ts`（フック無しで COMPLETE 到達不能 ⇄ フック有りで到達、を両方向で固定） |
+| 9 | **ゲート不合格の worker を COMPLETE と報告**（commit も idle streak も「完了」に見えるので、capture 由来の信号だけでは検証不合格と区別できない） | #1581 | タスク状態を一次ソースにし、`failed` / `cancelled` を `VERIFY_FAILED` として分離 | `verify-completion.test.ts` / `monitor-task-source.test.ts` |
+| 10 | 古い契約の終局ステータスを現在の裁定として読み、**生成中の worker を COMPLETE と誤報** | #1581 | 生存ペイン（`GENERATING`/`PROMPT`/`RATE_LIMIT`）をタスク状態より先に評価 | `verify-completion.test.ts`（stale veto）/ `monitor-task-source.test.ts` |
 
 いずれも naive 実装で red → ガード実装で green にした（#3〜#7 は #1512 の初版実装に対して red）。
 #8 は両方向テスト（対照＋変異注入）で固定している：`--verbose` を既定 ON にする / フックをスタブより

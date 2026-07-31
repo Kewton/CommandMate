@@ -99,6 +99,19 @@ main を develop へマージバック（-s ours・祖先復元）
 
    > **注意**: `git log origin/main..origin/develop` は squash の影響で実態より遥かに多くのコミットを表示します（実差分15ファイルに対し136コミット等）。**tree 差分（`git diff`）が正**です。
 
+5. **Vibe メトリクスを確認**（前リリースからの期間。**リリースをブロックしません**）
+
+   ```bash
+   commandmate report metrics --days <前リリースからの日数（1..90）> --json > /tmp/vibe-metrics.json 2>&1; echo $?
+   ```
+
+   > `--days` は 1..90 の整数のみで、範囲外はクランプされず **exit 2** で失敗します。呼ぶ前に丸めてください。
+   > 判定は **exit code** で行います。失敗時のファイルには JSON ではなくエラー文が入るため、**パースしてから判断してはいけません**。
+   > exit code が 0 以外（サーバ未稼働は **1**）なら「メトリクスなし」と明記して**スキップし、リリースは続行**します。
+   > exit 0 でも `tasks.total` が 0（`successRate` が `null`）なら同じくスキップ。
+   > タスク成功率・検証 pass 率・`gateFailBreakdown` 上位・人間介入回数をリリース PR 本文の
+   > 「Vibe Metrics」節に貼ります。詳細は [`.claude/skills/release/SKILL.md`](../.claude/skills/release/SKILL.md) の 1-4 を参照。
+
 ### Step 1: バージョン決定
 
 ```bash
@@ -180,6 +193,7 @@ PR 本文に含める要素:
 - **対応 Issue** 一覧
 - **主な変更**: Added / Changed / Fixed
 - **品質チェック**結果
+- **Vibe Metrics**: 事前準備 5 で取得した要約。取れなかった場合は「メトリクスなし」とその理由（サーバ未稼働／対象期間に記録なし）を 1 行で書く
 
 CI 通過を確認します。
 

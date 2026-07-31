@@ -122,8 +122,13 @@ function expectPolls(run: RunResult, polls: number, id = 'w1'): void {
   expect(run.stdout).not.toContain('capture failed');
 }
 
+// `task=` carries the contract status verify-completion.sh was given, and is `-`
+// when there is none (Issue #1581). It is part of the fixed format because the
+// poll line's contract is "the inputs behind the verdict": once the task ledger
+// became the primary completion source, a line without it would explain a
+// COMPLETE with counters that did not actually decide it.
 const POLL_LINE =
-  /^monitor\[([^\]]+)\]: poll (\d+) -> ([A-Z_]+) started=(\d+) streak=(\d+) commits=(\d+) uncommitted=(\d+) verdict=([A-Z_]+)$/;
+  /^monitor\[([^\]]+)\]: poll (\d+) -> ([A-Z_]+) started=(\d+) streak=(\d+) commits=(\d+) uncommitted=(\d+) task=(\S+) verdict=([A-Z_]+)$/;
 
 interface PollRecord {
   id: string;
@@ -133,6 +138,7 @@ interface PollRecord {
   streak: number;
   commits: number;
   uncommitted: number;
+  task: string;
   verdict: string;
 }
 
@@ -150,7 +156,8 @@ function parsePolls(stdout: string): PollRecord[] {
       streak: Number(m[5]),
       commits: Number(m[6]),
       uncommitted: Number(m[7]),
-      verdict: m[8],
+      task: m[8],
+      verdict: m[9],
     }));
 }
 
@@ -192,9 +199,9 @@ describe('monitor.sh --verbose per-poll state log (Issue #1533, scope A)', () =>
     // would leave this short rather than silently degrade the evidence.
     expect(records.map((r) => r.poll)).toEqual([1, 2, 3]);
     expect(records).toEqual([
-      { id: 'w1', poll: 1, state: 'GENERATING', started: 1, streak: 0, commits: 0, uncommitted: 0, verdict: 'WORKING' },
-      { id: 'w1', poll: 2, state: 'IDLE', started: 1, streak: 1, commits: 0, uncommitted: 0, verdict: 'NOT_STARTED' },
-      { id: 'w1', poll: 3, state: 'IDLE', started: 1, streak: 2, commits: 0, uncommitted: 0, verdict: 'NOT_STARTED' },
+      { id: 'w1', poll: 1, state: 'GENERATING', started: 1, streak: 0, commits: 0, uncommitted: 0, task: '-', verdict: 'WORKING' },
+      { id: 'w1', poll: 2, state: 'IDLE', started: 1, streak: 1, commits: 0, uncommitted: 0, task: '-', verdict: 'NOT_STARTED' },
+      { id: 'w1', poll: 3, state: 'IDLE', started: 1, streak: 2, commits: 0, uncommitted: 0, task: '-', verdict: 'NOT_STARTED' },
     ]);
     // The #1513 G2 question "what was the state distribution over the run".
     expect(stateDistribution(records)).toEqual({ GENERATING: 1, IDLE: 2 });
@@ -262,8 +269,8 @@ describe('monitor.sh completion hooks (Issue #1533, scope B)', () => {
     expect(run.stdout).toContain('monitor: all 1 worker(s) complete');
     expect(run.stdout).not.toContain('reached --max-polls');
     expect(parsePolls(run.stdout)).toEqual([
-      { id: 'w1', poll: 1, state: 'GENERATING', started: 1, streak: 0, commits: 2, uncommitted: 5, verdict: 'WORKING' },
-      { id: 'w1', poll: 2, state: 'IDLE', started: 1, streak: 1, commits: 2, uncommitted: 5, verdict: 'COMPLETE' },
+      { id: 'w1', poll: 1, state: 'GENERATING', started: 1, streak: 0, commits: 2, uncommitted: 5, task: '-', verdict: 'WORKING' },
+      { id: 'w1', poll: 2, state: 'IDLE', started: 1, streak: 1, commits: 2, uncommitted: 5, task: '-', verdict: 'COMPLETE' },
     ]);
   }, 20_000);
 

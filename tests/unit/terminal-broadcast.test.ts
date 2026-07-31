@@ -69,6 +69,7 @@ beforeEach(() => {
     isPagerActive: false,
     isUnclassifiedActive: false,
     lineCount: 1,
+    lastStopEventAt: null,
   });
 });
 
@@ -120,6 +121,7 @@ describe('broadcastTerminalSnapshotAfterInteraction', () => {
         content: '',
         fullOutput: 'old frame',
         lineCount: 1,
+        lastStopEventAt: null,
       })
       .mockResolvedValueOnce({
         isRunning: true,
@@ -130,6 +132,7 @@ describe('broadcastTerminalSnapshotAfterInteraction', () => {
         fullOutput: 'redrawn frame',
         thinking: true,
         lineCount: 1,
+        lastStopEventAt: null,
       });
 
     const pending = broadcastTerminalSnapshotAfterInteraction(

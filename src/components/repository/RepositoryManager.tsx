@@ -307,6 +307,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
       <div className="flex gap-2 flex-wrap">
         {!showAddForm && (
           <Button
+            data-testid="add-repository-button"
             variant="primary"
             size="sm"
             onClick={() => setShowAddForm(true)}
@@ -315,6 +316,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
           </Button>
         )}
         <Button
+          data-testid="sync-all-button"
           variant="secondary"
           size="sm"
           onClick={handleSyncRepositories}
@@ -357,6 +359,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
                     <div className="flex gap-2">
                       <Input
                         id="repositoryPath"
+                        data-testid="repository-path-input"
                         type="text"
                         value={repositoryPath}
                         onChange={(e) => setRepositoryPath(e.target.value)}
@@ -398,6 +401,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
 
                   <div className="flex gap-2">
                     <Button
+                      data-testid="repository-scan-submit"
                       type="submit"
                       variant="primary"
                       disabled={isScanning || !repositoryPath.trim()}

@@ -1,0 +1,14 @@
+# Comments, blank lines, quoted and unquoted scalars, and values that contain
+# a colon and a hash.
+
+version: 1
+
+gates:
+  # only the first colon separates key from value
+  - id: quoted
+    command: "echo hash:# and colon"
+  - id: unquoted
+    command: sh -c "echo a:b"
+options:
+  skipInPrimaryCheckout: false
+  maxLogTailBytes: 4096

@@ -143,6 +143,44 @@ export interface SerializedReport {
   updatedAt: string;
 }
 
+// Mirrors: src/lib/metrics/vibe-metrics.ts VibeMetrics [Issue #1551]
+// Restated rather than imported: tsconfig.cli.json compiles src/cli alone with
+// no `@/` paths, so the CLI cannot reach src/lib.
+export interface VibeMetrics {
+  periodDays: number;
+  tasks: {
+    total: number;
+    succeeded: number;
+    failed: number;
+    notStarted: number;
+    cancelled: number;
+    /** 0..1 fraction; null when no tasks were created in the window. */
+    successRate: number | null;
+    /** null when nothing failed in the window. */
+    avgRetryLoops: number | null;
+  };
+  verification: {
+    runs: number;
+    passed: number;
+    failed: number;
+    notStarted: number;
+    /** 0..1 fraction; null when no runs started in the window. */
+    passRate: number | null;
+    gateFailBreakdown: Array<{ gateId: string; failCount: number }>;
+  };
+  intervention: {
+    humanResponds: number;
+    autoAnswered: number;
+    /** Always null in v1: the policy suppression log is not persisted. */
+    suppressedByPolicy: number | null;
+  };
+}
+
+// Mirrors: src/app/api/metrics/vibe/route.ts GET response [Issue #1551]
+export interface VibeMetricsResponse {
+  metrics: VibeMetrics;
+}
+
 // Mirrors: src/app/api/templates/[id]/route.ts GET response [Issue #636]
 export interface TemplateResponse {
   id: string;
@@ -417,4 +455,170 @@ export interface SkillReindexResult {
   }>;
   /** Registered worktrees whose directory is gone; their rows were left untouched. */
   unreadableWorktreeIds: string[];
+}
+
+// =============================================================================
+// Verification (Issue #1544)
+// =============================================================================
+
+/** Mirrors: src/app/api/worktrees/[id]/verify/route.ts POST 202 response. */
+export interface VerifyStartResponse {
+  runId: number;
+}
+
+/**
+ * Mirrors: src/lib/db/verification-db.ts VerificationRunStatus.
+ * Declared here rather than imported so the CLI bundle stays free of the
+ * server's better-sqlite3 dependency graph.
+ */
+export type VerificationRunStatus =
+  | 'running'
+  | 'passed'
+  | 'failed'
+  | 'not_started'
+  | 'error'
+  | 'cancelled';
+
+/** Mirrors: src/lib/db/verification-db.ts VerificationGateStatus. */
+export type VerificationGateStatus =
+  | 'running'
+  | 'passed'
+  | 'failed'
+  | 'timeout'
+  | 'skipped'
+  | 'error';
+
+/**
+ * Mirrors: src/lib/db/verification-db.ts VerificationGateResult.
+ * Dates arrive as ISO strings because the route serializes them through JSON.
+ */
+export interface VerificationGateResultView {
+  id: number;
+  runId: number;
+  gateId: string;
+  command: string;
+  status: VerificationGateStatus;
+  exitCode: number | null;
+  durationMs: number | null;
+  logTail: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+/** Mirrors: src/lib/db/verification-db.ts VerificationRunWithGates. */
+export interface VerificationRunView {
+  id: number;
+  worktreeId: string;
+  instanceId: string | null;
+  taskId: string | null;
+  trigger: string;
+  status: VerificationRunStatus;
+  baseRef: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  gates: VerificationGateResultView[];
+}
+
+/** Mirrors: src/app/api/worktrees/[id]/verify/runs/[runId]/route.ts GET response. */
+export interface VerifyRunResponse {
+  run: VerificationRunView;
+}
+
+/**
+ * Mirrors: src/lib/db/verification-db.ts VerificationGateSummary (Issue #1593).
+ * No `logTail` — the history listing does not carry log bodies, and declaring
+ * one here would let `history` code read a field the server never sends.
+ */
+export interface VerificationGateSummaryView {
+  gateId: string;
+  status: VerificationGateStatus;
+  exitCode: number | null;
+  durationMs: number | null;
+}
+
+/** Mirrors: src/lib/db/verification-db.ts VerificationRunWithGateSummaries. */
+export interface VerificationRunSummaryView {
+  id: number;
+  worktreeId: string;
+  instanceId: string | null;
+  taskId: string | null;
+  trigger: string;
+  status: VerificationRunStatus;
+  baseRef: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  gates: VerificationGateSummaryView[];
+}
+
+/** Mirrors: src/app/api/verification/runs/route.ts GET response. */
+export interface VerificationRunHistoryResponse {
+  runs: VerificationRunSummaryView[];
+}
+
+// =============================================================================
+// Task contracts (Issue #1545)
+// =============================================================================
+
+/** Mirrors: src/lib/db/tasks-db.ts TaskStatus. */
+export type TaskStatus =
+  | 'pending'
+  | 'running'
+  | 'waiting_input'
+  | 'verifying'
+  | 'succeeded'
+  | 'failed'
+  | 'not_started'
+  | 'cancelled';
+
+/**
+ * Mirrors: src/lib/tasks/contract-parser.ts TaskContract.
+ * The snapshot taken at send time, as stored in `tasks.contract_json`.
+ */
+export interface TaskContractView {
+  version: number;
+  title: string;
+  goal: string;
+  scope: { allow: string[]; deny: string[] };
+  verify: { gates: string[] | null };
+  autoYes: { mode: string | null; allowPromptTypes: string[]; denyPatterns: string[] };
+  success: { requireWorkEvidence: boolean; requireScopeClean: boolean };
+}
+
+/**
+ * Mirrors: src/lib/db/tasks-db.ts Task.
+ * Dates arrive as ISO strings because the route serializes them through JSON.
+ */
+export interface TaskView {
+  id: string;
+  worktreeId: string;
+  cliToolId: string;
+  instanceId: string | null;
+  title: string;
+  goal: string;
+  contractPath: string | null;
+  contract: TaskContractView;
+  status: TaskStatus;
+  lastVerificationRunId: number | null;
+  createdAt: string;
+  updatedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+/** Mirrors: src/app/api/worktrees/[id]/tasks/route.ts POST response. */
+export interface TaskCreateResponse {
+  task: TaskView;
+  /** Contract preamble + goal, composed server-side; this is what gets sent. */
+  message: string;
+}
+
+/** Mirrors: src/app/api/worktrees/[id]/tasks/route.ts GET response. */
+export interface TaskListResponse {
+  tasks: TaskView[];
+}
+
+/** Mirrors: src/app/api/tasks/[taskId]/route.ts GET response. */
+export interface TaskDetailResponse {
+  task: TaskView;
+  lastVerificationRun: VerificationRunView | null;
 }

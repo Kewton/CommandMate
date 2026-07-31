@@ -214,6 +214,25 @@ app.prepare().then(() => {
         console.error('Error reconciling Skill operations:', error);
       }
 
+      // Issue #1543: close verification runs that a crash left in `running`.
+      // Gate execution lives in process memory, so none of them survived the
+      // restart; leaving the rows open would keep their worktrees permanently
+      // 409-locked against a new run. Dynamic import for the same reason as the
+      // Skill reconciler above — do not hoist to a static import.
+      try {
+        const { reconcileOrphanVerificationRuns } = await import(
+          './src/lib/verification/verification-reconciler'
+        );
+        const verifyReport = reconcileOrphanVerificationRuns(db);
+        if (verifyReport.runs > 0) {
+          console.log(
+            `Verification runs reconciled: runs=${verifyReport.runs} gates=${verifyReport.gates}`
+          );
+        }
+      } catch (error) {
+        console.error('Error reconciling verification runs:', error);
+      }
+
       // Get repository paths from environment variables
       const repositoryPaths = getRepositoryPaths();
 

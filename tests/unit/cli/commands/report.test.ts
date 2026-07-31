@@ -341,3 +341,148 @@ describe('report list', () => {
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// report metrics [Issue #1551]
+// ---------------------------------------------------------------------------
+
+const sampleMetrics = {
+  periodDays: 7,
+  tasks: {
+    total: 12,
+    succeeded: 9,
+    failed: 2,
+    notStarted: 1,
+    cancelled: 0,
+    successRate: 0.75,
+    avgRetryLoops: 4 / 3,
+  },
+  verification: {
+    runs: 31,
+    passed: 25,
+    failed: 6,
+    notStarted: 0,
+    passRate: 25 / 31,
+    gateFailBreakdown: [
+      { gateId: 'unit', failCount: 4 },
+      { gateId: 'lint', failCount: 2 },
+    ],
+  },
+  intervention: { humanResponds: 5, autoAnswered: 23, suppressedByPolicy: null },
+};
+
+/** An empty database: every rate is null and nothing failed. */
+const emptyMetrics = {
+  periodDays: 7,
+  tasks: {
+    total: 0,
+    succeeded: 0,
+    failed: 0,
+    notStarted: 0,
+    cancelled: 0,
+    successRate: null,
+    avgRetryLoops: null,
+  },
+  verification: {
+    runs: 0,
+    passed: 0,
+    failed: 0,
+    notStarted: 0,
+    passRate: null,
+    gateFailBreakdown: [],
+  },
+  intervention: { humanResponds: 0, autoAnswered: 0, suppressedByPolicy: null },
+};
+
+/** Everything console.log received, joined — the human-readable report. */
+function loggedOutput(): string {
+  return mockConsoleLog.mock.calls.map((call) => String(call[0])).join('\n');
+}
+
+describe('report metrics', () => {
+  it('is registered as a subcommand', async () => {
+    const { createReportCommand } = await import('../../../../src/cli/commands/report');
+    expect(createReportCommand().commands.map(c => c.name())).toContain('metrics');
+  });
+
+  it('requests the default 7-day window', async () => {
+    mockFetchResponse({ metrics: sampleMetrics });
+    const { createReportCommand } = await import('../../../../src/cli/commands/report');
+    await createReportCommand().parseAsync(['node', 'report', 'metrics']);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/metrics/vibe?days=7'),
+      expect.anything()
+    );
+  });
+
+  it('passes --days through to the API', async () => {
+    mockFetchResponse({ metrics: { ...sampleMetrics, periodDays: 30 } });
+    const { createReportCommand } = await import('../../../../src/cli/commands/report');
+    await createReportCommand().parseAsync(['node', 'report', 'metrics', '--days', '30']);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/metrics/vibe?days=30'),
+      expect.anything()
+    );
+  });
+
+  it('renders counts, percentages and the top gate failures', async () => {
+    mockFetchResponse({ metrics: sampleMetrics });
+    const { createReportCommand } = await import('../../../../src/cli/commands/report');
+    await createReportCommand().parseAsync(['node', 'report', 'metrics']);
+
+    const output = loggedOutput();
+    expect(output).toContain('Vibe Metrics (last 7 days)');
+    expect(output).toContain('12 total / 9 succeeded / 2 failed / 1 not-started');
+    expect(output).toContain('(success 75.0%)');
+    expect(output).toContain('31 runs, pass 80.6%');
+    expect(output).toContain('(top fails: unit x4, lint x2)');
+    expect(output).toContain('5 human responds / 23 auto answered');
+    expect(output).toContain('avg 1.3 per failed task');
+  });
+
+  // A zero denominator is not 0%. Printing "success 0.0%" for a day with no
+  // tasks reports a failure that did not happen.
+  it('prints n/a rather than 0.0% when a rate has no denominator', async () => {
+    mockFetchResponse({ metrics: emptyMetrics });
+    const { createReportCommand } = await import('../../../../src/cli/commands/report');
+    await createReportCommand().parseAsync(['node', 'report', 'metrics']);
+
+    const output = loggedOutput();
+    expect(output).toContain('(success n/a)');
+    expect(output).toContain('pass n/a');
+    expect(output).toContain('n/a per failed task');
+    expect(output).not.toContain('0.0%');
+    expect(output).not.toContain('top fails');
+  });
+
+  it('outputs the raw metrics object with --json', async () => {
+    mockFetchResponse({ metrics: sampleMetrics });
+    const { createReportCommand } = await import('../../../../src/cli/commands/report');
+    await createReportCommand().parseAsync(['node', 'report', 'metrics', '--json']);
+
+    const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
+    expect(output.tasks.successRate).toBe(0.75);
+    expect(output.verification.gateFailBreakdown).toHaveLength(2);
+    expect(output.intervention.suppressedByPolicy).toBeNull();
+  });
+
+  it.each(['0', '-1', '91', 'abc'])('rejects --days %s without calling the API', async (value) => {
+    const { createReportCommand } = await import('../../../../src/cli/commands/report');
+    await createReportCommand().parseAsync(['node', 'report', 'metrics', '--days', value]);
+
+    expect(mockExit).toHaveBeenCalledWith(2);
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      expect.stringContaining('--days must be an integer between 1 and 90')
+    );
+  });
+
+  it('handles server error', async () => {
+    mockFetchError('connect ECONNREFUSED 127.0.0.1:3000');
+    const { createReportCommand } = await import('../../../../src/cli/commands/report');
+    await createReportCommand().parseAsync(['node', 'report', 'metrics']);
+
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+});

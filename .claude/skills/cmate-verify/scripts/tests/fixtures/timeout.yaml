@@ -1,0 +1,13 @@
+# `slow` outlives its timeout. It backgrounds a child that carries a per-run
+# token in its argv before blocking, so killing only the direct child would
+# leave that token visible in `ps`: the orphan probe in run-tests.sh is what
+# makes the process-group kill testable. The marker would only appear at +4144s.
+version: 1
+gates:
+  - id: slow
+    command: sh -c "sleep 4143; : cmate-verify-orphan-probe $CMATE_VERIFY_TEST_MARKER" & sleep 4144; touch "$CMATE_VERIFY_TEST_MARKER"
+    timeoutSec: 1
+  - id: after
+    command: echo ran-after-timeout
+options:
+  skipInPrimaryCheckout: false

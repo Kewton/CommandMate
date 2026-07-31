@@ -297,6 +297,10 @@ commandmate wait <worktree-id> --timeout 300                   # 300秒でタイ
 commandmate wait <worktree-id> --stall-timeout 60              # 60秒出力変化なしでタイムアウト
 commandmate wait <worktree-id> --on-prompt human               # プロンプト検出時も待機継続
 commandmate wait <id1> <id2>                                   # 複数worktree同時待機
+commandmate wait <worktree-id> --verify                        # 完了検知後に検証ゲート実行（不合格 exit 20 / 作業証跡ゼロ exit 21）
+
+# 検証ゲート（.commandmate/verify.yaml、Issue #1544、詳細は docs/user-guide/cli-operations-guide.md）
+commandmate verify <worktree-id> [--gates lint,unit] [--json]  # 合格 0 / 不合格 20 / 作業証跡ゼロ 21
 
 # プロンプト応答
 commandmate respond <worktree-id> "yes"                        # プロンプトに応答
@@ -375,7 +379,12 @@ commandmate report list --days 7             # 直近N日のレポート一覧�
 | スキル | 説明 |
 |--------|------|
 | `/release` | バージョン更新、CHANGELOG更新、Gitタグ作成、GitHub Releases作成を自動化 |
+| `/release-post` | リリース告知文の作成 |
 | `/rebuild` | サーバーをリビルドして再起動 |
+| `/demo-video` | 隔離環境でデモ動画（日英）を全自動生成。絵コンテ駆動・尺検証つき |
+| `/video-to-gif` | 動画をバイト予算つきで GIF 化。docs の markdown に貼れる形にする |
+| `/cmate-verify` | `.commandmate/verify.yaml` の検証ゲートを実 exit code で実行 |
+| `/orchestrate-monitor` | 並列ワーカーの capture 解析・状態判定・完了検証 |
 
 ---
 

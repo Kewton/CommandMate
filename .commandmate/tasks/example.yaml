@@ -1,0 +1,35 @@
+# 実行契約サンプル（Issue #1545 / Phase 2-1）
+#
+# 正準仕様: docs/design/task-contract.md
+# 使い方:   commandmate send <worktree-id> --contract .commandmate/tasks/example.yaml
+#
+# このファイルは形式の見本であり、送信対象として選ばれない限り何の効果も持たない。
+# 実タスクを作るときは別名でコピーして中身を書き換えること。
+version: 1
+title: "サンプル: 契約の書き方"
+goal: |
+  ここにエージェントへ渡す作業内容を書く。
+  受入条件は「何が満たされたら完了か」を検証可能な形で書くこと。
+scope:
+  # worktree ルートからの相対 glob。絶対パスと .. は契約エラーになる。
+  # `src/lib/tasks` のようにディレクトリを書けば配下すべてが対象。glob の意味は
+  # docs/design/task-contract.md §2.2.1（[ ] はリテラル。文字クラスではない）。
+  allow:
+    - "src/lib/tasks/**"
+    - "tests/unit/tasks/**"
+    - "docs/module-reference.md"
+  deny: []
+verify:
+  # .commandmate/verify.yaml のゲート id を参照する。キーごと省略すると全ゲート。
+  # work-evidence は success.requireWorkEvidence が決めるのでここに書かなくてよい。
+  gates: [lint, typecheck, unit]
+autoYes:
+  # off | safe | allow-listed。省略時は「契約はポリシーを述べていない」= 従来動作。
+  # enforcement は Phase 2-3（#1547）。ここでは宣言として保持されるだけ。
+  mode: safe
+  allowPromptTypes: []
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  # true なら組み込み scope ゲートが走り、上の allow / deny の外を触った時点で不合格。
+  requireScopeClean: true

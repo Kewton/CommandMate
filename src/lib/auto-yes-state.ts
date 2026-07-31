@@ -10,7 +10,7 @@
  * auto-yes-poller.ts -> auto-yes-state.ts -> path-validator.ts
  */
 
-import { DEFAULT_AUTO_YES_DURATION, validateStopPattern, type AutoYesDuration, type AutoYesStopReason } from '@/config/auto-yes-config';
+import { DEFAULT_AUTO_YES_DURATION, executeRegexWithTimeout, validateStopPattern, type AutoYesDuration, type AutoYesStopReason } from '@/config/auto-yes-config';
 import { isValidWorktreeId } from './security/path-validator';
 import { isCliToolType, type CLIToolType } from './cli-tools/types';
 import { createLogger } from '@/lib/logger';
@@ -274,26 +274,10 @@ export function clearAllAutoYesStates(): void {
 // =============================================================================
 
 /**
- * Execute a regex test with timeout protection.
- * Uses synchronous execution with safe-regex2 pre-validation as the primary defense.
- *
- * @internal Exported for testing purposes only.
- * @param regex - Pre-compiled RegExp to test
- * @param text - Text to test against
- * @param _timeoutMs - Reserved for future timeout implementation (default: 100ms)
- * @returns true/false for match result, null if execution failed
+ * Re-exported from the shared auto-yes config (Issue #1547 moved it there so the
+ * client-safe auto-yes resolver can share the same guarded execution path).
  */
-export function executeRegexWithTimeout(
-  regex: RegExp,
-  text: string,
-  _timeoutMs: number = 100
-): boolean | null {
-  try {
-    return regex.test(text);
-  } catch {
-    return null;
-  }
-}
+export { executeRegexWithTimeout } from '@/config/auto-yes-config';
 
 /**
  * Check if the terminal output matches the stop condition pattern.

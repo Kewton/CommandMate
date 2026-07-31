@@ -13,7 +13,10 @@
 import type { CLIToolType } from './cli-tools/types';
 import { captureSessionOutput } from './session/cli-session';
 import { detectPrompt } from './detection/prompt-detector';
-import { resolveAutoAnswer } from './polling/auto-yes-resolver';
+import { resolveAutoAnswerWithPolicy } from './polling/auto-yes-resolver';
+import { getSessionAutoYesPolicy, invalidateSessionAutoYesPolicy } from './polling/auto-yes-policy';
+import { applyEventToActiveTask } from './tasks/task-transition-service';
+import { getDbInstance } from './db/db-instance';
 import { sendPromptAnswer } from './prompt-answer-sender';
 import { CLIToolManager } from './cli-tools/manager';
 import { stripAnsi, stripBoxDrawing, detectThinking, buildDetectPromptOptions } from './detection/cli-patterns';
@@ -352,8 +355,26 @@ export async function detectAndRespondToPrompt(
       return 'duplicate';
     }
 
-    // 3. Resolve auto answer
-    const answer = resolveAutoAnswer(promptDetection.promptData);
+    // 3. Resolve auto answer under the execution contract's policy (Issue #1547).
+    // Auto-Yes calls detectPrompt directly instead of going through
+    // status-detector, so this is the only place the policy can gate an
+    // auto-answer: a prompt the policy withholds is left for a human, and the
+    // response poller's prompt path (WS broadcast + Web Push, see
+    // polling/response-checker.ts) is what tells them it is waiting.
+    const policy = getSessionAutoYesPolicy(worktreeId, cliToolId, instanceId);
+    const resolution = resolveAutoAnswerWithPolicy(promptDetection.promptData, policy);
+    if (resolution.suppressedBy) {
+      logger.warn('poller:auto-yes-suppressed-by-policy', {
+        worktreeId,
+        cliToolId,
+        instanceId,
+        reason: resolution.suppressedBy,
+        mode: policy?.mode ?? null,
+        pattern: resolution.pattern,
+        promptType: promptDetection.promptData.type,
+      });
+    }
+    const answer = resolution.answer;
     if (answer === null) {
       return 'no_answer';
     }
@@ -383,6 +404,20 @@ export async function detectAndRespondToPrompt(
     pollerState.lastAnsweredAt = Date.now();
 
     logger.info('poller:response-sent', { worktreeId, cliToolId, instanceId });
+
+    // Issue #1548: the prompt was answered without a human. Raised only after
+    // the keys actually reached tmux, so a send that threw is not logged as an
+    // answer. No-ops when this instance is not running a contract.
+    applyEventToActiveTask(
+      getDbInstance(),
+      worktreeId,
+      cliToolId,
+      // Undefined means the primary instance, which the task lookup identifies
+      // by the tool id itself (see getActiveTaskForInstance).
+      instanceId ?? cliToolId,
+      'prompt_answered_auto',
+      { promptType: promptDetection.promptData.type }
+    );
 
     // Dynamic imports avoid a module cycle through terminal-broadcast ->
     // current-output-builder -> auto-yes-manager -> this poller.
@@ -549,6 +584,9 @@ export function startAutoYesPolling(
   };
   autoYesPollerStates.set(compositeKey, pollerState);
 
+  // A task may have been recorded moments ago; start from a fresh policy read.
+  invalidateSessionAutoYesPolicy(compositeKey);
+
   // Start polling immediately
   pollerState.timerId = setTimeout(() => {
     pollAutoYes(worktreeId, cliToolId, effectiveInstanceId);
@@ -574,6 +612,7 @@ export function stopAutoYesPolling(compositeKey: string): void {
   }
 
   autoYesPollerStates.delete(compositeKey);
+  invalidateSessionAutoYesPolicy(compositeKey);
   logger.info('poller:stopped', { compositeKey });
 }
 
@@ -585,6 +624,7 @@ export function stopAllAutoYesPolling(): void {
     if (pollerState.timerId) {
       clearTimeout(pollerState.timerId);
     }
+    invalidateSessionAutoYesPolicy(key);
     logger.info('poller:stopped', { compositeKey: key, reason: 'shutdown' });
   }
   autoYesPollerStates.clear();

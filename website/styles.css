@@ -538,6 +538,35 @@ a {
   font-size: 0.9rem;
 }
 
+/* ---------- feature demos ---------- */
+
+.demos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.demo {
+  margin: 0;
+}
+
+.demo video {
+  width: 100%;
+  height: auto;
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  background: var(--bg-subtle);
+}
+
+.demo figcaption {
+  margin-top: 0.6rem;
+  color: var(--fg-muted);
+  font-size: 0.85rem;
+}
+
 /* ---------- gallery ---------- */
 
 .gallery {

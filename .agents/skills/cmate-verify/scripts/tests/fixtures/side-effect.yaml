@@ -1,0 +1,7 @@
+# Single observable gate: the marker file is the evidence that gates really ran.
+version: 1
+gates:
+  - id: sidefx
+    command: touch "$CMATE_VERIFY_TEST_MARKER"
+options:
+  skipInPrimaryCheckout: false

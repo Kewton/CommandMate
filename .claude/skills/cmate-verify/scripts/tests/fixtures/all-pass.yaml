@@ -1,0 +1,11 @@
+# Every gate passes. skipInPrimaryCheckout is false because the test sandboxes
+# are created with `git init` and are therefore primary checkouts.
+version: 1
+gates:
+  - id: first
+    command: echo first-ok
+  - id: second
+    command: "true"
+    timeoutSec: 30
+options:
+  skipInPrimaryCheckout: false

@@ -16,25 +16,11 @@ import { parseIncludeParam } from '@/lib/api/worktrees-include-parser';
 import { isWorktreeStalled } from '@/lib/detection/stalled-detector';
 import { getNextAction, getReviewStatus } from '@/lib/session/next-action-helper';
 import { resolveAgentInstances } from '@/lib/session/agent-instances-resolver';
+import { deriveSessionStatus } from '@/lib/session/status-mapping';
 import { createLogger } from '@/lib/logger';
-import type { SessionStatus } from '@/lib/detection/status-detector';
 import type { PromptType } from '@/types/models';
 
 const logger = createLogger('api/worktrees');
-
-/**
- * Derive SessionStatus from worktree status helper result.
- */
-function deriveSessionStatus(status: {
-  isSessionRunning: boolean;
-  isWaitingForResponse: boolean;
-  isProcessing: boolean;
-}): SessionStatus | null {
-  if (!status.isSessionRunning) return null;
-  if (status.isWaitingForResponse) return 'waiting';
-  if (status.isProcessing) return 'running';
-  return 'ready';
-}
 
 export async function GET(request: NextRequest) {
   try {

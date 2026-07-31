@@ -1,0 +1,37 @@
+version: 1
+duration: 20
+output: cm-01-parallel-worktrees
+scenes:
+  - id: sessions-overview
+    type: record
+    duration: 4
+    viewport: pc
+    telop:
+      ja: "ターミナルのタブ、増えすぎてない？"
+      en: "Too many terminal tabs?"
+  - id: send-and-generate
+    type: record
+    duration: 8
+    viewport: pc
+    telop:
+      ja: "ブランチごとに1セッション"
+      en: "One session per branch"
+  - id: respond-from-mobile
+    type: record
+    duration: 4
+    viewport: mobile
+    telop:
+      ja: "同じUIでどこからでも"
+      en: "Same UI, anywhere"
+  - id: complete
+    type: record
+    duration: 3
+    telop:
+      ja: "並列でも見失わない"
+      en: "Parallel, never lost"
+  - id: outro
+    type: card
+    duration: 1
+    telop:
+      ja: "github.com/Kewton/CommandMate"
+      en: "github.com/Kewton/CommandMate"

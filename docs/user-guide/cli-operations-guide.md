@@ -59,10 +59,12 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate send`](#commandmate-send) | エージェントへのメッセージ送信 |
 | [`commandmate wait`](#commandmate-wait) | エージェント完了の待機 |
 | [`commandmate respond`](#commandmate-respond) | プロンプトへの応答 |
+| [`commandmate verify`](#commandmate-verify) | 検証ゲート（.commandmate/verify.yaml）の実行と検証履歴の参照 |
+| [`commandmate task`](#commandmate-task) | 実行契約（.commandmate/tasks/*.yaml）の一覧・詳細 |
 | [`commandmate capture`](#commandmate-capture) | ターミナル出力の取得 |
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Auto-Yesの制御 |
 | [`commandmate instances`](#commandmate-instances) | エージェントインスタンス（roster）の一覧・追加・削除・alias変更 |
-| [`commandmate report`](#commandmate-report) | 日次レポートの生成・表示・一覧 |
+| [`commandmate report`](#commandmate-report) | 日次レポートの生成・表示・一覧、Eval メトリクス集計 |
 | [`commandmate skill`](#commandmate-skill) | 公式Skillのカタログ参照・Install Plan・install・uninstall・status |
 | [`commandmate update`](#commandmate-update) | CommandMate本体の更新（停止 → 更新 → 再起動） |
 
@@ -168,6 +170,8 @@ commandmate wait <id1> <id2> --timeout 600          # 複数同時待機
 commandmate wait <worktree-id> --on-prompt agent     # プロンプト検出で返却（デフォルト）
 commandmate wait <worktree-id> --on-prompt human     # プロンプトは人間がUIで応答
 commandmate wait <worktree-id> --stall-timeout 120   # 出力変化なしの検出
+commandmate wait <worktree-id> --verify               # 完了検知後に全ゲートを実行
+commandmate wait <worktree-id> --require-work         # 完了検知後に work-evidence のみ実行
 ```
 
 ### オプション
@@ -178,14 +182,39 @@ commandmate wait <worktree-id> --stall-timeout 120   # 出力変化なしの検�
 | `--on-prompt <mode>` | プロンプト検出時の動作（agent / human） | agent |
 | `--stall-timeout <sec>` | 出力変化なしのタイムアウト（秒） | - |
 | `--instance <id>` | 対象インスタンスID（`<agent>` または `<agent>-<n>`） | エージェントのプライマリインスタンス |
+| `--verify` | 完了検知後に検証ゲートを全件実行し、その判定で終了コードを決める | 無効 |
+| `--require-work` | 完了検知後に work-evidence ゲートのみ実行する | 無効 |
 
 ### 終了コード
 
 | コード | 意味 | 次のアクション |
 |:------:|------|---------------|
-| 0 | 正常完了（エージェントが入力待ちに戻った） | `capture` で結果取得 |
+| 0 | 正常完了（`--verify` 指定時は検証にも合格） | `capture` で結果取得 |
 | 10 | プロンプト検出（`--on-prompt agent` 時） | `respond` で応答し、再度 `wait` |
+| 20 | 検証ゲート不合格（`--verify`） | `verify --json` で失敗ゲートを確認し修正 |
+| 21 | 作業証跡ゼロ（コミットも未コミット変更も無い） | エージェントが着手していない。再度 `send` |
 | 124 | タイムアウト | `capture` で状況確認、再度 `wait` or 中断 |
+
+### --verify / --require-work（Issue #1544）
+
+`wait` の成功条件を「エージェントが止まった」から「**検証に合格した**」へ引き上げます。
+
+- `--verify`: 全ゲート（work-evidence + `.commandmate/verify.yaml` の宣言ゲート）を実行
+- `--require-work`: work-evidence ゲートのみ実行。全ゲートを回す前の安価な事前確認に使う
+- 両方を同時指定してもエラーにはならない。work-evidence は常に全ゲートに含まれるため `--verify` が包含する
+- 検証は**完了検知できたときだけ**走る。プロンプト検出（10）やタイムアウト（124）はそのまま返し、検証しない
+- 複数 worktree を指定した場合、完了検知は並行・検証は**直列**。サーバ側が同時実行数を制限しているため
+- 複数 worktree の終了コードは優先順位 **10 > 20 > 21 > 124** で集約される
+
+```bash
+commandmate wait "$WT" --timeout 1800 --verify
+case $? in
+  0)  echo "検証合格" ;;
+  10) commandmate respond "$WT" "yes" ;;
+  20) commandmate verify "$WT" --json ;;   # 失敗ゲートの詳細
+  21) echo "エージェントが何も作っていない" ;;
+esac
+```
 
 ### --on-prompt の動作
 
@@ -240,6 +269,226 @@ commandmate respond <worktree-id> "yes" --agent codex --instance codex-2  # 追�
 |:------:|------|
 | 0 | 応答成功 |
 | 99 | プロンプトが既に消えている（`prompt_no_longer_active`）|
+
+---
+
+## commandmate verify
+
+`.commandmate/verify.yaml` に宣言された検証ゲートを worktree の作業ディレクトリで実行し、終了コードで合否を返します。
+
+サーバは検証要求に対して 202 と runId のみを返す（ゲートはテストスイートやビルドで数分かかる）ため、CLI は run が終端ステータスに達するまで 5 秒間隔でポーリングします。
+
+### 使用方法
+
+```bash
+commandmate verify <worktree-id>                       # 全ゲート実行
+commandmate verify <worktree-id> --gates lint,unit     # ゲートを絞る
+commandmate verify <worktree-id> --json                # run + gate results を JSON 出力
+commandmate verify <worktree-id> --timeout 1800        # 超過で exit 124
+
+commandmate verify history                             # 過去の run 一覧（読み取り専用）
+commandmate verify show <run-id>                       # run の詳細（読み取り専用）
+```
+
+### オプション
+
+| オプション | 説明 | デフォルト |
+|-----------|------|-----------|
+| `--gates <id1,id2>` | 実行するゲートID（カンマ区切り） | work-evidence + 宣言された全ゲート |
+| `--instance <id>` | run を紐づけるエージェントインスタンスID | なし（worktree 単位の run） |
+| `--timeout <sec>` | ポーリングを打ち切るまでの秒数 | 無制限 |
+| `--json` | run と gate results を stdout に JSON 出力 | 無効 |
+
+### 終了コード
+
+| コード | 意味 | 次のアクション |
+|:------:|------|---------------|
+| 0 | 全ゲート合格 | - |
+| 20 | ゲート不合格（failed / timeout / error） | 失敗ゲートの logTail を見て修正 |
+| 21 | work-evidence 不合格（コミットも未コミット変更も無い） | エージェントが着手していない |
+| 99 | 判定不能（verify.yaml 不正、全ゲート skipped、cancelled） | verify.yaml と実行ディレクトリを確認 |
+| 124 | `--timeout` 超過（サーバ側の run は継続中） | 時間をおいて再確認 |
+
+`error` / `cancelled` を 20 ではなく 99 に割り当てているのは、「判定できなかった」が「判定した結果ダメだった」として読まれないようにするためです。
+
+### 出力
+
+進捗（GATE 行）は stderr、判定（RESULT 行）は stdout に出力されます。不合格ゲートは logTail も stderr に続けて出力します。
+
+```
+# stderr:
+Verifying: myrepo-feature-101 (run 42)
+GATE work-evidence PASS (commits=3, uncommitted=2)
+GATE lint PASS (exit=0, 12.3s)
+GATE unit FAIL (exit=1, 45.0s)
+
+# stdout:
+RESULT failed
+```
+
+### 実行中コンフリクト（409）
+
+1つの worktree に対して同時に走らせられる run は1つだけです。既に走っている場合は実行中の runId を含むメッセージで終了します。
+
+```
+Error: A verification run is already in progress for 'myrepo-feature-101' (run 41). Wait for it to finish, then retry.
+```
+
+### 稼働サーバの作業ディレクトリでは走らない
+
+`verify.yaml` の `options.skipInPrimaryCheckout: true` は、サーバプロセス自身の作業ディレクトリと一致する worktree でコマンドゲートを `skipped` にします。配信中のビルド成果物を `npm run build` が差し替えて画面を壊す事故を防ぐためです。
+
+skipped を含む run は `passed` ではなく `error`（exit 99）になります。「検証しなかった」が「検証して問題なかった」として読まれないようにするためです。
+
+### 契約ファイルは作業証跡に数えない
+
+`.commandmate/tasks/` 配下は work-evidence（commits / uncommitted）からも scope の変更集合からも除外されます（Issue #1580）。そのため契約を worktree に**未コミットのまま置いてすぐ `send` してよく**、事前に base ブランチへマージする必要はありません。契約だけが置かれた worktree は `commits=0 uncommitted=0` のまま exit 21（作業証跡ゼロ）になります。
+
+`.commandmate/verify.yaml` は**除外されません**。契約本体は送信時にスナップショットされるので後編集が判定に影響しない一方、verify.yaml のゲート定義は毎ラン読み直されるため、エージェントが自分のゲートを弱めた場合に scope の `deny` で検出できる状態を残しています。
+
+### 検証履歴を読む（Issue #1593）
+
+過去の run は `verify history` で一覧し、`verify show <run-id>` で中身を見ます。どちらも**読み取り専用**で、検証を新たに走らせることはありません。
+
+```bash
+commandmate verify history                             # 全 worktree の直近50 run
+commandmate verify history --worktree <worktree-id>    # worktree で絞る
+commandmate verify history --days 14 --limit 100       # 期間と件数で絞る
+commandmate verify history --json                      # JSON 配列で出力
+commandmate verify show 42                             # run 42 の詳細（logTail 込み）
+commandmate verify show 42 --json                      # JSON で出力
+```
+
+#### verify history のオプション
+
+| オプション | 説明 | デフォルト |
+|-----------|------|-----------|
+| `--worktree <id>` | 対象 worktree を1つに絞る | 全 worktree |
+| `--days <n>` | 何日前まで遡るか（1..90） | 制限なし（`--limit` のみが効く） |
+| `--limit <n>` | 取得する run の最大数（1..500） | 50 |
+| `--json` | run の配列を stdout に JSON 出力 | 無効 |
+
+人間可読出力は 1 run 1 行です。先頭の `#<run-id>` が `verify show` に渡す ID です。
+
+```
+#42  2026-07-31T04:12:00.000Z  myrepo-feature-101  manual  failed  failed: unit,build
+#41  2026-07-31T03:58:00.000Z  myrepo-feature-101  wait    passed
+```
+
+一覧には**ゲートのログ本文（logTail）は含まれません**。500 run 分のログ末尾を毎回返すと一覧が MB 級になるためで、ログが必要なときは `verify show` を使います。`--json` の一覧に `logTail` フィールドは存在しません（`null` ではなく不在です）。
+
+`verify show` はゲートごとに status / exit code / 所要時間を並べ、logTail を `| ` プレフィックス付きで展開します。
+
+```
+run #42  failed  worktree=myrepo-feature-101  trigger=manual
+started=2026-07-31T04:12:00.000Z  finished=2026-07-31T04:15:20.000Z
+baseRef=origin/develop  instance=-  task=-
+  work-evidence  passed  exit=0  0.2s
+  unit  failed  exit=1  45.0s
+    | 2 tests failed
+    | expected 1 to be 2
+```
+
+#### 終了コード
+
+`history` / `show` は **20 / 21 を返しません**。この2つは「今のツリーが検証に落ちた」という意味であり、過去の run への問い合わせは現在のツリーへの判定ではないからです。
+
+| コード | 意味 |
+|:------:|------|
+| 0 | 取得成功（該当0件でも 0。人間向けには stderr に `No verification runs found.`、`--json` では `[]`） |
+| 2 | 引数不正（`--days` / `--limit` が範囲外、worktree ID 形式不正、run ID が正の整数でない）。HTTP 前に弾く |
+| 99 | 指定した run が存在しない（404）ほか予期しないエラー |
+
+---
+
+## commandmate task
+
+`.commandmate/tasks/<name>.yaml` に宣言した**実行契約**を送信し、記録された task を参照します。
+
+契約は「目的・変更許可スコープ・合格条件・Auto-Yes ポリシー」を**送信前に宣言**するもので、
+送信メッセージにそのまま埋め込まれ、`verify` の既定ゲートにもなります。
+正準仕様は [docs/design/task-contract.md](../design/task-contract.md)。
+
+> 本フェーズ（#1545）の契約は**宣言**であって**強制**ではありません。
+> scope のゲート化は #1546、autoYes の enforcement は #1547 です。
+
+### 契約付き送信（`send --contract`）
+
+```bash
+# 契約を送る。message 引数は取らない（契約の goal が本文になる）
+commandmate send myrepo-feature-101 --contract .commandmate/tasks/loader.yaml
+
+# task id は stdout に出るので変数に取れる
+TASK=$(commandmate send myrepo-feature-101 --contract .commandmate/tasks/loader.yaml)
+
+# 既存オプションと併用できる
+commandmate send myrepo-feature-101 --contract .commandmate/tasks/loader.yaml \
+  --agent codex --instance codex-2 --auto-yes --duration 3h
+```
+
+エージェントには契約前文＋goal が送られます。前文の「完了条件」行は
+`verify.yaml` の `gates[].command` を解決した**実コマンド**で書かれます。
+
+```
+## 実行契約
+- 変更してよいのは次のパスのみ: src/lib/tasks/**, tests/unit/tasks/**
+- 作業完了後は必ず commit すること（未 commit の作業は未完了とみなされる）
+- 完了条件: 次の検証コマンドがすべて成功すること: npm run lint / npx tsc --noEmit
+
+## タスク
+（契約の goal）
+```
+
+契約が不正な場合は **exit 2** で、違反が**全件**表示されます（task は作られません）。
+`verify.gates` が `verify.yaml` に無いゲート id を指している場合もここで弾かれます。
+
+```
+Error: invalid task contract:
+  - version: must be 1 (got 3)
+  - scope.allow: at least one pattern is required while success.requireScopeClean is true
+```
+
+### 一覧・詳細
+
+```bash
+commandmate task list <worktree-id>              # 新しい順（TSV: id / status / agent / gates / title）
+commandmate task list <worktree-id> --limit 5
+commandmate task list <worktree-id> --json
+commandmate task show <task-id>                 # 契約＋最後に判定した検証ランの要約
+commandmate task show <task-id> --json
+```
+
+### status の意味
+
+| status | 意味 |
+|--------|------|
+| `pending` | task 行はあるが未送信 |
+| `running` | 送信済み。エージェントが作業中 |
+| `waiting_input` | プロンプト待ち（Phase 3-1 で使用） |
+| `verifying` | 検証ラン実行中 |
+| `succeeded` | 検証ランが `passed` |
+| `failed` | 検証ランが `failed`、または送信・検証が成立しなかった |
+| `not_started` | 検証ランが `not_started`（作業証跡ゼロ） |
+| `cancelled` | 明示的に中止 |
+
+`succeeded` は検証ランだけが与えられる判定です。CLI やクライアントから
+`succeeded` を報告することはできません（API が 400 で拒否します）。
+
+### wait --verify との連携
+
+`wait --verify` は CLI 側に追加指定は要りません。サーバが worktree の
+active task（`running` / `waiting_input` / `verifying` の最新1件）を解決し、
+契約の `verify.gates` を既定のゲート集合として検証し、結果で task を遷移させます。
+
+```bash
+commandmate send <id> --contract .commandmate/tasks/loader.yaml
+commandmate wait <id> --on-prompt human --verify   # 合格 0 / 不合格 20 / 作業証跡ゼロ 21
+commandmate task show "$TASK"                      # succeeded / failed / not_started
+```
+
+`verify --gates` を明示した場合は契約より明示指定が優先されます。
+
+契約ファイルは検証ゲートの変更集合から除外されるため、worktree に置いたまま（未コミットでも）`send` できます。詳細は [契約ファイルは作業証跡に数えない](#契約ファイルは作業証跡に数えない)。
 
 ---
 
@@ -418,6 +667,10 @@ commandmate report show --date 2026-06-21 --json   # 日付指定＋JSON出力
 commandmate report list                            # 直近7日を一覧
 commandmate report list --days 30                  # 直近30日を一覧
 commandmate report list --json                     # JSON出力
+
+commandmate report metrics                         # 直近7日の Eval メトリクス
+commandmate report metrics --days 30               # 期間指定（1〜90日）
+commandmate report metrics --json                  # JSON出力
 ```
 
 ### サブコマンド
@@ -427,6 +680,7 @@ commandmate report list --json                     # JSON出力
 | `generate` | 指定日のレポートを生成し、内容を標準出力に表示 |
 | `show` | 既存レポートを表示（未生成なら `No report found` を表示） |
 | `list` | 直近 N 日分のレポート有無・メッセージ件数・生成ツールを一覧 |
+| `metrics` | タスク成功率・検証合格率・人間介入回数を集計（Issue #1551） |
 
 ### generate オプション
 
@@ -458,6 +712,44 @@ commandmate report list --json                     # JSON出力
 2026-06-20  [no report]  messages=3
 2026-06-19  [report] tool=codex  messages=8
 ```
+
+### metrics（Eval メトリクス、Issue #1551）
+
+「ハーネスがどれだけエージェントを放置したまま完走させられているか」を、`tasks` / `verification_runs` /
+`task_events` の実記録から集計します。**読み取り専用**で、集計のためのテーブル追加はありません。
+
+| オプション | 説明 | デフォルト |
+|-----------|------|-----------|
+| `--days <days>` | 集計期間（1〜90）。範囲外・非整数は `exit 2` | 7 |
+| `--json` | JSON形式で出力 | - |
+| `--token <token>` | 認証トークン（`CM_AUTH_TOKEN` 環境変数を推奨） | - |
+
+```
+$ commandmate report metrics
+Vibe Metrics (last 7 days)
+Tasks:        12 total / 9 succeeded / 2 failed / 1 not-started  (success 75.0%)
+Verification: 31 runs, pass 80.6%  (top fails: unit x4, lint x2)
+Intervention: 5 human responds / 23 auto answered
+Retry loops:  avg 1.3 per failed task
+```
+
+読み方:
+
+- **Tasks** — 期間内に作成された `tasks` 行。`total` には未完了（pending / running）も含まれる。
+  `success` は `succeeded / total`
+- **Verification** — 期間内に開始された検証 run。`top fails` は `failed` / `timeout` に終わったゲートの上位10件
+  （`skipped` と `error` は「判定していない」ので数えない）
+- **Intervention** — `prompt_answered_human`（人間が答えた）と `prompt_answered_auto`（Auto-Yes が答えた）の件数。
+  ポリシーで抑止された件数（`suppressedByPolicy`）は DB 化されていないため v1 では常に `null`
+- **Retry loops** — 不合格になったタスク 1 件あたりの平均再指示回数（`failed` / `not_started` からの `message_sent`）
+
+> **分母ゼロは `n/a`** — `0.0%` とは表示しません。「12件中0件成功」と「そもそも0件」を同じ文字列で報告しないためです。
+
+> **旧 DB でも動きます** — migration v49〜v51 が未適用のデータベースでは、該当セクションが 0 と `n/a` になるだけで
+> エラーにはなりません。
+
+日次レポート（`report generate`）のプロンプトにも、当日分の同じ集計が `<verification_metrics>` セクションとして
+渡されます。活動がゼロの日はセクション自体が省略されます。
 
 ---
 

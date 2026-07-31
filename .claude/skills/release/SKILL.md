@@ -78,6 +78,64 @@ git tag -l "v${NEXT_VERSION}"   # 空であること。あればエラー表示�
 
 > **注意**: `git log origin/main..origin/develop` は squash の影響で実態より遥かに多くのコミットを表示する。**tree 差分（`git diff`）が正**。
 
+### 1-4. Vibe メトリクス定点観測
+
+前リリースからの期間の Eval メトリクス（#1551）を取り、リリース PR 本文に貼る。
+**これはリリースをブロックしない** — 取れなければ「メトリクスなし」と明記してスキップし、次へ進む。
+
+```bash
+# 前リリースタグからの日数。--days は 1..90 の整数しか受け付けず、
+# 範囲外は「クランプされずに exit 2 で失敗する」ため、渡す前にここで丸める。
+PREV_TAG=$(git describe --tags --abbrev=0 --match 'v*' origin/main 2>/dev/null)
+METRICS_DAYS=7
+if [ -n "$PREV_TAG" ]; then
+  METRICS_DAYS=$(( ( $(date +%s) - $(git log -1 --format=%ct "$PREV_TAG") ) / 86400 + 1 ))
+fi
+[ "$METRICS_DAYS" -lt 1 ] && METRICS_DAYS=1
+[ "$METRICS_DAYS" -gt 90 ] && METRICS_DAYS=90
+
+commandmate report metrics --days "$METRICS_DAYS" --json > /tmp/vibe-metrics.json 2>&1; echo $?
+```
+
+> `> ファイル 2>&1; echo $?` の形を崩さないこと。`| grep` に繋ぐと exit code が grep のものに化け、
+> 失敗を成功として読む。このリポジトリでは開発版エイリアス `commandmatedev` も同じ CLI を指す。
+
+**判定は exit code で行う。JSON をパースしてから判断してはいけない** — 失敗時の
+`/tmp/vibe-metrics.json` には JSON ではなくエラー文（`Error: Server is not running.` 等）が入る。
+
+| exit | 意味 | 対応 |
+|---|---|---|
+| `0` | 取得成功 | 下の要約を PR 本文に貼る |
+| `1` | サーバ未稼働・無応答（`Server is not running. Start it with: commandmate start`） | **「Vibe Metrics: メトリクスなし（サーバ未稼働）」と明記してスキップ。リリースは続行する** |
+| `2` | 認証エラー（`CM_AUTH_TOKEN` 未設定）／`--days` が範囲外 | 同上。スキップして続行する |
+| `127` | `commandmate` が PATH に無い | 同上。スキップして続行する |
+| その他 | 想定外 | 同上。スキップして続行する |
+
+exit 0 でも `tasks.total` が `0`（＝ `tasks.successRate` が `null`）なら**対象期間に記録が無い**。
+「Vibe Metrics: メトリクスなし（対象期間に記録なし）」と明記してスキップする。
+分母ゼロの比率は `0` ではなく `null` で返る仕様なので、**`null` を `0%` と読み替えてはいけない**
+（「12 件中 0 件成功」と「そもそも 0 件」が同じ文字列になる）。
+
+取得できたら PR 本文に `## Vibe Metrics` 節として 1 ブロック貼る:
+
+- **タスク成功率**: `tasks.successRate`（`succeeded / total`）
+- **検証 pass 率**: `verification.passRate`（`passed / runs`）
+- **gateFailBreakdown 上位**: `failCount` 降順・`gateId` 昇順で最大 10 件
+- **人間介入回数**: `intervention.humanResponds`（対比として `autoAnswered`）
+
+`--json` を外すと同じ数字が整形済みで出るので、その 5 行をそのまま貼ってもよい:
+
+```
+Vibe Metrics (last 7 days)
+Tasks:        3 total / 1 succeeded / 1 failed / 1 not-started  (success 33.3%)
+Verification: 6 runs, pass 66.7%  (top fails: lint x1, work-evidence x1)
+Intervention: 0 human responds / 1 auto answered
+Retry loops:  avg 0.0 per failed task
+```
+
+> しきい値による自動ブロック（成功率 X% 未満でリリース中止等）は**まだ設けない**。
+> 運用データが貯まるまでは定点観測のみで、判断は人間が行う。
+
 ---
 
 ## Phase 1.5: スラッシュコマンドカタログのリコンサイル（Issue #1489）
@@ -209,6 +267,7 @@ PR 本文に含める要素:
 - **対応 Issue** 一覧
 - **主な変更**: Added / Changed / Fixed
 - **品質チェック**結果
+- **Vibe Metrics**: 1-4 で取得した要約。取れなかった場合は「メトリクスなし」とその理由（サーバ未稼働／対象期間に記録なし）を 1 行で書く
 
 ### 3-2. CI 通過を確認
 
