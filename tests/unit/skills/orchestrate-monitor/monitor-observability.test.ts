@@ -177,9 +177,16 @@ describe('monitor.sh --verbose per-poll state log (Issue #1533, scope A)', () =>
     // stream and Issue #1533 is only allowed to add opt-in output to it. Verified
     // once against the pre-change monitor.sh by diffing stdout across five
     // fixtures; this assertion is what keeps it that way.
+    //
+    // Issue #1601 added exactly one line to it: the resolved intervention target,
+    // once per worker on its first successful poll. It is NOT opt-in because the
+    // defect it closes is invisibility — the loop typed into a session that did
+    // not exist and said nothing, so an operator had no way to notice before a
+    // missed approval had already stalled the worker.
     expect(run.stdout).toBe(
       [
         'monitor: watching 1 worker(s), interval=0s, idle-threshold=1, max-resends=2',
+        'monitor[w1]: intervention target = mcbd-claude-w1',
         'monitor[w1]: NOT_STARTED — idle with no work; check the composer / Enter',
         'monitor[w1]: NOT_STARTED — idle with no work; check the composer / Enter',
         'monitor: reached --max-polls (3) after 3 poll round(s); stopping',
@@ -229,7 +236,9 @@ describe('monitor.sh --verbose per-poll state log (Issue #1533, scope A)', () =>
     expectPolls(run, POLLS);
 
     expect(stateDistribution(parsePolls(run.stdout))).toEqual({ RATE_LIMIT: 2 });
-    expect(run.stdout.split('\n').filter((l) => l.includes("rate limit -> sending 'a'"))).toHaveLength(2);
+    expect(
+      run.stdout.split('\n').filter((l) => l.includes("rate limit -> sent 'a' to mcbd-claude-w1")),
+    ).toHaveLength(2);
   }, 20_000);
 });
 

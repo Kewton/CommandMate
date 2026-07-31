@@ -140,11 +140,18 @@ describe('monitor.sh recovers from retry exhaustion (Issue #1522, defect 4)', ()
     ]);
     expectPolls(run, POLLS);
 
-    expect(run.stdout).toContain(`resending (1/${MAX_RESENDS})`);
+    expect(run.stdout).toContain(`resent to mcbd-claude-w1 (1/${MAX_RESENDS})`);
     // Capped, then escalated instead of typing into the pane forever: the second
     // poll is now guaranteed to have happened, so this is no longer a race.
     expect(run.stdout).toContain('resend budget spent');
-    expect(run.tmuxCalls).toEqual([`send-keys -t cm-w1 ${RESEND_MESSAGE} Enter`]);
+    // Issue #1601: the target is derived from the poll's cliToolId (no flag was
+    // passed), checked for existence first, and addressed with tmux's exact-match
+    // `=name:` form. The old expectation here was `cm-w1` — a session that has
+    // never existed, which is precisely why every resend was a no-op.
+    expect(run.tmuxCalls).toEqual([
+      'has-session -t =mcbd-claude-w1:',
+      `send-keys -t =mcbd-claude-w1: ${RESEND_MESSAGE} Enter`,
+    ]);
   }, 20_000);
 
   it('never intervenes while the CLI is still inside its own backoff', () => {
@@ -158,7 +165,7 @@ describe('monitor.sh recovers from retry exhaustion (Issue #1522, defect 4)', ()
 
     expect(run.tmuxCalls).toEqual([]);
     expect(run.stdout).not.toContain('rate limit');
-    expect(run.stdout).not.toContain('resending');
+    expect(run.stdout).not.toContain('resent');
     // The frame was treated as a live, started worker: had it classified as idle
     // or not-running, the streak would have crossed the threshold and reported
     // NOT_STARTED. That keeps the empty-tmuxCalls claim about *this* state.
@@ -173,7 +180,7 @@ describe('monitor.sh recovers from retry exhaustion (Issue #1522, defect 4)', ()
     expectPolls(run, POLLS);
 
     expect(run.tmuxCalls).toEqual([]);
-    expect(run.stdout).not.toContain("sending 'a'");
+    expect(run.stdout).not.toContain("sent 'a'");
     expect(run.stdout).not.toContain('NOT_STARTED');
   }, 20_000);
 
@@ -183,7 +190,13 @@ describe('monitor.sh recovers from retry exhaustion (Issue #1522, defect 4)', ()
     const run = runLoop('rate-limit.json', POLLS);
     expectPolls(run, POLLS);
 
-    expect(run.stdout).toContain("rate limit -> sending 'a'");
-    expect(run.tmuxCalls).toEqual(['send-keys -t cm-w1 a Enter']);
+    // The log now states the RESULT and names the session it reached: before
+    // #1601 it printed "sending 'a'" *before* a send-keys whose failure was
+    // swallowed, so the line was emitted whether or not anything was delivered.
+    expect(run.stdout).toContain("rate limit -> sent 'a' to mcbd-claude-w1");
+    expect(run.tmuxCalls).toEqual([
+      'has-session -t =mcbd-claude-w1:',
+      'send-keys -t =mcbd-claude-w1: a Enter',
+    ]);
   }, 20_000);
 });

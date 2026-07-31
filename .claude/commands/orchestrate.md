@@ -289,9 +289,11 @@ MONITOR_HOOKS_BASE=origin/develop \
   --verbose \
   --hooks .claude/skills/orchestrate-monitor/scripts/hooks-git.sh \
   --hooks .claude/skills/orchestrate-monitor/scripts/hooks-task.sh \
-  --session-prefix mcbd-claude \
   --interval 20 --idle-threshold 8 <worktree-id> ... 2>&1 | tee monitor.log
 ```
+
+介入先の tmux セッションは capture の `cliToolId` から導出されるので**指定は不要**（#1601）。
+既定インスタンス以外を見るときだけ `<worktree-id>@<instance-id>`（例 `w1@codex-2`）で指定する。
 
 **monitor の COMPLETE 判定をマージ可否の裁定に使わないこと。** 裁定は 3-3 の
 `wait --verify` の exit code である。
@@ -338,8 +340,12 @@ commandmatedev capture "$WT"
 - **composer に本文が残っている** → Enter 未確定。`tmux send-keys -t "mcbd-claude-$WT" Enter` で確定させる
   （`commandmatedev respond` は空文字を受け付けず exit 2 になるのでここでは使えない）。
   tmux セッション名は `mcbd-<エージェント>-<worktree-id>` である
-- **権限プロンプトで停止** → Enter で承認。monitor.sh に自動承認させる場合は
-  `--session-prefix mcbd-claude` を渡すこと（既定の `cm` はこの製品のセッション名と一致しない）
+- **権限プロンプトで停止** → Enter で承認。monitor.sh に自動承認させる場合、送信先は
+  capture の `cliToolId` から `mcbd-<cliToolId>-<worktree-id>[-<suffix>]` が導出されるので
+  **オプション指定は要らない**（#1601）。`--session-prefix` は導出できないセッションを見るための
+  escape hatch で、渡すと導出を丸ごとバイパスするため**混在フリートでは使わない**
+  （例えば `mcbd-claude` を渡すと codex / copilot のワーカーまで claude 扱いに固定され、
+  存在しないペインへ撃つことになる）。届かなかった介入は stderr に `NOT delivered` と出る
 - **セッションが起動していない** → `commandmatedev ls` で存在確認、必要なら再送
 - 判別のための知見は orchestrate-monitor skill の STARTED ガード（`verify-completion.sh`）を参照
 

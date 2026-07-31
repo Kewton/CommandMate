@@ -404,9 +404,13 @@ give it the task-status hook as well:
 .claude/skills/orchestrate-monitor/scripts/monitor.sh \
   --hooks .claude/skills/orchestrate-monitor/scripts/hooks-git.sh \
   --hooks .claude/skills/orchestrate-monitor/scripts/hooks-task.sh \
-  --session-prefix mcbd-claude \
   --interval 20 --idle-threshold 8 "$WT" ...
 ```
+
+The tmux session an intervention is sent to is derived from the poll's
+`cliToolId`, so no option is needed even for a fleet running several agents
+(#1601). Only a non-default instance needs to be named, as
+`<worktree-id>@<instance-id>` (e.g. `w1@codex-2`).
 
 **The monitor's `COMPLETE` is not a merge verdict.** The verdict is the exit code
 from step 3. The monitor only decides when to go look.
