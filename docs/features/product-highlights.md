@@ -142,7 +142,15 @@ $EDITOR docs/images/features/storyboards/01-parallel-worktrees.yaml
 .claude/skills/demo-video/scripts/demo-video.sh \
   --storyboard docs/images/features/storyboards/01-parallel-worktrees.yaml \
   --out docs/images/features
+
+# ページに表示される GIF を作り直す（mp4 と同じディレクトリに出る）
+.claude/skills/video-to-gif/scripts/to-gif.sh \
+  docs/images/features/cm-01-parallel-worktrees.ja.mp4 \
+  docs/images/features/cm-01-parallel-worktrees.en.mp4
 ```
+
+GIF はバイト予算（既定 1.5MB）に収まるまで解像度・fps・パレットを段階的に落とし、
+収まらなければ**書かずに** exit 1 する。終了時に「コミットすれば何バイト増えるか」を出す。
 
 絵コンテの尺は素材の実尺が上限で、超えた分は最終フレームの静止で埋まる。
 実測値: 一覧 4.1–5.2s / 送信→生成 15.4–18.5s / スマホ承認 5.9–6.0s / 完了 3.6s。

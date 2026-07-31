@@ -379,7 +379,12 @@ commandmate report list --days 7             # 直近N日のレポート一覧�
 | スキル | 説明 |
 |--------|------|
 | `/release` | バージョン更新、CHANGELOG更新、Gitタグ作成、GitHub Releases作成を自動化 |
+| `/release-post` | リリース告知文の作成 |
 | `/rebuild` | サーバーをリビルドして再起動 |
+| `/demo-video` | 隔離環境でデモ動画（日英）を全自動生成。絵コンテ駆動・尺検証つき |
+| `/video-to-gif` | 動画をバイト予算つきで GIF 化。docs の markdown に貼れる形にする |
+| `/cmate-verify` | `.commandmate/verify.yaml` の検証ゲートを実 exit code で実行 |
+| `/orchestrate-monitor` | 並列ワーカーの capture 解析・状態判定・完了検証 |
 
 ---
 

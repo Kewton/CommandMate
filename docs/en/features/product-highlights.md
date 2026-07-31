@@ -144,7 +144,16 @@ $EDITOR docs/images/features/storyboards/01-parallel-worktrees.yaml
 .claude/skills/demo-video/scripts/demo-video.sh \
   --storyboard docs/images/features/storyboards/01-parallel-worktrees.yaml \
   --out docs/images/features
+
+# rebuild the GIF the page actually plays (written beside the mp4)
+.claude/skills/video-to-gif/scripts/to-gif.sh \
+  docs/images/features/cm-01-parallel-worktrees.ja.mp4 \
+  docs/images/features/cm-01-parallel-worktrees.en.mp4
 ```
+
+The GIF step steps resolution, frame rate and palette down until the file fits its byte budget
+(1.5MB by default). If it never fits it writes nothing and exits 1, and it always prints how many
+bytes committing the result would add.
 
 A storyboard's scene duration is capped by the length of the take; anything longer is padded
 with a frozen last frame. Measured: overview 4.1–5.2s / send-and-generate 15.4–18.5s /
