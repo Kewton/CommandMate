@@ -1,0 +1,37 @@
+version: 1
+duration: 20
+output: cm-06-approve-from-phone
+scenes:
+  - id: sessions-overview
+    type: record
+    duration: 4
+    viewport: pc
+    telop:
+      ja: "承認のために席へ戻らない"
+      en: "No walking back to your desk"
+  - id: send-and-generate
+    type: record
+    duration: 7
+    viewport: pc
+    telop:
+      ja: "必要なのはブラウザだけ"
+      en: "Only your phone browser"
+  - id: respond-from-mobile
+    type: record
+    duration: 5
+    viewport: mobile
+    telop:
+      ja: "確認はワンタップ"
+      en: "Approve with one tap"
+  - id: complete
+    type: record
+    duration: 3
+    telop:
+      ja: "移動中に前へ進む"
+      en: "Progress while you commute"
+  - id: outro
+    type: card
+    duration: 1
+    telop:
+      ja: "github.com/Kewton/CommandMate"
+      en: "github.com/Kewton/CommandMate"
