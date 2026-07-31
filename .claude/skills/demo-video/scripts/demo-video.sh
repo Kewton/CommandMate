@@ -145,22 +145,30 @@ for loc in $LOCALES; do
   PLAN="$OUT_DIR/.plan-$loc.tsv"
   mkdir -p "$SCENES_DIR" "$OVERLAY_DIR"
 
-  log "recording scenes"
-  "$REPO_ROOT/node_modules/.bin/tsx" "$SCRIPT_DIR/record-scenes.ts" \
-    --locale "$loc" --out "$SCENES_DIR" --message "$MESSAGE" --worktree "$WORKTREE_ID" \
-    || die "recording failed for locale '$loc'"
-
-  log "rendering telops"
-  "$REPO_ROOT/node_modules/.bin/tsx" "$SCRIPT_DIR/render-overlays.ts" \
-    --locale "$loc" --out "$OVERLAY_DIR" --storyboard "$STORYBOARD" --frame "$FRAME" \
-    || die "telop rendering failed for locale '$loc'"
-
+  # The plan is built before the camera rolls because it decides *what* to
+  # film: the storyboard is the source of truth for the scene list, so a scene
+  # it does not place is never shot rather than shot and discarded.
   "$REPO_ROOT/node_modules/.bin/tsx" "$SCRIPT_DIR/storyboard.ts" \
     --file "$STORYBOARD" --locale "$loc" --format plan >"$PLAN" \
     || die "could not write the plan for locale '$loc'"
 
   STEM="$(awk -F'\t' '$1 == "#output" { print $2; exit }' "$PLAN")"
   [ -n "$STEM" ] || die "plan has no '#output' row"
+
+  # Scene ids are validated kebab-case, so word-splitting this is safe.
+  SCENE_ARGS="$(awk -F'\t' '$1 !~ /^#/ && $2 == "record" { printf " --scene %s", $1 }' "$PLAN")"
+  [ -n "$SCENE_ARGS" ] || die "storyboard '$STORYBOARD' places no record scenes — nothing to film"
+
+  log "recording scenes:$SCENE_ARGS"
+  "$REPO_ROOT/node_modules/.bin/tsx" "$SCRIPT_DIR/record-scenes.ts" \
+    --locale "$loc" --out "$SCENES_DIR" --message "$MESSAGE" --worktree "$WORKTREE_ID" \
+    $SCENE_ARGS \
+    || die "recording failed for locale '$loc'"
+
+  log "rendering telops"
+  "$REPO_ROOT/node_modules/.bin/tsx" "$SCRIPT_DIR/render-overlays.ts" \
+    --locale "$loc" --out "$OVERLAY_DIR" --storyboard "$STORYBOARD" --frame "$FRAME" \
+    || die "telop rendering failed for locale '$loc'"
 
   log "composing $OUT_DIR/$STEM.mp4"
   COMPOSE_ARGS="--plan $PLAN --scenes $SCENES_DIR --overlays $OVERLAY_DIR"

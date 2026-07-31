@@ -9,8 +9,9 @@
 #     foreign telop, which no reviewer would catch)
 #   - telop budget: record scenes ja <= 20 chars / en <= 8 words,
 #     card scenes ja <= 40 chars / en <= 12 words
-#   - every `type: record` id must exist in record-scenes.ts SCENES, and every
-#     implemented scene must appear here (1:1, both directions)
+#   - every `type: record` id must exist in record-scenes.ts SCENES. The reverse
+#     does not hold (#1575): a storyboard is a cut, not a manifest of the whole
+#     scene library, and demo-video.sh only films the ids listed here
 #
 # Translations are written by hand in both languages on purpose. Machine
 # translating at generation time would put text on screen that nobody reviewed.

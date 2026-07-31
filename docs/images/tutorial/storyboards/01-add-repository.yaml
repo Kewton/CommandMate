@@ -1,0 +1,16 @@
+# Tutorial Step 1 — register a repository (Issue #1575)
+#
+# No title card: the tutorial already carries a heading and prose around the
+# clip, so the frames are spent on the operation itself.
+
+version: 1
+duration: 10
+output: cm-t1-add-repository
+scenes:
+  - id: add-repository
+    type: record
+    duration: 10
+    viewport: pc
+    telop:
+      ja: "リポジトリのパスを登録する"
+      en: "Register a repository by its path"

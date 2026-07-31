@@ -116,7 +116,7 @@ npx tsx .claude/skills/demo-video/scripts/record-scenes.ts --locale ja
 #                --viewport 1440x900 / --message "..." / --headed
 ```
 
-シーンは絵コンテと 1:1 の 4 本:
+シーンは**部品**であり、1 本の絵コンテが全部を使う必要はない（#1575）。絵コンテは使う id だけを並べ、`demo-video.sh` はその id だけを撮る:
 
 | id | viewport | 内容 | 同期点（prepare） |
 |----|----------|------|------------------|
@@ -124,6 +124,15 @@ npx tsx .claude/skills/demo-video/scripts/record-scenes.ts --locale ja
 | `send-and-generate` | pc | worktree を開いてメッセージ送信 → 生成開始 | `isSessionRunning === true`。送信後は `isProcessing === true` を待つ |
 | `respond-from-mobile` | **mobile** | スマホ幅で承認シートを開いて承認 | `isWaitingForResponse === true` → 承認後 `false` に戻るまで |
 | `complete` | pc | ready に戻った一覧 | `isProcessing === false && isSessionRunning === true` |
+| `add-repository` | pc | リポジトリ画面で**パス指定**の登録（clone URL ではない＝ネットワークに出ない） | `/api/repositories` に `CM_DEMO_SEED_REPO_2` が**無い**こと → 登録後は出るまで |
+| `sync-worktrees` | pc | 外部で作られた worktree を「すべて同期」で認識させる | `/api/worktrees` に `cmdemo-app-feature-demo-api-cache` が**無い**こと → 同期後は出るまで |
+| `review-diff` | pc | Git アクティビティを開いて未コミット差分を表示 | `/api/worktrees/<id>/git/staged` の `unstaged` が非空になるまで |
+
+`review-diff` の同期点が `git/diff` ではなく `git/staged` なのは、`git/diff` が**コミット指定専用**（`commit` が 7〜40 桁の hash でないと 400）で作業ツリーの変更を一切返せないため。Git ペイン自身も `git/staged` を読む。
+
+**`respond-from-mobile` は単独では撮れない。** カセットの行は `@input` で CommandMate からの送信を待って初めて次のフレームに進むので、承認フレームは送信なしには描画されない。絵コンテに `respond-from-mobile` を置くときは**必ず手前に `send-and-generate` を置く**こと（`storyboard.test.ts` が固定している）。
+
+サーバレンダリングされたボタンは、React が `onClick` を貼る前から Playwright の actionability を満たす。その隙に入ったクリックは黙って捨てられ、数十秒後に「別の要素が見つからない」というタイムアウトになる。`clickUntilEffective` は**観測可能な結果**（フォームが開く／ペインが `data-active="git"` になる／サーバが worktree を登録する）が出るまでクリックし直す。クリック前に固定 sleep を入れても競合が移動するだけなので使わない。
 
 同期点は **サーバ API** を読む。状態ドットの読み上げ名はローカライズされ、エージェント別内訳で上書きされることもあるため、UI 文字列に同期すると非 en ロケールで黙って壊れる。`page.waitForTimeout` は「完成した画を数秒見せる」ためだけに使い、判定には使わない。
 
@@ -241,7 +250,7 @@ git status --short     # 何も出ないこと
 | `telop.ja` / `telop.en` の**両方必須** | 片方欠けると画面と字幕の言語が食い違った動画が黙って出る |
 | record シーン: ja 20 文字 / en 8 語以内 | 動く映像の上に重ねる帯は一目で読めないと意味がない |
 | card シーン: ja 40 文字 / en 12 語以内 | カードは静止した全画面。Issue 本文のアウトロ `github.com/Kewton/CommandMate` は 29 文字で、帯の予算では自分の規則に落ちる |
-| `type: record` の id と `record-scenes.ts` の `SCENES` が **1:1**（両方向） | 未実装 id は録画時に落ちる。逆に実装済みで絵コンテに無い id は、撮った映像を黙って捨てることになる |
+| `type: record` の id が `record-scenes.ts` の `SCENES` に**存在する**（絵コンテ ⊆ 実装） | 未実装 id は録画時に落ちる。逆方向は #1575 で外した — 「実装済みなら絵コンテに必ず載せる」は 1 本の絵コンテに全シーンを強制し、シーン追加が既存の全絵コンテを壊すため。撮った映像を捨てない保証は `demo-video.sh` が絵コンテの id だけを `--scene` で撮ることに置き換えた |
 | `output` はファイル名になるので `[A-Za-z0-9._-]` のみ | `../` を含む値でディレクトリ外に書き出させない |
 
 ```bash

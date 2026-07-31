@@ -45,6 +45,9 @@ esac
 
 SEED_ROOT="$STATE_DIR/seed"
 SEED_REPO="$SEED_ROOT/cmdemo-app"
+# A second throwaway repository, deliberately left out of WORKTREE_REPOS so the
+# boot sync never discovers it. The add-repository scene registers it on camera.
+SEED_REPO_2="$SEED_ROOT/cmdemo-docs"
 DB_PATH="$STATE_DIR/cm.db"
 LOG_FILE="$STATE_DIR/server.log"
 STATE_FILE="$STATE_DIR/state.env"
@@ -105,6 +108,16 @@ seed_commit() {
     commit -q -m "$1"
 }
 
+create_second_seed_repo() {
+  mkdir -p "$SEED_REPO_2"
+  git -C "$SEED_REPO_2" init -q
+  git -C "$SEED_REPO_2" symbolic-ref HEAD refs/heads/main
+  printf '# cmdemo-docs\n\nSecond throwaway repository, registered on camera.\n' >"$SEED_REPO_2/README.md"
+  git -C "$SEED_REPO_2" add -A
+  git -C "$SEED_REPO_2" -c user.name='CommandMate Demo' -c user.email='demo@example.invalid' \
+    commit -q -m 'docs: initial notes'
+}
+
 create_seed_repo() {
   rm -rf "$SEED_ROOT"
   mkdir -p "$SEED_REPO"
@@ -125,6 +138,21 @@ create_seed_repo() {
 
   git -C "$SEED_REPO" worktree add -q -b feature/demo-dark-mode "$SEED_ROOT/wt-dark-mode" >/dev/null
   git -C "$SEED_REPO" worktree add -q -b fix/demo-login-error "$SEED_ROOT/wt-login-error" >/dev/null
+
+  # Uncommitted work for the review-diff scene. Left unstaged on purpose: the
+  # Git pane's `unstaged` list is what that scene clicks, and a staged change
+  # would land in a different list.
+  cat >"$SEED_ROOT/wt-dark-mode/src/theme.ts" <<'THEME'
+export const THEME_STORAGE_KEY = "cmdemo.theme";
+
+export type Theme = "light" | "dark";
+
+export function resolveTheme(stored: string | null): Theme {
+  return stored === "dark" ? "dark" : "light";
+}
+THEME
+
+  create_second_seed_repo
 }
 
 # ---------------------------------------------------------------- boot -------
@@ -200,6 +228,13 @@ if [ "$ready" -ne 1 ]; then
   die "server did not answer $BASE_URL/ within ${READY_TIMEOUT}s"
 fi
 
+# Created only now, after the boot sync in server.ts has already scanned
+# WORKTREE_REPOS. That ordering is what leaves this worktree on disk and absent
+# from the database, which is the precondition the sync-worktrees scene films.
+log "adding a worktree the boot sync has already missed"
+git -C "$SEED_REPO" worktree add -q -b feature/demo-api-cache "$SEED_ROOT/wt-api-cache" >/dev/null \
+  || { cleanup_failed_boot; die "could not create the post-boot worktree"; }
+
 cat >"$STATE_FILE" <<EOF
 CM_DEMO_PORT=$PORT
 CM_DEMO_BASE_URL=$BASE_URL
@@ -209,6 +244,7 @@ CM_DEMO_PROC_MATCH=$PROC_MATCH
 CM_DEMO_STATE_DIR=$STATE_DIR
 CM_DEMO_SEED_ROOT=$SEED_ROOT
 CM_DEMO_SEED_REPO=$SEED_REPO
+CM_DEMO_SEED_REPO_2=$SEED_REPO_2
 CM_DEMO_DB_PATH=$DB_PATH
 CM_DEMO_VIDEO_DIR=$VIDEO_DIR
 CM_DEMO_LOG_FILE=$LOG_FILE

@@ -8,6 +8,7 @@
  *
  * @vitest-environment node
  */
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -207,11 +208,27 @@ describe('validation', () => {
     expect(errors.join('\n')).toMatch(/no implementation in record-scenes\.ts: does-not-exist/);
   });
 
-  it('rejects an implemented scene the storyboard never places', () => {
-    // The other half of "1:1". Without it, dropping a scene from the storyboard
-    // would silently shorten the video and waste the footage.
-    const errors = parseStoryboard(baseYaml(), [...IMPLEMENTED, 'orphan-scene']).errors;
-    expect(errors.join('\n')).toMatch(/absent from the storyboard: orphan-scene/);
+  it('accepts a storyboard that places only some of the implemented scenes', () => {
+    // The subset rule (#1575). A storyboard is a *cut*, not a manifest of the
+    // scene library: a 12 second tutorial clip cannot place every scene, and
+    // demanding it capped the library at whatever fits the shortest video.
+    const one = IMPLEMENTED[0];
+    const { storyboard, errors } = parseStoryboard(
+      `version: 1\nduration: 4\noutput: demo\nscenes:\n  - id: ${one}\n    type: record\n    duration: 4\n    telop: { ja: "説明", en: "Explanation" }\n`,
+      IMPLEMENTED,
+    );
+    expect(errors).toEqual([]);
+    expect(storyboard!.scenes.map((scene) => scene.id)).toEqual([one]);
+  });
+
+  it('does not object to an implemented scene the storyboard never places', () => {
+    // The exact inversion of the rule this replaced. What that rule protected —
+    // footage recorded and then silently dropped — is now impossible by
+    // construction: demo-video.sh derives --scene from the storyboard, so an
+    // unplaced scene is never filmed. See the wiring test below.
+    const { storyboard, errors } = parseStoryboard(baseYaml(), [...IMPLEMENTED, 'orphan-scene']);
+    expect(errors).toEqual([]);
+    expect(storyboard).not.toBeNull();
   });
 
   it('rejects a card that declares a viewport it is never recorded at', () => {
@@ -256,9 +273,10 @@ describe('the committed storyboard', () => {
     expect(storyboard!.output).toBe('demo-30s');
   });
 
-  it('covers every implemented scene exactly once', () => {
+  it('places no scene record-scenes.ts cannot film, and places none twice', () => {
     const recorded = storyboard!.scenes.filter((scene) => scene.type === 'record').map((s) => s.id);
-    expect([...recorded].sort()).toEqual([...IMPLEMENTED].sort());
+    expect(recorded.filter((id) => !IMPLEMENTED.includes(id))).toEqual([]);
+    expect(new Set(recorded).size).toBe(recorded.length);
   });
 
   it('films the approval beat at a phone viewport', () => {
@@ -273,6 +291,114 @@ describe('the committed storyboard', () => {
       if (scene.type !== 'record') continue;
       expect(SCENES.find((s) => s.id === scene.id)!.viewport).toBe(scene.viewport);
     }
+  });
+});
+
+describe('every storyboard committed to the repository', () => {
+  // #1575 relaxed the storyboard/implementation correspondence to a subset. The
+  // point of that relaxation was that adding a scene must not invalidate cuts
+  // that do not use it, so the guard is the whole committed set, checked with
+  // the same defaults the CLI uses.
+  const roots = [
+    'docs/images/features/storyboards',
+    'docs/images/tutorial/storyboards',
+    '.claude/skills/demo-video/storyboard',
+    '.agents/skills/demo-video/storyboard',
+  ];
+  const files = roots.flatMap((relative) => {
+    const dir = path.join(REPO_ROOT, relative);
+    return fs
+      .readdirSync(dir)
+      .filter((name) => name.endsWith('.yaml'))
+      .sort()
+      .map((name) => path.join(relative, name));
+  });
+
+  it('finds every storyboard, so the per-file check below cannot be vacuous', () => {
+    // 10 product-highlight cuts + 5 tutorial cuts + the skill default in both
+    // install roots.
+    expect(files.length).toBe(17);
+  });
+
+  it.each(files)('%s validates against the implemented scenes', (relative) => {
+    const { storyboard, errors } = parseStoryboard(
+      fs.readFileSync(path.join(REPO_ROOT, relative), 'utf8'),
+    );
+    expect(errors).toEqual([]);
+    expect(storyboard).not.toBeNull();
+  });
+
+  it.each(files)('%s places the approval scene after a send, or not at all', (relative) => {
+    // Scenes became independently selectable in #1575, which exposed a
+    // dependency that used to be hidden by "every storyboard places every
+    // scene": fake-agent.sh's cassette blocks on `@input` until CommandMate
+    // sends a message, so the approval frame is never painted without a send.
+    // A storyboard that places `respond-from-mobile` alone hangs in prepare
+    // until the timeout — minutes of nothing, then a failed take.
+    const { storyboard } = parseStoryboard(fs.readFileSync(path.join(REPO_ROOT, relative), 'utf8'));
+    const ids = storyboard!.scenes.map((scene) => scene.id);
+    const approval = ids.indexOf('respond-from-mobile');
+    if (approval === -1) return;
+    const send = ids.indexOf('send-and-generate');
+    expect(send).toBeGreaterThan(-1);
+    expect(send).toBeLessThan(approval);
+  });
+
+  it.each(files)('%s agrees with record-scenes.ts about each viewport', (relative) => {
+    // Two files declare it and they must not drift: the storyboard decides the
+    // letterbox, record-scenes decides the browser. A mobile scene placed in a
+    // storyboard that calls it `pc` gets a phone-shaped take pillarboxed into a
+    // desktop frame.
+    const { storyboard } = parseStoryboard(fs.readFileSync(path.join(REPO_ROOT, relative), 'utf8'));
+    for (const scene of storyboard!.scenes) {
+      if (scene.type !== 'record') continue;
+      expect(SCENES.find((implemented) => implemented.id === scene.id)!.viewport).toBe(scene.viewport);
+    }
+  });
+});
+
+describe('demo-video.sh films exactly the scenes the storyboard places', () => {
+  // The design substituted for the dropped `unused` check: rather than assert
+  // that no implemented scene is missing from the cut, the pipeline only ever
+  // rolls the camera on ids the cut names. If this wiring regresses, every
+  // scene is filmed again and the discarded-footage problem comes back silently.
+  const script = fs.readFileSync(
+    path.join(REPO_ROOT, '.claude/skills/demo-video/scripts/demo-video.sh'),
+    'utf8',
+  );
+
+  it('builds the plan before recording and passes it on as --scene arguments', () => {
+    const planAt = script.indexOf('--format plan >"$PLAN"');
+    const recordAt = script.indexOf('record-scenes.ts');
+    expect(planAt).toBeGreaterThan(-1);
+    expect(recordAt).toBeGreaterThan(-1);
+    // The plan has to exist before it can decide what to shoot.
+    expect(planAt).toBeLessThan(recordAt);
+    // Unquoted on purpose: the ids must word-split into separate arguments.
+    expect(script.slice(recordAt)).toMatch(/^[\s\S]{0,400}?\$SCENE_ARGS/);
+    expect(script).toMatch(/nothing to film/);
+  });
+
+  it("selects the record ids and nothing else, running the script's own awk program", () => {
+    const match = /SCENE_ARGS="\$\(awk -F'\\t' '([^']*)' "\$PLAN"\)"/.exec(script);
+    expect(match).not.toBeNull();
+
+    const source = fs.readFileSync(DEFAULT_STORYBOARD_PATH, 'utf8');
+    const board = parseStoryboard(source).storyboard!;
+    const plan = formatPlan(board, 'ja');
+    // The committed cut mixes card and record scenes, so a program that simply
+    // printed every row would not match the expectation below.
+    expect(board.scenes.some((scene) => scene.type === 'card')).toBe(true);
+
+    const selected = execFileSync('awk', ['-F', '\\t', match![1]], {
+      input: plan,
+      encoding: 'utf8',
+    });
+    const expected = board.scenes
+      .filter((scene) => scene.type === 'record')
+      .map((scene) => ` --scene ${scene.id}`)
+      .join('');
+    expect(selected).toBe(expected);
   });
 });
 
