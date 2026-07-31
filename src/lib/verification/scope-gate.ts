@@ -53,6 +53,29 @@ export const MAX_REPORTED_VIOLATIONS = 100;
  */
 export const ALWAYS_ALLOWED_PREFIX = '.commandmate/';
 
+/**
+ * Execution contracts, dropped from both gates' change sets entirely (#1580).
+ *
+ * An orchestrator writes `.commandmate/tasks/<task>.yaml` into a worktree and
+ * sends immediately, without committing it. Counting that file as change makes
+ * an agent that did nothing indistinguishable from one that did something:
+ * work-evidence sees a dirty tree and passes, and the run that should have been
+ * `not_started` collects a row of green gates instead.
+ *
+ * Dropping it is tamper-safe because the contract is snapshotted into
+ * `tasks.contract_json` at send time (src/lib/db/tasks-db.ts), so editing the
+ * file afterwards cannot change what the run is judged against.
+ * `.commandmate/verify.yaml` has no such snapshot — the gates are re-read from
+ * the file on every run — so it stays in the change set, where a contract's
+ * explicit `deny` can still catch an agent weakening its own gates.
+ */
+export const CONTRACT_DIR_PREFIX = '.commandmate/tasks/';
+
+/** Whether git reported a path that {@link CONTRACT_DIR_PREFIX} excludes. */
+export function isContractPath(path: string): boolean {
+  return path.startsWith(CONTRACT_DIR_PREFIX);
+}
+
 /** Matches {@link GateOutcome} in gate-runner; kept structural to avoid a cycle. */
 export interface ScopeOutcome {
   status: VerificationGateTerminalStatus;
@@ -237,10 +260,14 @@ function splitNul(output: string): string[] {
  * format C-quotes anything containing a space. Both paths of a rename are
  * returned: moving a file *out of* a permitted directory is a change to that
  * directory, and judging only the destination would miss it.
+ *
+ * Grouped per entry rather than flattened because work-evidence counts entries,
+ * and a rename that moved a contract file into real work has to stay countable
+ * as one change (#1580).
  */
-function parsePorcelain(output: string): string[] {
+export function parsePorcelainEntries(output: string): string[][] {
   const fields = output.split('\0');
-  const paths: string[] = [];
+  const entries: string[][] = [];
   let i = 0;
 
   while (i < fields.length) {
@@ -249,7 +276,7 @@ function parsePorcelain(output: string): string[] {
     // "XY " plus at least one path character.
     if (entry.length < 4) continue;
 
-    paths.push(entry.slice(3));
+    const paths = [entry.slice(3)];
 
     const [x, y] = entry;
     if (x === 'R' || x === 'C' || y === 'R' || y === 'C') {
@@ -257,9 +284,11 @@ function parsePorcelain(output: string): string[] {
       i += 1;
       if (original) paths.push(original);
     }
+
+    entries.push(paths);
   }
 
-  return paths;
+  return entries;
 }
 
 export interface ChangedPaths {
@@ -320,7 +349,13 @@ export async function collectChangedPaths(
     };
   }
 
-  const paths = new Set<string>([...splitNul(diff.stdout), ...parsePorcelain(status.stdout)]);
+  // Both sides are filtered, not just the working tree: an orchestrator may
+  // also have committed the contract as a setup commit (#1580).
+  const paths = new Set<string>(
+    [...splitNul(diff.stdout), ...parsePorcelainEntries(status.stdout).flat()].filter(
+      (path) => !isContractPath(path)
+    )
+  );
   return { paths: [...paths].sort(), mergeBase: base };
 }
 

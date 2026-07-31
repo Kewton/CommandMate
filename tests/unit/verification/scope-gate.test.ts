@@ -313,6 +313,62 @@ describe('collectChangedPaths', () => {
     expect(await changedPaths(repo)).toEqual(['.gitignore']);
   });
 
+  it('drops an uncommitted contract file and keeps verify.yaml', async () => {
+    const repo = createRepo();
+    write(repo, '.commandmate/tasks/t.yaml', 'goal: x\n');
+    write(repo, '.commandmate/verify.yaml', 'version: 1\n');
+    write(repo, 'src/lib/verification/work.ts', 'export const w = 1;\n');
+
+    expect(await changedPaths(repo)).toEqual([
+      '.commandmate/verify.yaml',
+      'src/lib/verification/work.ts',
+    ]);
+  });
+
+  it('drops a committed contract file too', async () => {
+    const repo = createRepo();
+    // The orchestrator variant that commits the contract as a setup commit.
+    write(repo, '.commandmate/tasks/t.yaml', 'goal: x\n');
+    git(['add', '-A'], repo);
+    git(['commit', '-m', 'contract'], repo);
+    write(repo, 'src/lib/verification/work.ts', 'export const w = 1;\n');
+
+    expect(await changedPaths(repo)).toEqual(['src/lib/verification/work.ts']);
+  });
+
+  it('drops both paths when a contract file is renamed within the contract directory', async () => {
+    const repo = createRepo();
+    write(repo, '.commandmate/tasks/old.yaml', 'goal: x\n');
+    git(['add', '-A'], repo);
+    git(['commit', '-m', 'contract'], repo);
+    git(['mv', '.commandmate/tasks/old.yaml', '.commandmate/tasks/new.yaml'], repo);
+
+    // Both the `R  <new>NUL<old>` rename record and the committed diff have to
+    // be filtered, or the origin path survives as a phantom change.
+    expect(await changedPaths(repo)).toEqual([]);
+  });
+
+  it('keeps the non-contract half of a rename out of the contract directory', async () => {
+    const repo = createRepo();
+    write(repo, '.commandmate/tasks/t.yaml', 'goal: x\n');
+    git(['add', '-A'], repo);
+    git(['commit', '-m', 'contract'], repo);
+    git(['mv', '.commandmate/tasks/t.yaml', 'src/escaped.yaml'], repo);
+
+    expect(await changedPaths(repo)).toEqual(['src/escaped.yaml']);
+  });
+
+  it('does not drop a directory that merely starts like the contract directory', async () => {
+    const repo = createRepo();
+    write(repo, '.commandmate/tasks-archive/t.yaml', 'goal: x\n');
+    write(repo, '.commandmate/tasks.yaml', 'goal: x\n');
+
+    expect(await changedPaths(repo)).toEqual([
+      '.commandmate/tasks-archive/t.yaml',
+      '.commandmate/tasks.yaml',
+    ]);
+  });
+
   it('reports an error for a base ref this worktree cannot reach', async () => {
     const result = await collectChangedPaths(createRepo(), 'origin/nonexistent');
     expect('error' in result && result.error).toContain('merge-base');
@@ -431,7 +487,22 @@ describe('evaluateScope', () => {
 
     const outcome = await evaluate(repo, ALLOW_SRC);
     expect(outcome.status).toBe('passed');
-    expect(outcome.logTail).toContain('changed=2 violations=0');
+    // Only verify.yaml is left: the contract is dropped from the change set
+    // entirely (#1580), while verify.yaml stays visible to the gate.
+    expect(outcome.logTail).toContain('changed=1 violations=0');
+  });
+
+  it('fails a deny that names verify.yaml, and cannot be dodged by a deny on the contract', async () => {
+    const repo = createRepo();
+    write(repo, '.commandmate/tasks/t.yaml', 'version: 1\n');
+    write(repo, '.commandmate/verify.yaml', 'version: 1\n');
+
+    // A contract that forbids weakening the gates still catches verify.yaml,
+    // because verify.yaml has no send-time snapshot to fall back on.
+    const outcome = await evaluate(repo, scope(['src/**'], ['.commandmate/**']));
+    expect(outcome.status).toBe('failed');
+    expect(outcome.logTail).toContain('  - .commandmate/verify.yaml');
+    expect(outcome.logTail).not.toContain('.commandmate/tasks/t.yaml');
   });
 
   it('skips when no contract is attached to the run', async () => {

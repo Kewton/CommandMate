@@ -106,6 +106,12 @@ function addUncommittedWork(dir: string): void {
   writeFileSync(join(dir, 'work.txt'), 'agent output\n');
 }
 
+/** An execution contract the orchestrator dropped in, not the agent's work. */
+function writeContract(dir: string, name: string): void {
+  mkdirSync(join(dir, '.commandmate', 'tasks'), { recursive: true });
+  writeFileSync(join(dir, '.commandmate', 'tasks', name), 'version: 1\ngoal: do the thing\n');
+}
+
 function registerWorktree(id: string, path: string): void {
   upsertWorktree(db, {
     id,
@@ -398,6 +404,81 @@ options:
     expect(evidence?.logTail).toContain('commits=1');
     expect(evidence?.logTail).toContain('uncommitted=0');
     expect(getVerificationRun(db, runId)?.status).toBe('passed');
+  });
+
+  it('reports not_started when only an uncommitted contract file is present', async () => {
+    // The orchestrator flow #1580 exists for: drop the contract into the
+    // worktree, send, and the agent does nothing. Counting the contract would
+    // make that indistinguishable from work.
+    const repo = createRepo(PASSING_CONFIG);
+    writeContract(repo, 'orchestrated.yaml');
+    registerWorktree('wt-contract-only', repo);
+
+    const runId = await runToCompletion('wt-contract-only', repo);
+
+    const evidence = gatesById(runId).get(WORK_EVIDENCE_GATE_ID);
+    expect(evidence?.status).toBe('failed');
+    expect(evidence?.logTail).toContain('commits=0 uncommitted=0 (contract files excluded)');
+    expect(getVerificationRun(db, runId)?.status).toBe('not_started');
+  });
+
+  it('reports not_started when the only commit touches contract files alone', async () => {
+    const repo = createRepo(PASSING_CONFIG);
+    writeContract(repo, 'orchestrated.yaml');
+    git(['add', '-A'], repo);
+    git(['commit', '-m', 'set up contract'], repo);
+    registerWorktree('wt-contract-commit', repo);
+
+    const runId = await runToCompletion('wt-contract-commit', repo);
+
+    const evidence = gatesById(runId).get(WORK_EVIDENCE_GATE_ID);
+    expect(evidence?.status).toBe('failed');
+    expect(evidence?.logTail).toContain('commits=0 uncommitted=0');
+    expect(getVerificationRun(db, runId)?.status).toBe('not_started');
+  });
+
+  it('counts real work alongside a contract file, and counts it once', async () => {
+    const repo = createRepo(PASSING_CONFIG);
+    writeContract(repo, 'orchestrated.yaml');
+    addUncommittedWork(repo);
+    registerWorktree('wt-contract-plus-work', repo);
+
+    const runId = await runToCompletion('wt-contract-plus-work', repo);
+
+    const evidence = gatesById(runId).get(WORK_EVIDENCE_GATE_ID);
+    expect(evidence?.status).toBe('passed');
+    expect(evidence?.logTail).toContain('uncommitted=1');
+    expect(getVerificationRun(db, runId)?.status).toBe('passed');
+  });
+
+  it('counts a rename that carried a contract file out of the contract directory', async () => {
+    const repo = createRepo(PASSING_CONFIG);
+    writeContract(repo, 'orchestrated.yaml');
+    git(['add', '-A'], repo);
+    git(['commit', '-m', 'set up contract'], repo);
+    // `R  <new>NUL<old>` is one entry holding two paths; only one of them is a
+    // contract path, and the entry is a real change to the destination.
+    git(['mv', '.commandmate/tasks/orchestrated.yaml', 'escaped.yaml'], repo);
+    registerWorktree('wt-contract-rename', repo);
+
+    const runId = await runToCompletion('wt-contract-rename', repo);
+
+    const evidence = gatesById(runId).get(WORK_EVIDENCE_GATE_ID);
+    expect(evidence?.status).toBe('passed');
+    expect(evidence?.logTail).toContain('uncommitted=1');
+  });
+
+  it('still counts an edit to verify.yaml, which has no send-time snapshot', async () => {
+    const repo = createRepo(PASSING_CONFIG);
+    writeFileSync(join(repo, '.commandmate', 'verify.yaml'), PASSING_CONFIG);
+    writeFileSync(join(repo, '.commandmate', 'verify.yaml'), `${PASSING_CONFIG}\n# touched\n`);
+    registerWorktree('wt-verify-edit', repo);
+
+    const runId = await runToCompletion('wt-verify-edit', repo);
+
+    const evidence = gatesById(runId).get(WORK_EVIDENCE_GATE_ID);
+    expect(evidence?.status).toBe('passed');
+    expect(evidence?.logTail).toContain('uncommitted=1');
   });
 
   it('errors when no base ref can be resolved', async () => {

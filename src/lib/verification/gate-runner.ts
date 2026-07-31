@@ -42,7 +42,12 @@ import { createLogger } from '@/lib/logger';
 import { resolveContractGateIds } from '@/lib/tasks/contract-message';
 import type { TaskEvent } from '@/lib/tasks/task-state-machine';
 import { applyTaskEvent } from '@/lib/tasks/task-transition-service';
-import { evaluateScope } from './scope-gate';
+import {
+  CONTRACT_DIR_PREFIX,
+  evaluateScope,
+  isContractPath,
+  parsePorcelainEntries,
+} from './scope-gate';
 import {
   loadVerifyConfig,
   SCOPE_GATE_ID,
@@ -78,7 +83,8 @@ export const CONFIG_GATE_ID = 'config';
  * Neither runs a shell command, but the column is what a reader consults to see
  * what a gate did, so it names the plumbing instead of being left null.
  */
-const WORK_EVIDENCE_GATE_COMMAND = 'git merge-base / rev-list / status --porcelain';
+const WORK_EVIDENCE_GATE_COMMAND =
+  'git merge-base / rev-list / status --porcelain (excluding contract files)';
 const SCOPE_GATE_COMMAND = 'git diff --name-only / status --porcelain × contract scope';
 
 /**
@@ -345,6 +351,9 @@ function runGit(args: string[], cwd: string): Promise<{ code: number | null; std
  * agent reported completion without touching anything, which the run records
  * as `not_started` rather than letting empty work collect a row of passing
  * gates — the precise failure `verify-completion.sh` was written to catch.
+ *
+ * Contract files are evidence of the *orchestrator*, not of the agent, so
+ * neither side counts them (see {@link CONTRACT_DIR_PREFIX}).
  */
 async function evaluateWorkEvidence(
   worktreePath: string,
@@ -376,20 +385,46 @@ async function evaluateWorkEvidence(
   }
 
   const base = mergeBase.stdout.trim();
-  const revList = await runGit(['rev-list', '--count', `${base}..HEAD`], worktreePath);
+  // `:(top)` is an explicit "everything from the repository root" so the
+  // pathspec is not exclusions alone, and it anchors both patterns at the root
+  // rather than at cwd. A setup commit that only carries the contract must not
+  // read as a commit's worth of work.
+  const revList = await runGit(
+    [
+      'rev-list',
+      '--count',
+      `${base}..HEAD`,
+      '--',
+      ':(top)',
+      `:(exclude,top)${CONTRACT_DIR_PREFIX}`,
+    ],
+    worktreePath
+  );
   if (revList.code !== 0) {
     return done('error', `work-evidence: 'git rev-list --count ${base}..HEAD' failed.`, null);
   }
   const commitCount = Number.parseInt(revList.stdout.trim(), 10);
 
-  const porcelain = await runGit(['status', '--porcelain'], worktreePath);
+  // -z -uall for the same reasons scope-gate uses them: the human format
+  // C-quotes paths with spaces and joins renames with ` -> `, and the default
+  // untracked mode collapses a fresh `.commandmate/tasks/` to one directory
+  // entry — all three make a per-path exclusion judge something that is not a
+  // path. An entry counts as work when any of its paths is not a contract file,
+  // so renaming a contract into real work is still a change.
+  const porcelain = await runGit(
+    ['status', '--porcelain', '-z', '--untracked-files=all'],
+    worktreePath
+  );
   if (porcelain.code !== 0) {
     return done('error', "work-evidence: 'git status --porcelain' failed.", null);
   }
-  const uncommittedCount = porcelain.stdout.split('\n').filter((line) => line.trim() !== '').length;
+  const uncommittedCount = parsePorcelainEntries(porcelain.stdout).filter((paths) =>
+    paths.some((path) => !isContractPath(path))
+  ).length;
 
   const summary =
-    `work-evidence: baseRef=${baseRef} commits=${commitCount} uncommitted=${uncommittedCount}`;
+    `work-evidence: baseRef=${baseRef} commits=${commitCount} uncommitted=${uncommittedCount}` +
+    ' (contract files excluded)';
 
   if (!Number.isFinite(commitCount) || (commitCount === 0 && uncommittedCount === 0)) {
     return done('failed', `${summary}\nNo commits and no uncommitted changes: nothing to verify.`, 1);
