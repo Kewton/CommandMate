@@ -250,6 +250,23 @@ export interface VerifyOptions {
   token?: string;
 }
 
+/** verify history subcommand options [Issue #1593] */
+export interface VerifyHistoryOptions {
+  /** Restrict to one worktree; omitted means every worktree. */
+  worktree?: string;
+  /** Look back this many days; omitted means no lower bound. */
+  days?: number;
+  limit?: number;
+  json?: boolean;
+  token?: string;
+}
+
+/** verify show subcommand options [Issue #1593] */
+export interface VerifyShowOptions {
+  json?: boolean;
+  token?: string;
+}
+
 /** ls command options [Issue #518] */
 export interface LsOptions {
   json?: boolean;

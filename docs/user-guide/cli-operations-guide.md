@@ -59,7 +59,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate send`](#commandmate-send) | エージェントへのメッセージ送信 |
 | [`commandmate wait`](#commandmate-wait) | エージェント完了の待機 |
 | [`commandmate respond`](#commandmate-respond) | プロンプトへの応答 |
-| [`commandmate verify`](#commandmate-verify) | 検証ゲート（.commandmate/verify.yaml）の実行 |
+| [`commandmate verify`](#commandmate-verify) | 検証ゲート（.commandmate/verify.yaml）の実行と検証履歴の参照 |
 | [`commandmate task`](#commandmate-task) | 実行契約（.commandmate/tasks/*.yaml）の一覧・詳細 |
 | [`commandmate capture`](#commandmate-capture) | ターミナル出力の取得 |
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Auto-Yesの制御 |
@@ -285,6 +285,9 @@ commandmate verify <worktree-id>                       # 全ゲート実行
 commandmate verify <worktree-id> --gates lint,unit     # ゲートを絞る
 commandmate verify <worktree-id> --json                # run + gate results を JSON 出力
 commandmate verify <worktree-id> --timeout 1800        # 超過で exit 124
+
+commandmate verify history                             # 過去の run 一覧（読み取り専用）
+commandmate verify show <run-id>                       # run の詳細（読み取り専用）
 ```
 
 ### オプション
@@ -342,6 +345,59 @@ skipped を含む run は `passed` ではなく `error`（exit 99）になりま
 `.commandmate/tasks/` 配下は work-evidence（commits / uncommitted）からも scope の変更集合からも除外されます（Issue #1580）。そのため契約を worktree に**未コミットのまま置いてすぐ `send` してよく**、事前に base ブランチへマージする必要はありません。契約だけが置かれた worktree は `commits=0 uncommitted=0` のまま exit 21（作業証跡ゼロ）になります。
 
 `.commandmate/verify.yaml` は**除外されません**。契約本体は送信時にスナップショットされるので後編集が判定に影響しない一方、verify.yaml のゲート定義は毎ラン読み直されるため、エージェントが自分のゲートを弱めた場合に scope の `deny` で検出できる状態を残しています。
+
+### 検証履歴を読む（Issue #1593）
+
+過去の run は `verify history` で一覧し、`verify show <run-id>` で中身を見ます。どちらも**読み取り専用**で、検証を新たに走らせることはありません。
+
+```bash
+commandmate verify history                             # 全 worktree の直近50 run
+commandmate verify history --worktree <worktree-id>    # worktree で絞る
+commandmate verify history --days 14 --limit 100       # 期間と件数で絞る
+commandmate verify history --json                      # JSON 配列で出力
+commandmate verify show 42                             # run 42 の詳細（logTail 込み）
+commandmate verify show 42 --json                      # JSON で出力
+```
+
+#### verify history のオプション
+
+| オプション | 説明 | デフォルト |
+|-----------|------|-----------|
+| `--worktree <id>` | 対象 worktree を1つに絞る | 全 worktree |
+| `--days <n>` | 何日前まで遡るか（1..90） | 制限なし（`--limit` のみが効く） |
+| `--limit <n>` | 取得する run の最大数（1..500） | 50 |
+| `--json` | run の配列を stdout に JSON 出力 | 無効 |
+
+人間可読出力は 1 run 1 行です。先頭の `#<run-id>` が `verify show` に渡す ID です。
+
+```
+#42  2026-07-31T04:12:00.000Z  myrepo-feature-101  manual  failed  failed: unit,build
+#41  2026-07-31T03:58:00.000Z  myrepo-feature-101  wait    passed
+```
+
+一覧には**ゲートのログ本文（logTail）は含まれません**。500 run 分のログ末尾を毎回返すと一覧が MB 級になるためで、ログが必要なときは `verify show` を使います。`--json` の一覧に `logTail` フィールドは存在しません（`null` ではなく不在です）。
+
+`verify show` はゲートごとに status / exit code / 所要時間を並べ、logTail を `| ` プレフィックス付きで展開します。
+
+```
+run #42  failed  worktree=myrepo-feature-101  trigger=manual
+started=2026-07-31T04:12:00.000Z  finished=2026-07-31T04:15:20.000Z
+baseRef=origin/develop  instance=-  task=-
+  work-evidence  passed  exit=0  0.2s
+  unit  failed  exit=1  45.0s
+    | 2 tests failed
+    | expected 1 to be 2
+```
+
+#### 終了コード
+
+`history` / `show` は **20 / 21 を返しません**。この2つは「今のツリーが検証に落ちた」という意味であり、過去の run への問い合わせは現在のツリーへの判定ではないからです。
+
+| コード | 意味 |
+|:------:|------|
+| 0 | 取得成功（該当0件でも 0。人間向けには stderr に `No verification runs found.`、`--json` では `[]`） |
+| 2 | 引数不正（`--days` / `--limit` が範囲外、worktree ID 形式不正、run ID が正の整数でない）。HTTP 前に弾く |
+| 99 | 指定した run が存在しない（404）ほか予期しないエラー |
 
 ---
 

@@ -112,6 +112,34 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   options.skipInPrimaryCheckout, so a 'build' gate cannot replace the assets the
   live app is serving.
 
+### commandmate verify history / commandmate verify show <run-id>
+  Read past verification runs. Both are read-only and never start a run, so
+  neither returns 20 or 21 — those mean "this tree failed verification", and a
+  question about history is not a verdict on the current tree.
+
+  commandmate verify history                          # every worktree, newest 50
+  commandmate verify history --worktree <id>          # one worktree
+  commandmate verify history --days 14 --limit 100    # window and page size
+  commandmate verify history --json                   # JSON array on stdout
+  commandmate verify show 42                          # gates + log tails
+  commandmate verify show 42 --json
+
+  history options:
+    --worktree <id>       Restrict to one worktree (default: all)
+    --days <n>            Look back n days, 1..90 (default: no lower bound)
+    --limit <n>           Maximum runs, 1..500 (default: 50)
+
+  One run per line. The leading #<run-id> is what "verify show" takes:
+    #42  2026-07-31T04:12:00.000Z  myrepo-feature-101  manual  failed  failed: unit,build
+
+  The listing carries gate verdicts but NOT gate log bodies — logTail is absent
+  from the JSON, not null. Use "verify show <run-id>" when you need the log.
+
+  Exit codes:
+    0   - Read succeeded (also when nothing matched: stderr note, or [] in JSON)
+    2   - Bad argument (--days/--limit out of range, bad worktree or run id)
+    99  - No such run (404), or an unexpected failure
+
 ### commandmate respond <worktree-id> "<answer>"
   Respond to an agent's prompt.
 
