@@ -337,6 +337,12 @@ Error: A verification run is already in progress for 'myrepo-feature-101' (run 4
 
 skipped を含む run は `passed` ではなく `error`（exit 99）になります。「検証しなかった」が「検証して問題なかった」として読まれないようにするためです。
 
+### 契約ファイルは作業証跡に数えない
+
+`.commandmate/tasks/` 配下は work-evidence（commits / uncommitted）からも scope の変更集合からも除外されます（Issue #1580）。そのため契約を worktree に**未コミットのまま置いてすぐ `send` してよく**、事前に base ブランチへマージする必要はありません。契約だけが置かれた worktree は `commits=0 uncommitted=0` のまま exit 21（作業証跡ゼロ）になります。
+
+`.commandmate/verify.yaml` は**除外されません**。契約本体は送信時にスナップショットされるので後編集が判定に影響しない一方、verify.yaml のゲート定義は毎ラン読み直されるため、エージェントが自分のゲートを弱めた場合に scope の `deny` で検出できる状態を残しています。
+
 ---
 
 ## commandmate task
@@ -425,6 +431,8 @@ commandmate task show "$TASK"                      # succeeded / failed / not_st
 ```
 
 `verify --gates` を明示した場合は契約より明示指定が優先されます。
+
+契約ファイルは検証ゲートの変更集合から除外されるため、worktree に置いたまま（未コミットでも）`send` できます。詳細は [契約ファイルは作業証跡に数えない](#契約ファイルは作業証跡に数えない)。
 
 ---
 
