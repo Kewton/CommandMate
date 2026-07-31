@@ -9,6 +9,16 @@ Use a sample repository with two bugs left in on purpose to work through the cor
 
 This document follows the flow in the sample repository's README, and adds the **CommandMate screen operations** around it (registering your forked repository, installing a Skill, External Apps, and parallel worktrees).
 
+Each step carries a GIF of that operation actually running.
+
+> **How the GIFs were recorded**
+> Every take runs in an isolated environment (a throwaway seed repository, a dedicated port, a
+> dedicated database), so no private repository name, personal path, or source code appears.
+> No real LLM is involved: a "fake agent" replays captured terminal output inside a tmux session.
+> **Only the LLM is substituted** — the screens, status detection, and response polling are all
+> the production code paths.
+> Each GIF is captioned with **only what is actually on screen**.
+
 ---
 
 ## Prerequisites
@@ -28,6 +38,7 @@ This document follows the flow in the sample repository's README, and adds the *
 | 1.5 | Install a Skill from the Catalog in the UI → restart the session → use it |
 | 2 | External Apps — proxy your dev server through CommandMate |
 | 3 | Run an agent CLI in a session, from any browser |
+| 3 | Spot a confirmation prompt and answer it from your phone |
 | 4 | One session per worktree, running in parallel |
 
 ---
@@ -57,6 +68,12 @@ https://github.com/<you>/commandmate-tutorial.git
 ```
 
 It lands inside CommandMate's managed root (`CM_ROOT_DIR`) and shows up in the list as a session. Origin is the fork URL you pasted, so everything from here on acts against your own fork.
+
+![Adding a repository until it appears in the repository list](../../images/tutorial/cm-t1-add-repository.en.gif)
+
+**What is on screen**: clicking **Add Repository** on the **Repositories** screen, typing a path, waiting for the "Git repository detected" hint, running **Scan & Add**, and the new row appearing in the repository list.
+
+> **Where the recording differs from the steps**: the steps above import from the **Clone URL** tab, but this recording adds a local repository from the **Local Path** tab, because the recording environment has no network access (a clone URL is only accepted as `https://`, `git@`, or `ssh://` — a local path is not, see `src/lib/url-normalizer.ts`). It is a different tab of the same dialog, and the outcome — a registered repository in the list — is the same.
 
 > **Note**: CommandMate refuses to register paths outside the managed root. The worktree you create in Step 4 has to live under that root too.
 
@@ -154,9 +171,35 @@ Open the session and ask your agent:
 
 > `npm test` fails. Fix the first failure only, then run the tests again.
 
+![Sending an instruction and the agent starting work](../../images/tutorial/cm-t2-send-and-generate.en.gif)
+
+**What is on screen**: typing the instruction into the session's composer, sending it, and the agent starting to generate.
+
 The fix is one character in `src/greet.js`. The point is not the difficulty — it is **watching the agent run the tests, change the code, and re-run them from your browser (or your phone)**.
 
 Leave the second failure (`shout()` is not implemented) alone for now: Step 4 uses it.
+
+### When it stops and waits for your approval
+
+An agent may **stop and ask for confirmation** before editing a file or running a command. If you do not notice that it is stopped, it looks like nothing is happening — so find out where to answer before it happens.
+
+- In the list, that session's status changes to **Waiting for response** (the **Overview** screen counts it under **waiting**)
+- **Desktop**: answer from the session screen
+- **Phone-width**: a **sheet** slides up from the bottom, and you answer there
+
+![Answering a confirmation prompt from a phone](../../images/tutorial/cm-t3-approve-prompt.en.gif)
+
+**What is on screen**: sending the task on desktop, then a phone-width screen where the prompt sheet opens, the option is answered, and the session moves on.
+
+There is also **Auto Yes**, which answers every confirmation for you — but it lets things through without you reading what they are, so this tutorial leaves it off ([Web App Guide](./webapp-guide.md#auto-yes-mode)).
+
+### Review the diff once it finishes
+
+When the agent finishes generating, the status in the list settles back. To see what changed, open the **Git** pane on the session screen.
+
+![Completion being detected and the diff reviewed in the Git pane](../../images/tutorial/cm-t5-review-changes.en.gif)
+
+**What is on screen**: the finished session's status settling back in the list, and the **Git** pane on the session screen opening the diff of an uncommitted change.
 
 ### The page only changes after a restart
 
@@ -203,6 +246,10 @@ The `worktree-new` skill is verified on Claude Code (`.claude/skills/`) and Code
 2. Click **Sync All**
 
 The new worktree appears as a second session. Ask *that* session to implement `shout()` — the second failing test you left alone — while the first session stays where it is.
+
+![Syncing a worktree in and one session per branch](../../images/tutorial/cm-t4-parallel-worktrees.en.gif)
+
+**What is on screen**: running **Sync All** on the **Repositories** screen to pick up a worktree created outside CommandMate, and the list showing one session per branch.
 
 **Two branches, two agents, one browser.**
 
