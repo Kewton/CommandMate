@@ -42,6 +42,7 @@ Issue単位での具体的な作業計画を立案し、実装タスクの詳細
 3. **依存関係図** - Mermaid形式の依存関係
 4. **品質チェック項目** - 必須チェック一覧
 5. **成果物チェックリスト** - 完了条件
+6. **実行契約** - 達成条件・変更可能範囲・検証ゲートの宣言（仕様: [task-contract.md](../design/task-contract.md)）
 
 ### 出力例
 
@@ -60,7 +61,8 @@ Issue単位での具体的な作業計画を立案し、実装タスクの詳細
 
 ### 出力先
 
-`dev-reports/issue/{issue_number}/work-plan.md`
+- 作業計画: `dev-reports/issue/{issue_number}/work-plan.md`
+- 実行契約: `.commandmate/tasks/issue-{issue_number}.yaml`（Git 追跡対象。PR レビューの対象に含める）
 
 ### ベストプラクティス
 
