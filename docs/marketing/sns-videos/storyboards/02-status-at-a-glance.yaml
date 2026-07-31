@@ -1,0 +1,43 @@
+version: 1
+duration: 20
+output: cm-02-status-at-a-glance
+scenes:
+  - id: title
+    type: card
+    duration: 3
+    telop:
+      ja: "どのエージェントが止まってる？"
+      en: "Which agent is stuck right now?"
+  - id: sessions-overview
+    type: record
+    duration: 5
+    viewport: pc
+    telop:
+      ja: "実行中と待機中が一目で"
+      en: "Running and waiting, at a glance"
+  - id: send-and-generate
+    type: record
+    duration: 4
+    viewport: pc
+    telop:
+      ja: "状態は色で分かる"
+      en: "Status you can read by color"
+  - id: respond-from-mobile
+    type: record
+    duration: 3
+    viewport: mobile
+    telop:
+      ja: "待機中はすぐ気づける"
+      en: "Spot a waiting agent instantly"
+  - id: complete
+    type: record
+    duration: 3
+    telop:
+      ja: "確認は一覧だけでいい"
+      en: "One dashboard, every session"
+  - id: outro
+    type: card
+    duration: 2
+    telop:
+      ja: "github.com/Kewton/CommandMate"
+      en: "github.com/Kewton/CommandMate"

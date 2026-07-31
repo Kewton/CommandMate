@@ -1,0 +1,43 @@
+version: 1
+duration: 20
+output: cm-04-multi-agent
+scenes:
+  - id: title
+    type: card
+    duration: 3
+    telop:
+      ja: "エージェントは1つに絞らない"
+      en: "Do not commit to just one agent"
+  - id: sessions-overview
+    type: record
+    duration: 3
+    viewport: pc
+    telop:
+      ja: "タスクごとに相棒を選ぶ"
+      en: "Pick the right agent per task"
+  - id: send-and-generate
+    type: record
+    duration: 5
+    viewport: pc
+    telop:
+      ja: "Claude Code をそのまま"
+      en: "Run Claude Code as-is"
+  - id: respond-from-mobile
+    type: record
+    duration: 5
+    viewport: mobile
+    telop:
+      ja: "タブで切り替えるだけ"
+      en: "Switching is one tab away"
+  - id: complete
+    type: record
+    duration: 2
+    telop:
+      ja: "1つの画面に集約"
+      en: "All of them, one screen"
+  - id: outro
+    type: card
+    duration: 2
+    telop:
+      ja: "github.com/Kewton/CommandMate"
+      en: "github.com/Kewton/CommandMate"

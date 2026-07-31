@@ -1,0 +1,43 @@
+version: 1
+duration: 20
+output: cm-07-completion-detected
+scenes:
+  - id: title
+    type: card
+    duration: 3
+    telop:
+      ja: "終わったか、見に行くのをやめる"
+      en: "Stop checking whether it finished"
+  - id: sessions-overview
+    type: record
+    duration: 4
+    viewport: pc
+    telop:
+      ja: "完了は自動で検知する"
+      en: "Completion is detected for you"
+  - id: send-and-generate
+    type: record
+    duration: 4
+    viewport: pc
+    telop:
+      ja: "実行中は色が変わる"
+      en: "Running state shows in color"
+  - id: respond-from-mobile
+    type: record
+    duration: 3
+    viewport: mobile
+    telop:
+      ja: "待機も完了も自動判定"
+      en: "Waiting and done, detected"
+  - id: complete
+    type: record
+    duration: 4
+    telop:
+      ja: "終わると一覧に戻る"
+      en: "Back to ready, automatically"
+  - id: outro
+    type: card
+    duration: 2
+    telop:
+      ja: "github.com/Kewton/CommandMate"
+      en: "github.com/Kewton/CommandMate"
