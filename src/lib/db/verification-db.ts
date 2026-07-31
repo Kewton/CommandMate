@@ -98,6 +98,26 @@ export interface VerificationRunWithGates extends VerificationRun {
   gates: VerificationGateResult[];
 }
 
+/**
+ * A gate verdict without its log body (Issue #1593).
+ *
+ * `logTail` is absent from the type *and* from the SELECT that builds it, so a
+ * history listing cannot leak kilobytes of build output per gate no matter what
+ * a caller asks for. Reach for {@link getVerificationRun} when the log is what
+ * you actually want.
+ */
+export interface VerificationGateSummary {
+  gateId: string;
+  status: VerificationGateStatus;
+  exitCode: number | null;
+  durationMs: number | null;
+}
+
+/** A run with per-gate verdicts but no log bodies, for history listings. */
+export interface VerificationRunWithGateSummaries extends VerificationRun {
+  gates: VerificationGateSummary[];
+}
+
 /** Fields needed to open a run. */
 export interface CreateVerificationRunInput {
   worktreeId: string;
@@ -369,4 +389,108 @@ export function listVerificationRuns(
     .all(worktreeId, limit) as VerificationRunRow[];
 
   return rows.map(mapRunRow);
+}
+
+/** Default page size for {@link listVerificationRunsForPeriod}. */
+export const DEFAULT_RUN_HISTORY_LIMIT = 50;
+
+/** Largest page {@link listVerificationRunsForPeriod} will return. */
+export const MAX_RUN_HISTORY_LIMIT = 500;
+
+/** Longest window {@link listVerificationRunsForPeriod} will look back over. */
+export const MAX_RUN_HISTORY_DAYS = 90;
+
+const MS_PER_DAY = 86_400_000;
+
+/** Options accepted by {@link listVerificationRunsForPeriod}. */
+export interface ListVerificationRunsForPeriodOptions {
+  /** Restrict to one worktree. Omitted means every worktree. */
+  worktreeId?: string;
+  /** Look back this many days. Omitted means no lower bound on `started_at`. */
+  days?: number;
+  /** Page size; clamped to 1..{@link MAX_RUN_HISTORY_LIMIT}. */
+  limit?: number;
+}
+
+/** Clamp to an integer inside [min, max]; non-finite input falls back to `fallback`. */
+function clampInt(value: number | undefined, fallback: number, min: number, max: number): number {
+  if (value === undefined || !Number.isFinite(value)) return fallback;
+  return Math.min(Math.max(Math.trunc(value), min), max);
+}
+
+/**
+ * Recent runs across worktrees, newest first, each with its gate verdicts but
+ * no log bodies (Issue #1593).
+ *
+ * `worktreeId` is optional because the advisor that consumes this (#1594) looks
+ * at a repository's trend, not one worktree's. Ordering follows the same
+ * `started_at DESC, id DESC` contract as {@link listVerificationRuns} so both
+ * feeds agree about what "newest" means.
+ *
+ * `days` and `limit` are clamped rather than rejected: this is a read-only feed
+ * and a caller asking for 10000 runs wants as many as it can have, not an
+ * exception. API routes validate before calling so a user typo still 400s.
+ */
+export function listVerificationRunsForPeriod(
+  db: Database.Database,
+  opts: ListVerificationRunsForPeriodOptions = {}
+): VerificationRunWithGateSummaries[] {
+  const limit = clampInt(opts.limit, DEFAULT_RUN_HISTORY_LIMIT, 1, MAX_RUN_HISTORY_LIMIT);
+
+  const conditions: string[] = [];
+  const params: Array<string | number> = [];
+
+  if (opts.worktreeId !== undefined) {
+    conditions.push('worktree_id = ?');
+    params.push(opts.worktreeId);
+  }
+
+  if (opts.days !== undefined) {
+    const days = clampInt(opts.days, MAX_RUN_HISTORY_DAYS, 1, MAX_RUN_HISTORY_DAYS);
+    conditions.push('started_at >= ?');
+    params.push(Date.now() - days * MS_PER_DAY);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const runRows = db
+    .prepare(`
+      SELECT ${RUN_COLUMNS} FROM verification_runs
+      ${where}
+      ORDER BY started_at DESC, id DESC
+      LIMIT ?
+    `)
+    .all(...params, limit) as VerificationRunRow[];
+
+  if (runRows.length === 0) return [];
+
+  const placeholders = runRows.map(() => '?').join(', ');
+  const gateRows = db
+    .prepare(`
+      SELECT run_id, gate_id, status, exit_code, duration_ms
+      FROM verification_gate_results
+      WHERE run_id IN (${placeholders})
+      ORDER BY started_at ASC, id ASC
+    `)
+    .all(...runRows.map((row) => row.id)) as Array<{
+    run_id: number;
+    gate_id: string;
+    status: string;
+    exit_code: number | null;
+    duration_ms: number | null;
+  }>;
+
+  const byRun = new Map<number, VerificationGateSummary[]>();
+  for (const row of gateRows) {
+    const summary: VerificationGateSummary = {
+      gateId: row.gate_id,
+      status: row.status as VerificationGateStatus,
+      exitCode: row.exit_code,
+      durationMs: row.duration_ms,
+    };
+    const bucket = byRun.get(row.run_id);
+    if (bucket) bucket.push(summary);
+    else byRun.set(row.run_id, [summary]);
+  }
+
+  return runRows.map((row) => ({ ...mapRunRow(row), gates: byRun.get(row.id) ?? [] }));
 }

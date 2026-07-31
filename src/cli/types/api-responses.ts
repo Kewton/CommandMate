@@ -524,6 +524,37 @@ export interface VerifyRunResponse {
   run: VerificationRunView;
 }
 
+/**
+ * Mirrors: src/lib/db/verification-db.ts VerificationGateSummary (Issue #1593).
+ * No `logTail` — the history listing does not carry log bodies, and declaring
+ * one here would let `history` code read a field the server never sends.
+ */
+export interface VerificationGateSummaryView {
+  gateId: string;
+  status: VerificationGateStatus;
+  exitCode: number | null;
+  durationMs: number | null;
+}
+
+/** Mirrors: src/lib/db/verification-db.ts VerificationRunWithGateSummaries. */
+export interface VerificationRunSummaryView {
+  id: number;
+  worktreeId: string;
+  instanceId: string | null;
+  taskId: string | null;
+  trigger: string;
+  status: VerificationRunStatus;
+  baseRef: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  gates: VerificationGateSummaryView[];
+}
+
+/** Mirrors: src/app/api/verification/runs/route.ts GET response. */
+export interface VerificationRunHistoryResponse {
+  runs: VerificationRunSummaryView[];
+}
+
 // =============================================================================
 // Task contracts (Issue #1545)
 // =============================================================================
