@@ -19,12 +19,19 @@ import {
   DEFAULT_WORKTREE_ID,
   MOBILE_VIEWPORT,
   SCENES,
+  UNSYNCED_WORKTREE_ID,
   localeCookie,
   parseRecordArgs,
   parseStateFile,
+  readRepositoryPaths,
+  readUnstagedPaths,
+  readWorktreeIds,
+  secondSeedRepository,
   submitButtonLabel,
   viewportFor,
+  waitForJson,
   waitForWorktree,
+  type DemoState,
   type WaitDeps,
 } from '../../../../.claude/skills/demo-video/scripts/record-scenes';
 
@@ -104,13 +111,43 @@ describe('parseRecordArgs', () => {
 });
 
 describe('SCENES', () => {
-  it('exposes the four storyboard scenes, in storyboard order', () => {
+  it('exposes the scene library storyboards draw from', () => {
+    // Since #1575 a storyboard is a subset of this list rather than a mirror of
+    // it, so the order here is the order scenes were added, not a running order.
     expect(SCENES.map((scene) => scene.id)).toEqual([
       'sessions-overview',
       'send-and-generate',
       'respond-from-mobile',
+      'add-repository',
+      'sync-worktrees',
+      'review-diff',
       'complete',
     ]);
+  });
+
+  it('registers a repository by path, never by clone URL', () => {
+    // The isolated environment must not reach the network:
+    // POST /api/repositories/clone walks out to a real git host, while the
+    // path route resolves inside the throwaway seed. Filming the clone tab
+    // would make the recording depend on GitHub being up.
+    const source = fs.readFileSync(
+      path.resolve(__dirname, '../../../../.claude/skills/demo-video/scripts/record-scenes.ts'),
+      'utf8',
+    );
+    // Comment lines are stripped: the scene explains *why* it avoids the clone
+    // route, and that prose must not read as use of it.
+    const code = source
+      .split('\n')
+      .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+      .join('\n');
+    const CLONE_USE = /repositories\/clone|cloneUrl|trigger-url/;
+
+    expect(code).toContain('add-repository-button');
+    expect(code).toContain('repository-path-input');
+    expect(code).not.toMatch(CLONE_USE);
+    // A comment-stripping bug would make the assertion above pass on anything,
+    // so prove the pattern still fires on code that does reach the clone route.
+    expect('await fetch(`${baseUrl}/api/repositories/clone`)').toMatch(CLONE_USE);
   });
 
   it('gives every scene a title, a viewport and a runner', () => {
@@ -258,5 +295,134 @@ describe('waitForWorktree', () => {
     await expect(
       waitForWorktree('http://x', 'wt', (w) => w.isProcessing === true, 'generating', 0, d, 250),
     ).resolves.toMatchObject({ id: 'wt' });
+  });
+});
+
+describe('the API projections the #1575 scenes synchronise on', () => {
+  // Each of these endpoints answers with an envelope, not a bare array. A
+  // reader that guessed wrong would return [] forever, and the scene would only
+  // discover it at the timeout — minutes into a take.
+  it('reads paths out of the /api/repositories envelope', () => {
+    expect(
+      readRepositoryPaths({ success: true, repositories: [{ path: '/seed/a' }, { path: '/seed/b' }] }),
+    ).toEqual(['/seed/a', '/seed/b']);
+    expect(readRepositoryPaths({})).toEqual([]);
+  });
+
+  it('reads ids out of the /api/worktrees envelope', () => {
+    expect(readWorktreeIds({ worktrees: [{ id: 'wt-a' }, { id: 'wt-b' }], repositories: [] })).toEqual([
+      'wt-a',
+      'wt-b',
+    ]);
+    expect(readWorktreeIds({})).toEqual([]);
+  });
+
+  it('reads only the unstaged bucket of /git/staged', () => {
+    // review-diff clicks a row inside `git-unstaged-list`. Keying off
+    // /git/status's `isDirty` instead would also be true when nothing but
+    // untracked files exist, and that list would be empty when the take rolls.
+    expect(
+      readUnstagedPaths({
+        staged: [{ path: 'already-staged.ts' }],
+        unstaged: [{ path: 'src/theme.ts' }],
+        untracked: [{ path: 'brand-new.ts' }],
+      }),
+    ).toEqual(['src/theme.ts']);
+    expect(readUnstagedPaths({})).toEqual([]);
+  });
+});
+
+describe('waitForJson', () => {
+  function deps(pages: unknown[]): WaitDeps {
+    const clock = { value: 0 };
+    let call = 0;
+    return {
+      fetchJson: vi.fn(async () => pages[Math.min(call++, pages.length - 1)]),
+      sleep: vi.fn(async (ms: number) => {
+        clock.value += ms;
+      }),
+      now: () => clock.value,
+    };
+  }
+
+  it('polls the given url until the projection satisfies the predicate', async () => {
+    const d = deps([{ worktrees: [] }, { worktrees: [{ id: 'wt-new' }] }]);
+    await expect(
+      waitForJson(
+        'http://x/api/worktrees',
+        readWorktreeIds,
+        (ids) => ids.includes('wt-new'),
+        'the new worktree',
+        10_000,
+        d,
+        100,
+      ),
+    ).resolves.toEqual(['wt-new']);
+    expect(d.fetchJson).toHaveBeenCalledWith('http://x/api/worktrees');
+  });
+
+  it('supports an absence predicate, which is how the scenes assert a precondition', () => {
+    // add-repository and sync-worktrees both film something *appearing*, so
+    // their prepare step has to be able to require that it is not there yet.
+    const d = deps([{ repositories: [{ path: '/seed/app' }] }]);
+    return expect(
+      waitForJson(
+        'http://x/api/repositories',
+        readRepositoryPaths,
+        (paths) => !paths.includes('/seed/docs'),
+        '/seed/docs to still be unregistered',
+        0,
+        d,
+        100,
+      ),
+    ).resolves.toEqual(['/seed/app']);
+  });
+
+  it('names the endpoint state it last saw when the deadline passes', async () => {
+    const d = deps([{ unstaged: [] }]);
+    await expect(
+      waitForJson(
+        'http://x/git/staged',
+        readUnstagedPaths,
+        (paths) => paths.length > 0,
+        'an unstaged change',
+        1000,
+        d,
+        250,
+      ),
+    ).rejects.toThrow(/timed out after 1000ms waiting for an unstaged change; last seen: \[\]/);
+  });
+});
+
+describe('secondSeedRepository', () => {
+  const state = (extra: Record<string, string>): DemoState =>
+    ({ baseUrl: 'http://x', videoDir: '/v', ...extra }) as DemoState;
+
+  it('returns the unregistered repository env-up.sh recorded', () => {
+    expect(secondSeedRepository(state({ CM_DEMO_SEED_REPO_2: '/seed/cmdemo-docs' }))).toBe(
+      '/seed/cmdemo-docs',
+    );
+  });
+
+  it('fails before the browser opens when env-up.sh recorded no second repository', () => {
+    // Otherwise the scene types an empty path, the submit button stays
+    // disabled, and the take dies at a Playwright timeout that says nothing
+    // about the real cause.
+    expect(() => secondSeedRepository(state({}))).toThrow(/CM_DEMO_SEED_REPO_2/);
+  });
+});
+
+describe('the worktree the boot sync deliberately misses', () => {
+  it('matches the branch env-up.sh creates after the server is ready', () => {
+    // generateWorktreeId slugs `<repo>` + `<branch>`; if env-up.sh's branch
+    // name and this constant drift apart, sync-worktrees waits for an id that
+    // never arrives.
+    expect(UNSYNCED_WORKTREE_ID).toBe('cmdemo-app-feature-demo-api-cache');
+    const envUp = fs.readFileSync(
+      path.resolve(__dirname, '../../../../.claude/skills/demo-video/scripts/env-up.sh'),
+      'utf8',
+    );
+    expect(envUp).toContain('worktree add -q -b feature/demo-api-cache');
+    expect(envUp).toContain('CM_DEMO_SEED_REPO_2=$SEED_REPO_2');
   });
 });

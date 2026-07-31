@@ -346,10 +346,17 @@ export interface ValidationResult {
 }
 
 /**
- * @param implementedSceneIds ids `record-scenes.ts` can actually film. The
- * correspondence is checked in both directions: an unimplemented id would fail
- * at record time, and an implemented-but-unused id would silently drop footage
- * the storyboard never places.
+ * @param implementedSceneIds ids `record-scenes.ts` can actually film. A
+ * storyboard must be a *subset* of them: an id with no implementation still
+ * fails, because the recorder would have nothing to run.
+ *
+ * The reverse direction is deliberately not an error. It used to be, to stop a
+ * scene being filmed and then silently dropped — but that made one storyboard
+ * have to place every implemented scene, which caps the scene library at
+ * whatever fits the shortest cut. `demo-video.sh` now derives its `--scene`
+ * arguments from the storyboard, so footage the storyboard does not place is
+ * never shot in the first place. The property is enforced by construction
+ * instead of by assertion.
  */
 export function validateStoryboard(
   raw: YamlValue,
@@ -405,15 +412,11 @@ export function validateStoryboard(
   const recorded = scenes.filter((scene) => scene.type === 'record').map((scene) => scene.id);
   const implemented = [...implementedSceneIds];
   const missing = recorded.filter((id) => !implemented.includes(id));
-  const unused = implemented.filter((id) => !recorded.includes(id));
   if (missing.length > 0) {
     errors.push(
       `record scene(s) with no implementation in record-scenes.ts: ${missing.join(', ')}` +
         ` (implemented: ${implemented.join(', ') || '<none>'})`,
     );
-  }
-  if (unused.length > 0) {
-    errors.push(`scene(s) implemented in record-scenes.ts but absent from the storyboard: ${unused.join(', ')}`);
   }
 
   if (errors.length > 0) return { storyboard: null, errors };

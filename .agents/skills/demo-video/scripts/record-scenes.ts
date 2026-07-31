@@ -18,7 +18,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import type { BrowserContext, Page } from '@playwright/test';
+import type { BrowserContext, Locator, Page } from '@playwright/test';
 
 export const LOCALES = ['ja', 'en'] as const;
 export type Locale = (typeof LOCALES)[number];
@@ -60,7 +60,23 @@ export const DEFAULT_VIEWPORT = { width: 1280, height: 800 };
 export const MOBILE_VIEWPORT = { width: 390, height: 844 };
 /** `cmdemo-app` + `feature/demo-dark-mode`, slugged by generateWorktreeId(). */
 export const DEFAULT_WORKTREE_ID = 'cmdemo-app-feature-demo-dark-mode';
+/**
+ * `cmdemo-app` + `feature/demo-api-cache`, the worktree env-up.sh adds *after*
+ * the server has booted. The boot sync in server.ts has already run by then, so
+ * this id is on disk and missing from the database until a sync is triggered —
+ * the precondition the `sync-worktrees` scene films.
+ */
+export const UNSYNCED_WORKTREE_ID = 'cmdemo-app-feature-demo-api-cache';
 export const DEFAULT_MESSAGE = 'Add a dark mode toggle to the header';
+
+/** The unregistered repository env-up.sh seeds for the `add-repository` scene. */
+export function secondSeedRepository(state: DemoState): string {
+  const target = state.CM_DEMO_SEED_REPO_2;
+  if (!target) {
+    throw new Error('state file has no CM_DEMO_SEED_REPO_2 — re-run env-up.sh');
+  }
+  return target;
+}
 
 function defaultStatePath(): string {
   const home = process.env.CM_DEMO_HOME ?? path.join(os.homedir(), '.commandmate-demo');
@@ -180,7 +196,7 @@ interface WorktreeSummary {
 }
 
 export interface WaitDeps {
-  fetchJson: (url: string) => Promise<{ worktrees?: WorktreeSummary[] }>;
+  fetchJson: (url: string) => Promise<unknown>;
   sleep: (ms: number) => Promise<void>;
   now: () => number;
 }
@@ -189,11 +205,65 @@ const defaultWaitDeps: WaitDeps = {
   fetchJson: async (url) => {
     const response = await fetch(url);
     if (!response.ok) throw new Error(`GET ${url} -> ${response.status}`);
-    return (await response.json()) as { worktrees?: WorktreeSummary[] };
+    return (await response.json()) as unknown;
   },
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   now: () => Date.now(),
 };
+
+/**
+ * Poll a JSON endpoint until `read`'s projection satisfies `predicate`.
+ *
+ * `read` is separate from `predicate` so the timeout message can print the
+ * projection — "last seen: []" tells the operator which endpoint stayed empty,
+ * where a bare boolean would not.
+ */
+export async function waitForJson<T>(
+  url: string,
+  read: (payload: unknown) => T,
+  predicate: (value: T) => boolean,
+  what: string,
+  timeoutMs: number,
+  deps: WaitDeps = defaultWaitDeps,
+  pollMs = 500,
+): Promise<T> {
+  const deadline = deps.now() + timeoutMs;
+  let seen: T | undefined;
+  for (;;) {
+    seen = read(await deps.fetchJson(url));
+    if (predicate(seen)) return seen;
+    if (deps.now() >= deadline) {
+      throw new Error(
+        `timed out after ${timeoutMs}ms waiting for ${what}; last seen: ${JSON.stringify(seen)}`,
+      );
+    }
+    await deps.sleep(pollMs);
+  }
+}
+
+/** `GET /api/repositories` -> `{ repositories: [{ path }] }`. */
+export function readRepositoryPaths(payload: unknown): string[] {
+  const list = (payload as { repositories?: { path?: string }[] }).repositories ?? [];
+  return list.map((repository) => repository.path ?? '');
+}
+
+/** `GET /api/worktrees` -> `{ worktrees: [{ id }] }`. */
+export function readWorktreeIds(payload: unknown): string[] {
+  const list = (payload as { worktrees?: WorktreeSummary[] }).worktrees ?? [];
+  return list.map((worktree) => worktree.id);
+}
+
+/**
+ * `GET /api/worktrees/<id>/git/staged` -> `{ staged, unstaged, untracked }`.
+ *
+ * The `unstaged` bucket specifically, not `git/status`'s `isDirty`: the scene
+ * clicks a row in `git-unstaged-list`, and `isDirty` is also true when only
+ * untracked files exist, which would leave that list empty mid-take.
+ */
+export function readUnstagedPaths(payload: unknown): string[] {
+  const list = (payload as { unstaged?: { path?: string }[] }).unstaged ?? [];
+  return list.map((file) => file.path ?? '');
+}
 
 /**
  * Poll `GET /api/worktrees` until one worktree satisfies `predicate`.
@@ -215,7 +285,9 @@ export async function waitForWorktree(
   const deadline = deps.now() + timeoutMs;
   let seen: WorktreeSummary | undefined;
   for (;;) {
-    const payload = await deps.fetchJson(`${baseUrl}/api/worktrees`);
+    const payload = (await deps.fetchJson(`${baseUrl}/api/worktrees`)) as {
+      worktrees?: WorktreeSummary[];
+    };
     seen = (payload.worktrees ?? []).find((worktree) => worktree.id === worktreeId);
     if (seen && predicate(seen)) return seen;
     if (deps.now() >= deadline) {
@@ -234,11 +306,14 @@ export interface SceneContext {
   page: Page;
   baseUrl: string;
   options: RecordOptions;
+  /** Everything env-up.sh recorded, including the seed paths it created. */
+  state: DemoState;
 }
 
 export interface PrepareContext {
   baseUrl: string;
   options: RecordOptions;
+  state: DemoState;
 }
 
 export interface Scene {
@@ -316,6 +391,44 @@ export async function gotoLocalized(page: Page, url: string, locale: Locale): Pr
     throw new Error(
       `refusing to record ${url}: requested locale '${locale}' but the app rendered <html lang="${lang}">`,
     );
+  }
+}
+
+/**
+ * Click a control until it actually takes effect.
+ *
+ * These pages are server-rendered, so a button is in the DOM — and satisfies
+ * every one of Playwright's actionability checks: visible, stable, enabled,
+ * hit-testable — before React has attached its `onClick`. A click that lands in
+ * that window is silently swallowed, and the failure surfaces much later as a
+ * timeout on whatever the click was supposed to produce, naming the wrong
+ * element. Waiting a fixed time before clicking would only move the race.
+ *
+ * `isDone` is checked *before* the first click as well, so a control that
+ * toggles — the activity bar closes the pane when its already-active icon is
+ * clicked again — is never clicked one time too many.
+ */
+export async function clickUntilEffective(
+  trigger: Locator,
+  isDone: () => Promise<boolean>,
+  what: string,
+  timeoutMs: number,
+  attemptMs = 4000,
+  pollMs = 250,
+): Promise<void> {
+  const page = trigger.page();
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await isDone()) return;
+    await trigger.click();
+    const attemptUntil = Date.now() + attemptMs;
+    while (Date.now() < attemptUntil) {
+      await page.waitForTimeout(pollMs);
+      if (await isDone()) return;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`clicked ${what} for ${timeoutMs}ms but it never took effect`);
+    }
   }
 }
 
@@ -414,6 +527,133 @@ export const SCENES: Scene[] = [
     },
   },
   {
+    id: 'add-repository',
+    title: 'Register a repository by local path',
+    viewport: 'pc',
+    // Path registration rather than clone: `POST /api/repositories/clone` walks
+    // out to a real git host, and the isolated environment is not allowed to
+    // reach the network. The path route stays inside the throwaway seed.
+    //
+    // The precondition is the repository still being *absent*, which env-up.sh
+    // guarantees by keeping it out of WORKTREE_REPOS — the only source the boot
+    // sync in server.ts scans.
+    prepare: async ({ baseUrl, options, state }) => {
+      const target = secondSeedRepository(state);
+      await waitForJson(
+        `${baseUrl}/api/repositories`,
+        readRepositoryPaths,
+        (paths) => !paths.includes(target),
+        `${target} to still be unregistered`,
+        options.timeoutMs,
+      );
+    },
+    run: async ({ page, baseUrl, options, state }) => {
+      const target = secondSeedRepository(state);
+      await gotoLocalized(page, `${baseUrl}/repositories`, options.locale);
+      const input = page.getByTestId('repository-path-input');
+      await clickUntilEffective(
+        page.getByTestId('add-repository-button'),
+        () => input.isVisible(),
+        'the add-repository button',
+        options.timeoutMs,
+      );
+      await input.click();
+      await input.pressSequentially(target, { delay: 25 });
+      // Path validation is debounced by 400ms (PATH_VALIDATION_DEBOUNCE_MS);
+      // letting it land puts the "git repository detected" hint on screen
+      // before the submit, which is the reassurance the shot is about.
+      await page.waitForTimeout(1200);
+      await page.getByTestId('repository-scan-submit').click();
+
+      // Server-side truth first, then the row it produces. Registration is what
+      // the scene claims happened, so the footage must not outrun it.
+      await waitForJson(
+        `${baseUrl}/api/repositories`,
+        readRepositoryPaths,
+        (paths) => paths.includes(target),
+        `${target} to appear in the repository list`,
+        options.timeoutMs,
+      );
+      await page
+        .locator('[data-testid^="repository-row-"]')
+        .filter({ hasText: path.basename(target) })
+        .first()
+        .waitFor({ state: 'visible' });
+      await page.waitForTimeout(2000);
+    },
+  },
+  {
+    id: 'sync-worktrees',
+    title: 'Pick up a worktree that was created outside CommandMate',
+    viewport: 'pc',
+    // CommandMate never creates worktrees — src/lib/git/worktrees.ts only
+    // scans and registers them, and docs/user-guide/tutorial.md says so in as
+    // many words. env-up.sh therefore makes this one with plain git, and does
+    // it *after* the server's boot sync, so it is on disk and absent from the
+    // database. That gap is the whole subject of the scene.
+    prepare: ({ baseUrl, options }) =>
+      waitForJson(
+        `${baseUrl}/api/worktrees`,
+        readWorktreeIds,
+        (ids) => ids.includes(options.worktreeId) && !ids.includes(UNSYNCED_WORKTREE_ID),
+        `${UNSYNCED_WORKTREE_ID} to be on disk but not yet registered`,
+        options.timeoutMs,
+      ).then(() => undefined),
+    run: async ({ page, baseUrl, options }) => {
+      await gotoLocalized(page, `${baseUrl}/repositories`, options.locale);
+      // The outcome is read from the server, not from the button's own spinner:
+      // the footage must not claim a registration the database never got.
+      await clickUntilEffective(
+        page.getByTestId('sync-all-button'),
+        async () =>
+          readWorktreeIds(await defaultWaitDeps.fetchJson(`${baseUrl}/api/worktrees`)).includes(
+            UNSYNCED_WORKTREE_ID,
+          ),
+        'the sync-all button',
+        options.timeoutMs,
+      );
+      await page.waitForTimeout(2500);
+    },
+  },
+  {
+    id: 'review-diff',
+    title: 'Read the diff of an uncommitted change in the Git pane',
+    viewport: 'pc',
+    // `git/staged` rather than `git/diff`: the latter is commit-scoped and
+    // rejects anything that is not a 7-40 character hash, so it cannot speak
+    // about working-tree changes at all. The pane reads `git/staged` too, so
+    // this waits on exactly the list the take is about to click.
+    prepare: ({ baseUrl, options }) =>
+      waitForJson(
+        `${baseUrl}/api/worktrees/${options.worktreeId}/git/staged`,
+        readUnstagedPaths,
+        (paths) => paths.length > 0,
+        `${options.worktreeId} to report an unstaged change`,
+        options.timeoutMs,
+      ).then(() => undefined),
+    run: async ({ page, baseUrl, options }) => {
+      await gotoLocalized(page, `${baseUrl}/worktrees/${options.worktreeId}`, options.locale);
+      // `files` is the default activity, so Git needs one *effective* click —
+      // clickUntilEffective re-checks before clicking so it can never toggle
+      // the pane back shut.
+      const gitPane = page.locator('[data-testid="activity-pane"][data-active="git"]');
+      await clickUntilEffective(
+        page.getByTestId('activity-bar-button-git'),
+        () => gitPane.isVisible(),
+        'the Git activity button',
+        options.timeoutMs,
+      );
+
+      const unstaged = page.getByTestId('git-unstaged-list');
+      await unstaged.waitFor({ state: 'visible' });
+      await unstaged.getByTestId('git-changes-diff-button').first().click();
+      // FilePanelSplit only mounts the viewer for a non-empty diff body, so a
+      // visible pane is proof the diff really came back.
+      await page.getByTestId('file-panel-pane').waitFor({ state: 'visible' });
+      await page.waitForTimeout(2500);
+    },
+  },
+  {
     id: 'complete',
     title: 'Session returns to ready and the list reflects it',
     viewport: 'pc',
@@ -456,7 +696,7 @@ export async function recordScenes(options: RecordOptions): Promise<string[]> {
   try {
     for (const scene of selected) {
       // Outside the recording: see Scene.prepare.
-      await scene.prepare?.({ baseUrl: state.baseUrl, options });
+      await scene.prepare?.({ baseUrl: state.baseUrl, options, state });
       const viewport = viewportFor(scene, options);
       const context: BrowserContext = await browser.newContext({
         viewport,
@@ -470,7 +710,7 @@ export async function recordScenes(options: RecordOptions): Promise<string[]> {
       const page = await context.newPage();
       const video = page.video();
       try {
-        await scene.run({ page, baseUrl: state.baseUrl, options });
+        await scene.run({ page, baseUrl: state.baseUrl, options, state });
       } finally {
         await context.close();
       }
