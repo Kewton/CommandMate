@@ -1,0 +1,37 @@
+version: 1
+duration: 20
+output: cm-05-send-and-walk-away
+scenes:
+  - id: sessions-overview
+    type: record
+    duration: 4
+    viewport: pc
+    telop:
+      ja: "送ったら、あとは任せる"
+      en: "Send it, then walk away"
+  - id: send-and-generate
+    type: record
+    duration: 10
+    viewport: pc
+    telop:
+      ja: "メッセージを送るだけ"
+      en: "Just send a message"
+  - id: respond-from-mobile
+    type: record
+    duration: 2
+    viewport: mobile
+    telop:
+      ja: "手を離していい"
+      en: "Hands off from here"
+  - id: complete
+    type: record
+    duration: 3
+    telop:
+      ja: "戻ったら終わっている"
+      en: "Come back to it done"
+  - id: outro
+    type: card
+    duration: 1
+    telop:
+      ja: "github.com/Kewton/CommandMate"
+      en: "github.com/Kewton/CommandMate"
