@@ -8,8 +8,9 @@
  * media budget that keeps the hero's LCP defensible.
  *
  * Issue #1272 removed the demo videos and pinned the hero/og:image to an
- * isolated-environment screenshot; the guards against that regressing live in
- * the `Issue #1272` block at the bottom.
+ * isolated-environment screenshot; Issue #1577 put four vetted demos back and
+ * recast those guards around where media comes from rather than what container
+ * it is in. Both live in the `Issue #1272/#1577` block below.
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
@@ -26,6 +27,36 @@ const PAGES_BASE_URL = 'https://kewton.github.io/CommandMate/';
 
 /** The LP's own source, i.e. everything Pages actually serves as the page. */
 const LP_SOURCE_FILES = ['index.html', 'styles.css', 'main.js'];
+
+/** The single reviewed location for anything that moves. */
+const MEDIA_DIR = path.join('assets', 'media');
+
+/**
+ * Every container a moving image can arrive in. #1272's guard listed video
+ * extensions only, which is why a GIF re-encode of the same tainted recording
+ * would have walked straight through it — `docs/images/demo-mobile.gif` still
+ * exists next to the mp4 it was made from.
+ */
+const MOVING_IMAGE = /\.(mp4|webm|mov|m4v|ogv|gif|apng)$/i;
+
+/**
+ * The only files the LP may ship under `assets/media/`. This is an allowlist
+ * rather than a format rule because the property #1272 was defending is
+ * provenance: the recording must have been made in an isolated environment.
+ * No test can read that off the bytes, so adding a line here is the point at
+ * which a human confirms it — see `website/assets/media/README.md`.
+ */
+const ALLOWED_MEDIA = [
+  'README.md',
+  'approve-from-phone.mp4',
+  'parallel-worktrees.mp4',
+  'poster-approve-from-phone.webp',
+  'poster-parallel-worktrees.webp',
+  'poster-status-at-a-glance.webp',
+  'poster-tmux-in-browser.webp',
+  'status-at-a-glance.mp4',
+  'tmux-in-browser.mp4',
+];
 
 /** Every file under website/, recursively, as paths relative to website/. */
 function walk(dir: string, base = dir): string[] {
@@ -45,7 +76,9 @@ function readIndexHtml(): string {
  */
 function extractRefs(html: string): string[] {
   const refs: string[] = [];
-  const pattern = /(?:src|href)\s*=\s*"([^"]+)"/g;
+  // `poster` is in here because a video's still is an asset like any other: it
+  // 404s the same way, and it escapes website/ the same way.
+  const pattern = /(?:src|href|poster)\s*=\s*"([^"]+)"/g;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(html)) !== null) {
     refs.push(match[1]);
@@ -171,7 +204,9 @@ describe('Issue #1200: media budget', () => {
     expect(bytes).toBeLessThan(HERO_BUDGET_BYTES);
   });
 
-  it('never copies the 22MB/47MB originals into website/', () => {
+  it('never copies the 22MB/47MB originals into website/, in any container', () => {
+    // Deliberately extension-agnostic: a GIF re-encode of a recording is the
+    // same weight problem as the mp4, and at 2-3x the bytes.
     const huge = walk(WEBSITE_DIR)
       .map((f) => ({ file: f, bytes: fs.statSync(path.join(WEBSITE_DIR, f)).size }))
       .filter((f) => f.bytes > 5_000_000);
@@ -193,13 +228,16 @@ describe('Issue #1200: page-level markup', () => {
  * product name `MyCodeBranchDesk` in the hero. The desktop poster doubled as the
  * og:image, so it expanded as the preview card every time the LP was linked.
  *
- * These tests exist to stop that material coming back. They are deliberately
- * blunt — anything named `demo-*` under website/, or any `<video>` on the page,
- * fails — because the safe way to add a video back is to re-record in an
- * isolated environment and revisit this rule on purpose, not to quietly reuse
- * `docs/images/` (which still holds the tainted originals for the README GIFs).
+ * Issue #1577 took the revisit those guards invited. The blunt form — no
+ * `<video>`, no video extension — turned out not to defend the property it was
+ * written for: what was wrong with the old material was where it came from, not
+ * what container it sat in, and a GIF of the identical footage passed every one
+ * of the checks. The rules below name the location and the exact files instead,
+ * so a re-encode of `docs/images/` fails whatever it is called, and growing the
+ * set means editing ALLOWED_MEDIA — the point at which someone has to confirm
+ * the footage was recorded in an isolated environment.
  */
-describe('Issue #1272: the LP ships no demo media', () => {
+describe('Issue #1272/#1577: the LP ships only vetted media', () => {
   it('references demo-desktop/demo-mobile from nowhere in the LP source', () => {
     const offenders = LP_SOURCE_FILES.flatMap((file) => {
       const body = fs.readFileSync(path.join(WEBSITE_DIR, file), 'utf-8');
@@ -217,16 +255,30 @@ describe('Issue #1272: the LP ships no demo media', () => {
     expect(demoFiles).toEqual([]);
   });
 
-  it('ships no video file under website/ at all', () => {
-    const videos = walk(WEBSITE_DIR).filter((f) => /\.(mp4|webm|mov|m4v|ogv)$/i.test(f));
+  it('keeps every moving image under assets/media/, the one reviewed location', () => {
+    const strays = walk(WEBSITE_DIR)
+      .filter((f) => MOVING_IMAGE.test(f))
+      .filter((f) => path.dirname(f) !== MEDIA_DIR);
 
-    expect(videos).toEqual([]);
+    expect(strays).toEqual([]);
   });
 
-  it('embeds no <video> element, so no playback script is needed', () => {
-    const html = readIndexHtml();
+  it('ships nothing under assets/media/ that is not on the allowlist', () => {
+    const unvetted = walk(path.join(WEBSITE_DIR, MEDIA_DIR)).filter(
+      (f) => !ALLOWED_MEDIA.includes(f),
+    );
 
-    expect(html).not.toMatch(/<video\b/);
+    expect(unvetted).toEqual([]);
+  });
+
+  it('lists nothing on the allowlist that is no longer on disk', () => {
+    // Without this the allowlist rots into names nobody ships, and the review
+    // gate above degrades into whatever someone last remembered to delete.
+    const missing = ALLOWED_MEDIA.filter(
+      (f) => !fs.existsSync(path.join(WEBSITE_DIR, MEDIA_DIR, f)),
+    );
+
+    expect(missing).toEqual([]);
   });
 
   it('points og:image at the isolated-environment hero screenshot', () => {
@@ -264,6 +316,71 @@ describe('Issue #1272: the LP ships no demo media', () => {
     expect(heroFigure![0]).not.toMatch(/loading="lazy"/);
     expect(heroFigure![0]).toMatch(/width="\d+"/);
     expect(heroFigure![0]).toMatch(/height="\d+"/);
+  });
+});
+
+/**
+ * Issue #1577 — four feature demos, in mp4 rather than GIF. Pages serves
+ * website/ verbatim with no markdown sanitiser in the way, so `<video>` works
+ * here even though docs/ has to settle for GIFs; at 0.56MB against 1.02MB for
+ * the same twenty seconds, the container is also the cheaper one.
+ *
+ * What is easy to get wrong is autoplay: iOS Safari refuses it without both
+ * `muted` and `playsinline`, and the failure is silent — a still frame with no
+ * error anywhere. These pin the attributes that make playback happen at all.
+ */
+describe('Issue #1577: feature demo playback', () => {
+  const videoTags = (): string[] => readIndexHtml().match(/<video\b[\s\S]*?<\/video>/g) ?? [];
+
+  it('embeds the four demos the Issue settled on', () => {
+    expect(videoTags()).toHaveLength(4);
+  });
+
+  it('carries muted and playsinline, without which iOS Safari will not autoplay', () => {
+    for (const tag of videoTags()) {
+      expect(tag, `missing muted:\n${tag}`).toMatch(/\bmuted\b/);
+      expect(tag, `missing playsinline:\n${tag}`).toMatch(/\bplaysinline\b/);
+    }
+  });
+
+  it('gives every demo a poster that exists, so preload="none" is not a black box', () => {
+    for (const tag of videoTags()) {
+      const poster = /poster="([^"]+)"/.exec(tag);
+
+      expect(poster, `no poster:\n${tag}`).not.toBeNull();
+      expect(fs.existsSync(path.join(WEBSITE_DIR, poster![1])), poster![1]).toBe(true);
+    }
+  });
+
+  it('reserves each demo box, so the first frame does not reflow the page', () => {
+    for (const tag of videoTags()) {
+      expect(tag, tag).toMatch(/width="\d+"/);
+      expect(tag, tag).toMatch(/height="\d+"/);
+    }
+  });
+
+  it('sources every demo from the reviewed media directory', () => {
+    for (const tag of videoTags()) {
+      expect(tag, tag).toMatch(/src="assets\/media\//);
+      expect(tag, tag).toMatch(/poster="assets\/media\//);
+    }
+  });
+
+  it('drops autoplay for readers who asked for reduced motion', () => {
+    // A media query cannot stop an autoplaying video, so this has to be script;
+    // the CSS block that handles animations elsewhere does nothing here.
+    const js = fs.readFileSync(path.join(WEBSITE_DIR, 'main.js'), 'utf-8');
+
+    expect(js).toMatch(/prefers-reduced-motion:\s*reduce/);
+    expect(js).toMatch(/removeAttribute\(['"]autoplay['"]\)/);
+    expect(js).toMatch(/\.controls\s*=\s*true/);
+  });
+
+  it('keeps the demos out of the hero, which owns the LCP and the og:image', () => {
+    const hero = /<section class="hero">[\s\S]*?<\/section>/.exec(readIndexHtml());
+
+    expect(hero).not.toBeNull();
+    expect(hero![0]).not.toMatch(/<video\b/);
   });
 });
 
