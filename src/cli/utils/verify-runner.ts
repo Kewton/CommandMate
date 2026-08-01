@@ -32,6 +32,12 @@ export interface VerificationRequest {
   /** 'manual' for the verify command, 'wait' when chained after wait. */
   trigger: 'manual' | 'wait';
   instanceId?: string;
+  /**
+   * Task the run judges. Omitted lets the server resolve the worktree's own
+   * task, which is enough while that task is still open — `wait` names one
+   * because the agent may close it before the run starts (#1620).
+   */
+  taskId?: string;
   /** Omitted means work-evidence plus every gate declared in verify.yaml. */
   gateIds?: string[];
   /** Seconds before the CLI stops polling and reports TIMEOUT. */
@@ -173,6 +179,7 @@ export async function runVerification(
       trigger: request.trigger,
       instanceId: request.instanceId,
       gateIds: request.gateIds,
+      taskId: request.taskId,
     });
     runId = assertResponseShape<VerifyStartResponse>(
       started,

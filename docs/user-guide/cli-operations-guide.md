@@ -476,9 +476,21 @@ commandmate task show <task-id> --json
 
 ### wait --verify との連携
 
-`wait --verify` は CLI 側に追加指定は要りません。サーバが worktree の
-active task（`running` / `waiting_input` / `verifying` の最新1件）を解決し、
-契約の `verify.gates` を既定のゲート集合として検証し、結果で task を遷移させます。
+`wait --verify` は CLI 側に追加指定は要りません。**待ち始める時点**で worktree の
+active task（`running` / `waiting_input` / `verifying` の最新1件）を読み、その id を
+後続の検証 run に渡します。契約の `verify.gates` が既定のゲート集合になり、結果で task が
+遷移します。
+
+id を**待機開始時に**読むのは、エージェントが完了報告の前に自分でゲートを回す（契約がそう
+求めている）と、その run が task を `succeeded` へ移してしまうためです。後から worktree id
+だけで検証を始めると契約を解決できず、**判定していない scope を含んだまま `passed` を返して
+いました**（Issue #1620）。待機開始時に id を控えておけば、待っている間に task が閉じても
+契約の scope はきちんと裁定されます。
+
+そのため、task が既に終端になった後で `commandmate verify <id>` を単独で回すと、scope を
+判定できないことが exit code に出ます（run は `error` = exit 99）。ログの `GATE scope SKIP`
+行が **どの task を判定できなかったのか**を id と status つきで示します。契約を 1 件も
+持たない worktree の素の `commandmate verify` は従来どおり `passed` です。
 
 ```bash
 commandmate send <id> --contract .commandmate/tasks/loader.yaml

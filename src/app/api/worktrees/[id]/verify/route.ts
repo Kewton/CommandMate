@@ -20,6 +20,9 @@ const logger = createLogger('api/verify');
 /** Bounded so a request body cannot make the runner iterate an unbounded list. */
 const MAX_GATE_IDS = 32;
 
+/** crypto.randomUUID() output; mirrors TASK_ID_PATTERN in the task routes. */
+const TASK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function isTrigger(value: unknown): value is VerificationTrigger {
   return typeof value === 'string' && (VERIFICATION_TRIGGERS as readonly string[]).includes(value);
 }
@@ -54,6 +57,16 @@ export async function POST(
       }
     }
 
+    // Issue #1620: naming the task is how a caller says "judge *this* contract"
+    // even after the agent's own verification closed it. Rejected rather than
+    // ignored when malformed: silently dropping it is exactly the outcome the
+    // parameter exists to prevent.
+    if (payload.taskId !== undefined) {
+      if (typeof payload.taskId !== 'string' || !TASK_ID_PATTERN.test(payload.taskId)) {
+        return NextResponse.json({ error: 'Invalid taskId' }, { status: 400 });
+      }
+    }
+
     if (payload.trigger !== undefined && !isTrigger(payload.trigger)) {
       return NextResponse.json(
         { error: `trigger must be one of: ${VERIFICATION_TRIGGERS.join(', ')}` },
@@ -81,6 +94,7 @@ export async function POST(
       worktreeId: id,
       worktreePath: worktree.path,
       instanceId: payload.instanceId as string | undefined,
+      taskId: payload.taskId as string | undefined,
       trigger: isTrigger(payload.trigger) ? payload.trigger : 'api',
       gateIds,
     });

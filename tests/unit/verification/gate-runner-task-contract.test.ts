@@ -31,6 +31,7 @@ import {
 import { updateTaskStatus } from '@/lib/db/tasks-db';
 import { parseTaskContract } from '@/lib/tasks/contract-parser';
 import { startVerification, waitForVerification } from '@/lib/verification/gate-runner';
+import { SCOPE_SKIP_NO_CONTRACT } from '@/lib/verification/scope-gate';
 
 declare module '@/lib/db/db-instance' {
   export function setMockDb(db: Database.Database): void;
@@ -99,6 +100,28 @@ function createRepo(): string {
 
 function addWork(): void {
   writeFileSync(join(repo, 'work.txt'), 'agent output\n');
+}
+
+/**
+ * Re-declare the repository with no failing gate.
+ *
+ * The shared fixture declares `fail-gate`, and {@link aggregateRunStatus} ranks
+ * `failed` above `error` — so a run that reported `error` for the right reason
+ * would be indistinguishable from one that reported `failed` for the wrong one.
+ * Tests whose subject is the run *status* use this instead.
+ */
+function usePassingGatesOnly(): void {
+  writeFileSync(
+    join(repo, '.commandmate', 'verify.yaml'),
+    `version: 1
+gates:
+  - id: pass-gate
+    command: "sh -c 'exit 0'"
+options:
+  baseRef: main
+  skipInPrimaryCheckout: false
+`
+  );
 }
 
 function seedTask(
@@ -331,17 +354,7 @@ describe('scope gate selection', () => {
   it('skips scope without failing a contract-less run', async () => {
     // The default selection always includes scope, so counting its skip would
     // turn every verification in a repository without contracts into an error.
-    writeFileSync(
-      join(repo, '.commandmate', 'verify.yaml'),
-      `version: 1
-gates:
-  - id: pass-gate
-    command: "sh -c 'exit 0'"
-options:
-  baseRef: main
-  skipInPrimaryCheckout: false
-`
-    );
+    usePassingGatesOnly();
     addWork();
 
     const run = getVerificationRun(db, await runToCompletion());
@@ -350,7 +363,9 @@ options:
       'scope',
       'pass-gate',
     ]);
-    expect(run?.gates.find((gate) => gate.gateId === 'scope')?.status).toBe('skipped');
+    const scope = run?.gates.find((gate) => gate.gateId === 'scope');
+    expect(scope?.status).toBe('skipped');
+    expect(scope?.logTail).toBe(SCOPE_SKIP_NO_CONTRACT);
     expect(run?.status).toBe('passed');
   });
 
@@ -420,6 +435,83 @@ options:
     const scope = run?.gates.find((gate) => gate.gateId === 'scope');
     expect(scope?.status).toBe('skipped');
     expect(scope?.logTail).toContain('work-evidence');
+  });
+});
+
+/**
+ * Issue #1620: a worker that verifies its own work moves the task to
+ * `succeeded`, and the orchestrator's later `wait --verify` then resolved no
+ * task at all — so the contract's scope was never judged and the run still
+ * reported `passed`. Two properties keep that from happening silently: a run
+ * that names its task judges that contract whatever the task's status, and a
+ * run that cannot attach to a contract which exists says so instead of
+ * collapsing into the harmless contract-less skip.
+ */
+describe('detached contracts', () => {
+  it('judges the contract scope of a task the run names, even after it was closed', async () => {
+    const task = seedTask({ gates: ['pass-gate'], allow: ['allowed/**'] });
+    updateTaskStatus(db, task.id, 'succeeded');
+    addWork(); // work.txt, which "allowed/**" does not cover
+
+    const run = getVerificationRun(db, await runToCompletion({ taskId: task.id }));
+    expect(run?.gates.find((gate) => gate.gateId === 'scope')?.status).toBe('failed');
+    expect(run?.status).toBe('failed');
+    // The verdict belongs to the run. The closed task is still not walked back.
+    expect(getTask(db, task.id)?.status).toBe('succeeded');
+  });
+
+  it('finds a task whose gates failed without being told its id', async () => {
+    // The state machine reopens `failed` for a re-run, so a re-run has to be
+    // able to *find* it: resolving only the active statuses meant the retry
+    // every worker performs after a red gate lost the contract.
+    const task = seedTask({ gates: ['pass-gate'], allow: ['allowed/**'] });
+    updateTaskStatus(db, task.id, 'failed');
+    addWork();
+
+    const run = getVerificationRun(db, await runToCompletion());
+    expect(run?.taskId).toBe(task.id);
+    expect(run?.gates.find((gate) => gate.gateId === 'scope')?.status).toBe('failed');
+  });
+
+  it('refuses to report passed when a closed contract could not be attached', async () => {
+    usePassingGatesOnly();
+    const task = seedTask();
+    updateTaskStatus(db, task.id, 'succeeded');
+    addWork();
+
+    const run = getVerificationRun(db, await runToCompletion());
+    const scope = run?.gates.find((gate) => gate.gateId === 'scope');
+    expect(scope?.status).toBe('skipped');
+    // The reader has to be able to tell this from "no contract exists".
+    expect(scope?.logTail).not.toBe(SCOPE_SKIP_NO_CONTRACT);
+    expect(scope?.logTail).toContain(task.id);
+    expect(scope?.logTail).toContain('succeeded');
+    expect(run?.status).toBe('error');
+    // Not attributed: this run did not judge that task, and saying it did would
+    // put a verdict-less run in the task's history.
+    expect(run?.taskId).toBeNull();
+  });
+
+  it('stays green when the closed contract never asked for a clean scope', async () => {
+    // Nothing was declined: the gate would have skipped even fully attached.
+    usePassingGatesOnly();
+    const task = seedTask({ requireScopeClean: false });
+    updateTaskStatus(db, task.id, 'succeeded');
+    addWork();
+
+    const run = getVerificationRun(db, await runToCompletion());
+    expect(run?.gates.find((gate) => gate.gateId === 'scope')?.status).toBe('skipped');
+    expect(run?.status).toBe('passed');
+  });
+
+  it('stays green when a contract was created but never sent', async () => {
+    // `pending` means no message went out, so no run can be about it yet.
+    usePassingGatesOnly();
+    seedTask({ status: 'pending' });
+    addWork();
+
+    const run = getVerificationRun(db, await runToCompletion());
+    expect(run?.status).toBe('passed');
   });
 });
 
