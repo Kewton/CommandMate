@@ -14,28 +14,42 @@ import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
 import { validateCopilotModelName, validateAntigravityModelName } from '../config/model-validation';
 import { fetchAgentInstances, saveAgentInstances, defaultAlias, MAX_AGENT_INSTANCES } from '../utils/agent-instances';
 
+/** Auto-yes duration used when --duration is omitted. */
+const DEFAULT_AUTO_YES_DURATION = '1h';
+
 /**
- * Build auto-yes request body and send it to the API (DRY extraction).
- * Validates duration and exits on invalid input.
+ * Resolve --duration to milliseconds, exiting on an invalid value.
  *
- * @param client - API client instance
- * @param worktreeId - Target worktree ID
- * @param options - Send command options containing auto-yes settings
+ * Issue #1608: this is called from the option-validation block at the top of
+ * the action, not from enableAutoYes(). enableAutoYes() runs after --contract
+ * has already created the task row, so validating there left a `pending` task
+ * behind for a message that was never sent.
  */
-async function enableAutoYes(
-  client: ApiClient,
-  worktreeId: string,
-  options: SendOptions
-): Promise<void> {
-  const durationMs = options.duration
-    ? parseDurationToMs(options.duration)
-    : parseDurationToMs('1h'); // default 1h
+function resolveAutoYesDurationMs(duration: string | undefined): number {
+  const durationMs = parseDurationToMs(duration ?? DEFAULT_AUTO_YES_DURATION);
 
   if (durationMs === null) {
     console.error(`Error: Invalid duration. Must be one of: ${ALLOWED_DURATIONS.join(', ')}`);
     process.exit(ExitCode.CONFIG_ERROR);
   }
 
+  return durationMs;
+}
+
+/**
+ * Build auto-yes request body and send it to the API (DRY extraction).
+ *
+ * @param client - API client instance
+ * @param worktreeId - Target worktree ID
+ * @param options - Send command options containing auto-yes settings
+ * @param durationMs - Duration already validated by resolveAutoYesDurationMs()
+ */
+async function enableAutoYes(
+  client: ApiClient,
+  worktreeId: string,
+  options: SendOptions,
+  durationMs: number
+): Promise<void> {
   const autoYesBody: Record<string, unknown> = {
     enabled: true,
     duration: durationMs,
@@ -226,6 +240,15 @@ export function createSendCommand(): Command {
           }
         }
 
+        // Issue #1608: every option that can be judged from its own value is
+        // judged here, before the first side effect. --duration used to be the
+        // exception: enableAutoYes() validated it, and that runs after
+        // --contract has already created the task row, so `--duration 2h` left
+        // a `pending` task for a message that was never sent. Validated
+        // unconditionally, like --stop-pattern and --model above: a value the
+        // CLI cannot honour is an error whether or not --auto-yes accompanies it.
+        const autoYesDurationMs = resolveAutoYesDurationMs(options.duration);
+
         const client = new ApiClient({ token: options.token });
 
         // Issue #1545: resolve the contract before anything with a side effect,
@@ -243,7 +266,7 @@ export function createSendCommand(): Command {
 
         // --auto-yes: enable auto-yes first (unless --model is specified, then after send) [DR2-02]
         if (options.autoYes && !options.model) {
-          await enableAutoYes(client, worktreeId, options);
+          await enableAutoYes(client, worktreeId, options, autoYesDurationMs);
         }
 
         // [DR2-05] Send API uses "content" not "message"
@@ -285,7 +308,7 @@ export function createSendCommand(): Command {
         // Issue #576: Enable auto-yes AFTER send when --model is specified
         // This avoids auto-yes interfering with the /model command interaction
         if (options.autoYes && options.model) {
-          await enableAutoYes(client, worktreeId, options);
+          await enableAutoYes(client, worktreeId, options, autoYesDurationMs);
         }
       } catch (error) {
         handleCommandError(error);
