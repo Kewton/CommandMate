@@ -1,0 +1,335 @@
+{
+  "version": 1,
+  "issue": 1612,
+  "summary": "CommandMate 内の skill 実体と Kewton/commandmate-skills の公開パッケージの対応表。sha256 の pin を tests/unit/skills/sync-map.test.ts が突き合わせ、ここで宣言したファイルを編集すると赤くなる。",
+  "gate": "tests/unit/skills/sync-map.test.ts",
+  "tool": "scripts/skills-sync-map.mjs",
+  "counterpart": {
+    "repo": "Kewton/commandmate-skills",
+    "url": "https://github.com/Kewton/commandmate-skills",
+    "lastSyncedRef": "2f56807",
+    "lastSyncedAt": "2026-08-01",
+    "checkoutRequired": false,
+    "checkoutNote": "この対応表による検知はローカルの sha256 だけで完結する。skills は個人リポジトリで、CI から書ける token を増やしたくない（docs/user-guide/skills.md §3-9）ため、CI は counterpart を checkout しない。手元に checkout がある時だけ `node scripts/skills-sync-map.mjs check --counterpart <dir>` で実 diff を取る。"
+  },
+  "policies": {
+    "byte-identical": {
+      "meaning": "counterpart とバイト単位で一致していなければならない。移植は逐語コピーである。",
+      "onChange": "同じバイト列を counterpart へコピーし、`node scripts/skills-sync-map.mjs update` で pin を更新する。",
+      "detected": "sha256 pin。編集した瞬間に赤くなる。"
+    },
+    "port-required": {
+      "meaning": "挙動の変更は必ず counterpart へ移植しなければならないが、バイト一致は要求しない。リポジトリ固有の Issue 番号・URL・文書構成が意図的に食い違うため。",
+      "onChange": "counterpart の対応箇所を「同じ挙動になるように」書き直したうえで pin を更新する。逐語コピーは適応を壊すので不可。",
+      "detected": "sha256 pin。バイト一致を要求しないことと、検知対象から外すことは別である （#1613 のドリフトは後者の扱いで無検知になっていた）。"
+    },
+    "local-only": {
+      "meaning": "counterpart が存在しない CommandMate 専用パッケージ。",
+      "onChange": "何もしなくてよい。検知対象外。",
+      "detected": "検知しない。counterpart が出来たらこの分類から外すこと。"
+    }
+  },
+  "policyRationale": "Issue #1612 本文は identical / adapted の 2 分類を提案していたが、この 2 分類では #1613 と同じドリフトが再発する。orchestrate-monitor の scripts は「バイト一致ではない」（コメント中の Issue 番号がリポジトリごとに違う）が「検知対象から外してはいけない」（コメントを除くコード差分は 8 ファイルすべて 0 行で、機能変更は必ず両側へ移植しなければならない）。adapted として除外すると、まさに #1613 で起きた無検知が再現する。そのため adapted を port-required（移植必須・バイト不問）と local-only（対応先なし）へ分割し、3 分類とした。",
+  "packages": [
+    {
+      "local": ".claude/skills/cmate-verify",
+      "counterpart": "skills/cmate-verify",
+      "policy": "mapped",
+      "rationale": "CommandMate が開発元。scripts は #1586 で byte-identical に移植された（2026-08-01 実測: diff -r 無差分）。SKILL.md だけは移植時に適応が入っている。",
+      "mirrors": [
+        ".agents/skills/cmate-verify"
+      ],
+      "mirrorGuard": "tests/unit/skills/cmate-verify/dual-placement.test.ts",
+      "counterpartOnly": [
+        "commandmate.skill.yaml"
+      ],
+      "counterpartOnlyReason": "commandmate.skill.yaml は skills リポジトリの配布 metadata（version / digest）で、CommandMate 側には存在しない。",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "policy": "port-required",
+          "sha256": "9f2ec5d06920e9f02d85753d482f6dd7dc7080daad56c7ea28aaf038f14b73e0",
+          "note": "#1586 の移植で GitHub 絶対 URL 化・「起案 / スタンドアロンランナー」の2役への書き換えが入っている。単純コピーするとこの適応が壊れる（#1611 で実際に注意点として扱った）。手順・フラグ・exit code の意味を変えたときは counterpart 側の同じ節を書き直す。"
+        },
+        {
+          "path": "scripts/tests/fixtures/all-pass.yaml",
+          "policy": "byte-identical",
+          "sha256": "830fe8f301d9e06871eb8ea58ca272e4db63f6d38c0ebce18470ca3a79ceb6c9"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-anchor.yaml",
+          "policy": "byte-identical",
+          "sha256": "1b80b0829432f4269f2a8842aa7f4c89e32e3bda205d37a53b49670796be29d0"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-block-scalar.yaml",
+          "policy": "byte-identical",
+          "sha256": "b89117a79cfab8b2099c187337e1339bcedca63dc0e201c79d411a7a6e10bf80"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-duplicate-id.yaml",
+          "policy": "byte-identical",
+          "sha256": "dcc323cd41552d9aa76d2d8d10a54b9e8ee234dc37f99cd7993764ce488ffb91"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-flow.yaml",
+          "policy": "byte-identical",
+          "sha256": "3179c3ac553c2a308e270a098ba4ac95ff69f024ae0836106e062f5b7cdf5b37"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-gate-key.yaml",
+          "policy": "byte-identical",
+          "sha256": "1d62c602d1c59b5c9bbd20f99b11525f28c0316945f4b2a4caf8e86eb94832b3"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-indent.yaml",
+          "policy": "byte-identical",
+          "sha256": "99e0f97fd288bfb565a5fa808fbb8bb046e7cbb208aac67bd360b7f81ef8319e"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-invalid-id.yaml",
+          "policy": "byte-identical",
+          "sha256": "9c96187607ef74c2d5086166f836aeae161bbf94357b37d1c011e857fdb3ef1f"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-missing-command.yaml",
+          "policy": "byte-identical",
+          "sha256": "810a6f34c4f2a5a77dc635c2a0243d159272f0e43d14823a6add79aed87fb59e"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-missing-id.yaml",
+          "policy": "byte-identical",
+          "sha256": "44c9ce1e2d331cf521961398bdea34b5fb890376d8dfe059470774a9d1e616b6"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-no-gates.yaml",
+          "policy": "byte-identical",
+          "sha256": "7be542f8bb5954519fab54267758b48bd0c9b9fd44e1f6d6a906a52e8e4e1d26"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-no-version.yaml",
+          "policy": "byte-identical",
+          "sha256": "43e806edf29c0d52ec09e1094ca4ab8eded9fccd62ffb609f620bc5a508239df"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-option-key.yaml",
+          "policy": "byte-identical",
+          "sha256": "eea039f08edd17bdb3cf01898e56485a151a40f3afab339a7b8439b9d29680a6"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-option-value.yaml",
+          "policy": "byte-identical",
+          "sha256": "a41b5672d7adfdf698062ce1e47c154106e38eabd97ebb9906d109acf11053ff"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-reserved-id.yaml",
+          "policy": "byte-identical",
+          "sha256": "f8a526bc59f198505c82533c184572b5ac1191f30dad70f3907a703967acb231"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-tab.yaml",
+          "policy": "byte-identical",
+          "sha256": "1f6043cb5ae62709915a406b4564122e3793ed51cb4c41e9d1f8ac6d0daec984"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-timeout-range.yaml",
+          "policy": "byte-identical",
+          "sha256": "95e1907fbcb531ca1cda9a49a90bc6b4b96aefc0ff3839750f2ca1e8d382ef79"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-timeout-type.yaml",
+          "policy": "byte-identical",
+          "sha256": "bc42beb805d8b57dc00a9c63107e228f38142a1ada72fc2c446fca8984415188"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-version.yaml",
+          "policy": "byte-identical",
+          "sha256": "deb52d8f8205df596c026404f913d15cde8d7afc6c96f7a0fbc881d1086dd75c"
+        },
+        {
+          "path": "scripts/tests/fixtures/default-options.yaml",
+          "policy": "byte-identical",
+          "sha256": "98657da4079c59565c23d66d46373c8c71b2df3abe8b7f63a1f7aa5556180396"
+        },
+        {
+          "path": "scripts/tests/fixtures/no-log-tail.yaml",
+          "policy": "byte-identical",
+          "sha256": "7cddb975d5c3af7f4b316e879bd20cf12ecc64b121934d3b5db328692bbbde33"
+        },
+        {
+          "path": "scripts/tests/fixtures/one-fail.yaml",
+          "policy": "byte-identical",
+          "sha256": "62580fa87300a3e79736df33a2c4e2e4a7b5260ee3455c1de329ce4c07f56993"
+        },
+        {
+          "path": "scripts/tests/fixtures/parsing.yaml",
+          "policy": "byte-identical",
+          "sha256": "262417735fae50aa79e3addb33e5157cc202df16045ec2af2b47110e39581edf"
+        },
+        {
+          "path": "scripts/tests/fixtures/side-effect.yaml",
+          "policy": "byte-identical",
+          "sha256": "1e9b218d5e3cb63f9e09469dd95c4bfd1813aac6911ab62ff40364e4df227b3e"
+        },
+        {
+          "path": "scripts/tests/fixtures/silent-fail.yaml",
+          "policy": "byte-identical",
+          "sha256": "a3a640a9f4ad179f802cf411d6ce51f551ca8691a1e7b829165438335f5888bb"
+        },
+        {
+          "path": "scripts/tests/fixtures/timeout.yaml",
+          "policy": "byte-identical",
+          "sha256": "8ba1f347093da9d80378d75e403279954339cd63232616a218607238f381350d"
+        },
+        {
+          "path": "scripts/tests/run-tests.sh",
+          "policy": "byte-identical",
+          "sha256": "98088d3f0fac0b57cd8dde8ded0b397e51c10bef3d7abb82dc6f948cba3a27d7"
+        },
+        {
+          "path": "scripts/verify-run.sh",
+          "policy": "byte-identical",
+          "sha256": "ac506c17daba1207a109f2716e625ba01a17318630c4670bc7474461f8f9edc4",
+          "note": "ランナー本体。#1586 で byte-identical に移植され、#1607 が CommandMate 側だけを直して 4 日間ドリフトした（#1611 で復旧）。この Issue の直接の発端。"
+        }
+      ]
+    },
+    {
+      "local": ".claude/skills/orchestrate-monitor",
+      "counterpart": "skills/cmate-orchestrate-monitor",
+      "policy": "mapped",
+      "rationale": "CommandMate が開発元（判定ロジックのテストは tests/unit/skills/orchestrate-monitor/ にある）。scripts はコメント中の Issue 番号だけが両リポジトリで異なり（CommandMate #1581/#1601 ↔ skills #1589/#1602）、コメントを除いたコード差分は 8 ファイルすべて 0 行（2026-08-01 実測、#1613 同期後）。",
+      "mirrors": [],
+      "mirrorNote": "CommandMate 側は .claude/skills だけに置いてあり .agents/skills には無い（Claude 専用）。skills リポジトリ経由で install した場合は .agents/skills にも入るため、CommandMate 内の二重配置ガード（dual-placement / mirror テスト）とは対象が重ならない。",
+      "counterpartOnly": [
+        "commandmate.skill.yaml",
+        "references/agent-compatibility.md",
+        "references/evidence.md",
+        "references/monitor-contract.md",
+        "references/recipe-rationale.md"
+      ],
+      "counterpartOnlyReason": "配布 metadata と、公開パッケージ向けに切り出した reference 群。CommandMate 側では SKILL.md 1 枚に収めている。",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "policy": "port-required",
+          "sha256": "2c0828baddfd4220745a5bb1f7a442ce5fd137e9d973a00ee29326c7bcb7bc72",
+          "note": "counterpart は独立に書き起こされた文書で、共有行は 17 行しかない（2026-08-01 実測、CommandMate 423 行 / skills 380 行）。コピーではなく「同じ scripts を説明した別の文書」なので、移植するのは prose ではなく挙動の記述（フラグ・exit code・判定順序・警告文言）である。"
+        },
+        {
+          "path": "scripts/classify-state.sh",
+          "policy": "port-required",
+          "sha256": "41750af3480a11a5b4f2c74a2bc5dfd5111f41291a2ccca4a15f25ff502e072b"
+        },
+        {
+          "path": "scripts/hooks-git.sh",
+          "policy": "port-required",
+          "sha256": "528dc90d464bbe5d44555dfeadc49189f47ae8731f1f14e20e49f99a03e2ad0b"
+        },
+        {
+          "path": "scripts/hooks-task.sh",
+          "policy": "port-required",
+          "sha256": "628a48cf79c57dfa7dba6b27b6b34d77a133c08ca83ccb751014e05b456ee112",
+          "note": "#1613 で同期済み。それ以前は skills 側だけが `commandmate task list` の exit≠0 を unavailable として扱っていた（コード差分 17 行）。"
+        },
+        {
+          "path": "scripts/monitor-lib.sh",
+          "policy": "port-required",
+          "sha256": "1c203ba4a2c25f8a03f356ed8937801e935b23f70c5260b0ad5d3483a105cf5d"
+        },
+        {
+          "path": "scripts/monitor.sh",
+          "policy": "port-required",
+          "sha256": "ffce8e14a005d10e84e92184dcaef5611c0d0c5bd32a868f6fc8688425087736",
+          "note": "#1613 で同期済み。それ以前は skills 側だけが FALLBACK MODE 警告を出していた（コード差分 13 行）。"
+        },
+        {
+          "path": "scripts/quality-gate.sh",
+          "policy": "port-required",
+          "sha256": "c64057db91b400a661b2191ccdfa9f0f08922fa8f84f0e9463dca65ad91712b6"
+        },
+        {
+          "path": "scripts/verify-completion.sh",
+          "policy": "port-required",
+          "sha256": "f17890c8712bc48fa9a4bac632563732b75dfc691059af2f1b2d6b0650678cf1"
+        },
+        {
+          "path": "scripts/verify-scope.sh",
+          "policy": "port-required",
+          "sha256": "82845086a9d47f799db1ee32d00a3ea38b53cc1de9ca99bcc0d09bfb45e16927"
+        }
+      ]
+    },
+    {
+      "local": ".claude/skills/demo-video",
+      "counterpart": null,
+      "policy": "local-only",
+      "reason": "CommandMate のデモ動画を CommandMate のリポジトリ構成・storyboard 前提で録る。他リポジトリで意味を持たないため公開していない。",
+      "mirrors": [
+        ".agents/skills/demo-video"
+      ],
+      "mirrorGuard": "tests/unit/skills/demo-video/mirror.test.ts"
+    },
+    {
+      "local": ".claude/skills/video-to-gif",
+      "counterpart": null,
+      "policy": "local-only",
+      "reason": "汎用だが未公開。skills リポジトリに対応パッケージが無い（2026-08-01 実測）。公開したらこの分類を外すこと。",
+      "mirrors": [
+        ".agents/skills/video-to-gif"
+      ],
+      "mirrorGuard": "tests/unit/skills/video-to-gif/mirror.test.ts"
+    },
+    {
+      "local": ".claude/skills/rebuild",
+      "counterpart": null,
+      "policy": "local-only",
+      "reason": "CommandMate 本体のビルド・再起動手順そのもの。他リポジトリでは成立しない。",
+      "mirrors": []
+    },
+    {
+      "local": ".claude/skills/release",
+      "counterpart": null,
+      "policy": "local-only",
+      "reason": "CommandMate のリリース手順（version / CHANGELOG / tag / GitHub Releases）。他リポジトリでは成立しない。",
+      "mirrors": []
+    },
+    {
+      "local": ".claude/skills/release-post",
+      "counterpart": null,
+      "policy": "local-only",
+      "reason": "CommandMate のリリース告知文の作成手順。他リポジトリでは成立しない。",
+      "mirrors": []
+    }
+  ],
+  "notMapped": [
+    {
+      "counterpart": [
+        "skills/cmate-orchestrate",
+        "skills/cmate-acceptance-test",
+        "skills/cmate-worktree-setup",
+        "skills/cmate-worktree-cleanup"
+      ],
+      "candidateLocal": [
+        ".claude/commands/orchestrate.md",
+        ".claude/commands/acceptance-test.md",
+        ".claude/commands/worktree-setup.md",
+        ".claude/commands/worktree-cleanup.md"
+      ],
+      "reason": "同名の .claude/commands/*.md は「移植元」ではなく独立に書き起こされた別文書である。2026-08-01 実測で共通する非空行は orchestrate 2 行 / acceptance-test 1 行 / worktree-setup 1 行 / worktree-cleanup 1 行しかない（数百行中）。commands は CommandMate の develop/worktree 運用に密着した手順書、skills 側は public commandmate CLI だけで完結する self-contained な skill で、構成・schema・出力契約が別物。対応表に入れると「片方を編集したら他方も直せ」が常に偽になり、鳴っても誰も移植しないゲートになる（＝無効化されて終わる）。skills/cmate-orchestrate/scripts/*.mjs 4 本も CommandMate 側に実体が無い。",
+      "revisitIf": "どちらかを他方からコピーして作り直した場合は、その時点で packages へ port-required として追加すること。",
+      "measuredAt": "2026-08-01"
+    },
+    {
+      "counterpart": [
+        "skills/cmate-issue-refinement",
+        "skills/cmate-repository-analysis",
+        "skills/cmate-task-contract"
+      ],
+      "candidateLocal": [],
+      "reason": "CommandMate 側に対応するファイルが存在しない（skills リポジトリ固有の skill）。",
+      "measuredAt": "2026-08-01"
+    }
+  ],
+  "knownGap": "この対応表が検知できるのは CommandMate 側の編集だけである。skills 側が先に進んだ場合（#1613 がまさにその向き）は pin が変わらないので鳴らない。逆向きは `node scripts/skills-sync-map.mjs check --counterpart <dir>` を手元の checkout に対して実行して見る。CI から見るには cross-repo token が要るため、Issue #1612 の受入条件（token を増やさない）と衝突する。"
+}
