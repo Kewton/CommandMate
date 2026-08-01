@@ -241,6 +241,18 @@ options:
     expect(res.status).toBe(400);
   });
 
+  it('records the run against a taskId the caller named (#1620)', async () => {
+    // The id is carried through even with no such row: what matters here is
+    // that the route forwards the attribution instead of dropping it, which is
+    // how `wait --verify` keeps hold of the contract its agent already closed.
+    const taskId = '11111111-2222-4333-8444-555555555555';
+    const { runId } = await (await postVerify(wtId, { taskId })).json();
+    await waitForVerification(runId);
+
+    const { run } = await (await getRun(wtId, String(runId))).json();
+    expect(run.taskId).toBe(taskId);
+  });
+
   it.each([
     ['an unknown trigger', { trigger: 'cron' }],
     ['a non-array gateIds', { gateIds: 'quick' }],
@@ -248,6 +260,8 @@ options:
     ['a blank gate id', { gateIds: ['  '] }],
     ['a non-string gate id', { gateIds: [1] }],
     ['an invalid instanceId', { instanceId: 'not a valid id!' }],
+    ['a taskId that is not a uuid', { taskId: 'task-1' }],
+    ['a non-string taskId', { taskId: 42 }],
   ])('returns 400 for %s', async (_label, body) => {
     const res = await postVerify(wtId, body);
     expect(res.status).toBe(400);

@@ -379,9 +379,15 @@ function verifyRun(over: Record<string, unknown> = {}) {
 
 const completedOutput = { ...baseOutput, isRunning: false, sessionStatus: 'idle' as const };
 
-/** current-output + verify routes for one worktree that completes immediately. */
-function completedWorktreeRoutes(id: string, runId: number, status: string): Route[] {
+/** tasks + current-output + verify routes for one worktree that completes immediately. */
+function completedWorktreeRoutes(
+  id: string,
+  runId: number,
+  status: string,
+  tasks: unknown[] = [],
+): Route[] {
   return [
+    { match: u => u.includes(`/api/worktrees/${id}/tasks`), data: { tasks } },
     { match: u => u.includes(`/api/worktrees/${id}/current-output`), data: completedOutput },
     {
       match: (u, m) => m === 'POST' && u.endsWith(`/api/worktrees/${id}/verify`),
@@ -423,6 +429,7 @@ describe('Issue #1544: wait --verify / --require-work', () => {
     expect(mockExit).toHaveBeenCalledWith(VerifyExitCode.VERIFY_FAILED);
     expect(mockExit).not.toHaveBeenCalledWith(WaitExitCode.SUCCESS);
     expect(callSignatures(fetchMock)).toEqual([
+      'GET /api/worktrees/wt1/tasks',
       'GET /api/worktrees/wt1/current-output',
       'POST /api/worktrees/wt1/verify',
       'GET /api/worktrees/wt1/verify/runs/1',
@@ -449,6 +456,7 @@ describe('Issue #1544: wait --verify / --require-work', () => {
       trigger: 'wait',
       instanceId: undefined,
       gateIds: undefined,
+      taskId: undefined,
     });
   });
 
@@ -483,6 +491,7 @@ describe('Issue #1544: wait --verify / --require-work', () => {
       promptData: { type: 'yes_no', question: 'Continue?', options: ['yes', 'no'], status: 'pending' },
     };
     const fetchMock = mockFetchRoutes([
+      { match: u => u.includes('/api/worktrees/wt1/tasks'), data: { tasks: [] } },
       { match: u => u.includes('/current-output'), data: promptOutput },
     ]);
 
@@ -490,8 +499,12 @@ describe('Issue #1544: wait --verify / --require-work', () => {
     await createWaitCommand().parseAsync(['node', 'wait', 'wt1', '--verify']);
 
     expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
-    // Decidable proof that verify never ran: exactly one request was made.
-    expect(callSignatures(fetchMock)).toEqual(['GET /api/worktrees/wt1/current-output']);
+    // Decidable proof that verify never ran: the task lookup and the single
+    // poll are the only requests.
+    expect(callSignatures(fetchMock)).toEqual([
+      'GET /api/worktrees/wt1/tasks',
+      'GET /api/worktrees/wt1/current-output',
+    ]);
   });
 
   it('runs verify serially across worktrees', async () => {
@@ -506,6 +519,8 @@ describe('Issue #1544: wait --verify / --require-work', () => {
     expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
     // Concurrent verification would interleave the two POSTs before either GET.
     expect(callSignatures(fetchMock)).toEqual([
+      'GET /api/worktrees/wt1/tasks',
+      'GET /api/worktrees/wt2/tasks',
       'GET /api/worktrees/wt1/current-output',
       'GET /api/worktrees/wt2/current-output',
       'POST /api/worktrees/wt1/verify',
@@ -576,6 +591,7 @@ describe('Issue #1544: wait --verify / --require-work', () => {
 
   it('a verify API failure yields its exit code instead of a false success', async () => {
     const fetchMock = mockFetchRoutes([
+      { match: u => u.includes('/api/worktrees/wt1/tasks'), data: { tasks: [] } },
       { match: u => u.includes('/current-output'), data: completedOutput },
       {
         match: (u, m) => m === 'POST' && u.endsWith('/api/worktrees/wt1/verify'),
@@ -592,8 +608,131 @@ describe('Issue #1544: wait --verify / --require-work', () => {
       expect.stringContaining("already in progress for 'wt1' (run 9)")
     );
     expect(callSignatures(fetchMock)).toEqual([
+      'GET /api/worktrees/wt1/tasks',
       'GET /api/worktrees/wt1/current-output',
       'POST /api/worktrees/wt1/verify',
+    ]);
+  });
+});
+
+// =============================================================================
+// Issue #1620: bind the task the wait was about
+// =============================================================================
+
+/**
+ * A worker that verifies its own work — which the contract asks it to do —
+ * moves its task to `succeeded`. The verification the orchestrator runs
+ * afterwards then found no *active* task, judged no scope, and still reported
+ * `passed`. The fix is temporal: the task id is resolved when the wait starts,
+ * while the task is still in flight, and named on the run that follows.
+ */
+describe('Issue #1620: wait --verify binds the task it waited on', () => {
+  const TASK_ID = '11111111-2222-4333-8444-555555555555';
+
+  function postBody(fetchMock: ReturnType<typeof mockFetchRoutes>): Record<string, unknown> {
+    const post = fetchMock.mock.calls.find(c => (c[1] as { method?: string })?.method === 'POST');
+    return JSON.parse((post![1] as { body: string }).body);
+  }
+
+  it('names the task that was active when the wait started', async () => {
+    const fetchMock = mockFetchRoutes(
+      completedWorktreeRoutes('wt1', 1, 'passed', [{ id: TASK_ID, status: 'running' }]),
+    );
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1', '--verify']);
+
+    expect(postBody(fetchMock).taskId).toBe(TASK_ID);
+    // Resolved before the first poll: after it, the worker's own verification
+    // may already have closed the task.
+    expect(callSignatures(fetchMock)[0]).toBe('GET /api/worktrees/wt1/tasks');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('limit=1');
+  });
+
+  it('still names it after the worker closed the task mid-wait', async () => {
+    // The lookup happens once, up front; nothing re-reads the ledger later, so
+    // a task that reaches `succeeded` while the agent finishes is still named.
+    const fetchMock = mockFetchRoutes([
+      { match: u => u.includes('/api/worktrees/wt1/tasks'), data: { tasks: [{ id: TASK_ID, status: 'verifying' }] } },
+      ...completedWorktreeRoutes('wt1', 1, 'passed').slice(1),
+    ]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1', '--verify']);
+
+    expect(postBody(fetchMock).taskId).toBe(TASK_ID);
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+  });
+
+  it('names no task when the newest one was already closed before the wait', async () => {
+    // The paired case. Binding whatever is newest would let a wait on unrelated
+    // work be judged against a contract that finished days ago.
+    const fetchMock = mockFetchRoutes(
+      completedWorktreeRoutes('wt1', 1, 'passed', [{ id: TASK_ID, status: 'succeeded' }]),
+    );
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1', '--verify']);
+
+    expect(postBody(fetchMock).taskId).toBeUndefined();
+  });
+
+  it('names the task for --require-work too', async () => {
+    const fetchMock = mockFetchRoutes(
+      completedWorktreeRoutes('wt1', 1, 'passed', [{ id: TASK_ID, status: 'running' }]),
+    );
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1', '--require-work']);
+
+    expect(postBody(fetchMock).taskId).toBe(TASK_ID);
+  });
+
+  it('verifies anyway when the task ledger cannot be read', async () => {
+    // An unreachable ledger is not a verdict. Losing the binding costs the
+    // scope attribution; refusing to verify would cost every gate.
+    const fetchMock = mockFetchRoutes([
+      { match: u => u.includes('/api/worktrees/wt1/tasks'), data: { error: 'boom' }, status: 500 },
+      ...completedWorktreeRoutes('wt1', 1, 'passed').slice(1),
+    ]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1', '--verify']);
+
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+    expect(postBody(fetchMock).taskId).toBeUndefined();
+  });
+
+  it('does not read the ledger when no verification was asked for', async () => {
+    const fetchMock = mockFetchRoutes([
+      { match: u => u.includes('/current-output'), data: completedOutput },
+    ]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+
+    expect(callSignatures(fetchMock)).toEqual(['GET /api/worktrees/wt1/current-output']);
+  });
+
+  it('binds each worktree to its own task', async () => {
+    const OTHER = '99999999-2222-4333-8444-555555555555';
+    const fetchMock = mockFetchRoutes([
+      ...completedWorktreeRoutes('wt1', 1, 'passed', [{ id: TASK_ID, status: 'running' }]),
+      ...completedWorktreeRoutes('wt2', 2, 'passed', [{ id: OTHER, status: 'running' }]),
+    ]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1', 'wt2', '--verify']);
+
+    const posts = fetchMock.mock.calls
+      .filter(c => (c[1] as { method?: string })?.method === 'POST')
+      .map(c => [
+        new URL(String(c[0])).pathname,
+        JSON.parse((c[1] as { body: string }).body).taskId,
+      ]);
+    expect(posts).toEqual([
+      ['/api/worktrees/wt1/verify', TASK_ID],
+      ['/api/worktrees/wt2/verify', OTHER],
     ]);
   });
 });

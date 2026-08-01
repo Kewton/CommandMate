@@ -29,14 +29,19 @@ import {
   createVerificationRun,
   finishGateResult,
   finishVerificationRun,
-  getActiveTask,
   getRunningVerificationRun,
   getTask,
+  listTasks,
   type Task,
   type VerificationGateTerminalStatus,
   type VerificationRunTerminalStatus,
   type VerificationTrigger,
 } from '@/lib/db';
+// Past the barrel, as `agent-event-service` does for `getActiveTaskForInstance`:
+// this selector exists for the verification runner alone and re-exporting it
+// would invite the callers that must keep using `getActiveTask` (Auto-Yes,
+// prompt events) to reach for the wider set by accident.
+import { getVerifiableTask } from '@/lib/db/tasks-db';
 import { resolveDefaultBranchName } from '@/lib/git/git-default-branch';
 import { createLogger } from '@/lib/logger';
 import { resolveContractGateIds } from '@/lib/tasks/contract-message';
@@ -47,6 +52,7 @@ import {
   evaluateScope,
   isContractPath,
   parsePorcelainEntries,
+  scopeSkipDetachedContract,
 } from './scope-gate';
 import {
   loadVerifyConfig,
@@ -106,9 +112,10 @@ export interface RunVerificationInput {
   worktreePath: string;
   instanceId?: string;
   /**
-   * Task the run belongs to. Omitted means "resolve the worktree's active task"
-   * (#1545), which is what lets `wait --verify` verify against a contract
-   * without the CLI knowing a task exists.
+   * Task the run belongs to. Omitted means "resolve the worktree's own task"
+   * (#1545), which is what lets a caller verify against a contract without
+   * knowing a task exists. Naming one is stronger than that fallback: it
+   * survives the agent closing its own task mid-flight (#1620).
    */
   taskId?: string;
   trigger: VerificationTrigger;
@@ -534,7 +541,8 @@ async function executeRun(
   config: VerifyConfig,
   selection: GateSelection,
   baseRef: string | null,
-  task: Task | null
+  task: Task | null,
+  detachedContract: Task | null
 ): Promise<VerificationRunTerminalStatus> {
   const { maxLogTailBytes, skipInPrimaryCheckout } = config.options;
   const { runWorkEvidence, gates } = selection;
@@ -586,18 +594,30 @@ async function executeRun(
   }
 
   if (selection.scope !== 'off') {
-    const outcome = await evaluateScope(
-      worktreePath,
-      task?.contract.scope ?? null,
-      task?.contract.success.requireScopeClean ?? false,
-      baseRef,
-      task?.contractPath ?? null
-    );
+    const outcome = detachedContract
+      ? {
+          status: 'skipped' as const,
+          exitCode: null,
+          durationMs: 0,
+          logTail: scopeSkipDetachedContract(detachedContract.id, detachedContract.status),
+        }
+      : await evaluateScope(
+          worktreePath,
+          task?.contract.scope ?? null,
+          task?.contract.success.requireScopeClean ?? false,
+          baseRef,
+          task?.contractPath ?? null
+        );
     record(SCOPE_GATE_ID, SCOPE_GATE_COMMAND, outcome);
-    // A skipped scope gate in the default selection is not a declined check:
-    // no contract declared a scope, so there was no assertion to test. Counting
-    // it would turn every contract-less run into `error` (see aggregateRunStatus).
-    if (outcome.status !== 'skipped' || selection.scope === 'explicit') {
+    // A skipped scope gate in the default selection is usually not a declined
+    // check: no contract declared a scope, so there was no assertion to test.
+    // Counting it would turn every contract-less run into `error` (see
+    // aggregateRunStatus). It *is* a declined check when the caller asked for
+    // scope by name, and when a contract exists that this run could not attach
+    // to — that second case is how a run reported `passed` while the scope it
+    // was supposed to judge went unexamined (#1620).
+    const declined = selection.scope === 'explicit' || detachedContract !== null;
+    if (outcome.status !== 'skipped' || declined) {
       statuses.push(outcome.status);
     }
   }
@@ -686,13 +706,47 @@ function recordTaskTransition(
  *
  * An explicit `taskId` wins even when the row is gone — the caller asserted the
  * attribution and the run should record it — so a missing row yields no task to
- * transition, not an error.
+ * transition, not an error. It also wins over the task's status: naming a task
+ * is the caller saying "this run is about that contract", which is what lets a
+ * `wait --verify` still judge a contract whose agent already verified itself
+ * and closed the task (#1620).
  */
 function resolveTask(db: Database.Database, input: RunVerificationInput): Task | null {
   if (input.taskId !== undefined) {
     return getTask(db, input.taskId);
   }
-  return getActiveTask(db, input.worktreeId);
+  return getVerifiableTask(db, input.worktreeId);
+}
+
+/**
+ * A contract this worktree has that the run could not be attached to.
+ *
+ * The scope gate skips whenever no task resolves, and that skip is forgiven so
+ * a repository without contracts is not permanently `error`. The forgiveness
+ * was load-bearing for a case it was never meant to cover: once an agent's own
+ * `commandmate verify` moved its task to `succeeded`, the orchestrator's run
+ * resolved nothing, skipped scope, and reported `passed` — a green verdict on a
+ * declaration nothing had read (#1620).
+ *
+ * Reported only when the contract actually asked for a clean scope: a contract
+ * with `requireScopeClean: false` would have skipped while fully attached, so
+ * nothing was declined by losing it.
+ *
+ * @returns the closed task, or null when there is genuinely nothing to judge
+ */
+function findDetachedContract(
+  db: Database.Database,
+  input: RunVerificationInput,
+  task: Task | null
+): Task | null {
+  // A resolved task, or a caller that named one, is an attributed run.
+  if (task !== null || input.taskId !== undefined) return null;
+
+  const [latest] = listTasks(db, input.worktreeId, 1);
+  // `pending` is not detached: nothing was sent, so no run can be about it yet.
+  // Anything resolvable would already have come back from resolveTask.
+  if (!latest || latest.status === 'pending') return null;
+  return latest.contract.success.requireScopeClean ? latest : null;
 }
 
 /**
@@ -715,6 +769,10 @@ export async function startVerification(
   }
 
   const task = resolveTask(db, input);
+  // Deliberately not folded into `taskId` below: the run did not judge this
+  // contract, and recording it would put a verdict-less run in that task's
+  // history. It is named in the scope gate's log_tail instead.
+  const detachedContract = findDetachedContract(db, input, task);
   const taskId = input.taskId ?? task?.id ?? null;
   // An explicit gateIds always wins: `verify --gates lint` must mean lint even
   // when the contract asks for more.
@@ -808,7 +866,8 @@ export async function startVerification(
         resolvedConfig,
         resolvedSelection,
         baseRef,
-        task
+        task,
+        detachedContract
       );
       terminalStatus = status;
       finishVerificationRun(db, run.id, status);
