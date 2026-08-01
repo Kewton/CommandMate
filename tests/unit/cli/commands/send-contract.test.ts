@@ -10,6 +10,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { restoreFetch } from '../../../helpers/mock-api';
 import { ExitCode } from '../../../../src/cli/types';
+import { MAX_STOP_PATTERN_LENGTH } from '../../../../src/cli/utils/api-client';
 
 const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -75,6 +76,48 @@ const SEND_OK: RouteResponse = {
 async function runSend(argv: string[]) {
   const { createSendCommand } = await import('../../../../src/cli/commands/send');
   await createSendCommand().parseAsync(['node', 'send', ...argv]);
+}
+
+/** Thrown by the terminating process.exit stand-in below. */
+class ExitSignal extends Error {
+  constructor(readonly code: number) {
+    super(`process.exit(${code})`);
+  }
+}
+
+/**
+ * Run the command with a process.exit that actually stops the action, the way
+ * the real one does (Issue #1608).
+ *
+ * The module-level spy is a no-op, so under it execution falls straight through
+ * a rejected argument and goes on to create the task row anyway — which is
+ * exactly what these tests exist to rule out. Without a terminating exit they
+ * would pass whether or not the validation runs before the side effect.
+ *
+ * @returns the code of the first process.exit call, or undefined if none
+ */
+async function runSendUntilExit(argv: string[]): Promise<number | undefined> {
+  let firstCode: number | undefined;
+  mockExit.mockImplementation(((code?: number) => {
+    const resolved = typeof code === 'number' ? code : 0;
+    if (firstCode === undefined) {
+      firstCode = resolved;
+    }
+    throw new ExitSignal(resolved);
+  }) as never);
+  try {
+    await runSend(argv);
+  } catch (error) {
+    // The action's own catch turns the first ExitSignal into handleCommandError(),
+    // which exits again; that second signal escapes parseAsync. Anything else is
+    // a real failure and must not be swallowed.
+    if (!(error instanceof ExitSignal)) {
+      throw error;
+    }
+  } finally {
+    mockExit.mockImplementation((() => {}) as never);
+  }
+  return firstCode;
 }
 
 describe('send --contract', () => {
@@ -144,7 +187,7 @@ describe('send --contract', () => {
   });
 
   it('prints every contract issue and exits 2 without sending', async () => {
-    mockRoutes([
+    const calls = mockRoutes([
       {
         match: '/api/worktrees/wt1/tasks',
         response: {
@@ -157,15 +200,18 @@ describe('send --contract', () => {
       },
     ]);
 
-    await runSend(['wt1', '--contract', '.commandmate/tasks/broken.yaml']);
+    const code = await runSendUntilExit(['wt1', '--contract', '.commandmate/tasks/broken.yaml']);
 
     expect(mockConsoleError).toHaveBeenCalledWith('Error: invalid task contract:');
     expect(mockConsoleError).toHaveBeenCalledWith('  - version: must be 1 (got 3)');
     expect(mockConsoleError).toHaveBeenCalledWith(
       '  - title: required, must be a non-empty string'
     );
-    expect(mockExit).toHaveBeenCalledWith(ExitCode.CONFIG_ERROR);
+    expect(code).toBe(ExitCode.CONFIG_ERROR);
     expect(mockConsoleError).not.toHaveBeenCalledWith('Message sent.');
+    // The rejection is the server's, so the request had to be made — but
+    // nothing may follow it.
+    expect(calls.map((c) => c.url).filter((url) => !url.includes('/tasks'))).toEqual([]);
   });
 
   it('records the task as failed when the message could not be delivered', async () => {
@@ -216,5 +262,154 @@ describe('send argument validation', () => {
       'Error: a message argument is required unless --contract is given.'
     );
     expect(mockExit).toHaveBeenCalledWith(ExitCode.CONFIG_ERROR);
+  });
+});
+
+/**
+ * Issue #1608: the task row is a side effect, so every option that can be
+ * judged from its own value must be judged before it. `--duration 2h` used to
+ * be judged inside enableAutoYes(), which runs after the row exists: the
+ * command printed `Task created: <id>` and then exited 2, leaving a `pending`
+ * task for a message that was never sent.
+ */
+describe('send option validation happens before the task row is created', () => {
+  const CONTRACT = ['--contract', '.commandmate/tasks/t.yaml'];
+  const INVALID_DURATION = 'Error: Invalid duration. Must be one of: 1h, 3h, 8h';
+
+  /** Every route the command could reach, so an early call is recorded rather than rejected. */
+  function mockAllRoutes() {
+    return mockRoutes([
+      { match: '/api/worktrees/wt1/tasks', response: TASK_CREATED },
+      { match: '/api/worktrees/wt1/auto-yes', response: { status: 200, data: {} } },
+      { match: '/api/worktrees/wt1/send', response: SEND_OK },
+      { match: '/api/worktrees/wt1', method: 'GET', response: { status: 200, data: { id: 'wt1', agentInstances: [] } } },
+      { match: `/api/tasks/${TASK_ID}`, method: 'PATCH', response: { status: 200, data: {} } },
+    ]);
+  }
+
+  it('rejects an invalid --duration without creating the task row', async () => {
+    const calls = mockAllRoutes();
+
+    const code = await runSendUntilExit([
+      'wt1',
+      ...CONTRACT,
+      '--agent',
+      'claude',
+      '--auto-yes',
+      '--duration',
+      '2h',
+    ]);
+
+    expect(mockConsoleError).toHaveBeenCalledWith(INVALID_DURATION);
+    expect(code).toBe(ExitCode.CONFIG_ERROR);
+    // The reported symptom: `Task created: <id>` on stderr and the id on stdout,
+    // for a message that never went out.
+    expect(calls).toEqual([]);
+    expect(mockConsoleLog).not.toHaveBeenCalled();
+    expect(mockConsoleError).not.toHaveBeenCalledWith(expect.stringContaining('Task created:'));
+    expect(mockConsoleError).not.toHaveBeenCalledWith('Message sent.');
+  });
+
+  it('rejects an invalid --duration even without --auto-yes, before sending', async () => {
+    // --duration is validated on its own value, the same way --stop-pattern and
+    // --model are: a value the CLI cannot honour is never silently dropped.
+    const calls = mockAllRoutes();
+
+    const code = await runSendUntilExit(['wt1', 'hello', '--duration', '90m']);
+
+    expect(mockConsoleError).toHaveBeenCalledWith(INVALID_DURATION);
+    expect(code).toBe(ExitCode.CONFIG_ERROR);
+    expect(calls).toEqual([]);
+    expect(mockConsoleError).not.toHaveBeenCalledWith('Message sent.');
+  });
+
+  /**
+   * The symmetry the fix has to hold to: nothing that is checkable up front may
+   * be checked after the task row exists. Each case is an argument the command
+   * can reject on its own, paired with --contract so a leaked task row shows up.
+   */
+  const REJECTED_UP_FRONT: Array<{ name: string; argv: string[]; error: string }> = [
+    {
+      name: 'worktree id',
+      argv: ['../invalid', ...CONTRACT],
+      error: 'Error: Invalid worktree ID format.',
+    },
+    {
+      name: '--agent',
+      argv: ['wt1', ...CONTRACT, '--agent', 'not-an-agent'],
+      error: 'Error: Invalid agent. Must be one of: ',
+    },
+    {
+      name: '--instance',
+      argv: ['wt1', ...CONTRACT, '--instance', 'bad instance!'],
+      error: 'Error: Invalid --instance.',
+    },
+    {
+      name: '--register without --instance',
+      argv: ['wt1', ...CONTRACT, '--register'],
+      error: 'Error: --register requires --instance.',
+    },
+    {
+      name: '--register with a non-primary --instance and no --agent',
+      argv: ['wt1', ...CONTRACT, '--instance', 'codex-2', '--register'],
+      error: 'Error: --register requires --agent',
+    },
+    {
+      name: '--stop-pattern length',
+      argv: ['wt1', ...CONTRACT, '--auto-yes', '--stop-pattern', 'x'.repeat(MAX_STOP_PATTERN_LENGTH + 1)],
+      error: 'Error: stop-pattern exceeds maximum length',
+    },
+    {
+      name: '--model without a model-capable --agent',
+      argv: ['wt1', ...CONTRACT, '--model', 'gpt-5-mini'],
+      error: 'Error: --model option requires --agent copilot or --agent antigravity',
+    },
+    {
+      name: '--model value',
+      argv: ['wt1', ...CONTRACT, '--agent', 'copilot', '--model', 'model; rm -rf /'],
+      error: 'Error: Invalid model name:',
+    },
+    {
+      name: '--duration',
+      argv: ['wt1', ...CONTRACT, '--auto-yes', '--duration', '2h'],
+      error: INVALID_DURATION,
+    },
+  ];
+
+  it.each(REJECTED_UP_FRONT)('rejects a bad $name with no request at all', async ({ argv, error }) => {
+    const calls = mockAllRoutes();
+
+    const code = await runSendUntilExit(argv);
+
+    expect(mockConsoleError).toHaveBeenCalledWith(expect.stringContaining(error));
+    expect(code).toBe(ExitCode.CONFIG_ERROR);
+    expect(calls).toEqual([]);
+  });
+
+  it('still enables auto-yes with a valid --duration, after the task row exists', async () => {
+    const calls = mockAllRoutes();
+
+    await runSend(['wt1', ...CONTRACT, '--agent', 'claude', '--auto-yes', '--duration', '3h']);
+
+    const autoYes = calls.find((c) => c.url.includes('/auto-yes'));
+    expect(autoYes?.body).toEqual({ enabled: true, duration: 10_800_000, cliToolId: 'claude' });
+    expect(calls.findIndex((c) => c.url.includes('/tasks'))).toBeLessThan(
+      calls.findIndex((c) => c.url.includes('/auto-yes'))
+    );
+    expect(calls.findIndex((c) => c.url.includes('/auto-yes'))).toBeLessThan(
+      calls.findIndex((c) => c.url.includes('/send'))
+    );
+    expect(mockConsoleError).toHaveBeenCalledWith('Message sent.');
+  });
+
+  it('defaults to 1h when --duration is omitted', async () => {
+    const calls = mockAllRoutes();
+
+    await runSend(['wt1', 'hello', '--auto-yes']);
+
+    expect(calls.find((c) => c.url.includes('/auto-yes'))?.body).toEqual({
+      enabled: true,
+      duration: 3_600_000,
+    });
   });
 });
