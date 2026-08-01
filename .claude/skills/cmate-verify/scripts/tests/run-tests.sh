@@ -20,7 +20,7 @@ BASE_BRANCH="cmate-verify-base"
 # Floor on the assertion count. A suite that silently stops running cases would
 # otherwise exit 0 with "0 failed" — the same empty-glob trap the orchestrate-monitor
 # syntax test guards against.
-MIN_ASSERTIONS=100
+MIN_ASSERTIONS=150
 
 [ -f "$RUNNER" ] || { echo "run-tests: runner not found: $RUNNER" >&2; exit 2; }
 [ -d "$FIXTURES" ] || { echo "run-tests: fixtures not found: $FIXTURES" >&2; exit 2; }
@@ -35,10 +35,38 @@ TOTAL_FAIL=0
 RUN_SEQ=0
 RC=0
 OUT=""
+RAWOUT=""
 ERR=""
+# Path of the annotated out.N belonging to the most recent run_verify, and whether
+# it has already been dumped for that run. Both are reset by run_verify.
+FAIL_CONTEXT=""
+FAIL_CONTEXT_SHOWN=0
+# Upper bound on the context dump so one pathological gate log cannot bury the
+# rest of the suite output. The runner already caps its tail at maxLogTailBytes.
+MAX_CONTEXT_LINES=200
 
 ok() { TOTAL_PASS=$((TOTAL_PASS + 1)); echo "ok - $1"; }
-notok() { TOTAL_FAIL=$((TOTAL_FAIL + 1)); echo "not ok - $1"; }
+
+# A failing assertion names where the reason lives and then prints it. The CI red
+# in Issue #1607 left only `not ok - parsing: ...` behind: the sandbox holding
+# err.N is removed by the EXIT trap, so anything not echoed here is gone for good.
+notok() {
+  TOTAL_FAIL=$((TOTAL_FAIL + 1))
+  if [ -n "$FAIL_CONTEXT" ]; then
+    echo "not ok - $1 [context: $FAIL_CONTEXT]"
+  else
+    echo "not ok - $1"
+  fi
+  [ -n "$FAIL_CONTEXT" ] || return 0
+  [ "$FAIL_CONTEXT_SHOWN" -eq 0 ] || return 0
+  FAIL_CONTEXT_SHOWN=1
+  echo "# context: $FAIL_CONTEXT (verify-run stdout, plus its exit code and stderr when it failed)"
+  sed -n "1,${MAX_CONTEXT_LINES}p" "$FAIL_CONTEXT" | sed 's/^/#   /'
+  if [ "$(wc -l < "$FAIL_CONTEXT" | tr -d ' ')" -gt "$MAX_CONTEXT_LINES" ]; then
+    echo "#   ... truncated at $MAX_CONTEXT_LINES lines ..."
+  fi
+  echo "# end context: $FAIL_CONTEXT"
+}
 
 assert_eq() { # name expected actual
   if [ "$2" = "$3" ]; then ok "$1"; else notok "$1 (expected [$2], got [$3])"; fi
@@ -60,6 +88,22 @@ assert_file_absent() { # name path
 assert_le() { # name actual limit
   if [ "$2" -le "$3" ]; then ok "$1"; else notok "$1 ($2 > $3)"; fi
 }
+# Every line the runner writes to stdout must be one of the two documented record
+# shapes. This is what pins the machine-readable contract while out.N is allowed
+# to carry stderr: if a diagnostic ever leaked into stdout, `RESULT` would stop
+# being the last line and `commandmate verify` would parse garbage.
+STDOUT_CONTRACT_RE='^(GATE [a-z0-9-]+ (PASS|FAIL|TIMEOUT|SKIP) [^ ].*|RESULT (passed|failed|not_started|skipped))$'
+assert_stdout_contract() { # name file
+  as_lines=$(grep -c . "$2" | tr -d ' ')
+  as_bad=$(grep -v -E "$STDOUT_CONTRACT_RE" "$2" | head -3 | tr '\n' '/')
+  if [ "$as_lines" -eq 0 ]; then
+    notok "$1 (stdout is empty, so the contract check would be vacuous)"
+  elif [ -n "$as_bad" ]; then
+    notok "$1 (line outside the machine-readable contract: $as_bad)"
+  else
+    ok "$1"
+  fi
+}
 
 count_procs() { # pattern -> number of live processes whose argv contains it
   ps -A -o args= 2>/dev/null | grep -F -e "$1" | grep -v grep | wc -l | tr -d ' '
@@ -79,12 +123,34 @@ wait_for_no_procs() { # pattern seconds -> final count
   count_procs "$1"
 }
 
-run_verify() { # sets RC / OUT / ERR
+# Sets RC / RAWOUT / OUT / ERR.
+#
+#   RAWOUT — exactly what the runner wrote to stdout. Assertions about the
+#            machine-readable contract must use this file and only this file.
+#   ERR    — exactly what the runner wrote to stderr.
+#   OUT    — the diagnostic view: RAWOUT, plus the exit code and the stderr that
+#            explains it appended whenever the run failed.
+#
+# The split has to stay (that is the contract under test), but a failure message
+# that points at out.N has to be enough on its own: the sandbox holding err.N is
+# gone by the time anyone reads the CI log (Issue #1607).
+run_verify() {
   RUN_SEQ=$((RUN_SEQ + 1))
   OUT="$SANDBOX/out.$RUN_SEQ"
+  RAWOUT="$SANDBOX/stdout.$RUN_SEQ"
   ERR="$SANDBOX/err.$RUN_SEQ"
-  bash "$RUNNER" "$@" > "$OUT" 2> "$ERR"
+  bash "$RUNNER" "$@" > "$RAWOUT" 2> "$ERR"
   RC=$?
+  cat "$RAWOUT" > "$OUT"
+  if [ "$RC" -ne 0 ]; then
+    {
+      echo "--- verify-run exit=$RC (stderr captured in $ERR) ---"
+      if [ -s "$ERR" ]; then cat "$ERR"; else echo "(stderr was empty)"; fi
+      echo "--- end verify-run exit=$RC ---"
+    } >> "$OUT"
+  fi
+  FAIL_CONTEXT="$OUT"
+  FAIL_CONTEXT_SHOWN=0
 }
 
 # new_repo <name> — a primary checkout whose HEAD equals $BASE_BRANCH.
@@ -124,6 +190,27 @@ probe=$(TOTAL_FAIL=0; assert_file_absent p "$SANDBOX/probe.txt" >/dev/null; echo
 assert_eq "harness: assert_file_absent counts an existing file as a failure" "1" "$probe"
 probe=$(TOTAL_FAIL=0; assert_file_present p "$SANDBOX/no-such-file" >/dev/null; echo "$TOTAL_FAIL")
 assert_eq "harness: assert_file_present counts a missing file as a failure" "1" "$probe"
+# The diagnostic dump is the whole point of Issue #1607, so it gets the same
+# treatment: prove that a failure really carries the captured output with it,
+# and that a passing assertion does not spray context into the log.
+printf 'GATE g FAIL exit=7 duration=0s\n--- verify-run exit=20 ---\nreason-needle\n' > "$SANDBOX/probe-ctx.txt"
+probe=$(FAIL_CONTEXT="$SANDBOX/probe-ctx.txt"; FAIL_CONTEXT_SHOWN=0; notok "p")
+case "$probe" in
+  *"[context: $SANDBOX/probe-ctx.txt]"*) ok "harness: a failure names the captured output";;
+  *) notok "harness: a failure names the captured output (got [$probe])";;
+esac
+case "$probe" in
+  *"#   reason-needle"*) ok "harness: a failure prints the captured output, not just its path";;
+  *) notok "harness: a failure prints the captured output, not just its path (got [$probe])";;
+esac
+probe=$(FAIL_CONTEXT="$SANDBOX/probe-ctx.txt"; FAIL_CONTEXT_SHOWN=0; notok "first"; notok "second")
+probe=$(printf '%s\n' "$probe" | grep -c '^# context:' | tr -d ' ')
+assert_eq "harness: the context is dumped once per run, not once per assertion" "1" "$probe"
+probe=$(FAIL_CONTEXT=""; ok "p")
+case "$probe" in
+  *context*) notok "harness: a passing assertion stays a single line (got [$probe])";;
+  *) ok "harness: a passing assertion stays a single line";;
+esac
 
 # --- 1. every gate passes -----------------------------------------------------
 repo=$(new_repo worked)
@@ -143,7 +230,7 @@ assert_has "one-fail: green-looking output with exit 3 is a FAIL" "$OUT" "GATE b
 assert_has "one-fail: execution continues past the failure" "$OUT" "GATE after PASS exit=0 duration="
 assert_has "one-fail: verdict is failed" "$OUT" "RESULT failed"
 assert_has "one-fail: the failing gate output is reported on stderr" "$ERR" "Tests 100 passed"
-assert_lacks "one-fail: stdout stays parseable (no log tail)" "$OUT" "Tests 100 passed"
+assert_lacks "one-fail: stdout stays parseable (no log tail)" "$RAWOUT" "Tests 100 passed"
 
 # --- 3. timeout ---------------------------------------------------------------
 marker=$(new_marker)
@@ -156,6 +243,14 @@ assert_eq "timeout: exit code is 20" "20" "$RC"
 assert_has "timeout: the slow gate is reported as TIMEOUT" "$OUT" "GATE slow TIMEOUT exit=124 duration="
 assert_has "timeout: execution continues past the timeout" "$OUT" "GATE after PASS exit=0 duration="
 assert_has "timeout: verdict is failed" "$OUT" "RESULT failed"
+# The slow gate blocks in `sleep` and prints nothing, so its log is empty. Before
+# Issue #1607 that made the TIMEOUT branch silent: the status line was the entire
+# report. Both halves are pinned — the runner says it on stderr, and the harness
+# carries it into out.N where a CI reader can actually reach it.
+assert_has "timeout: a silent timeout still states its reason" "$ERR" "gate slow (TIMEOUT after 1s): no output captured"
+assert_has "timeout: out.N carries the timeout reason" "$OUT" "gate slow (TIMEOUT after 1s): no output captured"
+assert_lacks "timeout: the reason stays off stdout" "$RAWOUT" "no output captured"
+assert_stdout_contract "timeout: stdout holds only GATE/RESULT records" "$RAWOUT"
 # The gate would touch the marker at +4144s; the elapsed bound proves we did not
 # wait it out rather than killing it.
 assert_file_absent "timeout: the killed gate never reached its side effect" "$marker"
@@ -176,14 +271,14 @@ run_verify --config "$FIXTURES/side-effect.yaml" --cwd "$clean" --base-ref "$BAS
 assert_eq "not_started: exit code is 21" "21" "$RC"
 assert_has "not_started: work-evidence reports zero work" "$OUT" "GATE work-evidence FAIL commits=0 uncommitted=0"
 assert_has "not_started: verdict is not_started" "$OUT" "RESULT not_started"
-assert_lacks "not_started: no command gate is reported" "$OUT" "GATE sidefx"
+assert_lacks "not_started: no command gate is reported" "$RAWOUT" "GATE sidefx"
 assert_file_absent "not_started: no command gate is executed" "$marker"
 
 # --- 5. missing config file ---------------------------------------------------
 run_verify --config "$SANDBOX/there-is-no-such-file.yaml" --cwd "$repo" --base-ref "$BASE_BRANCH"
 assert_eq "missing-config: exit code is 2" "2" "$RC"
 assert_has "missing-config: the path is named on stderr" "$ERR" "config file not found"
-assert_lacks "missing-config: no verdict is emitted" "$OUT" "RESULT"
+assert_lacks "missing-config: no verdict is emitted" "$RAWOUT" "RESULT"
 
 # --- 6. work-evidence also passes on uncommitted changes ----------------------
 echo scratch > "$clean/untracked.txt"
@@ -213,7 +308,7 @@ run_verify --config "$FIXTURES/default-options.yaml" --cwd "$repo" --base-ref "$
 assert_eq "primary-checkout: exit code is 22" "22" "$RC"
 assert_has "primary-checkout: the gate is skipped" "$OUT" "GATE sidefx SKIP reason=primary-checkout"
 assert_has "primary-checkout: verdict is skipped, not passed" "$OUT" "RESULT skipped"
-assert_lacks "primary-checkout: an all-skipped run is never reported as passed" "$OUT" "RESULT passed"
+assert_lacks "primary-checkout: an all-skipped run is never reported as passed" "$RAWOUT" "RESULT passed"
 assert_file_absent "primary-checkout: no command runs in the primary checkout" "$marker"
 
 # --- 9. the same config runs in a linked worktree ------------------------------
@@ -233,13 +328,13 @@ assert_file_present "linked-worktree: the command gate ran" "$marker"
 run_verify --config "$FIXTURES/one-fail.yaml" --cwd "$repo" --base-ref "$BASE_BRANCH" --gates ok,after
 assert_eq "gates-subset: exit code is 0" "0" "$RC"
 assert_has "gates-subset: a selected gate runs" "$OUT" "GATE ok PASS exit=0 duration="
-assert_lacks "gates-subset: an unselected gate does not run" "$OUT" "GATE broken"
+assert_lacks "gates-subset: an unselected gate does not run" "$RAWOUT" "GATE broken"
 assert_has "gates-subset: verdict is passed" "$OUT" "RESULT passed"
 
 run_verify --config "$FIXTURES/one-fail.yaml" --cwd "$repo" --base-ref "$BASE_BRANCH" --gates ok,nosuch
 assert_eq "gates-unknown: a typo is a config error, not a silent pass" "2" "$RC"
 assert_has "gates-unknown: the unknown id is named" "$ERR" "unknown gate id: nosuch"
-assert_lacks "gates-unknown: no verdict is emitted" "$OUT" "RESULT"
+assert_lacks "gates-unknown: no verdict is emitted" "$RAWOUT" "RESULT"
 
 # --- 11. parsing of comments, quotes and embedded colons ----------------------
 run_verify --config "$FIXTURES/parsing.yaml" --cwd "$repo" --base-ref "$BASE_BRANCH"
@@ -276,7 +371,7 @@ assert_rejected() { # fixture expected-message
   run_verify --config "$FIXTURES/$1" --cwd "$repo" --base-ref "$BASE_BRANCH"
   assert_eq "reject $1: exit code is 2" "2" "$RC"
   assert_has "reject $1: explains why" "$ERR" "$2"
-  assert_lacks "reject $1: emits no verdict" "$OUT" "RESULT"
+  assert_lacks "reject $1: emits no verdict" "$RAWOUT" "RESULT"
 }
 
 assert_rejected bad-version.yaml "version must be 1"
@@ -297,6 +392,52 @@ assert_rejected bad-block-scalar.yaml "block scalars are not supported"
 assert_rejected bad-indent.yaml "indentation must be a multiple of 2 spaces"
 assert_rejected bad-tab.yaml "tab characters are not allowed"
 assert_rejected bad-no-gates.yaml "no gates are defined"
+
+# --- 14. a failing run leaves its reason inside out.N (Issue #1607) ------------
+# The CI red that opened this issue printed three `not ok - parsing: ...` lines
+# and nothing else: err.N lived in a sandbox the EXIT trap had already deleted,
+# and the vitest wrapper reduced the suite output to its `not ok` lines. out.N is
+# the one file a failure message can point at, so the reason has to be in it.
+run_verify --config "$FIXTURES/one-fail.yaml" --cwd "$repo" --base-ref "$BASE_BRANCH"
+assert_eq "diagnostics: exit code is 20" "20" "$RC"
+assert_has "diagnostics: out.N records the runner exit code" "$OUT" "--- verify-run exit=20 "
+assert_has "diagnostics: out.N names where stderr was captured" "$OUT" "$ERR"
+assert_has "diagnostics: out.N carries the failing gate's own exit code" "$OUT" "GATE broken FAIL exit=3"
+assert_has "diagnostics: out.N carries the stderr that explains the failure" "$OUT" "Tests 100 passed"
+assert_has "diagnostics: out.N labels which gate the tail belongs to" "$OUT" "gate broken (FAIL exit=3)"
+assert_stdout_contract "diagnostics: stdout holds only GATE/RESULT records" "$RAWOUT"
+
+# Pairs with the run above: a passing run gets no diagnostics block, so the block
+# cannot be a constant that appears whatever happened.
+run_verify --config "$FIXTURES/all-pass.yaml" --cwd "$repo" --base-ref "$BASE_BRANCH"
+assert_eq "diagnostics: a green run still exits 0" "0" "$RC"
+assert_lacks "diagnostics: a green run appends nothing to out.N" "$OUT" "--- verify-run exit="
+assert_has "diagnostics: a green run keeps its verdict in out.N" "$OUT" "RESULT passed"
+assert_stdout_contract "diagnostics: a green run's stdout holds only GATE/RESULT records" "$RAWOUT"
+
+# --- 15. a FAIL that printed nothing still explains itself ---------------------
+run_verify --config "$FIXTURES/silent-fail.yaml" --cwd "$repo" --base-ref "$BASE_BRANCH"
+assert_eq "silent-fail: exit code is 20" "20" "$RC"
+assert_has "silent-fail: an empty-output gate is still a FAIL" "$OUT" "GATE silent FAIL exit=3 duration="
+assert_has "silent-fail: the runner states the reason on stderr" "$ERR" "gate silent (FAIL exit=3): no output captured"
+assert_has "silent-fail: the reason reaches out.N" "$OUT" "gate silent (FAIL exit=3): no output captured"
+assert_lacks "silent-fail: the reason stays off stdout" "$RAWOUT" "no output captured"
+# 126/127 with an empty log is what an exec that never got off the ground looks
+# like from here; the hint is a lead to follow, not a diagnosis.
+assert_has "silent-fail: a command that cannot be executed is a FAIL" "$OUT" "GATE notfound FAIL exit=127 duration="
+assert_has "silent-fail: exit 127 with no output is called out as a possible spawn failure" "$ERR" "may not have started"
+assert_has "silent-fail: the spawn hint names the command" "$ERR" "cmate-verify-no-such-command-1607"
+assert_lacks "silent-fail: an ordinary non-zero exit gets no spawn hint" "$ERR" "gate silent exited 3 with no output"
+assert_has "silent-fail: verdict is failed" "$OUT" "RESULT failed"
+assert_stdout_contract "silent-fail: stdout holds only GATE/RESULT records" "$RAWOUT"
+
+# --- 16. maxLogTailBytes: 0 says so instead of going quiet ---------------------
+run_verify --config "$FIXTURES/no-log-tail.yaml" --cwd "$repo" --base-ref "$BASE_BRANCH"
+assert_eq "no-log-tail: exit code is 20" "20" "$RC"
+assert_has "no-log-tail: the gate fails with its exit code" "$OUT" "GATE noisy FAIL exit=5 duration="
+assert_has "no-log-tail: the disabled tail is reported, not silently skipped" "$OUT" "gate noisy (FAIL exit=5): log tail disabled (maxLogTailBytes=0)"
+assert_lacks "no-log-tail: the tail really is suppressed" "$OUT" "tail-should-not-appear"
+assert_stdout_contract "no-log-tail: stdout holds only GATE/RESULT records" "$RAWOUT"
 
 # --- summary ------------------------------------------------------------------
 total=$((TOTAL_PASS + TOTAL_FAIL))
