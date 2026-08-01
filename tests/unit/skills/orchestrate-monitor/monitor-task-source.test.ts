@@ -46,6 +46,8 @@ function runLoop(opts: {
   fixtures: string[];
   polls: number;
   taskStatus: string;
+  /** Exit code of the `task` subcommand; non-zero is the unreachable ledger. */
+  taskExit?: number;
   args?: string[];
 }): RunResult {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'monitor-task-'));
@@ -80,6 +82,10 @@ function runLoop(opts: {
       `    printf '%s\\n' "$*" >> "${taskLog}"`,
       // printf, not echo: the row carries literal tabs and must reach cut intact.
       `    printf '%s\\n' '${opts.taskStatus}'`,
+      // The row is still written on the failing arms on purpose: a hook that read
+      // stdout without checking `$?` would then answer with a status, which is the
+      // defect these tests exist to catch.
+      `    exit ${opts.taskExit ?? 0}`,
       '    ;;',
       'esac',
       '',
@@ -152,9 +158,10 @@ describe('hooks-task.sh reads the contract status from the task ledger (Issue #1
   });
 
   it('answers empty when the worktree has no tasks', () => {
-    // The CLI writes "No tasks recorded..." to stderr and leaves stdout empty
-    // (measured). Empty must mean "no answer", so the loop falls back rather than
-    // treating a contract-less worktree as adjudicated.
+    // The CLI writes "No tasks recorded..." to stderr, leaves stdout empty and
+    // still exits 0 (measured against develop @a46845c7: src/cli/commands/task.ts).
+    // Empty must stay a *normal* answer — it is the contract-less delegation — so
+    // "empty stdout" can never be the signal that the ledger failed.
     expect(probeHook('')).toEqual({ out: '', status: 0 });
   });
 
@@ -169,8 +176,26 @@ describe('hooks-task.sh reads the contract status from the task ledger (Issue #1
     expect(probeHook(stdout).out).toBe('');
   });
 
-  it('answers empty when the CLI exits non-zero', () => {
-    expect(probeHook('boom', 1).out).toBe('');
+  it.each([
+    { label: 'the server is not running', exitCode: 1 },
+    { label: 'the server does not know the worktree', exitCode: 99 },
+  ])('answers unavailable, not empty, when $label', ({ exitCode }) => {
+    // Both exit codes measured against develop @a46845c7 by calling the read-only
+    // route: `Server is not running.` -> 1 (DEPENDENCY_ERROR) and `Resource not
+    // found.` -> 99 (UNEXPECTED_ERROR, the 404 mapping in api-client.ts). Both used
+    // to collapse into '' — the same value a healthy ledger returns for a
+    // contract-less worktree — so the loop lost its adjudicated source and said
+    // nothing about it. This case is pinned separately from the empty one on
+    // purpose: they must never be able to satisfy each other's assertion.
+    expect(probeHook('', exitCode)).toEqual({ out: 'unavailable', status: 0 });
+  });
+
+  it('answers unavailable even when the failing CLI printed a valid-looking row', () => {
+    // The discriminator between "checked the exit code" and "read stdout and hoped".
+    // An older CommandMate has no `task` subcommand at all and a proxy or a broken
+    // pipe can put anything on stdout; a hook that trusts the bytes would report an
+    // adjudicated `succeeded` for a call that never reached the ledger.
+    expect(probeHook(`${taskListRow('succeeded')}`, 99).out).toBe('unavailable');
   });
 });
 
@@ -190,7 +215,7 @@ describe('monitor.sh takes its completion verdict from the task ledger (Issue #1
     // id alone — the monitor never needs the task id `send --contract` printed.
     expect(run.taskCalls).toEqual(['task list w1 --limit 1', 'task list w1 --limit 1']);
     expect(run.captureCalls).toEqual(['capture w1 --json', 'capture w1 --json']);
-    expect(run.stdout).toMatch(/task=succeeded verdict=COMPLETE$/m);
+    expect(run.stdout).toMatch(/verdict=COMPLETE task=succeeded$/m);
   }, 20_000);
 
   it('reports VERIFY_FAILED and stops, instead of COMPLETE, for a failed task', () => {
@@ -202,7 +227,7 @@ describe('monitor.sh takes its completion verdict from the task ledger (Issue #1
     expect(run.stdout).not.toContain('COMPLETE (approvals=');
     // Terminal: the loop ends on the verdict rather than running out of polls.
     expect(run.stdout).not.toContain('reached --max-polls');
-    expect(run.stdout).toMatch(/task=failed verdict=VERIFY_FAILED$/m);
+    expect(run.stdout).toMatch(/verdict=VERIFY_FAILED task=failed$/m);
   }, 20_000);
 
   it('keeps a live worker WORKING even when the newest task already succeeded', () => {
@@ -217,7 +242,7 @@ describe('monitor.sh takes its completion verdict from the task ledger (Issue #1
     expect(run.status).toBe(0);
     expect(run.stdout).not.toContain('COMPLETE (approvals=');
     expect(run.stdout).toContain('reached --max-polls');
-    expect(run.stdout).toMatch(/task=succeeded verdict=WORKING$/m);
+    expect(run.stdout).toMatch(/verdict=WORKING task=succeeded$/m);
   }, 20_000);
 
   it('loads work counters and the task status from two --hooks files at once', () => {
@@ -235,7 +260,7 @@ describe('monitor.sh takes its completion verdict from the task ledger (Issue #1
       args: ['--hooks', counters],
     });
 
-    expect(run.stdout).toMatch(/commits=7 uncommitted=0 task=succeeded verdict=COMPLETE$/m);
+    expect(run.stdout).toMatch(/commits=7 uncommitted=0 verdict=COMPLETE task=succeeded$/m);
   }, 20_000);
 
   it('fails loudly when any file in a repeated --hooks list is missing', () => {
@@ -249,5 +274,114 @@ describe('monitor.sh takes its completion verdict from the task ledger (Issue #1
     expect(run.status).toBe(2);
     expect(run.stderr).toContain('hooks file not found');
     expect(run.captureCalls).toEqual([]);
+  }, 20_000);
+});
+
+/** The one line the loop owes an operator when it stops adjudicating (Issue #1613). */
+const FALLBACK_LINE =
+  "monitor[w1]: task state unavailable (CommandMate without 'commandmate task', server down, " +
+  'or unknown worktree) — FALLBACK MODE: completion is inferred from capture, not adjudicated. ' +
+  'Diagnose with: commandmate task list w1 --limit 1';
+
+function countLines(stdout: string, needle: string): number {
+  return stdout.split('\n').filter((line) => line.includes(needle)).length;
+}
+
+describe('monitor.sh announces an unreachable task ledger instead of degrading quietly (Issue #1613)', () => {
+  it.each([
+    { label: 'the server is not running', exitCode: 1 },
+    { label: 'the server does not know the worktree', exitCode: 99 },
+  ])('reports FALLBACK MODE exactly once per worker when $label', ({ exitCode }) => {
+    // The shim still prints a `succeeded` row, so this run separates "read the exit
+    // code" from "read stdout": with the exit code honoured the status is discarded
+    // and the stub counters keep the loop off COMPLETE; without it the run would end
+    // early on an adjudicated COMPLETE that the ledger never gave.
+    const run = runLoop({
+      fixtures: STARTED_THEN_IDLE,
+      polls: 3,
+      taskStatus: taskListRow('succeeded'),
+      taskExit: exitCode,
+    });
+
+    expect(run.status).toBe(0);
+    expect(countLines(run.stdout, FALLBACK_LINE)).toBe(1);
+    // Once per worker, not once per poll: three polls happened, and the notice is a
+    // version gate, not a per-poll event. A repeated line would bury the stream it
+    // is supposed to make readable.
+    expect(run.taskCalls).toHaveLength(3);
+    expect(run.stdout).not.toContain('COMPLETE (approvals=');
+    expect(run.stdout).toContain('reached --max-polls');
+  }, 20_000);
+
+  it('keeps polling the ledger so a server that comes back is picked up', () => {
+    // Downgrading to empty must not latch the hook off. The gate file only silences
+    // the message; the read itself still happens on every poll.
+    const run = runLoop({
+      fixtures: STARTED_THEN_IDLE,
+      polls: 4,
+      taskStatus: taskListRow('succeeded'),
+      taskExit: 99,
+    });
+
+    expect(run.taskCalls).toEqual(Array.from({ length: 4 }, () => 'task list w1 --limit 1'));
+  }, 20_000);
+
+  it('omits task= from the poll lines while the ledger is unreachable', () => {
+    // `unavailable` is downgraded to empty before the poll line is built, so the
+    // evidence stream never claims a status it did not get. Pinned as an absence
+    // because the failure mode is a plausible-looking value, not a missing one.
+    const run = runLoop({
+      fixtures: STARTED_THEN_IDLE,
+      polls: 3,
+      taskStatus: taskListRow('succeeded'),
+      taskExit: 1,
+    });
+
+    const pollLines = run.stdout.split('\n').filter((line) => / poll \d+ -> /.test(line));
+    expect(pollLines).toHaveLength(3);
+    expect(pollLines.some((line) => line.includes('task='))).toBe(false);
+    expect(pollLines.every((line) => /verdict=[A-Z_]+$/.test(line))).toBe(true);
+  }, 20_000);
+
+  it('stays silent for a contract-less worktree, where nothing was promised', () => {
+    // The control arm, and the reason the branch keys on the exit code rather than
+    // on empty stdout: a known worktree with zero tasks exits 0 with an empty stdout
+    // (measured), and that is a normal answer. Warning here would train the operator
+    // to ignore the line that matters.
+    const run = runLoop({
+      fixtures: STARTED_THEN_IDLE,
+      polls: 3,
+      taskStatus: '',
+    });
+
+    expect(run.stdout).not.toContain('FALLBACK MODE');
+    expect(run.stdout).not.toContain('task=');
+    expect(run.taskCalls).toHaveLength(3);
+  }, 20_000);
+
+  it('stays silent when the hook was never wired, so the stub is not a failure', () => {
+    // monitor.sh's own `read_task_status` stub returns empty, not `unavailable`:
+    // a run that never asked for task state must not be told it lost it.
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'monitor-task-nohook-'));
+    const cmShim = path.join(dir, 'fake-cm');
+    writeFileSync(
+      cmShim,
+      `#!/bin/sh\ncat "${path.join(FIXTURES, 'live-idle.json')}"\n`,
+    );
+    chmodSync(cmShim, 0o755);
+
+    const proc = spawnSync(
+      'bash',
+      [MONITOR, '--interval', '0', '--idle-threshold', '1', '--max-polls', '2', '--verbose', 'w1'],
+      {
+        encoding: 'utf8',
+        timeout: HARD_TIMEOUT_MS,
+        env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}`, CM: cmShim },
+      },
+    );
+
+    expect(proc.status).toBe(0);
+    expect(proc.stdout ?? '').not.toContain('FALLBACK MODE');
+    expect(proc.stdout ?? '').not.toContain('task=');
   }, 20_000);
 });

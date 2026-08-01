@@ -215,12 +215,15 @@ describe('verify-completion task status as the primary source', () => {
     },
   );
 
-  it.each(['', 'bogus-status'])(
+  it.each(['', 'bogus-status', 'unavailable'])(
     'falls back to the capture heuristics when the status is %o',
     (status) => {
-      // Empty is what every hook returns when there is no contract, no ledger, or
-      // an older CLI; an unrecognised value is what a changed output format would
-      // produce. Both must degrade to the old behaviour, never to a verdict.
+      // Empty is what every hook returns when there is no contract; an unrecognised
+      // value is what a changed output format would produce; `unavailable` is what
+      // hooks-task.sh answers when the ledger could not be reached at all (Issue
+      // #1613) — deliberately not a TaskStatus, so a monitor.sh that predates that
+      // split hands it straight here and it still decides nothing. All three must
+      // degrade to the old behaviour, never to a verdict.
       expect(verify(['--started', '1', ...idleWithNoWork, '--task-status', status])).toBe(
         'NOT_STARTED',
       );
