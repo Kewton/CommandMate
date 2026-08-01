@@ -102,7 +102,7 @@ mcbd-<cliToolId>-<worktree-id>[-<instance suffix>]      # getSessionName() と�
 固定フォーマットが追加される（**opt-in。付けない限り既定出力は 1 バイトも変わらない**）:
 
 ```
-monitor[<wid>]: poll <N> -> <STATE> started=<0|1> streak=<n> commits=<n> uncommitted=<n> task=<status|-> verdict=<VERDICT>
+monitor[<wid>]: poll <N> -> <STATE> started=<0|1> streak=<n> commits=<n> uncommitted=<n> verdict=<VERDICT> [task=<status>]
 ```
 
 `<STATE>` は `classify-state.sh` の出力、`<VERDICT>` は `verify-completion.sh` の出力、間の
@@ -114,7 +114,14 @@ verdict だけでなく根拠つきで読める。集計はそのまま awk / so
 grep -oE 'poll [0-9]+ -> [A-Z_]+' monitor.log | awk '{print $4}' | sort | uniq -c
 # 総ポーリング数（worker 別）
 grep -cE '^monitor\[w1\]: poll ' monitor.log
+# タスク状態の分布（台帳が答えた poll だけが数えられる）
+grep -oE 'task=[a-z_]+' monitor.log | sort | uniq -c
 ```
+
+`task=` は**台帳が答えたときだけ末尾に付く**（#1613）。契約なし委任・フォールバックモードの
+poll 行は `task=` を持たず、台帳導入前と 1 バイトも変わらない。`task=-` のような
+「読んでいないのに読んだ形をした値」を証拠ストリームに出さないため。裏を返せば、
+**終局判定の poll 行に `task=` があるかどうかが「裁定由来か推定由来か」の判別子**になる。
 
 ### `--hooks` / `MONITOR_HOOKS`: 完了フックの配線（#1533）
 
@@ -173,7 +180,7 @@ capture のテキスト解析は契約無しの委任と未終局タスクのた
 | `failed` / `cancelled` | `VERIFY_FAILED` | 終局だが**マージ不可**。`commandmate verify <id> --json` で失敗ゲートを見て再指示 |
 | `not_started` | `NOT_STARTED` | 作業証跡ゼロ |
 | `pending` / `running` / `waiting_input` / `verifying` | （フォールバック） | 未終局。capture ヒューリスティクスが判定する |
-| 空 / 未知 | （フォールバック） | 契約無し・ledger 無し・旧 CLI。**必ず従来動作に落ちる**（勝手な verdict を作らない） |
+| 空 / 未知 | （フォールバック） | 契約無しの委任・未知の出力形式。**必ず従来動作に落ちる**（勝手な verdict を作らない） |
 
 2 つの落とし穴を明示的に塞いでいる:
 
@@ -186,6 +193,37 @@ capture のテキスト解析は契約無しの委任と未終局タスクのた
 > **monitor の COMPLETE をマージ可否の裁定に使わないこと。** 契約付き委任の最終裁定は
 > `commandmate wait <id> --on-prompt human --verify` の exit code（`0` 合格 / `20` 検証不合格 /
 > `21` 作業証跡ゼロ）である。monitor は「いつ見に行くか」を決める道具であって、合否を決める道具ではない。
+
+#### タスク状態が読めないとき（バージョンゲート、#1613）
+
+`hooks-task.sh` を配線したのに台帳を引けなかった場合、monitor は worker ごとに**1 度だけ**
+次を出してからフォールバックモードで走る。**黙って劣化しない。**
+
+```
+monitor[<wid>]: task state unavailable (CommandMate without 'commandmate task', server down, or unknown worktree) — FALLBACK MODE: completion is inferred from capture, not adjudicated. Diagnose with: commandmate task list <wid> --limit 1
+```
+
+`read_task_status` の答えは 3 値である。**空（台帳が答えた／この worktree に契約は無い）と、
+`unavailable`（台帳に訊けなかった）を同じ値にしない**のがこの分岐の要点で、以前は両方が空に
+潰れていたため、完了判定の一次ソースが丸ごと消えてもログは正常時と同じだった。
+
+`$CM task list` の**終了コード**で判定する（stdout の中身ではない）。develop `a46845c7` 実測:
+
+| 条件 | 挙動 | `read_task_status` |
+|---|---|---|
+| worktree をサーバが知らない | exit 99 / `Resource not found. Check the worktree ID.` | `unavailable` |
+| サーバ未起動 | exit 1 / `Server is not running. Start it with: commandmate start` | `unavailable` |
+| 既知 worktree・タスク 0 件 | **exit 0** / notice は stderr、stdout は空 | 空（＝正常。契約なし委任） |
+
+**「stdout が空だから異常」にしてはいけない**のは最後の行のため。`task` 未実装の CommandMate
+（`src/cli/commands/task.ts` は develop にのみ存在。v0.15.0 / v0.16.0 には無い）も非 0 で落ちるので
+`unavailable` に入る。なお `commandmate task --help` は判別に使えない（旧版はルートヘルプを出して
+exit 0 になる）。実サブコマンドを叩く必要がある。
+
+`unavailable` は **TaskStatus ではない**。`verify-completion.sh` は未知値を fallthrough するので、
+この値を知らない版に渡っても裁定には使われずヒューリスティクスに落ちる。monitor 側は 1 度報告した
+あと空へ落として扱うが、**ポーリング自体は続く**ので、復帰したサーバは次の poll から拾える。
+`hooks-task.sh` を配線しなければこの行は出ない（契約なし委任として従来どおり動く）。
 
 ### #1513 G2 の証拠採取レシピ
 
@@ -209,7 +247,8 @@ MONITOR_HOOKS_BASE=origin/develop \
 | 総ポーリング数 | `grep -cE '^monitor\[<wid>\]: poll ' monitor.log` |
 | 状態分類の分布 | `grep -oE 'poll [0-9]+ -> [A-Z_]+' monitor.log \| awk '{print $4}' \| sort \| uniq -c` |
 | 介入全件 | `grep -E "sent 'a'\|resent to\|resend budget spent" monitor.log`（承認 Enter はサイレント。総数は COMPLETE 行の `approvals=` に出る。**未配信は `grep 'NOT delivered'`** で別に数える） |
-| 完了判定の根拠 | poll 行の `started= / streak= / commits= / uncommitted= / task= / verdict=`。COMPLETE した poll 行がその worker の判定根拠そのもの |
+| 完了判定の根拠 | poll 行の `started= / streak= / commits= / uncommitted= / verdict= / task=`。COMPLETE した poll 行がその worker の判定根拠そのもの |
+| 判定が一次ソース由来かフォールバック由来か | 終局判定の poll 行に `task=` があるか／`FALLBACK MODE` 行が出ているか |
 | capture 失敗 | `grep -c 'capture failed' monitor.log`（poll 行は出ないので、総ポーリング数と別に数える） |
 
 **`--hooks` を付け忘れると誤報 0 は測れない**：commits/uncommitted が常に 0 になり、完走した
@@ -306,6 +345,9 @@ worker まで NOT_STARTED として記録される。G2 のログは必ずフッ
 14. **契約付き委任では完了判定の一次ソースはタスク状態**（`hooks-task.sh`）で、capture 解析は
     フォールバック。マージ可否の最終裁定は `wait --verify` の exit code であり、monitor の
     `COMPLETE` ではない。詳細は上記「タスク状態を一次ソースにする（#1581）」。
+    **台帳が引けない環境では、worker ごと 1 度だけ `FALLBACK MODE` を報告してから推定モードで走る**
+    （#1613）。arm 前に `CM=commandmate . .../hooks-task.sh; read_task_status <worktree-id>` を叩き、
+    契約中の状態／契約なしなら空／引けないなら `unavailable` のどれが返るかを確かめること。
 15. **merge 成否は state=MERGED を確認してから Issue close**（未マージ Issue の誤クローズ防止）
     （`feedback_orchestrate_changelog_conflict_close_guard`）。
 16. **スコープ完遂は受入ゲートでなく grep 実数で検証**。NUL 混入ファイルで grep がバイナリ扱いするため
@@ -348,6 +390,7 @@ worker まで NOT_STARTED として記録される。G2 のログは必ずフッ
 | 9 | **ゲート不合格の worker を COMPLETE と報告**（commit も idle streak も「完了」に見えるので、capture 由来の信号だけでは検証不合格と区別できない） | #1581 | タスク状態を一次ソースにし、`failed` / `cancelled` を `VERIFY_FAILED` として分離 | `verify-completion.test.ts` / `monitor-task-source.test.ts` |
 | 10 | 古い契約の終局ステータスを現在の裁定として読み、**生成中の worker を COMPLETE と誤報** | #1581 | 生存ペイン（`GENERATING`/`PROMPT`/`RATE_LIMIT`）をタスク状態より先に評価 | `verify-completion.test.ts`（stale veto）/ `monitor-task-source.test.ts` |
 | 11 | **介入が 1 回も届かないまま「送った」と記録される**（既定 prefix `cm` が実在しないセッションを指し、失敗は握り潰され、ログとカウンタは送信前に動いていた） | #1601 | `cliToolId` からのセッション導出 ＋ `has-session` 検証 ＋ 送信後ログ ＋ 配信時のみカウント ＋ `=name:` exact match | `monitor-session-target.test.ts` / `monitor-lib.test.ts`（導出）/ `monitor-resend.test.ts` |
+| 12 | **完了判定の一次ソースを失ったまま推定モードで走り続ける**（`task list` の非 0 終了が「契約なし」と同じ空文字に潰れ、ログは正常時と区別が付かない） | #1613 | `read_task_status` を 3 値化（終了コードで `unavailable`）＋ worker ごと 1 度の `FALLBACK MODE` 報告 ＋ `task=` を値があるときだけ出力 | `monitor-task-source.test.ts`（exit 1 / exit 99 を空とは別ケースとして固定）/ `monitor-observability.test.ts` / `verify-completion.test.ts` |
 
 いずれも naive 実装で red → ガード実装で green にした（#3〜#7 は #1512 の初版実装に対して red）。
 #8 は両方向テスト（対照＋変異注入）で固定している：`--verbose` を既定 ON にする / フックをスタブより
@@ -356,6 +399,10 @@ worker まで NOT_STARTED として記録される。G2 のログは必ずフッ
 #11 も同じ方法で確認済み（既定を `cm` に戻す / `has-session` 検証を外して `|| true` に戻す /
 承認カウンタを送信前に加算する / ログを送信前に出す / ツール id 一覧を欠落させる /
 `=name:` を素の名前に戻す の 6 変異で、いずれも該当テストだけが赤くなる）。
+#12 も同様（`hooks-task.sh` の `unavailable` 分岐を削る → 7 件 red / `monitor.sh` の
+`unavailable` 処理を削る → 3 件 red / poll 行を `task=${task_status:--}` に戻す → 17 件 red）。
+なお **`task list` を stdout だけで判定する実装は変異で捕まらない**ため、失敗する CLI にも
+正常に見える行を stdout へ出させるケースを別に置いてある。
 
 ## fixture の作り方（実機採取）
 

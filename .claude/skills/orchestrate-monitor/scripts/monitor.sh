@@ -270,7 +270,8 @@ count_commits() {
 # read_task_status <worktree-id>: the status the server recorded for the
 # worktree's newest execution contract, or empty when there is no answer. Stubbed
 # to empty so a contract-less run behaves exactly as before — verify-completion.sh
-# then falls back to the capture heuristics. See hooks-task.sh (Issue #1581).
+# then falls back to the capture heuristics, with no version-gate notice, because
+# nothing was promised. See hooks-task.sh (Issue #1581, #1613).
 read_task_status() {
   echo ""
 }
@@ -412,7 +413,21 @@ while [ "$done_count" -lt "$n_ids" ]; do
     post_streak=$(read_state "$lbl" streak)
     commits=$(count_commits "$wid")
     uncommitted=$(count_uncommitted "$wid")
+    # Primary completion source (Issue #1581). `unavailable` is the version gate
+    # (Issue #1613): the hook was wired, so task state was *promised*, and it could
+    # not be read. Announced once per worker and then downgraded to empty, which is
+    # what makes verify-completion.sh fall back to the capture heuristics.
+    # Announcing beats degrading quietly — a run that silently loses its adjudicated
+    # source still prints plausible COMPLETE lines, and nothing in the log says they
+    # were inferred. Polling continues, so a server that comes back is picked up again.
     task_status=$(read_task_status "$wid")
+    if [ "$task_status" = "unavailable" ]; then
+      task_status=""
+      if [ ! -f "$STATE_DIR/$lbl.taskgate" ]; then
+        touch "$STATE_DIR/$lbl.taskgate"
+        echo "monitor[$lbl]: task state unavailable (CommandMate without 'commandmate task', server down, or unknown worktree) — FALLBACK MODE: completion is inferred from capture, not adjudicated. Diagnose with: commandmate task list $wid --limit 1"
+      fi
+    fi
 
     verdict=$("$VERIFY" \
       --started "$post_started" \
@@ -429,8 +444,18 @@ while [ "$done_count" -lt "$n_ids" ]; do
     # gives the state distribution, and the trailing key=value pairs carry the
     # inputs verify-completion.sh actually saw, i.e. the evidence behind the
     # verdict rather than the verdict alone (Issue #1533, #1513 G2).
+    #
+    # `task=` is appended last and only when the ledger answered (Issue #1613).
+    # Appending keeps every contract-less poll line byte-identical to the pre-#1581
+    # format — the regression suite pins those lines, and a `task=-` on runs that
+    # never had a contract would be noise claiming to be evidence.
+    # `grep -o 'task=[a-z_]*'` reduces it the same way the other fields reduce.
     if [ "$VERBOSE" = "1" ]; then
-      echo "monitor[$lbl]: poll $((poll_round + 1)) -> $state started=$post_started streak=$post_streak commits=$commits uncommitted=$uncommitted task=${task_status:--} verdict=$verdict"
+      poll_line="monitor[$lbl]: poll $((poll_round + 1)) -> $state started=$post_started streak=$post_streak commits=$commits uncommitted=$uncommitted verdict=$verdict"
+      if [ -n "$task_status" ]; then
+        poll_line="$poll_line task=$task_status"
+      fi
+      echo "$poll_line"
     fi
 
     case "$verdict" in

@@ -122,13 +122,15 @@ function expectPolls(run: RunResult, polls: number, id = 'w1'): void {
   expect(run.stdout).not.toContain('capture failed');
 }
 
-// `task=` carries the contract status verify-completion.sh was given, and is `-`
-// when there is none (Issue #1581). It is part of the fixed format because the
-// poll line's contract is "the inputs behind the verdict": once the task ledger
-// became the primary completion source, a line without it would explain a
-// COMPLETE with counters that did not actually decide it.
+// `task=` carries the contract status verify-completion.sh was given, and is
+// appended after `verdict=` only when the task ledger actually answered (Issue
+// #1581, #1613). It is optional rather than a `-` placeholder so a contract-less
+// run — and a run whose ledger could not be reached — keeps the pre-ledger line
+// byte for byte: an evidence stream must not carry a value that looks like a
+// reading when nothing was read. Its presence is therefore itself the signal that
+// the verdict was adjudicated rather than inferred.
 const POLL_LINE =
-  /^monitor\[([^\]]+)\]: poll (\d+) -> ([A-Z_]+) started=(\d+) streak=(\d+) commits=(\d+) uncommitted=(\d+) task=(\S+) verdict=([A-Z_]+)$/;
+  /^monitor\[([^\]]+)\]: poll (\d+) -> ([A-Z_]+) started=(\d+) streak=(\d+) commits=(\d+) uncommitted=(\d+) verdict=([A-Z_]+)(?: task=(\S+))?$/;
 
 interface PollRecord {
   id: string;
@@ -138,7 +140,7 @@ interface PollRecord {
   streak: number;
   commits: number;
   uncommitted: number;
-  task: string;
+  task: string | null;
   verdict: string;
 }
 
@@ -156,8 +158,8 @@ function parsePolls(stdout: string): PollRecord[] {
       streak: Number(m[5]),
       commits: Number(m[6]),
       uncommitted: Number(m[7]),
-      task: m[8],
-      verdict: m[9],
+      verdict: m[8],
+      task: m[9] ?? null,
     }));
 }
 
@@ -206,12 +208,17 @@ describe('monitor.sh --verbose per-poll state log (Issue #1533, scope A)', () =>
     // would leave this short rather than silently degrade the evidence.
     expect(records.map((r) => r.poll)).toEqual([1, 2, 3]);
     expect(records).toEqual([
-      { id: 'w1', poll: 1, state: 'GENERATING', started: 1, streak: 0, commits: 0, uncommitted: 0, task: '-', verdict: 'WORKING' },
-      { id: 'w1', poll: 2, state: 'IDLE', started: 1, streak: 1, commits: 0, uncommitted: 0, task: '-', verdict: 'NOT_STARTED' },
-      { id: 'w1', poll: 3, state: 'IDLE', started: 1, streak: 2, commits: 0, uncommitted: 0, task: '-', verdict: 'NOT_STARTED' },
+      { id: 'w1', poll: 1, state: 'GENERATING', started: 1, streak: 0, commits: 0, uncommitted: 0, task: null, verdict: 'WORKING' },
+      { id: 'w1', poll: 2, state: 'IDLE', started: 1, streak: 1, commits: 0, uncommitted: 0, task: null, verdict: 'NOT_STARTED' },
+      { id: 'w1', poll: 3, state: 'IDLE', started: 1, streak: 2, commits: 0, uncommitted: 0, task: null, verdict: 'NOT_STARTED' },
     ]);
     // The #1513 G2 question "what was the state distribution over the run".
     expect(stateDistribution(records)).toEqual({ GENERATING: 1, IDLE: 2 });
+    // Nothing was wired to the ledger here, so the field is absent rather than
+    // present-and-empty. Asserted on the raw text as well as through the optional
+    // capture group: `task=-` would satisfy neither, and a `task=` with nothing
+    // after it would still parse.
+    expect(run.stdout).not.toContain('task=');
   }, 20_000);
 
   it('adds only the poll lines: --verbose stdout minus them equals the default stdout', () => {
@@ -278,8 +285,8 @@ describe('monitor.sh completion hooks (Issue #1533, scope B)', () => {
     expect(run.stdout).toContain('monitor: all 1 worker(s) complete');
     expect(run.stdout).not.toContain('reached --max-polls');
     expect(parsePolls(run.stdout)).toEqual([
-      { id: 'w1', poll: 1, state: 'GENERATING', started: 1, streak: 0, commits: 2, uncommitted: 5, task: '-', verdict: 'WORKING' },
-      { id: 'w1', poll: 2, state: 'IDLE', started: 1, streak: 1, commits: 2, uncommitted: 5, task: '-', verdict: 'COMPLETE' },
+      { id: 'w1', poll: 1, state: 'GENERATING', started: 1, streak: 0, commits: 2, uncommitted: 5, task: null, verdict: 'WORKING' },
+      { id: 'w1', poll: 2, state: 'IDLE', started: 1, streak: 1, commits: 2, uncommitted: 5, task: null, verdict: 'COMPLETE' },
     ]);
   }, 20_000);
 
