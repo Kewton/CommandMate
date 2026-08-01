@@ -7,7 +7,7 @@
   "counterpart": {
     "repo": "Kewton/commandmate-skills",
     "url": "https://github.com/Kewton/commandmate-skills",
-    "lastSyncedRef": "2f56807",
+    "lastSyncedRef": "439338b",
     "lastSyncedAt": "2026-08-01",
     "checkoutRequired": false,
     "checkoutNote": "この対応表による検知はローカルの sha256 だけで完結する。skills は個人リポジトリで、CI から書ける token を増やしたくない（docs/user-guide/skills.md §3-9）ため、CI は counterpart を checkout しない。手元に checkout がある時だけ `node scripts/skills-sync-map.mjs check --counterpart <dir>` で実 diff を取る。"
@@ -213,7 +213,7 @@
         {
           "path": "SKILL.md",
           "policy": "port-required",
-          "sha256": "2c0828baddfd4220745a5bb1f7a442ce5fd137e9d973a00ee29326c7bcb7bc72",
+          "sha256": "bff6476bd4645d4a285784d3d1d3f3f35864ec838f41ef143c72fbd3dce0ea64",
           "note": "counterpart は独立に書き起こされた文書で、共有行は 17 行しかない（2026-08-01 実測、CommandMate 423 行 / skills 380 行）。コピーではなく「同じ scripts を説明した別の文書」なので、移植するのは prose ではなく挙動の記述（フラグ・exit code・判定順序・警告文言）である。"
         },
         {
@@ -224,7 +224,8 @@
         {
           "path": "scripts/hooks-git.sh",
           "policy": "port-required",
-          "sha256": "528dc90d464bbe5d44555dfeadc49189f47ae8731f1f14e20e49f99a03e2ad0b"
+          "sha256": "79523633f01e09114c743cc65afd75908708458769b3565fc77794dcdb014c25",
+          "note": "#1614 で同期済み（skills 0.4.0）。この pin が実際に赤くなって移植を強制した最初の事例である: #1614 の編集で hooks-git.sh と monitor.sh の 2 件が sync-map.test.ts で red になり、counterpart へ移植してから update した。"
         },
         {
           "path": "scripts/hooks-task.sh",
@@ -240,7 +241,7 @@
         {
           "path": "scripts/monitor.sh",
           "policy": "port-required",
-          "sha256": "ffce8e14a005d10e84e92184dcaef5611c0d0c5bd32a868f6fc8688425087736",
+          "sha256": "b6d663091cad3fe91a62962aec85aa0adaae307f927f9e0dc5a6189696df255e",
           "note": "#1613 で同期済み。それ以前は skills 側だけが FALLBACK MODE 警告を出していた（コード差分 13 行）。"
         },
         {

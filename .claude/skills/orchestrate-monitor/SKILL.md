@@ -157,6 +157,22 @@ worktree のディレクトリ名）、`git -C <path> log --oneline <base>..HEAD
 場合は起動時に stderr へ警告する（黙って 0 を返すと、全部コミット済みの worker が
 uncommitted=0 と合わさって最後に NOT_STARTED と誤報されるため）。
 
+**git が答えられなかった場合と、worker が本当に何も書いていない場合は別物である（#1614）。**
+`git worktree list` / `git log` / `git status` はいずれも終了コードを確認する。失敗したときの
+カウンタ値は 0 のまま（`commits=0 && uncommitted=0` は verify-completion.sh を安全側＝
+COMPLETE を出さない方向にしか倒さない）だが、**黙った 0 ではなく**、原因ごとに
+**worker あたり 1 行**を stderr へ出す。毎ポーリング出さないのは base ref 警告と同じ理由である。
+
+```
+monitor hooks: [<wid>] 'git -C <repo> worktree list --porcelain' failed (exit 128); commit and change counts for this worker are UNKNOWN and reported as 0 — ...
+monitor hooks: [<wid>] no checkout resolved in '<repo>'; both counters report 0 because nothing was measured, not because the worker did nothing ...
+```
+
+worktree path の解決が失敗すると**両カウンタが同時に 0 へ沈む**ので、id が解決できないケースも
+同じ粒度で報告する。なお数え方は `printf '%s' "$out" | grep -c . || true` である:
+終了コードを見るために出力を変数へ受けると `$()` が末尾改行を落とすため、`wc -l` は
+1 件を 0 と数える（bash 3.2.57 実測）。`|| echo 0` は 0 件で `"0\n0"` になるので使わない。
+
 ### タスク状態を一次ソースにする（#1581）
 
 `send --contract` で委任した worktree では、サーバが検証ゲートを回してタスクに**終局ステータス**を
@@ -250,6 +266,8 @@ MONITOR_HOOKS_BASE=origin/develop \
 | 完了判定の根拠 | poll 行の `started= / streak= / commits= / uncommitted= / verdict= / task=`。COMPLETE した poll 行がその worker の判定根拠そのもの |
 | 判定が一次ソース由来かフォールバック由来か | 終局判定の poll 行に `task=` があるか／`FALLBACK MODE` 行が出ているか |
 | capture 失敗 | `grep -c 'capture failed' monitor.log`（poll 行は出ないので、総ポーリング数と別に数える） |
+| helper 失敗（#1614） | `grep -cE 'classify-state failed\|verify-completion failed' monitor.log`。いずれもそのポーリングを捨てる（poll 行は出ない）。**0 でなければ判定を下せなかったポーリングがある**ので、誤報 0 の主張はその分だけ弱い |
+| カウンタが信用できないポーリング | `grep 'monitor hooks: \[' monitor.log`（worker あたり 1 行。出ていれば `commits=` / `uncommitted=` の 0 は「測れなかった」であって「作業ゼロ」ではない） |
 
 **`--hooks` を付け忘れると誤報 0 は測れない**：commits/uncommitted が常に 0 になり、完走した
 worker まで NOT_STARTED として記録される。G2 のログは必ずフック付きで採ること。
@@ -392,6 +410,8 @@ worker まで NOT_STARTED として記録される。G2 のログは必ずフッ
 | 11 | **介入が 1 回も届かないまま「送った」と記録される**（既定 prefix `cm` が実在しないセッションを指し、失敗は握り潰され、ログとカウンタは送信前に動いていた） | #1601 | `cliToolId` からのセッション導出 ＋ `has-session` 検証 ＋ 送信後ログ ＋ 配信時のみカウント ＋ `=name:` exact match | `monitor-session-target.test.ts` / `monitor-lib.test.ts`（導出）/ `monitor-resend.test.ts` |
 | 12 | **完了判定の一次ソースを失ったまま推定モードで走り続ける**（`task list` の非 0 終了が「契約なし」と同じ空文字に潰れ、ログは正常時と区別が付かない） | #1613 | `read_task_status` を 3 値化（終了コードで `unavailable`）＋ worker ごと 1 度の `FALLBACK MODE` 報告 ＋ `task=` を値があるときだけ出力 | `monitor-task-source.test.ts`（exit 1 / exit 99 を空とは別ケースとして固定）/ `monitor-observability.test.ts` / `verify-completion.test.ts` |
 
+| 13 | **外部コマンドの終了コードを見ずに次を決める**（`git \| wc -l` が git の失敗を「作業 0」として返し完走 worker を NOT_STARTED と誤報／`classify-state.sh` が落ちると空 state が verify へ渡り、生存ペインとみなされず**稼働中 worker が COMPLETE**／`verify-completion.sh` が落ちると `case` に default が無く**そのポーリングが無言で素通り**） | #1614 | hooks-git.sh の 3 つの git 呼び出しを終了コード判定＋worker あたり 1 回の stderr 報告に、`monitor.sh` の `CLASSIFY` / `VERIFY` を `capture`（既存）と同じ扱いに | `monitor-exit-codes.test.ts`（git 失敗と真の作業ゼロを別テストで固定、0/1/複数件の計数も固定） |
+
 いずれも naive 実装で red → ガード実装で green にした（#3〜#7 は #1512 の初版実装に対して red）。
 #8 は両方向テスト（対照＋変異注入）で固定している：`--verbose` を既定 ON にする / フックをスタブより
 先に source する / poll 行の書式を変える / 参考フックの commit 数を 0 固定にする、のいずれの変異でも
@@ -403,6 +423,12 @@ worker まで NOT_STARTED として記録される。G2 のログは必ずフッ
 `unavailable` 処理を削る → 3 件 red / poll 行を `task=${task_status:--}` に戻す → 17 件 red）。
 なお **`task list` を stdout だけで判定する実装は変異で捕まらない**ため、失敗する CLI にも
 正常に見える行を stdout へ出させるケースを別に置いてある。
+#13 も 7 変異で確認済み（`classify` ガード削除 → 2 件 red、しかも実際に
+`poll 4 -> <空> ... verdict=COMPLETE` と `COMPLETE (approvals=0)` が出る／`verify` ガード削除 → 2 件 red／
+hooks-git.sh を #1614 以前へ全戻し → 5 件 red／`git log` だけ・`git status` だけ・no-checkout 警告だけを
+削る → それぞれ 1・1・1 件 red／`git worktree list` だけ削る → 2 件 red／数え方を `wc -l` に戻す → 4 件 red）。
+**「git が失敗した」と「本当に作業ゼロ」は別テストが担保する**（後者は stderr が空であることを固定
+しているので、前者の assertion では満たせない）。
 
 ## fixture の作り方（実機採取）
 
