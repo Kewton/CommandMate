@@ -322,7 +322,23 @@ while [ "$done_count" -lt "$n_ids" ]; do
       continue
     fi
 
+    # The helper's exit code matters as much as capture's above (Issue #1614).
+    # An empty `state` is NOT inert: `case "$state"` below matches nothing, but
+    # the value is still handed to verify-completion.sh, where it is not a live
+    # signal and therefore falls through to the idle heuristic. Measured on bash
+    # 3.2.57:
+    #   verify-completion.sh --started 1 --state '' --idle-streak 10 \
+    #     --idle-threshold 5 --commits 2 --uncommitted 0 --task-status ''
+    #   -> COMPLETE
+    # i.e. a classifier that dies turns a busy worker into a COMPLETE report.
+    # Skipping the poll — the treatment a failed capture already gets — is what
+    # keeps the empty value away from the decision.
     state=$("$CLASSIFY" --json "$poll")
+    classify_rc=$?
+    if [ "$classify_rc" -ne 0 ] || [ -z "$state" ]; then
+      echo "monitor[$lbl]: classify-state failed (exit $classify_rc), skipping poll"
+      continue
+    fi
 
     # The intervention target, derived from THIS poll: the tool the server just
     # resolved for this worktree/instance, so the pane we may type into is the
@@ -437,6 +453,15 @@ while [ "$done_count" -lt "$n_ids" ]; do
       --commits "$commits" \
       --uncommitted "$uncommitted" \
       --task-status "$task_status")
+    verify_rc=$?
+    # The `case` below has no default arm, so an empty verdict would drop the
+    # poll without a word: the loop keeps running, prints nothing, and decides
+    # nothing while looking healthy (Issue #1614). Report it with the inputs it
+    # was given, so the call can be reproduced by hand rather than guessed at.
+    if [ "$verify_rc" -ne 0 ] || [ -z "$verdict" ]; then
+      echo "monitor[$lbl]: verify-completion failed (exit $verify_rc), no verdict this poll (state=$state started=$post_started streak=$post_streak commits=$commits uncommitted=$uncommitted task=${task_status:--})"
+      continue
+    fi
 
     # POLL_LINE — one line per poll per worker, opt-in via --verbose. Fixed field
     # order so a run can be reduced mechanically, e.g.
