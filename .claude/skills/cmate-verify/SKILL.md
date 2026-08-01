@@ -84,6 +84,12 @@ RESULT failed
 ```
 
 失敗ゲートのログ末尾は **stderr** に出る（stdout をパース可能に保つため）。
+FAIL / TIMEOUT では**必ず理由行が出る**。ゲートが 1 バイトも出力しなかった場合は
+`no output captured`、`maxLogTailBytes: 0` なら `log tail disabled` と明示する
+（無言で終わると「不合格」しか残らず原因を追えない。Issue #1607）。
+出力ゼロで exit 126/127 のときは「コマンドが起動できていない可能性」を追加で出す
+（**断定ではなく調査の手がかり**。exec/spawn の失敗は背景ジョブの `wait` 越しには
+非 0 としてしか見えない）。
 
 | RESULT | exit code | 意味 |
 |---|---|---|
@@ -161,9 +167,20 @@ fixture は `scripts/tests/fixtures/*.yaml`。カバーしているのは
 全 PASS / 1 ゲート FAIL / timeout / work-evidence の not_started / 設定ファイル無し
 の 5 ケースに加えて、対になる反証ケース（同じ設定が linked worktree では実行される、
 `--skip-work-evidence` を付ければ同じ clean repo でも実行される）と、18 種の設定エラー、
+出力ゼロで落ちるゲート・`maxLogTailBytes: 0` の診断可能性（Issue #1607）、
 アサーションヘルパ自身の自己検査。
+
+失敗ログの追跡可能性も固定してある。ランナーの stdout / stderr は分離したまま
+（それが契約）だが、`run_verify` は **exit code ≠ 0 のときだけ** stderr を `out.N` に
+追記し、失敗した assert は `out.N` の path と中身の両方を出す。CI に残るのは suite の
+標準出力だけなので、`err.N` は sandbox の EXIT trap で消えてしまい後から読めない。
+`assert_stdout_contract` は stdout が `GATE ...` / `RESULT ...` の 2 形式だけであることを
+確認する（out.N が stderr を運んでも stdout 契約は壊れていない、という反証側）。
 
 判定が空振りしていないことは変異注入で確認してある（`set -m` の除去 → orphan 検出が赤 /
 失敗時の打ち切り → 継続実行の assert が赤 / work-evidence の OR を AND に → 33 件赤 /
-全 skip を passed と報告 → skip 判定が赤 / プライマリ判定の無効化 → 6 件赤）。
+全 skip を passed と報告 → skip 判定が赤 / プライマリ判定の無効化 → 6 件赤 /
+`out.N` への stderr 追記の停止 → 診断系 7 件だけ赤 / 空 log・tail 無効の fallback 除去 →
+5 件だけ赤 / spawn ヒントの除去 → 2 件だけ赤 / ログ末尾を stdout に流す → 3 件赤
+（うち 1 件が `assert_stdout_contract`））。
 `MIN_ASSERTIONS` はケースが黙って落ちたときに 0 failed で緑にならないための下限である。

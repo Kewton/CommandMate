@@ -1,0 +1,10 @@
+# maxLogTailBytes: 0 turns the tail off. The gate prints plenty, so "the tail is
+# disabled" and "the gate said nothing" are indistinguishable unless the runner
+# says which one it is (Issue #1607).
+version: 1
+gates:
+  - id: noisy
+    command: echo tail-should-not-appear; exit 5
+options:
+  skipInPrimaryCheckout: false
+  maxLogTailBytes: 0
