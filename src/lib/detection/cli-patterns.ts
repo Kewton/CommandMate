@@ -321,6 +321,30 @@ export const CODEX_SEPARATOR_PATTERN = /^─.*Worked for.*─+$/m;
 export const CODEX_SELECTION_LIST_PATTERN = /press\s+enter\s+to\s+(?:confirm|select)/i;
 
 /**
+ * Codex CLI approval-request footer pattern (Issue #1628).
+ *
+ * Codex renders an approval request ("Would you like to run the following
+ * command?" / "Would you like to make the following edits?") with the SAME
+ * "Press enter to confirm" footer as a `/model`-style menu, which is why
+ * CODEX_SELECTION_LIST_PATTERN swallows it. The two differ in the escape verb:
+ * an approval request can be *cancelled* (it is the agent asking the human for
+ * permission), a menu can only be *gone back* from.
+ *
+ * Measured on codex-cli 0.146.0 (five consecutive live approval frames captured
+ * from a real session, plus two live `/model` picker frames):
+ *   - approval : "Press enter to confirm or esc to cancel"
+ *   - /model   : "Press enter to confirm or esc to go back"
+ *   - /model   : "Press enter to select reasoning effort, or esc to dismiss."
+ *
+ * Used only as one of two OR'd approval signals (see isCodexApprovalRequest in
+ * status-detector.ts); the other is an interrogative question line, so a future
+ * rewording of either signal alone does not reopen Issue #1628.
+ *
+ * No /g flag (keeps .test() stateless), no nested quantifiers (ReDoS-safe).
+ */
+export const CODEX_APPROVAL_FOOTER_PATTERN = /esc\s+to\s+cancel/i;
+
+/**
  * Codex CLI pager / edit-previous (transcript) mode footer pattern (Issue #1017)
  *
  * When Codex enters its transcript pager / "edit previous message" mode, the
