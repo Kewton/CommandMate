@@ -16,6 +16,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById, saveInitialBranch, getInitialBranch } from '@/lib/db';
+import { resolveInstanceCliTool } from '@/lib/db/agent-instances-db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { sendUserMessage } from '@/lib/session/send-user-message';
@@ -146,11 +147,10 @@ export async function POST(
       );
     }
 
-    // Determine which CLI tool to use (priority: request > worktree setting > default)
-    const cliToolId = body.cliToolId || worktree.cliToolId || DEFAULT_CLI_TOOL;
-
-    // Validate CLI tool ID (DR4-002: fixed error text, no raw input reflection)
-    if (!VALID_CLI_TOOL_IDS.includes(cliToolId)) {
+    // Validate the requested CLI tool ID (DR4-002: fixed error text, no raw
+    // input reflection) before it is used to resolve the instance.
+    const requestedCliToolId = body.cliToolId || undefined;
+    if (requestedCliToolId && !VALID_CLI_TOOL_IDS.includes(requestedCliToolId)) {
       return NextResponse.json(
         { error: `Invalid CLI tool ID. Must be one of: ${VALID_CLI_TOOL_IDS.join(', ')}` },
         { status: 400 }
@@ -168,6 +168,33 @@ export async function POST(
       );
     }
     const instanceId = body.instanceId;
+
+    // Issue #1629: the roster is what declares which CLI tool backs an instance.
+    // Without this the tool came from the worktree default, so `--instance codex`
+    // started Claude in a session named `mcbd-claude-<worktree>-codex`.
+    const resolution = resolveInstanceCliTool(db, id, instanceId, requestedCliToolId);
+    if (!resolution.ok) {
+      return NextResponse.json(
+        {
+          error: `Agent instance '${resolution.instanceId}' is registered as ${resolution.rosterCliTool}, `
+            + `but ${resolution.requestedCliTool} was requested. `
+            + `Omit the agent, pass ${resolution.rosterCliTool}, or update the instance's roster entry.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    // Determine which CLI tool to use
+    // (priority: request/roster > worktree setting > default)
+    const cliToolId = resolution.cliToolId || worktree.cliToolId || DEFAULT_CLI_TOOL;
+
+    // Validate CLI tool ID (DR4-002: fixed error text, no raw input reflection)
+    if (!VALID_CLI_TOOL_IDS.includes(cliToolId)) {
+      return NextResponse.json(
+        { error: `Invalid CLI tool ID. Must be one of: ${VALID_CLI_TOOL_IDS.join(', ')}` },
+        { status: 400 }
+      );
+    }
 
     // Issue #576/#588/#989: Validate model parameter via shared validator (DR1-003)
     if (body.model) {
