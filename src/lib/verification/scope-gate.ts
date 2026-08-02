@@ -80,6 +80,8 @@ export function isContractPath(path: string): boolean {
 export interface ScopeOutcome {
   status: VerificationGateTerminalStatus;
   exitCode: number | null;
+  /** Epoch ms this evaluation began; `durationMs` is measured from it (#1625). */
+  startedAt: number;
   durationMs: number;
   logTail: string | null;
 }
@@ -417,7 +419,13 @@ export async function evaluateScope(
     status: VerificationGateTerminalStatus,
     logTail: string,
     exitCode: number | null
-  ): ScopeOutcome => ({ status, exitCode, durationMs: Date.now() - startedAt, logTail });
+  ): ScopeOutcome => ({
+    status,
+    exitCode,
+    startedAt,
+    durationMs: Date.now() - startedAt,
+    logTail,
+  });
 
   if (!scope) return done('skipped', SCOPE_SKIP_NO_CONTRACT, null);
   if (!requireScopeClean) return done('skipped', SCOPE_SKIP_NOT_REQUIRED, null);

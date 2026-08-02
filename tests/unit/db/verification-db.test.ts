@@ -231,6 +231,98 @@ describe('createGateResult / finishGateResult', () => {
   });
 });
 
+/**
+ * Issue #1625: the timestamps have to describe the execution, not the write.
+ *
+ * The runner opens the row before spawning the gate so an open row exists while
+ * it runs, and closes it with the window its own measurement covered. Without
+ * an explicit window here, the close would stamp `finished_at = now` and leave
+ * `started_at` at the moment the row was opened — which is what made every gate
+ * report a window unrelated to `duration_ms`.
+ */
+describe('finishGateResult — measured execution window', () => {
+  const WINDOW = { startedAt: 1_800_000_000_000, finishedAt: 1_800_000_004_010 };
+
+  it('writes the supplied window over the provisional opening stamp', () => {
+    const run = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
+    const gate = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint' });
+
+    finishGateResult(db, gate.id, {
+      status: 'passed',
+      exitCode: 0,
+      durationMs: 4010,
+      logTail: 'ok',
+      executionWindow: WINDOW,
+    });
+
+    const stored = getVerificationRun(db, run.id)!.gates[0];
+    expect(stored.startedAt.getTime()).toBe(WINDOW.startedAt);
+    expect(stored.finishedAt!.getTime()).toBe(WINDOW.finishedAt);
+    expect(stored.finishedAt!.getTime() - stored.startedAt.getTime()).toBe(stored.durationMs);
+  });
+
+  it('keeps the opening stamp and closes at now when no window is supplied', () => {
+    const run = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
+    const gate = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint' });
+    const openedAt = gate.startedAt.getTime();
+
+    // The reconciler's call shape (#1543): it never observed the gate, so it
+    // has no window to declare and must not invent one.
+    finishGateResult(db, gate.id, { status: 'error', durationMs: null, logTail: 'orphan' });
+
+    const stored = getVerificationRun(db, run.id)!.gates[0];
+    expect(stored.startedAt.getTime()).toBe(openedAt);
+    expect(stored.finishedAt!.getTime()).toBeGreaterThanOrEqual(openedAt);
+  });
+
+  it('reports timingsMeasured only when the window matches duration_ms', () => {
+    const run = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
+
+    const measured = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint' });
+    finishGateResult(db, measured.id, {
+      status: 'passed',
+      exitCode: 0,
+      durationMs: 4010,
+      executionWindow: WINDOW,
+    });
+
+    // A row shaped like the ones written before #1625: both stamps taken after
+    // the gate finished, so the window is empty while duration_ms says 4s.
+    const legacy = createGateResult(db, run.id, { gateId: 'test', command: 'npm run test:unit' });
+    finishGateResult(db, legacy.id, {
+      status: 'passed',
+      exitCode: 0,
+      durationMs: 4010,
+      executionWindow: { startedAt: WINDOW.finishedAt, finishedAt: WINDOW.finishedAt },
+    });
+
+    const gates = getVerificationRun(db, run.id)!.gates;
+    expect(gates.find((g) => g.gateId === 'lint')!.timingsMeasured).toBe(true);
+    // This is the discriminator a history reader applies to pre-#1625 rows:
+    // no backfill can repair them, so they have to be recognisable instead.
+    expect(gates.find((g) => g.gateId === 'test')!.timingsMeasured).toBe(false);
+  });
+
+  it('reports timingsMeasured false while a gate is still open', () => {
+    const run = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
+    const gate = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint' });
+
+    expect(gate.timingsMeasured).toBe(false);
+    expect(getVerificationRun(db, run.id)!.gates[0].timingsMeasured).toBe(false);
+  });
+
+  it('reports timingsMeasured false for a gate closed without a duration', () => {
+    const run = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
+    const gate = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint' });
+
+    finishGateResult(db, gate.id, { status: 'error', durationMs: null, logTail: 'orphan' });
+
+    // A reconciled orphan: started_at is real, finished_at is when the restart
+    // noticed. Nothing measured that interval, so it must not be advertised.
+    expect(getVerificationRun(db, run.id)!.gates[0].timingsMeasured).toBe(false);
+  });
+});
+
 describe('getVerificationRun', () => {
   it('returns null for an unknown run', () => {
     expect(getVerificationRun(db, 1)).toBeNull();
