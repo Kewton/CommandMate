@@ -22,6 +22,18 @@ export interface VerifyOptions {
   baseRef: string | null;
   skipInPrimaryCheckout: boolean;
   maxLogTailBytes: number;
+  /**
+   * Whether `work-evidence` demands a COMMIT rather than any change at all
+   * (Issue #1628, D-4). Default false — the gate's job has always been "is
+   * there work here to verify", and a dirty tree answers that.
+   *
+   * Turn it on in a repository whose delegations end in a commit (the task
+   * contract preamble tells agents "未 commit の作業は未完了とみなされる", and
+   * without this the gate happily passes `commits=0 uncommitted=1`, so
+   * `RESULT passed` proved nothing about the commit). Repository-wide by
+   * design: it is a property of how the repository is worked, not of one run.
+   */
+  requireCommit: boolean;
 }
 
 export interface VerifyConfig {
@@ -61,7 +73,7 @@ const GATE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
 const TOP_LEVEL_KEYS = ['version', 'gates', 'options'];
 const GATE_KEYS = ['id', 'command', 'timeoutSec'];
-const OPTION_KEYS = ['baseRef', 'skipInPrimaryCheckout', 'maxLogTailBytes'];
+const OPTION_KEYS = ['baseRef', 'skipInPrimaryCheckout', 'maxLogTailBytes', 'requireCommit'];
 
 export class VerifyConfigError extends Error {
   readonly issues: string[];
@@ -188,6 +200,7 @@ function validateOptions(value: unknown, issues: string[]): VerifyOptions {
     baseRef: null,
     skipInPrimaryCheckout: true,
     maxLogTailBytes: DEFAULT_MAX_LOG_TAIL_BYTES,
+    requireCommit: false,
   };
 
   // A childless `options:` key parses as null and means "all defaults".
@@ -217,6 +230,17 @@ function validateOptions(value: unknown, issues: string[]): VerifyOptions {
       );
     } else {
       options.skipInPrimaryCheckout = parsed;
+    }
+  }
+
+  if (value.requireCommit !== undefined) {
+    const parsed = asBoolean(value.requireCommit);
+    if (parsed === null) {
+      issues.push(
+        `options.requireCommit: must be true or false (got ${describe(value.requireCommit)})`
+      );
+    } else {
+      options.requireCommit = parsed;
     }
   }
 

@@ -92,6 +92,7 @@ options:
           baseRef: 'origin/develop',
           skipInPrimaryCheckout: false,
           maxLogTailBytes: 32768,
+          requireCommit: false,
         },
       });
     });
@@ -106,6 +107,7 @@ options:
           baseRef: null,
           skipInPrimaryCheckout: true,
           maxLogTailBytes: 8192,
+          requireCommit: false,
         },
       });
     });
@@ -127,6 +129,7 @@ options:
         baseRef: 'origin/main',
         skipInPrimaryCheckout: true,
         maxLogTailBytes: DEFAULT_MAX_LOG_TAIL_BYTES,
+        requireCommit: false,
       });
     });
 
@@ -138,6 +141,7 @@ options:
         baseRef: null,
         skipInPrimaryCheckout: true,
         maxLogTailBytes: DEFAULT_MAX_LOG_TAIL_BYTES,
+        requireCommit: false,
       });
     });
 
@@ -192,7 +196,12 @@ options:
       expect(loadVerifyConfig(repoPath)).toEqual({
         version: 1,
         gates: [{ id: 'lint', command: 'npm run lint', timeoutSec: 900 }],
-        options: { baseRef: null, skipInPrimaryCheckout: false, maxLogTailBytes: 4096 },
+        options: {
+          baseRef: null,
+          skipInPrimaryCheckout: false,
+          maxLogTailBytes: 4096,
+          requireCommit: false,
+        },
       });
     });
   });

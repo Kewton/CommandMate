@@ -31,6 +31,7 @@ options:
   baseRef: origin/develop      # work-evidence / scope 判定の基準。省略時はリポジトリのデフォルトブランチの origin
   skipInPrimaryCheckout: true  # 省略時 true。メイン checkout（稼働サーバの cwd になり得る場所）ではコマンド系ゲートを skip
   maxLogTailBytes: 8192        # 省略時 8192
+  requireCommit: false         # 省略時 false。true で work-evidence が commit を要求する（Issue #1628）
 ```
 
 ---
@@ -65,6 +66,7 @@ options:
 | `baseRef` | string | `refs/remotes/origin/HEAD` の指す先 | `work-evidence` の比較基準。解決できない場合は設定エラー（`--base-ref` で明示する） |
 | `skipInPrimaryCheckout` | boolean | `true` | プライマリ checkout ではコマンド系ゲートを skip する |
 | `maxLogTailBytes` | integer | `8192` | 失敗ゲートのログを stderr に出す際の末尾バイト数。`0..1048576`。`0` で抑止 |
+| `requireCommit` | boolean | `false` | `true` で `work-evidence` が「変更が在る」ではなく **「commit が在る」** を要求する。`commits=0 uncommitted=1` は failed（run は `not_started`）。実行契約の前文は「未 commit の作業は未完了とみなされる」と宣言するのに、ゲートは未 commit の変更 1 件で `passed` を返していた（Issue #1628 D-4）。既定を false に置いたのは、このゲートの本来の問いが「judge する work が在るか」だからで、リポジトリ単位の opt-in にしてある。**Phase 0 参照実装（`.claude/skills/cmate-verify/scripts/verify-run.sh`）は未対応** — 有効化するなら TS 実装側（サーバ / `commandmate verify`）でのみ効く |
 
 ---
 

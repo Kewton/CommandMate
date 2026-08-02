@@ -1,0 +1,144 @@
+version: 1
+title: "Issue #1628: Codex では wait の完了判定が先走り、承認待ちのまま Completed → verify が exit 0"
+goal: |
+  /bug-fix
+
+  https://github.com/Kewton/CommandMate/issues/1628 を修正する。
+
+  ## 事象（実測済み・Epic #1585 の受入検証で発見）
+
+  **Codex エージェントでは `commandmate wait --verify` の exit 0 が「完走した」を意味しない。**
+  Codex が承認プロンプトで停止していても `Completed:` を出して裁定に入り、未コミットの変更が
+  1 件でもあれば `work-evidence` が PASS するため `RESULT passed` / exit 0 が返る。
+
+  同一 worktree・同一契約での実測:
+
+  ```
+  --- wait iteration 1: exit=21 ---   Completed: … / work-evidence FAIL (commits=0, uncommitted=0)
+  --- wait iteration 2: exit=21 ---
+  --- wait iteration 3: exit=21 ---
+  --- wait iteration 4: exit=0  ---   work-evidence PASS (commits=0, uncommitted=1)
+  --- wait iteration 5: exit=0  ---   work-evidence PASS (commits=1, uncommitted=0)
+  ```
+
+  `--auto-yes` 無しで流すと、Codex の承認プロンプトが exit 10 として上がってこないまま
+  `Completed` になった。そのとき Codex は実際には承認待ちで停止していた:
+
+  ```
+  • Running git add scripts/greet.sh
+    Would you like to run the following command? …
+  › 1. Yes, proceed (y)
+  ```
+
+  **Claude Code では再現しない**（同じ契約・同じ demo repo で 10,10,10,10 → 0 と、プロンプトを
+  exit 10 で正しく上げてから完了した）。実測全文:
+  https://github.com/Kewton/CommandMate/issues/1585#issuecomment-5157476193
+
+  ## オーケストレーターが裏取りした出発点（ここから先はあなたが検証する）
+
+  `src/cli/commands/wait.ts:99-102` が完了判定の一点:
+
+  ```ts
+  // Path B: agent completed task (sessionStatus === 'ready', input prompt detected)
+  if (!data.isRunning || data.sessionStatus === 'ready') {
+    console.error(`Completed: ${worktreeId}`);
+  ```
+
+  つまり `wait` は自前で判定しておらず、**API が返す `isRunning` / `sessionStatus` /
+  `isPromptWaiting` をそのまま信じている**。したがって疑うべきはこの3値の生成側
+  （`src/lib/session/current-output-builder.ts` と `src/lib/detection/**`）で、
+  Codex（非 alternate-screen）の承認プロンプトが `isPromptWaiting` に載らず
+  `sessionStatus='ready'` になっている可能性が高い。
+
+  **ただしこれは仮説であり、Issue 本文の「原因候補」も未検証と明記してある。**
+  この Issue はオーケストレーター自身が書いたもので、**過去に自作 Issue の原因帰属が
+  実際に外れた前例がある**（#1552）。コードで裏取りし、食い違ったら実測を正として
+  コミットメッセージに明記すること。
+
+  ## 調査の観点（Issue 本文より。すべて未検証）
+
+  - 完了検出は Claude と Codex で別経路か。`ALTERNATE_SCREEN_CLI_TOOLS`
+    （`src/lib/cli-tools/types.ts`）に codex は含まれず通常画面で動くため、検出器が見ている
+    signal が異なる可能性
+  - Codex の承認プロンプトが `detectPrompt` に載っていない、あるいは載っていても `wait` の
+    `--on-prompt` 経路に届いていない
+  - **Auto-Yes は `status-detector` を経由せず `detectPrompt` を直接呼ぶ**ので、両者の検出範囲が
+    ずれていると「Auto-Yes は応答するが wait は気づかない」が起こりうる
+  - **対になる経路も点検すること。** Codex を直したら他の非 alternate-screen ツール
+    （gemini / vibe-local / antigravity）でも同じ穴が空いていないか確認する
+
+  ## D-4 も本 Issue の受入条件に含む
+
+  `send --contract` が送る前文は「未 commit の作業は未完了とみなされる」と宣言しているが、
+  `work-evidence` ゲートは `commits=0, uncommitted=1` で **PASS** する（上の iteration 4 が実例）。
+  契約が commit を要求していても `RESULT passed` は commit の証明にならない。
+  **`requireWorkEvidence` に commit 必須モードを足すか、前文の文言を実態に合わせるかを判断し、
+  結論と根拠をコミットメッセージに残すこと。** 既定の挙動を変える場合は後方互換の影響も述べる。
+
+  ## 受入条件
+
+  - [ ] Codex ワーカーが承認プロンプトで停止している間、`wait` が `Completed` を返さないことを
+        **テストで固定**する（fixture は実 Codex の capture を使うこと。手書きの想像で作らない）
+  - [ ] Codex の承認プロンプトが `wait --on-prompt agent` で exit 10 として上がることを実機で確認する
+  - [ ] Claude / Codex 双方で「作業中 → プロンプト → 完了」の遷移が同じ exit code 列になることを実機で確認する
+  - [ ] 他の非 alternate-screen ツール（gemini / vibe-local / antigravity）に同型の穴が無いか確認し、
+        あれば併せて塞ぐ（無ければ「無い」ことを根拠つきで述べる）
+  - [ ] D-4 について結論を出す
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` が exit 0
+
+  ## 検証の作り方（空振り禁止）
+
+  修正後に緑になっただけでは「ガードが効いた」と「テストが空振り」の両方と整合する。
+  **修正前のコードで赤くなることを実際に確認してから**緑にすること。確認方法をコミット
+  メッセージに書くこと。
+
+  ## 担当範囲の境界（厳守）
+
+  - **`src/app/api/worktrees/[id]/send/route.ts` と `src/cli/commands/send.ts` は触らないこと。**
+    並行して #1629（`--instance codex` が claude を起動する）のワーカーが担当している
+  - 逆に **`src/cli/commands/wait.ts` はあなたの専有**。#1629 側には触らないよう指示済み
+
+  ## tmux を触るときの安全則（厳守・違反すると全ワーカーが死ぬ）
+
+  - **実 tmux を触る検証は必ず `tmux -L <専用socket>` で行う。** `-L` / `-S` は `$TMUX` より優先される。
+    あなたは tmux ペインの中で動いていて `$TMUX` が既定サーバを指しているため、フラグ無しの
+    `tmux` 呼び出しは全て**ユーザーの本番サーバ**に届く
+  - **`kill-server` を `-L` 無しで書かない。** 後始末は `kill-session -t '=<name>:'`（完全一致）で行う
+  - **`TMUX_TMPDIR` を隔離手段に使わない。** `$TMUX` が設定されていると完全に無視される。
+    socket 引数を取らない本番コード（`src/lib/tmux/tmux.ts`）を動かすときは `process.env.TMUX` を
+    私設サーバへ向け、**転送が効いていることをテスト内で assert する**
+  - **`bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たない**（サーバグローバル）
+  - `tests/unit/config/tmux-live-test-safety.test.ts` が unit ゲートで上記を機械的に弾く。
+    このガードを緩めたり除外したりしないこと
+  - 実 Codex セッションで再現実験をするなら、**本番の `mcbd-*` セッションではなく使い捨ての
+    worktree/セッションを使う**こと
+
+  ## 作業ルール（厳守）
+
+  - **PR を作らないこと。** ブランチにコミットするところまでが担当。PR は orchestrator が作る
+  - コミットは論理単位で複数に分けてよい
+  - `dev-reports/` 配下は **コミットしないこと**
+  - `CHANGELOG.md` の Unreleased セクションに 1 行だけ追記する（他ワーカーと衝突するので最小限に）
+  - **Issue 本文の記述はコードで裏取りすること。** 行番号や前提が実際と食い違ったら
+    **実測を正**とし、食い違いをコミットメッセージに明記する
+  - 完了したら最後に `IMPL_COMPLETED` とだけ出力する
+scope:
+  allow:
+    - "src/cli/commands/wait.ts"
+    - "src/lib/detection/**"
+    - "src/lib/session/current-output-builder.ts"
+    - "src/lib/session/worktree-status-helper.ts"
+    - "src/lib/session/agent-event-state.ts"
+    - "src/lib/verification/**"
+    - "src/lib/cli-tools/types.ts"
+    - "src/app/api/worktrees/[id]/current-output/**"
+    - "tests/unit/**"
+    - "tests/integration/**"
+    - "docs/module-reference.md"
+    - "docs/design/**"
+    - "CHANGELOG.md"
+    - ".commandmate/tasks/**"
+  deny: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
