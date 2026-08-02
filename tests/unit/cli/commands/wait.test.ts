@@ -49,8 +49,8 @@ describe('createWaitCommand', () => {
 });
 
 describe('wait command action', () => {
-  it('exits 0 on completion (isRunning=false, isPromptWaiting=false)', async () => {
-    mockFetchSequence([{ data: baseOutput }]);
+  it('exits 0 on completion (sessionStatus=ready, isPromptWaiting=false)', async () => {
+    mockFetchSequence([{ data: { ...baseOutput, isRunning: true, sessionStatus: 'ready' as const } }]);
     const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
     const cmd = createWaitCommand();
     await cmd.parseAsync(['node', 'wait', 'wt1']);
@@ -274,19 +274,101 @@ describe('Issue #520: sessionStatus completion detection', () => {
     expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
   });
 
-  it('exits 0 when sessionStatus is idle and isRunning is false (Path A)', async () => {
-    const idleOutput = {
+  // Issue #1628: Path A used to answer SUCCESS for BOTH "the session ended after
+  // the agent worked" and "no session was ever there". The second reading turned a
+  // wait on a worktree whose agent never started into an instant `Completed`, which
+  // then handed a verdict to --verify over work nobody in this wait had watched.
+  describe('Issue #1628: a session that was never running is not a completion', () => {
+    const notRunning = {
       ...baseOutput,
       isRunning: false,
       sessionStatus: 'idle' as const,
       sessionStatusReason: 'session_not_running',
     };
-    mockFetchSequence([{ data: idleOutput }]);
 
-    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
-    const cmd = createWaitCommand();
-    await cmd.parseAsync(['node', 'wait', 'wt1']);
-    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+    it('exits 21 (NOT_STARTED), not 0, when the first poll finds no session', async () => {
+      mockFetchSequence([{ data: notRunning }]);
+
+      const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+      await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+
+      expect(mockExit).toHaveBeenCalledWith(VerifyExitCode.NOT_STARTED);
+      expect(mockExit).not.toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+      expect(mockConsoleError).toHaveBeenCalledWith(expect.stringContaining('Not started: wt1'));
+      expect(mockConsoleError).not.toHaveBeenCalledWith(expect.stringContaining('Completed:'));
+    });
+
+    it('still exits 0 when the session goes away after having been seen running', async () => {
+      vi.useFakeTimers();
+      const running = {
+        ...baseOutput,
+        isRunning: true,
+        isComplete: false,
+        sessionStatus: 'running' as const,
+        sessionStatusReason: 'thinking_indicator',
+      };
+      mockFetchSequence([{ data: running }, { data: notRunning }]);
+
+      const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+      const promise = createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+      await vi.advanceTimersByTimeAsync(6000);
+      await promise;
+
+      expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+      expect(mockConsoleError).toHaveBeenCalledWith(expect.stringContaining('Completed: wt1'));
+    });
+  });
+
+  // Issue #1628: arrow-key menus (Codex `/model` and its pager, antigravity's
+  // permission menu, OpenCode's overlays) are published with isPromptWaiting=false
+  // so the UI renders NavigationButtons. `wait` used to have no signal for them at
+  // all and polled a stopped agent until --timeout.
+  describe('Issue #1628: an active selection list is a blocked agent', () => {
+    const selectionList = {
+      ...baseOutput,
+      isRunning: true,
+      isComplete: false,
+      isPromptWaiting: false,
+      promptData: null,
+      cliToolId: 'codex',
+      isSelectionListActive: true,
+      sessionStatus: 'waiting' as const,
+      sessionStatusReason: 'codex_selection_list',
+    };
+
+    it('exits 10 with a selection_list payload instead of polling until timeout', async () => {
+      mockFetchSequence([{ data: selectionList }]);
+
+      const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+      await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+
+      expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+      const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
+      expect(output).toMatchObject({
+        worktreeId: 'wt1',
+        cliToolId: 'codex',
+        type: 'selection_list',
+        question: 'codex_selection_list',
+      });
+    });
+
+    it('keeps waiting under --on-prompt human', async () => {
+      vi.useFakeTimers();
+      const ready = { ...baseOutput, isRunning: true, sessionStatus: 'ready' as const };
+      mockFetchSequence([{ data: selectionList }, { data: ready }]);
+
+      const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+      const promise = createWaitCommand().parseAsync([
+        'node', 'wait', 'wt1', '--on-prompt', 'human',
+      ]);
+      await vi.advanceTimersByTimeAsync(6000);
+      await promise;
+
+      expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('Selection list active on wt1'),
+      );
+    });
   });
 
   it('includes sessionStatus in progress message', async () => {
@@ -377,7 +459,13 @@ function verifyRun(over: Record<string, unknown> = {}) {
   };
 }
 
-const completedOutput = { ...baseOutput, isRunning: false, sessionStatus: 'idle' as const };
+/**
+ * A worktree whose agent has finished its turn with the session still alive —
+ * the normal shape of a completion (Path B). Issue #1628 stopped treating a
+ * session that was never running as a completion, so these verification tests
+ * must show an agent that actually ran.
+ */
+const completedOutput = { ...baseOutput, isRunning: true, sessionStatus: 'ready' as const };
 
 /** tasks + current-output + verify routes for one worktree that completes immediately. */
 function completedWorktreeRoutes(
@@ -443,6 +531,34 @@ describe('Issue #1544: wait --verify / --require-work', () => {
     await createWaitCommand().parseAsync(['node', 'wait', 'wt1', '--verify']);
 
     expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+  });
+
+  // Issue #1628: the exact shape the Epic #1585 acceptance run hit — a wait that
+  // never saw a session, followed by gates that pass because SOME uncommitted
+  // change exists. The gates still run (their output is what the operator needs)
+  // but a green run must not promote "nobody watched this agent" to success.
+  it('runs the gates for a never-running session yet still exits 21, not 0', async () => {
+    const routes = completedWorktreeRoutes('wt1', 1, 'passed').map(route =>
+      route.match('/api/worktrees/wt1/current-output', 'GET')
+        ? {
+            ...route,
+            data: {
+              ...baseOutput,
+              isRunning: false,
+              sessionStatus: 'idle' as const,
+              sessionStatusReason: 'session_not_running',
+            },
+          }
+        : route,
+    );
+    const fetchMock = mockFetchRoutes(routes);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1', '--verify']);
+
+    expect(mockExit).toHaveBeenCalledWith(VerifyExitCode.NOT_STARTED);
+    expect(mockExit).not.toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+    expect(callSignatures(fetchMock)).toContain('POST /api/worktrees/wt1/verify');
   });
 
   it('sends trigger=wait and all gates for --verify', async () => {

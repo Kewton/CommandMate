@@ -391,7 +391,8 @@ function runGit(args: string[], cwd: string): Promise<{ code: number | null; std
  */
 async function evaluateWorkEvidence(
   worktreePath: string,
-  baseRef: string | null
+  baseRef: string | null,
+  requireCommit = false
 ): Promise<GateOutcome> {
   const startedAt = Date.now();
   const done = (
@@ -464,10 +465,23 @@ async function evaluateWorkEvidence(
 
   const summary =
     `work-evidence: baseRef=${baseRef} commits=${commitCount} uncommitted=${uncommittedCount}` +
+    (requireCommit ? ' requireCommit=true' : '') +
     ' (contract files excluded)';
 
   if (!Number.isFinite(commitCount) || (commitCount === 0 && uncommittedCount === 0)) {
     return done('failed', `${summary}\nNo commits and no uncommitted changes: nothing to verify.`, 1);
+  }
+  // Issue #1628 (D-4): `commits=0 uncommitted=1` passing is what let a task
+  // contract that says "未 commit の作業は未完了とみなされる" still end in
+  // `RESULT passed` over work that was never committed. Opt-in per repository
+  // via `options.requireCommit` in .commandmate/verify.yaml; off by default so
+  // the gate keeps answering "is there work here" for everyone else.
+  if (requireCommit && commitCount === 0) {
+    return done(
+      'failed',
+      `${summary}\noptions.requireCommit is set: uncommitted changes are not work evidence, commit them.`,
+      1
+    );
   }
   return done('passed', summary, 0);
 }
@@ -577,7 +591,7 @@ async function executeRun(
   task: Task | null,
   detachedContract: Task | null
 ): Promise<VerificationRunTerminalStatus> {
-  const { maxLogTailBytes, skipInPrimaryCheckout } = config.options;
+  const { maxLogTailBytes, skipInPrimaryCheckout, requireCommit } = config.options;
   const { runWorkEvidence, gates } = selection;
 
   /**
@@ -635,7 +649,7 @@ async function executeRun(
 
   if (runWorkEvidence) {
     const outcome = await runGate(WORK_EVIDENCE_GATE_ID, WORK_EVIDENCE_GATE_COMMAND, () =>
-      evaluateWorkEvidence(worktreePath, baseRef)
+      evaluateWorkEvidence(worktreePath, baseRef, requireCommit)
     );
 
     if (outcome.status !== 'passed') {

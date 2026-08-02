@@ -30,6 +30,7 @@ const CONFIG: VerifyConfig = {
     baseRef: 'origin/develop',
     skipInPrimaryCheckout: true,
     maxLogTailBytes: DEFAULT_MAX_LOG_TAIL_BYTES,
+    requireCommit: false,
   },
 };
 
