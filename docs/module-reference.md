@@ -207,7 +207,7 @@
 | `src/lib/db/migrations/worktree-child-tables.ts` | worktree を参照するテーブルの実スキーマ列挙（`worktree_id` 列 ∪ `worktrees` への FK）と、`RAISE(ABORT)` トリガで自衛する追記専用台帳の検出。`migrations/` 配下に置くのは v52 が worktree-db.ts を import すると無関係な `vi.mock` に巻き込まれるため（Issue #1621） |
 | `src/lib/db/chat-db.ts` | チャットメッセージCRUD操作、論理削除（archived）・GetMessagesOptions・ACTIVE_FILTER（Issue #479, #168）、instance_id 列・getMessages の instanceId フィルタ・deleteMessagesByInstance（Issue #868） |
 | `src/lib/db/session-db.ts` | セッション状態管理（Issue #479）、PK を (worktree_id, instance_id) に拡張しインスタンス単位で状態保持（Issue #868） |
-| `src/lib/db/agent-instances-db.ts` | agent_instances テーブル CRUD（set/get/add/removeAgentInstances）、MAX_AGENT_INSTANCES=10 上限・重複/不正id検証・primary フォールバック（Issue #868） |
+| `src/lib/db/agent-instances-db.ts` | agent_instances テーブル CRUD（set/get/add/removeAgentInstances）、MAX_AGENT_INSTANCES=10 上限・重複/不正id検証・primary フォールバック（Issue #868）、resolveInstanceCliTool（instanceId→CLIツール解決・roster優先・矛盾は conflict 返却、Issue #1629） |
 | `src/lib/db/memo-db.ts` | メモ管理CRUD（Issue #479） |
 | `src/lib/db/worktree-todo-db.ts` | ブランチ（worktree）単位 ToDo CRUD＋reorder（getTodosByWorktreeId/createTodo/updateTodo/deleteTodo/reorderTodos）。memo-db パターン踏襲・worktree_id キー・ON DELETE CASCADE。db.ts バレルは getWorktreeTodoById 等にエイリアスして repository todo-db と衝突回避（Issue #1015）。Issue #1032で status 3状態（todo/doing/done）を真値化・done は派生。Issue #1034（migration v39）で detail フィールド追加（既定 ''、createTodo/updateTodo/mapTodoRow で受理） |
 | `src/lib/db/template-db.ts` | レポートテンプレートCRUD操作（getAllTemplates, getTemplateById, createTemplate, updateTemplate, deleteTemplate, getTemplateCount）（Issue #618） |

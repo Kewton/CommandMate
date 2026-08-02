@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **tmux セッションの scrollback が意図の 1/25（tmux 既定の 2000 行）しか確保されていなかった問題を修正** (#1624): `history-limit` はセッションオプションだが、**pane は生成時点の値でスクロールバッファを一度だけ確保する**。`new-session`（この時点で window 0 と pane ができる）の**後**に `set-option` していたため、`show-options` は 50000 を返すのに pane の `#{history_limit}` は 2000 のままという乖離が生じていた（実測: 稼働中の `mcbd-codex-*` セッションが 1977/2000 行と使用率 98.85% で、古い履歴を落とし続けていた）。影響を受けるのは scrollback を持つ非 alternate-screen ツール（codex / gemini / vibe-local / antigravity）で、claude / opencode / copilot は `history_size=0` のため無関係。`set-option` → `new-window -k`（window 0 を index を保ったまま作り直す）の順序に変更し、新 window は `window-size manual` を継承しないためジオメトリ設定（#1163）はその後に当てる。`respawn-pane -k` は pane が既存バッファを再利用するため効かない（実測）。あわせて値を **50000 → `TMUX_HISTORY_LIMIT=20000`** に見直した — `capturePane` の `execFile maxBuffer` が 10MB で、50000 行の SGR 込みテキスト（実測 274B/行 ≒ 13MB）はこれを超えて **throw** するため、50000 行の深部はそもそもアプリから読めなかった（アプリが読む最深は既定 10000 行、他の呼び出しは 1000 行以下）。根拠は `src/config/tmux-pane-config.ts` の定数 doc コメントに実測値つきで残してある。**既存の稼働セッションには適用されない**（pane を作り直さない限り 2000 のまま）: 稼働中 pane の再生成は実行中のエージェントプロセスを kill するため自動適用は行わず、**次回のセッション作成時から適用**する。今すぐ深い履歴が必要な場合はセッションを停止して作り直すこと
 - worktree の ID 変更・削除が FK 宣言の無い `tasks` / `verification_runs` を取りこぼし孤児行を残していた問題を修正し、既存の孤児を migration v52 で掃除（#1621）
+- `send --instance <id>` が roster の CLI_TOOL を引かず worktree 既定のツールでセッションを起動していた問題を修正（`--instance codex` で `mcbd-claude-…-codex` が立っていた）。`respond` / `capture` / `auto-yes` の同型経路も併せて解決するようにした（#1629）
 
 ## [0.18.0] - 2026-08-02
 
