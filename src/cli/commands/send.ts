@@ -13,6 +13,7 @@ import { parseDurationToMs, ALLOWED_DURATIONS } from '../config/duration-constan
 import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
 import { validateCopilotModelName, validateAntigravityModelName } from '../config/model-validation';
 import { fetchAgentInstances, saveAgentInstances, defaultAlias, MAX_AGENT_INSTANCES } from '../utils/agent-instances';
+import { resolveInstanceCliTool } from './instances';
 
 /** Auto-yes duration used when --duration is omitted. */
 const DEFAULT_AUTO_YES_DURATION = '1h';
@@ -43,19 +44,21 @@ function resolveAutoYesDurationMs(duration: string | undefined): number {
  * @param worktreeId - Target worktree ID
  * @param options - Send command options containing auto-yes settings
  * @param durationMs - Duration already validated by resolveAutoYesDurationMs()
+ * @param agent - CLI tool resolved for --instance (Issue #1629), else --agent
  */
 async function enableAutoYes(
   client: ApiClient,
   worktreeId: string,
   options: SendOptions,
-  durationMs: number
+  durationMs: number,
+  agent: string | undefined
 ): Promise<void> {
   const autoYesBody: Record<string, unknown> = {
     enabled: true,
     duration: durationMs,
   };
-  if (options.agent) {
-    autoYesBody.cliToolId = options.agent;
+  if (agent) {
+    autoYesBody.cliToolId = agent;
   }
   // Issue #896: per-instance auto-yes. When --instance is given, the poller keys
   // on worktreeId:cliToolId:instanceId so the targeted instance is auto-answered
@@ -107,11 +110,12 @@ async function registerInstance(
 async function createContractTask(
   client: ApiClient,
   worktreeId: string,
-  options: SendOptions
+  options: SendOptions,
+  agent: string | undefined
 ): Promise<{ taskId: string; message: string }> {
   const body: Record<string, unknown> = { contractPath: options.contract };
-  if (options.agent) {
-    body.cliToolId = options.agent;
+  if (agent) {
+    body.cliToolId = agent;
   }
   if (options.instance) {
     body.instanceId = options.instance;
@@ -251,13 +255,21 @@ export function createSendCommand(): Command {
 
         const client = new ApiClient({ token: options.token });
 
+        // Issue #1629: --instance names an agent instance, not a CLI tool, and
+        // the roster is the only place that pairs the two. Resolve it once, up
+        // front, so the task row, the send and auto-yes all name the same tool
+        // as the session that actually starts.
+        const agent = options.instance
+          ? await resolveInstanceCliTool(client, worktreeId, options.instance, options.agent)
+          : options.agent;
+
         // Issue #1545: resolve the contract before anything with a side effect,
         // so an invalid contract cannot leave auto-yes enabled for a message
         // that was never sent.
         let taskId: string | undefined;
         let content = message;
         if (options.contract) {
-          const task = await createContractTask(client, worktreeId, options);
+          const task = await createContractTask(client, worktreeId, options, agent);
           taskId = task.taskId;
           content = task.message;
           console.error(`Task created: ${taskId}`);
@@ -266,13 +278,13 @@ export function createSendCommand(): Command {
 
         // --auto-yes: enable auto-yes first (unless --model is specified, then after send) [DR2-02]
         if (options.autoYes && !options.model) {
-          await enableAutoYes(client, worktreeId, options, autoYesDurationMs);
+          await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent);
         }
 
         // [DR2-05] Send API uses "content" not "message"
         const sendBody: Record<string, unknown> = { content };
-        if (options.agent) {
-          sendBody.cliToolId = options.agent;
+        if (agent) {
+          sendBody.cliToolId = agent;
         }
         // Issue #868: Include instance ID in send body
         if (options.instance) {
@@ -308,7 +320,7 @@ export function createSendCommand(): Command {
         // Issue #576: Enable auto-yes AFTER send when --model is specified
         // This avoids auto-yes interfering with the /model command interaction
         if (options.autoYes && options.model) {
-          await enableAutoYes(client, worktreeId, options, autoYesDurationMs);
+          await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent);
         }
       } catch (error) {
         handleCommandError(error);

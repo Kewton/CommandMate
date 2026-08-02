@@ -10,6 +10,7 @@ import type { CurrentOutputResponse } from '../types/api-responses';
 import { ApiClient, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { isCliToolId } from '../config/cli-tool-ids';
+import { resolveInstanceCliTool } from './instances';
 
 /**
  * Format capture output as JSON (excluding fullOutput for size).
@@ -49,10 +50,18 @@ export function createCaptureCommand(): Command {
 
         const client = new ApiClient({ token: options.token });
 
+        // Issue #1629: /current-output takes the CLI tool at face value and
+        // otherwise falls back to the worktree default, so `--instance codex`
+        // alone captured the wrong (claude-named) session. Resolve the tool the
+        // instance is registered under before asking.
+        const agent = options.instance
+          ? await resolveInstanceCliTool(client, worktreeId, options.instance, options.agent)
+          : options.agent;
+
         // Build path with optional cliTool/instance query parameters
         const query = new URLSearchParams();
-        if (options.agent) {
-          query.set('cliTool', options.agent);
+        if (agent) {
+          query.set('cliTool', agent);
         }
         if (options.instance) {
           query.set('instance', options.instance);

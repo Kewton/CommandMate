@@ -12,6 +12,7 @@ import type { PromptResponseResult } from '../types/api-responses';
 import { ApiClient, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { isCliToolId } from '../config/cli-tool-ids';
+import { resolveInstanceCliTool } from './instances';
 
 export function createRespondCommand(): Command {
   const cmd = new Command('respond');
@@ -50,10 +51,18 @@ export function createRespondCommand(): Command {
 
         const client = new ApiClient({ token: options.token });
 
+        // Issue #1629: /prompt-response derives the session name from cliTool
+        // and falls back to the worktree default, so `--instance codex` alone
+        // answered into a session that was never started. Resolve the tool the
+        // instance is registered under first.
+        const agent = options.instance
+          ? await resolveInstanceCliTool(client, worktreeId, options.instance, options.agent)
+          : options.agent;
+
         // [DR2-06] Use prompt-response API with cliTool (not cliToolId)
         const body: Record<string, unknown> = { answer };
-        if (options.agent) {
-          body.cliTool = options.agent;
+        if (agent) {
+          body.cliTool = agent;
         }
         // Issue #868: target a specific agent instance
         if (options.instance) {

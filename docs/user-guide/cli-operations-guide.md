@@ -625,12 +625,39 @@ codex-2      レビュー用 codex     no       no
 
 `--instance` は `send` / `wait` / `respond` / `capture` / `auto-yes` すべてで受け付けます。
 
+> **既知の不統一（未解消）**: `--agent` を受け付けるのは `send` / `respond` / `capture` /
+> `auto-yes` のみで、`wait` は `--instance` だけを受け付けます（`wait --agent` は
+> `unknown option` で exit 1）。roster 登録済みインスタンスなら全コマンドを `--instance`
+> だけで統一して書けるため、実用上の回避策はあります。フラグ体系そのものの統一は
+> 別Issueで扱います。
+
 ### rosterとの関係
 
 - **roster** = ブラウザUIのAgentパネルで管理される、正式なインスタンス一覧（表示順・alias付き）。`commandmate instances` で一覧・追加・削除・alias変更ができます。
 - `send --instance <id>` は roster に**登録されていなくても**セッションを自動起動します（アドホック実行）。ただし roster に無いインスタンスはUIのサイドバー/タブには表示されません。
 - `send ... --instance <id> --register` を付けると、送信後にそのインスタンスを roster へ自動登録します。UIと状態を一致させたい場合はこちらを使ってください。
 - 有効な `--instance` の値を調べるには `commandmate instances <worktree-id>` で roster と稼働中セッションを確認します。
+
+### `--agent` と `--instance` の優先順位（Issue #1629）
+
+`--instance` はインスタンスIDであってCLIツール名ではないため、どのCLIツールで起動するかは
+別に決める必要があります。CLIツールIDは tmux セッション名の一部（`mcbd-<agent>-<worktree>[-<suffix>]`）
+なので、取り違えると「codex という名前のセッションで claude が動く」状態になります。
+決定順は次のとおりで、`send` / `respond` / `capture` / `auto-yes` で共通です。
+
+| ケース | 採用されるCLIツール |
+|--------|--------------------|
+| `--instance` が roster に**ある** / `--agent` 省略 | roster の `CLI_TOOL` |
+| `--instance` が roster に**ある** / `--agent` が roster と**一致** | その値 |
+| `--instance` が roster に**ある** / `--agent` が roster と**不一致** | **エラー（exit 2）**。roster が正本なので黙って上書きしない |
+| `--instance` が roster に**ない** / `--agent` 指定あり | `--agent` の値（アドホック起動） |
+| `--instance` が roster に**ない** / `--agent` 省略・IDがCLIツール名（例 `codex`） | そのCLIツール（プライマリインスタンス） |
+| `--instance` が roster に**ない** / `--agent` 省略・IDが独自名（例 `codex-9`） | worktree の既定エージェント |
+
+不一致でエラーになった場合は、`--agent` を外す・roster と同じ値にする・
+`commandmate instances <worktree-id> remove/add` で roster を登録し直す、のいずれかで解消します。
+
+> roster を読めない場合（古いデーモンなど）は警告を出して `--agent` をそのまま使います。
 
 ### per-instance Auto-Yes
 
@@ -645,10 +672,11 @@ WT=$(commandmate ls --branch feature/101 --quiet)
 commandmate instances "$WT"
 
 # 追加インスタンスをrosterに登録してから使う
+# roster登録済みなら --agent は省略できる（roster の CLI_TOOL が使われる）
 commandmate instances "$WT" add --agent codex --alias "レビュー用"
-commandmate send "$WT" "差分をレビューして" --agent codex --instance codex-2 --auto-yes
+commandmate send "$WT" "差分をレビューして" --instance codex-2 --auto-yes
 commandmate wait "$WT" --instance codex-2 --timeout 600
-commandmate capture "$WT" --agent codex --instance codex-2 --json
+commandmate capture "$WT" --instance codex-2 --json
 
 # アドホックに起動しつつ、その場でrosterに登録
 commandmate send "$WT" "軽くチェックして" --agent codex --instance codex-3 --register
