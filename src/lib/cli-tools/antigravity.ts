@@ -147,10 +147,11 @@ export class AntigravityTool extends BaseCLITool {
     try {
       // Create tmux session with large history buffer for agy output
       // (agy is inline-rendered and retains scrollback, like Codex)
+      // Scrollback depth comes from the shared TMUX_HISTORY_LIMIT default
+      // (Issue #1624) — do not re-hardcode it here.
       await createSession({
         sessionName,
         workingDirectory: worktreePath,
-        historyLimit: 50000,
       });
 
       // Wait a moment for the session to be created

@@ -21,3 +21,36 @@ export const TUI_PANE_HEIGHT = 1000;
 
 /** Fixed pane width (columns) for TUI sessions. Matches the historical default. */
 export const TUI_PANE_WIDTH = 200;
+
+/**
+ * Scrollback lines retained per pane (`history-limit`), Issue #1624.
+ *
+ * Only NON-alternate-screen tools (codex / gemini / vibe-local / antigravity)
+ * consume this: the alternate-screen tools in `ALTERNATE_SCREEN_CLI_TOOLS`
+ * (claude / opencode / copilot) keep `history_size` at 0, so scrollback depth is
+ * irrelevant to them. See `usesAlternateScreen` in lib/cli-tools/types.ts.
+ *
+ * WHY 20000 and not the 50000 this used to request — measured on tmux 3.5a with
+ * a 200-column pane full of realistic, heavily-SGR-coloured agent output
+ * (274 bytes/line as re-emitted by `capture-pane -e`):
+ *
+ * 1. `capturePane` runs tmux under `execFile` with `maxBuffer: 10 MB`. A full
+ *    50000-line capture extrapolates to ~13 MB of escape-laden text, which
+ *    OVERFLOWS that buffer and makes `capturePane` THROW rather than return a
+ *    truncated string — i.e. the deepest part of a 50000-line buffer was never
+ *    readable by this app in the first place. 20000 lines is ~5.2 MB, leaving
+ *    roughly 2x headroom.
+ * 2. Nothing in the app reads deeper than 10000 lines by default (`capturePane`'s
+ *    options-path default is `-S -10000`; every other call site asks for 1000 or
+ *    fewer). 20000 keeps a 2x margin over the deepest default read.
+ * 3. Memory is charged per line ACTUALLY emitted, not preallocated from the
+ *    limit: a fresh session cost ~0.3 MB of tmux-server RSS, growing to ~34 MB
+ *    only after 45000 lines had scrolled (~0.68 KB/line). At 20000 a saturated
+ *    pane costs ~14 MB, so 20 concurrent sessions cap out near 270 MB instead of
+ *    the ~680 MB implied by 50000.
+ *
+ * This is still a 10x increase over tmux's built-in 2000, which is what sessions
+ * were actually getting before #1624 (a `mcbd-codex-*` session was observed at
+ * 1977/2000 lines used, i.e. actively losing transcript).
+ */
+export const TMUX_HISTORY_LIMIT = 20000;

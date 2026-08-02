@@ -6,7 +6,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { invalidateCache } from './tmux-capture-cache';
-import { TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '@/config/tmux-pane-config';
+import { TMUX_HISTORY_LIMIT, TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '@/config/tmux-pane-config';
 import { createLogger } from '@/lib/logger';
 
 const execFileAsync = promisify(execFile);
@@ -65,7 +65,7 @@ export interface TmuxSession {
 export interface CreateSessionOptions {
   sessionName: string;
   workingDirectory: string;
-  historyLimit?: number;  // scrollback バッファサイズ（デフォルト: 50000）
+  historyLimit?: number;  // scrollback バッファサイズ（デフォルト: TMUX_HISTORY_LIMIT）
   windowWidth?: number;   // ペイン幅（デフォルト: TUI_PANE_WIDTH）
   windowHeight?: number;  // ペイン高さ（デフォルト: TUI_PANE_HEIGHT、alternate screen TUIで十分な表示行数を確保。Issue #1163）
 }
@@ -259,7 +259,7 @@ export async function createSession(
  * await createSession({
  *   sessionName: 'my-session',
  *   workingDirectory: '/path/to/project',
- *   historyLimit: 50000,
+ *   historyLimit: TMUX_HISTORY_LIMIT,
  * });
  * ```
  */
@@ -277,14 +277,14 @@ export async function createSession(
     // Legacy signature
     sessionName = sessionNameOrOptions;
     workingDirectory = cwd!;
-    historyLimit = 50000;
+    historyLimit = TMUX_HISTORY_LIMIT;
     windowWidth = TUI_PANE_WIDTH;
     windowHeight = TUI_PANE_HEIGHT;
   } else {
     // New signature with options
     sessionName = sessionNameOrOptions.sessionName;
     workingDirectory = sessionNameOrOptions.workingDirectory;
-    historyLimit = sessionNameOrOptions.historyLimit || 50000;
+    historyLimit = sessionNameOrOptions.historyLimit || TMUX_HISTORY_LIMIT;
     windowWidth = sessionNameOrOptions.windowWidth || TUI_PANE_WIDTH;
     windowHeight = sessionNameOrOptions.windowHeight || TUI_PANE_HEIGHT;
   }
@@ -298,6 +298,49 @@ export async function createSession(
       { timeout: DEFAULT_TIMEOUT }
     );
 
+    // Issue #1624: `history-limit` must be set BEFORE the pane that uses it exists.
+    //
+    // It is a session option, but a pane sizes its scrollback buffer ONCE, from
+    // the value in effect at pane-creation time. `new-session` above already
+    // created window 0 and its pane, so the old order (new-session → set-option)
+    // left every pane on tmux's built-in 2000 lines while `show-options` happily
+    // reported 50000 — the session option was set, and utterly inert. Measured on
+    // tmux 3.5a: pane `#{history_limit}` stayed 2000, and a live
+    // `mcbd-codex-*` session sat at 1977/2000 lines used, silently dropping the
+    // oldest transcript. `respawn-pane -k` does NOT fix it either (the pane reuses
+    // its existing buffer); only creating a NEW pane does.
+    await execFileAsync(
+      'tmux',
+      ['set-option', '-t', exactTarget(sessionName), 'history-limit', String(historyLimit)],
+      { timeout: DEFAULT_TIMEOUT }
+    );
+
+    // Rebuild window 0 IN PLACE so its pane is allocated against the option just
+    // set. `-k` replaces the existing window at index 0 rather than appending,
+    // which keeps `#{window_index}` at 0 and the session at exactly one window —
+    // no call site has to care that the window was recreated.
+    //
+    // `-c` is REQUIRED and not redundant: a bare `new-window` does NOT inherit the
+    // session's `-c` directory, it starts in the tmux CLIENT's cwd (verified: a
+    // session created with `-c /usr/local` produced a pane in the server process's
+    // cwd instead). Omitting it silently launches every agent in the wrong repo.
+    //
+    // Best-effort, matching the geometry step below: if this fails the session is
+    // still usable, just with tmux's default 2000-line scrollback.
+    try {
+      await execFileAsync(
+        'tmux',
+        ['new-window', '-k', '-t', `${exactTarget(sessionName)}0`, '-c', workingDirectory],
+        { timeout: DEFAULT_TIMEOUT }
+      );
+    } catch (error: unknown) {
+      logger.warn('session-history-limit:window-rebuild-failed', {
+        sessionName,
+        historyLimit,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     // Issue #1163: Pin the pane to a fixed height so alternate-screen TUIs
     // (Claude/Codex/etc.) keep enough visible rows for capture-pane.
     //
@@ -309,14 +352,13 @@ export async function createSession(
     // tracking (the global option is never touched), and an explicit
     // `resize-window` then locks in the intended geometry. Best-effort: a failure
     // here must not abort session creation (some environments restrict resize).
+    //
+    // Issue #1624: this MUST stay AFTER the window rebuild above. A window created
+    // by `new-window` does not inherit `window-size manual` from the window it
+    // replaced (verified: `show-window-options -v window-size` came back empty),
+    // so reconciling first would have the setting thrown away and leave the pane
+    // tracking the latest client again.
     await reconcileSessionGeometry(sessionName, { windowWidth, windowHeight });
-
-    // Set history limit
-    await execFileAsync(
-      'tmux',
-      ['set-option', '-t', exactTarget(sessionName), 'history-limit', String(historyLimit)],
-      { timeout: DEFAULT_TIMEOUT }
-    );
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to create tmux session: ${errorMessage}`);
