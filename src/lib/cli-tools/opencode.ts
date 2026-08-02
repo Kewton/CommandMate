@@ -110,11 +110,11 @@ export class OpenCodeTool extends BaseCLITool {
       // Generate opencode.json if not present (non-fatal on failure)
       await ensureOpencodeConfig(worktreePath);
 
-      // Create tmux session with large history buffer
+      // Create tmux session. Scrollback depth comes from the shared
+      // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
       await createSession({
         sessionName,
         workingDirectory: worktreePath,
-        historyLimit: 50000,
       });
 
       // Wait a moment for the session to be created

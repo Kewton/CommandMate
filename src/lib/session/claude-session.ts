@@ -586,11 +586,13 @@ export async function startClaudeSession(
   }
 
   try {
-    // Create tmux session with large history buffer for Claude output
+    // Create tmux session. Scrollback depth comes from the shared
+    // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
+    // (Claude itself renders in the alternate screen and keeps history_size at 0,
+    // so the limit is inert for this tool; it still applies to the bare shell.)
     await createSession({
       sessionName,
       workingDirectory: worktreePath,
-      historyLimit: 50000,
     });
 
     // SF-S2-003: Sanitize environment after createSession, before launching Claude CLI

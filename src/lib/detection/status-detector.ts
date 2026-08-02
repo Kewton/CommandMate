@@ -158,7 +158,8 @@ const CODEX_NUMBERED_OPTION_PATTERN = /^\s*[❯›●]?\s*\d{1,2}[.)]\s/;
  * already-answered prompt left in the 50-line scan window rather than an active one.
  *
  * Codex keeps the answered "1. Yes / 2. No" block + "press number to confirm" footer in
- * its transcript (session historyLimit 50000) instead of repainting it away like Claude,
+ * its transcript (it draws on the normal screen, so tmux retains a scrollback for it —
+ * TMUX_HISTORY_LIMIT lines deep) instead of repainting it away like Claude,
  * so detectPrompt() keeps matching it and detectSessionStatus() reports `waiting` even
  * after the user answered and Codex resumed — the sidebar status dot then stays orange
  * forever (the reported bug).
@@ -406,7 +407,8 @@ export function detectSessionStatus(
   if (promptDetection.isPrompt) {
     // Issue #1160: Codex keeps an ANSWERED approval / numbered-choice block
     // ("1. Yes / 2. No" + "press number to confirm" footer) in its transcript
-    // (historyLimit 50000) instead of repainting it away like Claude. detectPrompt's
+    // (non-alternate-screen, so tmux keeps TMUX_HISTORY_LIMIT lines of scrollback for
+    // it) instead of repainting it away like Claude. detectPrompt's
     // 50-line window then keeps matching that dead prompt, so this priority-1 branch
     // returns `waiting` even after the user answered and Codex resumed — the sidebar
     // status dot stays orange forever (the reported bug). Guard with a position check:

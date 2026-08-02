@@ -137,7 +137,11 @@ describe('OpenCodeTool', () => {
       expect(createSession).toHaveBeenCalledWith({
         sessionName: 'mcbd-opencode-test-123',
         workingDirectory: '/test/path',
-        historyLimit: 50000,
+        // Issue #1624: `historyLimit: 50000` used to be passed here and at the
+        // six other call sites. They now omit it so scrollback depth comes from
+        // the single TMUX_HISTORY_LIMIT default, which tmux.test.ts and
+        // tmux-history-limit.live.test.ts pin. Re-adding it here would let a
+        // call site drift back to a hardcoded value unnoticed.
       });
 
       // Verify opencode command was sent
