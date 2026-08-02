@@ -4,15 +4,18 @@
  *
  * Exit codes [DR1-03]:
  * - 0: SUCCESS (agent completed)
- * - 10: PROMPT_DETECTED (agent waiting for user input)
+ * - 10: PROMPT_DETECTED (agent waiting for user input, including arrow-key
+ *       selection lists — Issue #1628)
  * - 124: TIMEOUT (--timeout exceeded)
  * Issue #1544 adds --verify / --require-work, which can turn a detected
  * completion into 20 (VERIFY_FAILED) or 21 (NOT_STARTED).
+ * Issue #1628 also returns 21 without --verify when the session was never
+ * running: a wait with nothing to wait for must not report success.
  * Infrastructure errors use ExitCode (1, 2, 99)
  */
 
 import { Command } from 'commander';
-import { ExitCode, WAIT_EXIT_CODE_PRIORITY, WaitExitCode } from '../types';
+import { ExitCode, VerifyExitCode, WAIT_EXIT_CODE_PRIORITY, WaitExitCode } from '../types';
 import type { WaitOptions } from '../types';
 import type {
   CurrentOutputResponse,
@@ -28,6 +31,17 @@ import { runVerification, WORK_EVIDENCE_GATE_ID } from '../utils/verify-runner';
 const POLL_INTERVAL_MS = 5000;
 
 /**
+ * `type` reported for a blocked-on-a-human frame that carries no parsable prompt
+ * (Issue #1628). Arrow-key menus — Codex's pager and `/model`, antigravity's
+ * permission menu, OpenCode's `/models` overlay — are deliberately published as
+ * selection lists rather than prompts so the UI renders NavigationButtons, which
+ * left `wait` with no signal at all for them: it polled until the timeout while
+ * the agent sat stopped. They are not answerable as a prompt, so the payload
+ * names the state instead of inventing options.
+ */
+const SELECTION_LIST_PROMPT_TYPE = 'selection_list';
+
+/**
  * Poll a single worktree until completion, prompt, or timeout.
  */
 async function pollWorktree(
@@ -38,6 +52,14 @@ async function pollWorktree(
   const startTime = Date.now();
   let lastActivityTime = Date.now();
   let lastContent = '';
+  /**
+   * Issue #1628: whether this wait ever saw the session alive. `!isRunning` on the
+   * FIRST poll is "there is nothing here to wait for", not "the agent finished" —
+   * reporting SUCCESS for it is how a wait on a worktree whose agent never started
+   * (wrong tool, wrong instance, session never created) came back `Completed` in
+   * milliseconds and handed a `passed` verdict to whatever ran next.
+   */
+  let everRunning = false;
 
   while (true) {
     // Check timeout
@@ -71,6 +93,10 @@ async function pollWorktree(
         lastActivityTime = Date.now();
       }
 
+      if (data.isRunning) {
+        everRunning = true;
+      }
+
       // Prompt detected
       if (data.isPromptWaiting && data.promptData) {
         // [DR1-03] Prompt detection exit code
@@ -94,10 +120,49 @@ async function pollWorktree(
         return { exitCode: WaitExitCode.PROMPT_DETECTED, output: promptOutput };
       }
 
+      // Issue #1628: an arrow-key menu is the agent blocked on a human just as much
+      // as a numbered prompt is, but it is published with isPromptWaiting=false so
+      // the UI can render NavigationButtons instead of PromptPanel. Treat it as a
+      // prompt here — otherwise `wait` polls a stopped agent until --timeout.
+      if (data.isSelectionListActive) {
+        if (options.onPrompt === 'human') {
+          console.error(
+            `Selection list active on ${worktreeId} (${data.sessionStatusReason ?? 'selection_list'}). ` +
+              'Waiting for human response...',
+          );
+          await sleep(POLL_INTERVAL_MS);
+          continue;
+        }
+
+        return {
+          exitCode: WaitExitCode.PROMPT_DETECTED,
+          output: {
+            worktreeId,
+            cliToolId: data.cliToolId || 'claude',
+            type: SELECTION_LIST_PROMPT_TYPE,
+            question: data.sessionStatusReason ?? SELECTION_LIST_PROMPT_TYPE,
+            options: [],
+            status: 'pending',
+          },
+        };
+      }
+
       // Completion check [DR1-04]:
-      // Path A: tmux session not running (session terminated or not started)
+      // Path A: the tmux session went away after we had seen it alive — the agent
+      //         finished and its session was stopped.
       // Path B: agent completed task (sessionStatus === 'ready', input prompt detected)
-      // Both indicate "no more work in progress" from wait command's perspective
+      // Both indicate "no more work in progress" from wait command's perspective.
+      //
+      // Issue #1628 narrowed Path A: a session that was NEVER seen running is
+      // "nothing to wait for" (NOT_STARTED), not a completion. See `everRunning`.
+      if (!data.isRunning && !everRunning) {
+        console.error(
+          `Not started: ${worktreeId} has no running ${data.cliToolId ?? 'agent'} session` +
+            `${options.instance ? ` for instance ${options.instance}` : ''}.`,
+        );
+        return { exitCode: VerifyExitCode.NOT_STARTED };
+      }
+
       if (!data.isRunning || data.sessionStatus === 'ready') {
         console.error(`Completed: ${worktreeId}`);
         return { exitCode: WaitExitCode.SUCCESS };
@@ -123,6 +188,21 @@ function sleep(ms: number): Promise<void> {
 /** True when the caller asked for a verdict rather than "the agent stopped". */
 function verifyRequested(options: WaitOptions): boolean {
   return Boolean(options.verify || options.requireWork);
+}
+
+/**
+ * Whether this poll outcome should still be handed to the verification gates.
+ *
+ * A completion is the obvious case. NOT_STARTED joins it (Issue #1628) so the
+ * operator gets the gate results instead of a bare "no session": work committed
+ * by an agent whose session has since gone away is still worth reporting. The
+ * verdict is merged rather than substituted — mergeExitCode never lets a passing
+ * run overwrite NOT_STARTED, so "wait never saw this agent" survives to the exit
+ * code even when the gates are green.
+ */
+function shouldVerify(exitCode: number, options: WaitOptions): boolean {
+  if (!verifyRequested(options)) return false;
+  return exitCode === WaitExitCode.SUCCESS || exitCode === VerifyExitCode.NOT_STARTED;
 }
 
 /**
@@ -278,8 +358,11 @@ export function createWaitCommand(): Command {
           }
           // Issue #1544: only a detected completion is worth verifying — a
           // prompt or a timeout means the agent never claimed to be done.
-          const exitCode = result.exitCode === WaitExitCode.SUCCESS && verifyRequested(options)
-            ? await verifyAfterWait(client, worktreeIds[0], options, boundTaskIds[0])
+          const exitCode = shouldVerify(result.exitCode, options)
+            ? mergeExitCode(
+                result.exitCode,
+                await verifyAfterWait(client, worktreeIds[0], options, boundTaskIds[0]),
+              )
             : result.exitCode;
           process.exit(exitCode);
           return;
@@ -300,8 +383,11 @@ export function createWaitCommand(): Command {
             if (result.value.output) {
               outputs.push(result.value.output);
             }
-            if (result.value.exitCode === WaitExitCode.SUCCESS && verifyRequested(options)) {
+            if (shouldVerify(result.value.exitCode, options)) {
               verifyTargets.push({ id: worktreeIds[index], taskId: boundTaskIds[index] });
+              // Issue #1628: fold NOT_STARTED in before verification so a green
+              // gate run cannot promote "no session was ever running" to success.
+              finalExitCode = mergeExitCode(finalExitCode, result.value.exitCode);
               return;
             }
             finalExitCode = mergeExitCode(finalExitCode, result.value.exitCode);
