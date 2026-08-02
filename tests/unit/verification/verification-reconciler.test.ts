@@ -101,6 +101,23 @@ describe('reconcileOrphanVerificationRuns', () => {
   it('is a no-op on an empty table', () => {
     expect(reconcileOrphanVerificationRuns(db)).toEqual({ runs: 0, gates: 0 });
   });
+
+  it('keeps the open gate\'s real start and does not claim a measured window', () => {
+    const run = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'api' });
+    const gate = createGateResult(db, run.id, { gateId: 'build', command: 'npm run build' });
+    const openedAt = gate.startedAt.getTime();
+
+    reconcileOrphanVerificationRuns(db);
+
+    const closed = getVerificationRun(db, run.id)!.gates[0];
+    // The gate really did start when the row was opened (#1625), so that stamp
+    // stands. Its end is unknown — the process that would have written it is
+    // gone — so `finished_at` is when recovery noticed, and the row says so
+    // instead of implying an interval nothing measured.
+    expect(closed.startedAt.getTime()).toBe(openedAt);
+    expect(closed.durationMs).toBeNull();
+    expect(closed.timingsMeasured).toBe(false);
+  });
 });
 
 describe('server startup wiring', () => {

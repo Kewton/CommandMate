@@ -80,6 +80,8 @@ export function isContractPath(path: string): boolean {
 export interface ScopeOutcome {
   status: VerificationGateTerminalStatus;
   exitCode: number | null;
+  /** Epoch ms this evaluation began; `durationMs` is measured from it (#1625). */
+  startedAt: number;
   durationMs: number;
   logTail: string | null;
 }
@@ -380,6 +382,24 @@ export const SCOPE_SKIP_NOT_REQUIRED =
   'scope: the contract sets success.requireScopeClean: false.';
 
 /**
+ * The skip that is *not* harmless: a contract exists and this run could not be
+ * attached to it (#1620).
+ *
+ * Worded apart from {@link SCOPE_SKIP_NO_CONTRACT} on purpose. Both are skips,
+ * but only one of them means "there was nothing to judge" — reporting the other
+ * with the same sentence is what let a run whose scope was never checked read
+ * as a repository that simply does not use contracts. The task id is named so
+ * the reader can go and look at what was not judged.
+ */
+export function scopeSkipDetachedContract(taskId: string, status: string): string {
+  return (
+    `scope: task ${taskId} declares a scope for this worktree, but it is ${status} and ` +
+    'this run was not attached to it, so its scope was NOT judged. ' +
+    'Name the task when starting the run (`wait --verify` does this automatically).'
+  );
+}
+
+/**
  * Judge the worktree's changes against a contract's scope.
  *
  * @param scope declared scope, or null when no contract is attached to the run
@@ -399,7 +419,13 @@ export async function evaluateScope(
     status: VerificationGateTerminalStatus,
     logTail: string,
     exitCode: number | null
-  ): ScopeOutcome => ({ status, exitCode, durationMs: Date.now() - startedAt, logTail });
+  ): ScopeOutcome => ({
+    status,
+    exitCode,
+    startedAt,
+    durationMs: Date.now() - startedAt,
+    logTail,
+  });
 
   if (!scope) return done('skipped', SCOPE_SKIP_NO_CONTRACT, null);
   if (!requireScopeClean) return done('skipped', SCOPE_SKIP_NOT_REQUIRED, null);

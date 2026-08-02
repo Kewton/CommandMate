@@ -22,8 +22,11 @@ export const COMMAND_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** Description length cap (matches the reused skill limit, Issue #343). */
 export const MAX_DESCRIPTION_LENGTH = 500;
 
-/** Version string shape used for min-version / source-version fields. */
+/** Version string shape used for min/max-version / source-version fields. */
 export const VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
+
+/** Badge label shape (`skill`, `workflow`) — kept narrow like a command name. */
+export const COMMAND_KIND_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 
 /** ASCII control characters (C0 range plus DEL). */
 // eslint-disable-next-line no-control-regex
@@ -62,6 +65,22 @@ export function sanitizeProviderCommand(raw: ProviderCommand): ProviderCommand |
 
   if (typeof raw.minVersion === 'string' && VERSION_PATTERN.test(raw.minVersion)) {
     command.minVersion = raw.minVersion;
+  }
+
+  // Issue #1603: lifecycle metadata rides along so the engine can refuse to add
+  // history/alias rows. Every field is re-validated here — a provider is an
+  // untrusted parse of a network document, not a trusted caller.
+  if (typeof raw.maxVersion === 'string' && VERSION_PATTERN.test(raw.maxVersion)) {
+    command.maxVersion = raw.maxVersion;
+  }
+  if (raw.status === 'removed' || raw.status === 'active') {
+    command.status = raw.status;
+  }
+  if (isValidCommandName(raw.aliasOf)) {
+    command.aliasOf = raw.aliasOf;
+  }
+  if (typeof raw.kind === 'string' && COMMAND_KIND_PATTERN.test(raw.kind)) {
+    command.kind = raw.kind;
   }
 
   return command;

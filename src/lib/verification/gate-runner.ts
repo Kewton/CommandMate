@@ -29,14 +29,19 @@ import {
   createVerificationRun,
   finishGateResult,
   finishVerificationRun,
-  getActiveTask,
   getRunningVerificationRun,
   getTask,
+  listTasks,
   type Task,
   type VerificationGateTerminalStatus,
   type VerificationRunTerminalStatus,
   type VerificationTrigger,
 } from '@/lib/db';
+// Past the barrel, as `agent-event-service` does for `getActiveTaskForInstance`:
+// this selector exists for the verification runner alone and re-exporting it
+// would invite the callers that must keep using `getActiveTask` (Auto-Yes,
+// prompt events) to reach for the wider set by accident.
+import { getVerifiableTask } from '@/lib/db/tasks-db';
 import { resolveDefaultBranchName } from '@/lib/git/git-default-branch';
 import { createLogger } from '@/lib/logger';
 import { resolveContractGateIds } from '@/lib/tasks/contract-message';
@@ -47,6 +52,7 @@ import {
   evaluateScope,
   isContractPath,
   parsePorcelainEntries,
+  scopeSkipDetachedContract,
 } from './scope-gate';
 import {
   loadVerifyConfig,
@@ -106,9 +112,10 @@ export interface RunVerificationInput {
   worktreePath: string;
   instanceId?: string;
   /**
-   * Task the run belongs to. Omitted means "resolve the worktree's active task"
-   * (#1545), which is what lets `wait --verify` verify against a contract
-   * without the CLI knowing a task exists.
+   * Task the run belongs to. Omitted means "resolve the worktree's own task"
+   * (#1545), which is what lets a caller verify against a contract without
+   * knowing a task exists. Naming one is stronger than that fallback: it
+   * survives the agent closing its own task mid-flight (#1620).
    */
   taskId?: string;
   trigger: VerificationTrigger;
@@ -135,8 +142,35 @@ export class VerificationConflictError extends Error {
 interface GateOutcome {
   status: VerificationGateTerminalStatus;
   exitCode: number | null;
+  /**
+   * Epoch ms at which execution began (Issue #1625).
+   *
+   * Carried out of the evaluator rather than re-read when the row is written:
+   * `durationMs` is measured from this exact clock reading, so the pair is an
+   * interval. Taking a second reading at write time is what made the stored
+   * timestamps describe the database write instead of the gate.
+   */
+  startedAt: number;
   durationMs: number;
   logTail: string | null;
+}
+
+/**
+ * A gate that did not execute (Issue #1625).
+ *
+ * `started_at` is NOT NULL in the schema and a null `finished_at` already means
+ * "still open", so there is no way to spell "no interval" — a zero-length
+ * window at the instant the decision was made is recorded instead. It is also
+ * the truth: nothing ran, and `duration_ms` has always said 0 for these rows.
+ */
+function notRun(logTail: string): GateOutcome {
+  return {
+    status: 'skipped',
+    exitCode: null,
+    startedAt: Date.now(),
+    durationMs: 0,
+    logTail,
+  };
 }
 
 // =============================================================================
@@ -282,12 +316,12 @@ function runCommand(
 
     // Only ever called from an event handler, so the killTimer binding below is
     // initialised by the time this runs.
-    const finish = (outcome: Omit<GateOutcome, 'durationMs'>): void => {
+    const finish = (outcome: Omit<GateOutcome, 'durationMs' | 'startedAt'>): void => {
       if (settled) return;
       settled = true;
       clearTimeout(killTimer);
       if (graceTimer) clearTimeout(graceTimer);
-      resolve({ ...outcome, durationMs: Date.now() - startedAt });
+      resolve({ ...outcome, startedAt, durationMs: Date.now() - startedAt });
     };
 
     const killTimer = setTimeout(() => {
@@ -364,7 +398,13 @@ async function evaluateWorkEvidence(
     status: VerificationGateTerminalStatus,
     logTail: string,
     exitCode: number | null
-  ): GateOutcome => ({ status, exitCode, durationMs: Date.now() - startedAt, logTail });
+  ): GateOutcome => ({
+    status,
+    exitCode,
+    startedAt,
+    durationMs: Date.now() - startedAt,
+    logTail,
+  });
 
   if (!baseRef) {
     return done(
@@ -534,51 +574,79 @@ async function executeRun(
   config: VerifyConfig,
   selection: GateSelection,
   baseRef: string | null,
-  task: Task | null
+  task: Task | null,
+  detachedContract: Task | null
 ): Promise<VerificationRunTerminalStatus> {
   const { maxLogTailBytes, skipInPrimaryCheckout } = config.options;
   const { runWorkEvidence, gates } = selection;
 
-  const record = (
-    gateId: string,
-    command: string,
-    outcome: GateOutcome
-  ): VerificationGateTerminalStatus => {
-    const row = createGateResult(db, runId, { gateId, command });
-    finishGateResult(db, row.id, {
+  /**
+   * Close an open gate row with the interval its evaluator measured.
+   *
+   * `finishedAt` is derived from the same clock reading `durationMs` was
+   * measured against, so the stored pair is that measurement rather than a
+   * second, later reading (#1625).
+   */
+  const close = (rowId: number, outcome: GateOutcome): GateOutcome => {
+    finishGateResult(db, rowId, {
       status: outcome.status,
       exitCode: outcome.exitCode,
       durationMs: outcome.durationMs,
       logTail: outcome.logTail,
+      executionWindow: {
+        startedAt: outcome.startedAt,
+        finishedAt: outcome.startedAt + outcome.durationMs,
+      },
     });
-    return outcome.status;
+    return outcome;
+  };
+
+  /**
+   * Open the gate's row, run it, then close it.
+   *
+   * The row exists *before* the gate does anything, so a process that dies
+   * mid-gate leaves a `running` row naming what it died in — which is what
+   * {@link reconcileOrphanVerificationRuns} closes on the next start. Opening
+   * and closing back to back (what this used to do) left that loop with nothing
+   * to find, and an interrupted gate with no record at all.
+   */
+  const runGate = async (
+    gateId: string,
+    command: string,
+    evaluate: () => Promise<GateOutcome>
+  ): Promise<GateOutcome> => {
+    const row = createGateResult(db, runId, { gateId, command });
+    return close(row.id, await evaluate());
+  };
+
+  /**
+   * Record a gate that was never entered.
+   *
+   * Opened and closed on the spot: there is no execution to leave a `running`
+   * row around, and the row carries {@link notRun}'s zero-length window.
+   */
+  const recordNotRun = (gateId: string, command: string, reason: string): GateOutcome => {
+    const outcome = notRun(reason);
+    const row = createGateResult(db, runId, { gateId, command });
+    return close(row.id, outcome);
   };
 
   const statuses: VerificationGateTerminalStatus[] = [];
 
   if (runWorkEvidence) {
-    const outcome = await evaluateWorkEvidence(worktreePath, baseRef);
-    record(WORK_EVIDENCE_GATE_ID, WORK_EVIDENCE_GATE_COMMAND, outcome);
+    const outcome = await runGate(WORK_EVIDENCE_GATE_ID, WORK_EVIDENCE_GATE_COMMAND, () =>
+      evaluateWorkEvidence(worktreePath, baseRef)
+    );
 
     if (outcome.status !== 'passed') {
       // Nothing was produced, so every command gate below would be judging the
       // base commit. Record them as skipped so the run shows what was not run.
-      const notRun = `skipped: the ${WORK_EVIDENCE_GATE_ID} gate did not pass.`;
+      const reason = `skipped: the ${WORK_EVIDENCE_GATE_ID} gate did not pass.`;
       if (selection.scope !== 'off') {
-        record(SCOPE_GATE_ID, SCOPE_GATE_COMMAND, {
-          status: 'skipped',
-          exitCode: null,
-          durationMs: 0,
-          logTail: notRun,
-        });
+        recordNotRun(SCOPE_GATE_ID, SCOPE_GATE_COMMAND, reason);
       }
       for (const gate of gates) {
-        record(gate.id, gate.command, {
-          status: 'skipped',
-          exitCode: null,
-          durationMs: 0,
-          logTail: notRun,
-        });
+        recordNotRun(gate.id, gate.command, reason);
       }
       return outcome.status === 'failed' ? 'not_started' : 'error';
     }
@@ -586,18 +654,32 @@ async function executeRun(
   }
 
   if (selection.scope !== 'off') {
-    const outcome = await evaluateScope(
-      worktreePath,
-      task?.contract.scope ?? null,
-      task?.contract.success.requireScopeClean ?? false,
-      baseRef,
-      task?.contractPath ?? null
-    );
-    record(SCOPE_GATE_ID, SCOPE_GATE_COMMAND, outcome);
-    // A skipped scope gate in the default selection is not a declined check:
-    // no contract declared a scope, so there was no assertion to test. Counting
-    // it would turn every contract-less run into `error` (see aggregateRunStatus).
-    if (outcome.status !== 'skipped' || selection.scope === 'explicit') {
+    // A detached contract is decided before the gate would run, so its row is
+    // recorded rather than executed.
+    const outcome = detachedContract
+      ? recordNotRun(
+          SCOPE_GATE_ID,
+          SCOPE_GATE_COMMAND,
+          scopeSkipDetachedContract(detachedContract.id, detachedContract.status)
+        )
+      : await runGate(SCOPE_GATE_ID, SCOPE_GATE_COMMAND, () =>
+          evaluateScope(
+            worktreePath,
+            task?.contract.scope ?? null,
+            task?.contract.success.requireScopeClean ?? false,
+            baseRef,
+            task?.contractPath ?? null
+          )
+        );
+    // A skipped scope gate in the default selection is usually not a declined
+    // check: no contract declared a scope, so there was no assertion to test.
+    // Counting it would turn every contract-less run into `error` (see
+    // aggregateRunStatus). It *is* a declined check when the caller asked for
+    // scope by name, and when a contract exists that this run could not attach
+    // to — that second case is how a run reported `passed` while the scope it
+    // was supposed to judge went unexamined (#1620).
+    const declined = selection.scope === 'explicit' || detachedContract !== null;
+    if (outcome.status !== 'skipped' || declined) {
       statuses.push(outcome.status);
     }
   }
@@ -610,20 +692,20 @@ async function executeRun(
       // the chunks the running app is serving mid-flight and breaks the live UI
       // — observed twice before this guard existed.
       statuses.push(
-        record(gate.id, gate.command, {
-          status: 'skipped',
-          exitCode: null,
-          durationMs: 0,
-          logTail:
-            'skipped: worktreePath is the server process working directory and ' +
-            'options.skipInPrimaryCheckout is true.',
-        })
+        recordNotRun(
+          gate.id,
+          gate.command,
+          'skipped: worktreePath is the server process working directory and ' +
+            'options.skipInPrimaryCheckout is true.'
+        ).status
       );
       continue;
     }
 
-    const outcome = await runCommand(gate.command, worktreePath, gate.timeoutSec, maxLogTailBytes);
-    statuses.push(record(gate.id, gate.command, outcome));
+    const outcome = await runGate(gate.id, gate.command, () =>
+      runCommand(gate.command, worktreePath, gate.timeoutSec, maxLogTailBytes)
+    );
+    statuses.push(outcome.status);
   }
 
   return aggregateRunStatus(statuses);
@@ -686,13 +768,47 @@ function recordTaskTransition(
  *
  * An explicit `taskId` wins even when the row is gone — the caller asserted the
  * attribution and the run should record it — so a missing row yields no task to
- * transition, not an error.
+ * transition, not an error. It also wins over the task's status: naming a task
+ * is the caller saying "this run is about that contract", which is what lets a
+ * `wait --verify` still judge a contract whose agent already verified itself
+ * and closed the task (#1620).
  */
 function resolveTask(db: Database.Database, input: RunVerificationInput): Task | null {
   if (input.taskId !== undefined) {
     return getTask(db, input.taskId);
   }
-  return getActiveTask(db, input.worktreeId);
+  return getVerifiableTask(db, input.worktreeId);
+}
+
+/**
+ * A contract this worktree has that the run could not be attached to.
+ *
+ * The scope gate skips whenever no task resolves, and that skip is forgiven so
+ * a repository without contracts is not permanently `error`. The forgiveness
+ * was load-bearing for a case it was never meant to cover: once an agent's own
+ * `commandmate verify` moved its task to `succeeded`, the orchestrator's run
+ * resolved nothing, skipped scope, and reported `passed` — a green verdict on a
+ * declaration nothing had read (#1620).
+ *
+ * Reported only when the contract actually asked for a clean scope: a contract
+ * with `requireScopeClean: false` would have skipped while fully attached, so
+ * nothing was declined by losing it.
+ *
+ * @returns the closed task, or null when there is genuinely nothing to judge
+ */
+function findDetachedContract(
+  db: Database.Database,
+  input: RunVerificationInput,
+  task: Task | null
+): Task | null {
+  // A resolved task, or a caller that named one, is an attributed run.
+  if (task !== null || input.taskId !== undefined) return null;
+
+  const [latest] = listTasks(db, input.worktreeId, 1);
+  // `pending` is not detached: nothing was sent, so no run can be about it yet.
+  // Anything resolvable would already have come back from resolveTask.
+  if (!latest || latest.status === 'pending') return null;
+  return latest.contract.success.requireScopeClean ? latest : null;
 }
 
 /**
@@ -715,6 +831,10 @@ export async function startVerification(
   }
 
   const task = resolveTask(db, input);
+  // Deliberately not folded into `taskId` below: the run did not judge this
+  // contract, and recording it would put a verdict-less run in that task's
+  // history. It is named in the scope gate's log_tail instead.
+  const detachedContract = findDetachedContract(db, input, task);
   const taskId = input.taskId ?? task?.id ?? null;
   // An explicit gateIds always wins: `verify --gates lint` must mean lint even
   // when the contract asks for more.
@@ -768,6 +888,10 @@ export async function startVerification(
     // Closed synchronously: there is no work to schedule, and leaving the row
     // `running` would block the next request for this worktree on a run that
     // will never move.
+    // Recorded, not run: this row carries a message about a config that could
+    // not be loaded, so like any gate that never executed it gets a zero-length
+    // window at the moment the failure was recorded (#1625).
+    const recordedAt = Date.now();
     const row = createGateResult(db, run.id, {
       gateId: CONFIG_GATE_ID,
       command: VERIFY_CONFIG_RELATIVE_PATH,
@@ -777,6 +901,7 @@ export async function startVerification(
       exitCode: null,
       durationMs: 0,
       logTail: configFailure,
+      executionWindow: { startedAt: recordedAt, finishedAt: recordedAt },
     });
     finishVerificationRun(db, run.id, 'error');
     logger.warn('verification-config-unusable', { runId: run.id, worktreeId: input.worktreeId });
@@ -808,7 +933,8 @@ export async function startVerification(
         resolvedConfig,
         resolvedSelection,
         baseRef,
-        task
+        task,
+        detachedContract
       );
       terminalStatus = status;
       finishVerificationRun(db, run.id, status);

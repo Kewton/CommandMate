@@ -398,9 +398,12 @@ Issue ごとに Step 1–4 を繰り返します。独立した Issue は並列�
 .claude/skills/orchestrate-monitor/scripts/monitor.sh \
   --hooks .claude/skills/orchestrate-monitor/scripts/hooks-git.sh \
   --hooks .claude/skills/orchestrate-monitor/scripts/hooks-task.sh \
-  --session-prefix mcbd-claude \
   --interval 20 --idle-threshold 8 "$WT" ...
 ```
+
+介入先の tmux セッションは capture の `cliToolId` から導出されるため、エージェントが混在していても
+オプション指定は要りません（#1601）。既定インスタンス以外を見るときだけ
+`<worktree-id>@<instance-id>`（例 `w1@codex-2`）で指定します。
 
 **monitor の `COMPLETE` はマージ可否の裁定ではありません。** 最終裁定は Step 3 の
 `wait --verify` の exit code です。monitor は「いつ見に行くか」を決めるための道具です。

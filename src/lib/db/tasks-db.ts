@@ -62,6 +62,28 @@ export const ACTIVE_TASK_STATUSES = [
   'verifying',
 ] as const satisfies readonly TaskStatus[];
 
+/**
+ * Statuses a verification run that has to *discover* its task may attach to.
+ *
+ * The active three plus the two the state machine explicitly reopens:
+ * `transitionTask` accepts `verify_started` from `failed` and `not_started`
+ * because a task can fail on one run and pass on the retry. Resolving only the
+ * active three meant that reopening was reachable only by a caller that already
+ * knew the task id — so the retry every agent performs after a red gate found
+ * no contract, and with it no scope to judge (#1620).
+ *
+ * `succeeded` and `cancelled` stay out: those are closed for good, and a run
+ * that silently adopted one would be judging work against a verdict already
+ * given. {@link ACTIVE_TASK_STATUSES} keeps its narrower meaning for the
+ * callers that ask "what is this agent working on right now" (Auto-Yes, prompt
+ * events), where a finished task must not answer.
+ */
+export const VERIFIABLE_TASK_STATUSES = [
+  ...ACTIVE_TASK_STATUSES,
+  'failed',
+  'not_started',
+] as const satisfies readonly TaskStatus[];
+
 export function isTerminalTaskStatus(status: TaskStatus): status is TerminalTaskStatus {
   return (TERMINAL_TASK_STATUSES as readonly TaskStatus[]).includes(status);
 }
@@ -284,6 +306,31 @@ export function getActiveTask(
       LIMIT 1
     `)
     .get(...params, ...ACTIVE_TASK_STATUSES) as TaskRow | undefined;
+
+  return row ? mapTaskRow(row) : null;
+}
+
+/**
+ * The task a verification run should attach to when the caller cannot name one.
+ *
+ * Worktree-scoped for the same reason {@link getActiveTask} is: the gates run
+ * over the whole working tree, so there is nothing finer to narrow by. Ordered
+ * like {@link getActiveTask} — most recently updated first, insertion order
+ * breaking a same-millisecond tie — so the answer is the last task to have
+ * moved, not whichever row SQLite happened to reach first.
+ *
+ * @see VERIFIABLE_TASK_STATUSES for why this is wider than "active"
+ */
+export function getVerifiableTask(db: Database.Database, worktreeId: string): Task | null {
+  const placeholders = VERIFIABLE_TASK_STATUSES.map(() => '?').join(', ');
+  const row = db
+    .prepare(`
+      SELECT ${TASK_COLUMNS} FROM tasks
+      WHERE worktree_id = ? AND status IN (${placeholders})
+      ORDER BY updated_at DESC, created_at DESC, rowid DESC
+      LIMIT 1
+    `)
+    .get(worktreeId, ...VERIFIABLE_TASK_STATUSES) as TaskRow | undefined;
 
   return row ? mapTaskRow(row) : null;
 }

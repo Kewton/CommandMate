@@ -12,6 +12,8 @@
 #   GATE unit FAIL exit=1 duration=45s
 #   RESULT failed
 # Failing output tails and diagnostics go to stderr so stdout stays parseable.
+# Every FAIL/TIMEOUT prints a reason line on stderr — including gates that wrote
+# nothing at all, which used to be reported by the status line alone (Issue #1607).
 #
 # Exit code: passed=0 / config error=2 / failed=20 / not_started=21 / skipped=22.
 #
@@ -336,12 +338,23 @@ if [ -n "$abs_git_dir" ] && [ "$abs_git_dir" = "$abs_common_git_dir" ]; then
 fi
 
 # --- gate execution -----------------------------------------------------------
+# Never returns without a word. A gate that failed while printing nothing used to
+# leave the status line as the only trace, so a CI log showed "this gate did not
+# pass" and no reason at all (Issue #1607). "Nothing was captured" is itself the
+# diagnosis worth reading — it separates "the command failed and explained itself"
+# from "the command produced no output", which point at different causes.
 emit_log_tail() {
   el_id=$1
   el_status=$2
   el_log=$3
-  [ "$OPT_MAX_TAIL" -gt 0 ] || return 0
-  [ -s "$el_log" ] || return 0
+  if [ "$OPT_MAX_TAIL" -le 0 ]; then
+    echo "--- gate $el_id ($el_status): log tail disabled (maxLogTailBytes=$OPT_MAX_TAIL) ---" >&2
+    return 0
+  fi
+  if [ ! -s "$el_log" ]; then
+    echo "--- gate $el_id ($el_status): no output captured ---" >&2
+    return 0
+  fi
   echo "--- gate $el_id ($el_status): last $OPT_MAX_TAIL bytes ---" >&2
   tail -c "$OPT_MAX_TAIL" "$el_log" >&2
   echo "--- end gate $el_id ---" >&2
@@ -402,6 +415,16 @@ run_gate() {
     echo "GATE $rg_id FAIL exit=$rg_code duration=${rg_dur}s"
     any_failed=1
     emit_log_tail "$rg_id" "FAIL exit=$rg_code" "$rg_log"
+    # There is no separate branch for "the gate never started": the wrapper shell
+    # is backgrounded, so a failed `exec` surfaces only as a non-zero `wait`. What
+    # distinguishes it is that /bin/sh reports "not found" / "cannot execute" on
+    # its own stderr, which is redirected into the log — so 126/127 with an *empty*
+    # log points at the spawn rather than at the command's own failure. Emitted as
+    # a lead to follow, not as a verdict: Issue #1607 never reproduced a spawn
+    # failure and this is not a claim about what caused the CI red.
+    if [ ! -s "$rg_log" ] && { [ "$rg_code" -eq 126 ] || [ "$rg_code" -eq 127 ]; }; then
+      echo "verify-run: gate $rg_id exited $rg_code with no output; the command may not have started (exec/spawn failure). Check that it exists and is executable in $CWD: $rg_cmd" >&2
+    fi
   fi
 }
 

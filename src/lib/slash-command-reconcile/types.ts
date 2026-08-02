@@ -11,6 +11,15 @@
  * — it is consumed by the release-time runner (scripts/) and unit tests.
  */
 
+/**
+ * Lifecycle of a command as declared by its source (Issue #1603).
+ *
+ * An authoritative source is not only a list of *current* commands: the claude
+ * docs table also carries history rows ("Removed in v2.1.92"). Only `active`
+ * rows may be auto-added.
+ */
+export type ProviderCommandStatus = 'active' | 'removed';
+
 /** One command enumerated from a provider's authoritative source. */
 export interface ProviderCommand {
   /** Command name without the leading '/'. */
@@ -19,6 +28,18 @@ export interface ProviderCommand {
   description?: string;
   /** Minimum CLI version the command appeared in, when the source notes it. */
   minVersion?: string;
+  /**
+   * Last CLI version that still shipped the command, when the source notes a
+   * removal. Reading this is what keeps history rows out of the catalog
+   * (Issue #1603: the parser used to read min-version only).
+   */
+  maxVersion?: string;
+  /** Lifecycle declared by the source; absent means `active`. */
+  status?: ProviderCommandStatus;
+  /** Canonical command this row is merely an alias of (`/cost` → `usage`). */
+  aliasOf?: string;
+  /** Badge the source puts on the row (`skill`, `workflow`), when present. */
+  kind?: string;
 }
 
 /**
@@ -96,6 +117,30 @@ export interface ReconcileDiff {
   verifiedAgainstUpdated: Record<string, { from?: string; to: string }>;
 }
 
+/**
+ * Why the reconcile refused to act on a source row (Issue #1603).
+ *
+ *  - `removed-row`          the source documents the command as gone.
+ *  - `alias-row`            the row is an alias of another command, not a command.
+ *  - `suspect-description`  the extracted prose looks like a marker/badge leftover.
+ *  - `description-conflict` two tools disagree on the text behind one i18n key.
+ */
+export type ReconcileNoticeCategory =
+  | 'removed-row'
+  | 'alias-row'
+  | 'suspect-description'
+  | 'description-conflict';
+
+/** One categorized reconcile decision, surfaced by `--check`. */
+export interface ReconcileNotice {
+  category: ReconcileNoticeCategory;
+  /** Tool the row came from; absent when the notice spans tools. */
+  tool?: string;
+  /** Command name without the leading '/'. */
+  name: string;
+  message: string;
+}
+
 /** Full result of a reconcile pass. */
 export interface ReconcileResult {
   /** The catalog after reconciliation (unchanged object contents when `changed` is false). */
@@ -106,6 +151,8 @@ export interface ReconcileResult {
   diff: ReconcileDiff;
   /** Aggregated non-fatal warnings from every provider. */
   warnings: string[];
+  /** Categorized decisions the engine made about source rows (Issue #1603). */
+  notices: ReconcileNotice[];
   /** True when the catalog or locales would change. */
   changed: boolean;
 }

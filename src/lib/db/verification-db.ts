@@ -9,6 +9,11 @@
  * leaves a `running` row behind, which is recoverable evidence, whereas a
  * single write-on-completion would leave nothing at all.
  *
+ * The timestamps describe the *execution*, not the writes (Issue #1625): a
+ * caller that measured a gate closes the row with the window it measured, so
+ * `finished_at - started_at` equals `duration_ms` instead of the gap between
+ * two adjacent INSERT/UPDATE statements.
+ *
  * The finish* functions throw when the target row does not exist. A silent
  * no-op would let a caller believe it recorded a verdict it never recorded —
  * exactly the failure this table exists to make impossible.
@@ -91,6 +96,26 @@ export interface VerificationGateResult {
   logTail: string | null;
   startedAt: Date;
   finishedAt: Date | null;
+  /**
+   * Whether `startedAt`/`finishedAt` are the endpoints of the interval
+   * `durationMs` counted (Issue #1625).
+   *
+   * Derived, not stored. Until #1625 both stamps were written back to back
+   * *after* the gate had finished, so they described the write and their
+   * difference had nothing to do with `durationMs`. Those rows are history and
+   * are never rewritten, so a reader needs a way to tell them apart — this is
+   * it, and it is computed rather than backfilled for exactly that reason.
+   *
+   * The check is sound in both directions. The fixed writer makes it true by
+   * construction. A pre-#1625 row can only satisfy it when its window is empty
+   * *and* `durationMs` is 0 — because the two writes were adjacent, the window
+   * was always ~0 — and a gate that took no measurable time is one whose write
+   * time and execution time are the same instant anyway. `false` therefore
+   * means "do not read these stamps as timing"; it covers pre-#1625 rows, rows
+   * still open, and rows closed by restart reconciliation, which never observed
+   * the gate end.
+   */
+  timingsMeasured: boolean;
 }
 
 /** A run together with its gate results, in execution order. */
@@ -133,12 +158,33 @@ export interface CreateGateResultInput {
   command: string;
 }
 
+/**
+ * The interval a gate actually occupied, in epoch milliseconds (Issue #1625).
+ *
+ * Declared as one object so the two ends cannot be supplied separately: half a
+ * window is worse than none, because it looks like a window.
+ */
+export interface GateExecutionWindow {
+  startedAt: number;
+  finishedAt: number;
+}
+
 /** Outcome written when a gate finishes. Omitted fields are stored as NULL. */
 export interface FinishGateResultPatch {
   status: VerificationGateTerminalStatus;
   exitCode?: number | null;
   durationMs?: number | null;
   logTail?: string | null;
+  /**
+   * The measured execution window, when the caller has one (Issue #1625).
+   *
+   * Supplying it replaces the provisional `started_at` written when the row was
+   * opened, so the pair brackets exactly what `durationMs` counted rather than
+   * the two database writes. Omit it when nothing observed the gate run —
+   * restart reconciliation does — and the opening stamp is kept with
+   * `finished_at = now`.
+   */
+  executionWindow?: GateExecutionWindow;
 }
 
 interface VerificationRunRow {
@@ -200,6 +246,10 @@ function mapGateRow(row: VerificationGateResultRow): VerificationGateResult {
     logTail: row.log_tail,
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at === null ? null : new Date(row.finished_at),
+    timingsMeasured:
+      row.finished_at !== null &&
+      row.duration_ms !== null &&
+      row.finished_at - row.started_at === row.duration_ms,
   };
 }
 
@@ -276,7 +326,15 @@ export function createGateResult(
   return mapGateRow(row);
 }
 
-/** Close a gate result with its outcome, stamping `finished_at`. */
+/**
+ * Close a gate result with its outcome and the interval it occupied.
+ *
+ * `started_at` is rewritten only when the caller declares an
+ * {@link FinishGateResultPatch.executionWindow}: the value written when the row
+ * was opened is a placeholder for "this gate was entered", and the measured
+ * start is a few milliseconds later — after the insert this call is closing.
+ * Leaving the placeholder would put that gap inside the reported window.
+ */
 export function finishGateResult(
   db: Database.Database,
   gateResultId: number,
@@ -285,7 +343,9 @@ export function finishGateResult(
   const info = db
     .prepare(`
       UPDATE verification_gate_results
-      SET status = ?, exit_code = ?, duration_ms = ?, log_tail = ?, finished_at = ?
+      SET status = ?, exit_code = ?, duration_ms = ?, log_tail = ?,
+          started_at = COALESCE(?, started_at),
+          finished_at = ?
       WHERE id = ?
     `)
     .run(
@@ -293,7 +353,8 @@ export function finishGateResult(
       patch.exitCode ?? null,
       patch.durationMs ?? null,
       patch.logTail ?? null,
-      Date.now(),
+      patch.executionWindow?.startedAt ?? null,
+      patch.executionWindow?.finishedAt ?? Date.now(),
       gateResultId
     );
 

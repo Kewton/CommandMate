@@ -1,0 +1,13 @@
+# Gates that fail without writing a single byte. `emit_log_tail` used to return
+# without a word when the log was empty (Issue #1607), so the GATE status line
+# was the entire failure report. `notfound` also silences the wrapper shell's own
+# "not found" message, so it exits 127 with an empty log — what a command that
+# never started looks like from the runner's side.
+version: 1
+gates:
+  - id: silent
+    command: exit 3
+  - id: notfound
+    command: exec 2>/dev/null; exec cmate-verify-no-such-command-1607
+options:
+  skipInPrimaryCheckout: false

@@ -24,26 +24,63 @@
 #   CM — commandmate launcher; inherited from monitor.sh when sourced by it.
 CM=${CM:-"npx commandmate@latest"}
 
-# read_task_status <worktree-id> -> a TaskStatus, or empty when unavailable.
+# read_task_status <worktree-id> -> a TaskStatus, `unavailable`, or empty.
 #
-# Empty is the "no answer" value on purpose, and it is what a server without the
-# task ledger, a worktree with no contract, or an older CLI all produce: the
-# caller then falls back to the capture heuristics instead of stalling. The
-# status is echoed only if it is one of the statuses the product defines
-# (src/lib/db/tasks-db.ts TASK_STATUSES), so an error message or a changed
-# output format degrades to "no answer" rather than to a bogus verdict.
+# Three answers, because they mean three different things and collapsing them is
+# how a degraded run passes for a healthy one (Issue #1613):
+#
+#   <status>      the ledger answered. One of TASK_STATUSES (src/lib/db/tasks-db.ts):
+#                 pending running waiting_input verifying succeeded failed
+#                 not_started cancelled.
+#   ""            the ledger answered and this worktree has no task — a
+#                 contract-less delegation. The pre-task behaviour, silently.
+#   unavailable   the ledger could not be asked at all. This is the version gate:
+#                 monitor.sh reports it once per worker and then runs on the
+#                 capture heuristics. `unavailable` is deliberately not a
+#                 TaskStatus, so a monitor.sh that predates this file passes it
+#                 straight to verify-completion.sh, where it falls through to the
+#                 same heuristics instead of deciding anything.
+#
+# Measured against develop @a46845c7 (2026-08-01), read-only calls only:
+#   worktree unknown to the server   exit 99, stderr `Resource not found. Check the
+#                                    worktree ID.` (404 -> UNEXPECTED_ERROR,
+#                                    src/cli/utils/api-client.ts)
+#   server not running               exit 1,  stderr `Server is not running. Start it
+#                                    with: commandmate start` (DEPENDENCY_ERROR)
+#   known worktree, zero tasks       exit 0,  notice on stderr and stdout empty
+#                                    (src/cli/commands/task.ts) — the empty case above,
+#                                    which is why "empty stdout" must NOT mean failure
+# A CommandMate that predates the task ledger fails here too: `src/cli/commands/task.ts`
+# exists only on develop, so v0.15.0 / v0.16.0 have no `task` subcommand at all. Note
+# that `commandmate task --help` is not a usable probe — an older CLI prints the root
+# help and exits 0, so only running the real subcommand distinguishes the two.
 read_task_status() {
-  local line status
+  ht__line=""
+  ht__status=""
+  ht__rc=0
+
   # Non-JSON output is deliberate: it is tab-separated (id, status, agent, gates,
-  # title), which `cut` reads with no JSON parser and no jq dependency. When the
-  # worktree has no tasks the CLI writes its notice to stderr and stdout is empty.
-  line=$($CM task list "$1" --limit 1 2>/dev/null | head -n 1)
-  status=$(printf '%s' "$line" | cut -f2)
-  case "$status" in
+  # title), which `cut` reads with no JSON parser and no jq dependency. The
+  # assignment keeps the exit code — piping into `head` here would hand `$?` to
+  # head and erase every failure mode listed above.
+  ht__line=$($CM task list "$1" --limit 1 2>/dev/null)
+  ht__rc=$?
+  if [ "$ht__rc" -ne 0 ]; then
+    printf 'unavailable\n'
+    return 0
+  fi
+
+  # When the worktree has no tasks the CLI writes its notice to stderr and stdout
+  # is empty, so this is empty too — the contract-less case.
+  ht__status=$(printf '%s\n' "$ht__line" | head -n 1 | cut -f2)
+  case "$ht__status" in
     pending|running|waiting_input|verifying|succeeded|failed|not_started|cancelled)
-      printf '%s\n' "$status"
+      printf '%s\n' "$ht__status"
       ;;
     *)
+      # An unrecognised value is treated as "no answer" rather than passed on: a
+      # changed output format must degrade to the heuristics, not to a verdict
+      # nobody defined.
       printf '\n'
       ;;
   esac

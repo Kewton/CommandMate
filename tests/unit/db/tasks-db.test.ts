@@ -2,9 +2,10 @@
  * Unit tests for tasks-db (Issue #1545, migration v50).
  *
  * The selection rules are what the rest of the feature depends on:
- * `getActiveTask` is how a `wait --verify` with no task id finds the contract it
- * should verify against, so "which row wins" is asserted directly rather than
- * inferred from a happy path.
+ * `getVerifiableTask` is how a verification run with no task id finds the
+ * contract it should judge, and `getActiveTask` is how Auto-Yes and the prompt
+ * events find the task an agent is working on right now. "Which row wins" is
+ * asserted directly rather than inferred from a happy path.
  *
  * @vitest-environment node
  */
@@ -46,7 +47,7 @@ import {
 // (#1548): production code must go through `applyTaskEvent`, which is the only
 // writer that also records why the status moved. These tests are the unit tests
 // *of* `updateTaskStatus`, so they take the module's own path.
-import { updateTaskStatus } from '@/lib/db/tasks-db';
+import { getVerifiableTask, updateTaskStatus } from '@/lib/db/tasks-db';
 import { parseTaskContract, type TaskContract } from '@/lib/tasks/contract-parser';
 
 let db: Database.Database;
@@ -327,5 +328,67 @@ describe('getActiveTask', () => {
 
     expect(getActiveTask(db, 'wt-1', 'codex', 'codex-2')?.id).toBe(second.id);
     expect(getActiveTask(db, 'wt-1', 'codex', 'codex-3')).toBeNull();
+  });
+});
+
+/**
+ * Issue #1620: wider than `getActiveTask` by exactly the two statuses the state
+ * machine reopens. A verification run that cannot name its task has to be able
+ * to find one it is allowed to judge — otherwise the retry after a red gate
+ * loses the contract, and the scope it declared goes unchecked.
+ */
+describe('getVerifiableTask', () => {
+  it('returns null when the worktree has no tasks at all', () => {
+    expect(getVerifiableTask(db, 'wt-1')).toBeNull();
+  });
+
+  it('ignores a pending task: nothing has been sent, so there is no work to judge', () => {
+    seed({ status: 'pending' });
+    expect(getVerifiableTask(db, 'wt-1')).toBeNull();
+  });
+
+  it.each(['running', 'waiting_input', 'verifying'] as const)('finds a %s task', (status) => {
+    const task = seed({ status });
+    expect(getVerifiableTask(db, 'wt-1')?.id).toBe(task.id);
+  });
+
+  it.each(['failed', 'not_started'] as const)(
+    'finds a %s task, which a re-run legitimately reopens',
+    (status) => {
+      const task = seed({ status });
+      expect(getVerifiableTask(db, 'wt-1')?.id).toBe(task.id);
+      // The paired fact: `getActiveTask` still refuses it, so Auto-Yes and the
+      // prompt events do not start treating a finished task as live.
+      expect(getActiveTask(db, 'wt-1')).toBeNull();
+    }
+  );
+
+  it.each(['succeeded', 'cancelled'] as const)('ignores a %s task', (status) => {
+    seed({ status });
+    expect(getVerifiableTask(db, 'wt-1')).toBeNull();
+  });
+
+  it('takes the most recently updated verifiable task', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-01T00:00:00Z'));
+    const older = seed({ status: 'failed', title: 'older' });
+    vi.setSystemTime(new Date('2026-08-01T00:00:01Z'));
+    const newer = seed({ status: 'running', title: 'newer' });
+
+    expect(getVerifiableTask(db, 'wt-1')?.id).toBe(newer.id);
+
+    vi.setSystemTime(new Date('2026-08-01T00:00:02Z'));
+    updateTaskStatus(db, older.id, 'not_started');
+    expect(getVerifiableTask(db, 'wt-1')?.id).toBe(older.id);
+  });
+
+  it('breaks a same-millisecond tie by insertion order, not by id', () => {
+    seedTiedTrio('running');
+    expect(getVerifiableTask(db, 'wt-1')?.id).toBe(ID_C);
+  });
+
+  it('scopes to the worktree', () => {
+    seed({ worktreeId: 'wt-2', status: 'running' });
+    expect(getVerifiableTask(db, 'wt-1')).toBeNull();
   });
 });

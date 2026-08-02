@@ -14,7 +14,12 @@
 import { Command } from 'commander';
 import { ExitCode, WAIT_EXIT_CODE_PRIORITY, WaitExitCode } from '../types';
 import type { WaitOptions } from '../types';
-import type { CurrentOutputResponse, WaitPromptOutput } from '../types/api-responses';
+import type {
+  CurrentOutputResponse,
+  TaskListResponse,
+  TaskStatus,
+  WaitPromptOutput,
+} from '../types/api-responses';
 import { ApiClient, ApiError, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { runVerification, WORK_EVIDENCE_GATE_ID } from '../utils/verify-runner';
@@ -121,6 +126,56 @@ function verifyRequested(options: WaitOptions): boolean {
 }
 
 /**
+ * Task statuses that mean "this wait is about that task".
+ *
+ * Mirrors ACTIVE_TASK_STATUSES in src/lib/db/tasks-db.ts. Deliberately narrower
+ * than the set the server will attach a run to: this is a guess made from a
+ * worktree id alone, and a task that had already finished before the wait began
+ * is a different delegation, not this one.
+ */
+const IN_FLIGHT_TASK_STATUSES: ReadonlySet<TaskStatus> = new Set<TaskStatus>([
+  'running',
+  'waiting_input',
+  'verifying',
+]);
+
+/**
+ * Read the task this wait is about, before waiting for it (Issue #1620).
+ *
+ * Timing is the whole point. Agents are asked to run the gates themselves
+ * before reporting completion, and doing so moves their task to a terminal
+ * status — after which a verification run started with only a worktree id has
+ * no contract to resolve, judges no scope, and still reports `passed`. Read
+ * while the task is still in flight, the id survives that transition and the
+ * run that follows is judged against the contract it was supposed to judge.
+ *
+ * Never throws: an unreadable ledger costs the attribution, and refusing to
+ * verify over it would cost every gate.
+ *
+ * @returns the task id, or undefined to leave resolution to the server
+ */
+async function resolveWaitedTaskId(
+  client: ApiClient,
+  worktreeId: string,
+): Promise<string | undefined> {
+  try {
+    const data = await client.get<TaskListResponse>(
+      `/api/worktrees/${worktreeId}/tasks?limit=1`,
+    );
+    const task = data?.tasks?.[0];
+    if (!task || !IN_FLIGHT_TASK_STATUSES.has(task.status)) return undefined;
+    return task.id;
+  } catch (error) {
+    console.error(
+      `Note: could not read the task ledger for ${worktreeId} ` +
+        `(${error instanceof Error ? error.message : String(error)}); ` +
+        'verification will resolve its own task.',
+    );
+    return undefined;
+  }
+}
+
+/**
  * Run verification for one worktree after its completion was detected.
  *
  * Swallows ApiError into an exit code: with several worktrees in flight, one
@@ -130,6 +185,7 @@ async function verifyAfterWait(
   client: ApiClient,
   worktreeId: string,
   options: WaitOptions,
+  taskId: string | undefined,
 ): Promise<number> {
   // --verify runs every gate, and work-evidence is always part of "every gate",
   // so combining it with --require-work is a superset rather than a conflict.
@@ -139,6 +195,7 @@ async function verifyAfterWait(
       worktreeId,
       trigger: 'wait',
       instanceId: options.instance,
+      taskId,
       gateIds,
       // stdout stays reserved for the prompt JSON contract.
       resultStream: 'stderr',
@@ -205,6 +262,13 @@ export function createWaitCommand(): Command {
 
         const client = new ApiClient({ token: options.token });
 
+        // Issue #1620: resolved before any polling starts. Once the agent stops
+        // there is no reliable way left to tell which contract this wait was
+        // about — the agent's own verification may have closed it by then.
+        const boundTaskIds = verifyRequested(options)
+          ? await Promise.all(worktreeIds.map(id => resolveWaitedTaskId(client, id)))
+          : worktreeIds.map(() => undefined);
+
         if (worktreeIds.length === 1) {
           // Single worktree
           const result = await pollWorktree(client, worktreeIds[0], options);
@@ -215,7 +279,7 @@ export function createWaitCommand(): Command {
           // Issue #1544: only a detected completion is worth verifying — a
           // prompt or a timeout means the agent never claimed to be done.
           const exitCode = result.exitCode === WaitExitCode.SUCCESS && verifyRequested(options)
-            ? await verifyAfterWait(client, worktreeIds[0], options)
+            ? await verifyAfterWait(client, worktreeIds[0], options, boundTaskIds[0])
             : result.exitCode;
           process.exit(exitCode);
           return;
@@ -229,7 +293,7 @@ export function createWaitCommand(): Command {
         // Collect results
         const outputs: WaitPromptOutput[] = [];
         let finalExitCode: number = WaitExitCode.SUCCESS;
-        const verifyTargets: string[] = [];
+        const verifyTargets: Array<{ id: string; taskId: string | undefined }> = [];
 
         results.forEach((result, index) => {
           if (result.status === 'fulfilled') {
@@ -237,7 +301,7 @@ export function createWaitCommand(): Command {
               outputs.push(result.value.output);
             }
             if (result.value.exitCode === WaitExitCode.SUCCESS && verifyRequested(options)) {
-              verifyTargets.push(worktreeIds[index]);
+              verifyTargets.push({ id: worktreeIds[index], taskId: boundTaskIds[index] });
               return;
             }
             finalExitCode = mergeExitCode(finalExitCode, result.value.exitCode);
@@ -253,8 +317,11 @@ export function createWaitCommand(): Command {
         // Issue #1544: serial on purpose. The server caps concurrent runs
         // process-wide, so firing them together only queues them behind each
         // other while every gate competes for the same machine.
-        for (const id of verifyTargets) {
-          finalExitCode = mergeExitCode(finalExitCode, await verifyAfterWait(client, id, options));
+        for (const target of verifyTargets) {
+          finalExitCode = mergeExitCode(
+            finalExitCode,
+            await verifyAfterWait(client, target.id, options, target.taskId),
+          );
         }
 
         if (outputs.length > 0) {
