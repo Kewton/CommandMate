@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **tmux セッションの scrollback が意図の 1/25（tmux 既定の 2000 行）しか確保されていなかった問題を修正** (#1624): `history-limit` はセッションオプションだが、**pane は生成時点の値でスクロールバッファを一度だけ確保する**。`new-session`（この時点で window 0 と pane ができる）の**後**に `set-option` していたため、`show-options` は 50000 を返すのに pane の `#{history_limit}` は 2000 のままという乖離が生じていた（実測: 稼働中の `mcbd-codex-*` セッションが 1977/2000 行と使用率 98.85% で、古い履歴を落とし続けていた）。影響を受けるのは scrollback を持つ非 alternate-screen ツール（codex / gemini / vibe-local / antigravity）で、claude / opencode / copilot は `history_size=0` のため無関係。`set-option` → `new-window -k`（window 0 を index を保ったまま作り直す）の順序に変更し、新 window は `window-size manual` を継承しないためジオメトリ設定（#1163）はその後に当てる。`respawn-pane -k` は pane が既存バッファを再利用するため効かない（実測）。あわせて値を **50000 → `TMUX_HISTORY_LIMIT=20000`** に見直した — `capturePane` の `execFile maxBuffer` が 10MB で、50000 行の SGR 込みテキスト（実測 274B/行 ≒ 13MB）はこれを超えて **throw** するため、50000 行の深部はそもそもアプリから読めなかった（アプリが読む最深は既定 10000 行、他の呼び出しは 1000 行以下）。根拠は `src/config/tmux-pane-config.ts` の定数 doc コメントに実測値つきで残してある。**既存の稼働セッションには適用されない**（pane を作り直さない限り 2000 のまま）: 稼働中 pane の再生成は実行中のエージェントプロセスを kill するため自動適用は行わず、**次回のセッション作成時から適用**する。今すぐ深い履歴が必要な場合はセッションを停止して作り直すこと
+
 ## [0.18.0] - 2026-08-02
 
 > **Highlight**: **検証と監視が「見ていないもの」を合格・完了として報告していた経路を塞いだリリース。** v0.17.0 で導入した検証基盤は、ワーカー自身が `commandmate verify` を回してタスクを終端させると、続く `wait --verify` が契約を引けずに **scope ゲートを SKIP し、その SKIP を集計にも数えず `RESULT passed` / exit 0 を返していた** — 宣言した scope を一度も judge していない run が合格を返す経路である（#1620）。「契約は在るがこの run が attach されていない」を区別し、**exit 99（判定に到達せず）でタスク ID を名指しする**ようにした。あわせてゲートの `started_at` / `finished_at` が実行時刻ではなく**記録時刻**だった問題を直した（#1625） — live DB では 168 gate 中 145 が同値、**6 分 24 秒かかった unit ゲートの開始と終了が同一ミリ秒**だった。行を実行の前に開き、かつ計測値を明示的に運ぶ**両方**を採ることで `finished_at - started_at === duration_ms` がミリ秒単位で厳密に成立し、副次的に、実行中に落ちたゲートを記録する reconcile 経路が**初めて到達可能になった**（従来は行そのものが残らなかった）。監視側も同型の欠陥を潰しており、タスク台帳を引けなかったことを空（＝契約なし）と区別できず推定のまま健全な COMPLETE を出していた問題（#1613）と、`git` の失敗を「作業ゼロ」と読んで未起動ワーカーを COMPLETE と誤報していた問題（#1614）を、いずれも終了コードの確認で塞いだ。2 リポジトリに同じスクリプトの実体を持つことによるドリフトは、ネットワークも cross-repo トークンも使わない pin 方式の対応表で検知する（#1612）。

@@ -89,11 +89,12 @@ export class CodexTool extends BaseCLITool {
     }
 
     try {
-      // Create tmux session with large history buffer for Codex output
+      // Create tmux session. Codex is inline-rendered, so its transcript lives in
+      // the pane scrollback — depth comes from the shared TMUX_HISTORY_LIMIT
+      // default (Issue #1624), do not re-hardcode it here.
       await createSession({
         sessionName,
         workingDirectory: worktreePath,
-        historyLimit: 50000,
       });
 
       // Wait a moment for the session to be created
