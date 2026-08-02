@@ -503,6 +503,16 @@ export interface VerificationGateResultView {
   logTail: string | null;
   startedAt: string;
   finishedAt: string | null;
+  /**
+   * Whether `startedAt`/`finishedAt` bracket the execution `durationMs` counted
+   * (Issue #1625).
+   *
+   * Rows written before #1625 stamped both at write time, and history is never
+   * rewritten, so a consumer reading old runs must check this before treating
+   * the timestamps as timing. `durationMs` was always correct and needs no such
+   * check. Absent on responses from a server older than #1625.
+   */
+  timingsMeasured?: boolean;
 }
 
 /** Mirrors: src/lib/db/verification-db.ts VerificationRunWithGates. */

@@ -221,6 +221,7 @@ export type {
   CreateVerificationRunInput,
   CreateGateResultInput,
   FinishGateResultPatch,
+  GateExecutionWindow,
 } from './verification-db';
 
 // tasks-db (execution contracts, Issue #1545)
