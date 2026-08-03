@@ -46,9 +46,13 @@ import { initTimerManager, stopAllTimers } from './src/lib/timer-manager';
 import { initResourceCleanup, stopResourceCleanup } from './src/lib/resource-cleanup';
 import { runMigrations } from './src/lib/db/db-migrations';
 import { getEnvByKey } from './src/lib/env';
-import { registerAndFilterRepositories, resolveRepositoryPath, getAllRepositories } from './src/lib/db/db-repository';
-import { getWorktreeIdsByRepository, deleteWorktreesByIds } from './src/lib/db';
-import { cleanupMultipleWorktrees, killWorktreeSession, syncWorktreesAndCleanup } from './src/lib/session-cleanup';
+import { registerAndFilterRepositories, getAllRepositories } from './src/lib/db/db-repository';
+// Issue #1666: `resolveRepositoryPath`, `getWorktreeIdsByRepository`,
+// `deleteWorktreesByIds`, `cleanupMultipleWorktrees` and `killWorktreeSession`
+// went with the startup purge — they had no other caller here. `npm run lint`
+// only covers `src/`, and tsconfig sets no `noUnusedLocals`, so nothing in the
+// gates would have flagged them: they were removed by inspection, not by a tool.
+import { syncWorktreesAndCleanup } from './src/lib/session-cleanup';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = getEnvByKey('CM_BIND') || '127.0.0.1';
@@ -373,19 +377,31 @@ app.prepare().then(() => {
           console.log(`  [excluded] ${p}`);
         });
 
-        // Issue #202/#526: Remove worktrees of excluded repositories from DB
-        // SF-002: cleanup -> delete order for excluded repositories
-        // Sessions must be stopped before DB records are removed
-        for (const excludedPath of excludedPaths) {
-          const resolvedPath = resolveRepositoryPath(excludedPath);
-          const worktreeIds = getWorktreeIdsByRepository(db, resolvedPath);
-          if (worktreeIds.length > 0) {
-            // Issue #526: Clean up tmux sessions before deleting from DB
-            await cleanupMultipleWorktrees(worktreeIds, killWorktreeSession);
-            const result = deleteWorktreesByIds(db, worktreeIds);
-            console.log(`  Removed ${result.deletedCount} worktree(s) from excluded repository: ${resolvedPath}`);
-          }
-        }
+        // Issue #1666: exclusion is where startup STOPS, not where it deletes.
+        //
+        // This branch used to purge every excluded repository — kill its tmux
+        // sessions, then `deleteWorktreesByIds`, taking chat history, memos,
+        // todos, timers, schedules, execution logs, tasks and verification runs
+        // with it by cascade. That was #202's "deleted repositories must not
+        // reappear after a restart", and it was harmless for exactly as long as
+        // `DELETE /api/repositories` was the only route to `enabled = 0`: that
+        // route already purged, so the loop re-deleted nothing.
+        //
+        // #1658 added a non-destructive disable (a single
+        // `UPDATE repositories SET enabled = 0`), which made this loop the
+        // thing that undid it — and only for `WORKTREE_REPOS` repositories,
+        // because a DB-only one leaves `allPaths` when disabled and never
+        // reaches `excludedPaths` at all. So the same toggle was destructive or
+        // not depending on where the repository had been configured, and the
+        // damage landed a restart later, far from the click that caused it.
+        //
+        // #202 survives without the deletion: an excluded repository is not
+        // scanned, so nothing re-creates its rows, and keeping rows is not the
+        // same as showing them. Hiding a repository's worktrees from the
+        // sidebar is `visible`'s job (#690) — a separate, reversible flag that
+        // the user sets deliberately — whereas `enabled` only decides what gets
+        // scanned. Deleting rows to achieve "not shown" destroys history to
+        // implement a view filter, and cannot be undone by re-enabling.
       }
 
       // Scan filtered repositories (excluded repos are skipped)
