@@ -25,7 +25,24 @@ argument-hint: "[version-type] (major|minor|patch) or [version] (e.g., 1.2.3)"
 
 - **`develop` ブランチ**が最新で、`origin/develop` と同期していること（リリースは develop 基点。main 基点ではない）
 - 作業ツリーがクリーンであること
-- `npm run lint && npx tsc --noEmit && npm run test:unit && npm run build` が通ること
+- 検証ゲートが通ること（Phase 2-3 参照）。**`npm run build` は primary checkout で回さない** —
+  稼働サーバの `.next` を壊すため。build の検証はリリース PR の CI が行う
+
+## 全体の流れ
+
+```
+develop ──PR (squash)──> main ──annotated tag──> GitHub Release 作成
+                                                        │
+                                                        └─> publish.yml (OIDC) ──> npm
+develop <──merge -s ours── main      （祖先復元。squash で切れるため必須）
+```
+
+**`release/*` ブランチは経由しない。** `origin/release/v*` は v0.5.x までしか存在せず、
+`release` ブランチを切る手順（#1202）は v0.10.0 で廃止されている。`publish.yml` のトリガーは
+`on: release: types: [published]` ＝ **GitHub Release オブジェクトの公開**であって、
+ブランチへの push ではない。
+
+**このスキルは `develop` からしか実行できない**（Phase 1-1 で確認し、それ以外は中断する）。
 
 ## この手順が「なぜこの形か」
 
@@ -224,13 +241,43 @@ npm version "${NEXT_VERSION}" --no-git-tag-version
 
 ### 2-3. 品質ゲート
 
-全て通ること。1つでも落ちたら修正してから進む。
+**`npm run build` をここで実行してはいけない。**
+
+このスキルは develop、すなわち**稼働中サーバの cwd** で走る。`npm run build` は `.next` を
+作り替えて `BUILD_ID` を変えるため、**配信中の成果物を壊す**（開いているタブは chunk が 404 になり、
+遷移で client-side exception。過去 3 回発生）。同じ理由で `.commandmate/verify.yaml` は
+`skipInPrimaryCheckout: true` で build を除外している。**スキルだけ素で build を回すと矛盾する。**
+
+代わりに検証ゲートを使う。primary checkout では build が自動的に外れ、lint / typecheck / unit は走る。
+
+```bash
+# --branch develop は他リポジトリの develop も拾う（実測で 3 件返った）ので、
+# ID プレフィックスで本リポジトリに絞ること。head -1 に頼らない。
+WT=$(commandmatedev ls --id mycodebranchdesk-develop --quiet)
+[ "$(printf '%s\n' "$WT" | wc -l | xargs)" = "1" ] || { echo "worktree-id が一意に決まらない: $WT"; exit 1; }
+
+commandmatedev verify "$WT" --json > /tmp/release-gate.json; echo $?
+```
+
+| exit | 意味 | 対応 |
+|---|---|---|
+| `0` | 合格 | 次へ |
+| `20` | 不合格 | `--json` の失敗ゲートと `logTail` を見て修正。3 回失敗で中断 |
+| `21` | 作業証跡ゼロ | 版 bump の commit 前に走らせている。順序を見直す |
+| `99` | 設定エラー等 | `/tmp/release-gate.json` の中身を読む |
+
+`> ファイル 2>&1; echo $?` の形を崩さないこと。`| grep` に繋ぐと exit code が grep のものに化ける。
+
+**build の検証は CI に委ねる。** リリース PR の `ci-pr.yml` に Build ジョブがあり、
+別マシンで実行されるので稼働サーバに影響しない。どうしても手元で build を確認したい場合は
+**linked worktree を作ってそこで回す**（primary checkout では絶対に回さない）。
+
+サーバが停止していて `verify` が使えない場合のみ、手動で以下を回す（**build は含めない**）:
 
 ```bash
 npm run lint
 npx tsc --noEmit
 npm run test:unit
-npm run build
 ```
 
 ### 2-4. コミット & push
@@ -262,18 +309,52 @@ PR 本文に含める要素:
 
 - **リリース概要**: 何のためのリリースか
 - **バージョン**: `X.Y.Z → X.Y.Z+1`（patch/minor/major の別）
-- **DB マイグレーション**: 有無（有る場合は `CURRENT_SCHEMA_VERSION` の遷移）
+- **DB マイグレーション**: 下記 3-1a で判定した結果
 - **実差分**: `git diff --stat origin/main..origin/develop` の実数。「squash 履歴のため `main..develop` のコミット数は実態より多く表示される」旨を注記
 - **対応 Issue** 一覧
 - **主な変更**: Added / Changed / Fixed
 - **品質チェック**結果
+- **UAT**: 実施済みならレポートのパス（`dev-reports/uat/…/acceptance-test-report.html`）、未実施なら「未実施」と 1 行。**そのリリースが実機で検証されたかを PR から辿れるようにする**
 - **Vibe Metrics**: 1-4 で取得した要約。取れなかった場合は「メトリクスなし」とその理由（サーバ未稼働／対象期間に記録なし）を 1 行で書く
+
+### 3-1a. DB マイグレーションの判定
+
+```bash
+git diff origin/main..origin/develop -- src/lib/db/migrations/runner.ts | grep CURRENT_SCHEMA_VERSION
+git diff --name-only origin/main..origin/develop -- 'src/lib/db/migrations/v*.ts'
+```
+
+差分があれば PR 本文とリリースノートに **`CURRENT_SCHEMA_VERSION` の遷移**（例 51 → 52）を書く。
+
+**データを削除する migration が含まれる場合は、それを必ず明記する。** 利用者のサーバは
+**次回起動時に自動で migration が走る**ので、何が消えるのかを事前に知らせる必要がある。
+可能なら影響行数を実測して書く（例: v52 は `verification_runs` 25 件 / `tasks` 18 件の孤児行を削除した）。
+
+```bash
+# 削除系 migration の影響見積り（読み取りのみ・本番 DB を書き換えない）
+sqlite3 "file:$PWD/data/db.sqlite?mode=ro" \
+  "SELECT COUNT(*) FROM verification_runs WHERE worktree_id NOT IN (SELECT id FROM worktrees);"
+```
 
 ### 3-2. CI 通過を確認
 
+CI は実測で **10 分前後**かかる（2026-08-03 の計測: 10 分 23 秒）。`--watch` はその間ブロックし
+続けるため、実行環境によってはタイムアウトに当たる。**ポーリング形式を推奨する。**
+
 ```bash
-gh pr checks <PR番号> --repo Kewton/CommandMate --watch
+for i in $(seq 1 20); do
+  N=$(gh pr view <PR番号> --repo Kewton/CommandMate --json statusCheckRollup \
+      -q '[.statusCheckRollup[]?|select((.conclusion // .state)=="")]|length')
+  echo "未完チェック: $N"
+  [ "$N" = "0" ] && break
+  sleep 45
+done
+gh pr view <PR番号> --repo Kewton/CommandMate --json mergeable,statusCheckRollup \
+  -q '"mergeable=\(.mergeable) 非SUCCESS: " + ([.statusCheckRollup[]?|select((.conclusion // .state)!="SUCCESS")|"\(.name // .context)=\(.conclusion // .state)"]|join(" "))'
 ```
+
+**CI 限定の赤を反射的に flake 扱いしないこと。** ローカル緑・CI 赤は、ロケールや OS 差など
+実在の移植性欠陥であることがある（#1623 で awk のロケール依存を実際にこの形で検出した）。
 
 ### 3-3. マージはユーザーに委ねる
 
@@ -329,6 +410,25 @@ npm view commandmate version    # NEXT_VERSION になること
 
 失敗した場合はユーザーに報告する。**`npm publish` を手元で実行して回避しようとしないこと**（OIDC は CI 内でしか成立せず、provenance も付かない）。
 
+> **README のバージョンバッジは publish 成功後もしばらく古いまま**になる。shields.io と
+> GitHub camo のキャッシュによる表示遅延で、publish の失敗ではない。**慌てて再実行しないこと。**
+> 判定は上記 `npm view commandmate version` の実測値で行う。
+
+### 4-4a. publish 後に問題が見つかった場合（ロールバック）
+
+**npm は同一バージョンの再 publish を許さない。** `0.19.0` を publish した後に `0.19.0` を
+差し替えることはできないので、取れる手は以下に限られる。
+
+| 状況 | 対応 |
+|---|---|
+| 重大な不具合（起動しない・データを壊す等） | `npm deprecate commandmate@X.Y.Z "理由と回避策"` で警告を出し、**修正版を次パッチとして即座にリリース**する。`npm unpublish` は 72 時間以内かつ依存されていない場合のみ可能だが、**原則使わない**（利用者の lockfile が壊れる） |
+| 軽微な不具合 | 次のリリースで直す。deprecate はしない |
+| GitHub Release のノートの誤り | `gh release edit vX.Y.Z --notes-file …` で修正可能（publish は再実行されない） |
+| publish 前（Release 作成前）に気づいた | タグを消してやり直せる（`git push --delete origin vX.Y.Z` + `git tag -d`）。**Release を作る前なら安全** |
+
+**したがって Phase 4-3（Release 作成）が実質的な point of no return。** ここへ進む前に
+UAT と CI の結果を確認し、ユーザーの明示的合意を得ること。
+
 ### 4-5. main を develop へマージバック（祖先復元）
 
 **必須。** squash により main のコミットは develop の祖先ではなくなっており、放置すると次回の develop → main PR で幻コンフリクトが出る。
@@ -375,23 +475,30 @@ Release v${NEXT_VERSION} completed!
 | 作業ツリーが汚れている | 中断。**stash しない**（他エージェント稼働中だと破損の恐れ） |
 | タグが既に存在 | 中断。別バージョンの指定を促す |
 | `main..develop` の tree 差分が空 | リリースする変更が無い。中断 |
-| 品質ゲート失敗 | 修正してリトライ。3回失敗で中断 |
+| 品質ゲート失敗（`verify` が exit 20） | `--json` の失敗ゲートと `logTail` を見て修正。3回失敗で中断 |
 | main へ push しようとして hook に拒否された | **手順の誤り**。PR 経由に戻る |
+| CI だけが赤（ローカルは緑） | **flake と決めつけない。** ロケール・OS 差による実在の欠陥のことがある（#1623 実例）。CI と同じ条件を手元で再現してから直す |
 | publish ワークフロー失敗 | ユーザーに報告。ローカル `npm publish` で回避しない |
+| publish 成功後に不具合が発覚 | 4-4a のロールバック表に従う。**同一版の再 publish はできない** |
 | マージバック後に tree 不一致 | push せずユーザーに報告 |
 
 ## 安全ガード
 
 - **main 直 push は行わない**（hook が拒否する。PR が唯一の経路）
+- **primary checkout で `npm run build` を回さない**（稼働サーバの `.next` を壊す。2-3 参照）
 - **PR のマージはユーザーに委ねる**（main 向けは承認必須）
-- **GitHub Release の作成 = npm publish の実行**。ユーザーの明示的合意を得てから行う
+- **GitHub Release の作成 = npm publish の実行 = point of no return**。ユーザーの明示的合意を得てから行う
 - **`npm publish` をローカル実行しない**（OIDC / provenance が CI 前提）
 - タグが既に存在する場合は中断
 - マージバック後は必ず tree 一致を検証してから push
 
 ## 参考
 
-- [リリースガイド](../../../docs/release-guide.md)
+> **このファイルがリリース手順の正本。** [docs/release-guide.md](../../../docs/release-guide.md) は
+> 背景説明として残っているが、手順が二重管理になっており片方だけ更新されて腐るリスクがある。
+> 食い違いを見つけたら**このスキルを正**とし、ガイド側を直すこと。
+
+- [リリースガイド](../../../docs/release-guide.md)（背景説明。手順の正本ではない）
 - `.github/workflows/publish.yml` — Release 契機の自動 publish（OIDC）
 - `.git/hooks/pre-push` — main 直 push の拒否
 - [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/)
