@@ -67,7 +67,15 @@
     "pathRequired": "Repository path is required",
     "urlRequired": "Clone URL is required",
     "urlInvalid": "Invalid URL format",
-    "loading": "Loading repositories"
+    "loading": "Loading repositories",
+    "filterAll": "All ({count})",
+    "filterDisabled": "Disabled ({count})",
+    "emptyDisabled": "No repositories are excluded from scans.",
+    "disableConfirmTitle": "Exclude from scans?",
+    "disableConfirmBody": "\"{name}\" will no longer be scanned for worktrees.\n\nNothing is deleted: its {count} worktree(s) and their chat history, tasks and verification runs stay in the database, and any tmux session running under it keeps running.\n\nIts worktrees also stay in the sidebar — use the Visibility toggle to hide them.",
+    "disableConfirmAction": "Exclude from scans",
+    "disableSuccess": "\"{name}\" is excluded from scans.",
+    "enableSuccess": "\"{name}\" is scanned again ({count} worktree(s))."
   },
   "cancel": "Cancel",
   "send": "Send",

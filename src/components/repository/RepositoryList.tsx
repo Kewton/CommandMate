@@ -5,6 +5,8 @@
  * Issue #690: Adds a Visibility column with a toggle switch that flips
  *             the `visible` flag immediately (optimistic update) and
  *             rolls back + surfaces a feedback banner on failure.
+ * Issue #1658: Adds a Scan column whose toggle flips `enabled` — the
+ *             non-destructive way to take a repository out of the scan set.
  *
  * Renders a table of all registered repositories (enabled & disabled) with
  * inline editing of the display_name (alias). Refetches when `refreshKey`
@@ -19,18 +21,28 @@
  *   server stay in sync)
  * - Dark mode support via Tailwind CSS
  *
- * Visibility independence (Issue #690):
- *   - The toggle controls ONLY `visible`. It must NEVER touch `enabled`.
- *   - `enabled` continues to be governed by the existing disable/restore
- *     flow (Issue #190).
+ * Two toggles, two concepts — do not merge them (Issue #690, Issue #1658):
+ *   - The Visibility toggle controls ONLY `visible` (sidebar display). It must
+ *     NEVER touch `enabled`.
+ *   - The Scan toggle controls ONLY `enabled` (inclusion in `git worktree list`
+ *     scans). It must NEVER touch `visible`, so re-enabling gives the user back
+ *     their own visibility choice rather than a guess.
+ *   Keeping the columns orthogonal is why disabling does not hide the
+ *   repository's worktrees from the sidebar; the confirmation body says so, and
+ *   points at the Visibility toggle for that.
+ *
+ * Deliberately NOT wired here: `repositoryApi.delete()` (`DELETE
+ * /api/repositories`), which is exclude **and purge** — it kills every tmux
+ * session under the repository and deletes its worktree rows together with all
+ * their child data. The screen offers only the non-destructive operation.
  */
 
 'use client';
 
-import React, { memo, useCallback, useEffect, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Pencil } from 'lucide-react';
-import { Button, Card, Input, Skeleton, StatusDot } from '@/components/ui';
+import { Button, Card, ConfirmDialog, Input, Skeleton, StatusDot } from '@/components/ui';
 import { cn } from '@/lib/utils/cn';
 import {
   handleApiError,
@@ -68,6 +80,18 @@ const INITIAL_EDIT: EditState = {
 };
 
 /**
+ * Which rows the table shows (Issue #1658).
+ *
+ * `disabled` answers "what did I take out of the scan set?" — the list the
+ * Issue asks for. It filters the rows already loaded by `GET /api/repositories`
+ * (which returns enabled AND disabled repositories) rather than calling
+ * `GET /api/repositories/excluded`: that endpoint returns a strict subset of
+ * the same rows, so wiring it here would mean two sources of truth for one
+ * table and a second round trip for data already in hand.
+ */
+type RepositoryFilter = 'all' | 'disabled';
+
+/**
  * Repository list with inline alias editing.
  *
  * @example
@@ -100,8 +124,10 @@ function RepositoryTableHead() {
         <th className="px-4 py-2 text-left font-medium text-foreground">
           Worktrees
         </th>
+        {/* Issue #1658: was a read-only "Status" cell; the same enabled flag is
+            now the Scan toggle, so the header names what it controls. */}
         <th className="px-4 py-2 text-left font-medium text-foreground">
-          Status
+          Scan
         </th>
         <th className="px-4 py-2 text-left font-medium text-foreground">
           Actions
@@ -124,6 +150,13 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
   // so we can disable the control to prevent double-clicks and to render a
   // pending state. Uses a Set keyed by repository ID.
   const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
+  // Issue #1658: same idea for the Scan toggle, tracked separately so a
+  // visibility request in flight never greys out the scan control (or the
+  // other way round) on the same row.
+  const [scanPendingIds, setScanPendingIds] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useState<RepositoryFilter>('all');
+  /** Row awaiting confirmation of a disable, or null when no dialog is open. */
+  const [pendingDisable, setPendingDisable] = useState<RepositoryListItem | null>(null);
 
   const fetchRepositories = useCallback(async () => {
     setLoading(true);
@@ -297,6 +330,132 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
     [onChanged, togglingIds]
   );
 
+  /**
+   * Mark / unmark a row as having a scan-flag request in flight.
+   */
+  const setScanPending = useCallback((id: string, pending: boolean) => {
+    setScanPendingIds((prev) => {
+      const next = new Set(prev);
+      if (pending) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      return next;
+    });
+  }, []);
+
+  /**
+   * Take a repository out of the scan set (Issue #1658).
+   *
+   * Non-destructive by construction: the request is a one-column PUT. No
+   * worktree row is deleted, no child data (chat history, tasks, verification
+   * runs, …) is touched, and no tmux session is killed — sessions under this
+   * repository keep running, which is what the confirmation body promises.
+   *
+   * Not optimistic: the user has just confirmed a dialog, so a flip that has to
+   * roll back would read as the dialog having lied. The row moves only once the
+   * server has agreed.
+   */
+  const applyDisable = useCallback(
+    async (repo: RepositoryListItem) => {
+      setScanPending(repo.id, true);
+      setFeedback(null);
+
+      try {
+        const result = await repositoryApi.updateEnabled(repo.id, false);
+        setRepositories((prev) =>
+          prev.map((r) => (r.id === repo.id ? { ...r, ...result.repository } : r))
+        );
+        setFeedback({
+          type: 'success',
+          message: t('repositories.disableSuccess', { name: repo.name }),
+        });
+        if (onChanged) {
+          onChanged();
+        }
+      } catch (err) {
+        setFeedback({ type: 'error', message: handleApiError(err) });
+      } finally {
+        setScanPending(repo.id, false);
+      }
+    },
+    [onChanged, setScanPending, t]
+  );
+
+  /**
+   * Put a repository back into the scan set (Issue #1658).
+   *
+   * Uses `PUT /api/repositories/restore` rather than the plain `enabled: true`
+   * PUT because restore also re-scans the repository, so its worktrees are back
+   * in the list on the same click instead of after the next Sync All. The
+   * response carries no repository row, hence the refetch.
+   */
+  const applyEnable = useCallback(
+    async (repo: RepositoryListItem) => {
+      setScanPending(repo.id, true);
+      setFeedback(null);
+
+      try {
+        const result = await repositoryApi.restore(repo.path);
+        await fetchRepositories();
+        setFeedback({
+          type: result.warning ? 'error' : 'success',
+          message:
+            result.warning ??
+            t('repositories.enableSuccess', {
+              name: repo.name,
+              count: result.worktreeCount,
+            }),
+        });
+        if (onChanged) {
+          onChanged();
+        }
+      } catch (err) {
+        setFeedback({ type: 'error', message: handleApiError(err) });
+      } finally {
+        setScanPending(repo.id, false);
+      }
+    },
+    [fetchRepositories, onChanged, setScanPending, t]
+  );
+
+  /**
+   * Scan toggle click handler. Disabling asks first (it changes what the app
+   * discovers); enabling does not (it only adds back).
+   */
+  const handleToggleScan = useCallback(
+    (repo: RepositoryListItem) => {
+      if (scanPendingIds.has(repo.id)) {
+        return;
+      }
+      if (repo.enabled) {
+        setPendingDisable(repo);
+        return;
+      }
+      void applyEnable(repo);
+    },
+    [applyEnable, scanPendingIds]
+  );
+
+  const handleConfirmDisable = useCallback(() => {
+    const target = pendingDisable;
+    setPendingDisable(null);
+    if (target) {
+      void applyDisable(target);
+    }
+  }, [applyDisable, pendingDisable]);
+
+  const disabledCount = useMemo(
+    () => repositories.filter((r) => !r.enabled).length,
+    [repositories]
+  );
+
+  const visibleRows = useMemo(
+    () => (filter === 'disabled' ? repositories.filter((r) => !r.enabled) : repositories),
+    [filter, repositories]
+  );
+
   if (loading && repositories.length === 0) {
     // [Issue #1118] First-load skeleton: real table header + placeholder rows
     // so the loaded table appears without a layout shift.
@@ -359,31 +518,63 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
         </div>
       )}
 
+      {/* Issue #1658: the "what have I excluded?" list. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant={filter === 'all' ? 'secondary' : 'ghost'}
+          size="sm"
+          aria-pressed={filter === 'all'}
+          data-testid="repository-filter-all"
+          onClick={() => setFilter('all')}
+        >
+          {t('repositories.filterAll', { count: repositories.length })}
+        </Button>
+        <Button
+          variant={filter === 'disabled' ? 'secondary' : 'ghost'}
+          size="sm"
+          aria-pressed={filter === 'disabled'}
+          data-testid="repository-filter-disabled"
+          onClick={() => setFilter('disabled')}
+        >
+          {t('repositories.filterDisabled', { count: disabledCount })}
+        </Button>
+      </div>
+
       <Card padding="none">
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <RepositoryTableHead />
             <tbody>
-              {repositories.length === 0 && (
+              {visibleRows.length === 0 && (
                 <tr>
                   <td
                     colSpan={7}
                     className="px-4 py-6 text-center text-muted-foreground"
                   >
-                    {t('repositories.empty')}
+                    {filter === 'disabled'
+                      ? t('repositories.emptyDisabled')
+                      : t('repositories.empty')}
                   </td>
                 </tr>
               )}
-              {repositories.map((repo) => {
+              {visibleRows.map((repo) => {
                 const isEditing = edit.id === repo.id;
                 return (
                   <tr
                     key={repo.id}
-                    className="border-b border-border"
+                    className={cn(
+                      'border-b border-border',
+                      // Excluded rows read as inactive without hiding anything.
+                      !repo.enabled && 'bg-muted/40'
+                    )}
                     data-testid={`repository-row-${repo.id}`}
                   >
+                    {/* Issue #1662 will hang a duplicate-scan-root warning badge
+                        off this cell; keep it a flex container. */}
                     <td className="px-4 py-3 align-top text-foreground">
-                      {repo.name}
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        {repo.name}
+                      </span>
                     </td>
                     <td className="px-4 py-3 align-top">
                       {isEditing ? (
@@ -430,16 +621,13 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                     <td className="px-4 py-3 align-top text-foreground">
                       {repo.worktreeCount}
                     </td>
+                    {/* Issue #1658: the scan-inclusion flag, now interactive. */}
                     <td className="px-4 py-3 align-top">
-                      <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
-                        <StatusDot
-                          status={repo.enabled ? 'ready' : 'idle'}
-                          size="sm"
-                          label={repo.enabled ? 'Enabled' : 'Disabled'}
-                          aria-hidden="true"
-                        />
-                        {repo.enabled ? 'Enabled' : 'Disabled'}
-                      </span>
+                      <ScanToggle
+                        repo={repo}
+                        pending={scanPendingIds.has(repo.id)}
+                        onToggle={handleToggleScan}
+                      />
                     </td>
                     <td className="px-4 py-3 align-top">
                       {isEditing ? (
@@ -480,6 +668,26 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
           </table>
         </div>
       </Card>
+
+      {/*
+        Issue #1658: disabling is confirmed, and the body spells out what the
+        operation does NOT do. Users arriving here have only ever known
+        "removing a repository" as the purging DELETE, so the promise that
+        history and running sessions survive has to be made explicitly.
+        variant="default", not "danger": nothing is destroyed.
+      */}
+      <ConfirmDialog
+        isOpen={pendingDisable !== null}
+        title={t('repositories.disableConfirmTitle')}
+        description={t('repositories.disableConfirmBody', {
+          name: pendingDisable?.name ?? '',
+          count: pendingDisable?.worktreeCount ?? 0,
+        })}
+        confirmLabel={t('repositories.disableConfirmAction')}
+        variant="default"
+        onConfirm={handleConfirmDisable}
+        onCancel={() => setPendingDisable(null)}
+      />
     </div>
   );
 }
@@ -534,6 +742,61 @@ function VisibilityToggle({
         aria-hidden="true"
       />
       {isVisible ? 'Visible' : 'Hidden'}
+    </button>
+  );
+}
+
+/**
+ * ScanToggle (Issue #1658)
+ *
+ * Flips `enabled` — whether this repository is scanned for worktrees at all.
+ * Deliberately shaped like {@link VisibilityToggle} but never confusable with
+ * it: different column, different wording (Enabled/Disabled vs Visible/Hidden),
+ * different aria-label, and its own `data-testid` prefix. Both are switches, so
+ * `role="switch"` + `aria-checked` per ARIA (`aria-pressed` is for
+ * `role="button"`).
+ *
+ * The click does not itself mutate anything — turning scanning OFF routes
+ * through a confirmation first (see `handleToggleScan`).
+ */
+function ScanToggle({
+  repo,
+  pending,
+  onToggle,
+}: {
+  repo: RepositoryListItem;
+  pending: boolean;
+  onToggle: (repo: RepositoryListItem) => void;
+}) {
+  const isEnabled = repo.enabled;
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={isEnabled}
+      aria-label={
+        isEnabled
+          ? `Exclude ${repo.name} from repository scans`
+          : `Include ${repo.name} in repository scans`
+      }
+      data-testid={`scan-toggle-${repo.id}`}
+      onClick={() => onToggle(repo)}
+      disabled={pending}
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium',
+        'text-muted-foreground transition-colors',
+        'hover:bg-muted hover:text-foreground',
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        'disabled:opacity-60 disabled:cursor-not-allowed'
+      )}
+    >
+      <StatusDot
+        status={isEnabled ? 'ready' : 'idle'}
+        size="sm"
+        label={isEnabled ? 'Enabled' : 'Disabled'}
+        aria-hidden="true"
+      />
+      {isEnabled ? 'Enabled' : 'Disabled'}
     </button>
   );
 }
