@@ -7,8 +7,8 @@
   "counterpart": {
     "repo": "Kewton/commandmate-skills",
     "url": "https://github.com/Kewton/commandmate-skills",
-    "lastSyncedRef": "439338b",
-    "lastSyncedAt": "2026-08-01",
+    "lastSyncedRef": "573c013",
+    "lastSyncedAt": "2026-08-03",
     "checkoutRequired": false,
     "checkoutNote": "この対応表による検知はローカルの sha256 だけで完結する。skills は個人リポジトリで、CI から書ける token を増やしたくない（docs/user-guide/skills.md §3-9）ため、CI は counterpart を checkout しない。手元に checkout がある時だけ `node scripts/skills-sync-map.mjs check --counterpart <dir>` で実 diff を取る。"
   },
@@ -49,7 +49,7 @@
           "path": "SKILL.md",
           "policy": "port-required",
           "sha256": "d578cf068022f58d98de5ccbd9ec9cfbadc5bbde4f1aeb8b97fe4e233a2e82e2",
-          "note": "#1586 の移植で GitHub 絶対 URL 化・「起案 / スタンドアロンランナー」の2役への書き換えが入っている。単純コピーするとこの適応が壊れる（#1611 で実際に注意点として扱った）。手順・フラグ・exit code の意味を変えたときは counterpart 側の同じ節を書き直す。 Issue #1639 で追加。**2026-08-03 時点で counterpart への移植は未了** — PM が cmate-verify の version bump とあわせて別途移植する。pin を更新したので、この対応表からは移植済みと区別が付かない状態になっている（knownGap のとおり、この pin が検知できるのは CommandMate 側の編集だけ）。"
+          "note": "#1586 の移植で GitHub 絶対 URL 化・「起案 / スタンドアロンランナー」の2役への書き換えが入っている。単純コピーするとこの適応が壊れる（#1611 で実際に注意点として扱った）。手順・フラグ・exit code の意味を変えたときは counterpart 側の同じ節を書き直す。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。"
         },
         {
           "path": "scripts/tests/fixtures/all-pass.yaml",
@@ -125,7 +125,7 @@
           "path": "scripts/tests/fixtures/bad-require-commit.yaml",
           "policy": "byte-identical",
           "sha256": "2262736fa5dfcd4ae37e512c8f9cf5d054b5590a54036ce2c2bd9517c8d69586",
-          "note": "他の fixture と同じく counterpart へ逐語コピーする。Issue #1639 で追加。**2026-08-03 時点で counterpart への移植は未了** — PM が cmate-verify の version bump とあわせて別途移植する。pin を更新したので、この対応表からは移植済みと区別が付かない状態になっている（knownGap のとおり、この pin が検知できるのは CommandMate 側の編集だけ）。"
+          "note": "他の fixture と同じく counterpart へ逐語コピーする。Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。"
         },
         {
           "path": "scripts/tests/fixtures/bad-reserved-id.yaml",
@@ -176,7 +176,7 @@
           "path": "scripts/tests/fixtures/require-commit.yaml",
           "policy": "byte-identical",
           "sha256": "a734180dcf4dec0f97549f4e79ecd976b14e0b6a8d8b2bdcf7611412d01b6670",
-          "note": "他の fixture と同じく counterpart へ逐語コピーする。Issue #1639 で追加。**2026-08-03 時点で counterpart への移植は未了** — PM が cmate-verify の version bump とあわせて別途移植する。pin を更新したので、この対応表からは移植済みと区別が付かない状態になっている（knownGap のとおり、この pin が検知できるのは CommandMate 側の編集だけ）。"
+          "note": "他の fixture と同じく counterpart へ逐語コピーする。Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。"
         },
         {
           "path": "scripts/tests/fixtures/side-effect.yaml",
@@ -197,13 +197,13 @@
           "path": "scripts/tests/run-tests.sh",
           "policy": "byte-identical",
           "sha256": "f1046c6f5d3292122d9d27c2b28ef5883c20b7d41b5db25f9ee3d31e6017bc79",
-          "note": "Issue #1639 で追加。**2026-08-03 時点で counterpart への移植は未了** — PM が cmate-verify の version bump とあわせて別途移植する。pin を更新したので、この対応表からは移植済みと区別が付かない状態になっている（knownGap のとおり、この pin が検知できるのは CommandMate 側の編集だけ）。"
+          "note": "Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。"
         },
         {
           "path": "scripts/verify-run.sh",
           "policy": "byte-identical",
           "sha256": "3e5a7b72eba3e681c5b4f7b967352e273feefe834e18a64cee0694a89a853b89",
-          "note": "ランナー本体。#1586 で byte-identical に移植され、#1607 が CommandMate 側だけを直して 4 日間ドリフトした（#1611 で復旧）。この Issue の直接の発端。 Issue #1639 で追加。**2026-08-03 時点で counterpart への移植は未了** — PM が cmate-verify の version bump とあわせて別途移植する。pin を更新したので、この対応表からは移植済みと区別が付かない状態になっている（knownGap のとおり、この pin が検知できるのは CommandMate 側の編集だけ）。"
+          "note": "ランナー本体。#1586 で byte-identical に移植され、#1607 が CommandMate 側だけを直して 4 日間ドリフトした（#1611 で復旧）。この Issue の直接の発端。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。"
         }
       ]
     },
