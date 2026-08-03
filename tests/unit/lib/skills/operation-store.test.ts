@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, statSync, writeFileSync } from 'fs';
+import { mkdtempSync, statSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
@@ -20,6 +20,7 @@ import {
   redactSkillOperationText,
   writeSkillStateFile,
 } from '@/lib/skills/operation-store';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 let root: string;
 
@@ -28,7 +29,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  removeTempDir(root);
 });
 
 describe('service-owned state root permissions', () => {

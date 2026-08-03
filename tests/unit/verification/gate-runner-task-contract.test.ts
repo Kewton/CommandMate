@@ -14,7 +14,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { execFileSync } from 'child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { runMigrations } from '@/lib/db/db-migrations';
@@ -32,6 +32,7 @@ import { updateTaskStatus } from '@/lib/db/tasks-db';
 import { parseTaskContract } from '@/lib/tasks/contract-parser';
 import { startVerification, waitForVerification } from '@/lib/verification/gate-runner';
 import { SCOPE_SKIP_NO_CONTRACT } from '@/lib/verification/scope-gate';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 declare module '@/lib/db/db-instance' {
   export function setMockDb(db: Database.Database): void;
@@ -198,7 +199,7 @@ afterEach(async () => {
   closeDbInstance();
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
-    if (dir) rmSync(dir, { recursive: true, force: true });
+    if (dir) removeTempDir(dir);
   }
 });
 

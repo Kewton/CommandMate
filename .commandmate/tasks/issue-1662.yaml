@@ -1,0 +1,112 @@
+version: 1
+title: "Issue #1662: 同一 git リポジトリを指す scan root の重複登録を検出して警告する"
+goal: |
+  /pm-auto-issue2dev 1662
+
+  https://github.com/Kewton/CommandMate/issues/1662 を実装する。
+
+  ## 背景（実際に起きた事故）
+
+  `CommandAgent` と `CommandAgent-develop` は**同一 git リポジトリの 2 つの worktree**で、
+  両方が scan root（`repositories` テーブル）に登録されていた。`git worktree list` は
+  どちらから叩いても同じ 5 パスを返す（実測済み）:
+
+      $ git -C .../CommandAgent worktree list     $ git -C .../CommandAgent-develop worktree list
+      .../CommandAgent                            .../CommandAgent
+      /private/tmp/commandagent-bon0-run          /private/tmp/commandagent-bon0-run
+      /private/tmp/commandagent-f-bon-v-run       /private/tmp/commandagent-f-bon-v-run
+      /private/tmp/commandagent-ingest-luna-run   /private/tmp/commandagent-ingest-luna-run
+      .../CommandAgent-develop                    .../CommandAgent-develop
+
+  この構成が #1659 の ID churn（sync のたびに worktree ID が 8 hex ずつ伸びる）を引き起こし、
+  稼働中セッションが UI から消えるところまで行った。#1660 で churn 自体は塞いだが、
+  **「なぜ 2 つ登録されているのか」に利用者が気付ける導線は無いまま**である。
+
+  同じ worktree が 2 つの scan root から重複走査されるのは、それ自体が無駄であり
+  （sync のたびに同じパスを 2 回 upsert する）、`repository_path` 列の値が実行ごとに
+  入れ替わるという分かりにくい状態を作る。
+
+  ## やること
+
+  **同一 git リポジトリを指す scan root が複数登録されようとしたとき / 既に登録されているときに
+  可視化する。**
+
+  判定は `git rev-parse --git-common-dir` の実パス比較でよい（worktree はこれを共有する）。
+  `.git` ファイル経由の worktree でも正しく共通ディレクトリへ解決される。
+
+  - **登録時**: 既存の scan root と共通ディレクトリが一致したら、**登録をブロックせず警告して
+    確認を求める**（意図的にやっている利用者を締め出さない）
+  - **登録済み**: Repositories 画面で「このリポジトリは `<other>` と同じ git リポジトリです」と
+    表示する。**#1658 の無効化トグル（マージ済み）と組み合わせれば、その場で片方を走査対象から
+    外せる**ので、そこへ導線を張ること
+
+  ## 判断が要る点（決めた理由を残すこと）
+
+  - **ブロックするか警告に留めるか。警告を推奨**（同一リポジトリの複数 worktree をそれぞれ
+    独立に管理したい正当なユースケースがありうる）
+  - 重複が実害を持つのは「同じ worktree が両方の scan から見える」ときだけである。
+    共通ディレクトリが同じでも `git worktree list` の結果が食い違うことは通常無いので、
+    共通ディレクトリ比較で十分と考えられる（**要確認**）
+  - `is_env_managed`（`WORKTREE_REPOS` 由来）の scan root にも同じ警告を出すか。
+    **#1659 で実害が出たのはまさに env 由来の側**なので、出さないなら理由が要る
+
+  ## 受入条件
+
+  - [ ] 既存 scan root と同じ git リポジトリを指すパスを登録しようとすると警告が出る（ブロックしない）
+  - [ ] 既に重複登録されている場合、Repositories 画面でその事実が分かる
+  - [ ] 別リポジトリの worktree を登録する通常ケースでは警告が出ない（**誤検知しない**）
+  - [ ] `git rev-parse` に失敗するパス（git リポジトリでない等）では判定をスキップするだけで、
+        登録フローを阻害しない
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` が exit 0
+  - [ ] **`npm run test:integration` も exit code で実測すること**
+  - [ ] UI を触るので **`npm run test:e2e` も実測すること**。困難なら理由と代替検証を
+        commit message に書く
+
+  ## 直前にマージされた関連実装（読んでから着手すること）
+
+  - **#1658 / PR #1665** — Repositories 画面の "Status" 列が **Scan トグル**になり、
+    `PUT /api/repositories/[id]` が `enabled` を受けるようになった。`All / Disabled` フィルタもある。
+    本 Issue の警告表示はこの画面に乗る。設計判断は `docs/design/repository-disable-gui.md`
+  - **#1666** が並走中で `server.ts` の起動時 purge を落とす。そちらは `server.ts` 中心なので
+    重なりは小さいはずだが、`src/lib/db/**` を触る場合は最小限に
+
+  なお **#1663（砂箱後始末の共通ヘルパ）も進行中**で `tests/helpers/` にヘルパが入る。
+  本 Issue で新しく砂箱テストを作る場合、そのヘルパはまだ develop に無い。
+  素の形で書いてよく、PM が後で移行する。
+
+  ## 絶対にやってはいけないこと
+
+  - **本番サーバ（ポート 3000）を停止・再起動しない。** 実機確認は別ポート + 隔離 DB
+  - **本番 DB（`data/db.sqlite`）に触らない。** `CM_DB_PATH` を自分の worktree 配下へ差し替える
+  - **`npm run build` をプライマリ checkout で走らせない**（自分の worktree 内は可）
+  - **他の `mcbd-*` セッション（20 本以上稼働中）に影響する操作をしない**
+
+  ## 作業ルール（厳守）
+
+  - **Issue 本文を書き換えない。** Issue は PM が管理する。訂正・補足は commit message に書く
+  - **PR を作らない。** PR 作成とマージは PM が行う
+  - **`dev-reports/` を作らない・触らない**
+  - **Issue 本文の記述をコードで裏取りする。** 実測と食い違ったら実測を正とし commit message に明記
+  - **対になる経路も点検する。** 「登録時に警告する側」と「既に登録済みのものを見せる側」が対である。
+    片方だけ実装して、既存の重複に気付けないままにしない
+  - **テストが空振りでないことを変異注入で確認する**（検出を外すと警告テストが赤になる）
+  - 作業完了後は必ず commit する
+  - 最後に `IMPL_COMPLETED` の 1 行を出力する
+scope:
+  allow:
+    - "src/app/api/repositories/**"
+    - "src/app/repositories/**"
+    - "src/components/repository/**"
+    - "src/lib/git/**"
+    - "src/lib/db/db-repository.ts"
+    - "src/lib/api-client.ts"
+    - "src/types/**"
+    - "locales/**"
+    - "tests/**"
+    - "docs/module-reference.md"
+    - "docs/design/**"
+    - "CHANGELOG.md"
+  deny: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

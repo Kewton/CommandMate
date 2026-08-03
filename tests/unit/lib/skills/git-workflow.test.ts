@@ -13,7 +13,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 
@@ -50,6 +50,7 @@ import {
 } from '@/lib/skills/constants';
 import { SKILL_RECEIPT_FILENAME } from '@/lib/skills/install-plan';
 import type { SkillInstallReceipt } from '@/types/skills';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const SKILL_ID = 'demo-skill';
 const VERSION = '1.2.3';
@@ -191,7 +192,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(repo, { recursive: true, force: true });
+  removeTempDir(repo);
 });
 
 // =============================================================================

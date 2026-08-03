@@ -40,6 +40,7 @@ import {
   type SkillPlannedFile,
 } from '@/lib/skills/preview-diff';
 import { execFileAsync, execGitCommand } from '@/lib/git/git-exec';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const execGitCommandMock = vi.mocked(execGitCommand);
 const execFileAsyncMock = vi.mocked(execFileAsync) as unknown as ReturnType<typeof vi.fn>;
@@ -427,7 +428,7 @@ describe('readExistingSkillTree', () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmp, { recursive: true, force: true });
+    removeTempDir(tmp);
   });
 
   it('reports an absent directory as not present', () => {

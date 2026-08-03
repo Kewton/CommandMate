@@ -13,6 +13,7 @@ import type {
   SlashCommandCategory,
   SlashCommandGroup,
 } from '@/types/slash-commands';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 // Mock logger module (Issue #480)
 const { mockLogger } = vi.hoisted(() => {
@@ -151,7 +152,7 @@ describe('loadSlashCommands', () => {
       expect(shared).toBeDefined();
       expect(shared?.cliTools).toEqual(['gemini', 'codex']);
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -250,7 +251,7 @@ describe('getSlashCommandGroups', () => {
       expect(skillCommand?.source).toBe('skill');
       expect(skillCommand?.category).toBe('skill');
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -283,7 +284,7 @@ describe('getSlashCommandGroups', () => {
       // Command should win over skill
       expect(duplicates[0].description).toBe('Command version');
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 });
@@ -397,7 +398,7 @@ describe('loadSkills', () => {
       expect(skills[0].category).toBe('skill');
       expect(skills[0].source).toBe('skill');
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -427,7 +428,7 @@ describe('loadSkills', () => {
       expect(skills).toHaveLength(1);
       expect(skills[0].cliTools).toEqual(['gemini', 'copilot']);
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -452,7 +453,7 @@ describe('loadSkills', () => {
 
       expect(skills).toEqual([]);
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -477,7 +478,7 @@ describe('loadSkills', () => {
       const evilSkill = skills.find((s) => s.name === 'evil');
       expect(evilSkill).toBeUndefined();
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -503,7 +504,7 @@ describe('loadSkills', () => {
       expect(skills.length).toBeLessThanOrEqual(100);
       expect(mockLogger.warn).toHaveBeenCalled();
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -524,7 +525,7 @@ describe('loadSkills', () => {
       expect(skills).toEqual([]);
       expect(mockLogger.warn).toHaveBeenCalled();
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -550,7 +551,7 @@ describe('loadSkills', () => {
       expect(skills[0].description).toBeDefined();
       expect(skills[0].description?.length).toBeLessThanOrEqual(500);
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -572,7 +573,7 @@ describe('loadSkills', () => {
       expect(noFrontmatter).toBeDefined();
       expect(noFrontmatter?.name).toBe('no-frontmatter');
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -594,7 +595,7 @@ describe('loadSkills', () => {
 
       expect(skills.map((s) => s.name)).toEqual(['alpha', 'middle', 'zebra']);
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 });
@@ -663,7 +664,7 @@ describe('loadSkills with YAML-unfriendly frontmatter', () => {
       expect(skills[0].category).toBe('skill');
       expect(skills[0].source).toBe('skill');
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -684,7 +685,7 @@ describe('loadSkills with YAML-unfriendly frontmatter', () => {
       expect(skills).toHaveLength(1);
       expect(skills[0].name).toBe('my-tool');
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 });
@@ -926,7 +927,7 @@ describe('loadCodexSkills', () => {
       expect(skills[0].source).toBe('codex-skill');
       expect(skills[0].cliTools).toEqual(['codex']);
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -954,7 +955,7 @@ describe('loadCodexSkills', () => {
       expect(skills[0].name).toBe('home-skill');
       expect(skills[0].source).toBe('codex-skill');
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -976,7 +977,7 @@ describe('loadCodexSkills', () => {
       const evilSkill = skills.find((s) => s.name === 'evil');
       expect(evilSkill).toBeUndefined();
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -996,7 +997,7 @@ describe('loadCodexSkills', () => {
       expect(skills).toEqual([]);
       expect(mockLogger.warn).toHaveBeenCalled();
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -1021,7 +1022,7 @@ describe('loadCodexSkills', () => {
       expect(skills.length).toBeLessThanOrEqual(100);
       expect(mockLogger.warn).toHaveBeenCalled();
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -1043,7 +1044,7 @@ describe('loadCodexSkills', () => {
 
       expect(skills.map((s) => s.name)).toEqual(['alpha', 'middle', 'zebra']);
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 });
@@ -1075,7 +1076,7 @@ describe('loadCodexSkills .system subdirectory', () => {
       expect(skills[0].source).toBe('codex-skill');
       expect(skills[0].cliTools).toEqual(['codex']);
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -1101,7 +1102,7 @@ describe('loadCodexSkills .system subdirectory', () => {
       expect(skills).toHaveLength(2);
       expect(skills.map(s => s.name)).toEqual(['sys-skill', 'user-skill']);
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 });
@@ -1144,7 +1145,7 @@ describe('loadAgentsSkills', () => {
       // .agents/skills is read by both Codex and Antigravity (agy) CLIs.
       expect(skills[0].cliTools).toEqual(['codex', 'antigravity']);
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -1171,7 +1172,7 @@ describe('loadAgentsSkills', () => {
       expect(skills[0].source).toBe('codex-skill');
       expect(skills[0].cliTools).toEqual(['codex', 'antigravity']);
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -1192,7 +1193,7 @@ describe('loadAgentsSkills', () => {
       expect(skills[0].name).toBe('built-in-agents-skill');
       expect(skills[0].source).toBe('codex-skill');
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 });
@@ -1280,7 +1281,7 @@ describe('getSlashCommandGroups with Codex skills', () => {
       // Issue #1504: .agents/skills entries are visible to codex and antigravity.
       expect(agentsSkill?.cliTools).toEqual(['codex', 'antigravity']);
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -1313,7 +1314,7 @@ describe('getSlashCommandGroups with Codex skills', () => {
       expect(shared[0].cliTools).toEqual(['codex', 'antigravity']);
       expect(shared[0].description).toBe('From agents');
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -1354,7 +1355,7 @@ describe('getSlashCommandGroups with Codex skills', () => {
       expect(claudeSkill).toBeDefined();
       expect(claudeSkill?.source).toBe('skill');
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 });
@@ -1531,7 +1532,7 @@ describe('Issue #586: Copilot builtins must not override Claude standard command
       );
       expect(copilotBuiltins).toHaveLength(0);
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 

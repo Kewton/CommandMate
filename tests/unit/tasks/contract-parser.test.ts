@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -23,6 +23,7 @@ import {
   MAX_TITLE_LENGTH,
   PROMPT_TYPES,
 } from '@/lib/tasks/contract-parser';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 let repoPath: string;
 
@@ -57,7 +58,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(repoPath, { recursive: true, force: true });
+  removeTempDir(repoPath);
 });
 
 describe('parseTaskContract — valid documents', () => {

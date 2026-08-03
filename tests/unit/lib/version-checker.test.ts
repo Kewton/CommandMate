@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
@@ -27,6 +27,7 @@ import {
   GITHUB_RELEASE_URL_PREFIX,
   resetCacheForTesting,
 } from '@/lib/version-checker';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 /**
  * Issue #1359: a directory guaranteed to have no CommandMate package.json, so
@@ -156,7 +157,7 @@ describe('version-checker', () => {
 
     afterEach(() => {
       cwdSpy.mockRestore();
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeTempDir(tmpDir);
       if (originalEnv !== undefined) {
         process.env.NEXT_PUBLIC_APP_VERSION = originalEnv;
       } else {

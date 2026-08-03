@@ -9,7 +9,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join } from 'path';
-import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import {
   readFileContent,
@@ -26,6 +26,7 @@ import {
   FileOperationErrorCode,
 } from '@/lib/file-operations';
 import { VIEWER_CHUNK_LINE_SIZE } from '@/config/file-viewer-config';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 describe('File Operations', () => {
   let testDir: string;
@@ -39,7 +40,7 @@ describe('File Operations', () => {
   afterEach(() => {
     // Clean up test directory
     if (existsSync(testDir)) {
-      rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 

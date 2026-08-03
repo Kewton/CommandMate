@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join } from 'path';
-import { mkdirSync, writeFileSync, rmSync, symlinkSync } from 'fs';
+import { mkdirSync, writeFileSync, symlinkSync } from 'fs';
 import { tmpdir } from 'os';
 
 // Import the file tree module
@@ -23,6 +23,7 @@ import {
   createAccessDeniedError,
 } from '@/lib/file-tree';
 import type { TreeItem } from '@/types/models';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 describe('File Tree Business Logic', () => {
   let testDir: string;
@@ -36,7 +37,7 @@ describe('File Tree Business Logic', () => {
   afterEach(() => {
     // Clean up temporary directory
     try {
-      rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     } catch {
       // Ignore cleanup errors
     }

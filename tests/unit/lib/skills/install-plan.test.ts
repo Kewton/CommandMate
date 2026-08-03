@@ -51,6 +51,7 @@ import type { SkillPackageSnapshot } from '@/lib/skills/package-validator';
 import type { SkillCommandMateCompatibility } from '@/lib/skills/compatibility';
 import type { SkillManifest } from '@/types/skills';
 import { makeCatalogVersion } from './fixtures';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const execGitCommandMock = vi.mocked(execGitCommand);
 const execFileAsyncMock = vi.mocked(execFileAsync) as unknown as ReturnType<typeof vi.fn>;
@@ -198,7 +199,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  fs.rmSync(worktreeDir, { recursive: true, force: true });
+  removeTempDir(worktreeDir);
 });
 
 describe('receipt', () => {
