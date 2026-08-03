@@ -344,6 +344,22 @@ export interface CaptureOptions {
   token?: string;
   /** Issue #868: agent instance ID or alias (defaults to the agent's primary instance) */
   instance?: string;
+  /**
+   * Issue #1623: read the raw tmux pane instead of the accumulated response.
+   * `capture` without this answers "what is the agent saying right now" and is
+   * empty while idle; `--pane` answers "what is on screen", which is what a
+   * human wants to read.
+   */
+  pane?: boolean;
+  /**
+   * Issue #1623: with `--pane`, keep only the last N lines of the SQUEEZED
+   * transcript. Counting after the squeeze is what makes the number useful — on
+   * a 1000-row canvas whose transcript ends at row 254, tailing the raw frame
+   * would return blank padding.
+   */
+  tail?: string;
+  /** Issue #1623: with `--pane`, print the frame verbatim (no blank-row squeeze). */
+  raw?: boolean;
 }
 
 /** auto-yes command options [Issue #518] */

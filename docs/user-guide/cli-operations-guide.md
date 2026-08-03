@@ -530,6 +530,75 @@ commandmate capture <worktree-id> --agent codex --instance codex-2  # 追加イ�
 }
 ```
 
+### `--pane`: transcript を読む（Issue #1623）
+
+`--pane` を付けない `capture` は「エージェントがいま返している応答の蓄積」を返すため、
+**アイドル時は空文字**になります。「画面に何が出ているか」を人間が読みたいときは `--pane` を使います。
+
+```bash
+commandmate capture <worktree-id> --pane              # 空行を畳んだ transcript（TTY ならページャ）
+commandmate capture <worktree-id> --pane --tail 40    # 末尾 40 行だけ
+commandmate capture <worktree-id> --pane --raw        # 圧縮せず生のペインを出す
+commandmate capture <worktree-id> --pane --json       # 圧縮前後の行数つき JSON
+commandmate capture <worktree-id> --pane --agent codex --instance codex-2
+```
+
+- **`--tail N` は「圧縮後」の末尾 N 行**です。TUI セッションは 200×1000 のキャンバスに描かれ、
+  空白は transcript と入力欄の**間**に溜まるため、生フレームの末尾を取ると空行ばかりになります
+  （実測: 生の末尾 20 行に読める行は 4 行、圧縮後の末尾 20 行なら 13 行）
+- 出力先が端末なら `CM_PAGER` → `PAGER` → `less -R` の順でページャに通します。
+  パイプ・リダイレクト時はそのまま出るので `| grep` や `> file` が壊れません
+- 取得する行数は常に 1000 行固定（`--lines` はありません）。検知系と同じ要求のままにして、
+  人が読んでいるという理由でサーバの挙動が変わらないようにしています
+- **attach も tmux 3.2+ も不要**です。`prefix+g`（下記）が使えない環境の代替になります
+
+---
+
+## 読むモード: attach したまま transcript を読む（Issue #1623）
+
+CommandMate のセッションは 200 桁 × **1000 行**のキャンバスに固定されています（#1163）。
+tmux はカーソルを追従表示しますが、カーソルは 997 行目付近にあるため、
+`tmux attach` しても**見えるのは空白と入力欄だけで、読みたい transcript は一行も見えません**。
+打つことは今でもできているので、壊れているのは「読む」だけです。
+
+### `prefix + g`（tmux 内で読む）
+
+CommandMate セッションに attach 中に `prefix + g`（既定では `Ctrl-b` に続けて `g`）を押すと、
+空行を畳んだ transcript が popup に開きます。`less` の検索・スクロールがそのまま使え、
+`q` で閉じて即入力に戻れます。ウィンドウのサイズは一切変わりません。
+
+```bash
+# セッション名は `=` を付けてクォートすること（zsh の equals expansion 対策）
+tmux attach -t '=mcbd-claude-<worktree-id>:'
+```
+
+- **popup の内容はスナップショットです。** 生成中の追従はしません。
+  更新したいときは **もう一度 `prefix + g`** を押してください
+- 手で実行することもできます:
+  `sh ~/.commandmate/bin/cm-read-pane.sh mcbd-claude-<worktree-id>`
+
+### 導入・設定・無効化
+
+キーバインドはサーバ起動時に自動で導入されます。tmux の **key table はサーバ全体で共有される**ため、
+次のいずれかに当てはまる場合は **バインドを一切導入しません**（あなたの tmux は無変更のままです）。
+
+| 状況 | 挙動 |
+|---|---|
+| tmux が `display-popup` 非対応（3.2 未満） | 導入しない。`capture --pane` を使ってください |
+| そのキーが既に別の用途にバインド済み | 導入しない（上書きしません）。`CM_READ_MODE_KEY` で別のキーを指定してください |
+| CommandMate 以外のセッションで押した | 何も起きません（セッション名 `mcbd-*` でガードしています） |
+
+| 環境変数 | 既定 | 説明 |
+|---|---|---|
+| `CM_READ_MODE` | （有効） | `off` / `0` / `false` で無効化。**次回のサーバ起動時に、前回導入したバインドを削除します** |
+| `CM_READ_MODE_KEY` | `g` | prefix に続けるキー。英数字 1 文字か `F1`–`F12`、`C-` / `M-` / `S-` 修飾可 |
+| `CM_READ_LINES` | `1000` | popup が遡る行数（スクリプト側） |
+| `CM_READ_PAGER` | `less -R +G` | popup 内で使うページャ（スクリプト側） |
+
+> **サーバ停止時にバインドは削除されません。** `commandmate start --issue N` で複数サーバが
+> 1 つの tmux サーバを共有するため、片方の停止で削除すると他方のキーを奪ってしまうからです。
+> 削除したいときは `CM_READ_MODE=off` を設定して再起動してください。
+
 ---
 
 ## commandmate auto-yes
