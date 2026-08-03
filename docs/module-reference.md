@@ -504,7 +504,7 @@ Skill の support matrix・MVP 既知制約・rollback 手順は [docs/user-guid
 | `src/cli/utils/env-setup.ts` | 環境設定ファイル生成、getPidFilePath()、パストラバーサル対策（Issue #125, #136）。Issue #1517 で `normalizeBrowseRoots(input, resolveEntry?)`（カンマ区切り整形・重複除去）追加、`createEnvFile` は `CM_BROWSE_ROOTS` を**設定時のみ**出力 |
 | `src/cli/utils/daemon.ts` | デーモンプロセス管理、dotenv読み込み、セキュリティ警告、getEffectiveEnv()（Issue #125, #1266） |
 | `src/cli/utils/server-url.ts` | サーバURL解決の単一情報源（resolveServerEndpoint / loadEffectiveEnv: .env が環境変数より優先）（Issue #1266） |
-| `src/cli/utils/pid-manager.ts` | PIDファイル管理（O_EXCLアトミック書き込み） |
+| `src/cli/utils/pid-manager.ts` | PID/state ファイル管理（O_EXCLアトミック書き込み。1行目=bare PID / 2行目=JSON state のハイブリッド形式で書き、readStateは bare int・JSON単体・ハイブリッドの3形式を読む）（Issue #1354, #1358, #1632） |
 | `src/cli/utils/security-logger.ts` | セキュリティイベントログ |
 | `src/cli/utils/prompt.ts` | 対話形式プロンプトユーティリティ（Issue #119） |
 | `src/cli/utils/server-ready.ts` | サーバ起動完了待ち（waitForServer: TCPポーリング、throwしない）（Issue #1195） |

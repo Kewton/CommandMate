@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.19.0] - 2026-08-03
+### Fixed
+
+- **稼働中のサーバを旧 CLI が "Stopped (no PID file)" と誤報する前方互換の欠落を修正** (#1632): #1354 で `~/.commandmate/.commandmate.pid` の中身を bare integer から JSON state へ変えた際、パスは据え置いたまま形式だけを変えたため、PATH に残った旧 CLI（`readPid()` が `parseInt(content, 10)`）は先頭の `{` で NaN → 「ファイル無し」と解釈していた（#1354 の後方互換は「新 CLI が旧形式を読む」片方向のみだった）。`writeState()` を **1 行目 bare PID / 2 行目 JSON** のハイブリッド形式に変更し、`parseInt` が先頭の数字で停止する性質を使って前方互換を回復した。`readState()` も同時にハイブリッド対応させている（片側だけ直すと JSON.parse が失敗して `{pid}` のみに縮退し、`version` が落ちて #1354 の CLI↔サーバ版不一致警告が黙って無効化される）。旧 3 形式（bare int / JSON 単体 / ハイブリッド）の読み取りと O_EXCL アトミック書き込み・#1358 のプロセス同一性検証は不変で、旧 CLI 相当の `parseInt` ロジックで PID が取れることを固定 fixture のテストで担保した
 
 > **Highlight**: **tmux セッションを「読める」「取りこぼさない」状態にし、Codex ワーカーに対して検証ゲートが機能していなかった穴を塞いだリリース。** attach しても transcript が一行も見えなかった 200×1000 キャンバスに、ジオメトリを一切変えないオンデマンドの読むモード（`prefix+g` の popup ページャと `capture --pane`）を足した。あわせて、`history-limit` が一度も pane に適用されておらず全セッションが tmux 既定の 2000 行で動いていた欠陥（稼働中の codex セッションが 1977/2000 で古い履歴を捨て続けていた）と、`wait` が未起動セッションを完了扱いして `--verify` の exit 0 が完走を意味しなくなっていた欠陥を修正した。
 
