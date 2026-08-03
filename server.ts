@@ -297,7 +297,19 @@ app.prepare().then(() => {
         const sessionReport = await reconcileWorktreeSessionsFromAliases(db);
         if (sessionReport.renamedSessions.length > 0) {
           console.log(
-            `Reconciled ${sessionReport.renamedSessions.length} tmux session(s) to renamed worktree IDs`
+            `Reconciled ${sessionReport.renamedSessions.length} tmux session(s) to renamed worktree IDs ` +
+              `(predicted=${sessionReport.planSources.predicted} ` +
+              `discovered=${sessionReport.planSources.discovered})`
+          );
+        }
+        // Issue #1661: a live `mcbd-*` session that no known worktree ID
+        // explains is exactly what the previous report could not express — the
+        // pass ran clean while two agents sat stranded under stale names. Say
+        // it out loud, with the names, so it is actionable from the log alone.
+        if (sessionReport.unaccountedSessions.length > 0) {
+          console.warn(
+            `${sessionReport.unaccountedSessions.length} tmux session(s) match no known worktree ID ` +
+              `and were left untouched: ${sessionReport.unaccountedSessions.join(', ')}`
           );
         }
         if (sessionReport.errors.length > 0) {
