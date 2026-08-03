@@ -38,11 +38,44 @@
  * are built from `agent_instances` × the CLI tool registry and matched by exact
  * string equality against the live session list; the tmux operations themselves
  * go through `exactTarget()`.
+ *
+ * ## …and why prediction alone is not enough (Issue #1661)
+ *
+ * Predicting names can only find sessions whose name the prediction happens to
+ * reproduce. Anything else is not "skipped" — it is never enumerated, so it
+ * cannot be counted, and a pass that left two live sessions stranded reported
+ * `skipped: 0, errors: 0`. Two shapes escape prediction, and both are ordinary
+ * in a database that has been through a renumbering:
+ *
+ * - an additional instance (`mcbd-claude-<wt>-2`) whose `agent_instances` row
+ *   was never written or has since been removed — 45 of 70 worktrees in the
+ *   production database carry no roster rows at all;
+ * - a session whose name embeds an ID *generation* older than the one the
+ *   rename pair names, because it missed an earlier move.
+ *
+ * So the live session list is also read the other way round: each live name is
+ * attributed to a worktree ID by matching against the **exact set of IDs the
+ * database knows** (`worktrees` ∪ `worktree_aliases.old_id` ∪ this pass's
+ * pairs), longest ID first. That is set membership, not a prefix sweep: when
+ * `<wt>-2` is itself a registered worktree, `mcbd-claude-<wt>-2` resolves to
+ * *it* and a rename of `<wt>` leaves it alone — the #1156 misfire, still
+ * refused. When `<wt>-2` is not a worktree, the same name resolves to `<wt>`'s
+ * second instance and follows the move to `mcbd-claude-<new>-2`, never onto
+ * `mcbd-claude-<new>`.
+ *
+ * Live `mcbd-*` sessions that resolve to nothing at all are reported in
+ * `unaccountedSessions` and logged as a warning, because "I could not see it"
+ * must never again be rendered as "there was nothing to see".
  */
 
 import type Database from 'better-sqlite3';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { CLI_TOOL_IDS, isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
+import {
+  CLI_TOOL_IDS,
+  buildInstanceId,
+  isCliToolType,
+  type CLIToolType,
+} from '@/lib/cli-tools/types';
 import { validateSessionName } from '@/lib/cli-tools/validation';
 import { getAgentInstances } from '@/lib/db/agent-instances-db';
 import { getAllWorktreeAliases } from '@/lib/db/worktree-alias-db';
@@ -73,6 +106,27 @@ interface SessionRenamePlan {
   oldName: string;
   newName: string;
   rename: WorktreeIdRename;
+  /**
+   * `roster` — the name was predicted from `agent_instances` × the CLI tool
+   * registry; `live` — it was read off the live session list and attributed
+   * back to a known worktree ID (Issue #1661).
+   */
+  source: 'roster' | 'live';
+}
+
+/**
+ * How each rename plan was arrived at (Issue #1661).
+ *
+ * Reported separately from the outcome counts so a log line can never again
+ * imply coverage it did not have: `predicted` is what naming the targets in
+ * advance found, `discovered` is what only reading the live session list found,
+ * and `unaccountedSessions` is what neither could explain.
+ */
+export interface ReconcilePlanSources {
+  /** Live sessions matched by a name predicted from the roster */
+  predicted: number;
+  /** Live sessions the roster never named, recovered by attributing the live name */
+  discovered: number;
 }
 
 /** Outcome of one reconciliation pass. */
@@ -81,6 +135,14 @@ export interface ReconcileWorktreeSessionsResult {
   renamedSessions: Array<{ oldName: string; newName: string }>;
   /** Candidates deliberately not touched, with the reason */
   skippedSessions: Array<{ oldName: string; newName: string; reason: string }>;
+  /**
+   * Live `mcbd-*` sessions that no ID the database knows can explain
+   * (Issue #1661). Never a rename target — the pass cannot tell which worktree
+   * they belong to — but never silent either: a non-empty list is a warning.
+   */
+  unaccountedSessions: string[];
+  /** Where the rename plans came from (Issue #1661) */
+  planSources: ReconcilePlanSources;
   /** Auto-Yes composite keys that were re-pointed */
   movedAutoYesKeys: string[];
   /** Auto-Yes pollers restarted under the new ID */
@@ -118,6 +180,8 @@ function emptyResult(): ReconcileWorktreeSessionsResult {
   return {
     renamedSessions: [],
     skippedSessions: [],
+    unaccountedSessions: [],
+    planSources: { predicted: 0, discovered: 0 },
     movedAutoYesKeys: [],
     restartedAutoYesPollers: [],
     movedPollerKeys: [],
@@ -202,7 +266,7 @@ function planSessionRenames(
       // getSessionName validates already; assert it explicitly so the guarantee
       // is stated where the name is about to be handed to tmux (Issue #1621).
       validateSessionName(newName);
-      if (oldName !== newName) plans.push({ oldName, newName, rename });
+      if (oldName !== newName) plans.push({ oldName, newName, rename, source: 'roster' });
     } catch (error) {
       errors.push(
         `session name for ${rename.oldId}/${instanceId}: ${
@@ -213,6 +277,168 @@ function planSessionRenames(
   }
 
   return plans;
+}
+
+/**
+ * Every worktree ID this database can vouch for, current or historical.
+ *
+ * This is the set a live session name is matched against, so its completeness
+ * is what keeps the matching exact: an ID that is missing here turns a name
+ * that legitimately belongs to a *different* worktree into a suffix of one that
+ * is moving. Both tables are read with their own try/catch because tests and
+ * the CLI hand around hand-built connections where either may be absent.
+ *
+ * Queried directly rather than through `worktree-db` / `worktree-alias-db` on
+ * purpose: four suites `vi.mock('@/lib/db/worktree-db')`, and importing it here
+ * would make this module inherit those mocks (the same trap that moved
+ * `renameWorktreeIdPreservingChildren` under `migrations/`).
+ *
+ * @param db - Database instance
+ * @param renames - The pairs this pass is applying (their IDs are known by definition)
+ */
+function collectKnownWorktreeIds(
+  db: Database.Database,
+  renames: ReadonlyArray<WorktreeIdRename>
+): Set<string> {
+  const ids = new Set<string>();
+
+  try {
+    const rows = db.prepare('SELECT id FROM worktrees').all() as Array<{ id: string }>;
+    for (const row of rows) if (row.id) ids.add(row.id);
+  } catch {
+    // No `worktrees` table — nothing current to attribute against.
+  }
+
+  try {
+    const rows = db.prepare('SELECT old_id FROM worktree_aliases').all() as Array<{
+      old_id: string;
+    }>;
+    for (const row of rows) if (row.old_id) ids.add(row.old_id);
+  } catch {
+    // Older database without `worktree_aliases` (migration v53).
+  }
+
+  for (const rename of renames) {
+    ids.add(rename.oldId);
+    ids.add(rename.newId);
+  }
+
+  return ids;
+}
+
+/** A live session name resolved back to the worktree it belongs to. */
+interface AttributedSession {
+  cliToolId: CLIToolType;
+  worktreeId: string;
+  /** Instance suffix, or `undefined` for the primary instance */
+  suffix?: string;
+}
+
+/**
+ * Resolve a live tmux session name to (CLI tool, worktree ID, instance suffix).
+ *
+ * `mcbd-<cli>-<id>` and `mcbd-<cli>-<id>-<suffix>` are both valid readings of
+ * the same string, which is the whole of Issue #1156. The tie is broken by
+ * asking the database rather than the string: candidate IDs are tried
+ * **longest first**, and only an exact member of `knownIds` is accepted. So
+ * `mcbd-claude-alpha-2` resolves to worktree `alpha-2` when that worktree
+ * exists, and to `alpha`'s second instance when it does not — and in neither
+ * reading does it resolve to plain `alpha`'s primary session.
+ *
+ * @param name - A live tmux session name
+ * @param knownIds - Every worktree ID the database can vouch for
+ * @returns The attribution, or `null` when nothing in `knownIds` explains the name
+ */
+function attributeSessionName(name: string, knownIds: ReadonlySet<string>): AttributedSession | null {
+  for (const cliToolId of CLI_TOOL_IDS) {
+    const prefix = `mcbd-${cliToolId}-`;
+    if (!name.startsWith(prefix)) continue;
+
+    // No CLI tool id is a prefix of another, so at most one branch is entered
+    // and the remainder is unambiguously `<id>[-<suffix>]`.
+    const rest = name.slice(prefix.length);
+    let candidate = rest;
+    for (;;) {
+      if (knownIds.has(candidate)) {
+        const suffix = candidate.length === rest.length ? undefined : rest.slice(candidate.length + 1);
+        return { cliToolId, worktreeId: candidate, suffix: suffix || undefined };
+      }
+      const cut = candidate.lastIndexOf('-');
+      if (cut <= 0) return null;
+      candidate = candidate.slice(0, cut);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Read the live session list the other way round: attribute each name to a
+ * worktree ID and plan a rename when that ID is moving (Issue #1661).
+ *
+ * This is what covers the sessions prediction structurally cannot see — an
+ * instance with no roster row, a name left behind by an earlier move — and it
+ * is also the only place that can notice a live `mcbd-*` session nothing
+ * explains, which it records in `result.unaccountedSessions`.
+ */
+function discoverSessionRenames(
+  renames: ReadonlyArray<WorktreeIdRename>,
+  liveNames: ReadonlySet<string>,
+  knownIds: ReadonlySet<string>,
+  result: ReconcileWorktreeSessionsResult
+): SessionRenamePlan[] {
+  const byOldId = new Map(renames.map((rename) => [rename.oldId, rename]));
+  const plans: SessionRenamePlan[] = [];
+
+  for (const name of liveNames) {
+    if (!name.startsWith('mcbd-')) continue;
+
+    const attributed = attributeSessionName(name, knownIds);
+    if (!attributed) {
+      result.unaccountedSessions.push(name);
+      continue;
+    }
+
+    const rename = byOldId.get(attributed.worktreeId);
+    if (!rename) continue;
+
+    try {
+      const tool = CLIToolManager.getInstance().getTool(attributed.cliToolId);
+      // Rebuilt through getSessionName rather than by string surgery so the
+      // suffix convention stays owned by one place (`cli-tools/base.ts`).
+      const instanceId = attributed.suffix
+        ? buildInstanceId(attributed.cliToolId, attributed.suffix)
+        : attributed.cliToolId;
+      const newName = tool.getSessionName(rename.newId, instanceId);
+      validateSessionName(newName);
+      if (name !== newName) plans.push({ oldName: name, newName, rename, source: 'live' });
+    } catch (error) {
+      result.errors.push(
+        `attribute session ${name}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  return plans;
+}
+
+/**
+ * Merge the predicted and discovered plans, keeping one plan per live session.
+ *
+ * Prediction wins a tie. The two agree wherever both fire; where they disagree
+ * the roster is a positive statement that the instance belongs to this worktree
+ * ("`codex-3` is an instance of `alpha`"), while attribution is an inference
+ * from the name, so the explicit record is the safer of the two to trust.
+ */
+function mergeSessionPlans(
+  predicted: SessionRenamePlan[],
+  discovered: SessionRenamePlan[]
+): SessionRenamePlan[] {
+  const byOldName = new Map<string, SessionRenamePlan>();
+  for (const plan of [...predicted, ...discovered]) {
+    if (!byOldName.has(plan.oldName)) byOldName.set(plan.oldName, plan);
+  }
+  return Array.from(byOldName.values());
 }
 
 /** Mint a session name that is free both on the server and within this pass. */
@@ -232,22 +458,16 @@ function allocateTempName(taken: Set<string>, ordinal: number): string {
  */
 async function renameSessionsTwoStage(
   plans: SessionRenamePlan[],
+  live: ReadonlySet<string>,
   deps: ReconcileTmuxDeps,
   result: ReconcileWorktreeSessionsResult
 ): Promise<SessionRenamePlan[]> {
   if (plans.length === 0) return [];
 
-  let live: Set<string>;
-  try {
-    live = new Set((await deps.listSessions()).map((session) => session.name));
-  } catch (error) {
-    result.errors.push(
-      `list tmux sessions: ${error instanceof Error ? error.message : String(error)}`
-    );
-    return [];
-  }
-
-  // Exact set membership, never a prefix test (Issue #1156).
+  // Exact set membership, never a prefix test (Issue #1156). A predicted name
+  // that is not live is not a miss — it is a name nothing was ever running
+  // under — so it is dropped here rather than counted as skipped; what a pass
+  // could not see at all is reported through `unaccountedSessions` instead.
   const runnable = plans.filter((plan) => live.has(plan.oldName));
   const movingNames = new Set(runnable.map((plan) => plan.oldName));
 
@@ -462,8 +682,34 @@ export async function reconcileWorktreeSessions(
     renameSession: options?.tmux?.renameSession ?? renameSession,
   };
 
-  const plans = renames.flatMap((rename) => planSessionRenames(db, rename, result.errors));
-  await renameSessionsTwoStage(plans, deps, result);
+  // Listed once, up front: both the prediction pass and the attribution pass
+  // need it, and it is what makes a startup with nothing stale cost exactly one
+  // `tmux list-sessions`.
+  let live: Set<string> | null = null;
+  try {
+    live = new Set((await deps.listSessions()).map((session) => session.name));
+  } catch (error) {
+    result.errors.push(
+      `list tmux sessions: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+
+  if (live) {
+    const knownIds = collectKnownWorktreeIds(db, renames);
+    const predicted = renames.flatMap((rename) => planSessionRenames(db, rename, result.errors));
+    const discovered = discoverSessionRenames(renames, live, knownIds, result);
+    const plans = mergeSessionPlans(predicted, discovered);
+
+    // Counted against the live list, so `predicted` means "predicted AND
+    // found", not "names we guessed at".
+    for (const plan of plans) {
+      if (!live.has(plan.oldName)) continue;
+      if (plan.source === 'roster') result.planSources.predicted++;
+      else result.planSources.discovered++;
+    }
+
+    await renameSessionsTwoStage(plans, live, deps, result);
+  }
 
   // Runtime state moves after the sessions: a poller that ticks in between
   // fails one capture against a name that is briefly gone, which is a logged
@@ -471,11 +717,28 @@ export async function reconcileWorktreeSessions(
   // restarted poller address a session that does not exist yet.
   migrateRuntimeState(db, renames, result);
 
-  if (result.renamedSessions.length > 0 || result.errors.length > 0) {
+  // A live session nobody could account for is the failure this pass used to
+  // report as success (Issue #1661), so it gets its own line at warn level
+  // rather than a zero buried in the summary.
+  if (result.unaccountedSessions.length > 0) {
+    logger.warn('reconcile:unaccounted-sessions', {
+      count: result.unaccountedSessions.length,
+      sessions: result.unaccountedSessions,
+    });
+  }
+
+  if (
+    result.renamedSessions.length > 0 ||
+    result.errors.length > 0 ||
+    result.unaccountedSessions.length > 0
+  ) {
     logger.info('reconcile:complete', {
       renames: renames.length,
+      predicted: result.planSources.predicted,
+      discovered: result.planSources.discovered,
       renamedSessions: result.renamedSessions.length,
       skipped: result.skippedSessions.length,
+      unaccounted: result.unaccountedSessions.length,
       errors: result.errors.length,
     });
   }
@@ -494,7 +757,13 @@ export async function reconcileWorktreeSessions(
  *
  * Idempotent and cheap when there is nothing to do: it lists tmux sessions once
  * and intersects, so a startup where no old name is live performs one `tmux
- * list-sessions` and stops.
+ * list-sessions` and stops. Idempotence survives the attribution pass added in
+ * #1661 for the same reason the prediction pass is idempotent — a session that
+ * already carries the current ID resolves to the *destination* of its rename
+ * pair, which is not a source, so a second run plans nothing.
+ *
+ * A database with no aliases at all still returns immediately without listing:
+ * with no ID on the move there is no session that could be following one.
  *
  * @param db - Database instance
  */
@@ -520,5 +789,13 @@ export async function reconcileWorktreeSessionsFromAliases(
   );
 }
 
-/** @internal Exported so tests can assert the temp-name convention. */
-export const __internal = { TEMP_SESSION_PREFIX, allocateTempName, buildCompositeKey };
+/**
+ * @internal Exported so tests can assert the temp-name convention and pin the
+ * live-name attribution rules directly (Issue #1661).
+ */
+export const __internal = {
+  TEMP_SESSION_PREFIX,
+  allocateTempName,
+  buildCompositeKey,
+  attributeSessionName,
+};
