@@ -20,6 +20,38 @@
  */
 
 /**
+ * Locale the squeeze awk program MUST run under.
+ *
+ * Not cosmetic — the program is byte-oriented by construction, and `%c` is the
+ * one place where awk implementations disagree about what a "character" is:
+ *
+ * | awk                     | `sprintf("%c", 194)` |
+ * |-------------------------|----------------------|
+ * | mawk, BWK awk           | byte `0xC2`          |
+ * | gawk, `LC_ALL=C`        | byte `0xC2`          |
+ * | gawk, `*.UTF-8` locale  | U+00C2 -> `C3 82`    |
+ *
+ * `NBSP` below is assembled from bytes `C2 A0`, so under gawk in a UTF-8 locale
+ * it becomes a four-byte string that can never match a real NBSP — NBSP-only
+ * rows stop counting as blank and the frame comes back unsqueezed. That is not
+ * hypothetical: it is exactly how this shipped broken, green on macOS (BWK awk)
+ * and red on `ubuntu-latest`, whose `/usr/bin/awk` is gawk (Debian ranks the
+ * gawk alternative above mawk) under a UTF-8 locale.
+ *
+ * Pinning the locale — rather than making the regex match both encodings — is
+ * deliberate: an alternation covering the character form
+ * (`sprintf("%c%c",194,160) "|" sprintf("%c",160)`) fixes gawk but makes BWK awk
+ * abort with `multibyte conversion failure` in a UTF-8 locale. Measured on all
+ * three implementations, `LC_ALL=C` is the only setting where every one of them
+ * agrees, and it is byte-transparent: the same 1000-row fixture comes out with
+ * an identical sha256 from BWK awk, mawk and gawk.
+ *
+ * Scoped to the awk process alone, so `less` and tmux keep the user's locale and
+ * still render UTF-8 box drawing.
+ */
+export const SQUEEZE_AWK_LOCALE = 'C';
+
+/**
  * awk implementation of {@link import('./transcript-squeeze').squeezeTranscript}.
  *
  * Mirrors the TypeScript rules exactly:
@@ -28,7 +60,8 @@
  *   implementations (macOS ships BWK awk, Linux usually gawk/mawk).
  * - NBSP (UTF-8 `C2 A0`) is folded to a space before trimming, because
  *   JavaScript's `.trim()` treats U+00A0 as whitespace and awk's `[ \t]` does not.
- *   Without this the two implementations disagree on NBSP-only rows.
+ *   Without this the two implementations disagree on NBSP-only rows. This is the
+ *   line that requires {@link SQUEEZE_AWK_LOCALE} — read that doc before editing.
  * - Leading/trailing blank runs are dropped, runs of 1-2 kept verbatim, runs of
  *   3+ collapsed to a single row carrying the run's ANSI sequences.
  */
@@ -113,8 +146,12 @@ else
   PAGER_CMD="cat"
 fi
 
+# LC_ALL is pinned for awk ONLY (not for less, which still renders UTF-8 box
+# drawing in the user's locale). Under gawk in a UTF-8 locale, sprintf("%c",194)
+# yields U+00C2 rather than the byte 0xC2 and the NBSP fold below silently stops
+# matching. See SQUEEZE_AWK_LOCALE in read-mode-pager.ts.
 tmux capture-pane -pe -t "=$SESSION:" -S "-$LINES_BACK" -E - \\
-  | awk '${SQUEEZE_AWK_PROGRAM}' \\
+  | LC_ALL=${SQUEEZE_AWK_LOCALE} awk '${SQUEEZE_AWK_PROGRAM}' \\
   | $PAGER_CMD
 
 # Without a pager the popup would close before anything could be read.

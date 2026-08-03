@@ -25,7 +25,7 @@ import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { squeezeTranscript, isVisuallyBlank } from '@/lib/tmux/transcript-squeeze';
-import { SQUEEZE_AWK_PROGRAM } from '@/lib/tmux/read-mode-pager';
+import { PAGER_SCRIPT, SQUEEZE_AWK_LOCALE, SQUEEZE_AWK_PROGRAM } from '@/lib/tmux/read-mode-pager';
 import { normalizeTerminalOutputForDisplay } from '@/lib/terminal/terminal-display-normalizer';
 
 const FIXTURE_DIR = path.join(__dirname, 'fixtures');
@@ -166,6 +166,75 @@ describe('--tail semantics (Issue #1623 decision D5)', () => {
   });
 });
 
+/**
+ * Every awk on this machine, so a portability bug cannot hide behind whichever
+ * one happens to be `/usr/bin/awk` here.
+ *
+ * macOS ships BWK awk; Linux distributions ship mawk, and installing gawk
+ * silently promotes it to `awk` because Debian ranks the gawk alternative above
+ * mawk. Testing only `awk` is how a gawk-specific defect shipped green from a
+ * Mac and red on `ubuntu-latest`.
+ */
+function availableAwks(): Array<{ name: string; argv: string[] }> {
+  const candidates: Array<{ name: string; argv: string[] }> = [
+    { name: 'awk', argv: ['awk'] },
+    { name: 'mawk', argv: ['mawk'] },
+    { name: 'gawk', argv: ['gawk'] },
+    { name: 'original-awk', argv: ['original-awk'] },
+    { name: 'nawk', argv: ['nawk'] },
+    { name: 'busybox awk', argv: ['busybox', 'awk'] },
+    { name: 'goawk', argv: ['goawk'] },
+  ];
+  return candidates.filter(({ argv }) => {
+    try {
+      execFileSync(argv[0], [...argv.slice(1), 'BEGIN { exit 0 }'], { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** Run the shipped awk program exactly the way the shipped script runs it. */
+function runAwk(argv: string[], input: string): string {
+  return execFileSync(argv[0], [...argv.slice(1), SQUEEZE_AWK_PROGRAM], {
+    input,
+    encoding: 'utf-8',
+    maxBuffer: 32 * 1024 * 1024,
+    // The locale is part of the contract, not of the ambient environment.
+    env: { ...process.env, LC_ALL: SQUEEZE_AWK_LOCALE, LANG: SQUEEZE_AWK_LOCALE },
+  }).replace(/\n$/, '');
+}
+
+const AWKS = availableAwks();
+
+/** Built by code point, never typed literally — see EDGE_CASES. */
+const ESC = String.fromCharCode(27);
+const NBSP = String.fromCharCode(160);
+
+/**
+ * Inputs that separate a correct squeeze from a plausible one.
+ *
+ * ESC and NBSP are assembled from code points rather than typed. The regression
+ * that made this list necessary was invisible for exactly that reason: the NBSP
+ * case had been written with a raw U+00A0 that renders as a space in a diff, in
+ * a terminal, and in vitest's own failure output — which reported
+ * `'a\n \n \n \nb'` and sent everyone hunting for a bug in the trim regex's
+ * whitespace class instead of in the NBSP fold.
+ */
+const EDGE_CASES: Array<[string, string]> = [
+  ['collapse a long blank run', 'a\n\n\n\nb'],
+  ['ANSI carried across a run', `a\n${ESC}[49m\n${ESC}[31m\n\nb`],
+  ['leading and trailing runs', '\n\n\na\n\n\n'],
+  ['isolated SGR-only row', `a\n${ESC}[49m\nb`],
+  ['content with inner spacing', `  ${ESC}[31mkept  spacing${ESC}[39m   `],
+  ['ASCII-space-only rows', 'a\n \n \n \nb'],
+  ['NBSP-only rows (U+00A0)', `a\n${NBSP}\n${NBSP}\n${NBSP}\nb`],
+  ['tab-only rows', 'a\n\t\n\t\n\t\nb'],
+  ['NBSP next to real content', `x${NBSP}not blank`],
+  ['mixed NBSP and empty run', `a\n${NBSP}\n\n${NBSP}\nb`],
+];
+
 describe('conformance: the three implementations must not drift', () => {
   it('matches the Web UI normalizer (Issue #1172) byte-for-byte', () => {
     // Same problem, same rules. This module is a separate entry point only
@@ -176,37 +245,42 @@ describe('conformance: the three implementations must not drift', () => {
     }
   });
 
-  it('matches the awk program the tmux popup runs, byte-for-byte', () => {
-    // The popup has no node and no CommandMate server — only tmux, sh and awk.
-    // That second implementation is the drift risk this test exists to remove.
-    for (const name of FIXTURES) {
-      const raw = readFixture(name);
-      const awkOut = execFileSync('awk', [SQUEEZE_AWK_PROGRAM], {
-        input: raw,
-        encoding: 'utf-8',
-        maxBuffer: 32 * 1024 * 1024,
-      }).replace(/\n$/, '');
+  it('found at least one awk to test against', () => {
+    // Without this, a machine with no awk at all would report a green
+    // conformance suite that had compared nothing.
+    expect(AWKS.length).toBeGreaterThan(0);
+  });
 
-      expect(awkOut, name).toBe(squeezeTranscript(raw).text);
+  it.each(AWKS.map((a) => a.name))('%s matches on the real captures, byte-for-byte', (name) => {
+    const { argv } = AWKS.find((a) => a.name === name)!;
+    for (const fixture of FIXTURES) {
+      const raw = readFixture(fixture);
+      expect(runAwk(argv, raw), `${name} / ${fixture}`).toBe(squeezeTranscript(raw).text);
     }
   });
 
-  it('matches awk on the SGR and blank-run edge cases too', () => {
-    const cases = [
-      'a\n\n\n\nb',
-      'a\n\u001b[49m\n\u001b[31m\n\nb',
-      '\n\n\na\n\n\n',
-      'a\n\u001b[49m\nb',
-      '  \u001b[31mkept  spacing\u001b[39m   ',
-      'a\n \n \n \nb',
-    ];
-
-    for (const input of cases) {
-      const awkOut = execFileSync('awk', [SQUEEZE_AWK_PROGRAM], {
-        input,
-        encoding: 'utf-8',
-      }).replace(/\n$/, '');
-      expect(awkOut, JSON.stringify(input)).toBe(squeezeTranscript(input).text);
+  it.each(AWKS.map((a) => a.name))('%s matches on the blankness edge cases', (name) => {
+    const { argv } = AWKS.find((a) => a.name === name)!;
+    for (const [label, input] of EDGE_CASES) {
+      expect(runAwk(argv, input), `${name} / ${label}`).toBe(squeezeTranscript(input).text);
     }
+  });
+
+  it('pins the locale on the awk the popup runs', () => {
+    // The program builds NBSP out of the bytes C2 A0 via sprintf("%c"). gawk in
+    // a UTF-8 locale reads those as CHARACTER codes, producing U+00C2 (C3 82)
+    // and a matcher that can never fire — so NBSP-only rows stop being blank and
+    // the frame comes back unsqueezed. A byte locale is what makes every awk
+    // agree.
+    //
+    // Static on purpose: it fails on a mawk-only machine too, where the
+    // divergence itself cannot be reproduced and the matrix above proves nothing.
+    const highCodePoints = [...SQUEEZE_AWK_PROGRAM.matchAll(/sprintf\("(?:%c)+"((?:,\s*\d+)+)\)/g)]
+      .flatMap((m) => m[1].split(',').map((n) => Number(n.trim())))
+      .filter((code) => code > 127);
+    expect(highCodePoints.length).toBeGreaterThan(0);
+
+    expect(SQUEEZE_AWK_LOCALE).toBe('C');
+    expect(PAGER_SCRIPT).toContain(`LC_ALL=${SQUEEZE_AWK_LOCALE} awk '`);
   });
 });

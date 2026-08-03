@@ -94,6 +94,49 @@ popup の中には CommandMate サーバも node も `dist/` も無い。tmux �
 の出力が **バイト単位で一致**することを検証する。どれか 1 つを変えると落ちる
 （awk 側だけ閾値を変える変異、TS 側だけ変える変異の両方で赤を確認済み）。
 
+### awk 版の移植性: `LC_ALL=C` の固定（CI 赤で判明・2026-08-03 追記）
+
+初回実装は macOS で緑・`ubuntu-latest` で赤になった。原因は squeeze 本体ではなく
+**`sprintf("%c")` の解釈が awk 実装 × ロケールで割れる**こと。
+
+NBSP の畳み込みは `NBSP = sprintf("%c%c", 194, 160)` でバイト列 `C2 A0` を組み立てているが、
+
+| awk | `sprintf("%c", 194)` |
+|---|---|
+| mawk / BWK awk | バイト `0xC2` |
+| gawk・`LC_ALL=C` | バイト `0xC2` |
+| gawk・`*.UTF-8` ロケール | **文字 U+00C2 → `C3 82`** |
+
+gawk を UTF-8 ロケールで動かすと NBSP マッチャが 4 バイト文字列になり、**実際の NBSP に
+永久に一致しない**。結果として NBSP のみの行が空行と判定されず、フレームが無圧縮のまま返る。
+CI の `/usr/bin/awk` は gawk（Debian の alternatives は gawk を mawk より上位に置く）で
+UTF-8 ロケールのため、この条件を踏んでいた。
+
+**採らなかった修正**: 文字形も拾う alternation
+（`sprintf("%c%c",194,160) "|" sprintf("%c",160)`）は gawk では直るが、**BWK awk が
+UTF-8 ロケールで `multibyte conversion failure` で異常終了する**（実測）。
+
+**採った修正**: awk の呼び出しだけ `LC_ALL=C` に固定する。3 実装すべてが一致し
+（実 fixture 1000 行の出力 sha256 が BWK / mawk / gawk で同一）、バイト透過なので
+UTF-8 の罫線もそのまま通る。`less` と tmux はユーザーのロケールのまま。
+
+**検知の作り直し**: conformance テストは「その環境の `awk` 1 本」しか見ていなかったため、
+macOS 緑・Linux 赤を通してしまった。現在は
+
+1. 手元にある awk 実装を**全部**探して（`awk` / `mawk` / `gawk` / `original-awk` /
+   `nawk` / `busybox awk` / `goawk`）それぞれで conformance を回す
+2. 1 本も見つからなければ**失敗**する（無言の空振り禁止）
+3. `sprintf("%c", N)` に N > 127 が存在する限りロケール固定を要求する**静的ガード**を持つ
+   — mawk しか無い環境（差分自体が再現しない）でも効く
+
+変異注入で赤を確認済み: スクリプトから `LC_ALL=C` を外す / `SQUEEZE_AWK_LOCALE` を
+`en_US.UTF-8`（＝ CI の条件）に変える。
+
+**教訓（fixture と同じ轍）**: 赤になったテストケースは生の U+00A0 で書かれており、diff でも
+端末でも vitest の失敗出力でも**半角スペースに見えていた**。そのため当初は trim の空白クラス
+（`\v` / `\f` の移植性）が疑われた。ESC と NBSP は必ず `String.fromCharCode()` か
+エスケープで組み、ソースに生バイトを置かない。
+
 ## D3: popup は静止画（追尾しない）
 
 **仕様として明記する。** `less` の入力がパイプなので `F` による追尾はできない。
