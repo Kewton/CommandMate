@@ -45,6 +45,26 @@ export function clearPromptHashCache(pollerKey: string): void {
 }
 
 /**
+ * Move the cached hash from one pollerKey to another.
+ *
+ * Used when a worktree ID is renamed underneath a running poller
+ * (Issue #1621 Phase 3). Clearing instead of moving would let the poller
+ * re-save the prompt it is currently sitting on as a fresh message, which is
+ * the duplicate this module exists to prevent.
+ *
+ * No-op when nothing is cached under `oldKey`.
+ *
+ * @param oldKey - Poller key the cache entry lives under
+ * @param newKey - Poller key it should live under
+ */
+export function renamePromptHashCacheKey(oldKey: string, newKey: string): void {
+  if (oldKey === newKey) return;
+  const hash = promptHashCache.get(oldKey);
+  promptHashCache.delete(oldKey);
+  if (hash !== undefined) promptHashCache.set(newKey, hash);
+}
+
+/**
  * Normalize prompt content before deduplication check.
  * For Copilot, replaces cursor position markers at line beginnings
  * with spaces, so that prompts differing only in cursor position

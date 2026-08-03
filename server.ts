@@ -94,6 +94,52 @@ function validateCertPath(filePath: string, label: string): string {
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
 
+/**
+ * Issue #1621/#1645: emit a REAL 3xx for `/worktrees/<historical id>`.
+ *
+ * #1644 rescued those URLs from the layout with `permanentRedirect`, which
+ * measures as HTTP 200 + `<meta http-equiv="refresh">` — App Router emits a
+ * genuine 3xx only from Route Handlers, Server Actions and middleware. Old IDs
+ * only start arriving now that #1645 renumbers the existing rows, so the real
+ * redirect belongs here. `middleware.ts` cannot do it: it runs on the edge
+ * runtime, where the SQLite alias lookup is impossible.
+ *
+ * Loaded through `await import()` and cached, NOT as a top-level static import:
+ * adding a module graph to server.ts's eval-time graph perturbs Next's
+ * AsyncLocalStorage bootstrap under `tsx server.ts`, and the first request that
+ * compiles middleware then dies (measured; the symptom is E2E-only — unit,
+ * integration and build all stay green). Do not hoist this.
+ */
+type WorktreeRedirect = { statusCode: number; location: string };
+type WorktreeRedirectModule = typeof import('./src/lib/git/worktree-redirect');
+let worktreeRedirectModule: WorktreeRedirectModule | null = null;
+let worktreeRedirectLoad: Promise<void> | null = null;
+
+async function resolveWorktreeAliasRedirect(url: string): Promise<WorktreeRedirect | null> {
+  if (!worktreeRedirectModule) {
+    if (!worktreeRedirectLoad) {
+      worktreeRedirectLoad = import('./src/lib/git/worktree-redirect')
+        .then((mod) => {
+          worktreeRedirectModule = mod;
+        })
+        .catch((error) => {
+          // Fail open: without the resolver the layout's meta refresh still
+          // lands the user on the right worktree.
+          console.error('Failed to load worktree redirect resolver:', error);
+        });
+    }
+    await worktreeRedirectLoad;
+  }
+
+  if (!worktreeRedirectModule) return null;
+  try {
+    return worktreeRedirectModule.resolveWorktreeRedirect(url);
+  } catch (error) {
+    console.error('Worktree redirect resolution failed:', error);
+    return null;
+  }
+}
+
 // Issue #331: Prevent Next.js (NextCustomServer) from registering its own upgrade
 // event listener on the HTTP server.
 //
@@ -141,6 +187,23 @@ app.prepare().then(() => {
 
     const method = req.method ?? 'UNKNOWN';
     const url = req.url ?? '/';
+
+    // Issue #1621/#1645: a URL naming a worktree by a retired ID gets a real
+    // 308 here, before Next renders anything. The cheap prefix test keeps every
+    // other route free of the dynamic import and the alias lookup.
+    if (url.startsWith('/worktrees/')) {
+      const redirect = await resolveWorktreeAliasRedirect(url);
+      if (redirect && !res.headersSent) {
+        res.statusCode = redirect.statusCode;
+        res.setHeader('Location', redirect.location);
+        // See WORKTREE_REDIRECT_CACHE_CONTROL: alias -> live is durable, not
+        // eternal, and a cached permanent redirect could never be corrected.
+        res.setHeader('Cache-Control', 'no-store');
+        res.end();
+        return;
+      }
+    }
+
     try {
       const parsedUrl = parse(url, true);
       await handle(req, res, parsedUrl);
@@ -212,6 +275,36 @@ app.prepare().then(() => {
         }
       } catch (error) {
         console.error('Error reconciling Skill operations:', error);
+      }
+
+      // Issue #1621 Phase 3/4: make live tmux sessions follow the worktree IDs
+      // that migration v54 has just renumbered. Session names are DERIVED from
+      // the ID (`mcbd-{cli}-{worktreeId}`), so a running agent would otherwise
+      // keep its process while disappearing from the UI — and the app would
+      // happily start a second agent in the same directory. `worktree_aliases`
+      // is the durable record of every ID that has moved, which makes this pass
+      // idempotent: when nothing is stale it costs one `tmux list-sessions`.
+      //
+      // Fail-open in its own try/catch — reconciling sessions must never be
+      // able to stop the server from serving. Dynamic import for the same
+      // reason as the reconcilers around it: a static import here perturbs
+      // Next's AsyncLocalStorage bootstrap under `tsx server.ts` and the first
+      // request that compiles middleware dies. Do not hoist this.
+      try {
+        const { reconcileWorktreeSessionsFromAliases } = await import(
+          './src/lib/session/worktree-session-reconcile'
+        );
+        const sessionReport = await reconcileWorktreeSessionsFromAliases(db);
+        if (sessionReport.renamedSessions.length > 0) {
+          console.log(
+            `Reconciled ${sessionReport.renamedSessions.length} tmux session(s) to renamed worktree IDs`
+          );
+        }
+        if (sessionReport.errors.length > 0) {
+          console.warn(`Session reconcile warnings: ${sessionReport.errors.join(', ')}`);
+        }
+      } catch (error) {
+        console.error('Error reconciling worktree sessions:', error);
       }
 
       // Issue #1543: close verification runs that a crash left in `running`.

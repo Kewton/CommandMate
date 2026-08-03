@@ -15,6 +15,7 @@
  */
 
 import type Database from 'better-sqlite3';
+import { recordWorktreeAliasRow } from './migrations/worktree-id-rename';
 
 /** One historical ID and the worktree it resolves to today. */
 export interface WorktreeAlias {
@@ -63,20 +64,11 @@ export function recordWorktreeAlias(
   worktreeId: string,
   now: number = Date.now()
 ): void {
-  if (!oldId || !worktreeId || oldId === worktreeId) return;
-  if (!hasAliasTable(db)) return;
-
-  // The destination ID now names a live worktree; any alias claiming it as a
-  // historical name is stale and would only confuse resolution.
-  db.prepare('DELETE FROM worktree_aliases WHERE old_id = ?').run(worktreeId);
-
-  db.prepare(
-    `INSERT INTO worktree_aliases (old_id, worktree_id, created_at)
-     VALUES (?, ?, ?)
-     ON CONFLICT(old_id) DO UPDATE SET
-       worktree_id = excluded.worktree_id,
-       created_at = excluded.created_at`
-  ).run(oldId, worktreeId, now);
+  // The statements live in `migrations/worktree-id-rename.ts`: the rename that
+  // records the alias has to be callable from a migration, and a migration that
+  // imports a `@/lib/db/*` module inherits every `vi.mock` of it in the suite
+  // (Issue #1621, #1645). This function stays the public entry point.
+  recordWorktreeAliasRow(db, oldId, worktreeId, now);
 }
 
 /**
@@ -136,6 +128,38 @@ export function getWorktreeAliases(
     worktree_id: string;
     created_at: number;
   }>;
+
+  return rows.map((row) => ({
+    oldId: row.old_id,
+    worktreeId: row.worktree_id,
+    createdAt: row.created_at,
+  }));
+}
+
+/**
+ * Every alias in the database, oldest first.
+ *
+ * Feeds the startup session reconciliation (Issue #1621 Phase 3/4): each row is
+ * an ID that used to name a worktree, so `mcbd-<cli>-<old_id>` is exactly the
+ * tmux session name a still-running agent may be sitting under. Ordering by
+ * `created_at` makes the pass deterministic; the rename itself is
+ * order-independent because it runs in two stages.
+ *
+ * Returns `[]` rather than throwing when the table has not been created yet, so
+ * a caller on an older database degrades to "nothing to reconcile".
+ *
+ * @param db - Database instance
+ */
+export function getAllWorktreeAliases(db: Database.Database): WorktreeAlias[] {
+  if (!hasAliasTable(db)) return [];
+
+  const rows = db
+    .prepare(
+      `SELECT old_id, worktree_id, created_at
+       FROM worktree_aliases
+       ORDER BY created_at ASC, old_id ASC`
+    )
+    .all() as Array<{ old_id: string; worktree_id: string; created_at: number }>;
 
   return rows.map((row) => ({
     oldId: row.old_id,

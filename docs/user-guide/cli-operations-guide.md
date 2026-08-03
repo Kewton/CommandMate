@@ -91,11 +91,15 @@ commandmate ls --id anvil-              # worktree IDプレフィックスでフ
 ```
 ID                                               NAME                  STATUS   DEFAULT
 -----------------------------------------------  --------------------  -------  ------
-localllm-test-main                               main                  ready    claude
-mycodebranchdesk-develop                         develop               running  claude
-mycodebranchdesk-feature-518-worktree            feature/518-worktree  ready    claude
-mycodebranchdesk-main                            main                  idle     claude
+localllm-test                                    main                  ready    claude
+commandmate                                      develop               running  claude
+commandmate-issue-518                            feature/518-worktree  ready    claude
+commandmate-main                                 main                  idle     claude
 ```
+
+> ID は **worktree ディレクトリ名**由来です（Issue #1621/#1645）。`/worktree-setup` が作る
+> ディレクトリ名は既に Issue 番号を含むため、ID は旧形式（`<リポジトリ名>-<ブランチ名>`）より
+> 短く読みやすくなります。NAME 列はブランチ名で、checkout のたびに更新されます。
 
 ### STATUS列の意味
 
@@ -170,9 +174,17 @@ commandmate send "$WT" "実装してください"
 >
 > **以前の ID もそのまま使えます。** ID が変わった worktree については旧 ID が記録され、
 > `send` / `wait` / `capture` / `respond` / `auto-yes` / `instances` / `verify` の
-> `<worktree-id>` 引数と、ブラウザの `/worktrees/<旧ID>` が引き続き解決されます
-> （ブラウザは現在の URL へ転送されます）。`ls --id` の**前方一致だけは現在の ID に対して**
-> 行われます（旧 ID は完全一致でのみ解決されます）。
+> `<worktree-id>` 引数と、ブラウザの `/worktrees/<旧ID>` が引き続き解決されます。
+> `ls --id` の**前方一致だけは現在の ID に対して**行われます（旧 ID は完全一致でのみ解決）。
+>
+> ブラウザ URL は **HTTP 308 で現在の URL へ転送**されます（Issue #1645、実サーバで実測）。
+> `/terminal` や `/files/...` などのサブパスとクエリも保持されるので、ターミナル画面の
+> ブックマークはターミナル画面に着地します。
+>
+> **既存 worktree の ID はサーバ再起動時の migration で一度だけ振り直されます。** 稼働中の
+> tmux セッションは起動時に新しい名前へ追従しますが、**並列ワーカーを動かしていない
+> タイミングで当てる**こと — 監視スクリプトが旧 ID を握ったままだと、セッションは生きて
+> いるのに `send` / `capture` が届かないという切り分けの難しい状態になります。
 
 ---
 
@@ -343,7 +355,7 @@ commandmate verify show <run-id>                       # run の詳細（読み�
 
 ```
 # stderr:
-Verifying: myrepo-feature-101 (run 42)
+Verifying: commandmate-issue-101 (run 42)
 GATE work-evidence PASS (commits=3, uncommitted=2)
 GATE lint PASS (exit=0, 12.3s)
 GATE unit FAIL (exit=1, 45.0s)
@@ -357,7 +369,7 @@ RESULT failed
 1つの worktree に対して同時に走らせられる run は1つだけです。既に走っている場合は実行中の runId を含むメッセージで終了します。
 
 ```
-Error: A verification run is already in progress for 'myrepo-feature-101' (run 41). Wait for it to finish, then retry.
+Error: A verification run is already in progress for 'commandmate-issue-101' (run 41). Wait for it to finish, then retry.
 ```
 
 ### 稼働サーバの作業ディレクトリでは走らない
