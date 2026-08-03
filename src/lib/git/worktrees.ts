@@ -16,7 +16,9 @@ import {
   deleteWorktreesByIds,
   getRepositories,
   getAllWorktreeIds,
+  getAllWorktreePathIds,
   getAliasedWorktreeIds,
+  getAllWorktreeAliases,
 } from '@/lib/db';
 import { createLogger } from '@/lib/logger';
 
@@ -329,6 +331,46 @@ export async function scanMultipleRepositories(
 export type ScannedWorktree = Omit<Worktree, 'id'> & { id?: string };
 
 /**
+ * Mint an ID for `resolvedPath` without letting the path's **own** history block
+ * it (Issue #1658).
+ *
+ * `takenIds` holds every live ID plus every alias, which is right for a path
+ * nobody has seen before. For a path that IS already registered it is exactly
+ * wrong: its own current ID sits in that set, and so does every ID it has ever
+ * been renamed away from. `deriveWorktreeId` then rejects the basename it should
+ * have produced and walks up the digest ladder — `foo`, `foo-2f4530fe`,
+ * `foo-2f4530fe1cf1f9f8`, … — one rung longer on every call. That is the runaway
+ * this hotfix is about: production reached an 81-character ID whose derived tmux
+ * session name no longer matched the running session.
+ *
+ * Re-derivation for a known path should be reachable only through a bug now that
+ * the lookup is global, so this is a floor rather than a mechanism: excluding
+ * the row's own history makes the derivation converge (it re-mints the ID the
+ * row already has, or a shorter one), instead of growing without bound.
+ *
+ * Exported for the unit tests only: the branch it guards is unreachable through
+ * `syncWorktreesToDB` now that the path lookup is global, and a floor nobody can
+ * exercise is a floor nobody can prove.
+ *
+ * @param resolvedPath - Absolute, `path.resolve()`d worktree directory
+ * @param takenIds - IDs that are unavailable
+ * @param ownIds - IDs this very path already answers to (current ID + aliases)
+ * @internal
+ */
+export function deriveIdIgnoringOwnHistory(
+  resolvedPath: string,
+  takenIds: ReadonlySet<string>,
+  ownIds: ReadonlySet<string> | undefined
+): string {
+  if (!ownIds || ownIds.size === 0) {
+    return deriveWorktreeId(resolvedPath, takenIds);
+  }
+  const available = new Set(takenIds);
+  for (const ownId of ownIds) available.delete(ownId);
+  return deriveWorktreeId(resolvedPath, available);
+}
+
+/**
  * Sync scanned worktrees to database
  *
  * This function performs a true sync:
@@ -381,6 +423,46 @@ export function syncWorktreesToDB(
   // wrong worktree.
   const takenIds = new Set([...getAllWorktreeIds(db), ...getAliasedWorktreeIds(db)]);
 
+  // Issue #1621: the ID a path already owns is the ID it keeps.
+  //
+  // Issue #1658: and that lookup is GLOBAL, because `path` is global — the
+  // column is `NOT NULL UNIQUE`, one row per directory for the whole table.
+  // `repository_path` is not an identity at all, it only records which scan root
+  // last upserted the row, and two scan roots can legitimately report the same
+  // directory: registering a repository *and* one of its own linked worktrees in
+  // `WORKTREE_REPOS` makes `git worktree list` return the identical path set
+  // from either one. Scoping this map per repository then found nothing on
+  // whichever pass did not write `repository_path` last, fell through to
+  // re-derivation, collided with the row's own ID and aliases, and appended
+  // another 8 hex digits — every sync, without limit (measured in production:
+  // 81 characters, at which point the tmux session name derived from the ID no
+  // longer matched the running session and the UI lost it).
+  const idByPath = new Map(
+    getAllWorktreePathIds(db).map(row => [path.resolve(row.path), row.id] as const)
+  );
+
+  // Every ID each path still answers to (its current one plus every alias
+  // pointing at it), so a re-derivation cannot be blocked by the path's own
+  // history — see deriveIdIgnoringOwnHistory.
+  const ownIdsByPath = new Map<string, Set<string>>();
+  const pathById = new Map<string, string>();
+  for (const [resolvedPath, id] of idByPath) {
+    ownIdsByPath.set(resolvedPath, new Set([id]));
+    pathById.set(id, resolvedPath);
+  }
+  for (const alias of getAllWorktreeAliases(db)) {
+    const aliasedPath = pathById.get(alias.worktreeId);
+    if (aliasedPath) ownIdsByPath.get(aliasedPath)?.add(alias.oldId);
+  }
+
+  // Issue #1151: prune by on-disk PATH, not by ID — only a worktree whose PATH
+  // is gone from the scan was genuinely removed. The set is built from the whole
+  // scan rather than one repository's slice (#1658): a directory reported by
+  // *any* scan root is on disk, whatever `repository_path` currently says about
+  // it. Which ROWS a repository may prune is still scoped to that repository, so
+  // a scan root never reaches into another one's rows.
+  const scannedPaths = new Set(worktrees.map(wt => path.resolve(wt.path)));
+
   // Process each repository
   for (const [repoPath, repoWorktrees] of worktreesByRepo) {
     if (!repoPath) continue;
@@ -388,14 +470,9 @@ export function syncWorktreesToDB(
     // Get current worktree rows (id + path) in DB for this repository
     const existingRows = getWorktreesByRepository(db, repoPath);
 
-    // Issue #1151: prune by on-disk PATH, not by ID — only a worktree whose
-    // PATH is gone from the scan was genuinely removed. Issue #1621 makes the
-    // same principle the rule for *identity* as well, not just for pruning.
-    const newPaths = new Set(repoWorktrees.map(wt => path.resolve(wt.path)));
-
     // Find worktrees that no longer exist on disk (genuinely deleted)
     const deletedIds = existingRows
-      .filter(row => !newPaths.has(path.resolve(row.path)))
+      .filter(row => !scannedPaths.has(path.resolve(row.path)))
       .map(row => row.id);
 
     // Delete removed worktrees from DB
@@ -403,16 +480,16 @@ export function syncWorktreesToDB(
       const result = deleteWorktreesByIds(db, deletedIds);
       allDeletedIds.push(...deletedIds);
       // Their IDs are free again (and their alias rows went with them).
-      for (const deletedId of deletedIds) takenIds.delete(deletedId);
+      for (const deletedId of deletedIds) {
+        takenIds.delete(deletedId);
+        const deletedPath = pathById.get(deletedId);
+        if (deletedPath !== undefined) {
+          idByPath.delete(deletedPath);
+          ownIdsByPath.delete(deletedPath);
+        }
+      }
       logger.info('worktree:cleanup', { deletedCount: result.deletedCount });
     }
-
-    // Issue #1621: the ID a path already owns is the ID it keeps.
-    const idByPath = new Map(
-      existingRows
-        .filter(row => newPaths.has(path.resolve(row.path)))
-        .map(row => [path.resolve(row.path), row.id] as const)
-    );
 
     // Upsert current worktrees
     for (const worktree of repoWorktrees) {
@@ -423,8 +500,18 @@ export function syncWorktreesToDB(
         existingId ??
         (suggestedId && !takenIds.has(suggestedId)
           ? suggestedId
-          : deriveWorktreeId(resolvedPath, takenIds));
+          : deriveIdIgnoringOwnHistory(
+              resolvedPath,
+              takenIds,
+              ownIdsByPath.get(resolvedPath)
+            ));
       takenIds.add(id);
+      // Claim the ID for this path for the rest of the run, so the same
+      // directory seen again through a second scan root resolves to it instead
+      // of minting a second one (#1658 — a brand-new path hits this on its very
+      // first sync, before any row exists to look up).
+      idByPath.set(resolvedPath, id);
+      pathById.set(id, resolvedPath);
 
       upsertWorktree(db, {
         ...worktree,

@@ -102,3 +102,49 @@ export function deriveWorktreeId(
     }
   }
 }
+
+/**
+ * Whether `id` is one that {@link deriveWorktreeId} could have minted for
+ * `resolvedPath` — i.e. the basename, or the basename followed by a prefix of
+ * the path's SHA-256 in 8-hex steps.
+ *
+ * The inverse of the derivation, and it exists to tell two kinds of retired ID
+ * apart (Issue #1658). When the same directory was re-derived over and over, it
+ * left a ladder of aliases — `foo`, `foo-2f4530fe`, `foo-2f4530fe1cf1f9f8`, … —
+ * every rung pointing at the same worktree, none of them ever handed out for
+ * longer than the second it took the next sync to replace it. Those are safe to
+ * discard, and must be, because the minter treats an alias as taken and the
+ * ladder would otherwise reserve those IDs forever. An ID like
+ * `commandagent-develop-develop` — a genuine former name, from the
+ * branch-derived scheme — is not of this shape and is kept.
+ *
+ * Note this is a statement about *shape*, not about history: an ID that happens
+ * to match is one this path would produce today.
+ *
+ * @param id - Candidate ID
+ * @param resolvedPath - Absolute, `path.resolve()`d worktree directory
+ */
+export function isDerivedWorktreeId(id: string, resolvedPath: string): boolean {
+  if (!id) return false;
+
+  const base = sanitizeIdSegment(path.basename(resolvedPath)) || FALLBACK_ID_BASE;
+  if (id === base) return true;
+  if (!id.startsWith(`${base}-`)) return false;
+
+  const suffix = id.slice(base.length + 1);
+  const digest = createHash('sha256').update(resolvedPath).digest('hex');
+
+  // The collision ladder: 8 hex digits at a time, always a prefix of the digest.
+  if (
+    suffix.length > 0 &&
+    suffix.length % 8 === 0 &&
+    suffix.length <= digest.length &&
+    digest.startsWith(suffix)
+  ) {
+    return true;
+  }
+
+  // The exhausted-digest tail (`<digest>-<ordinal>`), unreachable short of a
+  // SHA-256 collision but part of the function's range all the same.
+  return /^-[0-9]+$/.test(suffix.slice(digest.length)) && suffix.startsWith(digest);
+}

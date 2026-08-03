@@ -32,6 +32,7 @@ export {
   getWorktreeIdsByRepository,
   getWorktreesByRepository,
   getAllWorktreeIds,
+  getAllWorktreePathIds,
   migrateWorktreeIdPreservingChildren,
   deleteRepositoryWorktrees,
   deleteWorktreesByIds,

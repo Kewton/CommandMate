@@ -32,6 +32,7 @@ import {
   syncWorktreesToDB,
   type ScannedWorktree,
 } from '@/lib/git/worktrees';
+import { isDerivedWorktreeId } from '@/lib/git/worktree-id';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 
 const REPO_PATH = '/repos/anvil';
@@ -143,6 +144,48 @@ describe('deriveWorktreeId', () => {
     expect(deriveWorktreeId('/repos/b/main', new Set(['main']))).toBe(
       `main-${sha8('/repos/b/main')}`
     );
+  });
+});
+
+/**
+ * Issue #1658: telling an abandoned rung of the collision ladder apart from a
+ * genuine former name. Migration v55 deletes the former and keeps the latter, so
+ * a wrong answer either strands an ID forever or breaks somebody's bookmark.
+ */
+describe('isDerivedWorktreeId', () => {
+  const p = '/repos/b/main';
+  const digest = createHash('sha256').update(p).digest('hex');
+
+  it('accepts every ID the derivation can produce for that path', () => {
+    expect(isDerivedWorktreeId('main', p)).toBe(true);
+    for (let length = 8; length <= 64; length += 8) {
+      expect({ length, ok: isDerivedWorktreeId(`main-${digest.slice(0, length)}`, p) }).toEqual({
+        length,
+        ok: true,
+      });
+    }
+    // The exhausted-digest tail.
+    expect(isDerivedWorktreeId(`main-${digest}-2`, p)).toBe(true);
+  });
+
+  it('rejects a branch-derived former name', () => {
+    expect(isDerivedWorktreeId('main-develop', p)).toBe(false);
+    expect(isDerivedWorktreeId('main-detached-1c64d87f', p)).toBe(false);
+    expect(isDerivedWorktreeId('anvil-main', p)).toBe(false);
+    expect(isDerivedWorktreeId('', p)).toBe(false);
+  });
+
+  it('rejects a hex suffix that is not this path\'s digest', () => {
+    const other = createHash('sha256').update('/repos/a/main').digest('hex');
+    expect(isDerivedWorktreeId(`main-${other.slice(0, 8)}`, p)).toBe(false);
+    // Right digest, wrong step: the ladder only ever moves 8 hex at a time.
+    expect(isDerivedWorktreeId(`main-${digest.slice(0, 7)}`, p)).toBe(false);
+    expect(isDerivedWorktreeId(`main-${digest.slice(0, 12)}`, p)).toBe(false);
+  });
+
+  it('uses the fallback base for a path with no usable basename', () => {
+    expect(isDerivedWorktreeId('worktree', '/')).toBe(true);
+    expect(isDerivedWorktreeId('main', '/')).toBe(false);
   });
 });
 

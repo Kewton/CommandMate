@@ -656,6 +656,35 @@ export function getAllWorktreeIds(db: Database.Database): string[] {
 }
 
 /**
+ * Every worktree row's `(id, path)` pair, across all repositories.
+ *
+ * The global counterpart of {@link getWorktreesByRepository}, and the difference
+ * matters (Issue #1658): `path` is the identity of a worktree — the column is
+ * `NOT NULL UNIQUE` — whereas `repository_path` merely records which scan root
+ * last upserted the row. When the *same* git repository is registered under two
+ * scan roots (a repo and one of its own linked worktrees, both in
+ * `WORKTREE_REPOS`), `git worktree list` returns the identical path set from
+ * either one, and `repository_path` ping-pongs between them on every sync.
+ * Looking an existing ID up per repository then misses the row half the time and
+ * re-derives its ID, which appends another 8 hex digits — forever.
+ *
+ * Resolving "which ID does this path already own?" must therefore be global.
+ * Pruning stays per-repository ({@link getWorktreesByRepository}): that question
+ * really is scoped to one scan root.
+ *
+ * @param db - Database instance
+ * @returns `{ id, path }` for every worktree row
+ */
+export function getAllWorktreePathIds(
+  db: Database.Database
+): Array<{ id: string; path: string }> {
+  return db.prepare('SELECT id, path FROM worktrees').all() as Array<{
+    id: string;
+    path: string;
+  }>;
+}
+
+/**
  * Get all worktree rows (id + path) for a given repository path.
  *
  * Issue #1151: sync decides which DB rows to prune. It must key that decision on
