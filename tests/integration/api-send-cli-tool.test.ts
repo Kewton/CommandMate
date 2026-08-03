@@ -9,6 +9,10 @@ import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { createMessage, getMessages, upsertWorktree } from '@/lib/db';
 import type { Worktree } from '@/types/models';
+import {
+  SESSION_STARTING_CODE,
+  SessionStartTimeoutError,
+} from '@/lib/session/session-start-error';
 
 // Mock CLI tool modules
 vi.mock('@/lib/session/claude-session', () => ({
@@ -607,6 +611,84 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
       expect(messages).toHaveLength(1);
       expect(messages[0].id).toBe(originalMessage.id);
       expect(messages[0].content).toBe('Retry me');
+    });
+  });
+  /**
+   * Issue #1637: the send route is where "still starting" stops being a 500.
+   *
+   * `startClaudeSession()` throws SessionStartTimeoutError when the tmux session
+   * and the `claude` process both exist but the prompt has not appeared inside
+   * the init budget. Answering 500 for that made the CLI print
+   * `Server error. Check server logs for details.` and made four orchestration
+   * runs file a slow cold start as a session-creation race.
+   */
+  describe('Session still initializing (Issue #1637)', () => {
+    function seedWorktree(id: string): void {
+      upsertWorktree(db, {
+        id,
+        name: 'Cold start',
+        path: `/path/to/${id}`,
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'TestRepo',
+      } as Worktree);
+    }
+
+    async function send(id: string): Promise<Response> {
+      const request = new Request(`http://localhost:3000/api/worktrees/${id}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'hello' }),
+      });
+      return sendMessage(
+        request as unknown as import('next/server').NextRequest,
+        { params: Promise.resolve({ id }) }
+      ) as unknown as Response;
+    }
+
+    it('answers 503 + SESSION_STARTING with the reason, not a bare 500', async () => {
+      seedWorktree('cold-start');
+      const { startClaudeSession } = await import('@/lib/session/claude-session');
+      vi.mocked(startClaudeSession).mockRejectedValueOnce(
+        new SessionStartTimeoutError('Claude Code', 'mcbd-claude-cold-start', 60000)
+      );
+
+      const response = await send('cold-start');
+      const body = (await response.json()) as { error?: string; code?: string };
+
+      expect(response.status).toBe(503);
+      expect(body.code).toBe(SESSION_STARTING_CODE);
+      // The whole point: the cause travels in the body, where the CLI reads it.
+      expect(body.error).toContain('initialization timeout');
+      expect(body.error).toMatch(/retry/i);
+      // Not wrapped in "Failed to start ..." — the session did not fail.
+      expect(body.error).not.toContain('Failed to start');
+    });
+
+    it('still answers 500 for a start that genuinely failed', async () => {
+      seedWorktree('broken-start');
+      const { startClaudeSession } = await import('@/lib/session/claude-session');
+      vi.mocked(startClaudeSession).mockRejectedValueOnce(
+        new Error('Failed to start Claude session')
+      );
+
+      const response = await send('broken-start');
+      const body = (await response.json()) as { error?: string; code?: string };
+
+      expect(response.status).toBe(500);
+      expect(body.code).toBeUndefined();
+      expect(body.error).toContain('Failed to start Claude Code session');
+    });
+
+    it('does not record a user message for a send that never reached the agent', async () => {
+      seedWorktree('cold-start-history');
+      const { startClaudeSession } = await import('@/lib/session/claude-session');
+      vi.mocked(startClaudeSession).mockRejectedValueOnce(
+        new SessionStartTimeoutError('Claude Code', 'mcbd-claude-cold-start-history', 60000)
+      );
+
+      await send('cold-start-history');
+
+      expect(getMessages(db, 'cold-start-history', { limit: 10 })).toHaveLength(0);
     });
   });
 });
