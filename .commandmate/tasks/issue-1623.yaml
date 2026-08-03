@@ -69,6 +69,33 @@ goal: |
   メッセージに書くこと。squeeze フィルタの fixture は**実 capture を採取**すること
   （手書きの想像で作らない。SGR のみの見かけ空行を含む実データが要る）。
 
+  ## 現在の状態（オーケストレーターによる引き継ぎ・2 回目の送信）
+
+  **実装は既にあなたが完了させており、コミット 4 本がブランチに入っている。**
+
+  ```
+  70c1d612 docs(1623): 読むモードの決定 5 件と実測を設計書・利用ガイドに残す
+  2c7021ea feat(tmux): prefix+g で transcript を popup に開く読むモードを追加する (#1623 案A)
+  4040799c feat(cli): capture --pane で attach せずに transcript を読めるようにする (#1623 案B)
+  026cb583 feat(tmux): transcript の空行圧縮フィルタを実 capture の fixture つきで追加する (#1623)
+  ```
+
+  `wait --verify` は **scope ゲートだけが FAIL** した（lint / typecheck / unit / work-evidence は
+  すべて PASS）。原因は**オーケストレーター側の契約の書き漏れ**で、`src/cli/types/index.ts`
+  （`CaptureOptions` に `pane` / `tail` / `raw` を追加した箇所）が `scope.allow` に入っていなかった。
+  **あなたの変更は正当**であり、取り消す必要はない。今回の契約では `src/cli/types/**` を allow に
+  追加済みなので、同じ差分のまま scope ゲートが通る。
+
+  **やり直さないこと。** この送信の目的は、修正済みの scope を持つ新しいタスクに紐づけ直して
+  裁定を取り直すことにある。やることは以下だけ:
+
+  - [ ] `git log --oneline origin/develop..HEAD` と `git status` で上記 4 コミット・未コミット 0 を確認する
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` を回して exit 0 を確認する
+  - [ ] 受入条件のうち**未達のものがあれば**そこだけ埋める。特に案A（display-popup / bind-key）が
+        本当に実機で発火するところまで到達しているかを自己申告ではなく実測で述べること
+  - [ ] 何も足す必要が無ければ、確認結果だけ述べて `IMPL_COMPLETED` を出す
+        （コミットを増やす必要はない。work-evidence は既存の 4 コミットで満たされる）
+
   ## 作業ルール（厳守）
 
   - **PR を作らないこと。** ブランチにコミットするところまでが担当。PR は orchestrator が作る
@@ -87,6 +114,7 @@ scope:
     - "src/cli/commands/**"
     - "src/cli/index.ts"
     - "src/cli/utils/**"
+    - "src/cli/types/**"
     - "src/cli/config/**"
     - "src/app/api/worktrees/[id]/capture/**"
     - "src/app/api/worktrees/[id]/current-output/**"
