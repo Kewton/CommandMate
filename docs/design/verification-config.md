@@ -66,7 +66,7 @@ options:
 | `baseRef` | string | `refs/remotes/origin/HEAD` の指す先 | `work-evidence` の比較基準。解決できない場合は設定エラー（`--base-ref` で明示する） |
 | `skipInPrimaryCheckout` | boolean | `true` | プライマリ checkout ではコマンド系ゲートを skip する |
 | `maxLogTailBytes` | integer | `8192` | 失敗ゲートのログを stderr に出す際の末尾バイト数。`0..1048576`。`0` で抑止 |
-| `requireCommit` | boolean | `false` | `true` で `work-evidence` が「変更が在る」ではなく **「commit が在る」** を要求する。`commits=0 uncommitted=1` は failed（run は `not_started`）。実行契約の前文は「未 commit の作業は未完了とみなされる」と宣言するのに、ゲートは未 commit の変更 1 件で `passed` を返していた（Issue #1628 D-4）。既定を false に置いたのは、このゲートの本来の問いが「judge する work が在るか」だからで、リポジトリ単位の opt-in にしてある。**Phase 0 参照実装（`.claude/skills/cmate-verify/scripts/verify-run.sh`）は未対応** — 有効化するなら TS 実装側（サーバ / `commandmate verify`）でのみ効く |
+| `requireCommit` | boolean | `false` | `true` で `work-evidence` が「変更が在る」ではなく **「commit が在る」** を要求する。`commits=0 uncommitted=1` は failed（run は `not_started`）。実行契約の前文は「未 commit の作業は未完了とみなされる」と宣言するのに、ゲートは未 commit の変更 1 件で `passed` を返していた（Issue #1628 D-4）。既定を false に置いたのは、このゲートの本来の問いが「judge する work が在るか」だからで、リポジトリ単位の opt-in にしてある。**委任 1 件だけに要求したい場合は実行契約の `success.requireCommit`**（Issue #1642、[task-contract.md](./task-contract.md) §2.5）。両者は **OR** で合成し、契約が本オプションを緩めることはできない |
 
 ---
 

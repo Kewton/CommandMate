@@ -87,6 +87,25 @@ export interface TaskContractSuccess {
   /** Honoured by the scope gate in Phase 2-2 (#1546); ignored until then. */
   requireScopeClean: boolean;
   /**
+   * Make the work-evidence gate demand a commit, not just a dirty tree (#1642).
+   *
+   * The preamble has always told the agent "未 commit の作業は未完了とみなされる"
+   * while the gate passed on `commits=0 uncommitted=1` — a rule declared and
+   * never checked (#1628 D-4). `options.requireCommit` in verify.yaml answers
+   * the same need per *repository*, which cannot separate "a delegated worker
+   * must commit" from "my own interactive `commandmate verify` must not be
+   * blocked by uncommitted work". This flag answers it per *delegation*.
+   *
+   * The two are ORed, never overridden: a contract can turn the requirement on
+   * where the repository left it off, but cannot turn one the repository set
+   * back off. Letting it relax the repository's rule would reopen the same hole
+   * one delegation at a time.
+   *
+   * Defaults to false for the reason {@link autoVerifyOnStop} does — every
+   * contract written before this field existed would otherwise change verdict.
+   */
+  requireCommit: boolean;
+  /**
    * Run the verification gates when the agent reports it stopped (#1549).
    *
    * Defaults to false while its siblings default to true, because it is the one
@@ -120,7 +139,12 @@ const TOP_LEVEL_KEYS = ['version', 'title', 'goal', 'scope', 'verify', 'autoYes'
 const SCOPE_KEYS = ['allow', 'deny'];
 const VERIFY_KEYS = ['gates'];
 const AUTO_YES_KEYS = ['mode', 'allowPromptTypes', 'denyPatterns'];
-const SUCCESS_KEYS = ['requireWorkEvidence', 'requireScopeClean', 'autoVerifyOnStop'];
+const SUCCESS_KEYS = [
+  'requireWorkEvidence',
+  'requireScopeClean',
+  'requireCommit',
+  'autoVerifyOnStop',
+];
 
 /** Mirrors GATE_ID_PATTERN in verify-config.ts: a contract can only name ids that could exist. */
 const GATE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
@@ -370,6 +394,7 @@ function validateSuccess(value: unknown, issues: string[]): TaskContractSuccess 
   const success: TaskContractSuccess = {
     requireWorkEvidence: true,
     requireScopeClean: true,
+    requireCommit: false,
     autoVerifyOnStop: false,
   };
   if (value === undefined || value === null) return success;
@@ -453,6 +478,19 @@ export function parseTaskContract(raw: string, sourceLabel: string): TaskContrac
   if (success.requireScopeClean && scope.allow.length === 0) {
     issues.push(
       'scope.allow: at least one pattern is required while success.requireScopeClean is true'
+    );
+  }
+
+  // Same discipline, and the same failure it prevents: the commit requirement is
+  // judged by the work-evidence gate, and `requireWorkEvidence: false` keeps that
+  // gate out of the contract's selection entirely. Accepting the pair would put
+  // "必ず commit" in the preamble with nothing behind it — the exact D-4 defect
+  // this field exists to close.
+  if (success.requireCommit && !success.requireWorkEvidence) {
+    issues.push(
+      'success.requireCommit: requires success.requireWorkEvidence to be true ' +
+        '(the commit requirement is judged by the work-evidence gate, which ' +
+        'requireWorkEvidence: false switches off)'
     );
   }
 
