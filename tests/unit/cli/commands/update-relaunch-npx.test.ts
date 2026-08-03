@@ -12,6 +12,7 @@
  * - ready / degraded / timeout after a successful relaunch
  * - post-start version mismatch warning
  * - user-facing `update` (no flag) under npx stays a no-op (§6)
+ * - Issue #1633: the stale `npm -g` install warning at the head of the routine
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -25,6 +26,7 @@ vi.mock('../../../../src/cli/utils/paths', () => ({
 vi.mock('../../../../src/cli/utils/install-context', () => ({
   isGlobalInstall: vi.fn(() => true),
   isNpxExecution: vi.fn(() => true),
+  ensureConfigDir: vi.fn(() => '/home/tester/.commandmate'),
 }));
 vi.mock('../../../../src/cli/utils/env-setup', () => ({
   getEnvPath: vi.fn(() => '/home/tester/.commandmate/.env'),
@@ -35,6 +37,7 @@ vi.mock('../../../../src/cli/utils/daemon-factory', () => ({
 vi.mock('../../../../src/cli/utils/npm-runner', () => ({
   viewLatestVersion: vi.fn(),
   installGlobalLatest: vi.fn(),
+  findGlobalInstallation: vi.fn(() => null),
 }));
 vi.mock('../../../../src/cli/utils/npx-runner', () => ({
   warmNpxLatest: vi.fn(),
@@ -64,7 +67,7 @@ import { updateCommand } from '../../../../src/cli/commands/update';
 import { ExitCode } from '../../../../src/cli/types';
 import { isNpxExecution } from '../../../../src/cli/utils/install-context';
 import { getDaemonManagerFactory } from '../../../../src/cli/utils/daemon-factory';
-import { viewLatestVersion } from '../../../../src/cli/utils/npm-runner';
+import { viewLatestVersion, findGlobalInstallation } from '../../../../src/cli/utils/npm-runner';
 import { warmNpxLatest, spawnNpxDaemon } from '../../../../src/cli/utils/npx-runner';
 import { waitForReady } from '../../../../src/cli/utils/health-check';
 import { releaseUpdateLock } from '../../../../src/lib/app-update/update-lock';
@@ -114,6 +117,7 @@ beforeEach(() => {
     create: vi.fn(() => daemon),
   } as unknown as ReturnType<typeof getDaemonManagerFactory>);
 
+  vi.mocked(findGlobalInstallation).mockReturnValue(null);
   vi.mocked(viewLatestVersion).mockReturnValue({ success: true, version: '0.11.0' });
   vi.mocked(warmNpxLatest).mockReturnValue({ success: true, version: '0.11.0' });
   vi.mocked(spawnNpxDaemon).mockReturnValue({ success: true, status: 0 });
@@ -261,5 +265,120 @@ describe('update (npx, no --relaunch-npx flag): user-facing no-op preserved (§6
     expect(daemon.stop).not.toHaveBeenCalled();
     expect(spawnNpxDaemon).not.toHaveBeenCalled();
     expect(exitCodes()).toContain(ExitCode.SUCCESS);
+  });
+});
+
+/**
+ * Issue #1633: the npx self-update replaces only the npx cache, so a `npm -g` install left
+ * behind keeps shadowing `commandmate` on PATH at its own (often much older) version. That
+ * divergence was silent for months and is what made #1632 invisible.
+ */
+describe('update --relaunch-npx: stale global install warning (Issue #1633)', () => {
+  const logPath = '/home/tester/.commandmate/update.log';
+
+  // clearAllMocks() (the outer beforeEach) keeps implementations, so a throwing appendFileSync
+  // set by one case would leak into the next.
+  beforeEach(() => {
+    vi.mocked(fs.appendFileSync).mockReset();
+  });
+
+  const loggedToFile = (): string =>
+    vi
+      .mocked(fs.appendFileSync)
+      .mock.calls.map((call) => String(call[1]))
+      .join('');
+
+  it('warns on the console and in update.log, naming the global version', async () => {
+    vi.mocked(findGlobalInstallation).mockReturnValue({
+      path: '/usr/local/lib/node_modules/commandmate',
+      version: '0.2.4',
+    });
+
+    await updateCommand({ yes: true, relaunchNpx: true });
+
+    expect(findGlobalInstallation).toHaveBeenCalledWith('commandmate');
+    expect(output()).toContain('v0.2.4');
+    expect(output()).toContain('/usr/local/lib/node_modules/commandmate');
+    expect(output()).toMatch(/npm install -g commandmate@latest/);
+
+    expect(fs.appendFileSync).toHaveBeenCalledWith(logPath, expect.any(String), { mode: 0o600 });
+    expect(loggedToFile()).toContain('v0.2.4');
+    expect(loggedToFile()).toContain('[WARN]');
+  });
+
+  it('says nothing when there is no global install', async () => {
+    vi.mocked(findGlobalInstallation).mockReturnValue(null);
+
+    await updateCommand({ yes: true, relaunchNpx: true });
+
+    expect(output()).not.toMatch(/global install/i);
+    expect(fs.appendFileSync).not.toHaveBeenCalled();
+    expect(exitCodes()).toContain(ExitCode.SUCCESS);
+  });
+
+  it('still warns when the global package.json has no readable version', async () => {
+    vi.mocked(findGlobalInstallation).mockReturnValue({
+      path: '/usr/local/lib/node_modules/commandmate',
+    });
+
+    await updateCommand({ yes: true, relaunchNpx: true });
+
+    expect(output()).toMatch(/global install of commandmate \(unknown version\)/i);
+    expect(loggedToFile()).toMatch(/unknown version/);
+  });
+
+  it('does not block the update when the detection itself throws (npm missing, EACCES, ...)', async () => {
+    vi.mocked(findGlobalInstallation).mockImplementation(() => {
+      throw new Error('npm root -g exploded');
+    });
+
+    await updateCommand({ yes: true, relaunchNpx: true });
+
+    expect(spawnNpxDaemon).toHaveBeenCalledWith('commandmate');
+    expect(exitCodes()).toContain(ExitCode.SUCCESS);
+    expect(fs.appendFileSync).not.toHaveBeenCalled();
+  });
+
+  it('does not block the update when the log cannot be written', async () => {
+    vi.mocked(findGlobalInstallation).mockReturnValue({
+      path: '/usr/local/lib/node_modules/commandmate',
+      version: '0.2.4',
+    });
+    vi.mocked(fs.appendFileSync).mockImplementation(() => {
+      throw new Error('EACCES');
+    });
+
+    await updateCommand({ yes: true, relaunchNpx: true });
+
+    expect(output()).toContain('v0.2.4');
+    expect(spawnNpxDaemon).toHaveBeenCalledWith('commandmate');
+    expect(exitCodes()).toContain(ExitCode.SUCCESS);
+  });
+
+  it('is emitted up front, so an aborted update still records it', async () => {
+    vi.mocked(findGlobalInstallation).mockReturnValue({
+      path: '/usr/local/lib/node_modules/commandmate',
+      version: '0.2.4',
+    });
+    vi.mocked(fs.existsSync).mockReturnValue(false); // no .env -> abort before anything else
+
+    await updateCommand({ yes: true, relaunchNpx: true });
+
+    expect(output()).toContain('v0.2.4');
+    expect(loggedToFile()).toContain('v0.2.4');
+    expect(exitCodes()).toContain(ExitCode.CONFIG_ERROR);
+  });
+
+  it('is not emitted on the non-npx global update path (it IS the global install)', async () => {
+    vi.mocked(isNpxExecution).mockReturnValue(false);
+    vi.mocked(findGlobalInstallation).mockReturnValue({
+      path: '/usr/local/lib/node_modules/commandmate',
+      version: '0.2.4',
+    });
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ version: '0.11.0' }));
+
+    await updateCommand({ check: true });
+
+    expect(findGlobalInstallation).not.toHaveBeenCalled();
   });
 });

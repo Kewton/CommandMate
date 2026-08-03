@@ -495,17 +495,17 @@ Skill の support matrix・MVP 既知制約・rollback 手順は [docs/user-guid
 | `src/cli/commands/start.ts` | startコマンド（前景/デーモン、--issue対応 Issue #136）。runStart()はexitせずStartResultを返す（Issue #1195） |
 | `src/cli/commands/stop.ts` | stopコマンド（サーバー停止、--issue対応 Issue #136） |
 | `src/cli/commands/status.ts` | statusコマンド（状態確認、--issue/--all対応 Issue #136）。statusコマンド（--all対応） |
-| `src/cli/commands/update.ts` | updateコマンド（停止→npm install -g→再起動、--check/--yes。素のnpx実行は案内のみで正常終了。隠しフラグ--relaunch-npxでnpx再取得→停止→再起動し、abort系はreleaseUpdateLock）（Issue #1194, #1319, #1395） |
+| `src/cli/commands/update.ts` | updateコマンド（停止→npm install -g→再起動、--check/--yes。素のnpx実行は案内のみで正常終了。隠しフラグ--relaunch-npxでnpx再取得→停止→再起動し、abort系はreleaseUpdateLock。npx自己更新の冒頭で残置グローバル導入をconsoleとupdate.logに警告）（Issue #1194, #1319, #1395, #1633） |
 | `src/cli/utils/preflight.ts` | システム依存関係チェック（compareVersionsはsemver.tsへ移譲、Issue #1194） |
 | `src/cli/utils/semver.ts` | semver 3方向比較（compareVersions/isComparableVersion）（Issue #1194） |
-| `src/cli/utils/npm-runner.ts` | npm実行ラッパ（viewLatestVersion/installGlobalLatest）（Issue #1194） |
+| `src/cli/utils/npm-runner.ts` | npm実行ラッパ（viewLatestVersion/installGlobalLatest/findGlobalInstallation: `npm root -g` で残置グローバル導入と版を検出し失敗時は null）（Issue #1194, #1633） |
 | `src/cli/utils/npx-runner.ts` | npx実行ラッパ（warmNpxLatest=`npx --yes <pkg>@latest --version`で取得＆版検証、spawnNpxDaemon=`start --daemon`再起動、sanitizeNpxEnvでnpm_*除去）（Issue #1395） |
 | `src/cli/utils/health-check.ts` | 更新後readiness確認（waitForReady: ready/degraded/timeout）（#1194） |
 | `src/cli/utils/worktree-servers.ts` | 稼働中worktreeサーバ列挙（listRunningWorktreeServers）（Issue #1194） |
 | `src/cli/utils/env-setup.ts` | 環境設定ファイル生成、getPidFilePath()、パストラバーサル対策（Issue #125, #136）。Issue #1517 で `normalizeBrowseRoots(input, resolveEntry?)`（カンマ区切り整形・重複除去）追加、`createEnvFile` は `CM_BROWSE_ROOTS` を**設定時のみ**出力 |
 | `src/cli/utils/daemon.ts` | デーモンプロセス管理、dotenv読み込み、セキュリティ警告、getEffectiveEnv()（Issue #125, #1266） |
 | `src/cli/utils/server-url.ts` | サーバURL解決の単一情報源（resolveServerEndpoint / loadEffectiveEnv: .env が環境変数より優先）（Issue #1266） |
-| `src/cli/utils/pid-manager.ts` | PIDファイル管理（O_EXCLアトミック書き込み） |
+| `src/cli/utils/pid-manager.ts` | PID/state ファイル管理（O_EXCLアトミック書き込み。1行目=bare PID / 2行目=JSON state のハイブリッド形式で書き、readStateは bare int・JSON単体・ハイブリッドの3形式を読む）（Issue #1354, #1358, #1632） |
 | `src/cli/utils/security-logger.ts` | セキュリティイベントログ |
 | `src/cli/utils/prompt.ts` | 対話形式プロンプトユーティリティ（Issue #119） |
 | `src/cli/utils/server-ready.ts` | サーバ起動完了待ち（waitForServer: TCPポーリング、throwしない）（Issue #1195） |
