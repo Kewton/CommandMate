@@ -23,6 +23,11 @@
  *    already bound to something that is not ours is left ALONE. The Issue's claim
  *    that `prefix+g` is unbound on stock tmux 3.5a is true here, but says nothing
  *    about a user's own `.tmux.conf`.
+ *    ORDER IS LOAD-BEARING: guard 1 runs first, and must keep doing so. On tmux
+ *    3.0 and older `list-keys` takes no key argument either (`usage: list-keys
+ *    [-T key-table]`, measured in #1641), so this check degrades to "the key is
+ *    always free" there. It is harmless only because those versions never reach
+ *    it — guard 1 has already returned `unsupported-tmux`.
  * 3. **Session-name guard.** The binding fires `if-shell -F '#{m:mcbd-*,...}'`, so
  *    pressing the key in a non-CommandMate session does nothing (measured: the
  *    format yields 1 for `mcbd-*` sessions and 0 for everything else).
@@ -163,8 +168,23 @@ export function buildBindKeyArgs(key: string, quotedScriptPath: string): string[
 /**
  * Whether this tmux understands `display-popup` (3.2+).
  *
- * Probes on OUTPUT, not exit status: measured on 3.5a, `list-commands` exits 0
- * for an unknown command name and simply prints nothing.
+ * Probes on OUTPUT, not exit status. Measured against real binaries in
+ * containers (Issue #1641; harness: `scripts/verify-legacy-tmux-readmode.sh`):
+ *
+ * | tmux | `list-commands display-popup` | verdict |
+ * |---|---|---|
+ * | 2.8 / 3.0a | exit 1, `usage: list-commands [-F format]` | false |
+ * | 3.1c | exit 0, EMPTY stdout | false |
+ * | 3.3a / 3.5a | exit 0, the command's help line | true |
+ *
+ * Two different reasons produce the same right answer, and only the output test
+ * covers both: an exit-code probe calls 3.1c capable, and a stderr probe calls
+ * 3.3a incapable.
+ *
+ * NOT a general-purpose capability prober. On tmux 3.0 and older `list-commands`
+ * takes no command argument at all, so it answers `usage:` for names that tmux
+ * DOES support — reusing this shape for a command that predates 3.1 would report
+ * a false negative on every old tmux.
  */
 export async function supportsDisplayPopup(): Promise<boolean> {
   try {
