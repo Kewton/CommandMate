@@ -33,8 +33,8 @@ describe('db-migrations', () => {
   });
 
   describe('CURRENT_SCHEMA_VERSION', () => {
-    it('should be 54 after Migration #54 (path-derived worktree IDs, #1621/#1645)', () => {
-      expect(CURRENT_SCHEMA_VERSION).toBe(54);
+    it('should be 55 after Migration #55 (compact churned worktree IDs, #1658)', () => {
+      expect(CURRENT_SCHEMA_VERSION).toBe(55);
     });
   });
 
