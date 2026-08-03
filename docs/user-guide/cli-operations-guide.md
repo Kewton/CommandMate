@@ -1177,7 +1177,7 @@ Error: Invalid duration. Must be one of: 1h, 3h, 8h
 ### 不正なagentエラー
 
 ```
-Error: Invalid agent. Must be one of: claude, codex, gemini, vibe-local, opencode
+Error: Invalid agent. Must be one of: claude, codex, gemini, vibe-local, opencode, copilot, antigravity
 ```
 
 **対処**: `--agent` には上記のいずれかを指定してください。

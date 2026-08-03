@@ -350,8 +350,12 @@ exit 2）。task id が stdout に出ます。
 WT=$(commandmatedev ls --branch "feature/1600" --quiet)
 TASK_ID=$(commandmatedev send "$WT" \
   --contract .commandmate/tasks/issue-1600.yaml \
-  --agent claude --auto-yes --duration 3h)
+  --instance claude --auto-yes --duration 3h)
 ```
+
+送り先は `--instance` で指定します（`--agent` ではありません）。`wait` は `--agent` を
+受け付けないため、`send` にだけエージェントを書くと Step 3 の `wait` は worktree の
+既定エージェントを見ることになります（Issue #1638）。
 
 送信直後に `commandmatedev capture "$WT"` で**ワーカーが実際に動き出したこと**を確認します。
 send が exit 0 でも本文が composer に残って Enter 未確定のことがあります。
@@ -359,7 +363,7 @@ send が exit 0 でも本文が composer に残って Enter 未確定のこと�
 ### Step 3: 完了を待って検証する
 
 ```bash
-commandmatedev wait "$WT" --on-prompt human --verify --timeout 10800
+commandmatedev wait "$WT" --instance claude --on-prompt human --verify --timeout 10800
 echo "exit=$?"
 ```
 

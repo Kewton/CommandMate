@@ -16,6 +16,8 @@
  *      because a doc-only change must not have moved any behaviour.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mockFetchSequence, restoreFetch } from '../../../helpers/mock-api';
 import {
@@ -214,5 +216,111 @@ describe('embedded `commandmate docs` guide recommends the --instance form (Issu
     const { readSection, isValidSection } = await import('../../../../src/cli/utils/docs-reader');
     expect(isValidSection('agent-operations')).toBe(true);
     expect(readSection('agent-operations')).toContain('Issue #1638');
+  });
+});
+
+/**
+ * The markdown surfaces (Issue #1638, second pass).
+ *
+ * The embedded guide above is a TypeScript constant, so it was already covered.
+ * The prose docs were not, and that is exactly where the drift happened: the
+ * first pass fixed the Japanese guide and left the English one teaching only
+ * `--agent`, with no test to notice. These guards read the files off disk so a
+ * regression in any locale — or in a locale added later — turns red.
+ */
+const REPO_ROOT = path.resolve(__dirname, '../../../..');
+
+/** Locale-agnostic discovery: docs/user-guide/*.md and docs/<locale>/user-guide/*.md. */
+function findUserGuides(): string[] {
+  const docsDir = path.join(REPO_ROOT, 'docs');
+  const found: string[] = [];
+  const visit = (dir: string, depth: number): void => {
+    if (depth > 2) return;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        visit(full, depth + 1);
+      } else if (entry.name.endsWith('.md') && path.basename(dir) === 'user-guide') {
+        found.push(path.relative(REPO_ROOT, full));
+      }
+    }
+  };
+  visit(docsDir, 0);
+  return found.sort();
+}
+
+/**
+ * Shell example lines (`commandmate ...` / `commandmatedev ...`), reduced to the
+ * command itself.
+ *
+ * Quoted arguments are blanked before the trailing `#` comment is cut, because
+ * message arguments legitimately contain a `#` (`"Implement #102" --auto-yes`)
+ * and a naive cut would hide every flag after it. The remaining text still
+ * carries all flags — none of them live inside quotes.
+ */
+function exampleLines(text: string): string[] {
+  return text
+    .split('\n')
+    .filter(line => /^\s*commandmate(dev)?\s/.test(line))
+    .map(line => {
+      const unquoted = line.replace(/"[^"]*"/g, '""').replace(/'[^']*'/g, "''");
+      const comment = unquoted.indexOf('#');
+      return comment === -1 ? unquoted : unquoted.slice(0, comment);
+    })
+    .map(line => line.trimEnd())
+    .filter(line => line.length > 0);
+}
+
+describe('user-facing markdown teaches the --instance form (Issue #1638)', () => {
+  const guides = findUserGuides();
+  const withClaudeMd = [...guides, 'CLAUDE.md'];
+
+  it('actually discovered the guides (a silent empty sweep proves nothing)', () => {
+    expect(guides.length).toBeGreaterThan(10);
+    expect(guides).toContain('docs/user-guide/cli-operations-guide.md');
+    expect(guides).toContain('docs/en/user-guide/cli-operations-guide.md');
+  });
+
+  it.each(withClaudeMd)('%s shows no `wait --agent` example', (relPath) => {
+    const text = fs.readFileSync(path.join(REPO_ROOT, relPath), 'utf-8');
+    const offenders = exampleLines(text)
+      .filter(line => /\bwait\b/.test(line) && line.includes('--agent'));
+    // `wait --agent` exits 1 with `unknown option`: an example using it is not
+    // merely off-style, it is a command that cannot run.
+    expect(offenders, `wait --agent in ${relPath}`).toEqual([]);
+  });
+
+  /**
+   * `--agent` survives in exactly two example shapes:
+   *   - `instances ... add --agent <tool>`, where it declares a new roster row
+   *   - `send ... --register`, where an unregistered id carries no tool
+   * Anything else is the demoted form the Issue set out to retire, so
+   * re-introducing `send --agent codex` in any locale turns this red.
+   */
+  it.each(withClaudeMd)('%s uses --agent only for `instances add` or --register', (relPath) => {
+    const text = fs.readFileSync(path.join(REPO_ROOT, relPath), 'utf-8');
+    const offenders = exampleLines(text)
+      .filter(line => line.includes('--agent'))
+      .filter(line => !line.includes('--register'))
+      .filter(line => !/\binstances\b.*\badd\b/.test(line));
+    expect(offenders, `unexpected --agent example in ${relPath}`).toEqual([]);
+  });
+
+  const CLI_GUIDES = guides.filter(p => p.endsWith('user-guide/cli-operations-guide.md'));
+
+  it('every locale ships a cli-operations-guide (parity, not just the ja one)', () => {
+    expect(CLI_GUIDES.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it.each(CLI_GUIDES)('%s states the recommendation and the wait asymmetry', (relPath) => {
+    const text = fs.readFileSync(path.join(REPO_ROOT, relPath), 'utf-8');
+
+    // The decision has to be findable from the doc, not only from git log.
+    expect(text, `${relPath} does not cite the Issue`).toContain('#1638');
+    // The symptom: `wait` is the one command with no --agent.
+    expect(text, `${relPath} does not say wait has no --agent`).toMatch(/wait[^\n]*--agent/);
+    // And it must show the working form, not just describe it.
+    expect(exampleLines(text).filter(l => /\bwait\b/.test(l) && l.includes('--instance')))
+      .not.toEqual([]);
   });
 });

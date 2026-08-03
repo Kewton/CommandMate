@@ -353,8 +353,12 @@ argument** (passing both exits 2). The task id is printed on stdout.
 WT=$(commandmatedev ls --branch "feature/1600" --quiet)
 TASK_ID=$(commandmatedev send "$WT" \
   --contract .commandmate/tasks/issue-1600.yaml \
-  --agent claude --auto-yes --duration 3h)
+  --instance claude --auto-yes --duration 3h)
 ```
+
+Name the target with `--instance`, not `--agent`. `wait` does not accept
+`--agent`, so naming the agent only on `send` leaves the `wait` in Step 3
+watching the worktree's default agent (Issue #1638).
 
 Right after sending, run `commandmatedev capture "$WT"` to confirm the worker
 actually started. `send` can exit 0 while the text sits unsubmitted in the composer.
@@ -362,7 +366,7 @@ actually started. `send` can exit 0 while the text sits unsubmitted in the compo
 ### Step 3: Wait, then verify
 
 ```bash
-commandmatedev wait "$WT" --on-prompt human --verify --timeout 10800
+commandmatedev wait "$WT" --instance claude --on-prompt human --verify --timeout 10800
 echo "exit=$?"
 ```
 

@@ -94,15 +94,47 @@ Send a message to a worktree's agent (async). Starts the session automatically i
 
 ```bash
 commandmate send <worktree-id> "<message>"
-commandmate send <worktree-id> "<message>" --agent codex
+commandmate send <worktree-id> "<message>" --instance codex
 commandmate send <worktree-id> "<message>" --auto-yes --duration 3h
+```
+
+### Naming the target: use `--instance` (Issue #1638)
+
+`--instance` is the only target flag every command accepts. `--agent` is accepted
+by `send` / `respond` / `capture` / `auto-yes` but **not by `wait`**, which fails
+with `unknown option` (exit 1). That asymmetry is what bites: name the agent on
+`send` and nothing on `wait`, and `wait` watches the worktree's **default** agent
+— on a worktree cut for Codex it silently waits for Claude Code to finish.
+
+```bash
+commandmate send "$WT" "Implement this" --instance codex   # codex primary instance
+commandmate wait "$WT" --instance codex                    # same flag, same target
+```
+
+An instance id is `<agent>` (the agent's primary instance, e.g. `codex`) or
+`<agent>-<n>` (an additional session, e.g. `codex-2`). A registered instance
+already carries its CLI tool, and an id that is itself a tool id resolves to
+that tool's primary instance even when it is not registered — so `--instance`
+alone is enough in both cases.
+
+**`--agent` is not deprecated syntax; it is the supplement for instances the
+roster does not know.** It cannot be dropped: `--register` has no other way to
+say which CLI tool an unregistered id like `codex-3` should start. Passing an
+`--agent` that contradicts a registered instance is an error (exit 2), not an
+override.
+
+```bash
+# --agent is required here: codex-3 is not in the roster yet
+commandmate send "$WT" "Quick check" --agent codex --instance codex-3 --register
 ```
 
 ### Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--agent <id>` | Agent type (claude, codex, gemini, vibe-local, opencode) | claude |
+| `--instance <id>` | **Recommended way to name the target.** Instance id: `<agent>` or `<agent>-<n>` (e.g. `codex`, `claude-2`). Starts the session if it is not running | The agent's primary instance |
+| `--agent <id>` | Ad-hoc CLI tool for an instance the roster does not know (claude, codex, gemini, vibe-local, opencode, copilot, antigravity) | The roster value / worktree default |
+| `--register` | Register the `--instance` session into the roster | - |
 | `--auto-yes` | Enable auto-yes before sending | - |
 | `--duration <d>` | Auto-yes duration (1h, 3h, 8h) | 1h |
 | `--stop-pattern <p>` | Auto-yes stop condition (regex) | - |
@@ -127,7 +159,16 @@ commandmate wait <worktree-id> --timeout 300
 commandmate wait <id1> <id2> --timeout 600          # Multiple worktrees
 commandmate wait <worktree-id> --on-prompt human     # Human responds via UI
 commandmate wait <worktree-id> --stall-timeout 120
+commandmate wait <worktree-id> --instance codex      # Wait on the codex session
 ```
+
+> **`wait` has no `--agent`** (Issue #1638). Name the target with `--instance`
+> (`--instance codex` is that tool's primary instance). Without it, `wait`
+> watches the worktree's **default** agent and can report "completed" while the
+> agent you actually sent to is still running.
+>
+> A single `wait` takes **one** `--instance`, applied to every worktree id in the
+> call. Worktrees on different instances need one `wait` each.
 
 ### Exit Codes
 
@@ -158,7 +199,7 @@ Respond to an agent's prompt.
 commandmate respond <worktree-id> "yes"          # Yes/No
 commandmate respond <worktree-id> "2"            # Multiple choice (number)
 commandmate respond <worktree-id> "text"         # Free text
-commandmate respond <worktree-id> "yes" --agent claude
+commandmate respond <worktree-id> "yes" --instance codex     # Specific instance
 ```
 
 ### Exit Codes
@@ -175,9 +216,9 @@ commandmate respond <worktree-id> "yes" --agent claude
 Get the current terminal output from a worktree.
 
 ```bash
-commandmate capture <worktree-id>                # Plain text
-commandmate capture <worktree-id> --json          # JSON with status info
-commandmate capture <worktree-id> --agent codex
+commandmate capture <worktree-id>                    # Plain text
+commandmate capture <worktree-id> --json             # JSON with status info
+commandmate capture <worktree-id> --instance codex   # Specific instance
 ```
 
 ### JSON Output Fields
@@ -203,6 +244,7 @@ Control auto-yes (automatic prompt response) individually.
 commandmate auto-yes <worktree-id> --enable --duration 3h
 commandmate auto-yes <worktree-id> --enable --stop-pattern "error"
 commandmate auto-yes <worktree-id> --disable
+commandmate auto-yes <worktree-id> --enable --instance codex-2  # Scoped to one instance
 ```
 
 ---
@@ -381,12 +423,17 @@ WT1=$(commandmate ls --branch feature/101 --quiet)
 WT2=$(commandmate ls --branch feature/102 --quiet)
 
 commandmate send "$WT1" "Implement #101" --auto-yes
-commandmate send "$WT2" "Implement #102" --auto-yes --agent codex
+commandmate send "$WT2" "Implement #102" --auto-yes --instance codex
 
-commandmate wait "$WT1" "$WT2" --timeout 1800
+# One `wait` takes a single --instance and applies it to every worktree id, so
+# worktrees on different instances need one wait each. Both agents keep running
+# while the first wait blocks, so this costs no wall clock over a combined wait.
+# A bare `wait "$WT2"` would watch WT2's DEFAULT agent, not the codex session.
+commandmate wait "$WT1" --timeout 1800
+commandmate wait "$WT2" --instance codex --timeout 1800
 
 commandmate capture "$WT1" --json
-commandmate capture "$WT2" --json
+commandmate capture "$WT2" --instance codex --json
 ```
 
 ---
@@ -455,7 +502,7 @@ Warning: Response may not have been applied. Reason: prompt_no_longer_active
 
 ```
 Error: Invalid duration. Must be one of: 1h, 3h, 8h
-Error: Invalid agent. Must be one of: claude, codex, gemini, vibe-local, opencode
+Error: Invalid agent. Must be one of: claude, codex, gemini, vibe-local, opencode, copilot, antigravity
 ```
 
 **Fix**: Use one of the allowed values listed in the error message.
