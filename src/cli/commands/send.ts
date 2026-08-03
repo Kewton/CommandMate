@@ -11,6 +11,7 @@ import { ApiClient, ApiError, assertResponseShape, isValidWorktreeId, isValidIns
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { parseDurationToMs, ALLOWED_DURATIONS } from '../config/duration-constants';
 import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
+import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 import { validateCopilotModelName, validateAntigravityModelName } from '../config/model-validation';
 import { fetchAgentInstances, saveAgentInstances, defaultAlias, MAX_AGENT_INSTANCES } from '../utils/agent-instances';
 import { resolveInstanceCliTool } from './instances';
@@ -169,9 +170,9 @@ export function createSendCommand(): Command {
     .description('Send a message to a worktree agent')
     .argument('<worktree-id>', 'Worktree ID')
     .argument('[message]', 'Message to send (omit when using --contract)')
-    .option('--agent <agent>', 'CLI tool agent (claude, codex, gemini, vibe-local, opencode, copilot, antigravity)')
-    .option('--instance <id>', 'Agent instance ID: <agent> or <agent>-<n> (e.g. claude-2). Defaults to the agent\'s primary instance.')
-    .option('--register', 'Register the --instance session into the agent-instance roster (Issue #1000)')
+    .option('--instance <id>', INSTANCE_OPTION_DESCRIPTION)
+    .option('--agent <agent>', AGENT_OPTION_DESCRIPTION)
+    .option('--register', 'Register the --instance session into the agent-instance roster (needs --agent unless the instance id is itself a CLI tool id)')
     .option('--model <model>', 'Specify AI model for Copilot or Antigravity agent')
     .option('--auto-yes', 'Enable auto-yes before sending')
     .option('--duration <duration>', `Auto-yes duration (${ALLOWED_DURATIONS.join(', ')})`)

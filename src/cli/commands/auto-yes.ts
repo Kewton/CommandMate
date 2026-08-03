@@ -10,6 +10,7 @@ import { ApiClient, isValidWorktreeId, isValidInstanceId, MAX_STOP_PATTERN_LENGT
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { parseDurationToMs, ALLOWED_DURATIONS } from '../config/duration-constants';
 import { isCliToolId } from '../config/cli-tool-ids';
+import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 import { resolveInstanceCliTool } from './instances';
 
 export function createAutoYesCommand(): Command {
@@ -21,8 +22,8 @@ export function createAutoYesCommand(): Command {
     .option('--disable', 'Disable auto-yes')
     .option('--duration <duration>', `Duration (${ALLOWED_DURATIONS.join(', ')})`)
     .option('--stop-pattern <pattern>', 'Stop pattern (regex, max 500 chars)')
-    .option('--agent <agent>', 'CLI tool agent (claude, codex, gemini, vibe-local, opencode, copilot, antigravity)')
-    .option('--instance <id>', 'Agent instance ID: <agent> or <agent>-<n> (e.g. claude-2). Defaults to the agent\'s primary instance.')
+    .option('--instance <id>', INSTANCE_OPTION_DESCRIPTION)
+    .option('--agent <agent>', AGENT_OPTION_DESCRIPTION)
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeId: string, options: AutoYesOptions) => {
       try {
