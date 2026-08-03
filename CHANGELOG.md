@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-08-03
+
+> **Highlight**: **tmux セッションを「読める」「取りこぼさない」状態にし、Codex ワーカーに対して検証ゲートが機能していなかった穴を塞いだリリース。** attach しても transcript が一行も見えなかった 200×1000 キャンバスに、ジオメトリを一切変えないオンデマンドの読むモード（`prefix+g` の popup ページャと `capture --pane`）を足した。あわせて、`history-limit` が一度も pane に適用されておらず全セッションが tmux 既定の 2000 行で動いていた欠陥（稼働中の codex セッションが 1977/2000 で古い履歴を捨て続けていた）と、`wait` が未起動セッションを完了扱いして `--verify` の exit 0 が完走を意味しなくなっていた欠陥を修正した。
+
 ### Added
 
 - **attach しても一行も読めない tmux セッションに、ジオメトリ非破壊の「読むモード」を追加** (#1623): 200×1000 のキャンバス（#1163）でカーソルが 997 行目に居座るため、attach しても可視域は空白と入力欄だけになる（実測: 72 行のクライアントで transcript 可視 **0 行**）。`prefix+g` で `display-popup` にレイアウト空行を畳んだ transcript を出す**案A**と、attach も tmux 3.2+ も要らない `commandmate capture <id> --pane [--tail N] [--raw] [--json]`（**案B**、tmux <3.2 のフォールバック）の 2 本立てで解決した。**ジオメトリと `capture-pane` の要求 argv は一切変えない**（Auto-Yes / status-detector / 応答保存が依存しているため、変異注入で赤を確認したテストで固定）。`bind-key` はサーバグローバルなので、`display-popup` 能力プローブ・`list-keys` による衝突検査（他人のバインドは上書きしない）・`#{m:mcbd-*,#{session_name}}` によるセッション名ガードを必須にし、いずれかに引っかかれば `bind-key` を 1 回も発行しない。キーは `CM_READ_MODE_KEY`、無効化は `CM_READ_MODE=off`（**前回導入したバインドを削除する収束型**。複数サーバが 1 つの tmux サーバを共有するため停止時 unbind は行わない）。空行圧縮は #1172 の Web UI 正規化と同一ルールで、TS 版・popup が実行する awk 版・#1172 版の 3 実装が実 capture 3 本に対しバイト一致することを conformance テストで固定した。5 件の未解決事項の決定と実測（Issue 本文との食い違い 3 件を含む）は [docs/design/1623-tmux-reading-mode.md](./docs/design/1623-tmux-reading-mode.md)
