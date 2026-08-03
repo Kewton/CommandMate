@@ -16,9 +16,14 @@
  */
 
 import { spawnSync, type SpawnSyncReturns } from 'child_process';
+import { existsSync, readFileSync } from 'fs';
+import { join } from 'path';
 
 /** Timeout for `npm view` (longer than preflight's 5s: this is a network round trip) */
 export const NPM_VIEW_TIMEOUT_MS = 10_000;
+
+/** Timeout for `npm root -g` (a local path lookup, so preflight's 5s is plenty) */
+export const NPM_ROOT_TIMEOUT_MS = 5_000;
 
 /**
  * Result of a registry version query
@@ -132,6 +137,66 @@ export function installGlobalLatest(packageName: string): NpmInstallResult {
   }
 
   return { success: true, permissionDenied: false };
+}
+
+/**
+ * A package present in the npm global root (`npm root -g`)
+ */
+export interface GlobalInstallation {
+  /** Absolute path of the installed package directory */
+  path: string;
+  /** Version read from its package.json; undefined when that cannot be read */
+  version?: string;
+}
+
+/**
+ * Locate a globally installed (`npm install -g`) package.
+ *
+ * Issue #1633: an npx self-update refreshes only the npx cache, so a global install left on the
+ * machine keeps shadowing `commandmate` on PATH at whatever version it was — a divergence that
+ * went unnoticed for months and surfaced as #1632. Callers only *warn* about what this reports,
+ * so every failure mode (npm missing, `npm root -g` failing on permissions, an unreadable
+ * package.json) degrades to "nothing to report" instead of propagating.
+ *
+ * @param packageName - Package name (e.g. `commandmate`)
+ * @returns The installation, or null when npm could not be asked or the package is not there
+ */
+export function findGlobalInstallation(packageName: string): GlobalInstallation | null {
+  const result = spawnSync('npm', ['root', '-g'], {
+    encoding: 'utf-8',
+    timeout: NPM_ROOT_TIMEOUT_MS,
+  });
+
+  // Covers ENOENT (no npm), a timeout, and a non-zero exit alike: nothing to report.
+  if (result.error || result.status !== 0) {
+    return null;
+  }
+
+  const root = readStream(result.stdout);
+  if (!root) {
+    return null;
+  }
+
+  const packagePath = join(root, packageName);
+  if (!existsSync(packagePath)) {
+    return null;
+  }
+
+  return { path: packagePath, version: readInstalledVersion(packagePath) };
+}
+
+/**
+ * Best-effort version read from an installed package's package.json.
+ * The install itself is what matters, so an unreadable manifest still reports the install.
+ */
+function readInstalledVersion(packagePath: string): string | undefined {
+  try {
+    const raw = readFileSync(join(packagePath, 'package.json'), 'utf-8');
+    const version = (JSON.parse(raw) as { version?: unknown }).version;
+    return typeof version === 'string' && version.length > 0 ? version : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

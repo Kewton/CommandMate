@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **npx 自己更新時に、残置したグローバル導入を警告** (#1633): サーバは npx 経由の自己更新（`update --relaunch-npx`）で更新され続ける一方、`npm install -g` で入れた CLI は据え置かれるため、PATH 上の `commandmate` だけが何ヶ月も古いまま乖離しうる（実際に 0.18.0 サーバ + 0.2.4 グローバル CLI という環境が生まれ、#1632 が誰にも気付かれない原因になった）。npx 自己更新経路の冒頭で `npm root -g` からグローバル導入を検出し、その版・パス・`npm install -g commandmate@latest` / `npm uninstall -g commandmate` の案内をコンソールと `~/.commandmate/update.log` の両方に記録する。**警告は助言に徹する**: グローバル導入が無ければ何も出さず、npm 不在・`npm root -g` の失敗・package.json が読めない等の検出失敗は警告をスキップするだけで update 本体は一切阻害しない（package.json が読めない場合は版を `unknown version` として警告自体は出す）
+
 ### Fixed
 
 - **稼働中のサーバを旧 CLI が "Stopped (no PID file)" と誤報する前方互換の欠落を修正** (#1632): #1354 で `~/.commandmate/.commandmate.pid` の中身を bare integer から JSON state へ変えた際、パスは据え置いたまま形式だけを変えたため、PATH に残った旧 CLI（`readPid()` が `parseInt(content, 10)`）は先頭の `{` で NaN → 「ファイル無し」と解釈していた（#1354 の後方互換は「新 CLI が旧形式を読む」片方向のみだった）。`writeState()` を **1 行目 bare PID / 2 行目 JSON** のハイブリッド形式に変更し、`parseInt` が先頭の数字で停止する性質を使って前方互換を回復した。`readState()` も同時にハイブリッド対応させている（片側だけ直すと JSON.parse が失敗して `{pid}` のみに縮退し、`version` が落ちて #1354 の CLI↔サーバ版不一致警告が黙って無効化される）。旧 3 形式（bare int / JSON 単体 / ハイブリッド）の読み取りと O_EXCL アトミック書き込み・#1358 のプロセス同一性検証は不変で、旧 CLI 相当の `parseInt` ロジックで PID が取れることを固定 fixture のテストで担保した
