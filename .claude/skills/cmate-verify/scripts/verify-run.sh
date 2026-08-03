@@ -17,6 +17,15 @@
 #
 # Exit code: passed=0 / config error=2 / failed=20 / not_started=21 / skipped=22.
 #
+# SCOPE: this is a standalone runner. It reads .commandmate/verify.yaml and nothing
+# else — no CommandMate server, no database, no task contract. CommandMate's own
+# execution contracts (.commandmate/tasks/*.yaml) can also demand a commit via
+# `success.requireCommit`, and the product implementation ORs that with
+# `options.requireCommit` (Issue #1642). Here only `options.requireCommit` exists,
+# because a run started from a shell is not attached to any delegation. A
+# repository that wants the requirement to hold for BOTH runners declares it in
+# verify.yaml, which is the one file both implementations read (Issue #1639).
+#
 # Never decide pass/fail by grepping a command's output: `cmd | grep ...` hands $?
 # to grep and hides a non-zero exit — vitest can print "Tests 100 passed" and still
 # exit 1 on an Unhandled Rejection. Each gate is run as `sh -c "$cmd" > log 2>&1`
@@ -182,7 +191,7 @@ BEGIN { SQ = sprintf("%c", 39); section = ""; gate_open = 0; ngates = 0; nversio
     if (section == "options") {
       if (!splitkv(body)) { err("expected \"key: value\" inside options:"); next }
       if (!checkvalue(KV_K, KV_V)) next
-      if (KV_K == "baseRef" || KV_K == "skipInPrimaryCheckout" || KV_K == "maxLogTailBytes")
+      if (KV_K == "baseRef" || KV_K == "skipInPrimaryCheckout" || KV_K == "maxLogTailBytes" || KV_K == "requireCommit")
         printf "OPT\t%s\t%s\n", KV_K, unquote(KV_V)
       else
         err("unknown options key: " KV_K)
@@ -222,6 +231,7 @@ GATE_CMDS=()
 OPT_BASE_REF=""
 OPT_SKIP_PRIMARY="true"
 OPT_MAX_TAIL="$DEFAULT_MAX_LOG_TAIL_BYTES"
+OPT_REQUIRE_COMMIT="false"
 
 while IFS="$TAB" read -r kind a b rest; do
   case "$kind" in
@@ -235,6 +245,7 @@ while IFS="$TAB" read -r kind a b rest; do
         baseRef) OPT_BASE_REF=$b;;
         skipInPrimaryCheckout) OPT_SKIP_PRIMARY=$b;;
         maxLogTailBytes) OPT_MAX_TAIL=$b;;
+        requireCommit) OPT_REQUIRE_COMMIT=$b;;
       esac
       ;;
   esac
@@ -243,6 +254,10 @@ done < "$PARSED"
 case "$OPT_SKIP_PRIMARY" in
   true|false) ;;
   *) die_config "options.skipInPrimaryCheckout must be true or false (got: $OPT_SKIP_PRIMARY)";;
+esac
+case "$OPT_REQUIRE_COMMIT" in
+  true|false) ;;
+  *) die_config "options.requireCommit must be true or false (got: $OPT_REQUIRE_COMMIT)";;
 esac
 case "$OPT_MAX_TAIL" in
   ''|*[!0-9]*) die_config "options.maxLogTailBytes must be an integer (got: $OPT_MAX_TAIL)";;
@@ -313,13 +328,27 @@ else
   git_in status --porcelain > "$WORKDIR/status.txt" 2>/dev/null \
     || die_config "git status failed in $CWD"
   uncommitted=$(wc -l < "$WORKDIR/status.txt" | tr -d ' ')
-  if [ "$commits" -gt 0 ] || [ "$uncommitted" -gt 0 ]; then
-    echo "GATE work-evidence PASS commits=$commits uncommitted=$uncommitted"
-  else
-    echo "GATE work-evidence FAIL commits=$commits uncommitted=$uncommitted"
+  # Printed only when the option is on, so the default output is unchanged and
+  # the TS implementation's summary line stays comparable word for word.
+  we_flag=""
+  if [ "$OPT_REQUIRE_COMMIT" = "true" ]; then we_flag=" requireCommit=true"; fi
+  if [ "$commits" -eq 0 ] && [ "$uncommitted" -eq 0 ]; then
+    echo "GATE work-evidence FAIL commits=$commits uncommitted=$uncommitted$we_flag"
     echo "RESULT not_started"
     exit "$EXIT_NOT_STARTED"
   fi
+  # Issue #1639 / #1628 (D-4): `commits=0 uncommitted=1` reads as "work exists",
+  # which is the right answer to "did anything happen here" and the wrong one to
+  # "is this finished". A repository that wants the second question asked says so
+  # with options.requireCommit. The reason goes to stderr because, unlike the
+  # zero-work case above, `FAIL commits=0 uncommitted=3` does not explain itself.
+  if [ "$OPT_REQUIRE_COMMIT" = "true" ] && [ "$commits" -eq 0 ]; then
+    echo "GATE work-evidence FAIL commits=$commits uncommitted=$uncommitted$we_flag"
+    echo "verify-run: options.requireCommit is set: uncommitted changes are not work evidence, commit them." >&2
+    echo "RESULT not_started"
+    exit "$EXIT_NOT_STARTED"
+  fi
+  echo "GATE work-evidence PASS commits=$commits uncommitted=$uncommitted$we_flag"
 fi
 
 # A linked worktree has its own git dir under <common>/worktrees/<name>; the

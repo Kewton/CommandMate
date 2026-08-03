@@ -13,8 +13,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   composeContractMessage,
+  REQUIRE_COMMIT_SOURCE_CONFIG,
+  REQUIRE_COMMIT_SOURCE_CONTRACT,
   resolveContractGateIds,
   resolveGateCommands,
+  resolveRequireCommit,
   validateContractAgainstVerifyConfig,
 } from '@/lib/tasks/contract-message';
 import { parseTaskContract, type TaskContract } from '@/lib/tasks/contract-parser';
@@ -33,6 +36,17 @@ const CONFIG: VerifyConfig = {
     requireCommit: false,
   },
 };
+
+/** The same repository, with the commit requirement declared repository-wide. */
+const CONFIG_REQUIRING_COMMIT: VerifyConfig = {
+  ...CONFIG,
+  options: { ...CONFIG.options, requireCommit: true },
+};
+
+/** The sentence the gate can actually enforce when a commit is required. */
+const COMMIT_REQUIRED = '必ず commit すること（未 commit の作業は未完了とみなされる）';
+/** ...and when it is not. Asserted as a pair so neither can appear alone. */
+const COMMIT_NOT_ENFORCED = 'commit の有無そのものは検査されない';
 
 function contract(extra = ''): TaskContract {
   return parseTaskContract(
@@ -189,7 +203,7 @@ describe('composeContractMessage', () => {
 
     expect(message).toContain('## 実行契約');
     expect(message).toContain('- 変更してよいのは次のパスのみ: src/lib/tasks/**, tests/unit/tasks/**');
-    expect(message).toContain('必ず commit');
+    expect(message).toContain('作業完了後は commit すること');
     expect(message).toContain('npm run lint');
     expect(message).toContain('## タスク\nImplement the loader.');
     // The goal must come last: everything above it is the frame it is read in.
@@ -230,5 +244,126 @@ scope:
     const message = composeContractMessage(contract(), null);
     expect(message).toContain('検証ゲートが宣言されていない');
     expect(message).not.toContain('次の検証コマンドがすべて成功すること');
+  });
+});
+
+/**
+ * Issue #1642: the preamble is a claim about what the run will do, so it has to
+ * be derived from the same inputs the run is. This block is the whole point of
+ * the Issue — before it, the "必ず commit" line was a constant while the gate
+ * passed on `commits=0 uncommitted=1`, and the Epic #1585 acceptance run
+ * recorded a Codex worker collecting `exit 0` over work it never committed.
+ *
+ * The matrix and its adjudication counterpart live in
+ * tests/unit/verification/gate-runner-task-contract.test.ts; keep them in step.
+ */
+describe('the commit requirement: declaration matches adjudication', () => {
+  const requiring = (extra = '') =>
+    contract(`success:\n  requireCommit: true\n${extra}`);
+
+  describe('resolveRequireCommit is an OR, not a precedence rule', () => {
+    it('is off when neither side declares it', () => {
+      expect(resolveRequireCommit(contract(), CONFIG)).toEqual({ required: false, sources: [] });
+    });
+
+    it('is on when only the contract declares it', () => {
+      expect(resolveRequireCommit(requiring(), CONFIG)).toEqual({
+        required: true,
+        sources: [REQUIRE_COMMIT_SOURCE_CONTRACT],
+      });
+    });
+
+    it('is on when only verify.yaml declares it', () => {
+      expect(resolveRequireCommit(contract(), CONFIG_REQUIRING_COMMIT)).toEqual({
+        required: true,
+        sources: [REQUIRE_COMMIT_SOURCE_CONFIG],
+      });
+    });
+
+    it('stays on when the contract says false and verify.yaml says true', () => {
+      // The direction that matters: a delegation cannot relax a rule the
+      // repository set, or the D-4 hole reopens one contract at a time.
+      const relaxing = contract('success:\n  requireCommit: false\n');
+      expect(resolveRequireCommit(relaxing, CONFIG_REQUIRING_COMMIT)).toEqual({
+        required: true,
+        sources: [REQUIRE_COMMIT_SOURCE_CONFIG],
+      });
+    });
+
+    it('names both declarations when both are set', () => {
+      expect(resolveRequireCommit(requiring(), CONFIG_REQUIRING_COMMIT).sources).toEqual([
+        REQUIRE_COMMIT_SOURCE_CONFIG,
+        REQUIRE_COMMIT_SOURCE_CONTRACT,
+      ]);
+    });
+
+    it('handles a run with no contract and no config at all', () => {
+      expect(resolveRequireCommit(null, null).required).toBe(false);
+    });
+  });
+
+  describe('the preamble sentence', () => {
+    it('promises only what the gate enforces when neither side requires a commit', () => {
+      const message = composeContractMessage(contract(), CONFIG);
+      expect(message).toContain(COMMIT_NOT_ENFORCED);
+      expect(message).not.toContain(COMMIT_REQUIRED);
+    });
+
+    it('declares the commit obligation when the contract requires it', () => {
+      const message = composeContractMessage(requiring(), CONFIG);
+      expect(message).toContain(COMMIT_REQUIRED);
+      expect(message).not.toContain(COMMIT_NOT_ENFORCED);
+    });
+
+    it('declares it when verify.yaml requires it, even for a silent contract', () => {
+      const message = composeContractMessage(contract(), CONFIG_REQUIRING_COMMIT);
+      expect(message).toContain(COMMIT_REQUIRED);
+      expect(message).not.toContain(COMMIT_NOT_ENFORCED);
+    });
+
+    it('declares it when the contract says false but verify.yaml says true', () => {
+      const message = composeContractMessage(
+        contract('success:\n  requireCommit: false\n'),
+        CONFIG_REQUIRING_COMMIT
+      );
+      expect(message).toContain(COMMIT_REQUIRED);
+    });
+
+    it('keeps saying it when the repository declares no gates at all', () => {
+      // resolveGateCommands returns nothing without a config, but the obligation
+      // is the contract's own and must not vanish with the command list.
+      const message = composeContractMessage(requiring(), null);
+      expect(message).toContain(COMMIT_REQUIRED);
+      expect(message).toContain('検証ゲートが宣言されていない');
+    });
+  });
+
+  describe('the work-evidence gate label', () => {
+    it('reads "commit or uncommitted change" while no commit is required', () => {
+      const [workEvidence] = resolveGateCommands(contract(), CONFIG);
+      expect(workEvidence).toBe('work-evidence（commit または未 commit の変更が存在すること）');
+    });
+
+    it('reads "a commit exists" once one is required', () => {
+      const [workEvidence] = resolveGateCommands(requiring(), CONFIG);
+      expect(workEvidence).toBe(
+        'work-evidence（commit が存在すること。未 commit の変更は作業証跡として数えない）'
+      );
+    });
+
+    it('follows verify.yaml too, not only the contract', () => {
+      const [workEvidence] = resolveGateCommands(contract(), CONFIG_REQUIRING_COMMIT);
+      expect(workEvidence).toContain('未 commit の変更は作業証跡として数えない');
+    });
+
+    it('applies to an explicitly named work-evidence gate as well as a defaulted one', () => {
+      // Two code paths produce the label (the named-gates branch and the
+      // "every gate" branch); a fix to one only would leave the other lying.
+      const [workEvidence] = resolveGateCommands(
+        requiring('verify:\n  gates: [work-evidence, lint]\n'),
+        CONFIG
+      );
+      expect(workEvidence).toContain('未 commit の変更は作業証跡として数えない');
+    });
   });
 });

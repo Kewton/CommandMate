@@ -44,7 +44,11 @@ import {
 import { getVerifiableTask } from '@/lib/db/tasks-db';
 import { resolveDefaultBranchName } from '@/lib/git/git-default-branch';
 import { createLogger } from '@/lib/logger';
-import { resolveContractGateIds } from '@/lib/tasks/contract-message';
+import {
+  resolveContractGateIds,
+  resolveRequireCommit,
+  type RequireCommitDecision,
+} from '@/lib/tasks/contract-message';
 import type { TaskEvent } from '@/lib/tasks/task-state-machine';
 import { applyTaskEvent } from '@/lib/tasks/task-transition-service';
 import {
@@ -392,7 +396,7 @@ function runGit(args: string[], cwd: string): Promise<{ code: number | null; std
 async function evaluateWorkEvidence(
   worktreePath: string,
   baseRef: string | null,
-  requireCommit = false
+  requireCommit: RequireCommitDecision
 ): Promise<GateOutcome> {
   const startedAt = Date.now();
   const done = (
@@ -465,7 +469,7 @@ async function evaluateWorkEvidence(
 
   const summary =
     `work-evidence: baseRef=${baseRef} commits=${commitCount} uncommitted=${uncommittedCount}` +
-    (requireCommit ? ' requireCommit=true' : '') +
+    (requireCommit.required ? ' requireCommit=true' : '') +
     ' (contract files excluded)';
 
   if (!Number.isFinite(commitCount) || (commitCount === 0 && uncommittedCount === 0)) {
@@ -473,13 +477,16 @@ async function evaluateWorkEvidence(
   }
   // Issue #1628 (D-4): `commits=0 uncommitted=1` passing is what let a task
   // contract that says "未 commit の作業は未完了とみなされる" still end in
-  // `RESULT passed` over work that was never committed. Opt-in per repository
-  // via `options.requireCommit` in .commandmate/verify.yaml; off by default so
-  // the gate keeps answering "is there work here" for everyone else.
-  if (requireCommit && commitCount === 0) {
+  // `RESULT passed` over work that was never committed. Opt-in, and off by
+  // default so the gate keeps answering "is there work here" for everyone else.
+  // Two declarations can switch it on — `options.requireCommit` per repository
+  // and `success.requireCommit` per delegation (#1642) — so the reason names
+  // whichever ones actually did.
+  if (requireCommit.required && commitCount === 0) {
     return done(
       'failed',
-      `${summary}\noptions.requireCommit is set: uncommitted changes are not work evidence, commit them.`,
+      `${summary}\n${requireCommit.sources.join(' and ')} requires a commit: ` +
+        'uncommitted changes are not work evidence, commit them.',
       1
     );
   }
@@ -591,8 +598,11 @@ async function executeRun(
   task: Task | null,
   detachedContract: Task | null
 ): Promise<VerificationRunTerminalStatus> {
-  const { maxLogTailBytes, skipInPrimaryCheckout, requireCommit } = config.options;
+  const { maxLogTailBytes, skipInPrimaryCheckout } = config.options;
   const { runWorkEvidence, gates } = selection;
+  // ORed with the repository-wide switch rather than replacing it (#1642): a
+  // delegation may tighten the rule, never relax one the repository declared.
+  const requireCommit = resolveRequireCommit(task?.contract ?? null, config);
 
   /**
    * Close an open gate row with the interval its evaluator measured.

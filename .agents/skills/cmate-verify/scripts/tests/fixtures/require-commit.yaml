@@ -1,0 +1,10 @@
+# options.requireCommit: work-evidence demands a commit, not just a dirty tree.
+# The marker gate is the evidence that the command gates really were reached (or
+# really were not), rather than trusting the SKIP/FAIL label the runner prints.
+version: 1
+gates:
+  - id: sidefx
+    command: touch "$CMATE_VERIFY_TEST_MARKER"
+options:
+  skipInPrimaryCheckout: false
+  requireCommit: true

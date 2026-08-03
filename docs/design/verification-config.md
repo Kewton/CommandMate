@@ -66,7 +66,7 @@ options:
 | `baseRef` | string | `refs/remotes/origin/HEAD` の指す先 | `work-evidence` の比較基準。解決できない場合は設定エラー（`--base-ref` で明示する） |
 | `skipInPrimaryCheckout` | boolean | `true` | プライマリ checkout ではコマンド系ゲートを skip する |
 | `maxLogTailBytes` | integer | `8192` | 失敗ゲートのログを stderr に出す際の末尾バイト数。`0..1048576`。`0` で抑止 |
-| `requireCommit` | boolean | `false` | `true` で `work-evidence` が「変更が在る」ではなく **「commit が在る」** を要求する。`commits=0 uncommitted=1` は failed（run は `not_started`）。実行契約の前文は「未 commit の作業は未完了とみなされる」と宣言するのに、ゲートは未 commit の変更 1 件で `passed` を返していた（Issue #1628 D-4）。既定を false に置いたのは、このゲートの本来の問いが「judge する work が在るか」だからで、リポジトリ単位の opt-in にしてある。**Phase 0 参照実装（`.claude/skills/cmate-verify/scripts/verify-run.sh`）は未対応** — 有効化するなら TS 実装側（サーバ / `commandmate verify`）でのみ効く |
+| `requireCommit` | boolean | `false` | `true` で `work-evidence` が「変更が在る」ではなく **「commit が在る」** を要求する。`commits=0 uncommitted=1` は failed（run は `not_started`）。実行契約の前文は「未 commit の作業は未完了とみなされる」と宣言するのに、ゲートは未 commit の変更 1 件で `passed` を返していた（Issue #1628 D-4）。既定を false に置いたのは、このゲートの本来の問いが「judge する work が在るか」だからで、リポジトリ単位の opt-in にしてある。**委任 1 件だけに要求したい場合は実行契約の `success.requireCommit`**（Issue #1642、[task-contract.md](./task-contract.md) §2.5）。両者は **OR** で合成し、契約が本オプションを緩めることはできない |
 
 ---
 
@@ -203,6 +203,12 @@ timestamp を一切使っていない**ので、この変更で合否は動か�
 「未起動のセッション」が「全ゲート PASS」として報告される。`--skip-work-evidence` で
 明示的に無効化できる（その場合 `GATE work-evidence SKIP reason=flag` を出す）。
 
+`options.requireCommit: true` のときは PASS 条件が **コミット数 > 0 のみ**になり、
+未 commit の変更は作業証跡として数えない（§2.3 / §7.1）。ゲート行には
+`requireCommit=true` が付く（false のときは付かないので、既定の出力は不変）。
+`--skip-work-evidence` はゲートごと飛ばすので requireCommit も効かない
+— このフラグはゲートを**弱める**のではなく**止める**ものである。
+
 予約 ID `scope` は、スコープ逸脱・未達検証の組み込みゲート用に確保してあり、v1 では未実装。
 ユーザー定義ゲートの ID としては使用できない。
 
@@ -262,6 +268,28 @@ verify-run.sh [--config <path>] [--cwd <worktree-path>] [--base-ref <ref>]
 | `--base-ref` | `options.baseRef` → `origin/HEAD` | `options.baseRef` より優先 |
 | `--gates` | 全ゲート | 実行するゲートの絞り込み（カンマ区切り）。**存在しない id は設定エラー**（黙って 0 件実行→`passed` を防ぐ） |
 | `--skip-work-evidence` | 無効 | `work-evidence` を SKIP する |
+
+### 7.1 `options.requireCommit` の適用範囲（Issue #1639）
+
+Phase 0 参照実装は `options.requireCommit` に対応している（未対応だった時期は、
+awk パーサの閉じたキー集合に引っかかって **exit 2 の設定エラー**になっていた。
+黙って無視してはいなかったが、設定を書いたリポジトリでは bash 版が一切走らなかった）。
+`true` のとき `commits=0` は FAIL で `RESULT not_started` / exit 21、ゲート行に
+`requireCommit=true` が付き、理由は stderr に出る。
+
+**参照実装は実行契約を読まない。** 実行契約の `success.requireCommit`
+（[task-contract.md](./task-contract.md) §2.5 / Issue #1642）は製品実装だけが見る。
+シェルから起動したランはどの委任にも紐付いていないため、スタンドアロンランナーが
+見るのは `options.requireCommit` だけである。**両方のランナーで効かせたい要求は
+verify.yaml に書く** — 2 実装が共に読む唯一のファイルだからである。
+
+2 実装の一致は `tests/unit/skills/cmate-verify/require-commit-conformance.test.ts` が
+同一の git サンドボックスに両方を当てて固定している。既知の差分もそこに pin してある:
+
+| 差分 | 内容 |
+|---|---|
+| 契約ファイルの除外（Issue #1580） | TS は `.commandmate/tasks/` を両カウンタから除外するが、**bash 版は除外しない**。契約ファイルだけが変更された worktree で判定が食い違う（bash が PASS、TS が not_started）。bash 側が緩い向きで、requireCommit と同じ種類の欠陥。移植は work-evidence が「何を数えるか」の変更なので follow-up 扱い |
+| 未追跡ディレクトリの数え方 | TS は `-uall` でファイル単位、bash は既定の porcelain でディレクトリ 1 エントリ。**数字だけが違い判定は一致する** |
 
 ---
 

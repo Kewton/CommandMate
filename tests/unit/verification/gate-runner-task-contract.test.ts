@@ -102,6 +102,12 @@ function addWork(): void {
   writeFileSync(join(repo, 'work.txt'), 'agent output\n');
 }
 
+/** Turn the uncommitted work of {@link addWork} into a commit on `work`. */
+function commitWork(): void {
+  git(['add', '-A'], repo);
+  git(['commit', '-m', 'agent work'], repo);
+}
+
 /**
  * Re-declare the repository with no failing gate.
  *
@@ -110,7 +116,7 @@ function addWork(): void {
  * would be indistinguishable from one that reported `failed` for the wrong one.
  * Tests whose subject is the run *status* use this instead.
  */
-function usePassingGatesOnly(): void {
+function usePassingGatesOnly(extraOptions = ''): void {
   writeFileSync(
     join(repo, '.commandmate', 'verify.yaml'),
     `version: 1
@@ -120,7 +126,7 @@ gates:
 options:
   baseRef: main
   skipInPrimaryCheckout: false
-`
+${extraOptions}`
   );
 }
 
@@ -130,12 +136,13 @@ function seedTask(
     status?: TaskStatus;
     requireWorkEvidence?: boolean;
     requireScopeClean?: boolean;
+    requireCommit?: boolean;
     allow?: string[];
     contractPath?: string;
   } = {}
 ): Task {
   const gates = options.gates ? `verify:\n  gates: [${options.gates.join(', ')}]\n` : '';
-  const flags = (['requireWorkEvidence', 'requireScopeClean'] as const)
+  const flags = (['requireWorkEvidence', 'requireScopeClean', 'requireCommit'] as const)
     .filter((key) => options[key] !== undefined)
     .map((key) => `  ${key}: ${options[key]}\n`)
     .join('');
@@ -614,5 +621,145 @@ describe('task events raised by a run', () => {
     addWork();
     await runToCompletion();
     expect(db.prepare('SELECT COUNT(*) AS n FROM task_events').get()).toEqual({ n: 0 });
+  });
+});
+
+/**
+ * Issue #1642: the delegation-scoped commit requirement.
+ *
+ * `options.requireCommit` (#1628) answers the same question per repository, and
+ * a repository has exactly one verify.yaml — so "a delegated worker must commit"
+ * and "my own interactive `commandmate verify` must still report lint/typecheck
+ * while I am mid-edit" could not both be true. A failing work-evidence gate
+ * skips every gate after it, so the interactive case loses all its output.
+ *
+ * The verdicts here are the counterpart of the sentences pinned in
+ * tests/unit/tasks/contract-message.test.ts. The pair is the Issue: a rule the
+ * preamble declares and the runner does not check is the defect.
+ */
+describe('success.requireCommit (Issue #1642)', () => {
+  /** work-evidence's own verdict, not just the run's. */
+  function workEvidence(runId: number) {
+    return getVerificationRun(db, runId)?.gates.find((gate) => gate.gateId === 'work-evidence');
+  }
+
+  it('fails a contract that requires a commit when the worker left the work uncommitted', async () => {
+    // The acceptance criterion: `wait --verify` must not hand back exit 0 here.
+    // `not_started` is what the CLI maps to exit 21.
+    const task = seedTask({ gates: ['pass-gate'], requireCommit: true });
+    usePassingGatesOnly();
+    addWork();
+
+    const runId = await runToCompletion({ taskId: task.id });
+
+    expect(workEvidence(runId)?.status).toBe('failed');
+    // uncommitted counts verify.yaml too — usePassingGatesOnly() rewrote it, and
+    // #1580 excludes contract files but deliberately not verify.yaml.
+    expect(workEvidence(runId)?.logTail).toMatch(
+      /commits=0 uncommitted=[1-9]\d* requireCommit=true/
+    );
+    expect(workEvidence(runId)?.logTail).toContain('success.requireCommit (task contract)');
+    expect(getVerificationRun(db, runId)?.status).toBe('not_started');
+    expect(getTask(db, task.id)?.status).toBe('not_started');
+  });
+
+  it('passes the same contract once the work is committed', async () => {
+    // Pairs with the case above: without it, the failure could be coming from
+    // the contract being unusable rather than from the missing commit.
+    const task = seedTask({ gates: ['pass-gate'], requireCommit: true });
+    usePassingGatesOnly();
+    addWork();
+    commitWork();
+
+    const runId = await runToCompletion({ taskId: task.id });
+
+    expect(workEvidence(runId)?.status).toBe('passed');
+    expect(getVerificationRun(db, runId)?.status).toBe('passed');
+    expect(getTask(db, task.id)?.status).toBe('succeeded');
+  });
+
+  describe('the OR against options.requireCommit', () => {
+    // The three cells the PM decision fixes. "The contract wins" would make the
+    // middle one pass, which is how a delegation would quietly switch off a rule
+    // the repository declared.
+    it('verify.yaml false × contract true → a commit is required', async () => {
+      const task = seedTask({ gates: ['pass-gate'], requireCommit: true });
+      usePassingGatesOnly();
+      addWork();
+
+      const runId = await runToCompletion({ taskId: task.id });
+      expect(getVerificationRun(db, runId)?.status).toBe('not_started');
+      expect(workEvidence(runId)?.logTail).toContain('success.requireCommit (task contract)');
+      expect(workEvidence(runId)?.logTail).not.toContain('options.requireCommit');
+    });
+
+    it('verify.yaml true × contract false → a commit is still required', async () => {
+      const task = seedTask({ gates: ['pass-gate'], requireCommit: false });
+      usePassingGatesOnly('  requireCommit: true\n');
+      addWork();
+
+      const runId = await runToCompletion({ taskId: task.id });
+      expect(getVerificationRun(db, runId)?.status).toBe('not_started');
+      expect(workEvidence(runId)?.logTail).toContain(
+        'options.requireCommit (.commandmate/verify.yaml)'
+      );
+      expect(workEvidence(runId)?.logTail).not.toContain('success.requireCommit');
+    });
+
+    it('both declared → both are named in the reason', async () => {
+      const task = seedTask({ gates: ['pass-gate'], requireCommit: true });
+      usePassingGatesOnly('  requireCommit: true\n');
+      addWork();
+
+      const runId = await runToCompletion({ taskId: task.id });
+      expect(workEvidence(runId)?.logTail).toContain(
+        'options.requireCommit (.commandmate/verify.yaml) and success.requireCommit (task contract)'
+      );
+    });
+
+    it('both omitted → an uncommitted change is still work evidence', async () => {
+      const task = seedTask({ gates: ['pass-gate'] });
+      usePassingGatesOnly();
+      addWork();
+
+      const runId = await runToCompletion({ taskId: task.id });
+      expect(workEvidence(runId)?.status).toBe('passed');
+      expect(workEvidence(runId)?.logTail).not.toContain('requireCommit');
+      expect(getVerificationRun(db, runId)?.status).toBe('passed');
+      expect(getTask(db, task.id)?.status).toBe('succeeded');
+    });
+  });
+
+  it('leaves a contract-less `commandmate verify` running every gate on a dirty tree', async () => {
+    // The case options.requireCommit could not keep working: the interactive
+    // "am I breaking anything right now" run, where work-evidence failing would
+    // take lint / typecheck / unit down with it as `skipped`.
+    usePassingGatesOnly();
+    addWork();
+
+    const runId = await runToCompletion();
+    const run = getVerificationRun(db, runId);
+
+    expect(run?.taskId).toBeNull();
+    expect(workEvidence(runId)?.status).toBe('passed');
+    expect(run?.gates.find((gate) => gate.gateId === 'pass-gate')?.status).toBe('passed');
+    expect(run?.status).toBe('passed');
+  });
+
+  it('does not read the requirement off a contract the run could not attach to', async () => {
+    // A detached contract is already reported by the scope gate (#1620); reading
+    // its flags anyway would let a closed task govern a run it is not part of.
+    const task = seedTask({ gates: ['pass-gate'], requireCommit: true });
+    updateTaskStatus(db, task.id, 'succeeded');
+    usePassingGatesOnly();
+    addWork();
+
+    const runId = await runToCompletion();
+
+    expect(getVerificationRun(db, runId)?.taskId).toBeNull();
+    expect(workEvidence(runId)?.status).toBe('passed');
+    expect(workEvidence(runId)?.logTail).not.toContain('requireCommit');
+    // ...and the run is still not green, because scope went unjudged.
+    expect(getVerificationRun(db, runId)?.status).toBe('error');
   });
 });
