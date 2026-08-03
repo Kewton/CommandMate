@@ -126,7 +126,10 @@ Visibility トグル（#690）は楽観的更新 + 失敗時ロールバック�
 
 ---
 
-## 4. 残っている危険 — `server.ts` の起動時 purge（**scope 外・要フォロー**）
+## 4. 残っていた危険 — `server.ts` の起動時 purge（**#1666 で解消済み**）
+
+> **状態: 解決済み（Issue #1666）。** 以下は #1658 時点の記録で、指摘そのものは実測で正しかった。
+> 実際に当てた差分と、当時の記述と食い違った点は [§6](#6-1666-での対応記録) に残す。
 
 **本 Issue の scope.allow に `server.ts` が含まれていないため、ここだけ手を付けていない。**
 
@@ -221,3 +224,94 @@ M3 が最初 GREEN だったのは、当初のテストが **DB 登録経路**�
 DB 登録経路では `getAllRepositories(db).filter(r => r.enabled)` が先に効くので、
 `registerAndFilterRepositories` の除外を壊しても結果が変わらない。
 `WORKTREE_REPOS` 経路（= §4 の危険な経路であり、Issue の発端の形）を足して初めて赤になった。
+
+---
+
+## 6. #1666 での対応記録
+
+Issue: #1666 / 本ドキュメント [§4](#4-残っていた危険--serverts-の起動時-purge1666-で解消済み) のフォロー。
+
+### 6.1 §4 の指摘は実測どおりだった
+
+`server.ts` の `initializeWorktrees()` を実際に走らせて確認した（後述の
+`tests/unit/lib/startup-excluded-repository-purge.test.ts` は modification 前に RED になる）。
+`WORKTREE_REPOS` に列挙されたリポジトリを #1658 の Scan トグルで無効化して再起動すると、
+worktree 行・`chat_messages`・`tasks`・`verification_runs` がすべて 0 行になり、
+`cleanupMultipleWorktrees(['wt-…'], killWorktreeSession)` が呼ばれた。
+DB 登録のみのリポジトリが安全であることも同じハーネスで確認した。
+
+### 6.2 §4 の記述と食い違った点（実測を正とする）
+
+| §4 / Issue #1666 本文の記述 | 実測 |
+|---|---|
+| 「`cleanupMultipleWorktrees` は他でも使われている」 | **リポジトリ全体では真だが `server.ts` 内では偽**。`server.ts` での唯一の呼び出し元が purge ループだったので、この import も削除が必要だった。残す読み方をすると未使用 import が残る |
+| 「lint が未使用 import を弾く」（Issue 本文） | **偽**。`npm run lint` は `eslint src --ext …` で `server.ts` を対象にしない。`tsconfig.json` に `noUnusedLocals` も無い。実際に未使用 import を足して `npm run lint` / `npx tsc --noEmit` を回し、**両方 exit 0** であることを確認した。5 つの import は目視で落とした |
+
+削除した import: `resolveRepositoryPath` / `getWorktreeIdsByRepository` /
+`deleteWorktreesByIds` / `cleanupMultipleWorktrees` / `killWorktreeSession`。
+`./src/lib/db` からの import 行は空になったので行ごと削除した。
+`syncWorktreesAndCleanup` は sync 側で使うため残る。
+
+### 6.3 対になる経路の点検
+
+「除外を検出する側」は `registerAndFilterRepositories()` の 1 箇所、
+「除外されたものをどう扱う側」はその呼び出し元 2 箇所しかない。
+
+| 呼び出し元 | `excludedPaths` の扱い |
+|---|---|
+| `server.ts` `initializeWorktrees()` | **purge していた** → ログのみに変更 |
+| `POST /api/repositories/sync` | `filteredPaths` しか分解代入しておらず、元から破壊しない |
+
+起動時に走るもう 1 つの削除経路（`syncWorktreesToDB` の per-repo prune）は、
+scan に現れた `repositoryPath` のグループだけをループする。無効化されたリポジトリは
+グループを持たないので届かない（#1658 §2 論点 4 の再確認）。
+`pruneStaleRepositoryWorktrees` は sync ルート専用で起動時には走らない。
+`DELETE /api/repositories`（除外 + purge）は #1658 同様、1 行も変えていない。
+
+### 6.4 #202 の要件をどう担保するか → **要件を「表示」と「削除」に分けて読み直した**
+
+#202 は「除外したリポジトリの worktree がサイドバーに残る」ことへの対処で、
+当時の実装手段が行削除だった。それが妥当だったのは、#202 の時点で `enabled = 0` に
+到達する唯一の経路が `DELETE /api/repositories`（既に purge 済み）だったからで、
+起動時 purge は実質 no-op のガードにすぎなかった。
+
+- **見せない**のは `visible` の役割（#690 が「概念を分離する」と明記して導入した）。
+  サイドバーの絞り込みは `src/lib/sidebar-utils.ts` で `visible` のみを見る。
+- **走査対象から外す**のが `enabled` の役割。除外されたリポジトリは scan されないので、
+  `syncWorktreesToDB` が行を作り直すこともない。
+
+行削除は「表示フィルタを履歴の破棄で実装する」ことになり、しかも再有効化で取り消せない。
+`enabled` と `visible` が分離された後は、#202 の目的（見えなくする）は `visible` で満たせる。
+よって **#202 の要件は維持し、実装手段だけを行削除から `visible` に移した**。
+#1658 が確認ダイアログ本文（`repositories.disableConfirmBody`）で
+「無効化しても worktree はサイドバーに残る／消したいなら Visibility トグル」と
+先に約束しているので、利用者向けの導線も既にある。
+
+### 6.5 テスト
+
+| ファイル | 固定していること |
+|---|---|
+| `tests/unit/lib/startup-excluded-repository-purge.test.ts` | **`server.ts` の実 `initializeWorktrees()` を走らせる**。`WORKTREE_REPOS` 由来の無効化リポジトリについて、再起動 1 回でも 3 回でも worktree 行・`chat_messages`・`tasks`・`verification_runs` が 1 行も減らないこと / `cleanupMultipleWorktrees`・`killWorktreeSession`・tmux の `killSession` に届かないこと / `[excluded] <path>` の監査ログが出続けること / 無効化パスが scan に渡らないこと / 起動が `enabled` を戻さないこと / DB 登録のみの経路も無傷なこと / **実際に消えた worktree の prune は従来どおり効くこと** |
+
+既存の `tests/unit/lib/server-startup-exclusion-filter.test.ts` は同じ primitives を
+テスト側で手組みしており、**purge ループがそのすぐ下にあっても緑のままだった**。
+新テストが `server.ts` を import して実 `initializeWorktrees()` を叩くのはこのためで、
+stub しているのはプロセス境界（Next / HTTP サーバ / tmux トランスポート /
+`await import()` される 4 つの fail-open reconciler）だけである。
+
+### 6.6 変異注入（テストが空振りでないことの確認）
+
+| 変異 | 結果 |
+|---|---|
+| M1: `server.ts` を `git show HEAD:server.ts` で丸ごと戻す（purge ループ + import を忠実に復元） | **RED**（8 件中 3 件） |
+| M2: `[excluded]` の監査ログを落とす | **RED**（1 件） |
+| M3: `scanMultipleRepositories(filteredPaths)` を `allPaths` に戻す | **RED**（1 件） |
+| M4: `syncWorktreesToDB` の per-repo prune を無効化 | **RED**（1 件） |
+
+M1 は import ごと復元しないと `ReferenceError` が `initializeWorktrees()` の
+try/catch に飲まれて行が残り、**偽の GREEN** になる。忠実な revert で当てること。
+
+### 6.7 ゲート実測
+
+`npm run lint` / `npx tsc --noEmit` / `npm run test:unit`（762 files, 13921 tests）/
+`npm run test:integration`（72 files, 1067 tests）すべて exit 0。
