@@ -386,6 +386,7 @@ assert_rejected bad-missing-id.yaml "gate is missing id:"
 assert_rejected bad-gate-key.yaml "unknown gate key: retries"
 assert_rejected bad-option-key.yaml "unknown options key: parallel"
 assert_rejected bad-option-value.yaml "skipInPrimaryCheckout must be true or false"
+assert_rejected bad-require-commit.yaml "requireCommit must be true or false"
 assert_rejected bad-flow.yaml "flow-style values are not supported"
 assert_rejected bad-anchor.yaml "anchors/aliases are not supported"
 assert_rejected bad-block-scalar.yaml "block scalars are not supported"
@@ -438,6 +439,75 @@ assert_has "no-log-tail: the gate fails with its exit code" "$OUT" "GATE noisy F
 assert_has "no-log-tail: the disabled tail is reported, not silently skipped" "$OUT" "gate noisy (FAIL exit=5): log tail disabled (maxLogTailBytes=0)"
 assert_lacks "no-log-tail: the tail really is suppressed" "$OUT" "tail-should-not-appear"
 assert_stdout_contract "no-log-tail: stdout holds only GATE/RESULT records" "$RAWOUT"
+
+# --- 17. options.requireCommit (Issue #1639) ----------------------------------
+# `commits=0 uncommitted=1` is the right answer to "did anything happen here" and
+# the wrong one to "is this finished": a contract that says 未 commit の作業は未完了
+# とみなされる was still collecting RESULT passed over work nobody committed
+# (#1628 D-4). Every case below pairs a verdict with the marker file, because the
+# label the runner prints about itself is not evidence that a gate ran.
+rc_dirty=$(new_repo require-commit-dirty)
+echo scratch > "$rc_dirty/work.txt"
+
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+export CMATE_VERIFY_TEST_MARKER
+run_verify --config "$FIXTURES/require-commit.yaml" --cwd "$rc_dirty" --base-ref "$BASE_BRANCH"
+assert_eq "requireCommit: an uncommitted change alone is exit 21" "21" "$RC"
+assert_has "requireCommit: the flag is echoed in the gate line" "$OUT" \
+  "GATE work-evidence FAIL commits=0 uncommitted=1 requireCommit=true"
+assert_has "requireCommit: verdict is not_started" "$OUT" "RESULT not_started"
+assert_has "requireCommit: FAIL over a dirty tree explains itself on stderr" "$ERR" \
+  "options.requireCommit is set: uncommitted changes are not work evidence, commit them."
+assert_lacks "requireCommit: the reason stays off stdout" "$RAWOUT" "not work evidence"
+assert_stdout_contract "requireCommit: stdout holds only GATE/RESULT records" "$RAWOUT"
+assert_file_absent "requireCommit: no command gate is executed" "$marker"
+
+# Pairs with the case above: same repo, same fixture, only the commit differs. A
+# runner that rejected everything would otherwise look correct.
+git -C "$rc_dirty" add -A >/dev/null 2>&1
+git -C "$rc_dirty" commit -q -m work
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+run_verify --config "$FIXTURES/require-commit.yaml" --cwd "$rc_dirty" --base-ref "$BASE_BRANCH"
+assert_eq "requireCommit: the same change committed is exit 0" "0" "$RC"
+assert_has "requireCommit: the commit is counted" "$OUT" \
+  "GATE work-evidence PASS commits=1 uncommitted=0 requireCommit=true"
+assert_has "requireCommit: verdict is passed" "$OUT" "RESULT passed"
+assert_file_present "requireCommit: the command gate ran" "$marker"
+
+# ...and the opposite pairing: the same dirty tree under the default option is
+# still work evidence, so the new branch cannot be firing unconditionally.
+rc_default=$(new_repo require-commit-default)
+echo scratch > "$rc_default/work.txt"
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+run_verify --config "$FIXTURES/side-effect.yaml" --cwd "$rc_default" --base-ref "$BASE_BRANCH"
+assert_eq "requireCommit: absent by default, so a dirty tree passes" "0" "$RC"
+assert_lacks "requireCommit: the flag is not echoed when it is off" "$RAWOUT" "requireCommit"
+assert_file_present "requireCommit: the command gate ran under the default" "$marker"
+
+# Zero work is still plain not_started: the requireCommit reason would be the
+# wrong diagnosis for a repository where nothing happened at all.
+rc_empty=$(new_repo require-commit-empty)
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+run_verify --config "$FIXTURES/require-commit.yaml" --cwd "$rc_empty" --base-ref "$BASE_BRANCH"
+assert_eq "requireCommit: zero work is still exit 21" "21" "$RC"
+assert_has "requireCommit: zero work reports both counters" "$OUT" \
+  "GATE work-evidence FAIL commits=0 uncommitted=0 requireCommit=true"
+assert_lacks "requireCommit: zero work is not blamed on the commit rule" "$ERR" \
+  "not work evidence"
+assert_file_absent "requireCommit: zero work runs no command gate" "$marker"
+
+# --skip-work-evidence still bypasses the whole gate, requireCommit included:
+# the flag turns the gate off, it does not soften it.
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+run_verify --config "$FIXTURES/require-commit.yaml" --cwd "$rc_empty" --base-ref "$BASE_BRANCH" --skip-work-evidence
+assert_eq "requireCommit: --skip-work-evidence bypasses it" "0" "$RC"
+assert_has "requireCommit: the gate reports the flag skip" "$OUT" "GATE work-evidence SKIP reason=flag"
+assert_file_present "requireCommit: the command gate ran after the skip" "$marker"
 
 # --- summary ------------------------------------------------------------------
 total=$((TOTAL_PASS + TOTAL_FAIL))
