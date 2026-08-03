@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import path2 from 'path';
 import { NextRequest } from 'next/server';
@@ -53,6 +53,7 @@ import { POST } from '@/app/api/repositories/scan/route';
 import { scanWorktrees } from '@/lib/git/worktrees';
 import { syncWorktreesAndCleanup } from '@/lib/session-cleanup';
 import { getRepositoryByPath, createRepository } from '@/lib/db/db-repository';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 function postRequest(body: unknown): NextRequest {
   return new NextRequest('http://localhost:3000/api/repositories/scan', {
@@ -72,7 +73,7 @@ describe('POST /api/repositories/scan', () => {
   });
 
   afterAll(() => {
-    rmSync(sandbox, { recursive: true, force: true });
+    removeTempDir(sandbox);
     delete process.env.CM_BROWSE_ROOTS;
   });
 

@@ -24,7 +24,6 @@ import {
   mkdirSync,
   mkdtempSync,
   realpathSync,
-  rmSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
@@ -40,6 +39,7 @@ import {
   SCOPE_SKIP_NO_CONTRACT,
   SCOPE_SKIP_NOT_REQUIRED,
 } from '@/lib/verification/scope-gate';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 // =============================================================================
 // Glob semantics
@@ -219,7 +219,7 @@ async function changedPaths(repo: string): Promise<string[]> {
 afterEach(() => {
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
-    if (dir) rmSync(dir, { recursive: true, force: true });
+    if (dir) removeTempDir(dir);
   }
 });
 

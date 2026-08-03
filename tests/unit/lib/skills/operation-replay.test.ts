@@ -10,7 +10,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createHash } from 'crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { SKILL_RECEIPT_FILENAME } from '@/lib/skills/install-plan';
@@ -23,6 +23,7 @@ import type {
   SkillOperationJournalEntry,
   SkillOperationState,
 } from '@/lib/skills/operation-journal';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const SKILL_ID = 'demo-skill';
 const RECEIPT_BYTES = '{"schema_version":1,"skill_id":"demo-skill"}\n';
@@ -64,7 +65,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(worktreeDir, { recursive: true, force: true });
+  removeTempDir(worktreeDir);
 });
 
 describe('readInstalledSkillReceiptDigest', () => {

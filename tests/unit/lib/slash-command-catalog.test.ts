@@ -52,6 +52,7 @@ import {
 import { getStandardCommandGroups } from '@/lib/standard-commands';
 import { mergeCommandGroups } from '@/lib/command-merger';
 import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 // --- Helpers ----------------------------------------------------------------
 
@@ -79,7 +80,7 @@ beforeEach(() => {
 
 afterEach(() => {
   clearCatalogCache();
-  fs.rmSync(tmpRoot, { recursive: true, force: true });
+  removeTempDir(tmpRoot);
 });
 
 // --- User extension loading -------------------------------------------------

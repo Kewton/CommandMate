@@ -13,6 +13,7 @@ import {
   isSystemDirectory,
   isPathWithin,
 } from '../../../src/config/system-directories';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 describe('system-directories', () => {
   describe('SYSTEM_DIRECTORIES', () => {
@@ -154,7 +155,7 @@ describe('system-directories', () => {
       });
 
       afterAll(() => {
-        fs.rmSync(workDir, { recursive: true, force: true });
+        removeTempDir(workDir);
       });
 
       it('the work dir itself is not a system directory (test precondition)', () => {

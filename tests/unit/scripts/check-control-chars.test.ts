@@ -12,6 +12,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { findControlCharViolations } from '../../../scripts/check-control-chars.mjs';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 
@@ -40,7 +41,7 @@ describe('Issue #1432: the guard actually fires', () => {
   });
 
   afterEach(() => {
-    fs.rmSync(root, { recursive: true, force: true });
+    removeTempDir(root);
   });
 
   const write = (relative: string, contents: string): void => {

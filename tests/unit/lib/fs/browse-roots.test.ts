@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, symlinkSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, symlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 
@@ -25,6 +25,7 @@ import {
   resolveAllowedPath,
   formatAllowedRoots,
 } from '@/lib/fs/browse-roots';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 let sandbox: string;
 /** Stands in for CM_ROOT_DIR. */
@@ -51,7 +52,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  rmSync(sandbox, { recursive: true, force: true });
+  removeTempDir(sandbox);
 });
 
 beforeEach(() => {

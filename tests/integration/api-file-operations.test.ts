@@ -13,8 +13,9 @@ import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree } from '@/lib/db';
 import type { Worktree } from '@/types/models';
 import { join } from 'path';
-import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 // Declare mock function type
 declare module '@/lib/db/db-instance' {
@@ -79,7 +80,7 @@ describe('File Operations API', () => {
 
     // Clean up test directory
     if (existsSync(testDir)) {
-      rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 

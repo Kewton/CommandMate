@@ -7,9 +7,10 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join, sep } from 'path';
-import { mkdirSync, writeFileSync, rmSync, existsSync, symlinkSync, readFileSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, symlinkSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { moveFileOrDirectory } from '@/lib/file-operations';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 describe('moveFileOrDirectory', () => {
   let testDir: string;
@@ -21,7 +22,7 @@ describe('moveFileOrDirectory', () => {
 
   afterEach(() => {
     if (existsSync(testDir)) {
-      rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -186,7 +187,7 @@ describe('moveFileOrDirectory', () => {
       expect(result.error?.code).toBe('INVALID_PATH');
 
       // Cleanup
-      rmSync(outsideDir, { recursive: true, force: true });
+      removeTempDir(outsideDir);
     });
   });
 

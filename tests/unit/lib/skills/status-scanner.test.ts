@@ -29,6 +29,7 @@ import {
   scanSkillInstallationStatus,
 } from '@/lib/skills/status-scanner';
 import type { SkillInstallReceipt } from '@/types/skills';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 let db: Database.Database;
 let repoRoot: string;
@@ -127,7 +128,7 @@ beforeEach(() => {
 
 afterEach(() => {
   db.close();
-  rmSync(repoRoot, { recursive: true, force: true });
+  removeTempDir(repoRoot);
   invalidateSkillStatusScanCache();
 });
 
@@ -167,7 +168,7 @@ describe('drift in the secondary root', () => {
     const wt = path.join(repoRoot, 'wt-1');
     insertWorktree('wt-1', wt);
     install('wt-1', wt, 'demo-skill');
-    rmSync(path.join(wt, SECONDARY, 'demo-skill'), { recursive: true, force: true });
+    removeTempDir(path.join(wt, SECONDARY, 'demo-skill'));
 
     const [entry] = (await scan()).entries;
 
@@ -310,7 +311,7 @@ describe('across worktrees', () => {
     const wt = path.join(repoRoot, 'wt-1');
     insertWorktree('wt-1', wt);
     install('wt-1', wt, 'demo-skill');
-    rmSync(wt, { recursive: true, force: true });
+    removeTempDir(wt);
 
     const result = await scan();
 
@@ -326,7 +327,7 @@ describe('caching', () => {
     install('wt-1', wt, 'demo-skill');
 
     const first = await scanSkillInstallationStatus(db, { now: T0 });
-    rmSync(path.join(wt, SECONDARY, 'demo-skill'), { recursive: true, force: true });
+    removeTempDir(path.join(wt, SECONDARY, 'demo-skill'));
     const second = await scanSkillInstallationStatus(db, { now: T0 + 1 });
 
     expect(second).toBe(first);
@@ -339,7 +340,7 @@ describe('caching', () => {
     install('wt-1', wt, 'demo-skill');
 
     await scanSkillInstallationStatus(db, { now: T0 });
-    rmSync(path.join(wt, SECONDARY, 'demo-skill'), { recursive: true, force: true });
+    removeTempDir(path.join(wt, SECONDARY, 'demo-skill'));
     invalidateSkillStatusScanCache();
     const fresh = await scanSkillInstallationStatus(db, { now: T0 + 1 });
 
@@ -352,7 +353,7 @@ describe('caching', () => {
     install('wt-1', wt, 'demo-skill');
 
     await scanSkillInstallationStatus(db, { now: T0 });
-    rmSync(path.join(wt, SECONDARY, 'demo-skill'), { recursive: true, force: true });
+    removeTempDir(path.join(wt, SECONDARY, 'demo-skill'));
     const later = await scanSkillInstallationStatus(db, { now: T0 + 60_000 });
 
     expect(later.entries[0].status).toBe('missing');

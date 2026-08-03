@@ -41,6 +41,7 @@ import {
   pruneStaleRepositoryWorktrees,
 } from '@/lib/git/worktrees';
 import type { Worktree } from '@/types/models';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 let testDb: Database.Database;
 const tempDirs: string[] = [];
@@ -53,7 +54,7 @@ beforeEach(() => {
 afterEach(() => {
   testDb.close();
   for (const dir of tempDirs.splice(0)) {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeTempDir(dir);
   }
 });
 
@@ -410,7 +411,7 @@ describe('disabling does not let a prune reach the rows (Issue #1658 acceptance)
     const goneDir = makeRepoDir('gone');
     createRepository(testDb, { name: 'gone', path: goneDir, cloneSource: 'local' });
     upsertWorktree(testDb, worktree('wt-gone', goneDir, 'main'));
-    fs.rmSync(goneDir, { recursive: true, force: true });
+    removeTempDir(goneDir);
 
     const prunedIds = pruneStaleRepositoryWorktrees(testDb, []);
 

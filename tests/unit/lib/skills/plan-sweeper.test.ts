@@ -50,6 +50,7 @@ import type { SkillPackageSnapshot } from '@/lib/skills/package-validator';
 import type { SkillCommandMateCompatibility } from '@/lib/skills/compatibility';
 import type { SkillManifest } from '@/types/skills';
 import { makeCatalogVersion } from './fixtures';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const execGitCommandMock = vi.mocked(execGitCommand);
 const execFileAsyncMock = vi.mocked(execFileAsync) as unknown as ReturnType<typeof vi.fn>;
@@ -179,8 +180,8 @@ afterEach(() => {
   stopSkillPlanSweeperForTesting();
   resetSkillInstallPlanCacheForTesting();
   resetSkillSnapshotStoreForTesting();
-  fs.rmSync(rootDir, { recursive: true, force: true });
-  fs.rmSync(worktreeDir, { recursive: true, force: true });
+  removeTempDir(rootDir);
+  removeTempDir(worktreeDir);
   vi.useRealTimers();
 });
 

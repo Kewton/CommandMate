@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -23,6 +23,7 @@ import {
   UPDATE_LOCK_TIMEOUT_MS,
   UPDATE_LOCK_FILENAME,
 } from '@/lib/app-update/update-lock';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const NOW = 1_700_000_000_000;
 
@@ -31,7 +32,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(configDir.path, { recursive: true, force: true });
+  removeTempDir(configDir.path);
 });
 
 describe('getUpdateLockPath', () => {

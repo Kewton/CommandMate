@@ -10,6 +10,7 @@ import { NextRequest } from 'next/server';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 vi.mock('@/lib/db/db-instance', () => ({
   getDbInstance: vi.fn(() => ({})),
@@ -98,8 +99,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  fs.rmSync(mockConfigDir, { recursive: true, force: true });
-  if (process.env.HOME) fs.rmSync(process.env.HOME, { recursive: true, force: true });
+  removeTempDir(mockConfigDir);
+  if (process.env.HOME) removeTempDir(process.env.HOME);
   process.env.HOME = originalHome;
 });
 
