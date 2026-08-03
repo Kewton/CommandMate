@@ -15,6 +15,7 @@
  */
 
 import type Database from 'better-sqlite3';
+import { recordWorktreeAliasRow } from './migrations/worktree-id-rename';
 
 /** One historical ID and the worktree it resolves to today. */
 export interface WorktreeAlias {
@@ -63,20 +64,11 @@ export function recordWorktreeAlias(
   worktreeId: string,
   now: number = Date.now()
 ): void {
-  if (!oldId || !worktreeId || oldId === worktreeId) return;
-  if (!hasAliasTable(db)) return;
-
-  // The destination ID now names a live worktree; any alias claiming it as a
-  // historical name is stale and would only confuse resolution.
-  db.prepare('DELETE FROM worktree_aliases WHERE old_id = ?').run(worktreeId);
-
-  db.prepare(
-    `INSERT INTO worktree_aliases (old_id, worktree_id, created_at)
-     VALUES (?, ?, ?)
-     ON CONFLICT(old_id) DO UPDATE SET
-       worktree_id = excluded.worktree_id,
-       created_at = excluded.created_at`
-  ).run(oldId, worktreeId, now);
+  // The statements live in `migrations/worktree-id-rename.ts`: the rename that
+  // records the alias has to be callable from a migration, and a migration that
+  // imports a `@/lib/db/*` module inherits every `vi.mock` of it in the suite
+  // (Issue #1621, #1645). This function stays the public entry point.
+  recordWorktreeAliasRow(db, oldId, worktreeId, now);
 }
 
 /**

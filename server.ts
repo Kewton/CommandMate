@@ -214,6 +214,36 @@ app.prepare().then(() => {
         console.error('Error reconciling Skill operations:', error);
       }
 
+      // Issue #1621 Phase 3/4: make live tmux sessions follow the worktree IDs
+      // that migration v54 has just renumbered. Session names are DERIVED from
+      // the ID (`mcbd-{cli}-{worktreeId}`), so a running agent would otherwise
+      // keep its process while disappearing from the UI — and the app would
+      // happily start a second agent in the same directory. `worktree_aliases`
+      // is the durable record of every ID that has moved, which makes this pass
+      // idempotent: when nothing is stale it costs one `tmux list-sessions`.
+      //
+      // Fail-open in its own try/catch — reconciling sessions must never be
+      // able to stop the server from serving. Dynamic import for the same
+      // reason as the reconcilers around it: a static import here perturbs
+      // Next's AsyncLocalStorage bootstrap under `tsx server.ts` and the first
+      // request that compiles middleware dies. Do not hoist this.
+      try {
+        const { reconcileWorktreeSessionsFromAliases } = await import(
+          './src/lib/session/worktree-session-reconcile'
+        );
+        const sessionReport = await reconcileWorktreeSessionsFromAliases(db);
+        if (sessionReport.renamedSessions.length > 0) {
+          console.log(
+            `Reconciled ${sessionReport.renamedSessions.length} tmux session(s) to renamed worktree IDs`
+          );
+        }
+        if (sessionReport.errors.length > 0) {
+          console.warn(`Session reconcile warnings: ${sessionReport.errors.join(', ')}`);
+        }
+      } catch (error) {
+        console.error('Error reconciling worktree sessions:', error);
+      }
+
       // Issue #1543: close verification runs that a crash left in `running`.
       // Gate execution lives in process memory, so none of them survived the
       // restart; leaving the rows open would keep their worktrees permanently
