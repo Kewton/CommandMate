@@ -95,8 +95,21 @@ const SENSITIVE_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
 
 /**
  * Sensitive key name patterns
+ *
+ * Issue #1640: `key` used to be listed on its own, which masked field names that
+ * carry no secret at all — `key`, `compositeKey`, `sortKey`, `idempotencyKey`,
+ * `publicKey`, ... — including the `read-mode:ready` log whose entire purpose is
+ * to report which key was bound (`{"key":"[REDACTED]"}` for the value `g`).
+ * Only credential-bearing `*key` compounds are matched now; a bare `key` is not.
+ * This brings the key-name side in line with the value side above, which has
+ * always used `api_key|apikey` rather than a bare `key`.
+ *
+ * Note: `auth` matches as a substring so that `authHeader` / `authorization` are
+ * covered. Do not narrow it with a `(?!or)` lookahead — that would stop matching
+ * `authorization`, which is the most important name in the group.
  */
-const SENSITIVE_KEY_PATTERN = /password|secret|token|key|auth/i;
+const SENSITIVE_KEY_PATTERN =
+  /password|secret|token|auth|(?:api|private|access|session|signing|encryption|ssh|gpg|deploy)[-_]?key/i;
 
 /**
  * Sanitize value (mask sensitive data)
