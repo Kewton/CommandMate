@@ -17,6 +17,7 @@ import { spawnSync } from 'child_process';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const SCRIPT = join(process.cwd(), 'scripts/hooks/cmate-agent-event.sh');
 
@@ -34,7 +35,7 @@ beforeAll(() => {
   chmodSync(fakeCurl, 0o755);
 });
 
-afterAll(() => rmSync(fakeBin, { recursive: true, force: true }));
+afterAll(() => removeTempDir(fakeBin));
 
 beforeEach(() => rmSync(argsFile, { force: true }));
 

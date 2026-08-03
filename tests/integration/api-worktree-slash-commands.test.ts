@@ -9,6 +9,7 @@ import { NextRequest } from 'next/server';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 // Mock the database functions
 vi.mock('@/lib/db/db-instance', () => ({
@@ -182,7 +183,7 @@ describe('GET /api/worktrees/[id]/slash-commands', () => {
       expect(allNames).not.toContain('agents');
     } finally {
       process.env.HOME = originalHome;
-      fs.rmSync(isolatedHome, { recursive: true, force: true });
+      removeTempDir(isolatedHome);
     }
   });
 
@@ -241,7 +242,7 @@ describe('GET /api/worktrees/[id]/slash-commands', () => {
       expect(claudeCommands.find((c) => c.name === 'my-agy-skill')).toBeUndefined();
     } finally {
       process.env.HOME = originalHome;
-      fs.rmSync(isolatedHome, { recursive: true, force: true });
+      removeTempDir(isolatedHome);
     }
   });
 
@@ -294,7 +295,7 @@ describe('GET /api/worktrees/[id]/slash-commands', () => {
       expect(allNames).toContain('gemini-shared');
       expect(allNames).not.toContain('context');
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 
@@ -365,7 +366,7 @@ describe('GET /api/worktrees/[id]/slash-commands', () => {
       expect(agyCommands.find((c) => c.name === 'my-global-skill')).toBeUndefined();
     } finally {
       process.env.HOME = originalHome;
-      fs.rmSync(isolatedHome, { recursive: true, force: true });
+      removeTempDir(isolatedHome);
     }
   });
 
@@ -419,8 +420,8 @@ describe('GET /api/worktrees/[id]/slash-commands', () => {
       expect(dupEntries[0].description).toBe('WORKTREE version');
     } finally {
       process.env.HOME = originalHome;
-      fs.rmSync(isolatedHome, { recursive: true, force: true });
-      fs.rmSync(worktreeDir, { recursive: true, force: true });
+      removeTempDir(isolatedHome);
+      removeTempDir(worktreeDir);
     }
   });
 
@@ -450,7 +451,7 @@ describe('GET /api/worktrees/[id]/slash-commands', () => {
       expect(response.status).toBe(200);
     } finally {
       process.env.HOME = originalHome;
-      fs.rmSync(isolatedHome, { recursive: true, force: true });
+      removeTempDir(isolatedHome);
     }
   });
 });

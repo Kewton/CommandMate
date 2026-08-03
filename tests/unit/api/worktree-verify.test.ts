@@ -23,6 +23,7 @@ import type { NextRequest } from 'next/server';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree } from '@/lib/db';
 import { waitForVerification } from '@/lib/verification/gate-runner';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 declare module '@/lib/db/db-instance' {
   export function setMockDb(db: Database.Database): void;
@@ -136,7 +137,7 @@ afterEach(async () => {
   closeDbInstance();
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
-    if (dir) rmSync(dir, { recursive: true, force: true });
+    if (dir) removeTempDir(dir);
   }
 });
 

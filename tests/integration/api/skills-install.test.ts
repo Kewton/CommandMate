@@ -24,7 +24,6 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
-  rmSync,
   writeFileSync,
 } from 'fs';
 import { tmpdir } from 'os';
@@ -92,6 +91,7 @@ import { getSkillInstallStagingRoot } from '@/lib/skills/operation-store';
 import { buildPackage } from '../../fixtures/skills/malicious-packages/package';
 import type { PackageFileSpec } from '../../fixtures/skills/malicious-packages/package';
 import type { Worktree } from '@/types/models';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const getWorktreeByIdMock = vi.mocked(getWorktreeById);
 const getDbInstanceMock = vi.mocked(getDbInstance);
@@ -299,8 +299,8 @@ beforeEach(() => {
 
 afterEach(() => {
   db.close();
-  rmSync(worktreeDir, { recursive: true, force: true });
-  rmSync(configRoot, { recursive: true, force: true });
+  removeTempDir(worktreeDir);
+  removeTempDir(configRoot);
 });
 
 // =============================================================================
@@ -642,8 +642,8 @@ describe('POST …/install — idempotency', () => {
     ).toBe(200);
 
     // What an uninstall leaves behind: both roots gone, index row gone.
-    rmSync(path.join(worktreeDir, '.agents', 'skills', SKILL_ID), { recursive: true, force: true });
-    rmSync(path.join(worktreeDir, '.claude', 'skills', SKILL_ID), { recursive: true, force: true });
+    removeTempDir(path.join(worktreeDir, '.agents', 'skills', SKILL_ID));
+    removeTempDir(path.join(worktreeDir, '.claude', 'skills', SKILL_ID));
     db.prepare('DELETE FROM skill_installations WHERE worktree_id = ?').run(WORKTREE_ID);
 
     const { token: second } = await issuePlan();

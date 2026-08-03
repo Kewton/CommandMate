@@ -32,6 +32,7 @@ import {
   repositoryExistsOnDisk,
 } from '@/lib/git/worktrees';
 import type { Worktree } from '@/types/models';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const REPO_PATH = '/repos/anvil';
 const WORKTREE_PATH = '/repos/anvil'; // develop lives in the primary worktree dir
@@ -356,7 +357,7 @@ describe('Issue #1349: pruneStaleRepositoryWorktrees', () => {
   afterEach(() => {
     db.close();
     for (const dir of tempDirs.splice(0)) {
-      fs.rmSync(dir, { recursive: true, force: true });
+      removeTempDir(dir);
     }
   });
 
@@ -399,7 +400,7 @@ describe('Issue #1349: pruneStaleRepositoryWorktrees', () => {
     expect(totalChildRows(db)).toBe(CHILD_TABLES.length);
 
     // Directory deleted → next global sync scans it to [] (absent from live set).
-    fs.rmSync(repo, { recursive: true, force: true });
+    removeTempDir(repo);
     const deleted = pruneStaleRepositoryWorktrees(db, []);
 
     expect(deleted).toContain('r-main');
@@ -413,7 +414,7 @@ describe('Issue #1349: pruneStaleRepositoryWorktrees', () => {
     const repo = makeRepoDir();
     syncWorktreesToDB(db, [repoWorktree(repo, 'r-main', 'main')]);
 
-    fs.rmSync(path.join(repo, '.git'), { recursive: true, force: true });
+    removeTempDir(path.join(repo, '.git'));
     const deleted = pruneStaleRepositoryWorktrees(db, []);
 
     expect(deleted).toContain('r-main');
@@ -445,7 +446,7 @@ describe('Issue #1349: pruneStaleRepositoryWorktrees', () => {
     seedChildData(db, 'gone-main');
     seedChildData(db, 'alive-main');
 
-    fs.rmSync(gone, { recursive: true, force: true });
+    removeTempDir(gone);
     // Current scan reports only the alive repository.
     const deleted = pruneStaleRepositoryWorktrees(db, [
       repoWorktree(alive, 'alive-main', 'main'),
@@ -463,7 +464,7 @@ describe('Issue #1349: pruneStaleRepositoryWorktrees', () => {
     const repo = makeRepoDir();
     syncWorktreesToDB(db, [repoWorktree(repo, 'r-main', 'main')]);
 
-    fs.rmSync(repo, { recursive: true, force: true });
+    removeTempDir(repo);
     const deleted = pruneStaleRepositoryWorktrees(db, [
       repoWorktree(repo, 'r-main', 'main'),
     ]);

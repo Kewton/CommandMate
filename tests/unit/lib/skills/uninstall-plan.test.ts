@@ -53,6 +53,7 @@ import type { PackageFileSpec } from '../../../fixtures/skills/malicious-package
 import { makeCatalogVersion } from './fixtures';
 import type { SkillGitTargetState } from '@/lib/skills/preview-diff';
 import type { SkillPlanActor } from '@/lib/skills/install-plan';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const SKILL_ID = 'demo-skill';
 const VERSION = '1.2.3';
@@ -141,7 +142,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(worktree, { recursive: true, force: true });
+  removeTempDir(worktree);
 });
 
 // =============================================================================

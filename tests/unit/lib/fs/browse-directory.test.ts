@@ -7,11 +7,12 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { listDirectories, countWorktrees, isGitRepositoryPath } from '@/lib/fs/browse-directory';
 import { BROWSE_ENTRY_LIMIT } from '@/lib/fs/browse-roots';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 let sandbox: string;
 let root: string;
@@ -49,7 +50,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  rmSync(sandbox, { recursive: true, force: true });
+  removeTempDir(sandbox);
 });
 
 describe('listDirectories', () => {

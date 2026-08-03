@@ -7,9 +7,10 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join } from 'path';
-import { mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { validateFileOperation } from '@/lib/file-operations';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 describe('validateFileOperation [MF-001]', () => {
   let testDir: string;
@@ -21,7 +22,7 @@ describe('validateFileOperation [MF-001]', () => {
 
   afterEach(() => {
     if (existsSync(testDir)) {
-      rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 

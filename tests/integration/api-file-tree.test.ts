@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { join } from 'path';
-import { mkdirSync, writeFileSync, rmSync } from 'fs';
+import { mkdirSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import Database from 'better-sqlite3';
 import type { NextRequest } from 'next/server';
@@ -16,6 +16,7 @@ import { GET as getSubdirTree } from '@/app/api/worktrees/[id]/tree/[...path]/ro
 import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree } from '@/lib/db';
 import type { Worktree } from '@/types/models';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 // Declare mock function type
 declare module '@/lib/db/db-instance' {
@@ -104,7 +105,7 @@ describe('File Tree API', () => {
   afterAll(() => {
     // Clean up temporary directory
     try {
-      rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     } catch {
       // Ignore cleanup errors
     }

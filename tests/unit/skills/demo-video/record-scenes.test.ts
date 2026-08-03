@@ -34,6 +34,7 @@ import {
   type DemoState,
   type WaitDeps,
 } from '../../../../.claude/skills/demo-video/scripts/record-scenes';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const STATE = [
   'CM_DEMO_PORT=3399',
@@ -213,7 +214,7 @@ describe('submitButtonLabel', () => {
       fs.writeFileSync(path.join(scratch, 'locales/en/prompt.json'), '{"yes":"Yes"}');
       expect(() => submitButtonLabel(scratch, 'en')).toThrow(/no 'submit' string/);
     } finally {
-      fs.rmSync(scratch, { recursive: true, force: true });
+      removeTempDir(scratch);
     }
   });
 });

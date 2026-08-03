@@ -15,6 +15,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 const SCRIPTS = path.join(REPO_ROOT, '.claude/skills/demo-video/scripts');
@@ -73,7 +74,7 @@ async function portListening(port: number): Promise<boolean> {
 }
 
 beforeAll(() => {
-  fs.rmSync(DEMO_HOME, { recursive: true, force: true });
+  removeTempDir(DEMO_HOME);
   fs.mkdirSync(DEMO_HOME, { recursive: true });
   fs.writeFileSync(
     STUB,
@@ -109,7 +110,7 @@ afterEach(() => {
 // `no-home-leftovers.test.ts` runs this file in a child process and asserts the
 // directory is gone afterwards, so deleting this hook turns that test red.
 afterAll(() => {
-  fs.rmSync(DEMO_HOME, { recursive: true, force: true });
+  removeTempDir(DEMO_HOME);
 });
 
 const stubEnv = {

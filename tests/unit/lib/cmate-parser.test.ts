@@ -31,6 +31,7 @@ import {
   MAX_SCHEDULE_ENTRIES,
   CMATE_FILENAME,
 } from '../../../src/lib/cmate-parser';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 describe('cmate-parser', () => {
   beforeEach(() => {
@@ -382,7 +383,7 @@ More text here.
       await expect(validateCmatePath(symlinkPath, worktreeDir)).rejects.toThrow('Path traversal detected');
 
       // Cleanup
-      fs.rmSync(tmpDir, { recursive: true });
+      removeTempDir(tmpDir);
     });
   });
 

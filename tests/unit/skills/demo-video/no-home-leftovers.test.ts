@@ -21,6 +21,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { stripAnsi } from '@/lib/detection/ansi';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 const VITEST_BIN = path.join(REPO_ROOT, 'node_modules/vitest/vitest.mjs');
@@ -82,7 +83,7 @@ beforeAll(() => {
 }, 200_000);
 
 afterAll(() => {
-  fs.rmSync(SCRATCH_HOME, { recursive: true, force: true });
+  removeTempDir(SCRATCH_HOME);
 });
 
 describe('env-scripts.test.ts cleans up after itself', () => {
@@ -148,7 +149,7 @@ describe('env-scripts.test.ts cleans up after itself', () => {
       // test's finding to report — this one only has to stay a valid control.
       expect(leftovers(SCRATCH_HOME)).toContain('.commandmate-demo-vitest-planted');
     } finally {
-      fs.rmSync(planted, { recursive: true, force: true });
+      removeTempDir(planted);
     }
   });
 });
