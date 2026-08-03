@@ -15,6 +15,7 @@ import {
   getWriteGuardedTables,
   type WorktreeChildTable,
 } from './migrations/worktree-child-tables';
+import { recordWorktreeAlias } from './worktree-alias-db';
 
 /**
  * Get latest user message per CLI tool for multiple worktrees (batch query)
@@ -454,6 +455,7 @@ export function migrateWorktreeIdPreservingChildren(
     // delete alone would strand their rows on a dead ID (#1621).
     deleteWorktreeChildRows(db, [oldId], allChildren);
     db.prepare('DELETE FROM worktrees WHERE id = ?').run(oldId);
+    recordWorktreeAlias(db, oldId, newId);
     return;
   }
 
@@ -464,6 +466,18 @@ export function migrateWorktreeIdPreservingChildren(
       `UPDATE "${table}" SET "${column}" = ? WHERE "${column}" = ?`
     ).run(newId, oldId);
   }
+
+  // The rename is what retires `oldId`, so this is the one place that knows an
+  // alias is needed. Recording it here (rather than at each call site) means
+  // every path that moves an ID — sync, the #1645 bulk migration, a future
+  // directory move — keeps old URLs and old `commandmate send <id>` lines
+  // answering, without any of them having to remember to.
+  //
+  // Runs AFTER the child sweep on purpose: `worktree_aliases` carries a
+  // `worktree_id`, so the loop above has already re-pointed the aliases this
+  // worktree accumulated earlier. A→B→C therefore leaves A→C and B→C, never a
+  // chain that resolution would have to walk.
+  recordWorktreeAlias(db, oldId, newId);
 }
 
 /**

@@ -19,7 +19,13 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import path from 'path';
 import { createHash } from 'crypto';
 import Database from 'better-sqlite3';
-import { getWorktreeById, getAllWorktreeIds } from '@/lib/db';
+import {
+  getWorktreeById,
+  getAllWorktreeIds,
+  getAliasedWorktreeIds,
+  resolveWorktreeIdWithAlias,
+  recordWorktreeAlias,
+} from '@/lib/db';
 import { runMigrations } from '@/lib/db/db-migrations';
 import {
   deriveWorktreeId,
@@ -273,6 +279,30 @@ describe('syncWorktreesToDB: the ID follows the directory, not the branch', () =
       { ...scanned('/repos/anvil', 'develop'), id: 'some-other-id' },
     ]);
     expect(getAllWorktreeIds(db)).toEqual(['legacy-explicit-id']);
+  });
+
+  it('does not mint an ID that an alias already redirects elsewhere', () => {
+    // Issue #1621 Phase 2. `anvil` is a retired name for the worktree at
+    // /repos/anvil-renamed; a new directory literally called `anvil` must not
+    // claim it, or the redirect would be shadowed and every old bookmark would
+    // silently start opening the wrong worktree.
+    syncWorktreesToDB(db, [scanned('/repos/anvil-renamed', 'develop')]);
+    recordWorktreeAlias(db, 'anvil', 'anvil-renamed');
+    expect(getAliasedWorktreeIds(db)).toEqual(['anvil']);
+
+    syncWorktreesToDB(db, [
+      scanned('/repos/anvil-renamed', 'develop'),
+      scanned('/repos/other/anvil', 'main', '/repos/other'),
+    ]);
+
+    const ids = getAllWorktreeIds(db).sort();
+    expect(ids).not.toContain('anvil');
+    expect(ids).toContain('anvil-renamed');
+    expect(ids.find((id) => id.startsWith('anvil-') && id !== 'anvil-renamed')).toMatch(
+      /^anvil-[0-9a-f]{8}$/
+    );
+    // The retired ID still resolves to the worktree that owns it.
+    expect(resolveWorktreeIdWithAlias(db, 'anvil')).toBe('anvil-renamed');
   });
 
   it('frees the ID of a worktree that is genuinely removed from disk', () => {

@@ -12,6 +12,7 @@ import {
   createWorktreeNotFoundError,
 } from '@/lib/file-tree';
 import { createLogger } from '@/lib/logger';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/tree');
 
@@ -20,7 +21,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const db = getDbInstance();
 
     // Check if worktree exists

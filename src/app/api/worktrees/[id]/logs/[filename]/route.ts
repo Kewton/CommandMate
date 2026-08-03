@@ -12,6 +12,7 @@ import { withLogging } from '@/lib/api-logger';
 import fs from 'fs/promises';
 import path from 'path';
 import { createLogger } from '@/lib/logger';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/logs');
 
@@ -20,7 +21,8 @@ export const GET = withLogging<{ id: string; filename: string }>(async (
   { params }: { params: Promise<{ id: string; filename: string }> }
 ) => {
   try {
-    const { id, filename } = await params;
+    const { id: requestedWorktreeId, filename } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const db = getDbInstance();
 
     // Check if worktree exists

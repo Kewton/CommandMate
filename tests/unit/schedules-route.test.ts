@@ -72,7 +72,13 @@ describe('GET /api/worktrees/[id]/schedules', () => {
     await GET(makeReq(), { params: Promise.resolve({ id: 'wt-1' }) });
 
     expect(prepareMock).toHaveBeenCalled();
-    const sql = prepareMock.mock.calls[0][0];
+    // Select the schedules query by shape, not by call order: the route now
+    // canonicalises the worktree ID first (Issue #1621), so call #0 is that
+    // lookup and hard-coding an index would assert on the wrong statement.
+    const sql = prepareMock.mock.calls
+      .map((call) => String(call[0]))
+      .find((statement) => /FROM\s+scheduled_executions/i.test(statement));
+    expect(sql, 'no scheduled_executions query was prepared').toBeDefined();
     expect(sql).not.toMatch(/enabled\s*=\s*1/);
     expect(sql).toMatch(/WHERE\s+worktree_id\s*=\s*\?/);
   });

@@ -16,7 +16,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { stashDrop, handleGitApiError } from '@/lib/git/git-utils';
-import { resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
+import { canonicalWorktreeId, resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
 import { validateStashIndex } from '@/lib/git/git-route-helpers';
 
 export async function DELETE(
@@ -24,7 +24,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; index: string }> }
 ) {
   try {
-    const { id, index: rawIndex } = await params;
+    const { id: requestedWorktreeId, index: rawIndex } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const worktree = resolveWorktreeOr404(id);
     if (worktree instanceof NextResponse) {
       return worktree;

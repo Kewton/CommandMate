@@ -12,6 +12,7 @@ import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { validateMemoReorderInput } from '@/lib/memo-reorder-validator';
 import { createLogger } from '@/lib/logger';
 import { MAX_MEMOS } from '@/config/memo-config';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/memos');
 
@@ -30,7 +31,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const db = getDbInstance();
 
     // Check if worktree exists
@@ -69,7 +71,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const db = getDbInstance();
 
     // Check if worktree exists
@@ -183,7 +186,8 @@ export async function PATCH(
 ) {
   try {
     // Validate worktree ID format (mirrors PATCH /api/worktrees/[id])
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     if (!isValidWorktreeId(id)) {
       return NextResponse.json(
         { error: 'Invalid worktree ID format', code: 'INVALID_WORKTREE_ID' },

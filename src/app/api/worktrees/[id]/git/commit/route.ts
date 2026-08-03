@@ -19,6 +19,7 @@ import { getWorktreeById } from '@/lib/db';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { gitCommit, getStagedStatus, getGitLog, handleGitApiError } from '@/lib/git/git-utils';
 import { MAX_COMMIT_MESSAGE_LENGTH } from '@/config/git-status-config';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 /**
  * Disallowed control characters in a commit message: all C0 controls and DEL,
@@ -33,7 +34,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     if (!isValidWorktreeId(id)) {
       return NextResponse.json(
         { error: 'Invalid worktree ID format' },

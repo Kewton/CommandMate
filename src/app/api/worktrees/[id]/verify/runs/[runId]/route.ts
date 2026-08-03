@@ -8,6 +8,7 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { getVerificationRun, getWorktreeById } from '@/lib/db';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { createLogger } from '@/lib/logger';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/verify-run');
 
@@ -16,7 +17,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string; runId: string }> }
 ) {
   try {
-    const { id, runId } = await params;
+    const { id: requestedWorktreeId, runId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     if (!isValidWorktreeId(id)) {
       return NextResponse.json({ error: 'Invalid worktree ID format' }, { status: 400 });
     }

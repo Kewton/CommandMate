@@ -10,6 +10,7 @@ import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-too
 import { buildCurrentOutput } from '@/lib/session/current-output-builder';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { createLogger } from '@/lib/logger';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/current-output');
 
@@ -24,7 +25,8 @@ export async function GET(
 ) {
   try {
     // [SEC-DS4-F006] Validate worktree ID format (Issue #314)
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     if (!isValidWorktreeId(id)) {
       return NextResponse.json(
         { error: 'Invalid worktree ID format' },

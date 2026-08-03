@@ -31,6 +31,7 @@ import { createLogger } from '@/lib/logger';
 import { AntigravityTool } from '@/lib/cli-tools/antigravity';
 import { validateCopilotModelName, validateAntigravityModelName } from '@/lib/cmate-cli-tool-parser';
 import { broadcastSessionStatus } from '@/lib/realtime/terminal-broadcast';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/send');
 
@@ -127,7 +128,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const db = getDbInstance();
 
     // Check if worktree exists

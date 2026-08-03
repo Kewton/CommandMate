@@ -9,6 +9,7 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { getGitLog, handleGitApiError } from '@/lib/git/git-utils';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 export async function GET(
   request: NextRequest,
@@ -16,7 +17,8 @@ export async function GET(
 ) {
   try {
     // Validate worktree ID format
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     if (!isValidWorktreeId(id)) {
       return NextResponse.json(
         { error: 'Invalid worktree ID format' },

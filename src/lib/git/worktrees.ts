@@ -16,6 +16,7 @@ import {
   deleteWorktreesByIds,
   getRepositories,
   getAllWorktreeIds,
+  getAliasedWorktreeIds,
 } from '@/lib/db';
 import { createLogger } from '@/lib/logger';
 
@@ -452,7 +453,12 @@ export function syncWorktreesToDB(
   // handed out earlier in this same run, so two directories that share a
   // basename across repositories cannot both claim it (which would violate the
   // UNIQUE(path) constraint on the second upsert).
-  const takenIds = new Set(getAllWorktreeIds(db));
+  //
+  // Historical IDs count as taken too (Issue #1621, Phase 2): an alias still
+  // answers requests, so minting a live worktree with an ID some alias redirects
+  // elsewhere would shadow that redirect and silently send old bookmarks to the
+  // wrong worktree.
+  const takenIds = new Set([...getAllWorktreeIds(db), ...getAliasedWorktreeIds(db)]);
 
   // Process each repository
   for (const [repoPath, repoWorktrees] of worktreesByRepo) {

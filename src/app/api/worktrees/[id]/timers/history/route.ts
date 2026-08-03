@@ -14,6 +14,7 @@ import { getWorktreeById } from '@/lib/db';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { clearTimerHistory } from '@/lib/db/timer-db';
 import { createLogger } from '@/lib/logger';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/timers/history');
 
@@ -26,7 +27,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
 
     // [SEC-SF-002] Validate worktreeId
     if (typeof id !== 'string' || id.length === 0) {

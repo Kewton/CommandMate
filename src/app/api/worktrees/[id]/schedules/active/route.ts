@@ -4,6 +4,7 @@ import { getWorktreeById } from '@/lib/db';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { getActiveSchedulesForWorktree } from '@/lib/schedule-manager';
 import { createLogger } from '@/lib/logger';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/schedules/active');
 
@@ -11,7 +12,8 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
+  const { id: requestedWorktreeId } = await params;
+  const id = canonicalWorktreeId(requestedWorktreeId);
   void request;
 
   try {

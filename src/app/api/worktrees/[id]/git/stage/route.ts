@@ -17,13 +17,15 @@ import { getWorktreeById } from '@/lib/db';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { stageFiles, handleGitApiError } from '@/lib/git/git-utils';
 import { validateFilesBody } from '@/lib/git/git-route-helpers';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     if (!isValidWorktreeId(id)) {
       return NextResponse.json(
         { error: 'Invalid worktree ID format' },

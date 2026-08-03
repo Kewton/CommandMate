@@ -10,6 +10,7 @@ import { getWorktreeById } from '@/lib/db';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { getGitShow, handleGitApiError } from '@/lib/git/git-utils';
 import { COMMIT_HASH_PATTERN } from '@/types/git';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 export async function GET(
   _request: Request,
@@ -17,7 +18,8 @@ export async function GET(
 ) {
   try {
     // Validate worktree ID format
-    const { id, commitHash } = await params;
+    const { id: requestedWorktreeId, commitHash } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     if (!isValidWorktreeId(id)) {
       return NextResponse.json(
         { error: 'Invalid worktree ID format' },

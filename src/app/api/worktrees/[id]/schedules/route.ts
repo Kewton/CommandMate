@@ -18,6 +18,7 @@ import {
 import { ALLOWED_CLI_TOOLS } from '@/lib/session/claude-executor';
 import { isValidCronExpression } from '@/config/cmate-constants';
 import { createLogger } from '@/lib/logger';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/schedules');
 
@@ -30,7 +31,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     // [S4-010] 2-stage worktree ID validation
     if (!isValidWorktreeId(id)) {
       return NextResponse.json({ error: 'Invalid worktree ID format' }, { status: 400 });
@@ -69,7 +71,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id: worktreeId } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const worktreeId = canonicalWorktreeId(requestedWorktreeId);
     // [S4-010] 2-stage worktree ID validation
     if (!isValidWorktreeId(worktreeId)) {
       return NextResponse.json({ error: 'Invalid worktree ID format' }, { status: 400 });

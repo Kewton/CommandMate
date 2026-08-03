@@ -11,6 +11,7 @@ import { getWorktreeById, getAgentInstance, getAgentInstances } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { createLogger, generateRequestId } from '@/lib/logger';
 import { CLI_TOOL_IDS, isCliToolType, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('interrupt');
 
@@ -29,7 +30,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id: worktreeId } = await params;
+  const { id: requestedWorktreeId } = await params;
+  const worktreeId = canonicalWorktreeId(requestedWorktreeId);
   const requestId = generateRequestId();
   const log = logger.withContext({ worktreeId, requestId });
 

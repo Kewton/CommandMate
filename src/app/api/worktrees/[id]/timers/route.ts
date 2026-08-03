@@ -30,6 +30,7 @@ import { isValidTimerDelay, MAX_TIMERS_PER_WORKTREE, MAX_TIMER_MESSAGE_LENGTH, D
 import { isValidUuidV4 } from '@/config/schedule-config';
 import { scheduleTimer, cancelScheduledTimer } from '@/lib/timer-manager';
 import { createLogger } from '@/lib/logger';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/timers');
 
@@ -44,7 +45,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
 
     // [SEC-SF-002] Validate worktreeId
     if (typeof id !== 'string' || id.length === 0) {
@@ -162,7 +164,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
 
     // [SEC-SF-002] Validate worktreeId
     if (typeof id !== 'string' || id.length === 0) {
@@ -234,7 +237,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
 
     // [SEC-SF-002] Validate worktreeId
     if (typeof id !== 'string' || id.length === 0) {

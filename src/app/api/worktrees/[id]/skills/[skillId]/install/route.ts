@@ -31,7 +31,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createLogger } from '@/lib/logger';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
+import { canonicalWorktreeId, resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
 import { validateSkillId } from '@/lib/skills/schema';
 import { isSkillFetchError } from '@/lib/skills/integrity';
 import { inspectSkillPackage } from '@/lib/skills/package-validator';
@@ -304,7 +304,8 @@ export async function POST(
   let lock: ReturnType<typeof acquireSkillOperationLock> | null = null;
 
   try {
-    const { id, skillId } = await params;
+    const { id: requestedWorktreeId, skillId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
 
     const worktree = resolveWorktreeOr404(id);
     if (worktree instanceof NextResponse) return worktree;
