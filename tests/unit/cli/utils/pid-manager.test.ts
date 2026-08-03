@@ -12,6 +12,7 @@ import {
   PidManager,
   createPidManager,
   createIssuePidManager,
+  type DaemonState,
 } from '../../../../src/cli/utils/pid-manager';
 
 // Mock install-context module
@@ -136,8 +137,11 @@ describe('PidManager', () => {
         expect.any(Number), // O_WRONLY | O_CREAT | O_EXCL
         0o600
       );
+      // Issue #1632: hybrid format — line 1 is the bare PID, line 2 the JSON state
       const written = vi.mocked(fs.writeSync).mock.calls[0][1] as string;
-      expect(JSON.parse(written)).toEqual({ pid: 12345, version: '1.2.3', port: 4000 });
+      const [pidLine, jsonLine] = written.split('\n');
+      expect(pidLine).toBe('12345');
+      expect(JSON.parse(jsonLine)).toEqual({ pid: 12345, version: '1.2.3', port: 4000 });
       expect(fs.closeSync).toHaveBeenCalledWith(mockFd);
     });
 
@@ -157,6 +161,116 @@ describe('PidManager', () => {
       vi.mocked(fs.openSync).mockImplementation(() => { throw error; });
 
       expect(() => pidManager.writeState({ pid: 12345 })).toThrow('permission denied');
+    });
+  });
+
+  /**
+   * Issue #1632: a globally installed CLI predating #1354 stays on PATH and reads the very same
+   * ~/.commandmate/.commandmate.pid the current daemon writes. Its readPid() is a plain
+   * parseInt(), so the #1354 JSON-only file made it report "Stopped (no PID file)" for a healthy
+   * server. The hybrid format restores that forward compatibility without losing any state.
+   */
+  describe('hybrid state file format (Issue #1632)', () => {
+    /** Exactly the pre-#1354 reader (src/cli/utils/pid-manager.ts @ v0.2.4, readPid) */
+    const legacyReadPid = (fileContent: string): number | null => {
+      const pid = parseInt(fileContent.trim(), 10);
+      return isNaN(pid) || pid <= 0 ? null : pid;
+    };
+
+    const state: DaemonState = {
+      pid: 84890,
+      version: '0.18.0',
+      port: 3000,
+      bind: '127.0.0.1',
+      protocol: 'http',
+      auth: false,
+      startedAt: '2026-07-30T12:00:00.000Z',
+      startTime: 'Thu Jul 30 21:00:00 2026',
+    };
+
+    /** The exact bytes writeState() puts on disk for `state` (format is frozen here) */
+    const HYBRID_FIXTURE =
+      '84890\n' +
+      '{"pid":84890,"version":"0.18.0","port":3000,"bind":"127.0.0.1","protocol":"http",' +
+      '"auth":false,"startedAt":"2026-07-30T12:00:00.000Z","startTime":"Thu Jul 30 21:00:00 2026"}\n';
+
+    const write = (value: DaemonState): string => {
+      vi.mocked(fs.openSync).mockReturnValue(3);
+      vi.mocked(fs.writeSync).mockReturnValue(1);
+      vi.mocked(fs.closeSync).mockReturnValue(undefined);
+      pidManager.writeState(value);
+      return vi.mocked(fs.writeSync).mock.calls[0][1] as string;
+    };
+
+    const read = (fileContent: string): DaemonState | null => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(fileContent);
+      return pidManager.readState();
+    };
+
+    it('writes the frozen hybrid layout: bare PID first, JSON second', () => {
+      expect(write(state)).toBe(HYBRID_FIXTURE);
+    });
+
+    it('lets the pre-#1354 parseInt reader recover the PID from what we write', () => {
+      expect(legacyReadPid(HYBRID_FIXTURE)).toBe(84890);
+      expect(legacyReadPid(write(state))).toBe(84890);
+    });
+
+    it('reproduces the #1632 failure with the JSON-only format (guards the fixture above)', () => {
+      // The format shipped between #1354 and #1632: parseInt('{...') === NaN → "no PID file"
+      expect(legacyReadPid(JSON.stringify(state))).toBeNull();
+    });
+
+    it('round-trips every field back through readState (version drives the #1354 warning)', () => {
+      expect(read(HYBRID_FIXTURE)).toEqual(state);
+      expect(read(write(state))).toEqual(state);
+    });
+
+    it('falls back to the line-1 PID when the JSON body is corrupt', () => {
+      expect(read('84890\n{"pid":84890,"version":"0.1')).toEqual({ pid: 84890 });
+    });
+
+    it('still reads a JSON-only file written before this change', () => {
+      expect(read(JSON.stringify(state))).toEqual(state);
+    });
+
+    it('still reads a bare-integer file written before #1354', () => {
+      expect(read('84890')).toEqual({ pid: 84890 });
+    });
+
+    it('tolerates CRLF line endings', () => {
+      expect(read('84890\r\n{"pid":84890,"version":"0.18.0"}\r\n')).toEqual({
+        pid: 84890,
+        version: '0.18.0',
+      });
+    });
+
+    it('returns null when the line-1 PID is not a usable process id', () => {
+      expect(read('0\n{"pid":0}')).toBeNull();
+    });
+
+    it('keeps the O_EXCL atomic create (no truncating open)', () => {
+      write(state);
+
+      const [, flags] = vi.mocked(fs.openSync).mock.calls[0];
+      expect(Number(flags) & fs.constants.O_EXCL).toBe(fs.constants.O_EXCL);
+      expect(Number(flags) & fs.constants.O_CREAT).toBe(fs.constants.O_CREAT);
+      expect(Number(flags) & fs.constants.O_TRUNC).toBe(0);
+    });
+
+    it('keeps the #1358 identity check working on a hybrid file', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(HYBRID_FIXTURE);
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+
+      const reused = new PidManager(testPidPath, vi.fn().mockReturnValue('Fri Jul 31 08:00:00 2026'));
+      expect(reused.isProcessRunning()).toBe(false);
+
+      const same = new PidManager(testPidPath, vi.fn().mockReturnValue(state.startTime));
+      expect(same.isProcessRunning()).toBe(true);
+
+      killSpy.mockRestore();
     });
   });
 

@@ -23,6 +23,9 @@ vi.mock('../../../../src/cli/utils/paths', () => ({
 vi.mock('../../../../src/cli/utils/install-context', () => ({
   isGlobalInstall: vi.fn(() => true),
   isNpxExecution: vi.fn(() => false),
+  // Only the npx relaunch path (Issue #1633's warning) reaches this, but the module-level
+  // import must resolve for every test in this file.
+  ensureConfigDir: vi.fn(() => '/mock/home/.commandmate'),
 }));
 vi.mock('../../../../src/cli/utils/env-setup', () => ({
   getEnvPath: vi.fn(() => '/mock/home/.commandmate/.env'),
