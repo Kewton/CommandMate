@@ -33,10 +33,20 @@ import { resolveWorktreeIdWithAlias } from '@/lib/db/worktree-alias-db';
  * it accepts a migration subset, and applying v54 as a *separate* step is what
  * proves it acts on rows that were already there rather than on an empty table.
  */
+let v53Snapshot: Buffer | null = null;
+
 function makeV53Database(): Database.Database {
-  const db = new Database(':memory:');
-  runMigrations(db, allMigrations.filter((migration) => migration.version <= 53));
-  return db;
+  // Built once and restored per test: running 53 migrations for each case is
+  // real CPU in a parallel suite, enough to tip a wall-clock-margin test
+  // elsewhere (see gate-runner-timestamps.test.ts, 60ms of slack around a
+  // spawned process).
+  if (!v53Snapshot) {
+    const template = new Database(':memory:');
+    runMigrations(template, allMigrations.filter((migration) => migration.version <= 53));
+    v53Snapshot = template.serialize();
+    template.close();
+  }
+  return new Database(v53Snapshot);
 }
 
 /** Insert a worktree row exactly as the branch-derived scheme would have. */

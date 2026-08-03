@@ -17,7 +17,7 @@
  * that only arises for bookmarks of sub-pages. Landing on the right worktree
  * beats 404 either way.
  *
- * ## The redirect is a meta refresh (HTTP 200), NOT the 301 the design asked for
+ * ## This is the FALLBACK; the real 3xx lives in `server.ts` (Issue #1645)
  *
  * Measured against a real server (`tsx server.ts`, NODE_ENV=production,
  * isolated DB): `permanentRedirect` from this layout returns
@@ -25,7 +25,7 @@
  *     HTTP/1.1 200 OK
  *     <meta id="__next-page-redirect" http-equiv="refresh" content="0;url=/worktrees/<new id>">
  *
- * That is Next.js App Router behaviour, not a symptom of anything here — an
+ * That is App Router behaviour, not a symptom of anything here — an
  * unconditional `permanentRedirect('/probe-target')` as the layout's very first
  * statement produces the same 200 + meta tag, with `loading.tsx` present or
  * removed. The App Router emits a real 3xx only from Route Handlers, Server
@@ -33,17 +33,17 @@
  * streaming can no longer set a status line, so it is delivered in the document
  * instead.
  *
- * A browser follows it, so the user-visible goal holds: an old tab, phone, PWA
- * shortcut or bookmark lands on the current worktree instead of a 404. What is
- * lost is what a status code buys — the browser does not rewrite the bookmark,
- * and a non-browser client does not follow it.
+ * #1645 is where old IDs actually start arriving (it renumbers the existing
+ * rows), so that is where the real redirect landed: `server.ts` intercepts
+ * `/worktrees/<id>` before Next sees it and answers **HTTP 308** with the
+ * sub-path and query preserved (`src/lib/git/worktree-redirect.ts`).
+ * `middleware.ts` could not do it — it runs on the edge runtime, where the
+ * SQLite alias lookup is impossible.
  *
- * Getting a true 301/308 needs the request intercepted before rendering starts,
- * i.e. `middleware.ts` or the custom `server.ts`. Neither is reachable from this
- * change (both are outside its scope), and middleware additionally runs on the
- * edge runtime, where the SQLite lookup this needs is impossible. The follow-up
- * belongs with #1645, which renumbers the existing rows and therefore owns the
- * moment old IDs actually start arriving.
+ * This layout is kept as the fallback for anything serving the app without the
+ * custom server. With `server.ts` in front it never sees a historical ID, and
+ * when it does fire, a browser follows the meta refresh so the user still lands
+ * on the current worktree.
  *
  * Resolution failures never block the page: `canonicalWorktreeId` is total and
  * returns the requested ID unchanged when it cannot do better, so an unmigrated

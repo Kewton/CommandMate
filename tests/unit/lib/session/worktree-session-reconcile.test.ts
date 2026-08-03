@@ -111,12 +111,31 @@ function fakeSocket(): WebSocket {
   } as unknown as WebSocket;
 }
 
+/**
+ * The migrated schema, built once and restored per test.
+ *
+ * Running all migrations 20+ times is real CPU in a parallel suite, and it
+ * showed: the added load tipped a wall-clock-margin test in
+ * `gate-runner-timestamps.test.ts` (which spawns a process and allows it 60ms
+ * of slack). Serialising the schema once keeps this file cheap.
+ */
+let schemaSnapshot: Buffer | null = null;
+
+function freshDatabase(): Database.Database {
+  if (!schemaSnapshot) {
+    const template = new Database(':memory:');
+    runMigrations(template);
+    schemaSnapshot = template.serialize();
+    template.close();
+  }
+  return new Database(schemaSnapshot);
+}
+
 describe('reconcileWorktreeSessions (Issue #1621 Phase 3)', () => {
   let db: Database.Database;
 
   beforeEach(() => {
-    db = new Database(':memory:');
-    runMigrations(db);
+    db = freshDatabase();
     db.pragma('foreign_keys = ON');
     clearAllAutoYesStates();
     stopAllAutoYesPolling();
