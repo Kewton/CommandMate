@@ -204,14 +204,23 @@ Operate agent sessions from the CLI. See the [CLI Operations Guide](./docs/en/us
 | `commandmate ls --id <prefix>` | Filter by worktree ID prefix |
 | `commandmate send <id> "message"` | Send a message to an agent |
 | `commandmate send <id> "msg" --auto-yes` | Send with auto-yes enabled |
-| `commandmate send <id> "msg" --agent codex` | Send to a specific agent |
+| `commandmate send <id> "msg" --instance codex` | Send to a specific agent instance |
 | `commandmate wait <id> --timeout 300` | Wait for agent completion (exit 0) or prompt (exit 10) |
+| `commandmate wait <id> --instance codex` | Wait on a specific agent instance |
 | `commandmate wait <id> --on-prompt human` | Wait, let human respond to prompts via browser UI |
 | `commandmate respond <id> "yes"` | Respond to an agent's prompt |
 | `commandmate capture <id>` | Get current terminal output |
 | `commandmate capture <id> --json` | Get output with status info as JSON |
 | `commandmate auto-yes <id> --enable` | Enable auto-yes (default 1h) |
 | `commandmate auto-yes <id> --disable` | Disable auto-yes |
+
+> **Name the target with `--instance`, on every command.** It is the only target
+> flag `wait` accepts — `wait --agent` fails with `unknown option`. Naming the
+> agent only on `send` leaves `wait` watching the worktree's *default* agent, so
+> a worktree cut for Codex silently waits for Claude Code. `--agent` still works
+> on `send`/`respond`/`capture`/`auto-yes` as the supplement for instances the
+> roster does not know (it is what `--register` needs). See the
+> [CLI Operations Guide](./docs/en/user-guide/cli-operations-guide.md).
 
 **Typical workflow:**
 

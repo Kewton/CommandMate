@@ -11,6 +11,7 @@ import type { CurrentOutputResponse, WorktreeDetailResponse } from '../types/api
 import { ApiClient, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { isCliToolId } from '../config/cli-tool-ids';
+import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 import { resolveInstanceCliTool } from './instances';
 import { printMaybePaged } from '../utils/pager';
 import { squeezeTranscript } from '../../lib/tmux/transcript-squeeze';
@@ -140,8 +141,8 @@ export function createCaptureCommand(): Command {
     .option('--pane', 'Read the raw tmux pane as a transcript, with blank layout rows squeezed')
     .option('--tail <n>', 'With --pane: keep only the last N lines OF THE SQUEEZED transcript')
     .option('--raw', 'With --pane: skip the squeeze and print the pane verbatim')
-    .option('--agent <agent>', 'CLI tool agent (claude, codex, gemini, vibe-local, opencode, copilot, antigravity)')
-    .option('--instance <id>', 'Agent instance ID: <agent> or <agent>-<n> (e.g. claude-2). Defaults to the agent\'s primary instance.')
+    .option('--instance <id>', INSTANCE_OPTION_DESCRIPTION)
+    .option('--agent <agent>', AGENT_OPTION_DESCRIPTION)
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeId: string, options: CaptureOptions) => {
       try {

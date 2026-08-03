@@ -26,6 +26,7 @@ import type {
 import { ApiClient, ApiError, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { runVerification, WORK_EVIDENCE_GATE_ID } from '../utils/verify-runner';
+import { WAIT_INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 
 /** [IA3-02] Polling interval 5 seconds (matches tmux-capture-cache TTL=2s) */
 const POLL_INTERVAL_MS = 5000;
@@ -318,7 +319,7 @@ export function createWaitCommand(): Command {
     .option('--timeout <seconds>', 'Maximum wait time in seconds', parseInt)
     .option('--on-prompt <mode>', 'Prompt handling: agent (default) or human')
     .option('--stall-timeout <seconds>', 'Maximum time without output change', parseInt)
-    .option('--instance <id>', 'Agent instance ID: <agent> or <agent>-<n> (e.g. claude-2). Defaults to the agent\'s primary instance.')
+    .option('--instance <id>', WAIT_INSTANCE_OPTION_DESCRIPTION)
     .option('--verify', 'After completion, run every verification gate; exit 20 when a gate fails, 21 when there is nothing to verify')
     .option('--require-work', 'After completion, run only the work-evidence gate; exit 21 when the worktree has no commits and no uncommitted changes')
     .option('--token <token>', TOKEN_WARNING)
