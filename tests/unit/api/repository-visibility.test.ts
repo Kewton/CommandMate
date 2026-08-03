@@ -174,7 +174,7 @@ describe('Repository visibility API (Issue #690)', () => {
       expect(data.error).toBe('visible must be a boolean');
     });
 
-    it('returns 400 when body has neither displayName nor visible', async () => {
+    it('returns 400 when body has neither displayName, visible nor enabled', async () => {
       const repo = createRepository(testDb, {
         name: 'repo-empty-body',
         path: '/path/to/repo-empty-body',
@@ -188,7 +188,8 @@ describe('Repository visibility API (Issue #690)', () => {
       const data = await response.json();
 
       expect(response.status).toBe(400);
-      expect(data.error).toBe('displayName or visible is required');
+      // Issue #1658: `enabled` joined the accepted fields, so the message names it.
+      expect(data.error).toBe('displayName, visible or enabled is required');
     });
 
     it('returns 404 when repository ID does not exist', async () => {

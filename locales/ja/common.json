@@ -67,7 +67,15 @@
     "pathRequired": "リポジトリパスを入力してください",
     "urlRequired": "クローン URL を入力してください",
     "urlInvalid": "URL の形式が正しくありません",
-    "loading": "リポジトリを読み込み中"
+    "loading": "リポジトリを読み込み中",
+    "filterAll": "すべて ({count})",
+    "filterDisabled": "無効化中 ({count})",
+    "emptyDisabled": "走査対象から外したリポジトリはありません。",
+    "disableConfirmTitle": "走査対象から外しますか？",
+    "disableConfirmBody": "「{name}」は今後 worktree の走査対象から外れます。\n\n削除は行いません: {count} 件の worktree と、そのチャット履歴・タスク・検証実行はデータベースに残り、稼働中の tmux セッションもそのまま動き続けます。\n\nworktree はサイドバーにも残ります。非表示にする場合は Visibility トグルを使ってください。",
+    "disableConfirmAction": "走査対象から外す",
+    "disableSuccess": "「{name}」を走査対象から外しました。",
+    "enableSuccess": "「{name}」を走査対象に戻しました (worktree {count} 件)。"
   },
   "cancel": "キャンセル",
   "send": "送信",
