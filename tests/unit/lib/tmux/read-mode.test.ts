@@ -215,6 +215,22 @@ describe('capability probe', () => {
     );
     expect(await supportsDisplayPopup()).toBe(false);
   });
+
+  it('treats tmux 3.0 and older, where list-commands takes no argument, as incapable', async () => {
+    // Issue #1641, measured against real binaries in containers: tmux 2.8 and
+    // 3.0a answer ANY `list-commands <name>` with `usage: list-commands
+    // [-F format]` and exit 1 — the command argument arrived in 3.1. The right
+    // answer for display-popup, but reached by a different path than 3.1c's
+    // exit-0-and-silent, which is why both are pinned here.
+    mockTmux(
+      tmuxWith({
+        'list-commands': () => {
+          throw new Error('Command failed: usage: list-commands [-F format]');
+        },
+      })
+    );
+    expect(await supportsDisplayPopup()).toBe(false);
+  });
 });
 
 describe('existing-binding probe', () => {
@@ -252,6 +268,19 @@ describe('reconcileReadModeBinding', () => {
     // The whole point of a no-op: the user's tmux is left exactly as it was.
     expect(calls.some((argv) => argv[0] === BIND_VERB)).toBe(false);
     expect(calls.some((argv) => argv[0] === UNBIND_VERB)).toBe(false);
+  });
+
+  it('never consults the conflict check on an incapable tmux', async () => {
+    // Issue #1641: `list-keys -T prefix <key>` is ALSO a usage error on tmux
+    // 3.0 and older (`usage: list-keys [-T key-table]`, measured), which makes
+    // readExistingBinding report every key as free there. That degradation is
+    // harmless only while the capability probe short-circuits ahead of it, so
+    // the ordering is asserted rather than left to reading order.
+    const calls = mockTmux(tmuxWith({ 'list-commands': '' }));
+    const status = await reconcileReadModeBinding();
+
+    expect(status.outcome).toBe('unsupported-tmux');
+    expect(calls.map((argv) => argv[0])).not.toContain('list-keys');
   });
 
   it('does NOT clobber a key the user already bound to something else', async () => {

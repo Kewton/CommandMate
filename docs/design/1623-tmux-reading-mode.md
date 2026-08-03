@@ -67,6 +67,8 @@ SGR のみ行の扱い（`extractAnsiSequences` で色状態を持ち越す）�
 exit code でプローブすると「あらゆる tmux が対応」と誤判定するため、**stdout が空でないこと**を
 判定条件にした。`tmux -V` のバージョン文字列パース（`3.5a` / `next-3.6` / `master`）は採らない。
 
+古い tmux 実機での裏取りは **[#1641（下記）](#1641-非対応-tmux-での-no-op-実機検証)** で済ませた。
+
 ## D2: ページャスクリプトの配置場所
 
 **`~/.commandmate/bin/cm-read-pane.sh`**（内容は TS 定数として埋め込み、起動時に materialize）。
@@ -214,3 +216,80 @@ popup への `resize-window` 混入 / CLI 側 `lines` の変更）。
 
 **受入条件のうち「実セッションで attach → `prefix+g`」は、ネストクライアントによる等価な
 再現までを自動で確認した。人間の端末から本番セッションに attach しての最終確認は UAT に残る。**
+
+---
+
+## #1641: 非対応 tmux での no-op 実機検証
+
+#1623 は受入条件「`display-popup` 非対応 tmux で no-op となり案B が代替として動作すること」を
+**未検証のままクローズした**。手元が 3.5a しか無く、単体テストはプローブの戻り値を
+**モックして両分岐を通していただけ**だったためである。モックはプローブの戻り値を固定できるが、
+**プローブが tmux に正しい質問をしているか**は何も言わない。#1641 でそこを実行で埋めた。
+
+### 手法
+
+`scripts/verify-legacy-tmux-readmode.sh`（ホスト側ドライバ）+
+`scripts/legacy-tmux-probe/`（コンテナ側）。
+
+- 出荷している `src/lib/tmux/{read-mode,tmux,transcript-squeeze}.ts` を esbuild で束ねて
+  **そのまま実行**する。書き写した再実装は使わない
+- **ホスト側スクリプトは tmux を 1 行も呼ばない**（`grep tmux` するとコメントと
+  イメージ名とパスしか出ない）。2026-08-02 の「隔離したつもりの `kill-server` で
+  稼働中の全 `mcbd-*` を消した」事故に対する構造的な防止策
+- コンテナ側は既定ソケットに囮セッション、`-L cm1641` の私設サーバに被験セッションを置き、
+  ソケット引数を取らない本番コードを `$TMUX` で私設サーバへ向ける。
+  probe は**転送が効いていなければ実行を拒否**する
+- コンテナ側は `CM1641_IN_CONTAINER=1` 未設定、または既定サーバに `mcbd-*` が居る場合は
+  起動を拒否する（使い捨て環境であることを実行時に強制する）
+
+### 実測（2026-08-03 / docker / node:18-{buster,bullseye,bookworm}）
+
+| tmux | `list-commands display-popup` | `list-commands capture-pane` | `list-keys -T prefix g` | `supportsDisplayPopup()` |
+|---|---|---|---|---|
+| 2.8 | exit 1 `usage: list-commands [-F format]` | exit 1 **同じ usage エラー** | exit 1 `usage: list-keys [-T key-table]` | **false** |
+| 3.1c | exit 0 / **stdout 空** | exit 0 / ヘルプ行 | exit 1 `unknown key: g` | **false** |
+| 3.3a | exit 0 / ヘルプ行 | exit 0 / ヘルプ行 | exit 1 `unknown key: g` | **true** |
+
+| 検証項目 | 2.8 | 3.1c | 3.3a（対照） |
+|---|---|---|---|
+| `reconcileReadModeBinding()` の outcome | `unsupported-tmux` | `unsupported-tmux` | `installed` |
+| `list-keys -T prefix g`（私設サーバ・実行後） | 未バインド | 未バインド | 自バインドあり |
+| 同一サーバの別セッション（`other-session-1641`） | 無傷 | 無傷 | 無傷 |
+| 既定ソケットのセッション・キーテーブル | 無傷・バインド無し | 無傷・バインド無し | 無傷・バインド無し |
+| バインドが撃つ `display-popup` を直接実行 | `unknown command: display-popup` | `unknown command: display-popup` | **`no current client`** |
+| 案B（`capturePane` + `squeezeTranscript`） | 1003 → 52 行・マーカー検出 | 1003 → 52 行・マーカー検出 | 1003 → 52 行・マーカー検出 |
+
+**結論**: 偽陽性（非対応 tmux にバインドを入れる）も偽陰性（3.2+ で無効になる）も起きていない。
+案B は 2.8 / 3.1c / 3.3a で同一の結果を返し、**tmux バージョン非依存であることが実測で確認された**。
+
+### 実測から出た新しい知見（#1623 時点で未把握だったもの）
+
+1. **プローブが正解する理由はバージョンで違う。** 3.1c は「引数は受けるが未知の名前には
+   無出力」、2.8 / 3.0a は「`list-commands` がそもそも**コマンド引数を取らない**」。
+   後者は `capture-pane`（そのバージョンに実在する）でも同じ usage エラーを返すので、
+   `supportsDisplayPopup` の形を**他のコマンドの capability 判定に流用してはいけない**
+   （3.1 未満の全 tmux で偽陰性になる）。
+2. **衝突検査も古い tmux では劣化する。** `list-keys` に**キー引数を渡せるのも 3.1 から**で、
+   3.0 以下では usage エラー → `readExistingBinding` が常に undefined（＝キーは空き）を返す。
+   これが無害なのは、**capability プローブが先に short-circuit していて 3.0 以下がそこへ到達しない**
+   から。順序が load-bearing であることが実測で判明したので、
+   `read-mode.test.ts` の「非対応 tmux では `list-keys` を一度も撃たない」で固定した。
+3. `display-popup` を直接実行したときのエラーの**違い**（`unknown command` か
+   `no current client` か）は、クライアント無しでもコマンドの実在を判定できる第 2 の証拠になる。
+
+### 空振り防止
+
+- `CM1641_INVERT_EXPECT=1` で全行の期待値を反転させて実行し、**3 行とも「正しく落ちる」**ことを
+  確認済み（アサーションが実測を読んでいて、常緑ではないことの証明）
+- 上記 1・2 の単体テストは、`supportsDisplayPopup` を exit-code 型に戻す変異と、
+  衝突検査を capability プローブより前に移す変異の両方で赤になることを確認済み
+- CI ジョブ `legacy-tmux-readmode`（`container: node:18-bullseye` = tmux 3.1c）は、
+  **tmux が 3.2 以上だったらジョブ自身を失敗させる**。ベースイメージが将来上がったときに
+  「何も検証していない緑」になるのを防ぐ
+
+### 残る未検証
+
+- **tmux 3.2 / 3.3 未満の macOS 実機**は見ていない（すべて Linux コンテナ）。
+  `display-popup` の有無は tmux 本体の機能なのでプラットフォーム差は想定しないが、実測はしていない
+- popup の**目視**確認は 3.3a では行っていない（クライアント非 attach のため）。
+  目視は #1623 の 3.5a ネストクライアント検証が担保する

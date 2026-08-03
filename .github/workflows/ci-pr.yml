@@ -101,6 +101,71 @@ jobs:
           fi
           echo "Token discipline: no raw gray/slate or chromatic utilities in migrated directories."
 
+  legacy-tmux-readmode:
+    name: Legacy tmux (<3.2) reading-mode no-op
+    runs-on: ubuntu-latest
+    # Debian 11 ships tmux 3.1c — the newest tmux that still lacks display-popup,
+    # so it is exactly the version a user most plausibly runs into. Using a
+    # container is what makes an old tmux available at all; ubuntu-latest has
+    # 3.4+, where this job could never fail.
+    container: node:18-bullseye
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # [Issue #1641] #1623 shipped the display-popup capability probe with both
+      # branches covered by MOCKED return values and closed with "no-op on tmux
+      # < 3.2" unverified — a mock cannot tell you whether the probe asks tmux the
+      # right question. It does not: `tmux list-commands <unknown>` exits 0 with
+      # empty stdout on 3.1c, and on 2.8 `list-commands` rejects a command
+      # argument outright. This job runs the SHIPPED modules against a real old
+      # tmux so a regression in that probe fails here instead of in a user's
+      # terminal as `unknown command: display-popup`.
+      - name: Install tmux
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tmux
+
+      # Without this the job would keep passing if the base image ever moved to a
+      # tmux that HAS display-popup — a silent no-op wearing a green check, which
+      # is the exact failure mode #1641 exists to repay.
+      - name: Assert the tmux under test really predates display-popup
+        run: |
+          RAW=$(tmux -V)
+          NUM=$(printf '%s' "$RAW" | grep -oE '[0-9]+\.[0-9]+' | head -1)
+          if [ -z "$NUM" ]; then
+            echo "::error::could not parse a version out of '$RAW'"
+            exit 1
+          fi
+          if ! awk -v v="$NUM" 'BEGIN{split(v,a,"."); exit !(a[1]<3 || (a[1]==3 && a[2]<2))}'; then
+            echo "::error::$RAW is 3.2 or newer; this job can no longer prove the no-op. Pin an older base image."
+            exit 1
+          fi
+          echo "tmux under test: $RAW (pre-display-popup)"
+
+      # esbuild is fetched standalone rather than via `npm ci` so this job needs
+      # no native module build; the bundle pulls src/lib/tmux/** straight from the
+      # checkout, which is what makes it the shipped code and not a paraphrase.
+      # It is installed OUTSIDE the checkout on purpose: resolving `esbuild` from
+      # the repo would pick up a node_modules built for another platform, and the
+      # only symptom is `Exec format error` (measured while rehearsing this job in
+      # a container with a macOS node_modules mounted).
+      - name: Bundle the shipped reading-mode modules
+        run: |
+          mkdir -p "$RUNNER_TEMP/probe" "$RUNNER_TEMP/tools"
+          (cd "$RUNNER_TEMP/tools" && npm init -y >/dev/null && npm install --no-audit --no-fund esbuild@0.27.4 >/dev/null)
+          "$RUNNER_TEMP/tools/node_modules/.bin/esbuild" scripts/legacy-tmux-probe/probe.ts \
+            --bundle --platform=node --format=cjs --target=node18 \
+            --tsconfig=tsconfig.json \
+            --outfile="$RUNNER_TEMP/probe/probe.cjs"
+          cp tests/unit/lib/tmux/fixtures/capture-claude-idle.txt "$RUNNER_TEMP/probe/fixture.txt"
+
+      - name: Verify no-op + Plan B against real tmux
+        env:
+          CM1641_IN_CONTAINER: '1'
+          EXPECT_SUPPORTED: '0'
+        run: PROBE_DIR="$RUNNER_TEMP/probe" scripts/legacy-tmux-probe/in-container.sh
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
