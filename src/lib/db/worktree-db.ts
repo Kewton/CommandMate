@@ -712,6 +712,24 @@ export function getWorktreeIdsByRepository(
 }
 
 /**
+ * Every worktree ID currently stored, across all repositories.
+ *
+ * Issue #1621: `deriveWorktreeId` mints an ID from a directory's basename, and
+ * two repositories can easily hold same-named directories (`.../a/main`,
+ * `.../b/main`). The ID is the global primary key of `worktrees`, so the
+ * "already taken" set the derivation consults has to be global too;
+ * {@link getWorktreeIdsByRepository} would silently allow a cross-repository
+ * collision, which then surfaces as a UNIQUE(path) failure on upsert.
+ *
+ * @param db - Database instance
+ * @returns Every `worktrees.id` value
+ */
+export function getAllWorktreeIds(db: Database.Database): string[] {
+  const rows = db.prepare('SELECT id FROM worktrees').all() as Array<{ id: string }>;
+  return rows.map(row => row.id);
+}
+
+/**
  * Get all worktree rows (id + path) for a given repository path.
  *
  * Issue #1151: sync decides which DB rows to prune. It must key that decision on

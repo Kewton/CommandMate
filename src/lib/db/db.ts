@@ -31,6 +31,7 @@ export {
   getInitialBranch,
   getWorktreeIdsByRepository,
   getWorktreesByRepository,
+  getAllWorktreeIds,
   migrateWorktreeIdPreservingChildren,
   deleteRepositoryWorktrees,
   deleteWorktreesByIds,

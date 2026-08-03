@@ -204,16 +204,20 @@ describe('Issue #1151: branch-switch history preservation', () => {
       expect(countChildData(db, 'anvil-develop').chat_messages).toBe(1);
 
       // git checkout feature-x; a sync runs (server restart / manual sync).
+      // Issue #1621 strengthens the guarantee: the row is not merely migrated
+      // to a new ID, the ID does not move at all. A caller suggesting the old
+      // branch-derived ID (`anvil-feature-x`) is overruled by the ID the PATH
+      // already owns.
       syncWorktreesToDB(db, [makeWorktree('anvil-feature-x', 'feature-x')]);
-      // History followed the directory to the new ID; nothing deleted.
       expect(totalChildRows(db)).toBe(CHILD_TABLES.length);
-      expect(countChildData(db, 'anvil-feature-x').chat_messages).toBe(1);
-      expect(getWorktreeById(db, 'anvil-develop')).toBeNull();
+      expect(countChildData(db, 'anvil-develop').chat_messages).toBe(1);
+      expect(getWorktreeById(db, 'anvil-feature-x')).toBeNull();
+      expect(getWorktreeById(db, 'anvil-develop')?.branch).toBe('feature-x');
 
       // git checkout develop again; sync runs.
       syncWorktreesToDB(db, [makeWorktree('anvil-develop', 'develop')]);
 
-      // The original develop history is intact and reachable again.
+      // The original develop history is intact and still on the same key.
       expect(totalChildRows(db)).toBe(CHILD_TABLES.length);
       const restored = countChildData(db, 'anvil-develop');
       for (const table of CHILD_TABLES) {

@@ -186,15 +186,19 @@ invalid line
       const result = await scanWorktrees('/path/to/root');
 
       expect(result).toHaveLength(2);
-      // ID is prefixed with the repository name (basename of rootDir, here "root").
+      // Issue #1621: the provisional ID comes from the worktree DIRECTORY, not
+      // from the branch and not from the repository name. `name` still carries
+      // the branch, so the two are now visibly independent.
       expect(result[0]).toMatchObject({
-        id: 'root-main',
+        id: 'main',
         name: 'main',
+        branch: 'main',
         path: '/path/to/main',
       });
       expect(result[1]).toMatchObject({
-        id: 'root-feature-foo',
+        id: 'feature-foo',
         name: 'feature/foo',
+        branch: 'feature/foo',
         path: '/path/to/feature-foo',
       });
 
