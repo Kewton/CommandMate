@@ -36,10 +36,11 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { TMUX_HISTORY_LIMIT } from '@/config/tmux-pane-config';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const execFileAsync = promisify(execFile);
 
@@ -146,7 +147,7 @@ afterAll(async () => {
     }
   }
 
-  if (workDir) rmSync(workDir, { recursive: true, force: true });
+  if (workDir) removeTempDir(workDir);
 });
 
 describe('createSession against a real tmux server (Issue #1624)', () => {

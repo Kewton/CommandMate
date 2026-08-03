@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { NextRequest } from 'next/server';
@@ -61,6 +61,7 @@ import { scanWorktrees } from '@/lib/git/worktrees';
 import { syncWorktreesAndCleanup } from '@/lib/session-cleanup';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { getRecentBrowsePaths } from '@/lib/db/app-settings-db';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 function postRequest(url: string, body: unknown): NextRequest {
   return new NextRequest(`http://localhost:3000${url}`, {
@@ -104,7 +105,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  rmSync(sandbox, { recursive: true, force: true });
+  removeTempDir(sandbox);
 });
 
 beforeEach(() => {

@@ -13,7 +13,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { runMigrations } from '@/lib/db/db-migrations';
@@ -34,6 +34,7 @@ import {
   reindexSkillInstallations,
 } from '@/lib/skills/reindex';
 import type { SkillInstallReceipt } from '@/types/skills';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 let db: Database.Database;
 let repoRoot: string;
@@ -127,7 +128,7 @@ beforeEach(() => {
 
 afterEach(() => {
   db.close();
-  rmSync(repoRoot, { recursive: true, force: true });
+  removeTempDir(repoRoot);
 });
 
 describe('rebuilding after the index is lost', () => {
@@ -271,8 +272,8 @@ describe('converging an existing index', () => {
     const wt = path.join(repoRoot, 'wt-1');
     insertWorktree('wt-1', wt);
     install('wt-1', wt, 'demo-skill');
-    rmSync(path.join(wt, PRIMARY, 'demo-skill'), { recursive: true, force: true });
-    rmSync(path.join(wt, SECONDARY, 'demo-skill'), { recursive: true, force: true });
+    removeTempDir(path.join(wt, PRIMARY, 'demo-skill'));
+    removeTempDir(path.join(wt, SECONDARY, 'demo-skill'));
 
     const result = reindexSkillInstallations(db, { now: T0 + 1000 });
 
@@ -358,7 +359,7 @@ describe('directories that are not evidence', () => {
     const wt = path.join(repoRoot, 'wt-1');
     insertWorktree('wt-1', wt);
     install('wt-1', wt, 'demo-skill');
-    rmSync(wt, { recursive: true, force: true });
+    removeTempDir(wt);
 
     const result = reindexSkillInstallations(db, { now: T0 + 1000 });
 

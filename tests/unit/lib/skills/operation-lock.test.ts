@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'fs';
 import { hostname, tmpdir } from 'os';
 import { join } from 'path';
 import {
@@ -26,6 +26,7 @@ import {
   type SkillOperationLockRecord,
 } from '@/lib/skills/operation-lock';
 import { SKILL_LOCK_DIRNAME, ensureSkillStateDir } from '@/lib/skills/operation-store';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 let root: string;
 const KEY = buildSkillOperationLockKey('/srv/worktrees/wt-1', 'demo-skill');
@@ -67,7 +68,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  removeTempDir(root);
 });
 
 describe('lock key derivation', () => {

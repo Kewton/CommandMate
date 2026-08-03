@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -17,6 +17,7 @@ import {
   DEFAULT_TIMEOUT_SEC,
   DEFAULT_MAX_LOG_TAIL_BYTES,
 } from '@/lib/verification/verify-config';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 let repoPath: string;
 
@@ -48,7 +49,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(repoPath, { recursive: true, force: true });
+  removeTempDir(repoPath);
 });
 
 describe('loadVerifyConfig', () => {

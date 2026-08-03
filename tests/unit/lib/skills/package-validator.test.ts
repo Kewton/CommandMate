@@ -40,7 +40,6 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'fs';
@@ -69,6 +68,7 @@ import {
   buildPackage,
   maliciousCase,
 } from '@tests/fixtures/skills/malicious-packages';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const COORDINATES = { skillId: SKILL_ID, version: SKILL_VERSION };
 
@@ -96,7 +96,7 @@ beforeEach(() => {
 afterEach(() => {
   fsHooks.afterMkdir = null;
   fsHooks.beforeWrite = null;
-  rmSync(stagingRoot, { recursive: true, force: true });
+  removeTempDir(stagingRoot);
   vi.restoreAllMocks();
 });
 

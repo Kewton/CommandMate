@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import crypto from 'crypto';
@@ -20,6 +20,7 @@ import { NextRequest } from 'next/server';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { addRecentBrowsePath } from '@/lib/db/app-settings-db';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const AUTH_TOKEN = 'browse-test-token';
 const AUTH_TOKEN_HASH = crypto.createHash('sha256').update(AUTH_TOKEN).digest('hex');
@@ -81,7 +82,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  rmSync(sandbox, { recursive: true, force: true });
+  removeTempDir(sandbox);
 });
 
 beforeEach(() => {

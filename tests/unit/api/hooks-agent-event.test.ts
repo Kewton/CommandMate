@@ -22,7 +22,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { execFileSync } from 'child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import type { NextRequest } from 'next/server';
@@ -43,6 +43,7 @@ import {
   getLastStopEventAt,
 } from '@/lib/session/agent-event-state';
 import { AUTH_EXCLUDED_PATHS } from '@/config/auth-config';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 declare module '@/lib/db/db-instance' {
   export function setMockDb(db: Database.Database): void;
@@ -180,7 +181,7 @@ afterEach(async () => {
   clearAgentStopEvents();
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
-    if (dir) rmSync(dir, { recursive: true, force: true });
+    if (dir) removeTempDir(dir);
   }
 });
 

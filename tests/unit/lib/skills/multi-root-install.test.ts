@@ -53,6 +53,7 @@ import { inspectSkillPackage } from '@/lib/skills/package-validator';
 import type { SkillPackageSnapshot } from '@/lib/skills/package-validator';
 import { buildPackage } from '../../../fixtures/skills/malicious-packages/package';
 import { makeCatalogVersion } from './fixtures';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const SKILL_ID = 'demo-skill';
 const VERSION = '1.2.3';
@@ -124,7 +125,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(worktree, { recursive: true, force: true });
+  removeTempDir(worktree);
 });
 
 describe('dual-root install (#1460)', () => {

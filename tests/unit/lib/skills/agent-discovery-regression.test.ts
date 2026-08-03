@@ -42,6 +42,7 @@ import {
   type SkillAgentMatrixEntry,
 } from '@/lib/skills/compatibility-matrix';
 import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 vi.mock('@/lib/logger', () => ({
   createLogger: () => ({
@@ -91,7 +92,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  fs.rmSync(workspace, { recursive: true, force: true });
+  removeTempDir(workspace);
 });
 
 describe('the install writes one payload into both roots (#1460)', () => {

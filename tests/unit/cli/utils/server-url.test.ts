@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -20,6 +20,7 @@ vi.mock('../../../../src/cli/utils/env-setup', () => ({
 }));
 
 import { resolveServerEndpoint, loadEffectiveEnv } from '../../../../src/cli/utils/server-url';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 describe('resolveServerEndpoint', () => {
   it('should default to http://127.0.0.1:3000 when nothing is configured', () => {
@@ -75,7 +76,7 @@ describe('loadEffectiveEnv', () => {
   });
 
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    removeTempDir(dir);
     vi.unstubAllEnvs();
   });
 

@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createHash, randomBytes } from 'crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, statSync, writeFileSync } from 'fs';
 import path from 'path';
 import {
   SKILL_SNAPSHOT_ID_PATTERN,
@@ -26,6 +26,7 @@ import {
   sweepSkillSnapshots,
 } from '@/lib/skills/snapshot-store';
 import { ARTIFACT_BYTES, ARTIFACT_SHA256, COMMIT, SKILL_ID } from './fixtures';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 /**
  * The store refuses system directories, and os.tmpdir() resolves under /var on
@@ -66,7 +67,7 @@ beforeEach(() => {
 
 afterEach(() => {
   resetSkillSnapshotStoreForTesting();
-  rmSync(rootDir, { recursive: true, force: true });
+  removeTempDir(rootDir);
   vi.useRealTimers();
 });
 

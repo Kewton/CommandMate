@@ -16,11 +16,12 @@ import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree } from '@/lib/db';
 import type { Worktree } from '@/types/models';
 import { join } from 'path';
-import { mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { isValidNewName } from '@/lib/file-operations';
 import { isProtectedDirectory, DELETE_SAFETY_CONFIG } from '@/config/file-operations';
 import { validateContent } from '@/config/editable-extensions';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 // Declare mock function type
 declare module '@/lib/db/db-instance' {
@@ -96,7 +97,7 @@ describe('Security Tests', () => {
     db.close();
 
     if (existsSync(testDir)) {
-      rmSync(testDir, { recursive: true, force: true });
+      removeTempDir(testDir);
     }
   });
 

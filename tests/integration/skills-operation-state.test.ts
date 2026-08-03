@@ -10,7 +10,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { runMigrations } from '@/lib/db/db-migrations';
@@ -35,6 +35,7 @@ import {
   recordSkillOperationAudit,
 } from '@/lib/skills/operation-audit';
 import { reconcileSkillOperations } from '@/lib/skills/operation-reconciler';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 let db: Database.Database;
 let root: string;
@@ -98,7 +99,7 @@ beforeEach(() => {
 
 afterEach(() => {
   db.close();
-  rmSync(root, { recursive: true, force: true });
+  removeTempDir(root);
 });
 
 describe('a completed operation is audited with its provenance', () => {

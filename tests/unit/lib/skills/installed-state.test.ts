@@ -11,7 +11,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, lstatSync } from 'fs';
+import { mkdtempSync, readFileSync, symlinkSync, writeFileSync, lstatSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { runMigrations } from '@/lib/db/db-migrations';
@@ -29,6 +29,7 @@ import {
   writeSkillPayloadFile,
 } from '@/lib/skills/install-apply';
 import type { SkillInstallReceipt } from '@/types/skills';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 let db: Database.Database;
 let dir: string;
@@ -80,7 +81,7 @@ beforeEach(() => {
 
 afterEach(() => {
   db.close();
-  rmSync(dir, { recursive: true, force: true });
+  removeTempDir(dir);
 });
 
 describe('skill_installations index', () => {
@@ -237,7 +238,7 @@ describe('writeSkillPayloadFile', () => {
       );
       expect(readFileSync(outside).toString()).toBe('untouched\n');
     } finally {
-      rmSync(outsideDir, { recursive: true, force: true });
+      removeTempDir(outsideDir);
     }
   });
 });

@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
@@ -23,6 +23,7 @@ import {
   type SkillOperationBinding,
 } from '@/lib/skills/operation-journal';
 import { SKILL_JOURNAL_DIRNAME } from '@/lib/skills/operation-store';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 let root: string;
 const T0 = 1_800_000_000_000;
@@ -54,7 +55,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  removeTempDir(root);
 });
 
 describe('idempotency binding', () => {

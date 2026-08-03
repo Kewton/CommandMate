@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
@@ -28,6 +28,7 @@ import {
   reconcileSkillOperations,
   type SkillReconcilerPorts,
 } from '@/lib/skills/operation-reconciler';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 let root: string;
 const T0 = 1_800_000_000_000;
@@ -63,7 +64,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  removeTempDir(root);
 });
 
 describe('convergence after a crash', () => {
