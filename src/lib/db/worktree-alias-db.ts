@@ -145,6 +145,38 @@ export function getWorktreeAliases(
 }
 
 /**
+ * Every alias in the database, oldest first.
+ *
+ * Feeds the startup session reconciliation (Issue #1621 Phase 3/4): each row is
+ * an ID that used to name a worktree, so `mcbd-<cli>-<old_id>` is exactly the
+ * tmux session name a still-running agent may be sitting under. Ordering by
+ * `created_at` makes the pass deterministic; the rename itself is
+ * order-independent because it runs in two stages.
+ *
+ * Returns `[]` rather than throwing when the table has not been created yet, so
+ * a caller on an older database degrades to "nothing to reconcile".
+ *
+ * @param db - Database instance
+ */
+export function getAllWorktreeAliases(db: Database.Database): WorktreeAlias[] {
+  if (!hasAliasTable(db)) return [];
+
+  const rows = db
+    .prepare(
+      `SELECT old_id, worktree_id, created_at
+       FROM worktree_aliases
+       ORDER BY created_at ASC, old_id ASC`
+    )
+    .all() as Array<{ old_id: string; worktree_id: string; created_at: number }>;
+
+  return rows.map((row) => ({
+    oldId: row.old_id,
+    worktreeId: row.worktree_id,
+    createdAt: row.created_at,
+  }));
+}
+
+/**
  * Every ID that is currently answerable as an alias.
  *
  * Feeds `deriveWorktreeId`'s taken set: a brand-new worktree must not be minted

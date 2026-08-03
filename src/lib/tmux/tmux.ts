@@ -6,6 +6,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { invalidateCache } from './tmux-capture-cache';
+import { validateSessionName } from '@/lib/cli-tools/validation';
 import { TMUX_HISTORY_LIMIT, TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '@/config/tmux-pane-config';
 import { createLogger } from '@/lib/logger';
 
@@ -564,6 +565,70 @@ export async function killSession(sessionName: string): Promise<boolean> {
     // Re-throw unexpected errors
     throw new Error(`Failed to kill tmux session: ${errorMessage}`);
   }
+}
+
+/**
+ * Rename a running tmux session, keeping its processes and scrollback intact.
+ *
+ * This is what lets a worktree ID move without killing the agent underneath it.
+ * Session names are a *derived* value (`mcbd-{cli}-{worktreeId}[-{suffix}]`), so
+ * the moment the ID behind a directory changes, every session named after the
+ * old ID becomes unreachable through the app while the process keeps running —
+ * the UI shows nothing and a second agent can be started on the same directory
+ * (Issue #1621 (a)). Renaming re-attaches the name to the process instead.
+ *
+ * Measured on a throwaway session (Issue #1621): the pane PID is unchanged
+ * across the rename, scrollback survives, an attached client follows the
+ * session, and the old name stops resolving immediately.
+ *
+ * Both names are validated: `oldName` because it is interpolated into a tmux
+ * target, `newName` because tmux would otherwise happily create a session whose
+ * name contains `:` or `.` — characters tmux itself uses as target separators,
+ * which would make the session permanently unaddressable.
+ *
+ * The `-t` target goes through {@link exactTarget} like every other target in
+ * this module: `mcbd-claude-<wt>` is a prefix of `mcbd-claude-<wt>-2`, and a
+ * fuzzy match here would rename the wrong instance's session (Issue #1156).
+ *
+ * @param oldName - Current session name (exact)
+ * @param newName - New session name
+ * @returns true when the session was renamed; false when `oldName` does not
+ *          exist (or tmux is not running), which is not an error for a
+ *          reconciliation pass over sessions that may or may not be up
+ * @throws Error when the rename fails for any other reason — notably when
+ *         `newName` is already taken, which the caller must not silently ignore
+ */
+export async function renameSession(oldName: string, newName: string): Promise<boolean> {
+  validateSessionName(oldName);
+  validateSessionName(newName);
+
+  if (oldName === newName) return false;
+
+  try {
+    await execFileAsync('tmux', ['rename-session', '-t', exactTarget(oldName), newName], {
+      timeout: DEFAULT_TIMEOUT,
+    });
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (
+      errorMessage?.includes('no server running') ||
+      errorMessage?.includes("can't find session")
+    ) {
+      return false;
+    }
+    throw new Error(`Failed to rename tmux session: ${errorMessage}`);
+  }
+
+  // Capture output is cached per session NAME (TTL 5s). Both keys are now lies:
+  // the old one names a session that no longer exists, and the new one may hold
+  // a stale entry from a session that used to have this name. Dropping them is
+  // enough — the next capture repopulates (Issue #1621 says the capture cache
+  // may simply be discarded).
+  invalidateCache(oldName);
+  invalidateCache(newName);
+
+  logger.info('session:renamed', { oldName, newName });
+  return true;
 }
 
 /**

@@ -91,6 +91,14 @@ export class ControlModeTmuxTransport implements SessionTransport {
     return this.registry.getSubscriberCount(sessionName);
   }
 
+  /**
+   * Re-file a live control-mode attach after the tmux session was renamed
+   * (Issue #1621 Phase 3). See TmuxControlRegistry.renameSession.
+   */
+  renameSession(oldName: string, newName: string): boolean {
+    return this.registry.renameSession(oldName, newName);
+  }
+
   async killSession(sessionName: string): Promise<boolean> {
     return killSession(sessionName);
   }

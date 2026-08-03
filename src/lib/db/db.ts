@@ -42,6 +42,7 @@ export {
   recordWorktreeAlias,
   resolveWorktreeIdWithAlias,
   getWorktreeAliases,
+  getAllWorktreeAliases,
   getAliasedWorktreeIds,
   type WorktreeAlias,
 } from './worktree-alias-db';

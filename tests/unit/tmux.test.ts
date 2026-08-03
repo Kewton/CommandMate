@@ -16,11 +16,17 @@ import {
   clearInputLine,
   capturePane,
   killSession,
+  renameSession,
   ensureSession,
   exactTarget,
   reconcileSessionGeometry,
   SPECIAL_KEY_VALUES,
 } from '@/lib/tmux/tmux';
+import {
+  setCachedCapture,
+  getCachedCapture,
+  resetCacheForTesting,
+} from '@/lib/tmux/tmux-capture-cache';
 import { TMUX_HISTORY_LIMIT } from '@/config/tmux-pane-config';
 
 // Mock child_process execFile (Issue #393: exec -> execFile migration)
@@ -31,6 +37,7 @@ vi.mock('child_process', () => ({
 describe('tmux library', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetCacheForTesting();
   });
 
   afterEach(() => {
@@ -982,6 +989,87 @@ describe('tmux library', () => {
       await expect(killSession('test-session')).rejects.toThrow(
         'Failed to kill tmux session'
       );
+    });
+  });
+
+  /**
+   * Issue #1621 Phase 3: the rename is what lets a worktree ID move without
+   * killing the agent. Session names are derived from the ID, so without it the
+   * running process keeps going while the app can no longer see it — and will
+   * start a second agent in the same directory.
+   */
+  describe('renameSession', () => {
+    it('renames through an exact-match target and reports success', async () => {
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const callback = args[args.length - 1] as (err: Error | null, result: { stdout: string; stderr: string }) => void;
+        callback(null, { stdout: '', stderr: '' });
+        return {} as ReturnType<typeof execFile>;
+      });
+
+      const result = await renameSession('mcbd-claude-old', 'mcbd-claude-new');
+
+      expect(result).toBe(true);
+      // `=name:` and not a bare name: `mcbd-claude-<wt>` is a prefix of
+      // `mcbd-claude-<wt>-2`, so a fuzzy target renames the wrong instance
+      // (Issue #1156).
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['rename-session', '-t', '=mcbd-claude-old:', 'mcbd-claude-new'],
+        { timeout: 5000 },
+        expect.any(Function)
+      );
+    });
+
+    it('drops the capture cache for both names', async () => {
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const callback = args[args.length - 1] as (err: Error | null, result: { stdout: string; stderr: string }) => void;
+        callback(null, { stdout: '', stderr: '' });
+        return {} as ReturnType<typeof execFile>;
+      });
+
+      setCachedCapture('mcbd-claude-old', 'stale output', 100);
+      setCachedCapture('mcbd-claude-new', 'output of a session that used to own this name', 100);
+
+      await renameSession('mcbd-claude-old', 'mcbd-claude-new');
+
+      expect(getCachedCapture('mcbd-claude-old', 10)).toBeNull();
+      expect(getCachedCapture('mcbd-claude-new', 10)).toBeNull();
+    });
+
+    it('returns false (not throw) when the session is not running', async () => {
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const callback = args[args.length - 1] as (err: Error | null, result: { stdout: string; stderr: string }) => void;
+        callback(new Error("can't find session"), { stdout: '', stderr: '' });
+        return {} as ReturnType<typeof execFile>;
+      });
+
+      await expect(renameSession('mcbd-claude-old', 'mcbd-claude-new')).resolves.toBe(false);
+    });
+
+    it('throws when the destination name is taken', async () => {
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const callback = args[args.length - 1] as (err: Error | null, result: { stdout: string; stderr: string }) => void;
+        callback(new Error('duplicate session: mcbd-claude-new'), { stdout: '', stderr: '' });
+        return {} as ReturnType<typeof execFile>;
+      });
+
+      // A collision must be loud: silently swallowing it would leave the ID
+      // moved in the DB and the session stranded under the old name.
+      await expect(renameSession('mcbd-claude-old', 'mcbd-claude-new')).rejects.toThrow(
+        'Failed to rename tmux session'
+      );
+    });
+
+    it('rejects a name tmux could not address afterwards', async () => {
+      await expect(renameSession('mcbd-claude-old', 'mcbd-claude-new:0')).rejects.toThrow(
+        'Invalid session name format'
+      );
+      expect(execFile).not.toHaveBeenCalled();
+    });
+
+    it('is a no-op when the name is unchanged', async () => {
+      await expect(renameSession('mcbd-claude-old', 'mcbd-claude-old')).resolves.toBe(false);
+      expect(execFile).not.toHaveBeenCalled();
     });
   });
 

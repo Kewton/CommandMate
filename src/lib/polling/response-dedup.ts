@@ -54,3 +54,23 @@ export function isDuplicateResponse(pollerKey: string, content: string): boolean
 export function clearResponseHashCache(pollerKey: string): void {
   responseHashCache.delete(pollerKey);
 }
+
+/**
+ * Move the cached hash from one pollerKey to another.
+ *
+ * Used when a worktree ID is renamed underneath a running poller
+ * (Issue #1621 Phase 3). The cache answers "did I already save this screen
+ * during THIS turn?", and the turn does not end just because the ID moved —
+ * dropping it would re-save the screen currently on display.
+ *
+ * No-op when nothing is cached under `oldKey`.
+ *
+ * @param oldKey - Poller key the cache entry lives under
+ * @param newKey - Poller key it should live under
+ */
+export function renameResponseHashCacheKey(oldKey: string, newKey: string): void {
+  if (oldKey === newKey) return;
+  const hash = responseHashCache.get(oldKey);
+  responseHashCache.delete(oldKey);
+  if (hash !== undefined) responseHashCache.set(newKey, hash);
+}
