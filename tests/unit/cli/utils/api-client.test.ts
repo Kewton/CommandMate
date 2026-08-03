@@ -393,3 +393,128 @@ describe('warnIfVersionSkew', () => {
     consoleSpy.mockRestore();
   });
 });
+
+/**
+ * Issue #1637: a 5xx used to reach the operator as
+ * `Server error. Check server logs for details.` and nothing else.
+ *
+ * The cause was always in the response body — every route in this codebase
+ * answers `{ error }` — and the client already read that body for its `code`.
+ * It just never used the `error` field, so an initialization timeout, a failed
+ * model switch and an unhandled exception all printed the same sentence. Four
+ * consecutive orchestration runs hit the timeout and filed it as a session
+ * race, because "check the logs" was the only thing on screen.
+ */
+describe('handleApiError — 5xx carries the server\'s reason (Issue #1637)', () => {
+  it('surfaces the error field the server sent', () => {
+    const result = handleApiError(null, 500, {
+      error: 'Claude Code did not reach its input prompt within 60s (initialization timeout).',
+    });
+
+    expect(result.message).toContain('initialization timeout');
+    // Still identifiable as server-side rather than a CLI-local failure.
+    expect(result.message).toContain('Server error');
+  });
+
+  it('keeps the log pointer when the body explains nothing', () => {
+    expect(handleApiError(null, 500).message).toBe(
+      'Server error. Check server logs for details.'
+    );
+    expect(handleApiError(null, 500, {}).message).toBe(
+      'Server error. Check server logs for details.'
+    );
+    expect(handleApiError(null, 500, { error: '   ' }).message).toBe(
+      'Server error. Check server logs for details.'
+    );
+  });
+
+  it('applies to every 5xx, including the 503 a still-starting session returns', () => {
+    const result = handleApiError(null, 503, {
+      error: 'Claude Code did not reach its input prompt within 60s (initialization timeout).',
+      code: 'SESSION_STARTING',
+    });
+
+    expect(result.message).toContain('initialization timeout');
+    expect(result.exitCode).toBe(ExitCode.UNEXPECTED_ERROR);
+  });
+
+  it('leaves the 4xx wording alone', () => {
+    // These are the CLI's own, more specific messages; a server string must not
+    // displace "Check the worktree ID".
+    expect(handleApiError(null, 404, { error: "Worktree 'x' not found" }).message).toBe(
+      'Resource not found. Check the worktree ID.'
+    );
+    expect(handleApiError(null, 400, { error: 'contractPath is required' }).message).toBe(
+      'Bad request. Check your input parameters.'
+    );
+  });
+
+  it('caps a pathological server string instead of pasting it to the terminal', () => {
+    const result = handleApiError(null, 500, { error: 'x'.repeat(5000) });
+
+    expect(result.message.length).toBeLessThan(2100);
+    expect(result.message).toContain('…');
+  });
+});
+
+describe('ApiClient — the reason reaches the caller (Issue #1637)', () => {
+  afterEach(() => {
+    restoreFetch();
+    delete process.env.CM_PORT;
+  });
+
+  const TIMEOUT_BODY = {
+    error:
+      "Claude Code did not reach its input prompt within 60s (initialization timeout). " +
+      "The tmux session 'mcbd-claude-issue-1637' and its process are still running, so " +
+      'this is a slow start, not a failed one — retry the send in a few seconds.',
+    code: 'SESSION_STARTING',
+  };
+
+  it('post surfaces a still-starting session end to end', async () => {
+    mockFetchResponse(TIMEOUT_BODY, 503);
+    const client = new ApiClient();
+
+    const error = await client
+      .post('/api/worktrees/issue-1637/send', { content: 'hello' })
+      .then(() => null)
+      .catch((caught: unknown) => caught as ApiError);
+
+    // This is the string `commandmate send` prints. Before this Issue it read
+    // "Server error. Check server logs for details." for the same response.
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error?.message).toContain('initialization timeout');
+    expect(error?.message).toMatch(/retry/i);
+    expect(error?.statusCode).toBe(503);
+    expect(error?.apiCode).toBe('SESSION_STARTING');
+  });
+
+  it('get and patch surface it too', async () => {
+    mockFetchResponse({ error: 'boom: the database is locked' }, 500);
+    const client = new ApiClient();
+    const getError = await client
+      .get('/api/worktrees')
+      .then(() => null)
+      .catch((caught: unknown) => caught as ApiError);
+    expect(getError?.message).toContain('the database is locked');
+
+    mockFetchResponse({ error: 'boom: the database is locked' }, 500);
+    const patchError = await client
+      .patch('/api/worktrees/abc', {})
+      .then(() => null)
+      .catch((caught: unknown) => caught as ApiError);
+    expect(patchError?.message).toContain('the database is locked');
+  });
+
+  it('still reports a bodiless 5xx without inventing a cause', async () => {
+    mockFetchResponse(null, 502);
+    const client = new ApiClient();
+
+    const error = await client
+      .get('/api/worktrees')
+      .then(() => null)
+      .catch((caught: unknown) => caught as ApiError);
+
+    expect(error?.message).toBe('Server error. Check server logs for details.');
+  });
+});
