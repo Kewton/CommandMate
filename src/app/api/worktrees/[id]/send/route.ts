@@ -20,6 +20,10 @@ import { resolveInstanceCliTool } from '@/lib/db/agent-instances-db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { sendUserMessage } from '@/lib/session/send-user-message';
+import {
+  isSessionStartTimeoutError,
+  SESSION_STARTING_CODE,
+} from '@/lib/session/session-start-error';
 import { getGitStatus } from '@/lib/git/git-utils';
 import { isPathSafe, resolveAndValidateRealPath } from '@/lib/security/path-validator';
 import path from 'path';
@@ -269,6 +273,18 @@ export async function POST(
         }
       } catch (error: unknown) {
         logger.error('failed-to-start-session:', { error: error instanceof Error ? error.message : String(error) });
+        // Issue #1637: a session that is still initializing is not a server
+        // fault. The tmux session and the CLI process exist and are coming up,
+        // so the honest answer is "temporarily unavailable, retry" — 503 with a
+        // stable code — and the message says exactly that. Returning 500 here
+        // is what made four separate orchestration runs misdiagnose a slow cold
+        // start as a session-creation race.
+        if (isSessionStartTimeoutError(error)) {
+          return NextResponse.json(
+            { error: error.message, code: SESSION_STARTING_CODE },
+            { status: 503 }
+          );
+        }
         return NextResponse.json(
           { error: `Failed to start ${cliTool.name} session: ${getErrorMessage(error)}` },
           { status: 500 }

@@ -73,14 +73,45 @@ export interface ApiErrorResult {
 }
 
 /**
+ * The server's own explanation for a failure, when it sent one worth showing.
+ *
+ * Issue #1637: every 5xx used to be flattened into `Server error. Check server
+ * logs for details.`, which is only useful to someone who has the server logs.
+ * A cold-start `send` failed with an initialization timeout and told the
+ * operator nothing but "go read the logs" — four orchestration runs in a row
+ * then misdiagnosed it as a session-creation race and worked around it by
+ * re-sending. Every route in this codebase already answers `{ error }`, so the
+ * cause was always in the response body; nothing read it.
+ *
+ * Trimmed and length-capped because it is printed to a terminal, and an
+ * unbounded server string is not something a CLI should paste verbatim.
+ */
+const MAX_SERVER_ERROR_DETAIL = 2000;
+
+function serverErrorDetail(payload?: ApiErrorPayload): string | undefined {
+  const detail = typeof payload?.error === 'string' ? payload.error.trim() : '';
+  if (detail === '') return undefined;
+  return detail.length > MAX_SERVER_ERROR_DETAIL
+    ? `${detail.slice(0, MAX_SERVER_ERROR_DETAIL)}…`
+    : detail;
+}
+
+/**
  * Classify API errors into user-friendly messages and exit codes.
  * [IA3-09] Covers: ECONNREFUSED, 400, 401/403, 404, 429, 500, timeout
  *
  * @param error - Error object or unknown
  * @param status - HTTP status code if available
+ * @param payload - Parsed error body, when the response carried one (Issue #1637).
+ *   Used for 5xx only: the 4xx messages below are already specific, and are
+ *   pinned by tests as the CLI's own wording.
  * @returns User-friendly error message and exit code
  */
-export function handleApiError(error: unknown, status?: number): ApiErrorResult {
+export function handleApiError(
+  error: unknown,
+  status?: number,
+  payload?: ApiErrorPayload
+): ApiErrorResult {
   // HTTP status-based errors
   if (status !== undefined) {
     switch (status) {
@@ -108,8 +139,14 @@ export function handleApiError(error: unknown, status?: number): ApiErrorResult 
       case 500:
       default:
         if (status >= 500) {
+          // Issue #1637: pass the server's own reason through. The prefix is
+          // kept so "this came from the server, not from the CLI" survives, and
+          // so does the log pointer when the body said nothing.
+          const detail = serverErrorDetail(payload);
           return {
-            message: 'Server error. Check server logs for details.',
+            message: detail
+              ? `Server error: ${detail}`
+              : 'Server error. Check server logs for details.',
             exitCode: ExitCode.UNEXPECTED_ERROR,
           };
         }
@@ -205,8 +242,10 @@ export class ApiClient {
       });
 
       if (!response.ok) {
-        const errResult = handleApiError(null, response.status);
+        // Issue #1637: read the body first — handleApiError needs it to surface
+        // the server's reason for a 5xx instead of "check the logs".
         const payload = await readErrorPayload(response);
+        const errResult = handleApiError(null, response.status, payload);
         throw new ApiError(errResult.message, errResult.exitCode, response.status, payload);
       }
 
@@ -231,8 +270,10 @@ export class ApiClient {
       });
 
       if (!response.ok) {
-        const errResult = handleApiError(null, response.status);
+        // Issue #1637: read the body first — handleApiError needs it to surface
+        // the server's reason for a 5xx instead of "check the logs".
         const payload = await readErrorPayload(response);
+        const errResult = handleApiError(null, response.status, payload);
         throw new ApiError(errResult.message, errResult.exitCode, response.status, payload);
       }
 
@@ -261,8 +302,10 @@ export class ApiClient {
       });
 
       if (!response.ok) {
-        const errResult = handleApiError(null, response.status);
+        // Issue #1637: read the body first — handleApiError needs it to surface
+        // the server's reason for a 5xx instead of "check the logs".
         const payload = await readErrorPayload(response);
+        const errResult = handleApiError(null, response.status, payload);
         throw new ApiError(errResult.message, errResult.exitCode, response.status, payload);
       }
 

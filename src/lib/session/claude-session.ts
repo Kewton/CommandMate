@@ -30,6 +30,11 @@ import { access, constants } from 'fs/promises';
 import { createLogger } from '@/lib/logger';
 import { CLAUDE_RESTART_DELAY_MS } from '@/config/cli-tool-timing-config';
 import { deriveSessionSuffix } from '@/lib/cli-tools/types';
+import {
+  SessionStartFailedError,
+  SessionStartTimeoutError,
+  isSafeSessionStartError,
+} from '@/lib/session/session-start-error';
 
 const logger = createLogger('claude-session');
 
@@ -83,9 +88,35 @@ const SHELL_PROMPT_ENDINGS: readonly string[] = ['$', '%', '#'] as const;
  * This timeout also covers trust dialog auto-response time (typically <1s).
  * When reducing this value, consider dialog response overhead.
  *
- * 15 seconds provides headroom for slower networks or cold starts.
+ * Issue #1637: raised from 15s to 60s. Measured on the reporter's machine
+ * (macOS, Claude Code v2, private tmux socket, the same detection predicates
+ * this module uses — `Yes, I trust this folder` for the dialog and
+ * CLAUDE_PROMPT_PATTERN for readiness):
+ *
+ *   - idle, already-trusted repository worktree : 1443 / 1470 ms
+ *   - idle, fresh directory (trust dialog shown): 1885 / 1896 / 1902 ms
+ *     (dialog visible at ~940 ms, prompt ~950 ms after it is answered)
+ *   - six cold starts launched concurrently     : 2845 / 3450 / 3488 / 4206 /
+ *                                                 4215 / 4850 ms
+ *
+ * So a healthy cold start costs ~2s idle and ~5s at six-way concurrency, and
+ * 15s left under 4x headroom over the concurrent case. That is what the six
+ * production failures spent: the machine was running an orchestration (several
+ * agent sessions plus test suites and builds), and the Issue's own reproduction
+ * — re-send ~30s later succeeds — puts the real ready time in that run above
+ * 15s and at or below ~45s. 60s covers it with margin and is the same order of
+ * magnitude as the window Codex already allows (3s + 30 x 1s polls ≈ 33s).
+ *
+ * Waiting longer costs nothing on the healthy path (the loop exits as soon as
+ * the prompt appears) and a session whose output already shows a terminal error
+ * fails immediately rather than consuming the budget — see the error-pattern
+ * check in startClaudeSession().
+ *
+ * This is the *first start* budget only. Sending to a session that already
+ * exists is bounded separately by CLAUDE_SEND_PROMPT_WAIT_TIMEOUT (10s), which
+ * is unchanged.
  */
-export const CLAUDE_INIT_TIMEOUT = 15000;
+export const CLAUDE_INIT_TIMEOUT = 60000;
 
 /**
  * Initialization polling interval (milliseconds)
@@ -133,7 +164,7 @@ export const CLAUDE_PROMPT_WAIT_TIMEOUT = 5000;
  * Relationship to other timeout constants:
  * - CLAUDE_PROMPT_WAIT_TIMEOUT (5000ms): Default for waitForPrompt()
  * - CLAUDE_SEND_PROMPT_WAIT_TIMEOUT (10000ms): sendMessageToClaude() specific
- * - CLAUDE_INIT_TIMEOUT (15000ms): Session initialization timeout
+ * - CLAUDE_INIT_TIMEOUT (60000ms): first-start initialization budget (Issue #1637)
  *
  * @see Issue #187 - Constant unification for sendMessageToClaude timeout
  */
@@ -285,6 +316,41 @@ async function getCleanPaneOutput(sessionName: string, lines: number = 50): Prom
   return stripAnsi(output);
 }
 
+/**
+ * The terminal error pattern visible in the tail of `cleanOutput`, or null.
+ *
+ * Extracted from isSessionHealthy() so the initialization loop can apply the
+ * same judgement (Issue #1637): with a 60s start budget, a session that has
+ * already printed "Claude Code cannot be launched inside another Claude Code
+ * session" must not sit there burning the whole budget before saying so.
+ *
+ * Only the last {@link HEALTH_CHECK_ERROR_TAIL_LINES} lines are searched, so a
+ * historical error that has scrolled up cannot condemn a session that recovered.
+ *
+ * @param cleanOutput - ANSI-stripped pane output
+ * @returns The matched pattern (or regex source) for the log, or null
+ */
+function findSessionErrorPattern(cleanOutput: string): string | null {
+  const allLines = cleanOutput
+    .trim()
+    .split('\n')
+    .filter((line) => line.trim() !== '');
+  const tailText = allLines.slice(-HEALTH_CHECK_ERROR_TAIL_LINES).join('\n');
+
+  // MF-001: Check error patterns from cli-patterns.ts (SRP - pattern management centralized)
+  for (const pattern of CLAUDE_SESSION_ERROR_PATTERNS) {
+    if (tailText.includes(pattern)) {
+      return pattern;
+    }
+  }
+  for (const regex of CLAUDE_SESSION_ERROR_REGEX_PATTERNS) {
+    if (regex.test(tailText)) {
+      return regex.source;
+    }
+  }
+  return null;
+}
+
 // ----- Health Check Functions (Bug 2) -----
 
 /**
@@ -335,19 +401,10 @@ export async function isSessionHealthy(sessionName: string): Promise<HealthCheck
     // Only the last HEALTH_CHECK_ERROR_TAIL_LINES lines are searched, so
     // historical errors that have scrolled up do not trigger false negatives.
     const allLines = trimmed.split('\n').filter(line => line.trim() !== '');
-    const tailLines = allLines.slice(-HEALTH_CHECK_ERROR_TAIL_LINES);
-    const tailText = tailLines.join('\n');
 
-    // MF-001: Check error patterns from cli-patterns.ts (SRP - pattern management centralized)
-    for (const pattern of CLAUDE_SESSION_ERROR_PATTERNS) {
-      if (tailText.includes(pattern)) {
-        return { healthy: false, reason: `error pattern: ${pattern}` };
-      }
-    }
-    for (const regex of CLAUDE_SESSION_ERROR_REGEX_PATTERNS) {
-      if (regex.test(tailText)) {
-        return { healthy: false, reason: `error pattern: ${regex.source}` };
-      }
+    const errorPattern = findSessionErrorPattern(trimmed);
+    if (errorPattern !== null) {
+      return { healthy: false, reason: `error pattern: ${errorPattern}` };
     }
 
     // S2-F002: Extract last line after empty line filtering
@@ -615,36 +672,59 @@ export async function startClaudeSession(
     while (Date.now() - startTime < maxWaitTime) {
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
 
+      // SF-001: Use getCleanPaneOutput helper (DRY)
+      let cleanOutput: string | null = null;
       try {
-        // SF-001: Use getCleanPaneOutput helper (DRY)
-        const cleanOutput = await getCleanPaneOutput(sessionName);
-        // Claude is ready when we see the prompt (DRY-001)
-        // Use CLAUDE_PROMPT_PATTERN from cli-patterns.ts for consistency
-        // Note: CLAUDE_SEPARATOR_PATTERN was removed from initialization check (Issue #187, P1-1)
-        if (CLAUDE_PROMPT_PATTERN.test(cleanOutput)) {
-          // Wait for stability after prompt detection (CONS-007, DOC-001)
-          await new Promise((resolve) => setTimeout(resolve, CLAUDE_POST_PROMPT_DELAY));
-          logger.info('claude-initialized-in');
-          initialized = true;
-          break;
-        }
-
-        // Issue #201: Detect trust dialog and auto-respond with Enter
-        // Condition order: CLAUDE_PROMPT_PATTERN (above) is checked first for shortest path
-        if (!trustDialogHandled && CLAUDE_TRUST_DIALOG_PATTERN.test(cleanOutput)) {
-          await sendKeys(sessionName, '', true);
-          trustDialogHandled = true;
-          logger.info('trust-dialog-detected');
-          // Continue polling to wait for prompt detection
-        }
+        cleanOutput = await getCleanPaneOutput(sessionName);
       } catch {
         // Ignore capture errors during initialization
       }
+      if (cleanOutput === null) {
+        continue;
+      }
+
+      // Claude is ready when we see the prompt (DRY-001)
+      // Use CLAUDE_PROMPT_PATTERN from cli-patterns.ts for consistency
+      // Note: CLAUDE_SEPARATOR_PATTERN was removed from initialization check (Issue #187, P1-1)
+      if (CLAUDE_PROMPT_PATTERN.test(cleanOutput)) {
+        // Wait for stability after prompt detection (CONS-007, DOC-001)
+        await new Promise((resolve) => setTimeout(resolve, CLAUDE_POST_PROMPT_DELAY));
+        logger.info('claude-initialized-in');
+        initialized = true;
+        break;
+      }
+
+      // Issue #201: Detect trust dialog and auto-respond with Enter
+      // Condition order: CLAUDE_PROMPT_PATTERN (above) is checked first for shortest path
+      if (!trustDialogHandled && CLAUDE_TRUST_DIALOG_PATTERN.test(cleanOutput)) {
+        try {
+          await sendKeys(sessionName, '', true);
+          trustDialogHandled = true;
+          logger.info('trust-dialog-detected');
+        } catch {
+          // Left unhandled so the next poll answers the dialog again
+        }
+        // Continue polling to wait for prompt detection
+      }
+
+      // Issue #1637: fail fast on a start that cannot succeed. The budget is
+      // 60s of patience for a *slow* start; a session already showing a
+      // terminal error is not slow, and waiting out the budget would only
+      // delay the same answer by 45 more seconds. Checked after the trust
+      // dialog so a dialog still on screen is answered first.
+      const errorPattern = findSessionErrorPattern(cleanOutput);
+      if (errorPattern !== null) {
+        throw new SessionStartFailedError('Claude Code', sessionName, errorPattern);
+      }
     }
 
-    // Throw error on timeout instead of silently continuing (CONS-005, IMP-001)
+    // Issue #1637: not "failed to start" — the session and the CLI process both
+    // exist and are still initializing, and they are deliberately left running
+    // so the retry the caller is about to make is cheap. The distinction is
+    // carried to the caller by the error type rather than lost in a generic
+    // message (CONS-005, IMP-001).
     if (!initialized) {
-      throw new Error(`Claude initialization timeout (${CLAUDE_INIT_TIMEOUT}ms)`);
+      throw new SessionStartTimeoutError('Claude Code', sessionName, CLAUDE_INIT_TIMEOUT);
     }
 
     logger.info('started-claude-session:sessionname');
@@ -653,6 +733,15 @@ export async function startClaudeSession(
     clearCachedClaudePath();
     // SEC-SF-002: Log detailed error server-side, throw generic message to client
     logger.error('session:start-failed', { error: error instanceof Error ? error.message : String(error) });
+    // Issue #1637: the one exception to SEC-SF-002. These two messages are
+    // assembled from a tool name, the tmux session name, a fixed pattern string
+    // and a number — no filesystem path, no captured CLI output — so they are
+    // safe to hand to the caller, and they are the whole reason the caller can
+    // tell "still starting" from "broken" instead of being told to read a log
+    // it may not have.
+    if (isSafeSessionStartError(error)) {
+      throw error;
+    }
     throw new Error('Failed to start Claude session');
   }
 }

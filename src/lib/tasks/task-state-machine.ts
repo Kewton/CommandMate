@@ -33,6 +33,13 @@ import type { TaskStatus } from '@/lib/db';
  * sit in `pending` forever. With the direct status writes closed off, dropping
  * it would have deleted that behaviour rather than migrating it.
  *
+ * What the event *means* depends on where it lands, which is why the two cases
+ * do not share a target status (#1637). From `pending` it means the contract
+ * was never delivered at all, and the row must not be resolvable afterwards.
+ * From `running` it means a follow-up message to an agent that is already
+ * working could not be delivered — real work exists, and re-judging it later is
+ * the point of `failed` being re-openable.
+ *
  * `prompt_answered_auto` and `prompt_answered_human` share a target status and
  * differ only in who answered — which is the whole point, since Phase 4 Eval
  * counts human interventions.
@@ -81,8 +88,30 @@ export function transitionTask(current: TaskStatus, event: TaskEvent): TaskStatu
       switch (event) {
         case 'message_sent':
           return 'running';
+        // Issue #1637: a contract whose very first send never landed is
+        // `cancelled`, not `failed`. The row stays — the audit trail is the
+        // `task_events` entry recording `send_failed` from `pending`, which
+        // says precisely what happened — but the status has to keep the row out
+        // of later contract resolution, and `failed` cannot do that.
+        //
+        // `failed` is deliberately re-openable: VERIFIABLE_TASK_STATUSES
+        // (src/lib/db/tasks-db.ts) includes it so an agent that retries after a
+        // red gate finds its contract again (#1620). A task nothing was ever
+        // sent for has no work to re-judge, yet it is the *most recently
+        // updated* verifiable row, so `getVerifiableTask` hands it to any later
+        // run that has to discover its own task. In #1623 that is exactly what
+        // happened: a send that failed on a cold start left `cbb7fe71`, the
+        // re-send created `88280de0` which finished `succeeded` — and
+        // `succeeded` is excluded from resolution while the orphan was not, so
+        // the orchestrator's `wait --verify` judged the worktree against the
+        // orphan's *older* scope snapshot and returned exit 20 for paths the
+        // current contract allows.
+        //
+        // `cancelled` is in neither ACTIVE_TASK_STATUSES nor
+        // VERIFIABLE_TASK_STATUSES, so it closes that path at the only point
+        // this layer controls: the status the event writes.
         case 'send_failed':
-          return 'failed';
+          return 'cancelled';
         case 'cancel':
           return 'cancelled';
         case 'prompt_detected':
