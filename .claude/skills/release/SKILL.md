@@ -248,37 +248,34 @@ npm version "${NEXT_VERSION}" --no-git-tag-version
 遷移で client-side exception。過去 3 回発生）。同じ理由で `.commandmate/verify.yaml` は
 `skipInPrimaryCheckout: true` で build を除外している。**スキルだけ素で build を回すと矛盾する。**
 
-代わりに検証ゲートを使う。primary checkout では build が自動的に外れ、lint / typecheck / unit は走る。
+**`commandmate verify` もここでは使えない。** `options.skipInPrimaryCheckout: true` は
+build だけを外すのではなく、**worktreePath がサーバプロセスの cwd と一致する場合に宣言ゲートを
+すべてスキップする run 単位のオプション**である（実測）:
 
-```bash
-# --branch develop は他リポジトリの develop も拾う（実測で 3 件返った）ので、
-# ID プレフィックスで本リポジトリに絞ること。head -1 に頼らない。
-WT=$(commandmatedev ls --id mycodebranchdesk-develop --quiet)
-[ "$(printf '%s\n' "$WT" | wc -l | xargs)" = "1" ] || { echo "worktree-id が一意に決まらない: $WT"; exit 1; }
-
-commandmatedev verify "$WT" --json > /tmp/release-gate.json; echo $?
+```
+GATE lint     SKIP (skipped: worktreePath is the server process working directory and
+                    options.skipInPrimaryCheckout is true.)
+GATE typecheck SKIP (同上)
+GATE unit     SKIP (同上)
+RESULT error → exit 99
 ```
 
-| exit | 意味 | 対応 |
-|---|---|---|
-| `0` | 合格 | 次へ |
-| `20` | 不合格 | `--json` の失敗ゲートと `logTail` を見て修正。3 回失敗で中断 |
-| `21` | 作業証跡ゼロ | 版 bump の commit 前に走らせている。順序を見直す |
-| `99` | 設定エラー等 | `/tmp/release-gate.json` の中身を読む |
+したがって develop で `verify` を叩くと**何も検証されないまま exit 99 が返る**。
 
-`> ファイル 2>&1; echo $?` の形を崩さないこと。`| grep` に繋ぐと exit code が grep のものに化ける。
+**手動で以下の 3 つを回す。`npm run build` は含めない。**
+
+```bash
+npm run lint      > /tmp/rel-lint.log 2>&1; echo "LINT=$?"
+npx tsc --noEmit  > /tmp/rel-tsc.log  2>&1; echo "TSC=$?"
+npm run test:unit > /tmp/rel-unit.log 2>&1; echo "UNIT=$?"
+```
+
+`> ファイル 2>&1; echo $?` の形を崩さないこと。`| grep` に繋ぐと exit code が grep のものに
+化け、失敗を成功として読む。3 つとも 0 であること。1 つでも落ちたら修正してから進む（3 回失敗で中断）。
 
 **build の検証は CI に委ねる。** リリース PR の `ci-pr.yml` に Build ジョブがあり、
 別マシンで実行されるので稼働サーバに影響しない。どうしても手元で build を確認したい場合は
 **linked worktree を作ってそこで回す**（primary checkout では絶対に回さない）。
-
-サーバが停止していて `verify` が使えない場合のみ、手動で以下を回す（**build は含めない**）:
-
-```bash
-npm run lint
-npx tsc --noEmit
-npm run test:unit
-```
 
 ### 2-4. コミット & push
 
