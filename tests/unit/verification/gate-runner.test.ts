@@ -406,6 +406,44 @@ options:
     expect(getVerificationRun(db, runId)?.status).toBe('passed');
   });
 
+  // Issue #1628 (D-4): the Epic #1585 acceptance run ended in `RESULT passed`
+  // over `commits=0 uncommitted=1` while the contract preamble told the agent
+  // "未 commit の作業は未完了とみなされる". options.requireCommit makes the gate
+  // enforce what that sentence claims; it is opt-in so the default answer to
+  // "is there work here to verify" is unchanged (see the two tests above).
+  describe('options.requireCommit (Issue #1628)', () => {
+    const REQUIRE_COMMIT_CONFIG = `${PASSING_CONFIG}  requireCommit: true\n`;
+
+    it('fails work-evidence on an uncommitted change alone', async () => {
+      const repo = createRepo(REQUIRE_COMMIT_CONFIG);
+      addUncommittedWork(repo);
+      registerWorktree('wt-require-commit-dirty', repo);
+
+      const runId = await runToCompletion('wt-require-commit-dirty', repo);
+
+      const evidence = gatesById(runId).get(WORK_EVIDENCE_GATE_ID);
+      expect(evidence?.status).toBe('failed');
+      expect(evidence?.logTail).toContain('commits=0 uncommitted=1 requireCommit=true');
+      expect(evidence?.logTail).toContain('commit them');
+      expect(getVerificationRun(db, runId)?.status).toBe('not_started');
+    });
+
+    it('passes once the same change is committed', async () => {
+      const repo = createRepo(REQUIRE_COMMIT_CONFIG);
+      addUncommittedWork(repo);
+      git(['add', '-A'], repo);
+      git(['commit', '-m', 'agent work'], repo);
+      registerWorktree('wt-require-commit-clean', repo);
+
+      const runId = await runToCompletion('wt-require-commit-clean', repo);
+
+      const evidence = gatesById(runId).get(WORK_EVIDENCE_GATE_ID);
+      expect(evidence?.status).toBe('passed');
+      expect(evidence?.logTail).toContain('commits=1');
+      expect(getVerificationRun(db, runId)?.status).toBe('passed');
+    });
+  });
+
   it('reports not_started when only an uncommitted contract file is present', async () => {
     // The orchestrator flow #1580 exists for: drop the contract into the
     // worktree, send, and the agent does nothing. Counting the contract would

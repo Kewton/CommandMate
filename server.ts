@@ -322,6 +322,24 @@ app.prepare().then(() => {
     // Initialize worktrees after server starts
     await initializeWorktrees();
 
+    // Issue #1623: reconcile the `prefix+g` reading-mode binding on the user's
+    // tmux server. Fail-open in its own try/catch — a convenience key must never
+    // be able to stop the server from serving.
+    //
+    // Dynamic import, NOT a top-level static import, for the same reason as the
+    // reconcilers above: adding a module graph to server.ts's eval-time graph
+    // perturbs Next's AsyncLocalStorage bootstrap under `tsx server.ts`, and the
+    // first request that compiles middleware then dies. Do not hoist this.
+    try {
+      const { initReadMode } = await import('./src/lib/tmux/read-mode');
+      const readMode = await initReadMode();
+      if (readMode.installed) {
+        console.log(`Reading mode ready: press prefix+${readMode.key} in an attached CommandMate session`);
+      }
+    } catch (error) {
+      console.error('Error initializing tmux reading mode:', error);
+    }
+
     // [S3-010] Initialize schedule manager AFTER worktrees are ready
     initScheduleManager();
 

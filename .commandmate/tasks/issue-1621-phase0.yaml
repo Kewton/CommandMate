@@ -1,0 +1,86 @@
+version: 1
+title: "Issue #1621 Phase 0: worktree_id を持つ全テーブルの追従と孤児掃除"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/1621 の **Phase 0 のみ** を実装する。
+  Phase 1〜4（ID のパス由来化・alias・セッション reconcile・一括移行）は
+  **別ワーカーの担当なので絶対に手を出さないこと**。`generateWorktreeId` の採番規則は変更しない。
+
+  ## 背景（Issue #1621 より）
+
+  `getWorktreeChildTables`（src/lib/db/worktree-db.ts:378-402）は子テーブルを
+  **FK メタデータから動的導出**している。しかし `tasks`(#1548) / `verification_runs`(#1544) /
+  `skill_operations`(#1428) は `worktree_id` カラムを持つが FK 宣言が無いため、この列挙から漏れる。
+  結果として worktree ID の移送でも削除でも取りこぼし、孤児行が残る。
+
+  ## 実装内容
+
+  1. `getWorktreeChildTables` の列挙を **FK メタデータ由来から「`worktree_id` カラムを持つ全テーブル」由来**へ変更する。
+     - `PRAGMA table_info` を全テーブルに回し、`worktree_id` 列の有無で判定する（FK 宣言の有無は問わない）
+     - `worktrees` テーブル自身や sqlite 内部テーブル（`sqlite_%`）を誤って含めないこと
+  2. `migrateWorktreeIdPreservingChildren`（同ファイル 414-452）が新しい列挙で全テーブルを移送することを保証する
+  3. **削除経路** `deleteWorktreesByIds`（同ファイル 756-771）でも FK 無しテーブルの行を明示削除する。
+     現状は CASCADE が効かず孤児が残る（実測済み）
+  4. 既存の孤児行を掃除する migration を追加する。
+     - `src/lib/db/migrations/` に新ファイルを追加し、`src/lib/db/migrations/index.ts` の import と
+       `migrations` 配列の両方に登録する
+     - `src/lib/db/migrations/runner.ts` の `CURRENT_SCHEMA_VERSION` を 51 → 52 に上げる
+     - 掃除対象は「`worktree_id` を持つ全テーブルのうち、`worktrees` に存在しない `worktree_id` を指す行」。
+       特定テーブル名をハードコードせず、1 の列挙ロジックを再利用すること
+     - 実 DB での既知の孤児は `verification_runs` 3 件・`skill_operations` 3 件（`mycodebranchdesk-feature-1544-cli-verify`）
+
+  ## 受入条件（すべてテストで固定すること）
+
+  - [ ] `worktree_id` を持つ全テーブル（FK 有無を問わない）が **rename 経路**（`migrateWorktreeIdPreservingChildren`）で追従すること
+  - [ ] 同じく **delete 経路**（`deleteWorktreesByIds`）で行が消え、孤児が残らないこと
+  - [ ] FK 宣言がある既存テーブルの挙動が退行していないこと
+  - [ ] migration が孤児行のみを消し、正当な行を消さないこと
+  - [ ] `worktrees` 自身や sqlite 内部テーブルが子テーブルとして列挙されないこと
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` が exit 0
+
+  ## 作業ルール（厳守）
+
+  - **PR を作らないこと。** ブランチにコミットするところまでが担当。PR は orchestrator が作る
+  - コミットは論理単位で複数に分けてよい。単一コミットにまとめる必要はない
+  - `dev-reports/` 配下は **コミットしないこと**
+  - `CHANGELOG.md` の Unreleased セクションに 1 行だけ追記する（他ワーカーと衝突するので最小限に）
+  - **Issue 本文の記述はコードで裏取りすること。** 行番号・テーブル名・件数が実際と食い違ったら
+    **実測を正**とし、食い違いをコミットメッセージに明記する
+  - **対になる経路も点検すること。** rename を直したら delete も、読み取りを直したら書き込みも見る
+
+  ## 現在の状態（2026-08-02 時点・オーケストレーターによる引き継ぎ）
+
+  **前任ワーカーが作業中に外部要因で強制終了した**（別ワーカーの live tmux テストが
+  `tmux kill-server` を撃ち、全 `mcbd-*` セッションが同時に落ちた。あなたの作業内容とは無関係）。
+  作業は**未コミットのまま worktree に残っている**。commit は 0 件。
+
+  ```
+   M src/lib/db/migrations/index.ts
+   M src/lib/db/migrations/runner.ts
+   M src/lib/db/worktree-db.ts
+   M tests/unit/lib/db-migrations.test.ts
+  ?? src/lib/db/migrations/v52-orphaned-worktree-children.ts
+  ?? src/lib/db/migrations/worktree-child-tables.ts
+  ?? tests/unit/db/migration-v52-mocked-worktree-db.test.ts
+  ?? tests/unit/db/worktree-child-tables.test.ts
+  ```
+
+  **やり直さないこと。** まず `git status` と `git diff` で残っている作業を読み、
+  `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` を回して現在地を確認してから、
+  足りない分だけを進めてコミットすること。どこまで出来ているかは未確認なので、
+  受入条件のチェックリストを 1 つずつ実測で埋め直すこと。
+
+  - 完了したら最後に `IMPL_COMPLETED` とだけ出力する
+scope:
+  allow:
+    - "src/lib/db/worktree-db.ts"
+    - "src/lib/db/db.ts"
+    - "src/lib/db/migrations/**"
+    - "tests/unit/**"
+    - "tests/integration/**"
+    - "docs/module-reference.md"
+    - "CHANGELOG.md"
+    - ".commandmate/tasks/**"
+  deny: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

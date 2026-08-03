@@ -130,6 +130,82 @@ export function getAgentInstance(
 }
 
 /**
+ * Outcome of {@link resolveInstanceCliTool}.
+ *
+ * `cliToolId: null` means the request carried no signal about which CLI tool
+ * backs the instance; the caller applies its own default (worktree setting,
+ * then 'claude').
+ */
+export type InstanceCliToolResolution =
+  | { ok: true; cliToolId: CLIToolType | null }
+  | {
+      ok: false;
+      instanceId: string;
+      rosterCliTool: CLIToolType;
+      requestedCliTool: CLIToolType;
+    };
+
+/**
+ * Resolve which CLI tool backs a targeted agent instance (Issue #1629).
+ *
+ * The CLI tool id is part of the tmux session name, so getting it wrong starts
+ * (or looks for) the wrong agent under a session name that claims otherwise:
+ * `--instance codex` used to start Claude in `mcbd-claude-<wt>-codex`.
+ *
+ * Resolution order:
+ *   1. the roster entry for `instanceId` — the roster is what declares that
+ *      `codex` is a codex instance, so it wins over the worktree default
+ *   2. `requestedCliTool`, for an instance the roster does not know about
+ *      (the ad-hoc `send --instance <new-id>` / `--register` flow)
+ *   3. `instanceId` when it is itself a CLI tool id — that is how the primary
+ *      instance is anchored (Issue #868), and holds without a roster row
+ *   4. no signal (`cliToolId: null`) — the caller falls back to its default
+ *
+ * An explicit `requestedCliTool` that contradicts the roster is reported as a
+ * conflict rather than silently overriding it: the roster is user-maintained
+ * and a mismatch means one of the two is wrong. Callers surface it as an error.
+ *
+ * @param db - Database instance
+ * @param worktreeId - Worktree ID
+ * @param instanceId - Targeted agent instance ID (omitted for the primary instance)
+ * @param requestedCliTool - CLI tool explicitly named by the caller, if any
+ */
+export function resolveInstanceCliTool(
+  db: Database.Database,
+  worktreeId: string,
+  instanceId: string | undefined,
+  requestedCliTool?: CLIToolType
+): InstanceCliToolResolution {
+  if (!instanceId) {
+    return { ok: true, cliToolId: requestedCliTool ?? null };
+  }
+
+  const registered = getAgentInstance(db, worktreeId, instanceId);
+  if (registered && isCliToolType(registered.cliTool)) {
+    if (requestedCliTool && requestedCliTool !== registered.cliTool) {
+      return {
+        ok: false,
+        instanceId,
+        rosterCliTool: registered.cliTool,
+        requestedCliTool,
+      };
+    }
+    return { ok: true, cliToolId: registered.cliTool };
+  }
+
+  // Not registered: an instance id that names a CLI tool is that tool's primary
+  // instance by definition, which outranks the worktree default but not an
+  // explicit request.
+  if (requestedCliTool) {
+    return { ok: true, cliToolId: requestedCliTool };
+  }
+  if (isCliToolType(instanceId)) {
+    return { ok: true, cliToolId: instanceId };
+  }
+  return { ok: true, cliToolId: null };
+}
+
+/**
  * Count agent instances for a worktree.
  */
 export function countAgentInstances(

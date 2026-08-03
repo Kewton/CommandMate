@@ -795,7 +795,8 @@ describe('status-detector', () => {
   // Issue #1160: Codex answered-approval-prompt staleness
   //
   // Codex keeps the answered "1. Yes / 2. No" block + "press number to confirm"
-  // footer in its transcript (historyLimit 50000) instead of repainting it away
+  // footer in its transcript (non-alternate-screen, so tmux keeps
+  // TMUX_HISTORY_LIMIT lines of scrollback for it) instead of repainting it away
   // like Claude. detectPrompt()'s 50-line window then keeps matching that dead
   // prompt, so priority-1 returned `waiting` even after the user answered and Codex
   // resumed — the sidebar status dot stayed orange forever (the reported bug).

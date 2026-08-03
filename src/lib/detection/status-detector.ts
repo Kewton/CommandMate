@@ -24,7 +24,7 @@
  * coupling via a minimal DTO/projection type.
  */
 
-import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN, CODEX_PAGER_FOOTER_PATTERN, CODEX_STATUS_BAR_PATTERN, CLAUDE_INTERRUPT_HINT_PATTERN, ANTIGRAVITY_SELECTION_LIST_PATTERN } from './cli-patterns';
+import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN, CODEX_APPROVAL_FOOTER_PATTERN, CODEX_PAGER_FOOTER_PATTERN, CODEX_STATUS_BAR_PATTERN, CLAUDE_INTERRUPT_HINT_PATTERN, ANTIGRAVITY_SELECTION_LIST_PATTERN } from './cli-patterns';
 import { detectPrompt } from './prompt-detector';
 import { normalizeTuiFrameForDetection } from './tui-detection-frame';
 import type { PromptDetectionResult } from './prompt-detector';
@@ -158,7 +158,8 @@ const CODEX_NUMBERED_OPTION_PATTERN = /^\s*[❯›●]?\s*\d{1,2}[.)]\s/;
  * already-answered prompt left in the 50-line scan window rather than an active one.
  *
  * Codex keeps the answered "1. Yes / 2. No" block + "press number to confirm" footer in
- * its transcript (session historyLimit 50000) instead of repainting it away like Claude,
+ * its transcript (it draws on the normal screen, so tmux retains a scrollback for it —
+ * TMUX_HISTORY_LIMIT lines deep) instead of repainting it away like Claude,
  * so detectPrompt() keeps matching it and detectSessionStatus() reports `waiting` even
  * after the user answered and Codex resumed — the sidebar status dot then stays orange
  * forever (the reported bug).
@@ -208,6 +209,42 @@ function isCodexStalePrompt(contentLines: string[]): boolean {
   }
 
   return lastPromptIdx >= 0 && lastThinkingIdx > lastPromptIdx;
+}
+
+/**
+ * Issue #1628: decide whether a Codex frame that matched CODEX_SELECTION_LIST_PATTERN
+ * is the agent ASKING FOR APPROVAL rather than the user browsing a menu.
+ *
+ * Why this exists: Codex renders both with a "Press enter to confirm" footer, so the
+ * priority-0.8 selection-list branch (added for `/model` in Issue #622) also swallowed
+ * every approval request and returned `hasActivePrompt: false`. `isPromptWaiting` is the
+ * only blocked-on-a-human signal the current-output payload carries, so `commandmate wait
+ * --on-prompt agent` could never raise exit 10 for a Codex worker sitting on
+ * "Would you like to run the following command?" — it polled until the timeout while the
+ * agent was stopped. Auto-Yes was unaffected because it calls detectPrompt() directly,
+ * which parses these frames correctly; only the status-detector layer lost them.
+ *
+ * Two OR'd signals, both measured against live codex-cli 0.146.0 captures
+ * (5 approval frames from one real session + 2 `/model` picker frames):
+ *   1. an interrogative question line directly above the options
+ *      ("Would you like to run the following command?" → the extracted question ends
+ *      with "?"; a picker's ends with its description, e.g. "…browse all models.")
+ *   2. the approval escape verb ("esc to cancel" vs a menu's "esc to go back" /
+ *      "esc to dismiss")
+ * Either alone covers every measured approval frame, so a rewording of one does not
+ * reopen the bug.
+ *
+ * Gated on `promptDetection.isPrompt` so a frame detectPrompt() could not parse into
+ * options (e.g. the unnumbered "Select a model" list of Issue #619) can never be
+ * promoted to an active prompt.
+ */
+function isCodexApprovalRequest(
+  promptDetection: PromptDetectionResult,
+  selectionWindow: string,
+): boolean {
+  if (!promptDetection.isPrompt) return false;
+  const question = promptDetection.promptData?.question?.trim() ?? '';
+  return question.endsWith('?') || CODEX_APPROVAL_FOOTER_PATTERN.test(selectionWindow);
 }
 
 /**
@@ -357,6 +394,23 @@ export function detectSessionStatus(
       if (CODEX_SELECTION_LIST_PATTERN.test(codexSelectionWindow)) {
         const codexPromptOptions = buildDetectPromptOptions(cliToolId);
         const codexPromptDetection = detectPrompt(stripBoxDrawing(cleanOutput), codexPromptOptions);
+        // Issue #1628: an approval request wears the same footer as a menu but is the
+        // agent blocked on the human, so it must surface as an active prompt (exit 10
+        // for `wait`, PromptPanel in the UI) instead of a navigable list. The #1160
+        // staleness guard still applies: an ALREADY-ANSWERED approval whose footer is
+        // still inside the window, with Codex running below it, is dead scrollback.
+        if (
+          isCodexApprovalRequest(codexPromptDetection, codexSelectionWindow) &&
+          !isCodexStalePrompt(contentLines)
+        ) {
+          return {
+            status: 'waiting',
+            confidence: 'high',
+            reason: STATUS_REASON.PROMPT_DETECTED,
+            hasActivePrompt: true,
+            promptDetection: codexPromptDetection,
+          };
+        }
         return {
           status: 'waiting',
           confidence: 'high',
@@ -406,7 +460,8 @@ export function detectSessionStatus(
   if (promptDetection.isPrompt) {
     // Issue #1160: Codex keeps an ANSWERED approval / numbered-choice block
     // ("1. Yes / 2. No" + "press number to confirm" footer) in its transcript
-    // (historyLimit 50000) instead of repainting it away like Claude. detectPrompt's
+    // (non-alternate-screen, so tmux keeps TMUX_HISTORY_LIMIT lines of scrollback for
+    // it) instead of repainting it away like Claude. detectPrompt's
     // 50-line window then keeps matching that dead prompt, so this priority-1 branch
     // returns `waiting` even after the user answered and Codex resumed — the sidebar
     // status dot stays orange forever (the reported bug). Guard with a position check:

@@ -1,0 +1,133 @@
+version: 1
+title: "Issue #1623: attach 時に transcript を読める「読むモード」を提供する"
+goal: |
+  /pm-auto-issue2dev 1623
+
+  https://github.com/Kewton/CommandMate/issues/1623 を実装する。**Issue 本文を必ず全文読むこと。**
+  以下はオーケストレーターからの補足であり、本文の代わりではない。
+
+  ## この Issue は仕様が閉じていない
+
+  本文の「## 課題（着手前に解く必要があるもの）」に **5 件の未解決事項**が列挙されている。
+  実装より先にこれを decision として閉じ、根拠つきで設計書に残すこと。オーケストレーターは
+  意図的に決めていない（実装者が実測して決めるべき事柄だと判断した）。
+
+  1. キーバインドのライフサイクル設計（導入タイミング・冪等性・アンインストール手段・
+     キーの設定化・既存バインドとの衝突検査）
+  2. ページャスクリプトの配置場所（`~/.commandmate/` 配下等）と tmux から参照するパスの決定
+  3. popup は**静止画**（less の入力がパイプのため `F` 追尾は不可）。「もう一度 `prefix+g` で更新」を
+     仕様として明記するか、追尾型を将来課題にするかの判断
+  4. Claude 以外（Codex / Gemini / opencode / copilot）の capture での squeeze フィルタ確認
+  5. 案B のインターフェース確定（`capture --pane` か新コマンドか、`--json` との整合、
+     `--tail N` の意味論）
+
+  ## 着手順を固定する（厳守）
+
+  ```
+  1. 案B（CLI ビューア）         ← tmux バージョン非依存・attach 不要・グローバル状態を触らない
+  2. squeeze フィルタ            ← 両案の共通部品。実 capture を fixture 化して固定
+  3. 案A（display-popup + bind-key） ← グローバル状態を触る。最後
+  ```
+
+  案B を先にするのは Issue 本文自身が「tmux <3.2 のユニバーサルフォールバック」「根治後も
+  そのまま生き残る」と書いているとおり、案A に依存しない独立価値があるため。**時間が足りなく
+  なった場合は案A を落として案B + squeeze を完成させること**（逆にしない）。落とした場合は
+  何を落としたかを最後に明示的に報告すること。黙って縮めないこと。
+
+  ## この Issue 固有の安全則（Phase 2-5 の tmux 4 項目に加えて）
+
+  - **開発中・テスト中に既定サーバへ `bind-key` / `unbind-key` を撃たないこと。**
+    `prefix+g` の発火確認は必ず `tmux -L <専用socket>` の私設サーバを立て、そこに attach して行う。
+    `bind-key` は**サーバグローバル**なので、既定サーバへ撃つとユーザーの全セッションに波及する
+  - **`server.ts` の top-level に静的 import を足さないこと。** キーバインド導入を「サーバ起動時」に
+    行う設計になるが、`server.ts` へ重い依存グラフを静的 import すると tsx 下で Next の
+    AsyncLocalStorage bootstrap を壊し、**unit / integration / build は全緑のまま E2E だけが
+    決定的に落ちる**（最初のリクエストで middleware compile 時に exit 7）。起動時依存は
+    `await import()` で動的化すること。ローカル再現は `curl /` を送出するところまでやらないと
+    出ない（Ready で止めると出ない）
+  - **既存バインドとの衝突検査を必須にすること。** 本文の「`prefix+g` は素の tmux 3.5a で未割当」は
+    このユーザーの環境での実測であり、他人の `.tmux.conf` では埋まっている可能性がある。
+    `list-keys` で検査し、衝突していたら導入しない
+  - `tests/unit/config/tmux-live-test-safety.test.ts` が unit ゲートで
+    unpinned な `kill-server` / `bind-key` / `TMUX_TMPDIR` を機械的に弾く。
+    **このガードを緩めたり除外したりしないこと。** 本 Issue の実装コードは本番サーバに
+    `bind-key` を撃つのが仕様だが、それは `src/` の実行時コードであってテストではない
+
+  ## 回帰ガード（受入条件より・必ずテストで固定する）
+
+  - **ウィンドウのジオメトリ（`window_width` / `window_height` / `window-size`）が一切変化しないこと**
+  - **`capture-pane` の返却行数が常に 1000 行のままであること**（＝検知系・Auto-Yes・DB 記録への
+    影響ゼロ）
+
+  この 2 つは #1163 と、Auto-Yes / status-detector / assistant-response-saver が依存している
+  前提そのもの。壊すと「読めるようになったが検知が死んだ」になる。
+
+  ## 検証の作り方（空振り禁止）
+
+  修正後に緑になっただけでは「ガードが効いた」と「テストが空振り」の両方と整合する。
+  **導入前のコードで赤くなることを実際に確認してから**緑にすること。確認方法をコミット
+  メッセージに書くこと。squeeze フィルタの fixture は**実 capture を採取**すること
+  （手書きの想像で作らない。SGR のみの見かけ空行を含む実データが要る）。
+
+  ## 現在の状態（オーケストレーターによる引き継ぎ・2 回目の送信）
+
+  **実装は既にあなたが完了させており、コミット 4 本がブランチに入っている。**
+
+  ```
+  70c1d612 docs(1623): 読むモードの決定 5 件と実測を設計書・利用ガイドに残す
+  2c7021ea feat(tmux): prefix+g で transcript を popup に開く読むモードを追加する (#1623 案A)
+  4040799c feat(cli): capture --pane で attach せずに transcript を読めるようにする (#1623 案B)
+  026cb583 feat(tmux): transcript の空行圧縮フィルタを実 capture の fixture つきで追加する (#1623)
+  ```
+
+  `wait --verify` は **scope ゲートだけが FAIL** した（lint / typecheck / unit / work-evidence は
+  すべて PASS）。原因は**オーケストレーター側の契約の書き漏れ**で、`src/cli/types/index.ts`
+  （`CaptureOptions` に `pane` / `tail` / `raw` を追加した箇所）が `scope.allow` に入っていなかった。
+  **あなたの変更は正当**であり、取り消す必要はない。今回の契約では `src/cli/types/**` を allow に
+  追加済みなので、同じ差分のまま scope ゲートが通る。
+
+  **やり直さないこと。** この送信の目的は、修正済みの scope を持つ新しいタスクに紐づけ直して
+  裁定を取り直すことにある。やることは以下だけ:
+
+  - [ ] `git log --oneline origin/develop..HEAD` と `git status` で上記 4 コミット・未コミット 0 を確認する
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` を回して exit 0 を確認する
+  - [ ] 受入条件のうち**未達のものがあれば**そこだけ埋める。特に案A（display-popup / bind-key）が
+        本当に実機で発火するところまで到達しているかを自己申告ではなく実測で述べること
+  - [ ] 何も足す必要が無ければ、確認結果だけ述べて `IMPL_COMPLETED` を出す
+        （コミットを増やす必要はない。work-evidence は既存の 4 コミットで満たされる）
+
+  ## 作業ルール（厳守）
+
+  - **PR を作らないこと。** ブランチにコミットするところまでが担当。PR は orchestrator が作る
+  - コミットは論理単位で複数に分けてよい
+  - `dev-reports/` 配下は **コミットしないこと**
+  - `CHANGELOG.md` の Unreleased セクションに 1 行だけ追記する
+  - **Issue 本文の記述はコードで裏取りすること。** 行番号や前提が実際と食い違ったら
+    **実測を正**とし、食い違いをコミットメッセージに明記する
+  - **対になる経路も点検すること。** 導入経路を作ったらアンインストール経路も、
+    非対応 tmux の no-op 経路も点検する
+  - 完了したら最後に `IMPL_COMPLETED` とだけ出力する
+scope:
+  allow:
+    - "src/lib/tmux/**"
+    - "src/config/tmux-pane-config.ts"
+    - "src/cli/commands/**"
+    - "src/cli/index.ts"
+    - "src/cli/utils/**"
+    - "src/cli/types/**"
+    - "src/cli/config/**"
+    - "src/app/api/worktrees/[id]/capture/**"
+    - "src/app/api/worktrees/[id]/current-output/**"
+    - "scripts/**"
+    - "server.ts"
+    - "tests/unit/**"
+    - "tests/integration/**"
+    - "docs/module-reference.md"
+    - "docs/user-guide/**"
+    - "docs/design/**"
+    - "CHANGELOG.md"
+    - ".commandmate/tasks/**"
+  deny: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

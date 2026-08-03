@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db';
+import { resolveInstanceCliTool } from '@/lib/db/agent-instances-db';
 import {
   getAutoYesState,
   setAutoYesEnabled,
@@ -220,7 +221,6 @@ export async function POST(
         { status: 400 }
       );
     }
-    const cliToolId: CLIToolType = body.cliToolId ?? 'claude';
 
     // Issue #896: Validate optional instanceId (per-instance auto-yes).
     if (body.instanceId !== undefined && !isValidInstanceId(body.instanceId)) {
@@ -229,6 +229,28 @@ export async function POST(
         { status: 400 }
       );
     }
+
+    // Issue #1629: the poller keys on (worktree, cliTool, instance) and derives
+    // the tmux session name from cliTool, so an instance must be paired with the
+    // CLI tool its roster entry declares. Without this, `--instance codex` armed
+    // auto-yes against a Claude session that was never started.
+    const resolution = resolveInstanceCliTool(
+      getDbInstance(),
+      id,
+      body.instanceId,
+      body.cliToolId
+    );
+    if (!resolution.ok) {
+      return NextResponse.json(
+        {
+          error: `Agent instance '${resolution.instanceId}' is registered as ${resolution.rosterCliTool}, `
+            + `but ${resolution.requestedCliTool} was requested.`,
+        },
+        { status: 400 }
+      );
+    }
+    const cliToolId: CLIToolType = resolution.cliToolId ?? 'claude';
+
     // Effective instance: provided instanceId, else the primary (=== cliToolId).
     const instanceId: string = body.instanceId ?? cliToolId;
 

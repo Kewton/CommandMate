@@ -65,6 +65,61 @@ function formatInstancesTable(rows: InstanceRow[]): string {
 }
 
 /**
+ * Resolve which CLI tool backs `instanceId`, from the worktree's roster
+ * (Issue #1629). Shared by every command that targets an instance: `send`,
+ * `respond`, `capture` and `auto-yes`.
+ *
+ * `--instance <id>` on its own carries no CLI tool, so the server used to fall
+ * back to the worktree default. Since the tool id is part of the tmux session
+ * name, `send --instance codex` against a claude-default worktree started
+ * Claude in `mcbd-claude-<worktree>-codex`. Resolving here means the resolved
+ * tool is sent explicitly to every endpoint the command touches — including
+ * `/tasks`, `/current-output` and `/prompt-response`, which have no other way
+ * to learn it.
+ *
+ * The roster wins over `--agent`: it is the user-maintained declaration of what
+ * a named instance is, so a contradiction is an error rather than a session
+ * whose name disagrees with the agent inside it. An instance the roster does
+ * not know (the ad-hoc `send --instance <new-id>` flow) keeps `--agent` as
+ * given, and an unreadable roster degrades to a warning so an older daemon
+ * behaves as it did before.
+ *
+ * @returns the CLI tool to send, or undefined to let the server decide
+ */
+export async function resolveInstanceCliTool(
+  client: ApiClient,
+  worktreeId: string,
+  instanceId: string,
+  requestedAgent: string | undefined
+): Promise<string | undefined> {
+  let registered: AgentInstance | undefined;
+  try {
+    const instances = await fetchAgentInstances(client, worktreeId);
+    registered = instances.find((inst) => inst.id === instanceId);
+  } catch (error) {
+    console.error(
+      `Warning: could not read the agent-instance roster (${getErrorMessage(error)}); using --agent as given.`
+    );
+    return requestedAgent;
+  }
+
+  if (!registered) {
+    return requestedAgent;
+  }
+
+  if (requestedAgent && requestedAgent !== registered.cliTool) {
+    console.error(
+      `Error: instance '${instanceId}' is registered as ${registered.cliTool}, but --agent ${requestedAgent} was given. `
+      + `Drop --agent, pass --agent ${registered.cliTool}, or re-register the instance.`
+    );
+    process.exit(ExitCode.CONFIG_ERROR);
+    return requestedAgent;
+  }
+
+  return registered.cliTool;
+}
+
+/**
  * List action: roster + live running/auto-yes status per instance.
  * Probes GET .../current-output?cliTool=&instance= per instance (same
  * endpoint capture.ts uses) since the roster itself carries no session state.

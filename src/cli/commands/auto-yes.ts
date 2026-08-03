@@ -10,6 +10,7 @@ import { ApiClient, isValidWorktreeId, isValidInstanceId, MAX_STOP_PATTERN_LENGT
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { parseDurationToMs, ALLOWED_DURATIONS } from '../config/duration-constants';
 import { isCliToolId } from '../config/cli-tool-ids';
+import { resolveInstanceCliTool } from './instances';
 
 export function createAutoYesCommand(): Command {
   const cmd = new Command('auto-yes');
@@ -83,8 +84,15 @@ export function createAutoYesCommand(): Command {
           }
         }
 
-        if (options.agent) {
-          body.cliToolId = options.agent;
+        // Issue #1629: the auto-yes poller keys on (worktree, cliTool, instance)
+        // and watches the session cliTool names, so the instance must be paired
+        // with the CLI tool its roster entry declares.
+        const agent = options.instance
+          ? await resolveInstanceCliTool(client, worktreeId, options.instance, options.agent)
+          : options.agent;
+
+        if (agent) {
+          body.cliToolId = agent;
         }
 
         // Issue #896: per-instance auto-yes

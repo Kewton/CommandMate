@@ -21,6 +21,7 @@ import {
   reconcileSessionGeometry,
   SPECIAL_KEY_VALUES,
 } from '@/lib/tmux/tmux';
+import { TMUX_HISTORY_LIMIT } from '@/config/tmux-pane-config';
 
 // Mock child_process execFile (Issue #393: exec -> execFile migration)
 vi.mock('child_process', () => ({
@@ -192,7 +193,7 @@ describe('tmux library', () => {
       );
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['set-option', '-t', '=test-session:', 'history-limit', '50000'],
+        ['set-option', '-t', '=test-session:', 'history-limit', String(TMUX_HISTORY_LIMIT)],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -403,13 +404,300 @@ describe('tmux library', () => {
         createSession({ sessionName: 'test-session', workingDirectory: '/path/to/cwd' })
       ).resolves.toBeUndefined();
 
-      // history-limit is still applied after the swallowed resize failure.
+      // history-limit is still applied despite the swallowed resize failure.
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['set-option', '-t', '=test-session:', 'history-limit', '50000'],
+        ['set-option', '-t', '=test-session:', 'history-limit', String(TMUX_HISTORY_LIMIT)],
         { timeout: 5000 },
         expect.any(Function)
       );
+    });
+  });
+
+  // Issue #1624: `history-limit` is a SESSION option, but a pane sizes its
+  // scrollback buffer ONCE, from the value in effect when the pane is created.
+  //
+  // Asserting on the `set-option ... history-limit` call alone (as the older
+  // tests above do) cannot distinguish a working implementation from a broken
+  // one — the pre-fix code issued exactly that call and still left every pane on
+  // tmux's built-in 2000. These tests therefore run createSession against a
+  // stateful tmux MODEL and assert on the resulting PANE value.
+  //
+  // The model's rule (pane snapshots the session option at creation; a new window
+  // does NOT inherit `window-size`) was verified against real tmux 3.5a:
+  //   new-session -> set-option 50000        => pane #{history_limit} = 2000
+  //   set-option 50000 -> new-window -k      => pane #{history_limit} = 50000
+  //   new-window -k after `window-size manual` => show-window-options returns ''
+  describe('createSession pane history-limit (Issue #1624)', () => {
+    /** tmux's compiled-in default when a pane is created before any set-option. */
+    const TMUX_BUILTIN_HISTORY_LIMIT = 2000;
+
+    interface FakeWindow {
+      historyLimit: number;
+      windowSize: string;
+      width: number;
+      height: number;
+      cwd: string;
+    }
+    interface FakeSession {
+      /** The session-level option — what `show-options history-limit` reports. */
+      historyLimit: number;
+      cwd: string;
+      windows: Map<number, FakeWindow>;
+      activeWindow: number;
+    }
+
+    function parseTarget(target: string): { session: string; window?: number } {
+      const match = /^=([^:]+):(\d*)$/.exec(target);
+      if (!match) throw new Error(`target did not use exactTarget() form: ${target}`);
+      return { session: match[1], window: match[2] === '' ? undefined : Number(match[2]) };
+    }
+
+    /**
+     * Install a stateful fake tmux. Returns the session table so tests can read
+     * the PANE's history_limit rather than the session option.
+     */
+    function installFakeTmux(options: { failNewWindow?: boolean } = {}): Map<string, FakeSession> {
+      const sessions = new Map<string, FakeSession>();
+
+      const activeWindowOf = (target: string): FakeWindow => {
+        const { session: name, window } = parseTarget(target);
+        const session = sessions.get(name);
+        if (!session) throw new Error(`can't find session: ${name}`);
+        const index = window ?? session.activeWindow;
+        const win = session.windows.get(index);
+        if (!win) throw new Error(`can't find window: ${name}:${index}`);
+        return win;
+      };
+
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const argv = args[1] as string[];
+        const callback = args[args.length - 1] as (
+          err: Error | null,
+          result: { stdout: string; stderr: string }
+        ) => void;
+        const flag = (name: string): string | undefined => {
+          const i = argv.indexOf(name);
+          return i >= 0 ? argv[i + 1] : undefined;
+        };
+        let stdout = '';
+
+        switch (argv[0]) {
+          case 'new-session': {
+            const name = flag('-s')!;
+            // A brand-new session starts at tmux's built-in default, and window 0
+            // is created immediately — snapshotting that default.
+            sessions.set(name, {
+              historyLimit: TMUX_BUILTIN_HISTORY_LIMIT,
+              cwd: flag('-c')!,
+              activeWindow: 0,
+              windows: new Map([[0, {
+                historyLimit: TMUX_BUILTIN_HISTORY_LIMIT,
+                windowSize: 'latest',
+                width: Number(flag('-x')),
+                height: Number(flag('-y')),
+                cwd: flag('-c')!,
+              }]]),
+            });
+            break;
+          }
+          case 'set-option': {
+            const { session: name } = parseTarget(flag('-t')!);
+            const session = sessions.get(name);
+            if (!session) throw new Error(`can't find session: ${name}`);
+            if (argv.includes('history-limit')) {
+              // Session option only. Existing panes keep their snapshot — this is
+              // precisely why the pre-fix ordering silently did nothing.
+              session.historyLimit = Number(argv[argv.indexOf('history-limit') + 1]);
+            }
+            break;
+          }
+          case 'new-window': {
+            if (options.failNewWindow) {
+              callback(new Error('create window failed'), { stdout: '', stderr: '' });
+              return {} as ReturnType<typeof execFile>;
+            }
+            const { session: name, window } = parseTarget(flag('-t')!);
+            const session = sessions.get(name);
+            if (!session) throw new Error(`can't find session: ${name}`);
+            const replacing = argv.includes('-k');
+            const previous = session.windows.get(session.activeWindow)!;
+            const index = window ?? Math.max(...session.windows.keys()) + 1;
+            if (!replacing && session.windows.has(index)) {
+              throw new Error(`index in use: ${index}`);
+            }
+            session.windows.set(index, {
+              // The new pane snapshots the CURRENT session option.
+              historyLimit: session.historyLimit,
+              // Verified against tmux 3.5a: the replacement window does NOT
+              // inherit `window-size manual` from the window it replaced.
+              windowSize: 'latest',
+              width: previous.width,
+              height: previous.height,
+              // A bare `new-window` starts in the tmux client's cwd, NOT the
+              // session's; only an explicit `-c` keeps the worktree path.
+              cwd: flag('-c') ?? '/some/other/client/cwd',
+            });
+            session.activeWindow = index;
+            break;
+          }
+          case 'set-window-option': {
+            const win = activeWindowOf(flag('-t')!);
+            if (argv.includes('window-size')) {
+              win.windowSize = argv[argv.indexOf('window-size') + 1];
+            }
+            break;
+          }
+          case 'resize-window': {
+            const win = activeWindowOf(flag('-t')!);
+            win.width = Number(flag('-x'));
+            win.height = Number(flag('-y'));
+            break;
+          }
+          case 'show-window-options':
+            stdout = `${activeWindowOf(flag('-t')!).windowSize}\n`;
+            break;
+          case 'display-message': {
+            const win = activeWindowOf(flag('-t')!);
+            stdout = `${win.width}|${win.height}\n`;
+            break;
+          }
+          default:
+            break;
+        }
+
+        callback(null, { stdout, stderr: '' });
+        return {} as ReturnType<typeof execFile>;
+      });
+
+      return sessions;
+    }
+
+    /** The pane the CLI tool will actually run in. */
+    function activePane(sessions: Map<string, FakeSession>, name: string): FakeWindow {
+      const session = sessions.get(name);
+      if (!session) throw new Error(`session ${name} was never created`);
+      const win = session.windows.get(session.activeWindow);
+      if (!win) throw new Error(`session ${name} has no active window`);
+      return win;
+    }
+
+    // Guards the guard: proves the model is not rigged to return the right answer
+    // no matter what, by replaying the PRE-FIX command order through it.
+    it('models the trap — the old new-session -> set-option order yields 2000', async () => {
+      const sessions = installFakeTmux();
+      const run = (argv: string[]) =>
+        new Promise<void>((resolve, reject) => {
+          (vi.mocked(execFile) as unknown as (
+            cmd: string,
+            argv: string[],
+            opts: unknown,
+            cb: (err: Error | null) => void,
+          ) => void)('tmux', argv, {}, err => (err ? reject(err) : resolve()));
+        });
+
+      await run(['new-session', '-d', '-s', 'legacy', '-c', '/repo', '-x', '200', '-y', '1000']);
+      await run(['set-option', '-t', '=legacy:', 'history-limit', '50000']);
+
+      // Session option looks right...
+      expect(sessions.get('legacy')!.historyLimit).toBe(50000);
+      // ...while the pane the agent actually types into is still on 2000.
+      expect(activePane(sessions, 'legacy').historyLimit).toBe(TMUX_BUILTIN_HISTORY_LIMIT);
+    });
+
+    it('gives the PANE the configured history-limit, not just the session option', async () => {
+      const sessions = installFakeTmux();
+
+      await createSession({ sessionName: 'mcbd-codex-wt', workingDirectory: '/repo/wt' });
+
+      expect(activePane(sessions, 'mcbd-codex-wt').historyLimit).toBe(TMUX_HISTORY_LIMIT);
+      expect(activePane(sessions, 'mcbd-codex-wt').historyLimit).not.toBe(
+        TMUX_BUILTIN_HISTORY_LIMIT
+      );
+    });
+
+    it('honors an explicit historyLimit on the PANE', async () => {
+      const sessions = installFakeTmux();
+
+      await createSession({
+        sessionName: 'mcbd-codex-wt',
+        workingDirectory: '/repo/wt',
+        historyLimit: 12345,
+      });
+
+      expect(activePane(sessions, 'mcbd-codex-wt').historyLimit).toBe(12345);
+    });
+
+    it('applies to the legacy two-argument signature too (both transports use it)', async () => {
+      // polling-tmux-transport.ts / control-mode-tmux-transport.ts call
+      // createSession(name, cwd) — they must get the same pane buffer.
+      const sessions = installFakeTmux();
+
+      await createSession('mcbd-gemini-wt', '/repo/wt');
+
+      expect(activePane(sessions, 'mcbd-gemini-wt').historyLimit).toBe(TMUX_HISTORY_LIMIT);
+    });
+
+    it('keeps the pane in the session working directory when rebuilding the window', async () => {
+      const sessions = installFakeTmux();
+
+      await createSession({ sessionName: 'mcbd-codex-wt', workingDirectory: '/repo/wt' });
+
+      // A bare `new-window` would land in the tmux client's cwd and launch the
+      // agent against the wrong repository.
+      expect(activePane(sessions, 'mcbd-codex-wt').cwd).toBe('/repo/wt');
+    });
+
+    it('leaves the session with a single window still at index 0', async () => {
+      const sessions = installFakeTmux();
+
+      await createSession({ sessionName: 'mcbd-codex-wt', workingDirectory: '/repo/wt' });
+
+      const session = sessions.get('mcbd-codex-wt')!;
+      expect([...session.windows.keys()]).toEqual([0]);
+      expect(session.activeWindow).toBe(0);
+    });
+
+    it('still ends at window-size manual / 200x1000 after the rebuild (Issue #1163)', async () => {
+      const sessions = installFakeTmux();
+
+      await createSession({ sessionName: 'mcbd-codex-wt', workingDirectory: '/repo/wt' });
+
+      // Fails if geometry is reconciled BEFORE the window rebuild, because the
+      // replacement window drops back to `latest`.
+      const pane = activePane(sessions, 'mcbd-codex-wt');
+      expect(pane.windowSize).toBe('manual');
+      expect(pane.width).toBe(200);
+      expect(pane.height).toBe(1000);
+    });
+
+    it('never sets history-limit globally (-g would resize every user session)', async () => {
+      installFakeTmux();
+
+      await createSession({ sessionName: 'mcbd-codex-wt', workingDirectory: '/repo/wt' });
+
+      for (const call of vi.mocked(execFile).mock.calls) {
+        const argv = call[1] as string[];
+        if (argv.includes('history-limit')) {
+          expect(argv).not.toContain('-g');
+          expect(argv).not.toContain('-s');
+        }
+      }
+    });
+
+    it('treats a failed window rebuild as non-fatal (session stays usable)', async () => {
+      const sessions = installFakeTmux({ failNewWindow: true });
+
+      await expect(
+        createSession({ sessionName: 'mcbd-codex-wt', workingDirectory: '/repo/wt' })
+      ).resolves.toBeUndefined();
+
+      // Degrades to tmux's default scrollback rather than failing to start the agent,
+      // and geometry is still reconciled.
+      const pane = activePane(sessions, 'mcbd-codex-wt');
+      expect(pane.historyLimit).toBe(TMUX_BUILTIN_HISTORY_LIMIT);
+      expect(pane.windowSize).toBe('manual');
+      expect(pane.height).toBe(1000);
     });
   });
 
@@ -715,8 +1003,9 @@ describe('tmux library', () => {
 
       await ensureSession('test-session', '/path/to/cwd');
 
-      // Includes two geometry inspection calls before the window-size writes.
-      expect(execFile).toHaveBeenCalledTimes(7);
+      // has-session, new-session, set-option history-limit, new-window (Issue #1624),
+      // then two geometry inspection calls before the window-size writes.
+      expect(execFile).toHaveBeenCalledTimes(8);
     });
 
     it('should not create session if it already exists', async () => {

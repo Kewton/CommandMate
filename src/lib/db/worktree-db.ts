@@ -10,6 +10,11 @@ import type { Worktree } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { parseSelectedAgents } from '@/lib/selected-agents-validator';
 import { ACTIVE_FILTER } from './chat-db';
+import {
+  getWorktreeChildTables,
+  getWriteGuardedTables,
+  type WorktreeChildTable,
+} from './migrations/worktree-child-tables';
 
 /**
  * Get latest user message per CLI tool for multiple worktrees (batch query)
@@ -369,36 +374,29 @@ export function upsertWorktree(
 }
 
 /**
- * Discover every table that has a foreign key referencing `worktrees(id)`,
- * along with the referencing column. Derived dynamically from the live schema
- * so it never drifts out of sync with future migrations that add child tables.
+ * Delete every child row pointing at any of `worktreeIds`.
  *
- * Issue #1151.
+ * Deliberately covers *all* deletable child tables, not just the FK-less ones:
+ * doing so makes deletion correct even when `PRAGMA foreign_keys` is off, and
+ * the extra statements against CASCADE tables remove rows that would have been
+ * removed anyway. Append-only ledgers are skipped (see getWriteGuardedTables).
+ * Must run before the parent row is deleted (Issue #1621).
  */
-function getWorktreeChildTables(
-  db: Database.Database
-): Array<{ table: string; column: string }> {
-  const tables = db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
-    .all() as Array<{ name: string }>;
+function deleteWorktreeChildRows(
+  db: Database.Database,
+  worktreeIds: string[],
+  children: WorktreeChildTable[] = getWorktreeChildTables(db)
+): void {
+  if (worktreeIds.length === 0) return;
 
-  const children: Array<{ table: string; column: string }> = [];
-  for (const { name } of tables) {
-    if (name === 'worktrees') continue;
-    // PRAGMA identifiers cannot be bound; `name` comes from sqlite_master, not
-    // user input, so string interpolation here is safe.
-    const fks = db.prepare(`PRAGMA foreign_key_list("${name}")`).all() as Array<{
-      table: string;
-      from: string;
-      to: string | null;
-    }>;
-    for (const fk of fks) {
-      if (fk.table === 'worktrees' && (fk.to === 'id' || fk.to === null)) {
-        children.push({ table: name, column: fk.from });
-      }
-    }
+  const { noDelete } = getWriteGuardedTables(db);
+  const placeholders = worktreeIds.map(() => '?').join(',');
+  for (const { table, column } of children) {
+    if (noDelete.has(table)) continue;
+    db.prepare(
+      `DELETE FROM "${table}" WHERE "${column}" IN (${placeholders})`
+    ).run(...worktreeIds);
   }
-  return children;
 }
 
 /**
@@ -406,6 +404,18 @@ function getWorktreeChildTables(
  * child table's foreign key so no CASCADE deletion occurs. This is what makes a
  * same-directory branch switch preserve chat history and all related data
  * instead of destroying it (Issue #1151).
+ *
+ * "Every child table" means every table carrying a worktree reference, not just
+ * the ones that declare a foreign key: `tasks`, `verification_runs` and
+ * `skill_operations` do not, and used to be left addressing an ID that no
+ * longer resolves (Issue #1621).
+ *
+ * Append-only ledgers are the one exception, and the schema states it itself —
+ * `skill_operations` aborts any UPDATE (#1234). An immutable audit row records
+ * what happened under the identity in force at the time, and rewriting it is
+ * precisely what its trigger exists to prevent; attempting it does not fail
+ * quietly either, it aborts the enclosing transaction and takes the rename with
+ * it (measured). See getWriteGuardedTables.
  *
  * Must be called inside a transaction. `PRAGMA defer_foreign_keys` defers FK
  * enforcement to COMMIT, letting us repoint the parent PK and its children in
@@ -426,18 +436,23 @@ export function migrateWorktreeIdPreservingChildren(
   db.pragma('defer_foreign_keys = ON');
 
   const newExists = db.prepare('SELECT 1 FROM worktrees WHERE id = ?').get(newId);
-  const children = getWorktreeChildTables(db);
+  const { noUpdate } = getWriteGuardedTables(db);
+  const allChildren = getWorktreeChildTables(db);
+  const children = allChildren.filter(({ table }) => !noUpdate.has(table));
 
   if (newExists) {
     // Collision guard. `path` is UNIQUE so two rows for the same directory
     // should never coexist, but if the DB is already inconsistent keep the
-    // destination row's data and fold in the source's non-conflicting children;
-    // conflicting leftovers are removed by CASCADE when the old row is deleted.
+    // destination row's data and fold in the source's non-conflicting children.
     for (const { table, column } of children) {
       db.prepare(
         `UPDATE OR IGNORE "${table}" SET "${column}" = ? WHERE "${column}" = ?`
       ).run(newId, oldId);
     }
+    // Conflicting leftovers are dropped explicitly rather than left to CASCADE:
+    // tables without a foreign key never cascade, so relying on the parent
+    // delete alone would strand their rows on a dead ID (#1621).
+    deleteWorktreeChildRows(db, [oldId], allChildren);
     db.prepare('DELETE FROM worktrees WHERE id = ?').run(oldId);
     return;
   }
@@ -720,11 +735,12 @@ export function getWorktreesByRepository(
 
 /**
  * Delete all worktrees for a given repository path
- * Related data is automatically deleted via ON DELETE CASCADE in every table
- * holding a foreign key to worktrees(id) — chat_messages, session_states,
- * worktree_memos, worktree_todos, agent_instances, scheduled_executions,
- * execution_logs, timer_messages and skill_installations (#1430). The live list
- * is whatever `PRAGMA foreign_key_list` reports; see getWorktreeChildTables.
+ * Child rows are deleted explicitly before the parent, for every table
+ * getWorktreeChildTables reports. ON DELETE CASCADE covers only the tables that
+ * declare a foreign key; `tasks`, `verification_runs` and `skill_operations`
+ * hold a `worktree_id` with no constraint and would otherwise survive their
+ * worktree as orphans (#1621). Deleting `verification_runs` still cascades to
+ * `verification_gate_results`, which does declare its foreign key.
  *
  * @param db - Database instance
  * @param repositoryPath - Path of the repository to delete
@@ -734,20 +750,32 @@ export function deleteRepositoryWorktrees(
   db: Database.Database,
   repositoryPath: string
 ): { deletedCount: number } {
-  const stmt = db.prepare(`
-    DELETE FROM worktrees WHERE repository_path = ?
-  `);
+  const run = db.transaction((): number => {
+    const ids = (
+      db
+        .prepare('SELECT id FROM worktrees WHERE repository_path = ?')
+        .all(repositoryPath) as Array<{ id: string | null }>
+    )
+      .map((row) => row.id)
+      .filter((id): id is string => id !== null);
 
-  const result = stmt.run(repositoryPath);
-  return { deletedCount: result.changes };
+    deleteWorktreeChildRows(db, ids);
+
+    return db
+      .prepare('DELETE FROM worktrees WHERE repository_path = ?')
+      .run(repositoryPath).changes;
+  });
+
+  return { deletedCount: run() };
 }
 
 /**
  * Delete worktrees by their IDs
- * Related data is automatically deleted via ON DELETE CASCADE in every table
- * holding a foreign key to worktrees(id) — including skill_installations, whose
- * rows used to survive the worktree and make a re-created worktree at the same
- * path un-installable (#1430). See getWorktreeChildTables for the live list.
+ * Child rows are deleted explicitly before the parent, for every table
+ * getWorktreeChildTables reports — including skill_installations, whose rows
+ * used to survive the worktree and make a re-created worktree at the same path
+ * un-installable (#1430), and the constraint-less `tasks` / `verification_runs`
+ * / `skill_operations`, which no CASCADE can reach (#1621).
  *
  * @param db - Database instance
  * @param worktreeIds - Array of worktree IDs to delete
@@ -762,10 +790,13 @@ export function deleteWorktreesByIds(
   }
 
   const placeholders = worktreeIds.map(() => '?').join(',');
-  const stmt = db.prepare(`
-    DELETE FROM worktrees WHERE id IN (${placeholders})
-  `);
+  const run = db.transaction((): number => {
+    deleteWorktreeChildRows(db, worktreeIds);
 
-  const result = stmt.run(...worktreeIds);
-  return { deletedCount: result.changes };
+    return db
+      .prepare(`DELETE FROM worktrees WHERE id IN (${placeholders})`)
+      .run(...worktreeIds).changes;
+  });
+
+  return { deletedCount: run() };
 }
