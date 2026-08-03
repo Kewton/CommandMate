@@ -17,6 +17,11 @@
  * (Same shape as the #1623 squeeze filter, which is pinned across its awk / TS /
  * Web UI implementations and did catch a real drift.)
  *
+ * The scope grew past `requireCommit` with Issue #1651: what work-evidence
+ * *counts* has to match too, so the last block compares the two counters as
+ * numbers. A verdict-only comparison cannot see a divergence that leaves both
+ * sides above zero.
+ *
  * @vitest-environment node
  */
 
@@ -116,6 +121,15 @@ function addUncommittedWork(dir: string): void {
 function commitWork(dir: string, message = 'work'): void {
   git(['add', '-A'], dir);
   git(['commit', '-m', message], dir);
+}
+
+/** The orchestrator's own evidence: what a delegation drops into the worktree. */
+function addContract(dir: string): void {
+  mkdirSync(join(dir, '.commandmate', 'tasks'), { recursive: true });
+  writeFileSync(
+    join(dir, '.commandmate', 'tasks', 'delegated.yaml'),
+    'version: 1\ntitle: t\ngoal: g\n'
+  );
 }
 
 /** What both runners are compared on: did work-evidence pass, and did the run. */
@@ -254,6 +268,54 @@ const MATRIX: Array<{
     prepare: () => {},
     expected: { workEvidence: 'failed', run: 'not_started' },
   },
+  // `.commandmate/tasks/` is the orchestrator's evidence, not the agent's, so
+  // neither counter sees it. The bash runner reported `passed` over a
+  // contract-only worktree until #1651 ported the exclusion #1580 put in the TS
+  // engine; these rows used to live in the divergence block below.
+  {
+    name: 'key absent, the orchestrator contract file only',
+    prepare: addContract,
+    expected: { workEvidence: 'failed', run: 'not_started' },
+  },
+  {
+    name: 'key absent, a setup commit carrying only the contract',
+    prepare: (repo) => {
+      addContract(repo);
+      commitWork(repo, 'setup: contract');
+    },
+    expected: { workEvidence: 'failed', run: 'not_started' },
+  },
+  {
+    name: 'key absent, the contract plus real work',
+    prepare: (repo) => {
+      addContract(repo);
+      addUncommittedWork(repo);
+    },
+    expected: { workEvidence: 'passed', run: 'passed' },
+  },
+  {
+    // An entry counts when ANY of its paths is outside the contract directory,
+    // so the destination alone is not what is judged.
+    name: 'key absent, the contract renamed into real work',
+    prepare: (repo) => {
+      addContract(repo);
+      commitWork(repo, 'setup: contract');
+      git(['mv', '.commandmate/tasks/delegated.yaml', 'real work.yaml'], repo);
+    },
+    expected: { workEvidence: 'passed', run: 'passed' },
+  },
+  {
+    // The two rules compose: the contract commit is not a commit, so
+    // requireCommit still has nothing to accept.
+    name: 'requireCommit: true, a contract-only commit plus uncommitted real work',
+    requireCommit: true,
+    prepare: (repo) => {
+      addContract(repo);
+      commitWork(repo, 'setup: contract');
+      addUncommittedWork(repo);
+    },
+    expected: { workEvidence: 'failed', run: 'not_started' },
+  },
 ];
 
 describe('options.requireCommit: the TS engine and the bash reference runner agree', () => {
@@ -276,6 +338,11 @@ describe('options.requireCommit: the TS engine and the bash reference runner agr
     expect(MATRIX.some((row) => row.expected.run === 'not_started')).toBe(true);
     expect(MATRIX.some((row) => row.requireCommit === true)).toBe(true);
     expect(MATRIX.some((row) => row.requireCommit === undefined)).toBe(true);
+    // The contract exclusion has to be covered in both directions, or the rows
+    // could all be passing because nothing is ever excluded (#1651).
+    const contractRows = MATRIX.filter((row) => row.name.includes('contract'));
+    expect(contractRows.some((row) => row.expected.run === 'passed')).toBe(true);
+    expect(contractRows.some((row) => row.expected.run === 'not_started')).toBe(true);
   });
 
   it('rejects a non-boolean value in both implementations', () => {
@@ -309,68 +376,86 @@ options:
 });
 
 /**
- * Known divergences, pinned rather than fixed here.
+ * The two counters, compared as numbers rather than as verdicts (Issue #1651).
  *
- * A drift gate that only asserts agreement would go red the moment anyone looked
- * at these, and be cleared by deleting the case. Asserting the difference itself
- * keeps it a recorded decision: it cannot grow, and it cannot be forgotten.
+ * This block used to pin two known divergences. Both are gone:
  *
- * Neither is in scope for Issue #1639 (`options.requireCommit`); both predate it.
+ * - contract files counted as work in bash and excluded in TS — the permissive
+ *   direction, and the reason #1651 exists. Now a MATRIX row.
+ * - an untracked directory counted once in bash (default porcelain) and per file
+ *   in TS (`-uall`). Only the reported number differed, so no verdict moved; it
+ *   went away on its own when bash took `-z -uall` for the exclusion parse.
+ *
+ * A verdict-only comparison would not have seen the second one, which is why it
+ * is asserted here on the summary lines instead.
  */
-describe('known work-evidence divergences between the two runners', () => {
-  it('counts contract files as work in bash, and excludes them in TS (#1580, unported)', async () => {
-    // TS excludes `.commandmate/tasks/` from both counters, so a worktree whose
-    // only change is the orchestrator's own contract file reads as "the agent did
-    // nothing". The bash runner has no such exclusion, so it reports work.
-    //
-    // This is the more permissive direction — bash says "there is work here" when
-    // there is not — and it is the same class of defect requireCommit closes.
-    // Porting it means reproducing the `-z -uall` entry-wise parse and the
-    // `:(exclude,top)` pathspec in bash; that is a change to what work-evidence
-    // counts, not to how requireCommit is read, so it is left for a follow-up.
-    const repo = createRepo({});
-    mkdirSync(join(repo, '.commandmate', 'tasks'), { recursive: true });
-    writeFileSync(
-      join(repo, '.commandmate', 'tasks', 'delegated.yaml'),
-      'version: 1\ntitle: t\ngoal: g\n'
+describe('the two runners report the same counters, not just the same verdict', () => {
+  /** commits / uncommitted as each runner prints them for the same repository. */
+  async function counters(repo: string): Promise<{ bash: string; ts: string }> {
+    const bash = spawnSync('bash', [RUNNER, '--cwd', repo, '--base-ref', BASE_REF], {
+      encoding: 'utf8',
+    });
+    const bashLine = (bash.stdout ?? '').match(
+      /^GATE work-evidence (?:PASS|FAIL) (commits=\d+ uncommitted=\d+)/m
     );
+    expect(bashLine, `bash runner printed no work-evidence line.\n${bash.stdout}`).not.toBeNull();
 
-    expect(runBash(repo)).toEqual({ workEvidence: 'passed', run: 'passed' });
-    expect(await runTs(repo)).toEqual({ workEvidence: 'failed', run: 'not_started' });
-  });
+    worktreeSeq += 1;
+    const worktreeId = `wt-counters-${worktreeSeq}`;
+    upsertWorktree(db, {
+      id: worktreeId,
+      name: `feature/${worktreeId}`,
+      path: repo,
+      repositoryPath: repo,
+      repositoryName: 'conformance',
+    });
+    const { runId } = await startVerification({ worktreeId, worktreePath: repo, trigger: 'manual' });
+    await waitForVerification(runId);
+    const gate = getVerificationRun(db, runId)?.gates.find(
+      (g) => g.gateId === WORK_EVIDENCE_GATE_ID
+    );
+    const tsLine = (gate?.logTail ?? '').match(/(commits=\d+ uncommitted=\d+)/);
+    expect(tsLine, `TS runner logged no counters.\n${gate?.logTail}`).not.toBeNull();
 
-  it('counts an untracked directory once in bash and per file in TS (`-uall`)', async () => {
-    // Only the reported number differs — both are > 0, so the verdict is the
-    // same. Pinned because a future reader comparing the two summary lines will
-    // otherwise read the mismatch as a bug in one of them.
+    return { bash: bashLine![1], ts: tsLine![1] };
+  }
+
+  it('counts a fresh untracked directory per file on both sides (`-uall`)', async () => {
     const repo = createRepo({});
     mkdirSync(join(repo, 'generated'), { recursive: true });
     writeFileSync(join(repo, 'generated', 'a.txt'), 'a\n');
     writeFileSync(join(repo, 'generated', 'b.txt'), 'b\n');
 
-    const bash = spawnSync('bash', [RUNNER, '--cwd', repo, '--base-ref', BASE_REF], {
-      encoding: 'utf8',
-    });
-    expect(bash.stdout).toContain('GATE work-evidence PASS commits=0 uncommitted=1');
+    const { bash, ts } = await counters(repo);
+    // Under the default untracked mode this reads `uncommitted=1` (the directory)
+    // — the shape of the divergence this test replaces.
+    expect(bash).toBe('commits=0 uncommitted=2');
+    expect(ts).toBe(bash);
+  });
 
-    const worktreeId = 'wt-uall';
-    upsertWorktree(db, {
-      id: worktreeId,
-      name: 'feature/uall',
-      path: repo,
-      repositoryPath: repo,
-      repositoryName: 'conformance',
-    });
-    const { runId } = await startVerification({
-      worktreeId,
-      worktreePath: repo,
-      trigger: 'manual',
-    });
-    await waitForVerification(runId);
-    const gate = getVerificationRun(db, runId)?.gates.find(
-      (g) => g.gateId === WORK_EVIDENCE_GATE_ID
-    );
-    expect(gate?.logTail).toContain('uncommitted=2');
-    expect(gate?.status).toBe('passed');
+  it('counts only the non-contract entries on both sides', async () => {
+    const repo = createRepo({});
+    addContract(repo);
+    addUncommittedWork(repo);
+    mkdirSync(join(repo, 'generated'), { recursive: true });
+    writeFileSync(join(repo, 'generated', 'a.txt'), 'a\n');
+
+    const { bash, ts } = await counters(repo);
+    // work.txt and generated/a.txt; the contract file is not one of them.
+    expect(bash).toBe('commits=0 uncommitted=2');
+    expect(ts).toBe(bash);
+  });
+
+  it('leaves a contract-only commit out of the commit count on both sides', async () => {
+    const repo = createRepo({});
+    addContract(repo);
+    commitWork(repo, 'setup: contract');
+    addUncommittedWork(repo);
+    commitWork(repo, 'work');
+
+    const { bash, ts } = await counters(repo);
+    // Two commits exist; one of them touched nothing but the contract.
+    expect(bash).toBe('commits=1 uncommitted=0');
+    expect(ts).toBe(bash);
   });
 });
