@@ -202,6 +202,7 @@ for (const excludedPath of excludedPaths) {
 | `tests/unit/lib/repository-disable-nondestructive.test.ts` | `setRepositoryEnabled` の意味論 / `visible` 非干渉 / SEC-SF-004 上限 / **worktree 行・chat history・tasks・verification_runs が 1 行も消えない** / 無効化パスが scan 対象から外れる / 2 つの prune 経路が行に届かない / #1659 の 2 scan root ケース / 消えたリポジトリの prune は従来どおり効く |
 | `tests/unit/api/repository-scan-toggle.test.ts` | PUT の検証と永続化 / `visible` 非干渉 / 409 / **worktree 行が消えない** / **`cleanupMultipleWorktrees` と `killWorktreeSession` が呼ばれない** / DB 登録経路と **`WORKTREE_REPOS` 経路の両方**で sync が無効化パスを走査しない / 無効化が sync をまたいで維持される |
 | `tests/unit/components/repository/RepositoryList-scan-toggle.test.tsx` | Scan トグルが Visibility トグルと別の操作であること / 無効化は確認必須 / 確認本文が実辞書で 3 つの約束を述べていること / cancel で何も起きない / 再有効化が `restore` を通ること / Disabled フィルタ |
+| `tests/e2e/repository-scan-toggle.spec.ts` | 上記を**実ブラウザ**で。portal + focus trap + 退出アニメーション付きの実 `Modal`、実 `next-intl` 辞書、実 fetch を通した往復（PUT の body と `restore` の宛先を記録して検証）。jsdom で緑でも動かなかった前科（CommandPalette）があるため、UI を触る変更はここまで見る |
 
 ### 変異注入（テストが空振りでないことの確認）
 
@@ -214,6 +215,7 @@ for (const excludedPath of excludedPaths) {
 | M5: Scan トグルが確認を挟まず即 PUT | RED |
 | M6: `pruneStaleRepositoryWorktrees` の on-disk ガードを外す | RED |
 | M7: 確認本文から「何も消えない」の一文を落とす | RED |
+| M5'（e2e）: Scan トグルが確認を挟まず即 PUT | RED（5 件中 2 件が落ちる） |
 
 M3 が最初 GREEN だったのは、当初のテストが **DB 登録経路**しか通していなかったため。
 DB 登録経路では `getAllRepositories(db).filter(r => r.enabled)` が先に効くので、
