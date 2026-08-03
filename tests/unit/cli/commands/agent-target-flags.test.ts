@@ -230,28 +230,68 @@ describe('embedded `commandmate docs` guide recommends the --instance form (Issu
  */
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 
-/** Locale-agnostic discovery: docs/user-guide/*.md and docs/<locale>/user-guide/*.md. */
-function findUserGuides(): string[] {
-  const docsDir = path.join(REPO_ROOT, 'docs');
+/**
+ * Files that are records of what was true at a point in time, not instructions
+ * for running the tool today. Retro-editing them to match a later
+ * recommendation would falsify the record, so they are opted out by name — and
+ * only these are. Everything else is discovered, so a doc added later is
+ * covered by default instead of waiting to be remembered.
+ *
+ * `docs/design/1623-tmux-reading-mode.md` is the concrete case: it documents
+ * `capture --pane [--agent X] [--instance Y]` as the signature that decision
+ * settled on, which is still accurate and is not a recommendation.
+ */
+const RECORD_FILES = new Set(['CHANGELOG.md']);
+// Locale-agnostic on purpose: `docs/en/design/` must be opted out on the same
+// grounds as `docs/design/`, not merely because nobody has translated one yet.
+const RECORD_DIRS = /^docs\/(?:[a-z]{2}\/)?(?:design|internal)\//;
+
+function isRecord(relPath: string): boolean {
+  return RECORD_FILES.has(relPath) || RECORD_DIRS.test(relPath);
+}
+
+/**
+ * Every prose markdown surface that teaches commands: all of `docs/` plus the
+ * repo-root markdown (README.md, CLAUDE.md, CONTRIBUTING.md, ...), minus the
+ * records above.
+ *
+ * Discovery rather than a list: the first pass missed the English guide and the
+ * second missed README.md, both because the surface was simply not enumerated
+ * anywhere. A list has to be remembered on every new file; a sweep does not.
+ */
+function findMarkdownSurfaces(): string[] {
   const found: string[] = [];
   const visit = (dir: string, depth: number): void => {
-    if (depth > 2) return;
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
+      const rel = path.relative(REPO_ROOT, full);
       if (entry.isDirectory()) {
-        visit(full, depth + 1);
-      } else if (entry.name.endsWith('.md') && path.basename(dir) === 'user-guide') {
-        found.push(path.relative(REPO_ROOT, full));
+        if (depth < 4) visit(full, depth + 1);
+      } else if (entry.name.endsWith('.md') && !isRecord(rel)) {
+        found.push(rel);
       }
     }
   };
-  visit(docsDir, 0);
+  // Repo root, non-recursive: node_modules/.next/etc. must not be walked.
+  for (const entry of fs.readdirSync(REPO_ROOT, { withFileTypes: true })) {
+    const rel = entry.name;
+    if (entry.isFile() && rel.endsWith('.md') && !isRecord(rel)) found.push(rel);
+  }
+  visit(path.join(REPO_ROOT, 'docs'), 0);
   return found.sort();
 }
 
 /**
- * Shell example lines (`commandmate ...` / `commandmatedev ...`), reduced to the
- * command itself.
+ * Command examples in a markdown file, reduced to the command itself.
+ *
+ * Two shapes, because both carry examples users copy:
+ *   - a fenced/indented line that starts with `commandmate`
+ *   - an inline code span anywhere in a line, which is how README and the
+ *     command-reference tables write them: `| `commandmate send ...` | ... |`
+ *
+ * Missing the second shape is not a cosmetic gap: README.md keeps ALL of its
+ * examples in table cells, so a scanner anchored to the start of the line reads
+ * it as having no examples at all and passes it silently.
  *
  * Quoted arguments are blanked before the trailing `#` comment is cut, because
  * message arguments legitimately contain a `#` (`"Implement #102" --auto-yes`)
@@ -259,9 +299,16 @@ function findUserGuides(): string[] {
  * carries all flags — none of them live inside quotes.
  */
 function exampleLines(text: string): string[] {
-  return text
-    .split('\n')
-    .filter(line => /^\s*commandmate(dev)?\s/.test(line))
+  const commands: string[] = [];
+  for (const line of text.split('\n')) {
+    if (/^\s*commandmate(dev)?\s/.test(line)) {
+      commands.push(line);
+    }
+    for (const [, span] of line.matchAll(/`([^`]+)`/g)) {
+      if (/^commandmate(dev)?\s/.test(span)) commands.push(span);
+    }
+  }
+  return commands
     .map(line => {
       const unquoted = line.replace(/"[^"]*"/g, '""').replace(/'[^']*'/g, "''");
       const comment = unquoted.indexOf('#');
@@ -272,16 +319,30 @@ function exampleLines(text: string): string[] {
 }
 
 describe('user-facing markdown teaches the --instance form (Issue #1638)', () => {
-  const guides = findUserGuides();
-  const withClaudeMd = [...guides, 'CLAUDE.md'];
+  const surfaces = findMarkdownSurfaces();
 
-  it('actually discovered the guides (a silent empty sweep proves nothing)', () => {
-    expect(guides.length).toBeGreaterThan(10);
-    expect(guides).toContain('docs/user-guide/cli-operations-guide.md');
-    expect(guides).toContain('docs/en/user-guide/cli-operations-guide.md');
+  it('actually discovered the surfaces (a silent empty sweep proves nothing)', () => {
+    expect(surfaces.length).toBeGreaterThan(10);
+    expect(surfaces).toContain('docs/user-guide/cli-operations-guide.md');
+    expect(surfaces).toContain('docs/en/user-guide/cli-operations-guide.md');
+    // The two surfaces that were each missed once, for want of being listed.
+    expect(surfaces).toContain('README.md');
+    expect(surfaces).toContain('CLAUDE.md');
+    // ...and the records stay out, so the sweep cannot force a rewrite of one.
+    expect(surfaces).not.toContain('CHANGELOG.md');
   });
 
-  it.each(withClaudeMd)('%s shows no `wait --agent` example', (relPath) => {
+  it('reads examples out of markdown tables, not just fenced blocks', () => {
+    // README keeps every example in a table cell. A scanner anchored to the
+    // start of the line sees none of them and passes the file vacuously — which
+    // is exactly how README.md stayed wrong through two passes.
+    const readme = fs.readFileSync(path.join(REPO_ROOT, 'README.md'), 'utf-8');
+    expect(exampleLines(readme).length).toBeGreaterThan(10);
+    expect(exampleLines('| `commandmate wait <id> --agent codex` | nope |'))
+      .toEqual(['commandmate wait <id> --agent codex']);
+  });
+
+  it.each(surfaces)('%s shows no `wait --agent` example', (relPath) => {
     const text = fs.readFileSync(path.join(REPO_ROOT, relPath), 'utf-8');
     const offenders = exampleLines(text)
       .filter(line => /\bwait\b/.test(line) && line.includes('--agent'));
@@ -297,7 +358,7 @@ describe('user-facing markdown teaches the --instance form (Issue #1638)', () =>
    * Anything else is the demoted form the Issue set out to retire, so
    * re-introducing `send --agent codex` in any locale turns this red.
    */
-  it.each(withClaudeMd)('%s uses --agent only for `instances add` or --register', (relPath) => {
+  it.each(surfaces)('%s uses --agent only for `instances add` or --register', (relPath) => {
     const text = fs.readFileSync(path.join(REPO_ROOT, relPath), 'utf-8');
     const offenders = exampleLines(text)
       .filter(line => line.includes('--agent'))
@@ -306,7 +367,7 @@ describe('user-facing markdown teaches the --instance form (Issue #1638)', () =>
     expect(offenders, `unexpected --agent example in ${relPath}`).toEqual([]);
   });
 
-  const CLI_GUIDES = guides.filter(p => p.endsWith('user-guide/cli-operations-guide.md'));
+  const CLI_GUIDES = surfaces.filter(p => p.endsWith('user-guide/cli-operations-guide.md'));
 
   it('every locale ships a cli-operations-guide (parity, not just the ja one)', () => {
     expect(CLI_GUIDES.length).toBeGreaterThanOrEqual(2);
