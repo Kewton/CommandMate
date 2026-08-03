@@ -48,8 +48,8 @@
         {
           "path": "SKILL.md",
           "policy": "port-required",
-          "sha256": "9f2ec5d06920e9f02d85753d482f6dd7dc7080daad56c7ea28aaf038f14b73e0",
-          "note": "#1586 の移植で GitHub 絶対 URL 化・「起案 / スタンドアロンランナー」の2役への書き換えが入っている。単純コピーするとこの適応が壊れる（#1611 で実際に注意点として扱った）。手順・フラグ・exit code の意味を変えたときは counterpart 側の同じ節を書き直す。"
+          "sha256": "d578cf068022f58d98de5ccbd9ec9cfbadc5bbde4f1aeb8b97fe4e233a2e82e2",
+          "note": "#1586 の移植で GitHub 絶対 URL 化・「起案 / スタンドアロンランナー」の2役への書き換えが入っている。単純コピーするとこの適応が壊れる（#1611 で実際に注意点として扱った）。手順・フラグ・exit code の意味を変えたときは counterpart 側の同じ節を書き直す。 Issue #1639 で追加。**2026-08-03 時点で counterpart への移植は未了** — PM が cmate-verify の version bump とあわせて別途移植する。pin を更新したので、この対応表からは移植済みと区別が付かない状態になっている（knownGap のとおり、この pin が検知できるのは CommandMate 側の編集だけ）。"
         },
         {
           "path": "scripts/tests/fixtures/all-pass.yaml",
@@ -122,6 +122,12 @@
           "sha256": "a41b5672d7adfdf698062ce1e47c154106e38eabd97ebb9906d109acf11053ff"
         },
         {
+          "path": "scripts/tests/fixtures/bad-require-commit.yaml",
+          "policy": "byte-identical",
+          "sha256": "2262736fa5dfcd4ae37e512c8f9cf5d054b5590a54036ce2c2bd9517c8d69586",
+          "note": "他の fixture と同じく counterpart へ逐語コピーする。Issue #1639 で追加。**2026-08-03 時点で counterpart への移植は未了** — PM が cmate-verify の version bump とあわせて別途移植する。pin を更新したので、この対応表からは移植済みと区別が付かない状態になっている（knownGap のとおり、この pin が検知できるのは CommandMate 側の編集だけ）。"
+        },
+        {
           "path": "scripts/tests/fixtures/bad-reserved-id.yaml",
           "policy": "byte-identical",
           "sha256": "f8a526bc59f198505c82533c184572b5ac1191f30dad70f3907a703967acb231"
@@ -167,6 +173,12 @@
           "sha256": "262417735fae50aa79e3addb33e5157cc202df16045ec2af2b47110e39581edf"
         },
         {
+          "path": "scripts/tests/fixtures/require-commit.yaml",
+          "policy": "byte-identical",
+          "sha256": "a734180dcf4dec0f97549f4e79ecd976b14e0b6a8d8b2bdcf7611412d01b6670",
+          "note": "他の fixture と同じく counterpart へ逐語コピーする。Issue #1639 で追加。**2026-08-03 時点で counterpart への移植は未了** — PM が cmate-verify の version bump とあわせて別途移植する。pin を更新したので、この対応表からは移植済みと区別が付かない状態になっている（knownGap のとおり、この pin が検知できるのは CommandMate 側の編集だけ）。"
+        },
+        {
           "path": "scripts/tests/fixtures/side-effect.yaml",
           "policy": "byte-identical",
           "sha256": "1e9b218d5e3cb63f9e09469dd95c4bfd1813aac6911ab62ff40364e4df227b3e"
@@ -184,13 +196,14 @@
         {
           "path": "scripts/tests/run-tests.sh",
           "policy": "byte-identical",
-          "sha256": "98088d3f0fac0b57cd8dde8ded0b397e51c10bef3d7abb82dc6f948cba3a27d7"
+          "sha256": "f1046c6f5d3292122d9d27c2b28ef5883c20b7d41b5db25f9ee3d31e6017bc79",
+          "note": "Issue #1639 で追加。**2026-08-03 時点で counterpart への移植は未了** — PM が cmate-verify の version bump とあわせて別途移植する。pin を更新したので、この対応表からは移植済みと区別が付かない状態になっている（knownGap のとおり、この pin が検知できるのは CommandMate 側の編集だけ）。"
         },
         {
           "path": "scripts/verify-run.sh",
           "policy": "byte-identical",
-          "sha256": "ac506c17daba1207a109f2716e625ba01a17318630c4670bc7474461f8f9edc4",
-          "note": "ランナー本体。#1586 で byte-identical に移植され、#1607 が CommandMate 側だけを直して 4 日間ドリフトした（#1611 で復旧）。この Issue の直接の発端。"
+          "sha256": "3e5a7b72eba3e681c5b4f7b967352e273feefe834e18a64cee0694a89a853b89",
+          "note": "ランナー本体。#1586 で byte-identical に移植され、#1607 が CommandMate 側だけを直して 4 日間ドリフトした（#1611 で復旧）。この Issue の直接の発端。 Issue #1639 で追加。**2026-08-03 時点で counterpart への移植は未了** — PM が cmate-verify の version bump とあわせて別途移植する。pin を更新したので、この対応表からは移植済みと区別が付かない状態になっている（knownGap のとおり、この pin が検知できるのは CommandMate 側の編集だけ）。"
         }
       ]
     },

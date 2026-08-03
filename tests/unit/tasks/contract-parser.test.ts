@@ -71,7 +71,12 @@ describe('parseTaskContract — valid documents', () => {
       scope: { allow: ['src/lib/tasks/**'], deny: [] },
       verify: { gates: null },
       autoYes: { mode: null, allowPromptTypes: [], denyPatterns: [] },
-      success: { requireWorkEvidence: true, requireScopeClean: true, autoVerifyOnStop: false },
+      success: {
+        requireWorkEvidence: true,
+        requireScopeClean: true,
+        requireCommit: false,
+        autoVerifyOnStop: false,
+      },
     });
   });
 
@@ -90,8 +95,9 @@ autoYes:
   allowPromptTypes: [yes_no, approval]
   denyPatterns: ["force.?push", "rm -rf"]
 success:
-  requireWorkEvidence: false
+  requireWorkEvidence: true
   requireScopeClean: false
+  requireCommit: true
   autoVerifyOnStop: true
 `,
       'task.yaml'
@@ -105,8 +111,11 @@ success:
       denyPatterns: ['force.?push', 'rm -rf'],
     });
     expect(contract.success).toEqual({
-      requireWorkEvidence: false,
+      // requireWorkEvidence stays true because requireCommit is judged by that
+      // gate; the pair is rejected outright (see the requireCommit tests below).
+      requireWorkEvidence: true,
       requireScopeClean: false,
+      requireCommit: true,
       autoVerifyOnStop: true,
     });
   });
@@ -130,6 +139,7 @@ success:
     expect(contract.success).toEqual({
       requireWorkEvidence: true,
       requireScopeClean: true,
+      requireCommit: false,
       autoVerifyOnStop: false,
     });
   });
@@ -156,6 +166,61 @@ success:
       parseTaskContract(`${MINIMAL}success:\n  autoVerifyOnStop: false\n`, 'task.yaml').success
         .autoVerifyOnStop
     ).toBe(false);
+  });
+
+  // Issue #1642: the flag that makes the contract's own "必ず commit" sentence
+  // enforceable per delegation. It defaults off for the same reason
+  // autoVerifyOnStop does — every contract written before it existed keeps its
+  // verdict.
+  describe('success.requireCommit (Issue #1642)', () => {
+    it('defaults to false so existing contracts keep their verdict', () => {
+      expect(parseTaskContract(MINIMAL, 'task.yaml').success.requireCommit).toBe(false);
+      // ...unlike the two judging flags next to it, which default to true.
+      expect(parseTaskContract(MINIMAL, 'task.yaml').success.requireWorkEvidence).toBe(true);
+      expect(parseTaskContract(MINIMAL, 'task.yaml').success.requireScopeClean).toBe(true);
+    });
+
+    it('accepts it as a boolean and as a quoted boolean', () => {
+      for (const literal of ['true', '"true"']) {
+        expect(
+          parseTaskContract(`${MINIMAL}success:\n  requireCommit: ${literal}\n`, 'task.yaml')
+            .success.requireCommit,
+          `for ${literal}`
+        ).toBe(true);
+      }
+      expect(
+        parseTaskContract(`${MINIMAL}success:\n  requireCommit: false\n`, 'task.yaml').success
+          .requireCommit
+      ).toBe(false);
+    });
+
+    it('rejects a non-boolean instead of coercing it', () => {
+      expect(() =>
+        parseTaskContract(`${MINIMAL}success:\n  requireCommit: always\n`, 'task.yaml')
+      ).toThrow(/requireCommit: must be true or false/);
+    });
+
+    it('rejects requireCommit: true alongside requireWorkEvidence: false', () => {
+      // The commit requirement is judged by the work-evidence gate, which
+      // requireWorkEvidence: false keeps out of the contract's gate selection.
+      // Accepting the pair would put "必ず commit" in the preamble with nothing
+      // behind it — the D-4 defect this field exists to close.
+      expect(() =>
+        parseTaskContract(
+          `${MINIMAL}success:\n  requireCommit: true\n  requireWorkEvidence: false\n`,
+          'task.yaml'
+        )
+      ).toThrow(/requireCommit: requires success\.requireWorkEvidence to be true/);
+    });
+
+    it('still allows requireWorkEvidence: false on its own', () => {
+      // Pairs with the case above: the rejection must be about the combination,
+      // not about requireWorkEvidence: false having become invalid.
+      expect(
+        parseTaskContract(`${MINIMAL}success:\n  requireWorkEvidence: false\n`, 'task.yaml')
+          .success.requireWorkEvidence
+      ).toBe(false);
+    });
   });
 
   it('rejects a non-boolean autoVerifyOnStop instead of coercing it', () => {

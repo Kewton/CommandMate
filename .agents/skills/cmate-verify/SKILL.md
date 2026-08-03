@@ -119,6 +119,7 @@ options:
   baseRef: origin/develop
   skipInPrimaryCheckout: true
   maxLogTailBytes: 8192
+  requireCommit: false        # true で work-evidence が commit を要求する（既定 false）
 ```
 
 このランナーは awk / sed で読むため、**YAML のサブセットしか受け付けない**:
@@ -146,6 +147,36 @@ Phase 1 の製品ローダは一般的な YAML パーサを使うが、この形
 未起動のセッションを「全ゲート PASS」と誤報告しないためのガードである
 （変更ゼロのリポジトリでは lint も typecheck も当然通る）。
 
+### `options.requireCommit`（既定 false）
+
+`true` にすると、work-evidence は「変更が在る」ではなく **「commit が在る」** を要求する。
+`commits=0 uncommitted=1` は PASS ではなく FAIL（`RESULT not_started` / exit 21）になり、
+ゲート行に `requireCommit=true` が付く。
+
+```
+GATE work-evidence FAIL commits=0 uncommitted=3 requireCommit=true
+RESULT not_started
+```
+
+理由は stderr に出る（`commits=0 uncommitted=3` は「作業が在る」ようにも読めるため、
+FAIL の理由が行から読み取れない唯一のケースである）。
+
+`commits=0 uncommitted=1` は「ここで何か起きたか」への答えとしては正しく、
+「これは完了したか」への答えとしては誤りである。後者を訊きたいリポジトリだけが
+opt-in する。**既定を false にしているのは、このゲート本来の問いが前者だから。**
+
+**このランナーは実行契約を読まない。** CommandMate の実行契約
+（`.commandmate/tasks/*.yaml`）にも `success.requireCommit` があり、製品実装は両者を
+**OR** で合成するが（Issue #1642）、本ランナーが見るのは `options.requireCommit` だけである
+— シェルから起動したランは、どの委任にも紐付いていないため。**両方のランナーで効かせたい
+要求は verify.yaml に書く**。それが 2 実装が共に読む唯一のファイルである（Issue #1639）。
+
+TS 実装（`src/lib/verification/gate-runner.ts`）との一致は CommandMate 側の
+conformance テスト（`tests/unit/skills/cmate-verify/require-commit-conformance.test.ts`）が
+同一の git サンドボックスに両実装を当てて固定している。既知の差分もそこに明示的に
+pin してある（**bash 版は `.commandmate/tasks/` を作業証跡から除外しない** — TS 側は
+Issue #1580 で除外済み。契約ファイルだけが変更された worktree で判定が食い違う）。
+
 ## メイン checkout での skip
 
 `options.skipInPrimaryCheckout`（既定 `true`）が有効なとき、**プライマリ checkout では
@@ -166,9 +197,11 @@ bash .claude/skills/cmate-verify/scripts/tests/run-tests.sh
 fixture は `scripts/tests/fixtures/*.yaml`。カバーしているのは
 全 PASS / 1 ゲート FAIL / timeout / work-evidence の not_started / 設定ファイル無し
 の 5 ケースに加えて、対になる反証ケース（同じ設定が linked worktree では実行される、
-`--skip-work-evidence` を付ければ同じ clean repo でも実行される）と、18 種の設定エラー、
+`--skip-work-evidence` を付ければ同じ clean repo でも実行される）と、19 種の設定エラー、
 出力ゼロで落ちるゲート・`maxLogTailBytes: 0` の診断可能性（Issue #1607）、
-アサーションヘルパ自身の自己検査。
+`options.requireCommit`（未 commit のみ → 21 / 同じ変更を commit → 0 / 既定では同じ dirty tree が
+PASS / 作業ゼロは commit 規則のせいにしない / `--skip-work-evidence` は要求ごと飛ばす。
+Issue #1639）、アサーションヘルパ自身の自己検査。
 
 失敗ログの追跡可能性も固定してある。ランナーの stdout / stderr は分離したまま
 （それが契約）だが、`run_verify` は **exit code ≠ 0 のときだけ** stderr を `out.N` に
@@ -183,4 +216,6 @@ fixture は `scripts/tests/fixtures/*.yaml`。カバーしているのは
 `out.N` への stderr 追記の停止 → 診断系 7 件だけ赤 / 空 log・tail 無効の fallback 除去 →
 5 件だけ赤 / spawn ヒントの除去 → 2 件だけ赤 / ログ末尾を stdout に流す → 3 件赤
 （うち 1 件が `assert_stdout_contract`））。
+`requireCommit` も同様（判定分岐の除去 → 5 件赤 / awk が再びキーを拒否 → 15 件赤 /
+`requireCommit=true` を無条件に出力 → 1 件赤）。
 `MIN_ASSERTIONS` はケースが黙って落ちたときに 0 failed で緑にならないための下限である。
