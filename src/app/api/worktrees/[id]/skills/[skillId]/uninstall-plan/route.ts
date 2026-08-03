@@ -18,7 +18,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createLogger } from '@/lib/logger';
-import { resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
+import { canonicalWorktreeId, resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
 import { validateSkillId } from '@/lib/skills/schema';
 import { isSkillPlanError, type SkillPlanActor } from '@/lib/skills/install-plan';
 import { readSkillGitTargetState } from '@/lib/skills/preview-diff';
@@ -103,7 +103,8 @@ export async function POST(
   ensureSkillPlanSweeper();
 
   try {
-    const { id, skillId } = await params;
+    const { id: requestedWorktreeId, skillId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
 
     const worktree = resolveWorktreeOr404(id);
     if (worktree instanceof NextResponse) return worktree;

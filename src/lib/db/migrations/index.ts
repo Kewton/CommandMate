@@ -35,6 +35,7 @@ import { v49_migrations } from './v49-verification-runs';
 import { v50_migrations } from './v50-tasks';
 import { v51_migrations } from './v51-task-events';
 import { v52_migrations } from './v52-orphaned-worktree-children';
+import { v53_migrations } from './v53-worktree-aliases';
 
 /**
  * Complete ordered list of all migrations.
@@ -75,4 +76,5 @@ export const migrations: Migration[] = [
   ...v50_migrations,
   ...v51_migrations,
   ...v52_migrations,
+  ...v53_migrations,
 ];

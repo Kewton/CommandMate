@@ -35,6 +35,7 @@ import {
   isJsonValid,
 } from '@/config/uploadable-extensions';
 import { createLogger } from '@/lib/logger';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/upload');
 
@@ -107,7 +108,8 @@ export async function POST(
 ) {
   try {
     // Get worktree
-    const { id, path } = await params;
+    const { id: requestedWorktreeId, path } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const db = getDbInstance();
     const worktree = getWorktreeById(db, id);
 

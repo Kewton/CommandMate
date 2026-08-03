@@ -14,6 +14,7 @@ import { broadcastMessage } from '@/lib/ws-server';
 import { createLogger } from '@/lib/logger';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/respond');
 
@@ -37,7 +38,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const { messageId, answer } = await req.json();
 
     // Validation

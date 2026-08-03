@@ -17,7 +17,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createLogger } from '@/lib/logger';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
+import { canonicalWorktreeId, resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
 import { listSkillInstallations } from '@/lib/skills/installed-state';
 import type { SkillInstallationRecord } from '@/lib/skills/installed-state';
 import { SKILL_API_NO_STORE_HEADERS, skillApiError } from '@/lib/api/skills-api';
@@ -86,7 +86,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
 
     const worktree = resolveWorktreeOr404(id);
     if (worktree instanceof NextResponse) return worktree;

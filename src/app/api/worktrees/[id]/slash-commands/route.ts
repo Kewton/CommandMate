@@ -25,6 +25,7 @@ import { isValidWorktreePath } from '@/lib/security/worktree-path-validator';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import type { SlashCommandGroup, CatalogStaleness } from '@/types/slash-commands';
 import { createLogger } from '@/lib/logger';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/slash-commands');
 
@@ -75,7 +76,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse<SlashCommandsResponse | { error: string }>> {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const db = getDbInstance();
     const worktree = getWorktreeById(db, id);
 

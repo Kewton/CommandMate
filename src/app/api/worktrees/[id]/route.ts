@@ -18,6 +18,7 @@ import { validateAgentInstancesInput } from '@/lib/agent-instances-validator';
 import { listSessions } from '@/lib/tmux/tmux';
 import { detectWorktreeSessionStatus } from '@/lib/session/worktree-status-helper';
 import { createLogger } from '@/lib/logger';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/worktrees');
 
@@ -27,7 +28,8 @@ export async function GET(
 ) {
   try {
     // R4-002: Validate worktree ID format
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     if (!isValidWorktreeId(id)) {
       return NextResponse.json(
         { error: 'Invalid worktree ID format' },
@@ -102,7 +104,8 @@ export async function PATCH(
 ) {
   try {
     // R4-002: Validate worktree ID format
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     if (!isValidWorktreeId(id)) {
       return NextResponse.json(
         { error: 'Invalid worktree ID format' },

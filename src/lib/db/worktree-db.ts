@@ -15,6 +15,7 @@ import {
   getWriteGuardedTables,
   type WorktreeChildTable,
 } from './migrations/worktree-child-tables';
+import { recordWorktreeAlias } from './worktree-alias-db';
 
 /**
  * Get latest user message per CLI tool for multiple worktrees (batch query)
@@ -454,6 +455,7 @@ export function migrateWorktreeIdPreservingChildren(
     // delete alone would strand their rows on a dead ID (#1621).
     deleteWorktreeChildRows(db, [oldId], allChildren);
     db.prepare('DELETE FROM worktrees WHERE id = ?').run(oldId);
+    recordWorktreeAlias(db, oldId, newId);
     return;
   }
 
@@ -464,6 +466,18 @@ export function migrateWorktreeIdPreservingChildren(
       `UPDATE "${table}" SET "${column}" = ? WHERE "${column}" = ?`
     ).run(newId, oldId);
   }
+
+  // The rename is what retires `oldId`, so this is the one place that knows an
+  // alias is needed. Recording it here (rather than at each call site) means
+  // every path that moves an ID — sync, the #1645 bulk migration, a future
+  // directory move — keeps old URLs and old `commandmate send <id>` lines
+  // answering, without any of them having to remember to.
+  //
+  // Runs AFTER the child sweep on purpose: `worktree_aliases` carries a
+  // `worktree_id`, so the loop above has already re-pointed the aliases this
+  // worktree accumulated earlier. A→B→C therefore leaves A→C and B→C, never a
+  // chain that resolution would have to walk.
+  recordWorktreeAlias(db, oldId, newId);
 }
 
 /**
@@ -709,6 +723,24 @@ export function getWorktreeIdsByRepository(
 
   const rows = stmt.all(repositoryPath) as Array<{ id: string }>;
   return rows.map(r => r.id);
+}
+
+/**
+ * Every worktree ID currently stored, across all repositories.
+ *
+ * Issue #1621: `deriveWorktreeId` mints an ID from a directory's basename, and
+ * two repositories can easily hold same-named directories (`.../a/main`,
+ * `.../b/main`). The ID is the global primary key of `worktrees`, so the
+ * "already taken" set the derivation consults has to be global too;
+ * {@link getWorktreeIdsByRepository} would silently allow a cross-repository
+ * collision, which then surfaces as a UNIQUE(path) failure on upsert.
+ *
+ * @param db - Database instance
+ * @returns Every `worktrees.id` value
+ */
+export function getAllWorktreeIds(db: Database.Database): string[] {
+  const rows = db.prepare('SELECT id FROM worktrees').all() as Array<{ id: string }>;
+  return rows.map(row => row.id);
 }
 
 /**

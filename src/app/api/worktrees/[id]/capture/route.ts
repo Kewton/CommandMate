@@ -18,6 +18,7 @@ import { getWorktreeById } from '@/lib/db';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { hasSession, capturePane } from '@/lib/tmux/tmux';
 import { createLogger } from '@/lib/logger';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/capture');
 
@@ -26,7 +27,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const { cliToolId, lines = 1000, instanceId } = await req.json();
 
     // Validate cliToolId against known CLI tool types

@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createBranch, handleGitApiError } from '@/lib/git/git-utils';
 import { validateGitBranchName } from '@/lib/git/git-route-helpers';
-import { resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
+import { canonicalWorktreeId, resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
 import type { BranchInfo } from '@/types/git';
 
 export async function POST(
@@ -21,7 +21,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const worktree = resolveWorktreeOr404(id);
     if (worktree instanceof NextResponse) {
       return worktree;

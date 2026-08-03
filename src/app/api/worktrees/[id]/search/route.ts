@@ -22,6 +22,7 @@ import {
 } from '@/lib/file-search';
 import { createLogger, generateRequestId } from '@/lib/logger';
 import { createWorktreeNotFoundError } from '@/lib/file-tree';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 // Logger for search API
 const logger = createLogger('api-search');
@@ -74,7 +75,8 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse<SearchSuccessResponse | SearchErrorResponse>> {
-  const { id } = await params;
+  const { id: requestedWorktreeId } = await params;
+  const id = canonicalWorktreeId(requestedWorktreeId);
   const startTime = Date.now();
   const requestId = generateRequestId();
   const worktreeId = id;

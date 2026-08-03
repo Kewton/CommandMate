@@ -20,7 +20,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createLogger } from '@/lib/logger';
-import { resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
+import { canonicalWorktreeId, resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
 import { SKILL_INSTALL_ROOT_PREFIXES } from '@/lib/skills/constants';
 import { getSkillCatalog } from '@/lib/skills/catalog-client';
 import {
@@ -162,7 +162,8 @@ export async function POST(
 
   let snapshotId: string | null = null;
   try {
-    const { id, skillId } = await params;
+    const { id: requestedWorktreeId, skillId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
 
     const worktree = resolveWorktreeOr404(id);
     if (worktree instanceof NextResponse) return worktree;

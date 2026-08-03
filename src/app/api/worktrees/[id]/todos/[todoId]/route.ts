@@ -19,6 +19,7 @@ import {
 } from '@/lib/db';
 import { createLogger } from '@/lib/logger';
 import { MAX_TODO_CONTENT_LENGTH, MAX_TODO_DETAIL_LENGTH } from '@/config/todo-config';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/worktree-todos');
 
@@ -37,7 +38,8 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string; todoId: string }> }
 ) {
   try {
-    const { id, todoId } = await params;
+    const { id: requestedWorktreeId, todoId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const db = getDbInstance();
 
     const worktree = getWorktreeById(db, id);
@@ -142,7 +144,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; todoId: string }> }
 ) {
   try {
-    const { id, todoId } = await params;
+    const { id: requestedWorktreeId, todoId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const db = getDbInstance();
 
     const worktree = getWorktreeById(db, id);
