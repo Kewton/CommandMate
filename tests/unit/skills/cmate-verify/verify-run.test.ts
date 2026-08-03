@@ -21,7 +21,7 @@ const TIMEOUT_MS = 180_000;
 
 // Floor mirrors MIN_ASSERTIONS in run-tests.sh: a truncated run must not pass
 // just because it never reached the failing case.
-const MIN_ASSERTIONS = 150;
+const MIN_ASSERTIONS = 200;
 
 /**
  * Issue #1607: this wrapper used to assert on `output.split(...).filter(l =>

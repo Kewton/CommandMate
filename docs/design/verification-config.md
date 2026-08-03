@@ -196,12 +196,37 @@ timestamp を一切使っていない**ので、この変更で合否は動か�
 コマンド系ゲートより先に実行される、**そもそも作業が行われたか**の判定。
 
 - PASS 条件: `merge-base(baseRef, HEAD)` から HEAD までのコミット数 > 0、
-  **または** `git status --porcelain` の出力が非空
+  **または** `git status --porcelain -z -uall` の非契約エントリ数 > 0
 - 両方 0 → 実行全体を `not_started`（exit 21）とし、**コマンド系ゲートは 1 つも実行しない**
 
 変更が 1 バイトも無いリポジトリでは lint も typecheck も当然通るので、このガードが無いと
 「未起動のセッション」が「全ゲート PASS」として報告される。`--skip-work-evidence` で
 明示的に無効化できる（その場合 `GATE work-evidence SKIP reason=flag` を出す）。
+
+### 4.1 実行契約は作業証跡から除外する（Issue #1580 / #1651）
+
+`.commandmate/tasks/` 配下は実行契約で、**オーケストレーターの証跡であってエージェントの
+証跡ではない**。委任直後の worktree（契約ファイルが 1 件置かれただけの状態）が「作業済み」に
+見えると exit 21 の検出が無意味になるため、**両実装とも両方のカウンタから除外する**。
+
+| カウンタ | コマンド |
+|---|---|
+| commits | `git rev-list --count <base>..HEAD -- ':(top)' ':(exclude,top).commandmate/tasks/'` |
+| uncommitted | `git status --porcelain -z --untracked-files=all` を**エントリ単位**で解析し、全パスが契約ファイルのエントリを数えない |
+
+- `:(top)` を明示するのは、除外だけの pathspec にしないためと、両パターンを cwd ではなく
+  リポジトリルートに固定するため。**契約だけを載せた setup commit は 1 コミット分の作業として
+  数えない。** 副作用として、**ファイルを 1 つも変更しない commit（`--allow-empty`）も
+  数えない**（pathspec 指定時の履歴単純化）
+- `-z` / `-uall` は必須。人間向けフォーマットは空白を含むパスを C クォートし、rename を
+  ` -> ` で連結し、既定の untracked モードは新規の `.commandmate/tasks/` を
+  `?? .commandmate/` の 1 エントリに畳む — いずれもパスでないものを判定に渡す
+- **エントリ内のいずれかのパスが契約ファイルでなければ**作業として数える。契約を実作業へ
+  rename した場合（逆向きも）を取りこぼさないため
+- **`.commandmate/verify.yaml` は除外しない。** 契約は送信時にスナップショットされるが
+  verify.yaml は毎ラン読み直すため、ゲートを弱める改竄を検出できる状態を残す
+- 参照実装（bash）は契約ファイルを**開かない**。パス名だけを見るので、§7 の
+  「実行契約を読まない」は成立したままである
 
 `options.requireCommit: true` のときは PASS 条件が **コミット数 > 0 のみ**になり、
 未 commit の変更は作業証跡として数えない（§2.3 / §7.1）。ゲート行には
@@ -284,12 +309,16 @@ awk パーサの閉じたキー集合に引っかかって **exit 2 の設定エ
 verify.yaml に書く** — 2 実装が共に読む唯一のファイルだからである。
 
 2 実装の一致は `tests/unit/skills/cmate-verify/require-commit-conformance.test.ts` が
-同一の git サンドボックスに両方を当てて固定している。既知の差分もそこに pin してある:
+同一の git サンドボックスに両方を当てて固定している。**Issue #1651 で既知の差分は 2 件とも
+解消し、pin は「一致する」側へ書き換えた**:
 
-| 差分 | 内容 |
+| 旧・差分 | 解消 |
 |---|---|
-| 契約ファイルの除外（Issue #1580） | TS は `.commandmate/tasks/` を両カウンタから除外するが、**bash 版は除外しない**。契約ファイルだけが変更された worktree で判定が食い違う（bash が PASS、TS が not_started）。bash 側が緩い向きで、requireCommit と同じ種類の欠陥。移植は work-evidence が「何を数えるか」の変更なので follow-up 扱い |
-| 未追跡ディレクトリの数え方 | TS は `-uall` でファイル単位、bash は既定の porcelain でディレクトリ 1 エントリ。**数字だけが違い判定は一致する** |
+| 契約ファイルの除外（Issue #1580） | bash 版は `.commandmate/tasks/` を除外せず、契約ファイルだけが変更された worktree で判定が食い違っていた（bash が PASS、TS が not_started ＝ **bash が緩い向き**で requireCommit と同種の欠陥）。#1651 で §4.1 を移植し一致 |
+| 未追跡ディレクトリの数え方 | TS は `-uall` でファイル単位、bash は既定の porcelain でディレクトリ 1 エントリ（**数字だけが違い判定は一致していた**）。#1651 が除外の解析に `-z -uall` を導入した副産物として一致 |
+
+同テストは verdict だけでなく `commits=N uncommitted=N` を**数値として**突き合わせる。
+2 件目は両方 > 0 のまま数字だけがズレる差分で、verdict の比較では見えないためである。
 
 ---
 

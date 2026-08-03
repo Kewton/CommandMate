@@ -48,8 +48,8 @@
         {
           "path": "SKILL.md",
           "policy": "port-required",
-          "sha256": "d578cf068022f58d98de5ccbd9ec9cfbadc5bbde4f1aeb8b97fe4e233a2e82e2",
-          "note": "#1586 の移植で GitHub 絶対 URL 化・「起案 / スタンドアロンランナー」の2役への書き換えが入っている。単純コピーするとこの適応が壊れる（#1611 で実際に注意点として扱った）。手順・フラグ・exit code の意味を変えたときは counterpart 側の同じ節を書き直す。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。"
+          "sha256": "5b26a8a6f6e8a9abc8ced73a724333e8103ce3fcfce8a6d21827d96394de39cf",
+          "note": "#1586 の移植で GitHub 絶対 URL 化・「起案 / スタンドアロンランナー」の2役への書き換えが入っている。単純コピーするとこの適応が壊れる（#1611 で実際に注意点として扱った）。手順・フラグ・exit code の意味を変えたときは counterpart 側の同じ節を書き直す。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。**この pin は Issue #1651 の変更で更新済みだが counterpart は 0.2.0 のまま＝未移植**（work-evidence の節に「実行契約は作業証跡ではない」を追加し、既知差分 2 件が解消した旨へ書き換えた）。次の cmate-verify bump（0.3.0）で counterpart の同じ節を書き直すこと（port-required なので逐語コピー不可）。"
         },
         {
           "path": "scripts/tests/fixtures/all-pass.yaml",
@@ -196,14 +196,14 @@
         {
           "path": "scripts/tests/run-tests.sh",
           "policy": "byte-identical",
-          "sha256": "f1046c6f5d3292122d9d27c2b28ef5883c20b7d41b5db25f9ee3d31e6017bc79",
-          "note": "Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。"
+          "sha256": "431e0c5f54dff5b1b81fe2f6e516aba29ce9bb901e6b83b9130d4714e946b6d6",
+          "note": "Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。**この pin は Issue #1651 の変更で更新済みだが counterpart は 0.2.0 のまま＝未移植**（契約ファイル除外の移植と、それに伴う fixture 追加 / MIN_ASSERTIONS 200 への引き上げ）。次の cmate-verify bump（0.3.0）で 0.2.0 → 現在のバイトを移植すること。"
         },
         {
           "path": "scripts/verify-run.sh",
           "policy": "byte-identical",
-          "sha256": "3e5a7b72eba3e681c5b4f7b967352e273feefe834e18a64cee0694a89a853b89",
-          "note": "ランナー本体。#1586 で byte-identical に移植され、#1607 が CommandMate 側だけを直して 4 日間ドリフトした（#1611 で復旧）。この Issue の直接の発端。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。"
+          "sha256": "31abf46f78f013391522e87a1a72a4e0d3651312cbb2477465b5b6a2a81f08ea",
+          "note": "ランナー本体。#1586 で byte-identical に移植され、#1607 が CommandMate 側だけを直して 4 日間ドリフトした（#1611 で復旧）。この Issue の直接の発端。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。**この pin は Issue #1651 の変更で更新済みだが counterpart は 0.2.0 のまま＝未移植**（work-evidence が `.commandmate/tasks/` を両カウンタから除外するようになった）。次の cmate-verify bump（0.3.0）で 0.2.0 → 現在のバイトを移植すること。"
         }
       ]
     },
