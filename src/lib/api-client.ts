@@ -608,6 +608,36 @@ export const repositoryApi = {
   },
 
   /**
+   * Update the scan-inclusion flag for a repository (Issue #1658).
+   *
+   * This is the NON-DESTRUCTIVE exclusion: the server writes one column and
+   * touches neither the worktree rows nor the running tmux sessions. Contrast
+   * with {@link repositoryApi.delete}, which excludes **and purges**.
+   *
+   * Note that the reverse direction has two flavours: this call with
+   * `enabled: true` only flips the flag back, whereas
+   * {@link repositoryApi.restore} additionally re-scans the repository so its
+   * worktrees reappear immediately. The Repositories screen uses `restore` for
+   * re-enabling, because "restore" is what a user pressing it means.
+   *
+   * @param id - Repository ID
+   * @param enabled - true => included in scans, false => excluded
+   * @returns The updated repository (without worktreeCount).
+   */
+  async updateEnabled(
+    id: string,
+    enabled: boolean
+  ): Promise<UpdateRepositoryResponse> {
+    return fetchApi<UpdateRepositoryResponse>(
+      `/api/repositories/${encodeURIComponent(id)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ enabled }),
+      }
+    );
+  },
+
+  /**
    * Check a local path before scanning it (Issue #1517).
    *
    * Answers the question `scan` will answer — is this inside an allowed root,
