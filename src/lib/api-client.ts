@@ -382,6 +382,16 @@ export interface RepositoryListItem {
   /** Sidebar visibility flag (Issue #690). Defaults to true. */
   visible: boolean;
   worktreeCount: number;
+  /**
+   * Paths of the OTHER enabled scan roots that are the same git repository as
+   * this one — i.e. sibling worktrees registered as separate roots (Issue
+   * #1662). Empty for the normal case of one root per repository.
+   *
+   * Optional rather than required: the server always sends it, but typing it as
+   * required would make every existing `RepositoryListItem` literal a compile
+   * error for a field that means "nothing to report" when absent.
+   */
+  duplicateOf?: string[];
 }
 
 /**
@@ -665,6 +675,13 @@ export interface ValidatePathResponse {
   allowedRootsLabel: string;
   isGitRepo: boolean;
   worktreeCount: number | null;
+  /**
+   * Paths of already-registered scan roots that are the SAME git repository as
+   * the candidate (Issue #1662). Non-empty means "registering this creates a
+   * duplicate scan root" — a warning the Add form must surface, NOT a rejection:
+   * `valid` is unaffected by it.
+   */
+  duplicateScanRoots?: string[];
 }
 
 /**

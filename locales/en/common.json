@@ -75,7 +75,13 @@
     "disableConfirmBody": "\"{name}\" will no longer be scanned for worktrees.\n\nNothing is deleted: its {count} worktree(s) and their chat history, tasks and verification runs stay in the database, and any tmux session running under it keeps running.\n\nIts worktrees also stay in the sidebar — use the Visibility toggle to hide them.",
     "disableConfirmAction": "Exclude from scans",
     "disableSuccess": "\"{name}\" is excluded from scans.",
-    "enableSuccess": "\"{name}\" is scanned again ({count} worktree(s))."
+    "enableSuccess": "\"{name}\" is scanned again ({count} worktree(s)).",
+    "duplicateScanRootWarning": "Same git repository as an existing scan root: {paths}. Both will be scanned, and every worktree they share will be registered twice.",
+    "duplicateConfirmTitle": "Register a second scan root for the same repository?",
+    "duplicateConfirmBody": "\"{path}\" is the same git repository as:\n{paths}\n\nBoth roots list the same worktrees, so every sync registers each of them twice and their \"repository path\" flips between the roots run to run.\n\nThis is allowed — continue if you want to manage these worktrees as separate roots. Otherwise cancel, or use the Scan toggle on the Repositories list to exclude one of them later.",
+    "duplicateConfirmAction": "Add anyway",
+    "duplicateRowBadge": "Duplicate scan root",
+    "duplicateRowDetail": "Same git repository as {paths}. Use the Scan toggle on one of these rows to exclude it from scans."
   },
   "cancel": "Cancel",
   "send": "Send",

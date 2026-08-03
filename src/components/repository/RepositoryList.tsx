@@ -7,6 +7,9 @@
  *             rolls back + surfaces a feedback banner on failure.
  * Issue #1658: Adds a Scan column whose toggle flips `enabled` — the
  *             non-destructive way to take a repository out of the scan set.
+ * Issue #1662: Flags rows that are the SAME git repository as another scan root
+ *             (sibling worktrees registered separately), and routes the user
+ *             from that flag to the Issue #1658 Scan toggle, which is the fix.
  *
  * Renders a table of all registered repositories (enabled & disabled) with
  * inline editing of the display_name (alias). Refetches when `refreshKey`
@@ -39,10 +42,10 @@
 
 'use client';
 
-import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Pencil } from 'lucide-react';
-import { Button, Card, ConfirmDialog, Input, Skeleton, StatusDot } from '@/components/ui';
+import { Badge, Button, Card, ConfirmDialog, Input, Skeleton, StatusDot } from '@/components/ui';
 import { cn } from '@/lib/utils/cn';
 import {
   handleApiError,
@@ -157,6 +160,25 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
   const [filter, setFilter] = useState<RepositoryFilter>('all');
   /** Row awaiting confirmation of a disable, or null when no dialog is open. */
   const [pendingDisable, setPendingDisable] = useState<RepositoryListItem | null>(null);
+  /**
+   * Scan toggles by repository id (Issue #1662), so the duplicate badge can
+   * hand focus to the control that resolves what it is warning about. Telling
+   * someone "two roots are the same repository" is only useful if the fix is
+   * one keystroke away.
+   */
+  const scanToggleRefs = useRef(new Map<string, HTMLButtonElement | null>());
+
+  const registerScanToggle = useCallback((id: string, node: HTMLButtonElement | null) => {
+    if (node) {
+      scanToggleRefs.current.set(id, node);
+    } else {
+      scanToggleRefs.current.delete(id);
+    }
+  }, []);
+
+  const focusScanToggle = useCallback((id: string) => {
+    scanToggleRefs.current.get(id)?.focus();
+  }, []);
 
   const fetchRepositories = useCallback(async () => {
     setLoading(true);
@@ -365,7 +387,20 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
       try {
         const result = await repositoryApi.updateEnabled(repo.id, false);
         setRepositories((prev) =>
-          prev.map((r) => (r.id === repo.id ? { ...r, ...result.repository } : r))
+          prev.map((r) => {
+            // Issue #1662: an excluded root is no longer scanned, so it is no
+            // longer half of a duplicate — for itself OR for its partners. The
+            // parent screen also bumps `refreshKey` (which refetches the
+            // authoritative flags), but the row the user was just looking at
+            // must not keep claiming a conflict that the click resolved.
+            if (r.id === repo.id) {
+              return { ...r, ...result.repository, duplicateOf: [] };
+            }
+            const remaining = (r.duplicateOf ?? []).filter((p) => p !== repo.path);
+            return remaining.length === (r.duplicateOf ?? []).length
+              ? r
+              : { ...r, duplicateOf: remaining };
+          })
         );
         setFeedback({
           type: 'success',
@@ -569,11 +604,15 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                     )}
                     data-testid={`repository-row-${repo.id}`}
                   >
-                    {/* Issue #1662 will hang a duplicate-scan-root warning badge
-                        off this cell; keep it a flex container. */}
+                    {/* Issue #1662: the duplicate-scan-root warning hangs off
+                        the name, which is what a user scans the table by. */}
                     <td className="px-4 py-3 align-top text-foreground">
                       <span className="flex flex-wrap items-center gap-1.5">
                         {repo.name}
+                        <DuplicateScanRootBadge
+                          repo={repo}
+                          onNavigateToScanToggle={focusScanToggle}
+                        />
                       </span>
                     </td>
                     <td className="px-4 py-3 align-top">
@@ -627,6 +666,7 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                         repo={repo}
                         pending={scanPendingIds.has(repo.id)}
                         onToggle={handleToggleScan}
+                        registerRef={registerScanToggle}
                       />
                     </td>
                     <td className="px-4 py-3 align-top">
@@ -763,14 +803,18 @@ function ScanToggle({
   repo,
   pending,
   onToggle,
+  registerRef,
 }: {
   repo: RepositoryListItem;
   pending: boolean;
   onToggle: (repo: RepositoryListItem) => void;
+  /** Issue #1662: lets the duplicate badge hand focus to this control. */
+  registerRef: (id: string, node: HTMLButtonElement | null) => void;
 }) {
   const isEnabled = repo.enabled;
   return (
     <button
+      ref={(node) => registerRef(repo.id, node)}
       type="button"
       role="switch"
       aria-checked={isEnabled}
@@ -797,6 +841,59 @@ function ScanToggle({
         aria-hidden="true"
       />
       {isEnabled ? 'Enabled' : 'Disabled'}
+    </button>
+  );
+}
+
+/**
+ * DuplicateScanRootBadge (Issue #1662)
+ *
+ * Marks a row whose scan root is the SAME git repository as another registered
+ * root — i.e. two worktrees of one repository registered separately. Both roots
+ * enumerate the same worktrees, so every sync upserts each of them twice and
+ * `worktrees.repository_path` alternates between the roots; that configuration
+ * is what produced the #1659 ID churn.
+ *
+ * It is a BUTTON, not a static badge, because the fix is one column to the
+ * right: pressing it moves focus to this row's Scan toggle (Issue #1658), which
+ * takes the root out of the scan set without deleting anything. A warning whose
+ * remedy the user has to go find is a warning most people ignore.
+ *
+ * Renders nothing when there is no duplicate, which is the normal case — two
+ * worktrees of two DIFFERENT repositories never land here.
+ */
+function DuplicateScanRootBadge({
+  repo,
+  onNavigateToScanToggle,
+}: {
+  repo: RepositoryListItem;
+  onNavigateToScanToggle: (id: string) => void;
+}) {
+  const t = useTranslations('common');
+  const duplicates = repo.duplicateOf ?? [];
+
+  if (duplicates.length === 0) {
+    return null;
+  }
+
+  // The visible label has to stay short enough to sit next to a name, so the
+  // paths — the part that actually identifies the other root — are carried by
+  // the accessible name and the tooltip rather than being truncated away.
+  const detail = t('repositories.duplicateRowDetail', { paths: duplicates.join(', ') });
+
+  return (
+    <button
+      type="button"
+      data-testid={`duplicate-scan-root-${repo.id}`}
+      onClick={() => onNavigateToScanToggle(repo.id)}
+      title={detail}
+      aria-label={detail}
+      className={cn(
+        'rounded-full',
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+      )}
+    >
+      <Badge variant="warning">{t('repositories.duplicateRowBadge')}</Badge>
     </button>
   );
 }
