@@ -219,7 +219,8 @@ describe('GET /api/repositories (Issue #644)', () => {
     expect(data.repositories).toHaveLength(1);
     const repo = data.repositories[0];
 
-    // Whitelist of expected fields (Issue #690: `visible` added)
+    // Whitelist of expected fields
+    // Issue #690: `visible` added. Issue #1662: `duplicateOf` added.
     const expectedFields = new Set([
       'id',
       'name',
@@ -228,6 +229,7 @@ describe('GET /api/repositories (Issue #644)', () => {
       'enabled',
       'visible',
       'worktreeCount',
+      'duplicateOf',
     ]);
 
     for (const key of Object.keys(repo)) {
@@ -241,5 +243,9 @@ describe('GET /api/repositories (Issue #644)', () => {
     expect(typeof repo.path).toBe('string');
     expect(typeof repo.enabled).toBe('boolean');
     expect(typeof repo.worktreeCount).toBe('number');
+    // Issue #1662: always an array, empty for a repository with a single scan
+    // root — the client must never have to distinguish "absent" from "none".
+    expect(Array.isArray(repo.duplicateOf)).toBe(true);
+    expect(repo.duplicateOf).toEqual([]);
   });
 });
