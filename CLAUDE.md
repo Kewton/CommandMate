@@ -284,6 +284,7 @@ commandmate ls --json                      # JSON形式で出力
 commandmate ls --quiet                     # IDのみ出力（1行1ID）
 commandmate ls --branch feature/           # ブランチ名プレフィックスでフィルタ
 commandmate ls --id <prefix>               # worktree IDのプレフィックスでフィルタ
+commandmate sync                           # サーバーのworktree再スキャン（GUI同期ボタン相当、--json対応、Issue #1680）
 
 # メッセージ送信（送り先の指定は --instance 単独形。--agent はroster外のアドホック起動用、Issue #1638）
 commandmate send <worktree-id> "メッセージ"                    # エージェントにメッセージ送信

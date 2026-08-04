@@ -42,6 +42,24 @@ import type { TaskContractScope } from '@/lib/tasks/contract-parser';
 export const MAX_REPORTED_VIOLATIONS = 100;
 
 /**
+ * Actionable coda appended to every scope failure report (#1683).
+ *
+ * The violating paths alone say *what* failed but not what to do about it —
+ * #1678 B-2 is a worker structurally unable to pass because a lockfile was
+ * missing from the issue's target-file list, and nothing in the output said so.
+ * The wording answers both directions a violation can resolve: widen the
+ * declared scope when the diff is intended, revert when it is not. Re-sending
+ * is named because scope is judged from the contract's send-time snapshot, so
+ * editing the YAML in place changes nothing.
+ */
+export const SCOPE_ALLOW_GUIDANCE =
+  "To allow this diff, add the paths above to the contract's scope.allow (the " +
+  "issue's target-file list) and re-send the task (`send --contract`) — scope " +
+  'is judged from the send-time snapshot, so editing the contract file alone ' +
+  'changes nothing. A path matching deny: is a deliberate prohibition; revert ' +
+  'it instead.';
+
+/**
  * Paths that are in scope no matter what the contract says.
  *
  * The contract file lives here, so a contract whose own `allow` list forgot to
@@ -461,6 +479,7 @@ export async function evaluateScope(
     'out of scope:',
     ...listed.map((path) => `  - ${path}`),
     ...(remainder > 0 ? [`  ... and ${remainder} more`] : []),
+    SCOPE_ALLOW_GUIDANCE,
   ].join('\n');
 
   return done('failed', report, 1);

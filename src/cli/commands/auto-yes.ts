@@ -21,7 +21,7 @@ export function createAutoYesCommand(): Command {
     .option('--enable', 'Enable auto-yes')
     .option('--disable', 'Disable auto-yes')
     .option('--duration <duration>', `Duration (${ALLOWED_DURATIONS.join(', ')})`)
-    .option('--stop-pattern <pattern>', 'Stop pattern (regex, max 500 chars)')
+    .option('--stop-pattern <pattern>', 'Stop pattern (regex, max 500 chars). Matched against terminal output; cannot block commands (build logs mentioning the pattern also trigger it). To suppress auto-responses per command, use the task contract\'s autoYes.denyPatterns')
     .option('--instance <id>', INSTANCE_OPTION_DESCRIPTION)
     .option('--agent <agent>', AGENT_OPTION_DESCRIPTION)
     .option('--token <token>', TOKEN_WARNING)

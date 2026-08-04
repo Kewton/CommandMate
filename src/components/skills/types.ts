@@ -41,12 +41,25 @@ export type {
   SkillUninstallPlanDto,
 } from '@/lib/skills/uninstall-plan';
 
+export type {
+  SkillUpdateBlocker,
+  SkillUpdateFileEntry,
+  SkillUpdatePlanDto,
+  SkillUpdateSecurityDiff,
+  SkillUpdateStats,
+} from '@/lib/skills/update-plan';
+
 export type { SkillInstallPlanResponse } from '@/app/api/worktrees/[id]/skills/[skillId]/plan/route';
 export type {
   SkillInstallReplayResponse,
   SkillInstallResponse,
 } from '@/app/api/worktrees/[id]/skills/[skillId]/install/route';
 export type { SkillUninstallPlanResponse } from '@/app/api/worktrees/[id]/skills/[skillId]/uninstall-plan/route';
+export type { SkillUpdatePlanResponse } from '@/app/api/worktrees/[id]/skills/[skillId]/update-plan/route';
+export type {
+  SkillUpdateReplayResponse,
+  SkillUpdateResponse,
+} from '@/app/api/worktrees/[id]/skills/[skillId]/update/route';
 export type {
   SkillUninstallReplayResponse,
   SkillUninstallResponse,
@@ -74,6 +87,10 @@ import type {
   SkillUninstallReplayResponse,
   SkillUninstallResponse,
 } from '@/app/api/worktrees/[id]/skills/[skillId]/uninstall/route';
+import type {
+  SkillUpdateReplayResponse,
+  SkillUpdateResponse,
+} from '@/app/api/worktrees/[id]/skills/[skillId]/update/route';
 
 /**
  * What an apply request can answer with.
@@ -85,3 +102,4 @@ import type {
  */
 export type SkillInstallApplyResponse = SkillInstallResponse | SkillInstallReplayResponse;
 export type SkillUninstallApplyResponse = SkillUninstallResponse | SkillUninstallReplayResponse;
+export type SkillUpdateApplyResponse = SkillUpdateResponse | SkillUpdateReplayResponse;

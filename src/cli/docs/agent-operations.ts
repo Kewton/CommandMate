@@ -40,6 +40,16 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     running  - Agent executing a task
     waiting  - Confirmation prompt active (Yes/No, etc.)
 
+### commandmate sync
+  Ask the server to re-scan repositories and sync worktrees to its database
+  (same endpoint as the GUI sync button). Run it after 'git worktree add' so the
+  new worktree appears in 'commandmate ls' without opening the GUI (Issue #1680).
+
+  commandmate sync                        # Prints the server's summary message
+  commandmate sync --json                 # Full API response (worktreeCount,
+                                          # repositoryCount, repositories,
+                                          # deletedCount, cleanupWarnings)
+
 ### commandmate send <worktree-id> "<message>"
   Send a message to an agent (async). Starts session automatically if not running.
 
@@ -50,9 +60,12 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     --agent <id>           Ad-hoc CLI tool for an instance the roster does not know:
                            claude (default), codex, gemini, vibe-local, opencode, copilot, antigravity
     --register             Register the --instance session into the agent-instance roster
-    --auto-yes             Enable auto-yes before sending
+    --auto-yes             Enable auto-yes before sending (session-wide, no policy
+                           guard -- for unattended runs prefer --contract with an
+                           autoYes policy: mode / denyPatterns)
     --duration <d>         Auto-yes duration: 1h, 3h, 8h (default: 1h)
-    --stop-pattern <p>     Auto-yes stop condition (regex)
+    --stop-pattern <p>     Auto-yes stop condition (regex; matches terminal output,
+                           cannot block commands -- see auto-yes below)
 
   Finding worktree IDs:
     WT=$(commandmate ls --branch feature/101 --quiet)
@@ -90,6 +103,9 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
 
   Prompt JSON output (exit 10):
     {"worktreeId":"...","cliToolId":"claude","type":"yes_no","question":"...","options":["yes","no"],"status":"pending"}
+    The payload IS the prompt -- read it from stdout before falling back to
+    capture. For type "selection_list", options is empty by design and the
+    question field carries the reason.
 
   --verify turns "the agent stopped" into "the work passes the repository's own
   checks". Verification only runs when completion was detected: a prompt (10) or
@@ -178,6 +194,12 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   commandmate auto-yes <id> --enable --stop-pattern "error"
   commandmate auto-yes <id> --disable                   # Disable
   commandmate auto-yes <id> --enable --instance codex-2 # Scoped to one instance
+
+  --stop-pattern matches new terminal output, not the commands an agent runs.
+  It cannot block a command; a build log that merely prints the pattern
+  (e.g. "rm -rf" in an npm script) also triggers it and stops auto-yes.
+  To suppress auto-responses for risky prompts, use the task contract's
+  autoYes.denyPatterns instead (docs/design/task-contract.md).
 
 ### commandmate instances <worktree-id> [action] [args]
   Discover and manage a worktree's agent-instance roster (1 agent, multiple sessions).
@@ -288,7 +310,7 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
 
   Worktree not found:
     commandmate ls --quiet             # Check registered IDs
-    curl -s -X POST http://localhost:3000/api/repositories/sync  # Sync new worktrees
+    commandmate sync                   # Sync new worktrees (e.g. after git worktree add)
 
   Authentication:
     CM_AUTH_TOKEN=your-token commandmate ls

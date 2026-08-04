@@ -56,6 +56,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | コマンド | 用途 |
 |---------|------|
 | [`commandmate ls`](#commandmate-ls) | worktree一覧の表示 |
+| [`commandmate sync`](#commandmate-sync) | サーバーのworktree再スキャン（GUI同期ボタン相当） |
 | [`commandmate send`](#commandmate-send) | エージェントへのメッセージ送信 |
 | [`commandmate wait`](#commandmate-wait) | エージェント完了の待機 |
 | [`commandmate respond`](#commandmate-respond) | プロンプトへの応答 |
@@ -65,7 +66,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Auto-Yesの制御 |
 | [`commandmate instances`](#commandmate-instances) | エージェントインスタンス（roster）の一覧・追加・削除・alias変更 |
 | [`commandmate report`](#commandmate-report) | 日次レポートの生成・表示・一覧、Eval メトリクス集計 |
-| [`commandmate skill`](#commandmate-skill) | 公式Skillのカタログ参照・Install Plan・install・uninstall・status |
+| [`commandmate skill`](#commandmate-skill) | 公式Skillのカタログ参照・Install/Update Plan・install・update・uninstall・status |
 | [`commandmate update`](#commandmate-update) | CommandMate本体の更新（停止 → 更新 → 再起動） |
 
 ---
@@ -112,6 +113,47 @@ commandmate-main                                 main                  idle     
 
 ---
 
+## commandmate sync
+
+サーバーにリポジトリの再スキャンを実行させ、worktree を DB に同期します（Issue #1680）。
+GUI の worktree 同期ボタンと同じエンドポイント（`POST /api/repositories/sync`）を呼ぶため、
+`git worktree add` で作成した worktree を CLI だけで `commandmate ls` に反映できます。
+
+### 使用方法
+
+```bash
+commandmate sync                        # 再スキャン実行（サーバーのmessageを表示）
+commandmate sync --json                 # 同期結果をJSON（APIレスポンス相当）で出力
+```
+
+### 出力例
+
+```
+$ commandmate sync
+Successfully synced 12 worktree(s) from 3 repository/repositories
+```
+
+`--json` では `worktreeCount` / `repositoryCount` / `repositories` / `deletedCount` /
+`cleanupWarnings` を含む API レスポンスをそのまま出力します。
+
+### エラー
+
+| 状況 | 動作 |
+|------|------|
+| サーバー未起動 | `Server is not running. Start it with: commandmate start`（exit 1） |
+| リポジトリ未設定 | サーバーの 400 メッセージ（`WORKTREE_REPOS` / `CM_ROOT_DIR` の設定を案内）をそのまま表示（exit 2） |
+
+### 典型的なフロー
+
+```bash
+git worktree add ../myrepo-issue-123 -b feature/123-fix origin/develop
+commandmate sync                        # サーバーに新worktreeを認識させる
+commandmate ls --id myrepo-issue-123    # 同期直後から見える
+commandmate send myrepo-issue-123 "作業を開始してください"
+```
+
+---
+
 ## commandmate send
 
 指定worktreeのエージェントにメッセージを送信します（非同期）。セッションが未起動の場合は自動的に起動します。
@@ -137,7 +179,7 @@ commandmate send <worktree-id> "<message>" --auto-yes --stop-pattern "FAILED"
 | `--register` | `--instance` で指定したセッションをroster（エージェントインスタンス一覧）に登録 | - |
 | `--auto-yes` | 送信前にAuto-Yesを有効化 | - |
 | `--duration <d>` | Auto-Yesの有効期間（1h, 3h, 8h） | 1h |
-| `--stop-pattern <p>` | Auto-Yes停止条件（正規表現） | - |
+| `--stop-pattern <p>` | Auto-Yes停止条件（正規表現、ターミナル出力への照合。[auto-yes の注意](#--stop-pattern-はターミナル出力への照合コマンドの抑止には使えない)参照） | - |
 
 > `--instance` の詳細（ID規約・rosterとの関係）は [マルチセッション（1エージェント複数セッション）](#マルチセッション1エージェント複数セッション) を参照してください。
 
@@ -294,19 +336,35 @@ Completed: localllm-test-main
 ### 使用方法
 
 ```bash
-commandmate respond <worktree-id> "yes"          # Yes/No
+commandmate respond <worktree-id> "yes"          # Yes/No（複数選択では肯定選択肢へ意味解決）
 commandmate respond <worktree-id> "2"            # 複数選択（番号）
 commandmate respond <worktree-id> "text"         # テキスト入力
+commandmate respond <worktree-id> --default      # default 選択肢を明示的に選ぶ
 commandmate respond <worktree-id> "yes" --instance codex          # プライマリインスタンス指定
 commandmate respond <worktree-id> "yes" --instance codex-2        # 追加インスタンス宛て
 ```
+
+### yes / no の意味解決（Issue #1681）
+
+複数選択（multiple_choice）プロンプトへの `yes` / `no`（`y` / `n`）は、選択肢ラベルを正規化して
+肯定（`Yes...`）/ 否定（`No...`・`Deny`）の**選択肢番号に解決してから**送信します。カーソルナビ型
+メニュー（claude / antigravity）ではテキスト入力が無視され Enter が default 選択肢の選択に
+化けるため（`respond no` が承認になる事故）、テキスト+Enter では送りません。
+
+- 肯定候補が複数ある場合（例: `1. Yes` / `2. Yes, allow all edits...`）は**最も番号の小さい選択肢**
+  （= 最小権限）を選びます
+- 解決できない場合（yes/no 系ラベルが無い・チェックボックス型・選択肢を読めない）は**何も送信せず**
+  exit 99（`unresolvable_answer`）で失敗します。番号で応答してください
+- 解決結果は監査のため stdout に出力されます: `Resolved "no" to option 3: No, and tell Claude ...`
+- `--default` は default 選択肢（❯ ハイライト位置）を明示的に選びます（`<answer>` と排他）
 
 ### 終了コード
 
 | コード | 意味 |
 |:------:|------|
 | 0 | 応答成功 |
-| 99 | プロンプトが既に消えている（`prompt_no_longer_active`）|
+| 2 | 引数エラー（`<answer>` と `--default` の同時指定・両方欠落 等）|
+| 99 | プロンプトが既に消えている（`prompt_no_longer_active`）/ yes・no を選択肢に解決できない（`unresolvable_answer`）|
 
 ---
 
@@ -351,7 +409,9 @@ commandmate verify show <run-id>                       # run の詳細（読み�
 
 ### 出力
 
-進捗（GATE 行）は stderr、判定（RESULT 行）は stdout に出力されます。不合格ゲートは logTail も stderr に続けて出力します。
+進捗（GATE 行）は stderr、判定（RESULT 行）は stdout に出力されます。不合格ゲートは logTail も stderr に続けて出力します。表示は**末尾 40 行**まで（超過分は `... (+N more lines; run \`commandmate verify show <run-id>\` for the full log)` の 1 行に畳まれます。Issue #1683）。
+
+scope ゲート不合格の logTail には**違反 path 一覧**（最大 100 件、超過は `... and N more`）と、意図した差分なら契約の `scope.allow`（＝Issue の対象ファイル）へ path を追加して `send --contract` で**送り直す**定型ガイダンスが含まれます（scope は送信時スナップショットで裁定されるため、契約 YAML の編集だけでは判定は変わりません）。
 
 ```
 # stderr:
@@ -486,6 +546,67 @@ Error: invalid task contract:
   - scope.allow: at least one pattern is required while success.requireScopeClean is true
 ```
 
+### 無人実行の Auto-Yes ポリシーは allow-listed を使う（Issue #1684）
+
+契約の `autoYes.mode: safe` は **`yes_no` 型のプロンプトしか自動応答しません**。
+**Claude の編集確認（`Do you want to make this edit …?`）は `multiple_choice` 型**
+（実質 Yes/No＋allow-all の 3 択）なので、safe のままだと編集のたびにワーカーが停止します。
+無人で走らせる契約は `allow-listed` に広げ、危険操作は `denyPatterns` でエスカレートさせてください。
+
+```yaml
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: ['rm -rf', 'git push.*--force', 'sudo ']
+```
+
+ポリシーが自動応答を抑止した事実は `commandmate capture --json` の
+`autoYes.lastSuppression` に出ます（[capture の JSON フィールド](#json出力の主要フィールド)参照）。
+
+### 無人実行の推奨契約テンプレート（Issue #1686）
+
+無人でワーカーを走らせる契約はこのテンプレートから始めてください。
+「目的・変更許可スコープ・合格条件・Auto-Yes ポリシー」が一式そろっており、
+`send --contract` → `wait --verify` → `capture --json` / `capture --prompts` の
+パイプラインでそのまま裁定・観測できます。
+
+```yaml
+# .commandmate/tasks/issue-123.yaml — 無人実行の推奨契約テンプレート
+version: 1
+title: "Issue #123: <一行サマリ>"
+goal: |
+  https://github.com/<org>/<repo>/issues/123 を実装する。
+  受入条件: Issue の受入条件チェックリストをすべて満たすこと。
+  作業完了後は commit すること。
+scope:
+  allow:                              # Issue の対象ファイルを列挙（列挙漏れは scope ゲートで不合格になる）
+    - "src/**"
+    - "tests/**"
+    - "docs/**"
+    - "CHANGELOG.md"
+  deny: []
+verify:
+  gates: [lint, typecheck, unit]      # verify.yaml のゲート id。省略時: 全ゲート
+autoYes:
+  mode: allow-listed                  # safe は yes_no 型のみ。無人実行は allow-listed（上記参照）
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: ['rm -rf', 'git push.*--force', 'sudo ']
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
+```
+
+```bash
+commandmate send <worktree-id> --contract .commandmate/tasks/issue-123.yaml
+commandmate wait <worktree-id> --verify          # 合格 0 / 不合格 20 / 作業証跡ゼロ 21
+commandmate capture <worktree-id> --json         # autoYes.lastSuppression で抑止を観測
+commandmate capture <worktree-id> --prompts      # auto-yes が解決したプロンプトの監査証跡
+```
+
+フィールドの正準仕様は [docs/design/task-contract.md](../design/task-contract.md)、
+判定の可観測性の設計原則は
+[docs/design/discoverability-principle.md](../design/discoverability-principle.md) を参照してください。
+
 ### 一覧・詳細
 
 ```bash
@@ -564,9 +685,41 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
   "cliToolId": "claude",
   "lineCount": 42,
   "isPromptWaiting": false,
-  "autoYes": { "enabled": false, "expiresAt": null }
+  "autoYes": { "enabled": false, "expiresAt": null, "lastSuppression": null }
 }
 ```
+
+#### `autoYes.lastSuppression`: ポリシー抑止の観測（Issue #1684）
+
+実行契約の `autoYes` ポリシーが自動応答を**抑止**した最後の記録です（抑止が無ければ `null`）。
+抑止はこれまでサーバーログ（`poller:auto-yes-suppressed-by-policy`）にしか出ず、
+「Auto-Yes が効いているのにワーカーが止まっている」理由を CLI から判別できませんでした。
+
+```json
+"autoYes": {
+  "enabled": true,
+  "expiresAt": 1754300000000,
+  "lastSuppression": {
+    "reason": "type-not-allowed",
+    "mode": "safe",
+    "promptType": "multiple_choice",
+    "at": 1754296400000
+  }
+}
+```
+
+| フィールド | 意味 |
+|-----------|------|
+| `reason` | `type-not-allowed`（mode が許さない型）/ `deny-pattern`（denyPatterns がマッチ）/ `deny-pattern-unusable`（評価不能パターンの fail-closed）/ `mode-off` |
+| `mode` | 抑止時点のポリシー mode（`off` / `safe` / `allow-listed`、契約が mode を述べていなければ `null`） |
+| `promptType` | 抑止されたプロンプトの型（例: Claude の編集確認は `multiple_choice`） |
+| `pattern` | `deny-pattern` 系のとき、マッチした denyPattern |
+| `at` | 抑止時刻（epoch ms）。抑止されたプロンプトが画面に残っている間は毎ポーリング更新される |
+
+`isPromptWaiting: true` かつ `lastSuppression.at` が新しい場合、そのセッションは
+**いまポリシー抑止で停止**しています。`commandmate respond` で人間が応答するか、
+契約の `autoYes` を見直してください（`mode: safe` で `multiple_choice` が抑止される場合は
+[allow-listed への切り替え](#無人実行の-auto-yes-ポリシーは-allow-listed-を使うissue-1684)を推奨）。
 
 ### `--pane`: transcript を読む（Issue #1623）
 
@@ -589,6 +742,49 @@ commandmate capture <worktree-id> --pane --instance codex-2
 - 取得する行数は常に 1000 行固定（`--lines` はありません）。検知系と同じ要求のままにして、
   人が読んでいるという理由でサーバの挙動が変わらないようにしています
 - **attach も tmux 3.2+ も不要**です。`prefix+g`（下記）が使えない環境の代替になります
+
+### `--prompts`: 解決済みプロンプトの監査証跡（Issue #1685）
+
+auto-yes が `wait` のポーリング間隔内にプロンプトへ自動応答すると、`wait` は exit 10 せず、
+`capture --json` の `promptData` も既に `null` になっています。`--prompts` はチャット履歴から
+プロンプトメッセージを読むため、**何を聞かれ、何と答えたかを事後に取得できます**。
+
+```bash
+commandmate capture <worktree-id> --prompts                    # 直近 20 件をテキストで一覧
+commandmate capture <worktree-id> --prompts --limit 5          # 直近 5 件
+commandmate capture <worktree-id> --prompts --json             # JSON で取得
+commandmate capture <worktree-id> --prompts --instance codex-2 # インスタンスで絞り込み
+```
+
+JSON 出力（`prompts` は古い順）:
+
+```json
+{
+  "worktreeId": "myrepo-feature-x",
+  "count": 1,
+  "prompts": [
+    {
+      "id": "…",
+      "timestamp": "2026-08-04T10:00:00.000Z",
+      "cliToolId": "claude",
+      "instanceId": "claude",
+      "type": "yes_no",
+      "question": "Allow tool use?",
+      "options": ["yes", "no"],
+      "status": "answered",
+      "answer": "yes",
+      "answeredAt": "2026-08-04T10:00:02.000Z",
+      "answeredBy": "auto"
+    }
+  ]
+}
+```
+
+- **`answeredBy` が応答種別**です: `auto`（サーバ側 auto-yes が自動応答）/ `human`（respond API・
+  チャット UI からの明示応答。ブラウザ側 auto-yes フォールバック経由も `human` になります）/
+  `terminal`（誰かがターミナルで直接応答したと推定される掃引記録）。本機能導入前に解決した行は `null`
+- `--pane` とは併用できません（`--prompts` は履歴、`--pane` は現在の画面を読むため）
+- `--limit` の上限はサーバの履歴取得上限（1000）と同じです
 
 ---
 
@@ -664,6 +860,17 @@ commandmate auto-yes <worktree-id> --enable --instance codex-2  # 追加イン�
 | `--stop-pattern <p>` | 指定パターンがターミナル出力に出現したら自動停止 |
 | `--instance <id>` | **対象の推奨指定方法**。対象インスタンスID。他インスタンスと独立してAuto-Yesを制御 |
 | `--agent <id>` | roster に無いインスタンス向けの補助（`--instance` 単独で足りる場合は不要） |
+
+### `--stop-pattern` はターミナル出力への照合（コマンドの抑止には使えない）
+
+`--stop-pattern` はエージェントが実行する**コマンドを監視するものではなく**、ターミナル出力の
+新規部分（デルタ）への正規表現照合です。コマンドの実行そのものを止めることはできず、逆に
+ビルドログ等の出力にパターン文字列が**表示されただけ**でも発火します（例: `rm -rf` を指定すると、
+npm スクリプトがクリーンアップで `rm -rf dist` をログに出しただけで Auto-Yes が停止します）。
+
+「危険なコマンドに対する自動応答を抑止したい」場合は、実行契約の `autoYes.denyPatterns`
+（[docs/design/task-contract.md](../design/task-contract.md)）を使ってください。こちらは
+確認プロンプトの**質問文・選択肢**に照合し、マッチしたら自動応答せず人間へエスカレートします。
 
 ---
 
@@ -934,6 +1141,18 @@ commandmate skill info <skill-id> --version 1.2.0
 commandmate skill plan <skill-id> --worktree <worktree-id>
 commandmate skill plan <skill-id> --worktree <worktree-id> --version 1.2.0 --json
 
+# Update Plan（書き込みなし）
+commandmate skill update-plan <skill-id> --worktree <worktree-id>            # 推奨候補で計画
+commandmate skill update-plan <skill-id> --worktree <worktree-id> --version 1.3.0
+commandmate skill update-plan <skill-id> --worktree <worktree-id> --range "^1.0.0" --json
+
+# update（plan → 確認 → apply）
+commandmate skill update <skill-id> --worktree <worktree-id>                 # 推奨候補へ更新
+commandmate skill update <skill-id> --worktree <worktree-id> --version 1.3.0 --dry-run
+commandmate skill update <skill-id> --worktree <worktree-id> --version 1.3.0 --yes
+commandmate skill update <skill-id> --worktree <worktree-id> --version 1.3.0 \
+  --yes --ack-risk <skill-id>@1.3.0 --ack-risk-increase   # high-risk かつ risk 上昇時
+
 # install（plan → 確認 → apply）
 commandmate skill install <skill-id> --worktree <worktree-id> --version 1.2.0
 commandmate skill install <skill-id> --worktree <worktree-id> --version 1.2.0 --dry-run
@@ -947,7 +1166,7 @@ commandmate skill uninstall <skill-id> --worktree <worktree-id> --yes
 commandmate skill status <skill-id> --worktree <worktree-id> --json
 ```
 
-### 確認規約（install / uninstall）
+### 確認規約（install / update / uninstall）
 
 | 状況 | 挙動 |
 |------|------|
@@ -956,17 +1175,21 @@ commandmate skill status <skill-id> --worktree <worktree-id> --json
 | TTY かつ `--yes` なし | plan summary を表示してから確認プロンプト（stderr）を出す |
 | **非TTY かつ `--yes` なし** | **書き込まず exit 12**。プロンプトを出せない環境で暗黙実行しない |
 | **high-risk Skill** | `--yes` に加えて `--ack-risk <skill-id>@<version>` の**完全一致**が必要。`--yes` だけでは通らない（TTY で承諾しても同じ） |
+| **update で effective risk が上がる** | `--ack-risk` とは**別に** `--ack-risk-increase` が必要。high-risk 承認とリスク上昇承認は独立した確認で、片方が他方を代替しない |
+| **update に local 変更がある** | plan の時点で updatable=false。適用しても**旧版・新版のどちらも書き換えず** exit 11 |
 
 ### オプション
 
 | オプション | 対象サブコマンド | 説明 |
 |-----------|-----------------|------|
-| `--worktree <id>` | plan / install / uninstall / status | 対象worktree ID（`commandmate ls` で確認） |
-| `--version <version>` | info / plan / install | install では**必須**（exact version） |
-| `--dry-run` | install / uninstall | plan までで停止 |
-| `-y, --yes` | install / uninstall | 確認プロンプトをスキップ（非対話環境では必須） |
-| `--ack-risk <id>@<version>` | install | high-risk Skill の明示的な承認 |
-| `--prerelease` | list / info / plan / install | prerelease version を対象に含める |
+| `--worktree <id>` | plan / update-plan / install / update / uninstall / status | 対象worktree ID（`commandmate ls` で確認） |
+| `--version <version>` | info / plan / update-plan / install / update | install では**必須**（exact version）。update-plan / update では省略時に推奨候補へ解決 |
+| `--range <range>` | update-plan / update | 候補をこの version range 内に限定（例 `"^1.0.0"`） |
+| `--dry-run` | install / update / uninstall | plan までで停止 |
+| `-y, --yes` | install / update / uninstall | 確認プロンプトをスキップ（非対話環境では必須） |
+| `--ack-risk <id>@<version>` | install / update | high-risk Skill の明示的な承認 |
+| `--ack-risk-increase` | update | effective risk が上がる更新の明示的な承認（`--ack-risk` とは別枠） |
+| `--prerelease` | list / info / plan / update-plan / install / update | prerelease version を対象に含める |
 | `--json` | 全サブコマンド | JSON出力（API レスポンスをそのまま出力） |
 | `--token <token>` | 全サブコマンド | 認証トークン（`CM_AUTH_TOKEN` 環境変数を推奨） |
 
@@ -987,6 +1210,12 @@ commandmate skill status <skill-id> --worktree <worktree-id> --json
 
 > **`skill status` について**: 1 worktree × 1 Skill の導入状態を、install receipt（ディスク上の実体）から報告します。
 > worktree 単位で導入済み Skill を一覧する API は未提供のため、`<skill-id>` は必須です。
+
+> **`skill update` の安全性**: 更新は「旧版が CommandMate の記録どおり無変更である」ことを適用直前に
+> 再証明してから行います。1 file でも編集・追加・欠落があれば**何も書かずに** exit 11 で止まります。
+> 切替は rename 1 点を commit point とするため、途中で失敗しても旧版完全体か新版完全体のどちらかに
+> 収束し、混在しません。旧版は切替前に `~/.commandmate/skills/backups/` へ検証済みで保存されます
+> （復元コマンドは #1245 で提供予定）。
 
 ---
 
@@ -1125,6 +1354,17 @@ commandmate wait "$WT2" --instance codex --timeout 1800
 commandmate capture "$WT1" --json
 commandmate capture "$WT2" --instance codex --json
 ```
+
+### エージェント稼働中の worktree でビルドしない（生成物ディレクトリの共有破損）
+
+エージェント（worker）が作業中の worktree で、監督側が検証やビルド
+（`npm run build` / `npm run preview` 等）を実行しないでください。双方が同じ生成物
+ディレクトリ（`.next` / `dist` 等）に書き込むため、**両方のビルドが破損**します。
+
+- 検証・ビルドは `commandmate wait` で worker の完了を確認してから実行する
+- 稼働中にどうしても必要な場合は、別の worktree / 別ディレクトリに checkout して行う
+- `commandmate verify` のゲートは worktree の作業ディレクトリで走るため、worker 稼働中の
+  実行も同じ競合を起こします。完了後（`wait --verify` の裁定後）に実行してください
 
 ---
 

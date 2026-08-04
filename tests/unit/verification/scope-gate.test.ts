@@ -36,6 +36,7 @@ import {
   evaluateScope,
   MAX_REPORTED_VIOLATIONS,
   ScopeMatcher,
+  SCOPE_ALLOW_GUIDANCE,
   SCOPE_SKIP_NO_CONTRACT,
   SCOPE_SKIP_NOT_REQUIRED,
 } from '@/lib/verification/scope-gate';
@@ -428,6 +429,31 @@ describe('evaluateScope', () => {
     expect(outcome.logTail).toContain('allow: src/lib/verification/**, tests/unit/verification/**');
   });
 
+  it('closes every failure report with the scope.allow guidance, after the path list', async () => {
+    const repo = createRepo();
+    write(repo, 'package.json', '{}\n');
+    git(['add', '-A'], repo);
+    git(['commit', '-m', 'out of scope'], repo);
+
+    const outcome = await evaluate(repo, ALLOW_SRC);
+    expect(outcome.status).toBe('failed');
+    const tail = outcome.logTail ?? '';
+    expect(tail.endsWith(SCOPE_ALLOW_GUIDANCE)).toBe(true);
+    // The reader meets the paths before the fix for them.
+    expect(tail.indexOf(SCOPE_ALLOW_GUIDANCE)).toBeGreaterThan(tail.indexOf('  - package.json'));
+  });
+
+  it('keeps the guidance out of a passing report', async () => {
+    const repo = createRepo();
+    write(repo, 'src/lib/verification/scope-gate.ts', 'export const gate = 1;\n');
+    git(['add', '-A'], repo);
+    git(['commit', '-m', 'in scope'], repo);
+
+    const outcome = await evaluate(repo, ALLOW_SRC);
+    expect(outcome.status).toBe('passed');
+    expect(outcome.logTail).not.toContain(SCOPE_ALLOW_GUIDANCE);
+  });
+
   it('fails on a deny match even when allow covers the path', async () => {
     const repo = createRepo();
     write(repo, 'src/lib/verification/scope-gate.ts', 'export const gate = 1;\n');
@@ -554,5 +580,7 @@ describe('evaluateScope', () => {
     expect(outcome.logTail).toContain(`violations=${total}`);
     expect((outcome.logTail ?? '').match(/^ {2}- /gm)?.length).toBe(MAX_REPORTED_VIOLATIONS);
     expect(outcome.logTail).toContain('... and 5 more');
+    // Truncation must not swallow the actionable part.
+    expect((outcome.logTail ?? '').endsWith(SCOPE_ALLOW_GUIDANCE)).toBe(true);
   });
 });

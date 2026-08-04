@@ -277,6 +277,12 @@ export interface LsOptions {
   token?: string;
 }
 
+/** sync command options [Issue #1680] */
+export interface SyncOptions {
+  json?: boolean;
+  token?: string;
+}
+
 /** send command options [Issue #518, #576] */
 export interface SendOptions {
   agent?: string;
@@ -335,6 +341,8 @@ export interface RespondOptions {
   token?: string;
   /** Issue #868: agent instance ID or alias (defaults to the agent's primary instance) */
   instance?: string;
+  /** Issue #1681: select the prompt's default option instead of passing an answer */
+  default?: boolean;
 }
 
 /** capture command options [Issue #518] */
@@ -360,6 +368,14 @@ export interface CaptureOptions {
   tail?: string;
   /** Issue #1623: with `--pane`, print the frame verbatim (no blank-row squeeze). */
   raw?: boolean;
+  /**
+   * Issue #1685: list the prompt audit trail (question / options / answer /
+   * answeredBy) instead of terminal output. Reads resolved prompts from chat
+   * history, so it works after Auto-Yes already cleared the prompt from screen.
+   */
+  prompts?: boolean;
+  /** Issue #1685: with `--prompts`, number of most recent prompts to list. */
+  limit?: string;
 }
 
 /** auto-yes command options [Issue #518] */
@@ -418,6 +434,24 @@ export interface SkillInfoOptions extends SkillListOptions {
 export interface SkillPlanOptions extends SkillListOptions {
   worktree?: string;
   version?: string;
+}
+
+/** skill update-plan options [Issue #1243] */
+export interface SkillUpdatePlanOptions extends SkillPlanOptions {
+  /** Range every candidate must satisfy, in the Skill version-range grammar. */
+  range?: string;
+}
+
+/** skill update (apply) options [Issue #1244] */
+export interface SkillUpdateOptions extends SkillUpdatePlanOptions {
+  /** Build the plan and stop; never writes. */
+  dryRun?: boolean;
+  /** Skip the interactive confirmation. Required to write from a non-TTY. */
+  yes?: boolean;
+  /** Explicit `<skill-id>@<version>` acknowledgement, demanded on top of --yes for high risk. */
+  ackRisk?: string;
+  /** Separate acknowledgement demanded when the update raises effective risk. */
+  ackRiskIncrease?: boolean;
 }
 
 /** skill install options [Issue #1237] */

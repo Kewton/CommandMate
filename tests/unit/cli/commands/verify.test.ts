@@ -11,6 +11,7 @@ import { restoreFetch } from '../../../helpers/mock-api';
 import { ExitCode, VerifyExitCode } from '../../../../src/cli/types';
 import {
   exitCodeForRunStatus,
+  MAX_PRINTED_LOG_TAIL_LINES,
   parseGateIds,
 } from '../../../../src/cli/utils/verify-runner';
 import type {
@@ -203,6 +204,81 @@ describe('verify command action', () => {
     expect(mockConsoleError).toHaveBeenCalledWith('GATE unit FAIL (exit=1, 45.0s)');
     // The log tail is what makes a CLI failure actionable.
     expect(mockConsoleError).toHaveBeenCalledWith('2 tests failed');
+  });
+
+  it('prints a scope failure with its out-of-scope paths and the scope.allow guidance', async () => {
+    // Mirrors the report evaluateScope() builds (scope-gate.ts); below the
+    // display cap it must reach stderr verbatim — the paths are what let a
+    // worker see that a lockfile is missing from the issue's target files
+    // (#1683, from #1678 B-2).
+    const scopeTail = [
+      'scope: baseRef=origin/develop changed=3 violations=2',
+      'allow: src/cli/**, tests/**',
+      'deny: (none)',
+      'out of scope:',
+      '  - package-lock.json',
+      '  - web/src/map.ts',
+      "To allow this diff, add the paths above to the contract's scope.allow.",
+    ].join('\n');
+    mockFetchWithTail([
+      { data: { runId: 7 }, status: 202 },
+      {
+        data: {
+          run: run({
+            status: 'failed',
+            gates: [
+              workEvidencePassed,
+              gate({ id: 12, gateId: 'scope', command: 'git diff --name-only / status --porcelain × contract scope', status: 'failed', exitCode: 1, durationMs: 200, logTail: scopeTail }),
+            ],
+          }),
+        },
+      },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'wt1']);
+
+    expect(mockExit).toHaveBeenCalledWith(VerifyExitCode.VERIFY_FAILED);
+    expect(mockConsoleError).toHaveBeenCalledWith('GATE scope FAIL (exit=1, 0.2s)');
+    expect(mockConsoleError).toHaveBeenCalledWith(scopeTail);
+  });
+
+  it('caps a long log tail to its last lines and counts the omitted rest', async () => {
+    const total = MAX_PRINTED_LOG_TAIL_LINES + 10;
+    const longTail = Array.from(
+      { length: total },
+      (_, i) => `line-${String(i).padStart(3, '0')}`
+    ).join('\n');
+    mockFetchWithTail([
+      { data: { runId: 7 }, status: 202 },
+      {
+        data: {
+          run: run({
+            status: 'failed',
+            gates: [
+              gate({ id: 11, gateId: 'unit', command: 'npm run test:unit', status: 'failed', exitCode: 1, logTail: longTail }),
+            ],
+          }),
+        },
+      },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'wt1']);
+
+    const printed = mockConsoleError.mock.calls
+      .map((call) => call[0])
+      .find((arg): arg is string => typeof arg === 'string' && arg.includes('line-'));
+    expect(printed).toBeDefined();
+    expect(
+      printed!.startsWith(
+        '... (+10 more lines; run `commandmate verify show 7` for the full log)'
+      )
+    ).toBe(true);
+    // The tail survives: that is where a suite's summary and scope's guidance sit.
+    expect(printed).toContain(`line-${String(total - 1).padStart(3, '0')}`);
+    expect(printed).not.toContain('line-000');
+    expect(printed!.split('\n')).toHaveLength(MAX_PRINTED_LOG_TAIL_LINES + 1);
   });
 
   it('exits 21 when work-evidence finds nothing to verify', async () => {

@@ -124,11 +124,10 @@ const SELECT_COLUMNS = `
  * The journal already holds the actor, target, source and typed error.
  *
  * The version transition (#1248) is derived from the journal rather than passed
- * in, because for the two operations that exist today the journal fully
- * determines it: an install ends at its target version and starts nowhere, an
- * uninstall starts at the version it removes and ends nowhere. An `update` is
- * the one case where `fromVersion` is not derivable — it has no writer yet
- * (#1243/#1244), and whoever adds one has to supply the replaced version here.
+ * in, because the journal fully determines it: an install ends at its target
+ * version and starts nowhere, an uninstall starts at the version it removes and
+ * ends nowhere, and an update (#1244) records the version it replaces on its
+ * own target (`fromVersion`) precisely so this derivation stays total.
  */
 export function buildSkillOperationAuditInput(
   entry: SkillOperationJournalEntry,
@@ -148,7 +147,7 @@ export function buildSkillOperationAuditInput(
     worktreeId: entry.target.worktreeId,
     skillId: entry.target.skillId,
     skillVersion: entry.target.version,
-    fromVersion: isUninstall ? entry.target.version : null,
+    fromVersion: isUninstall ? entry.target.version : (entry.target.fromVersion ?? null),
     toVersion: isUninstall ? null : entry.target.version,
     sourceOrigin: entry.source?.origin ?? null,
     sourceRepository: entry.source?.repository ?? null,

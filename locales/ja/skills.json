@@ -312,6 +312,72 @@
       "irregular": "残す（通常ファイル以外）"
     }
   },
+  "update": {
+    "badge": "更新あり",
+    "upToDate": "バージョン {version} は公開されている最新版です。更新はありません。",
+    "open": "更新内容を確認",
+    "heading": "更新プラン",
+    "intro": "{skill} はバージョン {version} がインストールされています。移行先のバージョンを明示的に選ぶと、何が変わるかを下のプランで確認できます。",
+    "ready": "更新プランの作成では何も書き込みません。候補パッケージをダウンロード・検証し、インストール済みの内容と比較して、差分とブロック要因をすべて報告します。",
+    "fromTo": "{from} → {to}",
+    "latestAvailable": "最新: {version}",
+    "versionPicker": "更新先バージョン",
+    "build": "更新プランを作成",
+    "building": "更新プランを作成中…",
+    "filesHeading": "ファイルの変更",
+    "stats": "+{added} 追加、~{updated} 更新、−{removed} 削除、={unchanged} 変更なし",
+    "showDiff": "差分を表示",
+    "permissionsAdded": "この更新で追加される権限",
+    "permissionsRemoved": "この更新で不要になる権限",
+    "scriptsAdded": "新しいスクリプト",
+    "scriptsRemoved": "削除されるスクリプト",
+    "executablesAdded": "新しい実行可能ファイル",
+    "executablesRemoved": "削除される実行可能ファイル",
+    "highRiskAcknowledgement": "CommandMate が候補パッケージの内容を検査した結果、高リスクと判定しました。この更新の適用には明示的な確認が必要になります。",
+    "riskIncreaseAcknowledgement": "この更新により、Skill の実効リスクが現在のインストールより高くなります。適用には通常の更新確認とは別に、追加の確認が必要になります。",
+    "change": {
+      "add": "追加",
+      "update": "更新",
+      "remove": "削除",
+      "unchanged": "変更なし"
+    },
+    "reason": {
+      "upToDate": "インストール済みのバージョンより新しい公開版はありません。",
+      "highestCompatible": "インストール済みより新しく、実行中の CommandMate で動作する最新の公開版です。",
+      "latestUnverified": "実行中の CommandMate バージョンを判定できなかったため、互換性未検証のまま最新候補を提示しています。",
+      "noneCompatible": "新しいバージョンはありますが、実行中の CommandMate で動作するものはありません。",
+      "installedVersionInvalid": "レシートに記録されたインストールバージョンが不正なため、更新を解決できません。",
+      "rangeUnsupported": "指定されたバージョン範囲はサポート外のため、候補を解決できませんでした。"
+    },
+    "blocked": {
+      "localChanges": "このパスはインストール後に変更されています（編集・削除・手動追加）。CommandMate はローカル変更を上書きして更新しません。ファイルを元に戻す（または Skill をアンインストールして再インストールする）と、新しい更新プランを作成できます。",
+      "rootMissing": "記録されたインストールディレクトリが存在しません。更新の前に Skill を再インストールするか、インデックスを再構築してください。",
+      "receiptMissing": "インストールディレクトリに CommandMate のインストール記録がなく、どのファイルが Skill のものかを証明できません。",
+      "receiptUnreadable": "インストール記録を読み取れないため、ファイルの所有を確認できません。",
+      "receiptForeign": "このディレクトリのインストール記録は別の Skill のものです。",
+      "rootReceiptDiverged": "記録されたインストールディレクトリのインストール記録が食い違っており、インストールが単一のバージョンではなくなっています。",
+      "treeScanTruncated": "Skill ディレクトリが大きすぎるか深すぎて完全に検査できず、ローカル変更がないことを保証できません。",
+      "incompatible": "選択したバージョンは実行中の CommandMate と互換性がありません。"
+    },
+    "nextAction": {
+      "updatable": "インストール済みの全ファイルがインストール記録と一致しています。このプランから更新を適用できます。",
+      "blocked": "何も変更されていません。下に列挙されたパスを解消（ローカル変更の復元、または CommandMate 管理外ファイルの移動）してから、新しい更新プランを作成してください。",
+      "succeeded": "Skill は新しいバージョンに切り替わり、記録されました。下記のエージェントセッションを再起動すると利用できます。",
+      "committedReconciling": "新しいバージョンはすでに worktree にありますが、操作は完全には完了しませんでした。残りは CommandMate が自動的に収束させます。再更新は不要です。",
+      "failed": "worktree には何も書き込まれていません。下記の理由を解消してから、新しい更新プランを作成してください。"
+    },
+    "apply": "更新を適用",
+    "applying": "更新を適用中…",
+    "ackRisk": "候補パッケージのファイル・スクリプト・権限を確認したうえで、この高リスクパッケージへの更新を明示的に承認します。",
+    "ackRiskIncrease": "この更新により Skill の実効リスクが現在より上がることを理解し、別途確認します。",
+    "rollbackAvailable": "入れ替え前のバージョン {version} は、切替前に検証済みの CommandMate 管理バックアップとして保存されました。ロールバックは別操作として提供予定です。",
+    "reload": {
+      "native": "{agent} は起動時に worktree から Skill を読み込みます。この worktree の {agent} セッションを再起動すると {skillId} {version} が利用できます。",
+      "commandmateRuntime": "{agent} はこの Skill を CommandMate ランタイム経由で実行します。この worktree の {agent} セッションを再起動するとランタイムが {skillId} {version} を読み込みます。",
+      "unsupported": "{agent} はこの Skill に対応していません。ファイルは更新されましたが、{skillId} {version} は {agent} セッションでは提供されません。",
+      "unknown": "{agent} でのサポートは未検証です。ファイルは更新済みのため、{agent} セッションを再起動して {skillId} {version} が提供されるか確認してください。"
+    }
+  },
   "card": {
     "provider": "提供元: {provider}",
     "noRecommendedVersion": "導入可能なversionなし"
@@ -323,7 +389,8 @@
     "catalogHeading": "Catalogから導入",
     "installedBadge": "導入済み",
     "version": "バージョン {version}",
-    "back": "Skill一覧へ戻る"
+    "back": "Skill一覧へ戻る",
+    "updateBadge": "更新あり"
   },
   "state": {
     "loading": "Skill Catalogを読み込んでいます…",
@@ -386,7 +453,11 @@
       "uninstallFileChanged": "plan作成後にファイルが変更されました。何も削除していません。planを作り直してください。",
       "uninstallFailed": "先行する削除が失敗しており、何も削除されていません。planを作り直してください。",
       "requestFailed": "要求がCommandMateに届かなかったか、理由を伴わない応答が返りました。変更が起きたとは確認できていません。",
-      "unexpected": "CommandMateが説明を持たない失敗を報告しました。worktreeを確認したうえで、変更なしと判断してください。"
+      "unexpected": "CommandMateが説明を持たない失敗を報告しました。worktreeを確認したうえで、変更なしと判断してください。",
+      "updateNotInstalled": "この worktree にはこの Skill のインストール記録がなく、更新対象がありません。",
+      "updateUpToDate": "インストール済みより新しい公開版はなく、更新はありません。",
+      "updateVersionNotEligible": "指定されたバージョンは、この Skill のインストール済みより新しい公開版ではありません。",
+      "updateNoneCompatible": "新しいバージョンはありますが、実行中の CommandMate で動作するものはありません。"
     }
   },
   "dashboard": {

@@ -13,6 +13,7 @@ import type {
   SkillCatalogSummary,
   SkillInstallPlan,
   SkillUninstallPlan,
+  SkillUpdatePlan,
 } from '../types/api-responses';
 
 /** [DR1-08 consistency] Mirrors ls.ts / instances.ts table rendering. */
@@ -158,6 +159,85 @@ export function formatInstallPlan(plan: SkillInstallPlan): string {
       `High risk:    installing requires --ack-risk ${skill.id}@${skill.version} in addition to --yes`
     );
   }
+  return lines.join('\n');
+}
+
+/**
+ * The update preview (Issue #1243): the version move, the security-relevant
+ * differences, the file diff totals, and every reason the update is refused.
+ * Shows the same facts the browser dialog shows, in the same order.
+ */
+export function formatUpdatePlan(plan: SkillUpdatePlan): string {
+  const { skill, target, update, securityDiff, stats } = plan;
+  const lines: string[] = [
+    `Update plan: ${skill.name} (${skill.id}) ${update.fromVersion} -> ${update.toVersion}`,
+    '',
+    `Target:       ${target.repositoryName} / ${target.worktreeName} (${target.worktreeId})`,
+    `Branch:       ${target.branch ?? `(${target.headState})`}${target.workingTreeDirty ? ' [working tree dirty]' : ''}`,
+    `Install root: ${formatInstallRoots(target.installRoots, target.installRoot)}`,
+    `Risk:         ${securityDiff.risk.from.effective} -> ${securityDiff.risk.to.effective}${securityDiff.risk.increased ? ' [RISK INCREASE]' : ''}`,
+    `Compatibility: ${skill.compatibility.commandmate.status} — ${skill.compatibility.commandmate.message}`,
+  ];
+  if (update.latestVersion && update.latestVersion !== update.toVersion) {
+    lines.push(`Newest:       ${update.latestVersion} (not selected)`);
+  }
+  if (securityDiff.permissions.added.length > 0) {
+    lines.push(formatList('Perms added:  ', securityDiff.permissions.added));
+  }
+  if (securityDiff.permissions.removed.length > 0) {
+    lines.push(formatList('Perms removed:', securityDiff.permissions.removed));
+  }
+  if (securityDiff.scripts.added.length > 0) {
+    lines.push(formatList('New scripts:  ', securityDiff.scripts.added));
+  }
+  if (securityDiff.scripts.removed.length > 0) {
+    lines.push(formatList('Scripts gone: ', securityDiff.scripts.removed));
+  }
+  if (securityDiff.executables.added.length > 0) {
+    lines.push(formatList('New execs:    ', securityDiff.executables.added));
+  }
+  lines.push(
+    `Changes:      +${stats.added} added, ~${stats.updated} updated, -${stats.removed} removed, =${stats.unchanged} unchanged`
+  );
+  const localFindings = stats.localModified + stats.localMissing + stats.localUnknown + stats.irregular;
+  if (localFindings > 0) {
+    lines.push(
+      `Local:        ${stats.localModified} modified, ${stats.localMissing} missing, ${stats.localUnknown} unmanaged, ${stats.irregular} irregular`
+    );
+  }
+  for (const entry of securityDiff.changelogs) {
+    lines.push(`Changelog ${entry.version}:`);
+    for (const changelogLine of entry.changelog.split('\n')) {
+      lines.push(`  ${changelogLine}`);
+    }
+  }
+  if (plan.warnings.length > 0) {
+    lines.push(`Warnings:     ${plan.warnings.join(', ')}`);
+  }
+  if (plan.blockers.length > 0) {
+    lines.push('Blockers:');
+    for (const blocker of plan.blockers) {
+      lines.push(
+        `  - ${blocker.code}${blocker.detail ? ` (${blocker.detail})` : ''}${blocker.path ? `: ${blocker.path}` : ''}`
+      );
+    }
+  }
+  lines.push(
+    plan.updatable
+      ? 'Updatable:    yes'
+      : 'Updatable:    no — nothing would be written'
+  );
+  if (plan.requiresRiskAcknowledgement) {
+    lines.push(
+      `High risk:    applying this update will require an explicit acknowledgement of ${skill.id}@${update.toVersion}`
+    );
+  }
+  if (plan.riskIncreased) {
+    lines.push(
+      'Risk rises:   applying this update will require a separate risk-increase confirmation'
+    );
+  }
+  lines.push(`Next action:  ${plan.nextActionKey}`);
   return lines.join('\n');
 }
 

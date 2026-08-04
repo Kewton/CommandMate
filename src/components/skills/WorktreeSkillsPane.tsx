@@ -25,9 +25,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ArrowLeft } from 'lucide-react';
 import { Badge, Button, Card, Skeleton } from '@/components/ui';
+import { hasSkillUpdate } from '@/lib/skills/version-resolver';
 import { SkillCompatibilityBadge, SkillRiskBadge } from './SkillBadges';
 import { SkillInstallPanel } from './SkillInstallPanel';
 import { SkillNotice } from './SkillNotice';
+import { SkillUpdateDialog } from './SkillUpdateDialog';
 import {
   fetchSkillList,
   fetchWorktreeInstalledSkills,
@@ -116,7 +118,10 @@ export function WorktreeSkillsPane({ worktreeId, className = '' }: WorktreeSkill
   const catalogInfoById = useMemo(
     () =>
       new Map(
-        catalog.skills.map((skill) => [skill.id, { name: skill.name, summary: skill.summary }])
+        catalog.skills.map((skill) => [
+          skill.id,
+          { name: skill.name, summary: skill.summary, latest: skill.latest },
+        ])
       ),
     [catalog.skills]
   );
@@ -173,7 +178,19 @@ export function WorktreeSkillsPane({ worktreeId, className = '' }: WorktreeSkill
             {skill?.name ?? selectedSkillId}
           </h2>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto p-3">
+        <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
+          {/* Issue #1243/#1244: an installed Skill with a Catalog entry gets the
+              update surface — badge, explicit version picker, the server-built
+              plan, and the apply step that spends the plan's token. */}
+          {selectedInstalledSkill && skill && (
+            <SkillUpdateDialog
+              skillId={selectedSkillId}
+              skillName={skill.name}
+              worktreeId={worktreeId}
+              installedVersion={selectedInstalledSkill.version}
+              versions={skill.versions}
+            />
+          )}
           <SkillInstallPanel
             skillId={selectedSkillId}
             version={version}
@@ -235,6 +252,14 @@ export function WorktreeSkillsPane({ worktreeId, className = '' }: WorktreeSkill
                           {catalogInfo?.name ?? skill.skillId}
                         </span>
                         <SkillRiskBadge risk={skill.effectiveRisk} />
+                        {hasSkillUpdate(skill.version, catalogInfo?.latest ?? null) && (
+                          <Badge
+                            variant="info"
+                            data-testid={`worktree-skills-update-badge-${skill.skillId}`}
+                          >
+                            {t('worktreePane.updateBadge')}
+                          </Badge>
+                        )}
                       </div>
                       {catalogInfo?.summary && (
                         <p

@@ -7,7 +7,7 @@
 
 import { randomUUID } from 'crypto';
 import Database from 'better-sqlite3';
-import type { ChatMessage } from '@/types/models';
+import type { ChatMessage, MessageType, PromptAnsweredBy, PromptData } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
 
@@ -24,6 +24,13 @@ export interface GetMessagesOptions {
   /** Issue #868: scope to a single agent instance (overrides cliToolId filtering when set). */
   instanceId?: string;
   includeArchived?: boolean;
+  /**
+   * Issue #1685: restrict results to a single message_type. Used with 'prompt'
+   * by the CLI prompt-audit listing (`capture --prompts`). Note that legacy rows
+   * store NULL for 'normal', so filtering on 'normal' misses pre-#565 rows —
+   * only the 'prompt' filter has a consumer today.
+   */
+  messageType?: MessageType;
   /**
    * Issue #1407: unit that `limit` counts.
    * - 'messages' (default): bounds the number of raw chat rows returned (legacy behavior).
@@ -206,7 +213,7 @@ export function getMessages(
   worktreeId: string,
   options: GetMessagesOptions = {}
 ): ChatMessage[] {
-  const { before, limit = 50, cliToolId, instanceId, includeArchived = false, limitUnit = 'messages' } = options;
+  const { before, limit = 50, cliToolId, instanceId, includeArchived = false, messageType, limitUnit = 'messages' } = options;
 
   // Build the shared scope clause (worktree + before cursor + archived + instance/cli
   // filter) and its bound params. Used for both the message-unit and pair-unit paths
@@ -228,6 +235,12 @@ export function getMessages(
     } else if (cliToolId) {
       clause += ` AND cli_tool_id = ?`;
       params.push(cliToolId);
+    }
+
+    // Issue #1685: message-type filter (prompt audit listing)
+    if (messageType) {
+      clause += ` AND message_type = ?`;
+      params.push(messageType);
     }
 
     return { clause, params };
@@ -606,6 +619,10 @@ export function markPendingPromptsAsAnswered(
       promptData.status = 'answered';
       promptData.answer = '(answered via terminal)';
       promptData.answeredAt = new Date().toISOString();
+      // Issue #1685: attribution for the audit trail. This sweep only sees
+      // prompts nothing else claimed, so all that is known is that the agent
+      // moved on — i.e. someone acted in the terminal.
+      promptData.answeredBy = 'terminal';
       updateStmt.run(JSON.stringify(promptData), row.id);
       updatedCount++;
     } catch {
@@ -614,4 +631,101 @@ export function markPendingPromptsAsAnswered(
   }
 
   return updatedCount;
+}
+
+/** Parameters for {@link recordAnsweredPrompt} (Issue #1685). */
+export interface RecordAnsweredPromptParams {
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  /** Agent instance that was asked. Defaults to the primary instance (=== cliToolId). */
+  instanceId?: string;
+  /** The prompt as detected on screen at answer time. */
+  promptData: PromptData;
+  /** The answer that was sent to the terminal. */
+  answer: string;
+  /** Who resolved the prompt. */
+  answeredBy: PromptAnsweredBy;
+  /** Content for a newly created row; defaults to the prompt's question. */
+  content?: string;
+}
+
+/** Result of {@link recordAnsweredPrompt} (Issue #1685). */
+export interface RecordAnsweredPromptResult {
+  message: ChatMessage;
+  /** True when no pending prompt row existed and a new (already-answered) row was created. */
+  created: boolean;
+}
+
+/**
+ * Persist "this prompt was just answered" to chat history (Issue #1685).
+ *
+ * The answer paths (Auto-Yes poller, /prompt-response) act on what is on
+ * screen, not on a stored message, so the prompt they resolve may or may not
+ * have been saved by the response poller yet:
+ *
+ * - If a pending prompt row exists for the instance, it is marked answered in
+ *   place — preferring the row whose question matches the screen, falling back
+ *   to the newest pending row (the two capture paths can clean text slightly
+ *   differently).
+ * - If none exists (the answer landed inside the response poller's interval —
+ *   the exact case Issue #1685 is about), a new already-answered prompt row is
+ *   created so the question/options/answer survive for the audit trail.
+ */
+export function recordAnsweredPrompt(
+  db: Database.Database,
+  params: RecordAnsweredPromptParams
+): RecordAnsweredPromptResult {
+  const { worktreeId, cliToolId, promptData, answer, answeredBy } = params;
+  const resolvedInstanceId = params.instanceId ?? cliToolId;
+
+  const rows = db
+    .prepare(
+      `
+    SELECT id, prompt_data
+    FROM chat_messages
+    WHERE worktree_id = ?
+      AND instance_id = ?
+      AND message_type = 'prompt'
+      AND json_extract(prompt_data, '$.status') = 'pending'
+      ${ACTIVE_FILTER}
+    ORDER BY timestamp DESC
+  `
+    )
+    .all(worktreeId, resolvedInstanceId) as { id: string; prompt_data: string }[];
+
+  let target: { id: string; parsed: Record<string, unknown> } | null = null;
+  for (const row of rows) {
+    try {
+      const parsed = JSON.parse(row.prompt_data) as Record<string, unknown>;
+      if (!target) {
+        target = { id: row.id, parsed };
+      }
+      if (parsed.question === promptData.question) {
+        target = { id: row.id, parsed };
+        break;
+      }
+    } catch {
+      // Skip if prompt_data is invalid JSON
+    }
+  }
+
+  const answeredAt = new Date().toISOString();
+
+  if (target) {
+    const updated = { ...target.parsed, status: 'answered', answer, answeredAt, answeredBy };
+    updatePromptData(db, target.id, updated);
+    return { message: getMessageById(db, target.id)!, created: false };
+  }
+
+  const message = createMessage(db, {
+    worktreeId,
+    role: 'assistant',
+    content: params.content || promptData.question || '[prompt]',
+    messageType: 'prompt',
+    promptData: { ...promptData, status: 'answered', answer, answeredAt, answeredBy },
+    timestamp: new Date(),
+    cliToolId,
+    instanceId: resolvedInstanceId,
+  });
+  return { message, created: true };
 }

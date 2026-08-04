@@ -43,7 +43,8 @@ module 単位の責務は [docs/module-reference.md](../module-reference.md) を
 | install | ✅ `/skills/[id]`・worktree 詳細の Skills pane | ✅ `install` | **CLI は `--version` 必須**（§3-6） |
 | uninstall | ✅ 同上 | ✅ `uninstall` | |
 | 導入済み一覧 | ✅ worktree 詳細の Skills pane（#1440） | ⚠️ `status` は単体照会のみ（§3-2） | |
-| update / rollback | ❌ 未提供 | ❌ 未提供 | Phase 2（#1243 / #1244） |
+| update | ✅ worktree 詳細の Skills pane（update dialog の適用ボタン） | ✅ `update-plan`（preview）/ `update`（適用） | local 変更があると zero-write で拒否（§3-3） |
+| rollback | ❌ 未提供 | ❌ 未提供 | 旧 version は検証済み backup として保存される。復元操作は #1245 |
 
 ### 2-2. Agent 対応状況
 
@@ -110,13 +111,37 @@ route を browser 側で stub するため）。初見利用者の UX 調査も�
 **単体照会** であり、内部的に uninstall plan を1件生成するため
 **plan token を1つ消費する副作用**がある。導入監査履歴と適用状態 dashboard は #1248。
 
-### 3-3. 再インストール・update の手段が無い
+### 3-3.（解消 #1243 / #1244）再インストール・update の手段が無い
 
-destination が既に存在する場合、apply は `SKILL_INSTALL_DESTINATION_EXISTS`（409）で拒否する。
-**同一 version の入れ直しも、別 version への更新もできない。** 一度 uninstall してから
-install し直す必要がある。update は Phase 2（#1243 / #1244）。
+destination が既に存在する場合、install の apply は `SKILL_INSTALL_DESTINATION_EXISTS`（409）で
+拒否する。**同一 version の入れ直しはできない。** 一度 uninstall してから install し直す必要がある。
 
-なお plan 段階では「managed かつ無変更」の tree は差分ゼロとして `installable: true` に見える。
+> **#1243 / #1244 で解消（update）**: 更新は preview（update plan）と適用（update apply）の 2 段で
+> 提供される。worktree 詳細の Skills pane の update dialog、または
+> `commandmate skill update-plan` / `commandmate skill update` から実行する。
+> 候補は installed より**厳密に新しい exact version のみ**に解決され、candidate artifact は
+> install と同じ source/checksum/archive 検証（#1229/#1230）を通る。
+>
+> 適用は次の性質を持つ:
+>
+> - **local 変更があれば 1 件でも zero-write で拒否**（`SKILL_UPDATE_LOCAL_CHANGES`）。
+>   modified / unknown / missing / irregular いずれも対象で、旧版・新版のどちらも書き換えない。
+>   自分の編集を残したい場合は、その path を退避してから update plan を作り直す。
+> - **preview から世界が動いていたら拒否**（`SKILL_PLAN_STALE`）。plan は receipt digest・tree hash・
+>   branch・HEAD に束縛され、apply 直前に再照合される。
+> - **切替は 1 点の commit point**（primary root の rename）。その前の失敗は worktree を 1 byte も
+>   変えず、その後の失敗は「committed, reconciling」として新 version 側へ前方収束する。
+>   **旧版と新版が混在した状態にはならない。**
+> - `.agents/skills` と `.claude/skills` の**両 root を 1 つの操作で切り替える**（#1460）。
+>   secondary root だけ切り替わらなかった場合は起動時 reconciliation が前方収束させる。
+> - effective risk が上がる更新は、通常の更新確認とは**別の追加確認**を要求する
+>   （UI は独立した checkbox、CLI は `--ack-risk-increase`）。high-risk 候補の
+>   `--ack-risk <id>@<version>` はそれとは別に必要で、`--yes` だけでは両方とも代替できない。
+> - 切替前に**旧 payload を検証済み backup として service 側（`~/.commandmate/skills/backups/`）に
+>   保存する**。リポジトリの中には置かない。**復元（rollback）操作は #1245 で未提供**であり、
+>   現時点で保存されるのは「戻せる材料」までである。
+
+なお install plan 段階では「managed かつ無変更」の tree は差分ゼロとして `installable: true` に見える。
 拒否は commit 直前の destination 再確認で起きる。
 
 ### 3-4. plan token を利用者個人に紐付けられない

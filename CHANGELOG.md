@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-08-05
+
+> **Highlight**: 導入済み Skill を GUI / CLI から**更新**できるようになった。これまで update の手段が無く、一度 uninstall してから install し直す（間に Skill 不在の窓が空き、確認も履歴も 2 回に割れる）しかなかった。#1243 が old receipt / 現行 filesystem / candidate artifact の 3-way 差分と local 変更 guard を備えた update plan を提供し、#1244 がその plan を入力に、同一 filesystem の rename 1 点を commit point として old→new を切り替える（失敗しても旧版・新版が混在しない）。あわせて実運用フィードバック #1678 のうち CommandMate 側 6 件（`commandmate sync` の新設、`respond yes/no` の誤承認修正、scope 違反 path の表示、Auto-Yes 抑止の可視化、プロンプト監査証跡、discoverability 原則の明文化）を反映した。
+
+### Added
+
+- **Skills: local 変更 guard つき atomic Skill update（apply）** (#1244)
+  - `POST /api/worktrees/[id]/skills/[skillId]/update` を追加。#1243 の update plan が固定した old receipt / old tree / new package / new receipt exact bytes / branch / HEAD / expiry を apply 入力として確定させ、plan token を単回消費して導入済み Skill を新 exact version へ切り替える
+  - **local 変更があれば 1 件でも zero-write で拒否**（`SKILL_UPDATE_LOCAL_CHANGES`）。modified / unknown / missing / irregular を uninstall guard で適用直前に再検査し、receipt digest・tree hash が plan の binding と一致しない場合も `SKILL_UPDATE_DRIFT` / `SKILL_PLAN_STALE` で旧版・新版のどちらも書き換えない
+  - **old→new の commit point を 1 点に定義**: new payload は install と同じ staging primitive（`O_EXCL|O_NOFOLLOW` write・digest/mode 再検証・tree hash gate・same-filesystem 検査）で destination と同一 filesystem の worktree-local staging へ materialize し、root ごとに「旧 directory を aside へ rename → staging を publish rename」の 2 段で切り替える。**primary root の publish rename が唯一の commit point**で、それ以前の失敗は in-process で aside を戻して worktree を 1 byte も変えず、それ以後の失敗は新 receipt から前方収束のみ（旧版・新版が混在した状態にならない）
+  - `.agents/skills` と `.claude/skills` の**両 root を 1 つの journaled operation として扱う**（#1460）。secondary root の切替が失敗した場合は committed primary から前方収束させ（`completeSecondarySkillUpdateRoots`）、local 変更のある secondary は上書きせず skip として報告する
+  - **journal replay 契約（#1552）に `update` の述語を追加**: 「commit を主張する entry の主張が今も真か」を new receipt の実在＋digest 一致で判定する `mayReplaySkillUpdate` を定義し、rollback や再 install で receipt が入れ替わった worktree に対して古い outcome を replay しない。起動時 reconciliation は crash 収束（aside の復元 / 完全検証済み staging の採用）を経てから commit 有無を答える
+  - 切替前に **old payload を digest 検証つきで service-owned root（`~/.commandmate/skills/backups/<operationId>/`）へ退避**する。リポジトリ内には置かない。retention と復元操作は #1245 の verified backup 契約へ引き渡すインターフェイス境界のみを定義する
+  - operation audit に source（origin/repository/ref/commit/artifact sha256）・old version・new version・actor・result を記録（`skill_operations.from_version` / `to_version`）。token・signed URL・絶対 path は通常 log にも error にも含めない
+  - update だけで script / hook を実行しない（archive 由来の mode も honour しない）
+  - UI: `SkillUpdateDialog` に適用ボタンを追加。updatable な plan にのみ表示し、high-risk 候補と risk 上昇はそれぞれ独立した同意 checkbox を必須にする（fail closed）。適用後は次アクション・Agent reload 案内・rollback 可否（保存済み backup の旧 version）を表示
+  - CLI: `commandmate skill update <skill-id> --worktree <id> [--version <v>] [--range <r>] [--dry-run] [--yes] [--ack-risk <id>@<version>] [--ack-risk-increase] [--json]` を追加。非TTY は `--yes` 必須、high-risk は `--ack-risk`、risk 上昇は `--ack-risk-increase` を追加で要求し、blocked は exit 11 / 未確認は exit 12 / committed_reconciling は exit 13
+  - rollback 操作・backup retention UI（#1245）、複数 version 連続 skip policy・自動 commit/PR・external source は非対象
+
+- **Skills: 更新検知・version 選択・更新差分・local 変更 guard（update plan）** (#1243)
+  - `POST /api/worktrees/[id]/skills/[skillId]/update-plan` を追加。installed exact version は on-disk receipt から読み、Catalog の候補 version（installed より厳密に新しい exact version のみ。stable/prerelease opt-in・`range` filter・CommandMate 互換性判定つき）へ解決し、candidate artifact を install と同一の source/checksum/archive 検証（#1229/#1230）に通したうえで、current receipt / 現行 filesystem / candidate artifact の 3-way inventory を返す
+  - add/update/remove/unchanged の file diff（unified diff 本文つき）と、risk（declared/computed/effective）・permissions・scripts/executables・requirements・changelog・Agent 互換性の security diff を 1 つの plan で提示。effective risk が上がる更新は通常確認とは別の追加確認を要求する契約（`riskIncreased`）を返す
+  - modified / unknown / missing / irregular な path が 1 件でもあれば `SKILL_UPDATE_LOCAL_CHANGES` として update 不可（fail closed）。receipt の `install_roots` に記録された全 root（`.agents/skills` / `.claude/skills`）を検査し、root 間で receipt が食い違う install も拒否する
+  - plan は #1233 と同じ server-side token 契約（TTL 10 分・single-use・LRU）で candidate artifact / current tree / branch / HEAD を固定し、apply（#1244）時の drift は `SKILL_PLAN_STALE`（409）で拒否される consume API を提供
+  - UI: worktree 詳細 Skills pane の導入済み一覧に update badge、詳細ビューに version picker・更新差分・block 理由と解決手順を一画面表示する `SkillUpdateDialog` を追加（plan-only、apply ボタンなし）
+  - CLI: `commandmate skill update-plan <skill-id> --worktree <id> [--version <v>] [--range <r>] [--prerelease] [--json]` を追加（blocked 時 exit 11）
+  - update の apply・rollback は非対象（#1244 / #1245 の範囲）
+
+- **設計原則文書: 判定の可観測性（discoverability 原則）を明文化** (#1686): 「サーバー側が下した判定・抑止・自動アクションは、理由コードつきで運用者が読む層（`capture --json` / `wait` / `task show`）に露出する」を `docs/design/discoverability-principle.md` として明文化し、既存判定点の棚卸し（露出済み: #1682〜#1685・skills#47 / 未露出の対応候補: stop-pattern のマッチ内容、プロンプト dedup スキップ）を記録した。あわせて cli-operations-guide.md に無人実行の推奨契約テンプレートを掲載し、誤用されやすいフラグ（`wait --on-prompt` / `send --auto-yes`）の `--help` にクロスリファレンスを追記、設計レビュー（/multi-stage-design-review Stage 1）の観点に discoverability を追加した
+
+- **verify / wait --verify: scope 不合格の logTail 末尾に定型ガイダンスを付与** (#1683): 違反 path 一覧の直後に「意図した差分なら契約の `scope.allow`（＝Issue の対象ファイル）へ path を追加し `send --contract` で送り直す（scope は送信時スナップショットで裁定）／`deny:` に一致する path は差し戻す」旨のガイダンスを追加。列挙漏れ起因の scope 不合格（#1678 B-2）を worker / 監督側が出力だけで自己解決できるようにする
+- **CLI: `commandmate sync` — サーバーの worktree 再スキャンを CLI から実行** (#1680)
+  - GUI の worktree 同期ボタンと同じ `POST /api/repositories/sync` を呼ぶ薄いサブコマンド。`git worktree add` で作成した worktree を GUI を開かずに `commandmate ls` へ反映でき、worktree 作成 → dispatch が CLI だけで完結する（#1678 A-1）
+  - `--json` で同期結果（worktreeCount / repositoryCount / repositories / deletedCount / cleanupWarnings）を API レスポンス相当のまま出力
+  - サーバー未起動時は既存コマンドと同じ接続エラー（exit 1）。リポジトリ未設定の 400 はサーバーの文言（WORKTREE_REPOS / CM_ROOT_DIR の案内）を素通しして exit 2
+- **CLI: `respond <worktree-id> --default`** — 検出中プロンプトの default 選択肢（❯ ハイライト位置）を明示的に選択する（#1681）
+- **実行契約の Auto-Yes ポリシー抑止を CLI から観測可能に** (#1684): 抑止はこれまでサーバーログ（`poller:auto-yes-suppressed-by-policy`）にしか出ず、無人実行のワーカーが `mode: safe` の対象外プロンプト（Claude の編集確認は `multiple_choice` 型）で停止しても理由を判別できなかった。最後の抑止をセッション単位で記録し、`commandmate capture --json` の `autoYes.lastSuppression`（reason / mode / promptType / pattern / at）として露出する。あわせて task-contract 仕様書と CLI 運用ガイドに「無人実行は `allow-listed` ＋ `denyPatterns` を使う」推奨レシピを明記した
+- **CLI: auto-yes が解決したプロンプトの監査証跡（#1685）**: `commandmate capture <worktree-id> --prompts [--limit N] [--json]` で、解決済みプロンプトの question / options / answer / 応答種別（`answeredBy`: `auto`＝サーバ側 auto-yes / `human`＝respond API・チャット UI / `terminal`＝ターミナル直接応答の推定）を事後に取得できるようになった。auto-yes が `wait` のポーリング間隔内に応答してプロンプトが一度も pending 保存されないケースでも、応答送出時に answered 済みのプロンプト行をチャット履歴へ作成して証跡を残す（`GET /api/worktrees/[id]/messages?messageType=prompt` を追加）
+
+### Changed
+
+- **`--stop-pattern` の照合対象と限界をヘルプ・ガイドに明記** (#1682): `--stop-pattern` はターミナル出力のデルタへの正規表現照合であり、エージェントが実行するコマンドの抑止には使えない（ビルドログに `rm -rf` 等の文字列が表示されただけでも発火して Auto-Yes が停止する実害が #1678 で発生）。`auto-yes` / `send` の `--help`、`commandmate docs agent-operations`、`docs/user-guide/cli-operations-guide.md` に「ターミナル出力への照合。コマンド抑止には実行契約の `autoYes.denyPatterns` を使う」旨を追記した。あわせて同ガイドに「worker 稼働中の worktree で監督側が検証・ビルドをしない（生成物ディレクトリ共有で双方のビルドが破損する）」の注意項を追加した
+- **verify / wait --verify: 不合格ゲートの logTail 表示に行数上限** (#1683): stderr への logTail 表示を末尾 40 行までにし、超過分は `... (+N more lines; run \`commandmate verify show <run-id>\` for the full log)` の 1 行に畳む。保存側（`options.maxLogTailBytes`、最大 1MB）は従来どおりで、`--json` / `verify show` は全文を返す
+
+### Fixed
+
+- **CLI**: `respond` の `yes` / `no` を multiple_choice プロンプトの選択肢ラベルへ意味解決してから送信するように修正（#1681）。従来は非数値回答をテキスト+Enter で送るだけで、カーソルナビ型メニュー（claude / antigravity）では文字入力が無視され Enter が default 選択肢の選択に化けていた（3 択への `respond no` が default の "Yes" を選ぶ = 否認のつもりが承認）。肯定候補が複数ある場合は最小番号（= 最小権限）を選択し、解決不能な場合は何も送信せず `unresolvable_answer` でエラー終了する。あわせて default 選択肢を明示的に選ぶ `respond --default` と、解決結果（選択した番号・ラベル）の stdout 出力（監査用）を追加
+
 ## [0.20.0] - 2026-08-04
 
 > **Highlight**: worktree ID を「一度採番したら動かない値」に作り替えたリリース。ブランチ由来だった ID をディレクトリ由来へ変え（#1644）、既存行も migration v54 で一括で振り直し、旧 ID は alias として API・ページ・CLI の 3 面で解決し続ける（#1645）。この移行中に**同一 git リポジトリを 2 つの scan root として登録していると sync のたびに ID が 8 hex ずつ伸び、稼働中セッションが UI から消える**回帰（#1659）を本番で踏んだため、churn を塞ぎ（migration v55 で伸びた ID を圧縮）、原因となる構成に気付ける警告（#1662）と、リポジトリを**非破壊で走査対象から外す** GUI（#1658）を追加した。あわせて Auto-Yes が Claude in Chrome の許可ダイアログに応答しない問題（#1676）など、実運用で踏んだ不具合を 12 件修正している。

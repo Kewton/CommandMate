@@ -31,6 +31,7 @@ import {
   RISK_LABEL_KEY,
   UNINSTALL_DISPOSITION_LABEL_KEY,
   UNINSTALL_REASON_LABEL_KEY,
+  UPDATE_CHANGE_LABEL_KEY,
   catalogReasonLabelKey,
   operationErrorLabelKey,
   resolveSkillMessageKey,
@@ -60,6 +61,18 @@ import {
   SKILL_UNINSTALL_REASON_MESSAGE_KEYS,
   SKILL_UNINSTALL_RELOAD_MESSAGE_KEYS,
 } from '@/lib/skills/uninstall-plan';
+import {
+  SKILL_UPDATE_BLOCKED_MESSAGE_KEYS,
+  SKILL_UPDATE_HIGH_RISK_MESSAGE_KEY,
+  SKILL_UPDATE_NEXT_ACTION_KEYS,
+  SKILL_UPDATE_RISK_INCREASE_MESSAGE_KEY,
+} from '@/lib/skills/update-plan';
+import {
+  SKILL_UPDATE_APPLY_NEXT_ACTION_KEYS,
+  SKILL_UPDATE_RELOAD_MESSAGE_KEYS,
+  SKILL_UPDATE_ROLLBACK_MESSAGE_KEY,
+} from '@/lib/skills/updater';
+import { SKILL_UPDATE_RECOMMENDATION_MESSAGE_KEYS } from '@/lib/skills/version-resolver';
 
 const ROOT = path.resolve(__dirname, '../../../..');
 const LOCALES_DIR = path.join(ROOT, 'locales');
@@ -161,6 +174,19 @@ function contractKeys(): string[] {
     ...Object.values(SKILL_UNINSTALL_REASON_MESSAGE_KEYS),
     ...Object.values(SKILL_UNINSTALL_NEXT_ACTION_KEYS),
     ...Object.values(SKILL_UNINSTALL_RELOAD_MESSAGE_KEYS),
+    // Emitted by the update plan API (#1243): why an update is blocked, what to
+    // do next, why a candidate was offered, and the two risk confirmations.
+    ...Object.values(SKILL_UPDATE_BLOCKED_MESSAGE_KEYS),
+    ...Object.values(SKILL_UPDATE_NEXT_ACTION_KEYS),
+    ...Object.values(SKILL_UPDATE_RECOMMENDATION_MESSAGE_KEYS),
+    SKILL_UPDATE_HIGH_RISK_MESSAGE_KEY,
+    SKILL_UPDATE_RISK_INCREASE_MESSAGE_KEY,
+    // Emitted by the update apply API (#1244): the response names the next
+    // action per outcome, the reload instruction per agent, and the verified
+    // backup the switch left behind.
+    ...Object.values(SKILL_UPDATE_APPLY_NEXT_ACTION_KEYS),
+    ...Object.values(SKILL_UPDATE_RELOAD_MESSAGE_KEYS),
+    SKILL_UPDATE_ROLLBACK_MESSAGE_KEY,
   ]
     .map(resolveSkillMessageKey)
     .concat(Object.values(RECOMMENDATION_LABEL_KEY))
@@ -176,6 +202,7 @@ function contractKeys(): string[] {
     .concat(Object.values(HEAD_STATE_LABEL_KEY))
     .concat(Object.values(UNINSTALL_DISPOSITION_LABEL_KEY))
     .concat(Object.values(UNINSTALL_REASON_LABEL_KEY))
+    .concat(Object.values(UPDATE_CHANGE_LABEL_KEY))
     .concat(Object.values(OPERATION_ERROR_LABEL_KEY))
     // Applied state and audit vocabulary (#1248): the dashboard names a status,
     // an operation kind, an outcome and an actor by wire value and looks the
@@ -269,6 +296,8 @@ const UNTRANSLATED_BY_DESIGN = [
   'history.none',
   'history.actor.cli',
   'history.actor.system',
+  // Pure format (#1243): renders "{from} → {to}" with no prose to translate.
+  'update.fromTo',
 ];
 
 describe('skills i18n keys (Issue #1232)', () => {

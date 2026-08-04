@@ -317,7 +317,7 @@ export function createWaitCommand(): Command {
     .description('Wait for agent completion (1 worktree per CLI instance recommended)')
     .argument('<worktree-ids...>', 'Worktree ID(s) to wait on')
     .option('--timeout <seconds>', 'Maximum wait time in seconds', parseInt)
-    .option('--on-prompt <mode>', 'Prompt handling: agent (default) or human')
+    .option('--on-prompt <mode>', 'Prompt handling: agent (default) exits 10 with a prompt JSON payload on stdout (read it before re-capturing); human keeps waiting for a human reply')
     .option('--stall-timeout <seconds>', 'Maximum time without output change', parseInt)
     .option('--instance <id>', WAIT_INSTANCE_OPTION_DESCRIPTION)
     .option('--verify', 'After completion, run every verification gate; exit 20 when a gate fails, 21 when there is nothing to verify')

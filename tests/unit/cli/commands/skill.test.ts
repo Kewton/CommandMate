@@ -220,6 +220,8 @@ describe('createSkillCommand', () => {
       'reindex',
       'status',
       'uninstall',
+      'update',
+      'update-plan',
     ]);
   });
 

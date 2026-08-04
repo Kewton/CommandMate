@@ -6,13 +6,15 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { getWorktreeById } from '@/lib/db';
+import { getWorktreeById, recordAnsweredPrompt } from '@/lib/db';
+import { broadcastMessage } from '@/lib/ws-server';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { isCliToolType, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutputFresh } from '@/lib/session/cli-session';
 import { detectPrompt, type PromptDetectionResult } from '@/lib/detection/prompt-detector';
 import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/detection/cli-patterns';
 import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
+import { resolvePromptAnswer, PromptAnswerResolutionError, type AnswerResolution } from '@/lib/prompt-answer-semantic';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import type { PromptType, SubmitMode } from '@/types/models';
 import { isValidSubmitMode } from '@/types/models';
@@ -25,7 +27,9 @@ import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 const logger = createLogger('api/prompt-response');
 
 interface PromptResponseRequest {
-  answer: string;
+  answer?: string;
+  /** Issue #1681: explicitly select the prompt's default option (`respond --default`). */
+  useDefault?: boolean;
   cliTool?: string;
   /** Issue #868: target a specific agent instance (defaults to the primary). */
   instanceId?: string;
@@ -53,15 +57,22 @@ export async function POST(
 
     const body: PromptResponseRequest = await req.json();
     const { answer, cliTool: cliToolParam, instanceId: instanceParam, promptType: bodyPromptType, defaultOptionNumber: bodyDefaultOptionNumber, submitMode: bodySubmitMode } = body;
+    const useDefault = body.useDefault === true;
 
     // Issue #616: Allowlist validation for submitMode
     const validSubmitMode: SubmitMode | undefined =
       isValidSubmitMode(bodySubmitMode) ? bodySubmitMode : undefined;
 
-    // Validation
-    if (!answer) {
+    // Validation (Issue #1681: exactly one of answer / useDefault)
+    if (!answer && !useDefault) {
       return NextResponse.json(
         { error: 'answer is required' },
+        { status: 400 }
+      );
+    }
+    if (answer && useDefault) {
+      return NextResponse.json(
+        { error: 'answer and useDefault are mutually exclusive' },
         { status: 400 }
       );
     }
@@ -129,12 +140,36 @@ export async function POST(
         return NextResponse.json({
           success: false,
           reason: 'prompt_no_longer_active',
-          answer,
+          answer: answer ?? '',
         });
       }
     } catch {
       // If capture fails, proceed with caution - don't block manual responses
       logger.warn('failed-to-verify-prompt');
+    }
+
+    // Issue #1681: resolve semantic yes/no answers (and --default) to a concrete
+    // option number BEFORE sending. On cursor-navigated menus a raw "no" + Enter
+    // degrades into selecting the highlighted default option, so unresolvable
+    // answers are refused without sending anything.
+    let resolution: AnswerResolution;
+    try {
+      resolution = resolvePromptAnswer({
+        answer,
+        useDefault,
+        promptData: promptCheck?.promptData,
+        fallbackPromptType: bodyPromptType,
+      });
+    } catch (error: unknown) {
+      if (error instanceof PromptAnswerResolutionError) {
+        return NextResponse.json({
+          success: false,
+          reason: 'unresolvable_answer',
+          message: error.message,
+          answer: answer ?? '',
+        });
+      }
+      throw error;
     }
 
     // Send answer to tmux
@@ -143,7 +178,7 @@ export async function POST(
     try {
       await sendPromptAnswer({
         sessionName,
-        answer,
+        answer: resolution.input,
         cliToolId,
         promptData: promptCheck?.promptData,
         fallbackPromptType: bodyPromptType,
@@ -170,6 +205,34 @@ export async function POST(
       promptType: promptCheck?.promptData?.type,
     });
 
+    // Issue #1685: persist question/options/answer for the audit trail. Skipped
+    // when the pre-send capture failed (promptCheck null) — there is nothing
+    // trustworthy to record. Shares the useAutoYes attribution caveat above.
+    if (promptCheck?.isPrompt && promptCheck.promptData) {
+      try {
+        // Issue #1681 resolved semantic answers to a concrete input before
+        // sending — record what actually reached the terminal.
+        const record = recordAnsweredPrompt(db, {
+          worktreeId: id,
+          cliToolId,
+          instanceId: instanceId ?? cliToolId,
+          promptData: promptCheck.promptData,
+          answer: resolution.input,
+          answeredBy: 'human',
+          content: promptCheck.rawContent || promptCheck.cleanContent,
+        });
+        broadcastMessage(record.created ? 'message' : 'message_updated', {
+          worktreeId: id,
+          message: record.message,
+        });
+      } catch (recordError) {
+        // Audit persistence must never fail a response that already reached tmux.
+        logger.warn('prompt-audit-record-failed', {
+          error: recordError instanceof Error ? recordError.message : String(recordError),
+        });
+      }
+    }
+
     // The prompt poller normally stops while waiting for input. Resume response
     // persistence and independently push the TUI redraw after this interaction.
     startPolling(id, cliToolId, instanceId);
@@ -177,7 +240,9 @@ export async function POST(
 
     return NextResponse.json({
       success: true,
-      answer,
+      answer: resolution.input,
+      // Issue #1681: audit trail — which option a semantic/default answer selected.
+      ...(resolution.resolved ? { resolved: resolution.resolved } : {}),
     });
   } catch (error: unknown) {
     logger.error('failed-to-respond-to-prompt:', { error: error instanceof Error ? error.message : String(error) });

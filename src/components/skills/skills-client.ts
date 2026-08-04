@@ -26,6 +26,8 @@ import type {
   SkillUninstallApplyResponse,
   SkillUninstallBlocker,
   SkillUninstallPlanResponse,
+  SkillUpdateApplyResponse,
+  SkillUpdatePlanResponse,
 } from './types';
 
 /** Code used when the request never produced a JSON error body. */
@@ -339,6 +341,85 @@ export function applySkillInstall(
     () =>
       postJson<SkillInstallApplyResponse>(
         operationUrl(worktreeId, skillId, 'install'),
+        payload,
+        signal
+      ),
+    SKILL_REQUEST_FAILED,
+    signal
+  );
+}
+
+export interface SkillUpdatePlanRequest {
+  /** Omitted to plan the recommended update candidate. */
+  version?: string;
+  includePrerelease?: boolean;
+}
+
+/**
+ * Build an Update Plan (#1243).
+ *
+ * Names only the Skill, the worktree and (optionally) the exact candidate
+ * version; the server reads the installed version from the receipt, resolves
+ * the candidate against the Catalog and verifies the artifact itself. The plan
+ * previews the update — nothing is written by this request.
+ */
+export function createSkillUpdatePlan(
+  worktreeId: string,
+  skillId: string,
+  options: SkillUpdatePlanRequest = {},
+  signal?: AbortSignal
+): Promise<SkillFetchResult<SkillUpdatePlanResponse>> {
+  const payload: Record<string, unknown> = {};
+  if (options.version) payload.version = options.version;
+  if (options.includePrerelease) payload.includePrerelease = true;
+
+  return request(
+    () =>
+      postJson<SkillUpdatePlanResponse>(
+        operationUrl(worktreeId, skillId, 'update-plan'),
+        payload,
+        signal
+      ),
+    SKILL_REQUEST_FAILED,
+    signal
+  );
+}
+
+export interface SkillUpdateApplyRequest {
+  planToken: string;
+  /** Must equal the version the plan was built for, or the token is refused. */
+  version: string;
+  acknowledgeRisk?: boolean;
+  /** Separate, additional confirmation when the update raises effective risk. */
+  acknowledgeRiskIncrease?: boolean;
+  idempotencyKey?: string;
+}
+
+/**
+ * Apply an Update Plan (#1244).
+ *
+ * Presents the single-use token back to the server unchanged; the switch —
+ * local-change guard, staging, the atomic rename sequence — is entirely
+ * server-side, and this request carries nothing that could redirect it.
+ */
+export function applySkillUpdate(
+  worktreeId: string,
+  skillId: string,
+  apply: SkillUpdateApplyRequest,
+  signal?: AbortSignal
+): Promise<SkillFetchResult<SkillUpdateApplyResponse>> {
+  const payload: Record<string, unknown> = {
+    planToken: apply.planToken,
+    version: apply.version,
+  };
+  if (apply.acknowledgeRisk) payload.acknowledgeRisk = true;
+  if (apply.acknowledgeRiskIncrease) payload.acknowledgeRiskIncrease = true;
+  if (apply.idempotencyKey) payload.idempotencyKey = apply.idempotencyKey;
+
+  return request(
+    () =>
+      postJson<SkillUpdateApplyResponse>(
+        operationUrl(worktreeId, skillId, 'update'),
         payload,
         signal
       ),

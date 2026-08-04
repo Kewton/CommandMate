@@ -312,6 +312,72 @@
       "irregular": "Keep (not a regular file)"
     }
   },
+  "update": {
+    "badge": "Update available",
+    "upToDate": "Version {version} is the newest published version. Nothing to update.",
+    "open": "Review update",
+    "heading": "Update plan",
+    "intro": "{skill} is installed at version {version}. Choose the exact version to move to; the plan below shows precisely what would change.",
+    "ready": "Building an update plan writes nothing. It downloads and verifies the candidate package, compares it with what is installed, and reports every difference and every blocker.",
+    "fromTo": "{from} → {to}",
+    "latestAvailable": "Newest available: {version}",
+    "versionPicker": "Update to version",
+    "build": "Build update plan",
+    "building": "Building the update plan…",
+    "filesHeading": "File changes",
+    "stats": "+{added} added, ~{updated} updated, −{removed} removed, ={unchanged} unchanged",
+    "showDiff": "Show diff",
+    "permissionsAdded": "Permissions this update adds",
+    "permissionsRemoved": "Permissions this update drops",
+    "scriptsAdded": "New scripts",
+    "scriptsRemoved": "Scripts removed",
+    "executablesAdded": "New executable files",
+    "executablesRemoved": "Executable files removed",
+    "highRiskAcknowledgement": "CommandMate rated the candidate package high risk after inspecting its contents. Applying this update will require an explicit acknowledgement.",
+    "riskIncreaseAcknowledgement": "This update raises the Skill's effective risk above what is installed today. Applying it will require a separate, additional confirmation beyond the ordinary update confirmation.",
+    "change": {
+      "add": "Added",
+      "update": "Updated",
+      "remove": "Removed",
+      "unchanged": "Unchanged"
+    },
+    "reason": {
+      "upToDate": "No published version is newer than the installed one.",
+      "highestCompatible": "This is the newest published version that is newer than the install and works with the CommandMate you are running.",
+      "latestUnverified": "The running CommandMate version could not be determined, so the newest candidate is offered without a compatibility check.",
+      "noneCompatible": "Newer versions exist, but none of them works with the CommandMate you are running.",
+      "installedVersionInvalid": "The installed version recorded in the receipt is not a valid version, so no update can be resolved.",
+      "rangeUnsupported": "The requested version range is not supported, so no candidate was resolved."
+    },
+    "blocked": {
+      "localChanges": "This path was changed after the install — edited, removed, or added by hand. CommandMate will not update over local changes. Restore the file (or uninstall and reinstall the Skill), then build a new update plan.",
+      "rootMissing": "A recorded install directory is gone entirely. Reinstall the Skill or rebuild the index before updating.",
+      "receiptMissing": "An install directory has no CommandMate install record, so nothing proves which files belong to the Skill.",
+      "receiptUnreadable": "An install record could not be read, so file ownership cannot be established.",
+      "receiptForeign": "The install record in this directory describes a different Skill.",
+      "rootReceiptDiverged": "The recorded install directories carry different install records, so the install is no longer one consistent version.",
+      "treeScanTruncated": "The Skill directory is too large or too deep to inspect completely, so CommandMate cannot rule out local changes.",
+      "incompatible": "The selected version is not compatible with the CommandMate you are running."
+    },
+    "nextAction": {
+      "updatable": "Every installed file matches the install record. The update can be applied from this plan.",
+      "blocked": "Nothing has been changed. Resolve the paths listed below — restore locally changed files, or move files CommandMate does not manage out of the Skill directory — then build a new update plan.",
+      "succeeded": "The Skill was switched to the new version and recorded. Restart the agent sessions listed below to start using it.",
+      "committedReconciling": "The new version is already in the worktree, but the operation did not finish cleanly. CommandMate will converge the rest automatically; no re-update is needed.",
+      "failed": "Nothing was changed in the worktree. Review the reason below, resolve it, then build a new update plan."
+    },
+    "apply": "Apply update",
+    "applying": "Applying the update…",
+    "ackRisk": "I have reviewed the candidate's files, scripts and permissions, and I explicitly accept updating to this high-risk package.",
+    "ackRiskIncrease": "I understand this update raises the Skill's effective risk above what is installed today, and I confirm that separately.",
+    "rollbackAvailable": "The replaced version {version} was preserved in a verified, CommandMate-owned backup before the switch. Rolling back to it will be available as a separate operation.",
+    "reload": {
+      "native": "{agent} loads Skills from the worktree at startup. Restart the {agent} session in this worktree to pick up {skillId} {version}.",
+      "commandmateRuntime": "{agent} runs this Skill through the CommandMate runtime. Restart the {agent} session in this worktree so the runtime picks up {skillId} {version}.",
+      "unsupported": "{agent} does not support this Skill. The files were updated, but {skillId} {version} will not be offered in {agent} sessions.",
+      "unknown": "Support for {agent} has not been verified. The files were updated; restart the {agent} session and check whether {skillId} {version} is offered."
+    }
+  },
   "card": {
     "provider": "by {provider}",
     "noRecommendedVersion": "No installable version"
@@ -323,7 +389,8 @@
     "catalogHeading": "Install from the Catalog",
     "installedBadge": "Installed",
     "version": "Version {version}",
-    "back": "Back to Skills"
+    "back": "Back to Skills",
+    "updateBadge": "Update available"
   },
   "state": {
     "loading": "Loading the Skill Catalog…",
@@ -386,7 +453,11 @@
       "uninstallFileChanged": "A file changed after the plan was built. Nothing was deleted. Build a new plan.",
       "uninstallFailed": "An earlier attempt at this uninstall failed and nothing was deleted. Build a new plan.",
       "requestFailed": "The request did not reach CommandMate, or it answered without naming a reason. Nothing is known to have changed.",
-      "unexpected": "CommandMate reported a failure it has no explanation for. Treat the worktree as unchanged only after checking it."
+      "unexpected": "CommandMate reported a failure it has no explanation for. Treat the worktree as unchanged only after checking it.",
+      "updateNotInstalled": "CommandMate has no record of this Skill in this worktree, so there is nothing to update.",
+      "updateUpToDate": "No published version is newer than the installed one. Nothing to update.",
+      "updateVersionNotEligible": "The requested version is not a strictly newer published version of this Skill.",
+      "updateNoneCompatible": "Newer versions exist, but none of them works with the CommandMate you are running."
     }
   },
   "dashboard": {

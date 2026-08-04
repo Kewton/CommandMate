@@ -74,6 +74,25 @@ export async function GET(
     }
     const limitUnit = (unitParam ?? 'messages') as 'messages' | 'pairs';
 
+    // Issue #1685: optional message-type filter. 'prompt' is the audit-trail
+    // listing consumed by `commandmate capture --prompts`.
+    const messageTypeParam = searchParams.get('messageType');
+    if (messageTypeParam !== null && messageTypeParam !== 'prompt' && messageTypeParam !== 'normal') {
+      return NextResponse.json(
+        { error: 'Invalid messageType parameter (must be "prompt" or "normal")' },
+        { status: 400 }
+      );
+    }
+    if (messageTypeParam !== null && limitUnit === 'pairs') {
+      // 'pairs' counts user turns; a type filter that excludes user rows would
+      // silently break that contract.
+      return NextResponse.json(
+        { error: 'messageType cannot be combined with unit=pairs' },
+        { status: 400 }
+      );
+    }
+    const messageType = (messageTypeParam ?? undefined) as 'prompt' | 'normal' | undefined;
+
     // Validate limit. Upper bound is MAX_MESSAGES_LIMIT (Issue #701).
     if (isNaN(limit) || limit < 1 || limit > MAX_MESSAGES_LIMIT) {
       return NextResponse.json(
@@ -83,7 +102,7 @@ export async function GET(
     }
 
     // Get messages with optional CLI tool / instance filter
-    const messages = getMessages(db, id, { before, limit, cliToolId, instanceId, includeArchived, limitUnit });
+    const messages = getMessages(db, id, { before, limit, cliToolId, instanceId, includeArchived, messageType, limitUnit });
 
     // Filter out messages with empty content (defensive programming)
     const validMessages = messages.filter((m) => m.content && m.content.trim() !== '');

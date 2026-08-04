@@ -239,6 +239,7 @@ describe('runSkillPlanSweep', () => {
     expect(runSkillPlanSweep({ now: T0 })).toEqual({
       installPlans: 0,
       uninstallPlans: 0,
+      updatePlans: 0,
       snapshots: 0,
     });
   });

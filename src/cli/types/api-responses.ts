@@ -47,6 +47,18 @@ export interface WorktreeItem {
   agentInstances?: AgentInstance[];
 }
 
+// Mirrors: src/app/api/repositories/sync/route.ts POST response (Issue #1680)
+export interface RepositorySyncResponse {
+  success: boolean;
+  message: string;
+  worktreeCount: number;
+  repositoryCount: number;
+  repositories: string[];
+  deletedCount: number;
+  /** Sanitized, generic warnings only (SEC-MF-001); details stay in server logs. */
+  cleanupWarnings: string[];
+}
+
 // Mirrors: src/lib/cli-tools/types.ts AgentInstance (Issue #868/#1000)
 export interface AgentInstance {
   id: string;
@@ -78,6 +90,16 @@ export interface CurrentOutputResponse {
     enabled: boolean;
     expiresAt: number | null;
     stopReason?: string;
+    // Mirrors: src/lib/polling/auto-yes-suppression-state.ts AutoYesPolicySuppression
+    // (Issue #1684). Non-null once the contract's autoYes policy withheld an
+    // answer; `at` is refreshed every poll while the suppressed prompt remains.
+    lastSuppression?: {
+      reason: string;
+      mode: string | null;
+      promptType: string;
+      pattern?: string;
+      at: number;
+    } | null;
   };
   thinking: boolean;
   thinkingMessage: string | null;
@@ -99,7 +121,27 @@ export interface PromptData {
   question: string;
   options?: unknown[];
   status?: string;
+  answer?: string;
+  answeredAt?: string;
+  /** Mirrors: src/types/models.ts PromptAnsweredBy (Issue #1685) */
+  answeredBy?: string;
   [key: string]: unknown;
+}
+
+// Mirrors: src/types/models.ts ChatMessage (subset), as serialized by
+// GET /api/worktrees/[id]/messages?messageType=prompt (Issue #1685).
+// `timestamp` is an ISO string on the wire (Date is JSON-serialized).
+export interface PromptMessageResponse {
+  id: string;
+  worktreeId: string;
+  role: string;
+  content: string;
+  timestamp: string;
+  messageType: string;
+  promptData?: PromptData;
+  cliToolId?: string;
+  instanceId?: string;
+  archived: boolean;
 }
 
 // Mirrors: src/app/api/worktrees/[id]/prompt-response/route.ts response shape
@@ -107,7 +149,15 @@ export interface PromptData {
 export interface PromptResponseResult {
   success: boolean;
   answer: string;
-  reason?: string; // e.g. 'prompt_no_longer_active'
+  reason?: string; // e.g. 'prompt_no_longer_active', 'unresolvable_answer'
+  /** Issue #1681: detail accompanying reason 'unresolvable_answer' */
+  message?: string;
+  /** Issue #1681: how a semantic yes/no or --default answer was resolved */
+  resolved?: {
+    via: 'semantic' | 'default';
+    optionNumber?: number;
+    optionLabel: string;
+  };
 }
 
 /** wait exit 10 CLI extended output type */
@@ -426,6 +476,113 @@ export interface SkillUninstallPlan {
 /** Mirrors: src/app/api/worktrees/[id]/skills/[skillId]/uninstall-plan/route.ts POST response. */
 export interface SkillUninstallPlanResponse {
   plan: SkillUninstallPlan;
+}
+
+/** A typed reason an update is refused (Issue #1243). Paths are repository-relative. */
+export interface SkillUpdateBlocker {
+  code: string;
+  path: string | null;
+  /** Underlying per-path finding, when one exists (e.g. a local modification). */
+  detail: string | null;
+}
+
+/** Mirrors: src/lib/skills/update-plan.ts SkillUpdatePlanDto (subset) [Issue #1243]. */
+export interface SkillUpdatePlan {
+  /** Single-use token apply (#1244) will present unchanged. The CLI never inspects it. */
+  token: string;
+  expiresAt: string;
+  updatable: boolean;
+  blockers: SkillUpdateBlocker[];
+  nextActionKey: string;
+  requiresRiskAcknowledgement: boolean;
+  riskIncreased: boolean;
+  update: {
+    fromVersion: string;
+    toVersion: string;
+    latestVersion: string | null;
+    reasonCode: string;
+    prerelease: boolean;
+  };
+  target: {
+    worktreeId: string;
+    worktreeName: string;
+    repositoryName: string;
+    branch: string | null;
+    headState: string;
+    workingTreeDirty: boolean;
+    /** Repository-relative; the server never serves a machine-absolute path. */
+    installRoot: string;
+    /** Every recorded root the update rewrites, primary first (#1460). */
+    installRoots: string[];
+  };
+  skill: {
+    id: string;
+    name: string;
+    version: string;
+    effectiveRisk: string;
+    riskRationale: string;
+    declaredPermissions: string[];
+    scriptPaths: string[];
+    compatibility: { commandmate: SkillCompatibilityView };
+  };
+  securityDiff: {
+    risk: {
+      from: { effective: string };
+      to: { effective: string };
+      increased: boolean;
+    };
+    permissions: { added: string[]; removed: string[] };
+    executables: { added: string[]; removed: string[] };
+    scripts: { added: string[]; removed: string[] };
+    changelogs: Array<{ version: string; changelog: string }>;
+  };
+  files: Array<{ path: string; change: string }>;
+  stats: {
+    added: number;
+    updated: number;
+    removed: number;
+    unchanged: number;
+    localModified: number;
+    localMissing: number;
+    localUnknown: number;
+    irregular: number;
+  };
+  warnings: string[];
+}
+
+/** Mirrors: src/app/api/worktrees/[id]/skills/[skillId]/update-plan/route.ts POST response. */
+export interface SkillUpdatePlanResponse {
+  plan: SkillUpdatePlan;
+}
+
+/**
+ * Mirrors: src/app/api/worktrees/[id]/skills/[skillId]/update/route.ts POST
+ * response [Issue #1244]. `update` is null when a replay finds no index row;
+ * `reload` and `rollback` are absent from the narrower replay body.
+ */
+export interface SkillUpdateResponse {
+  operation: SkillOperationResult;
+  update: {
+    skillId: string;
+    fromVersion?: string;
+    toVersion?: string;
+    /** Present on the replay body instead of fromVersion/toVersion. */
+    version?: string;
+    installRoot: string;
+    installRoots?: string[];
+    pendingRoots?: string[];
+  } | null;
+  reload?: {
+    skillId: string;
+    version: string;
+    installRoot: string;
+    agents: Array<{ agent: string; support: string; messageKey: string }>;
+  };
+  rollback?: {
+    available: boolean;
+    backup: { backupId: string; fromVersion: string; fileCount: number; verified: boolean };
+    messageKey: string;
+  };
 }
 
 /** Mirrors: src/app/api/worktrees/[id]/skills/[skillId]/uninstall/route.ts POST response. */

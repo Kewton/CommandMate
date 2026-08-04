@@ -5,6 +5,8 @@
  *   commandmate skill list [--json]
  *   commandmate skill info <skill-id> [--version <v>] [--json]
  *   commandmate skill plan <skill-id> --worktree <id> [--version <v>] [--json]
+ *   commandmate skill update-plan <skill-id> --worktree <id> [--version <v>] [--range <r>] [--json]
+ *   commandmate skill update <skill-id> --worktree <id> [--version <v>] [--dry-run] [--yes] [--ack-risk <id>@<version>] [--ack-risk-increase]
  *   commandmate skill install <skill-id> --worktree <id> --version <exact> [--dry-run] [--yes] [--ack-risk <id>@<version>] [--git current|dedicated] [--push] [--pr]
  *   commandmate skill uninstall <skill-id> --worktree <id> [--dry-run] [--yes] [--json]
  *   commandmate skill status <skill-id> --worktree <id> [--json]
@@ -30,6 +32,8 @@ import type {
   SkillPlanOptions,
   SkillStatusOptions,
   SkillUninstallOptions,
+  SkillUpdateOptions,
+  SkillUpdatePlanOptions,
 } from '../types';
 import { ExitCode, SkillExitCode } from '../types';
 import type {
@@ -44,6 +48,9 @@ import type {
   SkillUninstallPlan,
   SkillUninstallPlanResponse,
   SkillUninstallResponse,
+  SkillUpdatePlan,
+  SkillUpdatePlanResponse,
+  SkillUpdateResponse,
 } from '../types/api-responses';
 import { ApiClient, ApiError, assertResponseShape, isValidWorktreeId } from '../utils/api-client';
 import { TOKEN_WARNING } from '../utils/command-helpers';
@@ -54,6 +61,7 @@ import {
   formatSkillDetail,
   formatSkillTable,
   formatUninstallPlan,
+  formatUpdatePlan,
 } from './skill-format';
 import {
   handleSkillCommandError,
@@ -167,6 +175,47 @@ async function planInstall(skillId: string, options: SkillPlanOptions): Promise<
 
   console.log(options.json ? JSON.stringify({ plan }, null, 2) : formatInstallPlan(plan));
   if (!plan.installable) process.exit(SkillExitCode.BLOCKED);
+}
+
+/** Ask the server to build an Update Plan. The only inputs are what to move to. */
+async function requestUpdatePlan(
+  client: ApiClient,
+  target: { skillId: string; worktreeId: string },
+  options: { version?: string; prerelease?: boolean; range?: string }
+): Promise<SkillUpdatePlan> {
+  const body: Record<string, unknown> = {};
+  if (options.version) body.version = options.version;
+  if (options.prerelease) body.includePrerelease = true;
+  if (options.range) body.range = options.range;
+
+  const response = await client.post<SkillUpdatePlanResponse>(
+    `/api/worktrees/${encodeURIComponent(target.worktreeId)}/skills/${encodeURIComponent(target.skillId)}/update-plan`,
+    body
+  );
+  return assertResponseShape<SkillUpdatePlanResponse>(
+    response,
+    ['plan'],
+    'POST .../skills/update-plan'
+  ).plan;
+}
+
+/**
+ * Preview updating an installed Skill to a newer exact version (Issue #1243).
+ *
+ * Plan-only by design: the server reads the installed version from the on-disk
+ * receipt, resolves the candidate against the Catalog, verifies the artifact
+ * and reports the version diff, the risk change and every blocker. Applying is
+ * `skill update` (#1244).
+ */
+async function planUpdate(skillId: string, options: SkillUpdatePlanOptions): Promise<void> {
+  const target = resolveTarget(skillId, options.worktree);
+  if (!target) return;
+
+  const client = new ApiClient({ token: options.token });
+  const plan = await requestUpdatePlan(client, target, options);
+
+  console.log(options.json ? JSON.stringify({ plan }, null, 2) : formatUpdatePlan(plan));
+  if (!plan.updatable) process.exit(SkillExitCode.BLOCKED);
 }
 
 /**
@@ -473,6 +522,120 @@ async function installSkill(skillId: string, options: SkillInstallOptions): Prom
   }
 }
 
+/**
+ * Update an installed Skill to a newer exact version (Issue #1244).
+ *
+ * The same thin-client contract as install: the CLI shows the server-built
+ * plan, collects the confirmations the plan demands, and presents the token
+ * back unchanged. Both risk gates fail closed — a high-risk candidate needs
+ * `--ack-risk <id>@<version>`, and a risk *increase* additionally needs
+ * `--ack-risk-increase` — so `--yes` alone can never carry either.
+ */
+async function updateSkill(skillId: string, options: SkillUpdateOptions): Promise<void> {
+  const target = resolveTarget(skillId, options.worktree);
+  if (!target) return;
+
+  const client = new ApiClient({ token: options.token });
+  const plan = await requestUpdatePlan(client, target, options);
+
+  // --dry-run stops here by construction: the plan is the whole output and no
+  // token is ever presented back to the server.
+  if (options.dryRun) {
+    console.log(options.json ? JSON.stringify({ plan }, null, 2) : formatUpdatePlan(plan));
+    if (!plan.updatable) process.exit(SkillExitCode.BLOCKED);
+    return;
+  }
+
+  console.error(formatUpdatePlan(plan));
+
+  if (!plan.updatable) {
+    refuse(
+      'The update is blocked by the findings listed above; nothing was written.',
+      SkillExitCode.BLOCKED
+    );
+    return;
+  }
+
+  // Checked before the generic confirmation so `--yes` alone can never carry a
+  // high-risk update, in a TTY or out of one.
+  if (
+    plan.requiresRiskAcknowledgement &&
+    !riskAcknowledgementMatches(options.ackRisk, plan.skill.id, plan.update.toVersion)
+  ) {
+    refuse(
+      `${plan.skill.id} ${plan.update.toVersion} is high risk. Re-run with --ack-risk ${plan.skill.id}@${plan.update.toVersion} to acknowledge it explicitly.`,
+      SkillExitCode.CONFIRMATION_REQUIRED
+    );
+    return;
+  }
+  // The escalation gate is separate from the high-risk gate on purpose: a risk
+  // increase must be named as its own fact, not folded into a flag the caller
+  // may already be passing for other reasons.
+  if (plan.riskIncreased && options.ackRiskIncrease !== true) {
+    refuse(
+      `Updating ${plan.skill.id} to ${plan.update.toVersion} raises its effective risk (${plan.securityDiff.risk.from.effective} -> ${plan.securityDiff.risk.to.effective}). Re-run with --ack-risk-increase to confirm the escalation explicitly.`,
+      SkillExitCode.CONFIRMATION_REQUIRED
+    );
+    return;
+  }
+
+  const outcome = await resolveWriteConfirmation(
+    `Update ${plan.skill.id} ${plan.update.fromVersion} -> ${plan.update.toVersion} in ${plan.target.worktreeId} (${formatInstallRoots(plan.target.installRoots, plan.target.installRoot)})?`,
+    options
+  );
+  if (outcome === 'non_interactive') {
+    refuse(
+      'Refusing to update without a confirmation. Pass --yes to update from a non-interactive environment.',
+      SkillExitCode.CONFIRMATION_REQUIRED
+    );
+    return;
+  }
+  if (outcome === 'declined') {
+    refuse('Update declined; nothing was written.', SkillExitCode.CONFIRMATION_REQUIRED);
+    return;
+  }
+
+  const response = await client.post<SkillUpdateResponse>(
+    `/api/worktrees/${encodeURIComponent(target.worktreeId)}/skills/${encodeURIComponent(target.skillId)}/update`,
+    {
+      planToken: plan.token,
+      version: plan.update.toVersion,
+      acknowledgeRisk: plan.requiresRiskAcknowledgement,
+      acknowledgeRiskIncrease: plan.riskIncreased,
+    }
+  );
+  const body = assertResponseShape<SkillUpdateResponse>(
+    response,
+    ['operation', 'update'],
+    'POST .../skills/update'
+  );
+
+  if (options.json) {
+    console.log(JSON.stringify(body, null, 2));
+  } else {
+    console.log(
+      `Updated ${body.update?.skillId ?? target.skillId} ${body.update?.fromVersion ?? plan.update.fromVersion} -> ${body.update?.toVersion ?? body.update?.version ?? plan.update.toVersion} in ${formatInstallRoots(body.update?.installRoots, body.update?.installRoot ?? plan.target.installRoot)}`
+    );
+    for (const agent of body.reload?.agents ?? []) {
+      console.error(`Reload: restart the ${agent.agent} session in this worktree to pick up the new version.`);
+    }
+    if (body.rollback?.available) {
+      console.error(
+        `Rollback: version ${body.rollback.backup.fromVersion} is preserved in verified backup ${body.rollback.backup.backupId} (restore ships separately).`
+      );
+    }
+  }
+
+  if (body.operation.result === 'committed_reconciling') {
+    // The new payload is on disk; saying "update failed" would contradict what
+    // the user can see. Report it as needing attention instead.
+    console.error(
+      `Warning: the new version landed but the operation did not finish cleanly (${body.operation.nextActionKey}). Reconciliation will converge it.`
+    );
+    process.exit(SkillExitCode.COMMITTED_RECONCILING);
+  }
+}
+
 async function uninstallSkill(skillId: string, options: SkillUninstallOptions): Promise<void> {
   const target = resolveTarget(skillId, options.worktree);
   if (!target) return;
@@ -595,6 +758,24 @@ export function createSkillCommand(): Command {
     });
 
   skill
+    .command('update-plan')
+    .description('Preview updating an installed Skill to a newer version. Never writes.')
+    .argument('<skill-id>', 'Installed Skill ID')
+    .option('--worktree <id>', 'Target worktree ID (see: commandmate ls)')
+    .option('--version <version>', 'Exact candidate version (default: the recommended candidate)')
+    .option('--range <range>', 'Only consider candidates satisfying this version range')
+    .option('--json', 'JSON output (the API response body, verbatim)')
+    .option('--prerelease', 'Include prerelease candidates')
+    .option('--token <token>', TOKEN_WARNING)
+    .action(async (skillId: string, options: SkillUpdatePlanOptions) => {
+      try {
+        await planUpdate(skillId, options);
+      } catch (error) {
+        handleSkillCommandError(error);
+      }
+    });
+
+  skill
     .command('install')
     .description('Install a Skill into a worktree, after showing the plan and confirming')
     .argument('<skill-id>', 'Skill ID from the Catalog')
@@ -618,6 +799,34 @@ export function createSkillCommand(): Command {
     .action(async (skillId: string, options: SkillInstallOptions) => {
       try {
         await installSkill(skillId, options);
+      } catch (error) {
+        handleSkillCommandError(error);
+      }
+    });
+
+  skill
+    .command('update')
+    .description('Update an installed Skill to a newer version, after showing the plan and confirming')
+    .argument('<skill-id>', 'Installed Skill ID')
+    .option('--worktree <id>', 'Target worktree ID (see: commandmate ls)')
+    .option('--version <version>', 'Exact candidate version (default: the recommended candidate)')
+    .option('--range <range>', 'Only consider candidates satisfying this version range')
+    .option('--dry-run', 'Build and print the plan, then stop without writing')
+    .option('-y, --yes', 'Skip the confirmation prompt (required for non-interactive use)')
+    .option(
+      '--ack-risk <skill-id@version>',
+      'Explicitly acknowledge a high-risk candidate. Required in addition to --yes.'
+    )
+    .option(
+      '--ack-risk-increase',
+      'Explicitly confirm an update that raises the Skill\'s effective risk. Required in addition to --yes.'
+    )
+    .option('--json', 'JSON output (the API response body, verbatim)')
+    .option('--prerelease', 'Include prerelease candidates')
+    .option('--token <token>', TOKEN_WARNING)
+    .action(async (skillId: string, options: SkillUpdateOptions) => {
+      try {
+        await updateSkill(skillId, options);
       } catch (error) {
         handleSkillCommandError(error);
       }
