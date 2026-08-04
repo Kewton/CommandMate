@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-08-05
+
+> **Highlight**: 導入済み Skill を GUI / CLI から**更新**できるようになった。これまで update の手段が無く、一度 uninstall してから install し直す（間に Skill 不在の窓が空き、確認も履歴も 2 回に割れる）しかなかった。#1243 が old receipt / 現行 filesystem / candidate artifact の 3-way 差分と local 変更 guard を備えた update plan を提供し、#1244 がその plan を入力に、同一 filesystem の rename 1 点を commit point として old→new を切り替える（失敗しても旧版・新版が混在しない）。あわせて実運用フィードバック #1678 のうち CommandMate 側 6 件（`commandmate sync` の新設、`respond yes/no` の誤承認修正、scope 違反 path の表示、Auto-Yes 抑止の可視化、プロンプト監査証跡、discoverability 原則の明文化）を反映した。
+
 ### Added
 
 - **Skills: local 変更 guard つき atomic Skill update（apply）** (#1244)
