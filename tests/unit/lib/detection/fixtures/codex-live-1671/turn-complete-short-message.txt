@@ -1,0 +1,45 @@
+
+[2m╭─────────────────────────────────────────────────╮[0m
+[2m│ >_ [0;1mOpenAI Codex[0;2m (v0.146.0)                      │[0m
+[2m│                                                 │[0m
+[2m│ model:     [3mloading[0;2m   [0m[38;5;6m/model[2m[39m to change           │[0m
+[2m│ directory: [0m/private/tmp/…/scratchpad/probe-repo[2m │[0m
+[2m╰─────────────────────────────────────────────────╯[0m
+
+
+[1m›[0m [2mUse /skills to list available skills[0m
+
+  [38;2;246;226;183mgpt-5.6-sol default[2m[39m · [0m[38;2;171;223;167m/private/tmp/claude-501/-Users-maenokota-share-work-github-kewton-commandmate-issue-1671/41e4ed44-09e3-4c09-889f-f30c9459e33e/scratchpad/probe-repo[39m
+
+[2m╭─────────────────────────────────────────────────╮[0m
+[2m│ >_ [0;1mOpenAI Codex[0;2m (v0.146.0)                      │[0m
+[2m│                                                 │[0m
+[2m│ model:     [0mgpt-5.6-sol xhigh[2m   [0m[38;5;6m/model[2m[39m to change │[0m
+[2m│ directory: [0m/private/tmp/…/scratchpad/probe-repo[2m │[0m
+[2m╰─────────────────────────────────────────────────╯[0m
+
+  [1mTip:[0m [3mNew[0m Use [1m/fast[0m to enable our fastest inference with increased plan usage.
+
+[2m• [0mYou have 1 usage limit reset available. Run /usage to use one.
+
+
+[1;2m› [0mRun the shell command: sleep 30. Then reply with one short sentence.
+
+
+[2m• [0mI’ll run the requested command and reply when it finishes.
+
+[38;5;2m✔ [39mYou [1mapproved[0m codex to run [2msleep 30[0;1m this time[0m
+
+[1m[38;5;2m•[0m [1mRan[0m [38;2;137;180;250msleep[38;2;205;214;244m 30[39m
+[2m  └ (no output)[0m
+
+[2m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• [0mThe command finished successfully.
+
+[2m─ Worked for 1m 50s ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[0;1m›[0m [2mUse /skills to list available skills[0m
+
+  [38;2;246;226;183mgpt-5.6-sol xhigh[2m[39m · [0m[38;2;171;223;167m/private/tmp/claude-501/-Users-maenokota-share-work-github-kewton-commandmate-issue-1671/41e4ed44-09e3-4c09-889f-f30c9459e33e/scratchpad/probe-repo[39m
