@@ -40,6 +40,16 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     running  - Agent executing a task
     waiting  - Confirmation prompt active (Yes/No, etc.)
 
+### commandmate sync
+  Ask the server to re-scan repositories and sync worktrees to its database
+  (same endpoint as the GUI sync button). Run it after 'git worktree add' so the
+  new worktree appears in 'commandmate ls' without opening the GUI (Issue #1680).
+
+  commandmate sync                        # Prints the server's summary message
+  commandmate sync --json                 # Full API response (worktreeCount,
+                                          # repositoryCount, repositories,
+                                          # deletedCount, cleanupWarnings)
+
 ### commandmate send <worktree-id> "<message>"
   Send a message to an agent (async). Starts session automatically if not running.
 
@@ -295,7 +305,7 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
 
   Worktree not found:
     commandmate ls --quiet             # Check registered IDs
-    curl -s -X POST http://localhost:3000/api/repositories/sync  # Sync new worktrees
+    commandmate sync                   # Sync new worktrees (e.g. after git worktree add)
 
   Authentication:
     CM_AUTH_TOKEN=your-token commandmate ls

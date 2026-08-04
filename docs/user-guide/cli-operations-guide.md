@@ -56,6 +56,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | コマンド | 用途 |
 |---------|------|
 | [`commandmate ls`](#commandmate-ls) | worktree一覧の表示 |
+| [`commandmate sync`](#commandmate-sync) | サーバーのworktree再スキャン（GUI同期ボタン相当） |
 | [`commandmate send`](#commandmate-send) | エージェントへのメッセージ送信 |
 | [`commandmate wait`](#commandmate-wait) | エージェント完了の待機 |
 | [`commandmate respond`](#commandmate-respond) | プロンプトへの応答 |
@@ -109,6 +110,47 @@ commandmate-main                                 main                  idle     
 | `ready` | セッション起動中・入力待ち（タスク完了後の状態） |
 | `running` | エージェントがタスク実行中 |
 | `waiting` | 確認プロンプト待ち（Yes/No等） |
+
+---
+
+## commandmate sync
+
+サーバーにリポジトリの再スキャンを実行させ、worktree を DB に同期します（Issue #1680）。
+GUI の worktree 同期ボタンと同じエンドポイント（`POST /api/repositories/sync`）を呼ぶため、
+`git worktree add` で作成した worktree を CLI だけで `commandmate ls` に反映できます。
+
+### 使用方法
+
+```bash
+commandmate sync                        # 再スキャン実行（サーバーのmessageを表示）
+commandmate sync --json                 # 同期結果をJSON（APIレスポンス相当）で出力
+```
+
+### 出力例
+
+```
+$ commandmate sync
+Successfully synced 12 worktree(s) from 3 repository/repositories
+```
+
+`--json` では `worktreeCount` / `repositoryCount` / `repositories` / `deletedCount` /
+`cleanupWarnings` を含む API レスポンスをそのまま出力します。
+
+### エラー
+
+| 状況 | 動作 |
+|------|------|
+| サーバー未起動 | `Server is not running. Start it with: commandmate start`（exit 1） |
+| リポジトリ未設定 | サーバーの 400 メッセージ（`WORKTREE_REPOS` / `CM_ROOT_DIR` の設定を案内）をそのまま表示（exit 2） |
+
+### 典型的なフロー
+
+```bash
+git worktree add ../myrepo-issue-123 -b feature/123-fix origin/develop
+commandmate sync                        # サーバーに新worktreeを認識させる
+commandmate ls --id myrepo-issue-123    # 同期直後から見える
+commandmate send myrepo-issue-123 "作業を開始してください"
+```
 
 ---
 

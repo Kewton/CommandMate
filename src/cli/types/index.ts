@@ -277,6 +277,12 @@ export interface LsOptions {
   token?: string;
 }
 
+/** sync command options [Issue #1680] */
+export interface SyncOptions {
+  json?: boolean;
+  token?: string;
+}
+
 /** send command options [Issue #518, #576] */
 export interface SendOptions {
   agent?: string;

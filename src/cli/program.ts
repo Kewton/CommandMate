@@ -15,6 +15,8 @@ import { createIssueCommand } from './commands/issue';
 import { createDocsCommand } from './commands/docs';
 // Issue #518: Agent orchestration commands
 import { createLsCommand } from './commands/ls';
+// Issue #1680: Server-side worktree re-scan from the CLI
+import { createSyncCommand } from './commands/sync';
 import { createSendCommand } from './commands/send';
 import { createWaitCommand } from './commands/wait';
 import { createRespondCommand } from './commands/respond';
@@ -221,6 +223,7 @@ export function buildProgram(): Command {
   // Issue #518: Agent orchestration commands [DR1-08] [IA3-07]
   // These commands enable CLI-based agent control for worktree operations.
   program.addCommand(createLsCommand());
+  program.addCommand(createSyncCommand());
   program.addCommand(createSendCommand());
   program.addCommand(createWaitCommand());
   program.addCommand(createRespondCommand());

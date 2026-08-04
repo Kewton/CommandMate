@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **verify / wait --verify: scope 不合格の logTail 末尾に定型ガイダンスを付与** (#1683): 違反 path 一覧の直後に「意図した差分なら契約の `scope.allow`（＝Issue の対象ファイル）へ path を追加し `send --contract` で送り直す（scope は送信時スナップショットで裁定）／`deny:` に一致する path は差し戻す」旨のガイダンスを追加。列挙漏れ起因の scope 不合格（#1678 B-2）を worker / 監督側が出力だけで自己解決できるようにする
+- **CLI: `commandmate sync` — サーバーの worktree 再スキャンを CLI から実行** (#1680)
+  - GUI の worktree 同期ボタンと同じ `POST /api/repositories/sync` を呼ぶ薄いサブコマンド。`git worktree add` で作成した worktree を GUI を開かずに `commandmate ls` へ反映でき、worktree 作成 → dispatch が CLI だけで完結する（#1678 A-1）
+  - `--json` で同期結果（worktreeCount / repositoryCount / repositories / deletedCount / cleanupWarnings）を API レスポンス相当のまま出力
+  - サーバー未起動時は既存コマンドと同じ接続エラー（exit 1）。リポジトリ未設定の 400 はサーバーの文言（WORKTREE_REPOS / CM_ROOT_DIR の案内）を素通しして exit 2
 
 ### Changed
 

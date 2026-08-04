@@ -97,6 +97,8 @@ describe('buildProgram', () => {
       'issue',
       'docs',
       'ls',
+      // Issue #1680: server-side worktree re-scan (same endpoint as the GUI sync button)
+      'sync',
       'send',
       'wait',
       'respond',

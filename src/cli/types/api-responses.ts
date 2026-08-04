@@ -47,6 +47,18 @@ export interface WorktreeItem {
   agentInstances?: AgentInstance[];
 }
 
+// Mirrors: src/app/api/repositories/sync/route.ts POST response (Issue #1680)
+export interface RepositorySyncResponse {
+  success: boolean;
+  message: string;
+  worktreeCount: number;
+  repositoryCount: number;
+  repositories: string[];
+  deletedCount: number;
+  /** Sanitized, generic warnings only (SEC-MF-001); details stay in server logs. */
+  cleanupWarnings: string[];
+}
+
 // Mirrors: src/lib/cli-tools/types.ts AgentInstance (Issue #868/#1000)
 export interface AgentInstance {
   id: string;
