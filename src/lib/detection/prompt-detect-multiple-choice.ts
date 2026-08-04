@@ -855,7 +855,16 @@ export function detectMultipleChoicePrompt(
   // Layer 5 [SEC-001]: Enhanced question line validation for requireDefaultIndicator=false.
   // When requireDefault is false, apply stricter validation to prevent false positives
   // from normal numbered lists (e.g., "Recommendations:\n1. Add tests\n2. Update docs").
-  if (!requireDefault) {
+  //
+  // [Issue #1676] Frames where a ❯/●/› default indicator was actually collected are
+  // exempt from Layer 5: the cursor existence check (Layer 2 semantics) is the same
+  // false-positive defense that requireDefaultIndicator=true tools (codex/gemini)
+  // rely on without any question-line validation. This lets declarative permission
+  // dialogs with no question line ("Claude in Chrome wants to run JavaScript on …"
+  // + ❯ 1. Allow / 2. … / 3. Deny) and imperative AskUserQuestion headers
+  // (「実装方針を選んでください」) be detected. Indicator-less frames (#193 capture
+  // artifacts) still go through SEC-001a/b unchanged.
+  if (!requireDefault && !hasDefaultIndicator) {
     // SEC-001a: No question line found (questionEndIndex === -1) - reject.
     // Prevents generic question fallback from triggering Auto-Yes
     // on plain numbered lists that happen to be consecutive from 1.
