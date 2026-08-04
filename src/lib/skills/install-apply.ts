@@ -539,7 +539,10 @@ export function applySkillInstall(input: SkillInstallApplyInput): SkillInstallAp
     }
     return { relativePath: file.path, bytes, executable: file.executable };
   });
-  const directories = directoriesFor(input.snapshot.files.map((f) => f.path), input.snapshot.directories);
+  const directories = directoriesForSkillPayload(
+    input.snapshot.files.map((f) => f.path),
+    input.snapshot.directories
+  );
 
   // Every destination is proven safe and absent *before* the primary commits, so
   // a secondary that is already blocked cannot leave a committed primary behind.
@@ -610,14 +613,16 @@ export function applySkillInstall(input: SkillInstallApplyInput): SkillInstallAp
 }
 
 /** One payload file with its verified bytes, ready to stage into any root. */
-interface PayloadFile {
+export interface SkillPayloadFile {
   relativePath: string;
   bytes: Uint8Array;
   executable: boolean;
 }
 
+type PayloadFile = SkillPayloadFile;
+
 /** Sorted set of directories a payload implies, plus any the package declared. */
-function directoriesFor(
+export function directoriesForSkillPayload(
   filePaths: readonly string[],
   declared: readonly string[] = []
 ): string[] {
@@ -644,6 +649,94 @@ interface StageAndCommitRootInput {
   directories: readonly string[];
   receiptBytes: Uint8Array;
   plannedTreeHash: string;
+}
+
+/** Everything one root's staging step needs. Bytes are already verified. */
+export interface SkillStageRootInput {
+  worktreePath: string;
+  worktreeRealPath: string;
+  rootPrefix: string;
+  skillId: string;
+  /** Directory name inside the reserved staging namespace. Grammar-checked. */
+  stagingName: string;
+  payload: readonly SkillPayloadFile[];
+  directories: readonly string[];
+  receiptBytes: Uint8Array;
+  plannedTreeHash: string;
+}
+
+/** A staged, tree-hash-verified payload that has not been published. */
+export interface SkillStagedRootPayload {
+  /** Absolute staging directory holding the verified payload. */
+  stagingDir: string;
+  /** Absolute reserved staging namespace the directory lives in. */
+  stagingRoot: string;
+  /** Absolute destination the staging was placed next to (same filesystem). */
+  installRootAbs: string;
+}
+
+/**
+ * Stage the verified payload for one root without publishing it (#1244).
+ *
+ * The staging half of {@link stageAndCommitSkillRoot}, exported so update can
+ * reuse the exact write path — exclusive no-follow writes, tree-hash gate,
+ * same-filesystem check — and supply its own rename sequence. On any failure the
+ * staging directory is removed and {@link SkillInstallError} is thrown; the
+ * destination is never touched. The caller owns the returned directory: it must
+ * either rename it into place or remove it.
+ *
+ * @internal Shared between install and update apply; not a public API.
+ */
+export function stageSkillRootPayload(input: SkillStageRootInput): SkillStagedRootPayload {
+  if (!SKILL_INSTALL_OPERATION_ID_PATTERN.test(input.stagingName)) {
+    fail(SkillInstallErrorCode.STAGING_IO, { reason: 'staging-name' });
+  }
+  const installRootAbs = resolveSkillInstallTargetFor(
+    input.worktreePath,
+    input.rootPrefix,
+    input.skillId
+  );
+  assertAncestorsAreRealDirectories(input.worktreeRealPath, input.worktreePath, input.rootPrefix);
+
+  const stagingRoot = getSkillInstallStagingRoot(input.worktreePath, input.rootPrefix);
+  makeDirectory(path.dirname(stagingRoot), 0o755, true);
+  makeDirectory(stagingRoot, SKILL_INSTALL_DIR_MODE, true);
+
+  // Not recursive: a staging directory that already exists means another
+  // operation is using this name, and silently adopting it would merge two writes.
+  const stagingDir = path.join(stagingRoot, input.stagingName);
+  makeDirectory(stagingDir, SKILL_INSTALL_DIR_MODE, false);
+
+  try {
+    for (const directory of input.directories) {
+      makeDirectory(path.join(stagingDir, directory), SKILL_INSTALL_DIR_MODE, false);
+    }
+
+    for (const file of input.payload) {
+      // The execute bit comes from the reconciled inventory, which is also what
+      // the plan hashed — never from the archive header, which is attacker data.
+      writeSkillPayloadFile(path.join(stagingDir, file.relativePath), file.bytes, file.executable);
+    }
+
+    // The receipt is written last and from the plan's own bytes: rebuilding it
+    // here would make the file the user previewed and the file on disk two
+    // different artifacts that merely ought to agree.
+    writeSkillPayloadFile(path.join(stagingDir, SKILL_RECEIPT_FILENAME), input.receiptBytes, false);
+
+    const staged = readStagedTree(stagingDir);
+    const treeHash = computeSkillTreeHash(staged);
+    if (treeHash !== input.plannedTreeHash) {
+      fail(SkillInstallErrorCode.PAYLOAD_MISMATCH, { reason: 'tree-hash' });
+    }
+
+    assertSameFilesystem(stagingDir, path.dirname(installRootAbs));
+  } catch (error) {
+    rmSync(stagingDir, { recursive: true, force: true });
+    pruneStagingRoot(stagingRoot);
+    throw error;
+  }
+
+  return { stagingDir, stagingRoot, installRootAbs };
 }
 
 /**
@@ -674,39 +767,19 @@ function stageAndCommitSkillRoot(input: StageAndCommitRootInput): void {
     );
   }
 
-  const stagingRoot = getSkillInstallStagingRoot(input.worktreePath, input.rootPrefix);
-  makeDirectory(path.dirname(stagingRoot), 0o755, true);
-  makeDirectory(stagingRoot, SKILL_INSTALL_DIR_MODE, true);
-
-  // Not recursive: a staging directory that already exists means another
-  // operation is using this ID, and silently adopting it would merge two writes.
-  const stagingDir = path.join(stagingRoot, input.operationId);
-  makeDirectory(stagingDir, SKILL_INSTALL_DIR_MODE, false);
+  const staged = stageSkillRootPayload({
+    worktreePath: input.worktreePath,
+    worktreeRealPath: input.worktreeRealPath,
+    rootPrefix: input.rootPrefix,
+    skillId: input.skillId,
+    stagingName: input.operationId,
+    payload: input.payload,
+    directories: input.directories,
+    receiptBytes: input.receiptBytes,
+    plannedTreeHash: input.plannedTreeHash,
+  });
 
   try {
-    for (const directory of input.directories) {
-      makeDirectory(path.join(stagingDir, directory), SKILL_INSTALL_DIR_MODE, false);
-    }
-
-    for (const file of input.payload) {
-      // The execute bit comes from the reconciled inventory, which is also what
-      // the plan hashed — never from the archive header, which is attacker data.
-      writeSkillPayloadFile(path.join(stagingDir, file.relativePath), file.bytes, file.executable);
-    }
-
-    // The receipt is written last and from the plan's own bytes: rebuilding it
-    // here would make the file the user previewed and the file on disk two
-    // different artifacts that merely ought to agree.
-    writeSkillPayloadFile(path.join(stagingDir, SKILL_RECEIPT_FILENAME), input.receiptBytes, false);
-
-    const staged = readStagedTree(stagingDir);
-    const treeHash = computeSkillTreeHash(staged);
-    if (treeHash !== input.plannedTreeHash) {
-      fail(SkillInstallErrorCode.PAYLOAD_MISMATCH, { reason: 'tree-hash' });
-    }
-
-    assertSameFilesystem(stagingDir, path.dirname(installRootAbs));
-
     // Re-checked immediately before the rename rather than only at entry: the
     // exclusive lock keeps CommandMate out, but nothing keeps the user's own
     // editor from creating this directory while the payload was being staged.
@@ -721,17 +794,17 @@ function stageAndCommitSkillRoot(input: StageAndCommitRootInput): void {
     }
 
     try {
-      renameSync(stagingDir, installRootAbs);
+      renameSync(staged.stagingDir, installRootAbs);
     } catch {
       fail(SkillInstallErrorCode.COMMIT_FAILED, { reason: 'rename' });
     }
   } catch (error) {
-    rmSync(stagingDir, { recursive: true, force: true });
-    pruneStagingRoot(stagingRoot);
+    rmSync(staged.stagingDir, { recursive: true, force: true });
+    pruneStagingRoot(staged.stagingRoot);
     throw error;
   }
 
-  pruneStagingRoot(stagingRoot);
+  pruneStagingRoot(staged.stagingRoot);
 }
 
 /**
@@ -768,7 +841,7 @@ export function completeSecondarySkillInstallRoots(
     }
     return { relativePath: file.path, bytes, executable: file.executable };
   });
-  const directories = directoriesFor(receipt.files.map((file) => file.path));
+  const directories = directoriesForSkillPayload(receipt.files.map((file) => file.path));
   const plannedTreeHash = computeSkillTreeHash([
     ...receipt.files.map((file) => ({
       path: file.path,

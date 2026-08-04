@@ -361,7 +361,21 @@
     },
     "nextAction": {
       "updatable": "Every installed file matches the install record. The update can be applied from this plan.",
-      "blocked": "Nothing has been changed. Resolve the paths listed below — restore locally changed files, or move files CommandMate does not manage out of the Skill directory — then build a new update plan."
+      "blocked": "Nothing has been changed. Resolve the paths listed below — restore locally changed files, or move files CommandMate does not manage out of the Skill directory — then build a new update plan.",
+      "succeeded": "The Skill was switched to the new version and recorded. Restart the agent sessions listed below to start using it.",
+      "committedReconciling": "The new version is already in the worktree, but the operation did not finish cleanly. CommandMate will converge the rest automatically; no re-update is needed.",
+      "failed": "Nothing was changed in the worktree. Review the reason below, resolve it, then build a new update plan."
+    },
+    "apply": "Apply update",
+    "applying": "Applying the update…",
+    "ackRisk": "I have reviewed the candidate's files, scripts and permissions, and I explicitly accept updating to this high-risk package.",
+    "ackRiskIncrease": "I understand this update raises the Skill's effective risk above what is installed today, and I confirm that separately.",
+    "rollbackAvailable": "The replaced version {version} was preserved in a verified, CommandMate-owned backup before the switch. Rolling back to it will be available as a separate operation.",
+    "reload": {
+      "native": "{agent} loads Skills from the worktree at startup. Restart the {agent} session in this worktree to pick up {skillId} {version}.",
+      "commandmateRuntime": "{agent} runs this Skill through the CommandMate runtime. Restart the {agent} session in this worktree so the runtime picks up {skillId} {version}.",
+      "unsupported": "{agent} does not support this Skill. The files were updated, but {skillId} {version} will not be offered in {agent} sessions.",
+      "unknown": "Support for {agent} has not been verified. The files were updated; restart the {agent} session and check whether {skillId} {version} is offered."
     }
   },
   "card": {

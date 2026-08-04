@@ -88,3 +88,24 @@ export function mayReplaySkillUninstall(
   if (!hasSkillFilesystemCommit(entry)) return true;
   return readInstalledSkillReceiptDigest(worktreePath, skillId) === null;
 }
+
+/**
+ * Whether a recorded update may still be replayed (Issue #1244).
+ *
+ * A committed update claims the *new* receipt is at the primary install root —
+ * the update always records its receipt digest at the commit point, so this is
+ * a digest comparison, never mere existence: an old receipt that is back in
+ * place (a later rollback, an uninstall + reinstall of the previous version)
+ * means the recorded outcome no longer describes the worktree and the request
+ * is new work.
+ */
+export function mayReplaySkillUpdate(
+  entry: SkillOperationJournalEntry,
+  worktreePath: string,
+  skillId: string
+): boolean {
+  if (!hasSkillFilesystemCommit(entry)) return true;
+  const digest = readInstalledSkillReceiptDigest(worktreePath, skillId);
+  if (digest === null) return false;
+  return entry.receiptDigest === null || entry.receiptDigest === digest;
+}

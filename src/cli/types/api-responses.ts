@@ -555,6 +555,36 @@ export interface SkillUpdatePlanResponse {
   plan: SkillUpdatePlan;
 }
 
+/**
+ * Mirrors: src/app/api/worktrees/[id]/skills/[skillId]/update/route.ts POST
+ * response [Issue #1244]. `update` is null when a replay finds no index row;
+ * `reload` and `rollback` are absent from the narrower replay body.
+ */
+export interface SkillUpdateResponse {
+  operation: SkillOperationResult;
+  update: {
+    skillId: string;
+    fromVersion?: string;
+    toVersion?: string;
+    /** Present on the replay body instead of fromVersion/toVersion. */
+    version?: string;
+    installRoot: string;
+    installRoots?: string[];
+    pendingRoots?: string[];
+  } | null;
+  reload?: {
+    skillId: string;
+    version: string;
+    installRoot: string;
+    agents: Array<{ agent: string; support: string; messageKey: string }>;
+  };
+  rollback?: {
+    available: boolean;
+    backup: { backupId: string; fromVersion: string; fileCount: number; verified: boolean };
+    messageKey: string;
+  };
+}
+
 /** Mirrors: src/app/api/worktrees/[id]/skills/[skillId]/uninstall/route.ts POST response. */
 export interface SkillUninstallResponse {
   operation: SkillOperationResult;

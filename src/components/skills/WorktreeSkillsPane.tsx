@@ -179,9 +179,9 @@ export function WorktreeSkillsPane({ worktreeId, className = '' }: WorktreeSkill
           </h2>
         </div>
         <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
-          {/* Issue #1243: an installed Skill with a Catalog entry gets the update
-              surface — badge, explicit version picker and the server-built plan.
-              Plan-only: applying an update is #1244. */}
+          {/* Issue #1243/#1244: an installed Skill with a Catalog entry gets the
+              update surface — badge, explicit version picker, the server-built
+              plan, and the apply step that spends the plan's token. */}
           {selectedInstalledSkill && skill && (
             <SkillUpdateDialog
               skillId={selectedSkillId}

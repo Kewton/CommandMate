@@ -38,6 +38,10 @@ import {
 } from '@/lib/skills/install-apply';
 import { hasRemovedSkillPayload } from '@/lib/skills/uninstall-apply';
 import {
+  completeSecondarySkillUpdateRoots,
+  reconcileSkillUpdateTarget,
+} from '@/lib/skills/updater';
+import {
   deleteSkillInstallation,
   upsertSkillInstallation,
 } from '@/lib/skills/installed-state';
@@ -107,6 +111,19 @@ export function buildSkillReconcilerPorts(
         // and an uninstall's payload is by definition no longer present.
         return isRemovalOperation(entry);
       }
+      if (entry.operation === 'update') {
+        // An interrupted two-rename switch can leave the root empty (old in
+        // the aside directory, or a verified staged payload unpublished), so
+        // the probe first converges the root to old-complete or new-complete
+        // (#1244) and only then answers whether the *new* receipt landed. The
+        // pre-existing old receipt is why the install probe would misread this
+        // entry: with no recorded digest it accepts any parseable receipt.
+        return reconcileSkillUpdateTarget(worktreePath, entry.target.skillId, {
+          operationId: entry.operationId,
+          toVersion: entry.target.version,
+          receiptDigest: entry.receiptDigest,
+        }).committed;
+      }
       return isRemovalOperation(entry)
         ? hasRemovedSkillPayload(worktreePath, entry.target.skillId, entry.receiptDigest)
         : hasCommittedSkillPayload(worktreePath, entry.target.skillId, entry.receiptDigest);
@@ -124,16 +141,26 @@ export function buildSkillReconcilerPorts(
       if (worktreePath === null) {
         throw new Error('worktree path is unavailable for reindex');
       }
-      // Converge any secondary root a partial multi-root install did not reach,
-      // copying the byte-identical payload forward from the committed primary
-      // (#1460). Best-effort: a root blocked by a user file must not stall the
-      // index write, which is what actually makes the install visible.
+      // Converge any secondary root the operation did not reach, forward from
+      // the committed primary (#1460). An install only fills absent roots; an
+      // update (#1244) additionally switches a secondary that still holds the
+      // provably clean previous version. Best-effort: a root blocked by a user
+      // file must not stall the index write, which is what actually makes the
+      // operation visible.
       try {
-        completeSecondarySkillInstallRoots(
-          worktreePath,
-          realpathSync(worktreePath),
-          entry.target.skillId
-        );
+        if (entry.operation === 'update') {
+          completeSecondarySkillUpdateRoots(
+            worktreePath,
+            realpathSync(worktreePath),
+            entry.target.skillId
+          );
+        } else {
+          completeSecondarySkillInstallRoots(
+            worktreePath,
+            realpathSync(worktreePath),
+            entry.target.skillId
+          );
+        }
       } catch (error) {
         reconcileLogger.warn('skill-secondary-root-convergence-failed', {
           operationId: entry.operationId,

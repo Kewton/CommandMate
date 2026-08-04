@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Skills: local 変更 guard つき atomic Skill update（apply）** (#1244)
+  - `POST /api/worktrees/[id]/skills/[skillId]/update` を追加。#1243 の update plan が固定した old receipt / old tree / new package / new receipt exact bytes / branch / HEAD / expiry を apply 入力として確定させ、plan token を単回消費して導入済み Skill を新 exact version へ切り替える
+  - **local 変更があれば 1 件でも zero-write で拒否**（`SKILL_UPDATE_LOCAL_CHANGES`）。modified / unknown / missing / irregular を uninstall guard で適用直前に再検査し、receipt digest・tree hash が plan の binding と一致しない場合も `SKILL_UPDATE_DRIFT` / `SKILL_PLAN_STALE` で旧版・新版のどちらも書き換えない
+  - **old→new の commit point を 1 点に定義**: new payload は install と同じ staging primitive（`O_EXCL|O_NOFOLLOW` write・digest/mode 再検証・tree hash gate・same-filesystem 検査）で destination と同一 filesystem の worktree-local staging へ materialize し、root ごとに「旧 directory を aside へ rename → staging を publish rename」の 2 段で切り替える。**primary root の publish rename が唯一の commit point**で、それ以前の失敗は in-process で aside を戻して worktree を 1 byte も変えず、それ以後の失敗は新 receipt から前方収束のみ（旧版・新版が混在した状態にならない）
+  - `.agents/skills` と `.claude/skills` の**両 root を 1 つの journaled operation として扱う**（#1460）。secondary root の切替が失敗した場合は committed primary から前方収束させ（`completeSecondarySkillUpdateRoots`）、local 変更のある secondary は上書きせず skip として報告する
+  - **journal replay 契約（#1552）に `update` の述語を追加**: 「commit を主張する entry の主張が今も真か」を new receipt の実在＋digest 一致で判定する `mayReplaySkillUpdate` を定義し、rollback や再 install で receipt が入れ替わった worktree に対して古い outcome を replay しない。起動時 reconciliation は crash 収束（aside の復元 / 完全検証済み staging の採用）を経てから commit 有無を答える
+  - 切替前に **old payload を digest 検証つきで service-owned root（`~/.commandmate/skills/backups/<operationId>/`）へ退避**する。リポジトリ内には置かない。retention と復元操作は #1245 の verified backup 契約へ引き渡すインターフェイス境界のみを定義する
+  - operation audit に source（origin/repository/ref/commit/artifact sha256）・old version・new version・actor・result を記録（`skill_operations.from_version` / `to_version`）。token・signed URL・絶対 path は通常 log にも error にも含めない
+  - update だけで script / hook を実行しない（archive 由来の mode も honour しない）
+  - UI: `SkillUpdateDialog` に適用ボタンを追加。updatable な plan にのみ表示し、high-risk 候補と risk 上昇はそれぞれ独立した同意 checkbox を必須にする（fail closed）。適用後は次アクション・Agent reload 案内・rollback 可否（保存済み backup の旧 version）を表示
+  - CLI: `commandmate skill update <skill-id> --worktree <id> [--version <v>] [--range <r>] [--dry-run] [--yes] [--ack-risk <id>@<version>] [--ack-risk-increase] [--json]` を追加。非TTY は `--yes` 必須、high-risk は `--ack-risk`、risk 上昇は `--ack-risk-increase` を追加で要求し、blocked は exit 11 / 未確認は exit 12 / committed_reconciling は exit 13
+  - rollback 操作・backup retention UI（#1245）、複数 version 連続 skip policy・自動 commit/PR・external source は非対象
+
 - **Skills: 更新検知・version 選択・更新差分・local 変更 guard（update plan）** (#1243)
   - `POST /api/worktrees/[id]/skills/[skillId]/update-plan` を追加。installed exact version は on-disk receipt から読み、Catalog の候補 version（installed より厳密に新しい exact version のみ。stable/prerelease opt-in・`range` filter・CommandMate 互換性判定つき）へ解決し、candidate artifact を install と同一の source/checksum/archive 検証（#1229/#1230）に通したうえで、current receipt / 現行 filesystem / candidate artifact の 3-way inventory を返す
   - add/update/remove/unchanged の file diff（unified diff 本文つき）と、risk（declared/computed/effective）・permissions・scripts/executables・requirements・changelog・Agent 互換性の security diff を 1 つの plan で提示。effective risk が上がる更新は通常確認とは別の追加確認を要求する契約（`riskIncreased`）を返す
