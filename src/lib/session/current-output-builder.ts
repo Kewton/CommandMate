@@ -20,6 +20,7 @@ import {
   buildCompositeKey,
 } from '@/lib/polling/auto-yes-manager';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
+import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tmux-capture-cache';
 import { getLastStopEventAt } from '@/lib/session/agent-event-state';
 import type { PromptData } from '@/types/models';
 
@@ -101,7 +102,22 @@ export async function buildCurrentOutput(
   const lines = output.split('\n');
   const totalLines = lines.length;
 
-  const newLines = lines.slice(Math.max(0, lastCapturedLine));
+  // Issue #1670: `content` is "everything the poller has not saved yet", which
+  // only works while `lastCapturedLine` indexes into `lines`. Once the capture is
+  // clipped by the window the cursor is stale by an unknown amount, and slicing at
+  // it collapses `content` to the last row or two — which is what `commandmate
+  // capture <id>` prints, so a long-lived codex session returned an empty capture.
+  // The window can only have slid forward, so 0 is the sole safe clamp; the result
+  // is a superset (it may repeat already-saved rows) and never drops new output.
+  //
+  // The effective window is the smaller of what this path asks for and what the
+  // capture layer will ever fetch — captureSessionOutput() reads at most
+  // CACHE_MAX_CAPTURE_LINES regardless of the request.
+  const captureWindowSaturated = isCaptureWindowSaturated(
+    totalLines,
+    Math.min(STATUS_CAPTURE_LINES, CACHE_MAX_CAPTURE_LINES),
+  );
+  const newLines = captureWindowSaturated ? lines : lines.slice(Math.max(0, lastCapturedLine));
   const newContent = newLines.join('\n');
 
   const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);

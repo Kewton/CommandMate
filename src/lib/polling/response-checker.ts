@@ -29,6 +29,7 @@ import {
 } from '@/lib/detection/cli-patterns';
 import { createLogger } from '@/lib/logger';
 import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
+import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tmux-capture-cache';
 
 const logger = createLogger('response-poller');
 
@@ -62,6 +63,13 @@ export interface ExtractionResult {
   promptDetection?: PromptDetectionResult;
   /** True when tmux buffer shrank (TUI redraw, screen clear, session restart) */
   bufferReset?: boolean;
+  /**
+   * True when the capture came back clipped by the capture window (Issue #1670),
+   * i.e. `lineCount` is pinned at the window size and can never grow again.
+   * Only meaningful on results with `isComplete: true` — those are the only ones
+   * whose `lineCount` is compared against `session_states.last_captured_line`.
+   */
+  captureWindowSaturated?: boolean;
 }
 
 /**
@@ -89,6 +97,8 @@ export function incompleteResult(lineCount: number): ExtractionResult {
  * @param bufferReset - External buffer reset flag
  * @param cliToolId - CLI tool identifier
  * @param findRecentUserPromptIndex - Callback to locate the most recent user prompt
+ * @param promptDetection - Prompt detection result to carry on the extraction result
+ * @param captureWindowSaturated - True when the capture was clipped by the capture window (#1670)
  * @returns ExtractionResult with isComplete: true and ANSI-stripped response
  */
 export function buildPromptExtractionResult(
@@ -99,9 +109,11 @@ export function buildPromptExtractionResult(
   cliToolId: CLIToolType,
   findRecentUserPromptIndex: (windowSize: number) => number,
   promptDetection?: PromptDetectionResult,
+  captureWindowSaturated: boolean = false,
 ): ExtractionResult {
   const startIndex = resolveExtractionStartIndex(
-    lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex
+    lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex,
+    captureWindowSaturated
   );
   const extractedLines = lines.slice(startIndex);
   return {
@@ -110,6 +122,7 @@ export function buildPromptExtractionResult(
     lineCount: totalLines,
     promptDetection,
     bufferReset,
+    captureWindowSaturated,
   };
 }
 
@@ -142,12 +155,16 @@ export function detectPromptWithOptions(
  * @param output - Full tmux output
  * @param lastCapturedLine - Number of lines previously captured
  * @param cliToolId - CLI tool ID (claude, codex, gemini)
+ * @param captureWindowLines - Size of the capture window `output` was produced with.
+ *   Used only to decide whether the capture came back clipped (Issue #1670);
+ *   defaults to the window `checkForResponse()` uses.
  * @returns Extracted response or null if incomplete
  */
 export function extractResponse(
   output: string,
   lastCapturedLine: number,
-  cliToolId: CLIToolType
+  cliToolId: CLIToolType,
+  captureWindowLines: number = CACHE_MAX_CAPTURE_LINES
 ): ExtractionResult | null {
   // Trim trailing empty lines from the output before processing
   const rawLines = output.split('\n');
@@ -157,6 +174,13 @@ export function extractResponse(
   }
   const lines = rawLines.slice(0, trimmedLength);
   const totalLines = lines.length;
+
+  // Issue #1670: measured on the RAW capture, before the trailing-blank trim —
+  // the clip happens in sliceOutput(), so it is the untrimmed row count that
+  // reveals it. Once this is true the line count is pinned at the window size and
+  // `lastCapturedLine` stops being a position in `lines`; see
+  // isCaptureWindowSaturated() for why raising the window only relocates it.
+  const captureWindowSaturated = isCaptureWindowSaturated(rawLines.length, captureWindowLines);
 
   // Issue #1289: Claude Code pins a footer (rotating hint row, input box, status
   // bar) to the bottom of the pane. It is chrome, not transcript, and its hint
@@ -231,7 +255,7 @@ export function extractResponse(
     if (promptDetection.isPrompt) {
       return buildPromptExtractionResult(
         lines, lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex,
-        promptDetection,
+        promptDetection, captureWindowSaturated,
       );
     }
   }
@@ -252,7 +276,8 @@ export function extractResponse(
     const responseLines: string[] = [];
 
     const startIndex = resolveExtractionStartIndex(
-      lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex
+      lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex,
+      captureWindowSaturated
     );
 
     let endIndex = totalLines;
@@ -369,6 +394,7 @@ export function extractResponse(
       isComplete: true,
       lineCount: endIndex,
       bufferReset,
+      captureWindowSaturated,
     };
   }
 
@@ -380,7 +406,7 @@ export function extractResponse(
     if (promptDetection.isPrompt) {
       return buildPromptExtractionResult(
         lines, lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex,
-        promptDetection,
+        promptDetection, captureWindowSaturated,
       );
     }
   }
@@ -388,7 +414,10 @@ export function extractResponse(
   // Partial response in progress
   const responseLines: string[] = [];
   const endIndex = totalLines;
-  const partialBufferReset = bufferReset || lastCapturedLine >= endIndex - 5;
+  // Issue #1670: a saturated window makes lastCapturedLine meaningless here too —
+  // starting the partial slice at it would stream an arbitrary tail fragment
+  // instead of the turn so far. Re-anchor on the echoed user prompt.
+  const partialBufferReset = bufferReset || captureWindowSaturated || lastCapturedLine >= endIndex - 5;
   const recentPromptIndex = partialBufferReset ? findRecentUserPromptIndex(80) : -1;
   const startIndex = partialBufferReset
     ? (recentPromptIndex >= 0 ? recentPromptIndex + 1 : Math.max(0, endIndex - 80))
@@ -467,8 +496,10 @@ export async function checkForResponse(
     const sessionState = getSessionState(db, worktreeId, resolvedInstanceId);
     const lastCapturedLine = sessionState?.lastCapturedLine || 0;
 
-    // Capture current output
-    const output = await captureSessionOutput(worktreeId, cliToolId, 10000, instanceId);
+    // Capture current output. The requested width IS the capture window, so it is
+    // taken from the same constant extractResponse() measures saturation against
+    // (Issue #1670) — a literal here would silently decouple the two.
+    const output = await captureSessionOutput(worktreeId, cliToolId, CACHE_MAX_CAPTURE_LINES, instanceId);
 
     // Layer 2: Accumulate TUI content for full-screen TUI tools (for overlap tracking only).
     if (cliToolId === 'opencode' || cliToolId === 'copilot') {
@@ -477,7 +508,7 @@ export async function checkForResponse(
     }
 
     // Extract response
-    const result = extractResponse(output, lastCapturedLine, cliToolId);
+    const result = extractResponse(output, lastCapturedLine, cliToolId, CACHE_MAX_CAPTURE_LINES);
 
     if (!result || !result.isComplete) {
       // DR-004 windowing: Only check tail lines
@@ -502,7 +533,15 @@ export async function checkForResponse(
     // `lineCount <= lastCapturedLine` and drop the response forever — leaving
     // History stuck on "Waiting for response..." while the terminal shows the
     // reply. Those tools dedup on response content instead (see below).
-    const lineCountIsCursor = !usesAlternateScreen(cliToolId);
+    //
+    // Issue #1670: the scrollback tools reach the SAME dead end from the other
+    // side. Their buffer does grow — but only until it outgrows the capture
+    // window, after which the capture is clipped, the count is pinned at the
+    // window size, and the cursor can never be overtaken again. #1268 fixed
+    // saturation at pane height; this is saturation at the capture window, and it
+    // disables the cursor for exactly as long as the clipping lasts (a session
+    // restart or a cleared pane un-saturates it and the cursor comes back).
+    const lineCountIsCursor = !usesAlternateScreen(cliToolId) && !result.captureWindowSaturated;
 
     // Duplicate prevention
     if (lineCountIsCursor && !result.bufferReset && result.lineCount === lastCapturedLine && !sessionState?.inProgressMessageId) {
@@ -620,7 +659,12 @@ export async function checkForResponse(
     // every subsequent poll re-extracts byte-identical content; save it once.
     // The cache is cleared by stopPolling(), i.e. per polling cycle, so an
     // identical response in a later turn is still recorded.
-    if (usesAlternateScreen(cliToolId)) {
+    //
+    // Issue #1670: keyed off `lineCountIsCursor` rather than the tool trait, so a
+    // scrollback tool whose capture window has saturated gets the same substitute.
+    // Without this the disabled cursor would leave nothing suppressing re-saves and
+    // the poller would append the same finished reply every 2 s.
+    if (!lineCountIsCursor) {
       const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
       if (isDuplicateResponse(pollerKey, cleanedResponse)) {
         updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);

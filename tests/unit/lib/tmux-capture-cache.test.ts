@@ -12,6 +12,7 @@ import {
   clearAllCache,
   resetCacheForTesting,
   getOrFetchCapture,
+  isCaptureWindowSaturated,
   CACHE_TTL_MS,
   CACHE_MAX_ENTRIES,
   CACHE_MAX_CAPTURE_LINES,
@@ -414,6 +415,45 @@ describe('tmux-capture-cache', () => {
       // Cache should store with CACHE_MAX_CAPTURE_LINES
       const cached = getCachedCapture('session-1', 200);
       expect(cached).toBe(fullOutput);
+    });
+  });
+
+  // =========================================================================
+  // isCaptureWindowSaturated() - Issue #1670
+  // =========================================================================
+
+  describe('isCaptureWindowSaturated()', () => {
+    it('reports a capture that came back short as unsaturated', () => {
+      // The pane still has room to grow, so the returned line count keeps rising
+      // and remains usable as a read cursor.
+      expect(isCaptureWindowSaturated(9999, CACHE_MAX_CAPTURE_LINES)).toBe(false);
+    });
+
+    it('reports a capture filling the window as saturated', () => {
+      // sliceOutput() caps at exactly the requested width, so hitting it means the
+      // capture was clipped and the count can never grow again.
+      expect(isCaptureWindowSaturated(CACHE_MAX_CAPTURE_LINES, CACHE_MAX_CAPTURE_LINES)).toBe(true);
+    });
+
+    it('defaults to the window checkForResponse() captures with', () => {
+      expect(isCaptureWindowSaturated(CACHE_MAX_CAPTURE_LINES)).toBe(true);
+      expect(isCaptureWindowSaturated(CACHE_MAX_CAPTURE_LINES - 1)).toBe(false);
+    });
+
+    it('moves the threshold with the window rather than pinning it to a constant', () => {
+      // The point of Issue #1670: raising the window relocates saturation, it does
+      // not remove it. A 10000-row capture is saturated at a 10000 window and not
+      // at a 20000 one, and a 20000-row capture is saturated at both.
+      expect(isCaptureWindowSaturated(10000, 10000)).toBe(true);
+      expect(isCaptureWindowSaturated(10000, 20000)).toBe(false);
+      expect(isCaptureWindowSaturated(20000, 20000)).toBe(true);
+    });
+
+    it('never reports saturation for a zero-width window', () => {
+      // Defensive: a zero window would otherwise mark every capture — including an
+      // empty one — as saturated and permanently disable the cursor.
+      expect(isCaptureWindowSaturated(0, 0)).toBe(false);
+      expect(isCaptureWindowSaturated(500, 0)).toBe(false);
     });
   });
 });

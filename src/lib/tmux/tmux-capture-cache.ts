@@ -51,6 +51,43 @@ export const CACHE_MAX_ENTRIES = 100;
 export const CACHE_MAX_CAPTURE_LINES = 10000;
 
 // =========================================================================
+// isCaptureWindowSaturated()
+// =========================================================================
+
+/**
+ * Whether a capture came back clipped by the capture window (Issue #1670).
+ *
+ * Every capture in this app is a SLIDING WINDOW over the tail of the pane, not a
+ * view of the whole buffer: `captureSessionOutput()` asks tmux for
+ * `-S -CACHE_MAX_CAPTURE_LINES` and `sliceOutput()` then keeps only the last
+ * `requestedLines` rows. So the returned line count is
+ * `min(pane_scrollback + pane_height, windowLines)`.
+ *
+ * While the pane holds fewer rows than the window, that count GROWS with the
+ * transcript, which is what makes `session_states.last_captured_line` usable as a
+ * "how far have I read" cursor. Once the pane outgrows the window the count is
+ * pinned at `windowLines` forever and the window merely slides: a line index
+ * recorded earlier no longer denotes the same line, and no later capture can ever
+ * report a larger count. Callers must stop trusting the cursor at that point —
+ * see `usesAlternateScreen` in lib/cli-tools/types.ts for the sibling condition
+ * (#1268), where the same thing happens at `pane_height` instead.
+ *
+ * Raising `windowLines` does not avoid this; it only moves where it happens
+ * (`TMUX_HISTORY_LIMIT` is the hard ceiling), which is why the check is written
+ * against the window in use rather than against a specific constant.
+ *
+ * @param capturedLineCount - Number of lines the capture actually returned
+ * @param windowLines - Size of the capture window that produced it
+ * @returns True when the capture was clipped, i.e. the line count is no longer a cursor
+ */
+export function isCaptureWindowSaturated(
+  capturedLineCount: number,
+  windowLines: number = CACHE_MAX_CAPTURE_LINES
+): boolean {
+  return windowLines > 0 && capturedLineCount >= windowLines;
+}
+
+// =========================================================================
 // globalThis pattern (Next.js hot reload persistence)
 // =========================================================================
 
