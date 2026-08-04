@@ -7,9 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **verify / wait --verify: scope 不合格の logTail 末尾に定型ガイダンスを付与** (#1683): 違反 path 一覧の直後に「意図した差分なら契約の `scope.allow`（＝Issue の対象ファイル）へ path を追加し `send --contract` で送り直す（scope は送信時スナップショットで裁定）／`deny:` に一致する path は差し戻す」旨のガイダンスを追加。列挙漏れ起因の scope 不合格（#1678 B-2）を worker / 監督側が出力だけで自己解決できるようにする
+
 ### Changed
 
 - **`--stop-pattern` の照合対象と限界をヘルプ・ガイドに明記** (#1682): `--stop-pattern` はターミナル出力のデルタへの正規表現照合であり、エージェントが実行するコマンドの抑止には使えない（ビルドログに `rm -rf` 等の文字列が表示されただけでも発火して Auto-Yes が停止する実害が #1678 で発生）。`auto-yes` / `send` の `--help`、`commandmate docs agent-operations`、`docs/user-guide/cli-operations-guide.md` に「ターミナル出力への照合。コマンド抑止には実行契約の `autoYes.denyPatterns` を使う」旨を追記した。あわせて同ガイドに「worker 稼働中の worktree で監督側が検証・ビルドをしない（生成物ディレクトリ共有で双方のビルドが破損する）」の注意項を追加した
+- **verify / wait --verify: 不合格ゲートの logTail 表示に行数上限** (#1683): stderr への logTail 表示を末尾 40 行までにし、超過分は `... (+N more lines; run \`commandmate verify show <run-id>\` for the full log)` の 1 行に畳む。保存側（`options.maxLogTailBytes`、最大 1MB）は従来どおりで、`--json` / `verify show` は全文を返す
 
 ## [0.20.0] - 2026-08-04
 
