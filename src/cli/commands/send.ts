@@ -176,7 +176,7 @@ export function createSendCommand(): Command {
     .option('--model <model>', 'Specify AI model for Copilot or Antigravity agent')
     .option('--auto-yes', 'Enable auto-yes before sending')
     .option('--duration <duration>', `Auto-yes duration (${ALLOWED_DURATIONS.join(', ')})`)
-    .option('--stop-pattern <pattern>', 'Auto-yes stop pattern (regex)')
+    .option('--stop-pattern <pattern>', 'Auto-yes stop pattern (regex). Matched against terminal output; cannot block commands (use the task contract\'s autoYes.denyPatterns for that)')
     .option('--contract <path>', 'Execution contract path relative to the worktree root (e.g. .commandmate/tasks/my-task.yaml). Records a task and sends the contract preamble plus its goal.')
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeId: string, message: string | undefined, options: SendOptions) => {

@@ -137,7 +137,7 @@ commandmate send <worktree-id> "<message>" --auto-yes --stop-pattern "FAILED"
 | `--register` | `--instance` で指定したセッションをroster（エージェントインスタンス一覧）に登録 | - |
 | `--auto-yes` | 送信前にAuto-Yesを有効化 | - |
 | `--duration <d>` | Auto-Yesの有効期間（1h, 3h, 8h） | 1h |
-| `--stop-pattern <p>` | Auto-Yes停止条件（正規表現） | - |
+| `--stop-pattern <p>` | Auto-Yes停止条件（正規表現、ターミナル出力への照合。[auto-yes の注意](#--stop-pattern-はターミナル出力への照合コマンドの抑止には使えない)参照） | - |
 
 > `--instance` の詳細（ID規約・rosterとの関係）は [マルチセッション（1エージェント複数セッション）](#マルチセッション1エージェント複数セッション) を参照してください。
 
@@ -665,6 +665,17 @@ commandmate auto-yes <worktree-id> --enable --instance codex-2  # 追加イン�
 | `--instance <id>` | **対象の推奨指定方法**。対象インスタンスID。他インスタンスと独立してAuto-Yesを制御 |
 | `--agent <id>` | roster に無いインスタンス向けの補助（`--instance` 単独で足りる場合は不要） |
 
+### `--stop-pattern` はターミナル出力への照合（コマンドの抑止には使えない）
+
+`--stop-pattern` はエージェントが実行する**コマンドを監視するものではなく**、ターミナル出力の
+新規部分（デルタ）への正規表現照合です。コマンドの実行そのものを止めることはできず、逆に
+ビルドログ等の出力にパターン文字列が**表示されただけ**でも発火します（例: `rm -rf` を指定すると、
+npm スクリプトがクリーンアップで `rm -rf dist` をログに出しただけで Auto-Yes が停止します）。
+
+「危険なコマンドに対する自動応答を抑止したい」場合は、実行契約の `autoYes.denyPatterns`
+（[docs/design/task-contract.md](../design/task-contract.md)）を使ってください。こちらは
+確認プロンプトの**質問文・選択肢**に照合し、マッチしたら自動応答せず人間へエスカレートします。
+
 ---
 
 ## commandmate instances
@@ -1125,6 +1136,17 @@ commandmate wait "$WT2" --instance codex --timeout 1800
 commandmate capture "$WT1" --json
 commandmate capture "$WT2" --instance codex --json
 ```
+
+### エージェント稼働中の worktree でビルドしない（生成物ディレクトリの共有破損）
+
+エージェント（worker）が作業中の worktree で、監督側が検証やビルド
+（`npm run build` / `npm run preview` 等）を実行しないでください。双方が同じ生成物
+ディレクトリ（`.next` / `dist` 等）に書き込むため、**両方のビルドが破損**します。
+
+- 検証・ビルドは `commandmate wait` で worker の完了を確認してから実行する
+- 稼働中にどうしても必要な場合は、別の worktree / 別ディレクトリに checkout して行う
+- `commandmate verify` のゲートは worktree の作業ディレクトリで走るため、worker 稼働中の
+  実行も同じ競合を起こします。完了後（`wait --verify` の裁定後）に実行してください
 
 ---
 
