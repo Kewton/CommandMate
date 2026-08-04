@@ -7,6 +7,7 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { DetectPromptOptions } from './types';
 import { createLogger } from '@/lib/logger';
 import { stripAnsi } from './ansi';
+import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
 
 const logger = createLogger('cli-patterns');
 
@@ -57,11 +58,98 @@ export const CLAUDE_THINKING_PATTERN = new RegExp(
 export const CLAUDE_INTERRUPT_HINT_PATTERN = /esc to interrupt/;
 
 /**
- * Codex thinking pattern
+ * Codex activity-marker pattern
  * Matches activity indicators like "• Planning", "• Searching", etc.
  * T1.1: Extended to include "Ran" and "Deciding"
+ *
+ * Issue #1671: these are *transcript records*, not a liveness signal. Codex is
+ * inline-rendered (no alternate screen), so every "• Ran <cmd>" / "• Running
+ * <cmd>" step it ever printed stays in the pane scrollback forever — measured on
+ * a live `mcbd-codex-*` pane: 396 "• Ran" and 11 "• Running" rows, all of them
+ * from finished steps. Matching this pattern against a fixed tail window
+ * therefore answers "did a step happen recently", not "is Codex working now".
+ * Use {@link isCodexTurnActive} for the latter.
  */
 export const CODEX_THINKING_PATTERN = /•\s*(Planning|Searching|Exploring|Running|Thinking|Working|Reading|Writing|Analyzing|Ran|Deciding)/m;
+
+/**
+ * Codex live status-line hint (Issue #1671)
+ *
+ * While a turn is in flight Codex pins a status row directly above the composer:
+ *
+ *     • Working (13s • esc to interrupt) · 1 background terminal running · /ps to view
+ *
+ * It is repainted in place every tick and erased the moment the turn ends, so —
+ * unlike the "• Ran"/"• Running" step records — it never lingers in scrollback.
+ * Measured on a 11,000-line capture of an idle Codex pane: zero occurrences of
+ * "esc to interrupt", against 396 lingering "• Ran" rows. That makes it the one
+ * unambiguous "Codex is still generating" token, mirroring Claude's
+ * {@link CLAUDE_INTERRUPT_HINT_PATTERN}.
+ */
+export const CODEX_INTERRUPT_HINT_PATTERN = /esc to interrupt/;
+
+/**
+ * How far above the last content row Codex's composer ("› …") may sit.
+ *
+ * Codex pins the composer and the status bar to the bottom of the pane, so the
+ * composer lands 2-3 rows above the last non-blank row in every observed frame.
+ * The small allowance keeps the search from walking up into the transcript and
+ * latching onto the echoed user message, which uses the same "› " marker.
+ */
+const CODEX_COMPOSER_SEARCH_ROWS = 8;
+
+/**
+ * Decide whether a Codex turn is still in flight (Issue #1671).
+ *
+ * Completion detection used to answer this with {@link CODEX_THINKING_PATTERN}
+ * over a fixed 20-row tail. Because "• Ran <cmd>" is a *past-tense record* that
+ * never leaves the transcript, a turn that ended with a short final message kept
+ * that record inside the tail window and was reported as "still thinking"
+ * forever — so its reply was never saved, while a turn whose final message
+ * happened to be longer than 20 rows pushed the record out of the window and was
+ * saved. Whether a reply reached Message History depended on how long it was.
+ *
+ * Two signals, both measured against live codex-cli 0.146.0 captures:
+ *
+ * 1. The live status line ({@link CODEX_INTERRUPT_HINT_PATTERN}) anywhere in the
+ *    tail window. Present in every generating frame from 1s onwards, absent from
+ *    every idle frame.
+ * 2. An activity marker in the rows immediately above the composer — the band
+ *    Codex reserves for that status line. Version-agnostic backstop for a Codex
+ *    build whose status row drops the "esc to interrupt" wording; deliberately
+ *    narrow (THINKING_TAIL_LINE_COUNT rows, matching the window status-detector
+ *    already uses) so records further up the transcript cannot reach it.
+ *
+ * When no composer can be located the frame is not a normal Codex layout (an
+ * overlay is up, or the pane is mid-redraw), so signal 2 falls back to the whole
+ * tail window — the pre-#1671 behaviour, which errs towards "still active".
+ *
+ * @param lines - Captured pane lines with trailing blank rows already trimmed
+ * @param tailLineCount - Size of the tail window completion detection looks at
+ * @returns True while Codex is still generating
+ */
+export function isCodexTurnActive(lines: string[], tailLineCount: number): boolean {
+  const tailWindow = stripAnsi(lines.slice(Math.max(0, lines.length - tailLineCount)).join('\n'));
+
+  // 1. Live status line — unambiguous, never survives the end of a turn.
+  if (CODEX_INTERRUPT_HINT_PATTERN.test(tailWindow)) return true;
+
+  // 2. Activity marker in the status-line band directly above the composer.
+  //    Searched bottom-up so the composer wins over the echoed user message.
+  let composerIndex = -1;
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - CODEX_COMPOSER_SEARCH_ROWS); i--) {
+    if (CODEX_PROMPT_PATTERN.test(stripAnsi(lines[i]))) {
+      composerIndex = i;
+      break;
+    }
+  }
+
+  if (composerIndex < 0) return CODEX_THINKING_PATTERN.test(tailWindow);
+
+  const bandStart = Math.max(0, composerIndex - THINKING_TAIL_LINE_COUNT + 1);
+  const band = stripAnsi(lines.slice(bandStart, composerIndex + 1).join('\n'));
+  return CODEX_THINKING_PATTERN.test(band);
+}
 
 /**
  * Claude prompt pattern (waiting for input)

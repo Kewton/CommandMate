@@ -19,6 +19,7 @@ import { parseClaudeOutput } from '@/lib/claude-output';
 import {
   getCliToolPatterns,
   findClaudeChromeStart,
+  isCodexTurnActive,
   stripAnsi,
   stripBoxDrawing,
   buildDetectPromptOptions,
@@ -265,7 +266,15 @@ export function extractResponse(
 
   const hasPrompt = promptPattern.test(cleanOutputToCheck);
   const hasSeparator = separatorPattern.test(cleanOutputToCheck);
-  const isThinking = thinkingPattern.test(cleanOutputToCheck);
+  // Issue #1671: Codex's activity markers are past-tense transcript records that
+  // never leave the scrollback, so testing them against this fixed tail window
+  // reports "still thinking" for a finished turn whenever its final message was
+  // short enough to keep the last "• Ran <cmd>" row inside the window. Codex gets
+  // a liveness check that keys off the status line it repaints above the composer
+  // instead; every other tool keeps the tail-window match.
+  const isThinking = cliToolId === 'codex'
+    ? isCodexTurnActive(lines, checkLineCount)
+    : thinkingPattern.test(cleanOutputToCheck);
 
   // Prompt-based completion logic
   const isPromptBasedComplete = (cliToolId === 'codex' || cliToolId === 'gemini' || cliToolId === 'vibe-local' || cliToolId === 'copilot' || cliToolId === 'antigravity') && hasPrompt && !isThinking;
