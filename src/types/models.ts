@@ -208,6 +208,14 @@ export type MessageType = 'normal' | 'prompt' | 'prompt_response';
 export type PromptType = 'yes_no' | 'multiple_choice' | 'approval' | 'choice' | 'input' | 'continue';
 
 /**
+ * Who resolved a prompt (Issue #1685 audit trail).
+ * - 'auto': the server-side Auto-Yes poller answered it
+ * - 'human': an explicit reply through the respond APIs (chat UI / CLI respond)
+ * - 'terminal': inferred — the agent moved on, so someone must have answered in the terminal
+ */
+export type PromptAnsweredBy = 'auto' | 'human' | 'terminal';
+
+/**
  * Base prompt data interface
  */
 export interface BasePromptData {
@@ -221,6 +229,8 @@ export interface BasePromptData {
   answer?: string;
   /** Timestamp when answered (ISO 8601) */
   answeredAt?: string;
+  /** Who resolved the prompt (Issue #1685). Absent on rows answered before this field existed. */
+  answeredBy?: PromptAnsweredBy;
   /** Instruction text preceding the prompt (context for the user) - Issue #235 */
   instructionText?: string;
 }

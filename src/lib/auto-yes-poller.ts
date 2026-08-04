@@ -18,6 +18,7 @@ import { getSessionAutoYesPolicy, invalidateSessionAutoYesPolicy } from './polli
 import { recordPolicySuppression } from './polling/auto-yes-suppression-state';
 import { applyEventToActiveTask } from './tasks/task-transition-service';
 import { getDbInstance } from './db/db-instance';
+import { recordAnsweredPrompt, type RecordAnsweredPromptResult } from './db/chat-db';
 import { sendPromptAnswer } from './prompt-answer-sender';
 import { CLIToolManager } from './cli-tools/manager';
 import { stripAnsi, stripBoxDrawing, detectThinking, buildDetectPromptOptions } from './detection/cli-patterns';
@@ -428,6 +429,46 @@ export async function detectAndRespondToPrompt(
       'prompt_answered_auto',
       { promptType: promptDetection.promptData.type }
     );
+
+    // Issue #1685: persist question/options/answer to chat history so the audit
+    // trail survives even when the answer landed inside the response poller's
+    // interval and the prompt was never saved as a pending message. Must never
+    // fail the answer that already reached tmux.
+    let auditRecord: RecordAnsweredPromptResult | null = null;
+    try {
+      auditRecord = recordAnsweredPrompt(getDbInstance(), {
+        worktreeId,
+        cliToolId,
+        instanceId: instanceId ?? cliToolId,
+        promptData: promptDetection.promptData,
+        answer,
+        answeredBy: 'auto',
+        content: promptDetection.rawContent || promptDetection.cleanContent,
+      });
+    } catch (recordError) {
+      logger.warn('poller:prompt-audit-record-failed', {
+        worktreeId,
+        cliToolId,
+        instanceId,
+        error: getErrorMessage(recordError),
+      });
+    }
+
+    if (auditRecord) {
+      const record = auditRecord;
+      // Fire-and-forget on purpose: the WS push is advisory, and awaiting a
+      // cold ws-server module load inside the poll path would make its
+      // completion timing nondeterministic for a side effect it doesn't
+      // depend on (the audit row is already committed above).
+      void import('@/lib/ws-server')
+        .then(({ broadcastMessage }) => {
+          broadcastMessage(record.created ? 'message' : 'message_updated', {
+            worktreeId,
+            message: record.message,
+          });
+        })
+        .catch(() => {});
+    }
 
     // Dynamic imports avoid a module cycle through terminal-broadcast ->
     // current-output-builder -> auto-yes-manager -> this poller.

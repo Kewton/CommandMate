@@ -66,10 +66,11 @@ export {
   getMessageById,
   updatePromptData,
   markPendingPromptsAsAnswered,
+  recordAnsweredPrompt,
   ACTIVE_FILTER,
   getMessagesByDateRange,
 } from './chat-db';
-export type { GetMessagesOptions, GetMessagesByDateRangeOptions } from './chat-db';
+export type { GetMessagesOptions, GetMessagesByDateRangeOptions, RecordAnsweredPromptParams, RecordAnsweredPromptResult } from './chat-db';
 
 // session-db
 export {

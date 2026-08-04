@@ -126,6 +126,9 @@ export async function POST(
       status: 'answered' as const,
       answer,
       answeredAt: new Date().toISOString(),
+      // Issue #1685: audit attribution — this route is only reached from an
+      // explicit human reply (chat prompt buttons).
+      answeredBy: 'human' as const,
     };
 
     updatePromptData(db, messageId, updatedPromptData);

@@ -368,6 +368,14 @@ export interface CaptureOptions {
   tail?: string;
   /** Issue #1623: with `--pane`, print the frame verbatim (no blank-row squeeze). */
   raw?: boolean;
+  /**
+   * Issue #1685: list the prompt audit trail (question / options / answer /
+   * answeredBy) instead of terminal output. Reads resolved prompts from chat
+   * history, so it works after Auto-Yes already cleared the prompt from screen.
+   */
+  prompts?: boolean;
+  /** Issue #1685: with `--prompts`, number of most recent prompts to list. */
+  limit?: string;
 }
 
 /** auto-yes command options [Issue #518] */
