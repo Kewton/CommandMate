@@ -57,6 +57,10 @@ import { createTask, type Task, type TaskStatus } from '@/lib/db';
 import { updateTaskStatus } from '@/lib/db/tasks-db';
 import { parseTaskContract } from '@/lib/tasks/contract-parser';
 import { clearAutoYesPolicyCache, invalidateSessionAutoYesPolicy } from '@/lib/polling/auto-yes-policy';
+import {
+  clearPolicySuppressions,
+  getLastPolicySuppression,
+} from '@/lib/polling/auto-yes-suppression-state';
 import { detectAndRespondToPrompt, type AutoYesPollerState } from '@/lib/auto-yes-poller';
 
 const WORKTREE_ID = 'wt-1547';
@@ -105,6 +109,7 @@ beforeEach(() => {
   db = new Database(':memory:');
   runMigrations(db);
   clearAutoYesPolicyCache();
+  clearPolicySuppressions();
   sendPromptAnswer.mockClear();
   warn.mockClear();
 });
@@ -233,5 +238,66 @@ describe('detectAndRespondToPrompt under an autoYes policy', () => {
       await detectAndRespondToPrompt(WORKTREE_ID, state, 'claude', FRAME, undefined, 'claude-2')
     ).toBe('no_answer');
     expect(sendPromptAnswer).not.toHaveBeenCalled();
+  });
+});
+
+describe('policy suppression visibility (Issue #1684)', () => {
+  it('records the suppression so capture --json can surface it', async () => {
+    // The #1678 A-2 shape: mode safe + Claude's edit confirmation, which is a
+    // multiple_choice prompt and therefore outside safe's yes_no-only allowance.
+    seedTask('autoYes:\n  mode: safe\n');
+
+    await detectAndRespondToPrompt(WORKTREE_ID, pollerState(), 'claude', FRAME);
+
+    expect(getLastPolicySuppression(WORKTREE_ID, 'claude')).toMatchObject({
+      reason: 'type-not-allowed',
+      mode: 'safe',
+      promptType: 'multiple_choice',
+    });
+    expect(getLastPolicySuppression(WORKTREE_ID, 'claude')?.at).toEqual(expect.any(Number));
+  });
+
+  it('records the deny pattern responsible', async () => {
+    seedTask(
+      "autoYes:\n  mode: allow-listed\n  allowPromptTypes: [multiple_choice]\n  denyPatterns: ['useVirtualKeyboard']\n"
+    );
+
+    await detectAndRespondToPrompt(WORKTREE_ID, pollerState(), 'claude', FRAME);
+
+    expect(getLastPolicySuppression(WORKTREE_ID, 'claude')).toMatchObject({
+      reason: 'deny-pattern',
+      pattern: 'useVirtualKeyboard',
+    });
+  });
+
+  it('records under the alias instance key, not the primary', async () => {
+    seedTask("autoYes:\n  mode: 'off'\n", { instanceId: 'claude-2' });
+    const state = pollerState();
+    state.instanceId = 'claude-2';
+
+    await detectAndRespondToPrompt(WORKTREE_ID, state, 'claude', FRAME, undefined, 'claude-2');
+
+    expect(getLastPolicySuppression(WORKTREE_ID, 'claude', 'claude-2')).not.toBeNull();
+    expect(getLastPolicySuppression(WORKTREE_ID, 'claude')).toBeNull();
+  });
+
+  it('records nothing when the prompt is answered', async () => {
+    await detectAndRespondToPrompt(WORKTREE_ID, pollerState(), 'claude', FRAME);
+
+    expect(getLastPolicySuppression(WORKTREE_ID, 'claude')).toBeNull();
+  });
+
+  it('refreshes the record on every poll that re-suppresses', async () => {
+    seedTask("autoYes:\n  mode: 'off'\n");
+    const state = pollerState();
+
+    await detectAndRespondToPrompt(WORKTREE_ID, state, 'claude', FRAME);
+    const first = getLastPolicySuppression(WORKTREE_ID, 'claude');
+    await new Promise(resolve => setTimeout(resolve, 5));
+    await detectAndRespondToPrompt(WORKTREE_ID, state, 'claude', FRAME);
+    const second = getLastPolicySuppression(WORKTREE_ID, 'claude');
+
+    expect(first).not.toBeNull();
+    expect(second!.at).toBeGreaterThan(first!.at);
   });
 });

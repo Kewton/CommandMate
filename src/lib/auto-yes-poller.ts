@@ -15,6 +15,7 @@ import { captureSessionOutput } from './session/cli-session';
 import { detectPrompt } from './detection/prompt-detector';
 import { resolveAutoAnswerWithPolicy } from './polling/auto-yes-resolver';
 import { getSessionAutoYesPolicy, invalidateSessionAutoYesPolicy } from './polling/auto-yes-policy';
+import { recordPolicySuppression } from './polling/auto-yes-suppression-state';
 import { applyEventToActiveTask } from './tasks/task-transition-service';
 import { getDbInstance } from './db/db-instance';
 import { sendPromptAnswer } from './prompt-answer-sender';
@@ -364,6 +365,15 @@ export async function detectAndRespondToPrompt(
     const policy = getSessionAutoYesPolicy(worktreeId, cliToolId, instanceId);
     const resolution = resolveAutoAnswerWithPolicy(promptDetection.promptData, policy);
     if (resolution.suppressedBy) {
+      // Issue #1684: the log line alone leaves a CLI-driven pipeline blind to
+      // why its worker stalled. Record the suppression so buildCurrentOutput
+      // can publish it (`autoYes.lastSuppression` in capture --json).
+      recordPolicySuppression(worktreeId, cliToolId, instanceId, {
+        reason: resolution.suppressedBy,
+        mode: policy?.mode ?? null,
+        promptType: promptDetection.promptData.type,
+        pattern: resolution.pattern,
+      });
       logger.warn('poller:auto-yes-suppressed-by-policy', {
         worktreeId,
         cliToolId,

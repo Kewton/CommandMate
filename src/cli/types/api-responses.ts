@@ -90,6 +90,16 @@ export interface CurrentOutputResponse {
     enabled: boolean;
     expiresAt: number | null;
     stopReason?: string;
+    // Mirrors: src/lib/polling/auto-yes-suppression-state.ts AutoYesPolicySuppression
+    // (Issue #1684). Non-null once the contract's autoYes policy withheld an
+    // answer; `at` is refreshed every poll while the suppressed prompt remains.
+    lastSuppression?: {
+      reason: string;
+      mode: string | null;
+      promptType: string;
+      pattern?: string;
+      at: number;
+    } | null;
   };
   thinking: boolean;
   thinkingMessage: string | null;

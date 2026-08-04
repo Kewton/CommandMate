@@ -45,6 +45,22 @@ success:
   autoVerifyOnStop: false          # 省略時 false（エージェント停止イベントで検証を自動起動。§2.5）
 ```
 
+> **無人実行の推奨レシピ（Issue #1684）**: 上の `mode: safe` は `yes_no` 型しか自動応答しない。
+> **Claude の編集確認（`Do you want to make this edit …?`）は `multiple_choice` 型**
+> （実質 Yes/No＋allow-all の 3 択）なので、safe のままでは編集のたびにワーカーが停止する
+> （出典 #1678 A-2）。無人で走らせる契約は allow-listed に広げ、危険操作は `denyPatterns` で
+> エスカレートさせる:
+>
+> ```yaml
+> autoYes:
+>   mode: allow-listed
+>   allowPromptTypes: [yes_no, multiple_choice]
+>   denyPatterns: ['rm -rf', 'git push.*--force', 'sudo ']
+> ```
+>
+> ポリシーが応答を抑止した事実は `commandmate capture --json` の `autoYes.lastSuppression`
+> で観測できる（§2.4 enforcement）。
+
 契約ファイルは `.commandmate/tasks/*.yaml` として **Git 追跡対象**である
 （`.gitignore` の 2 段構え規則。[commandmate-directory-tracking.md](./commandmate-directory-tracking.md) 参照）。
 契約はレビュー対象の成果物であり、ランタイムデータではない。
@@ -323,6 +339,14 @@ enforcement が「契約が無いから従来動作」と「契約が off と言
 抑止時は `auto-yes-poller` が `poller:auto-yes-suppressed-by-policy` を理由付きで警告ログに
 出す。エージェントへのキーストロークは送られず、**人間への通知は既存経路**
 （`polling/response-checker.ts` の prompt 保存 → WS broadcast → Web Push）が担う。
+
+抑止の事実は CLI からも観測できる（Issue #1684）: 最後の抑止が
+`src/lib/polling/auto-yes-suppression-state.ts` にセッション単位で記録され、
+`GET /current-output`（= `commandmate capture --json`）の
+`autoYes.lastSuppression`（`reason` / `mode` / `promptType` / `pattern` / `at`）に出る。
+抑止されたプロンプトはポーラーの重複ガードに載らず毎 poll 再評価されるため、プロンプトが
+画面に残っている間は `at` が更新され続ける — `isPromptWaiting: true` かつ `at` が新しければ
+「いまポリシー抑止で停止している」と読める。露出のみで、この記録を読んで挙動を変えるものは無い。
 
 適用範囲は**サーバ側 Auto-Yes ポーラーのみ**。クライアント側 `hooks/useAutoYes.ts` は
 サーバポーラーが動いていないときだけ応答するフォールバックで、DB を読めないためポリシーを
