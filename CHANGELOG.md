@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **設計原則文書: 判定の可観測性（discoverability 原則）を明文化** (#1686): 「サーバー側が下した判定・抑止・自動アクションは、理由コードつきで運用者が読む層（`capture --json` / `wait` / `task show`）に露出する」を `docs/design/discoverability-principle.md` として明文化し、既存判定点の棚卸し（露出済み: #1682〜#1685・skills#47 / 未露出の対応候補: stop-pattern のマッチ内容、プロンプト dedup スキップ）を記録した。あわせて cli-operations-guide.md に無人実行の推奨契約テンプレートを掲載し、誤用されやすいフラグ（`wait --on-prompt` / `send --auto-yes`）の `--help` にクロスリファレンスを追記、設計レビュー（/multi-stage-design-review Stage 1）の観点に discoverability を追加した
+
 - **verify / wait --verify: scope 不合格の logTail 末尾に定型ガイダンスを付与** (#1683): 違反 path 一覧の直後に「意図した差分なら契約の `scope.allow`（＝Issue の対象ファイル）へ path を追加し `send --contract` で送り直す（scope は送信時スナップショットで裁定）／`deny:` に一致する path は差し戻す」旨のガイダンスを追加。列挙漏れ起因の scope 不合格（#1678 B-2）を worker / 監督側が出力だけで自己解決できるようにする
 - **CLI: `commandmate sync` — サーバーの worktree 再スキャンを CLI から実行** (#1680)
   - GUI の worktree 同期ボタンと同じ `POST /api/repositories/sync` を呼ぶ薄いサブコマンド。`git worktree add` で作成した worktree を GUI を開かずに `commandmate ls` へ反映でき、worktree 作成 → dispatch が CLI だけで完結する（#1678 A-1）

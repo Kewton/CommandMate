@@ -50,7 +50,7 @@ description: "設計書の4段階レビュー（通常→整合性→影響分�
 
 | Stage | レビュー種別 | フォーカス | 目的 |
 |-------|------------|----------|------|
-| 1 | 通常レビュー | 設計原則 | SOLID/KISS/YAGNI/DRY準拠確認 |
+| 1 | 通常レビュー | 設計原則 | SOLID/KISS/YAGNI/DRY準拠確認＋発見可能性（discoverability） |
 | 2 | 整合性レビュー | 整合性 | 設計書と実装の整合性確認 |
 | 3 | 影響分析レビュー | 影響範囲 | 変更の波及効果分析 |
 | 4 | セキュリティレビュー | セキュリティ | OWASP Top 10準拠確認 |
@@ -85,10 +85,18 @@ mkdir -p dev-reports/issue/{issue_number}/multi-stage-design-review
 
 ### Stage 1: 通常レビュー（設計原則）
 
+**Stage 1 の必須観点**（focus_area: 設計原則）:
+
+- SOLID / KISS / YAGNI / DRY 準拠
+- **発見可能性（discoverability）**: この機能・この判定結果を、運用者はどの層で・どのコマンドで知るか？
+  サーバーログにしか出ない判定・抑止・自動アクションはないか？（判定は理由コードつきで
+  `capture --json` / `wait` / `task show` 等の運用者が読む層に露出すること。
+  詳細: [docs/design/discoverability-principle.md](../../docs/design/discoverability-principle.md)）
+
 #### 1-1. レビュー実行
 
 ```
-Use architecture-review-agent (model: opus) to review Issue #{issue_number} with focus on 設計原則.
+Use architecture-review-agent (model: opus) to review Issue #{issue_number} with focus on 設計原則 and 発見可能性（discoverability: この機能・判定結果を運用者はどの層・どのコマンドで知るか。ログにしか出ない判定はないか）.
 
 Context file: dev-reports/issue/{issue_number}/multi-stage-design-review/stage1-review-context.json
 Output file: dev-reports/issue/{issue_number}/multi-stage-design-review/stage1-review-result.json

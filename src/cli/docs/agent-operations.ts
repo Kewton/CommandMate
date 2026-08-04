@@ -60,7 +60,9 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     --agent <id>           Ad-hoc CLI tool for an instance the roster does not know:
                            claude (default), codex, gemini, vibe-local, opencode, copilot, antigravity
     --register             Register the --instance session into the agent-instance roster
-    --auto-yes             Enable auto-yes before sending
+    --auto-yes             Enable auto-yes before sending (session-wide, no policy
+                           guard -- for unattended runs prefer --contract with an
+                           autoYes policy: mode / denyPatterns)
     --duration <d>         Auto-yes duration: 1h, 3h, 8h (default: 1h)
     --stop-pattern <p>     Auto-yes stop condition (regex; matches terminal output,
                            cannot block commands -- see auto-yes below)
@@ -101,6 +103,9 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
 
   Prompt JSON output (exit 10):
     {"worktreeId":"...","cliToolId":"claude","type":"yes_no","question":"...","options":["yes","no"],"status":"pending"}
+    The payload IS the prompt -- read it from stdout before falling back to
+    capture. For type "selection_list", options is empty by design and the
+    question field carries the reason.
 
   --verify turns "the agent stopped" into "the work passes the repository's own
   checks". Verification only runs when completion was detected: a prompt (10) or
