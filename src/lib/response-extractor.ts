@@ -37,9 +37,10 @@ export function isOpenCodeComplete(output: string): boolean {
  * Determine the start index for response extraction based on buffer state.
  * Shared between normal response extraction and prompt detection paths.
  *
- * Implements a 5-branch decision tree for startIndex determination:
+ * Implements a 6-branch decision tree for startIndex determination:
  *   1. bufferWasReset  -> findRecentUserPromptIndex(40) + 1, or 0 if not found
  *   2a. cliToolId === 'opencode' | 'copilot' -> findRecentUserPromptIndex(totalLines) + 1, or 0
+ *   2a''. captureWindowSaturated -> findRecentUserPromptIndex(totalLines) + 1, or 0
  *   2a'. cliToolId === 'antigravity' -> findRecentUserPromptIndex(totalLines) + 1, or lastCapturedLine
  *   2b. cliToolId === 'codex' -> Math.max(0, lastCapturedLine)
  *   3. lastCapturedLine >= totalLines - 5 (scroll boundary) ->
@@ -67,6 +68,9 @@ export function isOpenCodeComplete(output: string): boolean {
  * @param findRecentUserPromptIndex - Callback that searches the tmux buffer backwards
  *   for the most recent user prompt line within a given window size.
  *   Returns the line index (>= 0) if found, or -1 if not found.
+ * @param captureWindowSaturated - True when the capture came back clipped by the capture
+ *   window (Issue #1670), i.e. `lastCapturedLine` no longer indexes into `lines`.
+ *   Defaults to false so existing callers keep their behavior.
  * @returns The 0-based line index from which response extraction should begin.
  *
  * @internal Exported for testing only
@@ -76,7 +80,8 @@ export function resolveExtractionStartIndex(
   totalLines: number,
   bufferReset: boolean,
   cliToolId: CLIToolType,
-  findRecentUserPromptIndex: (windowSize: number) => number
+  findRecentUserPromptIndex: (windowSize: number) => number,
+  captureWindowSaturated: boolean = false
 ): number {
   // Defensive validation: clamp negative values to 0 (Stage 4 SF-001)
   lastCapturedLine = Math.max(0, lastCapturedLine);
@@ -87,6 +92,23 @@ export function resolveExtractionStartIndex(
   // lastCapturedLine = totalLines. Must execute BEFORE Branch 1 to avoid Branch 1's small
   // window (40 lines) which fails to find the second-to-last Build marker in a 200-line pane.
   if (cliToolId === 'opencode' || cliToolId === 'copilot') {
+    const foundUserPrompt = findRecentUserPromptIndex(totalLines);
+    return foundUserPrompt >= 0 ? foundUserPrompt + 1 : 0;
+  }
+
+  // Branch 2a'' (Issue #1670): the capture window is saturated, so the buffer no
+  // longer grows under the cursor — it slides. `lastCapturedLine` was recorded
+  // against a window that has since scrolled by an unknown amount, so it is not a
+  // position in `lines` any more and using it would slice off an arbitrary prefix
+  // of the turn. Anchor on the newest echoed user prompt instead, exactly as the
+  // alternate-screen branch above does for the same reason (#1268), and fall back
+  // to the whole window when the echo has scrolled out (a single turn longer than
+  // the window) — dropping it would be the very defect this branch fixes.
+  //
+  // Placed AFTER the opencode/copilot branch so the #1268 path is untouched, and
+  // BEFORE the antigravity branch because the two agree wherever an echo exists;
+  // only agy's `lastCapturedLine` fallback would still trust the stale cursor.
+  if (captureWindowSaturated) {
     const foundUserPrompt = findRecentUserPromptIndex(totalLines);
     return foundUserPrompt >= 0 ? foundUserPrompt + 1 : 0;
   }

@@ -33,7 +33,16 @@ vi.mock('@/lib/realtime/terminal-broadcast', () => ({
   broadcastTerminalSnapshotAfterInteraction: vi.fn().mockResolvedValue(undefined),
   broadcastTerminalSnapshot: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('@/lib/tmux/tmux-capture-cache', () => ({ invalidateCache: vi.fn() }));
+// Partial, not whole-module: the only thing worth stubbing here is the cache's
+// globalThis-backed state. The rest of the module is pure (the capture-window
+// width and the saturation predicate #1670 added), and response-checker reads it
+// on the path these tests drive — a whole-module replacement silently made those
+// undefined and checkForResponse's catch reported the resulting TypeError as an
+// ordinary "no response found".
+vi.mock('@/lib/tmux/tmux-capture-cache', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/tmux/tmux-capture-cache')>();
+  return { ...actual, invalidateCache: vi.fn() };
+});
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
     getInstance: () => ({
