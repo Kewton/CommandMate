@@ -10,6 +10,7 @@
 import React, { useEffect, useRef, useState, useMemo, memo, useCallback } from 'react';
 import { ArrowUp, ArrowDown } from 'lucide-react';
 import { sanitizeTerminalOutput } from '@/lib/security/sanitize';
+import { MAX_TERMINAL_OUTPUT_LENGTH } from '@/config/terminal-output-config';
 import { computeTerminalUpdate } from '@/lib/terminal/terminal-diff';
 import { normalizeTerminalOutputForDisplay } from '@/lib/terminal/terminal-display-normalizer';
 import { useTerminalScroll } from '@/hooks/useTerminalScroll';
@@ -165,7 +166,16 @@ export const TerminalDisplay = memo(function TerminalDisplay({
     prevOutputRef.current = displayOutput;
     if (update.mode === 'noop') return;
 
-    if (update.mode === 'append') {
+    // Issue #1674: `sanitizeTerminalOutput` now keeps the TAIL of oversized input.
+    // For a full frame that is exactly right, but an appended delta longer than
+    // the cap would lose its own head and punch a hole between the previously
+    // rendered chunk and the new one. Fall back to a full replace so what is
+    // rendered always stays a contiguous suffix of the output. (A delta this
+    // large means the pane was rewritten wholesale anyway.)
+    const isOversizedAppend =
+      update.mode === 'append' && update.appended.length > MAX_TERMINAL_OUTPUT_LENGTH;
+
+    if (update.mode === 'append' && !isOversizedAppend) {
       setRenderedChunks((prev) => {
         chunkKeyRef.current += 1;
         // Coalesce back to a single chunk if the DOM node count grows unbounded.
