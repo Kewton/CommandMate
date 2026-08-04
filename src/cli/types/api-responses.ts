@@ -121,7 +121,27 @@ export interface PromptData {
   question: string;
   options?: unknown[];
   status?: string;
+  answer?: string;
+  answeredAt?: string;
+  /** Mirrors: src/types/models.ts PromptAnsweredBy (Issue #1685) */
+  answeredBy?: string;
   [key: string]: unknown;
+}
+
+// Mirrors: src/types/models.ts ChatMessage (subset), as serialized by
+// GET /api/worktrees/[id]/messages?messageType=prompt (Issue #1685).
+// `timestamp` is an ISO string on the wire (Date is JSON-serialized).
+export interface PromptMessageResponse {
+  id: string;
+  worktreeId: string;
+  role: string;
+  content: string;
+  timestamp: string;
+  messageType: string;
+  promptData?: PromptData;
+  cliToolId?: string;
+  instanceId?: string;
+  archived: boolean;
 }
 
 // Mirrors: src/app/api/worktrees/[id]/prompt-response/route.ts response shape

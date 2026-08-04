@@ -699,6 +699,49 @@ commandmate capture <worktree-id> --pane --instance codex-2
   人が読んでいるという理由でサーバの挙動が変わらないようにしています
 - **attach も tmux 3.2+ も不要**です。`prefix+g`（下記）が使えない環境の代替になります
 
+### `--prompts`: 解決済みプロンプトの監査証跡（Issue #1685）
+
+auto-yes が `wait` のポーリング間隔内にプロンプトへ自動応答すると、`wait` は exit 10 せず、
+`capture --json` の `promptData` も既に `null` になっています。`--prompts` はチャット履歴から
+プロンプトメッセージを読むため、**何を聞かれ、何と答えたかを事後に取得できます**。
+
+```bash
+commandmate capture <worktree-id> --prompts                    # 直近 20 件をテキストで一覧
+commandmate capture <worktree-id> --prompts --limit 5          # 直近 5 件
+commandmate capture <worktree-id> --prompts --json             # JSON で取得
+commandmate capture <worktree-id> --prompts --instance codex-2 # インスタンスで絞り込み
+```
+
+JSON 出力（`prompts` は古い順）:
+
+```json
+{
+  "worktreeId": "myrepo-feature-x",
+  "count": 1,
+  "prompts": [
+    {
+      "id": "…",
+      "timestamp": "2026-08-04T10:00:00.000Z",
+      "cliToolId": "claude",
+      "instanceId": "claude",
+      "type": "yes_no",
+      "question": "Allow tool use?",
+      "options": ["yes", "no"],
+      "status": "answered",
+      "answer": "yes",
+      "answeredAt": "2026-08-04T10:00:02.000Z",
+      "answeredBy": "auto"
+    }
+  ]
+}
+```
+
+- **`answeredBy` が応答種別**です: `auto`（サーバ側 auto-yes が自動応答）/ `human`（respond API・
+  チャット UI からの明示応答。ブラウザ側 auto-yes フォールバック経由も `human` になります）/
+  `terminal`（誰かがターミナルで直接応答したと推定される掃引記録）。本機能導入前に解決した行は `null`
+- `--pane` とは併用できません（`--prompts` は履歴、`--pane` は現在の画面を読むため）
+- `--limit` の上限はサーバの履歴取得上限（1000）と同じです
+
 ---
 
 ## 読むモード: attach したまま transcript を読む（Issue #1623）

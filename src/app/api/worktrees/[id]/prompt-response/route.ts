@@ -6,7 +6,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { getWorktreeById } from '@/lib/db';
+import { getWorktreeById, recordAnsweredPrompt } from '@/lib/db';
+import { broadcastMessage } from '@/lib/ws-server';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { isCliToolType, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutputFresh } from '@/lib/session/cli-session';
@@ -203,6 +204,34 @@ export async function POST(
     applyEventToActiveTask(db, id, cliToolId, instanceId ?? cliToolId, 'prompt_answered_human', {
       promptType: promptCheck?.promptData?.type,
     });
+
+    // Issue #1685: persist question/options/answer for the audit trail. Skipped
+    // when the pre-send capture failed (promptCheck null) — there is nothing
+    // trustworthy to record. Shares the useAutoYes attribution caveat above.
+    if (promptCheck?.isPrompt && promptCheck.promptData) {
+      try {
+        // Issue #1681 resolved semantic answers to a concrete input before
+        // sending — record what actually reached the terminal.
+        const record = recordAnsweredPrompt(db, {
+          worktreeId: id,
+          cliToolId,
+          instanceId: instanceId ?? cliToolId,
+          promptData: promptCheck.promptData,
+          answer: resolution.input,
+          answeredBy: 'human',
+          content: promptCheck.rawContent || promptCheck.cleanContent,
+        });
+        broadcastMessage(record.created ? 'message' : 'message_updated', {
+          worktreeId: id,
+          message: record.message,
+        });
+      } catch (recordError) {
+        // Audit persistence must never fail a response that already reached tmux.
+        logger.warn('prompt-audit-record-failed', {
+          error: recordError instanceof Error ? recordError.message : String(recordError),
+        });
+      }
+    }
 
     // The prompt poller normally stops while waiting for input. Resume response
     // persistence and independently push the TUI redraw after this interaction.

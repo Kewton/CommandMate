@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - サーバー未起動時は既存コマンドと同じ接続エラー（exit 1）。リポジトリ未設定の 400 はサーバーの文言（WORKTREE_REPOS / CM_ROOT_DIR の案内）を素通しして exit 2
 - **CLI: `respond <worktree-id> --default`** — 検出中プロンプトの default 選択肢（❯ ハイライト位置）を明示的に選択する（#1681）
 - **実行契約の Auto-Yes ポリシー抑止を CLI から観測可能に** (#1684): 抑止はこれまでサーバーログ（`poller:auto-yes-suppressed-by-policy`）にしか出ず、無人実行のワーカーが `mode: safe` の対象外プロンプト（Claude の編集確認は `multiple_choice` 型）で停止しても理由を判別できなかった。最後の抑止をセッション単位で記録し、`commandmate capture --json` の `autoYes.lastSuppression`（reason / mode / promptType / pattern / at）として露出する。あわせて task-contract 仕様書と CLI 運用ガイドに「無人実行は `allow-listed` ＋ `denyPatterns` を使う」推奨レシピを明記した
+- **CLI: auto-yes が解決したプロンプトの監査証跡（#1685）**: `commandmate capture <worktree-id> --prompts [--limit N] [--json]` で、解決済みプロンプトの question / options / answer / 応答種別（`answeredBy`: `auto`＝サーバ側 auto-yes / `human`＝respond API・チャット UI / `terminal`＝ターミナル直接応答の推定）を事後に取得できるようになった。auto-yes が `wait` のポーリング間隔内に応答してプロンプトが一度も pending 保存されないケースでも、応答送出時に answered 済みのプロンプト行をチャット履歴へ作成して証跡を残す（`GET /api/worktrees/[id]/messages?messageType=prompt` を追加）
 
 ### Changed
 
