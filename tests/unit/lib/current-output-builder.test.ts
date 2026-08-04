@@ -22,6 +22,10 @@ vi.mock('@/lib/polling/auto-yes-manager', () => ({
 
 import { captureSessionOutput } from '@/lib/session/cli-session';
 import { getLastServerResponseTimestamp } from '@/lib/polling/auto-yes-manager';
+import {
+  recordPolicySuppression,
+  clearPolicySuppressions,
+} from '@/lib/polling/auto-yes-suppression-state';
 import { buildCurrentOutput } from '@/lib/session/current-output-builder';
 import { buildClaudeHelpOverlayFrame } from '../../fixtures/claude-help-overlay';
 
@@ -44,6 +48,53 @@ describe('buildCurrentOutput Issue #1167 frame', () => {
     expect(payload.sessionStatus).toBe('waiting');
     expect(payload.sessionStatusReason).toBe('prompt_detected');
     expect(payload.isUnclassifiedActive).toBe(false);
+  });
+});
+
+describe('buildCurrentOutput Issue #1684 policy suppression visibility', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearPolicySuppressions();
+    vi.mocked(captureSessionOutput).mockResolvedValue(buildClaude1000RowPermissionFrame());
+  });
+
+  it('publishes the last policy suppression for the requested instance', async () => {
+    recordPolicySuppression(
+      'wt-1',
+      'claude',
+      'claude-2',
+      { reason: 'type-not-allowed', mode: 'safe', promptType: 'multiple_choice' },
+      1_000
+    );
+
+    const payload = await buildCurrentOutput({} as Database.Database, 'wt-1', 'claude', 'claude-2');
+
+    expect(payload.autoYes?.lastSuppression).toEqual({
+      reason: 'type-not-allowed',
+      mode: 'safe',
+      promptType: 'multiple_choice',
+      at: 1_000,
+    });
+  });
+
+  it('publishes null when the policy never withheld an answer', async () => {
+    const payload = await buildCurrentOutput({} as Database.Database, 'wt-1', 'claude', 'claude-2');
+
+    expect(payload.autoYes?.lastSuppression).toBeNull();
+  });
+
+  it("does not leak another instance's suppression", async () => {
+    recordPolicySuppression(
+      'wt-1',
+      'claude',
+      'claude-3',
+      { reason: 'type-not-allowed', mode: 'safe', promptType: 'multiple_choice' },
+      1_000
+    );
+
+    const payload = await buildCurrentOutput({} as Database.Database, 'wt-1', 'claude', 'claude-2');
+
+    expect(payload.autoYes?.lastSuppression).toBeNull();
   });
 });
 

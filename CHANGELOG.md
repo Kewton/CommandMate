@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `--json` で同期結果（worktreeCount / repositoryCount / repositories / deletedCount / cleanupWarnings）を API レスポンス相当のまま出力
   - サーバー未起動時は既存コマンドと同じ接続エラー（exit 1）。リポジトリ未設定の 400 はサーバーの文言（WORKTREE_REPOS / CM_ROOT_DIR の案内）を素通しして exit 2
 - **CLI: `respond <worktree-id> --default`** — 検出中プロンプトの default 選択肢（❯ ハイライト位置）を明示的に選択する（#1681）
+- **実行契約の Auto-Yes ポリシー抑止を CLI から観測可能に** (#1684): 抑止はこれまでサーバーログ（`poller:auto-yes-suppressed-by-policy`）にしか出ず、無人実行のワーカーが `mode: safe` の対象外プロンプト（Claude の編集確認は `multiple_choice` 型）で停止しても理由を判別できなかった。最後の抑止をセッション単位で記録し、`commandmate capture --json` の `autoYes.lastSuppression`（reason / mode / promptType / pattern / at）として露出する。あわせて task-contract 仕様書と CLI 運用ガイドに「無人実行は `allow-listed` ＋ `denyPatterns` を使う」推奨レシピを明記した
 
 ### Changed
 

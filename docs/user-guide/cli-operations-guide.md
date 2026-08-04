@@ -546,6 +546,23 @@ Error: invalid task contract:
   - scope.allow: at least one pattern is required while success.requireScopeClean is true
 ```
 
+### 無人実行の Auto-Yes ポリシーは allow-listed を使う（Issue #1684）
+
+契約の `autoYes.mode: safe` は **`yes_no` 型のプロンプトしか自動応答しません**。
+**Claude の編集確認（`Do you want to make this edit …?`）は `multiple_choice` 型**
+（実質 Yes/No＋allow-all の 3 択）なので、safe のままだと編集のたびにワーカーが停止します。
+無人で走らせる契約は `allow-listed` に広げ、危険操作は `denyPatterns` でエスカレートさせてください。
+
+```yaml
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: ['rm -rf', 'git push.*--force', 'sudo ']
+```
+
+ポリシーが自動応答を抑止した事実は `commandmate capture --json` の
+`autoYes.lastSuppression` に出ます（[capture の JSON フィールド](#json出力の主要フィールド)参照）。
+
 ### 一覧・詳細
 
 ```bash
@@ -624,9 +641,41 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
   "cliToolId": "claude",
   "lineCount": 42,
   "isPromptWaiting": false,
-  "autoYes": { "enabled": false, "expiresAt": null }
+  "autoYes": { "enabled": false, "expiresAt": null, "lastSuppression": null }
 }
 ```
+
+#### `autoYes.lastSuppression`: ポリシー抑止の観測（Issue #1684）
+
+実行契約の `autoYes` ポリシーが自動応答を**抑止**した最後の記録です（抑止が無ければ `null`）。
+抑止はこれまでサーバーログ（`poller:auto-yes-suppressed-by-policy`）にしか出ず、
+「Auto-Yes が効いているのにワーカーが止まっている」理由を CLI から判別できませんでした。
+
+```json
+"autoYes": {
+  "enabled": true,
+  "expiresAt": 1754300000000,
+  "lastSuppression": {
+    "reason": "type-not-allowed",
+    "mode": "safe",
+    "promptType": "multiple_choice",
+    "at": 1754296400000
+  }
+}
+```
+
+| フィールド | 意味 |
+|-----------|------|
+| `reason` | `type-not-allowed`（mode が許さない型）/ `deny-pattern`（denyPatterns がマッチ）/ `deny-pattern-unusable`（評価不能パターンの fail-closed）/ `mode-off` |
+| `mode` | 抑止時点のポリシー mode（`off` / `safe` / `allow-listed`、契約が mode を述べていなければ `null`） |
+| `promptType` | 抑止されたプロンプトの型（例: Claude の編集確認は `multiple_choice`） |
+| `pattern` | `deny-pattern` 系のとき、マッチした denyPattern |
+| `at` | 抑止時刻（epoch ms）。抑止されたプロンプトが画面に残っている間は毎ポーリング更新される |
+
+`isPromptWaiting: true` かつ `lastSuppression.at` が新しい場合、そのセッションは
+**いまポリシー抑止で停止**しています。`commandmate respond` で人間が応答するか、
+契約の `autoYes` を見直してください（`mode: safe` で `multiple_choice` が抑止される場合は
+[allow-listed への切り替え](#無人実行の-auto-yes-ポリシーは-allow-listed-を使うissue-1684)を推奨）。
 
 ### `--pane`: transcript を読む（Issue #1623）
 

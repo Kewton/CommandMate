@@ -19,6 +19,10 @@ import {
   isPollerActive,
   buildCompositeKey,
 } from '@/lib/polling/auto-yes-manager';
+import {
+  getLastPolicySuppression,
+  type AutoYesPolicySuppression,
+} from '@/lib/polling/auto-yes-suppression-state';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tmux-capture-cache';
 import { getLastStopEventAt } from '@/lib/session/agent-event-state';
@@ -44,6 +48,14 @@ export interface CurrentOutputPayload {
     enabled: boolean;
     expiresAt: number | null;
     stopReason?: string;
+    /**
+     * Last answer the contract's autoYes policy withheld for this session, or
+     * null when it never withheld one (Issue #1684). Refreshed every poll while
+     * the suppressed prompt stays on screen, so `at` being current together
+     * with `isPromptWaiting` means the suppression is the reason the session is
+     * waiting right now.
+     */
+    lastSuppression: AutoYesPolicySuppression | null;
   };
   isSelectionListActive?: boolean;
   isPagerActive?: boolean;
@@ -165,6 +177,7 @@ export async function buildCurrentOutput(
       enabled: autoYesState?.enabled ?? false,
       expiresAt: autoYesState?.enabled ? autoYesState.expiresAt : null,
       stopReason: autoYesState?.stopReason,
+      lastSuppression: getLastPolicySuppression(worktreeId, cliToolId, instanceId),
     },
     isSelectionListActive,
     isPagerActive,
