@@ -110,13 +110,26 @@ route を browser 側で stub するため）。初見利用者の UX 調査も�
 **単体照会** であり、内部的に uninstall plan を1件生成するため
 **plan token を1つ消費する副作用**がある。導入監査履歴と適用状態 dashboard は #1248。
 
-### 3-3. 再インストール・update の手段が無い
+### 3-3.（一部解消 #1243）再インストール・update の手段が無い
 
-destination が既に存在する場合、apply は `SKILL_INSTALL_DESTINATION_EXISTS`（409）で拒否する。
-**同一 version の入れ直しも、別 version への更新もできない。** 一度 uninstall してから
-install し直す必要がある。update は Phase 2（#1243 / #1244）。
+destination が既に存在する場合、install の apply は `SKILL_INSTALL_DESTINATION_EXISTS`（409）で
+拒否する。**同一 version の入れ直しはできない。** 一度 uninstall してから install し直す必要がある。
 
-なお plan 段階では「managed かつ無変更」の tree は差分ゼロとして `installable: true` に見える。
+> **#1243 で解消（update plan まで）**: 更新の検知・候補 version 選択・更新差分・local 変更 guard は
+> 提供済み。worktree 詳細の Skills pane に update badge と version picker つきの update dialog が、
+> CLI に `commandmate skill update-plan` が追加され、
+> `POST /api/worktrees/[id]/skills/[skillId]/update-plan` が
+> current receipt / 現行 filesystem / candidate artifact の 3-way inventory を返す。
+> 候補は installed より**厳密に新しい exact version のみ**に解決され、candidate artifact は
+> install と同じ source/checksum/archive 検証（#1229/#1230）を通る。
+> modified / unknown / missing / irregular な path が 1 件でもあれば `SKILL_UPDATE_LOCAL_CHANGES`
+> として **update 不可（fail closed）**。effective risk が上がる更新は、通常の更新確認とは別の
+> 追加確認を要求する契約（`riskIncreased`）を返す。
+>
+> **update の apply（実際の書き換え）は #1244、rollback は #1245 で未提供。** plan token は
+> 発行されるが、それを消費する update apply API はまだ存在しない。
+
+なお install plan 段階では「managed かつ無変更」の tree は差分ゼロとして `installable: true` に見える。
 拒否は commit 直前の destination 再確認で起きる。
 
 ### 3-4. plan token を利用者個人に紐付けられない

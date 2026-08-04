@@ -23,6 +23,7 @@ import { SKILL_PLAN_SWEEP_INTERVAL_MS } from '@/config/skill-security-config';
 import { createLogger } from '@/lib/logger';
 import { sweepSkillInstallPlans } from '@/lib/skills/install-plan';
 import { sweepSkillUninstallPlans } from '@/lib/skills/uninstall-plan';
+import { sweepSkillUpdatePlans } from '@/lib/skills/update-plan';
 import { isSkillSnapshotStoreInitialized, sweepSkillSnapshots } from '@/lib/skills/snapshot-store';
 
 const logger = createLogger('lib/skills/plan-sweeper');
@@ -31,6 +32,7 @@ const logger = createLogger('lib/skills/plan-sweeper');
 export interface SkillPlanSweepResult {
   installPlans: number;
   uninstallPlans: number;
+  updatePlans: number;
   snapshots: number;
 }
 
@@ -58,8 +60,9 @@ export function runSkillPlanSweep(options: { now?: number } = {}): SkillPlanSwee
   const now = options.now ?? Date.now();
   const installPlans = sweepSkillInstallPlans({ now });
   const uninstallPlans = sweepSkillUninstallPlans({ now });
+  const updatePlans = sweepSkillUpdatePlans({ now });
   const snapshots = isSkillSnapshotStoreInitialized() ? sweepSkillSnapshots({ now }) : 0;
-  return { installPlans, uninstallPlans, snapshots };
+  return { installPlans, uninstallPlans, updatePlans, snapshots };
 }
 
 /**
@@ -71,7 +74,7 @@ export function ensureSkillPlanSweeper(): void {
   const timer = setInterval(() => {
     try {
       const result = runSkillPlanSweep();
-      if (result.installPlans || result.uninstallPlans || result.snapshots) {
+      if (result.installPlans || result.uninstallPlans || result.updatePlans || result.snapshots) {
         logger.debug('skill-plan-sweep', { ...result });
       }
     } catch (error) {

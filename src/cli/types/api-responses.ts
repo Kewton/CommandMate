@@ -478,6 +478,83 @@ export interface SkillUninstallPlanResponse {
   plan: SkillUninstallPlan;
 }
 
+/** A typed reason an update is refused (Issue #1243). Paths are repository-relative. */
+export interface SkillUpdateBlocker {
+  code: string;
+  path: string | null;
+  /** Underlying per-path finding, when one exists (e.g. a local modification). */
+  detail: string | null;
+}
+
+/** Mirrors: src/lib/skills/update-plan.ts SkillUpdatePlanDto (subset) [Issue #1243]. */
+export interface SkillUpdatePlan {
+  /** Single-use token apply (#1244) will present unchanged. The CLI never inspects it. */
+  token: string;
+  expiresAt: string;
+  updatable: boolean;
+  blockers: SkillUpdateBlocker[];
+  nextActionKey: string;
+  requiresRiskAcknowledgement: boolean;
+  riskIncreased: boolean;
+  update: {
+    fromVersion: string;
+    toVersion: string;
+    latestVersion: string | null;
+    reasonCode: string;
+    prerelease: boolean;
+  };
+  target: {
+    worktreeId: string;
+    worktreeName: string;
+    repositoryName: string;
+    branch: string | null;
+    headState: string;
+    workingTreeDirty: boolean;
+    /** Repository-relative; the server never serves a machine-absolute path. */
+    installRoot: string;
+    /** Every recorded root the update rewrites, primary first (#1460). */
+    installRoots: string[];
+  };
+  skill: {
+    id: string;
+    name: string;
+    version: string;
+    effectiveRisk: string;
+    riskRationale: string;
+    declaredPermissions: string[];
+    scriptPaths: string[];
+    compatibility: { commandmate: SkillCompatibilityView };
+  };
+  securityDiff: {
+    risk: {
+      from: { effective: string };
+      to: { effective: string };
+      increased: boolean;
+    };
+    permissions: { added: string[]; removed: string[] };
+    executables: { added: string[]; removed: string[] };
+    scripts: { added: string[]; removed: string[] };
+    changelogs: Array<{ version: string; changelog: string }>;
+  };
+  files: Array<{ path: string; change: string }>;
+  stats: {
+    added: number;
+    updated: number;
+    removed: number;
+    unchanged: number;
+    localModified: number;
+    localMissing: number;
+    localUnknown: number;
+    irregular: number;
+  };
+  warnings: string[];
+}
+
+/** Mirrors: src/app/api/worktrees/[id]/skills/[skillId]/update-plan/route.ts POST response. */
+export interface SkillUpdatePlanResponse {
+  plan: SkillUpdatePlan;
+}
+
 /** Mirrors: src/app/api/worktrees/[id]/skills/[skillId]/uninstall/route.ts POST response. */
 export interface SkillUninstallResponse {
   operation: SkillOperationResult;

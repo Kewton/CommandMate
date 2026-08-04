@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Skills: 更新検知・version 選択・更新差分・local 変更 guard（update plan）** (#1243)
+  - `POST /api/worktrees/[id]/skills/[skillId]/update-plan` を追加。installed exact version は on-disk receipt から読み、Catalog の候補 version（installed より厳密に新しい exact version のみ。stable/prerelease opt-in・`range` filter・CommandMate 互換性判定つき）へ解決し、candidate artifact を install と同一の source/checksum/archive 検証（#1229/#1230）に通したうえで、current receipt / 現行 filesystem / candidate artifact の 3-way inventory を返す
+  - add/update/remove/unchanged の file diff（unified diff 本文つき）と、risk（declared/computed/effective）・permissions・scripts/executables・requirements・changelog・Agent 互換性の security diff を 1 つの plan で提示。effective risk が上がる更新は通常確認とは別の追加確認を要求する契約（`riskIncreased`）を返す
+  - modified / unknown / missing / irregular な path が 1 件でもあれば `SKILL_UPDATE_LOCAL_CHANGES` として update 不可（fail closed）。receipt の `install_roots` に記録された全 root（`.agents/skills` / `.claude/skills`）を検査し、root 間で receipt が食い違う install も拒否する
+  - plan は #1233 と同じ server-side token 契約（TTL 10 分・single-use・LRU）で candidate artifact / current tree / branch / HEAD を固定し、apply（#1244）時の drift は `SKILL_PLAN_STALE`（409）で拒否される consume API を提供
+  - UI: worktree 詳細 Skills pane の導入済み一覧に update badge、詳細ビューに version picker・更新差分・block 理由と解決手順を一画面表示する `SkillUpdateDialog` を追加（plan-only、apply ボタンなし）
+  - CLI: `commandmate skill update-plan <skill-id> --worktree <id> [--version <v>] [--range <r>] [--prerelease] [--json]` を追加（blocked 時 exit 11）
+  - update の apply・rollback は非対象（#1244 / #1245 の範囲）
+
 - **設計原則文書: 判定の可観測性（discoverability 原則）を明文化** (#1686): 「サーバー側が下した判定・抑止・自動アクションは、理由コードつきで運用者が読む層（`capture --json` / `wait` / `task show`）に露出する」を `docs/design/discoverability-principle.md` として明文化し、既存判定点の棚卸し（露出済み: #1682〜#1685・skills#47 / 未露出の対応候補: stop-pattern のマッチ内容、プロンプト dedup スキップ）を記録した。あわせて cli-operations-guide.md に無人実行の推奨契約テンプレートを掲載し、誤用されやすいフラグ（`wait --on-prompt` / `send --auto-yes`）の `--help` にクロスリファレンスを追記、設計レビュー（/multi-stage-design-review Stage 1）の観点に discoverability を追加した
 
 - **verify / wait --verify: scope 不合格の logTail 末尾に定型ガイダンスを付与** (#1683): 違反 path 一覧の直後に「意図した差分なら契約の `scope.allow`（＝Issue の対象ファイル）へ path を追加し `send --contract` で送り直す（scope は送信時スナップショットで裁定）／`deny:` に一致する path は差し戻す」旨のガイダンスを追加。列挙漏れ起因の scope 不合格（#1678 B-2）を worker / 監督側が出力だけで自己解決できるようにする

@@ -26,6 +26,7 @@ import type {
   SkillUninstallApplyResponse,
   SkillUninstallBlocker,
   SkillUninstallPlanResponse,
+  SkillUpdatePlanResponse,
 } from './types';
 
 /** Code used when the request never produced a JSON error body. */
@@ -339,6 +340,42 @@ export function applySkillInstall(
     () =>
       postJson<SkillInstallApplyResponse>(
         operationUrl(worktreeId, skillId, 'install'),
+        payload,
+        signal
+      ),
+    SKILL_REQUEST_FAILED,
+    signal
+  );
+}
+
+export interface SkillUpdatePlanRequest {
+  /** Omitted to plan the recommended update candidate. */
+  version?: string;
+  includePrerelease?: boolean;
+}
+
+/**
+ * Build an Update Plan (#1243).
+ *
+ * Names only the Skill, the worktree and (optionally) the exact candidate
+ * version; the server reads the installed version from the receipt, resolves
+ * the candidate against the Catalog and verifies the artifact itself. The plan
+ * previews the update — nothing is written by this request.
+ */
+export function createSkillUpdatePlan(
+  worktreeId: string,
+  skillId: string,
+  options: SkillUpdatePlanRequest = {},
+  signal?: AbortSignal
+): Promise<SkillFetchResult<SkillUpdatePlanResponse>> {
+  const payload: Record<string, unknown> = {};
+  if (options.version) payload.version = options.version;
+  if (options.includePrerelease) payload.includePrerelease = true;
+
+  return request(
+    () =>
+      postJson<SkillUpdatePlanResponse>(
+        operationUrl(worktreeId, skillId, 'update-plan'),
         payload,
         signal
       ),
