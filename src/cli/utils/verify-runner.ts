@@ -27,6 +27,16 @@ export const VERIFY_POLL_INTERVAL_MS = 5000;
 /** Built-in gate id; mirrors WORK_EVIDENCE_GATE_ID in lib/verification/gate-runner.ts. */
 export const WORK_EVIDENCE_GATE_ID = 'work-evidence';
 
+/**
+ * Lines of a failing gate's log echoed to stderr before the rest becomes a
+ * count (#1683).
+ *
+ * log_tail is byte-capped only when stored (options.maxLogTailBytes, default
+ * 8KB but configurable up to 1MB), so echoing it whole lets one misconfigured
+ * gate flood the terminal and scroll the GATE verdict lines out of sight.
+ */
+export const MAX_PRINTED_LOG_TAIL_LINES = 40;
+
 export interface VerificationRequest {
   worktreeId: string;
   /** 'manual' for the verify command, 'wait' when chained after wait. */
@@ -123,6 +133,23 @@ function formatGateLine(gate: VerificationGateResultView): string {
 }
 
 /**
+ * Cap a failing gate's log for display, keeping the LAST lines: every producer
+ * puts its conclusion there — a failing suite ends with its summary, the scope
+ * gate ends with its violation list and guidance. The omission marker leads so
+ * the reader knows lines are missing before reading, and it names `verify show`
+ * because that is where the full stored log lives.
+ */
+function formatLogTailForDisplay(gate: VerificationGateResultView): string {
+  const lines = (gate.logTail ?? '').replace(/\n+$/, '').split('\n');
+  if (lines.length <= MAX_PRINTED_LOG_TAIL_LINES) return lines.join('\n');
+  const omitted = lines.length - MAX_PRINTED_LOG_TAIL_LINES;
+  return [
+    `... (+${omitted} more lines; run \`commandmate verify show ${gate.runId}\` for the full log)`,
+    ...lines.slice(-MAX_PRINTED_LOG_TAIL_LINES),
+  ].join('\n');
+}
+
+/**
  * Print each gate exactly once, when it reaches a terminal status.
  * @param reported - Gate row ids already printed; mutated in place.
  */
@@ -134,7 +161,7 @@ function reportGates(gates: VerificationGateResultView[], reported: Set<number>)
     // A failing gate without its log forces the caller back to the API to learn
     // anything actionable, which defeats the point of a CLI verdict.
     if (gate.status !== 'passed' && gate.logTail) {
-      console.error(gate.logTail.replace(/\n+$/, ''));
+      console.error(formatLogTailForDisplay(gate));
     }
   }
 }

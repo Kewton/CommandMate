@@ -351,7 +351,9 @@ commandmate verify show <run-id>                       # run の詳細（読み�
 
 ### 出力
 
-進捗（GATE 行）は stderr、判定（RESULT 行）は stdout に出力されます。不合格ゲートは logTail も stderr に続けて出力します。
+進捗（GATE 行）は stderr、判定（RESULT 行）は stdout に出力されます。不合格ゲートは logTail も stderr に続けて出力します。表示は**末尾 40 行**まで（超過分は `... (+N more lines; run \`commandmate verify show <run-id>\` for the full log)` の 1 行に畳まれます。Issue #1683）。
+
+scope ゲート不合格の logTail には**違反 path 一覧**（最大 100 件、超過は `... and N more`）と、意図した差分なら契約の `scope.allow`（＝Issue の対象ファイル）へ path を追加して `send --contract` で**送り直す**定型ガイダンスが含まれます（scope は送信時スナップショットで裁定されるため、契約 YAML の編集だけでは判定は変わりません）。
 
 ```
 # stderr:
