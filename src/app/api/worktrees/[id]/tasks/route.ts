@@ -24,6 +24,7 @@ import {
 } from '@/lib/tasks/contract-message';
 import { loadVerifyConfig, VerifyConfigError } from '@/lib/verification/verify-config';
 import { createLogger } from '@/lib/logger';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/tasks');
 
@@ -36,7 +37,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     if (!isValidWorktreeId(id)) {
       return NextResponse.json({ error: 'Invalid worktree ID format' }, { status: 400 });
     }
@@ -138,7 +140,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     if (!isValidWorktreeId(id)) {
       return NextResponse.json({ error: 'Invalid worktree ID format' }, { status: 400 });
     }

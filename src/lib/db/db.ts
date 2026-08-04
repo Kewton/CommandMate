@@ -31,10 +31,22 @@ export {
   getInitialBranch,
   getWorktreeIdsByRepository,
   getWorktreesByRepository,
+  getAllWorktreeIds,
+  getAllWorktreePathIds,
   migrateWorktreeIdPreservingChildren,
   deleteRepositoryWorktrees,
   deleteWorktreesByIds,
 } from './worktree-db';
+
+// worktree-alias-db (Issue #1621: old IDs stay resolvable after a rename)
+export {
+  recordWorktreeAlias,
+  resolveWorktreeIdWithAlias,
+  getWorktreeAliases,
+  getAllWorktreeAliases,
+  getAliasedWorktreeIds,
+  type WorktreeAlias,
+} from './worktree-alias-db';
 
 // chat-db
 export {

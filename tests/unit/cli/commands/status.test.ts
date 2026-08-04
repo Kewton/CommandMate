@@ -195,6 +195,40 @@ describe('statusCommand', () => {
       killSpy.mockRestore();
     });
 
+    // Issue #1632: the state file is now hybrid (bare PID line + JSON line). If readState()
+    // only kept the parseInt fallback, `version`/`port` would be dropped and the #1354
+    // mismatch warning would silently stop firing — this pins the whole path.
+    it('should keep reporting the version mismatch for a hybrid state file (#1632)', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(
+        '84890\n' +
+          JSON.stringify({
+            pid: 84890,
+            version: '0.9.0',
+            port: 3000,
+            bind: '127.0.0.1',
+            protocol: 'http',
+          }) +
+          '\n'
+      );
+      vi.mocked(dotenv.config).mockReturnValue({ parsed: {} });
+      vi.mocked(readPackageVersion).mockReturnValue('0.10.3');
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+
+      await statusCommand();
+
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Running (PID: 84890)'));
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Version: 0.9.0'));
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Port:    3000'));
+      const warned = consoleSpy.mock.calls.some(
+        (call: unknown[]) =>
+          typeof call[0] === 'string' && call[0].includes('[WARN]') && call[0].includes('0.9.0')
+      );
+      expect(warned).toBe(true);
+
+      killSpy.mockRestore();
+    });
+
     // Issue #1354: no warning when the running server is already the installed version
     it('should not warn when the server version matches the installed CLI', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);

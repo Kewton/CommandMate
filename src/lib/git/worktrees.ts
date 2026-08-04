@@ -7,6 +7,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
+import { deriveWorktreeId, sanitizeIdSegment } from './worktree-id';
 import type { Worktree } from '@/types/models';
 import type Database from 'better-sqlite3';
 import {
@@ -14,6 +15,10 @@ import {
   getWorktreesByRepository,
   deleteWorktreesByIds,
   getRepositories,
+  getAllWorktreeIds,
+  getAllWorktreePathIds,
+  getAliasedWorktreeIds,
+  getAllWorktreeAliases,
 } from '@/lib/db';
 import { createLogger } from '@/lib/logger';
 
@@ -40,7 +45,26 @@ interface ParsedWorktree {
 }
 
 /**
+ * ID minting lives in `worktree-id.ts` — a module that imports nothing but
+ * `crypto` and `path`. A migration has to mint IDs too (the Phase 4 renumbering
+ * in #1645), and importing THIS module from one would close a cycle through
+ * `@/lib/db` and inherit every `vi.mock('@/lib/git/worktrees')` in the suite.
+ * Re-exported here so existing callers are unaffected.
+ */
+export { deriveWorktreeId } from './worktree-id';
+
+/**
  * Generate URL-safe ID from repository name and branch name
+ *
+ * @deprecated Issue #1621/#1644: worktree IDs are no longer derived from the
+ * branch. A branch-derived ID changes whenever the branch changes, so checking
+ * out a different branch in the *same* directory renamed the worktree's primary
+ * key and broke everything keyed on it outside the DB (tmux session names, open
+ * tabs, bookmarks, poller/Auto-Yes keys). IDs are now derived from the directory
+ * once — see {@link deriveWorktreeId} — and never re-derived.
+ *
+ * Retained only so an out-of-tree caller keeps compiling; nothing in `src/`
+ * calls it any more.
  *
  * @param branchName - Git branch name (e.g., "feature/foo", "main")
  * @param repositoryName - Repository name (e.g., "MyRepo")
@@ -58,17 +82,10 @@ export function generateWorktreeId(branchName: string, repositoryName?: string):
     return '';
   }
 
-  const sanitize = (str: string) =>
-    str
-      .toLowerCase()
-      .replace(/[^a-z0-9-]/g, '-') // Replace non-alphanumeric (except hyphen) with hyphen
-      .replace(/-+/g, '-') // Replace consecutive hyphens with single hyphen
-      .replace(/^-|-$/g, ''); // Remove leading/trailing hyphens
-
-  const sanitizedBranch = sanitize(branchName);
+  const sanitizedBranch = sanitizeIdSegment(branchName);
 
   if (repositoryName) {
-    const sanitizedRepo = sanitize(repositoryName);
+    const sanitizedRepo = sanitizeIdSegment(repositoryName);
     return `${sanitizedRepo}-${sanitizedBranch}`;
   }
 
@@ -162,6 +179,22 @@ export function getRepositoryPaths(): string[] {
 /**
  * Scan git worktrees in a single repository
  *
+ * Issue #1621: the `id` on each returned object is a **provisional** suggestion,
+ * not the worktree's identity. The scan cannot know which IDs are already taken
+ * (it sees one repository, IDs are global) and — more importantly — it must not
+ * decide the ID of a directory that is already registered. {@link syncWorktreesToDB}
+ * is what confirms an ID: it keeps the existing row's ID when the path is known,
+ * and only falls back to this suggestion (or re-derives) for a new path.
+ *
+ * The field is still populated, rather than dropped from the type, because two
+ * callers outside this change's reach — `POST /api/repositories/scan`,
+ * `POST /api/repositories/restore` and `syncWorktreesAndCleanup`
+ * (`src/lib/session-cleanup.ts`) — are typed on `Worktree[]`.
+ *
+ * `name` is the **display branch name** and is refreshed on every sync; for a
+ * detached HEAD it is `detached-<short sha>` (see {@link parseWorktreeOutput}).
+ * Neither `name` nor `branch` participates in the ID any more.
+ *
  * @param rootDir - Root directory to scan for worktrees
  * @returns Array of Worktree objects
  *
@@ -170,7 +203,7 @@ export function getRepositoryPaths(): string[] {
  * @example
  * ```typescript
  * const worktrees = await scanWorktrees('/path/to/repo');
- * console.log(worktrees[0].id); // => "main"
+ * console.log(worktrees[0].path); // => "/path/to/repo"
  * ```
  */
 export async function scanWorktrees(rootDir: string): Promise<Worktree[]> {
@@ -189,16 +222,21 @@ export async function scanWorktrees(rootDir: string): Promise<Worktree[]> {
 
     // Filter and validate worktree paths
     return parsed
-      .map((wt) => ({
-        id: generateWorktreeId(wt.branch, repositoryName),
-        name: wt.branch,
-        // Issue #1003: persist the real branch (sync-time snapshot) so
-        // `ls --branch` can filter on it rather than the derived name/id slug.
-        branch: wt.branch,
-        path: path.resolve(wt.path),
-        repositoryPath,
-        repositoryName,
-      }))
+      .map((wt) => {
+        const resolvedPath = path.resolve(wt.path);
+        return {
+          // Provisional only — syncWorktreesToDB decides the real ID (see above).
+          id: deriveWorktreeId(resolvedPath),
+          // Display branch name (Issue #1621): re-read from git on every scan.
+          name: wt.branch,
+          // Issue #1003: persist the real branch (sync-time snapshot) so
+          // `ls --branch` can filter on it rather than the derived name/id slug.
+          branch: wt.branch,
+          path: resolvedPath,
+          repositoryPath,
+          repositoryName,
+        };
+      })
       .filter((wt) => {
         // Git worktrees can be outside the repo root, so we use a more lenient validation
         // Only filter out obviously dangerous system paths
@@ -279,12 +317,67 @@ export async function scanMultipleRepositories(
 }
 
 /**
+ * A worktree as observed by a scan: identical to {@link Worktree} except that
+ * `id` is optional and, when present, only a *suggestion*.
+ *
+ * Issue #1621: the path is the identity. `syncWorktreesToDB` resolves the ID in
+ * this order, and the first rule is the whole point of the change:
+ *
+ * 1. the ID already stored for this **path** — keeps a registered worktree's ID
+ *    frozen no matter what its branch (or the derivation rule) does;
+ * 2. the caller's suggested `id`, when nothing else holds it;
+ * 3. {@link deriveWorktreeId} against the live set of taken IDs.
+ */
+export type ScannedWorktree = Omit<Worktree, 'id'> & { id?: string };
+
+/**
+ * Mint an ID for `resolvedPath` without letting the path's **own** history block
+ * it (Issue #1658).
+ *
+ * `takenIds` holds every live ID plus every alias, which is right for a path
+ * nobody has seen before. For a path that IS already registered it is exactly
+ * wrong: its own current ID sits in that set, and so does every ID it has ever
+ * been renamed away from. `deriveWorktreeId` then rejects the basename it should
+ * have produced and walks up the digest ladder — `foo`, `foo-2f4530fe`,
+ * `foo-2f4530fe1cf1f9f8`, … — one rung longer on every call. That is the runaway
+ * this hotfix is about: production reached an 81-character ID whose derived tmux
+ * session name no longer matched the running session.
+ *
+ * Re-derivation for a known path should be reachable only through a bug now that
+ * the lookup is global, so this is a floor rather than a mechanism: excluding
+ * the row's own history makes the derivation converge (it re-mints the ID the
+ * row already has, or a shorter one), instead of growing without bound.
+ *
+ * Exported for the unit tests only: the branch it guards is unreachable through
+ * `syncWorktreesToDB` now that the path lookup is global, and a floor nobody can
+ * exercise is a floor nobody can prove.
+ *
+ * @param resolvedPath - Absolute, `path.resolve()`d worktree directory
+ * @param takenIds - IDs that are unavailable
+ * @param ownIds - IDs this very path already answers to (current ID + aliases)
+ * @internal
+ */
+export function deriveIdIgnoringOwnHistory(
+  resolvedPath: string,
+  takenIds: ReadonlySet<string>,
+  ownIds: ReadonlySet<string> | undefined
+): string {
+  if (!ownIds || ownIds.size === 0) {
+    return deriveWorktreeId(resolvedPath, takenIds);
+  }
+  const available = new Set(takenIds);
+  for (const ownId of ownIds) available.delete(ownId);
+  return deriveWorktreeId(resolvedPath, available);
+}
+
+/**
  * Sync scanned worktrees to database
  *
  * This function performs a true sync:
  * 1. Groups worktrees by repository
  * 2. For each repository, removes worktrees that no longer exist
- * 3. Upserts all current worktrees
+ * 3. Resolves each worktree's ID (existing row by path wins — Issue #1621)
+ * 4. Upserts all current worktrees, refreshing the display branch name
  *
  * @param db - Database instance
  * @param worktrees - Array of worktrees to sync
@@ -297,7 +390,7 @@ export async function scanMultipleRepositories(
  */
 export function syncWorktreesToDB(
   db: Database.Database,
-  worktrees: Worktree[]
+  worktrees: ScannedWorktree[]
 ): SyncResult {
   // If no worktrees provided, do nothing (avoid accidentally deleting all data)
   // SF-C01: Return empty SyncResult instead of void
@@ -309,7 +402,7 @@ export function syncWorktreesToDB(
   let upsertedCount = 0;
 
   // Group worktrees by repository path
-  const worktreesByRepo = new Map<string, Worktree[]>();
+  const worktreesByRepo = new Map<string, ScannedWorktree[]>();
   for (const worktree of worktrees) {
     const repoPath = worktree.repositoryPath || '';
     if (!worktreesByRepo.has(repoPath)) {
@@ -318,6 +411,58 @@ export function syncWorktreesToDB(
     worktreesByRepo.get(repoPath)!.push(worktree);
   }
 
+  // IDs are a GLOBAL primary key, so collision detection has to look at every
+  // repository, not just the one being synced. `takenIds` also absorbs the IDs
+  // handed out earlier in this same run, so two directories that share a
+  // basename across repositories cannot both claim it (which would violate the
+  // UNIQUE(path) constraint on the second upsert).
+  //
+  // Historical IDs count as taken too (Issue #1621, Phase 2): an alias still
+  // answers requests, so minting a live worktree with an ID some alias redirects
+  // elsewhere would shadow that redirect and silently send old bookmarks to the
+  // wrong worktree.
+  const takenIds = new Set([...getAllWorktreeIds(db), ...getAliasedWorktreeIds(db)]);
+
+  // Issue #1621: the ID a path already owns is the ID it keeps.
+  //
+  // Issue #1658: and that lookup is GLOBAL, because `path` is global — the
+  // column is `NOT NULL UNIQUE`, one row per directory for the whole table.
+  // `repository_path` is not an identity at all, it only records which scan root
+  // last upserted the row, and two scan roots can legitimately report the same
+  // directory: registering a repository *and* one of its own linked worktrees in
+  // `WORKTREE_REPOS` makes `git worktree list` return the identical path set
+  // from either one. Scoping this map per repository then found nothing on
+  // whichever pass did not write `repository_path` last, fell through to
+  // re-derivation, collided with the row's own ID and aliases, and appended
+  // another 8 hex digits — every sync, without limit (measured in production:
+  // 81 characters, at which point the tmux session name derived from the ID no
+  // longer matched the running session and the UI lost it).
+  const idByPath = new Map(
+    getAllWorktreePathIds(db).map(row => [path.resolve(row.path), row.id] as const)
+  );
+
+  // Every ID each path still answers to (its current one plus every alias
+  // pointing at it), so a re-derivation cannot be blocked by the path's own
+  // history — see deriveIdIgnoringOwnHistory.
+  const ownIdsByPath = new Map<string, Set<string>>();
+  const pathById = new Map<string, string>();
+  for (const [resolvedPath, id] of idByPath) {
+    ownIdsByPath.set(resolvedPath, new Set([id]));
+    pathById.set(id, resolvedPath);
+  }
+  for (const alias of getAllWorktreeAliases(db)) {
+    const aliasedPath = pathById.get(alias.worktreeId);
+    if (aliasedPath) ownIdsByPath.get(aliasedPath)?.add(alias.oldId);
+  }
+
+  // Issue #1151: prune by on-disk PATH, not by ID — only a worktree whose PATH
+  // is gone from the scan was genuinely removed. The set is built from the whole
+  // scan rather than one repository's slice (#1658): a directory reported by
+  // *any* scan root is on disk, whatever `repository_path` currently says about
+  // it. Which ROWS a repository may prune is still scoped to that repository, so
+  // a scan root never reaches into another one's rows.
+  const scannedPaths = new Set(worktrees.map(wt => path.resolve(wt.path)));
+
   // Process each repository
   for (const [repoPath, repoWorktrees] of worktreesByRepo) {
     if (!repoPath) continue;
@@ -325,28 +470,57 @@ export function syncWorktreesToDB(
     // Get current worktree rows (id + path) in DB for this repository
     const existingRows = getWorktreesByRepository(db, repoPath);
 
-    // Issue #1151: prune by on-disk PATH, not by branch-derived ID. A worktree's
-    // ID changes when its branch changes (`generateWorktreeId`), so keying the
-    // "removed" decision on ID mistakes a same-directory branch switch for a
-    // deleted worktree and CASCADE-deletes its chat history and related data.
-    // Only a worktree whose PATH is gone from the scan was genuinely removed.
-    const newPaths = new Set(repoWorktrees.map(wt => path.resolve(wt.path)));
-
     // Find worktrees that no longer exist on disk (genuinely deleted)
     const deletedIds = existingRows
-      .filter(row => !newPaths.has(path.resolve(row.path)))
+      .filter(row => !scannedPaths.has(path.resolve(row.path)))
       .map(row => row.id);
 
     // Delete removed worktrees from DB
     if (deletedIds.length > 0) {
       const result = deleteWorktreesByIds(db, deletedIds);
       allDeletedIds.push(...deletedIds);
+      // Their IDs are free again (and their alias rows went with them).
+      for (const deletedId of deletedIds) {
+        takenIds.delete(deletedId);
+        const deletedPath = pathById.get(deletedId);
+        if (deletedPath !== undefined) {
+          idByPath.delete(deletedPath);
+          ownIdsByPath.delete(deletedPath);
+        }
+      }
       logger.info('worktree:cleanup', { deletedCount: result.deletedCount });
     }
 
     // Upsert current worktrees
     for (const worktree of repoWorktrees) {
-      upsertWorktree(db, worktree);
+      const resolvedPath = path.resolve(worktree.path);
+      const existingId = idByPath.get(resolvedPath);
+      const suggestedId = worktree.id;
+      const id =
+        existingId ??
+        (suggestedId && !takenIds.has(suggestedId)
+          ? suggestedId
+          : deriveIdIgnoringOwnHistory(
+              resolvedPath,
+              takenIds,
+              ownIdsByPath.get(resolvedPath)
+            ));
+      takenIds.add(id);
+      // Claim the ID for this path for the rest of the run, so the same
+      // directory seen again through a second scan root resolves to it instead
+      // of minting a second one (#1658 — a brand-new path hits this on its very
+      // first sync, before any row exists to look up).
+      idByPath.set(resolvedPath, id);
+      pathById.set(id, resolvedPath);
+
+      upsertWorktree(db, {
+        ...worktree,
+        id,
+        // Issue #1621: `name` is the display branch name. The branch no longer
+        // feeds the ID, so this is the only place it surfaces — refresh it from
+        // the scan every time (a checkout must move the label, not the key).
+        name: worktree.branch ?? worktree.name,
+      });
       upsertedCount++;
     }
   }

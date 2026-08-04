@@ -15,7 +15,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import type { NextRequest } from 'next/server';
@@ -23,6 +23,7 @@ import { runMigrations } from '@/lib/db/db-migrations';
 import { getTask, upsertWorktree } from '@/lib/db';
 // See tasks-db.test.ts: fixtures reach past the barrel on purpose (#1548).
 import { updateTaskStatus } from '@/lib/db/tasks-db';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 declare module '@/lib/db/db-instance' {
   export function setMockDb(db: Database.Database): void;
@@ -159,7 +160,7 @@ afterEach(async () => {
   closeDbInstance();
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
-    if (dir) rmSync(dir, { recursive: true, force: true });
+    if (dir) removeTempDir(dir);
   }
 });
 
@@ -305,8 +306,25 @@ describe('PATCH /api/tasks/:taskId', () => {
     expect(body.task.startedAt).not.toBeNull();
   });
 
-  it('accepts failed, so an undeliverable message lands as a failure', async () => {
+  it('accepts failed, so an undeliverable message closes the task', async () => {
+    // Issue #1637: the reported status is an *event*, and the state machine
+    // decides what it means where it lands. A task still `pending` was never
+    // delivered at all, so it closes as `cancelled` — keeping the row and its
+    // `send_failed` event, but out of the set a later verification run resolves
+    // its contract from. See tests/unit/tasks/task-state-machine.test.ts.
     const taskId = await seedTask();
+    const body = await (await patchTaskRoute(taskId, { status: 'failed' })).json();
+
+    expect(body.task.status).toBe('cancelled');
+    expect(body.task.finishedAt).not.toBeNull();
+  });
+
+  it('reports a send that failed after work started as failed', async () => {
+    // The counter-case, so the two are not collapsed again: real work exists,
+    // and `failed` is re-openable on purpose (#1620).
+    const taskId = await seedTask();
+    expect((await patchTaskRoute(taskId, { status: 'running' })).status).toBe(200);
+
     const body = await (await patchTaskRoute(taskId, { status: 'failed' })).json();
 
     expect(body.task.status).toBe('failed');

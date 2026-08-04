@@ -17,6 +17,17 @@
 #
 # Exit code: passed=0 / config error=2 / failed=20 / not_started=21 / skipped=22.
 #
+# SCOPE: this is a standalone runner. It reads .commandmate/verify.yaml and nothing
+# else — no CommandMate server, no database, no task contract. CommandMate's own
+# execution contracts (.commandmate/tasks/*.yaml) can also demand a commit via
+# `success.requireCommit`, and the product implementation ORs that with
+# `options.requireCommit` (Issue #1642). Here only `options.requireCommit` exists,
+# because a run started from a shell is not attached to any delegation. A
+# repository that wants the requirement to hold for BOTH runners declares it in
+# verify.yaml, which is the one file both implementations read (Issue #1639).
+# `.commandmate/tasks/` is named once below, as a path work-evidence does not
+# count (Issue #1651); no file under it is ever opened, so this stays true.
+#
 # Never decide pass/fail by grepping a command's output: `cmd | grep ...` hands $?
 # to grep and hides a non-zero exit — vitest can print "Tests 100 passed" and still
 # exit 1 on an Unhandled Rejection. Each gate is run as `sh -c "$cmd" > log 2>&1`
@@ -182,7 +193,7 @@ BEGIN { SQ = sprintf("%c", 39); section = ""; gate_open = 0; ngates = 0; nversio
     if (section == "options") {
       if (!splitkv(body)) { err("expected \"key: value\" inside options:"); next }
       if (!checkvalue(KV_K, KV_V)) next
-      if (KV_K == "baseRef" || KV_K == "skipInPrimaryCheckout" || KV_K == "maxLogTailBytes")
+      if (KV_K == "baseRef" || KV_K == "skipInPrimaryCheckout" || KV_K == "maxLogTailBytes" || KV_K == "requireCommit")
         printf "OPT\t%s\t%s\n", KV_K, unquote(KV_V)
       else
         err("unknown options key: " KV_K)
@@ -222,6 +233,7 @@ GATE_CMDS=()
 OPT_BASE_REF=""
 OPT_SKIP_PRIMARY="true"
 OPT_MAX_TAIL="$DEFAULT_MAX_LOG_TAIL_BYTES"
+OPT_REQUIRE_COMMIT="false"
 
 while IFS="$TAB" read -r kind a b rest; do
   case "$kind" in
@@ -235,6 +247,7 @@ while IFS="$TAB" read -r kind a b rest; do
         baseRef) OPT_BASE_REF=$b;;
         skipInPrimaryCheckout) OPT_SKIP_PRIMARY=$b;;
         maxLogTailBytes) OPT_MAX_TAIL=$b;;
+        requireCommit) OPT_REQUIRE_COMMIT=$b;;
       esac
       ;;
   esac
@@ -243,6 +256,10 @@ done < "$PARSED"
 case "$OPT_SKIP_PRIMARY" in
   true|false) ;;
   *) die_config "options.skipInPrimaryCheckout must be true or false (got: $OPT_SKIP_PRIMARY)";;
+esac
+case "$OPT_REQUIRE_COMMIT" in
+  true|false) ;;
+  *) die_config "options.requireCommit must be true or false (got: $OPT_REQUIRE_COMMIT)";;
 esac
 case "$OPT_MAX_TAIL" in
   ''|*[!0-9]*) die_config "options.maxLogTailBytes must be an integer (got: $OPT_MAX_TAIL)";;
@@ -303,23 +320,102 @@ git_in rev-parse --verify --quiet "$BASE_REF^{commit}" >/dev/null 2>&1 \
   || die_config "baseRef does not resolve to a commit: $BASE_REF"
 
 # --- work-evidence ------------------------------------------------------------
+# `.commandmate/tasks/` holds CommandMate's execution contracts. They are the
+# ORCHESTRATOR's evidence, not the agent's: a worktree whose only change is the
+# contract file that was just dropped into it has to keep reading as "nothing
+# happened here", or exit 21 stops meaning anything. Both counters exclude the
+# directory — the product engine has done so since Issue #1580, and this runner
+# reported `RESULT passed` over a contract-only worktree until #1651 ported it.
+CONTRACT_DIR_PREFIX=".commandmate/tasks/"
+
+is_contract_path() {
+  case "$1" in
+    "$CONTRACT_DIR_PREFIX"*) return 0;;
+    *) return 1;;
+  esac
+}
+
+# Reads `git status --porcelain -z --untracked-files=all` on stdin and prints how
+# many entries are about something other than a contract file.
+#
+# `-z` and `-uall` are not cosmetic. The human format C-quotes any path holding a
+# space and joins a rename with ` -> `; the default untracked mode collapses a
+# brand-new `.commandmate/tasks/` into the single entry `?? .commandmate/`. All
+# three hand the prefix test something that is not a path, and the third is
+# exactly the case this exclusion exists for — the contract would come back as
+# work under a directory name that does not match the prefix.
+#
+# A record is `XY<space><path>NUL`, and a rename or copy appends the ORIGINAL
+# path as the next NUL field (measured on git 2.49: `R  new\0old\0`, the reverse
+# of the human `old -> new` rendering). An entry counts as work when ANY of its
+# paths is not a contract file, so renaming a contract into real work is still a
+# change — same rule as the TS `parsePorcelainEntries` filter.
+count_work_entries() {
+  cw_count=0
+  while IFS= read -r -d '' cw_entry; do
+    # "XY " plus at least one path character.
+    [ ${#cw_entry} -ge 4 ] || continue
+    cw_work=0
+    is_contract_path "${cw_entry:3}" || cw_work=1
+    cw_x=${cw_entry:0:1}
+    cw_y=${cw_entry:1:1}
+    if [ "$cw_x" = "R" ] || [ "$cw_x" = "C" ] || [ "$cw_y" = "R" ] || [ "$cw_y" = "C" ]; then
+      cw_orig=""
+      if IFS= read -r -d '' cw_orig && [ -n "$cw_orig" ]; then
+        is_contract_path "$cw_orig" || cw_work=1
+      fi
+    fi
+    [ "$cw_work" -eq 0 ] || cw_count=$((cw_count + 1))
+  done
+  printf '%s\n' "$cw_count"
+}
+
 if [ "$SKIP_WORK_EVIDENCE" -eq 1 ]; then
   echo "GATE work-evidence SKIP reason=flag"
 else
   merge_base=$(git_in merge-base "$BASE_REF" HEAD 2>/dev/null) \
     || die_config "cannot compute merge-base($BASE_REF, HEAD)"
-  commits=$(git_in rev-list --count "$merge_base..HEAD" 2>/dev/null) \
+  # Unfiltered, for the diagnosis below only. It is never the verdict.
+  commits_all=$(git_in rev-list --count "$merge_base..HEAD" 2>/dev/null) \
     || die_config "cannot count commits since $BASE_REF"
-  git_in status --porcelain > "$WORKDIR/status.txt" 2>/dev/null \
+  # `:(top)` is an explicit "everything under the repository root": it keeps the
+  # pathspec from being exclusions alone, and it anchors both patterns at the
+  # root rather than at --cwd. A setup commit carrying only the contract must not
+  # read as a commit's worth of work.
+  commits=$(git_in rev-list --count "$merge_base..HEAD" -- \
+    ':(top)' ":(exclude,top)$CONTRACT_DIR_PREFIX" 2>/dev/null) \
+    || die_config "cannot count commits since $BASE_REF excluding $CONTRACT_DIR_PREFIX"
+  git_in status --porcelain -z --untracked-files=all > "$WORKDIR/status.z" 2>/dev/null \
     || die_config "git status failed in $CWD"
-  uncommitted=$(wc -l < "$WORKDIR/status.txt" | tr -d ' ')
-  if [ "$commits" -gt 0 ] || [ "$uncommitted" -gt 0 ]; then
-    echo "GATE work-evidence PASS commits=$commits uncommitted=$uncommitted"
-  else
-    echo "GATE work-evidence FAIL commits=$commits uncommitted=$uncommitted"
+  uncommitted=$(count_work_entries < "$WORKDIR/status.z")
+  # Printed only when the option is on, so the default output is unchanged and
+  # the TS implementation's summary line stays comparable word for word.
+  we_flag=""
+  if [ "$OPT_REQUIRE_COMMIT" = "true" ]; then we_flag=" requireCommit=true"; fi
+  if [ "$commits" -eq 0 ] && [ "$uncommitted" -eq 0 ]; then
+    echo "GATE work-evidence FAIL commits=$commits uncommitted=$uncommitted$we_flag"
+    # Two zeroes over a tree that `git status` shows as dirty would otherwise read
+    # as a bug in the gate. `-s` on the porcelain dump settles the working-tree
+    # side on its own: every entry it holds was filtered out, so all of them were
+    # contract files.
+    if [ -s "$WORKDIR/status.z" ] || [ "$commits_all" -gt 0 ]; then
+      echo "verify-run: the only changes here are execution contracts under $CONTRACT_DIR_PREFIX. They are the orchestrator's evidence, not the agent's, so work-evidence does not count them." >&2
+    fi
     echo "RESULT not_started"
     exit "$EXIT_NOT_STARTED"
   fi
+  # Issue #1639 / #1628 (D-4): `commits=0 uncommitted=1` reads as "work exists",
+  # which is the right answer to "did anything happen here" and the wrong one to
+  # "is this finished". A repository that wants the second question asked says so
+  # with options.requireCommit. The reason goes to stderr because, unlike the
+  # zero-work case above, `FAIL commits=0 uncommitted=3` does not explain itself.
+  if [ "$OPT_REQUIRE_COMMIT" = "true" ] && [ "$commits" -eq 0 ]; then
+    echo "GATE work-evidence FAIL commits=$commits uncommitted=$uncommitted$we_flag"
+    echo "verify-run: options.requireCommit is set: uncommitted changes are not work evidence, commit them." >&2
+    echo "RESULT not_started"
+    exit "$EXIT_NOT_STARTED"
+  fi
+  echo "GATE work-evidence PASS commits=$commits uncommitted=$uncommitted$we_flag"
 fi
 
 # A linked worktree has its own git dir under <common>/worktrees/<name>; the

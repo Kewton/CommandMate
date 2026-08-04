@@ -8,6 +8,7 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById, upsertWorktree } from '@/lib/db';
 import { CLI_TOOL_IDS, isCliToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/cli-tool');
 
@@ -16,7 +17,8 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const db = getDbInstance();
 
     // Check if worktree exists

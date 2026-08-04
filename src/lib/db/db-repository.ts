@@ -24,7 +24,7 @@ import { isSystemDirectory } from '@/config/system-directories';
 export class RepositoryDbError extends Error {
   constructor(
     message: string,
-    public readonly code: 'DUPLICATE' | 'DB_ERROR',
+    public readonly code: 'DUPLICATE' | 'DB_ERROR' | 'LIMIT_EXCEEDED',
     public readonly cause?: Error
   ) {
     super(message);
@@ -657,10 +657,7 @@ export function disableRepository(db: Database.Database, repositoryPath: string)
 
   const resolvedPath = resolveRepositoryPath(repositoryPath);
   // SEC-SF-004: Check disabled repository count limit before creating new record
-  const disabledCount = db.prepare(
-    'SELECT COUNT(*) as count FROM repositories WHERE enabled = 0'
-  ).get() as { count: number };
-  if (disabledCount.count >= MAX_DISABLED_REPOSITORIES) {
+  if (countDisabledRepositories(db) >= MAX_DISABLED_REPOSITORIES) {
     throw new Error('Disabled repository limit exceeded');
   }
   createRepository(db, {
@@ -719,6 +716,79 @@ export function restoreRepository(db: Database.Database, repoPath: string): Repo
   if (!repo) return null;
   updateRepository(db, repo.id, { enabled: true });
   return { ...repo, enabled: true };
+}
+
+/**
+ * Number of repositories currently excluded from scans (`enabled = 0`).
+ *
+ * Extracted so the SEC-SF-004 ceiling is counted the same way by every caller
+ * that can create one more disabled row ({@link disableRepository}) or flip an
+ * enabled row to disabled ({@link setRepositoryEnabled}).
+ */
+export function countDisabledRepositories(db: Database.Database): number {
+  const row = db
+    .prepare('SELECT COUNT(*) as count FROM repositories WHERE enabled = 0')
+    .get() as { count: number };
+  return Number(row.count) || 0;
+}
+
+/**
+ * Flip a repository's scan-inclusion flag by id, and touch NOTHING else
+ * (Issue #1658).
+ *
+ * This is the non-destructive counterpart to `DELETE /api/repositories`, which
+ * is "exclude **and purge**": it disables the repository, kills every tmux
+ * session under it, and deletes its `worktrees` rows — taking chat history,
+ * memos, todos, timers, schedules, execution logs, tasks and verification runs
+ * with them (`deleteWorktreeChildRows`). A user who only wants a scan root to
+ * stop being scanned had no other route, so "stop scanning this" cost them
+ * their history and their running agents.
+ *
+ * What this function does, exhaustively: one `UPDATE repositories SET enabled`.
+ * It does not read, write or delete `worktrees` or any child table, and it
+ * never touches `visible` — `enabled` (scan inclusion, Issue #190) and
+ * `visible` (sidebar display, Issue #690) stay orthogonal columns, so
+ * re-enabling restores the user's own visibility choice rather than a guess.
+ *
+ * The scan side is the other half of the pair and already reads this flag:
+ * `POST /api/repositories/sync` and `server.ts` both drop `enabled = 0` paths
+ * via {@link registerAndFilterRepositories}, and neither
+ * `syncWorktreesToDB`'s per-repository prune nor `pruneStaleRepositoryWorktrees`
+ * can reach the rows of a repository that is merely absent from the scan while
+ * its directory still exists.
+ *
+ * SEC-SF-004: disabling one more repository is refused once
+ * {@link MAX_DISABLED_REPOSITORIES} rows are already disabled. Re-disabling an
+ * already-disabled repository adds no row and is therefore always allowed.
+ *
+ * @param db - Database instance
+ * @param id - Repository id (`repositories.id`), not a path
+ * @param enabled - `true` to include in scans, `false` to exclude
+ * @returns The repository as it now stands, or `null` when no row has that id
+ * @throws {RepositoryDbError} code `LIMIT_EXCEEDED` when the disabled ceiling
+ *   would be crossed
+ */
+export function setRepositoryEnabled(
+  db: Database.Database,
+  id: string,
+  enabled: boolean
+): Repository | null {
+  const repo = getRepositoryById(db, id);
+  if (!repo) return null;
+
+  // Already in the requested state: nothing to write, and no ceiling to test
+  // (the row is already counted).
+  if (repo.enabled === enabled) return repo;
+
+  if (!enabled && countDisabledRepositories(db) >= MAX_DISABLED_REPOSITORIES) {
+    throw new RepositoryDbError(
+      `Cannot disable more than ${MAX_DISABLED_REPOSITORIES} repositories`,
+      'LIMIT_EXCEEDED'
+    );
+  }
+
+  updateRepository(db, id, { enabled });
+  return getRepositoryById(db, id);
 }
 
 // ============================================================

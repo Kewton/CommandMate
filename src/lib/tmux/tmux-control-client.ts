@@ -133,6 +133,19 @@ export class TmuxControlClient {
     return this.started;
   }
 
+  /**
+   * Point this client's bookkeeping at a session that has been renamed
+   * underneath it (Issue #1621 Phase 3).
+   *
+   * The attach itself needs no repair: `attach-session` binds to the session
+   * object, not to its name, so a `rename-session` leaves the child process,
+   * its pipe and its scrollback untouched (measured in #1621). Only the name
+   * this client reports in its logs would otherwise go stale.
+   */
+  setSessionName(sessionName: string): void {
+    this.sessionName = sessionName;
+  }
+
   private emit(event: TmuxControlEvent): void {
     for (const handler of this.handlers) {
       handler(event);

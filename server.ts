@@ -46,9 +46,13 @@ import { initTimerManager, stopAllTimers } from './src/lib/timer-manager';
 import { initResourceCleanup, stopResourceCleanup } from './src/lib/resource-cleanup';
 import { runMigrations } from './src/lib/db/db-migrations';
 import { getEnvByKey } from './src/lib/env';
-import { registerAndFilterRepositories, resolveRepositoryPath, getAllRepositories } from './src/lib/db/db-repository';
-import { getWorktreeIdsByRepository, deleteWorktreesByIds } from './src/lib/db';
-import { cleanupMultipleWorktrees, killWorktreeSession, syncWorktreesAndCleanup } from './src/lib/session-cleanup';
+import { registerAndFilterRepositories, getAllRepositories } from './src/lib/db/db-repository';
+// Issue #1666: `resolveRepositoryPath`, `getWorktreeIdsByRepository`,
+// `deleteWorktreesByIds`, `cleanupMultipleWorktrees` and `killWorktreeSession`
+// went with the startup purge — they had no other caller here. `npm run lint`
+// only covers `src/`, and tsconfig sets no `noUnusedLocals`, so nothing in the
+// gates would have flagged them: they were removed by inspection, not by a tool.
+import { syncWorktreesAndCleanup } from './src/lib/session-cleanup';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = getEnvByKey('CM_BIND') || '127.0.0.1';
@@ -93,6 +97,52 @@ function validateCertPath(filePath: string, label: string): string {
 // Create Next.js app
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
+
+/**
+ * Issue #1621/#1645: emit a REAL 3xx for `/worktrees/<historical id>`.
+ *
+ * #1644 rescued those URLs from the layout with `permanentRedirect`, which
+ * measures as HTTP 200 + `<meta http-equiv="refresh">` — App Router emits a
+ * genuine 3xx only from Route Handlers, Server Actions and middleware. Old IDs
+ * only start arriving now that #1645 renumbers the existing rows, so the real
+ * redirect belongs here. `middleware.ts` cannot do it: it runs on the edge
+ * runtime, where the SQLite alias lookup is impossible.
+ *
+ * Loaded through `await import()` and cached, NOT as a top-level static import:
+ * adding a module graph to server.ts's eval-time graph perturbs Next's
+ * AsyncLocalStorage bootstrap under `tsx server.ts`, and the first request that
+ * compiles middleware then dies (measured; the symptom is E2E-only — unit,
+ * integration and build all stay green). Do not hoist this.
+ */
+type WorktreeRedirect = { statusCode: number; location: string };
+type WorktreeRedirectModule = typeof import('./src/lib/git/worktree-redirect');
+let worktreeRedirectModule: WorktreeRedirectModule | null = null;
+let worktreeRedirectLoad: Promise<void> | null = null;
+
+async function resolveWorktreeAliasRedirect(url: string): Promise<WorktreeRedirect | null> {
+  if (!worktreeRedirectModule) {
+    if (!worktreeRedirectLoad) {
+      worktreeRedirectLoad = import('./src/lib/git/worktree-redirect')
+        .then((mod) => {
+          worktreeRedirectModule = mod;
+        })
+        .catch((error) => {
+          // Fail open: without the resolver the layout's meta refresh still
+          // lands the user on the right worktree.
+          console.error('Failed to load worktree redirect resolver:', error);
+        });
+    }
+    await worktreeRedirectLoad;
+  }
+
+  if (!worktreeRedirectModule) return null;
+  try {
+    return worktreeRedirectModule.resolveWorktreeRedirect(url);
+  } catch (error) {
+    console.error('Worktree redirect resolution failed:', error);
+    return null;
+  }
+}
 
 // Issue #331: Prevent Next.js (NextCustomServer) from registering its own upgrade
 // event listener on the HTTP server.
@@ -141,6 +191,23 @@ app.prepare().then(() => {
 
     const method = req.method ?? 'UNKNOWN';
     const url = req.url ?? '/';
+
+    // Issue #1621/#1645: a URL naming a worktree by a retired ID gets a real
+    // 308 here, before Next renders anything. The cheap prefix test keeps every
+    // other route free of the dynamic import and the alias lookup.
+    if (url.startsWith('/worktrees/')) {
+      const redirect = await resolveWorktreeAliasRedirect(url);
+      if (redirect && !res.headersSent) {
+        res.statusCode = redirect.statusCode;
+        res.setHeader('Location', redirect.location);
+        // See WORKTREE_REDIRECT_CACHE_CONTROL: alias -> live is durable, not
+        // eternal, and a cached permanent redirect could never be corrected.
+        res.setHeader('Cache-Control', 'no-store');
+        res.end();
+        return;
+      }
+    }
+
     try {
       const parsedUrl = parse(url, true);
       await handle(req, res, parsedUrl);
@@ -214,6 +281,48 @@ app.prepare().then(() => {
         console.error('Error reconciling Skill operations:', error);
       }
 
+      // Issue #1621 Phase 3/4: make live tmux sessions follow the worktree IDs
+      // that migration v54 has just renumbered. Session names are DERIVED from
+      // the ID (`mcbd-{cli}-{worktreeId}`), so a running agent would otherwise
+      // keep its process while disappearing from the UI — and the app would
+      // happily start a second agent in the same directory. `worktree_aliases`
+      // is the durable record of every ID that has moved, which makes this pass
+      // idempotent: when nothing is stale it costs one `tmux list-sessions`.
+      //
+      // Fail-open in its own try/catch — reconciling sessions must never be
+      // able to stop the server from serving. Dynamic import for the same
+      // reason as the reconcilers around it: a static import here perturbs
+      // Next's AsyncLocalStorage bootstrap under `tsx server.ts` and the first
+      // request that compiles middleware dies. Do not hoist this.
+      try {
+        const { reconcileWorktreeSessionsFromAliases } = await import(
+          './src/lib/session/worktree-session-reconcile'
+        );
+        const sessionReport = await reconcileWorktreeSessionsFromAliases(db);
+        if (sessionReport.renamedSessions.length > 0) {
+          console.log(
+            `Reconciled ${sessionReport.renamedSessions.length} tmux session(s) to renamed worktree IDs ` +
+              `(predicted=${sessionReport.planSources.predicted} ` +
+              `discovered=${sessionReport.planSources.discovered})`
+          );
+        }
+        // Issue #1661: a live `mcbd-*` session that no known worktree ID
+        // explains is exactly what the previous report could not express — the
+        // pass ran clean while two agents sat stranded under stale names. Say
+        // it out loud, with the names, so it is actionable from the log alone.
+        if (sessionReport.unaccountedSessions.length > 0) {
+          console.warn(
+            `${sessionReport.unaccountedSessions.length} tmux session(s) match no known worktree ID ` +
+              `and were left untouched: ${sessionReport.unaccountedSessions.join(', ')}`
+          );
+        }
+        if (sessionReport.errors.length > 0) {
+          console.warn(`Session reconcile warnings: ${sessionReport.errors.join(', ')}`);
+        }
+      } catch (error) {
+        console.error('Error reconciling worktree sessions:', error);
+      }
+
       // Issue #1543: close verification runs that a crash left in `running`.
       // Gate execution lives in process memory, so none of them survived the
       // restart; leaving the rows open would keep their worktrees permanently
@@ -268,19 +377,31 @@ app.prepare().then(() => {
           console.log(`  [excluded] ${p}`);
         });
 
-        // Issue #202/#526: Remove worktrees of excluded repositories from DB
-        // SF-002: cleanup -> delete order for excluded repositories
-        // Sessions must be stopped before DB records are removed
-        for (const excludedPath of excludedPaths) {
-          const resolvedPath = resolveRepositoryPath(excludedPath);
-          const worktreeIds = getWorktreeIdsByRepository(db, resolvedPath);
-          if (worktreeIds.length > 0) {
-            // Issue #526: Clean up tmux sessions before deleting from DB
-            await cleanupMultipleWorktrees(worktreeIds, killWorktreeSession);
-            const result = deleteWorktreesByIds(db, worktreeIds);
-            console.log(`  Removed ${result.deletedCount} worktree(s) from excluded repository: ${resolvedPath}`);
-          }
-        }
+        // Issue #1666: exclusion is where startup STOPS, not where it deletes.
+        //
+        // This branch used to purge every excluded repository — kill its tmux
+        // sessions, then `deleteWorktreesByIds`, taking chat history, memos,
+        // todos, timers, schedules, execution logs, tasks and verification runs
+        // with it by cascade. That was #202's "deleted repositories must not
+        // reappear after a restart", and it was harmless for exactly as long as
+        // `DELETE /api/repositories` was the only route to `enabled = 0`: that
+        // route already purged, so the loop re-deleted nothing.
+        //
+        // #1658 added a non-destructive disable (a single
+        // `UPDATE repositories SET enabled = 0`), which made this loop the
+        // thing that undid it — and only for `WORKTREE_REPOS` repositories,
+        // because a DB-only one leaves `allPaths` when disabled and never
+        // reaches `excludedPaths` at all. So the same toggle was destructive or
+        // not depending on where the repository had been configured, and the
+        // damage landed a restart later, far from the click that caused it.
+        //
+        // #202 survives without the deletion: an excluded repository is not
+        // scanned, so nothing re-creates its rows, and keeping rows is not the
+        // same as showing them. Hiding a repository's worktrees from the
+        // sidebar is `visible`'s job (#690) — a separate, reversible flag that
+        // the user sets deliberately — whereas `enabled` only decides what gets
+        // scanned. Deleting rows to achieve "not shown" destroys history to
+        // implement a view filter, and cannot be undone by re-enabling.
       }
 
       // Scan filtered repositories (excluded repos are skipped)

@@ -14,7 +14,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'fs';
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { runMigrations } from '@/lib/db/db-migrations';
@@ -37,6 +37,7 @@ import { getSkillOperationAuditByOperationId } from '@/lib/skills/operation-audi
 import { runSkillStartupReconciliation } from '@/lib/skills/startup-reconcile';
 import { seedWorktreeRow } from './skills/mvp-harness';
 import type { SkillInstallReceipt } from '@/types/skills';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const T0 = 1_800_000_000_000;
 const WORKTREE_ID = 'wt-1';
@@ -144,8 +145,8 @@ beforeEach(() => {
 
 afterEach(() => {
   db.close();
-  rmSync(root, { recursive: true, force: true });
-  rmSync(worktreeDir, { recursive: true, force: true });
+  removeTempDir(root);
+  removeTempDir(worktreeDir);
 });
 
 describe('startup reconciliation converges an interrupted install through the production ports', () => {
@@ -172,7 +173,7 @@ describe('startup reconciliation converges an interrupted install through the pr
   });
 
   it('marks a genuinely rolled-back install as failed when no receipt is on disk', () => {
-    rmSync(join(worktreeDir, '.agents'), { recursive: true, force: true });
+    removeTempDir(join(worktreeDir, '.agents'));
     const begun = beginSkillOperation(
       { idempotencyKey: 'inst-2', binding: installBinding(), lockKey: 'lk', source: SOURCE },
       { root, now: T0 }

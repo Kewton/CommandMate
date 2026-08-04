@@ -78,6 +78,12 @@ import {
   CLAUDE_SESSION_ERROR_REGEX_PATTERNS,
 } from '@/lib/detection/cli-patterns';
 import { sendMessageWithSubmitVerification } from '@/lib/cli-tools/submit-verified-sender';
+import {
+  SESSION_STARTING_CODE,
+  isSafeSessionStartError,
+  isSessionStartTimeoutError,
+  type SessionStartTimeoutError,
+} from '@/lib/session/session-start-error';
 
 // ----- Shared test constants (DRY) -----
 const TEST_WORKTREE_ID = 'test-worktree';
@@ -115,8 +121,10 @@ describe('claude-session - Issue #152 improvements', () => {
   });
 
   describe('Timeout constants (OCP-001)', () => {
-    it('should export CLAUDE_INIT_TIMEOUT as 15000ms', () => {
-      expect(CLAUDE_INIT_TIMEOUT).toBe(15000);
+    // Issue #1637: raised from 15000. The measured cold starts that justify the
+    // value are recorded on the constant's JSDoc in claude-session.ts.
+    it('should export CLAUDE_INIT_TIMEOUT as 60000ms', () => {
+      expect(CLAUDE_INIT_TIMEOUT).toBe(60000);
     });
 
     it('should export CLAUDE_INIT_POLL_INTERVAL as 300ms', () => {
@@ -257,7 +265,9 @@ describe('claude-session - Issue #152 improvements', () => {
       const promise = startClaudeSession(TEST_SESSION_OPTIONS);
 
       // Attach rejection handler before advancing timers to prevent unhandled rejection
-      const assertion = expect(promise).rejects.toThrow('Failed to start Claude session');
+      // Issue #1637: the message names the cause instead of collapsing to
+      // 'Failed to start Claude session'.
+      const assertion = expect(promise).rejects.toThrow('initialization timeout');
 
       // Advance past CLAUDE_INIT_TIMEOUT
       await vi.advanceTimersByTimeAsync(CLAUDE_INIT_TIMEOUT + 1000);
@@ -291,7 +301,7 @@ describe('claude-session - Issue #152 improvements', () => {
       const promise = startClaudeSession(TEST_SESSION_OPTIONS);
 
       // Attach rejection handler before advancing timers to prevent unhandled rejection
-      const assertion = expect(promise).rejects.toThrow('Failed to start Claude session');
+      const assertion = expect(promise).rejects.toThrow('initialization timeout');
 
       // Advance past CLAUDE_INIT_TIMEOUT
       await vi.advanceTimersByTimeAsync(CLAUDE_INIT_TIMEOUT + 1000);
@@ -1578,5 +1588,118 @@ describe('claude-session - Issue #306 improvements', () => {
       const result = await isSessionHealthy(TEST_SESSION_NAME);
       expect(result.healthy).toBe(true);
     });
+  });
+});
+
+/**
+ * Issue #1637: a cold start that has not finished is not a start that failed.
+ *
+ * The bug was not the 15s value on its own — it was that exceeding it produced
+ * `Error: Failed to start Claude session`, which the API turned into a 500 and
+ * the CLI turned into `Server error. Check server logs for details.` (exit 99).
+ * The session and the `claude` process were alive the whole time. These tests
+ * fix the distinction at the point it is made.
+ *
+ * @vitest-environment node
+ */
+describe('claude-session - cold start is distinguishable from failure (Issue #1637)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.mocked(hasSession).mockResolvedValue(false);
+    vi.mocked(createSession).mockResolvedValue();
+    vi.mocked(sendKeys).mockResolvedValue();
+    vi.mocked(killSession).mockResolvedValue(true);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Run startClaudeSession() past the whole init budget and return the rejection. */
+  async function startAndTimeOut(): Promise<unknown> {
+    const promise = startClaudeSession(TEST_SESSION_OPTIONS);
+    const captured = promise.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(CLAUDE_INIT_TIMEOUT + 1000);
+    return captured;
+  }
+
+  it('marks an initialization timeout with the SESSION_STARTING code', async () => {
+    vi.mocked(capturePane).mockResolvedValue('Loading...');
+
+    const error = await startAndTimeOut();
+
+    // The code is what the API route branches on; without it the route cannot
+    // answer anything but 500.
+    expect(isSessionStartTimeoutError(error)).toBe(true);
+    expect((error as SessionStartTimeoutError).code).toBe(SESSION_STARTING_CODE);
+  });
+
+  it('names the cause and the next action instead of "Failed to start"', async () => {
+    vi.mocked(capturePane).mockResolvedValue('Loading...');
+
+    const message = (await startAndTimeOut()) as Error;
+
+    expect(message.message).toContain('initialization timeout');
+    expect(message.message).toContain('60s');
+    // The operator needs to know a retry is the answer — this is the sentence
+    // whose absence caused four re-sends to be filed as a session race.
+    expect(message.message).toMatch(/retry/i);
+    expect(message.message).toContain(TEST_SESSION_NAME);
+    expect(message.message).not.toBe('Failed to start Claude session');
+  });
+
+  it('leaves the tmux session running so the retry is cheap', async () => {
+    vi.mocked(capturePane).mockResolvedValue('Loading...');
+
+    await startAndTimeOut();
+
+    // Killing it would discard the process that is seconds away from ready —
+    // which is the behaviour the Issue's reproduction depends on (re-send
+    // succeeds ~30s later against the session the first send created).
+    expect(vi.mocked(killSession)).not.toHaveBeenCalled();
+  });
+
+  it('carries no filesystem path, so passing it to the caller leaks nothing', async () => {
+    vi.mocked(capturePane).mockResolvedValue('Loading...');
+
+    const message = ((await startAndTimeOut()) as Error).message;
+
+    // SEC-SF-002 is relaxed for this error only because its text is built from
+    // a tool name, a session name and a number.
+    expect(message).not.toContain(TEST_WORKTREE_PATH);
+    expect(message).not.toContain('/usr/local/bin/claude');
+  });
+
+  it('fails immediately when the session reports a terminal error', async () => {
+    vi.mocked(capturePane).mockResolvedValue(
+      `some output\n${CLAUDE_SESSION_ERROR_PATTERNS[0]}\n`
+    );
+
+    const promise = startClaudeSession(TEST_SESSION_OPTIONS);
+    const captured = promise.catch((error: unknown) => error);
+    // Far short of the 60s budget: a start that cannot succeed must not spend it.
+    await vi.advanceTimersByTimeAsync(CLAUDE_INIT_POLL_INTERVAL * 3);
+    const error = (await captured) as Error;
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toContain(CLAUDE_SESSION_ERROR_PATTERNS[0]);
+    // Not a timeout: retrying will not help, and the route must not say it will.
+    expect(isSessionStartTimeoutError(error)).toBe(false);
+    expect(isSafeSessionStartError(error)).toBe(true);
+  });
+
+  it('still hides the detail of an unexpected start failure (SEC-SF-002)', async () => {
+    vi.mocked(createSession).mockRejectedValue(
+      new Error('EACCES: permission denied, open /Users/someone/secret/path')
+    );
+
+    const promise = startClaudeSession(TEST_SESSION_OPTIONS);
+    const captured = promise.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(1000);
+    const error = (await captured) as Error;
+
+    expect(error.message).toBe('Failed to start Claude session');
+    expect(isSafeSessionStartError(error)).toBe(false);
   });
 });

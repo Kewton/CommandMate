@@ -96,6 +96,7 @@ import { runMigrations } from '@/lib/db/db-migrations';
 import { buildPackage } from '../../fixtures/skills/malicious-packages/package';
 import type { PackageFileSpec } from '../../fixtures/skills/malicious-packages/package';
 import type { Worktree } from '@/types/models';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const getWorktreeByIdMock = vi.mocked(getWorktreeById);
 const getDbInstanceMock = vi.mocked(getDbInstance);
@@ -324,8 +325,8 @@ beforeEach(async () => {
 
 afterEach(() => {
   db.close();
-  rmSync(worktreeDir, { recursive: true, force: true });
-  rmSync(configRoot, { recursive: true, force: true });
+  removeTempDir(worktreeDir);
+  removeTempDir(configRoot);
 });
 
 // =============================================================================
@@ -495,7 +496,7 @@ describe('POST …/uninstall — nothing is deleted when anything is ambiguous',
     // Clear both discovery roots so the different-version re-install has empty
     // destinations to write into (#1460).
     rmSync(installRootAbs(), { recursive: true });
-    rmSync(claudeInstallRootAbs(), { recursive: true, force: true });
+    removeTempDir(claudeInstallRootAbs());
     resetSkillInstallPlanCacheForTesting();
     useArtifact([{ path: 'reference/notes.md', content: '# Different package\n' }]);
     await installSkill('install-key-00000002');

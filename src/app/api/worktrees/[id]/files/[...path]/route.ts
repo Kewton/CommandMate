@@ -51,6 +51,7 @@ import { extname } from 'path';
 import { readFile, stat } from 'fs/promises';
 import { createLogger } from '@/lib/logger';
 import { buildAttachmentContentDisposition } from '@/lib/http/content-disposition';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/files');
 
@@ -212,7 +213,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string; path: string[] }> }
 ) {
   try {
-    const { id, path } = await params;
+    const { id: requestedWorktreeId, path } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const result = await getWorktreeAndValidatePath(id, path);
     if ('error' in result) {
       return result.error;
@@ -499,7 +501,8 @@ export async function PUT(
   { params }: { params: Promise<{ id: string; path: string[] }> }
 ) {
   try {
-    const { id, path } = await params;
+    const { id: requestedWorktreeId, path } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const result = await getWorktreeAndValidatePath(id, path);
     if ('error' in result) {
       return result.error;
@@ -554,7 +557,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string; path: string[] }> }
 ) {
   try {
-    const { id, path } = await params;
+    const { id: requestedWorktreeId, path } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const result = await getWorktreeAndValidatePath(id, path);
     if ('error' in result) {
       return result.error;
@@ -608,7 +612,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; path: string[] }> }
 ) {
   try {
-    const { id, path } = await params;
+    const { id: requestedWorktreeId, path } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const result = await getWorktreeAndValidatePath(id, path);
     if ('error' in result) {
       return result.error;
@@ -645,7 +650,8 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string; path: string[] }> }
 ) {
   try {
-    const { id, path } = await params;
+    const { id: requestedWorktreeId, path } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const result = await getWorktreeAndValidatePath(id, path);
     if ('error' in result) {
       return result.error;

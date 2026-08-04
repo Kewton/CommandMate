@@ -11,10 +11,9 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import { parseSelectedAgents } from '@/lib/selected-agents-validator';
 import { ACTIVE_FILTER } from './chat-db';
 import {
-  getWorktreeChildTables,
-  getWriteGuardedTables,
-  type WorktreeChildTable,
-} from './migrations/worktree-child-tables';
+  deleteWorktreeChildRows,
+  renameWorktreeIdPreservingChildren,
+} from './migrations/worktree-id-rename';
 
 /**
  * Get latest user message per CLI tool for multiple worktrees (batch query)
@@ -374,96 +373,23 @@ export function upsertWorktree(
 }
 
 /**
- * Delete every child row pointing at any of `worktreeIds`.
- *
- * Deliberately covers *all* deletable child tables, not just the FK-less ones:
- * doing so makes deletion correct even when `PRAGMA foreign_keys` is off, and
- * the extra statements against CASCADE tables remove rows that would have been
- * removed anyway. Append-only ledgers are skipped (see getWriteGuardedTables).
- * Must run before the parent row is deleted (Issue #1621).
- */
-function deleteWorktreeChildRows(
-  db: Database.Database,
-  worktreeIds: string[],
-  children: WorktreeChildTable[] = getWorktreeChildTables(db)
-): void {
-  if (worktreeIds.length === 0) return;
-
-  const { noDelete } = getWriteGuardedTables(db);
-  const placeholders = worktreeIds.map(() => '?').join(',');
-  for (const { table, column } of children) {
-    if (noDelete.has(table)) continue;
-    db.prepare(
-      `DELETE FROM "${table}" WHERE "${column}" IN (${placeholders})`
-    ).run(...worktreeIds);
-  }
-}
-
-/**
  * Rename a worktree row's primary key from `oldId` to `newId`, re-pointing every
- * child table's foreign key so no CASCADE deletion occurs. This is what makes a
- * same-directory branch switch preserve chat history and all related data
- * instead of destroying it (Issue #1151).
+ * child table's foreign key so no CASCADE deletion occurs (Issue #1151, #1621).
  *
- * "Every child table" means every table carrying a worktree reference, not just
- * the ones that declare a foreign key: `tasks`, `verification_runs` and
- * `skill_operations` do not, and used to be left addressing an ID that no
- * longer resolves (Issue #1621).
+ * The implementation lives in `migrations/worktree-id-rename.ts` because the
+ * Phase 4 renumbering (#1645) needs it from inside a migration, and a migration
+ * that imports THIS module inherits every `vi.mock('@/lib/db/worktree-db')` in
+ * the suite (measured — see that module's header). This wrapper keeps the
+ * public API and its import path unchanged.
  *
- * Append-only ledgers are the one exception, and the schema states it itself —
- * `skill_operations` aborts any UPDATE (#1234). An immutable audit row records
- * what happened under the identity in force at the time, and rewriting it is
- * precisely what its trigger exists to prevent; attempting it does not fail
- * quietly either, it aborts the enclosing transaction and takes the rename with
- * it (measured). See getWriteGuardedTables.
- *
- * Must be called inside a transaction. `PRAGMA defer_foreign_keys` defers FK
- * enforcement to COMMIT, letting us repoint the parent PK and its children in
- * any order without needing `ON UPDATE CASCADE` on every constraint.
+ * Must be called inside a transaction.
  */
 export function migrateWorktreeIdPreservingChildren(
   db: Database.Database,
   oldId: string,
   newId: string
 ): void {
-  if (oldId === newId) return;
-
-  const oldExists = db.prepare('SELECT 1 FROM worktrees WHERE id = ?').get(oldId);
-  if (!oldExists) return;
-
-  // Defer FK checks until COMMIT so the parent PK and child FKs can be updated
-  // independently. Resets automatically at the end of the transaction.
-  db.pragma('defer_foreign_keys = ON');
-
-  const newExists = db.prepare('SELECT 1 FROM worktrees WHERE id = ?').get(newId);
-  const { noUpdate } = getWriteGuardedTables(db);
-  const allChildren = getWorktreeChildTables(db);
-  const children = allChildren.filter(({ table }) => !noUpdate.has(table));
-
-  if (newExists) {
-    // Collision guard. `path` is UNIQUE so two rows for the same directory
-    // should never coexist, but if the DB is already inconsistent keep the
-    // destination row's data and fold in the source's non-conflicting children.
-    for (const { table, column } of children) {
-      db.prepare(
-        `UPDATE OR IGNORE "${table}" SET "${column}" = ? WHERE "${column}" = ?`
-      ).run(newId, oldId);
-    }
-    // Conflicting leftovers are dropped explicitly rather than left to CASCADE:
-    // tables without a foreign key never cascade, so relying on the parent
-    // delete alone would strand their rows on a dead ID (#1621).
-    deleteWorktreeChildRows(db, [oldId], allChildren);
-    db.prepare('DELETE FROM worktrees WHERE id = ?').run(oldId);
-    return;
-  }
-
-  // Normal rename: move the parent PK, then repoint all child rows.
-  db.prepare('UPDATE worktrees SET id = ? WHERE id = ?').run(newId, oldId);
-  for (const { table, column } of children) {
-    db.prepare(
-      `UPDATE "${table}" SET "${column}" = ? WHERE "${column}" = ?`
-    ).run(newId, oldId);
-  }
+  renameWorktreeIdPreservingChildren(db, oldId, newId);
 }
 
 /**
@@ -709,6 +635,53 @@ export function getWorktreeIdsByRepository(
 
   const rows = stmt.all(repositoryPath) as Array<{ id: string }>;
   return rows.map(r => r.id);
+}
+
+/**
+ * Every worktree ID currently stored, across all repositories.
+ *
+ * Issue #1621: `deriveWorktreeId` mints an ID from a directory's basename, and
+ * two repositories can easily hold same-named directories (`.../a/main`,
+ * `.../b/main`). The ID is the global primary key of `worktrees`, so the
+ * "already taken" set the derivation consults has to be global too;
+ * {@link getWorktreeIdsByRepository} would silently allow a cross-repository
+ * collision, which then surfaces as a UNIQUE(path) failure on upsert.
+ *
+ * @param db - Database instance
+ * @returns Every `worktrees.id` value
+ */
+export function getAllWorktreeIds(db: Database.Database): string[] {
+  const rows = db.prepare('SELECT id FROM worktrees').all() as Array<{ id: string }>;
+  return rows.map(row => row.id);
+}
+
+/**
+ * Every worktree row's `(id, path)` pair, across all repositories.
+ *
+ * The global counterpart of {@link getWorktreesByRepository}, and the difference
+ * matters (Issue #1658): `path` is the identity of a worktree — the column is
+ * `NOT NULL UNIQUE` — whereas `repository_path` merely records which scan root
+ * last upserted the row. When the *same* git repository is registered under two
+ * scan roots (a repo and one of its own linked worktrees, both in
+ * `WORKTREE_REPOS`), `git worktree list` returns the identical path set from
+ * either one, and `repository_path` ping-pongs between them on every sync.
+ * Looking an existing ID up per repository then misses the row half the time and
+ * re-derives its ID, which appends another 8 hex digits — forever.
+ *
+ * Resolving "which ID does this path already own?" must therefore be global.
+ * Pruning stays per-repository ({@link getWorktreesByRepository}): that question
+ * really is scoped to one scan root.
+ *
+ * @param db - Database instance
+ * @returns `{ id, path }` for every worktree row
+ */
+export function getAllWorktreePathIds(
+  db: Database.Database
+): Array<{ id: string; path: string }> {
+  return db.prepare('SELECT id, path FROM worktrees').all() as Array<{
+    id: string;
+    path: string;
+  }>;
 }
 
 /**

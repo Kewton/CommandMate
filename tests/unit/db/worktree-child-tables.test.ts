@@ -411,11 +411,17 @@ describe('migration v52: orphaned worktree children (Issue #1621)', () => {
 
   afterEach(() => db.close());
 
-  it('is registered as the current schema version', () => {
+  it('is registered in the schema history', () => {
     runMigrations(db);
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(52);
-    expect(getCurrentVersion(db)).toBe(52);
+    // v52 is no longer the head (v53 adds worktree_aliases, #1621 Phase 2), so
+    // this asserts it is APPLIED rather than that it is the latest.
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(52);
+    expect(getCurrentVersion(db)).toBe(CURRENT_SCHEMA_VERSION);
+    const applied = db
+      .prepare('SELECT name FROM schema_version WHERE version = 52')
+      .get() as { name: string } | undefined;
+    expect(applied?.name).toBe('delete-orphaned-worktree-children');
   });
 
   it('deletes rows pointing at a worktree that no longer exists', () => {

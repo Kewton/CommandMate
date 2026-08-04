@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById, getMemoById, updateMemo, deleteMemo } from '@/lib/db';
 import { createLogger } from '@/lib/logger';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/memos');
 
@@ -30,7 +31,8 @@ export async function PUT(
   { params }: { params: Promise<{ id: string; memoId: string }> }
 ) {
   try {
-    const { id, memoId } = await params;
+    const { id: requestedWorktreeId, memoId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const db = getDbInstance();
 
     // Check if worktree exists
@@ -96,7 +98,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; memoId: string }> }
 ) {
   try {
-    const { id, memoId } = await params;
+    const { id: requestedWorktreeId, memoId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const db = getDbInstance();
 
     // Check if worktree exists

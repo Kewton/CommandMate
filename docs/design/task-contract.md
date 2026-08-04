@@ -41,6 +41,7 @@ autoYes:
 success:
   requireWorkEvidence: true        # 省略時 true
   requireScopeClean: true          # 省略時 true（組み込み scope ゲートが変更ファイルを突合。§2.2）
+  requireCommit: false             # 省略時 false（true で work-evidence が commit を要求。§2.5）
   autoVerifyOnStop: false          # 省略時 false（エージェント停止イベントで検証を自動起動。§2.5）
 ```
 
@@ -333,18 +334,60 @@ enforcement が「契約が無いから従来動作」と「契約が off と言
 |---|---|---|---|
 | `requireWorkEvidence` | boolean | `true` | commit も差分も無い「作業ゼロ」を不合格とする（`work-evidence` ゲート） |
 | `requireScopeClean` | boolean | `true` | `scope` 外の変更を不合格とする（組み込み `scope` ゲート。§2.2） |
+| `requireCommit` | boolean | `false` | `work-evidence` に「変更が在る」ではなく **「commit が在る」** を要求する。`commits=0 uncommitted=1` は failed（run は `not_started`）。Issue #1642 |
 | `autoVerifyOnStop` | boolean | `false` | `POST /api/hooks/agent-event`（`event: stop`）受信時に検証ランを自動起動する（Issue #1549） |
 
-前 2 つのフラグは §2.3 のとおり `verify.gates` に対応する組み込みゲートを自動で足す。
-フラグが単独で意味を持つ（ゲートリストと矛盾しない）ようにするための規則である。
+`requireWorkEvidence` / `requireScopeClean` は §2.3 のとおり `verify.gates` に対応する
+組み込みゲートを自動で足す。フラグが単独で意味を持つ（ゲートリストと矛盾しない）ように
+するための規則である。
 
 `requireScopeClean` が true のとき `scope.allow` が空なら契約エラー。
 「スコープを守れ」と言いながらスコープを 1 つも挙げていない契約は、
 Phase 2-2 のゲートが有効になった瞬間に**あらゆる変更を不合格**にする。
 
-`autoVerifyOnStop` だけ既定が false なのは、他の 2 つが「判定基準」なのに対し
-これは**サーバに動作を起こさせる**唯一のフラグだからである。本フィールドが存在しなかった
-時代に書かれた契約が、Stop hook を設定した途端に検証ランを走らせ始めてはならない。
+同じ理由で、**`requireCommit: true` かつ `requireWorkEvidence: false` は契約エラー**。
+commit の要求を裁定するのは `work-evidence` ゲートであり、`requireWorkEvidence: false` は
+そのゲートを契約のゲート集合から外す。受理すると前文に「必ず commit」と書きながら
+それを見る機械が 1 つも無い契約が成立する — 本フィールドが塞ぐはずの欠陥そのものになる。
+
+`autoVerifyOnStop` / `requireCommit` の既定が false なのは、前 2 つが「判定基準」なのに対し
+`autoVerifyOnStop` は**サーバに動作を起こさせる**唯一のフラグだから、`requireCommit` は
+**既存の全契約の判定が変わってしまう**からである。本フィールドが存在しなかった時代に
+書かれた契約が、Stop hook を設定した途端に検証ランを走らせ始めたり、未 commit の作業で
+不合格になり始めたりしてはならない。
+
+#### `requireCommit` と `verify.yaml` の `options.requireCommit`（Issue #1642）
+
+同じ要求は `.commandmate/verify.yaml` の `options.requireCommit`（Issue #1628）にもある。
+違いは**適用単位**である。
+
+| 宣言場所 | 単位 | 使いどころ |
+|---|---|---|
+| `options.requireCommit`（verify.yaml） | リポジトリ | このリポジトリでは常に commit を要求する |
+| `success.requireCommit`（契約） | 委任 1 件 | このワーカー委任では commit を要求する |
+
+**両者の合成は OR（どちらか一方が true なら true）。** 契約が verify.yaml を上書きすることは
+ない。契約側を足した目的は「契約が宣言したルールを機械が検査していない」穴を塞ぐことなので、
+リポジトリが `options.requireCommit: true` で要求しているものを個々の委任契約が黙って
+緩められるようにすると、同じ穴が委任単位で再発する。**契約は締める方向にしか効かない。**
+
+リポジトリ単位のスイッチだけでは両立しなかった 2 用途:
+
+| 用途 | 求めるもの |
+|---|---|
+| ワーカー委任（`send --contract` → `wait --verify`） | commit を要求したい |
+| 手元の対話的な `commandmate verify` | 要求されたくない。**`work-evidence` が落ちると後続ゲートは全て `skipped`** になり、作業中に lint / typecheck / unit の結果が一切返らなくなる |
+
+裁定の理由行には**どちらの宣言が要求したか**を書く
+（`options.requireCommit (.commandmate/verify.yaml) and success.requireCommit (task contract)`）。
+
+契約に紐付かないラン（`taskId` も解決結果も無い素の `commandmate verify`）は
+`options.requireCommit` だけを見る。`findDetachedContract`（§2.2 / Issue #1620）が拾う
+**未接続の契約からはフラグを読まない** — そのランはその契約についてのランではないため。
+未接続の契約が在ること自体は `scope` の `skipped` として集計に数えられ、run は `error` になる。
+
+Phase 0 の bash 参照実装（`.claude/skills/cmate-verify/scripts/verify-run.sh`）は
+**契約を読まないスタンドアロンランナー**なので `options.requireCommit` だけを見る（Issue #1639）。
 
 ---
 
@@ -402,6 +445,21 @@ Phase 2-2 のゲートが有効になった瞬間に**あらゆる変更を不�
 
 前文の「完了条件」行は `verify.yaml` の `gates[].command` を解決して**実コマンド**で書く。
 ゲート id だけを渡してもエージェントは何が走るのか分からず、契約の意味が伝わらない。
+
+**commit の行は宣言ではなく裁定の写しである**（Issue #1642）。上の「必ず commit すること
+（未 commit の作業は未完了とみなされる）」が出るのは §2.5 の OR が true のとき**だけ**で、
+false のときは実際に効く内容に合わせて次の文が出る。
+
+```
+- 作業完了後は commit すること（ただし work-evidence は未 commit の変更も作業証跡として認めるため、commit の有無そのものは検査されない）
+```
+
+同じ理由で `work-evidence` ゲートのラベルも 2 通りある
+（`commit または未 commit の変更が存在すること` / `commit が存在すること。未 commit の変更は
+作業証跡として数えない`）。この行が固定文言だった時代、ゲートは `commits=0 uncommitted=1` で
+`passed` を返しており、Epic #1585 の受入実測で **Codex ワーカーが未コミットのまま
+`wait --verify` で exit 0 / `RESULT passed` を受け取った**（Issue #1628 D-4）。
+**前文が宣言したルールと機械が裁定するルールが食い違わないことが、この節の不変条件である。**
 
 そのため送信時に verify.yaml との照合が入る。以下は契約エラー（exit 2）:
 

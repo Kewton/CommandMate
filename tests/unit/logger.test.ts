@@ -353,6 +353,108 @@ describe('Logger', () => {
     });
   });
 
+  describe('[MF-1] Sensitive key name matching (Issue #1640)', () => {
+    beforeEach(() => {
+      process.env.CM_LOG_FORMAT = 'json';
+      process.env.CM_LOG_LEVEL = 'debug';
+    });
+
+    /** Log `data` and return the parsed `data` object from the emitted entry. */
+    const logAndParseData = (data: Record<string, unknown>): Record<string, unknown> => {
+      const consoleSpy = vi.spyOn(console, 'log');
+      createLogger('test').info('action', data);
+      const output = consoleSpy.mock.calls[0][0] as string;
+      return JSON.parse(output).data as Record<string, unknown>;
+    };
+
+    it('should not redact the bare `key` field of read-mode:ready', () => {
+      // The regression this issue reports: `read-mode:ready {"key":"[REDACTED]"}`
+      // hid the bound key `g`, which is the only reason that log line exists.
+      const data = logAndParseData({ key: 'g', scriptPath: '/tmp/read-mode.sh' });
+
+      expect(data.key).toBe('g');
+      expect(data.scriptPath).toBe('/tmp/read-mode.sh');
+    });
+
+    it.each([
+      ['key', 'g'],
+      ['keyName', 'ctrl-b'],
+      ['bindKey', 'prefix'],
+      ['compositeKey', 'wt-1:claude'],
+      ['idempotencyKey', 'op-20260803-0001'],
+      ['sortKey', 'lastSent'],
+      ['publicKey', 'BJ_vapid_public_value'],
+      ['monkey', 'not a credential'],
+    ])('should not redact the non-sensitive field `%s`', (field, value) => {
+      const data = logAndParseData({ [field]: value });
+
+      expect(data[field]).toBe(value);
+    });
+
+    it.each([
+      ['password', 'hunter2'],
+      ['token', 'tok_live_123'],
+      ['accessToken', 'at_123'],
+      ['secret', 's3cr3t'],
+      ['webhookSecret', 'whsec_123'],
+      ['auth', 'basic abc'],
+      ['authHeader', 'Basic dXNlcjpwYXNz'],
+      ['authorization', 'Basic dXNlcjpwYXNz'],
+      ['apiKey', 'ak_live_123'],
+      ['api_key', 'ak_live_123'],
+      ['API_KEY', 'ak_live_123'],
+      ['x-api-key', 'ak_live_123'],
+      ['privateKey', 'pk_123'],
+      ['private_key', 'pk_123'],
+      ['accessKey', 'AKIA_123'],
+      ['sessionKey', 'sk_123'],
+      ['signingKey', 'sign_123'],
+      ['encryptionKey', 'enc_123'],
+      ['sshKey', 'ssh-rsa AAAA'],
+      ['gpgKey', 'gpg_123'],
+      ['deployKey', 'deploy_123'],
+    ])('should still redact the credential-bearing field `%s`', (field, value) => {
+      const data = logAndParseData({ [field]: value });
+
+      expect(data[field]).toBe('[REDACTED]');
+      expect(JSON.stringify(data)).not.toContain(value);
+    });
+
+    it('should keep the value-side patterns applied to a non-sensitive key', () => {
+      // Loosening the key-name side must not open a hole: a secret embedded in
+      // the *value* of a benign field is still caught by SENSITIVE_PATTERNS.
+      const data = logAndParseData({
+        key: 'token=tok_live_123',
+        detail: 'Bearer eyJhbGciOiJIUzI1NiJ9',
+      });
+
+      expect(data.key).toBe('token=[REDACTED]');
+      expect(data.detail).toBe('Bearer [REDACTED]');
+      expect(JSON.stringify(data)).not.toContain('tok_live_123');
+      expect(JSON.stringify(data)).not.toContain('eyJhbGciOiJIUzI1NiJ9');
+    });
+
+    it('should apply the same key-name rules to nested objects and arrays', () => {
+      const data = logAndParseData({
+        readMode: { key: 'g', apiKey: 'ak_live_123' },
+        bindings: [
+          { key: 'q', token: 'tok_1' },
+          { key: 'j', token: 'tok_2' },
+        ],
+      });
+
+      const readMode = data.readMode as Record<string, unknown>;
+      expect(readMode.key).toBe('g');
+      expect(readMode.apiKey).toBe('[REDACTED]');
+
+      const bindings = data.bindings as Array<Record<string, unknown>>;
+      expect(bindings[0].key).toBe('q');
+      expect(bindings[0].token).toBe('[REDACTED]');
+      expect(bindings[1].key).toBe('j');
+      expect(bindings[1].token).toBe('[REDACTED]');
+    });
+  });
+
   describe('[SF-2] generateRequestId', () => {
     it('should return UUID-like string', () => {
       const id = generateRequestId();

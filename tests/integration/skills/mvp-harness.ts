@@ -27,7 +27,6 @@ import {
   readdirSync,
   lstatSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from 'fs';
 import { homedir } from 'os';
@@ -36,6 +35,7 @@ import type Database from 'better-sqlite3';
 import { SKILL_INSTALL_ROOT_PREFIX, SKILL_STAGING_DIRNAME } from '@/lib/skills/constants';
 import type { SkillCatalog, SkillCatalogVersion } from '@/types/skills';
 import { buildPackage, type PackageOptions } from '../../fixtures/skills/malicious-packages/package';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 /** Root every temp directory of this suite is created under. */
 const TEST_ROOT_PARENT = path.join(homedir(), '.commandmate-test-skills-mvp');
@@ -85,7 +85,7 @@ export function createTestRoot(prefix: string): string {
 }
 
 export function removeTestRoot(dir: string): void {
-  rmSync(dir, { recursive: true, force: true });
+  removeTempDir(dir);
 }
 
 // =============================================================================

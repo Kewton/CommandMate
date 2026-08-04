@@ -20,6 +20,10 @@ import { resolveInstanceCliTool } from '@/lib/db/agent-instances-db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { sendUserMessage } from '@/lib/session/send-user-message';
+import {
+  isSessionStartTimeoutError,
+  SESSION_STARTING_CODE,
+} from '@/lib/session/session-start-error';
 import { getGitStatus } from '@/lib/git/git-utils';
 import { isPathSafe, resolveAndValidateRealPath } from '@/lib/security/path-validator';
 import path from 'path';
@@ -27,6 +31,7 @@ import { createLogger } from '@/lib/logger';
 import { AntigravityTool } from '@/lib/cli-tools/antigravity';
 import { validateCopilotModelName, validateAntigravityModelName } from '@/lib/cmate-cli-tool-parser';
 import { broadcastSessionStatus } from '@/lib/realtime/terminal-broadcast';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/send');
 
@@ -123,7 +128,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const db = getDbInstance();
 
     // Check if worktree exists
@@ -269,6 +275,18 @@ export async function POST(
         }
       } catch (error: unknown) {
         logger.error('failed-to-start-session:', { error: error instanceof Error ? error.message : String(error) });
+        // Issue #1637: a session that is still initializing is not a server
+        // fault. The tmux session and the CLI process exist and are coming up,
+        // so the honest answer is "temporarily unavailable, retry" — 503 with a
+        // stable code — and the message says exactly that. Returning 500 here
+        // is what made four separate orchestration runs misdiagnose a slow cold
+        // start as a session-creation race.
+        if (isSessionStartTimeoutError(error)) {
+          return NextResponse.json(
+            { error: error.message, code: SESSION_STARTING_CODE },
+            { status: 503 }
+          );
+        }
         return NextResponse.json(
           { error: `Failed to start ${cliTool.name} session: ${getErrorMessage(error)}` },
           { status: 500 }

@@ -21,6 +21,7 @@ import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
 import { sendMessageWithSubmitVerification } from '@/lib/cli-tools/submit-verified-sender';
 import { createLogger } from '@/lib/logger';
 import { COPILOT_SEND_ENTER_DELAY_MS } from '@/config/copilot-constants';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/terminal');
 
@@ -32,7 +33,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const { cliToolId, command } = await req.json();
 
     // Validate cliToolId against known CLI tool types

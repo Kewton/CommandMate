@@ -28,6 +28,7 @@ vi.mock('@/lib/db/db-migrations', () => ({
 }));
 
 import { getDbInstance, closeDbInstance } from '@/lib/db/db-instance';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 describe('getDbInstance connection pragmas (Issue #1360)', () => {
   beforeEach(() => {
@@ -42,7 +43,7 @@ describe('getDbInstance connection pragmas (Issue #1360)', () => {
   });
 
   afterAll(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    removeTempDir(tmpDir);
   });
 
   it('enables WAL journal mode on the shared connection', () => {

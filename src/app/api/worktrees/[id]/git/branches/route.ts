@@ -12,7 +12,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { listBranches, handleGitApiError } from '@/lib/git/git-utils';
-import { resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
+import { canonicalWorktreeId, resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
 import type { BranchInclude } from '@/types/git';
 
 /** Coerce an arbitrary `include` query value to a valid BranchInclude. */
@@ -28,7 +28,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const worktree = resolveWorktreeOr404(id);
     if (worktree instanceof NextResponse) {
       return worktree;

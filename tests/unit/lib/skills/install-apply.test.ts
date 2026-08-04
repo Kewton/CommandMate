@@ -19,7 +19,6 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'fs';
@@ -55,6 +54,7 @@ import {
 import { buildPackage } from '../../../fixtures/skills/malicious-packages/package';
 import type { PackageFileSpec } from '../../../fixtures/skills/malicious-packages/package';
 import { makeCatalogVersion } from './fixtures';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const SKILL_ID = 'demo-skill';
 const VERSION = '1.2.3';
@@ -127,7 +127,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(worktree, { recursive: true, force: true });
+  removeTempDir(worktree);
 });
 
 describe('applySkillInstall — the committed payload', () => {
@@ -241,7 +241,7 @@ describe('applySkillInstall — where it refuses to write', () => {
       );
       expect(readdirSync(outside)).toEqual([]);
     } finally {
-      rmSync(outside, { recursive: true, force: true });
+      removeTempDir(outside);
     }
   });
 
@@ -310,7 +310,7 @@ describe('applySkillInstall — where it refuses to write', () => {
       );
       expect(readdirSync(outside)).toEqual([]);
     } finally {
-      rmSync(outside, { recursive: true, force: true });
+      removeTempDir(outside);
     }
   });
 });

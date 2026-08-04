@@ -44,8 +44,11 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   Send a message to an agent (async). Starts session automatically if not running.
 
   Options:
-    --agent <id>           Agent type: claude (default), codex, gemini, vibe-local, opencode, copilot, antigravity
-    --instance <id>        Agent instance ID: <agent> or <agent>-<n> (e.g. claude-2). See "Multi-Session" below.
+    --instance <id>        Agent instance ID: <agent> or <agent>-<n> (e.g. claude-2, or codex
+                           for the codex primary instance). The recommended way to name a
+                           target: send / wait / respond / capture / auto-yes all take it.
+    --agent <id>           Ad-hoc CLI tool for an instance the roster does not know:
+                           claude (default), codex, gemini, vibe-local, opencode, copilot, antigravity
     --register             Register the --instance session into the agent-instance roster
     --auto-yes             Enable auto-yes before sending
     --duration <d>         Auto-yes duration: 1h, 3h, 8h (default: 1h)
@@ -56,6 +59,13 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     WT=$(commandmate ls --id anvil- --quiet)   # disambiguate by repo (id prefix)
     commandmate send "$WT" "Implement this"
 
+  Targeting a non-default agent (Issue #1638): pass --instance, not --agent. Only
+  --instance is accepted by every command -- 'wait --agent' does not exist -- so a
+  workflow that names the agent on 'send' and nothing on 'wait' waits on the wrong
+  session in silence.
+    commandmate send "$WT" "Implement this" --instance codex
+    commandmate wait "$WT" --instance codex
+
 ### commandmate wait <worktree-id...>
   Block until agent completes or prompt is detected.
 
@@ -63,6 +73,7 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     --timeout <seconds>        Maximum wait time
     --on-prompt <mode>         agent (default) or human
     --stall-timeout <seconds>  Max time without output change
+    --instance <id>            Agent instance to wait on. There is no --agent here.
     --verify                   After completion, run every verification gate
     --require-work             After completion, run only the work-evidence gate
 
@@ -146,6 +157,7 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   commandmate respond <id> "yes"          # Yes/No
   commandmate respond <id> "2"            # Multiple choice (number)
   commandmate respond <id> "custom text"  # Free text
+  commandmate respond <id> "yes" --instance codex-2   # Specific instance
 
   Exit codes:
     0  - Response sent
@@ -154,9 +166,9 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
 ### commandmate capture <worktree-id>
   Get current terminal output.
 
-  commandmate capture <id>                # Plain text
-  commandmate capture <id> --json         # JSON with status info
-  commandmate capture <id> --agent codex  # Specific agent
+  commandmate capture <id>                   # Plain text
+  commandmate capture <id> --json            # JSON with status info
+  commandmate capture <id> --instance codex  # Specific instance
 
 ### commandmate auto-yes <worktree-id>
   Control auto-yes (automatic prompt response).
@@ -165,6 +177,7 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   commandmate auto-yes <id> --enable --duration 3h      # With duration
   commandmate auto-yes <id> --enable --stop-pattern "error"
   commandmate auto-yes <id> --disable                   # Disable
+  commandmate auto-yes <id> --enable --instance codex-2 # Scoped to one instance
 
 ### commandmate instances <worktree-id> [action] [args]
   Discover and manage a worktree's agent-instance roster (1 agent, multiple sessions).
@@ -226,6 +239,17 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   --instance is accepted by send / wait / respond / capture / auto-yes.
   send --instance auto-starts the session if it is not already running.
 
+  --instance alone is the recommended way to name a target (Issue #1638). It is
+  the only flag all five commands share: --agent is rejected by 'wait'. A
+  rostered instance already carries its CLI tool (Issue #1629), and an instance
+  id that is itself a tool id resolves to that tool's primary instance even
+  without a roster entry, so '--instance codex' needs no --agent.
+
+  --agent remains accepted by send / respond / capture / auto-yes as the
+  supplement for ad-hoc instances the roster does not know -- notably
+  '--register', which cannot infer the tool from an id like codex-3. Passing an
+  --agent that contradicts the roster is an error (exit 2), not an override.
+
   The roster (visible in the browser UI's Agent panel) is the list of known
   instances with aliases and display order. Ad-hoc sessions started via
   'send --instance' do NOT appear in the roster unless registered:
@@ -238,9 +262,9 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   to that specific session, independent of other instances of the same agent.
 
   commandmate instances <id>                        # discover valid --instance values
-  commandmate send <id> "task" --agent codex --instance codex-2 --auto-yes
+  commandmate send <id> "task" --instance codex-2 --auto-yes
   commandmate wait <id> --instance codex-2 --timeout 600
-  commandmate capture <id> --agent codex --instance codex-2
+  commandmate capture <id> --instance codex-2
 
 ## All Exit Codes
 
@@ -317,12 +341,18 @@ Copy and adapt these patterns for your use case.
   WT2=$(commandmate ls --branch feature/102 --quiet)
 
   commandmate send "$WT1" "Implement #101" --auto-yes
-  commandmate send "$WT2" "Implement #102" --auto-yes --agent codex
+  commandmate send "$WT2" "Implement #102" --auto-yes --instance codex
 
-  commandmate wait "$WT1" "$WT2" --timeout 1800
+  # One --instance covers every worktree id in the call, so worktrees on
+  # different instances need one wait each. Both agents keep running while the
+  # first wait blocks, so this costs no wall clock over a combined wait.
+  # A bare 'wait "$WT2"' would watch WT2's DEFAULT agent, not the codex session:
+  # 'wait' has no --agent to correct that with.
+  commandmate wait "$WT1" --timeout 1800
+  commandmate wait "$WT2" --instance codex --timeout 1800
 
   commandmate capture "$WT1" --json
-  commandmate capture "$WT2" --json
+  commandmate capture "$WT2" --instance codex --json
 
 ## 5. Check status before sending
 
@@ -361,13 +391,16 @@ Copy and adapt these patterns for your use case.
   # Discover the roster before picking an --instance value
   commandmate instances "$WT"
 
-  # Register a second Codex instance, then send/wait/capture scoped to it
+  # Register a second Codex instance, then send/wait/capture scoped to it.
+  # Once it is in the roster, --instance alone carries the CLI tool.
   commandmate instances "$WT" add --agent codex --alias "Review"
-  commandmate send "$WT" "Review the diff" --agent codex --instance codex-2 --auto-yes
+  commandmate send "$WT" "Review the diff" --instance codex-2 --auto-yes
   commandmate wait "$WT" --instance codex-2 --timeout 600
-  commandmate capture "$WT" --agent codex --instance codex-2 --json
+  commandmate capture "$WT" --instance codex-2 --json
 
-  # Ad-hoc instance without pre-registering (still runs; register to show in UI)
+  # Ad-hoc instance without pre-registering (still runs; register to show in UI).
+  # --agent is required here: codex-3 is not in the roster yet, so nothing else
+  # says which CLI tool to start.
   commandmate send "$WT" "Quick check" --agent codex --instance codex-3 --register
 
   # Clean up when done

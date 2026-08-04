@@ -59,4 +59,88 @@ describe('TmuxControlRegistry', () => {
     expect(sendInput).toHaveBeenCalledWith('hello');
     expect(resize).toHaveBeenCalledWith(120, 40);
   });
+
+  /**
+   * Issue #1621 Phase 3. `rename-session` does not disturb an attached control
+   * client — the child process, its pipe and its scrollback all survive — so
+   * the fix is to re-file the entry, not to tear the attach down. What breaks
+   * without it is subtle: the session is alive and streaming, but every lookup
+   * by name misses, so terminal input stops arriving with no error anywhere.
+   */
+  describe('renameSession (worktree ID migration)', () => {
+    function makeRegistry() {
+      const sendInput = vi.fn();
+      const setSessionName = vi.fn();
+      let emit: (event: unknown) => void = () => {};
+      const registry = new TmuxControlRegistry({
+        idleTimeoutMs: 1000,
+        createClient: () => ({
+          start: vi.fn(),
+          stop: vi.fn(),
+          onEvent: vi.fn((handler: (event: unknown) => void) => {
+            emit = handler;
+            return vi.fn();
+          }),
+          sendInput,
+          resize: vi.fn(),
+          setSessionName,
+        } as any),
+      });
+      return { registry, sendInput, setSessionName, emitEvent: (event: unknown) => emit(event) };
+    }
+
+    it('keeps the live attach reachable under the new name', () => {
+      const { registry, sendInput, setSessionName } = makeRegistry();
+      registry.subscribe('mcbd-claude-old', 'a', vi.fn());
+
+      expect(registry.renameSession('mcbd-claude-old', 'mcbd-claude-new')).toBe(true);
+
+      expect(registry.hasSession('mcbd-claude-old')).toBe(false);
+      expect(registry.hasSession('mcbd-claude-new')).toBe(true);
+      expect(registry.getSubscriberCount('mcbd-claude-new')).toBe(1);
+      expect(setSessionName).toHaveBeenCalledWith('mcbd-claude-new');
+
+      registry.sendInput('mcbd-claude-new', 'ls\n');
+      expect(sendInput).toHaveBeenCalledWith('ls\n');
+    });
+
+    it('still delivers client output to the subscriber after the rename', () => {
+      const { registry, emitEvent } = makeRegistry();
+      const handler = vi.fn();
+      registry.subscribe('mcbd-claude-old', 'a', handler);
+
+      registry.renameSession('mcbd-claude-old', 'mcbd-claude-new');
+      emitEvent({ type: 'output', data: 'hello' });
+
+      // The client's event callback is created once, before any rename; if it
+      // captured the name instead of reading it off the entry, this is where
+      // output silently stops.
+      expect(handler).toHaveBeenCalledWith({ type: 'output', data: 'hello' });
+    });
+
+    it('cleans the entry up under its current name when the client exits', () => {
+      const { registry, emitEvent } = makeRegistry();
+      registry.subscribe('mcbd-claude-old', 'a', vi.fn());
+      registry.renameSession('mcbd-claude-old', 'mcbd-claude-new');
+
+      emitEvent({ type: 'exit', exitCode: 0 });
+
+      expect(registry.getSessionCount()).toBe(0);
+    });
+
+    it('refuses to clobber an attach already registered under the new name', () => {
+      const { registry } = makeRegistry();
+      registry.subscribe('mcbd-claude-old', 'a', vi.fn());
+      registry.subscribe('mcbd-claude-new', 'b', vi.fn());
+
+      expect(registry.renameSession('mcbd-claude-old', 'mcbd-claude-new')).toBe(false);
+      expect(registry.hasSession('mcbd-claude-old')).toBe(true);
+      expect(registry.getSubscriberCount('mcbd-claude-new')).toBe(1);
+    });
+
+    it('reports false when nothing is registered under the old name', () => {
+      const { registry } = makeRegistry();
+      expect(registry.renameSession('mcbd-claude-old', 'mcbd-claude-new')).toBe(false);
+    });
+  });
 });

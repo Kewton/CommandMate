@@ -6,8 +6,8 @@ import {
   initTuiAccumulator,
   clearTuiAccumulator,
 } from '../tui-accumulator';
-import { clearPromptHashCache } from './prompt-dedup';
-import { clearResponseHashCache } from './response-dedup';
+import { clearPromptHashCache, renamePromptHashCacheKey } from './prompt-dedup';
+import { clearResponseHashCache, renameResponseHashCacheKey } from './response-dedup';
 import { checkForResponse } from './response-checker';
 import { broadcastTerminalSnapshot } from '@/lib/realtime/terminal-broadcast';
 
@@ -207,4 +207,136 @@ export function stopAllPolling(): void {
  */
 export function getActivePollers(): string[] {
   return Array.from(activePollers.keys());
+}
+
+// ============================================================================
+// Worktree ID migration (Issue #1621 Phase 3)
+// ============================================================================
+
+/** One response poller that moved from one worktree ID to another. */
+export interface MigratedPollerKey {
+  /** Poller key the poller used to run under */
+  oldKey: string;
+  /** Poller key it runs under now */
+  newKey: string;
+  /** Worktree ID after the move */
+  newWorktreeId: string;
+  /** CLI tool being polled */
+  cliToolId: CLIToolType;
+  /** Agent instance being polled (equals cliToolId for the primary) */
+  instanceId: string;
+}
+
+/** Split a poller key into its worktree and instance halves. */
+function splitPollerKey(pollerKey: string): { worktreeId: string; instanceId: string } | null {
+  const separatorIndex = pollerKey.indexOf(':');
+  // A worktree ID never contains ':' (isValidWorktreeId), so the first one is
+  // always the boundary.
+  if (separatorIndex <= 0 || separatorIndex === pollerKey.length - 1) return null;
+  return {
+    worktreeId: pollerKey.slice(0, separatorIndex),
+    instanceId: pollerKey.slice(separatorIndex + 1),
+  };
+}
+
+/**
+ * Move every running response poller from a renamed worktree ID to the new one
+ * (Issue #1621 Phase 3).
+ *
+ * Re-keying the maps alone is **not** enough, and this is the subtle part: the
+ * `setTimeout` chain in {@link scheduleNextResponsePoll} closes over
+ * `worktreeId` and recomputes its key on every tick. A poller left running
+ * would go on capturing `mcbd-<cli>-<OLD id>` (a session that no longer exists
+ * after the rename), writing its messages against an ID no row carries, and
+ * re-registering the old key the moment it fired. So each poller is torn down
+ * and restarted under the new ID, with everything that represents *progress*
+ * carried across:
+ *
+ * - `pollingStartTimes`, so MAX_POLLING_DURATION still measures from when the
+ *   turn actually began rather than restarting the 30-minute budget;
+ * - the prompt and response dedup hashes, so the screen currently on display is
+ *   not saved a second time as a new message.
+ *
+ * The TUI accumulator (opencode / copilot only) is re-initialised empty at the
+ * new key instead of carried over: `tui-accumulator.ts` exposes no way to write
+ * a buffer back, and it is outside this Issue's allowed scope. The cost is that
+ * one in-flight TUI response may be truncated at the rename boundary; the next
+ * turn accumulates normally.
+ *
+ * Takes the whole batch because IDs can swap (A→B, B→A): every source key is
+ * removed before any destination key is written.
+ *
+ * @param renames - Worktree ID pairs being applied
+ * @param resolveCliToolId - Maps a poller's (worktree, instance) back to its CLI
+ *   tool, which the poller key does not encode for alias instances. Callers pass
+ *   a roster-backed lookup; returning null skips that poller (it is stopped
+ *   rather than left pointing at a dead ID).
+ * @returns One entry per poller that was moved
+ */
+export function migrateResponsePollerWorktreeIds(
+  renames: ReadonlyArray<{ oldId: string; newId: string }>,
+  resolveCliToolId: (worktreeId: string, instanceId: string) => CLIToolType | null
+): MigratedPollerKey[] {
+  const targets = new Map<string, string>();
+  for (const { oldId, newId } of renames) {
+    if (!oldId || !newId || oldId === newId) continue;
+    targets.set(oldId, newId);
+  }
+  if (targets.size === 0) return [];
+
+  const moves: MigratedPollerKey[] = [];
+  const abandoned: string[] = [];
+
+  for (const pollerKey of Array.from(activePollers.keys())) {
+    const parts = splitPollerKey(pollerKey);
+    if (!parts) continue;
+    const newWorktreeId = targets.get(parts.worktreeId);
+    if (!newWorktreeId) continue;
+
+    const cliToolId = resolveCliToolId(parts.worktreeId, parts.instanceId);
+    if (!cliToolId) {
+      abandoned.push(pollerKey);
+      continue;
+    }
+
+    moves.push({
+      oldKey: pollerKey,
+      newKey: getPollerKey(newWorktreeId, cliToolId, parts.instanceId),
+      newWorktreeId,
+      cliToolId,
+      instanceId: parts.instanceId,
+    });
+  }
+
+  // Phase 1: stop every affected timer and lift the state off the old keys.
+  // Done for the whole batch before any write so a swap cannot self-collide.
+  const carried = new Map<string, { startedAt: number | undefined }>();
+  for (const move of moves) {
+    const timerId = activePollers.get(move.oldKey);
+    if (timerId) clearTimeout(timerId);
+    activePollers.delete(move.oldKey);
+
+    carried.set(move.newKey, { startedAt: pollingStartTimes.get(move.oldKey) });
+    pollingStartTimes.delete(move.oldKey);
+
+    renamePromptHashCacheKey(move.oldKey, move.newKey);
+    renameResponseHashCacheKey(move.oldKey, move.newKey);
+    clearTuiAccumulator(move.oldKey);
+  }
+  for (const pollerKey of abandoned) {
+    stopPollingByKey(pollerKey);
+    logger.warn('poller:migrate-abandoned', { pollerKey });
+  }
+
+  // Phase 2: restart each poller under its new identity.
+  for (const move of moves) {
+    const startedAt = carried.get(move.newKey)?.startedAt;
+    pollingStartTimes.set(move.newKey, startedAt ?? Date.now());
+    if (move.cliToolId === 'opencode' || move.cliToolId === 'copilot') {
+      initTuiAccumulator(move.newKey);
+    }
+    scheduleNextResponsePoll(move.newWorktreeId, move.cliToolId, move.instanceId);
+  }
+
+  return moves;
 }

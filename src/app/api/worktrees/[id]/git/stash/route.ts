@@ -11,14 +11,15 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getStashList, handleGitApiError } from '@/lib/git/git-utils';
-import { resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
+import { canonicalWorktreeId, resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const worktree = resolveWorktreeOr404(id);
     if (worktree instanceof NextResponse) {
       return worktree;

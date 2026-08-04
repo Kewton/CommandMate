@@ -18,14 +18,20 @@
  */
 
 import { config as dotenvConfig } from 'dotenv';
-import { existsSync, readFileSync } from 'fs';
+import { appendFileSync, existsSync, readFileSync } from 'fs';
+import { join } from 'path';
 import { ExitCode, getErrorMessage, type UpdateOptions } from '../types';
 import { CLILogger } from '../utils/logger';
 import { getPackageJsonPath } from '../utils/paths';
-import { isGlobalInstall, isNpxExecution } from '../utils/install-context';
+import { ensureConfigDir, isGlobalInstall, isNpxExecution } from '../utils/install-context';
 import { getEnvPath } from '../utils/env-setup';
 import { getDaemonManagerFactory } from '../utils/daemon-factory';
-import { viewLatestVersion, installGlobalLatest } from '../utils/npm-runner';
+import {
+  viewLatestVersion,
+  installGlobalLatest,
+  findGlobalInstallation,
+  type GlobalInstallation,
+} from '../utils/npm-runner';
 import { warmNpxLatest, spawnNpxDaemon } from '../utils/npx-runner';
 import { compareVersions, isComparableVersion } from '../utils/semver';
 import { waitForReady } from '../utils/health-check';
@@ -41,6 +47,13 @@ const logger = new CLILogger();
 
 /** npm package name (kept as a literal: never build it from a dynamic path) */
 const PACKAGE_NAME = 'commandmate';
+
+/**
+ * Update log file name. Must stay identical to `UPDATE_LOG_FILENAME` in
+ * api/app/update/route.ts:36 — that route reports the path to the UI, and it resolves it the
+ * same way (`join(ensureConfigDir(), ...)`), so both must name the same file.
+ */
+const UPDATE_LOG_FILENAME = 'update.log';
 
 /**
  * Execute the update command.
@@ -311,6 +324,9 @@ export async function updateCommand(options: UpdateOptions = {}): Promise<void> 
  * stop the freshly-started daemon). npx env hygiene lives inside npx-runner.
  */
 async function runNpxSelfUpdate(): Promise<void> {
+  // Issue #1633: surfaced first, so it is recorded even when the update itself aborts below.
+  warnStaleGlobalInstall();
+
   // .env must exist and be loaded before status/auth resolution so the health
   // check URL and token resolve correctly (mirrors step 6).
   const envPath = getEnvPath();
@@ -441,6 +457,66 @@ async function runNpxSelfUpdate(): Promise<void> {
   logger.error('The server started but did not answer in time.');
   printNpxManualRelaunch();
   process.exit(ExitCode.START_FAILED);
+}
+
+/**
+ * Warn when a `npm install -g` install is still on the machine (Issue #1633).
+ *
+ * The npx self-update replaces only the npx cache. A global install keeps shadowing
+ * `commandmate` on PATH at whatever version it was last installed at, and nothing used to say
+ * so: one machine ran a 0.18.0 server (self-updated via npx) behind a 0.2.4 global CLI for
+ * months, which is how #1632 stayed invisible.
+ *
+ * This is advisory only. Detection failures (npm missing, `npm root -g` refused) skip the
+ * notice; they never abort the update.
+ */
+function warnStaleGlobalInstall(): void {
+  let installed: GlobalInstallation | null;
+  try {
+    installed = findGlobalInstallation(PACKAGE_NAME);
+  } catch {
+    return;
+  }
+
+  if (installed === null) {
+    return;
+  }
+
+  const label = installed.version ? `v${installed.version}` : 'unknown version';
+  const lines = [
+    `A global install of ${PACKAGE_NAME} (${label}) is still present at ${installed.path}.`,
+    `This npx update only refreshes the npx cache, so that copy stays at ${label} and keeps ` +
+      `shadowing "${PACKAGE_NAME}" on your PATH.`,
+    `Update it as well:  npm install -g ${PACKAGE_NAME}@latest`,
+    `Or remove it:       npm uninstall -g ${PACKAGE_NAME}`,
+  ];
+
+  for (const line of lines) {
+    logger.warn(line);
+  }
+  appendUpdateLog(lines.map((line) => `[WARN] ${line}`));
+}
+
+/**
+ * Append lines to ~/.commandmate/update.log.
+ *
+ * When the GUI starts this command the child's stdout/stderr are already the update log
+ * (api/app/update/route.ts:129-159), so console output lands there too and these lines appear
+ * twice. The explicit write is what keeps the record when the command is run by hand, where
+ * stdout is a terminal and nothing would otherwise be persisted.
+ *
+ * Logging must never break an update, so every failure is swallowed.
+ */
+function appendUpdateLog(lines: string[]): void {
+  try {
+    const logPath = join(ensureConfigDir(), UPDATE_LOG_FILENAME);
+    const timestamp = new Date().toISOString();
+    appendFileSync(logPath, lines.map((line) => `${timestamp} ${line}\n`).join(''), {
+      mode: 0o600,
+    });
+  } catch {
+    // Best effort: the console output above already carried the message.
+  }
 }
 
 /**

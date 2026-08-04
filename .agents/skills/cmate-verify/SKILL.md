@@ -119,6 +119,7 @@ options:
   baseRef: origin/develop
   skipInPrimaryCheckout: true
   maxLogTailBytes: 8192
+  requireCommit: false        # true で work-evidence が commit を要求する（既定 false）
 ```
 
 このランナーは awk / sed で読むため、**YAML のサブセットしか受け付けない**:
@@ -140,11 +141,65 @@ Phase 1 の製品ローダは一般的な YAML パーサを使うが、この形
 コマンド系ゲートより先に、**そもそも作業が行われたか**を判定する。
 
 - PASS 条件: `merge-base(baseRef, HEAD)..HEAD` のコミット数 > 0 **または**
-  `git status --porcelain` が非空
+  `git status --porcelain -z -uall` の非契約エントリ数 > 0
 - 両方 0 なら `RESULT not_started` (exit 21)。コマンド系ゲートは 1 つも実行しない
 
 未起動のセッションを「全ゲート PASS」と誤報告しないためのガードである
 （変更ゼロのリポジトリでは lint も typecheck も当然通る）。
+
+### 実行契約は作業証跡ではない（Issue #1651 / #1580）
+
+`.commandmate/tasks/` 配下は CommandMate の実行契約で、**オーケストレーターの証跡で
+あってエージェントの証跡ではない**。委任した直後の worktree（契約ファイルが 1 件置かれた
+だけの状態）が「作業済み」に見えると exit 21 が意味を失うため、**両方のカウンタから除外する**。
+
+- コミット側: `git rev-list --count <base>..HEAD -- ':(top)' ':(exclude,top).commandmate/tasks/'`
+  — 契約だけを載せた setup commit は 1 コミット分の作業として数えない。
+  副作用として**ファイルを 1 つも変更しない commit（`--allow-empty`）も数えない**
+  （pathspec 指定時の履歴単純化。製品実装も同じ）
+- 未コミット側: `git status --porcelain -z --untracked-files=all` を**エントリ単位**で解析し、
+  **エントリ内のいずれかのパスが契約ファイルでなければ**作業として数える
+  （契約を実作業へ rename した場合も拾う）
+
+`-z` と `-uall` は必須である。人間向けフォーマットは空白を含むパスを C クォートし、
+rename を ` -> ` で連結し、既定の untracked モードは新規の `.commandmate/tasks/` を
+`?? .commandmate/` の 1 エントリに畳む — いずれもパスでないものを判定に渡す。
+このランナーは契約ファイルを**開かない**（パス名だけを見る）。
+
+両カウンタが 0 かつ変更自体は存在する場合、除外が効いたことを stderr に 1 行出す
+（`FAIL commits=0 uncommitted=0` を「ゲートのバグ」と読ませないため）。
+
+### `options.requireCommit`（既定 false）
+
+`true` にすると、work-evidence は「変更が在る」ではなく **「commit が在る」** を要求する。
+`commits=0 uncommitted=1` は PASS ではなく FAIL（`RESULT not_started` / exit 21）になり、
+ゲート行に `requireCommit=true` が付く。
+
+```
+GATE work-evidence FAIL commits=0 uncommitted=3 requireCommit=true
+RESULT not_started
+```
+
+理由は stderr に出る（`commits=0 uncommitted=3` は「作業が在る」ようにも読めるため、
+FAIL の理由が行から読み取れない唯一のケースである）。
+
+`commits=0 uncommitted=1` は「ここで何か起きたか」への答えとしては正しく、
+「これは完了したか」への答えとしては誤りである。後者を訊きたいリポジトリだけが
+opt-in する。**既定を false にしているのは、このゲート本来の問いが前者だから。**
+
+**このランナーは実行契約を読まない。** CommandMate の実行契約
+（`.commandmate/tasks/*.yaml`）にも `success.requireCommit` があり、製品実装は両者を
+**OR** で合成するが（Issue #1642）、本ランナーが見るのは `options.requireCommit` だけである
+— シェルから起動したランは、どの委任にも紐付いていないため。**両方のランナーで効かせたい
+要求は verify.yaml に書く**。それが 2 実装が共に読む唯一のファイルである（Issue #1639）。
+
+TS 実装（`src/lib/verification/gate-runner.ts`）との一致は CommandMate 側の
+conformance テスト（`tests/unit/skills/cmate-verify/require-commit-conformance.test.ts`）が
+同一の git サンドボックスに両実装を当てて固定している。**Issue #1651 で既知の差分は
+2 件とも解消した** — 契約ファイルの除外（bash が緩い向きだった）と、未追跡ディレクトリの
+数え方（`-uall` の有無で数字だけが違った）。同テストは verdict だけでなく
+`commits=N uncommitted=N` を**数値として**突き合わせる（両方 > 0 のままズレる差分は
+verdict の比較では見えないため）。
 
 ## メイン checkout での skip
 
@@ -166,9 +221,14 @@ bash .claude/skills/cmate-verify/scripts/tests/run-tests.sh
 fixture は `scripts/tests/fixtures/*.yaml`。カバーしているのは
 全 PASS / 1 ゲート FAIL / timeout / work-evidence の not_started / 設定ファイル無し
 の 5 ケースに加えて、対になる反証ケース（同じ設定が linked worktree では実行される、
-`--skip-work-evidence` を付ければ同じ clean repo でも実行される）と、18 種の設定エラー、
+`--skip-work-evidence` を付ければ同じ clean repo でも実行される）と、19 種の設定エラー、
 出力ゼロで落ちるゲート・`maxLogTailBytes: 0` の診断可能性（Issue #1607）、
-アサーションヘルパ自身の自己検査。
+`options.requireCommit`（未 commit のみ → 21 / 同じ変更を commit → 0 / 既定では同じ dirty tree が
+PASS / 作業ゼロは commit 規則のせいにしない / `--skip-work-evidence` は要求ごと飛ばす。
+Issue #1639）、契約ファイルの除外（契約だけの untracked → 21 / 契約だけの setup commit → 21 /
+同じツリーに実作業を足すと 0 / 契約を実作業へ rename・その逆向きも作業として数える /
+空白を含む契約パスも非契約パスも誤判定しない / 新規ディレクトリはファイル単位で数える。
+Issue #1651）、アサーションヘルパ自身の自己検査。
 
 失敗ログの追跡可能性も固定してある。ランナーの stdout / stderr は分離したまま
 （それが契約）だが、`run_verify` は **exit code ≠ 0 のときだけ** stderr を `out.N` に
@@ -183,4 +243,10 @@ fixture は `scripts/tests/fixtures/*.yaml`。カバーしているのは
 `out.N` への stderr 追記の停止 → 診断系 7 件だけ赤 / 空 log・tail 無効の fallback 除去 →
 5 件だけ赤 / spawn ヒントの除去 → 2 件だけ赤 / ログ末尾を stdout に流す → 3 件赤
 （うち 1 件が `assert_stdout_contract`））。
+`requireCommit` も同様（判定分岐の除去 → 5 件赤 / awk が再びキーを拒否 → 15 件赤 /
+`requireCommit=true` を無条件に出力 → 1 件赤）。
+契約ファイルの除外も同様（commit 側の pathspec 除去 → 6 件赤＋conformance 3 件赤 /
+未コミット側の除外除去 → 9 件赤＋conformance 2 件赤 / `-uall` 除去 → 10 件赤 /
+rename の 2 パス目を見ない → 1 件赤 / `-z` をやめて人間向けフォーマットを行単位で読む
+→ 21 件赤）。
 `MIN_ASSERTIONS` はケースが黙って落ちたときに 0 failed で緑にならないための下限である。

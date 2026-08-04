@@ -16,6 +16,7 @@
 
 export type { AutoYesStopReason } from '../auto-yes-state';
 export type { AutoYesState } from '../auto-yes-state';
+export type { MigratedAutoYesKey } from '../auto-yes-state';
 
 export {
   // Composite key helpers (Issue #525, #896)
@@ -40,6 +41,9 @@ export {
   filterCompositeKeysByWorktree,
   getCompositeKeysByWorktree,
   deleteAutoYesStateByWorktree,
+
+  // Worktree ID migration (Issue #1621 Phase 3)
+  migrateAutoYesStateWorktreeIds,
 
   // Constants
   calculateBackoffInterval,

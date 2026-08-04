@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getWorktreeById } from '@/lib/db';
 import { getDbInstance } from '@/lib/db/db-instance';
 import Marp from '@marp-team/marp-core';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 // ============================================================================
 // Constants
@@ -41,7 +42,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
 
     // Validate worktree exists
     const db = getDbInstance();

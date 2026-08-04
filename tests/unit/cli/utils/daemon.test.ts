@@ -103,8 +103,11 @@ describe('DaemonManager', () => {
 
       await daemonManager.start({});
 
+      // Issue #1632: hybrid layout — line 1 is the bare PID, line 2 the JSON state
       const written = vi.mocked(fs.writeSync).mock.calls[0][1] as string;
-      const state = JSON.parse(written);
+      const [pidLine, jsonLine] = written.split('\n');
+      expect(pidLine).toBe('12345');
+      const state = JSON.parse(jsonLine);
       expect(state).toMatchObject({
         pid: 12345,
         version: '1.2.3',

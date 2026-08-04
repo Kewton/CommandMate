@@ -4,6 +4,8 @@
  * Issue #136: Phase 2 - Task 2.4 - Added factory functions for Issue number support
  * Issue #1354/#1355/#1358: the file now records the daemon's version, effective settings, and
  *   a process-identity signature, not just the PID. See DaemonState.
+ * Issue #1632: the file is written in a hybrid format (bare PID on line 1, JSON on line 2) so
+ *   that CLIs predating #1354 can still recover the PID from it. See formatState().
  * SF-1: SRP - Separated from daemon.ts for single responsibility
  * MF-SEC-2: TOCTOU protection with O_EXCL atomic writes
  */
@@ -46,6 +48,75 @@ export interface DaemonState {
 }
 
 /**
+ * Serialize the state in the hybrid format (Issue #1632).
+ *
+ * ```
+ * 84890
+ * {"pid":84890,"version":"0.18.0","port":3000,...}
+ * ```
+ *
+ * The path of this file has never changed, so a CLI predating #1354 that is still on PATH
+ * (a stale `npm install -g`) reads whatever the current daemon wrote. Those CLIs parse it as
+ * `parseInt(readFileSync(...).trim(), 10)`, which returned NaN for a leading `{` and made them
+ * report "Stopped (no PID file)" for a perfectly healthy server. `parseInt` stops at the first
+ * non-digit, so putting the bare PID on line 1 restores that forward compatibility.
+ *
+ * The JSON is always exactly one line: JSON.stringify escapes control characters inside
+ * strings, so it can never emit a raw newline of its own.
+ */
+function formatState(state: DaemonState): string {
+  return `${state.pid}\n${JSON.stringify(state)}\n`;
+}
+
+/**
+ * Parse the (already trimmed, non-empty) contents of a state file in any format it has had.
+ *
+ * @returns The daemon state, or null when nothing usable could be parsed
+ */
+function parseState(content: string): DaemonState | null {
+  const firstBreak = content.indexOf('\n');
+  // .trim() also drops the \r of a CRLF file, which /^\d+$/ would otherwise reject.
+  const head = (firstBreak === -1 ? content : content.slice(0, firstBreak)).trim();
+
+  if (/^\d+$/.test(head)) {
+    const pid = parseInt(head, 10);
+    if (pid <= 0) {
+      return null;
+    }
+
+    const body = firstBreak === -1 ? '' : content.slice(firstBreak + 1).trim();
+    if (body.length === 0) {
+      // Pre-#1354 format: the file held only the PID.
+      return { pid };
+    }
+
+    // Hybrid format (#1632): line 2 carries the full state. Line 1 is the fallback, so a
+    // truncated or corrupt JSON body still yields a usable PID instead of "no PID file".
+    return parseJsonState(body) ?? { pid };
+  }
+
+  // #1354..#1632 format: the whole file is the JSON state.
+  return parseJsonState(content);
+}
+
+/**
+ * Parse a JSON state object, rejecting anything without a usable PID.
+ */
+function parseJsonState(json: string): DaemonState | null {
+  let parsed: Partial<DaemonState>;
+  try {
+    parsed = JSON.parse(json) as Partial<DaemonState>;
+  } catch {
+    return null;
+  }
+
+  if (typeof parsed.pid !== 'number' || !Number.isInteger(parsed.pid) || parsed.pid <= 0) {
+    return null;
+  }
+  return parsed as DaemonState;
+}
+
+/**
  * PID file manager for daemon process tracking
  */
 export class PidManager {
@@ -69,8 +140,15 @@ export class PidManager {
   /**
    * Read the daemon state from file.
    *
-   * Tolerates the legacy format (a bare integer PID) by returning `{ pid }`, so a state file
-   * written by an older running daemon is still understood after a CLI upgrade (Issue #1354).
+   * Understands all three formats this file has ever had (Issue #1632):
+   * - hybrid (current): bare PID on line 1, JSON state on line 2
+   * - JSON only (#1354 .. #1632): the full state as one JSON object
+   * - bare integer (pre-#1354): just the PID, returned as `{ pid }`
+   *
+   * Reading the JSON of the hybrid format is not optional: falling back to the line-1 PID
+   * would silently drop `version`, disabling the CLI↔server version mismatch warning added
+   * by #1354, and drop `port`/`protocol`/`bind`, sending status back to re-deriving the URL
+   * from a possibly-diverged .env (#1355).
    *
    * @returns The daemon state, or null when the file is missing or invalid
    */
@@ -84,18 +162,7 @@ export class PidManager {
       if (content.length === 0) {
         return null;
       }
-
-      // Legacy format: the file held only the PID as a bare integer.
-      if (/^\d+$/.test(content)) {
-        const pid = parseInt(content, 10);
-        return pid > 0 ? { pid } : null;
-      }
-
-      const parsed = JSON.parse(content) as Partial<DaemonState>;
-      if (typeof parsed.pid !== 'number' || !Number.isInteger(parsed.pid) || parsed.pid <= 0) {
-        return null;
-      }
-      return parsed as DaemonState;
+      return parseState(content);
     } catch {
       return null;
     }
@@ -112,6 +179,7 @@ export class PidManager {
   /**
    * Write the daemon state to file atomically
    * MF-SEC-2: Uses O_EXCL to prevent TOCTOU race conditions
+   * Issue #1632: written in the hybrid format (see formatState)
    *
    * @returns true if successful, false if file already exists
    * @throws Error for other filesystem errors
@@ -126,7 +194,7 @@ export class PidManager {
       );
 
       try {
-        writeSync(fd, JSON.stringify(state));
+        writeSync(fd, formatState(state));
         return true;
       } finally {
         closeSync(fd);

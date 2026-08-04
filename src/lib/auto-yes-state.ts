@@ -419,6 +419,91 @@ export function deleteAutoYesStateByWorktree(worktreeId: string): number {
   return keys.length;
 }
 
+// =============================================================================
+// Worktree ID migration (Issue #1621 Phase 3)
+// =============================================================================
+
+/** One auto-yes state that moved from one worktree ID to another. */
+export interface MigratedAutoYesKey {
+  /** Composite key the state used to live under */
+  oldKey: string;
+  /** Composite key it lives under now */
+  newKey: string;
+  /** Worktree ID before the move */
+  oldWorktreeId: string;
+  /** Worktree ID after the move */
+  newWorktreeId: string;
+  /** CLI tool the state belongs to */
+  cliToolId: CLIToolType;
+  /** Agent instance the state belongs to (equals cliToolId for the primary) */
+  instanceId: string;
+}
+
+/**
+ * Re-key every auto-yes state whose worktree ID is being renamed
+ * (Issue #1621 Phase 3).
+ *
+ * **Transfer, never invalidate.** Auto-Yes is what keeps an unattended worker
+ * answering prompts; dropping the state at rename time would leave the agent
+ * alive and silently stuck at the next confirmation, hours later, with nothing
+ * in the UI to explain it. The state object itself (enabledAt / expiresAt /
+ * stopPattern) is moved verbatim, so the countdown a user started keeps running
+ * against its original deadline.
+ *
+ * Takes the whole batch rather than one pair because IDs can **swap**: with
+ * A→B and B→A applied one at a time, the first move overwrites the destination's
+ * state before the destination has been read. Every source key is therefore read
+ * and removed first, and only then are the new keys written.
+ *
+ * The poller that consumes these states is a separate map with its own timers,
+ * and its timer callbacks capture the worktree ID — see
+ * `reconcileWorktreeSessions`, which restarts them. Moving the state without
+ * restarting the poller would stop Auto-Yes just as surely as deleting it.
+ *
+ * @param renames - Worktree ID pairs being applied
+ * @returns One entry per state that moved
+ */
+export function migrateAutoYesStateWorktreeIds(
+  renames: ReadonlyArray<{ oldId: string; newId: string }>
+): MigratedAutoYesKey[] {
+  const targets = new Map<string, string>();
+  for (const { oldId, newId } of renames) {
+    if (!oldId || !newId || oldId === newId) continue;
+    targets.set(oldId, newId);
+  }
+  if (targets.size === 0) return [];
+
+  const moves: Array<MigratedAutoYesKey & { state: AutoYesState }> = [];
+  for (const [key, state] of autoYesStates) {
+    const oldWorktreeId = extractWorktreeId(key);
+    const newWorktreeId = targets.get(oldWorktreeId);
+    if (!newWorktreeId) continue;
+
+    const cliToolId = extractCliToolId(key);
+    // A key whose second segment is not a known CLI tool cannot be rebuilt
+    // safely; leave it where it is rather than guess (it is unreachable through
+    // buildCompositeKey, so this only fires on hand-written state).
+    if (!cliToolId) continue;
+    const instanceId = extractInstanceId(key) ?? cliToolId;
+
+    moves.push({
+      oldKey: key,
+      newKey: buildCompositeKey(newWorktreeId, cliToolId, instanceId),
+      oldWorktreeId,
+      newWorktreeId,
+      cliToolId,
+      instanceId,
+      state,
+    });
+  }
+
+  // Two passes so a swap (A→B, B→A) cannot have one half clobber the other.
+  for (const move of moves) autoYesStates.delete(move.oldKey);
+  for (const move of moves) autoYesStates.set(move.newKey, move.state);
+
+  return moves.map(({ state: _state, ...rest }) => rest);
+}
+
 /**
  * Calculate backoff interval based on consecutive errors.
  * Returns the normal polling interval when errors are below the threshold,

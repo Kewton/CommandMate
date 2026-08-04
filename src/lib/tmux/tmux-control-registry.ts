@@ -20,6 +20,18 @@ interface RegistryEntry {
   subscribers: Set<string>;
   unsubscribeClientEvent: () => void;
   idleTimer: ReturnType<typeof setTimeout> | null;
+  /**
+   * The name this entry is currently filed under.
+   *
+   * Duplicates the map key on purpose. Every callback the entry owns (the
+   * client event handler, the idle-cleanup timer) has to look the entry back up
+   * by name, and a tmux session can be renamed under a live attach
+   * (Issue #1621 Phase 3). Capturing the name in those closures would leave
+   * them addressing a key that no longer exists, so output would stop reaching
+   * subscribers and the idle timer would fail to clean up. Reading it off the
+   * entry means a rename only has to update this one field.
+   */
+  sessionName: string;
 }
 
 type EventHandler = (event: TmuxControlEvent) => void;
@@ -99,6 +111,48 @@ export class TmuxControlRegistry {
     this.updateMetrics();
   }
 
+  /**
+   * Re-file a live control-mode attach under a session's new name
+   * (Issue #1621 Phase 3).
+   *
+   * `rename-session` does not disturb an attached control client, so the child
+   * process, its pipe and its scrollback all survive — what breaks is this
+   * registry, which is keyed by name. Without re-keying, `sendInput(newName)`
+   * throws "No control client registered" while a perfectly healthy attach sits
+   * under the old key: the session is alive but input no longer reaches it.
+   * Re-keying is therefore strictly better than tearing the attach down and
+   * re-establishing it, and it keeps every subscriber connected.
+   *
+   * @returns true when an entry was moved; false when nothing was registered
+   *          under `oldName`, or when `newName` is already registered (the
+   *          existing attach wins — clobbering it would strand a live child
+   *          process with no way to stop it)
+   */
+  renameSession(oldName: string, newName: string): boolean {
+    if (oldName === newName) return false;
+
+    const entry = this.entries.get(oldName);
+    if (!entry) return false;
+    if (this.entries.has(newName)) {
+      logger.warn('rename:destination-occupied', { oldName, newName });
+      return false;
+    }
+
+    this.entries.delete(oldName);
+    entry.sessionName = newName;
+    this.entries.set(newName, entry);
+    entry.client.setSessionName(newName);
+
+    const handlers = this.handlers.get(oldName);
+    if (handlers) {
+      this.handlers.delete(oldName);
+      this.handlers.set(newName, handlers);
+    }
+
+    logger.debug('rename', { oldName, newName });
+    return true;
+  }
+
   private ensureEntry(sessionName: string): RegistryEntry {
     const existing = this.entries.get(sessionName);
     if (existing) {
@@ -107,24 +161,29 @@ export class TmuxControlRegistry {
 
     const client = this.createClient(sessionName);
     client.start(sessionName);
-    const unsubscribeClientEvent = client.onEvent((event) => {
-      const handlers = this.handlers.get(sessionName);
+
+    const entry: RegistryEntry = {
+      client,
+      subscribers: new Set(),
+      // Replaced immediately below; the entry has to exist first so the event
+      // handler can read its current name rather than capture the old one.
+      unsubscribeClientEvent: () => {},
+      idleTimer: null,
+      sessionName,
+    };
+
+    entry.unsubscribeClientEvent = client.onEvent((event) => {
+      const handlers = this.handlers.get(entry.sessionName);
       if (handlers) {
         for (const handler of handlers) {
           handler(event);
         }
       }
       if (event.type === 'exit' || event.type === 'error') {
-        this.deleteEntry(sessionName);
+        this.deleteEntry(entry.sessionName);
       }
     });
 
-    const entry: RegistryEntry = {
-      client,
-      subscribers: new Set(),
-      unsubscribeClientEvent,
-      idleTimer: null,
-    };
     this.entries.set(sessionName, entry);
     this.updateMetrics();
     return entry;
@@ -151,8 +210,10 @@ export class TmuxControlRegistry {
 
     this.cancelIdleCleanup(entry);
     entry.idleTimer = setTimeout(() => {
-      logger.debug('idle-cleanup', { sessionName });
-      this.deleteEntry(sessionName);
+      // entry.sessionName, not the captured `sessionName`: the session may have
+      // been renamed while this timer was pending (see renameSession).
+      logger.debug('idle-cleanup', { sessionName: entry.sessionName });
+      this.deleteEntry(entry.sessionName);
     }, this.idleTimeoutMs);
   }
 

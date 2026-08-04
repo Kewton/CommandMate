@@ -15,7 +15,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { TASK_STATUSES, type TaskStatus } from '@/lib/db';
+import { ACTIVE_TASK_STATUSES, TASK_STATUSES, TERMINAL_TASK_STATUSES, type TaskStatus } from '@/lib/db';
+// Past the barrel, as tests/unit/db/tasks-db.test.ts does: the resolution set a
+// verification run discovers its own task with is deliberately not re-exported.
+import { VERIFIABLE_TASK_STATUSES } from '@/lib/db/tasks-db';
 import {
   transitionTask,
   TASK_EVENTS,
@@ -46,7 +49,10 @@ const EXPECTED: Record<TaskStatus, Row> = {
   pending: {
     ...rejectAll(),
     message_sent: 'running',
-    send_failed: 'failed',
+    // Issue #1637: a first send that never landed closes the task instead of
+    // failing it, so the orphan cannot be resolved as a later run's contract.
+    // See the dedicated describe block at the bottom of this file.
+    send_failed: 'cancelled',
     cancel: 'cancelled',
   },
   running: {
@@ -188,5 +194,62 @@ describe('transitionTask — the invariants behind the table', () => {
         expect(transitionTask(status, event)).toBe(first);
       }
     }
+  });
+});
+
+/**
+ * Issue #1637: a `--contract` send that never reached the agent leaves a task
+ * row behind, and that row used to be the one a later verification run picked
+ * up when it had to discover its own contract.
+ *
+ * The PM decision recorded on the Issue is: keep the row (audit trail), close
+ * it as soon as the send fails, and keep it out of subsequent scope resolution.
+ * The three assertions below are that decision, split into its parts, plus the
+ * counter-case that must NOT change — `failed` stays re-openable, because that
+ * is what lets an agent retry after a red gate (#1620).
+ *
+ * These are properties of the *pair* (state machine, resolution sets), so they
+ * are asserted against VERIFIABLE_TASK_STATUSES rather than against the literal
+ * `'cancelled'`: widening that set later must fail here rather than silently
+ * reopen the path this closes.
+ */
+describe('send_failed — orphan contract tasks (Issue #1637)', () => {
+  const firstSendFailed = transitionTask('pending', 'send_failed');
+  const laterSendFailed = transitionTask('running', 'send_failed');
+
+  it('closes the task instead of leaving it pending', () => {
+    expect(firstSendFailed).not.toBeNull();
+    expect(TERMINAL_TASK_STATUSES).toContain(firstSendFailed as TaskStatus);
+  });
+
+  it('keeps the orphan out of the set a verification run resolves from', () => {
+    // The bug: `getVerifiableTask` takes the most recently updated row in this
+    // set, so an orphan outranked the real (already `succeeded`) task and the
+    // run was judged against the orphan's older scope snapshot — #1623 exit 20.
+    expect(VERIFIABLE_TASK_STATUSES).not.toContain(firstSendFailed as TaskStatus);
+    expect(ACTIVE_TASK_STATUSES).not.toContain(firstSendFailed as TaskStatus);
+  });
+
+  it('leaves the row addressable rather than deleting it', () => {
+    // Nothing here removes rows; what the state machine has to guarantee is
+    // that the closed status is genuinely final, so the audit entry cannot be
+    // walked back by a later event.
+    for (const event of TASK_EVENTS) {
+      expect(transitionTask(firstSendFailed as TaskStatus, event)).toBeNull();
+    }
+  });
+
+  it('still fails — and reopens — a send that failed after work had started', () => {
+    // A follow-up message to an agent that is already working is a different
+    // situation: real work exists, so the task must stay re-judgeable.
+    expect(laterSendFailed).toBe('failed');
+    expect(VERIFIABLE_TASK_STATUSES).toContain(laterSendFailed as TaskStatus);
+    expect(transitionTask('failed', 'verify_started')).toBe('verifying');
+    expect(transitionTask('failed', 'message_sent')).toBe('running');
+  });
+
+  it('distinguishes the two by origin, not by event', () => {
+    // Guards against "collapse both back to one status" refactors.
+    expect(firstSendFailed).not.toBe(laterSendFailed);
   });
 });

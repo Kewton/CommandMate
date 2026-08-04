@@ -382,6 +382,16 @@ export interface RepositoryListItem {
   /** Sidebar visibility flag (Issue #690). Defaults to true. */
   visible: boolean;
   worktreeCount: number;
+  /**
+   * Paths of the OTHER enabled scan roots that are the same git repository as
+   * this one — i.e. sibling worktrees registered as separate roots (Issue
+   * #1662). Empty for the normal case of one root per repository.
+   *
+   * Optional rather than required: the server always sends it, but typing it as
+   * required would make every existing `RepositoryListItem` literal a compile
+   * error for a field that means "nothing to report" when absent.
+   */
+  duplicateOf?: string[];
 }
 
 /**
@@ -608,6 +618,36 @@ export const repositoryApi = {
   },
 
   /**
+   * Update the scan-inclusion flag for a repository (Issue #1658).
+   *
+   * This is the NON-DESTRUCTIVE exclusion: the server writes one column and
+   * touches neither the worktree rows nor the running tmux sessions. Contrast
+   * with {@link repositoryApi.delete}, which excludes **and purges**.
+   *
+   * Note that the reverse direction has two flavours: this call with
+   * `enabled: true` only flips the flag back, whereas
+   * {@link repositoryApi.restore} additionally re-scans the repository so its
+   * worktrees reappear immediately. The Repositories screen uses `restore` for
+   * re-enabling, because "restore" is what a user pressing it means.
+   *
+   * @param id - Repository ID
+   * @param enabled - true => included in scans, false => excluded
+   * @returns The updated repository (without worktreeCount).
+   */
+  async updateEnabled(
+    id: string,
+    enabled: boolean
+  ): Promise<UpdateRepositoryResponse> {
+    return fetchApi<UpdateRepositoryResponse>(
+      `/api/repositories/${encodeURIComponent(id)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ enabled }),
+      }
+    );
+  },
+
+  /**
    * Check a local path before scanning it (Issue #1517).
    *
    * Answers the question `scan` will answer — is this inside an allowed root,
@@ -635,6 +675,13 @@ export interface ValidatePathResponse {
   allowedRootsLabel: string;
   isGitRepo: boolean;
   worktreeCount: number | null;
+  /**
+   * Paths of already-registered scan roots that are the SAME git repository as
+   * the candidate (Issue #1662). Non-empty means "registering this creates a
+   * duplicate scan root" — a warning the Add form must surface, NOT a rejection:
+   * `valid` is unaffected by it.
+   */
+  duplicateScanRoots?: string[];
 }
 
 /**

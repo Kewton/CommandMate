@@ -12,6 +12,7 @@ import type { PromptResponseResult } from '../types/api-responses';
 import { ApiClient, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { isCliToolId } from '../config/cli-tool-ids';
+import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 import { resolveInstanceCliTool } from './instances';
 
 export function createRespondCommand(): Command {
@@ -20,8 +21,8 @@ export function createRespondCommand(): Command {
     .description("Respond to an agent's prompt (yes/no, number, or text)")
     .argument('<worktree-id>', 'Worktree ID')
     .argument('<answer>', 'Response answer (yes, no, number, or free text)')
-    .option('--agent <agent>', 'CLI tool agent (claude, codex, gemini, vibe-local, opencode, copilot, antigravity)')
-    .option('--instance <id>', 'Agent instance ID: <agent> or <agent>-<n> (e.g. claude-2). Defaults to the agent\'s primary instance.')
+    .option('--instance <id>', INSTANCE_OPTION_DESCRIPTION)
+    .option('--agent <agent>', AGENT_OPTION_DESCRIPTION)
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeId: string, answer: string, options: RespondOptions) => {
       try {

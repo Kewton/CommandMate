@@ -58,6 +58,7 @@ import { assessSkillUninstall, readSkillReceiptDigest } from '@/lib/skills/unins
 import { buildPackage } from '../../../fixtures/skills/malicious-packages/package';
 import type { PackageFileSpec } from '../../../fixtures/skills/malicious-packages/package';
 import { makeCatalogVersion } from './fixtures';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const SKILL_ID = 'demo-skill';
 const VERSION = '1.2.3';
@@ -138,7 +139,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(worktree, { recursive: true, force: true });
+  removeTempDir(worktree);
 });
 
 // =============================================================================
@@ -429,7 +430,7 @@ describe('removeReceiptOwnedFile — the per-file guards', () => {
 
       expect(existsSync(victim)).toBe(true);
     } finally {
-      rmSync(outside, { recursive: true, force: true });
+      removeTempDir(outside);
     }
   });
 

@@ -7,6 +7,7 @@
  * Issue #190: Repository exclusion on sync (disableRepository before worktree check)
  * Issue #644: Repository list display
  * Issue #1346: No ghost repository record when DELETE answers 404
+ * Issue #1662: GET reports which rows are the SAME git repository as another
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -21,6 +22,7 @@ import {
   disableExistingRepository,
   getAllRepositoriesWithWorktreeCount,
 } from '@/lib/db/db-repository';
+import { findDuplicateScanRoots } from '@/lib/git/git-common-dir';
 import { cleanupMultipleWorktrees, killWorktreeSession } from '@/lib/session-cleanup';
 import { cleanupRooms, broadcastMessage } from '@/lib/ws-server';
 import { createLogger } from '@/lib/logger';
@@ -39,11 +41,33 @@ const logger = createLogger('api/repositories');
  * number of worktrees currently registered under that repository path.
  *
  * Issue #644
+ * Issue #1662: each row also carries `duplicateOf` — the paths of the OTHER
+ * scan roots that are the same git repository as this one. This is the
+ * "already registered" half of the duplicate-scan-root pair; the registration
+ * half lives in `POST /api/repositories/validate-path`.
  */
 export async function GET() {
   try {
     const db = getDbInstance();
     const repos = getAllRepositoriesWithWorktreeCount(db);
+
+    // Issue #1662: only ENABLED rows take part. A disabled root is dropped from
+    // the scan set by `registerAndFilterRepositories`, so it cannot be half of a
+    // double-scan and flagging it would be a false positive. It also makes the
+    // fix legible: excluding one of the pair with the Issue #1658 Scan toggle
+    // makes the warning disappear from the row that remains.
+    const duplicateGroups = await findDuplicateScanRoots(
+      repos.filter((r) => r.enabled).map((r) => r.path)
+    );
+    const duplicatesByPath = new Map<string, string[]>();
+    for (const group of duplicateGroups) {
+      for (const memberPath of group.paths) {
+        duplicatesByPath.set(
+          memberPath,
+          group.paths.filter((other) => other !== memberPath)
+        );
+      }
+    }
 
     const repositories = repos.map((r) => ({
       id: r.id,
@@ -54,6 +78,9 @@ export async function GET() {
       // Issue #690: Sidebar visibility flag, independent of `enabled`.
       visible: r.visible,
       worktreeCount: r.worktreeCount,
+      // Issue #1662: empty for the overwhelmingly common case of a row that is
+      // the only scan root for its repository.
+      duplicateOf: duplicatesByPath.get(r.path) ?? [],
     }));
 
     return NextResponse.json({ success: true, repositories }, { status: 200 });

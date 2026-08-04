@@ -18,7 +18,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import Database from 'better-sqlite3';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { runMigrations } from '@/lib/db/db-migrations';
@@ -55,6 +55,7 @@ import { getSkillCatalog } from '@/lib/skills/catalog-client';
 import type { SkillInstallationsResponse } from '@/app/api/skills/installations/route';
 import type { SkillOperationsResponse } from '@/app/api/skills/operations/route';
 import type { SkillReindexResponse } from '@/app/api/skills/reindex/route';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const getDbInstanceMock = vi.mocked(getDbInstance);
 const getSkillCatalogMock = vi.mocked(getSkillCatalog);
@@ -232,7 +233,7 @@ beforeEach(() => {
 
 afterEach(() => {
   db.close();
-  rmSync(repoRoot, { recursive: true, force: true });
+  removeTempDir(repoRoot);
   invalidateSkillStatusScanCache();
   vi.clearAllMocks();
 });
@@ -269,7 +270,7 @@ describe('GET /api/skills/installations', () => {
     const wt2 = insertWorktree('wt-2');
     install('wt-1', wt1, 'demo-skill');
     install('wt-2', wt2, 'other-skill');
-    rmSync(path.join(wt2, SECONDARY, 'other-skill'), { recursive: true, force: true });
+    removeTempDir(path.join(wt2, SECONDARY, 'other-skill'));
 
     expect((await installationsRequest('?refresh=true&worktreeId=wt-1')).installations).toHaveLength(
       1

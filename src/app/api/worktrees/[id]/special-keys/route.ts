@@ -16,6 +16,7 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { hasSession, isAllowedSpecialKey, sendSpecialKeysAndInvalidate } from '@/lib/tmux/tmux';
 import { createLogger } from '@/lib/logger';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/special-keys');
 
@@ -27,7 +28,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   // 0. JSON parse defense [DR4-002]
-  const { id } = await params;
+  const { id: requestedWorktreeId } = await params;
+  const id = canonicalWorktreeId(requestedWorktreeId);
   let body: Record<string, unknown>;
   try {
     body = await req.json();

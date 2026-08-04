@@ -10,8 +10,9 @@
  */
 
 import path from 'path';
-import { mkdirSync, rmSync, writeFileSync, symlinkSync, mkdtempSync } from 'fs';
+import { mkdirSync, writeFileSync, symlinkSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
+import { removeTempDir } from './temp-dir';
 
 export interface SymlinkTestFixture {
   /** Worktree root directory (temp) */
@@ -79,6 +80,6 @@ export function createSymlinkFixture(options: SymlinkFixtureOptions = {}): Symli
  * @param fixture - The fixture to clean up
  */
 export function cleanupSymlinkFixture(fixture: SymlinkTestFixture): void {
-  rmSync(fixture.testRoot, { recursive: true, force: true });
-  rmSync(fixture.externalDir, { recursive: true, force: true });
+  removeTempDir(fixture.testRoot);
+  removeTempDir(fixture.externalDir);
 }

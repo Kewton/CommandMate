@@ -17,7 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import type { SkillInstallReceipt } from '@/types/skills';
@@ -54,6 +54,7 @@ import {
 } from '@/lib/skills/constants';
 import { SKILL_RECEIPT_FILENAME } from '@/lib/skills/install-plan';
 import { resetSkillGitWorkflowTargetsForTesting } from '@/lib/skills/git-workflow';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const WORKTREE_ID = 'wt-00000000-0000-4000-8000-000000000001';
 const SKILL_ID = 'demo-skill';
@@ -195,7 +196,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  removeTempDir(root);
 });
 
 // =============================================================================
@@ -274,7 +275,7 @@ describe('POST git-workflow — failures stay distinguishable', () => {
     const prepared = await prepare();
     writeInstalledPayload();
     // The remote disappears between prepare and apply.
-    rmSync(bare, { recursive: true, force: true });
+    removeTempDir(bare);
 
     const response = await post({
       phase: 'apply',
@@ -333,7 +334,7 @@ describe('POST git-workflow — failures stay distinguishable', () => {
   it('recovers on retry: the second apply pushes without re-committing', async () => {
     const prepared = await prepare();
     writeInstalledPayload();
-    rmSync(bare, { recursive: true, force: true });
+    removeTempDir(bare);
     await post({
       phase: 'apply',
       workflowToken: prepared.json.workflowToken,

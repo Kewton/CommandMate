@@ -14,7 +14,15 @@
 // ============================================================================
 
 // response-poller-core public API (polling lifecycle)
-export { startPolling, stopPolling, stopAllPolling, getActivePollers } from './response-poller-core';
+export {
+  startPolling,
+  stopPolling,
+  stopAllPolling,
+  getActivePollers,
+  // Issue #1621 Phase 3: follow a worktree ID rename without dropping the turn
+  migrateResponsePollerWorktreeIds,
+} from './response-poller-core';
+export type { MigratedPollerKey } from './response-poller-core';
 
 // response-extractor public API
 export { resolveExtractionStartIndex, isOpenCodeComplete } from '../response-extractor';
@@ -35,4 +43,9 @@ export {
 } from '../tui-accumulator';
 
 // prompt-dedup public API
-export { isDuplicatePrompt, clearPromptHashCache, normalizePromptForDedup } from './prompt-dedup';
+export {
+  isDuplicatePrompt,
+  clearPromptHashCache,
+  renamePromptHashCacheKey,
+  normalizePromptForDedup,
+} from './prompt-dedup';

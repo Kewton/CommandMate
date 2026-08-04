@@ -22,7 +22,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createLogger } from '@/lib/logger';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
+import { canonicalWorktreeId, resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
 import { handleGitApiError } from '@/lib/git/git-errors';
 import { resolveAgentInstances } from '@/lib/session/agent-instances-resolver';
 import { isSessionRunning } from '@/lib/session/cli-session';
@@ -204,7 +204,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string; skillId: string }> }
 ): Promise<NextResponse> {
   try {
-    const { id, skillId } = await params;
+    const { id: requestedWorktreeId, skillId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
 
     const worktree = resolveWorktreeOr404(id);
     if (worktree instanceof NextResponse) return worktree;

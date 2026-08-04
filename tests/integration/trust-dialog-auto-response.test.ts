@@ -57,6 +57,7 @@ import {
   CLAUDE_PROMPT_PATTERN,
 } from '@/lib/detection/cli-patterns';
 import { hasSession, createSession, sendKeys, capturePane } from '@/lib/tmux/tmux';
+import { isSessionStartTimeoutError } from '@/lib/session/session-start-error';
 
 describe('Issue #201: Trust dialog auto-response - Acceptance Tests', () => {
   beforeEach(() => {
@@ -164,33 +165,97 @@ describe('Issue #201: Trust dialog auto-response - Acceptance Tests', () => {
       expect(trustLogCalls.length).toBeGreaterThanOrEqual(1);
     });
 
-    it('AC5: should timeout if prompt never appears after trust dialog Enter', async () => {
+    /**
+     * AC5 asserts the *cause* again, as it did when Issue #201 first wrote it.
+     *
+     * History, checked rather than recalled. `841f8a37` (#201) asserted
+     * `'Claude initialization timeout'`. `b17c7efb` (#1102) replaced it with the
+     * generic `'Failed to start Claude session'` and added a comment citing
+     * "SEC-SF-002: detailed error is logged server-side, not surfaced to the
+     * client". Both halves of that citation are wrong as a justification, and
+     * the comment is corrected here rather than left standing behind a new
+     * expectation:
+     *
+     *  - #1102 was not a security decision. Its title is "test: integration
+     *    \u30B9\u30A4\u30FC\u30C8\u306E\u65E2\u5B58 drift \u89E3\u6D88\uFF08500 \u306B\u306A\u308B API \u7CFB\u30E2\u30C3\u30AF/\u671F\u5F85\u5024\u306E\u8FFD\u968F + CI \u8FFD\u52A0\uFF09"
+     *    and its scope says, in as many words, \u30B9\u30B3\u30FC\u30D7\u5916: \u30D7\u30ED\u30C0\u30AF\u30C8\u5B9F\u88C5\u306E\u6319\u52D5\u5909\u66F4
+     *    \uFF08\u30C6\u30B9\u30C8/\u30E2\u30C3\u30AF\u306E\u8FFD\u968F\u306E\u307F\u3002\u5B9F\u88C5\u304C\u6B63\u3057\u3044\u524D\u63D0\uFF09. The assertion was changed to
+     *    follow the implementation of the day, and the rationale was written
+     *    afterwards to explain what the implementation happened to do.
+     *  - SEC-SF-002 does not say "collapse the cause". Every other use of the
+     *    marker in src/ is input validation (worktreeId / duration whitelist /
+     *    MAX_SEARCH_QUERY_LENGTH), 500-character content truncation, or a
+     *    User-Agent header. The one that touches error responses at all is
+     *    `src/app/api/worktrees/[id]/files/[...path]/route.ts`: "Error responses
+     *    without absolute paths". That is a rule about paths, not about causes.
+     *
+     * Issue #1637 keeps the part of SEC-SF-002 that is real \u2014 an unexpected
+     * failure still collapses to the fixed generic string, and no message ever
+     * carries a path or raw pane output \u2014 while letting the caller learn that
+     * the session is *starting*, which is the whole point of that Issue. The
+     * leak-freedom is asserted below instead of being approximated by "the
+     * message is a constant".
+     */
+    it('AC5: should report an initialization timeout if the prompt never appears', async () => {
       vi.mocked(hasSession).mockResolvedValue(false);
       vi.mocked(createSession).mockResolvedValue();
       vi.mocked(sendKeys).mockResolvedValue();
 
       // Trust dialog appears but prompt never comes after Enter
-      vi.mocked(capturePane).mockResolvedValue(
-        ' \u276F 1. Yes, I trust this folder\n   2. No, exit'
-      );
+      const paneOutput = ' \u276F 1. Yes, I trust this folder\n   2. No, exit';
+      vi.mocked(capturePane).mockResolvedValue(paneOutput);
 
       const promise = startClaudeSession({
         worktreeId: 'stuck-workspace',
         worktreePath: '/path/to/stuck/workspace',
       });
-
-      // The init-timeout path (throw 'Claude initialization timeout') is caught by
-      // startClaudeSession and deliberately re-thrown as the generic
-      // 'Failed to start Claude session' (SEC-SF-002: detailed error is logged
-      // server-side, not surfaced to the client). Assert that generic message
-      // (Issue #1102: was asserting the internal timeout message).
-      const assertion = expect(promise).rejects.toThrow(
-        'Failed to start Claude session'
-      );
+      const captured = promise.catch((error: unknown) => error);
 
       await vi.advanceTimersByTimeAsync(CLAUDE_INIT_TIMEOUT + 1000);
+      const error = (await captured) as Error;
 
-      await assertion;
+      // The session and the CLI process are both still alive; only the prompt
+      // was not observed. That is what the caller has to be able to act on.
+      expect(isSessionStartTimeoutError(error)).toBe(true);
+      expect(error.message).toContain('initialization timeout');
+      expect(error.message).toMatch(/retry/i);
+      // Derived from the constant, not written as "60s": pinning the literal is
+      // what let this expectation drift away from the implementation twice.
+      expect(error.message).toContain(`${Math.round(CLAUDE_INIT_TIMEOUT / 1000)}s`);
+    });
+
+    it('AC5b: the timeout message leaks no path, pane output or stack frame', async () => {
+      vi.mocked(hasSession).mockResolvedValue(false);
+      vi.mocked(createSession).mockResolvedValue();
+      vi.mocked(sendKeys).mockResolvedValue();
+
+      const paneOutput = ' \u276F 1. Yes, I trust this folder\n   2. No, exit';
+      vi.mocked(capturePane).mockResolvedValue(paneOutput);
+
+      const promise = startClaudeSession({
+        worktreeId: 'stuck-workspace',
+        worktreePath: '/path/to/stuck/workspace',
+      });
+      const captured = promise.catch((error: unknown) => error);
+
+      await vi.advanceTimersByTimeAsync(CLAUDE_INIT_TIMEOUT + 1000);
+      const message = ((await captured) as Error).message;
+
+      // The worktree path, and the resolved CLI binary path from the
+      // child_process mock above \u2014 neither is the caller's to see.
+      expect(message).not.toContain('/path/to/stuck/workspace');
+      expect(message).not.toContain('/usr/local/bin/claude');
+      // Nothing that merely looks like an absolute path either.
+      expect(message).not.toMatch(/(?:^|[\s'"(])\/[\w.-]+\//);
+      // Raw capture output: the pane is arbitrary CLI text and may hold anything.
+      expect(message).not.toContain(paneOutput);
+      expect(message).not.toContain('Yes, I trust this folder');
+      // Not assembled from a stack trace.
+      expect(message).not.toMatch(/\n\s+at\s/);
+
+      // What it does name is the tmux session, which is derived from the
+      // worktreeId the caller itself supplied \u2014 not new information.
+      expect(message).toContain('mcbd-claude-stuck-workspace');
     });
   });
 

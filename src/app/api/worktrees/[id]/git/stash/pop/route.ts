@@ -14,7 +14,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { stashPop, handleGitApiError } from '@/lib/git/git-utils';
-import { resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
+import { canonicalWorktreeId, resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
 import { validateStashIndex } from '@/lib/git/git-route-helpers';
 
 export async function POST(
@@ -22,7 +22,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const worktree = resolveWorktreeOr404(id);
     if (worktree instanceof NextResponse) {
       return worktree;

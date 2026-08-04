@@ -20,7 +20,7 @@ BASE_BRANCH="cmate-verify-base"
 # Floor on the assertion count. A suite that silently stops running cases would
 # otherwise exit 0 with "0 failed" — the same empty-glob trap the orchestrate-monitor
 # syntax test guards against.
-MIN_ASSERTIONS=150
+MIN_ASSERTIONS=200
 
 [ -f "$RUNNER" ] || { echo "run-tests: runner not found: $RUNNER" >&2; exit 2; }
 [ -d "$FIXTURES" ] || { echo "run-tests: fixtures not found: $FIXTURES" >&2; exit 2; }
@@ -213,8 +213,15 @@ case "$probe" in
 esac
 
 # --- 1. every gate passes -----------------------------------------------------
+# The work commit has to touch a file. Since Issue #1651 the commit counter runs
+# under a pathspec (`:(top)` plus the contract exclusion), and git's history
+# simplification drops commits that modify no path — so a `--allow-empty` commit
+# now counts as 0. That is the product engine's behaviour too (#1580), and it is
+# the right answer: a commit that changed nothing is not work.
 repo=$(new_repo worked)
-git -C "$repo" commit -q --allow-empty -m work
+printf 'agent output\n' > "$repo/work.txt"
+git -C "$repo" add -A >/dev/null 2>&1
+git -C "$repo" commit -q -m work
 run_verify --config "$FIXTURES/all-pass.yaml" --cwd "$repo" --base-ref "$BASE_BRANCH"
 assert_eq "all-pass: exit code is 0" "0" "$RC"
 assert_has "all-pass: work-evidence counts the commit" "$OUT" "GATE work-evidence PASS commits=1 uncommitted=0"
@@ -386,6 +393,7 @@ assert_rejected bad-missing-id.yaml "gate is missing id:"
 assert_rejected bad-gate-key.yaml "unknown gate key: retries"
 assert_rejected bad-option-key.yaml "unknown options key: parallel"
 assert_rejected bad-option-value.yaml "skipInPrimaryCheckout must be true or false"
+assert_rejected bad-require-commit.yaml "requireCommit must be true or false"
 assert_rejected bad-flow.yaml "flow-style values are not supported"
 assert_rejected bad-anchor.yaml "anchors/aliases are not supported"
 assert_rejected bad-block-scalar.yaml "block scalars are not supported"
@@ -438,6 +446,202 @@ assert_has "no-log-tail: the gate fails with its exit code" "$OUT" "GATE noisy F
 assert_has "no-log-tail: the disabled tail is reported, not silently skipped" "$OUT" "gate noisy (FAIL exit=5): log tail disabled (maxLogTailBytes=0)"
 assert_lacks "no-log-tail: the tail really is suppressed" "$OUT" "tail-should-not-appear"
 assert_stdout_contract "no-log-tail: stdout holds only GATE/RESULT records" "$RAWOUT"
+
+# --- 17. options.requireCommit (Issue #1639) ----------------------------------
+# `commits=0 uncommitted=1` is the right answer to "did anything happen here" and
+# the wrong one to "is this finished": a contract that says 未 commit の作業は未完了
+# とみなされる was still collecting RESULT passed over work nobody committed
+# (#1628 D-4). Every case below pairs a verdict with the marker file, because the
+# label the runner prints about itself is not evidence that a gate ran.
+rc_dirty=$(new_repo require-commit-dirty)
+echo scratch > "$rc_dirty/work.txt"
+
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+export CMATE_VERIFY_TEST_MARKER
+run_verify --config "$FIXTURES/require-commit.yaml" --cwd "$rc_dirty" --base-ref "$BASE_BRANCH"
+assert_eq "requireCommit: an uncommitted change alone is exit 21" "21" "$RC"
+assert_has "requireCommit: the flag is echoed in the gate line" "$OUT" \
+  "GATE work-evidence FAIL commits=0 uncommitted=1 requireCommit=true"
+assert_has "requireCommit: verdict is not_started" "$OUT" "RESULT not_started"
+assert_has "requireCommit: FAIL over a dirty tree explains itself on stderr" "$ERR" \
+  "options.requireCommit is set: uncommitted changes are not work evidence, commit them."
+assert_lacks "requireCommit: the reason stays off stdout" "$RAWOUT" "not work evidence"
+assert_stdout_contract "requireCommit: stdout holds only GATE/RESULT records" "$RAWOUT"
+assert_file_absent "requireCommit: no command gate is executed" "$marker"
+
+# Pairs with the case above: same repo, same fixture, only the commit differs. A
+# runner that rejected everything would otherwise look correct.
+git -C "$rc_dirty" add -A >/dev/null 2>&1
+git -C "$rc_dirty" commit -q -m work
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+run_verify --config "$FIXTURES/require-commit.yaml" --cwd "$rc_dirty" --base-ref "$BASE_BRANCH"
+assert_eq "requireCommit: the same change committed is exit 0" "0" "$RC"
+assert_has "requireCommit: the commit is counted" "$OUT" \
+  "GATE work-evidence PASS commits=1 uncommitted=0 requireCommit=true"
+assert_has "requireCommit: verdict is passed" "$OUT" "RESULT passed"
+assert_file_present "requireCommit: the command gate ran" "$marker"
+
+# ...and the opposite pairing: the same dirty tree under the default option is
+# still work evidence, so the new branch cannot be firing unconditionally.
+rc_default=$(new_repo require-commit-default)
+echo scratch > "$rc_default/work.txt"
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+run_verify --config "$FIXTURES/side-effect.yaml" --cwd "$rc_default" --base-ref "$BASE_BRANCH"
+assert_eq "requireCommit: absent by default, so a dirty tree passes" "0" "$RC"
+assert_lacks "requireCommit: the flag is not echoed when it is off" "$RAWOUT" "requireCommit"
+assert_file_present "requireCommit: the command gate ran under the default" "$marker"
+
+# Zero work is still plain not_started: the requireCommit reason would be the
+# wrong diagnosis for a repository where nothing happened at all.
+rc_empty=$(new_repo require-commit-empty)
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+run_verify --config "$FIXTURES/require-commit.yaml" --cwd "$rc_empty" --base-ref "$BASE_BRANCH"
+assert_eq "requireCommit: zero work is still exit 21" "21" "$RC"
+assert_has "requireCommit: zero work reports both counters" "$OUT" \
+  "GATE work-evidence FAIL commits=0 uncommitted=0 requireCommit=true"
+assert_lacks "requireCommit: zero work is not blamed on the commit rule" "$ERR" \
+  "not work evidence"
+assert_file_absent "requireCommit: zero work runs no command gate" "$marker"
+
+# --skip-work-evidence still bypasses the whole gate, requireCommit included:
+# the flag turns the gate off, it does not soften it.
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+run_verify --config "$FIXTURES/require-commit.yaml" --cwd "$rc_empty" --base-ref "$BASE_BRANCH" --skip-work-evidence
+assert_eq "requireCommit: --skip-work-evidence bypasses it" "0" "$RC"
+assert_has "requireCommit: the gate reports the flag skip" "$OUT" "GATE work-evidence SKIP reason=flag"
+assert_file_present "requireCommit: the command gate ran after the skip" "$marker"
+
+# --- 18. contract files are not work evidence (Issue #1651 / #1580) -----------
+# `.commandmate/tasks/` is the orchestrator's own evidence. A worktree holding
+# nothing but the contract that was just dropped into it is a worktree where the
+# agent did nothing, and reporting `RESULT passed` over it is the same defect
+# class as #1628 D-4: a pass over something nobody looked at. Every case pairs
+# the verdict with the marker file, because the label the runner prints about
+# itself is not evidence that a gate ran.
+ct=$(new_repo contract-only)
+mkdir -p "$ct/.commandmate/tasks"
+printf 'version: 1\ntitle: t\n' > "$ct/.commandmate/tasks/issue-1651.yaml"
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+export CMATE_VERIFY_TEST_MARKER
+run_verify --config "$FIXTURES/side-effect.yaml" --cwd "$ct" --base-ref "$BASE_BRANCH"
+assert_eq "contract: an untracked contract file alone is exit 21" "21" "$RC"
+assert_has "contract: neither counter sees it" "$OUT" \
+  "GATE work-evidence FAIL commits=0 uncommitted=0"
+assert_has "contract: verdict is not_started" "$OUT" "RESULT not_started"
+# Without -uall this entry is `?? .commandmate/`, which does not match the
+# prefix and comes back as work — so this case also pins the untracked mode.
+assert_has "contract: two zeroes over a dirty tree explain themselves on stderr" "$ERR" \
+  "the only changes here are execution contracts under .commandmate/tasks/"
+assert_lacks "contract: the reason stays off stdout" "$RAWOUT" "execution contracts"
+assert_stdout_contract "contract: stdout holds only GATE/RESULT records" "$RAWOUT"
+assert_file_absent "contract: no command gate is executed" "$marker"
+
+# A setup commit carrying only the contract is not a commit's worth of work
+# either. This is the pathspec half of the exclusion.
+git -C "$ct" add -A >/dev/null 2>&1
+git -C "$ct" commit -q -m "setup: contract"
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+run_verify --config "$FIXTURES/side-effect.yaml" --cwd "$ct" --base-ref "$BASE_BRANCH"
+assert_eq "contract: a commit carrying only the contract is still exit 21" "21" "$RC"
+assert_has "contract: the setup commit is not counted" "$OUT" \
+  "GATE work-evidence FAIL commits=0 uncommitted=0"
+assert_file_absent "contract: the setup commit runs no command gate" "$marker"
+
+# The countering half: real work in the very same tree is still counted, so the
+# exclusion cannot be a blanket off switch for the gate.
+printf 'agent output\n' > "$ct/work.txt"
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+run_verify --config "$FIXTURES/side-effect.yaml" --cwd "$ct" --base-ref "$BASE_BRANCH"
+assert_eq "contract: real work beside the contract is exit 0" "0" "$RC"
+assert_has "contract: only the non-contract entry is counted" "$OUT" \
+  "GATE work-evidence PASS commits=0 uncommitted=1"
+assert_lacks "contract: a passing gate prints no exclusion note" "$ERR" "execution contracts"
+assert_file_present "contract: the command gate ran" "$marker"
+
+git -C "$ct" add -A >/dev/null 2>&1
+git -C "$ct" commit -q -m work
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+run_verify --config "$FIXTURES/side-effect.yaml" --cwd "$ct" --base-ref "$BASE_BRANCH"
+assert_eq "contract: a commit touching real files is exit 0" "0" "$RC"
+assert_has "contract: the commit that carries real work is counted" "$OUT" \
+  "GATE work-evidence PASS commits=1 uncommitted=0"
+assert_file_present "contract: the command gate ran after the work commit" "$marker"
+
+# An entry counts when ANY of its paths is outside the contract directory, so a
+# rename that moves the contract into real work is a change — in both
+# directions. Judging the destination alone would miss the second one.
+ren=$(new_repo contract-rename)
+mkdir -p "$ren/.commandmate/tasks"
+printf 'version: 1\ntitle: t\n' > "$ren/.commandmate/tasks/issue-1651.yaml"
+git -C "$ren" add -A >/dev/null 2>&1
+git -C "$ren" commit -q -m "setup: contract"
+mkdir -p "$ren/src"
+git -C "$ren" mv .commandmate/tasks/issue-1651.yaml "src/real work.yaml"
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+run_verify --config "$FIXTURES/side-effect.yaml" --cwd "$ren" --base-ref "$BASE_BRANCH"
+assert_eq "contract-rename: contract moved into real work is exit 0" "0" "$RC"
+assert_has "contract-rename: the rename counts as one change" "$OUT" \
+  "GATE work-evidence PASS commits=0 uncommitted=1"
+assert_file_present "contract-rename: the command gate ran" "$marker"
+
+git -C "$ren" add -A >/dev/null 2>&1
+git -C "$ren" commit -q -m "rename out"
+git -C "$ren" mv "src/real work.yaml" .commandmate/tasks/issue-1651.yaml
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+run_verify --config "$FIXTURES/side-effect.yaml" --cwd "$ren" --base-ref "$BASE_BRANCH"
+assert_eq "contract-rename: real work moved into the contract dir is exit 0" "0" "$RC"
+assert_has "contract-rename: the origin path outside the contract still counts" "$OUT" \
+  "uncommitted=1"
+assert_file_present "contract-rename: the command gate ran on the reverse rename" "$marker"
+
+# Paths the human porcelain format would C-quote. Read through `--porcelain`
+# without -z the entry below is `?? ".commandmate/tasks/issue 1651.yaml"`, whose
+# leading quote does not match the prefix — i.e. the contract would be counted.
+sp=$(new_repo contract-spaces)
+mkdir -p "$sp/.commandmate/tasks"
+printf 'version: 1\n' > "$sp/.commandmate/tasks/issue 1651.yaml"
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+run_verify --config "$FIXTURES/side-effect.yaml" --cwd "$sp" --base-ref "$BASE_BRANCH"
+assert_eq "contract-spaces: a quoted contract path is still excluded" "21" "$RC"
+assert_has "contract-spaces: neither counter sees it" "$OUT" \
+  "GATE work-evidence FAIL commits=0 uncommitted=0"
+assert_file_absent "contract-spaces: no command gate is executed" "$marker"
+
+printf 'x\n' > "$sp/a real file.txt"
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+run_verify --config "$FIXTURES/side-effect.yaml" --cwd "$sp" --base-ref "$BASE_BRANCH"
+assert_eq "contract-spaces: a quoted non-contract path is counted" "0" "$RC"
+assert_has "contract-spaces: exactly the one real file is counted" "$OUT" \
+  "GATE work-evidence PASS commits=0 uncommitted=1"
+assert_file_present "contract-spaces: the command gate ran" "$marker"
+
+# -uall, stated as its own assertion: a fresh untracked directory is judged file
+# by file. Under the default untracked mode this reports 1 (the directory), which
+# used to be a pinned divergence from the TS engine (#1639 -> #1651).
+ua=$(new_repo untracked-dir)
+mkdir -p "$ua/generated"
+printf 'a\n' > "$ua/generated/a.txt"
+printf 'b\n' > "$ua/generated/b.txt"
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+run_verify --config "$FIXTURES/side-effect.yaml" --cwd "$ua" --base-ref "$BASE_BRANCH"
+assert_eq "untracked-dir: exit code is 0" "0" "$RC"
+assert_has "untracked-dir: a new directory is counted per file, not once" "$OUT" \
+  "GATE work-evidence PASS commits=0 uncommitted=2"
+assert_file_present "untracked-dir: the command gate ran" "$marker"
 
 # --- summary ------------------------------------------------------------------
 total=$((TOTAL_PASS + TOTAL_FAIL))

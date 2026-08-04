@@ -25,6 +25,7 @@ import {
 } from '@/lib/cmate-writer';
 import { syncSchedulesNow } from '@/lib/schedule-manager';
 import { createLogger } from '@/lib/logger';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/cmate-schedules');
 
@@ -66,7 +67,8 @@ function normalizeInput(body: Record<string, unknown>): ScheduleWriteInput {
  */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const resolved = resolveWorktree(id);
     if ('error' in resolved) return resolved.error;
 
@@ -101,7 +103,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
  */
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const resolved = resolveWorktree(id);
     if ('error' in resolved) return resolved.error;
 
@@ -132,7 +135,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
  */
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const resolved = resolveWorktree(id);
     if ('error' in resolved) return resolved.error;
 

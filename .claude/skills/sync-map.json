@@ -7,8 +7,8 @@
   "counterpart": {
     "repo": "Kewton/commandmate-skills",
     "url": "https://github.com/Kewton/commandmate-skills",
-    "lastSyncedRef": "439338b",
-    "lastSyncedAt": "2026-08-01",
+    "lastSyncedRef": "b273a47",
+    "lastSyncedAt": "2026-08-03",
     "checkoutRequired": false,
     "checkoutNote": "この対応表による検知はローカルの sha256 だけで完結する。skills は個人リポジトリで、CI から書ける token を増やしたくない（docs/user-guide/skills.md §3-9）ため、CI は counterpart を checkout しない。手元に checkout がある時だけ `node scripts/skills-sync-map.mjs check --counterpart <dir>` で実 diff を取る。"
   },
@@ -48,8 +48,8 @@
         {
           "path": "SKILL.md",
           "policy": "port-required",
-          "sha256": "9f2ec5d06920e9f02d85753d482f6dd7dc7080daad56c7ea28aaf038f14b73e0",
-          "note": "#1586 の移植で GitHub 絶対 URL 化・「起案 / スタンドアロンランナー」の2役への書き換えが入っている。単純コピーするとこの適応が壊れる（#1611 で実際に注意点として扱った）。手順・フラグ・exit code の意味を変えたときは counterpart 側の同じ節を書き直す。"
+          "sha256": "5b26a8a6f6e8a9abc8ced73a724333e8103ce3fcfce8a6d21827d96394de39cf",
+          "note": "#1586 の移植で GitHub 絶対 URL 化・「起案 / スタンドアロンランナー」の2役への書き換えが入っている。単純コピーするとこの適応が壊れる（#1611 で実際に注意点として扱った）。手順・フラグ・exit code の意味を変えたときは counterpart 側の同じ節を書き直す。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。"
         },
         {
           "path": "scripts/tests/fixtures/all-pass.yaml",
@@ -122,6 +122,12 @@
           "sha256": "a41b5672d7adfdf698062ce1e47c154106e38eabd97ebb9906d109acf11053ff"
         },
         {
+          "path": "scripts/tests/fixtures/bad-require-commit.yaml",
+          "policy": "byte-identical",
+          "sha256": "2262736fa5dfcd4ae37e512c8f9cf5d054b5590a54036ce2c2bd9517c8d69586",
+          "note": "他の fixture と同じく counterpart へ逐語コピーする。Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。"
+        },
+        {
           "path": "scripts/tests/fixtures/bad-reserved-id.yaml",
           "policy": "byte-identical",
           "sha256": "f8a526bc59f198505c82533c184572b5ac1191f30dad70f3907a703967acb231"
@@ -167,6 +173,12 @@
           "sha256": "262417735fae50aa79e3addb33e5157cc202df16045ec2af2b47110e39581edf"
         },
         {
+          "path": "scripts/tests/fixtures/require-commit.yaml",
+          "policy": "byte-identical",
+          "sha256": "a734180dcf4dec0f97549f4e79ecd976b14e0b6a8d8b2bdcf7611412d01b6670",
+          "note": "他の fixture と同じく counterpart へ逐語コピーする。Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。"
+        },
+        {
           "path": "scripts/tests/fixtures/side-effect.yaml",
           "policy": "byte-identical",
           "sha256": "1e9b218d5e3cb63f9e09469dd95c4bfd1813aac6911ab62ff40364e4df227b3e"
@@ -184,13 +196,14 @@
         {
           "path": "scripts/tests/run-tests.sh",
           "policy": "byte-identical",
-          "sha256": "98088d3f0fac0b57cd8dde8ded0b397e51c10bef3d7abb82dc6f948cba3a27d7"
+          "sha256": "431e0c5f54dff5b1b81fe2f6e516aba29ce9bb901e6b83b9130d4714e946b6d6",
+          "note": "Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。"
         },
         {
           "path": "scripts/verify-run.sh",
           "policy": "byte-identical",
-          "sha256": "ac506c17daba1207a109f2716e625ba01a17318630c4670bc7474461f8f9edc4",
-          "note": "ランナー本体。#1586 で byte-identical に移植され、#1607 が CommandMate 側だけを直して 4 日間ドリフトした（#1611 で復旧）。この Issue の直接の発端。"
+          "sha256": "31abf46f78f013391522e87a1a72a4e0d3651312cbb2477465b5b6a2a81f08ea",
+          "note": "ランナー本体。#1586 で byte-identical に移植され、#1607 が CommandMate 側だけを直して 4 日間ドリフトした（#1611 で復旧）。この Issue の直接の発端。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。"
         }
       ]
     },

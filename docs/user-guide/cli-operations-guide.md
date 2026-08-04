@@ -84,18 +84,22 @@ commandmate ls --branch feature/        # ブランチ名プレフィックス�
 commandmate ls --id anvil-              # worktree IDプレフィックスでフィルタ
 ```
 
-> **`--id` について**: worktree ID は `<リポジトリ名>-<ブランチ名>` 形式のスラッグ（例 `anvil-develop`）です。`--id` はこの ID の前方一致でフィルタします。`--branch` と `--id` は独立して適用され、同時指定すると両方が適用されます（AND）。同一ブランチ名（例 `develop`）が複数リポジトリに存在する場合、`--id anvil-` のように ID プレフィックスで特定リポジトリの worktree に絞り込めます。前方一致は case-sensitive で、一意性は保証しません（`--id anvil-develop` は `anvil-develop-2` にもマッチし得ます）。厳密に1件へ絞るには `--quiet` の出力を `grep -x` する等してください。
+> **`--id` について**: worktree ID は **worktree ディレクトリ名**由来のスラッグ（例 `commandmate-issue-1644`）です（Issue #1621。同名ディレクトリが複数リポジトリにある場合のみ `-<パスのハッシュ8桁>` が付きます）。`--id` はこの ID の前方一致でフィルタします。`--branch` と `--id` は独立して適用され、同時指定すると両方が適用されます（AND）。同一ブランチ名（例 `develop`）が複数リポジトリに存在する場合、`--id anvil-` のように ID プレフィックスで特定リポジトリの worktree に絞り込めます。前方一致は case-sensitive で、一意性は保証しません（`--id anvil-develop` は `anvil-develop-2` にもマッチし得ます）。厳密に1件へ絞るには `--quiet` の出力を `grep -x` する等してください。
 
 ### 出力例
 
 ```
 ID                                               NAME                  STATUS   DEFAULT
 -----------------------------------------------  --------------------  -------  ------
-localllm-test-main                               main                  ready    claude
-mycodebranchdesk-develop                         develop               running  claude
-mycodebranchdesk-feature-518-worktree            feature/518-worktree  ready    claude
-mycodebranchdesk-main                            main                  idle     claude
+localllm-test                                    main                  ready    claude
+commandmate                                      develop               running  claude
+commandmate-issue-518                            feature/518-worktree  ready    claude
+commandmate-main                                 main                  idle     claude
 ```
+
+> ID は **worktree ディレクトリ名**由来です（Issue #1621/#1645）。`/worktree-setup` が作る
+> ディレクトリ名は既に Issue 番号を含むため、ID は旧形式（`<リポジトリ名>-<ブランチ名>`）より
+> 短く読みやすくなります。NAME 列はブランチ名で、checkout のたびに更新されます。
 
 ### STATUS列の意味
 
@@ -116,9 +120,9 @@ mycodebranchdesk-main                            main                  idle     
 
 ```bash
 commandmate send <worktree-id> "<message>"
-commandmate send <worktree-id> "<message>" --agent codex      # エージェント指定
-commandmate send <worktree-id> "<message>" --agent codex --instance codex-2  # 追加インスタンス宛て
-commandmate send <worktree-id> "<message>" --agent codex --instance codex-2 --register  # rosterへ登録
+commandmate send <worktree-id> "<message>" --instance codex    # codex のプライマリインスタンス宛て
+commandmate send <worktree-id> "<message>" --instance codex-2  # 追加インスタンス宛て（roster登録済み）
+commandmate send <worktree-id> "<message>" --agent codex --instance codex-3 --register  # 未登録IDをrosterへ登録
 commandmate send <worktree-id> "<message>" --auto-yes          # Auto-Yes有効化
 commandmate send <worktree-id> "<message>" --auto-yes --duration 3h
 commandmate send <worktree-id> "<message>" --auto-yes --stop-pattern "FAILED"
@@ -128,14 +132,20 @@ commandmate send <worktree-id> "<message>" --auto-yes --stop-pattern "FAILED"
 
 | オプション | 説明 | デフォルト |
 |-----------|------|-----------|
-| `--agent <id>` | エージェント種別（claude, codex, gemini, vibe-local, opencode, copilot, antigravity） | claude |
-| `--instance <id>` | インスタンスID。`<agent>` または `<agent>-<n>`（例: `claude-2`）。未起動なら自動起動 | エージェントのプライマリインスタンス |
+| `--instance <id>` | **送り先の推奨指定方法**。インスタンスID（`<agent>` または `<agent>-<n>`、例: `codex` / `claude-2`）。未起動なら自動起動 | エージェントのプライマリインスタンス |
+| `--agent <id>` | roster に無いインスタンスをアドホック起動するときの補助（claude, codex, gemini, vibe-local, opencode, copilot, antigravity） | roster の値・worktree既定 |
 | `--register` | `--instance` で指定したセッションをroster（エージェントインスタンス一覧）に登録 | - |
 | `--auto-yes` | 送信前にAuto-Yesを有効化 | - |
 | `--duration <d>` | Auto-Yesの有効期間（1h, 3h, 8h） | 1h |
 | `--stop-pattern <p>` | Auto-Yes停止条件（正規表現） | - |
 
 > `--instance` の詳細（ID規約・rosterとの関係）は [マルチセッション（1エージェント複数セッション）](#マルチセッション1エージェント複数セッション) を参照してください。
+
+> **送り先は `--instance` で指定してください（Issue #1638）**。`--agent` を受け付けないコマンドが
+> 1つだけあります（`wait`）。`send --agent codex` と書いて `wait` に何も付けないと、
+> **待つ相手は worktree の既定エージェント**になり、Codex 用に切った worktree で黙って
+> Claude Code の完了を待つことになります。`--instance` は 5 コマンド全てが受け付けるため、
+> ワークフロー全体を同じフラグで書けます。
 
 ### worktree ID の調べ方
 
@@ -145,16 +155,36 @@ commandmate ls --quiet
 
 # ブランチ名でフィルタしてID取得
 commandmate ls --branch feature/101 --quiet
-# → mycodebranchdesk-feature-101
+# → commandmate-issue-101
 
-# worktree IDプレフィックスでフィルタ（同一ブランチ×複数リポジトリの絞り込み）
-commandmate ls --id anvil- --quiet
-# → anvil-develop
+# worktree IDプレフィックスでフィルタ（同一プレフィックスのworktree絞り込み）
+commandmate ls --id commandmate-issue- --quiet
+# → commandmate-issue-101
 
 # 変数に格納
 WT=$(commandmate ls --branch feature/101 --quiet)
 commandmate send "$WT" "実装してください"
 ```
+
+> **ID はブランチを切り替えても変わりません**（Issue #1621）。以前の ID は
+> `<リポジトリ名>-<ブランチ名>`（例 `mycodebranchdesk-feature-101`）で、同じディレクトリで
+> `git checkout` するたびに別物になっていました。現在の ID は **worktree ディレクトリに
+> 一度だけ**採番され、以後は checkout でも detached HEAD のコミットでも変わりません。
+> ブランチ名は `commandmate ls` の NAME 列（`--json` の `branch`）に出ます。
+>
+> **以前の ID もそのまま使えます。** ID が変わった worktree については旧 ID が記録され、
+> `send` / `wait` / `capture` / `respond` / `auto-yes` / `instances` / `verify` の
+> `<worktree-id>` 引数と、ブラウザの `/worktrees/<旧ID>` が引き続き解決されます。
+> `ls --id` の**前方一致だけは現在の ID に対して**行われます（旧 ID は完全一致でのみ解決）。
+>
+> ブラウザ URL は **HTTP 308 で現在の URL へ転送**されます（Issue #1645、実サーバで実測）。
+> `/terminal` や `/files/...` などのサブパスとクエリも保持されるので、ターミナル画面の
+> ブックマークはターミナル画面に着地します。
+>
+> **既存 worktree の ID はサーバ再起動時の migration で一度だけ振り直されます。** 稼働中の
+> tmux セッションは起動時に新しい名前へ追従しますが、**並列ワーカーを動かしていない
+> タイミングで当てる**こと — 監視スクリプトが旧 ID を握ったままだと、セッションは生きて
+> いるのに `send` / `capture` が届かないという切り分けの難しい状態になります。
 
 ---
 
@@ -170,9 +200,17 @@ commandmate wait <id1> <id2> --timeout 600          # 複数同時待機
 commandmate wait <worktree-id> --on-prompt agent     # プロンプト検出で返却（デフォルト）
 commandmate wait <worktree-id> --on-prompt human     # プロンプトは人間がUIで応答
 commandmate wait <worktree-id> --stall-timeout 120   # 出力変化なしの検出
+commandmate wait <worktree-id> --instance codex      # codex のセッションを待つ
 commandmate wait <worktree-id> --verify               # 完了検知後に全ゲートを実行
 commandmate wait <worktree-id> --require-work         # 完了検知後に work-evidence のみ実行
 ```
+
+> **`wait` に `--agent` はありません（Issue #1638）**。送り先エージェントの指定は
+> `--instance` で行ってください（`--instance codex` はそのCLIツールのプライマリインスタンスを指します）。
+> `send --agent codex` と書いて `wait` に何も付けないと、`wait` は
+> **worktree の既定エージェント**を見るため、まだ動いている codex を横目に「完了」を返しえます。
+> 1回の `wait` に指定できる `--instance` は**1つ**で、引数の全 worktree に適用されます。
+> インスタンスが異なる worktree は `wait` を分けてください。
 
 ### オプション
 
@@ -181,7 +219,7 @@ commandmate wait <worktree-id> --require-work         # 完了検知後に work-
 | `--timeout <sec>` | 最大待機時間（秒） | 無制限 |
 | `--on-prompt <mode>` | プロンプト検出時の動作（agent / human） | agent |
 | `--stall-timeout <sec>` | 出力変化なしのタイムアウト（秒） | - |
-| `--instance <id>` | 対象インスタンスID（`<agent>` または `<agent>-<n>`） | エージェントのプライマリインスタンス |
+| `--instance <id>` | 対象インスタンスID（`<agent>` または `<agent>-<n>`）。**送り先指定はこのフラグのみ**（`--agent` は無い） | エージェントのプライマリインスタンス |
 | `--verify` | 完了検知後に検証ゲートを全件実行し、その判定で終了コードを決める | 無効 |
 | `--require-work` | 完了検知後に work-evidence ゲートのみ実行する | 無効 |
 
@@ -259,8 +297,8 @@ Completed: localllm-test-main
 commandmate respond <worktree-id> "yes"          # Yes/No
 commandmate respond <worktree-id> "2"            # 複数選択（番号）
 commandmate respond <worktree-id> "text"         # テキスト入力
-commandmate respond <worktree-id> "yes" --agent claude
-commandmate respond <worktree-id> "yes" --agent codex --instance codex-2  # 追加インスタンス宛て
+commandmate respond <worktree-id> "yes" --instance codex          # プライマリインスタンス指定
+commandmate respond <worktree-id> "yes" --instance codex-2        # 追加インスタンス宛て
 ```
 
 ### 終了コード
@@ -317,7 +355,7 @@ commandmate verify show <run-id>                       # run の詳細（読み�
 
 ```
 # stderr:
-Verifying: myrepo-feature-101 (run 42)
+Verifying: commandmate-issue-101 (run 42)
 GATE work-evidence PASS (commits=3, uncommitted=2)
 GATE lint PASS (exit=0, 12.3s)
 GATE unit FAIL (exit=1, 45.0s)
@@ -331,7 +369,7 @@ RESULT failed
 1つの worktree に対して同時に走らせられる run は1つだけです。既に走っている場合は実行中の runId を含むメッセージで終了します。
 
 ```
-Error: A verification run is already in progress for 'myrepo-feature-101' (run 41). Wait for it to finish, then retry.
+Error: A verification run is already in progress for 'commandmate-issue-101' (run 41). Wait for it to finish, then retry.
 ```
 
 ### 稼働サーバの作業ディレクトリでは走らない
@@ -423,7 +461,7 @@ TASK=$(commandmate send myrepo-feature-101 --contract .commandmate/tasks/loader.
 
 # 既存オプションと併用できる
 commandmate send myrepo-feature-101 --contract .commandmate/tasks/loader.yaml \
-  --agent codex --instance codex-2 --auto-yes --duration 3h
+  --instance codex-2 --auto-yes --duration 3h
 ```
 
 エージェントには契約前文＋goal が送られます。前文の「完了条件」行は
@@ -511,10 +549,10 @@ commandmate task show "$TASK"                      # succeeded / failed / not_st
 ### 使用方法
 
 ```bash
-commandmate capture <worktree-id>                # テキスト出力
-commandmate capture <worktree-id> --json          # JSON出力（ステータス情報付き）
-commandmate capture <worktree-id> --agent codex   # エージェント指定
-commandmate capture <worktree-id> --agent codex --instance codex-2  # 追加インスタンス指定
+commandmate capture <worktree-id>                    # テキスト出力
+commandmate capture <worktree-id> --json             # JSON出力（ステータス情報付き）
+commandmate capture <worktree-id> --instance codex   # プライマリインスタンス指定
+commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス指定
 ```
 
 ### JSON出力の主要フィールド
@@ -540,7 +578,7 @@ commandmate capture <worktree-id> --pane              # 空行を畳んだ trans
 commandmate capture <worktree-id> --pane --tail 40    # 末尾 40 行だけ
 commandmate capture <worktree-id> --pane --raw        # 圧縮せず生のペインを出す
 commandmate capture <worktree-id> --pane --json       # 圧縮前後の行数つき JSON
-commandmate capture <worktree-id> --pane --agent codex --instance codex-2
+commandmate capture <worktree-id> --pane --instance codex-2
 ```
 
 - **`--tail N` は「圧縮後」の末尾 N 行**です。TUI セッションは 200×1000 のキャンバスに描かれ、
@@ -612,8 +650,8 @@ commandmate auto-yes <worktree-id> --enable                    # 有効化（デ
 commandmate auto-yes <worktree-id> --enable --duration 3h       # 期間指定
 commandmate auto-yes <worktree-id> --enable --stop-pattern "error"  # 停止条件
 commandmate auto-yes <worktree-id> --disable                    # 無効化
-commandmate auto-yes <worktree-id> --enable --agent codex       # エージェント指定
-commandmate auto-yes <worktree-id> --enable --agent codex --instance codex-2  # 追加インスタンス個別制御
+commandmate auto-yes <worktree-id> --enable --instance codex    # プライマリインスタンス指定
+commandmate auto-yes <worktree-id> --enable --instance codex-2  # 追加インスタンス個別制御
 ```
 
 ### オプション
@@ -624,8 +662,8 @@ commandmate auto-yes <worktree-id> --enable --agent codex --instance codex-2  # 
 | `--disable` | Auto-Yesを無効化 |
 | `--duration <d>` | 有効期間（1h, 3h, 8h） |
 | `--stop-pattern <p>` | 指定パターンがターミナル出力に出現したら自動停止 |
-| `--agent <id>` | 対象エージェント |
-| `--instance <id>` | 対象インスタンスID。他インスタンスと独立してAuto-Yesを制御 |
+| `--instance <id>` | **対象の推奨指定方法**。対象インスタンスID。他インスタンスと独立してAuto-Yesを制御 |
+| `--agent <id>` | roster に無いインスタンス向けの補助（`--instance` 単独で足りる場合は不要） |
 
 ---
 
@@ -694,11 +732,22 @@ codex-2      レビュー用 codex     no       no
 
 `--instance` は `send` / `wait` / `respond` / `capture` / `auto-yes` すべてで受け付けます。
 
-> **既知の不統一（未解消）**: `--agent` を受け付けるのは `send` / `respond` / `capture` /
-> `auto-yes` のみで、`wait` は `--instance` だけを受け付けます（`wait --agent` は
-> `unknown option` で exit 1）。roster 登録済みインスタンスなら全コマンドを `--instance`
-> だけで統一して書けるため、実用上の回避策はあります。フラグ体系そのものの統一は
-> 別Issueで扱います。
+> **送り先は `--instance` 単独形で書いてください（Issue #1638）**。`--agent` を受け付けるのは
+> `send` / `respond` / `capture` / `auto-yes` のみで、`wait` は受け付けません（`wait --agent` は
+> `unknown option` で exit 1）。この非対称が実害になるのは
+> **「`send` にだけエージェントを書いて `wait` には書かない」**ときで、`wait` は worktree の
+> **既定エージェント**を見るため、Codex 用に切った worktree で黙って Claude Code の完了を待ちます。
+> `--instance` は 5 コマンド全てが受け付けるので、ワークフロー全体を 1 つのフラグで書けます。
+>
+> **`--agent` は廃止していません（Issue #1638 の決定）**。出荷済みの CLI・既存スクリプト・
+> 埋め込みドキュメントを壊す代償に見合わないこと、および
+> **`--register` は roster に無いIDに対して `--agent` でしかCLIツールを指定できない**（`codex-3` という
+> IDだけからは推論できない）ためです。したがって `--agent` は
+> **「roster に無いインスタンスをアドホック起動するときの補助」**という位置づけで残ります。
+> パース・優先順位（下表）は一切変わっていません。
+>
+> `wait --agent` の新設は Issue #1629 で不採用と結論済みです（インスタンスを伴わない
+> `--agent codex` は「どの codex セッションを待つのか」を決められないため）。
 
 ### rosterとの関係
 
@@ -748,6 +797,7 @@ commandmate wait "$WT" --instance codex-2 --timeout 600
 commandmate capture "$WT" --instance codex-2 --json
 
 # アドホックに起動しつつ、その場でrosterに登録
+# ここは --agent が必要: codex-3 はまだrosterに無く、IDだけではCLIツールを決められない
 commandmate send "$WT" "軽くチェックして" --agent codex --instance codex-3 --register
 
 # 不要になったら削除（セッションも停止）
@@ -1063,14 +1113,17 @@ WT1=$(commandmate ls --branch feature/101 --quiet)
 WT2=$(commandmate ls --branch feature/102 --quiet)
 
 commandmate send "$WT1" "Issue #101 を実装して" --auto-yes
-commandmate send "$WT2" "Issue #102 を実装して" --auto-yes --agent codex
+commandmate send "$WT2" "Issue #102 を実装して" --auto-yes --instance codex
 
-# 両方の完了を待つ
-commandmate wait "$WT1" "$WT2" --timeout 1800
+# 完了を待つ。1回の wait に指定できる --instance は1つで全worktreeに適用されるため、
+# インスタンスが異なる worktree は wait を分ける。
+# ここで `wait "$WT2"` と書くと WT2 の「既定エージェント」を待ってしまう（wait に --agent は無い）
+commandmate wait "$WT1" --timeout 1800
+commandmate wait "$WT2" --instance codex --timeout 1800
 
 # 結果をそれぞれ確認
 commandmate capture "$WT1" --json
-commandmate capture "$WT2" --json
+commandmate capture "$WT2" --instance codex --json
 ```
 
 ---
@@ -1148,7 +1201,7 @@ Error: Invalid duration. Must be one of: 1h, 3h, 8h
 ### 不正なagentエラー
 
 ```
-Error: Invalid agent. Must be one of: claude, codex, gemini, vibe-local, opencode
+Error: Invalid agent. Must be one of: claude, codex, gemini, vibe-local, opencode, copilot, antigravity
 ```
 
 **対処**: `--agent` には上記のいずれかを指定してください。

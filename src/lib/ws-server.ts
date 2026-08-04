@@ -860,6 +860,110 @@ export function broadcastMessage(type: string, data: { worktreeId?: string; [key
 }
 
 /**
+ * Message type sent to a room whose worktree ID has been renamed
+ * (Issue #1621 Phase 3).
+ *
+ * Clients that do not understand it ignore it (`parseRealtimeEvent` drops
+ * unknown types), so it is safe to emit to every subscriber; the point is that
+ * a browser holding the old ID can learn the new one without a reload.
+ */
+export const WORKTREE_RENAMED_EVENT_TYPE = 'worktree_renamed' as const;
+
+/**
+ * Move every WebSocket subscription from a renamed worktree ID to the new one
+ * (Issue #1621 Phase 3).
+ *
+ * Two things are keyed on the worktree ID here, and both have to move together
+ * because they are the write side and the read side of the same pair:
+ *
+ * 1. the **room** (`rooms`, plus each client's `worktreeIds` set) — every
+ *    server-side `broadcast(worktreeId, …)` after the rename uses the NEW ID,
+ *    so a room left under the old key goes silent while its clients still
+ *    believe they are subscribed;
+ * 2. the **terminal subscription's session name** — derived from the worktree ID
+ *    (`mcbd-<cli>-<id>`) and cached on the subscription, so `terminal_input` /
+ *    `terminal_resize` would keep addressing a tmux session that no longer
+ *    answers to that name.
+ *
+ * Every affected subscriber is then notified, so a client can re-point its own
+ * state instead of waiting for a reload.
+ *
+ * Takes the whole batch because IDs can swap (A→B, B→A): all source rooms are
+ * detached before any destination room is written. Where a destination room
+ * already exists the two sets are merged rather than replaced — dropping the
+ * incumbent subscribers would silence clients that did nothing wrong.
+ *
+ * @param renames - Worktree ID pairs being applied
+ * @returns The pairs that actually had room subscribers to move
+ */
+export function migrateWorktreeRooms(
+  renames: ReadonlyArray<{ oldId: string; newId: string }>
+): Array<{ oldId: string; newId: string; subscribers: number }> {
+  const targets = new Map<string, string>();
+  for (const { oldId, newId } of renames) {
+    if (!oldId || !newId || oldId === newId) continue;
+    targets.set(oldId, newId);
+  }
+  if (targets.size === 0) return [];
+
+  // Detach first, write second — a swap must not have one half clobber the other.
+  const detached: Array<{ oldId: string; newId: string; sockets: Set<WebSocket> }> = [];
+  for (const [oldId, newId] of targets) {
+    const room = rooms.get(oldId);
+    if (!room || room.size === 0) continue;
+    rooms.delete(oldId);
+    detached.push({ oldId, newId, sockets: room });
+  }
+
+  const moved: Array<{ oldId: string; newId: string; subscribers: number }> = [];
+  for (const { oldId, newId, sockets } of detached) {
+    const destination = rooms.get(newId) ?? new Set<WebSocket>();
+    for (const ws of sockets) {
+      destination.add(ws);
+      const clientInfo = clients.get(ws);
+      if (clientInfo) {
+        clientInfo.worktreeIds.delete(oldId);
+        clientInfo.worktreeIds.add(newId);
+      }
+      sendTerminalEvent(ws, {
+        type: WORKTREE_RENAMED_EVENT_TYPE,
+        worktreeId: newId,
+        previousWorktreeId: oldId,
+      });
+    }
+    rooms.set(newId, destination);
+    moved.push({ oldId, newId, subscribers: sockets.size });
+  }
+
+  // Terminal subscriptions live on the client, not in the room, so they are
+  // swept separately: a client can stream a terminal without joining the room.
+  for (const clientInfo of clients.values()) {
+    const subscription = clientInfo.terminalSubscription;
+    if (!subscription) continue;
+    const newId = targets.get(subscription.worktreeId);
+    if (!newId) continue;
+
+    try {
+      if (!isCliToolType(subscription.cliToolId)) continue;
+      const cliTool = CLIToolManager.getInstance().getTool(subscription.cliToolId);
+      subscription.sessionName = cliTool.getSessionName(newId);
+      subscription.worktreeId = newId;
+    } catch (error) {
+      logger.warn('terminal:rename-failed', {
+        worktreeId: subscription.worktreeId,
+        newId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (moved.length > 0) {
+    logger.info('rooms:migrated', { count: moved.length });
+  }
+  return moved;
+}
+
+/**
  * Clean up WebSocket rooms for deleted worktrees
  * Removes rooms from the rooms map (clients will naturally disconnect or resubscribe)
  *

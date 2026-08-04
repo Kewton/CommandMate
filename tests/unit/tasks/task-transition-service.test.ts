@@ -15,7 +15,7 @@ import { runMigrations } from '@/lib/db/db-migrations';
 import { createTask, getTask, listTaskEvents, type Task, type TaskStatus } from '@/lib/db';
 // Fixtures place a task in states the machine would refuse to reach; see
 // tasks-db.test.ts for why this import bypasses the barrel.
-import { updateTaskStatus } from '@/lib/db/tasks-db';
+import { getVerifiableTask, updateTaskStatus } from '@/lib/db/tasks-db';
 import { parseTaskContract } from '@/lib/tasks/contract-parser';
 import {
   applyTaskEvent,
@@ -249,5 +249,91 @@ describe('applyEventToActiveTask', () => {
       applyEventToActiveTask(db, 'wt-1', 'claude', 'claude', 'prompt_detected')
     ).not.toThrow();
     expect(applyEventToActiveTask(db, 'wt-1', 'claude', 'claude', 'prompt_detected')).toBeNull();
+  });
+});
+
+/**
+ * Issue #1637 / #1623: the orphan a failed `send --contract` leaves behind.
+ *
+ * `commandmate send --contract` records the task before it sends, so a send
+ * that never lands leaves a row nothing is working on. This is the end-to-end
+ * version of the rule fixed in task-state-machine.test.ts: what matters is not
+ * which token the status holds but that `getVerifiableTask` — how a run with no
+ * task id finds the contract it should judge — stops returning it.
+ *
+ * The reproduction is #1623's, in order: a first send fails on a cold start, a
+ * re-send succeeds and that task finishes, then a later `wait --verify` starts
+ * a run with no task id. It used to get the orphan, and with it a scope
+ * snapshot taken before the contract was edited — exit 20 naming files the
+ * current contract allows.
+ */
+describe('a contract whose first send never landed (Issue #1637)', () => {
+  it('is not what a later verification run resolves', () => {
+    const orphan = createTask(db, {
+      worktreeId: 'wt-1',
+      cliToolId: 'claude',
+      instanceId: null,
+      contractPath: '.commandmate/tasks/issue.yaml',
+      // The stale snapshot: this contract only allowed src/**.
+      contract: parseTaskContract(CONTRACT, 'issue.yaml'),
+      status: 'pending',
+    });
+    applyTaskEvent(db, orphan.id, 'send_failed');
+
+    const resent = createTask(db, {
+      worktreeId: 'wt-1',
+      cliToolId: 'claude',
+      instanceId: null,
+      contractPath: '.commandmate/tasks/issue.yaml',
+      contract: parseTaskContract(
+        `version: 1\ntitle: state machine work\ngoal: do the work\nscope:\n  allow: ["src/**", "docs/**"]\n`,
+        'issue.yaml'
+      ),
+      status: 'pending',
+    });
+    applyTaskEvent(db, resent.id, 'message_sent');
+    applyTaskEvent(db, resent.id, 'verify_started', { runId: 1 });
+    applyTaskEvent(db, resent.id, 'verify_passed', { runId: 1 });
+
+    // `succeeded` is closed for good and stays excluded, so with the orphan
+    // excluded too there is nothing to resolve — which is the honest answer,
+    // and one the scope gate reports as a detached contract (#1620) rather
+    // than as a violation of a contract nobody is working to.
+    expect(getVerifiableTask(db, 'wt-1')).toBeNull();
+  });
+
+  it('keeps the row and says why it closed', () => {
+    const orphan = createTask(db, {
+      worktreeId: 'wt-1',
+      cliToolId: 'claude',
+      instanceId: null,
+      contractPath: '.commandmate/tasks/issue.yaml',
+      contract: parseTaskContract(CONTRACT, 'issue.yaml'),
+      status: 'pending',
+    });
+
+    applyTaskEvent(db, orphan.id, 'send_failed');
+
+    // Audit trail intact: the row survives and the event names the cause.
+    const stored = getTask(db, orphan.id);
+    expect(stored).not.toBeNull();
+    expect(stored?.contract.scope.allow).toEqual(['src/**']);
+
+    const events = listTaskEvents(db, orphan.id, 10);
+    expect(events.map((event) => event.event)).toContain('send_failed');
+    const sendFailed = events.find((event) => event.event === 'send_failed');
+    expect(sendFailed?.fromStatus).toBe('pending');
+    expect(sendFailed?.toStatus).toBe(stored?.status);
+  });
+
+  it('does not close a task an agent is already working on', () => {
+    // The counter-case: a follow-up message that could not be delivered leaves
+    // real work behind, so the task must stay verifiable.
+    const working = seedTask({ status: 'running' });
+
+    applyTaskEvent(db, working.id, 'send_failed');
+
+    expect(getTask(db, working.id)?.status).toBe('failed');
+    expect(getVerifiableTask(db, 'wt-1')?.id).toBe(working.id);
   });
 });

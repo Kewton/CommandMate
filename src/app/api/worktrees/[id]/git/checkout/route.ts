@@ -19,14 +19,15 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { getInitialBranch } from '@/lib/db';
 import { checkoutBranch, getGitStatus, handleGitApiError } from '@/lib/git/git-utils';
 import { validateGitBranchName } from '@/lib/git/git-route-helpers';
-import { resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
+import { canonicalWorktreeId, resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     const worktree = resolveWorktreeOr404(id);
     if (worktree instanceof NextResponse) {
       return worktree;

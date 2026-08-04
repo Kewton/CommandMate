@@ -2,6 +2,8 @@
  * RepositoryManager Component
  * Allows users to add and manage git repositories
  * Issue #71: Extended with Clone URL registration feature
+ * Issue #1662: Warns — and asks — when the path being added is the same git
+ *              repository as an existing scan root. It WARNS; it never blocks.
  */
 
 'use client';
@@ -9,7 +11,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
 import { FolderOpen } from 'lucide-react';
-import { Button, Card, Input, Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui';
+import { Button, Card, ConfirmDialog, Input, Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui';
 import {
   repositoryApi,
   fsApi,
@@ -29,6 +31,19 @@ type InputMode = 'local' | 'url';
 
 /** Debounce for the while-typing path check (Issue #1517). */
 const PATH_VALIDATION_DEBOUNCE_MS = 400;
+
+/**
+ * How long submit will wait for a duplicate verdict before registering without
+ * one (Issue #1662).
+ *
+ * Submitting faster than the debounce above means no verdict is in hand yet, so
+ * submit re-asks — otherwise the warning would be skippable by clicking
+ * quickly. But the check is ADVISORY: an endpoint that never answers must not
+ * leave "Scan & Add" wedged forever. Past the deadline the registration
+ * proceeds silently and the Repositories list still flags the duplicate
+ * afterwards, which is the other half of this Issue.
+ */
+const DUPLICATE_CHECK_DEADLINE_MS = 400;
 
 /** Fallback example when the allowed roots have not loaded yet. */
 const FALLBACK_PATH_EXAMPLE = '/Users/username/projects/my-repo';
@@ -97,6 +112,20 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [allowedRoots, setAllowedRoots] = useState<string[]>([]);
   const [pathValidation, setPathValidation] = useState<ValidatePathResponse | null>(null);
+  /**
+   * Which input `pathValidation` describes (Issue #1662).
+   *
+   * The while-typing check is debounced, so at submit time the held result may
+   * belong to a shorter prefix of what is now in the box. Submitting fast would
+   * then consult a validation for a DIFFERENT path — and the duplicate warning
+   * would be skippable simply by pressing the button quickly. Tracking the
+   * subject lets submit notice the mismatch and re-check.
+   */
+  const [validatedPath, setValidatedPath] = useState<string | null>(null);
+  /** Duplicate scan roots awaiting the user's decision, or null. */
+  const [pendingDuplicate, setPendingDuplicate] = useState<
+    { path: string; duplicates: string[] } | null
+  >(null);
 
   const urlNormalizer = UrlNormalizer.getInstance();
 
@@ -175,6 +204,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
     const candidate = repositoryPath.trim();
     if (!candidate) {
       setPathValidation(null);
+      setValidatedPath(null);
       return;
     }
 
@@ -183,10 +213,14 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
       repositoryApi
         .validatePath(candidate)
         .then((result) => {
-          if (!cancelled) setPathValidation(result);
+          if (cancelled) return;
+          setPathValidation(result);
+          setValidatedPath(candidate);
         })
         .catch(() => {
-          if (!cancelled) setPathValidation(null);
+          if (cancelled) return;
+          setPathValidation(null);
+          setValidatedPath(null);
         });
     }, PATH_VALIDATION_DEBOUNCE_MS);
 
@@ -197,12 +231,73 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
   }, [repositoryPath]);
 
   /**
+   * Scan roots that already point at this path's git repository (Issue #1662).
+   *
+   * Prefers the while-typing result, but only when it actually describes the
+   * path being submitted; otherwise it re-asks. A failure here returns an empty
+   * list on purpose — the duplicate check is advisory, and an unreachable
+   * endpoint must not stop someone from registering a repository.
+   */
+  const resolveDuplicateScanRoots = useCallback(
+    async (candidate: string): Promise<string[]> => {
+      if (validatedPath === candidate && pathValidation) {
+        return pathValidation.duplicateScanRoots ?? [];
+      }
+
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const fresh = await Promise.race([
+          repositoryApi.validatePath(candidate).then((result) => {
+            setPathValidation(result);
+            setValidatedPath(candidate);
+            return result;
+          }),
+          new Promise<null>((resolve) => {
+            timer = setTimeout(() => resolve(null), DUPLICATE_CHECK_DEADLINE_MS);
+          }),
+        ]);
+        return fresh?.duplicateScanRoots ?? [];
+      } catch {
+        return [];
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    },
+    [pathValidation, validatedPath]
+  );
+
+  /**
+   * Register a local path. Split out of the submit handler so the
+   * duplicate-confirmation path (Issue #1662) reaches exactly the same code as
+   * the ordinary one — the confirmation must change WHETHER we scan, never HOW.
+   */
+  const runScan = useCallback(
+    async (candidate: string) => {
+      try {
+        const result = await repositoryApi.scan(candidate);
+        setSuccess(result.message);
+        setRepositoryPath('');
+        setShowAddForm(false);
+
+        // Notify parent to refresh
+        if (onRepositoryAdded) {
+          onRepositoryAdded();
+        }
+      } catch (err) {
+        setError(handleApiError(err));
+      }
+    },
+    [onRepositoryAdded]
+  );
+
+  /**
    * Handle adding a new repository (local path mode)
    */
   const handleAddRepository = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!repositoryPath.trim()) {
+    const candidate = repositoryPath.trim();
+    if (!candidate) {
       setError(t('repositories.pathRequired'));
       return;
     }
@@ -212,21 +307,29 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
     setIsScanning(true);
 
     try {
-      const result = await repositoryApi.scan(repositoryPath);
-      setSuccess(result.message);
-      setRepositoryPath('');
-      setShowAddForm(false);
-
-      // Notify parent to refresh
-      if (onRepositoryAdded) {
-        onRepositoryAdded();
+      // Issue #1662: ask before creating a second scan root for a repository
+      // that already has one. Nothing is registered until the user answers.
+      const duplicates = await resolveDuplicateScanRoots(candidate);
+      if (duplicates.length > 0) {
+        setPendingDuplicate({ path: candidate, duplicates });
+        return;
       }
-    } catch (err) {
-      setError(handleApiError(err));
+
+      await runScan(candidate);
     } finally {
       setIsScanning(false);
     }
   };
+
+  /** Issue #1662: the user chose to register the duplicate anyway. */
+  const handleConfirmDuplicate = useCallback(() => {
+    const target = pendingDuplicate;
+    setPendingDuplicate(null);
+    if (!target) return;
+
+    setIsScanning(true);
+    void runScan(target.path).finally(() => setIsScanning(false));
+  }, [pendingDuplicate, runScan]);
 
   /**
    * Handle cloning a repository (URL mode)
@@ -297,9 +400,13 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
     setForkBeforeClone(false);
     setError(null);
     setInputMode('local');
+    setPendingDuplicate(null);
   };
 
   const validationDisplay = pathValidation ? describeValidation(t, pathValidation) : null;
+  // Issue #1662: shown alongside the validation line, not instead of it — the
+  // path is perfectly valid, it just already has a scan root.
+  const duplicateScanRoots = pathValidation?.duplicateScanRoots ?? [];
 
   return (
     <div className="space-y-4">
@@ -395,6 +502,16 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
                     {validationDisplay && (
                       <p className={`text-xs mt-1 ${VALIDATION_INTENT_CLASS[validationDisplay.intent]}`}>
                         {validationDisplay.message}
+                      </p>
+                    )}
+                    {duplicateScanRoots.length > 0 && (
+                      <p
+                        className="text-xs mt-1 text-warning-foreground break-all"
+                        data-testid="duplicate-scan-root-warning"
+                      >
+                        {t('repositories.duplicateScanRootWarning', {
+                          paths: duplicateScanRoots.join(', '),
+                        })}
                       </p>
                     )}
                   </div>
@@ -510,6 +627,26 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
           setRepositoryPath(selectedPath);
           setError(null);
         }}
+      />
+
+      {/*
+        Issue #1662: a confirmation, not a refusal. Managing two worktrees of one
+        repository as independent scan roots is a legitimate choice, so the
+        dialog explains the cost (every shared worktree registered twice, the
+        stored repository path alternating between the roots) and lets the user
+        proceed. variant="default": nothing here is destructive.
+      */}
+      <ConfirmDialog
+        isOpen={pendingDuplicate !== null}
+        title={t('repositories.duplicateConfirmTitle')}
+        description={t('repositories.duplicateConfirmBody', {
+          path: pendingDuplicate?.path ?? '',
+          paths: (pendingDuplicate?.duplicates ?? []).join('\n'),
+        })}
+        confirmLabel={t('repositories.duplicateConfirmAction')}
+        variant="default"
+        onConfirm={handleConfirmDuplicate}
+        onCancel={() => setPendingDuplicate(null)}
       />
     </div>
   );

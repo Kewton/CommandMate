@@ -18,6 +18,7 @@ import {
   handleGitApiError,
   type WorkingTreeDiffMode,
 } from '@/lib/git/git-utils';
+import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 /** Allowed working-tree diff modes (query param `mode`). */
 const VALID_MODES: readonly WorkingTreeDiffMode[] = ['staged', 'unstaged', 'untracked'];
@@ -32,7 +33,8 @@ export async function GET(
 ) {
   try {
     // Validate worktree ID format
-    const { id } = await params;
+    const { id: requestedWorktreeId } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
     if (!isValidWorktreeId(id)) {
       return NextResponse.json(
         { error: 'Invalid worktree ID format' },

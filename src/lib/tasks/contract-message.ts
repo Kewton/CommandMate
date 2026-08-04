@@ -22,9 +22,59 @@ import {
 } from '@/lib/verification/verify-config';
 import type { TaskContract } from './contract-parser';
 
-/** How the built-in gates read in the preamble; they run git plumbing, not shell commands. */
-const WORK_EVIDENCE_LABEL = `${WORK_EVIDENCE_GATE_ID}（commit または未 commit の変更が存在すること）`;
+/**
+ * How the built-in gates read in the preamble; they run git plumbing, not shell
+ * commands.
+ *
+ * work-evidence has two readings because it has two behaviours. Leaving it on
+ * the permissive wording while `requireCommit` is in force would tell the agent
+ * a criterion the run does not apply — and stating the strict wording while it
+ * is not in force is the D-4 defect (#1628) this Issue closes.
+ */
+const WORK_EVIDENCE_ANY_CHANGE_LABEL = `${WORK_EVIDENCE_GATE_ID}（commit または未 commit の変更が存在すること）`;
+const WORK_EVIDENCE_COMMIT_LABEL = `${WORK_EVIDENCE_GATE_ID}（commit が存在すること。未 commit の変更は作業証跡として数えない）`;
 const SCOPE_LABEL = `${SCOPE_GATE_ID}（変更ファイルが scope.allow の内側に収まっていること）`;
+
+/** The obligation line, in the two forms the pipeline can actually enforce. */
+const COMMIT_REQUIRED_LINE =
+  '- 作業完了後は必ず commit すること（未 commit の作業は未完了とみなされる）';
+const COMMIT_EXPECTED_LINE =
+  '- 作業完了後は commit すること（ただし work-evidence は未 commit の変更も作業証跡として' +
+  '認めるため、commit の有無そのものは検査されない）';
+
+/** Named so a failing gate can say which declaration put it there. */
+export const REQUIRE_COMMIT_SOURCE_CONFIG = `options.requireCommit (${VERIFY_CONFIG_RELATIVE_PATH})`;
+export const REQUIRE_COMMIT_SOURCE_CONTRACT = 'success.requireCommit (task contract)';
+
+/** Whether a commit is required, and which declaration(s) said so. */
+export interface RequireCommitDecision {
+  required: boolean;
+  /** Empty when nothing required it; both entries when both did. */
+  sources: string[];
+}
+
+/**
+ * Combine the repository-wide and per-delegation commit requirements (#1642).
+ *
+ * OR, deliberately, rather than "the nearer declaration wins". The whole point
+ * of the contract-side flag is to stop a rule from being declared and never
+ * checked; letting a contract answer `false` to a repository that answered
+ * `true` would reopen exactly that hole one delegation at a time. A contract can
+ * only ever tighten.
+ *
+ * Lives here rather than in gate-runner because both callers need the same
+ * answer: this module writes the sentence the agent reads, gate-runner reaches
+ * the verdict, and the two disagreeing is the defect being fixed.
+ */
+export function resolveRequireCommit(
+  contract: TaskContract | null,
+  config: VerifyConfig | null
+): RequireCommitDecision {
+  const sources: string[] = [];
+  if (config?.options.requireCommit) sources.push(REQUIRE_COMMIT_SOURCE_CONFIG);
+  if (contract?.success.requireCommit) sources.push(REQUIRE_COMMIT_SOURCE_CONTRACT);
+  return { required: sources.length > 0, sources };
+}
 
 /**
  * The gate ids a contract asks for, or null for "every gate".
@@ -104,8 +154,11 @@ export function resolveGateCommands(
 ): string[] {
   if (!config) return [];
 
+  const workEvidenceLabel = resolveRequireCommit(contract, config).required
+    ? WORK_EVIDENCE_COMMIT_LABEL
+    : WORK_EVIDENCE_ANY_CHANGE_LABEL;
   const builtInLabels = new Map<string, string>([
-    [WORK_EVIDENCE_GATE_ID, WORK_EVIDENCE_LABEL],
+    [WORK_EVIDENCE_GATE_ID, workEvidenceLabel],
     [SCOPE_GATE_ID, SCOPE_LABEL],
   ]);
 
@@ -113,7 +166,7 @@ export function resolveGateCommands(
   if (!selected) {
     // An omitted gates list runs every gate, and the built-ins are still governed
     // by the success flags rather than by the (absent) list.
-    const builtIns = [WORK_EVIDENCE_LABEL];
+    const builtIns = [workEvidenceLabel];
     if (contract.success.requireScopeClean) builtIns.push(SCOPE_LABEL);
     return [...builtIns, ...config.gates.map((gate) => gate.command)];
   }
@@ -143,7 +196,13 @@ export function composeContractMessage(
     lines.push(`- 変更してはならないパス: ${contract.scope.deny.join(', ')}`);
   }
 
-  lines.push('- 作業完了後は必ず commit すること（未 commit の作業は未完了とみなされる）');
+  // The sentence follows the verdict, never the other way round: this line used
+  // to be a constant asserting "未 commit の作業は未完了とみなされる" while the
+  // gate passed on an uncommitted change alone (#1628 D-4, measured in the
+  // Epic #1585 acceptance run).
+  lines.push(
+    resolveRequireCommit(contract, config).required ? COMMIT_REQUIRED_LINE : COMMIT_EXPECTED_LINE
+  );
 
   const commands = resolveGateCommands(contract, config);
   lines.push(

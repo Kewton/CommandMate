@@ -32,6 +32,7 @@ import {
   repositoryExistsOnDisk,
 } from '@/lib/git/worktrees';
 import type { Worktree } from '@/types/models';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 const REPO_PATH = '/repos/anvil';
 const WORKTREE_PATH = '/repos/anvil'; // develop lives in the primary worktree dir
@@ -204,16 +205,20 @@ describe('Issue #1151: branch-switch history preservation', () => {
       expect(countChildData(db, 'anvil-develop').chat_messages).toBe(1);
 
       // git checkout feature-x; a sync runs (server restart / manual sync).
+      // Issue #1621 strengthens the guarantee: the row is not merely migrated
+      // to a new ID, the ID does not move at all. A caller suggesting the old
+      // branch-derived ID (`anvil-feature-x`) is overruled by the ID the PATH
+      // already owns.
       syncWorktreesToDB(db, [makeWorktree('anvil-feature-x', 'feature-x')]);
-      // History followed the directory to the new ID; nothing deleted.
       expect(totalChildRows(db)).toBe(CHILD_TABLES.length);
-      expect(countChildData(db, 'anvil-feature-x').chat_messages).toBe(1);
-      expect(getWorktreeById(db, 'anvil-develop')).toBeNull();
+      expect(countChildData(db, 'anvil-develop').chat_messages).toBe(1);
+      expect(getWorktreeById(db, 'anvil-feature-x')).toBeNull();
+      expect(getWorktreeById(db, 'anvil-develop')?.branch).toBe('feature-x');
 
       // git checkout develop again; sync runs.
       syncWorktreesToDB(db, [makeWorktree('anvil-develop', 'develop')]);
 
-      // The original develop history is intact and reachable again.
+      // The original develop history is intact and still on the same key.
       expect(totalChildRows(db)).toBe(CHILD_TABLES.length);
       const restored = countChildData(db, 'anvil-develop');
       for (const table of CHILD_TABLES) {
@@ -352,7 +357,7 @@ describe('Issue #1349: pruneStaleRepositoryWorktrees', () => {
   afterEach(() => {
     db.close();
     for (const dir of tempDirs.splice(0)) {
-      fs.rmSync(dir, { recursive: true, force: true });
+      removeTempDir(dir);
     }
   });
 
@@ -395,7 +400,7 @@ describe('Issue #1349: pruneStaleRepositoryWorktrees', () => {
     expect(totalChildRows(db)).toBe(CHILD_TABLES.length);
 
     // Directory deleted → next global sync scans it to [] (absent from live set).
-    fs.rmSync(repo, { recursive: true, force: true });
+    removeTempDir(repo);
     const deleted = pruneStaleRepositoryWorktrees(db, []);
 
     expect(deleted).toContain('r-main');
@@ -409,7 +414,7 @@ describe('Issue #1349: pruneStaleRepositoryWorktrees', () => {
     const repo = makeRepoDir();
     syncWorktreesToDB(db, [repoWorktree(repo, 'r-main', 'main')]);
 
-    fs.rmSync(path.join(repo, '.git'), { recursive: true, force: true });
+    removeTempDir(path.join(repo, '.git'));
     const deleted = pruneStaleRepositoryWorktrees(db, []);
 
     expect(deleted).toContain('r-main');
@@ -441,7 +446,7 @@ describe('Issue #1349: pruneStaleRepositoryWorktrees', () => {
     seedChildData(db, 'gone-main');
     seedChildData(db, 'alive-main');
 
-    fs.rmSync(gone, { recursive: true, force: true });
+    removeTempDir(gone);
     // Current scan reports only the alive repository.
     const deleted = pruneStaleRepositoryWorktrees(db, [
       repoWorktree(alive, 'alive-main', 'main'),
@@ -459,7 +464,7 @@ describe('Issue #1349: pruneStaleRepositoryWorktrees', () => {
     const repo = makeRepoDir();
     syncWorktreesToDB(db, [repoWorktree(repo, 'r-main', 'main')]);
 
-    fs.rmSync(repo, { recursive: true, force: true });
+    removeTempDir(repo);
     const deleted = pruneStaleRepositoryWorktrees(db, [
       repoWorktree(repo, 'r-main', 'main'),
     ]);

@@ -90,9 +90,15 @@ export function createLsCommand(): Command {
         }
 
         // Issue #1005: Filter by worktree id prefix. Independent of `--branch`
-        // (AND-combined when both are given). Front-match / case-sensitive;
-        // the prefix does not guarantee uniqueness because ids are
-        // `<repo>-<branch>` slugs and startsWith can match sibling slugs.
+        // (AND-combined when both are given). Front-match / case-sensitive.
+        //
+        // Matched against the CURRENT ids only (Issue #1621): `/api/worktrees`
+        // returns live rows, and historical ids resolve exactly — never by
+        // prefix — via the alias table on the routes that take an `<id>`
+        // argument. A prefix still does not guarantee uniqueness: ids are now
+        // directory-basename slugs (`commandmate-issue-1644`), so sibling
+        // worktrees of the same feature share a prefix just as `<repo>-<branch>`
+        // slugs used to.
         if (options.id) {
           worktrees = worktrees.filter(wt => wt.id.startsWith(options.id!));
         }

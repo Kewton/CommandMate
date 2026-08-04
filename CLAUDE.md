@@ -285,9 +285,9 @@ commandmate ls --quiet                     # IDのみ出力（1行1ID）
 commandmate ls --branch feature/           # ブランチ名プレフィックスでフィルタ
 commandmate ls --id <prefix>               # worktree IDのプレフィックスでフィルタ
 
-# メッセージ送信
+# メッセージ送信（送り先の指定は --instance 単独形。--agent はroster外のアドホック起動用、Issue #1638）
 commandmate send <worktree-id> "メッセージ"                    # エージェントにメッセージ送信
-commandmate send <worktree-id> "メッセージ" --agent claude     # エージェント指定
+commandmate send <worktree-id> "メッセージ" --instance codex   # 送り先指定（wait/respond/capture等も同じフラグ）
 commandmate send <worktree-id> "メッセージ" --auto-yes         # Auto-Yes有効化して送信
 commandmate send <worktree-id> "メッセージ" --auto-yes --duration 3h  # Auto-Yes時間指定
 
@@ -297,6 +297,7 @@ commandmate wait <worktree-id> --timeout 300                   # 300秒でタイ
 commandmate wait <worktree-id> --stall-timeout 60              # 60秒出力変化なしでタイムアウト
 commandmate wait <worktree-id> --on-prompt human               # プロンプト検出時も待機継続
 commandmate wait <id1> <id2>                                   # 複数worktree同時待機
+commandmate wait <worktree-id> --instance codex                # 送り先指定（wait に --agent は無い）
 commandmate wait <worktree-id> --verify                        # 完了検知後に検証ゲート実行（不合格 exit 20 / 作業証跡ゼロ exit 21）
 
 # 検証ゲート（.commandmate/verify.yaml、Issue #1544、詳細は docs/user-guide/cli-operations-guide.md）
@@ -304,12 +305,12 @@ commandmate verify <worktree-id> [--gates lint,unit] [--json]  # 合格 0 / 不�
 
 # プロンプト応答
 commandmate respond <worktree-id> "yes"                        # プロンプトに応答
-commandmate respond <worktree-id> "yes" --agent claude         # エージェント指定
+commandmate respond <worktree-id> "yes" --instance codex       # 送り先指定
 
 # ターミナル出力取得
 commandmate capture <worktree-id>                              # ターミナル出力をテキストで取得
 commandmate capture <worktree-id> --json                       # JSON形式で取得
-commandmate capture <worktree-id> --agent codex                # エージェント指定
+commandmate capture <worktree-id> --instance codex             # 送り先指定
 
 # Auto-Yes制御
 commandmate auto-yes <worktree-id> --enable                    # Auto-Yes有効化（デフォルト1h）
@@ -322,7 +323,7 @@ commandmate instances <worktree-id>                            # roster＋稼働
 commandmate instances <worktree-id> add --agent codex           # インスタンス追加（--alias/--id指定可）
 commandmate instances <worktree-id> remove <instance-id> --kill # roster削除＋セッション停止
 commandmate instances <worktree-id> alias <instance-id> "名前"  # alias変更
-commandmate send <worktree-id> "メッセージ" --agent codex --instance codex-2 --register  # アドホック起動+roster登録
+commandmate send <worktree-id> "メッセージ" --agent codex --instance codex-3 --register  # roster外IDのアドホック起動+登録（--agent必須）
 
 # 日次レポート（Issue #636、詳細は docs/user-guide/cli-operations-guide.md）
 commandmate report generate                  # 本日分のレポート生成（--date/--tool/--template/--instruction）
