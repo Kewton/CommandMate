@@ -40,7 +40,12 @@ export { isPathSafe, validateWorktreePath, resolveAndValidateRealPath } from './
 export { SENSITIVE_ENV_KEYS, sanitizeEnvForChildProcess } from './env-sanitizer'
 
 // sanitize.ts
-export { sanitizeTerminalOutput, sanitizeUserInput, containsDangerousContent } from './sanitize'
+export {
+  sanitizeTerminalOutput,
+  truncateTerminalOutput,
+  sanitizeUserInput,
+  containsDangerousContent,
+} from './sanitize'
 
 // worktree-path-validator.ts
 export { isValidWorktreePath } from './worktree-path-validator'

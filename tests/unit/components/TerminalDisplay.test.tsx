@@ -11,6 +11,7 @@ import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-libra
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { buildClaude1000RowPermissionFrame } from '../../fixtures/claude-1000-row-prompt';
 import { buildCodex1000RowApprovalFrame } from '../../fixtures/codex-1000-row-approval';
+import { MAX_TERMINAL_OUTPUT_LENGTH } from '@/config/terminal-output-config';
 
 describe('TerminalDisplay', () => {
   beforeEach(() => {
@@ -518,6 +519,72 @@ describe('TerminalDisplay', () => {
         () => expect(screen.getByText(/1\s*\/\s*1/)).toBeInTheDocument(),
         { timeout: 1000 },
       );
+    });
+  });
+  // ============================================================================
+  // [Issue #1674] oversized output keeps the tail (append-chunk coherence)
+  // ============================================================================
+
+  describe('[Issue #1674] oversized output keeps the tail', () => {
+    afterEach(() => {
+      cleanup();
+    });
+
+    /** Build `approxLength` characters of ~200-char plain lines. */
+    const buildLines = (approxLength: number, tag: string): string => {
+      const line = `${tag} ${'-'.repeat(190)}`;
+      const rows = Math.ceil(approxLength / (line.length + 1));
+      return `${Array.from({ length: rows }, () => line).join('\n')}\n`;
+    };
+
+    it('renders the newest lines and drops the oldest for a single oversized frame', () => {
+      const output = `OLDEST-FRAME-LINE\n${buildLines(MAX_TERMINAL_OUTPUT_LENGTH + 150_000, 'mid')}NEWEST-FRAME-LINE\n`;
+      expect(output.length).toBeGreaterThan(MAX_TERMINAL_OUTPUT_LENGTH);
+
+      const { container } = render(<TerminalDisplay output={output} isActive={true} />);
+      const log = container.querySelector('[role="log"]') as HTMLElement;
+      expect(log.textContent).toContain('NEWEST-FRAME-LINE');
+      expect(log.textContent).not.toContain('OLDEST-FRAME-LINE');
+      expect(log.textContent).toContain('older output truncated');
+    }, 60_000);
+
+    it('an oversized appended chunk falls back to a replace instead of punching a hole', () => {
+      const first = 'FIRST-FRAME-LINE\n';
+      const { container, rerender } = render(
+        <TerminalDisplay output={first} isActive={true} />,
+      );
+      const log = container.querySelector('[role="log"]') as HTMLElement;
+      expect(log.textContent).toContain('FIRST-FRAME-LINE');
+
+      // A delta larger than the cap: appending it would truncate the delta to its
+      // own tail, leaving the first frame rendered next to a gap. The component
+      // must replace instead, so the DOM stays a contiguous suffix of the output.
+      const next = first + buildLines(MAX_TERMINAL_OUTPUT_LENGTH + 150_000, 'mid') + 'NEWEST-APPENDED-LINE\n';
+      act(() => {
+        rerender(<TerminalDisplay output={next} isActive={true} />);
+      });
+
+      expect(log.textContent).toContain('NEWEST-APPENDED-LINE');
+      expect(log.textContent).toContain('older output truncated');
+      // The stale first frame is gone; exactly one truncation marker is shown.
+      expect(log.textContent).not.toContain('FIRST-FRAME-LINE');
+      expect(log.textContent?.match(/older output truncated/g)).toHaveLength(1);
+    }, 60_000);
+
+    it('a normal-sized appended chunk still appends without a marker', () => {
+      const first = 'FIRST-FRAME-LINE\n';
+      const { container, rerender } = render(
+        <TerminalDisplay output={first} isActive={true} />,
+      );
+      const log = container.querySelector('[role="log"]') as HTMLElement;
+
+      act(() => {
+        rerender(<TerminalDisplay output={`${first}SECOND-FRAME-LINE\n`} isActive={true} />);
+      });
+
+      expect(log.textContent).toContain('FIRST-FRAME-LINE');
+      expect(log.textContent).toContain('SECOND-FRAME-LINE');
+      expect(log.textContent).not.toContain('older output truncated');
     });
   });
 });
