@@ -300,11 +300,28 @@ describe('mutating the cassette breaks the run/ready/waiting contract', () => {
     expect(statusesOf(flattened)).not.toContain('waiting');
   });
 
-  it('loses the waiting frame when the question line goes away', () => {
+  // Issue #1676 changed the detector's semantics: a frame with a collected ❯
+  // indicator is exempt from the Layer 5 question-line requirement, and an
+  // indicator-less frame is still rescued by a question line (#193). Either
+  // signal alone therefore sustains `waiting`; the mutation kill needs both
+  // removed. The two `keeps` cases pin each rescue path individually so the
+  // combined kill cannot pass vacuously.
+  it('keeps the waiting frame when only the question line goes away (Issue #1676)', () => {
     const raw = fs.readFileSync(CASSETTE, 'utf8');
-    expect(statusesOf(raw.replace(/Do you want to proceed\?/g, 'Proceeding'))).not.toContain(
-      'waiting',
-    );
+    expect(statusesOf(raw.replace(/Do you want to proceed\?/g, 'Proceeding'))).toContain('waiting');
+  });
+
+  it('keeps the waiting frame when only the option ❯ goes away (#193 artifact tolerance)', () => {
+    const raw = fs.readFileSync(CASSETTE, 'utf8');
+    expect(statusesOf(raw.replace(/❯\\e\[39m 1\. Yes/g, '\\e[39m  1. Yes'))).toContain('waiting');
+  });
+
+  it('loses the waiting frame when the question line and the option ❯ both go away', () => {
+    const raw = fs.readFileSync(CASSETTE, 'utf8');
+    const mutated = raw
+      .replace(/Do you want to proceed\?/g, 'Proceeding')
+      .replace(/❯\\e\[39m 1\. Yes/g, '\\e[39m  1. Yes');
+    expect(statusesOf(mutated)).not.toContain('waiting');
   });
 });
 
