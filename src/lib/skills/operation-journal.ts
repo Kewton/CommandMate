@@ -70,6 +70,12 @@ export interface SkillOperationTarget {
   skillId: string;
   /** Target version; null for uninstall. */
   version: string | null;
+  /**
+   * Version the operation replaces. Set for `update` (#1244) so the audit can
+   * record the from→to transition; absent for install and uninstall, whose
+   * transitions the journal already determines.
+   */
+  fromVersion?: string | null;
 }
 
 /** Immutable provenance of the artifact, recorded for audit. */

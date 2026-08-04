@@ -361,7 +361,21 @@
     },
     "nextAction": {
       "updatable": "インストール済みの全ファイルがインストール記録と一致しています。このプランから更新を適用できます。",
-      "blocked": "何も変更されていません。下に列挙されたパスを解消（ローカル変更の復元、または CommandMate 管理外ファイルの移動）してから、新しい更新プランを作成してください。"
+      "blocked": "何も変更されていません。下に列挙されたパスを解消（ローカル変更の復元、または CommandMate 管理外ファイルの移動）してから、新しい更新プランを作成してください。",
+      "succeeded": "Skill は新しいバージョンに切り替わり、記録されました。下記のエージェントセッションを再起動すると利用できます。",
+      "committedReconciling": "新しいバージョンはすでに worktree にありますが、操作は完全には完了しませんでした。残りは CommandMate が自動的に収束させます。再更新は不要です。",
+      "failed": "worktree には何も書き込まれていません。下記の理由を解消してから、新しい更新プランを作成してください。"
+    },
+    "apply": "更新を適用",
+    "applying": "更新を適用中…",
+    "ackRisk": "候補パッケージのファイル・スクリプト・権限を確認したうえで、この高リスクパッケージへの更新を明示的に承認します。",
+    "ackRiskIncrease": "この更新により Skill の実効リスクが現在より上がることを理解し、別途確認します。",
+    "rollbackAvailable": "入れ替え前のバージョン {version} は、切替前に検証済みの CommandMate 管理バックアップとして保存されました。ロールバックは別操作として提供予定です。",
+    "reload": {
+      "native": "{agent} は起動時に worktree から Skill を読み込みます。この worktree の {agent} セッションを再起動すると {skillId} {version} が利用できます。",
+      "commandmateRuntime": "{agent} はこの Skill を CommandMate ランタイム経由で実行します。この worktree の {agent} セッションを再起動するとランタイムが {skillId} {version} を読み込みます。",
+      "unsupported": "{agent} はこの Skill に対応していません。ファイルは更新されましたが、{skillId} {version} は {agent} セッションでは提供されません。",
+      "unknown": "{agent} でのサポートは未検証です。ファイルは更新済みのため、{agent} セッションを再起動して {skillId} {version} が提供されるか確認してください。"
     }
   },
   "card": {

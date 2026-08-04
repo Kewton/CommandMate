@@ -67,6 +67,11 @@ import {
   SKILL_UPDATE_NEXT_ACTION_KEYS,
   SKILL_UPDATE_RISK_INCREASE_MESSAGE_KEY,
 } from '@/lib/skills/update-plan';
+import {
+  SKILL_UPDATE_APPLY_NEXT_ACTION_KEYS,
+  SKILL_UPDATE_RELOAD_MESSAGE_KEYS,
+  SKILL_UPDATE_ROLLBACK_MESSAGE_KEY,
+} from '@/lib/skills/updater';
 import { SKILL_UPDATE_RECOMMENDATION_MESSAGE_KEYS } from '@/lib/skills/version-resolver';
 
 const ROOT = path.resolve(__dirname, '../../../..');
@@ -176,6 +181,12 @@ function contractKeys(): string[] {
     ...Object.values(SKILL_UPDATE_RECOMMENDATION_MESSAGE_KEYS),
     SKILL_UPDATE_HIGH_RISK_MESSAGE_KEY,
     SKILL_UPDATE_RISK_INCREASE_MESSAGE_KEY,
+    // Emitted by the update apply API (#1244): the response names the next
+    // action per outcome, the reload instruction per agent, and the verified
+    // backup the switch left behind.
+    ...Object.values(SKILL_UPDATE_APPLY_NEXT_ACTION_KEYS),
+    ...Object.values(SKILL_UPDATE_RELOAD_MESSAGE_KEYS),
+    SKILL_UPDATE_ROLLBACK_MESSAGE_KEY,
   ]
     .map(resolveSkillMessageKey)
     .concat(Object.values(RECOMMENDATION_LABEL_KEY))

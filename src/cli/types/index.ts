@@ -442,6 +442,18 @@ export interface SkillUpdatePlanOptions extends SkillPlanOptions {
   range?: string;
 }
 
+/** skill update (apply) options [Issue #1244] */
+export interface SkillUpdateOptions extends SkillUpdatePlanOptions {
+  /** Build the plan and stop; never writes. */
+  dryRun?: boolean;
+  /** Skip the interactive confirmation. Required to write from a non-TTY. */
+  yes?: boolean;
+  /** Explicit `<skill-id>@<version>` acknowledgement, demanded on top of --yes for high risk. */
+  ackRisk?: string;
+  /** Separate acknowledgement demanded when the update raises effective risk. */
+  ackRiskIncrease?: boolean;
+}
+
 /** skill install options [Issue #1237] */
 export interface SkillInstallOptions extends SkillPlanOptions {
   /** Build the plan and stop; never writes. */

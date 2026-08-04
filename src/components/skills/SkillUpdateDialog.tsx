@@ -1,17 +1,19 @@
 /**
- * SkillUpdateDialog (Issue #1243)
+ * SkillUpdateDialog (Issue #1243, apply: #1244)
  *
  * The update surface for one installed Skill in one worktree: an update badge,
- * an explicit version picker, and the server-built Update Plan — version diff,
- * risk and permission changes, and every reason an update is refused — in one
- * place. It plans and previews only; applying an update is #1244 and no apply
- * request exists here.
+ * an explicit version picker, the server-built Update Plan — version diff,
+ * risk and permission changes, and every reason an update is refused — and the
+ * apply step that presents the plan's single-use token back to the server.
  *
- * Two rules the dialog does not bend:
+ * Rules the dialog does not bend:
  * - The candidate is always an exact version the user can see. "Update to
  *   latest" is a default selection in the picker, never an implicit action.
  * - A blocked plan is rendered, not swallowed: local changes are the user's
  *   work, and the screen names each blocking path with what to do about it.
+ *   Apply is only offered on an updatable plan.
+ * - The risk gates fail closed: a high-risk candidate and a risk increase each
+ *   require their own explicit acknowledgement before apply is enabled.
  *
  * @module components/skills/SkillUpdateDialog
  */
@@ -22,6 +24,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Badge, Button, Modal } from '@/components/ui';
 import { isNewerSkillVersion } from '@/lib/skills/version-resolver';
+import { getCliToolDisplayNameSafe } from '@/lib/cli-tools/types';
 import { SkillNotice } from './SkillNotice';
 import { SkillRiskBadge } from './SkillBadges';
 import {
@@ -32,8 +35,12 @@ import {
   operationErrorLabelKey,
   resolveSkillMessageKey,
 } from './skill-vocabulary';
-import { createSkillUpdatePlan, type SkillFetchFailure } from './skills-client';
-import type { SkillUpdatePlanDto, SkillVersionDto } from './types';
+import {
+  applySkillUpdate,
+  createSkillUpdatePlan,
+  type SkillFetchFailure,
+} from './skills-client';
+import type { SkillUpdateApplyResponse, SkillUpdatePlanDto, SkillVersionDto } from './types';
 
 const SELECT_CLASS =
   'w-full rounded-md border border-input bg-surface px-3 py-2 text-sm text-foreground ' +
@@ -55,6 +62,34 @@ interface DialogState {
   busy: boolean;
   plan: SkillUpdatePlanDto | null;
   failure: SkillFetchFailure | null;
+  /** Both risk gates; only rendered (and required) when the plan demands them. */
+  riskAcknowledged: boolean;
+  riskIncreaseAcknowledged: boolean;
+  applying: boolean;
+  applyResult: SkillUpdateApplyResponse | null;
+  applyFailure: SkillFetchFailure | null;
+}
+
+const DIALOG_CLOSED: DialogState = {
+  open: false,
+  selectedVersion: null,
+  busy: false,
+  plan: null,
+  failure: null,
+  riskAcknowledged: false,
+  riskIncreaseAcknowledged: false,
+  applying: false,
+  applyResult: null,
+  applyFailure: null,
+};
+
+/**
+ * Retry key for an apply, derived from the plan token so retrying the same
+ * approved plan replays the original operation instead of starting a second
+ * one (the install panel's rule, shared).
+ */
+function updateIdempotencyKey(token: string): string {
+  return `skill-update-${token}`;
 }
 
 function PathList({ heading, paths, testid }: { heading: string; paths: string[]; testid: string }) {
@@ -101,32 +136,29 @@ export function SkillUpdateDialog({
     [candidates]
   );
 
-  const [state, setState] = useState<DialogState>({
-    open: false,
-    selectedVersion: null,
-    busy: false,
-    plan: null,
-    failure: null,
-  });
+  const [state, setState] = useState<DialogState>(DIALOG_CLOSED);
 
   const openDialog = useCallback(() => {
-    setState({
-      open: true,
-      selectedVersion: defaultVersion,
-      busy: false,
-      plan: null,
-      failure: null,
-    });
+    setState({ ...DIALOG_CLOSED, open: true, selectedVersion: defaultVersion });
   }, [defaultVersion]);
 
   const closeDialog = useCallback(() => {
-    setState((current) => ({ ...current, open: false, plan: null, failure: null }));
+    setState(DIALOG_CLOSED);
   }, []);
 
   const buildPlan = useCallback(async () => {
     const version = state.selectedVersion;
     if (!version) return;
-    setState((current) => ({ ...current, busy: true, plan: null, failure: null }));
+    setState((current) => ({
+      ...current,
+      busy: true,
+      plan: null,
+      failure: null,
+      riskAcknowledged: false,
+      riskIncreaseAcknowledged: false,
+      applyResult: null,
+      applyFailure: null,
+    }));
 
     const result = await createSkillUpdatePlan(worktreeId, skillId, { version });
     setState((current) => ({
@@ -137,6 +169,26 @@ export function SkillUpdateDialog({
     }));
   }, [skillId, state.selectedVersion, worktreeId]);
 
+  const applyPlan = useCallback(async () => {
+    const currentPlan = state.plan;
+    if (!currentPlan || !currentPlan.updatable) return;
+    setState((current) => ({ ...current, applying: true, applyFailure: null }));
+
+    const result = await applySkillUpdate(worktreeId, skillId, {
+      planToken: currentPlan.token,
+      version: currentPlan.update.toVersion,
+      acknowledgeRisk: state.riskAcknowledged,
+      acknowledgeRiskIncrease: state.riskIncreaseAcknowledged,
+      idempotencyKey: updateIdempotencyKey(currentPlan.token),
+    });
+    setState((current) => ({
+      ...current,
+      applying: false,
+      applyResult: result.ok ? result.data : null,
+      applyFailure: result.ok ? null : result.failure,
+    }));
+  }, [skillId, state.plan, state.riskAcknowledged, state.riskIncreaseAcknowledged, worktreeId]);
+
   if (candidates.length === 0) {
     return (
       <p className="text-xs text-muted-foreground" data-testid="skill-update-uptodate">
@@ -146,6 +198,7 @@ export function SkillUpdateDialog({
   }
 
   const plan = state.plan;
+  const applied = state.applyResult;
 
   return (
     <div data-testid="skill-update-dialog-host">
@@ -278,6 +331,40 @@ export function SkillUpdateDialog({
                     {t(resolveSkillMessageKey(plan.riskAcknowledgementMessageKey))}
                   </SkillNotice>
                 )}
+                {plan.updatable && !state.applyResult && plan.requiresRiskAcknowledgement && (
+                  <label className="flex items-start gap-2 text-xs text-foreground">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={state.riskAcknowledged}
+                      onChange={(event) =>
+                        setState((current) => ({
+                          ...current,
+                          riskAcknowledged: event.target.checked,
+                        }))
+                      }
+                      data-testid="skill-update-ack-risk"
+                    />
+                    {t('update.ackRisk')}
+                  </label>
+                )}
+                {plan.updatable && !state.applyResult && plan.riskIncreased && (
+                  <label className="flex items-start gap-2 text-xs text-foreground">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={state.riskIncreaseAcknowledged}
+                      onChange={(event) =>
+                        setState((current) => ({
+                          ...current,
+                          riskIncreaseAcknowledged: event.target.checked,
+                        }))
+                      }
+                      data-testid="skill-update-ack-risk-increase"
+                    />
+                    {t('update.ackRiskIncrease')}
+                  </label>
+                )}
               </div>
 
               <div className="space-y-2" data-testid="skill-update-security-diff">
@@ -390,6 +477,97 @@ export function SkillUpdateDialog({
               <p className="text-xs text-muted-foreground" data-testid="skill-update-expiry">
                 {t('plan.expiresAt', { timestamp: plan.expiresAt })}
               </p>
+
+              {plan.updatable && !state.applyResult && (
+                <Button
+                  variant="primary"
+                  disabled={
+                    state.applying ||
+                    (plan.requiresRiskAcknowledgement && !state.riskAcknowledged) ||
+                    (plan.riskIncreased && !state.riskIncreaseAcknowledged)
+                  }
+                  onClick={applyPlan}
+                  data-testid="skill-update-apply"
+                >
+                  {state.applying ? t('update.applying') : t('update.apply')}
+                </Button>
+              )}
+
+              {state.applyFailure && (
+                <div className="space-y-2" data-testid="skill-update-apply-error">
+                  <SkillNotice tone="danger">
+                    <p>{t(operationErrorLabelKey(state.applyFailure.code))}</p>
+                    <p className="mt-1 break-words">
+                      {t('state.errorCode', { code: state.applyFailure.code })}
+                    </p>
+                  </SkillNotice>
+                  {state.applyFailure.nextActionKey && (
+                    <SkillNotice tone="warning">
+                      {t(resolveSkillMessageKey(state.applyFailure.nextActionKey))}
+                    </SkillNotice>
+                  )}
+                  {state.applyFailure.blockers && state.applyFailure.blockers.length > 0 && (
+                    <ul className="space-y-1" data-testid="skill-update-apply-error-blockers">
+                      {state.applyFailure.blockers.map((blocker) => (
+                        <li
+                          key={`${blocker.code}:${blocker.path ?? ''}`}
+                          className="text-xs text-danger-foreground"
+                        >
+                          {blocker.path && (
+                            <span className="mr-1 break-all font-mono">{blocker.path}</span>
+                          )}
+                          {t(resolveSkillMessageKey(blocker.messageKey))}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {applied && (
+            <div className="space-y-3" data-testid="skill-update-result">
+              <SkillNotice
+                tone={applied.operation.result === 'succeeded' ? 'info' : 'warning'}
+                data-testid="skill-update-result-next-action"
+              >
+                {t(resolveSkillMessageKey(applied.operation.nextActionKey))}
+              </SkillNotice>
+              {'reload' in applied && (
+                <>
+                  <p className="text-sm font-semibold text-foreground">
+                    {t('update.fromTo', {
+                      from: applied.update.fromVersion,
+                      to: applied.update.toVersion,
+                    })}
+                  </p>
+                  <div className="space-y-1" data-testid="skill-update-result-reload">
+                    <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      {t('operation.reloadHeading')}
+                    </h4>
+                    <ul className="space-y-1">
+                      {applied.reload.agents.map((agent) => (
+                        <li key={agent.agent} className="text-xs text-muted-foreground">
+                          {t(resolveSkillMessageKey(agent.messageKey), {
+                            agent: getCliToolDisplayNameSafe(agent.agent),
+                            skillId: applied.reload.skillId,
+                            version: applied.reload.version,
+                          })}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <p
+                    className="text-xs text-muted-foreground"
+                    data-testid="skill-update-result-rollback"
+                  >
+                    {t(resolveSkillMessageKey(applied.rollback.messageKey), {
+                      version: applied.rollback.backup.fromVersion,
+                    })}
+                  </p>
+                </>
+              )}
             </div>
           )}
         </div>

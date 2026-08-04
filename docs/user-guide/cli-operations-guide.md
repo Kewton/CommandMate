@@ -66,7 +66,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Auto-Yesの制御 |
 | [`commandmate instances`](#commandmate-instances) | エージェントインスタンス（roster）の一覧・追加・削除・alias変更 |
 | [`commandmate report`](#commandmate-report) | 日次レポートの生成・表示・一覧、Eval メトリクス集計 |
-| [`commandmate skill`](#commandmate-skill) | 公式Skillのカタログ参照・Install Plan・install・uninstall・status |
+| [`commandmate skill`](#commandmate-skill) | 公式Skillのカタログ参照・Install/Update Plan・install・update・uninstall・status |
 | [`commandmate update`](#commandmate-update) | CommandMate本体の更新（停止 → 更新 → 再起動） |
 
 ---
@@ -1141,10 +1141,17 @@ commandmate skill info <skill-id> --version 1.2.0
 commandmate skill plan <skill-id> --worktree <worktree-id>
 commandmate skill plan <skill-id> --worktree <worktree-id> --version 1.2.0 --json
 
-# Update Plan（書き込みなし。apply は #1244 で未提供）
+# Update Plan（書き込みなし）
 commandmate skill update-plan <skill-id> --worktree <worktree-id>            # 推奨候補で計画
 commandmate skill update-plan <skill-id> --worktree <worktree-id> --version 1.3.0
 commandmate skill update-plan <skill-id> --worktree <worktree-id> --range "^1.0.0" --json
+
+# update（plan → 確認 → apply）
+commandmate skill update <skill-id> --worktree <worktree-id>                 # 推奨候補へ更新
+commandmate skill update <skill-id> --worktree <worktree-id> --version 1.3.0 --dry-run
+commandmate skill update <skill-id> --worktree <worktree-id> --version 1.3.0 --yes
+commandmate skill update <skill-id> --worktree <worktree-id> --version 1.3.0 \
+  --yes --ack-risk <skill-id>@1.3.0 --ack-risk-increase   # high-risk かつ risk 上昇時
 
 # install（plan → 確認 → apply）
 commandmate skill install <skill-id> --worktree <worktree-id> --version 1.2.0
@@ -1159,7 +1166,7 @@ commandmate skill uninstall <skill-id> --worktree <worktree-id> --yes
 commandmate skill status <skill-id> --worktree <worktree-id> --json
 ```
 
-### 確認規約（install / uninstall）
+### 確認規約（install / update / uninstall）
 
 | 状況 | 挙動 |
 |------|------|
@@ -1168,18 +1175,21 @@ commandmate skill status <skill-id> --worktree <worktree-id> --json
 | TTY かつ `--yes` なし | plan summary を表示してから確認プロンプト（stderr）を出す |
 | **非TTY かつ `--yes` なし** | **書き込まず exit 12**。プロンプトを出せない環境で暗黙実行しない |
 | **high-risk Skill** | `--yes` に加えて `--ack-risk <skill-id>@<version>` の**完全一致**が必要。`--yes` だけでは通らない（TTY で承諾しても同じ） |
+| **update で effective risk が上がる** | `--ack-risk` とは**別に** `--ack-risk-increase` が必要。high-risk 承認とリスク上昇承認は独立した確認で、片方が他方を代替しない |
+| **update に local 変更がある** | plan の時点で updatable=false。適用しても**旧版・新版のどちらも書き換えず** exit 11 |
 
 ### オプション
 
 | オプション | 対象サブコマンド | 説明 |
 |-----------|-----------------|------|
-| `--worktree <id>` | plan / update-plan / install / uninstall / status | 対象worktree ID（`commandmate ls` で確認） |
-| `--version <version>` | info / plan / update-plan / install | install では**必須**（exact version）。update-plan では省略時に推奨候補へ解決 |
-| `--range <range>` | update-plan | 候補をこの version range 内に限定（例 `"^1.0.0"`） |
-| `--dry-run` | install / uninstall | plan までで停止 |
-| `-y, --yes` | install / uninstall | 確認プロンプトをスキップ（非対話環境では必須） |
-| `--ack-risk <id>@<version>` | install | high-risk Skill の明示的な承認 |
-| `--prerelease` | list / info / plan / update-plan / install | prerelease version を対象に含める |
+| `--worktree <id>` | plan / update-plan / install / update / uninstall / status | 対象worktree ID（`commandmate ls` で確認） |
+| `--version <version>` | info / plan / update-plan / install / update | install では**必須**（exact version）。update-plan / update では省略時に推奨候補へ解決 |
+| `--range <range>` | update-plan / update | 候補をこの version range 内に限定（例 `"^1.0.0"`） |
+| `--dry-run` | install / update / uninstall | plan までで停止 |
+| `-y, --yes` | install / update / uninstall | 確認プロンプトをスキップ（非対話環境では必須） |
+| `--ack-risk <id>@<version>` | install / update | high-risk Skill の明示的な承認 |
+| `--ack-risk-increase` | update | effective risk が上がる更新の明示的な承認（`--ack-risk` とは別枠） |
+| `--prerelease` | list / info / plan / update-plan / install / update | prerelease version を対象に含める |
 | `--json` | 全サブコマンド | JSON出力（API レスポンスをそのまま出力） |
 | `--token <token>` | 全サブコマンド | 認証トークン（`CM_AUTH_TOKEN` 環境変数を推奨） |
 
@@ -1200,6 +1210,12 @@ commandmate skill status <skill-id> --worktree <worktree-id> --json
 
 > **`skill status` について**: 1 worktree × 1 Skill の導入状態を、install receipt（ディスク上の実体）から報告します。
 > worktree 単位で導入済み Skill を一覧する API は未提供のため、`<skill-id>` は必須です。
+
+> **`skill update` の安全性**: 更新は「旧版が CommandMate の記録どおり無変更である」ことを適用直前に
+> 再証明してから行います。1 file でも編集・追加・欠落があれば**何も書かずに** exit 11 で止まります。
+> 切替は rename 1 点を commit point とするため、途中で失敗しても旧版完全体か新版完全体のどちらかに
+> 収束し、混在しません。旧版は切替前に `~/.commandmate/skills/backups/` へ検証済みで保存されます
+> （復元コマンドは #1245 で提供予定）。
 
 ---
 

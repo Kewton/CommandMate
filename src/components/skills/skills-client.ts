@@ -26,6 +26,7 @@ import type {
   SkillUninstallApplyResponse,
   SkillUninstallBlocker,
   SkillUninstallPlanResponse,
+  SkillUpdateApplyResponse,
   SkillUpdatePlanResponse,
 } from './types';
 
@@ -376,6 +377,49 @@ export function createSkillUpdatePlan(
     () =>
       postJson<SkillUpdatePlanResponse>(
         operationUrl(worktreeId, skillId, 'update-plan'),
+        payload,
+        signal
+      ),
+    SKILL_REQUEST_FAILED,
+    signal
+  );
+}
+
+export interface SkillUpdateApplyRequest {
+  planToken: string;
+  /** Must equal the version the plan was built for, or the token is refused. */
+  version: string;
+  acknowledgeRisk?: boolean;
+  /** Separate, additional confirmation when the update raises effective risk. */
+  acknowledgeRiskIncrease?: boolean;
+  idempotencyKey?: string;
+}
+
+/**
+ * Apply an Update Plan (#1244).
+ *
+ * Presents the single-use token back to the server unchanged; the switch —
+ * local-change guard, staging, the atomic rename sequence — is entirely
+ * server-side, and this request carries nothing that could redirect it.
+ */
+export function applySkillUpdate(
+  worktreeId: string,
+  skillId: string,
+  apply: SkillUpdateApplyRequest,
+  signal?: AbortSignal
+): Promise<SkillFetchResult<SkillUpdateApplyResponse>> {
+  const payload: Record<string, unknown> = {
+    planToken: apply.planToken,
+    version: apply.version,
+  };
+  if (apply.acknowledgeRisk) payload.acknowledgeRisk = true;
+  if (apply.acknowledgeRiskIncrease) payload.acknowledgeRiskIncrease = true;
+  if (apply.idempotencyKey) payload.idempotencyKey = apply.idempotencyKey;
+
+  return request(
+    () =>
+      postJson<SkillUpdateApplyResponse>(
+        operationUrl(worktreeId, skillId, 'update'),
         payload,
         signal
       ),
