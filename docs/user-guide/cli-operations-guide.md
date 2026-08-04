@@ -563,6 +563,50 @@ autoYes:
 ポリシーが自動応答を抑止した事実は `commandmate capture --json` の
 `autoYes.lastSuppression` に出ます（[capture の JSON フィールド](#json出力の主要フィールド)参照）。
 
+### 無人実行の推奨契約テンプレート（Issue #1686）
+
+無人でワーカーを走らせる契約はこのテンプレートから始めてください。
+「目的・変更許可スコープ・合格条件・Auto-Yes ポリシー」が一式そろっており、
+`send --contract` → `wait --verify` → `capture --json` / `capture --prompts` の
+パイプラインでそのまま裁定・観測できます。
+
+```yaml
+# .commandmate/tasks/issue-123.yaml — 無人実行の推奨契約テンプレート
+version: 1
+title: "Issue #123: <一行サマリ>"
+goal: |
+  https://github.com/<org>/<repo>/issues/123 を実装する。
+  受入条件: Issue の受入条件チェックリストをすべて満たすこと。
+  作業完了後は commit すること。
+scope:
+  allow:                              # Issue の対象ファイルを列挙（列挙漏れは scope ゲートで不合格になる）
+    - "src/**"
+    - "tests/**"
+    - "docs/**"
+    - "CHANGELOG.md"
+  deny: []
+verify:
+  gates: [lint, typecheck, unit]      # verify.yaml のゲート id。省略時: 全ゲート
+autoYes:
+  mode: allow-listed                  # safe は yes_no 型のみ。無人実行は allow-listed（上記参照）
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: ['rm -rf', 'git push.*--force', 'sudo ']
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
+```
+
+```bash
+commandmate send <worktree-id> --contract .commandmate/tasks/issue-123.yaml
+commandmate wait <worktree-id> --verify          # 合格 0 / 不合格 20 / 作業証跡ゼロ 21
+commandmate capture <worktree-id> --json         # autoYes.lastSuppression で抑止を観測
+commandmate capture <worktree-id> --prompts      # auto-yes が解決したプロンプトの監査証跡
+```
+
+フィールドの正準仕様は [docs/design/task-contract.md](../design/task-contract.md)、
+判定の可観測性の設計原則は
+[docs/design/discoverability-principle.md](../design/discoverability-principle.md) を参照してください。
+
 ### 一覧・詳細
 
 ```bash
