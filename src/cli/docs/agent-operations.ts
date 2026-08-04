@@ -52,7 +52,8 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     --register             Register the --instance session into the agent-instance roster
     --auto-yes             Enable auto-yes before sending
     --duration <d>         Auto-yes duration: 1h, 3h, 8h (default: 1h)
-    --stop-pattern <p>     Auto-yes stop condition (regex)
+    --stop-pattern <p>     Auto-yes stop condition (regex; matches terminal output,
+                           cannot block commands -- see auto-yes below)
 
   Finding worktree IDs:
     WT=$(commandmate ls --branch feature/101 --quiet)
@@ -178,6 +179,12 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   commandmate auto-yes <id> --enable --stop-pattern "error"
   commandmate auto-yes <id> --disable                   # Disable
   commandmate auto-yes <id> --enable --instance codex-2 # Scoped to one instance
+
+  --stop-pattern matches new terminal output, not the commands an agent runs.
+  It cannot block a command; a build log that merely prints the pattern
+  (e.g. "rm -rf" in an npm script) also triggers it and stops auto-yes.
+  To suppress auto-responses for risky prompts, use the task contract's
+  autoYes.denyPatterns instead (docs/design/task-contract.md).
 
 ### commandmate instances <worktree-id> [action] [args]
   Discover and manage a worktree's agent-instance roster (1 agent, multiple sessions).

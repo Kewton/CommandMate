@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`--stop-pattern` の照合対象と限界をヘルプ・ガイドに明記** (#1682): `--stop-pattern` はターミナル出力のデルタへの正規表現照合であり、エージェントが実行するコマンドの抑止には使えない（ビルドログに `rm -rf` 等の文字列が表示されただけでも発火して Auto-Yes が停止する実害が #1678 で発生）。`auto-yes` / `send` の `--help`、`commandmate docs agent-operations`、`docs/user-guide/cli-operations-guide.md` に「ターミナル出力への照合。コマンド抑止には実行契約の `autoYes.denyPatterns` を使う」旨を追記した。あわせて同ガイドに「worker 稼働中の worktree で監督側が検証・ビルドをしない（生成物ディレクトリ共有で双方のビルドが破損する）」の注意項を追加した
+
 ## [0.20.0] - 2026-08-04
 
 > **Highlight**: worktree ID を「一度採番したら動かない値」に作り替えたリリース。ブランチ由来だった ID をディレクトリ由来へ変え（#1644）、既存行も migration v54 で一括で振り直し、旧 ID は alias として API・ページ・CLI の 3 面で解決し続ける（#1645）。この移行中に**同一 git リポジトリを 2 つの scan root として登録していると sync のたびに ID が 8 hex ずつ伸び、稼働中セッションが UI から消える**回帰（#1659）を本番で踏んだため、churn を塞ぎ（migration v55 で伸びた ID を圧縮）、原因となる構成に気付ける警告（#1662）と、リポジトリを**非破壊で走査対象から外す** GUI（#1658）を追加した。あわせて Auto-Yes が Claude in Chrome の許可ダイアログに応答しない問題（#1676）など、実運用で踏んだ不具合を 12 件修正している。
