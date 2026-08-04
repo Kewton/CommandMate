@@ -155,6 +155,34 @@ describe('WorktreeSkillsPane list', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('badges an installed Skill whose Catalog latest is strictly newer (#1243)', async () => {
+    routeFetch({
+      '/api/skills': CATALOG,
+      '/api/worktrees/wt-1/skills': {
+        body: { worktreeId: 'wt-1', skills: [makeInstalled({ version: '1.1.0' })] },
+      },
+    });
+
+    render(<WorktreeSkillsPane worktreeId="wt-1" />);
+
+    await screen.findByTestId('worktree-skills-installed-release-helper');
+    expect(screen.getByTestId('worktree-skills-update-badge-release-helper')).toHaveTextContent(
+      'skills.worktreePane.updateBadge'
+    );
+  });
+
+  it('shows no update badge when the install matches the Catalog latest (#1243)', async () => {
+    routeFetch({ '/api/skills': CATALOG, '/api/worktrees/wt-1/skills': INSTALLED });
+
+    render(<WorktreeSkillsPane worktreeId="wt-1" />);
+
+    // Installed 1.2.0 equals the Catalog's latest, so no update is claimed.
+    await screen.findByTestId('worktree-skills-installed-release-helper');
+    expect(
+      screen.queryByTestId('worktree-skills-update-badge-release-helper')
+    ).not.toBeInTheDocument();
+  });
+
   it('surfaces an installed-list failure without falling back to an empty list', async () => {
     routeFetch({
       '/api/skills': CATALOG,
@@ -203,6 +231,25 @@ describe('WorktreeSkillsPane detail', () => {
     expect(await screen.findByTestId('skill-install-result')).toHaveTextContent(
       'skills.install.nextAction.succeeded'
     );
+  });
+
+  it('mounts the update surface for an installed Skill with a Catalog entry (#1243)', async () => {
+    routeFetch({
+      '/api/skills': CATALOG,
+      '/api/worktrees/wt-1/skills': {
+        body: { worktreeId: 'wt-1', skills: [makeInstalled({ version: '1.1.0' })] },
+      },
+    });
+
+    render(<WorktreeSkillsPane worktreeId="wt-1" />);
+
+    fireEvent.click(await screen.findByTestId('worktree-skills-installed-release-helper'));
+
+    // The detail view offers the update surface above the install panel: an
+    // update badge and a trigger into the version-picker dialog.
+    await screen.findByTestId('skill-install-panel');
+    expect(screen.getByTestId('skill-update-dialog-host')).toBeInTheDocument();
+    expect(screen.getByTestId('skill-update-badge')).toBeInTheDocument();
   });
 
   it('returns to the list and re-reads the installed index', async () => {

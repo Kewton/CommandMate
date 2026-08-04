@@ -1141,6 +1141,11 @@ commandmate skill info <skill-id> --version 1.2.0
 commandmate skill plan <skill-id> --worktree <worktree-id>
 commandmate skill plan <skill-id> --worktree <worktree-id> --version 1.2.0 --json
 
+# Update Plan（書き込みなし。apply は #1244 で未提供）
+commandmate skill update-plan <skill-id> --worktree <worktree-id>            # 推奨候補で計画
+commandmate skill update-plan <skill-id> --worktree <worktree-id> --version 1.3.0
+commandmate skill update-plan <skill-id> --worktree <worktree-id> --range "^1.0.0" --json
+
 # install（plan → 確認 → apply）
 commandmate skill install <skill-id> --worktree <worktree-id> --version 1.2.0
 commandmate skill install <skill-id> --worktree <worktree-id> --version 1.2.0 --dry-run
@@ -1168,12 +1173,13 @@ commandmate skill status <skill-id> --worktree <worktree-id> --json
 
 | オプション | 対象サブコマンド | 説明 |
 |-----------|-----------------|------|
-| `--worktree <id>` | plan / install / uninstall / status | 対象worktree ID（`commandmate ls` で確認） |
-| `--version <version>` | info / plan / install | install では**必須**（exact version） |
+| `--worktree <id>` | plan / update-plan / install / uninstall / status | 対象worktree ID（`commandmate ls` で確認） |
+| `--version <version>` | info / plan / update-plan / install | install では**必須**（exact version）。update-plan では省略時に推奨候補へ解決 |
+| `--range <range>` | update-plan | 候補をこの version range 内に限定（例 `"^1.0.0"`） |
 | `--dry-run` | install / uninstall | plan までで停止 |
 | `-y, --yes` | install / uninstall | 確認プロンプトをスキップ（非対話環境では必須） |
 | `--ack-risk <id>@<version>` | install | high-risk Skill の明示的な承認 |
-| `--prerelease` | list / info / plan / install | prerelease version を対象に含める |
+| `--prerelease` | list / info / plan / update-plan / install | prerelease version を対象に含める |
 | `--json` | 全サブコマンド | JSON出力（API レスポンスをそのまま出力） |
 | `--token <token>` | 全サブコマンド | 認証トークン（`CM_AUTH_TOKEN` 環境変数を推奨） |
 

@@ -87,6 +87,27 @@ export const DIFF_CHANGE_LABEL_KEY: Record<SkillDiffChange, string> = {
   unmanaged: 'plan.change.unmanaged',
 };
 
+/**
+ * What an update would do with a path, keyed by `SkillUpdateFileChange` (#1243).
+ *
+ * `remove` is a warning, not an error: unlike an install conflict it is part of
+ * the version diff the user is being asked to approve, but a file disappearing
+ * deserves more attention than one appearing.
+ */
+export const UPDATE_CHANGE_BADGE_VARIANT: Record<string, BadgeVariant> = {
+  add: 'info',
+  update: 'warning',
+  remove: 'warning',
+  unchanged: 'gray',
+};
+
+export const UPDATE_CHANGE_LABEL_KEY: Record<string, string> = {
+  add: 'update.change.add',
+  update: 'update.change.update',
+  remove: 'update.change.remove',
+  unchanged: 'update.change.unchanged',
+};
+
 /** Why the planner classified a path the way it did. Keyed by `SkillDiffReasonCode`. */
 export const DIFF_REASON_LABEL_KEY: Record<string, string> = {
   SKILL_DIFF_NEW_FILE: 'plan.diffReason.newFile',
@@ -194,6 +215,10 @@ export const OPERATION_ERROR_LABEL_KEY: Record<string, string> = {
   SKILL_UNINSTALL_DRIFT: 'operation.error.uninstallDrift',
   SKILL_UNINSTALL_FILE_CHANGED: 'operation.error.uninstallFileChanged',
   SKILL_UNINSTALL_FAILED: 'operation.error.uninstallFailed',
+  SKILL_UPDATE_NOT_INSTALLED: 'operation.error.updateNotInstalled',
+  SKILL_UPDATE_UP_TO_DATE: 'operation.error.updateUpToDate',
+  SKILL_UPDATE_VERSION_NOT_ELIGIBLE: 'operation.error.updateVersionNotEligible',
+  SKILL_UPDATE_RECOMMEND_NONE_COMPATIBLE: 'operation.error.updateNoneCompatible',
   SKILL_REQUEST_FAILED: 'operation.error.requestFailed',
 };
 

@@ -5,6 +5,7 @@
  *   commandmate skill list [--json]
  *   commandmate skill info <skill-id> [--version <v>] [--json]
  *   commandmate skill plan <skill-id> --worktree <id> [--version <v>] [--json]
+ *   commandmate skill update-plan <skill-id> --worktree <id> [--version <v>] [--range <r>] [--json]
  *   commandmate skill install <skill-id> --worktree <id> --version <exact> [--dry-run] [--yes] [--ack-risk <id>@<version>] [--git current|dedicated] [--push] [--pr]
  *   commandmate skill uninstall <skill-id> --worktree <id> [--dry-run] [--yes] [--json]
  *   commandmate skill status <skill-id> --worktree <id> [--json]
@@ -30,6 +31,7 @@ import type {
   SkillPlanOptions,
   SkillStatusOptions,
   SkillUninstallOptions,
+  SkillUpdatePlanOptions,
 } from '../types';
 import { ExitCode, SkillExitCode } from '../types';
 import type {
@@ -44,6 +46,7 @@ import type {
   SkillUninstallPlan,
   SkillUninstallPlanResponse,
   SkillUninstallResponse,
+  SkillUpdatePlanResponse,
 } from '../types/api-responses';
 import { ApiClient, ApiError, assertResponseShape, isValidWorktreeId } from '../utils/api-client';
 import { TOKEN_WARNING } from '../utils/command-helpers';
@@ -54,6 +57,7 @@ import {
   formatSkillDetail,
   formatSkillTable,
   formatUninstallPlan,
+  formatUpdatePlan,
 } from './skill-format';
 import {
   handleSkillCommandError,
@@ -167,6 +171,38 @@ async function planInstall(skillId: string, options: SkillPlanOptions): Promise<
 
   console.log(options.json ? JSON.stringify({ plan }, null, 2) : formatInstallPlan(plan));
   if (!plan.installable) process.exit(SkillExitCode.BLOCKED);
+}
+
+/**
+ * Preview updating an installed Skill to a newer exact version (Issue #1243).
+ *
+ * Plan-only by design: applying an update is #1244 and no apply request exists
+ * in this command. The server reads the installed version from the on-disk
+ * receipt, resolves the candidate against the Catalog, verifies the artifact
+ * and reports the version diff, the risk change and every blocker.
+ */
+async function planUpdate(skillId: string, options: SkillUpdatePlanOptions): Promise<void> {
+  const target = resolveTarget(skillId, options.worktree);
+  if (!target) return;
+
+  const client = new ApiClient({ token: options.token });
+  const body: Record<string, unknown> = {};
+  if (options.version) body.version = options.version;
+  if (options.prerelease) body.includePrerelease = true;
+  if (options.range) body.range = options.range;
+
+  const response = await client.post<SkillUpdatePlanResponse>(
+    `/api/worktrees/${encodeURIComponent(target.worktreeId)}/skills/${encodeURIComponent(target.skillId)}/update-plan`,
+    body
+  );
+  const plan = assertResponseShape<SkillUpdatePlanResponse>(
+    response,
+    ['plan'],
+    'POST .../skills/update-plan'
+  ).plan;
+
+  console.log(options.json ? JSON.stringify({ plan }, null, 2) : formatUpdatePlan(plan));
+  if (!plan.updatable) process.exit(SkillExitCode.BLOCKED);
 }
 
 /**
@@ -589,6 +625,24 @@ export function createSkillCommand(): Command {
     .action(async (skillId: string, options: SkillPlanOptions) => {
       try {
         await planInstall(skillId, options);
+      } catch (error) {
+        handleSkillCommandError(error);
+      }
+    });
+
+  skill
+    .command('update-plan')
+    .description('Preview updating an installed Skill to a newer version. Never writes.')
+    .argument('<skill-id>', 'Installed Skill ID')
+    .option('--worktree <id>', 'Target worktree ID (see: commandmate ls)')
+    .option('--version <version>', 'Exact candidate version (default: the recommended candidate)')
+    .option('--range <range>', 'Only consider candidates satisfying this version range')
+    .option('--json', 'JSON output (the API response body, verbatim)')
+    .option('--prerelease', 'Include prerelease candidates')
+    .option('--token <token>', TOKEN_WARNING)
+    .action(async (skillId: string, options: SkillUpdatePlanOptions) => {
+      try {
+        await planUpdate(skillId, options);
       } catch (error) {
         handleSkillCommandError(error);
       }

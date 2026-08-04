@@ -436,6 +436,12 @@ export interface SkillPlanOptions extends SkillListOptions {
   version?: string;
 }
 
+/** skill update-plan options [Issue #1243] */
+export interface SkillUpdatePlanOptions extends SkillPlanOptions {
+  /** Range every candidate must satisfy, in the Skill version-range grammar. */
+  range?: string;
+}
+
 /** skill install options [Issue #1237] */
 export interface SkillInstallOptions extends SkillPlanOptions {
   /** Build the plan and stop; never writes. */

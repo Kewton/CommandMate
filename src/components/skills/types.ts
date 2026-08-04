@@ -41,12 +41,21 @@ export type {
   SkillUninstallPlanDto,
 } from '@/lib/skills/uninstall-plan';
 
+export type {
+  SkillUpdateBlocker,
+  SkillUpdateFileEntry,
+  SkillUpdatePlanDto,
+  SkillUpdateSecurityDiff,
+  SkillUpdateStats,
+} from '@/lib/skills/update-plan';
+
 export type { SkillInstallPlanResponse } from '@/app/api/worktrees/[id]/skills/[skillId]/plan/route';
 export type {
   SkillInstallReplayResponse,
   SkillInstallResponse,
 } from '@/app/api/worktrees/[id]/skills/[skillId]/install/route';
 export type { SkillUninstallPlanResponse } from '@/app/api/worktrees/[id]/skills/[skillId]/uninstall-plan/route';
+export type { SkillUpdatePlanResponse } from '@/app/api/worktrees/[id]/skills/[skillId]/update-plan/route';
 export type {
   SkillUninstallReplayResponse,
   SkillUninstallResponse,
