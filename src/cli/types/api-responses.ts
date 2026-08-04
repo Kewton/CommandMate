@@ -119,7 +119,15 @@ export interface PromptData {
 export interface PromptResponseResult {
   success: boolean;
   answer: string;
-  reason?: string; // e.g. 'prompt_no_longer_active'
+  reason?: string; // e.g. 'prompt_no_longer_active', 'unresolvable_answer'
+  /** Issue #1681: detail accompanying reason 'unresolvable_answer' */
+  message?: string;
+  /** Issue #1681: how a semantic yes/no or --default answer was resolved */
+  resolved?: {
+    via: 'semantic' | 'default';
+    optionNumber?: number;
+    optionLabel: string;
+  };
 }
 
 /** wait exit 10 CLI extended output type */

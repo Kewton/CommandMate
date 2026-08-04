@@ -771,3 +771,207 @@ describe('POST /api/worktrees/:id/prompt-response - Multi-select (checkbox) prom
     expect(sentKeys).toEqual(['Space', 'Down', 'Down', 'Enter']);
   });
 });
+
+describe('POST /api/worktrees/:id/prompt-response - Semantic yes/no resolution (Issue #1681)', () => {
+  let db: Database.Database;
+
+  const claudePermissionPromptData = {
+    type: 'multiple_choice' as const,
+    question: 'Do you want to make this edit?',
+    options: [
+      { number: 1, label: 'Yes', isDefault: true },
+      { number: 2, label: 'Yes, allow all edits during this session (shift+tab)', isDefault: false },
+      { number: 3, label: 'No, and tell Claude what to do differently (esc)', isDefault: false },
+    ],
+    status: 'pending' as const,
+  };
+
+  function createBodyRequest(worktreeId: string, body: Record<string, unknown>): NextRequest {
+    return new Request(`http://localhost:3000/api/worktrees/${worktreeId}/prompt-response`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }) as unknown as NextRequest;
+  }
+
+  beforeEach(async () => {
+    db = new Database(':memory:');
+    runMigrations(db);
+
+    const { setMockDb } = await import('@/lib/db/db-instance');
+    setMockDb(db);
+
+    const worktree: Worktree = {
+      id: 'test-wt',
+      name: 'Test Worktree',
+      path: '/path/to/test',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'TestRepo',
+      cliToolId: 'claude',
+    };
+    upsertWorktree(db, worktree);
+
+    vi.clearAllMocks();
+
+    // Reset mocks that earlier describe blocks may have set to reject/false
+    const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux/tmux');
+    vi.mocked(sendKeys).mockResolvedValue(undefined);
+    vi.mocked(sendSpecialKeys).mockResolvedValue(undefined);
+    mockIsRunning.mockResolvedValue(true);
+  });
+
+  it('resolves "no" to the negative option on the Claude 3-choice menu (no Enter degradation)', async () => {
+    const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
+    const { detectPrompt } = await import('@/lib/detection/prompt-detector');
+    const { sendSpecialKeys, sendKeys } = await import('@/lib/tmux/tmux');
+
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue('permission menu');
+    vi.mocked(detectPrompt).mockReturnValue({
+      isPrompt: true,
+      promptData: claudePermissionPromptData,
+      cleanContent: 'permission menu',
+    });
+
+    const request = createBodyRequest('test-wt', { answer: 'no' });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
+    const data = await response.json();
+
+    expect(data.success).toBe(true);
+    expect(data.answer).toBe('3');
+    expect(data.resolved).toEqual({
+      via: 'semantic',
+      optionNumber: 3,
+      optionLabel: 'No, and tell Claude what to do differently (esc)',
+    });
+    // offset = 3 - 1 = 2 -> cursor navigation to the "No" option, not a bare Enter
+    expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test-wt', ['Down', 'Down', 'Enter']);
+    expect(sendKeys).not.toHaveBeenCalled();
+  });
+
+  it('resolves "yes" to the plain affirmative option (option 1)', async () => {
+    const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
+    const { detectPrompt } = await import('@/lib/detection/prompt-detector');
+    const { sendSpecialKeys } = await import('@/lib/tmux/tmux');
+
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue('permission menu');
+    vi.mocked(detectPrompt).mockReturnValue({
+      isPrompt: true,
+      promptData: claudePermissionPromptData,
+      cleanContent: 'permission menu',
+    });
+
+    const request = createBodyRequest('test-wt', { answer: 'yes' });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
+    const data = await response.json();
+
+    expect(data.success).toBe(true);
+    expect(data.answer).toBe('1');
+    expect(data.resolved?.optionNumber).toBe(1);
+    expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test-wt', ['Enter']);
+  });
+
+  it('refuses unresolvable yes/no and sends NOTHING', async () => {
+    const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
+    const { detectPrompt } = await import('@/lib/detection/prompt-detector');
+    const { sendSpecialKeys, sendKeys } = await import('@/lib/tmux/tmux');
+
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue('model picker');
+    vi.mocked(detectPrompt).mockReturnValue({
+      isPrompt: true,
+      promptData: {
+        type: 'multiple_choice',
+        question: 'Select model:',
+        options: [
+          { number: 1, label: 'Default (recommended)', isDefault: true },
+          { number: 2, label: 'Opus', isDefault: false },
+        ],
+        status: 'pending',
+      },
+      cleanContent: 'model picker',
+    });
+
+    const request = createBodyRequest('test-wt', { answer: 'yes' });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
+    const data = await response.json();
+
+    expect(data.success).toBe(false);
+    expect(data.reason).toBe('unresolvable_answer');
+    expect(sendKeys).not.toHaveBeenCalled();
+    expect(sendSpecialKeys).not.toHaveBeenCalled();
+  });
+
+  it('refuses yes/no when capture failed but the client claims multiple_choice', async () => {
+    const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
+    const { sendSpecialKeys, sendKeys } = await import('@/lib/tmux/tmux');
+
+    vi.mocked(captureSessionOutputFresh).mockRejectedValue(new Error('tmux capture failed'));
+
+    const request = createBodyRequest('test-wt', { answer: 'yes', promptType: 'multiple_choice' });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
+    const data = await response.json();
+
+    expect(data.success).toBe(false);
+    expect(data.reason).toBe('unresolvable_answer');
+    expect(sendKeys).not.toHaveBeenCalled();
+    expect(sendSpecialKeys).not.toHaveBeenCalled();
+  });
+
+  it('keeps text+Enter for yes/no when capture failed and nothing claims multiple_choice', async () => {
+    const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
+    const { sendKeys } = await import('@/lib/tmux/tmux');
+
+    vi.mocked(captureSessionOutputFresh).mockRejectedValue(new Error('tmux capture failed'));
+
+    const request = createBodyRequest('test-wt', { answer: 'yes' });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
+    const data = await response.json();
+
+    expect(data.success).toBe(true);
+    expect(sendKeys).toHaveBeenCalledWith('claude-test-wt', 'yes', false);
+  });
+
+  it('selects the default option with useDefault', async () => {
+    const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
+    const { detectPrompt } = await import('@/lib/detection/prompt-detector');
+    const { sendSpecialKeys } = await import('@/lib/tmux/tmux');
+
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue('permission menu');
+    vi.mocked(detectPrompt).mockReturnValue({
+      isPrompt: true,
+      promptData: claudePermissionPromptData,
+      cleanContent: 'permission menu',
+    });
+
+    const request = createBodyRequest('test-wt', { useDefault: true });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
+    const data = await response.json();
+
+    expect(data.success).toBe(true);
+    expect(data.answer).toBe('1');
+    expect(data.resolved).toEqual({ via: 'default', optionNumber: 1, optionLabel: 'Yes' });
+    expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test-wt', ['Enter']);
+  });
+
+  it('refuses useDefault when no prompt was detected (capture failed)', async () => {
+    const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
+    const { sendSpecialKeys, sendKeys } = await import('@/lib/tmux/tmux');
+
+    vi.mocked(captureSessionOutputFresh).mockRejectedValue(new Error('tmux capture failed'));
+
+    const request = createBodyRequest('test-wt', { useDefault: true });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
+    const data = await response.json();
+
+    expect(data.success).toBe(false);
+    expect(data.reason).toBe('unresolvable_answer');
+    expect(sendKeys).not.toHaveBeenCalled();
+    expect(sendSpecialKeys).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when both answer and useDefault are provided', async () => {
+    const request = createBodyRequest('test-wt', { answer: 'yes', useDefault: true });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
+
+    expect(response.status).toBe(400);
+  });
+});

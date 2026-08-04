@@ -336,19 +336,35 @@ Completed: localllm-test-main
 ### 使用方法
 
 ```bash
-commandmate respond <worktree-id> "yes"          # Yes/No
+commandmate respond <worktree-id> "yes"          # Yes/No（複数選択では肯定選択肢へ意味解決）
 commandmate respond <worktree-id> "2"            # 複数選択（番号）
 commandmate respond <worktree-id> "text"         # テキスト入力
+commandmate respond <worktree-id> --default      # default 選択肢を明示的に選ぶ
 commandmate respond <worktree-id> "yes" --instance codex          # プライマリインスタンス指定
 commandmate respond <worktree-id> "yes" --instance codex-2        # 追加インスタンス宛て
 ```
+
+### yes / no の意味解決（Issue #1681）
+
+複数選択（multiple_choice）プロンプトへの `yes` / `no`（`y` / `n`）は、選択肢ラベルを正規化して
+肯定（`Yes...`）/ 否定（`No...`・`Deny`）の**選択肢番号に解決してから**送信します。カーソルナビ型
+メニュー（claude / antigravity）ではテキスト入力が無視され Enter が default 選択肢の選択に
+化けるため（`respond no` が承認になる事故）、テキスト+Enter では送りません。
+
+- 肯定候補が複数ある場合（例: `1. Yes` / `2. Yes, allow all edits...`）は**最も番号の小さい選択肢**
+  （= 最小権限）を選びます
+- 解決できない場合（yes/no 系ラベルが無い・チェックボックス型・選択肢を読めない）は**何も送信せず**
+  exit 99（`unresolvable_answer`）で失敗します。番号で応答してください
+- 解決結果は監査のため stdout に出力されます: `Resolved "no" to option 3: No, and tell Claude ...`
+- `--default` は default 選択肢（❯ ハイライト位置）を明示的に選びます（`<answer>` と排他）
 
 ### 終了コード
 
 | コード | 意味 |
 |:------:|------|
 | 0 | 応答成功 |
-| 99 | プロンプトが既に消えている（`prompt_no_longer_active`）|
+| 2 | 引数エラー（`<answer>` と `--default` の同時指定・両方欠落 等）|
+| 99 | プロンプトが既に消えている（`prompt_no_longer_active`）/ yes・no を選択肢に解決できない（`unresolvable_answer`）|
 
 ---
 

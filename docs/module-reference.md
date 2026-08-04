@@ -278,6 +278,7 @@
 | `src/app/login/page.tsx` | ログイン画面（Issue #331: トークン認証フォーム、Rate limit/ロックアウト表示、認証無効時は / へリダイレクト。Issue #383: ngrok 経由モバイルアクセス用 QR コードログイン）。ログインページ |
 | `src/lib/session-key-sender.ts` | Claudeセッションキー送信ロジック（Issue #479） |
 | `src/lib/prompt-answer-input.ts` | プロンプト応答入力ロジック（getAnswerInput）（Issue #479） |
+| `src/lib/prompt-answer-semantic.ts` | yes/no の意味解決（Issue #1681）。multiple_choice のラベルを肯定/否定選択肢番号へ解決（resolvePromptAnswer）、--default 解決、解決不能時は PromptAnswerResolutionError で送信拒否 |
 | `src/lib/slash-command-format.ts` | スラッシュコマンドトリガ表記（getSlashCommandTrigger）。Issue #790で Codex skill（`source==='codex-skill'`）は Codex CLI 公式構文 `$NAME`、その他（Claude/Copilot/Gemini）は `/NAME` を返す。Issue #1306: resolveCommandDescription(command, t) が descriptionKey（組み込み）と description（ユーザー定義 frontmatter）の両方を解決 |
 | `src/lib/skill-events.ts` | Skill install → slash-command palette の疎結合ブリッジ（#1477）。`SKILL_INSTALLED_EVENT='skill:installed'` と `dispatchSkillInstalled(worktreeId)`（SSR で no-op）。`SkillInstallPanel` の install 成功時に dispatch し、`useSlashCommands` が worktreeId 一致時のみ refetch。`useSlashCommands` の fetch は `{cache:'no-store'}` で常に fresh |
 | `src/lib/link-utils.ts` | リンク種別判定・相対パス解決・hrefサニタイズ（Issue #505） |

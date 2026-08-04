@@ -341,6 +341,8 @@ export interface RespondOptions {
   token?: string;
   /** Issue #868: agent instance ID or alias (defaults to the agent's primary instance) */
   instance?: string;
+  /** Issue #1681: select the prompt's default option instead of passing an answer */
+  default?: boolean;
 }
 
 /** capture command options [Issue #518] */

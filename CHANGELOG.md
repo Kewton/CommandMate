@@ -14,11 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - GUI の worktree 同期ボタンと同じ `POST /api/repositories/sync` を呼ぶ薄いサブコマンド。`git worktree add` で作成した worktree を GUI を開かずに `commandmate ls` へ反映でき、worktree 作成 → dispatch が CLI だけで完結する（#1678 A-1）
   - `--json` で同期結果（worktreeCount / repositoryCount / repositories / deletedCount / cleanupWarnings）を API レスポンス相当のまま出力
   - サーバー未起動時は既存コマンドと同じ接続エラー（exit 1）。リポジトリ未設定の 400 はサーバーの文言（WORKTREE_REPOS / CM_ROOT_DIR の案内）を素通しして exit 2
+- **CLI: `respond <worktree-id> --default`** — 検出中プロンプトの default 選択肢（❯ ハイライト位置）を明示的に選択する（#1681）
 
 ### Changed
 
 - **`--stop-pattern` の照合対象と限界をヘルプ・ガイドに明記** (#1682): `--stop-pattern` はターミナル出力のデルタへの正規表現照合であり、エージェントが実行するコマンドの抑止には使えない（ビルドログに `rm -rf` 等の文字列が表示されただけでも発火して Auto-Yes が停止する実害が #1678 で発生）。`auto-yes` / `send` の `--help`、`commandmate docs agent-operations`、`docs/user-guide/cli-operations-guide.md` に「ターミナル出力への照合。コマンド抑止には実行契約の `autoYes.denyPatterns` を使う」旨を追記した。あわせて同ガイドに「worker 稼働中の worktree で監督側が検証・ビルドをしない（生成物ディレクトリ共有で双方のビルドが破損する）」の注意項を追加した
 - **verify / wait --verify: 不合格ゲートの logTail 表示に行数上限** (#1683): stderr への logTail 表示を末尾 40 行までにし、超過分は `... (+N more lines; run \`commandmate verify show <run-id>\` for the full log)` の 1 行に畳む。保存側（`options.maxLogTailBytes`、最大 1MB）は従来どおりで、`--json` / `verify show` は全文を返す
+
+### Fixed
+
+- **CLI**: `respond` の `yes` / `no` を multiple_choice プロンプトの選択肢ラベルへ意味解決してから送信するように修正（#1681）。従来は非数値回答をテキスト+Enter で送るだけで、カーソルナビ型メニュー（claude / antigravity）では文字入力が無視され Enter が default 選択肢の選択に化けていた（3 択への `respond no` が default の "Yes" を選ぶ = 否認のつもりが承認）。肯定候補が複数ある場合は最小番号（= 最小権限）を選択し、解決不能な場合は何も送信せず `unresolvable_answer` でエラー終了する。あわせて default 選択肢を明示的に選ぶ `respond --default` と、解決結果（選択した番号・ラベル）の stdout 出力（監査用）を追加
 
 ## [0.20.0] - 2026-08-04
 
