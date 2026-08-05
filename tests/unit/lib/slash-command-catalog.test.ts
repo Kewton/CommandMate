@@ -313,7 +313,7 @@ describe('getCatalogStaleness', () => {
     };
     const staleness = await getCatalogStaleness();
     expect(staleness.claude).toEqual({ current: '2.5.0', verifiedAgainst: '2.1.218', stale: true });
-    expect(staleness.codex).toEqual({ current: '0.144.6', verifiedAgainst: '0.144.6', stale: false });
+    expect(staleness.codex).toEqual({ current: '0.144.6', verifiedAgainst: '0.146.0', stale: false });
     // Missing binary → not reported at all.
     expect(staleness.antigravity).toBeUndefined();
   });
