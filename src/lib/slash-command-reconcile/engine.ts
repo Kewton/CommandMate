@@ -38,8 +38,14 @@ import type {
 const DESCRIPTION_KEY_PREFIX = 'slashCommands.descriptions.';
 /** Category a newly discovered command lands in until a human recategorizes it. */
 const DEFAULT_CATEGORY = 'standard-util';
-/** Marks a Japanese string as an untranslated placeholder needing review. */
-const JA_REVIEW_PREFIX = '[要レビュー] ';
+/**
+ * Marks a Japanese string as an untranslated placeholder needing review.
+ *
+ * Exported because the generator must not be the only side that knows this
+ * string: the shipped-dictionary guard (Issue #1703) reads the same constant,
+ * so changing the marker here can never silently disarm the guard.
+ */
+export const JA_REVIEW_PREFIX = '[要レビュー] ';
 
 /**
  * A "description" that is really a row marker the parser failed to strip.
@@ -59,6 +65,17 @@ export const NOTICE_CATEGORY_ORDER: readonly ReconcileNoticeCategory[] = [
   'suspect-description',
   'description-conflict',
 ];
+
+/**
+ * True when `value` still carries the untranslated-placeholder marker.
+ *
+ * Deliberately looser than the generator: it matches the marker anywhere in the
+ * string and ignores the trailing space, so a placeholder a human reflowed or
+ * partially edited is still caught (Issue #1703).
+ */
+export function hasReviewMarker(value: unknown): boolean {
+  return typeof value === 'string' && value.includes(JA_REVIEW_PREFIX.trim());
+}
 
 /** True when `description` looks like a row marker rather than a purpose. */
 export function isSuspectDescription(description: string | undefined): boolean {

@@ -17,9 +17,25 @@ import {
   getFrequentlyUsedCommands,
 } from '@/lib/standard-commands';
 import { keyOf } from '@/lib/command-merger';
+import { JA_REVIEW_PREFIX, hasReviewMarker } from '@/lib/slash-command-reconcile/engine';
 import type { SlashCommandCategory } from '@/types/slash-commands';
 
 const LOCALES = ['en', 'ja'] as const;
+
+/** Read a whole shipped locale namespace (Issue #1703 sweeps beyond descriptions). */
+function loadLocaleFile(locale: (typeof LOCALES)[number]): unknown {
+  const file = path.resolve(__dirname, `../../../locales/${locale}/worktree.json`);
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+/** Flatten a nested dictionary into dotted-key → string pairs. */
+function flattenStrings(value: unknown, prefix = ''): Array<[string, string]> {
+  if (typeof value === 'string') return [[prefix, value]];
+  if (!value || typeof value !== 'object') return [];
+  return Object.entries(value as Record<string, unknown>).flatMap(([key, child]) =>
+    flattenStrings(child, prefix ? `${prefix}.${key}` : key)
+  );
+}
 
 /**
  * Read the real `slashCommands.descriptions` block straight off disk.
@@ -703,5 +719,44 @@ describe('STANDARD_COMMANDS description dictionary (Issue #1306)', () => {
     const ja = loadDescriptions('ja');
     const untranslated = Object.keys(en).filter((key) => en[key] === ja[key]);
     expect(untranslated, 'ja descriptions identical to en').toEqual([]);
+  });
+
+  // Issue #1703: `catalog:refresh --write` seeds every new ja description with
+  // the JA_REVIEW_PREFIX placeholder (ja text is out of reach of the heuristic
+  // extraction), so a reconcile pass opens this leak *every* time. None of the
+  // guards above close it — the key exists, and the marker itself makes ja
+  // differ from en, so even the echo check passes. v0.21.2 reached its release
+  // PR with 86 such placeholders and was caught only by reading the diff.
+  it('should not ship untranslated review placeholders in any description', () => {
+    const offenders: string[] = [];
+    for (const locale of LOCALES) {
+      for (const [key, value] of Object.entries(loadDescriptions(locale))) {
+        if (hasReviewMarker(value)) offenders.push(`${locale}/${key}`);
+      }
+    }
+    expect(
+      offenders,
+      `${offenders.length} description(s) still carry the "${JA_REVIEW_PREFIX.trim()}" ` +
+        `translation marker — translate them before release: ${offenders.join(', ')}`
+    ).toEqual([]);
+  });
+
+  // Same marker, hand-authored strings: the reconcile only writes into
+  // slashCommands.descriptions, so this sweep covers the rest of the shipped
+  // namespace (a human copying a placeholder elsewhere). Disjoint from the
+  // guard above so one leak reports in exactly one place.
+  it('should not leave review placeholders anywhere else in the shipped locales', () => {
+    const offenders: string[] = [];
+    for (const locale of LOCALES) {
+      for (const [key, value] of flattenStrings(loadLocaleFile(locale))) {
+        if (key.startsWith('slashCommands.descriptions.')) continue;
+        if (hasReviewMarker(value)) offenders.push(`${locale}/${key}`);
+      }
+    }
+    expect(
+      offenders,
+      `${offenders.length} locale string(s) still carry the "${JA_REVIEW_PREFIX.trim()}" ` +
+        `translation marker: ${offenders.join(', ')}`
+    ).toEqual([]);
   });
 });
