@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.3] - 2026-08-06
+
+> **Highlight**: install した Skill が、サービスを起動しているインスタンス／端末が異なると未インストール扱いになっていた。インストールの真実は worktree 内の receipt にありリポジトリ相対で正しく共有されるが、Skill 一覧 API は DB 単位の索引しか読んでおらず、**キャッシュを真実として扱っていた**ため「未インストール」と「未索引」を区別できなかった。一覧 API を索引の read-through キャッシュにして解消した。
+
+### Fixed
+
+- **skills: Skill 一覧 API を索引の read-through キャッシュにする** (#1709)
+  - `GET /api/worktrees/<id>/skills` が応答前に対象 worktree の install root から receipt を読み、索引に行が無いものを復元してから返すようにした。別インスタンス・別端末・DB 再作成のいずれでも、再起動も手動操作もなしに導入済み Skill が見えるようになる
+  - 復元は**欠落分のみ**（`prune: false`／索引済み行は書き換えない）。読み取り経路が索引を prune すると、別の書き手と競合したときに正しい行を消しかねないため
+  - **索引済み Skill の receipt は開かない**（`collectReceipts` の accept filter）。索引が完備な worktree の追加コストは root ごとの `readdir` のみで、一覧が「安い読み取り」である性質を保つ
+  - **復元の失敗は warn ログのみで読み取りを継続する**（修復の失敗が読み取りを落とさない）
+  - 復元したときだけ `invalidateSkillStatusScanCache()` を呼ぶ。ダッシュボードの 5 秒キャッシュが復元済みの install を `unmanaged` のまま出さないため
+  - receipt が無い・壊れている・他 Skill 宛の payload は従来どおり索引せず `unmanaged` に留める（裏付けの無い provenance を主張しない）
+  - 複数 root（#1460）は receipt の `install_roots` をそのまま採用する
+  - 全件版 API（`POST /api/skills/reindex`）の挙動は変更なし
+
 ## [0.21.2] - 2026-08-05
 
 > **Highlight**: スラッシュコマンドのカタログを各 CLI の権威ソースへリコンサイルした。#1503 以降更新されておらず、カタログ 56 件に対して実コマンドが 104 件不足していた（パレットに出ないだけで実害は小さいが、放置するほど一度に流し込む量が増えレビュー不能になる）。機械が決められない 3 点 — ja 訳 86 件がプレースホルダ、claude と codex で説明が食い違う 6 件、過去に意図的に除外したものの再混入 — を人手でレビューして確定した。
