@@ -34,7 +34,13 @@ vi.mock('next-intl', () => ({
 }));
 
 import { WorktreeSkillsPane } from '@/components/skills/WorktreeSkillsPane';
-import { makeCatalogMeta, makeSkill, makeInstallPlan, makeInstallResponse } from './fixtures';
+import {
+  makeCatalogMeta,
+  makeSkill,
+  makeUnknownSkill,
+  makeInstallPlan,
+  makeInstallResponse,
+} from './fixtures';
 import type { InstalledSkillDto } from '@/components/skills/types';
 
 interface Route {
@@ -181,6 +187,116 @@ describe('WorktreeSkillsPane list', () => {
     expect(
       screen.queryByTestId('worktree-skills-update-badge-release-helper')
     ).not.toBeInTheDocument();
+  });
+
+  it('does not label a stale install merely "Installed" on the Catalog card (#1712)', async () => {
+    routeFetch({
+      '/api/skills': CATALOG,
+      '/api/worktrees/wt-1/skills': {
+        body: { worktreeId: 'wt-1', skills: [makeInstalled({ version: '1.1.0' })] },
+      },
+    });
+
+    render(<WorktreeSkillsPane worktreeId="wt-1" />);
+
+    // Installed 1.1.0 against Catalog latest 1.2.0: the card must say what the
+    // row above says, not the bare "Installed" that read as "you are current".
+    await screen.findByTestId('worktree-skills-catalog-release-helper');
+    expect(
+      screen.getByTestId('worktree-skills-catalog-update-badge-release-helper')
+    ).toHaveTextContent('skills.worktreePane.updateBadge');
+    expect(
+      screen.queryByTestId('worktree-skills-installed-badge-release-helper')
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps the plain Installed badge when the install matches the Catalog latest (#1712)', async () => {
+    routeFetch({ '/api/skills': CATALOG, '/api/worktrees/wt-1/skills': INSTALLED });
+
+    render(<WorktreeSkillsPane worktreeId="wt-1" />);
+
+    await screen.findByTestId('worktree-skills-catalog-release-helper');
+    expect(screen.getByTestId('worktree-skills-installed-badge-release-helper')).toHaveTextContent(
+      'skills.worktreePane.installedBadge'
+    );
+    expect(
+      screen.queryByTestId('worktree-skills-catalog-update-badge-release-helper')
+    ).not.toBeInTheDocument();
+  });
+
+  it('badges nothing on the Catalog card for a Skill that is not installed (#1712)', async () => {
+    routeFetch({ '/api/skills': CATALOG, '/api/worktrees/wt-1/skills': INSTALLED_EMPTY });
+
+    render(<WorktreeSkillsPane worktreeId="wt-1" />);
+
+    await screen.findByTestId('worktree-skills-catalog-release-helper');
+    expect(
+      screen.queryByTestId('worktree-skills-installed-badge-release-helper')
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('worktree-skills-catalog-update-badge-release-helper')
+    ).not.toBeInTheDocument();
+  });
+
+  it('never contradicts itself between the installed row and the Catalog card (#1712)', async () => {
+    // Two Skills, opposite states, one screen: `release-helper` is three minors
+    // behind, `mystery-skill` is exactly current. Whatever state word each
+    // section picks, both sections must pick the same one for the same Skill.
+    const staleSkill = makeSkill({ latest: '1.2.0' });
+    const currentSkill = makeUnknownSkill(); // latest 0.9.0
+    routeFetch({
+      '/api/skills': {
+        body: { catalog: makeCatalogMeta(), skills: [staleSkill, currentSkill] },
+      },
+      '/api/worktrees/wt-1/skills': {
+        body: {
+          worktreeId: 'wt-1',
+          skills: [
+            makeInstalled({ skillId: 'release-helper', version: '0.9.0' }),
+            makeInstalled({ skillId: 'mystery-skill', version: '0.9.0' }),
+          ],
+        },
+      },
+    });
+
+    render(<WorktreeSkillsPane worktreeId="wt-1" />);
+    await screen.findByTestId('worktree-skills-catalog-release-helper');
+
+    const stateWords = (skillId: string) => ({
+      installedRow: screen.queryByTestId(`worktree-skills-update-badge-${skillId}`)?.textContent,
+      catalogCard:
+        screen.queryByTestId(`worktree-skills-catalog-update-badge-${skillId}`)?.textContent ??
+        screen.queryByTestId(`worktree-skills-installed-badge-${skillId}`)?.textContent,
+    });
+
+    // Behind: both sections say "Update available".
+    const stale = stateWords('release-helper');
+    expect(stale.installedRow).toBe('skills.worktreePane.updateBadge');
+    expect(stale.catalogCard).toBe('skills.worktreePane.updateBadge');
+
+    // Current: the row claims no update, and the card says "Installed".
+    const current = stateWords('mystery-skill');
+    expect(current.installedRow).toBeUndefined();
+    expect(current.catalogCard).toBe('skills.worktreePane.installedBadge');
+  });
+
+  it('shows the Catalog version on every Catalog card (#1712)', async () => {
+    routeFetch({
+      '/api/skills': CATALOG,
+      '/api/worktrees/wt-1/skills': {
+        body: { worktreeId: 'wt-1', skills: [makeInstalled({ version: '1.1.0' })] },
+      },
+    });
+
+    render(<WorktreeSkillsPane worktreeId="wt-1" />);
+
+    // The number behind the badge: the card offers 1.2.0, the row records 1.1.0.
+    expect(
+      await screen.findByTestId('worktree-skills-catalog-version-release-helper')
+    ).toHaveTextContent('version=1.2.0');
+    expect(screen.getByTestId('worktree-skills-installed-release-helper')).toHaveTextContent(
+      'version=1.1.0'
+    );
   });
 
   it('surfaces an installed-list failure without falling back to an empty list', async () => {

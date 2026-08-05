@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.4] - 2026-08-06
+
+> **Highlight**: Worktree の Skills ペインで、Catalog セクションのカードが **skill ID の一致だけ**でバッジを決めていたため、数バージョン遅れた導入でも単に `Installed` と表示していた。同じ画面の上のセクションは `Update available` を出しており、同一 Skill に相反する状態語が並んでいた。判定を 1 箇所に集約し、両セクションが同じ結果を読む形にして解消した。
+
+### Fixed
+
+- **skills: カタログカードのバッジを導入版とカタログ版の比較で出し分ける** (#1712)
+  - 判定を `updateAvailableById` に**一本化**し、導入済み行と Catalog カードの**両方が同じ Map を読む**ようにした。2 箇所が別々に比較する構造自体を無くしたので、**表記の食い違いが構造的に起きない**
+  - 比較は既存の `hasSkillUpdate`（受領版 vs catalog latest）を**そのまま再利用**。新しい比較関数は追加していない（判定が 2 系統に割れると、また食い違うため）
+  - Catalog カードのバッジは **未導入=バッジなし / 旧版=`Update available` / 最新=`Installed`** の 3 状態になった
+  - バッジの裏付けとなる数値が 1 つも表示されていなかった Catalog カードに **catalog latest を表示**した
+  - 文言は既存の `worktreePane.updateBadge` / `installedBadge` / `version` を再利用したため i18n の追加は不要。2 セクションが同一キーを使う
+
 ## [0.21.3] - 2026-08-06
 
 > **Highlight**: install した Skill が、サービスを起動しているインスタンス／端末が異なると未インストール扱いになっていた。インストールの真実は worktree 内の receipt にありリポジトリ相対で正しく共有されるが、Skill 一覧 API は DB 単位の索引しか読んでおらず、**キャッシュを真実として扱っていた**ため「未インストール」と「未索引」を区別できなかった。一覧 API を索引の read-through キャッシュにして解消した。
