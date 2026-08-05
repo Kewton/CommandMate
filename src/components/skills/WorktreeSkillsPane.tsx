@@ -107,8 +107,8 @@ export function WorktreeSkillsPane({ worktreeId, className = '' }: WorktreeSkill
     return () => controller.abort();
   }, [worktreeId, installedReloadToken]);
 
-  const installedIds = useMemo(
-    () => new Set(installed.skills.map((skill) => skill.skillId)),
+  const installedVersionById = useMemo(
+    () => new Map(installed.skills.map((skill) => [skill.skillId, skill.version])),
     [installed.skills]
   );
   // Phase 2 (#1479): the installed index carries no name or summary, so borrow
@@ -125,6 +125,19 @@ export function WorktreeSkillsPane({ worktreeId, className = '' }: WorktreeSkill
       ),
     [catalog.skills]
   );
+  // #1712: one verdict per Skill, read by both sections below. The Catalog card
+  // used to badge on "is this id installed at all", so a Skill three versions
+  // behind was labelled `Installed` while the installed row above it — computing
+  // `hasSkillUpdate` from the same two numbers — said `Update available`. Deriving
+  // it once here means the two sections cannot disagree: they read one Map, not
+  // two comparisons that can drift apart again.
+  const updateAvailableById = useMemo(() => {
+    const verdicts = new Map<string, boolean>();
+    for (const [skillId, version] of installedVersionById) {
+      verdicts.set(skillId, hasSkillUpdate(version, catalogInfoById.get(skillId)?.latest ?? null));
+    }
+    return verdicts;
+  }, [installedVersionById, catalogInfoById]);
   const selectedCatalogSkill = useMemo(
     () => catalog.skills.find((skill) => skill.id === selectedSkillId) ?? null,
     [catalog.skills, selectedSkillId]
@@ -252,7 +265,7 @@ export function WorktreeSkillsPane({ worktreeId, className = '' }: WorktreeSkill
                           {catalogInfo?.name ?? skill.skillId}
                         </span>
                         <SkillRiskBadge risk={skill.effectiveRisk} />
-                        {hasSkillUpdate(skill.version, catalogInfo?.latest ?? null) && (
+                        {updateAvailableById.get(skill.skillId) && (
                           <Badge
                             variant="info"
                             data-testid={`worktree-skills-update-badge-${skill.skillId}`}
@@ -314,6 +327,11 @@ export function WorktreeSkillsPane({ worktreeId, className = '' }: WorktreeSkill
             <ul className="space-y-2">
               {catalog.skills.map((skill) => {
                 const declaredRisk = headlineDeclaredRisk(skill);
+                // Three states, three renderings: not installed (no badge),
+                // installed but behind (`Update available`, the same word the
+                // installed row uses), installed and current (`Installed`).
+                const isInstalled = installedVersionById.has(skill.id);
+                const updateAvailable = updateAvailableById.get(skill.id) === true;
                 return (
                   <li key={skill.id}>
                     <button
@@ -326,14 +344,35 @@ export function WorktreeSkillsPane({ worktreeId, className = '' }: WorktreeSkill
                         <span className="min-w-0 break-all text-sm font-semibold text-foreground">
                           {skill.name}
                         </span>
-                        {installedIds.has(skill.id) && (
-                          <Badge variant="info" data-testid={`worktree-skills-installed-badge-${skill.id}`}>
-                            {t('worktreePane.installedBadge')}
-                          </Badge>
-                        )}
+                        {isInstalled &&
+                          (updateAvailable ? (
+                            <Badge
+                              variant="info"
+                              data-testid={`worktree-skills-catalog-update-badge-${skill.id}`}
+                            >
+                              {t('worktreePane.updateBadge')}
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="info"
+                              data-testid={`worktree-skills-installed-badge-${skill.id}`}
+                            >
+                              {t('worktreePane.installedBadge')}
+                            </Badge>
+                          ))}
                       </div>
                       <p className="mt-0.5 truncate text-xs text-muted-foreground">
                         {t('card.provider', { provider: skill.provider.name })}
+                      </p>
+                      {/* #1712: the Catalog card carried no version at all, so
+                          "Update available" had no number behind it. In this
+                          section the version shown is always what the Catalog
+                          offers; the installed section above shows the receipt's. */}
+                      <p
+                        className="mt-0.5 text-xs text-muted-foreground"
+                        data-testid={`worktree-skills-catalog-version-${skill.id}`}
+                      >
+                        {t('worktreePane.version', { version: skill.latest })}
                       </p>
                       {skill.summary && (
                         <p
