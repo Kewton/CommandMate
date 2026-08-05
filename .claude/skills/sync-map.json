@@ -314,6 +314,13 @@
       "policy": "local-only",
       "reason": "CommandMate のリリース告知文の作成手順。他リポジトリでは成立しない。",
       "mirrors": []
+    },
+    {
+      "local": ".claude/skills/catalog-reconcile",
+      "counterpart": null,
+      "policy": "local-only",
+      "reason": "CommandMate 同梱の組み込みスラッシュコマンドカタログ（src/config/slash-commands-catalog.json と locales/{en,ja}/worktree.json）を各 CLI の権威ソースへ合わせる手順。CommandMate 固有のファイル構成・ガードテストに密着しており、他リポジトリでは成立しない。",
+      "mirrors": []
     }
   ],
   "notMapped": [
