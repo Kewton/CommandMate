@@ -43,6 +43,53 @@ const POLL_INTERVAL_MS = 5000;
 const SELECTION_LIST_PROMPT_TYPE = 'selection_list';
 
 /**
+ * How recent `autoYes.lastSuppression` must be to be reported as the reason this
+ * wait is blocked (Issue #1699).
+ *
+ * The record is refreshed on every poll for as long as the suppressed prompt is
+ * on screen, so a fresh timestamp means "this is happening now" while an old one
+ * is a historical suppression of some earlier prompt. The window is generous
+ * against the server's own poll interval — being a few seconds late with a true
+ * report beats staying silent, which is the failure this exists to fix.
+ */
+const SUPPRESSION_FRESH_MS = 60_000;
+
+type LastSuppression = NonNullable<CurrentOutputResponse['autoYes']['lastSuppression']>;
+
+/** The suppression currently blocking this session, or null. */
+function activeSuppression(
+  data: CurrentOutputResponse,
+  now: number,
+): { suppression: LastSuppression; ageSeconds: number } | null {
+  const suppression = data.autoYes?.lastSuppression;
+  if (!suppression) return null;
+  const ageMs = now - suppression.at;
+  // A negative age is clock skew between the CLI and the server, not staleness.
+  if (ageMs > SUPPRESSION_FRESH_MS) return null;
+  return { suppression, ageSeconds: Math.max(0, Math.round(ageMs / 1000)) };
+}
+
+/**
+ * One stderr line naming the policy that is holding this prompt (Issue #1699).
+ *
+ * `wait` used to print only "Waiting for human response...", which reads the
+ * same whether a human was always going to answer or whether Auto-Yes silently
+ * refused to. That ambiguity is what let a deny pattern matching a finished turn
+ * stall two workers unnoticed; the pattern and the reason code belong on screen.
+ */
+function formatSuppressionNotice(suppression: LastSuppression, ageSeconds: number): string {
+  const parts = [
+    `reason=${suppression.reason}`,
+    `mode=${suppression.mode ?? 'none'}`,
+    `promptType=${suppression.promptType}`,
+  ];
+  if (suppression.pattern !== undefined) {
+    parts.push(`pattern=${JSON.stringify(suppression.pattern)}`);
+  }
+  return `  auto-yes suppressed this prompt by contract policy: ${parts.join(' ')} (${ageSeconds}s ago)`;
+}
+
+/**
  * Poll a single worktree until completion, prompt, or timeout.
  */
 async function pollWorktree(
@@ -100,10 +147,18 @@ async function pollWorktree(
 
       // Prompt detected
       if (data.isPromptWaiting && data.promptData) {
+        // Issue #1699: report a policy suppression on both exits — the human one
+        // keeps polling and would otherwise say nothing about why nobody
+        // answered, and the agent one is read by pipelines that never see stderr.
+        const suppressed = activeSuppression(data, Date.now());
+
         // [DR1-03] Prompt detection exit code
         if (options.onPrompt === 'human') {
           // Block and continue polling - user handles prompt manually
           console.error(`Prompt detected on ${worktreeId}. Waiting for human response...`);
+          if (suppressed) {
+            console.error(formatSuppressionNotice(suppressed.suppression, suppressed.ageSeconds));
+          }
           await sleep(POLL_INTERVAL_MS);
           continue;
         }
@@ -116,7 +171,24 @@ async function pollWorktree(
           question: data.promptData.question || '',
           options: (data.promptData.options as unknown[]) || [],
           status: data.promptData.status || 'pending',
+          ...(data.promptData.approvalTarget !== undefined && {
+            approvalTarget: data.promptData.approvalTarget,
+          }),
+          ...(suppressed && {
+            autoYesSuppression: {
+              reason: suppressed.suppression.reason,
+              mode: suppressed.suppression.mode,
+              promptType: suppressed.suppression.promptType,
+              ...(suppressed.suppression.pattern !== undefined && {
+                pattern: suppressed.suppression.pattern,
+              }),
+              ageSeconds: suppressed.ageSeconds,
+            },
+          }),
         };
+        if (suppressed) {
+          console.error(formatSuppressionNotice(suppressed.suppression, suppressed.ageSeconds));
+        }
 
         return { exitCode: WaitExitCode.PROMPT_DETECTED, output: promptOutput };
       }
@@ -131,6 +203,12 @@ async function pollWorktree(
             `Selection list active on ${worktreeId} (${data.sessionStatusReason ?? 'selection_list'}). ` +
               'Waiting for human response...',
           );
+          // Issue #1699: the poller parses frames status-detector publishes as
+          // selection lists, so a policy can be the reason this one is stuck too.
+          const suppressed = activeSuppression(data, Date.now());
+          if (suppressed) {
+            console.error(formatSuppressionNotice(suppressed.suppression, suppressed.ageSeconds));
+          }
           await sleep(POLL_INTERVAL_MS);
           continue;
         }
