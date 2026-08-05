@@ -16,6 +16,7 @@ import type { ProviderResult, ReconcileResult, SlashCommandsCatalog } from './ty
 
 export * from './types';
 export * from './sanitize';
+export * from './check-report';
 export * from './engine';
 export * from './fetch';
 export {
