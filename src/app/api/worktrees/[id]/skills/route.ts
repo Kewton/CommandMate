@@ -6,9 +6,15 @@
  * the response carries only receipt/index-derived facts — never a machine-absolute
  * path or an artifact URL, matching the Catalog and install DTO policy (#1231).
  *
- * The index is a forward-converging cache of what the receipts say (#1234); this
- * route reports the index as-is and does not walk the filesystem, so it is the
- * cheap read the #1441/#1442 UIs consume to show "what is installed here".
+ * The index is a forward-converging cache of what the receipts say (#1234), and
+ * since #1709 this route reads *through* it rather than treating it as the
+ * truth: it lists the Skill directories of the one worktree it was asked about
+ * and, for any that the index has no row for, restores the row from the receipt
+ * before answering. That is what makes a Skill installed by another instance —
+ * another database — visible here instead of silently absent. A worktree whose
+ * index is already complete costs one directory listing per root and no receipt
+ * read, so this stays the cheap read the #1441/#1442 UIs consume to show "what
+ * is installed here".
  *
  * @module api/worktrees/[id]/skills
  */
@@ -20,6 +26,8 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { canonicalWorktreeId, resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
 import { listSkillInstallations } from '@/lib/skills/installed-state';
 import type { SkillInstallationRecord } from '@/lib/skills/installed-state';
+import { restoreSkillInstallationIndex } from '@/lib/skills/reindex';
+import { invalidateSkillStatusScanCache } from '@/lib/skills/status-scanner';
 import { SKILL_API_NO_STORE_HEADERS, skillApiError } from '@/lib/api/skills-api';
 import type { SkillRiskLevel } from '@/types/skills';
 
@@ -93,6 +101,35 @@ export async function GET(
     if (worktree instanceof NextResponse) return worktree;
 
     const db = getDbInstance();
+
+    // Read-through, because the index is a cache and the receipt is the truth
+    // (#1235). The cache lives in one database; the receipt lives inside the
+    // worktree and is repository-relative, so a Skill installed by another
+    // instance — or by this one before its database was replaced — is on disk
+    // with no row behind it. Answering from the cache alone reported that as
+    // "nothing is installed" (#1709). Restoring first is what makes the two
+    // answers the same one.
+    try {
+      const restored = restoreSkillInstallationIndex(db, worktree);
+      if (restored.indexed > 0) {
+        // The dashboard reads a cached cross-worktree scan; serving the
+        // pre-restore one back would keep calling these installs `unmanaged`.
+        invalidateSkillStatusScanCache();
+        logger.info('skill-installed-index-restored', {
+          worktreeId: worktree.id,
+          indexed: restored.indexed,
+          skipped: restored.skipped.length,
+        });
+      }
+    } catch (error) {
+      // A repair that fails must not take the read down with it: the index is
+      // still an answer, just possibly a short one.
+      logger.warn('skill-installed-index-restore-failed', {
+        worktreeId: worktree.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     const records = listSkillInstallations(db, worktree.id);
 
     const response: InstalledSkillListResponse = {
