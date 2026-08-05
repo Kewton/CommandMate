@@ -1,7 +1,7 @@
 {
   "verifiedAgainst": {
     "claude": "2.1.218",
-    "codex": "0.144.6",
+    "codex": "0.146.0",
     "antigravity": "1.1.3"
   },
   "frequentlyUsed": {
@@ -590,6 +590,1036 @@
       "category": "standard-util",
       "cliTools": [
         "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "advisor",
+      "descriptionKey": "slashCommands.descriptions.advisor",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "autocompact",
+      "descriptionKey": "slashCommands.descriptions.autocompact",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "autofix-pr",
+      "descriptionKey": "slashCommands.descriptions.autofix-pr",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "background",
+      "descriptionKey": "slashCommands.descriptions.background",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "batch",
+      "descriptionKey": "slashCommands.descriptions.batch",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "branch",
+      "descriptionKey": "slashCommands.descriptions.branch",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "btw",
+      "descriptionKey": "slashCommands.descriptions.btw",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "bug",
+      "descriptionKey": "slashCommands.descriptions.bug",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "cd",
+      "descriptionKey": "slashCommands.descriptions.cd",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "chrome",
+      "descriptionKey": "slashCommands.descriptions.chrome",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "claude-api",
+      "descriptionKey": "slashCommands.descriptions.claude-api",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "code-review",
+      "descriptionKey": "slashCommands.descriptions.code-review",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "color",
+      "descriptionKey": "slashCommands.descriptions.color",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "copy",
+      "descriptionKey": "slashCommands.descriptions.copy",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "dataviz",
+      "descriptionKey": "slashCommands.descriptions.dataviz",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "debug",
+      "descriptionKey": "slashCommands.descriptions.debug",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "deep-research",
+      "descriptionKey": "slashCommands.descriptions.deep-research",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "design-login",
+      "descriptionKey": "slashCommands.descriptions.design-login",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "design-sync",
+      "descriptionKey": "slashCommands.descriptions.design-sync",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "desktop",
+      "descriptionKey": "slashCommands.descriptions.desktop",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "diff",
+      "descriptionKey": "slashCommands.descriptions.diff",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "exit",
+      "descriptionKey": "slashCommands.descriptions.exit",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "feedback",
+      "descriptionKey": "slashCommands.descriptions.feedback",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "fewer-permission-prompts",
+      "descriptionKey": "slashCommands.descriptions.fewer-permission-prompts",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "fork",
+      "descriptionKey": "slashCommands.descriptions.fork",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "goal",
+      "descriptionKey": "slashCommands.descriptions.goal",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "heapdump",
+      "descriptionKey": "slashCommands.descriptions.heapdump",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "ide",
+      "descriptionKey": "slashCommands.descriptions.ide",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "init",
+      "descriptionKey": "slashCommands.descriptions.init",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "insights",
+      "descriptionKey": "slashCommands.descriptions.insights",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "install-github-app",
+      "descriptionKey": "slashCommands.descriptions.install-github-app",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "install-slack-app",
+      "descriptionKey": "slashCommands.descriptions.install-slack-app",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "keybindings",
+      "descriptionKey": "slashCommands.descriptions.keybindings",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "login",
+      "descriptionKey": "slashCommands.descriptions.login",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "logout",
+      "descriptionKey": "slashCommands.descriptions.logout",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "mobile",
+      "descriptionKey": "slashCommands.descriptions.mobile",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "passes",
+      "descriptionKey": "slashCommands.descriptions.passes",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "plan",
+      "descriptionKey": "slashCommands.descriptions.plan",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "plugin",
+      "descriptionKey": "slashCommands.descriptions.plugin",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "powerup",
+      "descriptionKey": "slashCommands.descriptions.powerup",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "privacy-settings",
+      "descriptionKey": "slashCommands.descriptions.privacy-settings",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "radio",
+      "descriptionKey": "slashCommands.descriptions.radio",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "recap",
+      "descriptionKey": "slashCommands.descriptions.recap",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "release-notes",
+      "descriptionKey": "slashCommands.descriptions.release-notes",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "reload-plugins",
+      "descriptionKey": "slashCommands.descriptions.reload-plugins",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "reload-skills",
+      "descriptionKey": "slashCommands.descriptions.reload-skills",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "remote-control",
+      "descriptionKey": "slashCommands.descriptions.remote-control",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "remote-env",
+      "descriptionKey": "slashCommands.descriptions.remote-env",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "rename",
+      "descriptionKey": "slashCommands.descriptions.rename",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "run",
+      "descriptionKey": "slashCommands.descriptions.run",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "run-skill-generator",
+      "descriptionKey": "slashCommands.descriptions.run-skill-generator",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "sandbox",
+      "descriptionKey": "slashCommands.descriptions.sandbox",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "scroll-speed",
+      "descriptionKey": "slashCommands.descriptions.scroll-speed",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "security-review",
+      "descriptionKey": "slashCommands.descriptions.security-review",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "setup-bedrock",
+      "descriptionKey": "slashCommands.descriptions.setup-bedrock",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "setup-vertex",
+      "descriptionKey": "slashCommands.descriptions.setup-vertex",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "simplify",
+      "descriptionKey": "slashCommands.descriptions.simplify",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "skills",
+      "descriptionKey": "slashCommands.descriptions.skills",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "stickers",
+      "descriptionKey": "slashCommands.descriptions.stickers",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "stop",
+      "descriptionKey": "slashCommands.descriptions.stop",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "subtask",
+      "descriptionKey": "slashCommands.descriptions.subtask",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "tasks",
+      "descriptionKey": "slashCommands.descriptions.tasks",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "team-onboarding",
+      "descriptionKey": "slashCommands.descriptions.team-onboarding",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "teleport",
+      "descriptionKey": "slashCommands.descriptions.teleport",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "theme",
+      "descriptionKey": "slashCommands.descriptions.theme",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "tui",
+      "descriptionKey": "slashCommands.descriptions.tui",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "ultrareview",
+      "descriptionKey": "slashCommands.descriptions.ultrareview",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "upgrade",
+      "descriptionKey": "slashCommands.descriptions.upgrade",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "usage-credits",
+      "descriptionKey": "slashCommands.descriptions.usage-credits",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "verify",
+      "descriptionKey": "slashCommands.descriptions.verify",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "voice",
+      "descriptionKey": "slashCommands.descriptions.voice",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "web-setup",
+      "descriptionKey": "slashCommands.descriptions.web-setup",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "workflows",
+      "descriptionKey": "slashCommands.descriptions.workflows",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "ide",
+      "descriptionKey": "slashCommands.descriptions.ide",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "keymap",
+      "descriptionKey": "slashCommands.descriptions.keymap",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "vim",
+      "descriptionKey": "slashCommands.descriptions.vim",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "setup-default-sandbox",
+      "descriptionKey": "slashCommands.descriptions.setup-default-sandbox",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "sandbox-add-read-dir",
+      "descriptionKey": "slashCommands.descriptions.sandbox-add-read-dir",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "experimental",
+      "descriptionKey": "slashCommands.descriptions.experimental",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "approve",
+      "descriptionKey": "slashCommands.descriptions.approve",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "import",
+      "descriptionKey": "slashCommands.descriptions.import",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "rename",
+      "descriptionKey": "slashCommands.descriptions.rename",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "archive",
+      "descriptionKey": "slashCommands.descriptions.archive",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "delete",
+      "descriptionKey": "slashCommands.descriptions.delete",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "app",
+      "descriptionKey": "slashCommands.descriptions.app",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "side",
+      "descriptionKey": "slashCommands.descriptions.side",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "btw",
+      "descriptionKey": "slashCommands.descriptions.btw",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "copy",
+      "descriptionKey": "slashCommands.descriptions.copy",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "raw",
+      "descriptionKey": "slashCommands.descriptions.raw",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "usage",
+      "descriptionKey": "slashCommands.descriptions.usage",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "debug-config",
+      "descriptionKey": "slashCommands.descriptions.debug-config",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "title",
+      "descriptionKey": "slashCommands.descriptions.title",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "statusline",
+      "descriptionKey": "slashCommands.descriptions.statusline",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "theme",
+      "descriptionKey": "slashCommands.descriptions.theme",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "pets",
+      "descriptionKey": "slashCommands.descriptions.pets",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "apps",
+      "descriptionKey": "slashCommands.descriptions.apps",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "plugins",
+      "descriptionKey": "slashCommands.descriptions.plugins",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "exit",
+      "descriptionKey": "slashCommands.descriptions.exit",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "rollout",
+      "descriptionKey": "slashCommands.descriptions.rollout",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "ps",
+      "descriptionKey": "slashCommands.descriptions.ps",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "stop",
+      "descriptionKey": "slashCommands.descriptions.stop",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "personality",
+      "descriptionKey": "slashCommands.descriptions.personality",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "test-approval",
+      "descriptionKey": "slashCommands.descriptions.test-approval",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
       ],
       "isStandard": true,
       "source": "standard"

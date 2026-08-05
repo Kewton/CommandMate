@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.2] - 2026-08-05
+
+> **Highlight**: スラッシュコマンドのカタログを各 CLI の権威ソースへリコンサイルした。#1503 以降更新されておらず、カタログ 56 件に対して実コマンドが 104 件不足していた（パレットに出ないだけで実害は小さいが、放置するほど一度に流し込む量が増えレビュー不能になる）。機械が決められない 3 点 — ja 訳 86 件がプレースホルダ、claude と codex で説明が食い違う 6 件、過去に意図的に除外したものの再混入 — を人手でレビューして確定した。
+
+### Changed
+
+- **slash-commands: カタログを claude docs / codex 0.146.0 へリコンサイル** (#1489)
+  - 実在コマンド 104 件を追加（56 → 159）。claude 97 件 / codex 53 件 / opencode 10 件 / antigravity 13 件
+  - ja 訳 86 件を全件翻訳。`catalog:refresh --write` は `[要レビュー]` プレフィックス付きの英文プレースホルダを生成するため、そのまま出すと利用者に英文と作業マーカーが見える
+  - claude と codex が同名で別の説明を持つ 6 件（`/btw` `/copy` `/ide` `/rename` `/stop` `/theme`）は descriptionKey を共有するため、ツールは説明をコマンド名そのものに落としていた（`/btw — btw`）。両ツールの意味を含む 1 文へ書き直し、codex 由来の小文字断片 21 件も既存の文体へ正規化した
+  - **過去の curation 判断の再混入を除去**（リコンサイルツールは除外の履歴を知らない）: `/ultraplan`（claude docs の説明が "Removed" マーカー。#1502 / #1503 で除去した幻コマンドと同型）、`/schedule`（#1488 で対象外と判断済み）、`/agents` の claude entry（#1503 が除去した "(removed)" スタブ）
+  - `/vim` の禁止を「名前で禁止」から「claude に出さない」へ狭めた。codex 0.146.0 の `codex-rs/tui/src/slash_command.rs` が `SlashCommand::Vim => "toggle Vim mode for the composer"` を宣言しており、名前で禁じると実在する codex コマンドを隠すため
+  - `/sandbox-add-read-dir` の説明が `<absolute_path>` を含み、説明の安全ガード（`/<[^>]+>/`）に掛かっていたため角括弧表記へ変更
+  - `verifiedAgainst.codex`: 0.144.6 → 0.146.0
+
 ## [0.21.1] - 2026-08-05
 
 > **Highlight**: 契約の `autoYes.denyPatterns` が、そのプロンプトとは無関係な**既に承認済みの過去のコマンド**にマッチし続け、以後のプロンプトを恒久的に抑止していた。照合面が「今このプロンプトが何を承認しようとしているか」ではなく「直近の画面に何が映っているか」だったためで、一度 `rm -rf` を承認すると、その行がペインから流れ出るまで無関係な編集確認まで止まり続けた。実運用では並列委任のワーカー 2 台が停止し、片方は約 1 時間 1 行も書けていない。判定用の `approvalTarget` を表示用の `instructionText` から分離して解決した。

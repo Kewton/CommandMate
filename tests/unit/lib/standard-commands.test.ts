@@ -40,8 +40,12 @@ describe('STANDARD_COMMANDS', () => {
   // fork, plan, rewind, tasks), all cliTools: ['antigravity'].
   // Issue #1503: -7 phantom entries removed — claude cost/lazy/todos/pr-comments
   // + the "(removed)" claude /agents stub, and codex approvals/undo. 63 -> 56.
-  it('should have 56 standard commands (Issue #1503: 63 - 7 phantom)', () => {
-    expect(STANDARD_COMMANDS.length).toBe(56);
+  // v0.21.2: the catalog had not been reconciled since #1503, so a single
+  // refresh against claude docs / codex 0.146.0 added 104 real commands.
+  // 56 -> 159. The bans below are what actually protects the set; this number
+  // only pins that a refresh was reviewed rather than applied blind.
+  it('should have 159 standard commands', () => {
+    expect(STANDARD_COMMANDS.length).toBe(159);
   });
 
   it('should have all required properties for each command', () => {
@@ -198,11 +202,12 @@ describe('STANDARD_COMMANDS', () => {
   });
 
   // Issue #1503: -2 codex phantoms (approvals/undo) removed → 23.
-  it('should have 23 commands available for Codex (Issue #1503: 25 - 2 phantom)', () => {
+  // v0.21.2: reconciled against the codex 0.146.0 enum → 53.
+  it('should have 53 commands available for Codex', () => {
     const codexCommands = STANDARD_COMMANDS.filter(
       (cmd) => cmd.cliTools?.includes('codex')
     );
-    expect(codexCommands.length).toBe(23);
+    expect(codexCommands.length).toBe(53);
   });
 
   it('should include session management commands', () => {
@@ -325,11 +330,12 @@ describe('STANDARD_COMMANDS', () => {
   // Issue #1488: +9 Claude built-ins → 29.
   // Issue #1503: -5 Claude-visible phantoms (cost/lazy/todos/pr-comments + the
   // "(removed)" /agents stub) → 24.
-  it('should have 24 commands available for Claude (Issue #1503: 29 - 5 phantom)', () => {
+  // v0.21.2: reconciled against the claude commands doc → 97.
+  it('should have 97 commands available for Claude', () => {
     const claudeCommands = STANDARD_COMMANDS.filter(
       (cmd) => !cmd.cliTools || cmd.cliTools.includes('claude')
     );
-    expect(claudeCommands.length).toBe(24);
+    expect(claudeCommands.length).toBe(97);
   });
 
   // Issue #689: agent (Codex) vs agents (OpenCode) differentiation (DR1-002)
@@ -455,11 +461,19 @@ describe('Claude built-in catalog additions (Issue #1488)', () => {
     expect(opencodeAgents?.cliTools).toEqual(['opencode']);
   });
 
-  // /schedule is deliberately out of scope; /vim was removed upstream in v2.1.92
-  // so it must not ship in a catalog verified against 2.1.218.
-  it('does not add /schedule or /vim', () => {
+  // /schedule is deliberately out of scope, and claude's /vim was removed
+  // upstream in v2.1.92 so it must not ship for claude.
+  //
+  // v0.21.2 narrows the /vim ban to claude. It used to forbid the name outright,
+  // which was correct while claude was the only source considered — but codex
+  // 0.146.0 declares `SlashCommand::Vim => "toggle Vim mode for the composer"`
+  // in codex-rs/tui/src/slash_command.rs, so banning the name hid a real codex
+  // command. The ban tracks the tool that removed it, not the string.
+  it('does not add /schedule, and keeps /vim off claude', () => {
     expect(STANDARD_COMMANDS.some((c) => c.name === 'schedule')).toBe(false);
-    expect(STANDARD_COMMANDS.some((c) => c.name === 'vim')).toBe(false);
+    const vim = STANDARD_COMMANDS.filter((c) => c.name === 'vim');
+    expect(vim.length).toBe(1);
+    expect(vim[0].cliTools).toEqual(['codex']);
   });
 });
 
