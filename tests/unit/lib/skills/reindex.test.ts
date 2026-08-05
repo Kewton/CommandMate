@@ -32,6 +32,7 @@ import {
   SKILL_REINDEX_OPERATION_ID,
   SkillReindexSkipReason,
   reindexSkillInstallations,
+  restoreSkillInstallationIndex,
 } from '@/lib/skills/reindex';
 import type { SkillInstallReceipt } from '@/types/skills';
 import { removeTempDir } from '@tests/helpers/temp-dir';
@@ -366,6 +367,120 @@ describe('directories that are not evidence', () => {
     expect(result.unreadableWorktreeIds).toEqual(['wt-1']);
     expect(result.removed).toBe(0);
     expect(getSkillInstallation(db, 'wt-1', 'demo-skill')).not.toBeNull();
+  });
+});
+
+describe('restoring one worktree from a read (#1709)', () => {
+  /**
+   * The per-worktree entry a list request can afford to take. It differs from
+   * the full rebuild in exactly two ways — it fills gaps only, and it prunes
+   * nothing — and both differences are what make it safe to run on a read.
+   */
+  it('restores a receipt the index never had', () => {
+    const wt = path.join(repoRoot, 'wt-1');
+    insertWorktree('wt-1', wt);
+    const receipt = install('wt-1', wt, 'demo-skill');
+    db.prepare('DELETE FROM skill_installations').run();
+
+    const result = restoreSkillInstallationIndex(db, { id: 'wt-1', path: wt }, { now: T0 + 1000 });
+
+    expect(result.indexed).toBe(1);
+    expect(getSkillInstallation(db, 'wt-1', 'demo-skill')?.installRoots).toEqual(
+      receiptInstallRoots(receipt)
+    );
+  });
+
+  it('reads only the worktree it was given', () => {
+    const wt1 = path.join(repoRoot, 'wt-1');
+    const wt2 = path.join(repoRoot, 'wt-2');
+    insertWorktree('wt-1', wt1);
+    insertWorktree('wt-2', wt2);
+    install('wt-1', wt1, 'demo-skill');
+    install('wt-2', wt2, 'demo-skill');
+    db.prepare('DELETE FROM skill_installations').run();
+
+    const result = restoreSkillInstallationIndex(db, { id: 'wt-1', path: wt1 }, { now: T0 });
+
+    expect(result.indexed).toBe(1);
+    expect(listSkillInstallations(db, 'wt-2')).toHaveLength(0);
+  });
+
+  it('leaves a row the index already has exactly as it was', () => {
+    const wt = path.join(repoRoot, 'wt-1');
+    insertWorktree('wt-1', wt);
+    install('wt-1', wt, 'demo-skill', '1.2.3');
+    // Disk disagrees; converging it is the explicit rebuild's job, not a read's.
+    writePayload(wt, makeReceipt('demo-skill', '9.9.9', [PRIMARY, SECONDARY]), [
+      PRIMARY,
+      SECONDARY,
+    ]);
+
+    const result = restoreSkillInstallationIndex(db, { id: 'wt-1', path: wt }, { now: T0 + 90_000 });
+
+    expect(result.indexed).toBe(0);
+    expect(getSkillInstallation(db, 'wt-1', 'demo-skill')).toMatchObject({
+      version: '1.2.3',
+      operationId: 'op-original',
+      installedAt: T0,
+      updatedAt: T0,
+    });
+  });
+
+  it('never drops a row whose payload is gone', () => {
+    const wt = path.join(repoRoot, 'wt-1');
+    insertWorktree('wt-1', wt);
+    install('wt-1', wt, 'demo-skill');
+    removeTempDir(path.join(wt, PRIMARY, 'demo-skill'));
+    removeTempDir(path.join(wt, SECONDARY, 'demo-skill'));
+
+    restoreSkillInstallationIndex(db, { id: 'wt-1', path: wt }, { now: T0 + 1000 });
+
+    expect(getSkillInstallation(db, 'wt-1', 'demo-skill')).not.toBeNull();
+  });
+
+  it('reports a directory that is not evidence instead of indexing it', () => {
+    const wt = path.join(repoRoot, 'wt-1');
+    insertWorktree('wt-1', wt);
+    mkdirSync(path.join(wt, PRIMARY, 'bare-skill'), { recursive: true });
+    writeFileSync(path.join(wt, PRIMARY, 'bare-skill', 'SKILL.md'), '# hand written\n');
+
+    const result = restoreSkillInstallationIndex(db, { id: 'wt-1', path: wt }, { now: T0 });
+
+    expect(result.indexed).toBe(0);
+    expect(result.skipped).toEqual([
+      {
+        worktreeId: 'wt-1',
+        skillId: 'bare-skill',
+        root: '.agents/skills/bare-skill',
+        reason: SkillReindexSkipReason.RECEIPT_MISSING,
+      },
+    ]);
+  });
+
+  it('concludes nothing from a worktree directory that is gone', () => {
+    const wt = path.join(repoRoot, 'wt-1');
+    insertWorktree('wt-1', wt);
+    install('wt-1', wt, 'demo-skill');
+    removeTempDir(wt);
+
+    const result = restoreSkillInstallationIndex(db, { id: 'wt-1', path: wt }, { now: T0 + 1000 });
+
+    expect(result.indexed).toBe(0);
+    expect(getSkillInstallation(db, 'wt-1', 'demo-skill')).not.toBeNull();
+  });
+
+  it('is idempotent', () => {
+    const wt = path.join(repoRoot, 'wt-1');
+    insertWorktree('wt-1', wt);
+    install('wt-1', wt, 'demo-skill');
+    db.prepare('DELETE FROM skill_installations').run();
+
+    const first = restoreSkillInstallationIndex(db, { id: 'wt-1', path: wt }, { now: T0 + 1000 });
+    const second = restoreSkillInstallationIndex(db, { id: 'wt-1', path: wt }, { now: T0 + 2000 });
+
+    expect(first.indexed).toBe(1);
+    expect(second.indexed).toBe(0);
+    expect(listSkillInstallations(db, 'wt-1')).toHaveLength(1);
   });
 });
 

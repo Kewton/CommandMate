@@ -23,6 +23,13 @@
  * Re-indexing never writes to the payload and never touches the append-only
  * operation log: it restores an index, it does not perform an operation.
  *
+ * Two entry points, same evidence. {@link reindexSkillInstallations} is the
+ * explicit whole-registry repair the dashboard and CLI expose. Since #1709
+ * {@link restoreSkillInstallationIndex} is the per-worktree, restore-only entry
+ * a read can afford to take: it fills the gaps of one worktree and prunes
+ * nothing, which is what turns the list route into a read-through cache instead
+ * of a reader that mistakes an empty cache for an empty worktree.
+ *
  * @module lib/skills/reindex
  */
 
@@ -152,14 +159,21 @@ function readReceiptAt(
  * A Skill present in several roots is one install: the first readable receipt in
  * root-prefix order is the one indexed, and the roots it is considered to occupy
  * come from that receipt, not from where the walk happened to find directories.
+ *
+ * `accept` narrows the walk before any receipt is opened, so the read-through
+ * restore (#1709) pays for a directory listing but reads no receipt for a Skill
+ * the index already has.
  */
-function collectReceipts(worktreePath: string): { found: FoundReceipt[]; skips: SkillReindexSkip[] } {
+function collectReceipts(
+  worktreePath: string,
+  accept: (skillId: string) => boolean = () => true
+): { found: FoundReceipt[]; skips: SkillReindexSkip[] } {
   const found = new Map<string, FoundReceipt>();
   const pendingSkips = new Map<string, SkillReindexSkip>();
 
   for (const rootPrefix of SKILL_INSTALL_ROOT_PREFIXES) {
     for (const skillId of listSkillDirectories(worktreePath, rootPrefix)) {
-      if (found.has(skillId)) continue;
+      if (found.has(skillId) || !accept(skillId)) continue;
       const outcome = readReceiptAt(worktreePath, rootPrefix, skillId);
       if (outcome === null) continue;
       if (outcome.kind === 'found') {
@@ -183,6 +197,78 @@ function collectReceipts(worktreePath: string): { found: FoundReceipt[]; skips: 
   return {
     found: [...found.values()].sort((a, b) => (a.skillId < b.skillId ? -1 : 1)),
     skips: [...pendingSkips.values()].sort((a, b) => (a.skillId < b.skillId ? -1 : 1)),
+  };
+}
+
+/** A worktree as re-indexing needs to see it: an ID to key rows by, a path to read. */
+export interface SkillReindexWorktree {
+  id: string;
+  path: string;
+}
+
+/** What one worktree pass did. */
+interface WorktreeIndexPass {
+  indexed: number;
+  removed: number;
+  skipped: SkillReindexSkip[];
+}
+
+/**
+ * Index one worktree from the receipts on its disk.
+ *
+ * The caller has already established that the worktree directory exists, because
+ * an absent directory means something different to each caller.
+ *
+ * `gapsOnly` skips Skills the index already has: the full rebuild wants every
+ * row converged onto what disk says, while a read-through restore (#1709) only
+ * wants the rows that are missing, so that answering a list request never
+ * rewrites a row that was already correct.
+ *
+ * `prune` is what makes this a *rebuild* rather than a repair. Only the explicit
+ * whole-index operation drops rows: a read must not delete an index row because
+ * the payload happens to be absent right now — that state is the `missing` the
+ * dashboard exists to show, and silently deleting it would hide the drift.
+ */
+function indexWorktreeFromReceipts(
+  db: Database.Database,
+  worktree: SkillReindexWorktree,
+  now: number,
+  options: { gapsOnly: boolean; prune: boolean }
+): WorktreeIndexPass {
+  const indexedBefore = listSkillInstallations(db, worktree.id).map((row) => row.skillId);
+  const indexedIds = new Set(indexedBefore);
+
+  const { found, skips } = collectReceipts(
+    worktree.path,
+    options.gapsOnly ? (skillId) => !indexedIds.has(skillId) : undefined
+  );
+
+  for (const entry of found) {
+    // `installed_at` is preserved by the upsert, so passing the current time
+    // dates the convergence without rewriting when the install first landed.
+    const prior = getSkillInstallation(db, worktree.id, entry.skillId);
+    upsertSkillInstallation(db, {
+      worktreeId: worktree.id,
+      receipt: entry.receipt,
+      receiptSha256: entry.receiptSha256,
+      operationId: prior?.operationId ?? SKILL_REINDEX_OPERATION_ID,
+      installedAt: now,
+    });
+  }
+
+  let removed = 0;
+  if (options.prune) {
+    const backedBySkillId = new Set(found.map((entry) => entry.skillId));
+    for (const skillId of indexedBefore) {
+      if (backedBySkillId.has(skillId)) continue;
+      if (deleteSkillInstallation(db, worktree.id, skillId)) removed += 1;
+    }
+  }
+
+  return {
+    indexed: found.length,
+    removed,
+    skipped: skips.map((skip) => ({ ...skip, worktreeId: worktree.id })),
   };
 }
 
@@ -219,29 +305,62 @@ export function reindexSkillInstallations(
     }
 
     result.scannedWorktrees += 1;
-    const { found, skips } = collectReceipts(worktree.path);
-    result.skipped.push(...skips.map((skip) => ({ ...skip, worktreeId: worktree.id })));
-
-    for (const entry of found) {
-      // `installed_at` is preserved by the upsert, so passing the current time
-      // dates the convergence without rewriting when the install first landed.
-      const prior = getSkillInstallation(db, worktree.id, entry.skillId);
-      upsertSkillInstallation(db, {
-        worktreeId: worktree.id,
-        receipt: entry.receipt,
-        receiptSha256: entry.receiptSha256,
-        operationId: prior?.operationId ?? SKILL_REINDEX_OPERATION_ID,
-        installedAt: now,
-      });
-      result.indexed += 1;
-    }
-
-    const backedBySkillId = new Set(found.map((entry) => entry.skillId));
-    for (const row of listSkillInstallations(db, worktree.id)) {
-      if (backedBySkillId.has(row.skillId)) continue;
-      if (deleteSkillInstallation(db, worktree.id, row.skillId)) result.removed += 1;
-    }
+    const pass = indexWorktreeFromReceipts(db, worktree, now, { gapsOnly: false, prune: true });
+    result.indexed += pass.indexed;
+    result.removed += pass.removed;
+    result.skipped.push(...pass.skipped);
   }
 
   return result;
+}
+
+/** What one read-through restore did (#1709). */
+export interface SkillIndexRestoreResult {
+  /** Rows written from a receipt for Skills the index did not have. */
+  indexed: number;
+  /** Directories that looked like an install but carried no usable receipt. */
+  skipped: SkillReindexSkip[];
+}
+
+/**
+ * Restore the index rows one worktree is missing, from the receipts on its disk.
+ *
+ * The read side of the same claim {@link reindexSkillInstallations} makes: the
+ * receipt is the truth and `skill_installations` is a cache over it. The cache
+ * is per-database, the receipt is inside the worktree and repository-relative,
+ * so a Skill installed by another instance — or by this one before its database
+ * was replaced — is present on disk with no row behind it. Reading the index as
+ * if it were the truth reports that as "not installed" (#1709); reading through
+ * to the receipt reports it as what it is.
+ *
+ * Restore-only, and deliberately so:
+ *
+ * - **Nothing is ever deleted.** A row whose payload is gone is drift to report,
+ *   not a row for a list request to destroy.
+ * - **Only gaps are written.** A Skill the index already has is left untouched,
+ *   so a read never rewrites `updated_at` or re-dates a row that was correct.
+ * - **A directory is not evidence.** A missing, unparseable or foreign receipt
+ *   is reported and skipped, exactly as the full rebuild does, because indexing
+ *   it would assert a provenance nobody can back up.
+ *
+ * Like the full rebuild it reads receipts from disk rather than reconstructing
+ * them from the table, writes nothing into the payload, and never appends to the
+ * operation log.
+ *
+ * @param worktree - The resolved worktree: its current ID and its path on disk
+ */
+export function restoreSkillInstallationIndex(
+  db: Database.Database,
+  worktree: SkillReindexWorktree,
+  options: { now?: number } = {}
+): SkillIndexRestoreResult {
+  // An absent directory says nothing about what is installed, so there is
+  // nothing to restore from and nothing to conclude.
+  if (!existsSync(worktree.path)) return { indexed: 0, skipped: [] };
+
+  const pass = indexWorktreeFromReceipts(db, worktree, options.now ?? Date.now(), {
+    gapsOnly: true,
+    prune: false,
+  });
+  return { indexed: pass.indexed, skipped: pass.skipped };
 }
