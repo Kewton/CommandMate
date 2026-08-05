@@ -108,14 +108,23 @@ function resolveBaseAnswer(promptData: PromptData): string | null {
 /**
  * Every piece of prompt text a deny pattern is matched against.
  *
- * `instructionText` is included because that is where the dangerous part
- * usually is — Claude's permission prompts put the command being approved in the
- * lines above the question, not in the question itself.
+ * `approvalTarget` is included because that is where the dangerous part usually
+ * is — Claude's permission prompts put the command being approved in the lines
+ * above the question, not in the question itself.
+ *
+ * Issue #1699: it used to be `instructionText` that was included here, and that
+ * was the bug. `instructionText` is a scrollback window sized for a human to
+ * read, so a `rm -rf` approved several turns earlier stayed inside it and went
+ * on matching — suppressing every later prompt, including edits that had
+ * nothing to do with it, until the line scrolled off the pane. `approvalTarget`
+ * is the same block bounded at the previous turn, so what is judged here is
+ * what *this* prompt is asking for. Prompts detected before the field existed
+ * (an old row replayed from the database) simply match on question and options.
  */
 function collectDenyMatchTexts(promptData: PromptData): string[] {
   const texts: string[] = [promptData.question];
-  if (promptData.instructionText) {
-    texts.push(promptData.instructionText);
+  if (promptData.approvalTarget) {
+    texts.push(promptData.approvalTarget);
   }
   if (promptData.type === 'multiple_choice') {
     for (const option of promptData.options) {

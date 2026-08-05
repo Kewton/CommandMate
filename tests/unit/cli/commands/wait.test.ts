@@ -852,3 +852,99 @@ describe('Issue #1620: wait --verify binds the task it waited on', () => {
     ]);
   });
 });
+
+/**
+ * Issue #1699: a prompt Auto-Yes refused to answer must say so.
+ *
+ * Before this, `wait` printed "Waiting for human response..." either way, so a
+ * deny pattern that had latched onto a finished turn and was suppressing every
+ * subsequent prompt looked exactly like an ordinary wait for a human. Two
+ * workers sat stalled behind that ambiguity for the better part of an hour.
+ */
+describe('Issue #1699: policy suppression is reported while waiting', () => {
+  const suppression = {
+    reason: 'deny-pattern',
+    mode: 'allow-listed',
+    promptType: 'multiple_choice',
+    pattern: 'rm -rf',
+    at: Date.now(),
+  };
+
+  const suppressedPrompt = (lastSuppression: unknown) => ({
+    ...baseOutput,
+    isRunning: true,
+    isPromptWaiting: true,
+    sessionStatus: 'waiting' as const,
+    promptData: {
+      type: 'multiple_choice',
+      question: 'Do you want to make this edit to foo.ts?',
+      options: [{ number: 1, label: 'Yes', isDefault: true }],
+      status: 'pending',
+      approvalTarget: 'Edit file\n\n  src/foo.ts\n\nDo you want to make this edit to foo.ts?',
+    },
+    autoYes: { enabled: true, expiresAt: null, lastSuppression },
+  });
+
+  it('names the reason and pattern on stderr in --on-prompt human mode', async () => {
+    vi.useFakeTimers();
+    mockFetchSequence([
+      { data: suppressedPrompt({ ...suppression, at: Date.now() }) },
+      { data: { ...baseOutput, isRunning: true, sessionStatus: 'ready' as const } },
+    ]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    const promise = createWaitCommand().parseAsync([
+      'node', 'wait', 'wt1', '--on-prompt', 'human',
+    ]);
+    await vi.advanceTimersByTimeAsync(5000);
+    await promise;
+
+    const stderr = mockConsoleError.mock.calls.map(c => String(c[0])).join('\n');
+    expect(stderr).toContain('Waiting for human response');
+    expect(stderr).toContain('auto-yes suppressed this prompt by contract policy');
+    expect(stderr).toContain('reason=deny-pattern');
+    expect(stderr).toContain('pattern="rm -rf"');
+  });
+
+  it('carries the suppression and the judged text in the exit-10 payload', async () => {
+    mockFetchSequence([{ data: suppressedPrompt({ ...suppression, at: Date.now() }) }]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+    const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
+    expect(output.autoYesSuppression).toMatchObject({
+      reason: 'deny-pattern',
+      mode: 'allow-listed',
+      pattern: 'rm -rf',
+    });
+    expect(output.approvalTarget).toContain('src/foo.ts');
+  });
+
+  it('stays silent about a suppression that is no longer being refreshed', async () => {
+    // The record is rewritten on every poll while the prompt is on screen, so a
+    // stale one belongs to some earlier prompt and is not why this wait is stuck.
+    mockFetchSequence([
+      { data: suppressedPrompt({ ...suppression, at: Date.now() - 10 * 60_000 }) },
+    ]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+
+    const stderr = mockConsoleError.mock.calls.map(c => String(c[0])).join('\n');
+    expect(stderr).not.toContain('auto-yes suppressed');
+    const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
+    expect(output.autoYesSuppression).toBeUndefined();
+  });
+
+  it('says nothing when no policy is in force', async () => {
+    mockFetchSequence([{ data: suppressedPrompt(null) }]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+
+    const stderr = mockConsoleError.mock.calls.map(c => String(c[0])).join('\n');
+    expect(stderr).not.toContain('auto-yes suppressed');
+  });
+});

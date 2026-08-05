@@ -163,6 +163,9 @@ async function capturePrompts(worktreeId: string, options: CaptureOptions): Prom
             answer: m.promptData!.answer ?? null,
             answeredAt: m.promptData!.answeredAt ?? null,
             answeredBy: m.promptData!.answeredBy ?? null,
+            // Issue #1699: what the contract's denyPatterns were judged against.
+            // Null on rows recorded before the field existed.
+            approvalTarget: m.promptData!.approvalTarget ?? null,
           })),
         },
         null,

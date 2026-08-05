@@ -233,6 +233,21 @@ export interface BasePromptData {
   answeredBy?: PromptAnsweredBy;
   /** Instruction text preceding the prompt (context for the user) - Issue #235 */
   instructionText?: string;
+  /**
+   * What *this* prompt is asking approval for — Issue #1699.
+   *
+   * `instructionText` is a scrollback window sized for human reading, so it
+   * carries whatever the previous turns happened to leave on the pane. Machine
+   * judgements (the contract's `autoYes.denyPatterns`) must not be made against
+   * that: a `rm -rf` approved three turns ago kept matching and suppressed every
+   * later prompt until it scrolled off. This field is the same block cut down to
+   * the current prompt's own panel — the upward scan stops at the previous
+   * turn's transcript marker (see `findApprovalContextStart`).
+   *
+   * Display keeps reading `instructionText`; only the deny surface reads this.
+   * Undefined when the frame gave no block to attribute to this prompt.
+   */
+  approvalTarget?: string;
 }
 
 /**
