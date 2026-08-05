@@ -61,6 +61,13 @@ const NORMAL_OPTION_PATTERN = /^\s*[^\d]{0,3}(\d+)(?:\.(?!\d)|\s+)\s*(.+)$/;
 const SEPARATOR_LINE_PATTERN = /^[-─]+$/;
 
 /**
+ * How many lines above `questionEndIndex` the question text is collected from.
+ * Also the point the Issue #1699 approval-context scan starts walking up from,
+ * since everything inside this window is already part of `question`.
+ */
+const QUESTION_CONTEXT_LINES = 5;
+
+/**
  * Pattern for collapsed-output summary lines rendered by Codex/OpenAI TUI.
  * Example: "[… 12 lines] ctrl + a view all"
  *
@@ -489,7 +496,7 @@ function extractQuestionText(lines: string[], questionEndIndex: number): string 
   }
 
   const questionLines: string[] = [];
-  for (let i = Math.max(0, questionEndIndex - 5); i <= questionEndIndex; i++) {
+  for (let i = Math.max(0, questionEndIndex - QUESTION_CONTEXT_LINES); i <= questionEndIndex; i++) {
     const line = lines[i].trim();
     if (line && !SEPARATOR_LINE_PATTERN.test(line)) {
       questionLines.push(line);
@@ -525,13 +532,131 @@ function extractInstructionText(
 }
 
 /**
+ * Lines that mean "the previous turn ended here" when scanning upward.
+ *
+ * Every supported CLI renders its transcript as marker-prefixed rows — Claude's
+ * tool-use `⏺` and result `⎿`, Codex's activity `•`, its approval receipts `✔`
+ * / `✗`, the user's own `›` / `❯` / `>` echo, and its output continuation `└`.
+ * The lines a prompt panel puts above its question (a header such as "Bash
+ * command", the command itself, a one-line description) never carry one, which
+ * is what makes this usable as the panel's upper edge after `stripBoxDrawing`
+ * has erased the real box border.
+ *
+ * Horizontal rules count too: Codex draws one between turns.
+ *
+ * Anchored at the start of the trimmed line — ReDoS safe (no repetition).
+ */
+const TURN_BOUNDARY_PATTERN =
+  /^[⏺⎿●○•✔✓✖✗✘›»❯└├>]/;
+
+/**
+ * How far above the question the approval context may reach (Issue #1699).
+ *
+ * The boundary marker above is the actual fix; this cap only exists so a frame
+ * that happens to contain no marker at all (a bare shell `(y/n)` prompt under
+ * plain command output) cannot drag an unbounded scrollback window into the
+ * deny surface the way the old fixed 19-line lookback did. Sized for the
+ * tallest real permission panel measured: header + blank + a wrapped multi-line
+ * command + description + blank.
+ */
+export const APPROVAL_TARGET_MAX_LOOKBACK = 12;
+
+/** True when this line belongs to a previous turn rather than the prompt panel. */
+function isTurnBoundaryLine(rawLine: string | undefined): boolean {
+  if (rawLine === undefined) return false;
+  const line = rawLine.trim();
+  if (line === '') return false;
+  return TURN_BOUNDARY_PATTERN.test(line) || SEPARATOR_LINE_PATTERN.test(line);
+}
+
+/**
+ * First line index that still belongs to *this* prompt, scanning upward.
+ *
+ * Walks up from `questionLineIndex - 1` and stops just below the nearest turn
+ * boundary; with no boundary in reach it falls back to the lookback cap.
+ * Everything above the returned index is a previous turn and must never reach a
+ * deny pattern — that poisoning is Issue #1699.
+ *
+ * Shared by both detector paths: multiple_choice passes its `questionEndIndex`,
+ * yes_no the line its pattern matched on.
+ *
+ * @param lines - Full frame, already ANSI/box stripped
+ * @param questionLineIndex - Line the prompt's own question sits on
+ * @returns Index of the first line of the current prompt's own block
+ */
+export function findApprovalContextStart(lines: string[], questionLineIndex: number): number {
+  const floor = Math.max(0, questionLineIndex - APPROVAL_TARGET_MAX_LOOKBACK);
+  for (let i = questionLineIndex - 1; i >= floor; i--) {
+    if (isTurnBoundaryLine(lines[i])) {
+      return i + 1;
+    }
+  }
+  return floor;
+}
+
+/**
+ * Join a slice of the frame into an approval-target string.
+ *
+ * @returns The trimmed block, or undefined when it is empty
+ */
+export function joinApprovalTarget(lines: string[], start: number, end: number): string | undefined {
+  const joined = lines
+    .slice(start, end)
+    .map(l => l.trimEnd())
+    .join('\n')
+    .trim();
+  return joined.length > 0 ? joined : undefined;
+}
+
+/**
+ * Extract what this multiple-choice prompt is asking approval for (Issue #1699).
+ *
+ * Same lower bound as {@link extractInstructionText} — the panel runs through
+ * its options — but the upper bound is the previous turn's boundary instead of
+ * a fixed 19-line lookback.
+ *
+ * Measured against the live Codex captures in `fixtures/codex-live-1628`: the
+ * two `✔ You approved codex to run …` receipts and the `• Ran …` echoes that
+ * `instructionText` carries all fall outside, while the `$ git add …` the
+ * prompt is actually asking about, and the diff an apply-patch prompt is asking
+ * about, both stay inside.
+ *
+ * Residual, deliberately left alone: `question` itself is built from up to
+ * {@link QUESTION_CONTEXT_LINES} lines above `questionEndIndex` and is also part
+ * of the deny surface. Narrowing that would change prompt dedup keys and what
+ * the UI renders, and it is bounded by the options below it either way.
+ *
+ * @param lines - Array of output lines
+ * @param questionEndIndex - Index of the last line before options, or -1 if not found
+ * @param effectiveEnd - End index of non-trailing-empty lines
+ * @returns Approval target string, or undefined if no question line found
+ */
+function extractApprovalTarget(
+  lines: string[],
+  questionEndIndex: number,
+  effectiveEnd: number,
+): string | undefined {
+  if (questionEndIndex < 0) {
+    return undefined;
+  }
+
+  return joinApprovalTarget(
+    lines,
+    findApprovalContextStart(lines, questionEndIndex),
+    effectiveEnd,
+  );
+}
+
+/**
  * Build the final PromptDetectionResult for a multiple choice prompt.
  * Maps collected options to the output format, checking each option for
  * text input requirements using TEXT_INPUT_PATTERNS.
  *
  * @param question - Extracted question text
  * @param collectedOptions - Options collected during Pass 2 scanning
- * @param instructionText - Instruction text for the prompt block
+ * @param context - Human-facing `instructionText` and machine-facing
+ *   `approvalTarget` for the prompt block (Issue #1699 split them; an
+ *   `undefined` here means neither, which is what the pre-#1699 callers meant)
  * @param output - Original output text (used for rawContent truncation)
  * @param truncateRawContentFn - Function to truncate raw content
  * @param submitMode - Optional submit mode for the prompt (Issue #616)
@@ -541,12 +666,13 @@ function extractInstructionText(
 export function buildMultipleChoiceResult(
   question: string,
   collectedOptions: ReadonlyArray<{ number: number; label: string; isDefault: boolean }>,
-  instructionText: string | undefined,
+  context: { instructionText?: string; approvalTarget?: string } | undefined,
   output: string,
   truncateRawContentFn: (content: string) => string,
   submitMode?: SubmitMode,
   isAskUserQuestion?: boolean,
 ): PromptDetectionResult {
+  const { instructionText, approvalTarget } = context ?? {};
   return {
     isPrompt: true,
     promptData: {
@@ -565,6 +691,7 @@ export function buildMultipleChoiceResult(
       }),
       status: 'pending',
       instructionText,
+      ...(approvalTarget !== undefined ? { approvalTarget } : {}),
       ...(submitMode ? { submitMode } : {}),
       ...(isAskUserQuestion ? { isAskUserQuestion: true } : {}),
     },
@@ -892,11 +1019,14 @@ export function detectMultipleChoicePrompt(
 
   const question = extractQuestionText(lines, questionEndIndex);
   const instructionText = extractInstructionText(lines, questionEndIndex, effectiveEnd);
+  // Issue #1699: the same block, cut at the previous turn's boundary. Display
+  // keeps the wide window; deny patterns are judged against this one.
+  const approvalTarget = extractApprovalTarget(lines, questionEndIndex, effectiveEnd);
 
   // Issue #616: Determine submitMode from confirmation footer (detected in single-pass above)
   const submitMode: SubmitMode | undefined = hasConfirmationFooter
     ? (hasNumberFooter ? 'answer_only' : 'answer_then_enter')
     : undefined;
 
-  return buildMultipleChoiceResult(question, collectedOptions, instructionText, output, truncateRawContentFn, submitMode, hasAskUserQuestionFooter);
+  return buildMultipleChoiceResult(question, collectedOptions, { instructionText, approvalTarget }, output, truncateRawContentFn, submitMode, hasAskUserQuestionFooter);
 }

@@ -37,7 +37,7 @@ verify:
 autoYes:
   mode: safe                       # off | safe | allow-listed（省略時: 従来動作 = ポリシー制約なし）
   allowPromptTypes: [yes_no]       # mode=allow-listed 時に有効
-  denyPatterns: []                 # 質問文/選択肢にマッチしたら自動応答せずエスカレート（正規表現）
+  denyPatterns: []                 # 承認対象/質問文/選択肢にマッチしたら自動応答せずエスカレート（正規表現）
 success:
   requireWorkEvidence: true        # 省略時 true
   requireScopeClean: true          # 省略時 true（組み込み scope ゲートが変更ファイルを突合。§2.2）
@@ -59,7 +59,8 @@ success:
 > ```
 >
 > ポリシーが応答を抑止した事実は `commandmate capture --json` の `autoYes.lastSuppression`
-> で観測できる（§2.4 enforcement）。
+> と、`commandmate wait` の stderr / exit 10 payload の `autoYesSuppression` で観測できる
+> （§2.4 enforcement、Issue #1699）。
 
 契約ファイルは `.commandmate/tasks/*.yaml` として **Git 追跡対象**である
 （`.gitignore` の 2 段構え規則。[commandmate-directory-tracking.md](./commandmate-directory-tracking.md) 参照）。
@@ -318,9 +319,17 @@ enforcement が「契約が無いから従来動作」と「契約が off と言
 
 1. 従来ルールで答えが出ないプロンプト（選択肢ゼロ、テキスト入力必須）はそのまま `null`
 2. `mode: off` → 常に抑止
-3. `denyPatterns` のいずれかがマッチ → 抑止。マッチ対象は**質問文・`instructionText`・
-   全選択肢ラベル**。Claude の許可プロンプトは承認対象のコマンドを質問文の上（=
-   `instructionText`）に置くため、質問文だけでは効かない
+3. `denyPatterns` のいずれかがマッチ → 抑止。マッチ対象は**質問文・`approvalTarget`・
+   全選択肢ラベル**。Claude の許可プロンプトは承認対象のコマンドを質問文の上に置くため、
+   質問文だけでは効かない。
+
+   > **#1699 の訂正**: この面はかつて `instructionText` だった。`instructionText` は人間が
+   > 文脈を読むためのペイン窓であり、**数ターン前に承認済みのコマンドが窓に残り続ける**。
+   > その結果 `rm -rf` を一度承認すると、以後の無関係なプロンプト（編集確認など）まで
+   > 恒久的に抑止され、当該行がスクロールアウトするまで Auto-Yes が事実上死ぬ
+   > （2026-08-05 の並列委任でワーカー2台が停止、片方は約1時間無進捗）。現在は検出時点で
+   > **直前ターンの境界で切った `approvalTarget`** を別フィールドとして持ち、判定はそちら、
+   > 表示は従来どおり `instructionText` を使う。
 4. `mode: safe` → `yes_no` のみ従来ルール、他は抑止（#1495 の `/model` オーバーレイ誤検出は
    この型に該当する）
 5. `mode: allow-listed` → `allowPromptTypes` に含まれる型のみ従来ルール

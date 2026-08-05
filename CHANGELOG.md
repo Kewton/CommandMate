@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-08-05
+
+> **Highlight**: 契約の `autoYes.denyPatterns` が、そのプロンプトとは無関係な**既に承認済みの過去のコマンド**にマッチし続け、以後のプロンプトを恒久的に抑止していた。照合面が「今このプロンプトが何を承認しようとしているか」ではなく「直近の画面に何が映っているか」だったためで、一度 `rm -rf` を承認すると、その行がペインから流れ出るまで無関係な編集確認まで止まり続けた。実運用では並列委任のワーカー 2 台が停止し、片方は約 1 時間 1 行も書けていない。判定用の `approvalTarget` を表示用の `instructionText` から分離して解決した。
+
+### Fixed
+
+- **auto-yes: deny pattern の照合面を現在のプロンプトに限定** (#1699)
+  - `collectDenyMatchTexts()` の照合面を `promptData.instructionText` から新設の `approvalTarget` へ変更した。`instructionText` は**人間が文脈を読むためのペイン窓**（multiple_choice は質問行の 19 行上から、yes_no はペイン末尾 20 行まるごと）であり、過去のターンのコマンドとその出力を日常的に含む。これを判定入力にしていたことが、承認済みコマンドによる恒久抑止の原因だった
+  - `instructionText` は表示用（`PromptPanel` / `MobilePromptSheet`）としてそのまま維持する。**判定面と表示面を分離**したので、人間向けの文脈情報は削られていない
+  - `findApprovalContextStart()` が質問行から上へ走査し、**直前ターンの transcript マーカー**（`⏺⎿●○•✔✓✖✗✘›»❯└├>` 始まり・区切り線）の直下を上端とする。マーカーが射程内に無い場合のみ `APPROVAL_TARGET_MAX_LOOKBACK=12` で打ち切る。`stripBoxDrawing()` が枠線（`╭──╮`）も枠内の空行（`│  │`）も等しく空行へ潰すため、**空行では panel の上端を判定できない**ことが実測で判明したことによる
+  - yes_no 経路も同時に修正した。`instructionText: rawContent`（ペイン末尾 20 行）は multiple_choice より広く、片方だけの修正では穴が残る
+  - `approvalTarget` を持たない旧データ（DB から再生された古い行）は question ＋選択肢ラベルのみで判定される
+  - **抑止の可視化**: `commandmate wait` が `--on-prompt human` の待機ループで抑止の reason / mode / promptType / pattern を stderr に出し、agent モードでは exit 10 の payload に `autoYesSuppression` と `approvalTarget` を載せる。従来は "Waiting for human response" しか出ず、正常な待機と抑止による停止を区別できなかった（これが発見を遅らせた）
+  - CLI ミラー追従: `src/cli/types/api-responses.ts` と `capture --prompts` の whitelist に `approvalTarget` を追加
+
 ## [0.21.0] - 2026-08-05
 
 > **Highlight**: 導入済み Skill を GUI / CLI から**更新**できるようになった。これまで update の手段が無く、一度 uninstall してから install し直す（間に Skill 不在の窓が空き、確認も履歴も 2 回に割れる）しかなかった。#1243 が old receipt / 現行 filesystem / candidate artifact の 3-way 差分と local 変更 guard を備えた update plan を提供し、#1244 がその plan を入力に、同一 filesystem の rename 1 点を commit point として old→new を切り替える（失敗しても旧版・新版が混在しない）。あわせて実運用フィードバック #1678 のうち CommandMate 側 6 件（`commandmate sync` の新設、`respond yes/no` の誤承認修正、scope 違反 path の表示、Auto-Yes 抑止の可視化、プロンプト監査証跡、discoverability 原則の明文化）を反映した。

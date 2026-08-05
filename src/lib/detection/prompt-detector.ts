@@ -5,7 +5,11 @@
  */
 
 import { createLogger } from '@/lib/logger';
-import { detectMultipleChoicePrompt } from './prompt-detect-multiple-choice';
+import {
+  detectMultipleChoicePrompt,
+  findApprovalContextStart,
+  joinApprovalTarget,
+} from './prompt-detect-multiple-choice';
 import type { DetectPromptOptions, PromptDetectionResult } from './types';
 import { normalizeTuiFrameForDetection } from './tui-detection-frame';
 
@@ -89,6 +93,44 @@ const YES_NO_PATTERNS: ReadonlyArray<{
 ];
 
 /**
+ * Where in `lines` a regex match against the joined tail window started and ended.
+ *
+ * The yes/no patterns are matched against the last 20 lines joined into one
+ * string, so a match carries no line number of its own. Issue #1699 needs one:
+ * the approval target is bounded relative to the line the prompt is actually on,
+ * not relative to the bottom of the pane.
+ */
+function locateMatchLines(
+  tailText: string,
+  tailStart: number,
+  match: RegExpMatchArray,
+): { startLine: number; endLine: number } {
+  const offset = match.index ?? 0;
+  const countNewlines = (text: string): number => text.split('\n').length - 1;
+  const startLine = tailStart + countNewlines(tailText.slice(0, offset));
+  return { startLine, endLine: startLine + countNewlines(match[0]) };
+}
+
+/**
+ * What a yes/no prompt is asking approval for (Issue #1699).
+ *
+ * Bounded on both sides, unlike `instructionText`: below at the prompt line
+ * itself (nothing printed after the question is part of what it approves) and
+ * above at the previous turn's boundary. A shell that echoes the command
+ * directly above its `(y/n)` — the case the deny patterns were written for —
+ * still lands inside; a command approved in an earlier turn does not.
+ */
+function yesNoApprovalTarget(
+  lines: string[],
+  tailText: string,
+  tailStart: number,
+  match: RegExpMatchArray,
+): string | undefined {
+  const { startLine, endLine } = locateMatchLines(tailText, tailStart, match);
+  return joinApprovalTarget(lines, findApprovalContextStart(lines, startLine), endLine + 1);
+}
+
+/**
  * Creates a yes/no prompt detection result.
  * Centralizes the repeated construction of yes_no PromptDetectionResult objects
  * used by both YES_NO_PATTERNS matching and Approve pattern matching.
@@ -96,6 +138,7 @@ const YES_NO_PATTERNS: ReadonlyArray<{
  * @param question - The question text
  * @param cleanContent - The clean content string
  * @param rawContent - The raw content string (last 20 lines, trimmed)
+ * @param approvalTarget - Issue #1699 deny-match surface for this prompt
  * @param defaultOption - Optional default option ('yes' or 'no')
  * @returns PromptDetectionResult with isPrompt: true and yes_no prompt data
  */
@@ -103,6 +146,7 @@ function yesNoPromptResult(
   question: string,
   cleanContent: string,
   rawContent: string,
+  approvalTarget: string | undefined,
   defaultOption?: 'yes' | 'no',
 ): PromptDetectionResult {
   return {
@@ -113,7 +157,12 @@ function yesNoPromptResult(
       options: ['yes', 'no'],
       status: 'pending',
       ...(defaultOption !== undefined && { defaultOption }),
+      // Issue #235: the wide window, for the human reading PromptPanel.
       instructionText: rawContent,
+      // Issue #1699: the narrow one, for machine judgement. Keeping the two
+      // apart is the whole fix — the wide window is a scrollback view and a
+      // deny pattern matched against it fires on turns that are already done.
+      ...(approvalTarget !== undefined && { approvalTarget }),
     },
     cleanContent,
     rawContent,
@@ -167,6 +216,9 @@ export function detectPrompt(output: string, options?: DetectPromptOptions): Pro
 
   // [SF-003] [MF-S2-001] Expanded from 10 to 20 lines for rawContent coverage
   const lastLines = lines.slice(-20).join('\n');
+  // Absolute index of lastLines[0] in `lines`, so a match inside the joined tail
+  // can be mapped back to a line number (Issue #1699).
+  const tailStart = Math.max(0, lines.length - 20);
 
   // Pattern 0: Multiple choice (numbered options with indicator)
   // Example:
@@ -193,7 +245,13 @@ export function detectPrompt(output: string, options?: DetectPromptOptions): Pro
     const match = lastLines.match(pattern.regex);
     if (match) {
       const question = match[1].trim();
-      return yesNoPromptResult(question, question, trimmedLastLines, pattern.defaultOption);
+      return yesNoPromptResult(
+        question,
+        question,
+        trimmedLastLines,
+        yesNoApprovalTarget(lines, lastLines, tailStart, match),
+        pattern.defaultOption,
+      );
     }
   }
 
@@ -206,7 +264,12 @@ export function detectPrompt(output: string, options?: DetectPromptOptions): Pro
     const content = approveMatch[1].trim();
     // If there's content before "Approve?", include it in the question
     const question = content ? `${content} Approve?` : 'Approve?';
-    return yesNoPromptResult(question, content || 'Approve?', trimmedLastLines);
+    return yesNoPromptResult(
+      question,
+      content || 'Approve?',
+      trimmedLastLines,
+      yesNoApprovalTarget(lines, lastLines, tailStart, approveMatch),
+    );
   }
 
   // No prompt detected

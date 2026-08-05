@@ -309,14 +309,33 @@ describe('auto-yes-resolver', () => {
         ).toBeNull();
       });
 
-      it('withholds when the instruction text above the question matches', () => {
+      it('withholds when the approval target above the question matches', () => {
         // Claude puts the command being approved above the question, not in it.
+        // Issue #1699 moved this surface from instructionText to approvalTarget;
+        // the behaviour being pinned — "the command above the question still
+        // escalates" — is unchanged, and must stay that way.
         expect(
           resolveAutoAnswer(
-            { ...yesNo, instructionText: 'Bash command: rm -rf /tmp/build' },
+            { ...yesNo, approvalTarget: 'Bash command: rm -rf /tmp/build' },
             policy({ denyPatterns: ['rm -rf'] })
           )
         ).toBeNull();
+      });
+
+      it('answers when only the scrollback — not the approval target — matches (#1699)', () => {
+        // instructionText is a pane window: it keeps showing an `rm -rf` that
+        // was approved turns ago. Matching against it suppressed every later
+        // prompt until the line scrolled off, which is how two workers stalled.
+        expect(
+          resolveAutoAnswer(
+            {
+              ...yesNo,
+              instructionText: 'Ran: rm -rf /tmp/build\n\nOverwrite config file?',
+              approvalTarget: 'Overwrite config file?',
+            },
+            policy({ denyPatterns: ['rm -rf'] })
+          )
+        ).toBe('y');
       });
 
       it('answers when no pattern matches', () => {

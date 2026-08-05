@@ -125,6 +125,14 @@ export interface PromptData {
   answeredAt?: string;
   /** Mirrors: src/types/models.ts PromptAnsweredBy (Issue #1685) */
   answeredBy?: string;
+  /** Human-facing context block preceding the prompt (Issue #235). */
+  instructionText?: string;
+  /**
+   * What this prompt asks approval for — the surface `autoYes.denyPatterns` are
+   * judged against (Issue #1699). Narrower than `instructionText` on purpose:
+   * the latter is a pane window and carries finished turns.
+   */
+  approvalTarget?: string;
   [key: string]: unknown;
 }
 
@@ -168,6 +176,25 @@ export interface WaitPromptOutput {
   question: string;
   options: unknown[];
   status: string;
+  /**
+   * What the prompt asks approval for, when the detector could attribute a block
+   * to it (Issue #1699). Present so a caller that reads only this payload can
+   * see what a `deny-pattern` verdict below was actually judged against.
+   */
+  approvalTarget?: string;
+  /**
+   * Set when the contract's autoYes policy withheld an answer for this session
+   * (Issue #1699). Without it, a prompt an operator has to answer by hand is
+   * indistinguishable on stdout from one nobody configured Auto-Yes for — which
+   * is why the #1699 suppression loop went unnoticed for an hour.
+   */
+  autoYesSuppression?: {
+    reason: string;
+    mode: string | null;
+    promptType: string;
+    pattern?: string;
+    ageSeconds: number;
+  };
   [key: string]: unknown;
 }
 
