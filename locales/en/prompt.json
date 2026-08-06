@@ -14,5 +14,8 @@
   "submit": "Submit",
   "yesNoGroupLabel": "Yes or No options",
   "selectAnOption": "Select an option",
-  "customValueInput": "Custom value input"
+  "customValueInput": "Custom value input",
+  "unclassifiedTitle": "A dialog is open, and CommandMate could not read its options.",
+  "unclassifiedInstruction": "Answer it in the terminal, or reply with the option NUMBER using {command}. Words like \"yes\"/\"no\" are not resolved on a numbered dialog.",
+  "unclassifiedRespondCommand": "commandmate respond [worktree-id] [number]"
 }

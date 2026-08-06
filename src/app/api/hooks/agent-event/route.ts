@@ -48,6 +48,7 @@ import {
   type AgentEventType,
 } from '@/lib/hooks/agent-event-types';
 import { isDuplicateAgentEvent, recordAgentEvent } from '@/lib/session/agent-event-state';
+import { MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH } from '@/lib/session/structured-prompt';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/hooks-agent-event');
@@ -181,6 +182,11 @@ export async function POST(request: NextRequest) {
       at: Date.now(),
       detail,
       sessionId: sessionId ?? null,
+      // Issue #1725: `Notification.message` is the agent's own one-line summary
+      // ("Claude needs your permission to use Bash"). Kept for display beside
+      // the prompt it announces; `notification_type` (in `detail`) remains the
+      // only thing anything branches on (D3).
+      message: readString(payload, 'message')?.slice(0, MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH) ?? null,
     });
 
     if (event !== 'stop') {

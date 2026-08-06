@@ -234,9 +234,14 @@ describe('buildCurrentOutput: divergence logging (Issue #1723 §3)', () => {
   });
 
   it('reports a disagreement it deliberately did not act on', async () => {
-    // The measurement the Epic is collecting includes the cases this Issue
-    // declines to merge — those are what the next Issues have to decide about.
-    record('notification', 'permission_prompt');
+    // The measurement the Epic is collecting includes the cases the merge
+    // declines to act on. Issue #1725 took `notification(permission_prompt)`
+    // out of that set — it is applied now, through the prompt-waiting state —
+    // so the case pinned here is the one that remains and always will: the
+    // scraper is looking at a dialog, the agent's newest event says the turn is
+    // running, and the scraper's `waiting` wins by rule.
+    vi.mocked(captureSessionOutput).mockResolvedValue(buildClaude1000RowPermissionFrame());
+    record('user_prompt_submit');
 
     await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
 
@@ -244,7 +249,11 @@ describe('buildCurrentOutput: divergence logging (Issue #1723 §3)', () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]).toEqual([
       'detection-divergence',
-      expect.objectContaining({ structuredStatus: 'waiting', applied: false }),
+      expect.objectContaining({
+        scraperStatus: 'waiting',
+        structuredStatus: 'running',
+        applied: false,
+      }),
     ]);
   });
 

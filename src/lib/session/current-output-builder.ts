@@ -34,11 +34,23 @@ import {
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tmux-capture-cache';
 import {
+  clearStructuredPromptWaiting,
+  corroborateStructuredPromptWaiting,
   getLastAgentEvent,
   getLastStopEventAt,
+  getStructuredPromptWaiting,
   getStructuredSessionState,
+  markStructuredPromptRecorded,
+  type StructuredPromptWaitingState,
   type StructuredSessionState,
 } from '@/lib/session/agent-event-state';
+import {
+  buildStructuredPromptData,
+  buildStructuredPromptHistoryRecord,
+  type StructuredPromptSource,
+  type StructuredPromptWaitingData,
+} from '@/lib/session/structured-prompt';
+import { HOOK_STATUS_REASON } from '@/lib/session/status-mapping';
 import type { PromptData } from '@/types/models';
 
 /**
@@ -61,6 +73,17 @@ export interface StructuredEventsPayload {
   lastEventAt: number | null;
   /** Subtype where the event has one: `permission_prompt`, `clear`, … */
   lastEventDetail: string | null;
+  /**
+   * Epoch ms the structured layer first learned a dialog was open, or null when
+   * it knows of none (Issue #1725).
+   *
+   * Diagnostic, and the one field that answers "is `isPromptWaiting` true
+   * because of the screen or because of the agent?" without guessing from
+   * `sessionStatusReason`. Null on a session that is not running.
+   */
+  promptWaitingSince: number | null;
+  /** `notification` / `permission-request`, or null. See above. */
+  promptWaitingSource: StructuredPromptSource | null;
 }
 
 export interface CurrentOutputPayload {
@@ -78,7 +101,15 @@ export interface CurrentOutputPayload {
   thinking?: boolean;
   thinkingMessage?: string | null;
   isPromptWaiting?: boolean;
-  promptData?: PromptData | null;
+  /**
+   * The prompt to answer, or null.
+   *
+   * Since Issue #1725 this is a union: either the scraper's parsed prompt, or
+   * the degraded {@link StructuredPromptWaitingData} published for a dialog only
+   * the structured layer can see. Readers that answer by option number must
+   * check `type` — the degraded form carries none, by construction.
+   */
+  promptData?: PromptData | StructuredPromptWaitingData | null;
   autoYes?: {
     enabled: boolean;
     expiresAt: number | null;
@@ -203,6 +234,71 @@ function recordUnclassifiedFrame(
   }
 }
 
+/**
+ * Write the "the agent said a dialog is open and we could not read it" row
+ * (Issue #1725, continuing #1708's proposal 2).
+ *
+ * Written once per waiting episode, and ONLY while the scraper is publishing no
+ * prompt of its own. Both halves matter:
+ *
+ *  - once, because `buildCurrentOutput` runs on every poll and a row per poll
+ *    would turn one blocked dialog into a wall of identical history;
+ *  - only when the scraper is blind, because when it is not, the existing
+ *    prompt writers already record that prompt with its options and its answer.
+ *    A second row would double-count the audit trail `capture --prompts` prints
+ *    and put a "nobody could read this" line next to the parsed prompt that
+ *    proves somebody could.
+ *
+ * So a row here means exactly one thing, which is the thing #1708 asked to be
+ * recorded: a prompt existed and the detection layer did not see it.
+ *
+ * Best effort, for the same reason as {@link recordUnclassifiedFrame}: the
+ * caller is waiting on a payload, and a failed insert must cost this row and
+ * nothing else.
+ */
+function recordStructuredPrompt(
+  db: Database.Database,
+  params: {
+    worktreeId: string;
+    cliToolId: CLIToolType;
+    instanceId: string;
+    state: StructuredPromptWaitingState;
+  },
+): void {
+  const record = buildStructuredPromptHistoryRecord(params.worktreeId, params.state);
+
+  try {
+    createMessage(db, {
+      worktreeId: params.worktreeId,
+      role: 'assistant',
+      content: record.question,
+      summary: `structured prompt · source=${params.state.source}${
+        params.state.toolName ? ` · tool=${params.state.toolName}` : ''
+      }`,
+      messageType: 'prompt',
+      // Not a PromptData: it has no options and nothing may answer it by
+      // number. The column is shared, so the cast is confined to this write —
+      // the same arrangement UnclassifiedFrameRecord uses.
+      promptData: record as unknown as PromptData,
+      timestamp: new Date(),
+      cliToolId: params.cliToolId,
+      instanceId: params.instanceId,
+    });
+    logger.info('structured-prompt-recorded', {
+      worktreeId: params.worktreeId,
+      cliToolId: params.cliToolId,
+      instanceId: params.instanceId,
+      source: params.state.source,
+      toolName: params.state.toolName,
+    });
+  } catch (error: unknown) {
+    logger.warn('structured-prompt-record-failed', {
+      worktreeId: params.worktreeId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 /** What `detectSessionStatus()` said about this frame, as this module uses it. */
 export interface ScraperVerdict {
   status: SessionStatus;
@@ -240,13 +336,17 @@ export interface MergedStatusVerdict extends ScraperVerdict {
  * the truth on screen is "waiting for a human". That is precisely the #1708
  * stall, and the scraper is the only layer that can see it.
  *
- * **A structured `waiting` is recorded, never applied.** `Notification(
- * permission_prompt)` maps to `waiting`, and this Issue stops at recording it:
- * promoting it is #1725's job, together with the `promptData` that would have
- * to come with it. There is a second reason to hold back — nothing marks a
- * permission prompt as *answered*. Claude emits no event when the dialog is
- * dismissed, so an applied `waiting` would stick until the next `Stop` and
- * describe a session that went back to work minutes ago.
+ * **A structured `waiting` is applied only through the prompt-waiting state**
+ * (Issue #1725). #1723 recorded `Notification(permission_prompt)` and stopped
+ * there, for a reason that had to be answered before it could be promoted:
+ * nothing marks a permission prompt as *answered*, so a verdict read off the
+ * last event alone would stick until the next `Stop` and describe a session
+ * that went back to work minutes ago. `getStructuredPromptWaiting` is that
+ * answer — it is released by `Stop` / `user_prompt_submit` / a generation
+ * change, by the scraper reporting the frame it corroborated has cleared, and
+ * by expiry. So the `waiting` promoted here is the one that survives all of
+ * those, passed in explicitly; the raw `structured.status === 'waiting'` still
+ * decides nothing on its own.
  *
  * ## The one flag this touches beyond `sessionStatus`
  *
@@ -272,12 +372,32 @@ export interface MergedStatusVerdict extends ScraperVerdict {
 export function mergeStructuredStatus(
   scraper: ScraperVerdict,
   structured: StructuredSessionState | null,
+  promptWaiting: StructuredPromptWaitingState | null = null,
 ): MergedStatusVerdict {
-  if (
-    structured === null ||
-    scraper.status === 'waiting' ||
-    structured.status === 'waiting'
-  ) {
+  if (scraper.status === 'waiting') {
+    return { ...scraper, structuredApplied: false };
+  }
+
+  // Issue #1725, the OR rule at the status level: the scraper reads this frame
+  // as running or ready, and the agent has told us a dialog is in front of it.
+  // Publishing `running` next to `isPromptWaiting: true` would be a payload
+  // that contradicts itself, and every consumer of `sessionStatus` — the
+  // sidebar dot, `deriveSessionStatus`, the worktrees API — would show a worker
+  // that needs a human as one that is busy.
+  if (promptWaiting !== null) {
+    return {
+      status: 'waiting',
+      reason:
+        promptWaiting.source === 'notification'
+          ? HOOK_STATUS_REASON.PERMISSION_PROMPT
+          : HOOK_STATUS_REASON.PERMISSION_REQUEST,
+      thinking: false,
+      isUnclassifiedActive: scraper.isUnclassifiedActive,
+      structuredApplied: true,
+    };
+  }
+
+  if (structured === null || structured.status === 'waiting') {
     return { ...scraper, structuredApplied: false };
   }
 
@@ -318,6 +438,8 @@ export async function buildCurrentOutput(
     lastEventType: lastEvent?.event ?? null,
     lastEventAt: lastEvent?.at ?? null,
     lastEventDetail: lastEvent?.detail ?? null,
+    promptWaitingSince: null,
+    promptWaitingSource: null,
   };
 
   const running = await cliTool.isRunning(worktreeId, instanceId);
@@ -365,7 +487,7 @@ export async function buildCurrentOutput(
 
   const statusResult = detectSessionStatus(output, cliToolId, lastOutputTimestamp);
   const thinking = statusResult.status === 'running' && statusResult.reason === STATUS_REASON.THINKING_INDICATOR;
-  const isPromptWaiting = statusResult.hasActivePrompt;
+  const scraperPromptWaiting = statusResult.hasActivePrompt;
   const isSelectionListActive =
     statusResult.status === 'waiting' && SELECTION_LIST_REASONS.has(statusResult.reason);
   const isPagerActive = statusResult.reason === STATUS_REASON.CODEX_PAGER;
@@ -386,10 +508,57 @@ export async function buildCurrentOutput(
   // ever fires — `getStructuredSessionState` answers null there, and
   // `mergeStructuredStatus` then returns the scraper's verdict untouched.
   const structured = getStructuredSessionState(worktreeId, cliToolId, instanceId);
+
+  // Issue #1725: the open-dialog half of the same merge, resolved before the
+  // status merge because it decides one of its inputs.
+  //
+  // The release rule is asymmetric on purpose. The scraper is allowed to say
+  // "that prompt is gone" only about a prompt it once saw, because the case
+  // this whole Issue exists for is the scraper being BLIND to the dialog: if
+  // "the scraper reports no prompt" released the state on its own, the
+  // structured layer would be silenced in exactly the situation it was added
+  // for, and the payload would go back to the #1708 stall. So a frame the
+  // scraper reads as `waiting` arms the release (and confirms a provisional
+  // record), and only after that does a non-waiting frame clear it.
+  //
+  // This is also what the push/pull timing demands. The structured fact arrives
+  // over HTTP the moment the agent posts it, while the scraper reads a pane
+  // through a 5 s capture cache (`CACHE_TTL_MS`), so "the event is here and the
+  // scraper has not seen the dialog yet" is a state that always exists — and
+  // under a rule that let the scraper's silence win, that state would be a lost
+  // detection every single time.
+  let promptWaiting = getStructuredPromptWaiting(worktreeId, cliToolId, instanceId);
+  if (promptWaiting !== null) {
+    if (statusResult.status === 'waiting') {
+      corroborateStructuredPromptWaiting(worktreeId, cliToolId, instanceId);
+    } else if (promptWaiting.scraperCorroborated) {
+      clearStructuredPromptWaiting(worktreeId, cliToolId, instanceId);
+      promptWaiting = null;
+    }
+  }
+  if (promptWaiting !== null) {
+    structuredEvents.promptWaitingSince = promptWaiting.at;
+    structuredEvents.promptWaitingSource = promptWaiting.source;
+  }
+
   const merged = mergeStructuredStatus(
     { status: statusResult.status, reason: statusResult.reason, thinking, isUnclassifiedActive },
     structured,
+    promptWaiting,
   );
+
+  // The OR rule, stated once: either layer seeing a prompt is a prompt. Neither
+  // false may cancel the other's true — the structured layer is blind to the
+  // AskUserQuestion screens (#1721 §5.6) and the scraper is blind to whatever
+  // the next Claude release renders differently, and the whole point of running
+  // two layers is that a gap in one is covered by the other.
+  const isPromptWaiting = scraperPromptWaiting || promptWaiting !== null;
+  const promptData: PromptData | StructuredPromptWaitingData | null = scraperPromptWaiting
+    ? statusResult.promptDetection.promptData ??
+      (promptWaiting ? buildStructuredPromptData(worktreeId, promptWaiting) : null)
+    : promptWaiting
+      ? buildStructuredPromptData(worktreeId, promptWaiting)
+      : null;
 
   // Issue #1723 §3: the field data this Epic is being built on. Every line is
   // one poll where the screen and the agent disagreed about what the agent was
@@ -440,6 +609,18 @@ export async function buildCurrentOutput(
     });
   }
 
+  // Issue #1725: the structured layer saw a dialog the scraper did not. That
+  // gap is the fact worth keeping — see recordStructuredPrompt.
+  if (promptWaiting !== null && !scraperPromptWaiting && !promptWaiting.recorded) {
+    markStructuredPromptRecorded(worktreeId, cliToolId, instanceId);
+    recordStructuredPrompt(db, {
+      worktreeId,
+      cliToolId,
+      instanceId: resolvedInstanceId,
+      state: promptWaiting,
+    });
+  }
+
   const realtimeSnippet = lines.slice(-100).join('\n');
   const autoYesState = getAutoYesState(worktreeId, cliToolId, instanceId);
 
@@ -458,7 +639,7 @@ export async function buildCurrentOutput(
     thinking: merged.thinking,
     thinkingMessage: merged.thinking ? 'Claude is thinking...' : null,
     isPromptWaiting,
-    promptData: isPromptWaiting ? statusResult.promptDetection.promptData ?? null : null,
+    promptData,
     autoYes: {
       enabled: autoYesState?.enabled ?? false,
       expiresAt: autoYesState?.enabled ? autoYesState.expiresAt : null,

@@ -154,6 +154,14 @@ export interface CurrentOutputResponse {
     lastEventType: string | null;
     lastEventAt: number | null;
     lastEventDetail: string | null;
+    /**
+     * Epoch ms the structured layer first learned a dialog was open, or null
+     * (Issue #1725). Non-null together with `isPromptWaiting` is how a caller
+     * tells "the agent told us" from "the screen told us".
+     */
+    promptWaitingSince?: number | null;
+    /** `notification` / `permission-request`, or null (Issue #1725). */
+    promptWaitingSource?: string | null;
   };
 }
 

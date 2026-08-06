@@ -49,6 +49,10 @@ import {
   type PermissionRequestSession,
 } from '@/lib/hooks/permission-decision-service';
 import type { AutoYesPolicy } from '@/lib/polling/auto-yes-resolver';
+import {
+  clearAgentStopEvents,
+  getStructuredPromptWaiting,
+} from '@/lib/session/agent-event-state';
 
 const FIXTURE_DIR = join(process.cwd(), 'tests/fixtures/hooks/claude');
 
@@ -454,5 +458,104 @@ describe('recording the verdict', () => {
 
     expect(resolvePermissionRequest(SESSION, bash('ls')).behavior).toBe('allow');
     expect(created).toEqual([]);
+  });
+});
+
+/**
+ * Issue #1725: a no-decision is a prediction that a dialog is about to appear.
+ *
+ * D5 measured `{}` landing back in the ordinary TUI approval flow, which is the
+ * same statement read forwards: whenever this service declines to decide, a
+ * human is about to be asked. That is ~6 seconds before
+ * `Notification(permission_prompt)` announces the same dialog, and it is the
+ * earliest anything here can know.
+ *
+ * The control cases matter more than the positive one. "Always reports a
+ * dialog" would pass a suite that only checks the no-decision branches, and the
+ * cost of a false report is a `wait --on-prompt agent` that exits 10 on a
+ * session nobody is blocking.
+ */
+describe('reporting the dialog a no-decision produces (Issue #1725)', () => {
+  beforeEach(() => {
+    clearAgentStopEvents();
+  });
+
+  function reported() {
+    return getStructuredPromptWaiting(SESSION.worktreeId, SESSION.cliToolId, SESSION.instanceId);
+  }
+
+  it('reports one when Auto-Yes is off', async () => {
+    resolvePermissionRequest(SESSION, bash('npm test'));
+
+    expect(reported()).toMatchObject({
+      source: 'permission-request',
+      toolName: 'Bash',
+      // A prediction, not an observation: it expires unless something
+      // corroborates it.
+      confirmedAt: null,
+    });
+  });
+
+  it('reports one when a contract policy withheld the approval', async () => {
+    enableAutoYes();
+    policy = makePolicy({ denyPatterns: ['rm -rf'] });
+
+    resolvePermissionRequest(SESSION, bash('rm -rf /tmp/x'));
+
+    expect(reported()).not.toBeNull();
+  });
+
+  it('reports one for an unreadable payload', async () => {
+    resolvePermissionRequest(SESSION, null);
+
+    expect(reported()).toMatchObject({ source: 'permission-request', toolName: null });
+  });
+
+  it('reports one for AskUserQuestion, which also draws a screen', async () => {
+    // Allowing it does not dismiss the picker (§5.6), so a no-decision here is
+    // followed by a screen a human must act on just the same. What is not
+    // claimed is that it survives: nothing about that screen emits events, so
+    // unless the scraper corroborates it the record expires.
+    enableAutoYes();
+
+    resolvePermissionRequest(SESSION, request('AskUserQuestion', { questions: [] }));
+
+    expect(reported()).not.toBeNull();
+  });
+
+  it('reports nothing when it answered `allow`', async () => {
+    // No dialog is drawn at all, so there is nothing for a human to answer.
+    enableAutoYes();
+
+    const decision = resolvePermissionRequest(SESSION, bash('npm test'));
+
+    expect(decision.behavior).toBe('allow');
+    expect(reported()).toBeNull();
+  });
+
+  it('reports nothing in bypassPermissions mode', async () => {
+    // Claude's "do not ask me" mode: if the hook fires there at all, the agent
+    // answers its own question and no human is ever blocked. Whether it fires
+    // was not measured by the #1721 spike, so the mode is checked rather than
+    // assumed.
+    const payload = parsePermissionRequestPayload({
+      ...(fixture('permission-request.json') as Record<string, unknown>),
+      permission_mode: 'bypassPermissions',
+    });
+
+    resolvePermissionRequest(SESSION, payload);
+
+    expect(reported()).toBeNull();
+  });
+
+  it('still reports one in the modes that do draw dialogs', async () => {
+    const payload = parsePermissionRequestPayload({
+      ...(fixture('permission-request.json') as Record<string, unknown>),
+      permission_mode: 'acceptEdits',
+    });
+
+    resolvePermissionRequest(SESSION, payload);
+
+    expect(reported()).not.toBeNull();
   });
 });

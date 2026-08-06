@@ -11,6 +11,8 @@
 import { memo, useState, useCallback, useId, useMemo } from 'react';
 import { useTranslations } from 'next-intl';
 import type { PromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
+import { UNCLASSIFIED_PROMPT_TYPE } from '@/types/models';
+import type { StructuredPromptWaitingData } from '@/lib/session/structured-prompt';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { RadioGroup, RadioGroupItem, Button, Spinner } from '@/components/ui';
 import { usePromptAnimation } from '@/hooks/usePromptAnimation';
@@ -34,9 +36,20 @@ const BUTTON_SECONDARY_STYLES = 'bg-surface border-2 border-input hover:bg-muted
 /**
  * Props for PromptPanel component
  */
+/**
+ * What the panel may be handed (Issue #1725).
+ *
+ * The second member is the degraded form published for a dialog only the
+ * structured layer can see: the agent said one is open, and nothing parsed its
+ * options. Widening the prop rather than the app-wide `PromptData` union is
+ * deliberate — see the `UNCLASSIFIED_PROMPT_TYPE` note in `types/models.ts` for
+ * why that union stays closed to values nothing may answer by option number.
+ */
+export type PanelPromptData = PromptData | StructuredPromptWaitingData;
+
 export interface PromptPanelProps {
   /** Prompt data (question, options, etc.) */
-  promptData: PromptData | null;
+  promptData: PanelPromptData | null;
   /** Associated message ID */
   messageId: string | null;
   /** Whether the panel is visible */
@@ -53,7 +66,7 @@ export interface PromptPanelProps {
 
 /** Props for PromptPanelContent component */
 interface PromptPanelContentProps {
-  promptData: PromptData;
+  promptData: PanelPromptData;
   answering: boolean;
   onRespond: (answer: string) => Promise<void>;
   onDismiss?: () => void;
@@ -150,15 +163,23 @@ function PromptPanelContent({
         )}
       </div>
 
-      {/* Instruction Text (context preceding the prompt) */}
-      {promptData.instructionText && (
+      {/* Instruction Text (context preceding the prompt). Issue #1725: the
+          structured form has none — it is built from a Notification payload,
+          not from a pane, so there is no scrollback to show. */}
+      {promptData.type !== UNCLASSIFIED_PROMPT_TYPE && promptData.instructionText && (
         <div className="max-h-40 overflow-y-auto whitespace-pre-wrap text-sm text-muted-foreground bg-muted rounded p-2 border border-border">
           {promptData.instructionText}
         </div>
       )}
 
-      {/* Question */}
-      <p className="text-foreground leading-relaxed">{promptData.question}</p>
+      {/* Question. Issue #1725: the structured form's `question` is a server-side
+          English one-liner built for `wait` / `capture`; the panel says the same
+          thing in the user's locale instead. */}
+      <p className="text-foreground leading-relaxed">
+        {promptData.type === UNCLASSIFIED_PROMPT_TYPE
+          ? t('unclassifiedTitle')
+          : promptData.question}
+      </p>
 
       {/* Answering indicator */}
       {isDisabled && (
@@ -191,6 +212,45 @@ function PromptPanelContent({
           onSubmit={handleMultipleChoiceSubmit}
         />
       )}
+
+      {/* Issue #1725: a dialog the structured layer reported and nobody parsed */}
+      {promptData.type === UNCLASSIFIED_PROMPT_TYPE && (
+        <UnclassifiedPromptNotice promptData={promptData} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The degraded rendering for a dialog only the structured layer can see
+ * (Issue #1725).
+ *
+ * There is nothing to click, and that is the honest state of the world: the
+ * agent's `Notification` says a dialog is open and carries no options (#1721
+ * §5.5), so any button drawn here would be a guess about which key it sends.
+ * What the panel can do instead is stop the session looking idle and say where
+ * the answer has to go.
+ *
+ * The instruction names the option NUMBER on purpose. `respond <id> yes` is not
+ * resolved semantically on a numbered dialog — Enter takes the highlighted
+ * default, so a "no" can be delivered as an approval (Issue #1681). Telling the
+ * user "answer it" without telling them how would walk them into that.
+ */
+function UnclassifiedPromptNotice({
+  promptData,
+}: {
+  promptData: StructuredPromptWaitingData;
+}) {
+  const t = useTranslations('prompt');
+
+  return (
+    <div className="space-y-2" data-testid="unclassified-prompt-notice">
+      {promptData.message && (
+        <p className="text-sm text-muted-foreground">{promptData.message}</p>
+      )}
+      <p className="text-sm text-foreground">
+        {t('unclassifiedInstruction', { command: t('unclassifiedRespondCommand') })}
+      </p>
     </div>
   );
 }
