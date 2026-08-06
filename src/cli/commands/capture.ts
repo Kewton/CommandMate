@@ -29,6 +29,14 @@ import { squeezeTranscript } from '../../lib/tmux/transcript-squeeze';
  */
 const PANE_CAPTURE_LINES = 1000;
 
+/**
+ * `promptData.type` the server writes for a frame the detection layer could not
+ * classify (Issue #1708). Mirrors UNCLASSIFIED_PROMPT_TYPE in
+ * src/types/models.ts; duplicated rather than imported because the CLI bundle
+ * keeps its own copy of the API shapes (see api-responses.ts).
+ */
+const UNCLASSIFIED_FRAME_TYPE = 'unclassified';
+
 /** Response of POST /api/worktrees/[id]/capture. */
 interface PaneCaptureResponse {
   output: string;
@@ -183,9 +191,16 @@ async function capturePrompts(worktreeId: string, options: CaptureOptions): Prom
   const blocks = prompts.map((m) => {
     const p = m.promptData!;
     const answered = p.status === 'answered';
-    const header = `${m.timestamp}  ${m.cliToolId ?? '-'}/${m.instanceId ?? '-'}  [${
-      answered ? `answered:${p.answeredBy ?? 'unknown'}` : 'pending'
-    }]`;
+    // Issue #1708: a row recording that detection FAILED must not read as a
+    // prompt that was seen and is merely unanswered — that reading is what would
+    // send an operator looking for an answer path that never existed.
+    const unclassified = p.type === UNCLASSIFIED_FRAME_TYPE;
+    const state = unclassified
+      ? 'unclassified:detection-failed'
+      : answered
+        ? `answered:${p.answeredBy ?? 'unknown'}`
+        : 'pending';
+    const header = `${m.timestamp}  ${m.cliToolId ?? '-'}/${m.instanceId ?? '-'}  [${state}]`;
     const lines = [header, `  Q: ${p.question}`];
     if (Array.isArray(p.options) && p.options.length > 0) {
       lines.push(`  options: ${p.options.map(formatPromptOption).join('  ')}`);

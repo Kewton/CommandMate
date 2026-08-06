@@ -179,3 +179,63 @@ describe('capture --prompts flag validation', () => {
     expect(mockExit).toHaveBeenCalledWith(2);
   });
 });
+
+// Issue #1708: rows recording that DETECTION FAILED share the prompt history
+// with prompts that were detected. The listing has to keep them apart — a
+// detection failure rendered as `[pending]` reads as "a prompt is waiting for an
+// answer", which sends an operator looking for an answer path that never existed.
+describe('capture --prompts renders unclassified frames distinctly (Issue #1708)', () => {
+  const unclassifiedMessage = {
+    id: 'msg-unclassified',
+    worktreeId: 'wt1',
+    role: 'assistant',
+    content: 'Unclassified interactive frame',
+    timestamp: '2026-08-06T12:00:00.000Z',
+    messageType: 'prompt',
+    promptData: {
+      type: 'unclassified',
+      question:
+        'Unclassified interactive frame (running/default) held for 60s. ' +
+        'Inspect the raw pane with `commandmate capture wt1 --pane`.',
+      options: [],
+      status: 'unclassified',
+      dwellSeconds: 60,
+      sessionStatusReason: 'running/default',
+    },
+    cliToolId: 'claude',
+    instanceId: 'claude',
+    archived: false,
+  };
+
+  it('labels the row as a detection failure, not as pending', async () => {
+    mockFetchResponse([unclassifiedMessage]);
+    await runCapture(['wt1', '--prompts']);
+
+    const printed = mockConsoleLog.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(printed).toContain('[unclassified:detection-failed]');
+    expect(printed).not.toContain('[pending]');
+    expect(printed).toContain('capture wt1 --pane');
+  });
+
+  it('still labels a genuinely unanswered prompt as pending', async () => {
+    // The other half of the distinction: the marker must not leak onto real
+    // prompts, or every unanswered prompt would read as a detector bug.
+    mockFetchResponse(samplePromptMessages);
+    await runCapture(['wt1', '--prompts']);
+
+    const printed = mockConsoleLog.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(printed).toContain('[pending]');
+    expect(printed).not.toContain('[unclassified:detection-failed]');
+  });
+
+  it('carries the type and status through --json for machine readers', async () => {
+    mockFetchResponse([unclassifiedMessage]);
+    await runCapture(['wt1', '--prompts', '--json']);
+
+    const parsed = JSON.parse(String(mockConsoleLog.mock.calls[0][0]));
+    expect(parsed.prompts[0]).toMatchObject({
+      type: 'unclassified',
+      status: 'unclassified',
+    });
+  });
+});

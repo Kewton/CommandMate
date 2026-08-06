@@ -67,6 +67,17 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     --stop-pattern <p>     Auto-yes stop condition (regex; matches terminal output,
                            cannot block commands -- see auto-yes below)
 
+  Refused while the agent is waiting on a prompt (exit 2). Keystrokes sent to
+  an open dialog never reach the agent -- they pile up in the dialog's own
+  input line, and the next respond then carries that text along as a message
+  instead of an answer. Nudging a stalled worker is how this gets worse.
+  Answer first: commandmate respond <id> <answer>. respond, special keys and
+  prompt-response are never refused -- they are the way out. Timer-fired sends
+  ARE refused (same service layer) and record [prompt_waiting] as their reason.
+  The refusal only fires where the prompt IS detected; a frame that slips past
+  detection is wait's "unclassified" case instead. It fails open if the pane
+  cannot be read, so treat it as a narrowing, not a guarantee.
+
   Finding worktree IDs:
     WT=$(commandmate ls --branch feature/101 --quiet)
     WT=$(commandmate ls --id anvil- --quiet)   # disambiguate by repo (id prefix)
@@ -106,6 +117,18 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     The payload IS the prompt -- read it from stdout before falling back to
     capture. For type "selection_list", options is empty by design and the
     question field carries the reason.
+
+    Three "type" values share exit 10; only the first is answerable with
+    respond:
+      yes_no / multiple_choice  a parsed prompt        -> commandmate respond
+      selection_list            arrow-key menu         -> special keys
+      unclassified              the frame is interactive but detection could
+                                not parse it, and it has stayed that way for
+                                60s -> look at the pane: capture <id> --pane
+    "unclassified" exists because a frame that slips past detection disables
+    auto-yes, the contract's autoYes policy and this exit 10 all at once. It
+    needs the dwell: a capture taken mid-repaint can raise the flag once.
+    --on-prompt human keeps waiting for it, same as the other two.
 
   --verify turns "the agent stopped" into "the work passes the repository's own
   checks". Verification only runs when completion was detected: a prompt (10) or

@@ -107,6 +107,17 @@ export interface CurrentOutputResponse {
   isSelectionListActive: boolean;
   /** Issue #1017: Codex pager/edit-previous mode (subset of isSelectionListActive). */
   isPagerActive?: boolean;
+  /**
+   * The frame is interactive but the detection layer could not classify it
+   * (Issue #1497). The server has published this since #1120; until Issue #1708
+   * the CLI never read it, so a dialog the scraper failed to parse was treated
+   * as "nothing is happening" and `wait` polled it until --timeout.
+   *
+   * Momentary by nature — a repaint mid-capture can raise it for a single poll —
+   * so it is only a stop reason after it has persisted; see
+   * UNCLASSIFIED_DWELL_MS in wait.ts.
+   */
+  isUnclassifiedActive?: boolean;
   lastServerResponseTimestamp: number | null;
   serverPollerActive: boolean;
   /** Issue #520: Session status from detectSessionStatus() */
