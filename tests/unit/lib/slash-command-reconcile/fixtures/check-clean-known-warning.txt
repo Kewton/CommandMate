@@ -1,0 +1,14 @@
+
+> commandmate@0.21.4 catalog:refresh
+> tsx scripts/refresh-slash-command-catalog.ts --check
+
+
+Slash-command catalog reconcile
+================================
+
+Warnings (fail-soft — affected sources left untouched):
+  ! antigravity provider not implemented yet (Issue #1489 Phase 2)
+
+No new commands to add.
+
+(check mode — no files written; run with --write to apply)

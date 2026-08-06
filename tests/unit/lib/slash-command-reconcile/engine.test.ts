@@ -265,7 +265,13 @@ describe('reconcileCatalog — active/canonical filter', () => {
     );
   });
 
-  it('refuses to let one tool\'s description win an i18n key another tool shares', () => {
+  // Issue #1704 changes the resolution of this conflict. Issue #1603 refused to
+  // let either sentence win the shared key and downgraded it to a placeholder —
+  // which is *why* v0.21.2 shipped six commands whose description was their own
+  // name ("/btw — btw"). The invariant that mattered is unchanged (no tool's
+  // sentence is shipped under a key another tool shares); what changes is that
+  // the key is now split per tool so both sentences survive.
+  it("splits the i18n key per tool when two tools disagree about a command", () => {
     const claudeSide: ProviderResult = {
       tool: 'claude',
       ok: true,
@@ -280,19 +286,44 @@ describe('reconcileCatalog — active/canonical filter', () => {
     };
     const result = reconcileCatalog(baseCatalog(), [claudeSide, codexSide]);
 
-    const locale = result.localeAdditions.filter(
-      (l) => l.key === 'slashCommands.descriptions.vim'
-    );
-    expect(locale).toHaveLength(1);
-    // Neither sentence is shipped under the shared key.
-    expect(locale[0]).toEqual({
-      key: 'slashCommands.descriptions.vim',
-      en: 'vim',
-      ja: '[要レビュー] vim',
-    });
-    expect(result.notices.find((n) => n.category === 'description-conflict')?.name).toBe('vim');
-    // Both tools still get their catalog entry.
-    expect(result.catalog.commands.filter((c) => c.name === 'vim')).toHaveLength(2);
+    // Nothing is written under the shared key any more.
+    expect(
+      result.localeAdditions.filter((l) => l.key === 'slashCommands.descriptions.vim')
+    ).toEqual([]);
+    expect(result.localeAdditions.filter((l) => l.key.startsWith('slashCommands.descriptions.vim')))
+      .toEqual([
+        {
+          key: 'slashCommands.descriptions.vim.claude',
+          en: 'Enter Vim mode',
+          ja: '[要レビュー] Enter Vim mode',
+        },
+        {
+          key: 'slashCommands.descriptions.vim.codex',
+          en: 'toggle vim keybindings in the composer',
+          ja: '[要レビュー] toggle vim keybindings in the composer',
+        },
+      ]);
+
+    // Both catalog entries point at their own key — including the one that was
+    // already pushed before the disagreement was discovered.
+    expect(
+      result.catalog.commands
+        .filter((c) => c.name === 'vim')
+        .map((c) => [c.cliTools, c.descriptionKey])
+    ).toEqual([
+      [['claude'], 'slashCommands.descriptions.vim.claude'],
+      [['codex'], 'slashCommands.descriptions.vim.codex'],
+    ]);
+    // The reported diff carries the same keys, so --check does not describe a
+    // different catalog than --write would produce.
+    expect(result.diff.added.filter((a) => a.name === 'vim').map((a) => a.descriptionKey)).toEqual([
+      'slashCommands.descriptions.vim.claude',
+      'slashCommands.descriptions.vim.codex',
+    ]);
+
+    const conflict = result.notices.find((n) => n.category === 'description-conflict');
+    expect(conflict?.name).toBe('vim');
+    expect(conflict?.message).toContain('per-tool keys');
   });
 
   it('reports one conflict per key, not one per extra tool', () => {
@@ -304,6 +335,168 @@ describe('reconcileCatalog — active/canonical filter', () => {
     }));
     const result = reconcileCatalog(baseCatalog(), three);
     expect(result.notices.filter((n) => n.category === 'description-conflict')).toHaveLength(1);
+    // Once contested, every tool keeps its own key — including the third one,
+    // which arrives after the split was already decided.
+    expect(result.localeAdditions.map((l) => l.key)).toEqual([
+      'slashCommands.descriptions.vim.claude',
+      'slashCommands.descriptions.vim.codex',
+      'slashCommands.descriptions.vim.antigravity',
+    ]);
+  });
+
+  it('keeps one shared key when tools agree, so the norm is still a single description', () => {
+    const sides: ProviderResult[] = ['claude', 'codex'].map((tool) => ({
+      tool,
+      ok: true,
+      commands: [{ name: 'theme', description: 'Choose the color theme' }],
+      warnings: [],
+    }));
+    const result = reconcileCatalog(baseCatalog(), sides);
+
+    expect(result.localeAdditions).toEqual([
+      {
+        key: 'slashCommands.descriptions.theme',
+        en: 'Choose the color theme',
+        ja: '[要レビュー] Choose the color theme',
+      },
+    ]);
+    expect(
+      result.catalog.commands.filter((c) => c.name === 'theme').map((c) => c.descriptionKey)
+    ).toEqual(['slashCommands.descriptions.theme', 'slashCommands.descriptions.theme']);
+    expect(result.notices.filter((n) => n.category === 'description-conflict')).toEqual([]);
+  });
+
+  it('does not split a key that a previous release already translated', () => {
+    // `loop` is in baseCatalog(), so its dictionary entry exists and carries a
+    // human ja translation. Splitting would orphan it with nothing to replace
+    // it, so the engine reports the disagreement instead of acting on it.
+    const codexSide: ProviderResult = {
+      tool: 'codex',
+      ok: true,
+      commands: [{ name: 'loop', description: 'repeat the last turn' }],
+      warnings: [],
+    };
+    const antigravitySide: ProviderResult = {
+      tool: 'antigravity',
+      ok: true,
+      commands: [{ name: 'loop', description: 'Run a prompt on a schedule' }],
+      warnings: [],
+    };
+    const result = reconcileCatalog(baseCatalog(), [codexSide, antigravitySide]);
+
+    expect(result.localeAdditions).toEqual([]);
+    expect(
+      result.catalog.commands.filter((c) => c.name === 'loop').map((c) => c.descriptionKey)
+    ).toEqual([
+      'slashCommands.descriptions.loop',
+      'slashCommands.descriptions.loop',
+      'slashCommands.descriptions.loop',
+    ]);
+    const conflict = result.notices.find((n) => n.category === 'description-conflict');
+    expect(conflict?.name).toBe('loop');
+    expect(conflict?.message).toContain('already translated');
+  });
+
+  // Issue #1704: the case measured on the live sources. Adding claude's /agents
+  // makes it inherit `slashCommands.descriptions.agents`, written for opencode
+  // ("List and manage available agents") — a description that is simply wrong
+  // for claude. No locale string is written, so before #1704 nothing in the
+  // report mentioned it at all.
+  describe('a new entry inheriting a key an earlier release already shipped', () => {
+    function catalogWithOpencodeAgents(): SlashCommandsCatalog {
+      const catalog = baseCatalog();
+      catalog.commands.push({
+        name: 'agents',
+        descriptionKey: 'slashCommands.descriptions.agents',
+        category: 'standard-util',
+        cliTools: ['opencode'],
+        isStandard: true,
+        source: 'standard',
+      });
+      return catalog;
+    }
+    // exclusions: [] below — /agents is the one command deliberately left off
+    // the curation list (Issue #1704), so these must not change meaning if that
+    // decision is ever settled.
+    const claudeAgents: ProviderResult = {
+      tool: 'claude',
+      ok: true,
+      commands: [{ name: 'agents', description: 'Prints a reminder to ask Claude instead' }],
+      warnings: [],
+    };
+
+    it('reports the inherited description and names the key to split to', () => {
+      const result = reconcileCatalog(catalogWithOpencodeAgents(), [claudeAgents], {
+        exclusions: [],
+        existingEnDescriptions: {
+          'slashCommands.descriptions.agents': 'List and manage available agents',
+        },
+      });
+
+      const conflict = result.notices.find((n) => n.category === 'description-conflict');
+      expect(conflict?.name).toBe('agents');
+      expect(conflict?.tool).toBe('claude');
+      expect(conflict?.message).toContain('List and manage available agents');
+      expect(conflict?.message).toContain('slashCommands.descriptions.agents.claude');
+
+      // Reporting only: nothing is rewritten, because splitting here would
+      // orphan the shipped ja translation with no replacement.
+      expect(result.localeAdditions).toEqual([]);
+      expect(
+        result.catalog.commands.filter((c) => c.name === 'agents').map((c) => c.descriptionKey)
+      ).toEqual(['slashCommands.descriptions.agents', 'slashCommands.descriptions.agents']);
+    });
+
+    it('stays quiet when the tools actually agree', () => {
+      const result = reconcileCatalog(catalogWithOpencodeAgents(), [claudeAgents], {
+        exclusions: [],
+        existingEnDescriptions: {
+          'slashCommands.descriptions.agents': 'Prints a reminder to ask Claude instead',
+        },
+      });
+      expect(result.notices.filter((n) => n.category === 'description-conflict')).toEqual([]);
+    });
+
+    it('stays quiet when the shipped text is unknown to the caller', () => {
+      const result = reconcileCatalog(catalogWithOpencodeAgents(), [claudeAgents], {
+        exclusions: [],
+      });
+      expect(result.notices.filter((n) => n.category === 'description-conflict')).toEqual([]);
+    });
+  });
+
+  // Issue #1704: an override is a value the catalog owns, not something the
+  // engine re-derives. A refresh must leave an existing tool-scoped key alone.
+  it('preserves a tool-scoped descriptionKey already recorded in the catalog', () => {
+    const catalog = baseCatalog();
+    catalog.commands.push({
+      name: 'btw',
+      descriptionKey: 'slashCommands.descriptions.btw.claude',
+      category: 'standard-util',
+      cliTools: ['claude'],
+      isStandard: true,
+      source: 'standard',
+    });
+    const claudeSide: ProviderResult = {
+      tool: 'claude',
+      ok: true,
+      commands: [{ name: 'btw', description: 'Ask a quick side question' }],
+      warnings: [],
+    };
+    const result = reconcileCatalog(catalog, [claudeSide]);
+
+    expect(result.catalog.commands.filter((c) => c.name === 'btw')).toEqual([
+      {
+        name: 'btw',
+        descriptionKey: 'slashCommands.descriptions.btw.claude',
+        category: 'standard-util',
+        cliTools: ['claude'],
+        isStandard: true,
+        source: 'standard',
+      },
+    ]);
+    expect(result.diff.added.some((a) => a.name === 'btw')).toBe(false);
+    expect(result.localeAdditions).toEqual([]);
   });
 });
 

@@ -1,0 +1,189 @@
+name: Slash-command catalog drift
+
+# Issue #1705: weekly drift watch for src/config/slash-commands-catalog.json.
+#
+# Why this exists: the catalog was not reconciled between #1503 and v0.21.2, and
+# the first `--check` after that gap reported 104 missing commands (~1,200 lines
+# of diff, all of it needing translation). Nothing was broken — nobody was
+# running the command. Three commands is ten minutes of work; 104 is days.
+#
+# Design constraints that are easy to get wrong:
+#
+# 1. THE EXIT CODE CARRIES NO SIGNAL. `catalog:refresh -- --check` is fail-soft
+#    and exits 0 whether it found 104 new commands or could not reach a single
+#    source (measured again on this branch: 3 new commands, exit 0). A
+#    `if: failure()` gate here would never fire, ever. So we capture the
+#    transcript and parse it — see scripts/catalog-drift-report.ts, whose parser
+#    lives in src/lib/slash-command-reconcile/check-report.ts and is unit-tested
+#    against real captured output.
+#
+# 2. "0 NEW" AND "COULD NOT CHECK" ARE DIFFERENT ANSWERS. When a source is
+#    unreachable or changes shape, the reconcile leaves that source's entries
+#    untouched, prints a warning, and still exits 0 with "No new commands to
+#    add." Read naively that is a green run for as long as the upstream is down.
+#    So warnings are classified:
+#
+#      ignored (known permanent state, does NOT make a run inconclusive)
+#        - "antigravity provider not implemented yet …" — providers/antigravity.ts
+#          returns this on every single run until Issue #1489 Phase 2 lands.
+#          If this alone made runs inconclusive, every run would be inconclusive
+#          and the workflow would be noise. Matched by PREFIX, never by
+#          "contains antigravity": once the provider is implemented, its real
+#          failures read "http 404 for …" / "fetch failed for …" / "parsed to
+#          zero commands", none of which match, so they block as they should.
+#
+#      blocking (→ status "inconclusive", issue is NOT closed)
+#        - everything else: "http <status> for …", "fetch failed for …",
+#          "url not allowed: …", "response too large …", "claude docs parsed to
+#          zero commands (format drift?)", "codex enum parsed to zero commands
+#          at <tag> (format drift?)", "could not resolve a codex release tag",
+#          "<tool> provider skipped".
+#          All of them mean a source was never actually compared, so "0 new" is
+#          unproven rather than good news.
+#
+#      Structural failures are blocking too: a non-zero exit code, a missing
+#      report header/footer, or a "New commands (N)" count that disagrees with
+#      the rows printed under it. A format change fails loud instead of quietly
+#      reporting zero.
+#
+# 3. ONE TRACKING ISSUE, UPDATED IN PLACE. A fresh issue every Monday is noise
+#    nobody reads within a month. Reusing one issue makes the trend legible
+#    ("12 last week → 15 now") and lets the count in the title apply pressure.
+#    The issue is found by its label, reopened if it was closed, and only closed
+#    when a run is both drift-free AND conclusive.
+#
+# 4. THIS WORKFLOW NEVER BLOCKS ANYBODY. It is schedule/dispatch only, touches
+#    no PR check, and stays green even when it finds drift — the tracking issue
+#    is the channel, so a red run would just train people to ignore it.
+
+on:
+  schedule:
+    # Mondays 07:10 JST (Sundays 22:10 UTC). Weekly is enough: the failure mode
+    # is slow accumulation, not a sudden break.
+    - cron: '10 22 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read # actions/checkout only
+  issues: write # create / update / close the single tracking issue
+
+# Never let a manual dispatch race the scheduled run onto the same issue.
+concurrency:
+  group: catalog-drift
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check catalog drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run catalog reconcile (check mode)
+        id: check
+        run: |
+          # `|| code=$?` keeps a non-zero exit from aborting the step: the exit
+          # code is data for the parser (structural failure), not the verdict.
+          npm run catalog:refresh -- --check > catalog-check.txt 2>&1 && code=0 || code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "reconcile exited with $code (0 does NOT mean 'no drift')"
+          cat catalog-check.txt
+
+      - name: Parse report
+        id: report
+        run: |
+          npx tsx scripts/catalog-drift-report.ts \
+            --input catalog-check.txt \
+            --exit-code "${{ steps.check.outputs.exit_code }}" \
+            --body-out catalog-drift-body.md \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - name: Sync tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Passed through the environment rather than interpolated into the
+          # script body, so issue text can never be read as shell.
+          STATUS: ${{ steps.report.outputs.status }}
+          TITLE: ${{ steps.report.outputs.title }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          LABEL=catalog-drift
+
+          # Idempotent: the label is the dedupe key, so the workflow provisions
+          # it instead of requiring a manual one-time setup.
+          gh label create "$LABEL" \
+            --color BFD4F2 \
+            --description "Slash-command catalog drift tracking (Issue #1705)" \
+            >/dev/null 2>&1 || true
+
+          # Most recent tracking issue in ANY state: a closed one is reopened
+          # rather than replaced, so there is only ever one of these.
+          NUMBER=$(gh issue list --label "$LABEL" --state all --limit 1 \
+            --json number --jq '.[0].number // empty')
+
+          if [ "$STATUS" = "clean" ]; then
+            if [ -z "$NUMBER" ]; then
+              echo "No drift and no tracking issue — nothing to do."
+              exit 0
+            fi
+            STATE=$(gh issue view "$NUMBER" --json state --jq .state)
+            if [ "$STATE" != "OPEN" ]; then
+              echo "No drift; issue #$NUMBER already closed."
+              exit 0
+            fi
+            gh issue edit "$NUMBER" --title "$TITLE" --body-file catalog-drift-body.md
+            gh issue close "$NUMBER" \
+              --comment "ドリフト 0 件・要調査の警告なしを確認したため自動 close します。($RUN_URL)"
+            echo "Closed #$NUMBER."
+            exit 0
+          fi
+
+          # status is drift or inconclusive → record it and keep the issue open.
+          if [ -z "$NUMBER" ]; then
+            gh issue create --title "$TITLE" --body-file catalog-drift-body.md --label "$LABEL"
+            exit 0
+          fi
+
+          PREV_TITLE=$(gh issue view "$NUMBER" --json title --jq .title)
+          STATE=$(gh issue view "$NUMBER" --json state --jq .state)
+          gh issue edit "$NUMBER" --title "$TITLE" --body-file catalog-drift-body.md
+          if [ "$STATE" != "OPEN" ]; then
+            gh issue reopen "$NUMBER"
+          fi
+          # Comment only when the headline actually moved. A weekly "still 3"
+          # comment is the noise this design is trying to avoid; a 3 → 15 jump
+          # is worth a notification.
+          if [ "$PREV_TITLE" != "$TITLE" ]; then
+            # Braces are load-bearing: a bare $PREV_TITLE followed by 「 swallows
+            # the first byte of the multibyte character into the variable name
+            # and dies under `set -u` (reproduced in a stubbed dry run).
+            gh issue comment "$NUMBER" \
+              --body "自動更新: 「${PREV_TITLE}」→「${TITLE}」(${RUN_URL})"
+          fi
+          echo "Updated #$NUMBER ($STATUS)."
+
+      - name: Annotate run
+        if: always()
+        env:
+          STATUS: ${{ steps.report.outputs.status }}
+        run: |
+          # `if: always()` means this also runs when an earlier step failed, in
+          # which case STATUS is empty — that must not read as "all clear".
+          case "$STATUS" in
+            drift) echo "::warning::カタログに未反映のコマンドがあります。追跡 Issue を確認してください。" ;;
+            inconclusive) echo "::warning::カタログを検査できませんでした（ソース未照合）。追跡 Issue を確認してください。" ;;
+            clean) echo "カタログのドリフトはありません。" ;;
+            *) echo "::warning::ドリフト判定を取得できませんでした。前段のステップのログを確認してください。" ;;
+          esac

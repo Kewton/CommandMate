@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.5] - 2026-08-06
+
+> **Highlight**: スラッシュコマンドカタログのリコンサイルを「運用として成立する」状態にした（Epic #1707）。従来はリコンサイルツールが**過去に人間が何を除外したかを知らない**ため、同じ 3 件を毎リリース提案し続け、適用するとガードテストが赤くなり、人間が過去 Issue を読み直して手で消す、というループになっていた。除外判断をデータ化したことで提案は **3 件 → 1 件**に減り、残る 1 件は「未決の判断が存在する」という正しい signal として機能する。あわせて、`--write` が必ず生成する `[要レビュー]` プレースホルダの流出をテストで止め、ドリフトの週次検知と手順の skill 化を入れた。
+
+### Added
+
+- **slash-commands: カタログのドリフトを週次で検知し単一の追跡 Issue に集約** (#1705)
+  - 週次 cron（`workflow_dispatch` でも手動起動可）で `catalog:refresh --check` を実行し、結果を 1 本の追跡 Issue に集約する。#1503 以降リコンサイルされず 104 件まで溜まった原因は「誰も `--check` を打っていなかった」ことで、3 件のうちに気づけば 10 分で終わる作業だった
+  - **exit code では判定しない。** `--check` はドリフトがあっても exit 0 を返すため（106 件検出時も exit 0）、`check-report.ts` が**出力をパース**して drift / clean / inconclusive を判定する
+  - **「0 件」と「調べられなかった」を区別する。** ソース到達不能時は fail-soft で exit 0 になるため、これを健全と読むと上流が落ちている間ずっと緑になる。警告は allowlist 方式で、`antigravity provider not implemented yet` のみ既知状態として無視し、他はすべて inconclusive とする
+  - 毎週新規 Issue を作らず 1 本を更新・再 open し、clean かつ警告なしのときだけ close する。権限は `issues: write` のみで、誰の PR も止めない
+
+- **skills: `/catalog-reconcile` skill** (#1706)
+  - v0.21.2 のリコンサイルで実行者がその場で発見した手順を固定した。規模による別 PR 切り出しの判断、翻訳の文体規約、説明衝突の解消、上流ソースでの裏取り、ガードテストの更新範囲、品質ゲートの実測方法を含む
+  - 実測に基づく注意（primary checkout で `npm run build` を実行しない／件数の数え方が claude と codex で述語が違う／説明に `<...>` を含めない／`--check` は exit 0 を返す）も明記
+
+### Changed
+
+- **slash-commands: カタログの除外判断をデータ化し、説明衝突をツール別に保持** (#1704)
+  - `src/config/slash-commands-exclusions.json` を新設し、reconcile engine が**既定で**尊重する（`options.exclusions` を渡し忘れてもガードが効く）。除外の意思はこれまでガードテストのアサーションにしか無く、ツールから参照できなかった
+  - **`kind` を `phantom` / `out-of-scope` の 2 値で型分離**した。前者は上流が変われば自動的に決着し、後者は人間の再判断でしか消えない。再判断コストが桁違いなので `reason` の散文に混ぜない
+  - **`cliTools` 必須で名前一括禁止を表現できない**ようにした。v0.21.2 で `/vim` の禁止を「名前」から「claude」へ狭めた実例があり、名前で禁止すると codex 0.146.0 の実在コマンドを隠す
+  - `descriptionKey` を name 由来の固定値ではなく**上書き可能**にし、同一 pass 内で tool 間の en が食い違ったら `slashCommands.descriptions.<name>.<tool>` へ**両側とも**分割する。前リリースで翻訳済みのキーは分割せず報告のみ（分割すると人手 ja 訳を代替なしに孤児化するため）
+  - これに伴い #1603 の「衝突時は中立 placeholder に落とす」を変更した。**その placeholder 動作こそが v0.21.2 でパレットに `/btw — btw` を出した欠陥**であり、「どちらの文も共有キーに載せない」という不変条件は維持したままキーを分けて両方の文を残す形にした
+
+### Fixed
+
+- **slash-commands: 未翻訳の `[要レビュー]` プレースホルダ流出をテストで止める** (#1703)
+  - `catalog:refresh --write` は新規 ja description を必ず `[要レビュー]` プレースホルダ（中身は英文）で埋めるが、**この状態で lint / tsc / test:unit はすべて緑**だった。v0.21.2 では人手で diff を読んで初めて 86 件に気づいた
+  - 既存の #1306 ガードは en / ja 両方にキーが存在することを検証するが、**キーは存在する**ので通ってしまい、中身が未翻訳であることは誰も見ていなかった
+  - `JA_REVIEW_PREFIX` を export し `hasReviewMarker()` を追加して**生成側とガード側で同じ定数を参照する**ようにした（将来マーカーを変えてもガードが黙って無効化されない）。ガードは locale 名前空間全体を走査し、失敗時は残存キーを列挙する
+
 ## [0.21.4] - 2026-08-06
 
 > **Highlight**: Worktree の Skills ペインで、Catalog セクションのカードが **skill ID の一致だけ**でバッジを決めていたため、数バージョン遅れた導入でも単に `Installed` と表示していた。同じ画面の上のセクションは `Update available` を出しており、同一 Skill に相反する状態語が並んでいた。判定を 1 箇所に集約し、両セクションが同じ結果を読む形にして解消した。

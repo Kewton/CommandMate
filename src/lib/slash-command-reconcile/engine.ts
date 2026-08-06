@@ -19,12 +19,18 @@
  *    more than its current commands: history rows ("Removed in vX") and alias
  *    rows are refused with a categorized notice instead of becoming catalog
  *    entries whose "description" is their own obituary.
+ *  - Curation decisions are honored (Issue #1704). A command a human decided to
+ *    keep out stays out, because the decision is data the engine reads — not an
+ *    assertion in a test file the engine cannot see.
  */
 
 import { sanitizeProviderCommands } from './sanitize';
+import { DEFAULT_EXCLUSIONS, buildExclusionIndex, describeExclusion, findExclusion } from './exclusions';
 import type {
+  CatalogExclusion,
   ProviderResult,
   ProviderCommand,
+  ReconcileAddition,
   ReconcileDiff,
   ReconcileNotice,
   ReconcileNoticeCategory,
@@ -35,11 +41,17 @@ import type {
 } from './types';
 
 /** i18n key prefix every built-in description resolves through (Issue #1306). */
-const DESCRIPTION_KEY_PREFIX = 'slashCommands.descriptions.';
+export const DESCRIPTION_KEY_PREFIX = 'slashCommands.descriptions.';
 /** Category a newly discovered command lands in until a human recategorizes it. */
 const DEFAULT_CATEGORY = 'standard-util';
-/** Marks a Japanese string as an untranslated placeholder needing review. */
-const JA_REVIEW_PREFIX = '[要レビュー] ';
+/**
+ * Marks a Japanese string as an untranslated placeholder needing review.
+ *
+ * Exported because the generator must not be the only side that knows this
+ * string: the shipped-dictionary guard (Issue #1703) reads the same constant,
+ * so changing the marker here can never silently disarm the guard.
+ */
+export const JA_REVIEW_PREFIX = '[要レビュー] ';
 
 /**
  * A "description" that is really a row marker the parser failed to strip.
@@ -54,11 +66,23 @@ const SUSPECT_PREFIX_RE = /^(removed\b|alias for\b|deprecated\b)/i;
 
 /** Order the `--check` report groups notice categories in. */
 export const NOTICE_CATEGORY_ORDER: readonly ReconcileNoticeCategory[] = [
+  'excluded',
   'removed-row',
   'alias-row',
   'suspect-description',
   'description-conflict',
 ];
+
+/**
+ * True when `value` still carries the untranslated-placeholder marker.
+ *
+ * Deliberately looser than the generator: it matches the marker anywhere in the
+ * string and ignores the trailing space, so a placeholder a human reflowed or
+ * partially edited is still caught (Issue #1703).
+ */
+export function hasReviewMarker(value: unknown): boolean {
+  return typeof value === 'string' && value.includes(JA_REVIEW_PREFIX.trim());
+}
 
 /** True when `description` looks like a row marker rather than a purpose. */
 export function isSuspectDescription(description: string | undefined): boolean {
@@ -89,6 +113,24 @@ function removedDetail(command: ProviderCommand): string {
 export interface ReconcileOptions {
   /** Category assigned to newly added commands (default: standard-util). */
   defaultCategory?: string;
+  /**
+   * Curation exclusions to honor (Issue #1704). Defaults to the bundled
+   * src/config/slash-commands-exclusions.json — a caller that forgets to pass
+   * them still gets the guard. Pass `[]` to reconcile without any.
+   */
+  exclusions?: CatalogExclusion[];
+  /**
+   * English text each i18n key already ships, flattened from the en dictionary
+   * (Issue #1704).
+   *
+   * Without it, a new entry landing on a key an *earlier release* already owns
+   * is silent: claude's `/agents` inherits opencode's "List and manage available
+   * agents" and nothing in the report says so. The engine cannot fix that pair
+   * on its own (splitting would orphan a human ja translation), so this only
+   * buys a notice — but a reported conflict is what the shared-key problem
+   * needed in the first place.
+   */
+  existingEnDescriptions?: Record<string, string>;
 }
 
 /** True when a catalog entry is in scope for `tool` (undefined cliTools = claude). */
@@ -99,8 +141,33 @@ function entryHasTool(entry: CatalogCommandEntry, tool: string): boolean {
   return tool === 'claude';
 }
 
-function descriptionKeyFor(name: string): string {
+/** Default i18n key for a command: one key shared by every tool that has it. */
+export function descriptionKeyFor(name: string): string {
   return `${DESCRIPTION_KEY_PREFIX}${name}`;
+}
+
+/**
+ * Tool-scoped i18n key, used only where tools disagree about a command
+ * (Issue #1704). `/btw` means "ephemeral side question" on claude and something
+ * else on codex; one shared key cannot hold both, and the pre-#1704 engine
+ * resolved that by shipping the command *name* as its own description
+ * ("/btw — btw"). Splitting the key lets each tool keep its real sentence.
+ */
+export function toolDescriptionKeyFor(name: string, tool: string): string {
+  return `${descriptionKeyFor(name)}.${tool}`;
+}
+
+/**
+ * A locale key claimed by an addition in this pass, plus every place that would
+ * have to be rewritten if a later tool turns out to disagree about the text.
+ */
+interface DescriptionClaim {
+  tool: string;
+  en: string;
+  entry: CatalogCommandEntry;
+  diffEntry: ReconcileAddition;
+  /** Absent when the key was already backed by a locale string in the catalog. */
+  addition?: LocaleAddition;
 }
 
 /**
@@ -115,6 +182,8 @@ export function reconcileCatalog(
   options: ReconcileOptions = {}
 ): ReconcileResult {
   const defaultCategory = options.defaultCategory ?? DEFAULT_CATEGORY;
+  const exclusionIndex = buildExclusionIndex(options.exclusions ?? DEFAULT_EXCLUSIONS);
+  const shippedEn = options.existingEnDescriptions ?? {};
 
   const commands: CatalogCommandEntry[] = catalog.commands.map((c) => ({ ...c }));
   const verifiedAgainst: Record<string, string> = { ...catalog.verifiedAgainst };
@@ -131,6 +200,10 @@ export function reconcileCatalog(
   );
   /** Locale entries staged this pass, by key — the seam a conflict rewrites. */
   const pendingLocale = new Map<string, LocaleAddition>();
+  /** Who claimed each default key first, and what would need rewriting on a split. */
+  const claims = new Map<string, DescriptionClaim>();
+  /** Default keys already split into per-tool keys — later tools skip straight to their own. */
+  const splitKeys = new Set<string>();
   const conflictedKeys = new Set<string>();
 
   for (const result of providerResults) {
@@ -154,6 +227,22 @@ export function reconcileCatalog(
       // combination ("source says removed, catalog still ships it") is exactly
       // what a human needs to see on the release PR.
       const catalogued = existingNamesForTool.has(command.name);
+
+      // Issue #1704: a settled human decision outranks whatever the source says,
+      // so it is checked first — an excluded command reports once, as excluded,
+      // rather than also as a suspect description or a history row.
+      const exclusion = findExclusion(exclusionIndex, command.name, tool);
+      if (exclusion) {
+        notices.push({
+          category: 'excluded',
+          tool,
+          name: command.name,
+          message: catalogued
+            ? `${describeExclusion(exclusion)}; the catalog still lists it — review`
+            : describeExclusion(exclusion),
+        });
+        continue;
+      }
 
       if (command.status === 'removed') {
         notices.push({
@@ -192,51 +281,103 @@ export function reconcileCatalog(
         enDescription = undefined;
       }
 
-      const descriptionKey = descriptionKeyFor(command.name);
-      commands.push({
+      const defaultKey = descriptionKeyFor(command.name);
+      const en = enDescription ?? command.name;
+
+      // Which i18n key this entry gets. Sharing one key across tools is the
+      // norm; a tool-scoped key is minted only where tools actually disagree
+      // (Issue #1704) — see resolveDescriptionKey below for the whole rule.
+      const claim = claims.get(defaultKey);
+      let descriptionKey = defaultKey;
+
+      if (splitKeys.has(defaultKey)) {
+        // Already contested by an earlier pair; every further tool keeps its own.
+        descriptionKey = toolDescriptionKeyFor(command.name, tool);
+      } else if (claim && claim.en !== en) {
+        if (claim.addition) {
+          // Both sides were staged in this pass, so both can move: give each
+          // tool its own key and its own sentence. Pre-#1704 the shared key was
+          // downgraded to the command name instead ("/btw — btw"), which is how
+          // v0.21.2 shipped six commands described by their own names.
+          splitKeys.add(defaultKey);
+          const claimKey = toolDescriptionKeyFor(command.name, claim.tool);
+          claim.entry.descriptionKey = claimKey;
+          claim.diffEntry.descriptionKey = claimKey;
+          pendingLocale.delete(defaultKey);
+          claim.addition.key = claimKey;
+          pendingLocale.set(claimKey, claim.addition);
+          descriptionKey = toolDescriptionKeyFor(command.name, tool);
+          conflictedKeys.add(defaultKey);
+          notices.push({
+            category: 'description-conflict',
+            name: command.name,
+            message:
+              `tools disagree on the description ("${claim.en}" vs "${en}"); ` +
+              `split into per-tool keys (${claim.tool}, ${tool})`,
+          });
+        } else if (!conflictedKeys.has(defaultKey)) {
+          // The key is already backed by a translated dictionary string from an
+          // earlier release. Splitting would orphan that string (and its human ja
+          // translation) with nothing to replace it, so the engine reports and
+          // leaves the key shared for a human to split by hand.
+          conflictedKeys.add(defaultKey);
+          notices.push({
+            category: 'description-conflict',
+            name: command.name,
+            message:
+              `tools disagree on the description ("${claim.en}" vs "${en}"), but ` +
+              `${defaultKey} is already translated; split it by hand`,
+          });
+        }
+      }
+
+      const entry: CatalogCommandEntry = {
         name: command.name,
         descriptionKey,
         category: defaultCategory,
         cliTools: [tool],
         isStandard: true,
         source: 'standard',
-      });
+      };
+      commands.push(entry);
       existingNamesForTool.add(command.name);
 
-      diff.added.push({
+      const diffEntry: ReconcileAddition = {
         tool,
         name: command.name,
         descriptionKey,
         enDescription,
         minVersion: command.minVersion,
-      });
+      };
+      diff.added.push(diffEntry);
 
       // Only add a locale string when this key is genuinely new (a name shared
       // with an existing command reuses its dictionary entry).
-      const en = enDescription ?? command.name;
-      const pending = pendingLocale.get(descriptionKey);
-      if (!existingKeys.has(descriptionKey) && !pending) {
-        const addition: LocaleAddition = {
-          key: descriptionKey,
-          en,
-          ja: `${JA_REVIEW_PREFIX}${en}`,
-        };
+      let addition: LocaleAddition | undefined;
+      if (!existingKeys.has(descriptionKey) && !pendingLocale.has(descriptionKey)) {
+        addition = { key: descriptionKey, en, ja: `${JA_REVIEW_PREFIX}${en}` };
         localeAdditions.push(addition);
         pendingLocale.set(descriptionKey, addition);
-      } else if (pending && pending.en !== en && !conflictedKeys.has(descriptionKey)) {
-        // One i18n key, two tools, two meanings: first-wins would ship the
-        // other tool's sentence under this key (Issue #1603). Neither wins —
-        // the key falls back to a review placeholder for a human to author.
-        conflictedKeys.add(descriptionKey);
-        notices.push({
-          category: 'description-conflict',
-          name: command.name,
-          message:
-            `tools disagree on the description ("${pending.en}" vs "${en}"); ` +
-            'left as a review placeholder',
-        });
-        pending.en = command.name;
-        pending.ja = `${JA_REVIEW_PREFIX}${command.name}`;
+      } else if (existingKeys.has(descriptionKey) && !conflictedKeys.has(descriptionKey)) {
+        // The key belongs to an entry from an earlier release. Inheriting its
+        // sentence is right when the tools agree and wrong when they do not, and
+        // before Issue #1704 both cases looked identical in the report.
+        const shipped = shippedEn[descriptionKey];
+        if (shipped && shipped !== en) {
+          conflictedKeys.add(descriptionKey);
+          notices.push({
+            category: 'description-conflict',
+            tool,
+            name: command.name,
+            message:
+              `inherits the shipped description ("${shipped}") but the source says ` +
+              `"${en}"; give this tool its own ${toolDescriptionKeyFor(command.name, tool)}`,
+          });
+        }
+      }
+
+      if (!claim) {
+        claims.set(defaultKey, { tool, en, entry, diffEntry, addition });
       }
     }
 

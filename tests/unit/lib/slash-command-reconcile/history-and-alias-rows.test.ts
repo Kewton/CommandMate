@@ -47,8 +47,12 @@ function claudeResult(): ProviderResult {
   return { tool: 'claude', ok: true, commands: parseClaudeCommandsDoc(CLAUDE_DOC), warnings: [] };
 }
 
+// `exclusions: []` isolates these from the shipped curation list (Issue #1704):
+// what is under test is how the engine reads *source rows*, and the fixture
+// names (`/agents`, `/vim`) are exactly the ones a future exclusion row might
+// cover. Coupling them would turn a curation decision into an unrelated failure.
 describe('catalog reconcile over the real claude docs shapes (Issue #1603)', () => {
-  const result = reconcileCatalog(emptyCatalog(), [claudeResult()]);
+  const result = reconcileCatalog(emptyCatalog(), [claudeResult()], { exclusions: [] });
   const addedNames = result.diff.added.map((a) => a.name);
   const added = (name: string) => result.diff.added.find((a) => a.name === name);
 
@@ -104,7 +108,7 @@ describe('catalog reconcile over the real claude docs shapes (Issue #1603)', () 
       commands: [{ name: 'vim', description: 'toggle vim keybindings in the composer' }],
       warnings: [],
     };
-    const shared = reconcileCatalog(emptyCatalog(), [claudeResult(), codex]);
+    const shared = reconcileCatalog(emptyCatalog(), [claudeResult(), codex], { exclusions: [] });
 
     // claude's /vim is refused, so codex's real description owns the key.
     expect(
