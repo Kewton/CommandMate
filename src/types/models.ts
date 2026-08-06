@@ -223,8 +223,16 @@ export interface BasePromptData {
   type: PromptType;
   /** The question being asked */
   question: string;
-  /** Current status of the prompt */
-  status: 'pending' | 'answered';
+  /**
+   * Current status of the prompt.
+   *
+   * `unclassified` (Issue #1708) is deliberately NOT `pending`: it marks a row
+   * that records a detection FAILURE, and `markPendingPromptsAsAnswered()`
+   * selects on `status = 'pending'`, so keeping it out of that value is what
+   * stops the sweep from stamping "(answered via terminal)" onto a frame nobody
+   * ever answered — or could have.
+   */
+  status: 'pending' | 'answered' | 'unclassified';
   /** User's answer (if status is 'answered') */
   answer?: string;
   /** Timestamp when answered (ISO 8601) */
@@ -317,6 +325,49 @@ export interface MultipleChoicePromptData extends BasePromptData {
  * Union type for all prompt data types (extensible for future prompt types)
  */
 export type PromptData = YesNoPromptData | MultipleChoicePromptData;
+
+/**
+ * `promptData.type` written for an interactive frame nothing could classify.
+ *
+ * Deliberately NOT a member of {@link PromptType}: the detectors can never
+ * produce it, and widening that union would oblige every exhaustive map over it
+ * (the contract parser's promptType allowlist among them) to grow a case for a
+ * value no prompt-answering path is allowed to accept. Readers compare against
+ * this constant instead.
+ */
+export const UNCLASSIFIED_PROMPT_TYPE = 'unclassified';
+
+/**
+ * A record that the detection layer FAILED on a frame (Issue #1708).
+ *
+ * Deliberately outside the {@link PromptData} union. It is stored in the same
+ * `chat_messages.prompt_data` column and listed by `capture --prompts`, so the
+ * failure itself is retrievable after the fact — before this, the two prompt
+ * history writers were both gated on `isPrompt === true`, so a missed frame left
+ * no trace anywhere and the only evidence a worker had stalled was the raw pane,
+ * for as long as it stayed on screen.
+ *
+ * But it is not a prompt: it carries no options (by definition nothing was
+ * parsed to put in them) and nothing may answer it. Keeping it out of the union
+ * is what stops it being handed to `respond` / the answer sender by a path that
+ * only checks `messageType === 'prompt'`.
+ *
+ * `status` is `'unclassified'` rather than `'pending'` for the same reason
+ * `markPendingPromptsAsAnswered()` selects on `status = 'pending'`: a frame
+ * nobody could read must never be stamped "(answered via terminal)".
+ */
+export interface UnclassifiedFrameRecord {
+  type: typeof UNCLASSIFIED_PROMPT_TYPE;
+  status: 'unclassified';
+  /** Human-readable description of the frame and where to go look at it. */
+  question: string;
+  /** Always empty — nothing was parsed. */
+  options: never[];
+  /** How long the frame had been unclassified when it was recorded, in seconds. */
+  dwellSeconds: number;
+  /** The `status/reason` the detector settled on, e.g. `running/default`. */
+  sessionStatusReason: string;
+}
 
 /**
  * Issue #1121: Client-only optimistic send state for a message shown in the UI

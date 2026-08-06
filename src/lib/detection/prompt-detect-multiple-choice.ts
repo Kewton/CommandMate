@@ -53,6 +53,94 @@ const DEFAULT_OPTION_PATTERN = /^\s*[\u276F\u25CF\u203A][^\d]*(\d+)(?:\.(?!\d)|\
 const NORMAL_OPTION_PATTERN = /^\s*[^\d]{0,3}(\d+)(?:\.(?!\d)|\s+)\s*(.+)$/;
 
 /**
+ * [Issue #1708] Header row of Claude Code's bottom-anchored task panel, e.g.
+ *   "  7 tasks (0 done, 1 in progress, 6 open)"
+ *
+ * The panel is an overlay pinned to the LAST rows of the pane, structurally
+ * unrelated to whatever the agent is currently blocked on. In a production pane
+ * (200x1000, alternate screen) a prompt dialog therefore renders near the top and
+ * the panel ~880 blank rows below it — rows `compactBlankRows` collapses to one,
+ * putting the panel squarely inside Pass 2's 50-line reverse-scan window.
+ *
+ * That is only harmless while something trims it away. #704/#807 trim at a
+ * footer, but the AskUserQuestion *confirmation* step ("Ready to submit your
+ * answers?") renders NEITHER footer, so nothing trims and the panel is the first
+ * thing the reverse scan meets. Measured on the live capture in
+ * fixtures/claude-live-1708/askuserquestion-submit-taskpanel.txt, two of its rows
+ * match NORMAL_OPTION_PATTERN independently:
+ *   - this header      → option 7,  label "tasks (2 done, 1 in progress, 4 open)"
+ *   - "… +2 completed" → option 2,  label "completed"
+ * Either one alone is enough to make isValidPrecedingOption() reject the real
+ * `❯ 1. Submit answers` / `2. Cancel` above it, so collectedOptions never reaches
+ * 2 and the frame is published as "no prompt" — Issue #1708's silent timeout.
+ *
+ * Anchored at line start and requires the literal `tasks (` + `<n> done`, which
+ * no option label produced by any supported CLI carries. ReDoS safe (S4-001):
+ * bounded repetition, no nesting.
+ */
+const CLAUDE_TASK_PANEL_HEADER_PATTERN = /^\s*\d{1,3}\s+tasks?\s+\(\d+\s+done\b/i;
+
+/**
+ * [Issue #1708] A single task row of the panel described above, e.g. "  ◼ Phase 3".
+ *
+ * Today these rows are inert — `isContinuationLine()` already absorbs them — but
+ * only because none of the observed titles begins with a digit. A title like
+ * "2. Fix the parser" would render as "  ◻ 2. Fix the parser" and be collected as
+ * option 2, reintroducing the same poisoning from a direction no single-line
+ * guard anticipates. Skipping the whole panel block closes that off structurally
+ * instead of one wording at a time.
+ *
+ * The glyph set is exactly the two forms measured on a live pane — ◼ (in
+ * progress) and ◻ (open) — and nothing else. Every extra glyph is a line this
+ * guard can delete from the frame, so the set is an allowlist of things seen,
+ * not a guess at what the family might contain:
+ *
+ *   - ❯ ● › are DEFAULT_OPTION_PATTERN's cursor indicators.
+ *   - ⏺ ⎿ ✔ ✗ are the transcript markers TURN_BOUNDARY_PATTERN reads.
+ *   - ☐ ☑ ☒ are the natural rendering of a MULTI-SELECT choice, and
+ *     AskUserQuestion has a multiSelect mode. Measured: with those in the set,
+ *     `☐ 1. Blue / ☑ 2. Green / ☐ 3. Red` under a panel header is claimed as
+ *     panel content and the prompt above it disappears entirely
+ *     (isPrompt=false, zero options) — Issue #1708's own failure, recreated by
+ *     its fix. See the regression test.
+ *
+ * A completed row never appears (the panel collapses those into `… +N
+ * completed`, which SUMMARY_LINE_PATTERN handles), so no done-marker is needed.
+ * An unmatched glyph simply ends the block, which is the safe direction: those
+ * rows go back to being handled exactly as they were before this guard existed.
+ *
+ * To widen this, capture a live pane that actually renders the new glyph and add
+ * it as a fixture. Do not widen it from the shape of the character.
+ */
+const CLAUDE_TASK_PANEL_ROW_PATTERN = /^\s*[◼◻]\s/;
+
+/**
+ * Line indices belonging to a Claude task panel within [start, end).
+ *
+ * Walks down from each header row for as long as rows keep looking like panel
+ * content (task rows or the collapsed `… +N …` summary). The first line that is
+ * neither ends the block, so a panel that abuts other content cannot swallow it.
+ *
+ * @param lines - Full frame, already ANSI/box stripped
+ * @param start - First index to consider (inclusive)
+ * @param end - Last index to consider (exclusive)
+ * @returns Indices Pass 2 must treat as metadata rather than options
+ */
+export function findClaudeTaskPanelLines(lines: string[], start: number, end: number): Set<number> {
+  const panelLines = new Set<number>();
+  for (let i = Math.max(0, start); i < Math.min(end, lines.length); i++) {
+    if (!CLAUDE_TASK_PANEL_HEADER_PATTERN.test(lines[i])) continue;
+    panelLines.add(i);
+    for (let j = i + 1; j < Math.min(end, lines.length); j++) {
+      const row = lines[j];
+      if (!CLAUDE_TASK_PANEL_ROW_PATTERN.test(row) && !SUMMARY_LINE_PATTERN.test(row)) break;
+      panelLines.add(j);
+    }
+  }
+  return panelLines;
+}
+
+/**
  * Pattern for separator lines (horizontal rules).
  * Matches lines consisting only of dash (-) or em-dash (─) characters.
  * Used to skip separator lines in question extraction and non-option line handling.
@@ -98,12 +186,17 @@ const COLLAPSED_OUTPUT_PATTERN = /^\s*\[[^\]]*\d+\s+lines?\]/i;
  *     `3. Show me more`) — those still flow through NORMAL_OPTION_PATTERN.
  *   - Optional leading ellipsis (… U+2026) and optional collapse direction
  *     marker (+ - ↑ ↓ ⏵ ⏷) accept the variants observed in the wild.
+ *   - [Issue #1708] `completed` joined `pending`/`more` after a live capture
+ *     (fixtures/claude-live-1708) showed the task panel collapsing FINISHED
+ *     rows as `… +2 completed`. That wording was outside the #704 guard, so it
+ *     reached Pass 2 and was collected as `option 2 / label='completed'` —
+ *     poisoning isValidPrecedingOption() exactly as `… +1 pending` used to.
  *   - The pattern deliberately omits any free `(.+)` capture — it must
  *     short-circuit, not extract data.
  *
  * Pattern shape: linear regex with no nested quantifiers — ReDoS safe (S4-001).
  */
-const SUMMARY_LINE_PATTERN = /^\s*[…]?\s*[+\-↑↓⏵⏷]?\s*\d+\s+(?:pending|more)\b/i;
+const SUMMARY_LINE_PATTERN = /^\s*[…]?\s*[+\-↑↓⏵⏷]?\s*\d+\s+(?:pending|more|completed)\b/i;
 
 /**
  * [Issue #704] Pattern for the Claude Code v2.1.142 prompt footer line.
@@ -836,8 +929,21 @@ export function detectMultipleChoicePrompt(
   let questionEndIndex = -1;
   let continuationLineCount = 0;
 
+  // [Issue #1708] Claude's bottom-anchored task panel is an overlay, not part of
+  // the prompt frame. Resolved as a block up front because the reverse scan meets
+  // its rows before its header and so cannot recognise them one at a time.
+  const taskPanelLines = findClaudeTaskPanelLines(lines, scanStart, effectiveEnd);
+
   for (let i = effectiveEnd - 1; i >= scanStart; i--) {
     const line = lines[i].trim();
+
+    // [Issue #1708] Task-panel rows are metadata. Same handling as the
+    // COLLAPSED_OUTPUT / SUMMARY guards below: skip without ending the scan, so
+    // the options rendered ABOVE the panel are still reachable.
+    if (taskPanelLines.has(i)) {
+      continuationLineCount++;
+      continue;
+    }
 
     // Collapsed preview markers like "[… 12 lines] ctrl + a view all" are
     // metadata, not selectable options. Skip them before option parsing to

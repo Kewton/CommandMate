@@ -20,6 +20,26 @@ import { resolveInstanceCliTool } from './instances';
 const DEFAULT_AUTO_YES_DURATION = '1h';
 
 /**
+ * Code the send API returns when the session is blocked on a prompt (Issue
+ * #1708). Mirrors PROMPT_WAITING_CODE in src/lib/session/prompt-waiting-guard.ts;
+ * duplicated rather than imported so the CLI bundle does not pull the server's
+ * tmux/detection graph in for one string.
+ */
+const PROMPT_WAITING_CODE = 'PROMPT_WAITING';
+
+/**
+ * What to print when a PROMPT_WAITING response carried no message body — an
+ * older daemon, or a truncated body. The code is the contract; the sentence is
+ * a courtesy, and the CLI must still say what to do without it.
+ */
+function promptWaitingFallback(worktreeId: string): string {
+  return (
+    `${worktreeId} is waiting on a prompt; the message was not sent. ` +
+    `Answer it first: \`commandmate respond ${worktreeId} <answer>\`.`
+  );
+}
+
+/**
  * Resolve --duration to milliseconds, exiting on an invalid value.
  *
  * Issue #1608: this is called from the option-validation block at the top of
@@ -303,6 +323,18 @@ export function createSendCommand(): Command {
           // one: nothing is working on it and nothing ever will.
           if (taskId) {
             await reportTaskStatus(client, taskId, 'failed');
+          }
+          // Issue #1708: the session is sitting on a prompt, so the message
+          // would have been typed into the prompt's input line rather than
+          // reaching the agent. Reported on its own so an unattended runner sees
+          // "answer the prompt", not a generic HTTP failure — nudging a stalled
+          // worker is exactly what made #1708 worse.
+          if (error instanceof ApiError && error.apiCode === PROMPT_WAITING_CODE) {
+            // The server's own sentence, not error.message: handleApiError maps a
+            // bare 409 to "Unexpected HTTP status: 409", which says nothing about
+            // what to do next.
+            console.error(`Error: ${error.payload?.error ?? promptWaitingFallback(worktreeId)}`);
+            process.exit(ExitCode.CONFIG_ERROR);
           }
           throw error;
         }

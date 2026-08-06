@@ -7,8 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **detection: claude のタスクパネルが直上のプロンプトを飲み、worker が無言で timeout する問題を修正** (#1708)
+  - タスクパネルはペイン最下部に固定描画されるため、実運用の 200x1000 ペインではダイアログが上部・パネルが約 880 行下に来る。空行が潰されるとパネルが Pass 2 の走査窓に入り、ヘッダ `N tasks (X done, …)` と折り畳み行 `… +N completed` が**それぞれ独立に**選択肢として拾われて本物の選択肢を弾いていた（実キャプチャの 1 行削除実験で確認。片方だけ直しても未検出のまま）。パネルを**ブロックごと** skip する
+  - 検出漏れは `isPromptWaiting: false` を意味し、それが唯一の「人間待ち」信号なので、auto-yes も `wait --on-prompt agent` の exit 10 も契約の `autoYes` ポリシーも同時に無効化されていた
+  - パネル行の判定グリフは**実測した `◼ ◻` のみ**。`☐ ☑ ☒` を含めると multiSelect の選択肢行をパネルと誤認してプロンプトごと消すことを実測したため、形が似ているという理由で広げない
+  - fixture は claude 2.1.223 の実 tmux capture。120x40 ではパネルとダイアログが同一画面に載らず**再現しない**
+  - **直っていないこと**: 2026-08-05 の元報告（Bash 承認プロンプト）の分岐点は再現できていない。その形のフレームは修正の有無にかかわらず検出成功する。実測して直したのは 2026-08-06 追記分（AskUserQuestion の確認ステップ）のみ
+
+- **wait: 未分類フレームの degraded 形 `ready`/`no_recent_output` を「完了」と誤報しなくなった** (#1708)
+  - `isUnclassifiedActive` は `(running && default) || (ready && no_recent_output)` の 2 状態で立つ。後者は**読めないオーバーレイが劣化した姿**で（Auto-Yes ポーラが `lastServerResponseTimestamp` を打つと約 5 秒で反転、#1497）、完了ではない。停滞中の worker に `Completed` を返していたのは、Issue が問題視した timeout(124) より悪い（124 はパイプラインを止めるが 0 はマージまで進む）
+  - フレームが読めない間は完了判定を抑止し、dwell は 2 状態をまたいで継続する。本物の完了 `ready`/`input_prompt` はフラグを立てないので従来どおり初回ポーリングで exit 0
+
 ### Added
 
+- **wait: 分類できない対話フレームが 60 秒続いたら停止事由にする** (#1708)
+  - `isUnclassifiedActive` は #1120 以降ペイロードに載っていたが `CurrentOutputResponse` に型が無く、`wait` は一度も読んでいなかった。検出をすり抜けたダイアログは「何も起きていない」扱いで `--timeout` まで放置される
+  - **新しい exit code は作らない**。既存の exit 10 に `type: 'unclassified'` を載せる（#1628 の `selection_list` と同じ前例。新設すると既存の 10 分岐がインフラ障害と読む）。`--on-prompt human` では待機を継続する
+  - 瞬間値では止めない（再描画中のキャプチャで 1 回だけ立つことがある）。分類できた時点で滞留カウンタはリセットされる
+  - dwell は定数でフラグを持たない。`--timeout` / `--stall-timeout` が 60 秒未満なら常にそちらが勝つ（長い待ちを先回りするための仕組みで、短い待ちを延ばすものではない）
+- **capture --prompts: 検出できなかったフレームも監査証跡に残す** (#1708)
+  - 書き込み口が 2 つとも `isPrompt === true` でゲートされていたため、検出漏れはどこにも残らなかった（900 秒停止した worker に対して `No prompt history.` を返していた）
+  - `[unclassified:detection-failed]` として**検出できたプロンプトと区別して**表示する。滞留中に行が増えることはない（1 停滞につき 1 行）
+  - `status` を `pending` にしないことで `markPendingPromptsAsAnswered()` の掃引対象から外している。誰も読めなかったフレームに「回答済み」は付かない
+  - **記録は観測駆動**（`wait` のポーリング／ブラウザ／`capture --json`）。サーバ側 Auto-Yes ポーラ単独では書かれない
+- **send: プロンプト待ちのセッションへの送信を拒否する** (#1708)
+  - ダイアログ表示中のキー入力はエージェントに届かず入力欄に溜まるだけで、後続の `respond` が残留テキストごと「メッセージ」として送られる危険がある（停滞 worker への nudge が状態を悪化させた実例）
+  - 409 `PROMPT_WAITING` / CLI は exit 2。**`respond` / 特殊キー / `prompt-response` は拒否しない**（塞ぐと回答手段が無くなる）
+  - ガードは送信サービス層（`sendUserMessage`）に置いたので、**タイマー送信も同じく拒否される**（`[prompt_waiting] …` を失敗理由として記録）。ルート層に置くとスケジュール送信がダイアログへ直撃したままだった
+  - 拒否が効くのは**検出できているときだけ**。すり抜けたフレームは上記 `wait` の `unclassified` が受け持つ。ペインが読めないときは fail-open するので、**取りこぼしを減らすガードであって保証ではない**
 - **detection: Claude Code hooks の実機検証レポートと実 payload fixture** (#1721)
   - `docs/design/agent-hooks-live-verification.md` — Epic #1720 の全下流 Issue が前提にする hooks の挙動を v2.1.223 で実測した。隔離 HOME ＋ 専用 tmux socket ＋ 使い捨てダンプサーバで再現可能な形にしてある。コード変更なし（スパイク）
   - `tests/fixtures/hooks/claude/*.json` — `PermissionRequest` / `PreToolUse(AskUserQuestion)` / `Notification(permission_prompt, idle_prompt)` / `Stop` / `UserPromptSubmit` / `SessionStart` / `SessionEnd` の実 payload 12 件。環境固有値はプレースホルダに置換済み

@@ -5,7 +5,10 @@
  * Exit codes [DR1-03]:
  * - 0: SUCCESS (agent completed)
  * - 10: PROMPT_DETECTED (agent waiting for user input, including arrow-key
- *       selection lists — Issue #1628)
+ *       selection lists — Issue #1628 — and interactive frames the detection
+ *       layer could not classify at all — Issue #1708. Both are reported as
+ *       exit 10 with a distinguishing `type` rather than a new exit code, so
+ *       callers that already branch on 10 keep working.)
  * - 124: TIMEOUT (--timeout exceeded)
  * Issue #1544 adds --verify / --require-work, which can turn a detected
  * completion into 20 (VERIFY_FAILED) or 21 (NOT_STARTED).
@@ -41,6 +44,37 @@ const POLL_INTERVAL_MS = 5000;
  * names the state instead of inventing options.
  */
 const SELECTION_LIST_PROMPT_TYPE = 'selection_list';
+
+/**
+ * `type` reported for an interactive frame the detection layer could not
+ * classify at all (Issue #1708).
+ *
+ * Rides the existing exit 10 rather than a new code on purpose: every caller
+ * that already branches on PROMPT_DETECTED (the `--auto-yes` dispatch runner
+ * among them) keeps working and simply meets a kind it does not recognise,
+ * whereas a new exit code reads as an infrastructure error to all of them.
+ */
+const UNCLASSIFIED_PROMPT_TYPE = 'unclassified';
+
+/**
+ * How long `isUnclassifiedActive` must hold before `wait` treats it as a stop
+ * reason (Issue #1708).
+ *
+ * The flag is a single-poll observation of "interactive, but unparsed", and a
+ * frame captured mid-repaint can raise it once and clear on the next poll — so
+ * stopping on the instantaneous value would abort healthy runs. 60s is 12
+ * consecutive POLL_INTERVAL_MS polls: far past any repaint, far short of the
+ * 900s timeout this exists to pre-empt.
+ *
+ * Intentionally a constant with no flag. Two consequences, both intended:
+ *   - `--timeout`/`--stall-timeout` below 60s always win, so a caller that asks
+ *     for a short deadline still gets 124 rather than a delayed 10. The dwell
+ *     pre-empts long waits; it does not extend short ones.
+ *   - There is no way to tune it per call. Add one only if a real pane is found
+ *     that legitimately sits unclassified for a minute — a flag here is a knob
+ *     for working around a detector bug, and the bug is the thing to fix.
+ */
+const UNCLASSIFIED_DWELL_MS = 60_000;
 
 /**
  * How recent `autoYes.lastSuppression` must be to be reported as the reason this
@@ -108,6 +142,12 @@ async function pollWorktree(
    * milliseconds and handed a `passed` verdict to whatever ran next.
    */
   let everRunning = false;
+  /**
+   * Epoch ms of the first poll in the current unbroken run of
+   * `isUnclassifiedActive === true`, or null when the last poll cleared it
+   * (Issue #1708).
+   */
+  let unclassifiedSince: number | null = null;
 
   while (true) {
     // Check timeout
@@ -226,6 +266,72 @@ async function pollWorktree(
         };
       }
 
+      // Issue #1708: the frame is interactive but nothing could parse it. The
+      // detection layer is the single entry point every downstream safeguard
+      // hangs off, so a frame that slips past it disables Auto-Yes, the exit-10
+      // handoff and the contract's autoYes policy all at once — and `wait` used
+      // to burn its whole --timeout without ever mentioning it. Treat a
+      // PERSISTENT unclassified frame as a stop reason of its own.
+      //
+      // The dwell deliberately spans BOTH states that raise this flag, and the
+      // completion check below is suppressed while it is up. That is the whole
+      // point, and it is worth spelling out because the obvious reading is the
+      // wrong one:
+      //
+      //   isUnclassifiedActive = (running && default) || (ready && no_recent_output)
+      //
+      // The second disjunct exists because a static unrecognised overlay DEGRADES
+      // into it — once the Auto-Yes poller stamps lastServerResponseTimestamp, a
+      // frame that stopped changing flips from `running`/`default` to
+      // `ready`/`no_recent_output` after STALE_OUTPUT_THRESHOLD_MS (5s). See the
+      // Issue #1497 note in current-output-builder.ts.
+      //
+      // So `ready` here does NOT mean "the agent finished". It means "we still
+      // cannot read this frame, and now its output has gone stale too" — and it
+      // arrives about twelve times faster than this dwell. Letting the completion
+      // check claim it turned a stalled worker into `Completed`, which is worse
+      // than the timeout Issue #1708 complained about: exit 124 stops a pipeline,
+      // exit 0 lets it merge. Measured before this guard: two unclassified polls
+      // followed by the degraded state returned SUCCESS.
+      //
+      // A genuine completion is `ready`/`input_prompt` — the agent back at its
+      // composer — which does not raise the flag at all, so it still exits
+      // SUCCESS on the first poll, unchanged.
+      if (data.isUnclassifiedActive === true) {
+        if (unclassifiedSince === null) unclassifiedSince = Date.now();
+        const dwellMs = Date.now() - unclassifiedSince;
+        if (dwellMs >= UNCLASSIFIED_DWELL_MS) {
+          const dwellSeconds = Math.round(dwellMs / 1000);
+          const question =
+            `Unclassified interactive frame on ${worktreeId} for ${dwellSeconds}s ` +
+            `(status=${data.sessionStatus ?? 'unknown'}/${data.sessionStatusReason ?? 'unknown'}). ` +
+            `The detection layer could not parse it; inspect the raw pane with ` +
+            `\`commandmate capture ${worktreeId} --pane\`.`;
+
+          if (options.onPrompt === 'human') {
+            console.error(question);
+            console.error('Waiting for human response...');
+            await sleep(POLL_INTERVAL_MS);
+            continue;
+          }
+
+          console.error(question);
+          return {
+            exitCode: WaitExitCode.PROMPT_DETECTED,
+            output: {
+              worktreeId,
+              cliToolId: data.cliToolId || 'claude',
+              type: UNCLASSIFIED_PROMPT_TYPE,
+              question,
+              options: [],
+              status: 'pending',
+            },
+          };
+        }
+      } else {
+        unclassifiedSince = null;
+      }
+
       // Completion check [DR1-04]:
       // Path A: the tmux session went away after we had seen it alive — the agent
       //         finished and its session was stopped.
@@ -242,7 +348,12 @@ async function pollWorktree(
         return { exitCode: VerifyExitCode.NOT_STARTED };
       }
 
-      if (!data.isRunning || data.sessionStatus === 'ready') {
+      // Issue #1708 narrowed Path B: `ready` is only a completion when the frame
+      // was actually understood. `ready`/`no_recent_output` is the degraded form
+      // of an unreadable overlay (see the note above), and reporting it as
+      // `Completed` is how a stalled worker gets merged. Path A is untouched — a
+      // session that went away really is finished, and carries no flag anyway.
+      if (!data.isRunning || (data.sessionStatus === 'ready' && data.isUnclassifiedActive !== true)) {
         console.error(`Completed: ${worktreeId}`);
         return { exitCode: WaitExitCode.SUCCESS };
       }

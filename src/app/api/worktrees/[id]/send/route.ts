@@ -20,6 +20,7 @@ import { resolveInstanceCliTool } from '@/lib/db/agent-instances-db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { sendUserMessage } from '@/lib/session/send-user-message';
+import { PROMPT_WAITING_CODE } from '@/lib/session/prompt-waiting-guard';
 import {
   isSessionStartTimeoutError,
   SESSION_STARTING_CODE,
@@ -323,6 +324,17 @@ export async function POST(
     });
 
     if (!result.ok) {
+      // Issue #1708: the session is sitting on a prompt, so nothing was sent.
+      // 409 rather than 500 — the request was well formed and the server is
+      // healthy; the session is simply in a state that cannot accept a message.
+      // The stable `code` is what the CLI branches on (a bare 409 would be
+      // reported as "Unexpected HTTP status: 409", which says nothing).
+      if (result.stage === 'prompt_waiting') {
+        return NextResponse.json(
+          { error: result.error, code: PROMPT_WAITING_CODE },
+          { status: 409 }
+        );
+      }
       if (result.stage === 'model') {
         return NextResponse.json(
           { error: `Failed to switch model to ${body.model}: ${result.error}` },
