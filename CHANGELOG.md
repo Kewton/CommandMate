@@ -33,6 +33,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - hook は **Auto-Yes トグルと独立に常時注入**（注入は起動時 1 回きり、Auto-Yes は途中で入る）。timeout 5 秒（http の既定は 600 秒で `async` も無い）。応答時間を毎回ログし 500ms 超で warn
   - **画面ベース Auto-Yes 経路（`detectPrompt` 直呼び）は削除も変更もしていない** — hooks 非対応環境と Claude 以外のフォールバック
 
+- **detection: 構造化イベントを `sessionStatus` 判定に優先適用する 2 層化** (#1723)
+  - #1722 で届くようになった hooks イベントを第一級ソースに昇格した。`user_prompt_submit` → `running`/`hook_prompt_submit`、`stop` → `ready`/`hook_stop`。イベントが届く環境では「thinking/ready の regex 誤判定」（#805 / #1150 / #1154 / #1497）が**判定の根拠ごと**消える
+  - **`detectSessionStatus()` は 1 文字も触っていない**。merge は builder 層（`mergeStructuredStatus()`）に置いた。検出器は端末フレームの純粋関数のままで、#1708 の回帰テストを含む fixture 資産がそのまま効く
+  - **scraper が `waiting` のときは常に scraper が勝つ**。AskUserQuestion の選択画面と「Ready to submit your answers?」確認画面では hooks が 1 件も発火しない（#1721 §5.6 実測）ため、その画面での最新の構造化事実は turn 冒頭の `user_prompt_submit`＝`running` になる。上書きしていたら #1708 の停滞をそのまま再現していた
+  - **`notification(permission_prompt)` は記録のみで適用しない**。`isPromptWaiting` / `promptData` / `isSelectionListActive` は本 Issue では scraper のまま（#1725 の担当）。加えて「プロンプトが回答された」ことを示すイベントが存在しないので、適用すると次の `Stop` まで `waiting` が貼り付く
+  - **信頼範囲を 3 つで縛る**: 世代（`startClaudeSession()` の新規作成パスと `session_start` イベントで切る。key を再作成セッションが再利用するため、無いと前プロセスのイベントが新セッションの判定になる）／齢（30 分。hooks は全経路 fail-open なので `Stop` が届かない事故がありえ、無制限だと `wait` が `--timeout` まで回る）／生存（tmux セッションが無ければ従来どおり `session_not_running`）
+  - `isUnclassifiedActive` は**構造化 `ready` × scraper `running` のときだけ** false にする。`wait` の完了条件が `ready && isUnclassifiedActive !== true` なので、ここを落とさないと構造化 `ready` は何も変えない。逆向き（構造化 `running`）では立てたまま残す — イベントを出さない画面に対する exit 10 の最後の逃げ道と、`/help` オーバーレイのナビゲーションハッチ（#1497）を潰さないため
+  - 乖離は `logger.info('detection-divergence')` を 1 行（両判定＋`applied`）。一致時は無言。scraper がどれだけ間違っていたかを実地データで定量化する材料で、**適用しなかった食い違いも残す**（後続 Issue の判断材料）
+  - **`wait` と Auto-Yes ポーラーは 1 行も変えていない**。どちらも current-output 経由で状態を読むため恩恵が自動的に届く。統合テストで「同じキャプチャに `Stop` を投げると `wait` が exit 0 になり、投げなければ待ち続ける」対照を固定した
+  - **未設定環境の非影響**: イベントが 1 件も無ければ `getStructuredSessionState()` が null を返し `mergeStructuredStatus()` が scraper をそのまま返す。既存テストは無変更で全緑
 - **wait: 分類できない対話フレームが 60 秒続いたら停止事由にする** (#1708)
   - `isUnclassifiedActive` は #1120 以降ペイロードに載っていたが `CurrentOutputResponse` に型が無く、`wait` は一度も読んでいなかった。検出をすり抜けたダイアログは「何も起きていない」扱いで `--timeout` まで放置される
   - **新しい exit code は作らない**。既存の exit 10 に `type: 'unclassified'` を載せる（#1628 の `selection_list` と同じ前例。新設すると既存の 10 分岐がインフラ障害と読む）。`--on-prompt human` では待機を継続する

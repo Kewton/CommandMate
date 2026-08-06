@@ -15,7 +15,12 @@ import { createLogger } from '@/lib/logger';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/session/cli-session';
-import { detectSessionStatus, STATUS_REASON, SELECTION_LIST_REASONS } from '@/lib/detection/status-detector';
+import {
+  detectSessionStatus,
+  STATUS_REASON,
+  SELECTION_LIST_REASONS,
+  type SessionStatus,
+} from '@/lib/detection/status-detector';
 import {
   getAutoYesState,
   getLastServerResponseTimestamp,
@@ -28,16 +33,26 @@ import {
 } from '@/lib/polling/auto-yes-suppression-state';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tmux-capture-cache';
-import { getLastAgentEvent, getLastStopEventAt } from '@/lib/session/agent-event-state';
+import {
+  getLastAgentEvent,
+  getLastStopEventAt,
+  getStructuredSessionState,
+  type StructuredSessionState,
+} from '@/lib/session/agent-event-state';
 import type { PromptData } from '@/types/models';
 
 /**
  * The last structured lifecycle event this instance reported (Issue #1722).
  *
- * Diagnostic only, and the shape says so: one event, not a log. It exists so an
+ * Diagnostic, and the shape says so: one event, not a log. It exists so an
  * operator can answer "are the injected hooks reaching this server at all, and
- * for the right instance?" without reading server logs. Nothing here feeds
- * `sessionStatus` — that is Issue #1723.
+ * for the right instance?" without reading server logs.
+ *
+ * It is the raw event, NOT the verdict. Since Issue #1723 the same event may
+ * also have decided `sessionStatus` — `sessionStatusReason` starting with
+ * `hook_` is how you tell that it did — but the two are reported separately on
+ * purpose: an event arrives here even when the merge declined to act on it, and
+ * that gap is the measurement the Epic is collecting.
  */
 export interface StructuredEventsPayload {
   /** e.g. `stop`, `user_prompt_submit`, `notification`. */
@@ -86,16 +101,15 @@ export interface CurrentOutputPayload {
    * Epoch ms of the last `POST /api/hooks/agent-event` stop event, or null when
    * the agent has no hook wired up (Issue #1549).
    *
-   * Exposed only. `sessionStatus` and every completion decision downstream still
-   * come from the string analysis above; this is the second opinion, published
-   * so the two can be compared on real sessions before either is trusted over
-   * the other.
+   * Still exposed only — this timestamp itself decides nothing. Since Issue
+   * #1723 the *event* behind it can drive `sessionStatus`, but through
+   * `getStructuredSessionState`, which applies the generation and age bounds
+   * this raw field has never had.
    */
   lastStopEventAt: number | null;
   /**
    * Last structured event of any kind, or nulls when none has arrived
-   * (Issue #1722). Exposed alongside `lastStopEventAt` and, like it, read by
-   * nothing that decides anything.
+   * (Issue #1722). See {@link StructuredEventsPayload}.
    */
   structuredEvents: StructuredEventsPayload;
 }
@@ -189,6 +203,97 @@ function recordUnclassifiedFrame(
   }
 }
 
+/** What `detectSessionStatus()` said about this frame, as this module uses it. */
+export interface ScraperVerdict {
+  status: SessionStatus;
+  reason: string;
+  /** The agent is producing output right now. */
+  thinking: boolean;
+  /** The frame is interactive but could not be classified (#1497 / #1708). */
+  isUnclassifiedActive: boolean;
+}
+
+export interface MergedStatusVerdict extends ScraperVerdict {
+  /** True when the structured layer, not the scraper, decided `status`. */
+  structuredApplied: boolean;
+}
+
+/**
+ * Prefer the agent's own account of what it is doing over the screen scrape
+ * (Issue #1723).
+ *
+ * Pure, and exported so the whole precedence table can be tested without a tmux
+ * session behind it.
+ *
+ * ## Why the scraper still wins in two cases
+ *
+ * **`waiting` on the scraper's side always wins.** A frame the detector reads
+ * as a prompt, a selection list or a pager is a frame a human has to act on,
+ * and this Issue deliberately does not touch `isPromptWaiting` / `promptData` /
+ * `isSelectionListActive` (they are #1725's). Letting a structured `running`
+ * overwrite `sessionStatus` while those three still said "answer me" would
+ * publish a self-contradicting payload. It is also the empirically necessary
+ * rule: the live capture found that Claude emits **no event at all** while an
+ * `AskUserQuestion` selection or "Ready to submit your answers?" screen is up
+ * (`agent-hooks-live-verification.md` §5.6), so the newest structured fact
+ * there is the `user_prompt_submit` that opened the turn — `running` — while
+ * the truth on screen is "waiting for a human". That is precisely the #1708
+ * stall, and the scraper is the only layer that can see it.
+ *
+ * **A structured `waiting` is recorded, never applied.** `Notification(
+ * permission_prompt)` maps to `waiting`, and this Issue stops at recording it:
+ * promoting it is #1725's job, together with the `promptData` that would have
+ * to come with it. There is a second reason to hold back — nothing marks a
+ * permission prompt as *answered*. Claude emits no event when the dialog is
+ * dismissed, so an applied `waiting` would stick until the next `Stop` and
+ * describe a session that went back to work minutes ago.
+ *
+ * ## The one flag this touches beyond `sessionStatus`
+ *
+ * `isUnclassifiedActive` is cleared only for the `Stop`-arrived-but-the-pane-
+ * still-looks-busy case (structured `ready` over scraper `running`). That case
+ * is the entire point of the Issue for `commandmate wait`, whose completion
+ * check is `sessionStatus === 'ready' && isUnclassifiedActive !== true` — leave
+ * the flag up and the structured `ready` buys nothing.
+ *
+ * Everywhere else the flag is left exactly as the scraper set it, which is not
+ * timidity but two specific behaviours that must survive:
+ *
+ *  - a static overlay left on screen after a turn (`/help`, #1497) reads as
+ *    `ready`/`no_recent_output` while the structured layer also says `ready` —
+ *    the two agree, the structured layer adds nothing, and clearing the flag
+ *    would take away the navigation hatch the user needs to escape;
+ *  - a frame nobody can classify while the structured layer says `running` is
+ *    still a frame nobody can classify. `wait`'s unclassified dwell (exit 10)
+ *    is the last hatch for a screen that produces no events at all, and #1708
+ *    exists because it was missing. A structured `running` does not prove a
+ *    human is not needed — see the AskUserQuestion case above.
+ */
+export function mergeStructuredStatus(
+  scraper: ScraperVerdict,
+  structured: StructuredSessionState | null,
+): MergedStatusVerdict {
+  if (
+    structured === null ||
+    scraper.status === 'waiting' ||
+    structured.status === 'waiting'
+  ) {
+    return { ...scraper, structuredApplied: false };
+  }
+
+  const thinking = structured.status === 'running';
+  return {
+    status: structured.status,
+    reason: structured.reason,
+    thinking,
+    isUnclassifiedActive:
+      structured.status === 'ready' && scraper.status === 'running'
+        ? false
+        : scraper.isUnclassifiedActive,
+    structuredApplied: true,
+  };
+}
+
 /**
  * Build the current-output payload for a worktree session.
  *
@@ -276,6 +381,38 @@ export async function buildCurrentOutput(
     (statusResult.status === 'running' && statusResult.reason === STATUS_REASON.DEFAULT) ||
     (statusResult.status === 'ready' && statusResult.reason === STATUS_REASON.NO_RECENT_OUTPUT);
 
+  // Issue #1723: the two-layer merge. Everything above this line is the string
+  // analysis, unchanged and still the only source on a machine where no hook
+  // ever fires — `getStructuredSessionState` answers null there, and
+  // `mergeStructuredStatus` then returns the scraper's verdict untouched.
+  const structured = getStructuredSessionState(worktreeId, cliToolId, instanceId);
+  const merged = mergeStructuredStatus(
+    { status: statusResult.status, reason: statusResult.reason, thinking, isUnclassifiedActive },
+    structured,
+  );
+
+  // Issue #1723 §3: the field data this Epic is being built on. Every line is
+  // one poll where the screen and the agent disagreed about what the agent was
+  // doing, which is the only way to answer "how wrong was the scraper?" with a
+  // number instead of an anecdote. Emitted only on disagreement — a session
+  // where the two layers agree is silent — and including the disagreements this
+  // merge deliberately does NOT act on (`applied: false`), because those are
+  // exactly the cases the next Issues in the Epic have to decide about.
+  if (structured !== null && structured.status !== statusResult.status) {
+    logger.info('detection-divergence', {
+      worktreeId,
+      cliToolId,
+      instanceId: resolvedInstanceId,
+      scraperStatus: statusResult.status,
+      scraperReason: statusResult.reason,
+      structuredStatus: structured.status,
+      structuredReason: structured.reason,
+      structuredEvent: structured.event,
+      structuredEventAt: structured.at,
+      applied: merged.structuredApplied,
+    });
+  }
+
   // Issue #1708: a frame nothing could classify left no trace anywhere. Both
   // prompt-history writers (response-checker's pending row and
   // recordAnsweredPrompt) are gated on `promptDetection.isPrompt === true`, so
@@ -286,15 +423,20 @@ export async function buildCurrentOutput(
   // Recorded here because this is the one place the flag is computed, and both
   // the HTTP pull and the WebSocket push run through it, so the row appears at
   // whatever cadence the session is actually being watched at.
-  const unclassifiedVerdict = observeUnclassifiedFrame(compositeKey, isUnclassifiedActive);
+  //
+  // Fed the MERGED flag (#1723): a frame the structured layer classified is not
+  // an unclassified frame, and writing a "detection failed" row for a turn the
+  // agent itself told us had ended would put a false stall into the audit trail
+  // `capture --prompts` prints.
+  const unclassifiedVerdict = observeUnclassifiedFrame(compositeKey, merged.isUnclassifiedActive);
   if (unclassifiedVerdict.shouldRecord) {
     recordUnclassifiedFrame(db, {
       worktreeId,
       cliToolId,
       instanceId: resolvedInstanceId,
       dwellMs: unclassifiedVerdict.dwellMs,
-      sessionStatus: statusResult.status,
-      sessionStatusReason: statusResult.reason,
+      sessionStatus: merged.status,
+      sessionStatusReason: merged.reason,
     });
   }
 
@@ -304,17 +446,17 @@ export async function buildCurrentOutput(
   return {
     isRunning: true,
     cliToolId,
-    sessionStatus: statusResult.status,
-    sessionStatusReason: statusResult.reason,
+    sessionStatus: merged.status,
+    sessionStatusReason: merged.reason,
     content: newContent,
     fullOutput: output,
     realtimeSnippet,
     lineCount: totalLines,
     lastCapturedLine,
     isComplete: isPromptWaiting,
-    isGenerating: thinking,
-    thinking,
-    thinkingMessage: thinking ? 'Claude is thinking...' : null,
+    isGenerating: merged.thinking,
+    thinking: merged.thinking,
+    thinkingMessage: merged.thinking ? 'Claude is thinking...' : null,
     isPromptWaiting,
     promptData: isPromptWaiting ? statusResult.promptDetection.promptData ?? null : null,
     autoYes: {
@@ -325,7 +467,7 @@ export async function buildCurrentOutput(
     },
     isSelectionListActive,
     isPagerActive,
-    isUnclassifiedActive,
+    isUnclassifiedActive: merged.isUnclassifiedActive,
     lastServerResponseTimestamp,
     serverPollerActive: isPollerActive(compositeKey),
     lastStopEventAt: stopEventAt,
