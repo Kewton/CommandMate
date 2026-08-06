@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **detection: 実 TUI カナリアで Claude 新バージョンの検出回帰を検知する** (#1727)
+  - `npm run canary` で実 `claude` を使い捨て tmux セッションに起動し、5 シナリオ（idle / 許可ダイアログ / AskUserQuestion＋タスクパネル併存 / `/model` オーバーレイ / 生成中）の capture を**本番と同じ 2 経路**に食わせて assert する。ステータス経路（`detectSessionStatus`）と Auto-Yes 経路（`detectPrompt` 直呼び）を**独立に**検証する — #1495 は Auto-Yes 側だけで発火した欠陥だった
+  - **隔離を仕組みで強制**。tmux は全呼び出しが `-L cmate-canary-*` を経由し、`kill-server` は専用メソッド以外から到達できない（`-L` 無しの `kill-server` が稼働中の全 `mcbd-*` を消した前例がある）。HOME は使い捨てにしたうえで `show-environment` で**転送されたことを assert** し、実 `~/.claude/settings.json` の sha256 と `mcbd-*` 一覧を各シナリオの前後で再検証する（違反は exit 3）
+  - **ハーネス自身の非空振りを `--mutate` で証明する**。各シナリオが持つ「もっともらしいが誤った期待値」で走らせ、全部赤にならなければ自己テスト失敗として扱う（実測 5/5 赤）
+  - **上流障害と検出回帰を区別する**。`529 Overloaded · Retrying in …` が写っている間は最大 180 秒シナリオの時計を止め、到達できなければ `blocked`（exit 4）として報告する。判定パターンは「usage limit reached」等のエラー文言に限定した — 単に `usage limit` を見る実装は Claude の販促バナー（"weekly usage limit on Fable 5"）に誤爆し、緑の実行を全件 blocked にした
+  - 各シナリオの実フレームを `tests/fixtures/canary/` に毎回保存するので、赤が出たときは**新バージョンの実キャプチャがそのまま修正用 fixture** になる。純関数部分は `tests/unit/canary/` が commit 済み fixture で固定し、CI では tmux も課金も不要
+  - claude 2.1.223 で 5 シナリオ緑（約 29 秒）。手順・費用の目安・CI 組み込み案 A/B は [docs/qa/detection-canary.md](docs/qa/detection-canary.md)
+
 ## [0.21.5] - 2026-08-06
 
 > **Highlight**: スラッシュコマンドカタログのリコンサイルを「運用として成立する」状態にした（Epic #1707）。従来はリコンサイルツールが**過去に人間が何を除外したかを知らない**ため、同じ 3 件を毎リリース提案し続け、適用するとガードテストが赤くなり、人間が過去 Issue を読み直して手で消す、というループになっていた。除外判断をデータ化したことで提案は **3 件 → 1 件**に減り、残る 1 件は「未決の判断が存在する」という正しい signal として機能する。あわせて、`--write` が必ず生成する `[要レビュー]` プレースホルダの流出をテストで止め、ドリフトの週次検知と手順の skill 化を入れた。
