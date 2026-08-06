@@ -21,6 +21,11 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { sendUserMessage } from '@/lib/session/send-user-message';
 import {
+  isPromptWaiting,
+  promptWaitingMessage,
+  PROMPT_WAITING_CODE,
+} from '@/lib/session/prompt-waiting-guard';
+import {
   isSessionStartTimeoutError,
   SESSION_STARTING_CODE,
 } from '@/lib/session/session-start-error';
@@ -296,6 +301,27 @@ export async function POST(
       // Issue #1120: push the running transition so sidebar status dots flip
       // immediately instead of waiting for the next /api/worktrees poll.
       broadcastSessionStatus(id, true, { cliTool: cliToolId, instance: instanceId ?? null });
+    }
+
+    // Issue #1708: refuse to type into an open prompt dialog. Keystrokes sent
+    // while one is up do not reach the agent — they accumulate in the prompt's
+    // own input line — so the send is silently lost AND the next `respond` has
+    // to answer a prompt whose input already contains somebody else's text,
+    // which is how an answer gets delivered as a message. Checked here rather
+    // than inside sendUserMessage() so the answer paths (`respond`,
+    // `special-keys`, `prompt-response`) are untouched: they exist to clear this
+    // exact state and blocking them would leave no way out of it.
+    const promptGuard = await isPromptWaiting(id, cliToolId, instanceId);
+    if (promptGuard.waiting) {
+      logger.info('send-refused-prompt-waiting', { worktreeId: id, cliToolId, reason: promptGuard.reason });
+      return NextResponse.json(
+        {
+          error: promptWaitingMessage(id),
+          code: PROMPT_WAITING_CODE,
+          sessionStatusReason: promptGuard.reason,
+        },
+        { status: 409 }
+      );
     }
 
     // Issue #474: Validate imagePath if provided (HTTP-layer validation stays here)
