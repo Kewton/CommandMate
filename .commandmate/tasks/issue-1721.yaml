@@ -1,0 +1,53 @@
+version: 1
+title: "Issue #1721: Claude Code hooks の実機挙動を検証し payload fixture を収集する（Phase 0 スパイク）"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/1721 を実施してください。
+  Issue 本文を `gh issue view 1721 --repo Kewton/CommandMate` で取得し、記載の検証項目 1〜7 をすべて実施すること。
+
+  これは**スパイク**です。src 配下のコードは一切変更しません。成果物は検証レポートと実 payload fixture の2つだけです。
+  TDD 実装フェーズは不要なので、スラッシュコマンドによる自動開発フローは使わず、直接調査・検証を行ってください。
+
+  ## 成果物（この2つのみ）
+
+  1. `docs/design/agent-hooks-live-verification.md`
+     - **冒頭に結論の表**（検証項目 × 実測結果 × 再現コマンド）を置くこと。下流 Issue #1722 / #1724 がこの表を仕様の根拠として引用します
+     - 各項目に「何を実行して」「何が起きたか」を、読んだ人が再実行できる粒度で書くこと
+     - 公式ドキュメントの記述と実測が食い違った場合、**食い違い自体を目立つように書く**（これが本 Issue の最重要成果物です）
+  2. `tests/fixtures/hooks/claude/*.json`
+     - PermissionRequest / PreToolUse(AskUserQuestion) / Notification(permission_prompt, idle_prompt) / Stop / UserPromptSubmit / SessionStart / SessionEnd の実 payload
+     - 絶対パス・トークン・セッション ID など環境固有値はプレースホルダに置換すること
+     - ファイル名はイベント名から機械的に決まる形（例 `permission-request.json`）にすること
+
+  ## 作業ルール（厳守）
+
+  - **src/ 配下を変更しない。** 変更した場合この委任は失敗とみなします
+  - **隔離必須**: 実 TUI プローブは過去にユーザーのグローバル設定を書き換える事故を起こしています（/model 実行でデフォルトモデルが変わった）。
+    HOME 隔離または `--settings` のみで実施し、**`~/.claude/settings.json` の before/after diff が空であること**をレポートに証拠として記載すること
+  - **tmux は必ず `-L <専用socket>` で起動する。** `-L` / `-S` は `$TMUX` より優先されます。
+    あなたは tmux ペインの中で動いており `$TMUX` はユーザーの本番サーバを指しているため、フラグ無しの `tmux` 呼び出しは**すべてユーザーの本番セッションに届きます**
+  - **`kill-server` を書かない。** 後始末は `kill-session -t '=<name>:'`（完全一致）で行うこと
+  - **`TMUX_TMPDIR` を隔離手段に使わない。** `$TMUX` が設定されていると完全に無視されます
+  - **`bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たない。** 全セッションに波及します
+  - hook の受け側は使い捨てのリクエストダンプサーバを使うこと。**稼働中の本番サーバ（port 3000）へ stop イベントを飛ばさない**（本番 DB の task_events に書き込まれます）
+  - 変更は**単一コミット**にまとめること。**PR は作らないこと**（オーケストレーターが作成します）
+  - `dev-reports/` 配下の進捗レポート類は作成不要です
+  - 完了したら最終行に `IMPL_COMPLETED` とだけ出力すること
+
+  ## 完了条件
+
+  - Issue #1721 の受入基準（🤖 自動検証可能 / 👤 手動検証）をすべて満たしていること
+  - `for f in tests/fixtures/hooks/claude/*.json; do python3 -m json.tool "$f" > /dev/null || echo "NG: $f"; done` が何も出力しないこと
+  - `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` が exit 0（**`cmd > log; echo $?` で exit code を実測すること**。grep へのパイプは exit code を隠します）
+scope:
+  allow:
+    - "docs/design/**"
+    - "tests/fixtures/hooks/**"
+    - "CHANGELOG.md"
+    - "dev-reports/**"
+  deny:
+    - "src/**"
+verify:
+  gates: [lint, typecheck, unit]
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **detection: Claude Code hooks の実機検証レポートと実 payload fixture** (#1721)
+  - `docs/design/agent-hooks-live-verification.md` — Epic #1720 の全下流 Issue が前提にする hooks の挙動を v2.1.223 で実測した。隔離 HOME ＋ 専用 tmux socket ＋ 使い捨てダンプサーバで再現可能な形にしてある。コード変更なし（スパイク）
+  - `tests/fixtures/hooks/claude/*.json` — `PermissionRequest` / `PreToolUse(AskUserQuestion)` / `Notification(permission_prompt, idle_prompt)` / `Stop` / `UserPromptSubmit` / `SessionStart` / `SessionEnd` の実 payload 12 件。環境固有値はプレースホルダに置換済み
+  - **公式ドキュメントとの食い違いを 3 件検出**した。(1) `SessionStart` では `type:"http"` が**黙って skip される**（debug ログにしか出ない。`type:"command"` 必須）、(2) `PermissionRequest` の実 payload には `permission_requirements` も `tool_use_id` も無く、代わりに `permission_suggestions` が入る、(3) TUI で承認を拒否しても `PermissionDenied` は発火しない
+  - **Auto-Yes v2 (#1724) の安全性の根拠を実測で固定**した。hook が空応答を返すと従来どおり TUI 承認ダイアログにフォールバックし、timeout も接続不能もすべて fail-open。一方 `AskUserQuestion` は `allow` を返しても選択画面が出るため、一律 allow では突破できない
+
 ## [0.21.5] - 2026-08-06
 
 > **Highlight**: スラッシュコマンドカタログのリコンサイルを「運用として成立する」状態にした（Epic #1707）。従来はリコンサイルツールが**過去に人間が何を除外したかを知らない**ため、同じ 3 件を毎リリース提案し続け、適用するとガードテストが赤くなり、人間が過去 Issue を読み直して手で消す、というループになっていた。除外判断をデータ化したことで提案は **3 件 → 1 件**に減り、残る 1 件は「未決の判断が存在する」という正しい signal として機能する。あわせて、`--write` が必ず生成する `[要レビュー]` プレースホルダの流出をテストで止め、ドリフトの週次検知と手順の skill 化を入れた。
