@@ -160,29 +160,132 @@ describe('POST /send refuses while a prompt is waiting (Issue #1708)', () => {
   });
 });
 
-describe('the answer paths stay open while a prompt is waiting (Issue #1708)', () => {
-  // Structural, and deliberately so: respond / special-keys / prompt-response are
-  // how a human or Auto-Yes clears the dialog. If the guard ever gets hoisted
-  // into a layer they share, they would start refusing too and the session would
-  // become unblockable — the one failure worse than the one being fixed.
-  const API_ROOT = fileURLToPath(new URL('../../src/app/api/worktrees/', import.meta.url));
+describe('sendUserMessage itself refuses, so scheduled sends are covered too (Issue #1708)', () => {
+  let db: Database.Database;
 
-  function routeSourcesReferencingGuard(): string[] {
+  beforeEach(async () => {
+    db = new Database(':memory:');
+    runMigrations(db);
+    const { setMockDb } = (await import('@/lib/db/db-instance')) as unknown as {
+      setMockDb: (d: Database.Database) => void;
+    };
+    setMockDb(db);
+    vi.clearAllMocks();
+    upsertWorktree(db, {
+      id: WORKTREE_ID,
+      name: 'Send Guard',
+      path: '/path/to/send-guard',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'TestRepo',
+      cliToolId: 'claude',
+    });
+  });
+
+  afterEach(async () => {
+    const { closeDbInstance } = await import('@/lib/db/db-instance');
+    closeDbInstance();
+    db.close();
+  });
+
+  it('refuses at the service layer, which is what the timer manager calls', async () => {
+    // src/lib/timer-manager.ts calls sendUserMessage directly. A guard placed in
+    // the send route would have left a scheduled message firing into an open
+    // dialog on its own timetable, with nobody watching.
+    vi.mocked(captureSessionOutput).mockResolvedValue(PROMPT_FRAME);
+    const { sendUserMessage } = await import('@/lib/session/send-user-message');
+
+    const result = await sendUserMessage(db, {
+      worktreeId: WORKTREE_ID,
+      content: 'scheduled nudge',
+      cliToolId: 'claude',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.stage).toBe('prompt_waiting');
+    expect(result.ok === false && result.error).toContain('respond');
+    expect(sendMessageToClaude).not.toHaveBeenCalled();
+    // The timer manager persists `[stage] error` as the timer's failure reason,
+    // so the refusal explains itself in the UI with no change on its side.
+  });
+
+  it('sends at the service layer when nothing is waiting', async () => {
+    vi.mocked(captureSessionOutput).mockResolvedValue(IDLE_FRAME);
+    const { sendUserMessage } = await import('@/lib/session/send-user-message');
+
+    const result = await sendUserMessage(db, {
+      worktreeId: WORKTREE_ID,
+      content: 'scheduled nudge',
+      cliToolId: 'claude',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(sendMessageToClaude).toHaveBeenCalled();
+  });
+});
+
+describe('the guard covers every message-send path and no answer path (Issue #1708)', () => {
+  // Structural, and deliberately so. The guard sits in sendUserMessage() because
+  // that is the choke point for typing a message at an agent. Two invariants keep
+  // it honest, and neither is visible from any single file:
+  //
+  //   1. Everything that types a message goes through sendUserMessage(). The
+  //      timer manager calls it directly, and a guard placed in the send route
+  //      would have let scheduled sends fire into open dialogs.
+  //   2. respond / special-keys / prompt-response do NOT go through it. They are
+  //      the only way out of this state; if they ever start routing through
+  //      sendUserMessage they will begin refusing too, and the session becomes
+  //      unblockable — the one failure worse than the one being fixed.
+  const SRC = fileURLToPath(new URL('../../src/', import.meta.url));
+
+  /**
+   * Files that IMPORT `module`. Matched on the import statement rather than on
+   * the bare name, so a mention in a comment does not count as a dependency —
+   * the first cut of this test did, and reported two prose references as
+   * callers.
+   */
+  function importersOf(module: string): string[] {
+    const importRe = new RegExp(`from\\s+['"][^'"]*${module}['"]`);
     const hits: string[] = [];
     const walk = (dir: string) => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const full = join(dir, entry.name);
         if (entry.isDirectory()) walk(full);
-        else if (entry.name.endsWith('.ts') && readFileSync(full, 'utf8').includes('prompt-waiting-guard')) {
-          hits.push(relative(API_ROOT, full));
+        else if (entry.name.endsWith('.ts') && importRe.test(readFileSync(full, 'utf8'))) {
+          hits.push(relative(SRC, full));
         }
       }
     };
-    walk(API_ROOT);
+    walk(SRC);
     return hits.sort();
   }
 
-  it('is consulted by the send route and by nothing else under /api/worktrees', () => {
-    expect(routeSourcesReferencingGuard()).toEqual(['[id]/send/route.ts']);
+  it('is called only from sendUserMessage', () => {
+    expect(importersOf('prompt-waiting-guard')).toEqual([
+      'app/api/worktrees/[id]/send/route.ts', // PROMPT_WAITING_CODE only, see below
+      'lib/session/send-user-message.ts',
+    ]);
+    // The route imports the status code to map the refusal, not the check
+    // itself. Re-adding a pre-check there would mean two capture passes per
+    // send and two places to keep in step.
+    const route = readFileSync(join(SRC, 'app/api/worktrees/[id]/send/route.ts'), 'utf8');
+    expect(route).not.toContain('isPromptWaiting');
+  });
+
+  it('names every caller of sendUserMessage, so a new one is a decision', () => {
+    expect(importersOf('send-user-message')).toEqual([
+      'app/api/worktrees/[id]/send/route.ts',
+      'lib/timer-manager.ts',
+    ]);
+  });
+
+  it('keeps the answer routes off that path entirely', () => {
+    for (const route of ['respond', 'special-keys', 'prompt-response']) {
+      const source = readFileSync(
+        join(SRC, 'app/api/worktrees/[id]', route, 'route.ts'),
+        'utf8'
+      );
+      expect(source).not.toContain('prompt-waiting-guard');
+      expect(source).not.toContain('send-user-message');
+    }
   });
 });

@@ -72,9 +72,11 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   input line, and the next respond then carries that text along as a message
   instead of an answer. Nudging a stalled worker is how this gets worse.
   Answer first: commandmate respond <id> <answer>. respond, special keys and
-  prompt-response are never refused -- they are the way out. The refusal only
-  fires where the prompt IS detected; a frame that slips past detection is
-  wait's "unclassified" case instead.
+  prompt-response are never refused -- they are the way out. Timer-fired sends
+  ARE refused (same service layer) and record [prompt_waiting] as their reason.
+  The refusal only fires where the prompt IS detected; a frame that slips past
+  detection is wait's "unclassified" case instead. It fails open if the pane
+  cannot be read, so treat it as a narrowing, not a guarantee.
 
   Finding worktree IDs:
     WT=$(commandmate ls --branch feature/101 --quiet)

@@ -10,6 +10,13 @@
  * someone else's text, which is how an "answer" can be delivered as a message.
  *
  * Refusing the send is the only thing that keeps `respond` well defined.
+ *
+ * Consulted from {@link sendUserMessage}, which is the choke point for every
+ * path that types a message at an agent — the send API and the timer manager.
+ * Putting it in the route instead would have left scheduled timer sends firing
+ * into open dialogs. The answer paths (`respond`, `special-keys`,
+ * `prompt-response`) do not go through that function, which is what keeps them
+ * open by construction rather than by remembering to exempt them.
  */
 
 import { CLIToolManager } from '@/lib/cli-tools/manager';
@@ -44,7 +51,9 @@ export interface PromptWaitingVerdict {
  *
  * Fail-open. A capture that throws must not make the session unwritable — the
  * cost of a missed guard is the pre-#1708 behaviour, while the cost of a false
- * refusal is a session nobody can talk to.
+ * refusal is a session nobody can talk to. Note this makes the guard a
+ * best-effort narrowing, not a barrier: it is not, and must not be relied on as,
+ * a correctness guarantee that no text ever reaches an open dialog.
  *
  * @param worktreeId - Worktree whose session is being written to
  * @param cliToolId - CLI tool driving that session

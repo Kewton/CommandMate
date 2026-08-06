@@ -93,6 +93,19 @@ const logger = createLogger('current-output-builder');
  * Not broadcast: this is a record for after the fact, and the prompt-answering
  * UI has nothing to render for a frame with no parsed options.
  *
+ * REACH, stated plainly because it is a real limit: this is driven by
+ * observation, not by the server's own loops. `buildCurrentOutput` has exactly
+ * two callers — the current-output route and `broadcastTerminalSnapshot`, which
+ * returns immediately when the room has no subscribers. So a row is written
+ * while `commandmate wait` is polling (every POLL_INTERVAL_MS), while a browser
+ * has the terminal open, or on a `capture --json`. A stall that nobody is
+ * watching at all writes nothing, and `capture --prompts` afterwards will not
+ * show it. That is tolerable because the stalls this exists to explain are the
+ * ones something WAS waiting on — but it means the Auto-Yes poller running
+ * alone is not enough. Feeding the tracker from that loop would need a second
+ * producer of `isUnclassifiedActive`, i.e. either duplicating its definition or
+ * adding a detectSessionStatus pass to a hot path; deliberately not done here.
+ *
  * Best effort — a failed insert must never break the payload the caller is
  * waiting on. The tracker has already marked the run as recorded, so a failure
  * costs this one row, not a retry storm.

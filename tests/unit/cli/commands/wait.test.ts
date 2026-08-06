@@ -470,18 +470,114 @@ describe('Issue #520: sessionStatus completion detection', () => {
       );
     });
 
-    it('still reports a ready session as completed even though it raises the flag', async () => {
-      // `ready`/`no_recent_output` also publishes isUnclassifiedActive (#1497).
-      // The completion check has to keep winning, or every finished agent would
-      // eventually be reported as blocked.
-      mockFetchSequence([
-        { data: { ...ready, isUnclassifiedActive: true, sessionStatusReason: 'no_recent_output' } },
-      ]);
+    it('reports a genuinely finished session as completed on the first poll', async () => {
+      // The real completion signal is `ready` with the frame understood — the
+      // agent back at its composer (`ready`/`input_prompt`). It does not raise
+      // the flag, so nothing here delays it.
+      mockFetchSequence([{ data: { ...ready, sessionStatusReason: 'input_prompt' } }]);
 
       const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
       await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
 
       expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+    });
+
+    // `isUnclassifiedActive` is raised by TWO states:
+    //   (running && default) || (ready && no_recent_output)
+    // The second is what a static unreadable overlay DEGRADES into once the
+    // Auto-Yes poller stamps lastServerResponseTimestamp — about 5s
+    // (STALE_OUTPUT_THRESHOLD_MS), twelve times faster than this dwell. So
+    // `ready` here means "still unreadable, and now stale too", not "finished".
+    describe('the degraded `ready`/`no_recent_output` form is not a completion', () => {
+      const degraded = {
+        ...unclassified,
+        sessionStatus: 'ready' as const,
+        sessionStatusReason: 'no_recent_output',
+      };
+
+      it('does not report SUCCESS when the stall degrades before the dwell elapses', async () => {
+        // Measured before this guard: this exact sequence returned exit 0.
+        // Reporting a stalled worker as `Completed` is worse than the timeout
+        // Issue #1708 complained about — 124 stops a pipeline, 0 lets it merge.
+        vi.useFakeTimers();
+        mockFetchSequence([...repeat(unclassified, 2), ...repeat(degraded, 20)]);
+
+        const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+        const promise = createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+        await vi.advanceTimersByTimeAsync(200_000);
+        await promise;
+
+        expect(mockExit).not.toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+        expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+        const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
+        expect(output.type).toBe('unclassified');
+        expect(output.question).toContain('ready/no_recent_output');
+      });
+
+      it('carries the dwell across the degradation instead of restarting it', async () => {
+        // The two states are one stuck overlay seen at two moments, so the run
+        // must not break at the transition — otherwise a stall that degrades at
+        // 55s starts counting again from zero, forever.
+        vi.useFakeTimers();
+        mockFetchSequence([...repeat(unclassified, 12), ...repeat(degraded, 5)]);
+
+        const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+        const promise = createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+        await vi.advanceTimersByTimeAsync(120_000);
+        await promise;
+
+        expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+      });
+
+      it('completes as soon as the frame becomes readable again', async () => {
+        // The suppression is not sticky: a stall that resolves into a real idle
+        // composer is a completion, and must not need the dwell to expire first.
+        vi.useFakeTimers();
+        mockFetchSequence([
+          ...repeat(unclassified, 3),
+          { data: { ...ready, sessionStatusReason: 'input_prompt' } },
+        ]);
+
+        const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+        const promise = createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+        await vi.advanceTimersByTimeAsync(40_000);
+        await promise;
+
+        expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+      });
+
+      it('still reports a vanished session as completed', async () => {
+        // Path A is untouched: a session that went away really is finished, and
+        // a stopped session publishes no flag to suppress anything with.
+        vi.useFakeTimers();
+        mockFetchSequence([
+          ...repeat(unclassified, 3),
+          { data: { ...baseOutput, isRunning: false } },
+        ]);
+
+        const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+        const promise = createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+        await vi.advanceTimersByTimeAsync(40_000);
+        await promise;
+
+        expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+      });
+    });
+
+    it('lets a --timeout shorter than the dwell win', async () => {
+      // Documented consequence of the dwell being a constant: it pre-empts long
+      // waits, it does not extend short ones.
+      vi.useFakeTimers();
+      mockFetchSequence(repeat(unclassified, 20));
+
+      const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+      const promise = createWaitCommand().parseAsync([
+        'node', 'wait', 'wt1', '--timeout', '30',
+      ]);
+      await vi.advanceTimersByTimeAsync(70_000);
+      await promise;
+
+      expect(mockExit).toHaveBeenCalledWith(WaitExitCode.TIMEOUT);
     });
   });
 

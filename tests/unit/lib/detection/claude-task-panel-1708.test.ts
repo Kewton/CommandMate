@@ -179,6 +179,24 @@ describe('Issue #1708: the panel guard cannot swallow a real option', () => {
     }
   });
 
+  it('does not claim checkbox-rendered options (multi-select AskUserQuestion)', () => {
+    // Measured on the first cut of this guard, whose glyph set included ☐ ☑ ☒
+    // "because they are the same family": all three option rows were claimed as
+    // panel content and the prompt above them vanished — isPrompt=false with
+    // zero options, which is Issue #1708's own failure recreated by its fix.
+    const frame = [
+      'Which colors do you like?',
+      '',
+      '  7 tasks (2 done, 1 in progress, 4 open)',
+      '☐ 1. Blue',
+      '☑ 2. Green',
+      '☐ 3. Red',
+    ].join('\n');
+
+    expect([...findClaudeTaskPanelLines(frame.split('\n'), 0, 6)]).toEqual([2]);
+    expect(labels(frame)).toEqual(['Blue', 'Green', 'Red']);
+  });
+
   it('does not claim a transcript marker line', () => {
     // ⏺ / ⎿ / ✔ are what findApprovalContextStart uses to find the previous
     // turn's edge; claiming them here would move that boundary.

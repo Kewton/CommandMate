@@ -38,6 +38,7 @@ import { savePendingAssistantResponse } from '@/lib/assistant-response-saver';
 import { sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
 import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
 import { createLogger } from '@/lib/logger';
+import { isPromptWaiting, promptWaitingMessage } from '@/lib/session/prompt-waiting-guard';
 import { COPILOT_SEND_ENTER_DELAY_MS } from '@/config/copilot-constants';
 import type { CopilotTool } from '@/lib/cli-tools/copilot';
 import type { ChatMessage, MessageType } from '@/types/models';
@@ -65,7 +66,14 @@ export interface SendUserMessageParams {
 /** Result of {@link sendUserMessage}. */
 export type SendUserMessageResult =
   | { ok: true; message: ChatMessage }
-  | { ok: false; stage: 'model' | 'send'; error: string };
+  /**
+   * `prompt_waiting` (Issue #1708) is a refusal, not a failure: nothing was
+   * sent because sending would have typed into an open prompt dialog. Callers
+   * that surface errors verbatim already read correctly — the timer manager
+   * persists `[prompt_waiting] <message>` as the timer's reason — and the send
+   * route maps it to its own status code.
+   */
+  | { ok: false; stage: 'model' | 'send' | 'prompt_waiting'; error: string };
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -86,6 +94,29 @@ export async function sendUserMessage(
   const messageType: MessageType = params.messageType ?? 'normal';
 
   const cliTool = CLIToolManager.getInstance().getTool(cliToolId);
+
+  // Issue #1708: refuse before the first side effect. A prompt dialog does not
+  // forward keystrokes to the agent — they accumulate in its own input line — so
+  // the message is lost AND the next `respond` has to answer a prompt whose
+  // input already holds someone else's text, which is how an answer gets
+  // delivered as a message.
+  //
+  // The guard lives HERE rather than in the send route because this function is
+  // the choke point for every path that types a message at an agent: the route
+  // and the timer manager (src/lib/timer-manager.ts, which calls it directly and
+  // would otherwise fire straight into an open dialog on schedule). The answer
+  // paths — `respond`, `special-keys`, `prompt-response` — do not go through
+  // here at all, which is what keeps them open; they are the only way out of
+  // this state and blocking them would strand the session.
+  const promptGuard = await isPromptWaiting(worktreeId, cliToolId, instanceId);
+  if (promptGuard.waiting) {
+    logger.info('send-refused-prompt-waiting', {
+      worktreeId,
+      cliToolId,
+      reason: promptGuard.reason,
+    });
+    return { ok: false, stage: 'prompt_waiting', error: promptWaitingMessage(worktreeId) };
+  }
 
   // Generate the user-message timestamp BEFORE saving the pending response so
   // ordering holds: assistantResponse < userMessage.

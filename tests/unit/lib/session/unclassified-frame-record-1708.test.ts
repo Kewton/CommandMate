@@ -25,6 +25,7 @@ import { getMessages, markPendingPromptsAsAnswered, upsertWorktree, createMessag
 import {
   observeUnclassifiedFrame,
   resetUnclassifiedFrameTracking,
+  unclassifiedFrameRunCount,
   UNCLASSIFIED_RECORD_DWELL_MS,
 } from '@/lib/detection/unclassified-frame-tracker';
 import { UNCLASSIFIED_PROMPT_TYPE } from '@/types/models';
@@ -259,5 +260,33 @@ describe('Issue #1708: unclassified dwell tracker', () => {
     const skewed = observeUnclassifiedFrame('c', true, 0);
     expect(skewed.dwellMs).toBe(0);
     expect(skewed.shouldRecord).toBe(false);
+  });
+
+  it('survives module re-evaluation via globalThis (dev hot reload)', async () => {
+    // Without the globalThis handle, `npm run dev` throws the run away on every
+    // hot reload, so the dwell restarts from zero and the record is never
+    // written — invisible from the payload, which still reports the flag fine.
+    observeUnclassifiedFrame('hot', true, 0);
+    vi.resetModules();
+    const reloaded = await import('@/lib/detection/unclassified-frame-tracker');
+
+    const verdict = reloaded.observeUnclassifiedFrame(
+      'hot',
+      true,
+      reloaded.UNCLASSIFIED_RECORD_DWELL_MS,
+    );
+    expect(verdict.shouldRecord).toBe(true);
+  });
+
+  it('ages out runs for sessions that stopped being polled', () => {
+    // A run normally ends when its session reports a classified frame. It can
+    // also end by nobody ever asking again (worktree removed, session killed).
+    // Nothing calls back to say so, and this Map is deliberately not registered
+    // with resource-cleanup's orphan sweep, so it has to age them out itself.
+    observeUnclassifiedFrame('gone', true, 0);
+    expect(unclassifiedFrameRunCount()).toBe(1);
+
+    observeUnclassifiedFrame('other', true, 60 * 60 * 1000 + 1);
+    expect(unclassifiedFrameRunCount()).toBe(1);
   });
 });

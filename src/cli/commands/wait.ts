@@ -65,6 +65,14 @@ const UNCLASSIFIED_PROMPT_TYPE = 'unclassified';
  * stopping on the instantaneous value would abort healthy runs. 60s is 12
  * consecutive POLL_INTERVAL_MS polls: far past any repaint, far short of the
  * 900s timeout this exists to pre-empt.
+ *
+ * Intentionally a constant with no flag. Two consequences, both intended:
+ *   - `--timeout`/`--stall-timeout` below 60s always win, so a caller that asks
+ *     for a short deadline still gets 124 rather than a delayed 10. The dwell
+ *     pre-empts long waits; it does not extend short ones.
+ *   - There is no way to tune it per call. Add one only if a real pane is found
+ *     that legitimately sits unclassified for a minute — a flag here is a knob
+ *     for working around a detector bug, and the bug is the thing to fix.
  */
 const UNCLASSIFIED_DWELL_MS = 60_000;
 
@@ -265,11 +273,30 @@ async function pollWorktree(
       // to burn its whole --timeout without ever mentioning it. Treat a
       // PERSISTENT unclassified frame as a stop reason of its own.
       //
-      // Deliberately below the completion check's peers and above the check
-      // itself: `ready`/`no_recent_output` also raises this flag, and that state
-      // exits as SUCCESS below before any dwell can accumulate. What survives to
-      // here is the `running`/`default` frame Issue #1708 reported — a dialog on
-      // screen that nothing recognised.
+      // The dwell deliberately spans BOTH states that raise this flag, and the
+      // completion check below is suppressed while it is up. That is the whole
+      // point, and it is worth spelling out because the obvious reading is the
+      // wrong one:
+      //
+      //   isUnclassifiedActive = (running && default) || (ready && no_recent_output)
+      //
+      // The second disjunct exists because a static unrecognised overlay DEGRADES
+      // into it — once the Auto-Yes poller stamps lastServerResponseTimestamp, a
+      // frame that stopped changing flips from `running`/`default` to
+      // `ready`/`no_recent_output` after STALE_OUTPUT_THRESHOLD_MS (5s). See the
+      // Issue #1497 note in current-output-builder.ts.
+      //
+      // So `ready` here does NOT mean "the agent finished". It means "we still
+      // cannot read this frame, and now its output has gone stale too" — and it
+      // arrives about twelve times faster than this dwell. Letting the completion
+      // check claim it turned a stalled worker into `Completed`, which is worse
+      // than the timeout Issue #1708 complained about: exit 124 stops a pipeline,
+      // exit 0 lets it merge. Measured before this guard: two unclassified polls
+      // followed by the degraded state returned SUCCESS.
+      //
+      // A genuine completion is `ready`/`input_prompt` — the agent back at its
+      // composer — which does not raise the flag at all, so it still exits
+      // SUCCESS on the first poll, unchanged.
       if (data.isUnclassifiedActive === true) {
         if (unclassifiedSince === null) unclassifiedSince = Date.now();
         const dwellMs = Date.now() - unclassifiedSince;
@@ -321,7 +348,12 @@ async function pollWorktree(
         return { exitCode: VerifyExitCode.NOT_STARTED };
       }
 
-      if (!data.isRunning || data.sessionStatus === 'ready') {
+      // Issue #1708 narrowed Path B: `ready` is only a completion when the frame
+      // was actually understood. `ready`/`no_recent_output` is the degraded form
+      // of an unreadable overlay (see the note above), and reporting it as
+      // `Completed` is how a stalled worker gets merged. Path A is untouched — a
+      // session that went away really is finished, and carries no flag anyway.
+      if (!data.isRunning || (data.sessionStatus === 'ready' && data.isUnclassifiedActive !== true)) {
         console.error(`Completed: ${worktreeId}`);
         return { exitCode: WaitExitCode.SUCCESS };
       }

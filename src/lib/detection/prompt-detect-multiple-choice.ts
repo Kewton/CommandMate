@@ -90,17 +90,29 @@ const CLAUDE_TASK_PANEL_HEADER_PATTERN = /^\s*\d{1,3}\s+tasks?\s+\(\d+\s+done\b/
  * guard anticipates. Skipping the whole panel block closes that off structurally
  * instead of one wording at a time.
  *
- * Glyph set is the box/checkbox family Claude renders these rows from (measured:
- * ◼ in-progress, ◻ open). It deliberately EXCLUDES ❯ ● › — DEFAULT_OPTION_PATTERN's
- * cursor indicators — and the ⏺ ⎿ ✔ ✗ transcript markers TURN_BOUNDARY_PATTERN
- * relies on. A guard that can swallow a real default option is the exact failure
- * class this Issue is about, and the cost of excluding them is nil: no observed
- * panel row uses one.
+ * The glyph set is exactly the two forms measured on a live pane — ◼ (in
+ * progress) and ◻ (open) — and nothing else. Every extra glyph is a line this
+ * guard can delete from the frame, so the set is an allowlist of things seen,
+ * not a guess at what the family might contain:
  *
- * An unmatched glyph simply ends the block, which is the safe direction — those
+ *   - ❯ ● › are DEFAULT_OPTION_PATTERN's cursor indicators.
+ *   - ⏺ ⎿ ✔ ✗ are the transcript markers TURN_BOUNDARY_PATTERN reads.
+ *   - ☐ ☑ ☒ are the natural rendering of a MULTI-SELECT choice, and
+ *     AskUserQuestion has a multiSelect mode. Measured: with those in the set,
+ *     `☐ 1. Blue / ☑ 2. Green / ☐ 3. Red` under a panel header is claimed as
+ *     panel content and the prompt above it disappears entirely
+ *     (isPrompt=false, zero options) — Issue #1708's own failure, recreated by
+ *     its fix. See the regression test.
+ *
+ * A completed row never appears (the panel collapses those into `… +N
+ * completed`, which SUMMARY_LINE_PATTERN handles), so no done-marker is needed.
+ * An unmatched glyph simply ends the block, which is the safe direction: those
  * rows go back to being handled exactly as they were before this guard existed.
+ *
+ * To widen this, capture a live pane that actually renders the new glyph and add
+ * it as a fixture. Do not widen it from the shape of the character.
  */
-const CLAUDE_TASK_PANEL_ROW_PATTERN = /^\s*[◼◻◾◽▪▫☐☑☒]\s/;
+const CLAUDE_TASK_PANEL_ROW_PATTERN = /^\s*[◼◻]\s/;
 
 /**
  * Line indices belonging to a Claude task panel within [start, end).
