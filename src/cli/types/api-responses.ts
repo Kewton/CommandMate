@@ -113,6 +113,23 @@ export interface CurrentOutputResponse {
   sessionStatus?: 'idle' | 'ready' | 'running' | 'waiting';
   /** Issue #520: Reason string from detectSessionStatus() or 'session_not_running' */
   sessionStatusReason?: string;
+  /**
+   * Issue #1549: epoch ms of the last structured stop event, or null when the
+   * agent has posted none.
+   */
+  lastStopEventAt?: number | null;
+  /**
+   * Issue #1722: the last lifecycle event the agent's injected hooks reported.
+   * Diagnostic — it tells an operator whether hooks are arriving and for which
+   * instance. No CLI verdict reads it; that is Issue #1723.
+   *
+   * Mirrors: src/lib/session/current-output-builder.ts StructuredEventsPayload
+   */
+  structuredEvents?: {
+    lastEventType: string | null;
+    lastEventAt: number | null;
+    lastEventDetail: string | null;
+  };
 }
 
 // Mirrors: src/types/models.ts BasePromptData (subset for CLI output)

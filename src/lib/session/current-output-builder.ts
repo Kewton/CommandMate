@@ -25,8 +25,25 @@ import {
 } from '@/lib/polling/auto-yes-suppression-state';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tmux-capture-cache';
-import { getLastStopEventAt } from '@/lib/session/agent-event-state';
+import { getLastAgentEvent, getLastStopEventAt } from '@/lib/session/agent-event-state';
 import type { PromptData } from '@/types/models';
+
+/**
+ * The last structured lifecycle event this instance reported (Issue #1722).
+ *
+ * Diagnostic only, and the shape says so: one event, not a log. It exists so an
+ * operator can answer "are the injected hooks reaching this server at all, and
+ * for the right instance?" without reading server logs. Nothing here feeds
+ * `sessionStatus` — that is Issue #1723.
+ */
+export interface StructuredEventsPayload {
+  /** e.g. `stop`, `user_prompt_submit`, `notification`. */
+  lastEventType: string | null;
+  /** Epoch ms. */
+  lastEventAt: number | null;
+  /** Subtype where the event has one: `permission_prompt`, `clear`, … */
+  lastEventDetail: string | null;
+}
 
 export interface CurrentOutputPayload {
   isRunning: boolean;
@@ -72,6 +89,12 @@ export interface CurrentOutputPayload {
    * the other.
    */
   lastStopEventAt: number | null;
+  /**
+   * Last structured event of any kind, or nulls when none has arrived
+   * (Issue #1722). Exposed alongside `lastStopEventAt` and, like it, read by
+   * nothing that decides anything.
+   */
+  structuredEvents: StructuredEventsPayload;
 }
 
 /**
@@ -93,6 +116,12 @@ export async function buildCurrentOutput(
   const cliTool = manager.getTool(cliToolId);
 
   const stopEventAt = getLastStopEventAt(worktreeId, cliToolId, instanceId);
+  const lastEvent = getLastAgentEvent(worktreeId, cliToolId, instanceId);
+  const structuredEvents: StructuredEventsPayload = {
+    lastEventType: lastEvent?.event ?? null,
+    lastEventAt: lastEvent?.at ?? null,
+    lastEventDetail: lastEvent?.detail ?? null,
+  };
 
   const running = await cliTool.isRunning(worktreeId, instanceId);
   if (!running) {
@@ -104,6 +133,7 @@ export async function buildCurrentOutput(
       sessionStatus: 'idle',
       sessionStatusReason: 'session_not_running',
       lastStopEventAt: stopEventAt,
+      structuredEvents,
     };
   }
 
@@ -185,5 +215,6 @@ export async function buildCurrentOutput(
     lastServerResponseTimestamp,
     serverPollerActive: isPollerActive(compositeKey),
     lastStopEventAt: stopEventAt,
+    structuredEvents,
   };
 }

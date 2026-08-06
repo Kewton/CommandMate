@@ -2,28 +2,52 @@
  * API Route: POST /api/hooks/agent-event
  *
  * The generalised receiver for structured agent lifecycle events (Issue #1549):
- * Claude Code's Stop hook, Codex's `notify`, and whatever comes next. It
- * supersedes `/api/hooks/claude-done`, which stays for compatibility and shares
- * this route's stop handling.
+ * Claude Code's hooks, Codex's `notify`, and whatever comes next. It supersedes
+ * `/api/hooks/claude-done`, which stays for compatibility and shares this
+ * route's stop handling.
  *
- * Two things shape the responses. First, the caller identifies a worktree by
- * `cwd` rather than by id, because a hook script running inside an agent knows
- * its directory and nothing else. Second, an unrecognised `cwd` answers 202 with
- * the same body a recognised one gets: this endpoint is reachable by anything
- * that can reach the server, and a distinguishable response would turn it into a
- * probe for which directories are registered.
+ * Three things shape the responses. First, an unrecognised caller answers 202
+ * with the same body a recognised one gets: this endpoint is reachable by
+ * anything that can reach the server, and a distinguishable response would turn
+ * it into a probe for which worktrees are registered. Second, it accepts two
+ * request shapes — see {@link readEvent}. Third, correlation is explicit when it
+ * can be and inferred from `cwd` when it cannot.
+ *
+ * ## Correlation (Issue #1722)
+ *
+ * `cwd` identifies a worktree but *cannot* identify an instance: `claude` and
+ * `claude-2` run in the same directory, which is why this route used to apply
+ * every event to the primary instance. Sessions CommandMate starts now carry
+ * `worktreeId` and `instanceId` in the hook URL itself, fixed at injection time.
+ * When they are present they win; when they are absent — a hand-configured hook
+ * from the #1549 guide — the old `cwd` path runs unchanged and still resolves to
+ * the primary instance.
+ *
+ * `session_id` is *not* used for identity. `/clear` ends the agent session and
+ * opens a new one with a different id while the instance, the worktree and the
+ * pane are all untouched (Issue #1721).
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { isCliToolType } from '@/lib/cli-tools/types';
+import { getWorktreeById } from '@/lib/db';
+import { isCliToolType, isValidInstanceId } from '@/lib/cli-tools/types';
+import type { CLIToolType } from '@/lib/cli-tools/types';
+import type { Worktree } from '@/types/models';
 import {
   applyAgentStopEvent,
-  isAgentEventType,
   resolveWorktreeByCwd,
   validateHookCwd,
 } from '@/lib/hooks/agent-event-service';
-import { AGENT_EVENT_TYPES } from '@/lib/hooks/agent-event-service';
+import {
+  AGENT_EVENT_TYPES,
+  extractClaudeEventDetail,
+  isAgentEventType,
+  mapClaudeHookEventName,
+  MAX_EVENT_DETAIL_LENGTH,
+  type AgentEventType,
+} from '@/lib/hooks/agent-event-types';
+import { isDuplicateAgentEvent, recordAgentEvent } from '@/lib/session/agent-event-state';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/hooks-agent-event');
@@ -34,61 +58,152 @@ const MAX_SESSION_ID_LENGTH = 256;
 /** Identical body for every accepted request. See the module comment. */
 const ACCEPTED = { accepted: true } as const;
 
+const badRequest = (error: string) => NextResponse.json({ error }, { status: 400 });
+
+/** A string field, or undefined when absent or of the wrong type. */
+function readString(payload: Record<string, unknown>, key: string): string | undefined {
+  const value = payload[key];
+  return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
+/**
+ * The event kind, from either request shape.
+ *
+ * - **CommandMate's shape** (`{ tool, event, cwd }`) is what
+ *   `scripts/hooks/cmate-agent-event.sh` and every hand-written hook from the
+ *   #1549 guide send.
+ * - **Claude Code's own payload** (`{ hook_event_name, cwd, session_id, … }`) is
+ *   what an injected `type: "http"` hook sends, because that hook type posts the
+ *   agent's payload verbatim — the body is not configurable.
+ *
+ * @returns the event, or an error string naming what was wrong
+ */
+function readEvent(payload: Record<string, unknown>): AgentEventType | { error: string } {
+  if (payload.event !== undefined) {
+    if (!isAgentEventType(payload.event)) {
+      return { error: `event must be one of: ${AGENT_EVENT_TYPES.join(', ')}` };
+    }
+    return payload.event;
+  }
+
+  if (payload.hook_event_name !== undefined) {
+    const mapped = mapClaudeHookEventName(payload.hook_event_name);
+    if (mapped === null) {
+      return { error: `hook_event_name is not a lifecycle event: ${String(payload.hook_event_name)}` };
+    }
+    return mapped;
+  }
+
+  return { error: `event must be one of: ${AGENT_EVENT_TYPES.join(', ')}` };
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body: unknown = await request.json().catch(() => null);
     if (typeof body !== 'object' || body === null || Array.isArray(body)) {
-      return NextResponse.json({ error: 'Request body must be a JSON object' }, { status: 400 });
+      return badRequest('Request body must be a JSON object');
     }
     const payload = body as Record<string, unknown>;
+    const query = new URL(request.url).searchParams;
 
-    if (typeof payload.tool !== 'string' || !isCliToolType(payload.tool)) {
-      return NextResponse.json({ error: 'tool must be a known CLI tool id' }, { status: 400 });
+    // The injected URL carries `tool`; the relay script and manual hooks put it
+    // in the body. Body first, so an operator's explicit value is never
+    // overridden by a stale URL.
+    const toolValue = readString(payload, 'tool') ?? query.get('tool') ?? undefined;
+    if (toolValue === undefined || !isCliToolType(toolValue)) {
+      return badRequest('tool must be a known CLI tool id');
     }
-    const tool = payload.tool;
+    const tool: CLIToolType = toolValue;
 
-    if (!isAgentEventType(payload.event)) {
-      return NextResponse.json(
-        { error: `event must be one of: ${AGENT_EVENT_TYPES.join(', ')}` },
-        { status: 400 }
-      );
-    }
-    const event = payload.event;
-
-    const cwd = validateHookCwd(payload.cwd);
-    if (!cwd.ok) {
-      return NextResponse.json({ error: `cwd rejected: ${cwd.reason}` }, { status: 400 });
+    const event = readEvent(payload);
+    if (typeof event !== 'string') {
+      return badRequest(event.error);
     }
 
+    const sessionId = readString(payload, 'sessionId') ?? readString(payload, 'session_id');
     if (
       payload.sessionId !== undefined &&
       (typeof payload.sessionId !== 'string' || payload.sessionId.length > MAX_SESSION_ID_LENGTH)
     ) {
-      return NextResponse.json(
-        { error: `sessionId must be a string of at most ${MAX_SESSION_ID_LENGTH} characters` },
-        { status: 400 }
+      return badRequest(
+        `sessionId must be a string of at most ${MAX_SESSION_ID_LENGTH} characters`
       );
     }
 
+    const instanceParam = readString(payload, 'instanceId') ?? query.get('instanceId') ?? undefined;
+    if (instanceParam !== undefined && !isValidInstanceId(instanceParam)) {
+      return badRequest('instanceId must be a safe, bounded identifier');
+    }
+
+    const worktreeIdParam =
+      readString(payload, 'worktreeId') ?? query.get('worktreeId') ?? undefined;
+
+    // `cwd` is only required when it is the sole way to find the worktree, but
+    // it is validated whenever it is sent: a malformed path is a client bug
+    // worth reporting even if this request did not need it.
+    const cwdSent = payload.cwd !== undefined;
+    const cwd = validateHookCwd(payload.cwd);
+    if (!cwd.ok && (cwdSent || worktreeIdParam === undefined)) {
+      return badRequest(`cwd rejected: ${cwd.reason}`);
+    }
+
     const db = getDbInstance();
-    const worktree = resolveWorktreeByCwd(db, cwd.cwd);
+    let worktree: Worktree | null = null;
+    if (worktreeIdParam !== undefined) {
+      worktree = getWorktreeById(db, worktreeIdParam) ?? null;
+    } else if (cwd.ok) {
+      worktree = resolveWorktreeByCwd(db, cwd.cwd);
+    }
+
     if (!worktree) {
       // Accepted and dropped: a hook left configured after a worktree was
       // removed is a normal state, not an error the agent can act on.
-      logger.info('agent-event-unresolved-cwd', { tool, event });
+      logger.info('agent-event-unresolved-target', { tool, event });
       return NextResponse.json(ACCEPTED, { status: 202 });
     }
+
+    // Injection does not replace the user's own hooks, it is concatenated with
+    // them, so anyone who followed the #1549 manual setup now delivers each
+    // event twice. Both copies name the same agent session, which is what makes
+    // them distinguishable from two genuine turns.
+    if (isDuplicateAgentEvent(worktree.id, tool, instanceParam, event, sessionId)) {
+      logger.info('agent-event-duplicate-dropped', { worktreeId: worktree.id, tool, event });
+      return NextResponse.json(ACCEPTED, { status: 202 });
+    }
+
+    const detail =
+      extractClaudeEventDetail(event, payload) ??
+      readString(payload, 'detail')?.slice(0, MAX_EVENT_DETAIL_LENGTH) ??
+      null;
+
+    recordAgentEvent(worktree.id, tool, instanceParam, {
+      event,
+      at: Date.now(),
+      detail,
+      sessionId: sessionId ?? null,
+    });
 
     if (event !== 'stop') {
       // Recorded for operators wiring hooks up; no state change yet (#1549).
-      logger.info('agent-event-received', { worktreeId: worktree.id, tool, event });
+      // Turning these into a completion verdict is Issue #1723.
+      logger.info('agent-event-received', {
+        worktreeId: worktree.id,
+        tool,
+        instanceId: instanceParam,
+        event,
+        detail,
+      });
       return NextResponse.json(ACCEPTED, { status: 202 });
     }
 
-    const outcome = await applyAgentStopEvent(db, worktree, tool, tool);
+    // Issue #1722: the instance the event actually came from, instead of the
+    // primary instance this route used to assume for every caller.
+    const instanceId = instanceParam ?? tool;
+    const outcome = await applyAgentStopEvent(db, worktree, tool, instanceId);
     logger.info('agent-event-stop-applied', {
       worktreeId: worktree.id,
       tool,
+      instanceId,
       taskId: outcome.taskId,
       taskEventApplied: outcome.taskEventApplied,
       verificationRunId: outcome.verificationRunId,

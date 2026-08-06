@@ -7,7 +7,31 @@
  * @vitest-environment node
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { removeTempDir } from '@tests/helpers/temp-dir';
+
+/**
+ * Issue #1722 writes a hooks settings file on every session start. Without this
+ * the suite would litter the developer's real `~/.commandmate/hooks`, and the
+ * launch assertions would be reading a path that outlives the run.
+ */
+let hooksDir: string;
+let previousHooksDir: string | undefined;
+
+beforeAll(() => {
+  hooksDir = mkdtempSync(join(tmpdir(), 'claude-session-hooks-'));
+  previousHooksDir = process.env.CM_AGENT_HOOKS_DIR;
+  process.env.CM_AGENT_HOOKS_DIR = hooksDir;
+});
+
+afterAll(() => {
+  if (previousHooksDir === undefined) delete process.env.CM_AGENT_HOOKS_DIR;
+  else process.env.CM_AGENT_HOOKS_DIR = previousHooksDir;
+  removeTempDir(hooksDir);
+});
 
 // Mock tmux module before importing claude-session
 // Issue #393 (R3F002): Added sendSpecialKey for stopClaudeSession() C-d migration
@@ -108,6 +132,32 @@ const TRUST_DIALOG_OUTPUT =
 function countEnterOnlyCalls(): number {
   const calls = vi.mocked(sendKeys).mock.calls;
   return calls.filter((call) => call[1] === '' && call[2] === true).length;
+}
+
+/**
+ * Index of the sendKeys call that launched the CLI, or -1.
+ *
+ * Issue #1722 stopped sending the bare CLI path: the launch line is now
+ * `'<path>' --settings '<file>'`, and `CM_AGENT_HOOKS_INJECT=0` puts it back.
+ * Tests about *which path was resolved* ask this rather than for equality, so
+ * they keep testing path resolution instead of quietly becoming tests of the
+ * launch decoration.
+ */
+function findLaunchCallIndex(claudePath: string): number {
+  return vi
+    .mocked(sendKeys)
+    .mock.calls.findIndex((call) => call[1] === claudePath || call[1].startsWith(`'${claudePath}' `));
+}
+
+/** Assert the CLI was launched from `claudePath`, with hooks injected. */
+function expectLaunchedFrom(claudePath: string): void {
+  const index = findLaunchCallIndex(claudePath);
+  expect(index, `no launch command for ${claudePath}`).toBeGreaterThanOrEqual(0);
+
+  const call = vi.mocked(sendKeys).mock.calls[index];
+  expect(call[0]).toBe(TEST_SESSION_NAME);
+  expect(call[1]).toMatch(new RegExp(`^'${claudePath}' --settings '.+\\.json'$`));
+  expect(call[2]).toBe(true);
 }
 
 describe('claude-session - Issue #152 improvements', () => {
@@ -735,7 +785,7 @@ describe('claude-session - Issue #265 improvements', () => {
       await promise;
 
       // sendKeys should have been called with the valid CLAUDE_PATH
-      expect(sendKeys).toHaveBeenCalledWith(TEST_SESSION_NAME, '/usr/local/bin/claude', true);
+      expectLaunchedFrom('/usr/local/bin/claude');
     });
 
     it('should reject CLAUDE_PATH with shell metacharacters', async () => {
@@ -751,7 +801,7 @@ describe('claude-session - Issue #265 improvements', () => {
       await promise;
 
       // Should have fallen through to 'which claude' fallback, not used the env var
-      expect(sendKeys).toHaveBeenCalledWith(TEST_SESSION_NAME, '/usr/local/bin/claude', true);
+      expectLaunchedFrom('/usr/local/bin/claude');
     });
 
     it('should reject CLAUDE_PATH with path traversal', async () => {
@@ -767,7 +817,7 @@ describe('claude-session - Issue #265 improvements', () => {
       await promise;
 
       // Should have fallen through to 'which claude' fallback
-      expect(sendKeys).toHaveBeenCalledWith(TEST_SESSION_NAME, '/usr/local/bin/claude', true);
+      expectLaunchedFrom('/usr/local/bin/claude');
     });
 
     it('should reject CLAUDE_PATH with pipe characters', async () => {
@@ -783,7 +833,7 @@ describe('claude-session - Issue #265 improvements', () => {
       await promise;
 
       // Should have fallen through to 'which claude' fallback
-      expect(sendKeys).toHaveBeenCalledWith(TEST_SESSION_NAME, '/usr/local/bin/claude', true);
+      expectLaunchedFrom('/usr/local/bin/claude');
     });
 
     it('should reject CLAUDE_PATH that is not executable', async () => {
@@ -803,7 +853,7 @@ describe('claude-session - Issue #265 improvements', () => {
       await promise;
 
       // Should have fallen through to 'which claude' fallback
-      expect(sendKeys).toHaveBeenCalledWith(TEST_SESSION_NAME, '/usr/local/bin/claude', true);
+      expectLaunchedFrom('/usr/local/bin/claude');
     });
   });
 
@@ -1002,9 +1052,7 @@ describe('claude-session - Issue #265 improvements', () => {
       const unsetIndex = sendKeysCalls.findIndex(
         (call) => call[1] === 'unset CLAUDECODE'
       );
-      const claudePathIndex = sendKeysCalls.findIndex(
-        (call) => call[1] === '/usr/local/bin/claude'
-      );
+      const claudePathIndex = findLaunchCallIndex('/usr/local/bin/claude');
 
       expect(unsetIndex).toBeLessThan(claudePathIndex);
     });
@@ -1312,7 +1360,7 @@ describe('claude-session - Issue #265 improvements', () => {
         await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 2 + CLAUDE_POST_PROMPT_DELAY);
         await promise;
 
-        expect(sendKeys).toHaveBeenCalledWith(TEST_SESSION_NAME, '/opt/homebrew/bin/claude', true);
+        expectLaunchedFrom('/opt/homebrew/bin/claude');
       });
 
       it('should throw error when all paths including fallbacks fail', async () => {
@@ -1701,5 +1749,95 @@ describe('claude-session - cold start is distinguishable from failure (Issue #16
 
     expect(error.message).toBe('Failed to start Claude session');
     expect(isSafeSessionStartError(error)).toBe(false);
+  });
+});
+
+describe('claude-session - hooks auto-injection (Issue #1722)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.mocked(hasSession).mockResolvedValue(false);
+    vi.mocked(createSession).mockResolvedValue();
+    vi.mocked(sendKeys).mockResolvedValue();
+    vi.mocked(capturePane).mockResolvedValue('> ');
+    delete process.env.CM_AGENT_HOOKS_INJECT;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    delete process.env.CM_AGENT_HOOKS_INJECT;
+  });
+
+  /** Start a session to completion and return the command that launched the CLI. */
+  async function launchCommand(
+    options: { worktreeId: string; worktreePath: string; instanceId?: string }
+  ): Promise<string> {
+    const promise = startClaudeSession(options);
+    await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 2 + CLAUDE_POST_PROMPT_DELAY);
+    await promise;
+
+    const launch = vi
+      .mocked(sendKeys)
+      .mock.calls.find((call) => call[1].includes('claude') && call[1] !== 'unset CLAUDECODE');
+    expect(launch, 'no CLI launch command was sent').toBeDefined();
+    return launch![1];
+  }
+
+  it('launches with --settings pointing at a real, per-instance file', async () => {
+    const command = await launchCommand(TEST_SESSION_OPTIONS);
+
+    const settingsPath = command.match(/--settings '(.+)'$/)?.[1];
+    expect(settingsPath, `no --settings in: ${command}`).toBeDefined();
+    // Absolute, because the command is executed by a shell that has no reason
+    // to expand `~` the way this process would.
+    expect(settingsPath!.startsWith('/')).toBe(true);
+    expect(existsSync(settingsPath!)).toBe(true);
+
+    const settings = JSON.parse(readFileSync(settingsPath!, 'utf8'));
+    expect(new URL(settings.hooks.Stop[0].hooks[0].url).searchParams.get('worktreeId')).toBe(
+      TEST_WORKTREE_ID
+    );
+  });
+
+  it('gives a second instance its own settings file and URL', async () => {
+    const primary = await launchCommand(TEST_SESSION_OPTIONS);
+    vi.clearAllMocks();
+    vi.mocked(hasSession).mockResolvedValue(false);
+    vi.mocked(createSession).mockResolvedValue();
+    vi.mocked(sendKeys).mockResolvedValue();
+    vi.mocked(capturePane).mockResolvedValue('> ');
+    const second = await launchCommand({ ...TEST_SESSION_OPTIONS, instanceId: 'claude-2' });
+
+    expect(second).not.toBe(primary);
+    const settings = JSON.parse(readFileSync(second.match(/--settings '(.+)'$/)![1], 'utf8'));
+    expect(new URL(settings.hooks.Stop[0].hooks[0].url).searchParams.get('instanceId')).toBe(
+      'claude-2'
+    );
+  });
+
+  it('sends the whole launch command on one line', async () => {
+    // tmux send-keys delivers this as a single line; a newline in it would
+    // submit half a command.
+    expect((await launchCommand(TEST_SESSION_OPTIONS)).split('\n')).toHaveLength(1);
+  });
+
+  it('launches the bare CLI when CM_AGENT_HOOKS_INJECT=0', async () => {
+    process.env.CM_AGENT_HOOKS_INJECT = '0';
+
+    expect(await launchCommand(TEST_SESSION_OPTIONS)).toBe('/usr/local/bin/claude');
+  });
+
+  it('does not inject into a healthy session it is reusing', async () => {
+    // The reuse branch returns before the CLI is launched at all, so the
+    // injected generation and the tmux session generation cannot diverge.
+    vi.mocked(hasSession).mockResolvedValue(true);
+    vi.mocked(capturePane).mockResolvedValue('> ');
+
+    await startClaudeSession(TEST_SESSION_OPTIONS);
+
+    expect(createSession).not.toHaveBeenCalled();
+    expect(
+      vi.mocked(sendKeys).mock.calls.some((call) => call[1].includes('--settings'))
+    ).toBe(false);
   });
 });
