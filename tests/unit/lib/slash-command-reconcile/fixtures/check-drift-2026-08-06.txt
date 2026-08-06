@@ -1,0 +1,30 @@
+
+> commandmate@0.21.4 catalog:refresh
+> tsx scripts/refresh-slash-command-catalog.ts --check
+
+
+Slash-command catalog reconcile
+================================
+
+Warnings (fail-soft — affected sources left untouched):
+  ! antigravity provider not implemented yet (Issue #1489 Phase 2)
+
+Not added / needs review (by category):
+  [removed-row] (2)
+    - [claude] /pr-comments: documented as removed; not added
+    - [claude] /vim: documented as removed; not added
+  [alias-row] (2)
+    - [claude] /cost: alias for /usage; not added
+    - [claude] /stats: alias for /usage; not added
+  [suspect-description] (1)
+    - [claude] /ultraplan: dropped a marker-like description: "Removed"
+
+New commands (3):
+  + [claude] /agents — As of v2.1.198, running /agents prints a reminder to ask Claude to create or manage subagents, or to edit .claude/agents/ or ~/.claude/agents/ directly
+  + [claude] /schedule — Create, update, list, or run routines, which execute on Anthropic-managed cloud infrastructure
+  + [claude] /ultraplan — (needs description)
+
+verifiedAgainst updates:
+  ~ codex: 0.146.0 -> 0.146.1
+
+(check mode — no files written; run with --write to apply)

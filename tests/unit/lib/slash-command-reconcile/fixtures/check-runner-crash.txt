@@ -1,0 +1,7 @@
+
+> commandmate@0.21.4 catalog:refresh
+> tsx scripts/refresh-slash-command-catalog.ts --check
+
+refresh-slash-command-catalog failed: Error: ENOENT: no such file or directory, open '/home/runner/work/CommandMate/CommandMate/src/config/slash-commands-catalog.json'
+    at Object.openSync (node:fs:561:18)
+    at readFileSync (node:fs:445:35)
