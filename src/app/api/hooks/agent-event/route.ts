@@ -47,7 +47,12 @@ import {
   MAX_EVENT_DETAIL_LENGTH,
   type AgentEventType,
 } from '@/lib/hooks/agent-event-types';
-import { isDuplicateAgentEvent, recordAgentEvent } from '@/lib/session/agent-event-state';
+import { parseAskUserQuestionPayload } from '@/lib/hooks/ask-user-question-payload';
+import {
+  isDuplicateAgentEvent,
+  recordAgentEvent,
+  recordAskUserQuestion,
+} from '@/lib/session/agent-event-state';
 import { MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH } from '@/lib/session/structured-prompt';
 import { createLogger } from '@/lib/logger';
 
@@ -163,23 +168,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(ACCEPTED, { status: 202 });
     }
 
-    // Injection does not replace the user's own hooks, it is concatenated with
-    // them, so anyone who followed the #1549 manual setup now delivers each
-    // event twice. Both copies name the same agent session, which is what makes
-    // them distinguishable from two genuine turns.
-    if (isDuplicateAgentEvent(worktree.id, tool, instanceParam, event, sessionId)) {
-      logger.info('agent-event-duplicate-dropped', { worktreeId: worktree.id, tool, event });
-      return NextResponse.json(ACCEPTED, { status: 202 });
-    }
-
     const detail =
       extractClaudeEventDetail(event, payload) ??
       readString(payload, 'detail')?.slice(0, MAX_EVENT_DETAIL_LENGTH) ??
       null;
 
+    // Injection does not replace the user's own hooks, it is concatenated with
+    // them, so anyone who followed the #1549 manual setup now delivers each
+    // event twice. Both copies name the same agent session, which is what makes
+    // them distinguishable from two genuine turns.
+    const receivedAt = Date.now();
+    if (isDuplicateAgentEvent(worktree.id, tool, instanceParam, event, sessionId, receivedAt, detail)) {
+      logger.info('agent-event-duplicate-dropped', { worktreeId: worktree.id, tool, event });
+      return NextResponse.json(ACCEPTED, { status: 202 });
+    }
+
     recordAgentEvent(worktree.id, tool, instanceParam, {
       event,
-      at: Date.now(),
+      at: receivedAt,
       detail,
       sessionId: sessionId ?? null,
       // Issue #1725: `Notification.message` is the agent's own one-line summary
@@ -188,6 +194,29 @@ export async function POST(request: NextRequest) {
       // only thing anything branches on (D3).
       message: readString(payload, 'message')?.slice(0, MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH) ?? null,
     });
+
+    if (event === 'pre_tool_use') {
+      // Issue #1726: the one event whose *body* is the point. The injected hook
+      // carries `matcher: "AskUserQuestion"`, but `tool_name` is re-read here
+      // rather than trusted — the user's own settings.json is concatenated with
+      // the injected one (#1722), so a wider matcher can land other tools on
+      // this route, and a `Bash` payload must never be filed as a question.
+      //
+      // Recorded AFTER `recordAgentEvent`, which is what releases a previous
+      // question; the order matters because this event is the one exception to
+      // that release.
+      const spec = parseAskUserQuestionPayload(payload);
+      if (spec) {
+        recordAskUserQuestion(worktree.id, tool, instanceParam, spec, receivedAt);
+        logger.info('ask-user-question-recorded', {
+          worktreeId: worktree.id,
+          tool,
+          instanceId: instanceParam,
+          questionCount: spec.questions.length,
+          optionCounts: spec.questions.map((q) => q.choices.length),
+        });
+      }
+    }
 
     if (event !== 'stop') {
       // Recorded for operators wiring hooks up; no state change yet (#1549).

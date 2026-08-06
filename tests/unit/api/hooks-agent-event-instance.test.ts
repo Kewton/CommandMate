@@ -27,6 +27,7 @@ import { createTask, listTaskEvents, upsertWorktree, type Task, type TaskStatus 
 import { parseTaskContract } from '@/lib/tasks/contract-parser';
 import {
   clearAgentStopEvents,
+  getAskUserQuestion,
   getLastAgentEvent,
   getLastStopEventAt,
 } from '@/lib/session/agent-event-state';
@@ -185,7 +186,6 @@ describe("Claude Code's own payload shape", () => {
       .filter((name) => name.endsWith('.json'))
       .map((name) => JSON.parse(readFileSync(join(FIXTURE_DIR, name), 'utf8')).hook_event_name);
 
-    // The two that are out of scope are named so their absence is a decision.
     expect(new Set(observed)).toEqual(
       new Set([
         'SessionStart',
@@ -195,15 +195,93 @@ describe("Claude Code's own payload shape", () => {
         'SessionEnd',
         'PermissionRequest',
         'PreToolUse',
+        'PostToolUse',
       ])
     );
   });
 
   it('refuses a decision-bearing event rather than filing it as something else', async () => {
-    for (const name of ['pre-tool-use-bash.json', 'permission-request.json']) {
-      const response = await post(claudePayload(name), { tool: 'claude', worktreeId: wtId });
-      expect(response.status, name).toBe(400);
-    }
+    // `PermissionRequest` has its own receiver, whose response body Claude
+    // obeys. Filing one here would answer it with this route's fixed 202 body
+    // and silently drop the adjudication (#1724).
+    const response = await post(claudePayload('permission-request.json'), {
+      tool: 'claude',
+      worktreeId: wtId,
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it('accepts PreToolUse and records the tool it named (Issue #1726)', async () => {
+    // Accepted, unlike `PermissionRequest`, because this route cannot decide
+    // anything: it answers 202 with a fixed body whatever arrives. A
+    // `PreToolUse` here is an observation of a tool call, and `tool_name`
+    // becomes the event's subtype.
+    const response = await post(claudePayload('pre-tool-use-bash.json'), injected('claude'));
+
+    expect(response.status).toBe(202);
+    expect(getLastAgentEvent(wtId, 'claude', 'claude')).toMatchObject({
+      event: 'pre_tool_use',
+      detail: 'Bash',
+    });
+  });
+
+  it('keeps the questions an AskUserQuestion PreToolUse carries (Issue #1726)', async () => {
+    const response = await post(
+      claudePayload('pre-tool-use-ask-user-question.json'),
+      injected('claude')
+    );
+
+    expect(response.status).toBe(202);
+    const episode = getAskUserQuestion(wtId, 'claude', 'claude');
+    expect(episode?.spec.questions).toHaveLength(2);
+    expect(episode?.spec.questions[0].choices.map((c) => c.label)).toEqual([
+      'Blue',
+      'Green',
+      'Red',
+    ]);
+  });
+
+  it('keeps no questions for a PreToolUse naming another tool (Issue #1726)', async () => {
+    await post(claudePayload('pre-tool-use-bash.json'), injected('claude'));
+
+    expect(getAskUserQuestion(wtId, 'claude', 'claude')).toBeNull();
+  });
+
+  it('drops the questions on the captured PostToolUse (Issue #1726)', async () => {
+    // The precise release: this payload is the one Claude sends when the human
+    // has answered — it even carries `tool_response.answers`. Captured live for
+    // this Issue, because the #1721 spike recorded PostToolUse as never firing.
+    await post(claudePayload('pre-tool-use-ask-user-question.json'), injected('claude'));
+    expect(getAskUserQuestion(wtId, 'claude', 'claude')).not.toBeNull();
+
+    const response = await post(
+      claudePayload('post-tool-use-ask-user-question.json', { sessionId: 'post-session' }),
+      injected('claude')
+    );
+
+    expect(response.status).toBe(202);
+    expect(getLastAgentEvent(wtId, 'claude', 'claude')).toMatchObject({
+      event: 'post_tool_use',
+      detail: 'AskUserQuestion',
+    });
+    expect(getAskUserQuestion(wtId, 'claude', 'claude')).toBeNull();
+  });
+
+  it('drops the questions on Stop too, as the fail-open backstop (Issue #1726)', async () => {
+    // Hooks are fail-open: a PostToolUse that never arrives must not leave a
+    // finished question in place until the age bound.
+    await post(claudePayload('pre-tool-use-ask-user-question.json'), injected('claude'));
+
+    await post(claudePayload('stop.json', { sessionId: 'stop-session' }), injected('claude'));
+
+    expect(getAskUserQuestion(wtId, 'claude', 'claude')).toBeNull();
+  });
+
+  it('files the questions against the instance the hook URL named (Issue #1726)', async () => {
+    await post(claudePayload('pre-tool-use-ask-user-question.json'), injected('claude-2'));
+
+    expect(getAskUserQuestion(wtId, 'claude', 'claude-2')).not.toBeNull();
+    expect(getAskUserQuestion(wtId, 'claude', 'claude')).toBeNull();
   });
 
   it('records the notification subtype from notification_type, not from message', async () => {

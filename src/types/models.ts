@@ -281,6 +281,44 @@ export interface MultipleChoiceOption {
   isDefault?: boolean;
   /** Whether this option requires text input from the user */
   requiresTextInput?: boolean;
+  /**
+   * The explanatory second line the option carries, when one is known — Issue
+   * #1726.
+   *
+   * Only ever set from an `AskUserQuestion` `tool_input`, never from the screen:
+   * the picker renders the description as its own indented line, which the
+   * scraper deliberately treats as a continuation and drops (otherwise it would
+   * be parsed as another option). So this is information the structured payload
+   * adds rather than information it duplicates.
+   */
+  description?: string;
+}
+
+/**
+ * What an `AskUserQuestion` picker is showing, from the tool call rather than
+ * from the screen (Issue #1726).
+ *
+ * Present only when the structured `PreToolUse` payload could be lined up
+ * against the options the scraper parsed — see
+ * `lib/session/ask-user-question-prompt`. Its absence means the options are the
+ * scraper's alone, which is also the state of every session on a machine where
+ * hooks never fire.
+ */
+export interface AskUserQuestionPromptMeta {
+  /** The short tab label Claude renders for this question, when it sent one. */
+  header?: string;
+  /** Whether this question accepts several answers (checkbox rendering). */
+  multiSelect: boolean;
+  /** 0-based index of the question the picker is on. */
+  questionIndex: number;
+  /** How many questions this one tool call carries. */
+  questionCount: number;
+  /**
+   * Option numbers the picker appended itself — "Type something." / "Chat about
+   * this". They are real and selectable, but no structured payload describes
+   * them, so a reader that wants only what the agent offered filters them out.
+   */
+  metaOptionNumbers: number[];
 }
 
 /**
@@ -319,6 +357,16 @@ export interface MultipleChoicePromptData extends BasePromptData {
    * numbered-confirmation format, whose response behavior is therefore unchanged.
    */
   isAskUserQuestion?: boolean;
+  /**
+   * The tool call behind this picker, when the agent's `PreToolUse` payload
+   * could be matched to it (Issue #1726). See {@link AskUserQuestionPromptMeta}.
+   *
+   * Its presence is what tells `respond` the option list is authoritative — and
+   * therefore that an out-of-range number may be refused before anything is sent
+   * to the terminal. Absent means the options came from the screen alone and the
+   * pre-#1726 behaviour applies.
+   */
+  askUserQuestion?: AskUserQuestionPromptMeta;
 }
 
 /**

@@ -68,6 +68,49 @@ describe('respond command action', () => {
     expect(mockExit).toHaveBeenCalledWith(99); // UNEXPECTED_ERROR
   });
 
+  it('exits with the input-error code when the number is out of range (Issue #1726)', async () => {
+    // The agent's own `AskUserQuestion` payload said the option does not exist,
+    // and the server sent nothing. That is a bad argument, so it exits 2 — the
+    // same code an invalid worktree id or agent gets — rather than 99, which
+    // means "the response may or may not have been applied".
+    mockFetchResponse(
+      {
+        success: false,
+        answer: '99',
+        reason: 'answer_out_of_range',
+        message: 'The option number is outside the range this prompt offers.',
+      },
+      200
+    );
+    const { createRespondCommand } = await import('../../../../src/cli/commands/respond');
+    const cmd = createRespondCommand();
+    await cmd.parseAsync(['node', 'respond', 'wt1', '99']);
+
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      expect.stringContaining('Answer was not sent')
+    );
+    expect(mockExit).toHaveBeenCalledWith(2); // CONFIG_ERROR
+    expect(mockExit).not.toHaveBeenCalledWith(99);
+  });
+
+  it('reports a label resolved against the agent’s options (Issue #1726)', async () => {
+    mockFetchResponse(
+      {
+        success: true,
+        answer: '2',
+        resolved: { via: 'semantic', optionNumber: 2, optionLabel: 'Sort papers' },
+      },
+      200
+    );
+    const { createRespondCommand } = await import('../../../../src/cli/commands/respond');
+    const cmd = createRespondCommand();
+    await cmd.parseAsync(['node', 'respond', 'wt1', 'Sort papers']);
+
+    expect(mockConsoleLog).toHaveBeenCalledWith(
+      'Resolved "Sort papers" to option 2: Sort papers'
+    );
+  });
+
   it('rejects invalid worktree ID', async () => {
     const { createRespondCommand } = await import('../../../../src/cli/commands/respond');
     const cmd = createRespondCommand();

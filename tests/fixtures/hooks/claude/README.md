@@ -16,6 +16,7 @@ Claude Code **v2.1.223** を実機で動かして採取した hook payload。
 | `user-prompt-submit.json` | `UserPromptSubmit` | TUI でプロンプト送信 |
 | `pre-tool-use-bash.json` | `PreToolUse` | 承認が要る `Bash` 呼び出し |
 | `pre-tool-use-ask-user-question.json` | `PreToolUse` | `AskUserQuestion`（2 問・選択肢と説明つき） |
+| `post-tool-use-ask-user-question.json` | `PostToolUse` | `AskUserQuestion` の回答確定時（Issue #1726 で採取）。`tool_response.answers` に選んだラベルが入る。`Stop` の 1.3 秒前に発火した |
 | `permission-request.json` | `PermissionRequest` | 上記 `Bash` の承認要求。`permission_suggestions` を含む |
 | `permission-request-ask-user-question.json` | `PermissionRequest` | `AskUserQuestion` も承認要求を上げる。`permission_suggestions` は無い |
 | `notification-permission-prompt.json` | `Notification` | `notification_type: "permission_prompt"`（承認ダイアログ表示の約 6 秒後） |

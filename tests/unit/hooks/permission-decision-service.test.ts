@@ -51,6 +51,7 @@ import {
 import type { AutoYesPolicy } from '@/lib/polling/auto-yes-resolver';
 import {
   clearAgentStopEvents,
+  getAskUserQuestion,
   getStructuredPromptWaiting,
 } from '@/lib/session/agent-event-state';
 
@@ -226,6 +227,35 @@ describe('AskUserQuestion is never adjudicated (Issue #1726)', () => {
 
     expect(decidePermissionRequest(SESSION, parsed).reason).toBe('ask-user-question');
     expect(decidePermissionRequest(SESSION, bash('git status')).reason).toBe('auto-yes-disabled');
+  });
+
+  it('keeps the questions it carries without adjudicating them (Issue #1726)', () => {
+    // `AskUserQuestion` raises a `PermissionRequest` with a `tool_input`
+    // byte-identical to its `PreToolUse` one, so this is a second, independent
+    // source for the same questions — and the only one on a session started
+    // before PreToolUse injection existed.
+    clearAgentStopEvents();
+    enableAutoYes();
+    const parsed = parsePermissionRequestPayload(
+      fixture('permission-request-ask-user-question.json')
+    );
+
+    const decision = resolvePermissionRequest(SESSION, parsed);
+
+    expect(decision).toEqual({ behavior: null, reason: 'ask-user-question' });
+    const episode = getAskUserQuestion(SESSION.worktreeId, SESSION.cliToolId, SESSION.instanceId);
+    expect(episode?.spec.questions.map((q) => q.question)).toEqual([
+      'What is your favorite color?',
+      'Which editor do you prefer?',
+    ]);
+  });
+
+  it('keeps no questions for any other tool (Issue #1726)', () => {
+    clearAgentStopEvents();
+
+    resolvePermissionRequest(SESSION, bash('git status'));
+
+    expect(getAskUserQuestion(SESSION.worktreeId, SESSION.cliToolId, SESSION.instanceId)).toBeNull();
   });
 });
 

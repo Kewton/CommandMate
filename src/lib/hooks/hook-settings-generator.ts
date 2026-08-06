@@ -42,6 +42,7 @@ import { homedir } from 'os';
 import { join, resolve } from 'path';
 import { getServerPort } from '@/lib/env';
 import { isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
+import { ASK_USER_QUESTION_TOOL } from '@/lib/hooks/permission-request-payload';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('lib/hooks/hook-settings-generator');
@@ -99,6 +100,18 @@ export const AUTH_TOKEN_ENV_VAR = 'CM_AUTH_TOKEN';
  * fires zero times — so a typo here is another silent failure.
  */
 export const NOTIFICATION_MATCHER = 'permission_prompt|idle_prompt';
+
+/**
+ * `PreToolUse` / `PostToolUse` matcher (Issue #1726).
+ *
+ * Matched against `tool_name`. Deliberately the single tool whose input this
+ * server has a use for: `AskUserQuestion` is the only call whose arguments *are*
+ * the thing the human has to answer, and a matcher covering every tool would
+ * post two payloads per tool call for nothing — on a hot loop that is two
+ * requests per `Read`, each of which blocks the agent for as long as the
+ * receiver takes.
+ */
+export const TOOL_USE_MATCHER = ASK_USER_QUESTION_TOOL;
 
 /** Relay script shipped with the package (`files: ["scripts/hooks/"]`). */
 const RELAY_SCRIPT_RELATIVE_PATH = join('scripts', 'hooks', 'cmate-agent-event.sh');
@@ -335,7 +348,13 @@ export function buildSessionStartCommand(
  * enabled mid-session, and a hook registered at launch is the only kind this
  * session will have.
  *
- * `PreToolUse` remains absent — nothing adjudicates it yet (Phase 4).
+ * `PreToolUse` / `PostToolUse` are registered for `AskUserQuestion` alone (Issue
+ * #1726), and they post to the *event* receiver rather than the permission one:
+ * they are observations, not verdicts. The distinction is not academic — a
+ * `PreToolUse` response body can block or redirect a tool call, and answering
+ * one for a question the human has not seen yet is the last thing this feature
+ * wants to be able to do. The event route answers 202 with a fixed body and
+ * cannot decide anything.
  */
 export function buildAgentHookSettings(
   target: HookSettingsTarget,
@@ -368,6 +387,9 @@ export function buildAgentHookSettings(
       Stop: [{ hooks: [http()] }],
       Notification: [{ matcher: NOTIFICATION_MATCHER, hooks: [http()] }],
       SessionEnd: [{ hooks: [http()] }],
+      // Issue #1726. The event receiver, not the permission one: observation.
+      PreToolUse: [{ matcher: TOOL_USE_MATCHER, hooks: [http()] }],
+      PostToolUse: [{ matcher: TOOL_USE_MATCHER, hooks: [http()] }],
       // Issue #1724. Points at its own receiver, not the event one.
       PermissionRequest: [{ hooks: [permissionHttp()] }],
     },

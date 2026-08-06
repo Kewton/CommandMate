@@ -52,6 +52,31 @@ export type StructuredPromptSource = 'notification' | 'permission-request';
 /** Bound on the agent's `message`, which is prose and only ever displayed. */
 export const MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH = 500;
 
+/**
+ * The question an `AskUserQuestion` call asked, for a dialog nobody parsed
+ * (Issue #1726).
+ *
+ * Attached to the degraded form and *only* to it. When the scraper can read the
+ * picker, the options are published properly — as a `multiple_choice` with real
+ * option numbers (`ask-user-question-prompt`). This is what is left to say when
+ * it cannot: the text of what was asked, so the human is not told merely that
+ * "a dialog is open" while the server is holding the question.
+ *
+ * There are no numbers here on purpose. A single tool call walks through one
+ * screen per question and then a `1. Submit answers / 2. Cancel` confirmation,
+ * emitting no event at any transition (§5.6), so a layer that cannot see the
+ * screen cannot know which of them is up — and a number published against the
+ * wrong screen is an answer to the wrong question.
+ */
+export interface StructuredAskUserQuestionSummary {
+  /** The first question of the call. */
+  question: string;
+  /** Its option labels, in the order the payload listed them. */
+  labels: string[];
+  /** How many questions the one tool call carries. */
+  questionCount: number;
+}
+
 /** What a structured prompt is built from, from either source. */
 export interface StructuredPromptFacts {
   source: StructuredPromptSource;
@@ -64,6 +89,8 @@ export interface StructuredPromptFacts {
   message: string | null;
   /** Tool the pre-empted request named, when the source knows it. */
   toolName?: string | null;
+  /** The `AskUserQuestion` call in flight, when there is one (Issue #1726). */
+  askUserQuestion?: StructuredAskUserQuestionSummary | null;
 }
 
 /**
@@ -89,6 +116,8 @@ export interface StructuredPromptWaitingData {
   message?: string;
   /** Tool the pre-empted permission request named, when known. */
   toolName?: string;
+  /** What the agent asked, when it was an `AskUserQuestion` (Issue #1726). */
+  askUserQuestion?: StructuredAskUserQuestionSummary;
 }
 
 /**
@@ -109,6 +138,8 @@ export interface StructuredPromptHistoryRecord {
   source: StructuredPromptSource;
   message?: string;
   toolName?: string;
+  /** What the agent asked, when it was an `AskUserQuestion` (Issue #1726). */
+  askUserQuestion?: StructuredAskUserQuestionSummary;
 }
 
 /** How each source reads in the one-line question. */
@@ -141,6 +172,15 @@ export function buildStructuredPromptQuestion(
   if (facts.message) {
     parts.push(`Agent message: "${facts.message}"`);
   }
+  if (facts.askUserQuestion) {
+    const { question, labels, questionCount } = facts.askUserQuestion;
+    parts.push(
+      `The agent asked${questionCount > 1 ? ` ${questionCount} questions, the first being` : ''}: ` +
+        `"${question}" — offering: ${labels.join(' / ')}. ` +
+        `The picker renumbers and adds its own entries, so read the option NUMBER off the ` +
+        `terminal rather than counting this list.`,
+    );
+  }
   return parts.join(' ');
 }
 
@@ -157,6 +197,7 @@ export function buildStructuredPromptData(
     source: facts.source,
     ...(facts.message ? { message: facts.message } : {}),
     ...(facts.toolName ? { toolName: facts.toolName } : {}),
+    ...(facts.askUserQuestion ? { askUserQuestion: facts.askUserQuestion } : {}),
   };
 }
 
@@ -173,6 +214,7 @@ export function buildStructuredPromptHistoryRecord(
     source: facts.source,
     ...(facts.message ? { message: facts.message } : {}),
     ...(facts.toolName ? { toolName: facts.toolName } : {}),
+    ...(facts.askUserQuestion ? { askUserQuestion: facts.askUserQuestion } : {}),
   };
 }
 

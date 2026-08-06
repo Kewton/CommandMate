@@ -74,6 +74,25 @@ export const HOOK_STATUS_REASON = {
   PERMISSION_REQUEST: 'hook_permission_request',
   /** `Notification(idle_prompt)` — the agent says it is sitting at the composer. */
   IDLE_PROMPT: 'hook_idle_prompt',
+  /**
+   * `PreToolUse` — the agent reported it is invoking a tool (Issue #1726).
+   *
+   * A turn in progress, and nothing more. It is deliberately NOT `waiting` even
+   * though the only matcher injected for it is `AskUserQuestion`: whether that
+   * picker is on screen is the scraper's question (§5.6 measured that Claude
+   * emits nothing at all while it is up), and asserting `waiting` from a
+   * pre-invocation event would keep asserting it long after a human answered in
+   * the terminal, because no event marks that.
+   */
+  PRE_TOOL_USE: 'hook_pre_tool_use',
+  /**
+   * `PostToolUse` — the agent reported a tool call finished (Issue #1726).
+   *
+   * `running` like its `PreToolUse` counterpart, and for the same reason: a tool
+   * finishing is not a turn finishing. `Stop` is what says the turn ended, and
+   * it followed this by 1.3 s in the live capture.
+   */
+  POST_TOOL_USE: 'hook_post_tool_use',
 } as const;
 
 export type HookStatusReason = (typeof HOOK_STATUS_REASON)[keyof typeof HOOK_STATUS_REASON];
@@ -94,11 +113,22 @@ export interface StructuredStatusVerdict {
  * |----------------------------------|--------------------|
  * | `user_prompt_submit`             | `running`          |
  * | `stop`                           | `ready`            |
+ * | `pre_tool_use`                   | `running`          |
+ * | `post_tool_use`                  | `running`          |
  * | `notification(permission_prompt)`| `waiting`          |
  * | `notification(idle_prompt)`      | `ready`            |
  * | `notification(other/none)`       | none (scraper)     |
  * | `session_start`                  | none (scraper)     |
  * | `session_end`                    | none (scraper)     |
+ *
+ * `pre_tool_use` answers `running` for the same reason `user_prompt_submit`
+ * does: the agent is mid-turn. It has to answer *something*, because this table
+ * reads only the newest event — answering "none" would mean an `AskUserQuestion`
+ * invocation erased the `running` its own turn's `user_prompt_submit` had
+ * established, and a scraper that reads the picker as `ready`/`no_recent_output`
+ * (which is exactly the #1708 failure) would then let `commandmate wait` exit 0
+ * on a session with a dialog in front of it. `running` never overrides a scraper
+ * `waiting`, so promoting it costs nothing where the screen can be read.
  *
  * `session_start` answering "none" is not an oversight, it is a requirement.
  * A folder that has not been trusted yet shows its trust dialog *before* any
@@ -121,6 +151,10 @@ export function agentEventToSessionStatus(
   switch (event) {
     case 'user_prompt_submit':
       return { status: 'running', reason: HOOK_STATUS_REASON.PROMPT_SUBMIT };
+    case 'pre_tool_use':
+      return { status: 'running', reason: HOOK_STATUS_REASON.PRE_TOOL_USE };
+    case 'post_tool_use':
+      return { status: 'running', reason: HOOK_STATUS_REASON.POST_TOOL_USE };
     case 'stop':
       return { status: 'ready', reason: HOOK_STATUS_REASON.STOP };
     case 'notification':

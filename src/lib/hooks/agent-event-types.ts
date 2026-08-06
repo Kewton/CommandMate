@@ -24,6 +24,13 @@
  * and exposed for observation; wiring them into `sessionStatus` / `wait` /
  * Auto-Yes is Issue #1723's job, deliberately kept separate so a change to the
  * completion verdict is never a side effect of adding a receiver (#1549).
+ *
+ * `pre_tool_use` / `post_tool_use` (Issue #1726) are the two events received for
+ * a *specific* tool rather than for the session: the injected hooks carry
+ * `matcher: "AskUserQuestion"`, so they bracket the agent asking the human a
+ * question — the first carries the question and its options in `tool_input`, the
+ * second says the call is over. Both are observations; this receiver never
+ * answers either with a decision.
  */
 export const AGENT_EVENT_TYPES = [
   'stop',
@@ -31,6 +38,8 @@ export const AGENT_EVENT_TYPES = [
   'session_start',
   'user_prompt_submit',
   'session_end',
+  'pre_tool_use',
+  'post_tool_use',
 ] as const;
 
 export type AgentEventType = (typeof AGENT_EVENT_TYPES)[number];
@@ -44,9 +53,27 @@ export function isAgentEventType(value: unknown): value is AgentEventType {
  *
  * An injected `type: "http"` hook posts Claude's payload verbatim — there is no
  * way to shape the body — so the receiver has to read Claude's spelling. Only
- * the events Issue #1722 injects are listed: `PreToolUse` and
- * `PermissionRequest` carry a decision and belong to Auto-Yes v2 (#1724), and
- * an unmapped name is refused rather than silently filed under something else.
+ * the events CommandMate injects are listed, and an unmapped name is refused
+ * rather than silently filed under something else.
+ *
+ * `PermissionRequest` is absent because it has its own receiver: its response
+ * body is a decision the agent obeys, which is the opposite contract to this
+ * fire-and-forget route (#1724).
+ *
+ * `PostToolUse` **is** mapped, on the strength of a measurement taken for Issue
+ * #1726 rather than of the #1721 spike, which recorded it as unobserved. Driving
+ * a live v2.1.223 session on 2026-08-06 with a `PostToolUse` hook registered:
+ *
+ * ```
+ * 15:36:04.112  PreToolUse   AskUserQuestion   (picker drawn)
+ * 15:36:10.127  Notification permission_prompt (picker still up)
+ * 15:36:28.643  PostToolUse  AskUserQuestion   (the human answered)
+ * 15:36:29.992  Stop
+ * ```
+ *
+ * It fires, and it is the precise signal — "this tool call is over" — where
+ * `Stop` is "the turn is over" and can be minutes later if the agent keeps
+ * working after the answer. Both are wired up; see `agent-event-state`.
  */
 export const CLAUDE_HOOK_EVENT_NAMES: Readonly<Record<string, AgentEventType>> = {
   Stop: 'stop',
@@ -55,6 +82,12 @@ export const CLAUDE_HOOK_EVENT_NAMES: Readonly<Record<string, AgentEventType>> =
   SessionStart: 'session_start',
   SessionEnd: 'session_end',
   UserPromptSubmit: 'user_prompt_submit',
+  // Issue #1726. Injected with matcher `AskUserQuestion`, so in practice these
+  // only ever arrive for that tool — but the receiver re-reads `tool_name`
+  // rather than trusting the matcher, because a user's own settings.json is
+  // concatenated with the injected one and may register a wider matcher.
+  PreToolUse: 'pre_tool_use',
+  PostToolUse: 'post_tool_use',
 };
 
 /** @returns The event this `hook_event_name` maps to, or null when unmapped. */
@@ -76,6 +109,7 @@ export const MAX_EVENT_DETAIL_LENGTH = 128;
  *   `message`, which is English prose for a human (D3).
  * - `SessionEnd` → `reason` (`clear` / `prompt_input_exit` / …)
  * - `SessionStart` → `source` (`startup` / `clear` / …)
+ * - `PreToolUse` / `PostToolUse` → `tool_name` (`AskUserQuestion`), Issue #1726
  *
  * `Stop` and `UserPromptSubmit` have no subtype, so they answer null.
  */
@@ -90,7 +124,9 @@ export function extractClaudeEventDetail(
         ? 'reason'
         : event === 'session_start'
           ? 'source'
-          : null;
+          : event === 'pre_tool_use' || event === 'post_tool_use'
+            ? 'tool_name'
+            : null;
   if (field === null) return null;
 
   const value = payload[field];

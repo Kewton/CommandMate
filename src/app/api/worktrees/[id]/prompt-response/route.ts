@@ -15,6 +15,11 @@ import { detectPrompt, type PromptDetectionResult } from '@/lib/detection/prompt
 import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/detection/cli-patterns';
 import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
 import { resolvePromptAnswer, PromptAnswerResolutionError, type AnswerResolution } from '@/lib/prompt-answer-semantic';
+import { getAskUserQuestion } from '@/lib/session/agent-event-state';
+import {
+  applyAskUserQuestion,
+  resolveAskUserQuestionAnswer,
+} from '@/lib/session/ask-user-question-prompt';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import type { PromptType, SubmitMode } from '@/types/models';
 import { isValidSubmitMode } from '@/types/models';
@@ -148,6 +153,47 @@ export async function POST(
       logger.warn('failed-to-verify-prompt');
     }
 
+    // Issue #1726: replace the screen-parsed options with the ones the agent
+    // itself reported for this `AskUserQuestion`, when the payload can be lined
+    // up against this exact screen. `applyAskUserQuestion` answers null for
+    // everything it cannot vouch for — the confirmation screen, any other
+    // prompt, any session with no hooks — and the pre-#1726 path then runs
+    // unchanged.
+    const askUserQuestion = getAskUserQuestion(id, cliToolId, instanceId);
+    const structuredPromptData =
+      promptCheck?.promptData && askUserQuestion
+        ? applyAskUserQuestion(promptCheck.promptData, askUserQuestion.spec)
+        : null;
+    const effectivePromptData = structuredPromptData ?? promptCheck?.promptData;
+
+    // With the agent's own option list in hand, an answer can be judged before
+    // any key is sent: a number outside the list cannot be right, and a word
+    // that matches no label cannot be resolved. This is where `respond <id> no`
+    // stops being able to arrive as an approval (Issue #1681) — typed text is
+    // not a selection on a cursor-navigated picker, the Enter after it takes
+    // whatever is highlighted.
+    let effectiveAnswer = answer;
+    let structuredResolution: AnswerResolution['resolved'];
+    if (structuredPromptData && !useDefault && answer !== undefined) {
+      const checked = resolveAskUserQuestionAnswer(structuredPromptData, answer);
+      if (!checked.ok) {
+        logger.info('prompt-response-refused', {
+          worktreeId: id,
+          cliToolId,
+          instanceId,
+          reason: checked.reason,
+        });
+        return NextResponse.json({
+          success: false,
+          reason: checked.reason,
+          message: checked.message,
+          answer,
+        });
+      }
+      effectiveAnswer = checked.input;
+      structuredResolution = checked.resolved;
+    }
+
     // Issue #1681: resolve semantic yes/no answers (and --default) to a concrete
     // option number BEFORE sending. On cursor-navigated menus a raw "no" + Enter
     // degrades into selecting the highlighted default option, so unresolvable
@@ -155,9 +201,9 @@ export async function POST(
     let resolution: AnswerResolution;
     try {
       resolution = resolvePromptAnswer({
-        answer,
+        answer: effectiveAnswer,
         useDefault,
-        promptData: promptCheck?.promptData,
+        promptData: effectivePromptData,
         fallbackPromptType: bodyPromptType,
       });
     } catch (error: unknown) {
@@ -180,7 +226,7 @@ export async function POST(
         sessionName,
         answer: resolution.input,
         cliToolId,
-        promptData: promptCheck?.promptData,
+        promptData: effectivePromptData,
         fallbackPromptType: bodyPromptType,
         fallbackDefaultOptionNumber: bodyDefaultOptionNumber,
         fallbackSubmitMode: validSubmitMode,
@@ -202,21 +248,23 @@ export async function POST(
     // which is also when nothing else would record the answer at all — an
     // over-count is preferable to a gap in the log.
     applyEventToActiveTask(db, id, cliToolId, instanceId ?? cliToolId, 'prompt_answered_human', {
-      promptType: promptCheck?.promptData?.type,
+      promptType: effectivePromptData?.type,
     });
 
     // Issue #1685: persist question/options/answer for the audit trail. Skipped
     // when the pre-send capture failed (promptCheck null) — there is nothing
     // trustworthy to record. Shares the useAutoYes attribution caveat above.
-    if (promptCheck?.isPrompt && promptCheck.promptData) {
+    if (promptCheck?.isPrompt && effectivePromptData) {
       try {
         // Issue #1681 resolved semantic answers to a concrete input before
-        // sending — record what actually reached the terminal.
+        // sending — record what actually reached the terminal. Issue #1726: with
+        // the agent's own labels, so the audit trail says which choice was made
+        // rather than which line the pane happened to be showing.
         const record = recordAnsweredPrompt(db, {
           worktreeId: id,
           cliToolId,
           instanceId: instanceId ?? cliToolId,
-          promptData: promptCheck.promptData,
+          promptData: effectivePromptData,
           answer: resolution.input,
           answeredBy: 'human',
           content: promptCheck.rawContent || promptCheck.cleanContent,
@@ -241,8 +289,13 @@ export async function POST(
     return NextResponse.json({
       success: true,
       answer: resolution.input,
-      // Issue #1681: audit trail — which option a semantic/default answer selected.
-      ...(resolution.resolved ? { resolved: resolution.resolved } : {}),
+      // Issue #1681: audit trail — which option a semantic/default answer
+      // selected. Issue #1726 adds the label match against the agent's own
+      // options, which resolves before `resolvePromptAnswer` ever sees the
+      // answer and therefore has to be merged in here.
+      ...(structuredResolution ?? resolution.resolved
+        ? { resolved: structuredResolution ?? resolution.resolved }
+        : {}),
     });
   } catch (error: unknown) {
     logger.error('failed-to-respond-to-prompt:', { error: error instanceof Error ? error.message : String(error) });

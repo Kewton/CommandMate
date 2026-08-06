@@ -169,6 +169,11 @@ export interface CurrentOutputResponse {
 export interface PromptData {
   type: string;
   question: string;
+  /**
+   * Mirrors src/types/models.ts MultipleChoiceOption. Since Issue #1726 an
+   * option may also carry `description` — the second line the AskUserQuestion
+   * picker renders — when the agent's own `PreToolUse` payload supplied it.
+   */
   options?: unknown[];
   status?: string;
   answer?: string;
@@ -207,10 +212,20 @@ export interface PromptMessageResponse {
 export interface PromptResponseResult {
   success: boolean;
   answer: string;
-  reason?: string; // e.g. 'prompt_no_longer_active', 'unresolvable_answer'
-  /** Issue #1681: detail accompanying reason 'unresolvable_answer' */
+  /**
+   * e.g. `prompt_no_longer_active`, `unresolvable_answer`, and since Issue
+   * #1726 `answer_out_of_range` — the option number is outside the list the
+   * agent's own `AskUserQuestion` payload declared, so nothing was sent.
+   */
+  reason?: string;
+  /** Issue #1681: detail accompanying a reason that refused to send. */
   message?: string;
-  /** Issue #1681: how a semantic yes/no or --default answer was resolved */
+  /**
+   * Issue #1681: how a semantic yes/no or --default answer was resolved.
+   *
+   * Issue #1726 also reports `via: 'semantic'` here when an option LABEL was
+   * matched against the agent's structured options (`respond <id> Blue` → 1).
+   */
   resolved?: {
     via: 'semantic' | 'default';
     optionNumber?: number;
