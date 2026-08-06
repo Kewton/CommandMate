@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **detection: Claude Code hooks の実機検証レポートと実 payload fixture** (#1721)
+  - `docs/design/agent-hooks-live-verification.md` — Epic #1720 の全下流 Issue が前提にする hooks の挙動を v2.1.223 で実測した。隔離 HOME ＋ 専用 tmux socket ＋ 使い捨てダンプサーバで再現可能な形にしてある。コード変更なし（スパイク）
+  - `tests/fixtures/hooks/claude/*.json` — `PermissionRequest` / `PreToolUse(AskUserQuestion)` / `Notification(permission_prompt, idle_prompt)` / `Stop` / `UserPromptSubmit` / `SessionStart` / `SessionEnd` の実 payload 12 件。環境固有値はプレースホルダに置換済み
+  - **公式ドキュメントとの食い違いを 3 件検出**した。(1) `SessionStart` では `type:"http"` が**黙って skip される**（debug ログにしか出ない。`type:"command"` 必須）、(2) `PermissionRequest` の実 payload には `permission_requirements` も `tool_use_id` も無く、代わりに `permission_suggestions` が入る、(3) TUI で承認を拒否しても `PermissionDenied` は発火しない
+  - **Auto-Yes v2 (#1724) の安全性の根拠を実測で固定**した。hook が空応答を返すと従来どおり TUI 承認ダイアログにフォールバックし、timeout も接続不能もすべて fail-open。一方 `AskUserQuestion` は `allow` を返しても選択画面が出るため、一律 allow では突破できない
 - **detection: 実 TUI カナリアで Claude 新バージョンの検出回帰を検知する** (#1727)
   - `npm run canary` で実 `claude` を使い捨て tmux セッションに起動し、5 シナリオ（idle / 許可ダイアログ / AskUserQuestion＋タスクパネル併存 / `/model` オーバーレイ / 生成中）の capture を**本番と同じ 2 経路**に食わせて assert する。ステータス経路（`detectSessionStatus`）と Auto-Yes 経路（`detectPrompt` 直呼び）を**独立に**検証する — #1495 は Auto-Yes 側だけで発火した欠陥だった
   - **隔離を仕組みで強制**。tmux は全呼び出しが `-L cmate-canary-*` を経由し、`kill-server` は専用メソッド以外から到達できない（`-L` 無しの `kill-server` が稼働中の全 `mcbd-*` を消した前例がある）。HOME は使い捨てにしたうえで `show-environment` で**転送されたことを assert** し、実 `~/.claude/settings.json` の sha256 と `mcbd-*` 一覧を各シナリオの前後で再検証する（違反は exit 3）
