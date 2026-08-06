@@ -1,0 +1,73 @@
+version: 1
+title: "Issue #1723: 構造化イベントを sessionStatus 判定に優先適用する2層化"
+goal: |
+  /pm-auto-issue2dev 1723
+
+  https://github.com/Kewton/CommandMate/issues/1723 を実装してください。
+  Issue 本文の「実装内容」1〜4、「受入基準」、「既知の罠」をすべて満たすこと。
+
+  ## 着手前に必ず読むこと
+
+  - `docs/design/agent-hooks-live-verification.md` — #1721 の実機検証レポート。**これが仕様の正**
+  - `src/lib/session/agent-event-state.ts` — #1722 が拡張済み。本 Issue はこれに状態機械を載せる
+  - `src/lib/hooks/hook-settings-generator.ts` — #1722 が新設。どのイベントがどの型で注入されるか
+
+  Issue 本文・本契約とレポートの実測が食い違ったら、**実測を正**とし乖離をコミットメッセージに書くこと。
+
+  ## 設計上の絶対条件
+
+  - **`src/lib/detection/status-detector.ts` の `detectSessionStatus()` を触らないこと。** 純粋関数のまま残す。
+    fixture ベースの既存テスト資産（#1708 の回帰テストを含む）を壊します。構造化イベントとの merge は
+    `src/lib/session/current-output-builder.ts`（builder 層）で行うこと。**`src/lib/detection/**` は契約の `scope.deny`**
+  - **`isPromptWaiting` / `promptData` / `isSelectionListActive` は本 Issue では scraper のまま。**
+    触ると後続 #1725 の担当範囲を侵し、差分が肥大します
+  - **未設定環境（イベントが来ない環境）の挙動を 1 bit も変えないこと。** 既存テストが無変更で全緑であることがその証明
+  - **hooks の到着を「起動完了」の signal にしないこと。** 未 trust ディレクトリでは folder trust ダイアログが先に出て
+    `SessionStart` すら来ない（実測 25.3 秒の無音）
+
+  ## 作業ルール（厳守）
+
+  - **「テストが緑 = 動く」ではない。** merge が空振り（構造化状態が常に不在で scraper 素通し）でも全テストは緑になります。
+    **変異注入**（イベントを実際に投入して status が変わることの実測）で非空振りを証明し、結果をコミットメッセージに書くこと
+  - **`npm run test:integration` を通しで実行し、exit code を `cmd > log; echo $?` で実測すること。**
+    `.commandmate/verify.yaml` のゲートは lint / typecheck / unit のみで **integration を裁定しません**。
+    #1722 では integration の回帰が `wait --verify` を素通りして CI で落ちました
+  - **テストが実ホームディレクトリを汚さないこと。** #1722 でスイートが `~/.commandmate/hooks` にファイルを残す問題が
+    見つかり、`tests/helpers/agent-hooks-dir.ts` で `CM_AGENT_HOOKS_DIR` を temp に向ける仕組みが入っています。
+    セッションを起動するテストを追加する場合はこれを使うこと
+  - `tests/unit/**/status-detector.test.ts` は develop 時点で赤のケースが存在した前例があります。着手前にベースラインを
+    把握し、**自分の変更起因と誤認しないこと**。無関係の赤を本ブランチで直さないこと
+  - 実機確認で `/api/worktrees` の status を見ないこと。**5s TTL の capture キャッシュ越し**なので短い遷移が消えます
+    （`CACHE_TTL_MS`、`src/lib/tmux/tmux-capture-cache.ts`）。確認は `/api/worktrees/<id>/current-output` を直接叩くこと
+  - 実 tmux を触る検証は必ず **`tmux -L <専用socket>`** で。`kill-server` は書かず `kill-session -t '=<name>:'` を使うこと。
+    `TMUX_TMPDIR` を隔離手段に使わないこと
+  - 変更は**単一コミット**。**PR は作らないこと**（オーケストレーターが作成する）。`dev-reports/` は作成不要
+  - 完了したら最終行に `IMPL_COMPLETED` とだけ出力すること
+
+  ## 並行作業への配慮
+
+  Issue #1724（Auto-Yes v2）が同時に `src/lib/hooks/**` と `src/lib/polling/**` を変更しています。
+  **その 2 つを触らないこと**（契約の `scope.deny`）。必要になった場合は理由をコミットメッセージに明記すること。
+
+  ## 完了条件
+
+  - Issue #1723 の受入基準（🤖 / 👤）をすべて満たしていること
+  - `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` / `npm run test:integration` / `npm run build`
+    がすべて exit 0（**実測**）
+scope:
+  allow:
+    - "src/lib/session/**"
+    - "src/cli/types/api-responses.ts"
+    - "tests/**"
+    - "docs/**"
+    - "CHANGELOG.md"
+    - "dev-reports/**"
+  deny:
+    - "src/lib/detection/**"
+    - "src/lib/hooks/**"
+    - "src/lib/polling/**"
+verify:
+  gates: [lint, typecheck, unit]
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
