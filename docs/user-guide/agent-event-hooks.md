@@ -28,9 +28,10 @@ hooks 設定ファイルを生成し `claude --settings <file>` で渡す。
 | `Stop` | `http` | |
 | `Notification` | `http`（matcher: `permission_prompt\|idle_prompt`） | matcher は `notification_type` に照合される |
 | `SessionEnd` | `http` | |
+| `PermissionRequest` | `http`（別受け口 `/api/hooks/permission-request`、timeout 5 秒） | **Auto-Yes v2**（#1724）。§0.6 |
 
-`PermissionRequest` / `PreToolUse` は**注入しない**。これらは hook が「代わりに答える」
-決定権を持つイベントで、本 Issue の「観測のみ」という前提を崩す。Auto-Yes v2（#1724）の担当。
+`PreToolUse` は**注入しない**。裁定する仕組みがまだ無く、注入しても全件 no-decision を
+返すだけになる（Phase 4 の担当）。
 
 ### 0.1 `~/.claude/settings.json` は書き換えられない
 
@@ -78,6 +79,42 @@ CM_AGENT_HOOKS_INJECT=0 commandmate start
   folder trust ダイアログが先に出て、応答するまで `SessionStart` すら発火しない
   （実測 25.3 秒の完全無音）。起動検出は従来どおり `CLAUDE_PROMPT_PATTERN` と
   trust ダイアログ自動応答で行う。
+### 0.6 `PermissionRequest`（Auto-Yes v2 / Issue #1724）
+
+他のイベントと違い、これは**同期**で、**応答本文がエージェントに従われる**。
+Claude は承認ダイアログを**描く前に**この hook を叩き、CommandMate は 3 通りのうち 1 つを返す。
+
+| 応答 | Claude の挙動 |
+|---|---|
+| `{}`（no-decision） | 従来どおり TUI 承認ダイアログが出る（＝この機能が無い機械と同じ） |
+| `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}` | ダイアログを出さず即実行 |
+| `deny` | **CommandMate は返さない**（下記） |
+
+裁定表:
+
+| 条件 | 裁定 |
+|---|---|
+| payload を読めない | no-decision |
+| `tool_name` が `AskUserQuestion` | no-decision（常に） |
+| Auto-Yes が無効／期限切れ | no-decision |
+| 契約 `autoYes` が抑止（`mode: off` / `denyPatterns` 一致 / 型不許可） | no-decision ＋ `lastSuppression` 記録 |
+| 上記以外 | `allow` |
+
+- **判定不能は必ず no-decision。** 誤 `allow` はコマンド実行を意味し、no-decision はダイアログが出るだけ。
+  この非対称性が全分岐の設計原則になっている。
+- **`deny` は返さない。** Auto-Yes の抑止はもともと「自動応答しない」であって「拒否する」ではない。
+  `denyPatterns` 該当時も**ダイアログが出て手動で応答できる**（挙動は従来と同じ）。
+- **`denyPatterns` の照合対象はそのリクエストの `tool_input` だけ**（Bash なら command、他ツールは主要引数）。
+  画面もスクロールバックも入力に無いため、#1699（承認済みの `rm -rf` が以後の無関係な承認まで抑止した不具合）は
+  構造的に起こらない。
+- **`AskUserQuestion` は突破できない。** `allow` を返しても選択画面はそのまま出る（実測）。
+  裏返せば「`respond yes` が承認に化ける」型の事故も起きない。質問への回答は別機構（#1726）の担当。
+- **サーバが落ちていてもエージェントは止まらない。** hook の timeout / 接続失敗はすべて fail-open で、
+  ダイアログが出るだけになる。
+- Auto-Yes のトグルとは**独立に常時注入**される。注入はセッション起動時 1 回きりで、
+  Auto-Yes は後から有効化されるため、トグル連動にすると「有効にしたのに hook が無い」状態が生まれる。
+- **画面ベースの Auto-Yes は残っている。** hooks 非対応の環境と Claude 以外の CLI では従来どおり動く。
+
 
 ---
 
@@ -244,10 +281,14 @@ notify は Codex の作業ディレクトリで起動されるため `cwd` は `
 
 ## 5. いま hook が「変えないこと」
 
+> **例外は `PermissionRequest` だけ**（§0.6 / Issue #1724）。これは応答がエージェントに
+> 従われる唯一のイベントで、Auto-Yes が有効なら承認ダイアログを出さずに実行させる。
+> それ以外の判定（`wait` / ポーラー / 完了検知）は以下のとおり従来のまま。
+
 `lastStopEventAt` と `structuredEvents` は
 `GET /api/worktrees/:id/current-output` と WebSocket のターミナルスナップショットに
-**露出するだけ**で、`wait` / ポーラー / Auto-Yes の完了判定はいずれも従来どおり
-文字列解析の結果で動く。
+**露出するだけ**で、`wait` / ポーラー / **画面ベース** Auto-Yes の完了判定はいずれも
+従来どおり文字列解析の結果で動く。
 
 ```jsonc
 "lastStopEventAt": 1754470000000,
@@ -280,7 +321,12 @@ hook が届いているかを確認したいときはこれを見る。
 - **hook 到着 ≠ 起動完了**: §0.5 のとおり、未 trust ディレクトリでは
   trust ダイアログに答えるまで `SessionStart` すら来ない。
 - **hook はすべて fail-open**: timeout も接続失敗もエージェントを止めない。
-  CommandMate サーバが落ちていてもセッションは壊れず、イベントだけが失われる。
+  CommandMate サーバが落ちていてもセッションは壊れず、イベントだけが失われる
+  （`PermissionRequest` なら承認ダイアログが出るだけになる）。
+- **`PermissionRequest` は headless `-p` では発火しない**: sandbox guard が先に弾くため、
+  非対話実行は Auto-Yes v2 の裁定対象にならない（実測）。
+- **ユーザーが「No」を選んだことは hook から分からない**: `PermissionDenied` は TUI で
+  拒否しても発火しなかった（実測・登録済み 0 回）。拒否を検知する仕組みには使えない。
 
 ---
 

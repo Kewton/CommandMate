@@ -133,9 +133,7 @@ function collectDenyMatchTexts(promptData: PromptData): string[] {
   } else {
     texts.push(...promptData.options);
   }
-  return texts.map(text =>
-    text.length > MAX_DENY_MATCH_TEXT_LENGTH ? text.slice(0, MAX_DENY_MATCH_TEXT_LENGTH) : text
-  );
+  return texts;
 }
 
 interface DenyOutcome {
@@ -151,12 +149,14 @@ interface DenyOutcome {
  * same ReDoS defence the stop-pattern path uses. A pattern that fails screening
  * — or whose execution throws — is reported as `unusable`, not skipped.
  */
-function evaluateDenyPatterns(promptData: PromptData, patterns: string[]): DenyOutcome {
+function evaluateDenyPatterns(rawTexts: string[], patterns: string[]): DenyOutcome {
   if (patterns.length === 0) {
     return { outcome: 'no-match' };
   }
 
-  const texts = collectDenyMatchTexts(promptData);
+  const texts = rawTexts.map(text =>
+    text.length > MAX_DENY_MATCH_TEXT_LENGTH ? text.slice(0, MAX_DENY_MATCH_TEXT_LENGTH) : text
+  );
 
   for (const pattern of patterns) {
     if (pattern.length > MAX_DENY_PATTERN_LENGTH || !validateStopPattern(pattern).valid) {
@@ -178,26 +178,45 @@ function evaluateDenyPatterns(promptData: PromptData, patterns: string[]): DenyO
   return { outcome: 'no-match' };
 }
 
+/** A policy denial, or null when the policy permits the answer. */
+export interface AutoYesPolicyDenial {
+  reason: AutoYesSuppressionReason;
+  pattern?: string;
+}
+
 /**
- * Decide whether the policy forbids answering this prompt.
+ * Decide whether the policy forbids answering, given the prompt type and the
+ * exact texts the deny patterns are to be judged against.
+ *
+ * Split out of {@link evaluatePolicy} for Issue #1724: the `PermissionRequest`
+ * hook adjudicates a structured tool call rather than a screen-scraped prompt,
+ * so it has no {@link PromptData} to pass — but it must reach *the same verdict*
+ * the screen path would. Two implementations of this ordering would be two
+ * chances for the hook to be quietly more permissive than the poller, and the
+ * hook's verdict is executed without a dialog.
  *
  * Deny patterns are honoured even when `mode` is null: a contract that lists
  * them has stated a policy, and a listed pattern that quietly did nothing is the
  * worst failure a contract can have. `mode` null with no deny patterns — what
  * the parser produces for a contract with no `autoYes` block — reaches none of
  * these branches and leaves behaviour identical.
+ *
+ * @param promptType - How the prompt would be classified on screen
+ * @param denyMatchTexts - The only strings deny patterns are matched against
+ * @param policy - Contract policy; null/undefined permits everything
  */
-function evaluatePolicy(
-  promptData: PromptData,
+export function evaluatePolicyAgainstTexts(
+  promptType: PromptType,
+  denyMatchTexts: string[],
   policy: AutoYesPolicy | null | undefined
-): { reason: AutoYesSuppressionReason; pattern?: string } | null {
+): AutoYesPolicyDenial | null {
   if (!policy) return null;
 
   if (policy.mode === 'off') {
     return { reason: 'mode-off' };
   }
 
-  const deny = evaluateDenyPatterns(promptData, policy.denyPatterns);
+  const deny = evaluateDenyPatterns(denyMatchTexts, policy.denyPatterns);
   if (deny.outcome === 'match') {
     return { reason: 'deny-pattern', pattern: deny.pattern };
   }
@@ -206,16 +225,22 @@ function evaluatePolicy(
   }
 
   if (policy.mode === 'safe') {
-    return promptData.type === 'yes_no' ? null : { reason: 'type-not-allowed' };
+    return promptType === 'yes_no' ? null : { reason: 'type-not-allowed' };
   }
 
   if (policy.mode === 'allow-listed') {
-    return policy.allowPromptTypes.includes(promptData.type)
-      ? null
-      : { reason: 'type-not-allowed' };
+    return policy.allowPromptTypes.includes(promptType) ? null : { reason: 'type-not-allowed' };
   }
 
   return null;
+}
+
+/** {@link evaluatePolicyAgainstTexts} over a detected on-screen prompt. */
+function evaluatePolicy(
+  promptData: PromptData,
+  policy: AutoYesPolicy | null | undefined
+): AutoYesPolicyDenial | null {
+  return evaluatePolicyAgainstTexts(promptData.type, collectDenyMatchTexts(promptData), policy);
 }
 
 /**

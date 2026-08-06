@@ -53,6 +53,16 @@ const HOOK_HOST = '127.0.0.1';
 export const AGENT_EVENT_PATH = '/api/hooks/agent-event';
 
 /**
+ * Auto-Yes v2 receiver (Issue #1724). Mirrors
+ * `src/app/api/hooks/permission-request/route.ts`.
+ *
+ * Separate from {@link AGENT_EVENT_PATH} because the two have opposite
+ * contracts: that one is fire-and-forget, this one blocks the agent until it
+ * answers and its body is obeyed.
+ */
+export const PERMISSION_REQUEST_PATH = '/api/hooks/permission-request';
+
+/**
  * Seconds a hook may block the agent.
  *
  * The receiver answers 202 without doing any work of its own, so this only ever
@@ -61,6 +71,18 @@ export const AGENT_EVENT_PATH = '/api/hooks/agent-event';
  * human is sitting and waiting for.
  */
 export const HOOK_TIMEOUT_SECONDS = 5;
+
+/**
+ * Seconds `PermissionRequest` may block the agent (Issue #1724).
+ *
+ * Claude's default for an `http` hook is 600 s, and there is no `async` for
+ * http (D4/§5.3.6), so this number is how long a wedged server delays every
+ * approval dialog on the machine. The receiver decides from in-memory Auto-Yes
+ * state and a TTL-cached policy, so the budget is generous by orders of
+ * magnitude; it is small because the failure mode it bounds is the server being
+ * gone, and a hook failure is fail-open — the dialog appears, five seconds late.
+ */
+export const PERMISSION_REQUEST_TIMEOUT_SECONDS = 5;
 
 /**
  * Environment variable carrying the bearer token, per
@@ -193,6 +215,29 @@ export function buildAgentEventUrl(
   target: HookSettingsTarget,
   options: HookSettingsOptions = {}
 ): string {
+  return buildReceiverUrl(AGENT_EVENT_PATH, target, options);
+}
+
+/**
+ * Auto-Yes v2 receiver URL, with the same correlation keys baked in
+ * (Issue #1724).
+ *
+ * They matter more here than on the event path: a verdict applied to the wrong
+ * instance is an approval the operator never asked for, and `cwd` cannot tell
+ * `claude` from `claude-2`.
+ */
+export function buildPermissionRequestUrl(
+  target: HookSettingsTarget,
+  options: HookSettingsOptions = {}
+): string {
+  return buildReceiverUrl(PERMISSION_REQUEST_PATH, target, options);
+}
+
+function buildReceiverUrl(
+  path: string,
+  target: HookSettingsTarget,
+  options: HookSettingsOptions
+): string {
   const cliToolId = target.cliToolId ?? 'claude';
   const port = options.port ?? getServerPort();
   const params = new URLSearchParams({
@@ -200,7 +245,7 @@ export function buildAgentEventUrl(
     worktreeId: target.worktreeId,
     instanceId: resolveTargetInstanceId(target),
   });
-  return `http://${HOOK_HOST}:${port}${AGENT_EVENT_PATH}?${params.toString()}`;
+  return `http://${HOOK_HOST}:${port}${path}?${params.toString()}`;
 }
 
 /** Absolute path of the shipped relay script, or null when it is not on disk. */
@@ -214,13 +259,17 @@ export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-function buildHttpHandler(url: string, withAuthHeader: boolean): ClaudeHookHandler {
+function buildHttpHandler(
+  url: string,
+  withAuthHeader: boolean,
+  timeout: number = HOOK_TIMEOUT_SECONDS
+): ClaudeHookHandler {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const handler: ClaudeHookHandler = {
     type: 'http',
     url,
     headers,
-    timeout: HOOK_TIMEOUT_SECONDS,
+    timeout,
   };
   if (withAuthHeader) {
     headers.Authorization = `Bearer $${AUTH_TOKEN_ENV_VAR}`;
@@ -278,9 +327,15 @@ export function buildSessionStartCommand(
  * Deterministic for a given (worktreeId, instanceId, port): callers rely on
  * regenerating it producing the same file.
  *
- * `PermissionRequest` and `PreToolUse` are deliberately absent. They carry a
- * decision the agent obeys, and shipping that by default before Auto-Yes v2
- * (#1724) exists would make this Issue's "observe only" claim false.
+ * `PermissionRequest` is registered unconditionally (Issue #1724) — it is *not*
+ * gated on Auto-Yes being enabled. The receiver answers no-decision whenever
+ * Auto-Yes is off, and no-decision is measured to be indistinguishable from
+ * having no hook at all (#1721 D5), so a toggle here would only add a second
+ * place for the feature to be silently off. It also has to be: Auto-Yes is
+ * enabled mid-session, and a hook registered at launch is the only kind this
+ * session will have.
+ *
+ * `PreToolUse` remains absent — nothing adjudicates it yet (Phase 4).
  */
 export function buildAgentHookSettings(
   target: HookSettingsTarget,
@@ -289,6 +344,12 @@ export function buildAgentHookSettings(
   const url = buildAgentEventUrl(target, options);
   const withAuthHeader = options.withAuthHeader ?? isAuthTokenExpected();
   const http = () => buildHttpHandler(url, withAuthHeader);
+  const permissionHttp = () =>
+    buildHttpHandler(
+      buildPermissionRequestUrl(target, options),
+      withAuthHeader,
+      PERMISSION_REQUEST_TIMEOUT_SECONDS
+    );
 
   return {
     hooks: {
@@ -307,6 +368,8 @@ export function buildAgentHookSettings(
       Stop: [{ hooks: [http()] }],
       Notification: [{ matcher: NOTIFICATION_MATCHER, hooks: [http()] }],
       SessionEnd: [{ hooks: [http()] }],
+      // Issue #1724. Points at its own receiver, not the event one.
+      PermissionRequest: [{ hooks: [permissionHttp()] }],
     },
   };
 }

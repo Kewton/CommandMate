@@ -26,10 +26,12 @@ import {
   buildAgentHookSettings,
   buildClaudeLaunchCommand,
   buildSessionStartCommand,
+  buildPermissionRequestUrl,
   getHookSettingsPath,
   isAuthTokenExpected,
   isHookInjectionEnabled,
   NOTIFICATION_MATCHER,
+  PERMISSION_REQUEST_TIMEOUT_SECONDS,
   resolveRelayScriptPath,
   shellQuote,
   writeAgentHookSettings,
@@ -86,12 +88,13 @@ function fixture(name: string): Record<string, unknown> {
 }
 
 describe('event coverage', () => {
-  it('registers exactly the five lifecycle events, and no decision-bearing ones', () => {
-    // PermissionRequest and PreToolUse let a hook *answer* for the user. This
-    // Issue is observation only; shipping them by default would make that claim
-    // false. They belong to Auto-Yes v2 (#1724).
+  it('registers the five lifecycle events plus PermissionRequest', () => {
+    // PreToolUse also carries a decision the agent obeys, and nothing
+    // adjudicates it yet (Phase 4) — registering it would mean answering
+    // no-decision to every tool call for no benefit.
     expect(Object.keys(buildAgentHookSettings(TARGET).hooks).sort()).toEqual([
       'Notification',
+      'PermissionRequest',
       'SessionEnd',
       'SessionStart',
       'Stop',
@@ -107,13 +110,56 @@ describe('event coverage', () => {
         .filter((name) => name.endsWith('.json'))
         .map((name) => fixture(name).hook_event_name as string)
     );
-    const outOfScope = new Set(['PermissionRequest', 'PreToolUse']);
+    const outOfScope = new Set(['PreToolUse']);
     const registered = new Set(Object.keys(buildAgentHookSettings(TARGET).hooks));
 
     for (const event of observed) {
       if (outOfScope.has(event)) continue;
       expect(registered.has(event), `no hook registered for observed event ${event}`).toBe(true);
     }
+  });
+});
+
+describe('PermissionRequest wiring (Issue #1724)', () => {
+  it('posts to its own receiver, not the fire-and-forget event one', () => {
+    // The event receiver answers 202 with a fixed body and never carries a
+    // decision. Pointing PermissionRequest at it would make every approval a
+    // silent no-decision — the feature off, with no way to notice.
+    const settings = buildAgentHookSettings(TARGET);
+    const [group] = settings.hooks.PermissionRequest;
+    const [hook] = group.hooks;
+
+    expect(group.matcher).toBeUndefined();
+    expect(hook.type).toBe('http');
+    expect(hook.type === 'http' && hook.url).toBe(buildPermissionRequestUrl(TARGET));
+    expect(hook.type === 'http' && hook.url).not.toBe(buildAgentEventUrl(TARGET));
+    expect(buildPermissionRequestUrl(TARGET)).toContain('/api/hooks/permission-request');
+  });
+
+  it('carries the same correlation keys, per instance', () => {
+    // A verdict applied to the wrong instance is an approval nobody asked for,
+    // and cwd cannot tell claude from claude-2.
+    expect(buildPermissionRequestUrl(TARGET_2)).toContain('instanceId=claude-2');
+    expect(buildPermissionRequestUrl(TARGET_2)).toContain('worktreeId=wt-alpha');
+    expect(buildPermissionRequestUrl(TARGET_2)).toContain('tool=claude');
+  });
+
+  it('bounds how long a wedged server can delay an approval dialog', () => {
+    const [hook] = buildAgentHookSettings(TARGET).hooks.PermissionRequest[0].hooks;
+
+    // Claude's own default for an http hook is 600 s and there is no async for
+    // http (#1721 §5.3.6), so leaving this unset would hang every dialog on the
+    // machine for ten minutes when the server is gone.
+    expect(hook.timeout).toBe(PERMISSION_REQUEST_TIMEOUT_SECONDS);
+    expect(PERMISSION_REQUEST_TIMEOUT_SECONDS).toBeLessThan(30);
+  });
+
+  it('is registered whether or not Auto-Yes is enabled anywhere', () => {
+    // Injection happens once at launch; Auto-Yes is toggled mid-session. A
+    // hook that were gated on Auto-Yes would simply never exist for the
+    // sessions that later turn it on.
+    expect(Object.keys(buildAgentHookSettings(TARGET).hooks)).toContain('PermissionRequest');
+    expect(Object.keys(buildAgentHookSettings(TARGET_2).hooks)).toContain('PermissionRequest');
   });
 });
 
@@ -161,10 +207,12 @@ describe('SessionStart cannot be an http hook (D1)', () => {
 
 describe('instance correlation is carried by the URL', () => {
   it('bakes tool, worktree and instance into every http hook URL', () => {
-    for (const { hook } of handlers(buildAgentHookSettings(TARGET_2))) {
+    for (const { event, hook } of handlers(buildAgentHookSettings(TARGET_2))) {
       if (hook.type !== 'http') continue;
       const url = new URL(hook.url);
-      expect(url.pathname).toBe('/api/hooks/agent-event');
+      expect(url.pathname).toBe(
+        event === 'PermissionRequest' ? '/api/hooks/permission-request' : '/api/hooks/agent-event'
+      );
       expect(url.searchParams.get('tool')).toBe('claude');
       expect(url.searchParams.get('worktreeId')).toBe('wt-alpha');
       expect(url.searchParams.get('instanceId')).toBe('claude-2');
