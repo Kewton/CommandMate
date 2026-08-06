@@ -26,13 +26,18 @@ import * as path from 'path';
 import {
   runReconcile,
   formatNoticesForReport,
+  applyLocaleAdditions,
+  flattenDictionary,
+  DEFAULT_EXCLUSIONS,
   type LocaleAddition,
+  type LocaleDictionary,
   type ReconcileResult,
   type SlashCommandsCatalog,
 } from '../src/lib/slash-command-reconcile';
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const CATALOG_PATH = path.join(REPO_ROOT, 'src/config/slash-commands-catalog.json');
+const EXCLUSIONS_PATH = path.join(REPO_ROOT, 'src/config/slash-commands-exclusions.json');
 const EN_LOCALE_PATH = path.join(REPO_ROOT, 'locales/en/worktree.json');
 const JA_LOCALE_PATH = path.join(REPO_ROOT, 'locales/ja/worktree.json');
 
@@ -92,34 +97,19 @@ function writeJson(filePath: string, value: unknown): void {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
-type LocaleDictionary = Record<string, unknown>;
-
-/** Set a dotted key (e.g. slashCommands.descriptions.loop) inside a dictionary. */
-function setNested(dict: LocaleDictionary, dottedKey: string, value: string): void {
-  const parts = dottedKey.split('.');
-  let node: Record<string, unknown> = dict;
-  for (let i = 0; i < parts.length - 1; i++) {
-    const key = parts[i];
-    const next = node[key];
-    if (!next || typeof next !== 'object') {
-      node[key] = {};
-    }
-    node = node[key] as Record<string, unknown>;
-  }
-  node[parts[parts.length - 1]] = value;
-}
-
-function applyLocaleAdditions(
+/**
+ * Merge locale additions into a dictionary file. The merge itself is a pure
+ * helper in the reconcile module (Issue #1704) so a test can pin the round trip
+ * between the key the engine mints and the key the renderer resolves.
+ */
+function writeLocaleAdditions(
   filePath: string,
   additions: LocaleAddition[],
   pick: (addition: LocaleAddition) => string
 ): void {
   if (additions.length === 0) return;
   const dict = readJson<LocaleDictionary>(filePath);
-  for (const addition of additions) {
-    setNested(dict, addition.key, pick(addition));
-  }
-  writeJson(filePath, dict);
+  writeJson(filePath, applyLocaleAdditions(dict, additions, pick));
 }
 
 function printSummary(result: ReconcileResult, args: CliArgs): void {
@@ -142,6 +132,13 @@ function printSummary(result: ReconcileResult, args: CliArgs): void {
   const { diff } = result;
   console.log('\nSlash-command catalog reconcile');
   console.log('================================');
+
+  // Issue #1704: make the curation list visible in the report, so "why is this
+  // never proposed?" is answered by the run itself rather than by issue archaeology.
+  console.log(
+    `\nHonoring ${DEFAULT_EXCLUSIONS.length} exclusion(s) from ` +
+      `${path.relative(REPO_ROOT, EXCLUSIONS_PATH)}`
+  );
 
   if (result.warnings.length > 0) {
     console.log('\nWarnings (fail-soft — affected sources left untouched):');
@@ -196,14 +193,17 @@ async function main(): Promise<void> {
     claude: args.skipClaude ? false : {},
     codex: args.skipCodex ? false : args.codexRef ? { ref: args.codexRef } : {},
     antigravity: args.skipAntigravity ? false : {},
+    // Issue #1704: lets the engine notice when a new entry would silently
+    // inherit a description an earlier release wrote for a different tool.
+    existingEnDescriptions: flattenDictionary(readJson<LocaleDictionary>(EN_LOCALE_PATH)),
   });
 
   printSummary(result, args);
 
   if (args.write && result.changed) {
     writeJson(CATALOG_PATH, result.catalog);
-    applyLocaleAdditions(EN_LOCALE_PATH, result.localeAdditions, (a) => a.en);
-    applyLocaleAdditions(JA_LOCALE_PATH, result.localeAdditions, (a) => a.ja);
+    writeLocaleAdditions(EN_LOCALE_PATH, result.localeAdditions, (a) => a.en);
+    writeLocaleAdditions(JA_LOCALE_PATH, result.localeAdditions, (a) => a.ja);
     console.log('\nFiles written:');
     console.log(`  ${path.relative(REPO_ROOT, CATALOG_PATH)}`);
     if (result.localeAdditions.length > 0) {

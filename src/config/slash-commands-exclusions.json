@@ -1,0 +1,43 @@
+{
+  "$comment": [
+    "Commands a human decided the catalog must NOT carry, in a form catalog:refresh can read (Issue #1704).",
+    "",
+    "Before this file existed the decision lived only in test assertions, which the reconcile tool cannot read:",
+    "it re-proposed the same commands on every release, applying them turned the guard tests red, and a human",
+    "re-derived the reasoning from old issues. v0.21.2 / v0.21.3 / v0.21.4 all proposed the same 3 commands.",
+    "",
+    "Fields (all required, validated by src/lib/slash-command-reconcile/exclusions.ts):",
+    "  name     command name without the leading '/'.",
+    "  cliTools tools this exclusion applies to. NEVER a name-wide ban: v0.21.2 had to narrow the /vim ban from",
+    "           'the name' to 'claude' because codex 0.146.0 genuinely ships /vim, and the name-wide form was",
+    "           hiding a real command. State the tool that removed it, not the string.",
+    "  kind     'phantom' | 'out-of-scope' — the two have very different re-decision costs, so they must not",
+    "           be written as one undifferentiated 'reason' blob:",
+    "             phantom       the command does not exist on that CLI (the source row is history, a marker, or",
+    "                           a stub). Settles itself: if upstream starts shipping it for real, delete the row.",
+    "             out-of-scope  the command is real upstream and its description is fine; we chose not to surface",
+    "                           it. Only a human re-deciding can remove this row.",
+    "  reason   why, in one sentence, phrased so the next reader does not have to open the issue.",
+    "  issue    the issue number the decision was made in.",
+    "",
+    "Adding a row silences a proposal, so add one only for a decision that is actually settled. A command still",
+    "under discussion belongs OUT of this file: it will be re-proposed every run, and that recurring line is the",
+    "correct signal that an open decision exists (this is why /agents is deliberately absent — see #1704)."
+  ],
+  "exclusions": [
+    {
+      "name": "ultraplan",
+      "cliTools": ["claude"],
+      "kind": "phantom",
+      "reason": "The claude docs row carries the bare marker \"Removed\" as its description; the command is not on the CLI. Adding it re-creates exactly the phantom entries #1502/#1503 purged.",
+      "issue": 1503
+    },
+    {
+      "name": "schedule",
+      "cliTools": ["claude"],
+      "kind": "out-of-scope",
+      "reason": "Real upstream with a correct description (cloud-run routines), but #1488 decided the palette does not carry it. A curation call, not a phantom — removing this row needs a human to re-decide.",
+      "issue": 1488
+    }
+  ]
+}
