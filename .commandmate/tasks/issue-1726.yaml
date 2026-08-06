@@ -1,0 +1,193 @@
+version: 1
+title: "Issue #1726: AskUserQuestion の選択肢を PreToolUse payload から取得し respond を検証可能にする"
+goal: |
+  /pm-auto-issue2dev 1726
+
+  https://github.com/Kewton/CommandMate/issues/1726 を実装してください。
+  Issue 本文の「実装内容」1〜3、「受入基準」、「既知の罠」、そして本文末尾の
+  **「⚠️ Phase 0 スパイク（#1721）による訂正」**をすべて満たすこと。
+
+  ## 着手前に必ず読むこと
+
+  - `tests/fixtures/hooks/claude/pre-tool-use-ask-user-question.json` /
+    `permission-request-ask-user-question.json` — #1721 が採取した実 payload。**この実形式が仕様の正**
+  - `docs/design/agent-hooks-live-verification.md` — 特に §5.6（hooks が発火しない UI）
+  - `src/lib/session/agent-event-state.ts` / `current-output-builder.ts` — #1722 / #1723 / #1725 が積み上げ済み。
+    本 Issue は #1725 の prompt_waiting 状態に構造化選択肢を紐付ける
+
+  Issue 本文・本契約と実 payload が食い違ったら、**実 payload を正**とし乖離をコミットメッセージに書くこと。
+
+  ## 本 Issue の狙いと、実測で判明した境界
+
+  `PreToolUse`（matcher: `AskUserQuestion`）は**ツール呼び出し時に 1 回発火し、`tool_input` に質問と選択肢の JSON が入る**。
+  選択肢データは構造化で取れるので、**regex による選択肢復元をやめる**という中心的な狙いは達成できる。
+
+  ただし決定的な制約がある:
+
+  > **AskUserQuestion の選択画面・確認画面では、`PreToolUse` の 1 回以外に一切イベントが発火しない**
+  > （表示中の受信件数 23 → 23。回答操作中も無音）
+
+  したがって役割分担は次のとおり:
+
+  | 何を | 誰が |
+  |---|---|
+  | 画面が「開いている／閉じた」ことの**検出** | scraper（#1708 が develop 済み） |
+  | 開いていると分かった後の**正確な選択肢の提供** | **本 Issue** |
+
+  ## 実測にもとづく訂正（Issue 本文より優先）
+
+  - **解除は `Stop` を第一級 signal にすること。** 回答確定後に `Stop` が発火することを実測（受信 23 → 24）。
+    **`PostToolUse` の発火は未確認**。使うなら自分で実測してから採用し、結果を PR に書くこと
+  - 複数ステップ（質問 → Review your answers → Ready to submit）は**単一の tool_use として続く**。
+    途中で紐付けを解除しないこと。ステップ遷移中はイベントが来ないので、そもそも途中解除の材料が存在しない
+  - **`AskUserQuestion` にも `PermissionRequest` は上がるが、`allow` を返しても選択画面はそのまま出る。**
+    #1724 は AskUserQuestion を常に no-decision にしている。**この方針を変えないこと**
+  - `AskUserQuestion` の `PermissionRequest` payload には `permission_suggestions` が無い
+  - **`tool_use_id` は実 payload に存在しない**。相関は `prompt_id` + `tool_name` + `tool_input`
+
+  ## 設計上の絶対条件
+
+  - **scraper 側の Claude selection list 検出はフォールバックとして残すこと**（削除しない）
+  - **#1725 が入れた OR 合成を壊さないこと。** 構造化イベントが存在しない画面は scraper だけが見える
+  - **#1723 の「scraper 側の `waiting` は常に勝つ」規則を壊さないこと**
+  - **Auto-Yes の誤応答面を広げないこと。** 画面ベース経路にも AskUserQuestion への自動応答を**追加しない**
+  - `promptData` 型は CLI（`src/cli/types/api-responses.ts`）と共有。型拡張時は CLI 側の後方互換に注意
+  - **`src/lib/detection/**` を触らないこと**（契約の `scope.deny`）
+
+  ## 本 Issue が塞ぐ実害（回帰テストに含めること）
+
+  2026-08-06 に、タスクパネル行 `7 tasks (0 done, 1 in progress, 6 open)` が `NORMAL_OPTION_PATTERN` に
+  「選択肢 7」として拾われ、AskUserQuestion の選択肢復元が全滅した。さらに**タスク数が「本物の選択肢数 + 1」に
+  一致する場合は検出成功するが幻の選択肢が 1 個混入する**。構造化 payload を使えばこの経路自体が不要になるが、
+  **フォールバック時にこの汚染が起きないことを回帰テストで固定すること**。
+
+  ## ★ この委任は「やり直し」である
+
+  前回の実行は成果物が完成する前に打ち切られた。理由は**実装内容の不備ではなく、環境を壊したため**である:
+
+  > ワーカーが隔離サーバを再起動しようとして `pkill -f "node dist/server/server.js"` を実行し、
+  > **ユーザーの本番サーバ（port 3000）と global インスタンス（port 60301）を巻き込んで停止させた。**
+  > ユーザーが手動で復旧するまで CommandMate 全体が使用不能になった。
+
+  下の「プロセス・サーバの扱い」節はこの事故から書かれている。**PID 指定で止める作法を最初から使うこと。**
+  前回のワーカーは後半の起動では正しく `echo $! > pidfile` を書いていた。作法を知らなかったのではなく、
+  最初の 1 回で手癖が出た。
+
+  ## #1725 からの申し送り（着手前に把握すること）
+
+  - **dev モード（`tsx server.ts`）では構造化イベントが機能しない**（[#1736](https://github.com/Kewton/CommandMate/issues/1736)）。
+    `agent-event-state.ts` の in-memory 状態が `globalThis` を経由しておらず、hook の受け口と読み出し側が
+    別モジュールインスタンスになるため。**実機確認は production build で行うこと**。
+    dev で「動かない」と見えても本 Issue の実装バグとは限らない。**#1736 の修正は本 Issue のスコープ外**
+  - `src/types/api.ts` と UI reducer 連鎖の `promptData` 型は縮退値を型で表現しきれていない
+    （[#1738](https://github.com/Kewton/CommandMate/issues/1738) として起票済み）。
+    **本 Issue で閉じる必要はない。** 必要な場合のみ `src/types/models.ts` を触ってよい（`scope.allow` に含めてある）
+  - send guard（プロンプト表示中の send 拒否）は scraper のみを見たまま
+    （[#1737](https://github.com/Kewton/CommandMate/issues/1737) として起票済み）。**本 Issue のスコープ外**
+
+  ## 作業ルール（厳守）— 共通
+
+  ### プロセス・サーバの扱い（★ 2026-08-06 に本番停止事故あり）
+
+  - **`pkill` / `killall` / パターン一致で複数プロセスを一括 kill するコマンドを一切書かないこと。**
+    2026-08-06 に委任ワーカーが `pkill -f "node dist/server/server.js"` を実行し、
+    **ユーザーの本番サーバ（port 3000）と global インスタンス（port 60301）を巻き込んで停止させた**。
+    そのワーカーの意図は自分の隔離サーバ 1 本を再起動することだけだった。`-f` はコマンドライン全体への
+    部分一致なので、同名の実行ファイルを使う**すべてのプロセス**に命中する。
+    **「自分のプロセスだけを止めるつもり」でも、パターン一致は他人のプロセスを巻き込む。**
+  - **プロセスを止めるときは必ず PID を指定すること。** 自分で起動したものは起動時に PID を保存する:
+
+    ```bash
+    U="$SB/uat"                      # scratchpad 配下。$HOME に作らないこと
+    mkdir -p "$U"
+    CM_PORT=3779 CM_DB_PATH="$U/cm.db" NODE_ENV=production \
+      nohup node dist/server/server.js > "$U/server.log" 2>&1 &
+    echo $! > "$U/uat.pid"           # ← 自分の PID だけ記録
+    # ... 検証 ...
+    kill "$(cat "$U/uat.pid")"       # ← PID 指定で止める
+    ```
+
+  - **本番サーバ（port 3000）と global インスタンス（port 60301）に一切触れないこと。**
+    停止・再起動・再ビルドのいずれも禁止。稼働中サーバの足元での `npm run build` / `npm run dev` も禁止
+    （`.next` が clean され BUILD_ID が消えて配信中の画面が壊れる実害がある）
+  - 検証用サーバは**未使用ポート**を選び、**終了時に必ず PID 指定で停止**すること
+
+  ### tmux の扱い
+
+  - 実 tmux を触る検証は必ず **`tmux -L <専用socket>`** で行うこと。`-L` / `-S` は `$TMUX` より優先される。
+    あなたは tmux ペインの中で動いており `$TMUX` はユーザーの本番サーバを指しているため、
+    フラグ無しの `tmux` 呼び出しは**すべてユーザーの本番セッションに届く**
+  - **`kill-server` を書かないこと。** 後始末は `kill-session -t '=<name>:'`（完全一致）で行う。
+    2026-08-02 に `kill-server` が**稼働中の全 `mcbd-*` セッションを消し、並列ワーカーを即死させた**
+  - **`TMUX_TMPDIR` を隔離手段に使わないこと**（`$TMUX` があると完全に無視される）
+  - **`bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たないこと**（全セッションに波及する）
+
+  ### ファイル・ディレクトリの汚染
+
+  - **`$HOME` 直下や `~/.commandmate/` に何も作らないこと。** 作業用ディレクトリは
+    scratchpad（`$SB`）配下に作る。2026-08-06 にワーカーが `~/.commandmate-uat-1726`（2.6M）を
+    HOME に作って放置した
+  - **テストが実ホームディレクトリを汚さないこと。** `tests/helpers/agent-hooks-dir.ts` で
+    `CM_AGENT_HOOKS_DIR` を temp に向ける仕組みがある。セッションを起動するテストではこれを使う
+  - 作ったものは**すべて片付ける**こと。片付けた証跡（ディレクトリ不在・プロセス不在・セッション不在）を報告に含める
+
+  ### 検証の作法
+
+  - 品質ゲートの exit code は **`cmd > log; echo $?` で実測**すること（grep へのパイプは exit code を隠す）
+  - **`npm run test:integration` を通しで実行し exit code を実測すること。**
+    `.commandmate/verify.yaml` のゲートは lint / typecheck / unit のみで **integration を裁定しない**
+  - **「テストが緑 = 動く」ではない。** ガードや合成が空振りでも全テストは緑になる。
+    **変異注入**（条件をわざと壊して赤くなることの確認）で非空振りを証明し、結果をコミットメッセージに書くこと
+  - 実機確認で `/api/worktrees` の status を見ないこと。**5s TTL の capture キャッシュ越し**
+    （`CACHE_TTL_MS`、`src/lib/tmux/tmux-capture-cache.ts`）。`current-output` を直接叩くこと
+  - **実機確認は production build で行うこと。** dev モード（`tsx server.ts`）では構造化イベントが
+    機能しない（#1736）。dev で「動かない」と見えても実装バグとは限らない
+
+  ### 成果物の形
+
+  - 変更は**単一コミット**にまとめること。**PR は作らないこと**（オーケストレーターが作成する）
+  - `dev-reports/` 配下の進捗レポート類は作成不要
+  - 完了したら最終行に `IMPL_COMPLETED` とだけ出力すること
+
+  ## 完了条件
+
+  - Issue #1726 の受入基準をすべて満たしていること
+  - 実機で、タスクパネル併存状態の AskUserQuestion に**正確な選択肢**が表示され、幻の「7. tasks...」が
+    混入しないことを確認し、結果を記載すること
+  - `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` / `npm run test:integration` / `npm run build`
+    がすべて exit 0（**実測**）
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  # #1724 で照合面が当該リクエストの tool_input に限定されたため安全に使える（#1699 の scrollback 汚染は解消済み）。
+  # 一致したら自動応答せず人間へエスカレートする。
+  denyPatterns:
+    - 'pkill'
+    - 'killall'
+    - 'kill -9'
+    - 'rm -rf /'
+    - 'git push.*--force'
+    - 'sudo '
+    - 'commandmate (stop|start)'
+scope:
+  allow:
+    - "src/lib/hooks/**"
+    - "src/lib/session/**"
+    - "src/app/api/hooks/**"
+    - "src/app/api/worktrees/**"
+    - "src/cli/**"
+    - "src/types/models.ts"
+    - "src/components/worktree/PromptPanel.tsx"
+    - "src/components/worktree/NavigationButtons.tsx"
+    - "locales/**"
+    - "tests/**"
+    - "docs/**"
+    - "CHANGELOG.md"
+    - "dev-reports/**"
+  deny:
+    - "src/lib/detection/**"
+verify:
+  gates: [lint, typecheck, unit]
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
