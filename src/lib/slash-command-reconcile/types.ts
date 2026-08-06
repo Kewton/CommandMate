@@ -66,7 +66,54 @@ export interface ProviderResult {
   warnings: string[];
 }
 
-/** Raw catalog entry, as authored in slash-commands-catalog.json. */
+/**
+ * Why a command is kept out of the catalog (Issue #1704).
+ *
+ *  - `phantom`      the command does not exist on that CLI; the source row is a
+ *                   history entry, a marker, or a stub. Self-settling: when
+ *                   upstream starts shipping it for real, the row is deleted.
+ *  - `out-of-scope` the command is real upstream and its description is fine; we
+ *                   chose not to surface it. Only a human re-deciding removes it.
+ *
+ * The two are separate values rather than prose inside `reason` because their
+ * future re-decision costs differ by an order of magnitude.
+ */
+export type ExclusionKind = 'phantom' | 'out-of-scope';
+
+/**
+ * One curation decision the reconcile must honor (Issue #1704).
+ *
+ * Scoped by `cliTools` on purpose: a name-wide ban is not expressible, because
+ * v0.21.2 had to narrow the /vim ban from the name to claude alone once codex
+ * 0.146.0 turned out to ship a real `/vim`.
+ */
+export interface CatalogExclusion {
+  /** Command name without the leading '/'. */
+  name: string;
+  /** Tools this exclusion applies to; never empty. */
+  cliTools: string[];
+  /** Whether the command is absent upstream or merely out of scope. */
+  kind: ExclusionKind;
+  /** One sentence a later reader can act on without opening the issue. */
+  reason: string;
+  /** Issue the decision was made in. */
+  issue: number;
+}
+
+/** Shape of src/config/slash-commands-exclusions.json. */
+export interface CatalogExclusionsFile {
+  exclusions: CatalogExclusion[];
+}
+
+/**
+ * Raw catalog entry, as authored in slash-commands-catalog.json.
+ *
+ * `descriptionKey` is an override point, not a derived value (Issue #1704): it
+ * defaults to `slashCommands.descriptions.<name>`, but an entry whose tool
+ * disagrees with another tool about what the command does carries the tool-
+ * scoped key `slashCommands.descriptions.<name>.<tool>` instead. Only contested
+ * names are split — sharing one key is still the norm.
+ */
 export interface CatalogCommandEntry {
   name: string;
   descriptionKey?: string;
@@ -120,12 +167,14 @@ export interface ReconcileDiff {
 /**
  * Why the reconcile refused to act on a source row (Issue #1603).
  *
+ *  - `excluded`             a human decided this command stays out (Issue #1704).
  *  - `removed-row`          the source documents the command as gone.
  *  - `alias-row`            the row is an alias of another command, not a command.
  *  - `suspect-description`  the extracted prose looks like a marker/badge leftover.
  *  - `description-conflict` two tools disagree on the text behind one i18n key.
  */
 export type ReconcileNoticeCategory =
+  | 'excluded'
   | 'removed-row'
   | 'alias-row'
   | 'suspect-description'

@@ -22,7 +22,7 @@ import { groupByCategory } from '@/lib/command-merger';
 import catalogJson from '@/config/slash-commands-catalog.json';
 
 /** Raw catalog entry as authored in slash-commands-catalog.json. */
-interface CatalogCommandEntry {
+export interface CatalogCommandEntry {
   name: string;
   descriptionKey?: string;
   category: string;
@@ -60,8 +60,14 @@ export const CATALOG_VERIFIED_AGAINST: Record<string, string> = catalog.verified
  * `filePath` is set to '' (built-ins have no backing file) to match the shape
  * callers and tests already rely on; `description` is intentionally left unset
  * so built-ins resolve via descriptionKey + the locale dictionary (Issue #1306).
+ *
+ * Issue #1704: `descriptionKey` is carried through verbatim, never re-derived
+ * from the name. Re-deriving would look identical for every entry that uses the
+ * default key and would silently discard the tool-scoped override a contested
+ * command needs — exported so that property can be tested on an entry that has
+ * one, rather than only on today's catalog where the two forms coincide.
  */
-function toStandardCommand(entry: CatalogCommandEntry): SlashCommand {
+export function toStandardCommand(entry: CatalogCommandEntry): SlashCommand {
   const command: SlashCommand = {
     name: entry.name,
     descriptionKey: entry.descriptionKey,
