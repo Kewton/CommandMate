@@ -17,8 +17,15 @@ import {
   getFrequentlyUsedCommands,
 } from '@/lib/standard-commands';
 import { keyOf } from '@/lib/command-merger';
-import { JA_REVIEW_PREFIX, hasReviewMarker } from '@/lib/slash-command-reconcile/engine';
-import type { SlashCommandCategory } from '@/types/slash-commands';
+import {
+  DESCRIPTION_KEY_PREFIX,
+  JA_REVIEW_PREFIX,
+  descriptionKeyFor,
+  hasReviewMarker,
+  toolDescriptionKeyFor,
+} from '@/lib/slash-command-reconcile/engine';
+import { DEFAULT_EXCLUSIONS, findExclusion, buildExclusionIndex } from '@/lib/slash-command-reconcile/exclusions';
+import type { SlashCommand, SlashCommandCategory } from '@/types/slash-commands';
 
 const LOCALES = ['en', 'ja'] as const;
 
@@ -38,15 +45,39 @@ function flattenStrings(value: unknown, prefix = ''): Array<[string, string]> {
 }
 
 /**
- * Read the real `slashCommands.descriptions` block straight off disk.
+ * Read the real `slashCommands.descriptions` block straight off disk, flattened
+ * to leaf strings.
  *
  * Issue #1306: these tests must fail when a key is missing from the shipped
  * dictionary, so they read the actual JSON rather than a mocked translator.
+ *
+ * Issue #1704: keys are flattened rather than read one level deep, because a
+ * command whose tools disagree about what it does carries the tool-scoped key
+ * `<name>.<tool>` — a nested object, not a string. Flattening keeps every guard
+ * below working on both shapes.
  */
 function loadDescriptions(locale: (typeof LOCALES)[number]): Record<string, string> {
   const file = path.resolve(__dirname, `../../../locales/${locale}/worktree.json`);
   const dict = JSON.parse(fs.readFileSync(file, 'utf8'));
-  return dict.slashCommands?.descriptions ?? {};
+  return Object.fromEntries(flattenStrings(dict.slashCommands?.descriptions ?? {}));
+}
+
+/**
+ * Every descriptionKey a catalog entry is allowed to carry (Issue #1704).
+ *
+ * The default is the one key shared by every tool that has the command; the
+ * tool-scoped form is legal only for a tool the entry actually serves, so an
+ * override can never point at a description for a CLI the entry does not cover.
+ */
+function allowedDescriptionKeys(cmd: SlashCommand): string[] {
+  const tools = cmd.cliTools ?? ['claude'];
+  return [descriptionKeyFor(cmd.name), ...tools.map((tool) => toolDescriptionKeyFor(cmd.name, tool))];
+}
+
+/** The shipped description for a command, resolved through its own key. */
+function descriptionFor(cmd: SlashCommand, locale: (typeof LOCALES)[number]): string | undefined {
+  const key = cmd.descriptionKey?.slice(DESCRIPTION_KEY_PREFIX.length) ?? '';
+  return loadDescriptions(locale)[key];
 }
 
 describe('STANDARD_COMMANDS', () => {
@@ -70,7 +101,10 @@ describe('STANDARD_COMMANDS', () => {
       expect(cmd.name.length).toBeGreaterThan(0);
       // Issue #1306: descriptions moved into the dictionary; the definition
       // carries a key, and the literal description is gone.
-      expect(cmd.descriptionKey).toBe(`slashCommands.descriptions.${cmd.name}`);
+      // Issue #1704: the key may be overridden per tool for a contested command,
+      // so the assertion is "one of the legal keys for this entry" rather than
+      // "derived from the name" — but nothing outside that set is accepted.
+      expect(allowedDescriptionKeys(cmd)).toContain(cmd.descriptionKey);
       expect(cmd.description).toBeUndefined();
       expect(cmd.category).toBeDefined();
       expect(cmd.isStandard).toBe(true);
@@ -393,9 +427,8 @@ describe('STANDARD_COMMANDS', () => {
   it('should have all descriptions without HTML tags or dangerous patterns', () => {
     const dangerousPatterns = [/<[^>]+>/, /javascript:/i, /onerror=/i, /onclick=/i];
     for (const locale of LOCALES) {
-      const dict = loadDescriptions(locale);
       STANDARD_COMMANDS.forEach((cmd) => {
-        const description = dict[cmd.name];
+        const description = descriptionFor(cmd, locale);
         expect(description).toBeTruthy();
         dangerousPatterns.forEach((pattern) => {
           expect(description).not.toMatch(pattern);
@@ -485,11 +518,44 @@ describe('Claude built-in catalog additions (Issue #1488)', () => {
   // 0.146.0 declares `SlashCommand::Vim => "toggle Vim mode for the composer"`
   // in codex-rs/tui/src/slash_command.rs, so banning the name hid a real codex
   // command. The ban tracks the tool that removed it, not the string.
+  //
+  // Issue #1704 moved the *intent* behind the /schedule half into
+  // src/config/slash-commands-exclusions.json so `catalog:refresh` stops
+  // proposing it. This assertion stays as-is: it is name-wide (stronger than the
+  // claude-scoped data row) and covers /vim, which the exclusions file does not
+  // list because the claude docs already mark it removed.
   it('does not add /schedule, and keeps /vim off claude', () => {
     expect(STANDARD_COMMANDS.some((c) => c.name === 'schedule')).toBe(false);
     const vim = STANDARD_COMMANDS.filter((c) => c.name === 'vim');
     expect(vim.length).toBe(1);
     expect(vim[0].cliTools).toEqual(['codex']);
+  });
+});
+
+// Issue #1704: the catalog and the curation list are two halves of one decision,
+// so their disagreement is a test failure rather than something a human notices
+// while reading a release diff. Intent lives in the data; verification here.
+describe('catalog ∩ curation exclusions (Issue #1704)', () => {
+  it('ships no command that the exclusions file excludes for that tool', () => {
+    const index = buildExclusionIndex(DEFAULT_EXCLUSIONS);
+    const violations: string[] = [];
+    for (const cmd of STANDARD_COMMANDS) {
+      for (const tool of cmd.cliTools ?? ['claude']) {
+        const exclusion = findExclusion(index, cmd.name, tool);
+        if (exclusion) {
+          violations.push(`/${cmd.name} on ${tool} (excluded by #${exclusion.issue})`);
+        }
+      }
+    }
+    expect(
+      violations,
+      `the catalog ships ${violations.length} excluded command(s): ${violations.join(', ')}`
+    ).toEqual([]);
+  });
+
+  // Without this, the guard above would also pass on an empty exclusions file.
+  it('has a non-empty exclusions list to check against', () => {
+    expect(DEFAULT_EXCLUSIONS.length).toBeGreaterThan(0);
   });
 });
 
@@ -681,20 +747,24 @@ describe('getFrequentlyUsedCommands', () => {
 describe('STANDARD_COMMANDS description dictionary (Issue #1306)', () => {
   it('should resolve every descriptionKey in every locale', () => {
     for (const locale of LOCALES) {
-      const dict = loadDescriptions(locale);
       for (const cmd of STANDARD_COMMANDS) {
+        const text = descriptionFor(cmd, locale);
         expect(
-          typeof dict[cmd.name] === 'string' && dict[cmd.name].length > 0,
-          `${locale}/worktree.json is missing slashCommands.descriptions.${cmd.name}`
+          typeof text === 'string' && text.length > 0,
+          `${locale}/worktree.json is missing ${cmd.descriptionKey}`
         ).toBe(true);
       }
     }
   });
 
+  // Issue #1704: matched against the keys entries actually carry, not against
+  // command names — a tool-scoped override makes those two sets differ.
   it('should not carry description keys that no command uses', () => {
-    const names = new Set(STANDARD_COMMANDS.map((cmd) => cmd.name));
+    const used = new Set(
+      STANDARD_COMMANDS.map((cmd) => cmd.descriptionKey?.slice(DESCRIPTION_KEY_PREFIX.length))
+    );
     for (const locale of LOCALES) {
-      const orphans = Object.keys(loadDescriptions(locale)).filter((key) => !names.has(key));
+      const orphans = Object.keys(loadDescriptions(locale)).filter((key) => !used.has(key));
       expect(orphans, `${locale} has orphaned description keys`).toEqual([]);
     }
   });
