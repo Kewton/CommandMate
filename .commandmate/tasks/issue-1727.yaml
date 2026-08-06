@@ -1,0 +1,58 @@
+version: 1
+title: "Issue #1727: 実 TUI カナリアで Claude 新バージョンの検出回帰を検知する"
+goal: |
+  /pm-auto-issue2dev 1727
+
+  https://github.com/Kewton/CommandMate/issues/1727 を実装してください。
+  Issue 本文の「実装内容」「受入基準」「既知の罠」をすべて満たすこと。
+
+  ## 本 Issue の要点
+
+  実 claude を throwaway tmux セッションで起動し、5 シナリオ（idle / 権限ダイアログ / AskUserQuestion+タスクパネル併存 /
+  `/model` オーバーレイ / 生成中）で capture → 検出関数に食わせて期待値を assert するハーネスを作ります。
+  **CI 組み込みは選択式**です（認証シークレットとコスト判断が必要）。まずローカル実行（`npm run canary`）を完成させ、
+  CI 組み込みの案 A/B をコスト概算つきでレポートに書くところまでが本 Issue のスコープです。
+
+  ## 作業ルール（厳守 — tmux を扱うため）
+
+  - **実 tmux を触る検証は必ず `tmux -L <専用socket>` で行う。** `-L` / `-S` は `$TMUX` より優先されます。
+    あなたは tmux ペインの中で動いており `$TMUX` がユーザーの本番サーバを指しているため、フラグ無しの
+    `tmux` 呼び出しは**すべてユーザーの本番サーバに届きます**
+  - **`kill-server` を `-L` 無しで書かない。** 後始末は `kill-session -t '=<name>:'`（完全一致）で行うこと。
+    2026-08-02 に、隔離したつもりの live tmux テストが `kill-server` を撃って**稼働中の全 `mcbd-*` セッションを消し、
+    並列ワーカーを即死させた**実害があります。テストは 3/3 緑で CI は tmux 非導入のため skip され、誰も気付きませんでした
+  - **`TMUX_TMPDIR` を隔離手段に使わない。** `$TMUX` が設定されていると完全に無視されます。
+    socket 引数を取らない本番コード（`src/lib/tmux/tmux.ts`）を動かすときは `process.env.TMUX` を私設サーバへ向け、
+    **転送が効いていることをテスト内で assert する**こと
+  - **`bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たない。** 全セッションに波及します
+  - **HOME 隔離必須**: シナリオ 4 の `/model` は設定を書き換える操作そのものです。
+    HOME 隔離が効いていることを**先に assert してから**実行すること。実行前後で `~/.claude/settings.json` が
+    無変化であることをハーネス内で検証すること
+  - **稼働中の `mcbd-*` セッションに一切触れない。** ハーネス実行前後で `mcbd-*` の一覧が不変であることを assert すること
+  - bash スクリプトにする場合は **bash 3.2 互換**（連想配列 `declare -A` は使用不可）。**TypeScript ハーネス（tsx 実行）を推奨**します
+  - `scripts/` は tsconfig の include 対象です（型チェックが走ります）
+  - 変更は**単一コミット**にまとめること。**PR は作らないこと**（オーケストレーターが作成します）
+  - `dev-reports/` 配下の進捗レポート類は作成不要です
+  - 完了したら最終行に `IMPL_COMPLETED` とだけ出力すること
+
+  ## 完了条件
+
+  - Issue #1727 の受入基準をすべて満たしていること
+  - `npm run canary` が現行 claude バージョンで 5 シナリオ緑（バージョンをレポートに記録すること）
+  - 期待値をわざと壊すと赤になること（ハーネス自体の非空振り証明）を実施し、結果を記載すること
+  - `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` が exit 0
+    （**`cmd > log; echo $?` で exit code を実測すること**。grep へのパイプは exit code を隠します）
+scope:
+  allow:
+    - "scripts/canary/**"
+    - "package.json"
+    - "docs/**"
+    - "tests/**"
+    - "CHANGELOG.md"
+    - "dev-reports/**"
+  deny: []
+verify:
+  gates: [lint, typecheck, unit]
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
