@@ -120,9 +120,23 @@ export interface CurrentOutputResponse {
   isUnclassifiedActive?: boolean;
   lastServerResponseTimestamp: number | null;
   serverPollerActive: boolean;
-  /** Issue #520: Session status from detectSessionStatus() */
+  /**
+   * Issue #520: session status from `detectSessionStatus()` — or, since Issue
+   * #1723, from the agent's own lifecycle events when they are available and
+   * the scraper is not reporting a prompt. `sessionStatusReason` says which.
+   */
   sessionStatus?: 'idle' | 'ready' | 'running' | 'waiting';
-  /** Issue #520: Reason string from detectSessionStatus() or 'session_not_running' */
+  /**
+   * Issue #520: reason string from `detectSessionStatus()`, or
+   * `session_not_running`.
+   *
+   * Issue #1723 adds a second family, distinguishable by its `hook_` prefix
+   * (`hook_stop`, `hook_prompt_submit`, …; see
+   * `src/lib/session/status-mapping.ts` HOOK_STATUS_REASON). A `hook_` reason
+   * means `sessionStatus` came from an event the agent reported rather than
+   * from reading its terminal, so it is exact rather than inferred — the
+   * distinction matters when triaging why `wait` did or did not stop.
+   */
   sessionStatusReason?: string;
   /**
    * Issue #1549: epoch ms of the last structured stop event, or null when the
