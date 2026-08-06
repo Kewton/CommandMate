@@ -21,6 +21,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - フレームが読めない間は完了判定を抑止し、dwell は 2 状態をまたいで継続する。本物の完了 `ready`/`input_prompt` はフラグを立てないので従来どおり初回ポーリングで exit 0
 
 ### Added
+- **auto-yes: Claude の承認を `PermissionRequest` hook で構造化裁定する（Auto-Yes v2 / Phase 2）** (#1724)
+  - 画面を regex で読んでキーを注入する代わりに、Claude が**ダイアログを描く前に**同期 POST してくる `PermissionRequest` を裁く。新設 `POST /api/hooks/permission-request`（`/api/hooks/agent-event` は 202 の fire-and-forget で性格が逆なので分離）
+  - 裁定: 未 parse → no-decision ／ `AskUserQuestion` → 常に no-decision（#1726 の担当。`allow` を返しても選択画面は出るので突破もできない）／ Auto-Yes 無効・期限切れ → no-decision ／ 契約ポリシー抑止 → no-decision ＋ `lastSuppression` 記録 ／ それ以外 → `allow`
+  - **`deny` は返さない**。現行 Auto-Yes の抑止は「自動応答しない」であって「拒否する」ではなく、deny 化はフィールドにある既存契約の意味を変える
+  - **判定不能は必ず no-decision**。空応答 `{}` は TUI ダイアログにフォールバックする（#1721 D5 の実測）ので、fail-safe 側が「現状維持」になる。誤 allow はコマンド実行を意味するため、この非対称性が全分岐の設計原則
+  - **#1699 の scrollback 汚染は構造的に起きない**: denyPatterns の照合対象は当該リクエストの `tool_input` のみ（Bash は command＋description、他ツールは主要引数、未知ツール／想定外 shape は input 全体へ fail-safe）。画面もスクロールバックも入力に無い。「一度 allow した `rm -rf` が以後の無関係な承認を抑止しない」ことを直接テストで固定した
+  - ポリシー評価は poller と `evaluatePolicyAgainstTexts()` を共有し、promptType は `multiple_choice`（画面上の承認ダイアログの分類）。**hook が poller より緩くなる余地を作らない**ためで、`mode: safe` は hook 側でも抑止する
+  - 相関は **`prompt_id` + `tool_name` + `tool_input`**。実 payload に `tool_use_id` は無く、公式ドキュメントの `permission_requirements` も無い（#1721 D2。代わりに `permission_suggestions`）。応答スキーマとリクエスト形は `tests/fixtures/hooks/claude/permission-request*.json` の実データに突合している
+  - **allow のときだけ** prompt 履歴に answered 行を作る（ダイアログが出ない＝他に記録者が居ない）。no-decision 側は画面経路が従来どおり記録するので二重にならない。`pending` 行を作らないのは `recordAnsweredPrompt` が人間の応答をその行に刻んでしまうため
+  - hook は **Auto-Yes トグルと独立に常時注入**（注入は起動時 1 回きり、Auto-Yes は途中で入る）。timeout 5 秒（http の既定は 600 秒で `async` も無い）。応答時間を毎回ログし 500ms 超で warn
+  - **画面ベース Auto-Yes 経路（`detectPrompt` 直呼び）は削除も変更もしていない** — hooks 非対応環境と Claude 以外のフォールバック
 
 - **detection: 構造化イベントを `sessionStatus` 判定に優先適用する 2 層化** (#1723)
   - #1722 で届くようになった hooks イベントを第一級ソースに昇格した。`user_prompt_submit` → `running`/`hook_prompt_submit`、`stop` → `ready`/`hook_stop`。イベントが届く環境では「thinking/ready の regex 誤判定」（#805 / #1150 / #1154 / #1497）が**判定の根拠ごと**消える
