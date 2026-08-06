@@ -1,0 +1,50 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000000",
+  "transcript_path": "<TRANSCRIPT_PATH>",
+  "cwd": "<CWD>",
+  "prompt_id": "11111111-1111-4111-8111-111111111111",
+  "permission_mode": "default",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PermissionRequest",
+  "tool_name": "AskUserQuestion",
+  "tool_input": {
+    "questions": [
+      {
+        "question": "What is your favorite color?",
+        "header": "Color",
+        "options": [
+          {
+            "label": "Blue",
+            "description": "Cool, calm, the default favorite for a large share of people."
+          },
+          {
+            "label": "Green",
+            "description": "Natural and easy on the eyes; common pick for terminal themes."
+          },
+          {
+            "label": "Red",
+            "description": "Warm and high-contrast; bold rather than restful."
+          }
+        ],
+        "multiSelect": false
+      },
+      {
+        "question": "Which editor do you prefer?",
+        "header": "Editor",
+        "options": [
+          {
+            "label": "VS Code",
+            "description": "GUI editor with a large extension ecosystem and the Claude Code extension."
+          },
+          {
+            "label": "Vim / Neovim",
+            "description": "Modal terminal editor; keyboard-driven and lightweight."
+          }
+        ],
+        "multiSelect": false
+      }
+    ]
+  }
+}
