@@ -37,6 +37,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 409 `PROMPT_WAITING` / CLI は exit 2。**`respond` / 特殊キー / `prompt-response` は拒否しない**（塞ぐと回答手段が無くなる）
   - ガードは送信サービス層（`sendUserMessage`）に置いたので、**タイマー送信も同じく拒否される**（`[prompt_waiting] …` を失敗理由として記録）。ルート層に置くとスケジュール送信がダイアログへ直撃したままだった
   - 拒否が効くのは**検出できているときだけ**。すり抜けたフレームは上記 `wait` の `unclassified` が受け持つ。ペインが読めないときは fail-open するので、**取りこぼしを減らすガードであって保証ではない**
+- **hooks: Claude セッション起動時の hooks 自動注入と instance 相関・イベント語彙拡張** (#1722)
+  - `src/lib/hooks/hook-settings-generator.ts` — (worktreeId, instanceId) ごとの hooks 設定を生成し `claude --settings <file>` で渡す。#1549 で作った受け口・サービス・状態・中継スクリプトの拡張であり、新規に作り直していない。**構造化イベントが「設定した人の環境にしか存在しない」制約が解消**された
+  - **`SessionStart` だけ `type:"command"`**。Claude Code は `SessionStart` の http hook を**黙って skip する**（#1721 D1。debug ログにしか出ず stdout / TUI は無音）。本実装でも実機で反証を取った — http で組んだ対照セッションは `Skipping HTTP hook … not supported for SessionStart` を出し配送 0 件、TUI には何も出ない。残る 4 イベント（`UserPromptSubmit` / `Stop` / `Notification` / `SessionEnd`）は http
+  - **instance 相関**。`cwd` は worktree は特定できるがインスタンスは特定できない（同一 worktree の `claude` と `claude-2` は cwd が同じ）ため、注入 URL に `worktreeId` / `instanceId` を焼き込む。`route.ts` の `applyAgentStopEvent(db, worktree, tool, tool)` primary 固定を解消した。**`session_id` は相関キーにしない** — `/clear` は `SessionEnd(reason=clear)` → `SessionStart(source=clear)` を発火し `session_id` が変わる（実機で確認）
+  - 受け口が **Claude のネイティブ payload も受ける**ようになった。`type:"http"` はボディを加工できないため。型とテストは `tests/fixtures/hooks/claude/*.json`（#1721 の実採取 12 件）に合わせてある。イベント語彙に `user_prompt_submit` / `session_end` を追加し、`Notification` は `notification_type`（`message` ではない）をサブタイプとして保持する
+  - **手動設定との共存**を実測で確定した。`--settings` の hooks はユーザー設定と**連結**されるので #1549 の手動 Stop hook を残していると同じターンが 2 回届き、`lastStopEventAt` は冪等でも `task_events` の `agent_idle` は 2 行になる。`(worktree, tool, instance, event, sessionId)` が一致するイベントを 3 秒以内は 1 回として扱う。`sessionId` を持たない呼び出しは畳まない（区別材料が無く、重複を許すほうが実イベント取りこぼしより安い）
+  - `headers` の `$CM_AUTH_TOKEN` は `allowedEnvVars` 併記がないと展開されない（#1721 D7）ため、生成器は常に対で出力する。実機で `Bearer live-1722-token` に展開されることを確認した
+  - **観測のみ**。`structuredEvents`（`lastEventType` / `lastEventAt` / `lastEventDetail`）を `current-output` に露出するだけで、`sessionStatus` / `wait` / Auto-Yes の判定には一切入れていない（#1723 の担当）。**hook 到着を起動完了の signal にもしない** — 未 trust ディレクトリでは trust ダイアログに答えるまで `SessionStart` すら来ない（本実装の実機検証でも再現）
+  - ロールバックは `CM_AGENT_HOOKS_INJECT=0`（起動コマンドが #1722 以前と完全に同一になる）。`~/.claude/settings.json` は書き換えない（実機で before/after の sha256 一致を確認）
+  - 実機検証: 隔離 tmux socket ＋ 使い捨てダンプサーバで 5 イベントすべての配送を確認し、**採取した実バイト列を本番 route に流し直して** 202・`claude-2` への帰属・primary 非汚染まで検証した
 - **detection: Claude Code hooks の実機検証レポートと実 payload fixture** (#1721)
   - `docs/design/agent-hooks-live-verification.md` — Epic #1720 の全下流 Issue が前提にする hooks の挙動を v2.1.223 で実測した。隔離 HOME ＋ 専用 tmux socket ＋ 使い捨てダンプサーバで再現可能な形にしてある。コード変更なし（スパイク）
   - `tests/fixtures/hooks/claude/*.json` — `PermissionRequest` / `PreToolUse(AskUserQuestion)` / `Notification(permission_prompt, idle_prompt)` / `Stop` / `UserPromptSubmit` / `SessionStart` / `SessionEnd` の実 payload 12 件。環境固有値はプレースホルダに置換済み

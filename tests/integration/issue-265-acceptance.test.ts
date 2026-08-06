@@ -23,9 +23,16 @@ vi.mock('@/lib/pasted-text-helper', () => ({
   detectAndResendIfPastedText: vi.fn().mockResolvedValue(undefined),
 }));
 
-// Mock fs/promises
+// Mock fs/promises.
+// `constants` is required: getClaudePath() reads `constants.X_OK`, and without it
+// the read throws inside the try block that guards the CLAUDE_PATH branch. The
+// env var is then never consulted at all, valid or not — which made "reject an
+// invalid CLAUDE_PATH" below pass for the wrong reason (it cannot fail if the
+// branch never runs). Verified by removing isValidClaudePath()'s check: with
+// `constants` present that test goes red, without it stays green.
 vi.mock('fs/promises', () => ({
   access: vi.fn().mockResolvedValue(undefined),
+  constants: { X_OK: 1 },
 }));
 
 // Mock child_process
@@ -57,12 +64,17 @@ import {
   CLAUDE_SESSION_ERROR_PATTERNS,
   CLAUDE_SESSION_ERROR_REGEX_PATTERNS,
 } from '@/lib/detection/cli-patterns';
+import { findClaudeLaunchIndex, sendKeysCommands } from '@tests/helpers/claude-launch-command';
+import { useIsolatedAgentHooksDir } from '@tests/helpers/agent-hooks-dir';
 
 const TEST_SESSION_OPTIONS = {
   worktreeId: 'test-worktree',
   worktreePath: '/path/to/worktree',
 } as const;
 const TEST_SESSION_NAME = 'mcbd-claude-test-worktree';
+
+// Issue #1722 writes a hooks settings file on every session start.
+useIsolatedAgentHooksDir('issue-265');
 
 describe('Issue #265 Acceptance Test: CLI path cache invalidation and broken session recovery', () => {
   beforeEach(() => {
@@ -129,8 +141,21 @@ describe('Issue #265 Acceptance Test: CLI path cache invalidation and broken ses
       await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 2 + CLAUDE_POST_PROMPT_DELAY);
       await promise;
 
-      // The invalid CLAUDE_PATH should be ignored; fallback to 'which claude' result
-      expect(sendKeys).toHaveBeenCalledWith(TEST_SESSION_NAME, '/usr/local/bin/claude', true);
+      // The invalid CLAUDE_PATH should be ignored; fallback to 'which claude' result.
+      // Asserted on the resolved *path* rather than on the whole command line:
+      // Issue #1722 appends `--settings <file>`, which this criterion is not about.
+      // Everything the criterion is about is still asserted — the binary, the
+      // session it was sent to, the Enter — plus that the rejected value did not
+      // reach the command line by any route at all.
+      const calls = vi.mocked(sendKeys).mock.calls;
+      const index = findClaudeLaunchIndex(calls, '/usr/local/bin/claude');
+      expect(
+        index,
+        `no launch from the which-resolved path in ${JSON.stringify(sendKeysCommands(calls))}`
+      ).toBeGreaterThanOrEqual(0);
+      expect(calls[index][0]).toBe(TEST_SESSION_NAME);
+      expect(calls[index][2]).toBe(true);
+      expect(calls[index][1]).not.toContain('evil');
     });
   });
 
@@ -259,11 +284,16 @@ describe('Issue #265 Acceptance Test: CLI path cache invalidation and broken ses
 
       const sendKeysCalls = vi.mocked(sendKeys).mock.calls;
       const unsetIndex = sendKeysCalls.findIndex(call => call[1] === 'unset CLAUDECODE');
-      const claudePathIndex = sendKeysCalls.findIndex(call => call[1] === '/usr/local/bin/claude');
+      // The launch line carries `--settings` since Issue #1722; this criterion is
+      // about ordering, so the launch call is located by which binary it runs.
+      const claudePathIndex = findClaudeLaunchIndex(sendKeysCalls, '/usr/local/bin/claude');
 
       // unset CLAUDECODE must come before claude CLI launch
       expect(unsetIndex).toBeGreaterThanOrEqual(0);
-      expect(claudePathIndex).toBeGreaterThanOrEqual(0);
+      expect(
+        claudePathIndex,
+        `no CLI launch in ${JSON.stringify(sendKeysCommands(sendKeysCalls))}`
+      ).toBeGreaterThanOrEqual(0);
       expect(unsetIndex).toBeLessThan(claudePathIndex);
     });
 

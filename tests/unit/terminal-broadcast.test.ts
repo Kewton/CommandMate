@@ -51,6 +51,13 @@ import {
 const mockBroadcast = vi.mocked(broadcast);
 const mockHasSubscribers = vi.mocked(hasRoomSubscribers);
 
+/** No hook has reported anything — the shape every payload carries (Issue #1722). */
+const NO_STRUCTURED_EVENTS = {
+  lastEventType: null,
+  lastEventAt: null,
+  lastEventDetail: null,
+} as const;
+
 beforeEach(() => {
   vi.clearAllMocks();
   __resetTerminalBroadcastState();
@@ -70,6 +77,7 @@ beforeEach(() => {
     isUnclassifiedActive: false,
     lineCount: 1,
     lastStopEventAt: null,
+    structuredEvents: NO_STRUCTURED_EVENTS,
   });
 });
 
@@ -122,6 +130,7 @@ describe('broadcastTerminalSnapshotAfterInteraction', () => {
         fullOutput: 'old frame',
         lineCount: 1,
         lastStopEventAt: null,
+        structuredEvents: NO_STRUCTURED_EVENTS,
       })
       .mockResolvedValueOnce({
         isRunning: true,
@@ -133,6 +142,7 @@ describe('broadcastTerminalSnapshotAfterInteraction', () => {
         thinking: true,
         lineCount: 1,
         lastStopEventAt: null,
+        structuredEvents: NO_STRUCTURED_EVENTS,
       });
 
     const pending = broadcastTerminalSnapshotAfterInteraction(

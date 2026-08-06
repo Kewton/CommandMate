@@ -58,6 +58,10 @@ import {
 } from '@/lib/detection/cli-patterns';
 import { hasSession, createSession, sendKeys, capturePane } from '@/lib/tmux/tmux';
 import { isSessionStartTimeoutError } from '@/lib/session/session-start-error';
+import { useIsolatedAgentHooksDir } from '@tests/helpers/agent-hooks-dir';
+
+// Issue #1722 writes a hooks settings file on every session start.
+useIsolatedAgentHooksDir('trust-dialog');
 
 describe('Issue #201: Trust dialog auto-response - Acceptance Tests', () => {
   beforeEach(() => {

@@ -30,6 +30,7 @@ import { access, constants } from 'fs/promises';
 import { createLogger } from '@/lib/logger';
 import { CLAUDE_RESTART_DELAY_MS } from '@/config/cli-tool-timing-config';
 import { deriveSessionSuffix } from '@/lib/cli-tools/types';
+import { buildClaudeLaunchCommand } from '@/lib/hooks/hook-settings-generator';
 import {
   SessionStartFailedError,
   SessionStartTimeoutError,
@@ -658,8 +659,24 @@ export async function startClaudeSession(
     // Get Claude CLI path dynamically
     const claudePath = await getClaudePath();
 
+    // Issue #1722: hand this session its own hooks config, so structured
+    // lifecycle events exist without the operator having edited
+    // ~/.claude/settings.json (which is never written — `--settings` is
+    // concatenated with it, and leaves it byte-identical).
+    //
+    // Only on the creation path. The reuse branch above has already returned,
+    // so the injected generation and the tmux session generation are the same
+    // generation by construction. A running session *can* be re-hooked — Claude
+    // hot-reloads settings without asking (Issue #1721, D8) — but that would
+    // make "which config is this pane running?" a question with a time-varying
+    // answer, and the events are not load-bearing enough to buy that.
+    //
+    // Falls back to the bare path on any failure; a session that starts without
+    // hooks is the pre-#1722 status quo, and a session that fails to start is not.
+    const launchCommand = buildClaudeLaunchCommand(claudePath, { worktreeId, instanceId });
+
     // Start Claude CLI in interactive mode using dynamically resolved path
-    await sendKeys(sessionName, claudePath, true);
+    await sendKeys(sessionName, launchCommand, true);
 
     // Wait for Claude to initialize with dynamic detection (OCP-001)
     // Use constants instead of hardcoded values

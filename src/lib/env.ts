@@ -165,6 +165,33 @@ export function getLogConfig(): LogConfig {
   };
 }
 
+/** Fallback port, shared by {@link getServerPort} and {@link getEnv}. */
+const DEFAULT_PORT = 3000;
+
+/**
+ * The port this server listens on, for callers that only need the port.
+ *
+ * Distinct from {@link getEnv} in two ways that matter to its users: it does no
+ * database-path resolution, and it never throws. Issue #1722 builds the hook
+ * endpoint URL baked into every injected Claude settings file from this, on the
+ * session-start path — where an unrelated `CM_DB_PATH` problem must not be able
+ * to prevent an agent from starting, and a nonsense `CM_PORT` should degrade to
+ * hooks pointing at the default port rather than to no session at all.
+ *
+ * @returns A port in [1, 65535]; {@link DEFAULT_PORT} when CM_PORT is unset or
+ *   unusable
+ */
+export function getServerPort(): number {
+  const raw = getEnvByKey('CM_PORT');
+  if (!raw) return DEFAULT_PORT;
+
+  const port = parseInt(raw, 10);
+  if (isNaN(port) || port < 1 || port > 65535) {
+    return DEFAULT_PORT;
+  }
+  return port;
+}
+
 // ============================================================
 // Environment Configuration
 // ============================================================
@@ -223,7 +250,7 @@ export interface Env {
 export function getEnv(): Env {
   // Get raw values with defaults (using fallback support)
   const rootDir = getEnvByKey('CM_ROOT_DIR') || process.cwd();
-  const port = parseInt(getEnvByKey('CM_PORT') || '3000', 10);
+  const port = parseInt(getEnvByKey('CM_PORT') || String(DEFAULT_PORT), 10);
   const bind = getEnvByKey('CM_BIND') || '127.0.0.1';
   // Issue #135: DB path resolution with proper fallback chain
   // Priority: CM_DB_PATH > DATABASE_PATH (deprecated) > getDefaultDbPath()
