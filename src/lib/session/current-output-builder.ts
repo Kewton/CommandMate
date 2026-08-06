@@ -8,7 +8,10 @@
  */
 
 import type Database from 'better-sqlite3';
-import { getSessionState } from '@/lib/db';
+import { getSessionState, createMessage } from '@/lib/db';
+import { observeUnclassifiedFrame } from '@/lib/detection/unclassified-frame-tracker';
+import { UNCLASSIFIED_PROMPT_TYPE, type UnclassifiedFrameRecord } from '@/types/models';
+import { createLogger } from '@/lib/logger';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/session/cli-session';
@@ -72,6 +75,82 @@ export interface CurrentOutputPayload {
    * the other.
    */
   lastStopEventAt: number | null;
+}
+
+const logger = createLogger('current-output-builder');
+
+/**
+ * Write the "detection failed on this frame" row (Issue #1708).
+ *
+ * Stored as a `prompt` message so `capture --prompts` — the audit trail that
+ * exists precisely to answer "why did this stall?" — lists it alongside the
+ * prompts that WERE detected. It must never read as one of them, so the
+ * promptData carries `type: 'unclassified'` and `status: 'unclassified'`; the
+ * latter is also what keeps it out of `markPendingPromptsAsAnswered()`, whose
+ * SQL selects `status = 'pending'`. A frame nobody could read must not end up
+ * stamped "(answered via terminal)" the moment the flag clears.
+ *
+ * Not broadcast: this is a record for after the fact, and the prompt-answering
+ * UI has nothing to render for a frame with no parsed options.
+ *
+ * Best effort — a failed insert must never break the payload the caller is
+ * waiting on. The tracker has already marked the run as recorded, so a failure
+ * costs this one row, not a retry storm.
+ */
+function recordUnclassifiedFrame(
+  db: Database.Database,
+  params: {
+    worktreeId: string;
+    cliToolId: CLIToolType;
+    instanceId: string;
+    dwellMs: number;
+    sessionStatus: string;
+    sessionStatusReason: string;
+  },
+): void {
+  const dwellSeconds = Math.round(params.dwellMs / 1000);
+  const statusReason = `${params.sessionStatus}/${params.sessionStatusReason}`;
+  const question =
+    `Unclassified interactive frame (${statusReason}) held for ${dwellSeconds}s. ` +
+    `The detection layer could not parse it, so no prompt was published and ` +
+    `nothing could answer it. Inspect the raw pane with ` +
+    `\`commandmate capture ${params.worktreeId} --pane\`.`;
+
+  const record: UnclassifiedFrameRecord = {
+    type: UNCLASSIFIED_PROMPT_TYPE,
+    status: 'unclassified',
+    question,
+    options: [],
+    dwellSeconds,
+    sessionStatusReason: statusReason,
+  };
+
+  try {
+    createMessage(db, {
+      worktreeId: params.worktreeId,
+      role: 'assistant',
+      content: question,
+      messageType: 'prompt',
+      // Not a PromptData: nothing may answer this row, which is why the record
+      // type is kept out of that union (see UnclassifiedFrameRecord). The column
+      // is shared, so the cast is confined to this one write.
+      promptData: record as unknown as PromptData,
+      timestamp: new Date(),
+      cliToolId: params.cliToolId,
+      instanceId: params.instanceId,
+    });
+    logger.info('unclassified-frame-recorded', {
+      worktreeId: params.worktreeId,
+      cliToolId: params.cliToolId,
+      dwellSeconds,
+      statusReason,
+    });
+  } catch (error: unknown) {
+    logger.warn('unclassified-frame-record-failed', {
+      worktreeId: params.worktreeId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 /**
@@ -153,6 +232,28 @@ export async function buildCurrentOutput(
   const isUnclassifiedActive =
     (statusResult.status === 'running' && statusResult.reason === STATUS_REASON.DEFAULT) ||
     (statusResult.status === 'ready' && statusResult.reason === STATUS_REASON.NO_RECENT_OUTPUT);
+
+  // Issue #1708: a frame nothing could classify left no trace anywhere. Both
+  // prompt-history writers (response-checker's pending row and
+  // recordAnsweredPrompt) are gated on `promptDetection.isPrompt === true`, so
+  // the only evidence a worker had stalled was the live pane — and `capture
+  // --prompts` answered "No prompt history." for a session that had been stuck
+  // for 900s. Record the failure itself, once, after it has persisted.
+  //
+  // Recorded here because this is the one place the flag is computed, and both
+  // the HTTP pull and the WebSocket push run through it, so the row appears at
+  // whatever cadence the session is actually being watched at.
+  const unclassifiedVerdict = observeUnclassifiedFrame(compositeKey, isUnclassifiedActive);
+  if (unclassifiedVerdict.shouldRecord) {
+    recordUnclassifiedFrame(db, {
+      worktreeId,
+      cliToolId,
+      instanceId: resolvedInstanceId,
+      dwellMs: unclassifiedVerdict.dwellMs,
+      sessionStatus: statusResult.status,
+      sessionStatusReason: statusResult.reason,
+    });
+  }
 
   const realtimeSnippet = lines.slice(-100).join('\n');
   const autoYesState = getAutoYesState(worktreeId, cliToolId, instanceId);
