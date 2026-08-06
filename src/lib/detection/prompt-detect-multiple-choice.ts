@@ -90,11 +90,17 @@ const CLAUDE_TASK_PANEL_HEADER_PATTERN = /^\s*\d{1,3}\s+tasks?\s+\(\d+\s+done\b/
  * guard anticipates. Skipping the whole panel block closes that off structurally
  * instead of one wording at a time.
  *
- * Glyph set is what Claude Code renders for pending/in-progress/done rows plus
- * the neighbouring checkbox forms; unmatched glyphs simply end the block, which
- * is the safe direction (the panel stops being skipped, exactly as before).
+ * Glyph set is the box/checkbox family Claude renders these rows from (measured:
+ * ◼ in-progress, ◻ open). It deliberately EXCLUDES ❯ ● › — DEFAULT_OPTION_PATTERN's
+ * cursor indicators — and the ⏺ ⎿ ✔ ✗ transcript markers TURN_BOUNDARY_PATTERN
+ * relies on. A guard that can swallow a real default option is the exact failure
+ * class this Issue is about, and the cost of excluding them is nil: no observed
+ * panel row uses one.
+ *
+ * An unmatched glyph simply ends the block, which is the safe direction — those
+ * rows go back to being handled exactly as they were before this guard existed.
  */
-const CLAUDE_TASK_PANEL_ROW_PATTERN = /^\s*[◼◻◾◽▪▫☐☑☒✔✓✗✘●○]\s/;
+const CLAUDE_TASK_PANEL_ROW_PATTERN = /^\s*[◼◻◾◽▪▫☐☑☒]\s/;
 
 /**
  * Line indices belonging to a Claude task panel within [start, end).

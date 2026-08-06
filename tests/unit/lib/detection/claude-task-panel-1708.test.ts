@@ -167,3 +167,24 @@ describe('Issue #1708: the collapsed summary line accepts "completed"', () => {
     expect(labels(build('… +2 completed'))).toEqual(['Yes', 'No']);
   });
 });
+
+describe('Issue #1708: the panel guard cannot swallow a real option', () => {
+  it('does not claim a ❯/●/› cursor line even directly under a panel header', () => {
+    // A guard that eats a default-option line would be the same failure class
+    // this Issue is about, one layer down. The glyph set excludes the three
+    // DEFAULT_OPTION_PATTERN cursors for exactly this reason.
+    for (const cursor of ['❯', '●', '›']) {
+      const lines = ['  7 tasks (2 done, 1 in progress, 4 open)', `${cursor} 1. Yes`];
+      expect([...findClaudeTaskPanelLines(lines, 0, lines.length)]).toEqual([0]);
+    }
+  });
+
+  it('does not claim a transcript marker line', () => {
+    // ⏺ / ⎿ / ✔ are what findApprovalContextStart uses to find the previous
+    // turn's edge; claiming them here would move that boundary.
+    for (const marker of ['⏺', '⎿', '✔', '✗']) {
+      const lines = ['  7 tasks (2 done, 1 in progress, 4 open)', `${marker} something`];
+      expect([...findClaudeTaskPanelLines(lines, 0, lines.length)]).toEqual([0]);
+    }
+  });
+});
