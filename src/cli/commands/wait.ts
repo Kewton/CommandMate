@@ -5,7 +5,10 @@
  * Exit codes [DR1-03]:
  * - 0: SUCCESS (agent completed)
  * - 10: PROMPT_DETECTED (agent waiting for user input, including arrow-key
- *       selection lists — Issue #1628)
+ *       selection lists — Issue #1628 — and interactive frames the detection
+ *       layer could not classify at all — Issue #1708. Both are reported as
+ *       exit 10 with a distinguishing `type` rather than a new exit code, so
+ *       callers that already branch on 10 keep working.)
  * - 124: TIMEOUT (--timeout exceeded)
  * Issue #1544 adds --verify / --require-work, which can turn a detected
  * completion into 20 (VERIFY_FAILED) or 21 (NOT_STARTED).
@@ -41,6 +44,29 @@ const POLL_INTERVAL_MS = 5000;
  * names the state instead of inventing options.
  */
 const SELECTION_LIST_PROMPT_TYPE = 'selection_list';
+
+/**
+ * `type` reported for an interactive frame the detection layer could not
+ * classify at all (Issue #1708).
+ *
+ * Rides the existing exit 10 rather than a new code on purpose: every caller
+ * that already branches on PROMPT_DETECTED (the `--auto-yes` dispatch runner
+ * among them) keeps working and simply meets a kind it does not recognise,
+ * whereas a new exit code reads as an infrastructure error to all of them.
+ */
+const UNCLASSIFIED_PROMPT_TYPE = 'unclassified';
+
+/**
+ * How long `isUnclassifiedActive` must hold before `wait` treats it as a stop
+ * reason (Issue #1708).
+ *
+ * The flag is a single-poll observation of "interactive, but unparsed", and a
+ * frame captured mid-repaint can raise it once and clear on the next poll — so
+ * stopping on the instantaneous value would abort healthy runs. 60s is 12
+ * consecutive POLL_INTERVAL_MS polls: far past any repaint, far short of the
+ * 900s timeout this exists to pre-empt.
+ */
+const UNCLASSIFIED_DWELL_MS = 60_000;
 
 /**
  * How recent `autoYes.lastSuppression` must be to be reported as the reason this
@@ -108,6 +134,12 @@ async function pollWorktree(
    * milliseconds and handed a `passed` verdict to whatever ran next.
    */
   let everRunning = false;
+  /**
+   * Epoch ms of the first poll in the current unbroken run of
+   * `isUnclassifiedActive === true`, or null when the last poll cleared it
+   * (Issue #1708).
+   */
+  let unclassifiedSince: number | null = null;
 
   while (true) {
     // Check timeout
@@ -224,6 +256,53 @@ async function pollWorktree(
             status: 'pending',
           },
         };
+      }
+
+      // Issue #1708: the frame is interactive but nothing could parse it. The
+      // detection layer is the single entry point every downstream safeguard
+      // hangs off, so a frame that slips past it disables Auto-Yes, the exit-10
+      // handoff and the contract's autoYes policy all at once — and `wait` used
+      // to burn its whole --timeout without ever mentioning it. Treat a
+      // PERSISTENT unclassified frame as a stop reason of its own.
+      //
+      // Deliberately below the completion check's peers and above the check
+      // itself: `ready`/`no_recent_output` also raises this flag, and that state
+      // exits as SUCCESS below before any dwell can accumulate. What survives to
+      // here is the `running`/`default` frame Issue #1708 reported — a dialog on
+      // screen that nothing recognised.
+      if (data.isUnclassifiedActive === true) {
+        if (unclassifiedSince === null) unclassifiedSince = Date.now();
+        const dwellMs = Date.now() - unclassifiedSince;
+        if (dwellMs >= UNCLASSIFIED_DWELL_MS) {
+          const dwellSeconds = Math.round(dwellMs / 1000);
+          const question =
+            `Unclassified interactive frame on ${worktreeId} for ${dwellSeconds}s ` +
+            `(status=${data.sessionStatus ?? 'unknown'}/${data.sessionStatusReason ?? 'unknown'}). ` +
+            `The detection layer could not parse it; inspect the raw pane with ` +
+            `\`commandmate capture ${worktreeId} --pane\`.`;
+
+          if (options.onPrompt === 'human') {
+            console.error(question);
+            console.error('Waiting for human response...');
+            await sleep(POLL_INTERVAL_MS);
+            continue;
+          }
+
+          console.error(question);
+          return {
+            exitCode: WaitExitCode.PROMPT_DETECTED,
+            output: {
+              worktreeId,
+              cliToolId: data.cliToolId || 'claude',
+              type: UNCLASSIFIED_PROMPT_TYPE,
+              question,
+              options: [],
+              status: 'pending',
+            },
+          };
+        }
+      } else {
+        unclassifiedSince = null;
       }
 
       // Completion check [DR1-04]:

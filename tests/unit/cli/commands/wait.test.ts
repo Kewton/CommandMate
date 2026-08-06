@@ -371,6 +371,120 @@ describe('Issue #520: sessionStatus completion detection', () => {
     });
   });
 
+  // Issue #1708: the detection layer is the single entry point every downstream
+  // safeguard hangs off. A frame it cannot classify disables Auto-Yes, the
+  // exit-10 handoff and the contract's autoYes policy at once — and `wait` used
+  // to say nothing about it until --timeout fired 900s later.
+  describe('Issue #1708: a dwelling unclassified frame is a blocked agent', () => {
+    const unclassified = {
+      ...baseOutput,
+      isRunning: true,
+      isComplete: false,
+      isPromptWaiting: false,
+      promptData: null,
+      isSelectionListActive: false,
+      isUnclassifiedActive: true,
+      sessionStatus: 'running' as const,
+      sessionStatusReason: 'default',
+    };
+    const ready = { ...baseOutput, isRunning: true, sessionStatus: 'ready' as const };
+    /** A running frame the detector DID classify — clears the dwell counter. */
+    const classifiedRunning = { ...unclassified, isUnclassifiedActive: false };
+
+    const repeat = <T,>(data: T, times: number) =>
+      Array.from({ length: times }, () => ({ data }));
+
+    it('exits 10 with an unclassified payload once the frame has persisted', async () => {
+      vi.useFakeTimers();
+      // 13 polls at POLL_INTERVAL_MS=5000 puts the 13th at dwell=60s.
+      mockFetchSequence(repeat(unclassified, 15));
+
+      const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+      const promise = createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+      await vi.advanceTimersByTimeAsync(70_000);
+      await promise;
+
+      expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+      const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
+      expect(output).toMatchObject({
+        worktreeId: 'wt1',
+        type: 'unclassified',
+        options: [],
+        status: 'pending',
+      });
+      // The question has to be actionable: how long, what the server thought it
+      // was, and where to look at the frame nothing could parse.
+      expect(output.question).toContain('60s');
+      expect(output.question).toContain('running/default');
+      expect(output.question).toContain('capture wt1 --pane');
+    });
+
+    it('does not stop on a momentary unclassified frame', async () => {
+      vi.useFakeTimers();
+      // A repaint captured mid-frame can raise the flag for a poll or two;
+      // stopping on the instantaneous value would abort healthy runs.
+      mockFetchSequence([...repeat(unclassified, 5), { data: ready }]);
+
+      const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+      const promise = createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+      await vi.advanceTimersByTimeAsync(40_000);
+      await promise;
+
+      expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+    });
+
+    it('resets the dwell when a poll comes back classified', async () => {
+      vi.useFakeTimers();
+      // Two 8-poll runs (35s each) separated by one classified poll. The total
+      // elapsed time is well past the threshold; no single unbroken run is.
+      mockFetchSequence([
+        ...repeat(unclassified, 8),
+        { data: classifiedRunning },
+        ...repeat(unclassified, 8),
+        { data: ready },
+      ]);
+
+      const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+      const promise = createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+      await vi.advanceTimersByTimeAsync(120_000);
+      await promise;
+
+      expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+      expect(mockExit).not.toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+    });
+
+    it('keeps waiting under --on-prompt human', async () => {
+      vi.useFakeTimers();
+      mockFetchSequence([...repeat(unclassified, 13), { data: ready }]);
+
+      const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+      const promise = createWaitCommand().parseAsync([
+        'node', 'wait', 'wt1', '--on-prompt', 'human',
+      ]);
+      await vi.advanceTimersByTimeAsync(80_000);
+      await promise;
+
+      expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('Unclassified interactive frame on wt1'),
+      );
+    });
+
+    it('still reports a ready session as completed even though it raises the flag', async () => {
+      // `ready`/`no_recent_output` also publishes isUnclassifiedActive (#1497).
+      // The completion check has to keep winning, or every finished agent would
+      // eventually be reported as blocked.
+      mockFetchSequence([
+        { data: { ...ready, isUnclassifiedActive: true, sessionStatusReason: 'no_recent_output' } },
+      ]);
+
+      const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+      await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+
+      expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+    });
+  });
+
   it('includes sessionStatus in progress message', async () => {
     vi.useFakeTimers();
     const runningOutput = {
