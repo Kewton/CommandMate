@@ -56,6 +56,9 @@ const NO_STRUCTURED_EVENTS = {
   lastEventType: null,
   lastEventAt: null,
   lastEventDetail: null,
+  // Issue #1725: no dialog reported either.
+  promptWaitingSince: null,
+  promptWaitingSource: null,
 } as const;
 
 beforeEach(() => {

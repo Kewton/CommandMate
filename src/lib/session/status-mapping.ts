@@ -61,8 +61,17 @@ export const HOOK_STATUS_REASON = {
   PROMPT_SUBMIT: 'hook_prompt_submit',
   /** The agent reported the turn ended (`Stop` / `SubagentStop`). */
   STOP: 'hook_stop',
-  /** `Notification(permission_prompt)` — recorded, not applied. See below. */
+  /** `Notification(permission_prompt)` — the agent says a dialog is on screen. */
   PERMISSION_PROMPT: 'hook_permission_prompt',
+  /**
+   * A `PermissionRequest` this server declined to decide (Issue #1725).
+   *
+   * Distinct from {@link PERMISSION_PROMPT} because the two are different kinds
+   * of evidence, and an operator reading a payload or a log has to be able to
+   * tell them apart: the notification is proof a dialog exists, this one is the
+   * prediction that one is about to. Only the prediction expires unaided.
+   */
+  PERMISSION_REQUEST: 'hook_permission_request',
   /** `Notification(idle_prompt)` — the agent says it is sitting at the composer. */
   IDLE_PROMPT: 'hook_idle_prompt',
 } as const;

@@ -1158,3 +1158,84 @@ describe('Issue #1699: policy suppression is reported while waiting', () => {
     expect(stderr).not.toContain('auto-yes suppressed');
   });
 });
+
+/**
+ * Issue #1725: a dialog only the structured layer can see.
+ *
+ * The server publishes `isPromptWaiting: true` with a `promptData` that has no
+ * options — the `Notification(permission_prompt)` payload carries none. `wait`
+ * is not modified for this, which is exactly the claim worth pinning: the
+ * degraded prompt must travel the ordinary exit-10 path rather than being
+ * dropped by a type check somewhere along it.
+ */
+describe('Issue #1725: a structured prompt with no options', () => {
+  const structuredPrompt = {
+    ...baseOutput,
+    isRunning: true,
+    isComplete: true,
+    isPromptWaiting: true,
+    sessionStatus: 'waiting' as const,
+    sessionStatusReason: 'hook_permission_prompt',
+    // No `isUnclassifiedActive`: the 60s dwell must not be what stops this
+    // wait. The dialog is known now, so the exit is immediate.
+    isUnclassifiedActive: false,
+    promptData: {
+      type: 'unclassified',
+      question:
+        'A dialog is open in wt1: the agent reported it via Notification(permission_prompt) for Bash, ' +
+        'but the detection layer published no options for it. Answer it in the terminal, or send the ' +
+        'option NUMBER with `commandmate respond wt1 <number>`.',
+      options: [],
+      status: 'pending',
+      source: 'notification',
+      message: 'Claude needs your permission to use Bash',
+    },
+    structuredEvents: {
+      lastEventType: 'notification',
+      lastEventAt: Date.now(),
+      lastEventDetail: 'permission_prompt',
+      promptWaitingSince: Date.now(),
+      promptWaitingSource: 'notification',
+    },
+  };
+
+  it('exits 10 on the first poll, carrying the unclassified type', async () => {
+    mockFetchSequence([{ data: structuredPrompt }]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+    const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
+    expect(output).toMatchObject({
+      worktreeId: 'wt1',
+      cliToolId: 'claude',
+      type: 'unclassified',
+      options: [],
+      status: 'pending',
+    });
+    // The one instruction that matters: `respond <id> yes` is not resolved on a
+    // numbered dialog (Issue #1681), so the guidance has to name the number.
+    expect(output.question).toContain('commandmate respond wt1 <number>');
+  });
+
+  it('keeps waiting under --on-prompt human', async () => {
+    vi.useFakeTimers();
+    mockFetchSequence([
+      { data: structuredPrompt },
+      { data: { ...baseOutput, isRunning: true, sessionStatus: 'ready' as const } },
+    ]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    const promise = createWaitCommand().parseAsync([
+      'node', 'wait', 'wt1', '--on-prompt', 'human',
+    ]);
+    await vi.advanceTimersByTimeAsync(6000);
+    await promise;
+
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      expect.stringContaining('Prompt detected on wt1'),
+    );
+  });
+});

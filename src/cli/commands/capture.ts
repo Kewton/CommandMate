@@ -174,6 +174,9 @@ async function capturePrompts(worktreeId: string, options: CaptureOptions): Prom
             // Issue #1699: what the contract's denyPatterns were judged against.
             // Null on rows recorded before the field existed.
             approvalTarget: m.promptData!.approvalTarget ?? null,
+            // Issue #1725: which structured signal reported an unclassified row,
+            // or null when the row is a plain detection failure (#1708).
+            source: typeof m.promptData!.source === 'string' ? m.promptData!.source : null,
           })),
         },
         null,
@@ -195,8 +198,15 @@ async function capturePrompts(worktreeId: string, options: CaptureOptions): Prom
     // prompt that was seen and is merely unanswered — that reading is what would
     // send an operator looking for an answer path that never existed.
     const unclassified = p.type === UNCLASSIFIED_FRAME_TYPE;
+    // Issue #1725: the same row type now has two origins, and they mean
+    // opposite things about coverage. `detection-failed` is "nothing saw this";
+    // `hook-<source>` is "the agent told us, and the scraper still did not see
+    // it" — the second is the measurement the hooks Epic exists to produce.
+    const structuredSource = typeof p.source === 'string' ? p.source : null;
     const state = unclassified
-      ? 'unclassified:detection-failed'
+      ? structuredSource
+        ? `unclassified:hook-${structuredSource}`
+        : 'unclassified:detection-failed'
       : answered
         ? `answered:${p.answeredBy ?? 'unknown'}`
         : 'pending';

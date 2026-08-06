@@ -220,16 +220,24 @@ describe('structuredEvents exposure (Issue #1722)', () => {
       lastEventType: null,
       lastEventAt: null,
       lastEventDetail: null,
+      promptWaitingSince: null,
+      promptWaitingSource: null,
     });
   });
 
   it('surfaces the last event without disturbing anything else in the payload', async () => {
     const before = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
 
+    // A `Notification` whose type this server has never observed. #1722's
+    // observation-only guarantee is asserted on one of those on purpose: the
+    // two types that DO carry a verdict were promoted by #1723
+    // (`idle_prompt` -> ready) and #1725 (`permission_prompt` -> a dialog is
+    // open), so pinning the guarantee to them would be pinning behaviour two
+    // later Issues deliberately changed.
     recordAgentEvent('wt-1', 'claude', 'claude', {
       event: 'notification',
       at: 1_700_000_000_002,
-      detail: 'permission_prompt',
+      detail: 'some_future_type',
       sessionId: 'sess-9',
     });
     const after = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
@@ -237,11 +245,10 @@ describe('structuredEvents exposure (Issue #1722)', () => {
     expect(after.structuredEvents).toEqual({
       lastEventType: 'notification',
       lastEventAt: 1_700_000_000_002,
-      lastEventDetail: 'permission_prompt',
+      lastEventDetail: 'some_future_type',
+      promptWaitingSince: null,
+      promptWaitingSource: null,
     });
-    // #1722 is observation only: a `permission_prompt` notification arriving
-    // must not move sessionStatus, isPromptWaiting or anything else. That is
-    // #1723's job, and it is not done here.
     expect({ ...after, structuredEvents: null }).toEqual({ ...before, structuredEvents: null });
   });
 

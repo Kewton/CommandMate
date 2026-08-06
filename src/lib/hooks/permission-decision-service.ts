@@ -47,6 +47,7 @@ import {
   type AutoYesSuppressionReason,
 } from '@/lib/polling/auto-yes-resolver';
 import { recordPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
+import { reportPermissionRequestPending } from '@/lib/session/agent-event-state';
 import type { PromptType } from '@/types/models';
 import { createLogger } from '@/lib/logger';
 import {
@@ -241,6 +242,54 @@ function recordAllowedPermission(
 }
 
 /**
+ * Permission modes in which declining to decide does NOT produce a dialog.
+ *
+ * `bypassPermissions` is Claude's "do not ask me" mode. If the hook fires at
+ * all there, a no-decision is answered by the agent itself and no human is ever
+ * blocked — so reporting a dialog would make `wait --on-prompt agent` exit 10
+ * on a session that is running perfectly well. Whether the hook fires in that
+ * mode was NOT measured by the #1721 spike; this guard costs nothing and
+ * removes the question.
+ */
+const NON_BLOCKING_PERMISSION_MODES = new Set(['bypassPermissions']);
+
+/**
+ * Tell the detection layer that a dialog is about to be drawn (Issue #1725).
+ *
+ * A no-decision means precisely this: D5 measured `{}` landing back in the
+ * ordinary TUI approval flow, i.e. the dialog appears. That is ~6 seconds
+ * before `Notification(permission_prompt)` announces the same dialog (§5.5), so
+ * it is the earliest moment anything in this system can know a human is needed.
+ *
+ * It is a prediction rather than an observation, and it is recorded as one:
+ * `agent-event-state` expires a `permission-request` record that nothing
+ * corroborates within 20 s. See STRUCTURED_PROMPT_PROVISIONAL_MAX_AGE_MS for
+ * why the asymmetry with the notification source is deliberate.
+ *
+ * `AskUserQuestion` is included even though this Issue does not claim to detect
+ * its screens: it also raises a `PermissionRequest`, and allowing it does not
+ * dismiss the picker (§5.6), so a no-decision there is followed by a screen a
+ * human must act on just the same. What is NOT claimed is that the state
+ * survives — nothing about that screen produces events, so unless the scraper
+ * corroborates it the record expires, which is the honest outcome for a screen
+ * this layer cannot see. That screen belongs to #1708 / #1726.
+ */
+function reportPendingDialog(
+  session: PermissionRequestSession,
+  payload: PermissionRequestPayload | null
+): void {
+  if (payload?.permissionMode && NON_BLOCKING_PERMISSION_MODES.has(payload.permissionMode)) {
+    return;
+  }
+  reportPermissionRequestPending(
+    session.worktreeId,
+    session.cliToolId,
+    session.instanceId,
+    payload?.toolName ?? null
+  );
+}
+
+/**
  * Adjudicate a permission request and record the outcome.
  *
  * @param session - Worktree / tool / instance the request came from
@@ -252,6 +301,10 @@ export function resolvePermissionRequest(
   payload: PermissionRequestPayload | null
 ): PermissionDecision {
   const decision = decidePermissionRequest(session, payload);
+
+  if (decision.behavior !== 'allow') {
+    reportPendingDialog(session, payload);
+  }
 
   if (decision.reason === 'policy-suppressed' && decision.suppressedBy) {
     // Issue #1684's record, so `capture --json` can say why the worker is

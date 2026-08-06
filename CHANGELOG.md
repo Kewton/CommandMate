@@ -21,6 +21,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - フレームが読めない間は完了判定を抑止し、dwell は 2 状態をまたいで継続する。本物の完了 `ready`/`input_prompt` はフラグを立てないので従来どおり初回ポーリングで exit 0
 
 ### Added
+- **detection: プロンプト待ちを構造化イベントで検出する（`isPromptWaiting` / `wait` exit 10 / `capture --prompts`、Phase 2）** (#1725)
+  - Claude が `Notification(notification_type=permission_prompt)` を出す承認ダイアログを、画面解析とは独立に「人間待ち」として publish する。#1708 の**元の報告事例そのもの**をイベント側から塞ぐ
+  - **合成規則は OR**。`isPromptWaiting = scraper が見た || 構造化が見た`。`promptData` は scraper の解析済みプロンプトを優先し、無ければ縮退形（`type:'unclassified'`／options 空／エージェントの `message` を原文表示）を返す。片方の false がもう片方の true を打ち消さないのが要点で、構造化イベントが 1 件も出ない画面（AskUserQuestion の選択・確認、trust dialog、`/login`・`/model` overlay）は scraper だけが見えるため
+  - **解除は実測にもとづく**: `Stop`（AskUserQuestion 回答確定後の発火を #1721 が実測）／`user_prompt_submit`／`session_start`・`session_end`（世代交代）／`notification(idle_prompt)`／**scraper がプロンプトの消滅を観測したとき**。ただし scraper の解除は**一度そのプロンプトを見た場合に限る** — 見えなかった層の沈黙を証拠に使うと、この機能が存在する理由そのものの状況で検出が消える
+  - **`PostToolUse` は使っていない**。Issue 本文は解除条件の候補に挙げていたが、#1721 のスパイクで一度も観測されておらず、受信 route も lifecycle event に写像していない。実測のある `Stop` だけを採用した
+  - **`Notification` の機械判断は `notification_type` のみ**（#1721 D3）。`message`（"Claude needs your permission"）は人間向け文言なので表示にだけ使う
+  - Auto-Yes v2 が `PermissionRequest` を no-decision で返したときも「これからダイアログが出る」として記録する（`Notification` より約 6 秒早い）。ただしこれは観測ではなく**予測**なので、20 秒以内に `Notification` か scraper の裏取りが無ければ失効する。貼り付いた場合のコストは健全なセッションでの `wait` exit 10（ワーカーの誤停止）であり、それを避けるための期限
+  - `wait --on-prompt agent` は構造化由来のプロンプトでも即 exit 10（#1708 の 60 秒 dwell を待たない）。`--on-prompt human` は従来どおり待機継続
+  - `capture --prompts` に `[unclassified:hook-notification]` として残る。「エージェントは教えたのに検出層には見えなかった」は `[unclassified:detection-failed]`（誰も見えなかった）と別の事実なので区別して表示する。**scraper がプロンプトを publish した回には書かない**（既存の記録者と二重計上になる）
+  - PromptPanel は選択肢の無い縮退プロンプトを操作 UI 無しで表示し、「**番号で**応答する」よう案内する（`respond <id> yes` は番号つきダイアログでは Enter=既定選択に化ける＝#1681）。文言は `locales/{en,ja}/prompt.json`
+  - **スコープ外（構造化イベントが存在しないため原理的に不可能）**: AskUserQuestion の選択・確認画面。#1721 の実測で、表示中・回答操作中とも hooks の受信件数は 23 → 23 で 1 件も発火しない。この画面の検出は scraper 側（#1708 / #1726）に残る。起票時の受入基準のうち当該項目は撤回済み
+  - 実機検証（Claude Code v2.1.223 / 隔離 DB・別ポートの production サーバ）: 承認ダイアログで `PermissionRequest`(13:12:53) → `Notification(permission_prompt)`(13:12:59) が到着し `promptWaitingSince` は前者の時刻＝予測が観測に昇格しても「人間が止まった時刻」を保つ。`wait --on-prompt agent` は exit 10。ダイアログに応答すると `Stop` を待たずに解除された（**scraper 観測による解除が実際に効いた**）。scraper が何も見ていない状態に実 payload を投函すると `waiting`/`hook_permission_prompt` ＋ 縮退 promptData ＋ `wait` exit 10（type=`unclassified`）となり、日英両 locale で PromptPanel の縮退表示を確認
+
 - **auto-yes: Claude の承認を `PermissionRequest` hook で構造化裁定する（Auto-Yes v2 / Phase 2）** (#1724)
   - 画面を regex で読んでキーを注入する代わりに、Claude が**ダイアログを描く前に**同期 POST してくる `PermissionRequest` を裁く。新設 `POST /api/hooks/permission-request`（`/api/hooks/agent-event` は 202 の fire-and-forget で性格が逆なので分離）
   - 裁定: 未 parse → no-decision ／ `AskUserQuestion` → 常に no-decision（#1726 の担当。`allow` を返しても選択画面は出るので突破もできない）／ Auto-Yes 無効・期限切れ → no-decision ／ 契約ポリシー抑止 → no-decision ＋ `lastSuppression` 記録 ／ それ以外 → `allow`
