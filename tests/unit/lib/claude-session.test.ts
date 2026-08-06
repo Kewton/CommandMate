@@ -7,31 +7,15 @@
  * @vitest-environment node
  */
 
-import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
-import { removeTempDir } from '@tests/helpers/temp-dir';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { existsSync, readFileSync } from 'fs';
+import { findClaudeLaunchIndex } from '@tests/helpers/claude-launch-command';
+import { useIsolatedAgentHooksDir } from '@tests/helpers/agent-hooks-dir';
 
-/**
- * Issue #1722 writes a hooks settings file on every session start. Without this
- * the suite would litter the developer's real `~/.commandmate/hooks`, and the
- * launch assertions would be reading a path that outlives the run.
- */
-let hooksDir: string;
-let previousHooksDir: string | undefined;
-
-beforeAll(() => {
-  hooksDir = mkdtempSync(join(tmpdir(), 'claude-session-hooks-'));
-  previousHooksDir = process.env.CM_AGENT_HOOKS_DIR;
-  process.env.CM_AGENT_HOOKS_DIR = hooksDir;
-});
-
-afterAll(() => {
-  if (previousHooksDir === undefined) delete process.env.CM_AGENT_HOOKS_DIR;
-  else process.env.CM_AGENT_HOOKS_DIR = previousHooksDir;
-  removeTempDir(hooksDir);
-});
+// Issue #1722 writes a hooks settings file on every session start. Without this
+// the suite would litter the developer's real `~/.commandmate/hooks`, and the
+// launch assertions would be reading a path that outlives the run.
+useIsolatedAgentHooksDir('claude-session');
 
 // Mock tmux module before importing claude-session
 // Issue #393 (R3F002): Added sendSpecialKey for stopClaudeSession() C-d migration
@@ -137,16 +121,15 @@ function countEnterOnlyCalls(): number {
 /**
  * Index of the sendKeys call that launched the CLI, or -1.
  *
- * Issue #1722 stopped sending the bare CLI path: the launch line is now
- * `'<path>' --settings '<file>'`, and `CM_AGENT_HOOKS_INJECT=0` puts it back.
- * Tests about *which path was resolved* ask this rather than for equality, so
- * they keep testing path resolution instead of quietly becoming tests of the
- * launch decoration.
+ * Shared with the integration suite (`@tests/helpers/claude-launch-command`),
+ * because both had assertions that located the launch by string equality with
+ * the bare CLI path and broke together when Issue #1722 started appending
+ * `--settings`. Tests about *which path was resolved* ask this rather than for
+ * equality, so they keep testing path resolution instead of quietly becoming
+ * tests of the launch decoration.
  */
 function findLaunchCallIndex(claudePath: string): number {
-  return vi
-    .mocked(sendKeys)
-    .mock.calls.findIndex((call) => call[1] === claudePath || call[1].startsWith(`'${claudePath}' `));
+  return findClaudeLaunchIndex(vi.mocked(sendKeys).mock.calls, claudePath);
 }
 
 /** Assert the CLI was launched from `claudePath`, with hooks injected. */
