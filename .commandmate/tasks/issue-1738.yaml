@@ -1,0 +1,159 @@
+version: 1
+title: "Issue #1738: promptData の縮退値 (unclassified) を hooks/reducer 連鎖の型が表現していない"
+goal: |
+  /bug-fix 1738
+
+  https://github.com/Kewton/CommandMate/issues/1738 を実装してください。
+  Issue 本文の「提案」「受入条件」「既知の罠」をすべて満たすこと。
+
+  ## この Issue の要点
+
+  `current-output` は #1725 以降 `promptData` に縮退値 `StructuredPromptWaitingData`
+  （`type: 'unclassified'`）を載せて返すことがあるが、受け取り側の型は `PromptData` 単独のまま。
+  `PromptPanel` だけが `PanelPromptData` に広げて型ガードしており、**間の層は「来ないはずの値」を
+  握ったまま通している**。
+
+  ## 実際の該当箇所（オーケストレーターが grep で特定）
+
+  | ファイル | 行 | 型 |
+  |---|---|---|
+  | `src/types/models.ts` | 403 | `promptData?: PromptData;` |
+  | `src/hooks/useWorktreeDetailController.ts` | 94 | `promptData?: PromptData;` |
+  | `src/hooks/useTerminalPanePolling.ts` | 88, 201 | `PromptData` / `PromptData \| null` |
+
+  **Issue 本文の申し送りにあった `src/types/api.ts` は存在しない**（訂正済み）。
+
+  ## 設計上の絶対条件
+
+  - **`StructuredPromptWaitingData` を `PromptData` union に入れないこと。** union の外に置いてあるのは
+    意図的な設計判断で、`src/types/models.ts` の `UNCLASSIFIED_PROMPT_TYPE` に理由が書かれている
+    （「選択肢番号で答えられない値を union に入れない」）。**閉じるべきは union ではなく、値が通る経路の型**
+  - **`PanelPromptData` 相当の union を共有型として 1 箇所に定義**し、`PromptPanel` のローカル型ではなく
+    そこを参照させる（定義の重複を残さない）
+  - **型ガードのヘルパーを 1 つ用意**（`isStructuredPromptWaiting(x)` 等）し、分岐を各所で書き直させない
+
+  ## 影響範囲の注意（scope について）
+
+  `promptData` は **src 配下 34 ファイル**に出現する（オーケストレーター実測）。型の変更が想定より
+  広く波及する可能性があるため、`scope.allow` は広めに取ってある。ただし
+  **`src/lib/session/**` は #1737 が同時に変更中なので触らないこと**（`scope.deny`）。
+  もし session 配下の変更が必要になったら、**実装せずに PR 説明へ書くこと**。
+
+  ## 現時点で実害は出ていない
+
+  `PromptPanel` が `type` で分岐し、縮退値はどの分岐にも入らず縮退表示に落ちる。危険なのは次に触る人が
+  型を信じて `options` を参照したときで、**型検査は通り `unclassified` のときだけ実行時に壊れる**。
+
+  ## 作業ルール（厳守）— 共通
+
+  ### プロセス・サーバの扱い（★ 2026-08-06 に本番停止事故あり）
+
+  - **`pkill` / `killall` / パターン一致で複数プロセスを一括 kill するコマンドを一切書かないこと。**
+    2026-08-06 に委任ワーカーが `pkill -f "node dist/server/server.js"` を実行し、
+    **ユーザーの本番サーバ（port 3000）と global インスタンス（port 60301）を巻き込んで停止させた**。
+    そのワーカーの意図は自分の隔離サーバ 1 本を再起動することだけだった。`-f` はコマンドライン全体への
+    部分一致なので、同名の実行ファイルを使う**すべてのプロセス**に命中する。
+    **「自分のプロセスだけを止めるつもり」でも、パターン一致は他人のプロセスを巻き込む。**
+  - **プロセスを止めるときは必ず PID を指定すること。** 自分で起動したものは起動時に PID を保存する:
+
+    ```bash
+    U="$SB/uat"                      # scratchpad 配下。$HOME に作らないこと
+    mkdir -p "$U"
+    CM_PORT=3779 CM_DB_PATH="$U/cm.db" NODE_ENV=production \
+      nohup node dist/server/server.js > "$U/server.log" 2>&1 &
+    echo $! > "$U/uat.pid"           # ← 自分の PID だけ記録
+    # ... 検証 ...
+    kill "$(cat "$U/uat.pid")"       # ← PID 指定で止める
+    ```
+
+  - **本番サーバ（port 3000）と global インスタンス（port 60301）に一切触れないこと。**
+    停止・再起動・再ビルドのいずれも禁止。稼働中サーバの足元での `npm run build` / `npm run dev` も禁止
+    （`.next` が clean され BUILD_ID が消えて配信中の画面が壊れる実害がある）
+  - 検証用サーバは**未使用ポート**を選び、**終了時に必ず PID 指定で停止**すること
+
+  ### tmux の扱い
+
+  - 実 tmux を触る検証は必ず **`tmux -L <専用socket>`** で行うこと。`-L` / `-S` は `$TMUX` より優先される。
+    あなたは tmux ペインの中で動いており `$TMUX` はユーザーの本番サーバを指しているため、
+    フラグ無しの `tmux` 呼び出しは**すべてユーザーの本番セッションに届く**
+  - **`kill-server` を書かないこと。** 後始末は `kill-session -t '=<name>:'`（完全一致）で行う。
+    2026-08-02 に `kill-server` が**稼働中の全 `mcbd-*` セッションを消し、並列ワーカーを即死させた**
+  - **`TMUX_TMPDIR` を隔離手段に使わないこと**（`$TMUX` があると完全に無視される）
+  - **`bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たないこと**（全セッションに波及する）
+
+  ### ファイル・ディレクトリの汚染
+
+  - **`$HOME` 直下や `~/.commandmate/` に何も作らないこと。** 作業用ディレクトリは
+    scratchpad（`$SB`）配下に作る。2026-08-06 にワーカーが `~/.commandmate-uat-1726`（2.6M）を
+    HOME に作って放置した
+  - **テストが実ホームディレクトリを汚さないこと。** `tests/helpers/agent-hooks-dir.ts` で
+    `CM_AGENT_HOOKS_DIR` を temp に向ける仕組みがある。セッションを起動するテストではこれを使う
+  - 作ったものは**すべて片付ける**こと。片付けた証跡（ディレクトリ不在・プロセス不在・セッション不在）を報告に含める
+
+  ### 検証の作法
+
+  - 品質ゲートの exit code は **`cmd > log; echo $?` で実測**すること（grep へのパイプは exit code を隠す）
+  - **`npm run test:integration` を通しで実行し exit code を実測すること。**
+    `.commandmate/verify.yaml` のゲートは lint / typecheck / unit のみで **integration を裁定しない**
+  - **「テストが緑 = 動く」ではない。** ガードや合成が空振りでも全テストは緑になる。
+    **変異注入**（条件をわざと壊して赤くなることの確認）で非空振りを証明し、結果をコミットメッセージに書くこと
+  - 実機確認で `/api/worktrees` の status を見ないこと。**5s TTL の capture キャッシュ越し**
+    （`CACHE_TTL_MS`、`src/lib/tmux/tmux-capture-cache.ts`）。`current-output` を直接叩くこと
+  - **実機確認は production build で行うこと。** dev モード（`tsx server.ts`）では構造化イベントが
+    機能しない（#1736）。dev で「動かない」と見えても実装バグとは限らない
+
+  ### 成果物の形
+
+  - 変更は**単一コミット**にまとめること。**PR は作らないこと**（オーケストレーターが作成する）
+  - `dev-reports/` 配下の進捗レポート類は作成不要
+  - 完了したら最終行に `IMPL_COMPLETED` とだけ出力すること
+
+
+  ## 本文の裏取り（必須）
+
+  この Issue は本オーケストレーターが同一セッション内でコードを読んで起票したもので、本文には
+  原因の証拠が記載されている。ただし**自作 Issue の原因特定が外れた前例**（#1552: 対照実験まで
+  示していたのに発生点の帰属が誤っていた）がある。
+
+  **着手時に本文の主張をコードで裏取りし、食い違えば実測を正として PR 説明に乖離を書くこと。**
+  「本文にこう書いてある」を根拠に実装しないこと。
+
+  ## 完了条件
+
+  - Issue の受入基準をすべて満たしていること
+  - `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` / `npm run test:integration` / `npm run build`
+    がすべて exit 0（**`cmd > log; echo $?` で実測**）
+
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns:
+    - 'pkill'
+    - 'killall'
+    - 'kill -9'
+    - 'rm -rf /'
+    - 'git push.*--force'
+    - 'sudo '
+    - 'commandmate (stop|start)'
+
+scope:
+  allow:
+    - "src/types/**"
+    - "src/hooks/**"
+    - "src/components/**"
+    - "src/cli/types/api-responses.ts"
+    - "src/lib/realtime/**"
+    - "src/app/api/worktrees/**"
+    - "tests/**"
+    - "docs/**"
+    - "CHANGELOG.md"
+    - "dev-reports/**"
+  deny:
+    - "src/lib/session/**"
+    - "src/lib/detection/**"
+    - "src/lib/hooks/**"
+verify:
+  gates: [lint, typecheck, unit]
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
