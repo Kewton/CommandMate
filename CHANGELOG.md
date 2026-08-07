@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-08-07
+
+> **Highlight**: Skill 一覧が**古いバージョンをインストール済みとして表示し、そこからの更新が必ず失敗する**問題を修正する（#1753）。一覧 API は索引を、更新 API は receipt を真実として読んでおり、両者が食い違うと UI は旧版を出して更新導線を描き、押すと `SKILL_UPDATE_VERSION_NOT_ELIGIBLE` を返していた。エラー文言は利用者に「もう最新です」としか読めず、UI に索引を作り直す導線も無いため、**一度ずれると回復できない**状態だった。読み取り時の索引修復を「欠落行の復元」から「receipt と食い違う行の収束」まで広げ、コストは索引が既に持つ `receipt_sha256` との比較で抑えている（一致する行は parse も書き込みもしない）。**このリリースを適用すると、ずれている索引は一覧を開いた時点で自動的に直る。**
+
 ### Fixed
 
 - **skills: 一覧 API が古い版を表示し、そこからの更新が必ず `SKILL_UPDATE_VERSION_NOT_ELIGIBLE` で失敗する問題を修正** (#1753)
