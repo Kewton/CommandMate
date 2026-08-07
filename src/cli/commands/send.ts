@@ -198,6 +198,7 @@ export function createSendCommand(): Command {
     .option('--duration <duration>', `Auto-yes duration (${ALLOWED_DURATIONS.join(', ')})`)
     .option('--stop-pattern <pattern>', 'Auto-yes stop pattern (regex). Matched against terminal output; cannot block commands (use the task contract\'s autoYes.denyPatterns for that)')
     .option('--contract <path>', 'Execution contract path relative to the worktree root (e.g. .commandmate/tasks/my-task.yaml). Records a task and sends the contract preamble plus its goal.')
+    .option('--ignore-structured-prompt', 'Send even if only the agent\'s hooks report an open dialog (Issue #1737). Use when the pane looks idle but sends are refused; a prompt visible in the terminal is still refused.')
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeId: string, message: string | undefined, options: SendOptions) => {
       try {
@@ -314,6 +315,12 @@ export function createSendCommand(): Command {
         // Issue #576: Include model in send body
         if (options.model) {
           sendBody.model = options.model;
+        }
+        // Issue #1737: waive the structured half of the prompt guard for this
+        // send. Sent only when asked for, so an older daemon that does not know
+        // the field sees exactly the body it always did.
+        if (options.ignoreStructuredPrompt) {
+          sendBody.ignoreStructuredPromptGuard = true;
         }
 
         try {

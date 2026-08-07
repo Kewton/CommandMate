@@ -61,6 +61,12 @@ export interface SendUserMessageParams {
   absoluteImagePath?: string;
   /** Validated Copilot model to switch to before sending (send API only). */
   copilotModel?: string;
+  /**
+   * Send even if only the structured layer reports an open dialog (Issue
+   * #1737). The operator's escape hatch for a hook-reported dialog that nothing
+   * ever released; a prompt the scraper can see is still refused.
+   */
+  ignoreStructuredPromptGuard?: boolean;
 }
 
 /** Result of {@link sendUserMessage}. */
@@ -108,14 +114,26 @@ export async function sendUserMessage(
   // paths — `respond`, `special-keys`, `prompt-response` — do not go through
   // here at all, which is what keeps them open; they are the only way out of
   // this state and blocking them would strand the session.
-  const promptGuard = await isPromptWaiting(worktreeId, cliToolId, instanceId);
+  //
+  // Issue #1737: the check consults the structured layer as well, through the
+  // same composition the current-output payload publishes. Before that it asked
+  // the scraper alone, so a dialog only the agent's hooks could see — the exact
+  // gap #1725 closed for the payload — was still sent into.
+  const promptGuard = await isPromptWaiting(worktreeId, cliToolId, instanceId, {
+    ignoreStructured: params.ignoreStructuredPromptGuard,
+  });
   if (promptGuard.waiting) {
     logger.info('send-refused-prompt-waiting', {
       worktreeId,
       cliToolId,
       reason: promptGuard.reason,
+      blockedBy: promptGuard.blockedBy,
     });
-    return { ok: false, stage: 'prompt_waiting', error: promptWaitingMessage(worktreeId) };
+    return {
+      ok: false,
+      stage: 'prompt_waiting',
+      error: promptWaitingMessage(worktreeId, promptGuard.blockedBy),
+    };
   }
 
   // Generate the user-message timestamp BEFORE saving the pending response so
