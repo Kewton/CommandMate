@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **skills(orchestrate-monitor): `hooks-git.sh` が現行の worktree id を 1 件も解決できず、`commits` / `uncommitted` が恒久的に 0 になる問題を修正** (#1728)
+  - `mh_worktree_path()` は worktree を**ブランチ名**でしか突合していなかったが、CommandMate が id を採番する規則は #1621 以降**ディレクトリ名**（`deriveWorktreeId()` ＝ `sanitize(basename(path))`、初回登録時に確定）である。`commandmate-issue-1728` / `fix/1728-…` のようにディレクトリを Issue 番号で採番するリポジトリでは**1 件も一致せず、メイン worktree すら解決できなかった**。`slug(basename(<path>))` を第 1 候補として追加し、ブランチ由来の旧 2 規則は残した（旧 id もそのまま解決できる）
+  - **最も重い影響は STARTED ガードの不活性化**。`verify-completion.sh` は `commits=0 && uncommitted=0` を「タスクが composer から出ていない」の署名として読むため、恒久 0 のもとでは「未起動 idle を COMPLETE と誤報しない」ガードが**誰も測っていない数字**で裁定していた。#1614 が塞いだのは git コマンドが失敗する経路で、これは**git は成功して突合が外れる**別経路である
+  - 突合はディレクトリ優先（稼働中サーバが配る id が 1 なので、両規則が別 checkout に当たったときは 1 が勝つ）。`branch` レコードを持たない detached HEAD も解決できるようになった。ディレクトリ名が衝突する 2 checkout は区別できないので、最初の 1 件を数えたうえで `WARN` を出す
+  - **診断行に `ERROR` / `WARN` のレベル語を付けた**。従来の `monitor hooks: …` は `WARN` も `ERROR` も含まないため、運用でよく使う `2>&1 | grep -Ei "…|ERROR|FAIL"` で**1 行残らず消えていた**。この欠陥が 25 分間気付かれなかった直接の理由がこれである。`ERROR` = 両カウンタとも測れていない／`WARN` = 片方だけ劣化
+  - 回帰テストは **ディレクトリ名 ≠ ブランチ名の repo** を fixture にする（`hooks-git-resolution.test.ts`）。既存テストの fixture は `myrepo-x` / `feature/x` / id `myrepo-feature-x` ＝ 旧規則で組まれており、この穴を構造的に検知できなかった
+
+- **skills(orchestrate-monitor): `monitor.sh` が黙って死に、ワーカーが無監視のまま走り続ける問題に可観測性を追加** (#1728)
+  - 起動行 1 行だけを出した監視が約 25 分後に **exit 144** で沈黙終了し、その間ワーカー 2 本は正常稼働のまま無監視だった（2026-08-06）。健全な沈黙と死んだ沈黙が区別できないのが本体である
+  - HUP / INT / QUIT / PIPE / TERM を trap して `monitor: ERROR caught SIG<name>` を stderr へ出し `128+n` で終了する。SIGURG（macOS の signal 16 ＝ 144 - 128）は**致死化せず** `WARN` を出して監視を続ける（既定動作が無視のため）
+  - 正常終端（全 COMPLETE / `--max-polls` 到達）**以外**の全終了で `monitor: ERROR exiting on poll round <r> with <d>/<n> worker(s) complete` を出す。EXIT trap にぶら下げてあるので個別に trap していない死に方でも出る。引数検証で落ちる経路は trap 設置前なので従来どおり
+  - `--heartbeat N`（既定 10、`0` で無効）で `monitor: alive (poll=N, complete=d/total)` を定期出力する。既定の運用ストリーム（介入・終局判定）は byte 単位で従来どおり
+  - **再現条件は未特定**。144 はパイプライン（`monitor.sh … | grep …`）の `$?` ＝ grep の終了コードでもありうるため、`monitor.sh` 自身が signal 16 で死んだとは断定していない。次に起きたときに原因がログへ残るようにした修正である
+
 - **detection: claude のタスクパネルが直上のプロンプトを飲み、worker が無言で timeout する問題を修正** (#1708)
   - タスクパネルはペイン最下部に固定描画されるため、実運用の 200x1000 ペインではダイアログが上部・パネルが約 880 行下に来る。空行が潰されるとパネルが Pass 2 の走査窓に入り、ヘッダ `N tasks (X done, …)` と折り畳み行 `… +N completed` が**それぞれ独立に**選択肢として拾われて本物の選択肢を弾いていた（実キャプチャの 1 行削除実験で確認。片方だけ直しても未検出のまま）。パネルを**ブロックごと** skip する
   - 検出漏れは `isPromptWaiting: false` を意味し、それが唯一の「人間待ち」信号なので、auto-yes も `wait --on-prompt agent` の exit 10 も契約の `autoYes` ポリシーも同時に無効化されていた

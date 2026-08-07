@@ -315,6 +315,24 @@ MONITOR_HOOKS_BASE=origin/develop \
 介入先の tmux セッションは capture の `cliToolId` から導出されるので**指定は不要**（#1601）。
 既定インスタンス以外を見るときだけ `<worktree-id>@<instance-id>`（例 `w1@codex-2`）で指定する。
 
+**起動直後に `monitor hooks ERROR` が出ていないことを確認する（#1728）。** 出ていたら
+worktree-id が checkout に解決できておらず、`commits` / `uncommitted` は**測定値ではなく恒久 0** で、
+「未起動 idle を COMPLETE と誤報しない」STARTED ガードが実質的に無効になっている。
+その場合は checkout の親ディレクトリを渡して回避する:
+
+```bash
+MONITOR_WORKTREE_ROOT=.. MONITOR_HOOKS_BASE=origin/develop \
+.claude/skills/orchestrate-monitor/scripts/monitor.sh ... # 以下同じ
+```
+
+**ログを `grep` で絞るときは `ERROR|WARN|alive` をパターンに必ず含めること。** 上の
+`| tee` なら全部残るが、実運用でよくやる
+`| grep -Ei "STALL|IDLE|BLOCKED|PROMPT|COMPLETE|NOT_STARTED|ERROR|FAIL"` 形だと、
+フック側の診断（上記）と監視自身の生存報告（`monitor: alive (poll=N, …)`、既定 10 ポーリングごと）が
+落ちる。2026-08-06 に監視が **exit 144 で沈黙終了**し、ワーカー 2 本が約 25 分間無監視のまま
+走り続けたのはこれが理由である。`alive` が途切れた所が最後に生きていたポーリングで、
+異常終了時は `caught SIG…` / `exiting on poll round …` が stderr に出る。
+
 **monitor の COMPLETE 判定をマージ可否の裁定に使わないこと。** 裁定は 3-3 の
 `wait --verify` の exit code である。
 
