@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **hooks: dev モードで構造化イベントが一切機能しなかった問題を修正（`agent-event-state` を `globalThis` 経由に）** (#1736)
+  - `src/lib/session/agent-event-state.ts` が 6 つの Map を素のモジュールスコープで持っていた。`next dev`（`commandmate start --dev` / `tsx server.ts`）は route handler を**個別にバンドルする**ため、`POST /api/hooks/agent-event` が書いた Map と `GET /api/worktrees/:id/current-output` が読む Map が別物になり、`structuredEvents` が**常に全 null**に縮退していた。production build ではモジュールが共有されるので影響なし＝ CI もリリースも一度も見ていない
+  - Epic #1720 の構造化状態**すべて**（#1549 の `lastStopEventAt` / #1722 の `lastAgentEvent` / #1723 の `sessionStatus` 2 層化 / #1724 の抑止記録 / #1725 の prompt_waiting / #1726 の AskUserQuestion）が同時に無効化されていた。**しかも無言** — エラーも警告も出ず payload は整形式のまま「イベントは来ていない」と言い続けるので、「hooks を設定したのに何も起きない」という #1720 が塞ごうとしている当の失敗様式になる
+  - **実測で確認**（2026-08-07、隔離ポート 3779 の `tsx server.ts` / 隔離 DB）: POST が `agent-event-received` をログに出した直後の GET が `structuredEvents.lastEventType: null` を返した。修正後は同じ手順で `"user_prompt_submit"` を返す
+  - `src/lib/polling/auto-yes-suppression-state.ts`（#1684）も**同型の分断**を受けていたので同時に修正した。書き手は `/api/hooks/permission-request`（`permission-decision-service` 経由）と Auto-Yes ポーラ、読み手は `buildCurrentOutput` で、常に別 route。ポリシー抑止で止まった worker の理由を CLI に出す機能そのものが dev で無効だった
+  - 修正は `auto-yes-state.ts`（#153）が確立していた `globalThis.__x ?? (globalThis.__x = new Map())` パターンをそのまま踏襲。**このパターンは既に repo 内 17 モジュールで使われていたのに、どこにも明文化されていなかった**ため、`docs/module-reference.md` 冒頭に規約として追加した（適用対象／非適用対象＝派生キャッシュ・ポーラループ内で完結する状態、の線引きつき）
+  - 回帰テスト `tests/unit/session/agent-event-state-module-identity.test.ts`: `vi.resetModules()` でモジュールを 2 回ロードし、片方が書いた状態をもう片方から読めることを 7 ケースで固定。**変異注入で非空振りを証明済み** — 7 つの Map を 1 つずつ素のモジュールスコープに戻すと、いずれも対応するケースが赤になることを実測（全戻しでは 7/7 赤）
+
 - **detection: claude のタスクパネルが直上のプロンプトを飲み、worker が無言で timeout する問題を修正** (#1708)
   - タスクパネルはペイン最下部に固定描画されるため、実運用の 200x1000 ペインではダイアログが上部・パネルが約 880 行下に来る。空行が潰されるとパネルが Pass 2 の走査窓に入り、ヘッダ `N tasks (X done, …)` と折り畳み行 `… +N completed` が**それぞれ独立に**選択肢として拾われて本物の選択肢を弾いていた（実キャプチャの 1 行削除実験で確認。片方だけ直しても未検出のまま）。パネルを**ブロックごと** skip する
   - 検出漏れは `isPromptWaiting: false` を意味し、それが唯一の「人間待ち」信号なので、auto-yes も `wait --on-prompt agent` の exit 10 も契約の `autoYes` ポリシーも同時に無効化されていた
@@ -21,6 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - フレームが読めない間は完了判定を抑止し、dwell は 2 状態をまたいで継続する。本物の完了 `ready`/`input_prompt` はフラグを立てないので従来どおり初回ポーリングで exit 0
 
 ### Added
+- **hooks: 注入 settings に `permissions.deny` を追加し、パターン一括 kill を機構で塞ぐ** (#1739)
+  - 2026-08-06、委任ワーカーが隔離サーバ 1 本を再起動するつもりで `pkill -f "node dist/server/server.js"` を実行し、**ユーザーの本番サーバ（port 3000）と global インスタンス（port 60301）を巻き込んで停止**させた。#1722 が全 Claude セッションへ注入している `--settings` に `"deny": ["Bash(pkill:*)","Bash(killall:*)","Bash(kill -9:*)"]` を同居させる
+  - **この層でなければ止まらない。** `permissions.deny` は**ダイアログが存在する前に**拒否するので `PermissionRequest` が発火せず、**Auto-Yes に裁定の機会が来ない**。事故当時は実際にダイアログが出て Auto-Yes がそれを承認していた。契約文（対象ベースの禁止＝助言）と契約 `autoYes.denyPatterns`（人間へのエスカレーション）はどちらもすり抜けられている
+  - **禁じるのは対象ではなく手段** — 3 ルールはいずれも「プロセスをパターンで選ぶ書き方」を指す。**PID 指定は従来どおり通る**（`kill "$(cat uat.pid)"` / `kill 4242` / `kill -TERM 4242`）。自分が起動したプロセスの止め方は docs/user-guide/agent-event-hooks.md §0.7 に明記した
+  - **実測**（claude 2.1.223、docs/design/agent-hooks-permission-deny-verification.md）: 無条件 allow を返す `PermissionRequest` hook（＝現実の Auto-Yes より強い）を置いた状態で、deny 対象は **hook 0 回**で拒否され、承認が要る別コマンドでは同じ hook が**確かに 1 回発火して allow した**（空振り防止の対照実験）。`--settings` の権限は独立宛先 `flagSettings` に **Adding** され置換ではない。**deny は優先度が上の `settings.local.json` の `allow` にも勝つ**ためユーザー設定の `permissions.allow` で開け直せない。前方一致は**フラグまで含めて**照合されるので `Bash(kill -9:*)` は `kill <pid>` に当たらない。`cd x && …` / `… | cat` / `echo x; …` と合成しても拒否される
+  - 危険なペイロードは一度も実行していない。実ルールは載せたまま、同じルール形の無害な stand-in（`sw_vers` = 素の前方一致、`uname -a` = フラグつき前方一致）で照合器を測っている
+  - ロールバックは既存の `CM_AGENT_HOOKS_INJECT=0`（注入全体）。deny だけを外すスイッチは設けない — 構造化イベントごと失う方が「機構は入っているが黙って外されている」より事故を見つけやすい
+
 - **verify: 実行契約に環境不変条件ゲート `env-clean` を追加し、リポジトリ外の副作用を裁定する** (#1740)
   - `scope` は `scope.allow` / `scope.deny` で**リポジトリ内のファイル変更**を裁定するが、プロセス・ポート・tmux セッション・`$HOME` を裁定する仕組みが 1 つも無かった。2026-08-06 の 4 件（本番サーバの停止 #1739 / `~/.commandmate-uat-1726` の放置 / 隔離サーバ 3779 の残存 / `~/.commandmate/hooks` の汚染 #1722）は**すべて `scope` を PASS する**。task 作成時にスナップショットを取り、検証時に差分を取る
   - スナップショット 4 項目: CommandMate 関連の TCP listener（`lsof` × `ps` で絞り、key は `tcp/<port>`）／`mcbd-*` tmux セッション／`$HOME` 直下／`~/.commandmate` 直下

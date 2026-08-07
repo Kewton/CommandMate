@@ -49,23 +49,75 @@ import {
   type StructuredPromptSource,
 } from '@/lib/session/structured-prompt';
 
+// =============================================================================
+// In-memory State (globalThis, per the convention Issue #153 established)
+// =============================================================================
+
+/**
+ * Every map below is reached through `globalThis`, not through the module
+ * scope (Issue #1736).
+ *
+ * A bare `const … = new Map()` is one map *per module instance*, and this
+ * server has more than one. Under `next dev` (`commandmate start --dev` /
+ * `tsx server.ts`) each route handler is bundled separately, so
+ * `/api/hooks/agent-event` and `/api/worktrees/:id/current-output` each got
+ * their own copy of this module: the hook wrote a `Stop` into one map and the
+ * reader looked for it in another, and every field this module feeds came back
+ * null. Verified end-to-end on 2026-08-07 — a `POST` logged
+ * `agent-event-received` while the `GET` that followed reported
+ * `structuredEvents.lastEventType: null`. A production build shares the module
+ * and was never affected, which is exactly what made it hard to see.
+ *
+ * That failure is silent, which is the reason it is called out here: nothing
+ * errors, nothing warns, the payload is well-formed and simply always says
+ * "no events" — the "I configured hooks and nothing happened" failure Epic
+ * #1720 exists to remove.
+ *
+ * Hot reload is the second reason, and the one Issue #153 wrote the convention
+ * for: an edit to any file in this module's import graph re-evaluates it, and a
+ * module-scoped map would take the live sessions' state with it.
+ *
+ * `docs/module-reference.md` states the rule — "プロセス全体で共有する in-memory
+ * 状態は globalThis 経由で持つ" — and lists the modules that follow it.
+ */
+declare global {
+  // eslint-disable-next-line no-var
+  var __agentEventLastStopAt: Map<string, number> | undefined;
+  // eslint-disable-next-line no-var
+  var __agentEventLast: Map<string, AgentEventRecord> | undefined;
+  // eslint-disable-next-line no-var
+  var __agentEventGenerationStartedAt: Map<string, number> | undefined;
+  // eslint-disable-next-line no-var
+  var __agentEventPromptWaiting: Map<string, StructuredPromptWaitingState> | undefined;
+  // eslint-disable-next-line no-var
+  var __agentEventAskUserQuestion: Map<string, AskUserQuestionEpisode> | undefined;
+  // eslint-disable-next-line no-var
+  var __agentEventRecentKeys: Map<string, number> | undefined;
+}
+
 /** compositeKey -> epoch ms of the most recent stop event. */
-const lastStopEventAt = new Map<string, number>();
+const lastStopEventAt = globalThis.__agentEventLastStopAt ??
+  (globalThis.__agentEventLastStopAt = new Map<string, number>());
 
 /** compositeKey -> the most recent event of any kind. */
-const lastAgentEvent = new Map<string, AgentEventRecord>();
+const lastAgentEvent = globalThis.__agentEventLast ??
+  (globalThis.__agentEventLast = new Map<string, AgentEventRecord>());
 
 /** compositeKey -> epoch ms the current generation began. See {@link beginAgentEventGeneration}. */
-const generationStartedAt = new Map<string, number>();
+const generationStartedAt = globalThis.__agentEventGenerationStartedAt ??
+  (globalThis.__agentEventGenerationStartedAt = new Map<string, number>());
 
 /** compositeKey -> the open dialog the structured layer knows about (#1725). */
-const promptWaiting = new Map<string, StructuredPromptWaitingState>();
+const promptWaiting = globalThis.__agentEventPromptWaiting ??
+  (globalThis.__agentEventPromptWaiting = new Map<string, StructuredPromptWaitingState>());
 
 /** compositeKey -> the `AskUserQuestion` call currently in flight (#1726). */
-const askUserQuestion = new Map<string, AskUserQuestionEpisode>();
+const askUserQuestion = globalThis.__agentEventAskUserQuestion ??
+  (globalThis.__agentEventAskUserQuestion = new Map<string, AskUserQuestionEpisode>());
 
 /** dedup key -> epoch ms it was first seen. See {@link isDuplicateAgentEvent}. */
-const recentEventKeys = new Map<string, number>();
+const recentEventKeys = globalThis.__agentEventRecentKeys ??
+  (globalThis.__agentEventRecentKeys = new Map<string, number>());
 
 /**
  * How long two identical events count as one delivery.
