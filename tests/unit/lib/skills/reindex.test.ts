@@ -370,11 +370,12 @@ describe('directories that are not evidence', () => {
   });
 });
 
-describe('restoring one worktree from a read (#1709)', () => {
+describe('restoring one worktree from a read (#1709, #1753)', () => {
   /**
    * The per-worktree entry a list request can afford to take. It differs from
-   * the full rebuild in exactly two ways — it fills gaps only, and it prunes
-   * nothing — and both differences are what make it safe to run on a read.
+   * the full rebuild in exactly two ways — it prunes nothing, and it rewrites
+   * only the rows that disagree with their receipt — and both differences are
+   * what make it safe to run on a read.
    */
   it('restores a receipt the index never had', () => {
     const wt = path.join(repoRoot, 'wt-1');
@@ -405,11 +406,19 @@ describe('restoring one worktree from a read (#1709)', () => {
     expect(listSkillInstallations(db, 'wt-2')).toHaveLength(0);
   });
 
-  it('leaves a row the index already has exactly as it was', () => {
+  /**
+   * #1709 left this row alone on the reasoning that converging it was the
+   * explicit rebuild's job, not a read's. #1753 is what that cost: the list
+   * route served `1.2.3` while the update route, reading the same receipt,
+   * refused `9.9.9` as "not strictly newer" — one server, two answers, and no
+   * rebuild a user can reach from the screen. A read converges now. It still
+   * does not prune, because dropping a row hides drift while correcting a
+   * version hides nothing.
+   */
+  it('converges a row the index has onto the receipt that disagrees with it', () => {
     const wt = path.join(repoRoot, 'wt-1');
     insertWorktree('wt-1', wt);
     install('wt-1', wt, 'demo-skill', '1.2.3');
-    // Disk disagrees; converging it is the explicit rebuild's job, not a read's.
     writePayload(wt, makeReceipt('demo-skill', '9.9.9', [PRIMARY, SECONDARY]), [
       PRIMARY,
       SECONDARY,
@@ -417,7 +426,40 @@ describe('restoring one worktree from a read (#1709)', () => {
 
     const result = restoreSkillInstallationIndex(db, { id: 'wt-1', path: wt }, { now: T0 + 90_000 });
 
-    expect(result.indexed).toBe(0);
+    expect(result).toMatchObject({ indexed: 1, converged: 1 });
+    expect(getSkillInstallation(db, 'wt-1', 'demo-skill')).toMatchObject({
+      version: '9.9.9',
+      // Bytes `op-original` did not write are not its claim any more.
+      operationId: SKILL_REINDEX_OPERATION_ID,
+      installedAt: T0,
+      updatedAt: T0 + 90_000,
+    });
+  });
+
+  it('converges drift the version alone would not reveal', () => {
+    const wt = path.join(repoRoot, 'wt-1');
+    insertWorktree('wt-1', wt);
+    install('wt-1', wt, 'demo-skill', '1.2.3');
+    // Same version, republished from a different commit: the row is still a
+    // claim about provenance the receipt no longer supports.
+    const republished = makeReceipt('demo-skill', '1.2.3', [PRIMARY, SECONDARY]);
+    republished.source.commit = 'd'.repeat(40);
+    writePayload(wt, republished, [PRIMARY, SECONDARY]);
+
+    const result = restoreSkillInstallationIndex(db, { id: 'wt-1', path: wt }, { now: T0 + 90_000 });
+
+    expect(result).toMatchObject({ indexed: 1, converged: 1 });
+    expect(getSkillInstallation(db, 'wt-1', 'demo-skill')?.sourceCommit).toBe('d'.repeat(40));
+  });
+
+  it('leaves a row alone when the receipt hashes to what it already recorded', () => {
+    const wt = path.join(repoRoot, 'wt-1');
+    insertWorktree('wt-1', wt);
+    install('wt-1', wt, 'demo-skill', '1.2.3');
+
+    const result = restoreSkillInstallationIndex(db, { id: 'wt-1', path: wt }, { now: T0 + 90_000 });
+
+    expect(result).toMatchObject({ indexed: 0, converged: 0 });
     expect(getSkillInstallation(db, 'wt-1', 'demo-skill')).toMatchObject({
       version: '1.2.3',
       operationId: 'op-original',

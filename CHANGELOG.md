@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **skills: 一覧 API が古い版を表示し、そこからの更新が必ず `SKILL_UPDATE_VERSION_NOT_ELIGIBLE` で失敗する問題を修正** (#1753)
+  - `GET /api/worktrees/[id]/skills` は応答前に `restoreSkillInstallationIndex` で索引を修復するが、これは `gapsOnly: true` で呼ばれており、**行が既にある skill を receipt を読む前に除外**していた。したがって「行が無い」（#1709 が対象にしたもの）は直るが、**「行はあるが version が古い」は構造的に永久に直らない**。一方 `update-plan` は receipt を正とするため、**同一サーバ内で一覧 API は索引を、更新 API は receipt を真実としていた**。実機では 3 件（`cmate-task-contract` 0.1.0/0.2.2、`cmate-verify-advisor` 0.1.1/0.2.0、`cmate-verify` 0.3.1/0.4.2）が不一致で、その 3 件だけが更新に失敗していた。利用者にはエラー文言が「もう最新です」としか読めないため表示が古いことに気づけず、UI に rebuild の導線も無い
+  - 読み取りが行を**挿入**はするのに**更新**はしない非対称に独立した根拠が無いため、read-through を「欠落行の復元」から「receipt と食い違う行の収束」まで広げた。**`prune` は #1709 の判断どおり維持する**（行を消すことはドリフトを隠すが、古い版を新しい版に直すことは何も隠さない）
+  - **コスト設計**: 索引行が既に持つ `receipt_sha256` と、disk の receipt bytes の sha256 を比較する。一致する行は **parse も DB 書き込みもしない**（呼び出し回数で検証済み）。receipt 全体の digest なので version だけでなく source commit・artifact digest・root 集合（#1460）の drift も同じ 1 回の検査で捕まる。mtime/size を索引に持つ案は migration が必要なうえ、実機の 3 件は receipt mtime が同一秒だったため証拠として弱い。TTL 間引きは「一覧を開いて更新を押す」という失敗する操作が窓の内側で完結するため却下した
+  - **実測**（macOS / `:memory:` DB / 実 receipt 相当 3KB / 両 root、200 回平均）: 修正前 N=11 `0.103ms` → 修正後 `0.367ms`、N=100（scanner の worktree 毎上限）`0.425ms` → `2.452ms`。全件 parse+write に倒した場合は N=11 `0.737ms` / N=100 `6.087ms` なので digest gate はその約 1/2.5。導入数 1 件あたり約 32µs で、既に dashboard の `status-scanner` が導入済み全**ファイル**を hash していることを踏まえれば読み取り経路の追加として妥当
+  - `update-plan` の判定ロジックは変更なし（receipt を正とするのは正しい）。エラーメッセージのみ、要求された版と receipt が記録している版の**両方を示す**ようにした
+  - **#1709 が現行挙動を pin していた 2 件のテストは削除せず期待値を反転して残した**（`reindex.test.ts` の `leaves a row the index already has exactly as it was` → `converges a row the index has onto the receipt that disagrees with it`、`worktree-skills-readthrough.test.ts` の `keeps serving the indexed version when the receipt on disk disagrees` → `serves the version on disk when the receipt disagrees with the index`）。何を決め、なぜ覆したかを本文に残してある。`prune` を固定するテスト（`never deletes an index row whose payload is absent` 等）は緑のまま
+  - 回帰テスト: `tests/unit/lib/skills/reindex-drift-cost.test.ts`（新規、一致行の parse/upsert 呼び出し回数が 0 であること・drift/欠落は 1 回だけであること）、`tests/integration/skills-update.test.ts` に実 route での再現（install → update → **行だけ巻き戻す**ことで実機の「索引=旧版 / disk=新版」を再現 → 一覧が receipt の版を返し `hasSkillUpdate` が false になる）
+  - **変異注入で非空振りを証明済み**（2026-08-07）: digest 比較を `indexedDigest !== null` に戻す（＝#1709 の「行があれば正しい」仮定）と unit 6 件＋integration 1 件が赤。エラーメッセージを旧文言に戻すと integration 1 件が赤
+  - `npm run test:unit` exit 0（817 files / 14948 tests）、`npm run test:integration` exit 0（79 files / 1135 passed・2 skipped）を `cmd > log; echo $?` で実測
+
 ## [0.22.0] - 2026-08-07
 
 > **Highlight**: 検出層を TUI 画面スクレイピングから **CLI 自身が申告する構造化イベント**へ移す基盤を入れた（Epic #1720）。発端は、claude のタスクパネル見出し `7 tasks (0 done, 1 in progress, 6 open)` が直上の選択肢プロンプトに「option 7」として紛れ込み、worker が無言で timeout する不具合である（#1708）。正規表現をもう 1 本足す対症療法ではなく、`PermissionRequest` / `PreToolUse` / `Stop` hook で**プロンプトの有無を CLI 自身に申告させる**経路を新設し、スクレイパと OR 合成した（どちらか一方が「プロンプトあり」と言えばプロンプトあり。互いの false は相手の true を打ち消さない）。あわせて、委任ワーカーが `pkill -f` で本番サーバを巻き込み停止させた事故と、環境変数の継承で本番 DB に書き込んだ事故を受け、`permissions.deny` の注入（#1739）と `env-clean` ゲート（#1740）で機構的に塞いだ。
