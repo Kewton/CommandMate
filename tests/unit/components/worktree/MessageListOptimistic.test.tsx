@@ -5,6 +5,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import type { ChatMessage } from '@/types/models';
+import { answerablePromptOf } from '../../../helpers/prompt-type-guards';
 
 describe('MessageList Optimistic Update', () => {
   describe('handlePromptResponse with Optimistic Update', () => {
@@ -35,7 +36,7 @@ describe('MessageList Optimistic Update', () => {
       const optimisticMessage: ChatMessage = {
         ...targetMessage!,
         promptData: {
-          ...targetMessage!.promptData!,
+          ...answerablePromptOf(targetMessage!.promptData)!,
           status: 'answered',
           answer: 'yes',
           answeredAt: new Date().toISOString(),
@@ -48,8 +49,8 @@ describe('MessageList Optimistic Update', () => {
       );
 
       expect(updatedMessages[0].promptData?.status).toBe('answered');
-      expect(updatedMessages[0].promptData?.answer).toBe('yes');
-      expect(updatedMessages[0].promptData?.answeredAt).toBeDefined();
+      expect(answerablePromptOf(updatedMessages[0].promptData)?.answer).toBe('yes');
+      expect(answerablePromptOf(updatedMessages[0].promptData)?.answeredAt).toBeDefined();
     });
 
     it('should preserve other message properties during optimistic update', () => {
@@ -76,7 +77,7 @@ describe('MessageList Optimistic Update', () => {
       const optimisticMessage: ChatMessage = {
         ...initialMessage,
         promptData: {
-          ...initialMessage.promptData!,
+          ...answerablePromptOf(initialMessage.promptData)!,
           status: 'answered',
           answer: 'no',
           answeredAt: new Date().toISOString(),
@@ -94,7 +95,7 @@ describe('MessageList Optimistic Update', () => {
       expect(optimisticMessage.promptData?.type).toBe('yes_no');
       expect(optimisticMessage.promptData?.question).toBe('Confirm?');
       expect(optimisticMessage.promptData?.status).toBe('answered');
-      expect(optimisticMessage.promptData?.answer).toBe('no');
+      expect(answerablePromptOf(optimisticMessage.promptData)?.answer).toBe('no');
     });
 
     it('should rollback to original state on API failure', () => {
@@ -120,7 +121,7 @@ describe('MessageList Optimistic Update', () => {
       const optimisticMessage: ChatMessage = {
         ...originalMessages[0],
         promptData: {
-          ...originalMessages[0].promptData!,
+          ...answerablePromptOf(originalMessages[0].promptData)!,
           status: 'answered',
           answer: 'yes',
         },
@@ -138,7 +139,7 @@ describe('MessageList Optimistic Update', () => {
 
       // Verify rollback
       expect(currentMessages[0].promptData?.status).toBe('pending');
-      expect(currentMessages[0].promptData?.answer).toBeUndefined();
+      expect(answerablePromptOf(currentMessages[0].promptData)?.answer).toBeUndefined();
     });
   });
 
@@ -222,7 +223,7 @@ describe('MessageBubble memoization', () => {
           prev.id === next.id &&
           prev.content === next.content &&
           prev.promptData?.status === next.promptData?.status &&
-          prev.promptData?.answer === next.promptData?.answer
+          answerablePromptOf(prev.promptData)?.answer === answerablePromptOf(next.promptData)?.answer
         );
       };
 
@@ -269,7 +270,7 @@ describe('MessageBubble memoization', () => {
           prev.id === next.id &&
           prev.content === next.content &&
           prev.promptData?.status === next.promptData?.status &&
-          prev.promptData?.answer === next.promptData?.answer
+          answerablePromptOf(prev.promptData)?.answer === answerablePromptOf(next.promptData)?.answer
         );
       };
 
@@ -317,7 +318,7 @@ describe('MessageBubble memoization', () => {
           prev.id === next.id &&
           prev.content === next.content &&
           prev.promptData?.status === next.promptData?.status &&
-          prev.promptData?.answer === next.promptData?.answer
+          answerablePromptOf(prev.promptData)?.answer === answerablePromptOf(next.promptData)?.answer
         );
       };
 
@@ -351,7 +352,7 @@ describe('MessageBubble memoization', () => {
           prev.id === next.id &&
           prev.content === next.content &&
           prev.promptData?.status === next.promptData?.status &&
-          prev.promptData?.answer === next.promptData?.answer
+          answerablePromptOf(prev.promptData)?.answer === answerablePromptOf(next.promptData)?.answer
         );
       };
 
@@ -385,7 +386,7 @@ describe('MessageBubble memoization', () => {
           prev.id === next.id &&
           prev.content === next.content &&
           prev.promptData?.status === prev.promptData?.status &&
-          prev.promptData?.answer === next.promptData?.answer
+          answerablePromptOf(prev.promptData)?.answer === answerablePromptOf(next.promptData)?.answer
         );
       };
 
@@ -419,7 +420,7 @@ describe('MessageBubble memoization', () => {
           prev.id === next.id &&
           prev.content === next.content &&
           prev.promptData?.status === next.promptData?.status &&
-          prev.promptData?.answer === next.promptData?.answer
+          answerablePromptOf(prev.promptData)?.answer === answerablePromptOf(next.promptData)?.answer
         );
       };
 
@@ -459,7 +460,7 @@ describe('MessageBubble memoization', () => {
           prev.id === next.id &&
           prev.content === next.content &&
           prev.promptData?.status === next.promptData?.status &&
-          prev.promptData?.answer === next.promptData?.answer
+          answerablePromptOf(prev.promptData)?.answer === answerablePromptOf(next.promptData)?.answer
         );
       };
 
@@ -495,7 +496,7 @@ describe('Optimistic Update - Multiple Choice prompts', () => {
     const optimisticMessage: ChatMessage = {
       ...initialMessage,
       promptData: {
-        ...initialMessage.promptData!,
+        ...answerablePromptOf(initialMessage.promptData)!,
         status: 'answered',
         answer: 'My custom response',
         answeredAt: new Date().toISOString(),
@@ -503,8 +504,8 @@ describe('Optimistic Update - Multiple Choice prompts', () => {
     };
 
     expect(optimisticMessage.promptData?.status).toBe('answered');
-    expect(optimisticMessage.promptData?.answer).toBe('My custom response');
-    expect(optimisticMessage.promptData?.answeredAt).toBeDefined();
+    expect(answerablePromptOf(optimisticMessage.promptData)?.answer).toBe('My custom response');
+    expect(answerablePromptOf(optimisticMessage.promptData)?.answeredAt).toBeDefined();
   });
 
   it('should handle multiple_choice prompt with default option selection', () => {
@@ -531,7 +532,7 @@ describe('Optimistic Update - Multiple Choice prompts', () => {
     const optimisticMessage: ChatMessage = {
       ...initialMessage,
       promptData: {
-        ...initialMessage.promptData!,
+        ...answerablePromptOf(initialMessage.promptData)!,
         status: 'answered',
         answer: '1',
         answeredAt: new Date().toISOString(),
@@ -539,7 +540,7 @@ describe('Optimistic Update - Multiple Choice prompts', () => {
     };
 
     expect(optimisticMessage.promptData?.status).toBe('answered');
-    expect(optimisticMessage.promptData?.answer).toBe('1');
+    expect(answerablePromptOf(optimisticMessage.promptData)?.answer).toBe('1');
   });
 });
 
@@ -720,7 +721,7 @@ describe('Optimistic Update - Error scenarios', () => {
     const optimisticMessage: ChatMessage = {
       ...originalMessages[0],
       promptData: {
-        ...originalMessages[0].promptData!,
+        ...answerablePromptOf(originalMessages[0].promptData)!,
         status: 'answered',
         answer: 'yes',
       },

@@ -5,7 +5,7 @@
  * Based on Issue #13 UX Improvement design specification (Section 16)
  */
 
-import type { ChatMessage, PromptData } from './models';
+import type { ChatMessage, LivePromptData } from './models';
 import type { ActivityId } from '@/config/activity-bar-config';
 
 /**
@@ -23,8 +23,14 @@ export type UIPhase = 'idle' | 'waiting' | 'receiving' | 'prompt' | 'complete';
  * Manages Claude's prompt (yes/no, multiple choice) state
  */
 export interface PromptState {
-  /** Prompt data (question, options, etc.) */
-  data: PromptData | null;
+  /**
+   * Prompt data (question, options, etc.).
+   *
+   * Issue #1738: {@link LivePromptData} — the reducer is fed straight from
+   * `/current-output`, which has published the degraded structured form since
+   * #1725. Narrow with `isAnswerablePromptData` before reading `options`.
+   */
+  data: LivePromptData | null;
   /** Associated message ID */
   messageId: string | null;
   /** Whether the prompt panel is visible */

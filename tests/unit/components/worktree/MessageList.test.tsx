@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MessageList } from '@/components/worktree/MessageList';
 import type { ChatMessage } from '@/types/models';
+import { answerablePromptOf } from '../../../helpers/prompt-type-guards';
 
 const pushMock = vi.fn();
 vi.mock('next/navigation', () => ({
@@ -158,7 +159,7 @@ describe('MessageList (Issue #1117 visual unification)', () => {
       });
       const optimistic = onOptimisticUpdate.mock.calls[0][0] as ChatMessage;
       expect(optimistic.promptData?.status).toBe('answered');
-      expect(optimistic.promptData?.answer).toBe('yes');
+      expect(answerablePromptOf(optimistic.promptData)?.answer).toBe('yes');
       expect(global.fetch).toHaveBeenCalledWith(
         '/api/worktrees/wt-1/respond',
         expect.objectContaining({ method: 'POST' })

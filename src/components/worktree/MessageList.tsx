@@ -14,6 +14,7 @@ import { useRouter } from 'next/navigation';
 import { Check, CircleCheck, Clock, Copy, Loader2, MessageCircle, X } from 'lucide-react';
 import { Card } from '@/components/ui';
 import type { ChatMessage } from '@/types/models';
+import { isAnswerablePromptData } from '@/types/models';
 import { useTranslations, useLocale } from 'next-intl';
 import { getDateFnsLocale } from '@/lib/date-locale';
 import { formatMessageTimestamp } from '@/lib/date-utils';
@@ -23,6 +24,18 @@ import rehypeHighlight from 'rehype-highlight';
 import { PromptMessage } from './PromptMessage';
 import AnsiToHtml from 'ansi-to-html';
 import { getCliToolDisplayNameSafe } from '@/lib/cli-tools/types';
+
+/**
+ * The answer stamped on a prompt row, or undefined when there is none.
+ *
+ * Issue #1738: `answer` lives on {@link PromptData} alone — the degraded rows
+ * that share `chat_messages.prompt_data` (#1708 / #1725) have no such field —
+ * so the memo comparator asks for it through the shared guard rather than
+ * reaching for a property the union does not have.
+ */
+function promptAnswerOf(message: ChatMessage): string | undefined {
+  return isAnswerablePromptData(message.promptData) ? message.promptData.answer : undefined;
+}
 
 // Module-level constants to prevent ReactMarkdown DOM rebuilds on re-render
 const REMARK_PLUGINS = [remarkGfm];
@@ -376,7 +389,9 @@ const MessageBubble = React.memo(function MessageBubble({
                 </>
               ) : null}
             </div>
-            {message.promptData.status === 'answered' && message.promptData.answer && (
+            {isAnswerablePromptData(message.promptData)
+              && message.promptData.status === 'answered'
+              && message.promptData.answer && (
               <div className="mt-3 flex items-center gap-2 text-sm text-success-foreground bg-success-subtle border border-success-border px-3 py-2 rounded-lg">
                 <CircleCheck size={16} aria-hidden="true" />
                 {tPrompt('answered')}: {message.promptData.answer}
@@ -394,7 +409,7 @@ const MessageBubble = React.memo(function MessageBubble({
     prevProps.message.id === nextProps.message.id &&
     prevProps.message.content === nextProps.message.content &&
     prevProps.message.promptData?.status === nextProps.message.promptData?.status &&
-    prevProps.message.promptData?.answer === nextProps.message.promptData?.answer
+    promptAnswerOf(prevProps.message) === promptAnswerOf(nextProps.message)
   );
 });
 
@@ -465,11 +480,22 @@ export function MessageList({
       return;
     }
 
+    // Issue #1738: the row may be one of the degraded records (#1708 / #1725),
+    // which share this column and carry `type: 'unclassified'`. Nothing may
+    // answer one, and stamping "answered" on an audit row would be a claim the
+    // server also refuses (/respond, same Issue). Unreachable from the UI today
+    // — the buttons that call this render only for yes_no / multiple_choice —
+    // but the type now says the value can arrive, so the refusal is stated.
+    const answerablePromptData = targetMessage.promptData;
+    if (!isAnswerablePromptData(answerablePromptData)) {
+      return;
+    }
+
     // 2. Optimistic Update: Immediately update UI
     const optimisticMessage: ChatMessage = {
       ...targetMessage,
       promptData: {
-        ...targetMessage.promptData,
+        ...answerablePromptData,
         status: 'answered' as const,
         answer,
         answeredAt: new Date().toISOString(),

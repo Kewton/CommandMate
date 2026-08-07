@@ -17,6 +17,8 @@ import {
 } from '@/lib/db';
 import { parseTaskContract } from '@/lib/tasks/contract-parser';
 import type { Worktree } from '@/types/models';
+import { answerablePromptOf } from '../helpers/prompt-type-guards';
+import { buildStructuredPromptHistoryRecord } from '@/lib/session/structured-prompt';
 
 // Declare mock function type
 declare module '@/lib/db/db-instance' {
@@ -142,7 +144,7 @@ describe('POST /api/worktrees/:id/respond', () => {
       const updatedMessage = getMessageById(db, message.id);
       expect(updatedMessage).toBeDefined();
       expect(updatedMessage?.promptData?.status).toBe('answered');
-      expect(updatedMessage?.promptData?.answer).toBe('yes');
+      expect(answerablePromptOf(updatedMessage?.promptData)?.answer).toBe('yes');
     });
 
     it('should respond to a yes/no prompt with "no"', async () => {
@@ -408,6 +410,88 @@ describe('POST /api/worktrees/:id/respond', () => {
       expect(response.status).toBe(400);
       const data = await response.json();
       expect(data.error).toBe('Prompt already answered');
+    });
+
+    it('should refuse a stored unclassified frame record (Issue #1738)', async () => {
+      // #1708 writes this row into `chat_messages.prompt_data` — the same column
+      // parsed prompts live in — so that a stall nobody could read still leaves a
+      // trace for `capture --prompts`. It is an audit record, not a prompt: no
+      // options were ever parsed, and answering it would type a string into the
+      // pane on behalf of a dialog nobody read. Before #1738 the row fell past the
+      // multiple_choice branch straight into the yes/no one.
+      const { sendKeys } = await import('@/lib/tmux/tmux');
+      vi.mocked(sendKeys).mockClear();
+
+      const message = createMessage(db, {
+        worktreeId: 'test-worktree',
+        role: 'assistant',
+        content: 'Unclassified interactive frame',
+        messageType: 'prompt',
+        promptData: {
+          type: 'unclassified',
+          status: 'unclassified',
+          question: 'Unclassified interactive frame (running/default) held for 900s.',
+          options: [],
+          dwellSeconds: 900,
+          sessionStatusReason: 'running/default',
+        },
+        timestamp: new Date(),
+      });
+
+      const request = new Request('http://localhost:3000/api/worktrees/test-worktree/respond', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId: message.id, answer: 'yes' }),
+      });
+
+      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
+        params: Promise.resolve({ id: 'test-worktree' }),
+      });
+
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data.error).toContain('never classified');
+      // Nothing reached the terminal, and the audit row was left as it was.
+      expect(sendKeys).not.toHaveBeenCalled();
+      expect(getMessageById(db, message.id)?.promptData?.status).toBe('unclassified');
+    });
+
+    it('should refuse a stored structured prompt history record (Issue #1738)', async () => {
+      // #1725's counterpart: the structured layer saw a dialog the scraper did
+      // not. Same column, same `type: 'unclassified'`, same refusal.
+      const { sendKeys } = await import('@/lib/tmux/tmux');
+      vi.mocked(sendKeys).mockClear();
+
+      const message = createMessage(db, {
+        worktreeId: 'test-worktree',
+        role: 'assistant',
+        content: 'A dialog is open',
+        messageType: 'prompt',
+        promptData: buildStructuredPromptHistoryRecord('test-worktree', {
+          source: 'notification',
+          message: 'Claude needs your permission to use Bash',
+          toolName: 'Bash',
+        }),
+        timestamp: new Date(),
+      });
+
+      const request = new Request('http://localhost:3000/api/worktrees/test-worktree/respond', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId: message.id, answer: '1' }),
+      });
+
+      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
+        params: Promise.resolve({ id: 'test-worktree' }),
+      });
+
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      // Asserting the REASON, not just the 400: without the #1738 refusal this
+      // row still 400s, but on `getAnswerInput` failing to parse an answer for a
+      // prompt type it does not know — which is luck, not a decision.
+      expect(data.error).toContain('never classified');
+      expect(sendKeys).not.toHaveBeenCalled();
     });
 
     it('should return 400 if answer is invalid', async () => {

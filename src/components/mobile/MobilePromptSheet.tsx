@@ -8,7 +8,8 @@
 
 import { useState, useCallback, useId, useMemo, useEffect, memo } from 'react';
 import { useTranslations } from 'next-intl';
-import type { PromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
+import type { LivePromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
+import { isAnswerablePromptData } from '@/types/models';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { RadioGroup, RadioGroupItem, Spinner } from '@/components/ui';
 import { usePromptAnimation } from '@/hooks/usePromptAnimation';
@@ -37,8 +38,14 @@ const BUTTON_STYLES = {
  * Props for MobilePromptSheet component
  */
 export interface MobilePromptSheetProps {
-  /** Prompt data (question, options, etc.) */
-  promptData: PromptData | null;
+  /**
+   * Prompt data (question, options, etc.).
+   *
+   * Issue #1738: {@link LivePromptData}, matching the reducer slice it is fed
+   * from. The degraded structured form (#1725) renders as the question alone —
+   * the sheet has no clickable options to offer for a dialog nobody parsed.
+   */
+  promptData: LivePromptData | null;
   /** Whether the sheet is visible */
   visible: boolean;
   /** Whether user is currently answering */
@@ -203,7 +210,7 @@ export const MobilePromptSheet = memo(function MobilePromptSheet({
  * Props for PromptContent component
  */
 interface PromptContentProps {
-  promptData: PromptData;
+  promptData: LivePromptData;
   answering: boolean;
   onRespond: (answer: string) => Promise<void>;
   labelId: string;
@@ -276,8 +283,10 @@ function PromptContent({
         {cliToolName ? t('confirmationFrom', { toolName: cliToolName }) : t('confirmationFromClaude')}
       </h3>
 
-      {/* Instruction Text (context preceding the prompt) */}
-      {promptData.instructionText && (
+      {/* Instruction Text (context preceding the prompt). Issue #1725: the
+          degraded structured form has none — it is built from a Notification
+          payload, not from a pane, so there is no scrollback to show. */}
+      {isAnswerablePromptData(promptData) && promptData.instructionText && (
         <div className="max-h-40 overflow-y-auto whitespace-pre-wrap text-sm text-muted-foreground bg-muted rounded p-2 border border-border">
           {promptData.instructionText}
         </div>

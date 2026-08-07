@@ -10,8 +10,8 @@
 
 import { memo, useState, useCallback, useId, useMemo } from 'react';
 import { useTranslations } from 'next-intl';
-import type { PromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
-import { UNCLASSIFIED_PROMPT_TYPE } from '@/types/models';
+import type { LivePromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
+import { isAnswerablePromptData } from '@/types/models';
 import type { StructuredPromptWaitingData } from '@/lib/session/structured-prompt';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { RadioGroup, RadioGroupItem, Button, Spinner } from '@/components/ui';
@@ -39,13 +39,13 @@ const BUTTON_SECONDARY_STYLES = 'bg-surface border-2 border-input hover:bg-muted
 /**
  * What the panel may be handed (Issue #1725).
  *
- * The second member is the degraded form published for a dialog only the
- * structured layer can see: the agent said one is open, and nothing parsed its
- * options. Widening the prop rather than the app-wide `PromptData` union is
- * deliberate — see the `UNCLASSIFIED_PROMPT_TYPE` note in `types/models.ts` for
- * why that union stays closed to values nothing may answer by option number.
+ * The union itself now lives in `types/models` as {@link LivePromptData} —
+ * Issue #1738, because every layer between `/current-output` and this prop
+ * carries the same two shapes and had been typed for only one of them. This
+ * alias is kept so the panel's own signatures still read in panel terms; it
+ * adds no second definition.
  */
-export type PanelPromptData = PromptData | StructuredPromptWaitingData;
+export type PanelPromptData = LivePromptData;
 
 export interface PromptPanelProps {
   /** Prompt data (question, options, etc.) */
@@ -166,7 +166,7 @@ function PromptPanelContent({
       {/* Instruction Text (context preceding the prompt). Issue #1725: the
           structured form has none — it is built from a Notification payload,
           not from a pane, so there is no scrollback to show. */}
-      {promptData.type !== UNCLASSIFIED_PROMPT_TYPE && promptData.instructionText && (
+      {isAnswerablePromptData(promptData) && promptData.instructionText && (
         <div className="max-h-40 overflow-y-auto whitespace-pre-wrap text-sm text-muted-foreground bg-muted rounded p-2 border border-border">
           {promptData.instructionText}
         </div>
@@ -191,9 +191,9 @@ function PromptPanelContent({
           English one-liner built for `wait` / `capture`; the panel says the same
           thing in the user's locale instead. */}
       <p className="text-foreground leading-relaxed">
-        {promptData.type === UNCLASSIFIED_PROMPT_TYPE
-          ? t('unclassifiedTitle')
-          : promptData.question}
+        {isAnswerablePromptData(promptData)
+          ? promptData.question
+          : t('unclassifiedTitle')}
       </p>
 
       {/* Answering indicator */}
@@ -229,7 +229,7 @@ function PromptPanelContent({
       )}
 
       {/* Issue #1725: a dialog the structured layer reported and nobody parsed */}
-      {promptData.type === UNCLASSIFIED_PROMPT_TYPE && (
+      {!isAnswerablePromptData(promptData) && (
         <UnclassifiedPromptNotice promptData={promptData} />
       )}
     </div>

@@ -10,7 +10,7 @@
 import { useReducer, useMemo, useEffect, useRef } from 'react';
 import type { WorktreeUIState, UIPhase, ErrorState, MobileActivePane, LeftPaneTab } from '@/types/ui-state';
 import type { WorktreeUIAction } from '@/types/ui-actions';
-import type { ChatMessage, PromptData } from '@/types/models';
+import type { ChatMessage, LivePromptData } from '@/types/models';
 import type { ActivityId } from '@/config/activity-bar-config';
 import {
   createInitialUIState,
@@ -203,7 +203,7 @@ export function worktreeUIReducer(
  */
 export interface WorktreeUIActions {
   setPhase: (phase: UIPhase) => void;
-  showPrompt: (data: PromptData, messageId: string) => void;
+  showPrompt: (data: LivePromptData, messageId: string) => void;
   clearPrompt: () => void;
   setPromptAnswering: (answering: boolean) => void;
   setError: (error: ErrorState) => void;
@@ -293,7 +293,7 @@ export function useWorktreeUIState(): {
     () => ({
       setPhase: (phase: UIPhase) => dispatch({ type: 'SET_PHASE', phase }),
 
-      showPrompt: (data: PromptData, messageId: string) =>
+      showPrompt: (data: LivePromptData, messageId: string) =>
         dispatch({ type: 'SHOW_PROMPT', data, messageId }),
 
       clearPrompt: () => dispatch({ type: 'CLEAR_PROMPT' }),
