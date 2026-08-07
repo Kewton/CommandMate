@@ -95,6 +95,26 @@ mcbd-<cliToolId>-<worktree-id>[-<instance suffix>]      # getSessionName() と�
 関与せず、ループを外部から kill せずに決定論的に終わらせるためのもの（#1527 の単体テストと、
 `--max-polls 1` の 1 回だけ様子を見るプローブで使う）。
 
+### 監視が生きているかを外から見る（#1728）
+
+**「静かなのは健全だから」と「静かなのは監視が死んだから」を区別できること。** 2026-08-06 に、
+起動行 1 行だけを出した監視が約 25 分後に exit 144 で沈黙終了し、その間ワーカー 2 本は
+正常稼働のまま**無監視**だった。判定ロジックは何も変えずに、次の 3 つを足してある。
+
+| 何が出るか | どこへ | いつ |
+|---|---|---|
+| `monitor: alive (poll=<n>, complete=<d>/<total>)` | stdout | `--heartbeat N` ポーリングごと（既定 10、`0` で無効） |
+| `monitor: ERROR caught SIG<name> (signal <n>) on poll round <r> — monitoring stops here` | stderr | HUP / INT / QUIT / PIPE / TERM 受信時。exit は `128+n` |
+| `monitor: WARN caught SIGURG on poll round <r> — ignored, monitoring continues` | stderr | SIGURG 受信時（**致死化しない**。既定動作が無視なので、届いたことだけを見えるようにする） |
+| `monitor: ERROR exiting on poll round <r> with <d>/<n> worker(s) complete (rc=<rc>) — the rest are now UNMONITORED` | stderr | 正常終了（全 COMPLETE / `--max-polls` 到達）**以外**の全ての終了 |
+
+最後の 1 行は EXIT trap にぶら下がっているので、**個別に trap していない死に方でも出る**のが要点。
+引数検証で落ちる経路（不正な id・`--hooks` のファイル欠落）は trap の設置前なので従来どおり
+1 行のまま。144 = 128 + 16 で macOS の signal 16 は SIGURG だが、SIGURG は既定で無視されるため
+`monitor.sh` 自身が受けて死んだとは限らない（`cmd | grep …` のパイプラインの `$?` は
+**grep の終了コード**である点にも注意）。再現条件は未特定のまま、次に起きたときに原因が
+ログへ残るようにしてある。
+
 ### `--verbose`: ポーリングごとの状態ログ（#1533）
 
 既定の stdout は**介入・介入先セッション・capture 失敗・終局判定（COMPLETE / VERIFY_FAILED / NOT_STARTED）・起動/停止**だけで、
@@ -149,13 +169,35 @@ MONITOR_HOOKS=.../hooks-git.sh .../monitor.sh <worktree-id> ...
 `MONITOR_HOOKS` の既定は捨てられる）。契約付き委任では作業量とタスク状態の両方が要るので、
 `hooks-git.sh` と `hooks-task.sh` を並べて渡す（下記「タスク状態を一次ソースにする」）。
 
-`hooks-git.sh` は worktree-id を `git worktree list --porcelain` から実 checkout に解決し
-（id = `<repo>-<branch>` の slug ＝ `generateWorktreeId()` と同じ正規化。`<repo>` はメイン
-worktree のディレクトリ名）、`git -C <path> log --oneline <base>..HEAD` と
-`git -C <path> status --porcelain` で数える。`MONITOR_HOOKS_BASE`（既定 `origin/develop`）/
-`MONITOR_HOOKS_REPO`（既定 `.`）/ `MONITOR_WORKTREE_ROOT` で調整する。base ref が解決できない
-場合は起動時に stderr へ警告する（黙って 0 を返すと、全部コミット済みの worker が
-uncommitted=0 と合わさって最後に NOT_STARTED と誤報されるため）。
+`hooks-git.sh` は worktree-id を `git worktree list --porcelain` から実 checkout に解決し、
+`git -C <path> log --oneline <base>..HEAD` と `git -C <path> status --porcelain` で数える。
+`MONITOR_HOOKS_BASE`（既定 `origin/develop`）/ `MONITOR_HOOKS_REPO`（既定 `.`）/
+`MONITOR_WORKTREE_ROOT` で調整する。base ref が解決できない場合は起動時に stderr へ警告する
+（黙って 0 を返すと、全部コミット済みの worker が uncommitted=0 と合わさって最後に
+NOT_STARTED と誤報されるため）。
+
+#### id の突合順（#1728）
+
+| # | 突合対象 | 由来 |
+|---|---|---|
+| 1 | `slug(basename(<checkout path>))` | **現行**。`deriveWorktreeId()`（`src/lib/git/worktree-id.ts`、#1621）＝ ディレクトリ名。初回登録時に一度だけ確定するので、ブランチを切り替えても id は変わらない |
+| 2 | `slug("<repo>-<branch>")` | 旧 `generateWorktreeId()`（`src/lib/git/worktrees.ts`）。`<repo>` はメイン worktree のディレクトリ名 |
+| 3 | `slug("<branch>")` | 同上（repo 名なし） |
+
+**1 が欠けていたのが #1728 の本体**である。2・3 しか無い状態では、ディレクトリをブランチ名では
+なく Issue 番号で採番するリポジトリ（`commandmate-issue-1728` / `fix/1728-…`）では**1 件も**
+解決できず——**メイン worktree すら解決できず**——すでにコミット済みの worker まで
+`commits=0 uncommitted=0` として報告されていた。#1614 が塞いだのは「git が失敗する」経路で、
+こちらは **git は成功して突合が外れる**別経路である。verify-completion.sh は
+`commits=0 && uncommitted=0` を「タスクが composer から出ていない」の署名として読むので、
+STARTED ガードは**誰も測っていない数字**で裁定していたことになる。
+
+1 を先に見るのは、稼働中のサーバが配る id が 1 だからである（2 と 3 の両方が別 checkout に
+当たったときは 1 が勝つ）。1 は `branch` レコードを持たない detached HEAD にも効く。
+
+ディレクトリ名が衝突している 2 つの checkout（CommandMate 側は mint 時に
+`<base>-<sha256[0:8]>` で解決している）は、この走査では区別できない。最初の 1 件を数えたうえで
+`WARN` を出すので、別の checkout を数えたい場合は `MONITOR_WORKTREE_ROOT` を指定する。
 
 **git が答えられなかった場合と、worker が本当に何も書いていない場合は別物である（#1614）。**
 `git worktree list` / `git log` / `git status` はいずれも終了コードを確認する。失敗したときの
@@ -164,9 +206,19 @@ COMPLETE を出さない方向にしか倒さない）だが、**黙った 0 で
 **worker あたり 1 行**を stderr へ出す。毎ポーリング出さないのは base ref 警告と同じ理由である。
 
 ```
-monitor hooks: [<wid>] 'git -C <repo> worktree list --porcelain' failed (exit 128); commit and change counts for this worker are UNKNOWN and reported as 0 — ...
-monitor hooks: [<wid>] no checkout resolved in '<repo>'; both counters report 0 because nothing was measured, not because the worker did nothing ...
+monitor hooks ERROR: [<wid>] 'git -C <repo> worktree list --porcelain' failed (exit 128); commit and change counts for this worker are UNKNOWN and reported as 0 — ...
+monitor hooks ERROR: [<wid>] no checkout resolved in '<repo>'; both counters report 0 because nothing was measured, not because the worker did nothing ...
+monitor hooks WARN:  [<wid>] 'git -C <path> log --oneline <base>..HEAD' failed (exit 129); the commit count is UNKNOWN and reported as 0
 ```
+
+**レベル語（`ERROR` / `WARN`）は #1728 で入れた。** それまでは `monitor hooks: …` で始まり
+`WARN` も `ERROR` も含まなかったため、運用でよく使う
+`monitor.sh … 2>&1 | grep -Ei "STALL|IDLE|…|ERROR|FAIL"` で**1 行残らず消えていた**。
+「この 0 は測定値ではない」と言う唯一の行が、ログの中で最も消えやすい形をしていたことになる。
+**ログを grep で絞るときは `ERROR|WARN|alive` を必ずパターンに含めること。**
+
+- `ERROR` = この worker については**何も測れていない**（両カウンタが答えの代わりに 0）
+- `WARN` = 片方のカウンタだけが劣化し、もう片方は実測値（STARTED ガードには本物の信号が残る）
 
 worktree path の解決が失敗すると**両カウンタが同時に 0 へ沈む**ので、id が解決できないケースも
 同じ粒度で報告する。なお数え方は `printf '%s' "$out" | grep -c . || true` である:
@@ -267,7 +319,8 @@ MONITOR_HOOKS_BASE=origin/develop \
 | 判定が一次ソース由来かフォールバック由来か | 終局判定の poll 行に `task=` があるか／`FALLBACK MODE` 行が出ているか |
 | capture 失敗 | `grep -c 'capture failed' monitor.log`（poll 行は出ないので、総ポーリング数と別に数える） |
 | helper 失敗（#1614） | `grep -cE 'classify-state failed\|verify-completion failed' monitor.log`。いずれもそのポーリングを捨てる（poll 行は出ない）。**0 でなければ判定を下せなかったポーリングがある**ので、誤報 0 の主張はその分だけ弱い |
-| カウンタが信用できないポーリング | `grep 'monitor hooks: \[' monitor.log`（worker あたり 1 行。出ていれば `commits=` / `uncommitted=` の 0 は「測れなかった」であって「作業ゼロ」ではない） |
+| カウンタが信用できないポーリング | `grep -E 'monitor hooks (ERROR\|WARN):' monitor.log`（worker あたり 1 行。出ていれば `commits=` / `uncommitted=` の 0 は「測れなかった」であって「作業ゼロ」ではない。`ERROR` は両カウンタ、`WARN` は片方だけ） |
+| 監視が最後まで生きていたか | `grep -E 'monitor: (alive\|ERROR\|WARN)' monitor.log`（`alive` が途切れた所が最後に生きていたポーリング。終端に `caught SIG…` / `exiting on poll round` があれば異常終了） |
 
 **`--hooks` を付け忘れると誤報 0 は測れない**：commits/uncommitted が常に 0 になり、完走した
 worker まで NOT_STARTED として記録される。G2 のログは必ずフック付きで採ること。
@@ -411,6 +464,9 @@ worker まで NOT_STARTED として記録される。G2 のログは必ずフッ
 | 12 | **完了判定の一次ソースを失ったまま推定モードで走り続ける**（`task list` の非 0 終了が「契約なし」と同じ空文字に潰れ、ログは正常時と区別が付かない） | #1613 | `read_task_status` を 3 値化（終了コードで `unavailable`）＋ worker ごと 1 度の `FALLBACK MODE` 報告 ＋ `task=` を値があるときだけ出力 | `monitor-task-source.test.ts`（exit 1 / exit 99 を空とは別ケースとして固定）/ `monitor-observability.test.ts` / `verify-completion.test.ts` |
 
 | 13 | **外部コマンドの終了コードを見ずに次を決める**（`git \| wc -l` が git の失敗を「作業 0」として返し完走 worker を NOT_STARTED と誤報／`classify-state.sh` が落ちると空 state が verify へ渡り、生存ペインとみなされず**稼働中 worker が COMPLETE**／`verify-completion.sh` が落ちると `case` に default が無く**そのポーリングが無言で素通り**） | #1614 | hooks-git.sh の 3 つの git 呼び出しを終了コード判定＋worker あたり 1 回の stderr 報告に、`monitor.sh` の `CLASSIFY` / `VERIFY` を `capture`（既存）と同じ扱いに | `monitor-exit-codes.test.ts`（git 失敗と真の作業ゼロを別テストで固定、0/1/複数件の計数も固定） |
+| 14 | **id の突合がブランチ名だけで、現行のディレクトリ由来 id を 1 件も解決できない**（git は成功するので #13 のガードは発火しない。両カウンタが恒久 0 になり、**STARTED ガードが実測値でない数字で裁定する**） | #1728 | `mh_worktree_path()` に `slug(basename(<path>))`（＝`deriveWorktreeId`、#1621）を第 1 候補として追加。ブランチ由来の旧 2 規則は残す | `hooks-git-resolution.test.ts`（**ディレクトリ名 ≠ ブランチ名**の repo を fixture にする。既存 fixture は `myrepo-x` / `feature/x` / id `myrepo-feature-x` ＝ 旧規則で作られており、この穴を構造的に検知できなかった） |
+| 15 | **警告が運用の grep で全て消える**（`monitor hooks: …` に `ERROR`/`WARN` が無く、`grep -Ei "…\|ERROR\|FAIL"` で不可視。#14 が 25 分間気付かれなかった直接の理由） | #1728 | 診断行に `ERROR`（両カウンタ死）/ `WARN`（片方）のレベル語を付与 | `hooks-git-resolution.test.ts`（Issue 記載の grep パターンそのものに `toMatch` させる） |
+| 16 | **監視が黙って死に、死んだことに気付けない**（exit 144・出力は起動行のみ・ワーカーは無監視で稼働継続。健全な沈黙と区別不能） | #1728 | 受信シグナルの明示報告 ＋ 正常終端以外の EXIT 報告 ＋ `--heartbeat`（既定 10 ポーリング） | `monitor-liveness.test.ts`（SIGTERM/SIGINT の文言と exit code、SIGURG が**致死化しない**こと、正常終端では何も足さないこと、heartbeat の間隔と既定値） |
 
 いずれも naive 実装で red → ガード実装で green にした（#3〜#7 は #1512 の初版実装に対して red）。
 #8 は両方向テスト（対照＋変異注入）で固定している：`--verbose` を既定 ON にする / フックをスタブより
@@ -429,6 +485,14 @@ hooks-git.sh を #1614 以前へ全戻し → 5 件 red／`git log` だけ・`gi
 削る → それぞれ 1・1・1 件 red／`git worktree list` だけ削る → 2 件 red／数え方を `wc -l` に戻す → 4 件 red）。
 **「git が失敗した」と「本当に作業ゼロ」は別テストが担保する**（後者は stderr が空であることを固定
 しているので、前者の assertion では満たせない）。
+#14〜#16 も 8 変異で確認済み（`hooks-git.sh`: basename 突合を削除 → **7 件 red**／突合順を
+branch 優先へ反転 → 1 件 red／レベル語を `monitor hooks:` へ戻す → 4 件 red／
+ディレクトリ名衝突の WARN を削除 → 1 件 red。`monitor.sh`: シグナル trap を #1728 以前へ全戻し →
+4 件 red／heartbeat を毎ポーリング発火に → 4 件 red（うち 1 件は #1533 の**既定 stdout を
+byte 単位で固定したテスト**で、既定 heartbeat が運用ストリームを汚していないことの対照でもある）／
+EXIT 報告を正常終端でも出す → 2 件 red／SIGURG を致死 trap に → 1 件 red）。
+**「監視が死んだ」を検知するテストは、監視が死んでも緑になりうる**ため、SIGURG のケースだけは
+「SIGURG では死なず、後続の SIGTERM で死ぬ」ことを exit code で固定してある。
 
 ## fixture の作り方（実機採取）
 

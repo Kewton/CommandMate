@@ -1,0 +1,138 @@
+version: 1
+title: "Issue #1728: orchestrate-monitor の git hooks が worktree id を解決できず両カウンタが恒久的に 0"
+goal: |
+  /bug-fix 1728
+
+  https://github.com/Kewton/CommandMate/issues/1728 を実装してください。
+  Issue 本文の「提案」「受入条件」「既知の罠」をすべて満たすこと。
+
+  ## この Issue の要点
+
+  `/orchestrate` の手順書（`.claude/commands/orchestrate.md`）に**書いてあるとおりの起動コマンド**で
+  監視すると、`commits` / `uncommitted` が**常に 0** になる。`hooks-git.sh` の `mh_worktree_path()` が
+  worktree を**ブランチ名**で突合しているが、CommandMate は worktree id を**ディレクトリ名**から
+  採番するため、どちらの条件にも一致しない。**メイン worktree すら解決できない。**
+
+  ## 設計上の注意
+
+  - **最も重い影響は STARTED ガードの不活性化**。「未起動 idle（commits=0 かつ uncommitted=0）を
+    COMPLETE と誤報しない」ガードはカウンタが実測値である前提に立つ。恒久 0 では機能しない
+  - #1614 の修正は**コマンド失敗経路**にしか入っていない。今回は git 自体は成功して**突合に失敗**する別経路
+  - **警告文がフィルタで消える問題も直すこと**。現在の文言は `monitor hooks: ...` で始まり `WARN`/`ERROR` を
+    含まないため、実運用でよくやる `| grep -Ei "...|ERROR|FAIL"` 形で完全に不可視になる
+  - **回帰テストに「ディレクトリ名 ≠ ブランチ名の worktree を解決できること」を固定すること**。
+    現行テストがこれを検知していない事実自体がテストの穴である
+
+  ## スコープ外
+
+  `sync-map.json` 上 `mapped`（port-required）で対応先は別リポジトリ `commandmate-skills` の
+  `skills/cmate-orchestrate-monitor`。**本 Issue では移植しない**（オーケストレーターが完了報告に記載する）。
+  `tests/unit/skills/sync-map.test.ts` は形状と網羅性のみを検査するため、スクリプト変更で赤にはならない（確認済み）。
+
+  ## 作業ルール（厳守）— 共通
+
+  ### プロセス・サーバの扱い（★ 2026-08-06 に本番停止事故あり）
+
+  - **`pkill` / `killall` / パターン一致で複数プロセスを一括 kill するコマンドを一切書かないこと。**
+    2026-08-06 に委任ワーカーが `pkill -f "node dist/server/server.js"` を実行し、
+    **ユーザーの本番サーバ（port 3000）と global インスタンス（port 60301）を巻き込んで停止させた**。
+    そのワーカーの意図は自分の隔離サーバ 1 本を再起動することだけだった。`-f` はコマンドライン全体への
+    部分一致なので、同名の実行ファイルを使う**すべてのプロセス**に命中する。
+    **「自分のプロセスだけを止めるつもり」でも、パターン一致は他人のプロセスを巻き込む。**
+  - **プロセスを止めるときは必ず PID を指定すること。** 自分で起動したものは起動時に PID を保存する:
+
+    ```bash
+    U="$SB/uat"                      # scratchpad 配下。$HOME に作らないこと
+    mkdir -p "$U"
+    CM_PORT=3779 CM_DB_PATH="$U/cm.db" NODE_ENV=production \
+      nohup node dist/server/server.js > "$U/server.log" 2>&1 &
+    echo $! > "$U/uat.pid"           # ← 自分の PID だけ記録
+    # ... 検証 ...
+    kill "$(cat "$U/uat.pid")"       # ← PID 指定で止める
+    ```
+
+  - **本番サーバ（port 3000）と global インスタンス（port 60301）に一切触れないこと。**
+    停止・再起動・再ビルドのいずれも禁止。稼働中サーバの足元での `npm run build` / `npm run dev` も禁止
+    （`.next` が clean され BUILD_ID が消えて配信中の画面が壊れる実害がある）
+  - 検証用サーバは**未使用ポート**を選び、**終了時に必ず PID 指定で停止**すること
+
+  ### tmux の扱い
+
+  - 実 tmux を触る検証は必ず **`tmux -L <専用socket>`** で行うこと。`-L` / `-S` は `$TMUX` より優先される。
+    あなたは tmux ペインの中で動いており `$TMUX` はユーザーの本番サーバを指しているため、
+    フラグ無しの `tmux` 呼び出しは**すべてユーザーの本番セッションに届く**
+  - **`kill-server` を書かないこと。** 後始末は `kill-session -t '=<name>:'`（完全一致）で行う。
+    2026-08-02 に `kill-server` が**稼働中の全 `mcbd-*` セッションを消し、並列ワーカーを即死させた**
+  - **`TMUX_TMPDIR` を隔離手段に使わないこと**（`$TMUX` があると完全に無視される）
+  - **`bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たないこと**（全セッションに波及する）
+
+  ### ファイル・ディレクトリの汚染
+
+  - **`$HOME` 直下や `~/.commandmate/` に何も作らないこと。** 作業用ディレクトリは
+    scratchpad（`$SB`）配下に作る。2026-08-06 にワーカーが `~/.commandmate-uat-1726`（2.6M）を
+    HOME に作って放置した
+  - **テストが実ホームディレクトリを汚さないこと。** `tests/helpers/agent-hooks-dir.ts` で
+    `CM_AGENT_HOOKS_DIR` を temp に向ける仕組みがある。セッションを起動するテストではこれを使う
+  - 作ったものは**すべて片付ける**こと。片付けた証跡（ディレクトリ不在・プロセス不在・セッション不在）を報告に含める
+
+  ### 検証の作法
+
+  - 品質ゲートの exit code は **`cmd > log; echo $?` で実測**すること（grep へのパイプは exit code を隠す）
+  - **`npm run test:integration` を通しで実行し exit code を実測すること。**
+    `.commandmate/verify.yaml` のゲートは lint / typecheck / unit のみで **integration を裁定しない**
+  - **「テストが緑 = 動く」ではない。** ガードや合成が空振りでも全テストは緑になる。
+    **変異注入**（条件をわざと壊して赤くなることの確認）で非空振りを証明し、結果をコミットメッセージに書くこと
+  - 実機確認で `/api/worktrees` の status を見ないこと。**5s TTL の capture キャッシュ越し**
+    （`CACHE_TTL_MS`、`src/lib/tmux/tmux-capture-cache.ts`）。`current-output` を直接叩くこと
+  - **実機確認は production build で行うこと。** dev モード（`tsx server.ts`）では構造化イベントが
+    機能しない（#1736）。dev で「動かない」と見えても実装バグとは限らない
+
+  ### 成果物の形
+
+  - 変更は**単一コミット**にまとめること。**PR は作らないこと**（オーケストレーターが作成する）
+  - `dev-reports/` 配下の進捗レポート類は作成不要
+  - 完了したら最終行に `IMPL_COMPLETED` とだけ出力すること
+
+
+  ## 本文の裏取り（必須）
+
+  この Issue は本オーケストレーターが同一セッション内でコードを読んで起票したもので、本文には
+  原因の証拠が記載されている。ただし**自作 Issue の原因特定が外れた前例**（#1552: 対照実験まで
+  示していたのに発生点の帰属が誤っていた）がある。
+
+  **着手時に本文の主張をコードで裏取りし、食い違えば実測を正として PR 説明に乖離を書くこと。**
+  「本文にこう書いてある」を根拠に実装しないこと。
+
+  ## 完了条件
+
+  - Issue の受入基準をすべて満たしていること
+  - `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` / `npm run test:integration` / `npm run build`
+    がすべて exit 0（**`cmd > log; echo $?` で実測**）
+
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns:
+    - 'pkill'
+    - 'killall'
+    - 'kill -9'
+    - 'rm -rf /'
+    - 'git push.*--force'
+    - 'sudo '
+    - 'commandmate (stop|start)'
+
+scope:
+  allow:
+    - ".claude/skills/orchestrate-monitor/**"
+    - ".claude/commands/orchestrate.md"
+    - "tests/unit/skills/**"
+    - "docs/**"
+    - "CHANGELOG.md"
+    - "dev-reports/**"
+  deny:
+    - "src/**"
+verify:
+  gates: [lint, typecheck, unit]
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

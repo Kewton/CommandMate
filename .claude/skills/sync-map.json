@@ -226,8 +226,8 @@
         {
           "path": "SKILL.md",
           "policy": "port-required",
-          "sha256": "bff6476bd4645d4a285784d3d1d3f3f35864ec838f41ef143c72fbd3dce0ea64",
-          "note": "counterpart は独立に書き起こされた文書で、共有行は 17 行しかない（2026-08-01 実測、CommandMate 423 行 / skills 380 行）。コピーではなく「同じ scripts を説明した別の文書」なので、移植するのは prose ではなく挙動の記述（フラグ・exit code・判定順序・警告文言）である。"
+          "sha256": "53d8a9da5082c1c11f33970afbe601e19343d8103ea1855255b9181e74a4da9d",
+          "note": "counterpart は独立に書き起こされた文書で、共有行は 17 行しかない（2026-08-01 実測、CommandMate 423 行 / skills 380 行）。コピーではなく「同じ scripts を説明した別の文書」なので、移植するのは prose ではなく挙動の記述（フラグ・exit code・判定順序・警告文言）である。 【未移植 #1728】CommandMate 側だけを変更した。hooks-git.sh: worktree id の突合に `slug(basename(path))`（deriveWorktreeId / #1621）を第1候補として追加（ブランチ由来の旧2規則は残置）、診断行に ERROR/WARN のレベル語を付与。monitor.sh: シグナル報告 trap・正常終端以外の EXIT 報告・`--heartbeat`（既定10）を追加。SKILL.md: 上記の挙動記述（突合順の表・レベル語・生存報告）を追記。skills/cmate-orchestrate-monitor への移植は本 Issue のスコープ外で、オーケストレーターが完了報告に記載する。"
         },
         {
           "path": "scripts/classify-state.sh",
@@ -237,8 +237,8 @@
         {
           "path": "scripts/hooks-git.sh",
           "policy": "port-required",
-          "sha256": "79523633f01e09114c743cc65afd75908708458769b3565fc77794dcdb014c25",
-          "note": "#1614 で同期済み（skills 0.4.0）。この pin が実際に赤くなって移植を強制した最初の事例である: #1614 の編集で hooks-git.sh と monitor.sh の 2 件が sync-map.test.ts で red になり、counterpart へ移植してから update した。"
+          "sha256": "096e9c12f3aff269fdebaa2a217958f9c20895884ab8c629358080584549dff4",
+          "note": "#1614 で同期済み（skills 0.4.0）。この pin が実際に赤くなって移植を強制した最初の事例である: #1614 の編集で hooks-git.sh と monitor.sh の 2 件が sync-map.test.ts で red になり、counterpart へ移植してから update した。 【未移植 #1728】CommandMate 側だけを変更した。hooks-git.sh: worktree id の突合に `slug(basename(path))`（deriveWorktreeId / #1621）を第1候補として追加（ブランチ由来の旧2規則は残置）、診断行に ERROR/WARN のレベル語を付与。monitor.sh: シグナル報告 trap・正常終端以外の EXIT 報告・`--heartbeat`（既定10）を追加。SKILL.md: 上記の挙動記述（突合順の表・レベル語・生存報告）を追記。skills/cmate-orchestrate-monitor への移植は本 Issue のスコープ外で、オーケストレーターが完了報告に記載する。"
         },
         {
           "path": "scripts/hooks-task.sh",
@@ -254,8 +254,8 @@
         {
           "path": "scripts/monitor.sh",
           "policy": "port-required",
-          "sha256": "b6d663091cad3fe91a62962aec85aa0adaae307f927f9e0dc5a6189696df255e",
-          "note": "#1613 で同期済み。それ以前は skills 側だけが FALLBACK MODE 警告を出していた（コード差分 13 行）。"
+          "sha256": "7cab647dd08890bde450565c2a59c24e1d9f8d740dc72ba8b44a7bd78a18b031",
+          "note": "#1613 で同期済み。それ以前は skills 側だけが FALLBACK MODE 警告を出していた（コード差分 13 行）。 【未移植 #1728】CommandMate 側だけを変更した。hooks-git.sh: worktree id の突合に `slug(basename(path))`（deriveWorktreeId / #1621）を第1候補として追加（ブランチ由来の旧2規則は残置）、診断行に ERROR/WARN のレベル語を付与。monitor.sh: シグナル報告 trap・正常終端以外の EXIT 報告・`--heartbeat`（既定10）を追加。SKILL.md: 上記の挙動記述（突合順の表・レベル語・生存報告）を追記。skills/cmate-orchestrate-monitor への移植は本 Issue のスコープ外で、オーケストレーターが完了報告に記載する。"
         },
         {
           "path": "scripts/quality-gate.sh",

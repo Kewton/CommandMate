@@ -29,7 +29,7 @@
 # Usage:
 #   monitor.sh [--interval 20] [--idle-threshold 8] [--session-prefix <prefix>] \
 #              [--resend-message continue] [--max-resends 2] [--max-polls 0] \
-#              [--verbose] [--hooks <file>] \
+#              [--heartbeat 10] [--verbose] [--hooks <file>] \
 #              <worktree-id>[@<instance-id>] [<worktree-id>[@<instance-id>] ...]
 #
 #   <worktree-id>[@<instance-id>]
@@ -63,6 +63,15 @@
 #                  so an operator reading the stream still sees only interventions
 #                  and terminal verdicts (Issue #1533).
 #
+#   --heartbeat N  print `monitor: alive (poll=<n>, complete=<d>/<total>)` every N
+#                  poll rounds; 0 disables it. Default 10, i.e. one line every
+#                  ~3 minutes at the documented 20s interval. It answers a
+#                  question the stream could not answer before (Issue #1728): a
+#                  monitor that has died and a monitor watching healthy workers
+#                  are both silent, and a 25-minute silence was read as the
+#                  second while it was the first. Cheap enough to leave on —
+#                  the interventions and verdicts around it are unchanged.
+#
 #   --hooks <file> source <file> after the built-in count_commits /
 #                  count_uncommitted / read_task_status stubs, so an operator can
 #                  supply the real data sources (Issue #1533, #1581). Repeatable,
@@ -86,6 +95,7 @@ SESSION_PREFIX=""         # empty = derive from the poll's cliToolId (the defaul
 RESEND_MESSAGE="continue"  # sent after the CLI exhausts its own retries
 MAX_RESENDS=2
 MAX_POLLS=0               # 0 = poll until every worker is COMPLETE (operator default)
+HEARTBEAT=10              # poll rounds between `alive` lines; 0 = off
 VERBOSE=0                 # 0 = default stream (interventions + verdicts only)
 CM=${CM:-"npx commandmate@latest"}
 
@@ -105,6 +115,7 @@ while [ $# -gt 0 ]; do
     --resend-message) shift; RESEND_MESSAGE=${1:-continue};;
     --max-resends) shift; MAX_RESENDS=${1:-2};;
     --max-polls) shift; MAX_POLLS=${1:-0};;
+    --heartbeat) shift; HEARTBEAT=${1:-10};;
     --verbose) VERBOSE=1;;
     --hooks)
       shift
@@ -296,6 +307,64 @@ echo "monitor: watching $n_ids worker(s), interval=${INTERVAL}s, idle-threshold=
 
 poll_round=0
 done_count=0
+
+# --- why this run stopped (Issue #1728) ------------------------------------
+#
+# A 25-minute supervision run once ended at exit 144 having printed nothing but
+# its own startup line, while both workers it was watching kept running unwatched.
+# Nothing in the log said whether the loop had died or the workers were simply
+# quiet, and nothing said what killed it. Three additions close that:
+#
+#   1. every signal bash can catch is named before the loop gives up;
+#   2. any exit that is not one of the two documented termini is reported with
+#      the round it happened on and how many workers were still being watched;
+#   3. `--heartbeat` (below) proves the loop is alive between verdicts.
+#
+# 1 and 2 go to stderr carrying `ERROR`/`WARN`; 3 goes to stdout carrying
+# `alive`. Each is a word an operator's `grep -Ei` can keep — which the hooks
+# diagnostics in the primary half of this Issue were not, and that is exactly
+# how a run this broken stayed invisible.
+#
+# `run_ended` starts at 1 so every pre-loop exit — bad flag, bad id, missing
+# hooks file — stays byte-identical to before; it drops to 0 for the duration of
+# the loop only. The traps are installed HERE, not next to `mktemp`, because
+# they read `n_ids` / `poll_round` / `done_count` and this script runs under
+# `set -u`.
+run_ended=1
+
+report_exit() {
+  re__rc=$?
+  if [ "$run_ended" = "0" ]; then
+    echo "monitor: ERROR exiting on poll round $poll_round with $done_count/$n_ids worker(s) complete (rc=$re__rc) — the rest are now UNMONITORED" >&2
+  fi
+  cleanup
+}
+
+# Fatal by default: report, then exit 128+n so a supervising shell still sees the
+# conventional status. `cleanup` runs from the EXIT trap that follows.
+report_fatal_signal() {
+  echo "monitor: ERROR caught SIG$1 (signal $2) on poll round $poll_round — monitoring stops here" >&2
+  exit $((128 + $2))
+}
+
+# Ignored by default (SIGURG is delivered by the kernel on out-of-band socket
+# data and normally discarded). Trapping it does NOT make it fatal — the handler
+# returns and the loop continues — it only makes a delivery visible, which is
+# what the 144 above could not be checked against. No number is printed: SIGURG
+# is 16 on macOS and 23 on Linux.
+report_benign_signal() {
+  echo "monitor: WARN caught SIG$1 on poll round $poll_round — ignored, monitoring continues" >&2
+}
+
+trap report_exit EXIT
+trap 'report_fatal_signal HUP 1' HUP
+trap 'report_fatal_signal INT 2' INT
+trap 'report_fatal_signal QUIT 3' QUIT
+trap 'report_fatal_signal PIPE 13' PIPE
+trap 'report_fatal_signal TERM 15' TERM
+trap 'report_benign_signal URG' URG
+
+run_ended=0
 while [ "$done_count" -lt "$n_ids" ]; do
   done_count=0
   i=0
@@ -506,16 +575,27 @@ while [ "$done_count" -lt "$n_ids" ]; do
   done
 
   poll_round=$((poll_round + 1))
+
+  # Liveness (Issue #1728). Emitted before the stop conditions so the last thing
+  # in a log is always evidence of how far the loop got, and on stdout because it
+  # is part of the operator stream rather than a fault. Silence between verdicts
+  # is normal — this is what makes silence *after* the last line diagnosable.
+  if [ "$HEARTBEAT" -gt 0 ] && [ $((poll_round % HEARTBEAT)) -eq 0 ]; then
+    echo "monitor: alive (poll=$poll_round, complete=$done_count/$n_ids)"
+  fi
+
   # Deterministic stop for bounded runs: end the loop from the inside after
   # MAX_POLLS rounds rather than relying on something outside to kill it. Checked
   # after the completion tally so a run that finishes on its final round still
   # reports "all complete"; skipped entirely when MAX_POLLS is 0.
   if [ "$done_count" -lt "$n_ids" ] && [ "$MAX_POLLS" -gt 0 ] && [ "$poll_round" -ge "$MAX_POLLS" ]; then
     echo "monitor: reached --max-polls ($MAX_POLLS) after $poll_round poll round(s); stopping"
+    run_ended=1
     exit 0
   fi
 
   [ "$done_count" -lt "$n_ids" ] && sleep "$INTERVAL"
 done
 
+run_ended=1
 echo "monitor: all $n_ids worker(s) complete"
