@@ -1,0 +1,142 @@
+version: 1
+title: "Issue #1739: 注入 settings に permissions.deny を追加し、ワーカーの広域 kill を機構で塞ぐ"
+goal: |
+  /pm-auto-issue2dev 1739
+
+  https://github.com/Kewton/CommandMate/issues/1739 を実装してください。
+  Issue 本文の「提案」「受入条件」「既知の罠」をすべて満たすこと。
+
+  ## この Issue の要点
+
+  2026-08-06、委任ワーカーが `pkill -f "node dist/server/server.js"` を実行し、**ユーザーの本番サーバ
+  （port 3000）と global インスタンス（port 60301）を巻き込んで停止**させた。#1722 が既に全ワーカーへ
+  注入している `--settings` に `permissions.deny` を足せば、契約文に依存せず**機構で**塞げる。
+
+  ## この層が正しい理由（設計の核心）
+
+  **`permissions.deny` はプロンプトを出す前に弾くため、Auto-Yes では突破できない。**
+  実際の事故では権限プロンプトが出たが Auto-Yes が自動承認した。契約の `autoYes.denyPatterns`
+  （人間へエスカレートする）より強く、契約文（助言でしかない）より確実である。
+
+  ## 設計上の注意
+
+  - **正当な用途を潰さないこと。** ワーカーが自分で起動したプロセスを止める手段は必要。
+    PID 指定（`kill "$(cat pidfile)"`）は deny 対象外なので残る。この作法をドキュメントに明記すること
+  - **`--settings` はユーザーの `~/.claude/settings.json` と配列連結でマージされる**（#1721 D1 の実測）。
+    ユーザー設定の `permissions.allow` と競合しないか確認すること
+  - `CM_AGENT_HOOKS_INJECT=0` で注入全体を切れる既存スイッチがあり、緊急時の逃げ道になる
+  - 生成器は現在 `{ hooks: {...} }` を返す。`permissions` キーの追加は素直
+
+  ## 実機検証の要件
+
+  **Auto-Yes 有効時でも拒否されること**が本 Issue の核心。ここを実機で確認すること
+  （dev モードは #1736 未修正のため構造化イベントが機能しない。**production build で行うこと**）。
+
+  ## 作業ルール（厳守）— 共通
+
+  ### プロセス・サーバの扱い（★ 2026-08-06 に本番停止事故あり）
+
+  - **`pkill` / `killall` / パターン一致で複数プロセスを一括 kill するコマンドを一切書かないこと。**
+    2026-08-06 に委任ワーカーが `pkill -f "node dist/server/server.js"` を実行し、
+    **ユーザーの本番サーバ（port 3000）と global インスタンス（port 60301）を巻き込んで停止させた**。
+    そのワーカーの意図は自分の隔離サーバ 1 本を再起動することだけだった。`-f` はコマンドライン全体への
+    部分一致なので、同名の実行ファイルを使う**すべてのプロセス**に命中する。
+    **「自分のプロセスだけを止めるつもり」でも、パターン一致は他人のプロセスを巻き込む。**
+  - **プロセスを止めるときは必ず PID を指定すること。** 自分で起動したものは起動時に PID を保存する:
+
+    ```bash
+    U="$SB/uat"                      # scratchpad 配下。$HOME に作らないこと
+    mkdir -p "$U"
+    CM_PORT=3779 CM_DB_PATH="$U/cm.db" NODE_ENV=production \
+      nohup node dist/server/server.js > "$U/server.log" 2>&1 &
+    echo $! > "$U/uat.pid"           # ← 自分の PID だけ記録
+    # ... 検証 ...
+    kill "$(cat "$U/uat.pid")"       # ← PID 指定で止める
+    ```
+
+  - **本番サーバ（port 3000）と global インスタンス（port 60301）に一切触れないこと。**
+    停止・再起動・再ビルドのいずれも禁止。稼働中サーバの足元での `npm run build` / `npm run dev` も禁止
+    （`.next` が clean され BUILD_ID が消えて配信中の画面が壊れる実害がある）
+  - 検証用サーバは**未使用ポート**を選び、**終了時に必ず PID 指定で停止**すること
+
+  ### tmux の扱い
+
+  - 実 tmux を触る検証は必ず **`tmux -L <専用socket>`** で行うこと。`-L` / `-S` は `$TMUX` より優先される。
+    あなたは tmux ペインの中で動いており `$TMUX` はユーザーの本番サーバを指しているため、
+    フラグ無しの `tmux` 呼び出しは**すべてユーザーの本番セッションに届く**
+  - **`kill-server` を書かないこと。** 後始末は `kill-session -t '=<name>:'`（完全一致）で行う。
+    2026-08-02 に `kill-server` が**稼働中の全 `mcbd-*` セッションを消し、並列ワーカーを即死させた**
+  - **`TMUX_TMPDIR` を隔離手段に使わないこと**（`$TMUX` があると完全に無視される）
+  - **`bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たないこと**（全セッションに波及する）
+
+  ### ファイル・ディレクトリの汚染
+
+  - **`$HOME` 直下や `~/.commandmate/` に何も作らないこと。** 作業用ディレクトリは
+    scratchpad（`$SB`）配下に作る。2026-08-06 にワーカーが `~/.commandmate-uat-1726`（2.6M）を
+    HOME に作って放置した
+  - **テストが実ホームディレクトリを汚さないこと。** `tests/helpers/agent-hooks-dir.ts` で
+    `CM_AGENT_HOOKS_DIR` を temp に向ける仕組みがある。セッションを起動するテストではこれを使う
+  - 作ったものは**すべて片付ける**こと。片付けた証跡（ディレクトリ不在・プロセス不在・セッション不在）を報告に含める
+
+  ### 検証の作法
+
+  - 品質ゲートの exit code は **`cmd > log; echo $?` で実測**すること（grep へのパイプは exit code を隠す）
+  - **`npm run test:integration` を通しで実行し exit code を実測すること。**
+    `.commandmate/verify.yaml` のゲートは lint / typecheck / unit のみで **integration を裁定しない**
+  - **「テストが緑 = 動く」ではない。** ガードや合成が空振りでも全テストは緑になる。
+    **変異注入**（条件をわざと壊して赤くなることの確認）で非空振りを証明し、結果をコミットメッセージに書くこと
+  - 実機確認で `/api/worktrees` の status を見ないこと。**5s TTL の capture キャッシュ越し**
+    （`CACHE_TTL_MS`、`src/lib/tmux/tmux-capture-cache.ts`）。`current-output` を直接叩くこと
+  - **実機確認は production build で行うこと。** dev モード（`tsx server.ts`）では構造化イベントが
+    機能しない（#1736）。dev で「動かない」と見えても実装バグとは限らない
+
+  ### 成果物の形
+
+  - 変更は**単一コミット**にまとめること。**PR は作らないこと**（オーケストレーターが作成する）
+  - `dev-reports/` 配下の進捗レポート類は作成不要
+  - 完了したら最終行に `IMPL_COMPLETED` とだけ出力すること
+
+
+  ## 本文の裏取り（必須）
+
+  この Issue は本オーケストレーターが同一セッション内でコードを読んで起票したもので、本文には
+  原因の証拠が記載されている。ただし**自作 Issue の原因特定が外れた前例**（#1552: 対照実験まで
+  示していたのに発生点の帰属が誤っていた）がある。
+
+  **着手時に本文の主張をコードで裏取りし、食い違えば実測を正として PR 説明に乖離を書くこと。**
+  「本文にこう書いてある」を根拠に実装しないこと。
+
+  ## 完了条件
+
+  - Issue の受入基準をすべて満たしていること
+  - `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` / `npm run test:integration` / `npm run build`
+    がすべて exit 0（**`cmd > log; echo $?` で実測**）
+
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns:
+    - 'pkill'
+    - 'killall'
+    - 'kill -9'
+    - 'rm -rf /'
+    - 'git push.*--force'
+    - 'sudo '
+    - 'commandmate (stop|start)'
+
+scope:
+  allow:
+    - "src/lib/hooks/**"
+    - "tests/**"
+    - "docs/**"
+    - "CHANGELOG.md"
+    - "dev-reports/**"
+  deny:
+    - "src/lib/detection/**"
+    - "src/lib/session/**"
+    - "src/lib/verification/**"
+verify:
+  gates: [lint, typecheck, unit]
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
