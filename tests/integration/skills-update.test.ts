@@ -55,6 +55,7 @@ import { POST as buildPlan } from '@/app/api/worktrees/[id]/skills/[skillId]/pla
 import { POST as applyInstall } from '@/app/api/worktrees/[id]/skills/[skillId]/install/route';
 import { POST as buildUpdatePlan } from '@/app/api/worktrees/[id]/skills/[skillId]/update-plan/route';
 import { POST as applyUpdate } from '@/app/api/worktrees/[id]/skills/[skillId]/update/route';
+import { GET as listSkills } from '@/app/api/worktrees/[id]/skills/route';
 import { getWorktreeById } from '@/lib/db';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getSkillCatalog } from '@/lib/skills/catalog-client';
@@ -70,6 +71,7 @@ import { resetSkillSnapshotStoreForTesting } from '@/lib/skills/snapshot-store';
 import { getSkillInstallation } from '@/lib/skills/installed-state';
 import { listSkillOperationAudit } from '@/lib/skills/operation-audit';
 import { readSkillUpdateBackupManifest } from '@/lib/skills/updater';
+import { hasSkillUpdate } from '@/lib/skills/version-resolver';
 import { loadAgentsSkills, loadSkills } from '@/lib/slash-commands';
 import type { SkillCatalog, SkillCatalogEntry } from '@/types/skills';
 import type { Worktree } from '@/types/models';
@@ -247,6 +249,14 @@ async function applyPlan(
     acknowledgeRiskIncrease: plan.riskIncreased,
     ...extra,
   });
+}
+
+/** The list route the #1441/#1442 UIs read (#1753). */
+async function listInstalledSkills(): Promise<Response> {
+  return listSkills(
+    new NextRequest(`http://localhost/api/worktrees/${WORKTREE_ID}/skills`),
+    { params: Promise.resolve({ id: WORKTREE_ID }) }
+  );
 }
 
 function installedReceiptVersion(prefix = '.agents/skills'): string | null {
@@ -467,6 +477,84 @@ describe('Skill update: zero-write refusals', () => {
       'SKILL_PLAN_INPUT_REJECTED'
     );
     expect(installedReceiptVersion()).toBe(FROM_VERSION);
+  });
+});
+
+// =============================================================================
+// Drift between the index and the receipt (#1753)
+// =============================================================================
+
+/**
+ * The reported failure, end to end.
+ *
+ * Something moved the payload on disk without going through this server — the
+ * production evidence was three receipts sharing an mtime with no rows in
+ * `skill_operations` — so the index kept naming the version that was installed
+ * before. The list route served that stale version, the screen offered an
+ * update to a version the receipt already had, and the update route (which
+ * reads the receipt) rejected it as not strictly newer. The message read as
+ * "you are already up to date" while the update button was still there.
+ *
+ * The state is reconstructed by rewinding the *row* after a real update, so
+ * disk and index disagree exactly as they did in production: a row naming
+ * {@link FROM_VERSION} with the digest of the receipt that version wrote,
+ * over a payload that is at {@link TO_VERSION}.
+ */
+describe('Skill update: an index that drifted from the receipt', () => {
+  async function driftIndexBehindDisk(): Promise<void> {
+    const before = getSkillInstallation(db, WORKTREE_ID, SKILL_ID);
+    expect(before?.version).toBe(FROM_VERSION);
+
+    expect((await applyPlan(await updatePlanOrThrow())).status).toBe(200);
+    expect(installedReceiptVersion()).toBe(TO_VERSION);
+
+    db.prepare(
+      'UPDATE skill_installations SET version = ?, receipt_sha256 = ? WHERE worktree_id = ? AND skill_id = ?'
+    ).run(before!.version, before!.receiptSha256, WORKTREE_ID, SKILL_ID);
+    expect(getSkillInstallation(db, WORKTREE_ID, SKILL_ID)?.version).toBe(FROM_VERSION);
+  }
+
+  it('lists the version the receipt records, not the one the row kept', async () => {
+    await driftIndexBehindDisk();
+
+    const response = await listInstalledSkills();
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { skills: Array<{ skillId: string; version: string }> };
+    const listed = body.skills.find((skill) => skill.skillId === SKILL_ID);
+
+    expect(listed?.version).toBe(TO_VERSION);
+    // No update affordance: the served version is the Catalog's latest.
+    expect(hasSkillUpdate(listed!.version, TO_VERSION)).toBe(false);
+    // And the row itself converged, so the dashboard scan sees it too.
+    expect(getSkillInstallation(db, WORKTREE_ID, SKILL_ID)?.version).toBe(TO_VERSION);
+  });
+
+  it('names both versions when a client asks for the version already installed', async () => {
+    await driftIndexBehindDisk();
+
+    // What a client reading the stale list would have sent.
+    const response = await requestUpdatePlan({ version: TO_VERSION });
+
+    expect(response.status).toBe(404);
+    const body = (await response.json()) as { code: string; error: string };
+    expect(body.code).toBe('SKILL_UPDATE_VERSION_NOT_ELIGIBLE');
+    expect(body.error).toContain(`requested version ${TO_VERSION}`);
+    expect(body.error).toContain(`receipt on disk records ${TO_VERSION}`);
+  });
+
+  it('converges without touching the payload or the operation log', async () => {
+    await driftIndexBehindDisk();
+    const before = snapshotTree(worktreeDir);
+    const auditBefore = listSkillOperationAudit(db, { worktreeId: WORKTREE_ID }).length;
+
+    expect((await listInstalledSkills()).status).toBe(200);
+
+    expect(treeDelta(before, snapshotTree(worktreeDir))).toEqual({
+      added: [],
+      removed: [],
+      changed: [],
+    });
+    expect(listSkillOperationAudit(db, { worktreeId: WORKTREE_ID })).toHaveLength(auditBefore);
   });
 });
 

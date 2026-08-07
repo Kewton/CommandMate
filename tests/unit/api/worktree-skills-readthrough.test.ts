@@ -15,6 +15,13 @@
  * lists the Skill can only have come from the restored index — which is what
  * "read-through cache" has to mean to be worth anything.
  *
+ * Issue #1753 is the same category error one step in: a row that *exists* and
+ * is stale. #1709 fixed "not indexed" being read as "not installed" but left
+ * "indexed at the wrong version" being read as the installed version, so the
+ * list route and the update route — which reads the receipt — answered
+ * differently inside one server, and the update the screen offered could never
+ * apply. A read converges the row now. It still does not prune one.
+ *
  * @vitest-environment node
  */
 
@@ -37,6 +44,7 @@ import {
   upsertSkillInstallation,
 } from '@/lib/skills/installed-state';
 import { SKILL_REINDEX_OPERATION_ID } from '@/lib/skills/reindex';
+import { hasSkillUpdate } from '@/lib/skills/version-resolver';
 import type { SkillInstallReceipt } from '@/types/skills';
 import type { Worktree } from '@/types/models';
 import { removeTempDir } from '@tests/helpers/temp-dir';
@@ -407,13 +415,66 @@ describe('GET /api/worktrees/[id]/skills — the indexed answer does not regress
     });
   });
 
-  it('keeps serving the indexed version when the receipt on disk disagrees', async () => {
+  /**
+   * #1709 pinned the opposite of this: the indexed version was served and the
+   * receipt was ignored, because converging a row was held to be the explicit
+   * rebuild's job. #1753 is the bill for that. The stale row is what the screen
+   * shows, so it is also what the client offers to update from — and the update
+   * route reads the receipt, sees the "new" version already installed, and
+   * rejects the request as not strictly newer. The user reads that as "already
+   * up to date" while looking at an update button. A read converges now, so
+   * both routes answer from the same evidence.
+   */
+  it('serves the version on disk when the receipt disagrees with the index', async () => {
     indexInstall(makeReceipt('demo-skill', '1.2.3'));
     writePayload(makeReceipt('demo-skill', '9.9.9'));
 
     const { body } = await call();
 
-    expect(body.skills[0].version).toBe('1.2.3');
+    expect(body.skills[0].version).toBe('9.9.9');
+    // And the row itself converged, so the next read needs no repair at all.
+    expect(getSkillInstallation(db, WORKTREE_ID, 'demo-skill')?.version).toBe('9.9.9');
+  });
+
+  it('invalidates the dashboard scan cache when it converges a drifted row', async () => {
+    indexInstall(makeReceipt('demo-skill', '1.2.3'));
+    writePayload(makeReceipt('demo-skill', '9.9.9'));
+
+    await call();
+    expect(invalidateCacheMock).toHaveBeenCalledTimes(1);
+
+    // Second read finds nothing to converge, so nothing is invalidated again.
+    await call();
+    expect(invalidateCacheMock).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * The reported state, with the versions it was reported with: `cmate-verify`
+   * indexed at 0.3.1 while the receipt on disk — and the Catalog — said 0.4.2.
+   * The screen offered an update to a version that was already installed, and
+   * the update route rejected it. `hasSkillUpdate` is the predicate the pane
+   * badges on, so running it over the served version is what says the affordance
+   * is gone, not merely that the number changed.
+   */
+  it('offers no update once the served version is the one on disk', async () => {
+    indexInstall(makeReceipt('cmate-verify', '0.3.1'));
+    writePayload(makeReceipt('cmate-verify', '0.4.2'));
+
+    const { body } = await call();
+
+    expect(body.skills[0].version).toBe('0.4.2');
+    expect(hasSkillUpdate(body.skills[0].version, '0.4.2')).toBe(false);
+  });
+
+  it('keeps serving the indexed row when the receipt agrees with it', async () => {
+    const receipt = makeReceipt('demo-skill', '1.2.3');
+    indexInstall(receipt);
+    writePayload(receipt);
+
+    const { body } = await call();
+
+    expect(body.skills[0]).toMatchObject({ version: '1.2.3', installedAt: T0, updatedAt: T0 });
+    expect(invalidateCacheMock).not.toHaveBeenCalled();
   });
 
   it('never deletes an index row whose payload is absent', async () => {
