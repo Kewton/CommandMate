@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **hooks: dev モードで構造化イベントが一切機能しなかった問題を修正（`agent-event-state` を `globalThis` 経由に）** (#1736)
+  - `src/lib/session/agent-event-state.ts` が 6 つの Map を素のモジュールスコープで持っていた。`next dev`（`commandmate start --dev` / `tsx server.ts`）は route handler を**個別にバンドルする**ため、`POST /api/hooks/agent-event` が書いた Map と `GET /api/worktrees/:id/current-output` が読む Map が別物になり、`structuredEvents` が**常に全 null**に縮退していた。production build ではモジュールが共有されるので影響なし＝ CI もリリースも一度も見ていない
+  - Epic #1720 の構造化状態**すべて**（#1549 の `lastStopEventAt` / #1722 の `lastAgentEvent` / #1723 の `sessionStatus` 2 層化 / #1724 の抑止記録 / #1725 の prompt_waiting / #1726 の AskUserQuestion）が同時に無効化されていた。**しかも無言** — エラーも警告も出ず payload は整形式のまま「イベントは来ていない」と言い続けるので、「hooks を設定したのに何も起きない」という #1720 が塞ごうとしている当の失敗様式になる
+  - **実測で確認**（2026-08-07、隔離ポート 3779 の `tsx server.ts` / 隔離 DB）: POST が `agent-event-received` をログに出した直後の GET が `structuredEvents.lastEventType: null` を返した。修正後は同じ手順で `"user_prompt_submit"` を返す
+  - `src/lib/polling/auto-yes-suppression-state.ts`（#1684）も**同型の分断**を受けていたので同時に修正した。書き手は `/api/hooks/permission-request`（`permission-decision-service` 経由）と Auto-Yes ポーラ、読み手は `buildCurrentOutput` で、常に別 route。ポリシー抑止で止まった worker の理由を CLI に出す機能そのものが dev で無効だった
+  - 修正は `auto-yes-state.ts`（#153）が確立していた `globalThis.__x ?? (globalThis.__x = new Map())` パターンをそのまま踏襲。**このパターンは既に repo 内 17 モジュールで使われていたのに、どこにも明文化されていなかった**ため、`docs/module-reference.md` 冒頭に規約として追加した（適用対象／非適用対象＝派生キャッシュ・ポーラループ内で完結する状態、の線引きつき）
+  - 回帰テスト `tests/unit/session/agent-event-state-module-identity.test.ts`: `vi.resetModules()` でモジュールを 2 回ロードし、片方が書いた状態をもう片方から読めることを 7 ケースで固定。**変異注入で非空振りを証明済み** — 7 つの Map を 1 つずつ素のモジュールスコープに戻すと、いずれも対応するケースが赤になることを実測（全戻しでは 7/7 赤）
 - **skills(orchestrate-monitor): `hooks-git.sh` が現行の worktree id を 1 件も解決できず、`commits` / `uncommitted` が恒久的に 0 になる問題を修正** (#1728)
   - `mh_worktree_path()` は worktree を**ブランチ名**でしか突合していなかったが、CommandMate が id を採番する規則は #1621 以降**ディレクトリ名**（`deriveWorktreeId()` ＝ `sanitize(basename(path))`、初回登録時に確定）である。`commandmate-issue-1728` / `fix/1728-…` のようにディレクトリを Issue 番号で採番するリポジトリでは**1 件も一致せず、メイン worktree すら解決できなかった**。`slug(basename(<path>))` を第 1 候補として追加し、ブランチ由来の旧 2 規則は残した（旧 id もそのまま解決できる）
   - **最も重い影響は STARTED ガードの不活性化**。`verify-completion.sh` は `commits=0 && uncommitted=0` を「タスクが composer から出ていない」の署名として読むため、恒久 0 のもとでは「未起動 idle を COMPLETE と誤報しない」ガードが**誰も測っていない数字**で裁定していた。#1614 が塞いだのは git コマンドが失敗する経路で、これは**git は成功して突合が外れる**別経路である
@@ -35,6 +42,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - フレームが読めない間は完了判定を抑止し、dwell は 2 状態をまたいで継続する。本物の完了 `ready`/`input_prompt` はフラグを立てないので従来どおり初回ポーリングで exit 0
 
 ### Added
+- **hooks: 注入 settings に `permissions.deny` を追加し、パターン一括 kill を機構で塞ぐ** (#1739)
+  - 2026-08-06、委任ワーカーが隔離サーバ 1 本を再起動するつもりで `pkill -f "node dist/server/server.js"` を実行し、**ユーザーの本番サーバ（port 3000）と global インスタンス（port 60301）を巻き込んで停止**させた。#1722 が全 Claude セッションへ注入している `--settings` に `"deny": ["Bash(pkill:*)","Bash(killall:*)","Bash(kill -9:*)"]` を同居させる
+  - **この層でなければ止まらない。** `permissions.deny` は**ダイアログが存在する前に**拒否するので `PermissionRequest` が発火せず、**Auto-Yes に裁定の機会が来ない**。事故当時は実際にダイアログが出て Auto-Yes がそれを承認していた。契約文（対象ベースの禁止＝助言）と契約 `autoYes.denyPatterns`（人間へのエスカレーション）はどちらもすり抜けられている
+  - **禁じるのは対象ではなく手段** — 3 ルールはいずれも「プロセスをパターンで選ぶ書き方」を指す。**PID 指定は従来どおり通る**（`kill "$(cat uat.pid)"` / `kill 4242` / `kill -TERM 4242`）。自分が起動したプロセスの止め方は docs/user-guide/agent-event-hooks.md §0.7 に明記した
+  - **実測**（claude 2.1.223、docs/design/agent-hooks-permission-deny-verification.md）: 無条件 allow を返す `PermissionRequest` hook（＝現実の Auto-Yes より強い）を置いた状態で、deny 対象は **hook 0 回**で拒否され、承認が要る別コマンドでは同じ hook が**確かに 1 回発火して allow した**（空振り防止の対照実験）。`--settings` の権限は独立宛先 `flagSettings` に **Adding** され置換ではない。**deny は優先度が上の `settings.local.json` の `allow` にも勝つ**ためユーザー設定の `permissions.allow` で開け直せない。前方一致は**フラグまで含めて**照合されるので `Bash(kill -9:*)` は `kill <pid>` に当たらない。`cd x && …` / `… | cat` / `echo x; …` と合成しても拒否される
+  - 危険なペイロードは一度も実行していない。実ルールは載せたまま、同じルール形の無害な stand-in（`sw_vers` = 素の前方一致、`uname -a` = フラグつき前方一致）で照合器を測っている
+  - ロールバックは既存の `CM_AGENT_HOOKS_INJECT=0`（注入全体）。deny だけを外すスイッチは設けない — 構造化イベントごと失う方が「機構は入っているが黙って外されている」より事故を見つけやすい
+
+- **verify: 実行契約に環境不変条件ゲート `env-clean` を追加し、リポジトリ外の副作用を裁定する** (#1740)
+  - `scope` は `scope.allow` / `scope.deny` で**リポジトリ内のファイル変更**を裁定するが、プロセス・ポート・tmux セッション・`$HOME` を裁定する仕組みが 1 つも無かった。2026-08-06 の 4 件（本番サーバの停止 #1739 / `~/.commandmate-uat-1726` の放置 / 隔離サーバ 3779 の残存 / `~/.commandmate/hooks` の汚染 #1722）は**すべて `scope` を PASS する**。task 作成時にスナップショットを取り、検証時に差分を取る
+  - スナップショット 4 項目: CommandMate 関連の TCP listener（`lsof` × `ps` で絞り、key は `tcp/<port>`）／`mcbd-*` tmux セッション／`$HOME` 直下／`~/.commandmate` 直下
+  - **fail-open にしない（本ゲートで最も重要な設計判断）**: probe は `ok` / `unavailable` を必ず名乗り、**「取れなかった」を「空だった」に潰さない**。ベースライン不在、または片側の probe が `unavailable` なら **UNKNOWN**（gate `error` → run `failed`）で、決して `passed` にはならない。`skipped` も使わない（「判定すべき宣言が無かった」と読まれるため）。`lsof` の exit 1、tmux の `no server running`、`~/.commandmate` の ENOENT は**実測されたゼロ**なので `ok` として区別する
+  - **偽陽性の抑制は非対称ルール**: 減ったものは誰のものであれ常に違反（#1739 / #1624）、増えたものは**他ワーカーに帰属できる場合だけ免除**。帰属は tmux がセッション名 `mcbd-<cli>-<worktreeId>`、listener がプロセスの cwd（自 worktree 配下＝自分 / **兄弟ディレクトリ＝他ワーカーとユーザの本番 checkout** / 不明＝厳しい側）。`$HOME` と `~/.commandmate` は所有者が無いので常に判定対象
+  - **既定は無効**。`options.requireEnvClean`（verify.yaml、リポジトリ単位）と `success.requireEnvClean`（契約、委任単位）の **OR** で有効化し、両方省略時は**ゲート行も probe もベースラインファイルも一切生じない**。ベースラインの記録自体が opt-in に従うため、off の既定は副作用ゼロ
+  - **未着地**: `success.requireEnvClean` は `TaskContractSuccess` / `SUCCESS_KEYS`（`src/lib/tasks/contract-parser.ts`、本委任の scope 外）が閉じた集合のため**契約 YAML にはまだ書けない**。parser 側 2 行で開き、検証側は resolver が `success` を構造的に読むので無改修で効く（挙動はテストで先に固定済み）。`verify.gates: [env-clean]` は `contract-message.ts` の 1 行、`commandmate status --json` のヘルスチェック拡張は `src/cli/commands/status.ts` が scope 外で未着手。詳細は docs/design/task-contract.md §2.6
 - **detection: AskUserQuestion の選択肢を `PreToolUse` の payload から取り、`respond` を送信前に検証する（Phase 3）** (#1726)
   - 画面から regex で復元していた選択肢を、エージェント自身が送ってくる `tool_input` で置き換える。`PreToolUse`（matcher `AskUserQuestion`）を注入し、質問文・選択肢ラベル・**各選択肢の説明文**を受け取る。説明文は picker が独立した行に描くもので、scraper は継続行として捨てているため（そうしないと別の選択肢として解析される）**構造化でしか取れない情報**
   - **役割分担**: 画面が開いている／閉じたの**検出は scraper**（#1708 が担当）、開いていると判ったあとの**正確な選択肢の提供が本 Issue**。この記録は `sessionStatus` を一切決めず、#1725 の OR 合成にも #1723 の「scraper の `waiting` が常に勝つ」規則にも触れていない

@@ -23,6 +23,8 @@ import {
   validateContractAgainstVerifyConfig,
 } from '@/lib/tasks/contract-message';
 import { loadVerifyConfig, VerifyConfigError } from '@/lib/verification/verify-config';
+import { resolveRequireEnvClean } from '@/lib/verification/env-clean-gate';
+import { captureEnvSnapshot, saveEnvSnapshot } from '@/lib/verification/env-snapshot';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
@@ -31,6 +33,37 @@ const logger = createLogger('api/tasks');
 const MAX_CONTRACT_PATH_LENGTH = 512;
 const MAX_LIST_LIMIT = 100;
 const DEFAULT_LIST_LIMIT = 20;
+
+/**
+ * Record the machine's state as this task begins (Issue #1740).
+ *
+ * Only when a declaration switched `env-clean` on. The gate is opt-in, and an
+ * opt-in gate that writes a file on every send would not be off — "省略時に既存
+ *契約の挙動が 1 bit も変わらない" has to include side effects, not just
+ * verdicts. The cost of that choice is that switching the gate on mid-flight
+ * cannot retroactively produce a baseline, which is correct: the gate reports
+ * UNKNOWN rather than inventing one.
+ *
+ * Never throws. A snapshot that could not be written leaves no baseline, and a
+ * missing baseline is UNKNOWN at verification time — failing the send instead
+ * would make an unrelated `lsof` problem block the delegation itself.
+ */
+async function recordEnvBaseline(
+  taskId: string,
+  worktreeId: string,
+  contract: Parameters<typeof resolveRequireEnvClean>[0],
+  verifyConfig: Parameters<typeof resolveRequireEnvClean>[1]
+): Promise<void> {
+  if (!resolveRequireEnvClean(contract, verifyConfig).required) return;
+  try {
+    saveEnvSnapshot(taskId, await captureEnvSnapshot({ worktreeId }));
+  } catch (error) {
+    logger.warn('env-baseline-capture-failed', {
+      taskId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
 
 export async function POST(
   request: NextRequest,
@@ -122,6 +155,8 @@ export async function POST(
       contractPath,
       contract,
     });
+
+    await recordEnvBaseline(task.id, id, contract, verifyConfig);
 
     return NextResponse.json(
       { task, message: composeContractMessage(contract, verifyConfig) },

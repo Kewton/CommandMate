@@ -293,6 +293,11 @@ globstar が 0 セグメントにマッチしない、括弧を文字クラス�
 （解決後のリストは §5 で「実際に走るコマンドの順序」として提示されるため、
 契約の記述順がその順序を偽ってはならない）。
 
+組み込み `env-clean`（§2.6）も同じ規則で、実行有無は `success.requireEnvClean` と
+verify.yaml の `options.requireEnvClean` の OR が決める。ただし現時点では
+`verify.gates: [env-clean]` と書くと送信時の照合（`validateContractAgainstVerifyConfig`）で
+未知の id として弾かれる — §2.6「未着地部分」を参照。
+
 ### 2.4 `autoYes`
 
 | キー | 型 | 既定 | 制約 |
@@ -369,6 +374,7 @@ enforcement が「契約が無いから従来動作」と「契約が off と言
 | `requireScopeClean` | boolean | `true` | `scope` 外の変更を不合格とする（組み込み `scope` ゲート。§2.2） |
 | `requireCommit` | boolean | `false` | `work-evidence` に「変更が在る」ではなく **「commit が在る」** を要求する。`commits=0 uncommitted=1` は failed（run は `not_started`）。Issue #1642 |
 | `autoVerifyOnStop` | boolean | `false` | `POST /api/hooks/agent-event`（`event: stop`）受信時に検証ランを自動起動する（Issue #1549） |
+| `requireEnvClean` | boolean | `false` | リポジトリ**外**の副作用（プロセス・ポート・tmux セッション・`$HOME`）を不合格とする（組み込み `env-clean` ゲート。§2.6）。Issue #1740。**現時点でパーサはこのキーを受理しない** — §2.6 の「未着地部分」を参照 |
 
 `requireWorkEvidence` / `requireScopeClean` は §2.3 のとおり `verify.gates` に対応する
 組み込みゲートを自動で足す。フラグが単独で意味を持つ（ゲートリストと矛盾しない）ように
@@ -421,6 +427,112 @@ commit の要求を裁定するのは `work-evidence` ゲートであり、`requ
 
 Phase 0 の bash 参照実装（`.claude/skills/cmate-verify/scripts/verify-run.sh`）は
 **契約を読まないスタンドアロンランナー**なので `options.requireCommit` だけを見る（Issue #1639）。
+
+### 2.6 組み込み `env-clean` ゲート（Issue #1740）
+
+実装: `src/lib/verification/env-snapshot.ts` / `src/lib/verification/env-clean-gate.ts`
+テスト: `tests/unit/verification/env-snapshot.test.ts` /
+`tests/unit/verification/env-clean-gate.test.ts` /
+`tests/unit/verification/gate-runner-env-clean.test.ts` /
+`tests/integration/env-clean-gate-1740.test.ts`
+
+`scope` は**リポジトリ内**のファイル変更を裁定する。`env-clean` は**リポジトリ外**を裁定する。
+両方あって初めて「この委任が何を変えたか」が閉じる。
+
+2026-08-06 に起きた 4 件（本番サーバの停止 #1739 / `~/.commandmate-uat-1726` の放置 /
+隔離サーバ 3779 の残存 / `~/.commandmate/hooks` の汚染 #1722）は**すべて `scope` を PASS する**。
+ファイルはリポジトリ内しか見ていないためである。
+
+#### スナップショット項目
+
+| probe id | 取得方法 | 違反の意味 |
+|---|---|---|
+| `listeners` | `lsof -nP -iTCP -sTCP:LISTEN -F pcn` を `ps -A -o pid=,command=` と突き合わせ、コマンドラインが CommandMate のもの（`COMMANDMATE_PROCESS_PATTERN`）だけを残す。key は `tcp/<port>`、anchor は `lsof -a -d cwd` で引いた cwd | ポートが消えた＝サーバを落とした／増えた＝サーバを残した |
+| `tmux-sessions` | `tmux list-sessions -F '#{session_name}'` のうち `mcbd-` 始まり | 他ワーカーのセッションを殺した（#1624）／自分のセッションを残した |
+| `home-entries` | `$HOME` 直下の `readdir` | HOME を汚した |
+| `commandmate-entries` | `~/.commandmate` 直下の `readdir` | 設定・状態ディレクトリを汚した |
+
+無関係なポートまで記録すると、ブラウザやコンテナランタイムが開閉するだけで違反が量産され
+ゲートが使い物にならない。`listeners` を CommandMate 関連に絞るのはそのためである。
+同じ理由で `-wal` / `-shm` / `-journal` / `.DS_Store` と、本機構自身の保存先
+`env-snapshots/` は両ディレクトリ probe から除外する（SQLite のサイドカーはサーバの
+起動・停止で勝手に増減する）。
+
+#### fail-open にしない（**本ゲートで最も重要な設計判断**）
+
+probe は `ok` / `unavailable` のどちらかを必ず名乗り、`unavailable` の `entries` は空である。
+**「取れなかった」を「空だった」に潰さない。** 潰すと #1614 と同型（測っていない 0 を配る）
+になる。差分側も、どちらか一方のスナップショットが `unavailable` なら該当 probe を
+`unknown` にする（欠けた側を空集合とみなせば全件が added / removed になり、等しいとみなせば
+それが fail-open そのものになる）。
+
+| ゲート結果 | 条件 | run 集計 |
+|---|---|---|
+| `passed` | 全 probe を比較でき、全て一致 | `passed` |
+| `failed` | 実測された違反が 1 件以上 | `failed` |
+| `error`（UNKNOWN） | ベースライン不在／`unknown` な probe が 1 つ以上 | `failed` |
+
+`skipped` は使わない。`skipped` は「判定すべき宣言が無かった」と読まれるが、
+測れなかった機械について言ってよい台詞ではない。
+
+#### 偽陽性の抑制 — 非対称ルール
+
+- **減ったものは常に違反。** タスク開始時に在ったものが消えたなら、誰のものであれ違反である
+  （`pkill -f` が本番サーバを巻き込む #1739、`kill-server` が全 `mcbd-*` を消す #1624 が
+  まさにこれ）。
+- **増えたものは、他ワーカーに帰属できる場合だけ免除。** 並列委任は互いの計測窓の中で
+  正当に自分のセッションやサーバを起こすため、これを違反にすると並列実行が成立しない。
+
+帰属の判定:
+
+| probe | 判定 |
+|---|---|
+| `tmux-sessions` | 名前 `mcbd-<cli>-<worktreeId>[-suffix]` を分解し、自 worktree なら `self`、別 worktree なら `other`、解釈できなければ `unattributed`。worktree id はハイフンを含みうるので曖昧なケースは `self` に倒す（厳しい側） |
+| `listeners` | プロセスの cwd が自 worktree 配下なら `self`、**自 worktree の兄弟ディレクトリ**なら `other`（linked worktree は横並びに作られ、ユーザの本番サーバが動くプライマリ checkout もそこに居る）、それ以外・cwd 不明は `unattributed` |
+| `home-entries` / `commandmate-entries` | ファイルに所有者は無いので常に `unattributed` |
+
+`unattributed` は「たぶん誰のものでもない」ではなく「他人のものだと**示せなかった**」であり、
+追加は違反として扱う。免除には他所有者の積極的な証拠が要る。
+
+#### 既定は無効、opt-in で有効
+
+| 宣言場所 | 単位 |
+|---|---|
+| `options.requireEnvClean`（verify.yaml、[verification-config.md](./verification-config.md) §2.3） | リポジトリ |
+| `success.requireEnvClean`（契約） | 委任 1 件 |
+
+`requireCommit` と同じく **OR** で合成し、契約は締める方向にしか効かない。
+両方省略時はゲート行が 1 つも作られず、probe も一切実行されず、ベースラインファイルも
+書かれない — **既存契約の挙動は 1 bit も変わらない**。
+
+`commandmate verify <id> --gates env-clean` で明示指名もできる。ベースラインが無ければ
+UNKNOWN を返す（黙って PASS はしない）。
+
+#### 実行位置
+
+`work-evidence` → `scope` → **`env-clean`** → コマンド系ゲート。
+コマンド系ゲートの**前**に測るのは、2 枚のスナップショットがエージェントの作業窓を表すから
+である。後ろに置くと、`test:e2e` のようにサーバを起こすゲート自身の副作用が
+エージェントの漏らしとして報告される。`work-evidence` が通らなかったランでは
+`scope` と同様 `skipped` を記録する（そのランは `not_started` で終わり、緑にはならない）。
+
+#### 未着地部分（本 Issue のスコープ外に落ちた分）
+
+1. **`success.requireEnvClean` は契約 YAML にまだ書けない。** `TaskContractSuccess` と
+   `SUCCESS_KEYS`（`src/lib/tasks/contract-parser.ts`）は閉じた集合で、未知キーは
+   `unknown key "requireEnvClean"` として送信時に 400 になる。同ファイルは本委任の
+   `scope.allow` の外にあるため触れていない。**解決は 2 行**（`TaskContractSuccess` に
+   `requireEnvClean: boolean` を足し、`SUCCESS_KEYS` に `'requireEnvClean'` を足す。
+   既定値は `validateSuccess` の初期値に `requireEnvClean: false`）。
+   `resolveRequireEnvClean` は契約の `success` を**構造的に**読むので、この 2 行が入った
+   瞬間に検証側は無改修で動く（`tests/unit/verification/gate-runner-env-clean.test.ts` が
+   その挙動を先に固定してある）。
+2. **`verify.gates: [env-clean]` も同じ理由でまだ書けない。**
+   `validateContractAgainstVerifyConfig`（`src/lib/tasks/contract-message.ts`、同じく
+   scope 外）の `known` 集合に `ENV_CLEAN_GATE_ID` を足す 1 行が要る。
+3. **オーケストレーター向けヘルスチェック**（Issue「併せて欲しいもの」の
+   `commandmate status --json` 拡張）は `src/cli/commands/status.ts` が scope 外のため
+   未着手。`env-clean` は事後検知であり、即時検知は別の層である。
 
 ---
 
