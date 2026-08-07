@@ -46,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 正常終端（全 COMPLETE / `--max-polls` 到達）**以外**の全終了で `monitor: ERROR exiting on poll round <r> with <d>/<n> worker(s) complete` を出す。EXIT trap にぶら下げてあるので個別に trap していない死に方でも出る。引数検証で落ちる経路は trap 設置前なので従来どおり
   - `--heartbeat N`（既定 10、`0` で無効）で `monitor: alive (poll=N, complete=d/total)` を定期出力する。既定の運用ストリーム（介入・終局判定）は byte 単位で従来どおり
   - **再現条件は未特定**。144 はパイプライン（`monitor.sh … | grep …`）の `$?` ＝ grep の終了コードでもありうるため、`monitor.sh` 自身が signal 16 で死んだとは断定していない。次に起きたときに原因がログへ残るようにした修正である
+  - **上記 2 件は公開版 skill `cmate-orchestrate-monitor` にも移植済み**（[commandmate-skills#110](https://github.com/Kewton/commandmate-skills/pull/110)、skills 0.7.0）。`sync-map.json` の `port-required` エントリ 3 件は両側反映済みとして記録してある
 
 - **detection: claude のタスクパネルが直上のプロンプトを飲み、worker が無言で timeout する問題を修正** (#1708)
   - タスクパネルはペイン最下部に固定描画されるため、実運用の 200x1000 ペインではダイアログが上部・パネルが約 880 行下に来る。空行が潰されるとパネルが Pass 2 の走査窓に入り、ヘッダ `N tasks (X done, …)` と折り畳み行 `… +N completed` が**それぞれ独立に**選択肢として拾われて本物の選択肢を弾いていた（実キャプチャの 1 行削除実験で確認。片方だけ直しても未検出のまま）。パネルを**ブロックごと** skip する
