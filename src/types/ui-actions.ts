@@ -5,7 +5,7 @@
  * Based on Issue #13 UX Improvement design specification (Section 16.3)
  */
 
-import type { ChatMessage, PromptData } from './models';
+import type { ChatMessage, LivePromptData } from './models';
 import type { UIPhase, ErrorState, MobileActivePane, LeftPaneTab } from './ui-state';
 import type { ActivityId } from '@/config/activity-bar-config';
 
@@ -18,7 +18,7 @@ export type WorktreeUIAction =
   | { type: 'SET_PHASE'; phase: UIPhase }
 
   // Prompt actions
-  | { type: 'SHOW_PROMPT'; data: PromptData; messageId: string }
+  | { type: 'SHOW_PROMPT'; data: LivePromptData; messageId: string }
   | { type: 'CLEAR_PROMPT' }
   | { type: 'SET_PROMPT_ANSWERING'; answering: boolean }
 

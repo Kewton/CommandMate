@@ -7,6 +7,166 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-08-07
+
+> **Highlight**: 検出層を TUI 画面スクレイピングから **CLI 自身が申告する構造化イベント**へ移す基盤を入れた（Epic #1720）。発端は、claude のタスクパネル見出し `7 tasks (0 done, 1 in progress, 6 open)` が直上の選択肢プロンプトに「option 7」として紛れ込み、worker が無言で timeout する不具合である（#1708）。正規表現をもう 1 本足す対症療法ではなく、`PermissionRequest` / `PreToolUse` / `Stop` hook で**プロンプトの有無を CLI 自身に申告させる**経路を新設し、スクレイパと OR 合成した（どちらか一方が「プロンプトあり」と言えばプロンプトあり。互いの false は相手の true を打ち消さない）。あわせて、委任ワーカーが `pkill -f` で本番サーバを巻き込み停止させた事故と、環境変数の継承で本番 DB に書き込んだ事故を受け、`permissions.deny` の注入（#1739）と `env-clean` ゲート（#1740）で機構的に塞いだ。
+
+### Fixed
+
+- **session: `send` の prompt-waiting ガードが scraper しか見ておらず、構造化イベントだけが見ているダイアログへ打ち込めた問題を修正** (#1737)
+  - `isPromptWaiting()`（#1708）は `buildCurrentOutput()` を通らず `detectSessionStatus()` を直接呼んでいたため、#1725 が入れた OR 合成（`scraperPromptWaiting || promptWaiting !== null`）を経由していなかった。**同じ「プロンプト待ちか」という問いに 2 実装があり、サーバは `isPromptWaiting: true` を publish しながら同じ瞬間の `send` を 201 で受けていた** — #1708 の実害（ダイアログの入力欄にテキストが溜まり、次の `respond` が残留テキストごと「メッセージ」として送られる）が、#1708 が塞ぐために作られた経路にだけ残っていた
+  - 合成を `src/lib/session/prompt-waiting-composition.ts` に抽出し、`buildCurrentOutput` とガードの**両方がこれを呼ぶ**。OR 規則と scraper の非対称な解除規則（一度 `waiting` を見たフレームだけが「消えた」と言える）はこの 1 モジュールにしか無い。原因が「2 実装」なので、直し方が実装を増やすものであってはならない
+  - **単に OR にするだけでは閉じない**。構造化 waiting の解除イベント（`Stop`/`PostToolUse`/`user_prompt_submit`/`idle_prompt`）は hooks が全経路 fail-open なので届かない事故がありえ、しかも「scraper に見えないダイアログ」はその scraper に解除させることもできない。貼り付いた記録が `send` を拒否し続けると、**そのセッションは誰も（運用者自身も）書き込めなくなる** — #1725 のワーカーが構造化側をガードに繋がなかった判断はこの点で妥当だった。よって fail-open を構造化側にも適用する: (1) 報告から **5 分**（`STRUCTURED_SEND_BLOCK_MAX_AGE_MS`）で send 拒否だけが失効、(2) `commandmate send --ignore-structured-prompt` で 1 回だけ迂回、(3) `CM_STRUCTURED_SEND_GUARD=off` でサーバ全体を無効化。**拒否メッセージにこの 3 つを書く**（画面に何も見えない状態で「プロンプトに答えろ」とだけ言われた運用者は詰む）
+  - **上限が掛かるのは `send` の拒否だけで、`isPromptWaiting` の publish には掛からない**。誤った publish のコストはパネル 1 枚と `wait` の早期 exit 10 だが、誤った拒否のコストはセッションの書き込み不能であり、両者は同じ重みではない。5 分を過ぎても UI と `wait` はダイアログを報告し続ける（完了と誤読させない）
+  - 画面に見えているプロンプトは**どの迂回手段でも拒否されたまま**（それは `respond` で答えられる本物で、打ち込むこと自体が #1708 の実害）。scraper 側には齢の上限も掛けない（毎回ライブのフレームを読み直すので自分で解除される）
+  - 回帰テスト: `tests/unit/session/send-guard-structured-1737.test.ts`（20 ケース）と `tests/integration/api-send-structured-prompt-1737.test.ts`（10 ケース、実 hook fixture を実 route へ POST）。構造化 waiting のみで拒否／解除イベント後に通る／解除が来なくても TTL 経過後は通る／capture 例外で fail-open の 4 パターンに加え、**否定対照**（同じフレームでイベントが無ければ拒否しない・上限の内側では拒否する）を対にしてある
+  - **変異注入で非空振りを証明済み**（2026-08-07）。7 変異すべてで対応するテストが赤: ガードを scraper 単独へ戻す（unit 8 / integ 6 失敗＝本 Issue の欠陥そのものを再現）、TTL 撤去（各 1）、TTL を 0 に（6/6）、per-send 迂回を無視（各 1）、OR を AND に（10/6）、scraper 解除規則の撤去（unit 3）、迂回を画面上のプロンプトにも広げる（各 1）
+  - **production build の実機で確認済み**（2026-08-07、隔離ポート 3779・隔離 DB。dev モードでは #1736 により構造化イベントが機能しないため production build 必須）: 実 hook fixture を POST → `/current-output` が `isPromptWaiting=true, hook_permission_prompt` → 同状態の `send` が **409 `PROMPT_WAITING`** → `--ignore-structured-prompt` 相当のボディで **201** → `Stop` 投函後に **201**。5 分の上限も実時間で確認（t+0s と t+150s は 409、t+330s は `isPromptWaiting=true` のまま **201**）
+- **types: `promptData` の縮退値 (`unclassified`) を hooks / reducer 連鎖の型が表現していなかった問題を修正** (#1738)
+  - #1725 以降 `/current-output` は `promptData` に縮退値 `StructuredPromptWaitingData`（`type: 'unclassified'`、選択肢ゼロ、番号で答えられない）を載せて返すが、値が通る層は `PromptData` 単独のままだった。広げてあったのは**連鎖の末端 `PromptPanel` の prop だけ**で、WebSocket スナップショット・ポーリング hooks・UI reducer・Auto-Yes hook は「自分の型では存在しえない値」を握ったまま通していた。実害は出ていなかったが、危険なのは次に触る人が型を信じて `options` を参照したときで、**型検査は通り `unclassified` のときだけ実行時に壊れる**
+  - 共有 union `LivePromptData` と型ガード `isAnswerablePromptData()` を `src/types/models.ts` に**1 箇所だけ**定義し、`TerminalSnapshotEvent` / `PanePromptState` / `PromptState` / `SHOW_PROMPT` action / `UseAutoYesParams` / `MobilePromptSheetProps` / `CurrentOutputResponse`（hooks 2 本）をそこへ差し替えた。`PromptPanel` のローカル `PanelPromptData` は共有型への alias に変更（定義の重複なし）
+  - **`StructuredPromptWaitingData` は `PromptData` union に入れていない。** union の外に置いてあるのは意図的な設計判断で（`UNCLASSIFIED_PROMPT_TYPE` の注記）、閉じたのは union ではなく**値が通る経路の型**である。回帰テストに `@ts-expect-error` を置いてあるので、union を広げた瞬間 `tsc --noEmit` が「未使用の ts-expect-error」で落ちる
+  - **調査で本文にない受け取り側を 2 つ発見して同時に修正した**: (1) `src/lib/realtime/types.ts` の `TerminalSnapshotEvent.promptData` — WS push 経路。`RealtimeEvent` の catch-all メンバが object literal を吸収するため broadcast 地点で型エラーにならず、不一致が一度も表面化していなかった。(2) `ChatMessage.promptData` — `chat_messages.prompt_data` は #1708 / #1725 の監査レコード（`UnclassifiedFrameRecord` / `StructuredPromptHistoryRecord`）と**同じ列を共有**しており、書き手が `as unknown as PromptData` で押し込んでいた。`StoredPromptData` を定義してこのキャストを不要にした
+  - **`POST /api/worktrees/:id/respond` の実害を 1 件塞いだ**: 保存済みの `unclassified` 監査行を messageId 指定で「回答」すると、multiple_choice 分岐を素通りして yes/no 分岐に落ち、**誰も読めなかったダイアログに対して任意文字列を pane へ打ち込んでいた**。400 で拒否する（現行 UI からは到達不能 — ボタンが yes_no / multiple_choice でしか描画されないため）
+  - CLI 側（`src/cli/types/api-responses.ts`）は `type: string` / `options?: unknown[]` の**意図的に緩いミラー**で縮退値を既に表現できていた。型変更は不要と実測で確認し、将来サーバ union へ締め上げて穴を再導入しないよう注記を追加した
+  - 回帰テスト `tests/unit/prompt-data-type-gap-1738.test.tsx`（12 ケース）: 各層の型に実物の縮退値を代入する型ピン＋`/current-output` レスポンス → `useTerminalPanePolling` → `PromptPanel` の縮退表示までを 1 本で通す。`tests/integration/api-prompt-handling.test.ts` に respond 拒否 2 ケースを追加。**変異注入で非空振りを確認済み**（下記コミットメッセージ参照）
+- **hooks: dev モードで構造化イベントが一切機能しなかった問題を修正（`agent-event-state` を `globalThis` 経由に）** (#1736)
+  - `src/lib/session/agent-event-state.ts` が 6 つの Map を素のモジュールスコープで持っていた。`next dev`（`commandmate start --dev` / `tsx server.ts`）は route handler を**個別にバンドルする**ため、`POST /api/hooks/agent-event` が書いた Map と `GET /api/worktrees/:id/current-output` が読む Map が別物になり、`structuredEvents` が**常に全 null**に縮退していた。production build ではモジュールが共有されるので影響なし＝ CI もリリースも一度も見ていない
+  - Epic #1720 の構造化状態**すべて**（#1549 の `lastStopEventAt` / #1722 の `lastAgentEvent` / #1723 の `sessionStatus` 2 層化 / #1724 の抑止記録 / #1725 の prompt_waiting / #1726 の AskUserQuestion）が同時に無効化されていた。**しかも無言** — エラーも警告も出ず payload は整形式のまま「イベントは来ていない」と言い続けるので、「hooks を設定したのに何も起きない」という #1720 が塞ごうとしている当の失敗様式になる
+  - **実測で確認**（2026-08-07、隔離ポート 3779 の `tsx server.ts` / 隔離 DB）: POST が `agent-event-received` をログに出した直後の GET が `structuredEvents.lastEventType: null` を返した。修正後は同じ手順で `"user_prompt_submit"` を返す
+  - `src/lib/polling/auto-yes-suppression-state.ts`（#1684）も**同型の分断**を受けていたので同時に修正した。書き手は `/api/hooks/permission-request`（`permission-decision-service` 経由）と Auto-Yes ポーラ、読み手は `buildCurrentOutput` で、常に別 route。ポリシー抑止で止まった worker の理由を CLI に出す機能そのものが dev で無効だった
+  - 修正は `auto-yes-state.ts`（#153）が確立していた `globalThis.__x ?? (globalThis.__x = new Map())` パターンをそのまま踏襲。**このパターンは既に repo 内 17 モジュールで使われていたのに、どこにも明文化されていなかった**ため、`docs/module-reference.md` 冒頭に規約として追加した（適用対象／非適用対象＝派生キャッシュ・ポーラループ内で完結する状態、の線引きつき）
+  - 回帰テスト `tests/unit/session/agent-event-state-module-identity.test.ts`: `vi.resetModules()` でモジュールを 2 回ロードし、片方が書いた状態をもう片方から読めることを 7 ケースで固定。**変異注入で非空振りを証明済み** — 7 つの Map を 1 つずつ素のモジュールスコープに戻すと、いずれも対応するケースが赤になることを実測（全戻しでは 7/7 赤）
+- **skills(orchestrate-monitor): `hooks-git.sh` が現行の worktree id を 1 件も解決できず、`commits` / `uncommitted` が恒久的に 0 になる問題を修正** (#1728)
+  - `mh_worktree_path()` は worktree を**ブランチ名**でしか突合していなかったが、CommandMate が id を採番する規則は #1621 以降**ディレクトリ名**（`deriveWorktreeId()` ＝ `sanitize(basename(path))`、初回登録時に確定）である。`commandmate-issue-1728` / `fix/1728-…` のようにディレクトリを Issue 番号で採番するリポジトリでは**1 件も一致せず、メイン worktree すら解決できなかった**。`slug(basename(<path>))` を第 1 候補として追加し、ブランチ由来の旧 2 規則は残した（旧 id もそのまま解決できる）
+  - **最も重い影響は STARTED ガードの不活性化**。`verify-completion.sh` は `commits=0 && uncommitted=0` を「タスクが composer から出ていない」の署名として読むため、恒久 0 のもとでは「未起動 idle を COMPLETE と誤報しない」ガードが**誰も測っていない数字**で裁定していた。#1614 が塞いだのは git コマンドが失敗する経路で、これは**git は成功して突合が外れる**別経路である
+  - 突合はディレクトリ優先（稼働中サーバが配る id が 1 なので、両規則が別 checkout に当たったときは 1 が勝つ）。`branch` レコードを持たない detached HEAD も解決できるようになった。ディレクトリ名が衝突する 2 checkout は区別できないので、最初の 1 件を数えたうえで `WARN` を出す
+  - **診断行に `ERROR` / `WARN` のレベル語を付けた**。従来の `monitor hooks: …` は `WARN` も `ERROR` も含まないため、運用でよく使う `2>&1 | grep -Ei "…|ERROR|FAIL"` で**1 行残らず消えていた**。この欠陥が 25 分間気付かれなかった直接の理由がこれである。`ERROR` = 両カウンタとも測れていない／`WARN` = 片方だけ劣化
+  - 回帰テストは **ディレクトリ名 ≠ ブランチ名の repo** を fixture にする（`hooks-git-resolution.test.ts`）。既存テストの fixture は `myrepo-x` / `feature/x` / id `myrepo-feature-x` ＝ 旧規則で組まれており、この穴を構造的に検知できなかった
+
+- **skills(orchestrate-monitor): `monitor.sh` が黙って死に、ワーカーが無監視のまま走り続ける問題に可観測性を追加** (#1728)
+  - 起動行 1 行だけを出した監視が約 25 分後に **exit 144** で沈黙終了し、その間ワーカー 2 本は正常稼働のまま無監視だった（2026-08-06）。健全な沈黙と死んだ沈黙が区別できないのが本体である
+  - HUP / INT / QUIT / PIPE / TERM を trap して `monitor: ERROR caught SIG<name>` を stderr へ出し `128+n` で終了する。SIGURG（macOS の signal 16 ＝ 144 - 128）は**致死化せず** `WARN` を出して監視を続ける（既定動作が無視のため）
+  - 正常終端（全 COMPLETE / `--max-polls` 到達）**以外**の全終了で `monitor: ERROR exiting on poll round <r> with <d>/<n> worker(s) complete` を出す。EXIT trap にぶら下げてあるので個別に trap していない死に方でも出る。引数検証で落ちる経路は trap 設置前なので従来どおり
+  - `--heartbeat N`（既定 10、`0` で無効）で `monitor: alive (poll=N, complete=d/total)` を定期出力する。既定の運用ストリーム（介入・終局判定）は byte 単位で従来どおり
+  - **再現条件は未特定**。144 はパイプライン（`monitor.sh … | grep …`）の `$?` ＝ grep の終了コードでもありうるため、`monitor.sh` 自身が signal 16 で死んだとは断定していない。次に起きたときに原因がログへ残るようにした修正である
+  - **上記 2 件は公開版 skill `cmate-orchestrate-monitor` にも移植済み**（[commandmate-skills#110](https://github.com/Kewton/commandmate-skills/pull/110)、skills 0.7.0）。`sync-map.json` の `port-required` エントリ 3 件は両側反映済みとして記録してある
+
+- **detection: claude のタスクパネルが直上のプロンプトを飲み、worker が無言で timeout する問題を修正** (#1708)
+  - タスクパネルはペイン最下部に固定描画されるため、実運用の 200x1000 ペインではダイアログが上部・パネルが約 880 行下に来る。空行が潰されるとパネルが Pass 2 の走査窓に入り、ヘッダ `N tasks (X done, …)` と折り畳み行 `… +N completed` が**それぞれ独立に**選択肢として拾われて本物の選択肢を弾いていた（実キャプチャの 1 行削除実験で確認。片方だけ直しても未検出のまま）。パネルを**ブロックごと** skip する
+  - 検出漏れは `isPromptWaiting: false` を意味し、それが唯一の「人間待ち」信号なので、auto-yes も `wait --on-prompt agent` の exit 10 も契約の `autoYes` ポリシーも同時に無効化されていた
+  - パネル行の判定グリフは**実測した `◼ ◻` のみ**。`☐ ☑ ☒` を含めると multiSelect の選択肢行をパネルと誤認してプロンプトごと消すことを実測したため、形が似ているという理由で広げない
+  - fixture は claude 2.1.223 の実 tmux capture。120x40 ではパネルとダイアログが同一画面に載らず**再現しない**
+  - **直っていないこと**: 2026-08-05 の元報告（Bash 承認プロンプト）の分岐点は再現できていない。その形のフレームは修正の有無にかかわらず検出成功する。実測して直したのは 2026-08-06 追記分（AskUserQuestion の確認ステップ）のみ
+
+- **wait: 未分類フレームの degraded 形 `ready`/`no_recent_output` を「完了」と誤報しなくなった** (#1708)
+  - `isUnclassifiedActive` は `(running && default) || (ready && no_recent_output)` の 2 状態で立つ。後者は**読めないオーバーレイが劣化した姿**で（Auto-Yes ポーラが `lastServerResponseTimestamp` を打つと約 5 秒で反転、#1497）、完了ではない。停滞中の worker に `Completed` を返していたのは、Issue が問題視した timeout(124) より悪い（124 はパイプラインを止めるが 0 はマージまで進む）
+  - フレームが読めない間は完了判定を抑止し、dwell は 2 状態をまたいで継続する。本物の完了 `ready`/`input_prompt` はフラグを立てないので従来どおり初回ポーリングで exit 0
+
+### Added
+- **hooks: 注入 settings に `permissions.deny` を追加し、パターン一括 kill を機構で塞ぐ** (#1739)
+  - 2026-08-06、委任ワーカーが隔離サーバ 1 本を再起動するつもりで `pkill -f "node dist/server/server.js"` を実行し、**ユーザーの本番サーバ（port 3000）と global インスタンス（port 60301）を巻き込んで停止**させた。#1722 が全 Claude セッションへ注入している `--settings` に `"deny": ["Bash(pkill:*)","Bash(killall:*)","Bash(kill -9:*)"]` を同居させる
+  - **この層でなければ止まらない。** `permissions.deny` は**ダイアログが存在する前に**拒否するので `PermissionRequest` が発火せず、**Auto-Yes に裁定の機会が来ない**。事故当時は実際にダイアログが出て Auto-Yes がそれを承認していた。契約文（対象ベースの禁止＝助言）と契約 `autoYes.denyPatterns`（人間へのエスカレーション）はどちらもすり抜けられている
+  - **禁じるのは対象ではなく手段** — 3 ルールはいずれも「プロセスをパターンで選ぶ書き方」を指す。**PID 指定は従来どおり通る**（`kill "$(cat uat.pid)"` / `kill 4242` / `kill -TERM 4242`）。自分が起動したプロセスの止め方は docs/user-guide/agent-event-hooks.md §0.7 に明記した
+  - **実測**（claude 2.1.223、docs/design/agent-hooks-permission-deny-verification.md）: 無条件 allow を返す `PermissionRequest` hook（＝現実の Auto-Yes より強い）を置いた状態で、deny 対象は **hook 0 回**で拒否され、承認が要る別コマンドでは同じ hook が**確かに 1 回発火して allow した**（空振り防止の対照実験）。`--settings` の権限は独立宛先 `flagSettings` に **Adding** され置換ではない。**deny は優先度が上の `settings.local.json` の `allow` にも勝つ**ためユーザー設定の `permissions.allow` で開け直せない。前方一致は**フラグまで含めて**照合されるので `Bash(kill -9:*)` は `kill <pid>` に当たらない。`cd x && …` / `… | cat` / `echo x; …` と合成しても拒否される
+  - 危険なペイロードは一度も実行していない。実ルールは載せたまま、同じルール形の無害な stand-in（`sw_vers` = 素の前方一致、`uname -a` = フラグつき前方一致）で照合器を測っている
+  - ロールバックは既存の `CM_AGENT_HOOKS_INJECT=0`（注入全体）。deny だけを外すスイッチは設けない — 構造化イベントごと失う方が「機構は入っているが黙って外されている」より事故を見つけやすい
+
+- **verify: 実行契約に環境不変条件ゲート `env-clean` を追加し、リポジトリ外の副作用を裁定する** (#1740)
+  - `scope` は `scope.allow` / `scope.deny` で**リポジトリ内のファイル変更**を裁定するが、プロセス・ポート・tmux セッション・`$HOME` を裁定する仕組みが 1 つも無かった。2026-08-06 の 4 件（本番サーバの停止 #1739 / `~/.commandmate-uat-1726` の放置 / 隔離サーバ 3779 の残存 / `~/.commandmate/hooks` の汚染 #1722）は**すべて `scope` を PASS する**。task 作成時にスナップショットを取り、検証時に差分を取る
+  - スナップショット 4 項目: CommandMate 関連の TCP listener（`lsof` × `ps` で絞り、key は `tcp/<port>`）／`mcbd-*` tmux セッション／`$HOME` 直下／`~/.commandmate` 直下
+  - **fail-open にしない（本ゲートで最も重要な設計判断）**: probe は `ok` / `unavailable` を必ず名乗り、**「取れなかった」を「空だった」に潰さない**。ベースライン不在、または片側の probe が `unavailable` なら **UNKNOWN**（gate `error` → run `failed`）で、決して `passed` にはならない。`skipped` も使わない（「判定すべき宣言が無かった」と読まれるため）。`lsof` の exit 1、tmux の `no server running`、`~/.commandmate` の ENOENT は**実測されたゼロ**なので `ok` として区別する
+  - **偽陽性の抑制は非対称ルール**: 減ったものは誰のものであれ常に違反（#1739 / #1624）、増えたものは**他ワーカーに帰属できる場合だけ免除**。帰属は tmux がセッション名 `mcbd-<cli>-<worktreeId>`、listener がプロセスの cwd（自 worktree 配下＝自分 / **兄弟ディレクトリ＝他ワーカーとユーザの本番 checkout** / 不明＝厳しい側）。`$HOME` と `~/.commandmate` は所有者が無いので常に判定対象
+  - **既定は無効**。`options.requireEnvClean`（verify.yaml、リポジトリ単位）と `success.requireEnvClean`（契約、委任単位）の **OR** で有効化し、両方省略時は**ゲート行も probe もベースラインファイルも一切生じない**。ベースラインの記録自体が opt-in に従うため、off の既定は副作用ゼロ
+  - **未着地**: `success.requireEnvClean` は `TaskContractSuccess` / `SUCCESS_KEYS`（`src/lib/tasks/contract-parser.ts`、本委任の scope 外）が閉じた集合のため**契約 YAML にはまだ書けない**。parser 側 2 行で開き、検証側は resolver が `success` を構造的に読むので無改修で効く（挙動はテストで先に固定済み）。`verify.gates: [env-clean]` は `contract-message.ts` の 1 行、`commandmate status --json` のヘルスチェック拡張は `src/cli/commands/status.ts` が scope 外で未着手。詳細は docs/design/task-contract.md §2.6
+- **detection: AskUserQuestion の選択肢を `PreToolUse` の payload から取り、`respond` を送信前に検証する（Phase 3）** (#1726)
+  - 画面から regex で復元していた選択肢を、エージェント自身が送ってくる `tool_input` で置き換える。`PreToolUse`（matcher `AskUserQuestion`）を注入し、質問文・選択肢ラベル・**各選択肢の説明文**を受け取る。説明文は picker が独立した行に描くもので、scraper は継続行として捨てているため（そうしないと別の選択肢として解析される）**構造化でしか取れない情報**
+  - **役割分担**: 画面が開いている／閉じたの**検出は scraper**（#1708 が担当）、開いていると判ったあとの**正確な選択肢の提供が本 Issue**。この記録は `sessionStatus` を一切決めず、#1725 の OR 合成にも #1723 の「scraper の `waiting` が常に勝つ」規則にも触れていない
+  - **payload と画面は同じではない**（実測）。画面には payload に無い `Type something.` / `Chat about this` が付き、最終ステップは `1. Submit answers / 2. Cancel` に化ける。そこで選択肢は**位置で照合**し、1 つでも合わなければ**丸ごと諦めて scraper の解析結果を残す**。番号は常に画面のもの。「Review your answers」や確認ステップは照合が成立しないので自動的に対象外
+  - **幻の選択肢に対する第 2 の防御**: payload が説明せず picker 既知の 2 つでもない選択肢は落とす。2026-08-06 に `7 tasks (0 done, 1 in progress, 6 open)` が「選択肢 7」として拾われた事故に対して、パネルの文言を知らなくても効く
+  - **`respond` の送信前検証**: 範囲外の番号は `answer_out_of_range`（CLI exit **2**）で拒否、ラベル一致は番号へ解決（`respond <id> T5` → 選択肢 2）、不一致・曖昧は `unresolvable_answer` で拒否。`yes` / `no` は**必ず拒否**する — cursor 移動式の picker では打った文字は選択にならず、続く Enter が強調表示中の選択肢を選ぶため承認に化けうる（#1681）。構造化選択肢が無い場合（hooks 未設定・他ツール・照合不成立）は**従来どおり**
+  - **Auto-Yes の面は広げていない**。`AskUserQuestion` は #1724 のまま常に no-decision で、画面ベース経路にも自動応答を追加していない
+  - **実機検証**（v2.1.223 / production build / 隔離サーバ）: タスクパネル `6 tasks (0 done, 1 in progress, 5 open)` が出た状態の picker で、UI に正確な 3 選択肢＋説明文と picker 既知の 2 件が出て幻の選択肢は混入せず、`respond 99` は exit 2 で送信されず、`respond T5` が選択肢 2 に解決して完了した
+
+- **detection: `PostToolUse` を解除 signal として採用（#1721 の「発火しない」を実測で訂正）** (#1726)
+  - #1721 は `PostToolUse` を「登録済み・0 回」と記録していたが、matcher を `AskUserQuestion` に絞って実測すると**回答確定の直後に発火する**（2026-08-06: `PreToolUse` 15:36:04.112 → `PostToolUse` 15:36:28.643 → `Stop` 15:36:29.992）。payload は `tool_response.answers` に選ばれたラベルまで持つ。fixture を追加した
+  - `Stop`＝「ターンが終わった」に対し `PostToolUse`＝「そのツール呼び出しが終わった」で、**「人間が答えた」に最も近い唯一のイベント**。回答後もエージェントが働き続けるケースでは `Stop` は数分後になる。`Stop` は取りこぼし用の backstop として併用する（hooks は全経路 fail-open）
+  - あわせて #1725 の「ダイアログが開いている」状態も `PostToolUse` で解除するようにした（従来は `Stop` か scraper の観測待ち）
+  - **`Notification(permission_prompt)` は AskUserQuestion でも発火する**（選択画面が出たまま約 6 秒後）。#1721 §5.6 の「表示中は無音」は計測窓の外で起きていた事象を取りこぼしており、「イベントが来た＝画面が閉じた」と読むと**機能が 6 秒で自分を消す**（実機で発生させて修正した）。§5.6 に訂正を追記
+
+- **detection: プロンプト待ちを構造化イベントで検出する（`isPromptWaiting` / `wait` exit 10 / `capture --prompts`、Phase 2）** (#1725)
+  - Claude が `Notification(notification_type=permission_prompt)` を出す承認ダイアログを、画面解析とは独立に「人間待ち」として publish する。#1708 の**元の報告事例そのもの**をイベント側から塞ぐ
+  - **合成規則は OR**。`isPromptWaiting = scraper が見た || 構造化が見た`。`promptData` は scraper の解析済みプロンプトを優先し、無ければ縮退形（`type:'unclassified'`／options 空／エージェントの `message` を原文表示）を返す。片方の false がもう片方の true を打ち消さないのが要点で、構造化イベントが 1 件も出ない画面（AskUserQuestion の選択・確認、trust dialog、`/login`・`/model` overlay）は scraper だけが見えるため
+  - **解除は実測にもとづく**: `Stop`（AskUserQuestion 回答確定後の発火を #1721 が実測）／`user_prompt_submit`／`session_start`・`session_end`（世代交代）／`notification(idle_prompt)`／**scraper がプロンプトの消滅を観測したとき**。ただし scraper の解除は**一度そのプロンプトを見た場合に限る** — 見えなかった層の沈黙を証拠に使うと、この機能が存在する理由そのものの状況で検出が消える
+  - **`PostToolUse` は使っていない**。Issue 本文は解除条件の候補に挙げていたが、#1721 のスパイクで一度も観測されておらず、受信 route も lifecycle event に写像していない。実測のある `Stop` だけを採用した（**#1726 で訂正**: matcher を絞って実測すると発火する。#1726 が解除 signal として採用した）
+  - **`Notification` の機械判断は `notification_type` のみ**（#1721 D3）。`message`（"Claude needs your permission"）は人間向け文言なので表示にだけ使う
+  - Auto-Yes v2 が `PermissionRequest` を no-decision で返したときも「これからダイアログが出る」として記録する（`Notification` より約 6 秒早い）。ただしこれは観測ではなく**予測**なので、20 秒以内に `Notification` か scraper の裏取りが無ければ失効する。貼り付いた場合のコストは健全なセッションでの `wait` exit 10（ワーカーの誤停止）であり、それを避けるための期限
+  - `wait --on-prompt agent` は構造化由来のプロンプトでも即 exit 10（#1708 の 60 秒 dwell を待たない）。`--on-prompt human` は従来どおり待機継続
+  - `capture --prompts` に `[unclassified:hook-notification]` として残る。「エージェントは教えたのに検出層には見えなかった」は `[unclassified:detection-failed]`（誰も見えなかった）と別の事実なので区別して表示する。**scraper がプロンプトを publish した回には書かない**（既存の記録者と二重計上になる）
+  - PromptPanel は選択肢の無い縮退プロンプトを操作 UI 無しで表示し、「**番号で**応答する」よう案内する（`respond <id> yes` は番号つきダイアログでは Enter=既定選択に化ける＝#1681）。文言は `locales/{en,ja}/prompt.json`
+  - **スコープ外（構造化イベントが存在しないため原理的に不可能）**: AskUserQuestion の選択・確認画面。#1721 の実測で、表示中・回答操作中とも hooks の受信件数は 23 → 23 で 1 件も発火しない。この画面の検出は scraper 側（#1708 / #1726）に残る。起票時の受入基準のうち当該項目は撤回済み
+  - 実機検証（Claude Code v2.1.223 / 隔離 DB・別ポートの production サーバ）: 承認ダイアログで `PermissionRequest`(13:12:53) → `Notification(permission_prompt)`(13:12:59) が到着し `promptWaitingSince` は前者の時刻＝予測が観測に昇格しても「人間が止まった時刻」を保つ。`wait --on-prompt agent` は exit 10。ダイアログに応答すると `Stop` を待たずに解除された（**scraper 観測による解除が実際に効いた**）。scraper が何も見ていない状態に実 payload を投函すると `waiting`/`hook_permission_prompt` ＋ 縮退 promptData ＋ `wait` exit 10（type=`unclassified`）となり、日英両 locale で PromptPanel の縮退表示を確認
+
+- **auto-yes: Claude の承認を `PermissionRequest` hook で構造化裁定する（Auto-Yes v2 / Phase 2）** (#1724)
+  - 画面を regex で読んでキーを注入する代わりに、Claude が**ダイアログを描く前に**同期 POST してくる `PermissionRequest` を裁く。新設 `POST /api/hooks/permission-request`（`/api/hooks/agent-event` は 202 の fire-and-forget で性格が逆なので分離）
+  - 裁定: 未 parse → no-decision ／ `AskUserQuestion` → 常に no-decision（#1726 の担当。`allow` を返しても選択画面は出るので突破もできない）／ Auto-Yes 無効・期限切れ → no-decision ／ 契約ポリシー抑止 → no-decision ＋ `lastSuppression` 記録 ／ それ以外 → `allow`
+  - **`deny` は返さない**。現行 Auto-Yes の抑止は「自動応答しない」であって「拒否する」ではなく、deny 化はフィールドにある既存契約の意味を変える
+  - **判定不能は必ず no-decision**。空応答 `{}` は TUI ダイアログにフォールバックする（#1721 D5 の実測）ので、fail-safe 側が「現状維持」になる。誤 allow はコマンド実行を意味するため、この非対称性が全分岐の設計原則
+  - **#1699 の scrollback 汚染は構造的に起きない**: denyPatterns の照合対象は当該リクエストの `tool_input` のみ（Bash は command＋description、他ツールは主要引数、未知ツール／想定外 shape は input 全体へ fail-safe）。画面もスクロールバックも入力に無い。「一度 allow した `rm -rf` が以後の無関係な承認を抑止しない」ことを直接テストで固定した
+  - ポリシー評価は poller と `evaluatePolicyAgainstTexts()` を共有し、promptType は `multiple_choice`（画面上の承認ダイアログの分類）。**hook が poller より緩くなる余地を作らない**ためで、`mode: safe` は hook 側でも抑止する
+  - 相関は **`prompt_id` + `tool_name` + `tool_input`**。実 payload に `tool_use_id` は無く、公式ドキュメントの `permission_requirements` も無い（#1721 D2。代わりに `permission_suggestions`）。応答スキーマとリクエスト形は `tests/fixtures/hooks/claude/permission-request*.json` の実データに突合している
+  - **allow のときだけ** prompt 履歴に answered 行を作る（ダイアログが出ない＝他に記録者が居ない）。no-decision 側は画面経路が従来どおり記録するので二重にならない。`pending` 行を作らないのは `recordAnsweredPrompt` が人間の応答をその行に刻んでしまうため
+  - hook は **Auto-Yes トグルと独立に常時注入**（注入は起動時 1 回きり、Auto-Yes は途中で入る）。timeout 5 秒（http の既定は 600 秒で `async` も無い）。応答時間を毎回ログし 500ms 超で warn
+  - **画面ベース Auto-Yes 経路（`detectPrompt` 直呼び）は削除も変更もしていない** — hooks 非対応環境と Claude 以外のフォールバック
+
+- **detection: 構造化イベントを `sessionStatus` 判定に優先適用する 2 層化** (#1723)
+  - #1722 で届くようになった hooks イベントを第一級ソースに昇格した。`user_prompt_submit` → `running`/`hook_prompt_submit`、`stop` → `ready`/`hook_stop`。イベントが届く環境では「thinking/ready の regex 誤判定」（#805 / #1150 / #1154 / #1497）が**判定の根拠ごと**消える
+  - **`detectSessionStatus()` は 1 文字も触っていない**。merge は builder 層（`mergeStructuredStatus()`）に置いた。検出器は端末フレームの純粋関数のままで、#1708 の回帰テストを含む fixture 資産がそのまま効く
+  - **scraper が `waiting` のときは常に scraper が勝つ**。AskUserQuestion の選択画面と「Ready to submit your answers?」確認画面では hooks が 1 件も発火しない（#1721 §5.6 実測）ため、その画面での最新の構造化事実は turn 冒頭の `user_prompt_submit`＝`running` になる。上書きしていたら #1708 の停滞をそのまま再現していた
+  - **`notification(permission_prompt)` は記録のみで適用しない**。`isPromptWaiting` / `promptData` / `isSelectionListActive` は本 Issue では scraper のまま（#1725 の担当）。加えて「プロンプトが回答された」ことを示すイベントが存在しないので、適用すると次の `Stop` まで `waiting` が貼り付く
+  - **信頼範囲を 3 つで縛る**: 世代（`startClaudeSession()` の新規作成パスと `session_start` イベントで切る。key を再作成セッションが再利用するため、無いと前プロセスのイベントが新セッションの判定になる）／齢（30 分。hooks は全経路 fail-open なので `Stop` が届かない事故がありえ、無制限だと `wait` が `--timeout` まで回る）／生存（tmux セッションが無ければ従来どおり `session_not_running`）
+  - `isUnclassifiedActive` は**構造化 `ready` × scraper `running` のときだけ** false にする。`wait` の完了条件が `ready && isUnclassifiedActive !== true` なので、ここを落とさないと構造化 `ready` は何も変えない。逆向き（構造化 `running`）では立てたまま残す — イベントを出さない画面に対する exit 10 の最後の逃げ道と、`/help` オーバーレイのナビゲーションハッチ（#1497）を潰さないため
+  - 乖離は `logger.info('detection-divergence')` を 1 行（両判定＋`applied`）。一致時は無言。scraper がどれだけ間違っていたかを実地データで定量化する材料で、**適用しなかった食い違いも残す**（後続 Issue の判断材料）
+  - **`wait` と Auto-Yes ポーラーは 1 行も変えていない**。どちらも current-output 経由で状態を読むため恩恵が自動的に届く。統合テストで「同じキャプチャに `Stop` を投げると `wait` が exit 0 になり、投げなければ待ち続ける」対照を固定した
+  - **未設定環境の非影響**: イベントが 1 件も無ければ `getStructuredSessionState()` が null を返し `mergeStructuredStatus()` が scraper をそのまま返す。既存テストは無変更で全緑
+- **wait: 分類できない対話フレームが 60 秒続いたら停止事由にする** (#1708)
+  - `isUnclassifiedActive` は #1120 以降ペイロードに載っていたが `CurrentOutputResponse` に型が無く、`wait` は一度も読んでいなかった。検出をすり抜けたダイアログは「何も起きていない」扱いで `--timeout` まで放置される
+  - **新しい exit code は作らない**。既存の exit 10 に `type: 'unclassified'` を載せる（#1628 の `selection_list` と同じ前例。新設すると既存の 10 分岐がインフラ障害と読む）。`--on-prompt human` では待機を継続する
+  - 瞬間値では止めない（再描画中のキャプチャで 1 回だけ立つことがある）。分類できた時点で滞留カウンタはリセットされる
+  - dwell は定数でフラグを持たない。`--timeout` / `--stall-timeout` が 60 秒未満なら常にそちらが勝つ（長い待ちを先回りするための仕組みで、短い待ちを延ばすものではない）
+- **capture --prompts: 検出できなかったフレームも監査証跡に残す** (#1708)
+  - 書き込み口が 2 つとも `isPrompt === true` でゲートされていたため、検出漏れはどこにも残らなかった（900 秒停止した worker に対して `No prompt history.` を返していた）
+  - `[unclassified:detection-failed]` として**検出できたプロンプトと区別して**表示する。滞留中に行が増えることはない（1 停滞につき 1 行）
+  - `status` を `pending` にしないことで `markPendingPromptsAsAnswered()` の掃引対象から外している。誰も読めなかったフレームに「回答済み」は付かない
+  - **記録は観測駆動**（`wait` のポーリング／ブラウザ／`capture --json`）。サーバ側 Auto-Yes ポーラ単独では書かれない
+- **send: プロンプト待ちのセッションへの送信を拒否する** (#1708)
+  - ダイアログ表示中のキー入力はエージェントに届かず入力欄に溜まるだけで、後続の `respond` が残留テキストごと「メッセージ」として送られる危険がある（停滞 worker への nudge が状態を悪化させた実例）
+  - 409 `PROMPT_WAITING` / CLI は exit 2。**`respond` / 特殊キー / `prompt-response` は拒否しない**（塞ぐと回答手段が無くなる）
+  - ガードは送信サービス層（`sendUserMessage`）に置いたので、**タイマー送信も同じく拒否される**（`[prompt_waiting] …` を失敗理由として記録）。ルート層に置くとスケジュール送信がダイアログへ直撃したままだった
+  - 拒否が効くのは**検出できているときだけ**。すり抜けたフレームは上記 `wait` の `unclassified` が受け持つ。ペインが読めないときは fail-open するので、**取りこぼしを減らすガードであって保証ではない**
+- **hooks: Claude セッション起動時の hooks 自動注入と instance 相関・イベント語彙拡張** (#1722)
+  - `src/lib/hooks/hook-settings-generator.ts` — (worktreeId, instanceId) ごとの hooks 設定を生成し `claude --settings <file>` で渡す。#1549 で作った受け口・サービス・状態・中継スクリプトの拡張であり、新規に作り直していない。**構造化イベントが「設定した人の環境にしか存在しない」制約が解消**された
+  - **`SessionStart` だけ `type:"command"`**。Claude Code は `SessionStart` の http hook を**黙って skip する**（#1721 D1。debug ログにしか出ず stdout / TUI は無音）。本実装でも実機で反証を取った — http で組んだ対照セッションは `Skipping HTTP hook … not supported for SessionStart` を出し配送 0 件、TUI には何も出ない。残る 4 イベント（`UserPromptSubmit` / `Stop` / `Notification` / `SessionEnd`）は http
+  - **instance 相関**。`cwd` は worktree は特定できるがインスタンスは特定できない（同一 worktree の `claude` と `claude-2` は cwd が同じ）ため、注入 URL に `worktreeId` / `instanceId` を焼き込む。`route.ts` の `applyAgentStopEvent(db, worktree, tool, tool)` primary 固定を解消した。**`session_id` は相関キーにしない** — `/clear` は `SessionEnd(reason=clear)` → `SessionStart(source=clear)` を発火し `session_id` が変わる（実機で確認）
+  - 受け口が **Claude のネイティブ payload も受ける**ようになった。`type:"http"` はボディを加工できないため。型とテストは `tests/fixtures/hooks/claude/*.json`（#1721 の実採取 12 件）に合わせてある。イベント語彙に `user_prompt_submit` / `session_end` を追加し、`Notification` は `notification_type`（`message` ではない）をサブタイプとして保持する
+  - **手動設定との共存**を実測で確定した。`--settings` の hooks はユーザー設定と**連結**されるので #1549 の手動 Stop hook を残していると同じターンが 2 回届き、`lastStopEventAt` は冪等でも `task_events` の `agent_idle` は 2 行になる。`(worktree, tool, instance, event, sessionId)` が一致するイベントを 3 秒以内は 1 回として扱う。`sessionId` を持たない呼び出しは畳まない（区別材料が無く、重複を許すほうが実イベント取りこぼしより安い）
+  - `headers` の `$CM_AUTH_TOKEN` は `allowedEnvVars` 併記がないと展開されない（#1721 D7）ため、生成器は常に対で出力する。実機で `Bearer live-1722-token` に展開されることを確認した
+  - **観測のみ**。`structuredEvents`（`lastEventType` / `lastEventAt` / `lastEventDetail`）を `current-output` に露出するだけで、`sessionStatus` / `wait` / Auto-Yes の判定には一切入れていない（#1723 の担当）。**hook 到着を起動完了の signal にもしない** — 未 trust ディレクトリでは trust ダイアログに答えるまで `SessionStart` すら来ない（本実装の実機検証でも再現）
+  - ロールバックは `CM_AGENT_HOOKS_INJECT=0`（起動コマンドが #1722 以前と完全に同一になる）。`~/.claude/settings.json` は書き換えない（実機で before/after の sha256 一致を確認）
+  - 実機検証: 隔離 tmux socket ＋ 使い捨てダンプサーバで 5 イベントすべての配送を確認し、**採取した実バイト列を本番 route に流し直して** 202・`claude-2` への帰属・primary 非汚染まで検証した
+- **detection: Claude Code hooks の実機検証レポートと実 payload fixture** (#1721)
+  - `docs/design/agent-hooks-live-verification.md` — Epic #1720 の全下流 Issue が前提にする hooks の挙動を v2.1.223 で実測した。隔離 HOME ＋ 専用 tmux socket ＋ 使い捨てダンプサーバで再現可能な形にしてある。コード変更なし（スパイク）
+  - `tests/fixtures/hooks/claude/*.json` — `PermissionRequest` / `PreToolUse(AskUserQuestion)` / `Notification(permission_prompt, idle_prompt)` / `Stop` / `UserPromptSubmit` / `SessionStart` / `SessionEnd` の実 payload 12 件。環境固有値はプレースホルダに置換済み
+  - **公式ドキュメントとの食い違いを 3 件検出**した。(1) `SessionStart` では `type:"http"` が**黙って skip される**（debug ログにしか出ない。`type:"command"` 必須）、(2) `PermissionRequest` の実 payload には `permission_requirements` も `tool_use_id` も無く、代わりに `permission_suggestions` が入る、(3) TUI で承認を拒否しても `PermissionDenied` は発火しない
+  - **Auto-Yes v2 (#1724) の安全性の根拠を実測で固定**した。hook が空応答を返すと従来どおり TUI 承認ダイアログにフォールバックし、timeout も接続不能もすべて fail-open。一方 `AskUserQuestion` は `allow` を返しても選択画面が出るため、一律 allow では突破できない
+- **detection: 実 TUI カナリアで Claude 新バージョンの検出回帰を検知する** (#1727)
+  - `npm run canary` で実 `claude` を使い捨て tmux セッションに起動し、5 シナリオ（idle / 許可ダイアログ / AskUserQuestion＋タスクパネル併存 / `/model` オーバーレイ / 生成中）の capture を**本番と同じ 2 経路**に食わせて assert する。ステータス経路（`detectSessionStatus`）と Auto-Yes 経路（`detectPrompt` 直呼び）を**独立に**検証する — #1495 は Auto-Yes 側だけで発火した欠陥だった
+  - **隔離を仕組みで強制**。tmux は全呼び出しが `-L cmate-canary-*` を経由し、`kill-server` は専用メソッド以外から到達できない（`-L` 無しの `kill-server` が稼働中の全 `mcbd-*` を消した前例がある）。HOME は使い捨てにしたうえで `show-environment` で**転送されたことを assert** し、実 `~/.claude/settings.json` の sha256 と `mcbd-*` 一覧を各シナリオの前後で再検証する（違反は exit 3）
+  - **ハーネス自身の非空振りを `--mutate` で証明する**。各シナリオが持つ「もっともらしいが誤った期待値」で走らせ、全部赤にならなければ自己テスト失敗として扱う（実測 5/5 赤）
+  - **上流障害と検出回帰を区別する**。`529 Overloaded · Retrying in …` が写っている間は最大 180 秒シナリオの時計を止め、到達できなければ `blocked`（exit 4）として報告する。判定パターンは「usage limit reached」等のエラー文言に限定した — 単に `usage limit` を見る実装は Claude の販促バナー（"weekly usage limit on Fable 5"）に誤爆し、緑の実行を全件 blocked にした
+  - 各シナリオの実フレームを `tests/fixtures/canary/` に毎回保存するので、赤が出たときは**新バージョンの実キャプチャがそのまま修正用 fixture** になる。純関数部分は `tests/unit/canary/` が commit 済み fixture で固定し、CI では tmux も課金も不要
+  - claude 2.1.223 で 5 シナリオ緑（約 29 秒）。手順・費用の目安・CI 組み込み案 A/B は [docs/qa/detection-canary.md](docs/qa/detection-canary.md)
+
 ## [0.21.5] - 2026-08-06
 
 > **Highlight**: スラッシュコマンドカタログのリコンサイルを「運用として成立する」状態にした（Epic #1707）。従来はリコンサイルツールが**過去に人間が何を除外したかを知らない**ため、同じ 3 件を毎リリース提案し続け、適用するとガードテストが赤くなり、人間が過去 Issue を読み直して手で消す、というループになっていた。除外判断をデータ化したことで提案は **3 件 → 1 件**に減り、残る 1 件は「未決の判断が存在する」という正しい signal として機能する。あわせて、`--write` が必ず生成する `[要レビュー]` プレースホルダの流出をテストで止め、ドリフトの週次検知と手順の skill 化を入れた。

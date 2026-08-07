@@ -306,3 +306,83 @@ describe('send command action', () => {
     });
   });
 });
+
+// Issue #1708: sending into an open prompt dialog does not reach the agent —
+// the text piles up in the dialog's input line and corrupts the next `respond`.
+// The server refuses with 409/PROMPT_WAITING; the CLI has to relay that as an
+// instruction, because the caller most likely to hit it is an unattended runner
+// that would otherwise just retry the nudge.
+describe('send refuses when the session is waiting on a prompt (Issue #1708)', () => {
+  const promptWaitingBody = {
+    error:
+      'wt1 is waiting on a prompt. Sending now would type into the prompt\'s input line ' +
+      'instead of reaching the agent. Answer the prompt first: `commandmate respond wt1 <answer>`.',
+    code: 'PROMPT_WAITING',
+  };
+
+  it('prints the server reason and exits with the config error code', async () => {
+    mockFetchResponse(promptWaitingBody, 409);
+    const { createSendCommand } = await import('../../../../src/cli/commands/send');
+    await createSendCommand().parseAsync(['node', 'send', 'wt1', 'nudge']);
+
+    // The FIRST thing printed, and the reason it exits. `process.exit` is a
+    // no-op under test so the generic handler runs on afterwards and logs
+    // "Unexpected HTTP status: 409" too — in the real CLI that line is never
+    // reached, which is the whole point of exiting here.
+    expect(String(mockConsoleError.mock.calls[0][0])).toContain('respond wt1');
+    expect(mockExit).toHaveBeenCalledWith(2);
+    expect(mockConsoleError).not.toHaveBeenCalledWith('Message sent.');
+  });
+
+  it('still says what to do when the response carried no message', async () => {
+    mockFetchResponse({ code: 'PROMPT_WAITING' }, 409);
+    const { createSendCommand } = await import('../../../../src/cli/commands/send');
+    await createSendCommand().parseAsync(['node', 'send', 'wt1', 'nudge']);
+
+    expect(mockConsoleError).toHaveBeenCalledWith(expect.stringContaining('respond wt1'));
+    expect(mockExit).toHaveBeenCalledWith(2);
+  });
+
+  it('leaves an unrelated 409 on its generic path', async () => {
+    // The code is the contract, not the status: another 409 must not be
+    // reported as "answer the prompt".
+    mockFetchResponse({ error: 'something else', code: 'SOMETHING_ELSE' }, 409);
+    const { createSendCommand } = await import('../../../../src/cli/commands/send');
+    await createSendCommand().parseAsync(['node', 'send', 'wt1', 'hello']);
+
+    expect(mockConsoleError).not.toHaveBeenCalledWith(expect.stringContaining('respond wt1'));
+  });
+});
+
+// Issue #1737: the guard now also refuses on a dialog only the agent's hooks
+// reported — one that may leave no trace on screen. The flag is how an operator
+// gets past a record that stuck, so it has to reach the server.
+describe('send --ignore-structured-prompt (Issue #1737)', () => {
+  it('asks the server to waive the structured half of the guard', async () => {
+    mockFetchResponse({ id: 1, role: 'user', content: 'nudge', worktreeId: 'wt1' }, 201);
+    const { createSendCommand } = await import('../../../../src/cli/commands/send');
+    await createSendCommand().parseAsync([
+      'node', 'send', 'wt1', 'nudge', '--ignore-structured-prompt',
+    ]);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/worktrees/wt1/send'),
+      expect.objectContaining({
+        body: JSON.stringify({ content: 'nudge', ignoreStructuredPromptGuard: true }),
+      })
+    );
+  });
+
+  it('sends the ordinary body without it', async () => {
+    // Opt-in, and the field is absent rather than false: an older daemon must
+    // see exactly the body it always did.
+    mockFetchResponse({ id: 1, role: 'user', content: 'nudge', worktreeId: 'wt1' }, 201);
+    const { createSendCommand } = await import('../../../../src/cli/commands/send');
+    await createSendCommand().parseAsync(['node', 'send', 'wt1', 'nudge']);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/worktrees/wt1/send'),
+      expect.objectContaining({ body: JSON.stringify({ content: 'nudge' }) })
+    );
+  });
+});

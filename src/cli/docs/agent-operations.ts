@@ -66,6 +66,33 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     --duration <d>         Auto-yes duration: 1h, 3h, 8h (default: 1h)
     --stop-pattern <p>     Auto-yes stop condition (regex; matches terminal output,
                            cannot block commands -- see auto-yes below)
+    --ignore-structured-prompt
+                           Send even if only the agent's hooks report an open dialog.
+                           For a session whose pane looks idle but keeps refusing;
+                           a dialog visible in the terminal is still refused.
+
+  Refused while the agent is waiting on a prompt (exit 2). Keystrokes sent to
+  an open dialog never reach the agent -- they pile up in the dialog's own
+  input line, and the next respond then carries that text along as a message
+  instead of an answer. Nudging a stalled worker is how this gets worse.
+  Answer first: commandmate respond <id> <answer>. respond, special keys and
+  prompt-response are never refused -- they are the way out. Timer-fired sends
+  ARE refused (same service layer) and record [prompt_waiting] as their reason.
+  It fails open if the pane cannot be read, so treat it as a narrowing, not a
+  guarantee.
+
+  Two layers can report the dialog: the terminal scraper, and the agent's own
+  hooks. Either one is enough to refuse -- the dialog the scraper cannot read is
+  exactly the one that caused this. A frame neither layer classifies is still
+  wait's "unclassified" case instead.
+
+  A hook-reported dialog is released by the agent's next event, and hooks are
+  fail-open, so the record can outlive its dialog. It therefore stops blocking
+  sends 5 minutes after it was reported -- and immediately with
+  --ignore-structured-prompt, or CM_STRUCTURED_SEND_GUARD=off for the server.
+  A session nobody can send to is worse than a missed guard. Both bypasses are
+  narrow: a prompt on screen is still refused, and the payload still reports it
+  (wait and the UI do not go quiet).
 
   Finding worktree IDs:
     WT=$(commandmate ls --branch feature/101 --quiet)
@@ -106,6 +133,18 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     The payload IS the prompt -- read it from stdout before falling back to
     capture. For type "selection_list", options is empty by design and the
     question field carries the reason.
+
+    Three "type" values share exit 10; only the first is answerable with
+    respond:
+      yes_no / multiple_choice  a parsed prompt        -> commandmate respond
+      selection_list            arrow-key menu         -> special keys
+      unclassified              the frame is interactive but detection could
+                                not parse it, and it has stayed that way for
+                                60s -> look at the pane: capture <id> --pane
+    "unclassified" exists because a frame that slips past detection disables
+    auto-yes, the contract's autoYes policy and this exit 10 all at once. It
+    needs the dwell: a capture taken mid-repaint can raise the flag once.
+    --on-prompt human keeps waiting for it, same as the other two.
 
   --verify turns "the agent stopped" into "the work passes the repository's own
   checks". Verification only runs when completion was detected: a prompt (10) or

@@ -33,10 +33,16 @@ vi.mock('@/lib/polling/auto-yes-manager', () => ({
 import { captureSessionOutput } from '@/lib/session/cli-session';
 import { buildCurrentOutput } from '@/lib/session/current-output-builder';
 import {
+  AGENT_EVENT_DEDUP_WINDOW_MS,
   clearAgentStopEvents,
+  getLastAgentEvent,
   getLastStopEventAt,
+  getRecentEventKeyCount,
+  isDuplicateAgentEvent,
+  recordAgentEvent,
   recordAgentStopEvent,
 } from '@/lib/session/agent-event-state';
+import type { AgentEventType } from '@/lib/hooks/agent-event-types';
 
 const db = {} as Database.Database;
 
@@ -111,5 +117,154 @@ describe('buildCurrentOutput exposure', () => {
 
     expect(payload.isRunning).toBe(false);
     expect(payload.lastStopEventAt).toBe(1_700_000_000_001);
+  });
+});
+
+describe('structured events of any kind (Issue #1722)', () => {
+  it('returns null until something is recorded, then the latest record', () => {
+    expect(getLastAgentEvent('wt-1', 'claude')).toBeNull();
+
+    recordAgentEvent('wt-1', 'claude', 'claude', {
+      event: 'user_prompt_submit',
+      at: 100,
+      detail: null,
+      sessionId: 'sess-1',
+    });
+    recordAgentEvent('wt-1', 'claude', 'claude', {
+      event: 'notification',
+      at: 200,
+      detail: 'idle_prompt',
+      sessionId: 'sess-1',
+    });
+
+    expect(getLastAgentEvent('wt-1', 'claude')).toEqual({
+      event: 'notification',
+      at: 200,
+      detail: 'idle_prompt',
+      sessionId: 'sess-1',
+    });
+  });
+
+  it('keeps instances apart', () => {
+    recordAgentEvent('wt-1', 'claude', 'claude-2', {
+      event: 'stop',
+      at: 300,
+      detail: null,
+      sessionId: null,
+    });
+
+    expect(getLastAgentEvent('wt-1', 'claude', 'claude-2')?.event).toBe('stop');
+    expect(getLastAgentEvent('wt-1', 'claude')).toBeNull();
+  });
+
+  it('does not write lastStopEventAt, which belongs to the stop path', () => {
+    // Two writers to one timestamp is how it starts disagreeing with the task
+    // transition it is supposed to accompany.
+    recordAgentEvent('wt-1', 'claude', 'claude', {
+      event: 'stop',
+      at: 400,
+      detail: null,
+      sessionId: null,
+    });
+
+    expect(getLastStopEventAt('wt-1', 'claude')).toBeNull();
+  });
+});
+
+describe('duplicate suppression (Issue #1722)', () => {
+  const dup = (session: string | null, at: number, event: AgentEventType = 'stop') =>
+    isDuplicateAgentEvent('wt-1', 'claude', 'claude', event, session, at);
+
+  it('suppresses the second delivery of one turn inside the window', () => {
+    expect(dup('sess-1', 1000)).toBe(false);
+    expect(dup('sess-1', 1000 + AGENT_EVENT_DEDUP_WINDOW_MS - 1)).toBe(true);
+  });
+
+  it('lets the same session through again once the window has passed', () => {
+    expect(dup('sess-1', 1000)).toBe(false);
+    expect(dup('sess-1', 1000 + AGENT_EVENT_DEDUP_WINDOW_MS)).toBe(false);
+  });
+
+  it('never suppresses an event with no session id', () => {
+    expect(dup(null, 1000)).toBe(false);
+    expect(dup(null, 1000)).toBe(false);
+  });
+
+  it('separates events, instances and worktrees', () => {
+    expect(dup('sess-1', 1000)).toBe(false);
+    expect(dup('sess-1', 1000, 'user_prompt_submit')).toBe(false);
+    expect(isDuplicateAgentEvent('wt-1', 'claude', 'claude-2', 'stop', 'sess-1', 1000)).toBe(false);
+    expect(isDuplicateAgentEvent('wt-2', 'claude', 'claude', 'stop', 'sess-1', 1000)).toBe(false);
+  });
+
+  it('is cleared with the rest of the state', () => {
+    expect(dup('sess-1', 1000)).toBe(false);
+    clearAgentStopEvents();
+    expect(dup('sess-1', 1000)).toBe(false);
+  });
+
+  it('does not grow without bound as sessions come and go', () => {
+    // Each turn of each session would otherwise leave a key behind forever.
+    for (let i = 0; i < 2000; i++) {
+      isDuplicateAgentEvent('wt-1', 'claude', 'claude', 'stop', `sess-${i}`, 1000 + i);
+    }
+    expect(getRecentEventKeyCount()).toBeLessThanOrEqual(600);
+  });
+});
+
+describe('structuredEvents exposure (Issue #1722)', () => {
+  it('is all nulls for a session whose agent has reported nothing', async () => {
+    const payload = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
+
+    expect(payload.structuredEvents).toEqual({
+      lastEventType: null,
+      lastEventAt: null,
+      lastEventDetail: null,
+      promptWaitingSince: null,
+      promptWaitingSource: null,
+    });
+  });
+
+  it('surfaces the last event without disturbing anything else in the payload', async () => {
+    const before = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
+
+    // A `Notification` whose type this server has never observed. #1722's
+    // observation-only guarantee is asserted on one of those on purpose: the
+    // two types that DO carry a verdict were promoted by #1723
+    // (`idle_prompt` -> ready) and #1725 (`permission_prompt` -> a dialog is
+    // open), so pinning the guarantee to them would be pinning behaviour two
+    // later Issues deliberately changed.
+    recordAgentEvent('wt-1', 'claude', 'claude', {
+      event: 'notification',
+      at: 1_700_000_000_002,
+      detail: 'some_future_type',
+      sessionId: 'sess-9',
+    });
+    const after = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
+
+    expect(after.structuredEvents).toEqual({
+      lastEventType: 'notification',
+      lastEventAt: 1_700_000_000_002,
+      lastEventDetail: 'some_future_type',
+      promptWaitingSince: null,
+      promptWaitingSource: null,
+    });
+    expect({ ...after, structuredEvents: null }).toEqual({ ...before, structuredEvents: null });
+  });
+
+  it('surfaces the last event for a session that is no longer running', async () => {
+    isRunning.mockResolvedValue(false);
+    recordAgentEvent('wt-1', 'claude', 'claude', {
+      event: 'session_end',
+      at: 1_700_000_000_003,
+      detail: 'clear',
+      sessionId: 'sess-9',
+    });
+
+    const payload = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
+
+    expect(payload.isRunning).toBe(false);
+    expect(payload.structuredEvents.lastEventType).toBe('session_end');
+    expect(payload.structuredEvents.lastEventDetail).toBe('clear');
   });
 });

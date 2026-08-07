@@ -30,6 +30,11 @@ import { access, constants } from 'fs/promises';
 import { createLogger } from '@/lib/logger';
 import { CLAUDE_RESTART_DELAY_MS } from '@/config/cli-tool-timing-config';
 import { deriveSessionSuffix } from '@/lib/cli-tools/types';
+import { buildClaudeLaunchCommand } from '@/lib/hooks/hook-settings-generator';
+import {
+  beginAgentEventGeneration,
+  discardAgentEventState,
+} from '@/lib/session/agent-event-state';
 import {
   SessionStartFailedError,
   SessionStartTimeoutError,
@@ -642,6 +647,20 @@ export async function startClaudeSession(
     // (SF-S2-004: Explicit fall-through instead of hidden re-entry)
   }
 
+  // Issue #1723: everything the previous agent process reported through this
+  // (worktreeId, instanceId) belongs to a session that no longer exists. The
+  // key is reused verbatim by the session about to be created, so without this
+  // fence the last `user_prompt_submit` of the old process would be read as the
+  // new one's and a brand-new session would publish `running` before anyone had
+  // typed into it.
+  //
+  // Placed on the creation path only — the reuse branch above has already
+  // returned — and before `createSession`, so there is no window in which a
+  // live pane is matched against a stale generation. Bumped even if the start
+  // then fails: falling back to the scraper is always safe, trusting a dead
+  // session's events is not.
+  beginAgentEventGeneration(worktreeId, 'claude', instanceId);
+
   try {
     // Create tmux session. Scrollback depth comes from the shared
     // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
@@ -658,8 +677,24 @@ export async function startClaudeSession(
     // Get Claude CLI path dynamically
     const claudePath = await getClaudePath();
 
+    // Issue #1722: hand this session its own hooks config, so structured
+    // lifecycle events exist without the operator having edited
+    // ~/.claude/settings.json (which is never written — `--settings` is
+    // concatenated with it, and leaves it byte-identical).
+    //
+    // Only on the creation path. The reuse branch above has already returned,
+    // so the injected generation and the tmux session generation are the same
+    // generation by construction. A running session *can* be re-hooked — Claude
+    // hot-reloads settings without asking (Issue #1721, D8) — but that would
+    // make "which config is this pane running?" a question with a time-varying
+    // answer, and the events are not load-bearing enough to buy that.
+    //
+    // Falls back to the bare path on any failure; a session that starts without
+    // hooks is the pre-#1722 status quo, and a session that fails to start is not.
+    const launchCommand = buildClaudeLaunchCommand(claudePath, { worktreeId, instanceId });
+
     // Start Claude CLI in interactive mode using dynamically resolved path
-    await sendKeys(sessionName, claudePath, true);
+    await sendKeys(sessionName, launchCommand, true);
 
     // Wait for Claude to initialize with dynamic detection (OCP-001)
     // Use constants instead of hardcoded values
@@ -820,7 +855,16 @@ export async function captureClaudeOutput(
  */
 export async function stopClaudeSession(worktreeId: string, instanceId?: string): Promise<boolean> {
   const sessionName = getSessionName(worktreeId, instanceId);
-  return stopSession(sessionName);
+  const stopped = await stopSession(sessionName);
+  // Issue #1723: the session this instance's structured state described is
+  // gone. Belt and braces rather than the load-bearing guard — a stopped
+  // session makes `buildCurrentOutput` return `session_not_running` before it
+  // ever asks, and a restart opens a new generation — but the state is about a
+  // live pane and should not outlive one. Unconditional: `stopSession` answers
+  // false for a session that was already gone, which is not a reason to keep
+  // state about it.
+  discardAgentEventState(worktreeId, 'claude', instanceId);
+  return stopped;
 }
 
 /**

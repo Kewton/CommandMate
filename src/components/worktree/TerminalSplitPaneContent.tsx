@@ -26,6 +26,7 @@ import React, { memo, useCallback, useMemo } from 'react';
 import { X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
+import { isAnswerablePromptData } from '@/types/models';
 import { TerminalSplitPane } from '@/components/worktree/TerminalSplitPane';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
@@ -256,7 +257,19 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     async (answer: string): Promise<void> => {
       setPromptAnswering(true);
       try {
-        const requestBody = buildPromptResponseBody(answer, cliToolId, prompt.data, resolvedInstanceId);
+        // Issue #1738: `prompt.data` may be the degraded structured form (#1725),
+        // and `promptType` on this body is a PromptType — a union the
+        // unclassified sentinel is deliberately not a member of. Passing null
+        // for it sends no promptType at all, which is the truthful answer to
+        // "what kind of prompt is this?" when nobody could read the dialog.
+        // Unreachable from the UI today: neither surface draws a control for the
+        // degraded form, so nothing can call this with one.
+        const requestBody = buildPromptResponseBody(
+          answer,
+          cliToolId,
+          isAnswerablePromptData(prompt.data) ? prompt.data : null,
+          resolvedInstanceId,
+        );
         const response = await fetch(
           `/api/worktrees/${worktreeId}/prompt-response`,
           {

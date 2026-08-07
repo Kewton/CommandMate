@@ -23,9 +23,12 @@ Usage: cmate-agent-event.sh [options] [JSON]
 
 Options:
   --tool ID          Agent CLI id (default: $CM_AGENT_TOOL, else "claude")
-  --event EVENT      stop | notification | session_start (default: "stop")
+  --event EVENT      stop | notification | session_start | user_prompt_submit |
+                     session_end (default: "stop")
   --cwd PATH         Agent working directory (default: $CLAUDE_PROJECT_DIR, else $PWD)
   --session-id ID    Opaque agent session id
+  --worktree-id ID   CommandMate worktree id; skips cwd-based resolution
+  --instance-id ID   Agent instance id; without it the event lands on the primary
   --json JSON        Hook payload to read cwd/session/event from
   --stdin-json       Read that payload from stdin instead
   --url URL          Endpoint (default: http://$CM_HOST:$CM_PORT/api/hooks/agent-event)
@@ -63,6 +66,20 @@ map_event_name() {
     Stop|SubagentStop|agent-turn-complete) printf 'stop' ;;
     Notification) printf 'notification' ;;
     SessionStart) printf 'session_start' ;;
+    SessionEnd) printf 'session_end' ;;
+    UserPromptSubmit) printf 'user_prompt_submit' ;;
+    *) printf '' ;;
+  esac
+}
+
+# The event's subtype, where it has one. Each event spells it differently and
+# none of them share a field. Notification is judged on notification_type, never
+# on the human-facing "message" (Issue #1721, D3).
+detail_field_for_event() {
+  case "$1" in
+    notification) printf 'notification_type' ;;
+    session_end) printf 'reason' ;;
+    session_start) printf 'source' ;;
     *) printf '' ;;
   esac
 }
@@ -71,6 +88,9 @@ TOOL="${CM_AGENT_TOOL:-claude}"
 EVENT=""
 CWD=""
 SESSION_ID=""
+WORKTREE_ID=""
+INSTANCE_ID=""
+DETAIL=""
 HOOK_JSON=""
 READ_STDIN=0
 URL="${CM_HOOK_URL:-}"
@@ -82,6 +102,8 @@ while [ $# -gt 0 ]; do
     --event) [ $# -ge 2 ] || die "--event requires a value"; EVENT="$2"; shift 2 ;;
     --cwd) [ $# -ge 2 ] || die "--cwd requires a value"; CWD="$2"; shift 2 ;;
     --session-id) [ $# -ge 2 ] || die "--session-id requires a value"; SESSION_ID="$2"; shift 2 ;;
+    --worktree-id) [ $# -ge 2 ] || die "--worktree-id requires a value"; WORKTREE_ID="$2"; shift 2 ;;
+    --instance-id) [ $# -ge 2 ] || die "--instance-id requires a value"; INSTANCE_ID="$2"; shift 2 ;;
     --json) [ $# -ge 2 ] || die "--json requires a value"; HOOK_JSON="$2"; shift 2 ;;
     --url) [ $# -ge 2 ] || die "--url requires a value"; URL="$2"; shift 2 ;;
     --stdin-json) READ_STDIN=1; shift ;;
@@ -120,9 +142,16 @@ fi
 [ -n "$EVENT" ] || EVENT="stop"
 
 case "$EVENT" in
-  stop|notification|session_start) ;;
-  *) die "--event must be one of: stop, notification, session_start (got \"$EVENT\")" ;;
+  stop|notification|session_start|user_prompt_submit|session_end) ;;
+  *) die "--event must be one of: stop, notification, session_start, user_prompt_submit, session_end (got \"$EVENT\")" ;;
 esac
+
+if [ -z "$DETAIL" ] && [ -n "$HOOK_JSON" ]; then
+  DETAIL_FIELD="$(detail_field_for_event "$EVENT")"
+  if [ -n "$DETAIL_FIELD" ]; then
+    DETAIL="$(json_string_field "$HOOK_JSON" "$DETAIL_FIELD")"
+  fi
+fi
 
 [ -n "$TOOL" ] || die "--tool must not be empty"
 
@@ -153,6 +182,18 @@ BODY="$BODY,\"event\":\"$(json_escape "$EVENT")\""
 BODY="$BODY,\"cwd\":\"$(json_escape "$CWD")\""
 if [ -n "$SESSION_ID" ]; then
   BODY="$BODY,\"sessionId\":\"$(json_escape "$SESSION_ID")\""
+fi
+# Correlation keys are omitted when unset rather than sent empty: the receiver
+# falls back to resolving the worktree from cwd and to the primary instance,
+# which is exactly what a hand-configured hook from Issue #1549 wants.
+if [ -n "$WORKTREE_ID" ]; then
+  BODY="$BODY,\"worktreeId\":\"$(json_escape "$WORKTREE_ID")\""
+fi
+if [ -n "$INSTANCE_ID" ]; then
+  BODY="$BODY,\"instanceId\":\"$(json_escape "$INSTANCE_ID")\""
+fi
+if [ -n "$DETAIL" ]; then
+  BODY="$BODY,\"detail\":\"$(json_escape "$DETAIL")\""
 fi
 BODY="$BODY}"
 

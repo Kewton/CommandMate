@@ -189,6 +189,63 @@ commandmate send <worktree-id> "<message>" --auto-yes --stop-pattern "FAILED"
 > Claude Code の完了を待つことになります。`--instance` は 5 コマンド全てが受け付けるため、
 > ワークフロー全体を同じフラグで書けます。
 
+### プロンプト待ちのセッションへは送信できません（Issue #1708）
+
+プロンプトダイアログが開いている間、キー入力は**エージェントに届きません**。ダイアログ自身の
+入力欄に溜まるだけです。そのまま `respond` を送ると、その残留テキストごと送信され、
+**「回答」ではなく「メッセージ」として届く**恐れがあります。停滞している worker に nudge を
+送って状態を悪化させたのが Issue #1708 の実例です。
+
+そのため、サーバがプロンプト待ちを報告している間の `send` は拒否されます。
+
+```
+$ commandmate send myrepo-issue-29 "まだ動いてる？"
+Error: myrepo-issue-29 is waiting on a prompt. … Answer the prompt first: `commandmate respond myrepo-issue-29 <answer>`.
+$ echo $?
+2
+```
+
+- **`respond` / 特殊キー送信 / prompt-response は拒否されません。** これらはプロンプトを
+  解消するための経路なので、塞ぐと回答手段が無くなります
+- **タイマー送信も同じく拒否されます。** ガードは送信サービス層（`sendUserMessage`）に置いて
+  あり、Web/CLI の送信とタイマー送信の両方がここを通ります。拒否されたタイマーは
+  `[prompt_waiting] …` を失敗理由として記録するので、詳細モーダルで理由が読めます
+- **拒否は検出できているときだけ効きます。** 検出をすり抜けたフレームはこのガードの対象外で、
+  そちらは `wait` の `unclassified`（上記）が受け持ちます
+- ペインをキャプチャできない場合は**拒否しません**（fail-open）。誤検知でセッションが
+  書き込み不能になる方が被害が大きいためです。**つまりこれは「取りこぼしを減らすガード」で
+  あって、「ダイアログに文字が絶対に入らない保証」ではありません**
+
+#### 画面に見えないダイアログでも拒否されます（Issue #1737）
+
+エージェントの hooks が報告したダイアログ（`Notification(permission_prompt)` など）は、
+ターミナル側の解析が読めなくても拒否の根拠になります。#1708 の実害はまさに
+「**画面からは読めないダイアログ**に nudge を打ち込んだ」ことなので、そこを塞ぐのが目的です。
+
+構造化イベントだけが根拠のときは、拒否メッセージに**脱出手段**が併記されます。
+
+```
+$ commandmate send myrepo-issue-29 "まだ動いてる？"
+Error: myrepo-issue-29 is waiting on a prompt. … This dialog was reported by the agent's own
+hooks and is not visible to the terminal scraper, … it stops blocking sends 5 minutes after it
+was reported, or immediately with `commandmate send myrepo-issue-29 <message>
+--ignore-structured-prompt` (server-wide: CM_STRUCTURED_SEND_GUARD=off).
+```
+
+**セッションが書き込み不能にならないための 3 つの安全弁**があります。hooks は全経路
+fail-open で、「人間が答えた」を示すイベントが届かない事故は起こりうるためです。
+
+| 手段 | 使いどころ |
+|------|-----------|
+| **5 分の上限** | 何もしなくても、報告から 5 分経った構造化 waiting は `send` を止めません（画面に見えているプロンプトには上限はありません） |
+| `send --ignore-structured-prompt` | ペインは平常なのに拒否され続けるとき。その 1 回だけ構造化側の拒否を無効化します |
+| `CM_STRUCTURED_SEND_GUARD=off` | サーバ全体で構造化側の拒否を切る（サーバ再起動が必要） |
+
+- どの手段も**画面に見えているプロンプトは拒否したままです**。そちらは `respond` で答えられる
+  本物のダイアログで、打ち込むこと自体が #1708 の実害だからです
+- 5 分の上限が効くのは **`send` の拒否だけ**です。`/current-output` の `isPromptWaiting` や
+  `wait` の exit 10 は従来どおり報告され続けます（誤って「完了」と読ませないため）
+
 ### worktree ID の調べ方
 
 ```bash
@@ -315,6 +372,46 @@ esac
   "status": "pending"
 }
 ```
+
+### exit 10 の `type`（種別）
+
+`wait` が「人間待ち」と判断する事由は 3 種類あり、**すべて exit 10** で返ります。
+新しい exit code を作らないのは、既に exit 10 で分岐している呼び出し側
+（dispatch runner の `--auto-yes` 等）を壊さないためです。種別は `type` で判別します。
+
+| `type` | 意味 | 応答方法 |
+|--------|------|----------|
+| `yes_no` / `multiple_choice` | プロンプトを検出・解析できた | `commandmate respond <id> <答え>` |
+| `selection_list` | 矢印キー選択 UI（Codex の pager / `/model`、antigravity の権限メニュー等、Issue #1628）。選択肢としては解析できない | `commandmate respond` ではなく矢印キー相当の特殊キー送信 |
+| `unclassified` | **対話中の画面なのに検出層が分類できなかった**（Issue #1708）。`isUnclassifiedActive` が **60 秒連続**で立った場合のみ返る | 生ペインを見る: `commandmate capture <id> --pane` |
+
+`unclassified` は「検出漏れそのものを停止事由にする」ための安全網です。検出層をすり抜けると
+auto-yes も契約の `autoYes` ポリシーも exit 10 も一切発火しないため、以前は `--timeout` を
+使い切るまで誰も気づけませんでした。**瞬間値では止めません**（再描画中のキャプチャで 1 回だけ
+立つことがあるため）。途中で分類できた時点で滞留カウンタはリセットされます。
+
+`--on-prompt human` では、他の 2 種別と同様に stderr に理由を出して待機を継続します。
+
+`--timeout` / `--stall-timeout` を 60 秒未満に設定した場合は常にそちらが先に効きます（この滞留判定は
+長い待ちを先回りするためのもので、短い待ちを延ばすものではありません）。
+
+#### `ready` は必ずしも「完了」ではありません
+
+`isUnclassifiedActive` は次の 2 状態で立ちます。
+
+```
+(sessionStatus=running && reason=default) || (sessionStatus=ready && reason=no_recent_output)
+```
+
+後者は**読めないオーバーレイが劣化した姿**です。出力が止まったフレームは、サーバの Auto-Yes ポーラが
+`lastServerResponseTimestamp` を打った時点から約 5 秒（`STALE_OUTPUT_THRESHOLD_MS`）で
+`running`/`default` → `ready`/`no_recent_output` に反転します。つまり `ready` でも
+「完了した」とは限らず、「まだ読めないうえに出力も止まった」という意味になり得ます。
+
+そのため **`isUnclassifiedActive` が立っている間は `wait` は完了判定を行いません**。
+本物の完了は `ready`/`input_prompt`（エージェントが composer に戻った状態）で、こちらはフラグを
+立てないため従来どおり最初のポーリングで exit 0 になります。セッション自体が消えた場合も従来どおり
+exit 0 です。
 
 ### 進捗表示
 
@@ -785,6 +882,30 @@ JSON 出力（`prompts` は古い順）:
   `terminal`（誰かがターミナルで直接応答したと推定される掃引記録）。本機能導入前に解決した行は `null`
 - `--pane` とは併用できません（`--prompts` は履歴、`--pane` は現在の画面を読むため）
 - `--limit` の上限はサーバの履歴取得上限（1000）と同じです
+
+#### 検出できなかったフレームも残ります（Issue #1708）
+
+**検出できなかったこと自体が記録すべき事実**です。以前は書き込み口が 2 つとも
+`isPrompt === true` でゲートされていたため、検出層をすり抜けたダイアログはどこにも残らず、
+「なぜ止まったか」は生ペインを見るしかありませんでした（しかも画面が流れるまでの間だけ）。
+
+`isUnclassifiedActive` が 60 秒連続で立つと、1 件だけ記録されます（滞留中にポーリングの度に
+行は増えません）。**検出できたプロンプトと混ざらないよう別表記になります**:
+
+```
+2026-08-06T12:00:00.000Z  claude/claude  [unclassified:detection-failed]
+  Q: Unclassified interactive frame (running/default) held for 60s. …
+```
+
+- `--json` では `"type": "unclassified"` / `"status": "unclassified"` で判別します
+- `status` が `pending` ではないため、`markPendingPromptsAsAnswered()` の掃引で
+  「回答済み」にされることはありません（誰も読めなかったフレームに `answered` は付きません）
+- この行に応答することはできません。生ペインを `capture <id> --pane` で確認してください
+- **記録は「誰かが観測しているとき」に限られます。** 書き込みは `current-output` の
+  ペイロード組立を経由するので、`wait` がポーリング中／ブラウザでターミナルを開いている／
+  `capture --json` を打った、のいずれかが必要です。**サーバ側の Auto-Yes ポーラ単独では
+  記録されません**。誰も待っていない停滞は残らない、という制約は意図的なもので、
+  この機能が説明したい停滞（＝何かが待っていた停滞）は必ず観測下にあるためです
 
 ---
 

@@ -20,6 +20,7 @@ import { resolveInstanceCliTool } from '@/lib/db/agent-instances-db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { sendUserMessage } from '@/lib/session/send-user-message';
+import { PROMPT_WAITING_CODE } from '@/lib/session/prompt-waiting-guard';
 import {
   isSessionStartTimeoutError,
   SESSION_STARTING_CODE,
@@ -47,6 +48,13 @@ interface SendMessageRequest {
   instanceId?: string;  // Issue #868: agent instance ID (defaults to primary === cliToolId)
   imagePath?: string;  // Issue #474: relative path within .commandmate/attachments/
   model?: string;  // Issue #576/#989: AI model name for Copilot or Antigravity agent
+  /**
+   * Issue #1737: send even if only the agent's structured events report an open
+   * dialog. The escape hatch for a hook-reported dialog nothing ever released —
+   * a prompt the terminal scraper can see is still refused, because that one is
+   * on screen and answerable.
+   */
+  ignoreStructuredPromptGuard?: boolean;
 }
 
 // Issue #588: MODEL_NAME_PATTERN and MAX_MODEL_NAME_LENGTH are now centralized
@@ -320,9 +328,22 @@ export async function POST(
       // Issue #576: copilot /model switch (antigravity model is applied at
       // session start above, not mid-session).
       copilotModel: cliToolId === 'copilot' ? body.model : undefined,
+      // Issue #1737: `commandmate send --ignore-structured-prompt`.
+      ignoreStructuredPromptGuard: body.ignoreStructuredPromptGuard === true,
     });
 
     if (!result.ok) {
+      // Issue #1708: the session is sitting on a prompt, so nothing was sent.
+      // 409 rather than 500 — the request was well formed and the server is
+      // healthy; the session is simply in a state that cannot accept a message.
+      // The stable `code` is what the CLI branches on (a bare 409 would be
+      // reported as "Unexpected HTTP status: 409", which says nothing).
+      if (result.stage === 'prompt_waiting') {
+        return NextResponse.json(
+          { error: result.error, code: PROMPT_WAITING_CODE },
+          { status: 409 }
+        );
+      }
       if (result.stage === 'model') {
         return NextResponse.json(
           { error: `Failed to switch model to ${body.model}: ${result.error}` },

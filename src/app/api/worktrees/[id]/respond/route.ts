@@ -15,6 +15,7 @@ import { createLogger } from '@/lib/logger';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { isAnswerablePromptData } from '@/types/models';
 
 const logger = createLogger('api/respond');
 
@@ -83,16 +84,32 @@ export async function POST(
       );
     }
 
+    // Issue #1738: `chat_messages.prompt_data` is shared with two degraded
+    // records — #1708's "the detectors failed on this frame" row and #1725's
+    // "only the structured layer saw this dialog" row. Both carry
+    // `type: 'unclassified'` and no options, and neither may be answered: they
+    // are audit records, and the answer, if one comes, is written by the
+    // ordinary prompt writer against its own row. Without this the row fell
+    // through to the yes/no branch below, which would have typed an arbitrary
+    // string into the pane on behalf of a prompt nobody could read.
+    if (!isAnswerablePromptData(message.promptData)) {
+      return NextResponse.json(
+        { error: 'Prompt cannot be answered: the frame was never classified' },
+        { status: 400 }
+      );
+    }
+    const promptData = message.promptData;
+
     // Validate answer based on prompt type
     let input: string;
 
     // For multiple choice, check if answer is an option number or custom text
-    if (message.promptData.type === 'multiple_choice') {
+    if (promptData.type === 'multiple_choice') {
       const answerNum = parseInt(answer, 10);
 
       // If answer is a number, validate it's one of the available options
       if (!isNaN(answerNum)) {
-        const validNumbers = message.promptData.options.map(opt => opt.number);
+        const validNumbers = promptData.options.map(opt => opt.number);
         if (!validNumbers.includes(answerNum)) {
           return NextResponse.json(
             { error: `Invalid choice: ${answer}. Valid options are: ${validNumbers.join(', ')}` },
@@ -110,7 +127,7 @@ export async function POST(
     } else {
       // For yes/no prompts, use the standard validation
       try {
-        input = getAnswerInput(answer, message.promptData.type);
+        input = getAnswerInput(answer, promptData.type);
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         return NextResponse.json(
@@ -122,7 +139,7 @@ export async function POST(
 
     // Update prompt data
     const updatedPromptData = {
-      ...message.promptData,
+      ...promptData,
       status: 'answered' as const,
       answer,
       answeredAt: new Date().toISOString(),
@@ -162,7 +179,7 @@ export async function POST(
         sessionName,
         answer: input,
         cliToolId,
-        promptData: message.promptData,
+        promptData: promptData,
       });
       logger.info('sent-answer-to');
     } catch (error: unknown) {
@@ -177,7 +194,7 @@ export async function POST(
     // prompt buttons (MessageList) and needs a stored messageId, so unlike
     // /prompt-response it has no automated caller to be confused with.
     applyEventToActiveTask(db, id, cliToolId, instanceId, 'prompt_answered_human', {
-      promptType: message.promptData.type,
+      promptType: promptData.type,
     });
 
     // Broadcast updated message

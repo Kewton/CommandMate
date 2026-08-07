@@ -15,7 +15,8 @@ import { useEffect, useRef, useState } from 'react';
 import { resolveAutoAnswer } from '@/lib/polling/auto-yes-resolver';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { generatePromptKey } from '@/lib/detection/prompt-key';
-import type { PromptData } from '@/types/models';
+import { isAnswerablePromptData } from '@/types/models';
+import type { LivePromptData } from '@/types/models';
 
 /** Duplicate prevention window in milliseconds (3 seconds) */
 const DUPLICATE_PREVENTION_WINDOW_MS = 3000;
@@ -28,8 +29,13 @@ export interface UseAutoYesParams {
   cliTool: string;
   /** Whether a prompt is currently waiting */
   isPromptWaiting: boolean;
-  /** Current prompt data */
-  promptData: PromptData | null;
+  /**
+   * Current prompt data.
+   *
+   * Issue #1738: {@link LivePromptData}, because the reducer slice this is read
+   * from carries the degraded structured form (#1725) like any other prompt.
+   */
+  promptData: LivePromptData | null;
   /** Whether auto-yes mode is enabled */
   autoYesEnabled: boolean;
   /** Last server-side response timestamp (Issue #138) */
@@ -73,6 +79,18 @@ export function useAutoYes({
     }
 
     if (!promptData || !autoYesEnabled) return;
+
+    // Issue #1738: the degraded structured form (#1725) arrives here through the
+    // reducer exactly like a parsed prompt, and nothing may answer it — it
+    // carries no options at all, and a bare 'y' on a numbered dialog takes
+    // whichever entry is highlighted rather than the one anybody chose (#1681).
+    //
+    // Behaviour is unchanged: `resolveAutoAnswer` already fell through to null
+    // for an unrecognised `type`, and the duplicate-prevention ref is only
+    // written after a non-null answer. What changes is that the refusal is now
+    // stated where the type says it belongs, instead of resting on a helper
+    // whose `PromptData` parameter this value never satisfied.
+    if (!isAnswerablePromptData(promptData)) return;
 
     // Issue #501: Skip client-side response entirely when server-side poller is active.
     // The server poller handles all prompt responses; client responding would cause duplicates.

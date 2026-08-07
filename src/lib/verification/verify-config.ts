@@ -34,6 +34,18 @@ export interface VerifyOptions {
    * design: it is a property of how the repository is worked, not of one run.
    */
   requireCommit: boolean;
+  /**
+   * Whether the built-in `env-clean` gate judges this repository's runs
+   * (Issue #1740). Default false — every contract written before the gate
+   * existed must keep its verdict, and a gate that starts failing runs the day
+   * it lands is a gate that gets switched off again.
+   *
+   * Turning it on has a second effect: baselines are only recorded (at task
+   * creation) while it is on, because a snapshot of the machine is a side effect
+   * and the off state must have none. A run without a baseline reports UNKNOWN,
+   * never a pass.
+   */
+  requireEnvClean: boolean;
 }
 
 export interface VerifyConfig {
@@ -58,8 +70,20 @@ export const WORK_EVIDENCE_GATE_ID = 'work-evidence';
  */
 export const SCOPE_GATE_ID = 'scope';
 
+/**
+ * Built-in gate that reconciles the *machine* against the snapshot taken when
+ * the task was created (#1740): listening CommandMate servers, `mcbd-*` tmux
+ * sessions, `$HOME` and `~/.commandmate`. `scope` answers what a delegation
+ * changed inside the repository; this answers what it changed outside one.
+ */
+export const ENV_CLEAN_GATE_ID = 'env-clean';
+
 /** Gate IDs reserved for built-in gates; using one in `gates` is a config error. */
-export const RESERVED_GATE_IDS = [WORK_EVIDENCE_GATE_ID, SCOPE_GATE_ID] as const;
+export const RESERVED_GATE_IDS = [
+  WORK_EVIDENCE_GATE_ID,
+  SCOPE_GATE_ID,
+  ENV_CLEAN_GATE_ID,
+] as const;
 
 export const VERIFY_CONFIG_RELATIVE_PATH = '.commandmate/verify.yaml';
 
@@ -73,7 +97,13 @@ const GATE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
 const TOP_LEVEL_KEYS = ['version', 'gates', 'options'];
 const GATE_KEYS = ['id', 'command', 'timeoutSec'];
-const OPTION_KEYS = ['baseRef', 'skipInPrimaryCheckout', 'maxLogTailBytes', 'requireCommit'];
+const OPTION_KEYS = [
+  'baseRef',
+  'skipInPrimaryCheckout',
+  'maxLogTailBytes',
+  'requireCommit',
+  'requireEnvClean',
+];
 
 export class VerifyConfigError extends Error {
   readonly issues: string[];
@@ -201,6 +231,7 @@ function validateOptions(value: unknown, issues: string[]): VerifyOptions {
     skipInPrimaryCheckout: true,
     maxLogTailBytes: DEFAULT_MAX_LOG_TAIL_BYTES,
     requireCommit: false,
+    requireEnvClean: false,
   };
 
   // A childless `options:` key parses as null and means "all defaults".
@@ -241,6 +272,17 @@ function validateOptions(value: unknown, issues: string[]): VerifyOptions {
       );
     } else {
       options.requireCommit = parsed;
+    }
+  }
+
+  if (value.requireEnvClean !== undefined) {
+    const parsed = asBoolean(value.requireEnvClean);
+    if (parsed === null) {
+      issues.push(
+        `options.requireEnvClean: must be true or false (got ${describe(value.requireEnvClean)})`
+      );
+    } else {
+      options.requireEnvClean = parsed;
     }
   }
 

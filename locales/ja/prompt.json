@@ -14,5 +14,10 @@
   "submit": "送信",
   "yesNoGroupLabel": "はい / いいえ の選択肢",
   "selectAnOption": "選択肢を選んでください",
-  "customValueInput": "カスタム値の入力"
+  "customValueInput": "カスタム値の入力",
+  "unclassifiedTitle": "ダイアログが開いていますが、選択肢を読み取れませんでした。",
+  "unclassifiedInstruction": "ターミナルで応答するか、{command} で選択肢の「番号」を送ってください。番号つきダイアログでは「yes」「no」といった語は解決されません。",
+  "unclassifiedRespondCommand": "commandmate respond [worktree-id] [番号]",
+  "askUserQuestionProgress": "エージェントからの質問 {index}/{total}",
+  "askUserQuestionSource": "選択肢はエージェントから取得しました"
 }

@@ -1,0 +1,88 @@
+version: 1
+title: "Issue #1724: PermissionRequest hook による構造化裁定（Auto-Yes v2）"
+goal: |
+  /pm-auto-issue2dev 1724
+
+  https://github.com/Kewton/CommandMate/issues/1724 を実装してください。
+  Issue 本文の「実装内容」1〜4、「受入基準」、「リスク」、そして本文末尾の
+  **「⚠️ Phase 0 スパイク（#1721）による訂正」**をすべて満たすこと。
+
+  ## 着手前に必ず読むこと
+
+  - `docs/design/agent-hooks-live-verification.md` — 特に **§5.4（PermissionRequest の no-decision）**。
+    本 Issue の安全性設計はここの実測に依拠します
+  - `tests/fixtures/hooks/claude/permission-request.json` / `permission-request-ask-user-question.json` —
+    **リクエスト形と応答スキーマはこの実データに一致させること**
+  - `src/lib/hooks/hook-settings-generator.ts` — #1722 が新設した settings 生成器。ここに hook を追加する
+
+  ## 実測で支持された前提（そのまま進めてよい）
+
+  - **`{}`（空応答）で従来どおり TUI 承認ダイアログが出る**（D5）。「判断できないときは黙る」で安全側に倒れる
+  - `allow` はダイアログを出さず即実行（transcript に `Allowed by PermissionRequest hook`）、`deny` は
+    `Denied by PermissionRequest hook`。http / command 両方で decision が効く
+  - **timeout / 接続失敗はすべて fail-open**。CommandMate サーバが落ちてもエージェントは止まらない
+
+  ## 実測で訂正された前提（外すと動かない）
+
+  - **実 payload に `tool_use_id` は無い**（D2）。公式ドキュメント記載の `permission_requirements` も無く、
+    代わりに `permission_suggestions`（`addRules` 形式）が入る。
+    **`PreToolUse` との相関は `prompt_id` + `tool_name` + `tool_input` で行うこと**
+  - **`PermissionDenied` は TUI で「3. No」を選んでも発火しない**（D6）。「ユーザーが拒否した」を hook で知ることはできない。
+    deny ルール由来の拒否での発火は**未確認**なので、断定して設計に組み込まないこと
+  - **headless `-p` では `PermissionRequest` 自体が発火しない**（sandbox guard が先に弾く）
+  - **`AskUserQuestion` にも `PermissionRequest` は上がるが、`allow` を返しても選択画面はそのまま出る。**
+    一律 allow でも「`respond yes` が承認に化ける」事故は起きない（良い面）が、AskUserQuestion の停止は解消できない（悪い面）
+
+  ## 安全性の絶対条件（本 Issue は誤判定が実行を伴う）
+
+  - **判定不能は必ず no-decision に倒すこと。** fail-safe 側は「ダイアログ表示 = 現状維持」。誤 allow はコマンド実行を意味します
+  - **denyPatterns 該当時に deny を返さないこと。** 現行 Auto-Yes の抑止は「自動応答しない」であって「拒否する」ではありません。
+    no-decision + lastSuppression 記録で、挙動を変えないこと
+  - **`AskUserQuestion` の PermissionRequest は常に no-decision**（#1726 の担当）
+  - **画面ベース Auto-Yes 経路（detectPrompt 直呼び）を削除・変更しないこと。** hooks 未対応環境と Claude 以外のフォールバック
+
+  ## 作業ルール（厳守）
+
+  - **#1699 の再発防止テストを必ず入れること**: 「一度 allow した `rm -rf` の denyPattern が、以後の**無関係な**承認を
+    恒久抑止しない」ことを直接テストする。過去、denyPatterns が pane scrollback に照合され、一度承認した `rm -rf` が
+    以後の普通の編集承認まで抑止して worker が 1 時間沈黙した実害があります。構造化裁定では照合対象が
+    **当該リクエストの `tool_input` のみ**であることを固定してください
+  - **抑止まわりは変異注入で非空振りを証明すること**（抑止条件をわざと壊して赤くなることを確認し、結果を記載）
+  - **`npm run test:integration` を通しで実行し exit code を `cmd > log; echo $?` で実測すること。**
+    `.commandmate/verify.yaml` のゲートは lint / typecheck / unit のみで **integration を裁定しません**。
+    #1722 では integration の回帰が `wait --verify` を素通りして CI で落ちました
+  - **テストが実ホームディレクトリを汚さないこと。** `tests/helpers/agent-hooks-dir.ts` で `CM_AGENT_HOOKS_DIR` を
+    temp に向ける仕組みが #1722 で入っています。セッションを起動するテストではこれを使うこと
+  - 同期パスに DB 重査問を置かないこと。応答時間を計測ログに出し、遅い場合（例 >500ms）に warn を出すこと
+  - 実 tmux を触る検証は必ず **`tmux -L <専用socket>`** で。`kill-server` は書かず `kill-session -t '=<name>:'`。
+    `TMUX_TMPDIR` を隔離手段に使わないこと
+  - 変更は**単一コミット**。**PR は作らないこと**。`dev-reports/` は作成不要
+  - 完了したら最終行に `IMPL_COMPLETED` とだけ出力すること
+
+  ## 並行作業への配慮
+
+  Issue #1723（検出2層化）が同時に `src/lib/session/**` を変更しています。**そこを触らないこと**（契約の `scope.deny`）。
+  必要になった場合は理由をコミットメッセージに明記すること。
+
+  ## 完了条件
+
+  - Issue #1724 の受入基準（🤖 / 👤）と訂正表をすべて満たしていること
+  - `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` / `npm run test:integration` / `npm run build`
+    がすべて exit 0（**実測**）
+scope:
+  allow:
+    - "src/lib/hooks/**"
+    - "src/lib/polling/**"
+    - "src/app/api/hooks/**"
+    - "tests/**"
+    - "docs/**"
+    - "CHANGELOG.md"
+    - "dev-reports/**"
+  deny:
+    - "src/lib/detection/**"
+    - "src/lib/session/**"
+verify:
+  gates: [lint, typecheck, unit]
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

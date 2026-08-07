@@ -107,18 +107,83 @@ export interface CurrentOutputResponse {
   isSelectionListActive: boolean;
   /** Issue #1017: Codex pager/edit-previous mode (subset of isSelectionListActive). */
   isPagerActive?: boolean;
+  /**
+   * The frame is interactive but the detection layer could not classify it
+   * (Issue #1497). The server has published this since #1120; until Issue #1708
+   * the CLI never read it, so a dialog the scraper failed to parse was treated
+   * as "nothing is happening" and `wait` polled it until --timeout.
+   *
+   * Momentary by nature — a repaint mid-capture can raise it for a single poll —
+   * so it is only a stop reason after it has persisted; see
+   * UNCLASSIFIED_DWELL_MS in wait.ts.
+   */
+  isUnclassifiedActive?: boolean;
   lastServerResponseTimestamp: number | null;
   serverPollerActive: boolean;
-  /** Issue #520: Session status from detectSessionStatus() */
+  /**
+   * Issue #520: session status from `detectSessionStatus()` — or, since Issue
+   * #1723, from the agent's own lifecycle events when they are available and
+   * the scraper is not reporting a prompt. `sessionStatusReason` says which.
+   */
   sessionStatus?: 'idle' | 'ready' | 'running' | 'waiting';
-  /** Issue #520: Reason string from detectSessionStatus() or 'session_not_running' */
+  /**
+   * Issue #520: reason string from `detectSessionStatus()`, or
+   * `session_not_running`.
+   *
+   * Issue #1723 adds a second family, distinguishable by its `hook_` prefix
+   * (`hook_stop`, `hook_prompt_submit`, …; see
+   * `src/lib/session/status-mapping.ts` HOOK_STATUS_REASON). A `hook_` reason
+   * means `sessionStatus` came from an event the agent reported rather than
+   * from reading its terminal, so it is exact rather than inferred — the
+   * distinction matters when triaging why `wait` did or did not stop.
+   */
   sessionStatusReason?: string;
+  /**
+   * Issue #1549: epoch ms of the last structured stop event, or null when the
+   * agent has posted none.
+   */
+  lastStopEventAt?: number | null;
+  /**
+   * Issue #1722: the last lifecycle event the agent's injected hooks reported.
+   * Diagnostic — it tells an operator whether hooks are arriving and for which
+   * instance. No CLI verdict reads it; that is Issue #1723.
+   *
+   * Mirrors: src/lib/session/current-output-builder.ts StructuredEventsPayload
+   */
+  structuredEvents?: {
+    lastEventType: string | null;
+    lastEventAt: number | null;
+    lastEventDetail: string | null;
+    /**
+     * Epoch ms the structured layer first learned a dialog was open, or null
+     * (Issue #1725). Non-null together with `isPromptWaiting` is how a caller
+     * tells "the agent told us" from "the screen told us".
+     */
+    promptWaitingSince?: number | null;
+    /** `notification` / `permission-request`, or null (Issue #1725). */
+    promptWaitingSource?: string | null;
+  };
 }
 
 // Mirrors: src/types/models.ts BasePromptData (subset for CLI output)
+//
+// Issue #1738: this mirror is deliberately LOOSER than the server union and
+// must stay that way. `type` is `string`, not `PromptType`, and `options` is
+// `unknown[]`, which is what already lets the degraded payloads through
+// unchanged: #1725's `StructuredPromptWaitingData` on `current-output`, and
+// #1708 / #1725's audit rows on `messages?messageType=prompt`. Both carry
+// `type: 'unclassified'` and an empty option list, and `capture` / `wait`
+// already branch on that literal (see UNCLASSIFIED_PROMPT_TYPE in
+// cli/commands/wait.ts). Tightening `type` into the server's `PromptData` union
+// would reintroduce exactly the gap #1738 closed, on the CLI side.
 export interface PromptData {
   type: string;
   question: string;
+  /**
+   * Mirrors src/types/models.ts MultipleChoiceOption. Since Issue #1726 an
+   * option may also carry `description` — the second line the AskUserQuestion
+   * picker renders — when the agent's own `PreToolUse` payload supplied it.
+   */
   options?: unknown[];
   status?: string;
   answer?: string;
@@ -157,10 +222,20 @@ export interface PromptMessageResponse {
 export interface PromptResponseResult {
   success: boolean;
   answer: string;
-  reason?: string; // e.g. 'prompt_no_longer_active', 'unresolvable_answer'
-  /** Issue #1681: detail accompanying reason 'unresolvable_answer' */
+  /**
+   * e.g. `prompt_no_longer_active`, `unresolvable_answer`, and since Issue
+   * #1726 `answer_out_of_range` — the option number is outside the list the
+   * agent's own `AskUserQuestion` payload declared, so nothing was sent.
+   */
+  reason?: string;
+  /** Issue #1681: detail accompanying a reason that refused to send. */
   message?: string;
-  /** Issue #1681: how a semantic yes/no or --default answer was resolved */
+  /**
+   * Issue #1681: how a semantic yes/no or --default answer was resolved.
+   *
+   * Issue #1726 also reports `via: 'semantic'` here when an option LABEL was
+   * matched against the agent's structured options (`respond <id> Blue` → 1).
+   */
   resolved?: {
     via: 'semantic' | 'default';
     optionNumber?: number;

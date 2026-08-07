@@ -3,6 +3,13 @@
  */
 
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
+// Type-only, and it has to stay that way: `lib/session/structured-prompt`
+// imports UNCLASSIFIED_PROMPT_TYPE back from this module, so a value import
+// here would close a runtime cycle. `import type` is erased, so there is none.
+import type {
+  StructuredPromptHistoryRecord,
+  StructuredPromptWaitingData,
+} from '@/lib/session/structured-prompt';
 
 export type { AgentInstance };
 
@@ -223,8 +230,16 @@ export interface BasePromptData {
   type: PromptType;
   /** The question being asked */
   question: string;
-  /** Current status of the prompt */
-  status: 'pending' | 'answered';
+  /**
+   * Current status of the prompt.
+   *
+   * `unclassified` (Issue #1708) is deliberately NOT `pending`: it marks a row
+   * that records a detection FAILURE, and `markPendingPromptsAsAnswered()`
+   * selects on `status = 'pending'`, so keeping it out of that value is what
+   * stops the sweep from stamping "(answered via terminal)" onto a frame nobody
+   * ever answered — or could have.
+   */
+  status: 'pending' | 'answered' | 'unclassified';
   /** User's answer (if status is 'answered') */
   answer?: string;
   /** Timestamp when answered (ISO 8601) */
@@ -273,6 +288,44 @@ export interface MultipleChoiceOption {
   isDefault?: boolean;
   /** Whether this option requires text input from the user */
   requiresTextInput?: boolean;
+  /**
+   * The explanatory second line the option carries, when one is known — Issue
+   * #1726.
+   *
+   * Only ever set from an `AskUserQuestion` `tool_input`, never from the screen:
+   * the picker renders the description as its own indented line, which the
+   * scraper deliberately treats as a continuation and drops (otherwise it would
+   * be parsed as another option). So this is information the structured payload
+   * adds rather than information it duplicates.
+   */
+  description?: string;
+}
+
+/**
+ * What an `AskUserQuestion` picker is showing, from the tool call rather than
+ * from the screen (Issue #1726).
+ *
+ * Present only when the structured `PreToolUse` payload could be lined up
+ * against the options the scraper parsed — see
+ * `lib/session/ask-user-question-prompt`. Its absence means the options are the
+ * scraper's alone, which is also the state of every session on a machine where
+ * hooks never fire.
+ */
+export interface AskUserQuestionPromptMeta {
+  /** The short tab label Claude renders for this question, when it sent one. */
+  header?: string;
+  /** Whether this question accepts several answers (checkbox rendering). */
+  multiSelect: boolean;
+  /** 0-based index of the question the picker is on. */
+  questionIndex: number;
+  /** How many questions this one tool call carries. */
+  questionCount: number;
+  /**
+   * Option numbers the picker appended itself — "Type something." / "Chat about
+   * this". They are real and selectable, but no structured payload describes
+   * them, so a reader that wants only what the agent offered filters them out.
+   */
+  metaOptionNumbers: number[];
 }
 
 /**
@@ -311,12 +364,123 @@ export interface MultipleChoicePromptData extends BasePromptData {
    * numbered-confirmation format, whose response behavior is therefore unchanged.
    */
   isAskUserQuestion?: boolean;
+  /**
+   * The tool call behind this picker, when the agent's `PreToolUse` payload
+   * could be matched to it (Issue #1726). See {@link AskUserQuestionPromptMeta}.
+   *
+   * Its presence is what tells `respond` the option list is authoritative — and
+   * therefore that an out-of-range number may be refused before anything is sent
+   * to the terminal. Absent means the options came from the screen alone and the
+   * pre-#1726 behaviour applies.
+   */
+  askUserQuestion?: AskUserQuestionPromptMeta;
 }
 
 /**
  * Union type for all prompt data types (extensible for future prompt types)
  */
 export type PromptData = YesNoPromptData | MultipleChoicePromptData;
+
+/**
+ * `promptData.type` written for an interactive frame nothing could classify.
+ *
+ * Deliberately NOT a member of {@link PromptType}: the detectors can never
+ * produce it, and widening that union would oblige every exhaustive map over it
+ * (the contract parser's promptType allowlist among them) to grow a case for a
+ * value no prompt-answering path is allowed to accept. Readers compare against
+ * this constant instead.
+ */
+export const UNCLASSIFIED_PROMPT_TYPE = 'unclassified';
+
+/**
+ * A record that the detection layer FAILED on a frame (Issue #1708).
+ *
+ * Deliberately outside the {@link PromptData} union. It is stored in the same
+ * `chat_messages.prompt_data` column and listed by `capture --prompts`, so the
+ * failure itself is retrievable after the fact — before this, the two prompt
+ * history writers were both gated on `isPrompt === true`, so a missed frame left
+ * no trace anywhere and the only evidence a worker had stalled was the raw pane,
+ * for as long as it stayed on screen.
+ *
+ * But it is not a prompt: it carries no options (by definition nothing was
+ * parsed to put in them) and nothing may answer it. Keeping it out of the union
+ * is what stops it being handed to `respond` / the answer sender by a path that
+ * only checks `messageType === 'prompt'`.
+ *
+ * `status` is `'unclassified'` rather than `'pending'` for the same reason
+ * `markPendingPromptsAsAnswered()` selects on `status = 'pending'`: a frame
+ * nobody could read must never be stamped "(answered via terminal)".
+ */
+export interface UnclassifiedFrameRecord {
+  type: typeof UNCLASSIFIED_PROMPT_TYPE;
+  status: 'unclassified';
+  /** Human-readable description of the frame and where to go look at it. */
+  question: string;
+  /** Always empty — nothing was parsed. */
+  options: never[];
+  /** How long the frame had been unclassified when it was recorded, in seconds. */
+  dwellSeconds: number;
+  /** The `status/reason` the detector settled on, e.g. `running/default`. */
+  sessionStatusReason: string;
+}
+
+/**
+ * What a LIVE `promptData` field may actually hold (Issue #1738).
+ *
+ * `currentOutput.promptData` has published the degraded
+ * {@link StructuredPromptWaitingData} since Issue #1725, but every layer the
+ * value travels through — the WebSocket snapshot, the polling hooks, the UI
+ * reducer — went on typing the field as {@link PromptData} alone. Only
+ * `PromptPanel`, at the very end, widened its prop. So the intermediate layers
+ * held a value their own types said could not exist, and a reader that trusted
+ * them could reach `options` on a payload that has none, pass the type checker,
+ * and break at runtime for `unclassified` alone.
+ *
+ * {@link StructuredPromptWaitingData} stays OUT of the {@link PromptData} union
+ * itself — see the note on {@link UNCLASSIFIED_PROMPT_TYPE} for why that union
+ * must stay closed to values no prompt-answering path may accept. What is
+ * closed here is the path the value travels, not the union.
+ */
+export type LivePromptData = PromptData | StructuredPromptWaitingData;
+
+/**
+ * What the shared `chat_messages.prompt_data` column may actually hold
+ * (Issue #1738).
+ *
+ * Two degraded records land there beside the parsed prompts: #1708's
+ * {@link UnclassifiedFrameRecord}, written when the detectors failed on a
+ * frame, and #1725's {@link StructuredPromptHistoryRecord}, written when only
+ * the structured layer saw a dialog. Both go in through the same `promptData`
+ * field of `createMessage` — which is why the writer in
+ * `lib/session/current-output-builder` needed an `as unknown as PromptData`
+ * cast to get past the old type. Naming them here is what makes that cast
+ * unnecessary and stops a reader assuming `answer` is always there.
+ */
+export type StoredPromptData =
+  | PromptData
+  | UnclassifiedFrameRecord
+  | StructuredPromptHistoryRecord;
+
+/**
+ * Narrow a prompt payload to the answerable {@link PromptData} union.
+ *
+ * The one branch every reader of {@link LivePromptData} / {@link
+ * StoredPromptData} needs, defined once: `true` means the options, the default
+ * and `answer` are meaningful and the value may be answered by option number;
+ * `false` narrows to the degraded form, which by construction carries none of
+ * them. Both directions come out of this single predicate so no call site has
+ * to re-derive "is `type` the unclassified sentinel?" for itself.
+ *
+ * Deliberately not `isStructuredPromptWaitingData` from
+ * `lib/session/structured-prompt`: that one asserts the *live* degraded shape,
+ * which would be unsound over {@link StoredPromptData}, whose degraded members
+ * share its `type` but not its `status`/`source`.
+ */
+export function isAnswerablePromptData(
+  value: LivePromptData | StoredPromptData | null | undefined,
+): value is PromptData {
+  return value != null && value.type !== UNCLASSIFIED_PROMPT_TYPE;
+}
 
 /**
  * Issue #1121: Client-only optimistic send state for a message shown in the UI
@@ -348,8 +512,15 @@ export interface ChatMessage {
   requestId?: string;
   /** Message type (normal, prompt, etc.) */
   messageType: MessageType;
-  /** Prompt data (only for prompt messages) */
-  promptData?: PromptData;
+  /**
+   * Prompt data (only for prompt messages).
+   *
+   * Issue #1738: {@link StoredPromptData}, not {@link PromptData} — the column
+   * also carries the two degraded records, and a row that is one of them must
+   * not look answerable to a reader. Narrow with {@link isAnswerablePromptData}
+   * before touching `options` / `answer`.
+   */
+  promptData?: StoredPromptData;
   /** CLI tool type (claude, codex, gemini, vibe-local) - defaults to 'claude' */
   cliToolId?: CLIToolType;
   /**

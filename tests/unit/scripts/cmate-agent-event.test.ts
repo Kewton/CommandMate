@@ -265,3 +265,104 @@ describe('transport failure does not break the agent', () => {
     expect(result.status).toBe(1);
   });
 });
+
+describe('correlation keys and the widened vocabulary (Issue #1722)', () => {
+  it('maps the two lifecycle events added for auto-injection', () => {
+    const withEvent = (name: string) =>
+      body(run(['--stdin-json'], { stdin: JSON.stringify({ hook_event_name: name, cwd: '/r' }) }))
+        .event;
+
+    expect(withEvent('SessionEnd')).toBe('session_end');
+    expect(withEvent('UserPromptSubmit')).toBe('user_prompt_submit');
+  });
+
+  it('still refuses the decision-bearing events, which are out of scope', () => {
+    for (const name of ['PreToolUse', 'PermissionRequest']) {
+      const result = run(['--stdin-json'], {
+        stdin: JSON.stringify({ hook_event_name: name, cwd: '/r' }),
+      });
+      expect(result.status, name).toBe(2);
+      expect(result.curlArgs, name).toBeNull();
+    }
+  });
+
+  it('sends the worktree and instance ids when given them', () => {
+    const result = run([
+      '--cwd', '/repos/wt-a',
+      '--worktree-id', 'wt-a',
+      '--instance-id', 'claude-2',
+    ]);
+
+    expect(body(result)).toEqual({
+      tool: 'claude',
+      event: 'stop',
+      cwd: '/repos/wt-a',
+      worktreeId: 'wt-a',
+      instanceId: 'claude-2',
+    });
+  });
+
+  it('omits them entirely when not given, so a manual hook is unchanged', () => {
+    // The receiver treats absent as "resolve from cwd, primary instance", which
+    // is exactly the Issue #1549 behaviour these users already have.
+    expect(body(run(['--cwd', '/repos/wt-a']))).toEqual({
+      tool: 'claude',
+      event: 'stop',
+      cwd: '/repos/wt-a',
+    });
+  });
+
+  it('reads the event subtype from the field that event actually uses', () => {
+    // Each event spells its subtype differently and none of them share a field.
+    const detailFor = (payload: Record<string, unknown>) =>
+      body(run(['--stdin-json'], { stdin: JSON.stringify(payload) })).detail;
+
+    expect(
+      detailFor({ hook_event_name: 'Notification', cwd: '/r', notification_type: 'idle_prompt' })
+    ).toBe('idle_prompt');
+    expect(detailFor({ hook_event_name: 'SessionEnd', cwd: '/r', reason: 'clear' })).toBe('clear');
+    expect(detailFor({ hook_event_name: 'SessionStart', cwd: '/r', source: 'startup' })).toBe(
+      'startup'
+    );
+    // Notification is judged on notification_type, never on the human-facing
+    // message (Issue #1721, D3).
+    expect(
+      detailFor({
+        hook_event_name: 'Notification',
+        cwd: '/r',
+        message: 'Claude is waiting for your input',
+      })
+    ).toBeUndefined();
+    expect(detailFor({ hook_event_name: 'Stop', cwd: '/r' })).toBeUndefined();
+  });
+
+  it('accepts the real captured SessionStart payload, which is how it is invoked', () => {
+    // SessionStart is the one event that cannot be an http hook (D1), so this
+    // script is the only path those payloads ever take.
+    const payload = readFileSync(
+      join(process.cwd(), 'tests/fixtures/hooks/claude/session-start.json'),
+      'utf8'
+    ).replace('<CWD>', '/repos/wt-a');
+
+    const result = run(
+      ['--stdin-json', '--event', 'session_start', '--worktree-id', 'wt-a', '--instance-id', 'claude'],
+      { stdin: payload }
+    );
+
+    expect(result.status).toBe(0);
+    expect(body(result)).toEqual({
+      tool: 'claude',
+      event: 'session_start',
+      cwd: '/repos/wt-a',
+      sessionId: '00000000-0000-4000-8000-000000000000',
+      worktreeId: 'wt-a',
+      instanceId: 'claude',
+      detail: 'startup',
+    });
+  });
+
+  it('rejects a missing value for either correlation flag', () => {
+    expect(run(['--worktree-id']).status).toBe(2);
+    expect(run(['--instance-id']).status).toBe(2);
+  });
+});

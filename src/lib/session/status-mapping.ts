@@ -9,6 +9,7 @@
  * | `BranchStatus`      | `types/sidebar.ts`                  | idle / ready / running / waiting / generating |
  * | boolean triple      | `lib/session/worktree-status-helper.ts` | isRunning / isWaitingForResponse / isProcessing |
  * | `UIPhase`           | `types/ui-state.ts`                 | idle / waiting / receiving / prompt / complete |
+ * | `AgentEventType`    | `lib/hooks/agent-event-types.ts`    | stop / notification / session_start / …   |
  *
  * This module is the single place where those vocabularies are converted into
  * one another, so the correspondence cannot drift between call sites. It is a
@@ -20,6 +21,8 @@
  *   terminal output
  *     -> detectSessionStatus()                  (status-detector, NOT touched here)
  *     -> SessionStatus
+ *     -> [merged with agentEventToSessionStatus() in current-output-builder]
+ *
  *     -> sessionStatusToActivityFlags()         (this module)
  *     -> boolean triple (+ isRunning from tmux session existence)
  *     -> deriveCliStatus()                      (this module)
@@ -41,7 +44,137 @@
  */
 
 import type { SessionStatus } from '@/lib/detection/status-detector';
+import type { AgentEventType } from '@/lib/hooks/agent-event-types';
 import type { BranchStatus } from '@/types/sidebar';
+
+/**
+ * `sessionStatusReason` values produced by the structured-event layer
+ * (Issue #1723), as opposed to `STATUS_REASON` which is the scraper's.
+ *
+ * They are deliberately prefixed: a reader of a payload, a log line or a
+ * `commandmate capture --json` must be able to tell at a glance which of the two
+ * detection layers decided, because the whole point of the two-layer split is
+ * being able to measure how often they disagree.
+ */
+export const HOOK_STATUS_REASON = {
+  /** The agent reported it began a turn (`UserPromptSubmit`). */
+  PROMPT_SUBMIT: 'hook_prompt_submit',
+  /** The agent reported the turn ended (`Stop` / `SubagentStop`). */
+  STOP: 'hook_stop',
+  /** `Notification(permission_prompt)` — the agent says a dialog is on screen. */
+  PERMISSION_PROMPT: 'hook_permission_prompt',
+  /**
+   * A `PermissionRequest` this server declined to decide (Issue #1725).
+   *
+   * Distinct from {@link PERMISSION_PROMPT} because the two are different kinds
+   * of evidence, and an operator reading a payload or a log has to be able to
+   * tell them apart: the notification is proof a dialog exists, this one is the
+   * prediction that one is about to. Only the prediction expires unaided.
+   */
+  PERMISSION_REQUEST: 'hook_permission_request',
+  /** `Notification(idle_prompt)` — the agent says it is sitting at the composer. */
+  IDLE_PROMPT: 'hook_idle_prompt',
+  /**
+   * `PreToolUse` — the agent reported it is invoking a tool (Issue #1726).
+   *
+   * A turn in progress, and nothing more. It is deliberately NOT `waiting` even
+   * though the only matcher injected for it is `AskUserQuestion`: whether that
+   * picker is on screen is the scraper's question (§5.6 measured that Claude
+   * emits nothing at all while it is up), and asserting `waiting` from a
+   * pre-invocation event would keep asserting it long after a human answered in
+   * the terminal, because no event marks that.
+   */
+  PRE_TOOL_USE: 'hook_pre_tool_use',
+  /**
+   * `PostToolUse` — the agent reported a tool call finished (Issue #1726).
+   *
+   * `running` like its `PreToolUse` counterpart, and for the same reason: a tool
+   * finishing is not a turn finishing. `Stop` is what says the turn ended, and
+   * it followed this by 1.3 s in the live capture.
+   */
+  POST_TOOL_USE: 'hook_post_tool_use',
+} as const;
+
+export type HookStatusReason = (typeof HOOK_STATUS_REASON)[keyof typeof HOOK_STATUS_REASON];
+
+/** A status the structured events imply, with the reason token that says so. */
+export interface StructuredStatusVerdict {
+  status: SessionStatus;
+  reason: HookStatusReason;
+}
+
+/**
+ * The structured state machine: last lifecycle event -> `SessionStatus`
+ * (Issue #1723).
+ *
+ * Pure and total, so the whole table can be read in one place:
+ *
+ * | event                            | verdict            |
+ * |----------------------------------|--------------------|
+ * | `user_prompt_submit`             | `running`          |
+ * | `stop`                           | `ready`            |
+ * | `pre_tool_use`                   | `running`          |
+ * | `post_tool_use`                  | `running`          |
+ * | `notification(permission_prompt)`| `waiting`          |
+ * | `notification(idle_prompt)`      | `ready`            |
+ * | `notification(other/none)`       | none (scraper)     |
+ * | `session_start`                  | none (scraper)     |
+ * | `session_end`                    | none (scraper)     |
+ *
+ * `pre_tool_use` answers `running` for the same reason `user_prompt_submit`
+ * does: the agent is mid-turn. It has to answer *something*, because this table
+ * reads only the newest event — answering "none" would mean an `AskUserQuestion`
+ * invocation erased the `running` its own turn's `user_prompt_submit` had
+ * established, and a scraper that reads the picker as `ready`/`no_recent_output`
+ * (which is exactly the #1708 failure) would then let `commandmate wait` exit 0
+ * on a session with a dialog in front of it. `running` never overrides a scraper
+ * `waiting`, so promoting it costs nothing where the screen can be read.
+ *
+ * `session_start` answering "none" is not an oversight, it is a requirement.
+ * A folder that has not been trusted yet shows its trust dialog *before* any
+ * hook fires — 25.3 seconds of complete silence in the live capture
+ * (`docs/design/agent-hooks-live-verification.md` §5.6) — so the arrival of
+ * `SessionStart` cannot be used as "the session is up", and its absence cannot
+ * be used as "it is not". What `session_start` does do is start a new
+ * generation; that belongs to `agent-event-state`, not to this table.
+ *
+ * `session_end` answers none because the state is discarded, not because the
+ * session is idle: `/clear` emits `SessionEnd(reason=clear)` on a session that
+ * is alive and about to keep going (§1.1).
+ *
+ * @param detail - The event's subtype, for the events that have one
+ */
+export function agentEventToSessionStatus(
+  event: AgentEventType,
+  detail: string | null,
+): StructuredStatusVerdict | null {
+  switch (event) {
+    case 'user_prompt_submit':
+      return { status: 'running', reason: HOOK_STATUS_REASON.PROMPT_SUBMIT };
+    case 'pre_tool_use':
+      return { status: 'running', reason: HOOK_STATUS_REASON.PRE_TOOL_USE };
+    case 'post_tool_use':
+      return { status: 'running', reason: HOOK_STATUS_REASON.POST_TOOL_USE };
+    case 'stop':
+      return { status: 'ready', reason: HOOK_STATUS_REASON.STOP };
+    case 'notification':
+      // Matched on `notification_type`, never on the human-facing `message` (D3).
+      if (detail === 'permission_prompt') {
+        return { status: 'waiting', reason: HOOK_STATUS_REASON.PERMISSION_PROMPT };
+      }
+      if (detail === 'idle_prompt') {
+        return { status: 'ready', reason: HOOK_STATUS_REASON.IDLE_PROMPT };
+      }
+      return null;
+    case 'session_start':
+    case 'session_end':
+      return null;
+    default:
+      // exhaustive check: AgentEventType extensions cause a compile error
+      event satisfies never;
+      return null;
+  }
+}
 
 /**
  * The boolean triple that both the sidebar and the worktree detail panes use to

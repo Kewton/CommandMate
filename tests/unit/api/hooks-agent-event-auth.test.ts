@@ -72,6 +72,15 @@ describe('POST /api/hooks/agent-event authentication', () => {
     expect(rejected.status).toBe(401);
   });
 
+  it('is enforced for the Auto-Yes v2 receiver (Issue #1724)', async () => {
+    // This one carries a decision the agent executes, so an unauthenticated
+    // caller reaching it could approve commands in somebody's worktree.
+    const path = 'http://localhost/api/hooks/permission-request';
+
+    expect((await callMiddleware(path, 'Bearer nope')).status).toBe(401);
+    expect((await callMiddleware(path, `Bearer ${TOKEN}`)).status).toBe(200);
+  });
+
   it('passes everything through when no token hash is configured', async () => {
     // Backwards compatibility: an installation that never enabled auth must not
     // start failing hook posts because this endpoint was added.

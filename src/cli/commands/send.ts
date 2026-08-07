@@ -20,6 +20,26 @@ import { resolveInstanceCliTool } from './instances';
 const DEFAULT_AUTO_YES_DURATION = '1h';
 
 /**
+ * Code the send API returns when the session is blocked on a prompt (Issue
+ * #1708). Mirrors PROMPT_WAITING_CODE in src/lib/session/prompt-waiting-guard.ts;
+ * duplicated rather than imported so the CLI bundle does not pull the server's
+ * tmux/detection graph in for one string.
+ */
+const PROMPT_WAITING_CODE = 'PROMPT_WAITING';
+
+/**
+ * What to print when a PROMPT_WAITING response carried no message body — an
+ * older daemon, or a truncated body. The code is the contract; the sentence is
+ * a courtesy, and the CLI must still say what to do without it.
+ */
+function promptWaitingFallback(worktreeId: string): string {
+  return (
+    `${worktreeId} is waiting on a prompt; the message was not sent. ` +
+    `Answer it first: \`commandmate respond ${worktreeId} <answer>\`.`
+  );
+}
+
+/**
  * Resolve --duration to milliseconds, exiting on an invalid value.
  *
  * Issue #1608: this is called from the option-validation block at the top of
@@ -178,6 +198,7 @@ export function createSendCommand(): Command {
     .option('--duration <duration>', `Auto-yes duration (${ALLOWED_DURATIONS.join(', ')})`)
     .option('--stop-pattern <pattern>', 'Auto-yes stop pattern (regex). Matched against terminal output; cannot block commands (use the task contract\'s autoYes.denyPatterns for that)')
     .option('--contract <path>', 'Execution contract path relative to the worktree root (e.g. .commandmate/tasks/my-task.yaml). Records a task and sends the contract preamble plus its goal.')
+    .option('--ignore-structured-prompt', 'Send even if only the agent\'s hooks report an open dialog (Issue #1737). Use when the pane looks idle but sends are refused; a prompt visible in the terminal is still refused.')
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeId: string, message: string | undefined, options: SendOptions) => {
       try {
@@ -295,6 +316,12 @@ export function createSendCommand(): Command {
         if (options.model) {
           sendBody.model = options.model;
         }
+        // Issue #1737: waive the structured half of the prompt guard for this
+        // send. Sent only when asked for, so an older daemon that does not know
+        // the field sees exactly the body it always did.
+        if (options.ignoreStructuredPrompt) {
+          sendBody.ignoreStructuredPromptGuard = true;
+        }
 
         try {
           await client.post<ChatMessage>(`/api/worktrees/${worktreeId}/send`, sendBody);
@@ -303,6 +330,18 @@ export function createSendCommand(): Command {
           // one: nothing is working on it and nothing ever will.
           if (taskId) {
             await reportTaskStatus(client, taskId, 'failed');
+          }
+          // Issue #1708: the session is sitting on a prompt, so the message
+          // would have been typed into the prompt's input line rather than
+          // reaching the agent. Reported on its own so an unattended runner sees
+          // "answer the prompt", not a generic HTTP failure — nudging a stalled
+          // worker is exactly what made #1708 worse.
+          if (error instanceof ApiError && error.apiCode === PROMPT_WAITING_CODE) {
+            // The server's own sentence, not error.message: handleApiError maps a
+            // bare 409 to "Unexpected HTTP status: 409", which says nothing about
+            // what to do next.
+            console.error(`Error: ${error.payload?.error ?? promptWaitingFallback(worktreeId)}`);
+            process.exit(ExitCode.CONFIG_ERROR);
           }
           throw error;
         }

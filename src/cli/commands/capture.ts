@@ -29,6 +29,14 @@ import { squeezeTranscript } from '../../lib/tmux/transcript-squeeze';
  */
 const PANE_CAPTURE_LINES = 1000;
 
+/**
+ * `promptData.type` the server writes for a frame the detection layer could not
+ * classify (Issue #1708). Mirrors UNCLASSIFIED_PROMPT_TYPE in
+ * src/types/models.ts; duplicated rather than imported because the CLI bundle
+ * keeps its own copy of the API shapes (see api-responses.ts).
+ */
+const UNCLASSIFIED_FRAME_TYPE = 'unclassified';
+
 /** Response of POST /api/worktrees/[id]/capture. */
 interface PaneCaptureResponse {
   output: string;
@@ -166,6 +174,9 @@ async function capturePrompts(worktreeId: string, options: CaptureOptions): Prom
             // Issue #1699: what the contract's denyPatterns were judged against.
             // Null on rows recorded before the field existed.
             approvalTarget: m.promptData!.approvalTarget ?? null,
+            // Issue #1725: which structured signal reported an unclassified row,
+            // or null when the row is a plain detection failure (#1708).
+            source: typeof m.promptData!.source === 'string' ? m.promptData!.source : null,
           })),
         },
         null,
@@ -183,9 +194,23 @@ async function capturePrompts(worktreeId: string, options: CaptureOptions): Prom
   const blocks = prompts.map((m) => {
     const p = m.promptData!;
     const answered = p.status === 'answered';
-    const header = `${m.timestamp}  ${m.cliToolId ?? '-'}/${m.instanceId ?? '-'}  [${
-      answered ? `answered:${p.answeredBy ?? 'unknown'}` : 'pending'
-    }]`;
+    // Issue #1708: a row recording that detection FAILED must not read as a
+    // prompt that was seen and is merely unanswered — that reading is what would
+    // send an operator looking for an answer path that never existed.
+    const unclassified = p.type === UNCLASSIFIED_FRAME_TYPE;
+    // Issue #1725: the same row type now has two origins, and they mean
+    // opposite things about coverage. `detection-failed` is "nothing saw this";
+    // `hook-<source>` is "the agent told us, and the scraper still did not see
+    // it" — the second is the measurement the hooks Epic exists to produce.
+    const structuredSource = typeof p.source === 'string' ? p.source : null;
+    const state = unclassified
+      ? structuredSource
+        ? `unclassified:hook-${structuredSource}`
+        : 'unclassified:detection-failed'
+      : answered
+        ? `answered:${p.answeredBy ?? 'unknown'}`
+        : 'pending';
+    const header = `${m.timestamp}  ${m.cliToolId ?? '-'}/${m.instanceId ?? '-'}  [${state}]`;
     const lines = [header, `  Q: ${p.question}`];
     if (Array.isArray(p.options) && p.options.length > 0) {
       lines.push(`  options: ${p.options.map(formatPromptOption).join('  ')}`);

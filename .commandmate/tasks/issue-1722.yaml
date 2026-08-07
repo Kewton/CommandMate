@@ -1,0 +1,82 @@
+version: 1
+title: "Issue #1722: Claude セッション起動時の hooks 自動注入と instance 相関・イベント語彙拡張"
+goal: |
+  /pm-auto-issue2dev 1722
+
+  https://github.com/Kewton/CommandMate/issues/1722 を実装してください。
+  Issue 本文の「実装内容」1〜4、「受入基準」、「既知の罠」、そして本文末尾の
+  **「⚠️ Phase 0 スパイク（#1721）による訂正 — 実測が正」の表 8 行**をすべて満たすこと。
+
+  ## 着手前に必ず読むこと（この 2 つが仕様の正）
+
+  - `docs/design/agent-hooks-live-verification.md` — #1721 の実機検証レポート。冒頭の「1. 結論サマリ」と
+    「2. 公式ドキュメントと実測の食い違い（D1〜D8）」を先に読むこと
+  - `tests/fixtures/hooks/claude/*.json` — 実 payload 12 件。**型定義とテストはこの実データに合わせる**こと
+
+  Issue 本文・本契約の記述とレポートの実測が食い違った場合、**実測を正**とし、乖離をコミットメッセージに書くこと。
+
+  ## 特に外すと無言で失敗する 3 点（実測済み）
+
+  1. **`SessionStart` では `type:"http"` が黙って skip される**（D1）。debug ログに
+     `Skipping HTTP hook … not supported for SessionStart` が出るだけで stdout / TUI は完全に無音。
+     **`SessionStart` は `type:"command"` + `scripts/hooks/cmate-agent-event.sh` 相当の中継が必須**。
+     他イベント（Stop / UserPromptSubmit / Notification / SessionEnd）は http で動作する。
+     ここを http で組むと「設定は通るのにイベントだけ来ない」形で失敗し、テストは緑のまま通る
+  2. **`headers` の `$VAR` は `allowedEnvVars` に列挙した分だけ展開される**（D7）。
+     `CM_AUTH_TOKEN` を送るなら併記が必須。忘れると認証が無言で落ちる
+  3. **`/clear` は `SessionEnd(reason=clear)` → `SessionStart(source=clear)` を発火し `session_id` が変わる**。
+     **session_id を instance の永続キーにしないこと**。相関は注入 URL に焼き込んだ worktreeId / instanceId で行う
+
+  ## 設計上の制約
+
+  - 本 Issue は**観測のみ**。`sessionStatus` / `wait` / Auto-Yes の判定に組み込むのは後続 #1723 の担当。
+    **判定ロジックを触らないこと**（#1549 と同じ安全策）
+  - **既存 `/api/hooks/agent-event` のテストを無変更で緑に保つこと**（手動設定ユーザーの後方互換の証明）
+  - 受け口・サービス・状態・中継スクリプト・手順書は **#1549 / PR #1572 で実装済み**。
+    `src/app/api/hooks/agent-event/route.ts` / `src/lib/hooks/agent-event-service.ts` /
+    `src/lib/session/agent-event-state.ts` / `scripts/hooks/cmate-agent-event.sh` /
+    `docs/user-guide/agent-event-hooks.md`。**ゼロから作らず拡張すること**
+  - `route.ts` の `applyAgentStopEvent(db, worktree, tool, tool)` が primary 固定。これを解消するのが instance 相関
+  - **hooks の到着を「起動完了」の signal に使わないこと**。未 trust ディレクトリでは folder trust ダイアログが先に出て、
+    応答するまで `SessionStart` すら来ない（実測 25.3 秒の完全無音）。既存の起動検出はそのまま残すこと
+
+  ## 作業ルール（厳守）
+
+  - **`server.ts` の top-level に重い依存グラフを静的 import しない。** Next の AsyncLocalStorage bootstrap を壊し、
+    最初のリクエストで exit 7 になった実害がある（unit/integration/build は全緑、E2E だけ決定的に失敗するため気付きにくい）。
+    起動時依存は `await import()` で動的化すること
+  - **`~/.claude/settings.json` を書き換えない。** 注入は `--settings` 経由のみ。実機確認で
+    **before/after の sha256 が一致すること**を証拠として示すこと
+  - tmux `sendKeys` は起動コマンドを 1 行で送る。生成ファイルパスは `~` を使わず絶対パスにし quote すること
+  - 実 tmux を触る検証は必ず **`tmux -L <専用socket>`** で行うこと（`-L` は `$TMUX` より優先。フラグ無しの
+    `tmux` はユーザーの本番サーバに届く）。**`kill-server` は書かず** `kill-session -t '=<name>:'` を使うこと
+  - **`TMUX_TMPDIR` を隔離手段に使わない**（`$TMUX` があると無視される）
+  - 品質ゲートの exit code は **`cmd > log; echo $?` で実測**すること（grep へのパイプは exit code を隠す）
+  - **「テストが緑 = 動く」ではない。** 注入した hooks が実際にイベントを届けることを実機で確認し、結果を書くこと
+  - 変更は**単一コミット**にまとめること。**PR は作らないこと**（オーケストレーターが作成する）
+  - `dev-reports/` 配下の進捗レポート類は作成不要
+  - 完了したら最終行に `IMPL_COMPLETED` とだけ出力すること
+
+  ## 完了条件
+
+  - Issue #1722 の受入基準（🤖 自動検証可能 / 👤 手動検証）と訂正表 8 行をすべて満たしていること
+  - `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` / `npm run build` が exit 0（実測）
+scope:
+  allow:
+    - "src/lib/hooks/**"
+    - "src/lib/session/**"
+    - "src/app/api/hooks/**"
+    - "src/lib/env.ts"
+    - "src/cli/types/api-responses.ts"
+    - "tests/**"
+    - "docs/**"
+    - "scripts/hooks/**"
+    - "CHANGELOG.md"
+    - "dev-reports/**"
+  deny:
+    - "src/lib/detection/**"
+verify:
+  gates: [lint, typecheck, unit]
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

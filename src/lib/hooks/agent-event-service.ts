@@ -33,19 +33,22 @@ import { createLogger } from '@/lib/logger';
 const logger = createLogger('lib/hooks/agent-event-service');
 
 /**
- * Event kinds accepted by `POST /api/hooks/agent-event`.
+ * The event vocabulary lives in `agent-event-types` (Issue #1722) so the
+ * settings generator and the in-memory state can use it without importing this
+ * module's database and verification dependencies. Re-exported here because
+ * this is where callers have always found it.
  *
- * `notification` and `session_start` are accepted and logged but carry no state
- * change yet: the receiver has to exist before agents can be told to send them,
- * and rejecting them would make every hook config a two-step rollout.
+ * Every kind but `stop` is accepted, recorded and exposed without changing any
+ * state: the receiver has to exist before agents can be told to send them, and
+ * rejecting them would make every hook config a two-step rollout.
  */
-export const AGENT_EVENT_TYPES = ['stop', 'notification', 'session_start'] as const;
-
-export type AgentEventType = (typeof AGENT_EVENT_TYPES)[number];
-
-export function isAgentEventType(value: unknown): value is AgentEventType {
-  return typeof value === 'string' && (AGENT_EVENT_TYPES as readonly string[]).includes(value);
-}
+export {
+  AGENT_EVENT_TYPES,
+  isAgentEventType,
+  mapClaudeHookEventName,
+  extractClaudeEventDetail,
+  type AgentEventType,
+} from '@/lib/hooks/agent-event-types';
 
 /** Bound on the accepted `cwd`, comfortably above PATH_MAX on every supported platform. */
 export const MAX_CWD_LENGTH = 4096;

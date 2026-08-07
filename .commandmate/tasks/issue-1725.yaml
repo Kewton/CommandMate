@@ -1,0 +1,101 @@
+version: 1
+title: "Issue #1725: プロンプト待ちの構造化検出 — isPromptWaiting / wait exit 10 / capture --prompts"
+goal: |
+  /pm-auto-issue2dev 1725
+
+  https://github.com/Kewton/CommandMate/issues/1725 を実装してください。
+  Issue 本文の「実装内容」1〜3、「受入基準」、「既知の罠」、そして本文末尾の
+  **「⚠️ Phase 0 スパイク（#1721）による訂正 — 受入基準を1つ撤回する」**をすべて満たすこと。
+
+  ## 着手前に必ず読むこと
+
+  - `docs/design/agent-hooks-live-verification.md` — #1721 の実機検証レポート。**これが仕様の正**
+  - `src/lib/session/agent-event-state.ts` / `src/lib/session/current-output-builder.ts` /
+    `src/lib/session/status-mapping.ts` — #1722 と #1723 が拡張済み。本 Issue はこの上に積む
+  - `src/lib/hooks/permission-decision-service.ts` — #1724 が新設。no-decision の記録方法
+
+  ## ★ 撤回された受入基準（起票時の想定が誤っていた）
+
+  Issue 本文にあった次の完了条件は **達成不可能なので撤回済み**です。実装しようとしないでください。
+
+  > ~~タスクパネル併存の AskUserQuestion 最終確認画面で `isPromptWaiting: true` になり `wait --on-prompt agent` が exit 10~~
+
+  **理由（実測）**: AskUserQuestion の選択画面・「Ready to submit your answers?」確認画面では
+  **hooks イベントが一切発火しません**（表示中の受信件数 23 → 23）。`PreToolUse` がツール呼び出し時に 1 回出るだけで、
+  以降の選択・確定操作は完全に無音です。この画面の検出は **scraper 依存のまま**であり、#1708 の担当です
+  （#1708 は既に develop にマージ済み: `23cfb5da`）。
+
+  ## 本 Issue が実際にカバーする範囲
+
+  | 画面 | 構造化イベント | 担当 |
+  |---|---|---|
+  | 権限承認ダイアログ（Bash 等） | `Notification(notification_type=permission_prompt)` あり | **本 Issue** |
+  | アイドル待ち | `Notification(notification_type=idle_prompt)` あり | 本 Issue |
+  | AskUserQuestion 選択・確認画面 | **無し** | スコープ外（#1708 / scraper） |
+  | trust dialog / `/login` / `/model` overlay | **無し** | スコープ外（恒久的に scraper） |
+
+  権限承認ダイアログは **#1708 の元の報告事例そのもの**なので、本 Issue で構造的に解決できます。
+
+  ## 実測にもとづく訂正（Issue 本文より優先）
+
+  - **`Notification` の matcher は payload の `notification_type` フィールドに照合される**（D3）。
+    `message` は `"Claude needs your permission"` 等の**人間向け文言**なので**機械判断に使わないこと**。
+    表示にはそのまま使ってよい
+  - **解除 signal は `Stop`**。AskUserQuestion 回答確定後に `Stop` が発火することを実測（受信 23 → 24）。
+    `PostToolUse` の発火は**未確認**なので、使うなら自分で実測してから採用し結果を PR に書くこと
+  - ターン終了後に composer へ suggested-reply が自動入力される場面がある（scraper 側の既知の毒）
+
+  ## 設計上の絶対条件
+
+  - **合成規則は OR。** scraper か構造化のどちらかが検出すれば waiting。片方の false でもう片方の true を打ち消さないこと。
+    構造化イベントが存在しない画面（上表）は scraper だけが見えるため、この規則が命綱です
+  - **#1723 が入れた「scraper 側の `waiting` は常に勝つ」規則を壊さないこと。** `current-output-builder.ts` の
+    module comment に理由が書かれています
+  - **`src/lib/detection/**` を触らないこと**（契約の `scope.deny`）。#1708 が直近でこの配下を修正しています
+
+  ## 作業ルール（厳守）
+
+  - 新設 UI 文言の追加先は**リポジトリルートの `locales/{en,ja}`**
+  - **next-intl のテストモックは補間 param を落とします。** placeholder の検証は実辞書を使うこと
+    （`setup.ts` の `t()` は param を描画しないため、補間値の assert が偽 PASS になります）
+  - `respond` の yes/no が multiple_choice 上で Enter=デフォルト選択に化ける既知問題（#1681）があります。
+    本 Issue はそこを直しませんが、unclassified 表示の誘導文言では**「番号で応答」を促すこと**
+  - **`npm run test:integration` を通しで実行し exit code を `cmd > log; echo $?` で実測すること。**
+    `.commandmate/verify.yaml` のゲートは lint / typecheck / unit のみで **integration を裁定しません**。
+    #1722 では integration の回帰が `wait --verify` を素通りして CI で落ちました
+  - **テストが実ホームディレクトリを汚さないこと。** `tests/helpers/agent-hooks-dir.ts` を使うこと
+  - 実機確認で `/api/worktrees` の status を見ないこと。**5s TTL の capture キャッシュ越し**です
+    （`CACHE_TTL_MS`、`src/lib/tmux/tmux-capture-cache.ts`）。`current-output` を直接叩くこと。
+    なお構造化イベントは push で即時、scraper は最大 5 秒遅延するため、**OR 合成では「イベントは来たが scraper はまだ見えていない」状態が必ず存在します**。テストで固定すること
+  - 実 tmux を触る検証は必ず **`tmux -L <専用socket>`** で。`kill-server` は書かず `kill-session -t '=<name>:'`。
+    `TMUX_TMPDIR` を隔離手段に使わないこと。本番サーバ（port 3000）に触れないこと
+  - 変更は**単一コミット**。**PR は作らないこと**。`dev-reports/` は作成不要
+  - 完了したら最終行に `IMPL_COMPLETED` とだけ出力すること
+
+  ## 完了条件
+
+  - Issue #1725 の受入基準（撤回分を除く）をすべて満たしていること
+  - **権限承認ダイアログ**で `Notification(permission_prompt)` 由来の `isPromptWaiting: true` が立ち、
+    `wait --on-prompt agent` が exit 10 で返ることを**実機で確認**し、結果を記載すること
+  - `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` / `npm run test:integration` / `npm run build`
+    がすべて exit 0（**実測**）
+scope:
+  allow:
+    - "src/lib/session/**"
+    - "src/lib/hooks/**"
+    - "src/cli/**"
+    - "src/components/worktree/PromptPanel.tsx"
+    - "src/app/api/worktrees/**"
+    - "src/app/api/hooks/**"
+    - "locales/**"
+    - "tests/**"
+    - "docs/**"
+    - "CHANGELOG.md"
+    - "dev-reports/**"
+  deny:
+    - "src/lib/detection/**"
+verify:
+  gates: [lint, typecheck, unit]
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
