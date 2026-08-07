@@ -34,18 +34,19 @@ import {
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tmux-capture-cache';
 import {
-  clearStructuredPromptWaiting,
-  corroborateStructuredPromptWaiting,
   getAskUserQuestion,
   getLastAgentEvent,
   getLastStopEventAt,
-  getStructuredPromptWaiting,
   getStructuredSessionState,
   markStructuredPromptRecorded,
   type AskUserQuestionEpisode,
   type StructuredPromptWaitingState,
   type StructuredSessionState,
 } from '@/lib/session/agent-event-state';
+import {
+  resolvePromptWaiting,
+  structuredWaitingReason,
+} from '@/lib/session/prompt-waiting-composition';
 import { applyAskUserQuestion } from '@/lib/session/ask-user-question-prompt';
 import {
   buildStructuredPromptData,
@@ -55,7 +56,6 @@ import {
   type StructuredPromptSource,
   type StructuredPromptWaitingData,
 } from '@/lib/session/structured-prompt';
-import { HOOK_STATUS_REASON } from '@/lib/session/status-mapping';
 import type { PromptData } from '@/types/models';
 
 /**
@@ -413,10 +413,7 @@ export function mergeStructuredStatus(
   if (promptWaiting !== null) {
     return {
       status: 'waiting',
-      reason:
-        promptWaiting.source === 'notification'
-          ? HOOK_STATUS_REASON.PERMISSION_PROMPT
-          : HOOK_STATUS_REASON.PERMISSION_REQUEST,
+      reason: structuredWaitingReason(promptWaiting),
       thinking: false,
       isUnclassifiedActive: scraper.isUnclassifiedActive,
       structuredApplied: true,
@@ -536,32 +533,21 @@ export async function buildCurrentOutput(
   const structured = getStructuredSessionState(worktreeId, cliToolId, instanceId);
 
   // Issue #1725: the open-dialog half of the same merge, resolved before the
-  // status merge because it decides one of its inputs.
-  //
-  // The release rule is asymmetric on purpose. The scraper is allowed to say
-  // "that prompt is gone" only about a prompt it once saw, because the case
-  // this whole Issue exists for is the scraper being BLIND to the dialog: if
-  // "the scraper reports no prompt" released the state on its own, the
-  // structured layer would be silenced in exactly the situation it was added
-  // for, and the payload would go back to the #1708 stall. So a frame the
-  // scraper reads as `waiting` arms the release (and confirms a provisional
-  // record), and only after that does a non-waiting frame clear it.
-  //
-  // This is also what the push/pull timing demands. The structured fact arrives
-  // over HTTP the moment the agent posts it, while the scraper reads a pane
-  // through a 5 s capture cache (`CACHE_TTL_MS`), so "the event is here and the
-  // scraper has not seen the dialog yet" is a state that always exists — and
-  // under a rule that let the scraper's silence win, that state would be a lost
-  // detection every single time.
-  let promptWaiting = getStructuredPromptWaiting(worktreeId, cliToolId, instanceId);
-  if (promptWaiting !== null) {
-    if (statusResult.status === 'waiting') {
-      corroborateStructuredPromptWaiting(worktreeId, cliToolId, instanceId);
-    } else if (promptWaiting.scraperCorroborated) {
-      clearStructuredPromptWaiting(worktreeId, cliToolId, instanceId);
-      promptWaiting = null;
-    }
-  }
+  // status merge because it decides one of its inputs. The rule itself — the
+  // asymmetric release and the OR below — lives in `prompt-waiting-composition`
+  // since Issue #1737, because the `send` guard has to reach the same verdict
+  // and a second copy here is exactly how the two answers diverged.
+  const promptResolution = resolvePromptWaiting({
+    worktreeId,
+    cliToolId,
+    instanceId,
+    scraper: {
+      status: statusResult.status,
+      reason: statusResult.reason,
+      hasActivePrompt: scraperPromptWaiting,
+    },
+  });
+  const promptWaiting = promptResolution.structured;
   if (promptWaiting !== null) {
     structuredEvents.promptWaitingSince = promptWaiting.at;
     structuredEvents.promptWaitingSource = promptWaiting.source;
@@ -573,12 +559,12 @@ export async function buildCurrentOutput(
     promptWaiting,
   );
 
-  // The OR rule, stated once: either layer seeing a prompt is a prompt. Neither
-  // false may cancel the other's true — the structured layer is blind to the
-  // AskUserQuestion screens (#1721 §5.6) and the scraper is blind to whatever
-  // the next Claude release renders differently, and the whole point of running
-  // two layers is that a gap in one is covered by the other.
-  const isPromptWaiting = scraperPromptWaiting || promptWaiting !== null;
+  // The OR rule, computed once for the whole server (Issue #1737): this is the
+  // same `resolvePromptWaiting` call the `send` guard makes, so the payload and
+  // the guard cannot disagree about whether a prompt is open. What they are
+  // still allowed to differ on is what to DO about it — see `blocksSend`, which
+  // bounds the structured layer's veto over sends and leaves this flag alone.
+  const isPromptWaiting = promptResolution.waiting;
 
   // Issue #1726: the agent's own account of what it asked. It contributes only
   // where some other layer has already established that a dialog is on screen —

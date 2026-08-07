@@ -302,6 +302,12 @@ export interface SendOptions {
    * message argument, so the two are mutually exclusive.
    */
   contract?: string;
+  /**
+   * Issue #1737: send even if only the agent's structured events report an open
+   * dialog. The way out of a hook-reported dialog nothing released; a prompt the
+   * terminal scraper can see is still refused.
+   */
+  ignoreStructuredPrompt?: boolean;
 }
 
 /** task list command options [Issue #1545] */
