@@ -94,6 +94,7 @@ options:
           skipInPrimaryCheckout: false,
           maxLogTailBytes: 32768,
           requireCommit: false,
+          requireEnvClean: false,
         },
       });
     });
@@ -109,6 +110,7 @@ options:
           skipInPrimaryCheckout: true,
           maxLogTailBytes: 8192,
           requireCommit: false,
+          requireEnvClean: false,
         },
       });
     });
@@ -117,7 +119,7 @@ options:
       expect(DEFAULT_TIMEOUT_SEC).toBe(600);
       expect(DEFAULT_MAX_LOG_TAIL_BYTES).toBe(8192);
       // Pinned so the it.each() below cannot silently degrade to zero cases.
-      expect(RESERVED_GATE_IDS).toEqual(['work-evidence', 'scope']);
+      expect(RESERVED_GATE_IDS).toEqual(['work-evidence', 'scope', 'env-clean']);
     });
 
     it('applies option defaults individually when options is partially specified', () => {
@@ -131,6 +133,7 @@ options:
         skipInPrimaryCheckout: true,
         maxLogTailBytes: DEFAULT_MAX_LOG_TAIL_BYTES,
         requireCommit: false,
+        requireEnvClean: false,
       });
     });
 
@@ -143,6 +146,7 @@ options:
         skipInPrimaryCheckout: true,
         maxLogTailBytes: DEFAULT_MAX_LOG_TAIL_BYTES,
         requireCommit: false,
+        requireEnvClean: false,
       });
     });
 
@@ -202,6 +206,7 @@ options:
           skipInPrimaryCheckout: false,
           maxLogTailBytes: 4096,
           requireCommit: false,
+          requireEnvClean: false,
         },
       });
     });

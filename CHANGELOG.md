@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - フレームが読めない間は完了判定を抑止し、dwell は 2 状態をまたいで継続する。本物の完了 `ready`/`input_prompt` はフラグを立てないので従来どおり初回ポーリングで exit 0
 
 ### Added
+- **verify: 実行契約に環境不変条件ゲート `env-clean` を追加し、リポジトリ外の副作用を裁定する** (#1740)
+  - `scope` は `scope.allow` / `scope.deny` で**リポジトリ内のファイル変更**を裁定するが、プロセス・ポート・tmux セッション・`$HOME` を裁定する仕組みが 1 つも無かった。2026-08-06 の 4 件（本番サーバの停止 #1739 / `~/.commandmate-uat-1726` の放置 / 隔離サーバ 3779 の残存 / `~/.commandmate/hooks` の汚染 #1722）は**すべて `scope` を PASS する**。task 作成時にスナップショットを取り、検証時に差分を取る
+  - スナップショット 4 項目: CommandMate 関連の TCP listener（`lsof` × `ps` で絞り、key は `tcp/<port>`）／`mcbd-*` tmux セッション／`$HOME` 直下／`~/.commandmate` 直下
+  - **fail-open にしない（本ゲートで最も重要な設計判断）**: probe は `ok` / `unavailable` を必ず名乗り、**「取れなかった」を「空だった」に潰さない**。ベースライン不在、または片側の probe が `unavailable` なら **UNKNOWN**（gate `error` → run `failed`）で、決して `passed` にはならない。`skipped` も使わない（「判定すべき宣言が無かった」と読まれるため）。`lsof` の exit 1、tmux の `no server running`、`~/.commandmate` の ENOENT は**実測されたゼロ**なので `ok` として区別する
+  - **偽陽性の抑制は非対称ルール**: 減ったものは誰のものであれ常に違反（#1739 / #1624）、増えたものは**他ワーカーに帰属できる場合だけ免除**。帰属は tmux がセッション名 `mcbd-<cli>-<worktreeId>`、listener がプロセスの cwd（自 worktree 配下＝自分 / **兄弟ディレクトリ＝他ワーカーとユーザの本番 checkout** / 不明＝厳しい側）。`$HOME` と `~/.commandmate` は所有者が無いので常に判定対象
+  - **既定は無効**。`options.requireEnvClean`（verify.yaml、リポジトリ単位）と `success.requireEnvClean`（契約、委任単位）の **OR** で有効化し、両方省略時は**ゲート行も probe もベースラインファイルも一切生じない**。ベースラインの記録自体が opt-in に従うため、off の既定は副作用ゼロ
+  - **未着地**: `success.requireEnvClean` は `TaskContractSuccess` / `SUCCESS_KEYS`（`src/lib/tasks/contract-parser.ts`、本委任の scope 外）が閉じた集合のため**契約 YAML にはまだ書けない**。parser 側 2 行で開き、検証側は resolver が `success` を構造的に読むので無改修で効く（挙動はテストで先に固定済み）。`verify.gates: [env-clean]` は `contract-message.ts` の 1 行、`commandmate status --json` のヘルスチェック拡張は `src/cli/commands/status.ts` が scope 外で未着手。詳細は docs/design/task-contract.md §2.6
 - **detection: AskUserQuestion の選択肢を `PreToolUse` の payload から取り、`respond` を送信前に検証する（Phase 3）** (#1726)
   - 画面から regex で復元していた選択肢を、エージェント自身が送ってくる `tool_input` で置き換える。`PreToolUse`（matcher `AskUserQuestion`）を注入し、質問文・選択肢ラベル・**各選択肢の説明文**を受け取る。説明文は picker が独立した行に描くもので、scraper は継続行として捨てているため（そうしないと別の選択肢として解析される）**構造化でしか取れない情報**
   - **役割分担**: 画面が開いている／閉じたの**検出は scraper**（#1708 が担当）、開いていると判ったあとの**正確な選択肢の提供が本 Issue**。この記録は `sessionStatus` を一切決めず、#1725 の OR 合成にも #1723 の「scraper の `waiting` が常に勝つ」規則にも触れていない
