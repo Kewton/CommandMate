@@ -245,10 +245,18 @@ export async function POST(
       // The reason code names why nothing is offerable: up to date, none
       // compatible, unparsable installed version or unsupported range — or an
       // explicit version that is not a strictly newer published one.
+      //
+      // The rejected request names both versions (#1753). A client that offered
+      // this update was reading an installed version from somewhere, and when
+      // that somewhere disagreed with the receipt the bare "not strictly newer"
+      // read as "you are already up to date" while the screen still showed an
+      // update button. Naming the receipt's version makes the disagreement
+      // legible in the response and in the logs of whoever hits it next.
       return skillApiError(
         parsed.body.version ? 'SKILL_UPDATE_VERSION_NOT_ELIGIBLE' : availability.reasonCode,
         parsed.body.version
-          ? 'The requested version is not a strictly newer published version of this Skill.'
+          ? `The requested version ${parsed.body.version} is not a strictly newer published ` +
+            `version of this Skill: the install receipt on disk records ${installed.receipt.version}.`
           : 'No update candidate can be offered for this install.',
         404
       );

@@ -9,12 +9,18 @@
  * The index is a forward-converging cache of what the receipts say (#1234), and
  * since #1709 this route reads *through* it rather than treating it as the
  * truth: it lists the Skill directories of the one worktree it was asked about
- * and, for any that the index has no row for, restores the row from the receipt
- * before answering. That is what makes a Skill installed by another instance —
- * another database — visible here instead of silently absent. A worktree whose
- * index is already complete costs one directory listing per root and no receipt
- * read, so this stays the cheap read the #1441/#1442 UIs consume to show "what
- * is installed here".
+ * and converges the index onto their receipts before answering. That is what
+ * makes a Skill installed by another instance — another database — visible here
+ * instead of silently absent.
+ *
+ * Since #1753 that convergence covers a row that is *wrong*, not just one that
+ * is missing. A row left stale made this route and the update route disagree
+ * inside one server: the list served the indexed version, the client offered an
+ * update to a version the receipt already had, and the update route — which
+ * reads the receipt — rejected it as not newer. The read costs one receipt read
+ * and one digest per installed Skill; a receipt that hashes to what the row
+ * recorded is neither parsed nor written, so this stays the cheap read the
+ * #1441/#1442 UIs consume to show "what is installed here".
  *
  * @module api/worktrees/[id]/skills
  */
@@ -106,18 +112,23 @@ export async function GET(
     // (#1235). The cache lives in one database; the receipt lives inside the
     // worktree and is repository-relative, so a Skill installed by another
     // instance — or by this one before its database was replaced — is on disk
-    // with no row behind it. Answering from the cache alone reported that as
-    // "nothing is installed" (#1709). Restoring first is what makes the two
-    // answers the same one.
+    // with no row behind it, and a Skill written on disk out of band leaves a
+    // row that names a version nobody has. Answering from the cache alone
+    // reported the first as "nothing is installed" (#1709) and the second as an
+    // update that can never apply (#1753). Converging first is what makes this
+    // route and the update route give the same answer.
     try {
       const restored = restoreSkillInstallationIndex(db, worktree);
       if (restored.indexed > 0) {
         // The dashboard reads a cached cross-worktree scan; serving the
-        // pre-restore one back would keep calling these installs `unmanaged`.
+        // pre-restore one back would keep calling these installs `unmanaged`
+        // — or keep showing the version the stale row named.
         invalidateSkillStatusScanCache();
         logger.info('skill-installed-index-restored', {
           worktreeId: worktree.id,
           indexed: restored.indexed,
+          // Non-zero means disk was written without going through this server.
+          converged: restored.converged,
           skipped: restored.skipped.length,
         });
       }
