@@ -31,6 +31,7 @@ import {
   isAuthTokenExpected,
   isHookInjectionEnabled,
   NOTIFICATION_MATCHER,
+  PERMISSION_DENY_RULES,
   PERMISSION_REQUEST_TIMEOUT_SECONDS,
   resolveRelayScriptPath,
   shellQuote,
@@ -176,6 +177,123 @@ describe('PermissionRequest wiring (Issue #1724)', () => {
     // sessions that later turn it on.
     expect(Object.keys(buildAgentHookSettings(TARGET).hooks)).toContain('PermissionRequest');
     expect(Object.keys(buildAgentHookSettings(TARGET_2).hooks)).toContain('PermissionRequest');
+  });
+});
+
+/**
+ * Claude's Bash rule matching, as measured in
+ * `docs/design/agent-hooks-permission-deny-verification.md` §2 against
+ * v2.1.223. Encoded once here so the table below asserts what a real session
+ * does with these rules rather than what this suite wishes it did.
+ *
+ *  - `Bash(<prefix>:*)` matches a command whose text starts with `<prefix>`.
+ *    The prefix is compared *including its flags*: a rule naming `uname -a`
+ *    refused `uname -a` and left `uname -s` untouched in the same session.
+ *  - The command line is decomposed and each segment matched on its own. All
+ *    three composed spellings — `&&`, `|`, `;` — of a denied command were
+ *    refused.
+ */
+function isDeniedBy(rules: readonly string[], command: string): boolean {
+  const prefixes = rules.map((rule) => {
+    const match = /^Bash\((.*):\*\)$/.exec(rule);
+    if (!match) throw new Error(`not a Bash prefix rule: ${rule}`);
+    return match[1];
+  });
+  return command
+    .split(/&&|\|\||[;|]/)
+    .map((segment) => segment.trim())
+    .some((segment) => prefixes.some((prefix) => segment.startsWith(prefix)));
+}
+
+describe('process-kill deny rules (Issue #1739)', () => {
+  it('carries permissions as a sibling of hooks, not inside it', () => {
+    // Claude reads `permissions` at the top level of a settings file. Nested
+    // anywhere else it is not an error — it is simply ignored, which is this
+    // feature being off with nothing to notice.
+    const settings = buildAgentHookSettings(TARGET);
+
+    expect(settings.permissions.deny).toEqual([...PERMISSION_DENY_RULES]);
+    expect(JSON.stringify(settings.hooks)).not.toContain('permissions');
+  });
+
+  it('denies the command that stopped the production server on 2026-08-06', () => {
+    // The accident, verbatim from the incident in Issue #1739. A worker meant
+    // to restart its own isolated server on port 3778; `-f` matches the whole
+    // command line, so it also hit the operator's server on 3000 and the
+    // global instance on 60301.
+    expect(
+      isDeniedBy(PERMISSION_DENY_RULES, 'pkill -f "node dist/server/server.js"')
+    ).toBe(true);
+  });
+
+  it.each([
+    ['pkill -f node', 'the bare pattern kill'],
+    ['killall node', 'the by-name variant'],
+    ['kill -9 -1', 'signalling every process the user owns'],
+    ['kill -9 -4242', 'signalling a whole process group'],
+    ['cd /tmp && pkill -f node', 'hidden behind a cd'],
+    ['killall node | cat', 'hidden in a pipeline'],
+    ['echo restarting; pkill -f node', 'hidden after a semicolon'],
+  ])('denies %s (%s)', (command) => {
+    expect(isDeniedBy(PERMISSION_DENY_RULES, command)).toBe(true);
+  });
+
+  it.each([
+    ['kill "$(cat uat.pid)"', 'the pid-file idiom the docs recommend'],
+    ['kill 4242', 'a literal pid'],
+    ['kill -TERM 4242', 'an explicit graceful signal'],
+    ['npm run kill-orphans', 'a script whose name merely contains kill'],
+    ['git commit -m "kill -9 is denied"', 'a rule name quoted inside prose'],
+  ])('leaves %s alone (%s)', (command) => {
+    // A worker still has to be able to stop what it started, or it will reach
+    // for something worse. Stopping by identity is exactly what these rules
+    // are meant to leave standing.
+    expect(isDeniedBy(PERMISSION_DENY_RULES, command)).toBe(false);
+  });
+
+  it('states every rule in the prefix form Claude honours', () => {
+    for (const rule of PERMISSION_DENY_RULES) {
+      expect(rule, `${rule} is not a Bash prefix rule`).toMatch(/^Bash\(\S(?:.*\S)?:\*\)$/);
+    }
+  });
+
+  it('never emits an allow list', () => {
+    // This file is handed to every session CommandMate starts. `deny` only
+    // narrows, so it is safe to inject unconditionally; an `allow` here would
+    // pre-approve tool calls no human ever saw.
+    expect(Object.keys(buildAgentHookSettings(TARGET).permissions)).toEqual(['deny']);
+  });
+
+  it('writes the rules into the file the CLI actually reads', () => {
+    // The generator's return value is not what Claude loads; the file is.
+    const written = JSON.parse(readFileSync(writeAgentHookSettings(TARGET), 'utf8'));
+
+    expect(written.permissions.deny).toEqual([...PERMISSION_DENY_RULES]);
+  });
+
+  it('hands out a copy, so one caller cannot edit every later session', () => {
+    // Snapshot *before* the edit. Comparing against `PERMISSION_DENY_RULES`
+    // afterwards would pass even when the array is shared, because the edit
+    // would have changed both sides of the assertion.
+    const pristine = [...PERMISSION_DENY_RULES];
+    const settings = buildAgentHookSettings(TARGET);
+    settings.permissions.deny.push('Bash(anything:*)');
+
+    expect(buildAgentHookSettings(TARGET).permissions.deny).toEqual(pristine);
+    expect([...PERMISSION_DENY_RULES]).toEqual(pristine);
+  });
+
+  it('writes no rules at all when CM_AGENT_HOOKS_INJECT=0', () => {
+    // The rollback switch has to take the permissions with it: an operator who
+    // turns injection off to get a kill through would otherwise still be denied
+    // by a file nothing is writing any more.
+    process.env.CM_AGENT_HOOKS_INJECT = '0';
+    const before = readdirSync(dir);
+
+    expect(buildClaudeLaunchCommand('/usr/local/bin/claude', { worktreeId: 'wt-deny' })).toBe(
+      '/usr/local/bin/claude'
+    );
+    expect(readdirSync(dir)).toEqual(before);
   });
 });
 

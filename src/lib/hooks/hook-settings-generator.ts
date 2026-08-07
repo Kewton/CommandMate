@@ -113,6 +113,48 @@ export const NOTIFICATION_MATCHER = 'permission_prompt|idle_prompt';
  */
 export const TOOL_USE_MATCHER = ASK_USER_QUESTION_TOOL;
 
+/**
+ * Bash spellings this server refuses to let an agent run (Issue #1739).
+ *
+ * On 2026-08-06 a delegated worker restarted its own isolated server with
+ * `pkill -f "node dist/server/server.js"`. `-f` matches the whole command line,
+ * so it also hit the operator's production server on port 3000 and the global
+ * instance on 60301 — two processes the worker did not know existed and could
+ * not see. Nothing was recovered until a human rebuilt and restarted by hand.
+ *
+ * Three earlier layers were in place and none of them stopped it:
+ *
+ *  - The delegation contract said "do not touch port 3000". That is a rule about
+ *    the *target*, and the worker's subjective target was its own server; the
+ *    blast radius is exactly what a pattern kill hides from its caller.
+ *  - A permission dialog did appear — and Auto-Yes approved it. Auto-Yes v2
+ *    answers the `PermissionRequest` hook (#1724), so anything that reaches a
+ *    dialog reaches its verdict.
+ *  - The contract's `autoYes.denyPatterns` would have escalated to a human, but
+ *    escalation is only as good as the pattern somebody remembered to write.
+ *
+ * `permissions.deny` sits *underneath* all three: a denied rule is refused
+ * before a dialog exists, so there is no `PermissionRequest` for Auto-Yes to
+ * answer and no wording in a contract for a worker to reinterpret. Verified
+ * live in `docs/design/agent-hooks-permission-deny-verification.md`.
+ *
+ * The list is deliberately about the *means*, not the target: every entry names
+ * a way of selecting processes by pattern rather than by identity. Stopping a
+ * process you started yourself stays available through its pid — `kill
+ * "$(cat pidfile)"` matches nothing here — which is the idiom
+ * `docs/user-guide/agent-event-hooks.md` §0.7 tells operators to use.
+ *
+ * `kill -9` is on the list even though it takes a pid, because `kill -9 -1`
+ * signals every process the user owns and `kill -9 -<pgid>` a whole group; the
+ * default `kill` (SIGTERM) is untouched, so the graceful spelling of the same
+ * intent is the one that survives.
+ */
+export const PERMISSION_DENY_RULES: readonly string[] = [
+  'Bash(pkill:*)',
+  'Bash(killall:*)',
+  'Bash(kill -9:*)',
+];
+
 /** Relay script shipped with the package (`files: ["scripts/hooks/"]`). */
 const RELAY_SCRIPT_RELATIVE_PATH = join('scripts', 'hooks', 'cmate-agent-event.sh');
 
@@ -154,8 +196,21 @@ export interface ClaudeHookMatcherGroup {
   hooks: ClaudeHookHandler[];
 }
 
+/**
+ * The `permissions` block of the injected settings.
+ *
+ * Only `deny` is written. `allow` is deliberately absent: this file is handed to
+ * every Claude session CommandMate starts, and pre-approving anything from here
+ * would widen what an agent may do without a human having said so. `deny` only
+ * ever narrows, which is why it is safe to inject unconditionally.
+ */
+export interface ClaudePermissionSettings {
+  deny: string[];
+}
+
 export interface ClaudeHookSettings {
   hooks: Record<string, ClaudeHookMatcherGroup[]>;
+  permissions: ClaudePermissionSettings;
 }
 
 /**
@@ -355,6 +410,11 @@ export function buildSessionStartCommand(
  * one for a question the human has not seen yet is the last thing this feature
  * wants to be able to do. The event route answers 202 with a fixed body and
  * cannot decide anything.
+ *
+ * `permissions.deny` rides along in the same file (Issue #1739). It is not a
+ * hook and nothing here delivers it — Claude enforces it itself, before any
+ * `PermissionRequest` exists — which is precisely why it belongs next to the
+ * hook that Auto-Yes answers rather than in the contract layer above it.
  */
 export function buildAgentHookSettings(
   target: HookSettingsTarget,
@@ -393,6 +453,9 @@ export function buildAgentHookSettings(
       // Issue #1724. Points at its own receiver, not the event one.
       PermissionRequest: [{ hooks: [permissionHttp()] }],
     },
+    // Issue #1739. Enforced by Claude below the hook layer: no dialog, so no
+    // PermissionRequest, so nothing for Auto-Yes to approve.
+    permissions: { deny: [...PERMISSION_DENY_RULES] },
   };
 }
 

@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { existsSync, readFileSync } from 'fs';
 import { findClaudeLaunchIndex } from '@tests/helpers/claude-launch-command';
 import { useIsolatedAgentHooksDir } from '@tests/helpers/agent-hooks-dir';
+import { PERMISSION_DENY_RULES } from '@/lib/hooks/hook-settings-generator';
 
 // Issue #1722 writes a hooks settings file on every session start. Without this
 // the suite would litter the developer's real `~/.commandmate/hooks`, and the
@@ -1780,6 +1781,17 @@ describe('claude-session - hooks auto-injection (Issue #1722)', () => {
     expect(new URL(settings.hooks.Stop[0].hooks[0].url).searchParams.get('worktreeId')).toBe(
       TEST_WORKTREE_ID
     );
+  });
+
+  it('hands the CLI a file that already denies pattern kills (Issue #1739)', async () => {
+    // The whole point of putting the rules in this file: they are in force from
+    // the first tool call of the session, before any Auto-Yes state exists.
+    const settingsPath = (await launchCommand(TEST_SESSION_OPTIONS)).match(
+      /--settings '(.+)'$/
+    )![1];
+    const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+
+    expect(settings.permissions.deny).toEqual([...PERMISSION_DENY_RULES]);
   });
 
   it('gives a second instance its own settings file and URL', async () => {
