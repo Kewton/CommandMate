@@ -29,6 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - フレームが読めない間は完了判定を抑止し、dwell は 2 状態をまたいで継続する。本物の完了 `ready`/`input_prompt` はフラグを立てないので従来どおり初回ポーリングで exit 0
 
 ### Added
+- **hooks: 注入 settings に `permissions.deny` を追加し、パターン一括 kill を機構で塞ぐ** (#1739)
+  - 2026-08-06、委任ワーカーが隔離サーバ 1 本を再起動するつもりで `pkill -f "node dist/server/server.js"` を実行し、**ユーザーの本番サーバ（port 3000）と global インスタンス（port 60301）を巻き込んで停止**させた。#1722 が全 Claude セッションへ注入している `--settings` に `"deny": ["Bash(pkill:*)","Bash(killall:*)","Bash(kill -9:*)"]` を同居させる
+  - **この層でなければ止まらない。** `permissions.deny` は**ダイアログが存在する前に**拒否するので `PermissionRequest` が発火せず、**Auto-Yes に裁定の機会が来ない**。事故当時は実際にダイアログが出て Auto-Yes がそれを承認していた。契約文（対象ベースの禁止＝助言）と契約 `autoYes.denyPatterns`（人間へのエスカレーション）はどちらもすり抜けられている
+  - **禁じるのは対象ではなく手段** — 3 ルールはいずれも「プロセスをパターンで選ぶ書き方」を指す。**PID 指定は従来どおり通る**（`kill "$(cat uat.pid)"` / `kill 4242` / `kill -TERM 4242`）。自分が起動したプロセスの止め方は docs/user-guide/agent-event-hooks.md §0.7 に明記した
+  - **実測**（claude 2.1.223、docs/design/agent-hooks-permission-deny-verification.md）: 無条件 allow を返す `PermissionRequest` hook（＝現実の Auto-Yes より強い）を置いた状態で、deny 対象は **hook 0 回**で拒否され、承認が要る別コマンドでは同じ hook が**確かに 1 回発火して allow した**（空振り防止の対照実験）。`--settings` の権限は独立宛先 `flagSettings` に **Adding** され置換ではない。**deny は優先度が上の `settings.local.json` の `allow` にも勝つ**ためユーザー設定の `permissions.allow` で開け直せない。前方一致は**フラグまで含めて**照合されるので `Bash(kill -9:*)` は `kill <pid>` に当たらない。`cd x && …` / `… | cat` / `echo x; …` と合成しても拒否される
+  - 危険なペイロードは一度も実行していない。実ルールは載せたまま、同じルール形の無害な stand-in（`sw_vers` = 素の前方一致、`uname -a` = フラグつき前方一致）で照合器を測っている
+  - ロールバックは既存の `CM_AGENT_HOOKS_INJECT=0`（注入全体）。deny だけを外すスイッチは設けない — 構造化イベントごと失う方が「機構は入っているが黙って外されている」より事故を見つけやすい
+
 - **detection: AskUserQuestion の選択肢を `PreToolUse` の payload から取り、`respond` を送信前に検証する（Phase 3）** (#1726)
   - 画面から regex で復元していた選択肢を、エージェント自身が送ってくる `tool_input` で置き換える。`PreToolUse`（matcher `AskUserQuestion`）を注入し、質問文・選択肢ラベル・**各選択肢の説明文**を受け取る。説明文は picker が独立した行に描くもので、scraper は継続行として捨てているため（そうしないと別の選択肢として解析される）**構造化でしか取れない情報**
   - **役割分担**: 画面が開いている／閉じたの**検出は scraper**（#1708 が担当）、開いていると判ったあとの**正確な選択肢の提供が本 Issue**。この記録は `sessionStatus` を一切決めず、#1725 の OR 合成にも #1723 の「scraper の `waiting` が常に勝つ」規則にも触れていない

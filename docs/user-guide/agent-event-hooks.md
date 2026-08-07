@@ -29,9 +29,10 @@ hooks 設定ファイルを生成し `claude --settings <file>` で渡す。
 | `Notification` | `http`（matcher: `permission_prompt\|idle_prompt`） | matcher は `notification_type` に照合される |
 | `SessionEnd` | `http` | |
 | `PermissionRequest` | `http`（別受け口 `/api/hooks/permission-request`、timeout 5 秒） | **Auto-Yes v2**（#1724）。§0.6 |
+| `PreToolUse` / `PostToolUse` | `http`（matcher: `AskUserQuestion`） | #1726。宛先は event 受け口（裁定ではなく観測） |
 
-`PreToolUse` は**注入しない**。裁定する仕組みがまだ無く、注入しても全件 no-decision を
-返すだけになる（Phase 4 の担当）。
+同じファイルに hooks 以外に **`permissions.deny`** も入る（#1739）。hook ではなく
+Claude 自身が enforce するもので、`PermissionRequest` が発火する前に効く。§0.7
 
 ### 0.1 `~/.claude/settings.json` は書き換えられない
 
@@ -115,6 +116,78 @@ Claude は承認ダイアログを**描く前に**この hook を叩き、Comman
   Auto-Yes は後から有効化されるため、トグル連動にすると「有効にしたのに hook が無い」状態が生まれる。
 - **画面ベースの Auto-Yes は残っている。** hooks 非対応の環境と Claude 以外の CLI では従来どおり動く。
 
+### 0.7 `permissions.deny` — パターン一括 kill の禁止（Issue #1739）
+
+注入ファイルには hooks に加えて `permissions.deny` が入る。
+
+```jsonc
+"permissions": {
+  "deny": ["Bash(pkill:*)", "Bash(killall:*)", "Bash(kill -9:*)"]
+}
+```
+
+2026-08-06、委任ワーカーが自分の隔離サーバ 1 本を再起動するつもりで
+`pkill -f "node dist/server/server.js"` を実行した。`-f` はコマンドライン全体への部分一致なので、
+同じ実行ファイルで動いていた**ユーザーの本番サーバ（port 3000）と global インスタンス（port 60301）**にも
+命中し、手で再ビルド・再起動するまで復旧しなかった。
+
+**なぜ hooks の隣に置くのか。** `permissions.deny` は**ダイアログが存在する前に**拒否する。
+つまり `PermissionRequest` が発火せず、**Auto-Yes には裁定する機会が来ない**。
+実際の事故ではダイアログが出て Auto-Yes がそれを承認していた。上位 2 層では止まらない:
+
+| 層 | 何をするか | この事故で止まったか |
+|---|---|---|
+| 委任契約の文面（「port 3000 に触れない」） | 助言。**対象**を禁じる | ✗ ワーカーの主観では自分のサーバだけを止めていた |
+| 契約 `autoYes.denyPatterns`（#1724） | 自動応答を抑止し**人間へエスカレート**する | ✗ 誰かが書き忘れたパターンは効かない |
+| `permissions.deny`（本節） | **手段**を禁じる。ダイアログ以前に拒否 | ✓ Auto-Yes の有無に関係なく拒否される |
+
+**禁じているのは「手段」であって「対象」ではない。** 3 つのルールはいずれも
+*プロセスをパターンで選ぶ*書き方を指している。
+
+#### 自分が起動したプロセスの止め方（この作法を使うこと）
+
+**PID を指定すれば従来どおり止められる。** 起動時に PID を記録し、それだけを止める:
+
+```bash
+U="$SB/uat"; mkdir -p "$U"
+CM_PORT=3779 CM_DB_PATH="$U/cm.db" NODE_ENV=production \
+  nohup node dist/server/server.js > "$U/server.log" 2>&1 &
+echo $! > "$U/uat.pid"          # ← 自分の PID だけ記録する
+# ...
+kill "$(cat "$U/uat.pid")"      # ← deny 対象外。そのまま実行できる
+```
+
+| 書き方 | 可否 |
+|---|---|
+| `kill "$(cat uat.pid)"` / `kill 4242` / `kill -TERM 4242` | ✅ 通る |
+| `pkill …` / `killall …` | ❌ 拒否 |
+| `kill -9 …` | ❌ 拒否（`kill -9 -1` は自分の全プロセス、`kill -9 -<pgid>` はプロセスグループを撃つ）。SIGTERM を使うこと |
+
+拒否は**コマンドを合成しても回避できない**。`cd /tmp && pkill …`・`pkill … \| cat`・
+`echo x; pkill …` はいずれも拒否される（コマンド行が分解され、区間ごとに照合されるため。§0.7 の実測）。
+
+#### ユーザー設定との関係
+
+- `--settings` の deny ルールは Claude 内部で **`flagSettings` という独立の宛先**に入り、
+  ユーザー設定・プロジェクト設定の権限ルールと**併存**する（hooks と同じく置換ではない）。
+- **`deny` は `allow` に勝つ。** より優先度の高い `.claude/settings.local.json` に
+  `"allow": ["Bash(pkill:*)"]` を書いても拒否されることを実測済み。
+  つまりユーザー設定の `permissions.allow` でこの禁止を開け直すことはできない。
+- 前方一致は**フラグまで含めて**照合される。`Bash(kill -9:*)` は `kill -9 …` だけを拒否し、
+  `kill <pid>` には当たらない（`Bash(uname -a:*)` が `uname -a` を拒否し `uname -s` を通した実測による）。
+
+実測の詳細は [agent-hooks-permission-deny-verification.md](../design/agent-hooks-permission-deny-verification.md)。
+
+#### 逃げ道
+
+正当な用途がどうしても塞がれる場合は、注入全体を切る（§0.3）:
+
+```bash
+CM_AGENT_HOOKS_INJECT=0 commandmate start
+```
+
+deny ルールだけを外すスイッチは**用意していない**。構造化イベントごと失う方が、
+「機構は入っているが誰かが黙って外している」状態より事故を見つけやすい。
 
 ---
 
