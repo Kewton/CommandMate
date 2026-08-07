@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-08-07
+
+> **Highlight**: 検出層を TUI 画面スクレイピングから **CLI 自身が申告する構造化イベント**へ移す基盤を入れた（Epic #1720）。発端は、claude のタスクパネル見出し `7 tasks (0 done, 1 in progress, 6 open)` が直上の選択肢プロンプトに「option 7」として紛れ込み、worker が無言で timeout する不具合である（#1708）。正規表現をもう 1 本足す対症療法ではなく、`PermissionRequest` / `PreToolUse` / `Stop` hook で**プロンプトの有無を CLI 自身に申告させる**経路を新設し、スクレイパと OR 合成した（どちらか一方が「プロンプトあり」と言えばプロンプトあり。互いの false は相手の true を打ち消さない）。あわせて、委任ワーカーが `pkill -f` で本番サーバを巻き込み停止させた事故と、環境変数の継承で本番 DB に書き込んだ事故を受け、`permissions.deny` の注入（#1739）と `env-clean` ゲート（#1740）で機構的に塞いだ。
+
 ### Fixed
 
 - **session: `send` の prompt-waiting ガードが scraper しか見ておらず、構造化イベントだけが見ているダイアログへ打ち込めた問題を修正** (#1737)
