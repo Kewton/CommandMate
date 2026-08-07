@@ -115,10 +115,11 @@ goal: |
 autoYes:
   mode: allow-listed
   allowPromptTypes: [yes_no, multiple_choice]
+  # この Issue は「pkill 等を permissions.deny で塞ぐ」ことそのものが主題であり、
+  # 検証プローブに pkill / killall / kill -9 の文字列が必ず含まれる。ここを denyPatterns に
+  # 入れると Auto-Yes の抑止が検証を止めてしまう（自家中毒）。#1699 で denyPatterns 自体の
+  # バグを直したときと同じ理由で、当該パターンだけ外す。破壊的な他パターンは残す。
   denyPatterns:
-    - 'pkill'
-    - 'killall'
-    - 'kill -9'
     - 'rm -rf /'
     - 'git push.*--force'
     - 'sudo '
