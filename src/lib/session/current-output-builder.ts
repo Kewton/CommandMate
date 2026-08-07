@@ -36,17 +36,22 @@ import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tm
 import {
   clearStructuredPromptWaiting,
   corroborateStructuredPromptWaiting,
+  getAskUserQuestion,
   getLastAgentEvent,
   getLastStopEventAt,
   getStructuredPromptWaiting,
   getStructuredSessionState,
   markStructuredPromptRecorded,
+  type AskUserQuestionEpisode,
   type StructuredPromptWaitingState,
   type StructuredSessionState,
 } from '@/lib/session/agent-event-state';
+import { applyAskUserQuestion } from '@/lib/session/ask-user-question-prompt';
 import {
   buildStructuredPromptData,
   buildStructuredPromptHistoryRecord,
+  type StructuredAskUserQuestionSummary,
+  type StructuredPromptFacts,
   type StructuredPromptSource,
   type StructuredPromptWaitingData,
 } from '@/lib/session/structured-prompt';
@@ -263,9 +268,10 @@ function recordStructuredPrompt(
     cliToolId: CLIToolType;
     instanceId: string;
     state: StructuredPromptWaitingState;
+    facts: StructuredPromptFacts;
   },
 ): void {
-  const record = buildStructuredPromptHistoryRecord(params.worktreeId, params.state);
+  const record = buildStructuredPromptHistoryRecord(params.worktreeId, params.facts);
 
   try {
     createMessage(db, {
@@ -312,6 +318,26 @@ export interface ScraperVerdict {
 export interface MergedStatusVerdict extends ScraperVerdict {
   /** True when the structured layer, not the scraper, decided `status`. */
   structuredApplied: boolean;
+}
+
+/**
+ * The `AskUserQuestion` call as the degraded prompt can describe it
+ * (Issue #1726).
+ *
+ * Only the first question, and no option numbers — see
+ * {@link StructuredAskUserQuestionSummary} for why a layer that cannot see the
+ * screen must not publish numbers for it.
+ */
+function summarizeAskUserQuestion(
+  episode: AskUserQuestionEpisode | null,
+): StructuredAskUserQuestionSummary | null {
+  const first = episode?.spec.questions[0];
+  if (!first) return null;
+  return {
+    question: first.question,
+    labels: first.choices.map((choice) => choice.label),
+    questionCount: episode!.spec.questions.length,
+  };
 }
 
 /**
@@ -553,11 +579,34 @@ export async function buildCurrentOutput(
   // the next Claude release renders differently, and the whole point of running
   // two layers is that a gap in one is covered by the other.
   const isPromptWaiting = scraperPromptWaiting || promptWaiting !== null;
+
+  // Issue #1726: the agent's own account of what it asked. It contributes only
+  // where some other layer has already established that a dialog is on screen —
+  // this record decides no status of its own, because Claude emits nothing at
+  // all while an AskUserQuestion picker is up (§5.6) and a record that asserted
+  // `waiting` from the invocation would go on asserting it long after a human
+  // answered in the terminal.
+  const askUserQuestion = getAskUserQuestion(worktreeId, cliToolId, instanceId);
+  const scraperPromptData = statusResult.promptDetection.promptData;
+  const correctedPromptData =
+    scraperPromptData && askUserQuestion
+      ? applyAskUserQuestion(scraperPromptData, askUserQuestion.spec)
+      : null;
+
+  // The degraded form, for a dialog only the structured layer can see. Enriched
+  // with the question text when one is in flight — that turns "a dialog is open
+  // and nobody could read it" into "a dialog is open and here is what it asks".
+  const structuredFacts: StructuredPromptFacts | null =
+    promptWaiting === null
+      ? null
+      : { ...promptWaiting, askUserQuestion: summarizeAskUserQuestion(askUserQuestion) };
+
   const promptData: PromptData | StructuredPromptWaitingData | null = scraperPromptWaiting
-    ? statusResult.promptDetection.promptData ??
-      (promptWaiting ? buildStructuredPromptData(worktreeId, promptWaiting) : null)
-    : promptWaiting
-      ? buildStructuredPromptData(worktreeId, promptWaiting)
+    ? correctedPromptData ??
+      scraperPromptData ??
+      (structuredFacts ? buildStructuredPromptData(worktreeId, structuredFacts) : null)
+    : structuredFacts
+      ? buildStructuredPromptData(worktreeId, structuredFacts)
       : null;
 
   // Issue #1723 §3: the field data this Epic is being built on. Every line is
@@ -611,13 +660,14 @@ export async function buildCurrentOutput(
 
   // Issue #1725: the structured layer saw a dialog the scraper did not. That
   // gap is the fact worth keeping — see recordStructuredPrompt.
-  if (promptWaiting !== null && !scraperPromptWaiting && !promptWaiting.recorded) {
+  if (promptWaiting !== null && structuredFacts !== null && !scraperPromptWaiting && !promptWaiting.recorded) {
     markStructuredPromptRecorded(worktreeId, cliToolId, instanceId);
     recordStructuredPrompt(db, {
       worktreeId,
       cliToolId,
       instanceId: resolvedInstanceId,
       state: promptWaiting,
+      facts: structuredFacts,
     });
   }
 

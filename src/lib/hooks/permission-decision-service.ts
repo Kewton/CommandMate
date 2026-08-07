@@ -47,9 +47,13 @@ import {
   type AutoYesSuppressionReason,
 } from '@/lib/polling/auto-yes-resolver';
 import { recordPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
-import { reportPermissionRequestPending } from '@/lib/session/agent-event-state';
+import {
+  recordAskUserQuestion,
+  reportPermissionRequestPending,
+} from '@/lib/session/agent-event-state';
 import type { PromptType } from '@/types/models';
 import { createLogger } from '@/lib/logger';
+import { parseAskUserQuestionPayload } from './ask-user-question-payload';
 import {
   ASK_USER_QUESTION_TOOL,
   collectToolInputMatchTexts,
@@ -301,6 +305,27 @@ export function resolvePermissionRequest(
   payload: PermissionRequestPayload | null
 ): PermissionDecision {
   const decision = decidePermissionRequest(session, payload);
+
+  // Issue #1726: `AskUserQuestion` raises a `PermissionRequest` carrying the
+  // same `tool_input` its `PreToolUse` does (§5.6), so the questions are
+  // recorded from here too. Redundant on a session this server started — both
+  // hooks are injected — and the only source on a session started before the
+  // upgrade, whose settings file has no `PreToolUse` entry at all. The two
+  // deliveries carry identical content, so the second is a harmless overwrite.
+  //
+  // This does NOT adjudicate anything: `decidePermissionRequest` still answers
+  // no-decision for `AskUserQuestion`, unchanged from #1724, because allowing it
+  // does not dismiss the picker.
+  if (payload?.toolName === ASK_USER_QUESTION_TOOL) {
+    const spec = parseAskUserQuestionPayload({
+      tool_name: payload.toolName,
+      tool_input: payload.toolInput,
+      prompt_id: payload.promptId,
+    });
+    if (spec) {
+      recordAskUserQuestion(session.worktreeId, session.cliToolId, session.instanceId, spec);
+    }
+  }
 
   if (decision.behavior !== 'allow') {
     reportPendingDialog(session, payload);

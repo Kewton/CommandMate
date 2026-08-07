@@ -84,13 +84,22 @@ export function createRespondCommand(): Command {
         if (result && !result.success) {
           // [DR2-06] Check reason for failure
           const reason = result.reason || 'unknown';
-          if (reason === 'unresolvable_answer') {
-            // Issue #1681: nothing was sent to the terminal.
+          // Issue #1681 / #1726: these two mean the server refused BEFORE
+          // sending, so the terminal is untouched — worth saying plainly,
+          // because the other reasons leave the answer's fate unknown.
+          const refusedBeforeSending =
+            reason === 'unresolvable_answer' || reason === 'answer_out_of_range';
+          if (refusedBeforeSending) {
             console.error(`Error: Answer was not sent. Reason: ${reason}${result.message ? ` (${result.message})` : ''}`);
           } else {
             console.error(`Warning: Response may not have been applied. Reason: ${reason}`);
           }
-          process.exit(ExitCode.UNEXPECTED_ERROR);
+          // Issue #1726: an option number the agent's own payload does not offer
+          // is a bad argument, so it exits with the input-error code the rest of
+          // this command already uses for a malformed worktree id or agent.
+          process.exit(
+            reason === 'answer_out_of_range' ? ExitCode.CONFIG_ERROR : ExitCode.UNEXPECTED_ERROR
+          );
         }
 
         // Issue #1681: audit trail — print which option was actually selected.

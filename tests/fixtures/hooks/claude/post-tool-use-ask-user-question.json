@@ -1,0 +1,60 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000000",
+  "transcript_path": "<TRANSCRIPT_PATH>",
+  "cwd": "<CWD>",
+  "prompt_id": "11111111-1111-4111-8111-111111111111",
+  "permission_mode": "default",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "AskUserQuestion",
+  "tool_input": {
+    "questions": [
+      {
+        "question": "Which theme do you prefer?",
+        "header": "Theme",
+        "options": [
+          {
+            "label": "Dark",
+            "description": "A dark background with light text, easier on the eyes in low-light environments."
+          },
+          {
+            "label": "Light",
+            "description": "A light background with dark text, crisper in bright or daylight settings."
+          }
+        ],
+        "multiSelect": false
+      }
+    ],
+    "answers": {
+      "Which theme do you prefer?": "Dark"
+    },
+    "annotations": {}
+  },
+  "tool_response": {
+    "questions": [
+      {
+        "question": "Which theme do you prefer?",
+        "header": "Theme",
+        "options": [
+          {
+            "label": "Dark",
+            "description": "A dark background with light text, easier on the eyes in low-light environments."
+          },
+          {
+            "label": "Light",
+            "description": "A light background with dark text, crisper in bright or daylight settings."
+          }
+        ],
+        "multiSelect": false
+      }
+    ],
+    "answers": {
+      "Which theme do you prefer?": "Dark"
+    },
+    "annotations": {}
+  },
+  "tool_use_id": "toolu_0000000000000000000000000",
+  "duration_ms": 0
+}

@@ -172,6 +172,21 @@ function PromptPanelContent({
         </div>
       )}
 
+      {/* Issue #1726: one `AskUserQuestion` call can carry several questions,
+          asked one screen at a time with no event at any transition. Saying
+          which one this is stops the panel reading as if it were the whole
+          request. */}
+      {promptData.type === 'multiple_choice' && promptData.askUserQuestion && (
+        <p className="text-xs text-muted-foreground" data-testid="ask-user-question-progress">
+          {promptData.askUserQuestion.questionCount > 1
+            ? t('askUserQuestionProgress', {
+                index: promptData.askUserQuestion.questionIndex + 1,
+                total: promptData.askUserQuestion.questionCount,
+              })
+            : t('askUserQuestionSource')}
+        </p>
+      )}
+
       {/* Question. Issue #1725: the structured form's `question` is a server-side
           English one-liner built for `wait` / `capture`; the panel says the same
           thing in the user's locale instead. */}
@@ -247,6 +262,20 @@ function UnclassifiedPromptNotice({
     <div className="space-y-2" data-testid="unclassified-prompt-notice">
       {promptData.message && (
         <p className="text-sm text-muted-foreground">{promptData.message}</p>
+      )}
+      {/* Issue #1726: the agent told us what it asked even though nothing could
+          read the screen. The labels are listed WITHOUT numbers — the picker
+          renumbers and appends its own entries, and this branch exists precisely
+          because nobody here can see which screen is up. */}
+      {promptData.askUserQuestion && (
+        <div className="space-y-1" data-testid="unclassified-ask-user-question">
+          <p className="text-sm text-foreground">{promptData.askUserQuestion.question}</p>
+          <ul className="list-disc list-inside text-sm text-muted-foreground">
+            {promptData.askUserQuestion.labels.map((label) => (
+              <li key={label}>{label}</li>
+            ))}
+          </ul>
+        </div>
       )}
       <p className="text-sm text-foreground">
         {t('unclassifiedInstruction', { command: t('unclassifiedRespondCommand') })}
@@ -368,6 +397,12 @@ function MultipleChoicePromptActions({
                   <span id={`default-${option.number}`} className="ml-2 text-xs text-accent-600 dark:text-accent-400 bg-accent-100 dark:bg-accent-900/30 px-2 py-0.5 rounded">
                     {t('default')}
                   </span>
+                )}
+                {/* Issue #1726: the picker's second line, which only the agent's
+                    own AskUserQuestion payload carries — the scraper treats it
+                    as a continuation line and drops it. */}
+                {option.description && (
+                  <p className="mt-0.5 text-sm text-muted-foreground">{option.description}</p>
                 )}
               </div>
             </label>

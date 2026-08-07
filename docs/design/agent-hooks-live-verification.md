@@ -659,6 +659,33 @@ effort.level     … PreToolUse / PermissionRequest / Stop にはあるが UserP
 - **良い面**: Auto-Yes v2 が `PermissionRequest` を一律 allow しても、AskUserQuestion が勝手に回答されることはない（＝「`respond yes` が承認に化ける」型の事故は起きない）。
 - **悪い面**: 一律 allow では **AskUserQuestion の停止を解消できない**。#1726 が別機構として必要な理由がこれ。
 
+#### 2026-08-06 追記（Issue #1726 の実測による訂正）
+
+本節の「AskUserQuestion 表示中は一切のイベントが出ない」は、**イベントを数えた窓の外で 2 件が発火していた**。
+#1726 の実装時に `PreToolUse` / `PostToolUse` / `Notification` / `Stop` を登録した dump サーバへ実セッション
+（v2.1.223）を流し、ボディごと採取した結果:
+
+| 時刻 | イベント | 画面 |
+|---|---|---|
+| 15:36:04.112 | `PreToolUse`（`AskUserQuestion`） | 選択画面が描かれる |
+| 15:36:10.127 | **`Notification`（`permission_prompt`）** | **選択画面は出たまま** |
+| 15:36:28.643 | **`PostToolUse`（`AskUserQuestion`）** | 人間が回答した直後 |
+| 15:36:29.992 | `Stop` | ターン終了 |
+
+訂正は 2 点:
+
+1. **`Notification(permission_prompt)` は AskUserQuestion でも発火する。** §5.5 の「ダイアログ描画の約 6 秒後」
+   という遅延がそのまま効いており、本節の計測窓（23 → 23）はその 6 秒より後に始まっていたと考えられる。
+   **「イベントが来た＝画面が閉じた」と読んではいけない。**
+2. **`PostToolUse` は発火する。** 本書は「登録済み・0 回」としていたが、`AskUserQuestion` に matcher を絞って
+   登録すると回答確定の直後（`Stop` の 1.3 秒前）に届く。payload は `tool_input` に加えて
+   `tool_response.answers`（選んだラベル）を持つ。fixture:
+   [`post-tool-use-ask-user-question.json`](../../tests/fixtures/hooks/claude/post-tool-use-ask-user-question.json)
+
+「選択・確定の**操作中**は無音」（＝どの画面を表示しているかは構造化イベントから判らない）という本節の結論自体は
+変わらない。変わるのは**イベントの有無を画面遷移の signal に使えない**という点で、#1726 はこれを踏まえて
+「画面の検出は scraper、選択肢の内容は `PreToolUse` の payload」という分担にしている。
+
 ---
 
 ### 5.7 項目 7 — 対応バージョン

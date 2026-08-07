@@ -21,11 +21,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - フレームが読めない間は完了判定を抑止し、dwell は 2 状態をまたいで継続する。本物の完了 `ready`/`input_prompt` はフラグを立てないので従来どおり初回ポーリングで exit 0
 
 ### Added
+- **detection: AskUserQuestion の選択肢を `PreToolUse` の payload から取り、`respond` を送信前に検証する（Phase 3）** (#1726)
+  - 画面から regex で復元していた選択肢を、エージェント自身が送ってくる `tool_input` で置き換える。`PreToolUse`（matcher `AskUserQuestion`）を注入し、質問文・選択肢ラベル・**各選択肢の説明文**を受け取る。説明文は picker が独立した行に描くもので、scraper は継続行として捨てているため（そうしないと別の選択肢として解析される）**構造化でしか取れない情報**
+  - **役割分担**: 画面が開いている／閉じたの**検出は scraper**（#1708 が担当）、開いていると判ったあとの**正確な選択肢の提供が本 Issue**。この記録は `sessionStatus` を一切決めず、#1725 の OR 合成にも #1723 の「scraper の `waiting` が常に勝つ」規則にも触れていない
+  - **payload と画面は同じではない**（実測）。画面には payload に無い `Type something.` / `Chat about this` が付き、最終ステップは `1. Submit answers / 2. Cancel` に化ける。そこで選択肢は**位置で照合**し、1 つでも合わなければ**丸ごと諦めて scraper の解析結果を残す**。番号は常に画面のもの。「Review your answers」や確認ステップは照合が成立しないので自動的に対象外
+  - **幻の選択肢に対する第 2 の防御**: payload が説明せず picker 既知の 2 つでもない選択肢は落とす。2026-08-06 に `7 tasks (0 done, 1 in progress, 6 open)` が「選択肢 7」として拾われた事故に対して、パネルの文言を知らなくても効く
+  - **`respond` の送信前検証**: 範囲外の番号は `answer_out_of_range`（CLI exit **2**）で拒否、ラベル一致は番号へ解決（`respond <id> T5` → 選択肢 2）、不一致・曖昧は `unresolvable_answer` で拒否。`yes` / `no` は**必ず拒否**する — cursor 移動式の picker では打った文字は選択にならず、続く Enter が強調表示中の選択肢を選ぶため承認に化けうる（#1681）。構造化選択肢が無い場合（hooks 未設定・他ツール・照合不成立）は**従来どおり**
+  - **Auto-Yes の面は広げていない**。`AskUserQuestion` は #1724 のまま常に no-decision で、画面ベース経路にも自動応答を追加していない
+  - **実機検証**（v2.1.223 / production build / 隔離サーバ）: タスクパネル `6 tasks (0 done, 1 in progress, 5 open)` が出た状態の picker で、UI に正確な 3 選択肢＋説明文と picker 既知の 2 件が出て幻の選択肢は混入せず、`respond 99` は exit 2 で送信されず、`respond T5` が選択肢 2 に解決して完了した
+
+- **detection: `PostToolUse` を解除 signal として採用（#1721 の「発火しない」を実測で訂正）** (#1726)
+  - #1721 は `PostToolUse` を「登録済み・0 回」と記録していたが、matcher を `AskUserQuestion` に絞って実測すると**回答確定の直後に発火する**（2026-08-06: `PreToolUse` 15:36:04.112 → `PostToolUse` 15:36:28.643 → `Stop` 15:36:29.992）。payload は `tool_response.answers` に選ばれたラベルまで持つ。fixture を追加した
+  - `Stop`＝「ターンが終わった」に対し `PostToolUse`＝「そのツール呼び出しが終わった」で、**「人間が答えた」に最も近い唯一のイベント**。回答後もエージェントが働き続けるケースでは `Stop` は数分後になる。`Stop` は取りこぼし用の backstop として併用する（hooks は全経路 fail-open）
+  - あわせて #1725 の「ダイアログが開いている」状態も `PostToolUse` で解除するようにした（従来は `Stop` か scraper の観測待ち）
+  - **`Notification(permission_prompt)` は AskUserQuestion でも発火する**（選択画面が出たまま約 6 秒後）。#1721 §5.6 の「表示中は無音」は計測窓の外で起きていた事象を取りこぼしており、「イベントが来た＝画面が閉じた」と読むと**機能が 6 秒で自分を消す**（実機で発生させて修正した）。§5.6 に訂正を追記
+
 - **detection: プロンプト待ちを構造化イベントで検出する（`isPromptWaiting` / `wait` exit 10 / `capture --prompts`、Phase 2）** (#1725)
   - Claude が `Notification(notification_type=permission_prompt)` を出す承認ダイアログを、画面解析とは独立に「人間待ち」として publish する。#1708 の**元の報告事例そのもの**をイベント側から塞ぐ
   - **合成規則は OR**。`isPromptWaiting = scraper が見た || 構造化が見た`。`promptData` は scraper の解析済みプロンプトを優先し、無ければ縮退形（`type:'unclassified'`／options 空／エージェントの `message` を原文表示）を返す。片方の false がもう片方の true を打ち消さないのが要点で、構造化イベントが 1 件も出ない画面（AskUserQuestion の選択・確認、trust dialog、`/login`・`/model` overlay）は scraper だけが見えるため
   - **解除は実測にもとづく**: `Stop`（AskUserQuestion 回答確定後の発火を #1721 が実測）／`user_prompt_submit`／`session_start`・`session_end`（世代交代）／`notification(idle_prompt)`／**scraper がプロンプトの消滅を観測したとき**。ただし scraper の解除は**一度そのプロンプトを見た場合に限る** — 見えなかった層の沈黙を証拠に使うと、この機能が存在する理由そのものの状況で検出が消える
-  - **`PostToolUse` は使っていない**。Issue 本文は解除条件の候補に挙げていたが、#1721 のスパイクで一度も観測されておらず、受信 route も lifecycle event に写像していない。実測のある `Stop` だけを採用した
+  - **`PostToolUse` は使っていない**。Issue 本文は解除条件の候補に挙げていたが、#1721 のスパイクで一度も観測されておらず、受信 route も lifecycle event に写像していない。実測のある `Stop` だけを採用した（**#1726 で訂正**: matcher を絞って実測すると発火する。#1726 が解除 signal として採用した）
   - **`Notification` の機械判断は `notification_type` のみ**（#1721 D3）。`message`（"Claude needs your permission"）は人間向け文言なので表示にだけ使う
   - Auto-Yes v2 が `PermissionRequest` を no-decision で返したときも「これからダイアログが出る」として記録する（`Notification` より約 6 秒早い）。ただしこれは観測ではなく**予測**なので、20 秒以内に `Notification` か scraper の裏取りが無ければ失効する。貼り付いた場合のコストは健全なセッションでの `wait` exit 10（ワーカーの誤停止）であり、それを避けるための期限
   - `wait --on-prompt agent` は構造化由来のプロンプトでも即 exit 10（#1708 の 60 秒 dwell を待たない）。`--on-prompt human` は従来どおり待機継続

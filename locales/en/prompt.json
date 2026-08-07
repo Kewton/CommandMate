@@ -17,5 +17,7 @@
   "customValueInput": "Custom value input",
   "unclassifiedTitle": "A dialog is open, and CommandMate could not read its options.",
   "unclassifiedInstruction": "Answer it in the terminal, or reply with the option NUMBER using {command}. Words like \"yes\"/\"no\" are not resolved on a numbered dialog.",
-  "unclassifiedRespondCommand": "commandmate respond [worktree-id] [number]"
+  "unclassifiedRespondCommand": "commandmate respond [worktree-id] [number]",
+  "askUserQuestionProgress": "Question {index} of {total} asked by the agent",
+  "askUserQuestionSource": "Options reported by the agent"
 }

@@ -88,13 +88,12 @@ function fixture(name: string): Record<string, unknown> {
 }
 
 describe('event coverage', () => {
-  it('registers the five lifecycle events plus PermissionRequest', () => {
-    // PreToolUse also carries a decision the agent obeys, and nothing
-    // adjudicates it yet (Phase 4) — registering it would mean answering
-    // no-decision to every tool call for no benefit.
+  it('registers the five lifecycle events plus PermissionRequest and the tool-use pair', () => {
     expect(Object.keys(buildAgentHookSettings(TARGET).hooks).sort()).toEqual([
       'Notification',
       'PermissionRequest',
+      'PostToolUse',
+      'PreToolUse',
       'SessionEnd',
       'SessionStart',
       'Stop',
@@ -110,14 +109,31 @@ describe('event coverage', () => {
         .filter((name) => name.endsWith('.json'))
         .map((name) => fixture(name).hook_event_name as string)
     );
-    const outOfScope = new Set(['PreToolUse']);
     const registered = new Set(Object.keys(buildAgentHookSettings(TARGET).hooks));
 
     for (const event of observed) {
-      if (outOfScope.has(event)) continue;
       expect(registered.has(event), `no hook registered for observed event ${event}`).toBe(true);
     }
   });
+
+  it.each(['PreToolUse', 'PostToolUse'])(
+    'narrows %s to AskUserQuestion and posts it to the event receiver (Issue #1726)',
+    (event) => {
+      // Two separate claims, both load-bearing. The matcher: an unmatched
+      // PreToolUse/PostToolUse pair fires on every tool call, and each one
+      // blocks the agent until this server answers — two requests per `Read`
+      // for a payload nothing reads. The receiver: a `PreToolUse` response body
+      // can block or redirect the tool call, and this feature must not be able
+      // to answer a question the human has not seen. The event route answers
+      // 202 with a fixed body.
+      const [group] = buildAgentHookSettings(TARGET).hooks[event];
+      const [hook] = group.hooks;
+
+      expect(group.matcher).toBe('AskUserQuestion');
+      expect(hook.type === 'http' && hook.url).toBe(buildAgentEventUrl(TARGET));
+      expect(hook.type === 'http' && hook.url).not.toContain('/api/hooks/permission-request');
+    },
+  );
 });
 
 describe('PermissionRequest wiring (Issue #1724)', () => {
