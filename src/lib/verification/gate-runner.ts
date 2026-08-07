@@ -52,6 +52,12 @@ import {
 import type { TaskEvent } from '@/lib/tasks/task-state-machine';
 import { applyTaskEvent } from '@/lib/tasks/task-transition-service';
 import {
+  evaluateEnvClean,
+  resolveRequireEnvClean,
+  type RequireEnvCleanDecision,
+} from './env-clean-gate';
+import { loadEnvSnapshot, type EnvSnapshot } from './env-snapshot';
+import {
   CONTRACT_DIR_PREFIX,
   evaluateScope,
   isContractPath,
@@ -59,6 +65,7 @@ import {
   scopeSkipDetachedContract,
 } from './scope-gate';
 import {
+  ENV_CLEAN_GATE_ID,
   loadVerifyConfig,
   SCOPE_GATE_ID,
   VERIFY_CONFIG_RELATIVE_PATH,
@@ -75,7 +82,7 @@ const logger = createLogger('lib/verification/gate-runner');
  * verify.yaml from shadowing them) and re-exported here, which is where callers
  * have always imported them from.
  */
-export { WORK_EVIDENCE_GATE_ID, SCOPE_GATE_ID };
+export { WORK_EVIDENCE_GATE_ID, SCOPE_GATE_ID, ENV_CLEAN_GATE_ID };
 
 /**
  * Pseudo-gate used to carry a config-load failure into the run record.
@@ -96,6 +103,8 @@ export const CONFIG_GATE_ID = 'config';
 const WORK_EVIDENCE_GATE_COMMAND =
   'git merge-base / rev-list / status --porcelain (excluding contract files)';
 const SCOPE_GATE_COMMAND = 'git diff --name-only / status --porcelain × contract scope';
+const ENV_CLEAN_GATE_COMMAND =
+  'lsof -iTCP -sTCP:LISTEN / tmux list-sessions / $HOME / ~/.commandmate × task-start snapshot';
 
 /**
  * Concurrent runs allowed process-wide.
@@ -534,6 +543,14 @@ type ScopeRequest = 'explicit' | 'implicit' | 'off';
 interface GateSelection {
   runWorkEvidence: boolean;
   scope: ScopeRequest;
+  /**
+   * Whether the env-clean gate runs (#1740).
+   *
+   * A plain boolean rather than a {@link ScopeRequest}: the gate has no "skip"
+   * outcome to forgive. It either runs — reaching passed, failed or the UNKNOWN
+   * `error` — or it was never selected and produces no row at all.
+   */
+  runEnvClean: boolean;
   gates: VerifyGate[];
 }
 
@@ -544,15 +561,31 @@ interface GateSelection {
  * does not exist, or selects nothing at all. Both would otherwise produce a run
  * with zero gate results, which {@link aggregateRunStatus} would have to call
  * `passed` — a green verdict from having checked nothing.
+ *
+ * @param requireEnvClean whether a declaration switched env-clean on. It is
+ *        ORed with an explicit request rather than replacing it, so `--gates
+ *        env-clean` still works with the switch off (and honestly reports
+ *        UNKNOWN, because no baseline was recorded), and a delegation that
+ *        declared the requirement cannot lose it by naming a narrower gate list.
  */
-function selectGates(config: VerifyConfig, gateIds: string[] | undefined): GateSelection | string {
+function selectGates(
+  config: VerifyConfig,
+  gateIds: string[] | undefined,
+  requireEnvClean: boolean
+): GateSelection | string {
   if (!gateIds) {
-    return { runWorkEvidence: true, scope: 'implicit', gates: config.gates };
+    return {
+      runWorkEvidence: true,
+      scope: 'implicit',
+      runEnvClean: requireEnvClean,
+      gates: config.gates,
+    };
   }
 
   const known = new Set<string>([
     WORK_EVIDENCE_GATE_ID,
     SCOPE_GATE_ID,
+    ENV_CLEAN_GATE_ID,
     ...config.gates.map((g) => g.id),
   ]);
   const unknown = gateIds.filter((id) => !known.has(id));
@@ -564,9 +597,15 @@ function selectGates(config: VerifyConfig, gateIds: string[] | undefined): GateS
   const selection: GateSelection = {
     runWorkEvidence: requested.has(WORK_EVIDENCE_GATE_ID),
     scope: requested.has(SCOPE_GATE_ID) ? 'explicit' : 'off',
+    runEnvClean: requested.has(ENV_CLEAN_GATE_ID) || requireEnvClean,
     gates: config.gates.filter((gate) => requested.has(gate.id)),
   };
-  if (!selection.runWorkEvidence && selection.scope === 'off' && selection.gates.length === 0) {
+  if (
+    !selection.runWorkEvidence &&
+    selection.scope === 'off' &&
+    !selection.runEnvClean &&
+    selection.gates.length === 0
+  ) {
     return 'gateIds selected no gates; a run with no gates has nothing to report.';
   }
   return selection;
@@ -588,6 +627,14 @@ function aggregateRunStatus(
   return 'passed';
 }
 
+/** Everything the env-clean gate needs that is resolved before the run starts. */
+interface EnvCleanContext {
+  worktreeId: string;
+  taskId: string | null;
+  baseline: EnvSnapshot | null;
+  decision: RequireEnvCleanDecision;
+}
+
 async function executeRun(
   db: Database.Database,
   runId: number,
@@ -596,7 +643,8 @@ async function executeRun(
   selection: GateSelection,
   baseRef: string | null,
   task: Task | null,
-  detachedContract: Task | null
+  detachedContract: Task | null,
+  envClean: EnvCleanContext
 ): Promise<VerificationRunTerminalStatus> {
   const { maxLogTailBytes, skipInPrimaryCheckout } = config.options;
   const { runWorkEvidence, gates } = selection;
@@ -669,6 +717,9 @@ async function executeRun(
       if (selection.scope !== 'off') {
         recordNotRun(SCOPE_GATE_ID, SCOPE_GATE_COMMAND, reason);
       }
+      if (selection.runEnvClean) {
+        recordNotRun(ENV_CLEAN_GATE_ID, ENV_CLEAN_GATE_COMMAND, reason);
+      }
       for (const gate of gates) {
         recordNotRun(gate.id, gate.command, reason);
       }
@@ -706,6 +757,23 @@ async function executeRun(
     if (outcome.status !== 'skipped' || declined) {
       statuses.push(outcome.status);
     }
+  }
+
+  if (selection.runEnvClean) {
+    // Measured before the command gates, not after: the pair of snapshots spans
+    // the agent's working window, and the gates below are the repository's own
+    // declared commands. A `test:e2e` gate that starts a server would otherwise
+    // be reported as the agent leaking one.
+    const outcome = await runGate(ENV_CLEAN_GATE_ID, ENV_CLEAN_GATE_COMMAND, () =>
+      evaluateEnvClean({
+        worktreeId: envClean.worktreeId,
+        worktreePath,
+        taskId: envClean.taskId,
+        baseline: envClean.baseline,
+        sources: envClean.decision.sources,
+      })
+    );
+    statuses.push(outcome.status);
   }
 
   const isPrimaryCheckout = skipInPrimaryCheckout && sameRealPath(worktreePath, process.cwd());
@@ -881,9 +949,12 @@ export async function startVerification(
         : `Failed to read ${VERIFY_CONFIG_RELATIVE_PATH}: ${(error as Error).message}`;
   }
 
+  // Resolved before gate selection because it can add a gate to it (#1740).
+  const envCleanDecision = resolveRequireEnvClean(task?.contract ?? null, config);
+
   let selection: GateSelection | null = null;
   if (config && !configFailure) {
-    const selected = selectGates(config, gateIds);
+    const selected = selectGates(config, gateIds, envCleanDecision.required);
     if (typeof selected === 'string') {
       configFailure = selected;
     } else {
@@ -946,6 +1017,15 @@ export async function startVerification(
 
   const resolvedConfig = config;
   const resolvedSelection = selection;
+  // Read once, up front: the baseline is a file, and a run that took minutes
+  // must be judged against the snapshot the task started from, not against
+  // whatever is on disk when the gate finally executes.
+  const envCleanContext: EnvCleanContext = {
+    worktreeId: input.worktreeId,
+    taskId,
+    baseline: resolvedSelection.runEnvClean && taskId ? loadEnvSnapshot(taskId) : null,
+    decision: envCleanDecision,
+  };
   const completion = (async (): Promise<VerificationRunTerminalStatus> => {
     await acquireSlot();
     let terminalStatus: VerificationRunTerminalStatus = 'error';
@@ -958,7 +1038,8 @@ export async function startVerification(
         resolvedSelection,
         baseRef,
         task,
-        detachedContract
+        detachedContract,
+        envCleanContext
       );
       terminalStatus = status;
       finishVerificationRun(db, run.id, status);

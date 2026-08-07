@@ -19,7 +19,7 @@ bash + awk で、Phase 1 以降の製品ローダは一般的な YAML パーサ�
 # .commandmate/verify.yaml — v1
 version: 1
 gates:
-  - id: lint              # 必須。^[a-z0-9][a-z0-9-]{0,31}$ で一意。予約ID: work-evidence, scope
+  - id: lint              # 必須。^[a-z0-9][a-z0-9-]{0,31}$ で一意。予約ID: work-evidence, scope, env-clean
     command: "npm run lint"   # 必須。worktree の cwd で shell 実行される
     timeoutSec: 600       # 省略時 600。範囲 1..7200
   - id: typecheck
@@ -32,6 +32,7 @@ options:
   skipInPrimaryCheckout: true  # 省略時 true。メイン checkout（稼働サーバの cwd になり得る場所）ではコマンド系ゲートを skip
   maxLogTailBytes: 8192        # 省略時 8192
   requireCommit: false         # 省略時 false。true で work-evidence が commit を要求する（Issue #1628）
+  requireEnvClean: false       # 省略時 false。true で組み込み env-clean ゲートがリポジトリ外の副作用を裁定する（Issue #1740）
 ```
 
 ---
@@ -52,7 +53,7 @@ options:
 
 | キー | 型 | 必須 | 既定 | 制約 |
 |---|---|---|---|---|
-| `id` | string | ✅ | — | `^[a-z0-9][a-z0-9-]{0,31}$`。設定内で一意。予約 ID（`work-evidence` / `scope`）は使用不可 |
+| `id` | string | ✅ | — | `^[a-z0-9][a-z0-9-]{0,31}$`。設定内で一意。予約 ID（`work-evidence` / `scope` / `env-clean`）は使用不可 |
 | `command` | string | ✅ | — | 非空。`--cwd` を作業ディレクトリとして POSIX sh (`/bin/sh -c`) で実行される |
 | `timeoutSec` | integer | — | `600` | `1..7200` |
 
@@ -67,6 +68,7 @@ options:
 | `skipInPrimaryCheckout` | boolean | `true` | プライマリ checkout ではコマンド系ゲートを skip する |
 | `maxLogTailBytes` | integer | `8192` | 失敗ゲートのログを stderr に出す際の末尾バイト数。`0..1048576`。`0` で抑止 |
 | `requireCommit` | boolean | `false` | `true` で `work-evidence` が「変更が在る」ではなく **「commit が在る」** を要求する。`commits=0 uncommitted=1` は failed（run は `not_started`）。実行契約の前文は「未 commit の作業は未完了とみなされる」と宣言するのに、ゲートは未 commit の変更 1 件で `passed` を返していた（Issue #1628 D-4）。既定を false に置いたのは、このゲートの本来の問いが「judge する work が在るか」だからで、リポジトリ単位の opt-in にしてある。**委任 1 件だけに要求したい場合は実行契約の `success.requireCommit`**（Issue #1642、[task-contract.md](./task-contract.md) §2.5）。両者は **OR** で合成し、契約が本オプションを緩めることはできない |
+| `requireEnvClean` | boolean | `false` | `true` で組み込み `env-clean` ゲート（Issue #1740、[task-contract.md](./task-contract.md) §2.6）を既定ゲート集合に加える。`scope` がリポジトリ**内**の変更を裁定するのに対し、こちらは**外**（稼働中の CommandMate サーバのポート・`mcbd-*` tmux セッション・`$HOME` 直下・`~/.commandmate` 直下）を裁定する。**このフラグは判定だけでなく計測の有無も決める** — ベースラインのスナップショットは task 作成時（`POST /api/worktrees/:id/tasks` ＝ `send --contract`）に、**本フラグまたは契約の `success.requireEnvClean` が true のときにのみ**記録される。off の既定はファイルを 1 つも書かない。後から on にしても過去の task のベースラインは作れないため、そのランは **UNKNOWN**（gate `error` → run `failed`）になり、決して `passed` にはならない |
 
 ---
 

@@ -34,6 +34,9 @@ const CONFIG: VerifyConfig = {
     skipInPrimaryCheckout: true,
     maxLogTailBytes: DEFAULT_MAX_LOG_TAIL_BYTES,
     requireCommit: false,
+    // #1740: a required field, so this fixture has to state it. `false` is the
+    // parser's default, so every assertion in this suite is unchanged.
+    requireEnvClean: false,
   },
 };
 
