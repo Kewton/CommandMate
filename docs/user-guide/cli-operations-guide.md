@@ -216,6 +216,36 @@ $ echo $?
   書き込み不能になる方が被害が大きいためです。**つまりこれは「取りこぼしを減らすガード」で
   あって、「ダイアログに文字が絶対に入らない保証」ではありません**
 
+#### 画面に見えないダイアログでも拒否されます（Issue #1737）
+
+エージェントの hooks が報告したダイアログ（`Notification(permission_prompt)` など）は、
+ターミナル側の解析が読めなくても拒否の根拠になります。#1708 の実害はまさに
+「**画面からは読めないダイアログ**に nudge を打ち込んだ」ことなので、そこを塞ぐのが目的です。
+
+構造化イベントだけが根拠のときは、拒否メッセージに**脱出手段**が併記されます。
+
+```
+$ commandmate send myrepo-issue-29 "まだ動いてる？"
+Error: myrepo-issue-29 is waiting on a prompt. … This dialog was reported by the agent's own
+hooks and is not visible to the terminal scraper, … it stops blocking sends 5 minutes after it
+was reported, or immediately with `commandmate send myrepo-issue-29 <message>
+--ignore-structured-prompt` (server-wide: CM_STRUCTURED_SEND_GUARD=off).
+```
+
+**セッションが書き込み不能にならないための 3 つの安全弁**があります。hooks は全経路
+fail-open で、「人間が答えた」を示すイベントが届かない事故は起こりうるためです。
+
+| 手段 | 使いどころ |
+|------|-----------|
+| **5 分の上限** | 何もしなくても、報告から 5 分経った構造化 waiting は `send` を止めません（画面に見えているプロンプトには上限はありません） |
+| `send --ignore-structured-prompt` | ペインは平常なのに拒否され続けるとき。その 1 回だけ構造化側の拒否を無効化します |
+| `CM_STRUCTURED_SEND_GUARD=off` | サーバ全体で構造化側の拒否を切る（サーバ再起動が必要） |
+
+- どの手段も**画面に見えているプロンプトは拒否したままです**。そちらは `respond` で答えられる
+  本物のダイアログで、打ち込むこと自体が #1708 の実害だからです
+- 5 分の上限が効くのは **`send` の拒否だけ**です。`/current-output` の `isPromptWaiting` や
+  `wait` の exit 10 は従来どおり報告され続けます（誤って「完了」と読ませないため）
+
 ### worktree ID の調べ方
 
 ```bash

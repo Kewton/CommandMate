@@ -353,3 +353,36 @@ describe('send refuses when the session is waiting on a prompt (Issue #1708)', (
     expect(mockConsoleError).not.toHaveBeenCalledWith(expect.stringContaining('respond wt1'));
   });
 });
+
+// Issue #1737: the guard now also refuses on a dialog only the agent's hooks
+// reported — one that may leave no trace on screen. The flag is how an operator
+// gets past a record that stuck, so it has to reach the server.
+describe('send --ignore-structured-prompt (Issue #1737)', () => {
+  it('asks the server to waive the structured half of the guard', async () => {
+    mockFetchResponse({ id: 1, role: 'user', content: 'nudge', worktreeId: 'wt1' }, 201);
+    const { createSendCommand } = await import('../../../../src/cli/commands/send');
+    await createSendCommand().parseAsync([
+      'node', 'send', 'wt1', 'nudge', '--ignore-structured-prompt',
+    ]);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/worktrees/wt1/send'),
+      expect.objectContaining({
+        body: JSON.stringify({ content: 'nudge', ignoreStructuredPromptGuard: true }),
+      })
+    );
+  });
+
+  it('sends the ordinary body without it', async () => {
+    // Opt-in, and the field is absent rather than false: an older daemon must
+    // see exactly the body it always did.
+    mockFetchResponse({ id: 1, role: 'user', content: 'nudge', worktreeId: 'wt1' }, 201);
+    const { createSendCommand } = await import('../../../../src/cli/commands/send');
+    await createSendCommand().parseAsync(['node', 'send', 'wt1', 'nudge']);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/worktrees/wt1/send'),
+      expect.objectContaining({ body: JSON.stringify({ content: 'nudge' }) })
+    );
+  });
+});
