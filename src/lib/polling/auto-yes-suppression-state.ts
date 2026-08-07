@@ -41,8 +41,31 @@ export interface AutoYesPolicySuppression {
   at: number;
 }
 
+/**
+ * Reached through `globalThis` for the same reason `agent-event-state` is
+ * (Issue #1736): the writer and the reader are different route handlers, and
+ * under `next dev` each one is bundled separately and would hold its own copy
+ * of this map.
+ *
+ * That split is not hypothetical here. `recordPolicySuppression` is called
+ * from `/api/hooks/permission-request` (via `permission-decision-service`) and
+ * from the Auto-Yes poller, while `getLastPolicySuppression` is only ever read
+ * by `buildCurrentOutput` — i.e. `/api/worktrees/:id/current-output` and the WS
+ * streamer. This record exists precisely so an unattended pipeline that stalled
+ * on a suppressed prompt can say *why*, so losing it in dev restores the
+ * unexplained stall the Issue set out to remove.
+ *
+ * `docs/module-reference.md` states the rule: "プロセス全体で共有する in-memory
+ * 状態は globalThis 経由で持つ".
+ */
+declare global {
+  // eslint-disable-next-line no-var
+  var __autoYesPolicySuppressions: Map<string, AutoYesPolicySuppression> | undefined;
+}
+
 /** compositeKey -> the most recent policy suppression for that session. */
-const lastPolicySuppressions = new Map<string, AutoYesPolicySuppression>();
+const lastPolicySuppressions = globalThis.__autoYesPolicySuppressions ??
+  (globalThis.__autoYesPolicySuppressions = new Map<string, AutoYesPolicySuppression>());
 
 /**
  * Record that the policy withheld an answer for `instanceId`'s current prompt.

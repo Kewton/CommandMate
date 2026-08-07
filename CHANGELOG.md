@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **hooks: dev モードで構造化イベントが一切機能しなかった問題を修正（`agent-event-state` を `globalThis` 経由に）** (#1736)
+  - `src/lib/session/agent-event-state.ts` が 6 つの Map を素のモジュールスコープで持っていた。`next dev`（`commandmate start --dev` / `tsx server.ts`）は route handler を**個別にバンドルする**ため、`POST /api/hooks/agent-event` が書いた Map と `GET /api/worktrees/:id/current-output` が読む Map が別物になり、`structuredEvents` が**常に全 null**に縮退していた。production build ではモジュールが共有されるので影響なし＝ CI もリリースも一度も見ていない
+  - Epic #1720 の構造化状態**すべて**（#1549 の `lastStopEventAt` / #1722 の `lastAgentEvent` / #1723 の `sessionStatus` 2 層化 / #1724 の抑止記録 / #1725 の prompt_waiting / #1726 の AskUserQuestion）が同時に無効化されていた。**しかも無言** — エラーも警告も出ず payload は整形式のまま「イベントは来ていない」と言い続けるので、「hooks を設定したのに何も起きない」という #1720 が塞ごうとしている当の失敗様式になる
+  - **実測で確認**（2026-08-07、隔離ポート 3779 の `tsx server.ts` / 隔離 DB）: POST が `agent-event-received` をログに出した直後の GET が `structuredEvents.lastEventType: null` を返した。修正後は同じ手順で `"user_prompt_submit"` を返す
+  - `src/lib/polling/auto-yes-suppression-state.ts`（#1684）も**同型の分断**を受けていたので同時に修正した。書き手は `/api/hooks/permission-request`（`permission-decision-service` 経由）と Auto-Yes ポーラ、読み手は `buildCurrentOutput` で、常に別 route。ポリシー抑止で止まった worker の理由を CLI に出す機能そのものが dev で無効だった
+  - 修正は `auto-yes-state.ts`（#153）が確立していた `globalThis.__x ?? (globalThis.__x = new Map())` パターンをそのまま踏襲。**このパターンは既に repo 内 17 モジュールで使われていたのに、どこにも明文化されていなかった**ため、`docs/module-reference.md` 冒頭に規約として追加した（適用対象／非適用対象＝派生キャッシュ・ポーラループ内で完結する状態、の線引きつき）
+  - 回帰テスト `tests/unit/session/agent-event-state-module-identity.test.ts`: `vi.resetModules()` でモジュールを 2 回ロードし、片方が書いた状態をもう片方から読めることを 7 ケースで固定。**変異注入で非空振りを証明済み** — 7 つの Map を 1 つずつ素のモジュールスコープに戻すと、いずれも対応するケースが赤になることを実測（全戻しでは 7/7 赤）
+
 - **detection: claude のタスクパネルが直上のプロンプトを飲み、worker が無言で timeout する問題を修正** (#1708)
   - タスクパネルはペイン最下部に固定描画されるため、実運用の 200x1000 ペインではダイアログが上部・パネルが約 880 行下に来る。空行が潰されるとパネルが Pass 2 の走査窓に入り、ヘッダ `N tasks (X done, …)` と折り畳み行 `… +N completed` が**それぞれ独立に**選択肢として拾われて本物の選択肢を弾いていた（実キャプチャの 1 行削除実験で確認。片方だけ直しても未検出のまま）。パネルを**ブロックごと** skip する
   - 検出漏れは `isPromptWaiting: false` を意味し、それが唯一の「人間待ち」信号なので、auto-yes も `wait --on-prompt agent` の exit 10 も契約の `autoYes` ポリシーも同時に無効化されていた
