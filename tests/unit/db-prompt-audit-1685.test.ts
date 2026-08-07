@@ -22,6 +22,7 @@ import {
   upsertWorktree,
 } from '@/lib/db';
 import type { PromptData, Worktree, YesNoPromptData } from '@/types/models';
+import { answerablePromptOf } from '../helpers/prompt-type-guards';
 
 const WORKTREE_ID = 'wt-prompt-audit';
 
@@ -99,7 +100,7 @@ describe('recordAnsweredPrompt (Issue #1685)', () => {
       answeredBy: 'auto',
       question: 'Allow tool use?',
     });
-    expect(stored.promptData!.answeredAt).toBeTruthy();
+    expect(answerablePromptOf(stored.promptData)!.answeredAt).toBeTruthy();
     // options from the originally saved prompt survive
     expect((stored.promptData as YesNoPromptData).options).toEqual(['yes', 'no']);
 

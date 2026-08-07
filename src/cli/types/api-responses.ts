@@ -166,6 +166,16 @@ export interface CurrentOutputResponse {
 }
 
 // Mirrors: src/types/models.ts BasePromptData (subset for CLI output)
+//
+// Issue #1738: this mirror is deliberately LOOSER than the server union and
+// must stay that way. `type` is `string`, not `PromptType`, and `options` is
+// `unknown[]`, which is what already lets the degraded payloads through
+// unchanged: #1725's `StructuredPromptWaitingData` on `current-output`, and
+// #1708 / #1725's audit rows on `messages?messageType=prompt`. Both carry
+// `type: 'unclassified'` and an empty option list, and `capture` / `wait`
+// already branch on that literal (see UNCLASSIFIED_PROMPT_TYPE in
+// cli/commands/wait.ts). Tightening `type` into the server's `PromptData` union
+// would reintroduce exactly the gap #1738 closed, on the CLI side.
 export interface PromptData {
   type: string;
   question: string;

@@ -31,7 +31,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CLIToolType } from '@/lib/cli-tools/types';
-import type { PromptData } from '@/types/models';
+import type { LivePromptData } from '@/types/models';
 import { useRealtime } from '@/hooks/useRealtimeConnection';
 import type { RealtimeEvent, TerminalSnapshotEvent, SessionStatusEvent } from '@/lib/realtime/types';
 
@@ -75,7 +75,8 @@ export interface PaneTerminalState {
 
 export interface PanePromptState {
   visible: boolean;
-  data: PromptData | null;
+  /** Issue #1738: may be the degraded structured form published since #1725. */
+  data: LivePromptData | null;
   messageId: string | null;
   answering: boolean;
 }
@@ -85,7 +86,7 @@ interface CurrentOutputResponse {
   cliToolId?: CLIToolType;
   isGenerating?: boolean;
   isPromptWaiting?: boolean;
-  promptData?: PromptData;
+  promptData?: LivePromptData;
   fullOutput?: string;
   realtimeSnippet?: string;
   thinking?: boolean;
@@ -198,7 +199,7 @@ export function useTerminalPanePolling({
       isPagerActive?: boolean;
       isUnclassifiedActive?: boolean;
       isPromptWaiting?: boolean;
-      promptData?: PromptData | null;
+      promptData?: LivePromptData | null;
     }): void => {
       const nextOutput = data.fullOutput ?? data.realtimeSnippet ?? '';
       const rawUnclassified = data.isUnclassifiedActive === true

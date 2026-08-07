@@ -51,6 +51,7 @@ vi.mock('@/lib/polling/auto-yes-manager', () => ({
 
 import { captureSessionOutput } from '@/lib/session/cli-session';
 import { buildCurrentOutput } from '@/lib/session/current-output-builder';
+import { answerablePromptOf } from '../../../helpers/prompt-type-guards';
 
 /**
  * A frame status-detector cannot classify: interactive-looking output with no
@@ -209,15 +210,17 @@ describe('Issue #1708: the stale-prompt sweep must not claim an unclassified row
 
     const rows = promptRows(db);
     const unclassified = rows.find(
-      m => (m.promptData as unknown as { type?: string })?.type === UNCLASSIFIED_PROMPT_TYPE
+      m => m.promptData?.type === UNCLASSIFIED_PROMPT_TYPE
     );
     expect(unclassified).toBeDefined();
     expect(unclassified!.promptData?.status).toBe('unclassified');
-    expect(unclassified!.promptData?.answer).toBeUndefined();
-    expect(unclassified!.promptData?.answeredBy).toBeUndefined();
+    // Issue #1738: the row is not an answerable prompt at all — the type now
+    // says so, which is a stronger statement than `answer` happening to be
+    // undefined on a shape that could have carried one.
+    expect(answerablePromptOf(unclassified!.promptData)).toBeUndefined();
 
     const answered = rows.find(
-      m => (m.promptData as unknown as { type?: string })?.type === 'yes_no'
+      m => m.promptData?.type === 'yes_no'
     );
     expect(answered!.promptData?.status).toBe('answered');
   });

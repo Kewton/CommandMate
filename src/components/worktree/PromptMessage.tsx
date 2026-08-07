@@ -10,6 +10,7 @@ import { TriangleAlert, CircleCheck } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useLocale } from 'next-intl';
 import type { ChatMessage } from '@/types/models';
+import { isAnswerablePromptData } from '@/types/models';
 import { format } from 'date-fns';
 import { getDateFnsLocale } from '@/lib/date-locale';
 import { getCliToolDisplayNameSafe } from '@/lib/cli-tools/types';
@@ -73,6 +74,11 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
   const [responding, setResponding] = useState(false);
   const prompt = message.promptData!;
   const isPending = prompt.status === 'pending';
+  // Issue #1738: `answer` exists only on an answerable prompt. A degraded row
+  // (#1708 / #1725) is neither pending nor answered — it is the record that a
+  // frame was never classified — so it lands in the same branch carrying
+  // nothing, which is exactly what it rendered before the type said so.
+  const answer = isAnswerablePromptData(prompt) ? prompt.answer : undefined;
   const timestamp = format(new Date(message.timestamp), 'PPp', { locale: dateFnsLocale });
   // [SF-S3-003] Cache getDisplayContent result for DRY principle
   const displayContent = getDisplayContent(message.content, prompt.question);
@@ -177,7 +183,7 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
         ) : (
           <div className="bg-surface border border-input rounded-lg px-4 py-2 inline-block">
             <span className="text-sm text-muted-foreground">
-              <CircleCheck size={16} className="inline align-[-3px] mr-1 text-success" aria-hidden="true" />{t('answered')}: <strong className="text-foreground">{prompt.answer}</strong>
+              <CircleCheck size={16} className="inline align-[-3px] mr-1 text-success" aria-hidden="true" />{t('answered')}: <strong className="text-foreground">{answer}</strong>
             </span>
           </div>
         )}

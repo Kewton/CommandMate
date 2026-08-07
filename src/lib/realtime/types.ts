@@ -8,7 +8,7 @@
  * the canonical {@link RealtimeEvent}.
  */
 
-import type { ChatMessage, PromptData } from '@/types/models';
+import type { ChatMessage, LivePromptData } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 export type RealtimeStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
@@ -72,7 +72,14 @@ export interface TerminalSnapshotEvent {
   isRunning: boolean;
   thinking: boolean;
   isPromptWaiting: boolean;
-  promptData?: PromptData | null;
+  /**
+   * Issue #1738: {@link LivePromptData}, because `emitTerminalSnapshot` assigns
+   * `buildCurrentOutput`'s payload straight through and that has published the
+   * degraded structured form since #1725. The old `PromptData` here typechecked
+   * only because {@link RealtimeEvent}'s catch-all member absorbed the object
+   * literal, so the mismatch never surfaced at the broadcast site.
+   */
+  promptData?: LivePromptData | null;
   isSelectionListActive: boolean;
   isPagerActive: boolean;
   isUnclassifiedActive: boolean;

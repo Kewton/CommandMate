@@ -5,6 +5,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ChatMessage } from '@/types/models';
+import { answerablePromptOf } from '../../../helpers/prompt-type-guards';
 
 // Helper functions to test (these will be extracted or tested via integration)
 // For now, we test the core logic independently
@@ -63,7 +64,7 @@ describe('WorktreeDetail WebSocket message handling', () => {
 
       expect(result.length).toBe(2);
       expect(result[0].promptData?.status).toBe('answered');
-      expect(result[0].promptData?.answer).toBe('yes');
+      expect(answerablePromptOf(result[0].promptData)?.answer).toBe('yes');
       expect(result[1].id).toBe('2'); // Other messages unchanged
     });
 
@@ -513,7 +514,7 @@ describe('handleMessageUpdate edge cases', () => {
     );
 
     expect(result[0].promptData?.status).toBe('answered');
-    expect(result[0].promptData?.answer).toBe('1');
+    expect(answerablePromptOf(result[0].promptData)?.answer).toBe('1');
   });
 });
 

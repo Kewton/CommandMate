@@ -3,6 +3,13 @@
  */
 
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
+// Type-only, and it has to stay that way: `lib/session/structured-prompt`
+// imports UNCLASSIFIED_PROMPT_TYPE back from this module, so a value import
+// here would close a runtime cycle. `import type` is erased, so there is none.
+import type {
+  StructuredPromptHistoryRecord,
+  StructuredPromptWaitingData,
+} from '@/lib/session/structured-prompt';
 
 export type { AgentInstance };
 
@@ -418,6 +425,64 @@ export interface UnclassifiedFrameRecord {
 }
 
 /**
+ * What a LIVE `promptData` field may actually hold (Issue #1738).
+ *
+ * `currentOutput.promptData` has published the degraded
+ * {@link StructuredPromptWaitingData} since Issue #1725, but every layer the
+ * value travels through — the WebSocket snapshot, the polling hooks, the UI
+ * reducer — went on typing the field as {@link PromptData} alone. Only
+ * `PromptPanel`, at the very end, widened its prop. So the intermediate layers
+ * held a value their own types said could not exist, and a reader that trusted
+ * them could reach `options` on a payload that has none, pass the type checker,
+ * and break at runtime for `unclassified` alone.
+ *
+ * {@link StructuredPromptWaitingData} stays OUT of the {@link PromptData} union
+ * itself — see the note on {@link UNCLASSIFIED_PROMPT_TYPE} for why that union
+ * must stay closed to values no prompt-answering path may accept. What is
+ * closed here is the path the value travels, not the union.
+ */
+export type LivePromptData = PromptData | StructuredPromptWaitingData;
+
+/**
+ * What the shared `chat_messages.prompt_data` column may actually hold
+ * (Issue #1738).
+ *
+ * Two degraded records land there beside the parsed prompts: #1708's
+ * {@link UnclassifiedFrameRecord}, written when the detectors failed on a
+ * frame, and #1725's {@link StructuredPromptHistoryRecord}, written when only
+ * the structured layer saw a dialog. Both go in through the same `promptData`
+ * field of `createMessage` — which is why the writer in
+ * `lib/session/current-output-builder` needed an `as unknown as PromptData`
+ * cast to get past the old type. Naming them here is what makes that cast
+ * unnecessary and stops a reader assuming `answer` is always there.
+ */
+export type StoredPromptData =
+  | PromptData
+  | UnclassifiedFrameRecord
+  | StructuredPromptHistoryRecord;
+
+/**
+ * Narrow a prompt payload to the answerable {@link PromptData} union.
+ *
+ * The one branch every reader of {@link LivePromptData} / {@link
+ * StoredPromptData} needs, defined once: `true` means the options, the default
+ * and `answer` are meaningful and the value may be answered by option number;
+ * `false` narrows to the degraded form, which by construction carries none of
+ * them. Both directions come out of this single predicate so no call site has
+ * to re-derive "is `type` the unclassified sentinel?" for itself.
+ *
+ * Deliberately not `isStructuredPromptWaitingData` from
+ * `lib/session/structured-prompt`: that one asserts the *live* degraded shape,
+ * which would be unsound over {@link StoredPromptData}, whose degraded members
+ * share its `type` but not its `status`/`source`.
+ */
+export function isAnswerablePromptData(
+  value: LivePromptData | StoredPromptData | null | undefined,
+): value is PromptData {
+  return value != null && value.type !== UNCLASSIFIED_PROMPT_TYPE;
+}
+
+/**
  * Issue #1121: Client-only optimistic send state for a message shown in the UI
  * before the server confirms it. `sending` = awaiting the send API / server
  * echo; `error` = the send failed and the user can retry or discard. Never set
@@ -447,8 +512,15 @@ export interface ChatMessage {
   requestId?: string;
   /** Message type (normal, prompt, etc.) */
   messageType: MessageType;
-  /** Prompt data (only for prompt messages) */
-  promptData?: PromptData;
+  /**
+   * Prompt data (only for prompt messages).
+   *
+   * Issue #1738: {@link StoredPromptData}, not {@link PromptData} — the column
+   * also carries the two degraded records, and a row that is one of them must
+   * not look answerable to a reader. Narrow with {@link isAnswerablePromptData}
+   * before touching `options` / `answer`.
+   */
+  promptData?: StoredPromptData;
   /** CLI tool type (claude, codex, gemini, vibe-local) - defaults to 'claude' */
   cliToolId?: CLIToolType;
   /**

@@ -44,7 +44,8 @@ import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { useUpdateCheck } from '@/hooks/useUpdateCheck';
 import { type AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
 import type { AutoYesStopReason } from '@/config/auto-yes-config';
-import type { Worktree, ChatMessage, PromptData, FileContent } from '@/types/models';
+import type { Worktree, ChatMessage, LivePromptData, FileContent } from '@/types/models';
+import { isAnswerablePromptData } from '@/types/models';
 import {
   isCliToolType,
   isValidInstanceId,
@@ -91,7 +92,8 @@ interface CurrentOutputResponse {
   cliToolId?: CLIToolType;
   isGenerating?: boolean;
   isPromptWaiting?: boolean;
-  promptData?: PromptData;
+  /** Issue #1738: may be the degraded structured form published since #1725. */
+  promptData?: LivePromptData;
   content?: string;
   fullOutput?: string;
   realtimeSnippet?: string;
@@ -878,10 +880,17 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         // so the API can use cursor-key navigation even when promptCheck re-verification fails.
         // Issue #874: on mobile target the active agent instance (the builder only
         // attaches instanceId when non-primary, so PC stays byte-identical).
+        // Issue #1738: `prompt.data` may be the degraded structured form (#1725),
+        // and `promptType` on this body is a PromptType — a union the
+        // unclassified sentinel is deliberately not a member of. Passing null
+        // for it sends no promptType at all, which is the truthful answer to
+        // "what kind of prompt is this?" when nobody could read the dialog.
+        // Unreachable from the UI today: neither surface draws a control for the
+        // degraded form, so nothing can call this with one.
         const requestBody = buildPromptResponseBody(
           answer,
           activeCliTab,
-          state.prompt.data,
+          isAnswerablePromptData(state.prompt.data) ? state.prompt.data : null,
           isMobileRef.current ? activeInstanceIdRef.current : undefined,
         );
 

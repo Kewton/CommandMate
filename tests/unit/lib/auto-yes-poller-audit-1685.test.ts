@@ -49,6 +49,7 @@ import { detectPrompt } from '@/lib/detection/prompt-detector';
 import { buildDetectPromptOptions } from '@/lib/detection/cli-patterns';
 import { detectAndRespondToPrompt, type AutoYesPollerState } from '@/lib/auto-yes-poller';
 import type { PromptData, Worktree } from '@/types/models';
+import { answerablePromptOf } from '../../helpers/prompt-type-guards';
 
 const WORKTREE_ID = 'wt-1685';
 const FRAME = buildClaude1000RowPermissionFrame();
@@ -116,7 +117,7 @@ describe('detectAndRespondToPrompt audit trail (Issue #1685)', () => {
       answer: sentAnswer.answer,
       question: detectedPromptData().question,
     });
-    expect(promptData.answeredAt).toBeTruthy();
+    expect(answerablePromptOf(promptData)!.answeredAt).toBeTruthy();
     expect((promptData as { options: unknown[] }).options.length).toBeGreaterThan(0);
     expect(rows[0].instanceId).toBe('claude');
 
