@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **test: `tests/unit/cli-tools/manager.test.ts` が CI で断続的にタイムアウトで落ちる問題を修正** (#1752)
+  - このファイルは `child_process` をモックしておらず、`getToolInfo` / `getAllToolsInfo` / `getInstalledTools` を呼ぶたびに 7 ツール分の**実プロセス**を起動していた。`BaseCLITool.isInstalled()` は `which <cmd>`（timeout 5000ms）、`CopilotTool.isInstalled()` は `gh --version` → `gh copilot --help` の **2 段直列**（最悪 5000 + 5000 = 10,000ms）。一方 `vitest.config.ts` は `testTimeout` 未設定＝既定 5000ms なので、**内側の予算が外側を構造的に超えており**、copilot の内側タイムアウトは一度も観測されえない。GitHub Actions ランナーには `gh` がプリインストールされているため stage 1 は必ず成功し、stage 2 が必ず実行される。v0.22.0 の同一コミット・同一ジョブが pull_request run では success、push run では failure に割れた（run 31151127023 / 31151080694）のはこのため（アサーション不一致ではなくタイムアウト）
+  - `vi.mock('child_process')` で `exec` / `execFile` を差し替えて実プロセス起動を排除した。**`testTimeout` を広げる対処は採っていない**（遅さの原因が残るうえ、全体既定の変更は他 816 ファイルに波及する）
+  - あわせて空振りの assertion を潰した。以前は `expect(typeof info.installed).toBe('boolean')` しか見ておらず、**true でも false でも緑**になっていた。`installed` を true / false の両方で固定し、copilot の 2 段チェックは「stage 1 失敗で stage 2 を呼ばない」「stage 1 成功 → stage 2 失敗で false」を個別のテストとして分離した
+  - `stopPollers` の委譲先である `@/lib/polling/response-poller` もモックした（この責務は `manager-stop-pollers.test.ts` が持つ）。依存グラフの import だけで 500ms 以上かかっていたため
+  - **変異注入で非空振りを証明済み**（2026-08-08）: (a) `getAllToolsInfo()` の `Promise.all` を直列 for ループへ変えると `should issue every probe before any of them resolves (checks run concurrently)` が赤（発行済み probe が `['which claude']` の 1 本だけになる）、(b) `CopilotTool.isInstalled()` の stage 2 を削ると 3 件が赤（copilot の 2 段テスト 2 件と `getInstalledTools` の `copilot` 混入）。変異はいずれも元に戻し、`src/` の diff が空であることを確認済み
+  - **実測**: 23 tests / `Duration 357ms`（tests 7ms）、`CI=true` でも 364ms。修正前は 17 tests / 1.28s（tests 216ms、実プロセス起動あり）。なお開発機では 6 ツールすべてと `gh copilot` が実際にインストールされているが、テストは `installed: false` を期待して緑になる — 実バイナリを参照していないことの実測的な裏付け
+
 ## [0.22.1] - 2026-08-07
 
 > **Highlight**: Skill 一覧が**古いバージョンをインストール済みとして表示し、そこからの更新が必ず失敗する**問題を修正する（#1753）。一覧 API は索引を、更新 API は receipt を真実として読んでおり、両者が食い違うと UI は旧版を出して更新導線を描き、押すと `SKILL_UPDATE_VERSION_NOT_ELIGIBLE` を返していた。エラー文言は利用者に「もう最新です」としか読めず、UI に索引を作り直す導線も無いため、**一度ずれると回復できない**状態だった。読み取り時の索引修復を「欠落行の復元」から「receipt と食い違う行の収束」まで広げ、コストは索引が既に持つ `receipt_sha256` との比較で抑えている（一致する行は parse も書き込みもしない）。**このリリースを適用すると、ずれている索引は一覧を開いた時点で自動的に直る。**
