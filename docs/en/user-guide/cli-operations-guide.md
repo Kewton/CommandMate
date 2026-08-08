@@ -12,11 +12,24 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
 
 ### Server Port
 
-CLI connects to `localhost:3000` by default. Use `CM_PORT` for a different port:
+The target is resolved in this order (Issue #1743):
+
+1. `CM_PORT` exported in the shell (e.g. `CM_PORT=3011 commandmate ls`)
+2. `CM_PORT` in `~/.commandmate/.env`
+3. The default, `3000`
 
 ```bash
+# 1. Name the target for this one invocation (wins over .env)
 CM_PORT=3011 commandmate ls
+
+# 2. With no CM_PORT in the shell, the .env value is used
+#    (the same port `commandmate status` reports)
+commandmate ls
 ```
+
+Host and protocol come from the same configuration: a `CM_BIND` of `0.0.0.0` is dialled as `127.0.0.1`, and HTTPS is used only when **both** `CM_HTTPS_CERT` and `CM_HTTPS_KEY` are set.
+
+> **Note**: `commandmate status` reports where the server actually runs, so there `.env` takes precedence over exported variables — that is the order the server process itself is started with. Resolving a client connection answers a different question ("where should this invocation dial?"), so the shell wins, as above.
 
 ### Authentication
 
