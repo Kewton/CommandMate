@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.2] - 2026-08-09
+
+> **Highlight**: サーバーを 2 つ動かしている環境で、**`commandmate ls` などが `~/.commandmate/.env` を読まず既定ポート 3000 の別サーバーに繋いでいた**問題を修正する（#1743）。`.env` を読んでいたのは `status` だけだったため「どのサーバーに繋がっているか分からない」状態になり、`cmate-orchestrate` の dispatch は正しく作成・登録した worktree を「無い」と誤判定して run を 1 回無駄に消費していた。解決順を **シェルで export した `CM_PORT` > `~/.commandmate/.env` > 3000** に統一し、`ls` だけでなく `ApiClient` を使う全 subcommand が同じ経路で解決するようにした。**接続先ホストは `localhost` から `127.0.0.1` に変わる**（`status` が報告するアドレスと一致させるため）。あわせて、リリース PR の CI を断続的に落としていた `manager.test.ts` の実プロセス起動（1 ファイルで 20 回以上）を排除し、実行時間を 1.28s → **357ms**（うち tests 7ms）に短縮した（#1752）。
+
 ### Fixed
 
 - **test: `tests/unit/cli-tools/manager.test.ts` が CI で断続的にタイムアウトで落ちる問題を修正** (#1752)
