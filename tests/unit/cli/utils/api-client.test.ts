@@ -19,6 +19,66 @@ import { readPackageVersion } from '../../../../src/cli/utils/package-info';
 import { ExitCode } from '../../../../src/cli/types';
 import { mockFetchResponse, mockFetchError, restoreFetch } from '../../../helpers/mock-api';
 
+/**
+ * Issue #1743: ApiClient resolves its port through ~/.commandmate/.env, so the .env read is
+ * mocked here. The suite must not depend on the developer's own .env — nor on one existing at
+ * all — and every precedence case below has to be expressible without touching the disk.
+ */
+const dotenvMock = vi.hoisted(() => ({ config: vi.fn() }));
+vi.mock('dotenv', () => ({
+  config: dotenvMock.config,
+  default: { config: dotenvMock.config },
+}));
+
+vi.mock('../../../../src/cli/utils/env-setup', () => ({
+  getEnvPath: vi.fn(() => '/mock/.commandmate/.env'),
+}));
+
+/**
+ * Stand in for ~/.commandmate/.env.
+ * @param parsed - The file's contents; undefined reproduces "no .env on disk", where dotenv
+ *   returns an error result carrying no `parsed` at all.
+ */
+function stubEnvFile(parsed?: Record<string, string>): void {
+  dotenvMock.config.mockReturnValue({ parsed });
+}
+
+// Nothing in the .env unless a test says otherwise
+beforeEach(() => {
+  stubEnvFile({});
+});
+
+/** Every variable resolveServerEndpoint() reads (Issue #1743). */
+const ENDPOINT_ENV_KEYS = ['CM_PORT', 'CM_BIND', 'CM_HTTPS_CERT', 'CM_HTTPS_KEY'] as const;
+
+/**
+ * Give the enclosing describe a clean slate for those variables, restoring the shell's own
+ * values afterwards. `commandmate init` writes CM_PORT and CM_BIND, and a developer shell
+ * commonly exports them; they correctly outrank the .env, so leaving them set would let the
+ * machine — not the test — decide the URL.
+ */
+function useCleanEndpointEnv(): void {
+  const exported = new Map<string, string | undefined>();
+
+  beforeEach(() => {
+    for (const key of ENDPOINT_ENV_KEYS) {
+      exported.set(key, process.env[key]);
+      delete process.env[key];
+    }
+  });
+
+  afterEach(() => {
+    for (const key of ENDPOINT_ENV_KEYS) {
+      const value = exported.get(key);
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  });
+}
+
 describe('resolveAuthToken', () => {
   const originalEnv = process.env.CM_AUTH_TOKEN;
 
@@ -144,19 +204,23 @@ describe('MAX_STOP_PATTERN_LENGTH', () => {
 });
 
 describe('ApiClient', () => {
+  useCleanEndpointEnv();
+
   afterEach(() => {
     restoreFetch();
     delete process.env.CM_AUTH_TOKEN;
-    delete process.env.CM_PORT;
   });
 
+  // Issue #1743: the host is 127.0.0.1, not localhost — resolveServerEndpoint() decides it now,
+  // so the CLI dials exactly the address `status` reports (and never a localhost that resolves
+  // to ::1 while the server listens on 127.0.0.1).
   it('uses default base URL with CM_PORT', () => {
     process.env.CM_PORT = '4000';
     mockFetchResponse({ data: 'test' });
     const client = new ApiClient();
     client.get('/api/test');
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://localhost:4000/api/test',
+      'http://127.0.0.1:4000/api/test',
       expect.any(Object)
     );
   });
@@ -167,7 +231,7 @@ describe('ApiClient', () => {
     const client = new ApiClient();
     client.get('/api/test');
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://localhost:3000/api/test',
+      'http://127.0.0.1:3000/api/test',
       expect.any(Object)
     );
   });
@@ -289,6 +353,114 @@ describe('ApiClient', () => {
       expect.stringContaining('plaintext')
     );
     consoleSpy.mockRestore();
+  });
+});
+
+/**
+ * Issue #1743: `commandmate status` read ~/.commandmate/.env, but ApiClient resolved from
+ * process.env alone. With two servers running, `ls` (and every other ApiClient-based
+ * subcommand) silently listed the worktrees of the default-port server while `status` reported
+ * the .env one — enough to make cmate-orchestrate's dispatch runner conclude a freshly created
+ * worktree did not exist.
+ *
+ * Resolution order asserted here: options.baseUrl > process.env > .env > 3000.
+ */
+describe('ApiClient port resolution (Issue #1743)', () => {
+  // "The shell exports nothing" is the case the bug hid in, so it is the baseline here
+  useCleanEndpointEnv();
+
+  afterEach(() => {
+    restoreFetch();
+  });
+
+  /** URL the client actually dialled. */
+  function dialled(): string {
+    return vi.mocked(global.fetch).mock.calls[0][0] as string;
+  }
+
+  it('dials the CM_PORT from ~/.commandmate/.env when the shell exports none', async () => {
+    stubEnvFile({ CM_PORT: '60301' });
+    mockFetchResponse({ ok: true });
+
+    await new ApiClient().get('/api/worktrees');
+
+    expect(dialled()).toBe('http://127.0.0.1:60301/api/worktrees');
+  });
+
+  it('lets an exported CM_PORT win over the .env value', async () => {
+    // `CM_PORT=3011 commandmate ls` is documented usage: the caller is naming the target for
+    // this one invocation, so the file must not override it.
+    process.env.CM_PORT = '3011';
+    stubEnvFile({ CM_PORT: '3000' });
+    mockFetchResponse({ ok: true });
+
+    await new ApiClient().get('/api/worktrees');
+
+    expect(dialled()).toBe('http://127.0.0.1:3011/api/worktrees');
+  });
+
+  it('lets options.baseUrl win over both the shell and the .env', async () => {
+    process.env.CM_PORT = '3011';
+    stubEnvFile({ CM_PORT: '60301' });
+    mockFetchResponse({ ok: true });
+
+    await new ApiClient({ baseUrl: 'http://127.0.0.1:9999' }).get('/api/worktrees');
+
+    expect(dialled()).toBe('http://127.0.0.1:9999/api/worktrees');
+  });
+
+  it('falls back to port 3000 when no .env exists (dotenv returns no parsed object)', async () => {
+    stubEnvFile(undefined);
+    mockFetchResponse({ ok: true });
+
+    await new ApiClient().get('/api/worktrees');
+
+    expect(dialled()).toBe('http://127.0.0.1:3000/api/worktrees');
+  });
+
+  // The old `http://localhost:${port}` ignored CM_BIND and the HTTPS pair outright; the
+  // endpoint must follow the same rules `status` applies.
+  describe('honours the rest of the .env endpoint configuration', () => {
+    it('dials a configured CM_BIND host', async () => {
+      stubEnvFile({ CM_BIND: '192.168.1.5', CM_PORT: '60301' });
+      mockFetchResponse({ ok: true });
+
+      await new ApiClient().get('/api/worktrees');
+
+      expect(dialled()).toBe('http://192.168.1.5:60301/api/worktrees');
+    });
+
+    it('rewrites a 0.0.0.0 bind to a dialable 127.0.0.1', async () => {
+      stubEnvFile({ CM_BIND: '0.0.0.0', CM_PORT: '60301' });
+      mockFetchResponse({ ok: true });
+
+      await new ApiClient().get('/api/worktrees');
+
+      expect(dialled()).toBe('http://127.0.0.1:60301/api/worktrees');
+    });
+
+    it('uses https when both cert and key are configured', async () => {
+      stubEnvFile({
+        CM_PORT: '60301',
+        CM_HTTPS_CERT: '/certs/localhost.pem',
+        CM_HTTPS_KEY: '/certs/localhost-key.pem',
+      });
+      mockFetchResponse({ ok: true });
+
+      await new ApiClient().get('/api/worktrees');
+
+      expect(dialled()).toBe('https://127.0.0.1:60301/api/worktrees');
+    });
+
+    // server.ts serves HTTPS only when both are present, so a lone cert must stay http
+    it('stays http when a cert is configured without a key', async () => {
+      stubEnvFile({ CM_PORT: '60301', CM_HTTPS_CERT: '/certs/localhost.pem' });
+      mockFetchResponse({ ok: true });
+
+      await new ApiClient().get('/api/worktrees');
+
+      expect(dialled()).toBe('http://127.0.0.1:60301/api/worktrees');
+    });
   });
 });
 

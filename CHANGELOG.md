@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.2] - 2026-08-09
+
+> **Highlight**: サーバーを 2 つ動かしている環境で、**`commandmate ls` などが `~/.commandmate/.env` を読まず既定ポート 3000 の別サーバーに繋いでいた**問題を修正する（#1743）。`.env` を読んでいたのは `status` だけだったため「どのサーバーに繋がっているか分からない」状態になり、`cmate-orchestrate` の dispatch は正しく作成・登録した worktree を「無い」と誤判定して run を 1 回無駄に消費していた。解決順を **シェルで export した `CM_PORT` > `~/.commandmate/.env` > 3000** に統一し、`ls` だけでなく `ApiClient` を使う全 subcommand が同じ経路で解決するようにした。**接続先ホストは `localhost` から `127.0.0.1` に変わる**（`status` が報告するアドレスと一致させるため）。あわせて、リリース PR の CI を断続的に落としていた `manager.test.ts` の実プロセス起動（1 ファイルで 20 回以上）を排除し、実行時間を 1.28s → **357ms**（うち tests 7ms）に短縮した（#1752）。
+
+### Fixed
+
+- **test: `tests/unit/cli-tools/manager.test.ts` が CI で断続的にタイムアウトで落ちる問題を修正** (#1752)
+  - このファイルは `child_process` をモックしておらず、`getToolInfo` / `getAllToolsInfo` / `getInstalledTools` を呼ぶたびに 7 ツール分の**実プロセス**を起動していた。`BaseCLITool.isInstalled()` は `which <cmd>`（timeout 5000ms）、`CopilotTool.isInstalled()` は `gh --version` → `gh copilot --help` の **2 段直列**（最悪 5000 + 5000 = 10,000ms）。一方 `vitest.config.ts` は `testTimeout` 未設定＝既定 5000ms なので、**内側の予算が外側を構造的に超えており**、copilot の内側タイムアウトは一度も観測されえない。GitHub Actions ランナーには `gh` がプリインストールされているため stage 1 は必ず成功し、stage 2 が必ず実行される。v0.22.0 の同一コミット・同一ジョブが pull_request run では success、push run では failure に割れた（run 31151127023 / 31151080694）のはこのため（アサーション不一致ではなくタイムアウト）
+  - `vi.mock('child_process')` で `exec` / `execFile` を差し替えて実プロセス起動を排除した。**`testTimeout` を広げる対処は採っていない**（遅さの原因が残るうえ、全体既定の変更は他 816 ファイルに波及する）
+  - あわせて空振りの assertion を潰した。以前は `expect(typeof info.installed).toBe('boolean')` しか見ておらず、**true でも false でも緑**になっていた。`installed` を true / false の両方で固定し、copilot の 2 段チェックは「stage 1 失敗で stage 2 を呼ばない」「stage 1 成功 → stage 2 失敗で false」を個別のテストとして分離した
+  - `stopPollers` の委譲先である `@/lib/polling/response-poller` もモックした（この責務は `manager-stop-pollers.test.ts` が持つ）。依存グラフの import だけで 500ms 以上かかっていたため
+  - **変異注入で非空振りを証明済み**（2026-08-08）: (a) `getAllToolsInfo()` の `Promise.all` を直列 for ループへ変えると `should issue every probe before any of them resolves (checks run concurrently)` が赤（発行済み probe が `['which claude']` の 1 本だけになる）、(b) `CopilotTool.isInstalled()` の stage 2 を削ると 3 件が赤（copilot の 2 段テスト 2 件と `getInstalledTools` の `copilot` 混入）。変異はいずれも元に戻し、`src/` の diff が空であることを確認済み
+  - **実測**: 23 tests / `Duration 357ms`（tests 7ms）、`CI=true` でも 364ms。修正前は 17 tests / 1.28s（tests 216ms、実プロセス起動あり）。なお開発機では 6 ツールすべてと `gh copilot` が実際にインストールされているが、テストは `installed: false` を期待して緑になる — 実バイナリを参照していないことの実測的な裏付け
+- **cli: `ApiClient` が `~/.commandmate/.env` を読まず、`ls` 等が既定ポート 3000 の別サーバーに繋いでいた問題を修正** (#1743)
+  - **解決順は「シェルで export した `CM_PORT` > `~/.commandmate/.env` の `CM_PORT` > 3000」**（`options.baseUrl` が渡された場合は従来どおり最優先）。修正前の `ApiClient` constructor は `process.env.CM_PORT || '3000'` として `process.env` だけから解決しており、`.env` を一切読まなかった
+  - **対象は `ls` だけではない**。`ApiClient` を使う全 subcommand（`ls` / `send` / `wait` / `capture` / `respond` / `sync` / `verify` / `auto-yes` / `task` / `instances` / `report` / `skill` / `update`）が同じ欠陥を共有していた。生成箇所はいずれも `baseUrl` を渡していないため、constructor の解決を直すことで全部が直る
+  - 実害: サーバーを 2 つ動かしている環境で `commandmate status` は `.env` の `CM_PORT`（例 60301）を報告する一方、`commandmate ls --json` は 3000 の別サーバーの worktree 一覧を返していた。`cmate-orchestrate` の dispatch runner は `ls --json` の branch 一致だけで worktree を解決するため、**正しく作成・登録された worktree が「無い」と判定され run を 1 回無駄に消費する**
+  - **`status` と同じ解決を使い回すのではなく、順序を反転させた**。`status` 側の `loadEffectiveEnv()` は「サーバーが実際にどこにいるか」を答えるもので、`daemon.start()` が子プロセスへ `{...process.env, ...parsed}` を渡す事実に合わせて `.env` を `process.env` の**上**に重ねる。これをクライアント側に流用すると、ドキュメント記載の `CM_PORT=3011 commandmate ls`（その 1 回の呼び出しの接続先を呼び出し側が指定する運用）が `.env` に上書きされて無効化される。そのため新設した `loadClientEnv()` は `.env` を `process.env` の**下**に敷く（標準的な dotenv の優先順位）。両者がなぜ違う順序なのかはコード中のコメントに記載してある。Issue が要求した統一は「**両方とも `.env` を参照する**」ことであり、それは満たしている
+  - あわせて、ハードコードされていた `http://localhost:${port}` をやめ `resolveServerEndpoint()`（Issue #1266）に揃えた。これにより `CM_BIND`（`0.0.0.0` は `127.0.0.1` へダイヤル）と、`CM_HTTPS_CERT` / `CM_HTTPS_KEY` の**両方**が揃うときだけ https という既存規則が CLI の接続先にも効く。ホストは `localhost` ではなく `127.0.0.1` になり、`status` が報告するアドレスと一致する
+  - dotenv の読み取りは `quiet: true`（バナーが **stdout** に出るため `ls --json` の出力を壊す）と `processEnv: {}`（読み取り専用の解決であり、`.env` の値を `process.env` に注入すると以後 file 値が「export された値」として振る舞い、この優先順位自体を壊す）で行う
+  - 回帰テスト: `tests/unit/cli/utils/api-client.test.ts` に解決順の 9 ケース（`.env` のみ／シェル優先／`options.baseUrl` 最優先／`.env` 不在で `parsed` が undefined／`CM_BIND`・`0.0.0.0`・https の cert+key・cert のみ）、`tests/unit/cli/utils/server-url.test.ts` に `loadClientEnv()` の 5 ケース。`.env` の読み取りは dotenv と `getEnvPath()` をモックして実ファイルに依存させない
+  - **変異注入で非空振りを証明済み**（2026-08-08）: (1) constructor を `process.env.CM_PORT || '3000'` / `http://localhost:${port}` に戻すと api-client の 9 テストが赤（`dials the CM_PORT from ~/.commandmate/.env when the shell exports none` は `expected 'http://localhost:3000/api/worktrees' to be 'http://127.0.0.1:60301/api/worktrees'` ＝ Issue の症状そのもの）。(2) `quiet: true` を外すと `loadClientEnv > should print nothing to stdout` が赤（dotenv は `console.log` でバナーを出すことを実測済み）
+
 ## [0.22.1] - 2026-08-07
 
 > **Highlight**: Skill 一覧が**古いバージョンをインストール済みとして表示し、そこからの更新が必ず失敗する**問題を修正する（#1753）。一覧 API は索引を、更新 API は receipt を真実として読んでおり、両者が食い違うと UI は旧版を出して更新導線を描き、押すと `SKILL_UPDATE_VERSION_NOT_ELIGIBLE` を返していた。エラー文言は利用者に「もう最新です」としか読めず、UI に索引を作り直す導線も無いため、**一度ずれると回復できない**状態だった。読み取り時の索引修復を「欠落行の復元」から「receipt と食い違う行の収束」まで広げ、コストは索引が既に持つ `receipt_sha256` との比較で抑えている（一致する行は parse も書き込みもしない）。**このリリースを適用すると、ずれている索引は一覧を開いた時点で自動的に直る。**
