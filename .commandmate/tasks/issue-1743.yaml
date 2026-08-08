@@ -1,0 +1,118 @@
+version: 1
+title: "Issue #1743: commandmate ls が .env の CM_PORT を読まず既定ポートに繋ぐ"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/1743 を修正する。
+
+  ## 事象
+  `commandmate status` は `~/.commandmate/.env` の `CM_PORT` を読んで正しいサーバーに繋ぐが、
+  `commandmate ls` は読まず既定ポート 3000 に繋ぐ。サーバーを 2 つ動かしている環境では
+  `ls` だけが別サーバーの worktree 一覧を返す。
+
+    $ commandmate status
+    Port:    60301                     ← .env の CM_PORT を読めている
+    $ commandmate ls --json | jq 'length'
+    63                                 ← port 3000（別サーバー）の一覧
+    $ CM_PORT=60301 commandmate ls --json | jq 'length'
+    5                                  ← 明示すれば正しいサーバーに繋がる
+
+  実害は大きい。`cmate-orchestrate` の dispatch runner は worktree を
+  `commandmate ls --json` の branch 一致だけで解決するため、`ls` が別サーバーを見ていると
+  正しく作成・登録された worktree が「無い」と判定され、run を 1 回無駄に消費する。
+
+  ## 根本原因（orchestrator が実コードで特定済み。**鵜呑みにせず自分で読んで裏取りすること**）
+  分岐点は 1 箇所だけである。
+
+  - `src/cli/utils/api-client.ts` の `ApiClient` constructor が
+    `const port = process.env.CM_PORT || '3000';` として **`process.env` だけ**から解決し、
+    `this.baseUrl = options?.baseUrl || `http://localhost:${port}`` と組み立てている。
+    `.env` を一切読まない。
+  - 一方 `status` 経路は `src/cli/utils/server-url.ts` の `loadEffectiveEnv()` ＋
+    `resolveServerEndpoint()` を通る。これは Issue #1266 で「サーバーが実際にどの URL にいるか」の
+    単一の真実として導入されたもので、`daemon.ts` が子プロセスへ `{...process.env, ...parsed}` を
+    渡す事実に合わせて **`.env` を `process.env` の上に重ねる**。
+  - `ApiClient` を使う全 subcommand（ls / send / wait / capture / verify / sync / respond /
+    auto-yes / task / instances / report / skill / update）が同じ欠陥を共有する。
+    `new ApiClient(...)` の生成箇所は `src/cli/commands/` 配下に多数あるが、
+    **いずれも `baseUrl` を渡していない**ので、constructor を直せば全部が直る。
+
+  主張とコードが食い違ったら**実測を正とし**、食い違いの内容を報告に明記すること。
+
+  ## 採用する意味論（オーナー裁定済み。**この順序で実装すること**）
+  `loadEffectiveEnv()` をそのまま使ってはならない。あれは `.env` を `process.env` の**上**に
+  重ねるため、ドキュメント記載の `CM_PORT=3011 commandmate ls` が無効化される。
+
+  クライアント側（＝「どこへ繋ぐか」）の解決順は次のとおり:
+
+      1. options.baseUrl        ← 最優先。現状維持
+      2. process.env.CM_PORT    ← shell が明示的に export した値
+      3. ~/.commandmate/.env    ← 【今回追加】ここが抜けていた
+      4. 3000                   ← 既定
+
+  つまり `.env` は `process.env` の**下**に敷く（標準的な dotenv の優先順位）。
+  `resolveServerEndpoint()` 自体は再利用してよい。渡す env を
+  `{ ...(dotenv の parsed), ...process.env }` の順で合成すればこの優先順位になる。
+
+  status（サーバー側解決 = `.env` が勝つ）と ls（クライアント側解決 = 呼び出し側が勝つ）が
+  なぜ違う順序なのかは**コード中のコメントで説明すること**。両者は
+  「サーバーはどこにいるか」と「どこへ繋ぐか」という別の問いに答えている。
+  Issue が要求した統一は「**両方とも `.env` を参照する**」ことであり、それは満たされる。
+
+  ## 受入条件（すべて満たすこと）
+  - [ ] `ApiClient` が `~/.commandmate/.env` の `CM_PORT` を解決に含める。
+        shell 未設定 + `.env` に `CM_PORT=60301` → `http://127.0.0.1:60301` へ繋ぐ
+  - [ ] shell の `CM_PORT` が設定されている場合は **shell が勝つ**。
+        `CM_PORT=3011` + `.env` `CM_PORT=3000` → 3011 へ繋ぐ
+        （`docs/user-guide/cli-operations-guide.md` 記載の運用を壊さないこと）
+  - [ ] `options.baseUrl` が渡されたときは、shell も `.env` も無視され従来どおり最優先
+  - [ ] protocol と host も解決結果に従う。現状ハードコードされている `http://localhost:` は
+        `CM_BIND` と `CM_HTTPS_CERT` / `CM_HTTPS_KEY` を無視している。
+        `resolveServerEndpoint()` の既存規則（bind が `0.0.0.0` のときは `127.0.0.1` へダイヤル、
+        cert と key の**両方**が揃うときだけ https）に揃えること
+  - [ ] `.env` が存在しない環境でも壊れない（`dotenv` の `parsed` が undefined のケース）
+  - [ ] `tests/unit/cli/utils/api-client.test.ts` に上記 5 点それぞれの回帰テストを追加する。
+        `.env` の読み取りは**実ファイルに依存させず**モックすること
+        （既存の `tests/unit/cli/utils/server-url.test.ts` のやり方を参考にする）
+  - [ ] **変異注入で非空振りを証明する**。`api-client.ts` の修正を元に戻すと
+        「shell 未設定 + `.env` あり」のテストが赤になることを実測し、
+        赤になったテスト名と出力を報告に含める。**変異は必ず元に戻し、`git status` を確認すること**
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` がすべて exit 0
+  - [ ] `CHANGELOG.md` の `[Unreleased]` に `### Fixed` エントリを追加する。
+        **解決順（shell > .env > 3000）を明記**し、`ls` だけでなく `ApiClient` を使う
+        全 subcommand が対象であることを書く
+
+  ## ドキュメント
+  `docs/user-guide/cli-operations-guide.md`（および `docs/en/` の対応ファイル）に、
+  「接続先ポートは shell の `CM_PORT` > `~/.commandmate/.env` の `CM_PORT` > 3000 の順で
+  解決される」旨を追記してよい。`src/cli/docs/agent-operations.ts` の記述が実挙動と
+  食い違う場合は合わせること。**必須ではない**が、行うなら日英両方を揃えること。
+
+  ## 作業ルール（厳守）
+  - **exit code は必ず `cmd > log 2>&1; echo $?` で実測する。** `grep` に pipe すると
+    `Errors 1 error` 行と exit code が消えて偽 PASS になる。全テストが緑でも
+    Unhandled Rejection で exit 1 になることがある。
+  - **稼働中のサーバーに触れないこと。** `commandmate start` / `stop` / `npm run build` /
+    `npm run dev` を実行しない。テストは `npm run test:unit` と `npx vitest run <file>` だけで行う。
+  - 実ポートへ接続する live テストを追加しない。すべてモックで閉じること。
+  - **成果物は単一の commit にまとめること。** commit message は
+    `fix(cli): ApiClient のポート解決に ~/.commandmate/.env を含める (#1743)` の形。
+  - **PR は作らない。** PR 作成はオーケストレーターが行う。
+  - `dev-reports/` 配下には成果物を残さない（scope 外）。
+  - `.commandmate/` 配下を変更しない。
+  - 完了したら最後に `IMPL_COMPLETED` と出力する。
+scope:
+  allow:
+    - "src/cli/utils/api-client.ts"
+    - "src/cli/utils/server-url.ts"
+    - "src/cli/docs/agent-operations.ts"
+    - "tests/unit/cli/utils/**"
+    - "docs/module-reference.md"
+    - "docs/user-guide/cli-operations-guide.md"
+    - "docs/en/user-guide/cli-operations-guide.md"
+    - "CHANGELOG.md"
+  deny: []
+verify:
+  gates: [lint, typecheck, unit]
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
+  requireCommit: true
