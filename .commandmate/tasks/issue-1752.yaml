@@ -1,0 +1,85 @@
+version: 1
+title: "Issue #1752: manager.test.ts が実プロセスを起動し内側タイムアウトが vitest 既定を超える"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/1752 を修正する。
+
+  ## 事象
+  `tests/unit/cli-tools/manager.test.ts` が CI で断続的にタイムアウトで落ちる。
+  アサーション不一致ではなくタイムアウトである。リリース v0.22.0 のコミット d24901c4 で、
+  同一コミット・同一ジョブが pull_request run では success、push run では failure に割れた
+  （run 31151127023 / 31151080694）。実装の欠陥ではなくテスト設計が実行環境の負荷に耐えていない。
+
+  ## 根本原因（Issue 本文の主張。**鵜呑みにせず自分でコードを読んで裏取りすること**）
+  内側（被テストコード）のタイムアウト予算が、外側（vitest）のテストタイムアウトを構造的に超えている。
+
+  - `getAllToolsInfo()` は 7 ツールの `isInstalled()` を `Promise.all` で並列実行する
+    （`src/lib/cli-tools/manager.ts` 付近）。各実装は実プロセスを起動する。
+  - `BaseCLITool.isInstalled()` は `execAsync('which <cmd>')`（`/bin/sh -c` 経由）、timeout 5000ms。
+  - `CopilotTool.isInstalled()` は `execFile('gh', ['--version'])` → `execFile('gh', ['copilot','--help'])`
+    の **2 段直列**で、最悪 5000 + 5000 = 10,000ms。
+  - `vitest.config.ts` に `testTimeout` の明示設定が無く既定 5000ms が効くため、
+    **copilot の内側タイムアウトは一度も観測されえない**（必ずテスト側が先に死ぬ）。
+  - GitHub Actions ランナーには `gh` がプリインストールされているので stage 1 は必ず成功し、
+    stage 2 が必ず実行される。
+  - `child_process` は一切モックされていない（当該テストファイルの import に `vi.mock` が無い）。
+
+  主張とコードが食い違ったら**実測を正とし**、食い違いの内容を報告に明記すること。
+
+  ## 対応方針
+  `child_process` をモックする。リポジトリ内に前例が複数ある。
+
+    tests/unit/cli/utils/browser.test.ts
+    tests/unit/cli/utils/npm-runner.test.ts
+    tests/unit/cli/utils/npx-runner.test.ts
+    tests/unit/cli/utils/preflight.test.ts
+    tests/unit/cli/utils/process-inspector.test.ts
+
+  `testTimeout` を広げるだけの対処は採らない。遅さの原因（実プロセス起動）が残るため。
+  **`vitest.config.ts` の全体既定は変更しない**（他 816 ファイルの挙動が変わるため、Issue の
+  スコープ外と本文が明示している）。
+
+  ## 受入条件（すべて満たすこと）
+  - [ ] `tests/unit/cli-tools/manager.test.ts` が実プロセスを起動しない
+        （`vi.mock('child_process')` で `exec` / `execFile` を差し替える）
+  - [ ] `installed` の真偽値を **true / false の両方**検証する。`expect(typeof info.installed).toBe('boolean')`
+        のような中身を検査しない assertion をやめる
+  - [ ] copilot の 2 段チェックについて、**stage 1 失敗で stage 2 が呼ばれない**ことと、
+        **stage 1 成功 → stage 2 失敗で `false`** になることを、個別のテストで固定する
+  - [ ] **変異注入で非空振りを証明する**。例:
+        (a) `getAllToolsInfo()` の `Promise.all` を直列に変える
+        (b) copilot の stage 2 を削る
+        のそれぞれで、対応するテストが**赤になること**を実測し、赤になったテスト名と出力を報告に含める。
+        **変異は必ず元に戻し、`git status` がクリーンであることを確認すること。**
+  - [ ] 該当ファイル単体の実行時間が **1 秒未満**であること。
+        `npx vitest run tests/unit/cli-tools/manager.test.ts > /tmp/m.log 2>&1; echo $?` で実測し、
+        実測値（tests 件数と duration）を報告に含める
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` がすべて exit 0
+
+  ## 実装の変更について
+  `src/lib/cli-tools/manager.ts` / `base.ts` / `copilot.ts` は **変更しない**。
+  テスト側で閉じるべき欠陥である。scope.allow もそれを反映している。
+  もし実装変更が不可避だと判断した場合は、**変更せずに理由を報告して停止すること**
+  （scope ゲートで不合格になるので勝手に広げても通らない）。
+
+  ## 作業ルール（厳守）
+  - **exit code は必ず `cmd > log 2>&1; echo $?` で実測する。** `grep` に pipe すると
+    `Errors 1 error` 行と exit code が消えて偽 PASS になる。全テストが緑でも
+    Unhandled Rejection で exit 1 になることがある。
+  - CI 差を再現するときは `CI=true` を付ける（`fileParallelism` の既定が変わる）。
+  - **成果物は単一の commit にまとめること。** commit message は
+    `test(cli-tools): manager.test.ts の child_process をモックし実プロセス起動を排除する (#1752)` の形。
+  - **PR は作らない。** PR 作成はオーケストレーターが行う。
+  - `dev-reports/` 配下には成果物を残さない（scope 外）。
+  - `.commandmate/` 配下を変更しない。
+  - 完了したら最後に `IMPL_COMPLETED` と出力する。
+scope:
+  allow:
+    - "tests/unit/cli-tools/**"
+    - "CHANGELOG.md"
+  deny: []
+verify:
+  gates: [lint, typecheck, unit]
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
+  requireCommit: true
