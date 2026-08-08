@@ -19,7 +19,11 @@ vi.mock('../../../../src/cli/utils/env-setup', () => ({
   getEnvPath: envSetup.getEnvPath,
 }));
 
-import { resolveServerEndpoint, loadEffectiveEnv } from '../../../../src/cli/utils/server-url';
+import {
+  resolveServerEndpoint,
+  loadEffectiveEnv,
+  loadClientEnv,
+} from '../../../../src/cli/utils/server-url';
 import { removeTempDir } from '@tests/helpers/temp-dir';
 
 describe('resolveServerEndpoint', () => {
@@ -120,5 +124,99 @@ describe('loadEffectiveEnv', () => {
     vi.stubEnv('CM_PORT', '3000');
 
     expect(loadEffectiveEnv().CM_PORT).toBe('3000');
+  });
+});
+
+/**
+ * Issue #1743: the client-side counterpart, layering .env *under* process.env. Same file, the
+ * opposite order, because "where should I dial?" is not "where is the server?".
+ */
+describe('loadClientEnv', () => {
+  let dir: string;
+  let mainEnvPath: string;
+  /**
+   * Cleared per test because an exported variable legitimately outranks the file here: a
+   * developer shell that exports CM_BIND=127.0.0.1 and CM_PORT=3000 would otherwise shadow
+   * every .env value under test.
+   */
+  const ENDPOINT_ENV_KEYS = ['CM_PORT', 'CM_BIND', 'CM_HTTPS_CERT', 'CM_HTTPS_KEY'] as const;
+  const exported = new Map<string, string | undefined>();
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'cm-1743-'));
+    mainEnvPath = join(dir, '.env');
+    envSetup.getEnvPath.mockReturnValue(mainEnvPath);
+    for (const key of ENDPOINT_ENV_KEYS) {
+      exported.set(key, process.env[key]);
+      delete process.env[key];
+    }
+  });
+
+  afterEach(() => {
+    removeTempDir(dir);
+    vi.unstubAllEnvs();
+    for (const key of ENDPOINT_ENV_KEYS) {
+      const value = exported.get(key);
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  });
+
+  // The bug: nothing exported, .env says 60301, `ls` went to 3000 anyway.
+  it('should take CM_PORT from .env when nothing is exported', () => {
+    writeFileSync(mainEnvPath, 'CM_PORT=60301\n');
+
+    expect(loadClientEnv().CM_PORT).toBe('60301');
+    expect(resolveServerEndpoint(loadClientEnv()).url).toBe('http://127.0.0.1:60301');
+  });
+
+  // Deliberately the opposite of loadEffectiveEnv(): `CM_PORT=3011 commandmate ls` is
+  // documented usage and must not be overridden by the file.
+  it('should give an exported variable precedence over .env', () => {
+    writeFileSync(mainEnvPath, 'CM_PORT=3000\n');
+    vi.stubEnv('CM_PORT', '3011');
+
+    expect(loadClientEnv().CM_PORT).toBe('3011');
+  });
+
+  it('should keep .env values the shell does not export', () => {
+    writeFileSync(mainEnvPath, 'CM_PORT=60301\nCM_BIND=0.0.0.0\n');
+    vi.stubEnv('CM_PORT', '3011');
+
+    const endpoint = resolveServerEndpoint(loadClientEnv());
+
+    expect(endpoint.bind).toBe('0.0.0.0');
+    expect(endpoint.url).toBe('http://127.0.0.1:3011');
+  });
+
+  it('should not throw when no .env exists at all', () => {
+    expect(resolveServerEndpoint(loadClientEnv()).url).toBe('http://127.0.0.1:3000');
+  });
+
+  // A read-only lookup: were the parsed values written into process.env, they would outrank
+  // the file on every later read and defeat the precedence above.
+  it('should not write the parsed values into process.env', () => {
+    writeFileSync(mainEnvPath, 'CM_PORT=60301\n');
+
+    loadClientEnv();
+
+    expect(process.env.CM_PORT).toBeUndefined();
+  });
+
+  // dotenv announces "[dotenv@x] injecting env (n) from ..." on console.log — i.e. stdout,
+  // the same stream `commandmate ls --json` writes its payload to. Every ApiClient-based
+  // command loads the .env now, so an unsuppressed banner would corrupt machine-readable
+  // output for all of them.
+  it('should print nothing to stdout', () => {
+    writeFileSync(mainEnvPath, 'CM_PORT=60301\n');
+    const stdout = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    loadClientEnv();
+
+    expect(stdout).not.toHaveBeenCalled();
+    stdout.mockRestore();
   });
 });

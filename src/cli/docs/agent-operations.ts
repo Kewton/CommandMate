@@ -15,7 +15,8 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
 
 - CommandMate server must be running: commandmate start --daemon
 - Target worktrees must be registered (visible in browser UI sidebar)
-- Use CM_PORT env var to connect to a different port (default: 3000)
+- Connection target is resolved as: exported CM_PORT > ~/.commandmate/.env CM_PORT > 3000
+  (CM_BIND and the CM_HTTPS_CERT + CM_HTTPS_KEY pair are honoured the same way)
 - Use CM_AUTH_TOKEN env var for authenticated servers
 
 ## Commands
@@ -350,6 +351,9 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   Worktree not found:
     commandmate ls --quiet             # Check registered IDs
     commandmate sync                   # Sync new worktrees (e.g. after git worktree add)
+    commandmate status                 # Confirm 'ls' and 'status' report the same Port
+                                       # (with several servers running, an exported CM_PORT
+                                       #  points 'ls' at a different one)
 
   Authentication:
     CM_AUTH_TOKEN=your-token commandmate ls

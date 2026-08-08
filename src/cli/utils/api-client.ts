@@ -10,6 +10,7 @@
 
 import { ExitCode } from '../types';
 import { readPackageVersion } from './package-info';
+import { loadClientEnv, resolveServerEndpoint } from './server-url';
 
 /** Maximum stop-pattern length [SEC4-06] */
 export const MAX_STOP_PATTERN_LENGTH = 500;
@@ -208,8 +209,14 @@ export class ApiClient {
   private token?: string;
 
   constructor(options?: { baseUrl?: string; token?: string }) {
-    const port = process.env.CM_PORT || '3000';
-    this.baseUrl = options?.baseUrl || `http://localhost:${port}`;
+    // Issue #1743: resolve through loadClientEnv() rather than `process.env.CM_PORT || '3000'`.
+    // Reading process.env alone ignored ~/.commandmate/.env, so with two servers running,
+    // `status` reported the .env port while every ApiClient-based subcommand (ls / send / wait
+    // / capture / …) silently talked to the default port 3000. loadClientEnv() layers .env
+    // *under* process.env — see its doc comment for why that order is the reverse of the one
+    // `status` uses. resolveServerEndpoint() then applies the same CM_BIND / CM_HTTPS_CERT +
+    // CM_HTTPS_KEY rules as `status`, which the old hardcoded `http://localhost:` ignored.
+    this.baseUrl = options?.baseUrl || resolveServerEndpoint(loadClientEnv()).url;
     this.token = resolveAuthToken(options);
 
     // [SEC4-02] Warn about HTTP to non-localhost
