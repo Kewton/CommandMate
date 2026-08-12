@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **`question.asked` が質問文・ヘッダ・選択肢を構造化して配り、`POST /question/:id/reply` で答えられる**ことを実測した。Claude では scraper に残さざるを得なかった `AskUserQuestion`（#1708 / #1726）が opencode では完全に構造化イベントで扱える
   - **最重要成果物として §9 に Phase 4-1（#1759）への要求事項**を、実測から導いた 8 つの制約（到着方向・裁定経路・fail 方向・7 語への非 1:1 写像・相関キー・接続健全性・再同期・未知 type）と具体的な型シグネチャ案（`AgentEventTransport` / `NoDecisionBehavior` / `Verdict` / `decide()` / `listPending()` / `liveness()`）として記載した。`AgentEventSource` が push 型（hooks）だけでなく pull 型（SSE 購読 + REST 応答）も表現できる形でなければならないという制約の根拠がここにある
   - **非汚染の証拠**: `~/.config/opencode/opencode.jsonc` の before/after diff は空（sha256 `4e901f9e…` 不変）、`~/.local/share/opencode/` の構成 diff も空、`opencode.db`（58MB）と `auth.json` の mtime は検証開始前のまま。`tmux -L cmate-p4spike-oc` 専用 socket のみ使用し `kill-server` は未使用（ユーザーの `mcbd-*` 10 本は健在）、本番サーバ（port 3000）へは 1 リクエストも送っていない、立てた serve は PID 指定で個別 kill（広域 `pkill` 未使用）。**`src/` の変更は 0 件**
+- **slash-commands: カタログを claude docs へリコンサイルし、未反映の 3 コマンドを追加** (#1767)
+  - `/agents` `/import` `/list-agents`（いずれも claude のみ）。`code.claude.com/docs/en/commands.md` の実行（2026-08-13）で 3 件とも実在する行であることを確認済み。カタログ総数 159 → 162、claude 可視数 97 → 100（codex 53 / opencode 10 / antigravity 13 は変化なし）
+  - **`/agents` と `/import` は claude 専用の説明キーを持つ**（Issue #1704 の tool-scoped key）。`/agents` は opencode の「利用可能なエージェントを一覧・管理」、`/import` は codex の「Claude Code から設定…を取り込み」という**別の意味の説明を共有していた**ため、そのままでは claude のパレットに他ツール向けの誤った説明が出る。`slashCommands.descriptions.{agents,import}` を tool 別オブジェクトへ分割し、既存ツールの文面は 1 文字も変えずにそれぞれのキーへ移した
+  - `/schedule`（#1488 のキュレーション判断）・`/ultraplan`（#1503 の幻コマンド）・`/pr-comments` `/vim`（上流で削除済み）・`/cost` `/stats`（`/usage` のエイリアス）は**従来どおり追加していない**
 
 ## [0.22.2] - 2026-08-09
 

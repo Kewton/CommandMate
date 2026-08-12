@@ -131,7 +131,10 @@
       "connect": "Connect to language server",
       "exit": "Exit OpenCode TUI",
       "models": "Switch AI model",
-      "agents": "List and manage available agents",
+      "agents": {
+        "opencode": "List and manage available agents",
+        "claude": "Show a reminder to ask Claude to create or manage subagents, or to edit .claude/agents/ directly"
+      },
       "themes": "Change TUI theme",
       "editor": "Open editor for long messages",
       "advisor": "Enable or disable the advisor tool, which consults a second model for guidance at key moments during a task",
@@ -203,7 +206,10 @@
       "sandbox-add-read-dir": "Let sandbox read a directory: /sandbox-add-read-dir [absolute-path]",
       "experimental": "Toggle experimental features",
       "approve": "Approve one retry of a recent auto-review denial",
-      "import": "Import setup, this project, and recent chats from Claude Code",
+      "import": {
+        "codex": "Import setup, this project, and recent chats from Claude Code",
+        "claude": "Bring configuration from OpenAI Codex or Google Gemini CLI into Claude Code, including instruction files, MCP servers, commands, subagents, and skills"
+      },
       "archive": "Archive this session and exit",
       "delete": "Permanently delete this session and exit",
       "app": "Continue this session in the Desktop app",
@@ -217,7 +223,8 @@
       "rollout": "Print the rollout file path",
       "ps": "List background terminals",
       "personality": "Choose a communication style for Codex",
-      "test-approval": "Test approval request"
+      "test-approval": "Test approval request",
+      "list-agents": "List the subagents and other Claude Code sessions Claude can message, with the name to use for each"
     }
   },
   "session": {
