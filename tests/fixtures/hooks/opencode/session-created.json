@@ -1,0 +1,35 @@
+{
+  "id": "evt_0000000000000000000000000",
+  "type": "session.created",
+  "properties": {
+    "sessionID": "ses_0000000000000000000000000",
+    "info": {
+      "id": "ses_0000000000000000000000000",
+      "slug": "brave-cabin",
+      "version": "1.18.3",
+      "projectID": "<PROJECT_ID>",
+      "directory": "<WORKTREE_PATH>",
+      "path": "",
+      "title": "New session - 2026-08-12T22:57:44.863Z",
+      "agent": "build",
+      "model": {
+        "id": "claude-sonnet-4.6",
+        "providerID": "github-copilot"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "time": {
+        "created": 1786575464863,
+        "updated": 1786575464863
+      }
+    }
+  }
+}

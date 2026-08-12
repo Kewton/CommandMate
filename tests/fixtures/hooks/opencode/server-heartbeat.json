@@ -1,0 +1,5 @@
+{
+  "id": "evt_0000000000000000000000000",
+  "type": "server.heartbeat",
+  "properties": {}
+}

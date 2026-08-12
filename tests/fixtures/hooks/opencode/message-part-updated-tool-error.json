@@ -1,0 +1,27 @@
+{
+  "id": "evt_0000000000000000000000000",
+  "type": "message.part.updated",
+  "properties": {
+    "sessionID": "ses_0000000000000000000000000",
+    "part": {
+      "type": "tool",
+      "tool": "bash",
+      "callID": "toolu_0000000000000000000000000",
+      "state": {
+        "status": "error",
+        "input": {
+          "command": "touch /private/tmp/cmate-oc-nodecision.txt"
+        },
+        "error": "The user rejected permission to use this specific tool call with the following feedback: rejected by CommandMate spike",
+        "time": {
+          "start": 1786575607152,
+          "end": 1786576226252
+        }
+      },
+      "id": "prt_0000000000000000000000000",
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_0000000000000000000000000"
+    },
+    "time": 1786576226252
+  }
+}

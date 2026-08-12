@@ -1,0 +1,20 @@
+{
+  "id": "evt_0000000000000000000000000",
+  "type": "message.updated",
+  "properties": {
+    "sessionID": "ses_0000000000000000000000000",
+    "info": {
+      "id": "msg_0000000000000000000000000",
+      "role": "user",
+      "sessionID": "ses_0000000000000000000000000",
+      "time": {
+        "created": 1786575464885
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "github-copilot",
+        "modelID": "claude-sonnet-4.6"
+      }
+    }
+  }
+}

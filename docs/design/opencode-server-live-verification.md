@@ -1,0 +1,1290 @@
+# 実機検証: opencode server API / SSE（Phase 4-0b スパイク）
+
+- **Issue**: [#1758](https://github.com/Kewton/CommandMate/issues/1758)（親 Epic [#1720](https://github.com/Kewton/CommandMate/issues/1720)）
+- **ステータス**: 実測完了（**`src/` の変更なし**）
+- **検証日**: 2026-08-13
+- **対象**: opencode **1.18.3**（`opencode --version`）
+- **プラットフォーム**: macOS (Darwin 25.6.0) / `~/.opencode/bin/opencode`
+- **provider / model**: `github-copilot` / `claude-sonnet-4.6`（LM Studio でも一部実行）
+- **成果物**: 本書 ＋ [`tests/fixtures/hooks/opencode/*.json`](../../tests/fixtures/hooks/opencode/)（19 件）
+- **一次証拠**: サーバ自身が返す OpenAPI（`GET /doc`、3.1.0 / 89 種の Event union）と、`GET /event` に張った SSE tap 計 471 フレーム
+
+> 本書は下流 Issue（[#1759](https://github.com/Kewton/CommandMate/issues/1759) 抽象抽出 / [#1763](https://github.com/Kewton/CommandMate/issues/1763) opencode 対応）が仕様の根拠として引用することを前提に書いている。
+> 先行する Claude 版スパイク [`agent-hooks-live-verification.md`](./agent-hooks-live-verification.md) と体裁を揃えた。
+> **本書に書いてあるのは「ドキュメントの記述」ではなく「実際に動かして観測した結果」である。**
+> Issue 本文の起票時前提と食い違った箇所は [§3](#3-issue-本文公式挙動と実測の食い違い) にまとめた。**食い違いは 6 件あり、うち 2 件は設計の形を変える。**
+
+---
+
+## 1. 結論サマリ
+
+| # | 検証項目 | 実測結果 | 証拠 |
+|---|---|---|---|
+| 1 | serve + attach の実用性 | **成立する**（`attach` した TUI は素の `opencode` と同等に使える）。**ただし serve+attach は不要だった** — **素の `opencode` TUI 自身が同じ HTTP サーバを内蔵しており、`opencode --port <N>` を足すだけで `/event` SSE と permission REST の全経路が使える**（実測）。**Go**。ただし採用すべき構成は serve+attach ではなく「既存の TUI 起動 + `--port`」 | [§2](#2-検証項目-1-の-gono-go-判断), [§5.1](#51-項目-1--serve--attach-の実用性と素の-tui-が持つサーバ) |
+| 2 | イベント語彙 | `/doc` の Event union は **89 種**。本スパイクで実際に流れたのは **20 種**。`AGENT_EVENT_TYPES` の 7 語に **1:1 対応するのは 3 語だけ**（`stop`←`session.idle` / `session_start`←`session.created` / `session_end`←`session.deleted`、ただし最後は意味が違う）。`notification` に相当する単一入口は**無く**、`idle_prompt` 相当（放置検知）は**存在しない**。`pre_tool_use` / `post_tool_use` は専用イベントではなく `message.part.updated` の `part.state.status` を見る | [§5.2](#52-項目-2--イベント語彙), [fixtures](../../tests/fixtures/hooks/opencode/) |
+| 3 | 完了（idle）の意味 | **`session.idle` は Claude の `Stop` と同じ「ターンが終わった」である。「セッションが暇」ではない。** 承認待ち 10 分 19 秒・質問待ち 40 秒の間、**当該セッションに `session.idle` は 1 件も出ていない**（`session.status` も `busy` のまま）。**`wait` の完了判定に使ってよい。** ただし **error / abort 経路では 1 ターンで 2 回発火**し、payload は `sessionID` **のみ**（ターン識別子なし）なので、**busy を観測してから最初の idle を取る + 冪等化**が必須 | [§5.3](#53-項目-3--完了idleの意味-wait-の完了判定に使ってよいか) |
+| 4 | 承認要求の受信 | **`permission.asked` が SSE に流れる。** payload に `id`(=permissionID) / `sessionID` / `permission`(種別) / `patterns` / `metadata.command` / `always` / `tool.{messageID,callID}`。`GET /permission` で同じものをポーリング取得もできる。**`permission.v2.asked` は型定義にあるが 1.18.3 では流れなかった** | [§5.4](#54-項目-4--承認要求の受信) |
+| 5 | 承認裁定の応答 | **`POST /session/:id/permissions/:permissionID` に `{"response":"once"}` で 200 `true`（4.8ms）、TUI ダイアログは消え、コマンドが実行された。** **タイムアウトは存在しない**（**10 分 19 秒**放置して無変化・自動裁定なし）。「no-decision で TUI 承認に落ちる」のではなく、**TUI ダイアログは `permission.asked` と同時に無条件で出ており、REST と TUI は最初に答えた方が勝つレース**である。**Auto-Yes は fail-open しない（CommandMate が黙ればエージェントは永久に止まる）** | [§5.5](#55-項目-5--承認裁定の応答と-no-decision-の実際の意味) |
+| 6 | インスタンス相関 | **1 サーバに複数 session を載せられる**（2 session 同時 busy を実測）。だが **`GET /session` は「このサーバの session」ではなく「同一 HOME / 同一 project の全 session」**を返す（別ポートの serve が作った session まで見える＝ `opencode.db` 共有）。**推奨は 1 インスタンス = 1 TUI プロセス = 1 ポート**。この構成なら当該ポートの `session.created` が一意に自分のものなので対応表は自動で決まる。`-s <sessionID>` による事前バインドも実測で成立 | [§5.6](#56-項目-6--インスタンス相関) |
+| 7 | 接続の生存管理 | `/event` は **10 秒ごとに `server.heartbeat`** を送る（60 サンプル、gap 10.00〜10.03 秒）＝これが死活監視の signal。サーバ消滅で SSE は即 close（`curl (18)`）、以後の接続は **1ms 未満で `ECONNREFUSED`**。`attach` した TUI は**サーバが死んでも画面に何も出さず**、同ポートで再起動すると**無言で自動再接続して復帰した**。**`GET /api/session/:id/event?after=<seq>` は 1 バイトも返さず（再接続時リプレイは使えない）**、**`GET /api/event` は 1 ターンの先頭 3 件で沈黙する** | [§5.7](#57-項目-7--接続の生存管理と再接続) |
+| 8 | 認証 | 既定は**無認証**（stderr に `Warning: OPENCODE_SERVER_PASSWORD is not set; server is unsecured.`）。`OPENCODE_SERVER_PASSWORD` を与えると **HTTP Basic**（`WWW-Authenticate: Basic realm="Secure Area"`、user 既定 `opencode` / `OPENCODE_SERVER_USERNAME`）。`--hostname` 既定 `127.0.0.1` で **LAN IP からは接続不可**（実測）。`CM_AUTH_TOKEN` とは無関係な別系統 | [§5.8](#58-項目-8--認証) |
+| 9 | ポート衝突 | **`--port 0` は「OS に空きポートを訊く」ではない。まず 4096 を試し、埋まっていたら ephemeral に落ちる**（1 本目 → 4096、2 本目 → 58153 を実測）。**実ポートを知る手段は stdout の 1 行（`opencode server listening on http://127.0.0.1:<port>`）か `lsof` しかない**（ポートファイル・ロックファイルは書かれない）。したがって **CommandMate 側で明示的にポートを割り当てるのが唯一の安全策** | [§5.9](#59-項目-9--ポート衝突と実ポートの知り方) |
+| 10 | plugin 方式との比較 | ローカル JS plugin は動く（`init` / `event` / `tool.execute.before` / `tool.execute.after` を実測）。しかし **plugin の `event` フックが受け取る語彙は SSE と同一で情報が増えない**うえ、**承認を裁定する plugin フックは存在しない**（`permission.ask` という文字列自体が 1.18.3 のバイナリに無い。`tool.execute.*` / `command.execute.before` / `event` のみ）。**server API が唯一の接点。plugin は採用しない** | [§5.10](#510-項目-10--plugin-方式との比較) |
+
+### 1.1 下流 Issue が特に依拠すべき結論
+
+| 結論 | 影響する Issue |
+|---|---|
+| **`opencode serve` / `opencode attach` は使わない。既存の TUI 起動に `--port <N>` を足すだけでよい。** 起動経路の変更（`opencode.ts:136`）は「引数 1 個の追加」に縮む。`killSession` の `/exit` 送出・初期化待ちループは**そのまま使える** | #1763 |
+| **`AgentEventSource` は push（hooks）だけでなく pull（SSE 購読 + REST 応答）を表現できなければならない。** 具体 I/F 案は [§9](#9-phase-4-1-1759-抽象抽出への要求事項最重要) | **#1759** |
+| `session.idle` は `Stop` と同義。**`wait` の完了判定に使ってよい**が、**busy 観測後の最初の idle** を取り、**2 回目以降を無視**すること | #1763 |
+| **承認は fail-open しない。** CommandMate が裁定を返さない限りエージェントは無限に待つ（10 分 19 秒で無変化を実測）。hooks 側の「黙れば安全」という前提は opencode には**通用しない** | #1763 / #1724 との差分 |
+| **`question.asked` は質問文と選択肢を構造化して配ってくる**うえ `POST /question/:id/reply` で答えられる。Claude で scraper に残さざるを得なかった `AskUserQuestion`（#1708 / #1726）が、opencode では**完全に構造化イベントで扱える** | #1763 / #1726 の対称 |
+| **`session_end` に相当するものが無い。** TUI の `/exit` はイベントを 1 件も出さず、`session.deleted` は明示 DELETE のときだけ。**プロセス終了の検知は tmux 側に残す** | #1759 / #1763 |
+| **購読先は legacy `/event` 一本。`/api/event` と `/api/session/:id/event` は 1.18.3 では実用にならない**（前者は 3 件で沈黙、後者は 0 バイト） | #1763 |
+| **`GET /session` を「自分の instance の一覧」として使ってはいけない。** 同一 HOME / project の全 session が返る | #1763 |
+| SSE の購読は Next.js サーバプロセス内に持つことになる。**`globalThis` を経由しない in-memory 状態は dev で無言に壊れる**（#1736 の前例）。購読レジストリは `globalThis` に置くこと | #1759 / #1763 |
+
+---
+
+## 2. 検証項目 1 の Go/No-Go 判断
+
+### 判断: **Go**（ただし採用する構成は Issue の想定と違う）
+
+Issue は「`opencode serve --port N` を別プロセスで立て、tmux 内で `opencode attach http://127.0.0.1:N` した TUI が通常の `opencode` と同等に使えるか」を問うている。
+
+**答えは「使える」。** [§5.1.1](#511-serve--attach-は成立する) のとおり `attach` した TUI で通常のプロンプト送信・tool 実行・承認ダイアログ・`question` の選択画面がすべて機能し、
+REST 経由の承認・質問応答も反映された。この構成でも Phase 4-5 は成立する。
+
+**しかし採用すべきではない。** [§5.1.2](#512-しかし-serveattach-は要らない--素の-tui-が同じサーバを内蔵している) のとおり、
+
+> **素の `opencode` TUI（`opencode [project]`、CommandMate が今まさに起動しているもの）が、同じ HTTP サーバを自プロセス内に持っている。**
+> `opencode --port 4791` で起動した TUI に対して `/global/health` / `/event` / `GET /permission` /
+> `POST /session/:id/permissions/:permissionID` のすべてが serve と同一に応答した。
+
+これにより Issue が「hooks には無い問題」として挙げた 3 つの困難のうち **2 つが消える**。
+
+| Issue が想定した困難 | serve + attach | **素の TUI + `--port`（推奨）** |
+|---|---|---|
+| 接続の生存管理 | serve プロセスと TUI プロセスの**2 つ**を別々に監視する必要がある | **サーバの寿命 = TUI プロセスの寿命**。CommandMate は既に tmux で TUI の生死を管理している。監視対象が増えない |
+| serve プロセスが落ちたときの縮退 | TUI が無言のゾンビになる（[§5.7.3](#573-attach-した-tui-はサーバの死を画面に出さない)）。**画面に何も出ないので scraper では検知できない** | **落ちるときは TUI ごと落ちる**。tmux セッション消滅＝既存の検知経路そのまま |
+| サーバ未起動時の縮退 | 「serve は居ないが TUI は生きている」という中間状態が存在する | **中間状態が存在しない**。ポートに繋がらなければ TUI も居ない |
+| 起動経路の変更 | `sendKeys(sessionName, 'opencode', true)` → serve 起動 + attach の 2 段。`killSession` の `/exit` や初期化待ちループとの整合を再設計 | **`'opencode'` → `'opencode --port <N>'` の 1 箇所**。`/exit`・初期化待ちはそのまま |
+
+> **なお「サーバが居なければ scraper に落ちる」という Issue の縮退設計は、素の TUI 構成では意味が変わる。**
+> サーバは TUI と同一プロセスなので「サーバだけが居ない」状態は起こらない。
+> 縮退が必要なのは **`--port` を付けずに起動された既存セッション**（バージョン混在・ユーザーが手で起動した pane）に対してであり、
+> その場合は従来どおり scraper のみで動く。**構造化イベントは「あれば使う」加算的な機構として設計すべきで、`--port` の有無で 2 モードを持つ。**
+
+### No-Go だった場合の代替案（記録のため）
+
+項目 1 が成立しなかった場合の代替は「素の TUI + scraper 継続」（現行 `src/lib/cli-tools/opencode.ts` のまま、`src/lib/detection/` のスクレイピングで status / prompt を判定）だった。
+**実測では serve+attach も素の TUI+`--port` も成立したので、この代替案は採らない。**
+ただし上記のとおり **`--port` 無しセッション向けのフォールバックとして scraper 経路は残す**必要がある（削除してはいけない）。
+
+---
+
+## 3. Issue 本文・公式挙動と実測の食い違い
+
+**下流実装者は下表を先に読むこと。** D1 / D2 は設計の形を変える。
+
+| # | Issue #1758 本文・`--help` の記述 | 実測 | 影響 |
+|---|---|---|---|
+| **D1** | 「opencode は **`opencode serve` が立てる HTTP サーバに CommandMate 側から繋ぐ**」「既存の CommandMate 実装は素の TUI として起動している。serve/attach は使っていない」→ **serve/attach への移行が前提** | **素の TUI がすでに同じサーバを内蔵している。** `opencode --port 4791` で `/event` SSE・permission REST が完全に動いた（[§5.1.2](#512-しかし-serveattach-は要らない--素の-tui-が同じサーバを内蔵している)）。**serve/attach への移行は不要** | **最重要。** #1763 の作業量とリスクが大幅に下がる。「起動経路の変更」ではなく「引数 1 個の追加」。Issue の「既知の罠」1 番目（`killSession` / 初期化待ちループとの整合）は**問題にならない** |
+| **D2** | 「応答しなかった場合に**通常の TUI 承認へ落ちる**か（＝ no-decision フォールバック）」→ hooks と同じ「黙れば TUI に落ちる」モデルを想定 | **フォールバックという段階は存在しない。** TUI ダイアログは `permission.asked` と**同時に無条件で描かれ**、REST と TUI は並行して開いている。先に答えた方が勝つ**レース**。そして**タイムアウトが無い**（10 分 19 秒放置で無変化） | **最重要。** Auto-Yes の安全性の形が Claude と逆になる。Claude は「CommandMate が黙る＝安全（fail-open）」だったが、opencode は「**CommandMate が黙る＝エージェントが永久停止**」。逆に「CommandMate が誤って allow を返す＝人間が読む前にダイアログが消える」レースが生じる（[§5.5](#55-項目-5--承認裁定の応答と-no-decision-の実際の意味)） |
+| **D3** | `--help`: `--port` の `[default: 0]` ＋ Issue「`--port 0`（自動）で立てた場合の実ポートの知り方」→ **0 = OS 任せの自動割当**という理解 | **`0` は「まず 4096、埋まっていたら ephemeral」のセンチネル。** 1 本目は必ず 4096 を掴む。ポートファイル等は書かれず、実ポートは **stdout 1 行か `lsof`** しか手がかりが無い | #1763 は**必ず `--port` を明示**する。既に worktree ごとにポートを扱う仕組み（`--auto-port`）があるので、そこに相乗りすれば二重管理にならない（[§5.9](#59-項目-9--ポート衝突と実ポートの知り方)） |
+| **D4** | Issue「`permission.asked` 相当が SSE に流れるか」／`/doc` は `permission.asked` と **`permission.v2.asked`** の両方を宣言 | **流れるのは `permission.asked` / `permission.replied`（v1）だけ。** v2 系（`permission.v2.asked` / `question.v2.asked` 等）は 1 件も観測されなかった | #1763 は v1 のみを実装する。v2 は将来の移行先として型定義だけ存在すると理解しておく |
+| **D5** | `/doc` の Event union（89 種） | **`server.heartbeat` が union に含まれていない**のに 10 秒ごとに実際に流れる。つまり**死活監視に使う最重要イベントが自サーバの OpenAPI に載っていない** | 生成型（openapi → TS）に頼ると `server.heartbeat` が unknown で落ちる。**パーサは未知の `type` を捨てずに無視する**設計にすること |
+| **D6** | Issue「`POST /session/:id/permissions/:permissionID`」 | 成立する。**ただしボディのキーは `response`**（`{"response":"once"}`）。別経路の `POST /permission/:requestID/reply` はキーが **`reply`** で、加えて `message` を渡せる（拒否理由がエージェントに見える）。**2 つの endpoint でキー名が違う** | #1763 はどちらを使うか決めて固定すること。**拒否理由を伝えたいなら `/permission/:id/reply`**（`message` 対応）。fixture [`message-part-updated-tool-error.json`](../../tests/fixtures/hooks/opencode/message-part-updated-tool-error.json) に `message` がエージェントへ届いた実物がある |
+
+---
+
+## 4. 再現環境（ハーネス）
+
+すべての実測は**隔離 HOME**と**専用 tmux socket**の中で行った。以下をそのまま再実行すれば同じ観測ができる。
+
+### 4.1 隔離 HOME
+
+opencode は `$HOME` から config（`~/.config/opencode`）・state（`~/.local/state/opencode`）・
+データ（`~/.local/share/opencode`、**`opencode.db` を含む**）を解決する。
+セッションを 1 回動かすだけで `opencode.db` に書き込むため、**`HOME` ごと差し替えないとユーザーのデータを汚す。**
+
+```bash
+SP=/path/to/scratchpad
+mkdir -p "$SP"/{home/.local/share/opencode,home/.config/opencode,work,logs,sse}
+
+# 認証情報（provider の credential）。mode 600 で複製し、検証後に削除する
+umask 077
+cp ~/.local/share/opencode/auth.json "$SP/home/.local/share/opencode/auth.json"
+umask 022
+
+# model を固定する（TUI のモデルピッカーを触らずに済む）
+cat > "$SP/home/.config/opencode/opencode.jsonc" <<'JSON'
+{ "$schema": "https://opencode.ai/config.json", "model": "github-copilot/claude-sonnet-4.6" }
+JSON
+
+# project として認識させる
+( cd "$SP/work" && git init -q && echo hello > README.md \
+  && git add -A && git -c user.email=a@b -c user.name=a commit -qm init )
+```
+
+隔離できていることは `GET /path` で確認する（**すべて scratchpad 配下を指していること**）。
+
+```bash
+curl -sS http://127.0.0.1:4788/path
+# {"home":"…/scratchpad/home","state":"…/scratchpad/home/.local/state/opencode",
+#  "config":"…/scratchpad/home/.config/opencode","worktree":"…/scratchpad/work","directory":"…/scratchpad/work"}
+```
+
+> **`opencode` は TUI のモデルピッカーで既定モデルを書き換える。** Claude の `/model` overlay と同じ罠なので、
+> 隔離 HOME の外でピッカーを開かないこと。本スパイクでは**ピッカーを一度も開いていない**（config で固定した）。
+
+### 4.2 ポート
+
+**3000 番は絶対に使わない**（ユーザーの稼働中 CommandMate 本番サーバ）。本スパイクは 4788 / 4789 / 4790 / 4791 / 4792 と、
+`--port 0` の挙動確認で 4096 / 58153 を使った。すべて `--hostname 127.0.0.1`。
+
+```bash
+cd "$SP/work"
+HOME="$SP/home" nohup opencode serve --port 4788 --hostname 127.0.0.1 --print-logs --log-level INFO \
+  > "$SP/logs/serve.out" 2>&1 &
+echo $!            # ← PID を控える。後始末は必ず PID 指定 kill（pkill -f opencode は使わない）
+```
+
+### 4.3 タイムスタンプ付き SSE tap
+
+**`curl -N` だけでは時刻が取れず、`session.idle` が「承認待ちの間に出ていないこと」を示せない。**
+1 フレーム 1 行の JSONL に時刻を付けて落とす。
+
+```python
+# $SP/ssetap.py — 使い捨て SSE tap
+import json, sys, time, urllib.request
+
+url, out = sys.argv[1], sys.argv[2]
+req = urllib.request.Request(url, headers={"Accept": "text/event-stream"})
+f = open(out, "a", buffering=1)
+with urllib.request.urlopen(req) as r:
+    ev = None
+    for raw in r:
+        line = raw.decode("utf-8", "replace").rstrip("\n")
+        if line.startswith("event:"):
+            ev = line[6:].strip()
+        elif line.startswith("data:"):
+            rec = {"ts": time.strftime("%H:%M:%S") + ".%03d" % (int(time.time() * 1000) % 1000),
+                   "sse_event_field": ev}
+            try:
+                rec["data"] = json.loads(line[5:].strip())
+            except Exception:
+                rec["raw"] = line[5:].strip()
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            ev = None
+```
+
+```bash
+nohup python3 "$SP/ssetap.py" http://127.0.0.1:4788/event "$SP/sse/tap.jsonl" > /dev/null 2>&1 &
+```
+
+**観測 471 フレームすべてで `sse_event_field` は `null` だった。** つまり `event:` 行は一度も来ておらず、
+**イベント種別は `data` の JSON の `type` にしか入っていない。**
+`EventSource#addEventListener("session.idle", …)` では 1 件も拾えない（`onmessage` で受けて `type` を見る）。
+
+### 4.4 tmux の隔離（必読）
+
+エージェントは tmux ペインの中で動いており `$TMUX` はユーザーの本番サーバを指している。
+tmux の解決順は **`-L` / `-S` > `$TMUX` > `TMUX_TMPDIR`** なので、**`TMUX_TMPDIR` では隔離できない**。
+
+```bash
+tmux -L cmate-p4spike-oc new-session -d -s oc-attach -x 200 -y 60 -c "$SP/work" \
+  "env HOME='$SP/home' TERM=xterm-256color opencode attach http://127.0.0.1:4788"
+
+tmux -L cmate-p4spike-oc capture-pane -p -t '=oc-attach:0.0'
+
+# 後始末（kill-server は絶対に使わない。完全一致ターゲットで session だけ落とす）
+tmux -L cmate-p4spike-oc kill-session -t '=oc-attach:'
+```
+
+- **`kill-server` は書かない。** 専用 socket なら最後の session 終了でサーバも自然終了する。
+- `bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たない。
+- 並行して走る #1757 のワーカーは socket `cmate-p4spike` を使う。**混ぜない。**
+
+### 4.5 一次証拠としての OpenAPI
+
+opencode は**自分自身の OpenAPI を配る**。イベント語彙の全列挙はここから取れる（推測不要）。
+
+```bash
+curl -sS http://127.0.0.1:4788/doc -o openapi.json     # 478,613 bytes / OpenAPI 3.1.0
+python3 - <<'PY'
+import json
+d = json.load(open("openapi.json"))
+sch = d["components"]["schemas"]
+for v in sch["Event"]["anyOf"]:
+    n = v["$ref"].split("/")[-1]
+    t = sch[n]["properties"]["type"]
+    print(t.get("const") or t["enum"][0])
+PY
+# => 89 行
+```
+
+---
+
+## 5. 検証項目ごとの実測
+
+### 5.1 項目 1 — serve + attach の実用性と、素の TUI が持つサーバ
+
+#### 5.1.1 serve + attach は成立する
+
+`opencode serve --port 4788` を立て、専用 socket の tmux で `opencode attach http://127.0.0.1:4788` を起動した。
+
+```
+opencode server listening on http://127.0.0.1:4788
+```
+
+```bash
+tmux -L cmate-p4spike-oc new-session -d -s oc-attach -x 200 -y 60 -c "$SP/work" \
+  "env HOME='$SP/home' TERM=xterm-256color opencode attach http://127.0.0.1:4788"
+sleep 8
+tmux -L cmate-p4spike-oc capture-pane -p -t '=oc-attach:0.0'
+```
+
+**trust プロンプト・update プロンプト・login プロンプトは一切出なかった**（Claude の folder trust に相当するものが無い）。
+素の TUI と同じスプラッシュとコンポーザが描かれ、フッタも同じ。
+
+観測できたこと（すべて `attach` した TUI 上）:
+
+| 操作 | 結果 |
+|---|---|
+| プロンプト送信 | `PONG-A` を **2.6 秒**で返した。`session.created` → … → `session.idle` が SSE に流れた |
+| tool 実行（`bash`） | 実行された。承認ダイアログも通常どおり描かれた |
+| 承認ダイアログ | `△ Permission required` ＋ `Allow once / Allow always / Reject` の 3 択が描かれた |
+| `question` tool | 選択肢つきのピッカーが描かれた（`↑↓ select  enter submit  esc dismiss`） |
+| REST での承認 | ダイアログが消えてコマンドが実行された |
+| REST での質問応答 | ピッカーが消えてエージェントが続行した |
+| `/exit` | TUI が終了し tmux セッションも終了した（＝既存 `killSession` と整合） |
+
+**結論: serve + attach で Phase 4-5 は成立する。**
+
+#### 5.1.2 しかし serve/attach は要らない — 素の TUI が同じサーバを内蔵している
+
+`--port` / `--hostname` は `serve` 専用のオプションではなく、**`opencode` のグローバルオプション**である
+（`opencode --help` の `Options:` に載っている）。素の TUI に付けて起動した。
+
+```bash
+tmux -L cmate-p4spike-oc new-session -d -s oc-plain -x 200 -y 50 -c "$SP/work" \
+  "env HOME='$SP/home' TERM=xterm-256color opencode --port 4791 --hostname 127.0.0.1"
+sleep 12
+lsof -nP -iTCP:4791 -sTCP:LISTEN
+# opencode 96057 … TCP 127.0.0.1:4791 (LISTEN)      ← TUI プロセス自身が listen している
+curl -sS http://127.0.0.1:4791/global/health
+# {"healthy":true,"version":"1.18.3"}
+curl -sS -N -m 4 http://127.0.0.1:4791/event
+# data: {"id":"evt_…","type":"server.connected","properties":{}}
+```
+
+**serve と同一のサーバである。** 全経路を素の TUI 上で通した。
+
+| 手順 | 実測 |
+|---|---|
+| TUI に `touch /private/tmp/cmate-oc-plain.txt` を打たせる | `08:17:38.056 permission.asked` が SSE に流れた |
+| `GET http://127.0.0.1:4791/permission` | pending 1 件、`metadata.command` に実コマンドが入っていた |
+| `POST /session/<sid>/permissions/<per> {"response":"once"}` | `200` / body `true` |
+| pane | ダイアログが消え、`Done. The file /private/tmp/cmate-oc-plain.txt has been created.` / `Build · Claude Sonnet 4.6 · 31.5s` |
+| ファイル | `-rw-r--r--@ 1 … /private/tmp/cmate-oc-plain.txt` が実在 |
+| SSE | `08:18:04.524 permission.replied once` → `08:18:06.655 session.status idle` → `08:18:06.655 session.idle` |
+
+→ **#1763 の起動経路変更は `opencode` → `opencode --port <N>` だけで足りる。**
+`src/lib/cli-tools/opencode.ts:136` の `sendKeys(sessionName, 'opencode', true)` に引数を足すだけであり、
+`killSession`（`/exit` 送出）・`OPENCODE_INIT_WAIT_MS` の初期化待ちループ・`reconcileExistingSession` は**一切変えなくてよい**。
+
+---
+
+### 5.2 項目 2 — イベント語彙
+
+#### 5.2.1 全列挙と実観測
+
+`GET /doc` の `components.schemas.Event` は **89 variant の anyOf**。全 89 種の名前は [§4.5](#45-一次証拠としての-openapi) のコマンドで再取得できる。
+族ごとに整理すると:
+
+| 族 | 種類数 | 代表 |
+|---|---|---|
+| `session.next.*`（v2 の細粒度ストリーム） | 30 | `session.next.tool.called` / `.text.delta` / `.step.started` / `.reasoning.*` |
+| `session.*`（v1） | 10 | `session.created` / `.updated` / `.deleted` / `.idle` / `.status` / `.error` / `.diff` / `.compacted` |
+| `message.*` | 5 | `message.updated` / `message.part.updated` / `message.part.delta` |
+| `permission.*` | 4 | `permission.asked` / `.replied` / `.v2.asked` / `.v2.replied` |
+| `question.*` | 6 | `question.asked` / `.replied` / `.rejected` ＋ v2 |
+| `pty.*` / `tui.*` / `workspace.*` / `worktree.*` / その他 | 34 | `installation.update-available` / `plugin.added` / `lsp.updated` / `todo.updated` … |
+
+**本スパイクで実際に流れたのは 20 種**（全 tap 合計、`plugin.added` を含む）。
+
+```
+   16  catalog.updated          360  plugin.added
+    8  integration.updated        8  reference.updated
+   68  message.part.delta         6  server.connected
+   85  message.part.updated     153  server.heartbeat        ← /doc に型定義が無い（D5）
+   87  message.updated            5  session.created
+    4  permission.asked           1  session.deleted
+    4  permission.replied        26  session.diff
+    1  question.asked             2  session.error
+    1  question.replied          13  session.idle
+                                 56  session.status
+                                 43  session.updated
+```
+
+**`session.next.*` は 1 件も流れなかった**（`/event` には来ない。[§5.2.2](#522-legacy-event-と-apievent-の違いと-apievent-が使えない理由) 参照）。
+
+#### 5.2.2 legacy `/event` と `/api/event` の違い（と `/api/event` が使えない理由）
+
+envelope が違う。
+
+```jsonc
+// GET /event（legacy）
+{ "id": "evt_…", "type": "message.updated", "properties": { … } }
+
+// GET /api/event（v2）
+{ "id": "evt_…", "type": "message.updated",
+  "durable": { "aggregateID": "ses_…", "seq": 26, "version": 1 },
+  "location": { "directory": "…" },
+  "data": { … } }                                     // ← properties ではなく data
+```
+
+**`/api/event` は 1 ターンの先頭 3 件で無言に沈黙する。** 独立に 2 回再現した（python tap / `curl -N` の両方）。
+
+```
+# 同一サーバ・同一ターンを両方で購読した結果
+### /event (legacy) ###          ### /api/event (v2) ###
+08:03:59.806 message.updated     08:03:59.806 message.updated       (seq 26)
+08:03:59.807 message.part.updated 08:03:59.807 message.part.updated (seq 27)
+08:03:59.807 session.updated     08:03:59.807 session.updated       (seq 28)
+…（合計 41 件、session.idle まで到達）           …（以降 0 件。接続は開いたまま）
+```
+
+別ターン（`TICK`）でも同じ: legacy **22 件**（`session.idle` 到達）に対し v2 は **3 件（seq 50/51/52）で停止**。
+接続自体は `curl` が `--max-time` で切られるまで開いたままで、エラーもクローズも起きない。
+
+`GET /api/session/:id/event?after=<seq>`（「durable event を seq 以降からリプレイして継続する」と宣言されている）は
+**ヘッダすら返らず 0 バイト**だった。ターンを実行中に開いていても 0 バイトのまま。
+
+```bash
+curl -sS -i -N --max-time 6 "http://127.0.0.1:4788/api/session/ses_…/event?after=0"
+# curl: (28) Operation timed out after 6002 milliseconds with 0 bytes received
+```
+
+→ **購読は legacy `/event` 一本にする。** seq ベースのリプレイによる再接続は 1.18.3 では使えない（[§5.7](#57-項目-7--接続の生存管理と再接続) の代替を採る）。
+
+#### 5.2.3 `AGENT_EVENT_TYPES` 7 語へのマッピング
+
+| `AGENT_EVENT_TYPES` | opencode | 判定条件 | 対応度 |
+|---|---|---|---|
+| `stop` | `session.idle` | そのまま | **1:1**（ただし 2 回発火しうる。[§5.3](#53-項目-3--完了idleの意味-wait-の完了判定に使ってよいか)） |
+| `session_start` | `session.created` | そのまま | **1:1**。ただし「セッションレコードの生成」であり TUI 起動ではない。`-s` で事前バインドすると**発火しない** |
+| `user_prompt_submit` | `message.updated` | `properties.info.role === "user"` | **複合**。本文は続く `message.part.updated`（`part.type === "text"`）に入る |
+| `pre_tool_use` | `message.part.updated` | `part.type === "tool" && part.state.status === "running"` | **部分一致**。`matcher` 相当は無いので購読側で `part.tool` を見て絞る |
+| `post_tool_use` | `message.part.updated` | `part.type === "tool" && part.state.status ∈ {"completed","error"}` | **部分一致**。相関キーは `part.callID` |
+| `notification` | `permission.asked` / `question.asked` / `session.error` | 用途別に 3 つ | **相当なし**。単一入口が無い。**`idle_prompt` 相当（放置検知）は存在しない** |
+| `session_end` | `session.deleted` | そのまま | **意味が違う**。[§5.6.3](#563-exit-はイベントを出さないsession_end-の不在) |
+
+tool part のライフサイクルは実測でこの順（`callID` で相関）。
+
+```
+07:58:37.392  bash  status=pending    state keys = input, raw, status
+07:58:37.665  bash  status=running    state keys = input, status, time              ← pre_tool_use
+07:59:24.819  bash  status=completed  state keys = input, metadata, output, status, time, title  ← post_tool_use
+08:10:26.253  bash  status=error      state keys = error, input, status, time       ← post_tool_use（拒否）
+```
+
+fixture: [`…-tool-pending`](../../tests/fixtures/hooks/opencode/message-part-updated-tool-pending.json) /
+[`-running`](../../tests/fixtures/hooks/opencode/message-part-updated-tool-running.json) /
+[`-completed`](../../tests/fixtures/hooks/opencode/message-part-updated-tool-completed.json) /
+[`-error`](../../tests/fixtures/hooks/opencode/message-part-updated-tool-error.json)
+
+#### 5.2.4 `question.asked` — Claude の `AskUserQuestion` が構造化で取れる
+
+opencode は `question` という tool を持つ（`GET /experimental/tool/ids` →
+`['invalid','question','bash','read','glob','grep','edit','write','task','webfetch','todowrite','websearch','skill','apply_patch']`）。
+これを誘発すると **質問文・ヘッダ・選択肢ラベル・選択肢説明がすべて構造化されて SSE に流れる。**
+
+```json
+{ "id": "evt_…", "type": "question.asked",
+  "properties": {
+    "id": "que_…", "sessionID": "ses_…",
+    "questions": [ { "question": "Which colour do you prefer?", "header": "Colour preference",
+                     "options": [ { "label": "Red",  "description": "The colour red" },
+                                  { "label": "Blue", "description": "The colour blue" } ] } ],
+    "tool": { "messageID": "msg_…", "callID": "toolu_…" } } }
+```
+
+そして **REST で答えられる。**
+
+```bash
+curl -sS -X POST -H 'Content-Type: application/json' -d '{"answers":[["Blue"]]}' \
+  "http://127.0.0.1:4788/question/que_…/reply"
+# => true / HTTP 200
+```
+
+pane では選択肢ピッカーが消え、`Which colour do you prefer? / Blue` の後にエージェントが `You prefer blue.` と続行した。
+
+> **これは Claude との最大の差であり、opencode 側の明確な優位点である。**
+> Claude では `AskUserQuestion` の選択画面に構造化イベントが無く、
+> `PermissionRequest` に `allow` を返しても選択画面が残るため **scraper に依存せざるを得なかった**（#1708 / #1726）。
+> opencode では **質問の内容も回答も完全に構造化されており、scraper が不要**。
+
+`answers` は `string[][]`（質問ごとに選んだラベルの配列）。`POST /question/:id/reject` で拒否もできる。
+
+---
+
+### 5.3 項目 3 — 完了（idle）の意味。`wait` の完了判定に使ってよいか
+
+### 結論: **使ってよい。`session.idle` は Claude の `Stop` と同じ「ターンが終わった」である。**
+
+ただし **(a) busy を観測してから最初の idle を取る**、**(b) 2 回目以降を無視する** の 2 つが必須。
+
+#### 5.3.1 「暇」ではなく「ターン終了」である証拠
+
+`session.idle` / `session.status(idle)` / `permission.*` / `question.*` だけを時系列に並べた（tap から抽出、2 セッション混在）。
+
+```
+07:57:47.525  st=idle    ses_…001                                   ← ターン終了（PONG-A、2.6s）
+07:58:37.682  permission.asked  ses_…001  per_…A
+07:59:24.806  permission.replied ses_…001 per_…A  once
+07:59:27.659  st=idle    ses_…001                                   ← 承認後にツールが走り終わってから idle
+07:59:27.659  IDLE       ses_…001
+08:00:07.155  permission.asked  ses_…001  per_…B                    ┐
+08:02:36.919  question.asked    ses_…002  que_…C                    │ この 10 分 19 秒のあいだ
+08:03:17.310  question.replied  ses_…002  que_…C                    │ ses_…001 の idle は 0 件
+08:03:19.483  IDLE       ses_…002                                   │ （ses_…002 の idle は出ている）
+08:04:04.659  IDLE       ses_…002                                   │
+08:06:13.473  IDLE       ses_…002                                   ┘
+08:10:26.253  permission.replied ses_…001 per_…B  reject
+08:10:28.773  st=idle    ses_…001                                   ← 裁定してから初めて idle
+08:10:28.773  IDLE       ses_…001
+```
+
+- **承認待ちの 10 分 19 秒**（`08:00:07.155` → `08:10:26.253`）、当該セッションに `session.idle` は **1 件も無い**。
+- **質問待ちの 40 秒**（`08:02:36.919` → `08:03:17.310`）も同様に **0 件**。
+- ポーリング側も一致する。承認 pending 中の `GET /session/status` は `busy` を返した。
+
+```bash
+curl -sS http://127.0.0.1:4788/session/status
+# {"ses_…001":{"type":"busy"}}                     ← 承認ダイアログが出たまま放置している最中
+# {"ses_…001":{"type":"busy"},"ses_…002":{"type":"busy"}}   ← 2 セッション同時
+```
+
+→ **`session.idle` は「人間の入力を待っている状態」を含まない。** 承認・質問はどちらも `busy`。
+`wait` が「エージェントが手を止めて人間を待っている」を検知したいなら、
+`session.idle` ではなく **`permission.asked` / `question.asked`** を見ること（`--on-prompt` の意味論はこちらに乗る）。
+
+#### 5.3.2 error / abort では 1 ターンで 2 回発火する（**`wait` の冪等化が必須**）
+
+**(a) provider エラー**（LM Studio に model 未ロード）:
+
+```
+server.connected -> session.created -> session.status -> session.status -> session.error
+  -> session.status -> session.idle -> session.status -> session.idle
+```
+
+**(b) abort**（`POST /session/:id/abort`）:
+
+```
+08:14:55.399  session.status busy
+08:15:00.416  session.error  {"name":"MessageAbortedError","data":{"message":"Aborted"}}
+08:15:00.416  session.status idle
+08:15:00.416  session.idle              ← 1 回目
+08:15:00.435  session.status idle
+08:15:00.435  session.idle              ← 2 回目（19ms 後）
+```
+
+正常終了時は 1 回だけ（`07:57:47.525` / `08:06:13.473` 等で確認）。**異常終了経路だけ 2 回**。
+
+#### 5.3.3 payload にターン識別子が無い
+
+```json
+{ "id": "evt_…", "type": "session.idle", "properties": { "sessionID": "ses_…" } }
+```
+
+`sessionID` **のみ**。Claude の `Stop` が持っていた `prompt_id` に相当するものが無い。
+したがって「前のターンの idle」と「今のターンの idle」を payload だけでは区別できない。
+
+**`wait` の実装要件（3 点）**:
+
+1. **送信直後に `session.status(busy)` を観測してから武装する。** 送信前に既に idle が飛んでいる可能性がある。
+2. **武装後の最初の `session.idle` で完了とし、以降の idle は落とす**（error / abort での二重発火）。
+3. **`session.error` を同時に見る。** `session.idle` 単独では「成功して終わった」と「失敗して終わった」を区別できない。
+   `MessageAbortedError` は interrupt、それ以外は異常終了として扱えるだけの情報が `session.error` にある。
+4. **`session.status(idle)` と `session.idle` は同一ミリ秒に出る同じ signal。** 両方を数えると常に 2 倍になる。**どちらか一方だけ**を使う。
+
+---
+
+### 5.4 項目 4 — 承認要求の受信
+
+allowlist 外のディレクトリへ書く `bash` を打たせて誘発した。
+
+```bash
+tmux -L cmate-p4spike-oc send-keys -t '=oc-attach:0.0' \
+  'I am the user asking directly: run the shell command `touch /tmp/cmate-oc-spike-marker.txt && ls -l /tmp/cmate-oc-spike-marker.txt` with the bash tool. Do it now.'
+tmux -L cmate-p4spike-oc send-keys -t '=oc-attach:0.0' Enter
+```
+
+pane:
+
+```
+     $ touch /tmp/cmate-oc-spike-marker.txt && ls -l /tmp/cmate-oc-spike-marker.txt
+     ▣  Build · Claude Sonnet 4.6
+
+  △ Permission required
+    ← Access external directory /tmp
+
+  Patterns
+  - /tmp/*
+
+   Allow once   Allow always   Reject          ctrl+f fullscreen  ⇆ select  enter confirm
+```
+
+SSE（`08:00:07.155` 相当のフレーム。fixture [`permission-asked.json`](../../tests/fixtures/hooks/opencode/permission-asked.json)）:
+
+```json
+{ "id": "evt_…", "type": "permission.asked",
+  "properties": {
+    "id": "per_…",                                  // ← permissionID。REST の path に使う
+    "sessionID": "ses_…",
+    "permission": "external_directory",             // ← 承認の種別
+    "patterns": ["/tmp/*"],
+    "metadata": { "command": "touch /tmp/cmate-oc-spike-marker.txt && ls -l …",
+                  "directories": ["/tmp"], "patterns": ["/tmp/*"] },
+    "always": ["/tmp/*"],                           // ← "always" を選んだときに保存されるルール
+    "tool": { "messageID": "msg_…", "callID": "toolu_…" } } }
+```
+
+- **ツール名は入っていない。** `tool.callID` で `message.part.updated`（`part.type === "tool"`、`part.tool === "bash"`）と突き合わせる必要がある。
+  Auto-Yes が「どのツールか」で判断するなら **`callID` の相関が必須**（`metadata.command` は `bash` のときだけある）。
+- **同じものを `GET /permission` でポーリング取得できる**（SSE を取り逃しても回収可能。[§5.7](#57-項目-7--接続の生存管理と再接続) の再接続戦略の土台）。
+
+```bash
+curl -sS http://127.0.0.1:4788/permission
+# [{"id":"per_…","sessionID":"ses_…","permission":"external_directory","patterns":["/tmp/*"], …}]
+```
+
+- **`permission.v2.asked` は 1 件も来なかった**（型定義にはある。D4）。
+- `GET /api/permission/saved` は `{"data":[]}` の形（legacy `/permission` は素の配列）。**同じ族の endpoint で envelope が違う。**
+
+---
+
+### 5.5 項目 5 — 承認裁定の応答と、no-decision の実際の意味
+
+#### 5.5.1 REST で裁定できる（Issue 記載の endpoint はそのまま使える）
+
+```bash
+curl -sS -w "HTTP %{http_code} time=%{time_total}\n" \
+  -X POST -H 'Content-Type: application/json' -d '{"response":"once"}' \
+  "http://127.0.0.1:4788/session/ses_…/permissions/per_…"
+# true
+# HTTP 200 time=0.004788
+```
+
+| 結果 | 実測 |
+|---|---|
+| pane | `△ Permission required` が消え、`$ touch …` の下に `-rw-r--r--@ 1 … /tmp/cmate-oc-spike-marker.txt` が出た |
+| ファイル | 実際に作成された |
+| SSE | `07:59:24.806 permission.replied { requestID, reply: "once" }` → `07:59:27.659 session.idle` |
+| `GET /permission` | `[]`（pending から消えた） |
+
+**裁定は 3 値**（`once` / `always` / `reject`）。Claude の `allow` / `deny` の 2 値に対して `always` が増えている。
+
+| 応答 | 実測 |
+|---|---|
+| `{"response":"once"}` | 実行される。次に同じことをすれば再び訊かれる |
+| `{"response":"always"}` | 実行される。`always` の pattern が以降許可される。**ただし `GET /api/permission/saved` は空のままだった**（永続化されているのは別の場所か、プロセス内のみ） |
+| `{"response":"reject"}` | 実行されない。tool part が `status: "error"` になる |
+
+#### 5.5.2 拒否理由はエージェントに届く（endpoint によってはキー名が違う — D6）
+
+別経路 `POST /permission/:requestID/reply` はボディのキーが **`reply`** で、`message` を添えられる。
+
+```bash
+curl -sS -X POST -H 'Content-Type: application/json' \
+  -d '{"reply":"reject","message":"rejected by CommandMate spike"}' \
+  "http://127.0.0.1:4788/permission/per_…/reply"
+# true / HTTP 200
+```
+
+pane:
+
+```
+     $ touch /private/tmp/cmate-oc-nodecision.txt
+     The tool call was rejected — permission was denied by CommandMate spike.
+     ▣  Build · Claude Sonnet 4.6 · 10m 23s
+```
+
+SSE の tool part（fixture [`message-part-updated-tool-error.json`](../../tests/fixtures/hooks/opencode/message-part-updated-tool-error.json)）:
+
+```json
+"state": { "status": "error",
+           "input": { "command": "touch /private/tmp/cmate-oc-nodecision.txt" },
+           "error": "The user rejected permission to use this specific tool call with the following feedback: rejected by CommandMate spike" }
+```
+
+→ Claude の `deny` の `message` と同じく、**渡した文字列がそのままエージェントに見える。**
+ファイルは作成されなかった（`ls: /private/tmp/cmate-oc-nodecision.txt: No such file or directory`）。
+
+| endpoint | ボディ | `message` |
+|---|---|---|
+| `POST /session/:sessionID/permissions/:permissionID` | `{"response": "once"\|"always"\|"reject"}` | **渡せない** |
+| `POST /permission/:requestID/reply` | `{"reply": "once"\|"always"\|"reject", "message"?: string}` | 渡せる |
+| `POST /api/session/:sessionID/permission/:requestID/reply` (v2) | `{"reply": …, "message"?: string}` | 型定義のみ（v2 は未観測） |
+
+#### 5.5.3 **no-decision の実際の意味 — タイムアウトは無い。TUI へ「落ちる」のではなく最初から並行している**
+
+**Issue の想定（hooks 型の「黙れば TUI に落ちる」）は成立しない。** 実測は次のとおり。
+
+1. **TUI ダイアログは `permission.asked` と同時に無条件で描かれる。** CommandMate の応答を待ってから出るのではない。
+   [§5.4](#54-項目-4--承認要求の受信) の pane capture は、REST で何も返していない時点のものである。
+2. **タイムアウトは存在しない。** `08:00:07.155` に発火した承認要求を放置し、
+   `08:10:26.253` に裁定するまで **10 分 19 秒**、`GET /permission` は pending 1 件のまま、
+   SSE にタイムアウトイベント・自動裁定イベントは**一切出なかった**。TUI 側は経過時間を数え続け、最終的に `10m 23s` と表示した。
+3. **したがって「no-decision フォールバック」という段階は無く、REST と TUI は最初から並行して開いている。**
+   先に答えた方が勝つ **レース**である（REST で答えると TUI のダイアログが消えることを [§5.5.1](#551-rest-で裁定できるissue-記載の-endpoint-はそのまま使える) で確認済み）。
+
+**#1763 の Auto-Yes 安全性への含意（Claude と逆になる 2 点）**:
+
+| | Claude（hooks / #1721） | **opencode（本スパイク）** |
+|---|---|---|
+| CommandMate が黙ったとき | `{}` を返す・timeout する・接続不能 — **すべて fail-open**。TUI ダイアログに落ちてエージェントは進める | **エージェントは無限に待つ。** ダイアログは出ているので**人間が居れば**答えられるが、**無人運転では永久停止** |
+| CommandMate が誤って allow したとき | `AskUserQuestion` は allow しても選択画面が残る＝人間の確認を突破できない | **`once` を返した瞬間にダイアログが消える。** 人間が読む前に消える競合が起こりうる |
+
+→ **Auto-Yes v2 の opencode 実装では「判断できないときは黙る」が安全側ではない。**
+`stop-pattern` に当たった等で裁定を見送る場合、**「見送った」ことを利用者に見せる**（`wait` の出力・UI）必要がある。
+黙って落ちると、hooks 側と違って**セッションが静かに止まる**。
+（Claude 側で `denyPatterns` が pane scrollback を汚染して worker が 1 時間沈黙した #1699 と同型の事故が、
+opencode では**より簡単に**起きる。あちらは抑止理由の出力で解決している。）
+
+---
+
+### 5.6 項目 6 — インスタンス相関
+
+#### 5.6.1 1 サーバに複数 session を載せられる（実測）
+
+同一 serve（4788）に対して 2 つ目の TUI を `attach` し、それぞれ別のプロンプトを流した。
+
+```bash
+curl -sS http://127.0.0.1:4788/session/status
+# {"ses_…001":{"type":"busy"},"ses_…002":{"type":"busy"}}      ← 同時に busy
+```
+
+SSE 上でも `sessionID` で完全に分離されている（[§5.3.1](#531-暇ではなくターン終了である証拠) のタイムラインで
+`ses_…001` の承認待ちと `ses_…002` の質問・idle が混ざりながら別々に追えている）。
+
+**2 つ目の `attach` は既存 session に勝手に参加しない。** セッション未選択の空の状態で起動し、
+最初のプロンプトで新しい session を作る（＝ラウンド 1 の pending 承認ダイアログは 2 つ目の TUI には出なかった）。
+
+#### 5.6.2 対応表の作り方 — 2 通りとも実測で成立
+
+**(A) 事前に session を作って `-s` でバインドする**
+
+```bash
+SID=$(curl -sS -X POST -H 'Content-Type: application/json' -d '{"title":"cmate-instance-2"}' \
+        http://127.0.0.1:4788/session | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')
+
+# attach でも素の TUI でも同じ
+opencode attach http://127.0.0.1:4788 -s "$SID"
+opencode --port 4792 --hostname 127.0.0.1 -s "$SID"
+```
+
+TUI の右パネルに指定した `title`（`cmate-instance-2`）が出た。プロンプトを流すと**すべてのイベントが `$SID` に落ちた**
+（`session.created` は**発火しない**）。
+
+```
+08:18:50.060 message.updated ses_007bae2e1ffeXvQxEqEEtNLUBz     ← 事前に作った SID そのもの
+08:18:50.060 session.status  ses_007bae2e1ffeXvQxEqEEtNLUBz
+…
+```
+
+**(B) 1 インスタンス = 1 ポートにして、そのポートの `session.created` を自分のものとみなす**（**推奨**）
+
+素の TUI に `--port` を付ける構成では 1 プロセス 1 ポートなので、
+**当該ポートの `/event` に流れる `session.created` は一意に自分の instance のもの**になる。
+事前作成が要らず、サーバ未起動時の順序問題（POST する相手が居ない）も起きない。
+
+#### 5.6.3 **`GET /session` は「このサーバの session」ではない**（重要な落とし穴）
+
+4788 で `GET /session` を叩くと、**4790 の serve が作った session まで返ってきた。**
+
+```
+ses_…  | Greeting          ← 4790 で作った
+ses_…  | plugin-probe      ← 4790 で作った
+ses_…  | PONG-A            ← 4788 で作った
+ses_…  | cmate-instance-2  ← 4788 で作った
+```
+
+同一 `HOME` かつ同一 project directory なので `~/.local/share/opencode/opencode.db` を共有しており、
+**session はサーバプロセスではなく (HOME, project) に属する。**
+
+→ **`GET /session` を「自分の instance 一覧」として使ってはいけない。**
+CommandMate は自前で `instanceId ↔ sessionID` を持つこと（既存の instance roster に列を足す）。
+
+#### 5.6.4 `/exit` はイベントを出さない（`session_end` の不在）
+
+attach した TUI に `/exit` を送った。
+
+| 観測 | 結果 |
+|---|---|
+| tmux セッション | 終了した（既存 `killSession` と整合） |
+| SSE（heartbeat 以外） | **0 件** |
+| `GET /session` | 当該 session は**残っている** |
+
+`session.deleted` が出るのは `DELETE /session/:id` を明示的に呼んだときだけ。
+
+```bash
+curl -sS -X DELETE http://127.0.0.1:4788/session/ses_…
+# true / HTTP 200
+# => 08:12:57.043 session.deleted { sessionID, info: { … } }
+```
+
+→ **`session_end` に相当する「エージェントが終わった」イベントは存在しない。** プロセス終了の検知は tmux 側に残す。
+逆に、CommandMate が instance を破棄するときに `DELETE /session/:id` を呼ぶかどうかは**設計判断**
+（呼ばないと `opencode.db` に session が溜まり続ける。`opencode session list` / `opencode session delete <id>` という CLI もある）。
+
+---
+
+### 5.7 項目 7 — 接続の生存管理と再接続
+
+#### 5.7.1 `server.heartbeat` が 10 秒周期の死活 signal
+
+10 分間の tap から heartbeat だけ抜いて間隔を測った。
+
+```
+heartbeats: 60  first: 07:57:27.902  last: 08:07:18.393
+gap histogram: [(10.01, 28), (10.00, 20), (10.02, 10), (10.03, 1)]
+```
+
+**きれいに 10 秒周期。** これが「SSE が生きている」ことの signal。
+ただし [§5.2.1](#521-全列挙と実観測) のとおり **`server.heartbeat` は `/doc` の Event union に含まれていない**（D5）ので、
+生成型に頼ると unknown で落ちる。
+
+→ **`wait` / 監視側は「25〜30 秒 heartbeat が来なければ購読が死んだ」と判定できる。**
+
+#### 5.7.2 サーバ消滅時の挙動
+
+| 状況 | 実測 |
+|---|---|
+| 購読中に serve を SIGTERM | SSE が即 close。`curl: (18) transfer closed with outstanding read data remaining`。**クリーンな EOF ではない** |
+| サーバ不在で接続 | `curl: (7) Failed to connect to 127.0.0.1 port 4789 after 0 ms`。HTTP `000`。**1ms 未満で失敗** |
+
+→ **不在判定はほぼ無コスト。** ポーリング間隔ごとに `GET /global/health` を撃っても負荷にならない。
+
+```bash
+curl -sS http://127.0.0.1:4788/global/health
+# {"healthy":true,"version":"1.18.3"}       ← 版まで取れる
+```
+
+#### 5.7.3 `attach` した TUI はサーバの死を画面に出さない
+
+serve を kill してから attach 済み TUI の pane を見た。
+
+```
+        （スプラッシュのまま。エラーも警告も再接続バナーも無い）
+  ┃  Ask anything... "What is the tech stack of this project?"
+  ┃  Build · Claude Sonnet 4.6 GitHub Copilot
+   …/scratchpad/work:master
+```
+
+プロンプトを打って Enter を押しても**何も起きない**（テキストはコンポーザに残り、エラーも出ない）。
+つまり **pane からは「正常に入力待ち」と区別できない。**
+
+**そして同じポートで serve を再起動すると、同じ TUI が無言で自動再接続して復帰した。**
+
+```
+（4790 で serve 再起動 → 同じ pane で Enter）
+     Yes, I'm here. How can I help you?
+     ▣  Build · Claude Sonnet 4.6 · 4.8s
+```
+
+→ 良い面: **serve の再起動を TUI が生き延びる。** 悪い面: **scraper ではサーバの死を検知できない。**
+[§2](#2-検証項目-1-の-gono-go-判断) で serve+attach を採らない理由がこれ（素の TUI 構成なら「サーバが死ぬ = TUI が死ぬ」になり、この中間状態が消える）。
+
+#### 5.7.4 再接続戦略（`?after=<seq>` が使えないので）
+
+[§5.2.2](#522-legacy-event-と-apievent-の違いと-apievent-が使えない理由) のとおり durable replay は 1.18.3 では 0 バイトなので、
+**取りこぼしは REST スナップショットで埋める**。
+
+| 埋めたいもの | 再接続直後に叩く |
+|---|---|
+| 未処理の承認要求 | `GET /permission`（pending 一覧。**これがあるので承認は取りこぼしても回収できる**） |
+| 未処理の質問 | `GET /question` |
+| 各 session の busy/idle | `GET /session/status` → `{"ses_…":{"type":"busy"|"idle"}}` |
+| session 一覧 | `GET /session`（ただし [§5.6.3](#563-get-session-はこのサーバの-session-ではない重要な落とし穴) の注意） |
+
+**`session.idle` の取りこぼしだけは回収できない**（イベントであってステートではない）。
+`GET /session/status` が `idle` を返せば「今は idle」は分かるが、「切断中にターンが終わった」との区別はつかない。
+→ **`wait` は SSE 断を「不明」として扱い、`session.status` の polling へ縮退すること。**
+
+---
+
+### 5.8 項目 8 — 認証
+
+#### 5.8.1 既定は無認証（stderr に警告）
+
+```
+Warning: OPENCODE_SERVER_PASSWORD is not set; server is unsecured.
+opencode server listening on http://127.0.0.1:4788
+```
+
+**この警告は毎回 stderr の第 1 行に出る。** ポート番号の行と一緒に来るので、
+stdout/stderr をパースして実ポートを取るコードは**警告行を読み飛ばす**必要がある（[§5.9](#59-項目-9--ポート衝突と実ポートの知り方)）。
+
+#### 5.8.2 `OPENCODE_SERVER_PASSWORD` を渡すと HTTP Basic
+
+```bash
+HOME="$SP/home" OPENCODE_SERVER_PASSWORD='spike-pw-1234' opencode serve --port 4789 --hostname 127.0.0.1 &
+```
+
+| リクエスト | 結果 |
+|---|---|
+| 資格情報なし | `HTTP 401` ＋ `www-authenticate: Basic realm="Secure Area"` |
+| `-u opencode:wrong` | `HTTP 401` |
+| `-u opencode:spike-pw-1234` | `{"healthy":true,"version":"1.18.3"}` |
+| `-u opencode:spike-pw-1234` で `/event` | `data: {"id":"evt_…","type":"server.connected",…}`（**SSE も Basic で通る**） |
+
+- user 名の既定は **`opencode`**（`OPENCODE_SERVER_USERNAME` で変更可）。`attach` 側も `-u` / `-p` を持つ。
+- **`CM_AUTH_TOKEN` とは無関係な別系統。** opencode サーバは CommandMate の認証機構を知らない。
+
+#### 5.8.3 外部露出しないことの確認
+
+`--hostname` 既定 `127.0.0.1` で LAN IP から接続不可（実測）。
+
+```bash
+ipconfig getifaddr en0            # 192.168.11.6
+curl -m 4 http://192.168.11.6:4788/global/health
+# curl: (7) Failed to connect to 192.168.11.6 port 4788 after 1 ms
+```
+
+→ **#1763 は `--hostname` を指定しない（既定の `127.0.0.1` に任せる）か、明示的に `127.0.0.1` を渡すこと。**
+`--mdns` は「hostname を `0.0.0.0` に既定変更する」と `--help` に書かれている。**絶対に付けない**（無認証のサーバが LAN に出る）。
+CommandMate サーバと opencode サーバは同一ホスト上なので、`OPENCODE_SERVER_PASSWORD` は
+「ローカルの他プロセスからの誤接続を防ぐ」目的なら意味があるが、必須ではない（loopback + パスワード無しが opencode の既定運用）。
+
+---
+
+### 5.9 項目 9 — ポート衝突と実ポートの知り方
+
+#### 5.9.1 `--port 0` は「自動割当」ではない
+
+`--help` は `--port [number] [default: 0]` と書いているが、**0 は「OS に空きを訊く」意味ではない。**
+
+```bash
+HOME="$SP/home" opencode serve --port 0 --hostname 127.0.0.1 &
+# opencode server listening on http://127.0.0.1:4096          ← 1 本目は 4096
+lsof -nP -iTCP:4096 -sTCP:LISTEN
+# opencode 37343 … TCP 127.0.0.1:4096 (LISTEN)
+
+HOME="$SP/home" opencode serve --port 0 --hostname 127.0.0.1 &
+# opencode server listening on http://127.0.0.1:58153         ← 2 本目は ephemeral に落ちた
+```
+
+→ **`--port 0` の意味は「まず 4096 を試し、埋まっていたら OS に任せる」。**
+複数 worktree × 複数インスタンスで無指定に立てると、**1 本目だけが 4096 を掴み、残りは予測不能なポートに散る。**
+
+#### 5.9.2 実ポートを知る手段は 2 つだけ
+
+隔離 HOME 配下を検索したが、**ポートファイル・ロックファイル・PID ファイルは書かれていない**
+（`~/.local/state/opencode/locks/` は空。他は `model.json` と `prompt-history.jsonl` のみ）。
+
+| 手段 | 内容 |
+|---|---|
+| **stdout の 1 行** | `opencode server listening on http://127.0.0.1:<port>`。ただし **stderr に警告行が先に出る**（[§5.8.1](#581-既定は無認証stderr-に警告)） |
+| **`lsof`** | `lsof -nP -p <pid> -a -iTCP -sTCP:LISTEN`（`-a` を忘れると全プロセスが出る） |
+
+→ **結論: CommandMate 側で明示的にポートを割り当てる。** これが唯一の安全策で、
+既に `commandmate start --issue N --auto-port` でポートを割り当てる仕組みがあるので、そこに相乗りする。
+**opencode 側の自動割当に依存すると、CommandMate は自分の立てたサーバのポートを知る信頼できる手段を持たない。**
+
+（Issue の「既知の罠」が懸念する二重管理は、**CommandMate 側の一元管理に寄せることで解消する** — opencode 側の
+割当を読む経路を作らなければ二重にならない。）
+
+---
+
+### 5.10 項目 10 — plugin 方式との比較
+
+### 結論: **server API を採る。plugin は採用しない。**
+
+#### 5.10.1 plugin は動く（ローカル JS ファイルで可）
+
+`opencode plugin <module>` は npm モジュールを config に書き込むコマンドだが、**config に直接ローカルパスを書ける。**
+
+```jsonc
+// $SP/home/.config/opencode/opencode.jsonc
+{ "$schema": "https://opencode.ai/config.json",
+  "model": "github-copilot/claude-sonnet-4.6",
+  "plugin": ["./plugin/cmate-probe.js"] }
+```
+
+```bash
+curl -sS http://127.0.0.1:4790/config | python3 -c 'import json,sys;print(json.load(sys.stdin)["plugin"])'
+# ['file:///…/home/.config/opencode/plugin/cmate-probe.js']     ← 解決されている
+```
+
+<details>
+<summary>使用した probe plugin（<code>cmate-probe.js</code>）</summary>
+
+```js
+import { appendFileSync } from "node:fs";
+const LOG = process.env.CMATE_PLUGIN_LOG || "/tmp/cmate-plugin-probe.log";
+const w = (tag, obj) => { try { appendFileSync(LOG, JSON.stringify({ tag, at: new Date().toISOString(), obj }) + "\n"); } catch {} };
+export const CmateProbe = async (input) => {
+  w("init", { keys: Object.keys(input ?? {}), directory: input?.directory, worktree: input?.worktree });
+  return {
+    event: async ({ event }) => w("event", { type: event?.type }),
+    "permission.ask": async (permission, output) => w("permission.ask", { permission, output }),
+    "tool.execute.before": async (input, output) => w("tool.execute.before", { input }),
+    "tool.execute.after": async (input, output) => w("tool.execute.after", { input }),
+  };
+};
+```
+</details>
+
+観測できた invocation:
+
+```
+23:07:49.021  init                  keys = [client, project, worktree, directory,
+                                            experimental_workspace, serverUrl, $]
+23:08:18.100  tool.execute.before   { tool: "bash", sessionID: "ses_…", callID: "toolu_…" }
+23:11:00.035  tool.execute.after    { tool: "bash", sessionID: "ses_…", callID: "toolu_…",
+                                      args: { command: "touch /private/tmp/cmate-oc-plugin.txt" } }
+```
+
+`init` の引数に **`client`（SDK クライアント）と `serverUrl` が入っている**ので、plugin から REST を叩くこともできる。
+
+#### 5.10.2 しかし採用しない理由（3 つ、いずれも実測）
+
+**(1) `event` フックの語彙は SSE と同一で、情報が 1 つも増えない**
+
+plugin が受け取ったイベント種別（`plugin.added` を除く）:
+
+```
+2 catalog.updated   1 integration.updated   4 message.part.updated   3 message.updated
+1 permission.asked  1 reference.updated     1 session.created        1 session.diff
+2 session.status    3 session.updated
+```
+
+SSE で見えるものと**完全に同じ**。plugin にしかない情報は無い。
+
+**(2) 承認を裁定する plugin フックが存在しない**
+
+`permission.ask` を登録したが **`permission.asked` イベントが出ているのに 0 回**しか呼ばれなかった。
+バイナリを調べると、**`"permission.ask"` という文字列自体が 1.18.3 に存在しない。**
+
+```bash
+strings -a ~/.opencode/bin/opencode | grep -c 'permission\.ask"'
+# 0
+strings -a ~/.opencode/bin/opencode | grep -oE '"[a-z]+\.execute\.(before|after)"'
+# "command.execute.before"
+# "tool.execute.after"
+# "tool.execute.before"
+```
+
+**plugin の hook 面は `event` / `tool.execute.before` / `tool.execute.after` / `command.execute.before` だけで、
+承認の裁定は含まれない。** 承認を返せるのは REST endpoint のみ。
+→ Phase 4-5（Auto-Yes）の中核が plugin では実装できない。**これが決定的な理由。**
+
+**(3) 導入コストと非汚染性で劣る**
+
+| | plugin | server API |
+|---|---|---|
+| 導入 | `opencode.jsonc` の `plugin` 配列に書き込む＝**ユーザーの設定ファイルを書き換える** | **書き換え不要**。`--port` 引数だけ |
+| 配布 | JS ファイルを worktree か config dir に置く。opencode の版差でフックの signature が変わる | HTTP/JSON。OpenAPI が付いてくる |
+| プロセス | opencode プロセス内。plugin の例外が opencode に影響しうる | 別プロセス。CommandMate が落ちても opencode は動く |
+| CommandMate との通信 | plugin から CommandMate へ HTTP を張り直すことになる（結局 HTTP） | 直接 |
+
+`ensureOpencodeConfig()`（`src/lib/cli-tools/opencode-config.ts`）は既に `opencode.json` を生成しているので
+plugin を書き込む前例はある。**しかし (2) だけで plugin は候補から外れる。**
+
+---
+
+## 6. 未実施・積み残し
+
+「実測済み」と誤解されないよう明示する。**検証項目 1〜10 のセルはすべて埋まっている**（[§1](#1-結論サマリ)）が、
+その内側で確認しきれなかったものが以下。
+
+| 項目 | 状態 | 理由 |
+|---|---|---|
+| `permission.v2.*` / `question.v2.*` / `session.next.*` の payload | **未採取** | 1.18.3 の legacy `/event` に流れず、`/api/event` は 3 件で沈黙する（[§5.2.2](#522-legacy-event-と-apievent-の違いと-apievent-が使えない理由)）。**v2 が使えないという事実自体が成果物** |
+| `installation.update-available`（update banner 相当） | **未計測** | 更新保留状態を作れなかった（#1721 の update banner と同じ理由）。型定義には `{version}` があるので**存在は確実**だが発火条件は未確認 |
+| `session.compacted` / `/session/:id/summarize` | **未計測** | context 溢れを起こす必要があり本スパイクの尺に合わない |
+| `--port 0` の 3 本目以降 / ephemeral 範囲 | **2 本まで** | 4096 → 58153 を確認。**明示指定に寄せる**結論が出たため深追いしていない |
+| `always` の永続化先 | **未特定** | `always` を返すと許可は効くが `GET /api/permission/saved` は空だった（[§5.5.1](#551-rest-で裁定できるissue-記載の-endpoint-はそのまま使える)）。プロセス内のみか別ストアかは未確認。**Auto-Yes は `always` を使わず `once` を使うのが安全** |
+| `--pure` / MCP / LSP 有効時のイベント差 | **未計測** | LSP は `LSPs are disabled` の状態で全実測を行った |
+| Ollama / LM Studio provider での挙動差 | **一部のみ** | LM Studio では model 未ロードで `session.error` になった（これ自体は §5.3.2 の証拠として使った）。CommandMate の既定は Ollama / LM Studio なので、**#1763 は local provider でも 1 度は通すこと** |
+| dev モードでの購読二重化 | **未検証** | Next.js 側の話でコード変更を伴うため #1763 のスコープ。#1736 の前例（`globalThis` 非経由の in-memory 状態が dev で無言に壊れる）を踏まえること |
+| 複数 worktree（別 project）での `opencode.db` 共有 | **未検証** | 同一 project で共有されることは確認した（[§5.6.3](#563-get-session-はこのサーバの-session-ではない重要な落とし穴)）。別 project 間でどう分離されるかは未確認 |
+| 対応バージョンレンジ | **1.18.3 のみ** | 手元に 1 版しかない。**「1.18.3 で動作」を前提とし、レンジを広く仮定しないこと** |
+
+---
+
+## 7. 非汚染の証拠
+
+### 7.1 opencode のユーザー設定（before / after diff が空）
+
+全検証（serve 6 プロセス ＋ TUI 5 セッション ＋ REST 呼び出し多数 ＋ plugin ロード）を通して、
+**すべて隔離 HOME（`$SP/home`）で実行した。**
+
+```bash
+# ~/.config/opencode/opencode.jsonc
+diff "$SP/baseline/opencode.jsonc.before" ~/.config/opencode/opencode.jsonc && echo "OPENCODE_JSONC_DIFF_EMPTY"
+# => OPENCODE_JSONC_DIFF_EMPTY
+```
+
+```bash
+# sha256（検証前 / 検証後で完全一致）
+4e901f9e457c8d52ab31f9fb4ea637a8c9104ebdbf23fe8b3600f35ad46d4a61  ~/.config/opencode/opencode.jsonc
+b6ebd9719f8c08ec08e82386fa70b3f7bdaf2be4ca0a570c7ec9bd95ffbdd201  ~/.config/opencode/package.json
+eec9856e414d105f1026abd4322f340f2ef3d7b568b7521ca86dc7de6ec5e482  ~/.local/share/opencode/auth.json
+```
+
+```bash
+# ディレクトリ構成の diff（log/ を除く）
+diff share-listing.before share-listing.after && echo "SHARE_LISTING_DIFF_EMPTY"    # => SHARE_LISTING_DIFF_EMPTY
+diff config-listing.before config-listing.after && echo "CONFIG_LISTING_DIFF_EMPTY" # => CONFIG_LISTING_DIFF_EMPTY
+```
+
+```bash
+# mtime（すべて検証開始 2026-08-13 07:54 より前のまま）
+ls -lT ~/.local/share/opencode/opencode.db ~/.local/share/opencode/auth.json ~/.config/opencode/opencode.jsonc
+# 7月 19 23:54:56 2026  ~/.config/opencode/opencode.jsonc
+# 3月  6 09:23:02 2026  ~/.local/share/opencode/auth.json
+# 7月 19 23:56:37 2026  ~/.local/share/opencode/opencode.db        ← 58MB の実 DB。1 バイトも触っていない
+```
+
+**`~/.config/opencode/opencode.jsonc` と `~/.local/share/opencode/` の before/after diff は空。**
+隔離が効いていることは `GET /path` の応答（[§4.1](#41-隔離-home)）でも裏取りしてある。
+モデルピッカーは**一度も開いていない**（config で固定した）。
+隔離 HOME に複製した `auth.json`（mode 600）は検証後に scratchpad ごと破棄される。
+
+### 7.2 tmux
+
+- すべて `tmux -L cmate-p4spike-oc` の**専用 socket 上**（#1757 の `cmate-p4spike` とは別 socket）。
+- **`kill-server` は使用していない。** 後始末は `kill-session -t '=<name>:'`（完全一致）のみ。
+- 検証後、専用 socket は `no server running on /private/tmp/tmux-501/cmate-p4spike-oc`。
+- **既定 socket 上のユーザーセッション（`mcbd-*` 10 本）は全て健在**であることを `tmux list-sessions` で確認済み。
+- `bind-key` / `unbind-key` / `set-option -g` は撃っていない。
+
+### 7.3 プロセスとポート
+
+- **3000 番（ユーザーの稼働中 CommandMate 本番サーバ）には 1 リクエストも送っていない。**
+  検証後の確認: `node 21576 … TCP 127.0.0.1:3000 (LISTEN)` / `curl 127.0.0.1:3000 → HTTP 200`。
+- 立てた serve は **PID を控えて個別 kill**（`pkill -f opencode` のような広域 kill は使用していない）。
+  検証後 `ps -eo pid,command | grep -E 'opencode (serve|attach|--port)'` → **NONE**、4096/4788/4789/4790/4791/4792 すべて解放。
+- probe で作った `/tmp/cmate-oc-*.txt` は削除済み。
+
+### 7.4 リポジトリ
+
+- **`src/` 配下の変更は 0 件。** 本コミットで触るのは `docs/design/` と `tests/fixtures/hooks/opencode/` と `CHANGELOG.md` のみ。
+- fixture は実 ID / 実パス / ユーザー名がプレースホルダに置換されていることを `grep` で確認済み
+  （`grep -rlE 'maenokota|ses_007|per_ff|que_ff|msg_ff|prt_ff|evt_ff|toolu_bdrk|/private/tmp/claude-501'` → 該当なし）。
+
+---
+
+## 8. Issue #1758 の「既知の罠」への回答
+
+| Issue が挙げた罠 | 実測を踏まえた回答 |
+|---|---|
+| 「serve/attach へ変えるのは**起動経路の変更**であり、既存の `killSession`（`/exit` 送出）や初期化待ちループとの整合を確認する必要がある」 | **serve/attach へ変えないので問題にならない**（[§2](#2-検証項目-1-の-gono-go-判断) / D1）。素の TUI に `--port <N>` を足すだけで、`killSession` の `/exit`・`OPENCODE_INIT_WAIT_MS` の初期化待ち・`reconcileExistingSession` は変更不要。なお `attach` した TUI でも `/exit` は正常に効き tmux セッションが終了することを実測済み（[§5.1.1](#511-serve--attach-は成立する)） |
+| 「`opencode --port` の既定は 0（自動割当）。CommandMate は既に worktree ごとにポートを扱う仕組みを持つので、二重管理にならないか確認する」 | **既定 0 は自動割当ではなく「4096 優先 + ephemeral 退避」**（D3）。**CommandMate 側で明示指定すれば二重管理は起きない**（opencode の割当を読む経路を作らないため）。逆に**明示しないと実ポートを知る信頼できる手段が無い**（[§5.9](#59-項目-9--ポート衝突と実ポートの知り方)） |
+| 「SSE の購読は Next.js のサーバプロセス内に持つことになる。dev モードでモジュールが再評価されると購読が二重化・消失する（#1736 の前例）」 | **実測していない（#1763 のスコープ）が、懸念は妥当。** 購読レジストリは `globalThis` 経由で持つこと。加えて **`/event` は同一サーバに複数の購読を許す**（本スパイクで legacy と v2 を同時に張れた）ので、**二重購読はサーバ側では検出されず、イベントが 2 倍で届く形で顕れる**。購読の重複排除は CommandMate 側の責務 |
+
+---
+
+## 9. Phase 4-1（#1759 抽象抽出）への要求事項（**最重要**）
+
+**本スパイクの最重要成果物。** `AgentEventSource` は push 型（hooks）だけでなく **pull 型（SSE 購読 + REST 応答）も表現できなければならない。**
+実測から導かれる制約と、それを満たす I/F 案を示す。
+
+### 9.1 実測から導かれる 8 つの制約
+
+| # | 制約 | 根拠 |
+|---|---|---|
+| **C1** | **イベントの到着方向が逆。** hooks は「エージェント → CommandMate の HTTP POST」で、受け口は `route.ts` 1 本あればよい。opencode は「CommandMate → エージェントへ長時間の GET を張る」。**購読の開始・停止・再接続というライフサイクルが抽象に要る** | [§5.2](#52-項目-2--イベント語彙) |
+| **C2** | **裁定の返し方が違う。** hooks は「受け取った HTTP リクエストのレスポンス body」で返す（同期・1 往復）。opencode は**別の REST 呼び出し**で返す（非同期・別コネクション）。**「イベントに対して答える」ことを、レスポンス body に限定しない形で表現する必要がある** | [§5.5](#55-項目-5--承認裁定の応答と-no-decision-の実際の意味) |
+| **C3** | **fail 方向が逆。** hooks は無応答が fail-**open**（エージェントは進む）。opencode は無応答が **無限待ち**（タイムアウト無し、10 分 19 秒実測）。**「答えないことの意味」がソースごとに違うので、抽象がそれを宣言できなければならない** | [§5.5.3](#553-no-decision-の実際の意味--タイムアウトは無いtui-へ落ちるのではなく最初から並行している) |
+| **C4** | **7 語への写像が 1:1 でない。** `pre_tool_use` / `post_tool_use` は「同一イベント種別の状態フィールド違い」、`user_prompt_submit` は「複数イベントの合成」、`notification` は「3 つの別イベントの束」、`session_end` は**不在**。**変換は「名前の対応表」では足りず、述語つきのマッパが要る** | [§5.2.3](#523-agent_event_types-7-語へのマッピング) |
+| **C5** | **相関キーがソースごとに違う。** Claude は `session_id`（`/clear` で変わる）＋ `prompt_id`。opencode は `sessionID`（安定）＋ tool は `callID`。**instance への紐付けは抽象の外（レジストリ）で決める必要がある**。加えて opencode では `GET /session` が他プロセスの session まで返す | [§5.6](#56-項目-6--インスタンス相関) |
+| **C6** | **接続の健全性という概念が opencode にだけある。** `server.heartbeat` 10 秒周期、断は `ECONNREFUSED`。**「このソースは今生きているか」を問える必要がある**（hooks は常に「不明」でよい） | [§5.7](#57-項目-7--接続の生存管理と再接続) |
+| **C7** | **取りこぼしの回収手段がソースごとに違う。** hooks は取りこぼしたら失われる。opencode は `GET /permission` / `GET /question` / `GET /session/status` でステートを引き直せる（が `session.idle` は引き直せない）。**「再同期」を任意操作として持てる形が要る** | [§5.7.4](#574-再接続戦略-aftersecq-が使えないので) |
+| **C8** | **未知のイベントを捨ててはいけない。** `/doc` の Event union に `server.heartbeat` が無いのに実際は流れる。opencode の 89 種は今後も増える。**未知の `type` は例外にせず無視する（そして数える）** | [§5.2.1](#521-全列挙と実観測) / D5 |
+
+### 9.2 I/F 案
+
+```ts
+// src/lib/agents/agent-event-source.ts（#1759 で新設される想定）
+
+/**
+ * どちらの向きでイベントが届くか。C1。
+ *
+ * - 'push' … エージェントが CommandMate へ POST する（Claude / codex / gemini / copilot / agy の hooks）。
+ *            受け口は既存の route。ソースは「登録されている」だけで、開始も停止もない。
+ * - 'pull' … CommandMate がエージェントの HTTP サーバへ購読を張る（opencode の GET /event）。
+ *            開始・停止・再接続・健全性というライフサイクルを持つ。
+ */
+export type AgentEventTransport = 'push' | 'pull';
+
+/**
+ * 裁定しなかったとき何が起きるか。C3。**この 1 フィールドが Auto-Yes の安全性設計を決める。**
+ *
+ * - 'proceeds'      … エージェントは通常フローへ進む（Claude: 空応答 / timeout / 接続不能すべてこれ）。
+ *                     「判断できないときは黙る」が安全側に倒れる。
+ * - 'blocks'        … エージェントは無期限に待つ（opencode: タイムアウト無し、10m19s 実測）。
+ *                     黙るとセッションが静かに止まる。**見送りを利用者に見せる責務が呼び出し側に生じる。**
+ * - 'blocksUntil'   … 待つが上限がある（該当ソースは現時点で無い。将来 opencode が付けたとき用）。
+ */
+export type NoDecisionBehavior =
+  | { kind: 'proceeds' }
+  | { kind: 'blocks' }
+  | { kind: 'blocksUntil'; timeoutMs: number };
+
+/** 正規化済みイベント。7 語 + ソース固有の生 payload。 */
+export interface NormalizedAgentEvent {
+  event: AgentEventType;              // AGENT_EVENT_TYPES の 7 語
+  detail: string | null;              // extractClaudeEventDetail 相当（tool 名 / reason / notification 種別）
+  /** instance を引くための、ソース内での会話単位の ID。Claude: session_id / opencode: sessionID。C5 */
+  conversationId: string | null;
+  /** tool 呼び出しの相関キー。Claude: tool_use_id（無い場合あり）/ opencode: part.callID。C5 */
+  toolCallId: string | null;
+  /** 検証・fixture 化のために捨てない生データ。 */
+  raw: Record<string, unknown>;
+  receivedAt: number;
+}
+
+/** 人間の判断を求められている、という 1 件。承認と質問を同じ形で扱う。 */
+export interface PendingDecision {
+  kind: 'permission' | 'question';
+  /** 裁定 REST の path に入る ID。opencode: per_… / que_…。push 型では hook の呼び出し ID。 */
+  id: string;
+  conversationId: string;
+  /** 承認: 実行しようとしているもの（opencode の metadata.command 等）。質問: 質問文と選択肢。 */
+  subject: PermissionSubject | QuestionSubject;
+  raw: Record<string, unknown>;
+  askedAt: number;
+}
+
+/** 裁定。opencode の 3 値（once/always/reject）と Claude の 2 値（allow/deny）を包含する。 */
+export type Verdict =
+  | { kind: 'allowOnce' }
+  | { kind: 'allowAlways' }                       // opencode の "always"。Claude には対応が無い
+  | { kind: 'deny'; message?: string }            // message は opencode の /permission/:id/reply と Claude の deny 双方で使う
+  | { kind: 'answer'; answers: string[][] }       // question 用（opencode の QuestionAnswer[]）
+  | { kind: 'abstain' };                          // 裁定しない。**意味は noDecision で決まる。C3**
+
+/** 購読の健全性。C6。 */
+export type SourceLiveness =
+  | { state: 'unknown' }                                   // push 型は常にこれ
+  | { state: 'live'; lastHeartbeatAt: number }             // opencode: server.heartbeat（10s 周期）
+  | { state: 'lost'; since: number; reason: string };      // ECONNREFUSED / SSE close
+
+export interface AgentEventSource {
+  readonly cliToolId: CLIToolType;
+  readonly transport: AgentEventTransport;                 // C1
+  readonly noDecision: NoDecisionBehavior;                 // C3
+
+  /**
+   * 購読を開始する。
+   * push 型は no-op に近い（登録を確認して返す）。pull 型は SSE を張る。
+   *
+   * onEvent には**正規化済みイベントだけ**が渡る。7 語に写らない生イベントは
+   * ここで落ちるが、**未知の type は例外にせず捨てて数える**（C8）。
+   */
+  subscribe(target: AgentInstanceRef, onEvent: (e: NormalizedAgentEvent) => void): Promise<Subscription>;
+
+  /**
+   * 裁定を返す。C2。
+   * push 型は「保留している HTTP レスポンスに body を書く」実装、
+   * pull 型は「REST を叩く」実装になり、**呼び出し側はどちらか知らない**。
+   *
+   * abstain は push 型では「空応答を返す」、pull 型では「何もしない」に落ちる。
+   * **その意味の違いは noDecision が宣言している。**
+   */
+  decide(target: AgentInstanceRef, decision: PendingDecision, verdict: Verdict): Promise<void>;
+
+  /**
+   * いま人間の判断を待っているものを引き直す。C7。
+   * pull 型は GET /permission + GET /question。push 型は in-memory の保留分。
+   * **再接続直後の取りこぼし回収に使う。**
+   */
+  listPending(target: AgentInstanceRef): Promise<PendingDecision[]>;
+
+  /**
+   * 会話の busy/idle を引き直す。C7。
+   * pull 型は GET /session/status。**push 型は null を返してよい**（引き直せない）。
+   * `session.idle` はイベントであってステートではないので、これは「今 busy か」しか答えない。
+   */
+  probeActivity(target: AgentInstanceRef): Promise<'busy' | 'idle' | null>;
+
+  /** C6。push 型は常に { state: 'unknown' }。 */
+  liveness(target: AgentInstanceRef): SourceLiveness;
+}
+
+export interface Subscription {
+  close(): Promise<void>;
+  readonly liveness: SourceLiveness;
+}
+```
+
+### 9.3 マッパの形（C4 — 名前の表では足りない）
+
+Claude 側は `CLAUDE_HOOK_EVENT_NAMES`（`Record<string, AgentEventType>`）で足りていた。
+opencode は**述語**が要る。
+
+```ts
+type EventMapper = (rawType: string, payload: Record<string, unknown>) => NormalizedAgentEvent | null;
+
+// opencode の例（実測に基づく。src/lib/hooks/agent-event-types.ts と同じ「fixture が正」の原則で書く）
+const OPENCODE_MAPPERS: ReadonlyArray<EventMapper> = [
+  // 1:1
+  t('session.idle',    'stop'),
+  t('session.created', 'session_start'),
+  t('session.deleted', 'session_end'),      // ただし DELETE のときだけ。/exit では出ない（§5.6.4）
+
+  // 複合: role を見る
+  (ty, p) => ty === 'message.updated' && role(p) === 'user' ? ev('user_prompt_submit', p) : null,
+
+  // 部分一致: 同一 type の state.status で pre/post に分かれる
+  (ty, p) => ty === 'message.part.updated' && toolStatus(p) === 'running'
+    ? ev('pre_tool_use', p, { detail: toolName(p), toolCallId: callId(p) }) : null,
+  (ty, p) => ty === 'message.part.updated' && ['completed', 'error'].includes(toolStatus(p) ?? '')
+    ? ev('post_tool_use', p, { detail: toolName(p), toolCallId: callId(p) }) : null,
+
+  // 束: 3 つの別イベントが notification に集まる。detail で区別する
+  t('permission.asked', 'notification', 'permission_prompt'),
+  t('question.asked',   'notification', 'question_prompt'),
+  t('session.error',    'notification', 'error'),
+];
+```
+
+**`detail` の値域はソース横断で決めること。** Claude は `notification_type`（`permission_prompt` / `idle_prompt`）を
+そのまま使っている。opencode に `idle_prompt` は無く、代わりに `question_prompt` が要る。
+**`detail` を横断的な enum にするか、ソースごとの自由文字列のままにするかは #1759 の判断事項**だが、
+`wait --on-prompt` が両ソースで同じ意味になるためには、少なくとも
+**「人間の入力を待って止まっている」を表す値が共通化されていなければならない。**
+
+### 9.4 #1759 が守るべきこと（チェックリスト）
+
+- [ ] `AgentEventSource` が `transport: 'push' | 'pull'` を持ち、**`subscribe` / `close` が push 型でも意味を持つ**（no-op でよいが呼べる）
+- [ ] **`decide()` が「レスポンス body に書く」実装と「別の REST を叩く」実装の両方を隠せる**（C2）
+- [ ] **`noDecision` が型として存在し、`abstain` の意味がソースごとに違うことを呼び出し側が読める**（C3）。
+      **これが欠けると Auto-Yes v2 が opencode でセッションを静かに止める**
+- [ ] `Verdict` が **3 値（once / always / reject）と question の `answers`** を表現できる
+- [ ] マッパが **述語つき**（`Record<string, AgentEventType>` では opencode を写せない）（C4）
+- [ ] `liveness()` / `listPending()` / `probeActivity()` があり、**push 型では `unknown` / in-memory / `null` を返してよい**（C6 / C7）
+- [ ] **未知の `type` で throw しない**（C8）
+- [ ] `session_end` が**来ないソースがある**ことを前提に、instance の終了検知を tmux 側に残す
+- [ ] 購読レジストリを **`globalThis` 経由**で持つ（dev のモジュール再評価で消える #1736 の前例）
+- [ ] `conversationId` を**永続キーにしない**（Claude は `/clear` で変わる。opencode は安定だが他プロセスの session が混ざる）
+
+---
+
+## 10. 関連
+
+- Epic: [#1720](https://github.com/Kewton/CommandMate/issues/1720)
+- 先行スパイク（Claude hooks）: [`agent-hooks-live-verification.md`](./agent-hooks-live-verification.md) / [#1721](https://github.com/Kewton/CommandMate/issues/1721)
+- 並行スパイク（codex / gemini / copilot / agy hooks）: [#1757](https://github.com/Kewton/CommandMate/issues/1757)
+- 下流: [#1759](https://github.com/Kewton/CommandMate/issues/1759)（抽象抽出）/ [#1763](https://github.com/Kewton/CommandMate/issues/1763)（opencode 対応）
+- fixtures: [`tests/fixtures/hooks/opencode/`](../../tests/fixtures/hooks/opencode/)（[README](../../tests/fixtures/hooks/opencode/README.md) にマッピング表あり）
+- 既存の 7 語定義: `src/lib/hooks/agent-event-types.ts`
+- 既存の opencode 起動: `src/lib/cli-tools/opencode.ts`（`:136` の `sendKeys(sessionName, 'opencode', true)` に `--port` を足す）
+- 既存の opencode config 生成: `src/lib/cli-tools/opencode-config.ts`（`ensureOpencodeConfig()`）
+- opencode 自身の API 定義: 稼働中のサーバの `GET /doc`（OpenAPI 3.1.0）。**推測せずここを見ること**

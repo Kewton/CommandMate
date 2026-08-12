@@ -1,0 +1,15 @@
+{
+  "id": "evt_0000000000000000000000000",
+  "type": "message.part.updated",
+  "properties": {
+    "sessionID": "ses_0000000000000000000000000",
+    "part": {
+      "type": "text",
+      "text": "Reply with exactly: PONG-A. Do not use any tools.",
+      "messageID": "msg_0000000000000000000000000",
+      "sessionID": "ses_0000000000000000000000000",
+      "id": "prt_0000000000000000000000000"
+    },
+    "time": 1786575464890
+  }
+}
