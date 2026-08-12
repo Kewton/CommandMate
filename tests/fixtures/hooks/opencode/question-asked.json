@@ -1,0 +1,28 @@
+{
+  "id": "evt_0000000000000000000000000",
+  "type": "question.asked",
+  "properties": {
+    "id": "que_0000000000000000000000000",
+    "sessionID": "ses_0000000000000000000000000",
+    "questions": [
+      {
+        "question": "Which colour do you prefer?",
+        "header": "Colour preference",
+        "options": [
+          {
+            "label": "Red",
+            "description": "The colour red"
+          },
+          {
+            "label": "Blue",
+            "description": "The colour blue"
+          }
+        ]
+      }
+    ],
+    "tool": {
+      "messageID": "msg_0000000000000000000000000",
+      "callID": "toolu_0000000000000000000000000"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "evt_0000000000000000000000000",
+  "type": "question.replied",
+  "properties": {
+    "sessionID": "ses_0000000000000000000000000",
+    "requestID": "que_0000000000000000000000000",
+    "answers": [
+      [
+        "Blue"
+      ]
+    ]
+  }
+}

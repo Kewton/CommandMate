@@ -1,0 +1,21 @@
+{
+  "id": "evt_0000000000000000000000000",
+  "type": "message.part.updated",
+  "properties": {
+    "sessionID": "ses_0000000000000000000000000",
+    "part": {
+      "id": "prt_0000000000000000000000000",
+      "messageID": "msg_0000000000000000000000000",
+      "sessionID": "ses_0000000000000000000000000",
+      "type": "tool",
+      "tool": "bash",
+      "callID": "toolu_0000000000000000000000000",
+      "state": {
+        "status": "pending",
+        "input": {},
+        "raw": ""
+      }
+    },
+    "time": 1786575517389
+  }
+}

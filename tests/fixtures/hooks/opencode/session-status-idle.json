@@ -1,0 +1,10 @@
+{
+  "id": "evt_0000000000000000000000000",
+  "type": "session.status",
+  "properties": {
+    "sessionID": "ses_0000000000000000000000000",
+    "status": {
+      "type": "idle"
+    }
+  }
+}
