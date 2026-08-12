@@ -476,7 +476,7 @@
     },
     {
       "name": "agents",
-      "descriptionKey": "slashCommands.descriptions.agents",
+      "descriptionKey": "slashCommands.descriptions.agents.opencode",
       "category": "standard-config",
       "cliTools": [
         "opencode"
@@ -1396,7 +1396,7 @@
     },
     {
       "name": "import",
-      "descriptionKey": "slashCommands.descriptions.import",
+      "descriptionKey": "slashCommands.descriptions.import.codex",
       "category": "standard-util",
       "cliTools": [
         "codex"
@@ -1620,6 +1620,36 @@
       "category": "standard-util",
       "cliTools": [
         "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "agents",
+      "descriptionKey": "slashCommands.descriptions.agents.claude",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "import",
+      "descriptionKey": "slashCommands.descriptions.import.claude",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "list-agents",
+      "descriptionKey": "slashCommands.descriptions.list-agents",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
       ],
       "isStandard": true,
       "source": "standard"

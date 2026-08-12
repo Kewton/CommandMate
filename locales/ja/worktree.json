@@ -131,7 +131,10 @@
       "connect": "言語サーバーに接続",
       "exit": "OpenCode TUI を終了",
       "models": "AI モデルを切り替え",
-      "agents": "利用可能なエージェントを一覧・管理",
+      "agents": {
+        "opencode": "利用可能なエージェントを一覧・管理",
+        "claude": "サブエージェントの作成・管理を Claude に依頼するか .claude/agents/ を直接編集するよう促す案内を表示"
+      },
       "themes": "TUI のテーマを変更",
       "editor": "長文メッセージ用のエディタを開く",
       "advisor": "アドバイザーツールの有効・無効を切り替え（要所で第 2 のモデルに助言を求める）",
@@ -203,7 +206,10 @@
       "sandbox-add-read-dir": "サンドボックスに読み取り可能なディレクトリを追加: /sandbox-add-read-dir [絶対パス]",
       "experimental": "実験的機能を切り替え",
       "approve": "直近の自動レビュー拒否に対する再試行を 1 回承認",
-      "import": "Claude Code から設定・プロジェクト・最近のチャットを取り込み",
+      "import": {
+        "codex": "Claude Code から設定・プロジェクト・最近のチャットを取り込み",
+        "claude": "OpenAI Codex / Google Gemini CLI の設定（指示ファイル・MCP サーバー・コマンド・サブエージェント・スキル）を Claude Code に取り込み"
+      },
       "archive": "このセッションをアーカイブして終了",
       "delete": "このセッションを完全に削除して終了",
       "app": "このセッションをデスクトップアプリで継続",
@@ -217,7 +223,8 @@
       "rollout": "rollout ファイルのパスを表示",
       "ps": "バックグラウンドのターミナル一覧を表示",
       "personality": "Codex の応答スタイルを選択",
-      "test-approval": "承認リクエストのテスト"
+      "test-approval": "承認リクエストのテスト",
+      "list-agents": "Claude がメッセージを送れるサブエージェントと他の Claude Code セッションを宛先名つきで一覧表示"
     }
   },
   "session": {

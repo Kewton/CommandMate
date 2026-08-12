@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **slash-commands: カタログを claude docs へリコンサイルし、未反映の 3 コマンドを追加** (#1767)
+  - `/agents` `/import` `/list-agents`（いずれも claude のみ）。`code.claude.com/docs/en/commands.md` の実行（2026-08-13）で 3 件とも実在する行であることを確認済み。カタログ総数 159 → 162、claude 可視数 97 → 100（codex 53 / opencode 10 / antigravity 13 は変化なし）
+  - **`/agents` と `/import` は claude 専用の説明キーを持つ**（Issue #1704 の tool-scoped key）。`/agents` は opencode の「利用可能なエージェントを一覧・管理」、`/import` は codex の「Claude Code から設定…を取り込み」という**別の意味の説明を共有していた**ため、そのままでは claude のパレットに他ツール向けの誤った説明が出る。`slashCommands.descriptions.{agents,import}` を tool 別オブジェクトへ分割し、既存ツールの文面は 1 文字も変えずにそれぞれのキーへ移した
+  - `/schedule`（#1488 のキュレーション判断）・`/ultraplan`（#1503 の幻コマンド）・`/pr-comments` `/vim`（上流で削除済み）・`/cost` `/stats`（`/usage` のエイリアス）は**従来どおり追加していない**
+
 ## [0.22.2] - 2026-08-09
 
 > **Highlight**: サーバーを 2 つ動かしている環境で、**`commandmate ls` などが `~/.commandmate/.env` を読まず既定ポート 3000 の別サーバーに繋いでいた**問題を修正する（#1743）。`.env` を読んでいたのは `status` だけだったため「どのサーバーに繋がっているか分からない」状態になり、`cmate-orchestrate` の dispatch は正しく作成・登録した worktree を「無い」と誤判定して run を 1 回無駄に消費していた。解決順を **シェルで export した `CM_PORT` > `~/.commandmate/.env` > 3000** に統一し、`ls` だけでなく `ApiClient` を使う全 subcommand が同じ経路で解決するようにした。**接続先ホストは `localhost` から `127.0.0.1` に変わる**（`status` が報告するアドレスと一致させるため）。あわせて、リリース PR の CI を断続的に落としていた `manager.test.ts` の実プロセス起動（1 ファイルで 20 回以上）を排除し、実行時間を 1.28s → **357ms**（うち tests 7ms）に短縮した（#1752）。
