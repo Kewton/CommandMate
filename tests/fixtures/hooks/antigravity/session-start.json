@@ -1,0 +1,7 @@
+{
+  "artifactDirectoryPath": "<ARTIFACT_DIR>",
+  "conversationId": "22222222-2222-4222-8222-222222222222",
+  "modelName": "gemini-3.5-flash-low",
+  "transcriptPath": "<TRANSCRIPT_PATH>",
+  "workspacePaths": []
+}
