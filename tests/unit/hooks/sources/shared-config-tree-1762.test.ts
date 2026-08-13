@@ -304,17 +304,22 @@ describe('antigravity hooks.json', () => {
     expect(getAntigravityHooksConfigPath()).toBe(join(home, '.gemini', 'config', 'hooks.json'));
   });
 
-  it('registers SessionStart, PostToolUse and Stop — and NOT PreToolUse', () => {
+  it('puts SessionStart, PostToolUse and Stop on the relay — and never PreToolUse', () => {
+    // Was `expect(Object.keys(config)).toEqual([…three…])` +
+    // `expect(config.PreToolUse).toBeUndefined()` until Issue #1779, which
+    // registered `PreToolUse` against its own receiver. The claim underneath
+    // both assertions is unchanged and is what is asserted here instead: **the
+    // relay must never be the thing answering `PreToolUse`**, because
+    // `cmate-agent-event.sh` ends in `curl … >/dev/null` and cannot return a
+    // verdict at all. What changed is that there is now a second command that
+    // can. See `antigravity-permission-1779.test.ts`, which runs it.
     const config = buildAntigravityHookConfig(RELAY);
 
-    expect(Object.keys(config)).toEqual(['SessionStart', 'PostToolUse', 'Stop']);
+    expect(Object.keys(config)).toEqual(['SessionStart', 'PostToolUse', 'Stop', 'PreToolUse']);
 
-    // The single most consequential line of Issue #1762. agy's `PreToolUse`
-    // reply has a *required* `decision` field, and #1757 P10 measured what
-    // "required" means: a hook answering `{}` gets every tool call denied. The
-    // relay writes nothing to stdout, which is that reply. Registering this hook
-    // would ship a machine-wide agent-stopper.
-    expect(config.PreToolUse).toBeUndefined();
+    const preToolUse = JSON.stringify(config.PreToolUse);
+    expect(preToolUse).not.toContain(RELAY);
+    expect(preToolUse).not.toContain('cmate-agent-event.sh');
   });
 
   it('bakes the event word into every command, because the payload cannot carry it', () => {
