@@ -75,3 +75,5 @@ export type { AbstainOutcome } from './abstain';
 
 export { CLAUDE_CLI_TOOL_ID } from './claude/tool-id';
 export { COPILOT_CLI_TOOL_ID } from './copilot/tool-id';
+export { GEMINI_CLI_TOOL_ID } from './gemini/tool-id';
+export { ANTIGRAVITY_CLI_TOOL_ID } from './antigravity/tool-id';

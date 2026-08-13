@@ -32,6 +32,8 @@ import { createLegacyRelaySource } from './legacy-relay';
 import type { AgentEventSource } from './types';
 import { claudeAgentEventSource } from './claude/source';
 import { copilotAgentEventSource } from './copilot/source';
+import { geminiAgentEventSource } from './gemini/source';
+import { antigravityAgentEventSource } from './antigravity/source';
 
 declare global {
   // eslint-disable-next-line no-var
@@ -112,3 +114,5 @@ export function unregisterAgentEventSource(cliToolId: CLIToolType): void {
 // the whole of "adding a tool" — see docs/design/agent-event-source-interface.md.
 registerAgentEventSource(claudeAgentEventSource);
 registerAgentEventSource(copilotAgentEventSource);
+registerAgentEventSource(geminiAgentEventSource);
+registerAgentEventSource(antigravityAgentEventSource);
