@@ -135,9 +135,26 @@ afterEach(async () => {
   closeDbInstance();
   clearAllAutoYesStates();
   clearPolicySuppressions();
+  // Issue #1763: this used to unregister `opencode`, which stopped being a
+  // free-standing stub the moment Phase 4-5 registered a real source for it —
+  // every test in this file would still have passed while deleting it, and
+  // under CI's `fileParallelism: false` the deletion would follow the process
+  // into every later file. The blocking stub below is registered under
+  // `vibe-local`, which is outside Phase 4's scope and therefore has no real
+  // source to destroy.
   const { unregisterAgentEventSource } = await import('@/lib/hooks/sources');
-  unregisterAgentEventSource('opencode');
+  unregisterAgentEventSource(BLOCKING_TOOL);
 });
+
+/**
+ * The tool the blocking stub is registered under.
+ *
+ * Deliberately not `opencode`: that tool now has a real source (#1763), and a
+ * test that overwrites it and then unregisters it leaves the registry worse
+ * than it found it. `vibe-local` has no Phase 4 Issue, so it stays unregistered
+ * however many of #1760-#1763 land.
+ */
+const BLOCKING_TOOL = 'vibe-local' as const;
 
 describe('claude still gets exactly the bytes it got before the abstraction', () => {
   it('an allow is the measured decision JSON, produced by the source', async () => {
@@ -178,36 +195,48 @@ describe('claude still gets exactly the bytes it got before the abstraction', ()
 
 describe('abstaining on a source that blocks is reported (C3)', () => {
   /**
-   * A source that waits forever for a verdict — opencode's measured behaviour.
+   * A source that waits forever for a verdict — opencode's measured behaviour
+   * (#1758 §5.5.3), reproduced under a tool that has no source of its own.
    *
    * Registered for a tool Claude has nothing to do with, so the assertion below
    * cannot be satisfied by anything Claude-shaped. If `noDecision` stops being
    * read — hard-coded to `proceeds`, dropped from the interface, ignored at the
    * call site — this test is the one that notices, and what it is protecting is
    * an opencode session that would otherwise stop in silence.
+   *
+   * `vibe-local` rather than `opencode` on purpose: see {@link BLOCKING_TOOL}.
+   * The stub is a *shape*, not an implementation, and it needs a slot in the
+   * registry that no shipped source is using.
+   *
+   * @param decide - Records the verdicts the receiver hands to the source
    */
-  async function registerBlockingOpencodeSource() {
+  async function registerBlockingSource(
+    decide: (verdict: string) => void = () => {}
+  ): Promise<void> {
     const { registerAgentEventSource, getAgentEventSource } = await import('@/lib/hooks/sources');
-    const base = getAgentEventSource('opencode');
+    // The compatibility relay, whose `parsePermissionRequest` reads the same
+    // captured Claude payload the tests above post — so the only difference
+    // between this request and those is which source answers it.
+    const base = getAgentEventSource(BLOCKING_TOOL);
     registerAgentEventSource({
       ...base,
-      cliToolId: 'opencode',
+      cliToolId: BLOCKING_TOOL,
       transport: 'pull',
       noDecision: { kind: 'blocks' },
-      // Reads the same captured Claude payload, so the only difference between
-      // this request and the ones above is which source answers it.
       parsePermissionRequest: base.parsePermissionRequest,
       encodeVerdict: () => ({ kind: 'outOfBand' }),
-      decide: async () => {},
+      decide: async (_target, _decision, verdict) => {
+        decide(verdict.kind);
+      },
     });
   }
 
   it('logs what abstaining will do to the agent', async () => {
-    await registerBlockingOpencodeSource();
+    await registerBlockingSource();
 
     const { status, body } = await postJson(
       bashPayload('touch /tmp/marker'),
-      `?tool=opencode&worktreeId=${WT}&instanceId=opencode`
+      `?tool=${BLOCKING_TOOL}&worktreeId=${WT}&instanceId=${BLOCKING_TOOL}`
     );
 
     expect(status).toBe(200);
@@ -219,20 +248,20 @@ describe('abstaining on a source that blocks is reported (C3)', () => {
     expect(warning, 'no warning was logged for a blocking source').toBeDefined();
     expect(warning![1]).toMatchObject({
       worktreeId: WT,
-      tool: 'opencode',
-      instanceId: 'opencode',
+      tool: BLOCKING_TOOL,
+      instanceId: BLOCKING_TOOL,
       blocksForMs: null,
     });
     expect(String(warning![1].consequence)).toContain('indefinitely');
   });
 
   it('does not log it when the same source is asked to allow', async () => {
-    await registerBlockingOpencodeSource();
-    setAutoYesEnabled(WT, 'opencode', true, ONE_HOUR_MS);
+    await registerBlockingSource();
+    setAutoYesEnabled(WT, BLOCKING_TOOL, true, ONE_HOUR_MS);
 
     await postJson(
       bashPayload('touch /tmp/marker'),
-      `?tool=opencode&worktreeId=${WT}&instanceId=opencode`
+      `?tool=${BLOCKING_TOOL}&worktreeId=${WT}&instanceId=${BLOCKING_TOOL}`
     );
 
     const warnings = mockLogger.warn.mock.calls.map((call) => call[0]);
@@ -244,27 +273,26 @@ describe('abstaining on a source that blocks is reported (C3)', () => {
     // to answer the HTTP request, and `{}` is the right thing to answer with —
     // but the verdict itself left through `decide()`.
     const decided: string[] = [];
-    const { registerAgentEventSource, getAgentEventSource } = await import('@/lib/hooks/sources');
-    const base = getAgentEventSource('opencode');
-    registerAgentEventSource({
-      ...base,
-      cliToolId: 'opencode',
-      transport: 'pull',
-      noDecision: { kind: 'blocks' },
-      parsePermissionRequest: base.parsePermissionRequest,
-      encodeVerdict: () => ({ kind: 'outOfBand' }),
-      decide: async (_target, _decision, verdict) => {
-        decided.push(verdict.kind);
-      },
-    });
-    setAutoYesEnabled(WT, 'opencode', true, ONE_HOUR_MS);
+    await registerBlockingSource((kind) => decided.push(kind));
+    setAutoYesEnabled(WT, BLOCKING_TOOL, true, ONE_HOUR_MS);
 
     const { body } = await postJson(
       bashPayload('touch /tmp/marker'),
-      `?tool=opencode&worktreeId=${WT}&instanceId=opencode`
+      `?tool=${BLOCKING_TOOL}&worktreeId=${WT}&instanceId=${BLOCKING_TOOL}`
     );
 
     expect(decided).toEqual(['allowOnce']);
     expect(body).toEqual({});
+  });
+
+  it('leaves the real opencode registration alone', async () => {
+    // The regression this file's teardown used to cause: overwriting and then
+    // deleting `opencode` passed every assertion here and quietly dropped the
+    // shipped source for the rest of the process (#1763).
+    const { hasAgentEventSource, getAgentEventSource } = await import('@/lib/hooks/sources');
+    await registerBlockingSource();
+
+    expect(hasAgentEventSource('opencode')).toBe(true);
+    expect(getAgentEventSource('opencode').cliToolId).toBe('opencode');
   });
 });

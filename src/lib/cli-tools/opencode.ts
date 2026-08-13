@@ -7,6 +7,22 @@
  * - sendMessage: sends text via tmux send-keys + Enter
  * - killSession: sends `/exit` command then falls back to tmux kill-session
  * - interrupt(): inherits BaseCLITool default (Escape key) [D2-008]
+ *
+ * ## Structured events (Issue #1763, Epic #1720 Phase 4-5)
+ *
+ * opencode is the one supported agent that does not push lifecycle events at
+ * CommandMate: it is *subscribed to*. #1758 §5.1.2 measured that the plain TUI
+ * serves the same HTTP API `opencode serve` does once it is given `--port`, so
+ * the whole of the launch change is that flag — no second process, no pid to
+ * track, no orphan to reap, and `killSession`'s `/exit`, the init wait and
+ * `reconcileExistingSession` are all untouched.
+ *
+ * What is added around it is three calls into
+ * `@/lib/hooks/sources/opencode/runtime`: reserve a port before the launch
+ * command is built, attach the event stream once the TUI is up, and release
+ * both when the pane is killed. Every one of them is fail-open — a session that
+ * starts without structured events is the pre-#1763 status quo, and the screen
+ * scraper keeps deciding for it exactly as before.
  */
 
 import { BaseCLITool } from './base';
@@ -24,6 +40,14 @@ import { ensureOpencodeConfig } from './opencode-config';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { createLogger } from '@/lib/logger';
+import { beginAgentSession, prepareAgentLaunch } from '@/lib/session/agent-session-lifecycle';
+import {
+  attachOpencodeEventStream,
+  opencodeTarget,
+  releaseOpencodeEventStream,
+  reserveOpencodeServerPort,
+  resumeOpencodeEventStream,
+} from '@/lib/hooks/sources/opencode/runtime';
 import {
   TUI_SESSION_CREATE_WAIT_MS,
   OPENCODE_EXIT_WAIT_MS,
@@ -96,15 +120,31 @@ export class OpenCodeTool extends BaseCLITool {
 
     const sessionName = this.getSessionName(worktreeId, instanceId);
 
+    const target = opencodeTarget(worktreeId, instanceId);
+
     const exists = await hasSession(sessionName);
     if (exists) {
       await this.reconcileExistingSession(sessionName, {
         windowWidth: 80,
         windowHeight: OPENCODE_PANE_HEIGHT,
       });
+      // Issue #1763: the pane outlived this process (a CommandMate restart), so
+      // the subscription that used to watch it is gone while its server is
+      // still listening. Recovered from the recorded port, health-checked, and
+      // skipped silently when there is nothing there. NOT a new generation —
+      // the pane is the same one, and fencing here would discard a still-valid
+      // verdict on every reconnect.
+      await resumeOpencodeEventStream(target, worktreePath);
       logger.info('opencode-session-sessionname');
       return;
     }
+
+    // Issue #1759 (S8) / #1763: everything the previous opencode process
+    // reported through this (worktreeId, instanceId) belongs to a session that
+    // no longer exists, and the key is reused verbatim by the one about to be
+    // created. On the creation path only, before the pane exists, and even if
+    // the launch then fails — falling back to the scraper is always safe.
+    beginAgentSession(target);
 
     try {
       // Generate opencode.json if not present (non-fatal on failure)
@@ -132,11 +172,26 @@ export class OpenCodeTool extends BaseCLITool {
         // Non-fatal: resize may fail in some environments
       }
 
-      // Start OpenCode TUI
-      await sendKeys(sessionName, 'opencode', true);
+      // Issue #1763: pick the port before the command is built. The TUI is its
+      // own HTTP server once `--port` is passed (#1758 §5.1.2), and CommandMate
+      // assigns the number because opencode's `--port 0` is not an OS-assigned
+      // port — it tries 4096 first and only then falls back to an ephemeral one
+      // that nothing can read back (§5.9). Null means "no structured events",
+      // and the launch below is then the pre-#1763 bare command.
+      await reserveOpencodeServerPort(target, worktreePath);
+
+      // Start OpenCode TUI. `prepareAgentLaunch` asks the tool's own
+      // `AgentEventSource` for the command line (S3/S4/S5) and never throws.
+      const launchCommand = prepareAgentLaunch(target, this.command).command;
+      await sendKeys(sessionName, launchCommand, true);
 
       // Wait for OpenCode to initialize (GPU model loading via Ollama)
       await new Promise((resolve) => setTimeout(resolve, OPENCODE_INIT_WAIT_MS));
+
+      // Issue #1763: subscribe once the server has had the same time to come up
+      // that the TUI has. Health-checked first, so an opencode too old to know
+      // `--port` costs one probe and nothing else.
+      await attachOpencodeEventStream(target);
 
       logger.info('started-opencode-session:sessionname');
     } catch (error: unknown) {
@@ -195,6 +250,11 @@ export class OpenCodeTool extends BaseCLITool {
    */
   async killSession(worktreeId: string, instanceId?: string): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
+
+    // Issue #1763: stop watching before the pane goes, so the stream is not
+    // reconnecting to a server that is being shut down. Also gives the port
+    // back — the pane is what held it. Never throws.
+    await releaseOpencodeEventStream(opencodeTarget(worktreeId, instanceId));
 
     try {
       // Step 1: Check if the tmux session currently exists

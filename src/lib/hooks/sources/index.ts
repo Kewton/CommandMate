@@ -74,3 +74,4 @@ export { describeAbstain, describeNoDecision, isAbstainSafe } from './abstain';
 export type { AbstainOutcome } from './abstain';
 
 export { CLAUDE_CLI_TOOL_ID } from './claude/tool-id';
+export { OPENCODE_CLI_TOOL_ID } from './opencode/tool-id';

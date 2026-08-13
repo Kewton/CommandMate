@@ -369,15 +369,30 @@ describe('#1758 §9.4 checklist', () => {
   it('9. the registry it plugs into lives on globalThis', async () => {
     // Asserted in full in agent-event-source.test.ts; restated here because it
     // is item 9 of the checklist and a pull source is registered the same way.
-    const { registerAgentEventSource, unregisterAgentEventSource, getAgentEventSource } =
-      await import('@/lib/hooks/sources/registry');
+    //
+    // The teardown **restores** rather than unregisters (Issue #1763). Since
+    // Phase 4-5 landed, `opencode` has a real registration, and a bare
+    // `unregisterAgentEventSource('opencode')` here would delete it — while
+    // every assertion in this file still passed. Under CI's
+    // `fileParallelism: false` the whole run shares one process, so the deleted
+    // registration would silently drop every later file's opencode back to the
+    // legacy relay. Locally, where files run in parallel, it is invisible.
+    const {
+      registerAgentEventSource,
+      unregisterAgentEventSource,
+      getAgentEventSource,
+      hasAgentEventSource,
+    } = await import('@/lib/hooks/sources/registry');
+    const previous = hasAgentEventSource('opencode') ? getAgentEventSource('opencode') : null;
     registerAgentEventSource(source);
     try {
       expect(globalThis.__agentEventSources?.get('opencode')).toBe(source);
       expect(getAgentEventSource('opencode').transport).toBe('pull');
     } finally {
-      unregisterAgentEventSource('opencode');
+      if (previous) registerAgentEventSource(previous);
+      else unregisterAgentEventSource('opencode');
     }
+    expect(globalThis.__agentEventSources?.get('opencode')).toBe(previous ?? undefined);
   });
 
   it('10. conversationId is carried but is not the key anything is stored under', () => {

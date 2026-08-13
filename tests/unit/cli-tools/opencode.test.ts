@@ -1,9 +1,13 @@
 /**
  * Unit tests for OpenCodeTool
  * Issue #379: OpenCode CLI tool implementation
+ * Issue #1763: structured events — `--port`, the generation fence and the
+ * subscription lifecycle around the unchanged tmux pane handling.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterAll, afterEach, describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
+import { join } from 'path';
+import { makeTempDir, removeTempDir } from '@tests/helpers/temp-dir';
 import { OpenCodeTool, OPENCODE_EXIT_COMMAND, OPENCODE_INIT_WAIT_MS, OPENCODE_PANE_HEIGHT } from '@/lib/cli-tools/opencode';
 
 // Mock tmux module
@@ -40,6 +44,25 @@ vi.mock('util', async (importOriginal) => {
   };
 });
 
+// Issue #1763: the event pipeline is stubbed so no port is bound and no socket
+// is opened. `prepareAgentLaunch` below is deliberately NOT stubbed — the
+// command that reaches the pane is the thing under test.
+vi.mock('@/lib/hooks/sources/opencode/runtime', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/hooks/sources/opencode/runtime')>();
+  return {
+    ...actual,
+    reserveOpencodeServerPort: vi.fn().mockResolvedValue(null),
+    attachOpencodeEventStream: vi.fn().mockResolvedValue(false),
+    resumeOpencodeEventStream: vi.fn().mockResolvedValue(false),
+    releaseOpencodeEventStream: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
+vi.mock('@/lib/session/agent-session-lifecycle', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/session/agent-session-lifecycle')>();
+  return { ...actual, beginAgentSession: vi.fn(actual.beginAgentSession) };
+});
+
 import {
   hasSession,
   createSession,
@@ -48,6 +71,27 @@ import {
 } from '@/lib/tmux/tmux';
 import { ensureOpencodeConfig } from '@/lib/cli-tools/opencode-config';
 import { sendMessageWithSubmitVerification } from '@/lib/cli-tools/submit-verified-sender';
+import { beginAgentSession } from '@/lib/session/agent-session-lifecycle';
+import {
+  attachOpencodeEventStream,
+  releaseOpencodeEventStream,
+  reserveOpencodeServerPort,
+  resumeOpencodeEventStream,
+} from '@/lib/hooks/sources/opencode/runtime';
+import {
+  rememberOpencodePort,
+  resetOpencodePortAssignments,
+} from '@/lib/hooks/sources/opencode/ports';
+
+let sandbox: string;
+
+beforeAll(() => {
+  sandbox = makeTempDir('opencode-tool-');
+});
+
+afterAll(() => {
+  removeTempDir(sandbox);
+});
 
 describe('OpenCodeTool', () => {
   let tool: OpenCodeTool;
@@ -55,7 +99,23 @@ describe('OpenCodeTool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.restoreAllMocks();
+    resetOpencodePortAssignments();
+    // Never the operator's home directory.
+    vi.stubEnv('CM_OPENCODE_PORT_FILE', join(sandbox, 'opencode-ports.json'));
+    vi.stubEnv('CM_AGENT_HOOKS_INJECT', '1');
+    // `clearAllMocks` clears calls but keeps implementations, so the pipeline
+    // stubs are re-stated here — a test that made one reserve a port would
+    // otherwise leak it into every test that follows.
+    vi.mocked(reserveOpencodeServerPort).mockResolvedValue(null);
+    vi.mocked(attachOpencodeEventStream).mockResolvedValue(false);
+    vi.mocked(resumeOpencodeEventStream).mockResolvedValue(false);
+    vi.mocked(releaseOpencodeEventStream).mockResolvedValue(undefined);
     tool = new OpenCodeTool();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    resetOpencodePortAssignments();
   });
 
   describe('properties', () => {
@@ -117,6 +177,93 @@ describe('OpenCodeTool', () => {
       expect(createSession).not.toHaveBeenCalled();
     });
 
+    it('resumes the event stream on the reuse path without a new generation', async () => {
+      // Issue #1763: the pane outlived this CommandMate process. Its opencode
+      // server is still listening, so the subscription is recovered — but the
+      // generation is NOT bumped, because it is the same pane and fencing here
+      // would discard a still-valid verdict on every reconnect.
+      vi.mocked(hasSession).mockResolvedValue(true);
+
+      await tool.startSession('test-123', '/test/path');
+
+      expect(resumeOpencodeEventStream).toHaveBeenCalledWith(
+        { worktreeId: 'test-123', cliToolId: 'opencode', instanceId: undefined },
+        '/test/path'
+      );
+      expect(beginAgentSession).not.toHaveBeenCalled();
+    });
+
+    it('opens a new event generation before the pane is created', async () => {
+      // Issue #1759 S8 / #1763. Mutation target: deleting this call lets the
+      // previous opencode process's last event decide the new session's status
+      // — a freshly started pane publishing `running` before anybody typed.
+      vi.mocked(hasSession).mockResolvedValue(false);
+      vi.mocked(createSession).mockResolvedValue(undefined);
+      vi.mocked(ensureOpencodeConfig).mockResolvedValue(undefined);
+
+      vi.useFakeTimers();
+      void tool.startSession('test-123', '/test/path', 'opencode-2');
+      await vi.runAllTimersAsync();
+      vi.useRealTimers();
+
+      expect(beginAgentSession).toHaveBeenCalledWith({
+        worktreeId: 'test-123',
+        cliToolId: 'opencode',
+        instanceId: 'opencode-2',
+      });
+      // Before the pane exists, so no window has a live pane judged against a
+      // stale generation.
+      expect(vi.mocked(beginAgentSession).mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(createSession).mock.invocationCallOrder[0]
+      );
+    });
+
+    it('launches with --port once a port has been reserved', async () => {
+      // The whole of the launch change (#1758 §5.1.2): the plain TUI is the
+      // HTTP server, so there is no `serve` process to start and no `attach`.
+      vi.mocked(hasSession).mockResolvedValue(false);
+      vi.mocked(createSession).mockResolvedValue(undefined);
+      vi.mocked(ensureOpencodeConfig).mockResolvedValue(undefined);
+      vi.mocked(reserveOpencodeServerPort).mockImplementation(async (target) => {
+        rememberOpencodePort(target, 4242, '/test/path');
+        return 4242;
+      });
+
+      vi.useFakeTimers();
+      void tool.startSession('test-123', '/test/path');
+      await vi.runAllTimersAsync();
+      vi.useRealTimers();
+
+      expect(sendKeys).toHaveBeenCalledWith(
+        'mcbd-opencode-test-123',
+        `'opencode' --port 4242 --hostname 127.0.0.1`,
+        true
+      );
+      expect(attachOpencodeEventStream).toHaveBeenCalled();
+    });
+
+    it('launches the bare TUI when CM_AGENT_HOOKS_INJECT=0', async () => {
+      // The rollback. Byte-for-byte the pre-#1763 command, even with a port
+      // recorded, so an operator who turns structured events off gets the old
+      // behaviour rather than a half-configured one.
+      vi.mocked(hasSession).mockResolvedValue(false);
+      vi.mocked(createSession).mockResolvedValue(undefined);
+      vi.mocked(ensureOpencodeConfig).mockResolvedValue(undefined);
+      rememberOpencodePort(
+        { worktreeId: 'test-123', cliToolId: 'opencode' },
+        4242,
+        '/test/path'
+      );
+      vi.stubEnv('CM_AGENT_HOOKS_INJECT', '0');
+
+      vi.useFakeTimers();
+      void tool.startSession('test-123', '/test/path');
+      await vi.runAllTimersAsync();
+      vi.useRealTimers();
+
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-test-123', 'opencode', true);
+    });
+
     it('should create session and start opencode TUI', async () => {
       vi.mocked(hasSession).mockResolvedValue(false);
       vi.mocked(createSession).mockResolvedValue(undefined);
@@ -144,7 +291,8 @@ describe('OpenCodeTool', () => {
         // call site drift back to a hardcoded value unnoticed.
       });
 
-      // Verify opencode command was sent
+      // Verify opencode command was sent. Issue #1763: with no port reserved
+      // (the stub above answers null) this stays the pre-#1763 bare command.
       expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-test-123', 'opencode', true);
     });
   });
@@ -234,6 +382,25 @@ describe('OpenCodeTool', () => {
       await tool.killSession('test-123');
       // When session doesn't exist, killSession (tmux) is still called as cleanup
       expect(killSession).toHaveBeenCalledWith('mcbd-opencode-test-123');
+    });
+
+    it('releases the event stream and the port before the pane goes', async () => {
+      // Issue #1763: the server's lifetime is the pane's, so a stream left open
+      // would reconnect at a port that is about to be free — and a port left
+      // recorded would be handed to the next instance as "already ours".
+      vi.mocked(hasSession).mockResolvedValue(false);
+      vi.mocked(killSession).mockResolvedValue(false);
+
+      await tool.killSession('test-123', 'opencode-2');
+
+      expect(releaseOpencodeEventStream).toHaveBeenCalledWith({
+        worktreeId: 'test-123',
+        cliToolId: 'opencode',
+        instanceId: 'opencode-2',
+      });
+      expect(vi.mocked(releaseOpencodeEventStream).mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(killSession).mock.invocationCallOrder[0]
+      );
     });
   });
 });
