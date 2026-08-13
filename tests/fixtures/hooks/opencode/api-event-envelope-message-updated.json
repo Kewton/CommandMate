@@ -1,0 +1,28 @@
+{
+  "id": "evt_0000000000000000000000000",
+  "type": "message.updated",
+  "durable": {
+    "aggregateID": "ses_0000000000000000000000000",
+    "seq": 26,
+    "version": 1
+  },
+  "location": {
+    "directory": "<WORKTREE_PATH>"
+  },
+  "data": {
+    "sessionID": "ses_0000000000000000000000000",
+    "info": {
+      "id": "msg_0000000000000000000000000",
+      "sessionID": "ses_0000000000000000000000000",
+      "role": "user",
+      "time": {
+        "created": 1786575839800
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "github-copilot",
+        "modelID": "claude-sonnet-4.6"
+      }
+    }
+  }
+}

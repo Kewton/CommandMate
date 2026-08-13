@@ -1,0 +1,28 @@
+{
+  "id": "evt_0000000000000000000000000",
+  "type": "permission.asked",
+  "properties": {
+    "id": "per_0000000000000000000000000",
+    "sessionID": "ses_0000000000000000000000000",
+    "permission": "external_directory",
+    "patterns": [
+      "/tmp/*"
+    ],
+    "metadata": {
+      "command": "touch /tmp/cmate-oc-spike-marker.txt && ls -l /tmp/cmate-oc-spike-marker.txt",
+      "directories": [
+        "/tmp"
+      ],
+      "patterns": [
+        "/tmp/*"
+      ]
+    },
+    "always": [
+      "/tmp/*"
+    ],
+    "tool": {
+      "messageID": "msg_0000000000000000000000000",
+      "callID": "toolu_0000000000000000000000000"
+    }
+  }
+}
