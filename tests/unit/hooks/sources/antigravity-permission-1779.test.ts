@@ -13,10 +13,10 @@
  * `curl … || true` and `curl …; printf '{"decision":"ask"}'` differ by one
  * clause and by the entire behaviour.
  *
- * So {@link runPermissionHook} really does `execFile('sh', ['-c', command])`
- * with a real payload on stdin, against a real HTTP server on a real port, and
- * asserts on the bytes that come back out. Every one of the five failure paths
- * Issue #1779 enumerates is a server (or the absence of one) rather than a mock.
+ * So {@link runHook} really does `spawn('sh', ['-c', command])` with a real
+ * payload on its stdin, against a real HTTP server on a real port, and asserts
+ * on the bytes that come back out. Every one of the five failure paths Issue
+ * #1779 enumerates is a server (or the absence of one) rather than a mock.
  *
  * ## What "fail-open" means here, and why it is not `allow`
  *
@@ -40,7 +40,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { createServer, type Server } from 'http';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -128,36 +128,62 @@ function hookEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
 /**
  * Run the generated hook exactly as agy runs it.
  *
- * `sh -c`, the payload on stdin, and a working directory that is not the
- * worktree — agy runs hooks from the directory holding `hooks.json`, so a
- * command that quietly depended on `cwd` would pass here and fail in the field.
+ * `sh -c`, the payload written to the child's **stdin**, and a working directory
+ * that is not the worktree — agy runs hooks from the directory holding
+ * `hooks.json`, so a command that quietly depended on `cwd` would pass here and
+ * fail in the field.
  *
- * @returns Whatever the hook wrote to stdout, verbatim
+ * The payload deliberately does *not* travel through the environment or through
+ * `argv`, and that is not a stylistic choice. Linux caps a single argv entry or
+ * environment string at `MAX_ARG_STRLEN` (32 × PAGE_SIZE = 128 KiB) and fails
+ * the whole `execve` with `E2BIG` past it; macOS has no such per-string limit.
+ * A `PAYLOAD=…` environment variable therefore passed locally and failed only on
+ * CI — the same "green on macOS, red on Linux" shape as the `/proc` fixture that
+ * hung CI for five hours. Writing to stdin has no such ceiling, and it is what
+ * the agent itself does.
+ *
+ * @param payload - Bytes to write to the hook's stdin
+ * @param env - Extra environment on top of {@link hookEnv}
  */
-async function runPermissionHook(): Promise<string> {
-  const command = buildAntigravityPermissionHookCommand();
-  const child = execFile('sh', ['-c', command], { env: hookEnv(), cwd: '/' }, () => {});
-  child.stdin?.end(JSON.stringify(FIXTURE));
-  return new Promise<string>((resolve, reject) => {
-    let out = '';
-    child.stdout?.on('data', (chunk: Buffer) => (out += chunk.toString('utf8')));
-    child.on('error', reject);
-    child.on('close', () => resolve(out));
+async function runHook(
+  payload: string,
+  env: Record<string, string> = {}
+): Promise<{ stdout: string; stderr: string }> {
+  const child = spawn('sh', ['-c', buildAntigravityPermissionHookCommand()], {
+    env: hookEnv(env),
+    cwd: '/',
   });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk: Buffer) => (stdout += chunk.toString('utf8')));
+  child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString('utf8')));
+  child.stdin.on('error', () => {
+    // A hook that exits without reading its stdin turns this write into EPIPE.
+    // Swallowed here so the assertion below reports *what the agent saw* rather
+    // than this suite dying with an unhandled 'error' event.
+    stderr += 'EPIPE writing to hook stdin\n';
+  });
+  child.stdin.end(payload);
+  await new Promise<void>((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', () => resolve());
+  });
+  return { stdout, stderr };
+}
+
+/** The captured `PreToolUse` payload, with no receiver configured. */
+async function runPermissionHook(): Promise<string> {
+  return (await runHook(JSON.stringify(FIXTURE))).stdout;
 }
 
 /** Same, with the receiver URL pointed somewhere. */
 async function runAgainst(url: string, extra: Record<string, string> = {}): Promise<string> {
-  const command = buildAntigravityPermissionHookCommand();
-  const { stdout } = await execFileAsync('sh', ['-c', `printf '%s' "$PAYLOAD" | { ${command}; }`], {
-    env: hookEnv({
-      PAYLOAD: JSON.stringify(FIXTURE),
+  return (
+    await runHook(JSON.stringify(FIXTURE), {
       [ANTIGRAVITY_PERMISSION_URL_ENV_VAR]: url,
       ...extra,
-    }),
-    cwd: '/',
-  });
-  return stdout;
+    })
+  ).stdout;
 }
 
 afterEach(() => {
@@ -182,15 +208,18 @@ describe('the adjudication hook never leaves agy without a verdict', () => {
     // agy writes the payload to the hook's stdin. A hook that exits without
     // reading turns that write into a broken pipe on the agent's side — the
     // lesson `copilot/hook-settings` learned the same way.
-    const command = buildAntigravityPermissionHookCommand();
-    expect(command).toContain('cat >/dev/null');
+    expect(buildAntigravityPermissionHookCommand()).toContain('cat >/dev/null');
 
+    // Comfortably past Linux's 64 KiB pipe buffer, which is the whole point: a
+    // payload that fits in the buffer is written and forgotten whether or not
+    // anything reads it, so a smaller one would pass against a hook that never
+    // consumed stdin at all. It must NOT be shrunk to dodge a spawn limit — see
+    // {@link runHook} for why it travels on stdin rather than in the environment.
     const big = JSON.stringify({ ...FIXTURE, padding: 'x'.repeat(200_000) });
-    const { stdout, stderr } = await execFileAsync(
-      'sh',
-      ['-c', `printf '%s' "$PAYLOAD" | { ${command}; }`],
-      { env: hookEnv({ PAYLOAD: big }), cwd: '/' }
-    );
+    expect(big.length).toBeGreaterThan(128 * 1024);
+
+    const { stdout, stderr } = await runHook(big);
+
     expect(stdout).toBe(ABSTAIN);
     expect(stderr).toBe('');
   });
