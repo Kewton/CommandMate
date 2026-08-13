@@ -23,6 +23,9 @@ import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { COPILOT_PROMPT_PATTERN, COPILOT_SELECTION_LIST_PATTERN, stripAnsi } from '../detection/cli-patterns';
 import { COPILOT_TEXT_INPUT_DELAY_MS, COPILOT_SEND_ENTER_DELAY_MS, COPILOT_MODEL_SWITCH_TIMEOUT_MS } from '@/config/copilot-constants';
 import { TUI_SESSION_CREATE_WAIT_MS, TUI_INTERRUPT_SETTLE_MS, TUI_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
+import { beginAgentSession, prepareAgentLaunch } from '@/lib/session/agent-session-lifecycle';
+import { COPILOT_LAUNCH_COMMAND } from '@/lib/hooks/sources/copilot/hook-settings';
+import { COPILOT_CLI_TOOL_ID } from '@/lib/hooks/sources/copilot/tool-id';
 import { getErrorMessage } from '@/lib/errors';
 import { createLogger } from '@/lib/logger';
 
@@ -128,6 +131,19 @@ export class CopilotTool extends BaseCLITool {
       return;
     }
 
+    // Issue #1761: fence this session off from the previous copilot process's
+    // events. The state is keyed by (worktree, tool, instance), a key the new
+    // session reuses verbatim, so without this the old process's last
+    // `user_prompt_submit` reads as the new one's and a session publishes
+    // `running` before anybody has typed into it (#1723).
+    //
+    // Creation path only — the reuse branch above has already returned — and
+    // before the pane exists, so no live pane is ever judged against a stale
+    // generation. Outside the try, so a launch that then fails is still fenced:
+    // falling back to the scraper is always safe, trusting a dead session's
+    // events is not.
+    beginAgentSession({ worktreeId, cliToolId: COPILOT_CLI_TOOL_ID, instanceId });
+
     try {
       // Create tmux session. Scrollback depth comes from the shared
       // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
@@ -139,8 +155,26 @@ export class CopilotTool extends BaseCLITool {
       // Wait a moment for the session to be created
       await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
 
+      // Issue #1761: hand this session its hook configuration, so structured
+      // lifecycle events and Auto-Yes adjudication exist without the operator
+      // having edited ~/.copilot/settings.json by hand.
+      //
+      // The returned command is `gh copilot` with two environment assignments
+      // in front of it. Copilot's config is one file for the whole machine, so
+      // unlike Claude's `--settings` it cannot carry the correlation keys —
+      // they ride in the environment and the hook reads them when it fires.
+      // See `lib/hooks/sources/copilot/hook-settings`.
+      //
+      // Fails open in every branch: with `CM_AGENT_HOOKS_INJECT=0`, or with a
+      // settings file that cannot be read or written, this is byte-for-byte the
+      // `gh copilot` this line has always sent.
+      const launchCommand = prepareAgentLaunch(
+        { worktreeId, cliToolId: COPILOT_CLI_TOOL_ID, instanceId },
+        COPILOT_LAUNCH_COMMAND
+      ).command;
+
       // Start Copilot CLI in interactive mode
-      await sendKeys(sessionName, 'gh copilot', true);
+      await sendKeys(sessionName, launchCommand, true);
 
       // Wait for Copilot to initialize
       await new Promise((resolve) => setTimeout(resolve, COPILOT_INIT_WAIT_MS));
