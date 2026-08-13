@@ -27,6 +27,12 @@
  *  - **Every hook failure is fail-open.** A refused connection or a timeout
  *    costs the event, never the session.
  *
+ * Issue #1759 made this module *Claude's* config serialiser rather than *the*
+ * config serialiser: it is reached through `claudeAgentEventSource.prepareLaunch`
+ * (seams S3/S4/S5), and the four other hook tools each bring their own — their
+ * files live in different places, nest differently, and cannot use `type:"http"`
+ * at all. Nothing here changed; only who calls it did.
+ *
  * The generated file is written rather than passed inline. `--settings` does
  * accept a JSON string (D2), but the launch command travels to the CLI through
  * `tmux send-keys` as a single line, and a ~1 KB argument of braces, quotes and
@@ -42,6 +48,7 @@ import { homedir } from 'os';
 import { join, resolve } from 'path';
 import { getServerPort } from '@/lib/env';
 import { isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
+import { CLAUDE_CLI_TOOL_ID } from '@/lib/hooks/sources/claude/tool-id';
 import { ASK_USER_QUESTION_TOOL } from '@/lib/hooks/permission-request-payload';
 import { createLogger } from '@/lib/logger';
 
@@ -162,7 +169,7 @@ export interface HookSettingsTarget {
   worktreeId: string;
   /** Defaults to the primary instance (`instanceId === cliToolId`). */
   instanceId?: string;
-  /** Defaults to `claude`; the only tool wired up in this Issue. */
+  /** Defaults to {@link CLAUDE_CLI_TOOL_ID}; this generator writes Claude's file. */
   cliToolId?: CLIToolType;
 }
 
@@ -242,7 +249,7 @@ export function getHookSettingsDirectory(options: HookSettingsOptions = {}): str
 
 /** The instance this settings file speaks for; primary when unspecified. */
 export function resolveTargetInstanceId(target: HookSettingsTarget): string {
-  const cliToolId = target.cliToolId ?? 'claude';
+  const cliToolId = target.cliToolId ?? CLAUDE_CLI_TOOL_ID;
   const instanceId = target.instanceId ?? cliToolId;
   return instanceId;
 }
@@ -259,7 +266,7 @@ export function getHookSettingsPath(
   target: HookSettingsTarget,
   options: HookSettingsOptions = {}
 ): string {
-  const cliToolId = target.cliToolId ?? 'claude';
+  const cliToolId = target.cliToolId ?? CLAUDE_CLI_TOOL_ID;
   const instanceId = resolveTargetInstanceId(target);
   const slug = `${cliToolId}-${target.worktreeId}-${instanceId}`.replace(/[^a-zA-Z0-9_-]/g, '_');
   const digest = createHash('sha256')
@@ -306,7 +313,7 @@ function buildReceiverUrl(
   target: HookSettingsTarget,
   options: HookSettingsOptions
 ): string {
-  const cliToolId = target.cliToolId ?? 'claude';
+  const cliToolId = target.cliToolId ?? CLAUDE_CLI_TOOL_ID;
   const port = options.port ?? getServerPort();
   const params = new URLSearchParams({
     tool: cliToolId,
@@ -368,7 +375,7 @@ export function buildSessionStartCommand(
     return [
       shellQuote(relay),
       '--tool',
-      shellQuote(target.cliToolId ?? 'claude'),
+      shellQuote(target.cliToolId ?? CLAUDE_CLI_TOOL_ID),
       '--event',
       'session_start',
       '--worktree-id',

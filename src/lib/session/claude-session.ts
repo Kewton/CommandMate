@@ -30,11 +30,12 @@ import { access, constants } from 'fs/promises';
 import { createLogger } from '@/lib/logger';
 import { CLAUDE_RESTART_DELAY_MS } from '@/config/cli-tool-timing-config';
 import { deriveSessionSuffix } from '@/lib/cli-tools/types';
-import { buildClaudeLaunchCommand } from '@/lib/hooks/hook-settings-generator';
+import { CLAUDE_CLI_TOOL_ID } from '@/lib/hooks/sources';
 import {
-  beginAgentEventGeneration,
-  discardAgentEventState,
-} from '@/lib/session/agent-event-state';
+  beginAgentSession,
+  prepareAgentLaunch,
+} from '@/lib/session/agent-session-lifecycle';
+import { discardAgentEventState } from '@/lib/session/agent-event-state';
 import {
   SessionStartFailedError,
   SessionStartTimeoutError,
@@ -659,7 +660,10 @@ export async function startClaudeSession(
   // live pane is matched against a stale generation. Bumped even if the start
   // then fails: falling back to the scraper is always safe, trusting a dead
   // session's events is not.
-  beginAgentEventGeneration(worktreeId, 'claude', instanceId);
+  // Issue #1759: through the shared helper, which is the one call every
+  // tool's `startSession` makes. Claude's was the only fence in the codebase;
+  // making it the helper's job is what lets Phase 4-2…4-5 have one too.
+  beginAgentSession({ worktreeId, cliToolId: CLAUDE_CLI_TOOL_ID, instanceId });
 
   try {
     // Create tmux session. Scrollback depth comes from the shared
@@ -691,7 +695,13 @@ export async function startClaudeSession(
     //
     // Falls back to the bare path on any failure; a session that starts without
     // hooks is the pre-#1722 status quo, and a session that fails to start is not.
-    const launchCommand = buildClaudeLaunchCommand(claudePath, { worktreeId, instanceId });
+    // Issue #1759: which config file gets written, and whether one is written
+    // at all, belongs to the tool's `AgentEventSource` (S3/S4). Claude's
+    // delegates to `buildClaudeLaunchCommand`, unchanged.
+    const launchCommand = prepareAgentLaunch(
+      { worktreeId, cliToolId: CLAUDE_CLI_TOOL_ID, instanceId },
+      claudePath
+    ).command;
 
     // Start Claude CLI in interactive mode using dynamically resolved path
     await sendKeys(sessionName, launchCommand, true);

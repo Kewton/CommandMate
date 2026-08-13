@@ -6,6 +6,21 @@
 # `notify`) so the server learns that a turn ended from the agent itself rather
 # than by reading the terminal. See docs/user-guide/agent-event-hooks.md.
 #
+# **This script is on the critical path for every tool except Claude Code.**
+# Issue #1757 measured `type:"http"` handlers against codex, copilot, gemini and
+# antigravity and none of the four accept them — codex is the worst case, where
+# a single `"type":"http"` entry makes it discard the whole hooks.json and every
+# event dies with one line on stderr. So `type:"command"` running this script is
+# the only delivery mechanism those tools have, and a word this script refuses
+# is a word that tool can never report.
+#
+# Which is what Issue #1759 fixed here. Before it, `--event` accepted five words
+# while the API accepted seven: `pre_tool_use` and `post_tool_use`, added to
+# `AGENT_EVENT_TYPES` by #1726, exited 2 rather than posting. `map_event_name`
+# also knew only Claude's spellings, so gemini's `BeforeTool` / `AfterAgent`
+# family died as "unrecognized hook event name". Both are now complete: seven
+# words, and the native spellings of all five push-mode tools.
+#
 # Written for bash 3.2 — the version macOS still ships — so no associative
 # arrays, `mapfile`, or `${var^^}`.
 #
@@ -24,11 +39,12 @@ Usage: cmate-agent-event.sh [options] [JSON]
 Options:
   --tool ID          Agent CLI id (default: $CM_AGENT_TOOL, else "claude")
   --event EVENT      stop | notification | session_start | user_prompt_submit |
-                     session_end (default: "stop")
+                     session_end | pre_tool_use | post_tool_use (default: "stop")
   --cwd PATH         Agent working directory (default: $CLAUDE_PROJECT_DIR, else $PWD)
   --session-id ID    Opaque agent session id
   --worktree-id ID   CommandMate worktree id; skips cwd-based resolution
   --instance-id ID   Agent instance id; without it the event lands on the primary
+  --detail TEXT      Event subtype; without it, read from the payload
   --json JSON        Hook payload to read cwd/session/event from
   --stdin-json       Read that payload from stdin instead
   --url URL          Endpoint (default: http://$CM_HOST:$CM_PORT/api/hooks/agent-event)
@@ -61,13 +77,37 @@ json_escape() {
 }
 
 # Map an agent's own event name onto the API vocabulary.
+#
+# The spellings come from Issue #1757's live capture of all four tools
+# (docs/design/agent-hooks-phase4-live-verification.md §8.1) and #1721's of
+# Claude. Three dialects share this function because a single relay serves every
+# tool; a name that is not below is refused rather than guessed at, so a tool
+# whose vocabulary grows fails loudly instead of filing an unknown event under
+# something adjacent.
+#
+# Deliberately absent: `PreInvocation` / `PostInvocation` (antigravity),
+# `BeforeModel` / `AfterModel` / `PreCompress` (gemini), `PreCompact` /
+# `PostCompact` / `SubagentStart` (codex). They are real events with no word in
+# AGENT_EVENT_TYPES, and inventing one for them here would put a meaning in the
+# API that no consumer agreed to.
 map_event_name() {
   case "$1" in
+    # Claude Code / codex / copilot / antigravity — the CamelCase dialect.
+    # (antigravity never reaches this function from a payload: its payloads carry
+    # no event name at all, so its hooks must pass --event. #1757 R2.)
     Stop|SubagentStop|agent-turn-complete) printf 'stop' ;;
     Notification) printf 'notification' ;;
     SessionStart) printf 'session_start' ;;
     SessionEnd) printf 'session_end' ;;
     UserPromptSubmit) printf 'user_prompt_submit' ;;
+    PreToolUse) printf 'pre_tool_use' ;;
+    PostToolUse) printf 'post_tool_use' ;;
+    # gemini renames four of the seven. The table is the CLI's own, read out of
+    # `gemini hooks migrate --from-claude` rather than guessed (#1757 §5.3.1).
+    BeforeAgent) printf 'user_prompt_submit' ;;
+    AfterAgent) printf 'stop' ;;
+    BeforeTool) printf 'pre_tool_use' ;;
+    AfterTool) printf 'post_tool_use' ;;
     *) printf '' ;;
   esac
 }
@@ -75,11 +115,15 @@ map_event_name() {
 # The event's subtype, where it has one. Each event spells it differently and
 # none of them share a field. Notification is judged on notification_type, never
 # on the human-facing "message" (Issue #1721, D3).
+#
+# pre_tool_use / post_tool_use carry `tool_name`, which is what the receiver
+# stores as the detail and what a matcher is tested against (Issue #1726).
 detail_field_for_event() {
   case "$1" in
     notification) printf 'notification_type' ;;
     session_end) printf 'reason' ;;
     session_start) printf 'source' ;;
+    pre_tool_use|post_tool_use) printf 'tool_name' ;;
     *) printf '' ;;
   esac
 }
@@ -104,6 +148,7 @@ while [ $# -gt 0 ]; do
     --session-id) [ $# -ge 2 ] || die "--session-id requires a value"; SESSION_ID="$2"; shift 2 ;;
     --worktree-id) [ $# -ge 2 ] || die "--worktree-id requires a value"; WORKTREE_ID="$2"; shift 2 ;;
     --instance-id) [ $# -ge 2 ] || die "--instance-id requires a value"; INSTANCE_ID="$2"; shift 2 ;;
+    --detail) [ $# -ge 2 ] || die "--detail requires a value"; DETAIL="$2"; shift 2 ;;
     --json) [ $# -ge 2 ] || die "--json requires a value"; HOOK_JSON="$2"; shift 2 ;;
     --url) [ $# -ge 2 ] || die "--url requires a value"; URL="$2"; shift 2 ;;
     --stdin-json) READ_STDIN=1; shift ;;
@@ -131,8 +176,20 @@ if [ -n "$HOOK_JSON" ]; then
       [ -n "$EVENT" ] || die "unrecognized hook event name: $JSON_EVENT"
     fi
   fi
+  # Session id spellings, in preference order. `session_id` covers Claude,
+  # codex, copilot and gemini; `conversationId` is antigravity's protojson name
+  # for the same thing (#1757 R4). The two turn-ids are last because they
+  # identify a turn rather than a session and are only worth sending when
+  # nothing better exists: `turn_id` is codex's, `turn-id` predates #1757 and is
+  # kept so a hook configured against an older release keeps working.
   if [ -z "$SESSION_ID" ]; then
     SESSION_ID="$(json_string_field "$HOOK_JSON" 'session_id')"
+  fi
+  if [ -z "$SESSION_ID" ]; then
+    SESSION_ID="$(json_string_field "$HOOK_JSON" 'conversationId')"
+  fi
+  if [ -z "$SESSION_ID" ]; then
+    SESSION_ID="$(json_string_field "$HOOK_JSON" 'turn_id')"
   fi
   if [ -z "$SESSION_ID" ]; then
     SESSION_ID="$(json_string_field "$HOOK_JSON" 'turn-id')"
@@ -141,9 +198,12 @@ fi
 
 [ -n "$EVENT" ] || EVENT="stop"
 
+# All seven words of AGENT_EVENT_TYPES. Kept in the same order as
+# src/lib/hooks/agent-event-types.ts so the two are read side by side; a word
+# missing here is a word the API accepts and the relay silently cannot send.
 case "$EVENT" in
-  stop|notification|session_start|user_prompt_submit|session_end) ;;
-  *) die "--event must be one of: stop, notification, session_start, user_prompt_submit, session_end (got \"$EVENT\")" ;;
+  stop|notification|session_start|user_prompt_submit|session_end|pre_tool_use|post_tool_use) ;;
+  *) die "--event must be one of: stop, notification, session_start, user_prompt_submit, session_end, pre_tool_use, post_tool_use (got \"$EVENT\")" ;;
 esac
 
 if [ -z "$DETAIL" ] && [ -n "$HOOK_JSON" ]; then
@@ -151,6 +211,16 @@ if [ -z "$DETAIL" ] && [ -n "$HOOK_JSON" ]; then
   if [ -n "$DETAIL_FIELD" ]; then
     DETAIL="$(json_string_field "$HOOK_JSON" "$DETAIL_FIELD")"
   fi
+fi
+
+# antigravity nests the tool name under `toolCall.name` and has no `tool_name`
+# at all (#1757 R3: its payload is camelCase protojson throughout). Only
+# consulted when the flat field produced nothing, so no other tool's payload can
+# reach it.
+if [ -z "$DETAIL" ] && [ -n "$HOOK_JSON" ]; then
+  case "$EVENT" in
+    pre_tool_use|post_tool_use) DETAIL="$(json_string_field "$HOOK_JSON" 'name')" ;;
+  esac
 fi
 
 [ -n "$TOOL" ] || die "--tool must not be empty"

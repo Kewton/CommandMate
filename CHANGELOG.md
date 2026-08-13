@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **refactor(hooks): `AgentEventSource` 抽象を抽出し、Claude 固有の継ぎ目をツール別実装に分離した（Phase 4-1）** (#1759)
+  - Epic #1720 の Phase 4-2〜4-5 が「1 ファイル足せば 1 ツール増える」形になるための土台。**Claude の挙動は 1 バイトも変えていない**（`buildAgentHookSettings` の出力・`PermissionRequest` の応答ボディ・注入される `--settings` の内容はすべて develop と同一であることを実測で確認済み）
+  - 新設 `src/lib/hooks/sources/`: I/F（`types.ts`）／述語つきマッパ（`event-mapper.ts`）／`definePushHookSource`・`definePullEventSource`（`define-source.ts`）／裁定スロット（`pending-decisions.ts`）／`describeAbstain`（`abstain.ts`）／`globalThis` 経由のレジストリ（`registry.ts`）／未対応ツール用の互換ソース（`legacy-relay.ts`）／Claude 実装（`claude/`）。ツール追加手順は [`docs/design/agent-event-source-interface.md`](./docs/design/agent-event-source-interface.md)
+  - **`scripts/hooks/cmate-agent-event.sh` の語彙不足を修正した（Phase 4 全体のハードブロッカー）。** `type:"http"` は Claude 専用で他 4 ツールは使えない（#1757）ため、この中継が唯一の配送路である。にもかかわらず `--event` は 5 語しか受けず、#1726 で `AGENT_EVENT_TYPES` に入った `pre_tool_use` / `post_tool_use` を渡すと exit 2 していた。加えて `map_event_name` は `PreToolUse` / `PostToolUse` も gemini の `BeforeTool` / `AfterTool` / `BeforeAgent` / `AfterAgent` も知らなかった。**7 語すべて ＋ 5 ツールの native 名**に対応させ、session id の抽出に `conversationId`（antigravity）/ `turn_id`（codex）を追加し、`--detail` を新設した（bash 3.2 互換を維持）
+  - **`NoDecisionBehavior` を型として持たせた（実測 C3）。**「裁定しない＝安全」は成り立たない: Claude / codex / copilot は無応答で通常フローへ進むが、**antigravity は空応答を「拒否」と解釈してツールを全停止**し、**opencode はタイムアウト無しで無限待ちする**（10 分 19 秒の実測）。`/api/hooks/permission-request` は `abstain` かつ `noDecision.kind !== 'proceeds'` のとき `permission-request-abstain-blocks-agent` を warn するようにした。どちらの失敗も**セッションが無言で止まる**（考え込んでいる agent と区別がつかない）ため、記録が唯一の手がかりになる
+  - **イベント写像を「名前の表」から「述語つきマッパ」に変えた（C4）。** `Record<string, AgentEventType>` では opencode を写せない — `message.part.updated` は `part.state.status` によって `pre_tool_use` と `post_tool_use` に割れ、`user_prompt_submit` には専用イベントが無く（`message.updated` の `info.role`）、`notification` は 3 つの別イベントの束である
+  - **未知イベントで throw しないことを型と実装の両方で固定した（C8）。** opencode の `server.heartbeat` はサーバ自身の `/doc` に型定義が無いのに 10 秒ごとに届く。未知は `null` を返して数える（`getUnknownEventTally()`）
+  - **世代フェンス（S8）を共通ヘルパ化した。** `beginAgentEventGeneration` の呼び出しは全コードベースで `claude-session.ts` の 1 箇所だけだった＝**他ツールにはフェンスが無い**。`src/lib/session/agent-session-lifecycle.ts` の `beginAgentSession()` に集約し、Claude の既存呼び出しをそれ経由に置き換えた。Phase 4-2 以降は各 `startSession` からこの 1 行を呼ぶ
+  - S1/S2（イベント名の綴りと subtype 抽出）を `agent-event-types.ts` から `hooks/sources/hook-event-vocabulary.ts` へ移した。`agent-event-types.ts` に残るのは 7 語だけになり、**ツール非依存の共有モジュールに 1 ツールの綴りが同居する状態を解消した**（次のツールが同じ表に追記される導線を断つのが目的）
+  - **I/F が pull 型（SSE 購読 ＋ REST 応答）を表現できることを、#1758 §9.4 のチェックリスト 11 項目に照らして検証した**（`tests/unit/hooks/sources/pull-source-contract.test.ts` が opencode の実 SSE fixture でソースを実際に組み立てて確認する）。**実際の opencode 対応は #1763 のままスコープ外**
+  - **空振り緑の反証**: レジストリから claude を外す／`Stop`→`stop` の写像を 1 つ壊す／`noDecision` を全ソース `proceeds` に固定する／`describeAbstain` を常に safe にする、の 4 変異を注入して赤になることを実測した（順に 11・26・2・6 テストが赤）
+  - **fix(test): `/proc` 配下を env var に代入する fixture が Linux CI を 5h31m ハングさせたため差し替えた**（PR #1773 の postmortem）。`CM_AGENT_HOOKS_DIR = '/proc/…'` が製品コードの `mkdirSync(dir,{recursive:true})` に届き、**procfs は存在し得ない子への mkdir に EPERM ではなく ENOENT を返す**ため Node の recursive 実装が「親が無い＝作って再試行」と解釈して **C++ 内で同期無限ループ**になる（コンテナ実測: 25 秒経っても返らず CPU 100.4%・メモリ 12.66MiB で平坦）。同期ループなのでイベントループが止まり **vitest の testTimeout すら発火しない**（OOM 痕跡も残らず、ログが無音になるだけ）。**macOS では `/proc` が存在せず即 throw → 緑になるので、原理的にローカル再現しない**。fixture を「親が通常ファイルであるパス」に変更した（通常ファイルは子を持てないので全 OS で即 ENOTDIR。macOS/node 24 0ms・Linux/node 18 1ms）。**テストの意図（fail-open の検証）と `expect` 行は不変**
+  - 再発防止に `tests/unit/guards/no-procfs-env-fixtures.test.ts` を追加した。`tests/` 全体を走査し **env var への `/proc` `/sys` `/dev` 配下パスの代入**（`process.env.X = …` / `process.env['X'] = …` / `vi.stubEnv(…)`）を禁じる。#1760〜#1763 の 4 ワーカーが当該ファイルを雛形にするため、コメントではなく赤いテストで止める。**文字列としての `/proc` 参照は対象外**（`system-directories.test.ts` / `db-migration-path.test.ts` / `git-workflow.test.ts` は実 fs に触れない）。`/dev/null` 等の終端デバイスノードは完全一致で許可（`GIT_CONFIG_GLOBAL=/dev/null` は既存の正当な idiom）
+  - 既存テストの期待値（`expect` 行）は 1 つも削除・変更していない。`tests/unit/scripts/cmate-agent-event.test.ts` の 2 ケースだけ**入力値**を差し替えた（`PreToolUse` は #1726 以降「対応語の無いイベント」ではなくなったため、その役を `PreCompact` に交代させた。期待値は同一）
+
 ### Added
 
 - **docs/test: codex / copilot / gemini / antigravity の hooks 実機挙動を検証し、実 payload を fixture として収集** (#1757)
