@@ -31,6 +31,10 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLegacyRelaySource } from './legacy-relay';
 import type { AgentEventSource } from './types';
 import { claudeAgentEventSource } from './claude/source';
+import { copilotAgentEventSource } from './copilot/source';
+import { geminiAgentEventSource } from './gemini/source';
+import { antigravityAgentEventSource } from './antigravity/source';
+import { codexAgentEventSource } from './codex/source';
 import { opencodeAgentEventSource } from './opencode/source';
 
 declare global {
@@ -111,4 +115,8 @@ export function unregisterAgentEventSource(cliToolId: CLIToolType): void {
 // Phase 4-2…4-5 adds one line here per tool. That, plus the tool's own file, is
 // the whole of "adding a tool" — see docs/design/agent-event-source-interface.md.
 registerAgentEventSource(claudeAgentEventSource);
+registerAgentEventSource(copilotAgentEventSource);
+registerAgentEventSource(geminiAgentEventSource);
+registerAgentEventSource(antigravityAgentEventSource);
+registerAgentEventSource(codexAgentEventSource);
 registerAgentEventSource(opencodeAgentEventSource);

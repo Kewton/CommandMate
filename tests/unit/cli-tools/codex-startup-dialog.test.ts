@@ -146,7 +146,14 @@ describe('CodexTool first-launch dialog handling (Issue #890)', () => {
       }
 
       // The launch command keeps its Enter; the number selections must not.
-      expect(sendKeys).toHaveBeenCalledWith(SESSION, 'codex', true);
+      // Issue #1760 put the hook correlation keys in front of `codex` on that
+      // line, so it is matched on the Enter and the executable rather than on
+      // the whole string, which `codex-agent-hooks-1760.test.ts` owns.
+      expect(sendKeys).toHaveBeenCalledWith(
+        SESSION,
+        expect.stringMatching(/(^codex$|'codex'$)/),
+        true
+      );
       expect(sendKeys).toHaveBeenCalledWith(SESSION, '2', false);
       expect(sendKeys).toHaveBeenCalledWith(SESSION, '1', false);
 

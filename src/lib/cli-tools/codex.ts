@@ -17,6 +17,11 @@ import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { isCodexPromptReady, getCodexActiveDialog, stripAnsi } from '../detection/cli-patterns';
 import { createLogger } from '@/lib/logger';
+import { CODEX_CLI_TOOL_ID } from '@/lib/hooks/sources';
+import {
+  beginAgentSession,
+  prepareAgentLaunch,
+} from '@/lib/session/agent-session-lifecycle';
 import {
   TUI_SESSION_CREATE_WAIT_MS,
   TUI_EXIT_WAIT_MS,
@@ -44,6 +49,66 @@ const CODEX_INIT_MAX_ATTEMPTS = 30;
 
 /** Timeout for waiting for prompt before sending a message */
 const CODEX_PROMPT_WAIT_TIMEOUT_MS = 15000;
+
+/**
+ * Anchors of codex's "Hooks need review" dialog (Issue #1760, measured on
+ * codex-cli 0.147.0):
+ *
+ * ```
+ *  Hooks need review
+ *  5 hooks are new or changed.
+ *  Hooks can run outside the sandbox after you trust them.
+ *
+ * > 1. Review hooks
+ *   2. Trust all and continue
+ *   3. Continue without trusting (hooks won't run)
+ * ```
+ *
+ * It has to be handled here rather than in `getCodexActiveDialog`, which
+ * classifies it as `null`: its wording matches none of that function's three
+ * anchors (`Skip until next version` / `Do you trust` / `Press enter to
+ * continue`). Measured consequence of leaving it alone, on a pane with the
+ * generated `hooks.json` present: `isCodexPromptReady` stays false for the full
+ * 30-attempt window and the session is then handed to `sendMessage` still
+ * sitting on the dialog. Every launch, because "continue without trusting" is
+ * not remembered — verified by relaunching and getting the same screen.
+ *
+ * Both strings are required so a "hooks" mention elsewhere cannot select an
+ * option on a live prompt.
+ */
+const CODEX_HOOKS_REVIEW_ANCHORS = ['Hooks need review', 'Continue without trusting'] as const;
+
+/**
+ * Option 3, "Continue without trusting (hooks won't run)".
+ *
+ * Not option 2. Trusting writes `[hooks.state."<file>:<event>:0:0"]` entries
+ * into the operator's own `~/.codex/config.toml` — the file that carries, among
+ * other things, the `notify` command a Computer Use integration runs — and
+ * granting that on someone's behalf is not this server's call. So a session
+ * starts with the hooks inert and the screen scraper doing exactly what it did
+ * before Issue #1760; the human enables them once through codex's own review
+ * screen, or an operator sets `CM_CODEX_HOOK_TRUST=bypass`.
+ *
+ * Sent alone, like the other numbered dialogs (Issue #890): codex confirms a
+ * numbered selection instantly, and a trailing Enter would land on the next
+ * screen. Verified live — the prompt was ready on the following poll.
+ */
+const CODEX_HOOKS_REVIEW_DECLINE_KEY = '3';
+
+/**
+ * Whether the pane is sitting on the hooks review dialog.
+ *
+ * Position-independent on purpose, unlike `getCodexActiveDialog`: the only
+ * caller checks `isCodexPromptReady` first and returns when a genuine prompt
+ * exists, so residual dialog text above a live prompt is never reached, and a
+ * one-shot guard stops the key being sent twice.
+ *
+ * @param output - ANSI-stripped pane capture
+ * @returns True when both anchors of the dialog are present
+ */
+export function isCodexHooksReviewDialog(output: string): boolean {
+  return CODEX_HOOKS_REVIEW_ANCHORS.every((anchor) => output.includes(anchor));
+}
 
 /**
  * Codex CLI tool implementation
@@ -88,6 +153,19 @@ export class CodexTool extends BaseCLITool {
       return;
     }
 
+    // Issue #1760: everything the previous codex process reported through this
+    // (worktreeId, instanceId) belongs to a session that no longer exists, and
+    // the key is reused verbatim by the one about to be created. Without this
+    // fence the old process's last `user_prompt_submit` reads as the new one's
+    // and a brand-new session publishes `running` before anyone has typed into
+    // it (#1723).
+    //
+    // Creation path only — the reuse branch above has already returned — and
+    // before `createSession`, so no live pane is ever matched against a stale
+    // generation. Bumped even when the launch then fails: falling back to the
+    // scraper is always safe, trusting a dead session's events is not.
+    beginAgentSession({ worktreeId, cliToolId: CODEX_CLI_TOOL_ID, instanceId });
+
     try {
       // Create tmux session. Codex is inline-rendered, so its transcript lives in
       // the pane scrollback — depth comes from the shared TMUX_HISTORY_LIMIT
@@ -100,8 +178,22 @@ export class CodexTool extends BaseCLITool {
       // Wait a moment for the session to be created
       await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
 
+      // Issue #1760: hand this session its correlation keys, writing codex's
+      // hooks config first if it is not already there. codex has no
+      // `--settings`, so the keys ride in environment assignments on the launch
+      // line and the hook commands read them back — which is what tells `codex`
+      // from `codex-2` in one worktree, since `cwd` is identical for both.
+      //
+      // Falls back to the bare command on any failure and when
+      // `CM_AGENT_HOOKS_INJECT=0`; a session that starts without hooks is the
+      // pre-#1760 status quo, and a session that fails to start is not.
+      const launchCommand = prepareAgentLaunch(
+        { worktreeId, cliToolId: CODEX_CLI_TOOL_ID, instanceId },
+        this.command
+      ).command;
+
       // Start Codex CLI in interactive mode
-      await sendKeys(sessionName, 'codex', true);
+      await sendKeys(sessionName, launchCommand, true);
 
       // Wait for Codex to initialize
       await new Promise((resolve) => setTimeout(resolve, CODEX_INIT_WAIT_MS));
@@ -129,6 +221,7 @@ export class CodexTool extends BaseCLITool {
     // update branch re-sends "2" every poll and the live prompt gets "222...".
     let updateDialogHandled = false;
     let trustDialogHandled = false;
+    let hooksReviewHandled = false;
     for (let i = 0; i < CODEX_INIT_MAX_ATTEMPTS; i++) {
       try {
         const rawOutput = await capturePane(sessionName, 50);
@@ -141,6 +234,18 @@ export class CodexTool extends BaseCLITool {
         if (isCodexPromptReady(output)) {
           logger.info('codex-prompt-detected');
           return;
+        }
+
+        // Issue #1760: "Hooks need review". Reached only when no genuine prompt
+        // exists (the check above returned), so this cannot fire on a live
+        // prompt, and the one-shot guard stops a second key on a re-render.
+        // Declines: granting trust would write the operator's config.toml.
+        if (!hooksReviewHandled && isCodexHooksReviewDialog(output)) {
+          await sendKeys(sessionName, CODEX_HOOKS_REVIEW_DECLINE_KEY, false);
+          hooksReviewHandled = true;
+          logger.info('codex-hooks-review-declined');
+          await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
+          continue;
         }
 
         // Issue #892: classify the bottom-most ACTIVE dialog by position. A dialog
