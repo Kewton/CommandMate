@@ -46,6 +46,7 @@ import { createServer } from 'net';
 import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
+import { resolveSafeDirectory } from '@/config/safe-directory';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import { isHookInjectionEnabled } from '@/lib/hooks/hook-settings-generator';
 import { createLogger } from '@/lib/logger';
@@ -91,11 +92,22 @@ function keyOf(target: AgentInstanceRef): string {
   return buildCompositeKey(target.worktreeId, target.cliToolId, target.instanceId);
 }
 
-/** Where the assignments are persisted. `CM_OPENCODE_PORT_FILE` overrides. */
+/**
+ * Where the assignments are persisted. `CM_OPENCODE_PORT_FILE` overrides.
+ *
+ * Issue #1774: `writePersistedOpencodePorts` creates this file's directory with
+ * a recursive mkdir. For a path inside `/proc`, `/sys` or `/dev` that call does
+ * not throw — it spins the event loop forever, so the `try/catch` around it
+ * never runs. A file path is checked the same way a directory is (the match is
+ * on the prefix), so the override is refused here and the default is used.
+ */
 export function getOpencodePortFilePath(): string {
-  const override = process.env.CM_OPENCODE_PORT_FILE;
-  if (override) return override;
-  return join(homedir(), '.commandmate', 'opencode-ports.json');
+  const fallback = join(homedir(), '.commandmate', 'opencode-ports.json');
+  return resolveSafeDirectory(
+    process.env.CM_OPENCODE_PORT_FILE,
+    fallback,
+    'CM_OPENCODE_PORT_FILE'
+  );
 }
 
 function isAssignment(value: unknown): value is OpencodePortAssignment {

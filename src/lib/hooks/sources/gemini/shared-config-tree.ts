@@ -38,6 +38,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname } from 'path';
+import { isVirtualFilesystemPath } from '@/config/system-directories';
 import { isPlainObject } from '../event-mapper';
 
 /**
@@ -76,10 +77,26 @@ export function readJsonObjectFile(path: string): Record<string, unknown> | null
  * same posture `hook-settings-generator` takes, and for the same reason (the
  * contents name every worktree and instance on the machine).
  *
+ * Issue #1774: unlike its siblings this takes the path as an argument rather
+ * than resolving an environment variable, so there is no default to fall back
+ * to — the caller asked for one specific file. It therefore *refuses* rather
+ * than redirects. Throwing is the fail-open signal both callers already handle
+ * (`writeGeminiHookSettings` and `writeAntigravityHooksConfig` catch, warn and
+ * return null), and it has to happen before the mkdir: a recursive mkdir under
+ * `/proc` does not throw, it spins the event loop until the process is killed.
+ *
  * @param path - Absolute path to the file
  * @param value - The object to serialise
+ * @throws If the path is inside a virtual filesystem. Callers treat a throw as
+ *   "launch without hooks"
  */
 export function writeJsonObjectFile(path: string, value: Record<string, unknown>): void {
+  if (isVirtualFilesystemPath(path)) {
+    throw new Error(
+      `Refusing to write inside a virtual filesystem: ${path} ` +
+        `(a recursive mkdir under /proc, /sys or /dev never returns on Linux; Issue #1774)`
+    );
+  }
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
 }

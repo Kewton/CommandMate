@@ -73,6 +73,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
+import { resolveSafeDirectory } from '@/config/safe-directory';
 import { isValidInstanceId } from '@/lib/cli-tools/types';
 import { getServerPort } from '@/lib/env';
 import {
@@ -206,9 +207,14 @@ export interface CopilotHookSettingsOptions {
  * injection point it has; honouring it means an operator who isolates copilot
  * gets an isolated hook config too, and tests get a directory that is not the
  * developer's.
+ *
+ * Issue #1774: `writeCopilotHookSettings` creates this directory with a
+ * recursive mkdir, which does not fail but *hangs* for a path inside `/proc`,
+ * `/sys` or `/dev`. Such a value is refused here and `~/.copilot` is used.
  */
 export function getCopilotHomeDirectory(): string {
-  return process.env.COPILOT_HOME || join(homedir(), '.copilot');
+  const fallback = join(homedir(), '.copilot');
+  return resolveSafeDirectory(process.env.COPILOT_HOME, fallback, 'COPILOT_HOME');
 }
 
 /** The one file copilot reads hooks from. */

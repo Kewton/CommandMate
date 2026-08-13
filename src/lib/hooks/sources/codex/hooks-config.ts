@@ -56,6 +56,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
+import { resolveSafeDirectory } from '@/config/safe-directory';
 import { isValidInstanceId } from '@/lib/cli-tools/types';
 import { getServerPort } from '@/lib/env';
 import type { AgentEventType } from '@/lib/hooks/agent-event-types';
@@ -221,10 +222,19 @@ export function isCodexHookTrustBypassEnabled(): boolean {
   return process.env[CODEX_HOOK_TRUST_ENV_VAR] === 'bypass';
 }
 
-/** `$CODEX_HOME`, or `~/.codex`. */
+/**
+ * `$CODEX_HOME`, or `~/.codex`.
+ *
+ * Issue #1774: `writeCodexHookSettings` creates this directory with a recursive
+ * mkdir, which does not fail but *hangs* for a path inside `/proc`, `/sys` or
+ * `/dev`. Such a value is refused here and `~/.codex` is used instead.
+ */
 export function getCodexHome(options: CodexHookOptions = {}): string {
-  if (options.codexHome) return options.codexHome;
-  return process.env[CODEX_HOME_ENV_VAR] || join(homedir(), '.codex');
+  const fallback = join(homedir(), '.codex');
+  if (options.codexHome) {
+    return resolveSafeDirectory(options.codexHome, fallback, 'CodexHookOptions.codexHome');
+  }
+  return resolveSafeDirectory(process.env[CODEX_HOME_ENV_VAR], fallback, CODEX_HOME_ENV_VAR);
 }
 
 /** Absolute path of the hooks file codex reads. */

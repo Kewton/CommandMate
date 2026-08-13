@@ -32,6 +32,36 @@ export const SYSTEM_DIRECTORIES = [
 ] as const;
 
 /**
+ * The subset of {@link SYSTEM_DIRECTORIES} that is not a filesystem at all.
+ *
+ * Issue #1774: these three are kernel-backed namespaces, and their `mkdir`
+ * error codes are not the ones `fs` callers assume. procfs answers a `mkdir`
+ * for a child that cannot exist with **ENOENT rather than EPERM**, and Node's
+ * recursive mkdir reads ENOENT as "the parent is missing", so it creates the
+ * parent and retries — forever. Measured in a container: `mkdirSync('/proc/x/y',
+ * {recursive:true})` had not returned after 25s at 100.4% CPU; the promise from
+ * `fs.promises.mkdir` never settled and held a libuv threadpool thread (4 by
+ * default) for the life of the process. Neither logs anything, and the
+ * synchronous form stops the event loop, so a surrounding `try/catch` is never
+ * reached. On macOS the paths do not exist and the call throws at once, which
+ * is why this is invisible outside Linux and containers.
+ *
+ * Kept as a named subset rather than reusing the whole list because the two
+ * lists answer different questions. {@link isSystemDirectory} answers "may a
+ * database live here", and rejects `/tmp` and `/var` for that; but `/tmp` and
+ * `/var/log` are ordinary writable directories that a log or hook directory may
+ * legitimately be pointed at — `os.tmpdir()` is *inside* one on both platforms
+ * (`/tmp` on Linux, `/var/folders/…` on macOS), which is where every isolated
+ * test directory in this repository lives. Rejecting those would not prevent a
+ * hang; it would redirect isolated test runs and container deployments back
+ * onto the real `~/.codex` and `~/.commandmate`.
+ *
+ * `SYSTEM_DIRECTORIES` remains the superset — `tests/unit/config/system-directories.test.ts`
+ * pins that, so the two cannot drift apart.
+ */
+export const VIRTUAL_FILESYSTEM_ROOTS = ['/proc', '/sys', '/dev'] as const;
+
+/**
  * POSIX separator. SYSTEM_DIRECTORIES are POSIX absolute paths and this guard
  * protects POSIX platforms, so the boundary is always '/' rather than path.sep.
  */
@@ -63,15 +93,16 @@ export function isPathWithin(target: string, dir: string): boolean {
  *
  * Mount layout does not change while the process runs, so this is computed once.
  */
-let resolvedSystemDirectoriesCache: string[] | null = null;
+const resolvedDirectoryCandidatesCache = new Map<readonly string[], string[]>();
 
-function getSystemDirectoryCandidates(): string[] {
-  if (resolvedSystemDirectoriesCache !== null) {
-    return resolvedSystemDirectoriesCache;
+function getDirectoryCandidates(directories: readonly string[]): string[] {
+  const cached = resolvedDirectoryCandidatesCache.get(directories);
+  if (cached !== undefined) {
+    return cached;
   }
 
   const candidates = new Set<string>();
-  for (const dir of SYSTEM_DIRECTORIES) {
+  for (const dir of directories) {
     // Always keep the literal form: it must stay enforced even when the
     // directory does not exist on this platform (e.g. /proc and /sys on macOS).
     candidates.add(dir);
@@ -82,8 +113,9 @@ function getSystemDirectoryCandidates(): string[] {
     }
   }
 
-  resolvedSystemDirectoriesCache = Array.from(candidates);
-  return resolvedSystemDirectoriesCache;
+  const resolved = Array.from(candidates);
+  resolvedDirectoryCandidatesCache.set(directories, resolved);
+  return resolved;
 }
 
 /**
@@ -141,10 +173,45 @@ function resolvePhysicalPath(absolutePath: string): string {
  * @returns true if the path is within a system directory
  */
 export function isSystemDirectory(inputPath: string): boolean {
+  return matchesAnyDirectory(inputPath, SYSTEM_DIRECTORIES);
+}
+
+/**
+ * Check if a path is inside a virtual filesystem ({@link VIRTUAL_FILESYSTEM_ROOTS}).
+ *
+ * Issue #1774: the question `isSystemDirectory` cannot answer for a directory
+ * that is about to be created. A recursive `mkdir` under one of these roots does
+ * not fail — it hangs the process, unrecoverably and without a log line — so
+ * every path that reaches a `mkdir(…, {recursive:true})` has to be filtered
+ * through this first. See {@link VIRTUAL_FILESYSTEM_ROOTS} for the measurements
+ * and for why this is a subset of `SYSTEM_DIRECTORIES` rather than all of it.
+ *
+ * Matching is the same as `isSystemDirectory`: lexical *and* physical form, so a
+ * symlink that points into `/proc` is rejected along with a literal `/proc/…`.
+ * That is the direction that matters — a missed one hangs the server.
+ *
+ * Reads the filesystem (symlink resolution); it never creates anything, and
+ * `realpath` on a procfs path returns ENOENT immediately rather than spinning.
+ *
+ * @param inputPath - The path to check (relative paths are resolved against cwd)
+ * @returns true if a recursive mkdir for this path could spin
+ */
+export function isVirtualFilesystemPath(inputPath: string): boolean {
+  return matchesAnyDirectory(inputPath, VIRTUAL_FILESYSTEM_ROOTS);
+}
+
+/**
+ * Shared matcher for {@link isSystemDirectory} and {@link isVirtualFilesystemPath}.
+ *
+ * @param inputPath - The path to check
+ * @param directories - Absolute directory prefixes to test against
+ * @returns true if either the lexical or the physical form lands in one of them
+ */
+function matchesAnyDirectory(inputPath: string, directories: readonly string[]): boolean {
   const lexicalPath = path.resolve(inputPath);
   const physicalPath = resolvePhysicalPath(lexicalPath);
 
-  return getSystemDirectoryCandidates().some(
+  return getDirectoryCandidates(directories).some(
     (dir) => isPathWithin(lexicalPath, dir) || isPathWithin(physicalPath, dir)
   );
 }
