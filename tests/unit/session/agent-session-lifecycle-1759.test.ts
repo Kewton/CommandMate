@@ -18,6 +18,10 @@
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 import {
   beginAgentSession,
   prepareAgentLaunch,
@@ -115,8 +119,28 @@ describe('prepareAgentLaunch', () => {
   it('never throws when the config cannot be written', () => {
     // Fail-open: hooks are an enhancement to a session that has to start
     // anyway. An unwritable directory costs the events, not the session.
+    //
+    // The unwritable path is "a directory whose parent is a regular file".
+    // A regular file cannot have children, so `mkdirSync(…, {recursive:true})`
+    // throws ENOTDIR immediately on every OS (measured: macOS/node 24 0ms,
+    // Linux/node 18 1ms).
+    //
+    // **Never use a path under /proc, /sys or /dev here.** This case used to say
+    // `/proc/definitely-not-writable/cmate`, and it hung PR #1773's CI for
+    // 5h31m. On macOS `/proc` does not exist, so the call throws at once and the
+    // test is green — the failure is *unreproducible locally by construction*.
+    // On Linux `/proc` does exist, and procfs answers a mkdir for a child that
+    // cannot exist with **ENOENT rather than EPERM**. Node's recursive mkdir
+    // reads ENOENT as "the parent is missing", creates the parent and retries,
+    // forever, inside C++: a synchronous spin at 100% CPU with flat memory. The
+    // event loop never turns, so vitest's own 5s testTimeout cannot fire and
+    // there is no OOM either — the job just goes silent. `tests/unit/guards/
+    // no-procfs-env-fixtures.test.ts` now fails if anyone reintroduces it.
     const previous = process.env.CM_AGENT_HOOKS_DIR;
-    process.env.CM_AGENT_HOOKS_DIR = '/proc/definitely-not-writable/cmate';
+    const blockerDir = mkdtempSync(join(tmpdir(), 'cmate-fence-'));
+    const blocker = join(blockerDir, 'not-a-dir');
+    writeFileSync(blocker, '');
+    process.env.CM_AGENT_HOOKS_DIR = join(blocker, 'cmate');
     try {
       const plan = prepareAgentLaunch(
         { worktreeId: WT, cliToolId: CLAUDE_CLI_TOOL_ID, instanceId: 'claude' },
@@ -127,6 +151,7 @@ describe('prepareAgentLaunch', () => {
     } finally {
       if (previous === undefined) delete process.env.CM_AGENT_HOOKS_DIR;
       else process.env.CM_AGENT_HOOKS_DIR = previous;
+      removeTempDir(blockerDir);
     }
   });
 });
