@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "SessionStart",
+  "session_id": "00000000-0000-4000-8000-000000000000",
+  "timestamp": "2026-08-13T00:00:00.000Z",
+  "cwd": "<CWD>",
+  "source": "new",
+  "initial_prompt": "Run the shell command: echo CP-TOOL-MARKER > ./cp-marker.txt ; then reply PONG-CP1"
+}

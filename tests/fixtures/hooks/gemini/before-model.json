@@ -1,0 +1,21 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000000",
+  "transcript_path": "<TRANSCRIPT_PATH>",
+  "cwd": "<CWD>",
+  "hook_event_name": "BeforeModel",
+  "timestamp": "2026-08-13T00:00:00.000Z",
+  "llm_request": {
+    "model": "gemini-3.1-pro-preview",
+    "messages": [
+      {
+        "role": "user",
+        "content": "<session_context>\nThis is the Gemini CLI. We are setting up the context for our chat.\nToday's date is 2026年8月13日木曜日 (formatted according to the user's locale).\nMy operating system is: darwin\nThe project's temporary directory is: <SCRATCHPAD>/geminihome/.gemini/tmp/gemini\n- **Workspace Directories:**\n  - <CWD>\n- **Directory Structure:**\n\nShowing up to 200 items (files + folders).\n\n<CWD>/\n└───.gemini/\n    └───settings.json\n\n\n</session_context>Reply with exactly: PONG-GM2"
+      }
+    ],
+    "config": {
+      "temperature": 1,
+      "topP": 0.95,
+      "topK": 64
+    }
+  }
+}
