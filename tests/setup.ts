@@ -1,6 +1,18 @@
 // Vitest setup file
 import { beforeAll, afterAll, afterEach, vi } from 'vitest';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import '@testing-library/jest-dom/vitest';
+
+// Issue #1760: keep agent config generation out of the developer's home.
+//
+// `CodexTool.startSession` writes codex's hooks file, and codex reads exactly
+// one location — `$CODEX_HOME/hooks.json`, defaulting to `~/.codex/hooks.json`.
+// So any test that starts a codex session, including ones written long after
+// this line, would edit the real file on whatever machine ran the suite. Pinned
+// here rather than per file because the default is what makes it dangerous.
+// A test that cares about the path sets its own value; this only fills a gap.
+process.env.CODEX_HOME ??= join(tmpdir(), 'commandmate-test-codex-home');
 
 // Mock next-intl for all component tests
 vi.mock('next-intl', () => ({
