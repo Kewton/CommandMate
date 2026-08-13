@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **feat(hooks): copilot に構造化イベントと承認裁定を横展開した（Phase 4-3）** (#1761)
+  - `src/lib/hooks/sources/copilot/` を追加し、`registry.ts` に 1 行登録した。copilot セッションの `sessionStatus` / `wait` の完了判定 / Auto-Yes が、TUI スクレイピングではなく copilot 自身の hooks から決まるようになる（スクレイパは #1723 の 2 層目として残る）
+  - **Issue 本文冒頭の「hooks が実在するか未確認。実在しなければ取り下げ」は事実と逆だった。** #1757 のスパイクが実在を確定させており、payload は 4 ツール中もっとも Claude Code に近い。取り下げていない
+  - **設定の書き先は `~/.copilot/settings.json`。** `copilot help config` は `config.json` に書けると言うが、copilot は起動時に `hooks` を settings.json へ移送し config.json を機械管理形式で書き戻すため、**config.json に書くと次回起動で消える**（#1757 P2）
+  - **ユーザー設定は置換せずマージする。** マーカー `cmate-copilot-agent-hooks` を含む自分のエントリだけを差し替え、他のキーと他のハンドラ（grouped 形 / flat 形の両方）はそのまま保持する。パースできない設定ファイルには**触らず**、素の `gh copilot` で起動する（イベントを失うのは回復できるが、手編集された設定の上書きは回復できない）
+  - **相関キーは起動コマンドの環境変数に載せた。** copilot に `--settings` 相当は無く設定は**マシン全体で 1 本**なので、Claude のように URL へ焼き込むと 2 番目のインスタンスが 1 番目の名前でイベントを送ることになる。`CM_AGENT_WORKTREE_ID` / `CM_AGENT_INSTANCE_ID` を起動コマンドのプレフィックスとして与え、hook が発火時に読む
+  - **グローバル設定なので、CommandMate が起動していない copilot では無効になるようにした。** 全コマンドが `CM_AGENT_WORKTREE_ID` 未設定で無音終了する。これが無いとオペレータが自分の端末で起動した copilot の `Stop` が cwd 解決で当たり、**誰のエージェントも終わっていないのに `commandmate wait` が返る**
+  - **裁定は `hookSpecificOutput.permissionDecision`**（Claude の `decision.behavior` ではない）。copilot は `deny` ＋理由文字列も解釈するため Claude 実装より広いが、`permission-decision-service` は deny を出さないので能力の記述にとどまる。`{}` は fail-safe（通常の承認フローに落ちる）
+  - **`decisionTimeoutSeconds` は 10**（Claude は 600）。Claude の感覚で組むと裁定が届かない。コマンド側は `curl -m 4` で 10 秒の内側から打ち切る（エージェントの timeout に判定を任せると「遅れて届いた裁定が黙って捨てられる」ケースと区別できない）
+  - `supportedEvents` は 5 語。**`notification` は #1757 で発火実績ゼロ**、**`pre_tool_use` は承認ゲートそのもので permission receiver 宛**＝イベントストアに入らないため、どちらも約束しない（mapper は綴りを知っているので手設定の hook からは読める）
+  - **本 Issue で新たに実測した 3 点**（`docs/design/copilot-agent-hooks-injection.md`）: hook コマンドは**シェル経由**で実行される／copilot プロセスの**環境変数が hook に継承される**／`PreToolUse` の **stdout が裁定として解釈され、`permissionDecision:"allow"` は `--allow-all-tools` 無しでもプロンプトを出さずに実行する**（#1757 は deny と `{}` のみ実測で allow は未計測だった）
+  - **実機検証（copilot 1.0.79、受け口はスタブ。本番 port 3000 には送っていない）**: 相関 env ありで 6 イベント全件が `worktreeId` / `instanceId` 正で到達し裁定 `allow` が効いた／相関 env なしで**受信 0 件**／`CM_AGENT_INSTANCE_ID` 未設定は primary に落ちる／**受け口停止でもセッションは正常完了（fail-open）**／`~/.copilot/` は前後で **sha256 一致**。裁定の往復は **≈110ms**（予算 ≈10s に対して約 90 倍の余裕）、受け口停止時は 133ms で `{}`
+  - **空振り緑の反証**: ①レジストリから copilot を外す ②イベント名の写像を 1 つ壊す（`Stop`→`session_start`）③設定の書き先を `config.json` に変える ④`beginAgentSession()` の呼び出しを消す、の 4 変異を注入して赤になることを実測した（順に 8・4・4・4 テストが赤。すべて戻して 82/82 緑に復帰）
+  - `AgentEventSource` I/F は 1 行も変更していない。`if (tool === 'copilot')` 型の抜け道も追加していない
+
 ### Changed
 
 - **feat(hooks): gemini / antigravity に構造化イベントを横展開した（Phase 4-4）** (#1762)
