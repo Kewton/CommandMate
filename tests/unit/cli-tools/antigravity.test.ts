@@ -51,18 +51,27 @@ const TRUST_DIALOG =
   'Do you trust the contents of this project?\n> Yes, I trust this folder\n  No, exit\n↑/↓ Navigate · enter Confirm';
 
 /**
- * The launch command `startSession` now types into the pane (Issue #1762).
+ * The launch command `startSession` now types into the pane (Issue #1762,
+ * extended by #1779).
  *
  * `agy` reads one hooks file for the whole machine, so the worktree and instance
- * cannot be written into it and travel in `CM_HOOK_URL` instead. The port is
+ * cannot be written into it and travel in the environment instead. The port is
  * whatever the environment resolves to, hence the pattern rather than a literal.
  * `--model` still goes last, so #989's quoting is unchanged by the prefix.
+ *
+ * Two variables since #1779: the observation events and the approval
+ * adjudication go to receivers with opposite contracts, and the adjudication
+ * hook reads an absent `CM_PERMISSION_HOOK_URL` as "this agy is not
+ * CommandMate's, abstain" — which is the only thing keeping the machine-global
+ * hooks file out of the operator's own agy sessions.
  */
 function agyLaunch(modelSuffix = ''): RegExp {
   const escaped = modelSuffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const query = `\\?tool=antigravity&worktreeId=test-wt&instanceId=antigravity`;
   return new RegExp(
-    `^CM_HOOK_URL='http://127\\.0\\.0\\.1:\\d+/api/hooks/agent-event` +
-      `\\?tool=antigravity&worktreeId=test-wt&instanceId=antigravity' 'agy'${escaped}$`
+    `^CM_HOOK_URL='http://127\\.0\\.0\\.1:\\d+/api/hooks/agent-event${query}' ` +
+      `CM_PERMISSION_HOOK_URL='http://127\\.0\\.0\\.1:\\d+/api/hooks/permission-request${query}' ` +
+      `'agy'${escaped}$`
   );
 }
 

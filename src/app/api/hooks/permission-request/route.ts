@@ -45,6 +45,26 @@
  *
  * Both of those turn "abstain, which is safe" into "stop the session in
  * silence". `describeAbstain` is why the log says so.
+ *
+ * ## Every abstention goes through the source (Issue #1779)
+ *
+ * Two paths used to answer a hard-coded `{}` *before* asking the registry which
+ * tool was on the line: a request naming no worktree, and the catch-all. They
+ * were written when `{}` was the universal no-decision reply, and they became a
+ * latent fail-closed defect the moment antigravity grew a `PreToolUse` hook —
+ * `{}` is a **denial** there, so "this worktree is gone" and "something threw"
+ * would have silently refused agy's tool calls instead of showing a dialog.
+ *
+ * Both now go through {@link abstainBody}, which asks the source to spell its
+ * own abstention. For every tool but antigravity the bytes are unchanged (`{}`),
+ * and `tests/unit/api/hooks-permission-request-abstain-1779.test.ts` pins that.
+ *
+ * `badRequest` is deliberately *not* converted, and that is a measurement rather
+ * than an omission: agy's hook uses `curl -f`, so a 4xx prints nothing at all,
+ * and the hook command substitutes its own `{"decision":"ask"}` for an empty
+ * body. The 4xx therefore never reaches agy as a verdict, and reporting a
+ * validation error honestly costs nothing. See
+ * `antigravity/hooks-config`'s `buildAntigravityPermissionHookCommand`.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -63,6 +83,7 @@ import {
   answerPendingDecision,
   describeAbstain,
   getAgentEventSource,
+  type AgentEventSource,
   type PendingDecision,
   type Verdict,
 } from '@/lib/hooks/sources';
@@ -70,8 +91,34 @@ import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/hooks-permission-request');
 
-/** No decision to report. Byte-for-byte what the spike returned for D5. */
+/**
+ * No decision to report, for a request whose tool is not known.
+ *
+ * Byte-for-byte what the spike returned for D5, and the right answer only when
+ * there is nobody to ask: see {@link abstainBody}.
+ */
 const NO_DECISION_BODY = {} as const;
+
+/**
+ * "CommandMate has no opinion", in the dialect of whichever tool is asking
+ * (Issue #1779).
+ *
+ * The point of routing this through {@link AgentEventSource.encodeVerdict}
+ * rather than writing `{}` is that `{}` is not a universal no-decision reply:
+ * antigravity reads it as a denial and refuses the tool call (#1757 P10), so its
+ * source spells abstention `{"decision":"ask"}` instead. Everywhere else this
+ * still returns `{}`, unchanged.
+ *
+ * @param source - The tool's source, or null when the request never got far
+ *   enough to name a known tool
+ */
+function abstainBody(source: AgentEventSource | null): Record<string, unknown> {
+  if (!source) return { ...NO_DECISION_BODY };
+  const encoded = source.encodeVerdict({ kind: 'abstain' });
+  // `outOfBand` means the source has no response body to write into at all
+  // (opencode). The request still has to be answered, and `{}` is the ack.
+  return encoded.kind === 'responseBody' ? encoded.body : { ...NO_DECISION_BODY };
+}
 
 const badRequest = (error: string) => NextResponse.json({ error }, { status: 400 });
 
@@ -100,6 +147,10 @@ function toVerdict(decision: PermissionDecision): Verdict {
 
 export async function POST(request: NextRequest) {
   const startedAt = Date.now();
+  // Hoisted out of the `try` so the catch-all can still abstain in the asking
+  // tool's dialect (#1779). Null until the tool id has been validated, which is
+  // also the honest answer for anything that throws before then.
+  let source: AgentEventSource | null = null;
   try {
     const body: unknown = await request.json().catch(() => null);
     if (typeof body !== 'object' || body === null || Array.isArray(body)) {
@@ -115,6 +166,10 @@ export async function POST(request: NextRequest) {
       return badRequest('tool must be a known CLI tool id');
     }
     const tool: CLIToolType = toolValue;
+    // Resolved here rather than at the adjudication site (#1779): everything
+    // below this line that answers "no decision" has to answer it in this tool's
+    // dialect, and two of those answers come before the adjudication.
+    source = getAgentEventSource(tool);
 
     const instanceParam = readString(raw, 'instanceId') ?? query.get('instanceId') ?? undefined;
     if (instanceParam !== undefined && !isValidInstanceId(instanceParam)) {
@@ -139,14 +194,15 @@ export async function POST(request: NextRequest) {
 
     if (!worktree) {
       logger.info('permission-request-unresolved-target', { tool, instanceId: instanceParam });
-      return NextResponse.json(NO_DECISION_BODY, { status: 200 });
+      // #1779: a hook left configured after a worktree was removed is a normal
+      // state and must cost a dialog, not a refused tool call.
+      return NextResponse.json(abstainBody(source), { status: 200 });
     }
 
     // Issue #1759: the payload is read in the sending tool's dialect (S7) and
     // the verdict is written back in it (S6). The adjudication in between —
     // `resolvePermissionRequest` — was already tool-independent and is
     // untouched.
-    const source = getAgentEventSource(tool);
     const payload = source.parsePermissionRequest(raw);
     const decision = resolvePermissionRequest(
       { worktreeId: worktree.id, cliToolId: tool, instanceId: instanceParam ?? tool },
@@ -222,7 +278,9 @@ export async function POST(request: NextRequest) {
       elapsedMs: Date.now() - startedAt,
     });
     // No decision rather than a 500 body: an unexpected failure here must cost
-    // a dialog, never an approval and never a stuck agent.
-    return NextResponse.json(NO_DECISION_BODY, { status: 200 });
+    // a dialog, never an approval, never a stuck agent — and, since #1779, never
+    // a refused tool call either, which is what a hard-coded `{}` meant on
+    // antigravity.
+    return NextResponse.json(abstainBody(source), { status: 200 });
   }
 }

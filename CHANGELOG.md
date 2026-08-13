@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **feat(hooks): antigravity に承認裁定経路を張り、受け口の fail-closed な早期 return を塞いだ（Phase 4-4 残作業）** (#1779)
+  - agy の `PreToolUse` を登録し、**専用の裁定コマンド**（stdout が裁定）を `/api/hooks/permission-request` に向けた。codex の `PermissionRequest` / copilot の `PreToolUse` と同じ形で、**中継スクリプト `scripts/hooks/cmate-agent-event.sh` は 1 バイトも変更していない**（`curl … >/dev/null` で応答ボディを捨てるため裁定に使えない）。他 5 ツールの配送挙動は無変更
+  - **受け口の潜在欠陥を塞いだ。** `permission-request/route.ts` は `getAgentEventSource()` を呼ぶ**前**にハードコードした `{}` を返す経路を 2 つ持っていた（worktree 未解決 / catch-all）。他ツールでは `{}`＝「意見なし」だが **agy では `{}`＝拒否**なので、`PreToolUse` を張った瞬間に「worktree が消えた」「想定外の例外」で agy のツール呼び出しが黙って拒否される。両経路を `source.encodeVerdict({kind:'abstain'})` 経由にし、**他ツールの出力が `{}` のままであること**をテストで固定した
+  - **`badRequest()` の 4xx は 4xx のままにした（実測に基づく判断）。** 裁定コマンドは `curl -f` を使うので 4xx はボディごと捨てられ、コマンド自身の fallback に落ちる。400 が裁定として agy に届くことはないので、検証エラーを正直に返す現状のままでよい
+  - **失敗経路の既定出力は `{"decision":"ask"}` にした。Issue 本文の指定（`{"decision":"allow"}`）から意図的に変えている。** agy の `decision` は `allow`/`deny`/`ask`/`force_ask` の 4 値で、**`ask` が「通常の承認フローへ」＝abstain そのもの**。設定ファイルは `~/.gemini/config/hooks.json` の**マシン 1 本**なので、`allow` フォールバックは「CommandMate を止めるとマシン上の**全** agy セッションが全ツール呼び出しを無承認で実行する」を意味する（CommandMate が起動していないセッションを含む＝失敗経路 5 がまさにそれ）。`ask` なら「CommandMate が入っていない機械と同じ挙動」になり、Issue の狙い（agy を壊さない）を穴を開けずに満たす。**Issue 本文の手動受入条件「Auto-Yes 無効時は従来どおりダイアログが出ること」も `allow` では満たせない**
+  - **サーバ不達 / タイムアウト / 非 2xx / JSON でない or `decision` の無いボディ / `CM_PERMISSION_HOOK_URL` 未設定** の 5 経路すべてで `{"decision":"ask"}` を stdout に出す。`curl -m 4` を handler の `timeout: 5` の内側に置き、**agy に殺されて部分出力になる経路自体を作らない**
+  - `parsePermissionRequest` を実装した（`toolCall.name` / `toolCall.args`）。`()=>null` のままだと `unknown-payload` で常に abstain＝**「動いている Auto-Yes に承認するものが無い」と見分けがつかない**
+  - `noDecision` を `{kind:'blocks'}` → **`{kind:'proceeds'}`** に変えた。**`encodeVerdict` と対で読むこと** — 安全なのは abstain を `ask` と綴っているからで、`{}` に戻すと宣言だけが嘘になる。`blocks` のままだと Auto-Yes 無効時の全ツール呼び出しで `permission-request-abstain-blocks-agent` が warn され、起きていないことを報告し続ける
+  - `capabilities.supportedEvents` に **`pre_tool_use` は足していない**（Issue 本文の実装範囲 4 からの逸脱）。**copilot と同じ理由** — 登録先は permission receiver なので `pre_tool_use` の `NormalizedAgentEvent` は 1 件も生成されず、載せると「待っても来ない語」を約束することになる（`copilot/source.ts` が同じ判断を明記している）
+  - **実測で覆した Issue 本文 / #1762 の前提 2 点**（いずれも agy **1.1.12**・隔離 HOME・専用 tmux socket `cmate-i1779`・対話 TUI）
+    - **stdout が空（exit 0・無出力）は `{}` とは別物で fail-open。** 通常の承認ダイアログが出る。「中継のまま `PreToolUse` を張るとマシン上の全ツール呼び出しが止まる」は成立しない（止まるのは `{}` を返したときで、`{}` は `⚠ Tool call denied by pre-tool hook:` を出す＝#1757 P10 を再現）。中継を使わない判断自体は変わらない（裁定を返せないため）
+    - **`{"decision":"allow"}` は対話 TUI の承認ダイアログを抑止しない。** `permissionOverrides:["command(*)"]` を添えても、リダイレクトの無い `ls -a` でも同じ。`--print`（headless）では効く（#1757 §5.4.4）。**したがって対話セッションの Auto-Yes は従来どおり TUI 応答経路（#988）が担う** — 本 Issue が追加したのは「abstain が安全になったこと」と「裁定を表現できるようになったこと」であって、ダイアログの消滅ではない。裁定は agy の文書どおりの綴りで正直に出している
+  - **実機検証**: 生成した `hooks.json` をそのまま隔離 HOME に置き、実 agy 1.1.12 で ①**CommandMate 停止状態（ポート未 listen）→ 通常ダイアログ → `1. Yes` でコマンドが実際に実行された**（最重要条件）／②受け口スタブが `{"decision":"ask"}` → 通常ダイアログ、**リクエストは `?tool=antigravity&worktreeId=…&instanceId=…` 付きで到達**し payload は `toolCall.name`/`toolCall.args` ／③スタブが 500 → 通常ダイアログ。**ユーザーの実 `~/.gemini/` は 3507 ファイルの sha256 マニフェストが前後一致**（検証は複製 HOME で実施）。`kill-server` は使っていない
+  - **空振り緑の反証**: ①失敗経路の既定出力を「無出力」に変える ②受け口の早期 return を `{}` のハードコードに戻す ③`encodeVerdict` の abstain を `{}` に変える、の 3 変異を注入して赤になることを実測した（順に **9・2・11** テストが赤。すべて戻して 155/155 緑に復帰）
+  - **`AgentEventSource` I/F（`types.ts`）は 1 行も変更していない。** `NoDecisionBehavior` に「裁定しない＝拒否される」を表す値が無い件は、本 Issue では**表現する必要がなくなった**（abstain を `ask` と綴るので `proceeds` が実態と一致する）。ただし**表現できない状態が消えたわけではない** — `encodeVerdict` が `{}` を返す実装に戻れば `noDecision` は再び嘘になり、型はそれを防げない。申し送りとして残す
+  - **既存テストの期待値を変えた 4 箇所とその理由**（いずれも本 Issue が挙動を変えた点そのもの）: `noDecision` を `blocks`→`proceeds` ／ `isAbstainSafe` を `false`→`true`（gemini との対比を「逆」→「理由の違う一致」に書き換え） ／ abstain の encode を `{decision:'allow'}`→`{decision:'ask'}` ／ `buildAntigravityHookConfig` の `PreToolUse` を「未登録であること」→「**中継宛でないこと**」（主張の芯＝中継は裁定を返せない、は不変）。`cli-tools/antigravity.test.ts` の起動コマンド正規表現は `CM_PERMISSION_HOOK_URL` を含むよう更新（`expect` 行ではない）
+
 - **feat(hooks): copilot に構造化イベントと承認裁定を横展開した（Phase 4-3）** (#1761)
   - `src/lib/hooks/sources/copilot/` を追加し、`registry.ts` に 1 行登録した。copilot セッションの `sessionStatus` / `wait` の完了判定 / Auto-Yes が、TUI スクレイピングではなく copilot 自身の hooks から決まるようになる（スクレイパは #1723 の 2 層目として残る）
   - **Issue 本文冒頭の「hooks が実在するか未確認。実在しなければ取り下げ」は事実と逆だった。** #1757 のスパイクが実在を確定させており、payload は 4 ツール中もっとも Claude Code に近い。取り下げていない

@@ -300,28 +300,43 @@ describe('antigravity: no event name, no cwd, camelCase, fail-closed', () => {
   });
 
   // ---- mutation 3: the most important assertion in this Issue ----
-  it('declares that abstaining is NOT safe', () => {
-    // #1757 P10, verified against a hooks-free control run: a `PreToolUse` hook
-    // that answers `{}` has every tool call denied, and the agent reports that
-    // "all tool executions were denied by the environment's system policy".
-    // A *timeout* on the same hook is fail-open, so "no reply" and "an empty
-    // reply" are opposites here — the only tool of the six where that is true.
+  it('declares that abstaining is safe only because of how it is spelled', () => {
+    // Until Issue #1779 this read `expect(…noDecision).toEqual({ kind: 'blocks' })`
+    // and `isAbstainSafe(…)).toBe(false)`, and it was right: #1762 registered no
+    // `PreToolUse` hook, and a hook that answered `{}` would have had every tool
+    // call denied (#1757 P10). #1779 registered one and measured the case
+    // neither Issue had: `{"decision":"ask"}` — agy's own word for *"prompt the
+    // user for permission"* — draws exactly the dialog a hooks-free control run
+    // draws, on agy 1.1.12, interactively, in an isolated HOME.
     //
-    // Turning this into `{ kind: 'proceeds' }` is the mutation the Issue calls
-    // the most important one, and it fails here and in the next two assertions.
-    expect(antigravityAgentEventSource.noDecision).toEqual({ kind: 'blocks' });
-    expect(isAbstainSafe(antigravityAgentEventSource)).toBe(false);
-    expect(describeAbstain(antigravityAgentEventSource).safe).toBe(false);
-    expect(describeAbstain(antigravityAgentEventSource).blocksForMs).toBeNull();
+    // The mutation this still catches is the one that matters, and it is now
+    // spelled in `encodeVerdict` rather than here: encode abstention as `{}` and
+    // the assertion below goes red while this one stays green, which is why the
+    // two are asserted together.
+    expect(antigravityAgentEventSource.noDecision).toEqual({ kind: 'proceeds' });
+    expect(isAbstainSafe(antigravityAgentEventSource)).toBe(true);
+    expect(describeAbstain(antigravityAgentEventSource).safe).toBe(true);
+    expect(antigravityAgentEventSource.encodeVerdict({ kind: 'abstain' })).not.toEqual({
+      kind: 'responseBody',
+      body: {},
+    });
   });
 
   it('never encodes abstention as an empty object', () => {
     // The whole failure mode: `{}` is a denial here, so the "safe" reply that
     // works on Claude stops every tool call on antigravity. Abstention has to be
     // spelled positively.
+    //
+    // #1779 changed *which* positive word. #1762 wrote `allow` for abstention on
+    // the reasoning that it was the only other thing agy would accept; agy's
+    // vocabulary in fact has four values, and `ask` is the one that means "no
+    // opinion". `allow` would have meant that turning Auto-Yes **off** silently
+    // auto-approved every tool call — and, since the config file is
+    // machine-global, that stopping CommandMate did the same thing to agy
+    // sessions it never started.
     expect(antigravityAgentEventSource.encodeVerdict({ kind: 'abstain' })).toEqual({
       kind: 'responseBody',
-      body: { decision: 'allow' },
+      body: { decision: 'ask' },
     });
     expect(antigravityAgentEventSource.encodeVerdict({ kind: 'allowOnce' })).toEqual({
       kind: 'responseBody',
@@ -335,12 +350,22 @@ describe('antigravity: no event name, no cwd, camelCase, fail-closed', () => {
     });
   });
 
-  it('is the opposite of gemini on the one question that matters', () => {
-    // Stated as a contrast because the two ship together and share a config
-    // tree: a reader who assumes the sibling tool behaves the same way is
-    // exactly the reader this assertion is for.
+  it('agrees with gemini that abstaining is safe, for opposite reasons', () => {
+    // Until #1779 this asserted the two were *opposites*. They now agree, and
+    // the contrast worth stating is why: gemini is safe because CommandMate
+    // never adjudicates for it at all (its approvals belong to the Policy
+    // Engine), and agy is safe only because its abstention is spelled `ask`.
+    // Remove that spelling and this pair diverges again — silently.
     expect(isAbstainSafe(geminiAgentEventSource)).toBe(true);
-    expect(isAbstainSafe(antigravityAgentEventSource)).toBe(false);
+    expect(isAbstainSafe(antigravityAgentEventSource)).toBe(true);
+    expect(geminiAgentEventSource.encodeVerdict({ kind: 'abstain' })).toEqual({
+      kind: 'responseBody',
+      body: {},
+    });
+    expect(antigravityAgentEventSource.encodeVerdict({ kind: 'abstain' })).toEqual({
+      kind: 'responseBody',
+      body: { decision: 'ask' },
+    });
   });
 
   it('states what a CommandMate-started agy session emits', () => {
@@ -355,8 +380,11 @@ describe('antigravity: no event name, no cwd, camelCase, fail-closed', () => {
       'user_prompt_submit'
     );
     expect(antigravityAgentEventSource.capabilities.supportedEvents).not.toContain('notification');
-    // Absent for a different reason: `PreToolUse` fires, and CommandMate does
-    // not register it because the relay cannot answer it safely.
+    // Absent for a different reason again, and the same one copilot omits it
+    // for: since #1779 `PreToolUse` *is* registered, but against
+    // `/api/hooks/permission-request`, which adjudicates and does not record.
+    // Nothing ever files a `pre_tool_use` event for agy, and this list is a
+    // promise about what does.
     expect(antigravityAgentEventSource.capabilities.supportedEvents).not.toContain('pre_tool_use');
     expect(antigravityAgentEventSource.capabilities.configScope).toBe('global-singleton');
   });
