@@ -89,31 +89,43 @@ describe('registry', () => {
   it('falls back for a tool with no implementation, and says it is a fallback', () => {
     // The #1549 receiver applied one table to every tool. Un-porting that on
     // the day this abstraction landed would have broken every hand-configured
-    // codex hook for a reason unrelated to anything that changed.
-    expect(hasAgentEventSource('codex')).toBe(false);
+    // hook for a reason unrelated to anything that changed.
+    //
+    // Issue #1760: `vibe-local`, not codex. Phase 4-2…4-5 registers a real
+    // source for codex, copilot, gemini, antigravity and opencode, so any of
+    // those five would turn this assertion into a countdown; `vibe-local` is
+    // outside Phase 4 entirely and stays unregistered.
+    expect(hasAgentEventSource('vibe-local')).toBe(false);
 
-    const fallback = getAgentEventSource('codex');
-    expect(fallback.cliToolId).toBe('codex');
+    const fallback = getAgentEventSource('vibe-local');
+    expect(fallback.cliToolId).toBe('vibe-local');
     expect(fallback.transport).toBe('push');
     // "Nothing measured", not a copy of Claude's list presented as a promise.
     expect(fallback.capabilities.supportedEvents).toEqual([]);
 
     // Memoised: repeated lookups are one object, so a slot opened against one
     // is visible to the other.
-    expect(getAgentEventSource('codex')).toBe(fallback);
+    expect(getAgentEventSource('vibe-local')).toBe(fallback);
   });
 
   it('replaces the fallback the moment a real source registers', () => {
-    const before = getAgentEventSource('codex');
-    const stub: AgentEventSource = { ...before, cliToolId: 'codex', transport: 'pull' };
+    // Also `vibe-local` (Issue #1760), and here the tool name matters more than
+    // it looks: the `finally` below *unregisters* whatever it names. Run
+    // against a tool that has a real source, this test passes — and takes that
+    // source out of a registry the rest of the suite shares, in a process CI
+    // does not fork per file (`vitest.config.ts`: `fileParallelism` is off when
+    // `CI=true`). Green here, and the receiver falls back to legacy-relay for
+    // every file that runs afterwards.
+    const before = getAgentEventSource('vibe-local');
+    const stub: AgentEventSource = { ...before, cliToolId: 'vibe-local', transport: 'pull' };
     registerAgentEventSource(stub);
     try {
-      expect(getAgentEventSource('codex')).toBe(stub);
-      expect(hasAgentEventSource('codex')).toBe(true);
+      expect(getAgentEventSource('vibe-local')).toBe(stub);
+      expect(hasAgentEventSource('vibe-local')).toBe(true);
     } finally {
-      unregisterAgentEventSource('codex');
+      unregisterAgentEventSource('vibe-local');
     }
-    expect(hasAgentEventSource('codex')).toBe(false);
+    expect(hasAgentEventSource('vibe-local')).toBe(false);
   });
 });
 

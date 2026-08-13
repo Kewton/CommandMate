@@ -108,11 +108,15 @@ describe('prepareAgentLaunch', () => {
   });
 
   it('returns the bare executable for a tool CommandMate injects nothing into', () => {
+    // Issue #1760: `vibe-local`, not codex. codex now has a source that writes
+    // a config and returns an environment-prefixed command line, and every
+    // other tool named here is due one in Phase 4-3…4-5; `vibe-local` is
+    // outside Phase 4 and keeps standing for "no injection".
     const plan = prepareAgentLaunch(
-      { worktreeId: WT, cliToolId: 'codex', instanceId: 'codex' },
-      '/usr/local/bin/codex'
+      { worktreeId: WT, cliToolId: 'vibe-local', instanceId: 'vibe-local' },
+      '/usr/local/bin/vibe'
     );
-    expect(plan.command).toBe('/usr/local/bin/codex');
+    expect(plan.command).toBe('/usr/local/bin/vibe');
     expect(plan.settingsPath).toBeNull();
   });
 

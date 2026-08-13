@@ -66,6 +66,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **feat(hooks): codex に構造化イベントと承認裁定を横展開した（Phase 4-2）** (#1760)
+  - #1759 の `AgentEventSource` に codex 実装（`src/lib/hooks/sources/codex/`）を足し、レジストリに 1 行登録した。**I/F の変更も codex 固有の抜け道（`if (tool === 'codex')` 等）も無い。** `wait` / `capture --prompts` / Auto-Yes への反映は消費層がツール非依存なので自動的に付いてくる
+  - **設定は `$CODEX_HOME/hooks.json` 1 本、内容は静的。相関キーは起動コマンド行の環境変数で渡す。** codex には `--settings` 相当が無く 1 ファイルが全セッション共有になるため、`worktreeId` / `instanceId` をファイルに焼き込めない。本 Issue で **hook の `command` が POSIX シェルで実行され、hook プロセスが codex を起動したシェルの環境を継承すること**を実測したので、`CM_AGENT_WORKTREE_ID` / `CM_AGENT_INSTANCE_ID` / 受け口 URL / `CODEX_HOME` を起動行に置く方式にした。**同一 worktree の `codex` と `codex-2` が実機で正しく振り分けられることを確認済み**（`cwd` は両者同一なので他に手段が無い）
+  - **`CODEX_HOME` を起動行で pin する。** tmux セッションは tmux **サーバ**の環境を継ぐため、`CODEX_HOME` を設定して起動したサーバが書いた hooks.json を、起動された codex が読まない（`~/.codex` を見る）という無言の食い違いが起きる。実測して修正した（症状はエラー無しの「イベント 0 件」）
+  - **登録は 5 イベント。** `SessionStart` / `UserPromptSubmit` / `Stop` / `SessionEnd` ＋ `PermissionRequest`。**`Notification` は codex に存在しない**（レビュー画面が列挙する 11 イベントに無い）。`Pre/PostToolUse` は消費側が無く 1 ツール呼び出しにつき 2 POST になるだけなので登録せず、`capabilities.supportedEvents` からも外した（待つ側が永久に待たないように）。`SessionEnd` の timeout は **3 秒**（codex がクランプし TUI に警告を常時表示するため）
+  - **`PermissionRequest` だけインライン `curl`。** 応答ボディがそのまま裁定になるため、ボディを捨てる中継スクリプトは使えない。`{}` → 通常の承認ダイアログ（fail-safe）、`decision.behavior=allow` → ダイアログ無しで実行、**受け口停止中も fail-open**（セッションは止まらない）を実機で確認した
+  - **trust は CommandMate が与えない。** codex の hooks は人間が trust するまで**完全に無言で skip**され、trust は**ユーザーの `~/.codex/config.toml`** に書かれる。既定で `--dangerously-bypass-hook-trust` を使わないのは、このフラグが**作業対象リポジトリ内の `.codex/hooks.json` まで無審査で実行させる**ため（悪意あるリポジトリを開いた瞬間に任意コマンドが走る）。既定は「設定は書く・trust は人間が codex 自身のレビュー画面で 1 回与える」。自動化向けに `CM_CODEX_HOOK_TRUST=bypass` を opt-in で用意した。**作業前後で `~/.codex/config.toml` は sha256 一致（`notify` を含め非汚染）**
+  - **起動時の「Hooks need review」ダイアログを `cli-tools/codex.ts` が処理する（`3`＝trust せず継続）。** `getCodexActiveDialog` はこの画面を `null` に分類し `isCodexPromptReady` も false を返すため、放置すると 30 回ポーリングし切ってダイアログのまま `sendMessage` に渡る（実測）。**hooks.json を置くだけで codex の起動が壊れる**ということなので、注入とセットで入れた
+  - **ユーザーの既存 hooks 設定は置換せずマージする。** `$CODEX_HOME/hooks.json` はユーザー自身の codex hooks が置ける唯一の場所でもある。`# commandmate:agent-hooks` マーカーで自分のハンドラだけを置換し、内容が一致するときはファイルを開かず（trust を無駄にしない）、JSON として読めないファイルは上書きせず注入を諦める
+  - 世代フェンス（#1723 / S8）を `CodexTool.startSession` の生成パスに追加した。無いと前プロセスの `user_prompt_submit` を新セッションのものと読んで**起動直後に `running` を publish する**（単体テストは緑のまま壊れる型）
+  - **空振り緑の反証**: ①レジストリから codex 登録を外す ②`Stop` の写像を壊す ③`noDecision` を実測値と違う値にする ④`beginAgentSession()` を消す、の 4 変異を注入して赤になることを実測し、戻して緑に復帰することも確認した
+  - **`CM_AGENT_HOOKS_INJECT=0` で注入をスキップし、起動コマンドが #1760 以前と 1 バイト同一になる**ことをテストで固定した
+  - test: `tests/setup.ts` に `CODEX_HOME` の既定を temp dir に pin した。pin が無いと codex セッションを起動するテストが**開発者の実 `~/.codex/hooks.json` を書き換える**（実際に起きたので追加した）
+  - test: #1759 が「未登録ツールの例」として使っていた `'codex'` を `'vibe-local'` に差し替えた（`agent-event-source.test.ts` / `agent-session-lifecycle-1759.test.ts`）。特に register→`finally` unregister するケースは、**本物の codex source を消しながら assert は通る**＝緑のまま registry が壊れる（CI は `fileParallelism: false` で全ファイルが 1 プロセスを共有するため以降の全ファイルに波及する）
+  - 設計と実測は [`docs/design/codex-agent-event-source.md`](./docs/design/codex-agent-event-source.md)
+
 - **docs/test: codex / copilot / gemini / antigravity の hooks 実機挙動を検証し、実 payload を fixture として収集** (#1757)
   - Epic #1720 Phase 4 の全下流 Issue（#1759 / #1760 / #1761 / #1762）が前提にする外部 CLI 4 種の hooks 挙動を実機で確定した。**`src/` の変更はゼロ**（スパイク）。成果物は [`docs/design/agent-hooks-phase4-live-verification.md`](./docs/design/agent-hooks-phase4-live-verification.md) と `tests/fixtures/hooks/{codex,copilot,gemini,antigravity}/*.json`（24 payload）
   - **Issue 本文の「copilot に hooks は無いかもしれない（無ければ #1761 は取り下げ）」という前提は誤りだった。** `copilot --help` に hook の語が無いのは事実だが、`copilot help config` が `hooks` / `disableAllHooks` を、`copilot plugin --help` が「Plugins extend Copilot CLI with additional skills, agents, **hooks**, …」を明記しており、実際に 6 イベントが発火した。payload は 4 ツール中もっとも Claude Code に近い。**4 ツールすべてに hooks が実在したため、横展開 Issue の取り下げ提案は 1 件も無い**
