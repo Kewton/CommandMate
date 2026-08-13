@@ -35,6 +35,7 @@ import { copilotAgentEventSource } from './copilot/source';
 import { geminiAgentEventSource } from './gemini/source';
 import { antigravityAgentEventSource } from './antigravity/source';
 import { codexAgentEventSource } from './codex/source';
+import { opencodeAgentEventSource } from './opencode/source';
 
 declare global {
   // eslint-disable-next-line no-var
@@ -118,3 +119,4 @@ registerAgentEventSource(copilotAgentEventSource);
 registerAgentEventSource(geminiAgentEventSource);
 registerAgentEventSource(antigravityAgentEventSource);
 registerAgentEventSource(codexAgentEventSource);
+registerAgentEventSource(opencodeAgentEventSource);
