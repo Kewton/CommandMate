@@ -142,7 +142,7 @@ describe('createGateResult / finishGateResult', () => {
   it('opens a gate result in running state with an empty outcome', () => {
     const run = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
 
-    const gate = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint' });
+    const gate = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint', source: 'verify.yaml' });
 
     expect(gate.runId).toBe(run.id);
     expect(gate.gateId).toBe('lint');
@@ -156,7 +156,7 @@ describe('createGateResult / finishGateResult', () => {
 
   it('records a passing gate, keeping exit code 0 as 0', () => {
     const run = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
-    const gate = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint' });
+    const gate = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint', source: 'verify.yaml' });
 
     finishGateResult(db, gate.id, {
       status: 'passed',
@@ -176,7 +176,7 @@ describe('createGateResult / finishGateResult', () => {
 
   it('records a failing gate with its non-zero exit code and log tail', () => {
     const run = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
-    const gate = createGateResult(db, run.id, { gateId: 'test', command: 'npm run test:unit' });
+    const gate = createGateResult(db, run.id, { gateId: 'test', command: 'npm run test:unit', source: 'verify.yaml' });
 
     finishGateResult(db, gate.id, {
       status: 'failed',
@@ -194,7 +194,7 @@ describe('createGateResult / finishGateResult', () => {
 
   it('records a skipped gate with a reason and no exit code', () => {
     const run = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
-    const gate = createGateResult(db, run.id, { gateId: 'build', command: 'npm run build' });
+    const gate = createGateResult(db, run.id, { gateId: 'build', command: 'npm run build', source: 'verify.yaml' });
 
     finishGateResult(db, gate.id, {
       status: 'skipped',
@@ -214,7 +214,7 @@ describe('createGateResult / finishGateResult', () => {
 
   it('rejects a gate status outside the vocabulary', () => {
     const run = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
-    const gate = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint' });
+    const gate = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint', source: 'verify.yaml' });
 
     expect(() =>
       finishGateResult(db, gate.id, {
@@ -226,7 +226,7 @@ describe('createGateResult / finishGateResult', () => {
 
   it('refuses to attach a gate result to a run that does not exist', () => {
     expect(() =>
-      createGateResult(db, 9999, { gateId: 'lint', command: 'npm run lint' })
+      createGateResult(db, 9999, { gateId: 'lint', command: 'npm run lint', source: 'verify.yaml' })
     ).toThrow(/FOREIGN KEY constraint failed/);
   });
 });
@@ -245,7 +245,7 @@ describe('finishGateResult — measured execution window', () => {
 
   it('writes the supplied window over the provisional opening stamp', () => {
     const run = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
-    const gate = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint' });
+    const gate = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint', source: 'verify.yaml' });
 
     finishGateResult(db, gate.id, {
       status: 'passed',
@@ -263,7 +263,7 @@ describe('finishGateResult — measured execution window', () => {
 
   it('keeps the opening stamp and closes at now when no window is supplied', () => {
     const run = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
-    const gate = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint' });
+    const gate = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint', source: 'verify.yaml' });
     const openedAt = gate.startedAt.getTime();
 
     // The reconciler's call shape (#1543): it never observed the gate, so it
@@ -278,7 +278,7 @@ describe('finishGateResult — measured execution window', () => {
   it('reports timingsMeasured only when the window matches duration_ms', () => {
     const run = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
 
-    const measured = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint' });
+    const measured = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint', source: 'verify.yaml' });
     finishGateResult(db, measured.id, {
       status: 'passed',
       exitCode: 0,
@@ -288,7 +288,7 @@ describe('finishGateResult — measured execution window', () => {
 
     // A row shaped like the ones written before #1625: both stamps taken after
     // the gate finished, so the window is empty while duration_ms says 4s.
-    const legacy = createGateResult(db, run.id, { gateId: 'test', command: 'npm run test:unit' });
+    const legacy = createGateResult(db, run.id, { gateId: 'test', command: 'npm run test:unit', source: 'verify.yaml' });
     finishGateResult(db, legacy.id, {
       status: 'passed',
       exitCode: 0,
@@ -305,7 +305,7 @@ describe('finishGateResult — measured execution window', () => {
 
   it('reports timingsMeasured false while a gate is still open', () => {
     const run = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
-    const gate = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint' });
+    const gate = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint', source: 'verify.yaml' });
 
     expect(gate.timingsMeasured).toBe(false);
     expect(getVerificationRun(db, run.id)!.gates[0].timingsMeasured).toBe(false);
@@ -313,7 +313,7 @@ describe('finishGateResult — measured execution window', () => {
 
   it('reports timingsMeasured false for a gate closed without a duration', () => {
     const run = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
-    const gate = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint' });
+    const gate = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint', source: 'verify.yaml' });
 
     finishGateResult(db, gate.id, { status: 'error', durationMs: null, logTail: 'orphan' });
 
@@ -336,9 +336,9 @@ describe('getVerificationRun', () => {
 
   it('returns gate results in execution order', () => {
     const run = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
-    const lint = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint' });
-    const tsc = createGateResult(db, run.id, { gateId: 'tsc', command: 'npx tsc --noEmit' });
-    const test = createGateResult(db, run.id, { gateId: 'test', command: 'npm run test:unit' });
+    const lint = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint', source: 'verify.yaml' });
+    const tsc = createGateResult(db, run.id, { gateId: 'tsc', command: 'npx tsc --noEmit', source: 'verify.yaml' });
+    const test = createGateResult(db, run.id, { gateId: 'test', command: 'npm run test:unit', source: 'verify.yaml' });
 
     const gates = getVerificationRun(db, run.id)!.gates;
     expect(gates.map((g) => g.id)).toEqual([lint.id, tsc.id, test.id]);
@@ -348,8 +348,8 @@ describe('getVerificationRun', () => {
   it('does not mix in gate results belonging to another run', () => {
     const runA = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
     const runB = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
-    createGateResult(db, runA.id, { gateId: 'lint', command: 'npm run lint' });
-    createGateResult(db, runB.id, { gateId: 'build', command: 'npm run build' });
+    createGateResult(db, runA.id, { gateId: 'lint', command: 'npm run lint', source: 'verify.yaml' });
+    createGateResult(db, runB.id, { gateId: 'build', command: 'npm run build', source: 'verify.yaml' });
 
     expect(getVerificationRun(db, runA.id)!.gates.map((g) => g.gateId)).toEqual(['lint']);
     expect(getVerificationRun(db, runB.id)!.gates.map((g) => g.gateId)).toEqual(['build']);
@@ -358,9 +358,9 @@ describe('getVerificationRun', () => {
   it('deletes a run\'s gate results with the run (ON DELETE CASCADE)', () => {
     const run = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
     const survivor = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
-    createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint' });
-    createGateResult(db, run.id, { gateId: 'tsc', command: 'npx tsc --noEmit' });
-    createGateResult(db, survivor.id, { gateId: 'lint', command: 'npm run lint' });
+    createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint', source: 'verify.yaml' });
+    createGateResult(db, run.id, { gateId: 'tsc', command: 'npx tsc --noEmit', source: 'verify.yaml' });
+    createGateResult(db, survivor.id, { gateId: 'lint', command: 'npm run lint', source: 'verify.yaml' });
 
     db.prepare('DELETE FROM verification_runs WHERE id = ?').run(run.id);
 

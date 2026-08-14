@@ -131,6 +131,12 @@ export function createTaskCommand(): Command {
           console.log(`DENY:      ${task.contract.scope.deny.join(', ')}`);
         }
         console.log(`GATES:     ${task.contract.verify.gates?.join(', ') ?? 'all-gates'}`);
+        // Issue #1791: a gate the contract declares itself exists nowhere else
+        // — verify.yaml can be opened, this cannot. Printing the id alone would
+        // leave a reader unable to tell which criterion the run was judged by.
+        for (const gate of task.contract.verify.gateDefinitions ?? []) {
+          console.log(`GATE-DEF:  ${gate.id}  ${gate.command}  (timeoutSec=${gate.timeoutSec})`);
+        }
         console.log(`AUTO-YES:  ${task.contract.autoYes.mode ?? 'unset'}`);
         console.log(`CREATED:   ${task.createdAt}`);
         console.log(`STARTED:   ${formatTimestamp(task.startedAt)}`);

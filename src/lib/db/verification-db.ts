@@ -68,6 +68,25 @@ export type VerificationGateStatus =
 /** Statuses a gate result can be closed with. */
 export type VerificationGateTerminalStatus = Exclude<VerificationGateStatus, 'running'>;
 
+/**
+ * Where a gate's definition came from (Issue #1791, migration v56).
+ *
+ * `builtin` = work-evidence / scope / env-clean (and the `config` pseudo-gate),
+ * which are the runner's own. `verify.yaml` = the repository's declared
+ * criterion of passing. `contract` = a gate the execution contract carried for
+ * this delegation alone.
+ *
+ * Recorded rather than inferred from the id, because the whole point of letting
+ * a contract carry gates is that a reader can tell the repository's definition
+ * of "passes" from one Issue's. Without it in the report, per-delegation gates
+ * are a second verify.yaml that nothing announces.
+ *
+ * The runtime tuple mirrors the CHECK constraint in migration v56.
+ */
+export const VERIFICATION_GATE_SOURCES = ['builtin', 'verify.yaml', 'contract'] as const;
+
+export type VerificationGateSource = (typeof VERIFICATION_GATE_SOURCES)[number];
+
 /** One verification attempt against a worktree. */
 export interface VerificationRun {
   id: number;
@@ -96,6 +115,15 @@ export interface VerificationGateResult {
   logTail: string | null;
   startedAt: Date;
   finishedAt: Date | null;
+  /**
+   * Where the gate was declared (Issue #1791).
+   *
+   * null on rows written before v56. History is never rewritten, and neither
+   * value would have been true of every old row — the column separates "this
+   * gate came from the contract" from "nobody recorded where this came from"
+   * instead of guessing, exactly as {@link timingsMeasured} does for timing.
+   */
+  source: VerificationGateSource | null;
   /**
    * Whether `startedAt`/`finishedAt` are the endpoints of the interval
    * `durationMs` counted (Issue #1625).
@@ -136,6 +164,8 @@ export interface VerificationGateSummary {
   status: VerificationGateStatus;
   exitCode: number | null;
   durationMs: number | null;
+  /** Where the gate was declared (#1791); null on rows written before v56. */
+  source: VerificationGateSource | null;
 }
 
 /** A run with per-gate verdicts but no log bodies, for history listings. */
@@ -156,6 +186,14 @@ export interface CreateVerificationRunInput {
 export interface CreateGateResultInput {
   gateId: string;
   command: string;
+  /**
+   * Where the gate was declared (Issue #1791).
+   *
+   * Required, not defaulted: every writer knows which list it took the gate
+   * from, and a default would quietly re-create the "unrecorded source" state
+   * that only pre-v56 history is allowed to be in.
+   */
+  source: VerificationGateSource;
 }
 
 /**
@@ -210,6 +248,7 @@ interface VerificationGateResultRow {
   log_tail: string | null;
   started_at: number;
   finished_at: number | null;
+  source: string | null;
 }
 
 const RUN_COLUMNS = `
@@ -217,7 +256,8 @@ const RUN_COLUMNS = `
 `;
 
 const GATE_COLUMNS = `
-  id, run_id, gate_id, command, status, exit_code, duration_ms, log_tail, started_at, finished_at
+  id, run_id, gate_id, command, status, exit_code, duration_ms, log_tail, started_at, finished_at,
+  source
 `;
 
 function mapRunRow(row: VerificationRunRow): VerificationRun {
@@ -246,6 +286,7 @@ function mapGateRow(row: VerificationGateResultRow): VerificationGateResult {
     logTail: row.log_tail,
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at === null ? null : new Date(row.finished_at),
+    source: (row.source as VerificationGateSource | null) ?? null,
     timingsMeasured:
       row.finished_at !== null &&
       row.duration_ms !== null &&
@@ -310,11 +351,12 @@ export function createGateResult(
   const info = db
     .prepare(`
       INSERT INTO verification_gate_results (
-        run_id, gate_id, command, status, exit_code, duration_ms, log_tail, started_at, finished_at
+        run_id, gate_id, command, status, exit_code, duration_ms, log_tail, started_at,
+        finished_at, source
       )
-      VALUES (?, ?, ?, 'running', NULL, NULL, NULL, ?, NULL)
+      VALUES (?, ?, ?, 'running', NULL, NULL, NULL, ?, NULL, ?)
     `)
-    .run(runId, input.gateId, input.command, now);
+    .run(runId, input.gateId, input.command, now, input.source);
 
   const row = db
     .prepare(`SELECT ${GATE_COLUMNS} FROM verification_gate_results WHERE id = ?`)
@@ -527,7 +569,7 @@ export function listVerificationRunsForPeriod(
   const placeholders = runRows.map(() => '?').join(', ');
   const gateRows = db
     .prepare(`
-      SELECT run_id, gate_id, status, exit_code, duration_ms
+      SELECT run_id, gate_id, status, exit_code, duration_ms, source
       FROM verification_gate_results
       WHERE run_id IN (${placeholders})
       ORDER BY started_at ASC, id ASC
@@ -538,6 +580,7 @@ export function listVerificationRunsForPeriod(
     status: string;
     exit_code: number | null;
     duration_ms: number | null;
+    source: string | null;
   }>;
 
   const byRun = new Map<number, VerificationGateSummary[]>();
@@ -547,6 +590,7 @@ export function listVerificationRunsForPeriod(
       status: row.status as VerificationGateStatus,
       exitCode: row.exit_code,
       durationMs: row.duration_ms,
+      source: (row.source as VerificationGateSource | null) ?? null,
     };
     const bucket = byRun.get(row.run_id);
     if (bucket) bucket.push(summary);

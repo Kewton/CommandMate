@@ -99,6 +99,67 @@ describe('validateContractAgainstVerifyConfig', () => {
   it('accepts a gate-less contract even without verify.yaml (scope-only contracts)', () => {
     expect(validateContractAgainstVerifyConfig(contract(), null)).toEqual([]);
   });
+
+  // Issue #1791: a contract may carry gate definitions of its own. The
+  // cross-check is what keeps that from becoming a silent second verify.yaml.
+  describe('verify.gateDefinitions (Issue #1791)', () => {
+    const DEFINES_REPRO =
+      'verify:\n  gates: [lint, issue-1791-repro]\n' +
+      '  gateDefinitions:\n    - id: issue-1791-repro\n      command: "node repro.mjs"\n';
+
+    it('accepts gates naming an id the contract itself defines', () => {
+      expect(validateContractAgainstVerifyConfig(contract(DEFINES_REPRO), CONFIG)).toEqual([]);
+    });
+
+    it('rejects a definition that redefines a gate verify.yaml already declares', () => {
+      // Accepting it would let one delegation replace the repository's own
+      // definition of passing, under an id the report spells identically.
+      const issues = validateContractAgainstVerifyConfig(
+        contract(
+          'verify:\n  gates: [lint]\n  gateDefinitions:\n    - id: lint\n      command: "true"\n'
+        ),
+        CONFIG
+      );
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toContain('verify.gateDefinitions: gate id(s) lint are already declared');
+      expect(issues[0]).toContain('.commandmate/verify.yaml');
+    });
+
+    it('rejects definitions when the worktree has no verify.yaml to run them under', () => {
+      // The runner refuses to start a run at all without a config, so the
+      // contract would declare a criterion nothing could ever evaluate.
+      const issues = validateContractAgainstVerifyConfig(contract(DEFINES_REPRO), null);
+      expect(issues.some((issue) => issue.includes('verify.gateDefinitions: declared'))).toBe(true);
+      expect(issues.some((issue) => issue.includes('no verification run can execute them'))).toBe(
+        true
+      );
+    });
+
+    it('still rejects an id that neither verify.yaml nor the contract declares', () => {
+      const issues = validateContractAgainstVerifyConfig(
+        contract(
+          'verify:\n  gates: [lint, issue-1791-repro, e2e]\n' +
+            '  gateDefinitions:\n    - id: issue-1791-repro\n      command: "node repro.mjs"\n'
+        ),
+        CONFIG
+      );
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toContain('unknown gate id(s) e2e');
+      // The message says where each id *could* have come from, so a typo in a
+      // contract gate id is not mistaken for a missing verify.yaml entry.
+      expect(issues[0]).toContain('in verify.gateDefinitions: issue-1791-repro');
+    });
+
+    it('reads a contract stored before the field existed as defining no gates', () => {
+      // tasks.contract_json is JSON.parse'd straight back into a TaskContract,
+      // so a row written before #1791 has no gateDefinitions key at all.
+      const legacy = contract('verify:\n  gates: [lint]\n');
+      delete (legacy.verify as { gateDefinitions?: unknown }).gateDefinitions;
+
+      expect(validateContractAgainstVerifyConfig(legacy, CONFIG)).toEqual([]);
+      expect(resolveGateCommands(legacy, CONFIG)).toContain('npm run lint');
+    });
+  });
 });
 
 describe('resolveContractGateIds', () => {
@@ -186,6 +247,35 @@ describe('resolveGateCommands', () => {
     expect(commands[0]).toContain('work-evidence');
     expect(commands[1]).toContain('scope');
     expect(commands[2]).toBe('npm run lint');
+  });
+
+  it('names the contract-defined gate by its real command (Issue #1791)', () => {
+    // A gate id the agent cannot look up anywhere — verify.yaml does not
+    // declare it — would make the completion criterion unevaluatable, which is
+    // the whole reason this line spells out commands.
+    const commands = resolveGateCommands(
+      contract(
+        'verify:\n  gates: [lint, issue-1791-repro]\n' +
+          '  gateDefinitions:\n    - id: issue-1791-repro\n      command: "node repro.mjs"\n' +
+          'success:\n  requireWorkEvidence: false\n  requireScopeClean: false\n'
+      ),
+      CONFIG
+    );
+    expect(commands).toEqual(['npm run lint', 'node repro.mjs']);
+  });
+
+  it('appends contract-defined gates after every verify.yaml gate when gates is omitted', () => {
+    // The order the run will take: the repository's own criteria first, the
+    // Issue-specific one after.
+    const commands = resolveGateCommands(
+      contract(
+        'verify:\n  gateDefinitions:\n    - id: issue-1791-repro\n      command: "node repro.mjs"\n' +
+          'success:\n  requireScopeClean: false\n'
+      ),
+      CONFIG
+    );
+    expect(commands[0]).toContain('work-evidence');
+    expect(commands.slice(1)).toEqual(['npm run lint', 'npm run test:unit', 'node repro.mjs']);
   });
 
   it('leaves the scope gate unnamed when the contract does not require a clean scope', () => {

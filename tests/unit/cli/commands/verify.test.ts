@@ -206,6 +206,44 @@ describe('verify command action', () => {
     expect(mockConsoleError).toHaveBeenCalledWith('2 tests failed');
   });
 
+  it('marks a contract-defined gate so the report says which verdict was Issue-specific', async () => {
+    // Issue #1791. verify.yaml can be read off disk; the contract's copy lives
+    // in tasks.contract_json, so an unmarked GATE line has to mean "the
+    // repository's own criterion" for the separation to be legible at all.
+    // The marker is appended, leaving the `GATE <id> <LABEL>` prefix that
+    // existing log readers match on untouched.
+    mockFetchWithTail([
+      { data: { runId: 7 }, status: 202 },
+      {
+        data: {
+          run: run({
+            status: 'failed',
+            gates: [
+              workEvidencePassed,
+              gate({ id: 11, gateId: 'lint', source: 'verify.yaml' }),
+              gate({
+                id: 12, gateId: 'issue-1791-repro', command: 'node repro.mjs',
+                status: 'failed', exitCode: 3, durationMs: 2000, logTail: 'repro failed',
+                source: 'contract',
+              }),
+            ],
+          }),
+        },
+      },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'wt1']);
+
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      'GATE issue-1791-repro FAIL (exit=3, 2.0s) [contract]'
+    );
+    // Repository and built-in gates are unmarked, so output in a repository
+    // that never uses the feature is byte-identical to before #1791.
+    expect(mockConsoleError).toHaveBeenCalledWith('GATE lint PASS (exit=0, 12.3s)');
+    expect(mockConsoleError).toHaveBeenCalledWith('GATE work-evidence PASS (commits=3, uncommitted=2)');
+  });
+
   it('prints a scope failure with its out-of-scope paths and the scope.allow guidance', async () => {
     // Mirrors the report evaluateScope() builds (scope-gate.ts); below the
     // display cap it must reach stderr verbatim — the paths are what let a

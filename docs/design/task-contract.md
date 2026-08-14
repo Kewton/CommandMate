@@ -277,12 +277,51 @@ globstar が 0 セグメントにマッチしない、括弧を文字クラス�
 | キー | 型 | 既定 | 制約 |
 |---|---|---|---|
 | `gates` | list of string | `null`（= 全ゲート） | 各要素は `verify.yaml` の `gates[].id` 形式。空リストは契約エラー。最大 32 件 |
+| `gateDefinitions` | list of `{id, command, timeoutSec}` | `[]` | 形も検証も `verify.yaml` の `gates[]` と同一（Issue #1791）。最大 32 件 |
 
 `gates: []`（空リスト）は「ゲートなしで合格させる」という意味になりうるため**エラー**にする。
 「全部走らせる」は `verify` キー自体の省略、または `verify.gates` の省略で表す。
 
 ゲート id が `.commandmate/verify.yaml` に**実在するか**は、契約の送信時
 （`send --contract`）に照合される（§5）。パーサ単体は verify.yaml を読まない。
+
+#### 2.3.1 `gateDefinitions` — 契約自身が運ぶゲート（Issue #1791 / #1756 案 B）
+
+`gates` は**選択**、`gateDefinitions` は**定義**である。両者は別の役割であり、
+`gates` の意味は #1791 で変えていない。
+
+```yaml
+verify:
+  gates: [lint, issue-1234-repro]   # 省略時は「全ゲート」
+  gateDefinitions:                  # 任意。この契約でだけ有効なゲート
+    - id: issue-1234-repro
+      command: "node scripts/repro-1234.mjs"
+      timeoutSec: 300               # 省略時 DEFAULT_TIMEOUT_SEC=600
+```
+
+**なぜ契約側に載せるのか。** Issue 固有の使い捨てゲートを worktree へ渡す経路は、
+以前は「orchestrator が `.commandmate/verify.yaml` を書き換える」しか無かった。しかし
+`verify.yaml` は work-evidence の変更集合に**残る**設計であり（除外は `.commandmate/tasks/`
+だけ ——`scope-gate.ts` の `CONTRACT_DIR_PREFIX`）、**追記を置いただけの worktree が
+「作業済み」に見えて `exit 21` が意味を失う**（#1756 の実測）。一方で除外を広げると、
+エージェントが自分を裁くゲートを弱めたことを検出できなくなる（verify.yaml は毎ラン
+ファイルから読み直され snapshot が無い）。契約は既に `tasks.contract_json` へ
+snapshot 済みで変更集合からも除外済みなので、**新しい改竄面を作らずに済む**。
+
+- 形と検証は `verify.yaml` の `gates[]` と**同じ関数**（`validateGateEntries`）を通す。
+  id パターン `^[a-z0-9][a-z0-9-]{0,31}$`・予約 id 禁止・リスト内重複禁止・
+  `timeoutSec` の整数と 1..7200 の範囲は、二重定義ではなく同一実装で保証される
+- `gates` 省略時は「verify.yaml の全ゲート ＋ この契約の `gateDefinitions` 全部」
+- 空リスト `gateDefinitions: []` はキー省略と同義（`gates: []` と違い解釈が一意なので
+  エラーにしない。YAML を機械生成する orchestrator が空の場合分けを持たずに済む）
+- **`gates` を書いたのに定義したゲートを選ばないのは契約エラー**。その契約が唯一の
+  宣言元なので、選ばれなければ**永久に走らない**——「チェックを足したつもりで足していない」
+  契約になる（`requireCommit` × `requireWorkEvidence: false` と同型の規則）
+- 実行順は **verify.yaml の宣言順 → 契約の宣言順**（§6）。Issue 固有ゲートは repo 共通
+  ゲートの後に走る
+
+送信時の拒否（exit 2）は §5 を参照。`.commandmate/verify.yaml` は**読むだけで
+1 バイトも書かない**——それが本機能の前提である。
 
 組み込みゲート `work-evidence` / `scope` の実行有無は**このリストではなく
 `success.requireWorkEvidence` / `success.requireScopeClean` が決める**。両方 true（既定）の
@@ -609,10 +648,24 @@ false のときは実際に効く内容に合わせて次の文が出る。
 そのため送信時に verify.yaml との照合が入る。以下は契約エラー（exit 2）:
 
 - `verify.gates` が宣言されているのに `.commandmate/verify.yaml` が無い / 読めない
-- `verify.gates` が verify.yaml に存在しないゲート id を指している
+- `verify.gates` が verify.yaml にも `verify.gateDefinitions` にも無いゲート id を指している
+- `verify.gateDefinitions` が宣言されているのに `.commandmate/verify.yaml` が無い / 読めない
+  （config 無しでは run 自体が起動しないので、評価され得ない完了条件になる）
+- `verify.gateDefinitions[].id` が **verify.yaml の既存 gate id と衝突**している（#1791）
+- `verify.gateDefinitions[].id` が**予約 id**（`work-evidence` / `scope` / `env-clean`）
+  と衝突している（#1791。こちらは共有バリデータがパース時点で弾く＝同じく送信時）
 
 存在しないゲート id を許すと、検証時に `selectGates` が弾くまで気付けない。
 「契約を送った」と「契約の完了条件が実在する」を同じ瞬間に確定させる。
+
+**id 衝突を黙って上書きにしない理由**（#1791）。同じ id を契約が再定義できると、
+リポジトリ自身が宣言した「合格の定義」を委任単位で差し替えられることになる。しかも
+レポート上は同じ id なので**差し替えたことが読み取れない**。契約は**足せるだけ**で、
+上書きが要るなら別 Issue で明示的な override 構文として設計する。
+
+前文（`resolveGateCommands`）は `gateDefinitions` の `command` も実コマンドとして
+展開する。契約にしか存在しないゲートこそ、id だけ渡されてもエージェントは何が走るのか
+判定できない。
 
 ---
 
@@ -624,6 +677,21 @@ false のときは実際に効く内容に合わせて次の文が出る。
 - 解決できた task の契約に `verify.gates` があれば、`gateIds` 未指定時の既定として使う
   （`success.requireWorkEvidence` による `work-evidence` の補完込み。§2.3）。
   呼び出し側が明示した `gateIds` は常に優先される。
+- **契約の `verify.gateDefinitions` は verify.yaml のゲート集合にマージされる**（#1791）。
+  実行順は verify.yaml の宣言順 → 契約の宣言順で、`--gates` での名指しも解決できる。
+  マージ元は**このランが結び付いた task の契約だけ**——未接続の契約
+  （`findDetachedContract`）からは読まない（`requireCommit` と同じ規則。そのランは
+  その契約についてのランではない）。id が verify.yaml と衝突する契約が届いた場合は
+  マージせず run を `error` にする（送信時に弾いているので旧ビルド由来のみ。
+  同一 id の行が 2 つ並ぶとレポートがどちらの裁定か言えなくなる）
+- **`verification_gate_results.source`（migration v56）に出所を残す** ——
+  `builtin`（work-evidence / scope / env-clean / 擬似ゲート `config`）/
+  `verify.yaml` / `contract`。v56 以前の行は `null`（履歴は書き換えない。
+  `timingsMeasured` と同じ作法）。`verify --json` / `verify show`（`src=<source>`）/
+  `verify history --json` から読める。`wait --verify` と `verify` の GATE 行は
+  `contract` のときだけ末尾に ` [contract]` を付ける——verify.yaml はディスクで
+  引けるが契約の写しは `contract_json` の中にしか無いため、**印の無い行＝リポジトリの
+  合格定義**と読めることが分離の可読性そのものになる。他の出所では出力は 1 bit も変えない
 - ラン開始時に task は `verifying` になり、終了時に §4 の表に従って終端状態へ遷移する。
   `last_verification_run_id` と `finished_at` も同時に記録される。
 - したがって `wait --verify` は CLI 側の変更なしに契約の `verify.gates` で検証される。
