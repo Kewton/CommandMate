@@ -267,6 +267,12 @@ export async function ingestOpencodeEvent(
       detail: event.detail?.slice(0, MAX_EVENT_DETAIL_LENGTH) ?? null,
       sessionId: event.conversationId,
       message: describeNotification(event)?.slice(0, MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH) ?? null,
+      // Issue #1783. The second of the two receiving paths — this one is
+      // in-process rather than an HTTP route, and forgetting it would leave
+      // opencode as the one tool whose model is extracted and then dropped.
+      // Already bounded by the normaliser; null on the frames that carry no
+      // `properties.info.model` (every `session.idle`, every tool part).
+      model: event.model,
     });
 
     if (event.event === 'notification' && event.detail === OPENCODE_PERMISSION_DETAIL) {

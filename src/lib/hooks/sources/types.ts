@@ -131,6 +131,26 @@ export interface NormalizedAgentEvent {
    * `part.callID`. codex/copilot/gemini/antigravity: mostly absent.
    */
   toolCallId: string | null;
+  /**
+   * The model the agent says it is running, or null (Issue #1783).
+   *
+   * Already in the payload of four of the six tools and previously dropped on
+   * the floor here — `raw` kept it, but nothing above this layer reads `raw`.
+   * Where it lives is the source's business, declared as `modelFields` /
+   * `extractModel` on its spec, because the tools
+   * disagree: claude and codex say `model`, antigravity says `modelName`, and
+   * opencode nests it two levels down under a key that is `modelID` on one
+   * frame and `id` on another.
+   *
+   * Null is ordinary and carries no information: gemini and copilot never send
+   * it, and claude sends it on `SessionStart` alone. A reader that wants "the
+   * model this instance is on" must therefore remember the last non-null value
+   * rather than read the newest event — see `getLastKnownAgentModel`.
+   *
+   * Bounded to `MAX_EVENT_DETAIL_LENGTH` at extraction: it reaches a React text
+   * node, and the payload is whatever the agent chose to send.
+   */
+  model: string | null;
   /** Exactly what arrived, unmodified. */
   raw: Record<string, unknown>;
   receivedAt: number;

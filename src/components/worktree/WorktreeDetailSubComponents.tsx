@@ -112,6 +112,29 @@ export function deriveWorktreeStatus(
   return 'idle';
 }
 
+/**
+ * Project `sessionStatusByInstance` down to instanceId -> model (Issue #1783).
+ *
+ * The roster panes take a plain lookup rather than the status payload, so this
+ * is where the shape is dropped. Instances that reported no model are left out
+ * entirely instead of mapped to null, so a caller's `?? null` and a caller's
+ * `if (model)` agree — and so the object stays empty, not full of nulls, on the
+ * common case of a worktree whose tools have no hooks configured.
+ *
+ * @param byInstance - `worktree.sessionStatusByInstance`, or undefined
+ * @returns A frozen-in-spirit lookup; empty when nothing has reported a model
+ */
+export function buildModelByInstance(
+  byInstance: Worktree['sessionStatusByInstance']
+): Readonly<Record<string, string>> {
+  if (!byInstance) return {};
+  const models: Record<string, string> = {};
+  for (const [instanceId, status] of Object.entries(byInstance)) {
+    if (status?.model) models[instanceId] = status.model;
+  }
+  return models;
+}
+
 /** Parse message timestamps from API response */
 export function parseMessageTimestamps(messages: ChatMessage[]): ChatMessage[] {
   return messages.map((msg) => ({
@@ -721,6 +744,22 @@ export const DesktopHeader = memo(function DesktopHeader({
                   label,
                   status: tCommon(`status.${c.status}`),
                 });
+                // Issue #1783: tooltip-only, on purpose. This row is
+                // width-budgeted — MAX_HEADER_AGENT_PILLS caps the labelled
+                // pills and the rest fold into "+N" — so adding a second
+                // visible string per pill would push working instances into the
+                // overflow menu to make room for text nobody is scanning for.
+                // The model rides on the existing hover/`title` affordance
+                // instead, and the visible pill text is unchanged. `null` (no
+                // hooks, no model) leaves the label byte-identical to pre-#1783.
+                const instanceModel = sessionStatusByInstance?.[inst.id]?.model ?? null;
+                const labelWithModel = instanceModel
+                  ? tWorktree('detail.statusPillWithModel', {
+                      label,
+                      status: tCommon(`status.${c.status}`),
+                      model: instanceModel,
+                    })
+                  : fullLabel;
                 const isActive = c.isActive;
                 // Issue #786: drag source. click and drag are mutually exclusive
                 // in HTML; a plain click (no drag) still fires onClick exactly
@@ -741,7 +780,11 @@ export const DesktopHeader = memo(function DesktopHeader({
                       data-testid={`desktop-agent-status-${inst.id}`}
                       onClick={() => onActiveInstanceChange?.(inst.id)}
                       {...dragProps}
-                      aria-label={fullLabel}
+                      aria-label={labelWithModel}
+                      // Issue #1783: native tooltip so the model is reachable
+                      // without spending row width. Same string as the
+                      // accessible name, so hover and screen reader agree.
+                      title={labelWithModel}
                       aria-pressed={isActive}
                       className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${
                         isActive
@@ -758,14 +801,18 @@ export const DesktopHeader = memo(function DesktopHeader({
 
                 // Idle/ready → icon-only 24px circular button; full label via Tooltip.
                 return (
-                  <Tooltip key={inst.id} content={fullLabel} placement="bottom">
+                  /* Issue #1783: the idle/ready variant already had a tooltip;
+                     it now carries the model too when one is known. */
+                  <Tooltip key={inst.id} content={labelWithModel} placement="bottom">
                     {/* Issue #1061: draggable instance-tab switcher (aria-pressed) — 残置 */}
                     <button
                       type="button"
                       data-testid={`desktop-agent-status-${inst.id}`}
                       onClick={() => onActiveInstanceChange?.(inst.id)}
                       {...dragProps}
-                      aria-label={fullLabel}
+                      // No `title` here: the <Tooltip> above already renders
+                      // this string, and a native tooltip would stack on it.
+                      aria-label={labelWithModel}
                       aria-pressed={isActive}
                       className={`flex items-center justify-center w-6 h-6 rounded-full transition-colors ${
                         isActive

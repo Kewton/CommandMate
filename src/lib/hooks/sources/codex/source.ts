@@ -122,6 +122,13 @@ export const codexAgentEventSource: AgentEventSource = definePushHookSource({
   nativeEventNameFields: ['hook_event_name'],
   conversationIdFields: SESSION_ID_FIELDS,
   toolCallIdFields: TOOL_CALL_ID_FIELDS,
+
+  // Issue #1783. Same spelling as Claude, but on every event except `SessionEnd`
+  // rather than on `SessionStart` alone — verified against the fixtures, where
+  // only `session-end.json` lacks the key. codex therefore keeps its model
+  // visible through a restart of this server, which claude does not.
+  modelFields: ['model'],
+
   extractDetail: extractSnakeCaseEventDetail,
 
   // The captured `PermissionRequest` payload is Claude-shaped field for field —

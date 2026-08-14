@@ -74,6 +74,27 @@ export function frameSessionId(payload: Record<string, unknown>): string | null 
   return readNestedString(frameProperties(payload), ['sessionID']);
 }
 
+/**
+ * `properties.info.model` — the model this frame's session/message ran on (#1783).
+ *
+ * Two spellings, both live, and the Issue text only named the first: a
+ * `message.updated` frame carries `{ providerID, modelID }` while
+ * `session.created` / `session.deleted` carry `{ id, providerID }`. Checked
+ * against the captured fixtures, which is the only specification that has been
+ * right about this server so far (its own `/doc` omits `server.heartbeat`).
+ * Reading `modelID` alone would have left `session_start` — the one event a
+ * fresh subscription is guaranteed to see — with no model at all.
+ *
+ * `providerID` is deliberately not folded in. `github-copilot/claude-sonnet-4.6`
+ * would be a *composed* string, and every other tool reports the bare model, so
+ * composing here would make opencode the odd one out in the UI for no gain.
+ */
+export function frameModel(payload: Record<string, unknown>): string | null {
+  const info = frameProperties(payload).info;
+  if (!isPlainObject(info)) return null;
+  return readNestedString(info, ['model', 'modelID']) ?? readNestedString(info, ['model', 'id']);
+}
+
 /** `properties.part.state.status` — `pending` / `running` / `completed` / `error`. */
 function partStatus(payload: Record<string, unknown>): string | null {
   return readNestedString(frameProperties(payload), ['part', 'state', 'status']);

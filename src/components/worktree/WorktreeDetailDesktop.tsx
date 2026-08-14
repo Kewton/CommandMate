@@ -47,7 +47,7 @@ import { Modal } from '@/components/ui/Modal';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
 import { MoveDialog } from '@/components/worktree/MoveDialog';
 import { NewFileDialog } from '@/components/worktree/NewFileDialog';
-import { DesktopHeader, InfoModal } from '@/components/worktree/WorktreeDetailSubComponents';
+import { buildModelByInstance, DesktopHeader, InfoModal } from '@/components/worktree/WorktreeDetailSubComponents';
 import { UPLOADABLE_EXTENSIONS } from '@/config/uploadable-extensions';
 import { deriveCliStatus } from '@/types/sidebar';
 import { getCliToolDisplayName, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
@@ -298,6 +298,19 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   const handleAgentDragEnd = useCallback(() => setDraggedInstanceId(null), []);
 
   /**
+   * Issue #1783: instanceId -> reported model, for the roster pane.
+   *
+   * A projection of `sessionStatusByInstance` rather than the map itself,
+   * because the pane takes a plain id->model lookup and should not have to know
+   * the shape of the status payload. Entries with no model are dropped, so the
+   * pane's `?? null` is reached for exactly the instances that reported nothing.
+   */
+  const agentModelByInstance = useMemo(
+    () => buildModelByInstance(worktree?.sessionStatusByInstance),
+    [worktree?.sessionStatusByInstance]
+  );
+
+  /**
    * Issue #1152: header instance switcher → terminal wiring.
    *
    * Previously the DesktopHeader instance pills called `setActiveInstanceId`
@@ -397,6 +410,11 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           onMessageSent={onMessageSent}
           // Issue #743: derived per-CLI status string for the split header dot.
           cliStatus={paneCliStatus}
+          // Issue #1783: the model this pane's agent reported. Per-INSTANCE
+          // only — `sessionStatusByCli` is an aggregate over every instance of
+          // the tool, so it has no model to speak of. Undefined (no entry, no
+          // hooks, no model) renders nothing.
+          agentModel={worktree?.sessionStatusByInstance?.[paneInstanceId]?.model ?? null}
           // Issue #756: Auto-Yes domain group. Issue #740: enabled/expiresAt are
           // per-CLI; lastAutoResponse is activeCliTab-scoped (useAutoYes), shared
           // across splits for the toggle notification (Issue #501 owns per-split
@@ -629,6 +647,10 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           onVibeLocalModelChange={onVibeLocalModelChange}
           vibeLocalContextWindow={vibeLocalContextWindow}
           onVibeLocalContextWindowChange={onVibeLocalContextWindowChange}
+          // Issue #1783: read-only observed model per roster row. The map is
+          // the per-instance status map itself — the pane reads `[id]?.model`
+          // — so no extra derivation and no extra memo dependency.
+          modelByInstance={agentModelByInstance}
         />
       ),
       timer: <TimerPane worktreeId={worktreeId} instances={instances} />,
@@ -671,6 +693,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       onVibeLocalModelChange,
       vibeLocalContextWindow,
       onVibeLocalContextWindowChange,
+      agentModelByInstance,
     ]
   );
 

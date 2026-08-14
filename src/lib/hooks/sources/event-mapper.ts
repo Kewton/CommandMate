@@ -181,6 +181,20 @@ export function boundDetail(value: string | null): string | null {
   return value.slice(0, MAX_EVENT_DETAIL_LENGTH);
 }
 
+/**
+ * Trim a model id to the length the store accepts (Issue #1783).
+ *
+ * The same bound as {@link boundDetail} and deliberately so: both are short
+ * enum-ish words the agent chose, both end up rendered, and giving the model its
+ * own number would only invite the two to drift. Named separately because the
+ * call sites read better and because a future measurement could move one
+ * without moving the other.
+ */
+export function boundModel(value: string | null): string | null {
+  if (value === null || value === '') return null;
+  return value.slice(0, MAX_EVENT_DETAIL_LENGTH);
+}
+
 /** Type guard for a JSON object (not an array, not null). */
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -215,6 +229,10 @@ export function buildNormalizedEvent(
     detail?: (event: AgentEventType, payload: Record<string, unknown>) => string | null;
     conversationId?: readonly string[];
     toolCallId?: readonly string[];
+    /** Flat keys holding the model id, first non-empty string wins (#1783). */
+    modelFields?: readonly string[];
+    /** For shapes a flat lookup cannot reach. Wins over `modelFields` (#1783). */
+    extractModel?: (payload: Record<string, unknown>) => string | null;
   } = {}
 ): NormalizedAgentEvent {
   const detail =
@@ -231,6 +249,13 @@ export function buildNormalizedEvent(
     toolCallId:
       mapping.toolCallId ??
       (fallbacks.toolCallId ? readFirstStringField(payload, fallbacks.toolCallId) : null),
+    // Issue #1783. Every source runs through here, so a tool that declares
+    // neither hook simply answers null — which is the honest answer for gemini
+    // and copilot, whose payloads never carry one.
+    model: boundModel(
+      fallbacks.extractModel?.(payload) ??
+        (fallbacks.modelFields ? readFirstStringField(payload, fallbacks.modelFields) : null)
+    ),
     raw: payload,
     receivedAt,
   };
