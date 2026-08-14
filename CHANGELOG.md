@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **feat(cli): モデル / reasoning effort を `instances` と `capture --json` に露出した（モデル/effort 可視化 Phase 3）** (#1785)
+  - `CurrentOutputResponse`（`current-output-builder`）に **`model` / `reasoningEffort`（ともに `string | null`）** を追加した。
+    値は Phase 1（#1783）の保持層そのままで、**CLI 側でのモデル名の解釈・整形はしない** —
+    `capture --json | jq '.model'` の値を `/status` や `agy models` の表示とそのまま突き合わせられるようにするため
+  - `commandmate instances <id>` の表に **`MODEL` / `EFFORT` 列**、`--json` に `model` / `reasoningEffort` を追加した。
+    列は**末尾に追加**なので、`INSTANCE_ID`〜`AUTO_YES` を列位置で読んでいるスクリプトはそのまま動く
+  - **未稼働セッションは `null` / 空欄。** 保持層は意図的に期限切れしない（8時間走るターンは最後まで同じモデル）ので、
+    そのまま返すと `RUNNING no` の行が前プロセスのモデルを名乗る。落とすのは**サーバー側だけ**で、
+    CLI に同じ規則をもう 1 つ置かない（2 箇所に持つと食い違う）
+  - **既存フィールドは追加のみで一切変えていない。** `capture --json` の `content` / `realtimeSnippet` /
+    `sessionStatus` / `sessionStatusReason` は orchestrate-monitor 等の既存消費者が依存しており、
+    テキスト出力（既定）も byte 単位で不変（回帰テストで固定）
+  - **`reasoningEffort` は現状すべて `null`。** effort はどのエージェントの hooks payload にも無く、
+    抽出は Phase 2（#1784）の担当。`resolveReasoningEffort()` という named seam を置いてあるので、
+    #1784 着地時はこの関数の本体を差し替えるだけで済み、payload 形状・CLI・テスト期待値は動かない
+    （テストは値ではなく **null 許容のスキーマ検証**で書いてある）
+  - **空振り緑の反証（変異注入で実測）**: `buildCurrentOutput` の `model` 解決を `null` に潰すと
+    `current-output-model-1785` の 3 件（`publishes the model the agent reported about itself` /
+    `publishes it verbatim` / `publishes null for a stopped session even after a model was latched`）が赤になる。
+    変異は復元して全緑に復帰
 - **feat(verification): 実行契約が Issue 固有のゲート定義を運べるようにした（#1756 案 B）** (#1791)
   - 契約に **`verify.gateDefinitions`（`[{id, command, timeoutSec}]`）** を追加した。`verify.gates` の意味は変えていない
     （宣言済みゲートからの**選択**）。`gates` 省略時は「verify.yaml の全ゲート ＋ この契約の定義全部」

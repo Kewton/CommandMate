@@ -163,6 +163,27 @@ export interface CurrentOutputResponse {
     /** `notification` / `permission-request`, or null (Issue #1725). */
     promptWaitingSource?: string | null;
   };
+  /**
+   * Issue #1785: the model the session is running, or null when nothing knows.
+   *
+   * Mirrors: src/lib/session/current-output-builder.ts CurrentOutputPayload.model
+   *
+   * Optional *here* although the server always sends it, and the two are not in
+   * conflict: this mirror also describes what an older daemon answers, and the
+   * CLI is routinely newer than the server it dials (`npm i -g` does not restart
+   * the running daemon). `undefined` therefore means "this server predates the
+   * field", which the commands normalise to null — the same thing they print for
+   * a tool that publishes no model.
+   */
+  model?: string | null;
+  /**
+   * Issue #1785: reasoning effort, or null when nothing knows.
+   *
+   * Mirrors: src/lib/session/current-output-builder.ts
+   * CurrentOutputPayload.reasoningEffort — including the part where it is null
+   * for every session until Issue #1784's extraction layer lands.
+   */
+  reasoningEffort?: string | null;
 }
 
 // Mirrors: src/types/models.ts BasePromptData (subset for CLI output)

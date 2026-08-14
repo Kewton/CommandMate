@@ -36,6 +36,7 @@ import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tm
 import {
   getAskUserQuestion,
   getLastAgentEvent,
+  getLastKnownAgentModel,
   getLastStopEventAt,
   getStructuredSessionState,
   markStructuredPromptRecorded,
@@ -148,6 +149,63 @@ export interface CurrentOutputPayload {
    * (Issue #1722). See {@link StructuredEventsPayload}.
    */
   structuredEvents: StructuredEventsPayload;
+  /**
+   * The model this instance is running, or null when nothing knows (#1785).
+   *
+   * Exposure only: the value is whatever the retention layer latched from the
+   * agent's own hook events (`getLastKnownAgentModel`, Issue #1783). Nothing
+   * here parses, normalises or prettifies it — `commandmate capture --json`
+   * and `commandmate instances` have to be able to compare it against what the
+   * agent reports about itself, and any cleanup on the way out would break
+   * that comparison exactly when it matters.
+   *
+   * **Always present, null when unknown.** Unlike `CliToolSessionStatus.model`,
+   * which omits the key so existing `toEqual` suites keep passing, this payload
+   * is a CLI contract: `capture --json | jq '.model'` must answer `null` rather
+   * than nothing at all for a session whose tool publishes no model (gemini,
+   * copilot) or for a server that restarted mid-session.
+   *
+   * Null whenever the session is not running, regardless of what was latched
+   * before: the retention layer deliberately does not expire (an eight-hour
+   * turn is on the same model at the end as at the start), so a dead session
+   * would otherwise keep reporting the model of the process that ran in it.
+   */
+  model: string | null;
+  /**
+   * The reasoning effort this instance is running at, or null (#1785).
+   *
+   * See {@link resolveReasoningEffort} — today this is always null, and that is
+   * a statement about the retention layer rather than about the field.
+   */
+  reasoningEffort: string | null;
+}
+
+/**
+ * The reasoning effort this instance is running at, or null.
+ *
+ * A named seam, on purpose. Effort appears in **no** agent's hook payload — the
+ * terminal frame is its only source — so the layer that will hold it is Phase 2
+ * (Issue #1784), landing in parallel with this one. Phase 3 owns the *exposure*:
+ * the payload field above, the `EFFORT` column in `commandmate instances`, the
+ * `reasoningEffort` key in `capture --json`, and the tests that pin them. None
+ * of that may move when the holder arrives, so the contract (`string | null`) is
+ * fixed here now and answered with the only honest value available today.
+ *
+ * When #1784 lands, this body becomes a call to its per-instance getter and
+ * nothing else changes — not the payload shape, not the CLI, not a single test
+ * expectation, because every assertion on this field is written null-tolerant.
+ *
+ * Not an optional field and not `undefined`: a consumer must be able to read
+ * `.reasoningEffort` today and get the same "nothing knows" answer it will get
+ * afterwards for gemini, for copilot, and for any session whose banner has
+ * scrolled out of the tmux history.
+ */
+function resolveReasoningEffort(
+  _worktreeId: string,
+  _cliToolId: CLIToolType,
+  _instanceId?: string,
+): string | null {
+  return null;
 }
 
 const logger = createLogger('current-output-builder');
@@ -476,6 +534,12 @@ export async function buildCurrentOutput(
       sessionStatusReason: 'session_not_running',
       lastStopEventAt: stopEventAt,
       structuredEvents,
+      // Issue #1785: null on a dead session, not the last model it ran. The
+      // latch outlives the process that filled it (by design — see
+      // getLastKnownAgentModel), so reporting it here would tell `commandmate
+      // instances` that a `RUNNING no` row is on gpt-5.6.
+      model: null,
+      reasoningEffort: null,
     };
   }
 
@@ -689,5 +753,9 @@ export async function buildCurrentOutput(
     serverPollerActive: isPollerActive(compositeKey),
     lastStopEventAt: stopEventAt,
     structuredEvents,
+    // Issue #1785: straight from the retention layer, unparsed. See the field
+    // docs on CurrentOutputPayload for why nothing is normalised on the way out.
+    model: getLastKnownAgentModel(worktreeId, cliToolId, instanceId),
+    reasoningEffort: resolveReasoningEffort(worktreeId, cliToolId, instanceId),
   };
 }

@@ -236,15 +236,76 @@ commandmate capture <worktree-id> --instance codex   # Specific instance
 
 ### JSON Output Fields
 
+Everything the server sends except `fullOutput` is printed verbatim.
+
 ```json
 {
   "isRunning": true,
-  "sessionStatus": "ready",
-  "cliToolId": "claude",
-  "lineCount": 42,
+  "isComplete": false,
   "isPromptWaiting": false,
-  "autoYes": { "enabled": false, "expiresAt": null }
+  "isGenerating": true,
+  "content": "",
+  "realtimeSnippet": "(last 100 rows)",
+  "lineCount": 42,
+  "lastCapturedLine": 42,
+  "promptData": null,
+  "autoYes": {
+    "enabled": false,
+    "expiresAt": null,
+    "lastSuppression": null
+  },
+  "thinking": true,
+  "thinkingMessage": "Claude is thinking...",
+  "cliToolId": "claude",
+  "isSelectionListActive": false,
+  "isPagerActive": false,
+  "isUnclassifiedActive": false,
+  "lastServerResponseTimestamp": null,
+  "serverPollerActive": true,
+  "sessionStatus": "running",
+  "sessionStatusReason": "hook_prompt_submit",
+  "lastStopEventAt": null,
+  "structuredEvents": {
+    "lastEventType": "user_prompt_submit",
+    "lastEventAt": 1754296400000,
+    "lastEventDetail": null,
+    "promptWaitingSince": null,
+    "promptWaitingSource": null
+  },
+  "model": "claude-opus-5[1m]",
+  "reasoningEffort": null
 }
+```
+
+#### `model` / `reasoningEffort` (Issue #1785)
+
+The model and reasoning effort the session is running. `null` when nothing knows,
+but **the keys are always present**, so `capture <id> --json | jq '.model'` answers
+`null` rather than nothing at all.
+
+```bash
+commandmate capture <worktree-id> --json | jq -r '.model // "unknown"'
+```
+
+- Reported verbatim — the CLI never reformats a model name, so the value can be
+  compared directly against what the agent says about itself
+- `null` for a session that is not running: the retention layer deliberately never
+  expires (an eight-hour turn is on the same model at the end as at the start), so
+  the server drops it rather than report a dead process's model
+- `reasoningEffort` is `null` for every session until Issue #1784 (effort extraction
+  from the terminal frame) lands — no agent puts effort in its hook payload
+- **No existing field changed.** `content` / `realtimeSnippet` / `sessionStatus` /
+  `sessionStatusReason` are exactly as before
+
+`commandmate instances <worktree-id>` shows the same two values as `MODEL` / `EFFORT`
+columns (and as `model` / `reasoningEffort` with `--json`):
+
+```
+INSTANCE_ID  ALIAS   CLI_TOOL  RUNNING  AUTO_YES  MODEL              EFFORT
+-----------  ------  --------  -------  --------  -----------------  ------
+claude       Claude  claude    yes      no        claude-opus-5[1m]        
+codex-2      Review  codex     yes      yes       gpt-5.6-sol              
+gemini       Gemini  gemini    no       no                                 
 ```
 
 ---

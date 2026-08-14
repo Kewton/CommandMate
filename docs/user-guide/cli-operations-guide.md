@@ -784,16 +784,63 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
 
 ### JSON出力の主要フィールド
 
+`fullOutput` 以外はサーバーの返す payload をそのまま出力します。
+
 ```json
 {
   "isRunning": true,
-  "sessionStatus": "ready",
-  "cliToolId": "claude",
-  "lineCount": 42,
+  "isComplete": false,
   "isPromptWaiting": false,
-  "autoYes": { "enabled": false, "expiresAt": null, "lastSuppression": null }
+  "isGenerating": true,
+  "content": "",
+  "realtimeSnippet": "(last 100 rows)",
+  "lineCount": 42,
+  "lastCapturedLine": 42,
+  "promptData": null,
+  "autoYes": {
+    "enabled": false,
+    "expiresAt": null,
+    "lastSuppression": null
+  },
+  "thinking": true,
+  "thinkingMessage": "Claude is thinking...",
+  "cliToolId": "claude",
+  "isSelectionListActive": false,
+  "isPagerActive": false,
+  "isUnclassifiedActive": false,
+  "lastServerResponseTimestamp": null,
+  "serverPollerActive": true,
+  "sessionStatus": "running",
+  "sessionStatusReason": "hook_prompt_submit",
+  "lastStopEventAt": null,
+  "structuredEvents": {
+    "lastEventType": "user_prompt_submit",
+    "lastEventAt": 1754296400000,
+    "lastEventDetail": null,
+    "promptWaitingSince": null,
+    "promptWaitingSource": null
+  },
+  "model": "claude-opus-5[1m]",
+  "reasoningEffort": null
 }
 ```
+
+#### `model` / `reasoningEffort`（Issue #1785）
+
+そのセッションが動いているモデルと reasoning effort です。取得できなければ `null` で、
+**キー自体は常に存在します**（`capture <id> --json | jq '.model'` が `null` を返す）。
+
+```bash
+commandmate capture <worktree-id> --json | jq -r '.model // "unknown"'
+```
+
+- 値はエージェントの申告そのままで、CLI 側の整形はありません
+- `isRunning: false` のセッションは `null` です。モデルの保持は意図的に期限切れしない
+  （8時間走るターンは最後まで同じモデル）ため、停止済みセッションで前プロセスのモデルを
+  返さないようサーバー側で落としています
+- `reasoningEffort` は Issue #1784 着地までは常に `null` です
+- **既存フィールドは一切変わっていません**。`content` / `realtimeSnippet` /
+  `sessionStatus` / `sessionStatusReason` を読んでいる監視スクリプトはそのままです
 
 #### `autoYes.lastSuppression`: ポリシー抑止の観測（Issue #1684）
 
@@ -1029,12 +1076,70 @@ commandmate instances <worktree-id> kill <instance-id>                 # 該当�
 
 ### 出力例（一覧）
 
+`commandmate instances <worktree-id>`:
+
 ```
-INSTANCE_ID  ALIAS   CLI_TOOL  RUNNING  AUTO_YES
------------  ------  --------  -------  --------
-claude       Claude  claude    yes      no
-codex-2      レビュー用 codex     no       no
+INSTANCE_ID  ALIAS   CLI_TOOL  RUNNING  AUTO_YES  MODEL              EFFORT
+-----------  ------  --------  -------  --------  -----------------  ------
+claude       Claude  claude    yes      no        claude-opus-5[1m]        
+codex-2      レビュー用   codex     yes      yes       gpt-5.6-sol              
+gemini       Gemini  gemini    no       no                                 
 ```
+
+`commandmate instances <worktree-id> --json`:
+
+```json
+[
+  {
+    "instanceId": "claude",
+    "alias": "Claude",
+    "cliTool": "claude",
+    "running": true,
+    "autoYes": false,
+    "model": "claude-opus-5[1m]",
+    "reasoningEffort": null
+  },
+  {
+    "instanceId": "codex-2",
+    "alias": "レビュー用",
+    "cliTool": "codex",
+    "running": true,
+    "autoYes": true,
+    "model": "gpt-5.6-sol",
+    "reasoningEffort": null
+  },
+  {
+    "instanceId": "gemini",
+    "alias": "Gemini",
+    "cliTool": "gemini",
+    "running": false,
+    "autoYes": false,
+    "model": null,
+    "reasoningEffort": null
+  }
+]
+```
+
+#### `MODEL` / `EFFORT` 列（Issue #1785）
+
+稼働中インスタンスが**いまどのモデルで動いているか**を表示します。`CLI_TOOL` が答えるのは
+「どのエージェントか」までで、「その中のどのモデルか」はセッションだけが知っています。
+並列ワーカー運用で「4本動いている」と「4本動いていて1本だけ安いモデルに落ちている」を
+区別するための列です。
+
+| 状態 | 表示 |
+|------|------|
+| エージェントがモデルを報告している | 報告値をそのまま（`claude-opus-5[1m]` / `gpt-5.6-sol` 等） |
+| セッション未稼働（`RUNNING no`） | 空欄（`--json` では `null`） |
+| モデルを報告しないツール（gemini / copilot） | 空欄（`--json` では `null`） |
+| サーバー再起動後で claude がまだ `SessionStart` を出していない | 空欄（次のセッション開始で復帰） |
+
+- 値は**エージェントの申告そのまま**です。CLI 側で整形・正規化しません。`/status` や
+  `agy models` の表示とそのまま突き合わせられるようにするためです
+- `EFFORT` は Issue #1784（capture からの effort 抽出）着地までは常に空欄 / `null` です。
+  どのエージェントの hooks payload にも effort が無く、TUI 表示が唯一の情報源であるためです
+- 列は**末尾に追加**しています。`INSTANCE_ID` 〜 `AUTO_YES` を列位置で読んでいる
+  スクリプトはそのまま動きます
 
 ### オプション
 

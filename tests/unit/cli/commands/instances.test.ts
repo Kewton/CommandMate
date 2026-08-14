@@ -60,7 +60,18 @@ describe('instances command: list (default action)', () => {
 
     const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
     expect(output).toEqual([
-      { instanceId: 'claude', alias: 'Claude', cliTool: 'claude', running: true, autoYes: true },
+      // model / reasoningEffort added by Issue #1785; this stub server sends
+      // neither, which the command reports as null. Their behaviour is pinned in
+      // instances-model-1785.test.ts.
+      {
+        instanceId: 'claude',
+        alias: 'Claude',
+        cliTool: 'claude',
+        running: true,
+        autoYes: true,
+        model: null,
+        reasoningEffort: null,
+      },
     ]);
   });
 
