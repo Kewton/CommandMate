@@ -119,6 +119,31 @@ describe('task show', () => {
     expect(output()).toContain('GATES:     lint');
     expect(output()).toContain('AUTO-YES:  safe');
     expect(output()).toContain('(no verification run yet)');
+    // A contract that defines no gates of its own prints no GATE-DEF line.
+    expect(output()).not.toContain('GATE-DEF');
+  });
+
+  it('prints the command of a gate the contract declares for itself (Issue #1791)', async () => {
+    // verify.yaml can be opened; the contract's copy lives in contract_json.
+    // The id alone would leave a reader unable to see what the task is judged by.
+    mockFetchResponse({
+      task: task({
+        contract: {
+          ...task().contract,
+          verify: {
+            gates: ['lint', 'issue-1791-repro'],
+            gateDefinitions: [
+              { id: 'issue-1791-repro', command: 'node repro.mjs', timeoutSec: 300 },
+            ],
+          },
+        },
+      }),
+      lastVerificationRun: null,
+    });
+    await run(['show', TASK_ID]);
+
+    expect(output()).toContain('GATES:     lint, issue-1791-repro');
+    expect(output()).toContain('GATE-DEF:  issue-1791-repro  node repro.mjs  (timeoutSec=300)');
   });
 
   it('prints the gate verdicts of the run that last judged the task', async () => {

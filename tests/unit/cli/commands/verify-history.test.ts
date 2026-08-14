@@ -391,6 +391,50 @@ describe('verify show — human output', () => {
     expect(stdout()).not.toContain('null');
   });
 
+  it('names where each gate was declared (Issue #1791)', async () => {
+    // `show` is the view a reader consults to reconstruct what a run judged, so
+    // "which of these was the repository's own criterion" must not have to be
+    // inferred. A gate row from before migration v56 carries no source and
+    // prints none, rather than claiming one.
+    mockFetch([
+      {
+        data: {
+          run: detail({
+            gates: [
+              {
+                id: 1, runId: 7, gateId: 'lint', command: 'npm run lint',
+                status: 'passed', exitCode: 0, durationMs: 1000, logTail: null,
+                startedAt: '2026-07-30T00:00:00.000Z', finishedAt: '2026-07-30T00:00:01.000Z',
+                source: 'verify.yaml',
+              },
+              {
+                id: 2, runId: 7, gateId: 'issue-1791-repro', command: 'node repro.mjs',
+                status: 'failed', exitCode: 3, durationMs: 2000, logTail: null,
+                startedAt: '2026-07-30T00:00:01.000Z', finishedAt: '2026-07-30T00:00:03.000Z',
+                source: 'contract',
+              },
+              {
+                id: 3, runId: 7, gateId: 'legacy', command: 'npm run legacy',
+                status: 'passed', exitCode: 0, durationMs: 3000, logTail: null,
+                startedAt: '2026-07-30T00:00:03.000Z', finishedAt: '2026-07-30T00:00:06.000Z',
+              },
+            ],
+          }),
+        },
+      },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'show', '7']);
+
+    const out = stdout();
+    expect(out).toContain('lint  passed  exit=0  1.0s  src=verify.yaml');
+    expect(out).toContain('issue-1791-repro  failed  exit=3  2.0s  src=contract');
+    expect(out).toContain('legacy  passed  exit=0  3.0s');
+    expect(out).not.toContain('src=undefined');
+    expect(out).not.toContain('src=null');
+  });
+
   it('renders a still-running run without inventing a finish time', async () => {
     mockFetch([
       { data: { run: detail({ status: 'running', finishedAt: null, instanceId: null, gates: [] }) } },

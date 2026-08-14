@@ -93,7 +93,16 @@ export const DEFAULT_MAX_LOG_TAIL_BYTES = 8192;
 const MIN_TIMEOUT_SEC = 1;
 const MAX_TIMEOUT_SEC = 7200;
 const MAX_LOG_TAIL_BYTES = 1048576;
-const GATE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+/**
+ * Shape a gate id may take, wherever a gate is declared.
+ *
+ * Exported because the task contract declares gates too (#1791) and names them
+ * in `verify.gates`. A second copy of this expression would let the two
+ * declaration sites drift into accepting different ids, and a contract gate the
+ * runner refuses to resolve is a completion criterion nothing can evaluate.
+ */
+export const GATE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
 const TOP_LEVEL_KEYS = ['version', 'gates', 'options'];
 const GATE_KEYS = ['id', 'command', 'timeoutSec'];
@@ -158,17 +167,26 @@ function collectUnknownKeys(
   }
 }
 
-function validateGates(value: unknown, issues: string[]): VerifyGate[] {
-  if (value === undefined || value === null) {
-    issues.push('gates: required, at least one gate must be defined');
-    return [];
-  }
+/**
+ * Validate a list of `{ id, command, timeoutSec }` entries.
+ *
+ * Shared with the task contract's `verify.gateDefinitions` (#1791), which
+ * declares gates in the same shape and must be held to the same constraints —
+ * id pattern, reserved ids, duplicates, integer timeout in range. Calling this
+ * is what makes "the same constraints" a fact rather than a comment: a contract
+ * gate accepted here is one the runner can execute and the report can name.
+ *
+ * Deliberately does *not* decide whether the list may be absent or empty. That
+ * is the caller's rule: verify.yaml requires at least one gate, a contract that
+ * declares none is the normal case.
+ *
+ * @param at path prefix for issue messages (`gates`, `verify.gateDefinitions`)
+ * @returns the accepted entries; an entry that produced an issue is dropped so
+ *          the result never carries a value that failed validation
+ */
+export function validateGateEntries(value: unknown, at: string, issues: string[]): VerifyGate[] {
   if (!Array.isArray(value)) {
-    issues.push(`gates: must be a list (got ${describe(value)})`);
-    return [];
-  }
-  if (value.length === 0) {
-    issues.push('gates: at least one gate must be defined');
+    issues.push(`${at}: must be a list (got ${describe(value)})`);
     return [];
   }
 
@@ -176,53 +194,76 @@ function validateGates(value: unknown, issues: string[]): VerifyGate[] {
   const seenIds = new Set<string>();
 
   value.forEach((entry, index) => {
-    const at = `gates[${index}]`;
-    const issuesBefore = issues.length;
-
-    if (!isMapping(entry)) {
-      issues.push(`${at}: must be a mapping (got ${describe(entry)})`);
-      return;
-    }
-    collectUnknownKeys(entry, GATE_KEYS, at, issues);
-
-    if (typeof entry.id !== 'string' || entry.id === '') {
-      issues.push(`${at}.id: required, must be a non-empty string (got ${describe(entry.id)})`);
-    } else if (!GATE_ID_PATTERN.test(entry.id)) {
-      issues.push(`${at}.id: "${entry.id}" must match ${GATE_ID_PATTERN.source}`);
-    } else if ((RESERVED_GATE_IDS as readonly string[]).includes(entry.id)) {
-      issues.push(`${at}.id: "${entry.id}" is reserved for a built-in gate`);
-    } else if (seenIds.has(entry.id)) {
-      issues.push(`${at}.id: duplicate gate id "${entry.id}"`);
-    } else {
-      seenIds.add(entry.id);
-    }
-
-    if (typeof entry.command !== 'string' || entry.command.trim() === '') {
-      issues.push(
-        `${at}.command: required, must be a non-empty string (got ${describe(entry.command)})`
-      );
-    }
-
-    let timeoutSec = DEFAULT_TIMEOUT_SEC;
-    if (entry.timeoutSec !== undefined) {
-      const parsed = asInteger(entry.timeoutSec);
-      if (parsed === null) {
-        issues.push(`${at}.timeoutSec: must be an integer (got ${describe(entry.timeoutSec)})`);
-      } else if (parsed < MIN_TIMEOUT_SEC || parsed > MAX_TIMEOUT_SEC) {
-        issues.push(
-          `${at}.timeoutSec: must be ${MIN_TIMEOUT_SEC}..${MAX_TIMEOUT_SEC} (got ${parsed})`
-        );
-      } else {
-        timeoutSec = parsed;
-      }
-    }
-
-    if (issues.length === issuesBefore) {
-      gates.push({ id: entry.id as string, command: entry.command as string, timeoutSec });
-    }
+    const entryAt = `${at}[${index}]`;
+    validateGateEntry(entry, entryAt, seenIds, gates, issues);
   });
 
   return gates;
+}
+
+/** One gate entry; accepted entries are appended to `gates`. */
+function validateGateEntry(
+  entry: unknown,
+  at: string,
+  seenIds: Set<string>,
+  gates: VerifyGate[],
+  issues: string[]
+): void {
+  const issuesBefore = issues.length;
+
+  if (!isMapping(entry)) {
+    issues.push(`${at}: must be a mapping (got ${describe(entry)})`);
+    return;
+  }
+  collectUnknownKeys(entry, GATE_KEYS, at, issues);
+
+  if (typeof entry.id !== 'string' || entry.id === '') {
+    issues.push(`${at}.id: required, must be a non-empty string (got ${describe(entry.id)})`);
+  } else if (!GATE_ID_PATTERN.test(entry.id)) {
+    issues.push(`${at}.id: "${entry.id}" must match ${GATE_ID_PATTERN.source}`);
+  } else if ((RESERVED_GATE_IDS as readonly string[]).includes(entry.id)) {
+    issues.push(`${at}.id: "${entry.id}" is reserved for a built-in gate`);
+  } else if (seenIds.has(entry.id)) {
+    issues.push(`${at}.id: duplicate gate id "${entry.id}"`);
+  } else {
+    seenIds.add(entry.id);
+  }
+
+  if (typeof entry.command !== 'string' || entry.command.trim() === '') {
+    issues.push(
+      `${at}.command: required, must be a non-empty string (got ${describe(entry.command)})`
+    );
+  }
+
+  let timeoutSec = DEFAULT_TIMEOUT_SEC;
+  if (entry.timeoutSec !== undefined) {
+    const parsed = asInteger(entry.timeoutSec);
+    if (parsed === null) {
+      issues.push(`${at}.timeoutSec: must be an integer (got ${describe(entry.timeoutSec)})`);
+    } else if (parsed < MIN_TIMEOUT_SEC || parsed > MAX_TIMEOUT_SEC) {
+      issues.push(
+        `${at}.timeoutSec: must be ${MIN_TIMEOUT_SEC}..${MAX_TIMEOUT_SEC} (got ${parsed})`
+      );
+    } else {
+      timeoutSec = parsed;
+    }
+  }
+
+  if (issues.length === issuesBefore) {
+    gates.push({ id: entry.id as string, command: entry.command as string, timeoutSec });
+  }
+}
+
+function validateGates(value: unknown, issues: string[]): VerifyGate[] {
+  if (value === undefined || value === null) {
+    issues.push('gates: required, at least one gate must be defined');
+    return [];
+  }
+  if (Array.isArray(value) && value.length === 0) {
+    issues.push('gates: at least one gate must be defined');
+    return [];
+  }
+  return validateGateEntries(value, 'gates', issues);
 }
 
 function validateOptions(value: unknown, issues: string[]): VerifyOptions {

@@ -33,7 +33,7 @@ afterEach(() => {
 describe('reconcileOrphanVerificationRuns', () => {
   it('closes an orphaned run and its open gate as error', () => {
     const run = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'api' });
-    const gate = createGateResult(db, run.id, { gateId: 'unit', command: 'npm run test:unit' });
+    const gate = createGateResult(db, run.id, { gateId: 'unit', command: 'npm run test:unit', source: 'verify.yaml' });
 
     expect(reconcileOrphanVerificationRuns(db)).toEqual({ runs: 1, gates: 1 });
 
@@ -59,7 +59,7 @@ describe('reconcileOrphanVerificationRuns', () => {
 
   it('leaves runs that already reached a verdict untouched', () => {
     const passed = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'api' });
-    const gate = createGateResult(db, passed.id, { gateId: 'lint', command: 'npm run lint' });
+    const gate = createGateResult(db, passed.id, { gateId: 'lint', command: 'npm run lint', source: 'verify.yaml' });
     finishGateResult(db, gate.id, { status: 'passed', exitCode: 0, durationMs: 12, logTail: 'ok' });
     finishVerificationRun(db, passed.id, 'passed');
 
@@ -74,9 +74,9 @@ describe('reconcileOrphanVerificationRuns', () => {
 
   it('preserves finished gates inside an orphaned run', () => {
     const run = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'wait' });
-    const done = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint' });
+    const done = createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint', source: 'verify.yaml' });
     finishGateResult(db, done.id, { status: 'failed', exitCode: 2, durationMs: 900, logTail: '2 errors' });
-    createGateResult(db, run.id, { gateId: 'unit', command: 'npm run test:unit' });
+    createGateResult(db, run.id, { gateId: 'unit', command: 'npm run test:unit', source: 'verify.yaml' });
 
     expect(reconcileOrphanVerificationRuns(db)).toEqual({ runs: 1, gates: 1 });
 
@@ -104,7 +104,7 @@ describe('reconcileOrphanVerificationRuns', () => {
 
   it('keeps the open gate\'s real start and does not claim a measured window', () => {
     const run = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'api' });
-    const gate = createGateResult(db, run.id, { gateId: 'build', command: 'npm run build' });
+    const gate = createGateResult(db, run.id, { gateId: 'build', command: 'npm run build', source: 'verify.yaml' });
     const openedAt = gate.startedAt.getTime();
 
     reconcileOrphanVerificationRuns(db);

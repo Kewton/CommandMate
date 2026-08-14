@@ -54,6 +54,7 @@ function seedRun(opts: {
   const gate = createGateResult(db, run.id, {
     gateId: opts.gateId ?? 'lint',
     command: 'npm run lint',
+    source: 'verify.yaml',
   });
   finishGateResult(db, gate.id, {
     status: opts.gateStatus ?? 'passed',
@@ -79,15 +80,19 @@ describe('listVerificationRunsForPeriod — gate summaries carry no log bodies',
     expect(JSON.stringify(run)).not.toContain('SECRET BUILD OUTPUT');
   });
 
-  it('returns exactly the four documented summary fields per gate', () => {
+  it('returns exactly the five documented summary fields per gate', () => {
     seedRun({ worktreeId: 'wt-1', gateId: 'unit', gateStatus: 'failed' });
 
     const [run] = listVerificationRunsForPeriod(db);
 
+    // `source` joined the set in #1791. The point of pinning the whole key list
+    // is that `logTail` can never rejoin it by accident, so the pin is widened
+    // deliberately rather than loosened.
     expect(Object.keys(run.gates[0]).sort()).toEqual([
       'durationMs',
       'exitCode',
       'gateId',
+      'source',
       'status',
     ]);
     expect(run.gates[0]).toEqual({
@@ -95,16 +100,17 @@ describe('listVerificationRunsForPeriod — gate summaries carry no log bodies',
       status: 'failed',
       exitCode: 1,
       durationMs: 1234,
+      source: 'verify.yaml',
     });
   });
 
   it('keeps gates in execution order and groups them under the right run', () => {
     const first = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
     for (const gateId of ['work-evidence', 'lint', 'unit']) {
-      createGateResult(db, first.id, { gateId, command: `run ${gateId}` });
+      createGateResult(db, first.id, { gateId, command: `run ${gateId}`, source: 'verify.yaml' });
     }
     const second = createVerificationRun(db, { worktreeId: 'wt-2', trigger: 'api' });
-    createGateResult(db, second.id, { gateId: 'build', command: 'npm run build' });
+    createGateResult(db, second.id, { gateId: 'build', command: 'npm run build', source: 'verify.yaml' });
     setStartedAt(first.id, 2_000_000_000_000);
     setStartedAt(second.id, 2_000_000_001_000);
 
@@ -254,7 +260,7 @@ describe('listVerificationRunsForPeriod — limit', () => {
     for (let i = 0; i < 3; i += 1) {
       const run = createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
       for (const gateId of ['lint', 'unit', 'build']) {
-        createGateResult(db, run.id, { gateId, command: `run ${gateId}` });
+        createGateResult(db, run.id, { gateId, command: `run ${gateId}`, source: 'verify.yaml' });
       }
       setStartedAt(run.id, 2_000_000_000_000 - i * 1000);
     }

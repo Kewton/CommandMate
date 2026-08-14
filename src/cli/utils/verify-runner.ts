@@ -126,10 +126,27 @@ function formatDetail(gate: VerificationGateResultView): string {
   return parts.join(', ');
 }
 
+/**
+ * Mark a gate that exists for this delegation only (Issue #1791).
+ *
+ * Contract-defined gates are the ones a reader cannot look up: verify.yaml is
+ * on disk, the contract's copy lives in `tasks.contract_json`. An unmarked line
+ * therefore means "the repository's own criterion" and a marked one means "this
+ * Issue's", which is the distinction that keeps per-delegation gates from being
+ * a second verify.yaml nothing announces. Appended at the end so the leading
+ * `GATE <id> <LABEL>` shape every existing log reader matches on is unchanged,
+ * and absent for every other source so output is byte-identical in repositories
+ * that do not use the feature.
+ */
+function formatGateSource(gate: VerificationGateResultView): string {
+  return gate.source === 'contract' ? ' [contract]' : '';
+}
+
 function formatGateLine(gate: VerificationGateResultView): string {
   const label = GATE_LABELS[gate.status] ?? gate.status.toUpperCase();
   const detail = formatDetail(gate);
-  return detail ? `GATE ${gate.gateId} ${label} (${detail})` : `GATE ${gate.gateId} ${label}`;
+  const head = detail ? `GATE ${gate.gateId} ${label} (${detail})` : `GATE ${gate.gateId} ${label}`;
+  return `${head}${formatGateSource(gate)}`;
 }
 
 /**

@@ -235,6 +235,87 @@ verify:
     expect((await response.json()).issues[0]).toContain('unknown gate id(s) e2e');
   });
 
+  // Issue #1791: a contract may define gates of its own, and every way that
+  // could quietly redefine the repository's own criterion of passing has to be
+  // refused *here* — at send — because after this point the definition is
+  // snapshotted into contract_json and the agent has been told a completion
+  // criterion. The CLI turns each of these 400s into exit 2.
+  describe('verify.gateDefinitions (Issue #1791)', () => {
+    const contractWith = (verify: string) =>
+      `version: 1\ntitle: t\ngoal: g\nscope:\n  allow: ["src/**"]\n${verify}`;
+
+    it('accepts a contract that defines its own gate and names its command in the message', async () => {
+      const path = writeContract(
+        contractWith(
+          'verify:\n  gates: [lint, issue-1791-repro]\n' +
+            '  gateDefinitions:\n    - id: issue-1791-repro\n      command: "node repro.mjs"\n'
+        ),
+        'defines-gate.yaml'
+      );
+
+      const response = await postTask(wtId, { contractPath: path });
+      expect(response.status).toBe(201);
+
+      const body = await response.json();
+      // The preamble states real commands, so the agent can evaluate the
+      // criterion it is being held to — including the one only this contract
+      // declares.
+      expect(body.message).toContain('node repro.mjs');
+      expect(body.task.contract.verify.gateDefinitions).toEqual([
+        { id: 'issue-1791-repro', command: 'node repro.mjs', timeoutSec: 600 },
+      ]);
+    });
+
+    it('rejects a definition that collides with a verify.yaml gate id', async () => {
+      const path = writeContract(
+        contractWith(
+          'verify:\n  gates: [lint]\n  gateDefinitions:\n    - id: lint\n      command: "true"\n'
+        ),
+        'collides-config.yaml'
+      );
+
+      const response = await postTask(wtId, { contractPath: path });
+      expect(response.status).toBe(400);
+      expect((await response.json()).issues[0]).toContain(
+        'verify.gateDefinitions: gate id(s) lint are already declared'
+      );
+      expect(db.prepare('SELECT COUNT(*) AS n FROM tasks').get()).toEqual({ n: 0 });
+    });
+
+    it.each(['work-evidence', 'scope', 'env-clean'])(
+      'rejects a definition that shadows the reserved id %s',
+      async (reserved) => {
+        const path = writeContract(
+          contractWith(
+            `verify:\n  gates: [${reserved}]\n  gateDefinitions:\n    - id: ${reserved}\n      command: "true"\n`
+          ),
+          `reserved-${reserved}.yaml`
+        );
+
+        const response = await postTask(wtId, { contractPath: path });
+        expect(response.status).toBe(400);
+        expect((await response.json()).issues).toContain(
+          `verify.gateDefinitions[0].id: "${reserved}" is reserved for a built-in gate`
+        );
+        expect(db.prepare('SELECT COUNT(*) AS n FROM tasks').get()).toEqual({ n: 0 });
+      }
+    );
+
+    it('still rejects a gates id that neither source declares', async () => {
+      const path = writeContract(
+        contractWith(
+          'verify:\n  gates: [issue-1791-repro, e2e]\n' +
+            '  gateDefinitions:\n    - id: issue-1791-repro\n      command: "node repro.mjs"\n'
+        ),
+        'still-unknown.yaml'
+      );
+
+      const response = await postTask(wtId, { contractPath: path });
+      expect(response.status).toBe(400);
+      expect((await response.json()).issues[0]).toContain('unknown gate id(s) e2e');
+    });
+  });
+
   it('rejects a contract path that escapes the worktree', async () => {
     const response = await postTask(wtId, { contractPath: '../outside.yaml' });
     expect(response.status).toBe(400);

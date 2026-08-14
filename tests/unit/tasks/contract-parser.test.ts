@@ -19,10 +19,12 @@ import {
   loadTaskContract,
   parseTaskContract,
   TaskContractError,
+  MAX_GATE_DEFINITIONS,
   MAX_PATTERN_LENGTH,
   MAX_TITLE_LENGTH,
   PROMPT_TYPES,
 } from '@/lib/tasks/contract-parser';
+import { DEFAULT_TIMEOUT_SEC, RESERVED_GATE_IDS } from '@/lib/verification/verify-config';
 import { removeTempDir } from '@tests/helpers/temp-dir';
 
 let repoPath: string;
@@ -70,7 +72,7 @@ describe('parseTaskContract — valid documents', () => {
       title: 'contract parser',
       goal: 'Implement the loader.',
       scope: { allow: ['src/lib/tasks/**'], deny: [] },
-      verify: { gates: null },
+      verify: { gates: null, gateDefinitions: [] },
       autoYes: { mode: null, allowPromptTypes: [], denyPatterns: [] },
       success: {
         requireWorkEvidence: true,
@@ -368,6 +370,134 @@ describe('parseTaskContract — verify.gates', () => {
     expect(issuesOf(`${MINIMAL}verify:\n  gates: [lint, lint]\n`)).toContain(
       'verify.gates[1]: duplicate gate id "lint"'
     );
+  });
+});
+
+describe('parseTaskContract — verify.gateDefinitions (Issue #1791)', () => {
+  const DEFINITION = `verify:
+  gates: [lint, issue-1791-repro]
+  gateDefinitions:
+    - id: issue-1791-repro
+      command: "node scripts/repro-1791.mjs"
+      timeoutSec: 300
+`;
+
+  it('accepts a gate the contract defines for itself', () => {
+    const contract = parseTaskContract(`${MINIMAL}${DEFINITION}`, 'task.yaml');
+
+    expect(contract.verify.gateDefinitions).toEqual([
+      { id: 'issue-1791-repro', command: 'node scripts/repro-1791.mjs', timeoutSec: 300 },
+    ]);
+    expect(contract.verify.gates).toEqual(['lint', 'issue-1791-repro']);
+  });
+
+  it('applies the verify.yaml default timeout when the definition omits one', () => {
+    const contract = parseTaskContract(
+      `${MINIMAL}verify:\n  gates: [repro]\n  gateDefinitions:\n    - id: repro\n      command: "sh repro.sh"\n`,
+      'task.yaml'
+    );
+
+    // Same constant verify.yaml gates get, because the same validator ran.
+    expect(contract.verify.gateDefinitions[0].timeoutSec).toBe(DEFAULT_TIMEOUT_SEC);
+  });
+
+  it('runs every defined gate when gates is omitted', () => {
+    const contract = parseTaskContract(
+      `${MINIMAL}verify:\n  gateDefinitions:\n    - id: repro\n      command: "sh repro.sh"\n`,
+      'task.yaml'
+    );
+
+    // null = "every declared gate", which now includes the contract's own.
+    expect(contract.verify.gates).toBeNull();
+    expect(contract.verify.gateDefinitions).toHaveLength(1);
+  });
+
+  it('treats an empty list as no definitions at all', () => {
+    // Unlike `gates: []`, this has one possible meaning, so an orchestrator
+    // emitting YAML programmatically is not forced to special-case it.
+    const contract = parseTaskContract(`${MINIMAL}verify:\n  gateDefinitions: []\n`, 'task.yaml');
+    expect(contract.verify.gateDefinitions).toEqual([]);
+  });
+
+  for (const reserved of RESERVED_GATE_IDS) {
+    it(`refuses to define the reserved id "${reserved}"`, () => {
+      // Shadowing a built-in would let a contract replace the gate that judges
+      // it — work-evidence redefined as `true` is a contract that proves nothing.
+      expect(
+        issuesOf(
+          `${MINIMAL}verify:\n  gates: [${reserved}]\n  gateDefinitions:\n    - id: ${reserved}\n      command: "true"\n`
+        )
+      ).toContain(`verify.gateDefinitions[0].id: "${reserved}" is reserved for a built-in gate`);
+    });
+  }
+
+  it('rejects a duplicate definition id', () => {
+    expect(
+      issuesOf(
+        `${MINIMAL}verify:\n  gates: [repro]\n  gateDefinitions:\n    - id: repro\n      command: "a"\n    - id: repro\n      command: "b"\n`
+      )
+    ).toContain('verify.gateDefinitions[1].id: duplicate gate id "repro"');
+  });
+
+  it('rejects an id verify.yaml could never spell either', () => {
+    expect(
+      issuesOf(
+        `${MINIMAL}verify:\n  gates: [repro]\n  gateDefinitions:\n    - id: "Repro Gate"\n      command: "a"\n`
+      )[0]
+    ).toContain('verify.gateDefinitions[0].id: "Repro Gate" must match');
+  });
+
+  it('rejects a definition with no command', () => {
+    expect(
+      issuesOf(
+        `${MINIMAL}verify:\n  gates: [repro]\n  gateDefinitions:\n    - id: repro\n      command: "   "\n`
+      )[0]
+    ).toContain('verify.gateDefinitions[0].command: required');
+  });
+
+  it('rejects a non-integer timeout', () => {
+    expect(
+      issuesOf(
+        `${MINIMAL}verify:\n  gates: [repro]\n  gateDefinitions:\n    - id: repro\n      command: "a"\n      timeoutSec: 1.5\n`
+      )[0]
+    ).toContain('verify.gateDefinitions[0].timeoutSec: must be an integer');
+  });
+
+  it('rejects a timeout outside the verify.yaml bounds', () => {
+    expect(
+      issuesOf(
+        `${MINIMAL}verify:\n  gates: [repro]\n  gateDefinitions:\n    - id: repro\n      command: "a"\n      timeoutSec: 100000\n`
+      )[0]
+    ).toContain('verify.gateDefinitions[0].timeoutSec: must be 1..7200');
+  });
+
+  it('rejects an unknown key inside a definition', () => {
+    expect(
+      issuesOf(
+        `${MINIMAL}verify:\n  gates: [repro]\n  gateDefinitions:\n    - id: repro\n      command: "a"\n      retries: 3\n`
+      )
+    ).toContain('verify.gateDefinitions[0]: unknown key "retries" (v1 is a closed set)');
+  });
+
+  it('rejects more definitions than the cap allows', () => {
+    const many = Array.from(
+      { length: MAX_GATE_DEFINITIONS + 1 },
+      (_, i) => `    - id: g${i}\n      command: "true"\n`
+    ).join('');
+    expect(issuesOf(`${MINIMAL}verify:\n  gateDefinitions:\n${many}`)).toContain(
+      `verify.gateDefinitions: at most ${MAX_GATE_DEFINITIONS} entries (got ${MAX_GATE_DEFINITIONS + 1})`
+    );
+  });
+
+  it('rejects a definition that verify.gates leaves unselected', () => {
+    // The contract is the only place this gate exists, so a selection that
+    // omits it means nothing will ever run it — a check that reads as added
+    // and is not.
+    expect(
+      issuesOf(
+        `${MINIMAL}verify:\n  gates: [lint]\n  gateDefinitions:\n    - id: repro\n      command: "a"\n`
+      )[0]
+    ).toContain('verify.gateDefinitions: repro defined but not named in verify.gates');
   });
 });
 

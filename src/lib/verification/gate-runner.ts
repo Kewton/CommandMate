@@ -33,6 +33,7 @@ import {
   getTask,
   listTasks,
   type Task,
+  type VerificationGateSource,
   type VerificationGateTerminalStatus,
   type VerificationRunTerminalStatus,
   type VerificationTrigger,
@@ -45,6 +46,7 @@ import { getVerifiableTask } from '@/lib/db/tasks-db';
 import { resolveDefaultBranchName } from '@/lib/git/git-default-branch';
 import { createLogger } from '@/lib/logger';
 import {
+  contractGateDefinitions,
   resolveContractGateIds,
   resolveRequireCommit,
   type RequireCommitDecision,
@@ -540,6 +542,11 @@ async function resolveBaseRef(config: VerifyConfig, worktreePath: string): Promi
  */
 type ScopeRequest = 'explicit' | 'implicit' | 'off';
 
+/** A declared gate together with where it was declared (Issue #1791). */
+interface ResolvedGate extends VerifyGate {
+  source: VerificationGateSource;
+}
+
 interface GateSelection {
   runWorkEvidence: boolean;
   scope: ScopeRequest;
@@ -551,17 +558,54 @@ interface GateSelection {
    * `error` — or it was never selected and produces no row at all.
    */
   runEnvClean: boolean;
-  gates: VerifyGate[];
+  gates: ResolvedGate[];
 }
 
 /**
- * Resolve `gateIds` against the config.
+ * Every gate available to this run, in execution order (Issue #1791).
+ *
+ * The repository's own declarations first, then the ones this delegation's
+ * contract carried. Repository-wide criteria are what an Issue gate is judged
+ * *against*, so running the shared ones first is what makes a report readable
+ * top to bottom: "the repository's definition of passing held, and then the
+ * Issue-specific check did too".
+ *
+ * A contract gate whose id collides with a verify.yaml gate is refused rather
+ * than merged. `validateContractAgainstVerifyConfig` already rejects that at
+ * send, so reaching here means the contract was stored by an older build or
+ * written straight into the database — and running both would put two rows
+ * under one id in the report, which is precisely the ambiguity `source` exists
+ * to remove.
+ */
+function declaredGates(config: VerifyConfig, contractGates: VerifyGate[]): ResolvedGate[] | string {
+  const fromConfig: ResolvedGate[] = config.gates.map((gate) => ({
+    ...gate,
+    source: 'verify.yaml',
+  }));
+  const configIds = new Set(fromConfig.map((gate) => gate.id));
+
+  const collisions = contractGates.filter((gate) => configIds.has(gate.id)).map((gate) => gate.id);
+  if (collisions.length > 0) {
+    return (
+      `Contract gate id(s) ${collisions.join(', ')} are already declared in ` +
+      `${VERIFY_CONFIG_RELATIVE_PATH}. A contract may add gates, never redefine the ` +
+      "repository's own."
+    );
+  }
+
+  return [...fromConfig, ...contractGates.map((gate) => ({ ...gate, source: 'contract' as const }))];
+}
+
+/**
+ * Resolve `gateIds` against the declared gates.
  *
  * Returns a message instead of a selection when the request names a gate that
  * does not exist, or selects nothing at all. Both would otherwise produce a run
  * with zero gate results, which {@link aggregateRunStatus} would have to call
  * `passed` — a green verdict from having checked nothing.
  *
+ * @param declared verify.yaml's gates followed by the contract's (#1791); the
+ *        selection preserves this order, never the order `gateIds` was typed in
  * @param requireEnvClean whether a declaration switched env-clean on. It is
  *        ORed with an explicit request rather than replacing it, so `--gates
  *        env-clean` still works with the switch off (and honestly reports
@@ -569,7 +613,7 @@ interface GateSelection {
  *        declared the requirement cannot lose it by naming a narrower gate list.
  */
 function selectGates(
-  config: VerifyConfig,
+  declared: ResolvedGate[],
   gateIds: string[] | undefined,
   requireEnvClean: boolean
 ): GateSelection | string {
@@ -578,7 +622,7 @@ function selectGates(
       runWorkEvidence: true,
       scope: 'implicit',
       runEnvClean: requireEnvClean,
-      gates: config.gates,
+      gates: declared,
     };
   }
 
@@ -586,7 +630,7 @@ function selectGates(
     WORK_EVIDENCE_GATE_ID,
     SCOPE_GATE_ID,
     ENV_CLEAN_GATE_ID,
-    ...config.gates.map((g) => g.id),
+    ...declared.map((g) => g.id),
   ]);
   const unknown = gateIds.filter((id) => !known.has(id));
   if (unknown.length > 0) {
@@ -598,7 +642,7 @@ function selectGates(
     runWorkEvidence: requested.has(WORK_EVIDENCE_GATE_ID),
     scope: requested.has(SCOPE_GATE_ID) ? 'explicit' : 'off',
     runEnvClean: requested.has(ENV_CLEAN_GATE_ID) || requireEnvClean,
-    gates: config.gates.filter((gate) => requested.has(gate.id)),
+    gates: declared.filter((gate) => requested.has(gate.id)),
   };
   if (
     !selection.runWorkEvidence &&
@@ -685,9 +729,10 @@ async function executeRun(
   const runGate = async (
     gateId: string,
     command: string,
+    source: VerificationGateSource,
     evaluate: () => Promise<GateOutcome>
   ): Promise<GateOutcome> => {
-    const row = createGateResult(db, runId, { gateId, command });
+    const row = createGateResult(db, runId, { gateId, command, source });
     return close(row.id, await evaluate());
   };
 
@@ -697,17 +742,25 @@ async function executeRun(
    * Opened and closed on the spot: there is no execution to leave a `running`
    * row around, and the row carries {@link notRun}'s zero-length window.
    */
-  const recordNotRun = (gateId: string, command: string, reason: string): GateOutcome => {
+  const recordNotRun = (
+    gateId: string,
+    command: string,
+    source: VerificationGateSource,
+    reason: string
+  ): GateOutcome => {
     const outcome = notRun(reason);
-    const row = createGateResult(db, runId, { gateId, command });
+    const row = createGateResult(db, runId, { gateId, command, source });
     return close(row.id, outcome);
   };
 
   const statuses: VerificationGateTerminalStatus[] = [];
 
   if (runWorkEvidence) {
-    const outcome = await runGate(WORK_EVIDENCE_GATE_ID, WORK_EVIDENCE_GATE_COMMAND, () =>
-      evaluateWorkEvidence(worktreePath, baseRef, requireCommit)
+    const outcome = await runGate(
+      WORK_EVIDENCE_GATE_ID,
+      WORK_EVIDENCE_GATE_COMMAND,
+      'builtin',
+      () => evaluateWorkEvidence(worktreePath, baseRef, requireCommit)
     );
 
     if (outcome.status !== 'passed') {
@@ -715,13 +768,13 @@ async function executeRun(
       // base commit. Record them as skipped so the run shows what was not run.
       const reason = `skipped: the ${WORK_EVIDENCE_GATE_ID} gate did not pass.`;
       if (selection.scope !== 'off') {
-        recordNotRun(SCOPE_GATE_ID, SCOPE_GATE_COMMAND, reason);
+        recordNotRun(SCOPE_GATE_ID, SCOPE_GATE_COMMAND, 'builtin', reason);
       }
       if (selection.runEnvClean) {
-        recordNotRun(ENV_CLEAN_GATE_ID, ENV_CLEAN_GATE_COMMAND, reason);
+        recordNotRun(ENV_CLEAN_GATE_ID, ENV_CLEAN_GATE_COMMAND, 'builtin', reason);
       }
       for (const gate of gates) {
-        recordNotRun(gate.id, gate.command, reason);
+        recordNotRun(gate.id, gate.command, gate.source, reason);
       }
       return outcome.status === 'failed' ? 'not_started' : 'error';
     }
@@ -735,9 +788,10 @@ async function executeRun(
       ? recordNotRun(
           SCOPE_GATE_ID,
           SCOPE_GATE_COMMAND,
+          'builtin',
           scopeSkipDetachedContract(detachedContract.id, detachedContract.status)
         )
-      : await runGate(SCOPE_GATE_ID, SCOPE_GATE_COMMAND, () =>
+      : await runGate(SCOPE_GATE_ID, SCOPE_GATE_COMMAND, 'builtin', () =>
           evaluateScope(
             worktreePath,
             task?.contract.scope ?? null,
@@ -764,7 +818,7 @@ async function executeRun(
     // the agent's working window, and the gates below are the repository's own
     // declared commands. A `test:e2e` gate that starts a server would otherwise
     // be reported as the agent leaking one.
-    const outcome = await runGate(ENV_CLEAN_GATE_ID, ENV_CLEAN_GATE_COMMAND, () =>
+    const outcome = await runGate(ENV_CLEAN_GATE_ID, ENV_CLEAN_GATE_COMMAND, 'builtin', () =>
       evaluateEnvClean({
         worktreeId: envClean.worktreeId,
         worktreePath,
@@ -787,6 +841,7 @@ async function executeRun(
         recordNotRun(
           gate.id,
           gate.command,
+          gate.source,
           'skipped: worktreePath is the server process working directory and ' +
             'options.skipInPrimaryCheckout is true.'
         ).status
@@ -794,7 +849,7 @@ async function executeRun(
       continue;
     }
 
-    const outcome = await runGate(gate.id, gate.command, () =>
+    const outcome = await runGate(gate.id, gate.command, gate.source, () =>
       runCommand(gate.command, worktreePath, gate.timeoutSec, maxLogTailBytes)
     );
     statuses.push(outcome.status);
@@ -954,11 +1009,19 @@ export async function startVerification(
 
   let selection: GateSelection | null = null;
   if (config && !configFailure) {
-    const selected = selectGates(config, gateIds, envCleanDecision.required);
-    if (typeof selected === 'string') {
-      configFailure = selected;
+    // Contract gates come from the task this run is actually about (#1791), so
+    // a detached contract contributes none — the same rule `requireCommit`
+    // follows, and for the same reason: that run is not about that contract.
+    const declared = declaredGates(config, task ? contractGateDefinitions(task.contract) : []);
+    if (typeof declared === 'string') {
+      configFailure = declared;
     } else {
-      selection = selected;
+      const selected = selectGates(declared, gateIds, envCleanDecision.required);
+      if (typeof selected === 'string') {
+        configFailure = selected;
+      } else {
+        selection = selected;
+      }
     }
   }
 
@@ -990,6 +1053,7 @@ export async function startVerification(
     const row = createGateResult(db, run.id, {
       gateId: CONFIG_GATE_ID,
       command: VERIFY_CONFIG_RELATIVE_PATH,
+      source: 'builtin',
     });
     finishGateResult(db, row.id, {
       status: 'error',

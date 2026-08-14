@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **feat(verification): 実行契約が Issue 固有のゲート定義を運べるようにした（#1756 案 B）** (#1791)
+  - 契約に **`verify.gateDefinitions`（`[{id, command, timeoutSec}]`）** を追加した。`verify.gates` の意味は変えていない
+    （宣言済みゲートからの**選択**）。`gates` 省略時は「verify.yaml の全ゲート ＋ この契約の定義全部」
+  - **`.commandmate/verify.yaml` は読むだけで 1 バイトも書かない。** orchestrator が Issue 固有ゲートを渡すのに
+    verify.yaml を書き換えるしかなかったのが問題だった — verify.yaml は work-evidence の変更集合に**残る**ので
+    （除外は `.commandmate/tasks/` だけ）、**追記を置いただけの worktree が「作業済み」に見えて `exit 21` が意味を失う**。
+    契約は既に `tasks.contract_json` へ snapshot 済みで変更集合からも除外済みなので、新しい改竄面を作らずに済む。
+    work-evidence / scope の除外規則（`CONTRACT_DIR_PREFIX`）は変更していない
+  - **形と検証は verify.yaml の `gates[]` と同一実装。** verify-config の gate エントリ検証を
+    `validateGateEntries` として切り出して両方から呼ぶので、id パターン・予約 id 禁止・重複禁止・
+    timeout の整数と範囲が「同じ制約」であることがコメントではなく事実になる
+  - **送信時に fail-closed で拒否（exit 2）**: 予約 id（`work-evidence`/`scope`/`env-clean`）との衝突、
+    **verify.yaml の既存 gate id との衝突**、`gates` がどこにも無い id を名指し、verify.yaml が無いのに定義がある。
+    id 衝突を黙って上書きにしないのは、リポジトリ自身が宣言した合格の定義を委任単位で差し替えられ、
+    しかもレポート上は同じ id なので**差し替えたことが読み取れない**ため（override が要るなら別 Issue で明示構文を設計する）
+  - **裁定の出所を記録する（migration v56: `verification_gate_results.source`）**: `builtin` / `verify.yaml` / `contract`。
+    `verify --json` / `verify show`（`src=<source>`）/ `verify history --json` から読め、
+    `verify` と `wait --verify` の GATE 行は `contract` のときだけ末尾に ` [contract]` を付ける。
+    **どの裁定がリポジトリの合格定義でどれが Issue 固有かが report から読めないと、この分離は
+    「静かな 2 つ目の verify.yaml」になる。** v56 以前の行は `null` で backfill しない（履歴は書き換えない）
+  - 実行順は **verify.yaml の宣言順 → 契約の宣言順**。マージ元は**このランが結び付いた task の契約だけ**で、
+    未接続の契約（`findDetachedContract`）からは読まない。id が verify.yaml と衝突する契約が届いた場合は
+    マージせず run を `error` にする（送信時に弾いているので旧ビルド由来のみ）
+  - **`gates` を書いたのに定義したゲートを選ばないのは契約エラー**にした（Issue 本文にない追加規則）。
+    契約が唯一の宣言元なので、選ばれなければ永久に走らない＝「チェックを足したつもりで足していない」契約になる
+  - **空振り緑の反証（変異注入で実測）**: ①契約ゲートをマージから外す → 失敗するはずの Issue ゲートを持つ run が
+    **`passed` を返し**（実測 `PROBE run.status=passed repro=absent`）6 テストが赤 ②verify.yaml との id 衝突検証を外す →
+    **送信が 201 で通り**（`expected 201 to be 400`）2 テストが赤 ③予約 id 検証を外す → 10 テストが赤
+    （契約側 6・verify.yaml 側 4＝共有バリデータが両方を守っていることの裏取り）。3 変異とも復元して全緑に復帰
+
 - **feat(session): 入力待ちの構造化合成と `waitingKind`/`waitingSince`/`awaitingInstruction` を一覧 API に露出（入力待ち可視化 方針A・基盤）** (#1786)
   - **一覧 API（`/api/worktrees`・`/api/worktrees/[id]`）が構造化イベントを見るようになった。** これまで per-instance の状態は `detectSessionStatus()`（スクレイパー）だけで決めており、hooks が正確に知っている待ち（#1725 の `prompt_waiting`）は**サイドバー / Home / Sessions / Review / CommandPalette のどのドットにも出ていなかった**。`checkCliToolStatus` で `peekPromptWaiting()` を通し `isWaitingForResponse` を OR で広げる
   - **副作用の無い read-only 変種（`peekPromptWaiting`）を新設して一覧側はそれを使う。** `resolvePromptWaiting` は corroborate/clear の副作用を持つが、一覧側は (a) `STATUS_DETECTION_CAPTURE_LINES` の狭い窓で検出するため「プロンプトは無い」の証拠が解除規則の想定より弱い、(b) 同じ記録を `blocksSend` が読むので read エンドポイントの誤解除が **send ガードを黙って解除する**（#1708 の穴の再来）、(c) 開いているタブの数で状態機械の結果が変わる、の 3 点から書き手にしない。corroborate を張る側（`buildCurrentOutput` / send ガード）は無変更で、`blocksSend` の意味・挙動も変えていない
