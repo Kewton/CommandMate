@@ -43,6 +43,8 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import { MAX_EVENT_DETAIL_LENGTH, type AgentEventType } from '@/lib/hooks/agent-event-types';
 import type { AskUserQuestionSpec } from '@/lib/hooks/ask-user-question-payload';
 import { ASK_USER_QUESTION_TOOL } from '@/lib/hooks/permission-request-payload';
+// Issue #1784: the terminal-frame half of "which model / effort is this on".
+import { mergeModelInfo, type ModelInfo } from '@/lib/detection/model-info-extractor';
 import { agentEventToSessionStatus, type StructuredStatusVerdict } from '@/lib/session/status-mapping';
 import {
   MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH,
@@ -97,6 +99,8 @@ declare global {
   var __agentEventAwaitingInstruction: Map<string, AwaitingInstructionRecord> | undefined;
   // eslint-disable-next-line no-var
   var __agentEventLastModel: Map<string, string> | undefined;
+  // eslint-disable-next-line no-var
+  var __agentCapturedModelInfo: Map<string, ModelInfo> | undefined;
 }
 
 /** compositeKey -> epoch ms of the most recent stop event. */
@@ -144,6 +148,27 @@ const awaitingInstruction = globalThis.__agentEventAwaitingInstruction ??
  */
 const lastAgentModel = globalThis.__agentEventLastModel ??
   (globalThis.__agentEventLastModel = new Map<string, string>());
+
+/**
+ * compositeKey -> what the terminal frame last showed for this instance (#1784).
+ *
+ * The second source, and a strictly different kind of fact from
+ * {@link lastAgentModel}: that one is the agent naming itself over the hook
+ * channel, this one is the TUI's own chrome read back off the screen. It is
+ * kept apart rather than folded into the first map because the two have a
+ * precedence between them ({@link getResolvedAgentModelInfo}) — merging on write
+ * would let a scraped display name ("Gemini 3.7 Flash") overwrite the exact id
+ * the agent reported, with nothing left to recover it from.
+ *
+ * Latched the same way and for a sharper reason: Claude prints its model in the
+ * startup banner and nowhere else, and tmux keeps 2000 lines of history, so on
+ * any session that has been talking for a while the banner is simply gone. The
+ * screen going quiet is not the model changing, so the last non-null sighting
+ * stands until the process it described does not (see
+ * {@link beginAgentEventGeneration} / {@link discardAgentEventState}).
+ */
+const capturedModelInfo = globalThis.__agentCapturedModelInfo ??
+  (globalThis.__agentCapturedModelInfo = new Map<string, ModelInfo>());
 
 /**
  * How long two identical events count as one delivery.
@@ -495,6 +520,94 @@ export function getLastKnownAgentModel(
 }
 
 /**
+ * Latch what a terminal capture showed for this instance (Issue #1784).
+ *
+ * Called from the status-detection poll with the text that poll already
+ * captured — no `capture-pane` is issued for this, so the feature costs nothing
+ * in tmux round-trips.
+ *
+ * **Each half latches independently.** A Codex footer carries a model on every
+ * frame but an effort only on some formats; a Claude banner carries both and
+ * then scrolls away entirely. Writing `{model, effort}` wholesale would let the
+ * frame that stopped showing one of them blank a value the other frame proved.
+ * Nothing is ever written as null: absent means "no frame has ever shown this",
+ * which is the honest state for gemini/copilot and for any session whose chrome
+ * this module has no rule for.
+ *
+ * @param info - {@link import('@/lib/detection/model-info-extractor').extractModelInfo}'s answer
+ */
+export function recordCapturedModelInfo(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+  info: ModelInfo
+): void {
+  if (!info.model && !info.effort) return;
+  const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
+  const previous = capturedModelInfo.get(key);
+  capturedModelInfo.set(key, {
+    model: info.model ? info.model.slice(0, MAX_EVENT_DETAIL_LENGTH) : (previous?.model ?? null),
+    effort: info.effort ?? previous?.effort ?? null,
+  });
+}
+
+/**
+ * The last model/effort a terminal capture showed, both halves possibly null.
+ *
+ * The raw scraped value, before precedence is applied — {@link
+ * getResolvedAgentModelInfo} is what callers publishing to the UI or the API
+ * want. Exported for the tests and for anything that needs to tell "the screen
+ * said" apart from "the agent said".
+ */
+export function getLastCapturedModelInfo(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): ModelInfo {
+  const record = capturedModelInfo.get(buildCompositeKey(worktreeId, cliToolId, instanceId));
+  return { model: record?.model ?? null, effort: record?.effort ?? null };
+}
+
+/**
+ * The model and reasoning effort to publish for this instance (Issue #1784).
+ *
+ * The single answer both surfaces should read: it folds the hook channel
+ * (#1783) together with the screen under the precedence documented on
+ * {@link mergeModelInfo} — hooks win for the model, the screen is the only
+ * source of effort for codex/claude, and antigravity's effort is derived from
+ * the id it reports rather than from its (renderer-truncated) status bar.
+ *
+ * Both halves may be null, and routinely are: no tool publishes an effort over
+ * hooks, and most tools publish neither. Callers omit the key rather than
+ * emitting null — see `CliToolSessionStatus`.
+ */
+export function getResolvedAgentModelInfo(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): ModelInfo {
+  return mergeModelInfo(
+    cliToolId,
+    getLastKnownAgentModel(worktreeId, cliToolId, instanceId),
+    getLastCapturedModelInfo(worktreeId, cliToolId, instanceId)
+  );
+}
+
+/**
+ * The reasoning effort this instance is running at, or null (Issue #1784).
+ *
+ * Convenience reader over {@link getResolvedAgentModelInfo} for callers that
+ * want only the effort — `capture --json` and `instances` (#1785) among them.
+ */
+export function getLastKnownAgentEffort(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): string | null {
+  return getResolvedAgentModelInfo(worktreeId, cliToolId, instanceId).effort;
+}
+
+/**
  * How long a structured verdict is trusted after the event that produced it
  * (Issue #1723).
  *
@@ -565,6 +678,11 @@ export function beginAgentEventGeneration(
   // A `/clear` is deliberately not affected: it reaches `recordAgentEvent` as
   // `session_end` + `session_start`, never this function.
   lastAgentModel.delete(key);
+  // Issue #1784: same argument for what the screen showed. The latch exists to
+  // survive the banner scrolling away *within* one process; carrying it across
+  // a relaunch would show the old process's effort with no frame left that
+  // could contradict it. The next poll re-reads a live footer immediately.
+  capturedModelInfo.delete(key);
 }
 
 /**
@@ -602,6 +720,8 @@ export function discardAgentEventState(
   awaitingInstruction.delete(key);
   // Issue #1783: the session that was on this model no longer exists.
   lastAgentModel.delete(key);
+  // Issue #1784: nor does the pane its footer was read from.
+  capturedModelInfo.delete(key);
 }
 
 /**
@@ -1086,4 +1206,6 @@ export function clearAgentStopEvents(): void {
   // repo shares this process — a model latched by one test would otherwise be
   // read by another, in file order, and only in CI.
   lastAgentModel.clear();
+  // Issue #1784: and the same for the scraped half.
+  capturedModelInfo.clear();
 }

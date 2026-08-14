@@ -26,8 +26,15 @@ import { GLOBAL_SESSION_WORKTREE_ID } from '@/lib/session/global-session-constan
 import { peekPromptWaiting } from '@/lib/session/prompt-waiting-composition';
 import { deriveWaitingKind, type WaitingKind } from '@/lib/session/waiting-kind';
 import { observeWaitingEdge } from '@/lib/session/waiting-episode-state';
-// Issue #1783 adds `getLastKnownAgentModel` alongside #1786's `isAwaitingInstruction`.
-import { getLastKnownAgentModel, isAwaitingInstruction } from '@/lib/session/agent-event-state';
+// Issue #1783 adds the model readers alongside #1786's `isAwaitingInstruction`;
+// Issue #1784 promotes them to `getResolvedAgentModelInfo`, which folds in what
+// the capture below showed.
+import {
+  getResolvedAgentModelInfo,
+  isAwaitingInstruction,
+  recordCapturedModelInfo,
+} from '@/lib/session/agent-event-state';
+import { extractModelInfo } from '@/lib/detection/model-info-extractor';
 import type { getMessages as GetMessagesFn, markPendingPromptsAsAnswered as MarkPendingFn, getAgentInstances as GetAgentInstancesFn } from '@/lib/db';
 
 function getStatusCaptureLines(cliToolId: CLIToolType): number {
@@ -93,6 +100,24 @@ export interface CliToolSessionStatus {
    * per-instance map alone for that reason.
    */
   model?: string | null;
+  /**
+   * The reasoning effort this instance is running at, or absent (Issue #1784).
+   *
+   * Scraped from the TUI's own chrome, because **no hook payload of any tool
+   * carries an effort field** — the Codex footer, the Claude startup banner and
+   * the Antigravity status bar are the only places the value exists at all. For
+   * Antigravity it is derived from the model id instead, which encodes it.
+   *
+   * Same key-omission rule as {@link model}, and for the same reason: the
+   * absence is what existing `toEqual` suites assert, and it says everything a
+   * `null` would. Same per-instance rule too — {@link mergeSessionStatus} drops
+   * it, so read it from `sessionStatusByInstance`.
+   *
+   * Absent is the ordinary state, not a defect: a long-lived Claude session has
+   * scrolled its banner out of tmux's 2000-line history, and reporting a guess
+   * would be worse than reporting nothing.
+   */
+  reasoningEffort?: string | null;
 }
 
 /** Aggregated session status result for a worktree */
@@ -150,7 +175,15 @@ function mergeWaitingSince(a: number | null, b: number | null): number | null {
   return Math.min(a, b);
 }
 
-/** Merge two per-instance statuses into an aggregate (logical-OR of each flag). */
+/**
+ * Merge two per-instance statuses into an aggregate (logical-OR of each flag).
+ *
+ * `model` (#1783) and `reasoningEffort` (#1784) are deliberately NOT carried
+ * over: they describe one instance, and two instances of a tool can be on
+ * different models. The aggregate therefore keeps them only when there was
+ * nothing to fold — i.e. the tool has a single instance and this function was
+ * never called for it.
+ */
 function mergeSessionStatus(
   a: CliToolSessionStatus,
   b: CliToolSessionStatus,
@@ -214,6 +247,19 @@ async function detectInstanceSessionStatus(
       const lastServerResponseTs = getLastServerResponseTimestamp(compositeKey);
       const lastOutputTimestamp = lastServerResponseTs ? new Date(lastServerResponseTs) : undefined;
       const statusResult = detectSessionStatus(output, cliToolId, lastOutputTimestamp);
+
+      // Issue #1784: read the model / reasoning effort off the same frame the
+      // detector just judged. Riding on this capture is the entire point — the
+      // reasoning effort exists nowhere except the TUI's own chrome, and a
+      // dedicated `capture-pane` for it would add a tmux round-trip per
+      // instance per poll for a string that changes once a session. Pure and
+      // non-throwing; a frame that shows nothing latches nothing.
+      recordCapturedModelInfo(
+        worktreeId,
+        cliToolId,
+        instanceId,
+        extractModelInfo(cliToolId, output)
+      );
       // Issue #1550: SessionStatus → activity flags lives in status-mapping.ts
       ({ isWaitingForResponse, isProcessing } = sessionStatusToActivityFlags(statusResult.status));
 
@@ -280,13 +326,14 @@ async function detectInstanceSessionStatus(
     structuredSince: structuredWaitingSince,
   });
 
-  // Issue #1783: the model the agent's own hooks reported, independent of the
-  // tmux probe, the screen scrape and the waiting taxonomy above. Attached
-  // regardless of `isRunning`: for Claude the flag is gated on a health check
-  // that can fail transiently, and blanking a correct model on that would
-  // flicker. Absent — not null — when nothing has ever reported one, so a status
-  // object for a tool without hooks keeps exactly the shape #1786 left it with.
-  const model = getLastKnownAgentModel(worktreeId, cliToolId, instanceId);
+  // Issue #1783 / #1784: the model and reasoning effort, folded from the agent's
+  // own hooks and from the frame captured above. Independent of the waiting
+  // taxonomy, and attached regardless of `isRunning`: for Claude the flag is
+  // gated on a health check that can fail transiently, and blanking a correct
+  // model on that would flicker. Absent — not null — when nothing has ever
+  // reported one, so a status object for a tool without hooks and without
+  // recognisable chrome keeps exactly the shape #1786 left it with.
+  const { model, effort } = getResolvedAgentModelInfo(worktreeId, cliToolId, instanceId);
 
   return {
     isRunning,
@@ -298,6 +345,7 @@ async function detectInstanceSessionStatus(
     // that reported it, and that process is gone.
     awaitingInstruction: isRunning && isAwaitingInstruction(worktreeId, cliToolId, instanceId),
     ...(model !== null ? { model } : {}),
+    ...(effort !== null ? { reasoningEffort: effort } : {}),
   };
 }
 

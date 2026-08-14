@@ -29,6 +29,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `current-output-model-1785` の 3 件（`publishes the model the agent reported about itself` /
     `publishes it verbatim` / `publishes null for a stopped session even after a model was latched`）が赤になる。
     変異は復元して全緑に復帰
+- **feat(detection): tmux capture から model / reasoning effort を抽出して補完する（モデル/effort 可視化 Phase 2）** (#1784)
+  - **reasoning effort はどのツールの hooks payload にも存在しない**（`tests/fixtures/hooks/` 全件で確認）。
+    唯一の情報源は TUI が自分で描く chrome なので、`src/lib/detection/model-info-extractor.ts` を新設して
+    `extractModelInfo(cliToolId, captureText) → {model, effort}` で読む。Phase 1（#1783）が埋められなかった
+    **サーバ再起動後の claude の model**（claude は `SessionStart` にしか model を載せない）も同じ経路で埋まる
+  - **既存の detection パターンは 1 バイトも変更していない。** `CODEX_STATUS_BAR_PATTERN` は codex の
+    running/idle 判定の境界（#1150）、`CLAUDE_MODEL_OVERLAY_FOOTER_PATTERN` は Auto-Yes が `/model` ピッカーを
+    誤確定して**ユーザーのグローバル既定モデルを書き換える**のを防ぐガード（#1495）。前者はフッタ行の**特定にだけ**
+    read-only で再利用し、値の読み出しは新規パターンで行う
+  - **実測で確定させた形式**（2026-08-15、隔離 socket `tmux -L cm1784probe` ＋ 200x60 の捨てセッション。
+    fixture は `tests/fixtures/model-info-captures.ts`）:
+    codex 0.147.0 `gpt-5.6-sol xhigh · ~/…`（legacy `gpt-5.4 high · 21% left · ~/…` と effort 無しの
+    `  o4-mini  50% left · /path` も同一パターンで解ける — 最初の `·` より前を切ってから読む形にしたため。
+    位置で読むと legacy の `50%` が effort として出てしまう）／
+    claude 2.1.232 `▝▜█████▛▘  Opus 5 (1M context) with xhigh effort · Claude Max`／
+    agy 1.1.13 `? for shortcuts … Gemini 3.7 Flash · hig`
+  - **Issue 本文と食い違った実測を 2 件、実測を正として実装した**:
+    ①**agy のステータスバーは右寄せの最終 1 桁が欠ける**（`high` が `hig` として届く。200 桁でも 120 桁でも再現＝
+    capture ではなく agy 1.1.13 のレンダラ側）。Issue 本文の `Gemini 3.5 Flash · medium` はそのままでは取れないので、
+    1 文字欠けを**一意に復元できるときだけ**復元する（`hig`→`high` / `lo`→`low` / `mediu`→`medium`）。
+    復元できない末尾トークンはその行ごと捨てる — さもないと effort 無しモデルの名前が 1 文字削れて出る。
+    ②Issue 本文は `gpt-oss-120b-medium` を「サフィックス無し」に分類しつつ規則を `-low|-medium|-high$` と書いており
+    自己矛盾している。書かれた規則どおり `medium` と読む（UI に出る model は hooks の id そのままなので実害なし）
+  - **マージ規則**: model は **hooks > capture**（食い違えば hooks。agy は `Gemini 3.7 Flash` と表示するが
+    id は `gemini-3.7-flash-high`）、effort は codex/claude が capture、antigravity は **modelName 末尾サフィックス導出 >
+    capture**。保持は hooks 由来（`__agentEventLastModel`）と capture 由来（`__agentCapturedModelInfo`）を
+    **別 Map** に持つ（同一 Map に混ぜると scrape した表示名が id を後書きで潰し、復元手段が無くなる）
+  - `CliToolSessionStatus.reasoningEffort?` を追加し `sessionStatusByInstance` 経由で API へ。**未知のときはキー自体を
+    出さない**（#1783 が model に決めた規約と同じ。`toEqual` で全体比較している既存スイートを壊さないため）。
+    UI は #1783 のモデル表示に `· <effort>` を追記する形で、effort 不明なら表示は #1783 と 1 バイトも変わらない。
+    DesktopHeader の status pill は幅配給の都合で**ツールチップのみ**（#1783 の制約を維持）
+  - **この機能のための tmux capture は 1 回も増やしていない** — ステータス検出ポーラが既に取った capture テキストに
+    相乗りする（`captureSessionOutput` の呼び出し回数をテストで固定）
+  - **空振り緑の反証（変異注入で実測）**: ①`resolveEffortToken` が常に null を返すよう変異＝effort 抽出を無効化 →
+    **41 テストが赤**（extractor 27・retention 9・join 5。UI スイートは緑のまま＝表示ロジックは抽出に依らないことの裏取り）。
+    ②ステータス検出ポーラから `recordCapturedModelInfo(...extractModelInfo(...))` の呼び出しを外す → **join の 6 テストが赤**
+    （`「antigravity は modelName 導出」だけは緑のまま`＝capture 非依存の経路であることの裏取り）。
+    2 変異とも復元し `git status` で確認、全緑に復帰
 - **feat(verification): 実行契約が Issue 固有のゲート定義を運べるようにした（#1756 案 B）** (#1791)
   - 契約に **`verify.gateDefinitions`（`[{id, command, timeoutSec}]`）** を追加した。`verify.gates` の意味は変えていない
     （宣言済みゲートからの**選択**）。`gates` 省略時は「verify.yaml の全ゲート ＋ この契約の定義全部」

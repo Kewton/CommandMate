@@ -47,7 +47,7 @@ import { Modal } from '@/components/ui/Modal';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
 import { MoveDialog } from '@/components/worktree/MoveDialog';
 import { NewFileDialog } from '@/components/worktree/NewFileDialog';
-import { buildModelByInstance, DesktopHeader, InfoModal } from '@/components/worktree/WorktreeDetailSubComponents';
+import { buildModelByInstance, DesktopHeader, formatAgentModelLabel, InfoModal } from '@/components/worktree/WorktreeDetailSubComponents';
 import { UPLOADABLE_EXTENSIONS } from '@/config/uploadable-extensions';
 import { deriveCliStatus } from '@/types/sidebar';
 import { getCliToolDisplayName, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
@@ -414,7 +414,11 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           // only — `sessionStatusByCli` is an aggregate over every instance of
           // the tool, so it has no model to speak of. Undefined (no entry, no
           // hooks, no model) renders nothing.
-          agentModel={worktree?.sessionStatusByInstance?.[paneInstanceId]?.model ?? null}
+          // Issue #1784 appends "· <effort>" when the frame showed one.
+          agentModel={formatAgentModelLabel(
+            worktree?.sessionStatusByInstance?.[paneInstanceId]?.model,
+            worktree?.sessionStatusByInstance?.[paneInstanceId]?.reasoningEffort
+          )}
           // Issue #756: Auto-Yes domain group. Issue #740: enabled/expiresAt are
           // per-CLI; lastAutoResponse is activeCliTab-scoped (useAutoYes), shared
           // across splits for the toggle notification (Issue #501 owns per-split
