@@ -113,7 +113,30 @@ export function deriveWorktreeStatus(
 }
 
 /**
- * Project `sessionStatusByInstance` down to instanceId -> model (Issue #1783).
+ * The one string every surface shows for "what is this agent running on"
+ * (Issue #1783 model, #1784 effort).
+ *
+ * `model · effort`, or the model alone when the effort is unknown — which is
+ * the ordinary case, not an edge one: no tool publishes an effort over hooks,
+ * so it is only known while the CLI's chrome is on screen to be read. Returns
+ * null when there is no model either, so every call site's existing
+ * `{label && …}` guard keeps meaning "show nothing".
+ *
+ * Centralised rather than interpolated at each of the four display sites so the
+ * pane header, the roster rows, the mobile sheet and the header pill's tooltip
+ * cannot drift apart.
+ */
+export function formatAgentModelLabel(
+  model: string | null | undefined,
+  effort?: string | null
+): string | null {
+  if (!model) return null;
+  return effort ? `${model} · ${effort}` : model;
+}
+
+/**
+ * Project `sessionStatusByInstance` down to instanceId -> display label
+ * (Issue #1783, extended with effort in #1784).
  *
  * The roster panes take a plain lookup rather than the status payload, so this
  * is where the shape is dropped. Instances that reported no model are left out
@@ -130,7 +153,8 @@ export function buildModelByInstance(
   if (!byInstance) return {};
   const models: Record<string, string> = {};
   for (const [instanceId, status] of Object.entries(byInstance)) {
-    if (status?.model) models[instanceId] = status.model;
+    const label = formatAgentModelLabel(status?.model, status?.reasoningEffort);
+    if (label) models[instanceId] = label;
   }
   return models;
 }
@@ -752,7 +776,13 @@ export const DesktopHeader = memo(function DesktopHeader({
                 // The model rides on the existing hover/`title` affordance
                 // instead, and the visible pill text is unchanged. `null` (no
                 // hooks, no model) leaves the label byte-identical to pre-#1783.
-                const instanceModel = sessionStatusByInstance?.[inst.id]?.model ?? null;
+                // Issue #1784 appends "· <effort>" here too; the pill's visible
+                // text is still untouched, so the width budget above is unmoved.
+                const instanceStatus = sessionStatusByInstance?.[inst.id];
+                const instanceModel = formatAgentModelLabel(
+                  instanceStatus?.model,
+                  instanceStatus?.reasoningEffort
+                );
                 const labelWithModel = instanceModel
                   ? tWorktree('detail.statusPillWithModel', {
                       label,

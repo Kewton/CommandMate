@@ -182,6 +182,16 @@ export interface Worktree {
      * nothing rather than an "unknown" badge.
      */
     model?: string | null;
+    /**
+     * The reasoning effort this instance is running at (Issue #1784), or absent.
+     *
+     * One of `minimal | low | medium | high | xhigh`. Read off the CLI's own
+     * status bar / startup banner — no hook payload of any tool publishes an
+     * effort — so it exists for codex, claude and antigravity and is absent for
+     * everything else, and absent for a claude session old enough to have
+     * scrolled its banner out of tmux history. Render nothing when absent.
+     */
+    reasoningEffort?: string | null;
   } & SessionWaitingDetail>>;
   /** Whether this worktree is marked as favorite */
   favorite?: boolean;
