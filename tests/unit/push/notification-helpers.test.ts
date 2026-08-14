@@ -132,6 +132,84 @@ describe('buildPushPayload locale selection', () => {
   });
 });
 
+/**
+ * The waiting taxonomy in the payload (Issue #1790).
+ *
+ * `kind` still answers "which toggle gates this", so it stays `'prompt'` for
+ * every wait; `waitingKind` is what tells the reader whether tapping the
+ * notification will present something to answer.
+ */
+describe('buildPushPayload waiting kinds', () => {
+  const base = { worktreeId: 'w', worktreeName: 'n', kind: 'prompt' as const };
+
+  it('keeps the reply wording for an answerable prompt', () => {
+    expect(buildPushPayload({ ...base, waitingKind: 'prompt' }, 'en').body).toBe(
+      'Waiting for your reply'
+    );
+    expect(
+      buildPushPayload({ ...base, waitingKind: 'prompt', excerpt: 'Continue?' }, 'en').body
+    ).toBe('Waiting for reply: Continue?');
+  });
+
+  it.each(['menu', 'unclassified'] as const)(
+    'points a %s wait at the terminal instead',
+    (waitingKind) => {
+      expect(buildPushPayload({ ...base, waitingKind }, 'en').body).toBe(
+        'Needs attention in the terminal'
+      );
+      expect(buildPushPayload({ ...base, waitingKind, excerpt: 'Select a file' }, 'en').body).toBe(
+        'Needs attention in the terminal: Select a file'
+      );
+    }
+  );
+
+  it('publishes waitingKind, and only for waits', () => {
+    expect(buildPushPayload({ ...base, waitingKind: 'menu' }, 'en').waitingKind).toBe('menu');
+    // Omitted rather than null, so a #1125 completion payload is unchanged.
+    expect('waitingKind' in buildPushPayload({ ...base, kind: 'completion' }, 'en')).toBe(false);
+    expect('waitingKind' in buildPushPayload(base, 'en')).toBe(false);
+  });
+
+  it('quotes the elapsed minutes in the reminder and drops the excerpt', () => {
+    const since = 1_000_000;
+    const payload = buildPushPayload(
+      { ...base, waitingKind: 'prompt', waitingSince: since, escalated: true, excerpt: 'Continue?' },
+      'en',
+      since + 11 * 60_000
+    );
+    expect(payload.body).toBe('Still waiting for your reply (11 min)');
+
+    expect(
+      buildPushPayload(
+        { ...base, waitingKind: 'menu', waitingSince: since, escalated: true },
+        'ja',
+        since + 25 * 60_000
+      ).body
+    ).toBe('まだ端末の確認が必要です（25分経過）');
+  });
+
+  it('never reports a reminder as zero minutes old', () => {
+    // Rounding down a threshold that fired a few seconds early would read as
+    // "still waiting (0 min)", which says nothing.
+    expect(
+      buildPushPayload(
+        { ...base, waitingSince: 500, escalated: true },
+        'en',
+        500 + 59_000
+      ).body
+    ).toBe('Still waiting for your reply (1 min)');
+  });
+
+  it('keeps the tag stable so the reminder replaces the first notification', () => {
+    const first = buildPushPayload({ ...base, waitingKind: 'prompt', waitingSince: 1 }, 'en');
+    const reminder = buildPushPayload(
+      { ...base, waitingKind: 'prompt', waitingSince: 1, escalated: true },
+      'en'
+    );
+    expect(reminder.tag).toBe(first.tag);
+  });
+});
+
 describe('resolvePushLocale', () => {
   it('passes through supported locales', () => {
     expect(resolvePushLocale('en')).toBe('en');

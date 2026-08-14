@@ -26,10 +26,23 @@ const PUSH_KEYS = [
   'promptWaiting',
   'completionWithExcerpt',
   'completion',
+  // Issue #1790: a wait only the terminal can clear, and the reminder for a
+  // wait that outlived the threshold.
+  'terminalAttentionWithExcerpt',
+  'terminalAttention',
+  'stillWaitingPrompt',
+  'stillWaitingTerminal',
 ] as const;
 
 /** Keys whose copy must carry the placeholder push-sender substitutes. */
-const EXCERPT_KEYS = ['promptWaitingWithExcerpt', 'completionWithExcerpt'] as const;
+const EXCERPT_KEYS = [
+  'promptWaitingWithExcerpt',
+  'completionWithExcerpt',
+  'terminalAttentionWithExcerpt',
+] as const;
+
+/** Keys whose copy must carry the elapsed-minutes placeholder (Issue #1790). */
+const MINUTES_KEYS = ['stillWaitingPrompt', 'stillWaitingTerminal'] as const;
 
 describe('notifications.push dictionary', () => {
   for (const locale of SUPPORTED_LOCALES) {
@@ -46,6 +59,12 @@ describe('notifications.push dictionary', () => {
       for (const key of EXCERPT_KEYS) {
         it(`keeps the {excerpt} placeholder in ${key}`, () => {
           expect(push[key] as string).toContain('{excerpt}');
+        });
+      }
+
+      for (const key of MINUTES_KEYS) {
+        it(`keeps the {minutes} placeholder in ${key}`, () => {
+          expect(push[key] as string).toContain('{minutes}');
         });
       }
 
@@ -66,7 +85,13 @@ describe('notifications.push dictionary', () => {
   it('preserves the pre-i18n Japanese wording byte-for-byte', () => {
     // These are the literals push-sender hardcoded before #1308. Japanese users
     // must not notice the migration at all.
-    expect(loadPush('ja')).toEqual({
+    //
+    // Issue #1790 relaxed this from `toEqual` to `toMatchObject`: the four
+    // literals below are still asserted byte-for-byte, but the dictionary now
+    // also carries the wordings for a terminal-only wait and for the reminder.
+    // Exhaustiveness has not been lost — the per-locale block above still pins
+    // the key set exactly, against `PUSH_KEYS`.
+    expect(loadPush('ja')).toMatchObject({
       promptWaitingWithExcerpt: '応答待ち: {excerpt}',
       promptWaiting: '応答待ちです',
       completionWithExcerpt: '完了: {excerpt}',
