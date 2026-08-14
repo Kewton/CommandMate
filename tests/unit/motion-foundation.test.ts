@@ -79,10 +79,21 @@ describe('Tailwind 4 CSS-first configuration', () => {
       '--animate-slide-in',
       '--animate-slide-up',
       '--animate-status-glow',
-      '--animate-status-blink',
+      // Issue #1787: replaced `--animate-status-blink`. Waiting is the state
+      // that needs a human, so it stopped being the weakest animated state.
+      '--animate-status-attention',
     ]) {
       expect(css).toContain(name);
     }
+  });
+
+  // Issue #1787: StatusDot's waiting state was the only consumer of the blink,
+  // so the token was removed rather than left as dead CSS. If it ever comes
+  // back, it must come back with a consumer.
+  it('no longer defines the retired status-blink animation', () => {
+    const css = read('src/app/globals.css');
+    expect(css).not.toContain('--animate-status-blink');
+    expect(css).not.toContain('@keyframes status-blink');
   });
 });
 

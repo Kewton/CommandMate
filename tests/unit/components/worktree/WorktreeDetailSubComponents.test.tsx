@@ -818,7 +818,9 @@ describe('DesktopHeader agent-row idle collapse + overflow (Issue #1078)', () =>
     const overflow = screen.getByTestId('desktop-agent-status-overflow');
     const overflowDot = overflow.querySelector('span');
     expect(overflowDot?.className).toContain('bg-warning');
-    expect(overflowDot?.className).toContain('animate-status-blink');
+    // Issue #1787: the amber waiting dot pulses for attention now (it used to
+    // carry the weaker `animate-status-blink`).
+    expect(overflowDot?.className).toContain('animate-status-attention');
   });
 
   it('overflow prefers a running glow over a waiting one when both are folded', () => {

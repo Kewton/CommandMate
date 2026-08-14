@@ -15,6 +15,8 @@ import { useLocale } from 'next-intl';
 import { formatDistanceToNow } from 'date-fns';
 import { getDateFnsLocale } from '@/lib/date-locale';
 import { worktreeApi, handleApiError } from '@/lib/api-client';
+import { isNextActionKey } from '@/lib/session/next-action-helper';
+import { deriveWorktreeWaitingDetail } from '@/types/sidebar';
 
 export interface WorktreeCardProps {
   worktree: Worktree;
@@ -50,6 +52,22 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
 
   // Determine if this is the main branch
   const isMain = name === 'main' || name === 'master';
+
+  // Issue #1787: `nextAction` became a dictionary key. It arrives as a plain
+  // string on the wire, so translate ONLY what this build knows to be a key —
+  // a pre-#1787 server still sends the English literal, and handing that to
+  // `t()` would render `worktree.Approve / Reject` on screen.
+  const nextActionLabel = nextAction
+    ? isNextActionKey(nextAction)
+      ? t(nextAction)
+      : nextAction
+    : null;
+
+  // Issue #1787: "the agent finished its turn and is waiting for instructions"
+  // is a distinct state from "the agent is blocking on your answer". Derived
+  // from the per-instance payload rather than a top-level flag, because that is
+  // where #1786 publishes it.
+  const { awaitingInstruction } = deriveWorktreeWaitingDetail(worktree);
 
   /**
    * Handle kill session button click
@@ -155,6 +173,19 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
                   {t('status.responseCompleted')}
                 </Badge>
               )}
+              {/*
+                Issue #1787: awaiting-instruction is its own badge, in `success`
+                (green) rather than `warning` (amber), so "it is done, give it
+                work" is never mistaken for "it is blocked on you".
+              */}
+              {awaitingInstruction && (
+                <Badge
+                  variant="success"
+                  data-testid="worktree-card-awaiting-instruction"
+                >
+                  {t('awaitingInstruction.badge')}
+                </Badge>
+              )}
             </CardTitle>
             {isSessionRunning && (
               <Button
@@ -182,13 +213,13 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
               </span>
             )}
 
-            {/* Next action (Issue #600) */}
-            {nextAction && (
+            {/* Next action (Issue #600; i18n keys since Issue #1787) */}
+            {nextActionLabel && (
               <span
                 data-testid="worktree-card-next-action"
                 className="inline-block px-2 py-0.5 text-xs rounded bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300"
               >
-                {nextAction}
+                {nextActionLabel}
               </span>
             )}
 

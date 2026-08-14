@@ -130,9 +130,18 @@
    * re-renders never restart them (no JS/inline-style keying). OS "reduce
    * motion" is honored globally below (#1050), which freezes these to a static
    * dot — do not re-implement the media query.
+   *
+   * [Issue #1787] `status-attention` REPLACES the old `status-blink`. Waiting is
+   * the one state that needs a human, so it must never read as weaker than
+   * `running`: the blink only faded opacity 1→0.45 and lost to `status-glow`'s
+   * expanding halo. `status-attention` is deliberately faster (1.4s vs 2.4s) and
+   * throws a wider halo (12px/4px vs 8px/2px), while `status-glow` becomes the
+   * MEDIUM tier that terminal-only waits (`waitingKind` menu/unclassified) share
+   * with `running`. `status-blink` had no consumer besides StatusDot's waiting
+   * state, so it was removed rather than left behind as dead CSS.
    */
   --animate-status-glow: status-glow 2.4s ease-in-out infinite;
-  --animate-status-blink: status-blink 1.6s ease-in-out infinite;
+  --animate-status-attention: status-attention 1.4s ease-in-out infinite;
 
   @keyframes slide-in {
     0% {
@@ -187,14 +196,22 @@
       opacity: 1;
     }
   }
-  /* Weak amber blink for the waiting state. */
-  @keyframes status-blink {
+  /*
+   * [Issue #1787] Strong attention pulse for `waiting`. Uses the same
+   * currentColor trick as status-glow so the halo follows the dot's own color
+   * (amber). Opacity stays near 1 on purpose — a dot that fades toward the
+   * background is easier to miss than one that grows, which is exactly how the
+   * old `status-blink` ended up quieter than `running`.
+   */
+  @keyframes status-attention {
     0%,
     100% {
+      box-shadow: 0 0 4px 1px currentColor;
       opacity: 1;
     }
     50% {
-      opacity: 0.45;
+      box-shadow: 0 0 12px 4px currentColor;
+      opacity: 0.92;
     }
   }
 }

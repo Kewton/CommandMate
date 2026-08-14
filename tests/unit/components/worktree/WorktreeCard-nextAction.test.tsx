@@ -90,3 +90,83 @@ describe('WorktreeCard next action display', () => {
     expect(screen.getByTestId('worktree-card-repo-name').textContent).toBe('test-repo');
   });
 });
+
+// ============================================================================
+// Issue #1787: nextAction is a dictionary key, and awaiting-instruction is its
+// own (green) badge
+// ============================================================================
+
+describe('WorktreeCard next action i18n (Issue #1787)', () => {
+  it('resolves a dictionary key through the real en dictionary', () => {
+    const wt = createWorktree({ nextAction: 'nextAction.approveReject' } as Partial<Worktree>);
+    render(<WorktreeCard worktree={wt} />);
+    expect(screen.getByTestId('worktree-card-next-action').textContent).toBe(
+      'Approve / Reject'
+    );
+  });
+
+  it.each([
+    ['nextAction.start', 'Start'],
+    ['nextAction.sendMessage', 'Send message'],
+    ['nextAction.replyToPrompt', 'Reply to prompt'],
+    ['nextAction.checkStalled', 'Check stalled'],
+    ['nextAction.running', 'Running...'],
+  ])('renders %s as %j', (key, expected) => {
+    render(<WorktreeCard worktree={createWorktree({ nextAction: key } as Partial<Worktree>)} />);
+    expect(screen.getByTestId('worktree-card-next-action').textContent).toBe(expected);
+  });
+
+  // Back-compat: a server that predates this Issue still sends the English
+  // literal. Handing that to `t()` would print `worktree.Approve / Reject`, so
+  // unknown values must be rendered verbatim instead.
+  it.each(['Approve / Reject', 'Running...', 'Something new'])(
+    'renders the legacy literal %j verbatim',
+    (literal) => {
+      render(
+        <WorktreeCard worktree={createWorktree({ nextAction: literal } as Partial<Worktree>)} />
+      );
+      const label = screen.getByTestId('worktree-card-next-action').textContent ?? '';
+      expect(label).toBe(literal);
+      expect(label).not.toContain('worktree.');
+    }
+  );
+});
+
+describe('WorktreeCard awaiting-instruction badge (Issue #1787)', () => {
+  it('shows a green badge when an agent reports it is awaiting instructions', () => {
+    const wt = createWorktree({
+      isSessionRunning: true,
+      sessionStatusByInstance: {
+        claude: {
+          isRunning: true,
+          isWaitingForResponse: false,
+          isProcessing: false,
+          awaitingInstruction: true,
+        },
+      },
+    } as Partial<Worktree>);
+    render(<WorktreeCard worktree={wt} />);
+
+    const badge = screen.getByTestId('worktree-card-awaiting-instruction');
+    expect(badge.textContent).toBe('Ready for work');
+    // Green, never amber: "done, give me work" must not read as "answer me".
+    expect(badge.className).toMatch(/success/);
+    expect(badge.className).not.toMatch(/warning/);
+  });
+
+  it('does not show the badge for a plain running session', () => {
+    const wt = createWorktree({
+      isSessionRunning: true,
+      sessionStatusByInstance: {
+        claude: { isRunning: true, isWaitingForResponse: false, isProcessing: true },
+      },
+    } as Partial<Worktree>);
+    render(<WorktreeCard worktree={wt} />);
+    expect(screen.queryByTestId('worktree-card-awaiting-instruction')).toBeNull();
+  });
+
+  it('does not show the badge for a payload with no #1786 fields at all', () => {
+    render(<WorktreeCard worktree={createWorktree({ isSessionRunning: true })} />);
+    expect(screen.queryByTestId('worktree-card-awaiting-instruction')).toBeNull();
+  });
+});
