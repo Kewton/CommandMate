@@ -758,6 +758,31 @@ export const DesktopHeader = memo(function DesktopHeader({
             overflow.find((c) => c.status === 'waiting')?.status ??
             null;
 
+          // Issue #1787 acceptance 4: the detail header is the third surface
+          // that has to say "an agent here is done and wants work", alongside
+          // the sidebar row and the WorktreeCard. It was missed when #1787
+          // landed because this file sat outside that Issue's scope.
+          //
+          // ONE badge for the whole row, not one per pill, which is the same
+          // granularity `BranchListItem` shows (`branch.awaitingInstruction` is
+          // already the fold across every instance — see
+          // `deriveWorktreeWaitingDetail`). It is also the only granularity this
+          // row can afford: it is width-budgeted by MAX_HEADER_AGENT_PILLS, and
+          // a per-pill string would push working instances into the "+N"
+          // overflow to make room — the very trade-off #1783 refused when it
+          // put the model in the tooltip instead. Rendered AFTER the overflow
+          // trigger so it takes nothing from the pill budget, and nothing that
+          // was here before is removed.
+          //
+          // Resolved per instance with the same per-instance → per-CLI fallback
+          // the status dots use, so an alias instance is not read off a roster
+          // entry that has no status of its own.
+          const awaitingInstruction = instances.some(
+            (inst) =>
+              (sessionStatusByInstance?.[inst.id] ?? sessionStatusByCli?.[inst.cliTool])
+                ?.awaitingInstruction === true
+          );
+
           return (
             <div className="flex items-center gap-2 flex-shrink-0" data-testid="desktop-agent-status-row">
               {classified.map((c) => {
@@ -893,6 +918,24 @@ export const DesktopHeader = memo(function DesktopHeader({
                     })}
                   </DropdownMenuContent>
                 </DropdownMenu>
+              )}
+
+              {/*
+                Issue #1787: `awaitingInstruction` (the agent said its turn is
+                over) is a SECONDARY state deliberately styled `success` green,
+                so it can never be read as the amber "needs your answer" case
+                the StatusDots above own. Same tokens, same wording and the same
+                two dictionary keys as the sidebar badge — two surfaces showing
+                one state must not look like two different states.
+              */}
+              {awaitingInstruction && (
+                <span
+                  data-testid="desktop-awaiting-instruction-badge"
+                  className="flex-shrink-0 rounded-full bg-success-subtle px-1.5 py-0.5 text-[10px] font-medium leading-4 text-success-foreground"
+                  title={tWorktree('awaitingInstruction.label')}
+                >
+                  {tWorktree('awaitingInstruction.badge')}
+                </span>
               )}
             </div>
           );
