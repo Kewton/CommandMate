@@ -33,6 +33,20 @@ interface Prefs {
   completion: boolean;
 }
 
+/**
+ * Issue #1790. Declared here rather than imported from `@/lib/push` on purpose:
+ * that module is server-only (web-push, better-sqlite3), and this file is a
+ * client component. The server sends its own defaults and choices with the GET,
+ * so these two only cover the window before that response lands.
+ */
+interface EscalationSettings {
+  enabled: boolean;
+  thresholdMinutes: number;
+}
+
+const DEFAULT_ESCALATION_UI: EscalationSettings = { enabled: true, thresholdMinutes: 10 };
+const ESCALATION_CHOICES_FALLBACK = [5, 10, 30, 60];
+
 export function NotificationsSettings() {
   const t = useTranslations('notifications');
   const { showToast } = useToast();
@@ -306,6 +320,9 @@ export function NotificationsSettings() {
       <Card>
         {renderBody()}
       </Card>
+      <Card>
+        <EscalationNotificationSettings />
+      </Card>
     </div>
   );
 }
@@ -316,6 +333,116 @@ export function NotificationsSettings() {
  * Always rendered: it needs no permission, no service worker and no server
  * configuration, so none of the push guards apply to it.
  */
+/**
+ * The "still waiting" reminder — Issue #1790.
+ *
+ * Rendered outside the push card's guards for the same reason the in-app switch
+ * is, plus one of its own: this setting lives on the server and applies to every
+ * subscribed device, so the phone that will actually receive the reminder need
+ * not be the browser the user changes it from. A laptop with no Push API is a
+ * perfectly ordinary place to turn it off.
+ */
+function EscalationNotificationSettings() {
+  const t = useTranslations('notifications');
+  const { showToast } = useToast();
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [settings, setSettings] = useState<EscalationSettings>(DEFAULT_ESCALATION_UI);
+  const [choices, setChoices] = useState<number[]>([...ESCALATION_CHOICES_FALLBACK]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch('/api/push/escalation');
+        const data = (await res.json()) as {
+          settings?: EscalationSettings;
+          choices?: number[];
+        };
+        if (!cancelled) {
+          if (data.settings) setSettings(data.settings);
+          if (Array.isArray(data.choices) && data.choices.length > 0) setChoices(data.choices);
+        }
+      } catch {
+        // Leave the defaults in place — they are what the server would use too.
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const save = useCallback(
+    async (next: EscalationSettings) => {
+      const previous = settings;
+      setSettings(next);
+      setSaving(true);
+      try {
+        const res = await fetch('/api/push/escalation', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ settings: next }),
+        });
+        if (!res.ok) throw new Error('update failed');
+        showToast(t('toast.updated'), 'success');
+      } catch {
+        setSettings(previous);
+        showToast(t('toast.error'), 'error');
+      } finally {
+        setSaving(false);
+      }
+    },
+    [settings, showToast, t]
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {t('escalation.heading')}
+      </div>
+      <label className="flex items-center justify-between gap-4">
+        <span>
+          <span className="block text-sm font-medium text-foreground">
+            {t('escalation.toggle')}
+          </span>
+          <span className="block text-xs text-muted-foreground">
+            {t('escalation.toggleDesc')}
+          </span>
+        </span>
+        <Switch
+          checked={settings.enabled}
+          onCheckedChange={(v) => save({ ...settings, enabled: v })}
+          disabled={loading || saving}
+          aria-label={t('escalation.toggle')}
+          data-testid="notifications-toggle-escalation"
+        />
+      </label>
+      <label className="flex items-center justify-between gap-4">
+        <span className="text-sm text-foreground">{t('escalation.threshold')}</span>
+        <select
+          className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
+          value={String(settings.thresholdMinutes)}
+          disabled={loading || saving || !settings.enabled}
+          aria-label={t('escalation.threshold')}
+          data-testid="notifications-escalation-threshold"
+          onChange={(e) => save({ ...settings, thresholdMinutes: Number(e.target.value) })}
+        >
+          {choices.map((minutes) => (
+            <option key={minutes} value={String(minutes)}>
+              {t('escalation.minutes', { count: minutes })}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
+}
+
 function InAppNotificationSettings() {
   const t = useTranslations('notifications');
   const { enabled, setEnabled } = useInAppWaitingToast();

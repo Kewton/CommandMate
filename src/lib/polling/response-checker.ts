@@ -47,7 +47,21 @@ import { isDuplicatePrompt, normalizePromptForDedup } from './prompt-dedup';
 import { isDuplicateResponse } from './response-dedup';
 import { getPollerKey, stopPolling, GEMINI_LOADING_INDICATORS } from './response-poller-core';
 import { notifyPushSubscribers } from '@/lib/push';
+// Issue #1790: imported by deep path, not through `@/lib/push`. Suites that
+// replace the barrel to count notifications (e.g. the #1547 escalation test)
+// would otherwise get `undefined` here and take down module evaluation.
+import { startWaitingPushNotifier } from '@/lib/push/waiting-push-notifier';
+import { getWaitingEpisode, observeWaitingEdge } from '@/lib/session/waiting-episode-state';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
+
+// Issue #1790: arm the waiting-edge push subscription.
+//
+// It has to exist before the first edge, and `server.ts` reaches this module at
+// boot (it imports `polling/response-poller` for `stopAllPolling`, which pulls
+// in `response-poller-core` and then this file), so this is the earliest hook
+// the notification path owns. Idempotent by replacement, and it starts no timer
+// and touches no database until a wait actually opens.
+startWaitingPushNotifier();
 
 // ============================================================================
 // Extraction types and helpers
@@ -609,13 +623,42 @@ export async function checkForResponse(
 
       // Web Push fan-out (Issue #1125): agent is now waiting for a prompt reply.
       // Fire-and-forget — push is advisory and must never block/break the poller.
+      //
+      // Issue #1790: the wait is now named by #1786's episode rather than by the
+      // prompt text. The two lines below are ordered, not incidental:
+      //
+      //  1. the notification is raised first, while it still has the prompt's
+      //     own question to quote — it records the episode in the dedup, so
+      //     whichever path reports the wait second says nothing;
+      //  2. `observeWaitingEdge` then opens that same episode, which is what
+      //     lets the edge listener (and #1788's WebSocket frame) agree with this
+      //     call about *which* wait this is instead of raising a second one.
+      //
+      // Both use one timestamp so the episode the notification claims and the
+      // episode the store opens are the same number.
+      const promptObservedAt = Date.now();
+      const promptWaitingSince =
+        getWaitingEpisode(worktreeId, cliToolId, instanceId)?.since ?? promptObservedAt;
+
       void notifyPushSubscribers({
         worktreeId,
         worktreeName: worktree.name,
         kind: 'prompt',
         agentName: resolvedInstanceId,
+        instanceId: resolvedInstanceId,
+        waitingKind: 'prompt',
+        waitingSince: promptWaitingSince,
         excerpt: promptDetection.promptData?.question ?? promptSaveContent,
       }).catch(() => {});
+
+      observeWaitingEdge({
+        worktreeId,
+        cliToolId,
+        instanceId,
+        waiting: true,
+        kind: 'prompt',
+        now: promptObservedAt,
+      });
 
       if (!isFullScreenTui) {
         stopPolling(worktreeId, cliToolId, instanceId);
@@ -717,6 +760,15 @@ export async function checkForResponse(
 
     // Broadcast message to WebSocket clients
     broadcastMessage('message', { worktreeId, message });
+
+    // Issue #1790: the agent has just produced a reply, so whatever it was
+    // waiting for is over. Closing the episode here is what makes a *second*
+    // prompt in the same session notify again: without it a wait opened by the
+    // prompt branch above could stay open until a browser next probes the status
+    // API, and every later prompt would be folded into that stale episode and
+    // silently deduped. Nothing to close is a no-op, and no notification is
+    // raised for a closing edge.
+    observeWaitingEdge({ worktreeId, cliToolId, instanceId, waiting: false });
 
     // Web Push fan-out (Issue #1125): session completed (running → idle).
     // Fire-and-forget — push is advisory and must never block/break the poller.

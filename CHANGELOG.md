@@ -54,6 +54,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     新規 `current-output-effort-wiring-1784` の **9 件中 7 件が赤**（残り 2 件は `null` を期待する規則そのもの）。
     ②詳細ヘッダの `awaitingInstruction` 描画を外す → `WorktreeDetailSubComponents` の **4 件が赤**。
     変異は復元し `git status` で確認済み
+### Changed
+
+- **feat(push): 入力待ち通知を waiting エッジ駆動にし、種別の細分化とエスカレーションを追加した（入力待ち可視化 方針E）** (#1790)
+  - **通知トリガーを #1786 の waiting エッジ（`onWaitingTransition`）に載せた**。`src/lib/push/waiting-push-notifier.ts` は
+    #1788 の `waiting-broadcast.ts` と同じく**購読するだけ**で、検出器・pane capture・独自の「前回 waiting だったか」を持たない。
+    これにより **poller 非稼働・同一ターン 2 個目のプロンプト・`MAX_POLLING_DURATION` 超過・
+    selection list / pager / 構造化のみの待ち**が通知されるようになった
+  - **poller 内の発火は残した（Issue 本文の推奨から逸脱。実測に基づく判断）**。
+    本文は「エッジ経路へ一本化し poller 内は削除」を推奨していたが、**`observeWaitingEdge` の呼び出し元は
+    `worktree-status-helper` 1 箇所＝ worktree 一覧 / 詳細 API の probe のみ**で、サーバ側の周期スキャンは存在しない
+    （`grep -rn observeWaitingEdge src` で確認）。つまりエッジは**クライアントが画面を開いているときにしか観測されない**ため、
+    一本化すると「アプリを閉じて離席している」＝スマホ通知が最も要る状況で無通知になる。
+    よって両経路を残し、`response-checker` が prompt 検出時に `observeWaitingEdge(waiting:true)` で
+    **同じ episode を開く**ことで二重送信を構造的に潰した（順序も意図的で、prompt の質問文を持っている
+    poller 側を先に送り、後続のエッジ経路は dedup で黙る）
+  - **dedup を episode 化した**。`shouldSendWaitingPush()`（key = worktreeId + instanceId + `waitingSince`）が
+    「1 つの待ちにつき 1 通」を保証する。content hash 30 秒は**同一ターン 2 個目の同文プロンプトを落としつつ、
+    長い待ちには同じ質問を再送し得る**という逆向きの誤りを両方持っていた。completion 経路は現行維持
+  - **応答保存時に `observeWaitingEdge(waiting:false)` で episode を閉じる**。これが無いと poller が開いた待ちが
+    ブラウザの probe が来るまで開きっぱなしになり、以降のプロンプトが全部その古い episode に畳まれて無音になる
+  - **通知文を `waitingKind` で出し分ける**。`prompt`→「応答待ちです」／`menu`・`unclassified`→「端末の確認が必要です」／
+    エスカレーション→「まだ応答待ちです（N分経過）」。両言語を `locales/{en,ja}/notifications.json` に追加した。
+    payload の `waitingKind` は**待ちのときだけ付く**ので、#1125 の completion payload は 1 バイトも変わらない。
+    `tag` も据え置き＝再通知は最初の通知を置換する（同じ待ちで通知カードが 2 枚積まれない）
+  - **エスカレーション（再通知）を追加した**。既定 10 分・1 episode 1 回・`NotificationsSettings` で変更/オフ可能。
+    **相乗りできる既存の周期処理が無かった**（`global-session-poller` は assistant chat 専用、`resource-cleanup` は別責務）ため
+    60 秒 interval を新設したが、**待ちがある間だけ**張る（pending 0 で `clearInterval`、`unref()` 済み）。
+    生存判定は自前の pending ではなく `getWaitingEpisode()` ＝ #1786 のストアが権威なので、
+    別画面で答えられた待ちにも閉じるエッジを取りこぼした待ちにも再通知しない
+  - **設定はインストール単位（`app_settings` v27 に相乗り、migration なし）**。#1788 の in-app トグルと違い
+    localStorage を使えない — 判定するのは request も browser も無い background timer だから。
+    読みは全経路 total（行なし／壊れた JSON／範囲外／DB 不通 → 既定値）で、正規化はフィールド独立
+    （不正な threshold が `enabled` を巻き添えにしない）
+  - **VAPID 未設定環境では待ちを記録すらしない**。`isPushConfigured()` が偽なら timer も DB 参照も発生しない
+    （「静かなだけ」ではなく完全に不活性）。既存 prompt トグルはそのまま新経路に効く（`kind` は `'prompt'` のまま）。
+    `awaitingInstruction` は仕様どおりスコープ外
+  - **Issue 本文との食い違い（実測を正とした）は 1 点のみ**: 本文の「エッジ = poller 非依存」は正しいが、
+    **クライアント非依存ではない**（`observeWaitingEdge` の呼び出し元は一覧 / 詳細 API の probe だけ）。
+    これが「poller 内は削除」を採らなかった理由。**本文の file:line はすべて実測と一致**していた
+    （`response-checker.ts:612`＝`kind:'prompt'` / `:723`＝`kind:'completion'` の 2 箇所のみ、
+    `notification-dedup.ts:23`＝30 秒窓、`response-poller-core.ts:29`＝`MAX_POLLING_DURATION = 30 分`、
+    `public/sw.js` の push / notificationclick、`NotificationEvent` の kind 2 種）
+  - **Auto-Yes との競合に猶予は入れなかった**。本文は「数秒後にまだ waiting なら送る」を検討可としていたが、
+    **現行でも poller は Auto-Yes の有無に関係なくプロンプト検出時点で通知している**
+    （`tests/integration/auto-yes-policy-escalation.test.ts` の「escalation does not depend on the policy」が固定している）ため、
+    通知量は本 Issue で増えない。一方で猶予を入れると**すべての正当なプロンプト通知が数秒遅れる**
+  - **既存テストの期待値変更は 1 件**: `tests/unit/i18n/notifications-push-keys.test.ts` の
+    「pre-i18n の日本語文言を byte-for-byte 保持」を `toEqual` → `toMatchObject` に緩めた。
+    #1308 の 4 文言は引き続き byte 単位で固定しており、網羅性は同ファイル内の
+    「`push` のキー集合＝`PUSH_KEYS` と完全一致」テスト（新キー 4 件を追加済み）が担保する
+  - **空振り緑の反証（変異注入で実測）**:
+    ① `startWaitingPushNotifier` の購読を no-op listener に潰す → 14 件が赤
+    （`notifies on an edge nothing but the status probe observed` /
+    `notifies for a wait no prompt detector could classify` /
+    `notifies a second instance of the same worktree independently` /
+    `notifies again once the wait ended and a new one began` /
+    `renders prompt|menu|unclassified in both locales` /
+    `re-notifies once, and only once, past the threshold` /
+    `says "check the terminal" when that is what the wait needs` /
+    `does not re-notify a wait that has been answered` /
+    `does not re-notify when the closing edge was never seen but the wait is over` /
+    `sends nothing when the reminder is switched off` / `honours a threshold the user shortened` /
+    `is driven by an interval that exists only while something is waiting`）
+    ② `shouldSendWaitingPush` を常時 true に潰す → 6 件が赤
+    （`opens the episode the status probe would have opened` /
+    `sends nothing extra when the status probe then reports the same wait` /
+    `closes the episode on a reply, so the next prompt notifies again` /
+    `does not double-send when the poller and the edge both report it` /
+    `suppresses a repeat of the same episode however often it is reported` /
+    `keys the guard on the episode, not on the content`）
+    ③ エスカレーションの閾値判定を常に不成立にする → 4 件が赤
+    （`re-notifies once, and only once, past the threshold` /
+    `says "check the terminal" when that is what the wait needs` /
+    `honours a threshold the user shortened` /
+    `is driven by an interval that exists only while something is waiting`）
+    変異は 3 件とも復元し、`grep -rn MUTATION src` が空・全ゲート緑に復帰することを確認した
 
 ### Added
 
