@@ -17,6 +17,10 @@
  * the More screen immediately, without a reload. The `storage` event covers the
  * other direction (another tab of the same app).
  *
+ * Issue #1789 adds a second boolean of the same shape — the waiting chime —
+ * sharing this file's storage discipline and its change event. It defaults the
+ * other way (**off**); see {@link INAPP_WAITING_SOUND_DEFAULT}.
+ *
  * @module hooks/useInAppNotificationPrefs
  */
 
@@ -95,6 +99,73 @@ export function useInAppWaitingToast(): UseInAppWaitingToastReturn {
   const setEnabled = useCallback((next: boolean) => {
     setEnabledState(next);
     setInAppWaitingToastEnabled(next);
+  }, []);
+
+  return { enabled, setEnabled };
+}
+
+/** localStorage key for the waiting chime (Issue #1789). */
+export const INAPP_WAITING_SOUND_STORAGE_KEY = 'mcbd-inapp-waiting-sound';
+
+/**
+ * **Off** by default — the opposite of the toast, and deliberately so.
+ *
+ * A toast appears in a window you are already looking at. A sound leaves the
+ * machine: it plays in a meeting, in a shared office, over headphones someone
+ * else is wearing. Audio that nobody asked for is the fastest way to have the
+ * whole tab muted, which would take the toast down with it. So only an explicit
+ * `'true'` turns it on, and a corrupt value stays quiet.
+ */
+export const INAPP_WAITING_SOUND_DEFAULT = false;
+
+/** Read the stored preference. Safe on the server and with localStorage denied. */
+export function readInAppWaitingSoundEnabled(): boolean {
+  if (typeof window === 'undefined') return INAPP_WAITING_SOUND_DEFAULT;
+  try {
+    const raw = window.localStorage.getItem(INAPP_WAITING_SOUND_STORAGE_KEY);
+    if (raw === null) return INAPP_WAITING_SOUND_DEFAULT;
+    return raw === 'true';
+  } catch {
+    return INAPP_WAITING_SOUND_DEFAULT;
+  }
+}
+
+/** Persist the preference and tell every listener in this tab. */
+export function setInAppWaitingSoundEnabled(enabled: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(INAPP_WAITING_SOUND_STORAGE_KEY, enabled ? 'true' : 'false');
+  } catch {
+    // Quota / private mode — the in-memory state still updates.
+  }
+  window.dispatchEvent(new CustomEvent(INAPP_NOTIFICATION_PREFS_EVENT));
+}
+
+export interface UseInAppWaitingSoundReturn {
+  /** Whether the waiting chime may play. */
+  enabled: boolean;
+  /** Persist a new value (and notify every other consumer). */
+  setEnabled: (enabled: boolean) => void;
+}
+
+/** Subscribe to the chime preference. Same hydration discipline as the toast. */
+export function useInAppWaitingSound(): UseInAppWaitingSoundReturn {
+  const [enabled, setEnabledState] = useState(INAPP_WAITING_SOUND_DEFAULT);
+
+  useEffect(() => {
+    const sync = () => setEnabledState(readInAppWaitingSoundEnabled());
+    sync();
+    window.addEventListener(INAPP_NOTIFICATION_PREFS_EVENT, sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener(INAPP_NOTIFICATION_PREFS_EVENT, sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
+
+  const setEnabled = useCallback((next: boolean) => {
+    setEnabledState(next);
+    setInAppWaitingSoundEnabled(next);
   }, []);
 
   return { enabled, setEnabled };

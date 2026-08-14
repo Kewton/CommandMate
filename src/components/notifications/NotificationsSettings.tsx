@@ -21,7 +21,7 @@ import { useTranslations } from 'next-intl';
 import { Bell } from 'lucide-react';
 import { Button, Card, Spinner, Switch } from '@/components/ui';
 import { useToast } from '@/components/common/Toast';
-import { useInAppWaitingToast } from '@/hooks/useInAppNotificationPrefs';
+import { useInAppWaitingToast, useInAppWaitingSound } from '@/hooks/useInAppNotificationPrefs';
 import {
   urlBase64ToUint8Array,
   isPushSupported,
@@ -319,6 +319,9 @@ export function NotificationsSettings() {
 function InAppNotificationSettings() {
   const t = useTranslations('notifications');
   const { enabled, setEnabled } = useInAppWaitingToast();
+  // Issue #1789: the waiting chime, default off — see
+  // `INAPP_WAITING_SOUND_DEFAULT` for why it defaults the other way to the toast.
+  const { enabled: soundEnabled, setEnabled: setSoundEnabled } = useInAppWaitingSound();
 
   return (
     <div className="space-y-3">
@@ -339,6 +342,22 @@ function InAppNotificationSettings() {
           onCheckedChange={setEnabled}
           aria-label={t('inApp.waitingToggle')}
           data-testid="notifications-toggle-inapp-waiting"
+        />
+      </label>
+      <label className="flex items-center justify-between gap-4">
+        <span>
+          <span className="block text-sm font-medium text-foreground">
+            {t('inApp.soundToggle')}
+          </span>
+          <span className="block text-xs text-muted-foreground">
+            {t('inApp.soundToggleDesc')}
+          </span>
+        </span>
+        <Switch
+          checked={soundEnabled}
+          onCheckedChange={setSoundEnabled}
+          aria-label={t('inApp.soundToggle')}
+          data-testid="notifications-toggle-inapp-sound"
         />
       </label>
     </div>

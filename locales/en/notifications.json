@@ -36,6 +36,8 @@
     "heading": "In-app notifications",
     "waitingToggle": "Waiting toast",
     "waitingToggleDesc": "Show a toast when another worktree starts waiting for you",
-    "waitingToast": "{name} is waiting for your input"
+    "waitingToast": "{name} is waiting for your input",
+    "soundToggle": "Waiting sound",
+    "soundToggleDesc": "Play a short chime when a worktree starts waiting for you. Takes effect after you click or press a key on the page."
   }
 }
