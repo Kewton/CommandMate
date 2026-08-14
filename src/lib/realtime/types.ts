@@ -40,14 +40,57 @@ export function isVersionMismatch(serverVersion: string, clientVersion: string):
   return serverVersion !== clientVersion;
 }
 
-/** Session running/stopped transition (sidebar status dots). */
+/**
+ * Session running/stopped transition (sidebar status dots), and — since Issue
+ * #1788 — the waiting edge.
+ *
+ * The two are carried by one frame rather than two event types because every
+ * client that already listens for `session_status_changed` is exactly the set
+ * that needs the waiting edge, and a second type would have to be threaded
+ * through `parseRealtimeEvent`, the room subscription and every listener again.
+ * They are still distinguishable: a running/stopped frame carries `isRunning`, a
+ * waiting frame carries `isWaitingForResponse`.
+ */
 export interface SessionStatusEvent {
   type: 'session_status_changed';
   worktreeId: string;
-  isRunning: boolean;
+  /**
+   * Whether the session exists. Unchanged in meaning (Issue #1788 added fields
+   * only) — but now **optional**, because the waiting-edge frame cannot answer
+   * it honestly.
+   *
+   * `observeWaitingEdge` is called for every probe, including the ones where the
+   * session is gone or the capture threw, so a `waiting: false` crossing means
+   * "not waiting" and says nothing about whether the tmux session is still
+   * alive. Publishing `isRunning: true` there would resurrect a killed session
+   * in the sidebar until the next poll; publishing `false` would kill a live one.
+   * Absent means "this frame carries no session-existence verdict", and the two
+   * consumers that act on a stop already guard with `isRunning !== false`.
+   */
+  isRunning?: boolean;
   cliTool?: string | null;
   instance?: string | null;
   messagesCleared?: boolean;
+  /**
+   * The waiting edge (Issue #1788): true when this instance just started
+   * waiting for the user, false when the wait just ended.
+   *
+   * Emitted from `onWaitingTransition` — the single edge observer #1786 built —
+   * so it fires once per wait, not once per poll, and fires for a wait only the
+   * agent's structured events could see just as it does for one the screen
+   * scraper read. Absent on the running/stopped frames.
+   */
+  isWaitingForResponse?: boolean;
+  /** `WaitingKind` for this wait (`prompt` / `menu` / `unclassified`), or null. */
+  waitingKind?: string | null;
+  /**
+   * Epoch ms the wait began; stable for the whole episode.
+   *
+   * Carried so a client can tell one wait from the next: it is the dedup key for
+   * the cross-screen toast, which must fire once per episode rather than once
+   * per frame. Null when the wait just ended.
+   */
+  waitingSince?: number | null;
 }
 
 /** New / updated chat message. */

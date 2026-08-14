@@ -10,7 +10,8 @@
   "sessionSummary": {
     "loading": "セッション概要を読み込み中",
     "running": "実行中",
-    "waiting": "待機中"
+    "waiting": "待機中",
+    "waitingLinkLabel": "入力待ち {count} 件 — レビュー一覧を開く"
   },
   "recentSessions": {
     "empty": "最近のセッションはまだありません。",

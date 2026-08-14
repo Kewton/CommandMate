@@ -27,6 +27,10 @@ import {
   VERSION_MISMATCH_EVENT_TYPE,
   isVersionMismatch,
 } from '@/lib/realtime/types';
+import {
+  startWaitingStatusBroadcast,
+  stopWaitingStatusBroadcast,
+} from '@/lib/realtime/waiting-broadcast';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('ws-server');
@@ -295,6 +299,12 @@ function isExpectedWebSocketError(error: Error & { code?: string }): boolean {
  */
 export function setupWebSocket(server: HTTPServer | HTTPSServer): void {
   wss = new WebSocketServer({ noServer: true });
+
+  // Issue #1788: publish the waiting edge to the worktree room. Started here
+  // rather than at module scope so the listener's lifetime matches the server's
+  // — and so the closure it registers is the one holding *this* bundle's `rooms`
+  // map, which is what a broadcast has to reach.
+  startWaitingStatusBroadcast(handleBroadcast);
 
   // Handle upgrade requests - only accept app WebSocket connections, not Next.js HMR
   server.on('upgrade', (request, socket, head) => {
@@ -997,6 +1007,10 @@ export function cleanupRooms(worktreeIds: string[]): void {
  * Used for testing and graceful shutdown
  */
 export function closeWebSocket(): void {
+  // Issue #1788: drop the waiting-edge subscription first — it outlives `wss`
+  // otherwise, and CI shares one process across the whole suite.
+  stopWaitingStatusBroadcast();
+
   if (wss) {
     // Close all client connections
     clients.forEach((clientInfo) => {

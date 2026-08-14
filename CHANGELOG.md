@@ -67,6 +67,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     ②ステータス検出ポーラから `recordCapturedModelInfo(...extractModelInfo(...))` の呼び出しを外す → **join の 6 テストが赤**
     （`「antigravity は modelName 導出」だけは緑のまま`＝capture 非依存の経路であることの裏取り）。
     2 変異とも復元し `git status` で確認、全緑に復帰
+- **feat(realtime): 入力待ちを WS 配信・要対応バッジ・クロス画面 Toast で即時に知らせる (#1788)**
+  - **WS 配信は #1786 の `onWaitingTransition` を購読するだけ**（`src/lib/realtime/waiting-broadcast.ts`）。
+    検出器を新設していないので、hooks 由来（構造化イベントだけが見えるダイアログ）でもスクレイパー由来でも
+    同じように飛び、response poller には依存しない。**発火はエッジのみ**（21 回の poll で 1 フレーム）
+  - **`SessionStatusEvent` は追加のみ**（`isWaitingForResponse?` / `waitingKind?` / `waitingSince?`）。
+    ただし **`isRunning` は optional 化**した。`observeWaitingEdge` はセッションが消えた probe でも
+    `waiting:false` で呼ばれるため waiting フレームはセッション存在を答えられず、`true` を送れば
+    kill 済みセッションが sidebar で蘇り `false` を送れば生存中を殺す。既存 2 消費者
+    （`useTerminalPanePolling` / `useSplitMessages`）は `isRunning !== false` で守られているので不在は安全
+  - **Issue 本文の `broadcastToWorktree` は実在しない**（実測）。ws-server の room ブロードキャストは
+    `broadcast` / 内部 `handleBroadcast`。後者を `setupWebSocket` から注入し、`closeWebSocket` で解除する
+    （import 循環回避＋テストで実サーバ不要）。room は認証済み subscribe でしか入れないので認可は迂回しない
+  - **バッジ件数は `src/hooks/useAttentionCount.ts` の単一セレクタ**（`selectAttentionCount` /
+    `selectAttentionWorktrees` / `useAttentionCount`）。**方針D (#1789) のタブタイトル・favicon・App Badge は
+    ここを import すること。** カウント規則は「**waiting な worktree を 1 件**（instance が 3 つ待機でも 1）」＝
+    この数字は `/review?filter=approval` へのリンクで、その一覧の述語と同一だから
+  - PC はサイドバーヘッダのピル、モバイルは `GlobalMobileNav` の Review タブのバブル（0 件で非表示、
+    99 超は `99+`、件数>0 のときタップ先が approval フィルタ）。Home の Waiting 統計もリンク化し、
+    同じセレクタで数えるようにした（**旧ローカル集計は `isSessionRunning` も要求しており approval 一覧より
+    1 件少なく出得た**ので意図的な挙動変更）
+  - **クロス画面 Toast**（`WaitingToastListener`、AppProviders に単一マウント）: 表示中の worktree では出さない／
+    `waitingSince` を dedup キーに 1 episode 1 回／トグルで無効化可。Toast 本文は実 `<button>` にした
+    （hover 依存の表現はタッチ端末で恒久的に不可視になるため）
+  - **アプリ内通知トグルは push カードの外・上に置いた**。`NotificationsSettings` の本体は Push API 非対応 /
+    iOS 未インストール / VAPID 未設定で早期 return する — **アプリ内 Toast が唯一の通知になるのは
+    まさにその環境**なので、その内側に置くと最も必要な場所で設定が消える
+  - **ポーリングは廃止していない**（間隔も不変）。WS 未接続クライアントが従来どおり poll で waiting を知る
+    回帰テストつき
+  - **空振り緑の反証（変異注入で実測・全て復元済み）**: ①エッジ購読を無効化 → `waiting-broadcast-1788` が
+    **7 件赤**（`broadcasts the extended frame when a wait begins` ほか）②episode dedup を無効化 →
+    `fires once per episode however many frames repeat it` が赤（`expected [...] to have a length of 1 but got 3`）
+    ③兄弟 instance の再計算を無効化 → `keeps the worktree waiting while a SIBLING instance still is` が赤
+
 - **feat(verification): 実行契約が Issue 固有のゲート定義を運べるようにした（#1756 案 B）** (#1791)
   - 契約に **`verify.gateDefinitions`（`[{id, command, timeoutSec}]`）** を追加した。`verify.gates` の意味は変えていない
     （宣言済みゲートからの**選択**）。`gates` 省略時は「verify.yaml の全ゲート ＋ この契約の定義全部」

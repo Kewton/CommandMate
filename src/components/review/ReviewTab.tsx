@@ -10,18 +10,24 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Card, Skeleton } from '@/components/ui';
 import { cn } from '@/lib/utils/cn';
-import { REVIEW_POLL_INTERVAL_MS } from '@/config/review-config';
+import {
+  REVIEW_POLL_INTERVAL_MS,
+  REVIEW_FILTERS,
+  REVIEW_FILTER_QUERY_PARAM,
+  DEFAULT_REVIEW_FILTER,
+  parseReviewFilter,
+  type ReviewFilter,
+} from '@/config/review-config';
 import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
 import { deriveCliStatus } from '@/types/sidebar';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
 import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 import type { Worktree } from '@/types/models';
 import type { BranchStatus } from '@/types/sidebar';
-
-type ReviewFilter = 'in_review' | 'approval' | 'stalled';
 
 /** Keys rather than literals: t() cannot be called at module scope, where a
  * literal would pin the chip labels to English (Issue #1271/#1273). A total
@@ -33,8 +39,9 @@ const FILTER_LABEL_KEYS: Record<ReviewFilter, string> = {
   stalled: 'status.stalled',
 };
 
-/** Chip display order. */
-const FILTER_TABS: ReviewFilter[] = ['in_review', 'approval', 'stalled'];
+/** Chip display order. Owned by `review-config` since #1788, so the deep link
+ * and the chips cannot name different filters. */
+const FILTER_TABS: readonly ReviewFilter[] = REVIEW_FILTERS;
 
 /** Membership predicate per filter. Shared by the visible list and the chip
  * counts so both always agree (counts are derived, never fetched separately). */
@@ -87,8 +94,27 @@ export default function ReviewTab() {
   const t = useTranslations('review');
   const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState<ReviewFilter>('in_review');
+  // Issue #1788: `/review?filter=approval` opens on the approval list, which is
+  // where every "N need your attention" affordance points. Read once as the
+  // initial state, not synced back into the URL on every chip click: the deep
+  // link is an entry point, and rewriting the query as the user browses would
+  // make Back walk the filter history instead of leaving the page.
+  const searchParams = useSearchParams();
+  const [activeFilter, setActiveFilter] = useState<ReviewFilter>(
+    () => parseReviewFilter(searchParams?.get(REVIEW_FILTER_QUERY_PARAM)) ?? DEFAULT_REVIEW_FILTER,
+  );
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // A deep link followed while already on /review is a same-route navigation:
+  // this component does not remount, so the initializer above never re-runs and
+  // the badge click would appear to do nothing. Keyed on the raw string rather
+  // than the params object so a chip click (which does not touch the URL) does
+  // not get overwritten.
+  const filterParam = searchParams?.get(REVIEW_FILTER_QUERY_PARAM) ?? null;
+  useEffect(() => {
+    const fromUrl = parseReviewFilter(filterParam);
+    if (fromUrl) setActiveFilter(fromUrl);
+  }, [filterParam]);
 
   const fetchWorktrees = useCallback(async () => {
     try {

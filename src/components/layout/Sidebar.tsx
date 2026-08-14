@@ -42,6 +42,7 @@ import { LocaleSwitcher } from '@/components/common/LocaleSwitcher';
 import { ThemeToggle } from '@/components/common/ThemeToggle';
 import { LogoutButton } from '@/components/common/LogoutButton';
 import { useToast } from '@/components/common/Toast';
+import { AttentionBadge } from '@/components/layout/AttentionBadge';
 import { repositoryApi, ApiError } from '@/lib/api-client';
 import { toBranchItem } from '@/types/sidebar';
 import type { SidebarBranchItem } from '@/types/sidebar';
@@ -461,6 +462,9 @@ export const Sidebar = memo(function Sidebar() {
             </Tooltip>
           </div>
         </div>
+        {/* Issue #1788: global "N need your attention" badge. Header only —
+            the rows below belong to Issue #1787. Renders nothing at zero. */}
+        <AttentionBadge />
       </div>
 
       {/* Search */}

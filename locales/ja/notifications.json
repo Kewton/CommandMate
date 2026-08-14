@@ -31,5 +31,11 @@
     "promptWaiting": "応答待ちです",
     "completionWithExcerpt": "完了: {excerpt}",
     "completion": "セッションが完了しました"
+  },
+  "inApp": {
+    "heading": "アプリ内通知",
+    "waitingToggle": "入力待ちトースト",
+    "waitingToggleDesc": "別のワークツリーが入力待ちになったときにトーストを表示します",
+    "waitingToast": "{name} が入力待ちです"
   }
 }
