@@ -46,6 +46,7 @@ import { createHash } from 'crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join, resolve } from 'path';
+import { resolveSafeDirectory } from '@/config/safe-directory';
 import { getServerPort } from '@/lib/env';
 import { isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { CLAUDE_CLI_TOOL_ID } from '@/lib/hooks/sources/claude/tool-id';
@@ -239,12 +240,21 @@ export function isAuthTokenExpected(): boolean {
   return Boolean(process.env[AUTH_TOKEN_ENV_VAR] || process.env.CM_AUTH_TOKEN_HASH);
 }
 
-/** Directory the generated settings files live in. */
+/**
+ * Directory the generated settings files live in.
+ *
+ * Issue #1774: `writeAgentHookSettings` calls `mkdirSync(…, {recursive:true})`
+ * on the result, so a value inside `/proc`, `/sys` or `/dev` would spin the
+ * event loop forever rather than throw — the fail-open `try/catch` below is
+ * never reached, because the call never returns. Such a value is refused here
+ * and the default is used.
+ */
 export function getHookSettingsDirectory(options: HookSettingsOptions = {}): string {
-  if (options.directory) return options.directory;
-  const override = process.env.CM_AGENT_HOOKS_DIR;
-  if (override) return override;
-  return join(homedir(), '.commandmate', 'hooks');
+  const fallback = join(homedir(), '.commandmate', 'hooks');
+  if (options.directory) {
+    return resolveSafeDirectory(options.directory, fallback, 'HookSettingsOptions.directory');
+  }
+  return resolveSafeDirectory(process.env.CM_AGENT_HOOKS_DIR, fallback, 'CM_AGENT_HOOKS_DIR');
 }
 
 /** The instance this settings file speaks for; primary when unspecified. */

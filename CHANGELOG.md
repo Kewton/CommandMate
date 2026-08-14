@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **fix(security): 設定パスが `/proc` `/sys` `/dev` 配下でもサーバが停止しないようにした** (#1774)
+  - **`/proc` への recursive mkdir は失敗せず「返らない」。** procfs は存在し得ない子への `mkdir` に EPERM ではなく **ENOENT** を返し、Node の recursive mkdir はそれを「親が無い」と解釈して親を作って再試行する。親（`/proc`）の作成は EEXIST で成功扱いになるので **1 階層でもループに入る**。**同期版はイベントループごと停止**（`try/catch` は書いてあっても**呼び出しが返らないので到達しない**）、**非同期版は promise が永久に settle せず libuv スレッドプールを 1 本恒久占有**する（既定 4 本）。**エラーログも OOM も残らない** — PR #1773 の `Unit Tests` は fixture が `CM_AGENT_HOOKS_DIR` に `/proc/…` を入れたことでこの状態に入り、**5 時間 31 分 57 秒、出力ゼロ**で走った（同期スピンなので vitest の `testTimeout` も発火できない）
+  - **Linux / コンテナ限定。** macOS は `/proc` が無いため即 throw して fail-open になり、ローカルでは構造的に再現しない
+  - **共有ヘルパ 1 つを各 resolver に通す形にした**（`src/config/safe-directory.ts` の `resolveSafeDirectory(candidate, fallback, source)`）。**Issue 本文は `CM_AGENT_HOOKS_DIR` / `CM_LOG_DIR` の 2 経路と書いているが、develop `3e8a6192` 時点の実測は 5 経路**（Phase 4 の #1760 / #1761 / #1763 が `CODEX_HOME` / `COPILOT_HOME` / `CM_OPENCODE_PORT_FILE` を同型で追加していた）。「2 箇所に足す」ではなく resolver 側に集約したので、6 個目のツールは既存の resolver を呼ぶだけで守られる。`gemini/shared-config-tree.writeJsonObjectFile()`（`~/.gemini` ツリーの共通 writer）は**引数でパスを受け取り代替既定値が無い**ので、フォールバックではなく **throw で拒否**する（呼び出し元 2 つは既に throw を「hooks 無しで起動」として扱う＝fail-open の形は不変）
+  - **`isSystemDirectory()` をそのまま適用するのは誤りで、実測で退けた（Issue 本文の「提案する対処 1.」からの意図的な逸脱）。** 同関数は `/tmp` と `/var` も弾くが、そこは**ハングしない普通の書き込み可能ディレクトリ**であり、`os.tmpdir()` は Linux で `/tmp`・macOS で `/var/folders/…` と**両方その配下**にある。適用すると `tests/setup.ts:15` の `CODEX_HOME` 隔離と `tests/helpers/agent-hooks-dir.ts` が既定値に落ちて**テストがユーザーの実 `~/.codex` と `~/.commandmate/hooks` を書き換え**、コンテナ運用の `CM_LOG_DIR=/var/log/commandmate` も黙って化ける。**ハングを防げないうえに正常な構成を壊す**ので、`VIRTUAL_FILESYSTEM_ROOTS`（`/proc` `/sys` `/dev`）を名前付き部分集合として切り出し、判定機構（lexical/physical 両解決＋境界一致）は既存のものを共有した。`VIRTUAL_FILESYSTEM_ROOTS ⊂ SYSTEM_DIRECTORIES` はテストで固定してある
+  - **throw しない。** ログディレクトリで throw するとロギング自体が死に、hooks は既に fail-open が設計方針。既定値へフォールバックして `logger.warn` を出す。警告は `(source, candidate)` ごとに 1 回だけ（`getLogDir()` は全ログ書き込みの経路上にあるため、無条件だと 1 つの設定ミスがログ洪水になる）
+  - **テストは fs にも env にも触れない。** `tests/unit/guards/no-procfs-env-fixtures.test.ts` が env 代入を機械的に赤にするので、①述語と resolver は**素の文字列引数**で全分岐を固定 ②5 設定の配線は**述語を mock した無害な sentinel パス**で end-to-end に確認 ③引数を取る入口（`HookSettingsOptions.directory` / `CodexHookOptions.codexHome` / `writeJsonObjectFile`）だけ**実 `/proc` 文字列**で fail-open まで通す、の 3 段に分けた
+  - **空振り緑の反証**: 10 変異を 1 つずつ注入して**全部赤**になることを実測（経路ごとのガード除去 8 種＝順に **2・3・2・2・3・2・2・3** テスト赤／`isVirtualFilesystemPath` を常に false＝**32** 赤／フォールバックを候補値そのままに変更＝**23** 赤）。すべて戻して 136/136 緑に復帰
+  - **実機検証**: ①**実 Linux コンテナ（`node:24-bookworm`）でガード無しの `mkdirSync('/proc/x/y',{recursive:true})` が 15 秒間 CPU 100.4% / メモリ平坦のまま返らないことを再現**し、②**同じコンテナで実コードをバンドルして走らせると 1ms で既定値へフォールバックし `/proc/x` は作られない**ことを確認（`/tmp` `/var/log` `~/.codex` 相対パス `/procfs` `/devices` は素通し）。③macOS 側は隔離環境（**ポート 3774・隔離 DB**、本番 3000 は無停止）で `CM_LOG_DIR=/proc/definitely-not-writable/cmate-1774` を与えて**サーバが起動し `GET /` が 200**、`/api/worktrees/<id>/logs` が 200 で `<cwd>/data/logs` にフォールバックし、**6 回叩いても警告は 1 回**であることを実測。`~/.commandmate/` `~/.codex/` `~/.copilot/` `~/.gemini/` は前後で sha256 マニフェスト一致（差分は develop 由来の既存テスト `agent-session-lifecycle-1759.test.ts` が `CM_AGENT_HOOKS_DIR` を隔離せず書く 1 ファイルのみで、内容は `CM_PORT` から決まる＝本変更とは無関係。同一環境の 2 回連続実行で同一ハッシュを実測して確認）
+  - **`grep -rn "mkdirSync(\|mkdir(" src/ | grep recursive` の全 25 件を 1 件ずつ判定**し、安全だったものも根拠つきで `docs/design/virtual-filesystem-directory-guard.md` §4 に記録した（DB 系 3 件は `isSystemDirectory` 済み、skills 系 6 件は検証済み root 配下、`file-operations` 3 件は `checkPathSafety` で worktree 内に限定、CLI 4 件と `tmux/read-mode` は `homedir()` 定数、ほか）。**残存リスクとして「これらの安全は `HOME` が正気であることに依存する」を明記**
+
 ### Added
 
 - **feat(hooks): antigravity に承認裁定経路を張り、受け口の fail-closed な早期 return を塞いだ（Phase 4-4 残作業）** (#1779)
