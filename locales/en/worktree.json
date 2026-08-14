@@ -799,5 +799,17 @@
   "agentModel": {
     "label": "Model",
     "modelLabel": "Model: {model}"
+  },
+  "nextAction": {
+    "start": "Start",
+    "sendMessage": "Send message",
+    "approveReject": "Approve / Reject",
+    "replyToPrompt": "Reply to prompt",
+    "checkStalled": "Check stalled",
+    "running": "Running..."
+  },
+  "awaitingInstruction": {
+    "badge": "Ready for work",
+    "label": "The agent finished its turn and is waiting for your next instruction"
   }
 }

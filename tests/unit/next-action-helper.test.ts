@@ -3,49 +3,53 @@
  * Issue #600: UX refresh - getNextAction() and getReviewStatus()
  */
 
+import fs from 'fs';
+import path from 'path';
 import { describe, it, expect } from 'vitest';
 import {
   getNextAction,
   getReviewStatus,
+  isNextActionKey,
+  NEXT_ACTION_KEYS,
   type ReviewStatus,
 } from '@/lib/session/next-action-helper';
 import type { SessionStatus } from '@/lib/detection/status-detector';
 import type { PromptType } from '@/types/models';
 
 describe('getNextAction()', () => {
-  it('should return "Start" when status is null', () => {
-    expect(getNextAction(null, null, false)).toBe('Start');
+  it('should return the start key when status is null', () => {
+    expect(getNextAction(null, null, false)).toBe(NEXT_ACTION_KEYS.start);
   });
 
-  it('should return "Start" when status is idle', () => {
-    expect(getNextAction('idle', null, false)).toBe('Start');
+  it('should return the start key when status is idle', () => {
+    expect(getNextAction('idle', null, false)).toBe(NEXT_ACTION_KEYS.start);
   });
 
-  it('should return "Send message" when status is ready', () => {
-    expect(getNextAction('ready', null, false)).toBe('Send message');
+  it('should return the sendMessage key when status is ready', () => {
+    expect(getNextAction('ready', null, false)).toBe(NEXT_ACTION_KEYS.sendMessage);
   });
 
-  it('should return "Approve / Reject" when waiting with approval prompt', () => {
-    expect(getNextAction('waiting', 'approval', false)).toBe('Approve / Reject');
+  it('should return the approveReject key when waiting with approval prompt', () => {
+    expect(getNextAction('waiting', 'approval', false)).toBe(NEXT_ACTION_KEYS.approveReject);
   });
 
   it('should return "Reply to prompt" when waiting with non-approval prompt', () => {
     const nonApprovalTypes: PromptType[] = ['yes_no', 'multiple_choice', 'choice', 'input', 'continue'];
     for (const type of nonApprovalTypes) {
-      expect(getNextAction('waiting', type, false)).toBe('Reply to prompt');
+      expect(getNextAction('waiting', type, false)).toBe(NEXT_ACTION_KEYS.replyToPrompt);
     }
   });
 
-  it('should return "Reply to prompt" when waiting with null prompt type', () => {
-    expect(getNextAction('waiting', null, false)).toBe('Reply to prompt');
+  it('should return the replyToPrompt key when waiting with null prompt type', () => {
+    expect(getNextAction('waiting', null, false)).toBe(NEXT_ACTION_KEYS.replyToPrompt);
   });
 
-  it('should return "Check stalled" when running and stalled', () => {
-    expect(getNextAction('running', null, true)).toBe('Check stalled');
+  it('should return the checkStalled key when running and stalled', () => {
+    expect(getNextAction('running', null, true)).toBe(NEXT_ACTION_KEYS.checkStalled);
   });
 
-  it('should return "Running..." when running and not stalled', () => {
-    expect(getNextAction('running', null, false)).toBe('Running...');
+  it('should return the running key when running and not stalled', () => {
+    expect(getNextAction('running', null, false)).toBe(NEXT_ACTION_KEYS.running);
   });
 
   it('should handle all SessionStatus values exhaustively', () => {
@@ -57,16 +61,83 @@ describe('getNextAction()', () => {
   });
 
   it('should prioritize approval over stalled when waiting', () => {
-    // Even if isStalled is true, waiting+approval should show "Approve / Reject"
-    expect(getNextAction('waiting', 'approval', true)).toBe('Approve / Reject');
+    // Even if isStalled is true, waiting+approval should show approve/reject
+    expect(getNextAction('waiting', 'approval', true)).toBe(NEXT_ACTION_KEYS.approveReject);
   });
 
   it('should ignore stalled flag for idle status', () => {
-    expect(getNextAction('idle', null, true)).toBe('Start');
+    expect(getNextAction('idle', null, true)).toBe(NEXT_ACTION_KEYS.start);
   });
 
   it('should ignore stalled flag for ready status', () => {
-    expect(getNextAction('ready', null, true)).toBe('Send message');
+    expect(getNextAction('ready', null, true)).toBe(NEXT_ACTION_KEYS.sendMessage);
+  });
+});
+
+// ============================================================================
+// Issue #1787: keys, not English literals
+// ============================================================================
+
+describe('getNextAction() i18n keys (Issue #1787)', () => {
+  const LOCALES_DIR = path.resolve(__dirname, '../../locales');
+
+  function loadWorktreeDictionary(locale: string): Record<string, unknown> {
+    return JSON.parse(
+      fs.readFileSync(path.join(LOCALES_DIR, locale, 'worktree.json'), 'utf-8')
+    ) as Record<string, unknown>;
+  }
+
+  it('never returns a bare English sentence', () => {
+    const inputs: Array<[SessionStatus | null, PromptType | null, boolean]> = [
+      [null, null, false],
+      ['idle', null, false],
+      ['ready', null, false],
+      ['waiting', 'approval', false],
+      ['waiting', 'yes_no', false],
+      ['running', null, true],
+      ['running', null, false],
+    ];
+    for (const [status, promptType, stalled] of inputs) {
+      expect(getNextAction(status, promptType, stalled)).toMatch(/^nextAction\./);
+    }
+  });
+
+  // Guards the actual regression this Issue is about: `t()` renders a missing
+  // key as its own path, so an untranslated key ships `worktree.nextAction.foo`
+  // to the screen. Both dictionaries must carry every key the helper can emit.
+  it.each(['en', 'ja'])('resolves every emitted key in the %s dictionary', (locale) => {
+    const dictionary = loadWorktreeDictionary(locale);
+    for (const key of Object.values(NEXT_ACTION_KEYS)) {
+      const [namespace, leaf] = key.split('.');
+      const group = dictionary[namespace] as Record<string, string> | undefined;
+      expect(group, `${locale}: missing "${namespace}" group`).toBeDefined();
+      expect(typeof group?.[leaf], `${locale}: missing "${key}"`).toBe('string');
+      expect(group?.[leaf]).not.toBe('');
+    }
+  });
+
+  it('en and ja translate the keys differently (ja is not an English copy)', () => {
+    const en = loadWorktreeDictionary('en').nextAction as Record<string, string>;
+    const ja = loadWorktreeDictionary('ja').nextAction as Record<string, string>;
+    expect(ja.approveReject).not.toBe(en.approveReject);
+    expect(ja.replyToPrompt).not.toBe(en.replyToPrompt);
+  });
+
+  describe('isNextActionKey', () => {
+    it('accepts every key the helper can return', () => {
+      for (const key of Object.values(NEXT_ACTION_KEYS)) {
+        expect(isNextActionKey(key)).toBe(true);
+      }
+    });
+
+    // Back-compat: a server that predates #1787 still sends the old literals,
+    // and those must be rendered verbatim rather than fed to `t()`.
+    it.each(['Approve / Reject', 'Running...', 'Start', '', 'nextAction.bogus'])(
+      'rejects the legacy/unknown value %j',
+      (value) => {
+        expect(isNextActionKey(value)).toBe(false);
+      }
+    );
   });
 });
 

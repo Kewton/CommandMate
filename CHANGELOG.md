@@ -162,6 +162,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **feat(ui): 入力待ちの画面内視認性を強化した（入力待ち可視化 方針B）** (#1787)
+  - **`waiting` が `running` より目立たない逆転を解消した。** `waiting` は opacity 1→0.45 だけの
+    `animate-status-blink` で、放置してよい `running` の `animate-status-glow`（box-shadow 拡張 + リング）
+    より弱かった。amber の `animate-status-attention`（1.4s・box-shadow 12px/4px＝glow の 2.4s・8px/2px より
+    速く広い）を `globals.css` の `@theme` に追加して既定にし、**`animate-status-blink` は
+    StatusDot の waiting 以外に利用箇所が無かったため削除した**（死んだ CSS を残さない。
+    `motion-foundation.test.ts` に「復活していないこと」のガードを追加）
+  - **reduced-motion 時も `waiting` が識別できる。** 従来は無地 amber ドットに退化していた。
+    `running` と同じパターンで**モーション非依存の amber リング**（強調時 `ring-4 ring-warning/50` /
+    中強調 `ring-2 ring-warning/40`）を持たせ、アニメが凍結されても `ready` と同形にならない
+  - **`waitingKind`（#1786）で強調を出し分ける。** `'prompt'`（アプリから答えられる）＝最強調、
+    `'menu'`/`'unclassified'`（端末操作が必要）＝中強調（`animate-status-glow` + `ring-2`）。
+    **フィールドが無い/null なら一律で最強調にフォールバックする** — #1786 以前のサーバ応答は
+    kind を持たず、「人間が要る」状態の安全側は過小強調ではなく過剰強調だから
+  - **サイドバーを二段ソートにした。** `sortBranches()` に「waiting 先頭固定」の前段を足した
+    （`SidebarContext` の `SortKey` 型・`DEFAULT_SORT_KEY` は不変）。判定 `isWaitingBranch()` は
+    行が描く 1 つのドットと同じ**集約ステータス**を見るので、alias インスタンスだけが待っている
+    ブランチも浮上する。前段は **direction 乗算より前に return** するため `asc` でも下へ沈まない。
+    `sortKey === 'status'` のときは前段を掛けない（`STATUS_PRIORITY` が既に waiting 優先で、
+    降順＝「idle を先に」が表現不能になるため）。grouped 表示はリポジトリ束を保ったまま各群内で適用
+  - **`nextAction` を i18n 化した。** `getNextAction()` は英語リテラルではなく `worktree` 名前空間の
+    辞書キー（`nextAction.start`/`sendMessage`/`approveReject`/`replyToPrompt`/`checkStalled`/`running`）を
+    返す。**旧サーバが送る英語リテラルは `isNextActionKey()` で弾いてそのまま描画する** — next-intl は
+    未知キーをキーパス文字列として描画するので、素通しすると `worktree.Approve / Reject` が画面に出る。
+    SessionStatus の exhaustive check は維持
+  - **次アクションはサイドバー行に「インライン」表示する**（`waiting` と `awaitingInstruction` のときのみ）。
+    hover 限定の表現はタッチ端末で永久に不可視になるため、hover に頼らない。それ以外のステータスは
+    ツールチップ（`Next: …`）にのみ出す — 全行に「Running...」を出すのは、目立たせたい 2 行を
+    かえって埋もれさせるノイズになる
+  - **`awaitingInstruction`（#1786 の `idle_prompt`）は緑バッジ**（`awaitingInstruction.badge`）で
+    サイドバー行と `WorktreeCard` に出す。amber と混同されないことが要件なので、`success` トークン系で
+    固定した。**worktree 詳細ヘッダ（`WorktreeDetailSubComponents.tsx`）は実行契約の `scope.allow` 外
+    だったため未実装**（waiting ドットの強調は `StatusDot` 経由で自動的に効いている）
+  - `RecentSessionsList` の生 `bg-warning` 静的ドットを `StatusDot` に統一した（`deriveCliStatus` 経由なので
+    「起動中だが処理していない」は従来どおり静的な緑 `ready` のまま）。`Terminal.tsx` の
+    `bg-yellow-500` をトークン `bg-warning` へ置換（同ファイルの他 3 色は常時ダーク島として現状維持）
+  - **空振り緑の反証（変異注入で実測）**: ①`sortBranches` の waiting 前段を外す → 二段ソートの
+    5 テストが赤 ②`waiting` の `animate-status-attention` を旧 `animate-status-blink` に戻す →
+    StatusDot / BranchStatusIndicator / BranchListItem / RecentSessionsList / DesktopHeader の
+    9 テストが赤。両変異とも復元して全緑に復帰（詳細は PR 本文）
+
 - **feat(hooks): gemini / antigravity に構造化イベントを横展開した（Phase 4-4）** (#1762)
   - `docs/design/agent-event-source-interface.md` §4 の手順 1〜8 を 2 ツール分実行した。新設 `src/lib/hooks/sources/gemini/`（`tool-id` / `event-vocabulary` / `settings-generator` / `shared-config-tree` / `source`）と `src/lib/hooks/sources/antigravity/`（`tool-id` / `hooks-config` / `source`）、`registry.ts` に 2 行、`index.ts` に re-export、`cli-tools/{gemini,antigravity}.ts` の `startSession` に世代フェンスと注入。**`AgentEventSource` I/F は変更していない／`if (tool === '…')` 型の抜け道も入れていない／`hook-event-vocabulary.ts` の共有表に gemini・agy の綴りを足していない**（判断根拠は [`docs/design/agent-hooks-gemini-antigravity-integration.md`](./docs/design/agent-hooks-gemini-antigravity-integration.md)）
   - **実機検証で Issue 本文・#1757 の記載と食い違った点（実測を正とした）**

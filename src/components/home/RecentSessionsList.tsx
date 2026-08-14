@@ -13,8 +13,10 @@ import React, { useMemo } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Skeleton } from '@/components/ui';
+import { StatusDot } from '@/components/ui/StatusDot';
 import { compareByTimestamp } from '@/lib/sidebar-utils';
 import { formatRelativeTimeShort } from '@/lib/date-utils';
+import { deriveCliStatus, deriveWorktreeWaitingDetail } from '@/types/sidebar';
 import type { Worktree } from '@/types/models';
 
 export interface RecentSessionsListProps {
@@ -31,15 +33,21 @@ function recencyOf(wt: Worktree): Date | string | undefined {
   return wt.lastUserMessageAt ?? wt.updatedAt;
 }
 
-/** Small status dot reflecting whether the session is active/waiting. */
-function statusDotClass(wt: Worktree): string {
-  if (wt.isWaitingForResponse) {
-    return 'bg-warning';
-  }
-  if (wt.isSessionRunning) {
-    return 'bg-success';
-  }
-  return 'bg-muted-foreground';
+/**
+ * Status this row's dot should show (Issue #1787).
+ *
+ * Was a bare `bg-warning` / `bg-success` / `bg-muted-foreground` class string —
+ * a STATIC dot, so a Home tile could show a waiting session with no more
+ * emphasis than an idle one. Routing through `deriveCliStatus` (the same fold
+ * the sidebar uses) and `StatusDot` makes the three surfaces agree on both the
+ * vocabulary and the motion.
+ */
+function statusOf(wt: Worktree) {
+  return deriveCliStatus({
+    isRunning: wt.isSessionRunning ?? false,
+    isWaitingForResponse: wt.isWaitingForResponse ?? false,
+    isProcessing: wt.isProcessing ?? false,
+  });
 }
 
 export function RecentSessionsList({ worktrees, limit = 5, isLoading = false }: RecentSessionsListProps) {
@@ -109,9 +117,13 @@ export function RecentSessionsList({ worktrees, limit = 5, isLoading = false }: 
               data-testid={`recent-session-${wt.id}`}
               className="flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <span
-                className={`h-2 w-2 shrink-0 rounded-full ${statusDotClass(wt)}`}
-                aria-hidden="true"
+              <StatusDot
+                // NOT prefixed `recent-session-` on purpose: the row link owns
+                // that prefix and is selected with a `/^recent-session-/` regex.
+                data-testid={`recent-status-dot-${wt.id}`}
+                status={statusOf(wt)}
+                waitingKind={deriveWorktreeWaitingDetail(wt).waitingKind}
+                size="sm"
               />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-medium text-foreground">

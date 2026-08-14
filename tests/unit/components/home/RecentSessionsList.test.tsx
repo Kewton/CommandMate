@@ -118,4 +118,84 @@ describe('RecentSessionsList', () => {
     expect(screen.queryByTestId('recent-sessions-loading')).toBeNull();
     expect(screen.getByTestId('recent-session-wt-1')).toBeDefined();
   });
+
+  // ==========================================================================
+  // Issue #1787: the dot is the shared StatusDot primitive, not a class string
+  // ==========================================================================
+
+  describe('status dot (Issue #1787)', () => {
+    it('renders a waiting session with the shared attention pulse, not a static dot', () => {
+      render(
+        <RecentSessionsList
+          worktrees={[
+            createMockWorktree({ id: 'w', isSessionRunning: true, isWaitingForResponse: true }),
+          ]}
+        />
+      );
+      const dot = screen.getByTestId('recent-status-dot-w');
+      expect(dot.className).toContain('bg-warning');
+      expect(dot.className).toContain('animate-status-attention');
+      // Motion-independent ring, so reduce-motion still separates it from ready.
+      expect(dot.className).toContain('ring-warning');
+    });
+
+    it('grades a terminal-only wait down to the medium tier', () => {
+      render(
+        <RecentSessionsList
+          worktrees={[
+            createMockWorktree({
+              id: 'w',
+              isSessionRunning: true,
+              isWaitingForResponse: true,
+              sessionStatusByInstance: {
+                claude: {
+                  isRunning: true,
+                  isWaitingForResponse: true,
+                  isProcessing: false,
+                  waitingKind: 'menu',
+                },
+              },
+            }),
+          ]}
+        />
+      );
+      const dot = screen.getByTestId('recent-status-dot-w');
+      expect(dot.className).toContain('animate-status-glow');
+      expect(dot.className).not.toContain('animate-status-attention');
+    });
+
+    it.each([
+      ['processing', { isSessionRunning: true, isProcessing: true }, 'bg-success', 'animate-status-glow'],
+      ['idle', {}, 'bg-muted-foreground', null],
+    ] as const)('renders a %s session through the primitive', (_name, flags, color, animation) => {
+      render(<RecentSessionsList worktrees={[createMockWorktree({ id: 'w', ...flags })]} />);
+      const dot = screen.getByTestId('recent-status-dot-w');
+      expect(dot.className).toContain(color);
+      if (animation) {
+        expect(dot.className).toContain(animation);
+      } else {
+        expect(dot.className).not.toContain('animate-status');
+      }
+    });
+
+    // A running-but-not-processing session is `ready`: the old hand-rolled dot
+    // used the same green, so this pins that the migration did not upgrade an
+    // idle-at-the-prompt session into a glowing "busy" one.
+    it('keeps a session sitting at its prompt as a static ready dot', () => {
+      render(
+        <RecentSessionsList
+          worktrees={[createMockWorktree({ id: 'w', isSessionRunning: true })]}
+        />
+      );
+      const dot = screen.getByTestId('recent-status-dot-w');
+      expect(dot.className).toContain('bg-success');
+      expect(dot.className).not.toContain('animate-status');
+    });
+
+    // Guards the testid collision that would break the row selectors.
+    it('keeps the dot out of the `recent-session-` testid namespace', () => {
+      render(<RecentSessionsList worktrees={[createMockWorktree({ id: 'w' })]} />);
+      expect(screen.getAllByTestId(/^recent-session-/)).toHaveLength(1);
+    });
+  });
 });

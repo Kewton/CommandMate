@@ -263,8 +263,9 @@ describe('BranchListItem', () => {
       );
 
       const indicator = screen.getByTestId('status-indicator');
-      // waiting renders as an amber dot that blinks (never spins).
+      // waiting renders as an amber dot that pulses for attention (never spins).
       expect(indicator.className).toMatch(/bg-warning/);
+      expect(indicator.className).toMatch(/animate-status-attention/);
       expect(indicator.className).not.toMatch(/animate-spin/);
     });
 
@@ -942,6 +943,164 @@ describe('BranchListItem', () => {
 
       const button = screen.getByTestId('branch-list-item');
       expect(button.getAttribute('aria-label')).toContain('MyRepo');
+    });
+  });
+
+  // ==========================================================================
+  // Issue #1787: in-row attention affordances
+  // ==========================================================================
+
+  describe('Waiting emphasis and next action (Issue #1787)', () => {
+    const waitingBranch = (overrides: Partial<SidebarBranchItem> = {}): SidebarBranchItem => ({
+      ...defaultBranch,
+      status: 'waiting',
+      cliStatus: { claude: 'waiting' },
+      nextActionKey: 'nextAction.approveReject',
+      ...overrides,
+    });
+
+    it('forwards waitingKind to the status dot (medium tier for a menu wait)', () => {
+      render(
+        <BranchListItem
+          branch={waitingBranch({ waitingKind: 'menu' })}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      const indicator = screen.getByTestId('status-indicator');
+      expect(indicator.className).toMatch(/animate-status-glow/);
+      expect(indicator.className).not.toMatch(/animate-status-attention/);
+    });
+
+    // Field-absent fallback: a pre-#1786 payload has no waitingKind, and the
+    // safe failure mode is to over-emphasize.
+    it('falls back to the strong tier when the payload carries no waitingKind', () => {
+      render(
+        <BranchListItem branch={waitingBranch()} isSelected={false} onClick={() => {}} />
+      );
+
+      expect(screen.getByTestId('status-indicator').className).toMatch(
+        /animate-status-attention/
+      );
+    });
+
+    // The trap this guards: a hover-only affordance is permanently invisible on
+    // touch. The waiting row must state the next action WITHOUT any interaction.
+    it('renders the next action inline (no hover) for a waiting branch', () => {
+      render(
+        <BranchListItem branch={waitingBranch()} isSelected={false} onClick={() => {}} />
+      );
+
+      const label = screen.getByTestId('branch-next-action');
+      expect(label.textContent).toBe('Approve / Reject');
+      expect(label.className).toMatch(/text-warning-foreground/);
+    });
+
+    it('does not clutter a running row with an inline next action', () => {
+      render(
+        <BranchListItem
+          branch={{
+            ...defaultBranch,
+            status: 'running',
+            cliStatus: { claude: 'running' },
+            nextActionKey: 'nextAction.running',
+          }}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      expect(screen.queryByTestId('branch-next-action')).not.toBeInTheDocument();
+    });
+
+    it('renders an awaiting-instruction badge distinct from the amber waiting color', () => {
+      render(
+        <BranchListItem
+          branch={{
+            ...defaultBranch,
+            status: 'ready',
+            cliStatus: { claude: 'ready' },
+            awaitingInstruction: true,
+            nextActionKey: 'nextAction.sendMessage',
+          }}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      const badge = screen.getByTestId('awaiting-instruction-badge');
+      expect(badge.textContent).toBe('Ready for work');
+      // Green family, never the amber `warning` family — the whole point is
+      // that "done, give me work" cannot be mistaken for "answer me".
+      expect(badge.className).toMatch(/success/);
+      expect(badge.className).not.toMatch(/warning/);
+
+      // And it says what to do, inline, without hover.
+      expect(screen.getByTestId('branch-next-action').textContent).toBe('Send message');
+      expect(screen.getByTestId('branch-next-action').className).toMatch(
+        /text-success-foreground/
+      );
+    });
+
+    it('does not render the badge when awaitingInstruction is absent or false', () => {
+      const { rerender } = render(
+        <BranchListItem branch={defaultBranch} isSelected={false} onClick={() => {}} />
+      );
+      expect(screen.queryByTestId('awaiting-instruction-badge')).not.toBeInTheDocument();
+
+      rerender(
+        <BranchListItem
+          branch={{ ...defaultBranch, awaitingInstruction: false }}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+      expect(screen.queryByTestId('awaiting-instruction-badge')).not.toBeInTheDocument();
+    });
+
+    it('shows both signals when one agent is waiting and another is idle-prompted', () => {
+      render(
+        <BranchListItem
+          branch={waitingBranch({
+            cliStatus: { claude: 'waiting', codex: 'ready' },
+            awaitingInstruction: true,
+          })}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      expect(screen.getByTestId('awaiting-instruction-badge')).toBeInTheDocument();
+      // Amber wins the dot; the green badge still says the other agent is free.
+      expect(screen.getByTestId('status-indicator').className).toMatch(/bg-warning/);
+    });
+
+    it('also exposes the next action in the tooltip (for statuses without the inline label)', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        render(
+          <BranchListItem
+            branch={{
+              ...defaultBranch,
+              status: 'running',
+              cliStatus: { claude: 'running' },
+              nextActionKey: 'nextAction.running',
+            }}
+            isSelected={false}
+            onClick={() => {}}
+          />
+        );
+
+        fireEvent.mouseEnter(screen.getByTestId('branch-list-item'));
+        await vi.advanceTimersByTimeAsync(200);
+
+        await waitFor(() => {
+          expect(screen.getByRole('tooltip').textContent).toContain('Next: Running...');
+        });
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });

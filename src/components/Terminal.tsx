@@ -258,7 +258,9 @@ export function TerminalComponent({
       detail: 'Control mode is disabled for this client.',
     },
     connecting: {
-      dot: 'bg-yellow-500',
+      // Issue #1787: the last raw amber literal on this surface, replaced by the
+      // semantic token so "something needs attention" is one color repo-wide.
+      dot: 'bg-warning',
       label: 'Connecting',
       detail: reconnectAttempt > 0
         ? 'Reconnecting to terminal stream.'

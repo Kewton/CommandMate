@@ -73,11 +73,14 @@ function BranchTooltip({
   branch,
   isVisible,
   anchorRef,
+  nextActionLabel,
 }: {
   id: string;
   branch: SidebarBranchItem;
   isVisible: boolean;
   anchorRef: { current: HTMLButtonElement | null };
+  /** Already-translated next action, or null when the branch has no key. */
+  nextActionLabel: string | null;
 }) {
   // Start off-screen so tooltip is never briefly visible at (0,0) before coords are set
   const [coords, setCoords] = useState({ top: -9999, left: -9999 });
@@ -148,6 +151,15 @@ function BranchTooltip({
       {branch.worktreePath && (
         <p className="text-sidebar-muted truncate">{branch.worktreePath}</p>
       )}
+      {/*
+        Issue #1787: the next action is also in the tooltip so it is reachable
+        for every status, not just the two that show it inline in the row. The
+        inline copy is what carries it on touch devices, where this bubble can
+        never open.
+      */}
+      {nextActionLabel && (
+        <p className="text-sidebar-muted whitespace-nowrap">Next: {nextActionLabel}</p>
+      )}
       {branch.description && (
         <p className="text-sidebar-muted mt-1 border-t border-sidebar-border pt-1 whitespace-pre-wrap break-words">
           {branch.description}
@@ -198,6 +210,9 @@ export const BranchListItem = memo(function BranchListItem({
   showRepositoryName = true,
 }: BranchListItemProps) {
   const t = useTranslations('common');
+  // Issue #1787: the next-action wording lives in the `worktree` namespace
+  // alongside the other worktree-facing copy, so this row reads two namespaces.
+  const tWorktree = useTranslations('worktree');
   const tooltipId = `tooltip-${branch.id}`;
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [isTooltipVisible, setIsTooltipVisible] = useState(false);
@@ -214,6 +229,18 @@ export const BranchListItem = memo(function BranchListItem({
 
   // Cancel the pending timer when the component unmounts.
   useEffect(() => () => clearShowTimer(), [clearShowTimer]);
+
+  // ---- Issue #1787: attention affordances ----
+  const aggregatedStatus = aggregateCliStatus(branch.cliStatus);
+  const isWaiting = aggregatedStatus === 'waiting';
+  const awaitingInstruction = branch.awaitingInstruction === true;
+  const nextActionLabel = branch.nextActionKey ? tWorktree(branch.nextActionKey) : null;
+  // The next action is rendered INLINE (never hover-only) for the two states
+  // that need one, because a hover tooltip is permanently invisible on touch.
+  // Every other status keeps it in the tooltip alone: "Running…" on every row
+  // is noise that would make the two rows that matter harder to spot.
+  const showInlineNextAction = (isWaiting || awaitingInstruction) && nextActionLabel !== null;
+  // ---- end #1787 ----
 
   // Issue #676 (A): selected branches never show the tooltip so a stuck
   // `isTooltipVisible=true` does not leave a tooltip lingering next to the
@@ -306,8 +333,9 @@ export const BranchListItem = memo(function BranchListItem({
         {branch.cliStatus && Object.keys(branch.cliStatus).length > 0 && (
           <div className="flex items-center justify-center flex-shrink-0 w-4" aria-label={t('branchItem.cliToolStatus')}>
             <BranchStatusIndicator
-              status={aggregateCliStatus(branch.cliStatus)}
+              status={aggregatedStatus}
               label={formatCliStatusBreakdown(branch.cliStatus, branch.cliStatusLabels)}
+              waitingKind={branch.waitingKind}
             />
           </div>
         )}
@@ -322,7 +350,38 @@ export const BranchListItem = memo(function BranchListItem({
               {branch.repositoryName}
             </p>
           )}
+          {/*
+            Issue #1787: what to do next, spelled out. Amber for "you are
+            blocking it", green for "it is done and waiting for work" — the two
+            must never be confusable, which is why this is not one neutral color.
+          */}
+          {showInlineNextAction && (
+            <p
+              data-testid="branch-next-action"
+              className={`text-xs font-medium truncate ${
+                isWaiting ? 'text-warning-foreground' : 'text-success-foreground'
+              }`}
+            >
+              {nextActionLabel}
+            </p>
+          )}
         </div>
+
+        {/*
+          Issue #1787: `awaitingInstruction` (the agent said its turn is over) is
+          a SECONDARY state deliberately styled green, so it can never be read as
+          the amber "needs your answer" case. Shown even while waiting is amber,
+          because both can be true across two agents in one branch.
+        */}
+        {awaitingInstruction && (
+          <span
+            data-testid="awaiting-instruction-badge"
+            className="flex-shrink-0 rounded-full bg-success-subtle px-1.5 py-0.5 text-[10px] font-medium leading-4 text-success-foreground"
+            title={tWorktree('awaitingInstruction.label')}
+          >
+            {tWorktree('awaitingInstruction.badge')}
+          </span>
+        )}
 
         {/* Unread indicator */}
         {branch.hasUnread && (
@@ -352,6 +411,7 @@ export const BranchListItem = memo(function BranchListItem({
         branch={branch}
         isVisible={showTooltip}
         anchorRef={buttonRef}
+        nextActionLabel={nextActionLabel}
       />
     </button>
   );
