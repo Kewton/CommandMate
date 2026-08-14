@@ -30,7 +30,64 @@ const STUB = path.join(DEMO_HOME, 'stub-server.js');
 const STUB_WRONG_PORT = path.join(DEMO_HOME, 'stub-wrong-port.js');
 const STUB_EXITS = path.join(DEMO_HOME, 'stub-exits.js');
 
-const TEST_PORT = 3457;
+/**
+ * Port band this file allocates its demo port pair from.
+ *
+ * Chosen to sit clear of everything else the suite or the app binds (3000/3001,
+ * 3011, 3100-3135, 3399+, 3999, 4000, 4200-4299, 4242, 4321, 5000, 6030, 8501)
+ * and below the OS ephemeral range (49152+ on macOS), so a reservation here
+ * cannot lose a race with a socket the kernel handed out.
+ */
+const PORT_BAND_START = 34000;
+/** Pairs available in the band; the port and port+1 are both reserved. */
+const PORT_BAND_PAIRS = 500;
+
+/**
+ * The demo port for THIS process, chosen in `beforeAll` (Issue #1791 follow-up).
+ *
+ * It used to be the constant 3457, which made this file isolated per process
+ * for its filesystem (`DEMO_HOME` is keyed by `process.pid`) and *not* for its
+ * port. Any second test process on the machine — `npm run test:unit` in another
+ * worktree, a second full run started while one is in flight, or a stub leaked
+ * by a run that was interrupted before `afterEach` — took 3457 first, and
+ * env-up then died with `port 3457 is already in use`. That turns exactly 7 of
+ * these 11 tests red (measured), and the red lands on whatever diff happened to
+ * be under test rather than on the collision: the failure was reproduced here
+ * by running two suites at once, which is precisely what comparing a branch
+ * against `origin/develop` in a second checkout does.
+ *
+ * A pair, not a single port: the wrong-port stub deliberately binds CM_PORT + 1,
+ * so that case only proves anything if both are free.
+ */
+let TEST_PORT = 0;
+
+/** Whether 127.0.0.1:port can be bound right now. env-up binds loopback only. */
+async function portBindable(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const probe = net.createServer();
+    probe.once('error', () => resolve(false));
+    probe.listen(port, '127.0.0.1', () => probe.close(() => resolve(true)));
+  });
+}
+
+/**
+ * Reserve a free port pair, starting from a pid-derived offset.
+ *
+ * The pid start is what keeps two concurrent processes off each other: they do
+ * not merely resolve a collision, they never probe the same pair first. The
+ * bind probe is the second line of defence, against a port held by something
+ * that is not a test process at all.
+ */
+async function reserveDemoPortPair(): Promise<number> {
+  const start = process.pid % PORT_BAND_PAIRS;
+  for (let offset = 0; offset < PORT_BAND_PAIRS; offset += 1) {
+    const port = PORT_BAND_START + (((start + offset) % PORT_BAND_PAIRS) * 2);
+    if ((await portBindable(port)) && (await portBindable(port + 1))) return port;
+  }
+  throw new Error(
+    `no free port pair in ${PORT_BAND_START}..${PORT_BAND_START + PORT_BAND_PAIRS * 2 - 1}`,
+  );
+}
 
 function run(script: string, args: string[], env: Record<string, string> = {}) {
   return spawnSync('bash', [script, ...args], {
@@ -73,7 +130,8 @@ async function portListening(port: number): Promise<boolean> {
   });
 }
 
-beforeAll(() => {
+beforeAll(async () => {
+  TEST_PORT = await reserveDemoPortPair();
   removeTempDir(DEMO_HOME);
   fs.mkdirSync(DEMO_HOME, { recursive: true });
   fs.writeFileSync(
@@ -113,30 +171,39 @@ afterAll(() => {
   removeTempDir(DEMO_HOME);
 });
 
-const stubEnv = {
-  CM_DEMO_SERVER_CMD: `node ${STUB}`,
-  CM_DEMO_PROC_MATCH: 'stub-server.js',
-  CM_DEMO_READY_TIMEOUT: '30',
-  CM_DEMO_PORT: String(TEST_PORT),
-};
+/**
+ * The env every passing-boot case runs env-up with.
+ *
+ * A function rather than a constant because `CM_DEMO_PORT` is only known once
+ * `beforeAll` has reserved it; an object built at module scope would freeze the
+ * placeholder 0.
+ */
+function stubEnv(): Record<string, string> {
+  return {
+    CM_DEMO_SERVER_CMD: `node ${STUB}`,
+    CM_DEMO_PROC_MATCH: 'stub-server.js',
+    CM_DEMO_READY_TIMEOUT: '30',
+    CM_DEMO_PORT: String(TEST_PORT),
+  };
+}
 
 describe('env-up refuses configurations that could reach a live instance', () => {
   it('refuses port 3000', () => {
-    const result = run(ENV_UP, [], { ...stubEnv, CM_DEMO_PORT: '3000' });
+    const result = run(ENV_UP, [], { ...stubEnv(), CM_DEMO_PORT: '3000' });
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('must not be 3000');
     expect(fs.existsSync(STATE_FILE)).toBe(false);
   });
 
   it('refuses a state dir outside $HOME', () => {
-    const result = run(ENV_UP, [], { ...stubEnv, CM_DEMO_HOME: '/tmp/commandmate-demo' });
+    const result = run(ENV_UP, [], { ...stubEnv(), CM_DEMO_HOME: '/tmp/commandmate-demo' });
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('must live under $HOME');
   });
 
   it('refuses to start on top of an existing state file', () => {
     fs.writeFileSync(STATE_FILE, 'CM_DEMO_PID=1\n');
-    const result = run(ENV_UP, [], stubEnv);
+    const result = run(ENV_UP, [], stubEnv());
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('run env-down.sh first');
     fs.rmSync(STATE_FILE);
@@ -145,7 +212,7 @@ describe('env-up refuses configurations that could reach a live instance', () =>
 
 describe('env-up boots an isolated instance', () => {
   it('waits for the port to answer, records state and seeds three worktrees', async () => {
-    const result = run(ENV_UP, [], stubEnv);
+    const result = run(ENV_UP, [], stubEnv());
     expect(result.stderr).toBe('');
     expect(result.status).toBe(0);
 
@@ -167,7 +234,7 @@ describe('env-up boots an isolated instance', () => {
 
   it('fails and cleans up when the server never answers on the demo port', async () => {
     const result = run(ENV_UP, [], {
-      ...stubEnv,
+      ...stubEnv(),
       CM_DEMO_SERVER_CMD: `node ${STUB_WRONG_PORT}`,
       CM_DEMO_PROC_MATCH: 'stub-wrong-port.js',
       CM_DEMO_READY_TIMEOUT: '3',
@@ -183,7 +250,7 @@ describe('env-up boots an isolated instance', () => {
 
   it('fails fast when the server exits before becoming ready', () => {
     const result = run(ENV_UP, [], {
-      ...stubEnv,
+      ...stubEnv(),
       CM_DEMO_SERVER_CMD: `node ${STUB_EXITS}`,
       CM_DEMO_PROC_MATCH: 'stub-exits.js',
       CM_DEMO_READY_TIMEOUT: '30',
@@ -196,7 +263,7 @@ describe('env-up boots an isolated instance', () => {
 
 describe('env-down stops exactly what env-up started', () => {
   it('refuses a pid whose command line no longer matches', () => {
-    expect(run(ENV_UP, [], stubEnv).status).toBe(0);
+    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
     const state = readState();
 
     const rewritten = fs
@@ -211,7 +278,7 @@ describe('env-down stops exactly what env-up started', () => {
   }, 60_000);
 
   it('refuses a state file that records port 3000', () => {
-    expect(run(ENV_UP, [], stubEnv).status).toBe(0);
+    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
     const state = readState();
     fs.writeFileSync(
       STATE_FILE,
@@ -225,7 +292,7 @@ describe('env-down stops exactly what env-up started', () => {
   }, 60_000);
 
   it('kills the server, frees the port and removes the state file and seed', async () => {
-    expect(run(ENV_UP, [], stubEnv).status).toBe(0);
+    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
     const state = readState();
 
     const result = run(ENV_DOWN, []);
@@ -237,7 +304,7 @@ describe('env-down stops exactly what env-up started', () => {
   }, 60_000);
 
   it('--purge removes the demo database together with its WAL sidecars', () => {
-    expect(run(ENV_UP, [], stubEnv).status).toBe(0);
+    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
     const state = readState();
     // The stub never opens SQLite, so stand the sidecars up explicitly: what is
     // being fixed is that `rm cm.db` alone left megabytes of -wal behind.
