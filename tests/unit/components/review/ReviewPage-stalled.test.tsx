@@ -34,15 +34,13 @@ vi.mock('@/components/layout', () => ({
     React.createElement('div', { 'data-testid': 'app-shell' }, children),
 }));
 
-// Mock review-config
-vi.mock('@/config/review-config', () => ({
+// Mock review-config. Issue #1788: spread the real module rather than listing
+// constants by hand — the filter vocabulary and the deep-link helpers moved here,
+// and an exhaustive literal mock breaks (with an import-time error, not a
+// readable assertion) every time this file gains an export.
+vi.mock('@/config/review-config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/config/review-config')>()),
   REVIEW_POLL_INTERVAL_MS: 60000,
-  SUMMARY_GENERATION_TIMEOUT_MS: 60000,
-  SUMMARY_ALLOWED_TOOLS: ['claude', 'codex', 'copilot'],
-  MAX_TEMPLATES: 5,
-  MAX_TEMPLATE_NAME_LENGTH: 100,
-  MAX_TEMPLATE_CONTENT_LENGTH: 1000,
-  MAX_USER_INSTRUCTION_LENGTH: 1000,
 }));
 
 // Mock status-colors (Issue #1304: labels are `common.status.*` keys, resolved

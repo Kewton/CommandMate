@@ -23,6 +23,7 @@ import { ViewTransitionsProvider } from '@/components/providers/ViewTransitionsP
 import { RealtimeProvider } from '@/hooks/useRealtimeConnection';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 import { ToastProvider } from '@/components/common/Toast';
+import { WaitingToastListener } from '@/components/notifications/WaitingToastListener';
 import { ServiceWorkerRegistrar } from '@/components/pwa/ServiceWorkerRegistrar';
 
 interface AppProvidersProps {
@@ -60,6 +61,11 @@ export function AppProviders({ children, locale, messages, timeZone, authEnabled
                     fallback when disconnected. */}
                 <RealtimeProvider>
                   <WorktreesCacheProvider>
+                    {/* Issue #1788: cross-screen waiting toast. Here — above the
+                        routed content, below the toast queue / realtime / cache
+                        it reads — so it survives navigation and fires on every
+                        screen, not only on worktree detail. Renders nothing. */}
+                    <WaitingToastListener />
                     <CommandPaletteProvider>
                       {/* Issue #1130: `?` keyboard-shortcuts help overlay open state. */}
                       <KeyboardShortcutsProvider>

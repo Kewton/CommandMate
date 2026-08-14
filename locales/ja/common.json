@@ -171,5 +171,9 @@
   },
   "meta": {
     "description": "Claude CLI と tmux セッションによる Git worktree 管理"
+  },
+  "attention": {
+    "label": "要対応",
+    "badgeLabel": "要対応のワークツリーが {count} 件あります"
   }
 }

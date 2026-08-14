@@ -31,6 +31,28 @@ import type { ToastType, ToastItem } from '@/types/markdown-editor';
 const DEFAULT_DURATION = 3000;
 
 /**
+ * A queued toast, optionally actionable (Issue #1788).
+ *
+ * Extends the shared {@link ToastItem} here rather than in
+ * `types/markdown-editor` because the action is a live function, not
+ * serializable editor state — and every existing `ToastItem` is still a valid
+ * value of this type.
+ */
+export interface AppToastItem extends ToastItem {
+  /** Invoked when the body is activated. Absent = a plain, inert toast. */
+  onClick?: () => void;
+}
+
+/** Extra behavior for {@link ToastContextValue.showToast}. */
+export interface ShowToastOptions {
+  /**
+   * Makes the toast body a button that runs this and dismisses the toast —
+   * "<branch> is waiting for you" is only useful if it takes you there.
+   */
+  onClick?: () => void;
+}
+
+/**
  * Props for individual Toast component
  */
 export interface ToastProps {
@@ -44,6 +66,15 @@ export interface ToastProps {
   onClose: (id: string) => void;
   /** Optional duration in milliseconds (default: 3000, 0 = no auto-dismiss) */
   duration?: number;
+  /**
+   * Optional activation handler (Issue #1788).
+   *
+   * When present the message becomes a real `<button>`, not a `div` with an
+   * onClick: the toast has to be reachable by keyboard and by touch, and a
+   * hover-or-pointer-only affordance would be dead on a phone — which is the
+   * device this Issue's toast most needs to work on.
+   */
+  onClick?: () => void;
 }
 
 /**
@@ -147,6 +178,7 @@ export function Toast({
   type,
   onClose,
   duration = DEFAULT_DURATION,
+  onClick,
 }: ToastProps) {
   const t = useTranslations('common');
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -213,7 +245,22 @@ export function Toast({
       `}
     >
       <ToastIcon type={type} iconColor={styles.iconColor} />
-      <p className="flex-1 text-sm font-medium">{message}</p>
+      {onClick ? (
+        <button
+          type="button"
+          data-testid="toast-action-button"
+          onClick={() => {
+            onClick();
+            handleClose();
+          }}
+          className="flex-1 text-left text-sm font-medium underline-offset-2 hover:underline
+            focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+        >
+          {message}
+        </button>
+      ) : (
+        <p className="flex-1 text-sm font-medium">{message}</p>
+      )}
       <button
         data-testid="toast-close-button"
         onClick={handleClose}
@@ -236,7 +283,7 @@ export function Toast({
  */
 export interface ToastContainerProps {
   /** Array of toast items to display */
-  toasts: ToastItem[];
+  toasts: AppToastItem[];
   /** Callback when a toast is closed */
   onClose: (id: string) => void;
 }
@@ -278,6 +325,7 @@ export function ToastContainer({ toasts, onClose }: ToastContainerProps) {
           type={toast.type}
           onClose={onClose}
           duration={toast.duration}
+          onClick={toast.onClick}
         />
       ))}
     </div>
@@ -294,9 +342,14 @@ export function ToastContainer({ toasts, onClose }: ToastContainerProps) {
  */
 export interface ToastContextValue {
   /** Currently visible toasts */
-  toasts: ToastItem[];
+  toasts: AppToastItem[];
   /** Show a new toast notification; returns the generated id */
-  showToast: (message: string, type?: ToastType, duration?: number) => string;
+  showToast: (
+    message: string,
+    type?: ToastType,
+    duration?: number,
+    options?: ShowToastOptions,
+  ) => string;
   /** Remove a toast by id */
   removeToast: (id: string) => void;
   /** Clear all toasts */
@@ -308,17 +361,23 @@ export interface ToastContextValue {
  * {@link ToastProvider} and the provider-less fallback in {@link useToast}.
  */
 function useToastState(): ToastContextValue {
-  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [toasts, setToasts] = useState<AppToastItem[]>([]);
   const idCounterRef = useRef(0);
 
   const showToast = useCallback(
-    (message: string, type: ToastType = 'info', duration: number = DEFAULT_DURATION) => {
+    (
+      message: string,
+      type: ToastType = 'info',
+      duration: number = DEFAULT_DURATION,
+      options?: ShowToastOptions,
+    ) => {
       const id = `toast-${++idCounterRef.current}-${Date.now()}`;
-      const newToast: ToastItem = {
+      const newToast: AppToastItem = {
         id,
         message,
         type,
         duration,
+        ...(options?.onClick ? { onClick: options.onClick } : {}),
       };
       setToasts((prev) => [...prev, newToast]);
       return id;

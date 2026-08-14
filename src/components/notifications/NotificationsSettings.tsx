@@ -4,6 +4,14 @@
  * Lets the user enable Web Push on this device, toggle which agent events they
  * are notified about, and unsubscribe. Handles the unsupported-browser and
  * iOS-not-installed cases with guidance instead of a dead button.
+ *
+ * Issue #1788 adds the in-app toast toggle **above** the push card, outside
+ * every one of the guards below. That placement is the decision, not an
+ * accident: `renderBody` returns early when the browser has no Push API, when
+ * iOS has not been "Add to Home Screen"-ed, and when the server has no VAPID
+ * keys — and those are precisely the installs where the in-app toast is the only
+ * notification the user can get. Putting its switch inside that body would hide
+ * the control exactly where it matters most.
  */
 
 'use client';
@@ -13,6 +21,7 @@ import { useTranslations } from 'next-intl';
 import { Bell } from 'lucide-react';
 import { Button, Card, Spinner, Switch } from '@/components/ui';
 import { useToast } from '@/components/common/Toast';
+import { useInAppWaitingToast } from '@/hooks/useInAppNotificationPrefs';
 import {
   urlBase64ToUint8Array,
   isPushSupported,
@@ -290,8 +299,48 @@ export function NotificationsSettings() {
   };
 
   return (
-    <Card>
-      {renderBody()}
-    </Card>
+    <div className="space-y-4">
+      <Card>
+        <InAppNotificationSettings />
+      </Card>
+      <Card>
+        {renderBody()}
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * In-app (cross-screen toast) notifications — Issue #1788.
+ *
+ * Always rendered: it needs no permission, no service worker and no server
+ * configuration, so none of the push guards apply to it.
+ */
+function InAppNotificationSettings() {
+  const t = useTranslations('notifications');
+  const { enabled, setEnabled } = useInAppWaitingToast();
+
+  return (
+    <div className="space-y-3">
+      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {t('inApp.heading')}
+      </div>
+      <label className="flex items-center justify-between gap-4">
+        <span>
+          <span className="block text-sm font-medium text-foreground">
+            {t('inApp.waitingToggle')}
+          </span>
+          <span className="block text-xs text-muted-foreground">
+            {t('inApp.waitingToggleDesc')}
+          </span>
+        </span>
+        <Switch
+          checked={enabled}
+          onCheckedChange={setEnabled}
+          aria-label={t('inApp.waitingToggle')}
+          data-testid="notifications-toggle-inapp-waiting"
+        />
+      </label>
+    </div>
   );
 }

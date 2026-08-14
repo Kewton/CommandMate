@@ -23,6 +23,44 @@ export const STALLED_THRESHOLD_MS = 300_000;
 export const REVIEW_POLL_INTERVAL_MS = 7_000;
 
 /**
+ * Review filter ids, in chip display order (Issue #600, named here by #1788).
+ *
+ * Lifted out of `ReviewTab` so the deep link and the tab agree on the vocabulary
+ * by construction: the "needs attention" surfaces (sidebar badge, mobile nav,
+ * Home's Waiting stat) all link to one of these, and a typo would otherwise
+ * silently land on the default filter.
+ */
+export const REVIEW_FILTERS = ['in_review', 'approval', 'stalled'] as const;
+export type ReviewFilter = typeof REVIEW_FILTERS[number];
+
+/** The filter selected when the URL says nothing. */
+export const DEFAULT_REVIEW_FILTER: ReviewFilter = 'in_review';
+
+/** Query parameter name carrying the initial filter (`/review?filter=approval`). */
+export const REVIEW_FILTER_QUERY_PARAM = 'filter';
+
+/**
+ * The one link every "N need your attention" affordance points at (Issue #1788).
+ *
+ * `approval` is the review filter whose membership predicate is
+ * `isWaitingForResponse === true` — the same predicate the badge counts — so the
+ * number on the badge and the length of the list it opens cannot drift.
+ */
+export const ATTENTION_REVIEW_HREF = `/review?${REVIEW_FILTER_QUERY_PARAM}=approval`;
+
+/**
+ * Read a filter id out of a URL query value.
+ *
+ * @returns The filter, or null when the value is absent or not one of ours —
+ *   callers fall back to {@link DEFAULT_REVIEW_FILTER} rather than rendering an
+ *   empty list for `?filter=nonsense`.
+ */
+export function parseReviewFilter(raw: string | null | undefined): ReviewFilter | null {
+  if (!raw) return null;
+  return (REVIEW_FILTERS as readonly string[]).includes(raw) ? (raw as ReviewFilter) : null;
+}
+
+/**
  * Timeout in milliseconds for AI summary generation.
  * Issue #607: Daily summary feature
  *
