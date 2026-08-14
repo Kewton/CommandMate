@@ -33,22 +33,41 @@ type InstanceRow = {
   cliTool: string;
   running: boolean;
   autoYes: boolean;
+  /**
+   * Issue #1785: what the server said this instance is running, or null.
+   *
+   * Verbatim. `cliTool` above answers "which agent", which the roster already
+   * knew; this answers "which model inside it", which only the live session
+   * knows — and the point of printing it at all is to compare it against what
+   * the agent reports about itself, so the CLI must not tidy it up.
+   */
+  model: string | null;
+  /** Issue #1785: reasoning effort, or null. Verbatim, as above. */
+  reasoningEffort: string | null;
 };
 
 /**
  * Format instance rows as a table for terminal display.
  * [DR1-08 consistency] Mirrors ls.ts's formatTable().
+ *
+ * Issue #1785 appends MODEL / EFFORT rather than inserting them, so anything
+ * reading this table by column position keeps working.
  */
 function formatInstancesTable(rows: InstanceRow[]): string {
   if (rows.length === 0) return 'No agent instances found.';
 
-  const headers = ['INSTANCE_ID', 'ALIAS', 'CLI_TOOL', 'RUNNING', 'AUTO_YES'];
+  const headers = ['INSTANCE_ID', 'ALIAS', 'CLI_TOOL', 'RUNNING', 'AUTO_YES', 'MODEL', 'EFFORT'];
   const dataRows = rows.map(r => [
     r.instanceId,
     r.alias,
     r.cliTool,
     r.running ? 'yes' : 'no',
     r.autoYes ? 'yes' : 'no',
+    // Blank, not a placeholder: an unknown model is the ordinary state (the
+    // session is stopped, the tool publishes none, the server restarted), and a
+    // column of `-` reads like a value the reader has to look up.
+    r.model ?? '',
+    r.reasoningEffort ?? '',
   ]);
 
   const colWidths = headers.map((h, i) =>
@@ -140,6 +159,16 @@ async function listInstances(worktreeId: string, options: InstancesOptions): Pro
         cliTool: inst.cliTool,
         running: output.isRunning,
         autoYes: output.autoYes?.enabled ?? false,
+        // Issue #1785: pass-through. `?? null` collapses "this daemon predates
+        // the field" into the same null the server sends for "nothing knows" —
+        // the CLI has no way to tell those apart and no reason to.
+        //
+        // Blanking a stopped instance is the *server's* job (buildCurrentOutput
+        // returns null before it ever reads the latch), so there is no
+        // `running ? … : null` here: a second rule in a second place is how the
+        // two answers get to disagree.
+        model: output.model ?? null,
+        reasoningEffort: output.reasoningEffort ?? null,
       };
     })
   );
