@@ -23,6 +23,10 @@ import { STATUS_DETECTION_CAPTURE_LINES } from '@/config/status-capture-config';
 import { isSessionHealthy } from './claude-session';
 import { getLastServerResponseTimestamp, buildCompositeKey } from '@/lib/polling/auto-yes-manager';
 import { GLOBAL_SESSION_WORKTREE_ID } from '@/lib/session/global-session-constants';
+import { peekPromptWaiting } from '@/lib/session/prompt-waiting-composition';
+import { deriveWaitingKind, type WaitingKind } from '@/lib/session/waiting-kind';
+import { observeWaitingEdge } from '@/lib/session/waiting-episode-state';
+import { isAwaitingInstruction } from '@/lib/session/agent-event-state';
 import type { getMessages as GetMessagesFn, markPendingPromptsAsAnswered as MarkPendingFn, getAgentInstances as GetAgentInstancesFn } from '@/lib/db';
 
 function getStatusCaptureLines(cliToolId: CLIToolType): number {
@@ -45,6 +49,31 @@ export interface CliToolSessionStatus {
   isRunning: boolean;
   isWaitingForResponse: boolean;
   isProcessing: boolean;
+  /**
+   * What kind of wait this is, or null when it is not waiting (Issue #1786).
+   *
+   * `isWaitingForResponse` alone renders one orange dot for a y/n prompt the app
+   * can answer, a selection list only the terminal can drive, and a dialog only
+   * the agent's own events reported. See `deriveWaitingKind`.
+   */
+  waitingKind: WaitingKind | null;
+  /**
+   * Epoch ms the current wait began, or null (Issue #1786).
+   *
+   * Fixed for the whole wait — polling does not move it — so "waiting for 12
+   * minutes" is a number a surface can render. Owned by `waiting-episode-state`,
+   * which is also where #1788 / #1790 subscribe to the edge.
+   */
+  waitingSince: number | null;
+  /**
+   * Whether the agent has said it is waiting for its next instruction
+   * (Issue #1786).
+   *
+   * Independent of `isWaitingForResponse`: this one is the `idle_prompt`
+   * notification — the turn is over and nothing is blocking — held until the
+   * next `user_prompt_submit` / `session_start` / `session_end`.
+   */
+  awaitingInstruction: boolean;
 }
 
 /** Aggregated session status result for a worktree */
@@ -75,6 +104,33 @@ export interface WorktreeSessionStatus {
   isProcessing: boolean;
 }
 
+/**
+ * Precedence when several instances of one CLI tool are waiting (Issue #1786).
+ *
+ * Same ordering `deriveWaitingKind` applies within one instance, for the same
+ * reason: an aggregate that reports `menu` while one of its instances has an
+ * answerable prompt would hide the action the user can actually take.
+ */
+const WAITING_KIND_PRIORITY: Record<WaitingKind, number> = {
+  prompt: 3,
+  menu: 2,
+  unclassified: 1,
+};
+
+/** The more actionable of two kinds; null only when both are null. */
+function mergeWaitingKind(a: WaitingKind | null, b: WaitingKind | null): WaitingKind | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  return WAITING_KIND_PRIORITY[a] >= WAITING_KIND_PRIORITY[b] ? a : b;
+}
+
+/** The earlier of two starts — the aggregate reports the longest-running wait. */
+function mergeWaitingSince(a: number | null, b: number | null): number | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  return Math.min(a, b);
+}
+
 /** Merge two per-instance statuses into an aggregate (logical-OR of each flag). */
 function mergeSessionStatus(
   a: CliToolSessionStatus,
@@ -84,6 +140,9 @@ function mergeSessionStatus(
     isRunning: a.isRunning || b.isRunning,
     isWaitingForResponse: a.isWaitingForResponse || b.isWaitingForResponse,
     isProcessing: a.isProcessing || b.isProcessing,
+    waitingKind: mergeWaitingKind(a.waitingKind, b.waitingKind),
+    waitingSince: mergeWaitingSince(a.waitingSince, b.waitingSince),
+    awaitingInstruction: a.awaitingInstruction || b.awaitingInstruction,
   };
 }
 
@@ -119,6 +178,12 @@ async function detectInstanceSessionStatus(
   // Check status based on terminal state
   let isWaitingForResponse = false;
   let isProcessing = false;
+  // Issue #1786: the waiting metadata the list API now publishes. Declared out
+  // here so the edge below is observed exactly once per probe, whatever happened
+  // inside the try — a session that is not running, and a capture that threw,
+  // are both "not waiting" and must end an episode that was open.
+  let waitingKind: WaitingKind | null = null;
+  let structuredWaitingSince: number | null = null;
   if (isRunning) {
     try {
       const captureLines = getStatusCaptureLines(cliToolId);
@@ -132,6 +197,41 @@ async function detectInstanceSessionStatus(
       const statusResult = detectSessionStatus(output, cliToolId, lastOutputTimestamp);
       // Issue #1550: SessionStatus → activity flags lives in status-mapping.ts
       ({ isWaitingForResponse, isProcessing } = sessionStatusToActivityFlags(statusResult.status));
+
+      // Issue #1786: fold in what the agent's own events know. Until now the
+      // list API — and therefore the sidebar, Home, Sessions, Review and the
+      // command palette — published the scraper's verdict alone, so a dialog
+      // only the structured layer could see (#1725's whole reason to exist) lit
+      // no dot anywhere. Read-only on purpose: see `peekPromptWaiting`.
+      //
+      // ORed onto the scraper's flag rather than replacing it with the
+      // resolution's `waiting`, which the Issue's text proposed. Measured
+      // against the code: that field is `hasActivePrompt || structured`, while
+      // this flag is `status === 'waiting'` — a strictly wider set, because a
+      // selection list and a Codex pager report `waiting` with
+      // `hasActivePrompt: false` (status-detector.ts, the SELECTION_LIST_REASONS
+      // returns). Assigning it verbatim would have turned every selection list
+      // in the sidebar from orange to green: a regression, in an Issue whose own
+      // non-functional requirement is that the dots must not get worse. The OR
+      // only ever widens `isWaitingForResponse`, never narrows it.
+      const peek = peekPromptWaiting({
+        worktreeId,
+        cliToolId,
+        instanceId,
+        scraper: {
+          status: statusResult.status,
+          reason: statusResult.reason,
+          hasActivePrompt: statusResult.hasActivePrompt,
+        },
+      });
+      isWaitingForResponse = isWaitingForResponse || peek.waiting;
+      structuredWaitingSince = peek.structured?.at ?? null;
+      waitingKind = deriveWaitingKind({
+        waiting: isWaitingForResponse,
+        hasActivePrompt: statusResult.hasActivePrompt,
+        scraperStatus: statusResult.status,
+        scraperReason: statusResult.reason,
+      });
 
       // Clean up stale pending prompts (scoped to this instance) if none is showing
       if (!statusResult.hasActivePrompt) {
@@ -149,7 +249,28 @@ async function detectInstanceSessionStatus(
     }
   }
 
-  return { isRunning, isWaitingForResponse, isProcessing };
+  // Issue #1786: the single place the waiting edge is observed. #1788 (WS push)
+  // and #1790 (push notifications) subscribe with `onWaitingTransition` rather
+  // than adding a second detector of their own — see `waiting-episode-state`.
+  const waitingSince = observeWaitingEdge({
+    worktreeId,
+    cliToolId,
+    instanceId,
+    waiting: isWaitingForResponse,
+    kind: waitingKind,
+    structuredSince: structuredWaitingSince,
+  });
+
+  return {
+    isRunning,
+    isWaitingForResponse,
+    isProcessing,
+    waitingKind,
+    waitingSince,
+    // A dead session is not awaiting anything; the flag describes the process
+    // that reported it, and that process is gone.
+    awaitingInstruction: isRunning && isAwaitingInstruction(worktreeId, cliToolId, instanceId),
+  };
 }
 
 /**

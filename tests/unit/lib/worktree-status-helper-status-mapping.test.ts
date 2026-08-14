@@ -38,7 +38,13 @@ vi.mock('@/lib/session/cli-session', () => ({
   captureSessionOutput: vi.fn().mockResolvedValue('$ '),
 }));
 
-vi.mock('@/lib/detection/status-detector', () => ({
+// Issue #1786: the helper now also classifies the wait, which reads the real
+// SELECTION_LIST_REASONS set. A factory mock replaces the whole module, so an
+// omitted export is `undefined` at the call site rather than a missing-export
+// error — and the resulting TypeError lands in the helper's capture `catch`,
+// which reports `isProcessing: true`. Re-export the real one.
+vi.mock('@/lib/detection/status-detector', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/detection/status-detector')>()),
   detectSessionStatus: vi.fn(),
 }));
 
@@ -104,7 +110,17 @@ describe('detectWorktreeSessionStatus SessionStatus → flags (Issue #1550)', ()
     'detector %s → isWaitingForResponse=%s isProcessing=%s',
     async (status, isWaitingForResponse, isProcessing) => {
       const flags = await detectWithRunningSession(status);
-      expect(flags).toEqual({ isRunning: true, isWaitingForResponse, isProcessing });
+      // Issue #1786 added the waiting taxonomy to this payload. The detector is
+      // mocked as reason `input_prompt` with no active prompt, so a `waiting`
+      // frame here is one the scraper could not classify further.
+      expect(flags).toEqual({
+        isRunning: true,
+        isWaitingForResponse,
+        isProcessing,
+        waitingKind: isWaitingForResponse ? 'unclassified' : null,
+        waitingSince: isWaitingForResponse ? expect.any(Number) : null,
+        awaitingInstruction: false,
+      });
     }
   );
 
@@ -139,6 +155,10 @@ describe('detectWorktreeSessionStatus SessionStatus → flags (Issue #1550)', ()
       isRunning: false,
       isWaitingForResponse: false,
       isProcessing: false,
+      // Issue #1786: a session that is not running is not waiting for anything.
+      waitingKind: null,
+      waitingSince: null,
+      awaitingInstruction: false,
     });
   });
 
