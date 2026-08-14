@@ -57,6 +57,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **feat(pwa): 入力待ちをタブタイトル・favicon・App Badge・通知音でブラウザ外に伝える（入力待ち可視化 方針D）** (#1789)
+  - **件数は #1788 の `useAttentionCount` をそのまま使う（新設なし・二重実装なし）。** タブタイトル／favicon／App Badge／
+    通知音の 4 面すべてが同じ値を読むので、サイドバーのバッジや `/review?filter=approval` の一覧と食い違いようがない。
+    カウント規則（**waiting な worktree を 1 件と数える** = instance が 3 つ待機でも 1）も #1788 のまま変更していない
+  - **タブタイトル**: N > 0 で `(N) <現行タイトル>`、0 で原状復帰。変換は **strip→prepend** なので冪等で、
+    同じ effect が 2 回走っても `(1) (1) Foo` にならない。Next のページ遷移は title を上書きする（`<title>` 要素ごと
+    差し替わることもある）ので順序に賭けず `document.head` の MutationObserver で観測して再適用する
+  - **favicon**: canvas 合成を **data URL** で差し替え（SW の cache-first `/favicon.ico`・`/icons/` とも、
+    ブラウザ固有の favicon キャッシュとも交差しない）。**`href` だけ差し替え、`sizes` / `type` は Next が出したまま**。
+    0 件と unmount で原状復帰する。数字は潰さず描く判断とした（バッジ円がタイル辺の約 68% を占め、16px 縮小でも
+    1 グリフは読める）。桁溢れは `9+` で、その状態のときだけ amber → red に変える
+  - **App Badge**: `navigator.setAppBadge` / `clearAppBadge` を feature detect のうえ呼ぶ。**未対応・reject・throw を
+    すべて黙殺し、ログも出さない**（未対応ブラウザで status 変化ごとに warning が出るコンソールは読まれなくなる）
+  - **通知音（既定 OFF・オプトイン）**: #1788 の WS waiting エッジで 1 episode 1 回。音源は **Web Audio の合成 2 音**で
+    **外部リソース一切なし**。autoplay 制約は初回ジェスチャ（`pointerdown`/`touchstart`/`keydown`）での
+    `unlockWaitingSound()` で解錠し、**鳴らせなければ黙って諦める**（リトライループもトーストも console 出力もなし）。
+    トーストと違って既定 OFF なのは、音は端末の外へ出る（会議中・共有オフィス）ため — 頼まれていない音はタブごと
+    ミュートされる最短路で、それは #1788 のトーストまで道連れにする。バイブ（任意項目）は実装していない
+  - **タブ非表示中の更新停止は許容仕様として明記**した（`useWorktreesCache` の visibilitychange による poll 停止。
+    #1788 の WS が生きている間は push で追随するので、通常はタブが裏でも追いつく）
+  - **Issue 本文の現状記述はコードで裏取り済み**（`document.title` の動的変更なし／`setAppBadge`・`new Audio`・
+    `AudioContext`・`navigator.vibrate` のヒット 0／`public/sw.js:161` の `badge` は通知アイコンで本件と別物 —
+    いずれも本文どおり）。**本文と実装の差は 1 点**: `<link rel="icon">` はソースに literal では存在せず、
+    App Router の file convention（`src/app/icon.png` / `icon1.png` / `icon2.png`）から**複数**生成される。
+    そのため「既存 link の href を替える」実装は**全件**に対して行い、1 件も無い文書では link を生成して復帰時に除去する
+  - **空タイトルでの無限書き戻しを実装中に発見して塞いだ**: `document.title` の getter は空白を strip/collapse するため
+    `"(2) "` を書くと `"(2)"` で読み戻る。差分検知が永久に「変わった」と言い続け、title 監視が回り続ける。
+    プレフィクスは空タイトル時に末尾スペースを出さず、strip 正規表現も `(?:\s+|$)` で `"(2)"` 単体を剥がす
+  - **空振り緑の反証（変異注入で実測）**: ①`formatTitleWithBadge` のプレフィクス付与を潰す → `attention-badge-1789` /
+    `useAttentionBadge-1789` の 10 件が赤（`prefixes one, several, and more than nine` / `is idempotent: applying it
+    twice cannot produce "(1) (1) Foo"` / `replaces a stale badge rather than stacking on it` / `emits no trailing space
+    when there is no title to prefix` / `prefixes the count, and drops the prefix again at zero` / `replaces the prefix
+    on a count change rather than stacking one` / `stays single-prefixed when the effect runs again for the same count` /
+    `re-applies after a navigation rewrites the title` / `settles on a page with no title at all, instead of re-writing
+    forever` / `restores the plain title on unmount`）。②`restoreFavicons` の復帰を潰す → 6 件が赤
+    (`restores every original href` / `never records a data URL as the original, however many times it re-applies` /
+    `creates a link when the document has none, and removes it again` / `restores the authored icon at zero` /
+    `restores the authored icon on unmount` / `survives a count change without ever losing the authored href`)。
+    ③音のトグル判定を常に true にする → 2 件が赤（`stays silent while the toggle is off (the default)` /
+    `stays silent when the toggle is explicitly off`）。3 変異とも復元して全緑に復帰（`git status` で確認）
 - **feat(cli): モデル / reasoning effort を `instances` と `capture --json` に露出した（モデル/effort 可視化 Phase 3）** (#1785)
   - `CurrentOutputResponse`（`current-output-builder`）に **`model` / `reasoningEffort`（ともに `string | null`）** を追加した。
     値は Phase 1（#1783）の保持層そのままで、**CLI 側でのモデル名の解釈・整形はしない** —
