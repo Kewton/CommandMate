@@ -36,8 +36,8 @@ import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tm
 import {
   getAskUserQuestion,
   getLastAgentEvent,
-  getLastKnownAgentModel,
   getLastStopEventAt,
+  getResolvedAgentModelInfo,
   getStructuredSessionState,
   markStructuredPromptRecorded,
   type AskUserQuestionEpisode,
@@ -152,10 +152,11 @@ export interface CurrentOutputPayload {
   /**
    * The model this instance is running, or null when nothing knows (#1785).
    *
-   * Exposure only: the value is whatever the retention layer latched from the
-   * agent's own hook events (`getLastKnownAgentModel`, Issue #1783). Nothing
-   * here parses, normalises or prettifies it — `commandmate capture --json`
-   * and `commandmate instances` have to be able to compare it against what the
+   * Exposure only: the value is whatever the retention layer resolved — the
+   * agent's own hook events first (#1783), the terminal frame filling the hole
+   * (#1784), under `mergeModelInfo`'s precedence. Nothing here parses,
+   * normalises or prettifies it — `commandmate capture --json` and
+   * `commandmate instances` have to be able to compare it against what the
    * agent reports about itself, and any cleanup on the way out would break
    * that comparison exactly when it matters.
    *
@@ -174,38 +175,23 @@ export interface CurrentOutputPayload {
   /**
    * The reasoning effort this instance is running at, or null (#1785).
    *
-   * See {@link resolveReasoningEffort} — today this is always null, and that is
-   * a statement about the retention layer rather than about the field.
+   * Phase 3 (#1785) shipped this key against a seam that returned a constant
+   * null, because its holding layer (#1784) was landing in parallel; the two
+   * Issues went green side by side and nobody joined them, so the field stayed
+   * null on every session for both `capture --json` and `commandmate
+   * instances`. It now reads the same retention layer `model` does, resolved by
+   * the same call — see the note on the resolution site in
+   * {@link buildCurrentOutput}.
+   *
+   * Not an optional field and not `undefined`: a consumer must be able to read
+   * `.reasoningEffort` and get an explicit "nothing knows" for gemini, for
+   * copilot, and for any session whose banner has scrolled out of the tmux
+   * history.
+   *
+   * Null whenever the session is not running, for the same reason `model` is —
+   * see above.
    */
   reasoningEffort: string | null;
-}
-
-/**
- * The reasoning effort this instance is running at, or null.
- *
- * A named seam, on purpose. Effort appears in **no** agent's hook payload — the
- * terminal frame is its only source — so the layer that will hold it is Phase 2
- * (Issue #1784), landing in parallel with this one. Phase 3 owns the *exposure*:
- * the payload field above, the `EFFORT` column in `commandmate instances`, the
- * `reasoningEffort` key in `capture --json`, and the tests that pin them. None
- * of that may move when the holder arrives, so the contract (`string | null`) is
- * fixed here now and answered with the only honest value available today.
- *
- * When #1784 lands, this body becomes a call to its per-instance getter and
- * nothing else changes — not the payload shape, not the CLI, not a single test
- * expectation, because every assertion on this field is written null-tolerant.
- *
- * Not an optional field and not `undefined`: a consumer must be able to read
- * `.reasoningEffort` today and get the same "nothing knows" answer it will get
- * afterwards for gemini, for copilot, and for any session whose banner has
- * scrolled out of the tmux history.
- */
-function resolveReasoningEffort(
-  _worktreeId: string,
-  _cliToolId: CLIToolType,
-  _instanceId?: string,
-): string | null {
-  return null;
 }
 
 const logger = createLogger('current-output-builder');
@@ -537,7 +523,9 @@ export async function buildCurrentOutput(
       // Issue #1785: null on a dead session, not the last model it ran. The
       // latch outlives the process that filled it (by design — see
       // getLastKnownAgentModel), so reporting it here would tell `commandmate
-      // instances` that a `RUNNING no` row is on gpt-5.6.
+      // instances` that a `RUNNING no` row is on gpt-5.6. The same holds for
+      // the effort, whose scraped half never expires either: dropping both is
+      // the server's job, done here and in exactly one place.
       model: null,
       reasoningEffort: null,
     };
@@ -724,6 +712,19 @@ export async function buildCurrentOutput(
   const realtimeSnippet = lines.slice(-100).join('\n');
   const autoYesState = getAutoYesState(worktreeId, cliToolId, instanceId);
 
+  // Issue #1785 + #1784: ONE resolution for both halves, not two readers.
+  //
+  // `getResolvedAgentModelInfo` is the reader #1784 documents as "the single
+  // answer both surfaces should read", and it is already what the list API
+  // publishes (`worktree-status-helper`). Reading the model off the hook latch
+  // here while taking the effort from the resolver would let this payload
+  // publish an effort with no model — the exact shape `buildModelByInstance`
+  // calls "unreachable through the API" — on a claude session whose banner the
+  // poller scraped before its first `SessionStart` hook arrived. It also folds
+  // in antigravity's rule that the effort comes from the model id, which a bare
+  // read of the scraped half would drop.
+  const { model, effort } = getResolvedAgentModelInfo(worktreeId, cliToolId, instanceId);
+
   return {
     isRunning: true,
     cliToolId,
@@ -755,7 +756,7 @@ export async function buildCurrentOutput(
     structuredEvents,
     // Issue #1785: straight from the retention layer, unparsed. See the field
     // docs on CurrentOutputPayload for why nothing is normalised on the way out.
-    model: getLastKnownAgentModel(worktreeId, cliToolId, instanceId),
-    reasoningEffort: resolveReasoningEffort(worktreeId, cliToolId, instanceId),
+    model,
+    reasoningEffort: effort,
   };
 }

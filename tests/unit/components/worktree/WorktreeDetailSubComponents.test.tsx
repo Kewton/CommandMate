@@ -848,3 +848,128 @@ describe('DesktopHeader agent-row idle collapse + overflow (Issue #1078)', () =>
     expect(overflowDot?.className).toContain('animate-status-glow');
   });
 });
+
+/**
+ * Issue #1787 acceptance 4: the awaiting-instruction affordance in the detail
+ * header.
+ *
+ * #1787 required a secondary, unmistakably-not-amber representation of
+ * `awaitingInstruction` on the sidebar row AND the worktree detail header. The
+ * sidebar row and the WorktreeCard got theirs; this file was outside that
+ * Issue's contract scope, so the header never did — a green badge on the branch
+ * list that vanished the moment you opened the branch.
+ *
+ * The badge is deliberately worktree-level (one per row, not one per pill): the
+ * sidebar shows it at exactly that granularity, and this row is width-budgeted
+ * by MAX_HEADER_AGENT_PILLS. What is asserted here is that it renders, that it
+ * says the same thing the sidebar says, that it is in the green family and
+ * never the amber one, and that it costs the pill budget nothing.
+ */
+describe('DesktopHeader awaiting-instruction badge (Issue #1787)', () => {
+  type InstanceStatusMap = NonNullable<Worktree['sessionStatusByInstance']>;
+
+  const idle = { isRunning: true, isWaitingForResponse: false, isProcessing: false };
+  const waiting = { isRunning: true, isWaitingForResponse: true, isProcessing: false };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('renders a badge distinct from the amber waiting color when an agent awaits instruction', () => {
+    const sessionStatusByInstance: InstanceStatusMap = {
+      claude: { ...idle, awaitingInstruction: true },
+    };
+    render(
+      <DesktopHeader
+        {...baseProps}
+        instances={mkInstances(['claude'])}
+        sessionStatusByInstance={sessionStatusByInstance}
+      />
+    );
+
+    const badge = screen.getByTestId('desktop-awaiting-instruction-badge');
+    // Same wording as the sidebar badge — one state, one word for it.
+    expect(badge.textContent).toBe('Ready for work');
+    expect(badge.getAttribute('title')).toBe(
+      'The agent finished its turn and is waiting for your next instruction'
+    );
+    // Green family, never the amber `warning` family: "done, give me work" must
+    // not be readable as "answer me".
+    expect(badge.className).toMatch(/success/);
+    expect(badge.className).not.toMatch(/warning/);
+  });
+
+  it('does not render the badge when no instance is awaiting instruction', () => {
+    const { rerender } = render(
+      <DesktopHeader {...baseProps} instances={mkInstances(['claude'])} />
+    );
+    expect(screen.queryByTestId('desktop-awaiting-instruction-badge')).toBeNull();
+
+    rerender(
+      <DesktopHeader
+        {...baseProps}
+        instances={mkInstances(['claude'])}
+        sessionStatusByInstance={{ claude: { ...idle, awaitingInstruction: false } }}
+      />
+    );
+    expect(screen.queryByTestId('desktop-awaiting-instruction-badge')).toBeNull();
+  });
+
+  it('shows both signals when one agent is waiting and another is idle-prompted', () => {
+    const sessionStatusByInstance: InstanceStatusMap = {
+      claude: waiting,
+      codex: { ...idle, awaitingInstruction: true },
+    };
+    render(
+      <DesktopHeader
+        {...baseProps}
+        instances={mkInstances(['claude', 'codex'])}
+        sessionStatusByInstance={sessionStatusByInstance}
+      />
+    );
+
+    // Amber still owns the waiting instance's dot; the green badge says the
+    // other agent is free. Both are true, and both are shown.
+    const waitingDot = screen.getByTestId('desktop-agent-status-claude').querySelector('span');
+    expect(waitingDot?.className).toContain('bg-warning');
+    expect(screen.getByTestId('desktop-awaiting-instruction-badge')).toBeDefined();
+  });
+
+  it('resolves through the per-CLI map when the instance has no entry of its own', () => {
+    render(
+      <DesktopHeader
+        {...baseProps}
+        instances={mkInstances(['claude'])}
+        sessionStatusByCli={{ claude: { ...idle, awaitingInstruction: true } }}
+      />
+    );
+
+    expect(screen.getByTestId('desktop-awaiting-instruction-badge')).toBeDefined();
+  });
+
+  it('costs the pill width budget nothing: one badge for the row, whatever the instance count', () => {
+    const instances: AgentInstance[] = Array.from({ length: 6 }, (_, i) => ({
+      id: `claude-${i}`,
+      cliTool: 'claude' as CLIToolType,
+      alias: `Agent ${i}`,
+      order: i,
+    }));
+    const sessionStatusByInstance = Object.fromEntries(
+      instances.map((inst) => [inst.id, { ...idle, awaitingInstruction: true }])
+    ) as InstanceStatusMap;
+    render(
+      <DesktopHeader
+        {...baseProps}
+        instances={instances}
+        sessionStatusByInstance={sessionStatusByInstance}
+      />
+    );
+
+    // Six awaiting instances → still exactly one badge, and every instance is
+    // still reachable in the row (no pill was displaced to make room).
+    expect(screen.getAllByTestId('desktop-awaiting-instruction-badge')).toHaveLength(1);
+    for (let i = 0; i < 6; i += 1) {
+      expect(screen.getByTestId(`desktop-agent-status-claude-${i}`)).toBeDefined();
+    }
+  });
+});

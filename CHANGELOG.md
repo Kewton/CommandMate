@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **fix(session): 並列開発で宙に浮いた 2 つの配線を繋いだ（`reasoningEffort` が永久に null／詳細ヘッダに指示待ち表現が無い）** (#1785, #1787, #1784)
+  - **どちらも「実装されていなかった」のではなく「着地済みの実装同士が繋がれていなかった」。**
+    Phase 2（#1784・保持層）と Phase 3（#1785・露出）、および #1787（waiting 視認性）が**同時並行で開発され、
+    それぞれのテストは緑のまま**着地したため、境界の穴を CI が一度も検出できなかった。
+    同じ穴を再発させないための記録として、原因を「片方の Issue のバグ」ではなく**並列開発の配線漏れ**として残す
+  - **`commandmate capture <id> --json | jq '.reasoningEffort'` と `commandmate instances` の `EFFORT` 列が、
+    effort を実際に検出できているセッションでも永久に `null` / 空欄だった。**
+    #1785 が「#1784 未着地でも動くように」置いた `resolveReasoningEffort()` seam（`return null` 固定）を
+    誰も差し替えなかったのが原因。#1785 のテストは #1784 の着地で赤にならないよう
+    **値ではなくスキーマ（`null` 許容）で**書かれていたので、両 Issue のテストが緑のまま穴が残った
+  - **修正は `getResolvedAgentModelInfo()` 1 回の呼び出しに集約した（`getLastKnownAgentEffort()` ではなく）。**
+    effort 値そのものはどちらでも同じ（後者は前者の `.effort` を返す薄いラッパ）だが、
+    `model` と `reasoningEffort` を**別々の reader から読むと不整合な payload を publish しうる** —
+    `model` を hooks 専用 latch（`getLastKnownAgentModel`）から読んだままだと、
+    最初の `SessionStart` hook が届く前にバナーを scrape 済みの claude セッションで
+    **model が null なのに effort だけ載る行**（`buildModelByInstance` が "unreachable through the API" と
+    明記している形）が `EFFORT` 列に出る。1 回の解決に統一することで、antigravity の
+    「effort は model id 末尾から導出」規則も自動的に効く
+  - **オーケストレーターの前提と実測が食い違った点（実測を正とした）**: ①同ファイル内の `model` は
+    「既に保持層から解決されている」とされていたが、実際は `getLastKnownAgentModel`（hooks 専用 latch）で、
+    `worktree-status-helper`（Web UI 側）が使う `getResolvedAgentModelInfo` と**別の答えを返していた**。
+    上記のとおり両者を後者に統一した。これは #1783 が「サーバ再起動後の claude の穴は Phase 2 が埋める」と
+    明記した設計の未完了部分でもある（値は厳密に上位互換 — hooks があれば同値、無いときだけ capture が穴を埋める）。
+    ②`commandmate instances` の `EFFORT` 列は「保持層と無関係に空欄」ではなく、
+    `instances` は `worktree-status-helper` ではなく **current-output エンドポイントを instance ごとに叩く**ので、
+    同じ 1 箇所の修正で両 CLI 面が同時に直る（Web UI の pill ツールチップは #1784 時点で既に正しく出ていた）
+  - **未稼働セッション（`running=no`）が `null` を返す規則は変えていない。** 保持層は意図的に期限切れしない
+    （8 時間走るターンは最後まで同じモデル・同じ effort）ので、停止済み行が前プロセスの値を名乗らないよう
+    落とすのは**サーバー側だけ**。effort も model と同じ扱いにした
+  - **#1787 受入条件 4 が部分未達だった** — `awaitingInstruction`（エージェントが「ターンを終えた」と自己申告した状態）の
+    セカンダリ表現は、サイドバー行（`BranchListItem`）と `WorktreeCard` には出ていたが、
+    **worktree 詳細ヘッダ（`DesktopHeader`）に無かった**。同ファイルが #1787 の契約 scope 外だったため。
+    ブランチ一覧では緑バッジが出ているのに、そのブランチを開くと消える状態だった
+  - **サイドバーと同一の表現・同一トークン・同一 i18n キー**（`worktree.awaitingInstruction.badge` / `.label`）を
+    再利用した（新しいデザインを発明しない／重複キーを作らない）。`success`（緑）系で、
+    waiting の `warning`（amber）系とは**決して混同されない**ことが唯一の必須要件
+  - **バッジは pill ごとではなく行に 1 つ**（worktree 単位）。サイドバー行が既にその粒度で出しており
+    （`branch.awaitingInstruction` は `deriveWorktreeWaitingDetail` による全インスタンスの畳み込み）、
+    かつこの行は `MAX_HEADER_AGENT_PILLS` で幅を配給しているため、pill ごとに文字列を足すと
+    **稼働中のインスタンスが「+N」に押し出される**（#1783 が model をツールチップに留めたのと同じ理由）。
+    「+N」トリガーの**後ろ**に置いて pill の幅予算を一切消費せず、既存の表示は 1 バイトも削っていない
+  - **空振り緑の反証（変異注入で実測）**: ①`buildCurrentOutput` の `reasoningEffort` を `null` に戻す →
+    新規 `current-output-effort-wiring-1784` の **9 件中 7 件が赤**（残り 2 件は `null` を期待する規則そのもの）。
+    ②詳細ヘッダの `awaitingInstruction` 描画を外す → `WorktreeDetailSubComponents` の **4 件が赤**。
+    変異は復元し `git status` で確認済み
+
 ### Added
 
 - **feat(cli): モデル / reasoning effort を `instances` と `capture --json` に露出した（モデル/effort 可視化 Phase 3）** (#1785)
