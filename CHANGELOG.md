@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **feat(session): 入力待ちの構造化合成と `waitingKind`/`waitingSince`/`awaitingInstruction` を一覧 API に露出（入力待ち可視化 方針A・基盤）** (#1786)
+  - **一覧 API（`/api/worktrees`・`/api/worktrees/[id]`）が構造化イベントを見るようになった。** これまで per-instance の状態は `detectSessionStatus()`（スクレイパー）だけで決めており、hooks が正確に知っている待ち（#1725 の `prompt_waiting`）は**サイドバー / Home / Sessions / Review / CommandPalette のどのドットにも出ていなかった**。`checkCliToolStatus` で `peekPromptWaiting()` を通し `isWaitingForResponse` を OR で広げる
+  - **副作用の無い read-only 変種（`peekPromptWaiting`）を新設して一覧側はそれを使う。** `resolvePromptWaiting` は corroborate/clear の副作用を持つが、一覧側は (a) `STATUS_DETECTION_CAPTURE_LINES` の狭い窓で検出するため「プロンプトは無い」の証拠が解除規則の想定より弱い、(b) 同じ記録を `blocksSend` が読むので read エンドポイントの誤解除が **send ガードを黙って解除する**（#1708 の穴の再来）、(c) 開いているタブの数で状態機械の結果が変わる、の 3 点から書き手にしない。corroborate を張る側（`buildCurrentOutput` / send ガード）は無変更で、`blocksSend` の意味・挙動も変えていない
+  - **`isWaitingForResponse = resolution.waiting`（Issue 本文の指定）は採らず OR にした。** コードで裏取りした食い違い: `resolution.waiting` は `hasActivePrompt || 構造化` だが、一覧のフラグは `sessionStatusToActivityFlags(status)`＝`status === 'waiting'` で**厳密に広い**（selection list と codex pager は `hasActivePrompt: false` の `waiting`）。そのまま代入すると**サイドバーの選択リストがオレンジから緑に落ちる**回帰になり、本 Issue の非機能要件（ドットを悪化させない）に反する。OR は広げるだけで狭めない
+  - `CliToolSessionStatus` に `waitingKind`（`'prompt'｜'menu'｜'unclassified'｜null`）/ `waitingSince`（epoch ms）/ `awaitingInstruction` を追加し、`sessionStatusByCli` / `sessionStatusByInstance` 経由で露出。per-CLI 集約は kind=優先度（prompt>menu>unclassified）・since=最小値（最長の待ち）・awaiting=OR。クライアント型（`types/models.ts`）は `SessionWaitingDetail` として同期し**全フィールド optional**（既存 fixture・古いサーバの応答がそのまま型検査を通る）。**UI は変更していない**（方針 B/C の担当）
+  - `deriveWaitingKind()` を純関数（`session/waiting-kind.ts`）として切り出した。`menu` の判定式は `current-output-builder` の `isSelectionListActive` と同一で、`SELECTION_LIST_REASONS` の membership を二重に持たない
+  - **待ちエッジの観測点を 1 箇所に閉じた（`session/waiting-episode-state.ts`）。** `observeWaitingEdge()` が false→true / true→false を検出し、`onWaitingTransition()` が**#1788（WS 配信）と #1790（push 発火）の差し込み口**になる（ポーリング回数ではなく交差 1 回につき 1 発火。購読解除関数を返す）。`since` はエピソード中不変で、構造化 episode の `at` を優先する（エージェントは描画と同時に post、scraper は 5 秒キャッシュ越しなので必ず遅れる）。listener の例外は握り潰す（一覧 API の hot path で通知 sink の故障がステータス読みを落としてはならない）。#1736 の規約どおり `globalThis` 保持で、module-identity テストにケースを追加した
+  - **`notification(idle_prompt)` を第 3 の状態にした。** `agent-event-state` に `awaiting_instruction` を併設し、`user_prompt_submit` / `session_start` / `session_end` / 世代交代まで保持する。**`SessionStatus` の 4 値は変更していない** — `idle_prompt` は `ready` のままで、`ready`＝「送信できる」の意味を全消費者に再判断させないため boolean を足す形にした。`stop` では立てない（中間ターンの終了は指示待ちではない）。**この状態にだけ齢の上限を掛けていない**（解除が composer 入力＝`UserPromptSubmit` とセッション終了という取りこぼしようのないイベントで、6 時間 idle のエージェントは実際にまだ指示待ちだから）
+  - 追加の tmux capture は発行しない（構造化状態は in-memory 参照。エッジ記録は try/catch の外で 1 回だけ呼び、未起動・capture 失敗も「待っていない」として開いていたエピソードを閉じる）
+  - **空振り緑の反証**: 構造化合成（`|| peek.waiting`）を無効化する変異を注入し、**4 テストが赤**になることを実測（`waits when the scraper says \`ready\` and the agent reported an open dialog` ほか）。変異は戻して `git status` で確認済み
+
 ## [0.23.0] - 2026-08-14
 
 > **Highlight**: Epic #1720 Phase 4 を完了し、**機械判断の一次ソースを TUI スクレイピングから CLI 自身が申告する構造化イベントへ移す作業を全 6 ツール**（claude / codex / copilot / gemini / antigravity / opencode）**に広げた**。#1759 で `AgentEventSource` 抽象を切り出して「1 ファイル ＋ レジストリ 1 行でツールが 1 つ増える」形にし、#1760〜#1763 / #1779 で 5 ツール分を実装している。**スクレイパは 2 層目のフォールバックとして残るため、構造化イベントが無い環境の挙動は変わらない。**あわせて、この作業中に CI を **5 時間 31 分 57 秒**沈黙させた `/proc` への recursive mkdir 無限ループ（Linux 限定・同期スピンのため `try/catch` にも `testTimeout` にも到達せず OOM も残らない）を、製品コード側の 5 経路でも塞いだ（#1774）。

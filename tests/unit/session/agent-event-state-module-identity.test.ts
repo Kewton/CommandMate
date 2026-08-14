@@ -30,6 +30,7 @@ import type { AskUserQuestionSpec } from '@/lib/hooks/ask-user-question-payload'
 
 type AgentEventStateModule = typeof import('@/lib/session/agent-event-state');
 type SuppressionModule = typeof import('@/lib/polling/auto-yes-suppression-state');
+type WaitingEpisodeModule = typeof import('@/lib/session/waiting-episode-state');
 
 /**
  * Load a module twice, with a registry reset in between, and hand back both
@@ -149,6 +150,35 @@ describe('agent-event-state is shared across module instances (#1736)', () => {
     second.clearAgentStopEvents();
   });
 
+  it('reports awaiting_instruction set by another instance (#1786)', async () => {
+    const { first, second } = await loadTwice<AgentEventStateModule>(
+      () => import('@/lib/session/agent-event-state')
+    );
+    expectsDistinctInstances(first, second, 'isAwaitingInstruction');
+    first.clearAgentStopEvents();
+
+    const at = 1_700_000_350_000;
+    first.recordAgentEvent(WT, TOOL, undefined, {
+      event: 'notification',
+      at,
+      detail: 'idle_prompt',
+      sessionId: 'session-b',
+      message: 'Claude is waiting for your input',
+    });
+
+    expect(second.isAwaitingInstruction(WT, TOOL)).toBe(true);
+    // Released through the other instance too, or the flag would stick after a
+    // prompt the hook route happened to receive on the other bundle.
+    second.recordAgentEvent(WT, TOOL, undefined, {
+      event: 'user_prompt_submit',
+      at: at + 1_000,
+      detail: null,
+      sessionId: 'session-b',
+    });
+    expect(first.isAwaitingInstruction(WT, TOOL)).toBe(false);
+    second.clearAgentStopEvents();
+  });
+
   it('deduplicates against a key claimed by another instance', async () => {
     const { first, second } = await loadTwice<AgentEventStateModule>(
       () => import('@/lib/session/agent-event-state')
@@ -175,6 +205,44 @@ describe('agent-event-state is shared across module instances (#1736)', () => {
     second.clearAgentStopEvents();
 
     expect(first.getLastStopEventAt(WT, TOOL)).toBeNull();
+  });
+});
+
+describe('waiting-episode-state is shared across module instances (#1786)', () => {
+  it('reports an episode opened by another instance, and emits to its listeners', async () => {
+    const { first, second } = await loadTwice<WaitingEpisodeModule>(
+      () => import('@/lib/session/waiting-episode-state')
+    );
+    expectsDistinctInstances(first, second, 'observeWaitingEdge');
+    first.clearWaitingEpisodes();
+    first.clearWaitingTransitionListeners();
+
+    const at = 1_700_000_700_000;
+    // The producer is the list route; the subscribers #1788 / #1790 will add
+    // register from wherever the WS server and the push sender are bundled.
+    const seen: Array<boolean> = [];
+    second.onWaitingTransition((t) => seen.push(t.waiting));
+
+    first.observeWaitingEdge({
+      worktreeId: WT,
+      cliToolId: TOOL,
+      waiting: true,
+      kind: 'prompt',
+      now: at,
+    });
+
+    expect(second.getWaitingEpisode(WT, TOOL)).toEqual({ since: at, kind: 'prompt' });
+    expect(seen).toEqual([true]);
+
+    // …and the level is shared, so the other instance sees a continuing wait
+    // rather than opening a second episode of its own.
+    expect(
+      second.observeWaitingEdge({ worktreeId: WT, cliToolId: TOOL, waiting: true, now: at + 9_000 })
+    ).toBe(at);
+    expect(seen).toEqual([true]);
+
+    second.clearWaitingEpisodes();
+    second.clearWaitingTransitionListeners();
   });
 });
 

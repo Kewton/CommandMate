@@ -86,6 +86,29 @@ export interface GitStatus {
 }
 
 /**
+ * The waiting taxonomy published per agent instance (Issue #1786).
+ *
+ * Client mirror of `CliToolSessionStatus`'s waiting fields in
+ * `lib/session/worktree-status-helper.ts`. Every field is optional here and
+ * required there, deliberately: the server always fills them, but a payload from
+ * an older server — and every fixture written before this Issue — has none of
+ * them, and a consumer must go on compiling and rendering exactly as it did.
+ * Read them null-safely; there is no UI change in #1786 itself.
+ */
+export interface SessionWaitingDetail {
+  /**
+   * What kind of wait: `prompt` is answerable from the app, `menu` needs the
+   * terminal (selection list / pager), `unclassified` is a wait only the agent's
+   * structured events reported. null / absent when not waiting.
+   */
+  waitingKind?: 'prompt' | 'menu' | 'unclassified' | null;
+  /** Epoch ms the current wait began; stable for its whole duration. */
+  waitingSince?: number | null;
+  /** The agent said it is waiting for its next instruction (`idle_prompt`). */
+  awaitingInstruction?: boolean;
+}
+
+/**
  * Worktree representation
  */
 export interface Worktree {
@@ -139,14 +162,14 @@ export interface Worktree {
   /** Whether Claude is actively processing a request (last message from user) */
   isProcessing?: boolean;
   /** Session status per CLI tool */
-  sessionStatusByCli?: Partial<Record<CLIToolType, { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean }>>;
+  sessionStatusByCli?: Partial<Record<CLIToolType, { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean } & SessionWaitingDetail>>;
   /**
    * Session status per agent instance (Issue #875), keyed by instanceId.
    * Primary instances are keyed by their CLI tool id (instanceId === cliToolId);
    * alias instances by their own instanceId. Each entry is that instance's own
    * (un-aggregated) status, so the per-instance UI can resolve each independently.
    */
-  sessionStatusByInstance?: Partial<Record<string, { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean }>>;
+  sessionStatusByInstance?: Partial<Record<string, { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean } & SessionWaitingDetail>>;
   /** Whether this worktree is marked as favorite */
   favorite?: boolean;
   /** Worktree status: ready, in_progress, in_review, done, or null if not set */

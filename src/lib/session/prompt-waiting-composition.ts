@@ -247,6 +247,72 @@ export function resolvePromptWaiting({
   };
 }
 
+/** What a read-only caller is allowed to know. See {@link peekPromptWaiting}. */
+export interface PromptWaitingPeek {
+  /** The same OR rule {@link PromptWaitingResolution.waiting} publishes. */
+  waiting: boolean;
+  /** The scraper's own half. */
+  scraperWaiting: boolean;
+  /**
+   * The structured record as it stands, or null — the live object, but a peek
+   * caller must not write to it.
+   */
+  structured: StructuredPromptWaitingState | null;
+}
+
+export interface PeekPromptWaitingParams {
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  instanceId?: string;
+  scraper: ScraperPromptVerdict;
+  /** Epoch ms; defaults to now. */
+  now?: number;
+}
+
+/**
+ * The OR rule without the release rule: read both layers, change neither
+ * (Issue #1786).
+ *
+ * Added for the list API (`/api/worktrees`), which had been publishing the
+ * scraper's verdict alone and therefore showed no dot at all for a dialog only
+ * the agent's events could see. It needs the composed answer; what it must not
+ * have is {@link resolvePromptWaiting}'s side effects, for three reasons:
+ *
+ *  - **it is not the same evidence.** The list path detects on
+ *    `STATUS_DETECTION_CAPTURE_LINES`, a deliberately smaller window than the
+ *    detail path's, so its "no prompt here" is a weaker statement than the one
+ *    the release rule was written for. Letting it clear a corroborated episode
+ *    would retire a record on evidence #1725 never intended.
+ *  - **`blocksSend` reads the same record.** A list poll that wrongly cleared it
+ *    would silently disarm the `send` guard — the #1708 hazard, restored by a
+ *    read endpoint. The Issue's own instruction is that `blocksSend` must not
+ *    change, and the cheapest way to guarantee that is to write nothing.
+ *  - **it is polled by every open tab, for every worktree.** A state machine
+ *    whose outcome depends on how many browsers are watching is not one anybody
+ *    can reason about later.
+ *
+ * What the list path gives up is arming corroboration. It costs nothing that was
+ * ever there: the arming callers (`current-output-builder`, the `send` guard)
+ * are unchanged, and the structured record's own releases — `Stop`,
+ * `user_prompt_submit`, `post_tool_use`, `Notification(idle_prompt)`, a
+ * generation change — are what retire it in the ordinary case, with
+ * {@link agent-event-state!STRUCTURED_STATE_MAX_AGE_MS} as the backstop.
+ */
+export function peekPromptWaiting({
+  worktreeId,
+  cliToolId,
+  instanceId,
+  scraper,
+  now = Date.now(),
+}: PeekPromptWaitingParams): PromptWaitingPeek {
+  const structured = getStructuredPromptWaiting(worktreeId, cliToolId, instanceId, now);
+  return {
+    waiting: scraper.hasActivePrompt || structured !== null,
+    scraperWaiting: scraper.hasActivePrompt,
+    structured,
+  };
+}
+
 /**
  * Why this structured record may not refuse a send, or null when it may.
  *
