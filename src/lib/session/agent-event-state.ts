@@ -40,7 +40,7 @@
 
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
-import type { AgentEventType } from '@/lib/hooks/agent-event-types';
+import { MAX_EVENT_DETAIL_LENGTH, type AgentEventType } from '@/lib/hooks/agent-event-types';
 import type { AskUserQuestionSpec } from '@/lib/hooks/ask-user-question-payload';
 import { ASK_USER_QUESTION_TOOL } from '@/lib/hooks/permission-request-payload';
 import { agentEventToSessionStatus, type StructuredStatusVerdict } from '@/lib/session/status-mapping';
@@ -95,6 +95,8 @@ declare global {
   var __agentEventRecentKeys: Map<string, number> | undefined;
   // eslint-disable-next-line no-var
   var __agentEventAwaitingInstruction: Map<string, AwaitingInstructionRecord> | undefined;
+  // eslint-disable-next-line no-var
+  var __agentEventLastModel: Map<string, string> | undefined;
 }
 
 /** compositeKey -> epoch ms of the most recent stop event. */
@@ -124,6 +126,24 @@ const recentEventKeys = globalThis.__agentEventRecentKeys ??
 /** compositeKey -> the agent's own "I am waiting for instructions" (#1786). */
 const awaitingInstruction = globalThis.__agentEventAwaitingInstruction ??
   (globalThis.__agentEventAwaitingInstruction = new Map<string, AwaitingInstructionRecord>());
+
+/**
+ * compositeKey -> the last non-null model this instance reported (Issue #1783).
+ *
+ * A *separate* map, not a field read off {@link lastAgentEvent}, and that is the
+ * whole point of it. `lastAgentEvent` is replaced wholesale on every delivery,
+ * and Claude puts the model on `SessionStart` and on nothing else — so the very
+ * next `UserPromptSubmit` would overwrite the only record that ever knew it, and
+ * the UI would show the model for the fraction of a second between session start
+ * and the first prompt. Keeping the last *non-null* sighting separately is what
+ * makes "which model is this session on" answerable at all for that tool.
+ *
+ * Never written with null: absent means "nothing has ever said", which is the
+ * honest state for gemini, copilot, and any session that predates this server
+ * process. See {@link getLastKnownAgentModel}.
+ */
+const lastAgentModel = globalThis.__agentEventLastModel ??
+  (globalThis.__agentEventLastModel = new Map<string, string>());
 
 /**
  * How long two identical events count as one delivery.
@@ -174,6 +194,16 @@ export interface AgentEventRecord {
    * (D3). Absent for every event that carries no message.
    */
   message?: string | null;
+  /**
+   * The model the agent reported running (Issue #1783), or null/absent.
+   *
+   * Absent for a caller that has nothing to say, null for one that looked and
+   * found nothing — the two are treated identically here. What is *not* stored
+   * on this record is the answer to "which model is this instance on": the
+   * record is replaced on every event and most events carry no model, so that
+   * question is answered by {@link getLastKnownAgentModel} instead.
+   */
+  model?: string | null;
 }
 
 /**
@@ -218,6 +248,12 @@ export function recordAgentEvent(
 ): void {
   const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
   lastAgentEvent.set(key, record);
+  // Issue #1783: latch, never clear. An event without a model is the ordinary
+  // case (Claude sends one on `SessionStart` alone), and reading it as "the
+  // model is now unknown" would blank the display on the very next event.
+  if (typeof record.model === 'string' && record.model !== '') {
+    lastAgentModel.set(key, record.model.slice(0, MAX_EVENT_DETAIL_LENGTH));
+  }
   applyAskUserQuestionTransition(key, record);
   if (record.event === 'session_start') {
     // The agent restarting inside a pane CommandMate never touched — `claude`
@@ -427,6 +463,38 @@ export function getLastAgentEvent(
 }
 
 /**
+ * The last model this instance reported running, or null (Issue #1783).
+ *
+ * "Last **non-null**", which is the only useful reading: three of the four tools
+ * that publish a model publish it on some events and not others, and Claude
+ * publishes it on exactly one. Reading `getLastAgentEvent()?.model` would
+ * therefore answer null for almost every moment of almost every session.
+ *
+ * Deliberately **not** bounded by {@link STRUCTURED_STATE_MAX_AGE_MS}, unlike
+ * every other reader in this module. That bound exists because a *status* that
+ * nothing has refreshed is a claim about right now that may have expired — a
+ * lost `Stop` leaving the layer asserting `running` forever. A model is not that
+ * kind of claim: an eight-hour turn is on the same model at the end as at the
+ * start, and expiring it would blank the display on precisely the long-running
+ * sessions this is most useful for. What *is* honoured is identity: a new
+ * generation or a discarded session drops the value, because the process that
+ * reported it is gone. See {@link beginAgentEventGeneration} /
+ * {@link discardAgentEventState}.
+ *
+ * In-memory only — nothing is written to `session_states`. After a server
+ * restart codex and antigravity repopulate on their next event; Claude stays
+ * null until its next `SessionStart`, a gap Phase 2 (#1784) closes from the
+ * terminal frame.
+ */
+export function getLastKnownAgentModel(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): string | null {
+  return lastAgentModel.get(buildCompositeKey(worktreeId, cliToolId, instanceId)) ?? null;
+}
+
+/**
  * How long a structured verdict is trusted after the event that produced it
  * (Issue #1723).
  *
@@ -490,6 +558,13 @@ export function beginAgentEventGeneration(
   // And for "waiting for your input" (Issue #1786): a new process has not asked
   // for anything yet.
   awaitingInstruction.delete(key);
+  // And for the model (Issue #1783): a new generation is a new agent process,
+  // which may have been launched on a different model entirely. Latching across
+  // one would show the *previous* process's model with nothing to correct it —
+  // Claude only re-reports on `SessionStart`, which lands moments later anyway.
+  // A `/clear` is deliberately not affected: it reaches `recordAgentEvent` as
+  // `session_end` + `session_start`, never this function.
+  lastAgentModel.delete(key);
 }
 
 /**
@@ -525,6 +600,8 @@ export function discardAgentEventState(
   promptWaiting.delete(key);
   askUserQuestion.delete(key);
   awaitingInstruction.delete(key);
+  // Issue #1783: the session that was on this model no longer exists.
+  lastAgentModel.delete(key);
 }
 
 /**
@@ -1005,4 +1082,8 @@ export function clearAgentStopEvents(): void {
   promptWaiting.clear();
   askUserQuestion.clear();
   awaitingInstruction.clear();
+  // Issue #1783. CI runs with `fileParallelism: false`, so every suite in the
+  // repo shares this process — a model latched by one test would otherwise be
+  // read by another, in file order, and only in CI.
+  lastAgentModel.clear();
 }

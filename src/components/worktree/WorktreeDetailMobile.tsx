@@ -31,6 +31,7 @@ import type { UseFileSearchReturn } from '@/hooks/useFileSearch';
 import type { ShowToast } from '@/types/markdown-editor';
 import type { HistoryDisplayLimit } from '@/config/history-display-config';
 import {
+  buildModelByInstance,
   WorktreeInfoFields,
   useDescriptionEditor,
 } from '@/components/worktree/WorktreeDetailSubComponents';
@@ -383,6 +384,11 @@ export const MobileContent = memo(function MobileContent({
             onInstancesChange={onInstancesChange}
             visibleInstanceIds={visibleInstanceIds}
             onToggleInstanceVisible={onToggleInstanceVisible}
+            // Issue #1783: the per-instance model, projected out of the status
+            // map this component already receives. Built inline rather than
+            // memoised because `MobileContent` re-renders on the same cadence
+            // as `worktree` anyway — the whole switch below is keyed off it.
+            modelByInstance={buildModelByInstance(worktree?.sessionStatusByInstance)}
           />
         </ErrorBoundary>
       );

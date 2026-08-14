@@ -26,7 +26,8 @@ import { GLOBAL_SESSION_WORKTREE_ID } from '@/lib/session/global-session-constan
 import { peekPromptWaiting } from '@/lib/session/prompt-waiting-composition';
 import { deriveWaitingKind, type WaitingKind } from '@/lib/session/waiting-kind';
 import { observeWaitingEdge } from '@/lib/session/waiting-episode-state';
-import { isAwaitingInstruction } from '@/lib/session/agent-event-state';
+// Issue #1783 adds `getLastKnownAgentModel` alongside #1786's `isAwaitingInstruction`.
+import { getLastKnownAgentModel, isAwaitingInstruction } from '@/lib/session/agent-event-state';
 import type { getMessages as GetMessagesFn, markPendingPromptsAsAnswered as MarkPendingFn, getAgentInstances as GetAgentInstancesFn } from '@/lib/db';
 
 function getStatusCaptureLines(cliToolId: CLIToolType): number {
@@ -74,6 +75,24 @@ export interface CliToolSessionStatus {
    * next `user_prompt_submit` / `session_start` / `session_end`.
    */
   awaitingInstruction: boolean;
+  /**
+   * The model this instance last reported running, or absent (Issue #1783).
+   *
+   * Comes from the structured hook events, not from the terminal frame, so it is
+   * present only for tools that publish one (claude / codex / antigravity /
+   * opencode) and only once one has arrived. **The key is omitted rather than
+   * set to null when nothing is known** — this object is compared with `toEqual`
+   * in existing suites, and an always-present `model: null` would fail them
+   * while saying nothing the absence does not.
+   *
+   * **Read it from `sessionStatusByInstance` only.** A model belongs to one
+   * instance, and `sessionStatusByCli` is an aggregate over all instances of a
+   * tool: {@link mergeSessionStatus} drops the field when there are two or more,
+   * so the per-CLI entry carries a model exactly when the fold had nothing to
+   * fold. The client type in `src/types/models.ts` declares it on the
+   * per-instance map alone for that reason.
+   */
+  model?: string | null;
 }
 
 /** Aggregated session status result for a worktree */
@@ -261,6 +280,14 @@ async function detectInstanceSessionStatus(
     structuredSince: structuredWaitingSince,
   });
 
+  // Issue #1783: the model the agent's own hooks reported, independent of the
+  // tmux probe, the screen scrape and the waiting taxonomy above. Attached
+  // regardless of `isRunning`: for Claude the flag is gated on a health check
+  // that can fail transiently, and blanking a correct model on that would
+  // flicker. Absent — not null — when nothing has ever reported one, so a status
+  // object for a tool without hooks keeps exactly the shape #1786 left it with.
+  const model = getLastKnownAgentModel(worktreeId, cliToolId, instanceId);
+
   return {
     isRunning,
     isWaitingForResponse,
@@ -270,6 +297,7 @@ async function detectInstanceSessionStatus(
     // A dead session is not awaiting anything; the flag describes the process
     // that reported it, and that process is gone.
     awaitingInstruction: isRunning && isAwaitingInstruction(worktreeId, cliToolId, instanceId),
+    ...(model !== null ? { model } : {}),
   };
 }
 

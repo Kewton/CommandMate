@@ -99,6 +99,15 @@ export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProp
    * omitted the End (×) button is not rendered (backward compatible).
    */
   onRequestSessionEnd?: (target: SessionKillTarget) => void;
+  /**
+   * Issue #1783: this split's agent model, passed straight to
+   * `TerminalSplitPane`. Declared here rather than in
+   * `TerminalSplitPaneCoreProps` so the shared core type keeps its pre-#1783
+   * shape; the parent resolves it from
+   * `worktree.sessionStatusByInstance[instanceId].model`. Optional — omitting it
+   * renders no model, which is the correct display for a tool that reports none.
+   */
+  agentModel?: string | null;
 }
 
 export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
@@ -120,6 +129,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   onDropInstance,
   draggedInstanceId,
   onRequestSessionEnd,
+  agentModel,
 }: TerminalSplitPaneContentProps) {
   // Issue #869: resolve the instance id this split targets. Defaults to the
   // primary instance (`=== cliToolId`) so pre-#869 single-instance behavior —
@@ -611,6 +621,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       // Issue #1079: the derived agent status now renders as a StatusDot inside
       // the selector trigger (session title bar). BranchStatus ⊂ StatusDotStatus.
       status={cliStatus}
+      // Issue #1783: the model the agent reported, shown beside the alias.
+      agentModel={agentModel}
       onFocus={onFocus}
       attaching={terminal.attaching}
       terminal={terminalSlot}

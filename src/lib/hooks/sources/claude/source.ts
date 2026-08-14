@@ -127,6 +127,14 @@ export const claudeAgentEventSource: AgentEventSource = definePushHookSource({
   conversationIdFields: SESSION_ID_FIELDS,
   toolCallIdFields: TOOL_CALL_ID_FIELDS,
 
+  // Issue #1783. Claude sends it on `SessionStart` and nowhere else — checked
+  // against every fixture in `tests/fixtures/hooks/claude/`, where only
+  // `session-start.json` carries the key. So the value has to be *remembered*
+  // rather than read off the newest event; `getLastKnownAgentModel` is what
+  // does that. The value arrives with its own suffix (`claude-opus-5[1m]`) and
+  // is not parsed here: a display string the tool chose is the tool's to spell.
+  modelFields: ['model'],
+
   // S2.
   extractDetail: extractSnakeCaseEventDetail,
 

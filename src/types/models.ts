@@ -169,7 +169,20 @@ export interface Worktree {
    * alias instances by their own instanceId. Each entry is that instance's own
    * (un-aggregated) status, so the per-instance UI can resolve each independently.
    */
-  sessionStatusByInstance?: Partial<Record<string, { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean } & SessionWaitingDetail>>;
+  sessionStatusByInstance?: Partial<Record<string, {
+    isRunning: boolean;
+    isWaitingForResponse: boolean;
+    isProcessing: boolean;
+    /**
+     * The model this instance last reported running (Issue #1783), or absent.
+     *
+     * Read from the agent's own structured hook events, so it is present only
+     * for the tools that publish one (claude / codex / antigravity / opencode)
+     * and only once one has arrived. Absent means "nothing has said" — render
+     * nothing rather than an "unknown" badge.
+     */
+    model?: string | null;
+  } & SessionWaitingDetail>>;
   /** Whether this worktree is marked as favorite */
   favorite?: boolean;
   /** Worktree status: ready, in_progress, in_review, done, or null if not set */
