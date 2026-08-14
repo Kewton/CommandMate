@@ -21,6 +21,9 @@ import {
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { GEMINI_PROMPT_PATTERN, stripAnsi } from '../detection/cli-patterns';
+import { GEMINI_CLI_TOOL_ID } from '@/lib/hooks/sources';
+import { injectGeminiHookSettings } from '@/lib/hooks/sources/gemini/source';
+import { beginAgentSession, prepareAgentLaunch } from '@/lib/session/agent-session-lifecycle';
 import { createLogger } from '@/lib/logger';
 import {
   TUI_SESSION_CREATE_WAIT_MS,
@@ -96,6 +99,14 @@ export class GeminiTool extends BaseCLITool {
       return;
     }
 
+    // Issue #1762: fence this instance's structured events off from the process
+    // that used to hold the same (worktree, tool, instance) key. On the creation
+    // path only — the reuse branch above has already returned — and before the
+    // pane exists, so no live pane is ever judged against a stale generation.
+    // Bumped even if the launch below then fails: falling back to the screen
+    // scraper is always safe, trusting a dead session's events is not.
+    beginAgentSession({ worktreeId, cliToolId: GEMINI_CLI_TOOL_ID, instanceId });
+
     try {
       // Create tmux session. Scrollback depth comes from the shared
       // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
@@ -107,8 +118,28 @@ export class GeminiTool extends BaseCLITool {
       // Wait a moment for the session to be created
       await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
 
-      // Start Gemini CLI in interactive mode (no flags = interactive REPL)
-      await sendKeys(sessionName, 'gemini', true);
+      // Issue #1762: hand this worktree its own hooks config, merged into any
+      // `.gemini/settings.json` that is already there. Written from here rather
+      // than from the source's `prepareLaunch` because the worktree path is the
+      // one input `AgentInstanceRef` does not carry, and gemini is the only tool
+      // whose config is scoped to a worktree. Fail-open: a config that cannot be
+      // written costs the events and nothing else.
+      injectGeminiHookSettings(worktreePath, {
+        worktreeId,
+        cliToolId: GEMINI_CLI_TOOL_ID,
+        instanceId,
+      });
+
+      // Start Gemini CLI in interactive mode (no flags = interactive REPL).
+      // `prepareAgentLaunch` prefixes `CM_HOOK_URL`, which is what tells the
+      // receiver which instance an event came from — `.gemini/settings.json` is
+      // per worktree and cannot. `CM_AGENT_HOOKS_INJECT=0` returns the bare
+      // command, unchanged from before this Issue.
+      const launchCommand = prepareAgentLaunch(
+        { worktreeId, cliToolId: GEMINI_CLI_TOOL_ID, instanceId },
+        this.command
+      ).command;
+      await sendKeys(sessionName, launchCommand, true);
 
       // Wait for Gemini to initialize (minimum wait for banner/auth)
       await new Promise((resolve) => setTimeout(resolve, GEMINI_INIT_WAIT_MS));

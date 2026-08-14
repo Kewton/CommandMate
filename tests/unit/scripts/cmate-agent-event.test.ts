@@ -228,8 +228,13 @@ describe('failures are refused rather than sent', () => {
   });
 
   it('exits non-zero and sends nothing for an unrecognized hook event name', () => {
+    // `PreCompact` rather than `PreToolUse`, which this case used to name:
+    // Issue #1726 gave `pre_tool_use` a word in AGENT_EVENT_TYPES and #1759
+    // taught the relay to send it, so it is no longer an unrecognised name.
+    // `PreCompact` is a real Claude/codex event that still has no counterpart,
+    // which is what this case is about. The expectations are unchanged.
     const result = run(['--stdin-json'], {
-      stdin: JSON.stringify({ hook_event_name: 'PreToolUse', cwd: '/r' }),
+      stdin: JSON.stringify({ hook_event_name: 'PreCompact', cwd: '/r' }),
     });
 
     expect(result.status).toBe(2);
@@ -277,7 +282,13 @@ describe('correlation keys and the widened vocabulary (Issue #1722)', () => {
   });
 
   it('still refuses the decision-bearing events, which are out of scope', () => {
-    for (const name of ['PreToolUse', 'PermissionRequest']) {
+    // `PreToolUse` has left this list (Issue #1759). It was here because #1722
+    // had not wired it up yet, not because it decides anything — #1726 made it
+    // an ordinary observation with a word of its own, and the relay now sends
+    // it. `PermissionRequest` stays: its response body *is* a verdict the agent
+    // obeys, so it belongs to its own receiver and must never travel down the
+    // fire-and-forget path. The expectations below are unchanged.
+    for (const name of ['PermissionRequest']) {
       const result = run(['--stdin-json'], {
         stdin: JSON.stringify({ hook_event_name: name, cwd: '/r' }),
       });

@@ -3,7 +3,11 @@
  * Issue #988: Antigravity (agy) CLI support (Phase A)
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+import { mkdtempSync, realpathSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 import { AntigravityTool } from '@/lib/cli-tools/antigravity';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
@@ -46,12 +50,53 @@ const IDLE_FOOTER = '? for shortcuts';
 const TRUST_DIALOG =
   'Do you trust the contents of this project?\n> Yes, I trust this folder\n  No, exit\n↑/↓ Navigate · enter Confirm';
 
+/**
+ * The launch command `startSession` now types into the pane (Issue #1762,
+ * extended by #1779).
+ *
+ * `agy` reads one hooks file for the whole machine, so the worktree and instance
+ * cannot be written into it and travel in the environment instead. The port is
+ * whatever the environment resolves to, hence the pattern rather than a literal.
+ * `--model` still goes last, so #989's quoting is unchanged by the prefix.
+ *
+ * Two variables since #1779: the observation events and the approval
+ * adjudication go to receivers with opposite contracts, and the adjudication
+ * hook reads an absent `CM_PERMISSION_HOOK_URL` as "this agy is not
+ * CommandMate's, abstain" — which is the only thing keeping the machine-global
+ * hooks file out of the operator's own agy sessions.
+ */
+function agyLaunch(modelSuffix = ''): RegExp {
+  const escaped = modelSuffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const query = `\\?tool=antigravity&worktreeId=test-wt&instanceId=antigravity`;
+  return new RegExp(
+    `^CM_HOOK_URL='http://127\\.0\\.0\\.1:\\d+/api/hooks/agent-event${query}' ` +
+      `CM_PERMISSION_HOOK_URL='http://127\\.0\\.0\\.1:\\d+/api/hooks/permission-request${query}' ` +
+      `'agy'${escaped}$`
+  );
+}
+
 describe('AntigravityTool', () => {
   let tool: AntigravityTool;
+  const tempHomes: string[] = [];
 
   beforeEach(() => {
     tool = new AntigravityTool();
     vi.clearAllMocks();
+    // Issue #1762: `startSession` merges CommandMate's named hook into
+    // `~/.gemini/config/hooks.json`, which is a real file on a real developer's
+    // machine. `os.homedir()` reads `$HOME` on POSIX, so a private HOME is all
+    // that stands between this suite and the operator's agy configuration.
+    const home = realpathSync(mkdtempSync(join(tmpdir(), 'antigravity-test-home-')));
+    tempHomes.push(home);
+    vi.stubEnv('HOME', home);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    while (tempHomes.length > 0) {
+      const home = tempHomes.pop();
+      if (home) removeTempDir(home);
+    }
   });
 
   describe('Tool properties', () => {
@@ -161,8 +206,9 @@ describe('AntigravityTool', () => {
         await promise;
 
         expect(createSession).toHaveBeenCalled();
-        // Contract: launch the agy binary in interactive mode.
-        expect(sendKeys).toHaveBeenCalledWith(SESSION, 'agy', true);
+        // Contract: launch the agy binary in interactive mode, behind the
+        // Issue #1762 correlation prefix.
+        expect(sendKeys).toHaveBeenCalledWith(SESSION, expect.stringMatching(agyLaunch()), true);
         // Trust dialog confirmed with a single Enter (default "Yes, I trust this folder").
         expect(sendSpecialKey).toHaveBeenCalledWith(SESSION, 'Enter');
       } finally {
@@ -203,7 +249,11 @@ describe('AntigravityTool', () => {
           await vi.advanceTimersByTimeAsync(40000);
           await promise;
 
-          expect(sendKeys).toHaveBeenCalledWith(SESSION, "agy --model 'Gemini 3.1 Pro (High)'", true);
+          expect(sendKeys).toHaveBeenCalledWith(
+            SESSION,
+            expect.stringMatching(agyLaunch(" --model 'Gemini 3.1 Pro (High)'")),
+            true
+          );
         } finally {
           vi.useRealTimers();
         }
@@ -221,7 +271,7 @@ describe('AntigravityTool', () => {
           await vi.advanceTimersByTimeAsync(40000);
           await promise;
 
-          expect(sendKeys).toHaveBeenCalledWith(SESSION, 'agy', true);
+          expect(sendKeys).toHaveBeenCalledWith(SESSION, expect.stringMatching(agyLaunch()), true);
         } finally {
           vi.useRealTimers();
         }
@@ -239,7 +289,11 @@ describe('AntigravityTool', () => {
           await vi.advanceTimersByTimeAsync(40000);
           await promise;
 
-          expect(sendKeys).toHaveBeenCalledWith(SESSION, `agy --model 'model'\\''; rm -rf ~ #'`, true);
+          expect(sendKeys).toHaveBeenCalledWith(
+            SESSION,
+            expect.stringMatching(agyLaunch(` --model 'model'\\''; rm -rf ~ #'`)),
+            true
+          );
         } finally {
           vi.useRealTimers();
         }

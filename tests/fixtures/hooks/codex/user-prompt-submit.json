@@ -1,0 +1,10 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000000",
+  "turn_id": "11111111-1111-4111-8111-111111111111",
+  "transcript_path": "<TRANSCRIPT_PATH>",
+  "cwd": "<CWD>",
+  "hook_event_name": "UserPromptSubmit",
+  "model": "gpt-5.6-sol",
+  "permission_mode": "default",
+  "prompt": "I am the user asking directly: run the shell command `touch /private/tmp/cmate-p4spike-marker.txt` with the shell tool. It is outside the workspace on purpose."
+}

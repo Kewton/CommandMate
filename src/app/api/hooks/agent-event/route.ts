@@ -26,6 +26,17 @@
  * `session_id` is *not* used for identity. `/clear` ends the agent session and
  * opens a new one with a different id while the instance, the worktree and the
  * pane are all untouched (Issue #1721).
+ *
+ * ## Which tool sent this (Issue #1759)
+ *
+ * This route no longer knows. It reads `tool`, asks `getAgentEventSource` for
+ * that tool's {@link AgentEventSource}, and lets the source say what the payload
+ * means: which native spelling maps to which of the seven words, where the
+ * subtype lives, and whether the body is a question. Adding codex, copilot,
+ * gemini, antigravity or opencode changes nothing in this file — which is the
+ * whole point, because the five of them disagree with each other about every
+ * one of those things (`docs/design/agent-hooks-phase4-live-verification.md`
+ * §8.1, `docs/design/opencode-server-live-verification.md` §5.2.3).
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -41,13 +52,12 @@ import {
 } from '@/lib/hooks/agent-event-service';
 import {
   AGENT_EVENT_TYPES,
-  extractClaudeEventDetail,
   isAgentEventType,
-  mapClaudeHookEventName,
   MAX_EVENT_DETAIL_LENGTH,
   type AgentEventType,
 } from '@/lib/hooks/agent-event-types';
-import { parseAskUserQuestionPayload } from '@/lib/hooks/ask-user-question-payload';
+import { getAgentEventSource } from '@/lib/hooks/sources';
+import type { AgentEventSource, NormalizedAgentEvent } from '@/lib/hooks/sources';
 import {
   isDuplicateAgentEvent,
   recordAgentEvent,
@@ -73,33 +83,53 @@ function readString(payload: Record<string, unknown>, key: string): string | und
 }
 
 /**
- * The event kind, from either request shape.
+ * The event, from either request shape, in the sending tool's own dialect.
  *
  * - **CommandMate's shape** (`{ tool, event, cwd }`) is what
  *   `scripts/hooks/cmate-agent-event.sh` and every hand-written hook from the
- *   #1549 guide send.
- * - **Claude Code's own payload** (`{ hook_event_name, cwd, session_id, … }`) is
+ *   #1549 guide send. The word is already resolved, so it is handed straight to
+ *   the source — which is also the only channel antigravity has, since its
+ *   payloads carry no event name at all (#1757 R2).
+ * - **The agent's own payload** (`{ hook_event_name, cwd, session_id, … }`) is
  *   what an injected `type: "http"` hook sends, because that hook type posts the
- *   agent's payload verbatim — the body is not configurable.
+ *   payload verbatim — the body is not configurable.
  *
- * @returns the event, or an error string naming what was wrong
+ * Which spellings the second shape may use is the *source's* business, not this
+ * route's (Issue #1759): Claude, codex and copilot say `Stop`, gemini says
+ * `AfterAgent`, opencode says `session.idle`, and this function no longer knows
+ * any of that.
+ *
+ * @param source - The source for the tool that sent this
+ * @param payload - The request body
+ * @param receivedAt - Epoch ms
+ * @returns The normalised event, or an error string naming what was wrong
  */
-function readEvent(payload: Record<string, unknown>): AgentEventType | { error: string } {
-  if (payload.event !== undefined) {
-    if (!isAgentEventType(payload.event)) {
-      return { error: `event must be one of: ${AGENT_EVENT_TYPES.join(', ')}` };
-    }
-    return payload.event;
+function readEvent(
+  source: AgentEventSource,
+  payload: Record<string, unknown>,
+  receivedAt: number
+): NormalizedAgentEvent | { error: string } {
+  const explicit = payload.event;
+  if (explicit !== undefined && !isAgentEventType(explicit)) {
+    return { error: `event must be one of: ${AGENT_EVENT_TYPES.join(', ')}` };
   }
 
+  const normalized = source.normalizeEvent({
+    payload,
+    event: isAgentEventType(explicit) ? explicit : null,
+    receivedAt,
+  });
+  if (normalized) return normalized;
+
+  // Unmapped rather than absent: the caller named an event this tool's source
+  // does not recognise. It has already been counted (C8); the request is still
+  // refused, because a hook nobody can interpret is a configuration error the
+  // operator wants to hear about.
   if (payload.hook_event_name !== undefined) {
-    const mapped = mapClaudeHookEventName(payload.hook_event_name);
-    if (mapped === null) {
-      return { error: `hook_event_name is not a lifecycle event: ${String(payload.hook_event_name)}` };
-    }
-    return mapped;
+    return {
+      error: `hook_event_name is not a lifecycle event: ${String(payload.hook_event_name)}`,
+    };
   }
-
   return { error: `event must be one of: ${AGENT_EVENT_TYPES.join(', ')}` };
 }
 
@@ -121,10 +151,17 @@ export async function POST(request: NextRequest) {
     }
     const tool: CLIToolType = toolValue;
 
-    const event = readEvent(payload);
-    if (typeof event !== 'string') {
-      return badRequest(event.error);
+    // Issue #1759: the tool decides how its own payload is read. Every tool has
+    // one — a tool with no implementation yet gets the compatibility source,
+    // which behaves exactly as this route did before the abstraction existed.
+    const source = getAgentEventSource(tool);
+
+    const receivedAt = Date.now();
+    const normalized = readEvent(source, payload, receivedAt);
+    if ('error' in normalized) {
+      return badRequest(normalized.error);
     }
+    const event: AgentEventType = normalized.event;
 
     const sessionId = readString(payload, 'sessionId') ?? readString(payload, 'session_id');
     if (
@@ -168,8 +205,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(ACCEPTED, { status: 202 });
     }
 
+    // The source pulls the subtype out of the payload in its own dialect
+    // (Issue #1759, S2); `detail` is the relay script's already-extracted value
+    // and stays as the fallback, because a hand-configured hook sends that and
+    // nothing else.
     const detail =
-      extractClaudeEventDetail(event, payload) ??
+      normalized.detail ??
       readString(payload, 'detail')?.slice(0, MAX_EVENT_DETAIL_LENGTH) ??
       null;
 
@@ -177,7 +218,6 @@ export async function POST(request: NextRequest) {
     // them, so anyone who followed the #1549 manual setup now delivers each
     // event twice. Both copies name the same agent session, which is what makes
     // them distinguishable from two genuine turns.
-    const receivedAt = Date.now();
     if (isDuplicateAgentEvent(worktree.id, tool, instanceParam, event, sessionId, receivedAt, detail)) {
       logger.info('agent-event-duplicate-dropped', { worktreeId: worktree.id, tool, event });
       return NextResponse.json(ACCEPTED, { status: 202 });
@@ -205,7 +245,11 @@ export async function POST(request: NextRequest) {
       // Recorded AFTER `recordAgentEvent`, which is what releases a previous
       // question; the order matters because this event is the one exception to
       // that release.
-      const spec = parseAskUserQuestionPayload(payload);
+      //
+      // Issue #1759: which fields hold the question is the source's business
+      // (S7). opencode's `question.asked` carries structured choices in a shape
+      // that shares no field name with Claude's `tool_input.questions`.
+      const spec = source.parseQuestion(payload);
       if (spec) {
         recordAskUserQuestion(worktree.id, tool, instanceParam, spec, receivedAt);
         logger.info('ask-user-question-recorded', {

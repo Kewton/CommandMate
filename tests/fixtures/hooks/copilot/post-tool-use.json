@@ -1,0 +1,15 @@
+{
+  "hook_event_name": "PostToolUse",
+  "session_id": "00000000-0000-4000-8000-000000000000",
+  "timestamp": "2026-08-13T00:00:00.000Z",
+  "cwd": "<CWD>",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "echo CP-TOOL-MARKER > ./cp-marker.txt",
+    "description": "Create marker file"
+  },
+  "tool_result": {
+    "result_type": "success",
+    "text_result_for_llm": "\n<shellId: 0 completed with exit code 0>"
+  }
+}

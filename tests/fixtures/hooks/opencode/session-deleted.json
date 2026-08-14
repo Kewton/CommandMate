@@ -1,0 +1,40 @@
+{
+  "id": "evt_0000000000000000000000000",
+  "type": "session.deleted",
+  "properties": {
+    "sessionID": "ses_0000000000000000000000000",
+    "info": {
+      "id": "ses_0000000000000000000000000",
+      "slug": "tidy-sailor",
+      "projectID": "<PROJECT_ID>",
+      "directory": "<WORKTREE_PATH>",
+      "path": "",
+      "title": "New session - 2026-08-12T22:55:59.838Z",
+      "agent": "build",
+      "model": {
+        "id": "qwen/qwen3-coder-30b",
+        "providerID": "lmstudio"
+      },
+      "version": "1.18.3",
+      "summary": {
+        "additions": 0,
+        "deletions": 0,
+        "files": 0
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "time": {
+        "created": 1786575359838,
+        "updated": 1786575359956
+      }
+    }
+  }
+}

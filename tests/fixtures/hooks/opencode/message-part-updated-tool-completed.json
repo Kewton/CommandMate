@@ -1,0 +1,33 @@
+{
+  "id": "evt_0000000000000000000000000",
+  "type": "message.part.updated",
+  "properties": {
+    "sessionID": "ses_0000000000000000000000000",
+    "part": {
+      "type": "tool",
+      "tool": "bash",
+      "callID": "toolu_0000000000000000000000000",
+      "state": {
+        "status": "completed",
+        "input": {
+          "command": "touch /tmp/cmate-oc-spike-marker.txt && ls -l /tmp/cmate-oc-spike-marker.txt"
+        },
+        "output": "-rw-r--r--@ 1 <USER>  wheel  0  8月 13 07:59 /tmp/cmate-oc-spike-marker.txt\n",
+        "metadata": {
+          "output": "-rw-r--r--@ 1 <USER>  wheel  0  8月 13 07:59 /tmp/cmate-oc-spike-marker.txt\n",
+          "exit": 0,
+          "truncated": false
+        },
+        "title": "touch /tmp/cmate-oc-spike-marker.txt && ls -l /tmp/cmate-oc-spike-marker.txt",
+        "time": {
+          "start": 1786575564815,
+          "end": 1786575564818
+        }
+      },
+      "id": "prt_0000000000000000000000000",
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_0000000000000000000000000"
+    },
+    "time": 1786575564818
+  }
+}

@@ -15,6 +15,8 @@
  * @vitest-environment node
  */
 
+import fs from 'fs';
+import path from 'path';
 import { describe, it, expect } from 'vitest';
 import { reconcileCatalog, toolDescriptionKeyFor } from '@/lib/slash-command-reconcile/engine';
 import {
@@ -126,9 +128,10 @@ describe('descriptionKey override, engine → dictionary → renderer', () => {
 
 describe('the bundled catalog carries descriptionKey through verbatim', () => {
   // The override only works if standard-commands.ts passes the authored key
-  // along instead of re-deriving it from the name. Asserting that over today's
-  // catalog proves nothing — no entry overrides yet, so the two forms coincide
-  // for all 159 of them. The property has to be checked on an entry that does.
+  // along instead of re-deriving it from the name. Until Issue #1767 no shipped
+  // entry overrode anything, so this had to be checked on a synthetic entry;
+  // /agents and /import now override for real (see the shipped-override test
+  // below), and this stays as the minimal statement of the property.
   it('does not re-derive the key from the command name', () => {
     const overridden = toStandardCommand({
       name: 'btw',
@@ -148,7 +151,41 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
     );
   });
 
-  it('resolves an overridden key through the renderer even though no entry uses one yet', () => {
+  // Issue #1767: the first shipped overrides. /agents and /import each exist on
+  // claude and on another tool with genuinely different meanings, so both names
+  // became per-tool objects in the dictionary. Resolution here goes through
+  // lookupNestedValue — path traversal, the way next-intl resolves a dotted key —
+  // rather than the flattened map the other guards use, because a dictionary that
+  // stored "agents.claude" as one literal key would satisfy a flat lookup and
+  // still render the raw key in the palette.
+  it('resolves every shipped tool-scoped override against the real dictionaries', () => {
+    const overridden = (catalogJson as SlashCommandsCatalog).commands.filter(
+      (entry) => (entry.descriptionKey ?? '').split('.').length > 3
+    );
+    expect(overridden.map((e) => e.descriptionKey)).toEqual([
+      'slashCommands.descriptions.agents.opencode',
+      'slashCommands.descriptions.import.codex',
+      'slashCommands.descriptions.agents.claude',
+      'slashCommands.descriptions.import.claude',
+    ]);
+
+    for (const locale of ['en', 'ja'] as const) {
+      const dict = JSON.parse(
+        fs.readFileSync(path.resolve(__dirname, `../../../locales/${locale}/worktree.json`), 'utf8')
+      );
+      for (const entry of overridden) {
+        const text = resolveCommandDescription(asSlashCommand(entry), (key) =>
+          lookupNestedValue(dict, key) ?? key
+        );
+        expect(text, `${locale} cannot resolve ${entry.descriptionKey}`).not.toBe(
+          entry.descriptionKey
+        );
+        expect(text.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('resolves a synthetic overridden key through the renderer', () => {
     const overridden = asSlashCommand({
       name: 'btw',
       descriptionKey: toolDescriptionKeyFor('btw', 'codex'),

@@ -1,0 +1,28 @@
+{
+  "id": "evt_0000000000000000000000000",
+  "type": "session.error",
+  "properties": {
+    "sessionID": "ses_0000000000000000000000000",
+    "error": {
+      "name": "APIError",
+      "data": {
+        "message": "No models loaded. Please load a model in the developer page or use the 'lms load' command.",
+        "statusCode": 400,
+        "isRetryable": false,
+        "responseHeaders": {
+          "connection": "keep-alive",
+          "content-length": "225",
+          "content-type": "application/json; charset=utf-8",
+          "date": "Wed, 12 Aug 2026 22:56:00 GMT",
+          "etag": "W/\"e1-NnYf7+RE36GYMwc2dcGicaF+ns4\"",
+          "keep-alive": "timeout=5",
+          "x-powered-by": "Express"
+        },
+        "responseBody": "{\n    \"error\": {\n        \"message\": \"No models loaded. Please load a model in the developer page or use the 'lms load' command.\",\n        \"type\": \"invalid_request_error\",\n        \"param\": \"model\",\n        \"code\": null\n    }\n}",
+        "metadata": {
+          "url": "http://127.0.0.1:1234/v1/chat/completions"
+        }
+      }
+    }
+  }
+}

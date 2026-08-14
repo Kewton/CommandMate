@@ -1,0 +1,16 @@
+{
+  "artifactDirectoryPath": "<ARTIFACT_DIR>",
+  "conversationId": "22222222-2222-4222-8222-222222222222",
+  "modelName": "gemini-3.5-flash-low",
+  "stepIdx": 16,
+  "toolCall": {
+    "args": {
+      "CommandLine": "echo hello",
+      "Cwd": ".",
+      "WaitMsBeforeAsync": 1000
+    },
+    "name": "run_command"
+  },
+  "transcriptPath": "<TRANSCRIPT_PATH>",
+  "workspacePaths": []
+}

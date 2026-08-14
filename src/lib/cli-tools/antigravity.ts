@@ -22,6 +22,8 @@ import {
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { stripAnsi } from '../detection/cli-patterns';
+import { ANTIGRAVITY_CLI_TOOL_ID } from '@/lib/hooks/sources';
+import { beginAgentSession, prepareAgentLaunch } from '@/lib/session/agent-session-lifecycle';
 import { createLogger } from '@/lib/logger';
 import {
   TUI_SESSION_CREATE_WAIT_MS,
@@ -144,6 +146,12 @@ export class AntigravityTool extends BaseCLITool {
       return;
     }
 
+    // Issue #1762: fence this instance's structured events off from the process
+    // that used to hold the same (worktree, tool, instance) key. Creation path
+    // only — the reuse branch above has already returned — and before the pane
+    // exists. Bumped even if the launch below then fails.
+    beginAgentSession({ worktreeId, cliToolId: ANTIGRAVITY_CLI_TOOL_ID, instanceId });
+
     try {
       // Create tmux session with large history buffer for agy output
       // (agy is inline-rendered and retains scrollback, like Codex)
@@ -157,8 +165,21 @@ export class AntigravityTool extends BaseCLITool {
       // Wait a moment for the session to be created
       await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
 
-      // Start agy in interactive mode, optionally pinned to a model
-      const launchCommand = model ? `agy --model ${shellSingleQuote(model)}` : 'agy';
+      // Start agy in interactive mode, optionally pinned to a model.
+      //
+      // Issue #1762: `prepareAgentLaunch` merges CommandMate's named hook into
+      // `~/.gemini/config/hooks.json` — agy's single global config, shared with
+      // gemini's tree and with whatever the user has in it — and prefixes
+      // `CM_HOOK_URL`. That variable is the *only* correlation channel agy has:
+      // its payloads carry no `cwd`, its hooks run in `~/.gemini/config`, and
+      // one file serves every worktree on the machine. `--model` is appended
+      // after, so the env prefix stays in front of the command.
+      // `CM_AGENT_HOOKS_INJECT=0` returns bare `agy`, unchanged from before.
+      const base = prepareAgentLaunch(
+        { worktreeId, cliToolId: ANTIGRAVITY_CLI_TOOL_ID, instanceId },
+        this.command
+      ).command;
+      const launchCommand = model ? `${base} --model ${shellSingleQuote(model)}` : base;
       await sendKeys(sessionName, launchCommand, true);
 
       // Wait for agy to initialize

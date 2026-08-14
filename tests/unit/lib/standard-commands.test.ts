@@ -91,8 +91,11 @@ describe('STANDARD_COMMANDS', () => {
   // refresh against claude docs / codex 0.146.0 added 104 real commands.
   // 56 -> 159. The bans below are what actually protects the set; this number
   // only pins that a refresh was reviewed rather than applied blind.
-  it('should have 159 standard commands', () => {
-    expect(STANDARD_COMMANDS.length).toBe(159);
+  // Issue #1767: +3 claude built-ins the weekly drift check surfaced — /agents,
+  // /import, /list-agents, all real rows on code.claude.com/docs/en/commands.md.
+  // 159 -> 162.
+  it('should have 162 standard commands', () => {
+    expect(STANDARD_COMMANDS.length).toBe(162);
   });
 
   it('should have all required properties for each command', () => {
@@ -324,15 +327,23 @@ describe('STANDARD_COMMANDS', () => {
   });
 
   // Issue #1503: these 6 entries did not exist on claude 2.1.218 / codex 0.144.6
-  // and were purged; the "(removed)" claude /agents stub went too, leaving only
-  // the opencode /agents. None of them may reappear in the catalog.
+  // and were purged. None of them may reappear in the catalog.
+  //
+  // Issue #1767 narrows the /agents half exactly the way v0.21.2 narrowed /vim.
+  // The old assertion was "claude ships no /agents at all", which was right while
+  // the claude docs row was a bare "(removed)" stub. It no longer is: the row on
+  // code.claude.com/docs/en/commands.md (fetched 2026-08-13) reads "As of
+  // v2.1.198, running `/agents` prints a reminder to ask Claude to create or
+  // manage subagents…" — a real command with a real description. So claude gets
+  // an entry, and what is pinned instead is that the two entries stay separate
+  // and never share a description key (Issue #1704 tool-scoped keys).
   it('does not carry the Issue #1503 phantom commands', () => {
     for (const name of ['cost', 'lazy', 'todos', 'pr-comments', 'approvals', 'undo']) {
       expect(STANDARD_COMMANDS.some((c) => c.name === name), `/${name} must be gone`).toBe(false);
     }
     const agentsEntries = STANDARD_COMMANDS.filter((c) => c.name === 'agents');
-    expect(agentsEntries.length).toBe(1);
-    expect(agentsEntries[0].cliTools).toEqual(['opencode']);
+    expect(agentsEntries.map((c) => c.cliTools?.join(',')).sort()).toEqual(['claude', 'opencode']);
+    expect(new Set(agentsEntries.map((c) => c.descriptionKey)).size).toBe(2);
   });
 
   // Issue #689: New Claude commands with explicit cliTools: ['claude'] (DR1-001)
@@ -381,28 +392,35 @@ describe('STANDARD_COMMANDS', () => {
   // Issue #1503: -5 Claude-visible phantoms (cost/lazy/todos/pr-comments + the
   // "(removed)" /agents stub) → 24.
   // v0.21.2: reconciled against the claude commands doc → 97.
-  it('should have 97 commands available for Claude', () => {
+  // Issue #1767: +3 (/agents, /import, /list-agents) → 100.
+  it('should have 100 commands available for Claude', () => {
     const claudeCommands = STANDARD_COMMANDS.filter(
       (cmd) => !cmd.cliTools || cmd.cliTools.includes('claude')
     );
-    expect(claudeCommands.length).toBe(97);
+    expect(claudeCommands.length).toBe(100);
   });
 
   // Issue #689: agent (Codex) vs agents (OpenCode) differentiation (DR1-002)
   // Issue #1306: distinct keys are not enough — two keys can hold identical
   // text (see /model and /models), so assert the resolved text differs too.
-  it('agent (Codex) and agents (OpenCode) should have distinct descriptions', () => {
-    const agent = STANDARD_COMMANDS.find((c) => c.name === 'agent');
-    const agents = STANDARD_COMMANDS.find((c) => c.name === 'agents');
-    expect(agent).toBeDefined();
-    expect(agents).toBeDefined();
-    expect(agent?.descriptionKey).not.toBe(agents?.descriptionKey);
+  // Issue #1767: claude's /agents joined the pair meaning a third thing, so
+  // `descriptions.agents` is now a per-tool object rather than one string.
+  // Each entry is therefore resolved through its own key (a flat `dict.agents`
+  // lookup would silently read undefined here), and all three must differ.
+  it('agent (Codex), agents (OpenCode) and agents (Claude) have distinct descriptions', () => {
+    type CliTool = NonNullable<SlashCommand['cliTools']>[number];
+    const pick = (name: string, tool: CliTool): SlashCommand => {
+      const cmd = STANDARD_COMMANDS.find((c) => c.name === name && c.cliTools?.includes(tool));
+      expect(cmd, `/${name} must be ${tool}-visible`).toBeDefined();
+      return cmd as SlashCommand;
+    };
+    const entries = [pick('agent', 'codex'), pick('agents', 'opencode'), pick('agents', 'claude')];
+    expect(new Set(entries.map((c) => c.descriptionKey)).size).toBe(entries.length);
 
     for (const locale of LOCALES) {
-      const dict = loadDescriptions(locale);
-      expect(dict.agent).toBeTruthy();
-      expect(dict.agents).toBeTruthy();
-      expect(dict.agent).not.toBe(dict.agents);
+      const texts = entries.map((cmd) => descriptionFor(cmd, locale));
+      texts.forEach((text) => expect(text).toBeTruthy());
+      expect(new Set(texts).size).toBe(entries.length);
     }
   });
 

@@ -7,10 +7,13 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import {
   SYSTEM_DIRECTORIES,
+  VIRTUAL_FILESYSTEM_ROOTS,
   isSystemDirectory,
+  isVirtualFilesystemPath,
   isPathWithin,
 } from '../../../src/config/system-directories';
 import { removeTempDir } from '@tests/helpers/temp-dir';
@@ -230,6 +233,109 @@ describe('system-directories', () => {
           expect(isSystemDirectory('/private/etc/cm.db')).toBe(true);
         }
       );
+    });
+  });
+
+  /**
+   * Issue #1774: the narrower question — "would a recursive mkdir here hang?"
+   * rather than "may a database live here?".
+   */
+  describe('VIRTUAL_FILESYSTEM_ROOTS', () => {
+    it('is a subset of SYSTEM_DIRECTORIES', () => {
+      // The two lists exist for different reasons and are allowed to differ in
+      // size, but a root that is unsafe to mkdir into and yet acceptable for a
+      // database would be incoherent. Pinned so they cannot drift apart.
+      for (const root of VIRTUAL_FILESYSTEM_ROOTS) {
+        expect(SYSTEM_DIRECTORIES).toContain(root);
+      }
+    });
+
+    it('names exactly the three kernel-backed namespaces', () => {
+      expect([...VIRTUAL_FILESYSTEM_ROOTS].sort()).toEqual(['/dev', '/proc', '/sys']);
+    });
+  });
+
+  describe('isVirtualFilesystemPath', () => {
+    let workDir: string;
+
+    beforeAll(() => {
+      // Must not itself be inside a system directory, otherwise the symlink
+      // assertion below would pass lexically and prove nothing. os.tmpdir() is
+      // /var/folders/... on macOS, so use the repo cwd.
+      workDir = fs.mkdtempSync(path.join(process.cwd(), 'tmp-virtualfs-test-'));
+    });
+
+    afterAll(() => {
+      removeTempDir(workDir);
+    });
+
+    describe('rejects the virtual roots and everything under them', () => {
+      const virtual = [
+        '/proc',
+        '/proc/',
+        '/proc/self',
+        '/proc/definitely-not-writable/cmate',
+        '/sys',
+        '/sys/kernel/security',
+        '/dev',
+        '/dev/null',
+        '/dev/shm/commandmate',
+      ];
+
+      for (const target of virtual) {
+        it(`should return true for ${target}`, () => {
+          expect(isVirtualFilesystemPath(target)).toBe(true);
+        });
+      }
+    });
+
+    describe('accepts the system directories that are real filesystems', () => {
+      // These are in SYSTEM_DIRECTORIES for SEC-001 (no database here) but a
+      // recursive mkdir in them fails cleanly, which is the only thing this
+      // predicate is asked about. Blocking them would redirect os.tmpdir()-based
+      // test isolation and container log directories onto the real home.
+      const real = [
+        '/etc/commandmate',
+        '/usr/local/share/commandmate',
+        '/bin',
+        '/sbin',
+        '/var/log/commandmate',
+        '/tmp/commandmate',
+        os.tmpdir(),
+      ];
+
+      for (const target of real) {
+        it(`should return false for ${target}`, () => {
+          expect(isVirtualFilesystemPath(target)).toBe(false);
+        });
+      }
+    });
+
+    it('should not match a sibling that merely shares the prefix', () => {
+      expect(isVirtualFilesystemPath('/procfs/x')).toBe(false);
+      expect(isVirtualFilesystemPath('/system/x')).toBe(false);
+      expect(isVirtualFilesystemPath('/devices/x')).toBe(false);
+    });
+
+    it('should resolve traversal before matching', () => {
+      expect(isVirtualFilesystemPath('/var/log/../../proc/x')).toBe(true);
+    });
+
+    it('should reject a path reaching a virtual filesystem through a symlink', () => {
+      // Fails closed in the direction that matters: a missed one hangs the
+      // server rather than erroring. `/dev` rather than `/proc` because a
+      // symlink is only resolvable when its target exists, and `/dev` is the
+      // one of the three that is present on macOS as well as on Linux.
+      const link = path.join(workDir, 'virtual-link');
+      fs.symlinkSync('/dev', link);
+
+      // Lexically this is under the repo cwd; only symlink resolution reveals /dev.
+      expect(isVirtualFilesystemPath(path.join(link, 'commandmate-logs'))).toBe(true);
+    });
+
+    it('should not reject an ordinary directory', () => {
+      expect(isVirtualFilesystemPath(workDir)).toBe(false);
+      expect(isVirtualFilesystemPath(path.join(os.homedir(), '.commandmate', 'hooks'))).toBe(false);
     });
   });
 });

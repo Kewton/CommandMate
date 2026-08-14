@@ -38,6 +38,12 @@ const logger = createLogger('lib/hooks/agent-event-service');
  * module's database and verification dependencies. Re-exported here because
  * this is where callers have always found it.
  *
+ * The Claude-specific mapping helpers that used to be re-exported alongside
+ * them are gone (Issue #1759): a tool's spellings now belong to that tool's
+ * `AgentEventSource`, and re-exporting one tool's from the generic service
+ * would have made this module the next place a Phase 4-x implementer reached
+ * for. Ask `getAgentEventSource(cliToolId).normalizeEvent()` instead.
+ *
  * Every kind but `stop` is accepted, recorded and exposed without changing any
  * state: the receiver has to exist before agents can be told to send them, and
  * rejecting them would make every hook config a two-step rollout.
@@ -45,8 +51,6 @@ const logger = createLogger('lib/hooks/agent-event-service');
 export {
   AGENT_EVENT_TYPES,
   isAgentEventType,
-  mapClaudeHookEventName,
-  extractClaudeEventDetail,
   type AgentEventType,
 } from '@/lib/hooks/agent-event-types';
 
