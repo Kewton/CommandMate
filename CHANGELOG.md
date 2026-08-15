@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-08-16
+
+> **Highlight**: エージェントの**入力待ちを見逃さないための経路を一通り揃えた**リリース。WS 即時配信・要対応バッジ・クロス画面 Toast に加え、タブタイトル / favicon / App Badge / 通知音でブラウザ外へ、さらに waiting エッジ駆動の push 通知でデバイス外へ伝わるようになった（方針 A / D / E）。あわせて稼働中の**モデルと reasoning effort** を hooks の構造化イベントと tmux capture の両経路から取得し、UI と CLI (`instances` / `capture --json`) に露出した。External Apps のプロキシは**末尾スラッシュとクエリ文字列を生バイトのまま**転送するようになり、Next.js static export のアプリが CommandMate 経由で開けなかった問題（`/proxy/<app>/try/` と `/assets/` が 404）が解消している。
+
 ### Fixed
 
 - **fix(proxy): クエリ文字列を生バイトのまま上流へ転送する** (#1804)
