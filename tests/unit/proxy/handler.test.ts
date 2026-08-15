@@ -191,6 +191,33 @@ describe('HTTP Proxy Handler', () => {
         expect.any(Object)
       );
     });
+
+    // Issue #1802: the path handed in by the route handler must reach fetch()
+    // unchanged - trailing slash kept, percent-encoding not re-encoded.
+    // This covers the proxyHttp -> fetch hop only. A client's ?q=a%20b never
+    // reaches this layer as %20: Next.js normalizes it to ?q=a+b before the
+    // route handler runs (see tests/unit/proxy/route.test.ts).
+    it('should forward a trailing slash and percent-encoded bytes to fetch unchanged', async () => {
+      const { proxyHttp } = await import('@/lib/proxy/handler');
+
+      const mockApp = createMockApp({
+        targetHost: '127.0.0.1',
+        targetPort: 60310,
+        pathPrefix: 'commandagent',
+      });
+      const request = new Request(
+        'http://localhost:3000/proxy/commandagent/try/?q=a%20b&n=1'
+      );
+
+      global.fetch = vi.fn().mockResolvedValue(new Response('OK'));
+
+      await proxyHttp(request, mockApp, '/proxy/commandagent/try/?q=a%20b&n=1');
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        'http://127.0.0.1:60310/proxy/commandagent/try/?q=a%20b&n=1',
+        expect.any(Object)
+      );
+    });
   });
 
   describe('proxyWebSocket', () => {

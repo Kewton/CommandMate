@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **fix(proxy): 上流転送で末尾スラッシュとクエリ文字列を保持する** (#1802)
+  - **External Apps のプロキシがルート画面（`/proxy/<app>/`）だけ 200 で、配下（`/proxy/<app>/try/`,
+    `/proxy/<app>/assets/`）が 404 になっていた。** Next.js static export のようにディレクトリ URL に
+    末尾 `/` を要求する上流では、`/try/` と `/try` は**別の URL**であり、上流は後者を 404 にする
+  - **原因は `src/app/proxy/[...path]/route.ts` の `'/proxy/' + pathSegments.join('/')`。**
+    Next.js の catch-all params は「区切り文字を落とした percent-decode 済みの配列」なので、
+    配列から join で URL を再構築する方式では**構造的に 3 つの情報が失われる**:
+    ①末尾スラッシュ ②クエリ文字列（`buildUpstreamUrl()` の JSDoc は "including query string" と
+    書いてあるのに呼び出し側が一度も search を渡していなかった）③percent-encode
+    （`%20` が素の空白、`%2F` が区切りの `/` に化ける）
+  - **修正は `new URL(request.url)` の `pathname` + `search` をそのまま連結して転送する形に変えた。**
+    `pathSegments` は `pathPrefix` の検索用途（DB の `pathPrefix` は decode 済みの素の文字列）にのみ残した
+  - **保存されるのはパスであり、クエリは route handler 到達前に Next.js が正規化する（実機計測）。**
+    エコー上流を立てて実サーバ経由で計測した結果は以下のとおり:
+    - パス: **バイト列がそのまま保存される** — `/try/` は `/try/`、`a%20b` / `a%2Fb` /
+      `%E6%97%A5%E6%9C%AC` / 素の `+` すべて無変換で上流へ届く
+    - クエリ: **バイト完全一致は達成できない** — `?q=a%20b&n=1` は `?q=a+b&n=1` に、
+      `?bare` は `?bare=` になる（`URLSearchParams` で再シリアライズした時の署名）。
+      `%2B` / `%26` / `%3D` / percent-encode 済みマルチバイト値は保存される。
+      これは App Router の route handler からは触れない層での正規化であり、
+      本 Issue のコード（`new URL()` も `fetch()` も無改変であることを node で切り分け済み）が
+      原因ではなく、本 Issue の範囲では解消できない。既知の制限として、
+      `?` 単独の空クエリも WHATWG URL の仕様上 `search` が空文字になるため落ちる（`/x?` → `/x`）
+  - **ログには query string を載せない（Issue #395 の方針）。** クエリにトークンが載りうるため、
+    転送用 path（`pathname + search`）とログ用 path（`pathname` のみ）を分離した。
+    `/proxy/` 単体での 400、WebSocket フォールバックの 426 は挙動を変えていない
+    （`next.config.js` の `skipTrailingSlashRedirect: true`（#671）と、
+    `src/lib/ws-server.ts` が `request.url` を生のまま渡す upgrade 経路には手を入れていない）
 - **fix(session): 並列開発で宙に浮いた 2 つの配線を繋いだ（`reasoningEffort` が永久に null／詳細ヘッダに指示待ち表現が無い）** (#1785, #1787, #1784)
   - **どちらも「実装されていなかった」のではなく「着地済みの実装同士が繋がれていなかった」。**
     Phase 2（#1784・保持層）と Phase 3（#1785・露出）、および #1787（waiting 視認性）が**同時並行で開発され、
