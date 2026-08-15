@@ -46,6 +46,28 @@ export const SENSITIVE_REQUEST_HEADERS = [
 ] as const;
 
 /**
+ * Issue #1804: Internal header carrying the raw request target.
+ *
+ * Next.js re-serializes the query string before an App Router route handler
+ * ever runs (`?q=a%20b` -> `?q=a+b`, `?bare` -> `?bare=`, a lone `?` collapses),
+ * so `request.url` is not what the client sent. `server.ts` stashes the raw
+ * `req.url` from the Node `IncomingMessage` into this header before handing the
+ * request to Next, and the proxy route handler reads it back.
+ *
+ * `server.ts` deletes this header unconditionally on every request before
+ * setting it, so a client cannot forge it. It is CommandMate-internal and must
+ * never reach the upstream app - see {@link INTERNAL_REQUEST_HEADERS}.
+ */
+export const PROXY_RAW_URL_HEADER = 'x-cm-raw-url';
+
+/**
+ * Issue #1804: CommandMate-internal request headers that must not be forwarded
+ * to upstream. These are set by our own HTTP layer for our own consumption and
+ * carry no meaning outside the process.
+ */
+export const INTERNAL_REQUEST_HEADERS = [PROXY_RAW_URL_HEADER] as const;
+
+/**
  * HTTP headers that should be stripped from proxied responses.
  *
  * content-encoding / content-length are stripped because Node's fetch

@@ -11,7 +11,7 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { getExternalAppCache } from '@/lib/external-apps/cache';
 import { proxyHttp, proxyWebSocket, isWebSocketUpgrade } from '@/lib/proxy/handler';
 import { logProxyRequest, logProxyError } from '@/lib/proxy/logger';
-import { PROXY_ERROR_MESSAGES } from '@/lib/proxy/config';
+import { PROXY_ERROR_MESSAGES, PROXY_RAW_URL_HEADER } from '@/lib/proxy/config';
 import type { ProxyLogEntry } from '@/lib/proxy/logger';
 
 // Force dynamic rendering
@@ -22,22 +22,43 @@ export const dynamic = 'force-dynamic';
  *
  * Issue #1802: Next.js catch-all params (`params.path`) are percent-decoded and
  * carry neither the trailing slash nor the query string, so rebuilding the path
- * with `pathSegments.join('/')` structurally drops all three. Read the pathname
- * and search from `request.url` instead, and concatenate them verbatim.
+ * with `pathSegments.join('/')` structurally drops all three. The path must come
+ * from the request URL instead.
  *
- * How much is preserved differs between the two halves (measured end-to-end
- * against an echo upstream through a real CommandMate server):
+ * Issue #1804: `request.url` is good enough for the pathname (preserved
+ * byte-for-byte) but NOT for the query string. Next.js re-serializes the query
+ * before an App Router route handler ever runs, so `?q=a%20b` arrives here as
+ * `?q=a+b` and `?bare` as `?bare=` - the signature of a URLSearchParams
+ * round-trip - which breaks any upstream that verifies a signature over the
+ * query bytes (HMAC-signed URLs, presigned URLs, OAuth 1.0a). That
+ * normalization happens in a layer this handler cannot reach.
  *
- * - **pathname**: preserved byte-for-byte. `/try/` stays `/try/`, and
- *   `%20` / `%2F` / `%E6%97%A5%E6%9C%AC` / a literal `+` all survive unchanged.
- * - **search**: NOT byte-for-byte. Next.js re-serializes the query string
- *   before the route handler ever runs, so `?q=a%20b` arrives here as `?q=a+b`
- *   and `?bare` arrives as `?bare=` (the signature of a URLSearchParams
- *   round-trip). `%2B`, `%26`, `%3D` and percent-encoded multibyte values are
- *   preserved. That normalization happens in a layer an App Router route
- *   handler cannot reach; this function neither causes nor can undo it.
- *   A bare `?` with no query also collapses (`/x?` -> `/x`) per the WHATWG URL
- *   spec, since `search` is the empty string in that case.
+ * So the raw request target is captured one layer earlier instead: `server.ts`
+ * copies the Node `IncomingMessage.req.url` - the untouched request target -
+ * into {@link PROXY_RAW_URL_HEADER} before handing the request to Next. When
+ * that header is present it is authoritative; the header is safe to trust
+ * because `server.ts` deletes it unconditionally on every request before
+ * setting it, so a client-supplied value never survives.
+ *
+ * The raw target is split on the FIRST `?` rather than parsed with `new URL()`:
+ * WHATWG parsing drops a bare trailing `?` (`/x?` -> `/x`, since `search` is
+ * the empty string in that case), and string splitting also guarantees the
+ * query bytes are passed through with no interpretation at all.
+ *
+ * KNOWN LIMIT (measured, Issue #1804): a bare trailing `?` still does not reach
+ * the upstream, but no longer because of anything in this file - it survives to
+ * `proxyHttp`, and Node's `fetch()` drops it when it serializes the URL back to
+ * a request target (undici uses `pathname + search`, and `search` is `''` for
+ * `http://x/a?` even though `href` keeps the `?`). Verified against an echo
+ * upstream: `fetch('http://127.0.0.1:PORT/a/?')` is received as `/a/`. Every
+ * other query form measured is byte-exact. Fixing this last case would mean
+ * replacing the proxy transport with `http.request`, which also gives up
+ * undici's transparent gzip handling - not worth it for a delimiter that
+ * denotes an empty query either way.
+ *
+ * Without the header (running under `next dev` with no custom server, or in a
+ * unit test that builds its own `Request`) this falls back to `request.url`,
+ * preserving the Issue #1802 behavior.
  *
  * The forwarded path carries the query string; the logged path deliberately
  * does not, because query strings may carry tokens and Issue #395 requires
@@ -50,6 +71,13 @@ function resolveProxyPaths(request: Request): {
   upstreamPath: string;
   logPath: string;
 } {
+  const rawUrl = request.headers.get(PROXY_RAW_URL_HEADER);
+  if (rawUrl) {
+    const queryStart = rawUrl.indexOf('?');
+    const pathname = queryStart === -1 ? rawUrl : rawUrl.slice(0, queryStart);
+    return { upstreamPath: rawUrl, logPath: pathname };
+  }
+
   const { pathname, search } = new URL(request.url);
   return { upstreamPath: pathname + search, logPath: pathname };
 }
@@ -68,8 +96,8 @@ async function handleProxy(
   // pathPrefix as a plain decoded string, so segment[0] is the right key here.
   const [pathPrefix] = pathSegments;
 
-  // Issue #1802: forward the received pathname (trailing slash and percent-
-  // encoding intact) plus the search verbatim; log without the query string.
+  // Issue #1802/#1804: forward the raw request target (trailing slash, percent-
+  // encoding and query bytes intact); log without the query string.
   const { upstreamPath: path, logPath } = resolveProxyPaths(request);
 
   // Handle empty path prefix
