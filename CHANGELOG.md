@@ -9,6 +9,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **fix(proxy): クエリ文字列を生バイトのまま上流へ転送する** (#1804)
+  - **#1802 でクエリは転送されるようになったが、バイト完全一致ではなかった。**
+    `?q=a%20b&n=1` は上流に `?q=a+b&n=1` として、`?bare` は `?bare=` として届いていた。
+    `application/x-www-form-urlencoded` の意味論では `+` と `%20` は同じ空白にデコードされるため
+    大半のアプリでは実害が無いが、**クエリのバイト列に対して署名を検証する上流**
+    （HMAC 署名つき URL / presigned URL / OAuth 1.0a）では署名検証に失敗する
+  - **原因は Next.js が route handler に渡す前に `request.url` を再構成していること。**
+    `%20`→`+` と `?bare`→`?bare=` は `URLSearchParams` で再シリアライズした時の署名であり、
+    App Router の route handler の内側からは触れない層で起きる
+  - **修正は「Next.js を迂回する」のではなく「生 URL を一段手前で退避する」方式。**
+    `server.ts` の `requestHandler` は Next.js に渡す前に生の `req.url`（Node の request target）を
+    持っているので、これを `x-cm-raw-url` ヘッダへ退避し、
+    `src/app/proxy/[...path]/route.ts` が読み戻す。ヘッダが無い場合（`next dev` 単体・unit test）は
+    従来どおり `request.url` にフォールバックするため #1802 の挙動を維持する
+  - **`/proxy/*` を `server.ts` で横取りする案（起票時の方針）は採用しなかった。**
+    `/proxy/...` は現在 `src/middleware.ts` の認証と IP 制限を通っており、
+    `AUTH_EXCLUDED_PATHS` は完全一致判定なので除外されていない。Next.js を迂回すると
+    **External Apps から認証と IP 制限が丸ごと外れる**（Cloudflare Tunnel 配下では外部公開に直結）。
+    `next.config.js` の `headers()`（CSP 等）も失われる。この性質を
+    `tests/unit/proxy/proxy-auth-guard.test.ts` で固定した
+  - **偽装防止**: `server.ts` は `x-cm-raw-url` を**無条件に `delete` してから**
+    `/proxy/` の時だけ `set` する。クライアントが付けてきた値は経路を問わず必ず捨てられる。
+    内部用ヘッダなので `filterHeaders()` で剥がしており**上流へは転送されない**
+  - **`server.ts` 側は inline 4 行、import は 1 つも追加していない**（#1428 の再発防止）。
+    top-level に内部モジュールの静的 import を足すと `tsx server.ts` 下で Next の
+    AsyncLocalStorage bootstrap が壊れ、最初のリクエストでクラッシュする。
+    この故障は unit / integration / build / lint をすべてすり抜け E2E だけで落ちる
+  - **実機計測（隔離 DB・ポート 3805・エコー上流 3806、生 TCP でバイト単位送信）**:
+    `?q=a%20b&n=1` / `?bare` / `?q=a%2Bb` / `?q=a%26b` / `?sig=aGVsbG8%3D` /
+    `?q=%E6%97%A5%E6%9C%AC` / `?q=a+b` / `?empty=` / `?a=1&a=2` がすべてバイト一致で上流着。
+    #1802 のパス保存（`/try/` と `/try` の区別・`a%2Fb`・`a%20b`・多バイト・素の `+`・深い階層）と
+    HEAD / POST / PUT / PATCH / DELETE に回帰なし。認証有効時は未認証 `/proxy/...` が 307（/login）、
+    不正 Bearer が 401、正規 Cookie が 200 でクエリもバイト一致
+  - **既知の制限（実測により起票時の想定と乖離）**: `?` 単独（`/search/?`）は依然として落ちる。
+    ただし原因は `new URL()` ではなく **Node の `fetch()`（undici）**である。
+    生文字列を最初の `?` で分割する実装により `?` は `buildUpstreamUrl()` まで保持され、
+    `new URL(...).href` も `?` を保つが、undici は request target を `pathname + search` で組み立て、
+    present-but-empty なクエリでは `search` が `''` になるため送信時に落ちる
+    （`fetch('http://127.0.0.1:3806/a/?')` の上流受信が `/a/` であることを実測）。
+    解消には proxy の transport を `http.request` に置き換える必要があり、
+    undici の gzip 透過処理（`content-encoding` 剥がし）も自前で作り直すことになるため、
+    空クエリを表す区切り文字 1 バイトの代償としては割に合わないと判断した
 - **fix(proxy): 上流転送で末尾スラッシュとクエリ文字列を保持する** (#1802)
   - **External Apps のプロキシがルート画面（`/proxy/<app>/`）だけ 200 で、配下（`/proxy/<app>/try/`,
     `/proxy/<app>/assets/`）が 404 になっていた。** Next.js static export のようにディレクトリ URL に

@@ -16,6 +16,7 @@ import {
   HOP_BY_HOP_RESPONSE_HEADERS,
   SENSITIVE_REQUEST_HEADERS,
   SENSITIVE_RESPONSE_HEADERS,
+  INTERNAL_REQUEST_HEADERS,
   PROXY_STATUS_CODES,
   PROXY_ERROR_MESSAGES,
 } from './config';
@@ -33,6 +34,14 @@ export function isWebSocketUpgrade(request: Request): boolean {
 
 /**
  * Build the upstream URL for the proxy request
+ *
+ * Issue #1804: `path` is the raw request target, so this concatenation is the
+ * last place the bytes are still exactly what the client sent. `fetch()` then
+ * re-parses this string as a WHATWG URL, which preserves everything measured
+ * against an echo upstream EXCEPT a bare trailing `?`: undici sends
+ * `pathname + search`, and `search` is `''` for `http://x/a?`. The URL returned
+ * here does keep the `?` (`new URL('http://x/a?').href` does too) - it is lost
+ * one layer further down.
  *
  * @param app - The external app configuration
  * @param path - The request path (including query string)
@@ -76,13 +85,13 @@ export function filterHeaders(
  * @param request - The incoming request
  * @param app - The external app configuration
  * @param path - The full request path including proxy prefix and query string
- *   (e.g., /proxy/{pathPrefix}/page/?q=a+b). Issue #1802: the caller passes
- *   pathname + search taken from the request URL, so the trailing slash and the
- *   percent-encoded pathname bytes reach the upstream unchanged. The query
- *   string is forwarded as the caller received it, which is not necessarily as
- *   the client sent it - Next.js re-serializes the query before the route
- *   handler runs (`?q=a%20b` -> `?q=a+b`, `?bare` -> `?bare=`). This function
- *   itself never rewrites what it is given.
+ *   (e.g., /proxy/{pathPrefix}/page/?q=a%20b). Issue #1802: the caller passes
+ *   pathname + search, so the trailing slash and the percent-encoded pathname
+ *   bytes reach the upstream unchanged. Issue #1804: the caller now sources
+ *   both halves from the raw request target that `server.ts` stashed in
+ *   `x-cm-raw-url`, so the query string is byte-identical to what the client
+ *   sent rather than a URLSearchParams round-trip of it. This function itself
+ *   never rewrites what it is given.
  * @returns The proxied response
  */
 export async function proxyHttp(
@@ -92,11 +101,14 @@ export async function proxyHttp(
 ): Promise<Response> {
   const upstreamUrl = buildUpstreamUrl(app, path);
 
-  // Strip hop-by-hop and sensitive headers from the request (Issue #395)
+  // Strip hop-by-hop and sensitive headers from the request (Issue #395), plus
+  // CommandMate-internal ones (Issue #1804: x-cm-raw-url is consumed by the
+  // route handler and has no meaning to the upstream app).
   const headers = filterHeaders(
     request.headers,
     HOP_BY_HOP_REQUEST_HEADERS,
     SENSITIVE_REQUEST_HEADERS,
+    INTERNAL_REQUEST_HEADERS,
   );
 
   try {

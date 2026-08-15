@@ -248,6 +248,13 @@ describe('Proxy Route Handler - pathPrefix preservation', () => {
  * A bare `?` also collapses (`/x?` -> `/x`), since WHATWG `URL.search` is the
  * empty string in that case. What these tests do prove is that the handler
  * forwards whatever pathname and search it was handed, without rewriting them.
+ *
+ * Issue #1804 later routed AROUND that normalization rather than undoing it:
+ * `server.ts` copies the raw `req.url` into `x-cm-raw-url` before Next sees the
+ * request, and the handler prefers it when present. This block deliberately
+ * sends no such header, so it now also pins the fallback path that `next dev`
+ * without the custom server takes. The #1804 block at the bottom of this file
+ * covers the header path.
  */
 describe('Proxy Route Handler - trailing slash and query string preservation (Issue #1802)', () => {
   beforeEach(() => {
@@ -464,6 +471,244 @@ describe('Proxy Route Handler - trailing slash and query string preservation (Is
       request,
       mockApp,
       '/proxy/testapp/ws/?v=1'
+    );
+  });
+});
+
+/**
+ * Issue #1804: byte-exact query forwarding via the raw request target.
+ *
+ * `request.url` reaches an App Router route handler only after Next.js has
+ * re-serialized the query string, so `?q=a%20b` becomes `?q=a+b` and `?bare`
+ * becomes `?bare=`. server.ts stashes the untouched `req.url` in `x-cm-raw-url`
+ * before handing the request to Next; these tests fix the handler's half of
+ * that contract by supplying the header directly.
+ *
+ * SCOPE LIMIT - as with the #1802 block above, these tests build their own
+ * `Request`, so they prove the handler prefers and forwards the raw target
+ * verbatim. They do NOT prove server.ts sets the header (see
+ * tests/unit/proxy/server-raw-url.test.ts) and they do not prove end-to-end
+ * byte preservation, which was measured against a live server and an echo
+ * upstream on port 3805.
+ */
+describe('Proxy Route Handler - raw request target forwarding (Issue #1804)', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * Run a proxy request whose `request.url` carries the Next.js-normalized form
+   * and whose `x-cm-raw-url` header carries the raw request target.
+   */
+  async function proxyWithRawUrl(
+    normalizedUrl: string,
+    params: string[],
+    rawUrl?: string,
+    method: 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' = 'GET'
+  ) {
+    const mockApp = createMockApp();
+    const { proxyHttp, logProxyRequest } = await setupProxyMocks(mockApp);
+
+    const route = await import('@/app/proxy/[...path]/route');
+
+    const hasBody = method !== 'GET' && method !== 'HEAD';
+    const request = new Request(normalizedUrl, {
+      method,
+      ...(rawUrl !== undefined ? { headers: { 'x-cm-raw-url': rawUrl } } : {}),
+      ...(hasBody ? { body: 'payload' } : {}),
+    });
+    const response = await route[method](request, {
+      params: Promise.resolve({ path: params }),
+    });
+
+    const call = vi.mocked(proxyHttp).mock.calls[0];
+    return { response, path: call?.[2], logProxyRequest, proxyHttp };
+  }
+
+  it('should forward %20 in the query verbatim instead of the normalized +', async () => {
+    const { path, response } = await proxyWithRawUrl(
+      // What Next.js hands the handler after its URLSearchParams round-trip...
+      'http://localhost:3000/proxy/testapp/search?q=a+b&n=1',
+      ['testapp', 'search'],
+      // ...and what the client actually sent.
+      '/proxy/testapp/search?q=a%20b&n=1'
+    );
+
+    expect(path).toBe('/proxy/testapp/search?q=a%20b&n=1');
+    expect(path).not.toContain('a+b');
+    expect(response.status).toBe(200);
+  });
+
+  it('should forward a valueless key without appending =', async () => {
+    const { path } = await proxyWithRawUrl(
+      'http://localhost:3000/proxy/testapp/search?bare=',
+      ['testapp', 'search'],
+      '/proxy/testapp/search?bare'
+    );
+
+    expect(path).toBe('/proxy/testapp/search?bare');
+    expect(path).not.toContain('bare=');
+  });
+
+  it('should preserve a bare ? with no query string', async () => {
+    // `new URL('http://x/proxy/testapp/search/?').search` is '' - the WHATWG
+    // parser drops the delimiter - so the raw target must be split on the first
+    // '?' as a string rather than parsed.
+    //
+    // KNOWN LIMIT: this is as far as the `?` gets. proxyHttp hands the built
+    // URL to fetch(), which serializes it as `pathname + search` and therefore
+    // drops it on the wire. Measured: `/proxy/testapp/search/?` arrives
+    // upstream as `/proxy/testapp/search/`. See the buildUpstreamUrl block in
+    // tests/unit/proxy/handler.test.ts.
+    const { path } = await proxyWithRawUrl(
+      'http://localhost:3000/proxy/testapp/search/',
+      ['testapp', 'search'],
+      '/proxy/testapp/search/?'
+    );
+
+    expect(path).toBe('/proxy/testapp/search/?');
+  });
+
+  it.each([
+    ['?q=a%2Bb', '/proxy/testapp/s?q=a%2Bb'],
+    ['?q=a%26b', '/proxy/testapp/s?q=a%26b'],
+    ['?sig=aGVsbG8%3D', '/proxy/testapp/s?sig=aGVsbG8%3D'],
+    ['?q=%E6%97%A5%E6%9C%AC', '/proxy/testapp/s?q=%E6%97%A5%E6%9C%AC'],
+    ['?q=a+b', '/proxy/testapp/s?q=a+b'],
+    ['?empty=', '/proxy/testapp/s?empty='],
+    ['?a=1&a=2', '/proxy/testapp/s?a=1&a=2'],
+  ])('should forward %s byte-for-byte', async (_label, rawUrl) => {
+    const { path } = await proxyWithRawUrl(
+      'http://localhost:3000/proxy/testapp/s',
+      ['testapp', 's'],
+      rawUrl
+    );
+
+    expect(path).toBe(rawUrl);
+  });
+
+  it('should keep the trailing slash and the raw query together', async () => {
+    const { path } = await proxyWithRawUrl(
+      'http://localhost:3000/proxy/testapp/try/?q=a+b',
+      ['testapp', 'try'],
+      '/proxy/testapp/try/?q=a%20b'
+    );
+
+    expect(path).toBe('/proxy/testapp/try/?q=a%20b');
+  });
+
+  it('should preserve percent-encoded path bytes carried by the raw target', async () => {
+    const { path } = await proxyWithRawUrl(
+      'http://localhost:3000/proxy/testapp/a%2Fb/%E6%97%A5%E6%9C%AC/',
+      ['testapp', 'a/b', '日本'],
+      '/proxy/testapp/a%2Fb/%E6%97%A5%E6%9C%AC/'
+    );
+
+    expect(path).toBe('/proxy/testapp/a%2Fb/%E6%97%A5%E6%9C%AC/');
+  });
+
+  it('should prefer the raw target over request.url when the two disagree', async () => {
+    const { path } = await proxyWithRawUrl(
+      'http://localhost:3000/proxy/testapp/normalized',
+      ['testapp', 'normalized'],
+      '/proxy/testapp/raw/'
+    );
+
+    expect(path).toBe('/proxy/testapp/raw/');
+  });
+
+  it('should fall back to request.url when the raw header is absent (next dev / unit test path)', async () => {
+    const { path } = await proxyWithRawUrl(
+      'http://localhost:3000/proxy/testapp/try/?q=a+b',
+      ['testapp', 'try']
+      // no x-cm-raw-url
+    );
+
+    expect(path).toBe('/proxy/testapp/try/?q=a+b');
+  });
+
+  it('should fall back to request.url when the raw header is an empty string', async () => {
+    const { path } = await proxyWithRawUrl(
+      'http://localhost:3000/proxy/testapp/try/',
+      ['testapp', 'try'],
+      ''
+    );
+
+    expect(path).toBe('/proxy/testapp/try/');
+  });
+
+  it.each(['HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'] as const)(
+    'should forward the raw query byte-for-byte for %s requests',
+    async (method) => {
+      const { path } = await proxyWithRawUrl(
+        'http://localhost:3000/proxy/testapp/items/?page=2&q=a+b',
+        ['testapp', 'items'],
+        '/proxy/testapp/items/?page=2&q=a%20b',
+        method
+      );
+
+      expect(path).toBe('/proxy/testapp/items/?page=2&q=a%20b');
+    }
+  );
+
+  it('should log the raw path without its query string (Issue #395)', async () => {
+    const { logProxyRequest } = await proxyWithRawUrl(
+      'http://localhost:3000/proxy/testapp/search?token=secret',
+      ['testapp', 'search'],
+      '/proxy/testapp/search?token=secret&sig=aGVsbG8%3D'
+    );
+
+    const entry = vi.mocked(logProxyRequest).mock.calls[0][0];
+    expect(entry.path).toBe('/proxy/testapp/search');
+    expect(entry.path).not.toContain('token');
+    expect(entry.path).not.toContain('sig');
+  });
+
+  it('should log a bare ? path without the delimiter', async () => {
+    const { logProxyRequest } = await proxyWithRawUrl(
+      'http://localhost:3000/proxy/testapp/search/',
+      ['testapp', 'search'],
+      '/proxy/testapp/search/?'
+    );
+
+    const entry = vi.mocked(logProxyRequest).mock.calls[0][0];
+    expect(entry.path).toBe('/proxy/testapp/search/');
+  });
+
+  it('should hand the raw target to the WebSocket fallback too', async () => {
+    const mockApp = createMockApp({ websocketEnabled: true });
+    await setupProxyMocks(mockApp);
+
+    const { isWebSocketUpgrade, proxyWebSocket } = await import(
+      '@/lib/proxy/handler'
+    );
+    vi.mocked(isWebSocketUpgrade).mockReturnValue(true);
+    vi.mocked(proxyWebSocket).mockResolvedValue(
+      new Response('Upgrade Required', { status: 426 })
+    );
+
+    const { GET } = await import('@/app/proxy/[...path]/route');
+
+    const request = new Request('http://localhost:3000/proxy/testapp/ws/?v=a+b', {
+      headers: {
+        upgrade: 'websocket',
+        'x-cm-raw-url': '/proxy/testapp/ws/?v=a%20b',
+      },
+    });
+    const response = await GET(request, {
+      params: Promise.resolve({ path: ['testapp', 'ws'] }),
+    });
+
+    expect(response.status).toBe(426);
+    expect(proxyWebSocket).toHaveBeenCalledWith(
+      request,
+      mockApp,
+      '/proxy/testapp/ws/?v=a%20b'
     );
   });
 });
