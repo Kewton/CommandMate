@@ -18,6 +18,43 @@ import type { ProxyLogEntry } from '@/lib/proxy/logger';
 export const dynamic = 'force-dynamic';
 
 /**
+ * Resolve the paths used for upstream forwarding and for logging.
+ *
+ * Issue #1802: Next.js catch-all params (`params.path`) are percent-decoded and
+ * carry neither the trailing slash nor the query string, so rebuilding the path
+ * with `pathSegments.join('/')` structurally drops all three. Read the pathname
+ * and search from `request.url` instead, and concatenate them verbatim.
+ *
+ * How much is preserved differs between the two halves (measured end-to-end
+ * against an echo upstream through a real CommandMate server):
+ *
+ * - **pathname**: preserved byte-for-byte. `/try/` stays `/try/`, and
+ *   `%20` / `%2F` / `%E6%97%A5%E6%9C%AC` / a literal `+` all survive unchanged.
+ * - **search**: NOT byte-for-byte. Next.js re-serializes the query string
+ *   before the route handler ever runs, so `?q=a%20b` arrives here as `?q=a+b`
+ *   and `?bare` arrives as `?bare=` (the signature of a URLSearchParams
+ *   round-trip). `%2B`, `%26`, `%3D` and percent-encoded multibyte values are
+ *   preserved. That normalization happens in a layer an App Router route
+ *   handler cannot reach; this function neither causes nor can undo it.
+ *   A bare `?` with no query also collapses (`/x?` -> `/x`) per the WHATWG URL
+ *   spec, since `search` is the empty string in that case.
+ *
+ * The forwarded path carries the query string; the logged path deliberately
+ * does not, because query strings may carry tokens and Issue #395 requires
+ * that such internals stay out of logs.
+ *
+ * @param request - The incoming request
+ * @returns The upstream path (pathname + search) and the log-safe path
+ */
+function resolveProxyPaths(request: Request): {
+  upstreamPath: string;
+  logPath: string;
+} {
+  const { pathname, search } = new URL(request.url);
+  return { upstreamPath: pathname + search, logPath: pathname };
+}
+
+/**
  * Handle proxy request for any HTTP method
  */
 async function handleProxy(
@@ -27,9 +64,13 @@ async function handleProxy(
   const startTime = Date.now();
   const method = request.method;
 
-  // Extract path prefix for app lookup; forward full path to upstream
+  // Extract path prefix for app lookup from the decoded segments; the DB stores
+  // pathPrefix as a plain decoded string, so segment[0] is the right key here.
   const [pathPrefix] = pathSegments;
-  const path = '/proxy/' + pathSegments.join('/');
+
+  // Issue #1802: forward the received pathname (trailing slash and percent-
+  // encoding intact) plus the search verbatim; log without the query string.
+  const { upstreamPath: path, logPath } = resolveProxyPaths(request);
 
   // Handle empty path prefix
   if (!pathPrefix) {
@@ -75,7 +116,7 @@ async function handleProxy(
         timestamp: Date.now(),
         pathPrefix,
         method,
-        path,
+        path: logPath,
         statusCode: response.status,
         responseTime: Date.now() - startTime,
         isWebSocket: true,
@@ -93,7 +134,7 @@ async function handleProxy(
       timestamp: Date.now(),
       pathPrefix,
       method,
-      path,
+      path: logPath,
       statusCode: response.status,
       responseTime: Date.now() - startTime,
       isWebSocket: false,
@@ -107,7 +148,7 @@ async function handleProxy(
 
     return response;
   } catch (error) {
-    logProxyError(pathPrefix, method, path, error as Error);
+    logProxyError(pathPrefix, method, logPath, error as Error);
 
     // Issue #395: Fixed-string error message; do not expose internal error details
     return NextResponse.json(

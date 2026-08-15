@@ -75,7 +75,14 @@ export function filterHeaders(
  *
  * @param request - The incoming request
  * @param app - The external app configuration
- * @param path - The full request path including proxy prefix (e.g., /proxy/{pathPrefix}/page)
+ * @param path - The full request path including proxy prefix and query string
+ *   (e.g., /proxy/{pathPrefix}/page/?q=a+b). Issue #1802: the caller passes
+ *   pathname + search taken from the request URL, so the trailing slash and the
+ *   percent-encoded pathname bytes reach the upstream unchanged. The query
+ *   string is forwarded as the caller received it, which is not necessarily as
+ *   the client sent it - Next.js re-serializes the query before the route
+ *   handler runs (`?q=a%20b` -> `?q=a+b`, `?bare` -> `?bare=`). This function
+ *   itself never rewrites what it is given.
  * @returns The proxied response
  */
 export async function proxyHttp(
