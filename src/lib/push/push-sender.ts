@@ -33,8 +33,9 @@ import { createLogger } from '@/lib/logger';
 import { DEFAULT_LOCALE, isSupportedLocale, type SupportedLocale } from '@/config/i18n-config';
 import enNotifications from '../../../locales/en/notifications.json';
 import jaNotifications from '../../../locales/ja/notifications.json';
+import type { WaitingKind } from '@/lib/session/waiting-kind';
 import { getVapidConfig } from './vapid';
-import { shouldSendNotification } from './notification-dedup';
+import { shouldSendNotification, shouldSendWaitingPush } from './notification-dedup';
 
 const logger = createLogger('push/sender');
 
@@ -66,6 +67,25 @@ export interface NotificationEvent {
   agentName?: string;
   /** Short human-readable excerpt (prompt question or response tail). */
   excerpt?: string;
+  /**
+   * What the agent is waiting for (Issue #1790). Only meaningful for
+   * `kind: 'prompt'`, and it changes the body rather than the kind: the reader
+   * needs to know whether the notification can be answered from the app
+   * (`'prompt'`) or only at the terminal (`'menu'` / `'unclassified'`).
+   */
+  waitingKind?: WaitingKind | null;
+  /**
+   * The waiting episode this notification belongs to (#1786's `since`).
+   *
+   * Present, it makes the notification episode-scoped: dedup keys off it rather
+   * than off the content hash, so one wait produces one notification no matter
+   * which path reported it. Absent, the legacy 30 s content dedup applies.
+   */
+  waitingSince?: number | null;
+  /** Instance id for the episode key; falls back to {@link agentName}. */
+  instanceId?: string;
+  /** True for the "still waiting" re-notification (Issue #1790). */
+  escalated?: boolean;
 }
 
 /** The JSON payload delivered to the Service Worker. Minimal by design. */
@@ -77,6 +97,11 @@ export interface PushPayload {
   url: string;
   tag: string;
   timestamp: number;
+  /**
+   * Present only on waiting notifications (Issue #1790). Omitted — not null —
+   * elsewhere, so a completion payload keeps the exact shape #1125 shipped.
+   */
+  waitingKind?: WaitingKind;
 }
 
 /** Collapse whitespace and truncate to a single short line. Never the full terminal. */
@@ -85,6 +110,49 @@ export function buildExcerpt(text: string | undefined, maxLength = MAX_EXCERPT_L
   const collapsed = text.replace(/\s+/g, ' ').trim();
   if (collapsed.length <= maxLength) return collapsed;
   return collapsed.slice(0, maxLength - 1).trimEnd() + '…';
+}
+
+/**
+ * Whether this wait can only be dealt with at the terminal (Issue #1790).
+ *
+ * A `menu` (selection list / pager) and an `unclassified` wait share the one
+ * fact the reader acts on: tapping the notification will not present anything
+ * to answer. `prompt` — and an absent kind, which is every pre-#1790 caller —
+ * keeps the original "waiting for your reply" wording.
+ */
+function needsTerminal(waitingKind: WaitingKind | null | undefined): boolean {
+  return waitingKind === 'menu' || waitingKind === 'unclassified';
+}
+
+/** The body for a waiting notification, in the reader's language. */
+function buildWaitingBody(
+  event: NotificationEvent,
+  messages: typeof enNotifications.push,
+  excerpt: string,
+  now: number
+): string {
+  const terminal = needsTerminal(event.waitingKind);
+
+  if (event.escalated) {
+    // The excerpt is dropped on purpose: after ten minutes the question is no
+    // longer news, the elapsed time is.
+    const elapsedMs = now - (event.waitingSince ?? now);
+    const minutes = String(Math.max(1, Math.floor(elapsedMs / 60_000)));
+    return (terminal ? messages.stillWaitingTerminal : messages.stillWaitingPrompt).replace(
+      '{minutes}',
+      minutes
+    );
+  }
+
+  if (terminal) {
+    return excerpt
+      ? messages.terminalAttentionWithExcerpt.replace('{excerpt}', excerpt)
+      : messages.terminalAttention;
+  }
+
+  return excerpt
+    ? messages.promptWaitingWithExcerpt.replace('{excerpt}', excerpt)
+    : messages.promptWaiting;
 }
 
 /** Build the minimal notification payload for an event, in the reader's language. */
@@ -99,9 +167,7 @@ export function buildPushPayload(
   const messages = PUSH_MESSAGES[resolvePushLocale(locale)];
   const body =
     event.kind === 'prompt'
-      ? excerpt
-        ? messages.promptWaitingWithExcerpt.replace('{excerpt}', excerpt)
-        : messages.promptWaiting
+      ? buildWaitingBody(event, messages, excerpt, now)
       : excerpt
         ? messages.completionWithExcerpt.replace('{excerpt}', excerpt)
         : messages.completion;
@@ -112,8 +178,12 @@ export function buildPushPayload(
     body,
     worktreeId: event.worktreeId,
     url: `/worktrees/${event.worktreeId}`,
+    // Unchanged by #1790, and deliberately: the escalation carries the same tag
+    // as the notification it follows up, so the Service Worker replaces the
+    // stale one instead of stacking a second card for the same wait.
     tag: `${event.worktreeId}:${event.kind}`,
     timestamp: now,
+    ...(event.waitingKind ? { waitingKind: event.waitingKind } : {}),
   };
 }
 
@@ -139,18 +209,49 @@ async function sendToOne(
 }
 
 /**
+ * Which guard applies to this event (Issue #1790).
+ *
+ * An episode-scoped waiting notification is deduped by the wait it belongs to;
+ * everything else — every completion, and any prompt event that predates the
+ * episode store — keeps the content hash and its 30 s window. Both record as
+ * they decide, so this must be called exactly once per event.
+ */
+function passesDedup(event: NotificationEvent): boolean {
+  if (event.kind === 'prompt' && typeof event.waitingSince === 'number') {
+    return shouldSendWaitingPush({
+      worktreeId: event.worktreeId,
+      instanceId: event.instanceId ?? event.agentName ?? '',
+      since: event.waitingSince,
+      escalated: event.escalated,
+    });
+  }
+
+  return shouldSendNotification({
+    worktreeId: event.worktreeId,
+    kind: event.kind,
+    content: event.excerpt,
+  });
+}
+
+/**
  * Fan out a notification to all subscriptions opted into this event's kind.
  * Never throws — push is advisory and must not disrupt the poller. No-op when
  * push is unconfigured, deduped, or there are no matching subscriptions.
+ *
+ * `now` is injectable because the escalation body quotes how long the wait has
+ * lasted (Issue #1790): the reminder is raised from a periodic check that knows
+ * the tick's time, and reading the clock again here would report a different
+ * elapsed time from the one that decided to send.
  */
-export async function notifyPushSubscribers(event: NotificationEvent): Promise<void> {
+export async function notifyPushSubscribers(
+  event: NotificationEvent,
+  now: number = Date.now()
+): Promise<void> {
   try {
     const config = getVapidConfig();
     if (!config) return;
 
-    if (!shouldSendNotification({ worktreeId: event.worktreeId, kind: event.kind, content: event.excerpt })) {
-      return;
-    }
+    if (!passesDedup(event)) return;
 
     const db = getDbInstance();
     const subscriptions = getPushSubscriptionsForKind(db, event.kind);
@@ -170,7 +271,7 @@ export async function notifyPushSubscribers(event: NotificationEvent): Promise<v
 
     await Promise.all(
       Array.from(byLocale, ([locale, subs]) => {
-        const payload = JSON.stringify(buildPushPayload(event, locale));
+        const payload = JSON.stringify(buildPushPayload(event, locale, now));
         return Promise.all(subs.map((sub) => sendToOne(sub, payload)));
       })
     );

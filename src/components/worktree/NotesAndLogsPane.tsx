@@ -75,6 +75,12 @@ export interface NotesAndLogsPaneProps {
   visibleInstanceIds?: string[];
   /** Issue #874: Toggle one instance's per-device visibility. */
   onToggleInstanceVisible?: (instanceId: string) => void;
+  /**
+   * Issue #1783: instanceId -> the model that instance last reported running.
+   * Threaded to {@link MobileAgentInstancesPane} for a read-only display; absent
+   * entries render nothing.
+   */
+  modelByInstance?: Readonly<Partial<Record<string, string | null>>>;
 }
 
 // ============================================================================
@@ -122,6 +128,7 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
   onInstancesChange,
   visibleInstanceIds,
   onToggleInstanceVisible,
+  modelByInstance,
 }: NotesAndLogsPaneProps) {
   const t = useTranslations('schedule');
   // Internal sub-tab state (not leaked to parent)
@@ -182,6 +189,7 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
                 onVibeLocalContextWindowChange={onVibeLocalContextWindowChange}
                 visibleInstanceIds={visibleInstanceIds}
                 onToggleInstanceVisible={onToggleInstanceVisible}
+                modelByInstance={modelByInstance}
               />
             </div>
           ) : (

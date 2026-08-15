@@ -218,6 +218,7 @@ export {
   MAX_RUN_HISTORY_LIMIT,
   MAX_RUN_HISTORY_DAYS,
   VERIFICATION_TRIGGERS,
+  VERIFICATION_GATE_SOURCES,
 } from './verification-db';
 export type {
   VerificationRun,
@@ -231,6 +232,7 @@ export type {
   VerificationRunTerminalStatus,
   VerificationGateStatus,
   VerificationGateTerminalStatus,
+  VerificationGateSource,
   CreateVerificationRunInput,
   CreateGateResultInput,
   FinishGateResultPatch,

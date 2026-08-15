@@ -191,6 +191,33 @@ describe('HTTP Proxy Handler', () => {
         expect.any(Object)
       );
     });
+
+    // Issue #1802: the path handed in by the route handler must reach fetch()
+    // unchanged - trailing slash kept, percent-encoding not re-encoded.
+    // This covers the proxyHttp -> fetch hop only. A client's ?q=a%20b never
+    // reaches this layer as %20: Next.js normalizes it to ?q=a+b before the
+    // route handler runs (see tests/unit/proxy/route.test.ts).
+    it('should forward a trailing slash and percent-encoded bytes to fetch unchanged', async () => {
+      const { proxyHttp } = await import('@/lib/proxy/handler');
+
+      const mockApp = createMockApp({
+        targetHost: '127.0.0.1',
+        targetPort: 60310,
+        pathPrefix: 'commandagent',
+      });
+      const request = new Request(
+        'http://localhost:3000/proxy/commandagent/try/?q=a%20b&n=1'
+      );
+
+      global.fetch = vi.fn().mockResolvedValue(new Response('OK'));
+
+      await proxyHttp(request, mockApp, '/proxy/commandagent/try/?q=a%20b&n=1');
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        'http://127.0.0.1:60310/proxy/commandagent/try/?q=a%20b&n=1',
+        expect.any(Object)
+      );
+    });
   });
 
   describe('proxyWebSocket', () => {
@@ -308,6 +335,55 @@ describe('HTTP Proxy Handler', () => {
       // Root path is forwarded as-is
       expect(url).toBe('http://localhost:3001/');
     });
+
+    /**
+     * Issue #1804: the caller now passes the RAW request target, so this
+     * concatenation is the last point at which the bytes are still exactly what
+     * the client sent.
+     */
+    it.each([
+      '/proxy/testapp/search?q=a%20b&n=1',
+      '/proxy/testapp/search?bare',
+      '/proxy/testapp/search?q=a%2Bb',
+      '/proxy/testapp/search?sig=aGVsbG8%3D',
+      '/proxy/testapp/search?q=%E6%97%A5%E6%9C%AC',
+      '/proxy/testapp/a%2Fb/',
+      '/proxy/testapp/search/?',
+    ])('should concatenate the raw request target %s without rewriting it', async (path) => {
+      const { buildUpstreamUrl } = await import('@/lib/proxy/handler');
+
+      const mockApp = createMockApp({
+        targetHost: '127.0.0.1',
+        targetPort: 3806,
+      });
+
+      expect(buildUpstreamUrl(mockApp, path)).toBe(`http://127.0.0.1:3806${path}`);
+    });
+
+    /**
+     * Issue #1804 KNOWN LIMIT, pinned so it is not mistaken for a bug in the
+     * layers above. A bare trailing `?` survives resolveProxyPaths() and
+     * buildUpstreamUrl(), and even survives `new URL().href` - but Node's
+     * fetch() serializes the request target as `pathname + search`, and
+     * `search` is '' when the query is present-but-empty. Measured end-to-end:
+     * `/proxy/testapp/search/?` is received upstream as
+     * `/proxy/testapp/search/`.
+     */
+    it('should keep a bare ? in the built URL even though fetch() later drops it', async () => {
+      const { buildUpstreamUrl } = await import('@/lib/proxy/handler');
+
+      const mockApp = createMockApp({ targetHost: '127.0.0.1', targetPort: 3806 });
+      const built = buildUpstreamUrl(mockApp, '/proxy/testapp/search/?');
+
+      expect(built).toBe('http://127.0.0.1:3806/proxy/testapp/search/?');
+      expect(built.endsWith('?')).toBe(true);
+
+      // The layer that actually loses it:
+      const parsed = new URL(built);
+      expect(parsed.href).toBe('http://127.0.0.1:3806/proxy/testapp/search/?');
+      expect(parsed.search).toBe('');
+      expect(parsed.pathname + parsed.search).toBe('/proxy/testapp/search/');
+    });
   });
 
   // Issue #395: Security hardening tests
@@ -369,6 +445,71 @@ describe('HTTP Proxy Handler', () => {
 
       const calledHeaders = getForwardedRequestHeaders();
       expect(calledHeaders.has(headerName)).toBe(false);
+    });
+  });
+
+  /**
+   * Issue #1804: `x-cm-raw-url` is set by server.ts purely so the proxy route
+   * handler can recover the raw request target. It is CommandMate-internal and
+   * must not leak to the upstream app, which would otherwise see a header
+   * naming our own routing prefix.
+   */
+  describe('internal request header stripping (Issue #1804)', () => {
+    it('should strip x-cm-raw-url before forwarding to upstream', async () => {
+      const { proxyHttp } = await import('@/lib/proxy/handler');
+
+      const mockApp = createMockApp();
+      const request = new Request('http://localhost:3000/proxy/test/api', {
+        method: 'GET',
+        headers: {
+          'x-cm-raw-url': '/proxy/test/api/?q=a%20b',
+          'Accept': 'application/json',
+        },
+      });
+
+      global.fetch = vi.fn().mockResolvedValue(new Response('OK'));
+
+      await proxyHttp(request, mockApp, '/proxy/test/api/?q=a%20b');
+
+      const calledHeaders = getForwardedRequestHeaders();
+      expect(calledHeaders.has('x-cm-raw-url')).toBe(false);
+      // Unrelated headers still get through.
+      expect(calledHeaders.get('accept')).toBe('application/json');
+    });
+
+    it('should strip every header listed in INTERNAL_REQUEST_HEADERS', async () => {
+      const { proxyHttp } = await import('@/lib/proxy/handler');
+      const { INTERNAL_REQUEST_HEADERS } = await import('@/lib/proxy/config');
+
+      expect(INTERNAL_REQUEST_HEADERS.length).toBeGreaterThan(0);
+
+      const mockApp = createMockApp();
+      const request = new Request('http://localhost:3000/proxy/test/api', {
+        method: 'GET',
+        headers: Object.fromEntries(
+          INTERNAL_REQUEST_HEADERS.map((name) => [name, 'internal-value'])
+        ),
+      });
+
+      global.fetch = vi.fn().mockResolvedValue(new Response('OK'));
+
+      await proxyHttp(request, mockApp, '/proxy/test/api');
+
+      const calledHeaders = getForwardedRequestHeaders();
+      for (const header of INTERNAL_REQUEST_HEADERS) {
+        expect(calledHeaders.has(header)).toBe(false);
+      }
+    });
+
+    it('should name the raw-url header consistently across config exports', async () => {
+      const { PROXY_RAW_URL_HEADER, INTERNAL_REQUEST_HEADERS } = await import(
+        '@/lib/proxy/config'
+      );
+
+      // server.ts writes this literal inline (it must not import from src/),
+      // so the two spellings are pinned here.
+      expect(PROXY_RAW_URL_HEADER).toBe('x-cm-raw-url');
+      expect(INTERNAL_REQUEST_HEADERS).toContain(PROXY_RAW_URL_HEADER);
     });
   });
 

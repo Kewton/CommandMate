@@ -787,12 +787,29 @@
     "agentInstanceSelection": "Agent Instance Selection",
     "statusPill": "{label}: {status}",
     "subTabMessage": "Message",
-    "subTabGit": "Git"
+    "subTabGit": "Git",
+    "statusPillWithModel": "{label}: {status} — model {model}"
   },
   "detailStatus": {
     "idle": "Idle - No active session",
     "ready": "Ready - Waiting for input",
     "running": "Running - Processing",
     "waiting": "Waiting - User input required"
+  },
+  "agentModel": {
+    "label": "Model",
+    "modelLabel": "Model: {model}"
+  },
+  "nextAction": {
+    "start": "Start",
+    "sendMessage": "Send message",
+    "approveReject": "Approve / Reject",
+    "replyToPrompt": "Reply to prompt",
+    "checkStalled": "Check stalled",
+    "running": "Running..."
+  },
+  "awaitingInstruction": {
+    "badge": "Ready for work",
+    "label": "The agent finished its turn and is waiting for your next instruction"
   }
 }

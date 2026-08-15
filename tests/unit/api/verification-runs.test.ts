@@ -68,6 +68,7 @@ function seedRun(opts: {
   const gate = createGateResult(db, run.id, {
     gateId: opts.gateId ?? 'unit',
     command: 'npm run test:unit',
+    source: 'verify.yaml',
   });
   finishGateResult(db, gate.id, {
     status: opts.status ?? 'failed',
@@ -118,6 +119,9 @@ describe('GET /api/verification/runs — the listing never carries log bodies', 
       status: 'failed',
       exitCode: 1,
       durationMs: 45_000,
+      // Where the gate was declared (#1791) — the listing carries it, the log
+      // body it never has.
+      source: 'verify.yaml',
     });
     expect(body.runs[0].gates[0]).not.toHaveProperty('logTail');
   });

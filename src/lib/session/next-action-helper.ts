@@ -20,29 +20,67 @@ import type { PromptType } from '@/types/models';
 export type ReviewStatus = 'done' | 'approval' | 'stalled';
 
 /**
- * Determine the next action string for a given session state.
+ * Dictionary keys returned by {@link getNextAction} (Issue #1787).
+ *
+ * These are keys in the `worktree` namespace (`locales/{en,ja}/worktree.json`),
+ * NOT display strings: the function runs on the server (`/api/worktrees`) and in
+ * module scope, where `t()` cannot be called, so pinning English here would ship
+ * "Approve / Reject" to a Japanese UI — the same problem #1271/#1273 fixed for
+ * StatusDot's labels. Rendering surfaces resolve them with
+ * `useTranslations('worktree')`.
+ */
+export const NEXT_ACTION_KEYS = {
+  start: 'nextAction.start',
+  sendMessage: 'nextAction.sendMessage',
+  approveReject: 'nextAction.approveReject',
+  replyToPrompt: 'nextAction.replyToPrompt',
+  checkStalled: 'nextAction.checkStalled',
+  running: 'nextAction.running',
+} as const;
+
+/** One of the {@link NEXT_ACTION_KEYS} values. */
+export type NextActionKey = (typeof NEXT_ACTION_KEYS)[keyof typeof NEXT_ACTION_KEYS];
+
+const NEXT_ACTION_KEY_SET: ReadonlySet<string> = new Set(Object.values(NEXT_ACTION_KEYS));
+
+/**
+ * Whether a value is a key this module produces (Issue #1787).
+ *
+ * `Worktree.nextAction` is a plain `string` on the wire, and a server that
+ * predates this Issue still sends the old English literal. Callers must gate
+ * `t()` on this: next-intl reports a missing key by rendering the key path, so
+ * feeding it `"Approve / Reject"` would put `worktree.Approve / Reject` on
+ * screen. Anything that fails this test is rendered verbatim instead.
+ */
+export function isNextActionKey(value: string): value is NextActionKey {
+  return NEXT_ACTION_KEY_SET.has(value);
+}
+
+/**
+ * Determine the next action for a given session state.
  *
  * @param status - Current session status (idle/ready/running/waiting) or null
  * @param promptType - Type of active prompt, if any
  * @param isStalled - Whether the session is considered stalled
- * @returns Human-readable next action string
+ * @returns A dictionary key from {@link NEXT_ACTION_KEYS} (Issue #1787 — this
+ *   used to be a hard-coded English string)
  */
 export function getNextAction(
   status: SessionStatus | null,
   promptType: PromptType | null,
   isStalled: boolean
-): string {
-  if (!status) return 'Start';
-  if (status === 'idle') return 'Start';
-  if (status === 'ready') return 'Send message';
-  if (status === 'waiting' && promptType === 'approval') return 'Approve / Reject';
-  if (status === 'waiting') return 'Reply to prompt';
-  if (status === 'running' && isStalled) return 'Check stalled';
-  if (status === 'running') return 'Running...';
+): NextActionKey {
+  if (!status) return NEXT_ACTION_KEYS.start;
+  if (status === 'idle') return NEXT_ACTION_KEYS.start;
+  if (status === 'ready') return NEXT_ACTION_KEYS.sendMessage;
+  if (status === 'waiting' && promptType === 'approval') return NEXT_ACTION_KEYS.approveReject;
+  if (status === 'waiting') return NEXT_ACTION_KEYS.replyToPrompt;
+  if (status === 'running' && isStalled) return NEXT_ACTION_KEYS.checkStalled;
+  if (status === 'running') return NEXT_ACTION_KEYS.running;
   // exhaustive check: SessionStatus extensions will cause compile error [DR2-005]
   const _exhaustive: never = status;
   void _exhaustive;
-  return 'Running...';
+  return NEXT_ACTION_KEYS.running;
 }
 
 /**

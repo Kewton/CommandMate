@@ -4,6 +4,7 @@
  * Provides sorting functionality for sidebar branch list
  */
 
+import { aggregateCliStatus } from '@/types/sidebar';
 import type { SidebarBranchItem, BranchStatus } from '@/types/sidebar';
 
 /**
@@ -92,6 +93,14 @@ export const STATUS_PRIORITY: Record<BranchStatus, number> = {
   generating: 3,
   idle: 4,
 };
+
+/**
+ * Sort key whose whole purpose is to let the user order by status themselves
+ * (Issue #1787). The waiting-first prefix is suppressed for it: `STATUS_PRIORITY`
+ * already puts `waiting` at the top ascending, and forcing the prefix would make
+ * descending — "show me the idle ones first" — silently impossible.
+ */
+const USER_CONTROLLED_STATUS_SORT_KEY: SortKey = 'status';
 
 /** Saturation value for repository color dots (%) */
 export const REPO_DOT_SATURATION = 65;
@@ -204,7 +213,37 @@ export function compareByTimestamp(
 }
 
 /**
+ * Whether a branch belongs in the sidebar's pinned "needs you" group
+ * (Issue #1787).
+ *
+ * Reads the AGGREGATED per-instance status, which is what the row's single dot
+ * shows — a branch whose `claude-2` is waiting renders an amber dot, so it must
+ * also float. Falls back to the branch-level `status` when the item carries no
+ * per-instance map (legacy payloads, and most unit fixtures).
+ *
+ * @param branch - Branch item to classify
+ * @returns true when the branch is waiting for the user
+ */
+export function isWaitingBranch(branch: SidebarBranchItem): boolean {
+  const aggregated =
+    branch.cliStatus && Object.keys(branch.cliStatus).length > 0
+      ? aggregateCliStatus(branch.cliStatus)
+      : branch.status;
+  return aggregated === 'waiting';
+}
+
+/**
  * Sort branch items by the specified key and direction
+ *
+ * Issue #1787: two-stage. Waiting branches are pinned to a leading group, and
+ * the selected sort orders each group internally — so the default `updatedAt`
+ * ordering still applies, it just applies within "needs you" and then within
+ * "everything else". Without this the branch that is blocked on a y/n prompt
+ * sinks below anything touched more recently, which is exactly the case the
+ * user must not miss.
+ *
+ * The prefix runs BEFORE the direction multiplier on purpose: flipping to `asc`
+ * must not bury the waiting group at the bottom.
  *
  * @param branches - Array of branch items to sort
  * @param sortKey - Key to sort by
@@ -214,7 +253,7 @@ export function compareByTimestamp(
  * @example
  * ```ts
  * const sorted = sortBranches(branches, 'updatedAt', 'desc');
- * // Returns branches sorted by update time, newest first
+ * // Waiting branches first (newest first among them), then the rest by update time
  * ```
  */
 export function sortBranches(
@@ -225,7 +264,16 @@ export function sortBranches(
   // Create a copy to avoid mutating the original array
   const sorted = [...branches];
 
+  // Issue #1787: the explicit 'status' sort stays byte-identical to its previous
+  // behaviour — the user asked for that exact order.
+  const pinWaitingFirst = sortKey !== USER_CONTROLLED_STATUS_SORT_KEY;
+
   sorted.sort((a, b) => {
+    if (pinWaitingFirst) {
+      const waitingDelta = Number(isWaitingBranch(b)) - Number(isWaitingBranch(a));
+      if (waitingDelta !== 0) return waitingDelta;
+    }
+
     let comparison = 0;
 
     switch (sortKey) {
@@ -296,6 +344,10 @@ export function sortBranches(
 /**
  * Group branches by repository name, sort groups alphabetically,
  * and sort branches within each group using the specified sort key.
+ *
+ * Issue #1787: grouped view keeps its repository grouping — the groups are the
+ * user's mental model and reordering them by status would scramble it — so the
+ * waiting-first prefix applies WITHIN each repository (via `sortBranches`).
  *
  * @param branches - Array of branch items to group
  * @param sortKey - Key to sort branches within each group

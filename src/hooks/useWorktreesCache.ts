@@ -3,6 +3,9 @@
  *
  * Issue #600: UX refresh - single source of truth for worktree list [DR3-004]
  * Issue #608: Add adaptive polling for real-time sidebar status sync
+ * Issue #1788: waiting edges arrive by push and are applied here. The polling
+ *   cadences below are UNCHANGED and remain the fallback — a client with no
+ *   WebSocket still learns about a wait exactly as fast as it did before.
  */
 
 'use client';
@@ -26,6 +29,64 @@ export const POLLING_INTERVAL_IDLE = 30000;
  */
 export const POLLING_INTERVAL_ACTIVE_WS = 20000;
 export const POLLING_INTERVAL_IDLE_WS = 60000;
+
+/**
+ * Apply a waiting edge (Issue #1788) to one cached worktree.
+ *
+ * Returns the same object when nothing changed, so the caller can keep the
+ * previous array identity and skip the re-render.
+ *
+ * Two things are updated and one is deliberately not:
+ *
+ * - **`sessionStatusByInstance[instance]`** — only when the key already exists.
+ *   Creating one would mean inventing `isRunning` / `isProcessing` for an
+ *   instance this client has never seen, and those drive the sidebar dot.
+ * - **`isWaitingForResponse`** — the worktree-level aggregate the badge counts
+ *   and Review's `approval` filter matches on. Set directly on a `true` edge
+ *   (an OR only ever widens); recomputed from the per-instance map on a `false`
+ *   edge, so one instance finishing does not clear a worktree whose sibling
+ *   instance is still waiting.
+ * - **`sessionStatusByCli[cliTool]` is left alone.** That entry is the OR across
+ *   every instance of a tool, and one instance's edge cannot decide it: an alias
+ *   going quiet says nothing about the primary. It stays poll-driven (≤20s),
+ *   which costs a stale dot rather than a wrong one.
+ */
+function applyWaitingEdge(
+  wt: Worktree,
+  edge: { waiting: boolean; instance?: string | null; waitingKind?: string | null },
+): Worktree {
+  const instanceKey = edge.instance ?? null;
+  const previousInstance = instanceKey ? wt.sessionStatusByInstance?.[instanceKey] : undefined;
+
+  let sessionStatusByInstance = wt.sessionStatusByInstance;
+  if (instanceKey && previousInstance && previousInstance.isWaitingForResponse !== edge.waiting) {
+    sessionStatusByInstance = {
+      ...wt.sessionStatusByInstance,
+      [instanceKey]: {
+        ...previousInstance,
+        isWaitingForResponse: edge.waiting,
+        waitingKind: (edge.waitingKind ?? null) as typeof previousInstance.waitingKind,
+      },
+    };
+  }
+
+  let isWaitingForResponse: boolean;
+  if (edge.waiting) {
+    isWaitingForResponse = true;
+  } else {
+    const entries = sessionStatusByInstance ? Object.values(sessionStatusByInstance) : [];
+    isWaitingForResponse =
+      entries.length > 0 ? entries.some((s) => s?.isWaitingForResponse === true) : false;
+  }
+
+  if (
+    sessionStatusByInstance === wt.sessionStatusByInstance &&
+    isWaitingForResponse === wt.isWaitingForResponse
+  ) {
+    return wt;
+  }
+  return { ...wt, sessionStatusByInstance, isWaitingForResponse };
+}
 
 /**
  * Return value of useWorktreesCache hook.
@@ -225,6 +286,31 @@ export function useWorktreesCache(): UseWorktreesCacheReturn {
     return addListener((event: RealtimeEvent) => {
       if (event.type === 'session_status_changed' && typeof event.worktreeId === 'string') {
         const targetId = event.worktreeId;
+
+        // Issue #1788: the waiting edge rides the same event type. Handled
+        // before the running/stopped branch and returning on its own, because a
+        // waiting frame carries no `isRunning` at all (it cannot know — see
+        // SessionStatusEvent) and the old `typeof isRunning !== 'boolean'`
+        // guard below would drop it on the floor.
+        const waiting = (event as { isWaitingForResponse?: boolean }).isWaitingForResponse;
+        if (typeof waiting === 'boolean') {
+          const instance = (event as { instance?: string | null }).instance ?? null;
+          const waitingKind = (event as { waitingKind?: string | null }).waitingKind ?? null;
+          startTransition(() => {
+            setWorktrees((prev) => {
+              let changed = false;
+              const next = prev.map((wt) => {
+                if (wt.id !== targetId) return wt;
+                const updated = applyWaitingEdge(wt, { waiting, instance, waitingKind });
+                if (updated !== wt) changed = true;
+                return updated;
+              });
+              return changed ? next : prev;
+            });
+          });
+          return;
+        }
+
         const isRunning = (event as { isRunning?: boolean }).isRunning;
         if (typeof isRunning !== 'boolean') return;
         // Issue #1171: a SCOPED stop (a single agent instance / CLI ended, so the

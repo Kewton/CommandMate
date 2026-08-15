@@ -250,7 +250,14 @@ function addShowCommand(parent: Command): void {
 
         for (const gate of run.gates) {
           const exit = gate.exitCode === null ? 'n/a' : String(gate.exitCode);
-          console.log(`  ${gate.gateId}  ${gate.status}  exit=${exit}  ${formatSeconds(gate.durationMs)}`);
+          // `show` names every gate's source, not only the contract's (#1791):
+          // this is the detail view a reader consults to reconstruct what a run
+          // judged, so "which of these was the repository's own definition of
+          // passing" should not have to be inferred from an absent marker.
+          const source = gate.source ? `  src=${gate.source}` : '';
+          console.log(
+            `  ${gate.gateId}  ${gate.status}  exit=${exit}  ${formatSeconds(gate.durationMs)}${source}`
+          );
           if (gate.logTail) {
             for (const line of gate.logTail.split('\n')) {
               console.log(`    | ${line}`);

@@ -30,6 +30,25 @@
     "promptWaitingWithExcerpt": "応答待ち: {excerpt}",
     "promptWaiting": "応答待ちです",
     "completionWithExcerpt": "完了: {excerpt}",
-    "completion": "セッションが完了しました"
+    "completion": "セッションが完了しました",
+    "terminalAttentionWithExcerpt": "端末の確認が必要です: {excerpt}",
+    "terminalAttention": "端末の確認が必要です",
+    "stillWaitingPrompt": "まだ応答待ちです（{minutes}分経過）",
+    "stillWaitingTerminal": "まだ端末の確認が必要です（{minutes}分経過）"
+  },
+  "escalation": {
+    "heading": "再通知",
+    "toggle": "待ち続けていたら再通知する",
+    "toggleDesc": "エージェントが入力待ちのまま指定時間を超えたら、もう1度だけ通知します。すべての端末に適用されます。",
+    "threshold": "再通知するまでの時間",
+    "minutes": "{count}分"
+  },
+  "inApp": {
+    "heading": "アプリ内通知",
+    "waitingToggle": "入力待ちトースト",
+    "waitingToggleDesc": "別のワークツリーが入力待ちになったときにトーストを表示します",
+    "waitingToast": "{name} が入力待ちです",
+    "soundToggle": "入力待ちの通知音",
+    "soundToggleDesc": "ワークツリーが入力待ちになったときに短い通知音を鳴らします。ページを一度クリックまたはキー操作すると有効になります。"
   }
 }

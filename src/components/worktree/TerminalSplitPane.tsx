@@ -65,6 +65,18 @@ export interface TerminalSplitPaneProps {
    * directly. Defaults to `idle`.
    */
   status?: StatusDotStatus;
+  /**
+   * Issue #1783: the model this split's agent last reported running, from the
+   * structured hook events (`sessionStatusByInstance[instanceId].model`).
+   *
+   * Rendered as muted small text after the alias — the session title bar is the
+   * one surface that is already per-instance, so it is the natural home for a
+   * per-instance fact. `null`/`undefined` renders **nothing**: most sessions
+   * never report a model (gemini, copilot, any tool without hooks configured),
+   * and an "unknown" badge on all of them would be noise on the busiest row of
+   * the screen.
+   */
+  agentModel?: string | null;
   /** Called when the textarea (or any input) inside this pane gains focus. */
   onFocus: () => void;
   /** Whether tmux attach is in progress for this split. */
@@ -105,6 +117,7 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   availableInstances,
   onInstanceChange,
   status = 'idle',
+  agentModel,
   onFocus,
   attaching = false,
   headerExtras,
@@ -259,6 +272,23 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {/* Issue #1783: the model the agent itself reported, as muted small
+            text after the alias. A sibling of the selector rather than a child
+            of its trigger: the trigger is already `max-w-[12rem]` with a
+            truncated alias and a chevron, and folding a second string into it
+            would eat the alias to make room for the model. Rendered only when a
+            model is actually known — see `agentModel`. `truncate` + `title` keep
+            a long id from pushing the search button off the row. */}
+        {agentModel && (
+          <span
+            data-testid={`split-agent-model-${splitIndex}`}
+            title={t('agentModel.modelLabel', { model: agentModel })}
+            className="min-w-0 max-w-[10rem] truncate text-[11px] leading-none text-muted-foreground"
+          >
+            {agentModel}
+          </span>
+        )}
 
         {/* Issue #1171: session-scoped extras (the End × button) sit directly
             after the instance selector, before the search button, so the

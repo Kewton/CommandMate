@@ -7,6 +7,390 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-08-16
+
+> **Highlight**: エージェントの**入力待ちを見逃さないための経路を一通り揃えた**リリース。WS 即時配信・要対応バッジ・クロス画面 Toast に加え、タブタイトル / favicon / App Badge / 通知音でブラウザ外へ、さらに waiting エッジ駆動の push 通知でデバイス外へ伝わるようになった（方針 A / D / E）。あわせて稼働中の**モデルと reasoning effort** を hooks の構造化イベントと tmux capture の両経路から取得し、UI と CLI (`instances` / `capture --json`) に露出した。External Apps のプロキシは**末尾スラッシュとクエリ文字列を生バイトのまま**転送するようになり、Next.js static export のアプリが CommandMate 経由で開けなかった問題（`/proxy/<app>/try/` と `/assets/` が 404）が解消している。
+
+### Fixed
+
+- **fix(proxy): クエリ文字列を生バイトのまま上流へ転送する** (#1804)
+  - **#1802 でクエリは転送されるようになったが、バイト完全一致ではなかった。**
+    `?q=a%20b&n=1` は上流に `?q=a+b&n=1` として、`?bare` は `?bare=` として届いていた。
+    `application/x-www-form-urlencoded` の意味論では `+` と `%20` は同じ空白にデコードされるため
+    大半のアプリでは実害が無いが、**クエリのバイト列に対して署名を検証する上流**
+    （HMAC 署名つき URL / presigned URL / OAuth 1.0a）では署名検証に失敗する
+  - **原因は Next.js が route handler に渡す前に `request.url` を再構成していること。**
+    `%20`→`+` と `?bare`→`?bare=` は `URLSearchParams` で再シリアライズした時の署名であり、
+    App Router の route handler の内側からは触れない層で起きる
+  - **修正は「Next.js を迂回する」のではなく「生 URL を一段手前で退避する」方式。**
+    `server.ts` の `requestHandler` は Next.js に渡す前に生の `req.url`（Node の request target）を
+    持っているので、これを `x-cm-raw-url` ヘッダへ退避し、
+    `src/app/proxy/[...path]/route.ts` が読み戻す。ヘッダが無い場合（`next dev` 単体・unit test）は
+    従来どおり `request.url` にフォールバックするため #1802 の挙動を維持する
+  - **`/proxy/*` を `server.ts` で横取りする案（起票時の方針）は採用しなかった。**
+    `/proxy/...` は現在 `src/middleware.ts` の認証と IP 制限を通っており、
+    `AUTH_EXCLUDED_PATHS` は完全一致判定なので除外されていない。Next.js を迂回すると
+    **External Apps から認証と IP 制限が丸ごと外れる**（Cloudflare Tunnel 配下では外部公開に直結）。
+    `next.config.js` の `headers()`（CSP 等）も失われる。この性質を
+    `tests/unit/proxy/proxy-auth-guard.test.ts` で固定した
+  - **偽装防止**: `server.ts` は `x-cm-raw-url` を**無条件に `delete` してから**
+    `/proxy/` の時だけ `set` する。クライアントが付けてきた値は経路を問わず必ず捨てられる。
+    内部用ヘッダなので `filterHeaders()` で剥がしており**上流へは転送されない**
+  - **`server.ts` 側は inline 4 行、import は 1 つも追加していない**（#1428 の再発防止）。
+    top-level に内部モジュールの静的 import を足すと `tsx server.ts` 下で Next の
+    AsyncLocalStorage bootstrap が壊れ、最初のリクエストでクラッシュする。
+    この故障は unit / integration / build / lint をすべてすり抜け E2E だけで落ちる
+  - **実機計測（隔離 DB・ポート 3805・エコー上流 3806、生 TCP でバイト単位送信）**:
+    `?q=a%20b&n=1` / `?bare` / `?q=a%2Bb` / `?q=a%26b` / `?sig=aGVsbG8%3D` /
+    `?q=%E6%97%A5%E6%9C%AC` / `?q=a+b` / `?empty=` / `?a=1&a=2` がすべてバイト一致で上流着。
+    #1802 のパス保存（`/try/` と `/try` の区別・`a%2Fb`・`a%20b`・多バイト・素の `+`・深い階層）と
+    HEAD / POST / PUT / PATCH / DELETE に回帰なし。認証有効時は未認証 `/proxy/...` が 307（/login）、
+    不正 Bearer が 401、正規 Cookie が 200 でクエリもバイト一致
+  - **既知の制限（実測により起票時の想定と乖離）**: `?` 単独（`/search/?`）は依然として落ちる。
+    ただし原因は `new URL()` ではなく **Node の `fetch()`（undici）**である。
+    生文字列を最初の `?` で分割する実装により `?` は `buildUpstreamUrl()` まで保持され、
+    `new URL(...).href` も `?` を保つが、undici は request target を `pathname + search` で組み立て、
+    present-but-empty なクエリでは `search` が `''` になるため送信時に落ちる
+    （`fetch('http://127.0.0.1:3806/a/?')` の上流受信が `/a/` であることを実測）。
+    解消には proxy の transport を `http.request` に置き換える必要があり、
+    undici の gzip 透過処理（`content-encoding` 剥がし）も自前で作り直すことになるため、
+    空クエリを表す区切り文字 1 バイトの代償としては割に合わないと判断した
+- **fix(proxy): 上流転送で末尾スラッシュとクエリ文字列を保持する** (#1802)
+  - **External Apps のプロキシがルート画面（`/proxy/<app>/`）だけ 200 で、配下（`/proxy/<app>/try/`,
+    `/proxy/<app>/assets/`）が 404 になっていた。** Next.js static export のようにディレクトリ URL に
+    末尾 `/` を要求する上流では、`/try/` と `/try` は**別の URL**であり、上流は後者を 404 にする
+  - **原因は `src/app/proxy/[...path]/route.ts` の `'/proxy/' + pathSegments.join('/')`。**
+    Next.js の catch-all params は「区切り文字を落とした percent-decode 済みの配列」なので、
+    配列から join で URL を再構築する方式では**構造的に 3 つの情報が失われる**:
+    ①末尾スラッシュ ②クエリ文字列（`buildUpstreamUrl()` の JSDoc は "including query string" と
+    書いてあるのに呼び出し側が一度も search を渡していなかった）③percent-encode
+    （`%20` が素の空白、`%2F` が区切りの `/` に化ける）
+  - **修正は `new URL(request.url)` の `pathname` + `search` をそのまま連結して転送する形に変えた。**
+    `pathSegments` は `pathPrefix` の検索用途（DB の `pathPrefix` は decode 済みの素の文字列）にのみ残した
+  - **保存されるのはパスであり、クエリは route handler 到達前に Next.js が正規化する（実機計測）。**
+    エコー上流を立てて実サーバ経由で計測した結果は以下のとおり:
+    - パス: **バイト列がそのまま保存される** — `/try/` は `/try/`、`a%20b` / `a%2Fb` /
+      `%E6%97%A5%E6%9C%AC` / 素の `+` すべて無変換で上流へ届く
+    - クエリ: **バイト完全一致は達成できない** — `?q=a%20b&n=1` は `?q=a+b&n=1` に、
+      `?bare` は `?bare=` になる（`URLSearchParams` で再シリアライズした時の署名）。
+      `%2B` / `%26` / `%3D` / percent-encode 済みマルチバイト値は保存される。
+      これは App Router の route handler からは触れない層での正規化であり、
+      本 Issue のコード（`new URL()` も `fetch()` も無改変であることを node で切り分け済み）が
+      原因ではなく、本 Issue の範囲では解消できない。既知の制限として、
+      `?` 単独の空クエリも WHATWG URL の仕様上 `search` が空文字になるため落ちる（`/x?` → `/x`）
+  - **ログには query string を載せない（Issue #395 の方針）。** クエリにトークンが載りうるため、
+    転送用 path（`pathname + search`）とログ用 path（`pathname` のみ）を分離した。
+    `/proxy/` 単体での 400、WebSocket フォールバックの 426 は挙動を変えていない
+    （`next.config.js` の `skipTrailingSlashRedirect: true`（#671）と、
+    `src/lib/ws-server.ts` が `request.url` を生のまま渡す upgrade 経路には手を入れていない）
+- **fix(session): 並列開発で宙に浮いた 2 つの配線を繋いだ（`reasoningEffort` が永久に null／詳細ヘッダに指示待ち表現が無い）** (#1785, #1787, #1784)
+  - **どちらも「実装されていなかった」のではなく「着地済みの実装同士が繋がれていなかった」。**
+    Phase 2（#1784・保持層）と Phase 3（#1785・露出）、および #1787（waiting 視認性）が**同時並行で開発され、
+    それぞれのテストは緑のまま**着地したため、境界の穴を CI が一度も検出できなかった。
+    同じ穴を再発させないための記録として、原因を「片方の Issue のバグ」ではなく**並列開発の配線漏れ**として残す
+  - **`commandmate capture <id> --json | jq '.reasoningEffort'` と `commandmate instances` の `EFFORT` 列が、
+    effort を実際に検出できているセッションでも永久に `null` / 空欄だった。**
+    #1785 が「#1784 未着地でも動くように」置いた `resolveReasoningEffort()` seam（`return null` 固定）を
+    誰も差し替えなかったのが原因。#1785 のテストは #1784 の着地で赤にならないよう
+    **値ではなくスキーマ（`null` 許容）で**書かれていたので、両 Issue のテストが緑のまま穴が残った
+  - **修正は `getResolvedAgentModelInfo()` 1 回の呼び出しに集約した（`getLastKnownAgentEffort()` ではなく）。**
+    effort 値そのものはどちらでも同じ（後者は前者の `.effort` を返す薄いラッパ）だが、
+    `model` と `reasoningEffort` を**別々の reader から読むと不整合な payload を publish しうる** —
+    `model` を hooks 専用 latch（`getLastKnownAgentModel`）から読んだままだと、
+    最初の `SessionStart` hook が届く前にバナーを scrape 済みの claude セッションで
+    **model が null なのに effort だけ載る行**（`buildModelByInstance` が "unreachable through the API" と
+    明記している形）が `EFFORT` 列に出る。1 回の解決に統一することで、antigravity の
+    「effort は model id 末尾から導出」規則も自動的に効く
+  - **オーケストレーターの前提と実測が食い違った点（実測を正とした）**: ①同ファイル内の `model` は
+    「既に保持層から解決されている」とされていたが、実際は `getLastKnownAgentModel`（hooks 専用 latch）で、
+    `worktree-status-helper`（Web UI 側）が使う `getResolvedAgentModelInfo` と**別の答えを返していた**。
+    上記のとおり両者を後者に統一した。これは #1783 が「サーバ再起動後の claude の穴は Phase 2 が埋める」と
+    明記した設計の未完了部分でもある（値は厳密に上位互換 — hooks があれば同値、無いときだけ capture が穴を埋める）。
+    ②`commandmate instances` の `EFFORT` 列は「保持層と無関係に空欄」ではなく、
+    `instances` は `worktree-status-helper` ではなく **current-output エンドポイントを instance ごとに叩く**ので、
+    同じ 1 箇所の修正で両 CLI 面が同時に直る（Web UI の pill ツールチップは #1784 時点で既に正しく出ていた）
+  - **未稼働セッション（`running=no`）が `null` を返す規則は変えていない。** 保持層は意図的に期限切れしない
+    （8 時間走るターンは最後まで同じモデル・同じ effort）ので、停止済み行が前プロセスの値を名乗らないよう
+    落とすのは**サーバー側だけ**。effort も model と同じ扱いにした
+  - **#1787 受入条件 4 が部分未達だった** — `awaitingInstruction`（エージェントが「ターンを終えた」と自己申告した状態）の
+    セカンダリ表現は、サイドバー行（`BranchListItem`）と `WorktreeCard` には出ていたが、
+    **worktree 詳細ヘッダ（`DesktopHeader`）に無かった**。同ファイルが #1787 の契約 scope 外だったため。
+    ブランチ一覧では緑バッジが出ているのに、そのブランチを開くと消える状態だった
+  - **サイドバーと同一の表現・同一トークン・同一 i18n キー**（`worktree.awaitingInstruction.badge` / `.label`）を
+    再利用した（新しいデザインを発明しない／重複キーを作らない）。`success`（緑）系で、
+    waiting の `warning`（amber）系とは**決して混同されない**ことが唯一の必須要件
+  - **バッジは pill ごとではなく行に 1 つ**（worktree 単位）。サイドバー行が既にその粒度で出しており
+    （`branch.awaitingInstruction` は `deriveWorktreeWaitingDetail` による全インスタンスの畳み込み）、
+    かつこの行は `MAX_HEADER_AGENT_PILLS` で幅を配給しているため、pill ごとに文字列を足すと
+    **稼働中のインスタンスが「+N」に押し出される**（#1783 が model をツールチップに留めたのと同じ理由）。
+    「+N」トリガーの**後ろ**に置いて pill の幅予算を一切消費せず、既存の表示は 1 バイトも削っていない
+  - **空振り緑の反証（変異注入で実測）**: ①`buildCurrentOutput` の `reasoningEffort` を `null` に戻す →
+    新規 `current-output-effort-wiring-1784` の **9 件中 7 件が赤**（残り 2 件は `null` を期待する規則そのもの）。
+    ②詳細ヘッダの `awaitingInstruction` 描画を外す → `WorktreeDetailSubComponents` の **4 件が赤**。
+    変異は復元し `git status` で確認済み
+### Changed
+
+- **feat(push): 入力待ち通知を waiting エッジ駆動にし、種別の細分化とエスカレーションを追加した（入力待ち可視化 方針E）** (#1790)
+  - **通知トリガーを #1786 の waiting エッジ（`onWaitingTransition`）に載せた**。`src/lib/push/waiting-push-notifier.ts` は
+    #1788 の `waiting-broadcast.ts` と同じく**購読するだけ**で、検出器・pane capture・独自の「前回 waiting だったか」を持たない。
+    これにより **poller 非稼働・同一ターン 2 個目のプロンプト・`MAX_POLLING_DURATION` 超過・
+    selection list / pager / 構造化のみの待ち**が通知されるようになった
+  - **poller 内の発火は残した（Issue 本文の推奨から逸脱。実測に基づく判断）**。
+    本文は「エッジ経路へ一本化し poller 内は削除」を推奨していたが、**`observeWaitingEdge` の呼び出し元は
+    `worktree-status-helper` 1 箇所＝ worktree 一覧 / 詳細 API の probe のみ**で、サーバ側の周期スキャンは存在しない
+    （`grep -rn observeWaitingEdge src` で確認）。つまりエッジは**クライアントが画面を開いているときにしか観測されない**ため、
+    一本化すると「アプリを閉じて離席している」＝スマホ通知が最も要る状況で無通知になる。
+    よって両経路を残し、`response-checker` が prompt 検出時に `observeWaitingEdge(waiting:true)` で
+    **同じ episode を開く**ことで二重送信を構造的に潰した（順序も意図的で、prompt の質問文を持っている
+    poller 側を先に送り、後続のエッジ経路は dedup で黙る）
+  - **dedup を episode 化した**。`shouldSendWaitingPush()`（key = worktreeId + instanceId + `waitingSince`）が
+    「1 つの待ちにつき 1 通」を保証する。content hash 30 秒は**同一ターン 2 個目の同文プロンプトを落としつつ、
+    長い待ちには同じ質問を再送し得る**という逆向きの誤りを両方持っていた。completion 経路は現行維持
+  - **応答保存時に `observeWaitingEdge(waiting:false)` で episode を閉じる**。これが無いと poller が開いた待ちが
+    ブラウザの probe が来るまで開きっぱなしになり、以降のプロンプトが全部その古い episode に畳まれて無音になる
+  - **通知文を `waitingKind` で出し分ける**。`prompt`→「応答待ちです」／`menu`・`unclassified`→「端末の確認が必要です」／
+    エスカレーション→「まだ応答待ちです（N分経過）」。両言語を `locales/{en,ja}/notifications.json` に追加した。
+    payload の `waitingKind` は**待ちのときだけ付く**ので、#1125 の completion payload は 1 バイトも変わらない。
+    `tag` も据え置き＝再通知は最初の通知を置換する（同じ待ちで通知カードが 2 枚積まれない）
+  - **エスカレーション（再通知）を追加した**。既定 10 分・1 episode 1 回・`NotificationsSettings` で変更/オフ可能。
+    **相乗りできる既存の周期処理が無かった**（`global-session-poller` は assistant chat 専用、`resource-cleanup` は別責務）ため
+    60 秒 interval を新設したが、**待ちがある間だけ**張る（pending 0 で `clearInterval`、`unref()` 済み）。
+    生存判定は自前の pending ではなく `getWaitingEpisode()` ＝ #1786 のストアが権威なので、
+    別画面で答えられた待ちにも閉じるエッジを取りこぼした待ちにも再通知しない
+  - **設定はインストール単位（`app_settings` v27 に相乗り、migration なし）**。#1788 の in-app トグルと違い
+    localStorage を使えない — 判定するのは request も browser も無い background timer だから。
+    読みは全経路 total（行なし／壊れた JSON／範囲外／DB 不通 → 既定値）で、正規化はフィールド独立
+    （不正な threshold が `enabled` を巻き添えにしない）
+  - **VAPID 未設定環境では待ちを記録すらしない**。`isPushConfigured()` が偽なら timer も DB 参照も発生しない
+    （「静かなだけ」ではなく完全に不活性）。既存 prompt トグルはそのまま新経路に効く（`kind` は `'prompt'` のまま）。
+    `awaitingInstruction` は仕様どおりスコープ外
+  - **Issue 本文との食い違い（実測を正とした）は 1 点のみ**: 本文の「エッジ = poller 非依存」は正しいが、
+    **クライアント非依存ではない**（`observeWaitingEdge` の呼び出し元は一覧 / 詳細 API の probe だけ）。
+    これが「poller 内は削除」を採らなかった理由。**本文の file:line はすべて実測と一致**していた
+    （`response-checker.ts:612`＝`kind:'prompt'` / `:723`＝`kind:'completion'` の 2 箇所のみ、
+    `notification-dedup.ts:23`＝30 秒窓、`response-poller-core.ts:29`＝`MAX_POLLING_DURATION = 30 分`、
+    `public/sw.js` の push / notificationclick、`NotificationEvent` の kind 2 種）
+  - **Auto-Yes との競合に猶予は入れなかった**。本文は「数秒後にまだ waiting なら送る」を検討可としていたが、
+    **現行でも poller は Auto-Yes の有無に関係なくプロンプト検出時点で通知している**
+    （`tests/integration/auto-yes-policy-escalation.test.ts` の「escalation does not depend on the policy」が固定している）ため、
+    通知量は本 Issue で増えない。一方で猶予を入れると**すべての正当なプロンプト通知が数秒遅れる**
+  - **既存テストの期待値変更は 1 件**: `tests/unit/i18n/notifications-push-keys.test.ts` の
+    「pre-i18n の日本語文言を byte-for-byte 保持」を `toEqual` → `toMatchObject` に緩めた。
+    #1308 の 4 文言は引き続き byte 単位で固定しており、網羅性は同ファイル内の
+    「`push` のキー集合＝`PUSH_KEYS` と完全一致」テスト（新キー 4 件を追加済み）が担保する
+  - **空振り緑の反証（変異注入で実測）**:
+    ① `startWaitingPushNotifier` の購読を no-op listener に潰す → 14 件が赤
+    （`notifies on an edge nothing but the status probe observed` /
+    `notifies for a wait no prompt detector could classify` /
+    `notifies a second instance of the same worktree independently` /
+    `notifies again once the wait ended and a new one began` /
+    `renders prompt|menu|unclassified in both locales` /
+    `re-notifies once, and only once, past the threshold` /
+    `says "check the terminal" when that is what the wait needs` /
+    `does not re-notify a wait that has been answered` /
+    `does not re-notify when the closing edge was never seen but the wait is over` /
+    `sends nothing when the reminder is switched off` / `honours a threshold the user shortened` /
+    `is driven by an interval that exists only while something is waiting`）
+    ② `shouldSendWaitingPush` を常時 true に潰す → 6 件が赤
+    （`opens the episode the status probe would have opened` /
+    `sends nothing extra when the status probe then reports the same wait` /
+    `closes the episode on a reply, so the next prompt notifies again` /
+    `does not double-send when the poller and the edge both report it` /
+    `suppresses a repeat of the same episode however often it is reported` /
+    `keys the guard on the episode, not on the content`）
+    ③ エスカレーションの閾値判定を常に不成立にする → 4 件が赤
+    （`re-notifies once, and only once, past the threshold` /
+    `says "check the terminal" when that is what the wait needs` /
+    `honours a threshold the user shortened` /
+    `is driven by an interval that exists only while something is waiting`）
+    変異は 3 件とも復元し、`grep -rn MUTATION src` が空・全ゲート緑に復帰することを確認した
+
+### Added
+
+- **feat(pwa): 入力待ちをタブタイトル・favicon・App Badge・通知音でブラウザ外に伝える（入力待ち可視化 方針D）** (#1789)
+  - **件数は #1788 の `useAttentionCount` をそのまま使う（新設なし・二重実装なし）。** タブタイトル／favicon／App Badge／
+    通知音の 4 面すべてが同じ値を読むので、サイドバーのバッジや `/review?filter=approval` の一覧と食い違いようがない。
+    カウント規則（**waiting な worktree を 1 件と数える** = instance が 3 つ待機でも 1）も #1788 のまま変更していない
+  - **タブタイトル**: N > 0 で `(N) <現行タイトル>`、0 で原状復帰。変換は **strip→prepend** なので冪等で、
+    同じ effect が 2 回走っても `(1) (1) Foo` にならない。Next のページ遷移は title を上書きする（`<title>` 要素ごと
+    差し替わることもある）ので順序に賭けず `document.head` の MutationObserver で観測して再適用する
+  - **favicon**: canvas 合成を **data URL** で差し替え（SW の cache-first `/favicon.ico`・`/icons/` とも、
+    ブラウザ固有の favicon キャッシュとも交差しない）。**`href` だけ差し替え、`sizes` / `type` は Next が出したまま**。
+    0 件と unmount で原状復帰する。数字は潰さず描く判断とした（バッジ円がタイル辺の約 68% を占め、16px 縮小でも
+    1 グリフは読める）。桁溢れは `9+` で、その状態のときだけ amber → red に変える
+  - **App Badge**: `navigator.setAppBadge` / `clearAppBadge` を feature detect のうえ呼ぶ。**未対応・reject・throw を
+    すべて黙殺し、ログも出さない**（未対応ブラウザで status 変化ごとに warning が出るコンソールは読まれなくなる）
+  - **通知音（既定 OFF・オプトイン）**: #1788 の WS waiting エッジで 1 episode 1 回。音源は **Web Audio の合成 2 音**で
+    **外部リソース一切なし**。autoplay 制約は初回ジェスチャ（`pointerdown`/`touchstart`/`keydown`）での
+    `unlockWaitingSound()` で解錠し、**鳴らせなければ黙って諦める**（リトライループもトーストも console 出力もなし）。
+    トーストと違って既定 OFF なのは、音は端末の外へ出る（会議中・共有オフィス）ため — 頼まれていない音はタブごと
+    ミュートされる最短路で、それは #1788 のトーストまで道連れにする。バイブ（任意項目）は実装していない
+  - **タブ非表示中の更新停止は許容仕様として明記**した（`useWorktreesCache` の visibilitychange による poll 停止。
+    #1788 の WS が生きている間は push で追随するので、通常はタブが裏でも追いつく）
+  - **Issue 本文の現状記述はコードで裏取り済み**（`document.title` の動的変更なし／`setAppBadge`・`new Audio`・
+    `AudioContext`・`navigator.vibrate` のヒット 0／`public/sw.js:161` の `badge` は通知アイコンで本件と別物 —
+    いずれも本文どおり）。**本文と実装の差は 1 点**: `<link rel="icon">` はソースに literal では存在せず、
+    App Router の file convention（`src/app/icon.png` / `icon1.png` / `icon2.png`）から**複数**生成される。
+    そのため「既存 link の href を替える」実装は**全件**に対して行い、1 件も無い文書では link を生成して復帰時に除去する
+  - **空タイトルでの無限書き戻しを実装中に発見して塞いだ**: `document.title` の getter は空白を strip/collapse するため
+    `"(2) "` を書くと `"(2)"` で読み戻る。差分検知が永久に「変わった」と言い続け、title 監視が回り続ける。
+    プレフィクスは空タイトル時に末尾スペースを出さず、strip 正規表現も `(?:\s+|$)` で `"(2)"` 単体を剥がす
+  - **空振り緑の反証（変異注入で実測）**: ①`formatTitleWithBadge` のプレフィクス付与を潰す → `attention-badge-1789` /
+    `useAttentionBadge-1789` の 10 件が赤（`prefixes one, several, and more than nine` / `is idempotent: applying it
+    twice cannot produce "(1) (1) Foo"` / `replaces a stale badge rather than stacking on it` / `emits no trailing space
+    when there is no title to prefix` / `prefixes the count, and drops the prefix again at zero` / `replaces the prefix
+    on a count change rather than stacking one` / `stays single-prefixed when the effect runs again for the same count` /
+    `re-applies after a navigation rewrites the title` / `settles on a page with no title at all, instead of re-writing
+    forever` / `restores the plain title on unmount`）。②`restoreFavicons` の復帰を潰す → 6 件が赤
+    (`restores every original href` / `never records a data URL as the original, however many times it re-applies` /
+    `creates a link when the document has none, and removes it again` / `restores the authored icon at zero` /
+    `restores the authored icon on unmount` / `survives a count change without ever losing the authored href`)。
+    ③音のトグル判定を常に true にする → 2 件が赤（`stays silent while the toggle is off (the default)` /
+    `stays silent when the toggle is explicitly off`）。3 変異とも復元して全緑に復帰（`git status` で確認）
+- **feat(cli): モデル / reasoning effort を `instances` と `capture --json` に露出した（モデル/effort 可視化 Phase 3）** (#1785)
+  - `CurrentOutputResponse`（`current-output-builder`）に **`model` / `reasoningEffort`（ともに `string | null`）** を追加した。
+    値は Phase 1（#1783）の保持層そのままで、**CLI 側でのモデル名の解釈・整形はしない** —
+    `capture --json | jq '.model'` の値を `/status` や `agy models` の表示とそのまま突き合わせられるようにするため
+  - `commandmate instances <id>` の表に **`MODEL` / `EFFORT` 列**、`--json` に `model` / `reasoningEffort` を追加した。
+    列は**末尾に追加**なので、`INSTANCE_ID`〜`AUTO_YES` を列位置で読んでいるスクリプトはそのまま動く
+  - **未稼働セッションは `null` / 空欄。** 保持層は意図的に期限切れしない（8時間走るターンは最後まで同じモデル）ので、
+    そのまま返すと `RUNNING no` の行が前プロセスのモデルを名乗る。落とすのは**サーバー側だけ**で、
+    CLI に同じ規則をもう 1 つ置かない（2 箇所に持つと食い違う）
+  - **既存フィールドは追加のみで一切変えていない。** `capture --json` の `content` / `realtimeSnippet` /
+    `sessionStatus` / `sessionStatusReason` は orchestrate-monitor 等の既存消費者が依存しており、
+    テキスト出力（既定）も byte 単位で不変（回帰テストで固定）
+  - **`reasoningEffort` は現状すべて `null`。** effort はどのエージェントの hooks payload にも無く、
+    抽出は Phase 2（#1784）の担当。`resolveReasoningEffort()` という named seam を置いてあるので、
+    #1784 着地時はこの関数の本体を差し替えるだけで済み、payload 形状・CLI・テスト期待値は動かない
+    （テストは値ではなく **null 許容のスキーマ検証**で書いてある）
+  - **空振り緑の反証（変異注入で実測）**: `buildCurrentOutput` の `model` 解決を `null` に潰すと
+    `current-output-model-1785` の 3 件（`publishes the model the agent reported about itself` /
+    `publishes it verbatim` / `publishes null for a stopped session even after a model was latched`）が赤になる。
+    変異は復元して全緑に復帰
+- **feat(detection): tmux capture から model / reasoning effort を抽出して補完する（モデル/effort 可視化 Phase 2）** (#1784)
+  - **reasoning effort はどのツールの hooks payload にも存在しない**（`tests/fixtures/hooks/` 全件で確認）。
+    唯一の情報源は TUI が自分で描く chrome なので、`src/lib/detection/model-info-extractor.ts` を新設して
+    `extractModelInfo(cliToolId, captureText) → {model, effort}` で読む。Phase 1（#1783）が埋められなかった
+    **サーバ再起動後の claude の model**（claude は `SessionStart` にしか model を載せない）も同じ経路で埋まる
+  - **既存の detection パターンは 1 バイトも変更していない。** `CODEX_STATUS_BAR_PATTERN` は codex の
+    running/idle 判定の境界（#1150）、`CLAUDE_MODEL_OVERLAY_FOOTER_PATTERN` は Auto-Yes が `/model` ピッカーを
+    誤確定して**ユーザーのグローバル既定モデルを書き換える**のを防ぐガード（#1495）。前者はフッタ行の**特定にだけ**
+    read-only で再利用し、値の読み出しは新規パターンで行う
+  - **実測で確定させた形式**（2026-08-15、隔離 socket `tmux -L cm1784probe` ＋ 200x60 の捨てセッション。
+    fixture は `tests/fixtures/model-info-captures.ts`）:
+    codex 0.147.0 `gpt-5.6-sol xhigh · ~/…`（legacy `gpt-5.4 high · 21% left · ~/…` と effort 無しの
+    `  o4-mini  50% left · /path` も同一パターンで解ける — 最初の `·` より前を切ってから読む形にしたため。
+    位置で読むと legacy の `50%` が effort として出てしまう）／
+    claude 2.1.232 `▝▜█████▛▘  Opus 5 (1M context) with xhigh effort · Claude Max`／
+    agy 1.1.13 `? for shortcuts … Gemini 3.7 Flash · hig`
+  - **Issue 本文と食い違った実測を 2 件、実測を正として実装した**:
+    ①**agy のステータスバーは右寄せの最終 1 桁が欠ける**（`high` が `hig` として届く。200 桁でも 120 桁でも再現＝
+    capture ではなく agy 1.1.13 のレンダラ側）。Issue 本文の `Gemini 3.5 Flash · medium` はそのままでは取れないので、
+    1 文字欠けを**一意に復元できるときだけ**復元する（`hig`→`high` / `lo`→`low` / `mediu`→`medium`）。
+    復元できない末尾トークンはその行ごと捨てる — さもないと effort 無しモデルの名前が 1 文字削れて出る。
+    ②Issue 本文は `gpt-oss-120b-medium` を「サフィックス無し」に分類しつつ規則を `-low|-medium|-high$` と書いており
+    自己矛盾している。書かれた規則どおり `medium` と読む（UI に出る model は hooks の id そのままなので実害なし）
+  - **マージ規則**: model は **hooks > capture**（食い違えば hooks。agy は `Gemini 3.7 Flash` と表示するが
+    id は `gemini-3.7-flash-high`）、effort は codex/claude が capture、antigravity は **modelName 末尾サフィックス導出 >
+    capture**。保持は hooks 由来（`__agentEventLastModel`）と capture 由来（`__agentCapturedModelInfo`）を
+    **別 Map** に持つ（同一 Map に混ぜると scrape した表示名が id を後書きで潰し、復元手段が無くなる）
+  - `CliToolSessionStatus.reasoningEffort?` を追加し `sessionStatusByInstance` 経由で API へ。**未知のときはキー自体を
+    出さない**（#1783 が model に決めた規約と同じ。`toEqual` で全体比較している既存スイートを壊さないため）。
+    UI は #1783 のモデル表示に `· <effort>` を追記する形で、effort 不明なら表示は #1783 と 1 バイトも変わらない。
+    DesktopHeader の status pill は幅配給の都合で**ツールチップのみ**（#1783 の制約を維持）
+  - **この機能のための tmux capture は 1 回も増やしていない** — ステータス検出ポーラが既に取った capture テキストに
+    相乗りする（`captureSessionOutput` の呼び出し回数をテストで固定）
+  - **空振り緑の反証（変異注入で実測）**: ①`resolveEffortToken` が常に null を返すよう変異＝effort 抽出を無効化 →
+    **41 テストが赤**（extractor 27・retention 9・join 5。UI スイートは緑のまま＝表示ロジックは抽出に依らないことの裏取り）。
+    ②ステータス検出ポーラから `recordCapturedModelInfo(...extractModelInfo(...))` の呼び出しを外す → **join の 6 テストが赤**
+    （`「antigravity は modelName 導出」だけは緑のまま`＝capture 非依存の経路であることの裏取り）。
+    2 変異とも復元し `git status` で確認、全緑に復帰
+- **feat(realtime): 入力待ちを WS 配信・要対応バッジ・クロス画面 Toast で即時に知らせる (#1788)**
+  - **WS 配信は #1786 の `onWaitingTransition` を購読するだけ**（`src/lib/realtime/waiting-broadcast.ts`）。
+    検出器を新設していないので、hooks 由来（構造化イベントだけが見えるダイアログ）でもスクレイパー由来でも
+    同じように飛び、response poller には依存しない。**発火はエッジのみ**（21 回の poll で 1 フレーム）
+  - **`SessionStatusEvent` は追加のみ**（`isWaitingForResponse?` / `waitingKind?` / `waitingSince?`）。
+    ただし **`isRunning` は optional 化**した。`observeWaitingEdge` はセッションが消えた probe でも
+    `waiting:false` で呼ばれるため waiting フレームはセッション存在を答えられず、`true` を送れば
+    kill 済みセッションが sidebar で蘇り `false` を送れば生存中を殺す。既存 2 消費者
+    （`useTerminalPanePolling` / `useSplitMessages`）は `isRunning !== false` で守られているので不在は安全
+  - **Issue 本文の `broadcastToWorktree` は実在しない**（実測）。ws-server の room ブロードキャストは
+    `broadcast` / 内部 `handleBroadcast`。後者を `setupWebSocket` から注入し、`closeWebSocket` で解除する
+    （import 循環回避＋テストで実サーバ不要）。room は認証済み subscribe でしか入れないので認可は迂回しない
+  - **バッジ件数は `src/hooks/useAttentionCount.ts` の単一セレクタ**（`selectAttentionCount` /
+    `selectAttentionWorktrees` / `useAttentionCount`）。**方針D (#1789) のタブタイトル・favicon・App Badge は
+    ここを import すること。** カウント規則は「**waiting な worktree を 1 件**（instance が 3 つ待機でも 1）」＝
+    この数字は `/review?filter=approval` へのリンクで、その一覧の述語と同一だから
+  - PC はサイドバーヘッダのピル、モバイルは `GlobalMobileNav` の Review タブのバブル（0 件で非表示、
+    99 超は `99+`、件数>0 のときタップ先が approval フィルタ）。Home の Waiting 統計もリンク化し、
+    同じセレクタで数えるようにした（**旧ローカル集計は `isSessionRunning` も要求しており approval 一覧より
+    1 件少なく出得た**ので意図的な挙動変更）
+  - **クロス画面 Toast**（`WaitingToastListener`、AppProviders に単一マウント）: 表示中の worktree では出さない／
+    `waitingSince` を dedup キーに 1 episode 1 回／トグルで無効化可。Toast 本文は実 `<button>` にした
+    （hover 依存の表現はタッチ端末で恒久的に不可視になるため）
+  - **アプリ内通知トグルは push カードの外・上に置いた**。`NotificationsSettings` の本体は Push API 非対応 /
+    iOS 未インストール / VAPID 未設定で早期 return する — **アプリ内 Toast が唯一の通知になるのは
+    まさにその環境**なので、その内側に置くと最も必要な場所で設定が消える
+  - **ポーリングは廃止していない**（間隔も不変）。WS 未接続クライアントが従来どおり poll で waiting を知る
+    回帰テストつき
+  - **空振り緑の反証（変異注入で実測・全て復元済み）**: ①エッジ購読を無効化 → `waiting-broadcast-1788` が
+    **7 件赤**（`broadcasts the extended frame when a wait begins` ほか）②episode dedup を無効化 →
+    `fires once per episode however many frames repeat it` が赤（`expected [...] to have a length of 1 but got 3`）
+    ③兄弟 instance の再計算を無効化 → `keeps the worktree waiting while a SIBLING instance still is` が赤
+
+- **feat(verification): 実行契約が Issue 固有のゲート定義を運べるようにした（#1756 案 B）** (#1791)
+  - 契約に **`verify.gateDefinitions`（`[{id, command, timeoutSec}]`）** を追加した。`verify.gates` の意味は変えていない
+    （宣言済みゲートからの**選択**）。`gates` 省略時は「verify.yaml の全ゲート ＋ この契約の定義全部」
+  - **`.commandmate/verify.yaml` は読むだけで 1 バイトも書かない。** orchestrator が Issue 固有ゲートを渡すのに
+    verify.yaml を書き換えるしかなかったのが問題だった — verify.yaml は work-evidence の変更集合に**残る**ので
+    （除外は `.commandmate/tasks/` だけ）、**追記を置いただけの worktree が「作業済み」に見えて `exit 21` が意味を失う**。
+    契約は既に `tasks.contract_json` へ snapshot 済みで変更集合からも除外済みなので、新しい改竄面を作らずに済む。
+    work-evidence / scope の除外規則（`CONTRACT_DIR_PREFIX`）は変更していない
+  - **形と検証は verify.yaml の `gates[]` と同一実装。** verify-config の gate エントリ検証を
+    `validateGateEntries` として切り出して両方から呼ぶので、id パターン・予約 id 禁止・重複禁止・
+    timeout の整数と範囲が「同じ制約」であることがコメントではなく事実になる
+  - **送信時に fail-closed で拒否（exit 2）**: 予約 id（`work-evidence`/`scope`/`env-clean`）との衝突、
+    **verify.yaml の既存 gate id との衝突**、`gates` がどこにも無い id を名指し、verify.yaml が無いのに定義がある。
+    id 衝突を黙って上書きにしないのは、リポジトリ自身が宣言した合格の定義を委任単位で差し替えられ、
+    しかもレポート上は同じ id なので**差し替えたことが読み取れない**ため（override が要るなら別 Issue で明示構文を設計する）
+  - **裁定の出所を記録する（migration v56: `verification_gate_results.source`）**: `builtin` / `verify.yaml` / `contract`。
+    `verify --json` / `verify show`（`src=<source>`）/ `verify history --json` から読め、
+    `verify` と `wait --verify` の GATE 行は `contract` のときだけ末尾に ` [contract]` を付ける。
+    **どの裁定がリポジトリの合格定義でどれが Issue 固有かが report から読めないと、この分離は
+    「静かな 2 つ目の verify.yaml」になる。** v56 以前の行は `null` で backfill しない（履歴は書き換えない）
+  - 実行順は **verify.yaml の宣言順 → 契約の宣言順**。マージ元は**このランが結び付いた task の契約だけ**で、
+    未接続の契約（`findDetachedContract`）からは読まない。id が verify.yaml と衝突する契約が届いた場合は
+    マージせず run を `error` にする（送信時に弾いているので旧ビルド由来のみ）
+  - **`gates` を書いたのに定義したゲートを選ばないのは契約エラー**にした（Issue 本文にない追加規則）。
+    契約が唯一の宣言元なので、選ばれなければ永久に走らない＝「チェックを足したつもりで足していない」契約になる
+  - **空振り緑の反証（変異注入で実測）**: ①契約ゲートをマージから外す → 失敗するはずの Issue ゲートを持つ run が
+    **`passed` を返し**（実測 `PROBE run.status=passed repro=absent`）6 テストが赤 ②verify.yaml との id 衝突検証を外す →
+    **送信が 201 で通り**（`expected 201 to be 400`）2 テストが赤 ③予約 id 検証を外す → 10 テストが赤
+    （契約側 6・verify.yaml 側 4＝共有バリデータが両方を守っていることの裏取り）。3 変異とも復元して全緑に復帰
+
+- **feat(session): 入力待ちの構造化合成と `waitingKind`/`waitingSince`/`awaitingInstruction` を一覧 API に露出（入力待ち可視化 方針A・基盤）** (#1786)
+  - **一覧 API（`/api/worktrees`・`/api/worktrees/[id]`）が構造化イベントを見るようになった。** これまで per-instance の状態は `detectSessionStatus()`（スクレイパー）だけで決めており、hooks が正確に知っている待ち（#1725 の `prompt_waiting`）は**サイドバー / Home / Sessions / Review / CommandPalette のどのドットにも出ていなかった**。`checkCliToolStatus` で `peekPromptWaiting()` を通し `isWaitingForResponse` を OR で広げる
+  - **副作用の無い read-only 変種（`peekPromptWaiting`）を新設して一覧側はそれを使う。** `resolvePromptWaiting` は corroborate/clear の副作用を持つが、一覧側は (a) `STATUS_DETECTION_CAPTURE_LINES` の狭い窓で検出するため「プロンプトは無い」の証拠が解除規則の想定より弱い、(b) 同じ記録を `blocksSend` が読むので read エンドポイントの誤解除が **send ガードを黙って解除する**（#1708 の穴の再来）、(c) 開いているタブの数で状態機械の結果が変わる、の 3 点から書き手にしない。corroborate を張る側（`buildCurrentOutput` / send ガード）は無変更で、`blocksSend` の意味・挙動も変えていない
+  - **`isWaitingForResponse = resolution.waiting`（Issue 本文の指定）は採らず OR にした。** コードで裏取りした食い違い: `resolution.waiting` は `hasActivePrompt || 構造化` だが、一覧のフラグは `sessionStatusToActivityFlags(status)`＝`status === 'waiting'` で**厳密に広い**（selection list と codex pager は `hasActivePrompt: false` の `waiting`）。そのまま代入すると**サイドバーの選択リストがオレンジから緑に落ちる**回帰になり、本 Issue の非機能要件（ドットを悪化させない）に反する。OR は広げるだけで狭めない
+  - `CliToolSessionStatus` に `waitingKind`（`'prompt'｜'menu'｜'unclassified'｜null`）/ `waitingSince`（epoch ms）/ `awaitingInstruction` を追加し、`sessionStatusByCli` / `sessionStatusByInstance` 経由で露出。per-CLI 集約は kind=優先度（prompt>menu>unclassified）・since=最小値（最長の待ち）・awaiting=OR。クライアント型（`types/models.ts`）は `SessionWaitingDetail` として同期し**全フィールド optional**（既存 fixture・古いサーバの応答がそのまま型検査を通る）。**UI は変更していない**（方針 B/C の担当）
+  - `deriveWaitingKind()` を純関数（`session/waiting-kind.ts`）として切り出した。`menu` の判定式は `current-output-builder` の `isSelectionListActive` と同一で、`SELECTION_LIST_REASONS` の membership を二重に持たない
+  - **待ちエッジの観測点を 1 箇所に閉じた（`session/waiting-episode-state.ts`）。** `observeWaitingEdge()` が false→true / true→false を検出し、`onWaitingTransition()` が**#1788（WS 配信）と #1790（push 発火）の差し込み口**になる（ポーリング回数ではなく交差 1 回につき 1 発火。購読解除関数を返す）。`since` はエピソード中不変で、構造化 episode の `at` を優先する（エージェントは描画と同時に post、scraper は 5 秒キャッシュ越しなので必ず遅れる）。listener の例外は握り潰す（一覧 API の hot path で通知 sink の故障がステータス読みを落としてはならない）。#1736 の規約どおり `globalThis` 保持で、module-identity テストにケースを追加した
+  - **`notification(idle_prompt)` を第 3 の状態にした。** `agent-event-state` に `awaiting_instruction` を併設し、`user_prompt_submit` / `session_start` / `session_end` / 世代交代まで保持する。**`SessionStatus` の 4 値は変更していない** — `idle_prompt` は `ready` のままで、`ready`＝「送信できる」の意味を全消費者に再判断させないため boolean を足す形にした。`stop` では立てない（中間ターンの終了は指示待ちではない）。**この状態にだけ齢の上限を掛けていない**（解除が composer 入力＝`UserPromptSubmit` とセッション終了という取りこぼしようのないイベントで、6 時間 idle のエージェントは実際にまだ指示待ちだから）
+  - 追加の tmux capture は発行しない（構造化状態は in-memory 参照。エッジ記録は try/catch の外で 1 回だけ呼び、未起動・capture 失敗も「待っていない」として開いていたエピソードを閉じる）
+  - **空振り緑の反証**: 構造化合成（`|| peek.waiting`）を無効化する変異を注入し、**4 テストが赤**になることを実測（`waits when the scraper says \`ready\` and the agent reported an open dialog` ほか）。変異は戻して `git status` で確認済み
+- **feat(hooks): エージェントの実モデル名を構造化イベントから取得し UI に表示する（モデル/effort 可視化 Phase 1/3）** (#1783)
+  - **モデル名は最初から payload に載っていて、正規化層で捨てられていた。** `NormalizedAgentEvent` に `model: string | null` を追加し、worktree 詳細画面の分割ペインタイトル・ヘッダの status pill・ロスター（PC / モバイル）に表示する。**effort の取得（#1784）と CLI 露出（#1785）は本 Issue のスコープ外**
+  - **抽出は `define-source.ts` の `buildNormalizedEvent` に一元化し、ツール差は spec の宣言に閉じた。** フラットキー用の `modelFields?: readonly string[]`（claude / codex = `model`、antigravity = `modelName`）と、フラットでは届かない形のための `extractModel?: (payload) => string | null`（opencode）の**併用**。片方だけにしなかった理由は、`conversationIdFields` が既に同じ 2 段構え（宣言 ＋ 逃がし弁）で、model だけ別の作法にすると「どちらを見ればいいか」がツールごとに変わるから。両方あるときは関数が勝つ
+  - **Issue 本文の記述と食い違った点（実測を正とした）: opencode の model キーは 1 つではなく 2 つある。** 本文は `model.modelID` だけを挙げていたが、捕捉済み fixture では `message.updated` が `properties.info.model.modelID`、**`session.created` / `session.deleted` は `properties.info.model.id`**。`modelID` だけを読む実装は `session_start` — 購読を張った直後に必ず来る唯一のフレーム — で model を取り逃す。両方読む（`modelID` → `id` の順）。`providerID` は連結しない（他ツールは素のモデル名を返すので、opencode だけ `github-copilot/claude-sonnet-4.6` になる）
+  - **`lastAgentEvent` はレコードごと置換されるので、model 専用の Map を別に持った。** claude は `SessionStart` にしか model を載せない（fixture 13 件中 1 件）ため、最新イベントから読むと最初のプロンプト送信で表示が消える。`getLastKnownAgentModel()` は**最後に観測した非 null 値を latch し、null のイベントは既知の値を消さない**。`/clear`（`session_end` → `session_start`）では保持し、破棄するのは世代交代（`beginAgentEventGeneration` ＝別プロセス）と `discardAgentEventState` のときだけ
+  - **齢による失効（`STRUCTURED_STATE_MAX_AGE_MS`）は付けていない。** あの 30 分は「`Stop` を取りこぼした status が `running` に貼り付く」を防ぐためのもので、model はそういう種類の主張ではない（8 時間走るターンも最初と最後で同じモデル）。失効させると一番役に立つ長時間セッションで表示が消える
+  - **モデル未報告時は `sessionStatusByInstance` にキー自体を出さない。** `model: null` を常設すると `worktree-status-helper-status-mapping.test.ts` の `toEqual` 比較が落ちるうえ、不在が言うこと以上を言わない。UI 側も**null のときは何も描画しない** — gemini / copilot は payload に model を持たず、hooks 未設定のセッションも同様なので、「不明」バッジは全行に出る恒久的なノイズになる
+  - **DesktopHeader はツールチップのみにした（表示面の判断）。** あの行は `MAX_HEADER_AGENT_PILLS` で幅を配給していて余剰は「+N」に畳まれるため、pill ごとに 2 本目の文字列を足すと**稼働中のインスタンスがモデル名のために overflow に押し出される**。model は既存の hover / `aria-label` に載せ、見えている pill のテキストは 1 バイトも変えていない。分割ペインのタイトルバー（最優先の表示面）とロスター行は実テキストで表示する
+  - 保持は in-memory のみで **DB（`session_states`）には永続化しない**。サーバ再起動後、codex / antigravity は次イベントで復活し、claude は次の `SessionStart` まで不明になる。この穴は Phase 2（#1784）の capture フォールバックが埋める設計
+  - **gemini / copilot は対象外（model: null のまま）。** copilot は payload に model キーが無く、gemini の `BeforeModel`（唯一 model を持つ payload）は `GEMINI_HOOK_EVENT_NAMES` に無く unknown-event として捨てられる。語彙追加が要るので別 Issue
+  - `CLAUDE_MODEL_OVERLAY_FOOTER_PATTERN`（#1495 の `/model` ピッカー誤確定ガード）には触れていない
+  - **空振り緑の反証**: 6 変異を注入して赤になることを実測（ベースラインは 4 ファイル 63 テスト緑）。①`buildNormalizedEvent` の model 抽出を `null` 固定 → **20 赤** ②`recordAgentEvent` の latch を外す → **12 赤** ③`worktree-status-helper` で model を載せない → **2 赤** ④`TerminalSplitPane` の null ガードを外す → **3 赤**（「何も描画しない」側の 3 ケースだけが落ちる） ⑤opencode の `model.id` フォールバックを削る → **2 赤**（`session.created` / `session.deleted`。Issue 本文どおり `modelID` だけを読む実装が落ちる） ⑥DesktopHeader の tooltip を model 抜きに戻す → **2 赤**。すべて戻して 63/63 緑・`git status` で復元を確認
+
 ## [0.23.0] - 2026-08-14
 
 > **Highlight**: Epic #1720 Phase 4 を完了し、**機械判断の一次ソースを TUI スクレイピングから CLI 自身が申告する構造化イベントへ移す作業を全 6 ツール**（claude / codex / copilot / gemini / antigravity / opencode）**に広げた**。#1759 で `AgentEventSource` 抽象を切り出して「1 ファイル ＋ レジストリ 1 行でツールが 1 つ増える」形にし、#1760〜#1763 / #1779 で 5 ツール分を実装している。**スクレイパは 2 層目のフォールバックとして残るため、構造化イベントが無い環境の挙動は変わらない。**あわせて、この作業中に CI を **5 時間 31 分 57 秒**沈黙させた `/proc` への recursive mkdir 無限ループ（Linux 限定・同期スピンのため `try/catch` にも `testTimeout` にも到達せず OOM も残らない）を、製品コード側の 5 経路でも塞いだ（#1774）。
@@ -106,6 +490,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `/schedule`（#1488 のキュレーション判断）・`/ultraplan`（#1503 の幻コマンド）・`/pr-comments` `/vim`（上流で削除済み）・`/cost` `/stats`（`/usage` のエイリアス）は**従来どおり追加していない**
 
 ### Changed
+
+- **feat(ui): 入力待ちの画面内視認性を強化した（入力待ち可視化 方針B）** (#1787)
+  - **`waiting` が `running` より目立たない逆転を解消した。** `waiting` は opacity 1→0.45 だけの
+    `animate-status-blink` で、放置してよい `running` の `animate-status-glow`（box-shadow 拡張 + リング）
+    より弱かった。amber の `animate-status-attention`（1.4s・box-shadow 12px/4px＝glow の 2.4s・8px/2px より
+    速く広い）を `globals.css` の `@theme` に追加して既定にし、**`animate-status-blink` は
+    StatusDot の waiting 以外に利用箇所が無かったため削除した**（死んだ CSS を残さない。
+    `motion-foundation.test.ts` に「復活していないこと」のガードを追加）
+  - **reduced-motion 時も `waiting` が識別できる。** 従来は無地 amber ドットに退化していた。
+    `running` と同じパターンで**モーション非依存の amber リング**（強調時 `ring-4 ring-warning/50` /
+    中強調 `ring-2 ring-warning/40`）を持たせ、アニメが凍結されても `ready` と同形にならない
+  - **`waitingKind`（#1786）で強調を出し分ける。** `'prompt'`（アプリから答えられる）＝最強調、
+    `'menu'`/`'unclassified'`（端末操作が必要）＝中強調（`animate-status-glow` + `ring-2`）。
+    **フィールドが無い/null なら一律で最強調にフォールバックする** — #1786 以前のサーバ応答は
+    kind を持たず、「人間が要る」状態の安全側は過小強調ではなく過剰強調だから
+  - **サイドバーを二段ソートにした。** `sortBranches()` に「waiting 先頭固定」の前段を足した
+    （`SidebarContext` の `SortKey` 型・`DEFAULT_SORT_KEY` は不変）。判定 `isWaitingBranch()` は
+    行が描く 1 つのドットと同じ**集約ステータス**を見るので、alias インスタンスだけが待っている
+    ブランチも浮上する。前段は **direction 乗算より前に return** するため `asc` でも下へ沈まない。
+    `sortKey === 'status'` のときは前段を掛けない（`STATUS_PRIORITY` が既に waiting 優先で、
+    降順＝「idle を先に」が表現不能になるため）。grouped 表示はリポジトリ束を保ったまま各群内で適用
+  - **`nextAction` を i18n 化した。** `getNextAction()` は英語リテラルではなく `worktree` 名前空間の
+    辞書キー（`nextAction.start`/`sendMessage`/`approveReject`/`replyToPrompt`/`checkStalled`/`running`）を
+    返す。**旧サーバが送る英語リテラルは `isNextActionKey()` で弾いてそのまま描画する** — next-intl は
+    未知キーをキーパス文字列として描画するので、素通しすると `worktree.Approve / Reject` が画面に出る。
+    SessionStatus の exhaustive check は維持
+  - **次アクションはサイドバー行に「インライン」表示する**（`waiting` と `awaitingInstruction` のときのみ）。
+    hover 限定の表現はタッチ端末で永久に不可視になるため、hover に頼らない。それ以外のステータスは
+    ツールチップ（`Next: …`）にのみ出す — 全行に「Running...」を出すのは、目立たせたい 2 行を
+    かえって埋もれさせるノイズになる
+  - **`awaitingInstruction`（#1786 の `idle_prompt`）は緑バッジ**（`awaitingInstruction.badge`）で
+    サイドバー行と `WorktreeCard` に出す。amber と混同されないことが要件なので、`success` トークン系で
+    固定した。**worktree 詳細ヘッダ（`WorktreeDetailSubComponents.tsx`）は実行契約の `scope.allow` 外
+    だったため未実装**（waiting ドットの強調は `StatusDot` 経由で自動的に効いている）
+  - `RecentSessionsList` の生 `bg-warning` 静的ドットを `StatusDot` に統一した（`deriveCliStatus` 経由なので
+    「起動中だが処理していない」は従来どおり静的な緑 `ready` のまま）。`Terminal.tsx` の
+    `bg-yellow-500` をトークン `bg-warning` へ置換（同ファイルの他 3 色は常時ダーク島として現状維持）
+  - **空振り緑の反証（変異注入で実測）**: ①`sortBranches` の waiting 前段を外す → 二段ソートの
+    5 テストが赤 ②`waiting` の `animate-status-attention` を旧 `animate-status-blink` に戻す →
+    StatusDot / BranchStatusIndicator / BranchListItem / RecentSessionsList / DesktopHeader の
+    9 テストが赤。両変異とも復元して全緑に復帰（詳細は PR 本文）
 
 - **feat(hooks): gemini / antigravity に構造化イベントを横展開した（Phase 4-4）** (#1762)
   - `docs/design/agent-event-source-interface.md` §4 の手順 1〜8 を 2 ツール分実行した。新設 `src/lib/hooks/sources/gemini/`（`tool-id` / `event-vocabulary` / `settings-generator` / `shared-config-tree` / `source`）と `src/lib/hooks/sources/antigravity/`（`tool-id` / `hooks-config` / `source`）、`registry.ts` に 2 行、`index.ts` に re-export、`cli-tools/{gemini,antigravity}.ts` の `startSession` に世代フェンスと注入。**`AgentEventSource` I/F は変更していない／`if (tool === '…')` 型の抜け道も入れていない／`hook-event-vocabulary.ts` の共有表に gemini・agy の綴りを足していない**（判断根拠は [`docs/design/agent-hooks-gemini-antigravity-integration.md`](./docs/design/agent-hooks-gemini-antigravity-integration.md)）

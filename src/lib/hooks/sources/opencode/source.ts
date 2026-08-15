@@ -62,7 +62,7 @@ import {
   OPENCODE_SERVER_HOST,
   type OpencodePermissionReply,
 } from './client';
-import { OPENCODE_MAPPERS } from './mappers';
+import { frameModel, OPENCODE_MAPPERS } from './mappers';
 import {
   parseOpencodePermissionRequest,
   parseOpencodeQuestion,
@@ -286,6 +286,9 @@ export const opencodeAgentEventSource: AgentEventSource = definePullEventSource(
   nativeEventNameFields: ['type'],
   // Flat lookup cannot reach `properties.sessionID`; the rules fill it in.
   conversationIdFields: [],
+  // Issue #1783: nor `properties.info.model.*`, so the spec takes the reader
+  // instead of a key list. See {@link frameModel} for the two spellings.
+  extractModel: frameModel,
 
   parsePermissionRequest: parseOpencodePermissionRequest,
   parseQuestion: parseOpencodeQuestion,

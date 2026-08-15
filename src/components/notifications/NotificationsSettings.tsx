@@ -4,6 +4,14 @@
  * Lets the user enable Web Push on this device, toggle which agent events they
  * are notified about, and unsubscribe. Handles the unsupported-browser and
  * iOS-not-installed cases with guidance instead of a dead button.
+ *
+ * Issue #1788 adds the in-app toast toggle **above** the push card, outside
+ * every one of the guards below. That placement is the decision, not an
+ * accident: `renderBody` returns early when the browser has no Push API, when
+ * iOS has not been "Add to Home Screen"-ed, and when the server has no VAPID
+ * keys — and those are precisely the installs where the in-app toast is the only
+ * notification the user can get. Putting its switch inside that body would hide
+ * the control exactly where it matters most.
  */
 
 'use client';
@@ -13,6 +21,7 @@ import { useTranslations } from 'next-intl';
 import { Bell } from 'lucide-react';
 import { Button, Card, Spinner, Switch } from '@/components/ui';
 import { useToast } from '@/components/common/Toast';
+import { useInAppWaitingToast, useInAppWaitingSound } from '@/hooks/useInAppNotificationPrefs';
 import {
   urlBase64ToUint8Array,
   isPushSupported,
@@ -23,6 +32,20 @@ interface Prefs {
   prompt: boolean;
   completion: boolean;
 }
+
+/**
+ * Issue #1790. Declared here rather than imported from `@/lib/push` on purpose:
+ * that module is server-only (web-push, better-sqlite3), and this file is a
+ * client component. The server sends its own defaults and choices with the GET,
+ * so these two only cover the window before that response lands.
+ */
+interface EscalationSettings {
+  enabled: boolean;
+  thresholdMinutes: number;
+}
+
+const DEFAULT_ESCALATION_UI: EscalationSettings = { enabled: true, thresholdMinutes: 10 };
+const ESCALATION_CHOICES_FALLBACK = [5, 10, 30, 60];
 
 export function NotificationsSettings() {
   const t = useTranslations('notifications');
@@ -290,8 +313,180 @@ export function NotificationsSettings() {
   };
 
   return (
-    <Card>
-      {renderBody()}
-    </Card>
+    <div className="space-y-4">
+      <Card>
+        <InAppNotificationSettings />
+      </Card>
+      <Card>
+        {renderBody()}
+      </Card>
+      <Card>
+        <EscalationNotificationSettings />
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * In-app (cross-screen toast) notifications — Issue #1788.
+ *
+ * Always rendered: it needs no permission, no service worker and no server
+ * configuration, so none of the push guards apply to it.
+ */
+/**
+ * The "still waiting" reminder — Issue #1790.
+ *
+ * Rendered outside the push card's guards for the same reason the in-app switch
+ * is, plus one of its own: this setting lives on the server and applies to every
+ * subscribed device, so the phone that will actually receive the reminder need
+ * not be the browser the user changes it from. A laptop with no Push API is a
+ * perfectly ordinary place to turn it off.
+ */
+function EscalationNotificationSettings() {
+  const t = useTranslations('notifications');
+  const { showToast } = useToast();
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [settings, setSettings] = useState<EscalationSettings>(DEFAULT_ESCALATION_UI);
+  const [choices, setChoices] = useState<number[]>([...ESCALATION_CHOICES_FALLBACK]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch('/api/push/escalation');
+        const data = (await res.json()) as {
+          settings?: EscalationSettings;
+          choices?: number[];
+        };
+        if (!cancelled) {
+          if (data.settings) setSettings(data.settings);
+          if (Array.isArray(data.choices) && data.choices.length > 0) setChoices(data.choices);
+        }
+      } catch {
+        // Leave the defaults in place — they are what the server would use too.
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const save = useCallback(
+    async (next: EscalationSettings) => {
+      const previous = settings;
+      setSettings(next);
+      setSaving(true);
+      try {
+        const res = await fetch('/api/push/escalation', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ settings: next }),
+        });
+        if (!res.ok) throw new Error('update failed');
+        showToast(t('toast.updated'), 'success');
+      } catch {
+        setSettings(previous);
+        showToast(t('toast.error'), 'error');
+      } finally {
+        setSaving(false);
+      }
+    },
+    [settings, showToast, t]
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {t('escalation.heading')}
+      </div>
+      <label className="flex items-center justify-between gap-4">
+        <span>
+          <span className="block text-sm font-medium text-foreground">
+            {t('escalation.toggle')}
+          </span>
+          <span className="block text-xs text-muted-foreground">
+            {t('escalation.toggleDesc')}
+          </span>
+        </span>
+        <Switch
+          checked={settings.enabled}
+          onCheckedChange={(v) => save({ ...settings, enabled: v })}
+          disabled={loading || saving}
+          aria-label={t('escalation.toggle')}
+          data-testid="notifications-toggle-escalation"
+        />
+      </label>
+      <label className="flex items-center justify-between gap-4">
+        <span className="text-sm text-foreground">{t('escalation.threshold')}</span>
+        <select
+          className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
+          value={String(settings.thresholdMinutes)}
+          disabled={loading || saving || !settings.enabled}
+          aria-label={t('escalation.threshold')}
+          data-testid="notifications-escalation-threshold"
+          onChange={(e) => save({ ...settings, thresholdMinutes: Number(e.target.value) })}
+        >
+          {choices.map((minutes) => (
+            <option key={minutes} value={String(minutes)}>
+              {t('escalation.minutes', { count: minutes })}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
+}
+
+function InAppNotificationSettings() {
+  const t = useTranslations('notifications');
+  const { enabled, setEnabled } = useInAppWaitingToast();
+  // Issue #1789: the waiting chime, default off — see
+  // `INAPP_WAITING_SOUND_DEFAULT` for why it defaults the other way to the toast.
+  const { enabled: soundEnabled, setEnabled: setSoundEnabled } = useInAppWaitingSound();
+
+  return (
+    <div className="space-y-3">
+      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {t('inApp.heading')}
+      </div>
+      <label className="flex items-center justify-between gap-4">
+        <span>
+          <span className="block text-sm font-medium text-foreground">
+            {t('inApp.waitingToggle')}
+          </span>
+          <span className="block text-xs text-muted-foreground">
+            {t('inApp.waitingToggleDesc')}
+          </span>
+        </span>
+        <Switch
+          checked={enabled}
+          onCheckedChange={setEnabled}
+          aria-label={t('inApp.waitingToggle')}
+          data-testid="notifications-toggle-inapp-waiting"
+        />
+      </label>
+      <label className="flex items-center justify-between gap-4">
+        <span>
+          <span className="block text-sm font-medium text-foreground">
+            {t('inApp.soundToggle')}
+          </span>
+          <span className="block text-xs text-muted-foreground">
+            {t('inApp.soundToggleDesc')}
+          </span>
+        </span>
+        <Switch
+          checked={soundEnabled}
+          onCheckedChange={setSoundEnabled}
+          aria-label={t('inApp.soundToggle')}
+          data-testid="notifications-toggle-inapp-sound"
+        />
+      </label>
+    </div>
   );
 }

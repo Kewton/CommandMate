@@ -192,6 +192,30 @@ app.prepare().then(() => {
     const method = req.method ?? 'UNKNOWN';
     const url = req.url ?? '/';
 
+    // Issue #1804: hand the proxy route handler the RAW request target.
+    //
+    // Next.js re-serializes the query string before an App Router route handler
+    // sees `request.url` (`?q=a%20b` -> `?q=a+b`, `?bare` -> `?bare=`, a lone
+    // `?` collapses), which breaks upstreams that verify a signature over the
+    // query bytes. `req.url` here is the untouched request target, so stash it
+    // in a header; `src/app/proxy/[...path]/route.ts` reads it back.
+    //
+    // The unconditional `delete` comes FIRST and runs for every request, so a
+    // client-supplied `x-cm-raw-url` can never survive to be trusted; only the
+    // conditional set below can put a value there. Requests still go through
+    // Next (and therefore through middleware.ts's auth + IP restriction and
+    // next.config.js's security headers) - deliberately NOT intercepted here.
+    //
+    // Kept inline, with the header name written out literally: importing a
+    // helper or a constant module here adds a module graph to server.ts's
+    // eval-time graph, which perturbs Next's AsyncLocalStorage bootstrap under
+    // `tsx server.ts` and kills the first request that compiles middleware
+    // (#1428; the symptom is E2E-only). Do not refactor this into an import.
+    delete req.headers['x-cm-raw-url'];
+    if (url.startsWith('/proxy/')) {
+      req.headers['x-cm-raw-url'] = url;
+    }
+
     // Issue #1621/#1645: a URL naming a worktree by a retired ID gets a real
     // 308 here, before Next renders anything. The cheap prefix test keeps every
     // other route free of the dynamic import and the alias lookup.

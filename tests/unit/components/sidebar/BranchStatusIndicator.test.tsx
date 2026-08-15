@@ -88,13 +88,36 @@ describe('BranchStatusIndicator', () => {
       expect(indicator.className).toMatch(/animate-status-glow/);
     });
 
-    it('should blink for waiting status (Issue #1051)', () => {
+    // Issue #1787: the weak blink was replaced by the strongest pulse in the
+    // system — waiting is the only status that needs a human.
+    it('should pulse for attention on waiting status (Issue #1051, #1787)', () => {
       render(<BranchStatusIndicator status="waiting" />);
 
       const indicator = screen.getByTestId('status-indicator');
-      // Waiting blinks (weak) but never spins.
-      expect(indicator.className).toMatch(/animate-status-blink/);
+      expect(indicator.className).toMatch(/animate-status-attention/);
+      expect(indicator.className).not.toMatch(/animate-status-blink/);
       expect(indicator.className).not.toMatch(/animate-spin/);
+    });
+
+    // Issue #1787: the indicator must FORWARD the kind, not swallow it — the
+    // sidebar row is the only place that knows it.
+    it.each(['menu', 'unclassified'] as const)(
+      'should forward waitingKind=%s to the medium tier',
+      (kind) => {
+        render(<BranchStatusIndicator status="waiting" waitingKind={kind} />);
+
+        const indicator = screen.getByTestId('status-indicator');
+        expect(indicator.className).toMatch(/animate-status-glow/);
+        expect(indicator.className).toMatch(/bg-warning/);
+        expect(indicator.className).not.toMatch(/animate-status-attention/);
+      }
+    );
+
+    it('should keep the strong tier for waitingKind=prompt', () => {
+      render(<BranchStatusIndicator status="waiting" waitingKind="prompt" />);
+
+      const indicator = screen.getByTestId('status-indicator');
+      expect(indicator.className).toMatch(/animate-status-attention/);
     });
 
     it('should glow/pulse for generating status (Issue #1051)', () => {

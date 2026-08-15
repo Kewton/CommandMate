@@ -61,6 +61,9 @@ const NO_STRUCTURED_EVENTS = {
   promptWaitingSource: null,
 } as const;
 
+/** Nothing has reported a model or an effort either (Issue #1785). */
+const NO_MODEL_INFO = { model: null, reasoningEffort: null } as const;
+
 beforeEach(() => {
   vi.clearAllMocks();
   __resetTerminalBroadcastState();
@@ -81,6 +84,7 @@ beforeEach(() => {
     lineCount: 1,
     lastStopEventAt: null,
     structuredEvents: NO_STRUCTURED_EVENTS,
+    ...NO_MODEL_INFO,
   });
 });
 
@@ -134,6 +138,7 @@ describe('broadcastTerminalSnapshotAfterInteraction', () => {
         lineCount: 1,
         lastStopEventAt: null,
         structuredEvents: NO_STRUCTURED_EVENTS,
+        ...NO_MODEL_INFO,
       })
       .mockResolvedValueOnce({
         isRunning: true,
@@ -146,6 +151,7 @@ describe('broadcastTerminalSnapshotAfterInteraction', () => {
         lineCount: 1,
         lastStopEventAt: null,
         structuredEvents: NO_STRUCTURED_EVENTS,
+        ...NO_MODEL_INFO,
       });
 
     const pending = broadcastTerminalSnapshotAfterInteraction(

@@ -11,7 +11,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { AppShell } from '@/components/layout';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui';
@@ -61,7 +61,12 @@ export default function ReviewPage() {
           </TabsList>
 
           <TabsContent value="review">
-            <ReviewTab />
+            {/* Issue #1788: ReviewTab reads `?filter=` through useSearchParams,
+                which needs a Suspense boundary above it or the route opts out of
+                static rendering at build time. */}
+            <Suspense fallback={null}>
+              <ReviewTab />
+            </Suspense>
           </TabsContent>
           <TabsContent value="report">
             <ReportTab />

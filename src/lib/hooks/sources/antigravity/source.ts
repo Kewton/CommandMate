@@ -217,6 +217,11 @@ export const antigravityAgentEventSource: AgentEventSource = definePushHookSourc
   conversationIdFields: ['conversationId'],
   toolCallIdFields: [],
 
+  // Issue #1783. protojson camelCase again: `modelName`, not `model`. Present on
+  // all six captured fixtures, so agy is the one tool whose model survives every
+  // kind of event — including the ones that carry no session id at all.
+  modelFields: ['modelName'],
+
   // The tool name is nested under `toolCall`, and it is present on both
   // `PreToolUse` and `PostToolUse` payloads (checked against both fixtures).
   extractDetail: (event, payload) =>

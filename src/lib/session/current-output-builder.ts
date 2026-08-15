@@ -37,6 +37,7 @@ import {
   getAskUserQuestion,
   getLastAgentEvent,
   getLastStopEventAt,
+  getResolvedAgentModelInfo,
   getStructuredSessionState,
   markStructuredPromptRecorded,
   type AskUserQuestionEpisode,
@@ -148,6 +149,49 @@ export interface CurrentOutputPayload {
    * (Issue #1722). See {@link StructuredEventsPayload}.
    */
   structuredEvents: StructuredEventsPayload;
+  /**
+   * The model this instance is running, or null when nothing knows (#1785).
+   *
+   * Exposure only: the value is whatever the retention layer resolved — the
+   * agent's own hook events first (#1783), the terminal frame filling the hole
+   * (#1784), under `mergeModelInfo`'s precedence. Nothing here parses,
+   * normalises or prettifies it — `commandmate capture --json` and
+   * `commandmate instances` have to be able to compare it against what the
+   * agent reports about itself, and any cleanup on the way out would break
+   * that comparison exactly when it matters.
+   *
+   * **Always present, null when unknown.** Unlike `CliToolSessionStatus.model`,
+   * which omits the key so existing `toEqual` suites keep passing, this payload
+   * is a CLI contract: `capture --json | jq '.model'` must answer `null` rather
+   * than nothing at all for a session whose tool publishes no model (gemini,
+   * copilot) or for a server that restarted mid-session.
+   *
+   * Null whenever the session is not running, regardless of what was latched
+   * before: the retention layer deliberately does not expire (an eight-hour
+   * turn is on the same model at the end as at the start), so a dead session
+   * would otherwise keep reporting the model of the process that ran in it.
+   */
+  model: string | null;
+  /**
+   * The reasoning effort this instance is running at, or null (#1785).
+   *
+   * Phase 3 (#1785) shipped this key against a seam that returned a constant
+   * null, because its holding layer (#1784) was landing in parallel; the two
+   * Issues went green side by side and nobody joined them, so the field stayed
+   * null on every session for both `capture --json` and `commandmate
+   * instances`. It now reads the same retention layer `model` does, resolved by
+   * the same call — see the note on the resolution site in
+   * {@link buildCurrentOutput}.
+   *
+   * Not an optional field and not `undefined`: a consumer must be able to read
+   * `.reasoningEffort` and get an explicit "nothing knows" for gemini, for
+   * copilot, and for any session whose banner has scrolled out of the tmux
+   * history.
+   *
+   * Null whenever the session is not running, for the same reason `model` is —
+   * see above.
+   */
+  reasoningEffort: string | null;
 }
 
 const logger = createLogger('current-output-builder');
@@ -476,6 +520,14 @@ export async function buildCurrentOutput(
       sessionStatusReason: 'session_not_running',
       lastStopEventAt: stopEventAt,
       structuredEvents,
+      // Issue #1785: null on a dead session, not the last model it ran. The
+      // latch outlives the process that filled it (by design — see
+      // getLastKnownAgentModel), so reporting it here would tell `commandmate
+      // instances` that a `RUNNING no` row is on gpt-5.6. The same holds for
+      // the effort, whose scraped half never expires either: dropping both is
+      // the server's job, done here and in exactly one place.
+      model: null,
+      reasoningEffort: null,
     };
   }
 
@@ -660,6 +712,19 @@ export async function buildCurrentOutput(
   const realtimeSnippet = lines.slice(-100).join('\n');
   const autoYesState = getAutoYesState(worktreeId, cliToolId, instanceId);
 
+  // Issue #1785 + #1784: ONE resolution for both halves, not two readers.
+  //
+  // `getResolvedAgentModelInfo` is the reader #1784 documents as "the single
+  // answer both surfaces should read", and it is already what the list API
+  // publishes (`worktree-status-helper`). Reading the model off the hook latch
+  // here while taking the effort from the resolver would let this payload
+  // publish an effort with no model — the exact shape `buildModelByInstance`
+  // calls "unreachable through the API" — on a claude session whose banner the
+  // poller scraped before its first `SessionStart` hook arrived. It also folds
+  // in antigravity's rule that the effort comes from the model id, which a bare
+  // read of the scraped half would drop.
+  const { model, effort } = getResolvedAgentModelInfo(worktreeId, cliToolId, instanceId);
+
   return {
     isRunning: true,
     cliToolId,
@@ -689,5 +754,9 @@ export async function buildCurrentOutput(
     serverPollerActive: isPollerActive(compositeKey),
     lastStopEventAt: stopEventAt,
     structuredEvents,
+    // Issue #1785: straight from the retention layer, unparsed. See the field
+    // docs on CurrentOutputPayload for why nothing is normalised on the way out.
+    model,
+    reasoningEffort: effort,
   };
 }

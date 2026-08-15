@@ -44,6 +44,12 @@ interface PaneCaptureResponse {
 
 /**
  * Format capture output as JSON (excluding fullOutput for size).
+ *
+ * Everything the server sends except `fullOutput` passes through verbatim, which
+ * is why Issue #1785's `model` / `reasoningEffort` appear in `--json` without a
+ * line of code here — and why `content` / `realtimeSnippet` / `sessionStatus` /
+ * `sessionStatusReason`, which the orchestrate-monitor recipe parses, cannot be
+ * disturbed by a field being added upstream.
  */
 function formatJson(data: CurrentOutputResponse): string {
   const { fullOutput: _fullOutput, ...rest } = data;

@@ -40,9 +40,11 @@
 
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
-import type { AgentEventType } from '@/lib/hooks/agent-event-types';
+import { MAX_EVENT_DETAIL_LENGTH, type AgentEventType } from '@/lib/hooks/agent-event-types';
 import type { AskUserQuestionSpec } from '@/lib/hooks/ask-user-question-payload';
 import { ASK_USER_QUESTION_TOOL } from '@/lib/hooks/permission-request-payload';
+// Issue #1784: the terminal-frame half of "which model / effort is this on".
+import { mergeModelInfo, type ModelInfo } from '@/lib/detection/model-info-extractor';
 import { agentEventToSessionStatus, type StructuredStatusVerdict } from '@/lib/session/status-mapping';
 import {
   MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH,
@@ -93,6 +95,12 @@ declare global {
   var __agentEventAskUserQuestion: Map<string, AskUserQuestionEpisode> | undefined;
   // eslint-disable-next-line no-var
   var __agentEventRecentKeys: Map<string, number> | undefined;
+  // eslint-disable-next-line no-var
+  var __agentEventAwaitingInstruction: Map<string, AwaitingInstructionRecord> | undefined;
+  // eslint-disable-next-line no-var
+  var __agentEventLastModel: Map<string, string> | undefined;
+  // eslint-disable-next-line no-var
+  var __agentCapturedModelInfo: Map<string, ModelInfo> | undefined;
 }
 
 /** compositeKey -> epoch ms of the most recent stop event. */
@@ -118,6 +126,49 @@ const askUserQuestion = globalThis.__agentEventAskUserQuestion ??
 /** dedup key -> epoch ms it was first seen. See {@link isDuplicateAgentEvent}. */
 const recentEventKeys = globalThis.__agentEventRecentKeys ??
   (globalThis.__agentEventRecentKeys = new Map<string, number>());
+
+/** compositeKey -> the agent's own "I am waiting for instructions" (#1786). */
+const awaitingInstruction = globalThis.__agentEventAwaitingInstruction ??
+  (globalThis.__agentEventAwaitingInstruction = new Map<string, AwaitingInstructionRecord>());
+
+/**
+ * compositeKey -> the last non-null model this instance reported (Issue #1783).
+ *
+ * A *separate* map, not a field read off {@link lastAgentEvent}, and that is the
+ * whole point of it. `lastAgentEvent` is replaced wholesale on every delivery,
+ * and Claude puts the model on `SessionStart` and on nothing else — so the very
+ * next `UserPromptSubmit` would overwrite the only record that ever knew it, and
+ * the UI would show the model for the fraction of a second between session start
+ * and the first prompt. Keeping the last *non-null* sighting separately is what
+ * makes "which model is this session on" answerable at all for that tool.
+ *
+ * Never written with null: absent means "nothing has ever said", which is the
+ * honest state for gemini, copilot, and any session that predates this server
+ * process. See {@link getLastKnownAgentModel}.
+ */
+const lastAgentModel = globalThis.__agentEventLastModel ??
+  (globalThis.__agentEventLastModel = new Map<string, string>());
+
+/**
+ * compositeKey -> what the terminal frame last showed for this instance (#1784).
+ *
+ * The second source, and a strictly different kind of fact from
+ * {@link lastAgentModel}: that one is the agent naming itself over the hook
+ * channel, this one is the TUI's own chrome read back off the screen. It is
+ * kept apart rather than folded into the first map because the two have a
+ * precedence between them ({@link getResolvedAgentModelInfo}) — merging on write
+ * would let a scraped display name ("Gemini 3.7 Flash") overwrite the exact id
+ * the agent reported, with nothing left to recover it from.
+ *
+ * Latched the same way and for a sharper reason: Claude prints its model in the
+ * startup banner and nowhere else, and tmux keeps 2000 lines of history, so on
+ * any session that has been talking for a while the banner is simply gone. The
+ * screen going quiet is not the model changing, so the last non-null sighting
+ * stands until the process it described does not (see
+ * {@link beginAgentEventGeneration} / {@link discardAgentEventState}).
+ */
+const capturedModelInfo = globalThis.__agentCapturedModelInfo ??
+  (globalThis.__agentCapturedModelInfo = new Map<string, ModelInfo>());
 
 /**
  * How long two identical events count as one delivery.
@@ -168,6 +219,16 @@ export interface AgentEventRecord {
    * (D3). Absent for every event that carries no message.
    */
   message?: string | null;
+  /**
+   * The model the agent reported running (Issue #1783), or null/absent.
+   *
+   * Absent for a caller that has nothing to say, null for one that looked and
+   * found nothing — the two are treated identically here. What is *not* stored
+   * on this record is the answer to "which model is this instance on": the
+   * record is replaced on every event and most events carry no model, so that
+   * question is answered by {@link getLastKnownAgentModel} instead.
+   */
+  model?: string | null;
 }
 
 /**
@@ -212,6 +273,12 @@ export function recordAgentEvent(
 ): void {
   const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
   lastAgentEvent.set(key, record);
+  // Issue #1783: latch, never clear. An event without a model is the ordinary
+  // case (Claude sends one on `SessionStart` alone), and reading it as "the
+  // model is now unknown" would blank the display on the very next event.
+  if (typeof record.model === 'string' && record.model !== '') {
+    lastAgentModel.set(key, record.model.slice(0, MAX_EVENT_DETAIL_LENGTH));
+  }
   applyAskUserQuestionTransition(key, record);
   if (record.event === 'session_start') {
     // The agent restarting inside a pane CommandMate never touched — `claude`
@@ -222,6 +289,111 @@ export function recordAgentEvent(
     generationStartedAt.set(key, record.at);
   }
   applyPromptWaitingTransition(key, record);
+  applyAwaitingInstructionTransition(key, record);
+}
+
+/** The agent's own report that it is sitting at the composer (Issue #1786). */
+export interface AwaitingInstructionRecord {
+  /** Epoch ms the `Notification(idle_prompt)` was received. */
+  at: number;
+  /** `Notification.message` — the agent's own line, or null. Display only. */
+  message: string | null;
+}
+
+/**
+ * The third state: "this turn is over and nobody has told me what to do next"
+ * (Issue #1786).
+ *
+ * | event                             | effect on awaiting_instruction |
+ * |-----------------------------------|--------------------------------|
+ * | `notification(idle_prompt)`       | **set**                        |
+ * | `user_prompt_submit`              | release                        |
+ * | `session_start` / `session_end`   | release                        |
+ * | everything else                   | unchanged                      |
+ *
+ * It is a boolean beside the status rather than a fifth `SessionStatus`, because
+ * `idle_prompt` already maps to `ready` (`agentEventToSessionStatus`) and
+ * `ready` means "you can send a message" everywhere in this codebase — the
+ * sidebar, `deriveCliStatus`, `getNextAction`, `commandmate wait`. Widening that
+ * vocabulary to carry "and it is *asking* you to" would have every consumer of
+ * the four values re-decide what they mean; the boolean asks nothing of anyone
+ * who does not want it.
+ *
+ * `stop` deliberately does NOT set it. `Stop` fires when the turn ends, which is
+ * most of the time the agent has simply finished a step of its own plan;
+ * `Notification(idle_prompt)` is Claude's separate, later "waiting for your
+ * input" signal, and using the turn boundary instead would mark every
+ * intermediate stop as a request for instructions.
+ *
+ * `pre_tool_use` / `post_tool_use` / `notification(permission_prompt)` leave it
+ * alone, and that is not a gap: a tool call or a dialog can only happen inside a
+ * turn, and the turn's own `user_prompt_submit` has already released it. Adding
+ * them would only paper over a `UserPromptSubmit` that never arrived — and an
+ * operator whose `UserPromptSubmit` hook is missing has no `Notification` hook
+ * either, so there would be nothing to release.
+ *
+ * There is deliberately no age bound here, unlike every other state in this
+ * module. Those bound the damage of an event that may never arrive (a lost
+ * `Stop`, a dialog answered with no event to say so). This one is released by
+ * events that cannot be missed while the fact is still true: typing into the
+ * composer — from the app or straight into the tmux pane — raises
+ * `UserPromptSubmit`, and ending the session raises `SessionEnd`. An agent that
+ * has been idle for six hours genuinely is still awaiting instructions, and
+ * expiring the flag would erase the notification #1790 exists to send. The
+ * generation fence in {@link isAwaitingInstruction} still applies, so the flag
+ * never survives the process that reported it.
+ */
+function applyAwaitingInstructionTransition(key: string, record: AgentEventRecord): void {
+  switch (record.event) {
+    case 'notification':
+      if (record.detail === 'idle_prompt') {
+        awaitingInstruction.set(key, { at: record.at, message: record.message ?? null });
+      }
+      return;
+    case 'user_prompt_submit':
+    case 'session_start':
+    case 'session_end':
+      awaitingInstruction.delete(key);
+      return;
+    case 'stop':
+    case 'pre_tool_use':
+    case 'post_tool_use':
+      return;
+    default:
+      // exhaustive check: a new AgentEventType must decide its transition here
+      record.event satisfies never;
+      return;
+  }
+}
+
+/**
+ * The agent's own "waiting for your input", or null (Issue #1786).
+ *
+ * Fenced by generation like the rest of this module: an `idle_prompt` from the
+ * Claude process that used to live in this pane is not this one's.
+ */
+export function getAwaitingInstruction(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string,
+): AwaitingInstructionRecord | null {
+  const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
+  const record = awaitingInstruction.get(key);
+  if (!record) return null;
+
+  const generation = generationStartedAt.get(key);
+  if (generation !== undefined && record.at < generation) return null;
+
+  return record;
+}
+
+/** {@link getAwaitingInstruction} as the boolean the list API publishes. */
+export function isAwaitingInstruction(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string,
+): boolean {
+  return getAwaitingInstruction(worktreeId, cliToolId, instanceId) !== null;
 }
 
 /**
@@ -316,6 +488,126 @@ export function getLastAgentEvent(
 }
 
 /**
+ * The last model this instance reported running, or null (Issue #1783).
+ *
+ * "Last **non-null**", which is the only useful reading: three of the four tools
+ * that publish a model publish it on some events and not others, and Claude
+ * publishes it on exactly one. Reading `getLastAgentEvent()?.model` would
+ * therefore answer null for almost every moment of almost every session.
+ *
+ * Deliberately **not** bounded by {@link STRUCTURED_STATE_MAX_AGE_MS}, unlike
+ * every other reader in this module. That bound exists because a *status* that
+ * nothing has refreshed is a claim about right now that may have expired — a
+ * lost `Stop` leaving the layer asserting `running` forever. A model is not that
+ * kind of claim: an eight-hour turn is on the same model at the end as at the
+ * start, and expiring it would blank the display on precisely the long-running
+ * sessions this is most useful for. What *is* honoured is identity: a new
+ * generation or a discarded session drops the value, because the process that
+ * reported it is gone. See {@link beginAgentEventGeneration} /
+ * {@link discardAgentEventState}.
+ *
+ * In-memory only — nothing is written to `session_states`. After a server
+ * restart codex and antigravity repopulate on their next event; Claude stays
+ * null until its next `SessionStart`, a gap Phase 2 (#1784) closes from the
+ * terminal frame.
+ */
+export function getLastKnownAgentModel(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): string | null {
+  return lastAgentModel.get(buildCompositeKey(worktreeId, cliToolId, instanceId)) ?? null;
+}
+
+/**
+ * Latch what a terminal capture showed for this instance (Issue #1784).
+ *
+ * Called from the status-detection poll with the text that poll already
+ * captured — no `capture-pane` is issued for this, so the feature costs nothing
+ * in tmux round-trips.
+ *
+ * **Each half latches independently.** A Codex footer carries a model on every
+ * frame but an effort only on some formats; a Claude banner carries both and
+ * then scrolls away entirely. Writing `{model, effort}` wholesale would let the
+ * frame that stopped showing one of them blank a value the other frame proved.
+ * Nothing is ever written as null: absent means "no frame has ever shown this",
+ * which is the honest state for gemini/copilot and for any session whose chrome
+ * this module has no rule for.
+ *
+ * @param info - {@link import('@/lib/detection/model-info-extractor').extractModelInfo}'s answer
+ */
+export function recordCapturedModelInfo(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+  info: ModelInfo
+): void {
+  if (!info.model && !info.effort) return;
+  const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
+  const previous = capturedModelInfo.get(key);
+  capturedModelInfo.set(key, {
+    model: info.model ? info.model.slice(0, MAX_EVENT_DETAIL_LENGTH) : (previous?.model ?? null),
+    effort: info.effort ?? previous?.effort ?? null,
+  });
+}
+
+/**
+ * The last model/effort a terminal capture showed, both halves possibly null.
+ *
+ * The raw scraped value, before precedence is applied — {@link
+ * getResolvedAgentModelInfo} is what callers publishing to the UI or the API
+ * want. Exported for the tests and for anything that needs to tell "the screen
+ * said" apart from "the agent said".
+ */
+export function getLastCapturedModelInfo(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): ModelInfo {
+  const record = capturedModelInfo.get(buildCompositeKey(worktreeId, cliToolId, instanceId));
+  return { model: record?.model ?? null, effort: record?.effort ?? null };
+}
+
+/**
+ * The model and reasoning effort to publish for this instance (Issue #1784).
+ *
+ * The single answer both surfaces should read: it folds the hook channel
+ * (#1783) together with the screen under the precedence documented on
+ * {@link mergeModelInfo} — hooks win for the model, the screen is the only
+ * source of effort for codex/claude, and antigravity's effort is derived from
+ * the id it reports rather than from its (renderer-truncated) status bar.
+ *
+ * Both halves may be null, and routinely are: no tool publishes an effort over
+ * hooks, and most tools publish neither. Callers omit the key rather than
+ * emitting null — see `CliToolSessionStatus`.
+ */
+export function getResolvedAgentModelInfo(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): ModelInfo {
+  return mergeModelInfo(
+    cliToolId,
+    getLastKnownAgentModel(worktreeId, cliToolId, instanceId),
+    getLastCapturedModelInfo(worktreeId, cliToolId, instanceId)
+  );
+}
+
+/**
+ * The reasoning effort this instance is running at, or null (Issue #1784).
+ *
+ * Convenience reader over {@link getResolvedAgentModelInfo} for callers that
+ * want only the effort — `capture --json` and `instances` (#1785) among them.
+ */
+export function getLastKnownAgentEffort(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): string | null {
+  return getResolvedAgentModelInfo(worktreeId, cliToolId, instanceId).effort;
+}
+
+/**
  * How long a structured verdict is trusted after the event that produced it
  * (Issue #1723).
  *
@@ -376,6 +668,21 @@ export function beginAgentEventGeneration(
   promptWaiting.delete(key);
   // Same reasoning for the question that dialog was asking (Issue #1726).
   askUserQuestion.delete(key);
+  // And for "waiting for your input" (Issue #1786): a new process has not asked
+  // for anything yet.
+  awaitingInstruction.delete(key);
+  // And for the model (Issue #1783): a new generation is a new agent process,
+  // which may have been launched on a different model entirely. Latching across
+  // one would show the *previous* process's model with nothing to correct it —
+  // Claude only re-reports on `SessionStart`, which lands moments later anyway.
+  // A `/clear` is deliberately not affected: it reaches `recordAgentEvent` as
+  // `session_end` + `session_start`, never this function.
+  lastAgentModel.delete(key);
+  // Issue #1784: same argument for what the screen showed. The latch exists to
+  // survive the banner scrolling away *within* one process; carrying it across
+  // a relaunch would show the old process's effort with no frame left that
+  // could contradict it. The next poll re-reads a live footer immediately.
+  capturedModelInfo.delete(key);
 }
 
 /**
@@ -410,6 +717,11 @@ export function discardAgentEventState(
   generationStartedAt.delete(key);
   promptWaiting.delete(key);
   askUserQuestion.delete(key);
+  awaitingInstruction.delete(key);
+  // Issue #1783: the session that was on this model no longer exists.
+  lastAgentModel.delete(key);
+  // Issue #1784: nor does the pane its footer was read from.
+  capturedModelInfo.delete(key);
 }
 
 /**
@@ -889,4 +1201,11 @@ export function clearAgentStopEvents(): void {
   generationStartedAt.clear();
   promptWaiting.clear();
   askUserQuestion.clear();
+  awaitingInstruction.clear();
+  // Issue #1783. CI runs with `fileParallelism: false`, so every suite in the
+  // repo shares this process — a model latched by one test would otherwise be
+  // read by another, in file order, and only in CI.
+  lastAgentModel.clear();
+  // Issue #1784: and the same for the scraped half.
+  capturedModelInfo.clear();
 }

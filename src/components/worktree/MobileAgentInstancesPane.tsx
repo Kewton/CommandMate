@@ -48,6 +48,13 @@ export interface MobileAgentInstancesPaneProps {
   visibleInstanceIds: string[];
   /** Toggle one instance's per-device visibility (enforces MIN_VISIBLE_INSTANCES). */
   onToggleInstanceVisible: (instanceId: string) => void;
+  /**
+   * Issue #1783: instanceId -> last reported model. Threaded to the shared
+   * {@link AgentInstancesPane} and shown as a third line on this pane's
+   * "show on this device" rows, under the existing alias / tool-name pair.
+   * Read-only; absent entries render nothing.
+   */
+  modelByInstance?: Readonly<Partial<Record<string, string | null>>>;
 }
 
 export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
@@ -60,8 +67,11 @@ export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
   onVibeLocalContextWindowChange,
   visibleInstanceIds,
   onToggleInstanceVisible,
+  modelByInstance,
 }: MobileAgentInstancesPaneProps) {
   const t = useTranslations('schedule');
+  // Issue #1783: model wording lives in the `worktree` namespace.
+  const tWorktree = useTranslations('worktree');
 
   const visibleSet = new Set(visibleInstanceIds);
   const atMinVisible = visibleInstanceIds.length <= MIN_VISIBLE_INSTANCES;
@@ -77,6 +87,8 @@ export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
         onVibeLocalModelChange={onVibeLocalModelChange}
         vibeLocalContextWindow={vibeLocalContextWindow}
         onVibeLocalContextWindowChange={onVibeLocalContextWindowChange}
+        // Issue #1783: read-only observed model per roster row.
+        modelByInstance={modelByInstance}
       />
 
       {/* Per-device "show as tabs" selection (localStorage, never the DB). */}
@@ -96,6 +108,8 @@ export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
             const checked = visibleSet.has(inst.id);
             // Cannot hide the last remaining visible instance (MIN=1).
             const disabled = checked && atMinVisible;
+            // Issue #1783: observed model for this instance, or null.
+            const instanceModel = modelByInstance?.[inst.id] ?? null;
             return (
               <label
                 key={inst.id}
@@ -116,6 +130,17 @@ export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
                   <span className="block text-xs text-muted-foreground truncate">
                     {getCliToolDisplayName(inst.cliTool)}
                   </span>
+                  {/* Issue #1783: the third line of the existing 2-line row.
+                      Omitted entirely when no model has been reported. */}
+                  {instanceModel && (
+                    <span
+                      data-testid={`mobile-visible-instance-model-${inst.id}`}
+                      title={tWorktree('agentModel.modelLabel', { model: instanceModel })}
+                      className="block text-xs text-muted-foreground truncate"
+                    >
+                      {instanceModel}
+                    </span>
+                  )}
                 </span>
               </label>
             );

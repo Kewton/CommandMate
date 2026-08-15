@@ -30,6 +30,25 @@
     "promptWaitingWithExcerpt": "Waiting for reply: {excerpt}",
     "promptWaiting": "Waiting for your reply",
     "completionWithExcerpt": "Done: {excerpt}",
-    "completion": "Session complete"
+    "completion": "Session complete",
+    "terminalAttentionWithExcerpt": "Needs attention in the terminal: {excerpt}",
+    "terminalAttention": "Needs attention in the terminal",
+    "stillWaitingPrompt": "Still waiting for your reply ({minutes} min)",
+    "stillWaitingTerminal": "Still needs attention in the terminal ({minutes} min)"
+  },
+  "escalation": {
+    "heading": "Reminder",
+    "toggle": "Remind me if still waiting",
+    "toggleDesc": "Send one more notification when an agent has been waiting this long. Applies to every device.",
+    "threshold": "Remind after",
+    "minutes": "{count} min"
+  },
+  "inApp": {
+    "heading": "In-app notifications",
+    "waitingToggle": "Waiting toast",
+    "waitingToggleDesc": "Show a toast when another worktree starts waiting for you",
+    "waitingToast": "{name} is waiting for your input",
+    "soundToggle": "Waiting sound",
+    "soundToggleDesc": "Play a short chime when a worktree starts waiting for you. Takes effect after you click or press a key on the page."
   }
 }

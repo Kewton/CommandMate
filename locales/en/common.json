@@ -171,5 +171,9 @@
   },
   "meta": {
     "description": "Git worktree management with Claude CLI and tmux sessions"
+  },
+  "attention": {
+    "label": "Needs attention",
+    "badgeLabel": "{count} worktrees need your attention"
   }
 }

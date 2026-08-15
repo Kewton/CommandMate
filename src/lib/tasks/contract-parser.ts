@@ -26,6 +26,11 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { parse as parseYaml } from 'yaml';
 import { isPathSafe } from '@/lib/security/path-validator';
+import {
+  GATE_ID_PATTERN,
+  validateGateEntries,
+  type VerifyGate,
+} from '@/lib/verification/verify-config';
 import type { PromptType } from '@/types/models';
 
 /** Directory contracts live in, relative to the worktree root. */
@@ -69,8 +74,29 @@ export interface TaskContractScope {
 }
 
 export interface TaskContractVerify {
-  /** Gate ids from verify.yaml; null means "every declared gate". */
+  /**
+   * Gate ids to run; null means "every declared gate".
+   *
+   * A *selection*, never a definition — the ids come from verify.yaml or from
+   * {@link TaskContractVerify.gateDefinitions} below. null resolves to every
+   * verify.yaml gate plus every gate this contract defines.
+   */
   gates: string[] | null;
+  /**
+   * Gates that exist for this delegation alone (Issue #1791).
+   *
+   * An Issue-specific check (a reproduction script, a one-off invariant) has to
+   * reach the worktree somehow, and the only other route was for the
+   * orchestrator to append it to `.commandmate/verify.yaml` — a file that stays
+   * in the work-evidence change set (#1756), so a worktree carrying nothing but
+   * that append reads as "the agent did work". The contract is already
+   * snapshotted into `tasks.contract_json` at send time and already excluded
+   * from both gates' change sets (#1580), so carrying the definition here adds
+   * no tamper surface that did not already exist.
+   *
+   * Empty when the contract defines none, which is the ordinary case.
+   */
+  gateDefinitions: VerifyGate[];
 }
 
 export interface TaskContractAutoYes {
@@ -132,12 +158,14 @@ export const MAX_GOAL_LENGTH = 8000;
 export const MAX_PATTERN_LENGTH = 200;
 export const MAX_SCOPE_PATTERNS = 200;
 export const MAX_GATE_IDS = 32;
+/** Matches {@link MAX_GATE_IDS}: a contract cannot select more gates than it may define. */
+export const MAX_GATE_DEFINITIONS = 32;
 export const MAX_DENY_PATTERNS = 32;
 export const MAX_ALLOW_PROMPT_TYPES = 16;
 
 const TOP_LEVEL_KEYS = ['version', 'title', 'goal', 'scope', 'verify', 'autoYes', 'success'];
 const SCOPE_KEYS = ['allow', 'deny'];
-const VERIFY_KEYS = ['gates'];
+const VERIFY_KEYS = ['gates', 'gateDefinitions'];
 const AUTO_YES_KEYS = ['mode', 'allowPromptTypes', 'denyPatterns'];
 const SUCCESS_KEYS = [
   'requireWorkEvidence',
@@ -145,9 +173,6 @@ const SUCCESS_KEYS = [
   'requireCommit',
   'autoVerifyOnStop',
 ];
-
-/** Mirrors GATE_ID_PATTERN in verify-config.ts: a contract can only name ids that could exist. */
-const GATE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
 export class TaskContractError extends Error {
   readonly issues: string[];
@@ -281,16 +306,52 @@ function validateScope(value: unknown, issues: string[]): TaskContractScope {
   return scope;
 }
 
+/**
+ * Validate `verify.gateDefinitions` (Issue #1791).
+ *
+ * Delegates every per-entry rule to verify-config's own gate validator, so a
+ * gate defined in a contract is held to exactly the constraints a gate declared
+ * in `.commandmate/verify.yaml` is — including the reserved ids, which is where
+ * a contract shadowing `work-evidence` or `scope` is rejected. That rejection
+ * lands here, at parse time, rather than in the verify.yaml cross-check: it
+ * needs no config to decide, and both run at send.
+ *
+ * An empty list is accepted as equivalent to omitting the key. Unlike
+ * `verify.gates: []` — which would read as "pass having run nothing" — a
+ * definition list with no entries has exactly one possible meaning, and an
+ * orchestrator that emits YAML programmatically should not have to special-case
+ * "this delegation happens to need no extra gate".
+ */
+function validateGateDefinitions(value: unknown, issues: string[]): VerifyGate[] {
+  if (value === undefined || value === null) return [];
+
+  if (Array.isArray(value) && value.length > MAX_GATE_DEFINITIONS) {
+    issues.push(
+      `verify.gateDefinitions: at most ${MAX_GATE_DEFINITIONS} entries (got ${value.length})`
+    );
+    return [];
+  }
+
+  return validateGateEntries(value, 'verify.gateDefinitions', issues);
+}
+
 function validateVerify(value: unknown, issues: string[]): TaskContractVerify {
-  if (value === undefined || value === null) return { gates: null };
+  const empty = (): TaskContractVerify => ({ gates: null, gateDefinitions: [] });
+  if (value === undefined || value === null) return empty();
 
   if (!isMapping(value)) {
     issues.push(`verify: must be a mapping (got ${describe(value)})`);
-    return { gates: null };
+    return empty();
   }
   collectUnknownKeys(value, VERIFY_KEYS, 'verify', issues);
 
-  if (value.gates === undefined || value.gates === null) return { gates: null };
+  const gateDefinitions = validateGateDefinitions(value.gateDefinitions, issues);
+  const withDefinitions = (gates: string[] | null): TaskContractVerify => ({
+    gates,
+    gateDefinitions,
+  });
+
+  if (value.gates === undefined || value.gates === null) return withDefinitions(null);
 
   const gates = validateStringList(
     value.gates,
@@ -298,13 +359,13 @@ function validateVerify(value: unknown, issues: string[]): TaskContractVerify {
     { maxEntries: MAX_GATE_IDS, maxLength: 32 },
     issues
   );
-  if (!gates) return { gates: null };
+  if (!gates) return withDefinitions(null);
 
   // An empty list would read as "pass with no gates run". "Run everything" is
   // spelled by omitting the key, so the two can never be confused.
   if (Array.isArray(value.gates) && value.gates.length === 0) {
     issues.push('verify.gates: must name at least one gate (omit the key to run every gate)');
-    return { gates: null };
+    return withDefinitions(null);
   }
 
   const valid: string[] = [];
@@ -322,7 +383,7 @@ function validateVerify(value: unknown, issues: string[]): TaskContractVerify {
     valid.push(id);
   });
 
-  return { gates: valid.length > 0 ? valid : null };
+  return withDefinitions(valid.length > 0 ? valid : null);
 }
 
 function validateAutoYes(value: unknown, issues: string[]): TaskContractAutoYes {
@@ -492,6 +553,23 @@ export function parseTaskContract(raw: string, sourceLabel: string): TaskContrac
         '(the commit requirement is judged by the work-evidence gate, which ' +
         'requireWorkEvidence: false switches off)'
     );
+  }
+
+  // Same rule again, for the gates this contract defines itself (#1791). A
+  // definition that `verify.gates` leaves out is a check the contract appears to
+  // add and never runs — and it is the *only* declaration of that gate, so
+  // unlike a verify.yaml gate there is no other run that would ever execute it.
+  // Selecting a subset is spelled by deleting the definition.
+  if (verify.gates) {
+    const unselected = verify.gateDefinitions
+      .map((gate) => gate.id)
+      .filter((id) => !verify.gates?.includes(id));
+    if (unselected.length > 0) {
+      issues.push(
+        `verify.gateDefinitions: ${unselected.join(', ')} defined but not named in verify.gates, ` +
+          'so nothing would ever run them (list them, or delete the definition)'
+      );
+    }
   }
 
   if (issues.length > 0) throw new TaskContractError(issues);

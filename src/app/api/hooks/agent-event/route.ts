@@ -233,6 +233,13 @@ export async function POST(request: NextRequest) {
       // the prompt it announces; `notification_type` (in `detail`) remains the
       // only thing anything branches on (D3).
       message: readString(payload, 'message')?.slice(0, MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH) ?? null,
+      // Issue #1783: which key holds the model is the source's business — it is
+      // `model` on claude and codex and `modelName` on antigravity — so this
+      // route reads the already-normalised value and never the payload. Already
+      // bounded at extraction; null for the tools that never send one, and for
+      // every Claude event except `SessionStart`, which is why the store latches
+      // the last non-null rather than the newest.
+      model: normalized.model,
     });
 
     if (event === 'pre_tool_use') {

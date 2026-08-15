@@ -19,6 +19,7 @@ import {
   VERIFY_CONFIG_RELATIVE_PATH,
   WORK_EVIDENCE_GATE_ID,
   type VerifyConfig,
+  type VerifyGate,
 } from '@/lib/verification/verify-config';
 import type { TaskContract } from './contract-parser';
 
@@ -105,12 +106,32 @@ export function resolveContractGateIds(contract: TaskContract): string[] | null 
 }
 
 /**
- * Check that every gate the contract names can actually be resolved.
+ * The gates this contract defines itself (#1791).
+ *
+ * Read through a helper because `contract` also arrives from
+ * `tasks.contract_json`, and a row written before the field existed parses back
+ * as `undefined` rather than an empty list. Every consumer reads it here so
+ * "an old task" and "a task that defines no gates" cannot behave differently.
+ */
+export function contractGateDefinitions(contract: TaskContract): VerifyGate[] {
+  return contract.verify.gateDefinitions ?? [];
+}
+
+/**
+ * Check that the contract's gates can actually be resolved, and that its own
+ * definitions do not collide with the repository's.
  *
  * A contract pointing at a gate id that does not exist would only be caught at
  * verification time, by which point the agent has already been told a
  * completion criterion that cannot be evaluated. Reporting it here makes
  * "the contract was accepted" and "the contract's gates exist" the same moment.
+ *
+ * The collision check is the same discipline pointed the other way (#1791). A
+ * contract that redefined an id `.commandmate/verify.yaml` already declares
+ * would replace the repository's own definition of passing with one written per
+ * delegation — silently, since both spell the same id in the report. Reserved
+ * ids (`work-evidence` / `scope` / `env-clean`) are refused one step earlier, by
+ * the shared gate validator in the parser; both refusals happen at send.
  *
  * @returns issue strings, empty when the contract resolves cleanly
  */
@@ -119,27 +140,55 @@ export function validateContractAgainstVerifyConfig(
   config: VerifyConfig | null
 ): string[] {
   const gates = contract.verify.gates;
-  if (!gates) return [];
+  const definitions = contractGateDefinitions(contract);
+  const issues: string[] = [];
 
   if (!config) {
-    return [
-      `verify.gates: declared ${gates.join(', ')}, but ${VERIFY_CONFIG_RELATIVE_PATH} ` +
-        'is missing or unreadable in this worktree, so the gate ids cannot be resolved',
-    ];
+    // Fail-closed for definitions too: the runner refuses to start a run at all
+    // without a config, so accepting the contract would promise a criterion that
+    // can never be evaluated — the exact thing this function exists to prevent.
+    if (definitions.length > 0) {
+      issues.push(
+        `verify.gateDefinitions: declared ${definitions.map((gate) => gate.id).join(', ')}, ` +
+          `but ${VERIFY_CONFIG_RELATIVE_PATH} is missing or unreadable in this worktree, ` +
+          'so no verification run can execute them'
+      );
+    }
+    if (gates) {
+      issues.push(
+        `verify.gates: declared ${gates.join(', ')}, but ${VERIFY_CONFIG_RELATIVE_PATH} ` +
+          'is missing or unreadable in this worktree, so the gate ids cannot be resolved'
+      );
+    }
+    return issues;
   }
 
-  const known = new Set<string>([
-    WORK_EVIDENCE_GATE_ID,
-    SCOPE_GATE_ID,
-    ...config.gates.map((gate) => gate.id),
-  ]);
-  const unknown = gates.filter((id) => !known.has(id));
-  if (unknown.length === 0) return [];
+  const configIds = config.gates.map((gate) => gate.id);
+  const collisions = definitions
+    .map((gate) => gate.id)
+    .filter((id) => configIds.includes(id));
+  if (collisions.length > 0) {
+    issues.push(
+      `verify.gateDefinitions: gate id(s) ${collisions.join(', ')} are already declared in ` +
+        `${VERIFY_CONFIG_RELATIVE_PATH}. A contract may add gates, never redefine the ` +
+        "repository's own — rename the contract gate."
+    );
+  }
 
-  return [
-    `verify.gates: unknown gate id(s) ${unknown.join(', ')}. ` +
-      `Declared in ${VERIFY_CONFIG_RELATIVE_PATH}: ${[...known].join(', ')}`,
-  ];
+  if (gates) {
+    const known = new Set<string>([WORK_EVIDENCE_GATE_ID, SCOPE_GATE_ID, ...configIds]);
+    const defined = new Set(definitions.map((gate) => gate.id));
+    const unknown = gates.filter((id) => !known.has(id) && !defined.has(id));
+    if (unknown.length > 0) {
+      const sources = [`Declared in ${VERIFY_CONFIG_RELATIVE_PATH}: ${[...known].join(', ')}`];
+      if (defined.size > 0) {
+        sources.push(`in verify.gateDefinitions: ${[...defined].join(', ')}`);
+      }
+      issues.push(`verify.gates: unknown gate id(s) ${unknown.join(', ')}. ${sources.join('; ')}`);
+    }
+  }
+
+  return issues;
 }
 
 /**
@@ -162,16 +211,21 @@ export function resolveGateCommands(
     [SCOPE_GATE_ID, SCOPE_LABEL],
   ]);
 
+  // Contract-defined gates run after the repository's own, so the preamble
+  // lists them in that order too — the line claims to be "the commands that
+  // will run", and an order it invents would be the first thing to drift.
+  const declared = [...config.gates, ...contractGateDefinitions(contract)];
+
   const selected = resolveContractGateIds(contract);
   if (!selected) {
     // An omitted gates list runs every gate, and the built-ins are still governed
     // by the success flags rather than by the (absent) list.
     const builtIns = [workEvidenceLabel];
     if (contract.success.requireScopeClean) builtIns.push(SCOPE_LABEL);
-    return [...builtIns, ...config.gates.map((gate) => gate.command)];
+    return [...builtIns, ...declared.map((gate) => gate.command)];
   }
 
-  const byId = new Map(config.gates.map((gate) => [gate.id, gate.command] as const));
+  const byId = new Map(declared.map((gate) => [gate.id, gate.command] as const));
   return selected.map((id) => builtInLabels.get(id) ?? (byId.get(id) as string));
 }
 

@@ -89,6 +89,27 @@ export interface PushHookSourceSpec {
   conversationIdFields?: readonly string[];
   /** Where a tool-call correlation id lives, if anywhere (#1757 R5). */
   toolCallIdFields?: readonly string[];
+  /**
+   * Where the model the agent is running lives, as flat payload keys (#1783).
+   *
+   * Declared the same way `conversationIdFields` is, and for the same reason:
+   * three of the four tools that publish a model publish it as one top-level
+   * string, and the only difference between them is its spelling — `model` for
+   * claude and codex, `modelName` for antigravity. First non-empty wins. Omit
+   * the field entirely for a tool that never sends one (gemini, copilot); the
+   * normalised event then carries `model: null`, which is a fact rather than a
+   * gap to be filled in by guessing.
+   */
+  modelFields?: readonly string[];
+  /**
+   * Model extraction for shapes a flat lookup cannot reach (#1783).
+   *
+   * The escape hatch {@link conversationIdFields} already needed for opencode,
+   * whose model sits at `properties.info.model.{modelID,id}`. Wins over
+   * {@link modelFields} when both are declared, so a tool that is mostly flat
+   * with one nested exception can say so without giving up the list.
+   */
+  extractModel?: (payload: Record<string, unknown>) => string | null;
   /** Subtype extraction for events whose rule did not fix one (S2). */
   extractDetail?: (event: AgentEventType, payload: Record<string, unknown>) => string | null;
   parsePermissionRequest: (payload: Record<string, unknown>) => PermissionRequestPayload | null;
@@ -129,6 +150,8 @@ export function definePushHookSource(spec: PushHookSourceSpec): AgentEventSource
           detail: spec.extractDetail,
           conversationId: spec.conversationIdFields,
           toolCallId: spec.toolCallIdFields,
+          modelFields: spec.modelFields,
+          extractModel: spec.extractModel,
         });
       }
 
@@ -144,6 +167,8 @@ export function definePushHookSource(spec: PushHookSourceSpec): AgentEventSource
         detail: spec.extractDetail,
         conversationId: spec.conversationIdFields,
         toolCallId: spec.toolCallIdFields,
+        modelFields: spec.modelFields,
+        extractModel: spec.extractModel,
       });
     },
 
@@ -203,6 +228,10 @@ export interface PullEventSourceSpec {
   nativeEventNameFields?: readonly string[];
   conversationIdFields?: readonly string[];
   toolCallIdFields?: readonly string[];
+  /** Flat keys holding the model (#1783). See {@link PushHookSourceSpec.modelFields}. */
+  modelFields?: readonly string[];
+  /** Nested model extraction (#1783). See {@link PushHookSourceSpec.extractModel}. */
+  extractModel?: (payload: Record<string, unknown>) => string | null;
   extractDetail?: (event: AgentEventType, payload: Record<string, unknown>) => string | null;
   parsePermissionRequest: (payload: Record<string, unknown>) => PermissionRequestPayload | null;
   parseQuestion: (payload: Record<string, unknown>) => AskUserQuestionSpec | null;
@@ -259,6 +288,8 @@ export function definePullEventSource(spec: PullEventSourceSpec): AgentEventSour
           detail: spec.extractDetail,
           conversationId: spec.conversationIdFields,
           toolCallId: spec.toolCallIdFields,
+          modelFields: spec.modelFields,
+          extractModel: spec.extractModel,
         });
       }
 
@@ -272,6 +303,8 @@ export function definePullEventSource(spec: PullEventSourceSpec): AgentEventSour
         detail: spec.extractDetail,
         conversationId: spec.conversationIdFields,
         toolCallId: spec.toolCallIdFields,
+        modelFields: spec.modelFields,
+        extractModel: spec.extractModel,
       });
     },
 

@@ -59,6 +59,17 @@ export interface AgentInstancesPaneProps {
   vibeLocalContextWindow?: number | null;
   /** Callback when vibe-local context window changes */
   onVibeLocalContextWindowChange?: (value: number | null) => void;
+  /**
+   * Issue #1783: instanceId -> the model that instance last reported running,
+   * from `sessionStatusByInstance`. Read-only; this pane edits the roster, and
+   * the model is an observation about a live session rather than a setting.
+   *
+   * Optional, and an instance with no entry renders no model line — which is the
+   * steady state for gemini / copilot and for any tool whose hooks are not
+   * configured. Not to be confused with {@link vibeLocalModel}, which is a
+   * *chosen* setting for one tool and is edited below.
+   */
+  modelByInstance?: Readonly<Partial<Record<string, string | null>>>;
 }
 
 // ============================================================================
@@ -99,9 +110,13 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
   onVibeLocalModelChange,
   vibeLocalContextWindow,
   onVibeLocalContextWindowChange,
+  modelByInstance,
 }: AgentInstancesPaneProps) {
   const t = useTranslations('schedule');
   const tCommon = useTranslations('common');
+  // Issue #1783: the model strings live in the `worktree` namespace beside the
+  // other session-status wording, not in `schedule` with the roster editor's.
+  const tWorktree = useTranslations('worktree');
   const confirm = useConfirm();
 
   const [saving, setSaving] = useState(false);
@@ -223,6 +238,8 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
         {instances.map((inst, index) => {
           const aliasValue = inst.id in aliasDrafts ? aliasDrafts[inst.id] : inst.alias;
           const isDragging = draggingIndex === index;
+          // Issue #1783: observed model for this instance, or null.
+          const instanceModel = modelByInstance?.[inst.id] ?? null;
           return (
             <div
               key={inst.id}
@@ -272,6 +289,19 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
                   content={getCliToolDisplayName(inst.cliTool)}
                   className="mt-0.5 block truncate text-xs text-muted-foreground"
                 />
+                {/* Issue #1783: read-only, and absent entirely when the agent
+                    has not reported a model. A third line saying "unknown" on
+                    every row of a roster whose tools mostly never report one
+                    would be pure noise. */}
+                {instanceModel && (
+                  <span
+                    data-testid={`agent-instance-model-${inst.id}`}
+                    title={tWorktree('agentModel.modelLabel', { model: instanceModel })}
+                    className="mt-0.5 block truncate text-xs text-muted-foreground"
+                  >
+                    {instanceModel}
+                  </span>
+                )}
               </div>
 
               <DropdownMenu>

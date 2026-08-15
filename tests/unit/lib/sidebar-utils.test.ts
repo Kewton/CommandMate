@@ -15,6 +15,7 @@ import {
   SORT_KEYS,
   isValidSortKey,
   compareByTimestamp,
+  isWaitingBranch,
 } from '@/lib/sidebar-utils';
 import type { ViewMode, BranchGroup } from '@/lib/sidebar-utils';
 import type { SidebarBranchItem } from '@/types/sidebar';
@@ -598,6 +599,160 @@ describe('sidebar-utils', () => {
       expect(match).not.toBeNull();
       expect(match![1]).toBe('65');
       expect(match![2]).toBe('60');
+    });
+  });
+
+  // ==========================================================================
+  // Issue #1787: two-stage sort (waiting pinned first)
+  // ==========================================================================
+
+  describe('isWaitingBranch (Issue #1787)', () => {
+    it('reads the branch-level status when there is no per-instance map', () => {
+      expect(isWaitingBranch(createBranchItem({ status: 'waiting' }))).toBe(true);
+      expect(isWaitingBranch(createBranchItem({ status: 'running' }))).toBe(false);
+    });
+
+    // The row renders ONE dot from the aggregate, so the sort must float the
+    // same branches the dot lights up — including a branch whose alias instance
+    // is the one waiting.
+    it('prefers the aggregated per-instance status over the branch status', () => {
+      const branch = createBranchItem({
+        status: 'running',
+        cliStatus: { claude: 'running', 'claude-2': 'waiting' },
+      });
+      expect(isWaitingBranch(branch)).toBe(true);
+    });
+
+    it('does not float a branch whose instances are all busy or idle', () => {
+      const branch = createBranchItem({
+        status: 'waiting',
+        cliStatus: { claude: 'running', codex: 'idle' },
+      });
+      expect(isWaitingBranch(branch)).toBe(false);
+    });
+
+    it('falls back to the branch status for an empty per-instance map', () => {
+      expect(isWaitingBranch(createBranchItem({ status: 'waiting', cliStatus: {} }))).toBe(
+        true
+      );
+    });
+  });
+
+  describe('sortBranches two-stage waiting group (Issue #1787)', () => {
+    // Deliberately built so the waiting branch is the OLDEST: under the plain
+    // `updatedAt` sort it would land last, which is the bug this fixes.
+    const twoStageFixture = (): SidebarBranchItem[] => [
+      createBranchItem({ id: 'newest', status: 'running', lastActivity: new Date('2026-06-03') }),
+      createBranchItem({ id: 'waiting-old', status: 'waiting', lastActivity: new Date('2026-06-01') }),
+      createBranchItem({ id: 'middle', status: 'ready', lastActivity: new Date('2026-06-02') }),
+      createBranchItem({ id: 'waiting-new', status: 'waiting', lastActivity: new Date('2026-06-04') }),
+    ];
+
+    it('pins waiting branches to the front under the default updatedAt sort', () => {
+      const result = sortBranches(twoStageFixture(), 'updatedAt', 'desc');
+      expect(result.map((b) => b.id)).toEqual([
+        'waiting-new',
+        'waiting-old',
+        'newest',
+        'middle',
+      ]);
+    });
+
+    it('keeps the selected sort order INSIDE each group', () => {
+      const result = sortBranches(twoStageFixture(), 'updatedAt', 'desc');
+      // Group 1 (waiting): newest first. Group 2 (the rest): newest first.
+      expect(result.slice(0, 2).map((b) => b.id)).toEqual(['waiting-new', 'waiting-old']);
+      expect(result.slice(2).map((b) => b.id)).toEqual(['newest', 'middle']);
+    });
+
+    it('does not flip the waiting group to the bottom when direction is asc', () => {
+      const result = sortBranches(twoStageFixture(), 'updatedAt', 'asc');
+      // The prefix is direction-independent; only the within-group order flips.
+      expect(result.map((b) => b.id)).toEqual([
+        'waiting-old',
+        'waiting-new',
+        'middle',
+        'newest',
+      ]);
+    });
+
+    it('pins waiting first for branchName and lastSent too', () => {
+      const byName = sortBranches(
+        [
+          createBranchItem({ id: 'a', name: 'aaa', status: 'idle' }),
+          createBranchItem({ id: 'z', name: 'zzz', status: 'waiting' }),
+        ],
+        'branchName',
+        'asc'
+      );
+      expect(byName.map((b) => b.id)).toEqual(['z', 'a']);
+
+      const byLastSent = sortBranches(
+        [
+          createBranchItem({ id: 'recent', status: 'idle', lastActivity: new Date('2026-06-09') }),
+          createBranchItem({ id: 'stale-waiting', status: 'waiting', lastActivity: new Date('2026-01-01') }),
+        ],
+        'lastSent',
+        'desc'
+      );
+      expect(byLastSent.map((b) => b.id)).toEqual(['stale-waiting', 'recent']);
+    });
+
+    // The "status" sort is the user explicitly taking control of the order.
+    it('leaves the explicit status sort byte-identical (no prefix)', () => {
+      const branches: SidebarBranchItem[] = [
+        createBranchItem({ id: '1', status: 'waiting' }),
+        createBranchItem({ id: '2', status: 'idle' }),
+      ];
+      // desc = reverse priority: idle first. A waiting-first prefix would have
+      // made this impossible to express.
+      expect(sortBranches(branches, 'status', 'desc').map((b) => b.id)).toEqual(['2', '1']);
+      expect(sortBranches(branches, 'status', 'asc').map((b) => b.id)).toEqual(['1', '2']);
+    });
+
+    it('floats a branch whose ALIAS instance is the one waiting', () => {
+      const branches: SidebarBranchItem[] = [
+        createBranchItem({
+          id: 'busy',
+          lastActivity: new Date('2026-06-09'),
+          status: 'running',
+          cliStatus: { claude: 'running' },
+        }),
+        createBranchItem({
+          id: 'alias-waiting',
+          lastActivity: new Date('2026-01-01'),
+          status: 'running',
+          cliStatus: { claude: 'running', 'claude-2': 'waiting' },
+        }),
+      ];
+      expect(sortBranches(branches, 'updatedAt', 'desc').map((b) => b.id)).toEqual([
+        'alias-waiting',
+        'busy',
+      ]);
+    });
+
+    it('does not mutate the input while pinning', () => {
+      const branches = twoStageFixture();
+      const first = branches[0];
+      sortBranches(branches, 'updatedAt', 'desc');
+      expect(branches[0]).toBe(first);
+    });
+  });
+
+  describe('groupBranches with the waiting prefix (Issue #1787)', () => {
+    // Grouped view keeps repository grouping (the user's mental model); the
+    // prefix therefore applies within each repository.
+    it('pins waiting first inside each repository group', () => {
+      const branches: SidebarBranchItem[] = [
+        createBranchItem({ id: 'a1', repositoryName: 'Alpha', status: 'idle', lastActivity: new Date('2026-06-09') }),
+        createBranchItem({ id: 'a2', repositoryName: 'Alpha', status: 'waiting', lastActivity: new Date('2026-01-01') }),
+        createBranchItem({ id: 'b1', repositoryName: 'Beta', status: 'running', lastActivity: new Date('2026-06-09') }),
+      ];
+
+      const groups = groupBranches(branches, 'updatedAt', 'desc');
+      expect(groups.map((g) => g.repositoryName)).toEqual(['Alpha', 'Beta']);
+      expect(groups[0].branches.map((b) => b.id)).toEqual(['a2', 'a1']);
+      expect(groups[1].branches.map((b) => b.id)).toEqual(['b1']);
     });
   });
 });

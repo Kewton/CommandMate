@@ -163,6 +163,27 @@ export interface CurrentOutputResponse {
     /** `notification` / `permission-request`, or null (Issue #1725). */
     promptWaitingSource?: string | null;
   };
+  /**
+   * Issue #1785: the model the session is running, or null when nothing knows.
+   *
+   * Mirrors: src/lib/session/current-output-builder.ts CurrentOutputPayload.model
+   *
+   * Optional *here* although the server always sends it, and the two are not in
+   * conflict: this mirror also describes what an older daemon answers, and the
+   * CLI is routinely newer than the server it dials (`npm i -g` does not restart
+   * the running daemon). `undefined` therefore means "this server predates the
+   * field", which the commands normalise to null — the same thing they print for
+   * a tool that publishes no model.
+   */
+  model?: string | null;
+  /**
+   * Issue #1785: reasoning effort, or null when nothing knows.
+   *
+   * Mirrors: src/lib/session/current-output-builder.ts
+   * CurrentOutputPayload.reasoningEffort — including the part where it is null
+   * for every session until Issue #1784's extraction layer lands.
+   */
+  reasoningEffort?: string | null;
 }
 
 // Mirrors: src/types/models.ts BasePromptData (subset for CLI output)
@@ -738,6 +759,15 @@ export type VerificationRunStatus =
   | 'error'
   | 'cancelled';
 
+/**
+ * Mirrors: src/lib/db/verification-db.ts VerificationGateSource (Issue #1791).
+ *
+ * `null` on gate rows written before migration v56, and absent entirely on
+ * responses from a server older than #1791 — so a consumer must treat "no
+ * source" as "unrecorded", never as "the repository declared it".
+ */
+export type VerificationGateSource = 'builtin' | 'verify.yaml' | 'contract';
+
 /** Mirrors: src/lib/db/verification-db.ts VerificationGateStatus. */
 export type VerificationGateStatus =
   | 'running'
@@ -762,6 +792,11 @@ export interface VerificationGateResultView {
   logTail: string | null;
   startedAt: string;
   finishedAt: string | null;
+  /**
+   * Where the gate was declared (Issue #1791): the repository's verify.yaml,
+   * this delegation's execution contract, or the runner's own built-ins.
+   */
+  source?: VerificationGateSource | null;
   /**
    * Whether `startedAt`/`finishedAt` bracket the execution `durationMs` counted
    * (Issue #1625).
@@ -803,6 +838,8 @@ export interface VerificationGateSummaryView {
   status: VerificationGateStatus;
   exitCode: number | null;
   durationMs: number | null;
+  /** Where the gate was declared (Issue #1791). */
+  source?: VerificationGateSource | null;
 }
 
 /** Mirrors: src/lib/db/verification-db.ts VerificationRunWithGateSummaries. */
@@ -848,7 +885,15 @@ export interface TaskContractView {
   title: string;
   goal: string;
   scope: { allow: string[]; deny: string[] };
-  verify: { gates: string[] | null };
+  verify: {
+    gates: string[] | null;
+    /**
+     * Gates this contract declares for itself (Issue #1791). Absent on
+     * responses from a server older than #1791, and on tasks recorded before
+     * it — `contract_json` is replayed verbatim, never re-validated.
+     */
+    gateDefinitions?: Array<{ id: string; command: string; timeoutSec: number }>;
+  };
   autoYes: { mode: string | null; allowPromptTypes: string[]; denyPatterns: string[] };
   success: { requireWorkEvidence: boolean; requireScopeClean: boolean };
 }

@@ -14,9 +14,12 @@
 'use client';
 
 import React, { useMemo } from 'react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Skeleton, StatusDot } from '@/components/ui';
 import { cn } from '@/lib/utils/cn';
+import { ATTENTION_REVIEW_HREF } from '@/config/review-config';
+import { selectAttentionCount } from '@/hooks/useAttentionCount';
 import type { Worktree } from '@/types/models';
 
 export interface HomeSessionSummaryProps {
@@ -31,19 +34,21 @@ export interface HomeSessionSummaryProps {
  */
 export function HomeSessionSummary({ worktrees, isLoading = false }: HomeSessionSummaryProps) {
   const t = useTranslations('home');
-  const { runningCount, waitingCount } = useMemo(() => {
-    let running = 0;
-    let waiting = 0;
-    for (const wt of worktrees) {
-      if (wt.isSessionRunning) {
-        running++;
-        if (wt.isWaitingForResponse) {
-          waiting++;
-        }
-      }
-    }
-    return { runningCount: running, waitingCount: waiting };
-  }, [worktrees]);
+  const runningCount = useMemo(
+    () => worktrees.filter((wt) => wt.isSessionRunning).length,
+    [worktrees],
+  );
+  // Issue #1788: derived by the shared selector, not by a second local filter.
+  // This tile, the sidebar badge, the mobile nav bubble and (next) #1789's tab
+  // title now all read the same number — and it is the number the link below
+  // opens, because `approval` uses the identical predicate.
+  //
+  // Deliberate behavior change: the old local count required `isSessionRunning`
+  // as well. The server only ever sets `isWaitingForResponse` from a live probe,
+  // so the pair moved together in practice; dropping the extra condition is what
+  // makes this tile agree with the Review list instead of quietly showing one
+  // fewer.
+  const waitingCount = useMemo(() => selectAttentionCount(worktrees), [worktrees]);
 
   if (isLoading) {
     // Same box chrome as the loaded stats; label (text-xs ≈ h-4) and count
@@ -90,7 +95,19 @@ export function HomeSessionSummary({ worktrees, isLoading = false }: HomeSession
           {runningCount}
         </div>
       </div>
-      <div className="rounded-lg border border-border bg-surface-2 px-3 py-2">
+      {/* Issue #1788: the Waiting stat is the answer to "who needs me?", so it
+          is now the link to that list rather than a dead number. Rendered as an
+          anchor unconditionally (also at zero) so its box chrome and height do
+          not shift when the count crosses zero; the destination is simply an
+          empty approval list in that case. */}
+      <Link
+        href={ATTENTION_REVIEW_HREF}
+        data-testid="waiting-count-link"
+        aria-label={t('sessionSummary.waitingLinkLabel', { count: waitingCount })}
+        className="block rounded-lg border border-border bg-surface-2 px-3 py-2
+          transition-colors hover:border-warning-border hover:bg-warning-subtle
+          focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <StatusDot
             status={waitingCount > 0 ? 'waiting' : 'idle'}
@@ -108,7 +125,7 @@ export function HomeSessionSummary({ worktrees, isLoading = false }: HomeSession
         >
           {waitingCount}
         </div>
-      </div>
+      </Link>
     </div>
   );
 }

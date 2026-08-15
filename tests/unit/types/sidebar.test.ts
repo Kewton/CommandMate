@@ -11,7 +11,9 @@ import {
   deriveCliStatus,
   aggregateCliStatus,
   formatCliStatusBreakdown,
+  deriveWorktreeWaitingDetail,
 } from '@/types/sidebar';
+import { NEXT_ACTION_KEYS } from '@/lib/session/next-action-helper';
 import type { Worktree } from '@/types/models';
 
 describe('sidebar types', () => {
@@ -573,5 +575,233 @@ describe('sidebar types', () => {
       // id itself as the fallback rather than a generic 'Assistant'.
       expect(formatCliStatusBreakdown({ 'claude-2': 'running' })).toBe('claude-2: running');
     });
+  });
+});
+
+// ============================================================================
+// Issue #1787: waiting taxonomy folded onto the branch item
+// ============================================================================
+
+describe('deriveWorktreeWaitingDetail (Issue #1787)', () => {
+  const base = (overrides: Partial<Worktree> = {}): Worktree =>
+    ({
+      id: 'wt',
+      name: 'feature/x',
+      path: '/w',
+      repositoryPath: '/r',
+      repositoryName: 'Repo',
+      ...overrides,
+    }) as Worktree;
+
+  // A payload from a server that predates #1786 has none of the fields. Null
+  // must reach the dot, which reads it as "strong emphasis".
+  it('returns nulls for a payload with no waiting fields at all', () => {
+    expect(deriveWorktreeWaitingDetail(base())).toEqual({
+      waitingKind: null,
+      awaitingInstruction: false,
+    });
+    expect(
+      deriveWorktreeWaitingDetail(
+        base({
+          sessionStatusByInstance: {
+            claude: { isRunning: true, isWaitingForResponse: true, isProcessing: false },
+          },
+        })
+      )
+    ).toEqual({ waitingKind: null, awaitingInstruction: false });
+  });
+
+  it('reads the kind from the per-instance map', () => {
+    const detail = deriveWorktreeWaitingDetail(
+      base({
+        sessionStatusByInstance: {
+          claude: {
+            isRunning: true,
+            isWaitingForResponse: true,
+            isProcessing: false,
+            waitingKind: 'menu',
+          },
+        },
+      })
+    );
+    expect(detail.waitingKind).toBe('menu');
+  });
+
+  // prompt > menu > unclassified: with two agents waiting, the one the user can
+  // answer without leaving the app is the one worth shouting about.
+  it('folds several instances by precedence (prompt wins)', () => {
+    const detail = deriveWorktreeWaitingDetail(
+      base({
+        sessionStatusByInstance: {
+          claude: {
+            isRunning: true,
+            isWaitingForResponse: true,
+            isProcessing: false,
+            waitingKind: 'unclassified',
+          },
+          'claude-2': {
+            isRunning: true,
+            isWaitingForResponse: true,
+            isProcessing: false,
+            waitingKind: 'menu',
+          },
+          codex: {
+            isRunning: true,
+            isWaitingForResponse: true,
+            isProcessing: false,
+            waitingKind: 'prompt',
+          },
+        },
+      })
+    );
+    expect(detail.waitingKind).toBe('prompt');
+  });
+
+  it('prefers menu over unclassified when no prompt is present', () => {
+    const detail = deriveWorktreeWaitingDetail(
+      base({
+        sessionStatusByInstance: {
+          claude: {
+            isRunning: true,
+            isWaitingForResponse: true,
+            isProcessing: false,
+            waitingKind: 'unclassified',
+          },
+          codex: {
+            isRunning: true,
+            isWaitingForResponse: true,
+            isProcessing: false,
+            waitingKind: 'menu',
+          },
+        },
+      })
+    );
+    expect(detail.waitingKind).toBe('menu');
+  });
+
+  it('ORs awaitingInstruction across instances', () => {
+    const detail = deriveWorktreeWaitingDetail(
+      base({
+        sessionStatusByInstance: {
+          claude: {
+            isRunning: true,
+            isWaitingForResponse: false,
+            isProcessing: false,
+            awaitingInstruction: false,
+          },
+          codex: {
+            isRunning: true,
+            isWaitingForResponse: false,
+            isProcessing: false,
+            awaitingInstruction: true,
+          },
+        },
+      })
+    );
+    expect(detail.awaitingInstruction).toBe(true);
+  });
+
+  // Same source-of-truth rule as deriveSidebarCliStatus, so the dot and its
+  // emphasis can never come from different snapshots.
+  it('falls back to sessionStatusByCli when there is no per-instance map', () => {
+    const detail = deriveWorktreeWaitingDetail(
+      base({
+        sessionStatusByCli: {
+          claude: {
+            isRunning: true,
+            isWaitingForResponse: true,
+            isProcessing: false,
+            waitingKind: 'prompt',
+            awaitingInstruction: true,
+          },
+        },
+      })
+    );
+    expect(detail).toEqual({ waitingKind: 'prompt', awaitingInstruction: true });
+  });
+
+  it('ignores sessionStatusByCli once a per-instance map exists', () => {
+    const detail = deriveWorktreeWaitingDetail(
+      base({
+        sessionStatusByInstance: {
+          claude: {
+            isRunning: true,
+            isWaitingForResponse: true,
+            isProcessing: false,
+            waitingKind: 'menu',
+          },
+        },
+        sessionStatusByCli: {
+          claude: {
+            isRunning: true,
+            isWaitingForResponse: true,
+            isProcessing: false,
+            waitingKind: 'prompt',
+          },
+        },
+      })
+    );
+    expect(detail.waitingKind).toBe('menu');
+  });
+});
+
+describe('toBranchItem waiting affordances (Issue #1787)', () => {
+  const base = (overrides: Partial<Worktree> = {}): Worktree =>
+    ({
+      id: 'wt',
+      name: 'feature/x',
+      path: '/w',
+      repositoryPath: '/r',
+      repositoryName: 'Repo',
+      selectedAgents: ['claude'],
+      ...overrides,
+    }) as Worktree;
+
+  it('carries waitingKind onto the branch item', () => {
+    const item = toBranchItem(
+      base({
+        sessionStatusByInstance: {
+          claude: {
+            isRunning: true,
+            isWaitingForResponse: true,
+            isProcessing: false,
+            waitingKind: 'menu',
+          },
+        },
+      })
+    );
+    expect(item.waitingKind).toBe('menu');
+    expect(aggregateCliStatus(item.cliStatus)).toBe('waiting');
+  });
+
+  it('carries awaitingInstruction onto the branch item', () => {
+    const item = toBranchItem(
+      base({
+        sessionStatusByInstance: {
+          claude: {
+            isRunning: true,
+            isWaitingForResponse: false,
+            isProcessing: false,
+            awaitingInstruction: true,
+          },
+        },
+      })
+    );
+    expect(item.awaitingInstruction).toBe(true);
+  });
+
+  it.each([
+    ['waiting', { isRunning: true, isWaitingForResponse: true, isProcessing: false }, NEXT_ACTION_KEYS.approveReject],
+    ['running', { isRunning: true, isWaitingForResponse: false, isProcessing: true }, NEXT_ACTION_KEYS.running],
+    ['ready', { isRunning: true, isWaitingForResponse: false, isProcessing: false }, NEXT_ACTION_KEYS.sendMessage],
+    ['idle', { isRunning: false, isWaitingForResponse: false, isProcessing: false }, NEXT_ACTION_KEYS.start],
+  ] as const)('derives the %s next-action key from the aggregate', (_name, flags, expected) => {
+    const item = toBranchItem(base({ sessionStatusByInstance: { claude: flags } }));
+    expect(item.nextActionKey).toBe(expected);
+  });
+
+  // Never a display string: the sidebar resolves this through next-intl.
+  it('always emits a dictionary key, never an English sentence', () => {
+    expect(toBranchItem(base()).nextActionKey).toMatch(/^nextAction\./);
   });
 });

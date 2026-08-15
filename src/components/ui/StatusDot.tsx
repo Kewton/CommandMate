@@ -4,7 +4,8 @@
  * A small colored status dot with "living" motion for active states:
  * - running / generating: green dot with a pulsing box-shadow glow + a static
  *   ring halo (so it stays distinct from `ready` even when motion is frozen)
- * - waiting: amber dot with a weak blink
+ * - waiting: amber dot with an attention pulse + a static ring halo, graded by
+ *   `waitingKind` (Issue #1787)
  * - ready: static green dot
  * - idle: static gray dot
  * - error: static red dot
@@ -15,6 +16,13 @@
  * error=red). Animations are infinite CSS classes (see tailwind.config.js), so
  * polling re-renders never restart them. OS "reduce motion" is honored globally
  * in globals.css, which freezes the animation to a static dot.
+ *
+ * Issue #1787: `waiting` used to be the WEAKEST animated state (a 1→0.45 opacity
+ * blink) even though it is the only one that needs a human, while `running` —
+ * which the user can safely ignore — carried the loudest glow. That inversion is
+ * gone: waiting now owns `animate-status-attention` (faster, wider halo than
+ * `animate-status-glow`) and, like running, keeps a MOTION-INDEPENDENT amber
+ * ring so a frozen dot is still not a plain `ready`-shaped disc.
  */
 
 import React from 'react';
@@ -30,6 +38,16 @@ export type StatusDotStatus =
   | 'error';
 
 export type StatusDotSize = 'sm' | 'md' | 'lg';
+
+/**
+ * What kind of wait a `waiting` dot represents (Issue #1786 taxonomy).
+ *
+ * Structurally identical to `WaitingKind` in `@/lib/session/waiting-kind`, but
+ * declared locally so this UI primitive keeps no import edge into the session
+ * layer (it is rendered by client components that must not pull the detector's
+ * module graph).
+ */
+export type StatusDotWaitingKind = 'prompt' | 'menu' | 'unclassified';
 
 interface StatusDotVisual {
   /** Color utility classes. Glow states also set `text-*` so the box-shadow
@@ -62,13 +80,55 @@ const STATUS_DOT_CONFIG: Record<StatusDotStatus, StatusDotVisual> = {
     animationClass: 'animate-status-glow',
     labelKey: 'status.generating',
   },
+  // Issue #1787: the default `waiting` visual is the STRONG tier. A payload
+  // from a server that predates #1786 carries no `waitingKind` at all, and the
+  // safe failure mode for "needs a human" is to over-emphasize, never to
+  // under-emphasize — so absence resolves here, not to the medium tier.
   waiting: {
-    colorClass: 'bg-warning',
-    animationClass: 'animate-status-blink',
+    colorClass: 'bg-warning text-warning ring-4 ring-warning/50',
+    animationClass: 'animate-status-attention',
     labelKey: 'status.waiting',
   },
   error: { colorClass: 'bg-danger', labelKey: 'status.error' },
 };
+
+/**
+ * Medium-emphasis waiting visual (Issue #1787).
+ *
+ * `menu` / `unclassified` waits cannot be answered from the app — the user has
+ * to drive the terminal — so they pulse at the same cadence as `running`
+ * (`animate-status-glow`) with a narrower ring, staying clearly below the
+ * answer-it-now `prompt` tier while still out-shouting the old blink.
+ */
+const WAITING_MEDIUM_VISUAL: StatusDotVisual = {
+  colorClass: 'bg-warning text-warning ring-2 ring-warning/40',
+  animationClass: 'animate-status-glow',
+  labelKey: 'status.waiting',
+};
+
+/** Waiting kinds that only the terminal can resolve → medium emphasis. */
+const MEDIUM_EMPHASIS_WAITING_KINDS: ReadonlySet<string> = new Set([
+  'menu',
+  'unclassified',
+]);
+
+/**
+ * Pick the visual for a status, grading `waiting` by its kind (Issue #1787).
+ *
+ * Exported for tests: the grading is the acceptance criterion, and asserting it
+ * through the rendered class string alone would not distinguish "fell back to
+ * strong" from "never looked at the kind".
+ */
+export function resolveStatusDotVisual(
+  status: StatusDotStatus,
+  waitingKind?: StatusDotWaitingKind | null
+): StatusDotVisual {
+  const base = STATUS_DOT_CONFIG[status] ?? FALLBACK_VISUAL;
+  if (status !== 'waiting') return base;
+  return waitingKind && MEDIUM_EMPHASIS_WAITING_KINDS.has(waitingKind)
+    ? WAITING_MEDIUM_VISUAL
+    : base;
+}
 
 /** Fallback for unrecognized state values (edge case: unknown status → gray). */
 const FALLBACK_VISUAL: StatusDotVisual = {
@@ -90,6 +150,14 @@ export interface StatusDotProps extends React.HTMLAttributes<HTMLSpanElement> {
   /** Accessible label override for `title` / `aria-label`. Falls back to the
    * status's default label when omitted. */
   label?: string;
+  /**
+   * How urgent this `waiting` is (Issue #1787). Ignored for every other status.
+   *
+   * `prompt` (answerable from the app) keeps the strong tier; `menu` /
+   * `unclassified` (terminal-only) drop to the medium tier. **Absent or null
+   * means strong**, which is what a pre-#1786 payload produces.
+   */
+  waitingKind?: StatusDotWaitingKind | null;
 }
 
 /**
@@ -105,11 +173,12 @@ export function StatusDot({
   status,
   size = 'md',
   label,
+  waitingKind,
   className,
   ...rest
 }: StatusDotProps) {
   const t = useTranslations('common');
-  const visual = STATUS_DOT_CONFIG[status] ?? FALLBACK_VISUAL;
+  const visual = resolveStatusDotVisual(status, waitingKind);
   const accessibleLabel = label ?? t(visual.labelKey);
 
   return (

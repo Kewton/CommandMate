@@ -787,12 +787,29 @@
     "agentInstanceSelection": "エージェントインスタンスの選択",
     "statusPill": "{label}: {status}",
     "subTabMessage": "メッセージ",
-    "subTabGit": "Git"
+    "subTabGit": "Git",
+    "statusPillWithModel": "{label}: {status} — モデル {model}"
   },
   "detailStatus": {
     "idle": "アイドル - セッションなし",
     "ready": "準備完了 - 入力待ち",
     "running": "実行中 - 処理しています",
     "waiting": "待機中 - ユーザー入力が必要です"
+  },
+  "agentModel": {
+    "label": "モデル",
+    "modelLabel": "モデル: {model}"
+  },
+  "nextAction": {
+    "start": "開始",
+    "sendMessage": "メッセージを送信",
+    "approveReject": "承認 / 拒否",
+    "replyToPrompt": "プロンプトに応答",
+    "checkStalled": "停滞を確認",
+    "running": "実行中..."
+  },
+  "awaitingInstruction": {
+    "badge": "指示待ち",
+    "label": "エージェントはターンを終え、次の指示を待っています"
   }
 }

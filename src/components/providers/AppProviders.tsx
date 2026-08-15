@@ -23,6 +23,9 @@ import { ViewTransitionsProvider } from '@/components/providers/ViewTransitionsP
 import { RealtimeProvider } from '@/hooks/useRealtimeConnection';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 import { ToastProvider } from '@/components/common/Toast';
+import { WaitingToastListener } from '@/components/notifications/WaitingToastListener';
+import { WaitingSoundListener } from '@/components/notifications/WaitingSoundListener';
+import { AttentionBadgeController } from '@/components/notifications/AttentionBadgeController';
 import { ServiceWorkerRegistrar } from '@/components/pwa/ServiceWorkerRegistrar';
 
 interface AppProvidersProps {
@@ -60,6 +63,17 @@ export function AppProviders({ children, locale, messages, timeZone, authEnabled
                     fallback when disconnected. */}
                 <RealtimeProvider>
                   <WorktreesCacheProvider>
+                    {/* Issue #1788: cross-screen waiting toast. Here — above the
+                        routed content, below the toast queue / realtime / cache
+                        it reads — so it survives navigation and fires on every
+                        screen, not only on worktree detail. Renders nothing. */}
+                    <WaitingToastListener />
+                    {/* Issue #1789: the same count, carried out of the page —
+                        tab title, favicon badge and PWA app badge — plus the
+                        opt-in chime on the waiting edge. Both render nothing and
+                        sit inside the cache/realtime providers they read. */}
+                    <AttentionBadgeController />
+                    <WaitingSoundListener />
                     <CommandPaletteProvider>
                       {/* Issue #1130: `?` keyboard-shortcuts help overlay open state. */}
                       <KeyboardShortcutsProvider>

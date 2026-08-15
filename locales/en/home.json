@@ -10,7 +10,8 @@
   "sessionSummary": {
     "loading": "Loading session summary",
     "running": "Running",
-    "waiting": "Waiting"
+    "waiting": "Waiting",
+    "waitingLinkLabel": "{count} worktrees waiting — open the review list"
   },
   "recentSessions": {
     "empty": "No recent sessions yet.",
