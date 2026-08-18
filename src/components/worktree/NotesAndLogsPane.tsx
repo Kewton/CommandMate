@@ -3,6 +3,8 @@
  * Issue #294: Combined Memo + Execution Log pane
  * Issue #368: Added 'agent' sub-tab for Agent settings
  * Issue #874: The 'agent' sub-tab can switch to instance-management mode (mobile)
+ * Issue #1816: Adds the 'verification' sub-tab (mobile Tools tab), mirroring the
+ * PC Activity Bar's Verification pane
  *
  * [S1-013] Props: { worktreeId: string; className?: string; }
  * Sub-tab state is managed internally (not exposed to parent)
@@ -11,7 +13,7 @@
 
 'use client';
 
-import React, { useState, useCallback, memo } from 'react';
+import React, { useState, useCallback, useEffect, useRef, memo } from 'react';
 import { useTranslations } from 'next-intl';
 import { MemoPane } from './MemoPane';
 import { TodoPane } from './TodoPane';
@@ -20,14 +22,30 @@ import { AgentSettingsPane } from './AgentSettingsPane';
 import { MobileAgentInstancesPane } from './MobileAgentInstancesPane';
 import { TimerPane } from './TimerPane';
 import { WorktreeSkillsPane } from '@/components/skills/WorktreeSkillsPane';
+import { VerificationPane } from './VerificationPane';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
+import type { WorktreeVerificationState } from '@/hooks/useWorktreeVerification';
 
 // ============================================================================
 // Types
 // ============================================================================
 
-/** Issue #368: Extended with 'agent' sub-tab. Issue #534: Extended with 'timer' sub-tab. Issue #1015: 'todo' sub-tab. Issue #1442: 'skills' sub-tab (mobile) */
-type SubTab = 'notes' | 'logs' | 'agent' | 'timer' | 'todo' | 'skills';
+/** Issue #368: Extended with 'agent' sub-tab. Issue #534: Extended with 'timer' sub-tab. Issue #1015: 'todo' sub-tab. Issue #1442: 'skills' sub-tab (mobile). Issue #1816: 'verification' sub-tab (mobile) */
+export type SubTab = 'notes' | 'logs' | 'agent' | 'timer' | 'todo' | 'skills' | 'verification';
+
+/**
+ * A request from outside to jump to a sub-tab (Issue #1816).
+ *
+ * Carries a token because the same tab can be requested twice in a row (tapping
+ * the header chip again while the Tools tab is already open), and a bare tab
+ * value would compare equal and do nothing. The parent clears the request when
+ * the user leaves the Tools tab, so a later visit opens on the default tab
+ * rather than replaying a stale jump.
+ */
+export interface SubTabRequest {
+  tab: SubTab;
+  token: number;
+}
 
 /** Configuration for a sub-tab button */
 interface SubTabConfig {
@@ -81,6 +99,15 @@ export interface NotesAndLogsPaneProps {
    * entries render nothing.
    */
   modelByInstance?: Readonly<Partial<Record<string, string | null>>>;
+  /**
+   * Issue #1816: task contract + verification runs, owned by
+   * `useWorktreeVerification` in the detail controller. The 'verification'
+   * sub-tab is offered only when this is supplied, so callers that have no such
+   * state (none today besides the mobile shell) keep the previous six tabs.
+   */
+  verification?: WorktreeVerificationState;
+  /** Issue #1816: jump to a sub-tab from outside (the header chip). */
+  requestedSubTab?: SubTabRequest | null;
 }
 
 // ============================================================================
@@ -99,6 +126,9 @@ const SUB_TABS: readonly SubTabConfig[] = [
   // Issue #1442: worktree-scoped Skills surface (mobile). Reuses the PC pane
   // (#1441). Label resolves from schedule.json `skillsTab` (BOTH en and ja).
   { id: 'skills', labelKey: 'skillsTab' },
+  // Issue #1816: execution contract + verification gates (mobile). Reuses the PC
+  // pane. Label resolves from schedule.json `verificationTab` (BOTH en and ja).
+  { id: 'verification', labelKey: 'verificationTab' },
 ] as const;
 
 /** CSS class for the active sub-tab button */
@@ -129,14 +159,43 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
   visibleInstanceIds,
   onToggleInstanceVisible,
   modelByInstance,
+  verification,
+  requestedSubTab,
 }: NotesAndLogsPaneProps) {
   const t = useTranslations('schedule');
-  // Internal sub-tab state (not leaked to parent)
-  const [activeSubTab, setActiveSubTab] = useState<SubTab>('notes');
+  // Internal sub-tab state (not leaked to parent). Issue #1816: an outside
+  // request present at mount is honoured as the initial tab, because the mobile
+  // shell unmounts this pane whenever the Tools tab is left — the chip's jump
+  // arrives together with the remount, not after it.
+  const [activeSubTab, setActiveSubTab] = useState<SubTab>(requestedSubTab?.tab ?? 'notes');
+  const appliedRequestTokenRef = useRef(requestedSubTab?.token ?? null);
+
+  // A *new* request (same pane already mounted: the chip tapped while the Tools
+  // tab is open) switches tabs. The token guard is what keeps the mount-time
+  // request from being applied twice.
+  useEffect(() => {
+    if (!requestedSubTab) return;
+    if (requestedSubTab.token === appliedRequestTokenRef.current) return;
+    appliedRequestTokenRef.current = requestedSubTab.token;
+    setActiveSubTab(requestedSubTab.tab);
+  }, [requestedSubTab]);
 
   const handleSubTabChange = useCallback((tab: SubTab) => {
     setActiveSubTab(tab);
   }, []);
+
+  // Issue #1816: the tab row scrolls horizontally (#1442), so a tab selected
+  // from OUTSIDE the row — the header chip jumping straight to Verification,
+  // which is last — would render its pane with no visible active tab. Optional
+  // call because jsdom does not implement scrollIntoView.
+  const tabRefs = useRef<Partial<Record<SubTab, HTMLButtonElement | null>>>({});
+  useEffect(() => {
+    tabRefs.current[activeSubTab]?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }, [activeSubTab]);
+
+  const subTabs = verification
+    ? SUB_TABS
+    : SUB_TABS.filter((tab) => tab.id !== 'verification');
 
   return (
     <div className={`flex flex-col h-full ${className}`}>
@@ -149,10 +208,13 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
           Tabs use plain `onClick` with no hover-gated visibility, so every tab
           stays tappable on touch devices. */}
       <div className="flex overflow-x-auto scrollbar-hide border-b border-border bg-surface dark:bg-surface-2 flex-shrink-0">
-        {SUB_TABS.map((tab) => (
+        {subTabs.map((tab) => (
           <button
             key={tab.id}
             type="button"
+            ref={(el) => {
+              tabRefs.current[tab.id] = el;
+            }}
             onClick={() => handleSubTabChange(tab.id)}
             className={`flex-shrink-0 whitespace-nowrap px-3 py-2 text-sm font-medium transition-colors ${
               activeSubTab === tab.id ? ACTIVE_TAB_CLASS : INACTIVE_TAB_CLASS
@@ -221,6 +283,11 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
             mounts (#1441); the worktree is fixed by this screen. */}
         {activeSubTab === 'skills' && (
           <WorktreeSkillsPane worktreeId={worktreeId} className="h-full" />
+        )}
+        {/* Issue #1816: same pane the PC Activity Bar mounts; the state comes
+            from the one hook the detail controller owns. */}
+        {activeSubTab === 'verification' && verification && (
+          <VerificationPane state={verification} className="h-full" />
         )}
       </div>
     </div>

@@ -88,6 +88,22 @@ function fulfillJson(route: Route, body: unknown): Promise<void> {
 }
 
 /**
+ * Task / verification rows to serve for the worktree detail page (Issue #1816).
+ *
+ * Optional and empty by default, so every spec written before #1816 keeps
+ * getting `{ tasks: [] }` / `{ runs: [] }` and therefore no chip and an empty
+ * Verification pane — exactly what those specs assume.
+ */
+export interface VerificationFixture {
+  /** Served by `GET /tasks` (the UI reads `tasks[0]`). */
+  tasks?: unknown[];
+  /** Served by `GET /verify/runs`, newest first. No gate rows (as in prod). */
+  runs?: unknown[];
+  /** Served by `GET /verify/runs/:runId`, keyed by run id. */
+  runDetails?: Record<number, unknown>;
+}
+
+/**
  * Intercept ALL `/api/...` requests for the duration of a test and serve
  * deterministic responses for the worktree detail page. Anything not
  * explicitly handled returns an empty, well-formed payload so the UI never
@@ -99,9 +115,13 @@ function fulfillJson(route: Route, body: unknown): Promise<void> {
 export async function mockWorktreeApi(
   page: Page,
   ids: string[] = [E2E_WORKTREE_A, E2E_WORKTREE_B],
+  verification: VerificationFixture = {},
 ): Promise<void> {
   const worktrees = ids.map(buildWorktree);
   const byId = new Map(worktrees.map(w => [w.id as string, w]));
+  const tasks = verification.tasks ?? [];
+  const runs = verification.runs ?? [];
+  const runDetails = verification.runDetails ?? {};
 
   await page.route(
     url => url.pathname.startsWith('/api/'),
@@ -128,6 +148,21 @@ export async function mockWorktreeApi(
         if (sub.startsWith('/schedules')) return fulfillJson(route, []);
         // FileTreeView reads `rootData.items`.
         if (sub.startsWith('/tree')) return fulfillJson(route, { items: [] });
+        // Issue #1816: execution contract + verification runs. Order matters —
+        // `/verify/runs/<id>` must be matched before the `/verify/runs` list.
+        if (sub.startsWith('/tasks')) return fulfillJson(route, { tasks });
+        const runDetailMatch = sub.match(/^\/verify\/runs\/(\d+)/);
+        if (runDetailMatch) {
+          const run = runDetails[Number(runDetailMatch[1])];
+          return run === undefined
+            ? route.fulfill({
+                status: 404,
+                contentType: 'application/json',
+                body: JSON.stringify({ error: 'Verification run not found' }),
+              })
+            : fulfillJson(route, { run });
+        }
+        if (sub.startsWith('/verify/runs')) return fulfillJson(route, { runs });
         // useSlashCommands reads `data.groups`.
         if (sub.startsWith('/slash-commands')) return fulfillJson(route, { groups: [] });
         // Any other worktree sub-resource: empty object is safe.
@@ -186,9 +221,10 @@ export async function clearSplitStorage(page: Page): Promise<void> {
 export async function setupSplitTest(
   page: Page,
   ids: string[] = [E2E_WORKTREE_A, E2E_WORKTREE_B],
+  verification: VerificationFixture = {},
 ): Promise<void> {
   await clearSplitStorage(page);
-  await mockWorktreeApi(page, ids);
+  await mockWorktreeApi(page, ids, verification);
 }
 
 /**
