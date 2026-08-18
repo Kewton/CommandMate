@@ -11,6 +11,15 @@
  * isolated-environment screenshot; Issue #1577 put four vetted demos back and
  * recast those guards around where media comes from rather than what container
  * it is in. Both live in the `Issue #1272/#1577` block below.
+ *
+ * Issue #1812 rebuilt the page on the Vibe Engineering axis. Two things moved
+ * here as a result. The hero is now an inline SVG of the loop rather than a
+ * screenshot, so the guard that kept the screenshot eager became a guard on the
+ * drawing being an image to a screen reader and taking its colours from the
+ * page's custom properties — the screenshot's own budget survives untouched
+ * because it is still the og:image. And the wording is no longer free text: it
+ * is copied from `docs/design/public-messaging.md`, so the retired vocabulary is
+ * asserted absent from everything Pages serves.
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
@@ -19,14 +28,25 @@ import path from 'path';
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const WEBSITE_DIR = path.join(REPO_ROOT, 'website');
 const INDEX_HTML = path.join(WEBSITE_DIR, 'index.html');
+const STYLES_CSS = path.join(WEBSITE_DIR, 'styles.css');
+const MESSAGING_DOC = path.join(REPO_ROOT, 'docs/design/public-messaging.md');
 
-/** The hero image is the LCP element and the og:image, so it carries a budget. */
+/**
+ * The social preview image carries a budget. It used to be the hero as well, so
+ * it was also the LCP element; #1812 made the hero a drawing and moved this
+ * screenshot to the head of the gallery. The budget stays because the reason it
+ * existed did not change: this is the file that expands as a preview card every
+ * time the page is linked, and a 500KB card is a slow card.
+ */
 const HERO_BUDGET_BYTES = 100_000;
-const HERO_IMAGE = 'assets/img/screenshot-desktop.webp';
+const OG_IMAGE = 'assets/img/screenshot-desktop.webp';
 const PAGES_BASE_URL = 'https://kewton.github.io/CommandMate/';
 
 /** The LP's own source, i.e. everything Pages actually serves as the page. */
 const LP_SOURCE_FILES = ['index.html', 'styles.css', 'main.js'];
+
+/** Everything under website/ a human reads, as opposed to the media bytes. */
+const TEXT_FILE = /\.(html|css|js|md|json|svg|txt)$/i;
 
 /** The single reviewed location for anything that moves. */
 const MEDIA_DIR = path.join('assets', 'media');
@@ -48,15 +68,29 @@ const MOVING_IMAGE = /\.(mp4|webm|mov|m4v|ogv|gif|apng)$/i;
  */
 const ALLOWED_MEDIA = [
   'README.md',
-  'approve-from-phone.mp4',
+  'contract-verify.mp4',
+  'install-skill.mp4',
+  'never-miss-waiting.mp4',
   'parallel-worktrees.mp4',
-  'poster-approve-from-phone.webp',
+  'poster-contract-verify.webp',
+  'poster-install-skill.webp',
+  'poster-never-miss-waiting.webp',
   'poster-parallel-worktrees.webp',
-  'poster-status-at-a-glance.webp',
-  'poster-tmux-in-browser.webp',
-  'status-at-a-glance.mp4',
-  'tmux-in-browser.mp4',
 ];
+
+/**
+ * The four demos, in page order, and the `docs/images/features/` take each one
+ * is a byte-for-byte copy of. Named here rather than left implicit because the
+ * copy is the whole provenance argument: a re-encode looks identical in the
+ * markup and identical on screen, and only `cmp` against these sources tells
+ * them apart (see `website/assets/media/README.md`).
+ */
+const DEMO_SOURCES: Record<string, string> = {
+  'contract-verify.mp4': 'cm-11-contract-verify.en.mp4',
+  'never-miss-waiting.mp4': 'cm-03-never-miss-waiting.en.mp4',
+  'parallel-worktrees.mp4': 'cm-01-parallel-worktrees.en.mp4',
+  'install-skill.mp4': 'cm-12-install-skill.en.mp4',
+};
 
 /** Every file under website/, recursively, as paths relative to website/. */
 function walk(dir: string, base = dir): string[] {
@@ -68,6 +102,71 @@ function walk(dir: string, base = dir): string[] {
 
 function readIndexHtml(): string {
   return fs.readFileSync(INDEX_HTML, 'utf-8');
+}
+
+/**
+ * The markup with every run of whitespace collapsed. Copy taken verbatim from
+ * the messaging doc is re-wrapped by hand when it lands in HTML, so comparing
+ * the raw file against a sentence would fail on indentation rather than on
+ * wording — which is the opposite of what these assertions are for.
+ */
+function normalizedHtml(): string {
+  return readIndexHtml().replace(/\s+/g, ' ');
+}
+
+/**
+ * The en definition sentence, read out of `docs/design/public-messaging.md`
+ * between its `<!-- def:en -->` markers. Read rather than restated: the point of
+ * that file is that one string exists once, so a copy of it here would be the
+ * second place it could drift.
+ */
+function definitionEn(): string {
+  const doc = fs.readFileSync(MESSAGING_DOC, 'utf-8');
+  const match = /<!-- def:en -->([\s\S]*?)<!-- \/def:en -->/.exec(doc);
+
+  expect(
+    match,
+    'docs/design/public-messaging.md must delimit the en definition with <!-- def:en --> … <!-- /def:en -->',
+  ).not.toBeNull();
+  return match![1].trim();
+}
+
+/** The retired vocabulary, as `docs/design/public-messaging.md` publishes it. */
+function documentedBannedTerms(): string[] {
+  const doc = fs.readFileSync(MESSAGING_DOC, 'utf-8');
+  const start = doc.indexOf('<!-- banned-terms:start -->');
+  const end = doc.indexOf('<!-- banned-terms:end -->');
+
+  expect(start, 'the banned-term table must be delimited').toBeGreaterThan(-1);
+  expect(end).toBeGreaterThan(start);
+
+  return doc
+    .slice(start, end)
+    .split('\n')
+    .map((line) => /^\|\s*`([^`]+)`\s*\|/.exec(line)?.[1])
+    .filter((term): term is string => Boolean(term));
+}
+
+/**
+ * What Issue #1812 measured on this page before the rewrite and required gone.
+ * These are shorter than some of the doc's rows on purpose — the old H1 is
+ * banned as a whole sentence there, but the LP carried it split across a `<br>`
+ * and rephrased in three meta tags, so the substring is what actually finds it.
+ */
+const LP_BANNED_TERMS = [
+  'control plane',
+  'Orchestrate your agent CLIs',
+  'Remote Control',
+  'Happy Coder',
+  'claude-squad',
+  'Omnara',
+];
+
+/** Every file under website/ a person reads, with its text. */
+function textFiles(): { file: string; body: string }[] {
+  return walk(WEBSITE_DIR)
+    .filter((file) => TEXT_FILE.test(file))
+    .map((file) => ({ file, body: fs.readFileSync(path.join(WEBSITE_DIR, file), 'utf-8') }));
 }
 
 /**
@@ -199,7 +298,7 @@ describe('Issue #1200: asset references resolve under sub-path hosting', () => {
 
 describe('Issue #1200: media budget', () => {
   it('keeps the hero image under 100KB, since it is the LCP element', () => {
-    const bytes = fs.statSync(path.join(WEBSITE_DIR, HERO_IMAGE)).size;
+    const bytes = fs.statSync(path.join(WEBSITE_DIR, OG_IMAGE)).size;
 
     expect(bytes).toBeLessThan(HERO_BUDGET_BYTES);
   });
@@ -281,12 +380,12 @@ describe('Issue #1272/#1577: the LP ships only vetted media', () => {
     expect(missing).toEqual([]);
   });
 
-  it('points og:image at the isolated-environment hero screenshot', () => {
+  it('points og:image at the isolated-environment screenshot', () => {
     const html = readIndexHtml();
     const ogImage = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/);
 
     expect(ogImage).not.toBeNull();
-    expect(ogImage![1]).toBe(`${PAGES_BASE_URL}${HERO_IMAGE}`);
+    expect(ogImage![1]).toBe(`${PAGES_BASE_URL}${OG_IMAGE}`);
   });
 
   it('resolves og:image to a file that exists, which no other test covers', () => {
@@ -304,18 +403,84 @@ describe('Issue #1272/#1577: the LP ships only vetted media', () => {
     expect(fs.existsSync(path.join(WEBSITE_DIR, relative))).toBe(true);
   });
 
-  it('serves the hero image eagerly and at a reserved size', () => {
-    // It is the LCP element: lazy-loading it delays the largest paint, and
-    // dropping width/height reflows the fold once the bytes land.
-    const html = readIndexHtml();
-    const heroFigure = html.match(/<figure class="hero-media">[\s\S]*?<\/figure>/);
+  it('still ships the og:image as a file the LP itself serves', () => {
+    // #1812 took it out of the hero, and "the hero no longer needs it" is
+    // exactly the reasoning that would delete it and leave og:image pointing at
+    // nothing. It is referenced from the gallery now; what this pins is that it
+    // is referenced from the page at all, so the broken-link sweep above keeps
+    // covering it.
+    expect(readIndexHtml()).toContain(`src="${OG_IMAGE}"`);
+  });
+});
 
-    expect(heroFigure).not.toBeNull();
-    expect(heroFigure![0]).toMatch(/<img\b/);
-    expect(heroFigure![0]).toContain(HERO_IMAGE);
-    expect(heroFigure![0]).not.toMatch(/loading="lazy"/);
-    expect(heroFigure![0]).toMatch(/width="\d+"/);
-    expect(heroFigure![0]).toMatch(/height="\d+"/);
+/**
+ * Issue #1812 — the hero is a drawing of the loop rather than a screenshot.
+ *
+ * That swap moves two risks. An inline SVG is a pile of `<text>` nodes to a
+ * screen reader unless it is labelled as one image, and — the one that has
+ * actually happened repeatedly on this project — a diagram whose inks are
+ * literals is composed while looking at one theme and turns invisible in the
+ * other. Both are pinned here rather than left to a reviewer opening the page.
+ */
+describe('Issue #1812: the hero diagram', () => {
+  const heroFigure = (): string => {
+    const figure = readIndexHtml().match(/<figure class="hero-media">[\s\S]*?<\/figure>/);
+
+    expect(figure, 'hero-media figure not found in index.html').not.toBeNull();
+    return figure![0];
+  };
+
+  /** Every declaration inside a `.loop-diagram …` rule, selector kept for the message. */
+  const diagramDeclarations = (): { selector: string; property: string; value: string }[] => {
+    const css = fs.readFileSync(STYLES_CSS, 'utf-8');
+
+    return Array.from(css.matchAll(/(\.loop-diagram[^{}]*)\{([^}]*)\}/g)).flatMap(
+      ([, selector, body]) =>
+        Array.from(body.matchAll(/\b(fill|stroke|color|background|background-color)\s*:\s*([^;]+);/g)).map(
+          (declaration) => ({
+            selector: selector.trim(),
+            property: declaration[1],
+            value: declaration[2].trim(),
+          }),
+        ),
+    );
+  };
+
+  it('draws the loop inline, so the page CSS reaches it', () => {
+    expect(heroFigure()).toMatch(/<svg\b/);
+  });
+
+  it('presents the drawing as a single labelled image to a screen reader', () => {
+    const svg = heroFigure();
+
+    expect(svg).toMatch(/role="img"/);
+    const label = /aria-label="([^"]+)"/.exec(svg);
+    expect(label, 'the hero svg needs an aria-label').not.toBeNull();
+    // A label of "diagram" describes the container, not the content.
+    expect(label![1].length).toBeGreaterThan(40);
+  });
+
+  it('reserves the drawing box before layout', () => {
+    const svg = heroFigure();
+
+    expect(svg).toMatch(/viewBox="[^"]+"/);
+    expect(svg).toMatch(/width="\d+"/);
+    expect(svg).toMatch(/height="\d+"/);
+  });
+
+  it('takes every ink in the drawing from a custom property', () => {
+    // The failure this exists for: a hard-coded ink is picked while looking at
+    // one colour scheme and is unreadable in the other, and nothing in a unit
+    // suite notices because the markup is valid either way.
+    const declarations = diagramDeclarations();
+
+    expect(declarations.length, 'no .loop-diagram paint rules found in styles.css').toBeGreaterThan(4);
+
+    const literal = declarations
+      .filter(({ value }) => !/^var\(--/.test(value) && !['none', 'inherit'].includes(value))
+      .map(({ selector, property, value }) => `${selector} { ${property}: ${value} }`);
+
+    expect(literal, 'every colour in the hero diagram must be a CSS variable').toEqual([]);
   });
 });
 
@@ -333,7 +498,29 @@ describe('Issue #1577: feature demo playback', () => {
   const videoTags = (): string[] => readIndexHtml().match(/<video\b[\s\S]*?<\/video>/g) ?? [];
 
   it('embeds the four demos the Issue settled on', () => {
-    expect(videoTags()).toHaveLength(4);
+    // #1812 re-cut the set: the retired three were shot from four reused scenes
+    // (#1811 measured two of them at SSIM 0.970), and the four below are one per
+    // card in public-messaging.md §3. Order is asserted because the page reads
+    // as an argument — contract, then what happens when it stops, then parallel,
+    // then where the method comes from.
+    const sources = videoTags().map((tag) => /src="([^"]+)"/.exec(tag)?.[1]);
+
+    expect(sources).toEqual(
+      Object.keys(DEMO_SOURCES).map((file) => `${MEDIA_DIR.split(path.sep).join('/')}/${file}`),
+    );
+  });
+
+  it('ships each demo as a byte-for-byte copy of its docs/images/features take', () => {
+    // The provenance argument in website/assets/media/README.md is "these are
+    // copies, not re-encodes". A re-encode is indistinguishable in the markup
+    // and on screen, so the bytes are what has to be compared.
+    const reencoded = Object.entries(DEMO_SOURCES).filter(([file, source]) => {
+      const shipped = fs.readFileSync(path.join(WEBSITE_DIR, MEDIA_DIR, file));
+      const original = fs.readFileSync(path.join(REPO_ROOT, 'docs/images/features', source));
+      return !shipped.equals(original);
+    });
+
+    expect(reencoded.map(([file]) => file)).toEqual([]);
   });
 
   it('carries muted and playsinline, without which iOS Safari will not autoplay', () => {
@@ -445,6 +632,128 @@ describe('Issue #1327: Track A shows what its one command does', () => {
 
     expect(list, 'Track A renders no steps-stack list').not.toBeNull();
     expect(list![1].match(/<li>/g) ?? []).toHaveLength(4);
+  });
+
+  it('lists the setup questions init actually asks, browsable roots included', () => {
+    // Four steps, but the second one describes five prompts: #1517 added
+    // CM_BROWSE_ROOTS ("Additional browsable directories") between the managed
+    // root and the port (src/cli/commands/init.ts), and the LP kept promising
+    // four. A reader who hits an unexpected prompt does not know whether they
+    // are running the thing the page described.
+    const steps = trackAMarkup()
+      .match(/<ol class="steps steps-stack">([\s\S]*?)<\/ol>/)![1]
+      .split('<li>')
+      .slice(1);
+
+    expect(steps).toHaveLength(4);
+    expect(steps[1].toLowerCase(), 'Track A step 2 must name the browsable-roots prompt').toContain(
+      'browsable',
+    );
+  });
+});
+
+/**
+ * Issue #1812 — the page is written on the Vibe Engineering axis, and its words
+ * are copied from `docs/design/public-messaging.md` rather than composed here.
+ *
+ * Two failures are worth machine-checking. The first is the retired vocabulary
+ * surviving in a corner nobody re-read: before this Issue the old H1 and "local
+ * control plane" were still in the `<title>`, three meta tags, the hero, a
+ * section lede and the footer, and the competitor comparison was a whole
+ * section — nine lines across a file that had been "updated" twice since. The
+ * second is paraphrase: the definition sentence is the one string every surface
+ * repeats, and a reworded copy of it reads fine in isolation and splits the
+ * product's story everywhere it is quoted.
+ */
+describe('Issue #1812: the page says what the messaging doc says', () => {
+  it('keeps every term the Issue named traceable to the messaging doc', () => {
+    // The scan below is the union of both lists, so this is what stops the two
+    // drifting into "the doc bans it but the LP does not look for it".
+    const documented = documentedBannedTerms().map((term) => term.toLowerCase());
+
+    const orphaned = LP_BANNED_TERMS.filter(
+      (term) => !documented.some((row) => row.includes(term.toLowerCase())),
+    );
+
+    expect(documented.length).toBeGreaterThan(0);
+    expect(orphaned, 'these are banned here but no longer in public-messaging.md').toEqual([]);
+  });
+
+  it('ships none of the retired wording anywhere under website/', () => {
+    const banned = [...new Set([...documentedBannedTerms(), ...LP_BANNED_TERMS])];
+
+    const offenders = textFiles().flatMap(({ file, body }) =>
+      body.split('\n').flatMap((line, index) => {
+        const lowered = line.toLowerCase();
+        return banned
+          .filter((term) => lowered.includes(term.toLowerCase()))
+          .map((term) => `${file}:${index + 1}: ${term}`);
+      }),
+    );
+
+    expect(offenders).toEqual([]);
+  });
+
+  it('names the axis and states the definition verbatim in the hero', () => {
+    expect(normalizedHtml()).toContain('Vibe Engineering');
+
+    // Scoped to the hero rather than the whole file, because the same sentence
+    // also sits in `description` and `og:description`: a page-wide `toContain`
+    // stays green with the visible copy paraphrased. Measured, not assumed —
+    // swapping "expertise" for "skills" in the hero passed the page-wide form.
+    const hero = /<section class="hero">[\s\S]*?<\/section>/.exec(readIndexHtml());
+
+    expect(hero, 'hero section not found in index.html').not.toBeNull();
+    expect(
+      hero![0].replace(/\s+/g, ' '),
+      'the en definition must be copied into the hero, not paraphrased',
+    ).toContain(definitionEn());
+  });
+
+  it('opens on the hero line the messaging doc settled on', () => {
+    // Kept as a literal rather than read from the doc: this is the one string
+    // where a marker in the source file would have to be threaded through the
+    // ja row as well, and the doc's own test already pins it there.
+    expect(normalizedHtml()).toContain('<h1>From vibe coding to Vibe Engineering.</h1>');
+  });
+
+  it('carries the axis word in the title and in both social tags', () => {
+    const html = readIndexHtml();
+    const title = /<title>([^<]+)<\/title>/.exec(html)?.[1] ?? '';
+    const ogTitle = /<meta property="og:title" content="([^"]+)"/.exec(html)?.[1] ?? '';
+    const description = /<meta\s+name="description"\s+content="([^"]+)"/.exec(html)?.[1] ?? '';
+    const ogDescription = /<meta\s+property="og:description"\s+content="([^"]+)"/.exec(html)?.[1] ?? '';
+
+    for (const [name, value] of Object.entries({ title, ogTitle, description, ogDescription })) {
+      expect(value, `${name} is missing from index.html`).not.toBe('');
+      expect(value, `${name} must name the axis`).toContain('Vibe Engineering');
+    }
+  });
+
+  it('replaces the competitor comparison with the With / Without table', () => {
+    const html = readIndexHtml();
+
+    // Both halves matter: the section has to be gone, and the nav link that
+    // pointed at it has to have moved with it or it scrolls nowhere. Anchors
+    // rather than the bare word, which survives legitimately in prose.
+    expect(html, 'the #comparison section must be gone').not.toMatch(/id="comparison[^"]*"/);
+    expect(html, 'the nav must not link to a section that no longer exists').not.toMatch(
+      /href="#comparison"/,
+    );
+    expect(html).toMatch(/id="with-without"/);
+    expect(html).toMatch(/href="#with-without"/);
+  });
+
+  it('states all seven With / Without rows', () => {
+    const section = /<section class="section" id="with-without"[\s\S]*?<\/section>/.exec(
+      readIndexHtml(),
+    );
+
+    expect(section, '#with-without section not found').not.toBeNull();
+    const body = /<tbody>([\s\S]*?)<\/tbody>/.exec(section![0]);
+
+    expect(body, '#with-without renders no table body').not.toBeNull();
+    expect(body![1].match(/<tr>/g) ?? []).toHaveLength(7);
   });
 });
 
