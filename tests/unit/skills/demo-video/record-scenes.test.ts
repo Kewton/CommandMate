@@ -16,16 +16,17 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_MESSAGE,
   DEFAULT_VIEWPORT,
-  DEFAULT_WORKTREE_ID,
   MOBILE_VIEWPORT,
   SCENES,
-  UNSYNCED_WORKTREE_ID,
+  assertIdForPath,
   localeCookie,
   parseRecordArgs,
   parseStateFile,
   readRepositoryPaths,
   readUnstagedPaths,
+  readWorktreeEntries,
   readWorktreeIds,
+  resolveRecordOptions,
   secondSeedRepository,
   submitButtonLabel,
   viewportFor,
@@ -34,7 +35,16 @@ import {
   type DemoState,
   type WaitDeps,
 } from '../../../../.claude/skills/demo-video/scripts/record-scenes';
+import { deriveWorktreeId } from '@/lib/git/worktree-id';
 import { removeTempDir } from '@tests/helpers/temp-dir';
+
+/** env-up.sh derives the ids from these directory names; nothing hard-codes them. */
+const SEED_ROOT = '/home/dev/.commandmate-demo/seed';
+const DARK_MODE_DIR = `${SEED_ROOT}/wt-dark-mode`;
+const API_CACHE_DIR = `${SEED_ROOT}/wt-api-cache`;
+
+/** The command line demo-video.sh builds from state.env. */
+const ARGS = ['--worktree', 'wt-dark-mode', '--worktree-path', DARK_MODE_DIR];
 
 const STATE = [
   'CM_DEMO_PORT=3399',
@@ -62,16 +72,42 @@ describe('parseStateFile', () => {
 });
 
 describe('parseRecordArgs', () => {
-  it('defaults to a 1280x800 PC viewport and the seeded worktree', () => {
-    const options = parseRecordArgs([]);
+  it('defaults to a 1280x800 PC viewport and no worktree id at all', () => {
+    const options = parseRecordArgs([], {});
     expect(options.viewport).toEqual(DEFAULT_VIEWPORT);
     expect(options.viewport).toEqual({ width: 1280, height: 800 });
-    expect(options.worktreeId).toBe(DEFAULT_WORKTREE_ID);
+    // Issue #1809: there is no constant to fall back on. A default here is what
+    // let the harness go on addressing a worktree the server had stopped
+    // minting, and every scene died at its own timeout instead.
+    expect(options.worktreeId).toBe('');
+    expect(options.unsyncedWorktreeId).toBe('');
     expect(options.message).toBe(DEFAULT_MESSAGE);
     expect(options.locale).toBe('en');
     expect(options.colorScheme).toBe('light');
     expect(options.sceneIds).toEqual([]);
     expect(options.headless).toBe(true);
+  });
+
+  it('takes the worktree ids and paths from the environment env-up.sh writes', () => {
+    const options = parseRecordArgs([], {
+      CM_DEMO_WORKTREE_ID: 'wt-dark-mode',
+      CM_DEMO_WORKTREE_PATH: DARK_MODE_DIR,
+      CM_DEMO_UNSYNCED_WORKTREE_ID: 'wt-api-cache',
+      CM_DEMO_UNSYNCED_WORKTREE_PATH: API_CACHE_DIR,
+    });
+    expect(options.worktreeId).toBe('wt-dark-mode');
+    expect(options.worktreePath).toBe(DARK_MODE_DIR);
+    expect(options.unsyncedWorktreeId).toBe('wt-api-cache');
+    expect(options.unsyncedWorktreePath).toBe(API_CACHE_DIR);
+  });
+
+  it('lets the flags win over the environment', () => {
+    const options = parseRecordArgs(
+      ['--worktree', 'from-flag', '--unsynced-worktree', 'unsynced-from-flag'],
+      { CM_DEMO_WORKTREE_ID: 'from-env', CM_DEMO_UNSYNCED_WORKTREE_ID: 'unsynced-from-env' },
+    );
+    expect(options.worktreeId).toBe('from-flag');
+    expect(options.unsyncedWorktreeId).toBe('unsynced-from-flag');
   });
 
   it('accepts locale and theme', () => {
@@ -107,7 +143,53 @@ describe('parseRecordArgs', () => {
     [['--frobnicate'], /unknown argument/],
     [['--out'], /--out needs a value/],
   ])('rejects %j', (argv, message) => {
-    expect(() => parseRecordArgs(argv)).toThrow(message);
+    expect(() => parseRecordArgs(argv, {})).toThrow(message);
+  });
+});
+
+describe('resolveRecordOptions', () => {
+  const state = (extra: Record<string, string> = {}): DemoState =>
+    ({ baseUrl: 'http://127.0.0.1:3399', videoDir: '/v', ...extra }) as DemoState;
+
+  it('fills the ids and paths from state.env when the command line omits them', () => {
+    const resolved = resolveRecordOptions(
+      parseRecordArgs([], {}),
+      state({
+        CM_DEMO_WORKTREE_ID: 'wt-dark-mode',
+        CM_DEMO_WORKTREE_PATH: DARK_MODE_DIR,
+        CM_DEMO_UNSYNCED_WORKTREE_ID: 'wt-api-cache',
+        CM_DEMO_UNSYNCED_WORKTREE_PATH: API_CACHE_DIR,
+      }),
+    );
+    expect(resolved.worktreeId).toBe('wt-dark-mode');
+    expect(resolved.worktreePath).toBe(DARK_MODE_DIR);
+    expect(resolved.unsyncedWorktreeId).toBe('wt-api-cache');
+    expect(resolved.unsyncedWorktreePath).toBe(API_CACHE_DIR);
+  });
+
+  it('refuses to record when nothing supplied a worktree id', () => {
+    // The failure the whole of #1809 is about: silently keeping a stale id
+    // turned into six scene timeouts with nothing in the message about ids.
+    expect(() => resolveRecordOptions(parseRecordArgs([], {}), state())).toThrow(
+      /no worktree id: pass --worktree, set CM_DEMO_WORKTREE_ID, or re-run env-up\.sh/,
+    );
+  });
+
+  it('refuses to film sync-worktrees without the id the boot sync missed', () => {
+    expect(() =>
+      resolveRecordOptions(
+        parseRecordArgs(['--scene', 'sync-worktrees', ...ARGS], {}),
+        state(),
+      ),
+    ).toThrow(/sync-worktrees.*--unsynced-worktree/s);
+  });
+
+  it('does not demand the unsynced id for a run that never films that scene', () => {
+    const resolved = resolveRecordOptions(
+      parseRecordArgs(['--scene', 'sessions-overview', ...ARGS], {}),
+      state(),
+    );
+    expect(resolved.unsyncedWorktreeId).toBe('');
   });
 });
 
@@ -238,7 +320,7 @@ describe('localeCookie', () => {
 
 describe('waitForWorktree', () => {
   function deps(
-    pages: Array<{ worktrees?: Array<{ id: string; isProcessing?: boolean }> }>,
+    pages: Array<{ worktrees?: Array<{ id: string; path?: string; isProcessing?: boolean }> }>,
   ): { deps: WaitDeps; clock: { value: number } } {
     const clock = { value: 0 };
     let call = 0;
@@ -297,6 +379,66 @@ describe('waitForWorktree', () => {
       waitForWorktree('http://x', 'wt', (w) => w.isProcessing === true, 'generating', 0, d, 250),
     ).resolves.toMatchObject({ id: 'wt' });
   });
+
+  it('fails on the first poll when the seed directory carries a different id', async () => {
+    // Not after the timeout: an id is frozen at first registration
+    // (syncWorktreesToDB looks the row up by path), so waiting cannot fix it.
+    // This is the check that would have named #1809 in one line.
+    const { deps: d } = deps([
+      { worktrees: [{ id: 'wt-dark-mode', path: DARK_MODE_DIR, isProcessing: true }] },
+    ]);
+    await expect(
+      waitForWorktree(
+        'http://x',
+        { id: 'cmdemo-app-feature-demo-dark-mode', path: DARK_MODE_DIR },
+        (w) => w.isProcessing === true,
+        'generating',
+        60_000,
+        d,
+        250,
+      ),
+    ).rejects.toThrow(/id mismatch.*'wt-dark-mode'.*'cmdemo-app-feature-demo-dark-mode'/s);
+    expect(d.fetchJson).toHaveBeenCalledTimes(1);
+    expect(d.sleep).not.toHaveBeenCalled();
+  });
+
+  it('lists the ids and paths it does know when it times out', async () => {
+    const { deps: d } = deps([{ worktrees: [{ id: 'other', path: '/seed/other' }] }]);
+    await expect(
+      waitForWorktree(
+        'http://x',
+        { id: 'wt-dark-mode', path: DARK_MODE_DIR },
+        () => true,
+        'present',
+        1000,
+        d,
+        250,
+      ),
+    ).rejects.toThrow(
+      new RegExp(`expected it at ${DARK_MODE_DIR}.*"id":"other","path":"/seed/other"`, 's'),
+    );
+  });
+});
+
+describe('assertIdForPath', () => {
+  it('accepts the pair env-up.sh recorded', () => {
+    expect(() =>
+      assertIdForPath(
+        [{ id: 'wt-dark-mode', path: DARK_MODE_DIR }],
+        'wt-dark-mode',
+        DARK_MODE_DIR,
+      ),
+    ).not.toThrow();
+  });
+
+  it('is a no-op when no path was recorded, so the check can never invent a failure', () => {
+    expect(() => assertIdForPath([{ id: 'anything', path: DARK_MODE_DIR }], 'wt', '')).not.toThrow();
+  });
+
+  it('says nothing about a path the server does not know yet', () => {
+    // sync-worktrees films a worktree *appearing*; its precondition is absence.
+    expect(() => assertIdForPath([], 'wt-api-cache', API_CACHE_DIR)).not.toThrow();
+  });
 });
 
 describe('the API projections the #1575 scenes synchronise on', () => {
@@ -308,6 +450,18 @@ describe('the API projections the #1575 scenes synchronise on', () => {
       readRepositoryPaths({ success: true, repositories: [{ path: '/seed/a' }, { path: '/seed/b' }] }),
     ).toEqual(['/seed/a', '/seed/b']);
     expect(readRepositoryPaths({})).toEqual([]);
+  });
+
+  it('reads id/path pairs out of the /api/worktrees envelope', () => {
+    // The path is what the id cross-check compares against; a reader that
+    // dropped it would make assertIdForPath silently vacuous.
+    expect(
+      readWorktreeEntries({
+        worktrees: [{ id: 'wt-dark-mode', path: DARK_MODE_DIR }],
+        repositories: [],
+      }),
+    ).toEqual([{ id: 'wt-dark-mode', path: DARK_MODE_DIR }]);
+    expect(readWorktreeEntries({})).toEqual([]);
   });
 
   it('reads ids out of the /api/worktrees envelope', () => {
@@ -413,17 +567,72 @@ describe('secondSeedRepository', () => {
   });
 });
 
-describe('the worktree the boot sync deliberately misses', () => {
-  it('matches the branch env-up.sh creates after the server is ready', () => {
-    // generateWorktreeId slugs `<repo>` + `<branch>`; if env-up.sh's branch
-    // name and this constant drift apart, sync-worktrees waits for an id that
-    // never arrives.
-    expect(UNSYNCED_WORKTREE_ID).toBe('cmdemo-app-feature-demo-api-cache');
-    const envUp = fs.readFileSync(
-      path.resolve(__dirname, '../../../../.claude/skills/demo-video/scripts/env-up.sh'),
-      'utf8',
-    );
-    expect(envUp).toContain('worktree add -q -b feature/demo-api-cache');
+describe('the harness ids agree with the rule the product mints them by', () => {
+  // This used to pin two string constants, which is why it stayed green through
+  // Issue #1621: the constants matched each other and matched nothing the
+  // server did. It now runs the *product* function over the directories
+  // env-up.sh creates, so a change to the derivation rule turns this red before
+  // it turns a take into six timeouts.
+  const envUp = fs.readFileSync(
+    path.resolve(__dirname, '../../../../.claude/skills/demo-video/scripts/env-up.sh'),
+    'utf8',
+  );
+
+  it.each([
+    ['cmdemo-app', `${SEED_ROOT}/cmdemo-app`],
+    ['wt-dark-mode', DARK_MODE_DIR],
+    ['wt-login-error', `${SEED_ROOT}/wt-login-error`],
+    ['wt-api-cache', API_CACHE_DIR],
+  ])('deriveWorktreeId mints %s for the seed directory of the same name', (id, dir) => {
+    expect(deriveWorktreeId(dir, new Set<string>())).toBe(id);
+  });
+
+  it('has no basename collision, so no id can pick up a digest suffix', () => {
+    // deriveWorktreeId only appends `-<sha256 prefix>` on collision, and such an
+    // id would depend on the absolute state dir — unpredictable for env-up.sh.
+    const dirs = ['cmdemo-app', 'cmdemo-docs', 'wt-dark-mode', 'wt-login-error', 'wt-api-cache'];
+    const taken = new Set<string>();
+    for (const dir of dirs) {
+      const id = deriveWorktreeId(`${SEED_ROOT}/${dir}`, taken);
+      expect(id).toBe(dir);
+      taken.add(id);
+    }
+  });
+
+  it('creates exactly those directories and records their ids in state.env', () => {
+    // The link between the rule above and the harness: if env-up.sh renames a
+    // seed directory or stops writing a key, one of these fails.
+    expect(envUp).toContain('WT_DARK_MODE="$SEED_ROOT/wt-dark-mode"');
+    expect(envUp).toContain('WT_LOGIN_ERROR="$SEED_ROOT/wt-login-error"');
+    expect(envUp).toContain('WT_API_CACHE="$SEED_ROOT/wt-api-cache"');
+    expect(envUp).toContain('worktree add -q -b feature/demo-api-cache "$WT_API_CACHE"');
     expect(envUp).toContain('CM_DEMO_SEED_REPO_2=$SEED_REPO_2');
+    expect(envUp).toContain('CM_DEMO_WORKTREE_ID=$WORKTREE_ID');
+    expect(envUp).toContain('CM_DEMO_UNSYNCED_WORKTREE_ID=$UNSYNCED_WORKTREE_ID');
+    expect(envUp).toContain('CM_DEMO_WORKTREE_PATH=$WT_DARK_MODE');
+    expect(envUp).toContain('CM_DEMO_UNSYNCED_WORKTREE_PATH=$WT_API_CACHE');
+  });
+
+  it('keeps no trace of the branch-derived scheme in either install root', () => {
+    // The acceptance grep of #1809, as a test: neither the retired id nor the
+    // deprecated minter may survive anywhere in the skill — including in prose,
+    // where a stale explanation is what sends the next reader to rebuild the
+    // same broken assumption.
+    const walk = (dir: string): string[] =>
+      fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const full = path.join(dir, entry.name);
+        return entry.isDirectory() ? walk(full) : [full];
+      });
+
+    const roots = ['.claude', '.agents'].map((root) =>
+      path.resolve(__dirname, `../../../../${root}/skills/demo-video`),
+    );
+    const files = roots.flatMap(walk);
+    expect(files.length).toBeGreaterThan(20);
+    for (const file of files) {
+      const source = fs.readFileSync(file, 'utf8');
+      expect(`${file}: ${source}`).not.toContain('cmdemo-app-feature-demo');
+      expect(`${file}: ${source}`).not.toContain('generateWorktreeId');
+    }
   });
 });

@@ -36,8 +36,20 @@ export interface RecordOptions {
   viewport: { width: number; height: number };
   /** Message typed into the composer in the send-message scene. */
   message: string;
-  /** Worktree the send-message scene drives. */
+  /**
+   * Worktree the send-message scene drives.
+   *
+   * Never a constant: `deriveWorktreeId` mints ids from the **directory**
+   * (src/lib/git/worktree-id.ts, Issue #1621/#1644), so env-up.sh derives them
+   * from the seed it created and records them in state.env.
+   */
   worktreeId: string;
+  /** Directory `worktreeId` must belong to; empty disables the cross-check. */
+  worktreePath: string;
+  /** Worktree the boot sync deliberately missed, for the sync-worktrees scene. */
+  unsyncedWorktreeId: string;
+  /** Directory `unsyncedWorktreeId` must belong to. */
+  unsyncedWorktreePath: string;
   /** Upper bound for a single synchronisation point, in ms. */
   timeoutMs: number;
   headless: boolean;
@@ -58,16 +70,19 @@ export const DEFAULT_VIEWPORT = { width: 1280, height: 800 };
  * mobile shell — and with it MobilePromptSheet — is what gets filmed.
  */
 export const MOBILE_VIEWPORT = { width: 390, height: 844 };
-/** `cmdemo-app` + `feature/demo-dark-mode`, slugged by generateWorktreeId(). */
-export const DEFAULT_WORKTREE_ID = 'cmdemo-app-feature-demo-dark-mode';
-/**
- * `cmdemo-app` + `feature/demo-api-cache`, the worktree env-up.sh adds *after*
- * the server has booted. The boot sync in server.ts has already run by then, so
- * this id is on disk and missing from the database until a sync is triggered —
- * the precondition the `sync-worktrees` scene films.
- */
-export const UNSYNCED_WORKTREE_ID = 'cmdemo-app-feature-demo-api-cache';
 export const DEFAULT_MESSAGE = 'Add a dark mode toggle to the header';
+
+/**
+ * There is deliberately no default worktree id in this file.
+ *
+ * Until Issue #1809 there were two, spelled in the retired branch-derived
+ * scheme. When #1621 made the id a function of the directory they went on
+ * parsing, went on type-checking and
+ * addressed worktrees that no longer existed: the fake agent's tmux session was
+ * never adopted, `isSessionRunning` stayed false forever, and every scene died
+ * at its own timeout with nothing in the message about the id being wrong.
+ * A missing id now stops the run before the browser opens.
+ */
 
 /** The unregistered repository env-up.sh seeds for the `add-repository` scene. */
 export function secondSeedRepository(state: DemoState): string {
@@ -110,7 +125,10 @@ function parseViewport(raw: string): { width: number; height: number } {
   return { width: Number(match[1]), height: Number(match[2]) };
 }
 
-export function parseRecordArgs(argv: string[]): RecordOptions {
+export function parseRecordArgs(
+  argv: string[],
+  env: Record<string, string | undefined> = process.env,
+): RecordOptions {
   const options: RecordOptions = {
     statePath: defaultStatePath(),
     outDir: '',
@@ -119,7 +137,12 @@ export function parseRecordArgs(argv: string[]): RecordOptions {
     colorScheme: 'light',
     viewport: { ...DEFAULT_VIEWPORT },
     message: DEFAULT_MESSAGE,
-    worktreeId: DEFAULT_WORKTREE_ID,
+    // Environment, not a constant. `resolveRecordOptions` then lets state.env
+    // supply whatever was not passed, and refuses to record if nothing did.
+    worktreeId: env.CM_DEMO_WORKTREE_ID ?? '',
+    worktreePath: env.CM_DEMO_WORKTREE_PATH ?? '',
+    unsyncedWorktreeId: env.CM_DEMO_UNSYNCED_WORKTREE_ID ?? '',
+    unsyncedWorktreePath: env.CM_DEMO_UNSYNCED_WORKTREE_PATH ?? '',
     timeoutMs: 60_000,
     headless: true,
     // <repo>/.claude/skills/demo-video/scripts, and byte-identically
@@ -161,6 +184,12 @@ export function parseRecordArgs(argv: string[]): RecordOptions {
       case '--repo-root': options.repoRoot = next(i, arg); i += 1; break;
       case '--message': options.message = next(i, arg); i += 1; break;
       case '--worktree': options.worktreeId = next(i, arg); i += 1; break;
+      case '--worktree-path': options.worktreePath = next(i, arg); i += 1; break;
+      case '--unsynced-worktree': options.unsyncedWorktreeId = next(i, arg); i += 1; break;
+      case '--unsynced-worktree-path':
+        options.unsyncedWorktreePath = next(i, arg);
+        i += 1;
+        break;
       case '--timeout': {
         const value = Number(next(i, arg));
         if (!Number.isFinite(value) || value <= 0) {
@@ -190,9 +219,17 @@ export function parseRecordArgs(argv: string[]): RecordOptions {
 
 interface WorktreeSummary {
   id: string;
+  /** Absolute directory the id was minted from (`deriveWorktreeId`). */
+  path?: string;
   isSessionRunning?: boolean;
   isProcessing?: boolean;
   isWaitingForResponse?: boolean;
+}
+
+/** A worktree to wait on, optionally with the directory its id must belong to. */
+export interface WorktreeTarget {
+  id: string;
+  path?: string;
 }
 
 export interface WaitDeps {
@@ -247,10 +284,42 @@ export function readRepositoryPaths(payload: unknown): string[] {
   return list.map((repository) => repository.path ?? '');
 }
 
+/** `GET /api/worktrees` -> `{ worktrees: [{ id, path, ... }] }`. */
+export function readWorktreeEntries(payload: unknown): WorktreeSummary[] {
+  return (payload as { worktrees?: WorktreeSummary[] }).worktrees ?? [];
+}
+
 /** `GET /api/worktrees` -> `{ worktrees: [{ id }] }`. */
 export function readWorktreeIds(payload: unknown): string[] {
-  const list = (payload as { worktrees?: WorktreeSummary[] }).worktrees ?? [];
-  return list.map((worktree) => worktree.id);
+  return readWorktreeEntries(payload).map((worktree) => worktree.id);
+}
+
+/**
+ * Fail — immediately, not after a full timeout — when the server knows
+ * `expectedPath` under an id other than `expectedId`.
+ *
+ * The second safety net over reading the ids out of state.env, and the one that
+ * turns a silent stall into a diagnosis. A worktree's id is frozen at first
+ * registration (`syncWorktreesToDB` looks the row up by path, Issue #1621), so
+ * once a different id has been minted, waiting cannot fix it: every scene would
+ * run out its timeout and report `<worktree not in /api/worktrees>` without ever
+ * naming the id that does exist. Both sides are printed for exactly that reason.
+ */
+export function assertIdForPath(
+  entries: readonly WorktreeSummary[],
+  expectedId: string,
+  expectedPath: string,
+): void {
+  if (!expectedPath) return;
+  const byPath = entries.find((entry) => entry.path === expectedPath);
+  if (byPath && byPath.id !== expectedId) {
+    throw new Error(
+      `worktree id mismatch for ${expectedPath}: /api/worktrees reports '${byPath.id}', ` +
+        `but this take was told to drive '${expectedId}'. Ids come from ` +
+        'deriveWorktreeId(path) (src/lib/git/worktree-id.ts); re-run env-up.sh so ' +
+        'state.env records the id the server actually minted.',
+    );
+  }
 }
 
 /**
@@ -275,25 +344,32 @@ export function readUnstagedPaths(payload: unknown): string[] {
  */
 export async function waitForWorktree(
   baseUrl: string,
-  worktreeId: string,
+  target: string | WorktreeTarget,
   predicate: (worktree: WorktreeSummary) => boolean,
   what: string,
   timeoutMs: number,
   deps: WaitDeps = defaultWaitDeps,
   pollMs = 500,
 ): Promise<WorktreeSummary> {
+  const { id: worktreeId, path: expectedPath = '' } =
+    typeof target === 'string' ? { id: target, path: '' } : target;
   const deadline = deps.now() + timeoutMs;
   let seen: WorktreeSummary | undefined;
+  let entries: WorktreeSummary[] = [];
   for (;;) {
-    const payload = (await deps.fetchJson(`${baseUrl}/api/worktrees`)) as {
-      worktrees?: WorktreeSummary[];
-    };
-    seen = (payload.worktrees ?? []).find((worktree) => worktree.id === worktreeId);
+    entries = readWorktreeEntries(await deps.fetchJson(`${baseUrl}/api/worktrees`));
+    // Before the predicate: a wrong id is never going to satisfy it, and the
+    // operator needs the id/path pair rather than `timed out` minutes later.
+    assertIdForPath(entries, worktreeId, expectedPath);
+    seen = entries.find((worktree) => worktree.id === worktreeId);
     if (seen && predicate(seen)) return seen;
     if (deps.now() >= deadline) {
+      const known = JSON.stringify(entries.map((entry) => ({ id: entry.id, path: entry.path })));
       throw new Error(
         `timed out after ${timeoutMs}ms waiting for ${worktreeId} to be ${what}; ` +
-          `last seen: ${seen ? JSON.stringify(seen) : '<worktree not in /api/worktrees>'}`,
+          `last seen: ${seen ? JSON.stringify(seen) : '<worktree not in /api/worktrees>'}` +
+          (expectedPath ? `; expected it at ${expectedPath}` : '') +
+          `; /api/worktrees knows: ${known}`,
       );
     }
     await deps.sleep(pollMs);
@@ -442,7 +518,7 @@ export const SCENES: Scene[] = [
     prepare: ({ baseUrl, options }) =>
       waitForWorktree(
         baseUrl,
-        options.worktreeId,
+        { id: options.worktreeId, path: options.worktreePath },
         () => true,
         'present in the worktree list',
         options.timeoutMs,
@@ -464,7 +540,7 @@ export const SCENES: Scene[] = [
     prepare: ({ baseUrl, options }) =>
       waitForWorktree(
         baseUrl,
-        options.worktreeId,
+        { id: options.worktreeId, path: options.worktreePath },
         (worktree) => worktree.isSessionRunning === true,
         'showing a live agent session',
         options.timeoutMs,
@@ -481,7 +557,7 @@ export const SCENES: Scene[] = [
       // never reached.
       await waitForWorktree(
         baseUrl,
-        options.worktreeId,
+        { id: options.worktreeId, path: options.worktreePath },
         (worktree) => worktree.isProcessing === true,
         'generating',
         options.timeoutMs,
@@ -498,7 +574,7 @@ export const SCENES: Scene[] = [
     prepare: ({ baseUrl, options }) =>
       waitForWorktree(
         baseUrl,
-        options.worktreeId,
+        { id: options.worktreeId, path: options.worktreePath },
         (worktree) => worktree.isWaitingForResponse === true,
         'waiting for a response',
         options.timeoutMs,
@@ -518,7 +594,7 @@ export const SCENES: Scene[] = [
 
       await waitForWorktree(
         baseUrl,
-        options.worktreeId,
+        { id: options.worktreeId, path: options.worktreePath },
         (worktree) => worktree.isWaitingForResponse === false,
         'released by the answer',
         options.timeoutMs,
@@ -594,9 +670,15 @@ export const SCENES: Scene[] = [
     prepare: ({ baseUrl, options }) =>
       waitForJson(
         `${baseUrl}/api/worktrees`,
-        readWorktreeIds,
-        (ids) => ids.includes(options.worktreeId) && !ids.includes(UNSYNCED_WORKTREE_ID),
-        `${UNSYNCED_WORKTREE_ID} to be on disk but not yet registered`,
+        readWorktreeEntries,
+        (entries) => {
+          // Throws out of the poll loop rather than returning false: an id the
+          // server never minted cannot start existing by waiting.
+          assertIdForPath(entries, options.unsyncedWorktreeId, options.unsyncedWorktreePath);
+          const ids = entries.map((entry) => entry.id);
+          return ids.includes(options.worktreeId) && !ids.includes(options.unsyncedWorktreeId);
+        },
+        `${options.unsyncedWorktreeId} to be on disk but not yet registered`,
         options.timeoutMs,
       ).then(() => undefined),
     run: async ({ page, baseUrl, options }) => {
@@ -605,10 +687,13 @@ export const SCENES: Scene[] = [
       // the footage must not claim a registration the database never got.
       await clickUntilEffective(
         page.getByTestId('sync-all-button'),
-        async () =>
-          readWorktreeIds(await defaultWaitDeps.fetchJson(`${baseUrl}/api/worktrees`)).includes(
-            UNSYNCED_WORKTREE_ID,
-          ),
+        async () => {
+          const entries = readWorktreeEntries(
+            await defaultWaitDeps.fetchJson(`${baseUrl}/api/worktrees`),
+          );
+          assertIdForPath(entries, options.unsyncedWorktreeId, options.unsyncedWorktreePath);
+          return entries.some((entry) => entry.id === options.unsyncedWorktreeId);
+        },
         'the sync-all button',
         options.timeoutMs,
       );
@@ -660,7 +745,7 @@ export const SCENES: Scene[] = [
     prepare: ({ baseUrl, options }) =>
       waitForWorktree(
         baseUrl,
-        options.worktreeId,
+        { id: options.worktreeId, path: options.worktreePath },
         (worktree) => worktree.isProcessing === false && worktree.isSessionRunning === true,
         'back to ready',
         options.timeoutMs,
@@ -678,19 +763,76 @@ export function viewportFor(scene: Scene, options: RecordOptions): { width: numb
   return scene.viewport === 'mobile' ? { ...MOBILE_VIEWPORT } : { ...options.viewport };
 }
 
+/** The scenes a run will film: `--scene` when given, the whole library otherwise. */
+export function selectedScenes(options: RecordOptions): Scene[] {
+  return options.sceneIds.length
+    ? SCENES.filter((scene) => options.sceneIds.includes(scene.id))
+    : SCENES;
+}
+
+/**
+ * Take the worktree ids and paths from state.env for whatever the command line
+ * did not supply, and refuse to record when nothing supplied them.
+ *
+ * env-up.sh derives the ids from the seed directories it just created and
+ * writes them to state.env, which makes the state file — not this source — the
+ * place the harness and the server agree. Silently defaulting is what Issue
+ * #1809 removed: see the note next to DEFAULT_MESSAGE.
+ */
+export function resolveRecordOptions(options: RecordOptions, state: DemoState): RecordOptions {
+  const resolved: RecordOptions = {
+    ...options,
+    worktreeId: options.worktreeId || state.CM_DEMO_WORKTREE_ID || '',
+    worktreePath: options.worktreePath || state.CM_DEMO_WORKTREE_PATH || '',
+    unsyncedWorktreeId: options.unsyncedWorktreeId || state.CM_DEMO_UNSYNCED_WORKTREE_ID || '',
+    unsyncedWorktreePath:
+      options.unsyncedWorktreePath || state.CM_DEMO_UNSYNCED_WORKTREE_PATH || '',
+  };
+
+  if (!resolved.worktreeId) {
+    throw new Error(
+      'no worktree id: pass --worktree, set CM_DEMO_WORKTREE_ID, or re-run env-up.sh so ' +
+        'state.env records the id it derived from the seed directory',
+    );
+  }
+  if (
+    !resolved.unsyncedWorktreeId &&
+    selectedScenes(resolved).some((scene) => scene.id === 'sync-worktrees')
+  ) {
+    throw new Error(
+      "scene 'sync-worktrees' needs the id of the worktree the boot sync missed: pass " +
+        '--unsynced-worktree, set CM_DEMO_UNSYNCED_WORKTREE_ID, or re-run env-up.sh',
+    );
+  }
+  return resolved;
+}
+
 // ---------------------------------------------------------------- main -------
 
-export async function recordScenes(options: RecordOptions): Promise<string[]> {
-  const state = parseStateFile(fs.readFileSync(options.statePath, 'utf8'));
+export async function recordScenes(requested: RecordOptions): Promise<string[]> {
+  const state = parseStateFile(fs.readFileSync(requested.statePath, 'utf8'));
+  const options = resolveRecordOptions(requested, state);
   const outDir = options.outDir || state.videoDir;
   if (!outDir) throw new Error('no output directory: pass --out or re-run env-up.sh');
   fs.mkdirSync(outDir, { recursive: true });
 
+  // One cross-check before the browser is even launched: the server has to
+  // agree that the id this run was handed is the one it minted for the seed
+  // directory. Every scene then carries the same pair, so a rule change shows
+  // up as a named mismatch instead of a scene-by-scene timeout.
+  if (options.worktreePath) {
+    await waitForWorktree(
+      state.baseUrl,
+      { id: options.worktreeId, path: options.worktreePath },
+      () => true,
+      'present in the worktree list',
+      options.timeoutMs,
+    );
+  }
+
   const { chromium } = await import('@playwright/test');
   const browser = await chromium.launch({ headless: options.headless });
-  const selected = options.sceneIds.length
-    ? SCENES.filter((scene) => options.sceneIds.includes(scene.id))
-    : SCENES;
+  const selected = selectedScenes(options);
   const written: string[] = [];
 
   try {

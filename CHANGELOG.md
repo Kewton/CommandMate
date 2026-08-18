@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **fix(demo-video): worktree ID の path 由来化に追従し、収録パイプラインを復旧する** (#1809)
+  - **`demo-video` スキルは #1621 / #1644（v0.20.0）以降、実収録が必ずタイムアウトしていた。**
+    worktree ID が `<repo>-<branch>` から `sanitize(basename(path))`（`deriveWorktreeId`）に
+    変わったのに、harness 側が旧規則の ID を定数で持っていたため。サーバが探す tmux セッション名は
+    `mcbd-claude-wt-dark-mode` なのに harness は別名のセッションを作り、`isSessionRunning` が
+    永久に false のまま全シーンが個別のタイムアウトで死んでいた（警告も出ない）
+  - **ID を定数で持つのをやめ、`env-up.sh` が seed ディレクトリから導出して `state.env` に書く。**
+    `CM_DEMO_PRIMARY_WORKTREE_ID` / `CM_DEMO_WORKTREE_ID` / `CM_DEMO_LOGIN_WORKTREE_ID` /
+    `CM_DEMO_UNSYNCED_WORKTREE_ID` と、それぞれの `*_PATH`。`record-scenes.ts` の
+    `DEFAULT_WORKTREE_ID` / `UNSYNCED_WORKTREE_ID` は**削除**し、引数・環境変数・`state.env` の
+    いずれも与えなければブラウザを開く前に停止する（黙って旧値に落ちない）
+  - **二重の安全策**: 録画開始前とシーンごとの `prepare` で `/api/worktrees` の `path` と
+    `CM_DEMO_WORKTREE_PATH` を突き合わせ、同じディレクトリが別 ID で登録されていたら
+    **その場で** ID と path の両方を出して落ちる。ID はパス単位で初回登録時に凍結されるため、
+    待っても直らない条件をタイムアウトまで待たない
+  - **後片付けは記録駆動にした**。`fake-agent.sh --record-to` が作成したセッション名を
+    `$CM_DEMO_SESSIONS_FILE` に追記し、`env-down.sh` はその記録と `state.env` の ID から組んだ
+    `mcbd-<tool>-<id>[-<suffix>]` だけを kill する。旧実装の `grep -- '-cmdemo-app-'` は
+    新 ID の `mcbd-claude-wt-dark-mode` に一致せず、偽エージェントを取り残していた
+  - **依存チェックに `claude` を追加**。`POST /api/worktrees/[id]/send` は
+    `cliTool.isInstalled()`（実体は `which claude`）が false だと 503 を返すため、未導入だと
+    依存チェックではなく録画の途中でテイクが死ぬ。欠けていれば導入方法を出して収録前に止まる
+  - **テストは製品の規則を固定する形に置き換えた**。旧テストは stale な定数どうしを突き合わせて
+    いたので #1621 を素通りしていた。`deriveWorktreeId` を import して seed ディレクトリ名から
+    ID を導き、`env-scripts.test.ts` は `tmux` スタブを介して「kill する名前」を実測する
+    （実 tmux は触らない）
+  - 隔離環境（`HOME` 差し替え・ポート 3466・`$HOME/.commandmate-demo`）で
+    `demo-video.sh --locale en` を通しで完走させ、尺検証ゲートの通過を確認済み
+
 ## [0.24.0] - 2026-08-16
 
 > **Highlight**: エージェントの**入力待ちを見逃さないための経路を一通り揃えた**リリース。WS 即時配信・要対応バッジ・クロス画面 Toast に加え、タブタイトル / favicon / App Badge / 通知音でブラウザ外へ、さらに waiting エッジ駆動の push 通知でデバイス外へ伝わるようになった（方針 A / D / E）。あわせて稼働中の**モデルと reasoning effort** を hooks の構造化イベントと tmux capture の両経路から取得し、UI と CLI (`instances` / `capture --json`) に露出した。External Apps のプロキシは**末尾スラッシュとクエリ文字列を生バイトのまま**転送するようになり、Next.js static export のアプリが CommandMate 経由で開けなかった問題（`/proxy/<app>/try/` と `/assets/` が 404）が解消している。
