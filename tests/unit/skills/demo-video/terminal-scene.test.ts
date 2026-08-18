@@ -21,6 +21,7 @@ import {
   EMPTY_STYLE,
   ansiToHtml,
   applySgr,
+  assertFinalFrame,
   buildConcatScript,
   captureFrames,
   dedupeFrames,
@@ -379,5 +380,52 @@ describe('the terminal template', () => {
 
   it('the network guard is not vacuous', () => {
     expect('<link rel="stylesheet" href="https://fonts.example/x.css">').toMatch(/<link\b/);
+  });
+});
+
+describe('the take has to end on its verdict', () => {
+  // Issue #1811. `captureFrames` stops when the session ends, and a script that
+  // died half way through ends its session too — so "the session ended" alone
+  // accepted a take that stopped at `Response sent.` with no GATE block on it.
+  // It encoded, it composed, and it shipped as the cut that exists to show the
+  // gates passing.
+  const frame = (text: string): CapturedFrame => ({ atMs: 0, text });
+
+  it('accepts a pane that reached the verdict', () => {
+    expect(() =>
+      assertFinalFrame(
+        [frame('GATE unit PASS (exit=0, 0.1s)\nRESULT passed\n$ echo $?\n0\n')],
+        'RESULT passed',
+      ),
+    ).not.toThrow();
+  });
+
+  it('still matches when a colour change splits the marker', () => {
+    // The transcript is captured with `-e`, so escape sequences land between
+    // words; a plain `includes` on the raw bytes would miss.
+    expect(() =>
+      assertFinalFrame([frame('RESULT \u001b[32mpassed\u001b[0m\n')], 'RESULT passed'),
+    ).not.toThrow();
+  });
+
+  it('rejects the truncated take, and says where the pane stopped', () => {
+    expect(() =>
+      assertFinalFrame(
+        [frame('$ commandmate respond wt-dark-mode 1\nResponse sent.\n\n')],
+        'RESULT passed',
+      ),
+    ).toThrow(/without 'RESULT passed'.*Response sent\./s);
+  });
+
+  it('rejects a take with no frames at all', () => {
+    expect(() => assertFinalFrame([], 'RESULT passed')).toThrow(/without 'RESULT passed'/);
+  });
+
+  it('judges the last frame, not any earlier one', () => {
+    // A run that printed the verdict and then scrolled it away is not a take
+    // that shows the verdict.
+    expect(() =>
+      assertFinalFrame([frame('RESULT passed\n'), frame('$ something else\n')], 'RESULT passed'),
+    ).toThrow(/without 'RESULT passed'/);
   });
 });

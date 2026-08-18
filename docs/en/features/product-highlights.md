@@ -207,7 +207,11 @@ Three things about the storyboards are worth knowing before editing one:
   `source` is resolved against the storyboard's own directory and may not leave it, so a cut can
   only ship a listing it sits with — see `storyboards/code/` and `11-contract-verify.yaml`.
 - `contract-verify` is filmed from a tmux pane, not a browser, and runs the gates for real. It is
-  the slowest scene in the library by a wide margin.
+  the slowest scene in the library by a wide margin. Its pane is **26 rows** rather than a
+  best-fit, and that number is load-bearing: the telop band is fixed at 7.5% from the bottom of
+  the frame for every cut, and a taller pane puts the `GATE` block underneath it. `cli-scene.sh`
+  therefore also routes the two machine-readable stdout payloads (the task id, the prompt JSON) to
+  files — its banners print the redirect, so the pane never shows a command it did not run.
 - `install-skill` needs the network. Offline it fails the run by design; `--allow-skip` turns that
   into a reported skip.
 
@@ -218,7 +222,7 @@ but a scene whose payoff is at the *start* (the Review list before the row is an
 slot close to the whole take. Measured over the 2026-08-18 re-shoot: branch list 4.1–4.7s /
 send-and-generate 20.8–26.5s / attention badge 5.8–6.1s / mobile approval 11.3–12.8s /
 Review screen 15.8–17.8s / diff 9.7–10.2s / slash palette 12.0–15.2s / install Skill 10.3–12.7s /
-back to ready 3.7–4.2s / contract-verify 35.1–36.0s.
+back to ready 3.7–4.2s / contract-verify 37.3–38.8s.
 
 Video is already compressed, so git cannot delta it — **do not re-commit all twelve every time you
 regenerate** (`docs/images/demo-mobile.gif` already sits in history in four versions). Replace

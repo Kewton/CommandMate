@@ -985,6 +985,9 @@ export const SCENES: Scene[] = [
         intervalMs: TERMINAL_CAPTURE_INTERVAL_MS,
         // Two `wait --verify` calls at 180s each, plus the gates themselves.
         timeoutMs: Math.max(options.timeoutMs, TERMINAL_TAKE_TIMEOUT_MS),
+        // The line the whole cut exists to show. A take that ends before it is
+        // a failed take, not a short one (Issue #1811).
+        requireInFinalFrame: 'RESULT passed',
       });
     },
   },

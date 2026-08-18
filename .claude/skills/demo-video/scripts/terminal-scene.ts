@@ -319,6 +319,30 @@ export async function captureFrames(
   }
 }
 
+/** Escape sequences, so a marker split by a colour change still matches. */
+const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
+
+/**
+ * The last frame has to carry the take's verdict (Issue #1811).
+ *
+ * `captureFrames` stops when the session ends, and a script that died half way
+ * through ends its session too. The take is then short, encodes fine, and
+ * composes into a cut whose telop promises something the footage never reaches
+ * — measured on the #1811 re-shoot, where cli-scene.sh's post-`respond` probe
+ * gave up and the ja cut shipped ending at `Response sent.`, no GATE block on
+ * it. "The session ended" is therefore necessary but not sufficient; what the
+ * pane finally said is the sufficient part.
+ */
+export function assertFinalFrame(frames: readonly CapturedFrame[], marker: string): void {
+  const last = frames[frames.length - 1];
+  const text = (last?.text ?? '').replace(ANSI, '');
+  if (text.includes(marker)) return;
+  const tail = text.split('\n').filter((line) => line.trim() !== '').slice(-3).join(' / ');
+  throw new Error(
+    `the take ended without '${marker}' on screen — the pane finished at: ${tail || '(blank)'}`,
+  );
+}
+
 // ------------------------------------------------------------- tmux ---------
 
 export function tmuxArgs(socket: string, rest: readonly string[]): string[] {
@@ -441,6 +465,8 @@ export interface TerminalSceneOptions {
   workDir: string;
   intervalMs: number;
   timeoutMs: number;
+  /** Text the last captured frame must carry; see {@link assertFinalFrame}. */
+  requireInFinalFrame?: string;
 }
 
 export function startCliSession(options: TerminalSceneOptions): void {
@@ -478,6 +504,9 @@ export async function recordTerminalScene(options: TerminalSceneOptions): Promis
   }
   if (result.frames.length === 0) {
     throw new Error('captured no frames: the tmux session ended before it painted anything');
+  }
+  if (options.requireInFinalFrame) {
+    assertFinalFrame(result.frames, options.requireInFinalFrame);
   }
 
   const files = await renderFrames(result.frames, {
