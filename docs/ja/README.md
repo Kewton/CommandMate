@@ -15,9 +15,9 @@
   <img src="../images/demo-desktop.gif" width="600" alt="CommandMate デスクトップデモ" />
 </p>
 
-> **ターミナルをさばくな。エージェント CLI をオーケストレーションしよう。**
+> **vibe coding から、Vibe Engineering へ。**
 
-CommandMate は、エージェント CLI のローカルコントロールプレーンです。
+Vibe Engineering — 作るのは AI。エンジニアリングを保証するのは、あなたの専門知識ではなく仕組み。
 
 ```bash
 npx commandmate@latest
@@ -27,8 +27,8 @@ npx commandmate@latest
 
 ---
 
-CommandMate は、既存のエージェント CLI の上にオーケストレーションと可視性を追加します。
-tmux、Git worktree、ターミナルを置き換えません。大規模な管理を容易にします。
+CommandMate は、既に使っているエージェント CLI の上に**仕組み**を足します。作業の前に契約を、作業の後に検証ゲートを、方法論は Skill として。
+tmux も Git worktree もターミナルもエージェント CLI も置き換えません。それらに枠をかけ、成果物が「終わった」ではなく「検証済み」で返るようにします。
 
 <p align="center">
   <img src="../images/demo-mobile.gif" width="300" alt="CommandMate モバイルデモ" />
@@ -44,8 +44,13 @@ tmux、Git worktree、ターミナルを置き換えません。大規模な管�
 
 | 機能 | できること | なぜ重要か |
 |------|-----------|-----------|
+| **実行契約（Task Contract）** | 作業を始める前に goal・変更してよい scope・検証ゲートを宣言し、`send --contract` でエージェントへ渡す | エージェントは推測ではなく、書かれた完了定義に向かって働く |
+| **検証ゲート** | `.commandmate/verify.yaml` に宣言したゲートを `verify` / `wait --verify` で実行し、exit `0` / `20` / `21` を返す | 「完了」はエージェントの申告ではなく、検証ランが返した裁定になる |
+| **証跡とメトリクス** | 組み込みの work-evidence / scope ゲートに加え、`verify history`・`task show`・`report metrics` | commit・ゲートログ・数値が残り、次の判断の材料になる |
+| **Skills カタログ** | 公式 Catalog の Skill を worktree ごとに導入・更新（Web UI / `commandmate skill`） | 方法論は誰かの頭の中ではなく、エージェントが読む形で導入される |
+| **入力待ちを見逃さない** | 入力待ちがバッジ・トースト・タブタイトル・PWA の App Badge・push 通知で届く | エージェントがあなたを必要とした瞬間に、席を外していても気づける |
 | **Git Worktree セッション** | worktree ごとに独立したセッション、並列実行 | 複数の Issue が干渉なく同時に進む |
-| **マルチエージェント対応** | Issue ごとに Claude Code、Codex、Gemini、ローカルモデルを選択 | タスクに最適なエージェントを使い分け |
+| **マルチエージェント対応** | worktree ごとに Claude Code / Codex / Gemini CLI / Copilot / OpenCode / Antigravity / ローカルモデルを選択 | タスクに最適なエージェントを使い分け |
 | **Auto Yes モード** | 確認なしでエージェントが動き続ける | 信頼できるワークフロー向けのオプショナル自動実行モード |
 | **Web UI（デスクトップ & モバイル）** | あらゆるブラウザからセッションを操作 | デスクからでもスマホからでも監視・指示が可能 |
 | **ファイルビューワ & Markdown エディタ** | ブラウザからファイルの閲覧・編集 | IDE を開かずにコード確認や AI への指示更新 |
@@ -79,18 +84,47 @@ tmux、Git worktree、ターミナルを置き換えません。大規模な管�
 
 ---
 
+## アプリとしてインストール（PWA）
+
+CommandMate は Progressive Web App です。モバイルブラウザの**ホーム画面に追加**から全画面（standalone）で起動でき、外出先でエージェントを監視するのに向いています。Service Worker が静的アセットを事前キャッシュし、オフライン時はフォールバック画面を表示します。API レスポンス・ログイン画面・WebSocket 通信はキャッシュしません。
+
+> **インストールには HTTPS が必要です。** ブラウザが Service Worker を登録する（＝インストールを提示する）のは `https://` か `http://localhost` の場合だけです。LAN 上の平文 HTTP（例: `http://192.168.x.x:3000`）でアクセスしている間は、ブラウザ側の制約でインストールとオフライン対応が無効になります。有効にするにはトンネルか HTTPS のリバースプロキシを使ってください（上のセキュリティ節を参照）。PWA レイヤーなしでもアプリ本体は完全に利用できます。
+
+---
+
+## ブラウザ対応
+
+Web UI は Tailwind CSS 4 で構築しており、配色・テーマの層で `@property` と `color-mix()` を使うため、
+モダンブラウザを対象としています。最低対応バージョンは次のとおりです。
+
+| ブラウザ | 最低バージョン |
+|---------|--------------|
+| Safari (macOS / iOS) | 16.4+ |
+| Chrome / Edge | 111+ |
+| Firefox | 128+ |
+
+これより古いブラウザでも読み込めますが、配色と余白が劣化した状態で表示されます。
+CommandMate はローカルの開発者向けツールなので、現行の開発マシンやスマートフォンに
+入っているブラウザとこの範囲は一致します。
+
+---
+
 ## 仕組み
 
 ```mermaid
 flowchart LR
     A["ブラウザ / スマホ"] -->|HTTP| B["CommandMate Server"]
     B --> C["Session Manager"]
+    G["Task Contract\n.commandmate/tasks/*.yaml"] --> C
     C -->|"spawn / attach"| D["tmux sessions\n(worktree ごと)"]
-    D --> E["Claude Code CLI"]
+    D --> E["Agent CLI"]
     C <-->|"read / write"| F[("Local DB\n& State")]
+    E --> H["Verification Gates\n.commandmate/verify.yaml"]
+    H -->|"exit 0 / 20 / 21"| B
 ```
 
 Git worktree ごとに専用の tmux セッションが割り当てられるため、複数タスクを干渉なく並列実行できます。
+契約はセッションを起動する前に入り、ゲートはセッションが止まった後に走ります。その exit code が裁定です。
 
 ---
 
@@ -333,55 +367,91 @@ npm start
 ---
 
 <details>
-<summary><strong>競合比較</strong></summary>
+<summary><strong>With / Without CommandMate</strong></summary>
 
-| 機能 | CommandMate | Remote Control（公式） | Happy Coder | claude-squad | Omnara |
-|------|:-----------:|:---------------------:|:-----------:|:------------:|:------:|
-| Auto Yes モード | あり | なし | なし | あり（TUI のみ） | なし |
-| Git Worktree 管理 | あり | なし | なし | あり（TUI のみ） | なし |
-| 並列セッション | あり | **なし（1つのみ）** | あり | あり | なし |
-| モバイル Web UI | あり | あり（claude.ai） | あり | **なし** | あり |
-| ファイルビューワ | あり | なし | なし | なし | なし |
-| Markdown エディタ | あり | なし | なし | なし | なし |
-| スクリーンショット指示 | あり | なし | なし | 不可能 | なし |
-| スケジュール実行 | あり | なし | なし | なし | なし |
-| PC を閉じても継続 | あり（デーモン） | **なし（ターミナル必須）** | あり | あり | あり |
-| トークン認証 | あり | N/A（Anthropic アカウント） | N/A（アプリ） | なし | N/A（クラウド） |
-| 無料 / OSS | あり | Pro/Max 必須 | 無料+有料 | あり | $20/月 |
-| 完全ローカル実行 | あり | Anthropic API 経由 | サーバー経由 | あり | クラウドフォールバック |
+比べるべき相手は他の製品ではなく、**やり方**です。
+
+| 観点 | vibe coding（丸投げ） | Vibe Engineering with CommandMate |
+|---|---|---|
+| 「完了」の意味 | エージェントが「できた」と言ったとき | 検証ランがそう言ったとき — exit 0 / 20 / 21 |
+| 変更範囲 | エージェントが触った範囲すべて | 契約で宣言し、scope ゲートで強制する |
+| 方法論 | 誰かの頭の中 | Catalog から Skill として導入する（`cmate-task-contract` / `cmate-verify` ほか） |
+| 証跡 | チャットの履歴 | commit ・ ゲートログ ・ `verify history` ・ `report metrics` |
+| 並列作業 | ターミナルのタブ | タスクごとに worktree 1 つと契約 1 つ |
+| 止まったとき | そのうち気づく | 入力待ちが届く: バッジ ・ トースト ・ タブタイトル ・ 通知 |
+| 使えるエージェント | 1 つに固定 | Claude Code ・ Codex ・ Gemini CLI ・ Copilot ・ OpenCode ・ Antigravity ・ ローカルモデル |
 
 </details>
 
 ---
 
-## オプショナルワークフローレイヤー
+## Vibe Engineering ワークフロー
 
 <a id="issue-driven-development"></a>
 
-チームでより構造的な開発を行いたい場合、CommandMate は Issue の精査、設計レビュー、
-計画立案、実装、受け入れチェックの標準化もサポートします。
-これらのワークフローは同じ CLI セッションと worktree の上に構築されます。利用は任意です。
-
-CommandMate は、ファイルを直接編集する時間よりも、Issue を定義し、方向性を確認し、コーディングエージェントの成果を受け入れる時間の方が長い開発者のために作られています。以下のコマンドは、そのワークフローを再現可能なプロセスに変えます。
+AI を賢くするのではなく、AI を使う側に必要だったソフトウェアエンジニアリング能力を仕組み化する。
+その仕組みは、どのエージェントにも渡せる 3 つで構成されます。**方法論**は導入された Skill として、
+**契約**は作業の前に宣言するものとして、**ゲート**は作業の後に完了を裁定するものとして。
 
 ```
-Issue 定義 → AI で補強 → 方向性レビュー → 計画生成 → エージェントが実行
+要求 → 契約 → エージェントが実行（任意の CLI・worktree ごと） → 検証済みの成果物
 ```
 
-| ステップ | コマンド | 実行内容 |
-|---------|---------|---------|
-| Issue を補強 | `/issue-enhance` | AI が不足情報を質問し、Issue を補完 |
-| Issue レビュー | `/multi-stage-issue-review` | 多段階レビュー（整合性・影響範囲）と指摘の自動対応 |
-| 設計レビュー | `/multi-stage-design-review` | 4 段階レビュー（通常 → 整合性 → 影響分析 → セキュリティ） |
-| 作業計画 | `/work-plan` | タスク分割と依存関係を生成 |
-| TDD 実装 | `/tdd-impl` | Red-Green-Refactor サイクルを自動実行 |
-| 受入テスト | `/acceptance-test` | Issue の受入基準を検証 |
-| PR 作成 | `/create-pr` | タイトル・説明・ラベルを自動生成 |
-| 開発（一括） | `/pm-auto-dev` | TDD 実装 → 受入テスト → リファクタリング → 進捗レポート |
-| Issue → 実装（一括） | `/pm-auto-issue2dev` | Issue レビュー → 設計レビュー → 作業計画 → TDD 実装 → 受入テスト → リファクタリング → 進捗レポート |
-| 設計 → 実装（一括） | `/pm-auto-design2dev` | 設計レビュー → 作業計画 → TDD 実装 → 受入テスト → リファクタリング → 進捗レポート |
+### 1. 方法論を Skill として導入する
 
-詳細は CommandMate リポジトリの [Issues](https://github.com/Kewton/CommandMate/issues)、[開発レポート](../../dev-reports/issue/)、[ワークフロー例](../user-guide/workflow-examples.md) を参照してください。
+Skill は公式 Catalog（[Kewton/commandmate-skills](https://github.com/Kewton/commandmate-skills)）から
+取得し、選んだ worktree に導入します。Web UI（`/skills`、または worktree 詳細の Skills pane）からでも、
+CLI からでも実行できます。
+
+```bash
+commandmate skill list
+commandmate skill install cmate-task-contract --worktree <worktree-id> --version <version> --yes
+```
+
+| Skill | 扱う範囲 |
+|-------|---------|
+| `cmate-issue-authoring` | Feature 記述から実装可能な Issue 群を起案する |
+| `cmate-issue-refinement` | 曖昧な Issue を read-only で実装可能な仕様へ精緻化する |
+| `cmate-task-contract` | Issue から `.commandmate/tasks/<name>.yaml`（goal・scope・ゲート）を起案する |
+| `cmate-verify` | `.commandmate/verify.yaml` にゲートを宣言し、実 exit code で判定する |
+| `cmate-verify-advisor` | 検証の実行履歴から verify.yaml の改善案を出す |
+| `cmate-worker-development` | ワーカーが進める 6 段（読取・調査・計画・実装・検証・証拠） |
+| `cmate-acceptance-test` | Issue の受入条件を証跡付きで検証し Go / Conditional Go / No-Go を返す |
+| `cmate-orchestrate` | 複数 Issue を並列に計画し、契約付きで dispatch して exit code で裁定する |
+
+Catalog にはこのほか `cmate-repository-analysis` / `cmate-orchestrate-monitor` /
+`cmate-worktree-setup` / `cmate-worktree-cleanup` も公開されています。support matrix・install root・
+rollback の扱いは [Skills 配布ガイド](../user-guide/skills.md) を参照してください。
+
+### 2. 契約を宣言し、ゲートに裁定させる
+
+```bash
+# .commandmate/tasks/issue-123.yaml に goal・scope.allow / scope.deny・実行するゲートを宣言する
+commandmate send <worktree-id> --contract .commandmate/tasks/issue-123.yaml
+commandmate wait <worktree-id> --verify
+```
+
+`--contract` がメッセージを供給するため、メッセージ引数は渡しません。`wait --verify` は
+エージェントが停止した後にゲートを実行し、裁定を exit code で返します。**0** は全ゲート合格、
+**20** はいずれかのゲートが不合格、**21** は work-evidence ゲートが commit も未 commit の変更も
+見つけられなかった場合です。
+
+契約の書式は [実行契約 仕様](../design/task-contract.md)、ゲートの書式は
+[検証ゲート設定 仕様](../design/verification-config.md) が正準です。
+
+### 次に読むもの
+
+| ドキュメント | 得られるもの |
+|-------------|------------|
+| [コンセプト](../concept.md) | Vision・Mission と、各実装項目がどの機能に対応するか |
+| [チュートリアル](../user-guide/tutorial.md) | サンプルリポジトリを fork し、契約から検証までを 15 分ほどで一通り体験する |
+| [プロダクトの特徴](../features/product-highlights.md) | 機能ごとの紹介 |
+| [CLI 操作ガイド](../user-guide/cli-operations-guide.md) | エージェント操作系コマンドの詳細 |
+
+> **CommandMate 自体を開発する場合。** `.claude/commands` 配下の `/work-plan` `/pm-auto-dev` などの
+> スラッシュコマンドは**このリポジトリ専用**です。あなたのリポジトリには導入されません。可搬な
+> 代替は上の Catalog Skill です。詳細は [コマンド利用ガイド](../user-guide/commands-guide.md) を
+> 参照してください。
 
 ---
 
@@ -390,9 +460,12 @@ Issue 定義 → AI で補強 → 方向性レビュー → 計画生成 → エ
 | ドキュメント | 説明 |
 |-------------|------|
 | [CLI セットアップガイド](../user-guide/cli-setup-guide.md) | インストールと初期設定 |
+| [チュートリアル](../user-guide/tutorial.md) | サンプルリポジトリを fork し、契約から検証済みの成果物までを 15 分ほどで体験する |
 | [Webアプリ操作ガイド](../user-guide/webapp-guide.md) | Webアプリの基本操作 |
 | [クイックスタート](../user-guide/quick-start.md) | Claude Code コマンドの使い方 |
-| [コンセプト](../concept.md) | ビジョンと解決する課題 |
+| [コンセプト](../concept.md) | Vision・Mission・中核原則の正本と、各実装項目と機能の対応 |
+| [プロダクトの特徴](../features/product-highlights.md) | 機能ごとの紹介 |
+| [Skills 配布ガイド](../user-guide/skills.md) | 公式 Catalog の Skill を worktree へ導入する |
 | [アーキテクチャ](../architecture.md) | システム設計 |
 | [デプロイガイド](../DEPLOYMENT.md) | 本番環境構築手順 |
 | [UI/UXガイド](../UI_UX_GUIDE.md) | UI 実装の詳細 |
