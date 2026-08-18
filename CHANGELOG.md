@@ -9,7 +9,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- **README（EN / JA）の hero・Key Features・ワークフロー節・比較表を Vibe Engineering 軸へ整合** (#1814): hero を `docs/design/public-messaging.md` の H1 ＋定義文に差し替え、Key Features 先頭に Task Contract / Verification Gates / Evidence & Metrics / Skills Catalog / 入力待ち通知の 5 行を追加し、Multi-Agent 行を 7 CLI（`CLI_TOOL_IDS` 実数）へ更新した。「Optional Workflow Layer」は `## Vibe Engineering workflow` へ昇格して "optional, not required" を削除し、公式 Catalog Skill と `send --contract` → `wait --verify` の最小コマンド列で説明する構成に変えた（`.claude/commands` 表はこのリポジトリ限定である旨を明記して 1 行リンクへ縮退）。競合 4 製品名の比較表は With / Without CommandMate 表に置換。ガード `tests/unit/docs/public-messaging.test.ts` の対象に両 README を追加した
+
 - **Mission / Vision を `docs/concept.md` / `docs/en/concept.md` に正本化し、公開面の文言表 `docs/design/public-messaging.md` を新設** (#1808): hero・定義文・4 カード・With / Without 表・デモのキャプションとテロップ・チュートリアル導入文・footer タグライン・禁止語リストを ja / en 両方で確定した。軸語 "Vibe Engineering" の一次情報（Simon Willison, 2025-10-07）を実際に確認し出典として記録。禁止語リストはガードテスト `tests/unit/docs/public-messaging.test.ts` の配列と一致していることを固定している
+
+### Fixed
+
+- **fix(demo-video): worktree ID の path 由来化に追従し、収録パイプラインを復旧する** (#1809)
+  - **`demo-video` スキルは #1621 / #1644（v0.20.0）以降、実収録が必ずタイムアウトしていた。**
+    worktree ID が `<repo>-<branch>` から `sanitize(basename(path))`（`deriveWorktreeId`）に
+    変わったのに、harness 側が旧規則の ID を定数で持っていたため。サーバが探す tmux セッション名は
+    `mcbd-claude-wt-dark-mode` なのに harness は別名のセッションを作り、`isSessionRunning` が
+    永久に false のまま全シーンが個別のタイムアウトで死んでいた（警告も出ない）
+  - **ID を定数で持つのをやめ、`env-up.sh` が seed ディレクトリから導出して `state.env` に書く。**
+    `CM_DEMO_PRIMARY_WORKTREE_ID` / `CM_DEMO_WORKTREE_ID` / `CM_DEMO_LOGIN_WORKTREE_ID` /
+    `CM_DEMO_UNSYNCED_WORKTREE_ID` と、それぞれの `*_PATH`。`record-scenes.ts` の
+    `DEFAULT_WORKTREE_ID` / `UNSYNCED_WORKTREE_ID` は**削除**し、引数・環境変数・`state.env` の
+    いずれも与えなければブラウザを開く前に停止する（黙って旧値に落ちない）
+  - **二重の安全策**: 録画開始前とシーンごとの `prepare` で `/api/worktrees` の `path` と
+    `CM_DEMO_WORKTREE_PATH` を突き合わせ、同じディレクトリが別 ID で登録されていたら
+    **その場で** ID と path の両方を出して落ちる。ID はパス単位で初回登録時に凍結されるため、
+    待っても直らない条件をタイムアウトまで待たない
+  - **後片付けは記録駆動にした**。`fake-agent.sh --record-to` が作成したセッション名を
+    `$CM_DEMO_SESSIONS_FILE` に追記し、`env-down.sh` はその記録と `state.env` の ID から組んだ
+    `mcbd-<tool>-<id>[-<suffix>]` だけを kill する。旧実装の `grep -- '-cmdemo-app-'` は
+    新 ID の `mcbd-claude-wt-dark-mode` に一致せず、偽エージェントを取り残していた
+  - **依存チェックに `claude` を追加**。`POST /api/worktrees/[id]/send` は
+    `cliTool.isInstalled()`（実体は `which claude`）が false だと 503 を返すため、未導入だと
+    依存チェックではなく録画の途中でテイクが死ぬ。欠けていれば導入方法を出して収録前に止まる
+  - **テストは製品の規則を固定する形に置き換えた**。旧テストは stale な定数どうしを突き合わせて
+    いたので #1621 を素通りしていた。`deriveWorktreeId` を import して seed ディレクトリ名から
+    ID を導き、`env-scripts.test.ts` は `tmux` スタブを介して「kill する名前」を実測する
+    （実 tmux は触らない）
+  - 隔離環境（`HOME` 差し替え・ポート 3466・`$HOME/.commandmate-demo`）で
+    `demo-video.sh --locale en` を通しで完走させ、尺検証ゲートの通過を確認済み
+
+### Added
+
+- **feat(ui): 実行契約と検証結果を Web UI に露出する** (#1816)
+  - **worktree 詳細ヘッダに状態チップを追加。** task 行を持つ worktree に限り、直近 task の
+    title・TaskStatus・直近検証ランの `RESULT` を表示する。判定の**理由**（不合格ゲートの ID
+    一覧まで）を `aria-label` と `title` の両方に出すため、ポインタでもスクリーンリーダーでも
+    ペインを開かずに読める（`docs/design/discoverability-principle.md` 実装規約 1）
+  - **Activity Bar に「Verification」ペインを追加**（スマホは Tools タブの「検証」サブタブ）。
+    上段=現在の契約（title / goal 冒頭 / `scope.allow` / `verify.gates` / `autoYes.mode`）、
+    中段=検証ラン一覧＋「再検証」、下段=選択ランのゲート表（gate id / PASS・FAIL・TIMEOUT・SKIP /
+    exit code / duration / logTail 末尾 40 行＝CLI の `MAX_PRINTED_LOG_TAIL_LINES` と同値）。
+    契約が無い worktree には `commandmate send --contract` と Skill `cmate-task-contract` を案内する
+    空状態文を出す
+  - **新しい API は 1 つも追加していない。** #1542 / #1543 / #1545 で既に在った
+    `GET /api/worktrees/:id/tasks`、`GET|POST /verify`、`GET /verify/runs[/:runId]` の配線のみ
+  - **独自のポーリングタイマーを増やしていない。** worktree 詳細が既に回している 2s/5s の
+    ポーリング末尾で `pollTick` を上げ、`useWorktreeVerification` がそれに相乗りする
+    （通常は 15s スロットル、`running` ラン中はティックごと）。ヘッダチップと Verification ペインは
+    同じフックの 1 インスタンスを共有するので、2 面同時表示でも要求は倍にならない
+  - en の `RESULT` / `GATE` 語彙は `docs/design/verification-config.md` §3.4 に合わせた
+    （`passed` / `failed` / `not_started`、`PASS` / `FAIL` / `TIMEOUT` / `SKIP`）。
+    tests/unit/i18n/verification-keys-1816.test.ts が en/ja のキー等価と語彙一致を固定する
+  - `docs/design/discoverability-principle.md` の「運用者が読む層」に Web UI を追加し、
+    実装規約に「新しい判定は CLI と Web UI の両方に出す」を追加
 
 - **docs(en): verify / task / skills / hooks の英語ドキュメントを JA と同構成に整備** (#1817) — `docs/en/user-guide/cli-operations-guide.md` に `sync` / `verify` / `task`（実行契約・`gateDefinitions`・無人実行テンプレート）/ 読むモード / `instances` / マルチセッション / `skill` / `report metrics` の各節を追加し、`docs/en/user-guide/skills.md` と `docs/en/user-guide/agent-event-hooks.md` を新規作成。EN `commands-guide.md` に「このリポジトリ限定」の明記と全 27 コマンド表を追加し、`tests/unit/docs/ja-en-heading-parity.test.ts` が 4 対の ja/en で `##` 見出し数の一致を固定する
 

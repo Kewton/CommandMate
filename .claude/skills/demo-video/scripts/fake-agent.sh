@@ -19,6 +19,7 @@ DRY_RUN=0
 CASSETTE=""
 SESSION=""
 SESSION_CWD="$PWD"
+RECORD_TO=""
 
 # Matches TUI_PANE_WIDTH / TUI_PANE_HEIGHT (src/config/tmux-pane-config.ts). The
 # server force-reconciles adopted sessions to this geometry, so creating the
@@ -35,6 +36,7 @@ usage() {
   cat <<'USAGE'
 Usage: fake-agent.sh <cassette> [--speed N] [--once] [--dry-run]
        fake-agent.sh <cassette> --session <tmux-name> [--cwd DIR] [--speed N]
+                     [--record-to FILE]
 
   --speed N       divide every delay by N (2.0 = twice as fast). Must be > 0.
   --once          stop after one pass instead of looping back to the idle frame.
@@ -45,6 +47,9 @@ Usage: fake-agent.sh <cassette> [--speed N] [--once] [--dry-run]
                   Use CommandMate's own name, `mcbd-claude-<worktreeId>`, so the
                   server adopts the session instead of starting a real CLI.
   --cwd DIR       working directory for --session (default: current directory).
+  --record-to F   append the created session name to F, one per line. env-down.sh
+                  kills what it finds there, so teardown never has to guess a
+                  name pattern — it stops exactly what was started.
 
 Cassette rows are "<delayMs>|@input <TAB> <payload>"; `#` rows and blank rows
 are ignored. Payloads go through `printf %b`. `{{INPUT}}` is replaced with the
@@ -83,6 +88,11 @@ while [ $# -gt 0 ]; do
       SESSION_CWD="$2"
       shift 2
       ;;
+    --record-to)
+      [ $# -ge 2 ] || die "--record-to needs a value"
+      RECORD_TO="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -108,9 +118,16 @@ if [ "$(awk -v s="$SPEED" 'BEGIN { print (s > 0) ? 1 : 0 }')" != "1" ]; then
   die "--speed must be greater than 0, got '$SPEED'"
 fi
 
+[ -z "$RECORD_TO" ] || [ -n "$SESSION" ] || die "--record-to only means anything together with --session"
+
 if [ -n "$SESSION" ]; then
   command -v tmux >/dev/null 2>&1 || die "tmux not found"
   [ -d "$SESSION_CWD" ] || die "--cwd is not a directory: $SESSION_CWD"
+  if [ -n "$RECORD_TO" ]; then
+    # Checked before the session exists: a session created and then not written
+    # down is exactly the leak --record-to is here to prevent.
+    [ -d "$(dirname "$RECORD_TO")" ] || die "--record-to directory does not exist: $(dirname "$RECORD_TO")"
+  fi
   case "$SESSION" in
     *[!a-zA-Z0-9_-]*) die "session name must match [a-zA-Z0-9_-]+ (CommandMate's SESSION_NAME_PATTERN), got '$SESSION'" ;;
   esac
@@ -125,6 +142,9 @@ if [ -n "$SESSION" ]; then
   else
     tmux new-session -d -s "$SESSION" -c "$SESSION_CWD" -x "$PANE_WIDTH" -y "$PANE_HEIGHT" \
       "$SELF" "$CASSETTE_ABS" --speed "$SPEED" --once
+  fi
+  if [ -n "$RECORD_TO" ]; then
+    printf '%s\n' "$SESSION" >>"$RECORD_TO" || die "could not append to $RECORD_TO"
   fi
   printf '%s\n' "$SESSION"
   exit 0

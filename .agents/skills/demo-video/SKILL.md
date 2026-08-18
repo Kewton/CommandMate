@@ -54,13 +54,15 @@ demo-video/
 ## 依存チェック（着手前に必ず実行）
 
 ```bash
-command -v tmux git curl node || echo "missing"
+command -v tmux git curl node claude || echo "missing"
 ffmpeg -version >/dev/null 2>&1 || echo "ffmpeg missing: brew install ffmpeg"
 ffprobe -version >/dev/null 2>&1 || echo "ffprobe missing: brew install ffmpeg"
 npx playwright install chromium   # 未導入なら実行（導入済みなら no-op）
 ```
 
 いずれかが欠けたら**導入コマンドを提示して停止する**。録画途中で落ちると隔離サーバと tmux セッションが残る。`demo-video.sh` は最初にこれを自前で行い、欠けていれば `brew install` を提示して 1 本目の録画に入る前に止まる。
+
+`claude` が要るのは、実 LLM を使うからではない。`POST /api/worktrees/<id>/send` は他の何を見るより先に `cliTool.isInstalled()`（実体は `which claude`）を評価し、false なら **503** を返す（`src/app/api/worktrees/[id]/send/route.ts`）。バイナリが PATH に無いと、依存チェックではなく**録画の途中**でテイクが死ぬ。
 
 ## パイプライン（demo-video.sh がやること）
 
@@ -97,14 +99,30 @@ npx playwright install chromium   # 未導入なら実行（導入済みなら n
 
 ### 2. 偽エージェントを起動
 
-セッション名は CommandMate 自身の命名規則 `mcbd-<cliTool>-<worktreeId>` に合わせる。worktree id は `<repo 名>-<branch>` を slug 化したもの（`src/lib/git/worktrees.ts` の `generateWorktreeId`）なので、seed リポジトリでは次になる。
+セッション名は CommandMate 自身の命名規則 `mcbd-<cliTool>-<worktreeId>`（primary インスタンスは suffix 無し。`src/lib/session/claude-session.ts` の `getSessionName`）に合わせる。
+
+worktree id は **ディレクトリ由来**である。`id = sanitize(basename(resolvedPath))`、衝突したときだけ `-<sha256(path) の先頭 8 桁>`（`src/lib/git/worktree-id.ts` の `deriveWorktreeId`。Issue #1621 / #1644 / #1645）。ブランチ名は入らない。旧規則 `<repo 名>-<branch>` の採番関数は **@deprecated** で `src/` から呼ばれていない。
+
+**id をここに書き写さないこと。** `env-up.sh` が seed ディレクトリから導出して `state.env` に書くので、そこから読む（Issue #1809。旧規則の定数を持っていた頃は、harness が作る tmux セッション名をサーバが一切探さず、セッションが採用されないまま全シーンがタイムアウトした）。
 
 ```bash
-WT=cmdemo-app-feature-demo-dark-mode
+. "$HOME/.commandmate-demo/state.env"    # CM_DEMO_WORKTREE_ID 等が入る
 .claude/skills/demo-video/scripts/fake-agent.sh \
   .claude/skills/demo-video/fixtures/claude-session-sample.cast \
-  --session "mcbd-claude-$WT" --cwd "$CM_DEMO_SEED_ROOT/wt-dark-mode"
+  --session "mcbd-claude-$CM_DEMO_WORKTREE_ID" --cwd "$CM_DEMO_WORKTREE_PATH" \
+  --record-to "$CM_DEMO_SESSIONS_FILE"
 ```
+
+`--record-to` は作ったセッション名を追記する。`env-down.sh` は**その記録**を kill 対象にするので、後片付けが名前パターンの推測に依存しない。
+
+`state.env` が持つ id と path（seed の basename がそのまま id になる）:
+
+| キー | 値 | ディレクトリ |
+|------|----|-------------|
+| `CM_DEMO_PRIMARY_WORKTREE_ID` | `cmdemo-app` | `seed/cmdemo-app` |
+| `CM_DEMO_WORKTREE_ID` / `CM_DEMO_WORKTREE_PATH` | `wt-dark-mode` | `seed/wt-dark-mode` |
+| `CM_DEMO_LOGIN_WORKTREE_ID` / `CM_DEMO_LOGIN_WORKTREE_PATH` | `wt-login-error` | `seed/wt-login-error` |
+| `CM_DEMO_UNSYNCED_WORKTREE_ID` / `CM_DEMO_UNSYNCED_WORKTREE_PATH` | `wt-api-cache` | `seed/wt-api-cache` |
 
 サーバは同名の既存セッションを**新規作成せずそのまま採用する**（`claude-session.ts` の `hasSession` → `ensureHealthySession`）。カセットの 1 フレーム目が `❯` プロンプトを含むのはこのためで、空 pane は「CLI が落ちた」と判定されてセッションごと kill される。
 
@@ -114,7 +132,13 @@ WT=cmdemo-app-feature-demo-dark-mode
 npx tsx .claude/skills/demo-video/scripts/record-scenes.ts --locale ja
 # 主なオプション: --scene <id> / --out <dir> / --locale ja|en / --theme dark
 #                --viewport 1440x900 / --message "..." / --headed
+#                --worktree <id> / --worktree-path <dir>
+#                --unsynced-worktree <id> / --unsynced-worktree-path <dir>
 ```
+
+worktree id に**既定値は無い**。`--worktree` か環境変数 `CM_DEMO_WORKTREE_ID`、どちらも無ければ `--state` の指す `state.env` から読む。3 つとも空なら**ブラウザを開く前に落ちる**（`sync-worktrees` を撮るときは `CM_DEMO_UNSYNCED_WORKTREE_ID` も同様に必須）。
+
+さらに録画開始前に `/api/worktrees` の `path` と `CM_DEMO_WORKTREE_PATH` を突き合わせ、同じディレクトリを別 id で持っていたら**その場で** id と path の両方を出して落ちる（`assertIdForPath`）。id は初回登録時に確定して以後動かないので（`syncWorktreesToDB` はパスで既存行を引く）、待っても直らない条件をタイムアウトまで待たない。
 
 シーンは**部品**であり、1 本の絵コンテが全部を使う必要はない（#1575）。絵コンテは使う id だけを並べ、`demo-video.sh` はその id だけを撮る:
 
@@ -125,7 +149,7 @@ npx tsx .claude/skills/demo-video/scripts/record-scenes.ts --locale ja
 | `respond-from-mobile` | **mobile** | スマホ幅で承認シートを開いて承認 | `isWaitingForResponse === true` → 承認後 `false` に戻るまで |
 | `complete` | pc | ready に戻った一覧 | `isProcessing === false && isSessionRunning === true` |
 | `add-repository` | pc | リポジトリ画面で**パス指定**の登録（clone URL ではない＝ネットワークに出ない） | `/api/repositories` に `CM_DEMO_SEED_REPO_2` が**無い**こと → 登録後は出るまで |
-| `sync-worktrees` | pc | 外部で作られた worktree を「すべて同期」で認識させる | `/api/worktrees` に `cmdemo-app-feature-demo-api-cache` が**無い**こと → 同期後は出るまで |
+| `sync-worktrees` | pc | 外部で作られた worktree を「すべて同期」で認識させる | `/api/worktrees` に `CM_DEMO_UNSYNCED_WORKTREE_ID`（既定 `wt-api-cache`）が**無い**こと → 同期後は出るまで |
 | `review-diff` | pc | Git アクティビティを開いて未コミット差分を表示 | `/api/worktrees/<id>/git/staged` の `unstaged` が非空になるまで |
 
 `review-diff` の同期点が `git/diff` ではなく `git/staged` なのは、`git/diff` が**コミット指定専用**（`commit` が 7〜40 桁の hash でないと 400）で作業ツリーの変更を一切返せないため。Git ペイン自身も `git/staged` を読む。
@@ -177,6 +201,11 @@ git status --short     # 何も出ないこと
 .claude/skills/demo-video/scripts/env-down.sh          # サーバ停止 + demo tmux セッション kill + seed 削除
 .claude/skills/demo-video/scripts/env-down.sh --purge  # DB・ログ・録画も消す
 ```
+
+tmux セッションの kill 対象は 2 系統で、どちらも**この run が記録した名前・id にしか一致しない**。`mcbd-*` の総なめはしない（この tmux サーバは開発者自身の稼働セッションを抱えている）。
+
+1. `fake-agent.sh --record-to` が `$CM_DEMO_SESSIONS_FILE` に追記した名前
+2. `state.env` の 4 つの demo worktree id に対する `mcbd-<tool>-<id>[-<suffix>]` — サーバ自身が起こしたセッションや追加インスタンスを拾う
 
 **手順 1 以降のどこで失敗しても、必ず 6 まで到達させること。** 途中で諦めると隔離サーバがポートを掴んだまま残り、次回の `env-up.sh` が state ファイルの存在を理由に起動を拒否する（これは意図的な設計。壊れた状態に上書きするより止める）。`demo-video.sh` は `trap ... EXIT INT TERM` でこれを保証する。
 

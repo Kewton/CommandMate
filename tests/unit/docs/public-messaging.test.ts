@@ -24,6 +24,11 @@
  *    fails the doc instead of failing the render months later.
  * 6. **No table cell is left blank.** The brief was "every item filled in both
  *    ja and en"; a blank cell is how a later issue ends up inventing wording.
+ * 7. **The two READMEs are held to the same pins as the concept files**
+ *    (Issue #1814). They are the surface most likely to be edited by someone
+ *    who never opens public-messaging.md, so the hero, the definition and the
+ *    retired wording are asserted there directly — and the two languages are
+ *    kept structurally parallel for the same reason the concept files are.
  *
  * @vitest-environment node
  */
@@ -38,6 +43,8 @@ const REPO_ROOT = path.resolve(__dirname, '../../..');
 const MESSAGING_DOC = 'docs/design/public-messaging.md';
 const CONCEPT_JA = 'docs/concept.md';
 const CONCEPT_EN = 'docs/en/concept.md';
+const README_EN = 'README.md';
+const README_JA = 'docs/ja/README.md';
 const STORYBOARD = '.claude/skills/demo-video/scripts/storyboard.ts';
 
 /**
@@ -77,6 +84,11 @@ function tableCells(line: string): string[] | null {
   const trimmed = line.trim();
   if (!trimmed.startsWith('|') || !trimmed.endsWith('|')) return null;
   return trimmed.slice(1, -1).split('|');
+}
+
+/** Top-level sections, the cheapest proxy for "both languages got the edit". */
+function sectionCount(content: string): number {
+  return content.split('\n').filter((line) => /^## /.test(line)).length;
 }
 
 function isSeparatorRow(cells: string[]): boolean {
@@ -175,9 +187,8 @@ describe('concept docs are the canonical Vision/Mission text', () => {
   });
 
   it('keeps the same number of ## sections in both languages', () => {
-    const count = (content: string) => content.split('\n').filter((l) => /^## /.test(l)).length;
-    expect(count(ja)).toBeGreaterThan(0);
-    expect(count(en)).toBe(count(ja));
+    expect(sectionCount(ja)).toBeGreaterThan(0);
+    expect(sectionCount(en)).toBe(sectionCount(ja));
   });
 
   it('draws the loop without an image', () => {
@@ -197,6 +208,42 @@ describe('concept docs are the canonical Vision/Mission text', () => {
       expect(ja, `${CONCEPT_JA} must list ${id}`).toContain(id);
       expect(en, `${CONCEPT_EN} must list ${id}`).toContain(id);
     }
+  });
+});
+
+describe('the READMEs carry the same axis as the concept docs', () => {
+  const en = readProse(README_EN);
+  const ja = readProse(README_JA);
+
+  it('opens with the hero and the definition, each in its own language', () => {
+    expect(en, `${README_EN} must open with the en hero verbatim`).toContain(HERO_H1_EN);
+    expect(en, `${README_EN} must carry the en definition verbatim`).toContain(DEFINITION_EN);
+    expect(ja, `${README_JA} must open with the ja hero verbatim`).toContain(HERO_H1_JA);
+    expect(ja, `${README_JA} must carry the ja definition verbatim`).toContain(DEFINITION_JA);
+  });
+
+  it.each([
+    [README_EN, en],
+    [README_JA, ja],
+  ])('%s uses none of the banned terms', (relative, prose) => {
+    const lowered = prose.toLowerCase();
+    const found = BANNED_TERMS.filter((term) => lowered.includes(term.toLowerCase()));
+    expect(found, `${relative} still uses retired wording`).toEqual([]);
+  });
+
+  it.each([
+    [README_EN, en],
+    [README_JA, ja],
+  ])('%s names the axis in the hero and again on the workflow section', (relative, prose) => {
+    // Two is the floor the issue set: the hero says it once, the workflow
+    // heading says it again. Fewer means one of the two was reverted.
+    const occurrences = prose.split('Vibe Engineering').length - 1;
+    expect(occurrences, `${relative} must name the axis at least twice`).toBeGreaterThanOrEqual(2);
+  });
+
+  it('keeps the same number of ## sections in both languages', () => {
+    expect(sectionCount(ja)).toBeGreaterThan(0);
+    expect(sectionCount(en)).toBe(sectionCount(ja));
   });
 });
 

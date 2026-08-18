@@ -15,9 +15,9 @@
   <img src="./docs/images/demo-desktop.gif" width="600" alt="CommandMate Desktop Demo" />
 </p>
 
-> **Orchestrate your agent CLIs, not your terminal tabs.**
+> **From vibe coding to Vibe Engineering.**
 
-CommandMate is a local control plane for agent CLIs.
+Vibe Engineering — the AI does the building; the system, not your expertise, guarantees the engineering.
 
 ```bash
 npx commandmate@latest
@@ -27,8 +27,8 @@ npx commandmate@latest
 
 ---
 
-CommandMate adds orchestration and visibility on top of your existing agent CLIs.
-It does not replace tmux, Git worktrees, or your terminal. It makes them easier to manage at scale.
+CommandMate adds the machinery — a contract before the work, verification gates after it, Skills that carry the method — on top of the agent CLIs you already use.
+It does not replace tmux, Git worktrees, your terminal, or your agent CLI. It puts a frame around them, so the work arrives verified instead of merely finished.
 
 <p align="center">
   <img src="./docs/images/demo-mobile.gif" width="300" alt="CommandMate Mobile Demo" />
@@ -44,8 +44,13 @@ If this is the kind of AI development workflow you want, [give the repo a star](
 
 | Feature | What it does | Why it matters |
 |---------|-------------|----------------|
+| **Task Contract** | Declare the goal, the changeable scope and the gates before the work starts, then `send --contract` hands them to the agent | The agent works to a written definition of done instead of guessing at one |
+| **Verification Gates** | Gates declared in `.commandmate/verify.yaml` run through `verify` / `wait --verify` and return exit `0` / `20` / `21` | "Done" is what a verification run returned, not what the agent said |
+| **Evidence & Metrics** | The built-in work-evidence and scope gates, plus `verify history`, `task show` and `report metrics` | Commits, gate logs and numbers are left behind for the next decision |
+| **Skills Catalog** | Install and update official Skills per worktree, from the web UI or `commandmate skill` | The method is installed for the agent to read, not kept in someone's head |
+| **Never miss a waiting agent** | A waiting agent shows up as a badge, a toast, the tab title, the PWA app badge and a push notification | You find out the moment an agent needs you, even away from the desk |
 | **Git Worktree Sessions** | One session per worktree, parallel execution | Multiple issues progress simultaneously without interference |
-| **Multi-Agent Support** | Choose Claude Code, Codex, Gemini, or local models per issue | Pick the right agent for each task |
+| **Multi-Agent Support** | Choose Claude Code, Codex, Gemini CLI, Copilot, OpenCode, Antigravity or local models per worktree | Pick the right agent for each task |
 | **Auto Yes Mode** | Agent runs without stopping for confirmations | Optional unattended mode for trusted workflows — review the Security section before enabling |
 | **Web UI (Desktop & Mobile)** | Full session control from any browser | Monitor and steer from your desk or your phone |
 | **File Viewer & Markdown Editor** | Browse and edit worktree files in the browser | Review changes and update AI instructions without opening an IDE |
@@ -111,12 +116,16 @@ development machine or phone will already have.
 flowchart LR
     A["Browser / Phone"] -->|HTTP| B["CommandMate Server"]
     B --> C["Session Manager"]
+    G["Task Contract\n.commandmate/tasks/*.yaml"] --> C
     C -->|"spawn / attach"| D["tmux sessions\n(per worktree)"]
-    D --> E["Claude Code CLI"]
+    D --> E["Agent CLI"]
     C <-->|"read / write"| F[("Local DB\n& State")]
+    E --> H["Verification Gates\n.commandmate/verify.yaml"]
+    H -->|"exit 0 / 20 / 21"| B
 ```
 
 Each Git worktree gets its own tmux session, so multiple tasks run in parallel without interference.
+The contract goes in before the session starts; the gates run after it stops, and their exit code is the verdict.
 
 ---
 
@@ -405,55 +414,92 @@ npm start
 ---
 
 <details>
-<summary><strong>Comparison</strong></summary>
+<summary><strong>With / Without CommandMate</strong></summary>
 
-| Feature | CommandMate | Remote Control (Official) | Happy Coder | claude-squad | Omnara |
-|---------|:-----------:|:------------------------:|:-----------:|:------------:|:------:|
-| Auto Yes Mode | Yes | No | No | Yes (TUI only) | No |
-| Git Worktree Management | Yes | No | No | Yes (TUI only) | No |
-| Parallel Sessions | Yes | **No (1 only)** | Yes | Yes | No |
-| Mobile Web UI | Yes | Yes (claude.ai) | Yes | **No** | Yes |
-| File Viewer | Yes | No | No | No | No |
-| Markdown Editor | Yes | No | No | No | No |
-| Screenshot Instructions | Yes | No | No | Not possible | No |
-| Scheduled Execution | Yes | No | No | No | No |
-| Survives Laptop Close | Yes (daemon) | **No (terminal must stay open)** | Yes | Yes | Yes |
-| Token Authentication | Yes | N/A (Anthropic account) | N/A (app) | No | N/A (cloud) |
-| Free / OSS | Yes | Requires Pro/Max | Free + Paid | Yes | $20/mo |
-| Runs 100% Locally | Yes | Via Anthropic API | Server-routed | Yes | Cloud fallback |
+The comparison that matters is not against other products; it is against the way of working.
+
+| Dimension | Vibe coding | Vibe Engineering with CommandMate |
+|---|---|---|
+| What "done" means | The agent says it's done | A verification run says so — exit 0 / 20 / 21 |
+| Scope of change | Whatever the agent touched | Declared in the contract, enforced by the scope gate |
+| Method | In someone's head | Installed as Skills from the Catalog (`cmate-task-contract`, `cmate-verify`, …) |
+| Evidence | A chat transcript | Commits, gate logs, `verify history`, `report metrics` |
+| Parallel work | Terminal tabs | One worktree and one contract per task |
+| When it stops | You notice, eventually | Waiting is surfaced: badge, toast, tab title, push |
+| Which agent | Locked to one | Claude Code, Codex, Gemini CLI, Copilot, OpenCode, Antigravity, local models |
 
 </details>
 
 ---
 
-## Optional Workflow Layer
+## Vibe Engineering workflow
 
 <a id="issue-driven-development"></a>
 
-If your team wants more structure, CommandMate can also help you standardize
-issue refinement, design review, planning, implementation, and acceptance checks.
-These workflows build on top of the same CLI sessions and worktrees. They are optional, not required.
-
-CommandMate is built for developers who spend less time editing files and more time defining issues, reviewing direction, and accepting outcomes from coding agents. The commands below turn that workflow into a repeatable process.
+We do not make the AI smarter. We make the software-engineering ability its user needed into a system.
+That system is three things you can hand to any agent: the method, as installed Skills; the contract,
+declared before the work; the gates, which decide afterwards whether the work is done.
 
 ```
-Define Issue → Refine with AI → Review Direction → Generate Plan → Agent Executes
+Requirement → Contract → Agent runs (any CLI, per worktree) → Verified result
 ```
 
-| Step | Command | What happens |
-|------|---------|-------------|
-| Refine the issue | `/issue-enhance` | AI asks clarifying questions and fills in missing details |
-| Review the issue | `/multi-stage-issue-review` | Multi-stage review (consistency, impact scope) with automated fixes |
-| Review the design | `/multi-stage-design-review` | 4-stage review (general → consistency → impact → security) |
-| Plan the work | `/work-plan` | Generates a task breakdown with dependencies |
-| Implement via TDD | `/tdd-impl` | Red-Green-Refactor cycle, automated |
-| Verify acceptance | `/acceptance-test` | Validates all acceptance criteria from the issue |
-| Create the PR | `/create-pr` | Auto-generates title, description, and labels |
-| Dev (full) | `/pm-auto-dev` | TDD implementation → acceptance test → refactoring → progress report |
-| Issue → Dev (full) | `/pm-auto-issue2dev` | Issue review → design review → work plan → TDD → acceptance test → refactoring → progress report |
-| Design → Dev (full) | `/pm-auto-design2dev` | Design review → work plan → TDD → acceptance test → refactoring → progress report |
+### 1. Install the method as Skills
 
-For details, see the [issues](https://github.com/Kewton/CommandMate/issues), [dev reports](./dev-reports/issue/), and [workflow examples](./docs/en/user-guide/workflow-examples.md) in the CommandMate repository.
+Skills come from the official Catalog
+([Kewton/commandmate-skills](https://github.com/Kewton/commandmate-skills)) and install into the
+worktree you choose — from the web UI (`/skills`, or the Skills pane of a worktree) or from the CLI.
+
+```bash
+commandmate skill list
+commandmate skill install cmate-task-contract --worktree <worktree-id> --version <version> --yes
+```
+
+| Skill | What it covers |
+|-------|----------------|
+| `cmate-issue-authoring` | Turns a feature description into a set of implementable issues |
+| `cmate-issue-refinement` | Refines a vague issue into an implementable specification, read-only |
+| `cmate-task-contract` | Drafts `.commandmate/tasks/<name>.yaml` from an issue: goal, scope, gates |
+| `cmate-verify` | Declares the gates in `.commandmate/verify.yaml` and runs them for a real exit code |
+| `cmate-verify-advisor` | Proposes gate improvements from the verification history |
+| `cmate-worker-development` | The six steps a worker follows: read, investigate, plan, implement, verify, evidence |
+| `cmate-acceptance-test` | Checks the issue's acceptance criteria and returns Go / Conditional Go / No-Go |
+| `cmate-orchestrate` | Plans several issues in parallel, dispatches them with contracts, judges by exit code |
+
+The Catalog also publishes `cmate-repository-analysis`, `cmate-orchestrate-monitor`,
+`cmate-worktree-setup` and `cmate-worktree-cleanup`. See the
+[Skills guide](./docs/user-guide/skills.md) for the support matrix, the install roots, and the
+rollback story.
+
+### 2. Declare the contract, then let the gates judge
+
+```bash
+# .commandmate/tasks/issue-123.yaml declares goal, scope.allow / scope.deny and the gates to run
+commandmate send <worktree-id> --contract .commandmate/tasks/issue-123.yaml
+commandmate wait <worktree-id> --verify
+```
+
+`--contract` supplies the message, so you do not pass one yourself. `wait --verify` runs the gates
+once the agent stops and returns the verdict as its exit code: **0** everything passed, **20** a gate
+failed, **21** the work-evidence gate found neither a commit nor an uncommitted change.
+
+The contract format is specified in [Task Contract](./docs/design/task-contract.md), the gate format
+in [Verification gates](./docs/design/verification-config.md) — both specifications are written in
+Japanese, but the YAML they specify is the same on either side.
+
+### Read next
+
+| Document | What it gives you |
+|----------|-------------------|
+| [Concept](./docs/en/concept.md) | The Vision, the Mission, and how each implementation item maps to a feature |
+| [Tutorial](./docs/en/user-guide/tutorial.md) | Fork a sample repository and run one task through contract and verification in about fifteen minutes |
+| [Product Highlights](./docs/en/features/product-highlights.md) | A feature-by-feature tour of the product |
+| [CLI Operations Guide](./docs/en/user-guide/cli-operations-guide.md) | Every agent-facing command, in depth |
+
+> **Developing CommandMate itself?** The `/work-plan`, `/pm-auto-dev` and other slash commands under
+> `.claude/commands` belong to **this repository only** — they are not installed into yours, and the
+> portable equivalents are the Catalog Skills above. See the
+> [Commands guide](./docs/en/user-guide/commands-guide.md).
 
 ---
 
@@ -462,10 +508,14 @@ For details, see the [issues](https://github.com/Kewton/CommandMate/issues), [de
 | Document | Description |
 |----------|-------------|
 | [CLI Setup Guide](./docs/en/user-guide/cli-setup-guide.md) | Installation and initial setup |
+| [Tutorial](./docs/en/user-guide/tutorial.md) | Fork a sample repository and go from contract to verified result in about fifteen minutes |
 | [Web App Guide](./docs/en/user-guide/webapp-guide.md) | Basic web app operations |
 | [Quick Start](./docs/en/user-guide/quick-start.md) | Using Claude Code commands |
 | [CLI Operations Guide](./docs/en/user-guide/cli-operations-guide.md) | Driving sessions from the CLI: execution contracts, verification gates, Skills, agent instances |
-| [Concept](./docs/en/concept.md) | Vision, Mission, and how each implementation item maps to a feature |
+| [Concept](./docs/en/concept.md) | The canonical Vision, Mission and core principle, and how each implementation item maps to a feature |
+| [Product Highlights](./docs/en/features/product-highlights.md) | A feature-by-feature tour of the product |
+| [Skills Guide](./docs/en/user-guide/skills.md) | Installing official Catalog Skills into a worktree |
+| [Agent Event Hooks](./docs/en/user-guide/agent-event-hooks.md) | Structured agent events instead of terminal scraping |
 | [Architecture](./docs/en/architecture.md) | System design |
 | [Deployment Guide](./docs/en/DEPLOYMENT.md) | Production environment setup |
 | [UI/UX Guide](./docs/en/UI_UX_GUIDE.md) | UI implementation details |

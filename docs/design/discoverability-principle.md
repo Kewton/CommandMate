@@ -7,7 +7,8 @@
 ## 原則
 
 > **サーバー側が下した判定・抑止・自動アクションは、理由コードつきで、運用者が実際に読む層
-> （`capture --json` / `wait` の stdout / `task show` / `verify` の GATE・RESULT 行）に露出する。**
+> （`capture --json` / `wait` の stdout / `task show` / `verify` の GATE・RESULT 行 /
+> Web UI の Verification ペイン）に露出する。**
 
 サーバーログ・DB・契約 schema にしか存在しない判定は「存在しない」のと同じに扱われる。
 #1678 の実運用フィードバック 11 件中 4 件（A-2 / A-4 / A-5 / B-5）は、機能・情報は既に存在するのに
@@ -18,7 +19,7 @@
 
 | 層 | 具体例 | 性質 |
 |---|---|---|
-| **運用者が読む層**（表層） | `capture --json` / `wait` の stdout / `task show` / `verify` の GATE・RESULT 行 / `--help` / docs の冒頭サンプル / skill の report | 運用者・監督スクリプト・skill が実際に参照する。ここに無い情報は運用上「存在しない」 |
+| **運用者が読む層**（表層） | `capture --json` / `wait` の stdout / `task show` / `verify` の GATE・RESULT 行 / `--help` / docs の冒頭サンプル / skill の report / **Web UI の worktree ヘッダチップと Verification ペイン**（#1816） | 運用者・監督スクリプト・skill が実際に参照する。ここに無い情報は運用上「存在しない」 |
 | **実行時の深い層** | サーバーログ（`logger.*`）/ DB / 契約 schema の 3 層目 / gate logTail の全文 | デバッグ・監査には残るが、運用判断のループには入らない |
 
 ## 構造問題の 4 機構（#1678 実例）
@@ -48,7 +49,17 @@
    正しい道具が別の層（契約 YAML 等）にある場合ほど必須。
 4. **docs の冒頭サンプル＝コピペされる運用**: 各設計書・ガイドの最初のサンプルは推奨運用を示す。
    「最小の例」を冒頭に置くと、それが既定路線になる（A-2 の機構）。
-5. **CLI の JSON 出力は安定インターフェース**: `capture --json` / `verify --json` /
+5. **新しい判定は CLI と Web UI の両方に出す**（#1816 で追加）:
+   本書は 2026-08-04 時点で運用者層を CLI の出力に限定していたが、それは
+   「CLI しか露出していなかった」という当時の実測をそのまま原則にしていたに過ぎない。
+   Mission の「誰でも」に対しては、CLI を開かない運用者にとって CLI だけの判定は
+   サーバーログと同じ「深い層」である。したがって新しい判定・抑止・自動アクションは、
+   CLI の stdout（規約 1・2）に加えて **Web UI にも露出する**。
+   現在の Web UI 側の受け皿は worktree ヘッダの状態チップと Verification ペイン
+   （`src/components/worktree/VerificationPane.tsx`）であり、**理由**も
+   `aria-label` / tooltip とゲート表に出す。
+   露出先を増やせない事情がある場合は、その理由を Issue と設計書に書き残す。
+6. **CLI の JSON 出力は安定インターフェース**: `capture --json` / `verify --json` /
    `wait` exit 10 の JSON 構造は、上位層が転写する前提の公開インターフェースとして扱う。
    正準の型は `src/cli/types/api-responses.ts`、運用者向け仕様は
    [cli-operations-guide.md](../user-guide/cli-operations-guide.md) に記載する。
@@ -66,6 +77,7 @@
 | `--stop-pattern` の照合対象と限界 | `auto-yes` / `send` の `--help`、`commandmate docs agent-operations`、cli-operations-guide.md | #1682 / PR #1687 で対応済み |
 | `wait` のプロンプト検出ペイロード | exit 10 と同時に `WaitPromptOutput` JSON を stdout へ出力（`src/cli/commands/wait.ts`）。selection_list 型は `type: selection_list` ＋ `question` に `sessionStatusReason` を載せ、`options: []` が仕様であることを判別可能 | 準拠済み（実装規約 2 の準拠例） |
 | verify の GATE 行の report 転記 | commandmate-skills 側 dispatch report にゲート結果を転記 | commandmate-skills#47 / skills PR #48 で対応済み |
+| 実行契約と検証ランの Web UI 露出 | worktree ヘッダの状態チップ（task title / TaskStatus / 直近ランの RESULT、理由は `aria-label` と tooltip）＋ Verification ペイン（契約・ラン一覧・ゲート表・logTail 末尾 40 行） | #1816 で対応済み（規約 5 の準拠例） |
 | stop-pattern 発火の事実 | `capture --json` の `autoYes.stopReason`（`stop_pattern_matched`。`src/lib/session/current-output-builder.ts` が露出） | 露出済み（ただしマッチ内容は未露出 — 下表参照） |
 
 ### 未露出（対応候補）

@@ -559,6 +559,14 @@ interface DesktopHeaderProps {
    * worktree status dropdown.
    */
   onKillSession?: () => void;
+  /**
+   * Issue #1816: the task-contract / verification status chip, rendered next to
+   * the branch title. A slot rather than the chip itself so this module keeps
+   * no dependency on the verification client — the parent already owns that
+   * state and can hand the built node down. Omitted (or `null`) renders
+   * nothing, which is what every worktree without a task row gets.
+   */
+  verificationChip?: React.ReactNode;
 }
 
 /** Status indicator configuration is imported from @/config/status-colors (SF1) */
@@ -590,6 +598,7 @@ export const DesktopHeader = memo(function DesktopHeader({
   onAgentDragStart,
   onAgentDragEnd,
   onKillSession,
+  verificationChip,
 }: DesktopHeaderProps) {
   const tWorktree = useTranslations('worktree');
   // Issue #1277: agent-instance status labels resolve through the generic
@@ -722,6 +731,10 @@ export const DesktopHeader = memo(function DesktopHeader({
             )}
           </div>
         </div>
+        {/* Issue #1816: task contract / verification verdict, next to the branch
+            identity it belongs to. `min-w-0` so a long task title truncates
+            instead of pushing the right-hand controls off the header. */}
+        {verificationChip && <div className="min-w-0 max-w-[360px]">{verificationChip}</div>}
       </div>
 
       {/* Right: Per-agent status row + Status dropdown + Info button */}
