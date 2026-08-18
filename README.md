@@ -464,6 +464,7 @@ For details, see the [issues](https://github.com/Kewton/CommandMate/issues), [de
 | [CLI Setup Guide](./docs/en/user-guide/cli-setup-guide.md) | Installation and initial setup |
 | [Web App Guide](./docs/en/user-guide/webapp-guide.md) | Basic web app operations |
 | [Quick Start](./docs/en/user-guide/quick-start.md) | Using Claude Code commands |
+| [CLI Operations Guide](./docs/en/user-guide/cli-operations-guide.md) | Driving sessions from the CLI: execution contracts, verification gates, Skills, agent instances |
 | [Concept](./docs/en/concept.md) | Vision and problems solved |
 | [Architecture](./docs/en/architecture.md) | System design |
 | [Deployment Guide](./docs/en/DEPLOYMENT.md) | Production environment setup |
