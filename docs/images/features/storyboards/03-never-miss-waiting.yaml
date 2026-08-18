@@ -1,37 +1,42 @@
+# cm-03 — Stay in control, anywhere (Issue #1811; LP demo 4 of public-messaging.md §5).
+#
+# `attention-badge` films the *transition* into waiting — the toast fires on a
+# realtime session_status_changed event, so it only exists on a page that was
+# already open when the edge happened. That is why it is placed before the scene
+# that answers the prompt, and why the send beat is not decoration.
+
 version: 1
 duration: 20
 output: cm-03-never-miss-waiting
 scenes:
-  - id: sessions-overview
-    type: record
-    duration: 4
-    viewport: pc
-    telop:
-      ja: "承認待ちを見逃さない"
-      en: "Never miss a waiting approval"
-  - id: send-and-generate
-    type: record
-    duration: 7
-    viewport: pc
-    telop:
-      ja: "止まった瞬間に分かる"
-      en: "Know the moment it stops"
-  - id: respond-from-mobile
-    type: record
-    duration: 5
-    viewport: mobile
-    telop:
-      ja: "その場で答えて再開"
-      en: "Answer on the spot, resume"
-  - id: complete
-    type: record
+  - id: title
+    type: card
     duration: 3
     telop:
-      ja: "放置時間がゼロに"
-      en: "No more idle hours"
+      ja: "入力待ちは、バッジ・トースト・タブ・通知で届く"
+      en: "Waiting reaches you: badge, toast, tab title, push."
+  - id: send-and-generate
+    type: record
+    duration: 5
+    viewport: pc
+    telop:
+      ja: "送って離れる"
+      en: "Send it, then step away."
+  - id: attention-badge
+    type: record
+    duration: 6
+    viewport: pc
+    telop:
+      ja: "止まった瞬間に届く"
+      en: "The moment it stops, you know."
+  - id: respond-from-mobile
+    type: record
+    duration: 4
+    viewport: mobile
+    telop:
+      ja: "スマホから応答する"
+      en: "Answer from your phone."
   - id: outro
     type: card
-    duration: 1
-    telop:
-      ja: "github.com/Kewton/CommandMate"
-      en: "github.com/Kewton/CommandMate"
+    duration: 2
+    telop: { ja: "github.com/Kewton/CommandMate", en: "github.com/Kewton/CommandMate" }

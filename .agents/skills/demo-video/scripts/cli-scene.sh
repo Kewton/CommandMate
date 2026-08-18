@@ -34,10 +34,25 @@ SESSION="cmdemo-cli"
 STATE_FILE=""
 TMUX_SOCKET=""
 START=0
-# The pane geometry the card is typeset for: 100x32 renders inside a 1280x800
-# frame at a size that is still legible after the h264 pass.
+# The pane geometry the card is typeset for: 100 columns renders inside a
+# 1280x800 frame at a size that is still legible after the h264 pass.
+#
+# The row count is a *budget*, not a fit (Issue #1811). templates/terminal.html
+# lays the capture out from the top of a body pinned to 736px, one 23px row per
+# captured line, so row N lands at roughly y = 42 + (N-1)*23 in the frame. The
+# telop band is fixed at `margin-bottom: 7.5%` for every cut and its scrim
+# covers y 612..720 (x 273..1006, measured off the rendered overlay PNG), so a
+# 32-row pane puts the GATE block underneath it: at 32 rows the transcript ran
+# to y 745 and `GATE scope PASS (exit=0, 0.0s)` lost its parenthesis to the
+# scrim. 26 rows ends the transcript at y 634 in the worst case, which keeps
+# every GATE line, RESULT and the exit code clear of it.
+#
+# This is a cap rather than an exact fit on purpose: `wait` prints one
+# `Waiting: ...` line per poll, so the transcript's length is not fixed. Extra
+# output now scrolls off the *top* — where the `ls` table already is — instead
+# of pushing the verdict down into the band.
 PANE_WIDTH=100
-PANE_HEIGHT=32
+PANE_HEIGHT=26
 HOLD_SECONDS="${CM_DEMO_CLI_HOLD:-6}"
 WAIT_TIMEOUT="${CM_DEMO_CLI_WAIT_TIMEOUT:-180}"
 
@@ -139,6 +154,16 @@ fi
 CLI_HOME="$CM_DEMO_STATE_DIR/cli-home"
 mkdir -p "$CLI_HOME" || die "cannot create the isolated CLI home at $CLI_HOME"
 
+# The pane is created with `-c "$REPO_ROOT"` because `tsx src/cli/index.ts`
+# resolves from there, but the redirects in the steps below are opened by *this*
+# shell, in *this* directory. Moving out of the repository first is what keeps
+# `task-id.txt` and `prompt.json` from landing in a working tree the run is
+# supposed to leave clean. `cm` re-enters the repository in its own subshell, so
+# nothing else is affected.
+PANE_CWD="$CM_DEMO_STATE_DIR/cli-scene-out"
+mkdir -p "$PANE_CWD" || die "cannot create the scratch directory at $PANE_CWD"
+cd "$PANE_CWD" || die "cannot enter $PANE_CWD"
+
 cm() {
   ( cd "$REPO_ROOT" && env -u DATABASE_PATH -u MCBD_DB_PATH -u MCBD_PORT -u CM_AUTH_TOKEN \
       HOME="$CLI_HOME" CM_PORT="$CM_DEMO_PORT" CM_BIND=127.0.0.1 \
@@ -190,6 +215,18 @@ WT="$CM_DEMO_WORKTREE_ID"
 # So the harness does what the recorder's `prepare` does for a browser scene:
 # synchronise on observable state before the step that films it. This is the
 # product's own `ls --json`, redirected, so nothing extra appears on camera.
+#
+# What must not be true is `isWaitingForResponse`: that is the stale approval
+# frame, and continuing on it makes the next `wait` report exit 10 for a prompt
+# that was already answered. `isProcessing` was the original evidence that the
+# pane had repainted — but it is not the only safe state, and waiting for it
+# alone is what broke the #1811 re-shoot. The cassette can finish its stretch
+# before the poll first looks, and then `isProcessing` is never observed true:
+# the loop span 90 times, gave up, killed the pane mid-take, and left a take
+# that ended at `Response sent.` with no verdict on it. That take still
+# composed — a session that ends is how the recorder knows the script finished
+# — and shipped as a cut whose telop promises a verdict the footage never
+# reaches. So the probe now reports three states and the loop accepts two.
 PROBE="$CM_DEMO_STATE_DIR/.cli-scene-probe.mjs"
 cat >"$PROBE" <<'PROBEJS'
 let raw = '';
@@ -200,54 +237,73 @@ process.stdin.on('end', () => {
   try { list = JSON.parse(raw); } catch { process.exit(1); }
   const worktree = Array.isArray(list) ? list.find((entry) => entry.id === process.argv[2]) : null;
   const status = worktree && worktree.sessionStatusByCli && worktree.sessionStatusByCli.claude;
-  // Generating *and* no longer parked on a prompt. The second half matters
-  // after `respond`: the capture the status is derived from is cached for 5s,
-  // so a bare `isProcessing` probe returns while the approval frame is still
-  // the newest thing the server has seen, and the next `wait` reports exit 10
-  // for the prompt that was already answered.
-  process.exit(status && status.isProcessing && !status.isWaitingForResponse ? 0 : 1);
+  // 1: unreadable, or still parked on a prompt — never safe to continue from.
+  if (!status || status.isWaitingForResponse) process.exit(1);
+  // 0: generating. 2: settled with no prompt, which the caller accepts only
+  // after it has held long enough to outlive the 5s capture cache.
+  process.exit(status.isProcessing ? 0 : 2);
 });
 PROBEJS
 
+# Six consecutive settled readings, a second apart plus the cost of the call
+# itself. The capture a status is derived from is cached for 5s (#1623), so one
+# settled reading could still be describing the pane as it was before the
+# message landed; six of them cannot all predate it.
+SETTLED_POLLS=6
+
 wait_until_busy() {
   attempt=0
+  settled=0
   while [ "$attempt" -lt 90 ]; do
     attempt=$((attempt + 1))
-    if cm ls --json 2>/dev/null | node "$PROBE" "$WT"; then
-      return 0
-    fi
+    cm ls --json 2>/dev/null | node "$PROBE" "$WT"
+    case $? in
+      0) return 0 ;;
+      2)
+        settled=$((settled + 1))
+        [ "$settled" -lt "$SETTLED_POLLS" ] || return 0
+        ;;
+      *) settled=0 ;;
+    esac
     sleep 1
   done
-  die "$WT never resumed generating after the message was delivered"
+  die "$WT never left the approval frame after the message was delivered"
 }
 
+# Two things below are there to keep the transcript inside the row budget, and
+# both are honest about it: the banner prints the command that is actually run,
+# redirect included.
+#
+# `send --contract` and `wait` put their *machine-readable* payload on stdout
+# and everything a reader needs on stderr (src/cli/commands/send.ts writes
+# `Task created: <id>` with console.error and the bare id with console.log;
+# wait.ts does the same with the prompt JSON). Sending stdout to a file
+# therefore removes eight rows — the duplicate task id, and seven wrapped rows
+# of prompt JSON — without removing a single line the shot is about. The blank
+# separator rows this script used to print are gone for the same reason; the
+# bold `$` banners already separate the steps.
 clear
 banner "commandmate ls"
 cm ls
 
-printf '\n'
-banner "commandmate send $WT --contract $CONTRACT"
-cm send "$WT" --contract "$CONTRACT" || die "send failed"
+banner "commandmate send $WT --contract $CONTRACT >task-id.txt"
+cm send "$WT" --contract "$CONTRACT" >task-id.txt || die "send failed"
 wait_until_busy
 
-printf '\n'
-banner "commandmate wait $WT --verify --timeout $WAIT_TIMEOUT"
-cm wait "$WT" --verify --timeout "$WAIT_TIMEOUT"
+banner "commandmate wait $WT --verify --timeout $WAIT_TIMEOUT >prompt.json"
+cm wait "$WT" --verify --timeout "$WAIT_TIMEOUT" >prompt.json
 FIRST_WAIT=$?
 printf '\033[2mexit %s (10 = the agent is asking)\033[0m\n' "$FIRST_WAIT"
 [ "$FIRST_WAIT" -eq 10 ] || die "expected exit 10 (prompt detected) from the first wait, got $FIRST_WAIT"
 
-printf '\n'
 banner "commandmate respond $WT 1"
 cm respond "$WT" 1 || die "respond failed"
 wait_until_busy
 
-printf '\n'
 banner "commandmate wait $WT --verify --timeout $WAIT_TIMEOUT"
 cm wait "$WT" --verify --timeout "$WAIT_TIMEOUT"
 SECOND_WAIT=$?
 
-printf '\n'
 banner "echo \$?"
 printf '%s\n' "$SECOND_WAIT"
 rm -f "$PROBE"

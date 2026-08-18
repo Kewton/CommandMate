@@ -1,37 +1,42 @@
+# cm-01 — Any agent, in parallel (Issue #1811; LP demo 3 of docs/design/public-messaging.md §5).
+#
+# The cut has to *show* parallelism rather than assert it, so it opens on the
+# branch list, then films CommandMate picking up a worktree plain `git` made
+# outside it, then returns to the list now carrying one more session. Telops are
+# copied from public-messaging.md §6 (demo 3) where that table has them.
+
 version: 1
 duration: 20
 output: cm-01-parallel-worktrees
 scenes:
-  - id: sessions-overview
-    type: record
-    duration: 4
-    viewport: pc
-    telop:
-      ja: "ターミナルのタブ、増えすぎてない？"
-      en: "Too many terminal tabs?"
-  - id: send-and-generate
-    type: record
-    duration: 8
-    viewport: pc
-    telop:
-      ja: "ブランチごとに1セッション"
-      en: "One session per branch"
-  - id: respond-from-mobile
-    type: record
-    duration: 4
-    viewport: mobile
-    telop:
-      ja: "同じUIでどこからでも"
-      en: "Same UI, anywhere"
-  - id: complete
-    type: record
+  - id: title
+    type: card
     duration: 3
     telop:
-      ja: "並列でも見失わない"
-      en: "Parallel, never lost"
+      ja: "worktree ごとに 1 セッション。7 種の CLI から選べる"
+      en: "One session per worktree, across seven agent CLIs."
+  - id: sessions-overview
+    type: record
+    duration: 5
+    viewport: pc
+    telop:
+      ja: "並列で走る worktree"
+      en: "Worktrees running side by side."
+  - id: sync-worktrees
+    type: record
+    duration: 6
+    viewport: pc
+    telop:
+      ja: "外で作った worktree も拾う"
+      en: "It picks up worktrees git made."
+  - id: complete
+    type: record
+    duration: 4
+    viewport: pc
+    telop:
+      ja: "一覧に戻れば全部見える"
+      en: "Back on one list, all of them."
   - id: outro
     type: card
-    duration: 1
-    telop:
-      ja: "github.com/Kewton/CommandMate"
-      en: "github.com/Kewton/CommandMate"
+    duration: 2
+    telop: { ja: "github.com/Kewton/CommandMate", en: "github.com/Kewton/CommandMate" }

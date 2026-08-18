@@ -1,3 +1,8 @@
+# cm-10 — Runs 100% locally (Issue #1811).
+#
+# The two claims that cannot be filmed — no cloud account, MIT, `npx` in sixty
+# seconds — are on cards, never on a telop over footage that does not show them.
+
 version: 1
 duration: 20
 output: cm-10-local-and-npx
@@ -7,37 +12,31 @@ scenes:
     duration: 3
     telop:
       ja: "クラウドにもアカウントにも預けない"
-      en: "No cloud, no account, no relay"
+      en: "No cloud, no account, no relay."
   - id: sessions-overview
     type: record
     duration: 4
     viewport: pc
     telop:
       ja: "動くのは手元のマシン"
-      en: "It runs on your own machine"
+      en: "It runs on your own machine."
   - id: send-and-generate
     type: record
-    duration: 6
+    duration: 8
     viewport: pc
     telop:
       ja: "セッションはローカル"
-      en: "Sessions stay local"
-  - id: respond-from-mobile
-    type: record
-    duration: 3
-    viewport: mobile
-    telop:
-      ja: "スマホからも直接つなぐ"
-      en: "Your phone connects directly"
+      en: "Sessions stay local."
   - id: complete
     type: record
     duration: 3
+    viewport: pc
     telop:
-      ja: "MITライセンスのOSS"
-      en: "Open source, MIT licensed"
+      ja: "MIT ライセンスの OSS"
+      en: "Open source, MIT licensed."
   - id: outro
     type: card
-    duration: 1
+    duration: 2
     telop:
-      ja: "npx commandmate@latest で60秒"
+      ja: "npx commandmate@latest で 60 秒"
       en: "npx commandmate@latest, running in 60 seconds"

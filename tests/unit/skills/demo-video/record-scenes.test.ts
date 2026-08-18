@@ -8,6 +8,7 @@
  *
  * @vitest-environment node
  */
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -916,6 +917,12 @@ const SERVER_GLOBAL_TMUX_COMMANDS = [
   `${['set', 'option'].join('-')} -g`,
 ];
 
+/**
+ * Top of the telop band's scrim in a 1280x800 frame, measured off the alpha
+ * channel of the PNG render-overlays.ts writes (alpha > 32 spans y 612..720).
+ */
+const TELOP_BAND_TOP_Y = 612;
+
 describe('the terminal take is wired to the recorded-session teardown', () => {
   const cliScene = fs.readFileSync(
     path.resolve(__dirname, '../../../../.claude/skills/demo-video/scripts/cli-scene.sh'),
@@ -962,6 +969,87 @@ describe('the terminal take is wired to the recorded-session teardown', () => {
     expect(assertAt).toBeGreaterThan(-1);
     expect(sendAt).toBeGreaterThan(assertAt);
     expect(cliScene).toContain('refusing to film a session that is not isolated');
+  });
+
+  it('keeps the transcript clear of the telop band', () => {
+    // Issue #1811. templates/terminal.html lays the capture out from the top of
+    // a body pinned to 736px, one 23px row per captured line, so row N lands at
+    // about y = 42 + (N-1)*23 in the 1280x800 frame. The telop band is fixed at
+    // `margin-bottom: 7.5%` for every cut and its scrim covers y 612..720
+    // (measured off the rendered overlay PNG). At the old 32 rows the GATE
+    // block landed underneath it and `GATE scope PASS (exit=0, 0.0s)` lost its
+    // parenthesis; the pane height is what decides that, because the transcript
+    // is anchored to the bottom of the pane.
+    const height = Number(/^PANE_HEIGHT=(\d+)$/m.exec(cliScene)![1]);
+    expect(Number.isFinite(height)).toBe(true);
+    // `GATE unit PASS` is six rows above the last one (RESULT, blank-free tail,
+    // `$ echo $?`, the code itself).
+    const gateRowBottom = (rows: number) => 42 + (rows - 6) * 23 + 17;
+    expect(gateRowBottom(height)).toBeLessThan(TELOP_BAND_TOP_Y);
+    // Not vacuous: the geometry that shipped the bug fails this.
+    expect(gateRowBottom(32)).toBeGreaterThan(TELOP_BAND_TOP_Y);
+  });
+
+  it('reads three states out of `ls --json`, not two', () => {
+    // Issue #1811. The probe used to answer a yes/no question — "is it
+    // generating and not on a prompt" — and the loop waited for the yes. The
+    // cassette can finish its stretch before the poll first looks, so that yes
+    // never arrived, the loop gave up after 90 tries, and the pane was killed
+    // mid-take. Run the real heredoc rather than asserting on its source: what
+    // matters is the exit code the shell branches on.
+    const probe = /cat >"\$PROBE" <<'PROBEJS'\n([\s\S]*?)\nPROBEJS/.exec(cliScene)?.[1];
+    expect(probe, 'probe heredoc not found in cli-scene.sh').toBeTruthy();
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-probe-'));
+    const probeFile = path.join(scratch, 'probe.mjs');
+    fs.writeFileSync(probeFile, `${probe}\n`);
+
+    const run = (status: Record<string, boolean> | null): number => {
+      const payload = JSON.stringify([
+        { id: 'other', sessionStatusByCli: { claude: { isProcessing: true } } },
+        { id: 'wt-dark-mode', sessionStatusByCli: status ? { claude: status } : {} },
+      ]);
+      try {
+        execFileSync('node', [probeFile, 'wt-dark-mode'], { input: payload, stdio: 'pipe' });
+        return 0;
+      } catch (error) {
+        return (error as { status: number }).status;
+      }
+    };
+
+    try {
+      // Parked on the prompt: never safe, whatever else is true.
+      expect(run({ isProcessing: false, isWaitingForResponse: true })).toBe(1);
+      expect(run({ isProcessing: true, isWaitingForResponse: true })).toBe(1);
+      // No status at all is the same answer, not a pass.
+      expect(run(null)).toBe(1);
+      // Generating and off the prompt: continue at once.
+      expect(run({ isProcessing: true, isWaitingForResponse: false })).toBe(0);
+      // Settled and off the prompt: a distinct code, because the caller may
+      // only continue on it after it has outlived the 5s capture cache.
+      expect(run({ isProcessing: false, isWaitingForResponse: false })).toBe(2);
+    } finally {
+      removeTempDir(scratch);
+    }
+  });
+
+  it('accepts the settled state only after it outlives the capture cache', () => {
+    // The 5s cache (#1623) is the reason a single settled reading is not
+    // enough: it could still be describing the pane as it was before the
+    // message landed. The loop polls about once a second.
+    const settled = Number(/^SETTLED_POLLS=(\d+)$/m.exec(cliScene)![1]);
+    expect(settled).toBeGreaterThan(5);
+    expect(cliScene).toMatch(/\[ "\$settled" -lt "\$SETTLED_POLLS" \] \|\| return 0/);
+  });
+
+  it('shows the redirect it actually performs', () => {
+    // The banner is hand-written, so it can drift from the command underneath
+    // it. These two payloads go to files to keep the transcript inside the row
+    // budget (#1811); a banner that hid that would be the pane claiming to run
+    // something it did not.
+    for (const redirect of ['>task-id.txt', '>prompt.json']) {
+      const occurrences = cliScene.split(redirect).length - 1;
+      expect(occurrences, `${redirect} should appear in both banner and command`).toBe(2);
+    }
   });
 
   it('runs the real gates: no stub, no mock, and the exit code is asserted', () => {

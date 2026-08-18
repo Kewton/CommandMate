@@ -1,0 +1,50 @@
+# cm-11 — Verified, not vibe-checked (Issue #1811; LP demos 1 and 2 of
+# public-messaging.md §5, whose telops §6 fixes verbatim).
+#
+# The two code cards are the real files env-up.sh writes into the seed
+# repository, copied here so the cut ships the listing it sits with (`source` is
+# resolved against this directory and may not leave it).
+#
+# The record beat is filmed from a tmux pane, not a browser: Task Contract and
+# the verification gates have no Web UI, so the CLI's own output is the only
+# surface that shows them. The gates are executed for real — the `unit` gate
+# runs `node --test` in the seed worktree — so the GATE lines in the footage are
+# actual exit codes.
+
+version: 1
+duration: 20
+output: cm-11-contract-verify
+scenes:
+  - id: title
+    type: card
+    duration: 2
+    telop:
+      ja: "作業の前に、契約を渡す"
+      en: "Hand the agent a contract before the work."
+  - id: contract-yaml
+    type: code
+    duration: 3
+    source: code/dark-mode.contract.yaml
+    lang: yaml
+    telop:
+      ja: "契約つきで送信する"
+      en: "Send with a contract."
+  - id: verify-yaml
+    type: code
+    duration: 3
+    source: code/verify.yaml
+    lang: yaml
+    telop:
+      ja: "終わりを決めるのは検証。exit 0 / 20 / 21"
+      en: "A verification run decides done, not the agent."
+  - id: contract-verify
+    type: record
+    duration: 10
+    viewport: pc
+    telop:
+      ja: "GATE と RESULT を読む"
+      en: "Gates run; the exit code judges."
+  - id: outro
+    type: card
+    duration: 2
+    telop: { ja: "github.com/Kewton/CommandMate", en: "github.com/Kewton/CommandMate" }
