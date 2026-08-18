@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- **Mission / Vision を `docs/concept.md` / `docs/en/concept.md` に正本化し、公開面の文言表 `docs/design/public-messaging.md` を新設** (#1808): hero・定義文・4 カード・With / Without 表・デモのキャプションとテロップ・チュートリアル導入文・footer タグライン・禁止語リストを ja / en 両方で確定した。軸語 "Vibe Engineering" の一次情報（Simon Willison, 2025-10-07）を実際に確認し出典として記録。禁止語リストはガードテスト `tests/unit/docs/public-messaging.test.ts` の配列と一致していることを固定している
+
 ### Fixed
 
 - **fix(demo-video): worktree ID の path 由来化に追従し、収録パイプラインを復旧する** (#1809)
