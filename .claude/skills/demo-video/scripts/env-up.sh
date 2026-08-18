@@ -48,10 +48,21 @@ SEED_REPO="$SEED_ROOT/cmdemo-app"
 # A second throwaway repository, deliberately left out of WORKTREE_REPOS so the
 # boot sync never discovers it. The add-repository scene registers it on camera.
 SEED_REPO_2="$SEED_ROOT/cmdemo-docs"
+# The worktree directories. Named once here because their *basenames* are the
+# worktree IDs the server will mint (see derive_worktree_id below), so the
+# directory name and the ID can never drift apart.
+WT_DARK_MODE="$SEED_ROOT/wt-dark-mode"
+WT_LOGIN_ERROR="$SEED_ROOT/wt-login-error"
+WT_API_CACHE="$SEED_ROOT/wt-api-cache"
 DB_PATH="$STATE_DIR/cm.db"
 LOG_FILE="$STATE_DIR/server.log"
 STATE_FILE="$STATE_DIR/state.env"
 VIDEO_DIR="$STATE_DIR/videos"
+# Every tmux session this run creates is appended here by fake-agent.sh, and
+# env-down.sh kills exactly what it finds. Teardown is driven by a record of
+# what was started, never by a `mcbd-*` sweep: this tmux server also holds the
+# developer's own sessions.
+SESSIONS_FILE="$STATE_DIR/sessions"
 READY_TIMEOUT="${CM_DEMO_READY_TIMEOUT:-180}"
 
 require() {
@@ -136,13 +147,13 @@ create_seed_repo() {
   git -C "$SEED_REPO" add -A
   seed_commit 'feat: add theme storage key'
 
-  git -C "$SEED_REPO" worktree add -q -b feature/demo-dark-mode "$SEED_ROOT/wt-dark-mode" >/dev/null
-  git -C "$SEED_REPO" worktree add -q -b fix/demo-login-error "$SEED_ROOT/wt-login-error" >/dev/null
+  git -C "$SEED_REPO" worktree add -q -b feature/demo-dark-mode "$WT_DARK_MODE" >/dev/null
+  git -C "$SEED_REPO" worktree add -q -b fix/demo-login-error "$WT_LOGIN_ERROR" >/dev/null
 
   # Uncommitted work for the review-diff scene. Left unstaged on purpose: the
   # Git pane's `unstaged` list is what that scene clicks, and a staged change
   # would land in a different list.
-  cat >"$SEED_ROOT/wt-dark-mode/src/theme.ts" <<'THEME'
+  cat >"$WT_DARK_MODE/src/theme.ts" <<'THEME'
 export const THEME_STORAGE_KEY = "cmdemo.theme";
 
 export type Theme = "light" | "dark";
@@ -155,12 +166,44 @@ THEME
   create_second_seed_repo
 }
 
+# ------------------------------------------------------------ worktree id ----
+
+# CommandMate mints a worktree ID from the *directory*, never from the branch:
+#
+#     id = sanitize(basename(resolvedPath))
+#     on collision only: "${id}-${sha256(resolvedPath) first 8 hex}"
+#
+# (`deriveWorktreeId`, src/lib/git/worktree-id.ts — Issue #1621/#1644/#1645. The
+# old `<repo>-<branch>` rule is @deprecated and no longer called from src/.)
+# `sanitize` is `sanitizeIdSegment`: lower-case, `[^a-z0-9-]` folded to `-`, runs
+# of `-` collapsed, edges trimmed.
+#
+# The four seed directories have distinct basenames, so the collision branch is
+# unreachable here and each ID is exactly its directory name. Do not add a seed
+# directory whose basename repeats one of these: the second ID would then carry
+# a digest of the absolute path and nothing here could predict it.
+derive_worktree_id() {
+  printf '%s' "${1##*/}" \
+    | LC_ALL=C tr 'A-Z' 'a-z' \
+    | LC_ALL=C sed -e 's/[^a-z0-9-]/-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//'
+}
+
+PRIMARY_WORKTREE_ID="$(derive_worktree_id "$SEED_REPO")"
+WORKTREE_ID="$(derive_worktree_id "$WT_DARK_MODE")"
+LOGIN_WORKTREE_ID="$(derive_worktree_id "$WT_LOGIN_ERROR")"
+UNSYNCED_WORKTREE_ID="$(derive_worktree_id "$WT_API_CACHE")"
+
+for derived in "$PRIMARY_WORKTREE_ID" "$WORKTREE_ID" "$LOGIN_WORKTREE_ID" "$UNSYNCED_WORKTREE_ID"; do
+  [ -n "$derived" ] || die "a seed directory name sanitizes to an empty worktree id"
+done
+
 # ---------------------------------------------------------------- boot -------
 
 PORT="$(pick_port)" || exit 1
 BASE_URL="http://127.0.0.1:$PORT"
 
 mkdir -p "$STATE_DIR" "$VIDEO_DIR"
+: >"$SESSIONS_FILE" || die "cannot write the session record at $SESSIONS_FILE"
 log "state dir: $STATE_DIR"
 log "seeding throwaway repository"
 create_seed_repo
@@ -232,7 +275,7 @@ fi
 # WORKTREE_REPOS. That ordering is what leaves this worktree on disk and absent
 # from the database, which is the precondition the sync-worktrees scene films.
 log "adding a worktree the boot sync has already missed"
-git -C "$SEED_REPO" worktree add -q -b feature/demo-api-cache "$SEED_ROOT/wt-api-cache" >/dev/null \
+git -C "$SEED_REPO" worktree add -q -b feature/demo-api-cache "$WT_API_CACHE" >/dev/null \
   || { cleanup_failed_boot; die "could not create the post-boot worktree"; }
 
 cat >"$STATE_FILE" <<EOF
@@ -248,6 +291,14 @@ CM_DEMO_SEED_REPO_2=$SEED_REPO_2
 CM_DEMO_DB_PATH=$DB_PATH
 CM_DEMO_VIDEO_DIR=$VIDEO_DIR
 CM_DEMO_LOG_FILE=$LOG_FILE
+CM_DEMO_SESSIONS_FILE=$SESSIONS_FILE
+CM_DEMO_PRIMARY_WORKTREE_ID=$PRIMARY_WORKTREE_ID
+CM_DEMO_WORKTREE_ID=$WORKTREE_ID
+CM_DEMO_LOGIN_WORKTREE_ID=$LOGIN_WORKTREE_ID
+CM_DEMO_UNSYNCED_WORKTREE_ID=$UNSYNCED_WORKTREE_ID
+CM_DEMO_WORKTREE_PATH=$WT_DARK_MODE
+CM_DEMO_LOGIN_WORKTREE_PATH=$WT_LOGIN_ERROR
+CM_DEMO_UNSYNCED_WORKTREE_PATH=$WT_API_CACHE
 EOF
 
 log "ready at $BASE_URL (pid $SERVER_PID)"

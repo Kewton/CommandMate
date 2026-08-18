@@ -50,6 +50,11 @@ CM_DEMO_PID=""
 CM_DEMO_PGID=""
 CM_DEMO_PROC_MATCH=""
 CM_DEMO_SEED_ROOT=""
+CM_DEMO_SESSIONS_FILE=""
+CM_DEMO_PRIMARY_WORKTREE_ID=""
+CM_DEMO_WORKTREE_ID=""
+CM_DEMO_LOGIN_WORKTREE_ID=""
+CM_DEMO_UNSYNCED_WORKTREE_ID=""
 # shellcheck source=/dev/null
 . "$STATE_FILE"
 
@@ -97,28 +102,80 @@ stop_server() {
   fi
 }
 
-# CommandMate derives session names as `mcbd-<cliTool>-<worktreeId>` and the
-# worktree id is `<repoName>-<branch>` (src/lib/cli-tools/base.ts,
-# src/lib/git/worktrees.ts). The seed repository is named `cmdemo-app`, so every
-# session this demo can possibly create contains `-cmdemo-app-`, and nothing
-# else does.
+# CommandMate names sessions `mcbd-<cliTool>-<worktreeId>[-<instance suffix>]`
+# (`getSessionName`, src/lib/session/claude-session.ts) and mints the worktree id
+# from the **directory**: `sanitize(basename(path))` (`deriveWorktreeId`,
+# src/lib/git/worktree-id.ts — Issue #1621/#1644). The branch is not in the name
+# any more, so the substring match this used to do (`-cmdemo-app-`) does not
+# contain `mcbd-claude-wt-dark-mode` and left the demo's own session running.
+#
+# Teardown is therefore driven by what this run recorded, in two passes, and
+# never by a bare `mcbd-*` sweep — this tmux server is the developer's own and
+# holds their live worktree sessions:
+#
+#   1. every name fake-agent.sh appended to $CM_DEMO_SESSIONS_FILE;
+#   2. `mcbd-<tool>-<id>[-<suffix>]` for the worktree ids env-up.sh derived,
+#      which also catches a session the demo *server* started (a real CLI, or an
+#      extra agent instance) and a leftover from the retired branch-derived
+#      scheme, whose ids all began with the seed repository's name.
+#
+# Both are anchored on ids minted from `$HOME/.commandmate-demo/seed/*`, so a
+# name has to be about this demo's own directories to match at all.
+# `-F` and `-x`: the name is compared as a whole literal line, so a record file
+# that somehow held a metacharacter could not turn into a pattern that matches
+# somebody else's session.
+kill_session_if_live() {
+  grep -Fqx -- "$1" "$LIVE_SESSIONS" || return 0
+  log "killing demo tmux session: $1"
+  tmux kill-session -t "=$1" 2>/dev/null || true
+  # Killed sessions are dropped from the list so the second pass cannot report
+  # the same name twice.
+  grep -Fvx -- "$1" "$LIVE_SESSIONS" >"$LIVE_SESSIONS.tmp" 2>/dev/null || :
+  mv "$LIVE_SESSIONS.tmp" "$LIVE_SESSIONS" 2>/dev/null || :
+}
+
 kill_demo_sessions() {
   command -v tmux >/dev/null 2>&1 || return 0
-  tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -- '-cmdemo-app-' >"$STATE_DIR/.sessions" 2>/dev/null || true
-  if [ ! -s "$STATE_DIR/.sessions" ]; then
-    rm -f "$STATE_DIR/.sessions"
-    return 0
+  LIVE_SESSIONS="$STATE_DIR/.live-sessions"
+  tmux list-sessions -F '#{session_name}' >"$LIVE_SESSIONS" 2>/dev/null || : >"$LIVE_SESSIONS"
+
+  if [ -n "$CM_DEMO_SESSIONS_FILE" ] && [ -f "$CM_DEMO_SESSIONS_FILE" ]; then
+    while IFS= read -r session; do
+      [ -n "$session" ] || continue
+      kill_session_if_live "$session"
+    done <"$CM_DEMO_SESSIONS_FILE"
   fi
-  while IFS= read -r session; do
-    [ -n "$session" ] || continue
-    log "killing demo tmux session: $session"
-    tmux kill-session -t "=$session" 2>/dev/null || true
-  done <"$STATE_DIR/.sessions"
-  rm -f "$STATE_DIR/.sessions"
+
+  for demo_id in "$CM_DEMO_PRIMARY_WORKTREE_ID" "$CM_DEMO_WORKTREE_ID" \
+                 "$CM_DEMO_LOGIN_WORKTREE_ID" "$CM_DEMO_UNSYNCED_WORKTREE_ID"; do
+    [ -n "$demo_id" ] || continue
+    # Worktree ids are `[a-z0-9-]+` (sanitizeIdSegment), so interpolating one
+    # into the pattern cannot introduce a regex metacharacter.
+    grep -E "^mcbd-[a-z0-9]+-${demo_id}(-[a-zA-Z0-9_-]+)?\$" "$LIVE_SESSIONS" \
+      >"$STATE_DIR/.matched-sessions" 2>/dev/null || : >"$STATE_DIR/.matched-sessions"
+    while IFS= read -r session; do
+      [ -n "$session" ] || continue
+      kill_session_if_live "$session"
+    done <"$STATE_DIR/.matched-sessions"
+    rm -f "$STATE_DIR/.matched-sessions"
+  done
+
+  rm -f "$LIVE_SESSIONS"
 }
 
 stop_server
 kill_demo_sessions
+
+# Removed unconditionally — including when tmux is absent and kill_demo_sessions
+# returned early. A record left behind would make the next run's teardown chase
+# names that no longer exist. Only inside the state dir, on the same reasoning as
+# purge_path below: nothing read out of the state file gets to name a path this
+# script deletes outside its own directory.
+case "${CM_DEMO_SESSIONS_FILE:-}" in
+  "$STATE_DIR"/*) rm -f "$CM_DEMO_SESSIONS_FILE" ;;
+  '') : ;;
+  *) log "session record '$CM_DEMO_SESSIONS_FILE' is outside $STATE_DIR; leaving it alone" ;;
+esac
 
 if [ "$KEEP_SEED" -eq 0 ] && [ -n "$CM_DEMO_SEED_ROOT" ]; then
   case "$CM_DEMO_SEED_ROOT" in
