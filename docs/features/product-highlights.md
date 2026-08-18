@@ -218,8 +218,13 @@ GIF はバイト予算（既定 1.5MB）に収まるまで解像度・fps・パ�
 今回の撮り直しだけは例外で、収録の間に Activity Bar のアイコンが増えたため、部分更新すると
 chrome の異なる版が 1 ページに混在してしまう。
 
-`docs/images/` の `demo-desktop.mp4` / `demo-mobile.mp4` は個人環境で撮られた旧素材で、
-README の GIF が参照しているために残っているだけ。**再利用しないこと**
+個人環境で撮られた `docs/images/` の旧素材は **#1815 で差替え済み**。README（EN / JA は
+同一ファイルを参照するので en 版のテロップが両方に出る）の `demo-desktop.gif` は
+`cm-11-contract-verify.en.mp4` の 0〜18 秒（outro カードを落とした 4 ビート）、
+`demo-mobile.gif` は `cm-03-never-miss-waiting.en.mp4` の `respond-from-mobile`（14〜18 秒）を
+**520x800 に切り抜いた**もの。切り抜き幅はスマホ枠（370px）ではなくテロップ帯の文字幅で決まる
+— 枠幅で切ると帯が途中で切れ、帯幅（594px）で切るとスマホが 187px まで縮んで画面の字が読めない。
+旧 `demo-desktop.mp4` / `demo-mobile.mp4`（合わせて 69,870,130 バイト）は削除した
 （[website/assets/media/README.md](../../website/assets/media/README.md) 参照）。
 
 ## 関連ドキュメント
