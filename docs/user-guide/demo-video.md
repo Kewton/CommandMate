@@ -18,6 +18,8 @@ CommandMate の 30 秒紹介動画（日本語版・英語版）を、隔離環�
 ## 前提
 
 - `tmux` / `git` / `curl` / `node` / `ffmpeg` / `ffprobe`（`brew install ffmpeg`）
+- `claude`（`npm install -g @anthropic-ai/claude-code`。実 LLM は使わないが、メッセージ送信 API が
+  CLI 未導入を 503 で拒否するため、無いと録画の途中でテイクが死ぬ）
 - Playwright の Chromium（`npx playwright install chromium`）
 - リポジトリで `npm install` 済みであること
 
