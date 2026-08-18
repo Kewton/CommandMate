@@ -69,6 +69,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `docs/design/discoverability-principle.md` の「運用者が読む層」に Web UI を追加し、
     実装規約に「新しい判定は CLI と Web UI の両方に出す」を追加
 
+- **docs(en): verify / task / skills / hooks の英語ドキュメントを JA と同構成に整備** (#1817) — `docs/en/user-guide/cli-operations-guide.md` に `sync` / `verify` / `task`（実行契約・`gateDefinitions`・無人実行テンプレート）/ 読むモード / `instances` / マルチセッション / `skill` / `report metrics` の各節を追加し、`docs/en/user-guide/skills.md` と `docs/en/user-guide/agent-event-hooks.md` を新規作成。EN `commands-guide.md` に「このリポジトリ限定」の明記と全 27 コマンド表を追加し、`tests/unit/docs/ja-en-heading-parity.test.ts` が 4 対の ja/en で `##` 見出し数の一致を固定する
+
 ## [0.24.0] - 2026-08-16
 
 > **Highlight**: エージェントの**入力待ちを見逃さないための経路を一通り揃えた**リリース。WS 即時配信・要対応バッジ・クロス画面 Toast に加え、タブタイトル / favicon / App Badge / 通知音でブラウザ外へ、さらに waiting エッジ駆動の push 通知でデバイス外へ伝わるようになった（方針 A / D / E）。あわせて稼働中の**モデルと reasoning effort** を hooks の構造化イベントと tmux capture の両経路から取得し、UI と CLI (`instances` / `capture --json`) に露出した。External Apps のプロキシは**末尾スラッシュとクエリ文字列を生バイトのまま**転送するようになり、Next.js static export のアプリが CommandMate 経由で開けなかった問題（`/proxy/<app>/try/` と `/assets/` が 404）が解消している。

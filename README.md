@@ -511,9 +511,11 @@ Japanese, but the YAML they specify is the same on either side.
 | [Tutorial](./docs/en/user-guide/tutorial.md) | Fork a sample repository and go from contract to verified result in about fifteen minutes |
 | [Web App Guide](./docs/en/user-guide/webapp-guide.md) | Basic web app operations |
 | [Quick Start](./docs/en/user-guide/quick-start.md) | Using Claude Code commands |
+| [CLI Operations Guide](./docs/en/user-guide/cli-operations-guide.md) | Driving sessions from the CLI: execution contracts, verification gates, Skills, agent instances |
 | [Concept](./docs/en/concept.md) | The canonical Vision, Mission and core principle, and how each implementation item maps to a feature |
 | [Product Highlights](./docs/en/features/product-highlights.md) | A feature-by-feature tour of the product |
-| [Skills Guide](./docs/user-guide/skills.md) | Installing official Catalog Skills into a worktree (Japanese) |
+| [Skills Guide](./docs/en/user-guide/skills.md) | Installing official Catalog Skills into a worktree |
+| [Agent Event Hooks](./docs/en/user-guide/agent-event-hooks.md) | Structured agent events instead of terminal scraping |
 | [Architecture](./docs/en/architecture.md) | System design |
 | [Deployment Guide](./docs/en/DEPLOYMENT.md) | Production environment setup |
 | [UI/UX Guide](./docs/en/UI_UX_GUIDE.md) | UI implementation details |

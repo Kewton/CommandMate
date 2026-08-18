@@ -112,7 +112,7 @@ Agents read a worktree's Skills **at startup**. Installing alone is not enough, 
 > - **A session restart is required after installing** (agents only read Skills at startup).
 > - **You cannot reinstall or update into the same destination** (it is one-shot). To change versions, uninstall first and then install again.
 > - Do **not** use **high-risk Skills** such as `cmate-worktree-cleanup` or `cmate-orchestrate` in your first tutorial.
-> - For the details and constraints of the Skills feature, see [Agent Skills Distribution](../../user-guide/skills.md).
+> - For the details and constraints of the Skills feature, see [Agent Skills Distribution](./skills.md).
 
 ---
 
@@ -277,3 +277,6 @@ Then remove the repository from the **Repositories** screen, and remove `tutoria
 - [Quick Start Guide](./quick-start.md) - A development flow using slash commands and agents
 - [CLI Setup Guide](./cli-setup-guide.md) - Installation and configuration details
 - [Workflow Examples](./workflow-examples.md) - Practical usage examples
+- [CLI Operations Guide](./cli-operations-guide.md) - Driving sessions from the CLI: contracts, verification gates, Skills
+- [Agent Skills Distribution](./skills.md) - What `commandmate skill` installs, and its constraints
+- [Agent Event Hooks](./agent-event-hooks.md) - The structured events an agent CLI emits
