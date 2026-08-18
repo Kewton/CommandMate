@@ -38,8 +38,18 @@ afterAll(() => {
   for (const file of tmpFiles) fs.rmSync(file, { force: true });
 });
 
+/**
+ * Draining is off by default here (Issue #1810).
+ *
+ * Every fixture below queues its submissions on one pipe, where they are all
+ * readable at once — the shape of two messages seconds apart in production, but
+ * indistinguishable from one multi-line message to a reader. `--input-settle 0`
+ * makes each line its own submission, which is what these cases model; the
+ * multi-line case turns it back on and is tested on its own.
+ */
 function run(args: string[], input = '') {
-  return spawnSync('bash', [SCRIPT, ...args], { input, encoding: 'utf8' });
+  const settled = args.includes('--input-settle') ? args : [...args, '--input-settle', '0'];
+  return spawnSync('bash', [SCRIPT, ...settled], { input, encoding: 'utf8' });
 }
 
 describe('argument handling', () => {
@@ -349,5 +359,54 @@ describe('{{TASK}} substitution', () => {
     const frames = result.stdout.split(CLEAR).filter((frame) => frame.trim() !== '');
     expect(frames.at(-1)).toContain('Add a dark mode toggle to the header');
     expect(frames.at(-1)).not.toMatch(/❯\s+y\s*$/m);
+  });
+});
+
+
+/**
+ * A multi-line message is one submission (Issue #1810).
+ *
+ * `commandmate send --contract` prepends a preamble dozens of lines long, and
+ * CommandMate types the whole thing into the pane before pressing Enter — so it
+ * arrives as many lines on stdin. Read as one `@input` each, the cassette raced
+ * through a full pass per line: the approval frame was painted and immediately
+ * answered by the next line of the *same* message, and `commandmate wait`
+ * reported `Completed` about work that had not happened (measured on the
+ * contract-verify take before this landed).
+ */
+describe('a multi-line submission', () => {
+  const CASSETTE_TWO_INPUTS = tmpCassette(
+    ['@input\tA:{{INPUT}}\n', '0\tmid\n', '@input\tB:{{INPUT}}\n', '0\tend\n'].join(''),
+  );
+
+  it('advances one @input row, not one per line', () => {
+    const result = run(
+      [CASSETTE_TWO_INPUTS, '--once', '--input-settle', '1'],
+      '## contract\nline two\nline three\n',
+    );
+    expect(result.status).toBe(0);
+    // The first line is what the pane echoes, the way a TUI shows a pasted
+    // block; the rest are consumed so they cannot answer a later prompt.
+    expect(result.stdout).toContain('A:## contract');
+    expect(result.stdout).not.toContain('B:');
+    expect(result.stdout).not.toContain('line two');
+  });
+
+  it('still takes two separate submissions as two, when they are separate', () => {
+    // The production case: the answer to an approval arrives seconds after the
+    // message that caused it, so the drain has long since timed out. A closed
+    // pipe ends the drain at once, which is why this fixture models the gap by
+    // running with draining disabled.
+    const result = run([CASSETTE_TWO_INPUTS, '--once'], 'first\nsecond\n');
+    expect(result.stdout).toContain('A:first');
+    expect(result.stdout).toContain('B:second');
+  });
+
+  it('rejects a settle value that is not whole seconds', () => {
+    // bash 3.2's `read -t` takes no fraction, so `0.05` would abort the replay
+    // at the first @input row rather than at startup.
+    const result = run([CASSETTE_TWO_INPUTS, '--input-settle', '0.5']);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('--input-settle must be a whole number of seconds');
   });
 });

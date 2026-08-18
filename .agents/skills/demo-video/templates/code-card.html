@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>demo-video code card</title>
+    <!--
+      Full-frame opaque listing card (Issue #1810). Like card.html this is a
+      complete frame, so ffmpeg turns it into a still segment rather than an
+      overlay; the palette is card.html's so a cut can cross-fade between the
+      two without the ground colour jumping.
+
+      Every font is a system font. The page must render identically with no
+      network at all — a webfont request would silently fall back mid-take and
+      change the column width between the ja and en passes.
+
+      Nothing here wraps: storyboard.ts refuses a source line wider than
+      MAX_CODE_CARD_COLUMNS, so an over-wide listing fails validation instead of
+      running off the right edge of a frame nobody re-reads.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 22px;
+        padding: 4% 6%;
+        box-sizing: border-box;
+        background: radial-gradient(circle at 50% 38%, #16202c 0%, #0a0e14 72%);
+        font-family: 'SF Mono', Menlo, Monaco, Consolas, 'DejaVu Sans Mono', monospace;
+      }
+      #code-caption {
+        max-width: 92%;
+        color: #f5f7fa;
+        text-align: center;
+        font-family: 'Helvetica Neue', Helvetica, Arial, 'Hiragino Sans',
+          'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic', Meiryo, sans-serif;
+        font-size: 34px;
+        font-weight: 700;
+        line-height: 1.25;
+        overflow-wrap: anywhere;
+      }
+      #code-card {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        max-width: 100%;
+        border-radius: 14px;
+        border: 1px solid #24313f;
+        background: #0d141c;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+        overflow: hidden;
+      }
+      #code-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 18px;
+        border-bottom: 1px solid #24313f;
+        background: #111a24;
+      }
+      #code-rule {
+        width: 44px;
+        height: 4px;
+        border-radius: 2px;
+        background: #22d3ee;
+      }
+      #code-lang {
+        color: #8fa3b8;
+        font-size: 18px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      #code-body {
+        padding: 18px 22px;
+        color: #e6edf3;
+        font-size: 22px;
+        line-height: 1.45;
+      }
+      .code-row {
+        display: flex;
+        gap: 18px;
+        white-space: pre;
+      }
+      .code-gutter {
+        flex: 0 0 auto;
+        min-width: 2ch;
+        color: #4c5f73;
+        text-align: right;
+        user-select: none;
+      }
+      .code-line {
+        flex: 1 1 auto;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Caption text is injected with `element.textContent`, and the listing is
+         built row by row with createElement/textContent, by render-overlays.ts.
+         Neither path goes through innerHTML, so neither the storyboard wording
+         nor the file on disk can inject markup into a published frame. -->
+    <div id="code-caption"></div>
+    <div id="code-card">
+      <div id="code-head">
+        <span id="code-rule"></span>
+        <span id="code-lang"></span>
+      </div>
+      <div id="code-body"></div>
+    </div>
+  </body>
+</html>

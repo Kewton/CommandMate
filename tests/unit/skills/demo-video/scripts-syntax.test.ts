@@ -31,7 +31,8 @@ describe('demo-video shell scripts', () => {
 
   it('finds the scripts in both install roots', () => {
     // Guards against an empty glob quietly passing this whole file.
-    expect(all.length).toBe(10);
+    // 6 scripts x 2 install roots.
+    expect(all.length).toBe(12);
   });
 
   it.each(all)('%s parses under bash -n', (script) => {

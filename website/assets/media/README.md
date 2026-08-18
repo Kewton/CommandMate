@@ -68,12 +68,22 @@ about 0.6MB each; the same twenty seconds as GIF would be about 1.3MB.
 
 ## Gallery images (webp)
 
+Generated, not taken by hand (Issue #1810). The five screenshots come out of the same isolated
+environment the demo video is filmed in, so the only repository that can appear in one is the
+throwaway seed — which is what #1225 could not reproduce about the hand-taken set.
+
 ```bash
-for n in screenshot-desktop screenshot-mobile screenshot-worktree-desktop \
-         screenshot-worktree-mobile screenshot-worktree-mobile-terminal; do
-  cwebp -q 82 "docs/images/$n.png" -o "website/assets/img/$n.webp"
-done
+.claude/skills/demo-video/scripts/env-up.sh
+npx tsx .claude/skills/demo-video/scripts/stills.ts --state "$HOME/.commandmate-demo/state.env"
+.claude/skills/demo-video/scripts/env-down.sh --purge
 ```
+
+It writes `docs/images/<id>.png` and `website/assets/img/<id>.webp`, starting at the `cwebp -q 82`
+this procedure used to spell by hand. The budget below is enforced rather than remembered: quality
+steps down to 40 and then resolution to 0.65, and if nothing fits, **nothing is written and the run
+fails**. Before each shot the rendered text is read back and the run fails on a home directory, a
+private LAN address, this repository's own name or the retired product name — the fix for which is
+to compose the shot differently, never to mask it.
 
 Budget: **each image < 100KB**, except `screenshot-worktree-desktop.webp`. `screenshot-desktop.webp`
 is both the hero and the `og:image`, so it is what Lighthouse measures as LCP — and it stays the

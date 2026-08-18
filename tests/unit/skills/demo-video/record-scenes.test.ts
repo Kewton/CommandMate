@@ -11,14 +11,24 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Page } from '@playwright/test';
 
 import {
+  DEFAULT_CLI_SESSION,
   DEFAULT_MESSAGE,
   DEFAULT_VIEWPORT,
+  DEMO_CATALOG_SKILL_ID,
   MOBILE_VIEWPORT,
   SCENES,
+  SLASH_PALETTE_COMMANDS,
+  SceneUnavailableError,
   assertIdForPath,
+  isTerminalScene,
+  readCatalogAvailability,
+  readInstalledSkillIds,
+  terminalWorkDir,
+  waitForTitleBadge,
   localeCookie,
   parseRecordArgs,
   parseStateFile,
@@ -32,7 +42,10 @@ import {
   viewportFor,
   waitForJson,
   waitForWorktree,
+  type BrowserScene,
   type DemoState,
+  type PrepareContext,
+  type RecordOptions,
   type WaitDeps,
 } from '../../../../.claude/skills/demo-video/scripts/record-scenes';
 import { deriveWorktreeId } from '@/lib/git/worktree-id';
@@ -200,6 +213,11 @@ describe('SCENES', () => {
     expect(SCENES.map((scene) => scene.id)).toEqual([
       'sessions-overview',
       'send-and-generate',
+      'attention-badge',
+      'review-screen',
+      'slash-palette',
+      'install-skill',
+      'contract-verify',
       'respond-from-mobile',
       'add-repository',
       'sync-worktrees',
@@ -237,8 +255,29 @@ describe('SCENES', () => {
     for (const scene of SCENES) {
       expect(scene.title.length).toBeGreaterThan(0);
       expect(['pc', 'mobile']).toContain(scene.viewport);
-      expect(typeof scene.run).toBe('function');
+      // A terminal scene has no browser to drive, so it carries `record`
+      // instead of `run` (#1810). Exactly one of the two, never both.
+      expect(isTerminalScene(scene) ? typeof scene.record : typeof scene.run).toBe('function');
     }
+  });
+
+  it('films the contract and its verdict from a tmux pane, not a browser', () => {
+    // Task Contract, the gates and Evidence have no Web UI to point a camera
+    // at: `src/components` calls neither /api/worktrees/:id/tasks nor
+    // /api/verification/*. A browser scene here would have to invent a screen.
+    const terminal = SCENES.filter(isTerminalScene).map((scene) => scene.id);
+    expect(terminal).toEqual(['contract-verify']);
+  });
+
+  it('names the four commands the slash palette take asserts are on screen', () => {
+    // The seed carries the real files env-up.sh copies in, so a palette that
+    // renders nothing means the seed is wrong rather than the shot being slow.
+    expect(SLASH_PALETTE_COMMANDS).toEqual([
+      '/cmate-verify',
+      '/work-plan',
+      '/create-pr',
+      '/tdd-impl',
+    ]);
   });
 
   it('does its waiting in prepare, before the camera rolls', () => {
@@ -634,5 +673,348 @@ describe('the harness ids agree with the rule the product mints them by', () => 
       expect(`${file}: ${source}`).not.toContain('cmdemo-app-feature-demo');
       expect(`${file}: ${source}`).not.toContain('generateWorktreeId');
     }
+  });
+});
+
+
+/**
+ * The scenes #1810 added, exercised through their real `prepare` with `fetch`
+ * stubbed.
+ *
+ * `prepare` is where every scene decides whether the product is in the state it
+ * films, so it is the half worth testing without a browser: a wrong predicate
+ * here costs a whole take and reports itself as a timeout.
+ */
+describe('the #1810 scenes', () => {
+  const BASE = 'http://127.0.0.1:3399';
+  const scene = (id: string) => SCENES.find((s) => s.id === id)!;
+
+  function prepareContext(overrides: Partial<RecordOptions> = {}): PrepareContext {
+    return {
+      baseUrl: BASE,
+      options: {
+        ...parseRecordArgs(ARGS, {}),
+        timeoutMs: 30,
+        ...overrides,
+      },
+      state: { baseUrl: BASE, videoDir: '/tmp/videos' } as DemoState,
+    };
+  }
+
+  /** A fetch stub over a fixed routing table, recording every POST it saw. */
+  function stubFetch(routes: Record<string, unknown | (() => Response)>) {
+    const posts: { url: string; body: unknown }[] = [];
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        posts.push({ url, body: JSON.parse(String(init.body)) });
+        return new Response('{}', { status: 201, headers: { 'Content-Type': 'application/json' } });
+      }
+      const key = Object.keys(routes).find((route) => url.endsWith(route));
+      if (key === undefined) return new Response('not found', { status: 404 });
+      const value = routes[key];
+      if (typeof value === 'function') return (value as () => Response)();
+      return new Response(JSON.stringify(value), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    return posts;
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const worktreeList = (worktree: Record<string, unknown>) => ({
+    worktrees: [{ id: 'wt-dark-mode', path: DARK_MODE_DIR, ...worktree }],
+  });
+
+  it('sends a message itself when attention-badge is filmed against an idle session', async () => {
+    // The take is filmable on its own (`--scene attention-badge`). An idle
+    // cassette is parked on `@input` and paints nothing until something is sent.
+    let processing = false;
+    const posts = stubFetch({
+      '/api/worktrees': () =>
+        new Response(
+          JSON.stringify(
+            worktreeList({ isSessionRunning: true, isProcessing: processing, isWaitingForResponse: false }),
+          ),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+    });
+    const pending = scene('attention-badge').prepare!(prepareContext({ timeoutMs: 2000 }));
+    // The send is what moves the cassette on, so the state only changes after it.
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    processing = true;
+    await pending;
+
+    expect(posts[0].url).toBe(`${BASE}/api/worktrees/wt-dark-mode/send`);
+    expect(posts[0].body).toEqual({ content: DEFAULT_MESSAGE });
+  });
+
+  it('does not send again when attention-badge follows send-and-generate', async () => {
+    const posts = stubFetch({
+      '/api/worktrees': worktreeList({
+        isSessionRunning: true,
+        isProcessing: true,
+        isWaitingForResponse: false,
+      }),
+    });
+    await scene('attention-badge').prepare!(prepareContext());
+    expect(posts).toEqual([]);
+  });
+
+  it('refuses to film attention-badge against a session that is already waiting', async () => {
+    // The toast comes off a realtime `session_status_changed` event, which a
+    // page opened after the edge never receives: the take would show the pill
+    // and silently lose the toast it exists to show.
+    stubFetch({
+      '/api/worktrees': worktreeList({
+        isSessionRunning: true,
+        isProcessing: false,
+        isWaitingForResponse: true,
+      }),
+    });
+    await expect(scene('attention-badge').prepare!(prepareContext())).rejects.toThrow(
+      /already waiting for a response/,
+    );
+  });
+
+  it('waits for an approval before filming the Review screen', async () => {
+    stubFetch({
+      '/api/worktrees': worktreeList({ isSessionRunning: true, isWaitingForResponse: false }),
+    });
+    await expect(scene('review-screen').prepare!(prepareContext())).rejects.toThrow(
+      /waiting for a response/,
+    );
+  });
+
+  it('waits for a live session before filming the slash palette', async () => {
+    stubFetch({ '/api/worktrees': worktreeList({ isSessionRunning: false }) });
+    await expect(scene('slash-palette').prepare!(prepareContext())).rejects.toThrow(
+      /showing a live agent session/,
+    );
+  });
+
+  it('skips install-skill, with the reason, when the Catalog is unreachable', async () => {
+    // The Catalog URL is a compile-time constant with an exact-match allowlist
+    // (SSRF policy), so it cannot be pointed at a local fixture: offline is a
+    // skip, and a skip has to say why rather than produce an empty take.
+    stubFetch({ '/api/skills': () => new Response('unavailable', { status: 503 }) });
+    const error = await scene('install-skill')
+      .prepare!(prepareContext())
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(SceneUnavailableError);
+    expect((error as Error).message).toMatch(/Skill Catalog is unreachable/);
+  });
+
+  it('skips install-skill when the Catalog is only served from a stale snapshot', async () => {
+    stubFetch({ '/api/skills': { catalog: { stale: true }, skills: [] } });
+    await expect(scene('install-skill').prepare!(prepareContext())).rejects.toBeInstanceOf(
+      SceneUnavailableError,
+    );
+  });
+
+  it('refuses to film an install of a Skill the worktree already has', async () => {
+    stubFetch({
+      '/api/skills': { catalog: { stale: false }, skills: [] },
+      [`/api/worktrees/wt-dark-mode/skills`]: {
+        skills: [{ skillId: DEMO_CATALOG_SKILL_ID }],
+      },
+    });
+    await expect(scene('install-skill').prepare!(prepareContext())).rejects.toThrow(
+      /to still be uninstalled/,
+    );
+  });
+});
+
+describe('readCatalogAvailability', () => {
+  it.each([
+    [{ catalog: { stale: false }, skills: [] }, true],
+    [{ catalog: { stale: true }, skills: [] }, false],
+    [{ skills: [] }, false],
+  ])('reads %j as ok=%s', (payload, ok) => {
+    expect(readCatalogAvailability(payload).ok).toBe(ok);
+  });
+
+  it('says why, so a skipped take is not a mystery', () => {
+    expect(readCatalogAvailability({ catalog: { stale: true } }).reason).toMatch(/stale/);
+  });
+});
+
+describe('readInstalledSkillIds', () => {
+  it('reads ids out of the worktree skills envelope', () => {
+    expect(readInstalledSkillIds({ skills: [{ skillId: 'a' }, { skillId: 'b' }] })).toEqual(['a', 'b']);
+  });
+
+  it('reads an empty list from a worktree with nothing installed', () => {
+    expect(readInstalledSkillIds({ skills: [] })).toEqual([]);
+    expect(readInstalledSkillIds({})).toEqual([]);
+  });
+});
+
+describe('waitForTitleBadge', () => {
+  /** The two calls the helper makes; enough of a Page for it to run. */
+  const fakePage = (titles: string[]) => {
+    let index = 0;
+    return {
+      title: async () => titles[Math.min(index++, titles.length - 1)],
+      waitForTimeout: async () => undefined,
+    } as unknown as Page;
+  };
+
+  it('resolves once the title carries the (N) prefix the badge prepends', async () => {
+    await expect(
+      waitForTitleBadge(fakePage(['CommandMate', 'CommandMate', '(1) CommandMate']), 5000),
+    ).resolves.toBe('(1) CommandMate');
+  });
+
+  it('accepts a count above one, which is what a second waiting branch produces', async () => {
+    await expect(waitForTitleBadge(fakePage(['(2) CommandMate']), 5000)).resolves.toBe(
+      '(2) CommandMate',
+    );
+  });
+
+  it('reports the title it kept seeing rather than timing out silently', async () => {
+    // The badge is the half of the notification that reaches someone whose tab
+    // is in the background — and the half a reviewer would never notice missing.
+    await expect(waitForTitleBadge(fakePage(['CommandMate']), 0)).rejects.toThrow(
+      /never took the attention badge; last seen: "CommandMate"/,
+    );
+  });
+});
+
+describe('terminalWorkDir', () => {
+  it('scratches inside the demo state dir, never in the repository', () => {
+    const options = parseRecordArgs(ARGS, {});
+    const dir = terminalWorkDir(options, {
+      baseUrl: 'http://127.0.0.1:3399',
+      videoDir: '',
+      CM_DEMO_STATE_DIR: '/home/dev/.commandmate-demo',
+    });
+    expect(dir).toBe('/home/dev/.commandmate-demo/terminal-work');
+  });
+
+  it('honours an explicit --work', () => {
+    const options = { ...parseRecordArgs(ARGS, {}), workDir: '/elsewhere/work' };
+    expect(terminalWorkDir(options, { baseUrl: '', videoDir: '' })).toBe('/elsewhere/work');
+  });
+});
+
+/**
+ * Assembled at runtime, never spelled out.
+ *
+ * `tests/unit/config/tmux-live-test-safety.test.ts` scans every test source for
+ * these literals and fails on one that is not pinned to a private `-L` socket.
+ * That guard cannot tell an assertion *against* a command from a use of it, so
+ * even a negative assertion has to avoid writing the token down.
+ */
+const SERVER_GLOBAL_TMUX_COMMANDS = [
+  ['kill', 'server'].join('-'),
+  ['bind', 'key'].join('-'),
+  `${['set', 'option'].join('-')} -g`,
+];
+
+describe('the terminal take is wired to the recorded-session teardown', () => {
+  const cliScene = fs.readFileSync(
+    path.resolve(__dirname, '../../../../.claude/skills/demo-video/scripts/cli-scene.sh'),
+    'utf8',
+  );
+
+  it('defaults to the session name env-down.sh will be told about', () => {
+    expect(DEFAULT_CLI_SESSION).toBe('cmdemo-cli');
+    expect(cliScene).toContain('SESSION="cmdemo-cli"');
+  });
+
+  it('records the session name before the session exists', () => {
+    // A session created and then not written down is exactly the leak the
+    // record-based teardown was built to prevent (#1809): env-down.sh kills
+    // what it finds in $CM_DEMO_SESSIONS_FILE and never sweeps `mcbd-*`.
+    const recordAt = cliScene.indexOf('>>"$CM_DEMO_SESSIONS_FILE"');
+    const createAt = cliScene.indexOf('new-session -d -s "$SESSION"');
+    expect(recordAt).toBeGreaterThan(-1);
+    expect(createAt).toBeGreaterThan(-1);
+    expect(recordAt).toBeLessThan(createAt);
+  });
+
+  it('never kills the tmux server, and never mutates it globally', () => {
+    const code = cliScene
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line))
+      .join('\n');
+    for (const forbidden of SERVER_GLOBAL_TMUX_COMMANDS) {
+      expect(code, `cli-scene.sh uses ${forbidden}`).not.toContain(forbidden);
+    }
+    // The guard is not vacuous: the same check fires on a script that does it.
+    expect(`tmux ${SERVER_GLOBAL_TMUX_COMMANDS[0]}`).toContain(SERVER_GLOBAL_TMUX_COMMANDS[0]);
+  });
+
+  it('refuses to drive port 3000 and isolates HOME from ~/.commandmate/.env', () => {
+    expect(cliScene).toContain('refusing to drive a live CommandMate instance');
+    expect(cliScene).toContain('HOME="$CLI_HOME"');
+    expect(cliScene).toContain('CM_PORT="$CM_DEMO_PORT"');
+  });
+
+  it('asserts the CLI sees only this run’s seed worktrees before sending anything', () => {
+    const assertAt = cliScene.indexOf('assert_only_seed_worktrees\n');
+    const sendAt = cliScene.indexOf('cm send');
+    expect(assertAt).toBeGreaterThan(-1);
+    expect(sendAt).toBeGreaterThan(assertAt);
+    expect(cliScene).toContain('refusing to film a session that is not isolated');
+  });
+
+  it('runs the real gates: no stub, no mock, and the exit code is asserted', () => {
+    // SKILL.md's design judgement — only the LLM is replaced — covers the
+    // verification gates too. Comment lines are stripped so the script's own
+    // prose *about* not mocking does not read as mocking.
+    const code = cliScene
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line))
+      .join('\n');
+    expect(cliScene).toContain('--verify');
+    expect(cliScene).toContain('expected exit 10 (prompt detected) from the first wait');
+    expect(cliScene).toContain('expected exit 0 from the verified wait');
+    expect(code).not.toMatch(/\bmock|\bstub\b/i);
+    expect('cm() { echo "GATE unit PASS"; }  # a stub').toMatch(/\bstub\b/i);
+  });
+});
+
+describe('the seed carries what the #1810 scenes read', () => {
+  const envUp = fs.readFileSync(
+    path.resolve(__dirname, '../../../../.claude/skills/demo-video/scripts/env-up.sh'),
+    'utf8',
+  );
+
+  it('commits the verification config and contract on main, before the branches exist', () => {
+    // The contract allows `src/**` and `test/**` only, and the scope gate
+    // reconciles the whole `main..HEAD` diff. Committing verify.yaml on the
+    // feature branch would make the take film its own harness failing scope.
+    const seedAt = envUp.indexOf('seed_verification_assets\n');
+    const worktreeAt = envUp.indexOf('worktree add -q -b feature/demo-dark-mode');
+    expect(seedAt).toBeGreaterThan(-1);
+    expect(seedAt).toBeLessThan(worktreeAt);
+    expect(envUp).toContain('.commandmate/verify.yaml');
+    expect(envUp).toContain('.commandmate/tasks/dark-mode.yaml');
+    expect(envUp).toContain('node --test');
+  });
+
+  it('proves the seed gate green before a server exists to film it', () => {
+    expect(envUp).toContain("the seed's own 'node --test' is not green");
+    const testAt = envUp.indexOf('node --test >"$STATE_DIR/seed-node-test.log"');
+    const themeAt = envUp.indexOf('cat >"$WT_DARK_MODE/src/theme.ts"');
+    expect(themeAt).toBeGreaterThan(-1);
+    // The test only passes against the uncommitted work, so it has to run after
+    // that work is on disk.
+    expect(testAt).toBeGreaterThan(themeAt);
+  });
+
+  it('copies the real commands and Skill the slash palette shows', () => {
+    for (const command of ['work-plan', 'create-pr', 'tdd-impl']) {
+      expect(envUp).toContain(command);
+    }
+    expect(envUp).toContain('skills/cmate-verify');
+    // Both install roots, byte-identically, because that is how it ships.
+    expect(envUp).toContain('for skill_root in .claude .agents');
   });
 });

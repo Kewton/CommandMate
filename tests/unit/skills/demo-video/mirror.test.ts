@@ -35,11 +35,12 @@ function walk(root: string): string[] {
 describe('demo-video skill mirroring', () => {
   const claudeFiles = walk(CLAUDE_ROOT);
 
-  it('ships the Phase A assets', () => {
+  it('ships the Phase A assets and the #1810 additions', () => {
     // Guards against an empty tree quietly passing the comparison below.
     expect(claudeFiles).toEqual([
       'SKILL.md',
       'fixtures/claude-session-sample.cast',
+      'scripts/cli-scene.sh',
       'scripts/compose.sh',
       'scripts/demo-video.sh',
       'scripts/env-down.sh',
@@ -47,10 +48,17 @@ describe('demo-video skill mirroring', () => {
       'scripts/fake-agent.sh',
       'scripts/record-scenes.ts',
       'scripts/render-overlays.ts',
+      'scripts/stills.ts',
       'scripts/storyboard.ts',
+      'scripts/terminal-scene.ts',
+      'storyboard/code/dark-mode.contract.yaml',
+      'storyboard/code/verify.yaml',
+      'storyboard/contract-verify.yaml',
       'storyboard/default.yaml',
       'templates/card.html',
+      'templates/code-card.html',
       'templates/telop.html',
+      'templates/terminal.html',
     ]);
   });
 

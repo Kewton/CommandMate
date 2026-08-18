@@ -27,13 +27,21 @@ import {
 } from './storyboard';
 
 export interface OverlayJob {
-  /** `telop` overlays composite onto footage; `card` overlays *are* the frame. */
-  kind: 'telop' | 'card';
+  /**
+   * `telop` overlays composite onto footage; `card` and `code` overlays *are*
+   * the frame. The kind is also the PNG's filename prefix, which is how
+   * compose.sh finds the still for a row without carrying a path column.
+   */
+  kind: 'telop' | 'card' | 'code';
   sceneId: string;
   text: string;
   file: string;
   width: number;
   height: number;
+  /** `code` jobs only: the listing to typeset, read from the plan's sourcePath. */
+  code?: string;
+  /** `code` jobs only: syntax label printed in the card's header. */
+  lang?: string;
 }
 
 export interface RenderOptions {
@@ -44,30 +52,51 @@ export interface RenderOptions {
   frame: { width: number; height: number };
 }
 
+/** Still frames keep their own prefix; everything recorded gets a band. */
+export function overlayKind(type: PlanEntry['type']): OverlayJob['kind'] {
+  if (type === 'card') return 'card';
+  if (type === 'code') return 'code';
+  return 'telop';
+}
+
 /**
- * One PNG per scene: a card scene needs its full-frame still, a record scene
- * needs a transparent band to composite over its footage.
+ * One PNG per scene: a card or code scene needs its full-frame still, a record
+ * scene needs a transparent band to composite over its footage.
  *
  * Telops for mobile scenes are still rendered at the *output* frame size. The
  * mobile footage is letterboxed into that frame by compose.sh, so a band sized
  * to the phone viewport would land in the wrong place.
  */
 export function overlayJobs(plan: PlanEntry[], options: RenderOptions): OverlayJob[] {
-  return plan.map((entry) => ({
-    kind: entry.type === 'card' ? 'card' : 'telop',
-    sceneId: entry.id,
-    text: entry.telop,
-    file: path.join(
-      options.outDir,
-      `${entry.type === 'card' ? 'card' : 'telop'}-${entry.id}.${options.locale}.png`,
-    ),
-    width: options.frame.width,
-    height: options.frame.height,
-  }));
+  return plan.map((entry) => {
+    const kind = overlayKind(entry.type);
+    const job: OverlayJob = {
+      kind,
+      sceneId: entry.id,
+      text: entry.telop,
+      file: path.join(options.outDir, `${kind}-${entry.id}.${options.locale}.png`),
+      width: options.frame.width,
+      height: options.frame.height,
+    };
+    if (kind !== 'code') return job;
+    if (!entry.sourcePath) {
+      // Unreachable through the validator, which refuses a code scene with no
+      // source; kept so a hand-built plan fails here rather than rendering an
+      // empty card that looks deliberate.
+      throw new Error(`code scene '${entry.id}' has no sourcePath in the plan`);
+    }
+    return {
+      ...job,
+      code: fs.readFileSync(entry.sourcePath, 'utf8').replace(/\n$/, ''),
+      lang: entry.lang ?? 'text',
+    };
+  });
 }
 
+/** `code` renders from `code-card.html`; the other two are named after the kind. */
 export function templatePath(kind: OverlayJob['kind']): string {
-  return path.resolve(__dirname, '..', 'templates', `${kind}.html`);
+  const stem = kind === 'code' ? 'code-card' : kind;
+  return path.resolve(__dirname, '..', 'templates', `${stem}.html`);
 }
 
 async function renderJob(browser: Browser, job: OverlayJob): Promise<void> {
@@ -80,14 +109,41 @@ async function renderJob(browser: Browser, job: OverlayJob): Promise<void> {
   const page = await context.newPage();
   try {
     await page.goto(`file://${templatePath(job.kind)}`, { waitUntil: 'load' });
-    const selector = job.kind === 'card' ? '#card-text' : '#telop-text';
+    const selector = TEXT_SELECTOR[job.kind];
     // textContent, never innerHTML: storyboard wording is data, and a telop
     // containing `<` must render as `<`, not open an element.
     await page.$eval(selector, (element, text) => {
       element.textContent = text;
     }, job.text);
-    const element = await page.$(job.kind === 'card' ? 'body' : '#telop-band');
-    if (!element) throw new Error(`${job.kind}.html has no ${selector} container`);
+    if (job.kind === 'code') {
+      await page.$eval('#code-lang', (element, lang) => {
+        element.textContent = lang;
+      }, job.lang ?? 'text');
+      // Built line by line with createElement/textContent for the same reason
+      // the caption is: the listing is a file off disk, and innerHTML would let
+      // it open elements in the frame the video ships.
+      await page.$eval('#code-body', (element, source) => {
+        const lines = source.split('\n');
+        element.textContent = '';
+        lines.forEach((line, index) => {
+          const row = document.createElement('div');
+          row.className = 'code-row';
+          const gutter = document.createElement('span');
+          gutter.className = 'code-gutter';
+          gutter.textContent = String(index + 1);
+          const text = document.createElement('span');
+          text.className = 'code-line';
+          // A blank line still needs a box, or the row collapses and the
+          // numbering stops matching the file.
+          text.textContent = line === '' ? '\u00a0' : line;
+          row.append(gutter, text);
+          element.append(row);
+        });
+      }, job.code ?? '');
+    }
+    const container = job.kind === 'telop' ? '#telop-band' : 'body';
+    const element = await page.$(container);
+    if (!element) throw new Error(`${job.kind} template has no ${container} container`);
     await page.screenshot({
       path: job.file,
       // A telop must be transparent everywhere but the band, or it would paint
@@ -100,8 +156,19 @@ async function renderJob(browser: Browser, job: OverlayJob): Promise<void> {
   }
 }
 
+/** The element each template's telop/caption text is injected into. */
+export const TEXT_SELECTOR: Record<OverlayJob['kind'], string> = {
+  telop: '#telop-text',
+  card: '#card-text',
+  code: '#code-caption',
+};
+
 export async function renderOverlays(options: RenderOptions): Promise<OverlayJob[]> {
-  const { storyboard, errors } = parseStoryboard(fs.readFileSync(options.storyboardPath, 'utf8'));
+  const { storyboard, errors } = parseStoryboard(
+    fs.readFileSync(options.storyboardPath, 'utf8'),
+    undefined,
+    path.dirname(path.resolve(options.storyboardPath)),
+  );
   if (!storyboard) {
     throw new Error(`storyboard is invalid:\n  - ${errors.join('\n  - ')}`);
   }

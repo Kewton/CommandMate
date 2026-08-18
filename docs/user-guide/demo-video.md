@@ -15,6 +15,20 @@ CommandMate の 30 秒紹介動画（日本語版・英語版）を、隔離環�
 
 生成物は `demo-30s.ja.mp4` / `demo-30s.en.mp4`（`--gif` 指定時は同名の `.gif` も）。
 
+LP / README に貼る**静止画 5 点**も、同じ隔離環境から機械生成できる（Issue #1810）。
+
+```bash
+.claude/skills/demo-video/scripts/env-up.sh
+npx tsx .claude/skills/demo-video/scripts/stills.ts --state "$HOME/.commandmate-demo/state.env"
+.claude/skills/demo-video/scripts/env-down.sh --purge
+```
+
+`docs/images/screenshot-*.png` と `website/assets/img/*.webp` を書き換える。
+**バイト予算はゲート**で、hero（`screenshot-desktop.webp`）が 100KB に収まらなければ
+品質と解像度を段階的に落とし、それでも収まらなければ**何も書かずに落ちる**。
+撮る前に画面のテキストを読み、個人パス・LAN アドレス・旧製品名が写っていれば失敗させる
+（直し方はマスクではなく**構図**）。
+
 ## 前提
 
 - `tmux` / `git` / `curl` / `node` / `ffmpeg` / `ffprobe`（`brew install ffmpeg`）
@@ -28,8 +42,19 @@ CommandMate の 30 秒紹介動画（日本語版・英語版）を、隔離環�
 ## 何が起きるのか
 
 ロケールごとに、使い捨ての seed リポジトリと**専用ポートの隔離サーバ**を立て、収録済みの
-ターミナル出力を再生する「偽エージェント」を tmux セッションに流し込み、Playwright で 4 シーンを
+ターミナル出力を再生する「偽エージェント」を tmux セッションに流し込み、絵コンテが並べたシーンを
 録画してから ffmpeg で合成する。
+
+シーンには 3 種類ある。ブラウザを Playwright で撮るもの、`type: code` の**コードカード**
+（絵コンテの隣にある実ファイルを組版した静止フレーム）、そして `contract-verify` の
+**ターミナル収録**である。最後のひとつは tmux pane を撮る: Task Contract と検証ゲートは
+Web UI に無く、CLI の出力が唯一それを見せる面だからである。そこに映る
+`GATE ... PASS` / `RESULT passed` / 終了コードは、サーバが seed の `.commandmate/verify.yaml` を
+**本当に実行した**結果であって、作り物ではない。
+
+`install-skill` シーンだけはネットワークが要る（公式 Skill Catalog の URL は
+コンパイル時定数で、ローカルの代用に差し替えられない）。到達できないときは理由を出して
+**失敗する**。オフラインで残りを撮りたいときは `--allow-skip` を明示する。
 
 実 LLM は使わない。非決定的で、生成に数分かかり 30 秒に収まらないからである。ただし
 **置き換えているのは LLM だけ**で、ステータス検出も応答ポーリングも UI も製品コードのまま動く。

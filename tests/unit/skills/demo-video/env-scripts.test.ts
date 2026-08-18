@@ -319,6 +319,67 @@ describe('env-up boots an isolated instance', () => {
     expect(fs.readFileSync(state.CM_DEMO_SESSIONS_FILE, 'utf8')).toBe('');
   }, 60_000);
 
+  it('seeds the contract, the gate config and the work the gate judges', () => {
+    // Issue #1810. The contract allows `src/**` and `test/**` only, and the
+    // scope gate reconciles the whole `main..HEAD` diff — so verify.yaml, the
+    // contract and the agent command files have to be committed on `main`,
+    // before the branches exist. Committed on the feature branch they would be
+    // changes outside the allow list, and the contract-verify take would film
+    // its own harness failing the gate.
+    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
+    const state = readState();
+    const onMain = (relative: string) =>
+      spawnSync('git', ['-C', state.CM_DEMO_SEED_REPO, 'ls-tree', '--name-only', 'main', relative], {
+        encoding: 'utf8',
+      }).stdout.trim();
+
+    for (const tracked of [
+      '.commandmate/verify.yaml',
+      '.commandmate/tasks/dark-mode.yaml',
+      'test/theme.test.mjs',
+      '.claude/commands/work-plan.md',
+      '.claude/skills/cmate-verify/SKILL.md',
+      '.agents/skills/cmate-verify/SKILL.md',
+    ]) {
+      expect(onMain(tracked), `${tracked} is not committed on main`).toBe(tracked);
+    }
+
+    // The only difference between the worktree and its base: the work the
+    // gate is there to judge, left uncommitted so review-diff has something to
+    // click and work-evidence has something to count.
+    const dirty = spawnSync('git', ['-C', state.CM_DEMO_WORKTREE_PATH, 'status', '--porcelain'], {
+      encoding: 'utf8',
+    }).stdout.trim();
+    // `trim()` has eaten the leading space of ` M`, so match on the rest: one
+    // entry, modified, and it is the file the contract's scope allows.
+    expect(dirty).toBe('M src/theme.ts');
+  }, 60_000);
+
+  it('proves the seed gate green, and would fail if it were not', () => {
+    // The self-check is the reason the take cannot film `GATE unit FAIL`: the
+    // gate command is run here, in the worktree, before a server exists. This
+    // runs the seed's own gate a second time to show it really passes, and
+    // then breaks the work it judges to show the gate is not vacuous.
+    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
+    const state = readState();
+    const gate = () =>
+      spawnSync('node', ['--test'], { cwd: state.CM_DEMO_WORKTREE_PATH, encoding: 'utf8' });
+
+    expect(gate().status).toBe(0);
+
+    const theme = path.join(state.CM_DEMO_WORKTREE_PATH, 'src/theme.ts');
+    const original = fs.readFileSync(theme, 'utf8');
+    try {
+      // Back to what `main` carries: no resolveTheme. The test asserts on the
+      // uncommitted work specifically, so this must turn it red.
+      fs.writeFileSync(theme, 'export const THEME_STORAGE_KEY = "cmdemo.theme";\n');
+      expect(gate().status).not.toBe(0);
+    } finally {
+      fs.writeFileSync(theme, original);
+    }
+    expect(gate().status).toBe(0);
+  }, 60_000);
+
   it('fails and cleans up when the server never answers on the demo port', async () => {
     const result = run(ENV_UP, [], {
       ...stubEnv(),

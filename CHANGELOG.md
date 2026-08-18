@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **feat(demo-video): 新シーン・code card・静止画生成を追加する** (#1810): `contract-verify`（tmux pane を収録し、`send --contract` → `wait --verify` の `GATE` / `RESULT` / 終了コードを**実ゲートの実 exit code のまま**映す）・`attention-badge`・`review-screen`・`slash-palette`・`install-skill` の 5 シーン、絵コンテの `type: code`（ファイルを組版する静止カード。`source` は絵コンテのディレクトリ配下に閉じることを解決後のパスで検証）、および LP / README 用の静止画 5 点を同じ隔離環境から機械生成する `stills.ts`（バイト予算はゲートで、収まらなければ**書かずに落ちる**）
+
 ### Documentation
 
 - **Mission / Vision を `docs/concept.md` / `docs/en/concept.md` に正本化し、公開面の文言表 `docs/design/public-messaging.md` を新設** (#1808): hero・定義文・4 カード・With / Without 表・デモのキャプションとテロップ・チュートリアル導入文・footer タグライン・禁止語リストを ja / en 両方で確定した。軸語 "Vibe Engineering" の一次情報（Simon Willison, 2025-10-07）を実際に確認し出典として記録。禁止語リストはガードテスト `tests/unit/docs/public-messaging.test.ts` の配列と一致していることを固定している

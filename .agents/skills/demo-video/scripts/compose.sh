@@ -210,10 +210,14 @@ while IFS="$TAB" read -r id type viewport start duration telop; do
   fade_out_at="$(awk -v d="$duration" -v f="$fade" 'BEGIN { printf "%.3f", d - f }')"
   end="$(awk -v s="$start" -v d="$duration" 'BEGIN { printf "%.3f", s + d }')"
 
-  if [ "$type" = "card" ]; then
-    card="$OVERLAYS_DIR/card-$id.$LOCALE.png"
-    [ -f "$card" ] || die "missing card image: $card (run render-overlays.ts --locale $LOCALE)"
-    log "card    $id  ${start}s..${end}s  \"$telop\""
+  # `code` is a still like `card` — a listing held for its declared duration —
+  # and differs only in which PNG render-overlays.ts wrote (Issue #1810). The
+  # prefix is the plan's own `type`, so adding a third still kind never needs a
+  # branch here.
+  if [ "$type" = "card" ] || [ "$type" = "code" ]; then
+    card="$OVERLAYS_DIR/$type-$id.$LOCALE.png"
+    [ -f "$card" ] || die "missing $type image: $card (run render-overlays.ts --locale $LOCALE)"
+    log "$(printf '%-7s' "$type") $id  ${start}s..${end}s  \"$telop\""
     run_ffmpeg -loop 1 -t "$duration" -i "$card" \
       -filter_complex "[0:v]${SCALE_PAD},fps=${FPS},fade=t=in:st=0:d=${fade},fade=t=out:st=${fade_out_at}:d=${fade},format=yuv420p[v]" \
       -map '[v]' -an -c:v libx264 -preset veryfast -crf "$CRF" -r "$FPS" -t "$duration" "$segment"
