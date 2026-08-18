@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- **README（EN / JA）の hero・Key Features・ワークフロー節・比較表を Vibe Engineering 軸へ整合** (#1814): hero を `docs/design/public-messaging.md` の H1 ＋定義文に差し替え、Key Features 先頭に Task Contract / Verification Gates / Evidence & Metrics / Skills Catalog / 入力待ち通知の 5 行を追加し、Multi-Agent 行を 7 CLI（`CLI_TOOL_IDS` 実数）へ更新した。「Optional Workflow Layer」は `## Vibe Engineering workflow` へ昇格して "optional, not required" を削除し、公式 Catalog Skill と `send --contract` → `wait --verify` の最小コマンド列で説明する構成に変えた（`.claude/commands` 表はこのリポジトリ限定である旨を明記して 1 行リンクへ縮退）。競合 4 製品名の比較表は With / Without CommandMate 表に置換。ガード `tests/unit/docs/public-messaging.test.ts` の対象に両 README を追加した
+
 - **Mission / Vision を `docs/concept.md` / `docs/en/concept.md` に正本化し、公開面の文言表 `docs/design/public-messaging.md` を新設** (#1808): hero・定義文・4 カード・With / Without 表・デモのキャプションとテロップ・チュートリアル導入文・footer タグライン・禁止語リストを ja / en 両方で確定した。軸語 "Vibe Engineering" の一次情報（Simon Willison, 2025-10-07）を実際に確認し出典として記録。禁止語リストはガードテスト `tests/unit/docs/public-messaging.test.ts` の配列と一致していることを固定している
 
 ## [0.24.0] - 2026-08-16
