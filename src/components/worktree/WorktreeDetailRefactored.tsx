@@ -81,6 +81,8 @@ import { NewFileDialog } from '@/components/worktree/NewFileDialog';
 import { useSwipeGesture } from '@/hooks/useSwipeGesture';
 import { useVirtualKeyboard } from '@/hooks/useVirtualKeyboard';
 import type { MobileTab } from '@/components/mobile/MobileTabBar';
+import { VerificationStatusChip } from '@/components/worktree/VerificationStatusChip';
+import type { SubTabRequest } from '@/components/worktree/NotesAndLogsPane';
 
 // ============================================================================
 // Types
@@ -158,6 +160,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     fileInputRef,
     fileSearch,
     fileTreeRefresh,
+    handleActivityOpen,
     handleActivityToggle,
     handleAgentInstancesChange,
     handleAutoYesToggle,
@@ -245,6 +248,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     tabsState,
     resetFileTreeView,
     toggleInstanceVisible,
+    verification,
     vibeLocalContextWindow,
     vibeLocalModel,
     visibleInstanceIds,
@@ -256,6 +260,26 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Issue #1080: mobile terminal secondary actions (search + End) moved off the
   // sticky control row into a bottom sheet, opened from a "more actions" trigger.
   const [showActionsSheet, setShowActionsSheet] = useState(false);
+
+  // Issue #1816: the mobile header chip opens the Tools tab on its Verification
+  // sub-tab. Held here rather than inside NotesAndLogsPane because the mobile
+  // shell unmounts that pane whenever another tab is active, so the request has
+  // to survive the tab switch that the chip itself causes.
+  const [toolsSubTabRequest, setToolsSubTabRequest] = useState<SubTabRequest | null>(null);
+
+  /** Leaving the Tools tab drops the request so a later visit opens on Notes. */
+  const handleMobileTabSelect = useCallback(
+    (tab: MobileTab) => {
+      if (tab !== 'memo') setToolsSubTabRequest(null);
+      handleMobileTabChange(tab);
+    },
+    [handleMobileTabChange]
+  );
+
+  const handleOpenVerificationMobile = useCallback(() => {
+    setToolsSubTabRequest((prev) => ({ tab: 'verification', token: (prev?.token ?? 0) + 1 }));
+    handleMobileTabChange('memo');
+  }, [handleMobileTabChange]);
 
   // Issue #1120: push-driven "new terminal output" badge on the mobile terminal tab.
   const hasNewOutput = useNewOutputIndicator({
@@ -278,9 +302,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       if (index === -1) return;
       const nextIndex = index + delta;
       if (nextIndex < 0 || nextIndex >= MOBILE_TAB_ORDER.length) return;
-      handleMobileTabChange(MOBILE_TAB_ORDER[nextIndex]);
+      handleMobileTabSelect(MOBILE_TAB_ORDER[nextIndex]);
     },
-    [activeTab, handleMobileTabChange]
+    [activeTab, handleMobileTabSelect]
   );
 
   // Issue #1128: horizontal tab-swipe over the mobile content area. Constrained
@@ -346,6 +370,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           lastAutoResponse={lastAutoResponse}
           activeActivity={activeActivity}
           onActivityToggle={handleActivityToggle}
+          onActivityOpen={handleActivityOpen}
+          verification={verification}
           onBackClick={handleBackClick}
           onInfoClick={handleInfoClick}
           onWorktreeStatusChange={handleWorktreeStatusChange}
@@ -471,6 +497,26 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onMenuClick={openMobileDrawer}
           />
         </div>
+
+        {/* Issue #1816: task contract / verification verdict. Renders nothing
+            when the branch has no task row, so this strip only appears for
+            worktrees that were actually delegated with a contract. */}
+        {verification.task && (
+          <div className="flex-shrink-0 border-b border-border bg-surface px-3 py-1.5">
+            <VerificationStatusChip
+              task={verification.task}
+              latestRun={verification.latestRun}
+              latestRunGates={
+                verification.selectedRun !== null &&
+                verification.selectedRun.id === verification.latestRun?.id
+                  ? verification.selectedRun.gates
+                  : null
+              }
+              onOpen={handleOpenVerificationMobile}
+              className="w-full justify-start"
+            />
+          </div>
+        )}
 
         {/* Issue #111: Branch mismatch warning (Mobile) */}
         {worktree?.gitStatus && worktree.gitStatus.isBranchMismatch && (
@@ -608,6 +654,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onHistoryDisplayLimitChange={handleHistoryDisplayLimitChange}
             historyUserOnly={historyUserOnly}
             onHistoryUserOnlyChange={handleHistoryUserOnlyChange}
+            verification={verification}
+            toolsSubTabRequest={toolsSubTabRequest}
           />
         </main>
 
@@ -658,7 +706,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             (static) so it tracks the viewport-height shell above the keyboard. */}
         <MobileTabBar
           activeTab={activeTab}
-          onTabChange={handleMobileTabChange}
+          onTabChange={handleMobileTabSelect}
           hasNewOutput={hasNewOutput}
           hasPrompt={state.prompt.visible}
           hasUpdate={hasUpdate}

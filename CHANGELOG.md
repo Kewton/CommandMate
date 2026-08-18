@@ -42,6 +42,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 隔離環境（`HOME` 差し替え・ポート 3466・`$HOME/.commandmate-demo`）で
     `demo-video.sh --locale en` を通しで完走させ、尺検証ゲートの通過を確認済み
 
+### Added
+
+- **feat(ui): 実行契約と検証結果を Web UI に露出する** (#1816)
+  - **worktree 詳細ヘッダに状態チップを追加。** task 行を持つ worktree に限り、直近 task の
+    title・TaskStatus・直近検証ランの `RESULT` を表示する。判定の**理由**（不合格ゲートの ID
+    一覧まで）を `aria-label` と `title` の両方に出すため、ポインタでもスクリーンリーダーでも
+    ペインを開かずに読める（`docs/design/discoverability-principle.md` 実装規約 1）
+  - **Activity Bar に「Verification」ペインを追加**（スマホは Tools タブの「検証」サブタブ）。
+    上段=現在の契約（title / goal 冒頭 / `scope.allow` / `verify.gates` / `autoYes.mode`）、
+    中段=検証ラン一覧＋「再検証」、下段=選択ランのゲート表（gate id / PASS・FAIL・TIMEOUT・SKIP /
+    exit code / duration / logTail 末尾 40 行＝CLI の `MAX_PRINTED_LOG_TAIL_LINES` と同値）。
+    契約が無い worktree には `commandmate send --contract` と Skill `cmate-task-contract` を案内する
+    空状態文を出す
+  - **新しい API は 1 つも追加していない。** #1542 / #1543 / #1545 で既に在った
+    `GET /api/worktrees/:id/tasks`、`GET|POST /verify`、`GET /verify/runs[/:runId]` の配線のみ
+  - **独自のポーリングタイマーを増やしていない。** worktree 詳細が既に回している 2s/5s の
+    ポーリング末尾で `pollTick` を上げ、`useWorktreeVerification` がそれに相乗りする
+    （通常は 15s スロットル、`running` ラン中はティックごと）。ヘッダチップと Verification ペインは
+    同じフックの 1 インスタンスを共有するので、2 面同時表示でも要求は倍にならない
+  - en の `RESULT` / `GATE` 語彙は `docs/design/verification-config.md` §3.4 に合わせた
+    （`passed` / `failed` / `not_started`、`PASS` / `FAIL` / `TIMEOUT` / `SKIP`）。
+    tests/unit/i18n/verification-keys-1816.test.ts が en/ja のキー等価と語彙一致を固定する
+  - `docs/design/discoverability-principle.md` の「運用者が読む層」に Web UI を追加し、
+    実装規約に「新しい判定は CLI と Web UI の両方に出す」を追加
+
 ## [0.24.0] - 2026-08-16
 
 > **Highlight**: エージェントの**入力待ちを見逃さないための経路を一通り揃えた**リリース。WS 即時配信・要対応バッジ・クロス画面 Toast に加え、タブタイトル / favicon / App Badge / 通知音でブラウザ外へ、さらに waiting エッジ駆動の push 通知でデバイス外へ伝わるようになった（方針 A / D / E）。あわせて稼働中の**モデルと reasoning effort** を hooks の構造化イベントと tmux capture の両経路から取得し、UI と CLI (`instances` / `capture --json`) に露出した。External Apps のプロキシは**末尾スラッシュとクエリ文字列を生バイトのまま**転送するようになり、Next.js static export のアプリが CommandMate 経由で開けなかった問題（`/proxy/<app>/try/` と `/assets/` が 404）が解消している。

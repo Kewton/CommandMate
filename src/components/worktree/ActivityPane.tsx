@@ -49,6 +49,7 @@ const ERROR_BOUNDARY_NAMES: Record<ActivityId, string> = {
   timer: 'TimerPane',
   todo: 'TodoPane',
   skills: 'WorktreeSkillsPane',
+  verification: 'VerificationPane',
 };
 
 export const ActivityPane = memo(function ActivityPane({

@@ -30,6 +30,8 @@ import { type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
 import type { UseFileSearchReturn } from '@/hooks/useFileSearch';
 import type { ShowToast } from '@/types/markdown-editor';
 import type { HistoryDisplayLimit } from '@/config/history-display-config';
+import type { WorktreeVerificationState } from '@/hooks/useWorktreeVerification';
+import type { SubTabRequest } from '@/components/worktree/NotesAndLogsPane';
 import {
   buildModelByInstance,
   WorktreeInfoFields,
@@ -198,6 +200,14 @@ interface MobileContentProps {
   visibleInstanceIds?: string[];
   /** [Issue #874] Toggle one instance's per-device visibility. */
   onToggleInstanceVisible?: (instanceId: string) => void;
+  /**
+   * [Issue #1816] Task contract + verification runs for the Tools tab's
+   * `Verification` sub-tab. Owned by `useWorktreeVerification` in the detail
+   * controller — the same object the header chip reads.
+   */
+  verification?: WorktreeVerificationState;
+  /** [Issue #1816] Jump the Tools tab to a sub-tab (the header chip). */
+  toolsSubTabRequest?: SubTabRequest | null;
 }
 
 // Issue #1494 / #1496: MobileTerminalTab moved to its own module so the mobile
@@ -250,6 +260,8 @@ export const MobileContent = memo(function MobileContent({
   onInstancesChange,
   visibleInstanceIds,
   onToggleInstanceVisible,
+  verification,
+  toolsSubTabRequest,
 }: MobileContentProps) {
   // Unconditional hook call — must stay above the `activeTab` switch below.
   const tWorktree = useTranslations('worktree');
@@ -389,6 +401,8 @@ export const MobileContent = memo(function MobileContent({
             // memoised because `MobileContent` re-renders on the same cadence
             // as `worktree` anyway — the whole switch below is keyed off it.
             modelByInstance={buildModelByInstance(worktree?.sessionStatusByInstance)}
+            verification={verification}
+            requestedSubTab={toolsSubTabRequest}
           />
         </ErrorBoundary>
       );

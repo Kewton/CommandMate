@@ -29,6 +29,7 @@ import { type WorktreeStatus } from '@/components/mobile/MobileHeader';
 import { type MobileTab } from '@/components/mobile/MobileTabBar';
 import { useFileSearch } from '@/hooks/useFileSearch';
 import { useActivityBarState } from '@/hooks/useActivityBarState';
+import { useWorktreeVerification } from '@/hooks/useWorktreeVerification';
 import type { ActivityId } from '@/config/activity-bar-config';
 import { useFileTabs, MAX_FILE_TABS } from '@/hooks/useFileTabs';
 import { usePendingInsertText } from '@/hooks/usePendingInsertText';
@@ -178,6 +179,14 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // gate; on a cache miss fall back to the previous loading-first behavior.
   const [loading, setLoading] = useState(initialFromCache === null);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Bumped at the end of every poll cycle (Issue #1816).
+   *
+   * Deliberately NOT in the polling effect's dependency array — it is an output
+   * of the loop, not an input, and depending on it would restart the interval
+   * on every tick.
+   */
+  const [pollTick, setPollTick] = useState(0);
   // Captured once at mount: whether the initial render was primed from cache.
   // Drives the loadInitialData loading guard so the background refresh on a
   // cache hit never flips the screen back to the loading indicator.
@@ -309,6 +318,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // leaks across branch (worktree) switches.
   const {
     active: activeActivity,
+    setActive: setActiveActivity,
     toggle: toggleActivity,
   } = useActivityBarState(worktreeId);
   // Issue #744: the top-level History column was removed on PC (History moved
@@ -837,6 +847,20 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       toggleActivity(id);
     },
     [toggleActivity]
+  );
+
+  /**
+   * Open a specific activity without the toggle-closed behaviour (Issue #1816).
+   *
+   * The header's verification chip means "show me this", so re-clicking it
+   * while the pane is already open must not close the thing it points at —
+   * which `toggleActivity` would do.
+   */
+  const handleActivityOpen = useCallback(
+    (id: ActivityId) => {
+      setActiveActivity(id);
+    },
+    [setActiveActivity]
   );
 
   /** Handle back button click - navigate to portal */
@@ -1416,6 +1440,11 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         tasks.push(fetchMessages());
       }
       await Promise.all(tasks);
+      // Issue #1816: the task/verification surfaces ride THIS loop rather than
+      // starting one of their own. The tick is only an opportunity — the
+      // consuming hook throttles itself — but it means there is exactly one
+      // cadence on this screen to reason about.
+      setPollTick((tick) => tick + 1);
     };
 
     const intervalId = setInterval(pollData, pollingInterval);
@@ -1489,6 +1518,22 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
 
 
   // ========================================================================
+  // Task contract / verification (Issue #1816)
+  // ========================================================================
+
+  /**
+   * One instance for the whole screen: the header chip and the Verification
+   * pane read the same object, so mounting both does not double the requests.
+   * Suspended until the detail screen itself has loaded — there is nothing to
+   * show next to a spinner or an error page.
+   */
+  const verification = useWorktreeVerification({
+    worktreeId,
+    refreshToken: pollTick,
+    enabled: !loading && !error,
+  });
+
+  // ========================================================================
 
   return {
     activeActivity,
@@ -1510,6 +1555,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     fileInputRef,
     fileSearch,
     fileTreeRefresh,
+    handleActivityOpen,
     handleActivityToggle,
     handleAgentInstancesChange,
     handleAutoYesToggle,
@@ -1602,6 +1648,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     tabsState,
     toggleInstanceVisible,
     vibeLocalContextWindow,
+    verification,
     vibeLocalModel,
     visibleInstanceIds,
     worktree,

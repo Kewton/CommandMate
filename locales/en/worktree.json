@@ -707,7 +707,8 @@
     "agent": "Agent",
     "timer": "Timer",
     "todo": "ToDo",
-    "skills": "Skills"
+    "skills": "Skills",
+    "verification": "Verification"
   },
   "branchMismatch": {
     "changedFrom": "Branch changed from",
@@ -811,5 +812,87 @@
   "awaitingInstruction": {
     "badge": "Ready for work",
     "label": "The agent finished its turn and is waiting for your next instruction"
+  },
+  "verification": {
+    "title": "Verification",
+    "refresh": "Refresh",
+    "loading": "Loading verification data…",
+    "loadError": "Could not load verification data: {message}",
+    "contract": {
+      "heading": "Execution contract",
+      "empty": "No contract on this branch.\nCreate one with `commandmate send --contract <file>`, or the `cmate-task-contract` Skill.",
+      "scopeAllow": "scope.allow",
+      "scopeDeny": "scope.deny",
+      "gates": "verify.gates",
+      "gatesAll": "all declared gates",
+      "autoYes": "autoYes.mode",
+      "autoYesUnset": "unset (keeps the existing behavior)",
+      "file": "contract file",
+      "updated": "updated"
+    },
+    "runs": {
+      "heading": "Verification runs",
+      "empty": "No verification run yet.\nPress Re-verify, or run `commandmate verify <worktree-id>`.",
+      "rerun": "Re-verify",
+      "rerunPending": "Starting…",
+      "rerunConflict": "A verification run is already in progress (run {runId}).",
+      "rerunConflictUnknown": "A verification run is already in progress.",
+      "rerunError": "Could not start verification: {message}",
+      "select": "Show gates for run {runId} (RESULT {verdict})",
+      "runLabel": "run {runId}",
+      "trigger": "trigger={trigger}"
+    },
+    "gates": {
+      "heading": "Gates — run {runId}",
+      "empty": "This run recorded no gates.",
+      "loading": "Loading gates…",
+      "notFound": "That verification run is no longer available.",
+      "loadError": "Could not load the verification run: {message}",
+      "exitCode": "exit={code}",
+      "duration": "duration={duration}",
+      "contractSource": "[contract]",
+      "showLog": "Show log tail",
+      "hideLog": "Hide log tail",
+      "logOmitted": "… (+{count} more lines; run `commandmate verify show {runId}` for the full log)",
+      "noLog": "No log output recorded."
+    },
+    "runStatus": {
+      "running": "running",
+      "passed": "passed",
+      "failed": "failed",
+      "not_started": "not_started",
+      "error": "error",
+      "cancelled": "cancelled"
+    },
+    "gateStatus": {
+      "running": "RUNNING",
+      "passed": "PASS",
+      "failed": "FAIL",
+      "timeout": "TIMEOUT",
+      "skipped": "SKIP",
+      "error": "ERROR"
+    },
+    "chip": {
+      "taskReason": "Task “{title}”: {status}",
+      "resultBadge": "RESULT {verdict}",
+      "runReason": "Last verification: RESULT {verdict} (run {runId})",
+      "noRun": "No verification run yet",
+      "failingGates": "Gates that did not pass: {gates}",
+      "gatesPassed": "All {count} gates passed",
+      "openHint": "Open the Verification pane",
+      "dash": "—"
+    }
+  },
+  "task": {
+    "status": {
+      "pending": "pending",
+      "running": "running",
+      "waiting_input": "waiting_input",
+      "verifying": "verifying",
+      "succeeded": "succeeded",
+      "failed": "failed",
+      "not_started": "not_started",
+      "cancelled": "cancelled"
+    }
   }
 }

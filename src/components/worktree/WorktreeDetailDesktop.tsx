@@ -43,6 +43,8 @@ import { TimerPane } from '@/components/worktree/TimerPane';
 import { AgentInstancesPane } from '@/components/worktree/AgentInstancesPane';
 import { GitPane } from '@/components/worktree/GitPane';
 import { WorktreeSkillsPane } from '@/components/skills/WorktreeSkillsPane';
+import { VerificationPane } from '@/components/worktree/VerificationPane';
+import { VerificationStatusChip } from '@/components/worktree/VerificationStatusChip';
 import { Modal } from '@/components/ui/Modal';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
 import { MoveDialog } from '@/components/worktree/MoveDialog';
@@ -59,6 +61,7 @@ import type { UseFileSearchReturn } from '@/hooks/useFileSearch';
 import type { FileTabsState, FileTabsActions } from '@/hooks/useFileTabs';
 import type { HistoryDisplayLimit } from '@/config/history-display-config';
 import type { MoveTarget } from '@/hooks/useFileOperations';
+import type { WorktreeVerificationState } from '@/hooks/useWorktreeVerification';
 
 /** Props for WorktreeDetailDesktop. */
 export interface WorktreeDetailDesktopProps {
@@ -85,6 +88,15 @@ export interface WorktreeDetailDesktopProps {
   // Activity Bar
   activeActivity: ActivityId | null;
   onActivityToggle: (id: ActivityId) => void;
+  /** Issue #1816: open an activity without the toggle-closed behaviour. */
+  onActivityOpen: (id: ActivityId) => void;
+
+  /**
+   * Issue #1816: task contract + verification runs for this worktree, owned by
+   * `useWorktreeVerification` in the detail controller. Feeds BOTH the header
+   * chip and the Verification activity pane from one set of requests.
+   */
+  verification: WorktreeVerificationState;
 
   // Header actions
   onBackClick: () => void;
@@ -208,6 +220,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   lastAutoResponse,
   activeActivity,
   onActivityToggle,
+  onActivityOpen,
+  verification,
   onBackClick,
   onInfoClick,
   onWorktreeStatusChange,
@@ -338,6 +352,16 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     },
     [setActiveInstanceId],
   );
+
+  /**
+   * Issue #1816: the header chip opens the Verification pane.
+   *
+   * `onActivityOpen`, not `onActivityToggle`: clicking a chip that points at a
+   * pane must never be the gesture that closes it.
+   */
+  const handleOpenVerification = useCallback(() => {
+    onActivityOpen('verification');
+  }, [onActivityOpen]);
 
   /**
    * Issue #728 (R3-005): PC-only per-split polling fan-out.
@@ -667,6 +691,10 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       // to the parent-owned worktreeId, so it plans/installs against this
       // checkout without a target picker.
       skills: <WorktreeSkillsPane worktreeId={worktreeId} className="h-full" />,
+      // Issue #1816: execution contract + verification gates. Fully controlled
+      // by the shared `verification` state, so this pane and the header chip
+      // never disagree and never fetch the same rows twice.
+      verification: <VerificationPane state={verification} className="h-full" />,
     }),
     [
       worktreeId,
@@ -698,6 +726,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       vibeLocalContextWindow,
       onVibeLocalContextWindowChange,
       agentModelByInstance,
+      verification,
     ]
   );
 
@@ -760,6 +789,20 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             onAgentDragStart={handleAgentDragStart}
             onAgentDragEnd={handleAgentDragEnd}
             onKillSession={onKillSession}
+            // Issue #1816: hidden entirely when the worktree has no task row.
+            verificationChip={
+              <VerificationStatusChip
+                task={verification.task}
+                latestRun={verification.latestRun}
+                latestRunGates={
+                  verification.selectedRun !== null &&
+                  verification.selectedRun.id === verification.latestRun?.id
+                    ? verification.selectedRun.gates
+                    : null
+                }
+                onOpen={handleOpenVerification}
+              />
+            }
           />
           {/* Issue #111: Branch mismatch warning */}
           {worktree?.gitStatus && (
