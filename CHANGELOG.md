@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- **Mission / Vision を `docs/concept.md` / `docs/en/concept.md` に正本化し、公開面の文言表 `docs/design/public-messaging.md` を新設** (#1808): hero・定義文・4 カード・With / Without 表・デモのキャプションとテロップ・チュートリアル導入文・footer タグライン・禁止語リストを ja / en 両方で確定した。軸語 "Vibe Engineering" の一次情報（Simon Willison, 2025-10-07）を実際に確認し出典として記録。禁止語リストはガードテスト `tests/unit/docs/public-messaging.test.ts` の配列と一致していることを固定している
+
 ## [0.24.0] - 2026-08-16
 
 > **Highlight**: エージェントの**入力待ちを見逃さないための経路を一通り揃えた**リリース。WS 即時配信・要対応バッジ・クロス画面 Toast に加え、タブタイトル / favicon / App Badge / 通知音でブラウザ外へ、さらに waiting エッジ駆動の push 通知でデバイス外へ伝わるようになった（方針 A / D / E）。あわせて稼働中の**モデルと reasoning effort** を hooks の構造化イベントと tmux capture の両経路から取得し、UI と CLI (`instances` / `capture --json`) に露出した。External Apps のプロキシは**末尾スラッシュとクエリ文字列を生バイトのまま**転送するようになり、Next.js static export のアプリが CommandMate 経由で開けなかった問題（`/proxy/<app>/try/` と `/assets/` が 404）が解消している。
