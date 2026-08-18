@@ -414,6 +414,57 @@ describe.skipIf(!HAS_FFMPEG)('the real pipeline', () => {
     expect(result.stderr).toMatch(/missing footage: .*body\.webm \(run record-scenes\.ts --scene body\)/);
   }, 300_000);
 
+  it('composes a code card exactly like a title card, from its own PNG', () => {
+    // #1810: `code` is a still held for its declared duration, and the plan's
+    // own `type` is the PNG prefix — so a third still kind needs no branch in
+    // the ffmpeg path, only the file render-overlays.ts wrote.
+    ffmpeg([
+      '-f', 'lavfi', '-i', `color=c=black:s=${FRAME}:d=1`,
+      '-frames:v', '1', path.join(OVERLAYS, 'code-listing.ja.png'),
+    ]);
+    const plan = path.join(DIR, 'code.tsv');
+    fs.writeFileSync(
+      plan,
+      [
+        '#id\ttype\tviewport\tstart\tduration\ttelop',
+        '#total\t3.000',
+        '#output\tfixture.ja',
+        'intro\tcard\tpc\t0.000\t1.000\tはじめに',
+        'listing\tcode\tpc\t1.000\t2.000\t検証設定',
+        '',
+      ].join('\n'),
+    );
+    const out = path.join(DIR, 'code.mp4');
+    const result = compose([
+      '--plan', plan, '--scenes', SCENES, '--overlays', OVERLAYS, '--locale', 'ja',
+      '--frame', FRAME, '--fps', '15', '--tolerance', '0.5', '--out', out,
+    ]);
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+    expect(probe(out)).toBeGreaterThan(2.5);
+    expect(probe(out)).toBeLessThan(3.5);
+  }, 300_000);
+
+  it('names the missing code PNG as a code PNG, not as a card', () => {
+    const plan = path.join(DIR, 'code-missing.tsv');
+    fs.writeFileSync(
+      plan,
+      [
+        '#id\ttype\tviewport\tstart\tduration\ttelop',
+        '#total\t2.000',
+        '#output\tfixture.ja',
+        'absent\tcode\tpc\t0.000\t2.000\t検証設定',
+        '',
+      ].join('\n'),
+    );
+    const result = compose([
+      '--plan', plan, '--scenes', SCENES, '--overlays', OVERLAYS, '--locale', 'ja',
+      '--frame', FRAME, '--fps', '15', '--out', path.join(DIR, 'never.mp4'),
+    ]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/missing code image: .*code-absent\.ja\.png/);
+  }, 300_000);
+
   it('stops when the telop PNG for the requested locale is absent', () => {
     // Composing without it would silently produce a video with no subtitles at
     // all, which looks like a success.

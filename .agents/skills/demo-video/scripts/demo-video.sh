@@ -36,6 +36,11 @@ LOCALES="ja en"
 WANT_GIF=0
 FRAME="1280x800"
 CHECK_ONLY=0
+# A scene may report itself unfilmable (install-skill needs the official Skill
+# Catalog, whose URL is a compile-time constant). Off by default: skipping
+# silently is how a storyboard ends up short one shot and nobody notices until
+# ffmpeg meets an absent file, with the reason long gone.
+ALLOW_SKIP=""
 
 die() {
   printf 'demo-video: %s\n' "$1" >&2
@@ -56,6 +61,8 @@ Usage: demo-video.sh [--locale ja|en|all] [--out DIR] [--gif] [--check]
   --frame WxH   output frame size (default 1280x800)
   --gif         also write a README-sized GIF next to each mp4
   --check       run the dependency check and storyboard validation, then stop
+  --allow-skip  let a scene that cannot be filmed here (install-skill needs the
+                network) be reported and passed over instead of failing the run
 USAGE
 }
 
@@ -76,6 +83,7 @@ while [ $# -gt 0 ]; do
     --frame) [ $# -ge 2 ] || die "--frame needs a value"; FRAME="$2"; shift 2 ;;
     --gif) WANT_GIF=1; shift ;;
     --check) CHECK_ONLY=1; shift ;;
+    --allow-skip) ALLOW_SKIP="--allow-skip"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die "unknown argument: $1" ;;
   esac
@@ -194,6 +202,7 @@ for loc in $LOCALES; do
     --locale "$loc" --out "$SCENES_DIR" --message "$MESSAGE" \
     --worktree "$CM_DEMO_WORKTREE_ID" --worktree-path "$CM_DEMO_WORKTREE_PATH" \
     --unsynced-worktree "$CM_DEMO_UNSYNCED_WORKTREE_ID" \
+    $ALLOW_SKIP \
     $SCENE_ARGS \
     || die "recording failed for locale '$loc'"
 

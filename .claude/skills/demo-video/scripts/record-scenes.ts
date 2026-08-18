@@ -20,6 +20,8 @@ import path from 'path';
 
 import type { BrowserContext, Locator, Page } from '@playwright/test';
 
+import { recordTerminalScene } from './terminal-scene';
+
 export const LOCALES = ['ja', 'en'] as const;
 export type Locale = (typeof LOCALES)[number];
 
@@ -55,6 +57,38 @@ export interface RecordOptions {
   headless: boolean;
   /** Repository root, used to read the locale dictionaries the UI renders from. */
   repoRoot: string;
+  /** tmux session the `contract-verify` take runs the CLI in. */
+  cliSession: string;
+  /**
+   * `tmux -L` socket for that session. Empty means the ambient tmux server,
+   * which is where the demo's other sessions live. A dedicated socket is how a
+   * developer verifies the scene without their own sessions being in reach.
+   */
+  tmuxSocket: string;
+  /** Scratch directory for the terminal take's PNG frames. */
+  workDir: string;
+  /**
+   * Whether a scene may report itself unfilmable and be passed over.
+   *
+   * Off by default: a scene the storyboard placed and the recorder skipped
+   * silently is footage nobody notices missing until compose.sh fails on an
+   * absent file, and the reason is gone by then. `install-skill` needs the
+   * network, so an offline operator opts in explicitly.
+   */
+  allowSkip: boolean;
+}
+
+/**
+ * Thrown by a `prepare` that has established the scene cannot be filmed *and*
+ * that waiting will not change it — the Skill Catalog being unreachable, not a
+ * state that has yet to arrive. Carries the reason so the run reports why
+ * rather than producing an empty take.
+ */
+export class SceneUnavailableError extends Error {
+  constructor(public readonly sceneId: string, reason: string) {
+    super(`scene '${sceneId}' cannot be filmed here: ${reason}`);
+    this.name = 'SceneUnavailableError';
+  }
 }
 
 export interface DemoState {
@@ -71,6 +105,19 @@ export const DEFAULT_VIEWPORT = { width: 1280, height: 800 };
  */
 export const MOBILE_VIEWPORT = { width: 390, height: 844 };
 export const DEFAULT_MESSAGE = 'Add a dark mode toggle to the header';
+
+/**
+ * tmux session the `contract-verify` take runs in.
+ *
+ * A constant here and in cli-scene.sh's default, unlike a worktree id: this
+ * session is created by the harness for the harness, so nothing on the server
+ * side derives or looks for the name. env-down.sh still tears it down from the
+ * record cli-scene.sh appends, never from a name pattern (#1809).
+ */
+export const DEFAULT_CLI_SESSION = 'cmdemo-cli';
+
+/** The Skill the `install-skill` take installs from the official Catalog. */
+export const DEMO_CATALOG_SKILL_ID = 'cmate-repository-analysis';
 
 /**
  * There is deliberately no default worktree id in this file.
@@ -148,6 +195,10 @@ export function parseRecordArgs(
     // <repo>/.claude/skills/demo-video/scripts, and byte-identically
     // <repo>/.agents/skills/demo-video/scripts — four levels up either way.
     repoRoot: path.resolve(__dirname, '../../../..'),
+    cliSession: env.CM_DEMO_CLI_SESSION ?? DEFAULT_CLI_SESSION,
+    tmuxSocket: env.CM_DEMO_TMUX_SOCKET ?? '',
+    workDir: '',
+    allowSkip: false,
   };
 
   const next = (index: number, flag: string): string => {
@@ -200,6 +251,10 @@ export function parseRecordArgs(
         break;
       }
       case '--headed': options.headless = false; break;
+      case '--cli-session': options.cliSession = next(i, arg); i += 1; break;
+      case '--tmux-socket': options.tmuxSocket = next(i, arg); i += 1; break;
+      case '--work': options.workDir = next(i, arg); i += 1; break;
+      case '--allow-skip': options.allowSkip = true; break;
       default:
         throw new Error(`unknown argument: ${arg}`);
     }
@@ -392,7 +447,7 @@ export interface PrepareContext {
   state: DemoState;
 }
 
-export interface Scene {
+interface SceneCommon {
   id: string;
   title: string;
   /** `mobile` scenes are filmed at MOBILE_VIEWPORT regardless of --viewport. */
@@ -408,7 +463,41 @@ export interface Scene {
    * prompt sheet the scene exists to show never made the cut.
    */
   prepare?: (ctx: PrepareContext) => Promise<void>;
+}
+
+export interface BrowserScene extends SceneCommon {
+  kind?: 'browser';
   run: (ctx: SceneContext) => Promise<void>;
+}
+
+/**
+ * A scene filmed from a tmux pane rather than a browser (Issue #1810).
+ *
+ * Task Contract, verification gates and Evidence have no Web UI — `src/components`
+ * calls neither `/api/worktrees/:id/tasks` nor `/api/verification/*` — so the
+ * only surface that shows them is the CLI's own output. `record` produces the
+ * same `<sceneId>.webm` a browser scene does, which is what lets compose.sh
+ * treat the two identically.
+ */
+export interface TerminalScene extends SceneCommon {
+  kind: 'terminal';
+  record: (ctx: TerminalRecordContext) => Promise<void>;
+}
+
+export type Scene = BrowserScene | TerminalScene;
+
+export interface TerminalRecordContext {
+  baseUrl: string;
+  options: RecordOptions;
+  state: DemoState;
+  /** Where the take's webm must be written. */
+  outFile: string;
+  /** Scratch space for the frame PNGs; never inside the repository. */
+  workDir: string;
+}
+
+export function isTerminalScene(scene: Scene): scene is TerminalScene {
+  return scene.kind === 'terminal';
 }
 
 /**
@@ -508,6 +597,92 @@ export async function clickUntilEffective(
   }
 }
 
+/** `POST` a JSON body, failing with the status the server actually returned. */
+export async function postJson(url: string, body: unknown): Promise<unknown> {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    throw new Error(`POST ${url} -> ${response.status} ${await response.text()}`);
+  }
+  return (await response.json().catch(() => null)) as unknown;
+}
+
+/**
+ * `GET /api/skills` seen as a reachability probe for the official Catalog.
+ *
+ * Asked of the *server* rather than of the network directly: the Catalog URL is
+ * a compile-time constant with an exact-match allowlist
+ * (`src/config/skill-catalog-config.ts`, SSRF policy), so a second copy of it
+ * in this file would be a second thing to keep in step. The route answers 503
+ * when retrieval failed with nothing to fall back on, and marks a cached
+ * answer `stale` — both mean the take would film last-known-good data rather
+ * than an install.
+ */
+export function readCatalogAvailability(payload: unknown): { ok: boolean; reason: string } {
+  const catalog = (payload as { catalog?: { stale?: boolean } }).catalog;
+  if (!catalog) return { ok: false, reason: 'GET /api/skills returned no catalog envelope' };
+  if (catalog.stale === true) {
+    return { ok: false, reason: 'the Skill Catalog is served stale (offline snapshot)' };
+  }
+  return { ok: true, reason: '' };
+}
+
+/** `GET /api/worktrees/<id>/skills` -> `{ skills: [{ skillId }] }`. */
+export function readInstalledSkillIds(payload: unknown): string[] {
+  const list = (payload as { skills?: { skillId?: string }[] }).skills ?? [];
+  return list.map((skill) => skill.skillId ?? '');
+}
+
+/**
+ * Wait for the tab title to carry the `(N)` badge `formatTitleWithBadge`
+ * prepends (`src/lib/pwa/attention-badge.ts`).
+ *
+ * Asserted rather than eyeballed: the badge is the half of the notification
+ * that reaches someone whose CommandMate tab is in the background, and it is
+ * also the half a reviewer watching a video would never notice missing.
+ */
+export async function waitForTitleBadge(page: Page, timeoutMs: number): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  let title = '';
+  for (;;) {
+    title = await page.title();
+    if (/^\(\d+\)\s/.test(title)) return title;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `document.title never took the attention badge; last seen: ${JSON.stringify(title)}`,
+      );
+    }
+    await page.waitForTimeout(250);
+  }
+}
+
+/**
+ * What the `slash-palette` take asserts is on screen.
+ *
+ * `/cmate-verify` arrives from the Skill directories env-up.sh copies into the
+ * seed worktree, the other three from its `.claude/commands`. Both loaders are
+ * the product's own (`src/lib/slash-commands.ts`), reading the worktree the
+ * take is pointed at.
+ */
+export const SLASH_PALETTE_COMMANDS: readonly string[] = [
+  '/cmate-verify',
+  '/work-plan',
+  '/create-pr',
+  '/tdd-impl',
+];
+
+/** How often the terminal take samples the pane. */
+export const TERMINAL_CAPTURE_INTERVAL_MS = 250;
+
+/**
+ * Upper bound for the whole `contract-verify` take: two `wait --verify` calls
+ * bounded at 180s each, the gates they start, and the hold on the last frame.
+ */
+export const TERMINAL_TAKE_TIMEOUT_MS = 480_000;
+
 export const SCENES: Scene[] = [
   {
     id: 'sessions-overview',
@@ -563,6 +738,254 @@ export const SCENES: Scene[] = [
         options.timeoutMs,
       );
       await page.waitForTimeout(3000);
+    },
+  },
+  {
+    id: 'attention-badge',
+    title: 'A session that needs an answer says so: pill, toast and tab title',
+    viewport: 'pc',
+    // The subject is a *transition*, so prepare's job is to guarantee the
+    // transition has not happened yet. The toast fires off a realtime
+    // `session_status_changed` event (WaitingToastListener), which a page that
+    // opened after the edge never receives — a take started against an
+    // already-waiting session would show the pill and silently lose the toast.
+    prepare: async ({ baseUrl, options }) => {
+      const target = { id: options.worktreeId, path: options.worktreePath };
+      const live = await waitForWorktree(
+        baseUrl,
+        target,
+        (worktree) => worktree.isSessionRunning === true,
+        'showing a live agent session',
+        options.timeoutMs,
+      );
+      // Filmable on its own (`--scene attention-badge`) as well as after
+      // send-and-generate: an idle cassette is parked on `@input` and needs a
+      // message before it paints anything at all.
+      if (live.isProcessing !== true && live.isWaitingForResponse !== true) {
+        await postJson(`${baseUrl}/api/worktrees/${options.worktreeId}/send`, {
+          content: options.message,
+        });
+      }
+      const busy = await waitForWorktree(
+        baseUrl,
+        target,
+        (worktree) => worktree.isProcessing === true || worktree.isWaitingForResponse === true,
+        'generating',
+        options.timeoutMs,
+      );
+      if (busy.isWaitingForResponse === true) {
+        throw new Error(
+          `${options.worktreeId} is already waiting for a response: this scene films the moment ` +
+            'it starts waiting, so place attention-badge before any scene that answers the prompt',
+        );
+      }
+    },
+    run: async ({ page, baseUrl, options }) => {
+      await gotoLocalized(page, `${baseUrl}/`, options.locale);
+      await page.getByTestId('branch-list').waitFor({ state: 'visible' });
+
+      // The one wait deliberately inside a take: the edge from generating to
+      // waiting *is* the shot. Bounded by the same timeout as every other
+      // synchronisation point, so a cassette that never asks fails the take
+      // rather than filming a still page until the pipeline gives up.
+      await waitForWorktree(
+        baseUrl,
+        { id: options.worktreeId, path: options.worktreePath },
+        (worktree) => worktree.isWaitingForResponse === true,
+        'waiting for a response',
+        options.timeoutMs,
+      );
+
+      // The toast is the most transient of the three (WAITING_TOAST_DURATION_MS
+      // is 8s), so it is waited for first.
+      await page
+        .getByTestId('toast-container')
+        // `role="alert"`, not `status`: the container is the `aria-live` region
+        // and each toast inside it is the alert (src/components/common/Toast.tsx).
+        .getByRole('alert')
+        .first()
+        .waitFor({ state: 'visible', timeout: options.timeoutMs });
+      await page.getByTestId('attention-badge').waitFor({ state: 'visible', timeout: options.timeoutMs });
+      await waitForTitleBadge(page, options.timeoutMs);
+      await page.waitForTimeout(3000);
+    },
+  },
+  {
+    id: 'review-screen',
+    title: 'Answer from the Review screen and watch the row leave the list',
+    viewport: 'pc',
+    prepare: ({ baseUrl, options }) =>
+      waitForWorktree(
+        baseUrl,
+        { id: options.worktreeId, path: options.worktreePath },
+        (worktree) => worktree.isWaitingForResponse === true,
+        'waiting for a response',
+        options.timeoutMs,
+      ).then(() => undefined),
+    run: async ({ page, baseUrl, options }) => {
+      const approvalUrl = `${baseUrl}/review?filter=approval`;
+      await gotoLocalized(page, approvalUrl, options.locale);
+      const card = page.getByTestId(`review-item-${options.worktreeId}`);
+      await card.waitFor({ state: 'visible', timeout: options.timeoutMs });
+      await page.waitForTimeout(1500);
+
+      // ReviewTab renders each row as a Link to the worktree, with no composer
+      // of its own (see the deviation table in SKILL.md), so the answer is
+      // given where the product actually accepts one — the prompt panel the
+      // card opens.
+      await card.click();
+      const panel = page.getByTestId('prompt-panel');
+      await panel.waitFor({ state: 'visible', timeout: options.timeoutMs });
+      await panel
+        .getByRole('button', { name: submitButtonLabel(options.repoRoot, options.locale) })
+        .click();
+      await waitForWorktree(
+        baseUrl,
+        { id: options.worktreeId, path: options.worktreePath },
+        (worktree) => worktree.isWaitingForResponse === false,
+        'released by the answer',
+        options.timeoutMs,
+      );
+
+      // Back to the list, which is where the answer becomes visible as absence.
+      await gotoLocalized(page, approvalUrl, options.locale);
+      await page.getByTestId('review-list').waitFor({ state: 'visible' });
+      await card.waitFor({ state: 'detached', timeout: options.timeoutMs });
+      await page.waitForTimeout(2000);
+    },
+  },
+  {
+    id: 'slash-palette',
+    title: 'Type / in the composer and read the commands this worktree offers',
+    viewport: 'pc',
+    prepare: ({ baseUrl, options }) =>
+      waitForWorktree(
+        baseUrl,
+        { id: options.worktreeId, path: options.worktreePath },
+        (worktree) => worktree.isSessionRunning === true,
+        'showing a live agent session',
+        options.timeoutMs,
+      ).then(() => undefined),
+    run: async ({ page, baseUrl, options }) => {
+      await gotoLocalized(page, `${baseUrl}/worktrees/${options.worktreeId}`, options.locale);
+      const composer = page.getByTestId('message-input-textarea');
+      await composer.waitFor({ state: 'visible' });
+      await composer.click();
+      await composer.pressSequentially('/', { delay: 60 });
+
+      const dropdown = page.getByTestId('slash-command-dropdown');
+      await dropdown.waitFor({ state: 'visible', timeout: options.timeoutMs });
+      // The four env-up.sh copies into the seed worktree. Asserted rather than
+      // held for two seconds and hoped for: the list is read off the worktree's
+      // own `.claude/commands` and `.claude|.agents/skills` directories, so an
+      // empty palette means the seed is wrong, not that the shot is slow.
+      for (const command of SLASH_PALETTE_COMMANDS) {
+        await dropdown
+          .getByText(command, { exact: false })
+          .first()
+          .waitFor({ state: 'visible', timeout: options.timeoutMs });
+      }
+      await page.waitForTimeout(2500);
+
+      // Escape, never Enter: sending one of these would run a real command in
+      // the pane, which is not what the scene claims happens.
+      await page.keyboard.press('Escape');
+      await dropdown.waitFor({ state: 'hidden', timeout: options.timeoutMs });
+      await page.waitForTimeout(1200);
+    },
+  },
+  {
+    id: 'install-skill',
+    title: 'Install a Skill from the official Catalog into this worktree',
+    viewport: 'pc',
+    // The only scene that needs the network: the Catalog URL is a compile-time
+    // constant with an exact-match allowlist and cannot be pointed at a local
+    // fixture. Unreachable is reported as a skip with its reason rather than
+    // filmed as an empty panel.
+    prepare: async ({ baseUrl, options }) => {
+      let payload: unknown;
+      try {
+        payload = await defaultWaitDeps.fetchJson(`${baseUrl}/api/skills`);
+      } catch (error) {
+        throw new SceneUnavailableError(
+          'install-skill',
+          `the Skill Catalog is unreachable (${error instanceof Error ? error.message : String(error)})`,
+        );
+      }
+      const availability = readCatalogAvailability(payload);
+      if (!availability.ok) throw new SceneUnavailableError('install-skill', availability.reason);
+
+      await waitForJson(
+        `${baseUrl}/api/worktrees/${options.worktreeId}/skills`,
+        readInstalledSkillIds,
+        (ids) => !ids.includes(DEMO_CATALOG_SKILL_ID),
+        `${DEMO_CATALOG_SKILL_ID} to still be uninstalled in ${options.worktreeId}`,
+        options.timeoutMs,
+      );
+    },
+    run: async ({ page, baseUrl, options }) => {
+      await gotoLocalized(page, `${baseUrl}/worktrees/${options.worktreeId}`, options.locale);
+      const pane = page.locator('[data-testid="activity-pane"][data-active="skills"]');
+      await clickUntilEffective(
+        page.getByTestId('activity-bar-button-skills'),
+        () => pane.isVisible(),
+        'the Skills activity button',
+        options.timeoutMs,
+      );
+
+      const entry = page.getByTestId(`worktree-skills-catalog-${DEMO_CATALOG_SKILL_ID}`);
+      await entry.waitFor({ state: 'visible', timeout: options.timeoutMs });
+      const panel = page.getByTestId('skill-install-panel');
+      await clickUntilEffective(entry, () => panel.isVisible(), 'the Catalog entry', options.timeoutMs);
+
+      await page.getByTestId('skill-install-action').click();
+      // The plan, on screen, before anything is written: it is the reassurance
+      // the shot is about.
+      await page.getByTestId('skill-install-confirm').waitFor({ state: 'visible', timeout: options.timeoutMs });
+      await page.waitForTimeout(2000);
+      await page.getByTestId('skill-install-confirm').click();
+
+      // Server-side truth first: the footage must not claim an install the
+      // worktree never received.
+      await waitForJson(
+        `${baseUrl}/api/worktrees/${options.worktreeId}/skills`,
+        readInstalledSkillIds,
+        (ids) => ids.includes(DEMO_CATALOG_SKILL_ID),
+        `${DEMO_CATALOG_SKILL_ID} to be installed in ${options.worktreeId}`,
+        options.timeoutMs,
+      );
+      await page.getByTestId('skill-install-result').waitFor({ state: 'visible', timeout: options.timeoutMs });
+      await page.waitForTimeout(2500);
+    },
+  },
+  {
+    id: 'contract-verify',
+    title: 'Hand the agent a contract, then let the gates return the verdict',
+    kind: 'terminal',
+    viewport: 'pc',
+    // No browser wait to do: the pane is the camera. The one precondition is
+    // that the fake agent's session is adopted, because the contract is sent to
+    // it and `wait --verify` blocks on its completion.
+    prepare: ({ baseUrl, options }) =>
+      waitForWorktree(
+        baseUrl,
+        { id: options.worktreeId, path: options.worktreePath },
+        (worktree) => worktree.isSessionRunning === true,
+        'showing a live agent session',
+        options.timeoutMs,
+      ).then(() => undefined),
+    record: async ({ options, outFile, workDir }) => {
+      await recordTerminalScene({
+        statePath: options.statePath,
+        session: options.cliSession,
+        tmuxSocket: options.tmuxSocket,
+        frame: { ...options.viewport },
+        outFile,
+        workDir,
+        intervalMs: TERMINAL_CAPTURE_INTERVAL_MS,
+        // Two `wait --verify` calls at 180s each, plus the gates themselves.
+        timeoutMs: Math.max(options.timeoutMs, TERMINAL_TAKE_TIMEOUT_MS),
+      });
     },
   },
   {
@@ -763,6 +1186,13 @@ export function viewportFor(scene: Scene, options: RecordOptions): { width: numb
   return scene.viewport === 'mobile' ? { ...MOBILE_VIEWPORT } : { ...options.viewport };
 }
 
+/** Scratch space for the terminal take, always outside the repository. */
+export function terminalWorkDir(options: RecordOptions, state: DemoState): string {
+  if (options.workDir) return options.workDir;
+  const base = state.CM_DEMO_STATE_DIR || path.dirname(options.statePath);
+  return path.join(base, 'terminal-work');
+}
+
 /** The scenes a run will film: `--scene` when given, the whole library otherwise. */
 export function selectedScenes(options: RecordOptions): Scene[] {
   return options.sceneIds.length
@@ -782,6 +1212,7 @@ export function selectedScenes(options: RecordOptions): Scene[] {
 export function resolveRecordOptions(options: RecordOptions, state: DemoState): RecordOptions {
   const resolved: RecordOptions = {
     ...options,
+    cliSession: options.cliSession || DEFAULT_CLI_SESSION,
     worktreeId: options.worktreeId || state.CM_DEMO_WORKTREE_ID || '',
     worktreePath: options.worktreePath || state.CM_DEMO_WORKTREE_PATH || '',
     unsyncedWorktreeId: options.unsyncedWorktreeId || state.CM_DEMO_UNSYNCED_WORKTREE_ID || '',
@@ -809,7 +1240,17 @@ export function resolveRecordOptions(options: RecordOptions, state: DemoState): 
 
 // ---------------------------------------------------------------- main -------
 
+export interface RecordOutcome {
+  written: string[];
+  /** Scenes that reported themselves unfilmable, with the reason. */
+  skipped: { id: string; reason: string }[];
+}
+
 export async function recordScenes(requested: RecordOptions): Promise<string[]> {
+  return (await recordScenesDetailed(requested)).written;
+}
+
+export async function recordScenesDetailed(requested: RecordOptions): Promise<RecordOutcome> {
   const state = parseStateFile(fs.readFileSync(requested.statePath, 'utf8'));
   const options = resolveRecordOptions(requested, state);
   const outDir = options.outDir || state.videoDir;
@@ -834,11 +1275,40 @@ export async function recordScenes(requested: RecordOptions): Promise<string[]> 
   const browser = await chromium.launch({ headless: options.headless });
   const selected = selectedScenes(options);
   const written: string[] = [];
+  const skipped: { id: string; reason: string }[] = [];
 
   try {
     for (const scene of selected) {
-      // Outside the recording: see Scene.prepare.
-      await scene.prepare?.({ baseUrl: state.baseUrl, options, state });
+      const target = path.join(outDir, `${scene.id}.webm`);
+      try {
+        // Outside the recording: see SceneCommon.prepare.
+        await scene.prepare?.({ baseUrl: state.baseUrl, options, state });
+      } catch (error) {
+        if (!(error instanceof SceneUnavailableError)) throw error;
+        // Loud in both directions. Without --allow-skip this is a failure, so
+        // the operator learns the reason now rather than meeting an absent file
+        // in ffmpeg an hour later.
+        process.stderr.write(`skipping ${scene.id}: ${error.message}\n`);
+        if (!options.allowSkip) throw error;
+        skipped.push({ id: scene.id, reason: error.message });
+        continue;
+      }
+
+      if (isTerminalScene(scene)) {
+        // No browser context: the tmux capture loop is this scene's camera, and
+        // it starts when the pane does.
+        await scene.record({
+          baseUrl: state.baseUrl,
+          options,
+          state,
+          outFile: target,
+          workDir: terminalWorkDir(options, state),
+        });
+        written.push(target);
+        process.stdout.write(`recorded ${scene.id} -> ${target}\n`);
+        continue;
+      }
+
       const viewport = viewportFor(scene, options);
       const context: BrowserContext = await browser.newContext({
         viewport,
@@ -856,7 +1326,6 @@ export async function recordScenes(requested: RecordOptions): Promise<string[]> 
       } finally {
         await context.close();
       }
-      const target = path.join(outDir, `${scene.id}.webm`);
       if (video) {
         await video.saveAs(target);
         await video.delete();
@@ -868,7 +1337,10 @@ export async function recordScenes(requested: RecordOptions): Promise<string[]> 
     await browser.close();
   }
 
-  return written;
+  for (const skip of skipped) {
+    process.stdout.write(`skipped ${skip.id}: ${skip.reason}\n`);
+  }
+  return { written, skipped };
 }
 
 const invokedDirectly =

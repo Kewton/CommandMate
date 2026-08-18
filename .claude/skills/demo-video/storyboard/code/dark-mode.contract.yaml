@@ -1,0 +1,17 @@
+version: 1
+title: "Add a dark mode toggle"
+goal: |
+  Add a dark mode toggle to the header of the demo application.
+  Keep the change inside src/ and test/.
+scope:
+  allow:
+    - "src/**"
+    - "test/**"
+verify:
+  gates:
+    - unit
+autoYes:
+  mode: "off"
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

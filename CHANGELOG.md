@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **feat(demo-video): 新シーン・code card・静止画生成を追加する** (#1810): `contract-verify`（tmux pane を収録し、`send --contract` → `wait --verify` の `GATE` / `RESULT` / 終了コードを**実ゲートの実 exit code のまま**映す）・`attention-badge`・`review-screen`・`slash-palette`・`install-skill` の 5 シーン、絵コンテの `type: code`（ファイルを組版する静止カード。`source` は絵コンテのディレクトリ配下に閉じることを解決後のパスで検証）、および LP / README 用の静止画 5 点を同じ隔離環境から機械生成する `stills.ts`（バイト予算はゲートで、収まらなければ**書かずに落ちる**）
+
 ### Documentation
 
 - **README（EN / JA）の hero・Key Features・ワークフロー節・比較表を Vibe Engineering 軸へ整合** (#1814): hero を `docs/design/public-messaging.md` の H1 ＋定義文に差し替え、Key Features 先頭に Task Contract / Verification Gates / Evidence & Metrics / Skills Catalog / 入力待ち通知の 5 行を追加し、Multi-Agent 行を 7 CLI（`CLI_TOOL_IDS` 実数）へ更新した。「Optional Workflow Layer」は `## Vibe Engineering workflow` へ昇格して "optional, not required" を削除し、公式 Catalog Skill と `send --contract` → `wait --verify` の最小コマンド列で説明する構成に変えた（`.claude/commands` 表はこのリポジトリ限定である旨を明記して 1 行リンクへ縮退）。競合 4 製品名の比較表は With / Without CommandMate 表に置換。ガード `tests/unit/docs/public-messaging.test.ts` の対象に両 README を追加した

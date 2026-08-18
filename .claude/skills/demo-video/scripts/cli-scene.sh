@@ -1,0 +1,261 @@
+#!/usr/bin/env bash
+#
+# cli-scene.sh — the `contract-verify` terminal take (Issue #1810).
+#
+# Runs the real CLI against the isolated demo server, in a tmux pane that
+# terminal-scene.ts photographs. Nothing here is staged: `wait --verify` starts
+# a verification run on the server, that run executes the seed worktree's own
+# `.commandmate/verify.yaml`, and the `GATE`/`RESULT` lines on screen are the
+# ones the product printed. SKILL.md's design judgement — only the LLM is
+# replaced — applies to the verification gates too, so there is no mock here.
+#
+# Two modes:
+#   --start   create the tmux session that runs this script, record its name,
+#             and exit. This is what the recorder calls.
+#   (default) the body, executed inside that pane.
+#
+# Isolation (all four are load-bearing):
+#   * HOME is redirected under the demo state dir, so `~/.commandmate/.env`
+#     cannot supply a port and point the CLI at the developer's live server on
+#     3000 (#1743).
+#   * CM_PORT is exported from state.env; loadClientEnv() lets an exported
+#     variable win over the file.
+#   * Step 1 asserts that `commandmate ls` sees nothing but this run's own seed
+#     worktrees. A production connection fails here, before anything is sent.
+#   * The session name is appended to $CM_DEMO_SESSIONS_FILE *before* the
+#     session exists, so env-down.sh tears down what it finds recorded and
+#     never has to sweep `mcbd-*` on a tmux server holding real work.
+#
+# bash 3.2 compatible: no associative arrays, no mapfile.
+
+set -u
+
+SESSION="cmdemo-cli"
+STATE_FILE=""
+TMUX_SOCKET=""
+START=0
+# The pane geometry the card is typeset for: 100x32 renders inside a 1280x800
+# frame at a size that is still legible after the h264 pass.
+PANE_WIDTH=100
+PANE_HEIGHT=32
+HOLD_SECONDS="${CM_DEMO_CLI_HOLD:-6}"
+WAIT_TIMEOUT="${CM_DEMO_CLI_WAIT_TIMEOUT:-180}"
+
+die() {
+  printf 'cli-scene: %s\n' "$1" >&2
+  exit 1
+}
+
+usage() {
+  cat <<'USAGE'
+Usage: cli-scene.sh --state FILE [--session NAME] [--tmux-socket NAME] [--start]
+
+  --state FILE        state.env written by env-up.sh (required)
+  --session NAME      tmux session name (default cmdemo-cli)
+  --tmux-socket NAME  tmux -L socket; default is the ambient tmux server
+  --start             create the session and exit, instead of being the body
+USAGE
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --state) [ $# -ge 2 ] || die "--state needs a value"; STATE_FILE="$2"; shift 2 ;;
+    --session) [ $# -ge 2 ] || die "--session needs a value"; SESSION="$2"; shift 2 ;;
+    --tmux-socket) [ $# -ge 2 ] || die "--tmux-socket needs a value"; TMUX_SOCKET="$2"; shift 2 ;;
+    --start) START=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; die "unknown argument: $1" ;;
+  esac
+done
+
+[ -n "$STATE_FILE" ] || { usage >&2; die "--state is required"; }
+[ -f "$STATE_FILE" ] || die "no state file at $STATE_FILE — run env-up.sh first"
+case "$SESSION" in
+  *[!a-zA-Z0-9_-]*) die "session name must match [a-zA-Z0-9_-]+, got '$SESSION'" ;;
+esac
+
+CM_DEMO_PORT=""
+CM_DEMO_STATE_DIR=""
+CM_DEMO_SEED_REPO=""
+CM_DEMO_SESSIONS_FILE=""
+CM_DEMO_PRIMARY_WORKTREE_ID=""
+CM_DEMO_WORKTREE_ID=""
+CM_DEMO_LOGIN_WORKTREE_ID=""
+CM_DEMO_UNSYNCED_WORKTREE_ID=""
+CM_DEMO_WORKTREE_PATH=""
+# shellcheck source=/dev/null
+. "$STATE_FILE"
+
+[ -n "$CM_DEMO_PORT" ] || die "state file has no CM_DEMO_PORT"
+[ "$CM_DEMO_PORT" != "3000" ] || die "state file records port 3000; refusing to drive a live CommandMate instance"
+[ -n "$CM_DEMO_WORKTREE_ID" ] || die "state file has no CM_DEMO_WORKTREE_ID — re-run env-up.sh"
+[ -n "$CM_DEMO_STATE_DIR" ] || die "state file has no CM_DEMO_STATE_DIR"
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="${CM_DEMO_REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}"
+[ -f "$REPO_ROOT/src/cli/index.ts" ] || die "no src/cli/index.ts under $REPO_ROOT (set CM_DEMO_REPO_ROOT)"
+
+tmux_cmd() {
+  if [ -n "$TMUX_SOCKET" ]; then
+    tmux -L "$TMUX_SOCKET" "$@"
+  else
+    tmux "$@"
+  fi
+}
+
+# --------------------------------------------------------------- start -------
+
+if [ "$START" -eq 1 ]; then
+  command -v tmux >/dev/null 2>&1 || die "tmux not found"
+  if tmux_cmd has-session -t "=$SESSION" 2>/dev/null; then
+    die "tmux session already exists: $SESSION"
+  fi
+  # Recorded before the session exists, for the same reason fake-agent.sh does
+  # it: a session created and then not written down is exactly the leak the
+  # record-based teardown was built to prevent (#1809).
+  if [ -n "$CM_DEMO_SESSIONS_FILE" ]; then
+    printf '%s\n' "$SESSION" >>"$CM_DEMO_SESSIONS_FILE" \
+      || die "could not record the session name in $CM_DEMO_SESSIONS_FILE"
+  fi
+  SELF="$SCRIPT_DIR/$(basename "$0")"
+  if [ -n "$TMUX_SOCKET" ]; then
+    tmux -L "$TMUX_SOCKET" new-session -d -s "$SESSION" -c "$REPO_ROOT" \
+      -x "$PANE_WIDTH" -y "$PANE_HEIGHT" \
+      "$SELF" --state "$STATE_FILE" --session "$SESSION" --tmux-socket "$TMUX_SOCKET"
+  else
+    tmux new-session -d -s "$SESSION" -c "$REPO_ROOT" \
+      -x "$PANE_WIDTH" -y "$PANE_HEIGHT" \
+      "$SELF" --state "$STATE_FILE" --session "$SESSION"
+  fi
+  printf '%s\n' "$SESSION"
+  exit 0
+fi
+
+# ---------------------------------------------------------------- body -------
+
+# `env -u` drops the ambient overrides that would otherwise point the CLI at the
+# developer's database or default port, and HOME is redirected so getEnvPath()
+# resolves inside the demo state dir.
+CLI_HOME="$CM_DEMO_STATE_DIR/cli-home"
+mkdir -p "$CLI_HOME" || die "cannot create the isolated CLI home at $CLI_HOME"
+
+cm() {
+  ( cd "$REPO_ROOT" && env -u DATABASE_PATH -u MCBD_DB_PATH -u MCBD_PORT -u CM_AUTH_TOKEN \
+      HOME="$CLI_HOME" CM_PORT="$CM_DEMO_PORT" CM_BIND=127.0.0.1 \
+      "$REPO_ROOT/node_modules/.bin/tsx" src/cli/index.ts "$@" )
+}
+
+banner() {
+  printf '\033[1;36m$\033[0m \033[1m%s\033[0m\n' "$1"
+}
+
+# Step 1 doubles as the proof that this pane is not talking to a production
+# server: every id the CLI reports has to be one of the ids env-up.sh derived
+# from the throwaway seed. `wt-api-cache` is deliberately absent until the
+# sync-worktrees scene registers it, so the check is "subset of the seed, and
+# the boot-synced ones are all there" rather than an exact four.
+assert_only_seed_worktrees() {
+  listed="$CM_DEMO_STATE_DIR/.cli-scene-ids"
+  cm ls --quiet >"$listed" 2>/dev/null || die "'commandmate ls' failed against port $CM_DEMO_PORT"
+  seen=0
+  while IFS= read -r listed_id; do
+    [ -n "$listed_id" ] || continue
+    seen=$((seen + 1))
+    case "$listed_id" in
+      "$CM_DEMO_PRIMARY_WORKTREE_ID"|"$CM_DEMO_WORKTREE_ID"|"$CM_DEMO_LOGIN_WORKTREE_ID"|"$CM_DEMO_UNSYNCED_WORKTREE_ID") : ;;
+      *)
+        rm -f "$listed"
+        die "'$listed_id' is not one of this run's seed worktrees; refusing to film a session that is not isolated"
+        ;;
+    esac
+  done <"$listed"
+  for required in "$CM_DEMO_PRIMARY_WORKTREE_ID" "$CM_DEMO_WORKTREE_ID" "$CM_DEMO_LOGIN_WORKTREE_ID"; do
+    grep -Fqx -- "$required" "$listed" || { rm -f "$listed"; die "seed worktree '$required' is missing from 'commandmate ls'"; }
+  done
+  rm -f "$listed"
+  [ "$seen" -gt 0 ] || die "'commandmate ls' listed no worktrees at all"
+}
+
+assert_only_seed_worktrees
+
+CONTRACT=".commandmate/tasks/dark-mode.yaml"
+WT="$CM_DEMO_WORKTREE_ID"
+
+# `wait` returns as soon as it observes a completed session, and the capture it
+# reads is cached for 5s (Issue #1623). Called straight after `send`, it can
+# therefore read the pane as it was *before* the cassette repainted and report
+# `Completed` without the agent having started — measured: the first wait
+# returned 0 instead of 10, and verified an agent that had not yet run.
+#
+# So the harness does what the recorder's `prepare` does for a browser scene:
+# synchronise on observable state before the step that films it. This is the
+# product's own `ls --json`, redirected, so nothing extra appears on camera.
+PROBE="$CM_DEMO_STATE_DIR/.cli-scene-probe.mjs"
+cat >"$PROBE" <<'PROBEJS'
+let raw = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => { raw += chunk; });
+process.stdin.on('end', () => {
+  let list;
+  try { list = JSON.parse(raw); } catch { process.exit(1); }
+  const worktree = Array.isArray(list) ? list.find((entry) => entry.id === process.argv[2]) : null;
+  const status = worktree && worktree.sessionStatusByCli && worktree.sessionStatusByCli.claude;
+  // Generating *and* no longer parked on a prompt. The second half matters
+  // after `respond`: the capture the status is derived from is cached for 5s,
+  // so a bare `isProcessing` probe returns while the approval frame is still
+  // the newest thing the server has seen, and the next `wait` reports exit 10
+  // for the prompt that was already answered.
+  process.exit(status && status.isProcessing && !status.isWaitingForResponse ? 0 : 1);
+});
+PROBEJS
+
+wait_until_busy() {
+  attempt=0
+  while [ "$attempt" -lt 90 ]; do
+    attempt=$((attempt + 1))
+    if cm ls --json 2>/dev/null | node "$PROBE" "$WT"; then
+      return 0
+    fi
+    sleep 1
+  done
+  die "$WT never resumed generating after the message was delivered"
+}
+
+clear
+banner "commandmate ls"
+cm ls
+
+printf '\n'
+banner "commandmate send $WT --contract $CONTRACT"
+cm send "$WT" --contract "$CONTRACT" || die "send failed"
+wait_until_busy
+
+printf '\n'
+banner "commandmate wait $WT --verify --timeout $WAIT_TIMEOUT"
+cm wait "$WT" --verify --timeout "$WAIT_TIMEOUT"
+FIRST_WAIT=$?
+printf '\033[2mexit %s (10 = the agent is asking)\033[0m\n' "$FIRST_WAIT"
+[ "$FIRST_WAIT" -eq 10 ] || die "expected exit 10 (prompt detected) from the first wait, got $FIRST_WAIT"
+
+printf '\n'
+banner "commandmate respond $WT 1"
+cm respond "$WT" 1 || die "respond failed"
+wait_until_busy
+
+printf '\n'
+banner "commandmate wait $WT --verify --timeout $WAIT_TIMEOUT"
+cm wait "$WT" --verify --timeout "$WAIT_TIMEOUT"
+SECOND_WAIT=$?
+
+printf '\n'
+banner "echo \$?"
+printf '%s\n' "$SECOND_WAIT"
+rm -f "$PROBE"
+
+# Held so the last frame — the one carrying RESULT and the exit code — is on
+# screen long enough for the capture loop to photograph it. The scene's real
+# length is still the storyboard's; compose.sh trims from the front.
+sleep "$HOLD_SECONDS"
+
+[ "$SECOND_WAIT" -eq 0 ] || die "expected exit 0 from the verified wait, got $SECOND_WAIT"
+exit 0

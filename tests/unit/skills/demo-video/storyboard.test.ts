@@ -11,10 +11,18 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import os from 'node:os';
+import { afterAll, describe, expect, it } from 'vitest';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 import {
+  APPROVAL_CONSUMING_SCENES,
+  ATTENTION_SCENE_ID,
   DEFAULT_STORYBOARD_PATH,
+  MAX_CODE_CARD_COLUMNS,
+  MAX_CODE_CARD_LINES,
+  SCENES_REQUIRING_A_PRIOR_SEND,
+  SEND_SCENE_ID,
   TELOP_LIMITS,
   buildPlan,
   countEnglishWords,
@@ -22,6 +30,7 @@ import {
   parseStoryboard,
   parseStoryboardArgs,
   parseYamlSubset,
+  resolveCodeSource,
   runStoryboardCli,
   stripComment,
   type Storyboard,
@@ -36,12 +45,18 @@ const IMPLEMENTED = SCENES.map((scene) => scene.id);
  * implements, so the fixtures below exercise one rule at a time instead of all
  * failing on the 1:1 check the moment a scene is added.
  */
+const PLACEABLE = IMPLEMENTED.filter(
+  // One approval consumer per cut (#1810): the cassette paints one prompt per
+  // pass, so a fixture placing both would fail a rule it is not exercising.
+  (id) => id === APPROVAL_CONSUMING_SCENES[0] || !APPROVAL_CONSUMING_SCENES.includes(id),
+);
+
 function baseYaml(overrides: { scenes?: string; duration?: number } = {}): string {
-  const recorded = IMPLEMENTED.map(
+  const recorded = PLACEABLE.map(
     (id) => `  - id: ${id}\n    type: record\n    duration: 2\n    telop: { ja: "説明", en: "Explanation" }`,
   ).join('\n');
   const scenes = overrides.scenes ?? `  - id: title\n    type: card\n    duration: 3\n    telop: { ja: "題", en: "Title" }\n${recorded}`;
-  const duration = overrides.duration ?? 3 + IMPLEMENTED.length * 2;
+  const duration = overrides.duration ?? 3 + PLACEABLE.length * 2;
   return `version: 1\nduration: ${duration}\noutput: demo\nscenes:\n${scenes}\n`;
 }
 
@@ -244,7 +259,7 @@ describe('validation', () => {
     ['version: 2\nduration: 1\noutput: demo\nscenes:\n  - id: a\n    type: card\n    duration: 1\n    telop: { ja: "あ", en: "a" }', /version must be 1/],
     ['version: 1\nduration: 1\noutput: ../escape\nscenes:\n  - id: a\n    type: card\n    duration: 1\n    telop: { ja: "あ", en: "a" }', /output must be a plain file stem/],
     ['version: 1\nduration: 1\noutput: demo\nscenes:\n  - id: A_Scene\n    type: card\n    duration: 1\n    telop: { ja: "あ", en: "a" }', /kebab-case/],
-    ['version: 1\nduration: 1\noutput: demo\nscenes:\n  - id: a\n    type: still\n    duration: 1\n    telop: { ja: "あ", en: "a" }', /type must be 'card' or 'record'/],
+    ['version: 1\nduration: 1\noutput: demo\nscenes:\n  - id: a\n    type: still\n    duration: 1\n    telop: { ja: "あ", en: "a" }', /type must be 'card', 'record' or 'code'/],
     ['version: 1\nduration: 0\noutput: demo\nscenes:\n  - id: a\n    type: card\n    duration: 0\n    telop: { ja: "あ", en: "a" }', /duration must be a positive number/],
     ['version: 1\nduration: 1\noutput: demo\nscenes: []', /flow sequences are not supported/],
   ])('rejects %j', (yaml, message) => {
@@ -315,33 +330,47 @@ describe('every storyboard committed to the repository', () => {
   });
 
   it('finds every storyboard, so the per-file check below cannot be vacuous', () => {
-    // 10 product-highlight cuts + 5 tutorial cuts + the skill default in both
-    // install roots.
-    expect(files.length).toBe(17);
+    // 10 product-highlight cuts + 5 tutorial cuts + the skill's default and
+    // contract-verify cuts in both install roots.
+    expect(files.length).toBe(19);
   });
 
-  it.each(files)('%s validates against the implemented scenes', (relative) => {
-    const { storyboard, errors } = parseStoryboard(
+  const parseCommitted = (relative: string) =>
+    parseStoryboard(
       fs.readFileSync(path.join(REPO_ROOT, relative), 'utf8'),
+      undefined,
+      // `code` scenes resolve `source` against the storyboard's own directory,
+      // which is what the CLI passes and what keeps a cut from shipping a file
+      // it does not sit with.
+      path.dirname(path.join(REPO_ROOT, relative)),
     );
+
+  it.each(files)('%s validates against the implemented scenes', (relative) => {
+    const { storyboard, errors } = parseCommitted(relative);
     expect(errors).toEqual([]);
     expect(storyboard).not.toBeNull();
   });
 
-  it.each(files)('%s places the approval scene after a send, or not at all', (relative) => {
+  it.each(files)('%s places every send-dependent scene after a send', (relative) => {
     // Scenes became independently selectable in #1575, which exposed a
     // dependency that used to be hidden by "every storyboard places every
     // scene": fake-agent.sh's cassette blocks on `@input` until CommandMate
-    // sends a message, so the approval frame is never painted without a send.
-    // A storyboard that places `respond-from-mobile` alone hangs in prepare
-    // until the timeout — minutes of nothing, then a failed take.
-    const { storyboard } = parseStoryboard(fs.readFileSync(path.join(REPO_ROOT, relative), 'utf8'));
-    const ids = storyboard!.scenes.map((scene) => scene.id);
-    const approval = ids.indexOf('respond-from-mobile');
-    if (approval === -1) return;
-    const send = ids.indexOf('send-and-generate');
-    expect(send).toBeGreaterThan(-1);
-    expect(send).toBeLessThan(approval);
+    // sends a message, so nothing downstream of the send is ever painted.
+    // #1810 widened the set — the attention badge and the Review approval list
+    // are the same frame seen from other surfaces.
+    const ids = parseCommitted(relative).storyboard!.scenes.map((scene) => scene.id);
+    for (const dependent of SCENES_REQUIRING_A_PRIOR_SEND) {
+      const at = ids.indexOf(dependent);
+      if (at === -1) continue;
+      const send = ids.indexOf(SEND_SCENE_ID);
+      expect(send, `${relative} places ${dependent} with no send`).toBeGreaterThan(-1);
+      expect(send).toBeLessThan(at);
+    }
+  });
+
+  it.each(files)('%s answers the approval at most once', (relative) => {
+    const ids = parseCommitted(relative).storyboard!.scenes.map((scene) => scene.id);
+    expect(APPROVAL_CONSUMING_SCENES.filter((id) => ids.includes(id)).length).toBeLessThanOrEqual(1);
   });
 
   it.each(files)('%s agrees with record-scenes.ts about each viewport', (relative) => {
@@ -349,7 +378,7 @@ describe('every storyboard committed to the repository', () => {
     // letterbox, record-scenes decides the browser. A mobile scene placed in a
     // storyboard that calls it `pc` gets a phone-shaped take pillarboxed into a
     // desktop frame.
-    const { storyboard } = parseStoryboard(fs.readFileSync(path.join(REPO_ROOT, relative), 'utf8'));
+    const { storyboard } = parseCommitted(relative);
     for (const scene of storyboard!.scenes) {
       if (scene.type !== 'record') continue;
       expect(SCENES.find((implemented) => implemented.id === scene.id)!.viewport).toBe(scene.viewport);
@@ -404,6 +433,7 @@ describe('demo-video.sh films exactly the scenes the storyboard places', () => {
 
 describe('buildPlan', () => {
   const storyboard = parseStoryboard(baseYaml(), IMPLEMENTED).storyboard as Storyboard;
+
 
   it('accumulates start times from the cut instead of restating them', () => {
     const plan = buildPlan(storyboard, 'ja');
@@ -499,5 +529,244 @@ describe('CLI', () => {
 
   it('exits 2 on a bad argument, distinguishing usage from content', () => {
     expect(runStoryboardCli(['--locale', 'fr'], () => {})).toBe(2);
+  });
+});
+
+
+/**
+ * `type: code` — a listing typeset as a still card (Issue #1810).
+ *
+ * The rule that carries the security weight is the path check: a storyboard is
+ * data edited by whoever writes the wording, and `source` names a file that
+ * ends up on screen in a published video. It is tested from both sides — a
+ * legitimate sibling file resolves, and every way out of the directory is
+ * refused — because a check that only ever sees valid input proves nothing.
+ */
+describe('code scenes', () => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'demo-video-code-'));
+  const nested = path.join(scratch, 'code');
+  fs.mkdirSync(nested, { recursive: true });
+  fs.writeFileSync(path.join(nested, 'sample.yaml'), 'version: 1\ngates:\n  - id: unit\n');
+  fs.writeFileSync(path.join(scratch, 'outside.yaml'), 'secret: 1\n');
+  const outsideScratch = fs.mkdtempSync(path.join(os.tmpdir(), 'demo-video-outside-'));
+  fs.writeFileSync(path.join(outsideScratch, 'elsewhere.yaml'), 'secret: 1\n');
+
+  afterAll(() => {
+    removeTempDir(scratch);
+    removeTempDir(outsideScratch);
+  });
+
+  const codeYaml = (body: string, duration = 4): string =>
+    `version: 1\nduration: ${duration}\noutput: demo\nscenes:\n  - id: sample\n    type: code\n    duration: ${duration}\n${body}`;
+
+  const parseIn = (yaml: string, dir = scratch) => parseStoryboard(yaml, IMPLEMENTED, dir);
+
+  const VALID = codeYaml(
+    '    source: code/sample.yaml\n    lang: yaml\n    telop: { ja: "検証設定", en: "The verification config" }\n',
+  );
+
+  it('accepts a listing that sits next to the storyboard', () => {
+    const { storyboard, errors } = parseIn(VALID);
+    expect(errors).toEqual([]);
+    expect(storyboard!.scenes[0].source).toBe('code/sample.yaml');
+    expect(storyboard!.scenes[0].lang).toBe('yaml');
+    expect(storyboard!.scenes[0].sourcePath).toBe(fs.realpathSync(path.join(nested, 'sample.yaml')));
+  });
+
+  it('carries the resolved path into the plan, where render-overlays reads it', () => {
+    const plan = buildPlan(parseIn(VALID).storyboard!, 'ja');
+    expect(plan[0].type).toBe('code');
+    expect(plan[0].sourcePath).toBe(fs.realpathSync(path.join(nested, 'sample.yaml')));
+    expect(plan[0].lang).toBe('yaml');
+  });
+
+  it('gives a code card the card telop budget, not the band budget', () => {
+    expect(TELOP_LIMITS.code).toEqual(TELOP_LIMITS.card);
+  });
+
+  it.each([
+    ['../outside.yaml', /must stay inside/],
+    ['code/../../outside.yaml', /must stay inside/],
+    [`${outsideScratch}/elsewhere.yaml`, /must be relative to the storyboard/],
+    ['/etc/hosts', /must be relative to the storyboard/],
+    ['code/absent.yaml', /cannot read source/],
+  ])('refuses source %j', (source, message) => {
+    const { storyboard, errors } = parseIn(
+      codeYaml(`    source: ${source}\n    lang: yaml\n    telop: { ja: "あ", en: "a" }\n`),
+    );
+    expect(storyboard).toBeNull();
+    expect(errors.join('\n')).toMatch(message);
+  });
+
+  it('refuses a source reached through a symlink out of the directory', () => {
+    // The check is on the *resolved* path, not on the spelling: a link is the
+    // one way a value with no `..` in it still leaves the directory.
+    const link = path.join(nested, 'linked.yaml');
+    try {
+      fs.symlinkSync(path.join(outsideScratch, 'elsewhere.yaml'), link);
+    } catch {
+      return; // no symlink permission here; the `..` cases still cover the rule
+    }
+    const { errors } = parseIn(
+      codeYaml('    source: code/linked.yaml\n    lang: yaml\n    telop: { ja: "あ", en: "a" }\n'),
+    );
+    expect(errors.join('\n')).toMatch(/must stay inside/);
+  });
+
+  it('refuses a listing longer than the card can set', () => {
+    const long = path.join(nested, 'long.yaml');
+    fs.writeFileSync(long, `${Array.from({ length: MAX_CODE_CARD_LINES + 1 }, (_, i) => `line: ${i}`).join('\n')}\n`);
+    const { errors } = parseIn(
+      codeYaml('    source: code/long.yaml\n    lang: yaml\n    telop: { ja: "あ", en: "a" }\n'),
+    );
+    expect(errors.join('\n')).toMatch(
+      new RegExp(`is ${MAX_CODE_CARD_LINES + 1} lines, limit is ${MAX_CODE_CARD_LINES}`),
+    );
+  });
+
+  it('accepts a listing at exactly the line limit', () => {
+    // The boundary in the passing direction, so the check cannot drift into
+    // rejecting everything and still look correct.
+    const exact = path.join(nested, 'exact.yaml');
+    fs.writeFileSync(exact, `${Array.from({ length: MAX_CODE_CARD_LINES }, (_, i) => `line: ${i}`).join('\n')}\n`);
+    const { errors } = parseIn(
+      codeYaml('    source: code/exact.yaml\n    lang: yaml\n    telop: { ja: "あ", en: "a" }\n'),
+    );
+    expect(errors).toEqual([]);
+  });
+
+  it('refuses a line wider than the card, which does not wrap', () => {
+    const wide = path.join(nested, 'wide.yaml');
+    fs.writeFileSync(wide, `note: ${'x'.repeat(MAX_CODE_CARD_COLUMNS)}\n`);
+    const { errors } = parseIn(
+      codeYaml('    source: code/wide.yaml\n    lang: yaml\n    telop: { ja: "あ", en: "a" }\n'),
+    );
+    expect(errors.join('\n')).toMatch(/columns, limit is/);
+  });
+
+  it.each([
+    ['    lang: yaml\n    telop: { ja: "あ", en: "a" }\n', /needs 'source'/],
+    ['    source: code/sample.yaml\n    telop: { ja: "あ", en: "a" }\n', /lang must be a short syntax label/],
+    [
+      '    source: code/sample.yaml\n    lang: "not a lang"\n    telop: { ja: "あ", en: "a" }\n',
+      /lang must be a short syntax label/,
+    ],
+    [
+      '    source: code/sample.yaml\n    lang: yaml\n    viewport: pc\n    telop: { ja: "あ", en: "a" }\n',
+      /a code scene is not recorded/,
+    ],
+  ])('refuses %j', (body, message) => {
+    expect(parseIn(codeYaml(body)).errors.join('\n')).toMatch(message);
+  });
+
+  it('refuses source/lang on a scene that is not code', () => {
+    const yaml =
+      'version: 1\nduration: 3\noutput: demo\nscenes:\n  - id: title\n    type: card\n    duration: 3\n    source: code/sample.yaml\n    telop: { ja: "あ", en: "a" }\n';
+    expect(parseIn(yaml).errors.join('\n')).toMatch(/only a code scene may declare/);
+  });
+
+  it('resolves a legitimate sibling and refuses an escape, as a unit', () => {
+    const ok = resolveCodeSource(scratch, 'code/sample.yaml');
+    expect('path' in ok && ok.path).toBe(fs.realpathSync(path.join(nested, 'sample.yaml')));
+    expect(resolveCodeSource(scratch, '../outside.yaml')).toHaveProperty('error');
+    expect(resolveCodeSource(scratch, '')).toHaveProperty('error');
+  });
+});
+
+/**
+ * The cassette dependencies, checked as validation rather than only as a
+ * property of the committed cuts: `demo-video.sh --check` runs the validator
+ * before the first take, so a mis-ordered cut costs a second instead of the
+ * whole recording session it would otherwise be found in.
+ */
+describe('scene ordering rules', () => {
+  const cut = (...ids: string[]): string => {
+    const scenes = ids
+      .map((id) => `  - id: ${id}\n    type: record\n    duration: 2\n    telop: { ja: "説明", en: "Explanation" }`)
+      .join('\n');
+    return `version: 1\nduration: ${ids.length * 2}\noutput: demo\nscenes:\n${scenes}\n`;
+  };
+
+  it.each(SCENES_REQUIRING_A_PRIOR_SEND)('refuses %s placed without a send', (id) => {
+    expect(parseStoryboard(cut(id), IMPLEMENTED).errors.join('\n')).toMatch(
+      new RegExp(`scene '${id}' needs '${SEND_SCENE_ID}' earlier`),
+    );
+  });
+
+  it.each(SCENES_REQUIRING_A_PRIOR_SEND)('refuses %s placed before the send', (id) => {
+    expect(parseStoryboard(cut(id, SEND_SCENE_ID), IMPLEMENTED).errors.join('\n')).toMatch(
+      new RegExp(`scene '${id}' needs '${SEND_SCENE_ID}' earlier`),
+    );
+  });
+
+  it.each(SCENES_REQUIRING_A_PRIOR_SEND)('accepts %s placed after the send', (id) => {
+    expect(parseStoryboard(cut(SEND_SCENE_ID, id), IMPLEMENTED).errors).toEqual([]);
+  });
+
+  it('refuses two scenes that both answer the approval', () => {
+    // The cassette paints one prompt per pass; the second would wait out its
+    // whole timeout against a session that stopped asking.
+    const errors = parseStoryboard(
+      cut(SEND_SCENE_ID, ...APPROVAL_CONSUMING_SCENES),
+      IMPLEMENTED,
+    ).errors;
+    expect(errors.join('\n')).toMatch(/both answer the approval prompt/);
+  });
+
+  it('refuses the attention badge placed after the prompt has been answered', () => {
+    const errors = parseStoryboard(
+      cut(SEND_SCENE_ID, APPROVAL_CONSUMING_SCENES[0], ATTENTION_SCENE_ID),
+      IMPLEMENTED,
+    ).errors;
+    expect(errors.join('\n')).toMatch(
+      new RegExp(`'${ATTENTION_SCENE_ID}' films the moment a session starts waiting`),
+    );
+  });
+
+  it('accepts the badge before the answer, which is the order that works', () => {
+    expect(
+      parseStoryboard(
+        cut(SEND_SCENE_ID, ATTENTION_SCENE_ID, APPROVAL_CONSUMING_SCENES[0]),
+        IMPLEMENTED,
+      ).errors,
+    ).toEqual([]);
+  });
+});
+
+describe('the committed contract-verify cut', () => {
+  const file = path.join(REPO_ROOT, '.claude/skills/demo-video/storyboard/contract-verify.yaml');
+  const { storyboard, errors } = parseStoryboard(
+    fs.readFileSync(file, 'utf8'),
+    undefined,
+    path.dirname(file),
+  );
+
+  it('validates, code cards and all', () => {
+    expect(errors).toEqual([]);
+    expect(storyboard).not.toBeNull();
+  });
+
+  it('places the two code cards the Issue asks for', () => {
+    const code = storyboard!.scenes.filter((scene) => scene.type === 'code');
+    expect(code.map((scene) => scene.id)).toEqual(['contract-yaml', 'verify-yaml']);
+    for (const scene of code) {
+      expect(fs.existsSync(scene.sourcePath!)).toBe(true);
+    }
+  });
+
+  it('films the verdict from the terminal scene', () => {
+    const recorded = storyboard!.scenes.filter((scene) => scene.type === 'record');
+    expect(recorded.map((scene) => scene.id)).toEqual(['contract-verify']);
+  });
+
+  it('takes its wording from the canonical public messaging document', () => {
+    // #1808 settled every telop on a public surface. Copying rather than
+    // re-inventing is the point; this fails if either side is edited alone.
+    const messaging = fs.readFileSync(path.join(REPO_ROOT, 'docs/design/public-messaging.md'), 'utf8');
+    for (const scene of storyboard!.scenes) {
+      if (scene.id === 'outro') continue; // the repository URL, not a message
+      expect(messaging, `telop.ja of ${scene.id}`).toContain(scene.telop.ja);
+      expect(messaging, `telop.en of ${scene.id}`).toContain(scene.telop.en);
+    }
   });
 });

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>demo-video terminal</title>
+    <!--
+      A tmux pane, type-set (Issue #1810). terminal-scene.ts assigns the body's
+      innerHTML from `ansiToHtml`, which escapes every character of the capture
+      first — the only markup that reaches this page is the markup that function
+      generated, and the colours arrive as inline styles from its palette.
+
+      Sized for the 100x32 pane cli-scene.sh creates: at 17px in a monospace
+      face the advance is ~10.2px, so 100 columns is ~1020px and 32 rows at
+      23px is 736px — both inside a 1280x800 frame with room for the chrome.
+
+      Every font is a system font. The page must render identically with no
+      network at all; a webfont request would fall back mid-take and re-flow the
+      columns, which in a monospace grid is the whole layout.
+
+      Terminal surfaces stay dark in both themes (the project's convention for
+      anything that shows pane bytes), so there is no light variant here.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #05080c;
+      }
+      #terminal-window {
+        display: flex;
+        flex-direction: column;
+        width: 1120px;
+        max-width: 96%;
+        border-radius: 12px;
+        border: 1px solid #1e2a36;
+        background: #0b1219;
+        box-shadow: 0 14px 48px rgba(0, 0, 0, 0.55);
+        overflow: hidden;
+      }
+      #terminal-chrome {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 16px;
+        border-bottom: 1px solid #1e2a36;
+        background: #101a24;
+      }
+      .dot {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+      }
+      .dot-1 { background: #f2777a; }
+      .dot-2 { background: #e6c07b; }
+      .dot-3 { background: #7ec699; }
+      #terminal-title {
+        margin-left: 8px;
+        color: #7b8ea3;
+        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        font-size: 14px;
+        letter-spacing: 0.04em;
+      }
+      #terminal-body {
+        padding: 16px 20px;
+        min-height: 736px;
+        color: #c9d1d9;
+        font-family: 'SF Mono', Menlo, Monaco, Consolas, 'DejaVu Sans Mono', monospace;
+        font-size: 17px;
+        line-height: 23px;
+      }
+      /* `pre` semantics without a <pre>: runs of spaces are load-bearing in a
+         terminal grid, and nothing may wrap — a wrapped row would shift every
+         line below it and misalign the whole capture. */
+      .t-line {
+        white-space: pre;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="terminal-window">
+      <div id="terminal-chrome">
+        <span class="dot dot-1"></span>
+        <span class="dot dot-2"></span>
+        <span class="dot dot-3"></span>
+        <span id="terminal-title">commandmate</span>
+      </div>
+      <!-- Filled by terminal-scene.ts, one .t-line per captured row. -->
+      <div id="terminal-body"></div>
+    </div>
+  </body>
+</html>
