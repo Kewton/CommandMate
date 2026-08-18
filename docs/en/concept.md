@@ -2,201 +2,148 @@
 
 # CommandMate - Concept
 
-## A Parallel Development Platform for Vibe Coders
+> **From vibe coding to Vibe Engineering.**
 
-> **"Work, parenting, chores. Weaving code in the gaps between them all."**
+CommandMate builds the engineering discipline into the workflow: a contract before the work,
+verification gates after it, evidence throughout.
+Any coding agent turns your requirement into a verified result.
 
----
-
-## The Problem This Tool Solves
-
-### The Reality of Vibe Coding
-
-The advent of AI coding assistants (such as Claude Code) has fundamentally changed the way we develop. So-called "Vibe Coding" - an intuitive style of writing code through conversation with AI - has opened up new possibilities for many developers.
-
-However, terminal-only development has its limitations:
-
-- **Location-bound**: You can't develop unless you're sitting at your PC
-- **Time-consuming**: You need a large block of time to start working
-- **Context switch cost**: Focusing on one task means other tasks stall
-- **Hard to balance with life**: No room to develop between work, parenting, and household chores
-
-### Our Answer
-
-CommandMate is our answer to these challenges:
-
-```
-🚀 Parallel Development × 📱 Mobile Access × 📦 All in One App = ∞ Productivity
-```
-
-No need to switch between multiple tools. **With just a browser, you can give instructions, check execution results, and manage history - all in one place.**
+This document is the **canonical source** for the Vision, the Mission, the core principle and the
+implementation. The wording every public surface uses (landing page, README, tutorial,
+product highlights) lives in [docs/design/public-messaging.md](../design/public-messaging.md).
 
 ---
 
-## Concept
+## The Four Rungs
 
-### 1. Independent Development Environments per Branch
+Top to bottom, abstract to concrete. Each rung is the means by which the rung above it happens.
 
-Leveraging the Git worktree concept, CommandMate manages **independent AI sessions for each branch**.
+| Rung | Statement |
+|---|---|
+| **Vision** | Do not offload professional engineering knowledge to the AI — supply it as a system |
+| **Mission** | Let anyone build a product with AI while following best practices |
+| **Core principle** | With any coding agent, a requirement reaches a verified result reproducibly |
+| **Implementation** | Task Contract / issue-driven work / Skills / parallel execution / independent verification / evidence / PR workflow |
 
-```
-feature/authentication  →  Claude Code Session A
-feature/dashboard       →  Claude Code Session B
-bugfix/login-error      →  Claude Code Session C
-```
-
-This enables:
-- **Parallel task processing**: You can start work on another branch while AI is still working
-- **Context preservation**: Conversation history for each branch is stored independently
-- **Flexible work style**: Switch between tasks based on your mood or situation
-
-### 2. Development from Your Smartphone
-
-**Being able to move development forward without a PC** - this is the core of CommandMate.
-
-- Give PR review instructions while on your commute
-- Request a bug fix while the kids are napping
-- Check test results between household chores
-
-With a mobile-optimized UI, you can **convert idle moments into development time**.
-
-### 3. Asynchronous & Event-Driven
-
-No need to wait for AI responses.
-
-1. Give a task instruction from your phone
-2. Put it back in your pocket and go about your day
-3. Get notified when AI completes the task
-4. Check the results and give the next instruction
-
-This cycle lets you **use AI processing time as living time**.
+The core principle is not the Mission itself; it is the **means** that makes the Mission hold.
+"Anyone" only works if a different person, or a different agent, still arrives at the same
+result — and that condition is what "reproducibly" names.
 
 ---
 
-## Target Users
+## The Loop
 
-CommandMate is ideal for:
+CommandMate sits between you and the agent and **hands over the method, the rules and the
+verification criteria as a system**. It does not add intelligence; it adds the frame that keeps
+intelligence from spinning in place.
 
-### 👨‍👩‍👧‍👦 Engineers with Kids
-
-> "I can't get large blocks of time, but I have 5-10 minute gaps throughout the day."
-
-You can make progress by accumulating short bursts of time while kids are playing, napping, or after bedtime.
-
-### 👔 Side-Project Developers with Day Jobs
-
-> "Weekdays are for work, weekends are for family. But I still want to advance my own project."
-
-Use commute time, lunch breaks, and waiting time to develop without affecting your day job.
-
-### 🏠 Remote Workers
-
-> "It's hard to focus at home. Switching between chores is stressful."
-
-Toss tasks at AI between chores and check the results when you're done. Develop without disrupting your daily rhythm.
-
-### 🌟 Vibe Coders
-
-> "Developing through conversation with AI is fun. But being glued to the terminal is tiring."
-
-With a chat-style UI, you can collaborate with AI more naturally.
-
----
-
-## Productivity Gains
-
-### Before: Traditional Development Style
-
-```
-[PC Work] ━━━━━━━━━━━━━━━━━━━━━━━━━━━
-          ↑                            ↑
-       Start dev                    End dev
-       (Need 2 hours of focused time)
+```mermaid
+flowchart LR
+    A["Human requirement"] --> B["CommandMate<br/>supplies method, rules and<br/>verification criteria as a system"]
+    B --> C["Coding agent executes"]
+    C --> D["Verified result"]
+    D --> A
 ```
 
-### After: CommandMate Style
+- **Human requirement** — an issue, or a one-line request
+- **CommandMate** — hands over a contract (allowed scope, definition of done), Skills (the method) and verification gates (the pass/fail criteria)
+- **Coding agent** — Claude Code, Codex, Gemini CLI and others execute inside that frame
+- **Verified result** — not "the agent said so", but what the exit code of a verification run returned
 
-```
-[Commute] [Work] [Lunch] [Work] [Home] [Chores] [Kids] [Bedtime]
-   📱      💼     📱      💼     🚃      🏠       👶      📱
-   ↑              ↑                              ↑        ↑
-Task inst.  Check results          Check results  Review
- (3 min)     (5 min)              while parenting (10 min)
-                                     (2 min)
-```
-
-**The sum of distributed idle moments can yield results equivalent to a solid block of development time.**
+The last arrow matters. A verified result becomes the starting point of the next requirement, and
+the evidence left behind along the way — commits, gate logs, history — becomes the material for
+the next decision.
 
 ---
 
-## Key Features
+## Vibe Engineering
 
-| Feature | Description |
-|---------|-------------|
-| **Multi-Worktree Management** | Independent AI sessions per branch |
-| **Mobile-Optimized UI** | Chat interface optimized for touch |
-| **Real-Time Status** | Instantly see AI state (processing/waiting/complete) |
-| **CLI Support** | Claude Code, Codex CLI |
-| **Log Management** | Detailed conversation history saved in Markdown |
-| **LAN Access** | Accessible from smartphones on the same network |
+> **Vibe Engineering — the AI does the building; the system, not your expertise, guarantees the engineering.**
 
----
+Vibe coding is building intuitively through conversation with an AI. It is fast, it is fun, and
+something that actually runs comes out of it. CommandMate does not reject that.
+**It treats it as the starting point.**
 
-## Tech Stack
+The problem is what is left behind when you hand the whole thing over: the only material for
+judging whether it is really done is a chat transcript. Someone who can judge, judges.
+Someone who cannot, cannot. At that moment the outcome starts depending on a person's expertise.
 
-- **Frontend**: Next.js 14 (App Router) / TypeScript / Tailwind CSS
-- **Backend**: Next.js API Routes / Node.js
-- **Database**: SQLite
-- **Session Management**: tmux
-- **Real-Time Communication**: WebSocket
-- **Supported CLIs**: Claude Code, Codex CLI
+**We do not make the AI smarter. We make the software-engineering ability its user needed into a system.**
 
----
+That is the core of CommandMate. Writing a contract, declaring the verification criteria, leaving
+evidence — steps that used to live in an experienced person's head — become files, commands and
+gates. Ride the system, and you arrive at the same result whether or not you have the expertise.
 
-## Getting Started
-
-```bash
-# Install
-git clone https://github.com/Kewton/CommandMate.git
-cd CommandMate
-npm install
-
-# Configure (.env)
-# CM_ROOT_DIR is the scope CommandMate may manage: repositories must live under
-# it to be registered, and clones are saved into it. Setting it does not itself
-# discover repositories - register them from the UI or clone into it.
-CM_ROOT_DIR=/path/to/your/repos
-CM_BIND=0.0.0.0
-# External access: configure reverse proxy authentication (see docs/security-guide.md)
-
-# Start
-npm run build && npm start
-```
-
-Access `http://<your-pc-ip>:3000` from your phone's browser to get started.
-
-For more details, see [README.md](../../README.md).
+> **Where the term comes from**: "vibe engineering" was coined by Simon Willison in 2025
+> ([Vibe engineering, 2025-10-07](https://simonwillison.net/2025/Oct/7/vibe-engineering/)).
+> His post describes seasoned professionals accelerating their work with LLMs while staying
+> accountable for what they ship, so the discipline is assumed to live **in the person**.
+> CommandMate puts that discipline **in the system instead**, which widens the audience to people
+> without the expertise. The full comparison is recorded in the sourcing section of
+> [public-messaging.md](../design/public-messaging.md) (Japanese).
 
 ---
 
-## License
+## From Implementation to Product Features
 
-MIT License
+All seven implementation items map to features that actually exist.
 
-This project is open-sourced for all developers who want to make progress during their idle moments.
+| Implementation | Product feature |
+|---|---|
+| **Task Contract** | `.commandmate/tasks/*.yaml`, `commandmate send --contract`, `commandmate task list` / `task show` ([design](../design/task-contract.md), Japanese) |
+| **Issue-driven work** | Catalog Skills `cmate-issue-authoring` / `cmate-issue-refinement` / `cmate-task-contract` |
+| **Skills** | Install and update from the official Catalog (`commandmate skill list` / `install` / `update`, [guide](../user-guide/skills.md), Japanese) |
+| **Parallel execution** | An independent session per worktree, across several CLIs (claude / codex / gemini / vibe-local / opencode / copilot / antigravity) |
+| **Independent verification** | `.commandmate/verify.yaml`, `commandmate verify` / `wait --verify`, exit 0 / 20 / 21 ([design](../design/verification-config.md), Japanese) |
+| **Evidence** | work-evidence and scope gates, `commandmate verify history` / `task show`, `commandmate report metrics` |
+| **PR workflow** | Skills `cmate-orchestrate` / `cmate-acceptance-test`, `/create-pr` |
+
+Three notes.
+
+**A contract is a snapshot taken at send time.** The contents of the yaml at the moment you ran
+`commandmate send --contract` are what that task is judged against. Editing the yaml afterwards
+changes nothing until you re-cut the task with another `send --contract`.
+
+**The verdict is always the real exit code.** Grepping the output to decide pass or fail hides
+`$?`. `0` is a pass, `20` means a gate failed, and `21` means there is no evidence of work at all
+(nothing was ever started). "We could not judge" and "we judged it and it failed" stay distinct.
+
+**Evidence is readable afterwards.** `verify history` shows which verification run failed, when
+and on what; `task show` shows which contract asked for what; `report metrics` shows the success
+rate and how often a human had to step in.
 
 ---
 
-## In Closing
+## Who This Reaches
 
-> **"Development is a part of life, not all of it."**
+**Someone without the expertise still arrives at the same result, as long as they ride the
+system.** That is how the audience is cut: not by job title or years of experience, but only by
+whether you ride the system.
 
-CommandMate is a tool for achieving harmony between development and life.
+- **People about to build a product with AI** — the contract and `verify.yaml` state what to verify and how
+- **People who want consistent quality across a team** — ship the method as a Skill and the steps stay the same when the person changes
+- **People running several tasks at once** — one worktree and one contract per task, running in parallel without bleeding into each other
 
-Even if you have a job, a family, hobbies. You can cherish all of them while continuing to develop at your own pace.
-
-That is the Vibe Coding lifestyle we aspire to.
+On top of that, CommandMate is built so you can **keep hold of the reins without sitting at your
+PC**. When an agent starts waiting for input it reaches you through a badge, a toast, the tab
+title and a push notification, and you can answer straight from your phone's browser. Not having
+a large block of time does not turn waiting into a stop. This is not the centre of the value —
+it is the condition that lets the centre hold.
 
 ---
 
-*Built with ❤️ for Vibe Coders everywhere*
+## Related Documents
+
+| Document | Contents |
+|---|---|
+| [Public messaging spec](../design/public-messaging.md) | Single source for public wording: hero, definition, four cards, With / Without, banned terms (Japanese) |
+| [Task Contract design](../design/task-contract.md) | Contract file format and how it is judged (Japanese) |
+| [Verification config design](../design/verification-config.md) | `.commandmate/verify.yaml` and the gate specification (Japanese) |
+| [Skills guide](../user-guide/skills.md) | Installing and updating Skills from the Catalog (Japanese) |
+| [Tutorial](./user-guide/tutorial.md) | Work through contract to verification in fifteen minutes on a sample repository |
+| [Quick Start](./user-guide/quick-start.md) | The development flow in five minutes |
+| [Architecture](./architecture.md) | System design |
+
+---
+
+MIT License. CommandMate is released as open source.
