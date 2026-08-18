@@ -1,37 +1,38 @@
+# cm-02 — Session status at a glance (Issue #1811).
+#
+# The cut ends on the Review screen rather than on the branch list a second
+# time: the claim is "you can see what needs you without opening a session",
+# and /review?filter=approval is the surface that collects exactly that across
+# worktrees.
+#
+# The Review beat gets almost the whole cut for a mechanical reason. compose.sh
+# keeps the *tail* of an over-long take, and this take ends on the list the row
+# has just left; a short slot would therefore show only the empty list, which is
+# the one thing the telop is not about. At 14s the slot is roughly the take, so
+# the beat opens on the approval card itself.
+#
+# `review-screen` answers the approval, so it is this cut's only approval
+# consumer and it sits after the send that paints the prompt.
+
 version: 1
 duration: 20
 output: cm-02-status-at-a-glance
 scenes:
-  - id: sessions-overview
-    type: record
-    duration: 4
-    viewport: pc
-    telop:
-      ja: "どれが止まってるか一目で"
-      en: "See which agent is stuck"
   - id: send-and-generate
     type: record
-    duration: 8
+    duration: 4
     viewport: pc
     telop:
-      ja: "状態は色で分かる"
-      en: "Status you can read by color"
-  - id: respond-from-mobile
+      ja: "実行中は色で分かる"
+      en: "Running shows up in colour."
+  - id: review-screen
     type: record
-    duration: 4
-    viewport: mobile
+    duration: 14
+    viewport: pc
     telop:
-      ja: "待機中はすぐ気づける"
-      en: "Spot a waiting agent instantly"
-  - id: complete
-    type: record
-    duration: 3
-    telop:
-      ja: "確認は一覧だけでいい"
-      en: "One dashboard, every session"
+      ja: "承認待ちは Review に集まる"
+      en: "Approvals collect on the Review screen."
   - id: outro
     type: card
-    duration: 1
-    telop:
-      ja: "github.com/Kewton/CommandMate"
-      en: "github.com/Kewton/CommandMate"
+    duration: 2
+    telop: { ja: "github.com/Kewton/CommandMate", en: "github.com/Kewton/CommandMate" }

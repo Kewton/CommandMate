@@ -330,9 +330,10 @@ describe('every storyboard committed to the repository', () => {
   });
 
   it('finds every storyboard, so the per-file check below cannot be vacuous', () => {
-    // 10 product-highlight cuts + 5 tutorial cuts + the skill's default and
-    // contract-verify cuts in both install roots.
-    expect(files.length).toBe(19);
+    // 12 product-highlight cuts (#1811 added contract-verify and install-skill)
+    // + 5 tutorial cuts + the skill's default and contract-verify cuts in both
+    // install roots.
+    expect(files.length).toBe(21);
   });
 
   const parseCommitted = (relative: string) =>

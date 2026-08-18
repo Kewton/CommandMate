@@ -1,37 +1,28 @@
+# cm-04 — Multi-agent support (Issue #1811).
+#
+# The agent tabs are on screen for the whole send beat, which is why that beat
+# carries most of the cut. The act of switching tabs is still not filmed — there
+# is no scene for it — and product-highlights keeps saying so.
+
 version: 1
 duration: 20
 output: cm-04-multi-agent
 scenes:
   - id: sessions-overview
     type: record
-    duration: 4
+    duration: 5
     viewport: pc
     telop:
-      ja: "エージェントは1つに絞らない"
-      en: "Do not commit to one agent"
+      ja: "エージェントは 1 つに絞らない"
+      en: "Do not lock into one agent."
   - id: send-and-generate
     type: record
-    duration: 7
+    duration: 13
     viewport: pc
     telop:
-      ja: "Claude Code をそのまま"
-      en: "Run Claude Code as-is"
-  - id: respond-from-mobile
-    type: record
-    duration: 5
-    viewport: mobile
-    telop:
-      ja: "タブで切り替えるだけ"
-      en: "Switching is one tab away"
-  - id: complete
-    type: record
-    duration: 3
-    telop:
-      ja: "1つの画面に集約"
-      en: "All of them, one screen"
+      ja: "Claude Code をそのまま動かす"
+      en: "Run Claude Code as it is."
   - id: outro
     type: card
-    duration: 1
-    telop:
-      ja: "github.com/Kewton/CommandMate"
-      en: "github.com/Kewton/CommandMate"
+    duration: 2
+    telop: { ja: "github.com/Kewton/CommandMate", en: "github.com/Kewton/CommandMate" }

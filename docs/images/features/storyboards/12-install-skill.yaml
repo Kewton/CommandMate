@@ -1,0 +1,38 @@
+# cm-12 — Method as a system (Issue #1811).
+#
+# `install-skill` is the one scene that needs the network: the Catalog URL is a
+# compile-time constant behind an exact-match allowlist and cannot be pointed at
+# a local fixture. When it is unreachable the recorder reports a skip with its
+# reason instead of filming an empty panel.
+#
+# The palette beat closes the loop: the method is installed, and then it is
+# there to call. Escape is pressed rather than Enter — the cut never runs one.
+
+version: 1
+duration: 20
+output: cm-12-install-skill
+scenes:
+  - id: title
+    type: card
+    duration: 3
+    telop:
+      ja: "方法論を、仕組みに"
+      en: "Method as a system."
+  - id: install-skill
+    type: record
+    duration: 9
+    viewport: pc
+    telop:
+      ja: "Catalog から Skill を導入"
+      en: "Install a Skill from the Catalog."
+  - id: slash-palette
+    type: record
+    duration: 6
+    viewport: pc
+    telop:
+      ja: "以後はコマンドで呼べる"
+      en: "From then on it is a command."
+  - id: outro
+    type: card
+    duration: 2
+    telop: { ja: "github.com/Kewton/CommandMate", en: "github.com/Kewton/CommandMate" }
