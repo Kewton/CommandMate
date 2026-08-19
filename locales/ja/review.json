@@ -9,7 +9,6 @@
     "template": "テンプレート"
   },
   "status": {
-    "done": "完了",
     "inReview": "レビュー中",
     "approval": "承認待ち",
     "stalled": "停滞"

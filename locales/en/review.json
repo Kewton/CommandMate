@@ -9,7 +9,6 @@
     "template": "Template"
   },
   "status": {
-    "done": "Done",
     "inReview": "In Review",
     "approval": "Approval",
     "stalled": "Stalled"
