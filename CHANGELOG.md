@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `docs/design/discoverability-principle.md` の「運用者が読む層」に Web UI を追加し、
     実装規約に「新しい判定は CLI と Web UI の両方に出す」を追加
 
+### Changed
+
+- **ci: 全ワークフローの全ジョブに `timeout-minutes` を設定する** (#1830): GitHub Actions の既定タイムアウトは 360 分（6 時間）で、`ci-pr.yml`（11 ジョブ）/ `pages.yml` / `publish.yml` には `timeout-minutes` が 1 つも無かった。2026-08-19 に develop の run `32218070769` で `E2E Tests` が `Install Playwright browser` のまま **88 分**ハングし、手動キャンセル → `gh run rerun --failed` で 6 分 47 秒で success（CDN 由来の一過性）。値は直近 12 ランの成功ジョブの実測（median / max）から **`max × 2`・最低 10 分**で決め、根拠は各ジョブのコメントに残した（E2E 6.2m/16.2m → 30、Unit Tests 12.3m/13.2m → 30、他は 10）。`publish.yml` は実測 median 14.3m / max 16.0m（n=10）が存在したため Issue 記載の 20 分ではなく **30 分**とした。あわせて、自前で外部からバイトを取得するステップ（`npm ci` / `npx playwright install` / `apt-get install` / `npm install` / `npm audit` / `npm publish`）にステップ単位の `timeout-minutes` を付け、タイムアウト時に「どのステップで詰まったか」がログから読めるようにした。`tests/unit/guards/workflow-timeouts.test.ts` が、ジョブの付け漏れ・360 分以上の無意味な値・ジョブ上限以上の死んだステップ上限・未設定のインストールステップを赤にする
+
 ### Documentation
 
 - **docs(tutorial): 契約 → 検証ループを体験する構成へ改稿し、GIF 8 本を v0.24 の UI で撮り直す** (#1813): ja / en のチュートリアルを Fork → 登録 → Skill 導入 → **ゲートを赤で確認（exit 20）** → 契約を渡して判定（exit 0）→ 2 契約を並列 → 証跡 の 8 ステップへ改稿し、各ステップに「エンジニアならここで何を気にするか」を 1 行添えた。旧 §1.5 の誤記（「Skill は同じ場所へ入れ直せない」＝ #1243 / #1244 以降は誤り、install 先が 1 ディレクトリ）を、更新フロー・`.agents/skills` と `.claude/skills` の 2 ディレクトリ・再起動が要る理由に置き換えた。GIF は 8 本 × ja / en を隔離環境で撮り直し（旧 5 本 × 2 は削除）、絵コンテを `docs/images/tutorial/storyboards/01…08-*.yaml` に差し替えた。demo-video スキルには `verify-red` と `evidence` の 2 シーン（`cli-scene.sh --mode`）を追加している。掲載する出力はすべて実機の実測値で、`commandmate verify <id>`（ゲート無指定）が work-evidence で **exit 21** を返すこと、`wait --verify` は**開いている契約**に対してのみ契約ゲートで判定することも本文に明記した
