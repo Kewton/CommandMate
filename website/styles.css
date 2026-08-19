@@ -189,9 +189,20 @@ a {
 }
 
 .lede {
-  margin: 0 0 1.75rem;
+  margin: 0 0 1rem;
   font-size: 1.15rem;
   color: var(--fg-muted);
+}
+
+/* The definition sentence, verbatim from docs/design/public-messaging.md §2.
+   It sits at full contrast rather than muted: it is the one line every surface
+   repeats, so on the LP it reads as a statement and not as sub-copy. */
+.definition {
+  margin: 0 0 1.75rem;
+  padding-left: 0.9rem;
+  border-left: 3px solid var(--accent);
+  color: var(--fg);
+  font-size: 1rem;
 }
 
 .install {
@@ -313,6 +324,83 @@ a {
   background: var(--bg-subtle);
 }
 
+/* ---------- hero loop diagram ---------- */
+
+/* The hero drawing is inline SVG so that these rules reach it, and every ink in
+   it is a custom property. That is the whole point: a literal colour here is how
+   a diagram ends up perfectly legible in the theme its author had open and
+   invisible in the other one. Nothing below may be a hex, rgb() or named colour
+   (tests/unit/website/landing-page.test.ts pins that). */
+.loop-diagram {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.loop-diagram text {
+  font-family: inherit;
+  text-anchor: middle;
+}
+
+.loop-diagram .node rect {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+
+/* CommandMate is the node the reader is being told about, so it is the one that
+   carries the accent. --fg and --fg-muted both clear 4.5:1 on --accent-subtle in
+   either theme, which is why the text classes below need no variant. */
+.loop-diagram .node-accent rect {
+  fill: var(--accent-subtle);
+  stroke: var(--accent);
+}
+
+.loop-diagram .node-title {
+  fill: var(--fg);
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.loop-diagram .node-sub {
+  fill: var(--fg-muted);
+  font-size: 11px;
+}
+
+.loop-diagram .edge {
+  stroke: var(--fg-muted);
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.loop-diagram .arrowhead {
+  fill: var(--fg-muted);
+}
+
+.loop-diagram .edge-label {
+  fill: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.loop-diagram .label-start {
+  text-anchor: start;
+}
+
+.loop-diagram .label-end {
+  text-anchor: end;
+}
+
+/* The drawing is the whole width of its column on a phone, where 400 user units
+   render at roughly 335 CSS px. Capping it on wide screens keeps the type from
+   ballooning past the hero copy beside it. */
+@media (min-width: 901px) {
+  .loop-diagram {
+    max-width: 30rem;
+    margin-left: auto;
+  }
+}
+
 /* ---------- sections ---------- */
 
 .section {
@@ -371,6 +459,99 @@ a {
   border-radius: var(--radius);
   color: var(--fg);
   font-size: 0.9rem;
+}
+
+/* ---------- the loop ---------- */
+
+/* Two columns at --maxw, so the four beats land 2x2. A 17rem floor gave three
+   columns and left the fourth beat alone under a row whose height was set by
+   the two code snippets in beat 2 — a screenful of empty card. 22rem is also
+   what keeps `GATE work-evidence PASS (commits=0, uncommitted=1)` inside the
+   snippet box instead of behind its scrollbar. */
+.beats {
+  list-style: none;
+  counter-reset: beat;
+  margin: 2rem 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.beats > li {
+  counter-increment: beat;
+  padding: 1.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  /* A grid item's automatic minimum is its content's min-content width, which a
+     snippet line would set to the width of its longest command. Without this the
+     card stops scrolling its own code and widens the page instead. */
+  min-width: 0;
+}
+
+.beats h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.beats h3::before {
+  content: counter(beat);
+  display: inline-grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  margin-right: 0.55rem;
+  vertical-align: -0.35rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 0.82rem;
+}
+
+.beats p {
+  margin: 0.9rem 0 0;
+  color: var(--fg-muted);
+  font-size: 0.94rem;
+}
+
+.beats h3 + p {
+  margin-top: 0;
+}
+
+.beats .beat-quote {
+  padding-left: 0.85rem;
+  border-left: 3px solid var(--border);
+  color: var(--fg);
+  font-style: italic;
+}
+
+.beats .snippet-label {
+  margin-top: 1rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* Code the reader is meant to read rather than run, so no copy button and no
+   `$ ` injected by CSS — the shell prompt is part of the text where it belongs. */
+.snippet {
+  margin: 0.45rem 0 0;
+  padding: 0.8rem 0.9rem;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-x: auto;
+  color: var(--fg);
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+.snippet code {
+  font-size: inherit;
 }
 
 /* ---------- quick start tracks ---------- */
@@ -538,6 +719,15 @@ a {
   font-size: 0.9rem;
 }
 
+/* The box below it holds the upstream URL, which is the thing to fork — not the
+   thing to paste. Without a label the reader pastes the wrong URL and their
+   commits point at someone else's repository. */
+.tutorial-label {
+  margin: 0 0 0.5rem;
+  color: var(--fg-muted);
+  font-size: 0.88rem;
+}
+
 /* ---------- feature demos ---------- */
 
 .demos {
@@ -570,8 +760,11 @@ a {
 /* ---------- gallery ---------- */
 
 .gallery {
+  /* 15rem rather than 13: it lands on four columns at --maxw, which is what
+     makes the two wide shots fill the first row and the three phone shots the
+     second, instead of leaving a wide shot orphaned on a row of its own. */
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
   gap: 1.25rem;
   align-items: start;
 }
@@ -605,7 +798,7 @@ a {
   font-size: 0.85rem;
 }
 
-/* ---------- comparison table ---------- */
+/* ---------- with / without table ---------- */
 
 .table-scroll {
   overflow-x: auto;
@@ -645,15 +838,44 @@ a {
   color: var(--fg-muted);
 }
 
-.compare td.yes {
-  color: var(--fg);
-  font-weight: 600;
-  background: var(--accent-subtle);
-}
-
 .compare tbody tr:last-child th,
 .compare tbody tr:last-child td {
   border-bottom: 0;
+}
+
+/* Three columns of sentences rather than a grid of Yes/No, so the cells are
+   read left-to-right and the table needs far less width before it stops being
+   worth scrolling. */
+.compare-prose {
+  min-width: 34rem;
+}
+
+.compare-prose th,
+.compare-prose td {
+  text-align: left;
+  vertical-align: top;
+}
+
+.compare-prose thead th,
+.compare-prose tbody th[scope="row"] {
+  white-space: normal;
+}
+
+.compare-prose thead th:last-child {
+  color: var(--fg);
+}
+
+.compare-prose td.with {
+  color: var(--fg);
+  background: var(--accent-subtle);
+}
+
+.compare-prose code {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.05rem 0.3rem;
+  white-space: nowrap;
 }
 
 /* ---------- closing ---------- */
@@ -707,11 +929,18 @@ a {
   text-decoration: underline;
 }
 
-.copyright {
+.attribution {
   max-width: var(--maxw);
   margin: 2rem auto 0;
   padding-top: 1.5rem;
   border-top: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-size: 0.82rem;
+}
+
+.copyright {
+  max-width: var(--maxw);
+  margin: 0.5rem auto 0;
   color: var(--fg-muted);
   font-size: 0.82rem;
 }

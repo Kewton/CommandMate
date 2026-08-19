@@ -11,8 +11,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **feat(demo-video): 新シーン・code card・静止画生成を追加する** (#1810): `contract-verify`（tmux pane を収録し、`send --contract` → `wait --verify` の `GATE` / `RESULT` / 終了コードを**実ゲートの実 exit code のまま**映す）・`attention-badge`・`review-screen`・`slash-palette`・`install-skill` の 5 シーン、絵コンテの `type: code`（ファイルを組版する静止カード。`source` は絵コンテのディレクトリ配下に閉じることを解決後のパスで検証）、および LP / README 用の静止画 5 点を同じ隔離環境から機械生成する `stills.ts`（バイト予算はゲートで、収まらなければ**書かずに落ちる**）
 
+
+- **feat(ui): 実行契約と検証結果を Web UI に露出する** (#1816)
+  - **worktree 詳細ヘッダに状態チップを追加。** task 行を持つ worktree に限り、直近 task の
+    title・TaskStatus・直近検証ランの `RESULT` を表示する。判定の**理由**（不合格ゲートの ID
+    一覧まで）を `aria-label` と `title` の両方に出すため、ポインタでもスクリーンリーダーでも
+    ペインを開かずに読める（`docs/design/discoverability-principle.md` 実装規約 1）
+  - **Activity Bar に「Verification」ペインを追加**（スマホは Tools タブの「検証」サブタブ）。
+    上段=現在の契約（title / goal 冒頭 / `scope.allow` / `verify.gates` / `autoYes.mode`）、
+    中段=検証ラン一覧＋「再検証」、下段=選択ランのゲート表（gate id / PASS・FAIL・TIMEOUT・SKIP /
+    exit code / duration / logTail 末尾 40 行＝CLI の `MAX_PRINTED_LOG_TAIL_LINES` と同値）。
+    契約が無い worktree には `commandmate send --contract` と Skill `cmate-task-contract` を案内する
+    空状態文を出す
+  - **新しい API は 1 つも追加していない。** #1542 / #1543 / #1545 で既に在った
+    `GET /api/worktrees/:id/tasks`、`GET|POST /verify`、`GET /verify/runs[/:runId]` の配線のみ
+  - **独自のポーリングタイマーを増やしていない。** worktree 詳細が既に回している 2s/5s の
+    ポーリング末尾で `pollTick` を上げ、`useWorktreeVerification` がそれに相乗りする
+    （通常は 15s スロットル、`running` ラン中はティックごと）。ヘッダチップと Verification ペインは
+    同じフックの 1 インスタンスを共有するので、2 面同時表示でも要求は倍にならない
+  - en の `RESULT` / `GATE` 語彙は `docs/design/verification-config.md` §3.4 に合わせた
+    （`passed` / `failed` / `not_started`、`PASS` / `FAIL` / `TIMEOUT` / `SKIP`）。
+    tests/unit/i18n/verification-keys-1816.test.ts が en/ja のキー等価と語彙一致を固定する
+  - `docs/design/discoverability-principle.md` の「運用者が読む層」に Web UI を追加し、
+    実装規約に「新しい判定は CLI と Web UI の両方に出す」を追加
+
 ### Documentation
 
+- **LP（`website/`）を Vibe Engineering 軸の v2 へ作り替え** (#1812): 文言は `docs/design/public-messaging.md` からコピーし（hero H1・定義文・4 カード・With / Without 7 行・キャプション・footer タグライン）、独自に言い換えていない。hero の静止画は**ループ図の inline SVG**（要求 → CommandMate → Coding Agent → 検証された成果物、色はすべて CSS 変数で light / dark 追従、`role="img"` ＋ `aria-label`）へ差し替え、ダッシュボード静止画は Gallery 先頭へ移した（og:image は引き続き同ファイル。SVG は social preview に描画されないため）。契約 → 実行 → 検証の 4 拍を実物のコード片（`Kewton/commandmate-tutorial` の `verify.yaml` / `tasks/fix-shout.yaml`、`GATE` / `RESULT` / `exit 0`）で見せる `#loop` 節を新設。競合 4 製品名の比較表（`#comparison`）は `#with-without` へ置換し、ナビも差し替えた。デモは `docs/images/features/` の `cm-11` / `cm-03` / `cm-01` / `cm-12` の en 版を **byte-for-byte コピー**した 4 本に入れ替え（`cmp` で確認、旧 3 本は削除）、Track A のセットアップ質問を実装どおり 5 項目（`CM_BROWSE_ROOTS` を含む）に、チュートリアル導線を 15 分・fork してから・契約 → 検証へ直した。ガードは `website/**` からの禁止語一掃・定義文の逐語一致・`#with-without` 7 行・byte-for-byte・hero SVG の色がすべて CSS 変数であること、を追加した
 - **README のデモ GIF 2 本を隔離環境の素材へ差し替え、旧 `demo-*.mp4` を削除** (#1815): `docs/images/demo-desktop.gif` は `cm-11-contract-verify.en.mp4` の 0〜18 秒（title カード → 契約 YAML → `verify.yaml` → 実ゲートの `GATE` 3 行・`RESULT passed`・`0`。outro の URL カードは README では冗長なので落とした）、`docs/images/demo-mobile.gif` は `cm-03-never-miss-waiting.en.mp4` の `respond-from-mobile`（14〜18 秒）を 1280x800 の合成から **520x800 に切り抜いた**もの。切り抜き幅はスマホ枠（実測 x=455..824 の 370px）ではなく**テロップ帯の文字幅**で決めた — 枠幅で切ると "Answer from your phone." が途中で切れ、帯の全幅（x=343..935 の 594px）で切るとスマホが 187px まで縮んで画面の字が読めなくなる（3 案を出力解像度のまま描画して比較した）。生成は `.claude/skills/video-to-gif/scripts/to-gif.sh` に**現行バイト数をそのまま予算として渡し**（desktop 1,929,059 / mobile 4,230,486）、両方とも rung 1（600px / 300px・10fps・256 色）で収まった: **desktop 909,922 バイト（現行の 47%）・mobile 180,521 バイト（同 4%）**、どちらも GIF89a。旧素材に映っていた私有情報（私有リポジトリ名 6 件・LAN IP `192.168.11.6:3001`・旧製品名）は隔離環境の seed（`cmdemo-app` / `wt-dark-mode` / `feature/demo-dark-mode`）に置き換わっている。確認は代表フレームの目視だけで止めず、**出荷される GIF から全 220 フレーム（desktop 180 / mobile 40）を復号して tesseract で OCR し**、私有リポジトリ名・個人パス（`/Users/`）・プライベート IP・旧製品名・ポート番号のパターンに 1 件もヒットしないことを実測した。未参照のまま残っていた旧 `demo-desktop.mp4`（22,674,969 バイト）/ `demo-mobile.mp4`（47,195,161 バイト）は削除し、`git ls-files docs/images | grep demo-` を GIF 2 本だけにした。README（EN / JA）の `alt` は "CommandMate Desktop Demo" のような何も説明しない文字列をやめ、`docs/design/public-messaging.md` §5 / §6 の確定語彙に合わせて映像の内容を書いた
 
 - **特徴デモ 12 本を新シーンで撮り直し、product-highlights を Vibe Engineering 軸へ更新** (#1811): 絵コンテ 12 本（`cm-11-contract-verify` / `cm-12-install-skill` を新設）を書き直し、48 ファイル（12 × ja/en × gif/mp4）を隔離環境から一度に撮り直した。旧 10 本は同一 4 シーンの使い回しで、`cm-01` と `cm-08` の 9 秒地点が SSIM 0.970（ほぼ同一フレーム）だったのに対し、新しい 5 本（`cm-01` / `cm-03` / `cm-09` / `cm-11` / `cm-12`）は代表フレームの総当たり SSIM が最大 0.828・最小 0.080 まで離れている。`cm-11` は tmux ペインを収録し、実ゲートの `GATE work-evidence / scope / unit PASS` ・ `RESULT passed` ・ `0` をそのまま映す。product-highlights（ja / en）は "control plane" を除いて `docs/design/public-messaging.md` の定義文と 4 段の梯子に差し替え、11・12 を先頭に置いた 12 見出し構成（ja / en 一致）にし、「デモが映している範囲」を実際のシーン構成へ更新した
@@ -22,6 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **README（EN / JA）の hero・Key Features・ワークフロー節・比較表を Vibe Engineering 軸へ整合** (#1814): hero を `docs/design/public-messaging.md` の H1 ＋定義文に差し替え、Key Features 先頭に Task Contract / Verification Gates / Evidence & Metrics / Skills Catalog / 入力待ち通知の 5 行を追加し、Multi-Agent 行を 7 CLI（`CLI_TOOL_IDS` 実数）へ更新した。「Optional Workflow Layer」は `## Vibe Engineering workflow` へ昇格して "optional, not required" を削除し、公式 Catalog Skill と `send --contract` → `wait --verify` の最小コマンド列で説明する構成に変えた（`.claude/commands` 表はこのリポジトリ限定である旨を明記して 1 行リンクへ縮退）。競合 4 製品名の比較表は With / Without CommandMate 表に置換。ガード `tests/unit/docs/public-messaging.test.ts` の対象に両 README を追加した
 
 - **Mission / Vision を `docs/concept.md` / `docs/en/concept.md` に正本化し、公開面の文言表 `docs/design/public-messaging.md` を新設** (#1808): hero・定義文・4 カード・With / Without 表・デモのキャプションとテロップ・チュートリアル導入文・footer タグライン・禁止語リストを ja / en 両方で確定した。軸語 "Vibe Engineering" の一次情報（Simon Willison, 2025-10-07）を実際に確認し出典として記録。禁止語リストはガードテスト `tests/unit/docs/public-messaging.test.ts` の配列と一致していることを固定している
+
+- **docs(en): verify / task / skills / hooks の英語ドキュメントを JA と同構成に整備** (#1817) — `docs/en/user-guide/cli-operations-guide.md` に `sync` / `verify` / `task`（実行契約・`gateDefinitions`・無人実行テンプレート）/ 読むモード / `instances` / マルチセッション / `skill` / `report metrics` の各節を追加し、`docs/en/user-guide/skills.md` と `docs/en/user-guide/agent-event-hooks.md` を新規作成。EN `commands-guide.md` に「このリポジトリ限定」の明記と全 27 コマンド表を追加し、`tests/unit/docs/ja-en-heading-parity.test.ts` が 4 対の ja/en で `##` 見出し数の一致を固定する
 
 ### Fixed
 
@@ -54,32 +81,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 隔離環境（`HOME` 差し替え・ポート 3466・`$HOME/.commandmate-demo`）で
     `demo-video.sh --locale en` を通しで完走させ、尺検証ゲートの通過を確認済み
 
-### Added
-
-- **feat(ui): 実行契約と検証結果を Web UI に露出する** (#1816)
-  - **worktree 詳細ヘッダに状態チップを追加。** task 行を持つ worktree に限り、直近 task の
-    title・TaskStatus・直近検証ランの `RESULT` を表示する。判定の**理由**（不合格ゲートの ID
-    一覧まで）を `aria-label` と `title` の両方に出すため、ポインタでもスクリーンリーダーでも
-    ペインを開かずに読める（`docs/design/discoverability-principle.md` 実装規約 1）
-  - **Activity Bar に「Verification」ペインを追加**（スマホは Tools タブの「検証」サブタブ）。
-    上段=現在の契約（title / goal 冒頭 / `scope.allow` / `verify.gates` / `autoYes.mode`）、
-    中段=検証ラン一覧＋「再検証」、下段=選択ランのゲート表（gate id / PASS・FAIL・TIMEOUT・SKIP /
-    exit code / duration / logTail 末尾 40 行＝CLI の `MAX_PRINTED_LOG_TAIL_LINES` と同値）。
-    契約が無い worktree には `commandmate send --contract` と Skill `cmate-task-contract` を案内する
-    空状態文を出す
-  - **新しい API は 1 つも追加していない。** #1542 / #1543 / #1545 で既に在った
-    `GET /api/worktrees/:id/tasks`、`GET|POST /verify`、`GET /verify/runs[/:runId]` の配線のみ
-  - **独自のポーリングタイマーを増やしていない。** worktree 詳細が既に回している 2s/5s の
-    ポーリング末尾で `pollTick` を上げ、`useWorktreeVerification` がそれに相乗りする
-    （通常は 15s スロットル、`running` ラン中はティックごと）。ヘッダチップと Verification ペインは
-    同じフックの 1 インスタンスを共有するので、2 面同時表示でも要求は倍にならない
-  - en の `RESULT` / `GATE` 語彙は `docs/design/verification-config.md` §3.4 に合わせた
-    （`passed` / `failed` / `not_started`、`PASS` / `FAIL` / `TIMEOUT` / `SKIP`）。
-    tests/unit/i18n/verification-keys-1816.test.ts が en/ja のキー等価と語彙一致を固定する
-  - `docs/design/discoverability-principle.md` の「運用者が読む層」に Web UI を追加し、
-    実装規約に「新しい判定は CLI と Web UI の両方に出す」を追加
-
-- **docs(en): verify / task / skills / hooks の英語ドキュメントを JA と同構成に整備** (#1817) — `docs/en/user-guide/cli-operations-guide.md` に `sync` / `verify` / `task`（実行契約・`gateDefinitions`・無人実行テンプレート）/ 読むモード / `instances` / マルチセッション / `skill` / `report metrics` の各節を追加し、`docs/en/user-guide/skills.md` と `docs/en/user-guide/agent-event-hooks.md` を新規作成。EN `commands-guide.md` に「このリポジトリ限定」の明記と全 27 コマンド表を追加し、`tests/unit/docs/ja-en-heading-parity.test.ts` が 4 対の ja/en で `##` 見出し数の一致を固定する
 
 ## [0.24.0] - 2026-08-16
 

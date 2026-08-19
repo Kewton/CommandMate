@@ -3,10 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>CommandMate — Orchestrate your agent CLIs, not your terminal tabs</title>
+    <title>CommandMate — From vibe coding to Vibe Engineering</title>
+    <!-- Copy on this page comes from docs/design/public-messaging.md (Issue #1808).
+         It is the single source for every public surface, so wording is copied
+         from it rather than rephrased here — a paraphrase splits the LP from the
+         README and the tutorial, which is the failure that file exists to stop. -->
     <meta
       name="description"
-      content="CommandMate is a local control plane for agent CLIs. Run Claude Code, Codex, and Gemini CLI across Git worktrees in parallel, and steer every session from your desk or your phone."
+      content="Vibe Engineering — the AI does the building; the system, not your expertise, guarantees the engineering. Any coding agent turns your requirement into a verified result."
     />
     <link rel="canonical" href="https://kewton.github.io/CommandMate/" />
     <meta name="color-scheme" content="light dark" />
@@ -17,13 +21,16 @@
     <link rel="apple-touch-icon" href="assets/img/icon-192.png" />
 
     <!-- OGP. og:image must be absolute; every other asset here is relative
-         because the site is served from the /CommandMate/ sub-path. -->
+         because the site is served from the /CommandMate/ sub-path. The hero is
+         a drawing now, but the social card still has to be a raster: no browser
+         renders an inline SVG into a preview, so the dashboard screenshot from
+         the isolated environment stays the og:image (Issue #1272, #1810). -->
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://kewton.github.io/CommandMate/" />
-    <meta property="og:title" content="CommandMate — Orchestrate your agent CLIs, not your terminal tabs" />
+    <meta property="og:title" content="CommandMate — From vibe coding to Vibe Engineering" />
     <meta
       property="og:description"
-      content="A local control plane for agent CLIs. Run Claude Code, Codex, and Gemini CLI across Git worktrees in parallel, and steer every session from your phone."
+      content="Vibe Engineering — the AI does the building; the system, not your expertise, guarantees the engineering. Any coding agent turns your requirement into a verified result."
     />
     <meta property="og:image" content="https://kewton.github.io/CommandMate/assets/img/screenshot-desktop.webp" />
     <meta name="twitter:card" content="summary_large_image" />
@@ -38,8 +45,9 @@
       <nav class="nav" aria-label="Primary">
         <span class="wordmark">CommandMate</span>
         <div class="nav-links">
+          <a href="#loop">The loop</a>
           <a href="#quick-start">Quick start</a>
-          <a href="#comparison">Comparison</a>
+          <a href="#with-without">With / Without</a>
           <a href="https://github.com/Kewton/CommandMate">GitHub</a>
         </div>
       </nav>
@@ -50,8 +58,16 @@
       <section class="hero">
         <div class="hero-copy">
           <p class="status-pill">Status: Beta</p>
-          <h1>Orchestrate your agent CLIs,<br />not your terminal tabs.</h1>
-          <p class="lede">CommandMate is a local control plane for agent CLIs.</p>
+          <h1>From vibe coding to Vibe Engineering.</h1>
+          <p class="lede">
+            CommandMate builds the engineering discipline into the workflow: a contract before
+            the work, verification gates after it, evidence throughout. Any coding agent turns
+            your requirement into a verified result.
+          </p>
+          <p class="definition">
+            Vibe Engineering — the AI does the building; the system, not your expertise,
+            guarantees the engineering.
+          </p>
 
           <div class="install">
             <code class="install-cmd" id="install-cmd">npx commandmate@latest</code>
@@ -71,44 +87,170 @@
         </div>
 
         <figure class="hero-media">
-          <!-- The LCP element: no lazy loading, and width/height are the file's
-               intrinsic size so the box is reserved before the bytes land. This
-               is also the og:image, so what it shows is what social previews
-               show — keep it to CommandMate's own repository (Issue #1272). -->
-          <img
-            src="assets/img/screenshot-desktop.webp"
-            alt="CommandMate desktop dashboard listing worktree sessions and their status"
-            width="2560"
-            height="1600"
-            decoding="async"
-            fetchpriority="high"
-          />
+          <!-- The loop this page is about, drawn rather than asserted. Inline
+               so it inherits the page's own custom properties: every colour in
+               it is a CSS variable (see .loop-diagram in styles.css), which is
+               what makes it follow prefers-color-scheme instead of being legible
+               in one theme and invisible in the other. viewBox + width/height
+               reserve the box before layout, and role/aria-label make it one
+               image to a screen reader rather than a pile of stray labels. -->
+          <svg
+            class="loop-diagram"
+            viewBox="0 0 400 300"
+            width="400"
+            height="300"
+            role="img"
+            aria-label="The CommandMate loop, drawn as a cycle of four steps: a requirement becomes a contract; CommandMate sends that contract to any of seven coding agent CLIs; verification gates judge the work; and the verified result comes back with the evidence that feeds the next requirement."
+          >
+            <g class="node">
+              <rect x="8" y="18" width="150" height="70" rx="12" />
+              <text class="node-title" x="83" y="49">Requirement</text>
+              <text class="node-sub" x="83" y="68">one line in an issue</text>
+            </g>
+
+            <g class="node node-accent">
+              <rect x="242" y="18" width="150" height="70" rx="12" />
+              <text class="node-title" x="317" y="49">CommandMate</text>
+              <text class="node-sub" x="317" y="68">contract and gates</text>
+            </g>
+
+            <g class="node">
+              <rect x="242" y="212" width="150" height="70" rx="12" />
+              <text class="node-title" x="317" y="243">Coding agent</text>
+              <text class="node-sub" x="317" y="262">any of seven CLIs</text>
+            </g>
+
+            <g class="node">
+              <rect x="8" y="212" width="150" height="70" rx="12" />
+              <text class="node-title" x="83" y="243">Verified result</text>
+              <text class="node-sub" x="83" y="262">exit 0, plus evidence</text>
+            </g>
+
+            <line class="edge" x1="164" y1="53" x2="229" y2="53" />
+            <polygon class="arrowhead" points="240,53 229,48 229,58" />
+            <text class="edge-label" x="200" y="41">contract</text>
+
+            <line class="edge" x1="317" y1="94" x2="317" y2="199" />
+            <polygon class="arrowhead" points="317,210 312,199 322,199" />
+            <text class="edge-label label-end" x="309" y="153">send</text>
+
+            <line class="edge" x1="236" y1="247" x2="171" y2="247" />
+            <polygon class="arrowhead" points="160,247 171,242 171,252" />
+            <text class="edge-label" x="200" y="235">gates</text>
+
+            <line class="edge" x1="83" y1="206" x2="83" y2="101" />
+            <polygon class="arrowhead" points="83,90 78,101 88,101" />
+            <text class="edge-label label-start" x="91" y="153">evidence</text>
+          </svg>
         </figure>
       </section>
 
-      <!-- 2. Three value propositions -->
+      <!-- 2. The loop -->
+      <section class="section" id="loop" aria-labelledby="loop-h">
+        <h2 id="loop-h">The loop</h2>
+        <p class="section-lede">
+          Four beats, and the same four every time. What makes the result reliable is the loop,
+          not how much software engineering the person driving it happens to carry in their head.
+        </p>
+
+        <ol class="beats">
+          <li class="beat">
+            <h3>The requirement</h3>
+            <p>
+              It starts where every task starts: one sentence describing what should be true when
+              this is done. Nothing about the agent, the branch or the tooling yet.
+            </p>
+            <p class="beat-quote">
+              “<code>shout()</code> should return the greeting uppercased.
+              <code>npm run test:shout</code> currently fails.”
+            </p>
+          </li>
+
+          <li class="beat">
+            <h3>The contract</h3>
+            <p>
+              Before the work starts, the sentence is written down as a contract: what may be
+              touched, and which gates decide that it is finished. Two files, both in the
+              repository, both readable by a human.
+            </p>
+            <p class="snippet-label">.commandmate/verify.yaml</p>
+            <pre class="snippet"><code>version: 1
+gates:
+  - id: unit
+    command: npm test
+    timeoutSec: 120</code></pre>
+            <p class="snippet-label">.commandmate/tasks/fix-shout.yaml</p>
+            <pre class="snippet"><code>title: "shout() uppercases the greeting"
+scope:
+  allow: ["src/greet.js"]
+  deny: ["test/**", ".commandmate/**"]
+verify:
+  gates: [issue-shout]
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true</code></pre>
+          </li>
+
+          <li class="beat">
+            <h3>The agent runs</h3>
+            <p>
+              The contract is handed to whichever coding agent you want to use, in a Git worktree
+              of its own. Several tasks can run at once because none of them shares a working
+              directory, and you can watch any of them from a browser.
+            </p>
+            <pre class="snippet"><code>$ commandmate send wt-shout \
+    --contract .commandmate/tasks/fix-shout.yaml >task-id.txt
+Task created: 4d1f8b2a-6c07-4a5e-9f3b-27ac91e0d4c8
+Message sent.</code></pre>
+          </li>
+
+          <li class="beat">
+            <h3>The verdict</h3>
+            <p>
+              When the agent stops, the gates you declared run for real and the process exit code
+              is the answer — <code>0</code> passed, <code>20</code> a gate failed,
+              <code>21</code> nothing was actually done. Not the agent's own opinion of its work.
+            </p>
+            <pre class="snippet"><code>$ commandmate wait wt-shout --verify
+GATE work-evidence PASS (commits=0, uncommitted=1)
+GATE scope PASS (exit=0, 0.1s)
+GATE unit PASS (exit=0, 0.1s)
+RESULT passed
+$ echo $?
+0</code></pre>
+          </li>
+        </ol>
+      </section>
+
+      <!-- 3. Four cards -->
       <section class="section" aria-labelledby="why">
         <h2 id="why">What it gives you</h2>
         <div class="cards">
           <article class="card">
-            <h3>Parallel issue development</h3>
+            <h3>Method as a system</h3>
             <p>
-              One session per Git worktree, running in parallel. Multiple issues progress
-              simultaneously without interfering with each other.
+              The method is not in someone's head — it is installed as Skills and read by the
+              agent.
             </p>
           </article>
           <article class="card">
-            <h3>Steer from your phone</h3>
+            <h3>Verified, not vibe-checked</h3>
             <p>
-              Full session control from any browser. Monitor and steer from your desk or your phone —
-              review changes, answer prompts, send a screenshot with "fix this".
+              Gates you declared decide whether the work is done, and the exit code is the
+              verdict.
             </p>
           </article>
           <article class="card">
-            <h3>Across agent CLIs</h3>
+            <h3>Any agent, in parallel</h3>
             <p>
-              Choose Claude Code, Codex, Gemini, or local models per issue. CommandMate adds
-              orchestration on top of the CLIs you already use — it does not replace them.
+              One worktree and one contract per task, across seven agent CLIs and local models.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Stay in control, anywhere</h3>
+            <p>
+              When an agent needs you, it reaches you — badge, toast, tab title, push — and you
+              answer from your phone.
             </p>
           </article>
         </div>
@@ -118,7 +260,7 @@
         </p>
       </section>
 
-      <!-- 3. 60-second quick start -->
+      <!-- 4. 60-second quick start -->
       <section class="section" id="quick-start" aria-labelledby="quick-start-h">
         <h2 id="quick-start-h">Quick start, in 60 seconds</h2>
         <p class="section-lede">
@@ -150,7 +292,13 @@
               </li>
               <li>
                 <h4>Asks the setup questions</h4>
-                <p>Repository root, port, external access, database path.</p>
+                <!-- Five, not four: src/cli/commands/init.ts asks for additional
+                     browsable directories (CM_BROWSE_ROOTS) between the managed
+                     root and the port. -->
+                <p>
+                  Repository root, additional browsable directories, port, external access,
+                  database path.
+                </p>
               </li>
               <li>
                 <h4>Starts the server in the background</h4>
@@ -213,15 +361,18 @@
         </p>
       </section>
 
-      <!-- 4. Tutorial -->
+      <!-- 5. Tutorial -->
       <section class="section" id="tutorial" aria-labelledby="tutorial-h">
-        <h2 id="tutorial-h">Then try it on a real repository</h2>
+        <h2 id="tutorial-h">Then run the loop on a real repository</h2>
         <p class="section-lede">
-          A small repo with two failing tests left in on purpose. Hand it to an agent and you
-          will have used the whole loop — a session, a proxied dev server, and two worktrees
-          running side by side — in about ten minutes.
+          Use a sample repository with two bugs left in on purpose to work through the core of
+          CommandMate in about fifteen minutes. You fork the sample repository before you start,
+          so nothing you do can touch the original repository (upstream). You hand the agent a
+          contract before the work and let the verification gates judge it afterwards, and you
+          read the verdict off the real exit code.
         </p>
 
+        <p class="tutorial-label">The sample repository — fork this one first:</p>
         <div class="install install-sm install-wide">
           <code class="install-cmd install-url" id="tutorial-clone-url">https://github.com/Kewton/commandmate-tutorial.git</code>
           <button type="button" class="copy-btn" data-copy-target="tutorial-clone-url">
@@ -230,20 +381,57 @@
         </div>
 
         <p class="tutorial-note">
-          Paste it into <strong>Repositories → Add Repository → Clone URL</strong>, then follow the
-          <a href="https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/tutorial.md">four-step tutorial</a>.
-          No install, no dependencies.
+          Fork it on GitHub, then paste <strong>your fork's</strong> URL into
+          <strong>Repositories → Add Repository → Clone URL</strong> and follow the
+          <a href="https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/tutorial.md">tutorial</a>.
+          It ships its own <code>.commandmate/verify.yaml</code> and two task contracts, so the
+          gates are real from the first command. No install, no dependencies.
         </p>
       </section>
 
-      <!-- 5. Feature demos -->
+      <!-- 6. Feature demos -->
       <section class="section" id="demos" aria-labelledby="demos-h">
         <h2 id="demos-h">See it running</h2>
         <p class="section-lede">
-          Twenty seconds each, recorded against a throwaway repository with a stubbed agent.
+          Twenty seconds each, recorded against a throwaway repository with a stubbed agent. The
+          gates in the first one are executed for real, so the exit codes on screen are the ones
+          that run produced.
         </p>
 
         <div class="demos">
+          <figure class="demo">
+            <video
+              src="assets/media/contract-verify.mp4"
+              poster="assets/media/poster-contract-verify.webp"
+              autoplay
+              muted
+              loop
+              playsinline
+              preload="none"
+              width="1280"
+              height="800"
+              aria-label="A task contract and a verify.yaml, then a terminal running the gates and printing RESULT passed"
+            ></video>
+            <figcaption>
+              Hand the agent a contract before the work starts. Gates run, and the exit code is
+              the verdict.
+            </figcaption>
+          </figure>
+          <figure class="demo">
+            <video
+              src="assets/media/never-miss-waiting.mp4"
+              poster="assets/media/poster-never-miss-waiting.webp"
+              autoplay
+              muted
+              loop
+              playsinline
+              preload="none"
+              width="1280"
+              height="800"
+              aria-label="A session that stops for confirmation raises a needs-attention pill and a toast, and is answered from a phone"
+            ></video>
+            <figcaption>Waiting reaches you, and you answer from your phone.</figcaption>
+          </figure>
           <figure class="demo">
             <video
               src="assets/media/parallel-worktrees.mp4"
@@ -261,8 +449,8 @@
           </figure>
           <figure class="demo">
             <video
-              src="assets/media/status-at-a-glance.mp4"
-              poster="assets/media/poster-status-at-a-glance.webp"
+              src="assets/media/install-skill.mp4"
+              poster="assets/media/poster-install-skill.webp"
               autoplay
               muted
               loop
@@ -270,51 +458,96 @@
               preload="none"
               width="1280"
               height="800"
-              aria-label="Running, waiting and finished sessions distinguished at a glance"
+              aria-label="Installing a Skill from the official Catalog into a worktree, then calling it from the composer"
             ></video>
-            <figcaption>Running, waiting, finished — told apart at a glance.</figcaption>
-          </figure>
-          <figure class="demo">
-            <video
-              src="assets/media/approve-from-phone.mp4"
-              poster="assets/media/poster-approve-from-phone.webp"
-              autoplay
-              muted
-              loop
-              playsinline
-              preload="none"
-              width="1280"
-              height="800"
-              aria-label="Answering an agent's confirmation prompt from a phone"
-            ></video>
-            <figcaption>Answer the agent's prompt from your phone.</figcaption>
-          </figure>
-          <figure class="demo">
-            <video
-              src="assets/media/tmux-in-browser.mp4"
-              poster="assets/media/poster-tmux-in-browser.webp"
-              autoplay
-              muted
-              loop
-              playsinline
-              preload="none"
-              width="1280"
-              height="800"
-              aria-label="A tmux session driven from the browser terminal"
-            ></video>
-            <figcaption>Your tmux session, driven from the browser.</figcaption>
+            <figcaption>
+              The method is not in someone's head — it is installed as Skills and read by the
+              agent.
+            </figcaption>
           </figure>
         </div>
       </section>
 
-      <!-- 6. Screenshot gallery -->
+      <!-- 7. With / Without CommandMate -->
+      <section class="section" id="with-without" aria-labelledby="with-without-h">
+        <h2 id="with-without-h">With and without CommandMate</h2>
+        <p class="section-lede">
+          The comparison worth drawing is between two ways of working, not between products.
+        </p>
+        <div class="table-scroll" tabindex="0" role="region" aria-labelledby="with-without-h">
+          <table class="compare compare-prose">
+            <thead>
+              <tr>
+                <th scope="col">Dimension</th>
+                <th scope="col">Vibe coding</th>
+                <th scope="col">Vibe Engineering with CommandMate</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">What "done" means</th>
+                <td>The agent says it's done</td>
+                <td class="with">A verification run says so — exit 0 / 20 / 21</td>
+              </tr>
+              <tr>
+                <th scope="row">Scope of change</th>
+                <td>Whatever the agent touched</td>
+                <td class="with">Declared in the contract, enforced by the scope gate</td>
+              </tr>
+              <tr>
+                <th scope="row">Method</th>
+                <td>In someone's head</td>
+                <td class="with">
+                  Installed as Skills from the Catalog (<code>cmate-task-contract</code>,
+                  <code>cmate-verify</code>, …)
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Evidence</th>
+                <td>A chat transcript</td>
+                <td class="with">
+                  Commits, gate logs, <code>verify history</code>, <code>report metrics</code>
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Parallel work</th>
+                <td>Terminal tabs</td>
+                <td class="with">One worktree and one contract per task</td>
+              </tr>
+              <tr>
+                <th scope="row">When it stops</th>
+                <td>You notice, eventually</td>
+                <td class="with">Waiting is surfaced: badge, toast, tab title, push</td>
+              </tr>
+              <tr>
+                <th scope="row">Which agent</th>
+                <td>Locked to one</td>
+                <td class="with">
+                  Claude Code, Codex, Gemini CLI, Copilot, OpenCode, Antigravity, local models
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 8. Screenshot gallery -->
       <section class="section" aria-labelledby="gallery-h">
         <h2 id="gallery-h">On desktop and on mobile</h2>
         <p class="section-lede">
-          The same control plane in your browser, whichever screen you are on.
+          The same sessions in your browser, whichever screen you are on.
         </p>
 
         <div class="gallery">
+          <figure class="shot shot-wide">
+            <img
+              src="assets/img/screenshot-desktop.webp"
+              alt="CommandMate desktop dashboard listing worktree sessions and their status"
+              loading="lazy"
+              decoding="async"
+            />
+            <figcaption>Every session and its status, on one dashboard.</figcaption>
+          </figure>
           <figure class="shot shot-wide">
             <img
               src="assets/img/screenshot-worktree-desktop.webp"
@@ -354,75 +587,6 @@
         </div>
       </section>
 
-      <!-- 7. Comparison -->
-      <section class="section" id="comparison" aria-labelledby="comparison-h">
-        <h2 id="comparison-h">How it compares</h2>
-        <div class="table-scroll" tabindex="0" role="region" aria-labelledby="comparison-h">
-          <table class="compare">
-            <thead>
-              <tr>
-                <th scope="col">Feature</th>
-                <th scope="col">CommandMate</th>
-                <th scope="col">Remote Control (Official)</th>
-                <th scope="col">Happy Coder</th>
-                <th scope="col">claude-squad</th>
-                <th scope="col">Omnara</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <th scope="row">Auto Yes Mode</th>
-                <td class="yes">Yes</td><td>No</td><td>No</td><td>Yes (TUI only)</td><td>No</td>
-              </tr>
-              <tr>
-                <th scope="row">Git Worktree Management</th>
-                <td class="yes">Yes</td><td>No</td><td>No</td><td>Yes (TUI only)</td><td>No</td>
-              </tr>
-              <tr>
-                <th scope="row">Parallel Sessions</th>
-                <td class="yes">Yes</td><td>No (1 only)</td><td>Yes</td><td>Yes</td><td>No</td>
-              </tr>
-              <tr>
-                <th scope="row">Mobile Web UI</th>
-                <td class="yes">Yes</td><td>Yes (claude.ai)</td><td>Yes</td><td>No</td><td>Yes</td>
-              </tr>
-              <tr>
-                <th scope="row">File Viewer</th>
-                <td class="yes">Yes</td><td>No</td><td>No</td><td>No</td><td>No</td>
-              </tr>
-              <tr>
-                <th scope="row">Markdown Editor</th>
-                <td class="yes">Yes</td><td>No</td><td>No</td><td>No</td><td>No</td>
-              </tr>
-              <tr>
-                <th scope="row">Screenshot Instructions</th>
-                <td class="yes">Yes</td><td>No</td><td>No</td><td>Not possible</td><td>No</td>
-              </tr>
-              <tr>
-                <th scope="row">Scheduled Execution</th>
-                <td class="yes">Yes</td><td>No</td><td>No</td><td>No</td><td>No</td>
-              </tr>
-              <tr>
-                <th scope="row">Survives Laptop Close</th>
-                <td class="yes">Yes (daemon)</td><td>No (terminal must stay open)</td><td>Yes</td><td>Yes</td><td>Yes</td>
-              </tr>
-              <tr>
-                <th scope="row">Token Authentication</th>
-                <td class="yes">Yes</td><td>N/A (Anthropic account)</td><td>N/A (app)</td><td>No</td><td>N/A (cloud)</td>
-              </tr>
-              <tr>
-                <th scope="row">Free / OSS</th>
-                <td class="yes">Yes</td><td>Requires Pro/Max</td><td>Free + Paid</td><td>Yes</td><td>$20/mo</td>
-              </tr>
-              <tr>
-                <th scope="row">Runs 100% Locally</th>
-                <td class="yes">Yes</td><td>Via Anthropic API</td><td>Server-routed</td><td>Yes</td><td>Cloud fallback</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
       <!-- Closing CTA -->
       <section class="section closing">
         <h2>Start in one command</h2>
@@ -439,12 +603,12 @@
       </section>
     </main>
 
-    <!-- 8. Footer -->
+    <!-- 9. Footer -->
     <footer class="site-footer">
       <div class="footer-inner">
         <div class="footer-brand">
           <span class="wordmark">CommandMate</span>
-          <p>A local control plane for agent CLIs.</p>
+          <p>The method, built in — for any coding agent.</p>
         </div>
         <nav class="footer-links" aria-label="Footer">
           <a href="https://github.com/Kewton/CommandMate">GitHub</a>
@@ -453,6 +617,12 @@
           <a href="https://github.com/Kewton/CommandMate/blob/main/LICENSE">MIT License</a>
         </nav>
       </div>
+      <!-- The axis word is not ours, and a page that used it as if it were would
+           be claiming a coinage it does not hold (public-messaging.md §10). -->
+      <p class="attribution">
+        The term "vibe engineering" was coined by Simon Willison (2025).
+        <a href="https://simonwillison.net/2025/Oct/7/vibe-engineering/">Read the original post</a>.
+      </p>
       <p class="copyright">MIT License · Copyright (c) 2026 Kewton</p>
     </footer>
 
