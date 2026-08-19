@@ -478,7 +478,7 @@ const myState = globalThis.__myState ?? (globalThis.__myState = new Map<string, 
 | `src/components/notifications/AttentionBadgeController.tsx` | `useAttentionBadge` のマウント専用コンポーネント（Issue #1789、描画なし）。`WorktreesCacheProvider` の**内側**に置く必要がある（AppProviders 直下だと cache context が無く件数が恒久 0 になり機能全体が無言で死ぬ） |
 | `src/components/home/AssistantChatPanel.tsx` | Home画面アシスタントチャットパネル（折りたたみ可能・最大50vh・ポーリング・セッション開始/停止）（Issue #649） |
 | `src/components/home/AssistantMessageInput.tsx` | アシスタント専用メッセージ入力（送信のみ・スラッシュコマンド/画像添付なし）（Issue #649） |
-| `src/components/review/ReviewCard.tsx` | Reviewカード（Issue #600） |
+| `src/components/review/ReviewTab.tsx` | `/review` の Review タブ本体（Issue #607 で `app/review/page.tsx` から抽出）。`?filter=` ディープリンク（`parseReviewFilter`、同一ルート遷移にも追従）＋ chip 3 種（`in_review` / `approval` / `stalled`、件数は同じ `FILTER_PREDICATES` から導出するので一覧と必ず一致）＋ `REVIEW_POLL_INTERVAL_MS` ポーリング。行の testid は `review-item-<id>`。**Issue #1824: 一度もマウントされていなかった `ReviewCard.tsx`（と 8 tests）を削除**したので、`/review` の行を描くのはこのファイルだけ（`review-card` / `review-status-badge` はもう存在しない） |
 | `src/components/review/SimpleMessageInput.tsx` | 軽量メッセージ入力（Review画面用）（Issue #600） |
 | `src/components/review/TemplateTab.tsx` | テンプレート管理UI（一覧・作成・編集・削除、最大5件制限）（Issue #618） |
 | `src/components/worktree/WorktreeDetailHeader.tsx` | Worktree詳細ヘッダー（Repository名・Branch名・Agent・Status・次アクション）（Issue #600） |
