@@ -300,6 +300,10 @@ commandmate send "$WT" "実装してください"
 
 指定worktreeのエージェントが完了するまでブロッキング待機します。
 
+> **完了判定は `sessionStatus === 'ready'`（かつ未分類フレームでない）またはセッション消滅。
+> ターンの成立は見ていない**（`src/cli/commands/wait.ts:356`）。エージェントが要求した作業を
+> 実際にやり遂げたかどうかは `--verify` / `--require-work`（下記）で確かめてください。
+
 ### 使用方法
 
 ```bash
@@ -824,6 +828,21 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
   "reasoningEffort": null
 }
 ```
+
+各フィールドの意味論は次のとおりです。行番号は 2026-08-20 時点の実測で、
+関数名（`buildCurrentOutput` / `isClaudeRunning`）で追うほうが安全です。
+
+| フィールド | 意味 |
+|---|---|
+| `content` | lastCapturedLine 以降の差分（`src/lib/session/current-output-builder.ts:535-556`）。ポーラーが保存済みなら正常時でも空 |
+| `realtimeSnippet` | pane 末尾 100 行（画面そのもの。`src/lib/session/current-output-builder.ts:712`） |
+| `lineCount` | capture 全体の行数（空白行を含む。TUI は 1000 行のペインに描かれるため、空白 pane でも 1001 になりうる） |
+| `isRunning` | tmux セッションが存在して healthy（`src/lib/session/claude-session.ts:543-556`）。**ターン進行中の意味ではない** |
+| `sessionStatus` / `sessionStatusReason` | 状態と、その根拠（`hook_*` なら hooks 由来、それ以外はスクレイパー由来。`HOOK_STATUS_REASON` は `src/lib/session/status-mapping.ts`） |
+| `structuredEvents.*` / `lastStopEventAt` | hooks の最終イベントと最終 `stop` 時刻。hooks が来ていなければ `null` |
+
+画面が空かどうかは `realtimeSnippet.trim() === ''` と `lineCount` で見る。
+`content` は差分なので単独では判断しない。
 
 #### `model` / `reasoningEffort`（Issue #1785）
 
