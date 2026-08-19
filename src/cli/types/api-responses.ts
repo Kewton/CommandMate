@@ -100,6 +100,14 @@ export interface CurrentOutputResponse {
       pattern?: string;
       at: number;
     } | null;
+    /**
+     * Mirrors: src/lib/auto-yes-state.ts AutoYesState.stopMatchedText
+     * (Issue #1694). Short excerpt of what `--stop-pattern` matched, with one
+     * line of context, present only while `stopReason` is
+     * `stop_pattern_matched`. Bounded to STOP_MATCH_EXCERPT_MAX_BYTES UTF-8
+     * bytes; a trailing `…[truncated]` marker means it was cut.
+     */
+    stopMatchedText?: string;
   };
   thinking: boolean;
   thinkingMessage: string | null;
