@@ -21,7 +21,7 @@ import { getDbInstance } from './db/db-instance';
 import { recordAnsweredPrompt, type RecordAnsweredPromptResult } from './db/chat-db';
 import { sendPromptAnswer } from './prompt-answer-sender';
 import { CLIToolManager } from './cli-tools/manager';
-import { stripAnsi, stripBoxDrawing, detectThinking, buildDetectPromptOptions } from './detection/cli-patterns';
+import { stripAnsi, stripBoxDrawing, detectThinking, buildDetectPromptOptions, getCodexLifecycleDialog } from './detection/cli-patterns';
 import { generatePromptKey } from './detection/prompt-key';
 import { getErrorMessage } from './errors';
 import { invalidateCache } from './tmux/tmux-capture-cache';
@@ -357,7 +357,45 @@ export async function detectAndRespondToPrompt(
       return 'duplicate';
     }
 
-    // 3. Resolve auto answer under the execution contract's policy (Issue #1547).
+    // 3. Issue #1829: codex's own launch dialogs are CodexTool.waitForReady()'s
+    // to answer, not the poller's. Every one of them defaults to option 1, and
+    // the base rules answer the default:
+    //
+    //   "Hooks need review"  -> 1. Review hooks   (undoes Issue #1760; the pane
+    //                           then sits two screens deep in a review UI that
+    //                           only `t`/`esc` leave, reported as `running`)
+    //   "Update available"   -> 1. Update now     (undoes Issue #890; runs
+    //                           `npm install -g @openai/codex`, killing codex)
+    //   "Do you trust …"     -> 1. Yes, continue
+    //
+    // waitForReady answers the same screens deliberately and differently ('3',
+    // '2', '1' — each without a trailing Enter), but only during startSession,
+    // while this poller runs on its own 2s phase for the life of the session.
+    // Whichever sees the dialog first decides, so the fix is to leave them all
+    // to the tool. Auto-answer layer only: detectPrompt above still reports the
+    // prompt, so the human keeps seeing the screen and the response poller
+    // still notifies them about it.
+    const launchDialog =
+      cliToolId === 'codex' ? getCodexLifecycleDialog(cleanOutput) : null;
+    if (launchDialog) {
+      // Recorded through the #1684 channel so `capture --json` and `cmate wait`
+      // can name the reason instead of showing a worker that went quiet.
+      recordPolicySuppression(worktreeId, cliToolId, instanceId, {
+        reason: 'agent-launch-dialog',
+        mode: null,
+        promptType: promptDetection.promptData.type,
+      });
+      logger.warn('poller:auto-yes-skipped-launch-dialog', {
+        worktreeId,
+        cliToolId,
+        instanceId,
+        dialog: launchDialog,
+        promptType: promptDetection.promptData.type,
+      });
+      return 'no_answer';
+    }
+
+    // 4. Resolve auto answer under the execution contract's policy (Issue #1547).
     // Auto-Yes calls detectPrompt directly instead of going through
     // status-detector, so this is the only place the policy can gate an
     // auto-answer: a prompt the policy withholds is left for a human, and the
@@ -390,7 +428,7 @@ export async function detectAndRespondToPrompt(
       return 'no_answer';
     }
 
-    // 4. Send answer to tmux (Issue #896: resolve the instance-specific session)
+    // 5. Send answer to tmux (Issue #896: resolve the instance-specific session)
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(cliToolId);
     const sessionName = cliTool.getSessionName(worktreeId, instanceId);
@@ -406,11 +444,11 @@ export async function detectAndRespondToPrompt(
       invalidateCache(sessionName);
     }
 
-    // 5. Update timestamp and reset error count
+    // 6. Update timestamp and reset error count
     updateLastServerResponseTimestamp(compositeKey, Date.now());
     resetErrorCount(compositeKey);
 
-    // 6. Record answered prompt key and timestamp
+    // 7. Record answered prompt key and timestamp
     pollerState.lastAnsweredPromptKey = promptKey;
     pollerState.lastAnsweredAt = Date.now();
 
