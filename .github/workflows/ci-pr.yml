@@ -1,5 +1,54 @@
 name: CI
 
+# [Issue #1830] Every job in this file carries `timeout-minutes`.
+#
+# WHY. GitHub's default job timeout is 360 minutes (6 hours). On 2026-08-19 the
+# `E2E Tests` job of run 32218070769 (develop, post-merge) sat inside
+# `Install Playwright browser` for 88 minutes until a human noticed and
+# cancelled it by hand; `gh run rerun --failed` then went green in 6m47s, so it
+# was a transient runner/CDN problem and not a code regression. The other 10
+# jobs of that run had all finished inside 12 minutes. With no `timeout-minutes`
+# the only thing standing between that hang and a six-hour runner squat was
+# somebody looking at the Actions tab.
+#
+# HOW THE NUMBERS WERE PICKED. Policy is `max x 2, floor 10`, measured on
+# 2026-08-19 over the 12 most recent successful runs of this workflow
+# (`gh run list --repo Kewton/CommandMate --workflow ci-pr.yml --limit 25 --json
+# databaseId,conclusion` then `gh run view <id> --json jobs`, job duration =
+# completedAt - startedAt):
+#
+#   job                                    n   median      max   timeout-minutes
+#   E2E Tests                             12    6.2m    16.2m    30
+#   Unit Tests                            12   12.3m    13.2m    30
+#   Build                                 12    2.3m     2.5m    10
+#   Integration Tests                     12    2.1m     2.4m    10
+#   Type Check                            12    1.0m     1.1m    10
+#   Lint                                  12    0.7m     0.9m    10
+#   Legacy tmux (<3.2) reading-mode no-op  12    0.5m     0.8m    10
+#   Security Audit                        12    0.5m     0.8m    10
+#   Control character check               12    0.1m     0.2m    10
+#   CLAUDE.md size check                  12    0.1m     0.2m    10
+#   Token discipline                      12    0.1m     0.2m    10
+#
+# The distance to `max` is what keeps a healthy run from being cut. The tightest
+# ratio here is Unit Tests at 2.3x; everything on 10 has 4x or more. Unit Tests
+# is also the one to watch, because its median and max are nearly the same
+# (12.3 / 13.2) — the suite has almost no slack of its own. Treat a run near 25m
+# as a signal to shorten the suite, not as a reason to raise this number.
+#
+# STEP-LEVEL TIMEOUTS. A job-level cap tells you the job hung; it does not tell
+# you where, which is exactly what was awkward to read in run 32218070769. So
+# every step that WE invoke and that reaches the network for bytes — `npm ci`,
+# `npx playwright install`, `apt-get install`, `npm install`, `npm audit` — also
+# carries its own, much smaller cap, sized off the same sample. First-party
+# GitHub actions (`actions/checkout`, `actions/setup-node`,
+# `actions/upload-artifact`) are deliberately left to the job cap: they retry
+# internally, they run against GitHub's own infrastructure, and none of them has
+# ever been the step that hung.
+#
+# tests/unit/guards/workflow-timeouts.test.ts fails if a job in any workflow
+# under .github/workflows/ is added without a `timeout-minutes`.
+
 on:
   push:
     branches: [main, develop]
@@ -10,6 +59,7 @@ jobs:
   claudemd-size:
     name: CLAUDE.md size check
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # measured 0.1m median / 0.2m max (n=12); floor of the policy
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,6 +77,7 @@ jobs:
   control-chars:
     name: Control character check
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # measured 0.1m median / 0.2m max (n=12); floor of the policy
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -47,6 +98,7 @@ jobs:
   token-discipline:
     name: Token discipline (raw gray/slate + chromatic guard)
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # measured 0.1m median / 0.2m max (n=12); floor of the policy
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -104,6 +156,7 @@ jobs:
   legacy-tmux-readmode:
     name: Legacy tmux (<3.2) reading-mode no-op
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # measured 0.5m median / 0.8m max (n=12); floor of the policy
     # Debian 11 ships tmux 3.1c — the newest tmux that still lacks display-popup,
     # so it is exactly the version a user most plausibly runs into. Using a
     # container is what makes an old tmux available at all; ubuntu-latest has
@@ -122,6 +175,8 @@ jobs:
       # tmux so a regression in that probe fails here instead of in a user's
       # terminal as `unknown command: display-popup`.
       - name: Install tmux
+        # apt-get reaches the Debian mirrors; measured 0.05m max (n=12).
+        timeout-minutes: 5
         run: |
           apt-get update -qq
           DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tmux
@@ -151,6 +206,8 @@ jobs:
       # only symptom is `Exec format error` (measured while rehearsing this job in
       # a container with a macOS node_modules mounted).
       - name: Bundle the shipped reading-mode modules
+        # `npm install esbuild` inside; measured 0.03m max (n=12).
+        timeout-minutes: 5
         run: |
           mkdir -p "$RUNNER_TEMP/probe" "$RUNNER_TEMP/tools"
           (cd "$RUNNER_TEMP/tools" && npm init -y >/dev/null && npm install --no-audit --no-fund esbuild@0.27.4 >/dev/null)
@@ -169,6 +226,7 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # measured 0.7m median / 0.9m max (n=12); floor of the policy
     # TODO: Remove continue-on-error after fixing existing lint issues
     continue-on-error: true
     steps:
@@ -182,6 +240,11 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
+        # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
+        # step in the run sample above, and a cold-cache `npm ci` of this
+        # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
+        # measured 7s locally. 5 is ~13x the observed CI worst case.
+        timeout-minutes: 5
         run: npm ci
 
       - name: Run ESLint
@@ -190,6 +253,7 @@ jobs:
   type-check:
     name: Type Check
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # measured 1.0m median / 1.1m max (n=12); floor of the policy
     # TODO: Remove continue-on-error after fixing existing type errors
     continue-on-error: true
     steps:
@@ -203,6 +267,11 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
+        # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
+        # step in the run sample above, and a cold-cache `npm ci` of this
+        # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
+        # measured 7s locally. 5 is ~13x the observed CI worst case.
+        timeout-minutes: 5
         run: npm ci
 
       - name: Run TypeScript type check
@@ -211,6 +280,10 @@ jobs:
   test-unit:
     name: Unit Tests
     runs-on: ubuntu-latest
+    # measured 12.3m median / 13.2m max (n=12). 30 rather than the ~26 that
+    # `max x 2` gives, because this suite grows with the test count and 13.2m
+    # is already the slowest thing in the workflow after E2E.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -222,6 +295,11 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
+        # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
+        # step in the run sample above, and a cold-cache `npm ci` of this
+        # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
+        # measured 7s locally. 5 is ~13x the observed CI worst case.
+        timeout-minutes: 5
         run: npm ci
 
       - name: Run unit tests
@@ -233,6 +311,7 @@ jobs:
   test-integration:
     name: Integration Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # measured 2.1m median / 2.4m max (n=12); floor of the policy
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -244,6 +323,11 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
+        # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
+        # step in the run sample above, and a cold-cache `npm ci` of this
+        # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
+        # measured 7s locally. 5 is ~13x the observed CI worst case.
+        timeout-minutes: 5
         run: npm ci
 
       # Issue #1102: the integration suite was drifting because it never ran in
@@ -261,6 +345,9 @@ jobs:
   test-e2e:
     name: E2E Tests
     runs-on: ubuntu-latest
+    # measured 6.2m median / 16.2m max (n=12) — this is the job that hung for
+    # 88 minutes in run 32218070769. 30 = ~2x the worst healthy run.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -272,6 +359,11 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
+        # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
+        # step in the run sample above, and a cold-cache `npm ci` of this
+        # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
+        # measured 7s locally. 5 is ~13x the observed CI worst case.
+        timeout-minutes: 5
         run: npm ci
 
       # Issue #1180: the E2E suite drifted for months because it never ran in CI
@@ -279,6 +371,14 @@ jobs:
       # installed: playwright.config.ts declares a single chromium project (see
       # the comment there on why the Mobile Safari project was dropped).
       - name: Install Playwright browser
+        # THE STEP THAT HUNG FOR 88 MINUTES (run 32218070769). It is measurably
+        # bimodal — the browser download is at the CDN's mercy. Across the same
+        # 12 runs: 0.28 0.30 0.32 0.33 0.35 0.35 0.37 0.40 0.77 1.07 4.90 10.55
+        # minutes (median 0.36m, max 10.55m). 20 is ~2x that worst healthy run,
+        # and after a full 20-minute stall the job's 30m cap still has room for
+        # `npm ci` (0.4m) plus `Run E2E tests` (5.4m max) to finish, so this cap
+        # only ever fires on something genuinely stuck.
+        timeout-minutes: 20
         run: npx playwright install --with-deps chromium
 
       # playwright.config.ts owns the isolation: it boots its own dev server on
@@ -301,6 +401,7 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # measured 2.3m median / 2.5m max (n=12); floor of the policy
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -312,6 +413,11 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
+        # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
+        # step in the run sample above, and a cold-cache `npm ci` of this
+        # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
+        # measured 7s locally. 5 is ~13x the observed CI worst case.
+        timeout-minutes: 5
         run: npm ci
 
       - name: Build Next.js
@@ -328,6 +434,7 @@ jobs:
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # measured 0.5m median / 0.8m max (n=12); floor of the policy
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -339,7 +446,14 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
+        # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
+        # step in the run sample above, and a cold-cache `npm ci` of this
+        # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
+        # measured 7s locally. 5 is ~13x the observed CI worst case.
+        timeout-minutes: 5
         run: npm ci
 
       - name: Run security audit
+        # `npm audit` posts the tree to the registry; measured 0.03m max (n=12).
+        timeout-minutes: 5
         run: npm audit --audit-level=critical
