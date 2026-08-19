@@ -1,0 +1,8 @@
+version: 1
+gates:
+  - id: unit
+    command: "node --test"
+    timeoutSec: 120
+options:
+  baseRef: main
+  skipInPrimaryCheckout: false

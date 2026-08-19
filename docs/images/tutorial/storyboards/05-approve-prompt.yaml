@@ -1,0 +1,25 @@
+# Tutorial Step 4 (approval) — answering from a phone (Issue #1813).
+#
+# The send beat is not decoration: the cassette parks on `@input` until
+# CommandMate delivers a message, so the approval frame is never painted
+# without it. The mobile beat is filmed at 390x844 whatever `--viewport` says,
+# because MobilePromptSheet is not rendered at all above 768px.
+
+version: 1
+duration: 13
+output: cm-t5-approve-prompt
+scenes:
+  - id: send-and-generate
+    type: record
+    duration: 6
+    viewport: pc
+    telop:
+      ja: "作業を依頼して離席する"
+      en: "Send the task and leave your desk."
+  - id: respond-from-mobile
+    type: record
+    duration: 7
+    viewport: mobile
+    telop:
+      ja: "スマホから応答する"
+      en: "Answer from your phone."

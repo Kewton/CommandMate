@@ -1183,6 +1183,84 @@ export const SCENES: Scene[] = [
       await page.waitForTimeout(2000);
     },
   },
+  {
+    id: 'verify-red',
+    title: 'Run the declared gate before any work and read exit 20 off it',
+    kind: 'terminal',
+    viewport: 'pc',
+    // The seed worktree that branched off `main` without the fix, so the gate
+    // is red for the reason the tutorial says it is: the repository's own
+    // `node --test` fails there. No session is involved — a verification run is
+    // server-side work on a checkout — so the only precondition is that the
+    // worktree is registered.
+    prepare: ({ baseUrl, options, state }) => {
+      const id = state.CM_DEMO_LOGIN_WORKTREE_ID ?? '';
+      if (!id) {
+        throw new Error(
+          'state.env has no CM_DEMO_LOGIN_WORKTREE_ID — the red-gate take has no checkout to fail in',
+        );
+      }
+      return waitForWorktree(
+        baseUrl,
+        { id, path: state.CM_DEMO_LOGIN_WORKTREE_PATH ?? '' },
+        () => true,
+        'registered, so the gate has a checkout to run in',
+        options.timeoutMs,
+      ).then(() => undefined);
+    },
+    record: async ({ options, outFile, workDir }) => {
+      await recordTerminalScene({
+        statePath: options.statePath,
+        session: `${options.cliSession}-verify`,
+        mode: 'verify-red',
+        tmuxSocket: options.tmuxSocket,
+        frame: { ...options.viewport },
+        outFile,
+        workDir,
+        intervalMs: TERMINAL_CAPTURE_INTERVAL_MS,
+        timeoutMs: Math.max(options.timeoutMs, TERMINAL_TAKE_TIMEOUT_MS),
+        // The last frame is the run read back out of the history, and this is
+        // the substring that says it was recorded as a failure of the declared
+        // gate. A take that stopped earlier — or one whose gate went green —
+        // is a failed take, not a short one.
+        requireInFinalFrame: 'failed: unit',
+      });
+    },
+  },
+  {
+    id: 'evidence',
+    title: 'Show the record a finished contract leaves behind',
+    kind: 'terminal',
+    viewport: 'pc',
+    // Same precondition as `contract-verify`: the take runs the contract first
+    // and then reads back what it wrote, so it needs the adopted session the
+    // contract is sent to.
+    prepare: ({ baseUrl, options }) =>
+      waitForWorktree(
+        baseUrl,
+        { id: options.worktreeId, path: options.worktreePath },
+        (worktree) => worktree.isSessionRunning === true,
+        'showing a live agent session',
+        options.timeoutMs,
+      ).then(() => undefined),
+    record: async ({ options, outFile, workDir }) => {
+      await recordTerminalScene({
+        statePath: options.statePath,
+        session: `${options.cliSession}-evidence`,
+        mode: 'evidence',
+        tmuxSocket: options.tmuxSocket,
+        frame: { ...options.viewport },
+        outFile,
+        workDir,
+        intervalMs: TERMINAL_CAPTURE_INTERVAL_MS,
+        timeoutMs: Math.max(options.timeoutMs, TERMINAL_TAKE_TIMEOUT_MS),
+        // The last line `task show` prints for a judged task. Requiring it is
+        // what separates "the record is on screen" from "the pane got as far as
+        // clearing itself".
+        requireInFinalFrame: 'GATE unit passed',
+      });
+    },
+  },
 ];
 
 export function viewportFor(scene: Scene, options: RecordOptions): { width: number; height: number } {

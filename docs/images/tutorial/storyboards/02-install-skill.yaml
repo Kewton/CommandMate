@@ -1,0 +1,24 @@
+# Tutorial Step 2 — install the method, then call it (Issue #1813).
+#
+# The two beats are the loop the step is about: a Skill arrives from the
+# Catalog, and afterwards it is a command in the composer. The palette beat
+# presses Escape rather than Enter — the cut never runs one.
+
+version: 1
+duration: 15
+output: cm-t2-install-skill
+scenes:
+  - id: install-skill
+    type: record
+    duration: 9
+    viewport: pc
+    telop:
+      ja: "Catalog から Skill を導入"
+      en: "Install a Skill from the Catalog."
+  - id: slash-palette
+    type: record
+    duration: 6
+    viewport: pc
+    telop:
+      ja: "以後はコマンドで呼べる"
+      en: "From then on it is a command."

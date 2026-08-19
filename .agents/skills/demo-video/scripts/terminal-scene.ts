@@ -454,10 +454,21 @@ export function encodeWebm(
 
 // ------------------------------------------------------------- scene --------
 
+/**
+ * Which take cli-scene.sh runs in the pane (Issue #1813).
+ *
+ * The three share one script because the isolation checks in front of them —
+ * the port refusal, the redirected HOME, the "seed worktrees only" assertion —
+ * are the load-bearing part, and a copy of them is a copy that drifts.
+ */
+export type CliSceneMode = 'contract' | 'verify-red' | 'evidence';
+
 export interface TerminalSceneOptions {
   /** Path to the state file env-up.sh wrote; handed straight to cli-scene.sh. */
   statePath: string;
   session: string;
+  /** Take to run; omitted is the original `contract` take. */
+  mode?: CliSceneMode;
   /** `tmux -L` socket, or '' for the ambient server. */
   tmuxSocket: string;
   frame: { width: number; height: number };
@@ -471,12 +482,13 @@ export interface TerminalSceneOptions {
 
 export function startCliSession(options: TerminalSceneOptions): void {
   const args = ['--state', options.statePath, '--session', options.session, '--start'];
+  if (options.mode) args.push('--mode', options.mode);
   if (options.tmuxSocket) args.push('--tmux-socket', options.tmuxSocket);
   execFileSync(CLI_SCENE_SCRIPT, args, { stdio: ['ignore', 'pipe', 'inherit'] });
 }
 
 /**
- * Record the `contract-verify` take end to end.
+ * Record one cli-scene.sh take end to end.
  *
  * Nothing is waited for in a `prepare`: unlike a browser scene there is no
  * camera to start early — the capture loop *is* the camera, and it begins the
