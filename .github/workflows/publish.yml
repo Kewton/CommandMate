@@ -17,6 +17,26 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     environment: npm-publish  # Required: must match npm Trusted Publisher settings
+    # [Issue #1830] This job publishes to npm, so a hang here leaves the release
+    # state ambiguous — did the version go out or not? — on top of squatting a
+    # runner for GitHub's 6-hour default. See the header of ci-pr.yml for the
+    # incident behind this change.
+    #
+    # Measured 2026-08-19 over the 10 most recent successful runs of this
+    # workflow (`gh run list --workflow publish.yml --limit 10 --json databaseId`
+    # then `gh run view <id> --json jobs`):
+    #
+    #   publish   n=10   median 14.3m   max 16.0m
+    #   (11.7 13.5 14.0 14.2 14.3 14.4 14.5 14.6 15.6 16.0)
+    #
+    # dominated by `Run tests` (10.4m median / 11.7m max — it is `npm run
+    # test:unit`, the same suite the CI workflow caps at 30).
+    #
+    # 30 = `max x 2` under the same policy as ci-pr.yml. NOTE: Issue #1830 asked
+    # for "20分程度" on the grounds that no measurement existed. It does exist,
+    # and 20 is only 1.25x the observed max — close enough to cut a healthy
+    # release. The measurement wins.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -25,16 +45,25 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
+      # The steps below that fetch or push bytes over the network carry their own
+      # caps, so a timed-out release says WHICH one stalled instead of only that
+      # the job did. Sizes are from the same 10-run sample.
       - name: Upgrade npm for trusted publishing
+        timeout-minutes: 5 # registry fetch of a single package; measured 0.03m max
         run: npm i -g npm@^11.5.1
 
       - name: Show versions
         run: node -v && npm -v
 
       - name: Install dependencies
+        # Registry fetch; measured 0.41m median / 0.43m max (n=10). A cold-cache
+        # `npm ci` of this lockfile (572 packages, empty --cache dir, lifecycle
+        # scripts included) measured 7s locally, so 5 has ample headroom.
+        timeout-minutes: 5
         run: npm ci
 
       - name: Security audit
+        timeout-minutes: 5 # `npm audit` posts the tree to the registry; measured 0.03m max
         run: npm audit --audit-level=critical
 
       - name: Run tests
@@ -57,4 +86,10 @@ jobs:
           echo "Package size: $SIZE"
 
       - name: Publish to npm (OIDC)
+        # Measured 1.46m median / 1.57m max (n=10), so 10 is ~6x the worst
+        # observed publish. Cutting here does not create a half-published
+        # version: the registry either accepts the tarball or it does not, and a
+        # `npm publish` still hanging after 10 minutes was not going to land
+        # anyway. Without a cap it would hang for 6 hours instead.
+        timeout-minutes: 10
         run: npm publish --provenance --access public
