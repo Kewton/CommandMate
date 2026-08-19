@@ -39,9 +39,14 @@ CommandMate の公開面（LP `website/` ・ README ・ チュートリアル �
 
 **この 2 文は逐語で固定する**。concept.md（ja / en）と LP が同じ文字列を持つことをテストで固定している。
 
+下の表の en 行は `def:en` の HTML コメントマーカーで囲ってある。LP のガード
+（[`tests/unit/website/landing-page.test.ts`](../../tests/unit/website/landing-page.test.ts)）は
+マーカーの中身を読んで `website/index.html` と突き合わせるので、**マーカーを外さないこと**
+（外すとテストは「照合対象が無い」で落ちる。文言を直したいときはマーカーの中を直す）。
+
 | 言語 | 定義文 |
 |---|---|
-| en | Vibe Engineering — the AI does the building; the system, not your expertise, guarantees the engineering. |
+| en | <!-- def:en -->Vibe Engineering — the AI does the building; the system, not your expertise, guarantees the engineering.<!-- /def:en --> |
 | ja | Vibe Engineering — 作るのは AI。エンジニアリングを保証するのは、あなたの専門知識ではなく仕組み。 |
 
 添える一節（芯）:
