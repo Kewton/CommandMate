@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-08-19
+
+> **Highlight**: 公開面（LP・README・チュートリアル・concept）を **Vibe Engineering** の軸へ据え替えた回（Epic #1807、子 Issue 10 件）。あわせて収録基盤 `demo-video` が worktree ID の path 由来化に追従できておらず**実収録が必ず失敗する**状態を復旧し、さらに `fake-agent.sh` が承認フレームを自動応答してしまい **`wait` が「起きていない作業」に `Completed` を返す**欠陥を修正した。これを直さないまま撮っていたら、全デモが「検証を通ったことになっている」だけの映像になっていた。製品側では実行契約と検証結果を Web UI に露出し（#1816）、codex 起動ダイアログへの Auto-Yes 誤応答（#1829）と CI のハング放置（#1830）を塞いだ。
+
 ### Added
 
 - **feat(demo-video): 新シーン・code card・静止画生成を追加する** (#1810): `contract-verify`（tmux pane を収録し、`send --contract` → `wait --verify` の `GATE` / `RESULT` / 終了コードを**実ゲートの実 exit code のまま**映す）・`attention-badge`・`review-screen`・`slash-palette`・`install-skill` の 5 シーン、絵コンテの `type: code`（ファイルを組版する静止カード。`source` は絵コンテのディレクトリ配下に閉じることを解決後のパスで検証）、および LP / README 用の静止画 5 点を同じ隔離環境から機械生成する `stills.ts`（バイト予算はゲートで、収まらなければ**書かずに落ちる**）

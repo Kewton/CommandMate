@@ -1,7 +1,7 @@
 {
   "verifiedAgainst": {
     "claude": "2.1.218",
-    "codex": "0.147.0",
+    "codex": "0.148.0",
     "antigravity": "1.1.3"
   },
   "frequentlyUsed": {
@@ -1650,6 +1650,16 @@
       "category": "standard-util",
       "cliTools": [
         "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "export",
+      "descriptionKey": "slashCommands.descriptions.export",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
       ],
       "isStandard": true,
       "source": "standard"
