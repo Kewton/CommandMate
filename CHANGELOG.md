@@ -52,6 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **docs(en): verify / task / skills / hooks の英語ドキュメントを JA と同構成に整備** (#1817) — `docs/en/user-guide/cli-operations-guide.md` に `sync` / `verify` / `task`（実行契約・`gateDefinitions`・無人実行テンプレート）/ 読むモード / `instances` / マルチセッション / `skill` / `report metrics` の各節を追加し、`docs/en/user-guide/skills.md` と `docs/en/user-guide/agent-event-hooks.md` を新規作成。EN `commands-guide.md` に「このリポジトリ限定」の明記と全 27 コマンド表を追加し、`tests/unit/docs/ja-en-heading-parity.test.ts` が 4 対の ja/en で `##` 見出し数の一致を固定する
 
+### Removed
+
+- **refactor(review): 未使用の `ReviewCard.tsx` と 8 tests を削除する** (#1824): `src/components/review/ReviewCard.tsx`（91 行）は `#600`（`ed612bcf`）で `/review` が `ReviewTab` へ移行した時点から呼び出し元がゼロで、`tests/unit/ReviewCard.test.tsx` の 8 tests は出荷 UI を何も保証しないまま緑を出し続けていた（実際 #1810 の `review-screen` シーンはこの testid を同期点に据えて起票され、収録が空振りした）。`ReviewCard` 固有の 4 挙動（`?pane=terminal` 付きリンク / `nextAction` 行 / 行ごとの `ReviewStatus` バッジ / インライン返信の `children` スロット）は `ReviewTab` の現行 UI で代替済みか、統合すると出荷中の UX 変更になるため取り込まない。どこも読まなくなった `review.status.done` を en / ja の `locales/*/review.json` と `tests/unit/i18n/review-keys.test.ts` の `RUNTIME_KEYS` から外し、i18n ガードが「実際に解決されるキー」だけを固定する状態へ戻した
+
 ### Fixed
 
 - **fix(demo-video): worktree ID の path 由来化に追従し、収録パイプラインを復旧する** (#1809)
