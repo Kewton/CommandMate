@@ -8,6 +8,7 @@ import {
 } from '../tui-accumulator';
 import { clearPromptHashCache, renamePromptHashCacheKey } from './prompt-dedup';
 import { clearResponseHashCache, renameResponseHashCacheKey } from './response-dedup';
+import { renamePromptDedupSkips } from './prompt-dedup-state';
 import { checkForResponse } from './response-checker';
 import { broadcastTerminalSnapshot } from '@/lib/realtime/terminal-broadcast';
 
@@ -255,7 +256,8 @@ function splitPollerKey(pollerKey: string): { worktreeId: string; instanceId: st
  * - `pollingStartTimes`, so MAX_POLLING_DURATION still measures from when the
  *   turn actually began rather than restarting the 30-minute budget;
  * - the prompt and response dedup hashes, so the screen currently on display is
- *   not saved a second time as a new message.
+ *   not saved a second time as a new message, together with the prompt-skip
+ *   tally that explains those suppressions to `capture --json` (Issue #1695).
  *
  * The TUI accumulator (opencode / copilot only) is re-initialised empty at the
  * new key instead of carried over: `tui-accumulator.ts` exposes no way to write
@@ -321,6 +323,14 @@ export function migrateResponsePollerWorktreeIds(
 
     renamePromptHashCacheKey(move.oldKey, move.newKey);
     renameResponseHashCacheKey(move.oldKey, move.newKey);
+    // Issue #1695: the prompt hash moved on the line above, so the guard keeps
+    // suppressing the prompt on screen under the new ID. Its tally has to move
+    // with it, or `capture --json` reports zero skips for a session that is
+    // still skipping. Old worktree ID comes back out of the key we just left.
+    const movedFrom = splitPollerKey(move.oldKey);
+    if (movedFrom) {
+      renamePromptDedupSkips(movedFrom.worktreeId, move.newWorktreeId, move.cliToolId, move.instanceId);
+    }
     clearTuiAccumulator(move.oldKey);
   }
   for (const pollerKey of abandoned) {

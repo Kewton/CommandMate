@@ -79,6 +79,12 @@
 | verify の GATE 行の report 転記 | commandmate-skills 側 dispatch report にゲート結果を転記 | commandmate-skills#47 / skills PR #48 で対応済み |
 | 実行契約と検証ランの Web UI 露出 | worktree ヘッダの状態チップ（task title / TaskStatus / 直近ランの RESULT、理由は `aria-label` と tooltip）＋ Verification ペイン（契約・ラン一覧・ゲート表・logTail 末尾 40 行） | #1816 で対応済み（規約 5 の準拠例） |
 | stop-pattern 発火の事実 | `capture --json` の `autoYes.stopReason`（`stop_pattern_matched`。`src/lib/session/current-output-builder.ts` が露出） | 露出済み（ただしマッチ内容は未露出 — 下表参照） |
+| プロンプト dedup スキップ | `capture --json` の `promptDedup`（`skippedCount` / `lastSkippedAt`。`src/lib/polling/prompt-dedup-state.ts` が記録し `src/lib/session/current-output-builder.ts` が露出）。`skippedCount > 0` かつ `lastSkippedAt` が直近なら dedup が原因、`0` なら検出漏れ（#1676）側 | #1695 で対応済み（response 側 dedup `isDuplicateResponse` はサーバーログ `duplicate-response-skipped` のみ — 下記注記参照） |
+
+> **注記（#1695）**: response 側 dedup（`isDuplicateResponse`、Issue #1268）はログ追加のみで `capture --json` への露出を見送った。
+> prompt 側と違い、この guard は「今のターンで既に保存済みの内容」しか落とさない（hash cache は `stopPolling()` が
+> ターンごとに破棄する）ため、スキップは**正常系の定常状態**であり「保存されなかった」の原因説明にならない。
+> カウンタを露出すると健全なセッションほど数値が大きくなる。
 
 ### 未露出（対応候補）
 
@@ -87,7 +93,6 @@
 | 判定点 | 現状（実測） | 対応候補 |
 |---|---|---|
 | stop-pattern 発火時に**何にマッチしたか** | `checkStopCondition`（`src/lib/auto-yes-state.ts`）はマッチ判定後 `disableAutoYes(..., 'stop_pattern_matched')` を呼ぶだけで、マッチした文字列・行を保存しない。サーバーログ `stop-condition-matched` も compositeKey のみ。運用者は `stopReason` から発火の事実は知れるが、誤爆（ビルドログがパターンを含んだ等）の切り分けができない | マッチ文字列（前後の行を含む短い抜粋）を auto-yes 状態に保存し、`capture --json` の `autoYes` に `stopMatchedText` として露出する |
-| プロンプト dedup スキップ | `src/lib/polling/response-checker.ts` の `isDuplicatePrompt` 分岐が `logger.info('duplicate-prompt-skipped', ...)` を出すのみ。`capture --json` に露出なし。「プロンプトが出たはずなのに保存されていない」とき、dedup が原因か検出漏れかを運用者が判別できない | スキップ回数・最終スキップ時刻をセッション状態に記録し `capture --json` へ露出する（同型: response 側 dedup `isDuplicateResponse`（Issue #1268）はログすら出さない） |
 
 ## 開発プロセスへの組み込み
 

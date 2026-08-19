@@ -31,6 +31,7 @@ import type { AskUserQuestionSpec } from '@/lib/hooks/ask-user-question-payload'
 type AgentEventStateModule = typeof import('@/lib/session/agent-event-state');
 type SuppressionModule = typeof import('@/lib/polling/auto-yes-suppression-state');
 type WaitingEpisodeModule = typeof import('@/lib/session/waiting-episode-state');
+type PromptDedupStateModule = typeof import('@/lib/polling/prompt-dedup-state');
 
 /**
  * Load a module twice, with a registry reset in between, and hand back both
@@ -271,5 +272,34 @@ describe('auto-yes-suppression-state is shared across module instances (#1736)',
       at: 1_700_000_600_000,
     });
     second.clearPolicySuppressions();
+  });
+});
+
+describe('prompt-dedup-state is shared across module instances (#1695)', () => {
+  it('reports skips counted by another instance', async () => {
+    const { first, second } = await loadTwice<PromptDedupStateModule>(
+      () => import('@/lib/polling/prompt-dedup-state')
+    );
+    expectsDistinctInstances(first, second, 'recordPromptDedupSkip');
+    first.clearPromptDedupSkips();
+
+    // The producer is the response poller and the sole consumer is
+    // `buildCurrentOutput` behind the current-output route — never the same
+    // bundle under `next dev`. A per-instance map would leave `capture --json`
+    // reporting zero skips for a session that is actively dropping prompts,
+    // i.e. exactly the blindness the field was added to remove.
+    first.recordPromptDedupSkip(WT, TOOL, undefined, 1_700_000_800_000);
+    first.recordPromptDedupSkip(WT, TOOL, undefined, 1_700_000_801_000);
+
+    expect(second.getPromptDedupSkips(WT, TOOL)).toEqual({
+      skippedCount: 2,
+      lastSkippedAt: 1_700_000_801_000,
+    });
+
+    // The count keeps accumulating across the boundary rather than restarting.
+    second.recordPromptDedupSkip(WT, TOOL, undefined, 1_700_000_802_000);
+    expect(first.getPromptDedupSkips(WT, TOOL).skippedCount).toBe(3);
+
+    second.clearPromptDedupSkips();
   });
 });
