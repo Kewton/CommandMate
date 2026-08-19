@@ -29,6 +29,18 @@ jobs:
   deploy:
     name: Build and deploy
     runs-on: ubuntu-latest
+    # [Issue #1830] Without this, a stuck deploy holds a runner for GitHub's
+    # 6-hour default (see the header of ci-pr.yml for the incident that prompted
+    # this). Measured 2026-08-19 over all 4 successful runs of this workflow
+    # (`gh run view <id> --json jobs`): 0.23m median / 0.28m max — the site is
+    # static HTML with no build step, so the job is an upload and nothing else.
+    # 10 is the policy floor and ~36x the worst observed run.
+    #
+    # No step-level timeouts here on purpose: all four steps are first-party
+    # GitHub actions (checkout / configure-pages / upload-pages-artifact /
+    # deploy-pages) with their own retries, and with only four of them the job
+    # log already says which one stopped.
+    timeout-minutes: 10
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
