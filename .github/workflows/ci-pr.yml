@@ -370,16 +370,121 @@ jobs:
       # — same failure mode as the integration suite in #1102. Only chromium is
       # installed: playwright.config.ts declares a single chromium project (see
       # the comment there on why the Mobile Safari project was dropped).
+      # [Issue #1844] This used to be ONE step — `npx playwright install
+      # --with-deps chromium` — and it kept eating the whole job (88m, 3h55m and
+      # 3h48m on 2026-08-19 before #1830 capped it; then a hard 20-minute
+      # timeout failure in run 32248871561). #1844 proposed caching
+      # ~/.cache/ms-playwright as the primary fix. The measurement says the
+      # cache is not where the time is, so the split below follows the
+      # measurement and caches the browser anyway, because it is free.
+      #
+      # WHERE THE TIME ACTUALLY GOES. `--with-deps` does two unrelated things in
+      # one step: an apt transaction, then a browser download from
+      # cdn.playwright.dev. Cutting each job's step log at the
+      # `Downloading Chrome for Testing ...` line separates them exactly
+      # (`gh run view --repo Kewton/CommandMate --job <id> --log`, all six E2E
+      # jobs of 2026-08-19):
+      #
+      #   job            step total    apt phase   browser (CDN)
+      #   96068691996         0.31m        0.20m           0.11m
+      #   96109347270         3.26m        3.14m           0.11m
+      #   96118759977         7.71m        7.63m           0.09m
+      #   96062812368         9.34m        9.22m           0.11m
+      #   95947185874        10.54m       10.44m           0.10m
+      #   96055267143        20.21m    timed out     never began
+      #
+      # The browser download is 0.09-0.11m in EVERY sample. It is not bimodal
+      # and it has never hung; the entire spread, and the timeout, is apt. In
+      # run 96055267143 those 20 minutes went on font archives from
+      # azure.archive.ubuntu.com at 14-21 kB/s (fonts-ipafont-gothic 3513 kB in
+      # 169s, fonts-freefont-ttf 5641 kB in 397s, killed mid fonts-wqy-zenhei)
+      # and the browser download never started. So caching the browser buys
+      # ~6 seconds, not the fix — it is here because it costs nothing and takes
+      # the CDN out of the picture for good.
+      #
+      # WHAT apt IS ACTUALLY INSTALLING. Every real Chromium library on the
+      # ubuntu-24.04 image is already present: each run logs libnss3, libgbm1,
+      # libatk*, libcups2t64, xvfb, fonts-liberation and the rest as "already
+      # the newest version". The 9 packages it downloads (21.1 MB) are all
+      # fonts — fonts-freefont-ttf, fonts-ipafont-gothic, fonts-tlwg-loma-otf,
+      # fonts-unifont, fonts-wqy-zenhei, xfonts-{cyrillic,encodings,scalable,
+      # utils}. Nothing under tests/e2e asserts on pixels (no toHaveScreenshot
+      # and no toMatchSnapshot anywhere; playwright.config.ts takes screenshots
+      # `only-on-failure`, as debugging artifacts), so those fonts cannot turn a
+      # pass into a fail. That is what makes it safe for the dependency step to
+      # give up on a slow mirror instead of holding the job.
+      - name: Resolve the installed Playwright version
+        id: playwright
+        # The cache key has to bind to the RESOLVED version, never to the
+        # `^1.56.1` range in package.json: a range key keeps hitting after a
+        # minor bump and would hand the suite browsers built for the previous
+        # playwright-core. playwright-core is the package whose version pins the
+        # browser revisions, so it is the one to read.
+        run: |
+          VERSION=$(node -p "require('playwright-core/package.json').version")
+          if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "::error::could not resolve a Playwright version (got '$VERSION')"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Playwright (resolved): $VERSION"
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          # Default PLAYWRIGHT_BROWSERS_PATH on Linux. Holds chromium-<rev>,
+          # chromium_headless_shell-<rev> and ffmpeg-<rev> — everything
+          # `playwright install chromium` writes.
+          path: ~/.cache/ms-playwright
+          # Deliberately no `restore-keys`: a partial-key fallback is precisely
+          # how a job ends up running last version's browser. Miss on a bump.
+          key: ${{ runner.os }}-playwright-${{ steps.playwright.outputs.version }}
+
+      - name: Install Playwright system dependencies
+        id: playwright-deps
+        # Bounded and non-fatal, which is the actual #1844 fix. On this image
+        # the step only ever fetches fonts nothing asserts on, so letting it run
+        # to a 20-minute cap — or to six hours before #1830 — buys nothing at
+        # all. 6 is ~30x the 0.20m median and still absorbs the 3.14m sample;
+        # the 7.6m / 9.2m / 10.4m samples are abandoned on purpose. A slow
+        # Ubuntu mirror now degrades a failure screenshot's CJK glyphs instead
+        # of failing the job. If a genuinely missing library ever reappears,
+        # `Run E2E tests` below fails with Playwright's own "Host system is
+        # missing dependencies" message, so this cannot go green while broken.
+        #
+        # No retry loop (considered, per #1844): the observed pathology is
+        # sustained low bandwidth over minutes rather than a stall, so a second
+        # attempt re-enters the same slow mirror — and killing the transaction
+        # mid-flight to retry leaves the dpkg lock held, which turns attempt 2
+        # into a different, more confusing failure.
+        timeout-minutes: 6
+        continue-on-error: true
+        run: npx playwright install-deps chromium
+
+      - name: Note degraded system dependencies
+        # `outcome` is the pre-continue-on-error result, so this fires on both a
+        # timeout and a real apt failure. Without it the give-up is a quiet
+        # orange tick nobody reads.
+        if: steps.playwright-deps.outcome != 'success'
+        run: |
+          echo "::warning title=Playwright system dependencies skipped::The system-dependency step did not finish inside its 6-minute budget (Issue #1844). On ubuntu-latest it only adds font packages, so the suite still runs; failure screenshots may render CJK glyphs as tofu."
+
       - name: Install Playwright browser
-        # THE STEP THAT HUNG FOR 88 MINUTES (run 32218070769). It is measurably
-        # bimodal — the browser download is at the CDN's mercy. Across the same
-        # 12 runs: 0.28 0.30 0.32 0.33 0.35 0.35 0.37 0.40 0.77 1.07 4.90 10.55
-        # minutes (median 0.36m, max 10.55m). 20 is ~2x that worst healthy run,
-        # and after a full 20-minute stall the job's 30m cap still has room for
-        # `npm ci` (0.4m) plus `Run E2E tests` (5.4m max) to finish, so this cap
-        # only ever fires on something genuinely stuck.
-        timeout-minutes: 20
-        run: npx playwright install --with-deps chromium
+        # Skipped outright on a cache hit, so a hit fetches nothing from
+        # cdn.playwright.dev. On a miss this is the same download as before the
+        # split — 0.09-0.11m across all six samples above — and `playwright
+        # install` is idempotent, so the miss path behaves exactly as it always
+        # did. 10 is ~90x the measured worst case and leaves the job's 30m cap
+        # room for `npm ci` (0.4m), the 6m dependency budget and `Run E2E tests`
+        # (5.4m max).
+        #
+        # `success()` is spelled out because a custom `if` replaces the implicit
+        # success check, and a browser download after a hard failure upstream is
+        # just wasted runner time.
+        if: success() && steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 10
+        run: npx playwright install chromium
 
       # playwright.config.ts owns the isolation: it boots its own dev server on
       # port 3177 with CM_DB_PATH/CM_ROOT_DIR pinned to a throwaway state dir, so
