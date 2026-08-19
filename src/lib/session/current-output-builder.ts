@@ -31,6 +31,10 @@ import {
   getLastPolicySuppression,
   type AutoYesPolicySuppression,
 } from '@/lib/polling/auto-yes-suppression-state';
+import {
+  getPromptDedupSkips,
+  type PromptDedupSkips,
+} from '@/lib/polling/prompt-dedup-state';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tmux-capture-cache';
 import {
@@ -192,6 +196,21 @@ export interface CurrentOutputPayload {
    * see above.
    */
   reasoningEffort: string | null;
+  /**
+   * How many prompts the content-hash dedup guard suppressed for this session,
+   * and when it last did (Issue #1695). See {@link PromptDedupSkips}.
+   *
+   * **Always present, zeroed when nothing was skipped.** The whole point is to
+   * separate "the guard dropped it" from "nothing classified the frame"
+   * (Issue #1676), and an absent key would leave the caller guessing which of
+   * the two it was looking at — the same ambiguity the field removes.
+   *
+   * Exposure only: no verdict reads it. `skippedCount` is cumulative across
+   * polling cycles, so `lastSkippedAt` is what says whether the suppression is
+   * current — read it next to `isPromptWaiting` the way `autoYes.lastSuppression`
+   * is read.
+   */
+  promptDedup: PromptDedupSkips;
 }
 
 const logger = createLogger('current-output-builder');
@@ -528,6 +547,13 @@ export async function buildCurrentOutput(
       // the server's job, done here and in exactly one place.
       model: null,
       reasoningEffort: null,
+      // Issue #1695: the real tally, not zeros — and deliberately unlike the two
+      // fields above. A model latch describes a process, so on a dead session it
+      // would assert something false; a skip count describes what already
+      // happened, and `lastSkippedAt` dates it. Zeroing it here would erase the
+      // evidence at exactly the moment an operator goes looking for it — the
+      // session ended and the prompt they were waiting on was never saved.
+      promptDedup: getPromptDedupSkips(worktreeId, cliToolId, instanceId),
     };
   }
 
@@ -758,5 +784,8 @@ export async function buildCurrentOutput(
     // docs on CurrentOutputPayload for why nothing is normalised on the way out.
     model,
     reasoningEffort: effort,
+    // Issue #1695: appended last on purpose — every field above is a published
+    // CLI contract and reordering them churns the diff for no reader's benefit.
+    promptDedup: getPromptDedupSkips(worktreeId, cliToolId, instanceId),
   };
 }

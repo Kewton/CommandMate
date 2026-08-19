@@ -184,6 +184,29 @@ export interface CurrentOutputResponse {
    * for every session until Issue #1784's extraction layer lands.
    */
   reasoningEffort?: string | null;
+  /**
+   * Issue #1695: prompts the content-hash dedup guard suppressed for this
+   * session, and when it last did.
+   *
+   * Mirrors: src/lib/polling/prompt-dedup-state.ts PromptDedupSkips
+   *
+   * The field an operator reads when a prompt was on screen but no prompt
+   * message exists: a non-zero `skippedCount` with a recent `lastSkippedAt`
+   * means `isDuplicatePrompt` dropped it, and a zero means the detection layer
+   * never classified the frame at all (Issue #1676) — two causes with the same
+   * symptom that nothing in this payload could previously separate.
+   *
+   * `skippedCount` is cumulative for the life of the server process, not
+   * per-turn, so `lastSkippedAt` is what dates the evidence.
+   *
+   * Optional here for the same reason `model` is: this mirror also describes
+   * what an older daemon answers, and `undefined` means "this server predates
+   * the field" rather than "nothing was skipped".
+   */
+  promptDedup?: {
+    skippedCount: number;
+    lastSkippedAt: number | null;
+  };
 }
 
 // Mirrors: src/types/models.ts BasePromptData (subset for CLI output)
