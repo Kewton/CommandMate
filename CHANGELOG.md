@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Docs
+
+- **docs(cli): `capture --json` の各フィールドの意味論を明文化する** (#1840):
+  `docs/user-guide/cli-operations-guide.md`（および `docs/en/` の対応節）の capture 節に、
+  `content` / `realtimeSnippet` / `lineCount` / `isRunning` /
+  `sessionStatus`・`sessionStatusReason` / `structuredEvents`・`lastStopEventAt` の 6 行表を追加した。
+  監視スクリプトが実際に踏んでいた 2 つの誤読を名指しで潰している:
+  **`content` は `lastCapturedLine` 以降の差分**なのでポーラーが先に保存していれば正常時でも空
+  （`src/lib/session/current-output-builder.ts:535-556`）、
+  **`isRunning` は tmux セッションが存在して healthy という意味だけ**でターン進行中ではない
+  （`src/lib/session/claude-session.ts:543-556`）。画面が空かどうかは
+  `realtimeSnippet.trim() === ''` と `lineCount` で見る。あわせて wait 節に、完了判定が
+  `sessionStatus === 'ready'`（未分類フレームでない）またはセッション消滅であって
+  **ターンの成立は見ていない**ことを明記した（`src/cli/commands/wait.ts:356`）
+
 ## [0.25.0] - 2026-08-19
 
 > **Highlight**: 公開面（LP・README・チュートリアル・concept）を **Vibe Engineering** の軸へ据え替えた回（Epic #1807、子 Issue 10 件）。あわせて収録基盤 `demo-video` が worktree ID の path 由来化に追従できておらず**実収録が必ず失敗する**状態を復旧し、さらに `fake-agent.sh` が承認フレームを自動応答してしまい **`wait` が「起きていない作業」に `Completed` を返す**欠陥を修正した。これを直さないまま撮っていたら、全デモが「検証を通ったことになっている」だけの映像になっていた。製品側では実行契約と検証結果を Web UI に露出し（#1816）、codex 起動ダイアログへの Auto-Yes 誤応答（#1829）と CI のハング放置（#1830）を塞いだ。
