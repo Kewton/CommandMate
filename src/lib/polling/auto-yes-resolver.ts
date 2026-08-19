@@ -42,7 +42,7 @@ export interface AutoYesPolicy {
 }
 
 /**
- * Why the policy withheld an answer.
+ * Why an auto-answer was withheld.
  *
  * `deny-pattern-unusable` is the fail-closed case: a deny pattern that cannot be
  * evaluated (unsafe, unparseable, or over-long) suppresses instead of being
@@ -53,7 +53,15 @@ export type AutoYesSuppressionReason =
   | 'mode-off'
   | 'deny-pattern'
   | 'deny-pattern-unusable'
-  | 'type-not-allowed';
+  | 'type-not-allowed'
+  /**
+   * Issue #1829: not a policy verdict at all, but the same outcome recorded
+   * through the same channel. The prompt on screen is a CLI-lifecycle dialog
+   * whose answer belongs to the tool's own launch sequence, so the poller
+   * withheld one. Listed here so `capture --json` / `cmate wait` can name it
+   * instead of showing a session that has silently gone quiet.
+   */
+  | 'agent-launch-dialog';
 
 export interface AutoYesResolution {
   /** The answer to send, or null when nothing should be sent. */

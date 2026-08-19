@@ -24,7 +24,7 @@
  * coupling via a minimal DTO/projection type.
  */
 
-import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN, CODEX_APPROVAL_FOOTER_PATTERN, CODEX_PAGER_FOOTER_PATTERN, CODEX_STATUS_BAR_PATTERN, CLAUDE_INTERRUPT_HINT_PATTERN, ANTIGRAVITY_SELECTION_LIST_PATTERN } from './cli-patterns';
+import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN, CODEX_APPROVAL_FOOTER_PATTERN, CODEX_PAGER_FOOTER_PATTERN, CODEX_STATUS_BAR_PATTERN, getCodexLifecycleDialog, CLAUDE_INTERRUPT_HINT_PATTERN, ANTIGRAVITY_SELECTION_LIST_PATTERN } from './cli-patterns';
 import { detectPrompt } from './prompt-detector';
 import { normalizeTuiFrameForDetection } from './tui-detection-frame';
 import type { PromptDetectionResult } from './prompt-detector';
@@ -107,6 +107,8 @@ export const STATUS_REASON = {
   CODEX_SELECTION_LIST: 'codex_selection_list',
   /** Issue #1017: Codex pager / edit-previous (transcript) mode. */
   CODEX_PAGER: 'codex_pager',
+  /** Issue #1829: Codex's hooks review screens, which only `t`/`esc` leave. */
+  CODEX_HOOKS_REVIEW: 'codex_hooks_review',
   ANTIGRAVITY_SELECTION_LIST: 'antigravity_selection_list',
   OPENCODE_RESPONSE_COMPLETE: 'opencode_response_complete',
   INPUT_PROMPT: 'input_prompt',
@@ -128,6 +130,9 @@ export const SELECTION_LIST_REASONS = new Set<string>([
   STATUS_REASON.CODEX_SELECTION_LIST,
   // Issue #1017: Codex pager/edit-previous mode also drives NavigationButtons.
   STATUS_REASON.CODEX_PAGER,
+  // Issue #1829: the hooks review screens have no numbered options — `t` and
+  // `esc` are the only ways out, and NavigationButtons is how a human sends them.
+  STATUS_REASON.CODEX_HOOKS_REVIEW,
   STATUS_REASON.ANTIGRAVITY_SELECTION_LIST,
 ]);
 
@@ -360,6 +365,30 @@ export function detectSessionStatus(
       hasActivePrompt: false,
       promptDetection: codexPagerPromptDetection,
     };
+  }
+
+  // 0.75. Codex: the hooks review screens (Issue #1829)
+  // codex-cli 0.148.0 answers "1. Review hooks" with a two-screen review UI:
+  //   screen 2 "Press t to trust all; enter to review hooks; esc to close"
+  //   screen 3 "Press t to trust; esc to go back"
+  // Neither carries a numbered option, a "press enter to confirm" footer, or any
+  // thinking indicator, so every branch below falls through to the `running`
+  // default -- which is how two live sessions sat parked on screen 3 while the UI
+  // and `cmate wait` both reported them as busy. They are the bottom-most
+  // interactive element and nothing but a keypress moves them: that is `waiting`.
+  // Checked ahead of prompt detection because the transcript rows on screen 2 are
+  // ordinary text that must not be read as options.
+  if (cliToolId === 'codex') {
+    const codexLifecycleDialog = getCodexLifecycleDialog(cleanOutput);
+    if (codexLifecycleDialog === 'hooks-list' || codexLifecycleDialog === 'hooks-detail') {
+      return {
+        status: 'waiting',
+        confidence: 'high',
+        reason: STATUS_REASON.CODEX_HOOKS_REVIEW,
+        hasActivePrompt: false,
+        promptDetection: detectPrompt(stripBoxDrawing(cleanOutput), buildDetectPromptOptions(cliToolId)),
+      };
+    }
   }
 
   // 0.8. Codex: selection list detection BEFORE prompt detection (Issue #622)

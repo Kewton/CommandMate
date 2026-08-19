@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `docs/design/discoverability-principle.md` の「運用者が読む層」に Web UI を追加し、
     実装規約に「新しい判定は CLI と Web UI の両方に出す」を追加
 
+### Fixed
+
+- **fix(codex): Auto-Yes が codex の起動ダイアログを勝手に確定してセッションが hooks レビュー画面で固着する** (#1829): Auto-Yes は既定ルールで「既定の選択肢＝option 1」を送るため、codex の `Hooks need review` に `1. Review hooks`、update 通知に `1. Update now` を撃っていた。前者は #1760 の `3`（trust せず継続）を無効化して `t`/`esc` しか出口の無いレビュー画面へ、後者は #890 が防いでいた `npm install -g @openai/codex`（＝codex プロセス死）へ繋がる。これらの画面の応答は `CodexTool.waitForReady` の担当だが、waitForReady は `startSession` 中しか見張らず Auto-Yes ポーラーはセッションと無関係に 2s で回り続けるため、**先に見た方が勝つレース**になっていた（起動後にダイアログが再出現した実セッション 2 本が固着）。修正は 3 点。**(1) auto-answer 層のみで抑止** — `getCodexLifecycleDialog`（`detection/cli-patterns.ts`）が非 null の間、ポーラーは何も送らない。検出層は無変更で、`detectPrompt` はこれまで通り画面をプロンプトとして報告する（検出層で潰すと人間にも提示されなくなる）。抑止は `capture --json` の `autoYes.lastSuppression`（`reason: agent-launch-dialog`）に出る。**(2) 固着からの復帰** — `waitForReady` が hooks 画面2/3 を検出したら `Escape` を最大 4 回まで送って上位へ戻す（`t`＝trust は送らない）。**(3) 誤表示の解消** — 画面2/3 は選択肢も confirm フッタも thinking マーカーも持たず `running` 既定に落ちていたので、`STATUS_REASON.CODEX_HOOKS_REVIEW` として `waiting` を返し NavigationButtons を出す。fixture は codex-cli 0.148.0 の実キャプチャ（3 画面）へ更新した
+
 ### Documentation
 
 - **docs(tutorial): 契約 → 検証ループを体験する構成へ改稿し、GIF 8 本を v0.24 の UI で撮り直す** (#1813): ja / en のチュートリアルを Fork → 登録 → Skill 導入 → **ゲートを赤で確認（exit 20）** → 契約を渡して判定（exit 0）→ 2 契約を並列 → 証跡 の 8 ステップへ改稿し、各ステップに「エンジニアならここで何を気にするか」を 1 行添えた。旧 §1.5 の誤記（「Skill は同じ場所へ入れ直せない」＝ #1243 / #1244 以降は誤り、install 先が 1 ディレクトリ）を、更新フロー・`.agents/skills` と `.claude/skills` の 2 ディレクトリ・再起動が要る理由に置き換えた。GIF は 8 本 × ja / en を隔離環境で撮り直し（旧 5 本 × 2 は削除）、絵コンテを `docs/images/tutorial/storyboards/01…08-*.yaml` に差し替えた。demo-video スキルには `verify-red` と `evidence` の 2 シーン（`cli-scene.sh --mode`）を追加している。掲載する出力はすべて実機の実測値で、`commandmate verify <id>`（ゲート無指定）が work-evidence で **exit 21** を返すこと、`wait --verify` は**開いている契約**に対してのみ契約ゲートで判定することも本文に明記した

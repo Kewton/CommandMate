@@ -354,7 +354,18 @@ export type CodexActiveDialog = 'update' | 'press-enter' | 'trust' | null;
  * update dialog wins over its own "Press enter to continue" footer, because Enter
  * on the update dialog could confirm the default "1. Update now" (npm install).
  */
-export function getCodexActiveDialog(output: string): CodexActiveDialog {
+/**
+ * The lines of Codex's ACTIVE region: everything strictly below the bottom-most
+ * genuine input-prompt line, or the whole frame when there is no prompt line
+ * (Issue #892).
+ *
+ * This is the one rule that keeps every Codex dialog classifier honest.
+ * capturePane returns scrollback, so a dialog that was answered minutes ago is
+ * still in the frame; only what sits BELOW the live prompt is still awaiting a
+ * key. Shared by getCodexActiveDialog and getCodexLifecycleDialog so the two
+ * cannot drift into disagreeing about what "active" means.
+ */
+function codexActiveRegionLines(output: string): string[] {
   const lines = output.split('\n');
   // Index of the bottom-most genuine input-prompt line (-1 if none).
   let promptIdx = -1;
@@ -364,10 +375,13 @@ export function getCodexActiveDialog(output: string): CodexActiveDialog {
       break;
     }
   }
-  // Active region = lines strictly below the genuine prompt (the whole frame when
-  // there is no genuine prompt). Residual dialog text above a live prompt is
-  // excluded, so a dialog lingering in scrollback is never treated as active.
-  const active = lines.slice(promptIdx + 1).join('\n');
+  return lines.slice(promptIdx + 1);
+}
+
+export function getCodexActiveDialog(output: string): CodexActiveDialog {
+  // Residual dialog text above a live prompt is excluded, so a dialog lingering
+  // in scrollback is never treated as active.
+  const active = codexActiveRegionLines(output).join('\n');
   if (active === '') {
     return null;
   }
@@ -382,6 +396,151 @@ export function getCodexActiveDialog(output: string): CodexActiveDialog {
   }
   if (active.includes('Press enter to continue')) {
     return 'press-enter';
+  }
+  return null;
+}
+
+/**
+ * Anchors of codex's "Hooks need review" launch dialog — screen 1 of the three
+ * it can put in front of a session (Issue #1760, re-measured on codex-cli
+ * 0.148.0 for Issue #1829):
+ *
+ * ```
+ *  Hooks need review
+ *  4 hooks are new or changed.
+ *  Hooks can run outside the sandbox after you trust them.
+ *
+ * > 1. Review hooks
+ *   2. Trust all and continue
+ *   3. Continue without trusting (hooks won't run)
+ *   Press enter to confirm or esc to go back
+ * ```
+ *
+ * The hook COUNT is data — 0.147.0 said 5, 0.148.0 said 4 — so neither anchor
+ * reads it. Both strings are required so a "hooks" mention elsewhere cannot
+ * select an option on a live prompt.
+ */
+export const CODEX_HOOKS_REVIEW_ANCHORS = ['Hooks need review', 'Continue without trusting'] as const;
+
+/**
+ * Footer of screen 2, the hooks LIST, new in codex-cli 0.148.0 (Issue #1829):
+ * `Press t to trust all; enter to review hooks; esc to close`.
+ *
+ * The semicolon is what separates it from screen 3's footer — "trust all;" and
+ * "trust;" are disjoint — and matching the footer rather than the table above it
+ * keeps the two screens distinguishable by a single line each.
+ */
+const CODEX_HOOKS_LIST_FOOTER_PATTERN = /press\s+t\s+to\s+trust\s+all\s*;/i;
+
+/**
+ * Footer of screen 3, the per-hook review DETAIL (Issue #1829):
+ * `Press t to trust; esc to go back`. Where both live sessions in the Issue were
+ * found parked.
+ */
+const CODEX_HOOKS_DETAIL_FOOTER_PATTERN = /press\s+t\s+to\s+trust\s*;/i;
+
+/**
+ * A screen codex puts up around a session's LIFECYCLE rather than around the
+ * work — one that `CodexTool.waitForReady` owns the answer to (Issue #1829).
+ *
+ * Wider than {@link CodexActiveDialog} in two directions: it covers the hooks
+ * review dialog (which #890's classifier deliberately returns `null` for, its
+ * wording matching none of that function's three anchors) and the two screens
+ * that dialog leads to, which carry no numbered options at all.
+ */
+export type CodexLifecycleDialog =
+  | 'hooks-review'
+  | 'hooks-list'
+  | 'hooks-detail'
+  | 'update'
+  | 'trust';
+
+/**
+ * How much of the active region {@link getCodexLifecycleDialog} judges, in
+ * non-blank lines counted from the bottom (Issue #1829).
+ *
+ * `getCodexActiveDialog` searches the whole active region, which is right for
+ * its caller: `waitForReady` only ever runs during `startSession`, when nothing
+ * else can be on screen. This classifier runs on every Auto-Yes poll for the
+ * life of the session, where "active region" alone is not enough — a codex
+ * approval request renders no `› ` composer line, so an approval that comes up
+ * while a dismissed hooks screen is still inside the capture window would have
+ * the whole frame as its active region and would be mistaken for the dialog.
+ * Requiring the dialog to be in the TAIL is what separates the screen the user
+ * is looking at from the one they have already left.
+ *
+ * 12 lines fits the tallest screen this has to recognise (the review dialog's
+ * two anchors sit 6 lines apart) and none of the shorter frames below it.
+ */
+const CODEX_LIFECYCLE_TAIL_LINES = 12;
+
+/**
+ * The interactive update dialog, by its option-3 label or its option-1 line.
+ *
+ * Deliberately stricter than `getCodexActiveDialog`'s `Update` AND `Skip`
+ * fallback: that pair can occur in ordinary agent output, and here a false
+ * positive silently stops Auto-Yes answering a real prompt. Both anchors below
+ * are dialog chrome that agent output does not produce.
+ */
+const CODEX_UPDATE_DIALOG_ANCHORS = [
+  /skip until next version/i,
+  /^\s*[›❯]?\s*\d+\.\s*Update now/im,
+] as const;
+
+/** The directory-trust dialog's question line. */
+const CODEX_TRUST_DIALOG_ANCHOR = /Do you trust/;
+
+/**
+ * Classify the bottom-most ACTIVE codex lifecycle screen (Issue #1829).
+ *
+ * Position-based, via {@link codexActiveRegionLines}: a dialog left in
+ * scrollback above a live prompt is not active and returns `null`. That is not
+ * a detail — the auto-answer guard in the Auto-Yes poller is built on this
+ * function, and a whole-frame version of it would switch Auto-Yes off for the
+ * rest of a codex session the moment any launch dialog scrolled past.
+ *
+ * The two hooks screens are matched FIRST and bottom-up, because a stuck pane
+ * holds screen 2 above screen 3 and the way out of each differs. The remaining
+ * three are region-level substring tests, which is all their anchors allow:
+ * the review dialog's are on two different lines.
+ *
+ * Deliberately NOT used to decide whether a prompt exists. `detectPrompt` still
+ * reports these screens, so a human still sees them; what this function gates is
+ * only whether a machine may answer on their behalf.
+ *
+ * @param output - ANSI-stripped pane capture
+ * @returns The active lifecycle screen, or null when none is
+ */
+export function getCodexLifecycleDialog(output: string): CodexLifecycleDialog | null {
+  const activeLines = codexActiveRegionLines(output);
+  const window: string[] = [];
+  for (let i = activeLines.length - 1; i >= 0 && window.length < CODEX_LIFECYCLE_TAIL_LINES; i--) {
+    if (activeLines[i].trim() === '') continue;
+    window.unshift(activeLines[i]);
+  }
+  if (window.length === 0) return null;
+  const text = window.join('\n');
+
+  // One bottom-up pass, returning on the first line that decides the question --
+  // including the lines that decide it NEGATIVELY. A stuck pane holds screen 2
+  // above screen 3, and an approval request can come up with a hooks screen
+  // still inside the capture window; in both cases the screen the user is
+  // looking at is the lower one.
+  for (let i = window.length - 1; i >= 0; i--) {
+    const line = window[i];
+    if (CODEX_HOOKS_LIST_FOOTER_PATTERN.test(line)) return 'hooks-list';
+    if (CODEX_HOOKS_DETAIL_FOOTER_PATTERN.test(line)) return 'hooks-detail';
+    // The agent asking the human for permission mid-turn (Issue #1628's
+    // "esc to cancel" footer, which no lifecycle screen wears). This is exactly
+    // the prompt Auto-Yes exists to answer, so whatever lifecycle text is still
+    // above it has been left behind and must not withhold the answer.
+    if (CODEX_APPROVAL_FOOTER_PATTERN.test(line)) return null;
+    if (CODEX_UPDATE_DIALOG_ANCHORS.some((pattern) => pattern.test(line))) return 'update';
+    if (CODEX_TRUST_DIALOG_ANCHOR.test(line)) return 'trust';
+    // Both anchors required, so a stray "hooks" mention cannot claim the screen.
+    if (line.includes(CODEX_HOOKS_REVIEW_ANCHORS[1]) && text.includes(CODEX_HOOKS_REVIEW_ANCHORS[0])) {
+      return 'hooks-review';
+    }
   }
   return null;
 }
