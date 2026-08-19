@@ -73,6 +73,30 @@ export interface WorktreeDetailResponse extends WorktreeItem {
   agentInstances: AgentInstance[];
 }
 
+/**
+ * Mirrors: src/lib/polling/auto-yes-resolver.ts AutoYesSuppressionReason
+ * (Issue #1843) — every value `autoYes.lastSuppression.reason` can carry.
+ *
+ * Copied rather than imported: tsconfig.cli.json sets `"paths": {}`, and the
+ * server module that declares the union imports `@/config/auto-yes-config`, so
+ * even a type-only import of it fails `npm run build:cli`. The copy is held to
+ * the original by a bidirectional assignability assertion in
+ * tests/unit/cli/config/cross-validation.test.ts, which fails `tsc --noEmit`
+ * the moment a reason is added server-side.
+ *
+ * The first four are verdicts of a contract's `autoYes` block. `agent-launch-dialog`
+ * is NOT: Issue #1829 records a CLI-lifecycle dialog the poller deliberately
+ * leaves to the tool's own launch sequence, through the same channel. Anything
+ * that phrases a suppression for a human has to tell the two apart — see
+ * SUPPRESSION_CAUSE in src/cli/commands/wait.ts.
+ */
+export type AutoYesSuppressionReason =
+  | 'mode-off'
+  | 'deny-pattern'
+  | 'deny-pattern-unusable'
+  | 'type-not-allowed'
+  | 'agent-launch-dialog';
+
 // Mirrors: src/app/api/worktrees/[id]/current-output/route.ts response shape
 // [DR2-03] All server-side fields included
 export interface CurrentOutputResponse {
@@ -94,6 +118,12 @@ export interface CurrentOutputResponse {
     // (Issue #1684). Non-null once the contract's autoYes policy withheld an
     // answer; `at` is refreshed every poll while the suppressed prompt remains.
     lastSuppression?: {
+      /**
+       * Normally an {@link AutoYesSuppressionReason}, but deliberately typed as
+       * the wire's `string`: this is a server response, and a server newer than
+       * the CLI can name a reason this build has never heard of. Consumers
+       * narrow it themselves and must stay truthful about the miss (Issue #1843).
+       */
       reason: string;
       mode: string | null;
       promptType: string;
