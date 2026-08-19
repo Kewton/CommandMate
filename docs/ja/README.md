@@ -12,7 +12,7 @@
 **[CommandMate 公式サイト（英語）→](https://kewton.github.io/CommandMate/)**
 
 <p align="center">
-  <img src="../images/demo-desktop.gif" width="600" alt="CommandMate デスクトップデモ" />
+  <img src="../images/demo-desktop.gif" width="600" alt="契約つきで送信し、ゲートが走り、exit code が RESULT passed を返す" />
 </p>
 
 > **vibe coding から、Vibe Engineering へ。**
@@ -31,7 +31,7 @@ CommandMate は、既に使っているエージェント CLI の上に**仕組�
 tmux も Git worktree もターミナルもエージェント CLI も置き換えません。それらに枠をかけ、成果物が「終わった」ではなく「検証済み」で返るようにします。
 
 <p align="center">
-  <img src="../images/demo-mobile.gif" width="300" alt="CommandMate モバイルデモ" />
+  <img src="../images/demo-mobile.gif" width="300" alt="入力待ちが届き、スマホから応答する" />
 </p>
 
 デスクトップでもモバイルでも使えます。あらゆるブラウザからセッションを監視・操作できます。

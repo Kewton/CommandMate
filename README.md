@@ -12,7 +12,7 @@
 **[commandmate website →](https://kewton.github.io/CommandMate/)**
 
 <p align="center">
-  <img src="./docs/images/demo-desktop.gif" width="600" alt="CommandMate Desktop Demo" />
+  <img src="./docs/images/demo-desktop.gif" width="600" alt="A task contract is sent, the verification gates run, and the exit code returns RESULT passed" />
 </p>
 
 > **From vibe coding to Vibe Engineering.**
@@ -31,7 +31,7 @@ CommandMate adds the machinery — a contract before the work, verification gate
 It does not replace tmux, Git worktrees, your terminal, or your agent CLI. It puts a frame around them, so the work arrives verified instead of merely finished.
 
 <p align="center">
-  <img src="./docs/images/demo-mobile.gif" width="300" alt="CommandMate Mobile Demo" />
+  <img src="./docs/images/demo-mobile.gif" width="300" alt="A waiting agent reaches you, and the prompt is answered from a phone" />
 </p>
 
 Works on desktop and mobile — monitor and steer sessions from any browser, including your phone.

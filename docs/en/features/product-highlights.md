@@ -229,8 +229,15 @@ regenerate** (`docs/images/demo-mobile.gif` already sits in history in four vers
 only what actually changed. The exception was this re-shoot: the Activity Bar gained icons between
 takes, so a partial update would have produced a page mixing two versions of the chrome.
 
-`docs/images/demo-desktop.mp4` and `demo-mobile.mp4` are the old recordings made on a personal
-machine; they remain only because the README GIFs reference them. **Do not reuse them**
+The old recordings under `docs/images/` that were made on a personal machine are **replaced as
+of #1815**. The README GIFs are cut from this library (EN and JA point at one file each, so both
+carry the en telop): `demo-desktop.gif` is seconds 0-18 of `cm-11-contract-verify.en.mp4` — the
+four beats without the outro card — and `demo-mobile.gif` is `respond-from-mobile` (seconds
+14-18) of `cm-03-never-miss-waiting.en.mp4`, **cropped to 520x800**. That crop width is set by
+the telop band's text, not by the phone frame (370px): cropping to the frame cuts the band
+mid-word, and cropping to the band's full width (594px) shrinks the phone to 187px, where the
+text on its screen stops being readable. The old `demo-desktop.mp4` and `demo-mobile.mp4`
+(69,870,130 bytes together) are deleted
 (see [website/assets/media/README.md](../../../website/assets/media/README.md)).
 
 ## Related documents
