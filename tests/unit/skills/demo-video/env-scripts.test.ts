@@ -31,6 +31,37 @@ const STUB_WRONG_PORT = path.join(DEMO_HOME, 'stub-wrong-port.js');
 const STUB_EXITS = path.join(DEMO_HOME, 'stub-exits.js');
 
 /**
+ * A fake `tmux`, so the teardown selection can be asserted without a real tmux
+ * server anywhere near it.
+ *
+ * This is not squeamishness: on 2026-08-02 a live tmux test in this repository
+ * killed every running `mcbd-*` session on the machine, and the developer's own
+ * sessions live on the same default socket the demo scripts talk to. A stub
+ * makes "which names would you have killed" observable and unkillable.
+ */
+const BIN_DIR = path.join(DEMO_HOME, 'bin');
+const TMUX_STUB = path.join(BIN_DIR, 'tmux');
+const TMUX_KILL_LOG = path.join(DEMO_HOME, 'tmux-kills.log');
+const TMUX_SESSION_LIST = path.join(DEMO_HOME, 'tmux-sessions.txt');
+
+/**
+ * Live session names as seen on a developer machine mid-work.
+ *
+ * The last four are the developer's own — sampled from a real
+ * `tmux list-sessions` — and the assertion that none of them is touched is the
+ * point of the fixture.
+ */
+const LIVE_SESSIONS = [
+  'mcbd-claude-wt-dark-mode',
+  'mcbd-claude-cmdemo-app',
+  'mcbd-codex-wt-api-cache-2',
+  'mcbd-claude-commandmate-issue-1809',
+  'mcbd-claude-mycodebranchdesk',
+  'mcbd-codex-commandagent-develop',
+  'mcbd-antigravity-zenn-content-develop',
+];
+
+/**
  * Port band this file allocates its demo port pair from.
  *
  * Chosen to sit clear of everything else the suite or the app binds (3000/3001,
@@ -147,6 +178,23 @@ beforeAll(async () => {
      setInterval(() => {}, 1 << 30);\n`,
   );
   fs.writeFileSync(STUB_EXITS, 'process.exit(3);\n');
+
+  fs.mkdirSync(BIN_DIR, { recursive: true });
+  fs.writeFileSync(
+    TMUX_STUB,
+    [
+      '#!/usr/bin/env bash',
+      'case "$1" in',
+      '  list-sessions) cat "$TMUX_STUB_SESSIONS" ;;',
+      // `kill-session -t =NAME`: record the target verbatim, exact-match sigil
+      // included, so a pattern-style target could not pass unnoticed.
+      '  kill-session) printf \'%s\\n\' "$3" >>"$TMUX_STUB_LOG" ;;',
+      'esac',
+      'exit 0',
+      '',
+    ].join('\n'),
+    { mode: 0o755 },
+  );
 });
 
 afterEach(() => {
@@ -230,6 +278,106 @@ describe('env-up boots an isolated instance', () => {
     expect(worktrees).toContain('[main]');
     expect(worktrees).toContain('[feature/demo-dark-mode]');
     expect(worktrees).toContain('[fix/demo-login-error]');
+  }, 60_000);
+
+  it('records the worktree ids the server will mint, and the paths they came from', async () => {
+    // Issue #1809. The ids are `sanitize(basename(path))` (deriveWorktreeId,
+    // src/lib/git/worktree-id.ts) — a rule the harness must not restate as
+    // constants, so env-up derives them from the directories it just created
+    // and hands them on through state.env. record-scenes.test.ts runs the
+    // product function over the same directory names.
+    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
+    const state = readState();
+
+    expect(state.CM_DEMO_PRIMARY_WORKTREE_ID).toBe('cmdemo-app');
+    expect(state.CM_DEMO_WORKTREE_ID).toBe('wt-dark-mode');
+    expect(state.CM_DEMO_LOGIN_WORKTREE_ID).toBe('wt-login-error');
+    expect(state.CM_DEMO_UNSYNCED_WORKTREE_ID).toBe('wt-api-cache');
+
+    expect(state.CM_DEMO_WORKTREE_PATH).toBe(path.join(state.CM_DEMO_SEED_ROOT, 'wt-dark-mode'));
+    expect(state.CM_DEMO_LOGIN_WORKTREE_PATH).toBe(
+      path.join(state.CM_DEMO_SEED_ROOT, 'wt-login-error'),
+    );
+    expect(state.CM_DEMO_UNSYNCED_WORKTREE_PATH).toBe(
+      path.join(state.CM_DEMO_SEED_ROOT, 'wt-api-cache'),
+    );
+    // Every recorded directory exists and its basename IS the recorded id, so a
+    // renamed seed directory cannot leave an id behind that nothing answers to.
+    for (const [id, dir] of [
+      [state.CM_DEMO_PRIMARY_WORKTREE_ID, state.CM_DEMO_SEED_REPO],
+      [state.CM_DEMO_WORKTREE_ID, state.CM_DEMO_WORKTREE_PATH],
+      [state.CM_DEMO_LOGIN_WORKTREE_ID, state.CM_DEMO_LOGIN_WORKTREE_PATH],
+      [state.CM_DEMO_UNSYNCED_WORKTREE_ID, state.CM_DEMO_UNSYNCED_WORKTREE_PATH],
+    ]) {
+      expect(fs.existsSync(dir)).toBe(true);
+      expect(path.basename(dir)).toBe(id);
+    }
+
+    // The record fake-agent.sh appends to, created empty so teardown can read
+    // it even when no scene ever started an agent.
+    expect(state.CM_DEMO_SESSIONS_FILE).toBe(path.join(DEMO_HOME, 'sessions'));
+    expect(fs.readFileSync(state.CM_DEMO_SESSIONS_FILE, 'utf8')).toBe('');
+  }, 60_000);
+
+  it('seeds the contract, the gate config and the work the gate judges', () => {
+    // Issue #1810. The contract allows `src/**` and `test/**` only, and the
+    // scope gate reconciles the whole `main..HEAD` diff — so verify.yaml, the
+    // contract and the agent command files have to be committed on `main`,
+    // before the branches exist. Committed on the feature branch they would be
+    // changes outside the allow list, and the contract-verify take would film
+    // its own harness failing the gate.
+    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
+    const state = readState();
+    const onMain = (relative: string) =>
+      spawnSync('git', ['-C', state.CM_DEMO_SEED_REPO, 'ls-tree', '--name-only', 'main', relative], {
+        encoding: 'utf8',
+      }).stdout.trim();
+
+    for (const tracked of [
+      '.commandmate/verify.yaml',
+      '.commandmate/tasks/dark-mode.yaml',
+      'test/theme.test.mjs',
+      '.claude/commands/work-plan.md',
+      '.claude/skills/cmate-verify/SKILL.md',
+      '.agents/skills/cmate-verify/SKILL.md',
+    ]) {
+      expect(onMain(tracked), `${tracked} is not committed on main`).toBe(tracked);
+    }
+
+    // The only difference between the worktree and its base: the work the
+    // gate is there to judge, left uncommitted so review-diff has something to
+    // click and work-evidence has something to count.
+    const dirty = spawnSync('git', ['-C', state.CM_DEMO_WORKTREE_PATH, 'status', '--porcelain'], {
+      encoding: 'utf8',
+    }).stdout.trim();
+    // `trim()` has eaten the leading space of ` M`, so match on the rest: one
+    // entry, modified, and it is the file the contract's scope allows.
+    expect(dirty).toBe('M src/theme.ts');
+  }, 60_000);
+
+  it('proves the seed gate green, and would fail if it were not', () => {
+    // The self-check is the reason the take cannot film `GATE unit FAIL`: the
+    // gate command is run here, in the worktree, before a server exists. This
+    // runs the seed's own gate a second time to show it really passes, and
+    // then breaks the work it judges to show the gate is not vacuous.
+    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
+    const state = readState();
+    const gate = () =>
+      spawnSync('node', ['--test'], { cwd: state.CM_DEMO_WORKTREE_PATH, encoding: 'utf8' });
+
+    expect(gate().status).toBe(0);
+
+    const theme = path.join(state.CM_DEMO_WORKTREE_PATH, 'src/theme.ts');
+    const original = fs.readFileSync(theme, 'utf8');
+    try {
+      // Back to what `main` carries: no resolveTheme. The test asserts on the
+      // uncommitted work specifically, so this must turn it red.
+      fs.writeFileSync(theme, 'export const THEME_STORAGE_KEY = "cmdemo.theme";\n');
+      expect(gate().status).not.toBe(0);
+    } finally {
+      fs.writeFileSync(theme, original);
+    }
+    expect(gate().status).toBe(0);
   }, 60_000);
 
   it('fails and cleans up when the server never answers on the demo port', async () => {
@@ -318,6 +466,44 @@ describe('env-down stops exactly what env-up started', () => {
     }
     expect(fs.existsSync(state.CM_DEMO_VIDEO_DIR)).toBe(false);
   }, 60_000);
+
+  it('kills the sessions this run accounts for and leaves the developer\'s alone', () => {
+    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
+    const state = readState();
+
+    // What fake-agent.sh --record-to would have written.
+    fs.writeFileSync(state.CM_DEMO_SESSIONS_FILE, 'mcbd-claude-wt-dark-mode\n');
+    fs.writeFileSync(TMUX_SESSION_LIST, `${LIVE_SESSIONS.join('\n')}\n`);
+    fs.rmSync(TMUX_KILL_LOG, { force: true });
+
+    const result = run(ENV_DOWN, [], {
+      PATH: `${BIN_DIR}:${process.env.PATH ?? ''}`,
+      TMUX_STUB_LOG: TMUX_KILL_LOG,
+      TMUX_STUB_SESSIONS: TMUX_SESSION_LIST,
+    });
+    expect(result.status).toBe(0);
+
+    const killed = fs.readFileSync(TMUX_KILL_LOG, 'utf8').split('\n').filter(Boolean);
+    expect(killed).toEqual([
+      // pass 1: the recorded name
+      '=mcbd-claude-wt-dark-mode',
+      // pass 2: derived from the ids in state.env — a session the demo server
+      // started itself, and an extra agent instance
+      '=mcbd-claude-cmdemo-app',
+      '=mcbd-codex-wt-api-cache-2',
+    ]);
+    // The record is consumed, so the next teardown cannot chase dead names.
+    expect(fs.existsSync(state.CM_DEMO_SESSIONS_FILE)).toBe(false);
+  }, 60_000);
+
+  it('would have missed the demo session under the pre-#1809 substring match', () => {
+    // Non-vacuity for the test above: the id no longer contains the repository
+    // name, so `grep -- '-cmdemo-app-'` — what env-down used to select on —
+    // matches none of the sessions this demo now creates, and teardown left the
+    // fake agent running.
+    expect(LIVE_SESSIONS.filter((name) => name.includes('-cmdemo-app-'))).toEqual([]);
+    expect('mcbd-claude-wt-dark-mode').not.toContain('-cmdemo-app-');
+  });
 
   it('reports there is nothing to stop when no state file exists', () => {
     const result = run(ENV_DOWN, []);

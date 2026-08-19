@@ -2,6 +2,14 @@
 
 # Quick Start Guide
 
+> **Start with the [Tutorial](./tutorial.md).** It walks the core of CommandMate — contract,
+> verification gates, evidence — on a sample repository in about fifteen minutes.
+>
+> **The slash commands on this page belong to the CommandMate repository only.** `/work-plan`,
+> `/tdd-impl` and the rest live in CommandMate's own `.claude/commands`; they are not installed into
+> your repository. The portable equivalents are the official Catalog Skills (`cmate-verify`,
+> `cmate-task-contract`, and others).
+
 Get started with a development flow using CommandMate's slash commands and agents for Claude Code.
 
 ---

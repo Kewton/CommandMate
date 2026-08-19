@@ -215,10 +215,62 @@ export function parseYamlSubset(text: string): YamlValue {
 
 // -------------------------------------------------------- storyboard --------
 
-export type SceneType = 'card' | 'record';
+export type SceneType = 'card' | 'record' | 'code';
 export type Viewport = 'pc' | 'mobile';
 export const LOCALES = ['ja', 'en'] as const;
 export type Locale = (typeof LOCALES)[number];
+
+/**
+ * Line budget for a `code` card (#1810).
+ *
+ * A code card is a still frame held for its declared duration, so the reader
+ * gets one pass over it at whatever size 30 lines can be set at. Beyond that
+ * the type shrinks past reading distance and the card stops being a card.
+ */
+export const MAX_CODE_CARD_LINES = 30;
+
+/**
+ * Column budget for a `code` card.
+ *
+ * The template does not wrap — a wrapped YAML key would read as a different
+ * document — so an over-wide line silently runs off the right edge of the frame
+ * instead of failing. Checked here, where it is still a one-second failure.
+ */
+export const MAX_CODE_CARD_COLUMNS = 100;
+
+/**
+ * Scenes whose footage only exists once a message has been sent (#1810).
+ *
+ * fake-agent.sh's cassette blocks on `@input` until CommandMate delivers a
+ * message, so every frame past the first is unreachable without a send: the
+ * approval prompt, the amber attention badge that counts it, and the Review
+ * screen's approval list are all the *same* frame seen from three surfaces.
+ * A storyboard that places one of them alone does not fail fast — it waits out
+ * the scene's whole timeout and then reports a take that never had a subject.
+ */
+export const SEND_SCENE_ID = 'send-and-generate';
+export const SCENES_REQUIRING_A_PRIOR_SEND: readonly string[] = [
+  'respond-from-mobile',
+  'attention-badge',
+  'review-screen',
+];
+
+/**
+ * Scenes that *answer* the approval prompt, and so consume it (#1810).
+ *
+ * The cassette paints one approval per pass. A cut placing two of these makes
+ * the second wait out its whole timeout against a session that is no longer
+ * asking anything — a failed take, minutes in, whose message says only that
+ * nothing became `isWaitingForResponse`.
+ */
+export const APPROVAL_CONSUMING_SCENES: readonly string[] = ['respond-from-mobile', 'review-screen'];
+
+/**
+ * Films the moment a session *starts* waiting, so it has to run before anything
+ * answers: the cross-screen toast comes off a realtime event, and a page opened
+ * after the edge never receives one.
+ */
+export const ATTENTION_SCENE_ID = 'attention-badge';
 
 export interface StoryboardScene {
   id: string;
@@ -226,6 +278,12 @@ export interface StoryboardScene {
   duration: number;
   viewport: Viewport;
   telop: Record<Locale, string>;
+  /** `code` scenes only: the path as authored, relative to the storyboard. */
+  source?: string;
+  /** `code` scenes only: `source` resolved against the storyboard's directory. */
+  sourcePath?: string;
+  /** `code` scenes only: syntax label rendered on the card (`yaml`, `text`, ...). */
+  lang?: string;
 }
 
 export interface Storyboard {
@@ -248,6 +306,9 @@ export interface Storyboard {
 export const TELOP_LIMITS: Record<SceneType, { jaChars: number; enWords: number }> = {
   record: { jaChars: 20, enWords: 8 },
   card: { jaChars: 40, enWords: 12 },
+  // A code card is a still frame like a card, so it gets the card budget: the
+  // telop is the caption above the listing, not a band over moving footage.
+  code: { jaChars: 40, enWords: 12 },
 };
 
 /** Sub-frame slop: durations are authored in whole seconds but summed as floats. */
@@ -258,7 +319,90 @@ export function countEnglishWords(text: string): number {
   return trimmed === '' ? 0 : trimmed.split(/\s+/).length;
 }
 
-function readScene(raw: YamlValue, index: number, errors: string[]): StoryboardScene | null {
+/**
+ * Resolve a `code` scene's `source` against the storyboard's own directory, and
+ * refuse anything that leaves it.
+ *
+ * Same property `output` already defends, one level up: a storyboard is data
+ * edited by whoever writes the wording, and `source: ../../../etc/passwd` would
+ * otherwise put an arbitrary file on screen in a published video. The check is
+ * on the *resolved* path rather than on the spelling, so a path that reaches
+ * outside through a symlinked subdirectory is caught too.
+ */
+export function resolveCodeSource(
+  baseDir: string,
+  source: string,
+): { path: string } | { error: string } {
+  if (source.trim() === '') return { error: 'source must not be empty' };
+  if (path.isAbsolute(source)) {
+    return { error: `source must be relative to the storyboard, got '${source}'` };
+  }
+  const base = fs.existsSync(baseDir) ? fs.realpathSync(baseDir) : path.resolve(baseDir);
+  const joined = path.resolve(base, source);
+  const resolved = fs.existsSync(joined) ? fs.realpathSync(joined) : joined;
+  if (resolved !== base && !resolved.startsWith(base + path.sep)) {
+    return { error: `source must stay inside ${base}, got '${source}' -> ${resolved}` };
+  }
+  return { path: resolved };
+}
+
+function readCodeSource(
+  map: Record<string, YamlValue>,
+  where: string,
+  id: string,
+  baseDir: string,
+  errors: string[],
+): { source: string; sourcePath: string; lang: string } | null {
+  const source = map.source;
+  if (typeof source !== 'string') {
+    errors.push(`${where} (${id}): a code scene needs 'source', the file it renders`);
+    return null;
+  }
+  const lang = map.lang;
+  if (typeof lang !== 'string' || !/^[a-z0-9][a-z0-9+#.-]{0,19}$/.test(lang)) {
+    errors.push(
+      `${where} (${id}): lang must be a short syntax label like 'yaml' or 'text', got ${JSON.stringify(lang)}`,
+    );
+    return null;
+  }
+  const resolved = resolveCodeSource(baseDir, source);
+  if ('error' in resolved) {
+    errors.push(`${where} (${id}): ${resolved.error}`);
+    return null;
+  }
+  let body: string;
+  try {
+    body = fs.readFileSync(resolved.path, 'utf8');
+  } catch {
+    errors.push(`${where} (${id}): cannot read source '${source}' (looked at ${resolved.path})`);
+    return null;
+  }
+  const lines = body.replace(/\n$/, '').split('\n');
+  if (lines.length > MAX_CODE_CARD_LINES) {
+    errors.push(
+      `${where} (${id}): source '${source}' is ${lines.length} lines, limit is ${MAX_CODE_CARD_LINES}`,
+    );
+    return null;
+  }
+  const overlong = lines
+    .map((line, index) => ({ n: index + 1, width: [...line].length }))
+    .filter((line) => line.width > MAX_CODE_CARD_COLUMNS);
+  if (overlong.length > 0) {
+    errors.push(
+      `${where} (${id}): source '${source}' line ${overlong[0].n} is ${overlong[0].width} columns, ` +
+        `limit is ${MAX_CODE_CARD_COLUMNS} (the card does not wrap)`,
+    );
+    return null;
+  }
+  return { source, sourcePath: resolved.path, lang };
+}
+
+function readScene(
+  raw: YamlValue,
+  index: number,
+  baseDir: string,
+  errors: string[],
+): StoryboardScene | null {
   const where = `scenes[${index}]`;
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     errors.push(`${where}: expected a mapping`);
@@ -271,8 +415,10 @@ function readScene(raw: YamlValue, index: number, errors: string[]): StoryboardS
     return null;
   }
   const type = map.type;
-  if (type !== 'card' && type !== 'record') {
-    errors.push(`${where} (${id}): type must be 'card' or 'record', got ${JSON.stringify(type)}`);
+  if (type !== 'card' && type !== 'record' && type !== 'code') {
+    errors.push(
+      `${where} (${id}): type must be 'card', 'record' or 'code', got ${JSON.stringify(type)}`,
+    );
     return null;
   }
   const duration = map.duration;
@@ -283,8 +429,8 @@ function readScene(raw: YamlValue, index: number, errors: string[]): StoryboardS
 
   let viewport: Viewport = 'pc';
   if (map.viewport !== undefined) {
-    if (type === 'card') {
-      errors.push(`${where} (${id}): a card scene is not recorded, so it must not declare a viewport`);
+    if (type !== 'record') {
+      errors.push(`${where} (${id}): a ${type} scene is not recorded, so it must not declare a viewport`);
       return null;
     }
     if (map.viewport !== 'pc' && map.viewport !== 'mobile') {
@@ -292,6 +438,15 @@ function readScene(raw: YamlValue, index: number, errors: string[]): StoryboardS
       return null;
     }
     viewport = map.viewport;
+  }
+
+  let code: { source: string; sourcePath: string; lang: string } | null = null;
+  if (type === 'code') {
+    code = readCodeSource(map, where, id, baseDir, errors);
+    if (!code) return null;
+  } else if (map.source !== undefined || map.lang !== undefined) {
+    errors.push(`${where} (${id}): only a code scene may declare 'source' / 'lang'`);
+    return null;
   }
 
   const telopRaw = map.telop;
@@ -337,7 +492,9 @@ function readScene(raw: YamlValue, index: number, errors: string[]): StoryboardS
     );
   }
 
-  return { id, type, duration, viewport, telop };
+  return code
+    ? { id, type, duration, viewport, telop, ...code }
+    : { id, type, duration, viewport, telop };
 }
 
 export interface ValidationResult {
@@ -361,6 +518,7 @@ export interface ValidationResult {
 export function validateStoryboard(
   raw: YamlValue,
   implementedSceneIds: string[] = SCENES.map((scene) => scene.id),
+  baseDir: string = path.dirname(DEFAULT_STORYBOARD_PATH),
 ): ValidationResult {
   const errors: string[] = [];
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
@@ -389,7 +547,7 @@ export function validateStoryboard(
   const scenes: StoryboardScene[] = [];
   const seen = new Set<string>();
   rawScenes.forEach((rawScene, index) => {
-    const scene = readScene(rawScene, index, errors);
+    const scene = readScene(rawScene, index, baseDir, errors);
     if (!scene) return;
     if (seen.has(scene.id)) {
       errors.push(`scenes[${index}]: duplicate scene id '${scene.id}'`);
@@ -419,6 +577,43 @@ export function validateStoryboard(
     );
   }
 
+  // The dependency #1575 exposed and #1810 widened: the cassette parks on
+  // `@input` until CommandMate sends a message, so nothing downstream of the
+  // send is on screen without it. Enforced here rather than only in a test, so
+  // `demo-video.sh --check` catches it in a second instead of the recorder
+  // catching it after a scene's whole timeout has run out.
+  const orderOf = (id: string): number => scenes.findIndex((scene) => scene.id === id);
+  const sendAt = orderOf(SEND_SCENE_ID);
+  for (const dependent of SCENES_REQUIRING_A_PRIOR_SEND) {
+    const at = orderOf(dependent);
+    if (at === -1) continue;
+    if (sendAt === -1 || sendAt > at) {
+      errors.push(
+        `scene '${dependent}' needs '${SEND_SCENE_ID}' earlier in the cut: the cassette blocks ` +
+          'on @input until a message is sent, so the frame it films is never painted',
+      );
+    }
+  }
+
+  const consumers = APPROVAL_CONSUMING_SCENES.filter((id) => orderOf(id) !== -1);
+  if (consumers.length > 1) {
+    errors.push(
+      `scenes ${consumers.map((id) => `'${id}'`).join(' and ')} both answer the approval prompt, ` +
+        'and the cassette paints one per pass: the second would wait out its timeout',
+    );
+  }
+  const attentionAt = orderOf(ATTENTION_SCENE_ID);
+  if (attentionAt !== -1) {
+    for (const consumer of consumers) {
+      if (orderOf(consumer) < attentionAt) {
+        errors.push(
+          `scene '${ATTENTION_SCENE_ID}' films the moment a session starts waiting, so it must ` +
+            `come before '${consumer}', which answers the prompt`,
+        );
+      }
+    }
+  }
+
   if (errors.length > 0) return { storyboard: null, errors };
   return {
     storyboard: {
@@ -431,14 +626,23 @@ export function validateStoryboard(
   };
 }
 
-export function parseStoryboard(text: string, implementedSceneIds?: string[]): ValidationResult {
+/**
+ * @param baseDir directory `code` scenes resolve their `source` against —
+ * always the directory holding the storyboard itself, so a cut can only ship
+ * code it sits next to. Callers that read a file pass `path.dirname(file)`.
+ */
+export function parseStoryboard(
+  text: string,
+  implementedSceneIds?: string[],
+  baseDir?: string,
+): ValidationResult {
   let raw: YamlValue;
   try {
     raw = parseYamlSubset(text);
   } catch (error) {
     return { storyboard: null, errors: [error instanceof Error ? error.message : String(error)] };
   }
-  return validateStoryboard(raw, implementedSceneIds);
+  return validateStoryboard(raw, implementedSceneIds, baseDir);
 }
 
 // ------------------------------------------------------------- plan ---------
@@ -451,6 +655,10 @@ export interface PlanEntry {
   durationSec: number;
   endSec: number;
   telop: string;
+  /** `code` scenes only: absolute path of the listing the card renders. */
+  sourcePath?: string;
+  /** `code` scenes only: syntax label rendered on the card. */
+  lang?: string;
 }
 
 /** Absolute timeline positions, accumulated from the storyboard's own cut. */
@@ -465,6 +673,11 @@ export function buildPlan(storyboard: Storyboard, locale: Locale): PlanEntry[] {
       durationSec: scene.duration,
       endSec: cursor + scene.duration,
       telop: scene.telop[locale],
+      // Deliberately not a TSV column: compose.sh only needs to know that the
+      // row is a still, and every extra column is one more thing its `read`
+      // has to keep in step with. The path is for render-overlays.ts, which
+      // reads the plan as JSON.
+      ...(scene.sourcePath ? { sourcePath: scene.sourcePath, lang: scene.lang } : {}),
     };
     cursor += scene.duration;
     return entry;
@@ -553,7 +766,11 @@ export function runStoryboardCli(argv: string[], write: (text: string) => void):
     process.stderr.write(`storyboard: ${error instanceof Error ? error.message : String(error)}\n`);
     return 2;
   }
-  const { storyboard, errors } = parseStoryboard(fs.readFileSync(options.file, 'utf8'));
+  const { storyboard, errors } = parseStoryboard(
+    fs.readFileSync(options.file, 'utf8'),
+    undefined,
+    path.dirname(path.resolve(options.file)),
+  );
   if (!storyboard) {
     process.stderr.write(`storyboard: ${options.file} is invalid\n`);
     for (const error of errors) process.stderr.write(`  - ${error}\n`);

@@ -22,7 +22,8 @@ It's a step-by-step guide for first-time users.
 9. [Markdown Log Viewer](#markdown-log-viewer)
 10. [Notes Feature](#notes-feature)
 11. [Agent Settings](#agent-settings)
-12. [Mobile Access](#mobile-access)
+12. [Execution Contract and Verification](#execution-contract-and-verification)
+13. [Mobile Access](#mobile-access)
 
 ---
 
@@ -324,6 +325,54 @@ When Vibe-Local is selected, you can specify which Ollama model to use.
 2. If Ollama is not running, "Ollama is not running" is displayed
 
 > **Note**: The selected model is also used for scheduled executions (CMATE.md).
+
+---
+
+## Execution Contract and Verification
+
+The **execution contract** handed to an agent with `commandmate send --contract`, and the
+**gate verdicts** `commandmate verify` produced from it, are readable on screen — no CLI
+stdout required (Issue #1816).
+
+### The header status chip
+
+A worktree that was delegated with a contract shows a status chip in its header, carrying
+the task title, its `TaskStatus`, and the `RESULT` of the most recent verification run.
+
+- A worktree with no task row shows **no chip at all**
+- Hovering the chip (or reading it with a screen reader) gives the **reason** behind the
+  verdict, down to the ids of the gates that did not pass
+- Clicking the chip opens the **Verification** pane
+
+### The Verification pane
+
+| Surface | How to open |
+|---------|-------------|
+| Desktop | The shield icon (Verification) in the left Activity Bar |
+| Mobile  | **Tools** tab in the bottom bar → **Verification** sub-tab |
+
+The pane has three sections, top to bottom.
+
+1. **Execution contract** — title, the start of `goal`, `scope.allow`, `verify.gates`,
+   `autoYes.mode`, and the contract file path. With no contract, it says how to create one
+   (`commandmate send --contract`, or the `cmate-task-contract` Skill)
+2. **Verification runs** — newest first (start time, `RESULT`, run id, trigger), plus the
+   **Re-verify** button. Selecting a run switches the third section to it
+3. **Gates** — the selected run's gate table: gate id, `PASS` / `FAIL` / `TIMEOUT` / `SKIP`,
+   exit code, duration, and the last 40 log lines. Gates that did not pass open with their
+   log already expanded
+
+### The Re-verify button
+
+It calls `POST /api/worktrees/:id/verify` and re-reads the list as soon as the route answers
+202 with a run id. Gates are whole suites and builds, so the request returns **before** any
+verdict exists; progress then arrives on the worktree detail screen's existing poll. When a
+run is already going, the pane says so and names it.
+
+> **This surface is read-only.** There is no contract editor. Edit
+> `.commandmate/tasks/<name>.yaml` directly and re-send with `commandmate send --contract` —
+> scope is judged against the **snapshot taken at send time**, so editing the YAML alone
+> changes no verdict.
 
 ---
 

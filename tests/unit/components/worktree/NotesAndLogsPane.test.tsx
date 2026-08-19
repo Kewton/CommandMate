@@ -3,6 +3,8 @@
  * Issue #368: Adds 'agent' sub-tab for Agent settings
  * Issue #874: Adds instance-management mode (mobile) for the 'agent' sub-tab
  * Issue #1442: Adds 'skills' sub-tab (mobile) + horizontal-scroll tab row
+ * Issue #1816: Adds the 'verification' sub-tab, offered only when the caller
+ * supplies verification state, and reachable from outside via requestedSubTab
  * @vitest-environment jsdom
  */
 
@@ -31,6 +33,10 @@ vi.mock('@/components/worktree/AgentSettingsPane', () => ({
   AgentSettingsPane: ({ worktreeId }: { worktreeId: string }) => (
     <div data-testid="agent-settings-pane">AgentSettingsPane: {worktreeId}</div>
   ),
+}));
+
+vi.mock('@/components/worktree/VerificationPane', () => ({
+  VerificationPane: () => <div data-testid="verification-pane-stub">VerificationPane</div>,
 }));
 
 vi.mock('@/components/skills/WorktreeSkillsPane', () => ({
@@ -216,6 +222,68 @@ describe('NotesAndLogsPane', () => {
       fireEvent.click(screen.getByText('schedule.agentTab'));
       expect(screen.getByTestId('agent-settings-pane')).toBeInTheDocument();
       expect(screen.queryByTestId('mobile-agent-instances-pane')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Verification sub-tab (Issue #1816)', () => {
+    // Only the identity of the object matters here — VerificationPane is
+    // stubbed, and the pane itself is covered by its own test.
+    const verification = {} as never;
+
+    it('is not offered when the caller supplies no verification state', () => {
+      render(<NotesAndLogsPane {...defaultProps} />);
+      expect(screen.queryByText('schedule.verificationTab')).not.toBeInTheDocument();
+    });
+
+    it('renders VerificationPane when the tab is selected', () => {
+      render(<NotesAndLogsPane {...defaultProps} verification={verification} />);
+      fireEvent.click(screen.getByText('schedule.verificationTab'));
+      expect(screen.getByTestId('verification-pane-stub')).toBeInTheDocument();
+    });
+
+    it('opens on Verification when the request is already present at mount', () => {
+      // The mobile shell unmounts this pane whenever the Tools tab is left, so
+      // the header chip's jump arrives together with the remount.
+      render(
+        <NotesAndLogsPane
+          {...defaultProps}
+          verification={verification}
+          requestedSubTab={{ tab: 'verification', token: 1 }}
+        />
+      );
+      expect(screen.getByTestId('verification-pane-stub')).toBeInTheDocument();
+    });
+
+    it('switches on a NEW request while already mounted, and not on a repeat of the old one', () => {
+      const { rerender } = render(
+        <NotesAndLogsPane
+          {...defaultProps}
+          verification={verification}
+          requestedSubTab={{ tab: 'verification', token: 1 }}
+        />
+      );
+      fireEvent.click(screen.getByText('schedule.notes'));
+      expect(screen.queryByTestId('verification-pane-stub')).not.toBeInTheDocument();
+
+      // Same token, new object identity: the user's own tab choice stands.
+      rerender(
+        <NotesAndLogsPane
+          {...defaultProps}
+          verification={verification}
+          requestedSubTab={{ tab: 'verification', token: 1 }}
+        />
+      );
+      expect(screen.queryByTestId('verification-pane-stub')).not.toBeInTheDocument();
+
+      // A fresh tap of the chip bumps the token and does switch.
+      rerender(
+        <NotesAndLogsPane
+          {...defaultProps}
+          verification={verification}
+          requestedSubTab={{ tab: 'verification', token: 2 }}
+        />
+      );
+      expect(screen.getByTestId('verification-pane-stub')).toBeInTheDocument();
     });
   });
 });

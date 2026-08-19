@@ -8,12 +8,12 @@
  *   - `src/components/worktree/ActivityPane.tsx`
  *   - `src/components/worktree/WorktreeDetailRefactored.tsx`
  *
- * The Activity Bar is a 48px-wide vertical bar that hosts 7 activities.
+ * The Activity Bar is a 48px-wide vertical bar that hosts the activities below.
  * Re-clicking the active icon toggles the ActivityPane closed (null).
  */
 
 import type { ComponentType, SVGProps } from 'react';
-import { File, GitBranch, StickyNote, Calendar, Bot, Timer, ListTodo, Sparkles } from 'lucide-react';
+import { File, GitBranch, StickyNote, Calendar, Bot, Timer, ListTodo, Sparkles, ShieldCheck } from 'lucide-react';
 
 /**
  * Unique identifier for an activity in the Activity Bar.
@@ -26,7 +26,8 @@ export type ActivityId =
   | 'agent'
   | 'timer'
   | 'todo'
-  | 'skills';
+  | 'skills'
+  | 'verification';
 
 /**
  * Metadata for a single Activity Bar icon.
@@ -63,6 +64,10 @@ export const ACTIVITIES: readonly ActivityDefinition[] = [
   { id: 'todo', labelKey: 'activityBar.todo', icon: ListTodo },
   // Issue #1441: worktree-scoped Skill install/uninstall management.
   { id: 'skills', labelKey: 'activityBar.skills', icon: Sparkles },
+  // Issue #1816: the execution contract and the verification gates. Appended
+  // rather than inserted so the existing ArrowUp/ArrowDown order — which users
+  // and tests both index by position — is unchanged.
+  { id: 'verification', labelKey: 'activityBar.verification', icon: ShieldCheck },
 ] as const;
 
 /**

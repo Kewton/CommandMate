@@ -21,7 +21,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="${CM_DEMO_REPO_ROOT:-$(cd "$SKILL_DIR/../../.." && pwd)}"
 
-WORKTREE_ID="cmdemo-app-feature-demo-dark-mode"
+# The worktree ids are NOT constants here. CommandMate mints them from the
+# directory (`deriveWorktreeId`, src/lib/git/worktree-id.ts — Issue #1621/#1644),
+# so env-up.sh derives them from the seed directories it just created and writes
+# them to state.env; this script reads them back after every env-up. A constant
+# here is what broke the whole pipeline once already (#1809): it held an id spelled
+# by the retired branch-derived rule, so the harness created a tmux session under
+# a name the server never looked for. Nothing was adopted, `isSessionRunning`
+# stayed false, and every scene died at its own timeout.
 MESSAGE="Add a dark mode toggle to the header"
 STORYBOARD="$SKILL_DIR/storyboard/default.yaml"
 OUT_DIR="${CM_DEMO_OUT_DIR:-$HOME/Desktop/commandmate-demo}"
@@ -29,6 +36,11 @@ LOCALES="ja en"
 WANT_GIF=0
 FRAME="1280x800"
 CHECK_ONLY=0
+# A scene may report itself unfilmable (install-skill needs the official Skill
+# Catalog, whose URL is a compile-time constant). Off by default: skipping
+# silently is how a storyboard ends up short one shot and nobody notices until
+# ffmpeg meets an absent file, with the reason long gone.
+ALLOW_SKIP=""
 
 die() {
   printf 'demo-video: %s\n' "$1" >&2
@@ -49,6 +61,8 @@ Usage: demo-video.sh [--locale ja|en|all] [--out DIR] [--gif] [--check]
   --frame WxH   output frame size (default 1280x800)
   --gif         also write a README-sized GIF next to each mp4
   --check       run the dependency check and storyboard validation, then stop
+  --allow-skip  let a scene that cannot be filmed here (install-skill needs the
+                network) be reported and passed over instead of failing the run
 USAGE
 }
 
@@ -69,6 +83,7 @@ while [ $# -gt 0 ]; do
     --frame) [ $# -ge 2 ] || die "--frame needs a value"; FRAME="$2"; shift 2 ;;
     --gif) WANT_GIF=1; shift ;;
     --check) CHECK_ONLY=1; shift ;;
+    --allow-skip) ALLOW_SKIP="--allow-skip"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die "unknown argument: $1" ;;
   esac
@@ -77,7 +92,12 @@ done
 # ---------------------------------------------------------- dependencies -----
 
 MISSING=""
-for tool in tmux git curl node awk ffmpeg ffprobe; do
+# `claude` is in this list even though the demo never runs a real LLM: the send
+# scene posts to /api/worktrees/<id>/send, and that route answers 503 before it
+# looks at anything else when `cliTool.isInstalled()` is false — a plain
+# `which claude` (src/app/api/worktrees/[id]/send/route.ts). Without the binary
+# on PATH the take dies mid-recording instead of here.
+for tool in tmux git curl node awk ffmpeg ffprobe claude; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     MISSING="$MISSING $tool"
   fi
@@ -89,6 +109,9 @@ if [ -n "$MISSING" ]; then
   esac
   case "$MISSING" in
     *tmux*) printf '  brew install tmux\n' >&2 ;;
+  esac
+  case "$MISSING" in
+    *claude*) printf '  npm install -g @anthropic-ai/claude-code   # or https://claude.com/download\n' >&2 ;;
   esac
   exit 1
 fi
@@ -131,13 +154,28 @@ for loc in $LOCALES; do
 
   "$SCRIPT_DIR/env-up.sh" || die "env-up failed for locale '$loc'"
   ENV_IS_UP=1
+  # Cleared before sourcing so a key the new state file does not carry cannot be
+  # satisfied by the previous locale's value.
+  CM_DEMO_WORKTREE_ID=""
+  CM_DEMO_UNSYNCED_WORKTREE_ID=""
+  CM_DEMO_WORKTREE_PATH=""
+  CM_DEMO_SESSIONS_FILE=""
   # shellcheck disable=SC1090
   . "${CM_DEMO_HOME:-$HOME/.commandmate-demo}/state.env"
+  [ -n "$CM_DEMO_WORKTREE_ID" ] || die "state.env has no CM_DEMO_WORKTREE_ID — env-up.sh is out of date"
+  [ -n "$CM_DEMO_UNSYNCED_WORKTREE_ID" ] || die "state.env has no CM_DEMO_UNSYNCED_WORKTREE_ID — env-up.sh is out of date"
+  [ -n "$CM_DEMO_WORKTREE_PATH" ] || die "state.env has no CM_DEMO_WORKTREE_PATH — env-up.sh is out of date"
+  [ -n "$CM_DEMO_SESSIONS_FILE" ] || die "state.env has no CM_DEMO_SESSIONS_FILE — env-up.sh is out of date"
 
-  log "starting the fake agent"
+  # `mcbd-claude-<worktreeId>` with no suffix: that is the primary instance's
+  # name (`getSessionName`, src/lib/session/claude-session.ts), and matching it
+  # is what makes the server adopt this pane instead of launching a real CLI.
+  SESSION_NAME="mcbd-claude-$CM_DEMO_WORKTREE_ID"
+  log "starting the fake agent in $SESSION_NAME"
   "$SCRIPT_DIR/fake-agent.sh" "$SKILL_DIR/fixtures/claude-session-sample.cast" \
-    --session "mcbd-claude-$WORKTREE_ID" \
-    --cwd "$CM_DEMO_SEED_ROOT/wt-dark-mode" >/dev/null \
+    --session "$SESSION_NAME" \
+    --cwd "$CM_DEMO_WORKTREE_PATH" \
+    --record-to "$CM_DEMO_SESSIONS_FILE" >/dev/null \
     || die "could not start the fake agent"
 
   SCENES_DIR="$CM_DEMO_VIDEO_DIR/$loc"
@@ -161,7 +199,10 @@ for loc in $LOCALES; do
 
   log "recording scenes:$SCENE_ARGS"
   "$REPO_ROOT/node_modules/.bin/tsx" "$SCRIPT_DIR/record-scenes.ts" \
-    --locale "$loc" --out "$SCENES_DIR" --message "$MESSAGE" --worktree "$WORKTREE_ID" \
+    --locale "$loc" --out "$SCENES_DIR" --message "$MESSAGE" \
+    --worktree "$CM_DEMO_WORKTREE_ID" --worktree-path "$CM_DEMO_WORKTREE_PATH" \
+    --unsynced-worktree "$CM_DEMO_UNSYNCED_WORKTREE_ID" \
+    $ALLOW_SKIP \
     $SCENE_ARGS \
     || die "recording failed for locale '$loc'"
 

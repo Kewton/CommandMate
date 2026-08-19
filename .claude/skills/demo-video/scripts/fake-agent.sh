@@ -19,6 +19,12 @@ DRY_RUN=0
 CASSETTE=""
 SESSION=""
 SESSION_CWD="$PWD"
+RECORD_TO=""
+# Seconds an `@input` row keeps reading after its first line before deciding the
+# submission is over. Whole seconds because bash 3.2's `read -t` takes no
+# fraction. 0 turns draining off, which is what a fixture wants when it queues
+# several *distinct* submissions on one pipe.
+INPUT_SETTLE=1
 
 # Matches TUI_PANE_WIDTH / TUI_PANE_HEIGHT (src/config/tmux-pane-config.ts). The
 # server force-reconciles adopted sessions to this geometry, so creating the
@@ -35,6 +41,7 @@ usage() {
   cat <<'USAGE'
 Usage: fake-agent.sh <cassette> [--speed N] [--once] [--dry-run]
        fake-agent.sh <cassette> --session <tmux-name> [--cwd DIR] [--speed N]
+                     [--record-to FILE]
 
   --speed N       divide every delay by N (2.0 = twice as fast). Must be > 0.
   --once          stop after one pass instead of looping back to the idle frame.
@@ -45,6 +52,11 @@ Usage: fake-agent.sh <cassette> [--speed N] [--once] [--dry-run]
                   Use CommandMate's own name, `mcbd-claude-<worktreeId>`, so the
                   server adopts the session instead of starting a real CLI.
   --cwd DIR       working directory for --session (default: current directory).
+  --record-to F   append the created session name to F, one per line. env-down.sh
+                  kills what it finds there, so teardown never has to guess a
+                  name pattern — it stops exactly what was started.
+  --input-settle N  seconds an @input row keeps reading after its first line, to
+                  take a multi-line message as one submission (default 1; 0 off).
 
 Cassette rows are "<delayMs>|@input <TAB> <payload>"; `#` rows and blank rows
 are ignored. Payloads go through `printf %b`. `{{INPUT}}` is replaced with the
@@ -83,6 +95,19 @@ while [ $# -gt 0 ]; do
       SESSION_CWD="$2"
       shift 2
       ;;
+    --record-to)
+      [ $# -ge 2 ] || die "--record-to needs a value"
+      RECORD_TO="$2"
+      shift 2
+      ;;
+    --input-settle)
+      [ $# -ge 2 ] || die "--input-settle needs a value"
+      case "$2" in
+        ''|*[!0-9]*) die "--input-settle must be a whole number of seconds, got '$2'" ;;
+      esac
+      INPUT_SETTLE="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -108,9 +133,16 @@ if [ "$(awk -v s="$SPEED" 'BEGIN { print (s > 0) ? 1 : 0 }')" != "1" ]; then
   die "--speed must be greater than 0, got '$SPEED'"
 fi
 
+[ -z "$RECORD_TO" ] || [ -n "$SESSION" ] || die "--record-to only means anything together with --session"
+
 if [ -n "$SESSION" ]; then
   command -v tmux >/dev/null 2>&1 || die "tmux not found"
   [ -d "$SESSION_CWD" ] || die "--cwd is not a directory: $SESSION_CWD"
+  if [ -n "$RECORD_TO" ]; then
+    # Checked before the session exists: a session created and then not written
+    # down is exactly the leak --record-to is here to prevent.
+    [ -d "$(dirname "$RECORD_TO")" ] || die "--record-to directory does not exist: $(dirname "$RECORD_TO")"
+  fi
   case "$SESSION" in
     *[!a-zA-Z0-9_-]*) die "session name must match [a-zA-Z0-9_-]+ (CommandMate's SESSION_NAME_PATTERN), got '$SESSION'" ;;
   esac
@@ -121,10 +153,13 @@ if [ -n "$SESSION" ]; then
   CASSETTE_ABS="$(cd "$(dirname "$CASSETTE")" && pwd)/$(basename "$CASSETTE")"
   if [ "$LOOP" -eq 1 ]; then
     tmux new-session -d -s "$SESSION" -c "$SESSION_CWD" -x "$PANE_WIDTH" -y "$PANE_HEIGHT" \
-      "$SELF" "$CASSETTE_ABS" --speed "$SPEED"
+      "$SELF" "$CASSETTE_ABS" --speed "$SPEED" --input-settle "$INPUT_SETTLE"
   else
     tmux new-session -d -s "$SESSION" -c "$SESSION_CWD" -x "$PANE_WIDTH" -y "$PANE_HEIGHT" \
-      "$SELF" "$CASSETTE_ABS" --speed "$SPEED" --once
+      "$SELF" "$CASSETTE_ABS" --speed "$SPEED" --input-settle "$INPUT_SETTLE" --once
+  fi
+  if [ -n "$RECORD_TO" ]; then
+    printf '%s\n' "$SESSION" >>"$RECORD_TO" || die "could not append to $RECORD_TO"
   fi
   printf '%s\n' "$SESSION"
   exit 0
@@ -179,6 +214,28 @@ play_once() {
     if [ "$delay" = "@input" ]; then
       [ "$DRY_RUN" -eq 1 ] && printf 'trace step=%d kind=input\n' "$step" >&2
       IFS= read -r LAST_INPUT || return 1
+      # One submission, however many lines it is (Issue #1810).
+      #
+      # CommandMate types the whole message into the pane and then presses
+      # Enter, so a multi-line message arrives as multiple lines on stdin —
+      # and `commandmate send --contract` prepends a preamble dozens of lines
+      # long. Treating each line as its own `@input` made the cassette race
+      # through a complete pass per line: the approval frame was painted and
+      # immediately answered by the next line of the same message, `wait`
+      # reported `Completed` about work that had not happened, and the pane
+      # ended up showing a frame from a later pass. The remaining lines are
+      # therefore drained here and discarded; what the pane echoes is the
+      # first line, which is what a TUI shows for a pasted block.
+      #
+      # `--input-settle` is whole seconds because bash 3.2's `read -t` takes no
+      # fraction. Every already-buffered line returns immediately, so the wait
+      # is only paid once, after the last line of the submission — and not at
+      # all when stdin is a closed pipe, which is what the tests feed.
+      if [ "$INPUT_SETTLE" -gt 0 ]; then
+        while IFS= read -r -t "$INPUT_SETTLE" drained_line; do
+          :
+        done
+      fi
       [ -n "$TASK_INPUT" ] || TASK_INPUT="$LAST_INPUT"
       emit "$payload"
       continue

@@ -1,0 +1,28 @@
+# Tutorial Step 3 — the gate before any work exists (Issue #1813).
+#
+# Filmed from a tmux pane, not a browser: the verification gates have no Web UI,
+# so the CLI's own output is the only surface that shows them.
+#
+# The worktree on screen is the seed branch that carries no fix, so the gate is
+# red for the reason the step says it is — `node --test` really fails there, and
+# the exit code in the frame is the one the product returned.
+#
+# The slot is deliberately *shorter* than the take. cli-scene.sh spends its first
+# seconds sourcing state and proving isolation before it clears the pane, so the
+# take opens on a blank terminal; compose.sh trims an over-long take from the
+# front, and a 9s slot against a ~12s take is what drops that blank head instead
+# of holding it on screen for a fifth of the cut. What is left is the take's two
+# held frames: the verdict with its exit code, then the run read back out of the
+# history.
+
+version: 1
+duration: 9
+output: cm-t3-verify-red
+scenes:
+  - id: verify-red
+    type: record
+    duration: 9
+    viewport: pc
+    telop:
+      ja: "着手前にゲートは赤"
+      en: "Before any work, the gate is red."

@@ -95,7 +95,7 @@ describe('STANDARD_COMMANDS', () => {
   // /import, /list-agents, all real rows on code.claude.com/docs/en/commands.md.
   // 159 -> 162.
   it('should have 162 standard commands', () => {
-    expect(STANDARD_COMMANDS.length).toBe(162);
+    expect(STANDARD_COMMANDS.length).toBe(163);
   });
 
   it('should have all required properties for each command', () => {
@@ -260,7 +260,7 @@ describe('STANDARD_COMMANDS', () => {
     const codexCommands = STANDARD_COMMANDS.filter(
       (cmd) => cmd.cliTools?.includes('codex')
     );
-    expect(codexCommands.length).toBe(53);
+    expect(codexCommands.length).toBe(54);
   });
 
   it('should include session management commands', () => {

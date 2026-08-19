@@ -43,7 +43,6 @@ function resolve(dict: Record<string, unknown>, key: string): unknown {
  * verbatim to the user.
  */
 const RUNTIME_KEYS = [
-  'status.done',
   'status.inReview',
   'status.approval',
   'status.stalled',
@@ -112,7 +111,6 @@ const RUNTIME_KEYS = [
  * English user reads, so a diff here is a regression, not a wording tweak.
  */
 const EN_PRE_MIGRATION: Record<string, string> = {
-  'status.done': 'Done',
   'status.inReview': 'In Review',
   'status.approval': 'Approval',
   'status.stalled': 'Stalled',
@@ -230,9 +228,11 @@ describe('review i18n keys (Issue #1274)', () => {
   });
 
   /**
-   * ReviewCard and ReviewTab both read `status.*`, so the badge and the filter
-   * chip cannot drift apart. Distinct labels also matter because the chip's
-   * colour alone does not distinguish the filters.
+   * `ReviewTab` is the only reader of `status.*` since #1824 deleted the
+   * never-mounted review card component: the same label backs a filter chip
+   * and the badge on every row that chip selects, so the two cannot drift.
+   * Distinct labels also matter because the chip's colour alone does not
+   * distinguish the filters.
    */
   it('gives every review status a distinct label in both locales', () => {
     for (const locale of ['en', 'ja']) {

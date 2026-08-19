@@ -4,9 +4,19 @@
 
 A detailed guide to the slash commands available in CommandMate.
 
+> **These commands ship with the CommandMate repository, not with the `commandmate` package.**
+> They live in `.claude/commands/*.md` in this repository and are picked up by an agent CLI whose
+> working directory is a checkout of it. They are **not** installed by `npm install -g commandmate`,
+> and typing them in another repository produces an `Unknown command` rather than a run. To use them
+> elsewhere, copy the `.md` files into that repository's `.claude/commands/`. Agent Skills, which are
+> distributed and installed per worktree, are a different mechanism — see
+> [Agent Skills Distribution](./skills.md).
+
 ---
 
 ## Command List
+
+The four most-used commands, with their full descriptions further down this page:
 
 | Command | Description | Priority |
 |---------|-------------|----------|
@@ -14,6 +24,40 @@ A detailed guide to the slash commands available in CommandMate.
 | `/create-pr` | Automatic PR creation | High |
 | `/progress-report` | Progress report generation | High |
 | `/tdd-impl` | TDD implementation | High |
+
+### All 27 Commands
+
+Every command in `.claude/commands/`. Follow the link for the full definition of each one.
+
+| Command | What it does |
+|---------|--------------|
+| [`/acceptance-test`](../../../.claude/commands/acceptance-test.md) | Run acceptance tests automatically against an Issue's requirements |
+| [`/apply-review`](../../../.claude/commands/apply-review.md) | Fold review findings back into the implementation |
+| [`/architecture-review`](../../../.claude/commands/architecture-review.md) | Design review, risk assessment, and improvement proposals |
+| [`/bug-fix`](../../../.claude/commands/bug-fix.md) | Fully automate investigating a defect, proposing a fix, and applying it |
+| [`/cause-analysis`](../../../.claude/commands/cause-analysis.md) | Analyze the root cause of the symptom in an Issue and append cause and countermeasures to it |
+| [`/create-pr`](../../../.claude/commands/create-pr.md) | Create a pull request, generating the title and description |
+| [`/current-situation`](../../../.claude/commands/current-situation.md) | Write up a defect precisely and file it as a new Issue |
+| [`/design-policy`](../../../.claude/commands/design-policy.md) | Support architecture design, technology selection, and design decisions |
+| [`/issue-create`](../../../.claude/commands/issue-create.md) | Create GitHub Issues in bulk from an Issue split plan |
+| [`/issue-enhance`](../../../.claude/commands/issue-enhance.md) | Analyze an Issue and fill in what is missing by asking the user |
+| [`/issue-split`](../../../.claude/commands/issue-split.md) | Split a feature into Issues and organize the dependencies |
+| [`/issues-exec-plan`](../../../.claude/commands/issues-exec-plan.md) | Analyze whether several Issues can run in parallel and file an epic Issue holding the execution plan |
+| [`/multi-stage-design-review`](../../../.claude/commands/multi-stage-design-review.md) | Run a four-stage design-document review (normal, consistency, impact, security) and apply the findings |
+| [`/multi-stage-issue-review`](../../../.claude/commands/multi-stage-issue-review.md) | Run a multi-stage Issue review (normal, impact scope) twice and apply the findings |
+| [`/orchestrate`](../../../.claude/commands/orchestrate.md) | Orchestrate several Issues in parallel (prepare, develop, PR, merge, UAT, fix loop, finish) |
+| [`/pm-auto-design2dev`](../../../.claude/commands/pm-auto-design2dev.md) | Automate design review through implementation (design review, work plan, TDD implementation) |
+| [`/pm-auto-dev`](../../../.claude/commands/pm-auto-dev.md) | Automate Issue development end to end (TDD, tests, report) |
+| [`/pm-auto-issue2dev`](../../../.claude/commands/pm-auto-issue2dev.md) | Automate Issue review through implementation (Issue review, design review, work plan, TDD implementation) |
+| [`/pr-merge-pipeline`](../../../.claude/commands/pr-merge-pipeline.md) | Automate PR creation, CI, sequential merges, and integration verification across several Issues |
+| [`/progress-report`](../../../.claude/commands/progress-report.md) | Produce a development progress summary and report blockers |
+| [`/refactoring`](../../../.claude/commands/refactoring.md) | Improve code quality, apply design patterns, and pay down technical debt |
+| [`/tdd-impl`](../../../.claude/commands/tdd-impl.md) | Implement to a high standard using test-driven development |
+| [`/uat`](../../../.claude/commands/uat.md) | Automate planning, reviewing, running, and reporting user acceptance tests on real machines |
+| [`/uat-fix-loop`](../../../.claude/commands/uat-fix-loop.md) | Automate the loop of failed UAT, feature-branch fix, new PR, re-merge, and re-run |
+| [`/work-plan`](../../../.claude/commands/work-plan.md) | Draw up a concrete work plan for one Issue |
+| [`/worktree-cleanup`](../../../.claude/commands/worktree-cleanup.md) | Clean up the Git worktree environments for the given Issue numbers |
+| [`/worktree-setup`](../../../.claude/commands/worktree-setup.md) | Build the Git worktree environments for the given Issue numbers |
 
 ---
 

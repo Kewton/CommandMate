@@ -1,3 +1,8 @@
+# cm-07 — Automatic completion detection (Issue #1811).
+#
+# Weighted towards the tail: the subject is the list going back to ready on its
+# own, so `complete` gets a slot long enough to read rather than a closing beat.
+
 version: 1
 duration: 20
 output: cm-07-completion-detected
@@ -8,30 +13,22 @@ scenes:
     viewport: pc
     telop:
       ja: "終わったか見に行かない"
-      en: "Stop checking if it finished"
+      en: "Stop checking whether it finished."
   - id: send-and-generate
     type: record
-    duration: 8
+    duration: 9
     viewport: pc
     telop:
-      ja: "実行中は色が変わる"
-      en: "Running state shows in color"
-  - id: respond-from-mobile
-    type: record
-    duration: 4
-    viewport: mobile
-    telop:
-      ja: "待機も完了も自動判定"
-      en: "Waiting and done, detected"
+      ja: "実行中はそう見える"
+      en: "Running looks like running."
   - id: complete
     type: record
-    duration: 3
+    duration: 5
+    viewport: pc
     telop:
-      ja: "終わると一覧に戻る"
-      en: "Back to ready, automatically"
+      ja: "完了は自動で検知する"
+      en: "Completion is detected for you."
   - id: outro
     type: card
-    duration: 1
-    telop:
-      ja: "github.com/Kewton/CommandMate"
-      en: "github.com/Kewton/CommandMate"
+    duration: 2
+    telop: { ja: "github.com/Kewton/CommandMate", en: "github.com/Kewton/CommandMate" }

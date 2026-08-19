@@ -54,25 +54,19 @@ import { CodexTool, isCodexHooksReviewDialog } from '@/lib/cli-tools/codex';
 import { capturePane, createSession, hasSession, sendKeys } from '@/lib/tmux/tmux';
 import { getAgentEventGenerationStartedAt, recordAgentEvent } from '@/lib/session/agent-event-state';
 import { getCodexHooksPath } from '@/lib/hooks/sources/codex/hooks-config';
+import {
+  CODEX_HOOKS_REVIEW_PANE,
+  CODEX_READY_PANE,
+} from '../../fixtures/codex-hooks-review-0148';
 
 const WORKTREE_ID = 'wt-codex-1760';
 const WORKTREE_PATH = '/tmp/wt-codex-1760';
 
-/** A pane showing a genuine, ready prompt. */
-const READY_PANE = ['  Tip: use /init', '', '› ', '  gpt-5.6-sol · /tmp/wt'].join('\n');
-
-/** codex 0.147.0's hooks review screen, transcribed from a live pane capture. */
-const HOOKS_REVIEW_PANE = [
-  '  Hooks need review',
-  '  5 hooks are new or changed.',
-  '  Hooks can run outside the sandbox after you trust them.',
-  '',
-  '› 1. Review hooks',
-  '  2. Trust all and continue',
-  "  3. Continue without trusting (hooks won't run)",
-  '',
-  '  Press enter to confirm or esc to go back',
-].join('\n');
+// Issue #1829: re-pinned against the codex-cli 0.148.0 capture. The wording that
+// changed is the hook COUNT ("5 hooks are new or changed." -> "4"), which is
+// data and which neither anchor reads; the screen is otherwise the same one.
+const READY_PANE = CODEX_READY_PANE;
+const HOOKS_REVIEW_PANE = CODEX_HOOKS_REVIEW_PANE;
 
 const MANAGED_ENV = ['CM_AGENT_HOOKS_INJECT', 'CODEX_HOME', 'CM_PORT', 'MCBD_PORT'] as const;
 let saved: Record<string, string | undefined>;

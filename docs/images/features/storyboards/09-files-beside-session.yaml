@@ -1,37 +1,29 @@
+# cm-09 — Files beside the session (Issue #1811).
+#
+# `review-diff` opens the Git activity and reads an uncommitted diff in the file
+# pane, which is the screen this highlight has always claimed and never filmed.
+# The send beat stays only as the establishing shot that the pane sits next to a
+# live session.
+
 version: 1
 duration: 20
 output: cm-09-files-beside-session
 scenes:
-  - id: sessions-overview
-    type: record
-    duration: 4
-    viewport: pc
-    telop:
-      ja: "差分のためにIDEを開かない"
-      en: "No IDE just to read a diff"
   - id: send-and-generate
     type: record
-    duration: 10
+    duration: 9
     viewport: pc
     telop:
-      ja: "ファイルツリーが隣にある"
-      en: "The file tree sits right there"
-  - id: respond-from-mobile
+      ja: "セッションはそのまま"
+      en: "The session stays where it is."
+  - id: review-diff
     type: record
-    duration: 2
-    viewport: mobile
+    duration: 9
+    viewport: pc
     telop:
-      ja: "スマホからでも辿れる"
-      en: "Browse it from your phone"
-  - id: complete
-    type: record
-    duration: 3
-    telop:
-      ja: "worktreeの中身も同じ画面"
-      en: "Worktree files, same screen"
+      ja: "差分は隣のペインで読む"
+      en: "Read the diff in the next pane."
   - id: outro
     type: card
-    duration: 1
-    telop:
-      ja: "github.com/Kewton/CommandMate"
-      en: "github.com/Kewton/CommandMate"
+    duration: 2
+    telop: { ja: "github.com/Kewton/CommandMate", en: "github.com/Kewton/CommandMate" }

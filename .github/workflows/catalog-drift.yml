@@ -76,6 +76,14 @@ jobs:
   check:
     name: Check catalog drift
     runs-on: ubuntu-latest
+    # [Issue #1830] Left at the value this job shipped with; recording the
+    # evidence for it, since the rest of .github/workflows/ now carries one.
+    # Measured 2026-08-19 over both successful runs of this workflow: 0.65m
+    # median / 0.78m max. 15 is generous against that, deliberately so — this
+    # job fetches from several third-party documentation sources, which is
+    # exactly the kind of network work that varies, and it blocks nobody
+    # (schedule/dispatch only, no PR check), so an over-generous cap costs
+    # nothing here.
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -88,6 +96,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
+        timeout-minutes: 5 # registry fetch; measured 0.30m median / 0.33m max
         run: npm ci
 
       - name: Run catalog reconcile (check mode)

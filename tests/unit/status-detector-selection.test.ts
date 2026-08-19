@@ -164,10 +164,12 @@ describe('SELECTION_LIST_REASONS Set', () => {
     expect(SELECTION_LIST_REASONS.has(STATUS_REASON.ANTIGRAVITY_SELECTION_LIST)).toBe(true);
     // Issue #1017: Codex pager/edit-previous mode also drives NavigationButtons.
     expect(SELECTION_LIST_REASONS.has(STATUS_REASON.CODEX_PAGER)).toBe(true);
+    // Issue #1829: codex's hooks review screens, whose only exits are `t`/`esc`.
+    expect(SELECTION_LIST_REASONS.has(STATUS_REASON.CODEX_HOOKS_REVIEW)).toBe(true);
   });
 
-  it('should have exactly 6 entries', () => {
-    expect(SELECTION_LIST_REASONS.size).toBe(6);
+  it('should have exactly 7 entries', () => {
+    expect(SELECTION_LIST_REASONS.size).toBe(7);
   });
 
   it('should not contain unrelated reasons', () => {

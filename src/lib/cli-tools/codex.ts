@@ -15,7 +15,13 @@ import {
 } from '../tmux/tmux';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
-import { isCodexPromptReady, getCodexActiveDialog, stripAnsi } from '../detection/cli-patterns';
+import {
+  isCodexPromptReady,
+  getCodexActiveDialog,
+  getCodexLifecycleDialog,
+  CODEX_HOOKS_REVIEW_ANCHORS,
+  stripAnsi,
+} from '../detection/cli-patterns';
 import { createLogger } from '@/lib/logger';
 import { CODEX_CLI_TOOL_ID } from '@/lib/hooks/sources';
 import {
@@ -51,34 +57,6 @@ const CODEX_INIT_MAX_ATTEMPTS = 30;
 const CODEX_PROMPT_WAIT_TIMEOUT_MS = 15000;
 
 /**
- * Anchors of codex's "Hooks need review" dialog (Issue #1760, measured on
- * codex-cli 0.147.0):
- *
- * ```
- *  Hooks need review
- *  5 hooks are new or changed.
- *  Hooks can run outside the sandbox after you trust them.
- *
- * > 1. Review hooks
- *   2. Trust all and continue
- *   3. Continue without trusting (hooks won't run)
- * ```
- *
- * It has to be handled here rather than in `getCodexActiveDialog`, which
- * classifies it as `null`: its wording matches none of that function's three
- * anchors (`Skip until next version` / `Do you trust` / `Press enter to
- * continue`). Measured consequence of leaving it alone, on a pane with the
- * generated `hooks.json` present: `isCodexPromptReady` stays false for the full
- * 30-attempt window and the session is then handed to `sendMessage` still
- * sitting on the dialog. Every launch, because "continue without trusting" is
- * not remembered — verified by relaunching and getting the same screen.
- *
- * Both strings are required so a "hooks" mention elsewhere cannot select an
- * option on a live prompt.
- */
-const CODEX_HOOKS_REVIEW_ANCHORS = ['Hooks need review', 'Continue without trusting'] as const;
-
-/**
  * Option 3, "Continue without trusting (hooks won't run)".
  *
  * Not option 2. Trusting writes `[hooks.state."<file>:<event>:0:0"]` entries
@@ -92,8 +70,29 @@ const CODEX_HOOKS_REVIEW_ANCHORS = ['Hooks need review', 'Continue without trust
  * Sent alone, like the other numbered dialogs (Issue #890): codex confirms a
  * numbered selection instantly, and a trailing Enter would land on the next
  * screen. Verified live — the prompt was ready on the following poll.
+ *
+ * Re-verified on codex-cli 0.148.0 for Issue #1829, against the objection that
+ * the dialog's own footer says `Press enter to confirm`. With the trust hashes
+ * invalidated and Auto-Yes off, a session launched onto this dialog reached
+ * `› Ask Codex to do anything` and then ran the message it was sent — on the
+ * `'3'` alone. The footer and the number key are not exclusive: the number
+ * selects AND confirms, Enter confirms the highlighted option. That is also why
+ * a trailing Enter is so costly here — the number having already advanced the
+ * screen, the Enter lands on the NEXT one, which is precisely how a pane ends up
+ * two screens deep in the hooks review UI.
  */
 const CODEX_HOOKS_REVIEW_DECLINE_KEY = '3';
+
+/**
+ * How many times `waitForReady` may press `esc` to climb out of codex's hooks
+ * review screens (Issue #1829).
+ *
+ * Two is the depth of the UI — detail -> list -> closed — and the cap exists
+ * because the alternative is one press per poll: 30 keystrokes into whatever is
+ * really on screen if the classifier is ever wrong about a frame. Two spare
+ * presses cover a redraw landing between capture and send.
+ */
+const CODEX_HOOKS_SCREEN_MAX_ESCAPES = 4;
 
 /**
  * Whether the pane is sitting on the hooks review dialog.
@@ -101,10 +100,26 @@ const CODEX_HOOKS_REVIEW_DECLINE_KEY = '3';
  * Position-independent on purpose, unlike `getCodexActiveDialog`: the only
  * caller checks `isCodexPromptReady` first and returns when a genuine prompt
  * exists, so residual dialog text above a live prompt is never reached, and a
- * one-shot guard stops the key being sent twice.
+ * one-shot guard stops the key being sent twice. Callers OUTSIDE this launch
+ * sequence must use `getCodexLifecycleDialog` instead, which is position-based.
+ *
+ * The dialog has to be handled here rather than in `getCodexActiveDialog`, which
+ * classifies it as `null`: its wording matches none of that function's three
+ * anchors (`Skip until next version` / `Do you trust` / `Press enter to
+ * continue`). Measured consequence of leaving it alone, on a pane with the
+ * generated `hooks.json` present: `isCodexPromptReady` stays false for the full
+ * 30-attempt window and the session is then handed to `sendMessage` still
+ * sitting on the dialog. Every launch, because "continue without trusting" is
+ * not remembered — verified by relaunching and getting the same screen.
+ *
+ * The anchors themselves live in `detection/cli-patterns` (Issue #1829): the
+ * Auto-Yes poller has to recognise the same screen in order to keep its hands
+ * off it, and two copies of the anchors would be two chances to disagree about
+ * what this dialog is.
  *
  * @param output - ANSI-stripped pane capture
  * @returns True when both anchors of the dialog are present
+ * @see CODEX_HOOKS_REVIEW_ANCHORS
  */
 export function isCodexHooksReviewDialog(output: string): boolean {
   return CODEX_HOOKS_REVIEW_ANCHORS.every((anchor) => output.includes(anchor));
@@ -222,6 +237,7 @@ export class CodexTool extends BaseCLITool {
     let updateDialogHandled = false;
     let trustDialogHandled = false;
     let hooksReviewHandled = false;
+    let hooksScreenEscapes = 0;
     for (let i = 0; i < CODEX_INIT_MAX_ATTEMPTS; i++) {
       try {
         const rawOutput = await capturePane(sessionName, 50);
@@ -244,6 +260,28 @@ export class CodexTool extends BaseCLITool {
           await sendKeys(sessionName, CODEX_HOOKS_REVIEW_DECLINE_KEY, false);
           hooksReviewHandled = true;
           logger.info('codex-hooks-review-declined');
+          await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
+          continue;
+        }
+
+        // Issue #1829: back out of the two screens the hooks dialog leads to.
+        // Confirming its option 1 -- which the Auto-Yes poller did on two live
+        // sessions, and which a human can do too -- opens a review UI whose only
+        // exits are `t` and `esc`. `t` is out: it writes `[hooks.state…]` into
+        // the operator's own ~/.codex/config.toml, the grant Issue #1760
+        // declined on their behalf. So `esc`, once per poll until the screens
+        // are gone. Before this, nothing sent either key: the whole 30-attempt
+        // window elapsed, waitForReady returned as if ready, and the session was
+        // left parked there -- reported as `running`, because neither screen
+        // carries an option, a confirm footer or a thinking indicator.
+        const hooksScreen = getCodexLifecycleDialog(output);
+        if (
+          (hooksScreen === 'hooks-list' || hooksScreen === 'hooks-detail') &&
+          hooksScreenEscapes < CODEX_HOOKS_SCREEN_MAX_ESCAPES
+        ) {
+          await sendSpecialKey(sessionName, 'Escape');
+          hooksScreenEscapes++;
+          logger.info('codex-hooks-screen-escaped');
           await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
           continue;
         }

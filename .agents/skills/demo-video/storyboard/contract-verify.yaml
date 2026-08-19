@@ -1,0 +1,51 @@
+# A cut for the "contract -> verified result" axis (Issue #1810).
+#
+# Two things make this storyboard different from default.yaml:
+#
+#   - it places `type: code` scenes, which typeset a file next to the cut
+#     instead of recording a browser. `source` is resolved against *this*
+#     directory and may not leave it, so a cut can only ship code it sits with.
+#   - its one record scene is filmed from a tmux pane rather than a browser.
+#     Task Contract and the verification gates have no Web UI, so the CLI's own
+#     output is where the product shows them (Epic #1807 D5).
+#
+# Wording is copied from docs/design/public-messaging.md section 6, which is the
+# canonical source for every telop on a public surface.
+
+version: 1
+duration: 30
+output: contract-verify
+scenes:
+  - id: title
+    type: card
+    duration: 3
+    telop:
+      ja: "作業の前に、契約を渡す"
+      en: "Hand the agent a contract before the work."
+  - id: contract-yaml
+    type: code
+    duration: 4
+    source: code/dark-mode.contract.yaml
+    lang: yaml
+    telop:
+      ja: "契約つきで送信する"
+      en: "Send with a contract."
+  - id: verify-yaml
+    type: code
+    duration: 4
+    source: code/verify.yaml
+    lang: yaml
+    telop:
+      ja: "終わりを決めるのは検証。exit 0 / 20 / 21"
+      en: "A verification run decides done, not the agent."
+  - id: contract-verify
+    type: record
+    duration: 16
+    viewport: pc
+    telop:
+      ja: "GATE と RESULT を読む"
+      en: "Gates run; the exit code judges."
+  - id: outro
+    type: card
+    duration: 3
+    telop: { ja: "github.com/Kewton/CommandMate", en: "github.com/Kewton/CommandMate" }

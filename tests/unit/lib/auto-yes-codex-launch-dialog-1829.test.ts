@@ -1,0 +1,220 @@
+/**
+ * Issue #1829: the Auto-Yes poller must not answer codex's own launch dialogs.
+ *
+ * The base rules answer the *default* option of any multiple choice, and every
+ * codex launch dialog defaults to option 1:
+ *
+ *   Hooks need review  -> 1. Review hooks    (measured: AUTO-YES ANSWER "1")
+ *   Update available   -> 1. Update now      (measured: AUTO-YES ANSWER "1")
+ *   Do you trust …     -> 1. Yes, continue
+ *
+ * `CodexTool.waitForReady` answers the same three screens deliberately and
+ * differently — `'3'` declines the hooks review rather than trusting the
+ * operator's `~/.codex/config.toml` (Issue #1760), `'2'` skips the update
+ * rather than running `npm install -g @openai/codex` and killing the codex
+ * process (Issue #890) — and it only watches during `startSession`. The poller
+ * runs on its own 2s phase forever, so whichever of the two sees the dialog
+ * first decides. Both #1760 and #890 are undone whenever that is the poller.
+ *
+ * These tests drive the real `detectAndRespondToPrompt` over the real 0.148.0
+ * pane captures and assert on `sendPromptAnswer` — the keystroke the agent
+ * actually receives — because asserting on the resolver would leave the wiring,
+ * which is the whole Issue, unverified.
+ *
+ * @vitest-environment node
+ */
+
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import Database from 'better-sqlite3';
+import { runMigrations } from '@/lib/db/db-migrations';
+import {
+  CODEX_APPROVAL_PANE,
+  CODEX_HOOKS_DETAIL_PANE,
+  CODEX_HOOKS_LIST_PANE,
+  CODEX_HOOKS_RESIDUAL_PLUS_PROMPT,
+  CODEX_HOOKS_REVIEW_PANE,
+  CODEX_HOOKS_STUCK_PANE,
+  CODEX_TRUST_DIALOG_PANE,
+  CODEX_UPDATE_DIALOG_PANE,
+} from '../../fixtures/codex-hooks-review-0148';
+
+let db: Database.Database;
+
+vi.mock('@/lib/db/db-instance', () => ({ getDbInstance: () => db }));
+
+const sendPromptAnswer = vi.fn(async (_params: { answer: string }) => {});
+vi.mock('@/lib/prompt-answer-sender', () => ({
+  sendPromptAnswer: (params: unknown) => sendPromptAnswer(params as { answer: string }),
+}));
+
+vi.mock('@/lib/session/cli-session', () => ({ captureSessionOutput: vi.fn() }));
+vi.mock('@/lib/polling/response-poller', () => ({ startPolling: vi.fn() }));
+vi.mock('@/lib/realtime/terminal-broadcast', () => ({
+  broadcastTerminalSnapshotAfterInteraction: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('@/lib/tmux/tmux-capture-cache', () => ({ invalidateCache: vi.fn() }));
+vi.mock('@/lib/cli-tools/manager', () => ({
+  CLIToolManager: {
+    getInstance: () => ({
+      getTool: () => ({ getSessionName: (id: string) => `mcbd-codex-${id}`, name: 'Codex CLI' }),
+    }),
+  },
+}));
+
+const warn = vi.fn();
+vi.mock('@/lib/logger', () => ({
+  createLogger: () => ({
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: (...args: unknown[]) => warn(...(args as [])),
+    error: vi.fn(),
+  }),
+}));
+
+import {
+  clearPolicySuppressions,
+  getLastPolicySuppression,
+} from '@/lib/polling/auto-yes-suppression-state';
+import { detectAndRespondToPrompt, type AutoYesPollerState } from '@/lib/auto-yes-poller';
+
+const WORKTREE_ID = 'wt-1829';
+
+function pollerState(): AutoYesPollerState {
+  return {
+    timerId: null,
+    cliToolId: 'codex',
+    instanceId: 'codex',
+    consecutiveErrors: 0,
+    currentInterval: 2000,
+    lastServerResponseTimestamp: null,
+    lastAnsweredPromptKey: null,
+    lastAnsweredAt: null,
+    stopCheckBaselineLength: -1,
+  };
+}
+
+/** The one observable that matters: what key the agent received, if any. */
+function answersSent(): string[] {
+  return sendPromptAnswer.mock.calls.map(([params]) => params.answer);
+}
+
+beforeEach(() => {
+  db = new Database(':memory:');
+  runMigrations(db);
+  vi.clearAllMocks();
+  clearPolicySuppressions();
+});
+
+afterEach(() => {
+  db.close();
+  clearPolicySuppressions();
+});
+
+describe('the poller leaves codex launch dialogs to CodexTool', () => {
+  it('sends nothing to the hooks review dialog', async () => {
+    const result = await detectAndRespondToPrompt(
+      WORKTREE_ID,
+      pollerState(),
+      'codex',
+      CODEX_HOOKS_REVIEW_PANE
+    );
+
+    expect(result).toBe('no_answer');
+    // Not "not 1" — nothing at all. Answering ANY option here confirms a
+    // selection codex acts on instantly, and options 1 and 2 both do damage.
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+  });
+
+  it('sends nothing to the update dialog — the #890 regression, restated', async () => {
+    // "1" is `Update now`: npm install -g @openai/codex, which kills the codex
+    // process the session is running in. waitForReady's "2" is the only answer
+    // this dialog may receive, and it is not the poller's to send.
+    const result = await detectAndRespondToPrompt(
+      WORKTREE_ID,
+      pollerState(),
+      'codex',
+      CODEX_UPDATE_DIALOG_PANE
+    );
+
+    expect(result).toBe('no_answer');
+    expect(answersSent()).not.toContain('1');
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+  });
+
+  it('sends nothing to the directory trust dialog', async () => {
+    const result = await detectAndRespondToPrompt(
+      WORKTREE_ID,
+      pollerState(),
+      'codex',
+      CODEX_TRUST_DIALOG_PANE
+    );
+
+    expect(result).toBe('no_answer');
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+  });
+
+  it('sends nothing to the hooks screens the dialog leads to', async () => {
+    for (const pane of [CODEX_HOOKS_LIST_PANE, CODEX_HOOKS_DETAIL_PANE, CODEX_HOOKS_STUCK_PANE]) {
+      await detectAndRespondToPrompt(WORKTREE_ID, pollerState(), 'codex', pane);
+    }
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+  });
+
+  it('says why it went quiet, so a stalled `cmate wait` can report it', async () => {
+    await detectAndRespondToPrompt(WORKTREE_ID, pollerState(), 'codex', CODEX_HOOKS_REVIEW_PANE);
+
+    const suppression = getLastPolicySuppression(WORKTREE_ID, 'codex');
+    expect(suppression).not.toBeNull();
+    expect(suppression!.reason).toBe('agent-launch-dialog');
+    expect(suppression!.promptType).toBe('multiple_choice');
+    expect(
+      warn.mock.calls.some(([action]) => action === 'poller:auto-yes-skipped-launch-dialog')
+    ).toBe(true);
+  });
+});
+
+describe('the guard does not switch Auto-Yes off for codex', () => {
+  it('still answers a genuine approval request', async () => {
+    // The control. A guard that also swallowed this would "fix" Issue #1829 by
+    // disabling the feature, and every Auto-Yes codex worker would stall.
+    const result = await detectAndRespondToPrompt(
+      WORKTREE_ID,
+      pollerState(),
+      'codex',
+      CODEX_APPROVAL_PANE
+    );
+
+    expect(result).toBe('responded');
+    expect(answersSent()).toEqual(['1']);
+  });
+
+  it('still answers once a dismissed dialog is only scrollback above the prompt', async () => {
+    // Issue #892's shape. A whole-frame guard would keep suppressing for as
+    // long as the dialog text stayed in the 50-line capture window — i.e. for
+    // the rest of the session, for every later prompt.
+    const state = pollerState();
+    await detectAndRespondToPrompt(WORKTREE_ID, state, 'codex', CODEX_HOOKS_RESIDUAL_PLUS_PROMPT);
+    expect(sendPromptAnswer).not.toHaveBeenCalled(); // no prompt on that frame at all
+
+    const result = await detectAndRespondToPrompt(
+      WORKTREE_ID,
+      state,
+      'codex',
+      [CODEX_HOOKS_REVIEW_PANE, CODEX_HOOKS_LIST_PANE, '', CODEX_APPROVAL_PANE].join('\n')
+    );
+    expect(result).toBe('responded');
+    expect(answersSent()).toEqual(['1']);
+  });
+
+  it('does not gag another CLI tool that prints the same words', async () => {
+    const result = await detectAndRespondToPrompt(
+      WORKTREE_ID,
+      { ...pollerState(), cliToolId: 'claude', instanceId: 'claude' },
+      'claude',
+      CODEX_HOOKS_REVIEW_PANE
+    );
+
+    expect(result).toBe('responded');
+    expect(sendPromptAnswer).toHaveBeenCalled();
+  });
+});
