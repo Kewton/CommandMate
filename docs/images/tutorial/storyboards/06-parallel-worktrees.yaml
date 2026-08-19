@@ -1,0 +1,24 @@
+# Tutorial Step 5 — going parallel (Issue #1813).
+#
+# The order is deliberate: the worktree is picked up first, and only then does
+# the list carry two sessions. Opening on the list would show the result before
+# the operation that produced it.
+
+version: 1
+duration: 12
+output: cm-t6-parallel-worktrees
+scenes:
+  - id: sync-worktrees
+    type: record
+    duration: 7
+    viewport: pc
+    telop:
+      ja: "すべて同期で取り込む"
+      en: "Sync All picks it up."
+  - id: sessions-overview
+    type: record
+    duration: 5
+    viewport: pc
+    telop:
+      ja: "worktree ごとに 1 セッション"
+      en: "One session per worktree."

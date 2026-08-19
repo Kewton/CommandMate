@@ -224,6 +224,8 @@ describe('SCENES', () => {
       'sync-worktrees',
       'review-diff',
       'complete',
+      'verify-red',
+      'evidence',
     ]);
   });
 
@@ -267,7 +269,7 @@ describe('SCENES', () => {
     // at: `src/components` calls neither /api/worktrees/:id/tasks nor
     // /api/verification/*. A browser scene here would have to invent a screen.
     const terminal = SCENES.filter(isTerminalScene).map((scene) => scene.id);
-    expect(terminal).toEqual(['contract-verify']);
+    expect(terminal).toEqual(['contract-verify', 'verify-red', 'evidence']);
   });
 
   it('names the four commands the slash palette take asserts are on screen', () => {

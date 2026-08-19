@@ -1,0 +1,18 @@
+# Tutorial Step 6 (the record) — where a verdict is kept (Issue #1813).
+#
+# One beat, filmed from a tmux pane: `verify history` and `task show` have no
+# Web UI. The take runs the contract first and then reads back what it wrote,
+# and compose.sh keeps the tail of an over-long take, so what the cut shows is
+# the record rather than the run that produced it.
+
+version: 1
+duration: 12
+output: cm-t8-evidence
+scenes:
+  - id: evidence
+    type: record
+    duration: 12
+    viewport: pc
+    telop:
+      ja: "判定は記録として残る"
+      en: "The verdict is kept as a record."

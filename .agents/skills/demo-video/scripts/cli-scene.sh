@@ -9,10 +9,22 @@
 # ones the product printed. SKILL.md's design judgement — only the LLM is
 # replaced — applies to the verification gates too, so there is no mock here.
 #
-# Two modes:
+# Two invocation modes:
 #   --start   create the tmux session that runs this script, record its name,
 #             and exit. This is what the recorder calls.
 #   (default) the body, executed inside that pane.
+#
+# Three takes, selected with --mode (Issue #1813):
+#   contract    (default) send --contract -> wait --verify -> exit 0
+#   verify-red  the gate before any work exists: exit 20 on the seed worktree
+#               that carries no fix, so the failing gate on screen is a real
+#               `node --test` run and not a screenshot of one
+#   evidence    the contract take, then the record it left behind:
+#               `verify history` and `task show`
+#
+# The three share one body rather than three scripts because the isolation
+# checks below are the load-bearing part and a copy of them is a copy that
+# drifts.
 #
 # Isolation (all four are load-bearing):
 #   * HOME is redirected under the demo state dir, so `~/.commandmate/.env`
@@ -34,6 +46,7 @@ SESSION="cmdemo-cli"
 STATE_FILE=""
 TMUX_SOCKET=""
 START=0
+MODE="contract"
 # The pane geometry the card is typeset for: 100 columns renders inside a
 # 1280x800 frame at a size that is still legible after the h264 pass.
 #
@@ -55,6 +68,16 @@ PANE_WIDTH=100
 PANE_HEIGHT=26
 HOLD_SECONDS="${CM_DEMO_CLI_HOLD:-6}"
 WAIT_TIMEOUT="${CM_DEMO_CLI_WAIT_TIMEOUT:-180}"
+# The evidence take's tail is the only part of it the cut keeps — compose.sh
+# trims from the front — so its hold is what decides how long the record is
+# readable, independent of how long the contract before it took to run.
+EVIDENCE_HOLD="${CM_DEMO_CLI_EVIDENCE_HOLD:-8}"
+# The red-gate take holds two frames, so it has two holds. The first is the
+# longer of the two on purpose: compose.sh keeps the *tail* of an over-long
+# take, so a short first hold is the one that gets trimmed away, and the frame
+# carrying the exit code is the one the step is named after.
+RED_FRAME_HOLD="${CM_DEMO_CLI_RED_HOLD:-6}"
+RED_TAIL_HOLD="${CM_DEMO_CLI_RED_TAIL_HOLD:-3}"
 
 die() {
   printf 'cli-scene: %s\n' "$1" >&2
@@ -63,11 +86,13 @@ die() {
 
 usage() {
   cat <<'USAGE'
-Usage: cli-scene.sh --state FILE [--session NAME] [--tmux-socket NAME] [--start]
+Usage: cli-scene.sh --state FILE [--session NAME] [--tmux-socket NAME]
+                    [--mode contract|verify-red|evidence] [--start]
 
   --state FILE        state.env written by env-up.sh (required)
   --session NAME      tmux session name (default cmdemo-cli)
   --tmux-socket NAME  tmux -L socket; default is the ambient tmux server
+  --mode MODE         which take to run (default contract)
   --start             create the session and exit, instead of being the body
 USAGE
 }
@@ -77,6 +102,7 @@ while [ $# -gt 0 ]; do
     --state) [ $# -ge 2 ] || die "--state needs a value"; STATE_FILE="$2"; shift 2 ;;
     --session) [ $# -ge 2 ] || die "--session needs a value"; SESSION="$2"; shift 2 ;;
     --tmux-socket) [ $# -ge 2 ] || die "--tmux-socket needs a value"; TMUX_SOCKET="$2"; shift 2 ;;
+    --mode) [ $# -ge 2 ] || die "--mode needs a value"; MODE="$2"; shift 2 ;;
     --start) START=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die "unknown argument: $1" ;;
@@ -87,6 +113,10 @@ done
 [ -f "$STATE_FILE" ] || die "no state file at $STATE_FILE — run env-up.sh first"
 case "$SESSION" in
   *[!a-zA-Z0-9_-]*) die "session name must match [a-zA-Z0-9_-]+, got '$SESSION'" ;;
+esac
+case "$MODE" in
+  contract|verify-red|evidence) : ;;
+  *) die "--mode must be contract, verify-red or evidence, got '$MODE'" ;;
 esac
 
 CM_DEMO_PORT=""
@@ -136,11 +166,11 @@ if [ "$START" -eq 1 ]; then
   if [ -n "$TMUX_SOCKET" ]; then
     tmux -L "$TMUX_SOCKET" new-session -d -s "$SESSION" -c "$REPO_ROOT" \
       -x "$PANE_WIDTH" -y "$PANE_HEIGHT" \
-      "$SELF" --state "$STATE_FILE" --session "$SESSION" --tmux-socket "$TMUX_SOCKET"
+      "$SELF" --state "$STATE_FILE" --session "$SESSION" --mode "$MODE" --tmux-socket "$TMUX_SOCKET"
   else
     tmux new-session -d -s "$SESSION" -c "$REPO_ROOT" \
       -x "$PANE_WIDTH" -y "$PANE_HEIGHT" \
-      "$SELF" --state "$STATE_FILE" --session "$SESSION"
+      "$SELF" --state "$STATE_FILE" --session "$SESSION" --mode "$MODE"
   fi
   printf '%s\n' "$SESSION"
   exit 0
@@ -205,6 +235,49 @@ assert_only_seed_worktrees
 
 CONTRACT=".commandmate/tasks/dark-mode.yaml"
 WT="$CM_DEMO_WORKTREE_ID"
+
+# ------------------------------------------------------- verify-red ---------
+#
+# The red gate the tutorial opens on (Issue #1813). It runs against the seed
+# worktree that branched off `main` *without* the fix, so `node --test` there
+# really does fail: the same `unit` gate that passes in wt-dark-mode.
+#
+# `--gates unit` rather than the default selection, and that is the measured
+# behaviour rather than a stylistic choice. The default is work-evidence plus
+# every declared gate, and work-evidence fails first on a checkout that carries
+# no work at all — the run then reports `not_started` and **exit 21**, with the
+# declared gates recorded as skipped. Naming the gate is what makes the failure
+# on screen the one the tutorial is about: the declared criterion, red.
+#
+# Two held frames rather than one, and the `clear` between them is the reason.
+# A failing gate prints up to 40 lines of its log tail
+# (MAX_PRINTED_LOG_TAIL_LINES, src/cli/utils/verify-runner.ts), so in a 26-row
+# pane the `GATE unit FAIL` line has scrolled off by the time `RESULT failed`
+# and the exit code arrive. Frame 1 is therefore the verdict and the code;
+# frame 2 is the same run read back out of the history, where one short line
+# names the gate that failed. Both are the product's own output — nothing is
+# reprinted by this script.
+if [ "$MODE" = "verify-red" ]; then
+  RED_WT="$CM_DEMO_LOGIN_WORKTREE_ID"
+  [ -n "$RED_WT" ] || die "state file has no CM_DEMO_LOGIN_WORKTREE_ID — nothing to fail a gate in"
+
+  clear
+  banner "commandmate verify $RED_WT --gates unit"
+  cm verify "$RED_WT" --gates unit
+  RED_EXIT=$?
+
+  banner "echo \$?"
+  printf '%s\n' "$RED_EXIT"
+  sleep "$RED_FRAME_HOLD"
+
+  clear
+  banner "commandmate verify history --worktree $RED_WT"
+  cm verify history --worktree "$RED_WT"
+  sleep "$RED_TAIL_HOLD"
+
+  [ "$RED_EXIT" -eq 20 ] || die "expected exit 20 (a declared gate failed) from the pre-work verify, got $RED_EXIT"
+  exit 0
+fi
 
 # `wait` returns as soon as it observes a completed session, and the capture it
 # reads is cached for 5s (Issue #1623). Called straight after `send`, it can
@@ -307,6 +380,33 @@ SECOND_WAIT=$?
 banner "echo \$?"
 printf '%s\n' "$SECOND_WAIT"
 rm -f "$PROBE"
+
+# ---------------------------------------------------------- evidence --------
+#
+# Issue #1813. The verdict is on screen by now; this tail shows where it is
+# kept once the pane is closed. `clear` first, because compose.sh keeps the
+# *tail* of an over-long take: without it the cut would end on the run rather
+# than on the record, which is the opposite of what the beat claims.
+#
+# The exit code is asserted before anything is printed — a red run would make
+# the record on screen a record of a failure, and the take should die here
+# rather than ship.
+if [ "$MODE" = "evidence" ]; then
+  [ "$SECOND_WAIT" -eq 0 ] || die "expected exit 0 from the verified wait, got $SECOND_WAIT"
+  TASK_ID="$(tr -d ' \n' <task-id.txt)"
+  [ -n "$TASK_ID" ] || die "send wrote no task id to task-id.txt"
+
+  sleep 2
+  clear
+  banner "commandmate verify history --worktree $WT"
+  cm verify history --worktree "$WT"
+
+  banner "commandmate task show $TASK_ID"
+  cm task show "$TASK_ID"
+
+  sleep "$EVIDENCE_HOLD"
+  exit 0
+fi
 
 # Held so the last frame — the one carrying RESULT and the exit code — is on
 # screen long enough for the capture loop to photograph it. The scene's real

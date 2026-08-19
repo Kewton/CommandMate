@@ -1,0 +1,34 @@
+# Tutorial Step 4 — hand over a contract, let the gates answer (Issue #1813).
+#
+# The two code cards are the files the run on the third beat actually reads, so
+# the cut is one document: this is the gate, this is the contract, this is the
+# verdict. `source` resolves against this directory and may not leave it, which
+# is why the listings are committed here rather than referenced from the skill.
+
+version: 1
+duration: 18
+output: cm-t4-contract-verify
+scenes:
+  - id: verify-yaml
+    type: code
+    duration: 3
+    source: code/verify.yaml
+    lang: yaml
+    telop:
+      ja: "リポジトリのゲートを宣言する"
+      en: "The repository declares its gate."
+  - id: contract-yaml
+    type: code
+    duration: 4
+    source: code/dark-mode.contract.yaml
+    lang: yaml
+    telop:
+      ja: "契約で範囲と判定者を決める"
+      en: "The contract fixes the scope and the judge."
+  - id: contract-verify
+    type: record
+    duration: 11
+    viewport: pc
+    telop:
+      ja: "GATE と RESULT を読む"
+      en: "Gates run; the exit code judges."

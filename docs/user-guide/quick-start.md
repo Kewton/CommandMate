@@ -2,6 +2,13 @@
 
 # クイックスタートガイド
 
+> **先に [チュートリアル](./tutorial.md) をどうぞ。** CommandMate の中核（契約 → 検証ゲート → 証跡）を、
+> サンプルリポジトリで 15 分ほどで一通り体験できます。
+>
+> **このページのスラッシュコマンドは CommandMate リポジトリ専用です。** `/work-plan` `/tdd-impl` などは
+> CommandMate 自身の `.claude/commands` に置かれているもので、あなたのリポジトリには導入されません。
+> 可搬な代替は公式 Catalog の Skill（`cmate-verify` / `cmate-task-contract` ほか）です。
+
 CommandMateでClaude Codeのスラッシュコマンドとエージェントを使った開発フローを始めましょう。
 
 ---

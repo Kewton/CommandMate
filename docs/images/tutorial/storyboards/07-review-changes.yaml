@@ -1,0 +1,20 @@
+# Tutorial Step 6 (what changed) — read the diff, not the transcript (#1813).
+
+version: 1
+duration: 13
+output: cm-t7-review-changes
+scenes:
+  - id: complete
+    type: record
+    duration: 5
+    viewport: pc
+    telop:
+      ja: "完了は自動で検知する"
+      en: "Completion is detected for you."
+  - id: review-diff
+    type: record
+    duration: 8
+    viewport: pc
+    telop:
+      ja: "Git ペインで差分を見る"
+      en: "Review the diff in the Git pane."

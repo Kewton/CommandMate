@@ -1,7 +1,9 @@
-# Tutorial Step 1 — register a repository (Issue #1575)
+# Tutorial Step 1 — register the fork (Issue #1813, re-shot for v0.24).
 #
-# No title card: the tutorial already carries a heading and prose around the
-# clip, so the frames are spent on the operation itself.
+# No title card: the tutorial carries a heading and prose around every clip, so
+# the frames are spent on the operation itself. That is the rule for all eight
+# tutorial cuts, and it is why none of them opens on a card the way the
+# product-highlight cuts do.
 
 version: 1
 duration: 10
@@ -12,5 +14,5 @@ scenes:
     duration: 10
     viewport: pc
     telop:
-      ja: "リポジトリのパスを登録する"
-      en: "Register a repository by its path"
+      ja: "リポジトリを登録する"
+      en: "Register the repository."
