@@ -21,6 +21,7 @@ import { Command } from 'commander';
 import { ExitCode, VerifyExitCode, WAIT_EXIT_CODE_PRIORITY, WaitExitCode } from '../types';
 import type { WaitOptions } from '../types';
 import type {
+  AutoYesSuppressionReason,
   CurrentOutputResponse,
   TaskListResponse,
   TaskStatus,
@@ -103,13 +104,60 @@ function activeSuppression(
   return { suppression, ageSeconds: Math.max(0, Math.round(ageMs / 1000)) };
 }
 
+/** The wording for the four reasons a contract's `autoYes` block really authors. */
+const CONTRACT_POLICY_CAUSE = 'by contract policy';
+
 /**
- * One stderr line naming the policy that is holding this prompt (Issue #1699).
+ * What withheld the answer, in the words `wait` puts on stderr (Issue #1843).
+ *
+ * A Record over the whole reason union rather than one fixed phrase: adding a
+ * reason to {@link AutoYesSuppressionReason} without deciding what `wait` should
+ * say about it is a compile error here, which is the point. Until #1843 the
+ * notice hard-coded "by contract policy" for every reason, so #1829's
+ * `agent-launch-dialog` — a product-side decision the poller makes with no
+ * contract in sight (`src/lib/auto-yes-poller.ts`, the `getCodexLifecycleDialog`
+ * branch) — sent operators of contract-less worktrees hunting for a
+ * `denyPatterns` entry that did not exist.
+ *
+ * The three sites that record a suppression are covered: the poller's launch-dialog
+ * branch (`agent-launch-dialog`), the poller's policy branch and
+ * `lib/hooks/permission-decision-service.ts` (both the four `evaluatePolicyAgainstTexts`
+ * verdicts, which is why those four keep the pre-#1843 wording exactly).
+ */
+const SUPPRESSION_CAUSE: Record<AutoYesSuppressionReason, string> = {
+  'mode-off': CONTRACT_POLICY_CAUSE,
+  'deny-pattern': CONTRACT_POLICY_CAUSE,
+  'deny-pattern-unusable': CONTRACT_POLICY_CAUSE,
+  'type-not-allowed': CONTRACT_POLICY_CAUSE,
+  'agent-launch-dialog': "while the agent's launch dialog was on screen",
+};
+
+/**
+ * {@link SUPPRESSION_CAUSE} for a reason that arrived over the wire.
+ *
+ * `reason` is a server-supplied string, so a server newer than this CLI can name
+ * a reason the union does not have. Naming it verbatim is the only honest answer:
+ * quietly folding an unknown reason into "by contract policy" is the same
+ * misattribution #1843 exists to remove, just for a future reason instead of
+ * `agent-launch-dialog`.
+ */
+function suppressionCause(reason: string): string {
+  return Object.prototype.hasOwnProperty.call(SUPPRESSION_CAUSE, reason)
+    ? SUPPRESSION_CAUSE[reason as AutoYesSuppressionReason]
+    : `for a reason this CLI does not recognise (${reason})`;
+}
+
+/**
+ * One stderr line naming what is holding this prompt (Issue #1699).
  *
  * `wait` used to print only "Waiting for human response...", which reads the
  * same whether a human was always going to answer or whether Auto-Yes silently
  * refused to. That ambiguity is what let a deny pattern matching a finished turn
  * stall two workers unnoticed; the pattern and the reason code belong on screen.
+ *
+ * Issue #1843: the cause is chosen per reason rather than asserted. `reason=` is
+ * in the payload either way, so the prefix is the only part that can lie — and it
+ * did, for every non-contract suppression.
  */
 function formatSuppressionNotice(suppression: LastSuppression, ageSeconds: number): string {
   const parts = [
@@ -120,7 +168,8 @@ function formatSuppressionNotice(suppression: LastSuppression, ageSeconds: numbe
   if (suppression.pattern !== undefined) {
     parts.push(`pattern=${JSON.stringify(suppression.pattern)}`);
   }
-  return `  auto-yes suppressed this prompt by contract policy: ${parts.join(' ')} (${ageSeconds}s ago)`;
+  const cause = suppressionCause(suppression.reason);
+  return `  auto-yes suppressed this prompt ${cause}: ${parts.join(' ')} (${ageSeconds}s ago)`;
 }
 
 /**
