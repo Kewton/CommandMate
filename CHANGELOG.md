@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **feat(polling): プロンプト dedup のスキップを `capture --json` に露出する** (#1695): 重複抑止で落としたプロンプトの累積回数と最終スキップ時刻を `promptDedup`（`skippedCount` / `lastSkippedAt`）として公開し、「プロンプトが出たはずなのに保存されていない」ときに dedup が原因か検出漏れ（#1676）かを CLI から判別できるようにした。あわせて response 側 dedup（`isDuplicateResponse`、#1268）に `duplicate-response-skipped` ログを追加（従来ログすら無かった）
 
-### Docs
+### Documentation
 
 - **docs(cli): `capture --json` の各フィールドの意味論を明文化する** (#1840):
   `docs/user-guide/cli-operations-guide.md`（および `docs/en/` の対応節）の capture 節に、
@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `realtimeSnippet.trim() === ''` と `lineCount` で見る。あわせて wait 節に、完了判定が
   `sessionStatus === 'ready'`（未分類フレームでない）またはセッション消滅であって
   **ターンの成立は見ていない**ことを明記した（`src/cli/commands/wait.ts:356`）
+
+### Fixed
+
+- **ci(e2e): Playwright インストールのハングを実測に基づき apt 側で塞ぎ、ブラウザは解決後バージョンでキャッシュする** (#1844): `test-e2e` の `npx playwright install --with-deps chromium` が繰り返しハングしていた（2026-08-19 だけで 88 分 / 3h55m / 3h48m、その後 #1830 のステップ上限 20 分に当たって run `32248871561` が赤）。Issue は `~/.cache/ms-playwright` のキャッシュを最優先の主因対策として挙げていたが、当日の E2E ジョブ 6 本のステップログを `Downloading Chrome for Testing` 行で二分して実測すると、**ブラウザのダウンロードは全サンプルで 0.09〜0.11 分と一定**で、バラつきもタイムアウトも 100% apt 側だった（apt フェーズ 0.20m / 3.14m / 7.63m / 9.22m / 10.44m / タイムアウト）。ubuntu-24.04 ランナーでは Chromium の実ライブラリは全て導入済みで、`--with-deps` が実際に取得するのは**フォント 9 パッケージ 21.1 MB だけ**（azure.archive.ubuntu.com が 14〜21 kB/s に落ちるのが原因）。`tests/e2e` に画素比較（`toHaveScreenshot` / `toMatchSnapshot`）は 1 件も無く、スクリーンショットは失敗時の調査用のみなので、このフォントが合否を変えることはない。よって 1 ステップを分割し、(1) システム依存 `playwright install-deps` は 6 分予算の `continue-on-error`（超過時は `::warning` を出して続行、本当に必要なライブラリが欠ければ `Run E2E tests` が Playwright 自身のエラーで落ちる）、(2) ブラウザは `actions/cache` で `~/.cache/ms-playwright` をキャッシュし、キーは `package.json` の `^1.56.1` ではなく**解決後の実バージョン**（`playwright-core/package.json` の `version`）に紐付け、古いブラウザでのヒットを避けるため `restore-keys` は付けない。キャッシュヒット時はダウンロードステップ自体をスキップする
 
 ## [0.25.0] - 2026-08-19
 
