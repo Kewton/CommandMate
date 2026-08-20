@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **feat(polling): プロンプト dedup のスキップを `capture --json` に露出する** (#1695): 重複抑止で落としたプロンプトの累積回数と最終スキップ時刻を `promptDedup`（`skippedCount` / `lastSkippedAt`）として公開し、「プロンプトが出たはずなのに保存されていない」ときに dedup が原因か検出漏れ（#1676）かを CLI から判別できるようにした。あわせて response 側 dedup（`isDuplicateResponse`、#1268）に `duplicate-response-skipped` ログを追加（従来ログすら無かった）
+- **feat(cli): stop-pattern が何にマッチしたかを `capture --json` に露出する** (#1694): `--stop-pattern` の発火は `autoYes.stopReason` で分かるが、何にマッチしたかはどの層にも出ておらず、ビルドログがパターン文字列を含んだだけの誤爆（#1678 A-5）と正当な停止を運用者が切り分けられなかった。マッチ行＋前後 1 行の抜粋を `autoYes.stopMatchedText` として露出する。抜粋は文字数ではなく **UTF-8 バイト**で 400 バイトに切り詰め（日本語フレームは 1 文字 3 バイトのため）、切り詰めたときだけ末尾に `…[truncated]` を付ける。抜粋は発火時のみ記録し、expired や手動 disable では持ち越さない（起きていない発火として読まれるため）
 
 ### Documentation
 

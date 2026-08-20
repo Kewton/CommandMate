@@ -132,6 +132,17 @@ export interface CurrentOutputPayload {
      * waiting right now.
      */
     lastSuppression: AutoYesPolicySuppression | null;
+    /**
+     * Short excerpt of what `--stop-pattern` matched, present only while
+     * `stopReason === 'stop_pattern_matched'` (Issue #1694).
+     *
+     * Exposure only, and deliberately raw: the operator's question is whether
+     * the pattern hit the agent's own output or a build log that happened to
+     * contain it (#1678 A-5), and that is answered by seeing the text in
+     * place. Bounded and marked when cut — see STOP_MATCH_EXCERPT_MAX_BYTES in
+     * `src/lib/auto-yes-state.ts`.
+     */
+    stopMatchedText?: string;
   };
   isSelectionListActive?: boolean;
   isPagerActive?: boolean;
@@ -772,6 +783,9 @@ export async function buildCurrentOutput(
       expiresAt: autoYesState?.enabled ? autoYesState.expiresAt : null,
       stopReason: autoYesState?.stopReason,
       lastSuppression: getLastPolicySuppression(worktreeId, cliToolId, instanceId),
+      // Issue #1694: undefined (so the key is absent from the JSON) unless a
+      // stop pattern actually fired — the state clears it on every other path.
+      stopMatchedText: autoYesState?.stopMatchedText,
     },
     isSelectionListActive,
     isPagerActive,
