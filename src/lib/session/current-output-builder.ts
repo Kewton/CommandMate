@@ -10,6 +10,7 @@
 import type Database from 'better-sqlite3';
 import { getSessionState, createMessage } from '@/lib/db';
 import { observeUnclassifiedFrame } from '@/lib/detection/unclassified-frame-tracker';
+import { matchUpstreamFault } from '@/lib/detection/upstream-faults';
 import { UNCLASSIFIED_PROMPT_TYPE, type UnclassifiedFrameRecord } from '@/types/models';
 import { createLogger } from '@/lib/logger';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
@@ -222,6 +223,33 @@ export interface CurrentOutputPayload {
    * is read.
    */
   promptDedup: PromptDedupSkips;
+  /**
+   * The upstream (model API) fault visible on the live frame, or null
+   * (Issue #1839).
+   *
+   * **Always present, null when no signature matched.** Read
+   * `src/lib/detection/upstream-faults.ts` before reading this field: null is
+   * "no known signature was on the frame", NEVER "upstream is healthy". The
+   * measurement behind the Issue found a 529 storm that left the pane blank, and
+   * a consumer that treats null as an all-clear re-creates exactly the false
+   * confidence the field exists to remove.
+   *
+   * Judged on `realtimeSnippet` (the last 100 rows), so it clears once the fault
+   * has scrolled out of that window rather than latching for the life of the
+   * session — the question a caller asks of it is "is this happening now".
+   *
+   * Exposure plus one verdict: `commandmate wait --fail-on-upstream-fault`
+   * exits {@link WaitExitCode.UPSTREAM_FAULT} on it. Nothing reads it by
+   * default.
+   */
+  upstreamFault: {
+    /** {@link UpstreamFault.id} — `overloaded` / `retrying` / `limit-reached` / `api-error`. */
+    id: string;
+    /** The whole line that matched, trimmed and bounded. */
+    matchedText: string;
+    /** Epoch ms the frame this was read from was captured. */
+    at: number;
+  } | null;
 }
 
 const logger = createLogger('current-output-builder');
@@ -565,6 +593,11 @@ export async function buildCurrentOutput(
       // evidence at exactly the moment an operator goes looking for it — the
       // session ended and the prompt they were waiting on was never saved.
       promptDedup: getPromptDedupSkips(worktreeId, cliToolId, instanceId),
+      // Issue #1839: there is no frame to read, so there is nothing to report.
+      // Unlike `promptDedup` this is not a tally of what already happened — it
+      // is a claim about what is on screen right now, and a dead session has no
+      // screen.
+      upstreamFault: null,
     };
   }
 
@@ -747,6 +780,10 @@ export async function buildCurrentOutput(
   }
 
   const realtimeSnippet = lines.slice(-100).join('\n');
+  // Issue #1839: judged on exactly what is published as `realtimeSnippet`, not
+  // on `output`. The wider capture keeps a banner from an hour ago in scope, and
+  // a fault the operator cannot see in the payload next to it is unverifiable.
+  const upstreamFaultMatch = matchUpstreamFault(realtimeSnippet);
   const autoYesState = getAutoYesState(worktreeId, cliToolId, instanceId);
 
   // Issue #1785 + #1784: ONE resolution for both halves, not two readers.
@@ -801,5 +838,15 @@ export async function buildCurrentOutput(
     // Issue #1695: appended last on purpose — every field above is a published
     // CLI contract and reordering them churns the diff for no reader's benefit.
     promptDedup: getPromptDedupSkips(worktreeId, cliToolId, instanceId),
+    // Issue #1839: read from `realtimeSnippet`, the same rows an operator sees
+    // in `capture --json`, so what the field claims can be checked against what
+    // is printed next to it.
+    upstreamFault: upstreamFaultMatch
+      ? {
+          id: upstreamFaultMatch.fault.id,
+          matchedText: upstreamFaultMatch.matchedText,
+          at: Date.now(),
+        }
+      : null,
   };
 }

@@ -67,6 +67,9 @@ const NO_MODEL_INFO = { model: null, reasoningEffort: null } as const;
 /** The dedup guard has suppressed no prompt for this session (Issue #1695). */
 const NO_PROMPT_DEDUP = { promptDedup: { skippedCount: 0, lastSkippedAt: null } } as const;
 
+/** No upstream API failure signature on the frame (Issue #1839). */
+const NO_UPSTREAM_FAULT = { upstreamFault: null } as const;
+
 beforeEach(() => {
   vi.clearAllMocks();
   __resetTerminalBroadcastState();
@@ -89,6 +92,7 @@ beforeEach(() => {
     structuredEvents: NO_STRUCTURED_EVENTS,
     ...NO_MODEL_INFO,
     ...NO_PROMPT_DEDUP,
+    ...NO_UPSTREAM_FAULT,
   });
 });
 
@@ -144,6 +148,7 @@ describe('broadcastTerminalSnapshotAfterInteraction', () => {
         structuredEvents: NO_STRUCTURED_EVENTS,
         ...NO_MODEL_INFO,
         ...NO_PROMPT_DEDUP,
+        ...NO_UPSTREAM_FAULT,
       })
       .mockResolvedValueOnce({
         isRunning: true,
@@ -158,6 +163,7 @@ describe('broadcastTerminalSnapshotAfterInteraction', () => {
         structuredEvents: NO_STRUCTURED_EVENTS,
         ...NO_MODEL_INFO,
         ...NO_PROMPT_DEDUP,
+        ...NO_UPSTREAM_FAULT,
       });
 
     const pending = broadcastTerminalSnapshotAfterInteraction(
