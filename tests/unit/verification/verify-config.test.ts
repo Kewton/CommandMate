@@ -16,6 +16,7 @@ import {
   RESERVED_GATE_IDS,
   DEFAULT_TIMEOUT_SEC,
   DEFAULT_MAX_LOG_TAIL_BYTES,
+  MAX_GATE_MUTEX_LENGTH,
 } from '@/lib/verification/verify-config';
 import { removeTempDir } from '@tests/helpers/temp-dir';
 
@@ -387,6 +388,93 @@ gates:
       expect(issuesOf(`${MINIMAL}options: origin/develop\n`)).toEqual([
         expect.stringContaining('options'),
       ]);
+    });
+  });
+
+  // Issue #1771: a gate that owns a fixed port / database / emulator can only run
+  // once per machine, and neither `command` nor `timeoutSec` can say so.
+  describe('gates[].mutex (Issue #1771)', () => {
+    it('accepts a declared mutex name', () => {
+      writeConfig(`version: 1
+gates:
+  - id: e2e
+    command: "npm run test:e2e"
+    mutex: e2e-port
+`);
+      expect(loadVerifyConfig(repoPath)?.gates[0].mutex).toBe('e2e-port');
+    });
+
+    it('leaves the key absent when no mutex is declared', () => {
+      writeConfig(MINIMAL);
+      const gate = loadVerifyConfig(repoPath)?.gates[0];
+      // Absent, not `undefined`-valued: a contract's gate list is stored as JSON
+      // and replayed verbatim, and an explicit key would claim a declaration
+      // nobody wrote.
+      expect(gate && 'mutex' in gate).toBe(false);
+    });
+
+    it.each(['port.60303', 'db_local', 'e2e-1', 'A'])('accepts %s', (name) => {
+      writeConfig(`version: 1
+gates:
+  - id: e2e
+    command: "true"
+    mutex: "${name}"
+`);
+      expect(loadVerifyConfig(repoPath)?.gates[0].mutex).toBe(name);
+    });
+
+    it.each([
+      ['""', 'empty'],
+      ['"e2e port"', 'whitespace'],
+      ['"e2e/port"', 'a path separator'],
+      ['"e2e:port"', 'a colon'],
+      ['"../escape"', 'a traversal attempt'],
+    ])('rejects %s (%s)', (value) => {
+      const issues = issuesOf(`version: 1
+gates:
+  - id: e2e
+    command: "true"
+    mutex: ${value}
+`);
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toContain('mutex');
+    });
+
+    it('rejects a name longer than the filesystem-safe cap', () => {
+      const issues = issuesOf(`version: 1
+gates:
+  - id: e2e
+    command: "true"
+    mutex: "${'a'.repeat(MAX_GATE_MUTEX_LENGTH + 1)}"
+`);
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toContain('mutex');
+    });
+
+    it('rejects a non-string mutex', () => {
+      const issues = issuesOf(`version: 1
+gates:
+  - id: e2e
+    command: "true"
+    mutex:
+      name: e2e
+`);
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toContain('mutex');
+    });
+
+    it('drops the gate when the mutex is invalid, so no gate runs unlocked', () => {
+      // The runner is handed only the gates that validated. A rejected mutex
+      // that still produced a gate object would be the one failure mode this
+      // field must not have: the resource claim silently dropped while the
+      // command runs anyway.
+      writeConfig(`version: 1
+gates:
+  - id: e2e
+    command: "true"
+    mutex: "bad name"
+`);
+      expect(() => loadVerifyConfig(repoPath)).toThrow(VerifyConfigError);
     });
   });
 

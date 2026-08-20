@@ -28,6 +28,25 @@ export const VERIFY_POLL_INTERVAL_MS = 5000;
 export const WORK_EVIDENCE_GATE_ID = 'work-evidence';
 
 /**
+ * Marker a mutexed gate writes into its log tail; mirrors MUTEX_LOG_PREFIX in
+ * lib/verification/gate-runner.ts (Issue #1771).
+ *
+ * Mirrored rather than imported because `tsconfig.cli.json` compiles
+ * `src/cli/**` alone with no path aliases, so the CLI bundle never pulls in the
+ * server's dependency graph. `tests/unit/verification/gate-mutex.test.ts` pins
+ * the two together by importing both.
+ */
+export const MUTEX_LOG_PREFIX = '[mutex]';
+
+/**
+ * Time a gate spent queued for its `mutex`, as written by the runner.
+ *
+ * Anchored to the start of a line so a gate whose own output happens to contain
+ * `waited=` cannot supply the number.
+ */
+const MUTEX_WAITED_PATTERN = /^\[mutex\] [^\n]*?\bwaited=([0-9]+(?:\.[0-9]+)?s)/m;
+
+/**
  * Lines of a failing gate's log echoed to stderr before the rest becomes a
  * count (#1683).
  *
@@ -123,6 +142,12 @@ function formatDetail(gate: VerificationGateResultView): string {
   if (gate.durationMs !== null && gate.durationMs !== undefined) {
     parts.push(`${(gate.durationMs / 1000).toFixed(1)}s`);
   }
+  // After the duration and never merged into it (#1771): the duration is what
+  // the gate's command took, the wait is what the machine made it queue for.
+  // Adding them would hide contention inside a number that timeout budgets and
+  // "did this gate get slower" are read from.
+  const waited = MUTEX_WAITED_PATTERN.exec(gate.logTail ?? '');
+  if (waited) parts.push(`waited=${waited[1]}`);
   return parts.join(', ');
 }
 

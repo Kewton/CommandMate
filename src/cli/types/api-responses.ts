@@ -1027,7 +1027,13 @@ export interface TaskContractView {
      * responses from a server older than #1791, and on tasks recorded before
      * it — `contract_json` is replayed verbatim, never re-validated.
      */
-    gateDefinitions?: Array<{ id: string; command: string; timeoutSec: number }>;
+    gateDefinitions?: Array<{
+      id: string;
+      command: string;
+      timeoutSec: number;
+      /** Machine-wide lock the gate holds while it runs (Issue #1771). */
+      mutex?: string;
+    }>;
   };
   autoYes: { mode: string | null; allowPromptTypes: string[]; denyPatterns: string[] };
   success: { requireWorkEvidence: boolean; requireScopeClean: boolean };

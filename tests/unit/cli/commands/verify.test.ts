@@ -244,6 +244,101 @@ describe('verify command action', () => {
     expect(mockConsoleError).toHaveBeenCalledWith('GATE work-evidence PASS (commits=3, uncommitted=2)');
   });
 
+  it('prints the mutex wait beside the duration, never folded into it', async () => {
+    // Issue #1771. `duration` is what the gate's command took; `waited` is what
+    // the machine made it queue for. A reader tuning timeoutSec, and the advisor
+    // reading these numbers back, both need them apart.
+    mockFetchWithTail([
+      { data: { runId: 7 }, status: 202 },
+      {
+        data: {
+          run: run({
+            status: 'passed',
+            gates: [
+              workEvidencePassed,
+              gate({
+                id: 11,
+                gateId: 'e2e',
+                command: 'npm run test:e2e',
+                durationMs: 190000,
+                logTail:
+                  '[mutex] name=e2e-port waited=42.3s lock=/home/dev/.commandmate/locks/e2e-port.lock\nall specs passed',
+              }),
+            ],
+          }),
+        },
+      },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'wt1']);
+
+    expect(mockConsoleError).toHaveBeenCalledWith('GATE e2e PASS (exit=0, 190.0s, waited=42.3s)');
+    // 190.0s is the command's own time. A runner that added the wait would print
+    // 232.3s here and nothing downstream could tell.
+    expect(mockConsoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('GATE e2e PASS (exit=0, 232.3s')
+    );
+  });
+
+  it('does not read waited= out of a gate\'s own output', async () => {
+    // The marker is anchored to the start of a line, so a suite that happens to
+    // print `waited=` cannot put a number the runner never measured on the
+    // GATE line.
+    mockFetchWithTail([
+      { data: { runId: 7 }, status: 202 },
+      {
+        data: {
+          run: run({
+            status: 'passed',
+            gates: [
+              workEvidencePassed,
+              gate({ id: 11, gateId: 'unit', logTail: 'server waited=99.9s for the port' }),
+            ],
+          }),
+        },
+      },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'wt1']);
+
+    expect(mockConsoleError).toHaveBeenCalledWith('GATE unit PASS (exit=0, 12.3s)');
+  });
+
+  it('prints reason=mutex-wait for a gate whose lock never came free', async () => {
+    mockFetchWithTail([
+      { data: { runId: 7 }, status: 202 },
+      {
+        data: {
+          run: run({
+            status: 'error',
+            gates: [
+              workEvidencePassed,
+              gate({
+                id: 11,
+                gateId: 'e2e',
+                status: 'skipped',
+                exitCode: null,
+                durationMs: 0,
+                logTail:
+                  'reason=mutex-wait waited=600.0s\n[mutex] name=e2e-port lock=/home/dev/.commandmate/locks/e2e-port.lock',
+              }),
+            ],
+          }),
+        },
+      },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'wt1']);
+
+    expect(mockConsoleError).toHaveBeenCalledWith('GATE e2e SKIP (reason=mutex-wait waited=600.0s)');
+    // 99, not 20: no verdict was reached, and a caller branching on 20 must be
+    // able to trust that the gate actually judged the work.
+    expect(mockExit).toHaveBeenCalledWith(ExitCode.UNEXPECTED_ERROR);
+  });
+
   it('prints a scope failure with its out-of-scope paths and the scope.allow guidance', async () => {
     // Mirrors the report evaluateScope() builds (scope-gate.ts); below the
     // display cap it must reach stderr verbatim — the paths are what let a

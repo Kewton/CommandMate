@@ -135,7 +135,10 @@ export function createTaskCommand(): Command {
         // — verify.yaml can be opened, this cannot. Printing the id alone would
         // leave a reader unable to tell which criterion the run was judged by.
         for (const gate of task.contract.verify.gateDefinitions ?? []) {
-          console.log(`GATE-DEF:  ${gate.id}  ${gate.command}  (timeoutSec=${gate.timeoutSec})`);
+          const mutex = gate.mutex ? `, mutex=${gate.mutex}` : '';
+          console.log(
+            `GATE-DEF:  ${gate.id}  ${gate.command}  (timeoutSec=${gate.timeoutSec}${mutex})`
+          );
         }
         console.log(`AUTO-YES:  ${task.contract.autoYes.mode ?? 'unset'}`);
         console.log(`CREATED:   ${task.createdAt}`);
