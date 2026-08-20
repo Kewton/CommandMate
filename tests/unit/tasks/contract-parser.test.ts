@@ -412,6 +412,38 @@ describe('parseTaskContract — verify.gateDefinitions (Issue #1791)', () => {
     expect(contract.verify.gateDefinitions).toHaveLength(1);
   });
 
+  it('accepts retryOnFail / flakyIsPass on a contract gate too (Issue #1772)', () => {
+    // Same validator as verify.yaml, so a per-delegation gate can declare the
+    // retry without a second copy of the range rules drifting from the first.
+    const contract = parseTaskContract(
+      `${MINIMAL}verify:\n  gates: [repro]\n  gateDefinitions:\n    - id: repro\n      command: "sh repro.sh"\n      retryOnFail: 1\n      flakyIsPass: true\n`,
+      'task.yaml'
+    );
+
+    expect(contract.verify.gateDefinitions[0].retryOnFail).toBe(1);
+    expect(contract.verify.gateDefinitions[0].flakyIsPass).toBe(true);
+  });
+
+  it('rejects an out-of-range retryOnFail on a contract gate (Issue #1772)', () => {
+    expect(
+      issuesOf(
+        `${MINIMAL}verify:\n  gates: [repro]\n  gateDefinitions:\n    - id: repro\n      command: "sh repro.sh"\n      retryOnFail: 2\n`
+      )
+    ).toContain('verify.gateDefinitions[0].retryOnFail: must be 0 or 1 (got 2)');
+  });
+
+  it('leaves both retry keys absent when a contract gate declares neither', () => {
+    // The stored JSON is replayed verbatim into the runner, so an
+    // `undefined`-valued key would claim a declaration nobody wrote.
+    const contract = parseTaskContract(
+      `${MINIMAL}verify:\n  gates: [repro]\n  gateDefinitions:\n    - id: repro\n      command: "sh repro.sh"\n`,
+      'task.yaml'
+    );
+    const gate = contract.verify.gateDefinitions[0];
+    expect('retryOnFail' in gate).toBe(false);
+    expect('flakyIsPass' in gate).toBe(false);
+  });
+
   it('treats an empty list as no definitions at all', () => {
     // Unlike `gates: []`, this has one possible meaning, so an orchestrator
     // emitting YAML programmatically is not forced to special-case it.

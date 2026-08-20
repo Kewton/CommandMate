@@ -17,6 +17,7 @@ import {
   DEFAULT_TIMEOUT_SEC,
   DEFAULT_MAX_LOG_TAIL_BYTES,
   MAX_GATE_MUTEX_LENGTH,
+  MAX_RETRY_ON_FAIL,
 } from '@/lib/verification/verify-config';
 import { removeTempDir } from '@tests/helpers/temp-dir';
 
@@ -473,6 +474,139 @@ gates:
   - id: e2e
     command: "true"
     mutex: "bad name"
+`);
+      expect(() => loadVerifyConfig(repoPath)).toThrow(VerifyConfigError);
+    });
+  });
+
+  // Issue #1772: a gate that fails on the machine's luck (a random UUID that
+  // happens to contain a forbidden substring) is indistinguishable from a gate
+  // that fails on the work, and "re-run the one red gate first" was tribal
+  // knowledge rather than a declaration the runner could act on.
+  describe('gates[].retryOnFail / flakyIsPass (Issue #1772)', () => {
+    it('accepts retryOnFail: 1 with flakyIsPass: true', () => {
+      writeConfig(`version: 1
+gates:
+  - id: unit
+    command: "npm run test:unit"
+    retryOnFail: 1
+    flakyIsPass: true
+`);
+      const gate = loadVerifyConfig(repoPath)?.gates[0];
+      expect(gate?.retryOnFail).toBe(1);
+      expect(gate?.flakyIsPass).toBe(true);
+    });
+
+    it('accepts retryOnFail: 1 on its own, defaulting to FLAKY counting as a failure', () => {
+      writeConfig(`version: 1
+gates:
+  - id: unit
+    command: "npm run test:unit"
+    retryOnFail: 1
+`);
+      const gate = loadVerifyConfig(repoPath)?.gates[0];
+      expect(gate?.retryOnFail).toBe(1);
+      // Absent, not false: the default lives in the runner, and a key nobody
+      // wrote must not appear in a contract's stored gate JSON.
+      expect(gate && 'flakyIsPass' in gate).toBe(false);
+    });
+
+    it('leaves both keys absent when neither is declared', () => {
+      writeConfig(MINIMAL);
+      const gate = loadVerifyConfig(repoPath)?.gates[0];
+      expect(gate && 'retryOnFail' in gate).toBe(false);
+      expect(gate && 'flakyIsPass' in gate).toBe(false);
+    });
+
+    it('accepts an explicit retryOnFail: 0', () => {
+      writeConfig(`version: 1
+gates:
+  - id: unit
+    command: "true"
+    retryOnFail: 0
+`);
+      expect(loadVerifyConfig(repoPath)?.gates[0].retryOnFail).toBe(0);
+    });
+
+    it.each(['2', '3', '-1', '10'])('rejects retryOnFail: %s (out of range)', (value) => {
+      // The ceiling is the feature: enough re-runs turn any red green, and the
+      // value of this field is precisely that it cannot.
+      const issues = issuesOf(`version: 1
+gates:
+  - id: unit
+    command: "true"
+    retryOnFail: ${value}
+`);
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toContain('retryOnFail');
+      expect(issues[0]).toContain(`must be 0 or ${MAX_RETRY_ON_FAIL}`);
+    });
+
+    it.each(['"one"', '1.5', 'true'])('rejects a non-integer retryOnFail: %s', (value) => {
+      const issues = issuesOf(`version: 1
+gates:
+  - id: unit
+    command: "true"
+    retryOnFail: ${value}
+`);
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toContain('retryOnFail');
+    });
+
+    it.each(['"yes"', '1', '"maybe"'])('rejects a non-boolean flakyIsPass: %s', (value) => {
+      const issues = issuesOf(`version: 1
+gates:
+  - id: unit
+    command: "true"
+    retryOnFail: 1
+    flakyIsPass: ${value}
+`);
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toContain('flakyIsPass');
+    });
+
+    it('rejects flakyIsPass: true without retryOnFail: 1', () => {
+      // A knob that can never fire is a config bug, not a preference: it reads
+      // as "flakes are tolerated here" while changing nothing at all.
+      const issues = issuesOf(`version: 1
+gates:
+  - id: unit
+    command: "true"
+    flakyIsPass: true
+`);
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toContain('flakyIsPass');
+      expect(issues[0]).toContain('retryOnFail');
+    });
+
+    it('rejects flakyIsPass: true beside retryOnFail: 0', () => {
+      const issues = issuesOf(`version: 1
+gates:
+  - id: unit
+    command: "true"
+    retryOnFail: 0
+    flakyIsPass: true
+`);
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toContain('flakyIsPass');
+    });
+
+    it('accepts flakyIsPass: false without a retry (the default said out loud)', () => {
+      writeConfig(`version: 1
+gates:
+  - id: unit
+    command: "true"
+    flakyIsPass: false
+`);
+      expect(loadVerifyConfig(repoPath)?.gates[0].flakyIsPass).toBe(false);
+    });
+
+    it('drops the gate when retryOnFail is invalid, so it never runs unretried', () => {
+      writeConfig(`version: 1
+gates:
+  - id: unit
+    command: "true"
+    retryOnFail: 5
 `);
       expect(() => loadVerifyConfig(repoPath)).toThrow(VerifyConfigError);
     });

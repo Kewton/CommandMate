@@ -29,7 +29,12 @@ import type {
 } from '../types/api-responses';
 import { ApiClient, ApiError, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
-import { parseGateIds, runVerification } from '../utils/verify-runner';
+import {
+  FLAKY_GATE_LABEL,
+  parseFlakyMarker,
+  parseGateIds,
+  runVerification,
+} from '../utils/verify-runner';
 
 /** Mirrors MAX_RUN_HISTORY_DAYS / MAX_RUN_HISTORY_LIMIT in verification-db.ts. */
 const MAX_HISTORY_DAYS = 90;
@@ -114,21 +119,26 @@ function splitAtArrow(text: string): [string, string | null] {
 }
 
 /**
- * Attach {@link parseScopeEvidence} to the scope gate before the run is printed
- * as JSON (Issue #1841).
+ * Attach the evidence the CLI parses out of gate logs before a run is printed
+ * as JSON: {@link parseScopeEvidence} on the scope gate (Issue #1841), and the
+ * retry record on any gate that was re-run (Issue #1772).
  *
  * Copies rather than mutates: the run object is also what the polling loop
  * reported from, and a JSON-only field has no business appearing in it.
  */
-function withScopeEvidence(run: VerificationRunView): VerificationRunView {
+function withGateEvidence(run: VerificationRunView): VerificationRunView {
   const gates = run.gates ?? [];
-  if (!gates.some((gate) => gate.gateId === SCOPE_GATE_ID)) return run;
   return {
     ...run,
     gates: gates.map((gate): VerificationGateResultView => {
-      if (gate.gateId !== SCOPE_GATE_ID) return gate;
-      const scope = parseScopeEvidence(gate.logTail);
-      return scope ? { ...gate, scope } : gate;
+      const scope = gate.gateId === SCOPE_GATE_ID ? parseScopeEvidence(gate.logTail) : null;
+      const flaky = parseFlakyMarker(gate.logTail);
+      if (!scope && !flaky) return gate;
+      return {
+        ...gate,
+        ...(scope ? { scope } : {}),
+        ...(flaky ? { flaky } : {}),
+      };
     }),
   };
 }
@@ -213,7 +223,7 @@ export function createVerifyCommand(): Command {
         });
 
         if (options.json && outcome.run) {
-          console.log(JSON.stringify(withScopeEvidence(outcome.run)));
+          console.log(JSON.stringify(withGateEvidence(outcome.run)));
         }
         process.exit(outcome.exitCode);
       } catch (error) {
@@ -338,9 +348,10 @@ function addShowCommand(parent: Command): void {
         const run = data.run;
         if (json) {
           // `show` is the forensic surface — the one a reader reaches for to
-          // reconstruct a run days later — so the scope evidence has to be
-          // readable here too, not only on the run that produced it.
-          console.log(JSON.stringify(withScopeEvidence(run), null, 2));
+          // reconstruct a run days later — so the scope evidence and the retry
+          // record have to be readable here too, not only on the run that
+          // produced them.
+          console.log(JSON.stringify(withGateEvidence(run), null, 2));
           return;
         }
 
@@ -357,8 +368,13 @@ function addShowCommand(parent: Command): void {
           // judged, so "which of these was the repository's own definition of
           // passing" should not have to be inferred from an absent marker.
           const source = gate.source ? `  src=${gate.source}` : '';
+          // Appended rather than replacing `status`, which is the stored column
+          // this view exists to show verbatim (#1772). The marker in the log
+          // tail below carries both runs' numbers.
+          const flaky =
+            parseFlakyMarker(gate.logTail)?.outcome === 'flaky' ? `  ${FLAKY_GATE_LABEL}` : '';
           console.log(
-            `  ${gate.gateId}  ${gate.status}  exit=${exit}  ${formatSeconds(gate.durationMs)}${source}`
+            `  ${gate.gateId}  ${gate.status}  exit=${exit}  ${formatSeconds(gate.durationMs)}${source}${flaky}`
           );
           if (gate.logTail) {
             for (const line of gate.logTail.split('\n')) {

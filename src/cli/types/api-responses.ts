@@ -905,6 +905,44 @@ export interface VerificationScopeDetail {
 }
 
 /**
+ * Machine-readable record of a gate that was re-run (Issue #1772).
+ *
+ * **Derived by the CLI, not sent by the server**, for the same reason
+ * {@link VerificationScopeDetail} is: `verification_gate_results` holds one
+ * status, one exit code and one duration per gate, and #1772 added no
+ * migration, so the second run's numbers exist only in the `[flaky]` marker the
+ * runner writes at the head of `logTail` (see `parseFlakyMarker` in
+ * src/cli/utils/verify-runner.ts).
+ *
+ * Absent on every gate that ran once — which is every gate that did not declare
+ * `retryOnFail: 1`, and every one of those that passed first time.
+ */
+export interface VerificationFlakyDetail {
+  /** Runs the gate actually got. Always 2 today; `retryOnFail` maxes out at 1. */
+  runs: number;
+  /**
+   * `flaky` = failed, then passed. `fail` = failed twice, which is a gate that
+   * was never flaky and whose retry said so.
+   */
+  outcome: 'flaky' | 'fail';
+  /** One per run, in order. null for a run killed by a signal (`n/a`). */
+  exitCodes: (number | null)[];
+  /** One per run, in order. null when the marker's value could not be read. */
+  durationsMs: (number | null)[];
+  /**
+   * How the run counted this gate: `pass` only when the gate declared
+   * `flakyIsPass: true` and the outcome was `flaky`. Recorded rather than
+   * recomputed, because the verify.yaml that decided it may have changed by the
+   * time anyone reads the run back.
+   */
+  verdict: 'pass' | 'fail';
+  /** The marker's own `exit=` value (`1,0`), for rendering without re-rounding. */
+  exit: string;
+  /** The marker's own `duration=` value (`45.0s,44.0s`). */
+  duration: string;
+}
+
+/**
  * Mirrors: src/lib/db/verification-db.ts VerificationGateResult.
  * Dates arrive as ISO strings because the route serializes them through JSON.
  */
@@ -942,6 +980,12 @@ export interface VerificationGateResultView {
    * Existing fields, `logTail` included, are untouched.
    */
   scope?: VerificationScopeDetail;
+  /**
+   * Retry record, on a gate that was re-run (Issue #1772). Added by the CLI the
+   * same way {@link VerificationGateResultView.scope} is, and for the same
+   * reason: this is what a flake advisor reads instead of re-parsing the log.
+   */
+  flaky?: VerificationFlakyDetail;
 }
 
 /** Mirrors: src/lib/db/verification-db.ts VerificationRunWithGates. */
