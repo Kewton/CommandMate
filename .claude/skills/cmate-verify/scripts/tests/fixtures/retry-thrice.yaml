@@ -1,0 +1,14 @@
+# The ceiling is the feature (CommandMate #1772). This command fails twice and
+# would pass on a third run, so a runner that retried "until it passes" — or even
+# just once more — would report it green. `retryOnFail: 1` means exactly one
+# re-run: the gate must come back FAIL with both failures on the record.
+#
+# The marker file counts the attempts, one byte each, so "how many times did the
+# command actually run" is measurable rather than inferred from the verdict.
+version: 1
+gates:
+  - id: unit
+    command: sh -c 'printf x >> "$CMATE_VERIFY_TEST_MARKER"; n=$(wc -c < "$CMATE_VERIFY_TEST_MARKER"); if [ "$n" -ge 3 ]; then echo third-run-would-be-green; exit 0; fi; echo still-red; exit 1'
+    retryOnFail: 1
+options:
+  skipInPrimaryCheckout: false

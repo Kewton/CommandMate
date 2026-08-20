@@ -44,6 +44,7 @@ import {
   clearTuiAccumulator,
 } from '../tui-accumulator';
 import { isDuplicatePrompt, normalizePromptForDedup } from './prompt-dedup';
+import { recordPromptDedupSkip } from './prompt-dedup-state';
 import { isDuplicateResponse } from './response-dedup';
 import { getPollerKey, stopPolling, GEMINI_LOADING_INDICATORS } from './response-poller-core';
 import { notifyPushSubscribers } from '@/lib/push';
@@ -585,6 +586,11 @@ export async function checkForResponse(
       const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
       const normalizedForDedup = normalizePromptForDedup(promptContent, cliToolId);
       if (isDuplicatePrompt(pollerKey, normalizedForDedup)) {
+        // Issue #1695: the log line below is invisible to `commandmate capture
+        // --json`, so a suppressed prompt and a prompt the detection layer never
+        // classified (#1676) look identical from the CLI — both say "nothing was
+        // recorded". Count the skip so the payload can tell them apart.
+        recordPromptDedupSkip(worktreeId, cliToolId, instanceId);
         logger.info('duplicate-prompt-skipped', { worktreeId, cliToolId });
         return false;
       }
@@ -719,6 +725,12 @@ export async function checkForResponse(
     if (!lineCountIsCursor) {
       const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
       if (isDuplicateResponse(pollerKey, cleanedResponse)) {
+        // Issue #1695: this branch used to drop the response silently — the
+        // prompt-side guard above has logged its skip since #565, this one
+        // logged nothing at all, so a reply that never reached History left no
+        // trace anywhere. Same action name shape as its sibling so both skips
+        // are found by one grep.
+        logger.info('duplicate-response-skipped', { worktreeId, cliToolId, instanceId: resolvedInstanceId });
         updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
         return false;
       }

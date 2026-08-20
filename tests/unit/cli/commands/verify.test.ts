@@ -244,6 +244,260 @@ describe('verify command action', () => {
     expect(mockConsoleError).toHaveBeenCalledWith('GATE work-evidence PASS (commits=3, uncommitted=2)');
   });
 
+  it('prints the mutex wait beside the duration, never folded into it', async () => {
+    // Issue #1771. `duration` is what the gate's command took; `waited` is what
+    // the machine made it queue for. A reader tuning timeoutSec, and the advisor
+    // reading these numbers back, both need them apart.
+    mockFetchWithTail([
+      { data: { runId: 7 }, status: 202 },
+      {
+        data: {
+          run: run({
+            status: 'passed',
+            gates: [
+              workEvidencePassed,
+              gate({
+                id: 11,
+                gateId: 'e2e',
+                command: 'npm run test:e2e',
+                durationMs: 190000,
+                logTail:
+                  '[mutex] name=e2e-port waited=42.3s lock=/home/dev/.commandmate/locks/e2e-port.lock\nall specs passed',
+              }),
+            ],
+          }),
+        },
+      },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'wt1']);
+
+    expect(mockConsoleError).toHaveBeenCalledWith('GATE e2e PASS (exit=0, 190.0s, waited=42.3s)');
+    // 190.0s is the command's own time. A runner that added the wait would print
+    // 232.3s here and nothing downstream could tell.
+    expect(mockConsoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('GATE e2e PASS (exit=0, 232.3s')
+    );
+  });
+
+  it('does not read waited= out of a gate\'s own output', async () => {
+    // The marker is anchored to the start of a line, so a suite that happens to
+    // print `waited=` cannot put a number the runner never measured on the
+    // GATE line.
+    mockFetchWithTail([
+      { data: { runId: 7 }, status: 202 },
+      {
+        data: {
+          run: run({
+            status: 'passed',
+            gates: [
+              workEvidencePassed,
+              gate({ id: 11, gateId: 'unit', logTail: 'server waited=99.9s for the port' }),
+            ],
+          }),
+        },
+      },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'wt1']);
+
+    expect(mockConsoleError).toHaveBeenCalledWith('GATE unit PASS (exit=0, 12.3s)');
+  });
+
+  it('prints reason=mutex-wait for a gate whose lock never came free', async () => {
+    mockFetchWithTail([
+      { data: { runId: 7 }, status: 202 },
+      {
+        data: {
+          run: run({
+            status: 'error',
+            gates: [
+              workEvidencePassed,
+              gate({
+                id: 11,
+                gateId: 'e2e',
+                status: 'skipped',
+                exitCode: null,
+                durationMs: 0,
+                logTail:
+                  'reason=mutex-wait waited=600.0s\n[mutex] name=e2e-port lock=/home/dev/.commandmate/locks/e2e-port.lock',
+              }),
+            ],
+          }),
+        },
+      },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'wt1']);
+
+    expect(mockConsoleError).toHaveBeenCalledWith('GATE e2e SKIP (reason=mutex-wait waited=600.0s)');
+    // 99, not 20: no verdict was reached, and a caller branching on 20 must be
+    // able to trust that the gate actually judged the work.
+    expect(mockExit).toHaveBeenCalledWith(ExitCode.UNEXPECTED_ERROR);
+  });
+
+  // Issue #1772: a gate that fails on the machine's luck and passes on a
+  // re-run has no word in PASS/FAIL that is true of it. FLAKY is that word, and
+  // it has to carry both runs' numbers or it says nothing a reader can act on.
+  const FLAKY_TAIL = [
+    '[flaky] runs=2 outcome=flaky exit=1,0 duration=45.0s,44.0s verdict=fail',
+    '--- [flaky] run 1/2: failed exit=1 duration=45.0s ---',
+    'AssertionError: expected not to contain "fac-"',
+    '--- [flaky] run 2/2: passed exit=0 duration=44.0s ---',
+    '53 passed',
+  ].join('\n');
+
+  it('prints FLAKY with both runs\' exit codes and durations', async () => {
+    mockFetchWithTail([
+      { data: { runId: 7 }, status: 202 },
+      {
+        data: {
+          run: run({
+            status: 'failed',
+            gates: [
+              workEvidencePassed,
+              gate({
+                id: 11, gateId: 'unit', command: 'npm run test:unit',
+                status: 'failed', exitCode: 1, durationMs: 89000, logTail: FLAKY_TAIL,
+              }),
+            ],
+          }),
+        },
+      },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'wt1']);
+
+    // The exact spelling docs/design/verification-config.md §9.3 fixes for this
+    // runner. The stored columns hold one run; printing them would drop half
+    // the evidence the retry exists to produce.
+    expect(mockConsoleError).toHaveBeenCalledWith('GATE unit FLAKY (exit=1,0, 45.0s,44.0s)');
+    expect(mockConsoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('GATE unit FAIL')
+    );
+    // Default flakyIsPass: the gate did not get weaker by opting into a retry.
+    expect(mockConsoleLog).toHaveBeenCalledWith('RESULT failed');
+    expect(mockExit).toHaveBeenCalledWith(VerifyExitCode.VERIFY_FAILED);
+  });
+
+  it('still prints FLAKY, and exits 0, when the gate declared flakyIsPass', async () => {
+    mockFetchWithTail([
+      { data: { runId: 7 }, status: 202 },
+      {
+        data: {
+          run: run({
+            status: 'passed',
+            gates: [
+              workEvidencePassed,
+              gate({
+                id: 11, gateId: 'unit', command: 'npm run test:unit',
+                status: 'passed', exitCode: 0, durationMs: 89000,
+                logTail: FLAKY_TAIL.replace('verdict=fail', 'verdict=pass'),
+              }),
+            ],
+          }),
+        },
+      },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'wt1']);
+
+    // Counting a flake as a pass must not erase the flake: PASS here would hide
+    // the one fact the whole feature exists to surface.
+    expect(mockConsoleError).toHaveBeenCalledWith('GATE unit FLAKY (exit=1,0, 45.0s,44.0s)');
+    expect(mockConsoleLog).toHaveBeenCalledWith('RESULT passed');
+    expect(mockExit).toHaveBeenCalledWith(VerifyExitCode.SUCCESS);
+  });
+
+  it('keeps FAIL for a gate that failed both runs, and shows both', async () => {
+    mockFetchWithTail([
+      { data: { runId: 7 }, status: 202 },
+      {
+        data: {
+          run: run({
+            status: 'failed',
+            gates: [
+              workEvidencePassed,
+              gate({
+                id: 11, gateId: 'unit', status: 'failed', exitCode: 1, durationMs: 89000,
+                logTail: '[flaky] runs=2 outcome=fail exit=1,1 duration=45.0s,44.0s verdict=fail',
+              }),
+            ],
+          }),
+        },
+      },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'wt1']);
+
+    // The retry agreed; nothing about this gate was flaky.
+    expect(mockConsoleError).toHaveBeenCalledWith('GATE unit FAIL (exit=1,1, 45.0s,44.0s)');
+    expect(mockExit).toHaveBeenCalledWith(VerifyExitCode.VERIFY_FAILED);
+  });
+
+  it('keeps the mutex wait beside a FLAKY gate\'s two durations', async () => {
+    mockFetchWithTail([
+      { data: { runId: 7 }, status: 202 },
+      {
+        data: {
+          run: run({
+            status: 'failed',
+            gates: [
+              workEvidencePassed,
+              gate({
+                id: 11, gateId: 'e2e', status: 'failed', exitCode: 1, durationMs: 89000,
+                logTail:
+                  '[flaky] runs=2 outcome=flaky exit=1,0 duration=45.0s,44.0s verdict=fail\n' +
+                  '[mutex] name=e2e-port waited=42.3s lock=/home/dev/.commandmate/locks/e2e-port.lock',
+              }),
+            ],
+          }),
+        },
+      },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'wt1']);
+
+    // The two features compose: `waited` still trails, still separate from
+    // both durations rather than folded into either.
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      'GATE e2e FLAKY (exit=1,0, 45.0s,44.0s, waited=42.3s)'
+    );
+  });
+
+  it('does not read a flaky marker out of a gate\'s own output', async () => {
+    mockFetchWithTail([
+      { data: { runId: 7 }, status: 202 },
+      {
+        data: {
+          run: run({
+            gates: [
+              workEvidencePassed,
+              gate({
+                id: 11, gateId: 'unit',
+                logTail: 'suite printed  [flaky] runs=2 outcome=flaky exit=9,9 duration=1.0s,1.0s verdict=pass',
+              }),
+            ],
+          }),
+        },
+      },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'wt1']);
+
+    // Anchored to the start of a line, so a suite that echoes the marker cannot
+    // claim a retry that never happened.
+    expect(mockConsoleError).toHaveBeenCalledWith('GATE unit PASS (exit=0, 12.3s)');
+  });
+
   it('prints a scope failure with its out-of-scope paths and the scope.allow guidance', async () => {
     // Mirrors the report evaluateScope() builds (scope-gate.ts); below the
     // display cap it must reach stderr verbatim — the paths are what let a
@@ -482,6 +736,130 @@ describe('verify command action', () => {
     const printed = JSON.parse(mockConsoleLog.mock.calls[0][0] as string);
     expect(printed.status).toBe('failed');
     expect(printed.gates).toHaveLength(1);
+  });
+
+  it('adds machine-readable scope evidence to the JSON, leaving every other field alone', async () => {
+    // Issue #1841. `scope.allow: ["src/**"]` is a claim; which files it actually
+    // covered on the day it ran is only in the gate's report, and a consumer
+    // should not have to re-parse prose to read it.
+    const scopeTail = [
+      'scope: baseRef=origin/develop changed=3 violations=1',
+      'allow: src/**, docs/*.md',
+      'deny: src/secret/**',
+      'admitted:',
+      '  + docs/x.md  \u2190 docs/*.md',
+      '  + src/a/b.ts  \u2190 src/**',
+      'out of scope:',
+      '  - src/secret/key.ts  \u2190 src/secret/**',
+      'To allow this diff, add the paths above to the contract\'s scope.allow.',
+    ].join('\n');
+    const scopeGate = gate({
+      id: 12, gateId: 'scope', status: 'failed', exitCode: 1, durationMs: 200,
+      logTail: scopeTail,
+    });
+    mockFetchWithTail([
+      { data: { runId: 7 }, status: 202 },
+      { data: { run: run({ status: 'failed', gates: [workEvidencePassed, scopeGate] }) } },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'wt1', '--json']);
+
+    const printed = JSON.parse(mockConsoleLog.mock.calls[0][0] as string);
+    const printedScope = printed.gates.find(
+      (g: VerificationGateResultView) => g.gateId === 'scope'
+    );
+    expect(printedScope.scope).toEqual({
+      admitted: [
+        { path: 'docs/x.md', pattern: 'docs/*.md' },
+        { path: 'src/a/b.ts', pattern: 'src/**' },
+      ],
+      violations: ['src/secret/key.ts'],
+      totals: { changed: 3, admitted: 2, violations: 1 },
+    });
+    // The evidence is added, not substituted: the report a human reads is
+    // still there verbatim, and the verdict fields are untouched.
+    expect(printedScope.logTail).toBe(scopeTail);
+    expect(printedScope.status).toBe('failed');
+    expect(printedScope.exitCode).toBe(1);
+    // Only the scope gate carries it.
+    const printedWorkEvidence = printed.gates.find(
+      (g: VerificationGateResultView) => g.gateId === 'work-evidence'
+    );
+    expect(printedWorkEvidence.scope).toBeUndefined();
+  });
+
+  it('leaves the scope gate untouched when its log is a message rather than a report', async () => {
+    // A skipped or detached-contract gate writes a sentence. An empty
+    // `admitted` there would read as "the gate looked and admitted nothing",
+    // which is the opposite of "the gate never judged anything".
+    mockFetchWithTail([
+      { data: { runId: 7 }, status: 202 },
+      {
+        data: {
+          run: run({
+            gates: [
+              workEvidencePassed,
+              gate({
+                id: 12, gateId: 'scope', status: 'skipped', exitCode: null,
+                logTail: 'scope: no contract is attached to this run, so no scope is declared to check.',
+              }),
+            ],
+          }),
+        },
+      },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'wt1', '--json']);
+
+    const printed = JSON.parse(mockConsoleLog.mock.calls[0][0] as string);
+    expect(printed.gates.find((g: VerificationGateResultView) => g.gateId === 'scope').scope)
+      .toBeUndefined();
+  });
+
+  it('adds the machine-readable retry record to the JSON (Issue #1772)', async () => {
+    mockFetchWithTail([
+      { data: { runId: 7 }, status: 202 },
+      {
+        data: {
+          run: run({
+            status: 'failed',
+            gates: [
+              workEvidencePassed,
+              gate({
+                id: 11, gateId: 'unit', status: 'failed', exitCode: 1, durationMs: 89000,
+                logTail: FLAKY_TAIL,
+              }),
+            ],
+          }),
+        },
+      },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'wt1', '--json']);
+
+    const printed = JSON.parse(mockConsoleLog.mock.calls[0][0] as string);
+    const unit = printed.gates.find((g: VerificationGateResultView) => g.gateId === 'unit');
+    // This is what a flake advisor reads instead of re-parsing the log.
+    expect(unit.flaky).toEqual({
+      runs: 2,
+      outcome: 'flaky',
+      exitCodes: [1, 0],
+      durationsMs: [45000, 44000],
+      verdict: 'fail',
+      exit: '1,0',
+      duration: '45.0s,44.0s',
+    });
+    // Added, not substituted: the stored verdict fields are untouched.
+    expect(unit.logTail).toBe(FLAKY_TAIL);
+    expect(unit.status).toBe('failed');
+    expect(unit.exitCode).toBe(1);
+    // Only the retried gate carries it.
+    expect(
+      printed.gates.find((g: VerificationGateResultView) => g.gateId === 'work-evidence').flaky
+    ).toBeUndefined();
   });
 
   it('reports a 409 conflict with the blocking run id', async () => {

@@ -17,14 +17,20 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { promisify } from 'node:util';
 
+import {
+  buildClaudeLaunchCommand,
+  isHookInjectionEnabled,
+  shellQuote,
+} from '@/lib/hooks/hook-settings-generator';
 import { formatHelp, parseArgs, type CanaryOptions } from './cli';
 import { writeFixtureArtifacts } from './fixtures';
 import { findUpstreamFault } from './expectations';
 import { assertGuardSnapshotIntact, captureGuardSnapshot, type GuardSnapshot } from './guards';
+import { CanaryHookReceiver, CANARY_INSTANCE_ID } from './hook-receiver';
 import { createIsolatedHome, type IsolatedHome } from './isolated-home';
-import { summarizeObservation } from './probe';
+import { CANARY_CLI_TOOL, summarizeObservation } from './probe';
 import { SCENARIOS, selectScenarios } from './scenarios';
-import { CanarySession } from './session';
+import { buildLaunchCommand, CANARY_PERMISSION_MODE, CanarySession } from './session';
 import { CANARY_SOCKET_PREFIX, PrivateTmuxServer } from './tmux-private';
 import { ObservationTimeoutError, type CanaryScenario, type ScenarioResult } from './types';
 
@@ -95,18 +101,97 @@ interface RunScenarioDeps {
   repoRoot: string;
   options: CanaryOptions;
   log: (message: string) => void;
+  /** Non-null once any selected scenario declares `hooks` (Issue #1847). */
+  receiver: CanaryHookReceiver | null;
+}
+
+/**
+ * Correlation key baked into this scenario's injected hook URLs.
+ *
+ * Not a real worktree id and never looked up in a database: the canary's
+ * receiver only checks that a request carries the id of the scenario it is
+ * currently answering for, which is what stops a straggling session from an
+ * earlier scenario being adjudicated against the current one's policy.
+ */
+function hookWorktreeIdFor(scenario: CanaryScenario): string {
+  return `canary-${scenario.id}`;
+}
+
+/**
+ * Wire a scenario's session to the canary's receiver (Issue #1847).
+ *
+ * The launch command comes from the production launcher, so the settings file
+ * under test is byte-for-byte the one a real CommandMate session gets — only
+ * `port` (the receiver's ephemeral one) and `directory` (inside the throwaway
+ * HOME, never `~/.commandmate/hooks`) are overridden.
+ *
+ * @returns The shell command tmux should run, and the per-capture hook sampler
+ */
+function prepareHookSession(
+  scenario: CanaryScenario,
+  deps: RunScenarioDeps
+): { launchCommand: string; observeHooks: CanaryHookReceiver['observe'] } {
+  const { receiver, home, preflight, options, log } = deps;
+  const hooks = scenario.hooks;
+  if (!hooks || !receiver) {
+    throw new Error(`canary: scenario ${scenario.id} has no hook receiver to attach to`);
+  }
+  if (!isHookInjectionEnabled()) {
+    throw new Error(
+      'canary: CM_AGENT_HOOKS_INJECT=0 disables hook injection, so the Auto-Yes v2 scenarios ' +
+        'would silently run a session with no hooks at all. Unset it and re-run.'
+    );
+  }
+
+  const worktreeId = hookWorktreeIdFor(scenario);
+  const launchCommand = buildClaudeLaunchCommand(
+    preflight.claudeBinary,
+    { worktreeId, instanceId: CANARY_INSTANCE_ID, cliToolId: CANARY_CLI_TOOL },
+    {
+      port: receiver.port,
+      directory: path.join(home.root, 'hooks'),
+      // The receiver has no auth middleware, and `$CM_AUTH_TOKEN` would be sent
+      // as a literal `$CM_AUTH_TOKEN` unless the throwaway session carried the
+      // variable (D7). Asking for the header would only add a way to fail.
+      withAuthHeader: false,
+    }
+  );
+  if (launchCommand === preflight.claudeBinary) {
+    throw new Error(
+      'canary: the hook settings file could not be written, so the session would start without ' +
+        'hooks and the scenario would assert nothing. See the hook-settings-write-failed warning.'
+    );
+  }
+  // Last, so a failure above leaves the receiver unconfigured rather than
+  // answering for a session that is never going to start.
+  receiver.beginSession({
+    worktreeId,
+    policy: hooks.policy,
+    probeFilePath: path.join(home.workingDirectoryFor(scenario.id), hooks.probeFile),
+    invertVerdict: options.mutateVerdict,
+  });
+  log(`  hooks: receiver on 127.0.0.1:${receiver.port}, worktreeId=${worktreeId}`);
+  return { launchCommand, observeHooks: receiver.observe.bind(receiver) };
 }
 
 async function runScenario(scenario: CanaryScenario, deps: RunScenarioDeps): Promise<ScenarioResult> {
   const { tmux, home, preflight, runId, repoRoot, options, log } = deps;
   const expectation = options.mutate ? scenario.mutantExpectation : scenario.expectation;
+  // `--mutate-verdict` deliberately keeps the full timeout: a mutated hook
+  // scenario is supposed to go red because the flipped reply changed the SCREEN,
+  // and cutting the clock short would make it go red because nothing had
+  // happened yet — a self-test that passes for the wrong reason.
   const timeoutMs = options.mutate ? Math.min(scenario.timeoutMs, 30_000) : scenario.timeoutMs;
   const startedAt = Date.now();
   const sessionName = `${CANARY_SOCKET_PREFIX}${scenario.id}-${runId}`;
 
   log(`\n▶ ${scenario.id} — ${scenario.title}`);
   log(`  expect: ${expectation.label}`);
+  if (options.mutateVerdict && scenario.hooks) {
+    log('  --mutate-verdict: the receiver answers the OPPOSITE verdict; this scenario must FAIL.');
+  }
 
+  const hookSession = scenario.hooks ? prepareHookSession(scenario, deps) : null;
   const session = await CanarySession.start({
     tmux,
     sessionName,
@@ -114,6 +199,11 @@ async function runScenario(scenario: CanaryScenario, deps: RunScenarioDeps): Pro
     isolatedHome: home.root,
     claudeBinary: preflight.claudeBinary,
     log,
+    // Every scenario, hooks or not: see CANARY_PERMISSION_MODE.
+    launchCommand: buildLaunchCommand(
+      hookSession?.launchCommand ?? shellQuote(preflight.claudeBinary)
+    ),
+    ...(hookSession ? { observeHooks: hookSession.observeHooks } : {}),
   });
 
   try {
@@ -192,6 +282,9 @@ async function runScenario(scenario: CanaryScenario, deps: RunScenarioDeps): Pro
     } else {
       await session.close(scenario.resetKeys ?? []);
     }
+    // After the session is gone, so a straggling request from it cannot be
+    // adjudicated against the NEXT scenario's policy.
+    deps.receiver?.endSession();
   }
 }
 
@@ -205,7 +298,11 @@ function formatSummary(
   const lines: string[] = [];
   lines.push('');
   lines.push('─'.repeat(78));
-  lines.push(options.mutate ? 'MUTATION SELF-TEST SUMMARY' : 'DETECTION CANARY SUMMARY');
+  lines.push(
+    options.mutate || options.mutateVerdict
+      ? 'MUTATION SELF-TEST SUMMARY'
+      : 'DETECTION CANARY SUMMARY'
+  );
   lines.push('─'.repeat(78));
   lines.push(`claude    : ${preflight.claudeVersion}`);
   lines.push(`tmux      : ${preflight.tmuxVersion}`);
@@ -275,6 +372,23 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     return 2;
   }
 
+  // `--mutate-verdict` mutates the hook receiver, so it has nothing to say
+  // about a scenario that runs a bare `claude`. Those are reported SKIP rather
+  // than silently dropped, so the summary shows what the self-test did not cover.
+  const verdictSkipped: CanaryScenario[] = options.mutateVerdict
+    ? selected.filter(scenario => !scenario.hooks)
+    : [];
+  if (options.mutateVerdict) {
+    selected = selected.filter(scenario => scenario.hooks);
+    if (selected.length === 0) {
+      console.error(
+        'canary: --mutate-verdict selected no scenario with a hook receiver. ' +
+          `Hook scenarios: ${SCENARIOS.filter(s => s.hooks).map(s => s.id).join(', ')}`
+      );
+      return 2;
+    }
+  }
+
   const repoRoot = findRepoRoot(process.cwd());
   const realHome = os.homedir();
   const startedAt = Date.now();
@@ -289,10 +403,16 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     return 2;
   }
 
-  log(`claude ${preflight.claudeVersion} · ${preflight.tmuxVersion}`);
+  log(`claude ${preflight.claudeVersion} · ${preflight.tmuxVersion} · --permission-mode ${CANARY_PERMISSION_MODE}`);
   log(`protecting ${snapshot.realSettingsPath} and ${snapshot.productionSessions.length} mcbd-* session(s)`);
   if (options.mutate) {
     log('MUTATION SELF-TEST: every scenario runs against a deliberately wrong expectation and must FAIL.');
+  }
+  if (options.mutateVerdict) {
+    log(
+      'VERDICT MUTATION SELF-TEST: the hook receiver answers the opposite verdict and every ' +
+        'hook scenario must FAIL against its REAL expectation.'
+    );
   }
 
   const runId = randomBytes(3).toString('hex');
@@ -317,6 +437,22 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   const results: ScenarioResult[] = [];
   let fatalError: Error | null = null;
 
+  // One receiver for the whole run, on a kernel-assigned loopback port: never
+  // 3000, never a worktree server's port, and gone when the process exits.
+  let receiver: CanaryHookReceiver | null = null;
+  if (selected.some(scenario => scenario.hooks)) {
+    try {
+      receiver = await CanaryHookReceiver.start(log);
+      log(`hook receiver: http://127.0.0.1:${receiver.port} (ephemeral, loopback only)`);
+    } catch (error) {
+      console.error(
+        `canary: could not start the hook receiver — ${error instanceof Error ? error.message : String(error)}`
+      );
+      home.dispose();
+      return 2;
+    }
+  }
+
   try {
     for (const scenario of selected) {
       // Re-checked per scenario so a violation is attributable. In particular
@@ -325,7 +461,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       await assertGuardSnapshotIntact(snapshot, `before scenario ${scenario.id}`);
       try {
         results.push(
-          await runScenario(scenario, { tmux, home, preflight, runId, repoRoot, options, log })
+          await runScenario(scenario, { tmux, home, preflight, runId, repoRoot, options, log, receiver })
         );
       } catch (error) {
         fatalError = error instanceof Error ? error : new Error(String(error));
@@ -344,6 +480,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   } catch (error) {
     fatalError = error instanceof Error ? error : new Error(String(error));
   } finally {
+    await receiver?.close();
     if (options.keep) {
       log(`\n--keep: tmux socket ${socketName} and HOME ${home.root} were left in place.`);
       log(`  inspect: tmux -L ${socketName} attach`);
@@ -372,6 +509,16 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       });
     }
   }
+  for (const scenario of verdictSkipped) {
+    results.push({
+      scenarioId: scenario.id,
+      title: scenario.title,
+      status: 'skipped',
+      expectationLabel: scenario.expectation.label,
+      durationMs: 0,
+      error: 'not run (--mutate-verdict only mutates scenarios with a hook receiver)',
+    });
+  }
 
   // Final guard check runs after teardown so a leak by the teardown itself is caught.
   let guardError: Error | null = null;
@@ -386,7 +533,12 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   const inconclusive = results.filter(
     result => result.status === 'blocked' || result.status === 'skipped'
   );
-  const mutationSelfTestPassed = options.mutate && results.every(result => result.status !== 'passed');
+  const mutating = options.mutate || options.mutateVerdict;
+  // A SKIP under `--mutate-verdict` is a scenario the self-test never touched,
+  // so it must not count as evidence in either direction — only the scenarios
+  // that actually ran with a flipped verdict do.
+  const mutationSelfTestPassed =
+    mutating && results.some(r => r.status !== 'skipped') && results.every(r => r.status !== 'passed');
 
   if (options.json) {
     console.log(
@@ -395,6 +547,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
           claudeVersion: preflight.claudeVersion,
           tmuxVersion: preflight.tmuxVersion,
           mutate: options.mutate,
+          mutateVerdict: options.mutateVerdict,
           durationMs: totalMs,
           guardViolation: guardError?.message ?? null,
           fatalError: fatalError?.message ?? null,
@@ -408,11 +561,12 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     console.log(formatSummary(results, preflight, home, options, totalMs));
     if (guardError) console.error(`GUARD VIOLATION: ${guardError.message}`);
     if (fatalError) console.error(`ABORTED: ${fatalError.message}`);
-    if (options.mutate) {
+    if (mutating) {
+      const mutant = options.mutate ? 'a wrong expectation' : 'a flipped hook verdict';
       console.log(
         mutationSelfTestPassed
-          ? 'mutation self-test PASSED — every scenario went red against a wrong expectation.'
-          : 'mutation self-test FAILED — a scenario still passed with a wrong expectation (vacuous assertion).'
+          ? `mutation self-test PASSED — every scenario that ran went red against ${mutant}.`
+          : `mutation self-test FAILED — a scenario still passed with ${mutant} (vacuous assertion).`
       );
     } else if (failed.length > 0) {
       console.log(
@@ -430,7 +584,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   }
 
   if (guardError) return 3;
-  if (options.mutate) return mutationSelfTestPassed ? 0 : 1;
+  if (mutating) return mutationSelfTestPassed ? 0 : 1;
   if (failed.length > 0) return 1;
   return inconclusive.length > 0 ? 4 : 0;
 }

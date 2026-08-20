@@ -409,9 +409,16 @@ describe('#1758 §9.4 checklist', () => {
   });
 
   it('11. no config is written for a source that is subscribed to', () => {
-    const plan = source.prepareLaunch(REF, '/usr/local/bin/opencode');
+    const plan = source.prepareLaunch({
+      target: REF,
+      executablePath: '/usr/local/bin/opencode',
+      worktreePath: '/repo/wt-1',
+    });
     expect(plan.command).toBe('/usr/local/bin/opencode');
     expect(plan.settingsPath).toBeNull();
+    // #1846: a pull source needs no correlation variable — CommandMate holds
+    // the connection, so it already knows whose frames these are.
+    expect(plan.env).toEqual({});
     expect(source.capabilities.configScope).toBe('none');
   });
 });

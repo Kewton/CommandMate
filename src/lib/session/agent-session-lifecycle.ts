@@ -36,8 +36,8 @@
  * @module lib/session/agent-session-lifecycle
  */
 
-import { getAgentEventSource } from '@/lib/hooks/sources';
-import type { AgentInstanceRef } from '@/lib/hooks/sources';
+import { getAgentEventSource, renderAgentLaunchCommand } from '@/lib/hooks/sources';
+import type { AgentInstanceRef, AgentLaunchContext, AgentLaunchPlan } from '@/lib/hooks/sources';
 import { beginAgentEventGeneration } from '@/lib/session/agent-event-state';
 import { createLogger } from '@/lib/logger';
 
@@ -72,13 +72,34 @@ export function beginAgentSession(target: AgentInstanceRef, at: number = Date.no
  * does not import a settings generator: which file gets written, and whether
  * one gets written at all, is the source's business.
  *
- * Never throws — see {@link AgentEventSource.prepareLaunch}. A tool whose
- * config could not be written starts bare, which is the pre-#1722 status quo.
+ * Never throws — see `AgentEventSource.prepareLaunch`. A tool whose config
+ * could not be written starts bare, which is the pre-#1722 status quo.
  *
- * @param target - The instance being started
- * @param executablePath - Resolved path to the agent CLI
- * @returns The command line, and the config file when one was written
+ * @param context - The instance, its executable, and the worktree it runs in
+ * @returns The command, its environment, and the config file when one landed
  */
-export function prepareAgentLaunch(target: AgentInstanceRef, executablePath: string) {
-  return getAgentEventSource(target.cliToolId).prepareLaunch(target, executablePath);
+export function prepareAgentLaunch(context: AgentLaunchContext): AgentLaunchPlan {
+  return getAgentEventSource(context.target.cliToolId).prepareLaunch(context);
+}
+
+/**
+ * The single line a `startSession` types into its pane (Issue #1846).
+ *
+ * `prepareAgentLaunch` returns a plan whose environment is *data*; this is the
+ * one function that turns that data into shell assignments. Before #1846 four
+ * sources each wrote their own `NAME=value ` prefix onto `plan.command`, so
+ * "does this launcher apply the environment?" was answered four times, by
+ * accident, and a fifth source that forgot would have produced a session whose
+ * hooks fire and cannot be attributed — no error, events landing on the wrong
+ * instance.
+ *
+ * Callers that need the settings path as well should call
+ * {@link prepareAgentLaunch} and render the plan themselves; every caller in
+ * `src/lib/cli-tools/` wants only the line.
+ *
+ * @param context - The instance, its executable, and the worktree it runs in
+ * @returns `NAME='value' … command`, ready for `sendKeys`
+ */
+export function buildAgentLaunchCommandLine(context: AgentLaunchContext): string {
+  return renderAgentLaunchCommand(prepareAgentLaunch(context));
 }

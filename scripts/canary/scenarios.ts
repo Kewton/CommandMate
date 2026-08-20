@@ -1,9 +1,14 @@
 /**
- * The five canary scenarios (Issue #1727).
+ * The canary scenarios.
  *
  * Each one drives a real `claude` into a state the detection layer has broken on
  * before, then asserts what production would conclude about that frame. The
  * prompts are deliberately tiny — the point is the TUI state, not the answer.
+ *
+ * Five of them (#1727) read the frame alone. The last two (#1847) additionally
+ * point the session's injected hooks at the canary's own receiver and assert
+ * what Auto-Yes v2's verdict did to the screen; they carry a `hooks` block, and
+ * their expectations live in `hook-expectations.ts`.
  *
  * Adding a scenario: append an entry here (id must be filename-safe, it names the
  * fixture), give it an expectation from `expectations.ts` and a DIFFERENT
@@ -18,10 +23,42 @@ import {
   expectModelOverlay,
   expectPermissionDialog,
 } from './expectations';
+import {
+  expectPermissionAllowedByHook,
+  expectPermissionDialogAfterNoDecision,
+} from './hook-expectations';
+import type { AutoYesPolicy } from '@/lib/polling/auto-yes-resolver';
 import type { CanaryScenario } from './types';
 
 /** Filename the permission scenario asks Claude to create (never actually created — the dialog is cancelled). */
 const PERMISSION_PROBE_FILE = 'canary-permission-probe.txt';
+
+/** Filename the Auto-Yes v2 allow scenario asks Claude to create — and which really is created. */
+const HOOK_ALLOW_PROBE_FILE = 'canary-hook-allow-probe.txt';
+
+/** Filename the Auto-Yes v2 no-decision scenario asks for. The deny pattern below matches it. */
+const HOOK_DENY_PROBE_FILE = 'canary-hook-deny-probe.txt';
+
+/**
+ * The one contract policy both Auto-Yes v2 scenarios are judged against
+ * (Issue #1847).
+ *
+ * Deliberately the SAME object for both, with the outcome decided by the
+ * filename each prompt asks for. That is what makes the pair a statement about
+ * `denyPatterns` rather than about two unrelated configurations: the allow
+ * scenario proves the pattern was evaluated and did not match, the no-decision
+ * scenario proves the same pattern suppressed the answer when it did.
+ *
+ * `mode` is null — a contract that lists deny patterns and states no mode —
+ * because deny patterns are honoured regardless of mode
+ * (`evaluatePolicyAgainstTexts`), and any real mode would suppress the
+ * `multiple_choice` verdict for its own reason and hide the pattern under it.
+ */
+const HOOK_SCENARIO_POLICY: AutoYesPolicy = {
+  mode: null,
+  allowPromptTypes: [],
+  denyPatterns: ['canary-hook-deny-probe'],
+};
 
 export const SCENARIOS: readonly CanaryScenario[] = [
   {
@@ -107,6 +144,46 @@ export const SCENARIOS: readonly CanaryScenario[] = [
     async drive(driver): Promise<void> {
       await driver.submitPrompt(
         'Without using any tools, write about 400 words explaining how terminal multiplexers keep processes alive across disconnects.'
+      );
+    },
+  },
+  {
+    id: 'permission-hook-allow',
+    title: 'Auto-Yes v2 — PermissionRequest answered allow',
+    intent:
+      'The load-bearing upstream contract of Auto-Yes v2 (#1724): a `decision.behavior: "allow"` reply makes Claude run the tool with NO dialog. Nothing in this repository can observe that, and if a Claude release stopped honouring it every Auto-Yes v2 session would silently fall back to sitting on a dialog. The probe file on disk is what separates "ran without asking" from "has not asked yet".',
+    cost: 'small',
+    timeoutMs: 180_000,
+    pollIntervalMs: 2_000,
+    expectation: expectPermissionAllowedByHook,
+    // The two scenarios are each other's mutant, which is the sharpest wrong
+    // answer available: it says "the receiver returned the opposite verdict".
+    // It is also unsatisfiable rather than merely unlikely — this scenario's
+    // probe file cannot match the deny pattern — so `--mutate` is deterministic
+    // here instead of racing the moment the poll lands on.
+    mutantExpectation: expectPermissionDialogAfterNoDecision,
+    hooks: { policy: HOOK_SCENARIO_POLICY, probeFile: HOOK_ALLOW_PROBE_FILE },
+    async drive(driver): Promise<void> {
+      await driver.submitPrompt(
+        `Use the Write tool to create a file named ${HOOK_ALLOW_PROBE_FILE} in the current directory containing the single word hello. Do not do anything else.`
+      );
+    },
+  },
+  {
+    id: 'permission-hook-no-decision',
+    title: 'Auto-Yes v2 — denyPatterns hit, no decision, dialog for a human',
+    intent:
+      "The other half of #1724's contract, and the one with no live record before this: an empty reply must land back in the ordinary approval flow. `denyPatterns` escalates rather than denies, so the human must get the dialog AND `capture --json` must be able to say why — a worker that stalls here with no reason published is the failure #1684 set out to remove.",
+    cost: 'small',
+    timeoutMs: 180_000,
+    pollIntervalMs: 2_000,
+    expectation: expectPermissionDialogAfterNoDecision,
+    mutantExpectation: expectPermissionAllowedByHook,
+    hooks: { policy: HOOK_SCENARIO_POLICY, probeFile: HOOK_DENY_PROBE_FILE },
+    resetKeys: ['Escape'],
+    async drive(driver): Promise<void> {
+      await driver.submitPrompt(
+        `Use the Write tool to create a file named ${HOOK_DENY_PROBE_FILE} in the current directory containing the single word hello. Do not do anything else.`
       );
     },
   },

@@ -1160,6 +1160,131 @@ describe('Issue #1699: policy suppression is reported while waiting', () => {
 });
 
 /**
+ * Issue #1843: the notice must name the *right* cause.
+ *
+ * #1699 shipped a single hard-coded prefix, "by contract policy", for every
+ * suppression. #1829 then started recording `agent-launch-dialog` through the
+ * same channel — a product-side decision the poller makes about the tool's own
+ * startup screens, with no contract involved — so a worktree running without any
+ * contract at all was being told its `denyPatterns` had blocked the prompt.
+ */
+describe('Issue #1843: the suppression notice names the reason it actually has', () => {
+  const suppressedPrompt = (lastSuppression: unknown) => ({
+    ...baseOutput,
+    isRunning: true,
+    isPromptWaiting: true,
+    sessionStatus: 'waiting' as const,
+    promptData: {
+      type: 'multiple_choice',
+      question: 'Hooks need review',
+      options: [{ number: 1, label: 'Review hooks', isDefault: true }],
+      status: 'pending',
+    },
+    autoYes: { enabled: true, expiresAt: null, lastSuppression },
+  });
+
+  const stderrOf = () => mockConsoleError.mock.calls.map(c => String(c[0])).join('\n');
+
+  /** One poll, agent mode: the notice is printed and the command exits 10. */
+  const waitOnce = async (lastSuppression: unknown) => {
+    mockFetchSequence([{ data: suppressedPrompt(lastSuppression) }]);
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+  };
+
+  const launchDialog = {
+    reason: 'agent-launch-dialog',
+    // Recorded with mode null: src/lib/auto-yes-poller.ts passes no policy here
+    // because the decision is not the policy's to make.
+    mode: null,
+    promptType: 'multiple_choice',
+    at: Date.now(),
+  };
+
+  it('does not blame the contract for a launch-dialog suppression', async () => {
+    await waitOnce(launchDialog);
+
+    const stderr = stderrOf();
+    expect(stderr).toContain('auto-yes suppressed this prompt');
+    expect(stderr).not.toContain('by contract policy');
+    expect(stderr).toContain("while the agent's launch dialog was on screen");
+    expect(stderr).toContain('reason=agent-launch-dialog');
+  });
+
+  it('says the same thing in --on-prompt human mode', async () => {
+    vi.useFakeTimers();
+    mockFetchSequence([
+      { data: suppressedPrompt({ ...launchDialog, at: Date.now() }) },
+      { data: { ...baseOutput, isRunning: true, sessionStatus: 'ready' as const } },
+    ]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    const promise = createWaitCommand().parseAsync([
+      'node', 'wait', 'wt1', '--on-prompt', 'human',
+    ]);
+    await vi.advanceTimersByTimeAsync(5000);
+    await promise;
+
+    const stderr = stderrOf();
+    expect(stderr).toContain("while the agent's launch dialog was on screen");
+    expect(stderr).not.toContain('by contract policy');
+  });
+
+  // The four verdicts evaluatePolicyAgainstTexts can return — recorded from the
+  // Auto-Yes poller's policy branch and from permission-decision-service alike.
+  // These are the contract's own doing, so #1843 must not have moved them.
+  it.each([
+    ['mode-off', undefined],
+    ['deny-pattern', 'rm -rf'],
+    ['deny-pattern-unusable', '(((' ],
+    ['type-not-allowed', undefined],
+  ])('keeps the pre-#1843 wording for reason=%s', async (reason, pattern) => {
+    await waitOnce({
+      reason,
+      mode: 'allow-listed',
+      promptType: 'multiple_choice',
+      ...(pattern !== undefined && { pattern }),
+      at: Date.now(),
+    });
+
+    expect(stderrOf()).toContain(
+      `auto-yes suppressed this prompt by contract policy: reason=${reason}`,
+    );
+  });
+
+  it('names an unknown reason instead of folding it into contract policy', async () => {
+    // `reason` is a server-supplied string: a server newer than this CLI can
+    // publish a reason this build has never heard of. Guessing "contract policy"
+    // for it would reintroduce exactly the bug, one reason later.
+    await waitOnce({
+      reason: 'some-future-reason',
+      mode: null,
+      promptType: 'multiple_choice',
+      at: Date.now(),
+    });
+
+    const stderr = stderrOf();
+    expect(stderr).not.toContain('by contract policy');
+    expect(stderr).toContain('some-future-reason');
+  });
+
+  it('leaves the --json payload untouched', async () => {
+    await waitOnce(launchDialog);
+
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+    const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
+    // The machine-readable reason is the raw code, exactly as before: only the
+    // human-facing prose is per-reason.
+    expect(output.autoYesSuppression).toMatchObject({
+      reason: 'agent-launch-dialog',
+      mode: null,
+      promptType: 'multiple_choice',
+    });
+    expect(output.autoYesSuppression.pattern).toBeUndefined();
+  });
+});
+
+/**
  * Issue #1725: a dialog only the structured layer can see.
  *
  * The server publishes `isPromptWaiting: true` with a `promptData` that has no

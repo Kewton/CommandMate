@@ -69,7 +69,7 @@ import { definePushHookSource } from '../define-source';
 import { boundDetail, isPlainObject, readNestedString, readStringField } from '../event-mapper';
 import type {
   AgentEventSource,
-  AgentInstanceRef,
+  AgentLaunchContext,
   AgentLaunchPlan,
   Verdict,
 } from '../types';
@@ -239,15 +239,16 @@ export const antigravityAgentEventSource: AgentEventSource = definePushHookSourc
 
   // Unlike gemini, the whole config is reachable from here: the file is global,
   // so no worktree path is needed and `prepareLaunch` really does write it.
-  prepareLaunch: (target: AgentInstanceRef, executablePath: string): AgentLaunchPlan => {
+  prepareLaunch: ({ target, executablePath }: AgentLaunchContext): AgentLaunchPlan => {
     const settingsPath = writeAntigravityHooksConfig();
-    return {
-      command: buildAntigravityLaunchCommand(executablePath, {
-        worktreeId: target.worktreeId,
-        instanceId: target.instanceId,
-        cliToolId: ANTIGRAVITY_CLI_TOOL_ID,
-      }),
-      settingsPath,
-    };
+    // #1846: the two correlation URLs are the plan's `env`. `worktreePath` is
+    // in the context now and deliberately unused here — agy's config is one
+    // file for the machine, so there is nothing per-worktree to write.
+    const { command, env } = buildAntigravityLaunchCommand(executablePath, {
+      worktreeId: target.worktreeId,
+      instanceId: target.instanceId,
+      cliToolId: ANTIGRAVITY_CLI_TOOL_ID,
+    });
+    return { command, settingsPath, env };
   },
 });

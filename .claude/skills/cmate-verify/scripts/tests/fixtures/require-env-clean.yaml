@@ -1,0 +1,12 @@
+# options.requireEnvClean switches CommandMate's built-in env-clean gate on
+# (#1740). This runner accepts the key — one verify.yaml has to be readable by
+# both — and reports that it cannot judge it, because the gate compares the
+# machine against a snapshot taken when the task was created and a shell-started
+# run is attached to no task.
+version: 1
+gates:
+  - id: ok
+    command: echo fine
+options:
+  skipInPrimaryCheckout: false
+  requireEnvClean: true

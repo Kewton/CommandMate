@@ -73,6 +73,30 @@ export interface WorktreeDetailResponse extends WorktreeItem {
   agentInstances: AgentInstance[];
 }
 
+/**
+ * Mirrors: src/lib/polling/auto-yes-resolver.ts AutoYesSuppressionReason
+ * (Issue #1843) — every value `autoYes.lastSuppression.reason` can carry.
+ *
+ * Copied rather than imported: tsconfig.cli.json sets `"paths": {}`, and the
+ * server module that declares the union imports `@/config/auto-yes-config`, so
+ * even a type-only import of it fails `npm run build:cli`. The copy is held to
+ * the original by a bidirectional assignability assertion in
+ * tests/unit/cli/config/cross-validation.test.ts, which fails `tsc --noEmit`
+ * the moment a reason is added server-side.
+ *
+ * The first four are verdicts of a contract's `autoYes` block. `agent-launch-dialog`
+ * is NOT: Issue #1829 records a CLI-lifecycle dialog the poller deliberately
+ * leaves to the tool's own launch sequence, through the same channel. Anything
+ * that phrases a suppression for a human has to tell the two apart — see
+ * SUPPRESSION_CAUSE in src/cli/commands/wait.ts.
+ */
+export type AutoYesSuppressionReason =
+  | 'mode-off'
+  | 'deny-pattern'
+  | 'deny-pattern-unusable'
+  | 'type-not-allowed'
+  | 'agent-launch-dialog';
+
 // Mirrors: src/app/api/worktrees/[id]/current-output/route.ts response shape
 // [DR2-03] All server-side fields included
 export interface CurrentOutputResponse {
@@ -94,12 +118,26 @@ export interface CurrentOutputResponse {
     // (Issue #1684). Non-null once the contract's autoYes policy withheld an
     // answer; `at` is refreshed every poll while the suppressed prompt remains.
     lastSuppression?: {
+      /**
+       * Normally an {@link AutoYesSuppressionReason}, but deliberately typed as
+       * the wire's `string`: this is a server response, and a server newer than
+       * the CLI can name a reason this build has never heard of. Consumers
+       * narrow it themselves and must stay truthful about the miss (Issue #1843).
+       */
       reason: string;
       mode: string | null;
       promptType: string;
       pattern?: string;
       at: number;
     } | null;
+    /**
+     * Mirrors: src/lib/auto-yes-state.ts AutoYesState.stopMatchedText
+     * (Issue #1694). Short excerpt of what `--stop-pattern` matched, with one
+     * line of context, present only while `stopReason` is
+     * `stop_pattern_matched`. Bounded to STOP_MATCH_EXCERPT_MAX_BYTES UTF-8
+     * bytes; a trailing `…[truncated]` marker means it was cut.
+     */
+    stopMatchedText?: string;
   };
   thinking: boolean;
   thinkingMessage: string | null;
@@ -164,6 +202,31 @@ export interface CurrentOutputResponse {
     promptWaitingSource?: string | null;
   };
   /**
+   * Issue #1839: the upstream (model API) fault visible on the live frame, or
+   * null when no known signature matched.
+   *
+   * Mirrors: src/lib/session/current-output-builder.ts
+   * CurrentOutputPayload.upstreamFault
+   *
+   * **null is not an all-clear.** It means no signature from
+   * `src/lib/detection/upstream-faults.ts` was on the last 100 rows — the pane
+   * may have scrolled, or the failure may have left it blank (measured in
+   * #1834). Only a non-null value is evidence of anything.
+   *
+   * Optional here although the server always sends it, for the reason
+   * {@link CurrentOutputResponse.model} gives: this mirror also has to describe
+   * what an older daemon answers, and the CLI is routinely newer than the
+   * server it dials.
+   */
+  upstreamFault?: {
+    /** `overloaded` / `retrying` / `limit-reached` / `api-error`. */
+    id: string;
+    /** The whole line that matched, trimmed and bounded to 200 UTF-8 bytes. */
+    matchedText: string;
+    /** Epoch ms the frame was captured. */
+    at: number;
+  } | null;
+  /**
    * Issue #1785: the model the session is running, or null when nothing knows.
    *
    * Mirrors: src/lib/session/current-output-builder.ts CurrentOutputPayload.model
@@ -184,6 +247,29 @@ export interface CurrentOutputResponse {
    * for every session until Issue #1784's extraction layer lands.
    */
   reasoningEffort?: string | null;
+  /**
+   * Issue #1695: prompts the content-hash dedup guard suppressed for this
+   * session, and when it last did.
+   *
+   * Mirrors: src/lib/polling/prompt-dedup-state.ts PromptDedupSkips
+   *
+   * The field an operator reads when a prompt was on screen but no prompt
+   * message exists: a non-zero `skippedCount` with a recent `lastSkippedAt`
+   * means `isDuplicatePrompt` dropped it, and a zero means the detection layer
+   * never classified the frame at all (Issue #1676) — two causes with the same
+   * symptom that nothing in this payload could previously separate.
+   *
+   * `skippedCount` is cumulative for the life of the server process, not
+   * per-turn, so `lastSkippedAt` is what dates the evidence.
+   *
+   * Optional here for the same reason `model` is: this mirror also describes
+   * what an older daemon answers, and `undefined` means "this server predates
+   * the field" rather than "nothing was skipped".
+   */
+  promptDedup?: {
+    skippedCount: number;
+    lastSkippedAt: number | null;
+  };
 }
 
 // Mirrors: src/types/models.ts BasePromptData (subset for CLI output)
@@ -777,6 +863,85 @@ export type VerificationGateStatus =
   | 'skipped'
   | 'error';
 
+/** One admitted change and the contract pattern that admitted it (Issue #1841). */
+export interface VerificationScopeAdmission {
+  path: string;
+  /**
+   * The first matching `scope.allow` pattern, in the contract's declaration
+   * order, or one of the gate's exemption stand-ins (`(exempt: ...)`), which are
+   * parenthesised precisely so they cannot be mistaken for a declared pattern.
+   */
+  pattern: string;
+}
+
+/**
+ * Machine-readable scope-gate evidence (Issue #1841).
+ *
+ * **Derived by the CLI, not sent by the server.** `verification_gate_results`
+ * stores a status, an exit code and a log body and nothing else, so the gate's
+ * report in `logTail` is the only carrier this evidence has; `verify --json`
+ * and `verify show --json` parse it back out (see `parseScopeEvidence` in
+ * src/cli/commands/verify.ts). Absent when the scope gate did not run, was
+ * skipped, or errored — every one of those writes a message rather than a
+ * report — and absent for every other gate.
+ */
+export interface VerificationScopeDetail {
+  /** Capped at 100 entries, as the report is; see {@link totals}. */
+  admitted: VerificationScopeAdmission[];
+  /** Capped at 100 entries, as the report is; see {@link totals}. */
+  violations: string[];
+  /**
+   * Counts as the gate itself made them, over *every* changed path.
+   *
+   * The lists above are the report's, so they stop at its cap; these do not.
+   * A consumer asking "did anything fall outside the contract" must read
+   * `totals.violations`, never `violations.length`.
+   */
+  totals: {
+    changed: number;
+    admitted: number;
+    violations: number;
+  };
+}
+
+/**
+ * Machine-readable record of a gate that was re-run (Issue #1772).
+ *
+ * **Derived by the CLI, not sent by the server**, for the same reason
+ * {@link VerificationScopeDetail} is: `verification_gate_results` holds one
+ * status, one exit code and one duration per gate, and #1772 added no
+ * migration, so the second run's numbers exist only in the `[flaky]` marker the
+ * runner writes at the head of `logTail` (see `parseFlakyMarker` in
+ * src/cli/utils/verify-runner.ts).
+ *
+ * Absent on every gate that ran once — which is every gate that did not declare
+ * `retryOnFail: 1`, and every one of those that passed first time.
+ */
+export interface VerificationFlakyDetail {
+  /** Runs the gate actually got. Always 2 today; `retryOnFail` maxes out at 1. */
+  runs: number;
+  /**
+   * `flaky` = failed, then passed. `fail` = failed twice, which is a gate that
+   * was never flaky and whose retry said so.
+   */
+  outcome: 'flaky' | 'fail';
+  /** One per run, in order. null for a run killed by a signal (`n/a`). */
+  exitCodes: (number | null)[];
+  /** One per run, in order. null when the marker's value could not be read. */
+  durationsMs: (number | null)[];
+  /**
+   * How the run counted this gate: `pass` only when the gate declared
+   * `flakyIsPass: true` and the outcome was `flaky`. Recorded rather than
+   * recomputed, because the verify.yaml that decided it may have changed by the
+   * time anyone reads the run back.
+   */
+  verdict: 'pass' | 'fail';
+  /** The marker's own `exit=` value (`1,0`), for rendering without re-rounding. */
+  exit: string;
+  /** The marker's own `duration=` value (`45.0s,44.0s`). */
+  duration: string;
+}
+
 /**
  * Mirrors: src/lib/db/verification-db.ts VerificationGateResult.
  * Dates arrive as ISO strings because the route serializes them through JSON.
@@ -807,6 +972,20 @@ export interface VerificationGateResultView {
    * check. Absent on responses from a server older than #1625.
    */
   timingsMeasured?: boolean;
+  /**
+   * Scope-gate evidence, on the `scope` gate only (Issue #1841).
+   *
+   * Not part of the server payload: the CLI adds it to the object it prints so
+   * a caller can read what the contract admitted without re-parsing prose.
+   * Existing fields, `logTail` included, are untouched.
+   */
+  scope?: VerificationScopeDetail;
+  /**
+   * Retry record, on a gate that was re-run (Issue #1772). Added by the CLI the
+   * same way {@link VerificationGateResultView.scope} is, and for the same
+   * reason: this is what a flake advisor reads instead of re-parsing the log.
+   */
+  flaky?: VerificationFlakyDetail;
 }
 
 /** Mirrors: src/lib/db/verification-db.ts VerificationRunWithGates. */
@@ -892,7 +1071,13 @@ export interface TaskContractView {
      * responses from a server older than #1791, and on tasks recorded before
      * it — `contract_json` is replayed verbatim, never re-validated.
      */
-    gateDefinitions?: Array<{ id: string; command: string; timeoutSec: number }>;
+    gateDefinitions?: Array<{
+      id: string;
+      command: string;
+      timeoutSec: number;
+      /** Machine-wide lock the gate holds while it runs (Issue #1771). */
+      mutex?: string;
+    }>;
   };
   autoYes: { mode: string | null; allowPromptTypes: string[]; denyPatterns: string[] };
   success: { requireWorkEvidence: boolean; requireScopeClean: boolean };

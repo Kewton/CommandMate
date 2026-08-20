@@ -766,7 +766,62 @@ shasum -a 256 ~/.claude/settings.json
 
 ---
 
-## 8. 関連
+## 8. #1724 の手動検証 3 項目の記録先（追記: Issue #1847）
+
+Epic #1720 は #1724（Auto-Yes v2 = `PermissionRequest` hook による構造化裁定）に **手動検証 3 項目**を
+残していた。Epic close 時点で記録が揃っていたのは 1 項目＋部分的に 1 項目だけで、
+「どこを見れば確認できるのか」が誰にも辿れない状態だった。#1847 で残り 2 項目を
+実 TUI カナリア（`scripts/canary/`、#1727）のシナリオとして固定し、3 項目すべての記録先を下表に確定した。
+
+| #1724 の手動検証項目 | 記録先 | 種別 |
+|---|---|---|
+| サーバ停止時の fail-open（hook の timeout / 接続不能でセッションが止まらない） | 本書 [§5.3.3](#533-timeout--単位は秒--fail-open)（timeout = cancelled でセッションは進む）／[§5.3.4](#534-接続不能時--fail-open)。運用面の引用は `docs/user-guide/agent-event-hooks.md` の §0.6 / §7 | 実測（2026-08-06 / v2.1.223） |
+| Auto-Yes 有効時に `PermissionRequest` へ `allow` を返すとダイアログを出さずにツールが走る | canary シナリオ **`permission-hook-allow`**（`scripts/canary/scenarios.ts`）。無条件 allow の受け口での先行観測は `agent-hooks-permission-deny-verification.md` §3（#1739） | 実 TUI カナリア（毎回再実測） |
+| Auto-Yes 無効時／契約 `denyPatterns` 該当時に**ダイアログが出て手動で応答できる**（no-decision ＋ `lastSuppression`） | canary シナリオ **`permission-hook-no-decision`**（同上） | 実 TUI カナリア（毎回再実測） |
+
+### 8.1 カナリアが「本体の裁定経路」をどこまで通しているか
+
+`npm run canary` はサーバプロセスではないので、Next.js のルートとミドルウェア認証、および
+**データベースを要する 2 箇所だけ**が本物ではない。裁定そのもの（`resolvePermissionRequest`）は
+本体の関数をそのまま呼んでいる。
+
+| 本番 | カナリア |
+|---|---|
+| `buildAgentHookSettings` が `--settings` ファイルを書く | 同じ関数。`port`（受け口の ephemeral ポート）と `directory`（使い捨て HOME 配下）だけ差し替え |
+| `claudeAgentEventSource.parsePermissionRequest` / `encodeVerdict` | レジストリ経由で同じ source |
+| `resolvePermissionRequest` が裁定する | **同じ関数**（`PermissionDecisionDeps` で下 2 行だけ差し替え） |
+| 契約の `autoYes` を active task 行から読む | シナリオが直接与える（task 行を持たないため） |
+| `allow` をプロンプト履歴へ書く | 書かない（開発者の DB を汚さないため） |
+| `recordAgentEvent` / `reportPermissionRequestPending` / `recordPolicySuppression` | 同じモジュール（すべて in-memory） |
+| `buildCurrentOutput` が `structuredEvents` / `autoYes.lastSuppression` を組む | 同じ getter（`getLastAgentEvent` / `resolvePromptWaiting` / `getLastPolicySuppression`）を同じ順で呼ぶ |
+
+差し替えた 2 箇所（契約の読み出しと allow の監査記録）は
+`tests/unit/hooks/permission-decision-service.test.ts` が本番実装のまま押さえている。
+2 つのシナリオが**空振りしていない**ことは `--mutate-verdict`（受け口が逆の裁定を返す）で証明する。
+シナリオ・受け口・期待値の純関数部分は `tests/unit/canary/canary-hook-scenarios.test.ts` が CI で固定する。
+
+### 8.2 2026-08-20 の実測（Claude Code v2.1.236 / v2.1.237）
+
+| 観測 | 結果 |
+|---|---|
+| `permission-hook-allow` | **緑**。`allow` 応答でダイアログは出ず、`Write` が実行されて probe ファイルが生成された |
+| `permission-hook-no-decision` | **緑**。`denyPatterns` 一致 → 空応答 `{}` → 承認ダイアログが出て、`autoYes.lastSuppression` に `deny-pattern` が載った |
+| `--mutate-verdict` | **両シナリオとも赤**（＝非空振り） |
+
+**副次的に判明した上流変更（#1847 で対処済み）**: Claude Code **2.1.236 で既定の permission mode が
+auto mode になった**。auto mode では Claude が自分で承認判断を行うため、
+本カナリアが読むべき承認ダイアログがそもそも描画されない。しかも
+使い捨て HOME では **1 本目だけ manual、2 本目以降が auto へ自己移行する**ため、
+複数シナリオ実行だけが「起動タイムアウト」で落ちるという分かりにくい形で表面化した
+（ready フッタ `? for shortcuts` が manual mode にしか無いため）。
+`settings.json` に `permissions.defaultMode` を書くと今度は
+「Make auto mode your default permission mode?」の選択画面が composer の前に出るので、
+カナリアは **`--permission-mode manual` をコマンドラインで固定**している
+（`CANARY_PERMISSION_MODE`、`scripts/canary/session.ts`）。
+
+---
+
+## 9. 関連
 
 - Epic: [#1720](https://github.com/Kewton/CommandMate/issues/1720)
 - 既存の受け口: `src/app/api/hooks/agent-event/route.ts`（常に 202 を返す＝ [§5.3.6](#536-async-は-command-hook-限定) の要件と整合）

@@ -15,6 +15,53 @@ export interface VerifyGate {
   id: string;
   command: string;
   timeoutSec: number;
+  /**
+   * Name of a machine-wide lock this gate must hold while it runs (Issue #1771).
+   *
+   * Declares "only one of these may run on this machine at a time", which a
+   * gate owning a fixed port, database or emulator needs and which command and
+   * timeout cannot express. Two parallel worktrees running such a gate at once
+   * make the second fail on the resource, and `GATE e2e FAIL exit=1` reads
+   * exactly like the change being broken.
+   *
+   * Optional rather than `string | null`: contracts store their gate list as
+   * JSON in `tasks.contract_json` and are read back with `JSON.parse`, never
+   * re-validated, so every row written before this field existed simply has no
+   * key — and `undefined` is the honest reading of that.
+   */
+  mutex?: string;
+  /**
+   * Re-run this gate once, in the same tree, when its command exits non-zero
+   * (Issue #1772). `1` opts in; `0` (the default) is the behaviour every gate
+   * had before this field existed.
+   *
+   * Only 0 and 1 are accepted. A gate allowed three or four attempts stops
+   * being a gate: enough re-runs turn any red into a green, and the value of
+   * this field is precisely that it cannot. One retry answers the one question
+   * worth asking — "does this reproduce in the same tree?" — and nothing more.
+   *
+   * Optional for the same reason {@link VerifyGate.mutex} is: contracts store
+   * their gate list as JSON in `tasks.contract_json` and read it back with
+   * `JSON.parse` without re-validating, so a row written before this field
+   * existed simply has no key.
+   */
+  retryOnFail?: number;
+  /**
+   * Whether a FLAKY outcome — failed, then passed on the retry — counts as a
+   * pass (Issue #1772). Default false: the gate does not get weaker by opting
+   * into a retry, it only gets a name for what happened.
+   *
+   * Declared per gate rather than per repository because it is a statement
+   * about *this* gate's failure mode. `unit` failing on a random UUID that
+   * happens to contain a forbidden substring is noise; `e2e` failing once and
+   * passing once is usually a real race in the product. An `options`-level flag
+   * would force those two into one answer, and would also be declarable for
+   * gates that never opted into a retry, where it can never fire.
+   *
+   * `true` without `retryOnFail: 1` is a config error rather than a no-op: no
+   * retry means no FLAKY, so the declaration could never take effect.
+   */
+  flakyIsPass?: boolean;
 }
 
 export interface VerifyOptions {
@@ -104,8 +151,32 @@ const MAX_LOG_TAIL_BYTES = 1048576;
  */
 export const GATE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
+/**
+ * Shape a `mutex` name may take (Issue #1771).
+ *
+ * Wider than {@link GATE_ID_PATTERN} because a mutex names a *resource*, not a
+ * gate: two repositories that both bind port 60303 should be able to agree on
+ * `port.60303` and be serialized against each other. Narrow enough that the
+ * name is safe as a path segment — no separator, no whitespace, nothing a shell
+ * re-interprets — because both runners turn it into
+ * `~/.commandmate/locks/<name>.lock`.
+ */
+export const GATE_MUTEX_PATTERN = /^[A-Za-z0-9_.-]+$/;
+
+/** Keeps the lock directory name inside every filesystem's limit. */
+export const MAX_GATE_MUTEX_LENGTH = 64;
+
+/**
+ * Largest `retryOnFail` a gate may declare (Issue #1772).
+ *
+ * Deliberately 1, and deliberately a named constant rather than a literal in
+ * one `if`: the ceiling is the feature. A gate that may re-run until it passes
+ * reports the machine's luck, not the work.
+ */
+export const MAX_RETRY_ON_FAIL = 1;
+
 const TOP_LEVEL_KEYS = ['version', 'gates', 'options'];
-const GATE_KEYS = ['id', 'command', 'timeoutSec'];
+const GATE_KEYS = ['id', 'command', 'timeoutSec', 'mutex', 'retryOnFail', 'flakyIsPass'];
 const OPTION_KEYS = [
   'baseRef',
   'skipInPrimaryCheckout',
@@ -249,8 +320,68 @@ function validateGateEntry(
     }
   }
 
+  let mutex: string | undefined;
+  if (entry.mutex !== undefined) {
+    if (typeof entry.mutex !== 'string' || entry.mutex === '') {
+      issues.push(`${at}.mutex: must be a non-empty string (got ${describe(entry.mutex)})`);
+    } else if (entry.mutex.length > MAX_GATE_MUTEX_LENGTH) {
+      issues.push(
+        `${at}.mutex: must be at most ${MAX_GATE_MUTEX_LENGTH} characters (got ${entry.mutex.length})`
+      );
+    } else if (!GATE_MUTEX_PATTERN.test(entry.mutex)) {
+      issues.push(`${at}.mutex: "${entry.mutex}" must match ${GATE_MUTEX_PATTERN.source}`);
+    } else {
+      mutex = entry.mutex;
+    }
+  }
+
+  let retryOnFail: number | undefined;
+  if (entry.retryOnFail !== undefined) {
+    const parsed = asInteger(entry.retryOnFail);
+    if (parsed === null) {
+      issues.push(`${at}.retryOnFail: must be an integer (got ${describe(entry.retryOnFail)})`);
+    } else if (parsed < 0 || parsed > MAX_RETRY_ON_FAIL) {
+      // Not "at most N": the range is the contract. See MAX_RETRY_ON_FAIL.
+      issues.push(`${at}.retryOnFail: must be 0 or ${MAX_RETRY_ON_FAIL} (got ${parsed})`);
+    } else {
+      retryOnFail = parsed;
+    }
+  }
+
+  let flakyIsPass: boolean | undefined;
+  if (entry.flakyIsPass !== undefined) {
+    const parsed = asBoolean(entry.flakyIsPass);
+    if (parsed === null) {
+      issues.push(
+        `${at}.flakyIsPass: must be true or false (got ${describe(entry.flakyIsPass)})`
+      );
+    } else if (parsed && retryOnFail !== MAX_RETRY_ON_FAIL) {
+      // A knob that can never fire is a config bug, not a preference: without a
+      // retry the gate has no FLAKY outcome for this to reclassify, so the
+      // declaration reads as "flakes are tolerated here" while changing nothing.
+      issues.push(
+        `${at}.flakyIsPass: true requires retryOnFail: ${MAX_RETRY_ON_FAIL} ` +
+          '(without a retry a gate can never be FLAKY)'
+      );
+    } else {
+      flakyIsPass = parsed;
+    }
+  }
+
   if (issues.length === issuesBefore) {
-    gates.push({ id: entry.id as string, command: entry.command as string, timeoutSec });
+    const gate: VerifyGate = {
+      id: entry.id as string,
+      command: entry.command as string,
+      timeoutSec,
+    };
+    // Only set when declared: an explicit `mutex: undefined` would serialize
+    // into a contract's stored JSON as a key, and "declared without a value"
+    // is not a state this field has. The same holds for the #1772 pair, whose
+    // absence has to keep meaning "this gate runs exactly once".
+    if (mutex !== undefined) gate.mutex = mutex;
+    if (retryOnFail !== undefined) gate.retryOnFail = retryOnFail;
+    if (flakyIsPass !== undefined) gate.flakyIsPass = flakyIsPass;
+    gates.push(gate);
   }
 }
 

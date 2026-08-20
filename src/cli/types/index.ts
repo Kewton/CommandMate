@@ -202,6 +202,26 @@ export interface EnvSetupOptions {
 export const WaitExitCode = {
   SUCCESS: 0,
   PROMPT_DETECTED: 10,
+  /**
+   * `--fail-on-upstream-fault`: the agent came back to its composer with an
+   * upstream (model API) failure on the frame (Issue #1839).
+   *
+   * Its own code rather than SUCCESS because the two mean opposite things to a
+   * caller: SUCCESS says "the turn ran, judge the result", this says "the turn
+   * never ran, send it again". Measured on 2026-08-20 against a stub upstream
+   * answering 529, Claude 2.1.236 returns to the composer ~3 s after the send
+   * having executed nothing, and `wait --verify` reports 21 (no work evidence) —
+   * which reads as "the agent worked and produced nothing" and is why #1834 saw
+   * twelve retries burned on a session that only needed to be re-sent later.
+   *
+   * Its own code rather than riding PROMPT_DETECTED (10) because nothing is
+   * waiting to be answered: `respond` has nothing to send here.
+   *
+   * 11 is deliberately shared with {@link SkillExitCode.BLOCKED}: the two
+   * commands' codes are separate namespaces, and 11 is the first value free of
+   * PROMPT_DETECTED.
+   */
+  UPSTREAM_FAULT: 11,
   TIMEOUT: 124,
 } as const;
 export type WaitExitCode = typeof WaitExitCode[keyof typeof WaitExitCode];
@@ -233,6 +253,12 @@ export type VerifyExitCode = typeof VerifyExitCode[keyof typeof VerifyExitCode];
  */
 export const WAIT_EXIT_CODE_PRIORITY: readonly number[] = [
   WaitExitCode.PROMPT_DETECTED,
+  // Issue #1839: below PROMPT_DETECTED because a prompt is actionable right now
+  // and an upstream fault is not, and above the verify verdicts because a turn
+  // that never ran makes those verdicts meaningless — reporting VERIFY_FAILED
+  // for a worktree whose agent never executed is the misattribution #1839 exists
+  // to end.
+  WaitExitCode.UPSTREAM_FAULT,
   VerifyExitCode.VERIFY_FAILED,
   VerifyExitCode.NOT_STARTED,
   WaitExitCode.TIMEOUT,
@@ -339,6 +365,17 @@ export interface WaitOptions {
   verify?: boolean;
   /** Issue #1544: run only the work-evidence gate. Subsumed by {@link verify}. */
   requireWork?: boolean;
+  /**
+   * Issue #1839: when the agent returns to its composer with an upstream fault
+   * signature on the frame, exit {@link WaitExitCode.UPSTREAM_FAULT} instead of
+   * SUCCESS.
+   *
+   * Opt-in because `wait`'s exit codes are a published branch table — the skills
+   * dispatcher switches on them — and a session that hits a transient 529 mid
+   * turn and recovers must keep exiting 0 for every caller that never asked for
+   * this.
+   */
+  failOnUpstreamFault?: boolean;
 }
 
 /** respond command options [Issue #518] */

@@ -42,9 +42,9 @@ import {
   writeGeminiHookSettings,
   type GeminiHookMatcherGroup,
 } from '@/lib/hooks/sources/gemini/settings-generator';
+import { renderAgentLaunchCommand } from '@/lib/hooks/sources';
 import { antigravityAgentEventSource } from '@/lib/hooks/sources/antigravity/source';
-import { geminiAgentEventSource } from '@/lib/hooks/sources/gemini/source';
-import { injectGeminiHookSettings } from '@/lib/hooks/sources/gemini/source';
+import { geminiAgentEventSource, prepareGeminiLaunch } from '@/lib/hooks/sources/gemini/source';
 
 const WT = 'wt-1762';
 const RELAY = '/opt/commandmate/scripts/hooks/cmate-agent-event.sh';
@@ -472,28 +472,56 @@ describe('launch commands', () => {
     );
 
   it('carries the instance for gemini, which the settings file cannot', () => {
-    const command = buildGeminiLaunchCommand('gemini', { worktreeId: WT, instanceId: 'gemini-2' });
-    expect(command).toMatch(URL_RE('gemini', 'gemini-2'));
-    expect(command.endsWith(` 'gemini'`)).toBe(true);
+    const plan = buildGeminiLaunchCommand('gemini', { worktreeId: WT, instanceId: 'gemini-2' });
+    // #1846: the variable is declared data now, not a prefix baked into the
+    // command — and the rendered line is what it always was.
+    expect(Object.keys(plan.env)).toEqual(['CM_HOOK_URL']);
+    expect(plan.command).toBe(`'gemini'`);
+    const rendered = renderAgentLaunchCommand({ ...plan, settingsPath: null });
+    expect(rendered).toMatch(URL_RE('gemini', 'gemini-2'));
+    expect(rendered.endsWith(` 'gemini'`)).toBe(true);
   });
 
   it('carries the worktree AND instance for antigravity, which has nowhere else to put them', () => {
-    const command = buildAntigravityLaunchCommand('agy', { worktreeId: WT, instanceId: 'antigravity' });
-    expect(command).toMatch(URL_RE('antigravity', 'antigravity'));
-    expect(command.endsWith(` 'agy'`)).toBe(true);
+    const plan = buildAntigravityLaunchCommand('agy', {
+      worktreeId: WT,
+      instanceId: 'antigravity',
+    });
+    expect(Object.keys(plan.env)).toEqual(['CM_HOOK_URL', 'CM_PERMISSION_HOOK_URL']);
+    expect(plan.command).toBe(`'agy'`);
+    const rendered = renderAgentLaunchCommand({ ...plan, settingsPath: null });
+    expect(rendered).toMatch(URL_RE('antigravity', 'antigravity'));
+    expect(rendered.endsWith(` 'agy'`)).toBe(true);
   });
 
   it('leaves room for the caller’s own flags after the executable', () => {
     // `AntigravityTool.startSession` appends `--model`, so the env prefix has to
     // stay in front and the executable has to be the last token.
-    const base = buildAntigravityLaunchCommand('agy', { worktreeId: WT });
+    const base = renderAgentLaunchCommand({
+      ...buildAntigravityLaunchCommand('agy', { worktreeId: WT }),
+      settingsPath: null,
+    });
     expect(`${base} --model 'Gemini 3.1 Pro (High)'`).toMatch(/'agy' --model 'Gemini 3\.1 Pro \(High\)'$/);
+  });
+
+  it('keeps shell syntax out of `command` on every source that needs an env', () => {
+    // The #1846 invariant, asserted rather than described: a `NAME=value`
+    // prefix inside `command` is invisible to a launcher that is not a shell,
+    // and four sources had written one. Nothing may put one back.
+    const plans = [
+      buildGeminiLaunchCommand('gemini', { worktreeId: WT }),
+      buildAntigravityLaunchCommand('agy', { worktreeId: WT }),
+    ];
+    for (const plan of plans) {
+      expect(plan.command).not.toMatch(/^[A-Z_][A-Z0-9_]*=/);
+      expect(Object.keys(plan.env).length).toBeGreaterThan(0);
+    }
   });
 
   it('refuses to inject an instance id the receiver would reject', () => {
     const bad = { worktreeId: WT, instanceId: '../../etc/passwd' };
-    expect(buildGeminiLaunchCommand('gemini', bad)).toBe('gemini');
-    expect(buildAntigravityLaunchCommand('agy', bad)).toBe('agy');
+    expect(buildGeminiLaunchCommand('gemini', bad)).toEqual({ command: 'gemini', env: {} });
+    expect(buildAntigravityLaunchCommand('agy', bad)).toEqual({ command: 'agy', env: {} });
   });
 });
 
@@ -501,25 +529,31 @@ describe('CM_AGENT_HOOKS_INJECT=0', () => {
   beforeEach(() => vi.stubEnv('CM_AGENT_HOOKS_INJECT', '0'));
 
   it('leaves the gemini launch command byte-identical to the pre-#1762 one', () => {
-    expect(buildGeminiLaunchCommand('gemini', { worktreeId: WT, instanceId: 'gemini' })).toBe(
-      'gemini'
-    );
+    expect(buildGeminiLaunchCommand('gemini', { worktreeId: WT, instanceId: 'gemini' })).toEqual({
+      command: 'gemini',
+      env: {},
+    });
     expect(
-      geminiAgentEventSource.prepareLaunch(
-        { worktreeId: WT, cliToolId: 'gemini', instanceId: 'gemini' },
-        'gemini'
-      )
-    ).toEqual({ command: 'gemini', settingsPath: null });
+      geminiAgentEventSource.prepareLaunch({
+        target: { worktreeId: WT, cliToolId: 'gemini', instanceId: 'gemini' },
+        executablePath: 'gemini',
+        worktreePath: worktree,
+      })
+    ).toEqual({ command: 'gemini', settingsPath: null, env: {} });
   });
 
   it('leaves the antigravity launch command byte-identical to the pre-#1762 one', () => {
-    expect(buildAntigravityLaunchCommand('agy', { worktreeId: WT })).toBe('agy');
+    expect(buildAntigravityLaunchCommand('agy', { worktreeId: WT })).toEqual({
+      command: 'agy',
+      env: {},
+    });
     expect(
-      antigravityAgentEventSource.prepareLaunch(
-        { worktreeId: WT, cliToolId: 'antigravity' },
-        'agy'
-      )
-    ).toEqual({ command: 'agy', settingsPath: null });
+      antigravityAgentEventSource.prepareLaunch({
+        target: { worktreeId: WT, cliToolId: 'antigravity' },
+        executablePath: 'agy',
+        worktreePath: worktree,
+      })
+    ).toEqual({ command: 'agy', settingsPath: null, env: {} });
   });
 
   it('writes no file for either tool', () => {
@@ -529,7 +563,13 @@ describe('CM_AGENT_HOOKS_INJECT=0', () => {
 
     expect(writeAntigravityHooksConfig()).toBeNull();
     expect(writeGeminiHookSettings(worktree, { worktreeId: WT })).toBeNull();
-    expect(injectGeminiHookSettings(worktree, { worktreeId: WT, cliToolId: 'gemini' })).toBeNull();
+    expect(
+      prepareGeminiLaunch({
+        target: { worktreeId: WT, cliToolId: 'gemini' },
+        executablePath: 'gemini',
+        worktreePath: worktree,
+      }).settingsPath
+    ).toBeNull();
 
     expect(sha256(agyHooks)).toBe(before.agy);
     expect(sha256(geminiUserSettings)).toBe(before.gemini);

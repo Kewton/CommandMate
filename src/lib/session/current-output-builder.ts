@@ -10,6 +10,7 @@
 import type Database from 'better-sqlite3';
 import { getSessionState, createMessage } from '@/lib/db';
 import { observeUnclassifiedFrame } from '@/lib/detection/unclassified-frame-tracker';
+import { matchUpstreamFault } from '@/lib/detection/upstream-faults';
 import { UNCLASSIFIED_PROMPT_TYPE, type UnclassifiedFrameRecord } from '@/types/models';
 import { createLogger } from '@/lib/logger';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
@@ -31,6 +32,10 @@ import {
   getLastPolicySuppression,
   type AutoYesPolicySuppression,
 } from '@/lib/polling/auto-yes-suppression-state';
+import {
+  getPromptDedupSkips,
+  type PromptDedupSkips,
+} from '@/lib/polling/prompt-dedup-state';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tmux-capture-cache';
 import {
@@ -128,6 +133,17 @@ export interface CurrentOutputPayload {
      * waiting right now.
      */
     lastSuppression: AutoYesPolicySuppression | null;
+    /**
+     * Short excerpt of what `--stop-pattern` matched, present only while
+     * `stopReason === 'stop_pattern_matched'` (Issue #1694).
+     *
+     * Exposure only, and deliberately raw: the operator's question is whether
+     * the pattern hit the agent's own output or a build log that happened to
+     * contain it (#1678 A-5), and that is answered by seeing the text in
+     * place. Bounded and marked when cut — see STOP_MATCH_EXCERPT_MAX_BYTES in
+     * `src/lib/auto-yes-state.ts`.
+     */
+    stopMatchedText?: string;
   };
   isSelectionListActive?: boolean;
   isPagerActive?: boolean;
@@ -192,6 +208,48 @@ export interface CurrentOutputPayload {
    * see above.
    */
   reasoningEffort: string | null;
+  /**
+   * How many prompts the content-hash dedup guard suppressed for this session,
+   * and when it last did (Issue #1695). See {@link PromptDedupSkips}.
+   *
+   * **Always present, zeroed when nothing was skipped.** The whole point is to
+   * separate "the guard dropped it" from "nothing classified the frame"
+   * (Issue #1676), and an absent key would leave the caller guessing which of
+   * the two it was looking at — the same ambiguity the field removes.
+   *
+   * Exposure only: no verdict reads it. `skippedCount` is cumulative across
+   * polling cycles, so `lastSkippedAt` is what says whether the suppression is
+   * current — read it next to `isPromptWaiting` the way `autoYes.lastSuppression`
+   * is read.
+   */
+  promptDedup: PromptDedupSkips;
+  /**
+   * The upstream (model API) fault visible on the live frame, or null
+   * (Issue #1839).
+   *
+   * **Always present, null when no signature matched.** Read
+   * `src/lib/detection/upstream-faults.ts` before reading this field: null is
+   * "no known signature was on the frame", NEVER "upstream is healthy". The
+   * measurement behind the Issue found a 529 storm that left the pane blank, and
+   * a consumer that treats null as an all-clear re-creates exactly the false
+   * confidence the field exists to remove.
+   *
+   * Judged on `realtimeSnippet` (the last 100 rows), so it clears once the fault
+   * has scrolled out of that window rather than latching for the life of the
+   * session — the question a caller asks of it is "is this happening now".
+   *
+   * Exposure plus one verdict: `commandmate wait --fail-on-upstream-fault`
+   * exits {@link WaitExitCode.UPSTREAM_FAULT} on it. Nothing reads it by
+   * default.
+   */
+  upstreamFault: {
+    /** {@link UpstreamFault.id} — `overloaded` / `retrying` / `limit-reached` / `api-error`. */
+    id: string;
+    /** The whole line that matched, trimmed and bounded. */
+    matchedText: string;
+    /** Epoch ms the frame this was read from was captured. */
+    at: number;
+  } | null;
 }
 
 const logger = createLogger('current-output-builder');
@@ -528,6 +586,18 @@ export async function buildCurrentOutput(
       // the server's job, done here and in exactly one place.
       model: null,
       reasoningEffort: null,
+      // Issue #1695: the real tally, not zeros — and deliberately unlike the two
+      // fields above. A model latch describes a process, so on a dead session it
+      // would assert something false; a skip count describes what already
+      // happened, and `lastSkippedAt` dates it. Zeroing it here would erase the
+      // evidence at exactly the moment an operator goes looking for it — the
+      // session ended and the prompt they were waiting on was never saved.
+      promptDedup: getPromptDedupSkips(worktreeId, cliToolId, instanceId),
+      // Issue #1839: there is no frame to read, so there is nothing to report.
+      // Unlike `promptDedup` this is not a tally of what already happened — it
+      // is a claim about what is on screen right now, and a dead session has no
+      // screen.
+      upstreamFault: null,
     };
   }
 
@@ -710,6 +780,10 @@ export async function buildCurrentOutput(
   }
 
   const realtimeSnippet = lines.slice(-100).join('\n');
+  // Issue #1839: judged on exactly what is published as `realtimeSnippet`, not
+  // on `output`. The wider capture keeps a banner from an hour ago in scope, and
+  // a fault the operator cannot see in the payload next to it is unverifiable.
+  const upstreamFaultMatch = matchUpstreamFault(realtimeSnippet);
   const autoYesState = getAutoYesState(worktreeId, cliToolId, instanceId);
 
   // Issue #1785 + #1784: ONE resolution for both halves, not two readers.
@@ -746,6 +820,9 @@ export async function buildCurrentOutput(
       expiresAt: autoYesState?.enabled ? autoYesState.expiresAt : null,
       stopReason: autoYesState?.stopReason,
       lastSuppression: getLastPolicySuppression(worktreeId, cliToolId, instanceId),
+      // Issue #1694: undefined (so the key is absent from the JSON) unless a
+      // stop pattern actually fired — the state clears it on every other path.
+      stopMatchedText: autoYesState?.stopMatchedText,
     },
     isSelectionListActive,
     isPagerActive,
@@ -758,5 +835,18 @@ export async function buildCurrentOutput(
     // docs on CurrentOutputPayload for why nothing is normalised on the way out.
     model,
     reasoningEffort: effort,
+    // Issue #1695: appended last on purpose — every field above is a published
+    // CLI contract and reordering them churns the diff for no reader's benefit.
+    promptDedup: getPromptDedupSkips(worktreeId, cliToolId, instanceId),
+    // Issue #1839: read from `realtimeSnippet`, the same rows an operator sees
+    // in `capture --json`, so what the field claims can be checked against what
+    // is printed next to it.
+    upstreamFault: upstreamFaultMatch
+      ? {
+          id: upstreamFaultMatch.fault.id,
+          matchedText: upstreamFaultMatch.matchedText,
+          at: Date.now(),
+        }
+      : null,
   };
 }

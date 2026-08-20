@@ -9,6 +9,8 @@
  *       layer could not classify at all — Issue #1708. Both are reported as
  *       exit 10 with a distinguishing `type` rather than a new exit code, so
  *       callers that already branch on 10 keep working.)
+ * - 11: UPSTREAM_FAULT (--fail-on-upstream-fault only, Issue #1839: the agent
+ *       came back to its composer with an upstream API failure on the frame)
  * - 124: TIMEOUT (--timeout exceeded)
  * Issue #1544 adds --verify / --require-work, which can turn a detected
  * completion into 20 (VERIFY_FAILED) or 21 (NOT_STARTED).
@@ -21,6 +23,7 @@ import { Command } from 'commander';
 import { ExitCode, VerifyExitCode, WAIT_EXIT_CODE_PRIORITY, WaitExitCode } from '../types';
 import type { WaitOptions } from '../types';
 import type {
+  AutoYesSuppressionReason,
   CurrentOutputResponse,
   TaskListResponse,
   TaskStatus,
@@ -55,6 +58,68 @@ const SELECTION_LIST_PROMPT_TYPE = 'selection_list';
  * whereas a new exit code reads as an infrastructure error to all of them.
  */
 const UNCLASSIFIED_PROMPT_TYPE = 'unclassified';
+
+/**
+ * Why `wait` decided the agent was done, printed on the completion line
+ * (Issue #1839).
+ *
+ * `Completed: <id>` used to be the whole story, which made two very different
+ * situations indistinguishable in a log: the agent's own `Stop` hook arrived, or
+ * nothing but the screen said so. The measurement behind this Issue is exactly
+ * that difference — a 529 storm returns Claude to its composer in ~3 s with the
+ * scraper reporting `ready`/`input_prompt` and no `Stop` ever sent — so the
+ * basis belongs next to the verdict rather than in a triage session afterwards.
+ */
+const COMPLETION_BASIS = {
+  /** The agent reported the turn ended, and the report postdates this wait's turn. */
+  HOOK_STOP: 'hook_stop',
+  /** The tmux session went away after we had seen it alive. */
+  SESSION_GONE: 'session_gone',
+  /** The terminal frame says the agent is back at its composer. Nothing corroborated it. */
+  SCRAPER_READY: 'scraper_ready',
+} as const;
+
+/**
+ * Structured event types that mean "a turn is under way" (Issue #1839).
+ *
+ * Mirrors AGENT_EVENT_TYPES in src/lib/hooks/agent-event-types.ts; duplicated
+ * rather than imported because the CLI bundle keeps its own copy of the API
+ * shapes (see api-responses.ts).
+ *
+ * `notification` is deliberately absent, and that is the one measured deviation
+ * from the design sketched in Issue #1839. The Issue proposed accepting
+ * `stop` **or** `idle_prompt` as the end of a turn; the live capture of
+ * 2026-08-20 (see docs/design/upstream-fault-turn-boundary-1839.md) shows
+ * Claude 2.1.236 emitting `Notification(idle_prompt)` 62 s into a turn that
+ * ran nothing at all, because the composer had been idle for a minute. Reading
+ * it as a turn boundary would have re-created the false completion this gate
+ * exists to stop, one minute later. Only `Stop` ends a turn.
+ */
+const TURN_OPENING_EVENT_TYPES: ReadonlySet<string> = new Set([
+  'user_prompt_submit',
+  'pre_tool_use',
+  'post_tool_use',
+]);
+
+/**
+ * How far *before* this wait started a turn-opening event may sit and still be
+ * read as the turn this wait is about (Issue #1839).
+ *
+ * `wait` does not know when `send` ran, and the honest proxy is its own start:
+ * an orchestrator sends and then waits, so the turn's `UserPromptSubmit` lands
+ * after `wait` is already polling (measured at +0.6 s from the send). One poll
+ * interval of slack covers a `wait` that starts a moment late.
+ *
+ * The bound is what keeps this from being a new way to hang. Structured events
+ * live in a server-side Map keyed by (worktree, tool, instance) and are NOT
+ * fenced by generation on the way into `structuredEvents` — a stale
+ * `user_prompt_submit` from a previous agent process can still be the last event
+ * on the wire. Refusing to adopt anything older than this wait means such a
+ * record cannot gate it: a `wait` on an already-idle session sees no fresh
+ * turn-opening event, keeps `turnStartedAt` null, and behaves exactly as it did
+ * before this Issue.
+ */
+const TURN_ADOPTION_GRACE_MS = POLL_INTERVAL_MS;
 
 /**
  * How long `isUnclassifiedActive` must hold before `wait` treats it as a stop
@@ -103,13 +168,60 @@ function activeSuppression(
   return { suppression, ageSeconds: Math.max(0, Math.round(ageMs / 1000)) };
 }
 
+/** The wording for the four reasons a contract's `autoYes` block really authors. */
+const CONTRACT_POLICY_CAUSE = 'by contract policy';
+
 /**
- * One stderr line naming the policy that is holding this prompt (Issue #1699).
+ * What withheld the answer, in the words `wait` puts on stderr (Issue #1843).
+ *
+ * A Record over the whole reason union rather than one fixed phrase: adding a
+ * reason to {@link AutoYesSuppressionReason} without deciding what `wait` should
+ * say about it is a compile error here, which is the point. Until #1843 the
+ * notice hard-coded "by contract policy" for every reason, so #1829's
+ * `agent-launch-dialog` — a product-side decision the poller makes with no
+ * contract in sight (`src/lib/auto-yes-poller.ts`, the `getCodexLifecycleDialog`
+ * branch) — sent operators of contract-less worktrees hunting for a
+ * `denyPatterns` entry that did not exist.
+ *
+ * The three sites that record a suppression are covered: the poller's launch-dialog
+ * branch (`agent-launch-dialog`), the poller's policy branch and
+ * `lib/hooks/permission-decision-service.ts` (both the four `evaluatePolicyAgainstTexts`
+ * verdicts, which is why those four keep the pre-#1843 wording exactly).
+ */
+const SUPPRESSION_CAUSE: Record<AutoYesSuppressionReason, string> = {
+  'mode-off': CONTRACT_POLICY_CAUSE,
+  'deny-pattern': CONTRACT_POLICY_CAUSE,
+  'deny-pattern-unusable': CONTRACT_POLICY_CAUSE,
+  'type-not-allowed': CONTRACT_POLICY_CAUSE,
+  'agent-launch-dialog': "while the agent's launch dialog was on screen",
+};
+
+/**
+ * {@link SUPPRESSION_CAUSE} for a reason that arrived over the wire.
+ *
+ * `reason` is a server-supplied string, so a server newer than this CLI can name
+ * a reason the union does not have. Naming it verbatim is the only honest answer:
+ * quietly folding an unknown reason into "by contract policy" is the same
+ * misattribution #1843 exists to remove, just for a future reason instead of
+ * `agent-launch-dialog`.
+ */
+function suppressionCause(reason: string): string {
+  return Object.prototype.hasOwnProperty.call(SUPPRESSION_CAUSE, reason)
+    ? SUPPRESSION_CAUSE[reason as AutoYesSuppressionReason]
+    : `for a reason this CLI does not recognise (${reason})`;
+}
+
+/**
+ * One stderr line naming what is holding this prompt (Issue #1699).
  *
  * `wait` used to print only "Waiting for human response...", which reads the
  * same whether a human was always going to answer or whether Auto-Yes silently
  * refused to. That ambiguity is what let a deny pattern matching a finished turn
  * stall two workers unnoticed; the pattern and the reason code belong on screen.
+ *
+ * Issue #1843: the cause is chosen per reason rather than asserted. `reason=` is
+ * in the payload either way, so the prefix is the only part that can lie — and it
+ * did, for every non-contract suppression.
  */
 function formatSuppressionNotice(suppression: LastSuppression, ageSeconds: number): string {
   const parts = [
@@ -120,7 +232,40 @@ function formatSuppressionNotice(suppression: LastSuppression, ageSeconds: numbe
   if (suppression.pattern !== undefined) {
     parts.push(`pattern=${JSON.stringify(suppression.pattern)}`);
   }
-  return `  auto-yes suppressed this prompt by contract policy: ${parts.join(' ')} (${ageSeconds}s ago)`;
+  const cause = suppressionCause(suppression.reason);
+  return `  auto-yes suppressed this prompt ${cause}: ${parts.join(' ')} (${ageSeconds}s ago)`;
+}
+
+/**
+ * Adopt the turn this wait is about, if this poll shows one opening.
+ *
+ * @param previous - the turn start adopted so far, or null
+ * @returns the newest adopted turn start, or `previous` when nothing qualified
+ */
+function adoptTurnStart(
+  data: CurrentOutputResponse,
+  waitStartedAt: number,
+  previous: number | null,
+): number | null {
+  const events = data.structuredEvents;
+  if (!events || events.lastEventAt == null || events.lastEventType == null) return previous;
+  if (!TURN_OPENING_EVENT_TYPES.has(events.lastEventType)) return previous;
+  if (events.lastEventAt < waitStartedAt - TURN_ADOPTION_GRACE_MS) return previous;
+  return previous === null || events.lastEventAt > previous ? events.lastEventAt : previous;
+}
+
+/**
+ * Whether the agent has reported the end of the turn this wait adopted
+ * (Issue #1839).
+ *
+ * True when no turn was adopted at all, which is the whole of the unchanged
+ * path: a session whose agent posts no hooks never adopts one, so every caller
+ * on a machine without hook injection sees precisely the pre-#1839 behaviour.
+ */
+function turnSettled(data: CurrentOutputResponse, turnStartedAt: number | null): boolean {
+  if (turnStartedAt === null) return true;
+  const stoppedAt = data.lastStopEventAt;
+  return stoppedAt != null && stoppedAt >= turnStartedAt;
 }
 
 /**
@@ -148,6 +293,12 @@ async function pollWorktree(
    * (Issue #1708).
    */
   let unclassifiedSince: number | null = null;
+  /**
+   * Epoch ms of the `user_prompt_submit` / `pre_tool_use` / `post_tool_use` this
+   * wait adopted as "the turn I am waiting on", or null when the agent has
+   * reported none (Issue #1839). See {@link adoptTurnStart}.
+   */
+  let turnStartedAt: number | null = null;
 
   while (true) {
     // Check timeout
@@ -184,6 +335,11 @@ async function pollWorktree(
       if (data.isRunning) {
         everRunning = true;
       }
+
+      // Issue #1839: done before any exit path so the turn is adopted even on a
+      // poll that ends in a prompt — the same turn is still open when the human
+      // answers and `--on-prompt human` resumes polling.
+      turnStartedAt = adoptTurnStart(data, startTime, turnStartedAt);
 
       // Prompt detected
       if (data.isPromptWaiting && data.promptData) {
@@ -353,8 +509,49 @@ async function pollWorktree(
       // of an unreadable overlay (see the note above), and reporting it as
       // `Completed` is how a stalled worker gets merged. Path A is untouched — a
       // session that went away really is finished, and carries no flag anyway.
-      if (!data.isRunning || (data.sessionStatus === 'ready' && data.isUnclassifiedActive !== true)) {
-        console.error(`Completed: ${worktreeId}`);
+      if (!data.isRunning) {
+        console.error(`Completed: ${worktreeId} (basis=${COMPLETION_BASIS.SESSION_GONE})`);
+        return { exitCode: WaitExitCode.SUCCESS };
+      }
+
+      if (data.sessionStatus === 'ready' && data.isUnclassifiedActive !== true) {
+        // Issue #1839: the agent is back at its composer with an upstream
+        // failure on the frame. Checked BEFORE the turn-boundary gate below,
+        // because it is the answer to the question that gate can only ask: the
+        // turn did not end, and this is why. Without it the same session runs
+        // to --timeout and reports 124, which says nothing about the cause.
+        const fault = data.upstreamFault ?? null;
+        if (options.failOnUpstreamFault && fault) {
+          console.error(
+            `Upstream fault on ${worktreeId}: id=${fault.id} — the agent is back at its ` +
+              'composer with an upstream API failure on screen, so this turn did not run. ' +
+              `Matched: ${JSON.stringify(fault.matchedText)}`,
+          );
+          return { exitCode: WaitExitCode.UPSTREAM_FAULT };
+        }
+
+        // Issue #1839: `ready` off the terminal frame is the agent's composer,
+        // not the agent's verdict. Measured 2026-08-20 against a stub upstream
+        // answering 529: Claude returns to the composer ~3 s after the send
+        // having executed nothing, and never sends `Stop`. When this instance's
+        // hooks ARE reporting — the only case in which `turnStartedAt` is
+        // non-null — that missing `Stop` is the difference between "finished"
+        // and "never ran", and it is the only signal that carries it.
+        if (!turnSettled(data, turnStartedAt)) {
+          console.error(
+            `Waiting: ${worktreeId} is back at its composer, but its agent has not reported ` +
+              `the end of this turn (turnStartedAt=${turnStartedAt}, ` +
+              `lastStopEventAt=${data.lastStopEventAt ?? 'none'}). ` +
+              'Not reporting completion; inspect with ' +
+              `\`commandmate capture ${worktreeId} --json\`.`,
+          );
+          await sleep(POLL_INTERVAL_MS);
+          continue;
+        }
+
+        const basis =
+          turnStartedAt === null ? COMPLETION_BASIS.SCRAPER_READY : COMPLETION_BASIS.HOOK_STOP;
+        console.error(`Completed: ${worktreeId} (basis=${basis})`);
         return { exitCode: WaitExitCode.SUCCESS };
       }
 
@@ -511,6 +708,7 @@ export function createWaitCommand(): Command {
     .option('--instance <id>', WAIT_INSTANCE_OPTION_DESCRIPTION)
     .option('--verify', 'After completion, run every verification gate; exit 20 when a gate fails, 21 when there is nothing to verify')
     .option('--require-work', 'After completion, run only the work-evidence gate; exit 21 when the worktree has no commits and no uncommitted changes')
+    .option('--fail-on-upstream-fault', 'Exit 11 instead of 0 when the agent returns to its composer with an upstream API failure (529/limit/API Error) on the frame')
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeIds: string[], options: WaitOptions) => {
       try {

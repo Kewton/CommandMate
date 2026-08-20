@@ -156,36 +156,19 @@ export function findStartupOverlay(frame: string): StartupOverlay | null {
 
 /**
  * Upstream conditions that stall a scenario without saying anything about the
- * detection layer: API overload, rate/usage limits, transport errors.
+ * detection layer.
  *
- * Observed for real on 2026-08-06 — a `529 Overloaded · Retrying in 34s ·
- * attempt 9/10` banner kept a scenario "running" past its timeout. Reporting
- * that as a detection regression would train everyone to ignore the canary, so
- * these frames get their own outcome (`blocked`) and buy extra waiting time.
+ * Re-exported, not defined: Issue #1839 moved the list to
+ * `src/lib/detection/upstream-faults.ts` so the server payload
+ * (`capture --json`'s `upstreamFault`) and `wait --fail-on-upstream-fault`
+ * judge a frame by exactly the patterns the canary judges it by. The names
+ * stay reachable from here because `runner.ts` and `session.ts` have always
+ * imported them from this module.
  */
-export interface UpstreamFault {
-  id: string;
-  pattern: RegExp;
-  /** Whether Claude retries on its own, so waiting longer is worthwhile. */
-  selfRetrying: boolean;
-}
-
-/**
- * Patterns are anchored on ERROR wording, not on the words "usage limit".
- * Claude's own banner advertises "up to 50% of your weekly usage limit on
- * Fable 5" on a perfectly healthy frame — a looser pattern marked every
- * scenario of a run as `blocked` (measured 2026-08-06), which would have hidden
- * real regressions behind a fake infrastructure excuse.
- */
-export const UPSTREAM_FAULTS: readonly UpstreamFault[] = [
-  { id: 'overloaded', pattern: /\b5\d{2}\s+Overloaded\b/i, selfRetrying: true },
-  { id: 'retrying', pattern: /Retrying in \d+s\s*[·•]\s*attempt \d+\/\d+/i, selfRetrying: true },
-  { id: 'limit-reached', pattern: /\blimit reached\b/i, selfRetrying: false },
-  { id: 'api-error', pattern: /\bAPI Error(?::|\s+\d{3})/i, selfRetrying: false },
-];
-
-/** First upstream fault visible in the frame, if any. */
-export function findUpstreamFault(frame: string): UpstreamFault | null {
-  const clean = stripAnsi(frame);
-  return UPSTREAM_FAULTS.find(fault => fault.pattern.test(clean)) ?? null;
-}
+export {
+  UPSTREAM_FAULTS,
+  findUpstreamFault,
+  matchUpstreamFault,
+  type UpstreamFault,
+  type UpstreamFaultMatch,
+} from '@/lib/detection/upstream-faults';

@@ -91,6 +91,7 @@ import { createLogger } from '@/lib/logger';
 // The `~/.gemini` tree belongs to gemini; agy lives inside it. The merge that
 // keeps the two from erasing each other is written once, there.
 import { readJsonObjectFile, writeJsonObjectFile } from '../gemini/shared-config-tree';
+import { AGENT_EVENT_URL_ENV_VAR } from '../launch-command';
 import { ANTIGRAVITY_CLI_TOOL_ID } from './tool-id';
 
 const logger = createLogger('lib/hooks/sources/antigravity/hooks-config');
@@ -395,32 +396,36 @@ export function writeAntigravityHooksConfig(options: { path?: string } = {}): st
  * terminal, so the variable is set here and nowhere else.
  *
  * The executable is quoted but not otherwise touched, so a caller may append its
- * own flags — `AntigravityTool.startSession` adds `--model` — after the value
- * this returns.
+ * own flags — `AntigravityTool.startSession` adds `--model` — after the rendered
+ * line. Since Issue #1846 the two variables come back as `env` rather than as a
+ * prefix on the command, which is also what keeps `--model` appendable: the
+ * caller appends to the *rendered* line and the assignments stay in front of it
+ * by construction rather than by the caller remembering to.
  *
- * Never throws, and returns the executable unchanged when injection is off.
+ * Never throws, and returns the executable with an empty environment when
+ * injection is off.
  *
  * @param executablePath - `agy`, or a resolved path to it
  * @param target - The instance being started
- * @returns The command line to type into the pane
+ * @returns The command to type into the pane and the environment it needs
  */
 export function buildAntigravityLaunchCommand(
   executablePath: string,
   target: HookSettingsTarget,
   options: HookSettingsOptions = {}
-): string {
-  if (!isHookInjectionEnabled()) return executablePath;
+): { command: string; env: Record<string, string> } {
+  if (!isHookInjectionEnabled()) return { command: executablePath, env: {} };
   if (!isValidInstanceId(resolveTargetInstanceId(target))) {
     logger.warn('antigravity-hook-invalid-instance-id', { worktreeId: target.worktreeId });
-    return executablePath;
+    return { command: executablePath, env: {} };
   }
 
   const scoped = { ...target, cliToolId: ANTIGRAVITY_CLI_TOOL_ID };
-  const url = buildAgentEventUrl(scoped, options);
-  const permissionUrl = buildPermissionRequestUrl(scoped, options);
-  return (
-    `CM_HOOK_URL=${shellQuote(url)} ` +
-    `${ANTIGRAVITY_PERMISSION_URL_ENV_VAR}=${shellQuote(permissionUrl)} ` +
-    `${shellQuote(executablePath)}`
-  );
+  return {
+    command: shellQuote(executablePath),
+    env: {
+      [AGENT_EVENT_URL_ENV_VAR]: buildAgentEventUrl(scoped, options),
+      [ANTIGRAVITY_PERMISSION_URL_ENV_VAR]: buildPermissionRequestUrl(scoped, options),
+    },
+  };
 }

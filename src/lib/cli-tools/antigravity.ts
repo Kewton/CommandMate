@@ -23,7 +23,10 @@ import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { stripAnsi } from '../detection/cli-patterns';
 import { ANTIGRAVITY_CLI_TOOL_ID } from '@/lib/hooks/sources';
-import { beginAgentSession, prepareAgentLaunch } from '@/lib/session/agent-session-lifecycle';
+import {
+  beginAgentSession,
+  buildAgentLaunchCommandLine,
+} from '@/lib/session/agent-session-lifecycle';
 import { createLogger } from '@/lib/logger';
 import {
   TUI_SESSION_CREATE_WAIT_MS,
@@ -167,18 +170,19 @@ export class AntigravityTool extends BaseCLITool {
 
       // Start agy in interactive mode, optionally pinned to a model.
       //
-      // Issue #1762: `prepareAgentLaunch` merges CommandMate's named hook into
+      // Issue #1762: the launch merges CommandMate's named hook into
       // `~/.gemini/config/hooks.json` — agy's single global config, shared with
       // gemini's tree and with whatever the user has in it — and prefixes
       // `CM_HOOK_URL`. That variable is the *only* correlation channel agy has:
       // its payloads carry no `cwd`, its hooks run in `~/.gemini/config`, and
       // one file serves every worktree on the machine. `--model` is appended
-      // after, so the env prefix stays in front of the command.
-      // `CM_AGENT_HOOKS_INJECT=0` returns bare `agy`, unchanged from before.
-      const base = prepareAgentLaunch(
-        { worktreeId, cliToolId: ANTIGRAVITY_CLI_TOOL_ID, instanceId },
-        this.command
-      ).command;
+      // after the rendered line, so the env assignments stay in front of the
+      // command. `CM_AGENT_HOOKS_INJECT=0` returns bare `agy`, unchanged.
+      const base = buildAgentLaunchCommandLine({
+        target: { worktreeId, cliToolId: ANTIGRAVITY_CLI_TOOL_ID, instanceId },
+        executablePath: this.command,
+        worktreePath,
+      });
       const launchCommand = model ? `${base} --model ${shellSingleQuote(model)}` : base;
       await sendKeys(sessionName, launchCommand, true);
 

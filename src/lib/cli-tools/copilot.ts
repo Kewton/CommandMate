@@ -23,7 +23,10 @@ import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { COPILOT_PROMPT_PATTERN, COPILOT_SELECTION_LIST_PATTERN, stripAnsi } from '../detection/cli-patterns';
 import { COPILOT_TEXT_INPUT_DELAY_MS, COPILOT_SEND_ENTER_DELAY_MS, COPILOT_MODEL_SWITCH_TIMEOUT_MS } from '@/config/copilot-constants';
 import { TUI_SESSION_CREATE_WAIT_MS, TUI_INTERRUPT_SETTLE_MS, TUI_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
-import { beginAgentSession, prepareAgentLaunch } from '@/lib/session/agent-session-lifecycle';
+import {
+  beginAgentSession,
+  buildAgentLaunchCommandLine,
+} from '@/lib/session/agent-session-lifecycle';
 import { COPILOT_LAUNCH_COMMAND } from '@/lib/hooks/sources/copilot/hook-settings';
 import { COPILOT_CLI_TOOL_ID } from '@/lib/hooks/sources/copilot/tool-id';
 import { getErrorMessage } from '@/lib/errors';
@@ -168,10 +171,11 @@ export class CopilotTool extends BaseCLITool {
       // Fails open in every branch: with `CM_AGENT_HOOKS_INJECT=0`, or with a
       // settings file that cannot be read or written, this is byte-for-byte the
       // `gh copilot` this line has always sent.
-      const launchCommand = prepareAgentLaunch(
-        { worktreeId, cliToolId: COPILOT_CLI_TOOL_ID, instanceId },
-        COPILOT_LAUNCH_COMMAND
-      ).command;
+      const launchCommand = buildAgentLaunchCommandLine({
+        target: { worktreeId, cliToolId: COPILOT_CLI_TOOL_ID, instanceId },
+        executablePath: COPILOT_LAUNCH_COMMAND,
+        worktreePath,
+      });
 
       // Start Copilot CLI in interactive mode
       await sendKeys(sessionName, launchCommand, true);

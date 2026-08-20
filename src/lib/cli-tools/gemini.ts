@@ -22,8 +22,10 @@ import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { GEMINI_PROMPT_PATTERN, stripAnsi } from '../detection/cli-patterns';
 import { GEMINI_CLI_TOOL_ID } from '@/lib/hooks/sources';
-import { injectGeminiHookSettings } from '@/lib/hooks/sources/gemini/source';
-import { beginAgentSession, prepareAgentLaunch } from '@/lib/session/agent-session-lifecycle';
+import {
+  beginAgentSession,
+  buildAgentLaunchCommandLine,
+} from '@/lib/session/agent-session-lifecycle';
 import { createLogger } from '@/lib/logger';
 import {
   TUI_SESSION_CREATE_WAIT_MS,
@@ -118,27 +120,24 @@ export class GeminiTool extends BaseCLITool {
       // Wait a moment for the session to be created
       await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
 
-      // Issue #1762: hand this worktree its own hooks config, merged into any
-      // `.gemini/settings.json` that is already there. Written from here rather
-      // than from the source's `prepareLaunch` because the worktree path is the
-      // one input `AgentInstanceRef` does not carry, and gemini is the only tool
-      // whose config is scoped to a worktree. Fail-open: a config that cannot be
-      // written costs the events and nothing else.
-      injectGeminiHookSettings(worktreePath, {
-        worktreeId,
-        cliToolId: GEMINI_CLI_TOOL_ID,
-        instanceId,
-      });
-
       // Start Gemini CLI in interactive mode (no flags = interactive REPL).
-      // `prepareAgentLaunch` prefixes `CM_HOOK_URL`, which is what tells the
+      //
+      // Issue #1762 hands this worktree its own hooks config, merged into any
+      // `.gemini/settings.json` that is already there; Issue #1846 moved that
+      // write inside `prepareLaunch`, where it belongs — the worktree path is
+      // now part of the launch context, so the second entry point this file
+      // used to call (`injectGeminiHookSettings`) is gone.
+      //
+      // The rendered line prefixes `CM_HOOK_URL`, which is what tells the
       // receiver which instance an event came from — `.gemini/settings.json` is
       // per worktree and cannot. `CM_AGENT_HOOKS_INJECT=0` returns the bare
-      // command, unchanged from before this Issue.
-      const launchCommand = prepareAgentLaunch(
-        { worktreeId, cliToolId: GEMINI_CLI_TOOL_ID, instanceId },
-        this.command
-      ).command;
+      // command, unchanged from before these Issues. Fail-open throughout: a
+      // config that cannot be written costs the events and nothing else.
+      const launchCommand = buildAgentLaunchCommandLine({
+        target: { worktreeId, cliToolId: GEMINI_CLI_TOOL_ID, instanceId },
+        executablePath: this.command,
+        worktreePath,
+      });
       await sendKeys(sessionName, launchCommand, true);
 
       // Wait for Gemini to initialize (minimum wait for banner/auth)

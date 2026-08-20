@@ -15,6 +15,7 @@ export type {
   AgentEventSource,
   AgentEventTransport,
   AgentInstanceRef,
+  AgentLaunchContext,
   AgentLaunchPlan,
   AgentSourceCapabilities,
   NoDecisionBehavior,
@@ -39,6 +40,8 @@ export {
 
 export { definePullEventSource, definePushHookSource } from './define-source';
 export type { PullEventSourceSpec, PushHookSourceSpec } from './define-source';
+
+export { AGENT_EVENT_URL_ENV_VAR, renderAgentLaunchCommand } from './launch-command';
 
 export {
   boundDetail,

@@ -1,0 +1,13 @@
+# The same resource, with a budget too small to outlast the holder: the lock
+# never comes free, so the command is never started. NOT a TIMEOUT (nothing ran
+# long) and NOT a FAIL (nothing judged the work) — section 9.4.
+version: 1
+gates:
+  - id: e2e
+    command: touch "$CMATE_VERIFY_TEST_MARKER"
+    timeoutSec: 1
+    mutex: cmate-verify-selftest
+  - id: after
+    command: echo ran-after-mutex-skip
+options:
+  skipInPrimaryCheckout: false

@@ -6,6 +6,11 @@
 Claude Code の新バージョンが検出層を壊したことを、ユーザー報告ではなく**カナリアで**検知するために存在する
 （Issue #1727 / Epic #1720）。hooks 化（#1720）が完了しても scraper はフォールバックとして残るため、本カナリアは恒久的に価値がある。
 
+Issue #1847 でシナリオが 7 本になり、後半 2 本は検出層ではなく **Auto-Yes v2 の裁定**
+（`PermissionRequest` hook）を実 TUI で確認する。こちらが守っているのは
+「`allow` を返すとダイアログが出ずにツールが走る」「空応答ならダイアログが出る」という
+**Claude 側の契約**で、これはリポジトリ内のどのテストでも観測できない。
+
 - 実装: [`scripts/canary/`](../../scripts/canary/)
 - 生成される実フレーム: `tests/fixtures/canary/`
 - 単体テスト（tmux も課金も不要）: `tests/unit/canary/`
@@ -38,15 +43,25 @@ Claude Code の新バージョンが検出層を壊したことを、ユーザ�
 ## 実行
 
 ```bash
-npm run canary                                   # 5 シナリオすべて
+npm run canary                                   # 7 シナリオすべて
 npm run canary -- --list                         # シナリオ一覧（意図・期待値・所要時間）
 npm run canary -- --only model-overlay,idle      # 一部だけ実行
 npm run canary -- --skip generating              # 一部だけ除外
 npm run canary -- --json                         # 機械可読サマリ
 npm run canary -- --keep                         # 使い捨て HOME と tmux セッションを残す（デバッグ用）
 npm run canary -- --mutate                       # ハーネス自体の非空振り自己テスト（後述）
+npm run canary -- --mutate-verdict               # 受け口の裁定を反転させる自己テスト（後述）
 CM_CANARY_MODEL=haiku npm run canary             # 課金を抑える（後述）
 ```
+
+> **permission mode は `--permission-mode manual` で固定している**（Issue #1847）。
+> Claude Code 2.1.236 で既定が **auto mode** になり、auto mode では Claude が自分で承認判断をするため
+> **本カナリアが読むべき承認ダイアログがそもそも描画されない**。しかも使い捨て HOME では
+> 1 本目だけ manual・2 本目以降が auto へ自己移行するため、複数シナリオ実行だけが
+> 「起動タイムアウト」で落ちるという分かりにくい形で出ていた（ready フッタ `? for shortcuts` が
+> manual mode にしか無いため）。`settings.json` に `permissions.defaultMode` を書くと今度は
+> 「Make auto mode your default permission mode?」の選択画面が composer の前に出るので、
+> コマンドライン側で固定している（`CANARY_PERMISSION_MODE` / `scripts/canary/session.ts`）。
 
 ### exit code
 
@@ -70,6 +85,16 @@ CM_CANARY_MODEL=haiku npm run canary             # 課金を抑える（後述�
 | `--mutate` 自己テスト | 約 166 秒（各シナリオが 30 秒の timeout を消費するため） |
 | トークンを使うシナリオ | 3 つ（`permission-dialog` / `askuserquestion-task-panel` / `generating`）。`idle` と `model-overlay` は **API を一切呼ばない** |
 
+2026-08-20 の実測（同環境, claude 2.1.237, Opus 5 既定。シナリオ 6・7 追加後）:
+
+| 項目 | 実測 |
+|---|---|
+| 7 シナリオ合計 | **276.7 秒**。ただしその 244 秒は `askuserquestion-task-panel` の timeout（下記「既知の限界」）。他 6 件は合計 29 秒 |
+| シナリオ 6・7 だけ | **16.8 秒**（`--only permission-hook-allow,permission-hook-no-decision`） |
+| `--mutate-verdict` 自己テスト | **369.9 秒**（2 件がそれぞれ満了まで待つ。時計を縮めない理由は後述） |
+| `--mutate --only permission-hook-*` | 67.3 秒 |
+| トークンを使うシナリオ | 5 つ（上記 3 つ ＋ `permission-hook-allow` / `permission-hook-no-decision`） |
+
 費用は 1 回あたり**数十セント程度**（各シナリオで短いプロンプト 1 本 + システムプロンプト。既定モデルが Opus 5 の場合の概算で、
 実測ではなく見積り）。Max プラン配下で実行した場合はプランの利用枠から引かれる。
 `CM_CANARY_MODEL=haiku` を付けると課金対象の 3 シナリオが Haiku 4.5 で走り、桁で安くなる
@@ -86,6 +111,20 @@ CM_CANARY_MODEL=haiku npm run canary             # 課金を抑える（後述�
 | 3 | `askuserquestion-task-panel` | AskUserQuestion picker ＋ 最下部のタスクパネル併存（#1708 の形） | `waiting`（`prompt_detected` または `claude_selection_list`）**かつフレームにタスクパネルが写っていること** |
 | 4 | `model-overlay` | `/model` オーバーレイ | `waiting` / `claude_selection_list` **かつ Auto-Yes からは見えない**（#1495） |
 | 5 | `generating` | 生成中 | `running` / `thinking_indicator`、Auto-Yes 沈黙 |
+| 6 | `permission-hook-allow` | Auto-Yes v2 が `PermissionRequest` に `allow` を返した後 | **ダイアログがどちらの経路にも出ない**、`structuredEvents` も prompt を報告しない、**probe ファイルが実在する**（＝ツールが本当に走った） |
+| 7 | `permission-hook-no-decision` | 契約 `denyPatterns` 一致 → no-decision | `waiting` / `prompt_detected`、両経路から見える、`autoYes.lastSuppression.reason = deny-pattern`、**probe ファイルは無い** |
+
+シナリオ 6・7 は Auto-Yes v2（#1724）の裁定を実 TUI で確認するもので（Issue #1847）、
+フレームだけでは足りない点が他の 5 つと違う。**「裁定が無いとき」と同じ画面が期待値**なので、
+pane だけを見ると受け口が何も答えなかった場合と区別が付かない。そのため
+probe ファイルの実在（6）と裁定器自身の verdict ＋ `lastSuppression`（7）を併せて assert する。
+
+この 2 つは本番の `buildAgentHookSettings` が書いた `--settings` を**カナリア内の受け口**
+（`hook-receiver.ts` / `127.0.0.1:0` の ephemeral ポート）に向けて起動する。
+裁定は本体の `resolvePermissionRequest` をそのまま呼び、**DB を要する 2 箇所だけ**
+（契約 `autoYes` の読み出しと `allow` の監査記録）を `PermissionDecisionDeps` で差し替える。
+`structuredEvents` / `autoYes.lastSuppression` も `buildCurrentOutput` と同じ getter
+（`getLastAgentEvent` / `resolvePromptWaiting` / `getLastPolicySuppression`）で組む。
 
 検出の呼び方は**本番の 2 経路をそのまま複製**している:
 
@@ -130,6 +169,29 @@ capture は本番と同じ `capture-pane -p -e -S -1000`、ペインも本番の
 
 `--mutate` 実行時は fixture を上書きしない（赤フレームで正常時の参照フレームを潰さないため）。
 
+### `--mutate-verdict`（Auto-Yes v2 シナリオ用 / Issue #1847）
+
+シナリオ 6・7 で問われているのは**述語の正しさではなく受け口の応答**である。
+どちらも「裁定が無いときと同じ画面」を期待値にしているので、誤った期待値を当てても
+「このハーネスは本当に裁定を届けているのか」は証明できない。そこで
+**受け口が逆の裁定を返す**モードを別フラグとして用意した:
+
+| シナリオ | 通常 | `--mutate-verdict` | 期待される結果 |
+|---|---|---|---|
+| `permission-hook-allow` | `allow` | `{}` | ダイアログが出る → 赤 |
+| `permission-hook-no-decision` | `{}` | `allow` | ダイアログが出ない → 赤 |
+
+- 期待値は**本来のもののまま**。反転するのは受け口の応答だけで、受け口のログには
+  `[MUTATED: sent …]` が残る（裁定器自身の verdict は本物のまま記録される）
+- **受け口を持たないシナリオは SKIP** になり、合否の材料に数えない
+- `--mutate` と違い**時計を 30 秒に縮めない**。縮めると「反転が画面を変えたから赤」ではなく
+  「まだ何も起きていないから赤」で通ってしまい、自己テストが誤って PASS する
+- `--mutate` と `--mutate-verdict` は**同時指定できない**（赤の原因が特定できなくなるため）
+
+2026-08-20 の実測（claude 2.1.237）: **2/2 が赤** → `mutation self-test PASSED`（exit 0）。
+allow を `{}` にすると `waiting` / `prompt_detected` になり、no-decision を `allow` にすると
+`ready` / `input_prompt` に戻る。`--mutate`（誤った期待値）でも 2/2 が赤。
+
 ---
 
 ## 赤が出たときの読み方
@@ -167,6 +229,21 @@ capture は本番と同じ `capture-pane -p -e -S -1000`、ペインも本番の
 期待値そのものは `scripts/canary/expectations.ts` に**純関数**として書く。こうしておくと
 `tests/unit/canary/` から commit 済み fixture に対して同じ述語を回せるので、CI（tmux も課金もなし）でも守られる。
 
+**hooks 経由の裁定まで見るシナリオ**は、上に加えて `hooks` ブロックを持つ（Issue #1847）:
+
+```ts
+  hooks: {
+    policy: { mode: null, allowPromptTypes: [], denyPatterns: ['…'] },  // 契約の autoYes 相当
+    probeFile: 'canary-…-probe.txt',   // ツールが本当に走ったかの証拠になるファイル
+  },
+```
+
+これが付いていると runner が (1) 本番の `buildClaudeLaunchCommand` で `--settings` を生成して
+カナリアの受け口に向け、(2) Auto-Yes を有効化し、(3) 毎 capture で `Observation.hooks` を埋める。
+期待値は `scripts/canary/hook-expectations.ts` に置く（フレームではなく `Observation.hooks` を読むため、
+`expectations.ts` とはファイルを分けている）。**`hooks` が無いときは必ず不一致を返すこと** —
+受け口が繋がっていない実行が空振りで緑にならないようにするため。
+
 ---
 
 ## 既知の限界
@@ -175,9 +252,17 @@ capture は本番と同じ `capture-pane -p -e -S -1000`、ペインも本番の
 - **#1708 の「Ready to submit your answers?」確認画面は対象外。** これは picker と違いフッターを持たず、
   現行コードでは**既知の未修正欠陥**（Issue #1708 で追跡中）。既知バグを緑の期待値としてハーネスに固定すると
   カナリアが恒常的に赤になり signal として死ぬため、シナリオ 3 は「picker ＋ タスクパネル併存」（#807 のガードが効く形）を対象にしている。
-  #1708 が修正されたら、確認画面を 6 番目のシナリオとして追加すること
+  #1708 が修正されたら、確認画面を新しいシナリオとして追加すること（id は 6・7 が Auto-Yes v2 で埋まっている）
 - シナリオ 3 は Claude の `TaskCreate` ツールに依存する。ツール名が変わるとタスクパネルが描画されず、
-  「併存を再現できなかった」として赤になる（これは意図した挙動: 弱いプローブが緑の顔をするより良い）
+  「併存を再現できなかった」として赤になる（これは意図した挙動: 弱いプローブが緑の顔をするより良い）。
+  **2026-08-20 に実際にこれが起きた**: claude 2.1.237 のセッションに `TaskCreate` が存在せず
+  （`No matching deferred tools found`）、picker は正しく検出できているのにタスクパネルが無く
+  241 秒の timeout で赤になった。**検出回帰ではない**。駆動プロンプトの書き直しが必要で、#1727 側の課題
+- シナリオ 6・7 は claude 専用。他ツールの `AgentEventSource`（codex / copilot / gemini / antigravity /
+  opencode）には `encodeVerdict` / `parsePermissionRequest` を実 TUI で確かめる仕組みがまだ無い
+- シナリオ 6・7 の受け口は**認証を検証しない**（`withAuthHeader: false` で注入する）。
+  `Authorization: Bearer $CM_AUTH_TOKEN` の `allowedEnvVars` 展開（D7）は
+  `tests/unit/hooks/hook-settings-generator.test.ts` の担当で、カナリアは見ていない
 
 ---
 

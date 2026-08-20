@@ -13,6 +13,7 @@
 
 import { ExitCode, VerifyExitCode } from '../types';
 import type {
+  VerificationFlakyDetail,
   VerificationGateResultView,
   VerificationRunStatus,
   VerificationRunView,
@@ -26,6 +27,88 @@ export const VERIFY_POLL_INTERVAL_MS = 5000;
 
 /** Built-in gate id; mirrors WORK_EVIDENCE_GATE_ID in lib/verification/gate-runner.ts. */
 export const WORK_EVIDENCE_GATE_ID = 'work-evidence';
+
+/**
+ * Marker a mutexed gate writes into its log tail; mirrors MUTEX_LOG_PREFIX in
+ * lib/verification/gate-runner.ts (Issue #1771).
+ *
+ * Mirrored rather than imported because `tsconfig.cli.json` compiles
+ * `src/cli/**` alone with no path aliases, so the CLI bundle never pulls in the
+ * server's dependency graph. `tests/unit/verification/gate-mutex.test.ts` pins
+ * the two together by importing both.
+ */
+export const MUTEX_LOG_PREFIX = '[mutex]';
+
+/**
+ * Time a gate spent queued for its `mutex`, as written by the runner.
+ *
+ * Anchored to the start of a line so a gate whose own output happens to contain
+ * `waited=` cannot supply the number.
+ */
+const MUTEX_WAITED_PATTERN = /^\[mutex\] [^\n]*?\bwaited=([0-9]+(?:\.[0-9]+)?s)/m;
+
+/**
+ * Marker a retried gate writes into its log tail; mirrors FLAKY_LOG_PREFIX in
+ * lib/verification/gate-runner.ts (Issue #1772).
+ *
+ * Mirrored rather than imported for the same reason the mutex prefix is, and
+ * pinned to the runner's spelling by `tests/unit/verification/gate-flaky.test.ts`.
+ */
+export const FLAKY_LOG_PREFIX = '[flaky]';
+
+/**
+ * Label a gate whose two runs disagreed. Not a `VerificationGateStatus`: the
+ * schema has no such status and #1772 added no migration, so FLAKY is a reading
+ * of the marker laid over the stored `passed`/`failed` verdict.
+ */
+export const FLAKY_GATE_LABEL = 'FLAKY';
+
+/**
+ * The runner's marker line, anchored to the start of a line so a gate whose own
+ * output happens to print `outcome=` cannot supply the numbers.
+ */
+const FLAKY_PATTERN =
+  /^\[flaky\] runs=(\d+) outcome=(flaky|fail) exit=(\S+) duration=(\S+) verdict=(pass|fail)$/m;
+
+/** `n/a` is what the runner writes for a run killed by a signal. */
+function parseExitField(value: string): number | null {
+  return /^-?\d+$/.test(value) ? Number(value) : null;
+}
+
+/** `45.0s` back into milliseconds; anything else is a value we cannot read. */
+function parseDurationField(value: string): number | null {
+  const match = /^([0-9]+(?:\.[0-9]+)?)s$/.exec(value);
+  return match ? Math.round(Number(match[1]) * 1000) : null;
+}
+
+/**
+ * Read a retried gate's two runs back out of its log tail (Issue #1772).
+ *
+ * `verification_gate_results` stores one status, one exit code and one duration,
+ * so the second run's numbers only exist in the log — the same carrier
+ * work-evidence's counts and the scope gate's evidence already use.
+ *
+ * @returns null when the gate was never retried, which is every gate that did
+ *          not declare `retryOnFail: 1` and every one that passed first time.
+ */
+export function parseFlakyMarker(
+  logTail: string | null | undefined
+): VerificationFlakyDetail | null {
+  if (!logTail) return null;
+  const match = FLAKY_PATTERN.exec(logTail);
+  if (!match) return null;
+  return {
+    runs: Number(match[1]),
+    outcome: match[2] as VerificationFlakyDetail['outcome'],
+    exitCodes: match[3].split(',').map(parseExitField),
+    durationsMs: match[4].split(',').map(parseDurationField),
+    verdict: match[5] as VerificationFlakyDetail['verdict'],
+    // Kept verbatim so the GATE line prints exactly what the runner wrote,
+    // rather than a re-rendering that could round differently.
+    exit: match[3],
+    duration: match[4],
+  };
+}
 
 /**
  * Lines of a failing gate's log echoed to stderr before the rest becomes a
@@ -119,10 +202,24 @@ function formatDetail(gate: VerificationGateResultView): string {
   }
 
   const parts: string[] = [];
-  if (gate.exitCode !== null && gate.exitCode !== undefined) parts.push(`exit=${gate.exitCode}`);
-  if (gate.durationMs !== null && gate.durationMs !== undefined) {
-    parts.push(`${(gate.durationMs / 1000).toFixed(1)}s`);
+  // A retried gate reports both runs (#1772). The stored columns hold only the
+  // run whose verdict was recorded, so printing them would silently drop half
+  // of the evidence the retry exists to produce.
+  const flaky = parseFlakyMarker(gate.logTail);
+  if (flaky) {
+    parts.push(`exit=${flaky.exit}`, flaky.duration);
+  } else {
+    if (gate.exitCode !== null && gate.exitCode !== undefined) parts.push(`exit=${gate.exitCode}`);
+    if (gate.durationMs !== null && gate.durationMs !== undefined) {
+      parts.push(`${(gate.durationMs / 1000).toFixed(1)}s`);
+    }
   }
+  // After the duration and never merged into it (#1771): the duration is what
+  // the gate's command took, the wait is what the machine made it queue for.
+  // Adding them would hide contention inside a number that timeout budgets and
+  // "did this gate get slower" are read from.
+  const waited = MUTEX_WAITED_PATTERN.exec(gate.logTail ?? '');
+  if (waited) parts.push(`waited=${waited[1]}`);
   return parts.join(', ');
 }
 
@@ -142,8 +239,26 @@ function formatGateSource(gate: VerificationGateResultView): string {
   return gate.source === 'contract' ? ' [contract]' : '';
 }
 
+/**
+ * The verdict word on a gate's line.
+ *
+ * FLAKY displaces PASS/FAIL rather than being appended to it (Issue #1772),
+ * because the whole point is that neither of those two words was true of this
+ * gate: it failed and then it passed. How the run *counted* it is not lost —
+ * `flakyIsPass` decided the stored status, which is what the RESULT line and
+ * the exit code are built from, so a FLAKY line on a `RESULT failed` run reads
+ * exactly as it should.
+ *
+ * A gate that failed twice keeps FAIL: the retry agreed, and nothing about it
+ * was flaky.
+ */
+function gateLabel(gate: VerificationGateResultView): string {
+  if (parseFlakyMarker(gate.logTail)?.outcome === 'flaky') return FLAKY_GATE_LABEL;
+  return GATE_LABELS[gate.status] ?? gate.status.toUpperCase();
+}
+
 function formatGateLine(gate: VerificationGateResultView): string {
-  const label = GATE_LABELS[gate.status] ?? gate.status.toUpperCase();
+  const label = gateLabel(gate);
   const detail = formatDetail(gate);
   const head = detail ? `GATE ${gate.gateId} ${label} (${detail})` : `GATE ${gate.gateId} ${label}`;
   return `${head}${formatGateSource(gate)}`;

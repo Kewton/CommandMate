@@ -1,0 +1,16 @@
+# `unit` fails the first time and passes the second, in the same tree — the
+# FLAKY outcome CommandMate #1772 exists to name. `flakyIsPass` is NOT declared,
+# so the default applies: FLAKY still counts as a failure. Declaring a retry must
+# not make a gate one bit weaker; what it buys is a name for what happened.
+#
+# `after` proves the run continues past a FLAKY gate, the same way it continues
+# past a FAIL.
+version: 1
+gates:
+  - id: unit
+    command: sh -c 'if [ -f "$CMATE_VERIFY_TEST_MARKER" ]; then echo second-run-green; exit 0; fi; : > "$CMATE_VERIFY_TEST_MARKER"; echo first-run-red; exit 1'
+    retryOnFail: 1
+  - id: after
+    command: echo ran-after-flaky
+options:
+  skipInPrimaryCheckout: false

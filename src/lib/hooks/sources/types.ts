@@ -78,11 +78,25 @@ export type AgentEventTransport = 'push' | 'pull';
  *   so far behaves this way; it exists so that a tool which grows a timeout
  *   does not force a third shape into the union later.
  *
- * antigravity is deliberately *not* representable as "abstain is safe": an
- * empty `{}` reply is read as a denial and stops the tool call outright (#1757
- * P10). Its source (Phase 4-4) must encode abstention as a positive
- * `{"decision":"allow"}` or register no hook at all — which is a statement
- * about {@link AgentEventSource.encodeVerdict}, not about this field.
+ * **There is deliberately no `denies` member.** Issue #1846 was asked to add
+ * one and measured the premise away instead. The request came from antigravity,
+ * where an empty `{}` reply on `PreToolUse` really is read as a denial (#1757
+ * P10) — but #1779 then measured agy 1.1.12 live and found that a hook which
+ * *prints nothing at all*, or times out, is indistinguishable from having no
+ * hook, and that `{"decision":"ask"}` draws agy's ordinary approval dialog. So
+ * `../antigravity/source` carries `{ kind: 'proceeds' }` and has since #1779;
+ * nothing in the tree approximates a denial with `blocks` any more.
+ *
+ * What that leaves is a member no source could truthfully carry. The reason it
+ * would still be wrong to add speculatively — unlike `blocksUntil`, which is a
+ * *degree* of the `blocks` this file already measures — is that this field is
+ * read as "what abstaining costs", and abstaining goes out through {@link
+ * AgentEventSource.encodeVerdict}. `{}` is never what CommandMate sends to agy.
+ * A `denies` member would therefore describe a wire byte no source emits, while
+ * inviting the next implementer to declare it *instead of* fixing the encoding
+ * — which is the one thing standing between agy and a stopped agent. The rule
+ * the two fields state together is in the module comment of
+ * `../antigravity/source`.
  */
 export type NoDecisionBehavior =
   | { kind: 'proceeds' }
@@ -97,6 +111,14 @@ export type NoDecisionBehavior =
  * the pane, the worktree and the instance are all untouched (#1721 D7 §1.1),
  * and opencode's `GET /session` returns sessions belonging to other processes
  * entirely (#1758 §5.6). See {@link NormalizedAgentEvent.conversationId}.
+ *
+ * **This is a key, and it stays three fields.** Issue #1846 declined to put the
+ * worktree's filesystem path here even though two implementations asked for one
+ * (#1777 codex, #1776 gemini): a key that carries a path stops comparing equal
+ * to itself the moment a worktree is moved or re-cloned, and every consumer of
+ * the triple — `agent-event-state`, `pending-decisions`, the receiver routes —
+ * compares it. The path goes to the one call that needs it, on
+ * {@link AgentLaunchContext}.
  */
 export interface AgentInstanceRef {
   worktreeId: string;
@@ -265,12 +287,31 @@ export interface Subscription {
 /** What a source can and cannot do, so callers never have to ask "which tool is this?". */
 export interface AgentSourceCapabilities {
   /**
-   * Which of the seven words this source can ever emit (#1757 §8.1).
+   * Which of the seven words a caller may expect to be **delivered** (#1757 §8.1).
    *
    * Not cosmetic. `session_end` never arrives from antigravity and only arrives
    * from opencode when something calls `DELETE /session/:id` — so "the agent
    * exited" has to keep coming from tmux, for every tool, forever. A caller
    * that waits for an event this list omits waits for good.
+   *
+   * **Delivered, not emittable** — Issue #1846 settled which of the two this
+   * means, because they are not the same list and two sources already
+   * distinguish them. copilot *emits* `PreToolUse`: its mapper recognises the
+   * spelling, and a hand-configured hook from #1549 still routes it here. But
+   * CommandMate points that event at `/api/hooks/permission-request`, which
+   * adjudicates and never records, so nothing downstream ever sees a copilot
+   * `pre_tool_use` and `../copilot/source` omits it here on purpose. gemini does
+   * the same for `pre_tool_use` / `post_tool_use`: mapped, but never registered
+   * by the generated config.
+   *
+   * The consuming half (`wait`, `capture --prompts`, `status-mapping`) asks one
+   * question — "will this word ever reach me?" — and this is the field that
+   * answers it. A source that can emit a word it does not deliver says so by
+   * keeping the mapper and leaving the word out of this list; it does **not**
+   * get a second list. Splitting the field into `emittable` / `delivered` would
+   * make every consumer pick one, and a consumer that picked `emittable` would
+   * wait for good on exactly the two cases above — which is the failure this
+   * field exists to prevent.
    */
   readonly supportedEvents: readonly AgentEventType[];
   /**
@@ -294,12 +335,75 @@ export interface AgentSourceCapabilities {
   readonly decisionTimeoutSeconds: number | null;
 }
 
-/** Everything needed to start the agent for one instance. */
+/**
+ * Everything {@link AgentEventSource.prepareLaunch} is given (Issue #1846).
+ *
+ * A context object rather than a parameter list, and separate from
+ * {@link AgentInstanceRef} rather than folded into it. The ref is the key; this
+ * is the circumstance. Widening the key to serve one call would have changed a
+ * type six other modules compare for equality.
+ *
+ * ## Why `worktreePath` is required
+ *
+ * Because #1762 shipped without it and had to route around the interface:
+ * gemini's config is `<worktree>/.gemini/settings.json`, `prepareLaunch` had no
+ * path, so that source exported `injectGeminiHookSettings(worktreePath, target)`
+ * as a second entry point and `cli-tools/gemini.ts` called *both*. One of the
+ * six sources then wrote its config from a different call site than the other
+ * five — exactly the shape Epic #1720 was opened to stop. codex (#1777) and
+ * gemini (#1776) reported the gap independently, which is why #1846 closed it
+ * rather than documenting it.
+ *
+ * Required, not optional: an optional field leaves the second call site legal,
+ * and a source that silently skips its config when the path is absent fails the
+ * way everything in this subsystem fails — with no error and no events.
+ */
+export interface AgentLaunchContext {
+  /** The instance being started. */
+  target: AgentInstanceRef;
+  /** Resolved path to the agent CLI, or the bare command when that is what runs. */
+  executablePath: string;
+  /** Absolute path of the worktree the pane was created in. */
+  worktreePath: string;
+}
+
+/**
+ * Everything needed to start the agent for one instance.
+ *
+ * `command` and `env` are two fields rather than one string since Issue #1846.
+ * Four of the six sources have to hand the agent's *process* a correlation key
+ * that its config file cannot carry — copilot and codex because their config is
+ * one file for the whole machine, gemini because `.gemini/settings.json` is per
+ * *worktree* and cannot tell `gemini` from `gemini-2`, antigravity because its
+ * payloads carry no `cwd` at all (#1757 R6) — and all four independently reached
+ * the same workaround: write `NAME=value ` in front of `command` and rely on the
+ * caller pasting the result into a shell.
+ *
+ * That works for a tmux pane and for nothing else. A launcher that spawns the
+ * agent with `execFile`, a caller that wants to log the command without the
+ * URLs in it, a source whose executable is argv rather than a shell word — none
+ * of them can take a prefixed string back apart, and each would have to
+ * re-derive assignments the source had already computed. Declaring them gives
+ * the launcher one place to apply them: `renderAgentLaunchCommand` in
+ * `./launch-command` is the only thing that turns this pair into a line.
+ */
 export interface AgentLaunchPlan {
-  /** The command line to send to the pane. */
+  /**
+   * The command line to send to the pane.
+   *
+   * **Never carries `NAME=value` prefixes** — those belong in {@link
+   * AgentLaunchPlan.env}. The executable and its flags, and nothing else.
+   */
   command: string;
   /** The generated config file, when the source writes one. */
   settingsPath: string | null;
+  /**
+   * Environment the agent process must be started with; `{}` when none.
+   *
+   * Insertion order is preserved end to end, so a plan that declares
+   * `CODEX_HOME` before the URLs still renders it first.
+   */
+  env: Record<string, string>;
 }
 
 /**
@@ -355,8 +459,12 @@ export interface AgentEventSource {
    * Must never throw: injecting hooks is an enhancement to a session that has
    * to start anyway, so a config that cannot be written costs the events and
    * returns the bare executable.
+   *
+   * Takes {@link AgentLaunchContext} rather than `(target, executablePath)`
+   * since Issue #1846, so the one input a per-worktree config needs is inside
+   * the interface instead of beside it.
    */
-  prepareLaunch(target: AgentInstanceRef, executablePath: string): AgentLaunchPlan;
+  prepareLaunch(context: AgentLaunchContext): AgentLaunchPlan;
 
   /**
    * Begin receiving events for one instance (C1).

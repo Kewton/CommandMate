@@ -27,6 +27,12 @@ gates:
   - id: unit
     command: "npm run test:unit"
     timeoutSec: 1800
+    retryOnFail: 1     # 省略時 0。fail したら同一 tree で 1 回だけ再実行する（§10）
+    flakyIsPass: false # 省略時 false。fail→pass（FLAKY）を pass 扱いにするか（§10）
+  - id: e2e
+    command: "npm run test:e2e"
+    timeoutSec: 1800
+    mutex: e2e-port    # 省略時なし。マシン全体で同名 mutex のゲートを同時に 1 つに制限（§9）
 options:
   baseRef: origin/develop      # work-evidence / scope 判定の基準。省略時はリポジトリのデフォルトブランチの origin
   skipInPrimaryCheckout: true  # 省略時 true。メイン checkout（稼働サーバの cwd になり得る場所）ではコマンド系ゲートを skip
@@ -56,6 +62,9 @@ options:
 | `id` | string | ✅ | — | `^[a-z0-9][a-z0-9-]{0,31}$`。設定内で一意。予約 ID（`work-evidence` / `scope` / `env-clean`）は使用不可 |
 | `command` | string | ✅ | — | 非空。`--cwd` を作業ディレクトリとして POSIX sh (`/bin/sh -c`) で実行される |
 | `timeoutSec` | integer | — | `600` | `1..7200` |
+| `mutex` | string | — | （無し） | `^[A-Za-z0-9_.-]+$`、64 文字以内。マシン全体のロック名（§9） |
+| `retryOnFail` | integer | — | `0` | **`0` か `1` のみ**。`1` で、コマンドが非ゼロ終了したとき同一 tree でもう 1 回だけ再実行する（§10） |
+| `flakyIsPass` | boolean | — | `false` | `true` で FLAKY（fail→pass）を pass 扱いにする。**`retryOnFail: 1` を伴わない `true` は設定エラー**（§10） |
 
 `command` は **POSIX sh** で実行される。bash 固有構文（`[[ ]]` / 配列 / `function` キーワード）は
 使わないこと。必要なら `bash -c "..."` と明示的に書く。
@@ -123,12 +132,20 @@ RESULT failed
 | 行 | 形式 |
 |---|---|
 | コマンド系ゲート | `GATE <id> PASS\|FAIL exit=<code> duration=<n>s` |
+| 再実行したゲート（§10） | `GATE <id> FLAKY\|FAIL exit=<code1>,<code2> duration=<n>s,<n>s` |
 | タイムアウト | `GATE <id> TIMEOUT exit=124 duration=<n>s` |
-| skip | `GATE <id> SKIP reason=primary-checkout\|flag` |
+| skip | `GATE <id> SKIP reason=primary-checkout\|flag\|mutex-wait` |
 | work-evidence | `GATE work-evidence PASS\|FAIL commits=<n> uncommitted=<n>` |
 | 判定 | `RESULT passed\|failed\|not_started\|skipped` |
 
 `--gates` で選択されなかったゲートは行を出さない（その実行の対象外であるため）。
+
+**`mutex` を宣言したゲートは `waited=<n>s` を追加する**（Issue #1771、§9.3）。
+`duration` に足さないことが規約である。
+
+**`retryOnFail: 1` を宣言したゲートが実際に再実行されたときは、`exit` と `duration` が
+2 値のカンマ区切りになる**（Issue #1772、§9.3 の表・§10）。再実行が起きなかったゲート
+（宣言していない／1 回目で PASS した）の行は**従来どおり 1 値**である。
 
 ### 3.5 exit code は絶対にパイプで失わない
 
@@ -333,3 +350,304 @@ verify.yaml に書く** — 2 実装が共に読む唯一のファイルだか�
 - `work-evidence` / `scope` の予約は維持する。`scope` を実装するときは本書の §4 を更新する。
 - タイムアウトはプロセスグループ単位で kill する（§3.6）。Node で実装する場合は
   `child_process.spawn(..., { detached: true })` ＋ `process.kill(-pid, ...)` が対応物。
+
+---
+
+## 9. 並列 worktree と共有資源（Issue #1771）
+
+v1 のゲートはコマンドと timeout しか宣言できず、「このゲートはマシン上で同時に 1 つしか
+走れない」（固定ポート・ローカル DB・エミュレータ等の共有資源）を表現できなかった。
+並列 worktree で同じゲートが重なると後発が資源衝突で即 fail し、記録には
+`GATE e2e FAIL exit=1` としか残らない — **変更の欠陥と環境の衝突が区別できない。**
+
+実測（BorderFreeKidsMap、2026-08-19）: planner が 9 wave を計算したのに、e2e ゲートが
+60303 番ポートを専有するため 16 回の直列 dispatch に手で開き直した。wave 化が一度も使われなかった。
+
+対処は 2 段構えで、**優先されるのは 9.1 の env 注入**である。9.2 の `mutex` は偽の赤を
+消すが検証は直列のままなので、資源を worktree ごとに分けられるならそちらを先に使う。
+
+### 9.1 `CM_WORKTREE_INDEX` / `CM_WORKTREE_ID`（env 注入）
+
+すべてのコマンド系ゲートは、以下の環境変数つきで実行される（組み込みゲートには無い —
+どれも外部コマンドを起動しないため）。
+
+| 変数 | 値 | 用途 |
+|---|---|---|
+| `CM_WORKTREE_ID` | worktree ID（`worktrees.id`） | コンテナ名・DB 名・ログディレクトリなど、数値で表せないもの |
+| `CM_WORKTREE_INDEX` | `0..1023` の整数 | ポート等の数値資源。`E2E_PORT=$((60400+CM_WORKTREE_INDEX))` |
+
+```yaml
+gates:
+  - id: e2e
+    command: "sh -c 'E2E_PORT=$((60400+CM_WORKTREE_INDEX)) npm run test:e2e'"
+    timeoutSec: 1800
+```
+
+これが**衝突そのものを無くす**唯一の手段であり、並列度を保てるのはこちらだけである。
+
+**採番は CommandMate 由来ではない。** Issue #1771 本文は「サーバが worktree を採番している」
+としていたが、実測ではしていない: `worktrees.id` はディレクトリ basename 由来の TEXT 主キー
+（`src/lib/git/worktree-id.ts:73`）で、順序列も作成時刻も列に無く
+（`src/lib/db/migrations/v01-v05-initial-schema.ts:104`）、唯一の並び順は
+`updated_at DESC`（`src/lib/db/worktree-db.ts:113`）＝エージェントが発言するたびに入れ替わる。
+そこで番号は**この機能が自分で払い出す**。満たすべき性質を代替案とともに明示する。
+
+| 性質 | 実現方法 |
+|---|---|
+| 同じ worktree なら同じ番号 | 払い出しをディスクに永続化する（プロセス再起動・DB リセットを跨いで不変） |
+| 同時に走る 2 worktree が同じ番号にならない | 枠の確保が `O_EXCL` のファイル作成＝アトミック。競合した側は必ず次の枠へ進む |
+
+- **レジストリ**: `~/.commandmate/worktree-index/<n>` は、枠 `n` を保有する worktree ID を
+  1 行で持つファイル。**両ランナーが従う規約**であり、standalone 側は
+  `set -C; printf '%s\n' "$id" > "$root/$n"`（noclobber）で同じ意味を実装できる。
+- 環境変数 `CM_VERIFY_WORKTREE_INDEX_ROOT` でルートを差し替えられる（テスト・隔離 CI 用）。
+- **worktree を削除しても枠は解放しない。** 再利用すると、生きている worktree の番号が
+  動き、削除された側のサーバがまだ握っているポートに載る可能性がある。
+- **ハッシュは採用しなかった**（Issue 本文の代替案）。同じ番号になる性質は満たすが、
+  30 worktree × 1024 枠で衝突確率は約 35% であり、衝突こそがこの機能で消したいものである。
+  レジストリが**書けない**マシンだけ `sha256(worktreeId) mod 1024` にフォールバックする
+  （変数が未設定だと `$((60400+CM_WORKTREE_INDEX))` が全 worktree で 60400 に潰れるため、
+  値は必ず渡す）。
+
+### 9.2 `mutex: <name>` — マシン全体のロック
+
+資源を worktree ごとに分けられない場合に、同名 `mutex` を宣言したゲートを
+**マシン全体で同時に 1 つ**に制限する。
+
+```yaml
+gates:
+  - id: e2e
+    command: "npm run test:e2e"
+    timeoutSec: 1800
+    mutex: e2e-port
+```
+
+**両ランナーが従う規約**（一致していなければ排他にならない。同じマシンで CommandMate の
+runner と standalone runner が同じ資源に触れる）:
+
+| 項目 | 規約 |
+|---|---|
+| パス | `~/.commandmate/locks/<name>.lock` |
+| 方式 | **`mkdir` によるアトミックな作成**。macOS に `flock(1)` が無いため、移植可能な方式を採る |
+| 保有者記録 | ロックディレクトリ内の `owner` ファイル。JSON `{"pid":N,"host":"…","token":"…","acquiredAt":ms}` |
+| 待ち | ロックが空くまでポーリング（既定 250ms 間隔）。待ち時間の上限は**そのゲートの `timeoutSec`** |
+| 解放 | `owner` の `token` が自分のものであるときだけディレクトリを削除する |
+| 死んだ保有者 | `host` が自ホストと一致し、かつ `pid` が存在しない（`kill(pid,0)` が ESRCH）ときのみ、待つ側が奪ってよい。**他ホストの pid では判断しない**（共有 home で 2 台が同時実行しうる） |
+| 名前 | `^[A-Za-z0-9_.-]+$` / 64 文字以内。ゲート ID ではなく**資源**の名前なので、別リポジトリのゲート同士が `port.60303` のような名前で排他し合ってよい |
+
+環境変数 `CM_VERIFY_LOCK_ROOT` でルートを差し替えられる（テストは必ずこれを使うこと。
+実 `~/.commandmate/locks` を使うテストは、並列 worktree の稼働中ランと排他して偽の赤を作る）。
+
+`token` は必須である。これが無いと、pid が死んで見えたために奪われた側が、あとから解放した
+ときに**次の保有者のロックを消す**（＝2 ランが同時に資源へ入る）。
+
+### 9.3 待ち時間は duration と別に記録する
+
+```
+GATE e2e PASS exit=0 duration=190s waited=42s
+```
+
+- `duration` は**ゲート自身のコマンドが動いていた時間**。`waited` は**ロック待ちの時間**。
+  混ぜると timeout の調整も advisor の入力も歪む。**`waited` を `duration` に足さないこと。**
+- 待たなかった mutex ゲートも `waited=0s` を出す。「排他されていて待たなかった」と
+  「mutex が無い」は別の事実であり、読む側が区別できる必要がある。
+- `mutex` を宣言していないゲートの行は**従来どおり**（`waited=` は付かない）。
+  この機能を使わないリポジトリの出力は 1 バイトも変わらない。
+
+**CommandMate CLI の描画は括弧つきで、値の綴りだけが共通である**（実測: 製品 CLI は
+`GATE lint PASS (exit=0, 12.3s)` 形式を #1544 から使っており、standalone runner の
+空白区切りとは元から別物。`src/cli/utils/verify-runner.ts:145-150`）。
+**契約はフィールド名 `waited` と単位 `s`、および「duration に足さない」ことであって、
+区切り文字ではない。**
+
+**本表が GATE 行の綴りの確定形である**（§9.2 の `waited` と §10 の FLAKY の両方を含む）。
+skills 側（#223 / #224）はこの表を正として実装する。
+
+| ランナー | 場面 | 綴り |
+|---|---|---|
+| standalone（`verify-run.sh`） | mutex 待ち（§9.2） | `GATE e2e PASS exit=0 duration=190s waited=42s` |
+| CommandMate CLI | mutex 待ち（§9.2） | `GATE e2e PASS (exit=0, 190.0s, waited=42.3s)` |
+| standalone（`verify-run.sh`） | FLAKY ＝ fail→pass（§10、Issue #1772） | `GATE unit FLAKY exit=1,0 duration=45s,44s` |
+| CommandMate CLI | FLAKY ＝ fail→pass（§10、Issue #1772） | `GATE unit FLAKY (exit=1,0, 45.0s,44.0s)` |
+| standalone（`verify-run.sh`） | 再実行しても fail（§10、Issue #1772） | `GATE unit FAIL exit=1,1 duration=45s,44s` |
+| CommandMate CLI | 再実行しても fail（§10、Issue #1772） | `GATE unit FAIL (exit=1,1, 45.0s,44.0s)` |
+
+**`FLAKY` は `flakyIsPass` の値で綴りが変わらない。** 裁定（RESULT と exit code）は
+`flakyIsPass` が決めるが、GATE 行が名指すのは**起きた事実**である。`flakyIsPass: true` の
+FLAKY を `PASS` と綴ってしまうと、この機能が可視化するために存在する唯一の事実が消える。
+
+**再実行しても fail したゲートは `FLAKY` ではなく `FAIL`** である。再実行が 1 回目に同意した
+のだから flaky ではない。`exit` / `duration` が 2 値になるのは、2 回走ったという事実のほうは
+残すためである。
+
+製品実装には `verification_gate_results` に待ち時間の列が無いため、`log_tail` の先頭に
+機械可読の 1 行 `[mutex] name=<name> waited=<n.n>s lock=<path>` を置き、CLI がそれを読んで
+GATE 行に載せる（`work-evidence` の `commits=`/`uncommitted=` と scope ゲートの証跡が既に
+使っている経路）。行頭アンカーで照合するので、ゲート自身の出力に `waited=` が現れても
+拾わない。
+
+### 9.4 ロックが取れないまま timeout に達したとき
+
+**TIMEOUT ではない。** コマンドは 1 度も起動していないので「長く走った」は事実ではなく、
+FAIL でもない — 資源衝突と変更の欠陥が同じ顔をするのを止めるのが本 Issue の目的である。
+
+```
+GATE e2e SKIP reason=mutex-wait waited=600s
+```
+
+- ゲートは `skipped`、`exit_code` は null。
+- run 全体は `error`（`skipped` は `passed` を塞ぐ、§3.3 と同じ規律）＝ CLI の exit code は
+  **99（判定不能）**であり、20（不合格）ではない。20 で分岐する呼び出し側は
+  「ゲートが実際に work を裁定した」と信じてよい、という既存の約束を守る。
+
+### 9.5 両ランナーが受理すべきキー集合（parity）
+
+この表が受理集合の正である。正準は CommandMate 本体の
+`src/lib/verification/verify-config.ts`（`GATE_KEYS` / `OPTION_KEYS`）で、skills 側
+（`.claude/skills/cmate-verify` と `.agents/skills/cmate-verify`、および commandmate-skills
+リポジトリの実装）はこれに追随する。
+
+| 場所 | キー | CommandMate 本体（TS） | standalone runner（awk） | advisor（JS） |
+|---|---|---|---|---|
+| `gates[]` | `id` / `command` / `timeoutSec` | ✅ | ✅ | ✅ |
+| `gates[]` | `mutex` | ✅ #1771 | ✅ skills #223 | ✅ skills #223 |
+| `gates[]` | `retryOnFail` / `flakyIsPass` | ✅ #1772 | ✅ skills #224 | ✅ skills #224 |
+| `options` | `baseRef` / `skipInPrimaryCheckout` / `maxLogTailBytes` / `requireCommit` | ✅ | ✅ | ✅ |
+| `options` | `requireEnvClean` | ✅ #1740 | ✅ skills PR #225 | ✅ skills PR #225 |
+
+**2026-08-20 実測: 4 実装すべてが同じ集合を受理する。** 内訳は本体の TS ローダ 1 本、
+バイト一致する bash ランナー 2 箇所（CommandMate の
+`.claude/skills/cmate-verify/scripts/verify-run.sh` ＋ `.agents/...` のミラーと、
+commandmate-skills の `skills/cmate-verify/scripts/verify-run.sh`）、そして JS の
+`skills/cmate-verify-advisor/scripts/verify-advisor.mjs` である。移植は
+**commandmate-skills PR #225**（`6faa33f`、Issue #223 / #224。`requireEnvClean` だけは
+Issue #223 / #224 とは別に先行していたドリフトで、同 PR がまとめて解消した）が skills 側 2 実装を、
+**CommandMate #1861** がその `verify-run.sh` を vendored copy へ逐語コピーして揃えた。
+集合が再びずれないことは機械的に固定してある —— skills 側 2 実装の一致は
+`tests/fixtures/cmate-verify-advisor/parser-parity.sh`（キー一覧の突き合わせと、実 verify.yaml
+を両パーサに食わせる 2 問構成）、vendored copy と counterpart のバイト一致は
+`.claude/skills/sync-map.json` の sha256 pin（ゲートは `tests/unit/skills/sync-map.test.ts`）。
+
+**v1 は閉じた集合であり、この表に無いキーは「無視される」のではなく設定エラー（exit 2）に
+なる。** 4 実装ともそう扱うので、**キーを足すときは 4 箇所すべてに揃うまで、そのキーを書いた
+verify.yaml は揃っていない実装で一切走らない**。#1771 / #1772 / #1740 が実際にその状態を作って
+おり（同じ verify.yaml が本体では exit 0、skills 側では `unknown gate key: mutex` 等で
+exit 2）、PR #225 / #1861 で解消した。**新しいキーを足す提案は、4 実装への追随計画と
+セットで出すこと。**
+
+**導入先にインストール済みのパッケージが古ければ、依然として exit 2 になる。** これは移植の
+話ではなく**版の話**である: 移植は commandmate-skills の `main`（`6faa33f`）に在るが、catalog が
+配っている最新は `cmate-verify` 0.4.2 / `cmate-verify-advisor` 0.2.0 で、いずれも 2026-08-05 に
+`d01ed9f` から公開された **#225 より前の版**である（PR #225 は版を上げていない）。パッケージ
+経由で導入した standalone runner / advisor に 4 キーを効かせるには、#225 を含む版の release が
+要る。CommandMate リポジトリ内の vendored copy（`.claude/skills/` / `.agents/skills/`）は catalog
+を経由しないので、#1861 の commit 時点で既に受理する。
+
+---
+
+## 10. FLAKY — 環境・乱数由来の赤を名前のある事実にする（Issue #1772）
+
+ランナーが持つ結果は PASS / FAIL しか無く、「この 1 件だけ赤ならまず再実行してみる」は
+**人間の部族知識**だった。オーケストレーション配下では、ワーカーもオペレータも赤の原因を
+自分の変更に求めて時間を焼く。
+
+実測（Kewton/BorderFreeKidsMap、2026-08-10）: unit ゲートの禁止語検査が
+`JSON.stringify(sent)` 全体への `not.toContain("fac-")` で、**乱数 UUID の `9fac-` に一致して
+fail**。同一 tree で再実行したら pass（1 fail 52 pass → 53 pass）。
+
+### 10.1 `retryOnFail: 1` — 同一 tree でもう 1 回だけ
+
+```yaml
+gates:
+  - id: unit
+    command: "npm run test:unit"
+    timeoutSec: 1800
+    retryOnFail: 1
+```
+
+- **値域は `0` か `1` のみ。** 2 以上は設定エラーである。十分な回数を回せばどんな赤も緑に
+  なるので、**上限そのものがこの機能の中身**である。1 回の再実行が答えるのは
+  「同一 tree で再現するか」という 1 つの問いだけで、それ以上は答えない。
+- **再実行するのは `FAIL`（非ゼロ終了）だけ。** `TIMEOUT` は再実行しない（そのゲートは
+  既に予算を使い切っており、2 回目は予算が最も大きいゲートの実時間をそのまま倍にする）。
+  `SKIP`（mutex が空かなかった）と起動失敗はコマンドが 1 度も走っていないので、
+  second opinion を求める対象の裁定が存在しない。
+- 2 回目が裁定に到達しなかったとき（mutex 待ちで SKIP・TIMEOUT・起動失敗）は
+  **1 回目の FAIL がそのまま立つ**。2 回目の結果を採ると、work を裁定したゲートが
+  「判定不能（exit 99）」に化けて**判定が弱くなる**。
+- `mutex` と併用したとき、ロックは**試行ごとに取得・解放する**。1 回目で失敗したランのために
+  マシン全体の資源を 2 試行ぶん占有し続けない。
+
+### 10.2 `flakyIsPass` — 裁定上の扱いは宣言で選ぶ
+
+| outcome | 条件 | GATE 行 | ゲートの裁定 |
+|---|---|---|---|
+| FLAKY | 1 回目 fail → 2 回目 pass、`flakyIsPass` 未宣言／`false` | `FLAKY` | **fail**（RESULT `failed` / exit 20） |
+| FLAKY | 1 回目 fail → 2 回目 pass、`flakyIsPass: true` | `FLAKY` | pass（RESULT `passed` / exit 0） |
+| FAIL | 2 回とも fail | `FAIL` | fail |
+
+**既定は「FLAKY は fail 扱い」＝ 再実行を宣言してもゲートは 1 bit も弱くならない。**
+`retryOnFail: 1` が買うのは「何が起きたか」に名前が付くことであって、pass ではない。
+
+**`flakyIsPass` は gate 単位**である（options 単位ではない。skills #224 はこちらを正とすること）。
+理由:
+
+1. `retryOnFail` が gate 単位である以上、対になる裁定も同じ場所に無いと、ゲート宣言 1 つを
+   読んだ人が「このゲートの FLAKY はどう裁定されるのか」を別の場所を見ないと言えない。
+2. リポジトリはゲートごとに事情が違う。`unit` が乱数 UUID で落ちるのはノイズだが、
+   `e2e` が 1 回落ちて 1 回通るのはたいてい製品側の実レースである。options 単位は
+   この 2 つを 1 つの答えに強制する。
+3. options 単位だと、`retryOnFail` を宣言していないゲートに対しても書けてしまう
+   ＝ **決して発火しない宣言**が正当な設定として通る。
+
+**`flakyIsPass: true` を `retryOnFail: 1` 無しで書くのは設定エラー**である。再実行が無ければ
+FLAKY は発生しないので、その宣言は「ここでは flake を許す」と読めて何も変えない。
+（`flakyIsPass: false` 単独は既定を明示しただけなので通る。）
+
+### 10.3 両ランの記録
+
+`verification_gate_results` は 1 ゲートにつき status / exit code / duration を 1 つずつしか
+持たず、**#1772 では DB マイグレーションを行わない**。そこで 2 回目の数値は #1771 の
+`waited` と同じ経路 — `log_tail` の**行頭アンカー** — で運ぶ。
+
+```
+[flaky] runs=2 outcome=flaky exit=1,0 duration=45.0s,44.0s verdict=fail
+--- [flaky] run 1/2: failed exit=1 duration=45.0s ---
+AssertionError: expected not to contain "fac-"
+--- [flaky] run 2/2: passed exit=0 duration=44.0s ---
+53 passed
+```
+
+| フィールド | 意味 |
+|---|---|
+| `runs` | 実際に走った回数。`retryOnFail` の上限が 1 なので現状は常に 2 |
+| `outcome` | `flaky`（fail→pass）／ `fail`（2 回とも fail） |
+| `exit` | 各ランの exit code をラン順にカンマ区切り。シグナルで殺されたランは `n/a` |
+| `duration` | 各ランの実行時間をラン順にカンマ区切り（`45.0s,44.0s`） |
+| `verdict` | そのランが**実際にどう数えたか**（`pass` は `outcome=flaky` かつ `flakyIsPass: true` のときだけ）。後から読む人が当時の verify.yaml を持っていないため、再計算ではなく記録する |
+
+- **`outcome=fail`（2 回とも fail）でもアンカーを書く。** 2 回落ちたゲートは flakiness に対する
+  **反証**であり、flake advisor はその分母を必要とする。flaky 側にしか印が無いと、
+  再実行したゲートが全て flaky に見える。
+- **両ランのログを残す。** 片方だけにすると、この機能が答えるために存在する唯一の問い
+  ＝「2 回で何が違ったのか」が記録から答えられなくなる。`maxLogTailBytes` は
+  **ラン単位**に適用される（1 ゲートのコマンド 1 本ぶんの上限であり、コマンドは 2 本走った）。
+- 行頭アンカーで照合するので、ゲート自身の出力に `[flaky]` と同じ語が現れても拾わない。
+- 保存された列（`status` / `exit_code`）は**その裁定を出したラン**のものになる。FLAKY を
+  fail と数えたなら失敗したラン、pass と数えたなら成功したラン、2 回とも fail なら後のラン。
+  `status=failed` の隣に `exit=0` が並ぶ行は作らない。`duration_ms` は**両ランの和**
+  （どちらもそのゲート自身のコマンドの実行時間であり、#1771 が `waited` を足さなかった
+  のと同じ規律）。#1625 の `finished_at - started_at === duration_ms` は保たれる。
+
+### 10.4 履歴に残す
+
+FLAKY は run の記録に残り、`commandmate verify show <run-id>` と run 詳細 API
+（`GET /api/verification/runs/:runId`）から読み戻せる。CLI の `--json` は
+アンカーを構造化して `gates[].flaky`（`runs` / `outcome` / `exitCodes` / `durationsMs` /
+`verdict`）として載せるので、flake advisor はログを再パースしなくてよい。
+
+**`verify history` の一覧行に FLAKY は出ない。** 一覧が返すゲート要約は
+`verification_gate_results` の列（status / exit_code / duration_ms）だけで構成され、
+`log_tail` を含まない — 500 run ぶんのログ本体を返さないための設計であり、
+FLAKY 専用の列を足すには DB マイグレーションが要る（#1772 の scope 外）。
+一覧で run を絞ってから `verify show` で FLAKY を読む、が現状の経路である。

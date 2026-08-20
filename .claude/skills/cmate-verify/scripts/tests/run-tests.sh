@@ -20,7 +20,7 @@ BASE_BRANCH="cmate-verify-base"
 # Floor on the assertion count. A suite that silently stops running cases would
 # otherwise exit 0 with "0 failed" — the same empty-glob trap the orchestrate-monitor
 # syntax test guards against.
-MIN_ASSERTIONS=200
+MIN_ASSERTIONS=300
 
 [ -f "$RUNNER" ] || { echo "run-tests: runner not found: $RUNNER" >&2; exit 2; }
 [ -d "$FIXTURES" ] || { echo "run-tests: fixtures not found: $FIXTURES" >&2; exit 2; }
@@ -92,7 +92,7 @@ assert_le() { # name actual limit
 # shapes. This is what pins the machine-readable contract while out.N is allowed
 # to carry stderr: if a diagnostic ever leaked into stdout, `RESULT` would stop
 # being the last line and `commandmate verify` would parse garbage.
-STDOUT_CONTRACT_RE='^(GATE [a-z0-9-]+ (PASS|FAIL|TIMEOUT|SKIP) [^ ].*|RESULT (passed|failed|not_started|skipped))$'
+STDOUT_CONTRACT_RE='^(GATE [a-z0-9-]+ (PASS|FAIL|FLAKY|TIMEOUT|SKIP) [^ ].*|RESULT (passed|failed|not_started|skipped))$'
 assert_stdout_contract() { # name file
   as_lines=$(grep -c . "$2" | tr -d ' ')
   as_bad=$(grep -v -E "$STDOUT_CONTRACT_RE" "$2" | head -3 | tr '\n' '/')
@@ -400,6 +400,15 @@ assert_rejected bad-block-scalar.yaml "block scalars are not supported"
 assert_rejected bad-indent.yaml "indentation must be a multiple of 2 spaces"
 assert_rejected bad-tab.yaml "tab characters are not allowed"
 assert_rejected bad-no-gates.yaml "no gates are defined"
+# Issues #223 / #224: the keys are accepted, their VALUE DOMAINS are not open.
+assert_rejected bad-reserved-env-clean.yaml "gate id is reserved: env-clean"
+assert_rejected bad-retry-range.yaml "retryOnFail must be 0 or 1"
+assert_rejected bad-retry-type.yaml "retryOnFail must be 0 or 1"
+assert_rejected bad-flaky-alone.yaml "flakyIsPass: true requires retryOnFail: 1"
+assert_rejected bad-flaky-type.yaml "flakyIsPass must be true or false"
+assert_rejected bad-mutex-name.yaml "invalid mutex name: e2e/port"
+assert_rejected bad-mutex-length.yaml "mutex must be at most 64 characters"
+assert_rejected bad-env-clean.yaml "requireEnvClean must be true or false"
 
 # --- 14. a failing run leaves its reason inside out.N (Issue #1607) ------------
 # The CI red that opened this issue printed three `not ok - parsing: ...` lines
@@ -642,6 +651,330 @@ assert_eq "untracked-dir: exit code is 0" "0" "$RC"
 assert_has "untracked-dir: a new directory is counted per file, not once" "$OUT" \
   "GATE work-evidence PASS commits=0 uncommitted=2"
 assert_file_present "untracked-dir: the command gate ran" "$marker"
+
+# --- 20. mutex, retry/FLAKY and env injection (Issues #223 / #224) ------------
+#
+# CM_VERIFY_LOCK_ROOT is not optional here. A suite that took its locks under the
+# real ~/.commandmate/locks would serialize against — and be failed by — the
+# parallel worktrees a developer has running on the same machine, which is the
+# exact false red this feature exists to remove.
+LOCK_ROOT="$SANDBOX/locks"
+CM_VERIFY_LOCK_ROOT="$LOCK_ROOT"
+export CM_VERIFY_LOCK_ROOT
+LOCK_DIR="$LOCK_ROOT/cmate-verify-selftest.lock"
+
+mx=$(new_repo mutex-and-retry)
+printf 'agent output\n' > "$mx/work.txt"
+git -C "$mx" add -A >/dev/null 2>&1
+git -C "$mx" commit -q -m work
+
+# The non-regression first: a gate that declares no mutex prints no `waited=`, so
+# a repository that does not use the feature sees byte-identical output.
+run_verify --config "$FIXTURES/all-pass.yaml" --cwd "$mx" --base-ref "$BASE_BRANCH"
+assert_lacks "mutex: a gate without a mutex prints no waited=" "$RAWOUT" "waited="
+
+# --- FLAKY, default: a retry does not make the gate weaker --------------------
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+run_verify --config "$FIXTURES/retry-flaky.yaml" --cwd "$mx" --base-ref "$BASE_BRANCH"
+assert_eq "flaky-default: exit code is 20" "20" "$RC"
+assert_has "flaky-default: the gate is FLAKY, not PASS and not FAIL" "$OUT" "GATE unit FLAKY exit=1,0 duration="
+assert_has "flaky-default: the run continues past a FLAKY gate" "$OUT" "GATE after PASS exit=0 duration="
+assert_has "flaky-default: FLAKY counts as a failure by default" "$OUT" "RESULT failed"
+assert_stdout_contract "flaky-default: stdout holds only GATE/RESULT records" "$RAWOUT"
+assert_has "flaky-default: the machine-readable anchor is written" "$ERR" "[flaky] runs=2 outcome=flaky exit=1,0 duration="
+assert_has "flaky-default: the anchor records how the run counted it" "$ERR" "verdict=fail"
+# Both runs' logs are kept: "what differed between the two" is the single
+# question this feature exists to answer, and one log cannot answer it.
+assert_has "flaky-default: run 1 is on the record" "$ERR" "first-run-red"
+assert_has "flaky-default: run 2 is on the record" "$ERR" "second-run-green"
+assert_has "flaky-default: run 1 is labelled" "$ERR" "--- [flaky] run 1/2: failed exit=1 duration="
+assert_has "flaky-default: run 2 is labelled" "$ERR" "--- [flaky] run 2/2: passed exit=0 duration="
+assert_lacks "flaky-default: the log tail stays off stdout" "$RAWOUT" "first-run-red"
+
+# --- FLAKY, tolerated: same word, different verdict ---------------------------
+# The two-point pair. Only `flakyIsPass` differs between the two fixtures, and
+# only the RESULT and the exit code may move: spelling a tolerated FLAKY as PASS
+# would erase the one fact this feature exists to make visible.
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+run_verify --config "$FIXTURES/retry-flaky-pass.yaml" --cwd "$mx" --base-ref "$BASE_BRANCH"
+assert_eq "flaky-tolerated: exit code is 0" "0" "$RC"
+assert_has "flaky-tolerated: the word does not change with flakyIsPass" "$OUT" "GATE unit FLAKY exit=1,0 duration="
+assert_lacks "flaky-tolerated: a tolerated FLAKY is never spelled PASS" "$RAWOUT" "GATE unit PASS"
+assert_has "flaky-tolerated: the verdict is passed" "$OUT" "RESULT passed"
+assert_has "flaky-tolerated: the anchor records the toleration" "$ERR" "verdict=pass"
+assert_stdout_contract "flaky-tolerated: stdout holds only GATE/RESULT records" "$RAWOUT"
+
+# --- two failures are not a flake --------------------------------------------
+run_verify --config "$FIXTURES/retry-hard-fail.yaml" --cwd "$mx" --base-ref "$BASE_BRANCH"
+assert_eq "retry-hard-fail: exit code is 20" "20" "$RC"
+assert_has "retry-hard-fail: the retry agreed, so the gate stays FAIL" "$OUT" "GATE unit FAIL exit=3,3 duration="
+assert_lacks "retry-hard-fail: a gate that failed twice is never FLAKY" "$RAWOUT" "FLAKY"
+assert_has "retry-hard-fail: flakyIsPass cannot reach outside FLAKY" "$OUT" "RESULT failed"
+# Written for the failing outcome too: two failures are evidence AGAINST
+# flakiness, and an advisor mining this needs the denominator.
+assert_has "retry-hard-fail: the anchor is written for outcome=fail as well" "$ERR" "[flaky] runs=2 outcome=fail exit=3,3 duration="
+
+# --- exactly one retry, never two --------------------------------------------
+# The bound is the whole feature: enough re-runs turn any red green, so a runner
+# that retried twice would report this gate — which passes on its third run —
+# as FLAKY and green. The attempt counter is what makes that measurable instead
+# of inferred from the verdict.
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+: > "$marker"
+run_verify --config "$FIXTURES/retry-thrice.yaml" --cwd "$mx" --base-ref "$BASE_BRANCH"
+assert_eq "retry-once: exit code is 20" "20" "$RC"
+assert_has "retry-once: two failures stay a FAIL" "$OUT" "GATE unit FAIL exit=1,1 duration="
+assert_lacks "retry-once: a third run would have made it FLAKY" "$RAWOUT" "FLAKY"
+assert_eq "retry-once: the command ran exactly twice" "2" "$(wc -c < "$marker" | tr -d ' ')"
+
+# --- a TIMEOUT is never retried ----------------------------------------------
+started=$(date +%s)
+run_verify --config "$FIXTURES/retry-timeout.yaml" --cwd "$mx" --base-ref "$BASE_BRANCH"
+elapsed=$(( $(date +%s) - started ))
+assert_eq "retry-timeout: exit code is 20" "20" "$RC"
+assert_has "retry-timeout: the gate times out once" "$OUT" "GATE slow TIMEOUT exit=124 duration="
+assert_lacks "retry-timeout: a timed-out gate is not run a second time" "$RAWOUT" "exit=124,"
+assert_lacks "retry-timeout: no flaky anchor is written for it" "$ERR" "[flaky] runs=2"
+assert_le "retry-timeout: the budget is not doubled" "$elapsed" "15"
+
+# --- the lock is a real machine-wide lock ------------------------------------
+# Two runs of the same fixture at once. The first holds the resource for 3s; the
+# second must WAIT for it, and must report that wait separately from its own
+# duration. Folding the two together is the mutation this pair is here to catch.
+CMATE_VERIFY_TEST_HOLD=3
+export CMATE_VERIFY_TEST_HOLD
+bash "$RUNNER" --config "$FIXTURES/mutex.yaml" --cwd "$mx" --base-ref "$BASE_BRANCH" \
+  > "$SANDBOX/mutex-a.out" 2> "$SANDBOX/mutex-a.err" &
+holder_pid=$!
+sleep 1
+# While it is held: the lock is a DIRECTORY at <root>/<name>.lock carrying an
+# owner record. The path convention and the mkdir primitive are the contract —
+# CommandMate's runner and this one are started independently against the same
+# machine, so a lock that differs in either is not a lock at all.
+assert_file_present "mutex: the lock is created at <root>/<name>.lock" "$LOCK_DIR"
+if [ -d "$LOCK_DIR" ]; then ok "mutex: the lock is a directory (mkdir, not flock)"; else notok "mutex: the lock is a directory (mkdir, not flock)"; fi
+assert_file_present "mutex: the lock carries an owner record" "$LOCK_DIR/owner"
+assert_has "mutex: the owner record names the holding process" "$LOCK_DIR/owner" '"pid":'
+assert_has "mutex: the owner record names the host" "$LOCK_DIR/owner" '"host":'
+# Without the token an owner whose lock was broken as stale would delete the NEXT
+# holder's directory on release, handing the resource to two runs at once.
+assert_has "mutex: the owner record carries an acquisition token" "$LOCK_DIR/owner" '"token":'
+
+CMATE_VERIFY_TEST_HOLD=0
+run_verify --config "$FIXTURES/mutex.yaml" --cwd "$mx" --base-ref "$BASE_BRANCH"
+wait "$holder_pid" 2>/dev/null
+assert_eq "mutex: the waiting run still passes" "0" "$RC"
+assert_has "mutex: the waiter reports its wait" "$OUT" "GATE e2e PASS exit=0 duration="
+waited=$(sed -n 's/^GATE e2e PASS exit=0 duration=\([0-9]*\)s waited=\([0-9]*\)s$/\2/p' "$RAWOUT")
+duration=$(sed -n 's/^GATE e2e PASS exit=0 duration=\([0-9]*\)s waited=\([0-9]*\)s$/\1/p' "$RAWOUT")
+if [ -n "$waited" ] && [ "$waited" -ge 1 ]; then
+  ok "mutex: the second run really queued (waited=${waited}s)"
+else
+  notok "mutex: the second run really queued (waited=[$waited] in $(cat "$RAWOUT"))"
+fi
+# The load-bearing half: the wait is NOT inside the duration. The command sleeps
+# 0s here, so a duration that had the ~2s wait folded into it would be >= 2.
+if [ -n "$duration" ] && [ "$duration" -le 1 ]; then
+  ok "mutex: waited is reported beside duration, never added to it (duration=${duration}s)"
+else
+  notok "mutex: waited is reported beside duration, never added to it (duration=[$duration], waited=[$waited])"
+fi
+# `duration=3s` used to be matched literally here, and that is not a fact this
+# runner promises: it measures whole seconds with `date +%s` (bash 3.2 ships no
+# sub-second date), so a 3s hold that starts just before a second boundary reads
+# as 4. Measured while running the suite 20x for Issue #228: red in 1 of 20 runs
+# on macOS AND in 1 of 20 on Linux/ARM64, for a reason that has nothing to do
+# with what the assertion is for. What it IS for is the `waited=0s` half — a
+# mutexed gate that did not queue still has to say so, or "serialized and got the
+# lock straight away" and "not serialized at all" stop being tellable apart
+# (verification-config.md section 9.3). So the two halves are asserted apart: the
+# wait exactly, the duration as a lower bound.
+holder_waited=$(sed -n 's/^GATE e2e PASS exit=0 duration=\([0-9]*\)s waited=\([0-9]*\)s$/\2/p' "$SANDBOX/mutex-a.out")
+holder_duration=$(sed -n 's/^GATE e2e PASS exit=0 duration=\([0-9]*\)s waited=\([0-9]*\)s$/\1/p' "$SANDBOX/mutex-a.out")
+assert_eq "mutex: the first run declares a wait of zero rather than nothing" "0" "$holder_waited"
+if [ -n "$holder_duration" ] && [ "$holder_duration" -ge 3 ]; then
+  ok "mutex: the first run's duration is its own 3s hold, not the waiter's (duration=${holder_duration}s)"
+else
+  notok "mutex: the first run's duration is its own 3s hold, not the waiter's (duration=[$holder_duration] in $(cat "$SANDBOX/mutex-a.out"))"
+fi
+assert_has "mutex: the line-anchored marker carries the wait too" "$ERR" "[mutex] name=cmate-verify-selftest waited="
+assert_has "mutex: the marker names the lock path" "$ERR" "lock=$LOCK_DIR"
+assert_file_absent "mutex: the lock is released when the gate finishes" "$LOCK_DIR"
+
+# --- the default lock root is the path convention, not this suite's override --
+# CM_VERIFY_LOCK_ROOT exists so a suite never touches the developer's real locks,
+# which means every assertion above is about the OVERRIDE. The convention itself
+# — `~/.commandmate/locks/<name>.lock` — is what makes CommandMate's runner and
+# this one exclude each other, so it is measured too, with HOME pointed at a
+# sandbox instead of the override.
+fakehome="$SANDBOX/fakehome"
+mkdir -p "$fakehome"
+CMATE_VERIFY_TEST_HOLD=3
+export CMATE_VERIFY_TEST_HOLD
+( unset CM_VERIFY_LOCK_ROOT; HOME="$fakehome" bash "$RUNNER" --config "$FIXTURES/mutex.yaml" --cwd "$mx" --base-ref "$BASE_BRANCH" ) \
+  > "$SANDBOX/homelock.out" 2> "$SANDBOX/homelock.err" &
+home_pid=$!
+sleep 1
+assert_file_present "default-lock-root: the lock lands at \$HOME/.commandmate/locks/<name>.lock" \
+  "$fakehome/.commandmate/locks/cmate-verify-selftest.lock"
+wait "$home_pid" 2>/dev/null
+assert_has "default-lock-root: the run still passes" "$SANDBOX/homelock.out" "GATE e2e PASS exit=0 duration="
+assert_file_absent "default-lock-root: and is released afterwards" "$fakehome/.commandmate/locks/cmate-verify-selftest.lock"
+CMATE_VERIFY_TEST_HOLD=0
+
+# --- the lock never comes free -----------------------------------------------
+# A record from another host is never broken: a pid from elsewhere says nothing
+# about a process here, and breaking a lock on that guess lets two machines
+# sharing a network home run the gate at once.
+mkdir -p "$LOCK_DIR"
+printf '{"pid":1,"host":"some-other-host.invalid","token":"held-elsewhere","acquiredAt":0}\n' > "$LOCK_DIR/owner"
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+run_verify --config "$FIXTURES/mutex-short.yaml" --cwd "$mx" --base-ref "$BASE_BRANCH"
+assert_eq "mutex-wait: a run that could not judge is not passed" "22" "$RC"
+assert_has "mutex-wait: the gate is SKIP with its own reason" "$OUT" "GATE e2e SKIP reason=mutex-wait waited="
+assert_lacks "mutex-wait: a lock that never came free is not a TIMEOUT" "$RAWOUT" "GATE e2e TIMEOUT"
+assert_lacks "mutex-wait: nor a verdict on the work" "$RAWOUT" "GATE e2e FAIL"
+assert_file_absent "mutex-wait: the command is never started" "$marker"
+assert_has "mutex-wait: the run continues to the next gate" "$OUT" "GATE after PASS exit=0 duration="
+assert_has "mutex-wait: the verdict is not passed" "$OUT" "RESULT skipped"
+assert_lacks "mutex-wait: a gate that reached no verdict never reports passed" "$RAWOUT" "RESULT passed"
+assert_has "mutex-wait: the reason says it is a resource conflict, not a verdict" "$ERR" "This is a resource conflict, not a verdict on the work"
+assert_has "mutex-wait: a foreign holder is named rather than evicted" "$ERR" "some-other-host.invalid"
+assert_file_present "mutex-wait: a foreign host's lock is left alone" "$LOCK_DIR"
+assert_stdout_contract "mutex-wait: stdout holds only GATE/RESULT records" "$RAWOUT"
+rm -rf "$LOCK_DIR"
+
+# --- a dead holder on this host does not wedge the machine -------------------
+( : ) & dead_pid=$!
+wait "$dead_pid" 2>/dev/null
+mkdir -p "$LOCK_DIR"
+printf '{"pid":%s,"host":"%s","token":"held-by-a-corpse","acquiredAt":0}\n' \
+  "$dead_pid" "$(hostname)" > "$LOCK_DIR/owner"
+CMATE_VERIFY_TEST_HOLD=0
+run_verify --config "$FIXTURES/mutex.yaml" --cwd "$mx" --base-ref "$BASE_BRANCH"
+assert_eq "stale-lock: a lock left by a dead process does not block the run" "0" "$RC"
+assert_has "stale-lock: the gate really ran" "$OUT" "GATE e2e PASS exit=0 duration="
+assert_has "stale-lock: breaking a stale lock is reported" "$ERR" "broke a stale lock"
+assert_file_absent "stale-lock: the lock is released again afterwards" "$LOCK_DIR"
+
+# --- mutex and retry together -------------------------------------------------
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+run_verify --config "$FIXTURES/mutex-flaky.yaml" --cwd "$mx" --base-ref "$BASE_BRANCH"
+assert_eq "mutex-flaky: exit code is 20" "20" "$RC"
+assert_has "mutex-flaky: both runs and the wait are all reported, each in its own field" "$OUT" \
+  "GATE unit FLAKY exit=1,0 duration="
+assert_has "mutex-flaky: the wait keeps its own field beside a two-valued duration" "$OUT" "waited=0s"
+assert_file_absent "mutex-flaky: the lock is released per attempt, not held across both" "$LOCK_DIR"
+unset CMATE_VERIFY_TEST_HOLD
+
+# --- 21. the per-worktree environment is the caller's (Issue #223) ------------
+# This runner does not number worktrees and must not invent a number: a number
+# that disagreed with CommandMate's would put the gate on a port the product run
+# has already claimed. So whatever the caller exported is inherited unchanged,
+# and a gate carries its own default for the case where nobody exported anything.
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+unset CM_WORKTREE_INDEX 2>/dev/null || true
+unset CM_WORKTREE_ID 2>/dev/null || true
+run_verify --config "$FIXTURES/worktree-env.yaml" --cwd "$mx" --base-ref "$BASE_BRANCH"
+assert_eq "worktree-env: an unset environment still runs the gate" "0" "$RC"
+assert_has "worktree-env: the gate's own default applies when nobody exported one" "$marker" "index=0 id=none"
+
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+CM_WORKTREE_INDEX=7
+CM_WORKTREE_ID=demo-app-feature-x
+export CM_WORKTREE_INDEX CM_WORKTREE_ID
+run_verify --config "$FIXTURES/worktree-env.yaml" --cwd "$mx" --base-ref "$BASE_BRANCH"
+assert_eq "worktree-env: an exported environment still runs the gate" "0" "$RC"
+assert_has "worktree-env: the caller's numbering is passed through untouched" "$marker" "index=7 id=demo-app-feature-x"
+unset CM_WORKTREE_INDEX
+unset CM_WORKTREE_ID
+
+# --- 22. options.requireEnvClean is accepted and reported ---------------------
+# CommandMate #1740 added the key; both parsers here rejected it with exit 2
+# until #223, so a repository that used it could not run this runner at all.
+# Accepting it is not the same as judging it: the built-in gate compares the
+# machine against a snapshot taken when the task was created, and a run started
+# from a shell is attached to no task.
+run_verify --config "$FIXTURES/require-env-clean.yaml" --cwd "$mx" --base-ref "$BASE_BRANCH"
+assert_eq "require-env-clean: the key no longer makes the config unreadable" "0" "$RC"
+assert_has "require-env-clean: the built-in is named rather than silently dropped" "$OUT" "GATE env-clean SKIP reason=no-baseline"
+assert_has "require-env-clean: the declared gates still run" "$OUT" "GATE ok PASS exit=0 duration="
+assert_has "require-env-clean: the reason says what is missing" "$ERR" "needs the baseline snapshot CommandMate records at task creation"
+assert_stdout_contract "require-env-clean: stdout holds only GATE/RESULT records" "$RAWOUT"
+
+# --- 23. the run directory outlives the run (Issue #228) ---------------------
+# The defect this pins: a gate that finishes before the runner has forked its
+# timeout watchdog makes `wait` return at once, so the `kill` that stops that
+# watchdog lands in the window where the freshly forked child still carries this
+# shell's EXIT trap AND bash's own terminating-signal handler. The child then ran
+# `rm -rf "$WORKDIR"` mid-run, and every later gate reported `no output captured`
+# with exit 1 — a verdict on nothing, in a runner whose whole job is adjudication.
+# It was probabilistic (measured ~1% per gate on Linux/ARM64), which is why the
+# case is many fast gates repeated: one green run is not evidence.
+#
+# Bounded on purpose. 48 gates x 12 runs is what turned the pre-fix runner red in
+# 20 of 20 measured repetitions; a smaller case was red in only 15 of 20, and a
+# regression test that misses one time in four is how this comes back silently.
+wl_runs=12
+wl_gates=48
+wl_lost=0
+wl_markers=0
+# The set of exit codes seen, not a count of wrong ones: a failure has to say
+# WHICH verdict the runner reached instead, or the next reader is back to
+# reproducing a probabilistic CI red by hand.
+wl_rcs=""
+# out.N of the FIRST run that deviated in any way. A probabilistic case is only
+# worth its red if the red names the run that produced it: `FAIL_CONTEXT` is
+# otherwise still pointing at the last (healthy) run when the assertions below
+# fire, and the sandbox holding every err.N is gone by the time anyone reads CI.
+wl_ctx=""
+# The runner puts $WORKDIR under $TMPDIR, so pointing it at an empty directory of
+# our own makes "was every one of them removed again" answerable by counting,
+# without depending on what else on this machine writes to /tmp.
+wl_tmp="$SANDBOX/workdir-lifetime-tmp"
+mkdir -p "$wl_tmp"
+wl_tmpdir_was_set=0
+wl_tmpdir_saved=""
+if [ -n "${TMPDIR+set}" ]; then wl_tmpdir_was_set=1; wl_tmpdir_saved=$TMPDIR; fi
+TMPDIR="$wl_tmp"
+export TMPDIR
+wl_i=0
+while [ "$wl_i" -lt "$wl_runs" ]; do
+  wl_i=$((wl_i + 1))
+  run_verify --config "$FIXTURES/workdir-lifetime.yaml" --cwd "$repo" --base-ref "$BASE_BRANCH"
+  case " $wl_rcs " in *" $RC "*) ;; *) wl_rcs="$wl_rcs $RC";; esac
+  # Both halves of the signature: the shell's own complaint about the vanished
+  # redirect target, and the empty-log report the runner then prints for a gate
+  # that did in fact run.
+  wl_run_lost=0
+  if grep -aFq "No such file or directory" "$ERR"; then wl_run_lost=$((wl_run_lost + 1)); fi
+  if grep -aFq "no output captured" "$ERR"; then wl_run_lost=$((wl_run_lost + 1)); fi
+  wl_lost=$((wl_lost + wl_run_lost))
+  wl_run_markers=$(grep -ac -e '-ran' "$ERR")
+  wl_markers=$((wl_markers + wl_run_markers))
+  if [ -z "$wl_ctx" ] \
+     && { [ "$wl_run_lost" -ne 0 ] || [ "$wl_run_markers" -ne "$wl_gates" ] || [ "$RC" -ne 20 ]; }; then
+    wl_ctx=$OUT
+  fi
+done
+if [ "$wl_tmpdir_was_set" -eq 1 ]; then TMPDIR=$wl_tmpdir_saved; export TMPDIR; else unset TMPDIR; fi
+if [ -n "$wl_ctx" ]; then FAIL_CONTEXT=$wl_ctx; FAIL_CONTEXT_SHOWN=0; fi
+assert_eq "workdir-lifetime: no run loses its work directory while it is still running" "0" "$wl_lost"
+assert_eq "workdir-lifetime: every gate's own output survives into the log tail" \
+  "$((wl_runs * wl_gates))" "$wl_markers"
+assert_eq "workdir-lifetime: every run still reaches the verdict its gates earned" "20" "${wl_rcs# }"
+# The other half of the same contract: whoever is allowed to remove the directory
+# must still do it. A guard that never fires would pass the assertions above by
+# leaking one directory per run instead.
+assert_eq "workdir-lifetime: the work directory is removed when the run really ends" \
+  "0" "$(ls -1 "$wl_tmp" 2>/dev/null | wc -l | tr -d ' ')"
 
 # --- summary ------------------------------------------------------------------
 total=$((TOTAL_PASS + TOTAL_FAIL))

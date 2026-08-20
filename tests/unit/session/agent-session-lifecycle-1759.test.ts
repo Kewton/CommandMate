@@ -24,6 +24,7 @@ import { join } from 'path';
 import { removeTempDir } from '@tests/helpers/temp-dir';
 import {
   beginAgentSession,
+  buildAgentLaunchCommandLine,
   prepareAgentLaunch,
 } from '@/lib/session/agent-session-lifecycle';
 import {
@@ -35,6 +36,14 @@ import { CLAUDE_CLI_TOOL_ID } from '@/lib/hooks/sources';
 
 const WT = 'wt-fence';
 const NOW = 1_700_000_000_000;
+/**
+ * Required by `prepareAgentLaunch` since Issue #1846.
+ *
+ * Only gemini reads it — its config is `<worktree>/.gemini/settings.json` — but
+ * it is required for every source, because an optional field would have left
+ * the second entry point #1762 needed (`injectGeminiHookSettings`) legal.
+ */
+const WORKTREE_PATH = '/repo/wt-fence';
 
 beforeEach(() => {
   // The state modules hang off globalThis, so a leftover generation from an
@@ -99,12 +108,16 @@ describe('prepareAgentLaunch', () => {
     // Claude's writes a settings file and appends `--settings`; the assertion
     // is on the shape rather than the path, which
     // `hook-settings-generator.test.ts` owns byte for byte.
-    const plan = prepareAgentLaunch(
-      { worktreeId: WT, cliToolId: CLAUDE_CLI_TOOL_ID, instanceId: 'claude' },
-      '/usr/local/bin/claude'
-    );
+    const plan = prepareAgentLaunch({
+      target: { worktreeId: WT, cliToolId: CLAUDE_CLI_TOOL_ID, instanceId: 'claude' },
+      executablePath: '/usr/local/bin/claude',
+      worktreePath: WORKTREE_PATH,
+    });
     expect(plan.command).toMatch(/^'\/usr\/local\/bin\/claude' --settings '.+\.json'$/);
     expect(plan.settingsPath).toMatch(/\.json$/);
+    // Claude is the one source that needs no launch environment: `--settings`
+    // carries the correlation keys inside the file it names (#1846).
+    expect(plan.env).toEqual({});
   });
 
   it('returns the bare executable for a tool CommandMate injects nothing into', () => {
@@ -112,12 +125,38 @@ describe('prepareAgentLaunch', () => {
     // a config and returns an environment-prefixed command line, and every
     // other tool named here is due one in Phase 4-3…4-5; `vibe-local` is
     // outside Phase 4 and keeps standing for "no injection".
-    const plan = prepareAgentLaunch(
-      { worktreeId: WT, cliToolId: 'vibe-local', instanceId: 'vibe-local' },
-      '/usr/local/bin/vibe'
-    );
+    const plan = prepareAgentLaunch({
+      target: { worktreeId: WT, cliToolId: 'vibe-local', instanceId: 'vibe-local' },
+      executablePath: '/usr/local/bin/vibe',
+      worktreePath: WORKTREE_PATH,
+    });
     expect(plan.command).toBe('/usr/local/bin/vibe');
     expect(plan.settingsPath).toBeNull();
+    expect(plan.env).toEqual({});
+  });
+
+  it('applies the plan’s environment exactly once, on the way to the pane', () => {
+    // #1846: four sources used to write their own `NAME=value ` prefix onto
+    // `command`. `buildAgentLaunchCommandLine` is now the only thing that turns
+    // a declared environment into shell assignments, so a source that declares
+    // one and a caller that renders the plan cannot disagree.
+    const line = buildAgentLaunchCommandLine({
+      target: { worktreeId: WT, cliToolId: 'codex', instanceId: 'codex' },
+      executablePath: '/usr/local/bin/codex',
+      worktreePath: WORKTREE_PATH,
+    });
+    const plan = prepareAgentLaunch({
+      target: { worktreeId: WT, cliToolId: 'codex', instanceId: 'codex' },
+      executablePath: '/usr/local/bin/codex',
+      worktreePath: WORKTREE_PATH,
+    });
+    for (const [name, value] of Object.entries(plan.env)) {
+      expect(line).toContain(`${name}='${value}'`);
+    }
+    // The command itself never carries an assignment: a launcher that is not a
+    // shell has to be able to run it.
+    expect(plan.command).not.toMatch(/^[A-Z_][A-Z0-9_]*=/);
+    expect(line.endsWith(plan.command)).toBe(true);
   });
 
   it('never throws when the config cannot be written', () => {
@@ -146,10 +185,11 @@ describe('prepareAgentLaunch', () => {
     writeFileSync(blocker, '');
     process.env.CM_AGENT_HOOKS_DIR = join(blocker, 'cmate');
     try {
-      const plan = prepareAgentLaunch(
-        { worktreeId: WT, cliToolId: CLAUDE_CLI_TOOL_ID, instanceId: 'claude' },
-        '/usr/local/bin/claude'
-      );
+      const plan = prepareAgentLaunch({
+        target: { worktreeId: WT, cliToolId: CLAUDE_CLI_TOOL_ID, instanceId: 'claude' },
+        executablePath: '/usr/local/bin/claude',
+        worktreePath: WORKTREE_PATH,
+      });
       expect(plan.command).toBe('/usr/local/bin/claude');
       expect(plan.settingsPath).toBeNull();
     } finally {

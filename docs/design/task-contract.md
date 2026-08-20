@@ -208,6 +208,7 @@ v1 では固定である。
 |---|---|
 | 違反 0 件 | `passed` |
 | 違反 1 件以上 | `failed`（`log_tail` に**最大 100 件**を列挙し、残りは件数で示す） |
+| 許可された変更 | 合否を問わず `log_tail` の `admitted:` 節に path とそれを許可したパターンを残す（§2.2.5.1・#1841） |
 | 変更ファイル 0 件 | `passed`（「何も起きていない」の判定は `work-evidence` の仕事。ここでも落とすと 1 つの問題が 2 件に見える） |
 | run に契約が紐づいていない（契約自体が存在しない） | `skipped`（集計に数えない） |
 | run に契約が紐づかず、**しかし終端状態の契約が worktree に存在する** | `skipped`（**集計に数える** → run は `error`。#1620） |
@@ -223,6 +224,65 @@ v1 では固定である。
 リポジトリの検証がすべて `error` になってしまう。そこで **`gateIds` で名指しされた場合の
 `skipped` だけを集計に数える** — 名指しされたのに判定しなかったのは「断った」ことだが、
 契約が無いのは「判定すべき宣言が存在しない」ことであって、断ったわけではない。
+
+#### 2.2.5.1 判定の証跡 — 何がどのパターンで許可されたか（#1841）
+
+ゲートは違反 path だけでなく、**許可された変更ファイルと、それを許可したパターン**も
+`log_tail` に残す。`allow` が完全一致 path なら「パターン＝ファイル」で情報量はゼロだが、
+#1546 で glob が正式化された後は `src/**` という宣言だけが残り、**その run で実際に何が
+許可されたのか**は後から読めない。契約は主張であり、これはその主張に対する証跡である。
+
+```
+scope: baseRef=origin/develop changed=3 violations=1
+allow: src/**, docs/*.md
+deny: src/secret/**
+admitted:
+  + docs/x.md  ← docs/*.md
+  + src/a/b.ts  ← src/**
+out of scope:
+  - src/secret/key.ts  ← src/secret/**
+```
+
+| 規則 | 内容 |
+|---|---|
+| 記録するパターン | **宣言順で最初に一致したもの**（allow / deny とも）。最後に一致したものを名指すと「消しても判定が変わらないルール」を提示することになる |
+| 例外で許可された path | `(exempt: .commandmate/)` / `(exempt: contract path)`。括弧付きなのは、契約を grep しても見つからないことが事実だから（§2.2.4） |
+| deny で落ちた path | `admitted:` に入らず、`out of scope:` 側に**拒否した deny パターン**が付く。`deny:` 見出しは宣言の一覧、こちらはこの path が踏んだ実体（＝revert すべきか allow を広げるべきかの違い） |
+| マーカー | 許可は `+`、違反は `-`。1 行だけを見た読者（や grep）が両者を取り違えないため |
+| 件数上限 | 各節 `MAX_REPORTED_VIOLATIONS`（100 件）。超過は `  ... (+N more)`（admitted）/ `  ... and N more`（違反）と明示する。**切り詰めは表示規則であり、判定は全ファイルに対して行う** |
+| 節の順序 | `admitted:` が `out of scope:` より前。CLI は不合格ゲートの log を**末尾 40 行**しか表示しない（`MAX_PRINTED_LOG_TAIL_LINES`）ので、長い `admitted:` を後ろに置くと違反一覧とガイダンスが流れる |
+
+**pass / fail の裁定はこの追加で 1 バイトも変わらない。** `ScopeMatcher.isViolation()` は
+`classify()` の否定に委譲するので、判定と証跡が食い違う経路そのものが無い。
+
+##### JSON への露出
+
+`commandmate verify --json` と `commandmate verify show --json` は、`scope` ゲートの結果に
+機械可読な `scope` フィールドを足す（既存フィールドは不変）。
+
+```jsonc
+"scope": {
+  "admitted": [{ "path": "src/a/b.ts", "pattern": "src/**" }],  // 最大 100 件
+  "violations": ["src/secret/key.ts"],                          // 最大 100 件
+  "totals": { "changed": 3, "admitted": 2, "violations": 1 }    // 全ファイルの実数
+}
+```
+
+`totals` を別に持つのは、2 つの配列がレポートと同じ 100 件で切れるからである。
+「scope 外が在るか」は `violations.length` ではなく `totals.violations` で判定する。
+
+この組み立ては**サーバではなく CLI 側**で行う。`verification_gate_results` は status・
+exit code・log 本文しか持たず（migration v49 / v56）、構造化データを載せる列が無いためで、
+`log_tail` のレポートが唯一の運搬経路である。CLI は `src/cli/**` だけを alias 無しで
+コンパイルする（`tsconfig.cli.json`）ので `src/lib/**` を import できず、書式定数は
+`SCOPE_PATTERN_ARROW`（`src/lib/verification/scope-gate.ts`）と
+`src/cli/commands/verify.ts` の 2 箇所に写しが在る。両者の一致は定数の比較ではなく、
+**実ゲートのレポートを実パーサに通す往復テスト**（`tests/unit/verification/scope-gate.test.ts`）で
+担保する。定数の比較は「コピーされたこと」しか証明しない。
+
+`scope` フィールドは scope ゲートが実際に判定したときだけ付く。`skipped` / `error` の
+`log_tail` はレポートではなく 1 文のメッセージなので、フィールドごと不在にする。空の
+`admitted` を出すと「判定した結果 1 件も許可されなかった」と読まれるためである。
 
 #### 2.2.6 「契約が無い」と「契約に結び付かなかった」の区別（#1620）
 
@@ -277,7 +337,7 @@ globstar が 0 セグメントにマッチしない、括弧を文字クラス�
 | キー | 型 | 既定 | 制約 |
 |---|---|---|---|
 | `gates` | list of string | `null`（= 全ゲート） | 各要素は `verify.yaml` の `gates[].id` 形式。空リストは契約エラー。最大 32 件 |
-| `gateDefinitions` | list of `{id, command, timeoutSec}` | `[]` | 形も検証も `verify.yaml` の `gates[]` と同一（Issue #1791）。最大 32 件 |
+| `gateDefinitions` | list of `{id, command, timeoutSec, mutex, retryOnFail, flakyIsPass}` | `[]` | 形も検証も `verify.yaml` の `gates[]` と同一（Issue #1791）。`mutex` は任意（Issue #1771）、`retryOnFail` / `flakyIsPass` も任意（Issue #1772）。最大 32 件 |
 
 `gates: []`（空リスト）は「ゲートなしで合格させる」という意味になりうるため**エラー**にする。
 「全部走らせる」は `verify` キー自体の省略、または `verify.gates` の省略で表す。
@@ -310,7 +370,17 @@ snapshot 済みで変更集合からも除外済みなので、**新しい改竄
 
 - 形と検証は `verify.yaml` の `gates[]` と**同じ関数**（`validateGateEntries`）を通す。
   id パターン `^[a-z0-9][a-z0-9-]{0,31}$`・予約 id 禁止・リスト内重複禁止・
-  `timeoutSec` の整数と 1..7200 の範囲は、二重定義ではなく同一実装で保証される
+  `timeoutSec` の整数と 1..7200 の範囲は、二重定義ではなく同一実装で保証される。
+  Issue #1771 の `mutex`（マシン全体のロック名。`^[A-Za-z0-9_.-]+$` / 64 文字以内、
+  [verification-config.md](./verification-config.md) §9）も同じ経路で受理される
+  — 契約が運ぶ使い捨てゲートこそ固定ポートを掴みがちだからである。
+  Issue #1772 の `retryOnFail`（`0` か `1`）と `flakyIsPass`（boolean。`true` は
+  `retryOnFail: 1` を伴わなければ契約エラー）も同様
+  （[verification-config.md](./verification-config.md) §10）。
+  **`mutex` / `retryOnFail` / `flakyIsPass` を宣言しなかったゲートの JSON には
+  キー自体が現れない**（契約は `tasks.contract_json` へ verbatim に保存され
+  再検証されないので、`undefined` 値のキーを書くと「宣言されていない」と
+  「値の無い宣言」が混ざる）
 - `gates` 省略時は「verify.yaml の全ゲート ＋ この契約の `gateDefinitions` 全部」
 - 空リスト `gateDefinitions: []` はキー省略と同義（`gates: []` と違い解釈が一意なので
   エラーにしない。YAML を機械生成する orchestrator が空の場合分けを持たずに済む）

@@ -69,7 +69,7 @@ import {
   SESSION_ID_FIELDS,
   TOOL_CALL_ID_FIELDS,
 } from '../hook-event-vocabulary';
-import type { AgentEventSource, AgentInstanceRef, AgentLaunchPlan, Verdict } from '../types';
+import type { AgentEventSource, AgentLaunchContext, AgentLaunchPlan, Verdict } from '../types';
 import {
   buildCopilotLaunchCommand,
   COPILOT_HOOK_TIMEOUT_SECONDS,
@@ -224,6 +224,6 @@ export const copilotAgentEventSource: AgentEventSource = definePushHookSource({
 
   encodeVerdict: encodeCopilotVerdict,
 
-  prepareLaunch: (target: AgentInstanceRef, executablePath: string): AgentLaunchPlan =>
+  prepareLaunch: ({ target, executablePath }: AgentLaunchContext): AgentLaunchPlan =>
     buildCopilotLaunchCommand(executablePath, target),
 });

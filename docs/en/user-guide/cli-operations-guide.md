@@ -219,6 +219,10 @@ commandmate send "$WT" "Implement this"
 
 Block until the agent in the given worktree completes.
 
+> **Completion means `sessionStatus === 'ready'` on a frame that was classified, or the session
+> disappearing** (`src/cli/commands/wait.ts:356`). **It does not check that the turn actually
+> landed.** Use `--verify` / `--require-work` (below) to judge whether the work is really there.
+
 ### Usage
 
 ```bash
@@ -803,6 +807,21 @@ Everything the server sends except `fullOutput` is printed verbatim.
   "reasoningEffort": null
 }
 ```
+
+What each field actually means. The line numbers were measured on 2026-08-20; following the
+function names (`buildCurrentOutput` / `isClaudeRunning`) is the safer way to find them.
+
+| Field | Meaning |
+|---|---|
+| `content` | The delta since `lastCapturedLine` (`src/lib/session/current-output-builder.ts:535-556`). Empty even on a healthy session once the poller has already saved it |
+| `realtimeSnippet` | The last 100 rows of the pane — the screen itself (`src/lib/session/current-output-builder.ts:712`) |
+| `lineCount` | The row count of the whole capture, blank rows included. A TUI is drawn on a 1000-row pane, so even a blank pane can report 1001 |
+| `isRunning` | The tmux session exists and is healthy (`src/lib/session/claude-session.ts:543-556`). **It does not mean a turn is in progress** |
+| `sessionStatus` / `sessionStatusReason` | The state and what it rests on: a `hook_*` reason came from hooks, anything else from the scraper (`HOOK_STATUS_REASON` in `src/lib/session/status-mapping.ts`) |
+| `structuredEvents.*` / `lastStopEventAt` | The last hook event and the last `stop` timestamp. `null` when no hooks have arrived |
+
+To tell whether the screen is empty, read `realtimeSnippet.trim() === ''` together with `lineCount`.
+`content` is a delta, so it never answers that on its own.
 
 #### `model` / `reasoningEffort` (Issue #1785)
 

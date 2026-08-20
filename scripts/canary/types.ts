@@ -10,6 +10,89 @@
 
 import type { StatusDetectionResult } from '@/lib/detection/status-detector';
 import type { PromptDetectionResult } from '@/lib/detection/prompt-detector';
+import type { AutoYesPolicy } from '@/lib/polling/auto-yes-resolver';
+import type { AutoYesPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
+
+/**
+ * One hook delivery the canary's receiver answered (Issue #1847).
+ *
+ * The canary has no CommandMate server, so this log is what the run can say
+ * about the wire: which hooks Claude actually posted, and what was written back
+ * to the one it blocks on. `behavior` / `reason` are the adjudicator's, i.e.
+ * `resolvePermissionRequest`'s own verdict — not the canary's paraphrase of it.
+ */
+export interface HookDelivery {
+  /** Native hook event name, e.g. `PermissionRequest`, `Stop`, `session_start`. */
+  eventName: string;
+  /** `tool_name`, for the events that name one. */
+  toolName: string | null;
+  /** Epoch ms the receiver answered. */
+  at: number;
+  /** `PermissionRequest` only: `'allow'`, or null for no-decision. */
+  behavior: 'allow' | null;
+  /** `PermissionRequest` only: `PermissionDecisionReason`. */
+  reason: string | null;
+  /**
+   * Whether `--mutate-verdict` flipped the answer that was actually sent. The
+   * verdict above stays the adjudicator's, so a mutated run stays legible.
+   */
+  inverted: boolean;
+}
+
+/**
+ * What the structured layer knows, sampled at the same instant as the frame
+ * (Issue #1847).
+ *
+ * Every field is read from the module `buildCurrentOutput` reads it from, so a
+ * scenario asserting on it is asserting on what `capture --json` would publish:
+ * `structuredEvents` comes from `agent-event-state` + `resolvePromptWaiting`,
+ * and `lastSuppression` from `auto-yes-suppression-state`. Nothing here is a
+ * canary-local re-implementation.
+ */
+export interface HookObservation {
+  /** Deliveries so far, in arrival order. */
+  deliveries: readonly HookDelivery[];
+  /** `capture --json`'s `structuredEvents`, minus the fields no scenario reads. */
+  structuredEvents: {
+    lastEventType: string | null;
+    lastEventAt: number | null;
+    lastEventDetail: string | null;
+    promptWaitingSince: number | null;
+    promptWaitingSource: string | null;
+  };
+  /** `capture --json`'s `autoYes.lastSuppression`. */
+  lastSuppression: AutoYesPolicySuppression | null;
+  /**
+   * Whether the scenario's probe file is on disk.
+   *
+   * The proof that the tool actually RAN, as opposed to the dialog merely not
+   * being visible in the captured window — which is the same screen a session
+   * with no hooks at all shows while Claude is still thinking.
+   */
+  probeFileWritten: boolean;
+}
+
+/**
+ * Hook wiring for a scenario that adjudicates real `PermissionRequest`s
+ * (Issue #1847).
+ *
+ * A scenario carrying this is launched as `claude --settings <file>` with the
+ * settings written by the PRODUCTION generator (`buildAgentHookSettings`),
+ * pointed at the canary's own receiver on an ephemeral loopback port.
+ */
+export interface HookScenarioSetup {
+  /**
+   * The contract `autoYes` block the adjudicator judges this session's requests
+   * against, or null for "no contract governs this instance".
+   *
+   * Supplied rather than read from SQLite: the canary is not a server and has
+   * no task row. See `PermissionDecisionDeps` in
+   * `src/lib/hooks/permission-decision-service.ts`.
+   */
+  policy: AutoYesPolicy | null;
+  /** File the probe prompt asks Claude to write, relative to the working directory. */
+  probeFile: string;
+}
 
 /**
  * One captured frame plus both detection verdicts.
@@ -30,6 +113,15 @@ export interface Observation {
    * verdicts must be asserted independently.
    */
   autoYes: PromptDetectionResult;
+  /**
+   * The structured layer's view of the same instant (Issue #1847).
+   *
+   * Present only for scenarios that declare {@link CanaryScenario.hooks}. The
+   * expectations that read it treat `undefined` as a failed match rather than
+   * as "nothing to check", so a scenario whose receiver was never wired up goes
+   * red instead of passing vacuously.
+   */
+  hooks?: HookObservation;
 }
 
 /** A named, pure predicate over an {@link Observation}. */
@@ -94,6 +186,16 @@ export interface CanaryScenario {
    * is not vacuous: with mutants in place every scenario must go red.
    */
   mutantExpectation: Expectation;
+  /**
+   * Hook wiring, for the Auto-Yes v2 verdict scenarios (Issue #1847).
+   *
+   * Present means: launch this session with the production-generated hook
+   * settings pointed at the canary's receiver, adjudicate its
+   * `PermissionRequest`s with {@link HookScenarioSetup.policy}, and fill
+   * {@link Observation.hooks} on every capture. Absent means the scenario runs
+   * a bare `claude`, exactly as the five #1727 scenarios do.
+   */
+  hooks?: HookScenarioSetup;
   /** Drives the fresh session into the target state. */
   drive(driver: ScenarioDriver): Promise<void>;
   /** Best-effort keys to leave the state before the session is torn down. */

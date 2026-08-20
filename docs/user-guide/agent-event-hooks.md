@@ -116,6 +116,12 @@ Claude は承認ダイアログを**描く前に**この hook を叩き、Comman
   Auto-Yes は後から有効化されるため、トグル連動にすると「有効にしたのに hook が無い」状態が生まれる。
 - **画面ベースの Auto-Yes は残っている。** hooks 非対応の環境と Claude 以外の CLI では従来どおり動く。
 
+> **この 2 つの挙動は実 TUI で継続的に確認されている**（Issue #1847）。
+> `npm run canary` の `permission-hook-allow`（allow → ダイアログが出ずにツールが走る）と
+> `permission-hook-no-decision`（`denyPatterns` 一致 → ダイアログが出て `autoYes.lastSuppression` に理由が載る）が、
+> 実際の Claude セッションに対して毎回測り直す。3 項目の記録先の一覧は
+> [`docs/design/agent-hooks-live-verification.md`](../design/agent-hooks-live-verification.md) の §8。
+
 ### 0.7 `permissions.deny` — パターン一括 kill の禁止（Issue #1739）
 
 注入ファイルには hooks に加えて `permissions.deny` が入る。

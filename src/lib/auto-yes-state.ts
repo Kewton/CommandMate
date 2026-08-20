@@ -117,6 +117,20 @@ export interface AutoYesState {
   stopPattern?: string;
   /** Reason why auto-yes was stopped (Issue #314) */
   stopReason?: AutoYesStopReason;
+  /**
+   * Short excerpt of what `stopPattern` actually matched, with
+   * {@link STOP_MATCH_EXCERPT_CONTEXT_LINES} line(s) of surrounding context
+   * (Issue #1694).
+   *
+   * Set only alongside `stopReason === 'stop_pattern_matched'`, and cleared by
+   * every other disable path: the excerpt is the evidence for *that* stop, so
+   * an expired or manually disabled state carrying a stale excerpt would be
+   * read as a stop that never happened.
+   *
+   * Truncated to {@link STOP_MATCH_EXCERPT_MAX_BYTES} UTF-8 bytes with
+   * {@link STOP_MATCH_EXCERPT_TRUNCATION_MARKER} appended when it does not fit.
+   */
+  stopMatchedText?: string;
 }
 
 // =============================================================================
@@ -240,13 +254,17 @@ export function setAutoYesEnabled(
  * @param cliToolId - CLI tool type (default: 'claude')
  * @param reason - Optional reason for disabling ('expired' | 'stop_pattern_matched')
  * @param instanceId - Optional instance identifier (Issue #896; defaults to primary)
+ * @param stopMatchedText - Optional excerpt of what the stop pattern matched
+ *   (Issue #1694). Deliberately *not* carried over from the existing state: it
+ *   belongs to `reason`, so a disable for any other reason stores none.
  * @returns Updated auto-yes state
  */
 export function disableAutoYes(
   worktreeId: string,
   cliToolId: CLIToolType = 'claude',
   reason?: AutoYesStopReason,
-  instanceId?: string
+  instanceId?: string,
+  stopMatchedText?: string
 ): AutoYesState {
   const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
   const existing = autoYesStates.get(key);
@@ -256,6 +274,7 @@ export function disableAutoYes(
     expiresAt: existing?.expiresAt ?? 0,
     stopPattern: existing?.stopPattern,
     stopReason: reason,
+    stopMatchedText,
   };
   autoYesStates.set(key, state);
   return state;
@@ -278,6 +297,113 @@ export function clearAllAutoYesStates(): void {
  * client-safe auto-yes resolver can share the same guarded execution path).
  */
 export { executeRegexWithTimeout } from '@/config/auto-yes-config';
+
+/**
+ * Maximum size of the stop-pattern excerpt, in UTF-8 bytes, marker included
+ * (Issue #1694).
+ *
+ * The excerpt answers one question — "is this a real stop or did a build log
+ * happen to contain the pattern?" (#1678 A-5) — and a couple of lines answer
+ * it. The cap is a hard bound rather than a hint because `cleanOutput` is a
+ * whole terminal frame and a greedy pattern can match all of it, and because
+ * the value rides in every `capture --json` poll for the rest of the session.
+ */
+export const STOP_MATCH_EXCERPT_MAX_BYTES = 400;
+
+/**
+ * Appended when the excerpt was cut to fit {@link STOP_MATCH_EXCERPT_MAX_BYTES}.
+ *
+ * Cutting silently would make a fragment read as the whole match, which is the
+ * wrong conclusion in exactly the triage this field exists for.
+ */
+export const STOP_MATCH_EXCERPT_TRUNCATION_MARKER = '…[truncated]';
+
+/** Lines of context kept on either side of the match (Issue #1694). */
+export const STOP_MATCH_EXCERPT_CONTEXT_LINES = 1;
+
+/** Shared encoder for byte-length math (UTF-8 by spec). */
+const utf8Encoder = new TextEncoder();
+
+/** UTF-8 byte length of a string. */
+function utf8ByteLength(text: string): number {
+  return utf8Encoder.encode(text).length;
+}
+
+/**
+ * Cut `text` down to `maxBytes` UTF-8 bytes, marker included, never splitting a
+ * character (Issue #1694).
+ *
+ * The budget is measured in bytes rather than characters because the excerpt is
+ * copied verbatim into a JSON payload, and a Japanese terminal frame costs 3
+ * bytes per character — a character cap would let one frame publish three times
+ * the intended payload.
+ *
+ * @internal Exported for testing purposes only.
+ * @param text - Text to bound
+ * @param maxBytes - Byte ceiling for the returned string (marker included)
+ * @returns `text` unchanged when it already fits, otherwise a prefix of it with
+ *   {@link STOP_MATCH_EXCERPT_TRUNCATION_MARKER} appended
+ */
+export function truncateToUtf8Bytes(
+  text: string,
+  maxBytes: number = STOP_MATCH_EXCERPT_MAX_BYTES
+): string {
+  if (utf8ByteLength(text) <= maxBytes) return text;
+
+  const budget = maxBytes - utf8ByteLength(STOP_MATCH_EXCERPT_TRUNCATION_MARKER);
+  if (budget <= 0) return STOP_MATCH_EXCERPT_TRUNCATION_MARKER;
+
+  let used = 0;
+  let kept = '';
+  // for..of iterates code points, so a surrogate pair is never halved.
+  for (const char of text) {
+    const size = utf8ByteLength(char);
+    if (used + size > budget) break;
+    kept += char;
+    used += size;
+  }
+  return kept + STOP_MATCH_EXCERPT_TRUNCATION_MARKER;
+}
+
+/**
+ * Build the excerpt shown for a stop-pattern hit (Issue #1694).
+ *
+ * Whole lines, not the raw match: a pattern like `error` matched against a
+ * terminal frame yields the six characters `error`, which tells the operator
+ * nothing about whether it came from the agent asking a question or from a
+ * dependency's build log scrolling past. The surrounding line is the smallest
+ * unit that carries that.
+ *
+ * @param regex - The already-constructed stop pattern (no `g` flag, so `exec`
+ *   is position-independent and does not disturb the caller's `test`)
+ * @param output - ANSI-stripped terminal output the pattern matched
+ * @returns Bounded excerpt, or null when the match cannot be located
+ */
+function buildStopMatchExcerpt(regex: RegExp, output: string): string | null {
+  let match: RegExpExecArray | null;
+  try {
+    match = regex.exec(output);
+  } catch {
+    return null;
+  }
+  if (!match) return null;
+
+  const matchStart = match.index;
+  const matchEnd = matchStart + match[0].length;
+
+  const lines = output.split('\n');
+  const firstLine = output.slice(0, matchStart).split('\n').length - 1;
+  const lastLine = output.slice(0, matchEnd).split('\n').length - 1;
+  const from = Math.max(0, firstLine - STOP_MATCH_EXCERPT_CONTEXT_LINES);
+  const to = Math.min(lines.length - 1, lastLine + STOP_MATCH_EXCERPT_CONTEXT_LINES);
+
+  const raw = lines.slice(from, to + 1).join('\n');
+  // Terminal frames are padded with blank lines and trailing spaces; those are
+  // pure noise here and eat the byte budget. A whitespace-only match keeps its
+  // raw form rather than becoming an empty, unexplained field.
+  const trimmed = raw.trim();
+  return truncateToUtf8Bytes(trimmed.length > 0 ? trimmed : raw);
+}
 
 /**
  * Check if the terminal output matches the stop condition pattern.
@@ -326,7 +452,10 @@ export function checkStopCondition(
     }
 
     if (matched) {
-      disableAutoYes(worktreeId, cliToolId, 'stop_pattern_matched', instanceId);
+      // Issue #1694: what matched, not just that something did. Built here
+      // because this is the only frame that still holds the output.
+      const stopMatchedText = buildStopMatchExcerpt(regex, cleanOutput) ?? undefined;
+      disableAutoYes(worktreeId, cliToolId, 'stop_pattern_matched', instanceId, stopMatchedText);
       if (onStopMatched) {
         onStopMatched(compositeKey);
       }

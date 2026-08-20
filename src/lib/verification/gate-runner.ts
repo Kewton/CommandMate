@@ -60,6 +60,13 @@ import {
 } from './env-clean-gate';
 import { loadEnvSnapshot, type EnvSnapshot } from './env-snapshot';
 import {
+  acquireMachineLock,
+  machineLockPath,
+  resolveMachineLockRoot,
+  type MachineLockResult,
+} from './machine-lock';
+import { resolveWorktreeIndex } from './worktree-index';
+import {
   CONTRACT_DIR_PREFIX,
   evaluateScope,
   isContractPath,
@@ -120,6 +127,103 @@ export const MAX_CONCURRENT_VERIFICATIONS = 2;
 
 /** Grace period between SIGTERM and SIGKILL for a gate that overran. */
 const SIGKILL_GRACE_MS = 5000;
+
+/**
+ * Per-worktree environment every command gate is given (Issue #1771).
+ *
+ * `CM_WORKTREE_INDEX` is what lets a repository write
+ * `E2E_PORT=$((60400+CM_WORKTREE_INDEX))` and stop N parallel worktrees from
+ * fighting over one port — removing the collision instead of serializing around
+ * it, which is the only option that keeps the parallelism. `CM_WORKTREE_ID` is
+ * for everything a number cannot name: a container name, a database prefix, a
+ * log directory.
+ */
+export const WORKTREE_ID_ENV = 'CM_WORKTREE_ID';
+export const WORKTREE_INDEX_ENV = 'CM_WORKTREE_INDEX';
+
+/**
+ * Marker line carrying a mutexed gate's wait into `log_tail` (Issue #1771).
+ *
+ * `verification_gate_results` has no column for the wait, and it must not be
+ * folded into `duration_ms`: the duration is what the gate's own command took,
+ * and adding another run's queueing to it corrupts the number every timeout
+ * budget and every "this gate got slower" judgement is made from. The log tail
+ * is the same channel work-evidence's counts and the scope gate's evidence
+ * already travel on (`src/cli/commands/verify.ts:60-99`).
+ *
+ * Mirrored by `MUTEX_LOG_PREFIX` in `src/cli/utils/verify-runner.ts`, which
+ * cannot import this module — `tsconfig.cli.json` compiles `src/cli/**` alone.
+ */
+export const MUTEX_LOG_PREFIX = '[mutex]';
+
+/**
+ * First line of a gate that never ran because the lock stayed held.
+ *
+ * Deliberately not `timeout`: the gate's command was never started, so there is
+ * nothing to say it ran long. Deliberately not `failed` either — the whole point
+ * of Issue #1771 is that a resource conflict and a broken change must stop
+ * reading the same. `skipped` aggregates the run to `error` (exit 99), which is
+ * "no verdict was reached", not "the work is bad".
+ */
+export const MUTEX_WAIT_SKIP_REASON = 'reason=mutex-wait';
+
+/**
+ * Marker line carrying a retried gate's two runs into `log_tail` (Issue #1772).
+ *
+ * `verification_gate_results` stores one status, one exit code and one duration
+ * per gate, and a DB migration was out of scope for #1772, so the second run's
+ * numbers travel the same way #1771's wait does: a line-anchored, machine
+ * readable first line the CLI reads back.
+ *
+ * Written whenever a retry actually ran — for `outcome=fail` too, not only for
+ * `outcome=flaky`. A gate that failed twice is evidence *against* flakiness,
+ * and a flake advisor mining history needs both halves of that ratio; a marker
+ * present only on the flaky half would make every retried gate look flaky.
+ *
+ * Mirrored by `FLAKY_LOG_PREFIX` in `src/cli/utils/verify-runner.ts`, which
+ * cannot import this module — `tsconfig.cli.json` compiles `src/cli/**` alone.
+ */
+export const FLAKY_LOG_PREFIX = '[flaky]';
+
+/**
+ * What a retried gate's two runs amounted to.
+ *
+ * `flaky` = failed then passed. `fail` = failed twice; the gate is FAIL and
+ * always was, the marker only records that the second opinion agreed.
+ */
+export type FlakyOutcome = 'flaky' | 'fail';
+
+/**
+ * Runs a gate is allowed. Not derived from `retryOnFail` at the call site: the
+ * marker states the number so a reader of stored history never has to look up
+ * the verify.yaml that was in effect months ago.
+ */
+const RETRY_TOTAL_RUNS = 2;
+
+/**
+ * Separator between the two runs' outputs inside the composed log tail.
+ *
+ * Both are kept. Keeping only one makes the single question this feature exists
+ * to answer — *what differed between the two runs* — unanswerable from the
+ * record. `maxLogTailBytes` is applied per run, because it caps what one gate
+ * command may contribute and there were two commands.
+ */
+function flakyRunHeader(index: number, outcome: GateOutcome): string {
+  return (
+    `--- ${FLAKY_LOG_PREFIX} run ${index}/${RETRY_TOTAL_RUNS}: ${outcome.status} ` +
+    `exit=${formatExit(outcome.exitCode)} duration=${formatSeconds(outcome.durationMs)} ---`
+  );
+}
+
+/** One decimal second, the spelling both `waited=` and `duration=` use. */
+function formatSeconds(ms: number): string {
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/** `exit_code` is null for a gate killed by a signal; say so rather than lie. */
+function formatExit(exitCode: number | null): string {
+  return exitCode === null ? 'n/a' : String(exitCode);
+}
 
 export interface RunVerificationInput {
   worktreeId: string;
@@ -290,7 +394,8 @@ function runCommand(
   command: string,
   cwd: string,
   timeoutSec: number,
-  maxLogTailBytes: number
+  maxLogTailBytes: number,
+  gateEnv: Record<string, string>
 ): Promise<GateOutcome> {
   return new Promise<GateOutcome>((resolve) => {
     const startedAt = Date.now();
@@ -304,8 +409,9 @@ function runCommand(
       cwd,
       // CI=true matches how the same commands run in the pipeline; vitest picks
       // a different fileParallelism otherwise, and a gate that passes here but
-      // fails in CI is worse than no gate.
-      env: { ...process.env, CI: 'true' },
+      // fails in CI is worse than no gate. `gateEnv` carries the per-worktree
+      // identity (#1771) and is code-supplied, never user input.
+      env: { ...process.env, CI: 'true', ...gateEnv },
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -374,6 +480,197 @@ function runCommand(
       });
     });
   });
+}
+
+/**
+ * Prefix a gate's log with what it waited for, so the wait is on the record
+ * even when the command itself printed nothing.
+ *
+ * First line rather than last: the reader's question is "why did this gate take
+ * so long", and the answer belongs before the output it is about. The GATE line
+ * is built from the whole stored tail, so placement never decides whether
+ * `waited=` reaches the terminal.
+ */
+function withMutexMarker(
+  name: string,
+  waitedMs: number,
+  lockPath: string,
+  logTail: string | null
+): string {
+  const marker = `${MUTEX_LOG_PREFIX} name=${name} waited=${formatSeconds(waitedMs)} lock=${lockPath}`;
+  return prefixLogTail(marker, logTail);
+}
+
+/** The log of a gate whose lock never came free. */
+function mutexWaitTimeoutLog(gate: VerifyGate, name: string, result: MachineLockResult): string {
+  if (result.acquired) throw new Error('mutexWaitTimeoutLog called for an acquired lock');
+  const held = result.heldBy ? ` (held by ${result.heldBy})` : '';
+  return [
+    `${MUTEX_WAIT_SKIP_REASON} waited=${formatSeconds(result.waitedMs)}`,
+    `${MUTEX_LOG_PREFIX} name=${name} lock=${machineLockPathFor(name)}${held}`,
+    `Gate '${gate.id}' declares mutex '${name}' and the machine-wide lock stayed held for its ` +
+      `whole ${gate.timeoutSec}s budget, so the command was never started. This is a resource ` +
+      'conflict, not a verdict on the work: re-run once the other run finishes, or raise ' +
+      "the gate's timeoutSec.",
+  ].join('\n');
+}
+
+/** Resolved separately from the acquisition so the message can name it either way. */
+function machineLockPathFor(name: string): string {
+  return machineLockPath(name, resolveMachineLockRoot());
+}
+
+/**
+ * Run one attempt at a command gate, holding its `mutex` for the duration
+ * (Issue #1771).
+ *
+ * The wait happens *outside* the measured interval: `startedAt`/`durationMs`
+ * come from {@link runCommand} and describe the command alone, so a gate that
+ * queued for 42s and then ran for 190s records 190s and reports the 42s beside
+ * it. Merging them would inflate every duration by however busy the machine was.
+ *
+ * One *attempt*, not one gate, since #1772: a gate declaring `retryOnFail: 1`
+ * calls this twice. The lock is taken and released per attempt rather than held
+ * across both, so a retry never keeps a machine-wide resource out of another
+ * worktree's hands for a run that has already failed once.
+ */
+async function runGateAttempt(
+  gate: VerifyGate,
+  worktreePath: string,
+  maxLogTailBytes: number,
+  gateEnv: Record<string, string>
+): Promise<GateOutcome> {
+  const mutex = gate.mutex;
+  if (!mutex) {
+    return runCommand(gate.command, worktreePath, gate.timeoutSec, maxLogTailBytes, gateEnv);
+  }
+
+  // The gate's own timeout is the wait budget: a gate allowed 600s of execution
+  // has already declared how long this run may spend on it, and a second knob
+  // would only let the two disagree.
+  const lock = await acquireMachineLock(mutex, { timeoutMs: gate.timeoutSec * 1000 });
+  if (!lock.acquired) {
+    const recordedAt = Date.now();
+    return {
+      status: 'skipped',
+      exitCode: null,
+      startedAt: recordedAt,
+      durationMs: 0,
+      logTail: mutexWaitTimeoutLog(gate, mutex, lock),
+    };
+  }
+
+  try {
+    const outcome = await runCommand(
+      gate.command,
+      worktreePath,
+      gate.timeoutSec,
+      maxLogTailBytes,
+      gateEnv
+    );
+    return {
+      ...outcome,
+      logTail: withMutexMarker(mutex, lock.waitedMs, lock.handle.path, outcome.logTail),
+    };
+  } finally {
+    lock.handle.release();
+  }
+}
+
+/**
+ * Run one command gate, re-running it once when it fails and the gate asked for
+ * that (Issue #1772).
+ *
+ * A gate that fails on the machine's luck — a random UUID that happens to
+ * contain a forbidden substring, a port that was still in TIME_WAIT — is
+ * indistinguishable in the record from a gate that fails on the work, and
+ * "re-run the one red gate before believing it" has been tribal knowledge
+ * rather than something the runner does. This makes it a declaration.
+ *
+ * Only a `failed` attempt is retried. A `timeout` is not: the gate already
+ * spent its whole budget, and a second attempt would double the wall clock of
+ * exactly the gates whose budgets are largest. A `skipped` (the mutex never
+ * came free) and an `error` (the command could not be spawned) never started a
+ * command, so there is no verdict to seek a second opinion on.
+ */
+async function runCommandGate(
+  gate: VerifyGate,
+  worktreePath: string,
+  maxLogTailBytes: number,
+  gateEnv: Record<string, string>
+): Promise<GateOutcome> {
+  const first = await runGateAttempt(gate, worktreePath, maxLogTailBytes, gateEnv);
+  if (gate.retryOnFail !== 1 || first.status !== 'failed') return first;
+
+  const second = await runGateAttempt(gate, worktreePath, maxLogTailBytes, gateEnv);
+  if (second.status !== 'passed' && second.status !== 'failed') {
+    // The retry reached no verdict of its own, so there is nothing to compare
+    // the first run against. The first run's FAIL stands unchanged — reporting
+    // the retry's `skipped`/`timeout` instead would turn a gate that judged the
+    // work into a run with no verdict (exit 99), which is strictly weaker.
+    return {
+      ...first,
+      logTail: prefixLogTail(
+        `${FLAKY_LOG_PREFIX} retry reached no verdict (${second.status}); ` +
+          "the first run's result stands. Retry log:\n" +
+          (second.logTail ?? '(no output)'),
+        first.logTail
+      ),
+    };
+  }
+  return composeRetriedGate(gate, first, second);
+}
+
+/**
+ * Fold two runs of one gate into the single row the schema has (Issue #1772).
+ *
+ * `status` and `exitCode` come from the run whose verdict is being reported, so
+ * the row never says `failed` beside `exit=0`: a FLAKY gate counted as a
+ * failure reports the failing run, one counted as a pass reports the passing
+ * one, and a gate that failed twice reports the later failure. `durationMs` is
+ * the sum, because both runs were this gate's own command executing — the same
+ * rule #1771 applied when it kept the lock *wait* out of the number.
+ *
+ * Both runs' numbers reach the terminal through the {@link FLAKY_LOG_PREFIX}
+ * marker, which the CLI reads to print `GATE <id> FLAKY (exit=1,0, 45.0s,44.0s)`.
+ */
+function composeRetriedGate(
+  gate: VerifyGate,
+  first: GateOutcome,
+  second: GateOutcome
+): GateOutcome {
+  const outcome: FlakyOutcome = second.status === 'passed' ? 'flaky' : 'fail';
+  const passes = outcome === 'flaky' && gate.flakyIsPass === true;
+  const reported = passes ? second : outcome === 'flaky' ? first : second;
+
+  const marker =
+    `${FLAKY_LOG_PREFIX} runs=${RETRY_TOTAL_RUNS} outcome=${outcome} ` +
+    `exit=${formatExit(first.exitCode)},${formatExit(second.exitCode)} ` +
+    `duration=${formatSeconds(first.durationMs)},${formatSeconds(second.durationMs)} ` +
+    `verdict=${passes ? 'pass' : 'fail'}`;
+
+  const body = [
+    flakyRunHeader(1, first),
+    first.logTail ?? '',
+    flakyRunHeader(2, second),
+    second.logTail ?? '',
+  ].join('\n');
+
+  return {
+    status: passes ? 'passed' : 'failed',
+    exitCode: reported.exitCode,
+    // The window opens where the first run opened and closes `durationMs`
+    // later, so #1625's `finished_at - started_at === duration_ms` still holds
+    // and the pair still describes execution rather than the database write.
+    startedAt: first.startedAt,
+    durationMs: first.durationMs + second.durationMs,
+    logTail: `${marker}\n${body}`,
+  };
+}
+
+/** Put a machine-readable line ahead of a gate's output, keeping both. */
+function prefixLogTail(marker: string, logTail: string | null): string {
+  return logTail ? `${marker}\n${logTail}` : marker;
 }
 
 /** Run a git plumbing command. No shell: every argument here is code-supplied. */
@@ -682,6 +979,7 @@ interface EnvCleanContext {
 async function executeRun(
   db: Database.Database,
   runId: number,
+  worktreeId: string,
   worktreePath: string,
   config: VerifyConfig,
   selection: GateSelection,
@@ -695,6 +993,24 @@ async function executeRun(
   // ORed with the repository-wide switch rather than replacing it (#1642): a
   // delegation may tighten the rule, never relax one the repository declared.
   const requireCommit = resolveRequireCommit(task?.contract ?? null, config);
+
+  /**
+   * The per-worktree environment, resolved on first use (#1771).
+   *
+   * Lazy because claiming an index writes to `~/.commandmate/worktree-index`,
+   * and a run that reaches no command gate — work-evidence failed, the primary
+   * checkout guard skipped everything — must leave nothing behind. It also has
+   * to stay behind the env-clean gate below, which lists `~/.commandmate` and
+   * would otherwise diff against a directory this very run had just created.
+   */
+  let gateEnvCache: Record<string, string> | null = null;
+  const gateEnv = (): Record<string, string> => {
+    gateEnvCache ??= {
+      [WORKTREE_ID_ENV]: worktreeId,
+      [WORKTREE_INDEX_ENV]: String(resolveWorktreeIndex(worktreeId)),
+    };
+    return gateEnvCache;
+  };
 
   /**
    * Close an open gate row with the interval its evaluator measured.
@@ -850,7 +1166,7 @@ async function executeRun(
     }
 
     const outcome = await runGate(gate.id, gate.command, gate.source, () =>
-      runCommand(gate.command, worktreePath, gate.timeoutSec, maxLogTailBytes)
+      runCommandGate(gate, worktreePath, maxLogTailBytes, gateEnv())
     );
     statuses.push(outcome.status);
   }
@@ -1097,6 +1413,7 @@ export async function startVerification(
       const status = await executeRun(
         db,
         run.id,
+        input.worktreeId,
         input.worktreePath,
         resolvedConfig,
         resolvedSelection,
