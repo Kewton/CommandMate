@@ -460,6 +460,50 @@ describe('verify show — JSON output', () => {
     expect(parsed.id).toBe(7);
     expect(parsed.gates[0].logTail).toContain('2 tests failed');
   });
+
+  it('carries the scope evidence on the forensic surface too (Issue #1841)', async () => {
+    // `show` is where a reader reconstructs a run days later — exactly when
+    // "which allow pattern let that file through" is asked and the working tree
+    // that would answer it has moved on.
+    mockFetch([
+      {
+        data: {
+          run: detail({
+            gates: [
+              {
+                id: 2,
+                runId: 7,
+                gateId: 'scope',
+                command: 'git diff --name-only / status --porcelain \u00d7 contract scope',
+                status: 'passed',
+                exitCode: 0,
+                durationMs: 200,
+                logTail: [
+                  'scope: baseRef=origin/develop changed=1 violations=0',
+                  'allow: src/**',
+                  'deny: (none)',
+                  'admitted:',
+                  '  + src/a/b.ts  \u2190 src/**',
+                ].join('\n'),
+                startedAt: '2026-07-30T00:00:00.000Z',
+                finishedAt: '2026-07-30T00:00:00.200Z',
+              },
+            ],
+          }),
+        },
+      },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'show', '7', '--json']);
+
+    const parsed = JSON.parse(mockConsoleLog.mock.calls[0][0] as string);
+    expect(parsed.gates[0].scope).toEqual({
+      admitted: [{ path: 'src/a/b.ts', pattern: 'src/**' }],
+      violations: [],
+      totals: { changed: 1, admitted: 1, violations: 0 },
+    });
+  });
 });
 
 describe('verify show — errors', () => {

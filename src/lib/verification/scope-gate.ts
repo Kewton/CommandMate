@@ -72,6 +72,50 @@ export const SCOPE_ALLOW_GUIDANCE =
 export const ALWAYS_ALLOWED_PREFIX = '.commandmate/';
 
 /**
+ * Separator between a reported path and the pattern that decided it (#1841).
+ *
+ * Mirrored by the CLI's scope-evidence parser (`src/cli/commands/verify.ts`,
+ * SCOPE_PATTERN_ARROW): the gate's report is the only carrier for this evidence
+ * — `verification_gate_results` has columns for a status, an exit code and a log
+ * body, and nothing else — so the two constants have to agree. A round-trip
+ * test feeds a real `evaluateScope` report through that parser rather than
+ * trusting the two copies to be edited together.
+ *
+ * A path containing this exact three-character sequence would split wrongly on
+ * the way back. Nothing prevents such a filename; it is accepted because the
+ * alternative — encoding paths in a log a human reads first — costs every
+ * reader something to protect against a file no repository has.
+ */
+export const SCOPE_PATTERN_ARROW = '  \u2190 ';
+
+/**
+ * Stand-ins for the two ways a path is admitted without matching `allow`.
+ *
+ * Parenthesised so they cannot be mistaken for a pattern the contract declared:
+ * a reader who greps the contract for `(exempt: .commandmate/)` should find
+ * nothing, because nothing there put it in scope.
+ */
+export const SCOPE_EXEMPT_ALWAYS_ALLOWED = `(exempt: ${ALWAYS_ALLOWED_PREFIX})`;
+export const SCOPE_EXEMPT_CONTRACT_PATH = '(exempt: contract path)';
+
+/** One admitted change, with the pattern that admitted it (#1841). */
+export interface ScopeAdmission {
+  path: string;
+  /** A declared `allow` pattern, or one of the two exemption stand-ins. */
+  pattern: string;
+}
+
+/**
+ * Why one path was admitted or rejected (#1841).
+ *
+ * `pattern` is null only for the rejection that no rule names: nothing in
+ * `deny` matched, and nothing in `allow` did either.
+ */
+export type ScopeDecision =
+  | { admitted: true; pattern: string }
+  | { admitted: false; pattern: string | null };
+
+/**
  * Execution contracts, dropped from both gates' change sets entirely (#1580).
  *
  * An orchestrator writes `.commandmate/tasks/<task>.yaml` into a worktree and
@@ -208,6 +252,16 @@ function hasBalancedBraces(pattern: string): boolean {
   return depth === 0;
 }
 
+/** A declared pattern kept next to its regex, so the report can name it (#1841). */
+interface CompiledPattern {
+  pattern: string;
+  regexp: RegExp;
+}
+
+function compilePattern(pattern: string): CompiledPattern {
+  return { pattern, regexp: globToRegExp(pattern) };
+}
+
 /**
  * A scope declaration compiled once per run.
  *
@@ -215,8 +269,8 @@ function hasBalancedBraces(pattern: string): boolean {
  * potentially thousands of changed paths.
  */
 export class ScopeMatcher {
-  private readonly allow: RegExp[];
-  private readonly deny: RegExp[];
+  private readonly allow: CompiledPattern[];
+  private readonly deny: CompiledPattern[];
 
   /**
    * @param contractPath the contract's own path, exempted alongside
@@ -226,19 +280,44 @@ export class ScopeMatcher {
     scope: TaskContractScope,
     private readonly contractPath: string | null = null
   ) {
-    this.allow = scope.allow.map(globToRegExp);
-    this.deny = scope.deny.map(globToRegExp);
+    this.allow = scope.allow.map(compilePattern);
+    this.deny = scope.deny.map(compilePattern);
+  }
+
+  /**
+   * Which declared rule decided `path`, and which way (#1841).
+   *
+   * The **first** matching pattern is reported, in the contract's declaration
+   * order, on both sides. Reporting the last would name a rule the reader
+   * cannot use: `allow: ["src/**", "src/lib/**"]` admits `src/lib/a.ts` under
+   * the first entry, and deleting the second changes nothing about the verdict.
+   *
+   * `path` is a repository-root-relative POSIX path as git reports it.
+   */
+  classify(path: string): ScopeDecision {
+    const denied = this.deny.find((entry) => entry.regexp.test(path));
+    if (denied) return { admitted: false, pattern: denied.pattern };
+    if (path.startsWith(ALWAYS_ALLOWED_PREFIX)) {
+      return { admitted: true, pattern: SCOPE_EXEMPT_ALWAYS_ALLOWED };
+    }
+    if (path === this.contractPath) {
+      return { admitted: true, pattern: SCOPE_EXEMPT_CONTRACT_PATH };
+    }
+    const allowed = this.allow.find((entry) => entry.regexp.test(path));
+    return allowed
+      ? { admitted: true, pattern: allowed.pattern }
+      : { admitted: false, pattern: null };
   }
 
   /**
    * Whether `path` is a scope violation.
    *
-   * `path` is a repository-root-relative POSIX path as git reports it.
+   * Delegates to {@link classify} rather than repeating the rules: the verdict
+   * and the evidence for it must never be able to disagree, and two copies of
+   * "deny wins, then the exemptions, then allow" is exactly how they would.
    */
   isViolation(path: string): boolean {
-    if (this.deny.some((pattern) => pattern.test(path))) return true;
-    if (path.startsWith(ALWAYS_ALLOWED_PREFIX) || path === this.contractPath) return false;
-    return !this.allow.some((pattern) => pattern.test(path));
+    return !this.classify(path).admitted;
   }
 }
 
@@ -388,6 +467,45 @@ function formatPatterns(patterns: string[]): string {
 }
 
 /**
+ * One reported path, optionally naming the rule that decided it (#1841).
+ *
+ * Admitted paths lead with `+` rather than `-` so the two sections cannot be
+ * confused by a reader — or by a grep — that has only one line in front of it.
+ */
+function formatDecidedPath(marker: '+' | '-', path: string, pattern: string | null): string {
+  if (pattern === null) return `  ${marker} ${path}`;
+  return `  ${marker} ${path}${SCOPE_PATTERN_ARROW}${pattern}`;
+}
+
+/**
+ * The `admitted:` section: what this run was allowed to change, and by which
+ * rule (#1841).
+ *
+ * With an `allow` of exact paths the pattern *is* the file and this adds
+ * nothing, but #1546 made globs legal, and `src/**` leaves no record of what it
+ * actually covered on the day it ran. The contract is the claim; this is the
+ * evidence for it, and it has to survive in `log_tail` because the run's own
+ * working tree will have moved on by the time anyone asks.
+ *
+ * Capped by the same rule as the violations, for the same reason (log_tail is
+ * stored per gate in SQLite), and the truncation is stated rather than silent —
+ * a list that stops at 100 with no marker reads as a complete one.
+ */
+function formatAdmitted(admitted: ScopeAdmission[]): string[] {
+  if (admitted.length === 0) return [];
+  const listed = admitted.slice(0, MAX_REPORTED_VIOLATIONS);
+  const remainder = admitted.length - listed.length;
+  return [
+    'admitted:',
+    ...listed.map((entry) => formatDecidedPath('+', entry.path, entry.pattern)),
+    // Worded `(+N more)` rather than the violations' `... and N more`: the two
+    // sections are capped independently and a reader scanning a truncated
+    // report should not have to work out which count belongs to which list.
+    ...(remainder > 0 ? [`  ... (+${remainder} more)`] : []),
+  ];
+}
+
+/**
  * Reasons the gate has nothing to judge, phrased for `log_tail`.
  *
  * A skip is recorded rather than omitted: a run with no scope row at all is
@@ -460,11 +578,28 @@ export async function evaluateScope(
   if ('error' in changed) return done('error', `scope: ${changed.error}`, null);
 
   const matcher = new ScopeMatcher(scope, contractPath);
-  const violations = changed.paths.filter((path) => matcher.isViolation(path));
+  // Every changed path is classified, whether or not it will fit in the report:
+  // the cap below is a display rule, and a violation withheld from the listing
+  // still counts toward the verdict.
+  const admitted: ScopeAdmission[] = [];
+  const violations: string[] = [];
+  const rejectedBy = new Map<string, string>();
+  for (const path of changed.paths) {
+    const decision = matcher.classify(path);
+    if (decision.admitted) {
+      admitted.push({ path, pattern: decision.pattern });
+      continue;
+    }
+    violations.push(path);
+    if (decision.pattern !== null) rejectedBy.set(path, decision.pattern);
+  }
 
-  const summary =
-    `scope: baseRef=${baseRef} changed=${changed.paths.length} violations=${violations.length}\n` +
-    `allow: ${formatPatterns(scope.allow)}\ndeny: ${formatPatterns(scope.deny)}`;
+  const summary = [
+    `scope: baseRef=${baseRef} changed=${changed.paths.length} violations=${violations.length}`,
+    `allow: ${formatPatterns(scope.allow)}`,
+    `deny: ${formatPatterns(scope.deny)}`,
+    ...formatAdmitted(admitted),
+  ].join('\n');
 
   if (violations.length === 0) {
     // An empty change set passes: work-evidence is the gate that judges "nothing
@@ -477,7 +612,11 @@ export async function evaluateScope(
   const report = [
     summary,
     'out of scope:',
-    ...listed.map((path) => `  - ${path}`),
+    // A deny match is named inline: the `deny:` line above lists what the
+    // contract declared, not which of those entries this path tripped, and a
+    // violation the reader must revert reads differently from one they could
+    // fix by widening `allow`.
+    ...listed.map((path) => formatDecidedPath('-', path, rejectedBy.get(path) ?? null)),
     ...(remainder > 0 ? [`  ... and ${remainder} more`] : []),
     SCOPE_ALLOW_GUIDANCE,
   ].join('\n');

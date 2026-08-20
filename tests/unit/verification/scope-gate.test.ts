@@ -37,9 +37,13 @@ import {
   MAX_REPORTED_VIOLATIONS,
   ScopeMatcher,
   SCOPE_ALLOW_GUIDANCE,
+  SCOPE_EXEMPT_ALWAYS_ALLOWED,
+  SCOPE_EXEMPT_CONTRACT_PATH,
+  SCOPE_PATTERN_ARROW,
   SCOPE_SKIP_NO_CONTRACT,
   SCOPE_SKIP_NOT_REQUIRED,
 } from '@/lib/verification/scope-gate';
+import { parseScopeEvidence } from '@/cli/commands/verify';
 import { removeTempDir } from '@tests/helpers/temp-dir';
 
 // =============================================================================
@@ -582,5 +586,290 @@ describe('evaluateScope', () => {
     expect(outcome.logTail).toContain('... and 5 more');
     // Truncation must not swallow the actionable part.
     expect((outcome.logTail ?? '').endsWith(SCOPE_ALLOW_GUIDANCE)).toBe(true);
+  });
+});
+
+// =============================================================================
+// Admission evidence (Issue #1841)
+// =============================================================================
+
+/**
+ * `  + <path>  \u2190 <pattern>` lines, as {path: pattern}.
+ *
+ * Read out of the report rather than off a return value on purpose: `log_tail`
+ * is the only place this evidence is stored, so a test that asserted on an
+ * in-memory structure would pass while the thing an operator actually reads
+ * three days later said nothing.
+ */
+function admittedLines(logTail: string | null): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of (logTail ?? '').split('\n')) {
+    if (!line.startsWith('  + ')) continue;
+    const [path, pattern] = line.slice(4).split(SCOPE_PATTERN_ARROW);
+    out[path] = pattern;
+  }
+  return out;
+}
+
+/** `  - <path>` lines, with any trailing `\u2190 <pattern>` stripped. */
+function violationLines(logTail: string | null): string[] {
+  return (logTail ?? '')
+    .split('\n')
+    .filter((line) => line.startsWith('  - '))
+    .map((line) => line.slice(4).split(SCOPE_PATTERN_ARROW)[0]);
+}
+
+describe('ScopeMatcher.classify', () => {
+  it('names the first matching allow pattern, not the last', () => {
+    // The reader has to be able to act on the answer: deleting the second entry
+    // changes nothing about this path, so naming it would send them to a rule
+    // that is not load-bearing.
+    const matcher = new ScopeMatcher(scope(['src/**', 'src/lib/**']));
+    expect(matcher.classify('src/lib/a.ts')).toEqual({ admitted: true, pattern: 'src/**' });
+  });
+
+  it('names the first matching deny pattern and admits nothing on a deny', () => {
+    const matcher = new ScopeMatcher(scope(['src/**'], ['src/**/*.gen.ts', 'src/lib/**']));
+    expect(matcher.classify('src/lib/a.gen.ts')).toEqual({
+      admitted: false,
+      pattern: 'src/**/*.gen.ts',
+    });
+  });
+
+  it('reports a null pattern when nothing matched at all', () => {
+    // The one rejection no rule can be named for. A stand-in string here would
+    // send the reader looking through the contract for something not in it.
+    expect(new ScopeMatcher(scope(['src/**'])).classify('README.md')).toEqual({
+      admitted: false,
+      pattern: null,
+    });
+  });
+
+  it('marks the two exemptions apart from any declared pattern', () => {
+    const matcher = new ScopeMatcher(scope(['src/**']), 'contracts/t.yaml');
+    expect(matcher.classify('.commandmate/verify.yaml')).toEqual({
+      admitted: true,
+      pattern: SCOPE_EXEMPT_ALWAYS_ALLOWED,
+    });
+    expect(matcher.classify('contracts/t.yaml')).toEqual({
+      admitted: true,
+      pattern: SCOPE_EXEMPT_CONTRACT_PATH,
+    });
+    // Parenthesised so a reader grepping the contract for the reported pattern
+    // finds nothing, which is the truth: nothing there put these in scope.
+    expect(SCOPE_EXEMPT_ALWAYS_ALLOWED.startsWith('(')).toBe(true);
+    expect(SCOPE_EXEMPT_CONTRACT_PATH.startsWith('(')).toBe(true);
+  });
+
+  it('keeps isViolation in step with classify over every glob case', () => {
+    const matcher = new ScopeMatcher(scope(['src/**', 'docs/*.md'], ['src/secret/**']));
+    for (const path of [
+      'src/a/b.ts',
+      'docs/x.md',
+      'docs/nested/x.md',
+      'README.md',
+      'src/secret/key.ts',
+      '.commandmate/verify.yaml',
+    ]) {
+      expect(matcher.isViolation(path)).toBe(!matcher.classify(path).admitted);
+    }
+  });
+});
+
+describe('evaluateScope — admitted evidence', () => {
+  it('records which allow pattern admitted each changed file', async () => {
+    const repo = createRepo();
+    write(repo, 'src/a/b.ts', 'export const b = 1;\n');
+    write(repo, 'docs/x.md', '# x\n');
+    write(repo, 'README.md', 'edited\n');
+    git(['add', '-A'], repo);
+    git(['commit', '-m', 'mixed'], repo);
+
+    const outcome = await evaluate(repo, scope(['src/**', 'docs/*.md']));
+    expect(outcome.status).toBe('failed');
+    expect(admittedLines(outcome.logTail)).toEqual({
+      'src/a/b.ts': 'src/**',
+      'docs/x.md': 'docs/*.md',
+    });
+    expect(violationLines(outcome.logTail)).toEqual(['README.md']);
+  });
+
+  it('records the admitting pattern on a passing run too', async () => {
+    // The evidence exists for the runs that passed: "what did `src/**` actually
+    // cover that day" is unanswerable afterwards, and a green run is exactly
+    // when nobody thinks to look.
+    const repo = createRepo();
+    write(repo, 'src/lib/verification/scope-gate.ts', 'export const gate = 1;\n');
+    git(['add', '-A'], repo);
+    git(['commit', '-m', 'in scope'], repo);
+
+    const outcome = await evaluate(repo, ALLOW_SRC);
+    expect(outcome.status).toBe('passed');
+    expect(outcome.logTail).toContain('admitted:');
+    expect(admittedLines(outcome.logTail)).toEqual({
+      'src/lib/verification/scope-gate.ts': 'src/lib/verification/**',
+    });
+  });
+
+  it('names the exemption that admitted a path no pattern covers', async () => {
+    const repo = createRepo();
+    write(repo, '.commandmate/verify.yaml', 'version: 1\n');
+
+    const outcome = await evaluate(repo, ALLOW_SRC);
+    expect(outcome.status).toBe('passed');
+    expect(admittedLines(outcome.logTail)).toEqual({
+      '.commandmate/verify.yaml': SCOPE_EXEMPT_ALWAYS_ALLOWED,
+    });
+  });
+
+  it('keeps a denied path out of admitted and names the deny pattern that rejected it', async () => {
+    const repo = createRepo();
+    write(repo, 'src/lib/verification/scope-gate.ts', 'export const gate = 1;\n');
+    write(repo, 'src/lib/verification/gate-runner.ts', 'export const runner = 1;\n');
+    git(['add', '-A'], repo);
+    git(['commit', '-m', 'touches a denied file'], repo);
+
+    const outcome = await evaluate(
+      repo,
+      scope(['src/lib/verification/**'], ['src/lib/verification/gate-runner.ts'])
+    );
+    expect(outcome.status).toBe('failed');
+    expect(admittedLines(outcome.logTail)).toEqual({
+      'src/lib/verification/scope-gate.ts': 'src/lib/verification/**',
+    });
+    // The `deny:` header lists what was declared; this says which entry this
+    // path tripped — the difference between "revert it" and "widen allow".
+    expect(outcome.logTail).toContain(
+      `  - src/lib/verification/gate-runner.ts${SCOPE_PATTERN_ARROW}src/lib/verification/gate-runner.ts`
+    );
+  });
+
+  it('leaves an allow-miss violation with no pattern to blame', async () => {
+    const repo = createRepo();
+    write(repo, 'package.json', '{}\n');
+    git(['add', '-A'], repo);
+    git(['commit', '-m', 'out of scope'], repo);
+
+    const outcome = await evaluate(repo, ALLOW_SRC);
+    expect(outcome.logTail).toContain('  - package.json\n');
+    expect(outcome.logTail).not.toContain(`package.json${SCOPE_PATTERN_ARROW}`);
+  });
+
+  it('omits the admitted section entirely when nothing was admitted', async () => {
+    const repo = createRepo();
+    write(repo, 'package.json', '{}\n');
+
+    const outcome = await evaluate(repo, ALLOW_SRC);
+    expect(outcome.logTail).not.toContain('admitted:');
+  });
+
+  it('caps the admitted list, says so, and still judges every file', async () => {
+    const repo = createRepo();
+    const admittedTotal = MAX_REPORTED_VIOLATIONS + 7;
+    for (let i = 0; i < admittedTotal; i += 1) {
+      write(repo, `src/lib/verification/f-${String(i).padStart(3, '0')}.ts`, 'export const x = 1;\n');
+    }
+    write(repo, 'stray-a.ts', 'export const x = 1;\n');
+    write(repo, 'stray-b.ts', 'export const x = 1;\n');
+
+    const outcome = await evaluate(repo, ALLOW_SRC);
+    expect(Object.keys(admittedLines(outcome.logTail))).toHaveLength(MAX_REPORTED_VIOLATIONS);
+    expect(outcome.logTail).toContain('(+7 more)');
+    // Truncation is a display rule. The summary counts every path, and the two
+    // violations that share the report with a capped admitted list still decide
+    // the verdict.
+    expect(outcome.logTail).toContain(`changed=${admittedTotal + 2} violations=2`);
+    expect(outcome.status).toBe('failed');
+    expect(outcome.exitCode).toBe(1);
+    expect(violationLines(outcome.logTail)).toEqual(['stray-a.ts', 'stray-b.ts']);
+  });
+
+  it('puts the admitted section before the violations so a capped log keeps the verdict', async () => {
+    // `verify` echoes only the LAST 40 lines of a failing gate's log
+    // (MAX_PRINTED_LOG_TAIL_LINES). A long admitted list printed after the
+    // violations would scroll the actionable half out of the terminal.
+    const repo = createRepo();
+    write(repo, 'src/lib/verification/a.ts', 'export const a = 1;\n');
+    write(repo, 'package.json', '{}\n');
+
+    const tail = (await evaluate(repo, ALLOW_SRC)).logTail ?? '';
+    expect(tail.indexOf('admitted:')).toBeGreaterThan(-1);
+    expect(tail.indexOf('admitted:')).toBeLessThan(tail.indexOf('out of scope:'));
+    expect(tail.endsWith(SCOPE_ALLOW_GUIDANCE)).toBe(true);
+  });
+});
+
+describe('scope evidence round-trip into `verify --json`', () => {
+  // The gate formats the report and the CLI parses it back, in two modules that
+  // cannot import each other: tsconfig.cli.json compiles `src/cli/**` with no
+  // path aliases, so the CLI bundle never reaches the server's dependency
+  // graph. Feeding a real report through the real parser is what keeps the two
+  // copies of the format honest — asserting the constants match would only
+  // prove they were copied, not that the shape survives.
+
+  it('recovers the admitted pairs and violations a real gate report carries', async () => {
+    const repo = createRepo();
+    write(repo, 'src/a/b.ts', 'export const b = 1;\n');
+    write(repo, 'docs/x.md', '# x\n');
+    write(repo, 'README.md', 'edited\n');
+
+    const outcome = await evaluate(repo, scope(['src/**', 'docs/*.md']));
+    const evidence = parseScopeEvidence(outcome.logTail);
+
+    expect(evidence).not.toBeNull();
+    expect(evidence?.admitted).toEqual([
+      { path: 'docs/x.md', pattern: 'docs/*.md' },
+      { path: 'src/a/b.ts', pattern: 'src/**' },
+    ]);
+    expect(evidence?.violations).toEqual(['README.md']);
+    expect(evidence?.totals).toEqual({ changed: 3, admitted: 2, violations: 1 });
+  });
+
+  it('recovers a deny rejection as a violation, with no admitted entry for it', async () => {
+    const repo = createRepo();
+    write(repo, 'src/keep.ts', 'export const k = 1;\n');
+    write(repo, 'src/secret/key.ts', 'export const s = 1;\n');
+
+    const outcome = await evaluate(repo, scope(['src/**'], ['src/secret/**']));
+    const evidence = parseScopeEvidence(outcome.logTail);
+
+    expect(evidence?.admitted).toEqual([{ path: 'src/keep.ts', pattern: 'src/**' }]);
+    expect(evidence?.violations).toEqual(['src/secret/key.ts']);
+  });
+
+  it('reports totals over every path when the report truncated its lists', async () => {
+    const repo = createRepo();
+    const admittedTotal = MAX_REPORTED_VIOLATIONS + 3;
+    for (let i = 0; i < admittedTotal; i += 1) {
+      write(repo, `src/f-${String(i).padStart(3, '0')}.ts`, 'export const x = 1;\n');
+    }
+    write(repo, 'stray.ts', 'export const x = 1;\n');
+
+    const evidence = parseScopeEvidence((await evaluate(repo, scope(['src/**']))).logTail);
+
+    // A consumer branching on `violations.length` would read 1 here and be
+    // right; one branching on `admitted.length` would read 100 and be wrong.
+    // The totals are what the gate counted.
+    expect(evidence?.admitted).toHaveLength(MAX_REPORTED_VIOLATIONS);
+    expect(evidence?.totals).toEqual({
+      changed: admittedTotal + 1,
+      admitted: admittedTotal,
+      violations: 1,
+    });
+  });
+
+  it('returns null for the tails that are messages rather than reports', async () => {
+    const repo = createRepo();
+    write(repo, 'anything.ts', 'export const x = 1;\n');
+
+    // An empty `admitted` on a skip would claim the gate looked and found
+    // nothing in scope, which is the opposite of what happened.
+    expect(parseScopeEvidence((await evaluate(repo, null)).logTail)).toBeNull();
+    expect(
+      parseScopeEvidence((await evaluate(repo, ALLOW_SRC, { requireScopeClean: false })).logTail)
+    ).toBeNull();
+    expect(parseScopeEvidence((await evaluate(repo, ALLOW_SRC, { baseRef: null })).logTail)).toBeNull();
+    expect(parseScopeEvidence(null)).toBeNull();
+    expect(parseScopeEvidence('skipped: the work-evidence gate did not pass.')).toBeNull();
   });
 });
