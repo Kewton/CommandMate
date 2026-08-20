@@ -661,6 +661,63 @@ GATE e2e SKIP (reason=mutex-wait waited=600.0s)
 > verify.yaml は**設定エラー（exit 2）で一切走りません**。両方で回すリポジトリでは、
 > skill 側へ移植されるまで `mutex:` を書かないでください。
 
+### 環境・乱数由来の赤を FLAKY として名指す（Issue #1772）
+
+「この 1 件だけ赤ならまず再実行してみる」は長く**人間の部族知識**でした。並列委任の下では、
+ワーカーもオペレータも赤の原因を自分の変更に求めて時間を焼きます
+（実測: 禁止語検査の `not.toContain("fac-")` が乱数 UUID の `9fac-` に一致して fail し、
+同一 tree で再実行したら pass）。
+
+ゲート単位の opt-in で、**fail したら同一 tree でもう 1 回だけ**再実行できます。
+
+```yaml
+gates:
+  - id: unit
+    command: "npm run test:unit"
+    timeoutSec: 1800
+    retryOnFail: 1        # 0 か 1 のみ。省略時 0（＝再実行しない）
+    flakyIsPass: false    # 省略時 false。FLAKY を pass 扱いにするか
+```
+
+1 回目 fail → 2 回目 pass のとき、GATE 行は `FLAKY` になり **両ランの exit と duration**
+が出ます。2 回とも fail なら `FLAKY` にはならず `FAIL` のままです。
+
+```
+GATE unit FLAKY (exit=1,0, 45.0s,44.0s)
+GATE e2e FAIL (exit=1,1, 45.0s,44.0s)
+```
+
+| | 既定（`flakyIsPass` 未宣言） | `flakyIsPass: true` |
+|---|---|---|
+| ゲートの裁定 | **fail** | pass |
+| RESULT / exit code | `failed` / **20** | `passed` / **0** |
+| GATE 行 | `FLAKY` | `FLAKY`（綴りは変わりません） |
+
+**既定は「FLAKY は fail 扱い」です。** `retryOnFail: 1` を書いてもゲートは 1 bit も
+弱くなりません — 買えるのは「何が起きたか」に名前が付くことだけで、pass ではありません。
+`flakyIsPass` は**ゲート単位**の宣言で、`retryOnFail: 1` を伴わない `flakyIsPass: true` は
+設定エラーです（再実行が無ければ FLAKY は発生せず、その宣言は何も変えないため）。
+
+再実行するのは**非ゼロ終了（FAIL）だけ**です。TIMEOUT は再実行しません（そのゲートは
+既に予算を使い切っており、2 回目は実時間をそのまま倍にします）。mutex 待ちの SKIP や
+起動失敗も、コマンドが 1 度も走っていないため対象外です。
+
+両ランの記録は `verify show <run-id>` で読めます（`--json` では `gates[].flaky` として
+構造化されます）。`verify history` の**一覧行には出ません** — 一覧はログ本体を返さない
+設計のためで、run を絞ってから `show` を見てください。
+
+```
+$ commandmate verify show 42
+  unit  failed  exit=1  89.0s  src=verify.yaml  FLAKY
+    | [flaky] runs=2 outcome=flaky exit=1,0 duration=45.0s,44.0s verdict=fail
+    | --- [flaky] run 1/2: failed exit=1 duration=45.0s ---
+```
+
+> **注意**: `retryOnFail` / `flakyIsPass` を受理するのは現時点で CommandMate の runner
+> だけです。`cmate-verify` skill の standalone runner は v1 を閉じたキー集合として扱うため、
+> これらを書いた verify.yaml は**設定エラー（exit 2）で一切走りません**。両方で回す
+> リポジトリでは、skill 側へ移植されるまで書かないでください。
+
 ### scope ゲートの証跡 — 何がどのパターンで許可されたか（Issue #1841）
 
 `scope.allow` に完全一致 path しか書かない運用なら「パターン＝ファイル」なので追加情報はありませんが、

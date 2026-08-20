@@ -27,6 +27,8 @@ gates:
   - id: unit
     command: "npm run test:unit"
     timeoutSec: 1800
+    retryOnFail: 1     # 省略時 0。fail したら同一 tree で 1 回だけ再実行する（§10）
+    flakyIsPass: false # 省略時 false。fail→pass（FLAKY）を pass 扱いにするか（§10）
   - id: e2e
     command: "npm run test:e2e"
     timeoutSec: 1800
@@ -61,6 +63,8 @@ options:
 | `command` | string | ✅ | — | 非空。`--cwd` を作業ディレクトリとして POSIX sh (`/bin/sh -c`) で実行される |
 | `timeoutSec` | integer | — | `600` | `1..7200` |
 | `mutex` | string | — | （無し） | `^[A-Za-z0-9_.-]+$`、64 文字以内。マシン全体のロック名（§9） |
+| `retryOnFail` | integer | — | `0` | **`0` か `1` のみ**。`1` で、コマンドが非ゼロ終了したとき同一 tree でもう 1 回だけ再実行する（§10） |
+| `flakyIsPass` | boolean | — | `false` | `true` で FLAKY（fail→pass）を pass 扱いにする。**`retryOnFail: 1` を伴わない `true` は設定エラー**（§10） |
 
 `command` は **POSIX sh** で実行される。bash 固有構文（`[[ ]]` / 配列 / `function` キーワード）は
 使わないこと。必要なら `bash -c "..."` と明示的に書く。
@@ -128,6 +132,7 @@ RESULT failed
 | 行 | 形式 |
 |---|---|
 | コマンド系ゲート | `GATE <id> PASS\|FAIL exit=<code> duration=<n>s` |
+| 再実行したゲート（§10） | `GATE <id> FLAKY\|FAIL exit=<code1>,<code2> duration=<n>s,<n>s` |
 | タイムアウト | `GATE <id> TIMEOUT exit=124 duration=<n>s` |
 | skip | `GATE <id> SKIP reason=primary-checkout\|flag\|mutex-wait` |
 | work-evidence | `GATE work-evidence PASS\|FAIL commits=<n> uncommitted=<n>` |
@@ -137,6 +142,10 @@ RESULT failed
 
 **`mutex` を宣言したゲートは `waited=<n>s` を追加する**（Issue #1771、§9.3）。
 `duration` に足さないことが規約である。
+
+**`retryOnFail: 1` を宣言したゲートが実際に再実行されたときは、`exit` と `duration` が
+2 値のカンマ区切りになる**（Issue #1772、§9.3 の表・§10）。再実行が起きなかったゲート
+（宣言していない／1 回目で PASS した）の行は**従来どおり 1 値**である。
 
 ### 3.5 exit code は絶対にパイプで失わない
 
@@ -451,10 +460,25 @@ GATE e2e PASS exit=0 duration=190s waited=42s
 **契約はフィールド名 `waited` と単位 `s`、および「duration に足さない」ことであって、
 区切り文字ではない。**
 
-| ランナー | 綴り |
-|---|---|
-| standalone（`verify-run.sh`） | `GATE e2e PASS exit=0 duration=190s waited=42s` |
-| CommandMate CLI | `GATE e2e PASS (exit=0, 190.0s, waited=42.3s)` |
+**本表が GATE 行の綴りの確定形である**（§9.2 の `waited` と §10 の FLAKY の両方を含む）。
+skills 側（#223 / #224）はこの表を正として実装する。
+
+| ランナー | 場面 | 綴り |
+|---|---|---|
+| standalone（`verify-run.sh`） | mutex 待ち（§9.2） | `GATE e2e PASS exit=0 duration=190s waited=42s` |
+| CommandMate CLI | mutex 待ち（§9.2） | `GATE e2e PASS (exit=0, 190.0s, waited=42.3s)` |
+| standalone（`verify-run.sh`） | FLAKY ＝ fail→pass（§10、Issue #1772） | `GATE unit FLAKY exit=1,0 duration=45s,44s` |
+| CommandMate CLI | FLAKY ＝ fail→pass（§10、Issue #1772） | `GATE unit FLAKY (exit=1,0, 45.0s,44.0s)` |
+| standalone（`verify-run.sh`） | 再実行しても fail（§10、Issue #1772） | `GATE unit FAIL exit=1,1 duration=45s,44s` |
+| CommandMate CLI | 再実行しても fail（§10、Issue #1772） | `GATE unit FAIL (exit=1,1, 45.0s,44.0s)` |
+
+**`FLAKY` は `flakyIsPass` の値で綴りが変わらない。** 裁定（RESULT と exit code）は
+`flakyIsPass` が決めるが、GATE 行が名指すのは**起きた事実**である。`flakyIsPass: true` の
+FLAKY を `PASS` と綴ってしまうと、この機能が可視化するために存在する唯一の事実が消える。
+
+**再実行しても fail したゲートは `FLAKY` ではなく `FAIL`** である。再実行が 1 回目に同意した
+のだから flaky ではない。`exit` / `duration` が 2 値になるのは、2 回走ったという事実のほうは
+残すためである。
 
 製品実装には `verification_gate_results` に待ち時間の列が無いため、`log_tail` の先頭に
 機械可読の 1 行 `[mutex] name=<name> waited=<n.n>s lock=<path>` を置き、CLI がそれを読んで
@@ -485,6 +509,7 @@ commandmate-skills リポジトリの実装）は**この表を正として**追
 |---|---|---|---|
 | `gates[]` | `id` / `command` / `timeoutSec` | ✅ | ✅ |
 | `gates[]` | `mutex` | ✅ #1771 | **未移植**（skills #223） |
+| `gates[]` | `retryOnFail` / `flakyIsPass` | ✅ #1772 | **未移植**（skills #224） |
 | `options` | `baseRef` / `skipInPrimaryCheckout` / `maxLogTailBytes` / `requireCommit` | ✅ | ✅ |
 | `options` | `requireEnvClean` | ✅ #1740 | **未移植** |
 
@@ -492,3 +517,112 @@ commandmate-skills リポジトリの実装）は**この表を正として**追
 閉じた集合として扱うためで、`mutex:` を書いた verify.yaml は移植が済むまで standalone
 runner では**一切走らない**。移植が完了するまで、両ランナーで回すリポジトリの
 verify.yaml に `mutex:` を書かないこと。
+
+---
+
+## 10. FLAKY — 環境・乱数由来の赤を名前のある事実にする（Issue #1772）
+
+ランナーが持つ結果は PASS / FAIL しか無く、「この 1 件だけ赤ならまず再実行してみる」は
+**人間の部族知識**だった。オーケストレーション配下では、ワーカーもオペレータも赤の原因を
+自分の変更に求めて時間を焼く。
+
+実測（Kewton/BorderFreeKidsMap、2026-08-10）: unit ゲートの禁止語検査が
+`JSON.stringify(sent)` 全体への `not.toContain("fac-")` で、**乱数 UUID の `9fac-` に一致して
+fail**。同一 tree で再実行したら pass（1 fail 52 pass → 53 pass）。
+
+### 10.1 `retryOnFail: 1` — 同一 tree でもう 1 回だけ
+
+```yaml
+gates:
+  - id: unit
+    command: "npm run test:unit"
+    timeoutSec: 1800
+    retryOnFail: 1
+```
+
+- **値域は `0` か `1` のみ。** 2 以上は設定エラーである。十分な回数を回せばどんな赤も緑に
+  なるので、**上限そのものがこの機能の中身**である。1 回の再実行が答えるのは
+  「同一 tree で再現するか」という 1 つの問いだけで、それ以上は答えない。
+- **再実行するのは `FAIL`（非ゼロ終了）だけ。** `TIMEOUT` は再実行しない（そのゲートは
+  既に予算を使い切っており、2 回目は予算が最も大きいゲートの実時間をそのまま倍にする）。
+  `SKIP`（mutex が空かなかった）と起動失敗はコマンドが 1 度も走っていないので、
+  second opinion を求める対象の裁定が存在しない。
+- 2 回目が裁定に到達しなかったとき（mutex 待ちで SKIP・TIMEOUT・起動失敗）は
+  **1 回目の FAIL がそのまま立つ**。2 回目の結果を採ると、work を裁定したゲートが
+  「判定不能（exit 99）」に化けて**判定が弱くなる**。
+- `mutex` と併用したとき、ロックは**試行ごとに取得・解放する**。1 回目で失敗したランのために
+  マシン全体の資源を 2 試行ぶん占有し続けない。
+
+### 10.2 `flakyIsPass` — 裁定上の扱いは宣言で選ぶ
+
+| outcome | 条件 | GATE 行 | ゲートの裁定 |
+|---|---|---|---|
+| FLAKY | 1 回目 fail → 2 回目 pass、`flakyIsPass` 未宣言／`false` | `FLAKY` | **fail**（RESULT `failed` / exit 20） |
+| FLAKY | 1 回目 fail → 2 回目 pass、`flakyIsPass: true` | `FLAKY` | pass（RESULT `passed` / exit 0） |
+| FAIL | 2 回とも fail | `FAIL` | fail |
+
+**既定は「FLAKY は fail 扱い」＝ 再実行を宣言してもゲートは 1 bit も弱くならない。**
+`retryOnFail: 1` が買うのは「何が起きたか」に名前が付くことであって、pass ではない。
+
+**`flakyIsPass` は gate 単位**である（options 単位ではない。skills #224 はこちらを正とすること）。
+理由:
+
+1. `retryOnFail` が gate 単位である以上、対になる裁定も同じ場所に無いと、ゲート宣言 1 つを
+   読んだ人が「このゲートの FLAKY はどう裁定されるのか」を別の場所を見ないと言えない。
+2. リポジトリはゲートごとに事情が違う。`unit` が乱数 UUID で落ちるのはノイズだが、
+   `e2e` が 1 回落ちて 1 回通るのはたいてい製品側の実レースである。options 単位は
+   この 2 つを 1 つの答えに強制する。
+3. options 単位だと、`retryOnFail` を宣言していないゲートに対しても書けてしまう
+   ＝ **決して発火しない宣言**が正当な設定として通る。
+
+**`flakyIsPass: true` を `retryOnFail: 1` 無しで書くのは設定エラー**である。再実行が無ければ
+FLAKY は発生しないので、その宣言は「ここでは flake を許す」と読めて何も変えない。
+（`flakyIsPass: false` 単独は既定を明示しただけなので通る。）
+
+### 10.3 両ランの記録
+
+`verification_gate_results` は 1 ゲートにつき status / exit code / duration を 1 つずつしか
+持たず、**#1772 では DB マイグレーションを行わない**。そこで 2 回目の数値は #1771 の
+`waited` と同じ経路 — `log_tail` の**行頭アンカー** — で運ぶ。
+
+```
+[flaky] runs=2 outcome=flaky exit=1,0 duration=45.0s,44.0s verdict=fail
+--- [flaky] run 1/2: failed exit=1 duration=45.0s ---
+AssertionError: expected not to contain "fac-"
+--- [flaky] run 2/2: passed exit=0 duration=44.0s ---
+53 passed
+```
+
+| フィールド | 意味 |
+|---|---|
+| `runs` | 実際に走った回数。`retryOnFail` の上限が 1 なので現状は常に 2 |
+| `outcome` | `flaky`（fail→pass）／ `fail`（2 回とも fail） |
+| `exit` | 各ランの exit code をラン順にカンマ区切り。シグナルで殺されたランは `n/a` |
+| `duration` | 各ランの実行時間をラン順にカンマ区切り（`45.0s,44.0s`） |
+| `verdict` | そのランが**実際にどう数えたか**（`pass` は `outcome=flaky` かつ `flakyIsPass: true` のときだけ）。後から読む人が当時の verify.yaml を持っていないため、再計算ではなく記録する |
+
+- **`outcome=fail`（2 回とも fail）でもアンカーを書く。** 2 回落ちたゲートは flakiness に対する
+  **反証**であり、flake advisor はその分母を必要とする。flaky 側にしか印が無いと、
+  再実行したゲートが全て flaky に見える。
+- **両ランのログを残す。** 片方だけにすると、この機能が答えるために存在する唯一の問い
+  ＝「2 回で何が違ったのか」が記録から答えられなくなる。`maxLogTailBytes` は
+  **ラン単位**に適用される（1 ゲートのコマンド 1 本ぶんの上限であり、コマンドは 2 本走った）。
+- 行頭アンカーで照合するので、ゲート自身の出力に `[flaky]` と同じ語が現れても拾わない。
+- 保存された列（`status` / `exit_code`）は**その裁定を出したラン**のものになる。FLAKY を
+  fail と数えたなら失敗したラン、pass と数えたなら成功したラン、2 回とも fail なら後のラン。
+  `status=failed` の隣に `exit=0` が並ぶ行は作らない。`duration_ms` は**両ランの和**
+  （どちらもそのゲート自身のコマンドの実行時間であり、#1771 が `waited` を足さなかった
+  のと同じ規律）。#1625 の `finished_at - started_at === duration_ms` は保たれる。
+
+### 10.4 履歴に残す
+
+FLAKY は run の記録に残り、`commandmate verify show <run-id>` と run 詳細 API
+（`GET /api/verification/runs/:runId`）から読み戻せる。CLI の `--json` は
+アンカーを構造化して `gates[].flaky`（`runs` / `outcome` / `exitCodes` / `durationsMs` /
+`verdict`）として載せるので、flake advisor はログを再パースしなくてよい。
+
+**`verify history` の一覧行に FLAKY は出ない。** 一覧が返すゲート要約は
+`verification_gate_results` の列（status / exit_code / duration_ms）だけで構成され、
+`log_tail` を含まない — 500 run ぶんのログ本体を返さないための設計であり、
+FLAKY 専用の列を足すには DB マイグレーションが要る（#1772 の scope 外）。
+一覧で run を絞ってから `verify show` で FLAKY を読む、が現状の経路である。

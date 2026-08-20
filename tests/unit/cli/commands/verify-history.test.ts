@@ -435,6 +435,45 @@ describe('verify show — human output', () => {
     expect(out).not.toContain('src=null');
   });
 
+  it('marks a retried gate FLAKY on the forensic surface (Issue #1772)', async () => {
+    mockFetch([
+      {
+        data: {
+          run: detail({
+            gates: [
+              {
+                id: 1, runId: 7, gateId: 'unit', command: 'npm run test:unit',
+                status: 'failed', exitCode: 1, durationMs: 89000,
+                logTail:
+                  '[flaky] runs=2 outcome=flaky exit=1,0 duration=45.0s,44.0s verdict=fail\n53 passed',
+                startedAt: '2026-07-30T00:00:00.000Z', finishedAt: '2026-07-30T00:01:29.000Z',
+                source: 'verify.yaml',
+              },
+              {
+                id: 2, runId: 7, gateId: 'lint', command: 'npm run lint',
+                status: 'failed', exitCode: 1, durationMs: 1000, logTail: 'boom',
+                startedAt: '2026-07-30T00:01:29.000Z', finishedAt: '2026-07-30T00:01:30.000Z',
+                source: 'verify.yaml',
+              },
+            ],
+          }),
+        },
+      },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'show', '7']);
+
+    const out = stdout();
+    // Appended, not substituted for `status`: this view exists to show the
+    // stored column verbatim, and both runs' numbers are in the log below it.
+    expect(out).toContain('unit  failed  exit=1  89.0s  src=verify.yaml  FLAKY');
+    expect(out).toContain('| [flaky] runs=2 outcome=flaky exit=1,0 duration=45.0s,44.0s verdict=fail');
+    // A gate that was never retried is untouched.
+    expect(out).toContain('lint  failed  exit=1  1.0s  src=verify.yaml\n');
+    expect(out).not.toContain('lint  failed  exit=1  1.0s  src=verify.yaml  FLAKY');
+  });
+
   it('renders a still-running run without inventing a finish time', async () => {
     mockFetch([
       { data: { run: detail({ status: 'running', finishedAt: null, instanceId: null, gates: [] }) } },

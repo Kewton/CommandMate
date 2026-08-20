@@ -167,8 +167,62 @@ export const MUTEX_LOG_PREFIX = '[mutex]';
  */
 export const MUTEX_WAIT_SKIP_REASON = 'reason=mutex-wait';
 
-function formatWaitedSeconds(ms: number): string {
+/**
+ * Marker line carrying a retried gate's two runs into `log_tail` (Issue #1772).
+ *
+ * `verification_gate_results` stores one status, one exit code and one duration
+ * per gate, and a DB migration was out of scope for #1772, so the second run's
+ * numbers travel the same way #1771's wait does: a line-anchored, machine
+ * readable first line the CLI reads back.
+ *
+ * Written whenever a retry actually ran — for `outcome=fail` too, not only for
+ * `outcome=flaky`. A gate that failed twice is evidence *against* flakiness,
+ * and a flake advisor mining history needs both halves of that ratio; a marker
+ * present only on the flaky half would make every retried gate look flaky.
+ *
+ * Mirrored by `FLAKY_LOG_PREFIX` in `src/cli/utils/verify-runner.ts`, which
+ * cannot import this module — `tsconfig.cli.json` compiles `src/cli/**` alone.
+ */
+export const FLAKY_LOG_PREFIX = '[flaky]';
+
+/**
+ * What a retried gate's two runs amounted to.
+ *
+ * `flaky` = failed then passed. `fail` = failed twice; the gate is FAIL and
+ * always was, the marker only records that the second opinion agreed.
+ */
+export type FlakyOutcome = 'flaky' | 'fail';
+
+/**
+ * Runs a gate is allowed. Not derived from `retryOnFail` at the call site: the
+ * marker states the number so a reader of stored history never has to look up
+ * the verify.yaml that was in effect months ago.
+ */
+const RETRY_TOTAL_RUNS = 2;
+
+/**
+ * Separator between the two runs' outputs inside the composed log tail.
+ *
+ * Both are kept. Keeping only one makes the single question this feature exists
+ * to answer — *what differed between the two runs* — unanswerable from the
+ * record. `maxLogTailBytes` is applied per run, because it caps what one gate
+ * command may contribute and there were two commands.
+ */
+function flakyRunHeader(index: number, outcome: GateOutcome): string {
+  return (
+    `--- ${FLAKY_LOG_PREFIX} run ${index}/${RETRY_TOTAL_RUNS}: ${outcome.status} ` +
+    `exit=${formatExit(outcome.exitCode)} duration=${formatSeconds(outcome.durationMs)} ---`
+  );
+}
+
+/** One decimal second, the spelling both `waited=` and `duration=` use. */
+function formatSeconds(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/** `exit_code` is null for a gate killed by a signal; say so rather than lie. */
+function formatExit(exitCode: number | null): string {
+  return exitCode === null ? 'n/a' : String(exitCode);
 }
 
 export interface RunVerificationInput {
@@ -443,8 +497,8 @@ function withMutexMarker(
   lockPath: string,
   logTail: string | null
 ): string {
-  const marker = `${MUTEX_LOG_PREFIX} name=${name} waited=${formatWaitedSeconds(waitedMs)} lock=${lockPath}`;
-  return logTail ? `${marker}\n${logTail}` : marker;
+  const marker = `${MUTEX_LOG_PREFIX} name=${name} waited=${formatSeconds(waitedMs)} lock=${lockPath}`;
+  return prefixLogTail(marker, logTail);
 }
 
 /** The log of a gate whose lock never came free. */
@@ -452,7 +506,7 @@ function mutexWaitTimeoutLog(gate: VerifyGate, name: string, result: MachineLock
   if (result.acquired) throw new Error('mutexWaitTimeoutLog called for an acquired lock');
   const held = result.heldBy ? ` (held by ${result.heldBy})` : '';
   return [
-    `${MUTEX_WAIT_SKIP_REASON} waited=${formatWaitedSeconds(result.waitedMs)}`,
+    `${MUTEX_WAIT_SKIP_REASON} waited=${formatSeconds(result.waitedMs)}`,
     `${MUTEX_LOG_PREFIX} name=${name} lock=${machineLockPathFor(name)}${held}`,
     `Gate '${gate.id}' declares mutex '${name}' and the machine-wide lock stayed held for its ` +
       `whole ${gate.timeoutSec}s budget, so the command was never started. This is a resource ` +
@@ -467,14 +521,20 @@ function machineLockPathFor(name: string): string {
 }
 
 /**
- * Run one command gate, holding its `mutex` for the duration (Issue #1771).
+ * Run one attempt at a command gate, holding its `mutex` for the duration
+ * (Issue #1771).
  *
  * The wait happens *outside* the measured interval: `startedAt`/`durationMs`
  * come from {@link runCommand} and describe the command alone, so a gate that
  * queued for 42s and then ran for 190s records 190s and reports the 42s beside
  * it. Merging them would inflate every duration by however busy the machine was.
+ *
+ * One *attempt*, not one gate, since #1772: a gate declaring `retryOnFail: 1`
+ * calls this twice. The lock is taken and released per attempt rather than held
+ * across both, so a retry never keeps a machine-wide resource out of another
+ * worktree's hands for a run that has already failed once.
  */
-async function runCommandGate(
+async function runGateAttempt(
   gate: VerifyGate,
   worktreePath: string,
   maxLogTailBytes: number,
@@ -515,6 +575,102 @@ async function runCommandGate(
   } finally {
     lock.handle.release();
   }
+}
+
+/**
+ * Run one command gate, re-running it once when it fails and the gate asked for
+ * that (Issue #1772).
+ *
+ * A gate that fails on the machine's luck — a random UUID that happens to
+ * contain a forbidden substring, a port that was still in TIME_WAIT — is
+ * indistinguishable in the record from a gate that fails on the work, and
+ * "re-run the one red gate before believing it" has been tribal knowledge
+ * rather than something the runner does. This makes it a declaration.
+ *
+ * Only a `failed` attempt is retried. A `timeout` is not: the gate already
+ * spent its whole budget, and a second attempt would double the wall clock of
+ * exactly the gates whose budgets are largest. A `skipped` (the mutex never
+ * came free) and an `error` (the command could not be spawned) never started a
+ * command, so there is no verdict to seek a second opinion on.
+ */
+async function runCommandGate(
+  gate: VerifyGate,
+  worktreePath: string,
+  maxLogTailBytes: number,
+  gateEnv: Record<string, string>
+): Promise<GateOutcome> {
+  const first = await runGateAttempt(gate, worktreePath, maxLogTailBytes, gateEnv);
+  if (gate.retryOnFail !== 1 || first.status !== 'failed') return first;
+
+  const second = await runGateAttempt(gate, worktreePath, maxLogTailBytes, gateEnv);
+  if (second.status !== 'passed' && second.status !== 'failed') {
+    // The retry reached no verdict of its own, so there is nothing to compare
+    // the first run against. The first run's FAIL stands unchanged — reporting
+    // the retry's `skipped`/`timeout` instead would turn a gate that judged the
+    // work into a run with no verdict (exit 99), which is strictly weaker.
+    return {
+      ...first,
+      logTail: prefixLogTail(
+        `${FLAKY_LOG_PREFIX} retry reached no verdict (${second.status}); ` +
+          "the first run's result stands. Retry log:\n" +
+          (second.logTail ?? '(no output)'),
+        first.logTail
+      ),
+    };
+  }
+  return composeRetriedGate(gate, first, second);
+}
+
+/**
+ * Fold two runs of one gate into the single row the schema has (Issue #1772).
+ *
+ * `status` and `exitCode` come from the run whose verdict is being reported, so
+ * the row never says `failed` beside `exit=0`: a FLAKY gate counted as a
+ * failure reports the failing run, one counted as a pass reports the passing
+ * one, and a gate that failed twice reports the later failure. `durationMs` is
+ * the sum, because both runs were this gate's own command executing — the same
+ * rule #1771 applied when it kept the lock *wait* out of the number.
+ *
+ * Both runs' numbers reach the terminal through the {@link FLAKY_LOG_PREFIX}
+ * marker, which the CLI reads to print `GATE <id> FLAKY (exit=1,0, 45.0s,44.0s)`.
+ */
+function composeRetriedGate(
+  gate: VerifyGate,
+  first: GateOutcome,
+  second: GateOutcome
+): GateOutcome {
+  const outcome: FlakyOutcome = second.status === 'passed' ? 'flaky' : 'fail';
+  const passes = outcome === 'flaky' && gate.flakyIsPass === true;
+  const reported = passes ? second : outcome === 'flaky' ? first : second;
+
+  const marker =
+    `${FLAKY_LOG_PREFIX} runs=${RETRY_TOTAL_RUNS} outcome=${outcome} ` +
+    `exit=${formatExit(first.exitCode)},${formatExit(second.exitCode)} ` +
+    `duration=${formatSeconds(first.durationMs)},${formatSeconds(second.durationMs)} ` +
+    `verdict=${passes ? 'pass' : 'fail'}`;
+
+  const body = [
+    flakyRunHeader(1, first),
+    first.logTail ?? '',
+    flakyRunHeader(2, second),
+    second.logTail ?? '',
+  ].join('\n');
+
+  return {
+    status: passes ? 'passed' : 'failed',
+    exitCode: reported.exitCode,
+    // The window opens where the first run opened and closes `durationMs`
+    // later, so #1625's `finished_at - started_at === duration_ms` still holds
+    // and the pair still describes execution rather than the database write.
+    startedAt: first.startedAt,
+    durationMs: first.durationMs + second.durationMs,
+    logTail: `${marker}\n${body}`,
+  };
+}
+
+/** Put a machine-readable line ahead of a gate's output, keeping both. */
+function prefixLogTail(marker: string, logTail: string | null): string {
+  return logTail ? `${marker}\n${logTail}` : marker;
 }
 
 /** Run a git plumbing command. No shell: every argument here is code-supplied. */
