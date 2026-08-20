@@ -327,15 +327,29 @@ jobs:
 
   test-unit:
     name: Unit Tests
-    # [self-hosted] This repository's ephemeral self-hosted runners (labels:
-    # self-hosted, Linux, ARM64, ubuntu-24.04), EXCEPT for a pull request opened
-    # from a fork, which falls back to `ubuntu-latest`. CommandMate is public, so
-    # a fork PR is code written by someone else; the runners are ephemeral and
-    # keep nothing between jobs, but the job still executes on hardware we own.
-    # The fallback keeps the full CI verdict on outside contributions without
-    # ever running them on our machines. See the identical change in
-    # Kewton/commandmate-skills#226.
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
+    # [self-hosted] TEMPORARY EXCEPTION — this job is pinned to `ubuntu-latest`
+    # until Kewton/commandmate-skills#228 is fixed. UN-PIN IT THEN: replace this
+    # block with the same conditional `runs-on` every other job in this file uses.
+    #
+    # WHY. On the ephemeral ARM64 self-hosted runners the vendored cmate-verify
+    # suite (`.claude/skills/cmate-verify/scripts/tests/run-tests.sh`, reached
+    # through tests/unit/skills/cmate-verify/verify-run.test.ts) fails EVERY run,
+    # in a DIFFERENT case each time — run 32339198148 lost `gates-subset` and
+    # `diagnostics`, run 32340171138 lost `flaky-default` and `silent-fail`. The
+    # signature is always the same: `verify-run.sh: line 734:
+    # /tmp/cmate-verify.XXXXXX/gate-<id>.log: No such file or directory`, i.e.
+    # the runner's own $WORKDIR disappears mid-run and the affected gates report
+    # `FAIL exit=1 duration=0s` with no output.
+    #
+    # It is NOT caused by moving to self-hosted. The same script is green on
+    # GitHub-hosted x64 and green on the skills repository's own ARM64 runners
+    # when invoked directly (commandmate-skills#226). Self-hosted execution here
+    # only exposes it. The defect landed today in #1862 / commandmate-skills#225.
+    #
+    # Pinning keeps develop green while the defect is investigated, at the cost
+    # of removing the only environment that reproduces it — commandmate-skills#228
+    # carries the reproduction, the run ids, and the four measurements to take.
+    runs-on: ubuntu-latest
     # measured 12.3m median / 13.2m max (n=12). 30 rather than the ~26 that
     # `max x 2` gives, because this suite grows with the test count and 13.2m
     # is already the slowest thing in the workflow after E2E.
