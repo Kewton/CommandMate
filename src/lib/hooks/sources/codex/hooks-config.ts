@@ -74,7 +74,7 @@ import {
 import { createLogger } from '@/lib/logger';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { isPlainObject } from '../event-mapper';
-import type { AgentInstanceRef } from '../types';
+import type { AgentInstanceRef, AgentLaunchPlan } from '../types';
 import { CODEX_CLI_TOOL_ID } from './tool-id';
 
 const logger = createLogger('lib/hooks/sources/codex/hooks-config');
@@ -471,7 +471,7 @@ export function writeCodexHookSettings(options: CodexHookOptions = {}): string |
 }
 
 /**
- * The command that starts codex for one instance.
+ * The plan that starts codex for one instance.
  *
  * Never throws: hooks are an enhancement to a session that has to start anyway,
  * so anything that goes wrong here returns the bare executable — which is
@@ -484,29 +484,37 @@ export function writeCodexHookSettings(options: CodexHookOptions = {}): string |
  * own (#1757 §5.1.7 found no `CLAUDE_PROJECT_DIR` equivalent). What is left is
  * the environment of the process CommandMate starts, which a hook inherits.
  *
+ * Since Issue #1846 they are returned as {@link AgentLaunchPlan.env} rather than
+ * written onto the front of the command. The bytes a pane receives are
+ * unchanged — `renderAgentLaunchCommand` re-emits them in declaration order —
+ * but the assignments are now data the launcher applies, which is what let the
+ * other three sources that had written the same prefix by hand stop writing it.
+ *
  * @param executablePath - Resolved codex CLI path or bare command name
  * @param target - The instance being started
- * @returns `<assignments> <codex>`, or `executablePath` unchanged when
- *   injection is off, the ids are unusable, or the file could not be written
+ * @returns The command and its environment, or the bare executable with an
+ *   empty environment when injection is off, the ids are unusable, or the file
+ *   could not be written
  */
-export function buildCodexLaunchCommand(
+export function buildCodexLaunchPlan(
   executablePath: string,
   target: AgentInstanceRef,
   options: CodexHookOptions = {}
-): string {
-  if (!isHookInjectionEnabled()) return executablePath;
+): AgentLaunchPlan {
+  const bare: AgentLaunchPlan = { command: executablePath, settingsPath: null, env: {} };
+  if (!isHookInjectionEnabled()) return bare;
 
   const instanceId = target.instanceId ?? CODEX_CLI_TOOL_ID;
   if (!isValidWorktreeId(target.worktreeId) || !isValidInstanceId(instanceId)) {
     // Both become URL parameters the receiver re-validates; a value that would
     // be rejected there is not worth injecting.
     logger.warn('codex-hooks-invalid-correlation-key', { worktreeId: target.worktreeId });
-    return executablePath;
+    return bare;
   }
 
   try {
     const settingsPath = writeCodexHookSettings(options);
-    if (!settingsPath) return executablePath;
+    if (!settingsPath) return bare;
 
     const port = options.port ?? getServerPort();
     const query = new URLSearchParams({
@@ -514,7 +522,7 @@ export function buildCodexLaunchCommand(
       worktreeId: target.worktreeId,
       instanceId,
     });
-    const assignments = [
+    const env: Record<string, string> = {
       // Pin the home the file was just written to, rather than trusting the
       // agent to resolve the same one. Measured on 2026-08-13: a tmux session
       // inherits the environment of the *tmux server*, which was started long
@@ -525,24 +533,20 @@ export function buildCodexLaunchCommand(
       // wrote" and "the file codex reads" the same file by construction; in the
       // ordinary case where nothing sets it, this is the default codex would
       // have picked anyway.
-      `${CODEX_HOME_ENV_VAR}=${shellQuote(getCodexHome(options))}`,
-      `${CODEX_TOOL_ENV_VAR}=${shellQuote(CODEX_CLI_TOOL_ID)}`,
-      `${CODEX_WORKTREE_ID_ENV_VAR}=${shellQuote(target.worktreeId)}`,
-      `${CODEX_INSTANCE_ID_ENV_VAR}=${shellQuote(instanceId)}`,
-      `${CODEX_EVENT_URL_ENV_VAR}=${shellQuote(
-        `http://${CODEX_HOOK_HOST}:${port}${AGENT_EVENT_PATH}`
-      )}`,
-      `${CODEX_PERMISSION_URL_ENV_VAR}=${shellQuote(
-        `http://${CODEX_HOOK_HOST}:${port}${PERMISSION_REQUEST_PATH}?${query.toString()}`
-      )}`,
-    ];
+      [CODEX_HOME_ENV_VAR]: getCodexHome(options),
+      [CODEX_TOOL_ENV_VAR]: CODEX_CLI_TOOL_ID,
+      [CODEX_WORKTREE_ID_ENV_VAR]: target.worktreeId,
+      [CODEX_INSTANCE_ID_ENV_VAR]: instanceId,
+      [CODEX_EVENT_URL_ENV_VAR]: `http://${CODEX_HOOK_HOST}:${port}${AGENT_EVENT_PATH}`,
+      [CODEX_PERMISSION_URL_ENV_VAR]: `http://${CODEX_HOOK_HOST}:${port}${PERMISSION_REQUEST_PATH}?${query.toString()}`,
+    };
     const trust = isCodexHookTrustBypassEnabled() ? ` ${CODEX_HOOK_TRUST_BYPASS_FLAG}` : '';
-    return `${assignments.join(' ')} ${shellQuote(executablePath)}${trust}`;
+    return { command: `${shellQuote(executablePath)}${trust}`, settingsPath, env };
   } catch (error) {
     logger.warn('codex-hooks-config-write-failed', {
       worktreeId: target.worktreeId,
       error: error instanceof Error ? error.message : String(error),
     });
-    return executablePath;
+    return bare;
   }
 }

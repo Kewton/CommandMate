@@ -61,6 +61,7 @@ import {
 } from '@/lib/hooks/hook-settings-generator';
 import { createLogger } from '@/lib/logger';
 import { isPlainObject } from '../event-mapper';
+import { AGENT_EVENT_URL_ENV_VAR } from '../launch-command';
 import { readJsonObjectFile, writeJsonObjectFile } from './shared-config-tree';
 import { GEMINI_CLI_TOOL_ID } from './tool-id';
 
@@ -330,7 +331,7 @@ export function writeGeminiHookSettings(
 }
 
 /**
- * The command that launches gemini for one instance.
+ * The command and environment that launch gemini for one instance.
  *
  * `CM_HOOK_URL` is the whole of the instance correlation, and it is an
  * environment variable rather than a flag in the settings file for a reason the
@@ -345,27 +346,32 @@ export function writeGeminiHookSettings(
  * lands on the primary instance. That is a degradation, not a
  * misattribution.
  *
- * Never throws, and returns the executable unchanged when injection is off, so
- * `CM_AGENT_HOOKS_INJECT=0` produces the byte-identical command line this tool
- * used before #1762.
+ * Returned as a `{ command, env }` pair since Issue #1846, instead of as one
+ * string with the variable written onto the front of `gemini`. Three other
+ * sources had built the same prefix by hand; `renderAgentLaunchCommand` now
+ * writes it once, and the line a pane receives is byte-identical.
+ *
+ * Never throws, and returns the executable with an empty environment when
+ * injection is off, so `CM_AGENT_HOOKS_INJECT=0` produces the byte-identical
+ * command line this tool used before #1762.
  *
  * @param executablePath - `gemini`, or a resolved path to it
  * @param target - The instance being started
- * @returns The command line to type into the pane
+ * @returns The command to type into the pane and the environment it needs
  */
 export function buildGeminiLaunchCommand(
   executablePath: string,
   target: HookSettingsTarget,
   options: HookSettingsOptions = {}
-): string {
-  if (!isHookInjectionEnabled()) return executablePath;
+): { command: string; env: Record<string, string> } {
+  if (!isHookInjectionEnabled()) return { command: executablePath, env: {} };
   if (!isValidInstanceId(resolveTargetInstanceId(target))) {
     // About to become a URL parameter the receiver re-validates; a value that
     // would be rejected there is not worth injecting.
     logger.warn('gemini-hook-invalid-instance-id', { worktreeId: target.worktreeId });
-    return executablePath;
+    return { command: executablePath, env: {} };
   }
 
   const url = buildAgentEventUrl({ ...target, cliToolId: GEMINI_CLI_TOOL_ID }, options);
-  return `CM_HOOK_URL=${shellQuote(url)} ${shellQuote(executablePath)}`;
+  return { command: shellQuote(executablePath), env: { [AGENT_EVENT_URL_ENV_VAR]: url } };
 }

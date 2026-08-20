@@ -485,18 +485,28 @@ export function writeCopilotHookSettings(options: CopilotHookSettingsOptions = {
 }
 
 /**
- * The environment assignments that tell a hook which instance fired it.
+ * The environment that tells a hook which instance fired it.
  *
- * A prefix on the command line rather than `tmux set-environment`: the pane is
- * created before the agent starts and the assignment then travels with the one
- * process that matters, out of reach of `sanitizeSessionEnvironment` and of
- * anything else that edits the session's environment later.
+ * Applied to the launched process rather than through `tmux set-environment`:
+ * the pane is created before the agent starts and the assignment then travels
+ * with the one process that matters, out of reach of
+ * `sanitizeSessionEnvironment` and of anything else that edits the session's
+ * environment later.
+ *
+ * Returned as a map since Issue #1846. It used to be a pre-quoted
+ * `NAME=value NAME=value` string that the caller concatenated in front of the
+ * command — the same workaround codex, gemini and antigravity had each written
+ * separately, all four assuming a shell nobody had declared. The rendering now
+ * happens once, in `../launch-command`, and the bytes are identical.
  */
-export function buildCopilotEnvironmentPrefix(worktreeId: string, instanceId: string): string {
-  return (
-    `${COPILOT_WORKTREE_ID_ENV}=${shellQuote(worktreeId)} ` +
-    `${COPILOT_INSTANCE_ID_ENV}=${shellQuote(instanceId)}`
-  );
+export function buildCopilotHookEnvironment(
+  worktreeId: string,
+  instanceId: string
+): Record<string, string> {
+  return {
+    [COPILOT_WORKTREE_ID_ENV]: worktreeId,
+    [COPILOT_INSTANCE_ID_ENV]: instanceId,
+  };
 }
 
 /**
@@ -527,7 +537,7 @@ export function buildCopilotLaunchCommand(
   target: AgentInstanceRef,
   options: CopilotHookSettingsOptions = {}
 ): AgentLaunchPlan {
-  const bare: AgentLaunchPlan = { command: executablePath, settingsPath: null };
+  const bare: AgentLaunchPlan = { command: executablePath, settingsPath: null, env: {} };
   if (!isCopilotHookInjectionEnabled()) return bare;
 
   const instanceId = target.instanceId ?? COPILOT_CLI_TOOL_ID;
@@ -542,8 +552,9 @@ export function buildCopilotLaunchCommand(
   try {
     const settingsPath = writeCopilotHookSettings(options);
     return {
-      command: `${buildCopilotEnvironmentPrefix(target.worktreeId, instanceId)} ${executablePath}`,
+      command: executablePath,
       settingsPath,
+      env: buildCopilotHookEnvironment(target.worktreeId, instanceId),
     };
   } catch (error) {
     logger.warn('copilot-hook-settings-write-failed', {

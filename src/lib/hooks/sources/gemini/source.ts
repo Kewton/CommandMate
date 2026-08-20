@@ -60,40 +60,50 @@ import type { HookSettingsTarget } from '@/lib/hooks/hook-settings-generator';
 import { definePushHookSource } from '../define-source';
 import { fromNameTable } from '../event-mapper';
 import { SESSION_ID_FIELDS } from '../hook-event-vocabulary';
-import type { AgentEventSource, AgentInstanceRef, AgentLaunchPlan } from '../types';
+import type { AgentEventSource, AgentLaunchContext, AgentLaunchPlan } from '../types';
 import { extractGeminiEventDetail, GEMINI_HOOK_EVENT_NAMES } from './event-vocabulary';
 import { buildGeminiLaunchCommand, writeGeminiHookSettings } from './settings-generator';
 import { GEMINI_CLI_TOOL_ID } from './tool-id';
 
 /**
- * Write this worktree's `.gemini/settings.json`, on the session-creation path.
+ * Write this worktree's `.gemini/settings.json` and build the launch line
+ * (S3 / S4 / S5).
  *
- * **This is the one thing about gemini that {@link AgentEventSource} cannot
- * express.** `prepareLaunch` receives an {@link AgentInstanceRef}, which is
- * `(worktreeId, cliToolId, instanceId)` and carries no filesystem path — the
- * right shape for the four tools whose config is global or per-instance, and one
- * field short for the only tool whose config is per-*worktree*. Rather than
- * widen the interface for one tool, or resolve the path by pulling the database
- * into the module every receiver imports, the caller that already holds the path
- * passes it here and `prepareLaunch` builds the command line.
+ * **This used to be the one thing {@link AgentEventSource} could not express.**
+ * `prepareLaunch` took `(target, executablePath)`, gemini's config lives at
+ * `<worktree>/.gemini/settings.json`, and an `AgentInstanceRef` carries no
+ * filesystem path — so #1762 exported `injectGeminiHookSettings(worktreePath,
+ * target)` beside the source and `cli-tools/gemini.ts` called both. One of the
+ * six sources wrote its config from a different call site than the other five,
+ * and a reader of this file could not tell that the config was written at all.
  *
- * Reported rather than worked around: see the Issue #1762 entry in `CHANGELOG.md`.
+ * Issue #1846 put `worktreePath` on {@link AgentLaunchContext} instead, so the
+ * write happens here, `settingsPath` reports the file that was actually
+ * written, and the second entry point is gone.
  *
- * @param worktreePath - Absolute path of the worktree the session runs in
- * @param target - The instance being created
- * @returns The settings file written, or null when nothing was written
+ * Never throws — `writeGeminiHookSettings` swallows its own failures and answers
+ * null, and a gemini session with no hooks is the pre-#1762 status quo.
+ *
+ * @param context - The instance, its executable, and the worktree it runs in
+ * @returns The command, its environment, and the settings file when one landed
  */
-export function injectGeminiHookSettings(
-  worktreePath: string,
-  target: AgentInstanceRef
-): string | null {
+export function prepareGeminiLaunch({
+  target,
+  executablePath,
+  worktreePath,
+}: AgentLaunchContext): AgentLaunchPlan {
   const settingsTarget: HookSettingsTarget = {
     worktreeId: target.worktreeId,
     instanceId: target.instanceId,
     cliToolId: GEMINI_CLI_TOOL_ID,
   };
-  if (!isValidInstanceId(target.instanceId ?? GEMINI_CLI_TOOL_ID)) return null;
-  return writeGeminiHookSettings(worktreePath, settingsTarget);
+  // Checked before the write as well as inside `buildGeminiLaunchCommand`: an
+  // id the receiver would reject is an id no settings file should name either.
+  const settingsPath = isValidInstanceId(target.instanceId ?? GEMINI_CLI_TOOL_ID)
+    ? writeGeminiHookSettings(worktreePath, settingsTarget)
+    : null;
+  const { command, env } = buildGeminiLaunchCommand(executablePath, settingsTarget);
+  return { command, settingsPath, env };
 }
 
 /**
@@ -148,15 +158,7 @@ export const geminiAgentEventSource: AgentEventSource = definePushHookSource({
   // verdict encodes to the empty body, which the bundle reads as no opinion.
   encodeVerdict: () => ({}),
 
-  // The settings file is written by `injectGeminiHookSettings`, which the
-  // session module calls with the worktree path this interface cannot carry.
-  // `settingsPath` is therefore null here rather than wrong.
-  prepareLaunch: (target: AgentInstanceRef, executablePath: string): AgentLaunchPlan => ({
-    command: buildGeminiLaunchCommand(executablePath, {
-      worktreeId: target.worktreeId,
-      instanceId: target.instanceId,
-      cliToolId: GEMINI_CLI_TOOL_ID,
-    }),
-    settingsPath: null,
-  }),
+  // Config write and command line, both from here since #1846. `CM_HOOK_URL` is
+  // the plan's `env` rather than a prefix on `command`.
+  prepareLaunch: prepareGeminiLaunch,
 });

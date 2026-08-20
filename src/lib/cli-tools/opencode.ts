@@ -40,7 +40,10 @@ import { ensureOpencodeConfig } from './opencode-config';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { createLogger } from '@/lib/logger';
-import { beginAgentSession, prepareAgentLaunch } from '@/lib/session/agent-session-lifecycle';
+import {
+  beginAgentSession,
+  buildAgentLaunchCommandLine,
+} from '@/lib/session/agent-session-lifecycle';
 import {
   attachOpencodeEventStream,
   opencodeTarget,
@@ -180,9 +183,15 @@ export class OpenCodeTool extends BaseCLITool {
       // and the launch below is then the pre-#1763 bare command.
       await reserveOpencodeServerPort(target, worktreePath);
 
-      // Start OpenCode TUI. `prepareAgentLaunch` asks the tool's own
-      // `AgentEventSource` for the command line (S3/S4/S5) and never throws.
-      const launchCommand = prepareAgentLaunch(target, this.command).command;
+      // Start OpenCode TUI. `buildAgentLaunchCommandLine` asks the tool's own
+      // `AgentEventSource` for the plan (S3/S4/S5) and never throws. opencode's
+      // environment is empty — it is the one source with no correlation
+      // variable, because CommandMate holds the connection (#1846).
+      const launchCommand = buildAgentLaunchCommandLine({
+        target,
+        executablePath: this.command,
+        worktreePath,
+      });
       await sendKeys(sessionName, launchCommand, true);
 
       // Wait for OpenCode to initialize (GPU model loading via Ollama)

@@ -48,6 +48,7 @@ import { definePullEventSource } from '../define-source';
 import type {
   AgentEventSource,
   AgentInstanceRef,
+  AgentLaunchContext,
   AgentLaunchPlan,
   PendingDecision,
   SourceLiveness,
@@ -242,22 +243,23 @@ async function probeOpencodeActivity(
  * because the default is the security property: the server is unauthenticated,
  * and `--mdns` (never passed) would move it to `0.0.0.0` (#1758 §5.8.3).
  */
-export function prepareOpencodeLaunch(
-  target: AgentInstanceRef,
-  executablePath: string
-): AgentLaunchPlan {
-  if (!isHookInjectionEnabled()) {
-    return { command: executablePath, settingsPath: null };
-  }
+export function prepareOpencodeLaunch({
+  target,
+  executablePath,
+}: AgentLaunchContext): AgentLaunchPlan {
+  // `env` is empty for every branch: opencode is the one source that needs no
+  // correlation variable at all, because CommandMate holds the connection and
+  // therefore already knows which instance the frames belong to (#1846).
+  const bare: AgentLaunchPlan = { command: executablePath, settingsPath: null, env: {} };
+  if (!isHookInjectionEnabled()) return bare;
   const port = getAssignedOpencodePort(target);
-  if (port === null) {
-    return { command: executablePath, settingsPath: null };
-  }
+  if (port === null) return bare;
   return {
     command: `${shellQuote(executablePath)} --port ${port} --hostname ${OPENCODE_SERVER_HOST}`,
     // Nothing is written to disk. `configScope: 'none'` says the same thing to
     // a caller that asks the capabilities instead of the plan.
     settingsPath: null,
+    env: {},
   };
 }
 

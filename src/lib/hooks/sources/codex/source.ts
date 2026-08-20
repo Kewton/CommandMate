@@ -41,12 +41,11 @@ import {
   SESSION_ID_FIELDS,
   TOOL_CALL_ID_FIELDS,
 } from '../hook-event-vocabulary';
-import type { AgentEventSource, AgentInstanceRef, AgentLaunchPlan, Verdict } from '../types';
+import type { AgentEventSource, AgentLaunchContext, AgentLaunchPlan, Verdict } from '../types';
 import {
-  buildCodexLaunchCommand,
+  buildCodexLaunchPlan,
   CODEX_PERMISSION_REQUEST_EVENT,
   CODEX_SUPPORTED_EVENTS,
-  getCodexHooksPath,
 } from './hooks-config';
 import { CODEX_CLI_TOOL_ID } from './tool-id';
 
@@ -152,13 +151,11 @@ export const codexAgentEventSource: AgentEventSource = definePushHookSource({
   // S3 / S4 / S5. The whole of the config generation lives in `./hooks-config`,
   // which never throws — a session that starts without hooks is the status quo,
   // a session that fails to start is not.
-  prepareLaunch: (target: AgentInstanceRef, executablePath: string): AgentLaunchPlan => {
-    const command = buildCodexLaunchCommand(executablePath, target);
-    // Reported only when the command actually reflects an injection. Both
-    // `CM_AGENT_HOOKS_INJECT=0` and a file that could not be written return the
-    // bare executable, and claiming a settings file then would name a file this
-    // launch is not using.
-    const settingsPath = command === executablePath ? null : getCodexHooksPath();
-    return { command, settingsPath };
-  },
+  //
+  // Issue #1846: the six correlation variables are the plan's `env` rather than
+  // a `NAME=value ` prefix written onto `command` here. `settingsPath` now comes
+  // straight out of the builder — it used to be re-derived by comparing the
+  // command against the bare executable, which was the same fact inferred twice.
+  prepareLaunch: ({ target, executablePath }: AgentLaunchContext): AgentLaunchPlan =>
+    buildCodexLaunchPlan(executablePath, target),
 });

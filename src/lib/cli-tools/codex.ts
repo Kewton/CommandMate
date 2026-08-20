@@ -26,7 +26,7 @@ import { createLogger } from '@/lib/logger';
 import { CODEX_CLI_TOOL_ID } from '@/lib/hooks/sources';
 import {
   beginAgentSession,
-  prepareAgentLaunch,
+  buildAgentLaunchCommandLine,
 } from '@/lib/session/agent-session-lifecycle';
 import {
   TUI_SESSION_CREATE_WAIT_MS,
@@ -202,10 +202,11 @@ export class CodexTool extends BaseCLITool {
       // Falls back to the bare command on any failure and when
       // `CM_AGENT_HOOKS_INJECT=0`; a session that starts without hooks is the
       // pre-#1760 status quo, and a session that fails to start is not.
-      const launchCommand = prepareAgentLaunch(
-        { worktreeId, cliToolId: CODEX_CLI_TOOL_ID, instanceId },
-        this.command
-      ).command;
+      const launchCommand = buildAgentLaunchCommandLine({
+        target: { worktreeId, cliToolId: CODEX_CLI_TOOL_ID, instanceId },
+        executablePath: this.command,
+        worktreePath,
+      });
 
       // Start Codex CLI in interactive mode
       await sendKeys(sessionName, launchCommand, true);
