@@ -1,0 +1,113 @@
+# Issue #228: the run directory ($WORKDIR) has to outlive every gate of a run.
+#
+# The shape that exposed the defect is MANY INSTANTANEOUS gates in ONE run. A gate
+# that is already dead before the runner has even forked its timeout watchdog makes
+# the runner's `wait` return at once, so the `kill` that stops that watchdog lands
+# inside the window between the watchdog's `fork()` and the point where bash resets
+# the child's signal dispositions — and a bash child killed by a CATCHABLE signal in
+# that window runs the EXIT trap string it inherited, which used to `rm -rf` this
+# run's work directory while the run was still going.
+#
+# Every gate fails on purpose so the runner has to print each one's captured log:
+# a gate whose log went missing says `no output captured` and its marker never
+# appears, which is exactly the CI symptom this fixture pins.
+version: 1
+gates:
+  - id: wl01
+    command: echo wl01-ran; exit 9
+  - id: wl02
+    command: echo wl02-ran; exit 9
+  - id: wl03
+    command: echo wl03-ran; exit 9
+  - id: wl04
+    command: echo wl04-ran; exit 9
+  - id: wl05
+    command: echo wl05-ran; exit 9
+  - id: wl06
+    command: echo wl06-ran; exit 9
+  - id: wl07
+    command: echo wl07-ran; exit 9
+  - id: wl08
+    command: echo wl08-ran; exit 9
+  - id: wl09
+    command: echo wl09-ran; exit 9
+  - id: wl10
+    command: echo wl10-ran; exit 9
+  - id: wl11
+    command: echo wl11-ran; exit 9
+  - id: wl12
+    command: echo wl12-ran; exit 9
+  - id: wl13
+    command: echo wl13-ran; exit 9
+  - id: wl14
+    command: echo wl14-ran; exit 9
+  - id: wl15
+    command: echo wl15-ran; exit 9
+  - id: wl16
+    command: echo wl16-ran; exit 9
+  - id: wl17
+    command: echo wl17-ran; exit 9
+  - id: wl18
+    command: echo wl18-ran; exit 9
+  - id: wl19
+    command: echo wl19-ran; exit 9
+  - id: wl20
+    command: echo wl20-ran; exit 9
+  - id: wl21
+    command: echo wl21-ran; exit 9
+  - id: wl22
+    command: echo wl22-ran; exit 9
+  - id: wl23
+    command: echo wl23-ran; exit 9
+  - id: wl24
+    command: echo wl24-ran; exit 9
+  - id: wl25
+    command: echo wl25-ran; exit 9
+  - id: wl26
+    command: echo wl26-ran; exit 9
+  - id: wl27
+    command: echo wl27-ran; exit 9
+  - id: wl28
+    command: echo wl28-ran; exit 9
+  - id: wl29
+    command: echo wl29-ran; exit 9
+  - id: wl30
+    command: echo wl30-ran; exit 9
+  - id: wl31
+    command: echo wl31-ran; exit 9
+  - id: wl32
+    command: echo wl32-ran; exit 9
+  - id: wl33
+    command: echo wl33-ran; exit 9
+  - id: wl34
+    command: echo wl34-ran; exit 9
+  - id: wl35
+    command: echo wl35-ran; exit 9
+  - id: wl36
+    command: echo wl36-ran; exit 9
+  - id: wl37
+    command: echo wl37-ran; exit 9
+  - id: wl38
+    command: echo wl38-ran; exit 9
+  - id: wl39
+    command: echo wl39-ran; exit 9
+  - id: wl40
+    command: echo wl40-ran; exit 9
+  - id: wl41
+    command: echo wl41-ran; exit 9
+  - id: wl42
+    command: echo wl42-ran; exit 9
+  - id: wl43
+    command: echo wl43-ran; exit 9
+  - id: wl44
+    command: echo wl44-ran; exit 9
+  - id: wl45
+    command: echo wl45-ran; exit 9
+  - id: wl46
+    command: echo wl46-ran; exit 9
+  - id: wl47
+    command: echo wl47-ran; exit 9
+  - id: wl48
+    command: echo wl48-ran; exit 9
+options:
+  skipInPrimaryCheckout: false

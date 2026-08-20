@@ -107,7 +107,25 @@ if [ -z "$CONFIG" ]; then CONFIG="$CWD/.commandmate/verify.yaml"; fi
 TMPBASE=${TMPDIR:-/tmp}
 TMPBASE=${TMPBASE%/}
 WORKDIR=$(mktemp -d "$TMPBASE/cmate-verify.XXXXXX") || die_config "cannot create a temporary directory under $TMPBASE"
-trap 'rm -rf "$WORKDIR"' EXIT
+
+# Removing $WORKDIR is the job of ONE process — the shell that created it —
+# and of no other (Issue #228). bash keeps the EXIT trap STRING across a fork:
+# a subshell gets its signal HANDLERS reset, not its traps, and a subshell that
+# is killed by a catchable signal in the window between `fork()` and that reset
+# runs the inherited string through termsig_handler -> run_exit_trap(). Measured
+# on Linux/ARM64 (bash 5.2.21): 9203 of 18000 `( ... ) &` subshells signalled
+# immediately after the fork ran this trap, every one of them before the first
+# command of their own body. Unguarded, each of those deletes the run directory
+# of a run that is still going, and every later gate then reports
+# `No such file or directory` / `no output captured` with exit 1 — a verdict on
+# nothing. BASH_SUBSHELL is 0 only in the top-level shell (measured: 443 of 443
+# such firings reported 1), so it is what separates "this run is over" from
+# "a forked child of this run is dying".
+cleanup_workdir() {
+  [ "${BASH_SUBSHELL:-0}" -eq 0 ] || return 0
+  rm -rf "$WORKDIR"
+}
+trap cleanup_workdir EXIT
 
 # --- YAML subset parser -------------------------------------------------------
 # Emits one TSV record per parsed item; the free-form field (a gate command) is
@@ -754,7 +772,19 @@ run_gate_attempt() {
   # 2>/dev/null suppresses the shell job-control "Terminated" notice.
   wait "$rga_pid" 2>/dev/null
   rga_code=$?
-  kill -TERM "$rga_wpid" 2>/dev/null
+  # KILL, not TERM (Issue #228). The watchdog is a bash subshell that inherited
+  # this shell's EXIT trap string, and for a fast gate the normal case — not the
+  # rare one — is that the gate is already over before the watchdog was even
+  # forked: `wait` above then returns at once, so this kill lands inside the
+  # window where the child still carries bash's terminating-signal handler. A
+  # catchable signal there makes the child run the EXIT trap and delete
+  # $WORKDIR out from under this run; SIGKILL cannot be caught, so no shell
+  # code runs in the doomed process at all. Measured on Linux/ARM64: 560 stray
+  # trap firings in 18000 attempts with TERM, 0 with KILL. Nothing else about the
+  # watchdog changes — TERM already ended it here rather than letting it reach its
+  # own grace KILL, and a 48-gate run leaves 0 stray `sleep` processes behind
+  # under either signal.
+  kill -s KILL "$rga_wpid" 2>/dev/null
   wait "$rga_wpid" 2>/dev/null
 
   RGA_DUR=$(( $(date +%s) - rga_start ))
