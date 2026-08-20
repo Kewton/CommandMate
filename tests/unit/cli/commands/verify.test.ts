@@ -484,6 +484,86 @@ describe('verify command action', () => {
     expect(printed.gates).toHaveLength(1);
   });
 
+  it('adds machine-readable scope evidence to the JSON, leaving every other field alone', async () => {
+    // Issue #1841. `scope.allow: ["src/**"]` is a claim; which files it actually
+    // covered on the day it ran is only in the gate's report, and a consumer
+    // should not have to re-parse prose to read it.
+    const scopeTail = [
+      'scope: baseRef=origin/develop changed=3 violations=1',
+      'allow: src/**, docs/*.md',
+      'deny: src/secret/**',
+      'admitted:',
+      '  + docs/x.md  \u2190 docs/*.md',
+      '  + src/a/b.ts  \u2190 src/**',
+      'out of scope:',
+      '  - src/secret/key.ts  \u2190 src/secret/**',
+      'To allow this diff, add the paths above to the contract\'s scope.allow.',
+    ].join('\n');
+    const scopeGate = gate({
+      id: 12, gateId: 'scope', status: 'failed', exitCode: 1, durationMs: 200,
+      logTail: scopeTail,
+    });
+    mockFetchWithTail([
+      { data: { runId: 7 }, status: 202 },
+      { data: { run: run({ status: 'failed', gates: [workEvidencePassed, scopeGate] }) } },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'wt1', '--json']);
+
+    const printed = JSON.parse(mockConsoleLog.mock.calls[0][0] as string);
+    const printedScope = printed.gates.find(
+      (g: VerificationGateResultView) => g.gateId === 'scope'
+    );
+    expect(printedScope.scope).toEqual({
+      admitted: [
+        { path: 'docs/x.md', pattern: 'docs/*.md' },
+        { path: 'src/a/b.ts', pattern: 'src/**' },
+      ],
+      violations: ['src/secret/key.ts'],
+      totals: { changed: 3, admitted: 2, violations: 1 },
+    });
+    // The evidence is added, not substituted: the report a human reads is
+    // still there verbatim, and the verdict fields are untouched.
+    expect(printedScope.logTail).toBe(scopeTail);
+    expect(printedScope.status).toBe('failed');
+    expect(printedScope.exitCode).toBe(1);
+    // Only the scope gate carries it.
+    const printedWorkEvidence = printed.gates.find(
+      (g: VerificationGateResultView) => g.gateId === 'work-evidence'
+    );
+    expect(printedWorkEvidence.scope).toBeUndefined();
+  });
+
+  it('leaves the scope gate untouched when its log is a message rather than a report', async () => {
+    // A skipped or detached-contract gate writes a sentence. An empty
+    // `admitted` there would read as "the gate looked and admitted nothing",
+    // which is the opposite of "the gate never judged anything".
+    mockFetchWithTail([
+      { data: { runId: 7 }, status: 202 },
+      {
+        data: {
+          run: run({
+            gates: [
+              workEvidencePassed,
+              gate({
+                id: 12, gateId: 'scope', status: 'skipped', exitCode: null,
+                logTail: 'scope: no contract is attached to this run, so no scope is declared to check.',
+              }),
+            ],
+          }),
+        },
+      },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'wt1', '--json']);
+
+    const printed = JSON.parse(mockConsoleLog.mock.calls[0][0] as string);
+    expect(printed.gates.find((g: VerificationGateResultView) => g.gateId === 'scope').scope)
+      .toBeUndefined();
+  });
+
   it('reports a 409 conflict with the blocking run id', async () => {
     const fetchMock = mockFetchWithTail([
       {

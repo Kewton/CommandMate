@@ -838,6 +838,47 @@ export type VerificationGateStatus =
   | 'skipped'
   | 'error';
 
+/** One admitted change and the contract pattern that admitted it (Issue #1841). */
+export interface VerificationScopeAdmission {
+  path: string;
+  /**
+   * The first matching `scope.allow` pattern, in the contract's declaration
+   * order, or one of the gate's exemption stand-ins (`(exempt: ...)`), which are
+   * parenthesised precisely so they cannot be mistaken for a declared pattern.
+   */
+  pattern: string;
+}
+
+/**
+ * Machine-readable scope-gate evidence (Issue #1841).
+ *
+ * **Derived by the CLI, not sent by the server.** `verification_gate_results`
+ * stores a status, an exit code and a log body and nothing else, so the gate's
+ * report in `logTail` is the only carrier this evidence has; `verify --json`
+ * and `verify show --json` parse it back out (see `parseScopeEvidence` in
+ * src/cli/commands/verify.ts). Absent when the scope gate did not run, was
+ * skipped, or errored — every one of those writes a message rather than a
+ * report — and absent for every other gate.
+ */
+export interface VerificationScopeDetail {
+  /** Capped at 100 entries, as the report is; see {@link totals}. */
+  admitted: VerificationScopeAdmission[];
+  /** Capped at 100 entries, as the report is; see {@link totals}. */
+  violations: string[];
+  /**
+   * Counts as the gate itself made them, over *every* changed path.
+   *
+   * The lists above are the report's, so they stop at its cap; these do not.
+   * A consumer asking "did anything fall outside the contract" must read
+   * `totals.violations`, never `violations.length`.
+   */
+  totals: {
+    changed: number;
+    admitted: number;
+    violations: number;
+  };
+}
+
 /**
  * Mirrors: src/lib/db/verification-db.ts VerificationGateResult.
  * Dates arrive as ISO strings because the route serializes them through JSON.
@@ -868,6 +909,14 @@ export interface VerificationGateResultView {
    * check. Absent on responses from a server older than #1625.
    */
   timingsMeasured?: boolean;
+  /**
+   * Scope-gate evidence, on the `scope` gate only (Issue #1841).
+   *
+   * Not part of the server payload: the CLI adds it to the object it prints so
+   * a caller can read what the contract admitted without re-parsing prose.
+   * Existing fields, `logTail` included, are untouched.
+   */
+  scope?: VerificationScopeDetail;
 }
 
 /** Mirrors: src/lib/db/verification-db.ts VerificationRunWithGates. */

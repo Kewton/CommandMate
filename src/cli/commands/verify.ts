@@ -19,8 +19,12 @@ import { Command } from 'commander';
 import { ExitCode } from '../types';
 import type { VerifyOptions, VerifyHistoryOptions, VerifyShowOptions } from '../types';
 import type {
+  VerificationGateResultView,
   VerificationRunHistoryResponse,
   VerificationRunSummaryView,
+  VerificationRunView,
+  VerificationScopeAdmission,
+  VerificationScopeDetail,
   VerifyRunResponse,
 } from '../types/api-responses';
 import { ApiClient, ApiError, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
@@ -33,6 +37,101 @@ const MAX_HISTORY_LIMIT = 500;
 
 /** Gate statuses that mean the gate did not pass. `skipped` is not a failure. */
 const FAILED_GATE_STATUSES: ReadonlySet<string> = new Set(['failed', 'timeout', 'error']);
+
+// =============================================================================
+// Scope-gate evidence (Issue #1841)
+// =============================================================================
+
+/** Built-in gate id; mirrors SCOPE_GATE_ID in lib/verification/verify-config.ts. */
+const SCOPE_GATE_ID = 'scope';
+
+/**
+ * Separator the scope gate puts between a path and the rule that decided it.
+ *
+ * Mirrors SCOPE_PATTERN_ARROW in `src/lib/verification/scope-gate.ts`. The two
+ * cannot import each other — tsconfig.cli.json compiles `src/cli/**` alone,
+ * with no path aliases, so the CLI bundle never pulls in the server's
+ * dependency graph — so a round-trip test feeds a real gate report through this
+ * parser instead of trusting the constants to be edited together.
+ */
+const SCOPE_PATTERN_ARROW = '  \u2190 ';
+
+/**
+ * Read the scope gate's report back into structured evidence.
+ *
+ * Parsing the gate's own prose is not the shape anyone would choose, but it is
+ * the only one available: `verification_gate_results` has no column for
+ * structured detail, and the CLI's `formatDetail` already reads work-evidence's
+ * counts out of `logTail` the same way (src/cli/utils/verify-runner.ts).
+ *
+ * Returns null when the tail is not a report — a skip, an error, or a gate that
+ * was never entered all write a sentence — because an empty `admitted` on those
+ * would claim the gate looked and found nothing.
+ */
+export function parseScopeEvidence(logTail: string | null | undefined): VerificationScopeDetail | null {
+  if (!logTail) return null;
+  const summary = /^scope: baseRef=.* changed=(\d+) violations=(\d+)$/m.exec(logTail);
+  if (!summary) return null;
+
+  const changed = Number(summary[1]);
+  const violationTotal = Number(summary[2]);
+  const admitted: VerificationScopeAdmission[] = [];
+  const violations: string[] = [];
+
+  for (const line of logTail.split('\n')) {
+    if (line.startsWith('  + ')) {
+      const [path, pattern] = splitAtArrow(line.slice(4));
+      // The gate always names the admitting rule; a `+` line without one is
+      // output this parser does not understand, and inventing an empty pattern
+      // for it would put a claim in the JSON that nothing made.
+      if (pattern !== null) admitted.push({ path, pattern });
+    } else if (line.startsWith('  - ')) {
+      violations.push(splitAtArrow(line.slice(4))[0]);
+    }
+  }
+
+  return {
+    admitted,
+    violations,
+    // From the summary line, not from the lists: both are capped at 100 by the
+    // report, and `changed` counts every path either way. Admitted is the
+    // remainder because the gate classifies each changed path exactly once.
+    totals: { changed, admitted: changed - violationTotal, violations: violationTotal },
+  };
+}
+
+/**
+ * Split `<path>  \u2190 <pattern>`, keeping the whole line as the path when no
+ * arrow is present (an allow-miss violation has no rule to name).
+ *
+ * Split at the *last* arrow so a path containing the sequence still yields the
+ * pattern the gate wrote.
+ */
+function splitAtArrow(text: string): [string, string | null] {
+  const at = text.lastIndexOf(SCOPE_PATTERN_ARROW);
+  if (at === -1) return [text, null];
+  return [text.slice(0, at), text.slice(at + SCOPE_PATTERN_ARROW.length)];
+}
+
+/**
+ * Attach {@link parseScopeEvidence} to the scope gate before the run is printed
+ * as JSON (Issue #1841).
+ *
+ * Copies rather than mutates: the run object is also what the polling loop
+ * reported from, and a JSON-only field has no business appearing in it.
+ */
+function withScopeEvidence(run: VerificationRunView): VerificationRunView {
+  const gates = run.gates ?? [];
+  if (!gates.some((gate) => gate.gateId === SCOPE_GATE_ID)) return run;
+  return {
+    ...run,
+    gates: gates.map((gate): VerificationGateResultView => {
+      if (gate.gateId !== SCOPE_GATE_ID) return gate;
+      const scope = parseScopeEvidence(gate.logTail);
+      return scope ? { ...gate, scope } : gate;
+    }),
+  };
+}
 
 function formatSeconds(durationMs: number | null): string {
   return durationMs === null ? 'n/a' : `${(durationMs / 1000).toFixed(1)}s`;
@@ -114,7 +213,7 @@ export function createVerifyCommand(): Command {
         });
 
         if (options.json && outcome.run) {
-          console.log(JSON.stringify(outcome.run));
+          console.log(JSON.stringify(withScopeEvidence(outcome.run)));
         }
         process.exit(outcome.exitCode);
       } catch (error) {
@@ -238,7 +337,10 @@ function addShowCommand(parent: Command): void {
 
         const run = data.run;
         if (json) {
-          console.log(JSON.stringify(run, null, 2));
+          // `show` is the forensic surface — the one a reader reaches for to
+          // reconstruct a run days later — so the scope evidence has to be
+          // readable here too, not only on the run that produced it.
+          console.log(JSON.stringify(withScopeEvidence(run), null, 2));
           return;
         }
 

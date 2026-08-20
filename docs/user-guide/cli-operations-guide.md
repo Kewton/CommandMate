@@ -521,7 +521,7 @@ commandmate verify show <run-id>                       # run の詳細（読み�
 
 進捗（GATE 行）は stderr、判定（RESULT 行）は stdout に出力されます。不合格ゲートは logTail も stderr に続けて出力します。表示は**末尾 40 行**まで（超過分は `... (+N more lines; run \`commandmate verify show <run-id>\` for the full log)` の 1 行に畳まれます。Issue #1683）。
 
-scope ゲート不合格の logTail には**違反 path 一覧**（最大 100 件、超過は `... and N more`）と、意図した差分なら契約の `scope.allow`（＝Issue の対象ファイル）へ path を追加して `send --contract` で**送り直す**定型ガイダンスが含まれます（scope は送信時スナップショットで裁定されるため、契約 YAML の編集だけでは判定は変わりません）。
+scope ゲート不合格の logTail には**違反 path 一覧**（最大 100 件、超過は `... and N more`）と、意図した差分なら契約の `scope.allow`（＝Issue の対象ファイル）へ path を追加して `send --contract` で**送り直す**定型ガイダンスが含まれます（scope は送信時スナップショットで裁定されるため、契約 YAML の編集だけでは判定は変わりません）。合格・不合格を問わず、許可された変更とそれを許可したパターンは `admitted:` 節に残ります（下記）。
 
 ```
 # stderr:
@@ -533,6 +533,71 @@ GATE unit FAIL (exit=1, 45.0s)
 # stdout:
 RESULT failed
 ```
+
+### scope ゲートの証跡 — 何がどのパターンで許可されたか（Issue #1841）
+
+`scope.allow` に完全一致 path しか書かない運用なら「パターン＝ファイル」なので追加情報はありませんが、
+`src/**` のような glob（Issue #1546）では **その run で実際に何が許可されたか**が契約からは読めません。
+そこで scope ゲートの logTail に `admitted:` 節を出し、変更ファイルごとに**それを許可した allow パターン**を残します。
+
+```
+scope: baseRef=origin/develop changed=3 violations=1
+allow: src/**, docs/*.md
+deny: src/secret/**
+admitted:
+  + docs/x.md  ← docs/*.md
+  + src/a/b.ts  ← src/**
+out of scope:
+  - src/secret/key.ts  ← src/secret/**
+To allow this diff, add the paths above to the contract's scope.allow ...
+```
+
+- 記録するのは**宣言順で最初に一致したパターン**です（`allow: ["src/**", "src/lib/**"]` なら
+  `src/lib/a.ts` は `src/**`）。後ろの方を名指しすると「消しても判定が変わらないルール」を
+  読者に提示することになるためです
+- `allow` のどれにも書かれていないのに許可された path は `(exempt: .commandmate/)` /
+  `(exempt: contract path)` と名乗ります。括弧付きなのは、契約を grep しても見つからないことが
+  事実だからです（そこには何も書かれていない）
+- `deny` で落ちた path は `admitted:` に入らず、`out of scope:` 側に**拒否した deny パターン**が付きます。
+  `deny:` 見出しは「宣言されたもの」の一覧で、こちらは「この path が踏んだもの」です
+  （＝「revert する」か「allow を広げる」かの違い）
+- `admitted:` / `out of scope:` はそれぞれ**最大 100 件**で、超過時は `  ... (+N more)` /
+  `  ... and N more` と明示します。**切り詰めは表示上の規則で、判定は全ファイルに対して行われます**
+- `admitted:` は `out of scope:` より**前**に出ます。不合格ゲートの stderr 表示は末尾 40 行までなので、
+  長い `admitted:` を後ろに置くと違反一覧とガイダンスが画面外へ流れるためです
+
+`--json` では、`scope` ゲートの結果に機械可読の `scope` フィールドが付きます
+（`verify --json` と `verify show --json` の両方。**既存フィールドは一切変わりません**）。
+
+```jsonc
+{
+  "gates": [
+    {
+      "gateId": "scope",
+      "status": "failed",
+      "exitCode": 1,
+      "logTail": "scope: baseRef=... (上の全文がそのまま残る)",
+      "scope": {
+        // 許可された変更と、それを許可したパターン（最大 100 件）
+        "admitted": [
+          { "path": "docs/x.md",  "pattern": "docs/*.md" },
+          { "path": "src/a/b.ts", "pattern": "src/**" }
+        ],
+        // scope 外の path（最大 100 件）
+        "violations": ["src/secret/key.ts"],
+        // ゲートが全ファイルに対して数えた実数。上の 2 配列は 100 件で切れるので、
+        // 「scope 外が在るか」は必ず totals.violations で判定すること
+        "totals": { "changed": 3, "admitted": 2, "violations": 1 }
+      }
+    }
+  ]
+}
+```
+
+`scope` フィールドは **scope ゲートが実際に判定したときだけ**付きます。`skipped`（契約なし /
+`requireScopeClean: false` / 契約に結び付かなかった）や `error`（baseRef 未解決）の logTail は
+レポートではなく 1 文のメッセージなので、フィールドごと不在です — 空の `admitted` を出すと
+「判定した結果 1 件も許可されなかった」と読まれてしまうためです。
 
 ### 実行中コンフリクト（409）
 
