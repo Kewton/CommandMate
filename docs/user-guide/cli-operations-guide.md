@@ -607,6 +607,60 @@ GATE unit FAIL (exit=1, 45.0s)
 RESULT failed
 ```
 
+### 並列 worktree と共有資源（Issue #1771）
+
+固定ポート・ローカル DB・エミュレータを掴むゲートは、並列 worktree で重なると後発が
+資源衝突で落ちます。記録は `GATE e2e FAIL exit=1` だけなので、**変更の欠陥なのか環境の
+衝突なのかが読めません**。対処は 2 つあり、**先に試すべきは 1 つ目**です。
+
+**1. worktree ごとに資源を分ける（並列度が保てるのはこちらだけ）**
+
+コマンド系ゲートには常に次の 2 変数が渡ります。
+
+| 変数 | 値 | 用途 |
+|---|---|---|
+| `CM_WORKTREE_ID` | worktree ID | コンテナ名・DB 名・ログディレクトリ |
+| `CM_WORKTREE_INDEX` | `0..1023` の整数。worktree ごとに一意で、同じ worktree なら毎回同じ | ポート等の数値資源 |
+
+```yaml
+gates:
+  - id: e2e
+    command: "sh -c 'E2E_PORT=$((60400+CM_WORKTREE_INDEX)) npm run test:e2e'"
+    timeoutSec: 1800
+```
+
+**2. `mutex` で直列化する（資源を分けられない場合）**
+
+```yaml
+gates:
+  - id: e2e
+    command: "npm run test:e2e"
+    timeoutSec: 1800
+    mutex: e2e-port      # 同名 mutex のゲートはマシン全体で同時に 1 つだけ
+```
+
+ロックは `~/.commandmate/locks/<name>.lock`（`mkdir` 方式）で、CommandMate の runner と
+`cmate-verify` の standalone runner が**同じパス規約**に従います。待ち時間は
+`duration` に混ぜず `waited=` として別に出ます。
+
+```
+GATE e2e PASS (exit=0, 190.0s, waited=42.3s)
+```
+
+ロックが `timeoutSec` の間ずっと空かなければ、ゲートは **TIMEOUT ではなく SKIP** になります。
+
+```
+GATE e2e SKIP (reason=mutex-wait waited=600.0s)
+```
+
+コマンドは 1 度も起動していないので「失敗」とは記録しません。run は `error` ＝ **exit 99
+（判定不能）** であって 20（不合格）ではありません。時間をおいて再実行してください。
+
+> **注意**: `mutex` を受理するのは現時点で CommandMate の runner だけです。`cmate-verify`
+> skill の standalone runner は v1 を閉じたキー集合として扱うため、`mutex:` を書いた
+> verify.yaml は**設定エラー（exit 2）で一切走りません**。両方で回すリポジトリでは、
+> skill 側へ移植されるまで `mutex:` を書かないでください。
+
 ### scope ゲートの証跡 — 何がどのパターンで許可されたか（Issue #1841）
 
 `scope.allow` に完全一致 path しか書かない運用なら「パターン＝ファイル」なので追加情報はありませんが、

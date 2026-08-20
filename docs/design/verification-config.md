@@ -27,6 +27,10 @@ gates:
   - id: unit
     command: "npm run test:unit"
     timeoutSec: 1800
+  - id: e2e
+    command: "npm run test:e2e"
+    timeoutSec: 1800
+    mutex: e2e-port    # 省略時なし。マシン全体で同名 mutex のゲートを同時に 1 つに制限（§9）
 options:
   baseRef: origin/develop      # work-evidence / scope 判定の基準。省略時はリポジトリのデフォルトブランチの origin
   skipInPrimaryCheckout: true  # 省略時 true。メイン checkout（稼働サーバの cwd になり得る場所）ではコマンド系ゲートを skip
@@ -56,6 +60,7 @@ options:
 | `id` | string | ✅ | — | `^[a-z0-9][a-z0-9-]{0,31}$`。設定内で一意。予約 ID（`work-evidence` / `scope` / `env-clean`）は使用不可 |
 | `command` | string | ✅ | — | 非空。`--cwd` を作業ディレクトリとして POSIX sh (`/bin/sh -c`) で実行される |
 | `timeoutSec` | integer | — | `600` | `1..7200` |
+| `mutex` | string | — | （無し） | `^[A-Za-z0-9_.-]+$`、64 文字以内。マシン全体のロック名（§9） |
 
 `command` は **POSIX sh** で実行される。bash 固有構文（`[[ ]]` / 配列 / `function` キーワード）は
 使わないこと。必要なら `bash -c "..."` と明示的に書く。
@@ -124,11 +129,14 @@ RESULT failed
 |---|---|
 | コマンド系ゲート | `GATE <id> PASS\|FAIL exit=<code> duration=<n>s` |
 | タイムアウト | `GATE <id> TIMEOUT exit=124 duration=<n>s` |
-| skip | `GATE <id> SKIP reason=primary-checkout\|flag` |
+| skip | `GATE <id> SKIP reason=primary-checkout\|flag\|mutex-wait` |
 | work-evidence | `GATE work-evidence PASS\|FAIL commits=<n> uncommitted=<n>` |
 | 判定 | `RESULT passed\|failed\|not_started\|skipped` |
 
 `--gates` で選択されなかったゲートは行を出さない（その実行の対象外であるため）。
+
+**`mutex` を宣言したゲートは `waited=<n>s` を追加する**（Issue #1771、§9.3）。
+`duration` に足さないことが規約である。
 
 ### 3.5 exit code は絶対にパイプで失わない
 
@@ -333,3 +341,154 @@ verify.yaml に書く** — 2 実装が共に読む唯一のファイルだか�
 - `work-evidence` / `scope` の予約は維持する。`scope` を実装するときは本書の §4 を更新する。
 - タイムアウトはプロセスグループ単位で kill する（§3.6）。Node で実装する場合は
   `child_process.spawn(..., { detached: true })` ＋ `process.kill(-pid, ...)` が対応物。
+
+---
+
+## 9. 並列 worktree と共有資源（Issue #1771）
+
+v1 のゲートはコマンドと timeout しか宣言できず、「このゲートはマシン上で同時に 1 つしか
+走れない」（固定ポート・ローカル DB・エミュレータ等の共有資源）を表現できなかった。
+並列 worktree で同じゲートが重なると後発が資源衝突で即 fail し、記録には
+`GATE e2e FAIL exit=1` としか残らない — **変更の欠陥と環境の衝突が区別できない。**
+
+実測（BorderFreeKidsMap、2026-08-19）: planner が 9 wave を計算したのに、e2e ゲートが
+60303 番ポートを専有するため 16 回の直列 dispatch に手で開き直した。wave 化が一度も使われなかった。
+
+対処は 2 段構えで、**優先されるのは 9.1 の env 注入**である。9.2 の `mutex` は偽の赤を
+消すが検証は直列のままなので、資源を worktree ごとに分けられるならそちらを先に使う。
+
+### 9.1 `CM_WORKTREE_INDEX` / `CM_WORKTREE_ID`（env 注入）
+
+すべてのコマンド系ゲートは、以下の環境変数つきで実行される（組み込みゲートには無い —
+どれも外部コマンドを起動しないため）。
+
+| 変数 | 値 | 用途 |
+|---|---|---|
+| `CM_WORKTREE_ID` | worktree ID（`worktrees.id`） | コンテナ名・DB 名・ログディレクトリなど、数値で表せないもの |
+| `CM_WORKTREE_INDEX` | `0..1023` の整数 | ポート等の数値資源。`E2E_PORT=$((60400+CM_WORKTREE_INDEX))` |
+
+```yaml
+gates:
+  - id: e2e
+    command: "sh -c 'E2E_PORT=$((60400+CM_WORKTREE_INDEX)) npm run test:e2e'"
+    timeoutSec: 1800
+```
+
+これが**衝突そのものを無くす**唯一の手段であり、並列度を保てるのはこちらだけである。
+
+**採番は CommandMate 由来ではない。** Issue #1771 本文は「サーバが worktree を採番している」
+としていたが、実測ではしていない: `worktrees.id` はディレクトリ basename 由来の TEXT 主キー
+（`src/lib/git/worktree-id.ts:73`）で、順序列も作成時刻も列に無く
+（`src/lib/db/migrations/v01-v05-initial-schema.ts:104`）、唯一の並び順は
+`updated_at DESC`（`src/lib/db/worktree-db.ts:113`）＝エージェントが発言するたびに入れ替わる。
+そこで番号は**この機能が自分で払い出す**。満たすべき性質を代替案とともに明示する。
+
+| 性質 | 実現方法 |
+|---|---|
+| 同じ worktree なら同じ番号 | 払い出しをディスクに永続化する（プロセス再起動・DB リセットを跨いで不変） |
+| 同時に走る 2 worktree が同じ番号にならない | 枠の確保が `O_EXCL` のファイル作成＝アトミック。競合した側は必ず次の枠へ進む |
+
+- **レジストリ**: `~/.commandmate/worktree-index/<n>` は、枠 `n` を保有する worktree ID を
+  1 行で持つファイル。**両ランナーが従う規約**であり、standalone 側は
+  `set -C; printf '%s\n' "$id" > "$root/$n"`（noclobber）で同じ意味を実装できる。
+- 環境変数 `CM_VERIFY_WORKTREE_INDEX_ROOT` でルートを差し替えられる（テスト・隔離 CI 用）。
+- **worktree を削除しても枠は解放しない。** 再利用すると、生きている worktree の番号が
+  動き、削除された側のサーバがまだ握っているポートに載る可能性がある。
+- **ハッシュは採用しなかった**（Issue 本文の代替案）。同じ番号になる性質は満たすが、
+  30 worktree × 1024 枠で衝突確率は約 35% であり、衝突こそがこの機能で消したいものである。
+  レジストリが**書けない**マシンだけ `sha256(worktreeId) mod 1024` にフォールバックする
+  （変数が未設定だと `$((60400+CM_WORKTREE_INDEX))` が全 worktree で 60400 に潰れるため、
+  値は必ず渡す）。
+
+### 9.2 `mutex: <name>` — マシン全体のロック
+
+資源を worktree ごとに分けられない場合に、同名 `mutex` を宣言したゲートを
+**マシン全体で同時に 1 つ**に制限する。
+
+```yaml
+gates:
+  - id: e2e
+    command: "npm run test:e2e"
+    timeoutSec: 1800
+    mutex: e2e-port
+```
+
+**両ランナーが従う規約**（一致していなければ排他にならない。同じマシンで CommandMate の
+runner と standalone runner が同じ資源に触れる）:
+
+| 項目 | 規約 |
+|---|---|
+| パス | `~/.commandmate/locks/<name>.lock` |
+| 方式 | **`mkdir` によるアトミックな作成**。macOS に `flock(1)` が無いため、移植可能な方式を採る |
+| 保有者記録 | ロックディレクトリ内の `owner` ファイル。JSON `{"pid":N,"host":"…","token":"…","acquiredAt":ms}` |
+| 待ち | ロックが空くまでポーリング（既定 250ms 間隔）。待ち時間の上限は**そのゲートの `timeoutSec`** |
+| 解放 | `owner` の `token` が自分のものであるときだけディレクトリを削除する |
+| 死んだ保有者 | `host` が自ホストと一致し、かつ `pid` が存在しない（`kill(pid,0)` が ESRCH）ときのみ、待つ側が奪ってよい。**他ホストの pid では判断しない**（共有 home で 2 台が同時実行しうる） |
+| 名前 | `^[A-Za-z0-9_.-]+$` / 64 文字以内。ゲート ID ではなく**資源**の名前なので、別リポジトリのゲート同士が `port.60303` のような名前で排他し合ってよい |
+
+環境変数 `CM_VERIFY_LOCK_ROOT` でルートを差し替えられる（テストは必ずこれを使うこと。
+実 `~/.commandmate/locks` を使うテストは、並列 worktree の稼働中ランと排他して偽の赤を作る）。
+
+`token` は必須である。これが無いと、pid が死んで見えたために奪われた側が、あとから解放した
+ときに**次の保有者のロックを消す**（＝2 ランが同時に資源へ入る）。
+
+### 9.3 待ち時間は duration と別に記録する
+
+```
+GATE e2e PASS exit=0 duration=190s waited=42s
+```
+
+- `duration` は**ゲート自身のコマンドが動いていた時間**。`waited` は**ロック待ちの時間**。
+  混ぜると timeout の調整も advisor の入力も歪む。**`waited` を `duration` に足さないこと。**
+- 待たなかった mutex ゲートも `waited=0s` を出す。「排他されていて待たなかった」と
+  「mutex が無い」は別の事実であり、読む側が区別できる必要がある。
+- `mutex` を宣言していないゲートの行は**従来どおり**（`waited=` は付かない）。
+  この機能を使わないリポジトリの出力は 1 バイトも変わらない。
+
+**CommandMate CLI の描画は括弧つきで、値の綴りだけが共通である**（実測: 製品 CLI は
+`GATE lint PASS (exit=0, 12.3s)` 形式を #1544 から使っており、standalone runner の
+空白区切りとは元から別物。`src/cli/utils/verify-runner.ts:145-150`）。
+**契約はフィールド名 `waited` と単位 `s`、および「duration に足さない」ことであって、
+区切り文字ではない。**
+
+| ランナー | 綴り |
+|---|---|
+| standalone（`verify-run.sh`） | `GATE e2e PASS exit=0 duration=190s waited=42s` |
+| CommandMate CLI | `GATE e2e PASS (exit=0, 190.0s, waited=42.3s)` |
+
+製品実装には `verification_gate_results` に待ち時間の列が無いため、`log_tail` の先頭に
+機械可読の 1 行 `[mutex] name=<name> waited=<n.n>s lock=<path>` を置き、CLI がそれを読んで
+GATE 行に載せる（`work-evidence` の `commits=`/`uncommitted=` と scope ゲートの証跡が既に
+使っている経路）。行頭アンカーで照合するので、ゲート自身の出力に `waited=` が現れても
+拾わない。
+
+### 9.4 ロックが取れないまま timeout に達したとき
+
+**TIMEOUT ではない。** コマンドは 1 度も起動していないので「長く走った」は事実ではなく、
+FAIL でもない — 資源衝突と変更の欠陥が同じ顔をするのを止めるのが本 Issue の目的である。
+
+```
+GATE e2e SKIP reason=mutex-wait waited=600s
+```
+
+- ゲートは `skipped`、`exit_code` は null。
+- run 全体は `error`（`skipped` は `passed` を塞ぐ、§3.3 と同じ規律）＝ CLI の exit code は
+  **99（判定不能）**であり、20（不合格）ではない。20 で分岐する呼び出し側は
+  「ゲートが実際に work を裁定した」と信じてよい、という既存の約束を守る。
+
+### 9.5 両ランナーが受理すべきキー集合（parity）
+
+skills 側（`.claude/skills/cmate-verify` と `.agents/skills/cmate-verify`、および
+commandmate-skills リポジトリの実装）は**この表を正として**追随する。
+
+| 場所 | キー | CommandMate | standalone runner |
+|---|---|---|---|
+| `gates[]` | `id` / `command` / `timeoutSec` | ✅ | ✅ |
+| `gates[]` | `mutex` | ✅ #1771 | **未移植**（skills #223） |
+| `options` | `baseRef` / `skipInPrimaryCheckout` / `maxLogTailBytes` / `requireCommit` | ✅ | ✅ |
+| `options` | `requireEnvClean` | ✅ #1740 | **未移植** |
+
+**未移植のキーは「無視される」のではなく設定エラー（exit 2）になる。** 両実装とも v1 を
+閉じた集合として扱うためで、`mutex:` を書いた verify.yaml は移植が済むまで standalone
+runner では**一切走らない**。移植が完了するまで、両ランナーで回すリポジトリの
+verify.yaml に `mutex:` を書かないこと。

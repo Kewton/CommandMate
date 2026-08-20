@@ -27,6 +27,8 @@ import { homedir } from 'os';
 import { dirname, join } from 'path';
 import { getEnv } from '@/lib/env';
 import { createLogger } from '@/lib/logger';
+import { MACHINE_LOCK_DIR_NAME } from './machine-lock';
+import { WORKTREE_INDEX_DIR_NAME } from './worktree-index';
 
 const logger = createLogger('lib/verification/env-snapshot');
 
@@ -381,6 +383,20 @@ export const VOLATILE_ENTRY_PATTERNS = [/-wal$/, /-shm$/, /-journal$/, /^\.DS_St
 /** This module's own storage, which must not read as something a task created. */
 export const ENV_SNAPSHOT_DIR_NAME = 'env-snapshots';
 
+/**
+ * Coordination directories the verification runner itself creates under
+ * `~/.commandmate` (Issue #1771): the gate mutex locks and the worktree index
+ * registry. Neither is a side effect of the delegation — the first mutexed gate
+ * on a machine creates them — so counting them would report the runner's own
+ * bookkeeping as pollution the agent left behind.
+ *
+ * Scoped to the `~/.commandmate` probe rather than added to
+ * {@link isIgnoredEntry}: a `~/locks` directory in `$HOME` is not ours, and
+ * blanket-ignoring the name would put a hole in the probe that exists to catch
+ * exactly that.
+ */
+const COMMANDMATE_RUNTIME_ENTRY_NAMES = [MACHINE_LOCK_DIR_NAME, WORKTREE_INDEX_DIR_NAME];
+
 function isIgnoredEntry(name: string): boolean {
   if (name === ENV_SNAPSHOT_DIR_NAME) return true;
   return VOLATILE_ENTRY_PATTERNS.some((pattern) => pattern.test(name));
@@ -389,7 +405,7 @@ function isIgnoredEntry(name: string): boolean {
 function probeDirectory(
   deps: EnvProbeDeps,
   path: string,
-  { missingIsEmpty }: { missingIsEmpty: boolean }
+  { missingIsEmpty, alsoIgnored = [] }: { missingIsEmpty: boolean; alsoIgnored?: string[] }
 ): EnvProbeResult {
   let names: string[];
   try {
@@ -403,7 +419,7 @@ function probeDirectory(
   }
   return ok(
     names
-      .filter((name) => !isIgnoredEntry(name))
+      .filter((name) => !isIgnoredEntry(name) && !alsoIgnored.includes(name))
       .map((name) => ({ key: name, detail: null, anchor: null }))
   );
 }
@@ -415,7 +431,10 @@ export function probeHomeEntries(deps: EnvProbeDeps): EnvProbeResult {
 
 /** Entries directly under `~/.commandmate` — the state directory #1722 polluted. */
 export function probeCommandmateEntries(deps: EnvProbeDeps): EnvProbeResult {
-  return probeDirectory(deps, join(deps.homeDir(), '.commandmate'), { missingIsEmpty: true });
+  return probeDirectory(deps, join(deps.homeDir(), '.commandmate'), {
+    missingIsEmpty: true,
+    alsoIgnored: COMMANDMATE_RUNTIME_ENTRY_NAMES,
+  });
 }
 
 // =============================================================================

@@ -337,7 +337,7 @@ globstar が 0 セグメントにマッチしない、括弧を文字クラス�
 | キー | 型 | 既定 | 制約 |
 |---|---|---|---|
 | `gates` | list of string | `null`（= 全ゲート） | 各要素は `verify.yaml` の `gates[].id` 形式。空リストは契約エラー。最大 32 件 |
-| `gateDefinitions` | list of `{id, command, timeoutSec}` | `[]` | 形も検証も `verify.yaml` の `gates[]` と同一（Issue #1791）。最大 32 件 |
+| `gateDefinitions` | list of `{id, command, timeoutSec, mutex}` | `[]` | 形も検証も `verify.yaml` の `gates[]` と同一（Issue #1791）。`mutex` は任意（Issue #1771）。最大 32 件 |
 
 `gates: []`（空リスト）は「ゲートなしで合格させる」という意味になりうるため**エラー**にする。
 「全部走らせる」は `verify` キー自体の省略、または `verify.gates` の省略で表す。
@@ -370,7 +370,13 @@ snapshot 済みで変更集合からも除外済みなので、**新しい改竄
 
 - 形と検証は `verify.yaml` の `gates[]` と**同じ関数**（`validateGateEntries`）を通す。
   id パターン `^[a-z0-9][a-z0-9-]{0,31}$`・予約 id 禁止・リスト内重複禁止・
-  `timeoutSec` の整数と 1..7200 の範囲は、二重定義ではなく同一実装で保証される
+  `timeoutSec` の整数と 1..7200 の範囲は、二重定義ではなく同一実装で保証される。
+  Issue #1771 の `mutex`（マシン全体のロック名。`^[A-Za-z0-9_.-]+$` / 64 文字以内、
+  [verification-config.md](./verification-config.md) §9）も同じ経路で受理される
+  — 契約が運ぶ使い捨てゲートこそ固定ポートを掴みがちだからである。
+  **`mutex` を宣言しなかったゲートの JSON にはキー自体が現れない**（契約は
+  `tasks.contract_json` へ verbatim に保存され再検証されないので、`undefined` 値の
+  キーを書くと「宣言されていない」と「値の無い宣言」が混ざる）
 - `gates` 省略時は「verify.yaml の全ゲート ＋ この契約の `gateDefinitions` 全部」
 - 空リスト `gateDefinitions: []` はキー省略と同義（`gates: []` と違い解釈が一意なので
   エラーにしない。YAML を機械生成する orchestrator が空の場合分けを持たずに済む）

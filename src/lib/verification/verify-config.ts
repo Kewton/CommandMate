@@ -15,6 +15,21 @@ export interface VerifyGate {
   id: string;
   command: string;
   timeoutSec: number;
+  /**
+   * Name of a machine-wide lock this gate must hold while it runs (Issue #1771).
+   *
+   * Declares "only one of these may run on this machine at a time", which a
+   * gate owning a fixed port, database or emulator needs and which command and
+   * timeout cannot express. Two parallel worktrees running such a gate at once
+   * make the second fail on the resource, and `GATE e2e FAIL exit=1` reads
+   * exactly like the change being broken.
+   *
+   * Optional rather than `string | null`: contracts store their gate list as
+   * JSON in `tasks.contract_json` and are read back with `JSON.parse`, never
+   * re-validated, so every row written before this field existed simply has no
+   * key — and `undefined` is the honest reading of that.
+   */
+  mutex?: string;
 }
 
 export interface VerifyOptions {
@@ -104,8 +119,23 @@ const MAX_LOG_TAIL_BYTES = 1048576;
  */
 export const GATE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
+/**
+ * Shape a `mutex` name may take (Issue #1771).
+ *
+ * Wider than {@link GATE_ID_PATTERN} because a mutex names a *resource*, not a
+ * gate: two repositories that both bind port 60303 should be able to agree on
+ * `port.60303` and be serialized against each other. Narrow enough that the
+ * name is safe as a path segment — no separator, no whitespace, nothing a shell
+ * re-interprets — because both runners turn it into
+ * `~/.commandmate/locks/<name>.lock`.
+ */
+export const GATE_MUTEX_PATTERN = /^[A-Za-z0-9_.-]+$/;
+
+/** Keeps the lock directory name inside every filesystem's limit. */
+export const MAX_GATE_MUTEX_LENGTH = 64;
+
 const TOP_LEVEL_KEYS = ['version', 'gates', 'options'];
-const GATE_KEYS = ['id', 'command', 'timeoutSec'];
+const GATE_KEYS = ['id', 'command', 'timeoutSec', 'mutex'];
 const OPTION_KEYS = [
   'baseRef',
   'skipInPrimaryCheckout',
@@ -249,8 +279,32 @@ function validateGateEntry(
     }
   }
 
+  let mutex: string | undefined;
+  if (entry.mutex !== undefined) {
+    if (typeof entry.mutex !== 'string' || entry.mutex === '') {
+      issues.push(`${at}.mutex: must be a non-empty string (got ${describe(entry.mutex)})`);
+    } else if (entry.mutex.length > MAX_GATE_MUTEX_LENGTH) {
+      issues.push(
+        `${at}.mutex: must be at most ${MAX_GATE_MUTEX_LENGTH} characters (got ${entry.mutex.length})`
+      );
+    } else if (!GATE_MUTEX_PATTERN.test(entry.mutex)) {
+      issues.push(`${at}.mutex: "${entry.mutex}" must match ${GATE_MUTEX_PATTERN.source}`);
+    } else {
+      mutex = entry.mutex;
+    }
+  }
+
   if (issues.length === issuesBefore) {
-    gates.push({ id: entry.id as string, command: entry.command as string, timeoutSec });
+    const gate: VerifyGate = {
+      id: entry.id as string,
+      command: entry.command as string,
+      timeoutSec,
+    };
+    // Only set when declared: an explicit `mutex: undefined` would serialize
+    // into a contract's stored JSON as a key, and "declared without a value"
+    // is not a state this field has.
+    if (mutex !== undefined) gate.mutex = mutex;
+    gates.push(gate);
   }
 }
 
