@@ -179,15 +179,15 @@ jobs:
 
   legacy-tmux-readmode:
     name: Legacy tmux (<3.2) reading-mode no-op
-    # [self-hosted] This repository's ephemeral self-hosted runners (labels:
-    # self-hosted, Linux, ARM64, ubuntu-24.04), EXCEPT for a pull request opened
-    # from a fork, which falls back to `ubuntu-latest`. CommandMate is public, so
-    # a fork PR is code written by someone else; the runners are ephemeral and
-    # keep nothing between jobs, but the job still executes on hardware we own.
-    # The fallback keeps the full CI verdict on outside contributions without
-    # ever running them on our machines. See the identical change in
-    # Kewton/commandmate-skills#226.
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
+    # [self-hosted] DELIBERATE EXCEPTION: this job stays on `ubuntu-latest`.
+    # It is the only container job in the workflow (`container: node:18-bullseye`,
+    # because the point is a tmux older than the runner image ships), and the
+    # ephemeral self-hosted image has no Docker — the run failed at `Set up job`
+    # with `docker: command not found` before a single step executed
+    # (run 32339198148). Container support is a property of the runner image, not
+    # of this workflow, so the fix belongs there; until it exists this job cannot
+    # move.
+    runs-on: ubuntu-latest
     timeout-minutes: 10 # measured 0.5m median / 0.8m max (n=12); floor of the policy
     # Debian 11 ships tmux 3.1c — the newest tmux that still lacks display-popup,
     # so it is exactly the version a user most plausibly runs into. Using a
