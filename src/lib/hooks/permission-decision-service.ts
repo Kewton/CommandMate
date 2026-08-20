@@ -44,6 +44,7 @@ import {
   evaluatePolicyAgainstTexts,
   MAX_DENY_MATCH_TEXT_LENGTH,
   type AutoYesMode,
+  type AutoYesPolicy,
   type AutoYesSuppressionReason,
 } from '@/lib/polling/auto-yes-resolver';
 import { recordPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
@@ -120,6 +121,44 @@ const NO_DECISION = (reason: PermissionDecisionReason): PermissionDecision => ({
 });
 
 /**
+ * The two things the adjudicator reaches outside itself, made substitutable
+ * (Issue #1847).
+ *
+ * Both defaults are the production ones and both talk to SQLite; every caller
+ * in `src/` omits this parameter and is unchanged. It exists for the live
+ * canary (`scripts/canary/hook-receiver.ts`), which drives a real Claude TUI
+ * with the injected hooks pointed at itself so the `allow` / no-decision
+ * verdicts can be observed on screen. That process is not a CommandMate server:
+ * it has no worktree row, no task row, and no business opening the developer's
+ * database — `recordAllow` would write a prompt-history row into it, and
+ * `readPolicy` would silently answer `null` for every contract, which is
+ * exactly the branch the no-decision scenario needs to exercise.
+ *
+ * Substituting these two is what lets the canary run **this** function rather
+ * than a re-implementation of it. A copy in the canary would be a second
+ * ordering of the table above, free to drift from the one that actually decides
+ * whether a command runs unattended — and drift in the permissive direction is
+ * not detectable by anything the canary asserts.
+ */
+export interface PermissionDecisionDeps {
+  /**
+   * The contract policy governing this session. Defaults to the `autoYes` block
+   * of the instance's active task, read through the TTL cache.
+   */
+  readPolicy?: (session: PermissionRequestSession) => AutoYesPolicy | null;
+  /**
+   * Where an `allow` is recorded for the audit trail. Defaults to the
+   * prompt-history row `capture --prompts` reads.
+   */
+  recordAllow?: (session: PermissionRequestSession, payload: PermissionRequestPayload) => void;
+}
+
+/** Production policy source: the active task's contract, TTL-cached. */
+function readContractPolicy(session: PermissionRequestSession): AutoYesPolicy | null {
+  return getSessionAutoYesPolicy(session.worktreeId, session.cliToolId, session.instanceId);
+}
+
+/**
  * The verdict for one permission request. Pure apart from reading Auto-Yes
  * state and the (TTL-cached) contract policy; the recording side effects live
  * in {@link resolvePermissionRequest}.
@@ -136,10 +175,13 @@ const NO_DECISION = (reason: PermissionDecisionReason): PermissionDecision => ({
  *
  * @param session - Worktree / tool / instance the request came from
  * @param payload - Parsed payload, or null when it could not be parsed
+ * @param deps - Substitutions for the database-backed lookups; see
+ *   {@link PermissionDecisionDeps}. Omit in the server.
  */
 export function decidePermissionRequest(
   session: PermissionRequestSession,
-  payload: PermissionRequestPayload | null
+  payload: PermissionRequestPayload | null,
+  deps: PermissionDecisionDeps = {}
 ): PermissionDecision {
   if (!payload) {
     return NO_DECISION('unknown-payload');
@@ -160,7 +202,7 @@ export function decidePermissionRequest(
     return NO_DECISION('auto-yes-disabled');
   }
 
-  const policy = getSessionAutoYesPolicy(worktreeId, cliToolId, instanceId);
+  const policy = (deps.readPolicy ?? readContractPolicy)({ worktreeId, cliToolId, instanceId });
   const denial = evaluatePolicyAgainstTexts(
     PERMISSION_REQUEST_PROMPT_TYPE,
     collectToolInputMatchTexts(payload.toolName, payload.toolInput),
@@ -298,13 +340,16 @@ function reportPendingDialog(
  *
  * @param session - Worktree / tool / instance the request came from
  * @param payload - Parsed payload, or null when it could not be parsed
+ * @param deps - Substitutions for the database-backed lookups; see
+ *   {@link PermissionDecisionDeps}. Omit in the server.
  * @returns The verdict the route serialises
  */
 export function resolvePermissionRequest(
   session: PermissionRequestSession,
-  payload: PermissionRequestPayload | null
+  payload: PermissionRequestPayload | null,
+  deps: PermissionDecisionDeps = {}
 ): PermissionDecision {
-  const decision = decidePermissionRequest(session, payload);
+  const decision = decidePermissionRequest(session, payload, deps);
 
   // Issue #1726: `AskUserQuestion` raises a `PermissionRequest` carrying the
   // same `tool_input` its `PreToolUse` does (§5.6), so the questions are
@@ -359,7 +404,7 @@ export function resolvePermissionRequest(
   }
 
   if (decision.behavior === 'allow' && payload) {
-    recordAllowedPermission(session, payload);
+    (deps.recordAllow ?? recordAllowedPermission)(session, payload);
   }
 
   return decision;
