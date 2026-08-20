@@ -182,3 +182,7 @@ export interface AgentEventSource {
 - 実測: [`agent-hooks-phase4-live-verification.md`](./agent-hooks-phase4-live-verification.md) / [`opencode-server-live-verification.md`](./opencode-server-live-verification.md) / [`agent-hooks-live-verification.md`](./agent-hooks-live-verification.md) / [`agent-hooks-permission-deny-verification.md`](./agent-hooks-permission-deny-verification.md)
 - fixture: [`tests/fixtures/hooks/`](../../tests/fixtures/hooks/)
 - 運用手順: [`docs/user-guide/agent-event-hooks.md`](../user-guide/agent-event-hooks.md)
+- 実 TUI での継続確認: `npm run canary` の `permission-hook-allow` / `permission-hook-no-decision`
+  （Issue #1847）。claude source の **S6（`encodeVerdict`）と S7（`parsePermissionRequest`）**が、
+  実際の Claude セッションで期待どおりの結果を生むかを毎回測り直す唯一の場所。
+  他ツールの source には同等のカナリアがまだ無い

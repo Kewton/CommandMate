@@ -21,6 +21,17 @@ export interface CanaryOptions {
    * are actually evaluated and not vacuously satisfied.
    */
   mutate: boolean;
+  /**
+   * Mutate the RECEIVER instead of the expectation, for the Auto-Yes v2
+   * scenarios (Issue #1847): answer `{}` where the adjudicator said `allow`, and
+   * `allow` where it declined to decide. Every selected hook scenario must then
+   * go red; scenarios with no receiver are skipped.
+   *
+   * A separate flag from `--mutate` because it mutates a different thing. Those
+   * two scenarios both expect the screen a session with NO verdict shows, so a
+   * wrong predicate does not test what they are for — a wrong reply does.
+   */
+  mutateVerdict: boolean;
   /** Print the scenario table and exit. */
   list: boolean;
   /** Print help and exit. */
@@ -33,6 +44,7 @@ export const DEFAULT_OPTIONS: CanaryOptions = {
   json: false,
   keep: false,
   mutate: false,
+  mutateVerdict: false,
   list: false,
   help: false,
 };
@@ -72,6 +84,9 @@ export function parseArgs(argv: readonly string[]): CanaryOptions {
       case '--mutate':
         options.mutate = true;
         break;
+      case '--mutate-verdict':
+        options.mutateVerdict = true;
+        break;
       case '--list':
         options.list = true;
         break;
@@ -87,6 +102,11 @@ export function parseArgs(argv: readonly string[]): CanaryOptions {
   const overlap = options.only.filter(id => options.skip.includes(id));
   if (overlap.length > 0) {
     throw new Error(`canary: ${overlap.join(', ')} passed to both --only and --skip`);
+  }
+  // Both mutate the run in a different place; combining them would leave a red
+  // scenario unattributable to either.
+  if (options.mutate && options.mutateVerdict) {
+    throw new Error('canary: --mutate and --mutate-verdict are mutually exclusive');
   }
   return options;
 }
@@ -106,6 +126,11 @@ Options:
   --keep         Keep the throwaway HOME and tmux sessions for inspection
   --mutate       Self-test: run every scenario against a plausible-but-WRONG
                  expectation. A healthy harness fails all of them.
+  --mutate-verdict
+                 Self-test for the Auto-Yes v2 scenarios: the hook receiver
+                 answers the OPPOSITE verdict (allow becomes {} and back), with
+                 the real expectations left in place. A healthy harness fails
+                 every hook scenario; the others are skipped.
   -h, --help     Show this help
 
 Scenarios: ${scenarioIds.join(', ')}

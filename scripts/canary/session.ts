@@ -14,7 +14,13 @@ import { stripAnsi } from '@/lib/detection/ansi';
 import { findStartupOverlay, findUpstreamFault } from './expectations';
 import { CANARY_CAPTURE_LINES, probeFrame } from './probe';
 import type { PrivateTmuxServer } from './tmux-private';
-import { ObservationTimeoutError, type Observation, type ScenarioDriver, type SpecialKey } from './types';
+import {
+  ObservationTimeoutError,
+  type HookObservation,
+  type Observation,
+  type ScenarioDriver,
+  type SpecialKey,
+} from './types';
 
 /**
  * Idle footer Claude renders when the composer is accepting input
@@ -39,6 +45,38 @@ export const UPSTREAM_FAULT_GRACE_MS = 180_000;
 
 export const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
+/**
+ * Permission mode every canary session is launched in (Issue #1847).
+ *
+ * Claude Code 2.1.236 made **auto mode** the default — "Claude checks each tool
+ * call for risky actions … runs the ones it assesses as lower-risk, and blocks
+ * the rest" — and in that mode the approval dialog this canary exists to read
+ * is simply not drawn. Measured on 2026-08-20 (2.1.236 / 2.1.237): in one
+ * throwaway HOME the FIRST `claude` still starts in manual mode and every later
+ * one migrates itself to auto, so a multi-scenario run silently stopped
+ * measuring what a single-scenario run measured. It surfaced as a startup
+ * timeout rather than as a wrong verdict, because the ready footer differs
+ * between the modes (`? for shortcuts` only exists in manual).
+ *
+ * Pinned on the command line rather than in the throwaway `settings.json`:
+ * writing `permissions.defaultMode` there puts an interactive
+ * "Make auto mode your default permission mode?" choice in front of the
+ * composer instead (measured — `defaultMode: "default"` is no longer one of the
+ * modes `--permission-mode` accepts). This is a statement about the canary,
+ * not about what a CommandMate session gets.
+ */
+export const CANARY_PERMISSION_MODE = 'manual';
+
+/**
+ * The shell command tmux runs for a scenario.
+ *
+ * @param baseCommand - `<claude>` for a bare scenario, or the production
+ *   launcher's `'<claude>' --settings '<file>'` for a hook scenario
+ */
+export function buildLaunchCommand(baseCommand: string): string {
+  return `${baseCommand} --permission-mode ${CANARY_PERMISSION_MODE}`;
+}
+
 export interface CanarySessionOptions {
   tmux: PrivateTmuxServer;
   sessionName: string;
@@ -47,6 +85,24 @@ export interface CanarySessionOptions {
   claudeBinary: string;
   log: (message: string) => void;
   startupTimeoutMs?: number;
+  /**
+   * Shell command tmux runs instead of the bare binary (Issue #1847).
+   *
+   * For a hook scenario this is `'<claude>' --settings '<file>'`, produced by
+   * the PRODUCTION launcher `buildClaudeLaunchCommand` — the same string a real
+   * CommandMate session is started with, so the settings file the run observes
+   * against is the one users get. Defaults to {@link claudeBinary}.
+   */
+  launchCommand?: string;
+  /**
+   * Fills {@link Observation.hooks} on every capture (Issue #1847).
+   *
+   * Called with the frame's own detection verdicts, because the structured
+   * layer's release rule needs the scraper's answer for the SAME frame — see
+   * `CanaryHookReceiver.observe`. Omitted for the scenarios that run a bare
+   * `claude`, which leaves `hooks` undefined.
+   */
+  observeHooks?: (scraper: Observation) => HookObservation;
 }
 
 /** A running `claude` in a throwaway tmux session. */
@@ -67,7 +123,7 @@ export class CanarySession implements ScenarioDriver {
     await tmux.newSession({
       sessionName,
       workingDirectory,
-      command: claudeBinary,
+      command: options.launchCommand ?? claudeBinary,
       width: TUI_PANE_WIDTH,
       height: TUI_PANE_HEIGHT,
       historyLimit: TMUX_HISTORY_LIMIT,
@@ -98,7 +154,13 @@ export class CanarySession implements ScenarioDriver {
   /** Capture the pane exactly as production does, then run both detectors. */
   async observe(): Promise<Observation> {
     const frame = await this.options.tmux.capturePane(this.options.sessionName, CANARY_CAPTURE_LINES);
-    return probeFrame(frame);
+    const observation = probeFrame(frame);
+    const observeHooks = this.options.observeHooks;
+    // Sampled here rather than in the scenario so `waitFor`, `submitPrompt` and
+    // the fixture writer all see the same paired frame + structured state — and
+    // so the structured layer's release rule runs on every poll, as it does in
+    // `buildCurrentOutput`.
+    return observeHooks ? { ...observation, hooks: observeHooks(observation) } : observation;
   }
 
   async sendText(text: string): Promise<void> {
