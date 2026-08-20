@@ -300,9 +300,15 @@ commandmate send "$WT" "実装してください"
 
 指定worktreeのエージェントが完了するまでブロッキング待機します。
 
-> **完了判定は `sessionStatus === 'ready'`（かつ未分類フレームでない）またはセッション消滅。
-> ターンの成立は見ていない**（`src/cli/commands/wait.ts:356`）。エージェントが要求した作業を
-> 実際にやり遂げたかどうかは `--verify` / `--require-work`（下記）で確かめてください。
+> **完了判定は `sessionStatus === 'ready'`（かつ未分類フレームでない）またはセッション消滅。**
+> エージェントが要求した作業を実際にやり遂げたかどうかは `--verify` / `--require-work`（下記）で
+> 確かめてください。
+>
+> Issue #1839 で**ターン成立の判定が 1 つだけ入りました**。hooks が有効なインスタンス
+> （`sessionStatusReason` が `hook_*`）で、この `wait` が開始した後にエージェント自身が
+> ターン開始を報告している場合、**そのターンの `Stop` が届くまで完了とみなしません**
+> （[ターン成立の判定](#ターン成立の判定issue-1839)）。hooks が来ていないセッションの挙動は
+> 一切変わりません。
 
 ### 使用方法
 
@@ -315,6 +321,7 @@ commandmate wait <worktree-id> --stall-timeout 120   # 出力変化なしの検�
 commandmate wait <worktree-id> --instance codex      # codex のセッションを待つ
 commandmate wait <worktree-id> --verify               # 完了検知後に全ゲートを実行
 commandmate wait <worktree-id> --require-work         # 完了検知後に work-evidence のみ実行
+commandmate wait <worktree-id> --fail-on-upstream-fault  # 上流障害で composer に戻ったら exit 11
 ```
 
 > **`wait` に `--agent` はありません（Issue #1638）**。送り先エージェントの指定は
@@ -334,6 +341,7 @@ commandmate wait <worktree-id> --require-work         # 完了検知後に work-
 | `--instance <id>` | 対象インスタンスID（`<agent>` または `<agent>-<n>`）。**送り先指定はこのフラグのみ**（`--agent` は無い） | エージェントのプライマリインスタンス |
 | `--verify` | 完了検知後に検証ゲートを全件実行し、その判定で終了コードを決める | 無効 |
 | `--require-work` | 完了検知後に work-evidence ゲートのみ実行する | 無効 |
+| `--fail-on-upstream-fault` | composer に戻った時点で上流障害の署名が画面にあれば exit 0 ではなく **11** を返す（Issue #1839） | 無効 |
 
 ### 終了コード
 
@@ -341,6 +349,7 @@ commandmate wait <worktree-id> --require-work         # 完了検知後に work-
 |:------:|------|---------------|
 | 0 | 正常完了（`--verify` 指定時は検証にも合格） | `capture` で結果取得 |
 | 10 | プロンプト検出（`--on-prompt agent` 時） | `respond` で応答し、再度 `wait` |
+| 11 | 上流障害（`--fail-on-upstream-fault` 指定時のみ、Issue #1839） | **`verify` を回さず**時間をおいて同じ内容を再 `send` |
 | 20 | 検証ゲート不合格（`--verify`） | `verify --json` で失敗ゲートを確認し修正 |
 | 21 | 作業証跡ゼロ（コミットも未コミット変更も無い） | エージェントが着手していない。再度 `send` |
 | 124 | タイムアウト | `capture` で状況確認、再度 `wait` or 中断 |
@@ -354,7 +363,9 @@ commandmate wait <worktree-id> --require-work         # 完了検知後に work-
 - 両方を同時指定してもエラーにはならない。work-evidence は常に全ゲートに含まれるため `--verify` が包含する
 - 検証は**完了検知できたときだけ**走る。プロンプト検出（10）やタイムアウト（124）はそのまま返し、検証しない
 - 複数 worktree を指定した場合、完了検知は並行・検証は**直列**。サーバ側が同時実行数を制限しているため
-- 複数 worktree の終了コードは優先順位 **10 > 20 > 21 > 124** で集約される
+- 複数 worktree の終了コードは優先順位 **10 > 11 > 20 > 21 > 124** で集約される（Issue #1839 で 11 を追加）
+- exit 11 は検証を**回しません**。走らなかったターンにゲートの判定を出すこと自体が、
+  この Issue が終わらせにきた誤帰属です
 
 ```bash
 commandmate wait "$WT" --timeout 1800 --verify
@@ -426,16 +437,78 @@ auto-yes も契約の `autoYes` ポリシーも exit 10 も一切発火しない
 立てないため従来どおり最初のポーリングで exit 0 になります。セッション自体が消えた場合も従来どおり
 exit 0 です。
 
+### ターン成立の判定（Issue #1839）
+
+`wait` はこれまで「エージェントが composer に戻ったか」しか見ておらず、**そのターンが
+成立したかどうか**を見ていませんでした。上流 API 障害でエージェントが何も実行せず即座に
+composer へ戻ると、`wait` は exit 0 を返し、続く `--verify` は work-evidence ゼロ（exit 21）を
+返します。呼び出し側はこれを「ターンは成立したが成果物が無い」と読み、同じ送信を無駄に
+繰り返すことになります（実測 #1834: 上流 529 × 13 に対して exit 21 を 12 回）。
+
+#### 実測（2026-08-20 / claude 2.1.236 / 隔離環境・実 API 不使用）
+
+ローカル stub を `ANTHROPIC_BASE_URL` に据えて 529 を返させ、CommandMate が実際に注入する
+hooks 設定を使って観測した結果です（詳細は
+[docs/design/upstream-fault-turn-boundary-1839.md](../design/upstream-fault-turn-boundary-1839.md)）。
+
+| 送信からの経過 | 観測 |
+|---|---|
+| +0.6 s | `UserPromptSubmit` hook が届く／上流へ 4 回 POST、すべて 529 |
+| +3 s | スクレイパーが `ready` / `input_prompt`。pane に `API Error: Repeated 529 Overloaded errors …` |
+| 最後まで | **`Stop` hook は 1 度も届かない** |
+| +62 s | `Notification(idle_prompt)`（「Claude is waiting for your input」） |
+
+#### 判定ルール
+
+- hooks が来ていないインスタンスでは `turnStartedAt` が立たないため、**挙動は従来どおり**です
+- この `wait` の開始（-5 秒の猶予）以降に `user_prompt_submit` / `pre_tool_use` / `post_tool_use`
+  を観測すると、それを「このターン」として採用します。開始より古いイベントは採用しません
+  （サーバー側の構造化イベントは世代で仕切られていないため、前プロセスの残骸で待ちが固まらないように）
+- 採用したターンについて、**`lastStopEventAt` がその時刻以降になるまで完了とみなしません**
+- **`idle_prompt` はターン終端として扱いません**。Issue #1839 の当初案は `stop` または
+  `idle_prompt` でしたが、上の実測どおり `idle_prompt` は「何も実行しなかったターン」でも
+  60 秒後に届くため、採用すると同じ誤判定が 1 分遅れで再現します
+- 完了しない間は stderr に理由（`turnStartedAt` と `lastStopEventAt`）を出し続けます。
+  最終的には `--timeout` で exit 124 になります — 「ゴミを 0 で通す」より「止める」ほうが安全です
+
+#### `--fail-on-upstream-fault`
+
+上のルールだけだと結果は exit 124 で、**原因が分かりません**。このフラグを付けると、
+composer に戻った時点で `upstreamFault`（→ [capture の該当節](#upstreamfault上流障害の観測issue-1839)）が
+非 null なら exit **11** を返し、何が一致したかを stderr に出します。
+
+```bash
+commandmate wait "$WT" --timeout 1800 --verify --fail-on-upstream-fault
+case $? in
+  0)  echo "検証合格" ;;
+  10) commandmate respond "$WT" "yes" ;;
+  11) sleep 600; commandmate send "$WT" "$SAME_MESSAGE" ;;   # ターンは走っていない。再送する
+  20) commandmate verify "$WT" --json ;;
+  21) echo "エージェントが何も作っていない" ;;
+esac
+```
+
+- **既定では有効になりません**。`wait` の終了コードは skills 側 dispatch が分岐に使う公開契約で、
+  途中で 529 を踏んで自力復帰したセッションは従来どおり exit 0 である必要があります
+- 判定は**署名一致のみ**です。`upstreamFault` が null であることは「上流が健全」を意味しません
+
 ### 進捗表示
 
 進捗メッセージはstderrに出力されます。stdoutは最終結果（JSON）のみです。
+完了行には**何を根拠に完了と判定したか**が付きます（Issue #1839）。
 
 ```
 # stderr:
 Waiting: localllm-test-main (status=running, running=true, prompt=false)
 Waiting: localllm-test-main (status=running, running=true, prompt=false)
-Completed: localllm-test-main
+Completed: localllm-test-main (basis=hook_stop)
 ```
+
+| `basis` | 意味 |
+|---|---|
+| `hook_stop` | エージェント自身が、この `wait` が採用したターンの終了を報告した |
+| `session_gone` | 一度動いていた tmux セッションが消えた |
+| `scraper_ready` | 画面が composer に戻っただけ。**誰も裏付けていない**（hooks が無いインスタンスの通常経路） |
 
 ---
 
@@ -890,7 +963,8 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
     "promptWaitingSource": null
   },
   "model": "claude-opus-5[1m]",
-  "reasoningEffort": null
+  "reasoningEffort": null,
+  "upstreamFault": null
 }
 ```
 
@@ -905,6 +979,7 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
 | `isRunning` | tmux セッションが存在して healthy（`src/lib/session/claude-session.ts:543-556`）。**ターン進行中の意味ではない** |
 | `sessionStatus` / `sessionStatusReason` | 状態と、その根拠（`hook_*` なら hooks 由来、それ以外はスクレイパー由来。`HOOK_STATUS_REASON` は `src/lib/session/status-mapping.ts`） |
 | `structuredEvents.*` / `lastStopEventAt` | hooks の最終イベントと最終 `stop` 時刻。hooks が来ていなければ `null` |
+| `upstreamFault` | 画面に上流障害の署名があれば `{id, matchedText, at}`、無ければ `null`（Issue #1839）。**`null` は「健全」ではなく「既知の署名が無かった」** |
 
 画面が空かどうかは `realtimeSnippet.trim() === ''` と `lineCount` で見る。
 `content` は差分なので単独では判断しない。
@@ -925,6 +1000,34 @@ commandmate capture <worktree-id> --json | jq -r '.model // "unknown"'
 - `reasoningEffort` は Issue #1784 着地までは常に `null` です
 - **既存フィールドは一切変わっていません**。`content` / `realtimeSnippet` /
   `sessionStatus` / `sessionStatusReason` を読んでいる監視スクリプトはそのままです
+
+#### `upstreamFault`: 上流障害の観測（Issue #1839）
+
+`realtimeSnippet`（pane 末尾 100 行）を ANSI 除去したうえで、上流（モデル API）障害の署名に
+一致したものを載せます。一致が無ければ `null` で、**キー自体は常に存在します**。
+
+```json
+"upstreamFault": {
+  "id": "overloaded",
+  "matchedText": "⏺ API Error: Repeated 529 Overloaded errors. The API is at capacity — this is usually temporary.",
+  "at": 1755640000000
+}
+```
+
+| フィールド | 意味 |
+|-----------|------|
+| `id` | `overloaded`（`5xx Overloaded`）/ `retrying`（`Retrying in Ns · attempt N/M`）/ `limit-reached` / `api-error` |
+| `matchedText` | 一致した**行そのもの**（前後の行は含まない）。200 UTF-8 バイトで切り詰め、切ったときだけ `…[truncated]` が付く |
+| `at` | 判定に使ったフレームの取得時刻（epoch ms） |
+
+- 署名は「エラーの文言」に固定しています。Claude が健全なフレームに出す
+  `up to 50% of your weekly usage limit on Fable 5` のような**宣伝バナーには一致しません**
+  （緩いパターンで実行全件を `blocked` と誤判定した実測が 2026-08-06 にあります）
+- 定義は `src/lib/detection/upstream-faults.ts` の 1 箇所だけです。検出カナリア
+  （`scripts/canary`）も `capture` も `wait` も同じ表を読みます
+- **`null` を「上流は健全」と読まないでください。** 署名一致だけが根拠であり、pane が
+  スクロールした場合も、障害が pane を空白のまま残した場合（#1834 の実測例）も `null` になります
+- `wait --fail-on-upstream-fault` はこのフィールドだけを見て exit 11 を返します
 
 #### `autoYes.lastSuppression`: ポリシー抑止の観測（Issue #1684）
 

@@ -202,6 +202,31 @@ export interface CurrentOutputResponse {
     promptWaitingSource?: string | null;
   };
   /**
+   * Issue #1839: the upstream (model API) fault visible on the live frame, or
+   * null when no known signature matched.
+   *
+   * Mirrors: src/lib/session/current-output-builder.ts
+   * CurrentOutputPayload.upstreamFault
+   *
+   * **null is not an all-clear.** It means no signature from
+   * `src/lib/detection/upstream-faults.ts` was on the last 100 rows — the pane
+   * may have scrolled, or the failure may have left it blank (measured in
+   * #1834). Only a non-null value is evidence of anything.
+   *
+   * Optional here although the server always sends it, for the reason
+   * {@link CurrentOutputResponse.model} gives: this mirror also has to describe
+   * what an older daemon answers, and the CLI is routinely newer than the
+   * server it dials.
+   */
+  upstreamFault?: {
+    /** `overloaded` / `retrying` / `limit-reached` / `api-error`. */
+    id: string;
+    /** The whole line that matched, trimmed and bounded to 200 UTF-8 bytes. */
+    matchedText: string;
+    /** Epoch ms the frame was captured. */
+    at: number;
+  } | null;
+  /**
    * Issue #1785: the model the session is running, or null when nothing knows.
    *
    * Mirrors: src/lib/session/current-output-builder.ts CurrentOutputPayload.model
