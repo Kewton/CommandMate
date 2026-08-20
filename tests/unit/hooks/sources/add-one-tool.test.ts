@@ -103,9 +103,10 @@ const codexSource: AgentEventSource = definePushHookSource({
 
   // #1757 P5: hook trust is persisted into the user's own `~/.codex/config.toml`,
   // so the only way to enable hooks without writing to it is per-invocation.
-  prepareLaunch: (_target, executablePath) => ({
+  prepareLaunch: ({ executablePath }) => ({
     command: `${executablePath} --dangerously-bypass-hook-trust`,
     settingsPath: null,
+    env: {},
   }),
 });
 
@@ -145,10 +146,13 @@ describe('a codex source, written once, maps every captured codex payload', () =
   it('carries the trust bypass into the launch command', () => {
     // #1757 P4: without it codex skips untrusted hooks in complete silence —
     // no stderr, no log, zero events, and a byte-identical transcript.
-    expect(codexSource.prepareLaunch(
-      { worktreeId: 'wt-1', cliToolId: 'codex' },
-      '/usr/local/bin/codex'
-    ).command).toBe('/usr/local/bin/codex --dangerously-bypass-hook-trust');
+    expect(
+      codexSource.prepareLaunch({
+        target: { worktreeId: 'wt-1', cliToolId: 'codex' },
+        executablePath: '/usr/local/bin/codex',
+        worktreePath: '/repo/wt-1',
+      }).command
+    ).toBe('/usr/local/bin/codex --dangerously-bypass-hook-trust');
   });
 });
 
@@ -178,7 +182,7 @@ describe('copilot: same spellings, different order, shorter fuse', () => {
     parsePermissionRequest: () => null,
     parseQuestion: () => null,
     encodeVerdict: () => ({}),
-    prepareLaunch: (_t, path) => ({ command: path, settingsPath: null }),
+    prepareLaunch: ({ executablePath }) => ({ command: executablePath, settingsPath: null, env: {} }),
   });
 
   it('maps its captured payloads', () => {
@@ -235,7 +239,7 @@ describe('gemini: four of the seven are spelled differently', () => {
     parsePermissionRequest: () => null,
     parseQuestion: () => null,
     encodeVerdict: () => ({}),
-    prepareLaunch: (_t, path) => ({ command: path, settingsPath: null }),
+    prepareLaunch: ({ executablePath }) => ({ command: executablePath, settingsPath: null, env: {} }),
   });
 
   it('maps BeforeAgent onto user_prompt_submit', () => {
@@ -306,7 +310,7 @@ describe('antigravity: no event name, no cwd, camelCase, fail-closed', () => {
         ? { decision: 'deny', reason: verdict.message ?? '' }
         : { decision: 'allow' },
 
-    prepareLaunch: (_t, path) => ({ command: path, settingsPath: null }),
+    prepareLaunch: ({ executablePath }) => ({ command: executablePath, settingsPath: null, env: {} }),
   });
 
   it('is only mappable through the relay argument', () => {

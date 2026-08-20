@@ -88,9 +88,10 @@ export function createLegacyRelaySource(cliToolId: CLIToolType): AgentEventSourc
 
     // CommandMate does not inject config for these tools; their `startSession`
     // in `src/lib/cli-tools/<tool>.ts` launches them bare.
-    prepareLaunch: (_target, executablePath): AgentLaunchPlan => ({
+    prepareLaunch: ({ executablePath }): AgentLaunchPlan => ({
       command: executablePath,
       settingsPath: null,
+      env: {},
     }),
   });
 }

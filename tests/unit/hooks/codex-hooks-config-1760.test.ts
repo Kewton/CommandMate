@@ -29,10 +29,11 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { removeTempDir } from '@tests/helpers/temp-dir';
+import { renderAgentLaunchCommand } from '@/lib/hooks/sources';
 import {
   buildCodexEventHookCommand,
   buildCodexHookSettings,
-  buildCodexLaunchCommand,
+  buildCodexLaunchPlan,
   buildCodexPermissionHookCommand,
   CODEX_HOOK_MARKER,
   CODEX_HOOK_TRUST_BYPASS_FLAG,
@@ -393,16 +394,37 @@ describe('writing into the operator’s file', () => {
 });
 
 describe('the launch command', () => {
+  /** What the pane receives — `env` applied to `command`, exactly once (#1846). */
+  const line = (...args: Parameters<typeof buildCodexLaunchPlan>): string =>
+    renderAgentLaunchCommand(buildCodexLaunchPlan(...args));
+
   it('carries the worktree, the instance and both receiver URLs', () => {
-    const command = buildCodexLaunchCommand('codex', TARGET_2, { port: 4321 });
-    expect(command).toContain(`${CODEX_WORKTREE_ID_ENV_VAR}='wt-alpha'`);
-    expect(command).toContain(`${CODEX_INSTANCE_ID_ENV_VAR}='codex-2'`);
-    expect(command).toContain("CM_HOOK_URL='http://127.0.0.1:4321/api/hooks/agent-event'");
-    expect(command).toContain(
-      "CM_PERMISSION_HOOK_URL='http://127.0.0.1:4321/api/hooks/permission-request" +
-        "?tool=codex&worktreeId=wt-alpha&instanceId=codex-2'"
+    const plan = buildCodexLaunchPlan('codex', TARGET_2, { port: 4321 });
+    // The correlation keys are declared data since #1846, not a prefix baked
+    // into `command` — which is what let gemini, copilot and antigravity stop
+    // writing the same prefix by hand.
+    expect(plan.env[CODEX_WORKTREE_ID_ENV_VAR]).toBe('wt-alpha');
+    expect(plan.env[CODEX_INSTANCE_ID_ENV_VAR]).toBe('codex-2');
+    expect(plan.env.CM_HOOK_URL).toBe('http://127.0.0.1:4321/api/hooks/agent-event');
+    expect(plan.env.CM_PERMISSION_HOOK_URL).toBe(
+      'http://127.0.0.1:4321/api/hooks/permission-request' +
+        '?tool=codex&worktreeId=wt-alpha&instanceId=codex-2'
     );
+    expect(plan.command).toBe("'codex'");
+    // …and the rendered line is byte-for-byte the pre-#1846 one.
+    const command = renderAgentLaunchCommand(plan);
+    expect(command).toContain(`${CODEX_WORKTREE_ID_ENV_VAR}='wt-alpha'`);
+    expect(command).toContain("CM_HOOK_URL='http://127.0.0.1:4321/api/hooks/agent-event'");
     expect(command.endsWith("'codex'")).toBe(true);
+  });
+
+  it('keeps shell syntax out of `command`', () => {
+    // The #1846 invariant. A `NAME=value` prefix inside `command` is invisible
+    // to any launcher that is not a shell, and reporting the settings path used
+    // to be inferred from whether one was there.
+    const plan = buildCodexLaunchPlan('codex', TARGET, { port: 4321 });
+    expect(plan.command).not.toMatch(/^[A-Z_][A-Z0-9_]*=/);
+    expect(plan.settingsPath).toBe(getCodexHooksPath());
   });
 
   it('pins the codex home the config was written to', () => {
@@ -411,13 +433,13 @@ describe('the launch command', () => {
     // there while the codex it launched read `~/.codex` and found none —
     // zero events, no error anywhere. The launch line names the directory so
     // the two cannot diverge.
-    const command = buildCodexLaunchCommand('codex', TARGET, { codexHome: home });
+    const command = line('codex', TARGET, { codexHome: home });
     expect(command).toContain(`CODEX_HOME='${home}'`);
     expect(readFileSync(join(home, 'hooks.json'), 'utf8')).toContain(CODEX_HOOK_MARKER);
   });
 
   it('defaults to the primary instance', () => {
-    expect(buildCodexLaunchCommand('codex', TARGET, { port: 4321 })).toContain(
+    expect(line('codex', TARGET, { port: 4321 })).toContain(
       `${CODEX_INSTANCE_ID_ENV_VAR}='codex'`
     );
   });
@@ -426,8 +448,8 @@ describe('the launch command', () => {
     // The measurement this Issue's acceptance turns on: `cwd` is identical for
     // both, so if these two lines matched, `codex-2`'s stop would end the wait
     // on `codex`.
-    const first = buildCodexLaunchCommand('codex', TARGET, { port: 4321 });
-    const second = buildCodexLaunchCommand('codex', TARGET_2, { port: 4321 });
+    const first = line('codex', TARGET, { port: 4321 });
+    const second = line('codex', TARGET_2, { port: 4321 });
     expect(first).not.toBe(second);
     expect(first).toContain("CM_AGENT_INSTANCE_ID='codex'");
     expect(second).toContain("CM_AGENT_INSTANCE_ID='codex-2'");
@@ -435,7 +457,11 @@ describe('the launch command', () => {
 
   it('is byte-identical to the pre-#1760 launch when injection is off', () => {
     process.env.CM_AGENT_HOOKS_INJECT = '0';
-    expect(buildCodexLaunchCommand('codex', TARGET_2)).toBe('codex');
+    expect(buildCodexLaunchPlan('codex', TARGET_2)).toEqual({
+      command: 'codex',
+      settingsPath: null,
+      env: {},
+    });
     expect(existsSync(join(home, 'hooks.json'))).toBe(false);
   });
 
@@ -443,22 +469,20 @@ describe('the launch command', () => {
     // The flag disables review for every hook the invocation can see, including
     // a `.codex/hooks.json` committed to the repository being worked on.
     expect(isCodexHookTrustBypassEnabled()).toBe(false);
-    expect(buildCodexLaunchCommand('codex', TARGET)).not.toContain(CODEX_HOOK_TRUST_BYPASS_FLAG);
+    expect(line('codex', TARGET)).not.toContain(CODEX_HOOK_TRUST_BYPASS_FLAG);
 
     process.env[CODEX_HOOK_TRUST_ENV_VAR] = 'bypass';
     expect(isCodexHookTrustBypassEnabled()).toBe(true);
-    expect(buildCodexLaunchCommand('codex', TARGET)).toContain(CODEX_HOOK_TRUST_BYPASS_FLAG);
+    expect(line('codex', TARGET)).toContain(CODEX_HOOK_TRUST_BYPASS_FLAG);
 
     process.env[CODEX_HOOK_TRUST_ENV_VAR] = '1';
-    expect(buildCodexLaunchCommand('codex', TARGET)).not.toContain(CODEX_HOOK_TRUST_BYPASS_FLAG);
+    expect(line('codex', TARGET)).not.toContain(CODEX_HOOK_TRUST_BYPASS_FLAG);
   });
 
   it('falls back to the bare command when the ids could not be used', () => {
-    expect(buildCodexLaunchCommand('codex', { worktreeId: '../etc', cliToolId: 'codex' })).toBe(
-      'codex'
-    );
+    expect(line('codex', { worktreeId: '../etc', cliToolId: 'codex' })).toBe('codex');
     expect(
-      buildCodexLaunchCommand('codex', { worktreeId: 'wt-alpha', cliToolId: 'codex', instanceId: 'a b' })
+      line('codex', { worktreeId: 'wt-alpha', cliToolId: 'codex', instanceId: 'a b' })
     ).toBe('codex');
   });
 
@@ -467,8 +491,6 @@ describe('the launch command', () => {
     // a regular file makes the directory creation fail.
     const blocked = join(home, 'blocked');
     writeFileSync(blocked, 'not a directory');
-    expect(buildCodexLaunchCommand('codex', TARGET, { codexHome: join(blocked, 'inner') })).toBe(
-      'codex'
-    );
+    expect(line('codex', TARGET, { codexHome: join(blocked, 'inner') })).toBe('codex');
   });
 });

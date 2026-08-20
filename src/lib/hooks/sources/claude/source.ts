@@ -51,7 +51,7 @@ import {
   SESSION_ID_FIELDS,
   TOOL_CALL_ID_FIELDS,
 } from '../hook-event-vocabulary';
-import type { AgentEventSource, AgentInstanceRef, AgentLaunchPlan, Verdict } from '../types';
+import type { AgentEventSource, AgentLaunchContext, AgentLaunchPlan, Verdict } from '../types';
 import { CLAUDE_CLI_TOOL_ID } from './tool-id';
 
 /**
@@ -150,7 +150,7 @@ export const claudeAgentEventSource: AgentEventSource = definePushHookSource({
   // S3 / S4 / S5. Delegated rather than reimplemented: `buildClaudeLaunchCommand`
   // writes the settings file, falls back to the bare path on any failure, and is
   // covered byte-for-byte by `tests/unit/hooks/hook-settings-generator.test.ts`.
-  prepareLaunch: (target: AgentInstanceRef, executablePath: string): AgentLaunchPlan => {
+  prepareLaunch: ({ target, executablePath }: AgentLaunchContext): AgentLaunchPlan => {
     const command = buildClaudeLaunchCommand(executablePath, {
       worktreeId: target.worktreeId,
       instanceId: target.instanceId,
@@ -168,6 +168,9 @@ export const claudeAgentEventSource: AgentEventSource = definePushHookSource({
             cliToolId: target.cliToolId,
           })
         : null;
-    return { command, settingsPath };
+    // Empty, and the only source for which that is uninteresting: `--settings`
+    // carries the correlation keys inside the file, so Claude never needed the
+    // environment prefix the other four sources reached for (#1846).
+    return { command, settingsPath, env: {} };
   },
 });

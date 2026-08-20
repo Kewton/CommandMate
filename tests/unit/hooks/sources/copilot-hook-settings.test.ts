@@ -27,6 +27,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { removeTempDir } from '@tests/helpers/temp-dir';
+import { renderAgentLaunchCommand } from '@/lib/hooks/sources';
 import {
   buildCopilotEventCommand,
   buildCopilotHookSettings,
@@ -319,13 +320,24 @@ describe('merging into the user’s file', () => {
 });
 
 describe('the launch command, and every way it fails open', () => {
-  it('prefixes the environment onto the command copilot has always been started with', () => {
+  it('declares the environment beside the command copilot has always been started with', () => {
     const plan = buildCopilotLaunchCommand(COPILOT_LAUNCH_COMMAND, TARGET, OPTIONS);
 
-    expect(plan.command).toBe(
+    // #1846: `env` is data. It used to be a pre-quoted prefix written onto
+    // `command` here, in gemini, in antigravity and in codex — four copies of
+    // one assumption (that the launcher is a shell) that nothing declared.
+    expect(plan.env).toEqual({
+      CM_AGENT_WORKTREE_ID: 'wt-1',
+      CM_AGENT_INSTANCE_ID: 'copilot-2',
+    });
+    expect(plan.command).toBe('gh copilot');
+    expect(plan.command).not.toMatch(/^[A-Z_][A-Z0-9_]*=/);
+    expect(plan.settingsPath).toBe(getCopilotSettingsPath());
+
+    // …and the line a pane receives is byte-for-byte the pre-#1846 one.
+    expect(renderAgentLaunchCommand(plan)).toBe(
       "CM_AGENT_WORKTREE_ID='wt-1' CM_AGENT_INSTANCE_ID='copilot-2' gh copilot"
     );
-    expect(plan.settingsPath).toBe(getCopilotSettingsPath());
   });
 
   it('names the primary instance when the target does not', () => {
@@ -334,7 +346,7 @@ describe('the launch command, and every way it fails open', () => {
       cliToolId: 'copilot',
     });
 
-    expect(plan.command).toContain("CM_AGENT_INSTANCE_ID='copilot'");
+    expect(plan.env.CM_AGENT_INSTANCE_ID).toBe('copilot');
   });
 
   it('starts copilot exactly as before when CM_AGENT_HOOKS_INJECT=0', () => {

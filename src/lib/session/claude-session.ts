@@ -33,7 +33,7 @@ import { deriveSessionSuffix } from '@/lib/cli-tools/types';
 import { CLAUDE_CLI_TOOL_ID } from '@/lib/hooks/sources';
 import {
   beginAgentSession,
-  prepareAgentLaunch,
+  buildAgentLaunchCommandLine,
 } from '@/lib/session/agent-session-lifecycle';
 import { discardAgentEventState } from '@/lib/session/agent-event-state';
 import {
@@ -698,10 +698,11 @@ export async function startClaudeSession(
     // Issue #1759: which config file gets written, and whether one is written
     // at all, belongs to the tool's `AgentEventSource` (S3/S4). Claude's
     // delegates to `buildClaudeLaunchCommand`, unchanged.
-    const launchCommand = prepareAgentLaunch(
-      { worktreeId, cliToolId: CLAUDE_CLI_TOOL_ID, instanceId },
-      claudePath
-    ).command;
+    const launchCommand = buildAgentLaunchCommandLine({
+      target: { worktreeId, cliToolId: CLAUDE_CLI_TOOL_ID, instanceId },
+      executablePath: claudePath,
+      worktreePath,
+    });
 
     // Start Claude CLI in interactive mode using dynamically resolved path
     await sendKeys(sessionName, launchCommand, true);

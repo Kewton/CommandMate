@@ -45,6 +45,7 @@ import { fillDecisionSlot, listOpenDecisions } from './pending-decisions';
 import type {
   AgentEventSource,
   AgentInstanceRef,
+  AgentLaunchContext,
   AgentLaunchPlan,
   AgentSourceCapabilities,
   NoDecisionBehavior,
@@ -116,8 +117,15 @@ export interface PushHookSourceSpec {
   parseQuestion: (payload: Record<string, unknown>) => AskUserQuestionSpec | null;
   /** The wire shape of a verdict (S6 / #1757 R15). */
   encodeVerdict: (verdict: Verdict) => Record<string, unknown>;
-  /** Config generation plus the command line (S3 / S4 / S5). Must not throw. */
-  prepareLaunch: (target: AgentInstanceRef, executablePath: string) => AgentLaunchPlan;
+  /**
+   * Config generation plus the command line (S3 / S4 / S5). Must not throw.
+   *
+   * Takes the whole {@link AgentLaunchContext} since #1846 — `worktreePath` is
+   * in it, so a per-worktree config no longer needs a second entry point.
+   * Correlation keys that cannot live in the config file go in the plan's
+   * `env`, never as a prefix on `command`.
+   */
+  prepareLaunch: (context: AgentLaunchContext) => AgentLaunchPlan;
 }
 
 /**
@@ -256,7 +264,7 @@ export interface PullEventSourceSpec {
    * How the agent is started, when starting it is CommandMate's job at all.
    * opencode needs a `--port`; nothing is written to disk.
    */
-  prepareLaunch?: (target: AgentInstanceRef, executablePath: string) => AgentLaunchPlan;
+  prepareLaunch?: (context: AgentLaunchContext) => AgentLaunchPlan;
 }
 
 /**
@@ -318,9 +326,11 @@ export function definePullEventSource(spec: PullEventSourceSpec): AgentEventSour
     },
 
     prepareLaunch:
-      spec.prepareLaunch ?? ((_target, executablePath) => ({
-        command: executablePath,
+      spec.prepareLaunch ??
+      ((context: AgentLaunchContext) => ({
+        command: context.executablePath,
         settingsPath: null,
+        env: {},
       })),
 
     subscribe: spec.subscribe,

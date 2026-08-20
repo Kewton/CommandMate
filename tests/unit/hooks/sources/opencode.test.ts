@@ -45,6 +45,7 @@ import {
   hasAgentEventSource,
   isAbstainSafe,
   OPENCODE_CLI_TOOL_ID,
+  renderAgentLaunchCommand,
   resetUnknownEventTallies,
   type PendingDecision,
   type Verdict,
@@ -381,14 +382,19 @@ describe('decide', () => {
 });
 
 describe('prepareLaunch', () => {
+  const LAUNCH = { target: REF, executablePath: 'opencode', worktreePath: '/tmp/wt' };
+
   it('adds --port and pins the hostname to loopback', () => {
     rememberOpencodePort(REF, 4242, '/tmp/wt');
     // `--hostname` is passed explicitly because the default *is* the security
     // property: the server is unauthenticated (#1758 §5.8).
-    expect(prepareOpencodeLaunch(REF, 'opencode')).toEqual({
+    expect(prepareOpencodeLaunch(LAUNCH)).toEqual({
       command: `'opencode' --port 4242 --hostname 127.0.0.1`,
       // Nothing is written to disk for this tool at all.
       settingsPath: null,
+      // #1846: and no environment either. opencode is the one source that needs
+      // no correlation variable, because CommandMate holds the connection.
+      env: {},
     });
   });
 
@@ -397,18 +403,30 @@ describe('prepareLaunch', () => {
     // pre-#1763 command, and the scraper decides as it always did.
     rememberOpencodePort(REF, 4242, '/tmp/wt');
     vi.stubEnv('CM_AGENT_HOOKS_INJECT', '0');
-    expect(prepareOpencodeLaunch(REF, 'opencode')).toEqual({
+    expect(prepareOpencodeLaunch(LAUNCH)).toEqual({
       command: 'opencode',
       settingsPath: null,
+      env: {},
     });
   });
 
   it('returns the bare command when no port could be allocated', () => {
     // Port exhaustion is not a launch failure. The pane starts either way.
-    expect(prepareOpencodeLaunch(REF, 'opencode')).toEqual({
+    expect(prepareOpencodeLaunch(LAUNCH)).toEqual({
       command: 'opencode',
       settingsPath: null,
+      env: {},
     });
+  });
+
+  it('renders to the bare command line, because there is nothing to prefix', () => {
+    // The #1846 renderer is the only thing that turns a plan into a line, and
+    // an empty `env` has to leave the command byte-identical — otherwise every
+    // source without correlation variables would grow a leading space.
+    rememberOpencodePort(REF, 4242, '/tmp/wt');
+    expect(renderAgentLaunchCommand(prepareOpencodeLaunch(LAUNCH))).toBe(
+      `'opencode' --port 4242 --hostname 127.0.0.1`
+    );
   });
 });
 
