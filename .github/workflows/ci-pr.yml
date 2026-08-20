@@ -58,7 +58,15 @@ on:
 jobs:
   claudemd-size:
     name: CLAUDE.md size check
-    runs-on: ubuntu-latest
+    # [self-hosted] This repository's ephemeral self-hosted runners (labels:
+    # self-hosted, Linux, ARM64, ubuntu-24.04), EXCEPT for a pull request opened
+    # from a fork, which falls back to `ubuntu-latest`. CommandMate is public, so
+    # a fork PR is code written by someone else; the runners are ephemeral and
+    # keep nothing between jobs, but the job still executes on hardware we own.
+    # The fallback keeps the full CI verdict on outside contributions without
+    # ever running them on our machines. See the identical change in
+    # Kewton/commandmate-skills#226.
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
     timeout-minutes: 10 # measured 0.1m median / 0.2m max (n=12); floor of the policy
     steps:
       - name: Checkout
@@ -76,7 +84,15 @@ jobs:
 
   control-chars:
     name: Control character check
-    runs-on: ubuntu-latest
+    # [self-hosted] This repository's ephemeral self-hosted runners (labels:
+    # self-hosted, Linux, ARM64, ubuntu-24.04), EXCEPT for a pull request opened
+    # from a fork, which falls back to `ubuntu-latest`. CommandMate is public, so
+    # a fork PR is code written by someone else; the runners are ephemeral and
+    # keep nothing between jobs, but the job still executes on hardware we own.
+    # The fallback keeps the full CI verdict on outside contributions without
+    # ever running them on our machines. See the identical change in
+    # Kewton/commandmate-skills#226.
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
     timeout-minutes: 10 # measured 0.1m median / 0.2m max (n=12); floor of the policy
     steps:
       - name: Checkout
@@ -97,7 +113,15 @@ jobs:
 
   token-discipline:
     name: Token discipline (raw gray/slate + chromatic guard)
-    runs-on: ubuntu-latest
+    # [self-hosted] This repository's ephemeral self-hosted runners (labels:
+    # self-hosted, Linux, ARM64, ubuntu-24.04), EXCEPT for a pull request opened
+    # from a fork, which falls back to `ubuntu-latest`. CommandMate is public, so
+    # a fork PR is code written by someone else; the runners are ephemeral and
+    # keep nothing between jobs, but the job still executes on hardware we own.
+    # The fallback keeps the full CI verdict on outside contributions without
+    # ever running them on our machines. See the identical change in
+    # Kewton/commandmate-skills#226.
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
     timeout-minutes: 10 # measured 0.1m median / 0.2m max (n=12); floor of the policy
     steps:
       - name: Checkout
@@ -155,6 +179,14 @@ jobs:
 
   legacy-tmux-readmode:
     name: Legacy tmux (<3.2) reading-mode no-op
+    # [self-hosted] DELIBERATE EXCEPTION: this job stays on `ubuntu-latest`.
+    # It is the only container job in the workflow (`container: node:18-bullseye`,
+    # because the point is a tmux older than the runner image ships), and the
+    # ephemeral self-hosted image has no Docker — the run failed at `Set up job`
+    # with `docker: command not found` before a single step executed
+    # (run 32339198148). Container support is a property of the runner image, not
+    # of this workflow, so the fix belongs there; until it exists this job cannot
+    # move.
     runs-on: ubuntu-latest
     timeout-minutes: 10 # measured 0.5m median / 0.8m max (n=12); floor of the policy
     # Debian 11 ships tmux 3.1c — the newest tmux that still lacks display-popup,
@@ -225,7 +257,15 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    # [self-hosted] This repository's ephemeral self-hosted runners (labels:
+    # self-hosted, Linux, ARM64, ubuntu-24.04), EXCEPT for a pull request opened
+    # from a fork, which falls back to `ubuntu-latest`. CommandMate is public, so
+    # a fork PR is code written by someone else; the runners are ephemeral and
+    # keep nothing between jobs, but the job still executes on hardware we own.
+    # The fallback keeps the full CI verdict on outside contributions without
+    # ever running them on our machines. See the identical change in
+    # Kewton/commandmate-skills#226.
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
     timeout-minutes: 10 # measured 0.7m median / 0.9m max (n=12); floor of the policy
     # TODO: Remove continue-on-error after fixing existing lint issues
     continue-on-error: true
@@ -252,7 +292,15 @@ jobs:
 
   type-check:
     name: Type Check
-    runs-on: ubuntu-latest
+    # [self-hosted] This repository's ephemeral self-hosted runners (labels:
+    # self-hosted, Linux, ARM64, ubuntu-24.04), EXCEPT for a pull request opened
+    # from a fork, which falls back to `ubuntu-latest`. CommandMate is public, so
+    # a fork PR is code written by someone else; the runners are ephemeral and
+    # keep nothing between jobs, but the job still executes on hardware we own.
+    # The fallback keeps the full CI verdict on outside contributions without
+    # ever running them on our machines. See the identical change in
+    # Kewton/commandmate-skills#226.
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
     timeout-minutes: 10 # measured 1.0m median / 1.1m max (n=12); floor of the policy
     # TODO: Remove continue-on-error after fixing existing type errors
     continue-on-error: true
@@ -279,6 +327,28 @@ jobs:
 
   test-unit:
     name: Unit Tests
+    # [self-hosted] TEMPORARY EXCEPTION — this job is pinned to `ubuntu-latest`
+    # until Kewton/commandmate-skills#228 is fixed. UN-PIN IT THEN: replace this
+    # block with the same conditional `runs-on` every other job in this file uses.
+    #
+    # WHY. On the ephemeral ARM64 self-hosted runners the vendored cmate-verify
+    # suite (`.claude/skills/cmate-verify/scripts/tests/run-tests.sh`, reached
+    # through tests/unit/skills/cmate-verify/verify-run.test.ts) fails EVERY run,
+    # in a DIFFERENT case each time — run 32339198148 lost `gates-subset` and
+    # `diagnostics`, run 32340171138 lost `flaky-default` and `silent-fail`. The
+    # signature is always the same: `verify-run.sh: line 734:
+    # /tmp/cmate-verify.XXXXXX/gate-<id>.log: No such file or directory`, i.e.
+    # the runner's own $WORKDIR disappears mid-run and the affected gates report
+    # `FAIL exit=1 duration=0s` with no output.
+    #
+    # It is NOT caused by moving to self-hosted. The same script is green on
+    # GitHub-hosted x64 and green on the skills repository's own ARM64 runners
+    # when invoked directly (commandmate-skills#226). Self-hosted execution here
+    # only exposes it. The defect landed today in #1862 / commandmate-skills#225.
+    #
+    # Pinning keeps develop green while the defect is investigated, at the cost
+    # of removing the only environment that reproduces it — commandmate-skills#228
+    # carries the reproduction, the run ids, and the four measurements to take.
     runs-on: ubuntu-latest
     # measured 12.3m median / 13.2m max (n=12). 30 rather than the ~26 that
     # `max x 2` gives, because this suite grows with the test count and 13.2m
@@ -310,7 +380,15 @@ jobs:
 
   test-integration:
     name: Integration Tests
-    runs-on: ubuntu-latest
+    # [self-hosted] This repository's ephemeral self-hosted runners (labels:
+    # self-hosted, Linux, ARM64, ubuntu-24.04), EXCEPT for a pull request opened
+    # from a fork, which falls back to `ubuntu-latest`. CommandMate is public, so
+    # a fork PR is code written by someone else; the runners are ephemeral and
+    # keep nothing between jobs, but the job still executes on hardware we own.
+    # The fallback keeps the full CI verdict on outside contributions without
+    # ever running them on our machines. See the identical change in
+    # Kewton/commandmate-skills#226.
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
     timeout-minutes: 10 # measured 2.1m median / 2.4m max (n=12); floor of the policy
     steps:
       - name: Checkout
@@ -344,7 +422,15 @@ jobs:
 
   test-e2e:
     name: E2E Tests
-    runs-on: ubuntu-latest
+    # [self-hosted] This repository's ephemeral self-hosted runners (labels:
+    # self-hosted, Linux, ARM64, ubuntu-24.04), EXCEPT for a pull request opened
+    # from a fork, which falls back to `ubuntu-latest`. CommandMate is public, so
+    # a fork PR is code written by someone else; the runners are ephemeral and
+    # keep nothing between jobs, but the job still executes on hardware we own.
+    # The fallback keeps the full CI verdict on outside contributions without
+    # ever running them on our machines. See the identical change in
+    # Kewton/commandmate-skills#226.
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
     # measured 6.2m median / 16.2m max (n=12) — this is the job that hung for
     # 88 minutes in run 32218070769. 30 = ~2x the worst healthy run.
     timeout-minutes: 30
@@ -439,7 +525,12 @@ jobs:
           path: ~/.cache/ms-playwright
           # Deliberately no `restore-keys`: a partial-key fallback is precisely
           # how a job ends up running last version's browser. Miss on a bump.
-          key: ${{ runner.os }}-playwright-${{ steps.playwright.outputs.version }}
+          # `runner.arch` is part of the key because the browser build is
+          # architecture-specific and `runner.os` is `Linux` on both the x64
+          # GitHub-hosted image and the ARM64 self-hosted runners. Without it a
+          # fork PR on x64 and a branch PR on ARM64 share one cache entry, and
+          # whichever lost the race hands the suite a chromium it cannot exec.
+          key: ${{ runner.os }}-${{ runner.arch }}-playwright-${{ steps.playwright.outputs.version }}
 
       - name: Install Playwright system dependencies
         id: playwright-deps
@@ -505,7 +596,15 @@ jobs:
 
   build:
     name: Build
-    runs-on: ubuntu-latest
+    # [self-hosted] This repository's ephemeral self-hosted runners (labels:
+    # self-hosted, Linux, ARM64, ubuntu-24.04), EXCEPT for a pull request opened
+    # from a fork, which falls back to `ubuntu-latest`. CommandMate is public, so
+    # a fork PR is code written by someone else; the runners are ephemeral and
+    # keep nothing between jobs, but the job still executes on hardware we own.
+    # The fallback keeps the full CI verdict on outside contributions without
+    # ever running them on our machines. See the identical change in
+    # Kewton/commandmate-skills#226.
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
     timeout-minutes: 10 # measured 2.3m median / 2.5m max (n=12); floor of the policy
     steps:
       - name: Checkout
@@ -538,7 +637,15 @@ jobs:
 
   security-audit:
     name: Security Audit
-    runs-on: ubuntu-latest
+    # [self-hosted] This repository's ephemeral self-hosted runners (labels:
+    # self-hosted, Linux, ARM64, ubuntu-24.04), EXCEPT for a pull request opened
+    # from a fork, which falls back to `ubuntu-latest`. CommandMate is public, so
+    # a fork PR is code written by someone else; the runners are ephemeral and
+    # keep nothing between jobs, but the job still executes on hardware we own.
+    # The fallback keeps the full CI verdict on outside contributions without
+    # ever running them on our machines. See the identical change in
+    # Kewton/commandmate-skills#226.
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
     timeout-minutes: 10 # measured 0.5m median / 0.8m max (n=12); floor of the policy
     steps:
       - name: Checkout
