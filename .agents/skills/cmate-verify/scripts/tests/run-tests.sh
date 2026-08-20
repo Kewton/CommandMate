@@ -782,7 +782,24 @@ if [ -n "$duration" ] && [ "$duration" -le 1 ]; then
 else
   notok "mutex: waited is reported beside duration, never added to it (duration=[$duration], waited=[$waited])"
 fi
-assert_has "mutex: the first run declares a wait of zero rather than nothing" "$SANDBOX/mutex-a.out" "GATE e2e PASS exit=0 duration=3s waited=0s"
+# `duration=3s` used to be matched literally here, and that is not a fact this
+# runner promises: it measures whole seconds with `date +%s` (bash 3.2 ships no
+# sub-second date), so a 3s hold that starts just before a second boundary reads
+# as 4. Measured while running the suite 20x for Issue #228: red in 1 of 20 runs
+# on macOS AND in 1 of 20 on Linux/ARM64, for a reason that has nothing to do
+# with what the assertion is for. What it IS for is the `waited=0s` half — a
+# mutexed gate that did not queue still has to say so, or "serialized and got the
+# lock straight away" and "not serialized at all" stop being tellable apart
+# (verification-config.md section 9.3). So the two halves are asserted apart: the
+# wait exactly, the duration as a lower bound.
+holder_waited=$(sed -n 's/^GATE e2e PASS exit=0 duration=\([0-9]*\)s waited=\([0-9]*\)s$/\2/p' "$SANDBOX/mutex-a.out")
+holder_duration=$(sed -n 's/^GATE e2e PASS exit=0 duration=\([0-9]*\)s waited=\([0-9]*\)s$/\1/p' "$SANDBOX/mutex-a.out")
+assert_eq "mutex: the first run declares a wait of zero rather than nothing" "0" "$holder_waited"
+if [ -n "$holder_duration" ] && [ "$holder_duration" -ge 3 ]; then
+  ok "mutex: the first run's duration is its own 3s hold, not the waiter's (duration=${holder_duration}s)"
+else
+  notok "mutex: the first run's duration is its own 3s hold, not the waiter's (duration=[$holder_duration] in $(cat "$SANDBOX/mutex-a.out"))"
+fi
 assert_has "mutex: the line-anchored marker carries the wait too" "$ERR" "[mutex] name=cmate-verify-selftest waited="
 assert_has "mutex: the marker names the lock path" "$ERR" "lock=$LOCK_DIR"
 assert_file_absent "mutex: the lock is released when the gate finishes" "$LOCK_DIR"
@@ -891,6 +908,73 @@ assert_has "require-env-clean: the built-in is named rather than silently droppe
 assert_has "require-env-clean: the declared gates still run" "$OUT" "GATE ok PASS exit=0 duration="
 assert_has "require-env-clean: the reason says what is missing" "$ERR" "needs the baseline snapshot CommandMate records at task creation"
 assert_stdout_contract "require-env-clean: stdout holds only GATE/RESULT records" "$RAWOUT"
+
+# --- 23. the run directory outlives the run (Issue #228) ---------------------
+# The defect this pins: a gate that finishes before the runner has forked its
+# timeout watchdog makes `wait` return at once, so the `kill` that stops that
+# watchdog lands in the window where the freshly forked child still carries this
+# shell's EXIT trap AND bash's own terminating-signal handler. The child then ran
+# `rm -rf "$WORKDIR"` mid-run, and every later gate reported `no output captured`
+# with exit 1 — a verdict on nothing, in a runner whose whole job is adjudication.
+# It was probabilistic (measured ~1% per gate on Linux/ARM64), which is why the
+# case is many fast gates repeated: one green run is not evidence.
+#
+# Bounded on purpose. 48 gates x 12 runs is what turned the pre-fix runner red in
+# 20 of 20 measured repetitions; a smaller case was red in only 15 of 20, and a
+# regression test that misses one time in four is how this comes back silently.
+wl_runs=12
+wl_gates=48
+wl_lost=0
+wl_markers=0
+# The set of exit codes seen, not a count of wrong ones: a failure has to say
+# WHICH verdict the runner reached instead, or the next reader is back to
+# reproducing a probabilistic CI red by hand.
+wl_rcs=""
+# out.N of the FIRST run that deviated in any way. A probabilistic case is only
+# worth its red if the red names the run that produced it: `FAIL_CONTEXT` is
+# otherwise still pointing at the last (healthy) run when the assertions below
+# fire, and the sandbox holding every err.N is gone by the time anyone reads CI.
+wl_ctx=""
+# The runner puts $WORKDIR under $TMPDIR, so pointing it at an empty directory of
+# our own makes "was every one of them removed again" answerable by counting,
+# without depending on what else on this machine writes to /tmp.
+wl_tmp="$SANDBOX/workdir-lifetime-tmp"
+mkdir -p "$wl_tmp"
+wl_tmpdir_was_set=0
+wl_tmpdir_saved=""
+if [ -n "${TMPDIR+set}" ]; then wl_tmpdir_was_set=1; wl_tmpdir_saved=$TMPDIR; fi
+TMPDIR="$wl_tmp"
+export TMPDIR
+wl_i=0
+while [ "$wl_i" -lt "$wl_runs" ]; do
+  wl_i=$((wl_i + 1))
+  run_verify --config "$FIXTURES/workdir-lifetime.yaml" --cwd "$repo" --base-ref "$BASE_BRANCH"
+  case " $wl_rcs " in *" $RC "*) ;; *) wl_rcs="$wl_rcs $RC";; esac
+  # Both halves of the signature: the shell's own complaint about the vanished
+  # redirect target, and the empty-log report the runner then prints for a gate
+  # that did in fact run.
+  wl_run_lost=0
+  if grep -aFq "No such file or directory" "$ERR"; then wl_run_lost=$((wl_run_lost + 1)); fi
+  if grep -aFq "no output captured" "$ERR"; then wl_run_lost=$((wl_run_lost + 1)); fi
+  wl_lost=$((wl_lost + wl_run_lost))
+  wl_run_markers=$(grep -ac -e '-ran' "$ERR")
+  wl_markers=$((wl_markers + wl_run_markers))
+  if [ -z "$wl_ctx" ] \
+     && { [ "$wl_run_lost" -ne 0 ] || [ "$wl_run_markers" -ne "$wl_gates" ] || [ "$RC" -ne 20 ]; }; then
+    wl_ctx=$OUT
+  fi
+done
+if [ "$wl_tmpdir_was_set" -eq 1 ]; then TMPDIR=$wl_tmpdir_saved; export TMPDIR; else unset TMPDIR; fi
+if [ -n "$wl_ctx" ]; then FAIL_CONTEXT=$wl_ctx; FAIL_CONTEXT_SHOWN=0; fi
+assert_eq "workdir-lifetime: no run loses its work directory while it is still running" "0" "$wl_lost"
+assert_eq "workdir-lifetime: every gate's own output survives into the log tail" \
+  "$((wl_runs * wl_gates))" "$wl_markers"
+assert_eq "workdir-lifetime: every run still reaches the verdict its gates earned" "20" "${wl_rcs# }"
+# The other half of the same contract: whoever is allowed to remove the directory
+# must still do it. A guard that never fires would pass the assertions above by
+# leaking one directory per run instead.
+assert_eq "workdir-lifetime: the work directory is removed when the run really ends" \
+  "0" "$(ls -1 "$wl_tmp" 2>/dev/null | wc -l | tr -d ' ')"
 
 # --- summary ------------------------------------------------------------------
 total=$((TOTAL_PASS + TOTAL_FAIL))
