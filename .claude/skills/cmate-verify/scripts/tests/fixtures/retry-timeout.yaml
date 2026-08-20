@@ -1,0 +1,12 @@
+# A TIMEOUT is never retried: the gate has already spent its whole budget, and a
+# second attempt doubles the wall clock of exactly the gates whose budgets are
+# largest. One TIMEOUT line with one duration is the evidence that no second run
+# happened.
+version: 1
+gates:
+  - id: slow
+    command: sleep 4144
+    timeoutSec: 1
+    retryOnFail: 1
+options:
+  skipInPrimaryCheckout: false

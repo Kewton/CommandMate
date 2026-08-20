@@ -7,8 +7,8 @@
   "counterpart": {
     "repo": "Kewton/commandmate-skills",
     "url": "https://github.com/Kewton/commandmate-skills",
-    "lastSyncedRef": "b273a47",
-    "lastSyncedAt": "2026-08-03",
+    "lastSyncedRef": "6faa33f",
+    "lastSyncedAt": "2026-08-20",
     "checkoutRequired": false,
     "checkoutNote": "この対応表による検知はローカルの sha256 だけで完結する。skills は個人リポジトリで、CI から書ける token を増やしたくない（docs/user-guide/skills.md §3-9）ため、CI は counterpart を checkout しない。手元に checkout がある時だけ `node scripts/skills-sync-map.mjs check --counterpart <dir>` で実 diff を取る。"
   },
@@ -35,7 +35,7 @@
       "local": ".claude/skills/cmate-verify",
       "counterpart": "skills/cmate-verify",
       "policy": "mapped",
-      "rationale": "CommandMate が開発元。scripts は #1586 で byte-identical に移植された（2026-08-01 実測: diff -r 無差分）。SKILL.md だけは移植時に適応が入っている。",
+      "rationale": "CommandMate が開発元。scripts は #1586 で byte-identical に移植された（2026-08-01 実測: diff -r 無差分）。SKILL.md だけは移植時に適応が入っている。 2026-08-20（Issue #1861）に counterpart PR #225（6faa33f、skills #223 / #224）を取り込み、verify-run.sh を再び byte-identical にした。 なお counterpart は fixture と run-tests.sh を package の外（`tests/fixtures/cmate-verify/`）に置いているため、`check --counterpart` は`scripts/tests/**` を MISSING と報告する。これは構造上の既知差で、CommandMate 側は Node の無い導入先でも suite を回せるよう package 内に同梱している。",
       "mirrors": [
         ".agents/skills/cmate-verify"
       ],
@@ -48,8 +48,8 @@
         {
           "path": "SKILL.md",
           "policy": "port-required",
-          "sha256": "5b26a8a6f6e8a9abc8ced73a724333e8103ce3fcfce8a6d21827d96394de39cf",
-          "note": "#1586 の移植で GitHub 絶対 URL 化・「起案 / スタンドアロンランナー」の2役への書き換えが入っている。単純コピーするとこの適応が壊れる（#1611 で実際に注意点として扱った）。手順・フラグ・exit code の意味を変えたときは counterpart 側の同じ節を書き直す。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。"
+          "sha256": "ec9c55c0cefcd1f74b56cd4cfab3fae5c106d6c95860290708dcce5d4b76e9fa",
+          "note": "#1586 の移植で GitHub 絶対 URL 化・「起案 / スタンドアロンランナー」の2役への書き換えが入っている。単純コピーするとこの適応が壊れる（#1611 で実際に注意点として扱った）。手順・フラグ・exit code の意味を変えたときは counterpart 側の同じ節を書き直す。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。 2026-08-20 に Issue #1861 で counterpart（skills PR #225、6faa33f）のmutex / retryOnFail / flakyIsPass / requireEnvClean の記述を移植した（CommandMate 側の Issue 番号 #1771 / #1772 / #1740 と相対パスに読み替えてある）。"
         },
         {
           "path": "scripts/tests/fixtures/all-pass.yaml",
@@ -70,6 +70,21 @@
           "path": "scripts/tests/fixtures/bad-duplicate-id.yaml",
           "policy": "byte-identical",
           "sha256": "dcc323cd41552d9aa76d2d8d10a54b9e8ee234dc37f99cd7993764ce488ffb91"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-env-clean.yaml",
+          "policy": "byte-identical",
+          "sha256": "c4b569baa00547867792d6c5d566d760d17d78912b070a1534436329b6238667"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-flaky-alone.yaml",
+          "policy": "byte-identical",
+          "sha256": "f2ce6aa14c292c09db58a04257432412ddb4a21b1f1aa52bc7c77f2d4132bf68"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-flaky-type.yaml",
+          "policy": "byte-identical",
+          "sha256": "43455adc7ba8b657e9a48a327c79c7dcaa0762dc9743274a772af91722e7d743"
         },
         {
           "path": "scripts/tests/fixtures/bad-flow.yaml",
@@ -102,6 +117,16 @@
           "sha256": "44c9ce1e2d331cf521961398bdea34b5fb890376d8dfe059470774a9d1e616b6"
         },
         {
+          "path": "scripts/tests/fixtures/bad-mutex-length.yaml",
+          "policy": "byte-identical",
+          "sha256": "2b132f844243a517ca4ad82ee29751ee1a147123003f507d7260746745bbfea5"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-mutex-name.yaml",
+          "policy": "byte-identical",
+          "sha256": "a7fc8ce3a40f772006f2ca06cb59126f174180e9a874f86d0ee25dd649936b14"
+        },
+        {
           "path": "scripts/tests/fixtures/bad-no-gates.yaml",
           "policy": "byte-identical",
           "sha256": "7be542f8bb5954519fab54267758b48bd0c9b9fd44e1f6d6a906a52e8e4e1d26"
@@ -128,9 +153,24 @@
           "note": "他の fixture と同じく counterpart へ逐語コピーする。Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。"
         },
         {
+          "path": "scripts/tests/fixtures/bad-reserved-env-clean.yaml",
+          "policy": "byte-identical",
+          "sha256": "1b8f62e377a37d5f4eacc0f806a30e47fe8a2a2a64a74dd3588189ae39cd4e1c"
+        },
+        {
           "path": "scripts/tests/fixtures/bad-reserved-id.yaml",
           "policy": "byte-identical",
           "sha256": "f8a526bc59f198505c82533c184572b5ac1191f30dad70f3907a703967acb231"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-retry-range.yaml",
+          "policy": "byte-identical",
+          "sha256": "40920f1992ed31038039194ae3691f39c481df136dfdff0fd4d783483ff6e607"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-retry-type.yaml",
+          "policy": "byte-identical",
+          "sha256": "02c9b8e98566fb786064c9be332d8aeef05d3e935bbe0972f3dc5fd6632811f1"
         },
         {
           "path": "scripts/tests/fixtures/bad-tab.yaml",
@@ -158,6 +198,21 @@
           "sha256": "98657da4079c59565c23d66d46373c8c71b2df3abe8b7f63a1f7aa5556180396"
         },
         {
+          "path": "scripts/tests/fixtures/mutex-flaky.yaml",
+          "policy": "byte-identical",
+          "sha256": "227203a5b04754e0bc762285f9cf108058492e4c1270910405969ccedf1f9baa"
+        },
+        {
+          "path": "scripts/tests/fixtures/mutex-short.yaml",
+          "policy": "byte-identical",
+          "sha256": "44d10db0a3f019d6f802183846cb321442f72270ab32b70d0c43ed707cb6ff1f"
+        },
+        {
+          "path": "scripts/tests/fixtures/mutex.yaml",
+          "policy": "byte-identical",
+          "sha256": "24245f56f09d2e173491e0ec2bcabe71df1133058136867e74f89e20cc192518"
+        },
+        {
           "path": "scripts/tests/fixtures/no-log-tail.yaml",
           "policy": "byte-identical",
           "sha256": "7cddb975d5c3af7f4b316e879bd20cf12ecc64b121934d3b5db328692bbbde33"
@@ -179,6 +234,36 @@
           "note": "他の fixture と同じく counterpart へ逐語コピーする。Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。"
         },
         {
+          "path": "scripts/tests/fixtures/require-env-clean.yaml",
+          "policy": "byte-identical",
+          "sha256": "1a34d8d1feef606f24424b59cd5489956c10483f36dd9580f0aa8a8dea9f07ea"
+        },
+        {
+          "path": "scripts/tests/fixtures/retry-flaky-pass.yaml",
+          "policy": "byte-identical",
+          "sha256": "e1fbf7b3b5a305b652d4f847a4d858a93b014b3e89b919aeaea5a245e7888e9b"
+        },
+        {
+          "path": "scripts/tests/fixtures/retry-flaky.yaml",
+          "policy": "byte-identical",
+          "sha256": "c3f21d8657a164d6a4410e5a4589a376f9ee505318e695fa74b586697770f080"
+        },
+        {
+          "path": "scripts/tests/fixtures/retry-hard-fail.yaml",
+          "policy": "byte-identical",
+          "sha256": "b6ef94ec488c1b9263878bf9b35af672662d08d836e4e63ca973645ab7a7bc34"
+        },
+        {
+          "path": "scripts/tests/fixtures/retry-thrice.yaml",
+          "policy": "byte-identical",
+          "sha256": "f159c7d54948c3a1c93d237475acc8b488074573b563b41687e7e7d6a77d3731"
+        },
+        {
+          "path": "scripts/tests/fixtures/retry-timeout.yaml",
+          "policy": "byte-identical",
+          "sha256": "cb54a8222e29f4af866c9deaea45b1feeae5af2d4b22158ecaafbe15a7fbf704"
+        },
+        {
           "path": "scripts/tests/fixtures/side-effect.yaml",
           "policy": "byte-identical",
           "sha256": "1e9b218d5e3cb63f9e09469dd95c4bfd1813aac6911ab62ff40364e4df227b3e"
@@ -194,16 +279,21 @@
           "sha256": "8ba1f347093da9d80378d75e403279954339cd63232616a218607238f381350d"
         },
         {
+          "path": "scripts/tests/fixtures/worktree-env.yaml",
+          "policy": "byte-identical",
+          "sha256": "d6dc6148b57b27cbcd0de14839e59813c38deed21672acbfc98a7bde1b37baa6"
+        },
+        {
           "path": "scripts/tests/run-tests.sh",
           "policy": "byte-identical",
-          "sha256": "431e0c5f54dff5b1b81fe2f6e516aba29ce9bb901e6b83b9130d4714e946b6d6",
-          "note": "Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。"
+          "sha256": "4f3ad470245232a32f7f71cc05ca33367bcaecaa03e145e4d9df824b474ac199",
+          "note": "Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。 counterpart の同一 suite は `tests/fixtures/cmate-verify/run-tests.sh` に在り、RUNNER の解決とヘッダのコメントだけが違う（Issue #1861 で実測: 差分はその 2 箇所のみ）。"
         },
         {
           "path": "scripts/verify-run.sh",
           "policy": "byte-identical",
-          "sha256": "31abf46f78f013391522e87a1a72a4e0d3651312cbb2477465b5b6a2a81f08ea",
-          "note": "ランナー本体。#1586 で byte-identical に移植され、#1607 が CommandMate 側だけを直して 4 日間ドリフトした（#1611 で復旧）。この Issue の直接の発端。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。"
+          "sha256": "ed369aad3c06276bafb5ccff9d84bbca846b20a7f6c97d811ab2de7f3bf4ba0a",
+          "note": "ランナー本体。#1586 で byte-identical に移植され、#1607 が CommandMate 側だけを直して 4 日間ドリフトした（#1611 で復旧）。この Issue の直接の発端。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。 2026-08-20（Issue #1861）に counterpart PR #225（6faa33f）から逐語コピーした。"
         }
       ]
     },

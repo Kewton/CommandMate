@@ -502,21 +502,46 @@ GATE e2e SKIP reason=mutex-wait waited=600s
 
 ### 9.5 両ランナーが受理すべきキー集合（parity）
 
-skills 側（`.claude/skills/cmate-verify` と `.agents/skills/cmate-verify`、および
-commandmate-skills リポジトリの実装）は**この表を正として**追随する。
+この表が受理集合の正である。正準は CommandMate 本体の
+`src/lib/verification/verify-config.ts`（`GATE_KEYS` / `OPTION_KEYS`）で、skills 側
+（`.claude/skills/cmate-verify` と `.agents/skills/cmate-verify`、および commandmate-skills
+リポジトリの実装）はこれに追随する。
 
-| 場所 | キー | CommandMate | standalone runner |
-|---|---|---|---|
-| `gates[]` | `id` / `command` / `timeoutSec` | ✅ | ✅ |
-| `gates[]` | `mutex` | ✅ #1771 | **未移植**（skills #223） |
-| `gates[]` | `retryOnFail` / `flakyIsPass` | ✅ #1772 | **未移植**（skills #224） |
-| `options` | `baseRef` / `skipInPrimaryCheckout` / `maxLogTailBytes` / `requireCommit` | ✅ | ✅ |
-| `options` | `requireEnvClean` | ✅ #1740 | **未移植** |
+| 場所 | キー | CommandMate 本体（TS） | standalone runner（awk） | advisor（JS） |
+|---|---|---|---|---|
+| `gates[]` | `id` / `command` / `timeoutSec` | ✅ | ✅ | ✅ |
+| `gates[]` | `mutex` | ✅ #1771 | ✅ skills #223 | ✅ skills #223 |
+| `gates[]` | `retryOnFail` / `flakyIsPass` | ✅ #1772 | ✅ skills #224 | ✅ skills #224 |
+| `options` | `baseRef` / `skipInPrimaryCheckout` / `maxLogTailBytes` / `requireCommit` | ✅ | ✅ | ✅ |
+| `options` | `requireEnvClean` | ✅ #1740 | ✅ skills PR #225 | ✅ skills PR #225 |
 
-**未移植のキーは「無視される」のではなく設定エラー（exit 2）になる。** 両実装とも v1 を
-閉じた集合として扱うためで、`mutex:` を書いた verify.yaml は移植が済むまで standalone
-runner では**一切走らない**。移植が完了するまで、両ランナーで回すリポジトリの
-verify.yaml に `mutex:` を書かないこと。
+**2026-08-20 実測: 4 実装すべてが同じ集合を受理する。** 内訳は本体の TS ローダ 1 本、
+バイト一致する bash ランナー 2 箇所（CommandMate の
+`.claude/skills/cmate-verify/scripts/verify-run.sh` ＋ `.agents/...` のミラーと、
+commandmate-skills の `skills/cmate-verify/scripts/verify-run.sh`）、そして JS の
+`skills/cmate-verify-advisor/scripts/verify-advisor.mjs` である。移植は
+**commandmate-skills PR #225**（`6faa33f`、Issue #223 / #224。`requireEnvClean` だけは
+Issue #223 / #224 とは別に先行していたドリフトで、同 PR がまとめて解消した）が skills 側 2 実装を、
+**CommandMate #1861** がその `verify-run.sh` を vendored copy へ逐語コピーして揃えた。
+集合が再びずれないことは機械的に固定してある —— skills 側 2 実装の一致は
+`tests/fixtures/cmate-verify-advisor/parser-parity.sh`（キー一覧の突き合わせと、実 verify.yaml
+を両パーサに食わせる 2 問構成）、vendored copy と counterpart のバイト一致は
+`.claude/skills/sync-map.json` の sha256 pin（ゲートは `tests/unit/skills/sync-map.test.ts`）。
+
+**v1 は閉じた集合であり、この表に無いキーは「無視される」のではなく設定エラー（exit 2）に
+なる。** 4 実装ともそう扱うので、**キーを足すときは 4 箇所すべてに揃うまで、そのキーを書いた
+verify.yaml は揃っていない実装で一切走らない**。#1771 / #1772 / #1740 が実際にその状態を作って
+おり（同じ verify.yaml が本体では exit 0、skills 側では `unknown gate key: mutex` 等で
+exit 2）、PR #225 / #1861 で解消した。**新しいキーを足す提案は、4 実装への追随計画と
+セットで出すこと。**
+
+**導入先にインストール済みのパッケージが古ければ、依然として exit 2 になる。** これは移植の
+話ではなく**版の話**である: 移植は commandmate-skills の `main`（`6faa33f`）に在るが、catalog が
+配っている最新は `cmate-verify` 0.4.2 / `cmate-verify-advisor` 0.2.0 で、いずれも 2026-08-05 に
+`d01ed9f` から公開された **#225 より前の版**である（PR #225 は版を上げていない）。パッケージ
+経由で導入した standalone runner / advisor に 4 キーを効かせるには、#225 を含む版の release が
+要る。CommandMate リポジトリ内の vendored copy（`.claude/skills/` / `.agents/skills/`）は catalog
+を経由しないので、#1861 の commit 時点で既に受理する。
 
 ---
 

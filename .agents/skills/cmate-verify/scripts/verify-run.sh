@@ -15,7 +15,23 @@
 # Every FAIL/TIMEOUT prints a reason line on stderr — including gates that wrote
 # nothing at all, which used to be reported by the status line alone (Issue #1607).
 #
+# Two further gate lines exist since Issues #223 / #224 (CommandMate #1771 /
+# #1772), and both are the spelling verification-config.md section 9.3 / 10 fixed
+# as canonical for THIS runner — the product CLI renders the same fields inside
+# parentheses and always has, so the contract is the field names, their units and
+# "never fold waited into duration", not the separator:
+#   GATE e2e  PASS  exit=0    duration=190s waited=42s
+#   GATE e2e  SKIP  reason=mutex-wait waited=600s
+#   GATE unit FLAKY exit=1,0  duration=45s,44s
+#
 # Exit code: passed=0 / config error=2 / failed=20 / not_started=21 / skipped=22.
+#
+# `skipped` (22) covers a second case since #223: a gate that declared `mutex`
+# and never got the lock reached NO VERDICT, so the run must not come back
+# `passed` on the gates that did run. CommandMate's own runner says that with
+# exit 99; this vocabulary has no 99, and 22 is the value already documented as
+# "nothing was verified here, and this is not green" (section 3.3). A gate that
+# actually failed still wins: a real verdict outranks a missing one.
 #
 # SCOPE: this is a standalone runner. It reads .commandmate/verify.yaml and nothing
 # else — no CommandMate server, no database, no task contract. CommandMate's own
@@ -136,6 +152,15 @@ function gatekv(s) {
   } else if (KV_K == "timeoutSec") {
     if (gto != "") { err("duplicate timeoutSec: in one gate"); return }
     gto = unquote(KV_V)
+  } else if (KV_K == "mutex") {
+    if (gmx != "") { err("duplicate mutex: in one gate"); return }
+    gmx = unquote(KV_V)
+  } else if (KV_K == "retryOnFail") {
+    if (gretry != "") { err("duplicate retryOnFail: in one gate"); return }
+    gretry = unquote(KV_V)
+  } else if (KV_K == "flakyIsPass") {
+    if (gflaky != "") { err("duplicate flakyIsPass: in one gate"); return }
+    gflaky = unquote(KV_V)
   } else {
     err("unknown gate key: " KV_K)
   }
@@ -145,12 +170,21 @@ function flushgate() {
   if (gid == "") err("gate is missing id:")
   if (gcmd == "") err("gate is missing command:")
   if (gid != "" && gcmd != "") {
-    printf "GATE\t%s\t%s\t%s\n", gid, (gto == "" ? "-" : gto), gcmd
+    # Fixed-arity TSV with the free-form command last. Absent optional fields are
+    # "-" rather than empty: IFS=<tab> collapses runs of tabs in `read`, so an
+    # empty field would silently shift every field after it. "-" is a legal
+    # `mutex` name, so a declared one is emitted with a "+" prefix — a character
+    # GATE_MUTEX_PATTERN cannot contain, which keeps "absent" and "named -"
+    # distinguishable.
+    printf "GATE\t%s\t%s\t%s\t%s\t%s\t%s\n", gid, (gto == "" ? "-" : gto), \
+      (gmx == "" ? "-" : "+" gmx), (gretry == "" ? "-" : gretry), \
+      (gflaky == "" ? "-" : gflaky), gcmd
     ngates++
   }
-  gid = ""; gcmd = ""; gto = ""; gate_open = 0
+  gid = ""; gcmd = ""; gto = ""; gmx = ""; gretry = ""; gflaky = ""; gate_open = 0
 }
-BEGIN { SQ = sprintf("%c", 39); section = ""; gate_open = 0; ngates = 0; nversion = 0 }
+BEGIN { SQ = sprintf("%c", 39); section = ""; gate_open = 0; ngates = 0; nversion = 0
+        gid = ""; gcmd = ""; gto = ""; gmx = ""; gretry = ""; gflaky = "" }
 {
   line = $0
   sub(/\r$/, "", line)
@@ -193,7 +227,7 @@ BEGIN { SQ = sprintf("%c", 39); section = ""; gate_open = 0; ngates = 0; nversio
     if (section == "options") {
       if (!splitkv(body)) { err("expected \"key: value\" inside options:"); next }
       if (!checkvalue(KV_K, KV_V)) next
-      if (KV_K == "baseRef" || KV_K == "skipInPrimaryCheckout" || KV_K == "maxLogTailBytes" || KV_K == "requireCommit")
+      if (KV_K == "baseRef" || KV_K == "skipInPrimaryCheckout" || KV_K == "maxLogTailBytes" || KV_K == "requireCommit" || KV_K == "requireEnvClean")
         printf "OPT\t%s\t%s\n", KV_K, unquote(KV_V)
       else
         err("unknown options key: " KV_K)
@@ -229,17 +263,28 @@ fi
 
 GATE_IDS=()
 GATE_TOS=()
+GATE_MUTEXES=()
+GATE_RETRIES=()
+GATE_FLAKY_IS_PASS=()
 GATE_CMDS=()
 OPT_BASE_REF=""
 OPT_SKIP_PRIMARY="true"
 OPT_MAX_TAIL="$DEFAULT_MAX_LOG_TAIL_BYTES"
 OPT_REQUIRE_COMMIT="false"
+OPT_REQUIRE_ENV_CLEAN="false"
 
-while IFS="$TAB" read -r kind a b rest; do
+while IFS="$TAB" read -r kind a b c d e rest; do
   case "$kind" in
     GATE)
       GATE_IDS+=("$a")
       GATE_TOS+=("$b")
+      # "-" is absent; "+name" is a declared mutex (see flushgate).
+      case "$c" in
+        -) GATE_MUTEXES+=("");;
+        *) GATE_MUTEXES+=("${c#+}");;
+      esac
+      GATE_RETRIES+=("$d")
+      GATE_FLAKY_IS_PASS+=("$e")
       GATE_CMDS+=("$rest")
       ;;
     OPT)
@@ -248,6 +293,7 @@ while IFS="$TAB" read -r kind a b rest; do
         skipInPrimaryCheckout) OPT_SKIP_PRIMARY=$b;;
         maxLogTailBytes) OPT_MAX_TAIL=$b;;
         requireCommit) OPT_REQUIRE_COMMIT=$b;;
+        requireEnvClean) OPT_REQUIRE_ENV_CLEAN=$b;;
       esac
       ;;
   esac
@@ -261,6 +307,10 @@ case "$OPT_REQUIRE_COMMIT" in
   true|false) ;;
   *) die_config "options.requireCommit must be true or false (got: $OPT_REQUIRE_COMMIT)";;
 esac
+case "$OPT_REQUIRE_ENV_CLEAN" in
+  true|false) ;;
+  *) die_config "options.requireEnvClean must be true or false (got: $OPT_REQUIRE_ENV_CLEAN)";;
+esac
 case "$OPT_MAX_TAIL" in
   ''|*[!0-9]*) die_config "options.maxLogTailBytes must be an integer (got: $OPT_MAX_TAIL)";;
 esac
@@ -269,6 +319,17 @@ if [ "$OPT_MAX_TAIL" -gt "$MAX_LOG_TAIL_BYTES_LIMIT" ]; then
 fi
 
 GATE_ID_RE='^[a-z0-9][a-z0-9-]{0,31}$'
+# Wider than GATE_ID_RE on purpose: a mutex names a RESOURCE, not a gate, so two
+# repositories that both bind port 60303 can agree on `port.60303` and serialize
+# against each other. Narrow enough to be safe as a path segment, because both
+# runners turn it into `<lock-root>/<name>.lock` (CommandMate #1771,
+# verification-config.md section 9.2).
+GATE_MUTEX_RE='^[A-Za-z0-9_.-]+$'
+MAX_GATE_MUTEX_LENGTH=64
+# The ceiling IS the feature (CommandMate #1772). A gate that may re-run until it
+# passes reports the machine's luck, not the work, so 2 is a config error rather
+# than a larger number of attempts.
+MAX_RETRY_ON_FAIL=1
 SEEN_IDS="$WORKDIR/seen-ids"
 : > "$SEEN_IDS"
 gate_count=${#GATE_IDS[@]}
@@ -276,7 +337,7 @@ i=0
 while [ "$i" -lt "$gate_count" ]; do
   vid=${GATE_IDS[$i]}
   case "$vid" in
-    work-evidence|scope) die_config "gate id is reserved: $vid";;
+    work-evidence|scope|env-clean) die_config "gate id is reserved: $vid";;
   esac
   [[ $vid =~ $GATE_ID_RE ]] || die_config "invalid gate id: $vid (must match $GATE_ID_RE)"
   if grep -Fxq "$vid" "$SEEN_IDS"; then die_config "duplicate gate id: $vid"; fi
@@ -291,6 +352,38 @@ while [ "$i" -lt "$gate_count" ]; do
     die_config "timeoutSec must be 1..$MAX_TIMEOUT_SEC (gate $vid, got: $vto)"
   fi
   GATE_TOS[$i]=$vto
+
+  vmx=${GATE_MUTEXES[$i]}
+  if [ -n "$vmx" ]; then
+    if [ ${#vmx} -gt "$MAX_GATE_MUTEX_LENGTH" ]; then
+      die_config "mutex must be at most $MAX_GATE_MUTEX_LENGTH characters (gate $vid, got: ${#vmx})"
+    fi
+    [[ $vmx =~ $GATE_MUTEX_RE ]] || die_config "invalid mutex name: $vmx (gate $vid, must match $GATE_MUTEX_RE)"
+  fi
+
+  vretry=${GATE_RETRIES[$i]}
+  if [ "$vretry" = "-" ]; then vretry=0; fi
+  case "$vretry" in
+    0|1) ;;
+    # Not "at most N": the range is the contract, so the message states it.
+    *) die_config "retryOnFail must be 0 or $MAX_RETRY_ON_FAIL (gate $vid, got: $vretry)";;
+  esac
+  GATE_RETRIES[$i]=$vretry
+
+  vflaky=${GATE_FLAKY_IS_PASS[$i]}
+  if [ "$vflaky" = "-" ]; then vflaky=false; fi
+  case "$vflaky" in
+    true|false) ;;
+    *) die_config "flakyIsPass must be true or false (gate $vid, got: $vflaky)";;
+  esac
+  # A knob that can never fire is a config bug, not a preference: with no retry
+  # the gate has no FLAKY outcome to reclassify, so the declaration reads as
+  # "flakes are tolerated here" while changing nothing. `flakyIsPass: false`
+  # alone is only the default written out, so it passes.
+  if [ "$vflaky" = "true" ] && [ "$vretry" != "$MAX_RETRY_ON_FAIL" ]; then
+    die_config "flakyIsPass: true requires retryOnFail: $MAX_RETRY_ON_FAIL (gate $vid, without a retry a gate can never be FLAKY)"
+  fi
+  GATE_FLAKY_IS_PASS[$i]=$vflaky
   i=$((i + 1))
 done
 
@@ -433,6 +526,121 @@ if [ -n "$abs_git_dir" ] && [ "$abs_git_dir" = "$abs_common_git_dir" ]; then
   is_primary=1
 fi
 
+# --- machine-wide gate lock (Issue #223 / CommandMate #1771) -------------------
+# A gate that owns a fixed resource — a hard-coded port, a local database, an
+# emulator — can only run once per machine. Two parallel worktrees running it at
+# once make the second fail on the resource, and `GATE e2e FAIL exit=1` is
+# indistinguishable from the change being broken.
+#
+# The path convention and the primitive are part of the CONTRACT, not an
+# implementation detail (verification-config.md section 9.2): CommandMate's own
+# runner and this one are started independently against the same machine, so a
+# lock that differs in either respect is not a lock at all. `mkdir` is the
+# primitive because macOS ships no flock(1) and mkdir is atomic on every POSIX
+# filesystem — the same reason the TS implementation uses it.
+LOCK_ROOT=${CM_VERIFY_LOCK_ROOT:-}
+if [ -z "$LOCK_ROOT" ]; then LOCK_ROOT="${HOME:-/tmp}/.commandmate/locks"; fi
+# How often a waiter re-tries the claim. Matches DEFAULT_LOCK_POLL_INTERVAL_MS.
+LOCK_POLL_SEC=0.25
+LOCK_HOST=$(hostname 2>/dev/null || echo unknown)
+
+# One field out of the owner record, which is the JSON object below. Read with
+# awk rather than a shell regex so a value containing `:` or `,` cannot corrupt
+# the next field.
+lock_owner_field() { # <lock-path> <key>
+  [ -f "$1/owner" ] || return 0
+  awk -v key="$2" '
+    {
+      k = "\"" key "\":"
+      i = index($0, k)
+      if (i == 0) next
+      v = substr($0, i + length(k))
+      if (substr(v, 1, 1) == "\"") {
+        v = substr(v, 2)
+        j = index(v, "\"")
+        if (j > 0) v = substr(v, 1, j - 1)
+      } else {
+        j = 1
+        while (j <= length(v) && index("0123456789", substr(v, j, 1)) > 0) j++
+        v = substr(v, 1, j - 1)
+      }
+      print v
+      exit
+    }' "$1/owner" 2>/dev/null
+}
+
+# Is the recorded holder gone? Only decidable on the machine that wrote the
+# record: a pid from another host says nothing about a process here, and breaking
+# a lock on that guess lets two machines sharing a network home run the gate at
+# once. An unreadable or ambiguous answer means "alive", which costs a wait —
+# the safe direction.
+lock_owner_is_dead() { # <pid> <host>
+  [ -n "$1" ] || return 1
+  [ "$2" = "$LOCK_HOST" ] || return 1
+  lod_out=$(kill -0 "$1" 2>&1) && return 1
+  # EPERM means the process exists and belongs to someone else; only ESRCH is
+  # evidence of a dead holder.
+  case "$lod_out" in
+    *[Nn]o\ such\ process*) return 0;;
+    *) return 1;;
+  esac
+}
+
+# lock_acquire <name> <budget-seconds>
+# Sets LOCK_PATH / LOCK_TOKEN / LOCK_WAITED / LOCK_HELD_BY.
+# Returns 0 when the lock is held by this process, 1 when the budget ran out.
+lock_acquire() {
+  la_name=$1
+  la_budget=$2
+  LOCK_PATH="$LOCK_ROOT/$la_name.lock"
+  LOCK_TOKEN="$$-$(date +%s)-${RANDOM}${RANDOM}"
+  LOCK_WAITED=0
+  LOCK_HELD_BY=""
+  mkdir -p "$LOCK_ROOT" 2>/dev/null || true
+  la_start=$(date +%s)
+  la_broken=""
+  while :; do
+    if mkdir "$LOCK_PATH" 2>/dev/null; then
+      printf '{"pid":%s,"host":"%s","token":"%s","acquiredAt":%s}\n' \
+        "$$" "$LOCK_HOST" "$LOCK_TOKEN" "$(( $(date +%s) * 1000 ))" > "$LOCK_PATH/owner"
+      LOCK_WAITED=$(( $(date +%s) - la_start ))
+      return 0
+    fi
+    la_pid=$(lock_owner_field "$LOCK_PATH" pid)
+    la_host=$(lock_owner_field "$LOCK_PATH" host)
+    la_token=$(lock_owner_field "$LOCK_PATH" token)
+    if [ -n "$la_token" ]; then LOCK_HELD_BY="pid ${la_pid:-unknown} on ${la_host:-unknown host}"; fi
+    # A stale record is broken at most once per token, so a directory nobody can
+    # remove degrades into ordinary waiting instead of a spin loop.
+    if [ -n "$la_token" ] && [ "$la_token" != "$la_broken" ] && lock_owner_is_dead "$la_pid" "$la_host"; then
+      la_broken=$la_token
+      # Only ever remove the record just read: the holder may have released and
+      # a new one taken it between the two reads.
+      if [ "$(lock_owner_field "$LOCK_PATH" token)" = "$la_token" ]; then
+        rm -rf "$LOCK_PATH" 2>/dev/null || true
+        echo "verify-run: broke a stale lock at $LOCK_PATH (recorded holder pid $la_pid on this host no longer exists)" >&2
+      fi
+      continue
+    fi
+    la_now=$(date +%s)
+    if [ $(( la_now - la_start )) -ge "$la_budget" ]; then
+      LOCK_WAITED=$(( la_now - la_start ))
+      return 1
+    fi
+    sleep "$LOCK_POLL_SEC" 2>/dev/null || sleep 1
+  done
+}
+
+# Release only while this acquisition still owns the directory. Without the token
+# check, a holder whose lock was broken as stale would delete the NEXT holder's
+# directory and hand the resource to two runs at once.
+lock_release() { # <lock-path> <token>
+  [ -d "$1" ] || return 0
+  lr_current=$(lock_owner_field "$1" token)
+  if [ -n "$lr_current" ] && [ "$lr_current" != "$2" ]; then return 0; fi
+  rm -rf "$1" 2>/dev/null || true
+}
+
 # --- gate execution -----------------------------------------------------------
 # Never returns without a word. A gate that failed while printing nothing used to
 # leave the status line as the only trace, so a CI log showed "this gate did not
@@ -458,22 +666,73 @@ emit_log_tail() {
 
 any_failed=0
 gates_ran=0
+# A gate that never got its mutex reached no verdict. Tracked separately from
+# `any_failed` because the two are different facts and the RESULT below ranks
+# them: a real failure outranks a missing verdict.
+no_verdict=0
 
-run_gate() {
-  rg_id=$1
-  rg_cmd=$2
-  rg_to=$3
-  rg_log="$WORKDIR/gate-$rg_id.log"
-  rg_mark="$WORKDIR/gate-$rg_id.timedout"
-  rm -f "$rg_mark"
-  rg_start=$(date +%s)
+# One decimal second, the spelling the machine-readable markers use. This runner
+# measures whole seconds (bash 3.2 on macOS has no sub-second `date`), so the
+# decimal is always .0 — the FIELD and its unit are the contract, and `45.0s`
+# parses under CommandMate's own `([0-9]+(\.[0-9]+)?)s` reader.
+marker_seconds() { printf '%s.0s' "$1"; }
+
+# --- one attempt --------------------------------------------------------------
+# Sets RGA_STATUS (pass|fail|timeout|mutex-skip), RGA_CODE, RGA_DUR, RGA_LOG and
+# RGA_WAITED (-1 when the gate declared no mutex, so "not exclusive" and "waited
+# nothing" stay distinguishable).
+#
+# The wait happens OUTSIDE the measured interval: `duration` is what the gate's
+# own command took, and adding another run's queueing to it corrupts the number
+# every timeout budget and every "did this gate get slower" judgement is read
+# from (verification-config.md section 9.3). Never fold waited into duration.
+run_gate_attempt() {
+  rga_id=$1
+  rga_cmd=$2
+  rga_to=$3
+  rga_mutex=$4
+  rga_log=$5
+  RGA_LOG=$rga_log
+  RGA_WAITED=-1
+  RGA_LOCK_PATH=""
+  rga_lock_token=""
+
+  if [ -n "$rga_mutex" ]; then
+    # The gate's own timeout is the wait budget: a gate allowed 600s of execution
+    # has already declared how long this run may spend on it, and a second knob
+    # would only let the two disagree.
+    if lock_acquire "$rga_mutex" "$rga_to"; then
+      RGA_WAITED=$LOCK_WAITED
+      RGA_LOCK_PATH=$LOCK_PATH
+      rga_lock_token=$LOCK_TOKEN
+    else
+      RGA_STATUS=mutex-skip
+      RGA_CODE=""
+      RGA_DUR=0
+      RGA_WAITED=$LOCK_WAITED
+      RGA_LOCK_PATH=$LOCK_PATH
+      RGA_HELD_BY=$LOCK_HELD_BY
+      : > "$rga_log"
+      return 0
+    fi
+  fi
+
+  rga_mark="$rga_log.timedout"
+  rm -f "$rga_mark"
+  rga_start=$(date +%s)
 
   # `set -m` puts the gate in its own process group so the watchdog can kill the
   # whole tree. Without it, `npm run x` dies but the node/sleep children it forked
   # survive the timeout (measured: 2 orphans left behind).
+  #
+  # CM_WORKTREE_INDEX / CM_WORKTREE_ID are NOT set here (Issue #223): this runner
+  # does not number worktrees and must not invent a number, because a number that
+  # disagrees with CommandMate's would put the gate on a port the product run has
+  # already claimed. Whatever the caller exported is inherited unchanged; a gate
+  # carries its own default (`${CM_WORKTREE_INDEX:-0}`).
   set -m
-  ( cd "$CWD" && exec /bin/sh -c "$rg_cmd" ) > "$rg_log" 2>&1 &
-  rg_pid=$!
+  ( cd "$CWD" && exec /bin/sh -c "$rga_cmd" ) > "$rga_log" 2>&1 &
+  rga_pid=$!
   set +m
 
   # `kill -TERM -N` signals whatever process group has id N. If job control could
@@ -481,46 +740,169 @@ run_gate() {
   # then the group with that id belongs to some unrelated process tree, and
   # signalling it blindly would kill a bystander. So confirm the gate really is
   # its own group leader before using the group form.
-  rg_pgid=$(ps -o pgid= -p "$rg_pid" 2>/dev/null | tr -d ' ')
-  if [ "$rg_pgid" = "$rg_pid" ]; then rg_target="-$rg_pid"; else rg_target="$rg_pid"; fi
+  rga_pgid=$(ps -o pgid= -p "$rga_pid" 2>/dev/null | tr -d ' ')
+  if [ "$rga_pgid" = "$rga_pid" ]; then rga_target="-$rga_pid"; else rga_target="$rga_pid"; fi
 
-  ( sleep "$rg_to"
-    : > "$rg_mark"
-    kill -s TERM -- "$rg_target" 2>/dev/null
+  ( sleep "$rga_to"
+    : > "$rga_mark"
+    kill -s TERM -- "$rga_target" 2>/dev/null
     sleep "$KILL_GRACE_SEC"
-    kill -s KILL -- "$rg_target" 2>/dev/null
+    kill -s KILL -- "$rga_target" 2>/dev/null
   ) >/dev/null 2>&1 &
-  rg_wpid=$!
+  rga_wpid=$!
 
   # 2>/dev/null suppresses the shell job-control "Terminated" notice.
-  wait "$rg_pid" 2>/dev/null
-  rg_code=$?
-  kill -TERM "$rg_wpid" 2>/dev/null
-  wait "$rg_wpid" 2>/dev/null
+  wait "$rga_pid" 2>/dev/null
+  rga_code=$?
+  kill -TERM "$rga_wpid" 2>/dev/null
+  wait "$rga_wpid" 2>/dev/null
 
-  rg_dur=$(( $(date +%s) - rg_start ))
+  RGA_DUR=$(( $(date +%s) - rga_start ))
+  # Released per ATTEMPT, not per gate: a retry must not keep a machine-wide
+  # resource out of another worktree's hands for a run that already failed once.
+  if [ -n "$rga_lock_token" ]; then lock_release "$RGA_LOCK_PATH" "$rga_lock_token"; fi
+
+  if [ -f "$rga_mark" ]; then
+    RGA_STATUS=timeout
+    RGA_CODE=124
+  elif [ "$rga_code" -eq 0 ]; then
+    RGA_STATUS=pass
+    RGA_CODE=0
+  else
+    RGA_STATUS=fail
+    RGA_CODE=$rga_code
+  fi
+  rm -f "$rga_mark"
+}
+
+# The `waited=` field of a GATE line, or nothing when the gate declared no mutex.
+# A mutexed gate that did not wait still prints `waited=0s`: "serialized and got
+# the lock straight away" and "not serialized at all" are different facts, and a
+# reader has to be able to tell them apart (section 9.3).
+waited_field() {
+  if [ "$1" -lt 0 ]; then printf ''; else printf ' waited=%ss' "$1"; fi
+}
+
+# The spawn hint of Issue #1607, unchanged: 126/127 with an EMPTY log points at
+# the spawn rather than at the command's own failure. A lead to follow, never a
+# verdict.
+spawn_hint() { # <id> <exit> <log> <command>
+  if [ ! -s "$3" ] && { [ "$2" -eq 126 ] || [ "$2" -eq 127 ]; }; then
+    echo "verify-run: gate $1 exited $2 with no output; the command may not have started (exec/spawn failure). Check that it exists and is executable in $CWD: $4" >&2
+  fi
+}
+
+run_gate() {
+  rg_id=$1
+  rg_cmd=$2
+  rg_to=$3
+  rg_mutex=$4
+  rg_retry=$5
+  rg_flaky_is_pass=$6
+
+  run_gate_attempt "$rg_id" "$rg_cmd" "$rg_to" "$rg_mutex" "$WORKDIR/gate-$rg_id.log"
+  rg1_status=$RGA_STATUS
+  rg1_code=$RGA_CODE
+  rg1_dur=$RGA_DUR
+  rg1_waited=$RGA_WAITED
+
+  # The lock never came free. NOT a TIMEOUT — the command was never started, so
+  # "it ran long" is not a fact — and NOT a FAIL, because keeping a resource
+  # conflict from wearing the same face as a broken change is the whole point.
+  if [ "$rg1_status" = "mutex-skip" ]; then
+    echo "GATE $rg_id SKIP reason=mutex-wait waited=${rg1_waited}s"
+    no_verdict=1
+    {
+      echo "--- gate $rg_id (SKIP reason=mutex-wait) ---"
+      echo "[mutex] name=$rg_mutex waited=$(marker_seconds "$rg1_waited") lock=$RGA_LOCK_PATH"
+      if [ -n "${RGA_HELD_BY:-}" ]; then echo "[mutex] held by $RGA_HELD_BY"; fi
+      echo "verify-run: gate $rg_id declares mutex '$rg_mutex' and the machine-wide lock stayed held for its whole ${rg_to}s budget, so the command was never started. This is a resource conflict, not a verdict on the work: re-run once the other run finishes, or raise the gate's timeoutSec."
+      echo "--- end gate $rg_id ---"
+    } >&2
+    return 0
+  fi
+
   gates_ran=$((gates_ran + 1))
 
-  if [ -f "$rg_mark" ]; then
-    echo "GATE $rg_id TIMEOUT exit=124 duration=${rg_dur}s"
-    any_failed=1
-    emit_log_tail "$rg_id" "TIMEOUT after ${rg_to}s" "$rg_log"
-  elif [ "$rg_code" -eq 0 ]; then
-    echo "GATE $rg_id PASS exit=0 duration=${rg_dur}s"
-  else
-    echo "GATE $rg_id FAIL exit=$rg_code duration=${rg_dur}s"
-    any_failed=1
-    emit_log_tail "$rg_id" "FAIL exit=$rg_code" "$rg_log"
-    # There is no separate branch for "the gate never started": the wrapper shell
-    # is backgrounded, so a failed `exec` surfaces only as a non-zero `wait`. What
-    # distinguishes it is that /bin/sh reports "not found" / "cannot execute" on
-    # its own stderr, which is redirected into the log — so 126/127 with an *empty*
-    # log points at the spawn rather than at the command's own failure. Emitted as
-    # a lead to follow, not as a verdict: Issue #1607 never reproduced a spawn
-    # failure and this is not a claim about what caused the CI red.
-    if [ ! -s "$rg_log" ] && { [ "$rg_code" -eq 126 ] || [ "$rg_code" -eq 127 ]; }; then
-      echo "verify-run: gate $rg_id exited $rg_code with no output; the command may not have started (exec/spawn failure). Check that it exists and is executable in $CWD: $rg_cmd" >&2
+  # Only a FAIL is retried (CommandMate #1772). A TIMEOUT is not: the gate has
+  # already spent its whole budget, and a second attempt doubles the wall clock
+  # of exactly the gates whose budgets are largest. A mutex SKIP never started a
+  # command, so there is no verdict to seek a second opinion on.
+  if [ "$rg_retry" = "1" ] && [ "$rg1_status" = "fail" ]; then
+    run_gate_attempt "$rg_id" "$rg_cmd" "$rg_to" "$rg_mutex" "$WORKDIR/gate-$rg_id.retry.log"
+    rg2_status=$RGA_STATUS
+    rg2_code=$RGA_CODE
+    rg2_dur=$RGA_DUR
+
+    if [ "$rg2_status" = "pass" ] || [ "$rg2_status" = "fail" ]; then
+      if [ "$rg2_status" = "pass" ]; then rg_outcome=flaky; else rg_outcome=fail; fi
+      rg_verdict=fail
+      if [ "$rg_outcome" = "flaky" ] && [ "$rg_flaky_is_pass" = "true" ]; then rg_verdict=pass; fi
+      # FLAKY displaces PASS/FAIL rather than being appended to it: neither word
+      # was true of this gate, it failed and then it passed. The spelling does
+      # NOT change with flakyIsPass — that decides the RESULT and the exit code,
+      # never what happened. A gate that failed twice keeps FAIL: the retry
+      # agreed, and nothing about it was flaky.
+      if [ "$rg_outcome" = "flaky" ]; then rg_label=FLAKY; else rg_label=FAIL; fi
+      echo "GATE $rg_id $rg_label exit=$rg1_code,$rg2_code duration=${rg1_dur}s,${rg2_dur}s$(waited_field "$rg1_waited")"
+      if [ "$rg_verdict" = "fail" ]; then any_failed=1; fi
+      # Written for outcome=fail too, not only for outcome=flaky: a gate that
+      # failed twice is evidence AGAINST flakiness, and an advisor mining this
+      # needs both halves of the ratio. A marker present only on the flaky half
+      # makes every retried gate look flaky.
+      {
+        echo "[flaky] runs=2 outcome=$rg_outcome exit=$rg1_code,$rg2_code duration=$(marker_seconds "$rg1_dur"),$(marker_seconds "$rg2_dur") verdict=$rg_verdict"
+        if [ "$rg1_waited" -ge 0 ]; then
+          echo "[mutex] name=$rg_mutex waited=$(marker_seconds "$rg1_waited") lock=$RGA_LOCK_PATH"
+        fi
+        echo "--- [flaky] run 1/2: failed exit=$rg1_code duration=$(marker_seconds "$rg1_dur") ---"
+      } >&2
+      emit_log_tail "$rg_id" "$rg_label run 1/2 exit=$rg1_code" "$WORKDIR/gate-$rg_id.log"
+      echo "--- [flaky] run 2/2: $([ "$rg2_status" = pass ] && echo passed || echo failed) exit=$rg2_code duration=$(marker_seconds "$rg2_dur") ---" >&2
+      emit_log_tail "$rg_id" "$rg_label run 2/2 exit=$rg2_code" "$WORKDIR/gate-$rg_id.retry.log"
+      spawn_hint "$rg_id" "$rg2_code" "$WORKDIR/gate-$rg_id.retry.log" "$rg_cmd"
+      return 0
     fi
+
+    # The retry reached no verdict of its own (it timed out, or the lock never
+    # came free), so there is nothing to compare the first run against. The first
+    # run's FAIL stands unchanged — reporting the retry instead would turn a gate
+    # that judged the work into one that judged nothing, which is strictly weaker.
+    echo "GATE $rg_id FAIL exit=$rg1_code duration=${rg1_dur}s$(waited_field "$rg1_waited")"
+    any_failed=1
+    echo "[flaky] retry reached no verdict ($rg2_status); the first run's FAIL stands" >&2
+    if [ "$rg1_waited" -ge 0 ]; then
+      echo "[mutex] name=$rg_mutex waited=$(marker_seconds "$rg1_waited") lock=$RGA_LOCK_PATH" >&2
+    fi
+    emit_log_tail "$rg_id" "FAIL exit=$rg1_code" "$WORKDIR/gate-$rg_id.log"
+    spawn_hint "$rg_id" "$rg1_code" "$WORKDIR/gate-$rg_id.log" "$rg_cmd"
+    return 0
+  fi
+
+  if [ "$rg1_status" = "timeout" ]; then
+    echo "GATE $rg_id TIMEOUT exit=124 duration=${rg1_dur}s$(waited_field "$rg1_waited")"
+    any_failed=1
+    if [ "$rg1_waited" -ge 0 ]; then
+      echo "[mutex] name=$rg_mutex waited=$(marker_seconds "$rg1_waited") lock=$RGA_LOCK_PATH" >&2
+    fi
+    emit_log_tail "$rg_id" "TIMEOUT after ${rg_to}s" "$WORKDIR/gate-$rg_id.log"
+  elif [ "$rg1_status" = "pass" ]; then
+    echo "GATE $rg_id PASS exit=0 duration=${rg1_dur}s$(waited_field "$rg1_waited")"
+    # The wait is on the record even when the command printed nothing, and even
+    # when the gate passed: it is the only evidence that the machine made this
+    # run queue. The GATE line above carries it too; this is the line-anchored
+    # form a log reader parses (section 9.3).
+    if [ "$rg1_waited" -ge 0 ]; then
+      echo "[mutex] name=$rg_mutex waited=$(marker_seconds "$rg1_waited") lock=$RGA_LOCK_PATH" >&2
+    fi
+  else
+    echo "GATE $rg_id FAIL exit=$rg1_code duration=${rg1_dur}s$(waited_field "$rg1_waited")"
+    any_failed=1
+    if [ "$rg1_waited" -ge 0 ]; then
+      echo "[mutex] name=$rg_mutex waited=$(marker_seconds "$rg1_waited") lock=$RGA_LOCK_PATH" >&2
+    fi
+    emit_log_tail "$rg_id" "FAIL exit=$rg1_code" "$WORKDIR/gate-$rg_id.log"
+    spawn_hint "$rg_id" "$rg1_code" "$WORKDIR/gate-$rg_id.log" "$rg_cmd"
   fi
 }
 
@@ -528,6 +910,9 @@ i=0
 while [ "$i" -lt "$gate_count" ]; do
   cur_id=${GATE_IDS[$i]}
   cur_to=${GATE_TOS[$i]}
+  cur_mutex=${GATE_MUTEXES[$i]}
+  cur_retry=${GATE_RETRIES[$i]}
+  cur_flaky=${GATE_FLAKY_IS_PASS[$i]}
   cur_cmd=${GATE_CMDS[$i]}
   i=$((i + 1))
 
@@ -539,8 +924,25 @@ while [ "$i" -lt "$gate_count" ]; do
     continue
   fi
   # Every gate runs even after one fails, so a single run reports every finding.
-  run_gate "$cur_id" "$cur_cmd" "$cur_to"
+  run_gate "$cur_id" "$cur_cmd" "$cur_to" "$cur_mutex" "$cur_retry" "$cur_flaky"
 done
+
+# --- built-in env-clean (options.requireEnvClean) -----------------------------
+# Accepted so one verify.yaml is readable by BOTH runners (CommandMate #1740 added
+# the key and this runner rejected it with exit 2 until #223), and reported rather
+# than silently swallowed. It is NOT evaluated here and cannot be: the gate
+# compares the machine against a snapshot taken when the TASK was created by
+# `send --contract`, and a run started from a shell is attached to no task, so
+# there is no baseline to compare against.
+#
+# It does not change the verdict. Blocking every run of a repository that opted in
+# would replace one unusable config (exit 2) with another (never green), and the
+# gate this stands in for judges the machine, not the work in this worktree — the
+# authority on it is `commandmate verify`, which has the baseline.
+if [ "$OPT_REQUIRE_ENV_CLEAN" = "true" ]; then
+  echo "GATE env-clean SKIP reason=no-baseline"
+  echo "verify-run: options.requireEnvClean is set, but the built-in env-clean gate needs the baseline snapshot CommandMate records at task creation. This standalone run has no task, so the gate is reported as SKIP and judged by nothing here — run \`commandmate verify\` for its verdict." >&2
+fi
 
 if [ "$gates_ran" -eq 0 ]; then
   echo "RESULT skipped"
@@ -549,6 +951,13 @@ fi
 if [ "$any_failed" -ne 0 ]; then
   echo "RESULT failed"
   exit "$EXIT_FAILED"
+fi
+# A declared gate that never got its mutex was never judged, so the gates that did
+# run are not the whole answer and `passed` would be a green over a hole. Ranked
+# below `failed` on purpose: a real verdict outranks a missing one.
+if [ "$no_verdict" -ne 0 ]; then
+  echo "RESULT skipped"
+  exit "$EXIT_SKIPPED"
 fi
 echo "RESULT passed"
 exit "$EXIT_PASSED"

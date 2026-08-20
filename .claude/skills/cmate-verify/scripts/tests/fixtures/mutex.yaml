@@ -1,0 +1,12 @@
+# One mutexed gate. The lock name is fixed so two runs of this fixture contend
+# with each other, and the suite points CM_VERIFY_LOCK_ROOT at its own sandbox —
+# a test that took a lock under the real ~/.commandmate/locks would serialize
+# against, and be failed by, unrelated live runs on the developer's machine.
+version: 1
+gates:
+  - id: e2e
+    command: sh -c 'sleep "${CMATE_VERIFY_TEST_HOLD:-0}"; echo e2e-ran'
+    timeoutSec: 30
+    mutex: cmate-verify-selftest
+options:
+  skipInPrimaryCheckout: false

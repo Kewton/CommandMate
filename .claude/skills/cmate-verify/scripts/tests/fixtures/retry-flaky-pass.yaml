@@ -1,0 +1,11 @@
+# Identical to retry-flaky.yaml except for the one declaration under test. Pairs
+# with it as a two-point measurement: the GATE line must be the same word in both
+# (`FLAKY` names what happened), and only the RESULT and the exit code may move.
+version: 1
+gates:
+  - id: unit
+    command: sh -c 'if [ -f "$CMATE_VERIFY_TEST_MARKER" ]; then echo second-run-green; exit 0; fi; : > "$CMATE_VERIFY_TEST_MARKER"; echo first-run-red; exit 1'
+    retryOnFail: 1
+    flakyIsPass: true
+options:
+  skipInPrimaryCheckout: false
