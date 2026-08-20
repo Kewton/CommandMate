@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-08-21
+
 ### Added
 
 - **chore(skills): vendored な cmate-verify を上流と揃え、`mutex` / `retryOnFail` / `flakyIsPass` / `requireEnvClean` を受理させる** (#1861): v0.26.0 の verify.yaml parity は 3 リポジトリ位置・4 実装にまたがるが、#1771 / #1772 は `.claude/skills/sync-map.json` の sha256 pin を壊さないため vendored copy を意図的に触っておらず、**同じ verify.yaml が製品側（`commandmate verify`）では exit 0、vendored ランナー（`.claude/skills/cmate-verify/scripts/verify-run.sh`）では exit 2** に割れていた（実測 2026-08-20: `unknown gate key: retryOnFail` / `flakyIsPass` / `mutex` / `unknown options key: requireEnvClean` の 4 件で設定エラー）。上流 Kewton/commandmate-skills PR #225（`6faa33f`、skills #223 / #224）の `verify-run.sh`（554 → 963 行）を **`cmp` でバイト一致する逐語コピー**として取り込み、`.agents/skills/cmate-verify/` へもミラーした（同 verify.yaml の再実測で vendored も exit 0 / `GATE e2e PASS exit=0 duration=0s waited=0s` / `GATE env-clean SKIP reason=no-baseline` / `RESULT passed`）。`SKILL.md` は policy が `port-required` なので逐語コピーせず、キー表・ロック規約（`~/.commandmate/locks/<name>.lock` / `mkdir` / `owner` の pid・host・token / `CM_VERIFY_LOCK_ROOT`）・`waited` を `duration` に足さない契約・`CM_WORKTREE_INDEX` を standalone 側は設定しない理由を、CommandMate 側の Issue 番号（#1771 / #1772 / #1740）と相対パスに読み替えて書き直した。fixture は counterpart（`tests/fixtures/cmate-verify/fixtures/`）から 18 本を追加し、suite の assertion は 200 → **317**（`MIN_ASSERTIONS` は bash 側・vitest ラッパ側とも 300 に引き上げ、新セクションが黙って落ちても緑にならないようにした）。counterpart は fixture と run-tests.sh を package の外に置くため `skills-sync-map.mjs check --counterpart` が `scripts/tests/**` を MISSING と報告するが、これは**構造上の既知差**（vendored は Node の無い導入先でも suite を回せるよう同梱する）であり、その旨を sync-map のrationale に明記した
