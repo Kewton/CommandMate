@@ -1,0 +1,11 @@
+# The per-worktree identity CommandMate injects (#1771). This runner does not
+# number worktrees and must not invent a number, so the gate sees exactly what
+# the caller exported — and carries its own default for the case where nobody
+# did. Writing the value to the marker file is what makes "which one did the gate
+# see" observable from the suite.
+version: 1
+gates:
+  - id: env
+    command: sh -c 'echo "index=${CM_WORKTREE_INDEX:-0} id=${CM_WORKTREE_ID:-none}" > "$CMATE_VERIFY_TEST_MARKER"'
+options:
+  skipInPrimaryCheckout: false

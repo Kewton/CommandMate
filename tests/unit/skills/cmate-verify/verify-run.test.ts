@@ -20,8 +20,10 @@ const SUITE = path.join(
 const TIMEOUT_MS = 180_000;
 
 // Floor mirrors MIN_ASSERTIONS in run-tests.sh: a truncated run must not pass
-// just because it never reached the failing case.
-const MIN_ASSERTIONS = 200;
+// just because it never reached the failing case. Raised with the mutex / FLAKY /
+// requireEnvClean cases ported from skills #223 / #224 (Issue #1861): leaving it
+// at 200 would let the whole new section stop running without turning this red.
+const MIN_ASSERTIONS = 300;
 
 /**
  * Issue #1607: this wrapper used to assert on `output.split(...).filter(l =>

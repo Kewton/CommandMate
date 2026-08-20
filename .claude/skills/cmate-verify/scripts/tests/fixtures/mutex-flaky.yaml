@@ -1,0 +1,13 @@
+# `mutex` and `retryOnFail` together. The lock is taken and released PER ATTEMPT,
+# so a retry never keeps a machine-wide resource out of another worktree's hands
+# for a run that has already failed once, and `waited=` stays a field of its own
+# beside a two-valued duration.
+version: 1
+gates:
+  - id: unit
+    command: sh -c 'if [ -f "$CMATE_VERIFY_TEST_MARKER" ]; then exit 0; fi; : > "$CMATE_VERIFY_TEST_MARKER"; exit 1'
+    timeoutSec: 30
+    retryOnFail: 1
+    mutex: cmate-verify-selftest
+options:
+  skipInPrimaryCheckout: false

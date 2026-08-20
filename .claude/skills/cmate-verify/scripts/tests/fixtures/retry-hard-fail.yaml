@@ -1,0 +1,15 @@
+# The retry AGREED with the first run, so nothing about this gate was flaky and
+# the line stays FAIL. Both exit codes and both durations are still reported: the
+# gate really did run twice, and that fact is the denominator a flake advisor
+# needs (verification-config.md section 10.3).
+#
+# `flakyIsPass: true` is declared on purpose — a gate that fails twice must fail
+# anyway, so this also pins that the toleration cannot reach outside FLAKY.
+version: 1
+gates:
+  - id: unit
+    command: sh -c 'echo always-red; exit 3'
+    retryOnFail: 1
+    flakyIsPass: true
+options:
+  skipInPrimaryCheckout: false
