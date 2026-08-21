@@ -861,15 +861,57 @@ export const OPENCODE_PERMISSION_PATTERN =
 export const OPENCODE_PROCESSING_INDICATOR = /esc interrupt/;
 
 /**
- * OpenCode TUI selection list pattern (Issue #473)
- * Detects the fuzzy-search selection list overlay in OpenCode TUI
- * (e.g., /models, /providers, /connect commands).
+ * OpenCode TUI selection list pattern (Issue #473, narrowed by Issue #1896).
  *
- * Matches header lines of selection overlays. Known headers:
- *   "              Select model                                     esc"
- *   "              Connect a provider                               esc"
+ * Detects the fuzzy-search picker overlay opencode draws for `/models`,
+ * `/providers` and `/connect`, anchored on its HEADER ROW COMPLETE WITH the
+ * right-aligned `esc` hatch:
+ *
+ * ```
+ *               Select model                                     esc
+ *
+ *               Search
+ *
+ *               Recent
+ *             ● GPT-5.6 Luna GitHub Copilot
+ * ```
+ *
+ * The `esc` is the picker's own dismiss affordance -- positive evidence that an
+ * overlay is open (design rule D1), rather than the presence of two English
+ * words somewhere on the pane. Until #1896 the pattern was the bare phrase, and
+ * `status-detector.ts` tests it against the WHOLE content area (up to ~200 rows,
+ * because the header can sit far above the last row when the list is long), so
+ * an agent that merely wrote `Select model to continue:` in its answer parked the
+ * session on `waiting` / `opencode_selection_list` for the rest of the session
+ * -- measured live on opencode 1.18.21,
+ * `opencode-live-1896/select-model-in-response.txt`.
+ *
+ * Requiring two or more spaces before `esc` is what separates the header row
+ * from prose: the picker right-aligns the hatch across the overlay's width
+ * (37 spaces in the measured frame), while a sentence that happens to end in
+ * "esc" would not.
+ *
+ * NOT additionally anchored on the `Search` row below the header: its distance
+ * from the header is unmeasured for the `Connect a provider` variant (that
+ * overlay needs an unconfigured provider to open, which the live probe could not
+ * produce without touching the operator's real credentials), and the header's
+ * own hatch is already the affordance.
+ *
+ * The header allowlist is deliberately unchanged. opencode 1.18 draws the same
+ * chrome for its ctrl+p command palette (`Commands … esc`), which this pattern
+ * therefore still does not match; that frame lands on `running` / `default`
+ * (measured, `opencode-live-1896/command-palette.txt`) -- i.e. on the
+ * "no evidence" side, which #1708's unclassified-frame guard already covers.
+ * Widening the allowlist is a separate change with its own live frames.
+ *
+ * The whitespace runs are `[^\S\n]` (horizontal only) for the reason Issue #1883
+ * documents: plain `\s` crosses newlines under the `m` flag, which would let a
+ * header on one row pair up with an `esc` several rows below it.
+ *
+ * Linear pattern, no nested quantifiers -- ReDoS safe (S4-001).
  */
-export const OPENCODE_SELECTION_LIST_PATTERN = /^\s*(Select\s+(model|provider)|Connect\s+a\s+provider)/m;
+export const OPENCODE_SELECTION_LIST_PATTERN =
+  /^[^\S\n]*(?:Select[^\S\n]+(?:model|provider)|Connect[^\S\n]+a[^\S\n]+provider)[^\S\n]{2,}esc[^\S\n]*$/m;
 
 /**
  * [Issue #1495] Footer signature of Claude Code's `/model` local-settings overlay.
@@ -1478,8 +1520,35 @@ export function buildDetectPromptOptions(
   }
   // [D2-006] OpenCode prompt "Ask anything..." does not use standard indicators (> / ❯),
   // so requireDefaultIndicator must be false to avoid missing prompt detection.
+  //
+  // [Issue #1896] `hasNumberedDialogs: false` -- opencode 1.18 renders NO dialog
+  // that a typed number drives, so the generic numbered-list inference has
+  // nothing to find on its pane and every hit it scored was transcript text.
+  // Its two interactive surfaces were both measured at the production 80x200
+  // geometry and both are cursor-driven:
+  //
+  //  - the permission dialog is a horizontal button strip
+  //    ({@link OPENCODE_PERMISSION_PATTERN}, Issue #1893) driven by ←/→ + Enter;
+  //    typing a number does nothing to it.
+  //  - the pickers (`/models`, `/providers`, `/connect`, and the ctrl+p command
+  //    palette) are fuzzy-search lists driven by ↑/↓ + Enter, with no numbers
+  //    drawn at all. The first three are what
+  //    {@link OPENCODE_SELECTION_LIST_PATTERN} names; the palette shares the
+  //    chrome but not the header allowlist, and lands on `running` / `default`.
+  //
+  // Both keep their own POSITIVE detection in `status-detector.ts`, so `wait`
+  // still stops for them (exit 10 via `isSelectionListActive`) and the UI still
+  // renders NavigationButtons: nothing that could be answered before stops being
+  // answered. What ends is the false positive -- a response whose body ends in
+  // `1. / 2. / 3.` + a question was published as
+  // `waiting`/`prompt_detected`/`hasActivePrompt: true`, and Auto-Yes typed `1`
+  // into the composer and SENT IT as a user utterance (Issue #1896).
+  //
+  // `requireDefaultIndicator` is kept at its D2-006 value: it is the correct
+  // setting for opencode's ❯-less rendering should the numbered path ever be
+  // re-enabled, and it still describes the tool.
   if (cliToolId === 'opencode') {
-    return { requireDefaultIndicator: false };
+    return { requireDefaultIndicator: false, hasNumberedDialogs: false };
   }
   // [Issue #545] Copilot prompt pattern may not use standard indicators
   if (cliToolId === 'copilot') {
