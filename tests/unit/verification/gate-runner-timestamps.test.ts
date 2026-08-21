@@ -115,15 +115,56 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * A database whose gate-row INSERT takes `delayMs`.
+ * Hold this thread for at least `ms`, without burning a core.
+ *
+ * better-sqlite3 is synchronous and so is the write this stands in for, so the
+ * delay has to hold the thread rather than yield to the event loop. It must not
+ * spin to do it: a busy-wait competes for the CPU with the very process whose
+ * scheduling this file measures, so the old spin made the machine noisier in
+ * exactly the way that then broke its own timing budget (#1849).
+ */
+function blockThread(ms: number): void {
+  const lock = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+  const until = Date.now() + ms;
+  // Nothing ever notifies `lock`, so every call returns by timing out. Looping
+  // on the wall clock covers a wait that comes back a hair early.
+  for (let remaining = ms; remaining > 0; remaining = until - Date.now()) {
+    Atomics.wait(lock, 0, 0, remaining);
+  }
+}
+
+/**
+ * When a gate row's INSERT was entered and when it returned, read from the same
+ * clock the runner stamps rows with.
+ */
+interface ObservedInsert {
+  gateId: string;
+  enteredAt: number;
+  returnedAt: number;
+}
+
+/**
+ * A database whose INSERT of `gateId`'s row costs `delayMs`, reported into
+ * `observed`.
  *
  * The runner opens the row before spawning the gate, so on a real file-backed
  * SQLite the opening stamp lands measurably before the command starts. Against
  * an in-memory database that gap is under a millisecond, which would let a
  * runner that stamped the row's write times instead of the measured interval
  * pass by luck. The delay makes the difference between the two visible.
+ *
+ * `observed` is what makes it checkable without a stopwatch: the write occupies
+ * a known interval on the wall clock, and the window the runner reports has to
+ * begin after that interval ended. Only the row under test pays the delay —
+ * every other gate's write stays free, so the run costs one delay, not one per
+ * gate.
  */
-function withSlowGateInserts(real: Database.Database, delayMs: number): Database.Database {
+function withSlowGateInserts(
+  real: Database.Database,
+  gateId: string,
+  delayMs: number,
+  observed: ObservedInsert[]
+): Database.Database {
   const bind = (target: object, prop: string | symbol): unknown => {
     const value = Reflect.get(target, prop);
     return typeof value === 'function' ? value.bind(target) : value;
@@ -138,14 +179,18 @@ function withSlowGateInserts(real: Database.Database, delayMs: number): Database
         return new Proxy(statement, {
           get(inner, innerProp) {
             if (innerProp !== 'run') return bind(inner, innerProp);
+            // Bound, not just referenced: better-sqlite3's `run` is a native
+            // method and needs its statement as the receiver.
+            const run = (inner.run as (...a: unknown[]) => unknown).bind(inner);
             return (...args: unknown[]) => {
-              // Busy-wait: better-sqlite3 is synchronous, and so is the write
-              // this stands in for.
-              const until = Date.now() + delayMs;
-              while (Date.now() < until) {
-                /* spin */
-              }
-              return (inner.run as (...a: unknown[]) => unknown)(...args);
+              // createGateResult binds (run_id, gate_id, command, started_at,
+              // source), so the row's identity is the second parameter.
+              if (args[1] !== gateId) return run(...args);
+              const enteredAt = Date.now();
+              blockThread(delayMs);
+              const result = run(...args);
+              observed.push({ gateId, enteredAt, returnedAt: Date.now() });
+              return result;
             };
           },
         });
@@ -158,11 +203,37 @@ function withSlowGateInserts(real: Database.Database, delayMs: number): Database
  *  stamp pair (both written after the run) cannot be mistaken for it. */
 const GATE_SLEEP_MS = 400;
 
+/**
+ * The write cost injected into the gate row's INSERT (#1849).
+ *
+ * Sized against the *upper* bound it buys, not against a realistic write. The
+ * gate's own duration is a `sleep` plus however long the OS took to get around
+ * to spawning, waking and reaping it, and that scheduling jitter is unbounded
+ * on a loaded machine — measured here at up to 82ms with the box oversubscribed
+ * (`sleep 0.4` reporting 482ms). An upper bound of `GATE_SLEEP_MS + this` both
+ * tolerates jitter smaller than this value and still catches a leak of exactly
+ * this value, so raising it widens the jitter budget without costing any
+ * detection: a runner that folded the write into the window reports at least
+ * `GATE_SLEEP_MS + this`, whatever this is. 400ms leaves ~5x headroom over the
+ * worst jitter seen. It is not a spin (see {@link blockThread}), so the run pays
+ * it in wall clock only.
+ */
+const INSERT_DELAY_MS = 400;
+
+/**
+ * How long the hanging gate is allowed to run before the runner kills it.
+ * Interpolated into the config below so the two cannot drift apart.
+ */
+const GATE_TIMEOUT_MS = 1000;
+
+// `sleep` takes seconds, so the command is derived rather than written out:
+// a change to GATE_SLEEP_MS that left the command alone would silently move
+// every bound in this file off the thing it is bounding.
 const SLEEPING_CONFIG = `
 version: 1
 gates:
   - id: slow
-    command: "sh -c 'sleep 0.4'"
+    command: "sh -c 'sleep ${GATE_SLEEP_MS / 1000}'"
     timeoutSec: 30
 options:
   baseRef: main
@@ -194,7 +265,11 @@ describe('gate timestamps — executed gates', () => {
 
     const slow = gatesById(runId).get('slow');
     expect(slow?.status).toBe('passed');
-    // The measurement that was already correct, kept as the reference.
+    // The measurement that was already correct, kept as the reference. Both
+    // bounds below are lower bounds on a sleep, which is the direction load
+    // cannot break: jitter only ever makes the observed interval longer, so the
+    // 50ms of slack is covering a `sleep` that returns fractionally early, not
+    // a busy machine (#1849).
     expect(slow!.durationMs).toBeGreaterThanOrEqual(GATE_SLEEP_MS - 50);
 
     // The defect: both stamps were written after the gate finished, so the
@@ -213,19 +288,41 @@ describe('gate timestamps — executed gates', () => {
     addUncommittedWork(repo);
     registerWorktree('wt-slow-write', repo);
 
-    const insertDelayMs = 60;
+    const inserts: ObservedInsert[] = [];
     const { setMockDb } = await import('@/lib/db/db-instance');
-    setMockDb(withSlowGateInserts(db, insertDelayMs));
+    setMockDb(withSlowGateInserts(db, 'slow', INSERT_DELAY_MS, inserts));
 
     const runId = await runToCompletion('wt-slow-write', repo);
 
     const slow = gatesById(runId).get('slow')!;
     expect(slow.status).toBe('passed');
-    // The row was opened well before the command started. A window taken from
-    // the two write times would be at least `insertDelayMs` too wide; the one
-    // stored is the interval the runner measured, so it is neither.
+
+    // Everything below is relative to this write, so prove it happened and
+    // cost what it was asked to. A mock that silently stopped matching would
+    // otherwise leave the assertions passing against a free write.
+    const insert = inserts.find((observed) => observed.gateId === 'slow');
+    expect(insert, "the slow gate's row INSERT was never intercepted").toBeDefined();
+    expect(insert!.returnedAt - insert!.enteredAt).toBeGreaterThanOrEqual(INSERT_DELAY_MS);
+
+    // The row was opened well before the command started, and the stored window
+    // is the interval the runner measured rather than either write time.
     expect(slow.finishedAt!.getTime() - slow.startedAt.getTime()).toBe(slow.durationMs);
-    expect(slow.durationMs).toBeLessThan(GATE_SLEEP_MS + insertDelayMs);
+
+    // The load-bearing check, and the only one here that needs no timing budget
+    // at all: the write owns [enteredAt, returnedAt] on the wall clock, and the
+    // reported window has to start strictly after it. A runner that stamped the
+    // row's own write time — #1625's defect, in either the started_at or the
+    // duration_ms half — starts inside that interval and fails, and it fails on
+    // a 1ms leak, not only on one bigger than the machine's scheduling jitter.
+    expect(slow.startedAt.getTime()).toBeGreaterThanOrEqual(insert!.returnedAt);
+
+    // Kept as the second half of the same statement: the leak the check above
+    // catches at the window's start, this one catches in its length, for a
+    // runner that measured from before the write while stamping started_at
+    // after it. The bound is the injected cost by construction, so it detects
+    // that leak in full no matter how INSERT_DELAY_MS is sized — see the
+    // constant for why it is sized the way it is.
+    expect(slow.durationMs).toBeLessThan(GATE_SLEEP_MS + INSERT_DELAY_MS);
     expect(slow.timingsMeasured).toBe(true);
   });
 
@@ -281,7 +378,7 @@ version: 1
 gates:
   - id: hangs
     command: "sh -c 'sleep 30'"
-    timeoutSec: 1
+    timeoutSec: ${GATE_TIMEOUT_MS / 1000}
 options:
   baseRef: main
 `);
@@ -295,7 +392,10 @@ options:
     // A timeout is the case where "how long did it take" matters most, and it
     // is the one a zero-length window destroyed most completely.
     expect(hangs.finishedAt!.getTime() - hangs.startedAt.getTime()).toBe(hangs.durationMs);
-    expect(hangs.durationMs).toBeGreaterThanOrEqual(900);
+    // A lower bound, so scheduling jitter can only make it hold harder: the
+    // kill timer cannot fire early, and a loaded machine reaps the child later,
+    // never sooner. The 100ms of slack is for timer resolution alone (#1849).
+    expect(hangs.durationMs).toBeGreaterThanOrEqual(GATE_TIMEOUT_MS - 100);
   });
 });
 
