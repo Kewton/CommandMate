@@ -25,29 +25,14 @@
 
 import { NextResponse } from 'next/server';
 import { getServerVersion } from '@/lib/version-checker';
+import {
+  SERVER_CAPABILITIES,
+  type CapabilitiesResponse,
+} from '@/config/server-capabilities';
 
 // The version is read from the runtime package.json, so prerendering it at
 // build time would freeze the answer of a server that later gets upgraded.
 export const dynamic = 'force-dynamic';
-
-/**
- * Capability tokens this build declares.
- *
- * A token is a promise about a wire contract, not about an implementation, and
- * it is never removed once shipped — a client that keys off it must keep
- * working against every later server. Add one when a client needs to know
- * whether an endpoint exists before calling it.
- */
-export const SERVER_CAPABILITIES = [
-  /** GET /api/worktrees/:id/resolve-target answers with {cliToolId, instanceId, resolvedBy}. */
-  'resolve-session-target',
-] as const;
-
-/** Exact response shape. Pinned key-for-key by tests/unit/api/capabilities.test.ts. */
-export interface CapabilitiesResponse {
-  serverVersion: string;
-  capabilities: string[];
-}
 
 export async function GET(): Promise<NextResponse> {
   const body: CapabilitiesResponse = {
