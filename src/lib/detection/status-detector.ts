@@ -24,7 +24,7 @@
  * coupling via a minimal DTO/projection type.
  */
 
-import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_IDLE_COMPOSER_PATTERN, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN, CODEX_APPROVAL_FOOTER_PATTERN, CODEX_PAGER_FOOTER_PATTERN, CODEX_STATUS_BAR_PATTERN, getCodexLifecycleDialog, CLAUDE_INTERRUPT_HINT_PATTERN, ANTIGRAVITY_SELECTION_LIST_PATTERN } from './cli-patterns';
+import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_IDLE_COMPOSER_PATTERN, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, readCopilotStatusBar, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN, CODEX_APPROVAL_FOOTER_PATTERN, CODEX_PAGER_FOOTER_PATTERN, CODEX_STATUS_BAR_PATTERN, getCodexLifecycleDialog, CLAUDE_INTERRUPT_HINT_PATTERN, ANTIGRAVITY_SELECTION_LIST_PATTERN } from './cli-patterns';
 import { detectPrompt } from './prompt-detector';
 import { normalizeTuiFrameForDetection } from './tui-detection-frame';
 import type { PromptDetectionResult } from './prompt-detector';
@@ -288,6 +288,13 @@ export function detectSessionStatus(
   // DR-003: Separate thinking detection window (5 lines) from prompt detection window (15 lines)
   const thinkingLines = contentLines.slice(-THINKING_TAIL_LINE_COUNT).join('\n');
 
+  // Issue #1885: copilot's turn state lives in the bottom row of the pane, not
+  // in any tail window -- read once here and consumed by steps 0.5 and 2.9.
+  // `null` for every other tool, and for a copilot frame whose bottom row is
+  // something else (a dialog box, a shell prompt), which is what keeps those
+  // frames on their existing branches.
+  const copilotStatusBar = cliToolId === 'copilot' ? readCopilotStatusBar(contentLines) : null;
+
   // 0. Copilot: selection list detection BEFORE thinking detection
   // COPILOT_THINKING_PATTERN includes "Reasoning\s+[■▪▮]" which matches the
   // "Reasoning ■■■ medium" UI element shown in /model selection lists.
@@ -324,18 +331,34 @@ export function detectSessionStatus(
     };
   }
 
-  // 0.5. Copilot: thinking detection BEFORE prompt detection (Issue #547)
-  // Copilot CLI keeps the "❯" prompt visible even during processing,
-  // so prompt detection would always match first. Check thinking first for copilot.
-  // Uses last 15 lines (not 5) because copilot shows action log lines above prompt.
-  const copilotThinkingWindow = contentLines.slice(-STATUS_CHECK_LINE_COUNT).join('\n');
-  if (cliToolId === 'copilot' && detectThinking(cliToolId, copilotThinkingWindow)) {
+  // 0.5. Copilot: the bottom status bar carries the running half of the turn
+  // (Issue #547 put a thinking check here; Issue #1885 replaced what it reads).
+  //
+  // Copilot keeps the "❯" composer drawn between its two full-width rules even
+  // while it generates, so prompt detection matches every frame and the running
+  // state has to be resolved before it -- that part is unchanged since #547.
+  // What changed is the evidence. `COPILOT_THINKING_PATTERN` was written for
+  // copilot's pre-1.0.79 vocabulary and matches NOTHING that 1.0.80 draws
+  // (measured: 0 of 44 live generating frames), which is how every frame of a
+  // generating session reached step 3 and was published as `ready`/`input_prompt`
+  // -- the sidebar showed no glow and `wait` reported the running agent as
+  // Completed on its first poll.
+  //
+  // 1.0.80 puts the state in the bottom row of the pane: " ◉ Working · 1.5 KiB
+  // esc interrupt" while the turn runs, key hints when it does not. Reading that
+  // ROW rather than a 15-line window is what makes this safe to keep ahead of
+  // `detectPrompt`: a dialog takes the row away entirely (its box occupies the
+  // bottom of the pane), so a frame with a permission prompt on it cannot reach
+  // this branch and still lands on `waiting` at step 1. The window form would
+  // also have matched copilot's own response text -- see
+  // `status-vocabulary-in-response.txt`.
+  if (cliToolId === 'copilot' && copilotStatusBar === 'working') {
     const promptOptions = buildDetectPromptOptions(cliToolId);
     const promptDetection = detectPrompt(stripBoxDrawing(cleanOutput), promptOptions);
     return {
       status: 'running',
       confidence: 'high',
-      reason: 'thinking_indicator',
+      reason: STATUS_REASON.THINKING_INDICATOR,
       hasActivePrompt: false,
       promptDetection,
     };
@@ -823,6 +846,35 @@ export function detectSessionStatus(
     }
   }
 
+  // 2.9. Copilot: the idle status bar is the completion evidence (Issue #1885)
+  //
+  // The other rendering of the row step 0.5 read. Copilot has no completion
+  // marker of its own -- no `▣ Build · model · duration` -- and its composer is
+  // drawn throughout a turn, so this bar is the only thing on the screen that
+  // changes when the turn ends. Seeing the key hints is therefore an affirmative
+  // observation that copilot is not working, which is what design rule D1
+  // (`docs/design/multi-agent-state-architecture.md` §4 D1 decision 1, item 2)
+  // requires before `ready` may be published; the old route to `ready` here was
+  // step 3 matching an always-visible `❯`, which is the "absence of a busy
+  // marker" inference D1 forbids and Issue #1885 reported.
+  //
+  // Placed after prompt detection, unlike its running counterpart: a `waiting`
+  // verdict must never be overtaken by an idle bar, even though no measured
+  // 1.0.80 frame draws a dialog and the status bar at once.
+  //
+  // The wire value stays `ready`/`input_prompt` (DR3-002) -- this is the same
+  // verdict claude's `❯` row and codex's `›` row publish, so nothing downstream
+  // has to learn a new reason code.
+  if (cliToolId === 'copilot' && copilotStatusBar === 'idle') {
+    return {
+      status: 'ready',
+      confidence: 'high',
+      reason: STATUS_REASON.INPUT_PROMPT,
+      hasActivePrompt: false,
+      promptDetection,
+    };
+  }
+
   // 3. Input prompt detection
   // CLI tool is waiting for user input (shows >, ❯, ›, $, %, etc.)
   //
@@ -835,8 +887,19 @@ export function detectSessionStatus(
   // idle evidence is E's gutter-anchored composer row and its completion marker
   // (branch D); a frame carrying neither has no evidence, and falls through to
   // the heuristics below exactly as design rule D1 asks.
+  //
+  // Issue #1885: copilot opts out for the same reason. Its `❯` composer row is
+  // drawn during generation as well as after it, so this check answered `ready`
+  // for every frame of a running turn -- the reported bug. Leaving it in would
+  // also make branch 2.9 unobservable: every frame the status bar declined to
+  // vouch for would be re-admitted here with the same verdict, and the anchor
+  // would stop being load-bearing. A copilot frame whose bottom row is not a
+  // status bar (a `/model` picker, an unrecognised overlay) now carries no
+  // completion evidence and falls through to the heuristics below, where
+  // `isUnclassifiedActive` gives `wait` its exit-10 handoff instead of a false
+  // Completed.
   const { promptPattern } = getCliToolPatterns(cliToolId);
-  if (cliToolId !== 'opencode' && promptPattern.test(lastLines)) {
+  if (cliToolId !== 'opencode' && cliToolId !== 'copilot' && promptPattern.test(lastLines)) {
     return {
       status: 'ready',
       confidence: 'high',
