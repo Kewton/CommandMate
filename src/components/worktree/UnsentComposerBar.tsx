@@ -126,9 +126,9 @@ export function UnsentComposerBar({
       data-testid="unsent-composer-bar"
       role="region"
       aria-label={t('unsentComposer.regionLabel')}
-      className="flex flex-wrap items-center gap-2 px-2 py-1.5 bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800/50 rounded-lg"
+      className="flex flex-wrap items-center gap-2 px-2 py-1.5 bg-info-subtle border border-info-border rounded-lg"
     >
-      <span className="text-xs font-medium text-sky-800 dark:text-sky-200 shrink-0">
+      <span className="text-xs font-medium text-info-foreground shrink-0">
         {t('unsentComposer.label')}
       </span>
       <code
@@ -142,7 +142,7 @@ export function UnsentComposerBar({
           type="button"
           onClick={handleRun}
           aria-label={t('unsentComposer.run')}
-          className="min-h-[32px] px-3 rounded-md text-xs font-medium bg-sky-600 text-white hover:bg-sky-700 active:bg-sky-800 transition-colors"
+          className="min-h-[32px] px-3 rounded-md text-xs font-medium bg-info-foreground text-info-subtle hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
         >
           {t('unsentComposer.run')}
         </button>
@@ -151,7 +151,7 @@ export function UnsentComposerBar({
           onClick={handleClear}
           disabled={clearing}
           aria-label={t('unsentComposer.clear')}
-          className="min-h-[32px] px-3 rounded-md text-xs font-medium border border-sky-300 dark:border-sky-700 text-sky-800 dark:text-sky-200 hover:bg-sky-100 dark:hover:bg-sky-800/40 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="min-h-[32px] px-3 rounded-md text-xs font-medium bg-surface border border-info-border text-info-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
         >
           {t('unsentComposer.clear')}
         </button>
