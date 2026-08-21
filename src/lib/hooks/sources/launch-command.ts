@@ -42,6 +42,37 @@ import type { AgentLaunchPlan } from './types';
 export const AGENT_EVENT_URL_ENV_VAR = 'CM_HOOK_URL';
 
 /**
+ * The port CommandMate's own server is listening on, read by a hook when it
+ * fires rather than baked into the file it was configured from (Issue #1904,
+ * 設計方針書 §10.8).
+ *
+ * Only copilot needs it today, and only because its configuration is one file
+ * for the whole machine: a port fixed at write time makes every copilot session
+ * on the machine post to whichever server started last. It is deliberately
+ * *just the port*. Scheme, host and the relay script's path stay literals in
+ * the generated command, because those are what decide **where** a hook's
+ * bearer token goes and **which program runs**; moving them into the
+ * environment would delegate both to whoever can set a variable.
+ *
+ * Consumers must reject a value that is not a run of digits and not fire at
+ * all — never fall back to a default port. See §10.8 決定 1 and 3.
+ */
+export const HOOK_PORT_ENV_VAR = 'CM_HOOK_PORT';
+
+/**
+ * Every `CM_HOOK_*` variable CommandMate sets on a launch line.
+ *
+ * Enumerated so the launch-line pin (受入条件 S8) has one list to check rather
+ * than a grep, and so the sanitizer that strips CommandMate's own variables out
+ * of an agent's child environment has one to import. A name that is here and
+ * not on the launch line is a hook reading a value CommandMate never wrote.
+ */
+export const COMMANDMATE_HOOK_ENV_VARS: readonly string[] = [
+  AGENT_EVENT_URL_ENV_VAR,
+  HOOK_PORT_ENV_VAR,
+];
+
+/**
  * Turn a plan into the line a shell can run.
  *
  * Assignments come out in declaration order — `Record` preserves insertion
