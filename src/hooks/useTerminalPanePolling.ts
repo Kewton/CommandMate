@@ -34,6 +34,7 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { LivePromptData } from '@/types/models';
 import { useRealtime } from '@/hooks/useRealtimeConnection';
 import type { RealtimeEvent, TerminalSnapshotEvent, SessionStatusEvent } from '@/lib/realtime/types';
+import { extractComposerText } from '@/lib/detection/composer-text';
 
 export const ACTIVE_POLLING_INTERVAL_MS = 2000;
 export const IDLE_POLLING_INTERVAL_MS = 5000;
@@ -69,6 +70,22 @@ export interface PaneTerminalState {
    * prompt ('ready'), so the hatch never appears where 'q' would insert text.
    */
   isUnclassifiedActive: boolean;
+  /**
+   * Text sitting unsent in the CLI's composer, or `''` (Issue #1879).
+   *
+   * Derived on the client from the frame this pane already holds, by the same
+   * `extractComposerText` the server runs for `capture --json`. Deriving rather
+   * than reading a payload field is what keeps the two delivery paths equal:
+   * `terminal_snapshot` (the WebSocket push, which carries the frame and a fixed
+   * set of flags) and `/current-output` (the HTTP poll, throttled to 15s while
+   * push is healthy) would otherwise disagree for up to that whole window — the
+   * bar would linger after a Clear, or not appear until the fallback poll.
+   *
+   * Empty for every state other than real content — in particular for Claude's
+   * dim ghost suggestions, which is the whole reason the extraction reads the
+   * raw ANSI frame rather than the rendered text.
+   */
+  composerText: string;
   attaching: boolean;
   autoScroll: boolean;
 }
@@ -135,6 +152,7 @@ export function useTerminalPanePolling({
     isSelectionListActive: false,
     isPagerActive: false,
     isUnclassifiedActive: false,
+    composerText: '',
     attaching: true,
     autoScroll: true,
   }));
@@ -218,6 +236,16 @@ export function useTerminalPanePolling({
         && unclassifiedSinceRef.current !== null
         && Date.now() - unclassifiedSinceRef.current >= UNCLASSIFIED_CONFIRMATION_DELAY_MS;
 
+      // Issue #1879: read straight off the frame, with no reference to any of the
+      // flags above. The unsent-input bar this feeds is deliberately NOT gated on
+      // detection state — the guards on `isUnclassifiedActive` /
+      // `isSelectionListActive` exist to stop a STRAY Enter reaching a live input
+      // line, and here the user is looking at the exact text they are about to
+      // run. A dead session has no composer.
+      const composerText = data.isRunning
+        ? extractComposerText(nextOutput, inFlightCliToolRef.current).text
+        : '';
+
       setTerminal(prev => {
         // Overwrite output if we have content or the session is still running.
         // Issue #842: also overwrite (i.e. clear) once the session has stopped,
@@ -233,6 +261,7 @@ export function useTerminalPanePolling({
           isSelectionListActive: data.isSelectionListActive ?? false,
           isPagerActive: data.isPagerActive ?? false,
           isUnclassifiedActive: confirmedUnclassified,
+          composerText,
           attaching: false,
         };
       });
@@ -316,6 +345,7 @@ export function useTerminalPanePolling({
       isSelectionListActive: false,
       isPagerActive: false,
       isUnclassifiedActive: false,
+      composerText: '',
       attaching: true,
     }));
     setPrompt({ visible: false, data: null, messageId: null, answering: false });

@@ -1,0 +1,121 @@
+version: 1
+title: "Issue #1879: composer に事前入力された未送信テキストをワンクリックで実行・クリアできるようにする"
+goal: |
+  /pm-auto-issue2dev 1879
+
+  https://github.com/Kewton/CommandMate/issues/1879 を実装してください。
+  **Issue 本文は 2026-08-21 に更新済みです。必ず最新の本文を `gh issue view 1879` で取得してから着手してください。**
+  末尾の「【更新 2026-08-21】#1878 の実測結果を受けた設計変更」が今回の前提です。
+
+  ## この Issue の位置づけ（先行実測 #1878 の結果）
+
+  #1878 の実測で、`/send` が composer の残存文字列と**カーソル位置で連結して実行する**ことが確定しました。
+  その送信経路側の欠陥修正は **#1880** に分離済みで、**本 Issue のスコープではありません**。
+  本 Issue は UI 側だけを作ります。ただし位置づけが変わりました:
+
+  - #1880 が送信前の自動クリアを入れると、**人間が打ちかけた文章が無告知で消えます**
+  - 本 Issue の「composer の中身を見せる／ワンクリックで実行する」UI は、
+    **その内容がまだ生きているうちにユーザが救出する唯一の手段**（= 自動クリアの安全網）です
+
+  ## 実測で判明した新しい必須要件（本文の受入条件に追加済み）
+
+  Claude Code v2.1 は**空の** composer に、過去入力から推測した suggestion を **dim（`ESC[2m`）** で描画します。
+  `capture-pane -p`（ANSI 除去後）では実内容とまったく同じに見えます:
+
+      ❯ echo PREFILLED/clear        ← ANSI 除去後の見え方。実内容は空
+
+  ANSI 付きなら区別できます:
+
+      ^[[39m❯ ^[[2mecho PREFILLED/clear^[[0m    ← dim = ゴースト。cursor_x=2（先頭）= 実内容は空
+      ^[[39m❯ ^[[38;5;153m/cost^[[39m           ← dim でない = 実残存。cursor_x=7（末尾）
+
+  `C-u` を打ってもゴーストは消えません（実内容ではないため）。
+  これを `composerText` に載せると「クリアを押しても表示が消えない」「空なのに中身があるように見える」
+  というユーザから見た不具合になります。
+
+  **判別の足がかり（推奨。ただし実測で覆ってよい）**: `capturePane` は既に
+  `capture-pane -p -e`（src/lib/tmux/tmux.ts:523）で **ANSI 付きで採っている**ので、
+  dim 属性は raw capture に残っているはずです。`stripAnsi` する前に SGR を見れば
+  新しい tmux 呼び出しなしで判別できる見込みです。
+  `tmux display-message -p '#{cursor_x}'`（`cursor_x == 2` なら実内容は空）も判別に使えますが、
+  ポーリングごとに tmux 呼び出しが 1 本増えます。
+  **どちらを採るかは実測で決めてください。** 上記は調査の出発点であって決定事項ではありません。
+
+  ## 受入条件
+
+  Issue 本文の受入条件（更新後）をすべて満たすこと。特に落としやすいもの:
+
+  - capture payload に `composerText` が載り、**実内容 / dim ゴースト / codex placeholder / 空** の
+    4 状態を区別できる
+  - **ANSI 付きの生 capture を fixture にすること。** ANSI 除去済み fixture では
+    ゴーストテキスト要件を検証したことになりません（テストが空振りします）
+  - 非空のときだけバーが出る。**表示条件が状態検出フラグに依存していない**ことをテストで固定する
+  - [実行] は既存 `special-keys` の `['Enter']` を送る（**新しい API を作らないこと**）
+  - [クリア] が composer を空にする
+  - **既存ガードを弱めていないこと**を示す: `isUnclassifiedActive` / `isSelectionListActive` の
+    表示条件は不変で、「中身が空のときは Enter を送る導線が出ない」ことをテストで固定する
+  - PC・モバイル両方から到達できる
+  - CHANGELOG `[Unreleased]` に 1 行
+
+  ## 作業ルール（厳守）
+
+  ### tmux / 稼働環境の保護
+
+  このマシンではユーザーの本番 CommandMate サーバ（http://127.0.0.1:3000）と稼働中の
+  エージェントセッションが**同一の既定 tmux サーバ上で**動いています。1 本でも壊すと実害が出ます。
+
+  - **`tmux kill-server` を絶対に打たない。** 後始末は `tmux kill-session -t '=<完全一致名>:'` のみ
+  - **`tmux set-option -g` / `bind-key` / `unbind-key` を絶対に打たない。** サーバグローバルで全セッションに波及する
+  - **`send-keys` / `capture-pane` は必ず `-t '=<セッション名>:'` の完全一致指定**（先頭 `=` と末尾 `:`）。
+    前方一致は他人のセッションに着弾する
+  - **稼働セッションに一切触れない**（send-keys も kill も禁止）:
+    `mcbd-claude-mycodebranchdesk`（オーケストレーター）/ `mcbd-claude-commandagent-develop` /
+    `mcbd-codex-commandagent-develop` / `mcbd-claude-borderfreekidsmap-develop-2` /
+    `mcbd-claude-commandmate-issue-1879`（**あなた自身**）
+  - **実 TUI で挙動を確かめる必要がある場合は、使い捨て worktree を作って専用セッション名で行う**
+    （#1878 のやり方）。終わったら `kill-session` で片付ける
+  - `TMUX_TMPDIR` を隔離手段に使わない（`$TMUX` が設定されていると無視される）
+  - **稼働サーバ（port 3000）を停止・再起動しない。`MyCodeBranchDesk` チェックアウトで
+    `npm run build` を走らせない**（配信中の .next を壊す）
+
+  ### 実 TUI から fixture を採る場合
+
+  - **pane geometry は 200x1000 で採ること。** 既定サイズだと再現しない事象がある
+  - **ANSI を保持して採ること**（`capture-pane -p -e`）。除去すると本件の要件を検証できない
+
+  ### 進め方
+
+  - **GitHub Issue を編集しない**（オーケストレーターが管理します）
+  - **PR を作らない・push しない**（オーケストレーターが作ります）
+  - 作業は**このブランチ上の単一 commit** にまとめる
+  - `dev-reports/` は commit に含めない
+  - Issue 本文の記述と実コードが食い違ったら、**実コードを正**とし、食い違いを commit message か
+    最終出力に明記する（本文は完全ではありません）
+  - 新しく export したものは**呼び出し元まで配線する**。`composerText` を payload に足しただけで
+    UI に届いていない、という状態で完了としない。配線は grep で実際に確認する
+  - `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` を自分で通してから完了とする
+
+scope:
+  allow:
+    - "src/lib/detection/**"
+    - "src/lib/session/**"
+    - "src/lib/tmux/**"
+    - "src/lib/cli-tools/**"
+    - "src/cli/types/**"
+    - "src/app/api/worktrees/**"
+    - "src/hooks/**"
+    - "src/components/worktree/**"
+    - "src/components/mobile/**"
+    - "src/components/ui/**"
+    - "src/types/**"
+    - "src/config/**"
+    - "locales/**"
+    - "tests/unit/**"
+    - "tests/helpers/**"
+    - "CHANGELOG.md"
+    - "docs/module-reference.md"
+  deny: []
+
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

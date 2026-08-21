@@ -15,11 +15,18 @@
  * This renders the shared {@link TerminalEscapeHatch} navigation pad below the
  * terminal under the same gate the PC footer uses, giving mobile parity for
  * ←/→/↑/↓/Enter/Esc in detection-independent overlays.
+ *
+ * Issue #1879: the unsent-input bar ({@link UnsentComposerBar}) is rendered here
+ * for the same reason — the PC footer has it, and a phone is where a half-typed
+ * composer is most likely to be discovered. Its gate is the composer text, not a
+ * detection flag, so the two bars can be on screen at once and neither implies
+ * the other.
  */
 
 import { memo } from 'react';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
+import { UnsentComposerBar, hasUnsentComposerText } from '@/components/worktree/UnsentComposerBar';
 import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
@@ -53,6 +60,11 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   // session (e.g. the `/model` misdetection tracked in #1495).
   const showEscapeHatch = terminal.isUnclassifiedActive && !prompt.visible;
 
+  // Issue #1879: contents-only gate, identical to the PC one. Deliberately not
+  // combined with `showEscapeHatch` — an unclassified overlay and a composer
+  // holding unsent text are unrelated conditions.
+  const showUnsentComposerBar = hasUnsentComposerText(terminal.composerText);
+
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="flex-1 min-h-0">
@@ -67,6 +79,17 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
           className="h-full"
         />
       </div>
+      {showUnsentComposerBar ? (
+        <div className="shrink-0 px-2 pt-1">
+          <UnsentComposerBar
+            worktreeId={worktreeId}
+            cliToolId={cliToolId}
+            instanceId={instanceId}
+            composerText={terminal.composerText}
+            onActionSent={refresh}
+          />
+        </div>
+      ) : null}
       {showEscapeHatch ? (
         <div className="shrink-0 px-2 pt-1 pb-2">
           <TerminalEscapeHatch

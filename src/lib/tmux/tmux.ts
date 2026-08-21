@@ -740,6 +740,42 @@ export async function clearInputLine(sessionName: string): Promise<void> {
 }
 
 /**
+ * Send one `C-e` + `C-u` pass over the TUI input line (Issue #1879).
+ *
+ * `C-u` alone is kill-line-*before-cursor*, so it deletes nothing at all when the
+ * cursor sits at column 0 — the state a human leaves behind after pressing Home
+ * and walking away, measured live in #1878 §5-1. Moving to end-of-line first is
+ * what makes the kill unconditional. Both keys go in one `send-keys` so they
+ * cannot be interleaved with anything else the session receives.
+ *
+ * One pass clears one row. A multi-row composer needs several (also measured in
+ * #1878 §5-1: up to `2N-1` for N rows), which is why callers drive this from
+ * {@link module:lib/session/composer-clear}'s read-back loop rather than firing
+ * it once and declaring victory.
+ *
+ * Like {@link clearInputLine}, the keys are fixed literals passed through
+ * execFile (no shell, no injection) and are deliberately NOT added to
+ * `ALLOWED_SPECIAL_KEYS` / `NAVIGATION_KEY_VALUES`: the special-keys API stays a
+ * navigation surface, and clearing the composer is its own endpoint with its own
+ * verification.
+ *
+ * @param sessionName - Target session name
+ * @throws {Error} If the tmux command fails
+ */
+export async function clearComposerLine(sessionName: string): Promise<void> {
+  try {
+    await execFileAsync(
+      'tmux',
+      ['send-keys', '-t', exactTarget(sessionName), 'C-e', 'C-u'],
+      { timeout: DEFAULT_TIMEOUT },
+    );
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to clear tmux composer line: ${errorMessage}`);
+  }
+}
+
+/**
  * Allowed navigation key names for special-keys API validation.
  * Used for TUI navigation sequences (e.g., Up/Down cursor, Enter/Escape selection).
  *

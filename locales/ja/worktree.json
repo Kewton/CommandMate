@@ -333,6 +333,12 @@
     "endSession": "セッションを終了",
     "endSessionFor": "{name}のセッションを終了"
   },
+  "unsentComposer": {
+    "regionLabel": "未送信の入力",
+    "label": "未送信の入力:",
+    "run": "実行",
+    "clear": "クリア"
+  },
   "todo": {
     "addPlaceholder": "ToDoを追加…",
     "add": "追加",

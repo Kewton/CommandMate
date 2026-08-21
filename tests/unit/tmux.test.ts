@@ -14,6 +14,7 @@ import {
   sendSpecialKey,
   sendSpecialKeys,
   clearInputLine,
+  clearComposerLine,
   capturePane,
   killSession,
   renameSession,
@@ -865,6 +866,57 @@ describe('tmux library', () => {
 
       await expect(clearInputLine('test-session')).rejects.toThrow(
         'Failed to clear tmux input line'
+      );
+    });
+  });
+
+  describe('clearComposerLine (Issue #1879)', () => {
+    it('moves to end-of-line before killing, in one send-keys', async () => {
+      // `C-u` is kill-line-BEFORE-cursor: with the cursor at column 0 it deletes
+      // nothing at all (#1878 §5-1 measured exactly that on a composer whose
+      // owner pressed Home and walked away). `C-e` first is what makes the kill
+      // unconditional, and both keys ride one invocation so nothing the session
+      // receives can land between them.
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const callback = args[args.length - 1] as (err: Error | null, result: { stdout: string; stderr: string }) => void;
+        callback(null, { stdout: '', stderr: '' });
+        return {} as ReturnType<typeof execFile>;
+      });
+
+      await clearComposerLine('test-session');
+
+      expect(execFile).toHaveBeenCalledTimes(1);
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['send-keys', '-t', '=test-session:', 'C-e', 'C-u'],
+        { timeout: 5000 },
+        expect.any(Function)
+      );
+    });
+
+    it('targets the session by exact match', async () => {
+      // Prefix matching would land the keys in somebody else's session.
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const callback = args[args.length - 1] as (err: Error | null, result: { stdout: string; stderr: string }) => void;
+        callback(null, { stdout: '', stderr: '' });
+        return {} as ReturnType<typeof execFile>;
+      });
+
+      await clearComposerLine('mcbd-claude-wt');
+
+      const target = vi.mocked(execFile).mock.calls[0][1] as string[];
+      expect(target[2]).toBe('=mcbd-claude-wt:');
+    });
+
+    it('throws on failure', async () => {
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const callback = args[args.length - 1] as (err: Error | null, result: { stdout: string; stderr: string }) => void;
+        callback(new Error('session not found'), { stdout: '', stderr: '' });
+        return {} as ReturnType<typeof execFile>;
+      });
+
+      await expect(clearComposerLine('test-session')).rejects.toThrow(
+        'Failed to clear tmux composer line'
       );
     });
   });

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **feat(ui): composer に残った未送信テキストを表示し、ワンクリックで実行・クリアできるようにする** (#1879): Claude が推奨コマンドを composer に事前入力した状態（あるいは人間が打ちかけて離席した状態）は、read-only ターミナル越しでは目で読んで打ち直すしかなかった。Enter を送れる既存 UI（`NavigationButtons` / `TerminalEscapeHatch`）は「迷子の Enter が composer に届かないように」検出フラグでゲートされており、通常の入力プロンプトでは意図的に出ないためである。capture payload に `composerText` / `composerState` を追加し、**中身が非空のときだけ**「未送信の入力」バーを PC・モバイル両方に出す。[実行] は**既存の** `special-keys` に `['Enter']` を送る（新 API なし）。[クリア] は新設の `POST /api/worktrees/[id]/clear-composer` で、#1878 §5-1 の実測（行頭カーソルでは `C-u` が何も消さない／複数行は 1 回では消えない）を踏まえ `C-e`+`C-u` を**読み戻し検証つきでループ**する。表示条件は `isUnclassifiedActive` / `isSelectionListActive` に一切依存せず、既存ゲートも不変（「中身が空なら Enter を送る導線は出ない」ことをテストで固定）。抽出は `stripAnsi` **前**の生 capture の SGR を見るため、Claude Code v2.1 が空の composer に dim（`ESC[2m`）で描くゴースト／プレースホルダを実内容と取り違えない（ANSI 除去後は実残存と 1 バイトも変わらないため、fixture も ANSI 付きの実 capture）。claude 限定。
+
 ## [0.26.1] - 2026-08-21
 
 > **Highlight**: 高負荷環境でのみ落ちるテストを 3 件、**実測で機構を特定してから設計ごと**直したリリース。いずれも「上限を緩める」「閾値を上げる」ではなく検出力を保つ形に作り替え、**変異注入で検出力が落ちていないことを証明**している（#1849 は計測窓を絶対時間から関係へ、#1869 は競合の staging を 1→8 writer にしたうえでスケジューリングに依存しない決定的経路を追加、#1873 は共通 setup で採番の漏れを封じた）。3 件とも Issue 本文に書かれた原因仮説が実測で覆されており、とくに #1869 は「writer が飢餓する」ではなく「**高負荷が奪うのは CPU ではなく連続性**」だった（赤いラウンドでも writer は 101ms の walk 中に 462 回書き込めていた）。あわせて Epic #1848 で唯一未達だった「並列 worktree の e2e ポート衝突が env 注入で消える」ことを実機で記録し（導出ポート 3219/3220 で両方 PASS、対照の固定 3177 は衝突して FAIL）、v0.26.0 で出荷済みだった #1771 の配線を `playwright.config.ts` に入れた。**製品コード（`src/`）の変更は 1 バイトも無い。**
