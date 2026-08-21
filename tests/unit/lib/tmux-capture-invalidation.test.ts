@@ -21,6 +21,10 @@ vi.mock('@/lib/tmux/tmux', () => ({
   sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKey: vi.fn().mockResolvedValue(undefined),
   capturePane: vi.fn().mockResolvedValue('\u276F \n\u203A '),
+  // Issue #1880: the send path now empties the composer first, and the loop
+  // that does it resolves this primitive up front. The frame above carries no
+  // input box, so no pass is ever sent — but the mock still has to expose it.
+  clearComposerLine: vi.fn().mockResolvedValue(undefined),
   killSession: vi.fn().mockResolvedValue(true),
   listSessions: vi.fn().mockResolvedValue([]),
 }));

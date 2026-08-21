@@ -64,6 +64,17 @@ export interface ClearComposerResult {
   state: ComposerTextState;
   /** Text still sitting in the composer when `cleared` is false; `''` otherwise. */
   remainingText: string;
+  /**
+   * What the composer held on the FIRST read — the text this call is about to
+   * destroy — or `''` when it started out empty.
+   *
+   * {@link remainingText} cannot serve as that audit record (Issue #1880): it
+   * reports the FINAL read, so a *successful* clear always returns `''` and what
+   * was thrown away is gone. Callers that empty the composer on the user's
+   * behalf rather than at the user's request — the pre-send clear in
+   * `cli-tools/submit-verified-sender.ts` — have to be able to log it.
+   */
+  discardedText: string;
 }
 
 export interface ClearComposerOptions {
@@ -102,6 +113,10 @@ export async function clearComposer(
   let passes = 0;
   let result = extractComposerText(await capture(sessionName), cliToolId);
 
+  // Snapshot before the first pass: every later read shows less of it (a pass
+  // eats one row), so this is the only moment the full text exists.
+  const discardedText = result.state === 'content' ? result.text : '';
+
   while (result.state === 'content' && passes < maxPasses) {
     await sendClear(sessionName);
     passes++;
@@ -124,5 +139,5 @@ export async function clearComposer(
     logger.warn('composer-clear:not-cleared', { sessionName, cliToolId, passes, state: result.state });
   }
 
-  return { cleared, passes, state: result.state, remainingText: result.text };
+  return { cleared, passes, state: result.state, remainingText: result.text, discardedText };
 }

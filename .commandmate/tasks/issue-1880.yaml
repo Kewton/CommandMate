@@ -1,0 +1,149 @@
+version: 1
+title: "Issue #1880: /send が composer の残存文字列と連結する欠陥の修正"
+goal: |
+  /bug-fix 1880
+
+  https://github.com/Kewton/CommandMate/issues/1880 を修正してください。
+  **Issue 本文は 2026-08-21 に更新済みです。必ず `gh issue view 1880` で最新を取得してから着手してください。**
+  末尾の「【重要・更新 2026-08-21】#1879 着地により前提が変わった」が今回の前提です。
+
+  ## 事象（#1878 で実測済み。再調査は不要）
+
+  `/send` は送信前に composer をクリアせず、本文を **TUI の現在のカーソル位置に素のキーストロークで挿入**する。
+  残存文字列があると連結され、しかも全ケースで `exit 0` / `Message sent.` / `sessionStatus: ready` と成功報告する。
+  最悪ケースは残存が `/` 始まりのときで、連結結果が `Unknown command` になり
+  **本文がモデルに一度も届かないまま成功と報告される**（正常ケースと exit code からも status からも区別できない）。
+
+  ## 【最重要】まず既存実装を読むこと。ループを新規に作らない
+
+  #1879（PR #1881）が develop に着地済みで、**本 Issue が必要とする読み戻し検証つきクリアループは既に存在します**。
+
+  - `src/lib/session/composer-clear.ts` の `clearComposer(sessionName, cliToolId, options)`
+    → `{ cleared, passes, state, remainingText }`
+    - `C-e`+`C-u` を `state !== 'content'` になるまでループ（上限 `MAX_COMPOSER_CLEAR_PASSES = 12`）
+    - 各パス後に `capturePane` で読み戻して検証（5 秒 TTL キャッシュを意図的にバイパス）
+    - dim ゴーストで無限ループしない
+    - 破棄文字列を `remainingText` で返す／終了時に `invalidateCache()`
+  - `src/lib/tmux/tmux.ts` の `clearComposerLine()`（`C-e` → `C-u`）
+  - `src/lib/detection/composer-text.ts` の `extractComposerText()`
+
+  **これらを読んでから、本当に不足している差分だけを実装してください。**
+  Issue 起票時点の本文にある「ループを作るべき」という記述は失効しています。
+
+  ### 挿入位置（実コードで確認済み）
+
+  `src/lib/cli-tools/submit-verified-sender.ts` の `sendMessageWithSubmitVerification`:
+
+      // 1. Type the body only — never send Enter in the same tmux command.
+      await sendKeys(sessionName, message, false);   // ← この直前
+
+  **import 循環に注意**: `src/lib/session/**` の多くが `@/lib/cli-tools` を import しています。
+  ただし `composer-clear.ts` 自身は `cli-tools` を import していない（`lib/tmux` / `lib/detection` /
+  `lib/logger` のみ）ので、このファイルに限れば循環しません。**tsc とランタイム双方で確認してください。**
+  `src/lib/session-key-sender.ts` 側に置く案も検討可（採る場合は根拠を書くこと）。
+
+  ## 【最重要】claude 以外の CLI ツールを壊さないこと
+
+  `extractComposerText` は claude 以外を**無条件で短絡**します:
+
+      if (cliToolId !== 'claude') return { text: '', state: 'unsupported_tool' };
+
+  `clearComposer` の `cleared` は `state === 'empty' || state === 'ghost'` なので、
+  **codex / gemini / copilot / opencode / vibe-local では常に `cleared: false` が返ります。**
+
+  したがって「空にできなければエラーにする」を素直に `if (!cleared) throw` と書くと、
+  **claude 以外の全 CLI ツールの送信が全滅します。**
+  このマシンでは現に codex / opencode のセッションが稼働しており、この退行は
+  「テストは緑・claude では動く・他ツールだけ静かに送れなくなる」という形で出ます。
+
+  必須の切り分け:
+
+  - `unsupported_tool` は「クリア失敗」ではなく**「この層では読めない」**。
+    claude 以外は**従来どおりの挙動を維持**する（クリアもせず、失敗扱いにもしない）
+  - `no_composer`（入力欄が画面に無い）も**失敗と断定しない**。オーバーレイ表示中などが該当し、
+    ここで送信を止めると別の停止要因になる
+  - 失敗扱いにしてよいのは **claude で `state === 'content'` のまま上限に達した場合のみ**
+
+  ## 受入条件
+
+  - [ ] 残存がある状態で送信しても、本文が**そのまま**投入される（連結しない）
+  - [ ] #1878 のケース1〜4（末尾カーソル / `/`始まり本文 / `/`始まり残存 / **行頭カーソル**）が再現しない
+  - [ ] **複数行残存**でも連結しない
+  - [ ] 上限内に空にできなかった場合、**成功と報告せずエラーとして表面化する**
+        （本 Issue の主因は「壊れているのに成功報告する」ことなので、黙って握りつぶす実装は不可）
+  - [ ] 破棄した内容が**ログまたはレスポンスに残る**（`remainingText` を使う）
+  - [ ] **claude 以外（最低でも codex）について、本変更の前後で送信経路の挙動が変わらないことをテストで固定する**
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` 全緑
+  - [ ] CHANGELOG `[Unreleased]` に 1 行
+
+  ## スコープ外
+
+  - `classifySubmit` に「送った本文が出たか」の検証レイヤを足すこと（別 Issue。case F の permissive 既定は温存が必要）
+  - `CLAUDE_PROMPT_PATTERN` が「プロンプトが空か」を見ていない件（自動クリア後は連結要因としては解消）
+
+  ## 実測での確認（必須。ユニットテストのモックだけでは不足）
+
+  #1878 / #1879 と同じ手順で**使い捨て worktree ＋ 専用セッション**を作り、実 TUI で確認すること:
+
+  1. 残存あり（カーソル末尾）→ 本文だけが投入される
+  2. 残存あり（**カーソル行頭**）→ 本文だけが投入される
+  3. **複数行**残存 → 本文だけが投入される
+  4. 残存が `/` 始まり → 本文が消失しない
+  5. **codex セッションで送信 → 従来どおり送れる**（退行が無いことの確認）
+
+  実測結果は `dev-reports/issue/1880/verification.md` に記録してください（commit には含めない）。
+
+  ## 作業ルール（厳守）
+
+  ### tmux / 稼働環境の保護
+
+  ユーザーの本番 CommandMate サーバ（http://127.0.0.1:3000）と稼働中セッションが
+  **同一の既定 tmux サーバ上**で動いています。1 本でも壊すと実害が出ます。
+
+  - **`tmux kill-server` を絶対に打たない。** 後始末は `tmux kill-session -t '=<完全一致名>:'` のみ
+  - **`tmux set-option -g` / `bind-key` / `unbind-key` を絶対に打たない**（サーバグローバル）
+  - **`send-keys` / `capture-pane` は必ず `-t '=<セッション名>:'` の完全一致指定**（先頭 `=` と末尾 `:`）
+  - **以下の稼働セッションに一切触れない**:
+    `mcbd-claude-mycodebranchdesk` / `mcbd-claude-commandagent-develop` /
+    `mcbd-codex-commandagent-develop` / `mcbd-claude-borderfreekidsmap-develop-2` /
+    `mcbd-claude-commandmate-issue-1878` / `mcbd-claude-commandmate-issue-1879` /
+    `mcbd-codex-commandagent-issue-285-python-cli-205-plan-run-static-cli-probe-not-run` /
+    `mcbd-opencode-commandmate-marketing` /
+    `mcbd-claude-commandmate-issue-1882`（**並走中の別ワーカー**） /
+    `mcbd-claude-commandmate-issue-1880`（**あなた自身**）
+  - `TMUX_TMPDIR` を隔離手段に使わない（`$TMUX` があると無視される）。隔離は「使い捨て worktree ＝ 専用セッション名」で行う
+  - **稼働サーバ（port 3000）を停止・再起動しない。`MyCodeBranchDesk` で `npm run build` を走らせない**
+
+  ### 並走ワーカーがいる
+
+  #1882 が別 worktree で**同時に走っています**。`CHANGELOG.md` は双方が触るため衝突しますが、
+  **あなたは自分のぶんだけ書けばよい**（マージ順序はオーケストレーターが調整します）。
+  相手の worktree・ブランチ・セッションには触れないでください。
+
+  ### 進め方
+
+  - **GitHub Issue / PR を編集しない**（オーケストレーターが管理します）
+  - **PR を作らない・push しない**（オーケストレーターが行います）
+  - 作業は**このブランチ上の単一 commit** にまとめる。`dev-reports/` は commit に含めない
+  - **Issue 本文と実コードが食い違ったら実コードを正**とし、食い違いを commit message か最終出力に明記する
+    （この Issue はオーケストレーターが書いたもので、完全ではありません）
+  - `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` を自分で通してから完了とする
+
+scope:
+  allow:
+    - "src/lib/cli-tools/**"
+    - "src/lib/session/**"
+    - "src/lib/session-key-sender.ts"
+    - "src/lib/tmux/**"
+    - "src/lib/detection/**"
+    - "src/app/api/worktrees/**"
+    - "src/config/**"
+    - "tests/unit/**"
+    - "tests/helpers/**"
+    - "CHANGELOG.md"
+    - "docs/module-reference.md"
+  deny: []
+
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **fix(send): `/send` が composer の残存文字列と本文を連結する（本文が黙って改変・消失し、成功と報告される）** (#1880): `sendMessageWithSubmitVerification` は本文を **TUI の現在のカーソル位置に素のキーストロークで挿入**しており、composer に残存があると連結された 1 本のプロンプトが実行されていた。#1878 の実測で被害は 4 形（内容改変／スラッシュコマンド降格／カーソル行頭による順序反転／**残存が `/` 始まりのとき `Unknown command` で本文が完全消失**）、いずれも `exit 0` / `Message sent.` / `sessionStatus: ready` を返すため呼び出し側（CLI・`wait`・orchestrate ワーカー）から正常送信と**区別できなかった**。本文打鍵の直前に #1879 の `clearComposer()`（`C-e`+`C-u` を読み戻し検証つきでループ）を挟み、上限内に空にできなければ**打鍵せずに throw** する（黙って握り潰さない）。破棄した内容は `clearComposer()` に追加した `discardedText`（最初の読み戻し値。`remainingText` は最終読み戻しなのでクリア成功時は常に空で監査に使えない）としてログに残す。**claude 以外は従来どおり**：`extractComposerText` が claude 以外を `unsupported_tool` に短絡する＝`cleared` が常に false になるため、素直に「クリアできなければ失敗」とすると codex/gemini/copilot/opencode/vibe-local/antigravity が全滅する。ツール判定でクリア経路に**入る前に** return し、読み戻し capture もキー送出も発生させない（実測 codex 321ms は残存なし claude 330ms と同等）。`no_composer`（オーバーレイ表示中などで入力欄が画面に無い）も失敗と断定しない。実機（Claude Code v2.1.238 / Codex v0.148.0、200x1000 ペイン）で #1878 のケース1〜4・複数行残存・dim ゴースト・codex 退行なしを確認済み。
+
 ### Added
 
 - **feat(ui): composer に残った未送信テキストを表示し、ワンクリックで実行・クリアできるようにする** (#1879): Claude が推奨コマンドを composer に事前入力した状態（あるいは人間が打ちかけて離席した状態）は、read-only ターミナル越しでは目で読んで打ち直すしかなかった。Enter を送れる既存 UI（`NavigationButtons` / `TerminalEscapeHatch`）は「迷子の Enter が composer に届かないように」検出フラグでゲートされており、通常の入力プロンプトでは意図的に出ないためである。capture payload に `composerText` / `composerState` を追加し、**中身が非空のときだけ**「未送信の入力」バーを PC・モバイル両方に出す。[実行] は**既存の** `special-keys` に `['Enter']` を送る（新 API なし）。[クリア] は新設の `POST /api/worktrees/[id]/clear-composer` で、#1878 §5-1 の実測（行頭カーソルでは `C-u` が何も消さない／複数行は 1 回では消えない）を踏まえ `C-e`+`C-u` を**読み戻し検証つきでループ**する。表示条件は `isUnclassifiedActive` / `isSelectionListActive` に一切依存せず、既存ゲートも不変（「中身が空なら Enter を送る導線は出ない」ことをテストで固定）。抽出は `stripAnsi` **前**の生 capture の SGR を見るため、Claude Code v2.1 が空の composer に dim（`ESC[2m`）で描くゴースト／プレースホルダを実内容と取り違えない（ANSI 除去後は実残存と 1 バイトも変わらないため、fixture も ANSI 付きの実 capture）。claude 限定。
