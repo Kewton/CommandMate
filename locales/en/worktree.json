@@ -110,26 +110,55 @@
       "statusline": "Configure the status line display",
       "usage": "Show session cost, plan usage limits, and activity stats",
       "tasks": "View and manage background tasks",
-      "memory": "Edit CLAUDE.md memory files and manage auto-memory",
+      "memory": {
+        "claude": "Edit CLAUDE.md memory files and manage auto-memory",
+        "copilot": "Show memory status, or enable and disable memory across sessions"
+      },
       "new": "Start a new conversation",
-      "logout": "Sign out from Codex",
+      "logout": {
+        "codex": "Sign out from Codex",
+        "claude": "Sign out of your Anthropic account",
+        "copilot": "Log out of the current OAuth session"
+      },
       "quit": "Exit Codex CLI",
       "diff": "Show Git diff (including untracked files)",
       "mention": "Attach file/folder for next interaction",
       "mcp": "Manage MCP servers and available tools",
-      "init": "Generate AGENTS.md template in current directory",
-      "feedback": "Send feedback to Codex team",
+      "init": {
+        "codex": "Generate AGENTS.md template in current directory",
+        "claude": "Generate a CLAUDE.md guide for the repository",
+        "copilot": "Initialize Copilot instructions for this repository",
+        "opencode": "Run guided AGENTS.md setup"
+      },
+      "feedback": {
+        "codex": "Send feedback to Codex team",
+        "claude": "Send feedback about Claude Code",
+        "copilot": "Provide feedback about the CLI"
+      },
       "plan": "Toggle plan mode",
       "goal": "Set goal for current session",
-      "agent": "Switch active agent (Codex)",
+      "agent": {
+        "codex": "Switch active agent (Codex)",
+        "copilot": "Browse and select an agent"
+      },
       "subagents": "Manage subagents",
       "fork": "Fork current session",
       "memories": "Manage Codex memories",
-      "skills": "Manage Codex skills",
+      "skills": {
+        "codex": "Manage Codex skills",
+        "claude": "Manage Claude Code skills",
+        "copilot": "Manage skills for enhanced capabilities",
+        "opencode": "Browse and run available skills"
+      },
       "hooks": "View or manage hook configurations",
       "sessions": "Browse conversation history",
-      "connect": "Connect to language server",
-      "exit": "Exit OpenCode TUI",
+      "connect": "Connect a provider",
+      "exit": {
+        "opencode": "Exit OpenCode TUI",
+        "claude": "Exit the CLI",
+        "codex": "Exit the CLI",
+        "copilot": "Exit the CLI"
+      },
       "models": "Switch AI model",
       "agents": {
         "opencode": "List and manage available agents",
@@ -152,7 +181,10 @@
       "color": "Set the prompt bar color for the current session",
       "copy": "Copy the last response to the clipboard as markdown",
       "dataviz": "Design guidance for charts, graphs, and dashboards",
-      "debug": "Enable debug logging for the current session and troubleshoot issues by reading the session debug log",
+      "debug": {
+        "claude": "Enable debug logging for the current session and troubleshoot issues by reading the session debug log",
+        "opencode": "View debug information"
+      },
       "deep-research": "Fan out web searches on a question, fetch and cross-check sources, and synthesize a cited report",
       "design-login": "Authorize design-system access for /design-sync with your claude.ai account",
       "design-sync": "Convert your repo's React design system and upload it to Claude Design, so designs it produces use your real components",
@@ -164,10 +196,16 @@
       "install-github-app": "Install the Claude GitHub App for a repository, with an optional step to set up GitHub Actions workflows and secrets",
       "install-slack-app": "Install the Claude Slack app",
       "keybindings": "Open your keyboard shortcuts file",
-      "login": "Sign in to your Anthropic account",
+      "login": {
+        "claude": "Sign in to your Anthropic account",
+        "copilot": "Log in to Copilot"
+      },
       "mobile": "Show QR code to download the Claude mobile app",
       "passes": "Share a free week of Claude Code with friends",
-      "plugin": "Manage Claude Code plugins",
+      "plugin": {
+        "claude": "Manage Claude Code plugins",
+        "copilot": "Manage plugins and plugin marketplaces"
+      },
       "powerup": "Discover Claude Code features through quick interactive lessons with animated demos",
       "privacy-settings": "View and update your privacy settings",
       "radio": "Open Claude FM lo-fi radio in your browser",
@@ -212,7 +250,10 @@
       },
       "archive": "Archive this session and exit",
       "delete": "Permanently delete this session and exit",
-      "app": "Continue this session in the Desktop app",
+      "app": {
+        "codex": "Continue this session in the Desktop app",
+        "copilot": "Open the GitHub Copilot desktop app"
+      },
       "side": "Start a side conversation in an ephemeral fork",
       "raw": "Toggle raw scrollback mode for copy-friendly terminal selection",
       "debug-config": "Show config layers and requirement sources for debugging",
@@ -224,7 +265,41 @@
       "ps": "List background terminals",
       "personality": "Choose a communication style for Codex",
       "test-approval": "Test approval request",
-      "list-agents": "List the subagents and other Claude Code sessions Claude can message, with the name to use for each"
+      "list-agents": "List the subagents and other Claude Code sessions Claude can message, with the name to use for each",
+      "allow-all": "Enable all tool, path, and URL permissions",
+      "ask": "Ask a quick side question without adding to conversation history",
+      "autopilot": "Toggle autopilot mode",
+      "changelog": "Display the changelog for CLI versions",
+      "chronicle": "Show session history tools and insights",
+      "cwd": "Change the working directory, or show the current one",
+      "delegate": "Send this session to GitHub to create a pull request",
+      "diagnose": "Analyze the current session log",
+      "env": "Show loaded environment details",
+      "fleet": "Enable fleet mode for parallel subagent execution",
+      "footer": "Configure status line items",
+      "instructions": "View and toggle custom instruction files",
+      "keep-alive": "Manage keep-alive mode, which prevents system sleep",
+      "limits": "View or edit session limits",
+      "list-dirs": "Display all allowed directories",
+      "lsp": "Manage language server configuration",
+      "pr": "Operate on pull requests for the current branch",
+      "refine": "Rewrite a rough prompt into a clear one for review",
+      "remote": "Toggle remote control from GitHub web and mobile",
+      "research": "Run a deep research investigation",
+      "reset-allowed-tools": "Reset the list of allowed tools",
+      "restart": "Restart the CLI, preserving the current session",
+      "rubber-duck": "Get an independent critique of the current work",
+      "search": "Search the conversation timeline",
+      "session": "View and manage sessions",
+      "settings": "Open the settings UI, or show and set a single value",
+      "share": "Share the session to a markdown file or a GitHub gist",
+      "undo": "Rewind the last turn and revert file changes",
+      "update": "Update the CLI to the latest version",
+      "user": "Manage the GitHub user list",
+      "version": "Display version information",
+      "mcps": "Toggle MCP servers",
+      "move": "Move to another project directory",
+      "variants": "Switch the model variant"
     }
   },
   "session": {
