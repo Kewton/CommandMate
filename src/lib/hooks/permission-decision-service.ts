@@ -60,6 +60,7 @@ import {
   collectToolInputMatchTexts,
   type PermissionRequestPayload,
 } from './permission-request-payload';
+import { recordToolInputNormalization } from './tool-input-normalization-state';
 
 const logger = createLogger('lib/hooks/permission-decision-service');
 
@@ -205,7 +206,9 @@ export function decidePermissionRequest(
   const policy = (deps.readPolicy ?? readContractPolicy)({ worktreeId, cliToolId, instanceId });
   const denial = evaluatePolicyAgainstTexts(
     PERMISSION_REQUEST_PROMPT_TYPE,
-    collectToolInputMatchTexts(payload.toolName, payload.toolInput),
+    // Issue #1902: the third argument is what stops a normalised payload from
+    // being judged on its whole body. See `collectToolInputMatchTexts`.
+    collectToolInputMatchTexts(payload.toolName, payload.toolInput, payload.toolInputNormalization),
     policy
   );
   if (denial) {
@@ -244,7 +247,11 @@ function recordAllowedPermission(
   session: PermissionRequestSession,
   payload: PermissionRequestPayload
 ): void {
-  const texts = collectToolInputMatchTexts(payload.toolName, payload.toolInput);
+  const texts = collectToolInputMatchTexts(
+    payload.toolName,
+    payload.toolInput,
+    payload.toolInputNormalization
+  );
   const target = texts.join('\n').slice(0, MAX_DENY_MATCH_TEXT_LENGTH);
   const now = new Date();
 
@@ -350,6 +357,23 @@ export function resolvePermissionRequest(
   deps: PermissionDecisionDeps = {}
 ): PermissionDecision {
   const decision = decidePermissionRequest(session, payload, deps);
+
+  // Issue #1902: before anything else, and regardless of the verdict. The
+  // adjudicated `tool_input` is not the one copilot sent, and the design
+  // policy's discoverability rule (§7) says a rewrite nobody can observe is a
+  // rewrite that should not happen. Recording it only on the allow path would
+  // hide it on exactly the path an operator investigates — a suppressed edit
+  // whose deny pattern was matched against the patch's action headers rather
+  // than its body.
+  if (payload?.toolInputNormalization) {
+    recordToolInputNormalization(
+      session.worktreeId,
+      session.cliToolId,
+      session.instanceId,
+      payload.toolInputNormalization,
+      payload.toolName
+    );
+  }
 
   // Issue #1726: `AskUserQuestion` raises a `PermissionRequest` carrying the
   // same `tool_input` its `PreToolUse` does (§5.6), so the questions are

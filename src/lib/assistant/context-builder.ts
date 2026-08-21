@@ -17,6 +17,16 @@ function resolveCommandMateBinary(): string {
   return process.env.CM_LAUNCHED_BY === 'commandmate-cli' ? 'commandmate' : 'commandmatedev';
 }
 
+/**
+ * The CommandMate CLI surface an assistant session is told about.
+ *
+ * Issue #1914: this used to describe `--agent NAME` as the way to name a
+ * target, which has been the *secondary* form since Issue #1638 -- `--agent` is
+ * for an ad-hoc session the agent-instance roster does not know, and `--instance`
+ * is the flag every targeting command accepts (`wait` has no `--agent` at all).
+ * `instances`, `verify`, `sync` and `send --contract` were missing entirely, so
+ * an assistant asked to drive a worktree could not name the commands that exist.
+ */
 function buildCommandMateCliReference(bin: string): string {
   return `## CommandMate CLI Reference
 
@@ -27,14 +37,28 @@ The user runs a CommandMate server locally. These are the CLI commands available
 - \`${bin} start [--dev] [--daemon] [--issue N] [--port N] [--auto-port]\` — Start the server (foreground / dev / background / issue-scoped)
 - \`${bin} stop [--issue N]\` — Stop the server
 - \`${bin} status [--all] [--issue N]\` — Show running server status
-- \`${bin} ls [--json] [--quiet] [--branch PREFIX]\` — List worktrees
-- \`${bin} send <worktree-id> "message" [--agent NAME] [--auto-yes] [--duration T]\` — Send a message to an agent session
-- \`${bin} wait <worktree-id>... [--timeout N] [--stall-timeout N] [--on-prompt TYPE]\` — Wait until the agent finishes or a prompt appears
-- \`${bin} respond <worktree-id> "answer" [--agent NAME]\` — Respond to an agent prompt
-- \`${bin} capture <worktree-id> [--json] [--agent NAME]\` — Capture the current terminal output of a session
-- \`${bin} auto-yes <worktree-id> [--enable] [--disable] [--duration T] [--stop-pattern PAT]\` — Toggle Auto-Yes
+- \`${bin} update [--check] [--yes]\` — Update a globally installed CommandMate
+- \`${bin} ls [--json] [--quiet] [--branch PREFIX] [--id PREFIX]\` — List worktrees
+- \`${bin} sync [--json]\` — Re-scan registered repositories for worktrees (the GUI sync button)
+- \`${bin} send <worktree-id> "message" [--instance ID] [--contract PATH] [--auto-yes] [--duration T]\` — Send a message to an agent session
+- \`${bin} wait <worktree-id>... [--timeout N] [--stall-timeout N] [--on-prompt agent|human] [--instance ID] [--verify] [--require-work]\` — Wait until the agent finishes or a prompt appears
+- \`${bin} respond <worktree-id> "answer" [--default] [--instance ID]\` — Respond to an agent prompt
+- \`${bin} capture <worktree-id> [--json] [--pane] [--tail N] [--prompts] [--instance ID]\` — Capture the current terminal output of a session
+- \`${bin} auto-yes <worktree-id> [--enable] [--disable] [--duration T] [--stop-pattern PAT] [--instance ID]\` — Toggle Auto-Yes
+- \`${bin} instances <worktree-id> [list|add|remove|alias|kill] [--agent TOOL] [--alias NAME] [--id INSTANCE-ID] [--kill] [--json]\` — Inspect and manage the agent-instance roster of a worktree
+- \`${bin} verify <worktree-id> [--gates a,b] [--instance ID] [--json] [--timeout N]\` — Run the verification gates declared in \`.commandmate/verify.yaml\`
+- \`${bin} task list|show ...\` / \`${bin} report generate|show|list|metrics ...\` — Execution-contract tasks and daily reports
+
+Targeting an agent:
+
+- \`--instance <id>\` is the way to name the target (\`<agent>\` or \`<agent>-<n>\`, e.g. \`codex-2\`). It is accepted by \`send\` / \`wait\` / \`respond\` / \`capture\` / \`auto-yes\` / \`verify\`, and omitting it means the worktree's primary instance.
+- \`--agent <tool>\` is **not** the normal way to select a target (Issue #1638). It only declares the CLI tool for an *ad-hoc* instance the roster does not know — pair it with \`--instance\` (plus \`--register\` on \`send\` to add the instance to the roster). \`wait\` has no \`--agent\` at all.
+- Valid CLI tools: \`claude\`, \`codex\`, \`gemini\`, \`vibe-local\`, \`opencode\`, \`copilot\`, \`antigravity\`.
+
+Other notes:
+
 - \`--duration\` accepts values like \`1h\`, \`3h\`, \`8h\`.
-- \`--agent\` selects the CLI tool: \`claude\`, \`codex\`, \`gemini\`, \`vibe-local\`, \`opencode\`, \`copilot\`, \`antigravity\`.
+- \`send --contract <path>\` records an execution contract (a YAML file under the worktree, e.g. \`.commandmate/tasks/my-task.yaml\`) and sends its preamble plus goal. \`wait --verify\` then adjudicates with the verification gates: exit 20 when a gate fails, 21 when there is nothing to verify.
 `;
 }
 

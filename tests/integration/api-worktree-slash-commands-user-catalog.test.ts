@@ -30,6 +30,8 @@ vi.mock('@/cli/utils/install-context', async (importOriginal) => {
 // Deterministic CLI version probes for staleness.
 type ExecTable = Record<string, { stdout?: string; error?: boolean }>;
 let execTable: ExecTable = {};
+/** When true the mocked execFile never calls back, standing in for a hung CLI. */
+let execHangs = false;
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>();
   return {
@@ -40,6 +42,7 @@ vi.mock('child_process', async (importOriginal) => {
       _opts: unknown,
       cb: (err: Error | null, stdout: string, stderr: string) => void
     ) => {
+      if (execHangs) return; // never calls back
       const entry = execTable[command];
       if (!entry || entry.error) {
         cb(new Error('ENOENT'), '', '');
@@ -71,13 +74,23 @@ function writeUserCatalogRaw(fileName: string, contents: string): void {
 
 type CommandEntry = { name: string; source?: string; description?: string; cliTools?: string[] };
 
-async function runGet(cliTool = 'claude') {
+/**
+ * @param warmStaleness - Await the probe before the request, so the route reads
+ *   a filled cache. The route itself never waits for a probe (Issue #1913
+ *   follow-up, §4 D2 / DR3-013), so a cold call answers `{}` by design; a test
+ *   that wants the probed values has to warm the cache first, and doing it here
+ *   keeps that deterministic instead of racing the background probe.
+ */
+async function runGet(cliTool = 'claude', { warmStaleness = false } = {}) {
   const { getWorktreeById } = await import('@/lib/db');
   vi.mocked(getWorktreeById).mockReturnValue(VALID_WORKTREE as never);
   // Reset the memoized user-catalog + staleness caches so each test's
   // temp files and execTable take effect.
-  const { clearCatalogCache } = await import('@/lib/slash-command-catalog');
+  const { clearCatalogCache, getCatalogStaleness } = await import(
+    '@/lib/slash-command-catalog'
+  );
   clearCatalogCache();
+  if (warmStaleness) await getCatalogStaleness();
 
   const { GET } = await import('@/app/api/worktrees/[id]/slash-commands/route');
   const request = new NextRequest(
@@ -96,6 +109,7 @@ beforeEach(() => {
   originalHome = process.env.HOME;
   process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-home-'));
   execTable = {};
+  execHangs = false;
 });
 
 afterEach(() => {
@@ -163,9 +177,13 @@ describe('GET /api/worktrees/[id]/slash-commands (Issue #1476)', () => {
       agy: { error: true },
     };
 
-    const response = await runGet('claude');
-    const data = await response.json();
-    expect(data).toHaveProperty('catalogStaleness');
+    // Cold: the probe has not answered yet, so the route says "not known yet"
+    // rather than holding the response open (Issue #1913 follow-up).
+    const cold = await (await runGet('claude')).json();
+    expect(cold).toHaveProperty('catalogStaleness');
+    expect(cold.catalogStaleness).toEqual({});
+
+    const data = await (await runGet('claude', { warmStaleness: true })).json();
     expect(data.catalogStaleness.claude).toEqual({ current: '9.9.9', verifiedAgainst: '2.1.218', stale: true });
     // Undetectable tools are omitted.
     expect(data.catalogStaleness.antigravity).toBeUndefined();
@@ -173,8 +191,22 @@ describe('GET /api/worktrees/[id]/slash-commands (Issue #1476)', () => {
 
   it('returns an empty catalogStaleness when no CLI version can be read', async () => {
     execTable = { claude: { error: true }, codex: { error: true }, agy: { error: true } };
-    const response = await runGet('claude');
+    const response = await runGet('claude', { warmStaleness: true });
     const data = await response.json();
     expect(data.catalogStaleness).toEqual({});
+  });
+
+  // Issue #1913 follow-up: the reason the route stopped awaiting the probe.
+  // With `await getCatalogStaleness()` back in the route this test does not
+  // fail an assertion — it never returns, and vitest reports the file as timed
+  // out. That is the same failure CI hit twice on
+  // api-worktree-slash-commands.test.ts, only deterministic here.
+  it('answers while a CLI version probe is hung', async () => {
+    execHangs = true;
+    const response = await runGet('claude');
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.catalogStaleness).toEqual({});
+    expect(data.sources.standard).toBeGreaterThan(0);
   });
 });

@@ -60,7 +60,15 @@ vi.mock('@/lib/cli-tools/submit-verified-sender', () => ({
   sendMessageWithSubmitVerification: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Issue #1907: `startSession` now refuses to launch without a copilot that
+// answered `--version`, and that probe walks the real PATH. Stubbed so these
+// frames are what the tests turn on, not whether the runner has copilot.
+vi.mock('@/lib/cli-tools/copilot-executable', () => ({
+  resolveCopilotExecutable: vi.fn(),
+}));
+
 import { CopilotTool } from '@/lib/cli-tools/copilot';
+import { resolveCopilotExecutable } from '@/lib/cli-tools/copilot-executable';
 import { hasSession, sendKeys, capturePane } from '@/lib/tmux/tmux';
 import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
 import { sendMessageWithSubmitVerification } from '@/lib/cli-tools/submit-verified-sender';
@@ -117,6 +125,11 @@ beforeEach(async () => {
   vi.mocked(hasSession).mockResolvedValue(false);
   vi.mocked(sendKeys).mockResolvedValue(undefined);
   vi.mocked(capturePane).mockResolvedValue(READY_FRAME);
+  vi.mocked(resolveCopilotExecutable).mockResolvedValue({
+    path: '/usr/local/bin/copilot',
+    version: '1.0.80',
+    source: 'path',
+  });
 
   const { execFile } = await import('child_process');
   vi.mocked(execFile).mockImplementation(

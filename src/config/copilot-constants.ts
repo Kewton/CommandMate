@@ -57,3 +57,15 @@ export const MODEL_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9\-._/:]*$/;
  * Issue #588: Shared validation constant.
  */
 export const MAX_MODEL_NAME_LENGTH = 128;
+
+/**
+ * How to install GitHub Copilot CLI, as shown when a session refuses to start.
+ * Issue #1907.
+ *
+ * The message this replaced was `gh extension install github/gh-copilot`, which
+ * installs a different, retired product (the `suggest` / `explain` extension).
+ * Copilot CLI is a standalone binary now, and `gh copilot` is a preview command
+ * built into `gh` that downloads it rather than a way of installing it.
+ */
+export const COPILOT_INSTALL_HINT =
+  'Install with: brew install copilot-cli (macOS) or npm i -g @github/copilot';

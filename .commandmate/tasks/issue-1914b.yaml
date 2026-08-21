@@ -1,0 +1,122 @@
+version: 1
+title: "Issue #1914 (残り): CMATE の opencode 既定と --model パススルー"
+goal: |
+  Issue #1914 の**残り 1 項目**を実装してください。https://github.com/Kewton/CommandMate/issues/1914
+
+  前回の契約の `scope.allow` が**実在しないパスを指していた**ため（`src/lib/schedule-config.ts`
+  → 実体は `src/config/schedule-config.ts`、`src/lib/claude-executor.ts` → 実体は
+  `src/lib/session/claude-executor.ts`）、あなたは scope 違反を避けて正しく見送りました。
+  今回の契約は実在パス＋必要な 3 ファイルを含んでいます。**あなたの前回の指摘どおりに進めてください。**
+  ## オーケストレーター契約（Issue 本文より優先・厳守）
+
+  1. **PR を作成しない・push しない**（オーケストレーターが行います）。ブランチは checkout 済みです。
+  2. 実装は**このブランチ上の単一 commit** にまとめる。メッセージは `<type>(<scope>): <要約> (#N)` 形式。
+  3. commit に含めてよいのは `src/` `tests/` `docs/` `scripts/` `.eslintrc.json` `CHANGELOG.md`
+     `.commandmate/tasks/issue-N.yaml` のみ。**`dev-reports/` は絶対に含めない**（CI の hygiene で落ちます）。
+  4. `CHANGELOG.md` は `## [Unreleased]` に**自分の 1 行だけ**追加する。他の行を並べ替えない・消さない
+     （並列ワーカーが同じ節を触っており、衝突解消はオーケストレーターが機械的に行います）。
+  5. **GitHub の Issue / PR を編集しない**（`gh issue edit` 禁止）。Issue レビューのフェーズも実行しない。
+     Issue 本文の誤りは**コミットメッセージの「意図的な逸脱」節**に書いて渡すこと。
+  6. 完了したら最終行に `IMPL_COMPLETED` とだけ出力して停止する。
+
+  ## 実装方針は「推奨」であって決定ではない
+
+  Issue 本文と設計方針書の実装方針は**推奨**です。**必ず実コードで裏を取り、実測が食い違ったら
+  実測を正とし、乖離をコミットメッセージに明記してください。** 過去に私（オーケストレーター）が
+  書いた方針が 3 回連続でワーカーの実測に覆されています。逸脱報告は歓迎します。
+
+  ## 正本ドキュメント
+
+  - 設計方針書: `docs/design/multi-agent-state-architecture.md`（develop に着地済み、Stage 1-4 レビュー済み）。
+    §4 D1〜D5 / §8 / §13.2 を正とする。**Issue 本文と方針書が食い違ったら方針書を正**とする。
+  - Issue 本文中の設計方針書リンクが 404 になる場合は上のローカルパスを見ること。
+
+  ## テスト実行のルール（重要・厳守）
+
+  - **フル `npm run test:unit` を自分で回さないでください。** 並列ワーカーが同時にフル実行すると
+    diff と無関係のテストが `Test timed out in 5000ms` で落ち、存在しない回帰を追いかけることになります
+    （実測済み。#1917 で `verify.yaml` の unit ゲートに `mutex: cpu.heavy` を入れた理由がこれです）。
+  - 自分が触った/追加したテストだけ `npx vitest run <path>` で確認する。
+  - 全体の裁定はオーケストレーターが `commandmate wait --verify`（`.commandmate/verify.yaml` の全ゲート）
+    で行います。どうしても全体を回したい場合のみ `.claude/skills/cmate-verify/scripts/verify-run.sh`
+    （mutex 準拠）を使ってください。
+  - **`npm run build` を実行しない**（稼働中サーバの配信成果物を壊します）。
+  - `npm run lint` / `npx tsc --noEmit` は軽いので自由に回してよい。
+
+  ## 環境ルール（厳守）
+
+  - **稼働サーバ（port 3000）を停止・再起動しない。** 隣の `MyCodeBranchDesk` ディレクトリで何もしない。
+  - 実 tmux を触る検証は必ず `tmux -L <専用socket>` で行う（`-L`/`-S` は `$TMUX` より優先）。
+    フラグ無しの `tmux` は**ユーザーの本番セッション**に届きます。`kill-server` を `-L` 無しで打たない。
+    後始末は `kill-session -t '=<name>:'`。`TMUX_TMPDIR` は隔離手段にならない（`$TMUX` があると無視）。
+    `bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たない。
+  - 他の worktree（`../commandmate-issue-*`）に触らない。
+
+  ## 完了条件
+
+  Issue の受入条件をすべて満たし、`npm run lint` と `npx tsc --noEmit` が緑、追加したテストが
+  単独実行で緑であること。**ガード/pin 系のテストは変異注入で赤になることを必ず確認**してください
+  （空振り緑を作らない。確認手順と結果をコミットメッセージに書く）。
+
+  ## やること（前回のコミットメッセージ「未着手と理由」の内容）
+
+  1. `src/config/schedule-config.ts` の `default:` が `GEMINI_PERMISSIONS` を返す件を是正する。
+  2. `src/lib/session/claude-executor.ts` の `buildCliArgs()` にある
+     `opencode run -m ollama/<model>` 分岐は**到達不能**（`resolveModelOption()` が opencode に
+     対して常に `undefined` を返すため）。`ollama/` の前置を含めて整理する。
+  3. opencode に `--model provider/model` のパススルーを成立させる。そのために
+     `src/lib/cmate-cli-tool-parser.ts` の `TOOLS_WITH_MODEL_SUPPORT`（現在 `['copilot']`）と
+     `src/lib/job-executor.ts` の `resolveModelOption()` を同時に直す。
+  4. `docs/user-guide/cmate-schedules-guide.md` の CLI Tool 列・`report --tool` の記述が
+     前回コミットと矛盾しないようにする（前回で直した箇所は再変更しないこと）。
+
+  ## 追加ルール
+
+  - **前回のコミットは書き換えないでください**（amend / rebase 禁止）。**追加の 1 コミット**として
+    積んでください。コミットメッセージは `fix(cmate): … (#1914)` 形式。
+  - **挙動変更なので CHANGELOG に追記**する。ただし前回追加した行は触らず、**新しい 1 行だけ**を
+    足すか、前回の行に追記するかを選び、理由をコミットメッセージに書いてください。
+  - 到達不能分岐を「消す」か「到達可能にする」かは**あなたの判断**でよい。実測の根拠と
+    選んだ理由をコミットメッセージに書くこと。
+  - 変異注入で新しいテストが空振りでないことを確認してください。
+
+# [#1914b 実測 / 完了記録]
+# 契約の 4 項目はすべて着地した。scope.allow は今回は実在パスを指しており違反なし。
+#
+# **残っている 1 件（今回も scope 外）**: `src/components/worktree/schedules/ScheduleEditDialog.tsx`
+#   の `const showModel = form.cliToolId === 'copilot'`（実測 :295、ほかに :335 のリセットと
+#   :322 の検証）が `TOOLS_WITH_MODEL_SUPPORT` を読まずにツール id を直書きしている。
+#   このため **GUI のスケジュール編集ダイアログでは opencode の Model 欄が出ない**。
+#   CMATE.md を手で編集する経路は今回の変更で通る（parser / validator / writer / executor は全て対応済み）。
+#   `src/components/**` は今回の scope.allow に無いので触っていない。3 行の置換で済む見込み。
+# **もう 1 件（同じく scope 外）**: `src/types/cmate.ts` の `ScheduleEntry.model` の JSDoc が
+#   "copilot only, from CLI Tool column --model option" のまま。挙動には影響しないコメントのみ。
+scope:
+  allow:
+    - "src/config/schedule-config.ts"
+    - "src/lib/session/claude-executor.ts"
+    - "src/lib/cmate-cli-tool-parser.ts"
+    - "src/lib/job-executor.ts"
+    - "src/lib/cmate-parser.ts"
+    - "src/lib/cmate-validator.ts"
+    - "tests/unit/**"
+    - "tests/helpers/**"
+    - "docs/**"
+    - "CHANGELOG.md"
+    - ".commandmate/tasks/issue-1914b.yaml"
+  deny: []
+
+
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns:
+    - "rm -rf"
+    - "git push"
+    - "gh pr create"
+    - "gh issue edit"
+    - "kill-server"
+
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

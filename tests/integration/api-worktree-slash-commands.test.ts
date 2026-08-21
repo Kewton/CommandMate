@@ -20,6 +20,40 @@ vi.mock('@/lib/db', () => ({
   getWorktreeById: vi.fn(),
 }));
 
+/**
+ * No real CLI processes (Issue #1913 follow-up).
+ *
+ * The route reads catalog staleness, which probes the installed CLI versions.
+ * Without this mock the suite spawns `claude` / `codex` / `agy` / `opencode` /
+ * `copilot --version` for real, so its runtime is a property of the machine
+ * rather than of the code under test: 79ms where none of them are installed,
+ * 322ms on a developer machine where they all are — and unbounded if one hangs,
+ * since each probe carries its own 5s timeout. That is what turned
+ * "should return merged command groups for valid worktree" into
+ * `Test timed out in 5000ms` on the loaded self-hosted CI runner, twice, while
+ * passing on a rerun.
+ *
+ * These tests are about merging and filtering command groups. Which CLIs the
+ * runner happens to have installed is not part of that, and the sibling
+ * user-catalog suite has mocked child_process from the start for the same
+ * reason. ENOENT for everything: staleness comes back `{}` and no test here
+ * asserts on it.
+ */
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>();
+  return {
+    ...actual,
+    execFile: (
+      _command: string,
+      _args: string[],
+      _opts: unknown,
+      cb: (err: Error | null, stdout: string, stderr: string) => void
+    ) => {
+      cb(new Error('ENOENT'), '', '');
+    },
+  };
+});
+
 describe('GET /api/worktrees/[id]/slash-commands', () => {
   beforeEach(() => {
     vi.clearAllMocks();

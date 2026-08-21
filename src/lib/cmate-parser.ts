@@ -259,6 +259,9 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
     // Validate permission against allowed values
     let allowedValues: readonly string[];
     switch (resolvedCliToolId) {
+      case 'claude':
+        allowedValues = CLAUDE_PERMISSIONS;
+        break;
       case 'codex':
         allowedValues = CODEX_SANDBOXES;
         break;
@@ -270,15 +273,20 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
         break;
       case 'gemini':
       case 'vibe-local':
-        // No permission flags for gemini/vibe-local; only empty string is valid
+      case 'opencode':
+      // Issue #1914: `default` sits with the no-flag tools, not with claude.
+      // It used to resolve to CLAUDE_PERMISSIONS, so `opencode` -- which has no
+      // permission flag at all -- accepted `acceptEdits`/`bypassPermissions`
+      // and handed them to a CLI that has no such option. A tool added to
+      // CLI_TOOL_IDS without its own case above now inherits "no permission
+      // flags" instead of Claude's --permission-mode vocabulary.
+      default:
+        // No permission flags for these tools; only empty string is valid
         allowedValues = [];
         if (permission) {
           logger.warn('parse:permission-ignored', { name: sanitizedName, cliToolId: resolvedCliToolId, permission });
           permission = '';
         }
-        break;
-      default:
-        allowedValues = CLAUDE_PERMISSIONS;
         break;
     }
     if (allowedValues.length > 0 && permission && !allowedValues.includes(permission)) {

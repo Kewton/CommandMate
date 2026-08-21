@@ -110,4 +110,35 @@ describe('getOptionalDependencies', () => {
     expect(ghCli).toBeDefined();
     expect(ghCli?.versionArg).toBe('--version');
   });
+
+  // Issue #1907: `commandmate init` の依存表に copilot / opencode が無く、
+  // どちらも入っていない環境で「準備完了」に見えていた。
+  it('should include GitHub Copilot CLI as optional', () => {
+    const optional = getOptionalDependencies();
+    expect(optional.map(d => d.name)).toContain('GitHub Copilot CLI');
+  });
+
+  it('should check copilot as the standalone executable, not via gh', () => {
+    // `gh copilot --help` は copilot 未インストールでも exit 0 を返すため、
+    // `command: 'gh'` で copilot の実在を測ることはできない（gh 2.86.0 実測）。
+    const copilot = DEPENDENCIES.find(d => d.name === 'GitHub Copilot CLI');
+    expect(copilot?.command).toBe('copilot');
+    expect(copilot?.versionArg).toBe('--version');
+    expect(copilot?.required).toBe(false);
+  });
+
+  it('should include OpenCode CLI as optional', () => {
+    const opencode = DEPENDENCIES.find(d => d.name === 'OpenCode CLI');
+    expect(opencode).toBeDefined();
+    expect(opencode?.command).toBe('opencode');
+    expect(opencode?.versionArg).toBe('--version');
+    expect(opencode?.required).toBe(false);
+  });
+
+  it('should keep every agent CLI optional so init cannot start failing on them', () => {
+    const agentCliNames = ['Claude CLI', 'gh CLI', 'GitHub Copilot CLI', 'OpenCode CLI'];
+    for (const name of agentCliNames) {
+      expect(DEPENDENCIES.find(d => d.name === name)?.required).toBe(false);
+    }
+  });
 });
