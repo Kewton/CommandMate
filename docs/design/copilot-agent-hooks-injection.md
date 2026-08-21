@@ -4,7 +4,7 @@
 - 実装: `src/lib/hooks/sources/copilot/`
 - 前提: [`agent-event-source-interface.md`](./agent-event-source-interface.md)（#1759 の I/F）/ [`agent-hooks-phase4-live-verification.md`](./agent-hooks-phase4-live-verification.md) §5.2（#1757 の実測）
 - fixture: [`tests/fixtures/hooks/copilot/`](../../tests/fixtures/hooks/copilot/)
-- 検証時の版: **GitHub Copilot CLI 1.0.79**（2026-08-13）
+- 検証時の版: **GitHub Copilot CLI 1.0.79**（2026-08-13）／ §7 は **1.0.80**（2026-08-21、[#1904](https://github.com/Kewton/CommandMate/issues/1904)）
 
 ---
 
@@ -13,6 +13,7 @@
 - **Issue 本文冒頭の「hooks が実在しないかもしれない／実在しなければ取り下げ」は誤り。** #1757 が実在を確定させており、payload は 4 ツール中もっとも Claude Code に近い。取り下げていない。
 - 近いのは **payload だけ**。設定の置き場所・裁定の返し方・裁定の締切の 3 つは Claude と別物で、本 Issue の実装コストはそこにある。
 - **設定は `~/.copilot/settings.json` 1 本＝マシン全体で共有**。だから相関キーは設定ファイルに焼けず、**起動コマンドの環境変数**に載せる（本書 §2 が根拠）。
+- #1904: 同じ理屈が**ポート**にも当てはまり、`config.json` の `hooks` は settings.json を**上書き**する。§7 を参照。
 
 ---
 
@@ -150,9 +151,85 @@ CommandMate のエントリは各イベント 1 件ずつ（`Stop` のみユー�
 
 ## 6. 既知の限界
 
-- **サーバのポートは書き込み時点で固定される。** グローバル 1 本なので、CommandMate を複数ポートで動かしている場合
-  （`commandmate start --issue N`）、**最後に copilot セッションを起動したサーバのポート**が全 copilot セッションの宛先になる。
-  グローバル設定しか持たないツールに固有の制約で、回避するには `COPILOT_HOME` を分けるしかない（認証・trust の再構成が要る）。
+- ~~**サーバのポートは書き込み時点で固定される。**~~ → #1904 で解消（§7.2）。ポートは `CM_HOOK_PORT` で起動時に運ぶ。
 - **repo-level `.github/hooks/*.json` は使っていない。** #1757 で発火せず、discovery 条件が未確定のため。
 - **TUI での `Notification` は未計測。** プロンプト検出は #1723 のスクレイパ（2 層目）に残る。
 - `Stop` にしか `transcript_path` が無い等、payload の細部は fixture が正。
+
+---
+
+## 7. #1904: マシン共通ファイル由来の脆さ 3 件（copilot 1.0.80 / 2026-08-21）
+
+Issue [#1904](https://github.com/Kewton/CommandMate/issues/1904)。3 件とも根は同じで、
+**`~/.copilot/settings.json` が「最後に copilot を起動したサーバが書いた 1 ファイル」である**こと。
+設計判断の正本は [`multi-agent-state-architecture.md`](./multi-agent-state-architecture.md) §10.8 / §10.9、
+受入条件は同 §13.2 の S7 / S8 / S16。
+
+### 7.1 `config.json` の `hooks` が settings.json を上書きする
+
+**実測（1.0.80）**: 両方のファイルにマーカー hook を置いて 1 セッション動かすと、
+発火したのは `CONFIG-*` だけで、直後に読んだ settings.json は `CONFIG-*` 6 件 / `SETTINGS-*` 0 件。
+config.json には `// User settings belong in settings.json.` が書かれていた。
+つまり copilot は起動時に config.json の `hooks` を settings.json へ**移送し、既存の `hooks` キーを置き換える**。
+
+`copilot help config` は今も `hooks` を config.json に書くよう案内しているので、
+**ドキュメントに従ったユーザーは CommandMate の hooks を丸ごと失う**（イベントも Auto-Yes も無音で止まる）。
+
+**対応**: 書き込み前に config.json を読み、`hooks` キーがあれば **settings.json を書かずに素の `gh copilot` で起動**し、
+`copilot-hook-config-json-shadows-settings` を warn に出す。
+
+- 「警告して settings.json に fold する」は採らなかった。**fold しても copilot が起動時に消す**ので、
+  ユーザーのファイルを触るコストだけが残る（上の実測がそれを示している）。
+- copilot 自身の移送でキーは消えるため、**この拒否は 1 回の起動で自然に解ける**（自己修復）。
+- config.json は**厳密な JSON ではない**（先頭 2 行が `//` コメント）。実ファイルは `JSON.parse` が 0 文字目で落ちる。
+  検出はコメントを除去してから解析し、それでも解析できなければ `unreadable` として**注入は続行**する（fail-open）。
+
+### 7.2 ポートと relay パスが「最後に起動したサーバ」に固定される
+
+**実測**: port 3011 の開発サーバが copilot を起動した結果、
+マシン上の全 copilot セッションの宛先が 3011 に書き換わった（バックアップから復元）。
+relay も `process.cwd()` 由来の絶対パスなので、その checkout を消すとイベントが全滅する。
+
+**対応**（§10.8 の決定に従う）:
+
+| 値 | 扱い | 理由 |
+|---|---|---|
+| **port** | `CM_HOOK_PORT` で起動 env に載せる。hook 冒頭で `case "$CM_HOOK_PORT" in ''\|*[!0-9]*) … exit 0;; esac` | セッションごとに正しい宛先になる唯一の値 |
+| **scheme / host** | 生成時の定数のまま（`http://127.0.0.1:`） | `curlArgumentPreamble` は**宛先を見ずに** `Authorization: Bearer` を付ける。宛先が定数であることがトークン漏洩の防波堤（§10.7） |
+| **relay の絶対パス** | 生成時の literal のまま。ただし `[ -x '<path>' ]` を**発火時**に見て、無ければ inline `curl` へ落ちる | env で運ぶと「hook のたびに実行するプログラム」を env に委譲することになる（§10.8 決定 2） |
+
+**`${VAR:-既定}` の綴りは使わない。** 未設定時に黙って別の宛先へ落ちるため、未設定なら**発火しない**（§10.8 決定 3）。
+これは `tests/unit/hooks/sources/copilot-hook-settings-1904.test.ts` が
+`${CM_HOOK_PORT:-` の出現そのものを赤にして固定している。
+
+### 7.3 4xx のボディが裁定として copilot に渡る
+
+`PreToolUse` の生成コマンドは `out=$(curl …)` の標準出力をそのまま裁定として印字するが `-f` が無かったため、
+`{"error":"cwd rejected: …"}` のような**受け口のエラーメッセージが copilot の verdict パーサに渡っていた**。
+
+**対応**: `curl` の引数を `-fsS` にし（relay スクリプトと同じ）、非 2xx では `out` を空にして `{}` を印字する。
+併せて **失敗を無音にしない**: `cmate-copilot-agent-hooks: permission_request_failed rc=22` のような
+理由コード 1 行を stderr に出す。観測イベント側の inline `curl` も `|| true` をやめて
+`agent_event_post_failed rc=<n>` を出す。
+
+### 7.4 settings.json の書き込み規約（S16）
+
+`commandmate start --issue N --auto-port` による複数サーバ同時稼働は公式サポートなので、
+このファイルには**複数プロセスが書く**。
+
+- **temp + `rename`** の原子的置換にした（`writeFileSync` は truncate してから書くので、
+  途中で落ちるとユーザーの settings.json が切り詰められる）。
+- 同一ディレクトリの `.cmate.lock` を `O_EXCL` で取り、**取れなければ書かずに hooks なしで起動**する。
+  10 秒より古いロックは落ちたプロセスの残骸として奪う。
+- 書き換える場合のみ**直前の内容を 1 世代** `settings.json.cmate-backup` に残す。
+- #1904 でファイルの内容がサーバ非依存になったため、**再起動しても普通はバイト列が変わらない**。
+  変わらないときは書かずに返す（ユーザーのファイルの mtime も触らない）。
+
+### 7.5 積み残し
+
+- **`CM_HOOK_*` を子プロセス環境から除去する**という §10.7 / S8 後半は本 Issue の scope 外
+  （`src/lib/security/env-sanitizer.ts`）。`COMMANDMATE_HOOK_ENV_VARS`
+  （`src/lib/hooks/sources/launch-command.ts`）に一覧を置いたので、sanitizer 側はこれを import すればよい。
+- **`tests/setup.ts` に `COPILOT_HOME` の既定が無い。** `CODEX_HOME` と同じ理由（既定値こそが危険）で
+  1 行足すべきだが、`tests/setup.ts` は本 Issue の scope 外。現状 copilot の launch を実行するテストは
+  すべて自前で `COPILOT_HOME` か `HOME` を stub している（実測）。
