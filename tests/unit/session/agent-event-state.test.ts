@@ -237,6 +237,9 @@ describe('structuredEvents exposure (Issue #1722)', () => {
       lastEventDetail: null,
       promptWaitingSince: null,
       promptWaitingSource: null,
+      // Issue #1902: claude sends `tool_input` as an object, so nothing here is
+      // ever rewritten. The key is present and null rather than absent.
+      toolInputNormalization: null,
       source: claudeSource,
     });
   });
@@ -264,6 +267,9 @@ describe('structuredEvents exposure (Issue #1722)', () => {
       lastEventDetail: 'some_future_type',
       promptWaitingSince: null,
       promptWaitingSource: null,
+      // Issue #1902: claude sends `tool_input` as an object, so nothing here is
+      // ever rewritten. The key is present and null rather than absent.
+      toolInputNormalization: null,
       source: claudeSource,
     });
     expect({ ...after, structuredEvents: null }).toEqual({ ...before, structuredEvents: null });
