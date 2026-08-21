@@ -11,11 +11,16 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { getWorktreeById, deleteSessionState, deleteAllMessages, deleteMessagesByCliTool, deleteMessagesByInstance, recomputeLastUserMessage, getAgentInstances, getAgentInstance } from '@/lib/db';
+import { getWorktreeById, deleteSessionState, deleteAllMessages, deleteMessagesByCliTool, deleteMessagesByInstance, recomputeLastUserMessage, getAgentInstances } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { killSession } from '@/lib/tmux/tmux';
 import { broadcast } from '@/lib/ws-server';
-import { CLI_TOOL_IDS, isCliToolType, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
+import {
+  resolveSessionTargetStrict,
+  describeSessionTargetConflict,
+  INSTANCE_TOOL_CONFLICT,
+} from '@/lib/session/resolve-session-target';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
@@ -68,21 +73,32 @@ export async function POST(
     const targets: Array<{ cliToolId: CLIToolType; instanceId: string }> = [];
 
     if (instanceParam) {
-      // Single-instance kill: resolve the backing CLI tool from (in priority order)
-      // the explicit cliTool param, the registered instance, or the instance id
-      // itself when it names a primary instance.
-      const known = getAgentInstance(db, id, instanceParam);
-      const resolvedTool: CLIToolType | null =
-        (targetCliTool ?? null)
-        ?? (known ? known.cliTool : null)
-        ?? (isCliToolType(instanceParam) ? instanceParam : null);
-      if (!resolvedTool) {
+      // Issue #1925: single-instance kill resolves through the one shared
+      // resolver (design §4 D5). This route used to inline its own chain with
+      // the explicit `?cliTool` ahead of the roster and no contradiction check,
+      // so `--instance codex --cliTool claude` silently killed (or failed to
+      // find) a Claude session under an instance the roster calls codex. The
+      // roster now wins and the contradiction is refused: killing is a side
+      // effect, so guessing which of the two declarations was meant is not an
+      // option (DR2-009 / DR3-015).
+      const resolution = resolveSessionTargetStrict(db, id, {
+        instanceId: instanceParam,
+        requestedCliTool: targetCliTool ?? undefined,
+      });
+      if (!resolution.ok) {
         return NextResponse.json(
-          { error: 'Could not resolve CLI tool for the specified instance. Provide cliTool.' },
+          {
+            error: describeSessionTargetConflict(resolution.conflict),
+            code: INSTANCE_TOOL_CONFLICT,
+            ...resolution.conflict,
+          },
           { status: 400 }
         );
       }
-      targets.push({ cliToolId: resolvedTool, instanceId: instanceParam });
+      targets.push({
+        cliToolId: resolution.target.cliToolId,
+        instanceId: resolution.target.instanceId,
+      });
     } else {
       // Determine which tools to kill, seeding each tool's primary instance
       // (instanceId === cliToolId) for backward compatibility.

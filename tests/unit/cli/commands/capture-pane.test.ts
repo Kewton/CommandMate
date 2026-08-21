@@ -37,9 +37,28 @@ async function runCapture(argv: string[]): Promise<void> {
   await createCaptureCommand().parseAsync(['node', 'capture', ...argv]);
 }
 
-/** GET /api/worktrees/:id then POST /api/worktrees/:id/capture. */
+/**
+ * Response of GET /api/worktrees/:id/resolve-target (Issue #1925).
+ *
+ * `--pane` has to name a CLI tool in the POST body — POST /capture takes no
+ * default — and since #1925 it asks the server which one rather than deriving
+ * it from the worktree row itself.
+ */
+function resolveTarget(cliToolId: string, instanceId = cliToolId, resolvedBy = 'worktree-default') {
+  return { data: { cliToolId, instanceId, resolvedBy, conflict: null } };
+}
+
+/** GET /api/worktrees/:id/resolve-target then POST /api/worktrees/:id/capture. */
 function mockPaneFetch(output: string = RAW_PANE): void {
-  mockFetchSequence([{ data: WORKTREE }, { data: { output } }]);
+  mockFetchSequence([resolveTarget('claude'), { data: { output } }]);
+}
+
+/** The POST /capture call, located by URL rather than by position: the
+ * capability probe and the resolve both precede it and neither is the subject. */
+function captureCall(): [string, RequestInit | undefined] {
+  const call = vi.mocked(global.fetch).mock.calls.find((c) => String(c[0]).includes('/capture'));
+  expect(call).toBeDefined();
+  return call as unknown as [string, RequestInit | undefined];
 }
 
 function lastLoggedLine(): string {
@@ -51,7 +70,7 @@ describe('capture --pane', () => {
     mockPaneFetch();
     await runCapture(['wt1', '--pane']);
 
-    const [url, init] = vi.mocked(global.fetch).mock.calls[1];
+    const [url, init] = captureCall();
     expect(url).toContain('/api/worktrees/wt1/capture');
     expect(init?.method).toBe('POST');
     expect(JSON.parse(init?.body as string)).toEqual({ cliToolId: 'claude', lines: 1000 });
@@ -113,46 +132,60 @@ describe('capture --pane', () => {
 });
 
 describe('capture --pane CLI tool resolution', () => {
-  it("falls back to the worktree's own default, mirroring the server", async () => {
-    mockFetchSequence([
-      { data: { ...WORKTREE, cliToolId: 'codex' } },
-      { data: { output: 'hello' } },
-    ]);
+  it("uses the worktree's own default when nothing else names an agent", async () => {
+    mockFetchSequence([resolveTarget('codex'), { data: { output: 'hello' } }]);
     await runCapture(['wt1', '--pane']);
 
-    const body = JSON.parse(vi.mocked(global.fetch).mock.calls[1][1]?.body as string);
+    const body = JSON.parse(captureCall()[1]?.body as string);
     expect(body.cliToolId).toBe('codex');
   });
 
-  it("falls back to claude when the worktree has no default, as the route does", async () => {
+  /**
+   * Issue #1925: reaching the last stage of the chain is the server's business
+   * and it says so (`resolvedBy: 'fallback'` — the shape of the #1909 bug). The
+   * CLI's job here is to repeat the answer rather than re-derive it, so what is
+   * pinned is that it does not second-guess a 'fallback'.
+   */
+  it('uses the last-resort agent the server reports, without overriding it', async () => {
     mockFetchSequence([
-      { data: { ...WORKTREE, cliToolId: undefined } },
+      resolveTarget('claude', 'claude', 'fallback'),
       { data: { output: 'hello' } },
     ]);
     await runCapture(['wt1', '--pane']);
 
-    const body = JSON.parse(vi.mocked(global.fetch).mock.calls[1][1]?.body as string);
+    const body = JSON.parse(captureCall()[1]?.body as string);
     expect(body.cliToolId).toBe('claude');
   });
 
-  it('honours --agent without asking the server for a default', async () => {
-    mockFetchResponse({ output: 'hello' });
+  /**
+   * Issue #1925: --agent goes to the server too. Short-circuiting it here would
+   * put one stage of the precedence chain back in the CLI, and one stage is how
+   * the second implementation started (design §3 P4).
+   */
+  it('sends --agent to the server and uses what comes back', async () => {
+    mockFetchSequence([
+      resolveTarget('codex', 'codex', 'explicit'),
+      { data: { output: 'hello' } },
+    ]);
     await runCapture(['wt1', '--pane', '--agent', 'codex']);
 
-    expect(vi.mocked(global.fetch).mock.calls).toHaveLength(1);
-    const body = JSON.parse(vi.mocked(global.fetch).mock.calls[0][1]?.body as string);
+    const resolveCall = vi.mocked(global.fetch).mock.calls.find((c) =>
+      String(c[0]).includes('/resolve-target')
+    );
+    expect(String(resolveCall?.[0])).toContain('cliTool=codex');
+    const body = JSON.parse(captureCall()[1]?.body as string);
     expect(body.cliToolId).toBe('codex');
   });
 
   it('passes --instance through to the route', async () => {
     // Issue #1629: the roster decides which tool an instance belongs to.
     mockFetchSequence([
-      { data: { ...WORKTREE, agentInstances: [{ id: 'codex-2', cliTool: 'codex', alias: '', order: 1 }] } },
+      resolveTarget('codex', 'codex-2', 'roster'),
       { data: { output: 'hello' } },
     ]);
     await runCapture(['wt1', '--pane', '--instance', 'codex-2']);
 
-    const body = JSON.parse(vi.mocked(global.fetch).mock.calls[1][1]?.body as string);
+    const body = JSON.parse(captureCall()[1]?.body as string);
     expect(body.cliToolId).toBe('codex');
     expect(body.instanceId).toBe('codex-2');
   });

@@ -13,6 +13,7 @@ import { describe, it, expect } from 'vitest';
 import {
   STANDARD_COMMANDS,
   FREQUENTLY_USED,
+  CATALOG_VERIFIED_AGAINST,
   getStandardCommandGroups,
   getFrequentlyUsedCommands,
 } from '@/lib/standard-commands';
@@ -94,8 +95,12 @@ describe('STANDARD_COMMANDS', () => {
   // Issue #1767: +3 claude built-ins the weekly drift check surfaced — /agents,
   // /import, /list-agents, all real rows on code.claude.com/docs/en/commands.md.
   // 159 -> 162.
-  it('should have 162 standard commands', () => {
-    expect(STANDARD_COMMANDS.length).toBe(163);
+  // Issue #1913: copilot entered the catalog (68, from `copilot help commands`
+  // on 1.0.80 plus the palette-only /undo) and opencode was reconciled against
+  // the 1.18.21 palette (+9 entries; /compact left the opencode scope but its
+  // claude/codex entry stays). 163 -> 240.
+  it('should have 240 standard commands', () => {
+    expect(STANDARD_COMMANDS.length).toBe(240);
   });
 
   it('should have all required properties for each command', () => {
@@ -189,8 +194,11 @@ describe('STANDARD_COMMANDS', () => {
     expect(antigravityCommands.length).toBe(13);
   });
 
+  // Issue #1913: /compact used to be listed here too. It is not in the opencode
+  // 1.18.21 palette — typing the full /compact matches nothing but the /review
+  // description text — so the opencode scope was dropped from that entry.
   it('should have commands shared between Claude and OpenCode', () => {
-    const sharedCommands = ['compact', 'help'];
+    const sharedCommands = ['help'];
     sharedCommands.forEach((name) => {
       const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
       expect(cmd).toBeDefined();
@@ -247,11 +255,13 @@ describe('STANDARD_COMMANDS', () => {
     });
   });
 
-  it('should have 10 commands available for OpenCode', () => {
+  // Issue #1913: reconciled against the opencode 1.18.21 palette (18 rows,
+  // /agents … /variants). -1 phantom (/compact) +9 missing. 10 -> 18.
+  it('should have 18 commands available for OpenCode', () => {
     const opencodeCommands = STANDARD_COMMANDS.filter(
       (cmd) => cmd.cliTools?.includes('opencode')
     );
-    expect(opencodeCommands.length).toBe(10);
+    expect(opencodeCommands.length).toBe(18);
   });
 
   // Issue #1503: -2 codex phantoms (approvals/undo) removed → 23.
@@ -337,10 +347,21 @@ describe('STANDARD_COMMANDS', () => {
   // manage subagents…" — a real command with a real description. So claude gets
   // an entry, and what is pinned instead is that the two entries stay separate
   // and never share a description key (Issue #1704 tool-scoped keys).
+  //
+  // Issue #1913 narrows the /undo half the same way, for the same reason. The
+  // ban was name-wide because /undo was a codex 0.144.6 phantom, but copilot
+  // 1.0.80 ships a real /undo: it is absent from `copilot help commands` yet
+  // matches on full input in the palette ("Rewind the last turn and revert file
+  // changes"), exactly the hidden-alias shape /clear and /quit have on codex.
+  // Banning the string hid a real command, so the ban now names codex.
   it('does not carry the Issue #1503 phantom commands', () => {
-    for (const name of ['cost', 'lazy', 'todos', 'pr-comments', 'approvals', 'undo']) {
+    for (const name of ['cost', 'lazy', 'todos', 'pr-comments', 'approvals']) {
       expect(STANDARD_COMMANDS.some((c) => c.name === name), `/${name} must be gone`).toBe(false);
     }
+    expect(
+      STANDARD_COMMANDS.some((c) => c.name === 'undo' && c.cliTools?.includes('codex')),
+      '/undo must stay off codex'
+    ).toBe(false);
     const agentsEntries = STANDARD_COMMANDS.filter((c) => c.name === 'agents');
     expect(agentsEntries.map((c) => c.cliTools?.join(',')).sort()).toEqual(['claude', 'opencode']);
     expect(new Set(agentsEntries.map((c) => c.descriptionKey)).size).toBe(2);
@@ -469,12 +490,21 @@ describe('STANDARD_COMMANDS', () => {
 // Issue #1488: add missing Claude built-ins (/loop etc.) to the bundled catalog.
 // Verified against the official docs for Claude Code 2.1.218 (= verifiedAgainst.claude).
 describe('Claude built-in catalog additions (Issue #1488)', () => {
-  const NEW_CLAUDE_BUILTINS: Array<{ name: string; category: SlashCommandCategory }> = [
+  // `key` is the leaf of the shipped descriptionKey. It is the plain command
+  // name unless the tools disagree about what the command does — Issue #1913
+  // split /memory because copilot's is "show memory status, enable/disable
+  // memory across sessions" while claude's edits CLAUDE.md memory files, and
+  // one shared key cannot hold both (the same mechanism #1767 used for /agents).
+  const NEW_CLAUDE_BUILTINS: Array<{
+    name: string;
+    category: SlashCommandCategory;
+    key?: string;
+  }> = [
     { name: 'loop', category: 'standard-util' },
     { name: 'add-dir', category: 'standard-util' },
     { name: 'mcp', category: 'standard-util' },
     { name: 'usage', category: 'standard-monitor' },
-    { name: 'memory', category: 'standard-config' },
+    { name: 'memory', category: 'standard-config', key: 'memory.claude' },
     { name: 'statusline', category: 'standard-config' },
     { name: 'terminal-setup', category: 'standard-config' },
     { name: 'hooks', category: 'standard-config' },
@@ -482,14 +512,14 @@ describe('Claude built-in catalog additions (Issue #1488)', () => {
     // purged; the opencode /agents entry stays (asserted separately below).
   ];
 
-  it('registers each new built-in with cliTools: ["claude"], the right category, and a name-derived key', () => {
-    for (const { name, category } of NEW_CLAUDE_BUILTINS) {
+  it('registers each new built-in with cliTools: ["claude"], the right category, and its shipped key', () => {
+    for (const { name, category, key } of NEW_CLAUDE_BUILTINS) {
       const claudeEntry = STANDARD_COMMANDS.find(
         (c) => c.name === name && c.cliTools?.length === 1 && c.cliTools[0] === 'claude'
       );
       expect(claudeEntry, `missing Claude entry for /${name}`).toBeDefined();
       expect(claudeEntry?.category).toBe(category);
-      expect(claudeEntry?.descriptionKey).toBe(`slashCommands.descriptions.${name}`);
+      expect(claudeEntry?.descriptionKey).toBe(`${DESCRIPTION_KEY_PREFIX}${key ?? name}`);
       expect(claudeEntry?.isStandard).toBe(true);
       expect(claudeEntry?.source).toBe('standard');
     }
@@ -507,10 +537,10 @@ describe('Claude built-in catalog additions (Issue #1488)', () => {
   it('resolves each new built-in description in en and ja without leaking the raw key', () => {
     for (const locale of LOCALES) {
       const dict = loadDescriptions(locale);
-      for (const { name } of NEW_CLAUDE_BUILTINS) {
-        const text = dict[name];
+      for (const { name, key } of NEW_CLAUDE_BUILTINS) {
+        const text = dict[key ?? name];
         expect(typeof text === 'string' && text.length > 0, `${locale} missing /${name}`).toBe(true);
-        expect(text).not.toBe(`slashCommands.descriptions.${name}`);
+        expect(text).not.toBe(`${DESCRIPTION_KEY_PREFIX}${key ?? name}`);
       }
     }
   });
@@ -577,6 +607,149 @@ describe('catalog ∩ curation exclusions (Issue #1704)', () => {
   });
 });
 
+// Issue #1913: copilot and opencode were reconciled against the installed CLIs
+// on 2026-08-22 (copilot 1.0.80, opencode 1.18.21 — the issue was filed against
+// opencode 1.18.20, which auto-updated before the work started).
+//
+// Both sets are pinned by name rather than by count, because a count alone
+// cannot tell "we added the 21 missing commands" from "we added 21 commands".
+// The sources are recorded next to each list so the next reconcile can re-run
+// exactly the same measurement.
+describe('copilot / opencode catalog reconcile (Issue #1913)', () => {
+  /**
+   * `copilot help commands` on GitHub Copilot CLI 1.0.80 (67 rows) plus /undo.
+   *
+   * /undo is in the interactive palette but not in `help commands`, the same
+   * hidden-alias shape /clear and /quit have on codex (#1503). /footer and
+   * /rewind are the mirror case — in `help commands`, not listed in the palette
+   * scroll, but matched on full input — so all three are carried.
+   *
+   * /streamer-mode is NOT here: it is in neither surface on 1.0.80.
+   */
+  const COPILOT_1_0_80 = [
+    'add-dir', 'agent', 'allow-all', 'app', 'ask', 'autopilot', 'changelog',
+    'chronicle', 'clear', 'compact', 'context', 'copy', 'cwd', 'delegate',
+    'diagnose', 'diff', 'env', 'exit', 'experimental', 'feedback', 'fleet',
+    'footer', 'fork', 'help', 'ide', 'init', 'instructions', 'keep-alive',
+    'limits', 'list-dirs', 'login', 'logout', 'lsp', 'mcp', 'memory', 'model',
+    'new', 'permissions', 'plan', 'plugin', 'pr', 'refine', 'remote', 'rename',
+    'research', 'reset-allowed-tools', 'restart', 'resume', 'review', 'rewind',
+    'rubber-duck', 'search', 'security-review', 'session', 'settings', 'share',
+    'skills', 'statusline', 'subagents', 'tasks', 'terminal-setup', 'theme',
+    'undo', 'update', 'usage', 'user', 'version', 'voice',
+  ];
+
+  /** The opencode 1.18.21 slash palette, scrolled end to end (18 rows). */
+  const OPENCODE_1_18_21 = [
+    'agents', 'connect', 'debug', 'diff', 'editor', 'exit', 'help', 'init',
+    'mcps', 'models', 'move', 'new', 'review', 'sessions', 'skills', 'status',
+    'themes', 'variants',
+  ];
+
+  const visibleTo = (tool: string): string[] =>
+    STANDARD_COMMANDS.filter((c) => c.cliTools?.includes(tool as never))
+      .map((c) => c.name)
+      .sort();
+
+  it('ships exactly the copilot 1.0.80 command set', () => {
+    expect(visibleTo('copilot')).toEqual([...COPILOT_1_0_80].sort());
+  });
+
+  it('ships exactly the opencode 1.18.21 palette', () => {
+    expect(visibleTo('opencode')).toEqual([...OPENCODE_1_18_21].sort());
+  });
+
+  // The two phantoms this reconcile removed. Both are recorded in
+  // src/config/slash-commands-exclusions.json so catalog:refresh stops
+  // proposing them; this is the catalog-side half of that decision.
+  it('carries neither phantom: /streamer-mode anywhere, /compact on opencode', () => {
+    expect(STANDARD_COMMANDS.some((c) => c.name === 'streamer-mode')).toBe(false);
+    expect(
+      STANDARD_COMMANDS.some((c) => c.name === 'compact' && c.cliTools?.includes('opencode'))
+    ).toBe(false);
+  });
+
+  // The bug that motivated the move: copilot built-ins used to live in
+  // getCopilotBuiltinCommands() with literal English `description`, so a ja
+  // user saw English for copilot and only copilot.
+  it('gives every copilot entry a descriptionKey and no literal description', () => {
+    const copilotEntries = STANDARD_COMMANDS.filter((c) => c.cliTools?.includes('copilot'));
+    expect(copilotEntries.length).toBe(COPILOT_1_0_80.length);
+    for (const cmd of copilotEntries) {
+      expect(cmd.cliTools).toEqual(['copilot']);
+      expect(cmd.description).toBeUndefined();
+      expect(allowedDescriptionKeys(cmd)).toContain(cmd.descriptionKey);
+      expect(cmd.source).toBe('standard');
+      expect(cmd.isStandard).toBe(true);
+    }
+  });
+
+  it('resolves every copilot description in both locales', () => {
+    for (const locale of LOCALES) {
+      for (const cmd of STANDARD_COMMANDS.filter((c) => c.cliTools?.includes('copilot'))) {
+        const text = descriptionFor(cmd, locale);
+        expect(text, `${locale} missing /${cmd.name}`).toBeTruthy();
+        expect(hasReviewMarker(text ?? '')).toBe(false);
+      }
+    }
+  });
+
+  // The headline i18n defect: one flat `descriptions.exit` held "Exit OpenCode
+  // TUI", and claude / codex both resolved through it. Splitting it per tool is
+  // only useful if each entry actually points at its own leaf.
+  it('gives /exit a tool-scoped key per tool, and keeps the OpenCode wording on opencode', () => {
+    const exits = STANDARD_COMMANDS.filter((c) => c.name === 'exit');
+    expect(exits.map((c) => c.cliTools?.join(',')).sort()).toEqual([
+      'claude',
+      'codex',
+      'copilot',
+      'opencode',
+    ]);
+    for (const cmd of exits) {
+      const tool = cmd.cliTools?.[0] as string;
+      expect(cmd.descriptionKey).toBe(toolDescriptionKeyFor('exit', tool));
+    }
+
+    for (const locale of LOCALES) {
+      const dict = loadDescriptions(locale);
+      const opencodeText = dict['exit.opencode'];
+      expect(opencodeText).toBeTruthy();
+      for (const tool of ['claude', 'codex', 'copilot']) {
+        expect(dict[`exit.${tool}`], `${locale} exit.${tool}`).toBeTruthy();
+        expect(
+          dict[`exit.${tool}`],
+          `${locale}: /exit on ${tool} still ships the opencode wording`
+        ).not.toBe(opencodeText);
+      }
+    }
+  });
+
+  // Splitting a key is a rewrite of every claimant, not an addition: a flat
+  // string cannot coexist with `<name>.<tool>` leaves, so an entry left on the
+  // old flat key resolves to undefined and renders blank.
+  it('leaves no entry pointing at a flat key that was split per tool', () => {
+    const splitNames = ['exit', 'login', 'logout', 'feedback', 'skills', 'init', 'agent',
+      'plugin', 'memory', 'app', 'debug'];
+    for (const locale of LOCALES) {
+      const dict = loadDescriptions(locale);
+      for (const name of splitNames) {
+        expect(dict[name], `${locale}: ${name} is still a flat string`).toBeUndefined();
+      }
+    }
+    for (const cmd of STANDARD_COMMANDS) {
+      if (!splitNames.includes(cmd.name)) continue;
+      expect(cmd.descriptionKey, `/${cmd.name} still uses the flat key`).not.toBe(
+        descriptionKeyFor(cmd.name)
+      );
+    }
+  });
+
+  it('records the probed CLI versions in verifiedAgainst', () => {
+    expect(CATALOG_VERIFIED_AGAINST.copilot).toBe('1.0.80');
+    expect(CATALOG_VERIFIED_AGAINST.opencode).toBe('1.18.21');
+  });
+});
+
 describe('FREQUENTLY_USED', () => {
   it('should be an object with cli tool keys', () => {
     expect(FREQUENTLY_USED).toBeDefined();
@@ -616,12 +789,19 @@ describe('FREQUENTLY_USED', () => {
     expect(FREQUENTLY_USED.codex).not.toContain('mcp');
   });
 
-  it('OpenCode frequently used should include models, new, compact, help, exit', () => {
-    expect(FREQUENTLY_USED.opencode).toContain('models');
-    expect(FREQUENTLY_USED.opencode).toContain('new');
-    expect(FREQUENTLY_USED.opencode).toContain('compact');
-    expect(FREQUENTLY_USED.opencode).toContain('help');
-    expect(FREQUENTLY_USED.opencode).toContain('exit');
+  // Issue #1913: /compact is not in the opencode 1.18.21 palette, so it left
+  // this list too — leaving it in would re-surface the phantom through the
+  // frequently-used row, which is exactly how #1502 leaked into antigravity.
+  // /status backfills to keep the list at 5.
+  it('OpenCode frequently used should be 5 real, opencode-visible commands', () => {
+    expect(FREQUENTLY_USED.opencode).toEqual(['models', 'new', 'status', 'help', 'exit']);
+    expect(FREQUENTLY_USED.opencode).not.toContain('compact');
+    FREQUENTLY_USED.opencode.forEach((name) => {
+      const visible = STANDARD_COMMANDS.some(
+        (c) => c.name === name && c.cliTools?.includes('opencode')
+      );
+      expect(visible, `frequentlyUsed /${name} is not opencode-visible`).toBe(true);
+    });
   });
 
   // Issue #1502: antigravity gets its own frequentlyUsed list (was falling back
@@ -724,12 +904,15 @@ describe('getFrequentlyUsedCommands', () => {
     expect(commands.some((c) => c.name === 'clear')).toBe(false);
   });
 
+  // Issue #1913: /compact left the opencode scope (not in the 1.18.21 palette)
+  // and /status took its slot in frequentlyUsed.opencode.
   it('should return OpenCode commands when cliToolId is opencode', () => {
     const commands = getFrequentlyUsedCommands('opencode');
     expect(commands.length).toBe(5);
     expect(commands.some((c) => c.name === 'models')).toBe(true);
     expect(commands.some((c) => c.name === 'new')).toBe(true);
-    expect(commands.some((c) => c.name === 'compact')).toBe(true);
+    expect(commands.some((c) => c.name === 'status')).toBe(true);
+    expect(commands.some((c) => c.name === 'compact')).toBe(false);
     expect(commands.some((c) => c.name === 'help')).toBe(true);
     expect(commands.some((c) => c.name === 'exit')).toBe(true);
     // All returned commands should be available for OpenCode

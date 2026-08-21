@@ -25,7 +25,9 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { removeTempDir } from '@tests/helpers/temp-dir';
 import { CopilotTool } from '@/lib/cli-tools/copilot';
+import { resolveCopilotExecutable } from '@/lib/cli-tools/copilot-executable';
 import { getAgentEventGenerationStartedAt } from '@/lib/session/agent-event-state';
+import { buildCopilotReadyFrame } from '@tests/fixtures/copilot-folder-trust-1080';
 
 vi.mock('child_process', async () => {
   const actual = await vi.importActual<typeof import('child_process')>('child_process');
@@ -38,15 +40,25 @@ vi.mock('@/lib/tmux/tmux', () => ({
   sendKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKey: vi.fn().mockResolvedValue(undefined),
   killSession: vi.fn().mockResolvedValue(true),
-  // Matches COPILOT_PROMPT_PATTERN, so `waitForReady` returns on its first poll.
-  capturePane: vi.fn().mockResolvedValue('> '),
+  // The live composer frame, so `waitForReady` returns on its first poll.
+  capturePane: vi.fn().mockResolvedValue(''),
   reconcileSessionGeometry: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock('@/lib/tmux/tmux-capture-cache', () => ({ invalidateCache: vi.fn() }));
 
+// Issue #1907: `startSession` refuses to launch without a copilot that answered
+// `--version`, and which of the two locations answered decides what it types.
+// Stubbed so these assertions turn on the launch plan, not on the runner.
+vi.mock('@/lib/cli-tools/copilot-executable', () => ({
+  resolveCopilotExecutable: vi.fn(),
+}));
+
 const WORKTREE_ID = 'wt-copilot-hooks';
 const WORKTREE_PATH = '/repos/wt-copilot-hooks';
+
+/** Copilot 1.0.80's composer frame (Issue #1886 recording). */
+const READY_FRAME = buildCopilotReadyFrame();
 
 let home: string;
 let tool: CopilotTool;
@@ -105,7 +117,12 @@ beforeEach(async () => {
   vi.mocked(tmux.hasSession).mockResolvedValue(false);
   vi.mocked(tmux.createSession).mockResolvedValue(undefined);
   vi.mocked(tmux.sendKeys).mockResolvedValue(undefined);
-  vi.mocked(tmux.capturePane).mockResolvedValue('> ');
+  vi.mocked(tmux.capturePane).mockResolvedValue(READY_FRAME);
+  vi.mocked(resolveCopilotExecutable).mockResolvedValue({
+    path: '/usr/local/bin/copilot',
+    version: '1.0.80',
+    source: 'path',
+  });
 
   const { execFile } = await import('child_process');
   vi.mocked(execFile).mockImplementation(
@@ -189,7 +206,7 @@ describe('the launch command', () => {
 
     expect(await sentCommand()).toBe(
       `CM_AGENT_WORKTREE_ID='${WORKTREE_ID}' CM_AGENT_INSTANCE_ID='copilot-2' ` +
-        `CM_HOOK_PORT='3210' gh copilot`
+        `CM_HOOK_PORT='3210' copilot`
     );
   });
 
@@ -205,7 +222,7 @@ describe('the launch command', () => {
 
     await startSession('copilot-2');
 
-    expect(await sentCommand()).toBe('gh copilot');
+    expect(await sentCommand()).toBe('copilot');
     expect(existsSync(join(home, 'settings.json'))).toBe(false);
   });
 
@@ -217,6 +234,6 @@ describe('the launch command', () => {
 
     await startSession();
 
-    expect(await sentCommand()).toBe('gh copilot');
+    expect(await sentCommand()).toBe('copilot');
   });
 });

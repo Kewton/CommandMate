@@ -51,7 +51,7 @@ Naming / Terminology:
 ### 1.3 Implemented Features
 
 - **CLI Tool Support** (Implemented in Issue #4, extended in Issue #368/#379/#545)
-  - Supports 6 tools: Claude Code, Codex CLI, Gemini CLI, Vibe-Local (Ollama), OpenCode, GitHub Copilot
+  - Supports 7 tools: Claude Code, Codex CLI, Gemini CLI, Vibe-Local (Ollama), OpenCode, GitHub Copilot, Antigravity (the authority is `CLI_TOOL_IDS` in `src/lib/cli-tools/types.ts`)
   - Extensible design via Strategy pattern
   - Select 2-4 agents per worktree (`selected_agents` column)
   - Vibe-Local supports Ollama model selection (`vibe_local_model` column)
@@ -411,7 +411,7 @@ tmux send-keys -t "{sessionName}" "claude" C-m
 - Tables (conceptual):
   - **worktrees**:
     - id, name, path, last_message_summary, updated_at
-    - **cli_tool_id** (added: Issue #4, extended in #379/#545) - CLI tool to use ('claude' | 'codex' | 'gemini' | 'vibe-local' | 'opencode' | 'copilot')
+    - **cli_tool_id** (added: Issue #4, extended in #379/#545/#988) - CLI tool to use ('claude' | 'codex' | 'gemini' | 'vibe-local' | 'opencode' | 'copilot' | 'antigravity')
     - **selected_agents** (added: Issue #368) - Selected 2-4 agents (JSON array, e.g., '["claude","vibe-local"]')
     - **vibe_local_model** (added: Issue #368) - Ollama model name for Vibe-Local (nullable)
     - repository_path, repository_name, description
@@ -501,11 +501,11 @@ A `.env.example` file is expected to be included in the repository.
 ### 10.2 Multi-LLM / Multi-Session ✅ Implemented (Issue #4, extended in #368/#379/#545)
 
 **Implementation:**
-- Supports 6 tools: Claude Code / Codex / Gemini / Vibe-Local / OpenCode / GitHub Copilot
+- Supports 7 tools: Claude Code / Codex / Gemini / Vibe-Local / OpenCode / GitHub Copilot / Antigravity
 - Each worktree manages its CLI tool via the `cliToolId` field
 - Abstraction via Strategy pattern:
   - `BaseCLITool` abstract class
-  - `ClaudeTool` / `CodexTool` / `GeminiTool` / `VibeLocalTool` / `OpenCodeTool` / `CopilotTool` implementation classes
+  - `ClaudeTool` / `CodexTool` / `GeminiTool` / `VibeLocalTool` / `OpenCodeTool` / `CopilotTool` / `AntigravityTool` implementation classes
   - `CLIToolManager` singleton for managing tool instances
 - Database schema: `worktrees.cli_tool_id` column (default: 'claude')
 - Supported APIs:

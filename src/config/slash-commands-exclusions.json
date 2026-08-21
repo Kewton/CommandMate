@@ -27,17 +27,39 @@
   "exclusions": [
     {
       "name": "ultraplan",
-      "cliTools": ["claude"],
+      "cliTools": [
+        "claude"
+      ],
       "kind": "phantom",
       "reason": "The claude docs row carries the bare marker \"Removed\" as its description; the command is not on the CLI. Adding it re-creates exactly the phantom entries #1502/#1503 purged.",
       "issue": 1503
     },
     {
       "name": "schedule",
-      "cliTools": ["claude"],
+      "cliTools": [
+        "claude"
+      ],
       "kind": "out-of-scope",
       "reason": "Real upstream with a correct description (cloud-run routines), but #1488 decided the palette does not carry it. A curation call, not a phantom — removing this row needs a human to re-decide.",
       "issue": 1488
+    },
+    {
+      "name": "streamer-mode",
+      "cliTools": [
+        "copilot"
+      ],
+      "kind": "phantom",
+      "reason": "Absent from `copilot help commands` on 1.0.80 and from the interactive palette: typing the full /streamer-mode returns no match, while the /zzzz negative control and the /undo positive control behave as expected.",
+      "issue": 1913
+    },
+    {
+      "name": "compact",
+      "cliTools": [
+        "opencode"
+      ],
+      "kind": "phantom",
+      "reason": "Not in the opencode 1.18.21 slash palette (18 entries, agents..variants). Typing the full /compact only fuzzy-matches the /review description text, never a /compact row; /status matches its own row as a control.",
+      "issue": 1913
     }
   ]
 }

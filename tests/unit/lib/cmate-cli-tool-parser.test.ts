@@ -56,6 +56,26 @@ describe('parseCliToolColumn', () => {
     expect(parseCliToolColumn('opencode')).toEqual({ cliToolId: 'opencode', model: undefined });
   });
 
+  // Issue #1914: `provider/model` is the format opencode documents for `-m`.
+  it.each([
+    'ollama/qwen3:8b',
+    'anthropic/claude-sonnet-4-5',
+    'github-copilot/gpt-5',
+  ])('should parse "opencode --model %s"', (model) => {
+    expect(parseCliToolColumn(`opencode --model ${model}`)).toEqual({
+      cliToolId: 'opencode',
+      model,
+    });
+  });
+
+  it('should reject an opencode model starting with a hyphen (DR4-001)', () => {
+    // Not a parse error — the tokenizer accepts three tokens — so the rejection
+    // has to come from the shared model-name validation.
+    const { result, errors } = parseAndValidateCliToolColumn('opencode --model --auto');
+    expect(result.cliToolId).toBe('opencode');
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
   // Copilot --model cases
   it('should parse "copilot --model gpt-5.4-mini" correctly', () => {
     const result = parseCliToolColumn('copilot --model gpt-5.4-mini');
@@ -361,8 +381,20 @@ describe('TOOLS_WITH_MODEL_SUPPORT', () => {
     expect(TOOLS_WITH_MODEL_SUPPORT.has('vibe-local')).toBe(false);
   });
 
-  it('should have exactly 1 member', () => {
-    expect(TOOLS_WITH_MODEL_SUPPORT.size).toBe(1);
+  // Issue #1914: opencode's `-m, --model` takes a `provider/model` value
+  // (`opencode run --help`, measured on 1.18.21), which the single-cell
+  // "<tool> --model <name>" tokenizer represents fine — unlike antigravity's
+  // display names below.
+  it('should contain opencode (Issue #1914)', () => {
+    expect(TOOLS_WITH_MODEL_SUPPORT.has('opencode')).toBe(true);
+  });
+
+  it('should not contain gemini', () => {
+    expect(TOOLS_WITH_MODEL_SUPPORT.has('gemini')).toBe(false);
+  });
+
+  it('should have exactly 2 members', () => {
+    expect(TOOLS_WITH_MODEL_SUPPORT.size).toBe(2);
   });
 
   // Issue #989: antigravity model names contain spaces (e.g. "Gemini 3.1 Pro

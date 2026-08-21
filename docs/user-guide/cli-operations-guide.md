@@ -1540,26 +1540,68 @@ gemini       Gemini  gemini    no       no
 - `send ... --instance <id> --register` を付けると、送信後にそのインスタンスを roster へ自動登録します。UIと状態を一致させたい場合はこちらを使ってください。
 - 有効な `--instance` の値を調べるには `commandmate instances <worktree-id>` で roster と稼働中セッションを確認します。
 
-### `--agent` と `--instance` の優先順位（Issue #1629）
+### `--agent` と `--instance` の優先順位（Issue #1629 / #1925）
 
 `--instance` はインスタンスIDであってCLIツール名ではないため、どのCLIツールで起動するかは
 別に決める必要があります。CLIツールIDは tmux セッション名の一部（`mcbd-<agent>-<worktree>[-<suffix>]`）
 なので、取り違えると「codex という名前のセッションで claude が動く」状態になります。
 決定順は次のとおりで、`send` / `respond` / `capture` / `auto-yes` で共通です。
 
-| ケース | 採用されるCLIツール |
-|--------|--------------------|
-| `--instance` が roster に**ある** / `--agent` 省略 | roster の `CLI_TOOL` |
-| `--instance` が roster に**ある** / `--agent` が roster と**一致** | その値 |
-| `--instance` が roster に**ある** / `--agent` が roster と**不一致** | **エラー（exit 2）**。roster が正本なので黙って上書きしない |
-| `--instance` が roster に**ない** / `--agent` 指定あり | `--agent` の値（アドホック起動） |
-| `--instance` が roster に**ない** / `--agent` 省略・IDがCLIツール名（例 `codex`） | そのCLIツール（プライマリインスタンス） |
-| `--instance` が roster に**ない** / `--agent` 省略・IDが独自名（例 `codex-9`） | worktree の既定エージェント |
+| ケース | 採用されるCLIツール | `resolvedBy` |
+|--------|--------------------|--------------|
+| `--instance` が roster に**ある** / `--agent` 省略 | roster の `CLI_TOOL` | `roster` |
+| `--instance` が roster に**ある** / `--agent` が roster と**一致** | その値 | `roster` |
+| `--instance` が roster に**ある** / `--agent` が roster と**不一致** | **変更系はエラー（exit 2）**。roster が正本なので黙って上書きしない | `roster` ＋ `conflict` |
+| `--instance` が roster に**ない** / `--agent` 指定あり | `--agent` の値（アドホック起動） | `explicit` |
+| `--instance` が roster に**ない** / `--agent` 省略・IDがCLIツール名（例 `codex`） | そのCLIツール（プライマリインスタンス） | `primary` |
+| `--instance` が roster に**ない** / `--agent` 省略・IDが独自名（例 `codex-9`） | worktree の既定エージェント | `worktree-default` |
+| `--instance` 省略 | `--agent` の値、無ければ worktree の既定エージェント（roster は参照しない） | `explicit` / `worktree-default` |
 
 不一致でエラーになった場合は、`--agent` を外す・roster と同じ値にする・
 `commandmate instances <worktree-id> remove/add` で roster を登録し直す、のいずれかで解消します。
 
-> roster を読めない場合（古いデーモンなど）は警告を出して `--agent` をそのまま使います。
+#### 決定するのはサーバ（Issue #1925）
+
+上の表を適用するのは**サーバ**です。CLI は `GET /api/worktrees/<id>/resolve-target` に問い合わせ、
+返ってきた `cliToolId` / `instanceId` / `resolvedBy` をそのまま使います。以前は CLI 側にも
+同じ規則の写しがあり、しかも**プライマリインスタンスの段（上表 5 行目）が欠けていた**ため、
+roster 未登録の `--instance codex` に対して CLI とサーバが違う答えを返していました。
+
+不一致（`conflict`）の扱いは**副作用の有無で分かれます**。
+
+| 区分 | コマンド | 不一致のとき |
+|------|----------|--------------|
+| 変更 | `send` / `respond` / `auto-yes --enable` | **exit 2**。送り先を推測して副作用を起こさない |
+| 読み取り | `capture` | **警告を stderr に 1 行出して roster 側で読む**（exit 0） |
+
+`capture` を例外にしているのは、監視スクリプトが `capture` の非 0 終了を「今回のポーリングを飛ばす」
+と解釈して無限に回り続けるためです（`--agent` を取り違えたワーカー 1 本で、監視が無音のまま止まらなくなる）。
+
+#### CLI が稼働サーバより新しいとき
+
+`npm i -g commandmate` は**稼働中のデーモンを再起動しません**。そこで CLI は
+`GET /api/capabilities`（`{ serverVersion, capabilities }`）をプロセス内 1 回だけ問い合わせ、
+サーバが解決に対応しているかを確かめてから委譲します。判定は次の 4 通りだけです。
+
+| 応答 | 動作 |
+|------|------|
+| 200 ＋ JSON ＋ `capabilities` に `resolve-session-target` | サーバへ委譲する |
+| **本物の 404**（本文が空 or JSON） | 旧サーバとみなし CLI 側で解決（`resolvedBy: client-fallback`）。**stderr に警告 1 行** |
+| 401 / 403 | 認証エラーとして終了。**フォールバックしない** |
+| 3xx / HTML / JSON でない本文 / 500 / 通信エラー | 「サーバの能力を判定できない」として終了。**フォールバックしない** |
+
+`client-fallback` は**プライマリインスタンスの段を持たない劣化解決**です。認証が通っていないだけの
+応答や中間装置（リバースプロキシ・ngrok 等）の応答をここに落とすと `send` / `respond` の着弾先が
+変わりうるため、**旧サーバだと確認できた場合以外はフォールバックしません**。警告が出たら
+`commandmate stop && commandmate start` でサーバを入れ替えてください。
+
+> roster を読めない場合（`client-fallback` 経路のみ）は警告を出して `--agent` をそのまま使います。
+
+#### ツール依存オプションは解決の**後**に検証されます
+
+`send --model` は解決後の CLI ツールに対して検証されます。したがって
+`send <id> "..." --instance copilot-2 --model gpt-5-mini` は `--agent copilot` を重ねなくても通ります
+（roster が `copilot-2` を copilot だと宣言しているため）。
 
 ### per-instance Auto-Yes
 
@@ -1630,7 +1672,7 @@ commandmate report metrics --json                  # JSON出力
 | オプション | 説明 | デフォルト |
 |-----------|------|-----------|
 | `--date <date>` | 対象日（`YYYY-MM-DD`） | 当日 |
-| `--tool <tool>` | 使用するAIツール（claude, codex, copilot） | claude |
+| `--tool <tool>` | 使用するAIツール（claude, codex, copilot, antigravity） | claude |
 | `--model <model>` | モデル名（copilot 向け） | - |
 | `--template <id>` | テンプレートIDを指示文として使用 | - |
 | `--instruction <text>` | カスタム指示文（`--template` の代替） | - |
@@ -1646,7 +1688,7 @@ commandmate report metrics --json                  # JSON出力
 | `--token <token>` | 認証トークン（`CM_AUTH_TOKEN` 環境変数を推奨） | - |
 
 > **注意**: `--date` は `YYYY-MM-DD` 形式のみ受け付けます。不正な形式は `exit 2`（CONFIG_ERROR）になります。
-> `--tool` は claude / codex / copilot のいずれか、`--days` は 1 以上を指定してください。
+> `--tool` は claude / codex / copilot / antigravity のいずれか、`--days` は 1 以上を指定してください。
 
 ### list 出力例
 

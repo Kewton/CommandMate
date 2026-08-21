@@ -5,9 +5,10 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { CopilotTool } from '@/lib/cli-tools/copilot';
+import { resolveCopilotExecutable } from '@/lib/cli-tools/copilot-executable';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
-// Mock child_process execFile for isInstalled tests
+// Mock child_process execFile so nothing here can spawn a real process
 vi.mock('child_process', async () => {
   const actual = await vi.importActual<typeof import('child_process')>('child_process');
   return {
@@ -15,6 +16,13 @@ vi.mock('child_process', async () => {
     execFile: vi.fn(),
   };
 });
+
+// Issue #1907: install detection is a filesystem probe now (PATH lookup +
+// `--version`), so it is stubbed here and exercised for real against temp
+// directories in copilot-install-detection-1907.test.ts.
+vi.mock('@/lib/cli-tools/copilot-executable', () => ({
+  resolveCopilotExecutable: vi.fn(),
+}));
 
 // Mock tmux functions
 vi.mock('@/lib/tmux/tmux', () => ({
@@ -67,8 +75,10 @@ describe('CopilotTool', () => {
       expect(tool.name).toBe('Copilot');
     });
 
-    it('should have correct command (gh)', () => {
-      expect(tool.command).toBe('gh');
+    // Issue #1907: was 'gh', from the days when copilot was the `gh-copilot`
+    // extension. Copilot CLI is a standalone executable.
+    it('should have correct command (copilot)', () => {
+      expect(tool.command).toBe('copilot');
     });
 
     it('should have CLIToolType as id type', () => {
@@ -88,57 +98,25 @@ describe('CopilotTool', () => {
     });
   });
 
+  // Issue #1907: `isInstalled` is now the resolver's answer and nothing else.
+  // The resolution rules themselves (PATH first, gh's downloaded copy second,
+  // a version string required) live in copilot-install-detection-1907.test.ts,
+  // where they run against real temp directories.
   describe('isInstalled', () => {
-    it('should return true when both gh and copilot extension are available', async () => {
-      const { execFile } = await import('child_process');
-      const mockExecFile = vi.mocked(execFile);
-      // First call: gh --version (success)
-      // Second call: gh copilot --help (success)
-      mockExecFile.mockImplementation((_command: string, args: unknown, _options: unknown, callback?: unknown) => {
-        const cb = callback as (error: Error | null, stdout: string, stderr: string) => void;
-        if (cb) {
-          cb(null, 'success', '');
-        }
-        return {} as import('child_process').ChildProcess;
+    it('should return true when a copilot executable answered --version', async () => {
+      vi.mocked(resolveCopilotExecutable).mockResolvedValue({
+        path: '/usr/local/bin/copilot',
+        version: '1.0.80',
+        source: 'path',
       });
 
-      const installed = await tool.isInstalled();
-      expect(installed).toBe(true);
-      expect(mockExecFile).toHaveBeenCalledTimes(2);
+      await expect(tool.isInstalled()).resolves.toBe(true);
     });
 
-    it('should return false when gh is installed but copilot extension is not', async () => {
-      const { execFile } = await import('child_process');
-      const mockExecFile = vi.mocked(execFile);
-      let callCount = 0;
-      mockExecFile.mockImplementation((_command: string, args: unknown, _options: unknown, callback?: unknown) => {
-        const cb = callback as (error: Error | null, stdout: string, stderr: string) => void;
-        callCount++;
-        if (callCount === 1) {
-          // gh --version succeeds
-          cb(null, 'gh version 2.0.0', '');
-        } else {
-          // gh copilot --help fails
-          cb(new Error('unknown command "copilot"'), '', 'unknown command "copilot"');
-        }
-        return {} as import('child_process').ChildProcess;
-      });
+    it('should return false when nothing answered', async () => {
+      vi.mocked(resolveCopilotExecutable).mockResolvedValue(null);
 
-      const installed = await tool.isInstalled();
-      expect(installed).toBe(false);
-    });
-
-    it('should return false when gh is not installed', async () => {
-      const { execFile } = await import('child_process');
-      const mockExecFile = vi.mocked(execFile);
-      mockExecFile.mockImplementation((_command: string, _args: unknown, _options: unknown, callback?: unknown) => {
-        const cb = callback as (error: Error | null, stdout: string, stderr: string) => void;
-        cb(new Error('command not found: gh'), '', '');
-        return {} as import('child_process').ChildProcess;
-      });
-
-      const installed = await tool.isInstalled();
-      expect(installed).toBe(false);
+      await expect(tool.isInstalled()).resolves.toBe(false);
     });
   });
 
@@ -167,7 +145,7 @@ describe('CopilotTool', () => {
     it('should have readonly properties', () => {
       expect(tool.id).toBe('copilot');
       expect(tool.name).toBe('Copilot');
-      expect(tool.command).toBe('gh');
+      expect(tool.command).toBe('copilot');
     });
   });
 

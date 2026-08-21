@@ -4,7 +4,8 @@ CommandMate はエージェントの完了を、既定では **tmux 画面の文
 hook を入れると、エージェント CLI 自身が発する**構造化イベント**が第一級の情報源として
 加わる（Issue #1549）。
 
-**Claude セッションについては、この hook は CommandMate が自動注入する**（Issue #1722）。
+**この hook は CommandMate が自動注入する**（Issue #1722、Epic #1720 Phase 4）。
+対応は **claude / copilot / gemini / antigravity / codex / opencode の 6 ツール**で、
 手動設定は不要になった（§0）。手動設定を残していても壊れない — §0.4 を参照。
 
 > **文字列解析は廃止しない**。hook は「二つ目の意見」であり、
@@ -12,10 +13,58 @@ hook を入れると、エージェント CLI 自身が発する**構造化イ�
 
 ---
 
-## 0. 自動注入（Claude / Issue #1722）
+## 0. 自動注入（Issue #1722 / Epic #1720 Phase 4）
 
-CommandMate が Claude セッションを**新規作成**するとき、そのセッション専用の
-hooks 設定ファイルを生成し `claude --settings <file>` で渡す。
+CommandMate がエージェントセッションを**新規作成**するとき、そのツール用の hook 設定を
+自動で用意し、起動コマンドに載せる。対応ツールの正本は
+`src/lib/hooks/sources/registry.ts` 末尾の `registerAgentEventSource(...)` 呼び出しで、
+現在は **claude / copilot / gemini / antigravity / codex / opencode の 6 ツール**である
+（`vibe-local` だけが未登録。登録の無いツールは `legacy-relay` の互換ソースに落ち、
+#1549 時点の手動設定と同じ挙動になる）。
+
+### 0.0 ツール別の一覧
+
+**「Claude と同じはず」で読むと必ず外れる。** 配送方式・設定ファイル・相関キーの運び方・
+裁定の予算がツールごとに違い、どれも**無言で壊れる**種類の違いである。
+
+| ツール | CommandMate が書く設定 | スコープ | 相関キーの運び方 | 配送 | 裁定イベント | 決定予算 |
+|---|---|---|---|---|---|---|
+| **claude** | `~/.commandmate/hooks/claude-<worktreeId>-<instanceId>-<hash>.json` を生成し `--settings <file>` で渡す | per-instance | **URL のクエリに焼き込み** | `http`（`SessionStart` だけ `command`。§0.2） | `PermissionRequest` | 5 秒 |
+| **copilot** | **`~/.copilot/settings.json`（マシン共通のユーザー設定）へ merge** | global-singleton | **環境変数** `CM_AGENT_WORKTREE_ID` / `CM_AGENT_INSTANCE_ID` / `CM_HOOK_PORT` | `command`（`http` は 1 件も届かない） | `PreToolUse` | **10 秒** |
+| **codex** | `$CODEX_HOME/hooks.json`（既定 `~/.codex/hooks.json`、マシン共通） | global-singleton | 環境変数 `CM_AGENT_WORKTREE_ID` / `CM_AGENT_INSTANCE_ID` ＋ `CM_HOOK_URL` | `command`（`http` handler が 1 つあると**ファイルごと破棄される**） | `PermissionRequest` | 5 秒（`SessionEnd` だけ codex 側が 3 秒に clamp） |
+| **gemini** | `<worktree>/.gemini/settings.json` へ merge | per-worktree | `CM_HOOK_URL`（instance は URL 側） | `command` | **なし**（応答が裁定になるイベントを登録しない） | — |
+| **antigravity** | `~/.gemini/config/hooks.json`（マシン共通。gemini と同じツリーに同居） | global-singleton | 環境変数 `CM_HOOK_URL` / `CM_PERMISSION_HOOK_URL` | `command` | `PreToolUse` | 5 秒 |
+| **opencode** | **何も書かない** | none | 起動時に割り当てた `--port <N>` | **push ではない** — CommandMate が SSE を**購読する側** | `POST /permission/:id/reply` | **なし（無期限に待つ）** |
+
+読み方の注意:
+
+- **決定予算**は「CommandMate の裁定が間に合わないと何が起きるか」の締切であって、
+  そのツールが hook 全般に与える時間ではない。各ソースが
+  `capabilities.decisionTimeoutSeconds` として公開しており、呼び出し側は定数を
+  読み直さずここを見る。
+- **`type:"http"` が使えるのは claude だけ。** copilot は `http` handler から 1 件も
+  リクエストが届かず（エラーも出ない）、codex は `http` handler が 1 つあるだけで
+  `hooks.json` 全体を破棄する。他 4 ツールでは
+  `scripts/hooks/cmate-agent-event.sh`（§2）が唯一の配送路である。
+- **`gemini` の `timeout` はミリ秒**。他ツールのつもりで `5` と書くと 5ms で殺され、
+  「登録もされ、開示バナーにも出て、実行もされたのに全イベントが失われる」状態になる。
+- **裁定の見送り（no-decision）が安全でないのは opencode だけ。** 他 5 ツールは
+  見送っても承認ダイアログが出るだけだが、opencode は**セッションが止まる**
+  （実測 10 分 19 秒無応答で pending のまま）。§0.8 を参照。
+
+全ツール共通の性質:
+
+| 事項 | 内容 |
+|---|---|
+| opt-out | **`CM_AGENT_HOOKS_INJECT=0`** で 6 ツールとも注入をスキップし、Issue #1722 以前と同じ素の起動コマンドに戻る（§0.3） |
+| 生成物の置き場所 | claude の生成ファイルは `~/.commandmate/hooks`（`CM_AGENT_HOOKS_DIR` で差替可）。**ユーザー自身の設定ファイルを書き換えるのは copilot / codex / gemini / antigravity で、いずれも merge** — 自分の marker つきエントリだけを差し替え、他のキーとハンドラは素通しする。解釈できないファイルは**触らず**、hook 無しで起動する |
+| fail-open | timeout も接続失敗も設定書き込み失敗もエージェントを止めない。**hook の無い素の起動に落ちるだけ**である |
+| 既存セッション | healthy な既存セッションの**再利用時は注入しない**（§0.5）。次の新規作成から効く |
+| 起動完了の signal | **hook の到着を起動完了の判定に使わない**（§0.5） |
+
+**以下 §0.1〜§0.7 は claude の詳細**である。claude 以外の 5 ツール固有の注意は §0.8 にまとめた。
+
+### claude の注入ファイル
 
 ```
 ~/.commandmate/hooks/claude-<worktreeId>-<instanceId>-<hash>.json
@@ -114,7 +163,10 @@ Claude は承認ダイアログを**描く前に**この hook を叩き、Comman
   ダイアログが出るだけになる。
 - Auto-Yes のトグルとは**独立に常時注入**される。注入はセッション起動時 1 回きりで、
   Auto-Yes は後から有効化されるため、トグル連動にすると「有効にしたのに hook が無い」状態が生まれる。
-- **画面ベースの Auto-Yes は残っている。** hooks 非対応の環境と Claude 以外の CLI では従来どおり動く。
+- **画面ベースの Auto-Yes は残っている。** hooks を注入できない環境（`CM_AGENT_HOOKS_INJECT=0`、
+  設定ファイルの書き込みに失敗した場合、codex の hook trust 未承認など）と `vibe-local` では
+  従来どおり画面解析で動く。裁定 hook を持つ 5 ツール（claude / codex / copilot / antigravity /
+  opencode）では、hook 側が先に裁定する。
 
 > **この 2 つの挙動は実 TUI で継続的に確認されている**（Issue #1847）。
 > `npm run canary` の `permission-hook-allow`（allow → ダイアログが出ずにツールが走る）と
@@ -194,6 +246,93 @@ CM_AGENT_HOOKS_INJECT=0 commandmate start
 
 deny ルールだけを外すスイッチは**用意していない**。構造化イベントごと失う方が、
 「機構は入っているが誰かが黙って外している」状態より事故を見つけやすい。
+
+### 0.8 claude 以外の 5 ツール
+
+§0.0 の表の各行が、実装のどこで何を意味しているか。**どれも実測に基づく**（出典は
+`docs/design/agent-hooks-phase4-live-verification.md` と各ソースのモジュールコメント）。
+
+#### copilot — マシン共通の `~/.copilot/settings.json` を書き換える
+
+**このツールだけは、ユーザーの機械全体で 1 つしかない設定ファイルを CommandMate が書き換える。**
+`copilot` に `--settings` 相当のオプションが無く、per-launch のファイルを作れないためである。
+
+- **merge であって上書きではない。** CommandMate 自身の marker
+  （`cmate-copilot-agent-hooks`。シェルの no-op `:` の引数として書かれる）を持つエントリだけを
+  差し替え、他のキーとハンドラは 1 バイトも触らない。**解釈できないファイルは触らず、
+  hook 無しでセッションを起動する** — イベントを失うのは回復できるが、
+  ユーザーの設定を壊すのは回復できない。
+- **書き込みは原子的置換＋ロック**（Issue #1904）。同じディレクトリの `.cmate.lock` を取り、
+  一時ファイルへ書いて `rename` する。`commandmate start --issue N --auto-port` で
+  複数サーバが同時に動く運用が正式にサポートされている以上、`writeFileSync` の
+  「truncate してから書く」窓は実在するリスクである。**ロックを取れなければ hook 無しで起動する。**
+- **`config.json` に `hooks` があるときは settings.json を書かない**（Issue #1904）。
+  `copilot help config` は `hooks` を `config.json` のキーとして案内しているが、
+  copilot 1.0.80 は起動時にそのキーを `settings.json` **の上へ**移送する。つまり
+  公式ドキュメントに従った利用者の設定が、CommandMate の書いた内容を無言で消す。
+  CommandMate は先に `config.json` を検査し、`hooks` があれば**書かずに素の起動へ落ちる**。
+- **hook は `CM_AGENT_WORKTREE_ID` が無ければ不活性。** マシン共通のファイルなので、
+  利用者が自分の端末で起動した copilot にも同じ hook が仕掛かる。全ハンドラの先頭に
+  `[ -z "$CM_AGENT_WORKTREE_ID" ]` のガードがあり、未設定なら stdin を捨てて `exit 0` する。
+  これが無いと、たまたま登録済み worktree の中で起動した無関係な copilot の `Stop` が
+  `cwd` で解決され、**誰のエージェントも終わっていないのに `commandmate wait` が返る**。
+  `CM_HOOK_PORT` が数字でない場合も同じく不活性になる。
+- **相関キーは環境変数で運ぶ**（`CM_AGENT_WORKTREE_ID` / `CM_AGENT_INSTANCE_ID`）。
+  書き込み時に URL へ焼き込むと、1 worktree の `copilot` と `copilot-2` のうち
+  後から起動したほうが先のインスタンスの名前で post することになる。
+  **ポート（`CM_HOOK_PORT`）も同じ理由で環境変数**である — 実際に、開発サーバ（3011）が
+  ファイルを書き換えた結果、本番 3000 のセッションまで 3011 へ post していた。
+- **決定予算は約 10 秒**（claude の `PermissionRequest` 用 5 秒設定とは別物で、
+  copilot 側の hook 打ち切り時間）。生成コマンド内の `curl` は 4 秒で自分を打ち切る。
+  遅れた裁定は破棄され、ツールはそのまま実行される（fail-open）。
+
+#### codex — `$CODEX_HOME/hooks.json`、ただし人が trust するまで動かない
+
+- ファイルは `$CODEX_HOME/hooks.json`（既定 `~/.codex/hooks.json`）**1 本のみ**。
+  `<worktree>/.codex/hooks.json` も発火するが、worktree ごとに untracked な `.codex/` が増え、
+  trust が絶対パス単位なので worktree の数だけ人が承認し直すことになるため採らない。
+- **hook は人が trust するまで完全な沈黙のうちに skip される。** trust は利用者自身の
+  `~/.codex/config.toml` に記録され、CommandMate はこのファイルを書かない。
+- 相関キーは copilot と同じく環境変数で運ぶ。**copilot と違い、CommandMate が起動していない
+  codex セッションも post する** — 環境変数が無いぶん相関キーが載らず、受け口は `cwd` から
+  worktree を解決してプライマリインスタンス扱いにする（＝#1549 の手動設定と同じ挙動）。
+
+#### gemini — worktree 内の `.gemini/settings.json`、`timeout` はミリ秒
+
+- 5 ツール中このツールだけ hook 設定が worktree スコープで、`~/.gemini/settings.json` は
+  一切開かない。**利用者のリポジトリ内のファイルを書き換える**ので、merge であることと、
+  書き込む command 文字列が起動ごとに変わらないことの両方が要件になる
+  （gemini は trust した command 文字列を記録しており、変わると開示バナーを出し直す）。
+- **`timeout` の単位はミリ秒**。`5` と書くと 5ms で殺される。
+- `BeforeTool` / `AfterTool` は**意図的に登録しない**（同期実行なのでツール呼び出しごとに
+  往復 2 回を足すだけで、得られる情報は `BeforeAgent` が既に立てている `running` と同じ）。
+
+#### antigravity — `~/.gemini/config/hooks.json`（gemini と同居）
+
+- agy が読むのは `~/.gemini/config/hooks.json` **1 本だけ**。文書化されている
+  `<workspace>/.agents/hooks.json` は読まれない。`~/.gemini/` は gemini の
+  OAuth 資格情報や agy 自身の状態と同居しているので、書き込みは merge に限られる。
+- ファイルは**相関キーを一切持たない**。worktree と instance は起動セッションの
+  環境変数（`CM_HOOK_URL` / `CM_PERMISSION_HOOK_URL`）で運ぶ。
+- **`PreToolUse` だけは中継スクリプトを通さない。** agy の `PreToolUse` は応答の
+  `decision` が必須で、`{}` を返すと**全ツール呼び出しが拒否される**。中継スクリプトは
+  stdout に何も書かないため、こちらは stdout が裁定になるインライン `curl` で構成する。
+
+#### opencode — 何も書かない。CommandMate が購読する側
+
+- **設定ファイルを 1 バイトも書かない**（`configScope: 'none'`）。統合の実体は
+  起動コマンドに付ける `--port <N>` と、そのポートへの SSE 購読だけである。
+  他 5 ツールが「エージェント → CommandMate へ POST」なのに対し、これだけが逆向きになる。
+- **ポートは CommandMate が明示的に割り当てる**（範囲 4200-4299）。`--port 0` は
+  「OS に空きを訊く」ではなく「まず 4096、埋まっていれば ephemeral」で、実ポートを
+  読み戻す手段が stdout か `lsof` しか無い。割当は `~/.commandmate/opencode-ports.json`
+  に永続化し、CommandMate 再起動後は推測ではなく記録＋health check で復帰する。
+- **裁定を見送ると、ダイアログが出るのではなくセッションが止まる。** 承認要求を
+  10 分 19 秒放置しても timeout もフォールスルーも起きなかった（実測）。TUI のダイアログと
+  REST の pending は 2 段階ではなく同じオブジェクトの 2 つの見え方なので、
+  「判断できないときは黙る」が唯一成立しないソースである。
+- 縮退は全経路 fail-open（ポート枯渇・サーバ不達・SSE 断のいずれも画面解析に落ちる）。
+  `CM_AGENT_HOOKS_INJECT=0` は起動を素の `opencode` に戻す。
 
 ---
 
@@ -393,10 +532,15 @@ hook が届いているかを確認したいときはこれを見る。
   リクエストは従来どおり**プライマリインスタンス**の task に適用される。
   1 worktree で `codex` と `codex-2` を併走させている場合、`codex-2` の hook に
   `--instance-id codex-2` を足さないと `codex` の task を動かす。
-  Claude の自動注入セッションではこれは自動で入る。
-- **自動注入は Claude のみ**: codex / gemini / copilot 等への展開は今後。
-  受け口自体は `tool` に既存 CLI ツール id を取れるので、
-  同じスクリプトで `--tool` を変えれば送信はできる。
+  自動注入したセッションではこれは自動で入る（claude は URL、他 4 ツールは環境変数）。
+- **自動注入の対象は 6 ツール**: claude / copilot / gemini / antigravity / codex / opencode
+  （`src/lib/hooks/sources/registry.ts` が正本）。**`vibe-local` だけが未対応**で、
+  従来どおり画面解析のみで判定する。受け口は `tool` に既存 CLI ツール id を取れるので、
+  未対応ツールでも同じスクリプトで `--tool` を変えれば手動で送信できる。
+- **ツールごとに前提が違う**: 設定ファイルの置き場所・相関キーの運び方・決定予算・
+  「裁定を見送ったときに何が起きるか」はいずれもツール依存である（§0.0 の表と §0.8）。
+  とくに **opencode は裁定を見送るとセッションが止まる**唯一のソースで、
+  **codex は人が hook を trust するまで沈黙のうちに skip される**。
 - **hook 到着 ≠ 起動完了**: §0.5 のとおり、未 trust ディレクトリでは
   trust ダイアログに答えるまで `SessionStart` すら来ない。
 - **hook はすべて fail-open**: timeout も接続失敗もエージェントを止めない。
