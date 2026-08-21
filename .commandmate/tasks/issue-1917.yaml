@@ -1,0 +1,139 @@
+version: 1
+title: "Issue #1917: 重い verify ゲートを mutex で直列化する"
+goal: |
+  /bug-fix 1917
+
+  https://github.com/Kewton/CommandMate/issues/1917 を修正してください。
+  **本文は 2026-08-21 に訂正済みです。必ず `gh issue view 1917` で最新を取得してから着手してください。**
+  末尾の「【重要・訂正 2026-08-21】ロック機構は既に存在する。作らないこと」が今回の前提です。
+
+  ## 事象（実測。オーケストレーターが当事者）
+
+  並列ワーカーの `wait --verify` が同時にフル `npm run test:unit` を走らせ、
+  **diff と無関係のテストが落ちて exit 20（検証不合格）**になりました。
+
+      FAIL tests/unit/skills/orchestrate-monitor/monitor-exit-codes.test.ts
+        > reports a failing `git status` while the commit counter still answers
+      AssertionError: expected '' to contain "status --porcelain' failed (exit 130)"
+      Test Files  1 failed | 918 passed (919)
+
+  帰属の検証:
+
+  | 検証 | 結果 |
+  |---|---|
+  | 失敗したテストは diff に含まれるか | **含まれない** |
+  | テストの対象（`.claude/skills/orchestrate-monitor/`）は diff に含まれるか | **含まれない** |
+  | 単独実行 | **16/16 PASS, exit 0** |
+
+  所要時間が事象を裏付けています:
+
+  | 実行 | 所要 | 同時実行 | 結果 |
+  |---|---|---|---|
+  | #1879 | 486.5s | なし | PASS |
+  | #1882 | 553.4s | なし | PASS |
+  | #1890 | 501.9s | あり | PASS |
+  | **#1889** | **640.5s** | **あり** | **FAIL** |
+
+  同セッション中に**再発**しています（#1889 の再裁定と #1892 の verify が再び同時に unit へ到達）。
+  一度きりの事故ではなく、並列オーケストレーションでは構造的に繰り返し起きます。
+
+  ## 【最重要】ロック機構は既にある。作らないこと
+
+  起票時の本文は「マシングローバルなロックを実装する」前提で書かれていましたが**誤りです**。
+  **#1771 で完全に実装済み**であることをオーケストレーターが確認しました。
+
+  | 資産 | 場所 |
+  |---|---|
+  | ロック本体（Node） | `src/lib/verification/machine-lock.ts`（`acquireMachineLock` 等） |
+  | ロック本体（bash） | `.claude/skills/cmate-verify/scripts/verify-run.sh:557-614` |
+  | ゲートからの利用 | `src/lib/verification/gate-runner.ts` |
+  | 宣言方法 | `.commandmate/verify.yaml` のゲートに **`mutex: <name>`** |
+  | 仕様 | `docs/design/verification-config.md` **§9.2 / §9.3** |
+
+  既に満たされていること: マシン全体で共有 / `mkdir` によるアトミック性（macOS に `flock(1)` が無いため）/
+  stale lock 回収（自ホストかつ pid 不在のときだけ奪える。`token` で二重解放も防止）/
+  `waited=<n>s` の可視化（`duration` に足さない規約つき）/ 待ちの上限＝そのゲートの `timeoutSec` /
+  `CM_VERIFY_LOCK_ROOT` によるテスト用ルート差し替え。
+
+  **本当に足りないのは「どのゲートも `mutex` を宣言していない」ことだけです。**
+  したがって本 Issue の実装は **「重いゲートに `mutex` を宣言する」** に縮みます。
+
+  **`machine-lock.ts` と `verify-run.sh` のロック部を書き換えないでください。**
+  実装に不足が見つかった場合のみ、根拠を明記したうえで最小限に留めること。
+
+  ## 設計判断が要る点
+
+  ### 1. 命名
+
+  §9.2 は mutex 名を **「ゲート ID ではなく資源の名前」**と規定しています。
+  `unit` ゲートが奪い合っているのは**固定資源ではなく CPU と実時間**なので、
+  §9 が想定する「ポート・DB・エミュレータ」とは性質が違います。
+  `cpu.heavy` のような名前が妥当か、**根拠つきで決めて記録**してください。
+
+  ### 2. どのゲートに付けるか（初期見解。実測で覆してよい）
+
+  | ゲート | 実測 | 初期見解 |
+  |---|---|---|
+  | `unit` | ~500-640s | **必要**（本 Issue の直接の原因） |
+  | `lint` | ~5s | 不要 |
+  | `typecheck` | ~2-11s | 不要 |
+  | 静的ガード 3 本 | 各 0.1s | **付けてはいけない**（秒で失敗を返す #1882 の設計意図が消える） |
+
+  `lint` / `typecheck` は並列で遅くはなりますが、**偽の赤を出した実績はありません**。
+  付ける／付けないは**実測の裏付け**で決めてください。上記は推奨であって決定ではありません。
+
+  ### 3. 待ちの上限
+
+  `unit` の `timeoutSec: 3600` がロック待ちの上限になります。ワーカー 3 本が同時完了した場合、
+  最後の 1 本は最大 ~18 分待って ~9 分走る（合計 ~27 分 < 3600s）。現状値で足りるはずですが、
+  **`wait --verify` 側の `--timeout` と整合しているか**を確認してください。
+
+  ## 受入条件
+
+  - [ ] `.commandmate/verify.yaml` の `unit` ゲートに `mutex` が宣言されている
+  - [ ] mutex 名の選定理由が §9.2 の命名規約に照らして記録されている
+  - [ ] **2 つ以上の worktree で `commandmate verify` を同時に起動しても `unit` が同時に走らない**ことを
+        実測で確認する（`waited=<n>s` が出ることの確認を含む）
+  - [ ] 静的ガード 3 本は**直列化されない**
+  - [ ] `lint` / `typecheck` に付けるか否かを実測の裏付けつきで決定し記録する
+  - [ ] #1771 の実装を書き換えていない
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` 全緑
+  - [ ] CHANGELOG `[Unreleased]` に 1 行
+
+  ## 実測の作法（必須）
+
+  **テストで `~/.commandmate/locks` を直接使わないこと。** 稼働中の並列ランと排他して偽の赤を作ります。
+  必ず `CM_VERIFY_LOCK_ROOT` でルートを差し替えてください（§9.2 に明記されています）。
+
+  実測は使い捨て worktree を 2 つ作って `commandmate verify` を同時に起動する形で行い、
+  結果を `dev-reports/issue/1917/verification.md` に記録してください（commit には含めない）。
+
+  **注意: あなた自身の `wait --verify` も影響を受けます。** `verify.yaml` を変更すると
+  あなたの裁定が新しい mutex 設定で走ります。ロック待ちで固まると `wait` がタイムアウトするので、
+  完了前に必ずローカルで `commandmate verify` を 1 回回して正常終了することを確認してください。
+
+  ## 作業ルール（厳守）
+
+  - **`tmux kill-server` / `set-option -g` / `bind-key` / `unbind-key` を絶対に打たない**
+  - **稼働セッションに `send-keys` しない**（ユーザーの codex / opencode / claude が多数稼働中）
+  - **稼働サーバ（port 3000）を停止・再起動しない。`MyCodeBranchDesk` で `npm run build` を走らせない**
+  - **GitHub Issue / PR を編集しない**（オーケストレーターが管理します）
+  - **PR を作らない・push しない**（オーケストレーターが行います）
+  - 作業は**このブランチ上の単一 commit**。`dev-reports/` は commit に含めない
+  - **Issue 本文と実コードが食い違ったら実コードを正**とし、食い違いを明記する
+    （この Issue はオーケストレーターが書いたもので、現に一度訂正が入っています）
+
+scope:
+  allow:
+    - ".commandmate/verify.yaml"
+    - "src/lib/verification/**"
+    - ".claude/skills/cmate-verify/**"
+    - "tests/unit/**"
+    - "tests/helpers/**"
+    - "docs/**"
+    - "CHANGELOG.md"
+  deny: []
+
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
