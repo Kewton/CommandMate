@@ -1255,3 +1255,17 @@ Stage 4 が develop `90b67eb9` に対して実測し、**追加の対処を要�
 | 31 | `src/lib/ws-server.ts` | `observeTmuxControlFirstOutputLatency` / `getControlModeTmuxTransport` / `isTmuxControlModeEnabled` | **`./tmux/**`** | ws / broadcast | 恒久除外 | —（control-mode トランスポートそのもの） |
 
 **内訳の再掲**: routes 11 ／ pollers 4 ／ ws・broadcast 6 ／ client 4 ／ cli 1 ／ session 5 ＝ **31**。区分は**恒久除外 12**（#1〜5, 8, 11, 13, 27, 28, 30, 31）／ **段階解消 19**（残り）。
+
+#### 付録 A への追記（#1922 の実装時に再計測。上表は develop `90b67eb9` 時点のスナップショットとして残す）
+
+Phase 1 の実装（`feature/1922-tmux-import-guard`）で棚卸しをやり直したところ、**総数は 31 のままだが中身が 4 件入れ替わっていた**。権威は `.eslintrc.json` の `overrides` と、それを完全一致で pin する `tests/unit/guards/tmux-import-allowlist.test.ts` にある（本表ではない）。
+
+- **追加 2 件**（`90b67eb9` より後に着地した #1879 / #1890 由来）: `src/app/api/worktrees/[id]/clear-composer/route.ts`（`hasSession`）と `src/lib/session/composer-clear.ts`（`capturePane` / `clearComposerLine` / `invalidateCache`）。いずれも**段階解消**に置いた。composer のクリアは D4 が「ツールクラスに閉じる」と決めたツール固有挙動そのものであり、`captureSessionOutput` の実体でもないため恒久除外には当たらない。
+- **削除 2 件**: `NavigationButtons.tsx` / `TerminalEscapeHatch.tsx`。D4 が「Phase 1 に間に合わなくてよい」とした `NavigationKey` の型モジュール移設（`src/types/terminal-keys.ts`）を同じ commit で済ませたため、allowlist に載せる必要が無くなった。
+- 区分の内訳は結果として不変（**恒久除外 12 ／ 段階解消 19**）。
+
+**禁止パターンは 3 綴りでは足りない（実測）**。`@/lib/tmux/**`・`**/lib/tmux/**`・`./tmux/**` の 3 つは付録 A の 31 件を全件捕まえるが、`ignore` パッケージ（`no-restricted-imports` の実装が使う matcher）で直接測ると **`../tmux/x` と `../../tmux/x` と barrel の `@/lib/tmux` は素通りする**。`../tmux/**` は仮定の綴りではなく `src/lib/cli-tools/*.ts` が実際に使っている綴りであり、`src/lib/tmux/index.ts`（barrel）も実在する。したがって出荷した group は **`**/tmux/**` と `**/tmux` を足した 5 綴り**である（`@/config/tmux-pane-config` や `./tmux-capture-cache` には当たらないことを同時に確認済み）。
+
+**`overrides.files` の `[id]` は minimatch のキャラクタクラスである**。`src/app/api/worktrees/[id]/route.ts` をそのまま書くと `.../i/route.ts` にしか当たらず、**その 5 ファイルが投入直後に error になる**。`\[id\]` とエスケープすること（該当 7 エントリ）。
+
+**動的取得の severity**: DR4-005 の決定どおり `no-restricted-syntax` の base 1 キーに並べ、同時に D5 決定 4 (1) の「i18n セレクタを `warn` → `error` へ格上げ」も本 commit で実施した（実測 `npm run lint` は格上げ後も exit 0 / 出力 0 行）。selector は `(^|/)tmux(/|$)` で bare barrel まで見るように広げてある。

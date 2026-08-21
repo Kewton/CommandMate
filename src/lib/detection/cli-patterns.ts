@@ -698,6 +698,38 @@ export const GEMINI_THINKING_PATTERN = /[\u2800-\u28FF]|Thinking\.\.\./;
 export const OPENCODE_PROMPT_PATTERN = /Ask anything\.\.\./;
 
 /**
+ * OpenCode idle composer pattern (Issue #1883).
+ *
+ * The `Ask anything...` placeholder as opencode actually draws it: **inside the
+ * input box**, behind the box's own gutter (`\u2503`, or `\u2502` on a lighter
+ * border style). Two measured facts make that row positive evidence that the
+ * composer is empty, rather than the mere absence of a busy marker (design
+ * principle D1 in `docs/design/multi-agent-state-architecture.md`):
+ *
+ * - opencode paints the placeholder **only while the input buffer is empty**.
+ *   The first typed character replaces the whole row — measured live on
+ *   opencode 1.18.20, pane 80x200 (`opencode-live-1883/composer-residual.txt`
+ *   holds `\u2503  echo PREFILLED` where the idle frame holds the placeholder).
+ * - the gutter says the row belongs to the input box. `Ask anything...` printed
+ *   in a response body has no gutter, and reading that as an idle composer is
+ *   the "the phrase is on screen somewhere" inference D1 forbids.
+ *
+ * **Match this against the ANSI-stripped frame BEFORE {@link stripBoxDrawing}**,
+ * which strips the very gutter this pattern anchors on.
+ *
+ * The whitespace runs are `[^\S\n]` (horizontal only) on purpose: plain `\s`
+ * crosses newlines under the `m` flag, which let the gutter of one row pair up
+ * with the phrase several rows below it and matched frames that hold no
+ * composer at all (measured on `phrase-in-response.txt`).
+ *
+ * {@link OPENCODE_PROMPT_PATTERN} stays as it is: `response-checker` and
+ * `OPENCODE_SKIP_PATTERNS` want the bare phrase wherever it lands, because they
+ * are deleting the row from an extracted response, not judging a session.
+ */
+export const OPENCODE_IDLE_COMPOSER_PATTERN =
+  /^[^\S\n]*[\u2502\u2503][^\S\n]*Ask anything\.\.\./m;
+
+/**
  * OpenCode prompt pattern after response completion (Issue #379)
  * Shows "tab agents  ctrl+p commands" in the TUI status bar after a response finishes.
  * Used as extraction stop condition in response-poller.ts [D2-003].
@@ -845,6 +877,68 @@ export const COPILOT_SEPARATOR_PATTERN = /^─{10,}$/m;
  * No nested quantifiers (SEC4-001: ReDoS safety).
  */
 export const COPILOT_SELECTION_LIST_PATTERN = /Search\s+\w+\.\.\.|Select\s+Model|to (?:navigate|select).*Enter to (?:select|confirm)/m;
+
+/**
+ * Anchors of Copilot CLI's first-launch "Confirm folder trust" dialog (Issue #1886).
+ *
+ * Recorded from copilot 1.0.80 (`tests/fixtures/copilot-folder-trust-1080.ts`):
+ * copilot asks this once per untrusted git repository, before anything else runs,
+ * and the whole dialog is drawn inside a box — every row reads `│ <content>`.
+ * That is why `COPILOT_PROMPT_PATTERN` (`^[>❯]\s`) does not match the frame at
+ * all and `waitForReady` used to spin its full 30-second window against it.
+ *
+ * Both anchors are required. One of them alone would also match this dialog's
+ * text quoted back inside a model response, and a false positive here does not
+ * merely mis-report a status: it sends a bare `1` into a live composer.
+ *
+ * The anchors live here rather than in `cli-tools/copilot` for the same reason
+ * codex's do (Issue #1829): the Auto-Yes poller judges the same screen through
+ * `detectPrompt`, and two copies of the wording would be two chances to disagree
+ * about what this dialog is.
+ */
+export const COPILOT_FOLDER_TRUST_ANCHORS: readonly string[] = [
+  'Confirm folder trust',
+  'Do you trust the files in this folder?',
+] as const;
+
+/**
+ * The one option CommandMate may answer on the operator's behalf: `1. Yes`,
+ * which grants trust for THIS SESSION only.
+ *
+ * Matching the option text — not just the dialog — is the fail-safe. Option 2
+ * ("Yes, and remember this folder for future sessions") writes `trustedFolders`
+ * into `~/.copilot/config.json`, one file shared by every checkout on the
+ * machine (measured: answering `1` leaves that file byte-identical). If copilot
+ * ever reorders the list so that `1` is the remembering variant, this stops
+ * matching, nothing is sent, and the launch degrades to the pre-#1886 stall
+ * instead of silently persisting a trust grant.
+ *
+ * Written against the box-stripped frame, where the row reads `❯ 1. Yes`.
+ * `[ \t]*$` rather than `\s*$` so the trailing anchor cannot roll onto a later
+ * line and accept `1. Yes, and remember ...`.
+ */
+export const COPILOT_FOLDER_TRUST_SESSION_OPTION_PATTERN = /^[ \t]*(?:[>❯][ \t]*)?1\.[ \t]+Yes[ \t]*$/m;
+
+/**
+ * Key that selects {@link COPILOT_FOLDER_TRUST_SESSION_OPTION_PATTERN}.
+ * Measured on 1.0.80: the digit confirms on its own — sending a trailing Enter
+ * would land on the composer that the dialog's dismissal reveals.
+ */
+export const COPILOT_FOLDER_TRUST_ANSWER_KEY = '1';
+
+/**
+ * Whether the pane is sitting on the folder-trust dialog with the session-only
+ * option in first position.
+ *
+ * @param output - ANSI-stripped pane capture (box drawing still present)
+ * @returns True when both anchors and the `1. Yes` option row are present
+ */
+export function isCopilotFolderTrustDialog(output: string): boolean {
+  if (!COPILOT_FOLDER_TRUST_ANCHORS.every((anchor) => output.includes(anchor))) {
+    return false;
+  }
+  return COPILOT_FOLDER_TRUST_SESSION_OPTION_PATTERN.test(stripBoxDrawing(output));
+}
 
 /**
  * Copilot skip patterns for response cleaning (Issue #545)
