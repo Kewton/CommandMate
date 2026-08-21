@@ -327,9 +327,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // prompt.visible. Those three gates exist so a stray Enter cannot reach a live
   // input line; this bar shows the user the exact text before they aim an Enter
   // at it, which is a different act. Blank composer (including a frame where all
-  // that is on screen is Claude's dim ghost suggestion, which
-  // `extractComposerText` has already dropped) means no bar, so the "no Enter
-  // affordance when the box is empty" property still holds.
+  // that is on screen is the CLI's dim placeholder — Claude's suggestion, or
+  // codex's since #1890 — which `extractComposerText` has already dropped) means
+  // no bar, so the "no Enter affordance when the box is empty" property holds.
   const showUnsentComposerBar = hasUnsentComposerText(terminal.composerText);
 
   // Issue #744: the embedded HistoryPane for THIS split. Receives this split's

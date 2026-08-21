@@ -259,9 +259,10 @@ export interface CurrentOutputPayload {
    * `src/lib/detection/composer-text.ts` before reading this field: null is
    * "nothing REAL is in the input box", which covers four different situations
    * that {@link composerState} tells apart — most importantly Claude Code's dim
-   * suggestion text, which after `stripAnsi` is indistinguishable from typed
-   * input and which this field must never carry (a bar offering to run a hint
-   * that no `C-u` can clear is a defect the user sees, not a cosmetic one).
+   * suggestion text — and codex's `Ask Codex to do anything` — which after
+   * `stripAnsi` is indistinguishable from typed input and which this field must
+   * never carry (a bar offering to run a hint that no `C-u` can clear is a defect
+   * the user sees, not a cosmetic one).
    *
    * Extracted structurally from the raw frame, NOT from any status verdict: it
    * does not consult `sessionStatus`, `isPromptWaiting`, `isUnclassifiedActive`
@@ -271,7 +272,7 @@ export interface CurrentOutputPayload {
    * #1879's bar is allowed at a normal input prompt only because the user reads
    * what is there before pressing it.
    *
-   * claude only for now; every other CLI reports `unsupported_tool`.
+   * claude and codex (Issue #1890); every other CLI reports `unsupported_tool`.
    */
   composerText: string | null;
   /**

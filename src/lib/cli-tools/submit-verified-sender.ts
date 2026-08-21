@@ -274,19 +274,26 @@ export function isSubmitted(output: string, cliToolId: CLIToolType, message: str
  * CLIs whose composer this layer is allowed to empty before typing (Issue #1880).
  *
  * The gate is `extractComposerText`'s reach, not a preference: it short-circuits
- * every tool but claude to `unsupported_tool`, so for codex/gemini/copilot/
- * opencode/vibe-local/antigravity {@link clearComposer} can never observe an
- * empty box and always returns `cleared: false`. Reading that as "the clear
- * failed" and refusing to send would take every one of those tools offline
- * while claude kept working and the unit tests stayed green — so those tools do
- * not enter the clear path at all: no read-back capture, no `C-e`+`C-u`, no new
- * failure mode. Byte-for-byte the pre-#1880 send.
+ * every unmeasured tool to `unsupported_tool`, so for gemini/copilot/opencode/
+ * vibe-local/antigravity {@link clearComposer} can never observe an empty box and
+ * always returns `cleared: false`. Reading that as "the clear failed" and
+ * refusing to send would take every one of those tools offline while claude kept
+ * working and the unit tests stayed green — so those tools do not enter the clear
+ * path at all: no read-back capture, no `C-e`+`C-u`, no new failure mode.
+ * Byte-for-byte the pre-#1880 send.
  *
- * Adding a tool here means teaching `extractComposerText` its input-box layout
- * first. Blind `C-u` into an input line nobody has measured is how the residual
- * problem gets replaced with a data-loss problem.
+ * codex joined in Issue #1890, which is the reason this set is not simply
+ * `SUPPORTED_COMPOSER_TOOLS`: shipping #1880 claude-only left codex measurably
+ * broken (its ケース7 reproduced the splice verbatim), and the fix was to measure
+ * codex's input box, not to relax the gate. Adding the next tool means the same
+ * work — a live 200x1000 capture of its box, its idle placeholder and its
+ * dialogs, pinned as fixtures. Blind `C-u` into an input line nobody has measured
+ * is how the residual problem gets replaced with a data-loss problem.
  */
-const COMPOSER_CLEAR_SUPPORTED_TOOLS: ReadonlySet<string> = new Set<CLIToolType>(['claude']);
+const COMPOSER_CLEAR_SUPPORTED_TOOLS: ReadonlySet<string> = new Set<CLIToolType>([
+  'claude',
+  'codex',
+]);
 
 /**
  * Empty the composer before the body is typed into it (Issue #1880).
@@ -297,17 +304,20 @@ const COMPOSER_CLEAR_SUPPORTED_TOOLS: ReadonlySet<string> = new Set<CLIToolType>
  * claude's dim ghost suggestions do not spin it to its cap. This function is the
  * policy layer on top: which tools take part, and which outcomes are failures.
  *
- * Exactly one outcome is a failure: **claude, still reporting `content` after
- * the pass cap**. That is a composer this code demonstrably could not empty, so
- * typing into it would splice the body into whatever is there and then report
- * success — the defect #1880 exists to remove. Everything else proceeds:
+ * Exactly one outcome is a failure: **a participating tool still reporting
+ * `content` after the pass cap**. That is a composer this code demonstrably
+ * could not empty, so typing into it would splice the body into whatever is
+ * there and then report success — the defect #1880 exists to remove. Everything
+ * else proceeds:
  *
  *   - `unsupported_tool` — never reached (see COMPOSER_CLEAR_SUPPORTED_TOOLS),
  *     but it means "this layer cannot read that box", not "the box is dirty".
  *   - `no_composer` — the input box is not on screen (a full-screen dialog, a
  *     pager, a session still starting). Nothing was inspected and nothing was
  *     sent; refusing here would invent a second way for sends to stall, on a
- *     frame that carries no evidence of residual text.
+ *     frame that carries no evidence of residual text. On codex this is also the
+ *     verdict for every dialog frame, which is what keeps a `C-e`+`C-u` volley
+ *     off an approval screen (Issue #1890).
  *   - `empty` / `ghost` — verified clean, with or without passes.
  *
  * A throw from {@link clearComposer} itself is a tmux failure (`capture-pane` or
@@ -316,7 +326,7 @@ const COMPOSER_CLEAR_SUPPORTED_TOOLS: ReadonlySet<string> = new Set<CLIToolType>
  * and swallowing it would mean typing into a composer whose contents are
  * unknown while still reporting success.
  *
- * @throws Error when claude's composer still holds text after the pass cap.
+ * @throws Error when the composer still holds text after the pass cap.
  */
 export async function clearComposerBeforeSend(
   sessionName: string,

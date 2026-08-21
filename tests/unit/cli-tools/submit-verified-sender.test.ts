@@ -100,6 +100,26 @@ const GHOST_FRAME = claudeFrame(`${ESC}[39m❯ ${ESC}[2mTry "how do I log an err
 /** No input box on screen at all (full-screen dialog / pager / starting up). */
 const NO_COMPOSER_FRAME = '⏺ a full-screen overlay with no composer at all';
 
+/** A codex pane tail with the given composer rows (Issue #1890). */
+function codexFrame(...composerRows: string[]): string {
+  return ['• a reply', '', ...composerRows, '', '  gpt-5.6-sol xhigh · /repo'].join('\n');
+}
+/** codex's idle placeholder on an EMPTY composer — must not trigger any key send. */
+const CODEX_PLACEHOLDER_FRAME = codexFrame(
+  `${ESC}[1m\u203A${ESC}[0m ${ESC}[2mAsk Codex to do anything${ESC}[0m`,
+);
+/** Real residual in a codex composer — #1880's ケース7, the reason #1890 exists. */
+const CODEX_RESIDUAL_FRAME = codexFrame(`${ESC}[1m\u203A${ESC}[0m echo PREFILLED`);
+/** A codex approval dialog: the composer is off screen and its keys have consequences. */
+const CODEX_DIALOG_FRAME = [
+  '  Would you like to make the following edits?',
+  '',
+  `${ESC}[1m${ESC}[38;5;6m\u203A 1. Yes, proceed (y)${ESC}[0m`,
+  "  2. Yes, and don't ask again for these files",
+  '',
+  '  Press enter to confirm or esc to cancel',
+].join('\n');
+
 describe('submit-verified-sender', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -652,16 +672,118 @@ describe('submit-verified-sender', () => {
     });
 
     // -------------------------------------------------------------------------
-    // Non-regression for every CLI that is NOT claude.
+    // codex joins the clear path (Issue #1890).
+    //
+    // #1880 shipped claude-only because `extractComposerText` could not read any
+    // other input box; its live ケース7 (codex + residual) reproduced the splice
+    // verbatim. These pin the three verdicts codex can now reach, through the
+    // REAL clearComposer against the tmux mocks.
+    // -------------------------------------------------------------------------
+    describe('codex now takes part (Issue #1890)', () => {
+      it('empties a codex composer BEFORE typing, and types the body unchanged', async () => {
+        vi.useFakeTimers();
+        try {
+          vi.mocked(capturePane)
+            .mockResolvedValueOnce(CODEX_RESIDUAL_FRAME)
+            .mockResolvedValue(CODEX_PLACEHOLDER_FRAME);
+
+          const p = sendMessageWithSubmitVerification({
+            sessionName: SESSION,
+            message: 'ZZTOP1234 とだけ返答してください',
+            cliToolId: 'codex',
+          });
+          await vi.runAllTimersAsync();
+          await expect(p).resolves.toBeUndefined();
+
+          expect(clearComposerLine).toHaveBeenCalledWith(SESSION);
+          expect(sendKeys).toHaveBeenCalledWith(SESSION, 'ZZTOP1234 とだけ返答してください', false);
+          // The clear ran first: that ordering IS the fix.
+          expect(callOrder(vi.mocked(clearComposerLine)))
+            .toBeLessThan(callOrder(vi.mocked(sendKeys)));
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('sends no clear keys at an idle codex composer showing its placeholder', async () => {
+        vi.useFakeTimers();
+        try {
+          // The cost of getting this wrong is not a cosmetic bar: a pass here
+          // fires on every idle send, spins to the cap against a buffer that was
+          // empty all along, and then throws instead of sending.
+          vi.mocked(capturePane)
+            .mockResolvedValueOnce(CODEX_PLACEHOLDER_FRAME)
+            .mockResolvedValue(EMPTY_PROMPT);
+
+          const p = sendMessageWithSubmitVerification({
+            sessionName: SESSION,
+            message: 'hello',
+            cliToolId: 'codex',
+          });
+          await vi.runAllTimersAsync();
+          await expect(p).resolves.toBeUndefined();
+
+          expect(clearComposerLine).not.toHaveBeenCalled();
+          expect(sendKeys).toHaveBeenCalledWith(SESSION, 'hello', false);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('sends no clear keys at a codex dialog, and still sends the body', async () => {
+        vi.useFakeTimers();
+        try {
+          vi.mocked(capturePane)
+            .mockResolvedValueOnce(CODEX_DIALOG_FRAME)
+            .mockResolvedValue(EMPTY_PROMPT);
+
+          const p = sendMessageWithSubmitVerification({
+            sessionName: SESSION,
+            message: 'hello',
+            cliToolId: 'codex',
+          });
+          await vi.runAllTimersAsync();
+          await expect(p).resolves.toBeUndefined();
+
+          expect(clearComposerLine).not.toHaveBeenCalled();
+          expect(sendKeys).toHaveBeenCalledWith(SESSION, 'hello', false);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('refuses to type into a codex composer it could not empty', async () => {
+        vi.useFakeTimers();
+        try {
+          vi.mocked(capturePane).mockResolvedValue(CODEX_RESIDUAL_FRAME);
+
+          const p = sendMessageWithSubmitVerification({
+            sessionName: SESSION,
+            message: 'hello',
+            cliToolId: 'codex',
+          });
+          const assertion = expect(p).rejects.toThrow(/still holds unsent text/i);
+          await vi.runAllTimersAsync();
+          await assertion;
+
+          expect(sendKeys).not.toHaveBeenCalled();
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // Non-regression for every CLI whose input box is still unmeasured.
     //
     // extractComposerText short-circuits them to `unsupported_tool`, so
     // clearComposer can never report success for them. Treating that as "the
-    // clear failed" would take codex/gemini/copilot/opencode/vibe-local/
-    // antigravity offline while claude kept working and these tests stayed
-    // green. They must not enter the clear path AT ALL.
+    // clear failed" would take gemini/copilot/opencode/vibe-local/antigravity
+    // offline while claude and codex kept working and these tests stayed green.
+    // They must not enter the clear path AT ALL.
     // -------------------------------------------------------------------------
-    describe.each(INTERACTIVE_TOOLS.filter((t) => t !== 'claude'))(
-      'non-claude send path is byte-for-byte unchanged: %s',
+    describe.each(INTERACTIVE_TOOLS.filter((t) => t !== 'claude' && t !== 'codex'))(
+      'unmeasured-CLI send path is byte-for-byte unchanged: %s',
       (cliToolId) => {
         it('reads nothing and sends no clear keys before typing the body', async () => {
           vi.useFakeTimers();

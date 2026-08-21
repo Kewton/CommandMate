@@ -22,10 +22,11 @@
  *  - **It does not call the text a recommendation.** Nothing in the frame says
  *    whether the agent pre-filled it or a human typed half a sentence and walked
  *    away (both were observed live in #1879/#1878), so the label is neutral.
- *  - **It never renders for ghost text.** `extractComposerText` drops Claude's
- *    dim suggestions upstream of this component, because a bar offering to run a
- *    hint — with a Clear button that provably cannot remove it — is a defect the
- *    user sees.
+ *  - **It never renders for ghost text.** `extractComposerText` drops the CLI's
+ *    dim suggestions upstream of this component — Claude's rotating hints and,
+ *    since #1890, codex's `Ask Codex to do anything` — because a bar offering to
+ *    run a hint, with a Clear button that provably cannot remove it, is a defect
+ *    the user sees.
  *
  * [Run] posts `['Enter']` to the EXISTING special-keys endpoint (no new API:
  * `NAVIGATION_KEY_VALUES` has carried `'Enter'` since #473). [Clear] posts to
