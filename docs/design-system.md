@@ -202,9 +202,16 @@ UI の配色方針は次の 2 分類のみ。曖昧な「暗いまま」の島�
 - **ツールチップ**: 反転サーフェス `bg-foreground text-background`（Radix `TooltipContent` が基準。
   ライトで暗い吹き出し、ダークで明るい吹き出しにテーマ追従する）。二次テキストは `text-background/70`。
 
-## トークン規律 ガード (Issue #1082 / #1116 / #1882)
+## トークン規律 ガード (Issue #1082 / #1116 / #1882 / #1889)
 
-移行済みディレクトリに **生の直書きカラークラス（`bg-`/`text-`/`border-`/`ring-`）が再流入したら hard-fail** する。
+移行済みディレクトリに対して **2 つ** の検査を hard-fail で回す。
+
+1. **不在検査**（#1082 / #1116）: 生の直書きカラークラス（`bg-`/`text-`/`border-`/`ring-`）が再流入したら落とす。
+2. **実在検査**（#1889）: 参照しているトークン名が `src/app/globals.css` の `--color-*` に**実在すること**を確認する。
+   Tailwind は解決できないクラスを黙って捨てるため、`bg-surface-elevated-typo` のような打ち間違いは
+   「背景が消える」「文字色が継承されて読めない」という**視覚だけの silent failure** になり、
+   lint も tsc も unit も検出しない（クラス名は単なる文字列）。PR #1881 では `sky-*` → `info` tint の置換で
+   1 の検査が PASS し、トークンの実在は**人間が `globals.css` を grep して手で確認**していた。その手作業の自動化。
 
 検査本体は **`scripts/check-token-discipline.mjs` の 1 本だけ**（Issue #1882）。パターン・対象ディレクトリ一覧・
 除外はすべてこのファイルが単一の権威ソースで、次の 2 箇所は**それを呼ぶだけ**である。
@@ -232,14 +239,42 @@ UI の配色方針は次の 2 分類のみ。曖昧な「暗いまま」の島�
   - `src/app/worktrees/**`（ワークツリー詳細ルート／ターミナルページ。CLI ブランド色
     `claude=bg-purple-600` / `codex=bg-blue-600` / `gemini=bg-green-600` / `bash=bg-gray-600` を含む）。
   - テストファイル（`*.test.*` / `*.spec.*` / `__tests__`）はクラス文字列を検証するため除外。
-- **既知の限界（#1882 で記録、対応は範囲外）**: このガードは**生配色の「不在」しか見ない**。
-  存在しないトークン名（例: `bg-surface-elevated-typo`）へ置換しても PASS するため、無スタイル化の
-  silent failure は検出できない。トークン名の実在検証（`src/app/globals.css` の `--color-*` との突き合わせ）は
-  別途必要。
+
 - **違反時の直し方**: ホワイトリストをいじらず、`docs/design-system.md` のセマンティックトークンへ置換する。
   中立色は `foreground` / `muted` / `muted-foreground` / `border` / `surface` / `input` / `ring`、
   状態色は `bg-{status}-subtle` / `border-{status}-border` / `text-{status}-foreground` / `bg-{status}`
   （status = success / warning / danger / info）。
+
+#### 実在検査の判定方法と検出できない範囲（#1889）
+
+判定は `(bg|text|border|ring)-<rest>` の `<rest>` が次の 3 つのどれかに当たるかで行い、どれでもなければ違反とする。
+
+| 分類 | 例 | 扱い |
+|------|-----|------|
+| Tailwind 組み込みの**非配色**ユーティリティ | `text-xs` / `text-center` / `border-b-2` / `border-dashed` / `bg-gradient-to-br` / `ring-offset-2` / `ring-inset` / `border-collapse` | 許可（スクリプト内の許可リスト） |
+| Tailwind 組み込みの**配色** | `text-white` / `bg-black` / `bg-transparent` / `text-current` / `text-pink-500` | 許可（生配色の可否は上記 1 の検査の担当。`text-white` / `bg-black` は #1889 のスコープ外） |
+| プロジェクトのトークン | `bg-info-subtle` / `bg-surface` / `ring-offset-background` / `border-t-accent-600` | 許可 |
+
+**なぜ Tailwind に解決させず許可リストなのか**: CI の `token-discipline` ジョブは checkout ＋ `run:` 1 本だけで
+`npm install` を行わない（`tests/unit/guards/static-guard-single-source.test.ts` がこの形を固定している）。
+`tailwindcss` を import すると、node_modules を用意しないジョブが node_modules に依存することになる。
+代償として **Tailwind が将来追加したユーティリティは許可リストを更新するまで偽陽性になる**が、
+その失敗は「どのクラスで落ちたか」を出す**大声の失敗**であって、黙って PASS する方向ではない。
+
+**検出できない範囲（意図的。スクリプト冒頭にも同じ一覧がある）**
+
+- **動的クラス名**: `` `bg-${tone}-subtle` `` / `'bg-' + name` / 実行時に引くテーブル。リテラルが無いので検査対象にならない
+  （Tailwind 側もこれらは生成しないが、「ガードが通った＝そのコンポーネントの算出クラスが解決する」ではない）。
+- **arbitrary value**: `bg-[#123456]` / `text-[11px]` / `border-[var(--x)]` は対象外（1 の検査も見ていない）。
+- **4 接頭辞以外の配色ユーティリティ**: `from-` / `via-` / `to-` / `divide-` / `outline-` / `fill-` / `stroke-` /
+  `decoration-` / `placeholder-` / `caret-` / `accent-` / `shadow-` は検査しない（1 の検査の対象面と揃えてある）。
+- **コメント本文**: 走査前に除去する。除去しないと英文コメント（"a text-entry context" / "the border-trick spinner"）が
+  CI 失敗になる — 実測では素朴な実装の偽陽性は**全件**これか組み込みユーティリティだった。
+  代わりに、コメント中に書いたトークン名の誤りは報告されない。
+- **除外対象**: テストファイル・`*Terminal*` ファイル・`src/app/worktrees/**`、および
+  `.ts/.tsx/.js/.jsx/.mjs/.cjs/.css` 以外の拡張子。
+- **「実在する」だけ**: `--color-info-subtle` が宣言されていることは、それが**意味的に正しい**トークンかどうかも、
+  参照先の RGB チャンネル三つ組が `@layer base` に定義済みかどうかも保証しない。
 
 ---
 

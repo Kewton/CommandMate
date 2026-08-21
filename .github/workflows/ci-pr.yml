@@ -112,7 +112,7 @@ jobs:
         run: node scripts/check-control-chars.mjs
 
   token-discipline:
-    name: Token discipline (raw gray/slate + chromatic guard)
+    name: Token discipline (raw palette guard + token existence)
     # [self-hosted] This repository's ephemeral self-hosted runners (labels:
     # self-hosted, Linux, ARM64, ubuntu-24.04), EXCEPT for a pull request opened
     # from a fork, which falls back to `ubuntu-latest`. CommandMate is public, so
@@ -130,6 +130,14 @@ jobs:
       # [Issue #1082 / #1116] Hard-fail if raw Tailwind color utilities reappear
       # in directories already migrated to semantic tokens.
       #
+      # [Issue #1889] The script also hard-fails when a class names a token that
+      # does NOT exist in src/app/globals.css. Tailwind drops an unresolvable
+      # class silently, so `bg-surface-elevated-typo` renders unstyled and passes
+      # lint, tsc and the unit suite untouched — a class name is just a string to
+      # all three. The script stays dependency-free for that check too: it reads
+      # the `--color-*` declarations itself rather than importing tailwindcss,
+      # because this job never runs `npm install`.
+      #
       # [Issue #1882] The pattern, the guarded directory list and the exclusions
       # (`*Terminal*` always-dark islands, test files, src/app/worktrees) live in
       # the script, not here. `.commandmate/verify.yaml` runs the SAME script as
@@ -137,7 +145,7 @@ jobs:
       # disagree about what counts as a violation. Fix violations with the tokens
       # in docs/design-system.md, NOT by widening the lists in the script.
       # The script is dependency-free, so no npm install is needed.
-      - name: Guard against raw gray/slate + chromatic colors in migrated directories
+      - name: Guard raw colors and token existence in migrated directories
         run: node scripts/check-token-discipline.mjs
 
   legacy-tmux-readmode:
