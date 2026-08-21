@@ -20,7 +20,13 @@ import {
 } from '../tmux/tmux';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
-import { COPILOT_PROMPT_PATTERN, COPILOT_SELECTION_LIST_PATTERN, stripAnsi } from '../detection/cli-patterns';
+import {
+  COPILOT_PROMPT_PATTERN,
+  COPILOT_SELECTION_LIST_PATTERN,
+  COPILOT_FOLDER_TRUST_ANSWER_KEY,
+  isCopilotFolderTrustDialog,
+  stripAnsi,
+} from '../detection/cli-patterns';
 import { COPILOT_TEXT_INPUT_DELAY_MS, COPILOT_SEND_ENTER_DELAY_MS, COPILOT_MODEL_SWITCH_TIMEOUT_MS } from '@/config/copilot-constants';
 import { TUI_SESSION_CREATE_WAIT_MS, TUI_INTERRUPT_SETTLE_MS, TUI_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
 import {
@@ -194,10 +200,61 @@ export class CopilotTool extends BaseCLITool {
   }
 
   /**
+   * Answer copilot's "Confirm folder trust" dialog when the pane is sitting on
+   * it (Issue #1886).
+   *
+   * Sends the session-only option (`1. Yes`) and nothing else. Option 2 ("Yes,
+   * and remember this folder for future sessions") writes `trustedFolders` into
+   * `~/.copilot/config.json`, one file shared by every checkout on the machine,
+   * so `isCopilotFolderTrustDialog` refuses the frame outright if the list is
+   * ever reordered and `1` is no longer the session-only choice -- the same rule
+   * that makes codex's launch decline its hooks-review dialog (Issue #1760):
+   * CommandMate answers on the operator's behalf only where the answer does not
+   * write the operator's config.
+   *
+   * `sendEnter=false` because 1.0.80 confirms on the digit alone (measured on a
+   * live pane); a trailing Enter would land as an empty submit on the composer
+   * that the dismissal reveals.
+   *
+   * The capture cache is dropped afterwards because the cached frame is now
+   * wrong in a way that blocks work: a consumer reading the dialog frame reports
+   * `waiting`, and the send guard refuses a `waiting` session for as long as
+   * that entry lives.
+   *
+   * @param sessionName - tmux session name
+   * @param output - ANSI-stripped pane capture
+   * @returns True when the dialog was found and answered
+   */
+  private async answerFolderTrustDialog(sessionName: string, output: string): Promise<boolean> {
+    if (!isCopilotFolderTrustDialog(output)) {
+      return false;
+    }
+    await sendKeys(sessionName, COPILOT_FOLDER_TRUST_ANSWER_KEY, false);
+    invalidateCache(sessionName);
+    logger.info('copilot-folder-trust-answered');
+    return true;
+  }
+
+  /**
    * Wait for Copilot CLI to become ready (prompt visible).
-   * Polls until COPILOT_PROMPT_PATTERN is detected or max attempts reached.
+   *
+   * Readiness is asserted by seeing the composer, never by a dialog's absence:
+   * copilot draws `❯` at column 0 and removes that row entirely while a dialog
+   * is up, so a `COPILOT_PROMPT_PATTERN` match is a real input prompt and never
+   * an option row. Do NOT feed this check a `stripBoxDrawing`ed frame -- that
+   * turns the trust dialog's `│ ❯ 1. Yes` into `❯ 1. Yes` and the dialog starts
+   * reading as ready (both halves are pinned in the Issue #1886 tests).
+   *
+   * Issue #1886: on an untrusted git repository copilot shows the folder-trust
+   * dialog before anything else runs, and nothing in that frame matches the
+   * composer -- so this loop used to burn its whole 30-second window and then
+   * hand `sendMessage` a session still parked on the dialog. Answer it once and
+   * keep polling for the composer on the normal cadence; no extra sleep, and the
+   * one-shot guard means a frame that somehow still shows the dialog cannot draw
+   * a second digit.
    */
   private async waitForReady(sessionName: string): Promise<void> {
+    let trustDialogHandled = false;
     for (let i = 0; i < COPILOT_INIT_MAX_ATTEMPTS; i++) {
       try {
         const rawOutput = await capturePane(sessionName, 50);
@@ -207,6 +264,10 @@ export class CopilotTool extends BaseCLITool {
         if (COPILOT_PROMPT_PATTERN.test(output)) {
           logger.info('copilot-prompt-detected');
           return;
+        }
+
+        if (!trustDialogHandled && (await this.answerFolderTrustDialog(sessionName, output))) {
+          trustDialogHandled = true;
         }
       } catch {
         // Capture may fail during initialization - continue polling
@@ -226,12 +287,25 @@ export class CopilotTool extends BaseCLITool {
   private async waitForPrompt(sessionName: string, timeoutMs: number = COPILOT_PROMPT_WAIT_TIMEOUT_MS): Promise<void> {
     const startTime = Date.now();
     const pollInterval = 500;
+    let trustDialogHandled = false;
     while (Date.now() - startTime < timeoutMs) {
       try {
         const rawOutput = await capturePane(sessionName, 50);
         const output = stripAnsi(rawOutput);
         if (COPILOT_PROMPT_PATTERN.test(output)) {
           return;
+        }
+        // Issue #1886: `startSession` returns early for a session that already
+        // exists, so a pane adopted from outside CommandMate -- or one whose
+        // trust dialog nobody answered -- arrives here still sitting on it.
+        // Unlike codex's, this method only logs on timeout and lets the send
+        // proceed, which types the message body INTO the dialog; the body's
+        // digits are option selections there, so a message containing `2` picks
+        // "Yes, and remember this folder" and writes the operator's
+        // machine-global ~/.copilot/config.json. Answer it here for the same
+        // reason the launch path does, rather than leaving the worse outcome.
+        if (!trustDialogHandled && (await this.answerFolderTrustDialog(sessionName, output))) {
+          trustDialogHandled = true;
         }
       } catch {
         // Capture may fail - continue polling

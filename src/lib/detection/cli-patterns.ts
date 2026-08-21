@@ -879,6 +879,68 @@ export const COPILOT_SEPARATOR_PATTERN = /^─{10,}$/m;
 export const COPILOT_SELECTION_LIST_PATTERN = /Search\s+\w+\.\.\.|Select\s+Model|to (?:navigate|select).*Enter to (?:select|confirm)/m;
 
 /**
+ * Anchors of Copilot CLI's first-launch "Confirm folder trust" dialog (Issue #1886).
+ *
+ * Recorded from copilot 1.0.80 (`tests/fixtures/copilot-folder-trust-1080.ts`):
+ * copilot asks this once per untrusted git repository, before anything else runs,
+ * and the whole dialog is drawn inside a box — every row reads `│ <content>`.
+ * That is why `COPILOT_PROMPT_PATTERN` (`^[>❯]\s`) does not match the frame at
+ * all and `waitForReady` used to spin its full 30-second window against it.
+ *
+ * Both anchors are required. One of them alone would also match this dialog's
+ * text quoted back inside a model response, and a false positive here does not
+ * merely mis-report a status: it sends a bare `1` into a live composer.
+ *
+ * The anchors live here rather than in `cli-tools/copilot` for the same reason
+ * codex's do (Issue #1829): the Auto-Yes poller judges the same screen through
+ * `detectPrompt`, and two copies of the wording would be two chances to disagree
+ * about what this dialog is.
+ */
+export const COPILOT_FOLDER_TRUST_ANCHORS: readonly string[] = [
+  'Confirm folder trust',
+  'Do you trust the files in this folder?',
+] as const;
+
+/**
+ * The one option CommandMate may answer on the operator's behalf: `1. Yes`,
+ * which grants trust for THIS SESSION only.
+ *
+ * Matching the option text — not just the dialog — is the fail-safe. Option 2
+ * ("Yes, and remember this folder for future sessions") writes `trustedFolders`
+ * into `~/.copilot/config.json`, one file shared by every checkout on the
+ * machine (measured: answering `1` leaves that file byte-identical). If copilot
+ * ever reorders the list so that `1` is the remembering variant, this stops
+ * matching, nothing is sent, and the launch degrades to the pre-#1886 stall
+ * instead of silently persisting a trust grant.
+ *
+ * Written against the box-stripped frame, where the row reads `❯ 1. Yes`.
+ * `[ \t]*$` rather than `\s*$` so the trailing anchor cannot roll onto a later
+ * line and accept `1. Yes, and remember ...`.
+ */
+export const COPILOT_FOLDER_TRUST_SESSION_OPTION_PATTERN = /^[ \t]*(?:[>❯][ \t]*)?1\.[ \t]+Yes[ \t]*$/m;
+
+/**
+ * Key that selects {@link COPILOT_FOLDER_TRUST_SESSION_OPTION_PATTERN}.
+ * Measured on 1.0.80: the digit confirms on its own — sending a trailing Enter
+ * would land on the composer that the dialog's dismissal reveals.
+ */
+export const COPILOT_FOLDER_TRUST_ANSWER_KEY = '1';
+
+/**
+ * Whether the pane is sitting on the folder-trust dialog with the session-only
+ * option in first position.
+ *
+ * @param output - ANSI-stripped pane capture (box drawing still present)
+ * @returns True when both anchors and the `1. Yes` option row are present
+ */
+export function isCopilotFolderTrustDialog(output: string): boolean {
+  if (!COPILOT_FOLDER_TRUST_ANCHORS.every((anchor) => output.includes(anchor))) {
+    return false;
+  }
+  return COPILOT_FOLDER_TRUST_SESSION_OPTION_PATTERN.test(stripBoxDrawing(output));
+}
+
+/**
  * Copilot skip patterns for response cleaning (Issue #545)
  * Placeholder patterns - to be refined after Phase 1 TUI investigation.
  */
