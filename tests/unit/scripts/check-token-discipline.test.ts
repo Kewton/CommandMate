@@ -1,5 +1,5 @@
 /**
- * Tests for the token-discipline guard (Issue #1082 / #1116 / #1882 / #1889).
+ * Tests for the token-discipline guard (Issue #1082 / #1116 / #1882 / #1889 / #1892).
  *
  * The check used to live as inline shell inside `.github/workflows/ci-pr.yml`,
  * where nothing could execute it except a CI run. `.commandmate/verify.yaml` now
@@ -11,6 +11,11 @@
  * Each case plants a real file in a real git repository and runs the real
  * `git grep`: the pathspec list and the exclusions are the behaviour under test,
  * and a unit test that only exercised the line filter would not see either.
+ *
+ * #1892 widened the raw-palette check from 11 hand-picked families to Tailwind's
+ * whole default palette, and the cases below pin the two things that failure
+ * mode needs: that every family Tailwind ships is matched, and that the list is
+ * compared against Tailwind's own `theme.css` rather than maintained by hand.
  *
  * #1889 added the second check — the token being referenced has to EXIST — and
  * with it a second, larger risk: a guard that reads every class name in the
@@ -29,6 +34,7 @@ import os from 'os';
 import path from 'path';
 import {
   GUARDED_PATHSPECS,
+  TAILWIND_PALETTE_FAMILY_NAMES,
   TOKEN_DISCIPLINE_PATTERN,
   classifyColorUtility,
   filterGitGrepLines,
@@ -153,16 +159,291 @@ describe('Issue #1882: the declared surface stays put', () => {
     ]);
   });
 
-  it('matches every palette family the CI job matched', () => {
+  it('is built from the palette list, so the pattern cannot be edited apart from it', () => {
     expect(TOKEN_DISCIPLINE_PATTERN).toBe(
-      '(bg|text|border|ring)-(gray|slate|red|green|yellow|amber|orange|purple|violet|sky|blue)-[0-9]'
+      `(bg|text|border|ring)-((x|y|t|r|b|l|s|e|offset)-)?(${TAILWIND_PALETTE_FAMILY_NAMES.join(
+        '|'
+      )})-[0-9]`
     );
+  });
+
+  it('still matches the 11 families the CI job matched before #1892', () => {
+    const pattern = new RegExp(TOKEN_DISCIPLINE_PATTERN);
+    for (const family of 'gray slate red green yellow amber orange purple violet sky blue'.split(
+      ' '
+    )) {
+      expect(pattern.test(`bg-${family}-500`)).toBe(true);
+    }
   });
 
   it('drops empty lines so a trailing newline is not a violation', () => {
     expect(filterGitGrepLines(['src/app/page.tsx:1:bg-sky-50', ''])).toEqual([
       'src/app/page.tsx:1:bg-sky-50',
     ]);
+  });
+});
+
+/* ==========================================================================
+ * Issue #1892: the guarded palette is Tailwind's, not a hand-picked subset.
+ * ========================================================================== */
+
+/**
+ * Tailwind's own palette, read out of the package rather than restated here.
+ *
+ * This is the anti-drift mechanism, and it is the reason `TAILWIND_PALETTE_
+ * FAMILY_NAMES` may be a hard-coded array at all: the script itself has to run
+ * on a checkout with no `npm install` (the CI job is one `run:` step), so it
+ * cannot ask Tailwind — but the unit suite can, and does. A Tailwind upgrade
+ * that adds a family fails HERE, at upgrade time, instead of silently widening
+ * the hole #1892 exists to close.
+ */
+const tailwindPaletteFamilies = (): string[] => {
+  const themeCss = path.join(REPO_ROOT, 'node_modules/tailwindcss/theme.css');
+  if (!fs.existsSync(themeCss)) {
+    throw new Error(
+      `${themeCss} not found. Tailwind is a devDependency of this repository; if the ` +
+        'package layout changed, update this test rather than deleting it — it is what ' +
+        'keeps TAILWIND_PALETTE_FAMILY_NAMES from falling behind (#1892).'
+    );
+  }
+  const families = new Set<string>();
+  const css = fs.readFileSync(themeCss, 'utf8');
+  for (const match of css.matchAll(/^[ \t]*--color-([a-z]+)-\d+[ \t]*:/gm)) families.add(match[1]);
+  if (families.size === 0) {
+    throw new Error(`${themeCss} declares no --color-<family>-<step>; the cross-check cannot run`);
+  }
+  return [...families].sort();
+};
+
+describe('Issue #1892: the palette list is cross-checked against Tailwind itself', () => {
+  it('enumerates exactly the families Tailwind ships', () => {
+    expect([...TAILWIND_PALETTE_FAMILY_NAMES].sort()).toEqual(tailwindPaletteFamilies());
+  });
+
+  it('includes the families Tailwind 4.3 added, which the #1116 list predates', () => {
+    expect(TAILWIND_PALETTE_FAMILY_NAMES).toEqual(
+      expect.arrayContaining(['mauve', 'olive', 'mist', 'taupe'])
+    );
+  });
+
+  it('matches a raw step of every family, so no family is enumerated but unmatched', () => {
+    const pattern = new RegExp(TOKEN_DISCIPLINE_PATTERN);
+    for (const family of TAILWIND_PALETTE_FAMILY_NAMES) {
+      expect(pattern.test(`bg-${family}-500`)).toBe(true);
+      expect(pattern.test(`text-${family}-50`)).toBe(true);
+      expect(pattern.test(`border-${family}-950`)).toBe(true);
+      expect(pattern.test(`ring-${family}-300`)).toBe(true);
+    }
+  });
+
+  /**
+   * `border-t-cyan-500` is a raw palette color that the bare
+   * `<prefix>-<family>-<step>` shape walks past. Check 2 already called it a
+   * palette color, so before #1892 the two checks disagreed about one class —
+   * and `FileTreeView`'s spinner was sitting in the gap.
+   */
+  it('matches a color hidden behind a side or offset segment', () => {
+    const pattern = new RegExp(TOKEN_DISCIPLINE_PATTERN);
+    expect(pattern.test('border-t-cyan-500')).toBe(true);
+    expect(pattern.test('border-b-2')).toBe(false);
+    expect(pattern.test('border-l-teal-400')).toBe(true);
+    expect(pattern.test('ring-offset-slate-900')).toBe(true);
+    expect(pattern.test('ring-offset-2')).toBe(false);
+    expect(pattern.test('border-t-accent-500')).toBe(false);
+  });
+
+  it('leaves the documented out-of-scope shapes alone', () => {
+    const pattern = new RegExp(TOKEN_DISCIPLINE_PATTERN);
+    // No palette step: `text-white` on a token-backed surface is legitimate and
+    // is explicitly out of scope for #1892.
+    expect(pattern.test('text-white')).toBe(false);
+    expect(pattern.test('bg-black')).toBe(false);
+    // Arbitrary values, and the tokens the fixes above use.
+    expect(pattern.test('bg-[#123456]')).toBe(false);
+    expect(pattern.test('bg-surface')).toBe(false);
+    expect(pattern.test('text-accent-500')).toBe(false);
+    expect(pattern.test('bg-terminal-surface')).toBe(false);
+    expect(pattern.test('text-terminal-foreground')).toBe(false);
+  });
+});
+
+/**
+ * The raw palette occurrences that survived on develop, verbatim and at their
+ * real paths. With the 11-family list of #1116 the guard read this exact tree
+ * and exited 0 — "no raw palette utilities" — which is the regression #1892
+ * fixes. Note that none of the three paths is `*Terminal*`, so none of them is
+ * reachable by the always-dark exemption.
+ */
+const DEVELOP_SURVIVORS: readonly (readonly [string, string])[] = [
+  [
+    'src/components/worktree/TreeNode.tsx',
+    "      css: 'text-pink-500',\n      scss: 'text-pink-500',\n",
+  ],
+  [
+    'src/components/worktree/VerificationPane.tsx',
+    '              <pre className="max-h-64 overflow-auto rounded bg-neutral-900 p-2 ' +
+      'font-mono text-[11px] leading-relaxed text-neutral-100">\n',
+  ],
+  [
+    'src/components/worktree/git/gitPaneShared.tsx',
+    "  untracked: 'text-teal-600 dark:text-teal-400',\n",
+  ],
+  // The fifth occurrence, which the Issue did not list: a palette color behind
+  // a side segment, invisible to the widened palette alone.
+  [
+    'src/components/worktree/FileTreeView.tsx',
+    '                className="w-3 h-3 border-2 border-input border-t-cyan-500 ' +
+      'rounded-full animate-spin"\n',
+  ],
+];
+
+/** The tokens those lines were replaced with. */
+const REPLACEMENTS: readonly (readonly [string, string])[] = [
+  [
+    'src/components/worktree/TreeNode.tsx',
+    "      css: 'text-accent-500',\n      scss: 'text-accent-500',\n",
+  ],
+  [
+    'src/components/worktree/VerificationPane.tsx',
+    '              <pre className="max-h-64 overflow-auto rounded bg-terminal-surface p-2 ' +
+      'font-mono text-[11px] leading-relaxed text-terminal-foreground">\n',
+  ],
+  [
+    'src/components/worktree/git/gitPaneShared.tsx',
+    "  untracked: 'text-accent-600 dark:text-accent-400',\n",
+  ],
+  [
+    'src/components/worktree/FileTreeView.tsx',
+    '                className="w-3 h-3 border-2 border-input border-t-accent-500 ' +
+      'rounded-full animate-spin"\n',
+  ],
+];
+
+describe('Issue #1892: the occurrences that develop reported as clean', () => {
+  const SCRIPT = path.join(REPO_ROOT, 'scripts/check-token-discipline.mjs');
+  let root: string;
+
+  const plant = (entries: readonly (readonly [string, string])[]): void => {
+    for (const [relative, contents] of entries) {
+      const full = path.join(root, relative);
+      fs.mkdirSync(path.dirname(full), { recursive: true });
+      fs.writeFileSync(full, contents);
+    }
+    execFileSync('git', ['add', '-A'], { cwd: root });
+  };
+
+  beforeAll(() => {
+    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cm-token-1892-')));
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    // The real globals.css: the CLI runs check 2 as well, and check 2 needs the
+    // declared tokens (it exits 2 rather than judging without them).
+    fs.mkdirSync(path.join(root, 'src/app'), { recursive: true });
+    fs.copyFileSync(
+      path.join(REPO_ROOT, 'src/app/globals.css'),
+      path.join(root, 'src/app/globals.css')
+    );
+    plant(DEVELOP_SURVIVORS);
+  });
+
+  afterAll(() => {
+    removeTempDir(root);
+  });
+
+  it('reports every one of them, at the lines they were on', () => {
+    expect(scan(root)).toEqual([
+      'src/components/worktree/FileTreeView.tsx:1:                className="w-3 h-3 border-2 ' +
+        'border-input border-t-cyan-500 rounded-full animate-spin"',
+      "src/components/worktree/TreeNode.tsx:1:      css: 'text-pink-500',",
+      "src/components/worktree/TreeNode.tsx:2:      scss: 'text-pink-500',",
+      'src/components/worktree/VerificationPane.tsx:1:              <pre className="max-h-64 ' +
+        'overflow-auto rounded bg-neutral-900 p-2 font-mono text-[11px] leading-relaxed ' +
+        'text-neutral-100">',
+      "src/components/worktree/git/gitPaneShared.tsx:1:  untracked: 'text-teal-600 dark:text-teal-400',",
+    ]);
+  });
+
+  it('exits non-zero on them, and zero once they are tokens', () => {
+    const run = (): { status: number; stderr: string; stdout: string } => {
+      const result = spawnSync(process.execPath, [SCRIPT, root], { encoding: 'utf8' });
+      return { status: result.status ?? -1, stderr: result.stderr, stdout: result.stdout };
+    };
+
+    const failing = run();
+    expect(failing.status).toBe(1);
+    expect(failing.stderr).toContain('text-pink-500');
+    expect(failing.stderr).toContain('bg-neutral-900');
+    expect(failing.stderr).toContain('text-neutral-100');
+    expect(failing.stderr).toContain('text-teal-600');
+    expect(failing.stderr).toContain('border-t-cyan-500');
+
+    // The same three files, with the tokens this Issue replaced them with. The
+    // pass proves the replacements resolve too: `terminal-surface` and
+    // `terminal-foreground` have to exist in globals.css or check 2 fails here.
+    plant(REPLACEMENTS);
+    const passing = run();
+    expect(passing.status).toBe(0);
+    expect(passing.stdout).toContain('no raw Tailwind palette utilities');
+  });
+});
+
+describe('Issue #1892: families the #1116 list left out', () => {
+  /**
+   * The families named in the Issue, plus the four Tailwind 4.3 additions.
+   * Every one of them was invisible to the guard before this change.
+   */
+  const NEWLY_COVERED = [
+    'neutral',
+    'zinc',
+    'stone',
+    'pink',
+    'rose',
+    'fuchsia',
+    'indigo',
+    'cyan',
+    'teal',
+    'emerald',
+    'lime',
+    'mauve',
+    'olive',
+    'mist',
+    'taupe',
+  ];
+  let root: string;
+
+  beforeAll(() => {
+    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cm-token-families-')));
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    const full = path.join(root, 'src/components/ui/Palette.tsx');
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(
+      full,
+      NEWLY_COVERED.map((family) => `export const ${family} = "bg-${family}-500";`).join('\n') + '\n'
+    );
+    // The exemptions have to keep working on the widened palette too, or #1892
+    // turns every terminal component into a violation at once.
+    fs.writeFileSync(
+      path.join(root, 'src/components/ui/MyTerminalView.tsx'),
+      'const c = "bg-neutral-900 text-neutral-100";\n'
+    );
+    fs.writeFileSync(
+      path.join(root, 'src/components/ui/Palette.test.tsx'),
+      'expect(c).toBe("bg-teal-600");\n'
+    );
+    fs.mkdirSync(path.join(root, 'src/app/worktrees'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src/app/worktrees/page.tsx'), 'const c = "bg-cyan-600";\n');
+    execFileSync('git', ['add', '-A'], { cwd: root });
+  });
+
+  afterAll(() => {
+    removeTempDir(root);
+  });
+
+  it.each(NEWLY_COVERED)('catches a raw %s step', (family) => {
+    expect(scan(root).some((line) => line.includes(`bg-${family}-500`))).toBe(true);
+  });
+
+  it('keeps the *Terminal* / test / worktrees exemptions on the widened palette', () => {
+    expect([...new Set(filesOf(root))]).toEqual(['src/components/ui/Palette.tsx']);
   });
 });
 
@@ -401,7 +682,7 @@ describe('Issue #1889: unknown token names', () => {
 describe('Issue #1889: classification of a single utility', () => {
   const tokens = readColorTokens(REPO_ROOT) as Set<string>;
 
-  it('reads the 42 color tokens out of globals.css, and no `var()` use', () => {
+  it('reads the color tokens out of globals.css, and no `var()` use', () => {
     expect(tokens.has('info-subtle')).toBe(true);
     expect(tokens.has('surface-2')).toBe(true);
     expect(tokens.has('accent-950')).toBe(true);

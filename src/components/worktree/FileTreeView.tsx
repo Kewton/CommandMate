@@ -673,9 +673,10 @@ export const FileTreeView = memo(function FileTreeView({
               aria-live="polite"
               className="flex items-center gap-1 text-xs text-muted-foreground"
             >
+              {/* #1892: cyan-500 -> accent-500 — the same RGB in both themes (globals.css). */}
               <span
                 aria-hidden="true"
-                className="w-3 h-3 border-2 border-input border-t-cyan-500 rounded-full animate-spin"
+                className="w-3 h-3 border-2 border-input border-t-accent-500 rounded-full animate-spin"
               />
               <span className="sr-only">{t('fileTree.refreshing')}</span>
             </div>

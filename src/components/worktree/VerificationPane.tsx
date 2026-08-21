@@ -259,8 +259,14 @@ function GateRow({ gate }: { gate: VerificationGateResultView }) {
                   })}
                 </p>
               )}
-              {/* Terminal output surface: stays dark in both themes (repo convention). */}
-              <pre className="max-h-64 overflow-auto rounded bg-neutral-900 p-2 font-mono text-[11px] leading-relaxed text-neutral-100">
+              {/*
+                Terminal output surface: stays dark in BOTH themes (#1075 (a)).
+                The intent used to be carried by raw `neutral-*` plus this
+                comment, which no guard can read; `terminal-*` is declared once
+                in globals.css with no `.dark` counterpart, so the always-dark
+                contract is now in the token itself (#1892).
+              */}
+              <pre className="max-h-64 overflow-auto rounded bg-terminal-surface p-2 font-mono text-[11px] leading-relaxed text-terminal-foreground">
                 {excerpt.lines.join('\n')}
               </pre>
             </>

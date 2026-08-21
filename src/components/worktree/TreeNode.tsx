@@ -217,8 +217,10 @@ export const FileIcon = memo(function FileIcon({ extension }: { extension?: stri
       jsx: 'text-warning',
       json: 'text-warning',
       md: 'text-muted-foreground',
-      css: 'text-pink-500',
-      scss: 'text-pink-500',
+      // #1892: pink has no token. The accent scale is the only tint left that
+      // is not already spoken for by a status color above.
+      css: 'text-accent-500',
+      scss: 'text-accent-500',
       html: 'text-warning',
       py: 'text-success',
     };

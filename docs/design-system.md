@@ -58,6 +58,8 @@ Tailwind からは `bg-background` / `bg-surface` / `text-accent-500` のよう�
 | `--sidebar-border` | slate-200 | `#2a303e` | サイドバー境界ヘアライン |
 | `--sidebar-hover` | slate-100 | gray-800 | hover / 選択行の背景 |
 | `--sidebar-muted` | gray-500 | gray-400 | サイドバー二次テキスト |
+| `--terminal-surface` | gray-900 | gray-900（同値） | 常時ダーク島の地色（#1892） |
+| `--terminal-foreground` | gray-300 | gray-300（同値） | 常時ダーク島の文字色（#1892） |
 
 `--accent-*` と `--success` / `--warning` / `--danger` / `--info` はライト・ダークで同値だが、
 将来のモード別調整を容易にするため両ブロックに明示的に定義している。
@@ -65,6 +67,11 @@ Tailwind からは `bg-background` / `bg-surface` / `text-accent-500` のよう�
 `--{status}-subtle/-border/-foreground`（Issue #1112 のステータス tint スケール）は**モード可変**。
 ライトは `*-50` の淡色面＋ `*-800` の前景（AA 4.5:1 超）、ダークは `*-950` の低輝度面
 （#0a0c12→#141821 のエレベーション階梯から浮かない）＋ `*-300` の前景（AA 8:1 超）。
+
+`--terminal-*`（Issue #1892）は**唯一「テーマに追従しない」ことが定義であるトークン**で、
+`@layer base` の `:root` に 1 度だけ宣言し **`.dark` に対を置かない**。常時ダーク島（#1075 分類 (a)）を
+「ファイル名が `*Terminal*` である」「コメントにそう書いてある」ではなく**スタイルの型として**表すためで、
+値は `TerminalDisplay` が実際に描いている gray-900 / gray-300 に揃えてある。
 
 `--sidebar-*`（Issue #1073）は **standalone なリテラル RGB 値**で定義する（`--surface` 等を
 `var()` 参照しない）。理由: `--surface` 階梯の将来改修がサイドバー色に意図せず波及するのを防ぐため。
@@ -89,6 +96,7 @@ Tailwind からは `bg-background` / `bg-surface` / `text-accent-500` のよう�
 | `--{status}-subtle` / `--{status}-border` / `--{status}-foreground` | `bg-warning-subtle` / `border-warning-border` / `text-warning-foreground` など |
 | `--sidebar` / `--sidebar-foreground` / `--sidebar-border` | `bg-sidebar` / `text-sidebar-foreground` / `border-sidebar-border` |
 | `--sidebar-hover` / `--sidebar-muted` | `hover:bg-sidebar-hover` / `text-sidebar-muted` |
+| `--terminal-surface` / `--terminal-foreground` | `bg-terminal-surface` / `text-terminal-foreground` |
 
 各色は `@theme inline` に `rgb(var(--token))` 形式で登録しており、
 `bg-surface/80` のように **透過度指定** がそのまま使える
@@ -156,12 +164,17 @@ grep で確認する運用とする。
    （`claude=bg-purple-600` / `codex=bg-blue-600` / `gemini=bg-green-600`）。
 2. `error/TerminalErrorFallback.tsx` — ターミナル配色に合わせた常時ダーク島（`*Terminal*` 名の別ファイルへ分離済み）。
 3. コードブロック／シンタックスハイライトの固定ダーク（`.prose pre` の `#0d1117` 系）。
-4. 4 ステータスに馴染まない装飾色でトークンが存在しないもの（例: ファイル種別アイコンの `text-pink-500`）。
-   grep パターン（上記 9 色）に含まれない色に限り、ライト/ダーク両対応を保つこと。
+4. ~~4 ステータスに馴染まない装飾色でトークンが存在しないもの（例: ファイル種別アイコンの
+   `text-pink-500`）。grep パターン（上記 9 色）に含まれない色に限り〜~~
+   **#1892 で撤回。** この例外は「ガードの grep パターンに含まれない色なら残してよい」と読める形で
+   書かれており、実際に `text-pink-500`（TreeNode）/ `text-teal-600`（gitPaneShared）/
+   `bg-neutral-900`（VerificationPane）/ `border-t-cyan-500`（FileTreeView）が**ガードに素通りしたまま**
+   残っていた。パターンは Tailwind 既定パレット全体を見るようになったので、**「パターン外」は
+   もう例外の根拠にならない**。4 ステータスに馴染まない装飾色は `accent` スケール（= cyan、両テーマ同値）
+   へ寄せるか、必要ならトークンを新設する。
 
-「完了」は grep 実数で判定する:
-`git grep -cE '(bg|text|border|ring)-(red|green|yellow|amber|orange|purple|violet|sky|blue)-[0-9]' -- src/`
-の残数が上記サンクション済み例外（ターミナル島）のみになったこと。
+「完了」は grep 実数ではなく **`node scripts/check-token-discipline.mjs` の exit code** で判定する
+（パターン・対象・除外の単一権威ソース。#1882 / #1892）。
 
 ### 常時ダーク領域とテーマ追従（#1075）
 
@@ -180,6 +193,31 @@ UI の配色方針は次の 2 分類のみ。曖昧な「暗いまま」の島�
 > **hidden-children 注意**: 常時ダーク前提で子孫が `text-gray-300` / `bg-gray-800` 等を
 > `dark:` 無しで直書きしていると、テーマ追従化した親の下でライト時に不可視化する。
 > コンテナだけでなく**描画サブツリー全体**をトークン化し、ライトの実画面で目視確認する。
+
+#### 常時ダーク島はトークンで表す（#1892）
+
+常時ダーク島は `bg-terminal-surface` / `text-terminal-foreground` を使う。生の `gray-*` / `neutral-*` を
+直書きして「コメントで常時ダークだと書く」形は取らない。理由は**その意図を機械が読めない**ことで、
+実際 `VerificationPane` はコメントで常時ダークだと宣言しながら生 `neutral-*` を使っており、
+ガードのパターンが `neutral` を見ていなかったため誰も気づかなかった。
+
+**判断: `VerificationPane` の `<pre>`（`commandmate verify` のゲートログ抜粋）は常時ダークのまま維持する**
+
+- **テーマ追従にしない理由**: この面は CLI ゲートの生ログ（等幅・ANSI 前提の出力）をそのまま流す
+  **ターミナル出力面**であり #1075 の分類 (a) そのもの。同じワークツリー画面に `TerminalDisplay` が
+  並ぶため、ライトでここだけ白地になると 1 画面の中でログ面が 2 つの慣例に分かれる。
+- **ファイル名規約（`*Terminal*` 除外）に寄せない理由**: ガードの除外は `TERMINAL_FILE_EXCLUDE`
+  （パス中の `Terminal`）で効くので、リネームでも通せる。しかしそれは「常時ダークである」という
+  **設計上の性質をファイル名の綴りに預ける**ことであり、綴りを外れた瞬間に静かに壊れる
+  （まさに今回の `VerificationPane` がそれ）。トークンなら `--terminal-*` は `:root` にだけ宣言され
+  `.dark` に対が無い ＝ **「テーマに追従しない」がトークンの定義**になり、置いた場所に依存しない。
+- **除外のマーカー方式化（案 3）を採らない理由**: ガード側の仕組みが 1 つ増えるが、常時ダークという
+  性質は依然としてマーカー（コメント）であってスタイルではない。トークン化の方が表現として強い。
+- **値の変更**: 旧 `neutral-900` / `neutral-100` から `gray-900` / `gray-300`（`TerminalDisplay` の実値）へ
+  **意図的に変更**した。同じ「ターミナルのダーク」がコンポーネントごとに別の値へ散るのを止めるため。
+  コントラスト比 11.6:1（AA 超）。
+- ガードの `*Terminal*` 除外は**据え置き**（`TerminalDisplay` 等は xterm 側の固定テーマと対で
+  生ダークユーティリティを使っており、本 Issue では触らない）。
 
 ---
 
@@ -202,11 +240,12 @@ UI の配色方針は次の 2 分類のみ。曖昧な「暗いまま」の島�
 - **ツールチップ**: 反転サーフェス `bg-foreground text-background`（Radix `TooltipContent` が基準。
   ライトで暗い吹き出し、ダークで明るい吹き出しにテーマ追従する）。二次テキストは `text-background/70`。
 
-## トークン規律 ガード (Issue #1082 / #1116 / #1882 / #1889)
+## トークン規律 ガード (Issue #1082 / #1116 / #1882 / #1889 / #1892)
 
 移行済みディレクトリに対して **2 つ** の検査を hard-fail で回す。
 
-1. **不在検査**（#1082 / #1116）: 生の直書きカラークラス（`bg-`/`text-`/`border-`/`ring-`）が再流入したら落とす。
+1. **不在検査**（#1082 / #1116 / #1892）: 生の直書きカラークラス（`bg-`/`text-`/`border-`/`ring-`）が
+   再流入したら落とす。対象は **Tailwind 既定パレットの全ファミリー**（#1892）。
 2. **実在検査**（#1889）: 参照しているトークン名が `src/app/globals.css` の `--color-*` に**実在すること**を確認する。
    Tailwind は解決できないクラスを黙って捨てるため、`bg-surface-elevated-typo` のような打ち間違いは
    「背景が消える」「文字色が継承されて読めない」という**視覚だけの silent failure** になり、
@@ -227,23 +266,45 @@ UI の配色方針は次の 2 分類のみ。曖昧な「暗いまま」の島�
 > verify.yaml へ `git grep` をコピーすると同じ検査が 2 箇所に増えて静かに乖離するため、
 > **スクリプトを共有する**形にしてある。
 
-- **対象カラー**: 中立色 `gray` / `slate`（#1082）に加え、**chromatic 色**
-  `red` / `green` / `yellow` / `amber` / `orange` / `purple` / `violet` / `sky` / `blue`（#1116）。
-  正規表現は `(bg|text|border|ring)-(gray|slate|red|green|yellow|amber|orange|purple|violet|sky|blue)-[0-9]`。
+- **対象カラー（#1892 で全パレットへ拡張）**: Tailwind 既定パレットの**全 26 ファミリー**。
+  正規表現は `(bg|text|border|ring)-((x|y|t|r|b|l|s|e|offset)-)?(<全ファミリー>)-[0-9]` で、
+  ファミリー一覧は `scripts/check-token-discipline.mjs` の `TAILWIND_PALETTE_FAMILY_NAMES`
+  **1 箇所だけ**が持つ。不在検査（正規表現）と実在検査（Tailwind 組み込み配色の判定）が**同じ配列**を
+  読むため、両者が「Tailwind の配色とは何か」で食い違うことがない。
+  - **列挙漏れが再発しない根拠**: ハードコードした配列を、unit テストが
+    `node_modules/tailwindcss/theme.css` の `--color-<family>-<step>` 実宣言と**集合として突き合わせる**
+    (`tests/unit/scripts/check-token-discipline.test.ts`)。Tailwind を上げてファミリーが増えれば
+    **その時点でテストが赤**になり、黙って穴が広がらない。スクリプト自身が `tailwindcss` を import
+    しないのは、CI の `token-discipline` ジョブが `npm install` を行わないため（#1889 の判断と同じ）。
+  - **#1116 の 11 ファミリー列挙で何が起きていたか**: `neutral` / `zinc` / `stone` / `pink` / `rose` /
+    `fuchsia` / `indigo` / `cyan` / `teal` / `emerald` / `lime`（および Tailwind 4.3 追加の
+    `mauve` / `olive` / `mist` / `taupe`）が素通りし、develop 上で 4 箇所の生配色が残ったまま
+    ガードが **exit 0（「生配色は無い」）** を返していた。手で選んだ列挙は「誰も足そうと思わなかった色」
+    について**構造的に無言**で、その無言はクリーンなツリーと区別できない。
+  - **側面・オフセット付きも対象**（#1892）: `border-t-cyan-500` / `ring-offset-slate-900`。
+    実在検査は以前からこれらを「Tailwind 組み込み配色」と判定していたため、不在検査が見ていないと
+    **同じクラスについて 2 つの検査が食い違う**状態だった（`FileTreeView` のスピナーがそこに居た）。
+  - **対象外**: `text-white` / `bg-black`（パレットのステップを持たない。トークン面の上に載せる
+    `text-white` が正当なケースが多く、方針判断が別途要る）、`bg-[#123456]` 等の arbitrary value。
 - **対象（ホワイトリスト）**: `src/app`（`src/app/worktrees/**` を除く）、
   `src/components/{ui,layout,home,review,repository,common,sidebar,providers,worktree,mobile,external-apps,error,auth}`。
   （worktree/mobile/external-apps は #1061、error/auth は #1116 で追加。）
 - **対象外（意図的な常時ダーク島・スコープ外）**:
   - `*Terminal*` ソースファイル（`src/components/Terminal.tsx`、`error/TerminalErrorFallback.tsx` 等）。
     ターミナル出力面は両テーマでダーク維持のため生ダークユーティリティを使う（#1079）。
+    **新しい常時ダーク島をこの除外に足さないこと**: ファイル名の綴りに設計を預ける形なので、
+    `*Terminal*` に当たらない面（`VerificationPane` がそうだった）は静かに漏れる。
+    新設は `bg-terminal-surface` / `text-terminal-foreground` のダーク島トークンで表す（#1892）。
   - `src/app/worktrees/**`（ワークツリー詳細ルート／ターミナルページ。CLI ブランド色
     `claude=bg-purple-600` / `codex=bg-blue-600` / `gemini=bg-green-600` / `bash=bg-gray-600` を含む）。
   - テストファイル（`*.test.*` / `*.spec.*` / `__tests__`）はクラス文字列を検証するため除外。
 
-- **違反時の直し方**: ホワイトリストをいじらず、`docs/design-system.md` のセマンティックトークンへ置換する。
+- **違反時の直し方**: ホワイトリストやパレット一覧をいじらず、`docs/design-system.md` の
+  セマンティックトークンへ置換する。
   中立色は `foreground` / `muted` / `muted-foreground` / `border` / `surface` / `input` / `ring`、
   状態色は `bg-{status}-subtle` / `border-{status}-border` / `text-{status}-foreground` / `bg-{status}`
-  （status = success / warning / danger / info）。
+  （status = success / warning / danger / info）、4 ステータスに馴染まない装飾色は `accent` スケール、
+  常時ダーク島は `terminal-surface` / `terminal-foreground`（#1892）。
 
 #### 実在検査の判定方法と検出できない範囲（#1889）
 

@@ -18,15 +18,23 @@
  * check 1 went green, and a human grepping `globals.css` by hand is what
  * actually established that the tint tokens existed. This is that grep.
  *
- * [Issue #1082 / #1116] Migrated directories use tokens, not raw palette steps:
- *   - gray/slate  → neutral tokens (foreground / muted / muted-foreground /
+ * [Issue #1082 / #1116 / #1892] Migrated directories use tokens, not raw palette
+ * steps. Check 1 covers Tailwind's ENTIRE default palette (#1892) — see
+ * TAILWIND_PALETTE_FAMILY_NAMES for why it is the whole palette rather than the
+ * families somebody noticed. The established replacements:
+ *   - neutrals (gray/slate/zinc/neutral/stone, plus the low-chroma tinted
+ *     neutrals Tailwind 4.3 added: mauve/olive/mist/taupe)
+ *                 → neutral tokens (foreground / muted / muted-foreground /
  *                   border / surface / input / ring). (#1082, #1061)
  *   - chromatic (red/green/yellow/amber/orange/purple/violet/sky/blue)
  *                 → status tint tokens (bg-{status}-subtle /
  *                   border-{status}-border / text-{status}-foreground /
  *                   bg-{status}, status = success|warning|danger|info). (#1116)
- * Fix violations with the tokens in docs/design-system.md, NOT by widening the
- * lists below.
+ *   - everything else (pink/teal/cyan/…) → the accent scale, or a new token;
+ *                   an always-dark island uses bg-terminal-surface /
+ *                   text-terminal-foreground. (#1892)
+ * Fix violations with the tokens in docs/design-system.md, NOT by narrowing the
+ * palette list or widening the exclusions below.
  *
  * [Issue #1882] This file is the SINGLE authority for the pattern, the guarded
  * directory list and the exclusions. `.github/workflows/ci-pr.yml` (job
@@ -100,9 +108,91 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-/** Raw palette utilities that must not appear in a migrated directory. */
-export const TOKEN_DISCIPLINE_PATTERN =
-  '(bg|text|border|ring)-(gray|slate|red|green|yellow|amber|orange|purple|violet|sky|blue)-[0-9]';
+/**
+ * Tailwind's default color palette, family by family (Tailwind 4.3).
+ *
+ * ONE list, read by BOTH checks: check 1 builds TOKEN_DISCIPLINE_PATTERN out of
+ * it and check 2 builds TAILWIND_BUILTIN_COLOR out of it, so the two can never
+ * disagree about what counts as "a Tailwind palette color".
+ *
+ * [Issue #1892] WHY THE WHOLE PALETTE, AND NOT THE FAMILIES WE HAPPEN TO USE.
+ * Check 1 shipped with 11 families, hand-picked from the colors that were in
+ * the code at the time (#1082 added gray/slate, #1116 added the 9 chromatic
+ * ones). Every other family walked straight through it: on develop
+ * `text-pink-500` (TreeNode), `bg-neutral-900` / `text-neutral-100`
+ * (VerificationPane) and `text-teal-600` (gitPaneShared) sat inside guarded
+ * directories while this guard printed "no raw palette utilities" and exited 0.
+ * A hand-picked list cannot fail any other way — it is silent by construction
+ * about every family nobody thought to add, and its silence is indistinguishable
+ * from a clean tree.
+ *
+ * WHY IT CANNOT SILENTLY FALL BEHIND AGAIN. This script has to run with nothing
+ * but Node (see the CI note below), so it cannot import Tailwind and ask. The
+ * list is therefore cross-checked against Tailwind itself in the unit suite:
+ * `tests/unit/scripts/check-token-discipline.test.ts` reads every
+ * `--color-<family>-<step>` declaration out of `node_modules/tailwindcss/
+ * theme.css` and asserts this array equals that set. A Tailwind upgrade that
+ * adds a family turns the suite RED at upgrade time instead of quietly widening
+ * the hole. `mauve` / `olive` / `mist` / `taupe` are in the list for exactly
+ * that reason: Tailwind 4.3 added them, and nothing in the repository would
+ * otherwise have noticed.
+ */
+export const TAILWIND_PALETTE_FAMILY_NAMES = [
+  // chromatic
+  'red',
+  'orange',
+  'amber',
+  'yellow',
+  'lime',
+  'green',
+  'emerald',
+  'teal',
+  'cyan',
+  'sky',
+  'blue',
+  'indigo',
+  'violet',
+  'purple',
+  'fuchsia',
+  'pink',
+  'rose',
+  // neutral
+  'slate',
+  'gray',
+  'zinc',
+  'neutral',
+  'stone',
+  // added in Tailwind 4.3
+  'mauve',
+  'olive',
+  'mist',
+  'taupe',
+];
+
+/** The same families as a regex alternation: `red|orange|amber|…`. */
+export const TAILWIND_PALETTE_FAMILIES = TAILWIND_PALETTE_FAMILY_NAMES.join('|');
+
+/**
+ * The segment a color can hide behind: `border-t-cyan-500` (a side) and
+ * `ring-offset-cyan-500` (the offset color) are raw palette utilities that the
+ * bare `<prefix>-<family>-<step>` shape does not match.
+ *
+ * [Issue #1892] Found by mutation-testing this guard, not by reading it: check 2
+ * already classified `border-t-cyan-500` as a Tailwind palette color, so check 1
+ * skipping it meant the two checks disagreed about the same class. One real
+ * occurrence was hiding there (`FileTreeView`'s spinner).
+ */
+const COLOR_SUB_SEGMENT = '(x|y|t|r|b|l|s|e|offset)-';
+
+/**
+ * Raw palette utilities that must not appear in a migrated directory.
+ *
+ * The trailing `-[0-9]` keeps this to a palette STEP (`bg-red-500`), which is
+ * also why `text-white` / `bg-black` do not match: they carry no step, a
+ * token-backed surface legitimately puts `text-white` on top of it, and they
+ * are out of scope for #1892.
+ */
+export const TOKEN_DISCIPLINE_PATTERN = `(bg|text|border|ring)-(${COLOR_SUB_SEGMENT})?(${TAILWIND_PALETTE_FAMILIES})-[0-9]`;
 
 /**
  * WHITELIST (guarded) = directories already migrated to semantic tokens.
@@ -242,14 +332,14 @@ export function readColorTokens(root) {
   return tokens;
 }
 
-/** Tailwind's built-in palette families. Steps are 50 / 100…900 / 950. */
-export const TAILWIND_PALETTE_FAMILIES =
-  'red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone';
-
 /**
  * A color Tailwind ships itself. Accepted by check 2 on purpose: policing raw
  * palette usage is check 1's job (and `text-white` / `bg-black` are out of
  * scope for #1889), so check 2 only ever asks "does this name resolve".
+ *
+ * Families come from TAILWIND_PALETTE_FAMILY_NAMES at the top of this file —
+ * the same list check 1's pattern is built from (#1892). Steps are
+ * 50 / 100…900 / 950.
  */
 const TAILWIND_BUILTIN_COLOR = new RegExp(
   `^(inherit|current|transparent|black|white|(${TAILWIND_PALETTE_FAMILIES})-(50|[1-9]00|950))$`
@@ -484,7 +574,7 @@ if (isMain) {
   if (rawPalette.length > 0) {
     failed = true;
     console.error(
-      '::error::Raw gray/slate or chromatic color utilities found in migrated directories (Issue #1082 / #1116). Replace with semantic tokens — see docs/design-system.md.'
+      '::error::Raw Tailwind palette utilities found in migrated directories (Issue #1082 / #1116 / #1892). Replace with semantic tokens — see docs/design-system.md.'
     );
     for (const line of rawPalette) console.error(line);
   }
@@ -497,6 +587,6 @@ if (isMain) {
   }
   if (failed) process.exit(1);
   console.log(
-    'Token discipline: no raw gray/slate or chromatic utilities, and every color token referenced exists.'
+    'Token discipline: no raw Tailwind palette utilities, and every color token referenced exists.'
   );
 }
