@@ -6,12 +6,42 @@
 import { Command } from 'commander';
 import { ExitCode } from '../types';
 import type { AutoYesOptions } from '../types';
+import type { AutoYesResponse } from '../types/api-responses';
 import { ApiClient, isValidWorktreeId, isValidInstanceId, MAX_STOP_PATTERN_LENGTH } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { parseDurationToMs, ALLOWED_DURATIONS } from '../config/duration-constants';
 import { isCliToolId } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 import { resolveInstanceCliTool } from './instances';
+
+/**
+ * Say which agent's poller the server just armed (Issue #1909).
+ *
+ * The agent is read off the response rather than resolved here on purpose. A
+ * bare `auto-yes <id> --enable` deliberately sends no `cliToolId`: the server
+ * applies the precedence chain (roster > explicit > primary anchor > worktree
+ * default), which is the same chain `send` / `wait` / `capture` get, and
+ * resolving it a second time in the CLI is how the two answers diverged in the
+ * first place (design §4 D5 決定 1 / DR2-008). The server names what it chose;
+ * this only prints it.
+ *
+ * @param worktreeId - Worktree the command targeted
+ * @param response - Body of the auto-yes POST, or undefined from an old daemon
+ */
+function reportEnabled(worktreeId: string, response: AutoYesResponse | undefined): void {
+  const agent = response?.cliToolId;
+  const instanceId = response?.instanceId;
+  // `instanceId === cliToolId` is how the primary instance is spelled (#868);
+  // repeating it as "copilot (copilot)" would be noise.
+  const label = agent && instanceId && instanceId !== agent
+    ? `${agent}, instance ${instanceId}`
+    : agent;
+  console.error(
+    label
+      ? `Auto-yes enabled for ${worktreeId} (${label}).`
+      : `Auto-yes enabled for ${worktreeId}.`
+  );
+}
 
 export function createAutoYesCommand(): Command {
   const cmd = new Command('auto-yes');
@@ -101,10 +131,13 @@ export function createAutoYesCommand(): Command {
           body.instanceId = options.instance;
         }
 
-        await client.post<void>(`/api/worktrees/${worktreeId}/auto-yes`, body);
+        const response = await client.post<AutoYesResponse | undefined>(
+          `/api/worktrees/${worktreeId}/auto-yes`,
+          body
+        );
 
         if (options.enable) {
-          console.error(`Auto-yes enabled for ${worktreeId}.`);
+          reportEnabled(worktreeId, response);
         } else {
           console.error(`Auto-yes disabled for ${worktreeId}.`);
         }

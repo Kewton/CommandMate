@@ -1220,3 +1220,36 @@ export interface TaskDetailResponse {
   task: TaskView;
   lastVerificationRun: VerificationRunView | null;
 }
+
+/**
+ * Mirrors: src/app/api/worktrees/[id]/auto-yes/route.ts AutoYesResponse.
+ *
+ * Issue #1909: every field below `expiresAt` is optional for the reason the
+ * rest of this file states — the CLI is routinely newer than the daemon it
+ * talks to (`npm i -g` does not restart a running server), and a server that
+ * predates #1909 answers with none of them. That absence is not "no agent":
+ * it is a server still arming a hard-coded claude, which is exactly the bug. So
+ * the CLI reports what it was told and says nothing it was not.
+ */
+export interface AutoYesResponse {
+  enabled: boolean;
+  expiresAt: number | null;
+  pollingStarted?: boolean;
+  /** The agent whose poller this request armed. */
+  cliToolId?: string;
+  /** The instance it was armed for (the primary instance's id is its cliToolId). */
+  instanceId?: string;
+  /**
+   * Which stage of the server's precedence chain chose `cliToolId`. Typed as the
+   * wire's `string` rather than a union, like CurrentOutputResponse.resolvedBy:
+   * a newer server may name a stage this build has never heard of, and
+   * narrowing would turn that into a parse failure.
+   */
+  resolvedBy?: string;
+  /** Read path only; a POST that contradicts the roster is refused, not resolved. */
+  conflict?: {
+    instanceId: string;
+    rosterCliTool: string;
+    requestedCliTool: string;
+  } | null;
+}

@@ -1055,6 +1055,24 @@ commandmate auto-yes <worktree-id> --enable --instance codex-2  # Scoped to one 
 | `--instance <id>` | **The recommended way to name the target.** The instance ID; Auto-Yes is controlled independently of the other instances |
 | `--agent <id>` | A helper for instances that are not in the roster (unnecessary when `--instance` alone is enough) |
 
+### The Target Agent Is the Worktree's Default (Issue #1909)
+
+`auto-yes <id> --enable` with neither `--instance` nor `--agent` targets the **worktree's default
+agent** — the same target `send` / `wait` / `capture` address. Before Issue #1909 it was hard-coded
+to claude, so on a worktree whose default is copilot or opencode a claude poller started, logged
+`Claude Code session ... does not exist` every 2 seconds, and left the real dialogs unanswered.
+
+The command now names the agent it armed:
+
+```console
+$ commandmate auto-yes proj-cp --enable
+Auto-yes enabled for proj-cp (copilot).
+```
+
+A non-primary `--instance` reads as `(opencode, instance oc-2)`. If no agent is named at all
+(`Auto-yes enabled for proj-cp.`), the **running server is older than the CLI** and is still
+hard-coding claude; restart it with `commandmate stop && commandmate start`.
+
 ### `--stop-pattern` Matches Terminal Output (It Cannot Suppress a Command)
 
 `--stop-pattern` **does not watch the commands the agent runs**. It is a regular expression matched

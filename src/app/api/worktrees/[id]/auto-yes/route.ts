@@ -8,7 +8,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db';
-import { resolveInstanceCliTool } from '@/lib/db/agent-instances-db';
+import {
+  resolveSessionTarget,
+  resolveSessionTargetStrict,
+  describeSessionTargetConflict,
+  INSTANCE_TOOL_CONFLICT,
+  type SessionTarget,
+} from '@/lib/session/resolve-session-target';
 import {
   getAutoYesState,
   setAutoYesEnabled,
@@ -42,12 +48,34 @@ interface AutoYesResponse {
   enabled: boolean;
   expiresAt: number | null;
   pollingStarted?: boolean;
+  /**
+   * Issue #1909: which agent this state (or this arming) actually belongs to.
+   *
+   * Added because the answer used to be unknowable from outside: the route
+   * coalesced an unresolved tool to a hard-coded claude and said nothing, so a
+   * worktree whose default is copilot got a claude poller and an `enabled: true`
+   * that named no agent — only the server log said which one. Carried on the
+   * single-target responses (the `?cliToolId` GET and every POST), not on the
+   * map entries, whose key already is the agent.
+   */
+  cliToolId?: CLIToolType;
+  instanceId?: string;
+  resolvedBy?: SessionTarget['resolvedBy'];
+  /** Read path only: the explicit request the roster contradicts, or null (DR3-015). */
+  conflict?: SessionTarget['conflict'] | null;
 }
 
-/** Build the JSON response shape from an AutoYesState */
+/**
+ * Build the JSON response shape from an AutoYesState.
+ *
+ * @param state - The stored state, or null when nothing is armed
+ * @param pollingStarted - Whether this request started a poller (POST only)
+ * @param target - The resolved (agent, instance) this state belongs to (Issue #1909)
+ */
 function buildAutoYesResponse(
   state: AutoYesState | null,
-  pollingStarted?: boolean
+  pollingStarted?: boolean,
+  target?: SessionTarget
 ): AutoYesResponse {
   const response: AutoYesResponse = {
     enabled: state?.enabled ?? false,
@@ -55,6 +83,12 @@ function buildAutoYesResponse(
   };
   if (pollingStarted !== undefined) {
     response.pollingStarted = pollingStarted;
+  }
+  if (target) {
+    response.cliToolId = target.cliToolId;
+    response.instanceId = target.instanceId;
+    response.resolvedBy = target.resolvedBy;
+    response.conflict = target.conflict ?? null;
   }
   return response;
 }
@@ -117,8 +151,27 @@ export async function GET(
           { status: 400 }
         );
       }
-      const state = getAutoYesState(id, cliToolIdParam, instanceIdParam);
-      return NextResponse.json(buildAutoYesResponse(state));
+      // Issue #1909 / #1925 (design §4 D5 決定 3): the pair is resolved by the
+      // one shared resolver instead of taken as given, so `?cliToolId=claude
+      // &instanceId=oc-2` reads the state of the agent the roster says `oc-2`
+      // is — the same agent the POST below arms — rather than a claude key
+      // that nothing ever wrote. Reading is not a side effect, so the
+      // contradiction resolves (roster wins) and ships in the payload rather
+      // than answering 400 (DR3-015).
+      const target = resolveSessionTarget(getDbInstance(), id, {
+        instanceId: instanceIdParam,
+        requestedCliTool: cliToolIdParam,
+      });
+      if (target.conflict) {
+        logger.warn('instance-tool-conflict:', {
+          worktreeId: id,
+          instanceId: target.conflict.instanceId,
+          rosterCliTool: target.conflict.rosterCliTool,
+          requestedCliTool: target.conflict.requestedCliTool,
+        });
+      }
+      const state = getAutoYesState(id, target.cliToolId, target.instanceId);
+      return NextResponse.json(buildAutoYesResponse(state, undefined, target));
     }
 
     // No cliToolId: return maps keyed by agent (cliToolId) and by instance (Issue #896).
@@ -137,10 +190,17 @@ export async function GET(
       }
     }
 
-    // For backward compatibility, also include top-level fields from default agent
-    const defaultState = getAutoYesState(id, 'claude');
+    // For backward compatibility, also include top-level fields from default agent.
+    //
+    // Issue #1909 / DR3-010: "default agent" is the worktree's, not a hard-coded
+    // one. This is the GET-side twin of the POST bug — with `--enable`
+    // fixed but this left alone, a copilot worktree would arm a copilot poller
+    // and then report the (never-written, always-disabled) claude state to the
+    // UI and to every reader of the top-level fields.
+    const defaultTarget = resolveSessionTarget(getDbInstance(), id);
+    const defaultState = getAutoYesState(id, defaultTarget.cliToolId, defaultTarget.instanceId);
     return NextResponse.json({
-      ...buildAutoYesResponse(defaultState),
+      ...buildAutoYesResponse(defaultState, undefined, defaultTarget),
       agents: agentStates,
       instances: instanceStates,
     });
@@ -237,25 +297,40 @@ export async function POST(
     // the tmux session name from cliTool, so an instance must be paired with the
     // CLI tool its roster entry declares. Without this, `--instance codex` armed
     // auto-yes against a Claude session that was never started.
-    const resolution = resolveInstanceCliTool(
-      getDbInstance(),
-      id,
-      body.instanceId,
-      body.cliToolId
-    );
+    //
+    // Issue #1909 / #1925: resolution moved to the one shared resolver, which
+    // is what removes the hard-coded claude this line used to coalesce to. That
+    // literal was the bug: `resolveInstanceCliTool` answers null for "the
+    // request named no agent" and left the worktree default to the caller, so
+    // `commandmate auto-yes <id> --enable` on a copilot worktree armed a claude
+    // poller, which then logged `Claude Code session ... does not exist` every
+    // 2s while copilot's dialogs went unanswered. `send` / `wait` / `capture`
+    // all took the worktree default; only this route did not.
+    //
+    // Strict, unlike the GET above: arming a poller types into a session, and
+    // design §4 D5 決定 3 (DR3-015) puts `auto-yes` POST on the side-effect side
+    // of that table — with two contradicting declarations of which agent is
+    // meant, refusing is the only answer that cannot auto-answer a dialog in
+    // the wrong pane.
+    const resolution = resolveSessionTargetStrict(getDbInstance(), id, {
+      instanceId: body.instanceId as string | undefined,
+      requestedCliTool: body.cliToolId as CLIToolType | undefined,
+    });
     if (!resolution.ok) {
       return NextResponse.json(
         {
-          error: `Agent instance '${resolution.instanceId}' is registered as ${resolution.rosterCliTool}, `
-            + `but ${resolution.requestedCliTool} was requested.`,
+          error: describeSessionTargetConflict(resolution.conflict),
+          code: INSTANCE_TOOL_CONFLICT,
+          ...resolution.conflict,
         },
         { status: 400 }
       );
     }
-    const cliToolId: CLIToolType = resolution.cliToolId ?? 'claude';
+    const target = resolution.target;
+    const cliToolId: CLIToolType = target.cliToolId;
 
     // Effective instance: provided instanceId, else the primary (=== cliToolId).
-    const instanceId: string = body.instanceId ?? cliToolId;
+    const instanceId: string = target.instanceId;
 
     // Issue #138, #525, #896: Start or stop server-side polling (per-instance)
     let pollingStarted = false;
@@ -299,7 +374,17 @@ export async function POST(
       }
     }
 
-    return NextResponse.json(buildAutoYesResponse(state, pollingStarted));
+    // Issue #1909: the resolved target rides back on the response so the caller
+    // can name the agent it just armed. The CLI prints it; before this the only
+    // record of the choice was `poller:started` in the server log.
+    //
+    // Withheld from the untargeted `{enabled: false}` request, which disables
+    // every instance of the worktree: naming one agent there would describe a
+    // request that deliberately named none.
+    const targetedRequest = body.enabled || !!body.instanceId || !!body.cliToolId;
+    return NextResponse.json(
+      buildAutoYesResponse(state, pollingStarted, targetedRequest ? target : undefined)
+    );
   } catch (error: unknown) {
     logger.error('error-setting-auto-yes-state:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
