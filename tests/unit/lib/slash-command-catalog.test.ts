@@ -22,16 +22,26 @@ vi.mock('@/cli/utils/install-context', async (importOriginal) => {
 });
 
 // Deterministic execFile: resolve a version string per command, or an error.
+// Issue #1913: every call is also recorded, so the probe guards can assert what
+// was executed, with which arguments and in which environment.
 type ExecTable = Record<string, { stdout?: string; error?: boolean }>;
 let execTable: ExecTable = {};
+
+interface ExecCall {
+  command: string;
+  args: string[];
+  opts: { timeout?: number; maxBuffer?: number; env?: NodeJS.ProcessEnv };
+}
+let execCalls: ExecCall[] = [];
 
 vi.mock('child_process', () => ({
   execFile: (
     command: string,
-    _args: string[],
-    _opts: unknown,
+    args: string[],
+    opts: ExecCall['opts'],
     cb: (err: Error | null, stdout: string, stderr: string) => void
   ) => {
+    execCalls.push({ command, args, opts });
     const entry = execTable[command];
     if (!entry || entry.error) {
       cb(new Error('ENOENT'), '', '');
@@ -49,6 +59,7 @@ import {
   compareCliVersions,
   clearCatalogCache,
 } from '@/lib/slash-command-catalog';
+import { SENSITIVE_ENV_KEYS } from '@/lib/security/env-sanitizer';
 import { getStandardCommandGroups } from '@/lib/standard-commands';
 import { mergeCommandGroups } from '@/lib/command-merger';
 import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
@@ -75,6 +86,7 @@ beforeEach(() => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-usercatalog-'));
   mockConfigDir = tmpRoot;
   execTable = {};
+  execCalls = [];
   clearCatalogCache();
 });
 
@@ -318,6 +330,74 @@ describe('getCatalogStaleness', () => {
     expect(staleness.antigravity).toBeUndefined();
   });
 
+  // Issue #1913: opencode and copilot joined the probe table, so drift in their
+  // catalog entries becomes visible instead of silent.
+  it('reports opencode and copilot against their catalog verifiedAgainst', async () => {
+    execTable = {
+      claude: { error: true },
+      codex: { error: true },
+      agy: { error: true },
+      opencode: { stdout: '1.18.30' },
+      gh: { stdout: 'GitHub Copilot CLI 1.0.80.' }, // equal
+    };
+    const staleness = await getCatalogStaleness();
+    expect(staleness.opencode).toEqual({
+      current: '1.18.30',
+      verifiedAgainst: '1.18.21',
+      stale: true,
+    });
+    expect(staleness.copilot).toEqual({
+      current: '1.0.80',
+      verifiedAgainst: '1.0.80',
+      stale: false,
+    });
+  });
+
+  // DR4-010 (1): probe the executable the session actually launches. Copilot is
+  // started as `gh copilot` (COPILOT_LAUNCH_COMMAND), so probing a bare
+  // `copilot` off PATH would report the version of a different binary — and on
+  // a machine that has the standalone `copilot` but not the gh extension, it
+  // would report a version for a tool CommandMate cannot start.
+  it('probes copilot through `gh copilot -- --version`, never a bare copilot', async () => {
+    execTable = { gh: { stdout: 'GitHub Copilot CLI 1.0.80.' } };
+    await getCatalogStaleness();
+
+    const gh = execCalls.find((call) => call.command === 'gh');
+    expect(gh, 'no gh probe was issued').toBeDefined();
+    expect(gh?.args).toEqual(['copilot', '--', '--version']);
+    expect(execCalls.some((call) => call.command === 'copilot')).toBe(false);
+  });
+
+  // DR4-010 (3)(4): a probe hands a third-party CLI a sanitized environment and
+  // caps how much of its answer is buffered. DR4-010 (2) — absolute-path
+  // resolution — is not asserted here; §13.2 S17 places that receipt on
+  // DETECTOR_VERSION_PROBES in Phase 3 (see the note on probeCliVersion).
+  it('runs every probe with a sanitized env and an explicit byte cap', async () => {
+    process.env.CM_AUTH_TOKEN_HASH = 'must-not-reach-the-child';
+    try {
+      execTable = { claude: { stdout: '2.1.218' } };
+      await getCatalogStaleness();
+
+      expect(execCalls.map((call) => call.command).sort()).toEqual([
+        'agy',
+        'claude',
+        'codex',
+        'gh',
+        'opencode',
+      ]);
+      for (const call of execCalls) {
+        expect(call.opts.timeout).toBe(5000);
+        expect(call.opts.maxBuffer).toBe(64 * 1024);
+        expect(call.opts.env, `${call.command} inherited process.env verbatim`).toBeDefined();
+        for (const key of SENSITIVE_ENV_KEYS) {
+          expect(call.opts.env?.[key], `${key} leaked into the probe env`).toBeUndefined();
+        }
+      }
+    } finally {
+      delete process.env.CM_AUTH_TOKEN_HASH;
+    }
+  });
+
   it('reports stale=false for an older or equal CLI', async () => {
     execTable = {
       claude: { stdout: '2.1.0 (Claude Code)' }, // older
@@ -335,16 +415,18 @@ describe('getCatalogStaleness', () => {
       claude: { stdout: 'unknown build' },
       codex: { error: true },
       agy: { error: true },
+      opencode: { error: true },
+      gh: { error: true },
     };
     const staleness = await getCatalogStaleness();
     expect(staleness).toEqual({});
   });
 
   it('caches the result across calls within a process', async () => {
-    execTable = { claude: { stdout: '2.9.0' }, codex: { error: true }, agy: { error: true } };
+    execTable = { claude: { stdout: '2.9.0' } };
     const first = await getCatalogStaleness();
     // Change the table; a cached call must not re-probe.
-    execTable = { claude: { stdout: '2.1.0' }, codex: { error: true }, agy: { error: true } };
+    execTable = { claude: { stdout: '2.1.0' } };
     const second = await getCatalogStaleness();
     expect(second).toEqual(first);
     expect(second.claude.stale).toBe(true);

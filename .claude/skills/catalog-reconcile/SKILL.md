@@ -42,7 +42,8 @@ argument-hint: "[--codex-ref <tag>] (任意。codex のソースを特定の rel
 | `src/config/slash-commands-catalog.json` | `--write`（追加は自動。除外は人間） |
 | `locales/en/worktree.json` | `--write` が heuristic 抽出した英文 → **人手で文体を正す** |
 | `locales/ja/worktree.json` | `--write` が `[要レビュー]` プレースホルダを置く → **人手で全件翻訳** |
-| `tests/unit/lib/standard-commands.test.ts` | 人間（件数固定テスト。禁止系ガードは触らない） |
+| `src/config/slash-commands-exclusions.json` | 人間（除外の**意図**。engine はここを読んで再提案をやめる） |
+| `tests/unit/lib/standard-commands.test.ts` | 人間（件数・名前集合の固定テスト。禁止系ガードは触らない） |
 | `tests/unit/lib/slash-command-catalog.test.ts` | 人間（`verifiedAgainst` を固定している箇所） |
 
 ---
@@ -269,7 +270,7 @@ grep -n "does not add\|must not be\|phantom\|Issue #150" tests/unit/lib/standard
 git log --format="%h %s%n%b" --grep="リコンサイル\|reconcile\|幻コマンド" -i -- src/config/slash-commands-catalog.json
 ```
 
-現在有効な除外（2026-08-06 時点の実測）:
+現在有効な除外（2026-08-22 時点の実測）:
 
 | 対象 | 理由 |
 |---|---|
@@ -278,6 +279,9 @@ git log --format="%h %s%n%b" --grep="リコンサイル\|reconcile\|幻コマン
 | `/agents` の claude entry | #1503 が除いた `(removed)` スタブ。opencode の 1 件のみ残す |
 | `/compact` `/status` `/review` の antigravity 露出 | agy 1.1.3 に存在しない（#1502）。露出すると send で誤実行する |
 | `/vim` の **claude** 露出 | claude 2.1.92 で上流削除。**codex には残す**（下記） |
+| `/streamer-mode` の **copilot** 露出 | copilot 1.0.80 の help にもパレットにも無い（#1913） |
+| `/compact` の **opencode** 露出 | opencode 1.18.21 のパレットに無い（#1913）。`frequentlyUsed.opencode` からも外す |
+| `/undo` の **codex** 露出 | codex 0.144.6 で幻（#1503）。**copilot には残す**（1.0.80 の隠しエイリアス。下記） |
 
 #### リストに無いのに怪しいものは、上流ソースを実際に取得して裏取りする
 
@@ -312,6 +316,89 @@ grep -n "^| \`/vim\`" /tmp/claude-commands.md
 
 ---
 
+## Phase 4-4: provider が無いツール（copilot / opencode）を手で照合する
+
+`src/lib/slash-command-reconcile/providers/` にあるのは **claude / codex / antigravity(stub)** だけである。
+**copilot と opencode は `--check` / `--write` に一切現れない。** `Warnings` にも出ない
+（provider が無いので「そのツールが存在しない」のと同じ扱いになる）。Phase 1-3 の
+「0 件と未照合を区別する」がここでは効かないので、**この 2 ツールは毎回手で照合する**。
+
+Issue #1913 でこの手順を実測した。以下はそのときのレシピと結果である。
+
+### copilot: 2 面ある。両方を採る
+
+```bash
+copilot help commands            # 面 A: 公称の一覧（1.0.80 で 67 行）
+```
+
+`help commands` は**隠しエイリアスを落とす**。1.0.80 では `/undo` が help に無いのに
+パレットには居た（`/rewind` と同じ説明）。逆に `/footer` と `/rewind` は help にあるのに
+パレットのスクロール一覧には出ず、**完全入力したときだけ**行が出る。したがって
+**採用集合は「help ∪ パレット」**であって、どちらか片方ではない。
+
+面 B（パレット）は私設ソケットの実 TUI で採る:
+
+```bash
+tmux -L cmcat new-session -d -s cp -x 200 -y 50 -c /tmp/probe 'bash -l'
+tmux -L cmcat send-keys -t cp 'gh copilot' Enter; sleep 12
+tmux -L cmcat send-keys -t cp -l '/'; sleep 1.5
+for i in $(seq 1 160); do
+  tmux -L cmcat capture-pane -p -t cp | grep -oE '/[a-z][a-z0-9-]*  +[^ ]'
+  tmux -L cmcat send-keys -t cp Down; sleep 0.2
+done | grep -oE '^/[a-z][a-z0-9-]*' | sed 's|/||' | sort -u
+tmux -L cmcat kill-server
+```
+
+**`-L` を必ず付ける。** 素の `tmux` はユーザーの本番セッションに届く。
+
+### 幻の判定は「`/` を打ってから 1 文字ずつ」でしか成立しない
+
+**`send-keys -l '/streamer-mode'` のように一括で流し込むとドロップダウンが開かない。**
+開いていない画面を見て「候補が無い＝幻」と読むと、**実在するコマンドまで幻に見える**
+（`/undo` `/statusline` `/footer` で実際にそうなった）。正しい撃ち方:
+
+1. `C-u` で composer を空にする
+2. `/` を単独で送る（ここでドロップダウンが開く）
+3. 残りを **1 文字ずつ** 送る（`sleep 0.1` 程度）
+4. 陰性対照 `/zzzz`（行が出ない）と陽性対照（実在コマンド）を**同じ手順で必ず撃つ**
+
+opencode 側の罠は別方向で、**候補の絞り込みが説明文へのファジーマッチ**である。
+`/compact` は `/review` の説明（`… defaults to uncommitted`）に部分列一致して
+1 行返す。**行が出たことではなく、`/<name>` の行が出たことを見る。**
+
+### opencode: パレットは循環スクロールで 1 画面 10 行
+
+```bash
+tmux -L cmcat new-session -d -s oc -x 200 -y 60 -c /tmp/probe 'bash -l'
+tmux -L cmcat send-keys -t oc 'opencode' Enter; sleep 10
+tmux -L cmcat send-keys -t oc -l '/'; sleep 2
+for i in $(seq 1 25); do
+  tmux -L cmcat send-keys -t oc Down; sleep 0.35
+  tmux -L cmcat capture-pane -p -t oc | grep -E '┃ /[a-z]' | sed -E 's/^ *┃ //; s/ *┃ *$//'
+done | sort -u
+tmux -L cmcat kill-server
+```
+
+一覧は末尾で先頭へ戻るので、**Down の回数が行数を超えても止まらない**。
+`sort -u` が増えなくなるまで回すこと（1.18.21 は 18 行）。
+
+### 版は起動実体で採る
+
+`verifiedAgainst` に入れる版は **CommandMate が起動する実行体**から採る。
+copilot は `COPILOT_LAUNCH_COMMAND = 'gh copilot'` なので `gh copilot -- --version`
+であって、PATH 上の裸の `copilot` ではない（`VERSION_PROBES` も同じ規約。
+docs/design/multi-agent-state-architecture.md §4 D2 / DR4-010）。
+
+```bash
+gh copilot -- --version     # GitHub Copilot CLI 1.0.80.
+opencode --version          # 1.18.21
+```
+
+**起票時の版を信用しない。** #1913 は opencode 1.18.20 で起票されたが、着手時には
+1.18.21 に上がっており、`/variants` が 1 件増えていた。
+
+---
+
 ## Phase 5: ガードテストの更新
 
 ### 5-1. 件数を固定しているテスト（curated set の実数に合わせる）
@@ -323,20 +410,22 @@ grep -n "^| \`/vim\`" /tmp/claude-commands.md
 | `…:338` | claude 可視数 | `!cliTools \|\| cliTools.includes('claude')` |
 | `…:136` | antigravity 可視数 | `cliTools?.includes('antigravity')` |
 | `…:201` | opencode 可視数 | `cliTools?.includes('opencode')` |
+| `standard-commands.test.ts` の `describe('copilot / opencode catalog reconcile (Issue #1913)')` | copilot / opencode の**名前集合**（件数ではない） | `cliTools?.includes(tool)` |
 
 > **⚠️ 件数の数え方はツールごとに述語が違う。揃えて数えると実数とずれる。**
 > claude だけが `!cliTools ||`（＝ `cliTools` 未指定を claude 扱いする）で、
 > 他は `cliTools?.includes(...)` の厳密一致。この非対称は
 > `engine.ts` の `entryHasTool()`（「undefined cliTools = claude」）と同じ規約。
 >
-> **実測（2026-08-06 のカタログ 159 件）**:
+> **実測（2026-08-22 のカタログ 240 件）**:
 >
 > | 数え方 | 結果 |
 > |---|---|
-> | codex `cliTools?.includes('codex')` | **53** ← 正 |
-> | codex `!cliTools \|\| includes('codex')` | 58 ← 誤り |
-> | claude `!cliTools \|\| includes('claude')` | **97** ← 正 |
-> | `cliTools` 未指定のエントリ | 5（この 5 件が 53 と 58 の差） |
+> | codex `cliTools?.includes('codex')` | **54** ← 正 |
+> | codex `!cliTools \|\| includes('codex')` | 59 ← 誤り |
+> | claude `!cliTools \|\| includes('claude')` | **100** ← 正 |
+> | `cliTools` 未指定のエントリ | 5（この 5 件が 54 と 59 の差） |
+> | copilot / opencode / antigravity | **68 / 18 / 13** |
 >
 > v0.21.2 で実際にこの取り違えをして codex を 58 と報告し、正は 53 だった。
 > **必ずテスト本体と同じ述語で数えること**:
@@ -377,7 +466,8 @@ grep -n "verifiedAgainst: '" tests/unit/lib/slash-command-catalog.test.ts
 | ファイル:行 | 守っているもの |
 |---|---|
 | `standard-commands.test.ts:112` | 幻コマンド（`compact`/`status`/`review`）を antigravity に露出しない（#1502） |
-| `…:472` | `/schedule` を足さない・`/vim` を claude に出さない |
+| `…` の `does not add /schedule, and keeps /vim off claude` | `/schedule` を足さない・`/vim` を claude に出さない |
+| `…` の `does not carry the Issue #1503 phantom commands` | 幻 5 件を足さない・`/undo` を **codex** に出さない（copilot には出す） |
 | `…:360` | コマンド名が `/^[a-z][a-z0-9-]*$/` に一致する |
 | `…:377` | 説明に HTML タグ・`javascript:` 等を含まない（4-1 の `<...>` はここで落ちる） |
 | `…:344` | `/agent`（codex）と `/agents`（opencode）の説明が別テキストである |

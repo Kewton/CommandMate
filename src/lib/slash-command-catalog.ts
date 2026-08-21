@@ -28,6 +28,7 @@ import { CATEGORY_LABELS } from '@/types/slash-commands';
 import { isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
 import { getConfigDir } from '@/cli/utils/install-context';
 import { CATALOG_VERIFIED_AGAINST } from '@/lib/standard-commands';
+import { sanitizeEnvForChildProcess } from '@/lib/security/env-sanitizer';
 import { mergeCommandGroups, groupByCategory } from '@/lib/command-merger';
 import { truncateString } from '@/lib/utils';
 import { createLogger } from '@/lib/logger';
@@ -48,6 +49,15 @@ const MAX_COMMAND_DESCRIPTION_LENGTH = 500;
 const DEFAULT_USER_CATEGORY: SlashCommandCategory = 'standard-util';
 /** `<cli> --version` probe timeout (matches copilot.ts, Issue #1476 R3). */
 const VERSION_PROBE_TIMEOUT_MS = 5000;
+/**
+ * Cap on `--version` output kept in memory (Issue #1913, DR4-010 (4)).
+ *
+ * `execFile` defaults to 1MB; a probe that answers with a megabyte of text is
+ * already misbehaving, so the buffer is sized to a version banner and the child
+ * is killed past it. The result is discarded either way — an over-long answer
+ * surfaces as `error` and leaves the tool out of the staleness report.
+ */
+const VERSION_PROBE_MAX_BUFFER_BYTES = 64 * 1024;
 
 /** Valid category set, derived from the label map so it stays in sync. */
 const VALID_CATEGORIES = new Set<string>(Object.keys(CATEGORY_LABELS));
@@ -57,12 +67,23 @@ const VERSION_REGEX = /(\d+)\.(\d+)\.(\d+)/;
 
 /**
  * Staleness probes: catalog tool id → binary + version arg.
- * The binary for antigravity is `agy` (Issue #1476 R3).
+ *
+ * The binary for antigravity is `agy` (Issue #1476 R3); for copilot it is
+ * `gh copilot -- --version`, because the launch executable is
+ * `COPILOT_LAUNCH_COMMAND = 'gh copilot'` and a probe must run the same
+ * executable the session runs — probing a bare `copilot` off PATH would check a
+ * different binary than the one CommandMate starts
+ * (Issue #1913; docs/design/multi-agent-state-architecture.md §4 D2, DR4-010).
+ *
+ * Names here are still resolved by `execFile` off the server's PATH; see
+ * probeCliVersion for why absolute-path resolution lands with Phase 3.
  */
 const VERSION_PROBES: Record<string, { command: string; args: string[] }> = {
   claude: { command: 'claude', args: ['--version'] },
   codex: { command: 'codex', args: ['--version'] },
   antigravity: { command: 'agy', args: ['--version'] },
+  opencode: { command: 'opencode', args: ['--version'] },
+  copilot: { command: 'gh', args: ['copilot', '--', '--version'] },
 };
 
 // --------------------------------------------------------------------------
@@ -272,16 +293,39 @@ export function compareCliVersions(a: string, b: string): number {
   return 0;
 }
 
-/** Probe a CLI's version via execFile (no shell). Resolves null on any failure. */
+/**
+ * Probe a CLI's version via execFile (no shell). Resolves null on any failure.
+ *
+ * The child runs with `sanitizeEnvForChildProcess()` (DR4-010 (3)) so a probe
+ * never hands CommandMate's auth token, TLS key or DB path to a third-party
+ * CLI, and with an explicit `maxBuffer` (DR4-010 (4)).
+ *
+ * DR4-010 (2) — resolving the command to an absolute path with `which`
+ * semantics before executing it, so a repository-local `node_modules/.bin`
+ * cannot decide which binary a cold probe runs — is deliberately NOT done here.
+ * §13.2 S17 places that receipt on `DETECTOR_VERSION_PROBES` in Phase 3, and
+ * the two tables should grow the same resolution helper in one change: doing it
+ * to this table alone leaves two probe mechanisms with different trust models,
+ * which is the shape DR4-010 is trying to remove.
+ */
 function probeCliVersion(command: string, args: string[]): Promise<string | null> {
   return new Promise((resolve) => {
-    execFile(command, args, { timeout: VERSION_PROBE_TIMEOUT_MS }, (error, stdout, stderr) => {
-      if (error) {
-        resolve(null);
-        return;
+    execFile(
+      command,
+      args,
+      {
+        timeout: VERSION_PROBE_TIMEOUT_MS,
+        maxBuffer: VERSION_PROBE_MAX_BUFFER_BYTES,
+        env: sanitizeEnvForChildProcess(),
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          resolve(null);
+          return;
+        }
+        resolve(parseCliVersion(`${stdout ?? ''}\n${stderr ?? ''}`));
       }
-      resolve(parseCliVersion(`${stdout ?? ''}\n${stderr ?? ''}`));
-    });
+    );
   });
 }
 
@@ -314,6 +358,15 @@ async function computeCatalogStaleness(): Promise<CatalogStaleness> {
 /**
  * Detect built-in catalog staleness, computed lazily once per process and
  * cached (Issue #1476 R3). Concurrent first callers share one probe.
+ *
+ * Awaiting this is only safe because its single caller — the slash-commands
+ * route — runs once per palette open, an operator-initiated action. The probe
+ * table grew from 3 to 5 in Issue #1913, but the spawns still run concurrently,
+ * so the first call after a restart waits one probe timeout at worst. The
+ * "start the probe in the background and never await it on a hot path" rule in
+ * design §4 D2 (DR3-013) governs `DETECTOR_VERSION_PROBES`, whose consumers
+ * (`capture --json` / `current-output`) are polled every 5 seconds; do not copy
+ * this await into one of those.
  */
 export async function getCatalogStaleness(): Promise<CatalogStaleness> {
   if (stalenessCache !== null) return stalenessCache;

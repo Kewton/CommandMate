@@ -29,6 +29,7 @@ import { groupByCategory, keyOf } from '@/lib/command-merger';
 import { isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
 import { truncateString } from '@/lib/utils';
 import { clearCatalogCache } from '@/lib/slash-command-catalog';
+import { STANDARD_COMMANDS } from '@/lib/standard-commands';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('slash-commands');
@@ -425,71 +426,23 @@ export function mergeCodexFamilySkills(
 }
 
 /**
- * Get Copilot CLI builtin commands (Issue #547)
+ * Get Copilot CLI builtin commands (Issue #547, reconciled in Issue #1913).
  *
- * Returns hardcoded builtin slash commands for Copilot CLI.
- * These are low-priority (user commands override via deduplicateByName).
+ * The list is no longer hardcoded here. Issue #1913 moved it into the bundled
+ * catalog (src/config/slash-commands-catalog.json) so Copilot entries carry a
+ * `descriptionKey` like every other tool instead of literal English text — the
+ * palette used to show English descriptions to ja users for Copilot alone.
+ *
+ * This function stays because the slash-commands route injects the Copilot
+ * built-ins as their own group; the entries it returns are now the same objects
+ * the standard layer already contains, so the injection dedups against itself
+ * (keyOf = name + cliTools) instead of overriding the catalog with a second
+ * definition. Their `source` is therefore `'standard'`, not `'builtin'`.
  *
  * @returns Array of SlashCommand objects for Copilot builtins
  */
 export function getCopilotBuiltinCommands(): SlashCommand[] {
-  return [
-    // Models and subagents
-    { name: 'model', description: 'Select AI model to use', category: 'standard-config', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'delegate', description: 'Send session to GitHub to create a PR', category: 'workflow', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'fleet', description: 'Enable fleet mode for parallel subagent execution', category: 'standard-config', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'tasks', description: 'View and manage background tasks', category: 'standard-monitor', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    // Agent environment
-    { name: 'init', description: 'Initialize Copilot instructions for repository', category: 'standard-config', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'agent', description: 'Browse and select from available agents', category: 'standard-config', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'skills', description: 'Manage skills for enhanced capabilities', category: 'standard-config', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'mcp', description: 'Manage MCP server configuration', category: 'standard-config', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'plugin', description: 'Manage plugins and plugin marketplaces', category: 'standard-config', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    // Code
-    { name: 'ide', description: 'Connect to an IDE workspace', category: 'workflow', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'diff', description: 'Review changes in current directory', category: 'standard-git', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'pr', description: 'Operate on pull requests for current branch', category: 'standard-git', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'review', description: 'Run code review agent to analyze changes', category: 'review', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'lsp', description: 'Manage language server configuration', category: 'standard-config', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'terminal-setup', description: 'Configure terminal for multiline input', category: 'standard-config', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    // Permissions
-    { name: 'allow-all', description: 'Enable all permissions', category: 'standard-config', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'add-dir', description: 'Add directory to allowed list', category: 'standard-config', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'list-dirs', description: 'Display all allowed directories', category: 'standard-monitor', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'cwd', description: 'Change or show working directory', category: 'standard-util', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'reset-allowed-tools', description: 'Reset the list of allowed tools', category: 'standard-config', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    // Session
-    { name: 'resume', description: 'Switch to a different session', category: 'standard-session', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'rename', description: 'Rename the current session', category: 'standard-session', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'context', description: 'Show context window token usage', category: 'standard-monitor', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'usage', description: 'Display session usage metrics', category: 'standard-monitor', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'session', description: 'View and manage sessions', category: 'standard-session', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'compact', description: 'Summarize conversation to reduce context', category: 'standard-session', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'share', description: 'Share session to markdown or GitHub gist', category: 'standard-util', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'copy', description: 'Copy last response to clipboard', category: 'standard-util', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'rewind', description: 'Rewind last turn and revert file changes', category: 'standard-session', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    // Help and feedback
-    { name: 'help', description: 'Show help for interactive commands', category: 'standard-util', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'changelog', description: 'Display changelog for CLI versions', category: 'standard-util', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'feedback', description: 'Provide feedback about the CLI', category: 'standard-util', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'theme', description: 'View or set color mode', category: 'standard-config', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'update', description: 'Update the CLI to the latest version', category: 'standard-util', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'version', description: 'Display version information', category: 'standard-util', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'experimental', description: 'Show or toggle experimental features', category: 'standard-config', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'clear', description: 'Abandon session and start fresh', category: 'standard-session', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'instructions', description: 'View and toggle custom instruction files', category: 'standard-config', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'streamer-mode', description: 'Toggle streamer mode', category: 'standard-config', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    // Other commands
-    { name: 'exit', description: 'Exit the CLI', category: 'standard-session', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'login', description: 'Log in to Copilot', category: 'standard-session', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'logout', description: 'Log out of Copilot', category: 'standard-session', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'new', description: 'Start a new conversation', category: 'standard-session', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'plan', description: 'Create an implementation plan before coding', category: 'workflow', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'research', description: 'Run deep research investigation', category: 'workflow', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'restart', description: 'Restart the CLI preserving session', category: 'standard-session', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'undo', description: 'Rewind last turn and revert changes', category: 'standard-session', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-    { name: 'user', description: 'Manage GitHub user list', category: 'standard-config', cliTools: ['copilot'], filePath: '', source: 'builtin' },
-  ];
+  return STANDARD_COMMANDS.filter((cmd) => cmd.cliTools?.includes('copilot'));
 }
 
 /**

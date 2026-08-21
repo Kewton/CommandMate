@@ -1384,6 +1384,10 @@ describe('clearCache', () => {
   });
 });
 
+// Issue #1913: the Copilot built-ins moved into the bundled catalog so they
+// carry a descriptionKey like every other tool. The function stays as the
+// route's injection point, but it now returns the catalog's own entries —
+// source 'standard', description resolved through the locale dictionary.
 describe('getCopilotBuiltinCommands', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -1403,7 +1407,7 @@ describe('getCopilotBuiltinCommands', () => {
     expect(modelCmd).toBeDefined();
     expect(modelCmd!.category).toBe('standard-config');
     expect(modelCmd!.cliTools).toEqual(['copilot']);
-    expect(modelCmd!.source).toBe('builtin');
+    expect(modelCmd!.source).toBe('standard');
     expect(modelCmd!.filePath).toBe('');
   });
 
@@ -1415,11 +1419,31 @@ describe('getCopilotBuiltinCommands', () => {
     }
   });
 
-  it('should set source to "builtin" for all commands', async () => {
+  it('returns the catalog entries verbatim, keyed for i18n (Issue #1913)', async () => {
     const { getCopilotBuiltinCommands } = await import('@/lib/slash-commands');
+    const { STANDARD_COMMANDS } = await import('@/lib/standard-commands');
     const commands = getCopilotBuiltinCommands();
+
+    expect(commands).toEqual(
+      STANDARD_COMMANDS.filter((c) => c.cliTools?.includes('copilot'))
+    );
     for (const cmd of commands) {
-      expect(cmd.source).toBe('builtin');
+      expect(cmd.source).toBe('standard');
+      // The defect this replaced: literal English text that ja never translated.
+      expect(cmd.description).toBeUndefined();
+      expect(cmd.descriptionKey).toMatch(/^slashCommands\.descriptions\./);
+    }
+  });
+
+  it('drops the /streamer-mode phantom (Issue #1913)', async () => {
+    const { getCopilotBuiltinCommands } = await import('@/lib/slash-commands');
+    const names = getCopilotBuiltinCommands().map((c) => c.name);
+    expect(names).not.toContain('streamer-mode');
+    // The 21 commands copilot 1.0.80 ships that the hardcoded list missed.
+    for (const name of ['autopilot', 'security-review', 'rubber-duck', 'permissions', 'fork',
+      'remote', 'diagnose', 'statusline', 'footer', 'memory', 'app', 'ask', 'chronicle', 'env',
+      'keep-alive', 'limits', 'refine', 'search', 'settings', 'subagents', 'voice']) {
+      expect(names, `/${name} is missing`).toContain(name);
     }
   });
 
@@ -1452,10 +1476,10 @@ describe('getCopilotBuiltinCommands', () => {
     expect(names).toContain('exit');
   });
 
-  it('should have more than 40 commands covering all Copilot CLI categories', async () => {
+  it('should have the full copilot 1.0.80 command set', async () => {
     const { getCopilotBuiltinCommands } = await import('@/lib/slash-commands');
     const commands = getCopilotBuiltinCommands();
-    expect(commands.length).toBeGreaterThanOrEqual(40);
+    expect(commands.length).toBe(68);
   });
 });
 
