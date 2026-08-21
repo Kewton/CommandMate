@@ -412,6 +412,11 @@ CommandMate 自身は導出を**ゲートのコマンドではなく `playwright
   1 行で持つファイル。**両ランナーが従う規約**であり、standalone 側は
   `set -C; printf '%s\n' "$id" > "$root/$n"`（noclobber）で同じ意味を実装できる。
 - 環境変数 `CM_VERIFY_WORKTREE_INDEX_ROOT` でルートを差し替えられる（テスト・隔離 CI 用）。
+  **unit スイートは `tests/setup.ts` でこれを `tmpdir()` 配下に固定している**（Issue #1873）。
+  `executeRun` は `root` 無しで `resolveWorktreeIndex` を呼ぶため、差し替えないと `wt-*` フィクスチャが
+  開発者マシンの共有レジストリに枠を取り、**枠は解放されない**ので実在 worktree の番号を食い潰す
+  （実測で 45 件中 40 件が幻の `wt-*` になっていた）。個別テストの `vi.stubEnv` / `{ root }` 明示は
+  この固定より優先される。
 - **worktree を削除しても枠は解放しない。** 再利用すると、生きている worktree の番号が
   動き、削除された側のサーバがまだ握っているポートに載る可能性がある。
 - **ハッシュは採用しなかった**（Issue 本文の代替案）。同じ番号になる性質は満たすが、
