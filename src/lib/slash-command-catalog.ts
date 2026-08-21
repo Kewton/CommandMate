@@ -28,6 +28,7 @@ import { CATEGORY_LABELS } from '@/types/slash-commands';
 import { isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
 import { getConfigDir } from '@/cli/utils/install-context';
 import { CATALOG_VERIFIED_AGAINST } from '@/lib/standard-commands';
+import { resolveCopilotExecutable } from '@/lib/cli-tools/copilot-executable';
 import { sanitizeEnvForChildProcess } from '@/lib/security/env-sanitizer';
 import { mergeCommandGroups, groupByCategory } from '@/lib/command-merger';
 import { truncateString } from '@/lib/utils';
@@ -66,24 +67,48 @@ const VALID_CATEGORIES = new Set<string>(Object.keys(CATEGORY_LABELS));
 const VERSION_REGEX = /(\d+)\.(\d+)\.(\d+)/;
 
 /**
- * Staleness probes: catalog tool id → binary + version arg.
+ * One staleness probe.
  *
- * The binary for antigravity is `agy` (Issue #1476 R3); for copilot it is
- * `gh copilot -- --version`, because the launch executable is
- * `COPILOT_LAUNCH_COMMAND = 'gh copilot'` and a probe must run the same
- * executable the session runs — probing a bare `copilot` off PATH would check a
- * different binary than the one CommandMate starts
- * (Issue #1913; docs/design/multi-agent-state-architecture.md §4 D2, DR4-010).
- *
- * Names here are still resolved by `execFile` off the server's PATH; see
- * probeCliVersion for why absolute-path resolution lands with Phase 3.
+ * `execFile` is the default: run `<command> <args>` and read a version out of
+ * the output. `delegated` exists for a tool that owns its own resolution,
+ * because *finding* the executable is part of the question for it.
  */
-const VERSION_PROBES: Record<string, { command: string; args: string[] }> = {
-  claude: { command: 'claude', args: ['--version'] },
-  codex: { command: 'codex', args: ['--version'] },
-  antigravity: { command: 'agy', args: ['--version'] },
-  opencode: { command: 'opencode', args: ['--version'] },
-  copilot: { command: 'gh', args: ['copilot', '--', '--version'] },
+type VersionProbe =
+  | { kind: 'execFile'; command: string; args: string[] }
+  | { kind: 'delegated'; probe: () => Promise<string | null> };
+
+/**
+ * Staleness probes: catalog tool id → how to read its installed version.
+ *
+ * The binary for antigravity is `agy` (Issue #1476 R3).
+ *
+ * **copilot is delegated, and must stay delegated** (Issue #1913 follow-up).
+ * The first cut of this table probed `gh copilot -- --version`, on the premise
+ * that the launch executable was `COPILOT_LAUNCH_COMMAND = 'gh copilot'`.
+ * Issue #1907 then measured what that command actually does: `copilot` is a
+ * preview command built into `gh`, not an extension, and on a machine whose
+ * PATH has no copilot **it downloads the CLI** into ~/.local/share/gh/copilot.
+ * A staleness hint must never install software, and a probe that may fetch a
+ * release over the network has no business on a request path. #1907 also moved
+ * the launch executable to PATH `copilot` (gh's copy is the fallback), so the
+ * `gh` spelling stopped matching the launched binary as well.
+ *
+ * `resolveCopilotExecutable` is the same resolution `CopilotTool.startSession`
+ * uses, so probe and launch cannot disagree (§4 D2 / DR4-010 (1)), and it
+ * already resolves to an absolute path before executing (DR4-010 (2)).
+ *
+ * The remaining four names are still resolved by `execFile` off the server's
+ * PATH; see probeCliVersion for why absolute-path resolution lands with Phase 3.
+ */
+const VERSION_PROBES: Record<string, VersionProbe> = {
+  claude: { kind: 'execFile', command: 'claude', args: ['--version'] },
+  codex: { kind: 'execFile', command: 'codex', args: ['--version'] },
+  antigravity: { kind: 'execFile', command: 'agy', args: ['--version'] },
+  opencode: { kind: 'execFile', command: 'opencode', args: ['--version'] },
+  copilot: {
+    kind: 'delegated',
+    probe: async () => (await resolveCopilotExecutable())?.version ?? null,
+  },
 };
 
 // --------------------------------------------------------------------------
@@ -337,7 +362,10 @@ async function computeCatalogStaleness(): Promise<CatalogStaleness> {
       const verifiedAgainst = CATALOG_VERIFIED_AGAINST[tool];
       if (!verifiedAgainst) return;
       const probe = VERSION_PROBES[tool];
-      const current = await probeCliVersion(probe.command, probe.args);
+      const current =
+        probe.kind === 'execFile'
+          ? await probeCliVersion(probe.command, probe.args)
+          : await probe.probe().catch(() => null);
       // Unknown version (missing binary / timeout / unparseable) is never
       // reported — safe side, so we don't nag users with false positives.
       if (!current) return;
@@ -359,14 +387,10 @@ async function computeCatalogStaleness(): Promise<CatalogStaleness> {
  * Detect built-in catalog staleness, computed lazily once per process and
  * cached (Issue #1476 R3). Concurrent first callers share one probe.
  *
- * Awaiting this is only safe because its single caller — the slash-commands
- * route — runs once per palette open, an operator-initiated action. The probe
- * table grew from 3 to 5 in Issue #1913, but the spawns still run concurrently,
- * so the first call after a restart waits one probe timeout at worst. The
- * "start the probe in the background and never await it on a hot path" rule in
- * design §4 D2 (DR3-013) governs `DETECTOR_VERSION_PROBES`, whose consumers
- * (`capture --json` / `current-output`) are polled every 5 seconds; do not copy
- * this await into one of those.
+ * **This awaits child processes — do not call it from a request path.** Use
+ * {@link getCatalogStalenessSnapshot}. Kept for callers that genuinely want the
+ * answer (CLI diagnostics, tests) and as the single implementation both entry
+ * points share.
  */
 export async function getCatalogStaleness(): Promise<CatalogStaleness> {
   if (stalenessCache !== null) return stalenessCache;
@@ -379,6 +403,34 @@ export async function getCatalogStaleness(): Promise<CatalogStaleness> {
   } finally {
     stalenessInFlight = null;
   }
+}
+
+/**
+ * The staleness the process already knows, plus a background probe when it
+ * knows nothing yet. Never awaits a child process (§4 D2, DR3-013 (a)(b)(c)).
+ *
+ * Returning `{}` means "not known yet", not "nothing is stale" — the hint is
+ * additive, so a palette that opens before the cache is warm simply shows no
+ * banner and the next open shows it. That is the deal DR3-013 makes: the probe
+ * result is worth having, but never at the cost of holding a response open.
+ *
+ * Issue #1913 follow-up: the earlier `await getCatalogStaleness()` in the
+ * slash-commands route was defended as "an operator-initiated one-off, so
+ * waiting is fine". Measurement says otherwise. Adding opencode and copilot took
+ * the cold call from **79ms to 322ms** on the developer machine (`opencode
+ * --version` 260ms and `copilot --version` 287ms are slow-starting binaries),
+ * and the ceiling is not 322ms but `VERSION_PROBE_TIMEOUT_MS` × a probe that
+ * hangs. A version banner is not worth a request that can block for seconds.
+ */
+export function getCatalogStalenessSnapshot(): CatalogStaleness {
+  if (stalenessCache !== null) return stalenessCache;
+  // Fire and forget. No in-flight check here on purpose: getCatalogStaleness
+  // owns that slot and hands a concurrent caller the promise that is already
+  // running, so a second guard would be a copy of an invariant that lives one
+  // function down — and a copy is what goes stale. It also swallows its own
+  // failures, so nothing here needs the result.
+  void getCatalogStaleness().catch(() => ({}));
+  return {};
 }
 
 // --------------------------------------------------------------------------

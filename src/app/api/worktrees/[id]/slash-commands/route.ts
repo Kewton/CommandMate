@@ -19,7 +19,11 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { getSlashCommandGroups, loadSkills, loadCodexSkills, loadAgentsSkills, mergeCodexFamilySkills, getCopilotBuiltinCommands, getGeminiBuiltinCommands } from '@/lib/slash-commands';
 import { getStandardCommandGroups } from '@/lib/standard-commands';
-import { loadUserCatalogCommands, composeStandardLayer, getCatalogStaleness } from '@/lib/slash-command-catalog';
+import {
+  loadUserCatalogCommands,
+  composeStandardLayer,
+  getCatalogStalenessSnapshot,
+} from '@/lib/slash-command-catalog';
 import { mergeCommandGroups, filterCommandsByCliTool, groupByCategory } from '@/lib/command-merger';
 import { isValidWorktreePath } from '@/lib/security/worktree-path-validator';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
@@ -180,7 +184,12 @@ export async function GET(
     }
 
     // Issue #1476: lazy, process-cached staleness probe. Never fails the request.
-    const catalogStaleness = await getCatalogStaleness().catch(() => ({} as CatalogStaleness));
+    // Issue #1913 follow-up: read the cache, start the probe in the background,
+    // and never wait for it (§4 D2, DR3-013). Awaiting it put five child
+    // processes on the response path — 322ms cold on the developer machine, and
+    // up to VERSION_PROBE_TIMEOUT_MS if one of them hangs. `{}` here means "not
+    // known yet"; the banner appears on the next palette open.
+    const catalogStaleness: CatalogStaleness = getCatalogStalenessSnapshot();
 
     return NextResponse.json({
       groups: filteredGroups,

@@ -33,6 +33,8 @@ interface ExecCall {
   opts: { timeout?: number; maxBuffer?: number; env?: NodeJS.ProcessEnv };
 }
 let execCalls: ExecCall[] = [];
+/** When true the mocked execFile never calls back, standing in for a hung CLI. */
+let execHangs = false;
 
 vi.mock('child_process', () => ({
   execFile: (
@@ -42,6 +44,7 @@ vi.mock('child_process', () => ({
     cb: (err: Error | null, stdout: string, stderr: string) => void
   ) => {
     execCalls.push({ command, args, opts });
+    if (execHangs) return; // never calls back
     const entry = execTable[command];
     if (!entry || entry.error) {
       cb(new Error('ENOENT'), '', '');
@@ -51,6 +54,17 @@ vi.mock('child_process', () => ({
   },
 }));
 
+// Issue #1913 follow-up: copilot's probe is delegated to the resolver
+// CopilotTool.startSession uses, so the version it reports and the binary that
+// gets launched cannot disagree. Stubbed here to keep the probe deterministic.
+let copilotVersion: string | null = null;
+const resolveCopilotExecutableMock = vi.fn(async () =>
+  copilotVersion ? { path: '/usr/local/bin/copilot', version: copilotVersion, source: 'path' } : null
+);
+vi.mock('@/lib/cli-tools/copilot-executable', () => ({
+  resolveCopilotExecutable: () => resolveCopilotExecutableMock(),
+}));
+
 import {
   loadUserCatalogCommands,
   composeStandardLayer,
@@ -58,6 +72,7 @@ import {
   parseCliVersion,
   compareCliVersions,
   clearCatalogCache,
+  getCatalogStalenessSnapshot,
 } from '@/lib/slash-command-catalog';
 import { SENSITIVE_ENV_KEYS } from '@/lib/security/env-sanitizer';
 import { getStandardCommandGroups } from '@/lib/standard-commands';
@@ -87,6 +102,9 @@ beforeEach(() => {
   mockConfigDir = tmpRoot;
   execTable = {};
   execCalls = [];
+  copilotVersion = null;
+  execHangs = false;
+  resolveCopilotExecutableMock.mockClear();
   clearCatalogCache();
 });
 
@@ -338,8 +356,8 @@ describe('getCatalogStaleness', () => {
       codex: { error: true },
       agy: { error: true },
       opencode: { stdout: '1.18.30' },
-      gh: { stdout: 'GitHub Copilot CLI 1.0.80.' }, // equal
     };
+    copilotVersion = '1.0.80'; // equal
     const staleness = await getCatalogStaleness();
     expect(staleness.opencode).toEqual({
       current: '1.18.30',
@@ -353,19 +371,24 @@ describe('getCatalogStaleness', () => {
     });
   });
 
-  // DR4-010 (1): probe the executable the session actually launches. Copilot is
-  // started as `gh copilot` (COPILOT_LAUNCH_COMMAND), so probing a bare
-  // `copilot` off PATH would report the version of a different binary — and on
-  // a machine that has the standalone `copilot` but not the gh extension, it
-  // would report a version for a tool CommandMate cannot start.
-  it('probes copilot through `gh copilot -- --version`, never a bare copilot', async () => {
-    execTable = { gh: { stdout: 'GitHub Copilot CLI 1.0.80.' } };
+  // DR4-010 (1): probe the executable the session actually launches.
+  //
+  // This used to spell the probe `gh copilot -- --version`, on the premise that
+  // the launch executable was `gh copilot`. Issue #1907 measured that command:
+  // `copilot` is a preview command built into gh, and on a machine whose PATH
+  // has no copilot it **downloads the CLI**. A staleness hint must not install
+  // software, and #1907 moved the launch executable to PATH `copilot` anyway.
+  // The probe now delegates to the very resolver startSession uses.
+  it('probes copilot through resolveCopilotExecutable, never by spawning gh', async () => {
+    copilotVersion = '1.0.80';
     await getCatalogStaleness();
 
-    const gh = execCalls.find((call) => call.command === 'gh');
-    expect(gh, 'no gh probe was issued').toBeDefined();
-    expect(gh?.args).toEqual(['copilot', '--', '--version']);
-    expect(execCalls.some((call) => call.command === 'copilot')).toBe(false);
+    expect(resolveCopilotExecutableMock).toHaveBeenCalledTimes(1);
+    expect(execCalls.some((call) => call.command === 'gh')).toBe(false);
+    expect(
+      execCalls.some((call) => call.args.includes('copilot')),
+      'no probe may pass `copilot` as an argument to another binary'
+    ).toBe(false);
   });
 
   // DR4-010 (3)(4): a probe hands a third-party CLI a sanitized environment and
@@ -378,11 +401,12 @@ describe('getCatalogStaleness', () => {
       execTable = { claude: { stdout: '2.1.218' } };
       await getCatalogStaleness();
 
+      // copilot is absent: its probe is delegated, so it never reaches execFile
+      // from this module (the resolver applies the same rules on its own side).
       expect(execCalls.map((call) => call.command).sort()).toEqual([
         'agy',
         'claude',
         'codex',
-        'gh',
         'opencode',
       ]);
       for (const call of execCalls) {
@@ -430,5 +454,56 @@ describe('getCatalogStaleness', () => {
     const second = await getCatalogStaleness();
     expect(second).toEqual(first);
     expect(second.claude.stale).toBe(true);
+  });
+});
+
+// --- Non-blocking staleness (Issue #1913 follow-up, §4 D2 / DR3-013) --------
+
+describe('getCatalogStalenessSnapshot', () => {
+  it('answers {} on a cold cache and starts the probe in the background', async () => {
+    execTable = { claude: { stdout: '9.9.9' } };
+
+    expect(getCatalogStalenessSnapshot()).toEqual({});
+    // Started by the snapshot itself: nothing has been awaited between the call
+    // and this assertion, so the probe cannot have come from anywhere else.
+    // (Without this the test would pass on a snapshot that only reads the
+    // cache, because the `await getCatalogStaleness()` below starts one too.)
+    expect(execCalls.filter((call) => call.command === 'claude')).toHaveLength(1);
+
+    // And the probe it started is the shared in-flight one, so awaiting the
+    // async entry point joins it rather than spawning a second round.
+    await getCatalogStaleness();
+    expect(execCalls.filter((call) => call.command === 'claude')).toHaveLength(1);
+
+    expect(getCatalogStalenessSnapshot().claude).toEqual({
+      current: '9.9.9',
+      verifiedAgainst: '2.1.218',
+      stale: true,
+    });
+  });
+
+  it('returns the cached result once the probe has answered', async () => {
+    execTable = { claude: { stdout: '2.1.0' } };
+    const awaited = await getCatalogStaleness();
+    expect(getCatalogStalenessSnapshot()).toBe(awaited);
+  });
+
+  // The property the slash-commands route depends on. `getCatalogStaleness()`
+  // would never settle here; the snapshot has to answer anyway.
+  it('answers immediately even when every probe hangs', async () => {
+    execHangs = true;
+    expect(getCatalogStalenessSnapshot()).toEqual({});
+    // Still nothing after the microtask queue drains — it did not wait.
+    await Promise.resolve();
+    expect(getCatalogStalenessSnapshot()).toEqual({});
+  });
+
+  it('does not start a second probe while one is in flight', () => {
+    execTable = { claude: { stdout: '2.1.0' } };
+    execHangs = true;
+    getCatalogStalenessSnapshot();
+    getCatalogStalenessSnapshot();
+    getCatalogStalenessSnapshot();
+    expect(execCalls.filter((call) => call.command === 'claude')).toHaveLength(1);
   });
 });
