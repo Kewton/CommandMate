@@ -19,7 +19,8 @@ vi.mock('@/lib/version-checker', () => ({
   getServerVersion: vi.fn().mockReturnValue('9.9.9'),
 }));
 
-import { GET, SERVER_CAPABILITIES, dynamic } from '@/app/api/capabilities/route';
+import { GET, dynamic } from '@/app/api/capabilities/route';
+import { SERVER_CAPABILITIES } from '@/config/server-capabilities';
 import { AUTH_EXCLUDED_PATHS } from '@/config/auth-config';
 import { getServerVersion } from '@/lib/version-checker';
 
