@@ -162,11 +162,48 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
     const overridden = (catalogJson as SlashCommandsCatalog).commands.filter(
       (entry) => (entry.descriptionKey ?? '').split('.').length > 3
     );
-    expect(overridden.map((e) => e.descriptionKey)).toEqual([
-      'slashCommands.descriptions.agents.opencode',
-      'slashCommands.descriptions.import.codex',
+    // Sorted so the pin survives entries being appended to the catalog; the
+    // point is which names are split, not where they sit in the file.
+    // Issue #1913 added 30 of these: /exit /login /logout /feedback /skills
+    // /init /agent /plugin /memory /app /debug. Each one is a case where a tool
+    // that joined the catalog means something different by the same command
+    // name, so the flat key had to become a per-tool object and every claimant
+    // had to be rewritten onto its own leaf.
+    expect(overridden.map((e) => e.descriptionKey).sort()).toEqual([
+      'slashCommands.descriptions.agent.codex',
+      'slashCommands.descriptions.agent.copilot',
       'slashCommands.descriptions.agents.claude',
+      'slashCommands.descriptions.agents.opencode',
+      'slashCommands.descriptions.app.codex',
+      'slashCommands.descriptions.app.copilot',
+      'slashCommands.descriptions.debug.claude',
+      'slashCommands.descriptions.debug.opencode',
+      'slashCommands.descriptions.exit.claude',
+      'slashCommands.descriptions.exit.codex',
+      'slashCommands.descriptions.exit.copilot',
+      'slashCommands.descriptions.exit.opencode',
+      'slashCommands.descriptions.feedback.claude',
+      'slashCommands.descriptions.feedback.codex',
+      'slashCommands.descriptions.feedback.copilot',
       'slashCommands.descriptions.import.claude',
+      'slashCommands.descriptions.import.codex',
+      'slashCommands.descriptions.init.claude',
+      'slashCommands.descriptions.init.codex',
+      'slashCommands.descriptions.init.copilot',
+      'slashCommands.descriptions.init.opencode',
+      'slashCommands.descriptions.login.claude',
+      'slashCommands.descriptions.login.copilot',
+      'slashCommands.descriptions.logout.claude',
+      'slashCommands.descriptions.logout.codex',
+      'slashCommands.descriptions.logout.copilot',
+      'slashCommands.descriptions.memory.claude',
+      'slashCommands.descriptions.memory.copilot',
+      'slashCommands.descriptions.plugin.claude',
+      'slashCommands.descriptions.plugin.copilot',
+      'slashCommands.descriptions.skills.claude',
+      'slashCommands.descriptions.skills.codex',
+      'slashCommands.descriptions.skills.copilot',
+      'slashCommands.descriptions.skills.opencode',
     ]);
 
     for (const locale of ['en', 'ja'] as const) {

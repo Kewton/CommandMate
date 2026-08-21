@@ -2,7 +2,9 @@
   "verifiedAgainst": {
     "claude": "2.1.218",
     "codex": "0.148.0",
-    "antigravity": "1.1.3"
+    "antigravity": "1.1.3",
+    "copilot": "1.0.80",
+    "opencode": "1.18.21"
   },
   "frequentlyUsed": {
     "claude": [
@@ -22,7 +24,7 @@
     "opencode": [
       "models",
       "new",
-      "compact",
+      "status",
       "help",
       "exit"
     ],
@@ -32,6 +34,13 @@
       "usage",
       "diff",
       "model"
+    ],
+    "copilot": [
+      "model",
+      "plan",
+      "diff",
+      "review",
+      "compact"
     ]
   },
   "commands": [
@@ -53,8 +62,7 @@
       "category": "standard-session",
       "cliTools": [
         "claude",
-        "codex",
-        "opencode"
+        "codex"
       ],
       "isStandard": true,
       "source": "standard"
@@ -235,7 +243,7 @@
     },
     {
       "name": "memory",
-      "descriptionKey": "slashCommands.descriptions.memory",
+      "descriptionKey": "slashCommands.descriptions.memory.claude",
       "category": "standard-config",
       "cliTools": [
         "claude"
@@ -286,7 +294,7 @@
     },
     {
       "name": "logout",
-      "descriptionKey": "slashCommands.descriptions.logout",
+      "descriptionKey": "slashCommands.descriptions.logout.codex",
       "category": "standard-session",
       "cliTools": [
         "codex"
@@ -336,7 +344,7 @@
     },
     {
       "name": "init",
-      "descriptionKey": "slashCommands.descriptions.init",
+      "descriptionKey": "slashCommands.descriptions.init.codex",
       "category": "standard-util",
       "cliTools": [
         "codex"
@@ -346,7 +354,7 @@
     },
     {
       "name": "feedback",
-      "descriptionKey": "slashCommands.descriptions.feedback",
+      "descriptionKey": "slashCommands.descriptions.feedback.codex",
       "category": "standard-util",
       "cliTools": [
         "codex"
@@ -376,7 +384,7 @@
     },
     {
       "name": "agent",
-      "descriptionKey": "slashCommands.descriptions.agent",
+      "descriptionKey": "slashCommands.descriptions.agent.codex",
       "category": "standard-session",
       "cliTools": [
         "codex"
@@ -416,7 +424,7 @@
     },
     {
       "name": "skills",
-      "descriptionKey": "slashCommands.descriptions.skills",
+      "descriptionKey": "slashCommands.descriptions.skills.codex",
       "category": "standard-config",
       "cliTools": [
         "codex"
@@ -456,7 +464,7 @@
     },
     {
       "name": "exit",
-      "descriptionKey": "slashCommands.descriptions.exit",
+      "descriptionKey": "slashCommands.descriptions.exit.opencode",
       "category": "standard-session",
       "cliTools": [
         "opencode"
@@ -746,7 +754,7 @@
     },
     {
       "name": "debug",
-      "descriptionKey": "slashCommands.descriptions.debug",
+      "descriptionKey": "slashCommands.descriptions.debug.claude",
       "category": "standard-util",
       "cliTools": [
         "claude"
@@ -806,7 +814,7 @@
     },
     {
       "name": "exit",
-      "descriptionKey": "slashCommands.descriptions.exit",
+      "descriptionKey": "slashCommands.descriptions.exit.claude",
       "category": "standard-util",
       "cliTools": [
         "claude"
@@ -816,7 +824,7 @@
     },
     {
       "name": "feedback",
-      "descriptionKey": "slashCommands.descriptions.feedback",
+      "descriptionKey": "slashCommands.descriptions.feedback.claude",
       "category": "standard-util",
       "cliTools": [
         "claude"
@@ -876,7 +884,7 @@
     },
     {
       "name": "init",
-      "descriptionKey": "slashCommands.descriptions.init",
+      "descriptionKey": "slashCommands.descriptions.init.claude",
       "category": "standard-util",
       "cliTools": [
         "claude"
@@ -926,7 +934,7 @@
     },
     {
       "name": "login",
-      "descriptionKey": "slashCommands.descriptions.login",
+      "descriptionKey": "slashCommands.descriptions.login.claude",
       "category": "standard-util",
       "cliTools": [
         "claude"
@@ -936,7 +944,7 @@
     },
     {
       "name": "logout",
-      "descriptionKey": "slashCommands.descriptions.logout",
+      "descriptionKey": "slashCommands.descriptions.logout.claude",
       "category": "standard-util",
       "cliTools": [
         "claude"
@@ -976,7 +984,7 @@
     },
     {
       "name": "plugin",
-      "descriptionKey": "slashCommands.descriptions.plugin",
+      "descriptionKey": "slashCommands.descriptions.plugin.claude",
       "category": "standard-util",
       "cliTools": [
         "claude"
@@ -1166,7 +1174,7 @@
     },
     {
       "name": "skills",
-      "descriptionKey": "slashCommands.descriptions.skills",
+      "descriptionKey": "slashCommands.descriptions.skills.claude",
       "category": "standard-util",
       "cliTools": [
         "claude"
@@ -1436,7 +1444,7 @@
     },
     {
       "name": "app",
-      "descriptionKey": "slashCommands.descriptions.app",
+      "descriptionKey": "slashCommands.descriptions.app.codex",
       "category": "standard-util",
       "cliTools": [
         "codex"
@@ -1566,7 +1574,7 @@
     },
     {
       "name": "exit",
-      "descriptionKey": "slashCommands.descriptions.exit",
+      "descriptionKey": "slashCommands.descriptions.exit.codex",
       "category": "standard-util",
       "cliTools": [
         "codex"
@@ -1660,6 +1668,776 @@
       "category": "standard-util",
       "cliTools": [
         "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "debug",
+      "descriptionKey": "slashCommands.descriptions.debug.opencode",
+      "category": "standard-monitor",
+      "cliTools": [
+        "opencode"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "diff",
+      "descriptionKey": "slashCommands.descriptions.diff",
+      "category": "standard-git",
+      "cliTools": [
+        "opencode"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "init",
+      "descriptionKey": "slashCommands.descriptions.init.opencode",
+      "category": "standard-util",
+      "cliTools": [
+        "opencode"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "mcps",
+      "descriptionKey": "slashCommands.descriptions.mcps",
+      "category": "standard-config",
+      "cliTools": [
+        "opencode"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "move",
+      "descriptionKey": "slashCommands.descriptions.move",
+      "category": "standard-util",
+      "cliTools": [
+        "opencode"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "review",
+      "descriptionKey": "slashCommands.descriptions.review",
+      "category": "standard-git",
+      "cliTools": [
+        "opencode"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "skills",
+      "descriptionKey": "slashCommands.descriptions.skills.opencode",
+      "category": "standard-config",
+      "cliTools": [
+        "opencode"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "status",
+      "descriptionKey": "slashCommands.descriptions.status",
+      "category": "standard-monitor",
+      "cliTools": [
+        "opencode"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "variants",
+      "descriptionKey": "slashCommands.descriptions.variants",
+      "category": "standard-config",
+      "cliTools": [
+        "opencode"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "init",
+      "descriptionKey": "slashCommands.descriptions.init.copilot",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "agent",
+      "descriptionKey": "slashCommands.descriptions.agent.copilot",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "skills",
+      "descriptionKey": "slashCommands.descriptions.skills.copilot",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "mcp",
+      "descriptionKey": "slashCommands.descriptions.mcp",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "plugin",
+      "descriptionKey": "slashCommands.descriptions.plugin.copilot",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "model",
+      "descriptionKey": "slashCommands.descriptions.model",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "delegate",
+      "descriptionKey": "slashCommands.descriptions.delegate",
+      "category": "workflow",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "fleet",
+      "descriptionKey": "slashCommands.descriptions.fleet",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "autopilot",
+      "descriptionKey": "slashCommands.descriptions.autopilot",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "tasks",
+      "descriptionKey": "slashCommands.descriptions.tasks",
+      "category": "standard-monitor",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "subagents",
+      "descriptionKey": "slashCommands.descriptions.subagents",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "ide",
+      "descriptionKey": "slashCommands.descriptions.ide",
+      "category": "workflow",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "diff",
+      "descriptionKey": "slashCommands.descriptions.diff",
+      "category": "standard-git",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "pr",
+      "descriptionKey": "slashCommands.descriptions.pr",
+      "category": "standard-git",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "review",
+      "descriptionKey": "slashCommands.descriptions.review",
+      "category": "review",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "security-review",
+      "descriptionKey": "slashCommands.descriptions.security-review",
+      "category": "review",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "rubber-duck",
+      "descriptionKey": "slashCommands.descriptions.rubber-duck",
+      "category": "review",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "lsp",
+      "descriptionKey": "slashCommands.descriptions.lsp",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "terminal-setup",
+      "descriptionKey": "slashCommands.descriptions.terminal-setup",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "permissions",
+      "descriptionKey": "slashCommands.descriptions.permissions",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "allow-all",
+      "descriptionKey": "slashCommands.descriptions.allow-all",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "add-dir",
+      "descriptionKey": "slashCommands.descriptions.add-dir",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "list-dirs",
+      "descriptionKey": "slashCommands.descriptions.list-dirs",
+      "category": "standard-monitor",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "cwd",
+      "descriptionKey": "slashCommands.descriptions.cwd",
+      "category": "standard-util",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "reset-allowed-tools",
+      "descriptionKey": "slashCommands.descriptions.reset-allowed-tools",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "resume",
+      "descriptionKey": "slashCommands.descriptions.resume",
+      "category": "standard-session",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "rename",
+      "descriptionKey": "slashCommands.descriptions.rename",
+      "category": "standard-session",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "fork",
+      "descriptionKey": "slashCommands.descriptions.fork",
+      "category": "standard-session",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "context",
+      "descriptionKey": "slashCommands.descriptions.context",
+      "category": "standard-monitor",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "usage",
+      "descriptionKey": "slashCommands.descriptions.usage",
+      "category": "standard-monitor",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "session",
+      "descriptionKey": "slashCommands.descriptions.session",
+      "category": "standard-session",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "compact",
+      "descriptionKey": "slashCommands.descriptions.compact",
+      "category": "standard-session",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "share",
+      "descriptionKey": "slashCommands.descriptions.share",
+      "category": "standard-util",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "remote",
+      "descriptionKey": "slashCommands.descriptions.remote",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "copy",
+      "descriptionKey": "slashCommands.descriptions.copy",
+      "category": "standard-util",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "rewind",
+      "descriptionKey": "slashCommands.descriptions.rewind",
+      "category": "standard-session",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "undo",
+      "descriptionKey": "slashCommands.descriptions.undo",
+      "category": "standard-session",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "new",
+      "descriptionKey": "slashCommands.descriptions.new",
+      "category": "standard-session",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "clear",
+      "descriptionKey": "slashCommands.descriptions.clear",
+      "category": "standard-session",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "restart",
+      "descriptionKey": "slashCommands.descriptions.restart",
+      "category": "standard-session",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "help",
+      "descriptionKey": "slashCommands.descriptions.help",
+      "category": "standard-util",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "changelog",
+      "descriptionKey": "slashCommands.descriptions.changelog",
+      "category": "standard-util",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "feedback",
+      "descriptionKey": "slashCommands.descriptions.feedback.copilot",
+      "category": "standard-util",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "diagnose",
+      "descriptionKey": "slashCommands.descriptions.diagnose",
+      "category": "standard-monitor",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "theme",
+      "descriptionKey": "slashCommands.descriptions.theme",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "statusline",
+      "descriptionKey": "slashCommands.descriptions.statusline",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "footer",
+      "descriptionKey": "slashCommands.descriptions.footer",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "update",
+      "descriptionKey": "slashCommands.descriptions.update",
+      "category": "standard-util",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "version",
+      "descriptionKey": "slashCommands.descriptions.version",
+      "category": "standard-util",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "experimental",
+      "descriptionKey": "slashCommands.descriptions.experimental",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "memory",
+      "descriptionKey": "slashCommands.descriptions.memory.copilot",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "instructions",
+      "descriptionKey": "slashCommands.descriptions.instructions",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "app",
+      "descriptionKey": "slashCommands.descriptions.app.copilot",
+      "category": "standard-util",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "ask",
+      "descriptionKey": "slashCommands.descriptions.ask",
+      "category": "standard-util",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "chronicle",
+      "descriptionKey": "slashCommands.descriptions.chronicle",
+      "category": "standard-monitor",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "env",
+      "descriptionKey": "slashCommands.descriptions.env",
+      "category": "standard-monitor",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "exit",
+      "descriptionKey": "slashCommands.descriptions.exit.copilot",
+      "category": "standard-session",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "keep-alive",
+      "descriptionKey": "slashCommands.descriptions.keep-alive",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "limits",
+      "descriptionKey": "slashCommands.descriptions.limits",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "login",
+      "descriptionKey": "slashCommands.descriptions.login.copilot",
+      "category": "standard-session",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "logout",
+      "descriptionKey": "slashCommands.descriptions.logout.copilot",
+      "category": "standard-session",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "plan",
+      "descriptionKey": "slashCommands.descriptions.plan",
+      "category": "workflow",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "refine",
+      "descriptionKey": "slashCommands.descriptions.refine",
+      "category": "standard-util",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "research",
+      "descriptionKey": "slashCommands.descriptions.research",
+      "category": "workflow",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "search",
+      "descriptionKey": "slashCommands.descriptions.search",
+      "category": "standard-util",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "settings",
+      "descriptionKey": "slashCommands.descriptions.settings",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "user",
+      "descriptionKey": "slashCommands.descriptions.user",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "voice",
+      "descriptionKey": "slashCommands.descriptions.voice",
+      "category": "standard-config",
+      "cliTools": [
+        "copilot"
       ],
       "isStandard": true,
       "source": "standard"

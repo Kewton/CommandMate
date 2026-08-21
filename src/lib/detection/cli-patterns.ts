@@ -861,6 +861,100 @@ export const COPILOT_PROMPT_PATTERN = /^[>❯]\s|^\?\s+/m;
 export const COPILOT_THINKING_PATTERN = /[\u2800-\u28FF]|\(Esc to cancel|Reasoning\s+[■▪▮]|\.\.\.\s+Thinking|Generating|Processing/;
 
 /**
+ * Copilot CLI's bottom status bar while a turn is in flight (Issue #1885).
+ *
+ * Measured on copilot 1.0.80 at the production 200x1000 geometry
+ * (`tests/unit/lib/detection/fixtures/copilot-live-1885/`). The bar is the
+ * bottom row of the pane and reads, across 44 captured generating frames:
+ *
+ *   " ● Working esc interrupt                              GPT-5.6 Terra"
+ *   " ◉ Working · 1.5 KiB esc interrupt                       GPT-5.6 Terra"
+ *
+ * The leading glyph cycles through ● ◉ ◎ ○ and the byte counter appears only
+ * once the turn has produced output, so neither is anchored on. `esc interrupt`
+ * is the affordance hint copilot draws for as long as the turn can be
+ * interrupted -- it is on every generating frame and on every tool-execution
+ * frame -- which makes it the same signal opencode's
+ * {@link OPENCODE_PROCESSING_INDICATOR} rests on.
+ *
+ * It is matched against the STATUS BAR ROW ONLY, never a window
+ * (see {@link readCopilotStatusBar}). `status-vocabulary-in-response.txt` is a
+ * live frame where copilot was asked to print this vocabulary and answered
+ * " ● Working esc interrupt" as body text: a window match would have pinned that
+ * finished session to `running` for the rest of its life.
+ *
+ * No /g flag (S4-5: would make test() stateful). No quantifier over a
+ * character class that can match its neighbour (SEC4-001: ReDoS safe).
+ */
+export const COPILOT_WORKING_STATUS_PATTERN = /\besc\s+interrupt\b/;
+
+/**
+ * Copilot CLI's bottom status bar while no turn is running (Issue #1885).
+ *
+ * The same row as {@link COPILOT_WORKING_STATUS_PATTERN}, in the state copilot
+ * paints when it is NOT working:
+ *
+ *   " ← open sidebar · / commands · ? help · tab next tab            GPT-5.6 Terra"
+ *
+ * This is copilot's positive completion evidence under design rule D1
+ * (`docs/design/multi-agent-state-architecture.md` §4 D1 decision 1, item 2):
+ * the key-hint bar and the working bar are two renderings of one row, so seeing
+ * the hints is an affirmative observation that the turn is over -- not the
+ * absence of a busy marker somewhere on screen. The composer cannot carry that
+ * evidence on copilot: `❯` between its two full-width rules is drawn during
+ * generation too (measured on every frame of the running fixtures), which is
+ * exactly why the always-visible prompt used to win at step 3 of
+ * `detectSessionStatus` and report a generating session as ready.
+ *
+ * Two alternative spellings of one affordance, because copilot has reworded
+ * this row before: 1.0.80 shows "? help", and the pre-1.0.79 wording survives
+ * in {@link COPILOT_SKIP_PATTERNS} as "? for shortcuts". "/ commands" covers
+ * the slash-command hint independently, so a rewording of either half alone
+ * does not cost the tool its completion evidence.
+ *
+ * No /g flag (S4-5). Linear alternation, no nested quantifiers (SEC4-001).
+ */
+export const COPILOT_IDLE_STATUS_PATTERN = /\/\s+commands\b|\?\s+(?:help\b|for\s+shortcuts\b)/;
+
+/**
+ * The two states {@link readCopilotStatusBar} can positively identify.
+ */
+export type CopilotStatusBarState = 'working' | 'idle';
+
+/**
+ * Read copilot's bottom status bar out of a captured frame (Issue #1885).
+ *
+ * Takes the whole frame rather than a row so the positional anchor -- "the
+ * status bar is the bottom row of the pane" -- cannot be lost at a call site.
+ * The scan stops at the first non-blank row from the bottom: if that row is
+ * neither state, this returns null and the caller has no evidence, which is the
+ * D1-correct answer rather than a guess. Two measured frames rely on it:
+ *
+ *  - a permission dialog replaces the whole bottom of the pane with its box, so
+ *    the bottom row is `╰───…` and neither pattern matches. The dialog then
+ *    reaches `detectPrompt` and is reported as `waiting`, unchanged.
+ *  - the `/model` picker ends in its own footer
+ *    ("↑/↓ to navigate · … · enter to select · esc to cancel"), which is not the
+ *    status bar either -- so this reports nothing about it and leaves that
+ *    screen to the selection-list branch (Issue #1895's subject).
+ *
+ * @param contentLines - Frame rows, ANSI already stripped, in pane order
+ * @returns The state the bottom row announces, or null when it announces neither
+ */
+export function readCopilotStatusBar(
+  contentLines: readonly string[]
+): CopilotStatusBarState | null {
+  for (let i = contentLines.length - 1; i >= 0; i--) {
+    const row = contentLines[i];
+    if (row.trim() === '') continue;
+    if (COPILOT_WORKING_STATUS_PATTERN.test(row)) return 'working';
+    if (COPILOT_IDLE_STATUS_PATTERN.test(row)) return 'idle';
+    return null;
+  }
+  return null;
+}
+
+/**
  * Copilot separator pattern (Issue #545)
  * Placeholder - to be updated after Phase 1 TUI investigation.
  */

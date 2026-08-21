@@ -1312,7 +1312,7 @@ commandmate report metrics --json                  # JSON output
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--date <date>` | Target date (`YYYY-MM-DD`) | today |
-| `--tool <tool>` | AI tool to use (claude, codex, copilot) | claude |
+| `--tool <tool>` | AI tool to use (claude, codex, copilot, antigravity) | claude |
 | `--model <model>` | Model name (for copilot) | - |
 | `--template <id>` | Template ID used as the instruction | - |
 | `--instruction <text>` | Custom instruction text (alternative to `--template`) | - |
@@ -1328,7 +1328,7 @@ commandmate report metrics --json                  # JSON output
 | `--token <token>` | Auth token (prefer the `CM_AUTH_TOKEN` env var) | - |
 
 > **Note**: `--date` accepts only `YYYY-MM-DD`. An invalid format exits with code 2 (CONFIG_ERROR).
-> `--tool` must be one of claude / codex / copilot, and `--days` must be at least 1.
+> `--tool` must be one of claude / codex / copilot / antigravity, and `--days` must be at least 1.
 
 ### list Output Example
 

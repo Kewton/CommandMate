@@ -70,6 +70,25 @@ const COPILOT_PROMPT_WAIT_TIMEOUT_MS = 15000;
  * These commands open an interactive picker after execution.
  * When sending these, we must wait for the selection list to appear
  * before allowing further input, to prevent text leaking into the search field.
+ *
+ * Issue #1913 measured the pickers on copilot 1.0.80 in a private tmux socket.
+ * Eleven commands open one: model, agent, theme, permissions, skills, mcp,
+ * settings, statusline, subagents, resume, session. The set below was NOT
+ * widened to cover the other eight, because the wait they would enter is
+ * already broken on this version and widening it would only add latency:
+ *
+ *   `COPILOT_SELECTION_LIST_PATTERN` matches none of the eleven frames — not
+ *   even the three listed here. `/model` renders `❯  Search models…` with
+ *   U+2026, so `Search\s+\w+\.\.\.` misses it, and every picker footer spells
+ *   the verbs in lower case (`↑/↓ to navigate · enter to select · esc to
+ *   cancel`), so `Enter to (?:select|confirm)` misses them too. So
+ *   `waitForSelectionList` burns its full 5s window and returns false for every
+ *   entry in this set.
+ *
+ * Fixing the pattern belongs to the detection layer (`cli-patterns.ts`, the
+ * #1885 / #1886 line of work); this branch is additionally unreachable today
+ * because `send-user-message.ts` bypasses `CopilotTool.sendMessage` (#1906).
+ * Widen this set once the pattern actually matches 1.0.80 frames.
  */
 const SELECTION_LIST_COMMANDS = new Set(['model', 'agent', 'theme']);
 

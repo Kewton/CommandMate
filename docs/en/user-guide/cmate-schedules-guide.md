@@ -8,7 +8,7 @@ A guide to setting up and managing scheduled executions using CMATE.md files.
 
 ## Overview
 
-The CMATE schedule feature allows you to automatically execute `claude -p` (or `codex exec`, `gemini -p`, `vibe-local -p`, `gh copilot -p`) commands by defining cron expressions in the Schedules section of a `CMATE.md` file placed in your worktree root.
+The CMATE schedule feature allows you to automatically execute `claude -p` (or `codex exec`, `gemini -p`, `vibe-local -p`, `gh copilot -p`, `agy -p`, `opencode run`) commands by defining cron expressions in the Schedules section of a `CMATE.md` file placed in your worktree root.
 
 **How it works:**
 
@@ -67,7 +67,7 @@ Create a `## Schedules` section in your `CMATE.md` and define entries using Mark
 | **Name** | Yes | Schedule name. 1-100 characters. Alphanumeric, Japanese, hyphens, and spaces allowed | - |
 | **Cron** | Yes | Cron expression (5-6 fields). Defines execution timing | - |
 | **Message** | Yes | Prompt sent to `claude -p`. Max 10,000 characters | - |
-| **CLI Tool** | No | CLI tool to use (`claude` / `codex` / `gemini` / `vibe-local` / `copilot`). Copilot only: `copilot --model <model-name>` for model selection | `claude` |
+| **CLI Tool** | No | CLI tool to use (`claude` / `codex` / `gemini` / `vibe-local` / `opencode` / `copilot` / `antigravity`; the authority is `CLI_TOOL_IDS` in `src/lib/cli-tools/types.ts`). **Only copilot and opencode accept `--model <model-name>`** — writing it for another tool is a syntax error and the whole row is skipped | `claude` |
 | **Enabled** | No | Enable/disable the schedule (`true` / `false`) | `true` |
 | **Permission** | No | Execution permission level. See Permission Reference below | Tool-specific default |
 
@@ -109,7 +109,7 @@ Cron expressions support 5 fields (minute hour day month weekday) or 6 fields (s
 
 ### gemini
 
-No permission settings. The Permission column is ignored.
+No permission settings. The Permission column is ignored (writing a value in it is a validation error).
 
 ### copilot (--allow-all-tools / --yolo)
 
@@ -128,7 +128,49 @@ Use `copilot --model <model-name>` in the CLI Tool column to specify a model for
 | copilot-task | 0 9 * * * | Analyze code changes | copilot --model claude-opus-4.6 | true | allow-all-tools |
 ```
 
-Model names may contain alphanumeric characters, hyphens, dots, and slashes. Model selection is only supported for copilot (ignored for other CLI tools).
+Model names may contain alphanumeric characters, hyphens, dots, slashes and colons, and must start with an alphanumeric (a leading `-` is rejected because it is ambiguous with a CLI option). **In the CLI Tool column, `--model` is accepted for copilot and opencode only** — for any other tool it is not "ignored" but a **syntax error that skips the whole schedule row** (`TOOLS_WITH_MODEL_SUPPORT` in `parseCliToolColumn`). The vibe-local model comes from the worktree's Agent settings (the DB) instead, and antigravity's `--model` takes display names containing spaces, which a single CLI Tool cell cannot represent — that one belongs to `commandmate send --model`.
+
+### antigravity (--dangerously-skip-permissions)
+
+| Value | Description |
+|-------|-------------|
+| `--dangerously-skip-permissions` | Auto-approves tool use (**default**; no other value is accepted) |
+
+> **Warning:** note that this is the only permitted value, and scheduled execution is an unattended batch.
+
+### opencode
+
+No permission settings, so **writing a value in the Permission column is a validation error**
+(Issue #1914). Before that, Claude's `--permission-mode` values (`acceptEdits` and friends) were
+accepted here and handed to a CLI that has no such option.
+
+> **Note:** "no permission settings" means opencode has no permission *level* vocabulary, not that it
+> has no flag at all. `opencode run` carries a boolean `--auto`, described by its own `--help` as
+> "auto-approve permissions that are not explicitly denied" (measured on opencode 1.18.21).
+> That is a different axis from claude's `--permission-mode` or codex's `--sandbox`, and CommandMate
+> does not pass it today.
+
+#### OpenCode Model Selection
+
+Use `opencode --model <provider/model>` in the CLI Tool column and the schedule launches
+`opencode run -m <provider/model> <message>`.
+
+```markdown
+| oc-task | 0 9 * * * | Analyze code changes | opencode --model ollama/qwen3:8b | true | |
+```
+
+The value is in **`provider/model` form** — that is what `opencode run --help` documents for
+`-m, --model` ("model to use in the format of provider/model", measured on 1.18.21) — and
+CommandMate passes it through **verbatim**. Before Issue #1914 the code prefixed it with `ollama/`,
+in a branch that could never run (`resolveModelOption()` always answered `undefined` for opencode);
+the prefix made every other provider unreachable and doubled up any value that already named one.
+A malformed value fails inside opencode with an opaque error — measured, an unknown provider and a
+bare model name produce the identical `UnknownError`, so CommandMate does not try to guess the shape
+and reject it here. Check the Execution Log for the result.
+
+> **Note:** opencode is not one of `commandmate report generate --tool`'s values
+> (`SUMMARY_ALLOWED_TOOLS` is claude / codex / copilot / antigravity). `--model` became available for
+> CMATE.md scheduled execution only.
 
 ### vibe-local
 
@@ -199,7 +241,7 @@ CommandMate automatically validates the contents of CMATE.md.
 | Name | 1-100 characters, alphanumeric/Japanese/hyphens/spaces only |
 | Cron | Valid cron expression with 5-6 fields |
 | Message | Must not be empty. Max 10,000 characters |
-| CLI Tool | Must be `claude`, `codex`, `gemini`, `vibe-local`, or `copilot` |
+| CLI Tool | Must be `claude`, `codex`, `gemini`, `vibe-local`, `opencode`, `copilot`, or `antigravity` |
 | Permission | Must match an allowed value for the selected tool |
 
 Invalid entries are skipped with a warning log. Other valid entries are processed normally.
