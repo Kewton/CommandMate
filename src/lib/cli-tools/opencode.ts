@@ -23,6 +23,14 @@
  * both when the pane is killed. Every one of them is fail-open — a session that
  * starts without structured events is the pre-#1763 status quo, and the screen
  * scraper keeps deciding for it exactly as before.
+ *
+ * ## Launch side effects (Issue #1908)
+ *
+ * Two things this file used to do on the way up are gone. The 15-second sleep
+ * between the launch keystroke and `attachOpencodeEventStream` is now a poll for
+ * opencode's own composer ({@link OpenCodeTool.waitForReady}), and
+ * `ensureOpencodeConfig` no longer writes into the worktree unless the operator
+ * opted in — see `./opencode-config`.
  */
 
 import { BaseCLITool } from './base';
@@ -30,10 +38,16 @@ import type { CLIToolType } from './types';
 import {
   hasSession,
   createSession,
+  capturePane,
   sendKeys,
   killSession,
   exactTarget,
 } from '../tmux/tmux';
+import {
+  OPENCODE_IDLE_COMPOSER_PATTERN,
+  OPENCODE_SELECTION_LIST_PATTERN,
+  stripAnsi,
+} from '../detection/cli-patterns';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { ensureOpencodeConfig } from './opencode-config';
@@ -84,10 +98,34 @@ export const OPENCODE_EXIT_COMMAND = '/exit';
 export const OPENCODE_PANE_HEIGHT = 200;
 
 /**
- * Wait for OpenCode TUI to initialize after launch.
- * Set to 15000ms to accommodate GPU model loading via Ollama.
+ * Interval between readiness polls while opencode paints its TUI (Issue #1908).
+ *
+ * Half of copilot's second (`COPILOT_POLL_INTERVAL_MS`) because the thing being
+ * waited for lands at ~3 s: a one-second cadence rounds a 3.0 s launch up to
+ * 4 s for no reason, and the poll is one `capture-pane`.
  */
-export const OPENCODE_INIT_WAIT_MS = 15000;
+export const OPENCODE_READY_POLL_INTERVAL_MS = 500;
+
+/**
+ * Readiness poll attempts — 60 * 500 ms = the same 30-second window copilot's
+ * `waitForReady` uses (Issue #1908).
+ *
+ * Sized off the slow end rather than the typical one. On an unloaded machine the
+ * composer is drawn 2.9-3.6 s after the launch keystroke; under the load of six
+ * parallel agents the same launch was measured at 24.1 s. The window has to
+ * cover that, which is precisely what a fixed wait cannot do — see
+ * {@link OpenCodeTool.waitForReady}.
+ */
+export const OPENCODE_READY_MAX_ATTEMPTS = 60;
+
+/**
+ * Scrollback rows to include in a readiness capture.
+ *
+ * `capturePane(name, n)` is `-S -n -E -`, i.e. n rows of history *plus* the whole
+ * visible pane, so every one of the 200 rows in {@link OPENCODE_PANE_HEIGHT} is
+ * in the frame regardless of this number. Matches copilot's 50.
+ */
+const OPENCODE_READY_CAPTURE_LINES = 50;
 
 /**
  * OpenCode CLI tool implementation
@@ -194,12 +232,20 @@ export class OpenCodeTool extends BaseCLITool {
       });
       await sendKeys(sessionName, launchCommand, true);
 
-      // Wait for OpenCode to initialize (GPU model loading via Ollama)
-      await new Promise((resolve) => setTimeout(resolve, OPENCODE_INIT_WAIT_MS));
+      // Issue #1908: poll for opencode's own composer instead of sleeping 15 s.
+      await this.waitForReady(sessionName);
 
-      // Issue #1763: subscribe once the server has had the same time to come up
-      // that the TUI has. Health-checked first, so an opencode too old to know
-      // `--port` costs one probe and nothing else.
+      // Issue #1763: subscribe once the server is up. Health-checked first, so
+      // an opencode too old to know `--port` costs one probe and nothing else.
+      //
+      // Issue #1908 measured the ordering this depends on: opencode's HTTP
+      // server answers `/global/health` 1.3-1.8 s *before* the composer is
+      // painted, in every run (9.4 s / 11.2 s, 12.2 s / 14.0 s, 22.8 s / 24.1 s
+      // under load). Structurally so — the TUI is a client of its own server
+      // (#1758 §5.1.2). Waiting for the composer therefore reaches this line
+      // with the server already listening, which the fixed 15 s wait did not
+      // guarantee: the 22.8 s run had nothing to probe at 15 s and would have
+      // lost structured events for the whole session.
       await attachOpencodeEventStream(target);
 
       logger.info('started-opencode-session:sessionname');
@@ -207,6 +253,74 @@ export class OpenCodeTool extends BaseCLITool {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start OpenCode session: ${errorMessage}`);
     }
+  }
+
+  /**
+   * Wait until opencode has painted something only opencode paints.
+   *
+   * Issue #1908 replaced a fixed 15-second sleep here. That number was written
+   * as "GPU model loading via Ollama", which the measurements do not support:
+   * opencode loads no model at launch (nothing is loaded until the first
+   * request), and the TUI it is waiting for is drawn at 2.9-3.6 s on an idle
+   * machine — so every session paid ~11 s of nothing, inside the HTTP request
+   * that started it. A fixed wait is also wrong in the other direction: with six
+   * agents running, the same launch took 24.1 s, and 15 s was not enough.
+   *
+   * ## What counts as evidence
+   *
+   * `OPENCODE_IDLE_COMPOSER_PATTERN` (Issue #1883) — the `Ask anything...`
+   * placeholder **behind the input box's gutter**. Not reimplemented here on
+   * purpose; it is the same positive-evidence row `status-detector` reads.
+   *
+   * The copilot hazard that #1907 hit does not reach opencode, and this was
+   * checked rather than assumed. Removing copilot's blind sleep exposed the
+   * shell frame to the first poll, and `^[>❯]\s` matches starship / pure /
+   * agnoster prompts, so a shell was read as a ready copilot. opencode's boot
+   * shows the same shell frame — measured, the launch line sits under a `❯`
+   * prompt for the first ~0.7 s — but the gutter anchor cannot match it, and the
+   * frames captured for `tests/fixtures/opencode-launch-boot-11821.ts` confirm
+   * the pattern stays false until the composer exists.
+   *
+   * `OPENCODE_SELECTION_LIST_PATTERN` is the second accepted signal, because the
+   * `Connect a provider` overlay **removes the composer from the frame**
+   * (measured: `Ask anything` occurs zero times while it is up). Without it a
+   * pane parked on that overlay would burn the whole 30-second window. It is
+   * *not* answered — every option on it writes provider credentials into the
+   * operator's config, which is the same line codex's launch draws at its
+   * hooks-review dialog (#1760).
+   *
+   * ## On failure
+   *
+   * Returns false and lets the launch continue, exactly as the sleep did: a
+   * session that is slower than the window is still a session, and the screen
+   * scraper decides for it from there.
+   *
+   * @param sessionName - tmux session name
+   * @returns Whether readiness evidence was seen inside the window
+   */
+  private async waitForReady(sessionName: string): Promise<boolean> {
+    for (let attempt = 0; attempt < OPENCODE_READY_MAX_ATTEMPTS; attempt++) {
+      try {
+        const output = stripAnsi(await capturePane(sessionName, OPENCODE_READY_CAPTURE_LINES));
+
+        // Do NOT stripBoxDrawing() this frame: the gutter is the anchor.
+        if (OPENCODE_IDLE_COMPOSER_PATTERN.test(output)) {
+          logger.info('opencode-composer-detected', { attempt });
+          return true;
+        }
+
+        if (OPENCODE_SELECTION_LIST_PATTERN.test(output)) {
+          logger.info('opencode-overlay-detected', { attempt });
+          return true;
+        }
+      } catch {
+        // Capture may fail while the pane is still coming up - keep polling
+      }
+      await new Promise((resolve) => setTimeout(resolve, OPENCODE_READY_POLL_INTERVAL_MS));
+    }
+
+    logger.info('opencode-ready-detection-timeout');
+    return false;
   }
 
   /**
