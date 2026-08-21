@@ -198,6 +198,16 @@ export const antigravityAgentEventSource: AgentEventSource = definePushHookSourc
     // at 4s so that CommandMate rather than agy decides what a slow server
     // means. The number a caller budgeting a verdict needs is the outer one.
     decisionTimeoutSeconds: ANTIGRAVITY_PERMISSION_TIMEOUT_SECONDS,
+    // Issue #1924, §4 D3. agy registers a permission hook, but CommandMate is
+    // the adjudicator on it rather than a forecaster: the reply IS the decision
+    // (see the module comment on encodeVerdict), so a non-allow answer is not a
+    // prediction that agy will now ask a human.
+    permissionHookPredictsDialog: false,
+    // Not audited. Default = Claude's current behaviour.
+    sessionStartMayArriveLate: false,
+    permissionReplyReleasesPrompt: false,
+    eventIdentity: null,
+    resync: 'none',
   },
 
   // Empty on purpose, and the only empty mapper list in the codebase. There is

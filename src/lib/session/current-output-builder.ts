@@ -16,6 +16,8 @@ import { UNCLASSIFIED_PROMPT_TYPE, type UnclassifiedFrameRecord } from '@/types/
 import { createLogger } from '@/lib/logger';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { getAgentEventSource } from '@/lib/hooks/sources/registry';
+import type { AgentSourceCapabilities } from '@/lib/hooks/sources/types';
 import { captureSessionOutput } from '@/lib/session/cli-session';
 import {
   detectSessionStatus,
@@ -96,6 +98,43 @@ export interface StructuredEventsPayload {
   promptWaitingSince: number | null;
   /** `notification` / `permission-request`, or null. See above. */
   promptWaitingSource: StructuredPromptSource | null;
+  /**
+   * Which {@link AgentEventSource} speaks for this tool, and what it declares it
+   * can do (Issue #1924, §7).
+   *
+   * The declared values verbatim — `capture --json` is where an operator finds
+   * out why the structured layer did or did not record something, and a
+   * capability that only existed in the source file could not answer that.
+   * Nothing here is computed: §4 D3 decision 1 requires every capability to be a
+   * JSON-serialisable declared value precisely so this field can be a copy.
+   *
+   * Always present. A tool with no source of its own gets the compatibility
+   * source from `lib/hooks/sources/legacy-relay`, whose capabilities say
+   * "nothing has been measured" rather than guessing Claude's.
+   */
+  source: StructuredSourcePayload;
+}
+
+/**
+ * The event source's identity and declared capabilities, as published.
+ *
+ * ## Why the whole block is on the hot path
+ *
+ * §7 (DR2-022) asks for the name on `current-output` and the capabilities only
+ * on "the detailed fetch". There is no detailed fetch: `commandmate capture
+ * --json` prints the `GET /api/worktrees/:id/current-output` response verbatim
+ * (`src/cli/commands/capture.ts`), so a field that is not here is not in
+ * `capture --json` either. Inventing a second endpoint or a query flag to
+ * separate them is a wider change than Issue #1924 is scoped for, and the thing
+ * being separated is ~250 bytes of static JSON next to a payload that carries
+ * the whole terminal frame. So it ships unconditionally, and DR2-022's split can
+ * be revisited if `instances` ever wants a different shape.
+ */
+export interface StructuredSourcePayload {
+  /** The tool this source speaks for — its own id, not the caller's. */
+  cliToolId: CLIToolType;
+  /** The declared block, copied. See {@link AgentSourceCapabilities}. */
+  capabilities: AgentSourceCapabilities;
 }
 
 export interface CurrentOutputPayload {
@@ -440,13 +479,49 @@ function recordStructuredPrompt(
   }
 }
 
+/**
+ * Whether a status rests on something positive, or on the absence of a negative
+ * (Issue #1924, §4 D1 decision 2).
+ *
+ * `'positive'` — a marker, a tool-specific idle-composer rule, or a structured
+ * event said so. `'none'` — nothing on the frame could be read either way, and
+ * the status is a fallback.
+ *
+ * The design policy adds this rather than a fifth `SessionStatus`: the value
+ * domain stays four wide, because `src/cli/types/api-responses.ts` enumerates it
+ * and a new member is a breaking change for every consumer older than the server
+ * — including `commandmate-skills`' `orchestrate-monitor`, which reads
+ * `capture --json` as its primary signal.
+ */
+export type StatusEvidence = 'positive' | 'none';
+
 /** What `detectSessionStatus()` said about this frame, as this module uses it. */
 export interface ScraperVerdict {
   status: SessionStatus;
   reason: string;
   /** The agent is producing output right now. */
   thinking: boolean;
-  /** The frame is interactive but could not be classified (#1497 / #1708). */
+  /**
+   * Whether `status` was positively confirmed (Issue #1924).
+   *
+   * Landed as a type in Phase 1 with the producer unchanged, so today it is
+   * exactly the negation of {@link ScraperVerdict.isUnclassifiedActive} — the
+   * two `reason`s that mean "the frame said nothing" are the two that already
+   * open the hatch. Phase 3 (§8) moves the producer tool by tool: an
+   * `input_prompt` frame that no tool-specific idle-composer rule vouches for
+   * becomes `'none'` here, and `isUnclassifiedActive` widens with it because it
+   * is derived from this field rather than computed beside it.
+   */
+  evidence: StatusEvidence;
+  /**
+   * The frame is interactive but could not be classified (#1497 / #1708).
+   *
+   * Since Issue #1924 this is `evidence === 'none'`, kept as its own field
+   * because it is a published CLI contract (`capture --json`, and `wait`'s
+   * `ready && !isUnclassifiedActive` completion rule). It is derived at every
+   * site that produces a verdict, never computed independently — two
+   * expressions for one fact is how §4 D1 decision 2 says this drifts.
+   */
   isUnclassifiedActive: boolean;
 }
 
@@ -550,6 +625,9 @@ export function mergeStructuredStatus(
       status: 'waiting',
       reason: structuredWaitingReason(promptWaiting),
       thinking: false,
+      // Untouched: what the scraper could read about this frame does not change
+      // because the agent told us a dialog is open (Issue #1924).
+      evidence: scraper.evidence,
       isUnclassifiedActive: scraper.isUnclassifiedActive,
       structuredApplied: true,
     };
@@ -560,14 +638,19 @@ export function mergeStructuredStatus(
   }
 
   const thinking = structured.status === 'running';
+  // Issue #1924: the same rule as before, stated once as evidence and derived
+  // into the compatibility flag. A structured `ready` over a scraper `running`
+  // IS the positive completion evidence §4 D1 asks for — it is the agent's own
+  // `Stop` — so it clears the hatch; anything else leaves the frame's own
+  // reading alone. Writing the two independently is how they would come apart.
+  const evidence: StatusEvidence =
+    structured.status === 'ready' && scraper.status === 'running' ? 'positive' : scraper.evidence;
   return {
     status: structured.status,
     reason: structured.reason,
     thinking,
-    isUnclassifiedActive:
-      structured.status === 'ready' && scraper.status === 'running'
-        ? false
-        : scraper.isUnclassifiedActive,
+    evidence,
+    isUnclassifiedActive: evidence === 'none',
     structuredApplied: true,
   };
 }
@@ -592,12 +675,20 @@ export async function buildCurrentOutput(
 
   const stopEventAt = getLastStopEventAt(worktreeId, cliToolId, instanceId);
   const lastEvent = getLastAgentEvent(worktreeId, cliToolId, instanceId);
+  // Issue #1924: the registry answers for every tool — a real implementation
+  // when there is one, the compatibility source otherwise — so this needs no
+  // null branch and never names a tool.
+  const eventSource = getAgentEventSource(cliToolId);
   const structuredEvents: StructuredEventsPayload = {
     lastEventType: lastEvent?.event ?? null,
     lastEventAt: lastEvent?.at ?? null,
     lastEventDetail: lastEvent?.detail ?? null,
     promptWaitingSince: null,
     promptWaitingSource: null,
+    source: {
+      cliToolId: eventSource.cliToolId,
+      capabilities: eventSource.capabilities,
+    },
   };
 
   const running = await cliTool.isRunning(worktreeId, instanceId);
@@ -682,9 +773,18 @@ export async function buildCurrentOutput(
   // unclassified frame — a real idle prompt (`❯`) is classified earlier as
   // `input_prompt`, never as `no_recent_output` — so treat the timed-out fallback
   // as unclassified too and keep the hatch open instead of stranding the user.
-  const isUnclassifiedActive =
+  // Issue #1924, §4 D1 decision 2: stated as evidence, with the published flag
+  // derived from it. The two `reason`s below are unchanged — Phase 3 is what
+  // moves `input_prompt` into the `'none'` half, tool by tool, once each tool
+  // has a positively confirmed idle-composer rule and its fixtures (DR2-002).
+  // Until then this is the pre-#1924 expression with the sign flipped, and no
+  // frame changes classification.
+  const evidence: StatusEvidence =
     (statusResult.status === 'running' && statusResult.reason === STATUS_REASON.DEFAULT) ||
-    (statusResult.status === 'ready' && statusResult.reason === STATUS_REASON.NO_RECENT_OUTPUT);
+    (statusResult.status === 'ready' && statusResult.reason === STATUS_REASON.NO_RECENT_OUTPUT)
+      ? 'none'
+      : 'positive';
+  const isUnclassifiedActive = evidence === 'none';
 
   // Issue #1723: the two-layer merge. Everything above this line is the string
   // analysis, unchanged and still the only source on a machine where no hook
@@ -714,7 +814,13 @@ export async function buildCurrentOutput(
   }
 
   const merged = mergeStructuredStatus(
-    { status: statusResult.status, reason: statusResult.reason, thinking, isUnclassifiedActive },
+    {
+      status: statusResult.status,
+      reason: statusResult.reason,
+      thinking,
+      evidence,
+      isUnclassifiedActive,
+    },
     structured,
     promptWaiting,
   );

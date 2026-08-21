@@ -95,6 +95,9 @@ describe('[#1843] AutoYesSuppressionReason cross-validation', () => {
       'deny-pattern-unusable',
       'type-not-allowed',
       'agent-launch-dialog',
+      // Issue #1924: the generic prompt estimator matched a frame the tool's own
+      // dialog detector would not vouch for.
+      'unclassified-frame',
     ];
     const fromServer: ServerSuppressionReason[] = knownToCli;
     expect(new Set(fromServer).size).toBe(knownToCli.length);

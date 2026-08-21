@@ -129,6 +129,16 @@ export const geminiAgentEventSource: AgentEventSource = definePushHookSource({
     configScope: 'per-worktree',
     // No gemini event waits on a verdict from CommandMate. See the module comment.
     decisionTimeoutSeconds: 0,
+    // Issue #1924, §4 D3. The one source that registers no permission hook at
+    // all: `../gemini/settings-generator` never writes one, so `PreToolUse` is
+    // mapped and never registered and `reportPendingDialog` is unreachable for
+    // this tool. There is no non-allow answer to read a forecast out of.
+    permissionHookPredictsDialog: false,
+    // Not audited. Default = Claude's current behaviour.
+    sessionStartMayArriveLate: false,
+    permissionReplyReleasesPrompt: false,
+    eventIdentity: null,
+    resync: 'none',
   },
 
   // gemini's own table, kept in gemini's own module: four of the seven are
