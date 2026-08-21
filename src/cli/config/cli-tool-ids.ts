@@ -21,3 +21,15 @@
 
 export { CLI_TOOL_IDS, isCliToolType as isCliToolId } from '../../lib/cli-tools/types';
 export type { CLIToolType as CLIToolId } from '../../lib/cli-tools/types';
+
+/**
+ * The agent addressed when nothing else declares one (Issue #1925).
+ *
+ * Only the CLI's compatibility path uses it: against a current server the
+ * answer comes from `GET /api/worktrees/:id/resolve-target`, which applies the
+ * worktree's own setting first and reports reaching this value as
+ * `resolvedBy: 'fallback'` so a worktree with no agent of its own is visible
+ * rather than silently Claude. Named here so the CLI has one such value instead
+ * of the `|| 'claude'` that used to sit in `capture`.
+ */
+export const DEFAULT_CLI_TOOL_ID = 'claude';

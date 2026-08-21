@@ -24,7 +24,7 @@
  * coupling via a minimal DTO/projection type.
  */
 
-import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN, CODEX_APPROVAL_FOOTER_PATTERN, CODEX_PAGER_FOOTER_PATTERN, CODEX_STATUS_BAR_PATTERN, getCodexLifecycleDialog, CLAUDE_INTERRUPT_HINT_PATTERN, ANTIGRAVITY_SELECTION_LIST_PATTERN } from './cli-patterns';
+import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_IDLE_COMPOSER_PATTERN, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN, CODEX_APPROVAL_FOOTER_PATTERN, CODEX_PAGER_FOOTER_PATTERN, CODEX_STATUS_BAR_PATTERN, getCodexLifecycleDialog, CLAUDE_INTERRUPT_HINT_PATTERN, ANTIGRAVITY_SELECTION_LIST_PATTERN } from './cli-patterns';
 import { detectPrompt } from './prompt-detector';
 import { normalizeTuiFrameForDetection } from './tui-detection-frame';
 import type { PromptDetectionResult } from './prompt-detector';
@@ -649,15 +649,46 @@ export function detectSessionStatus(
         };
       }
 
-      // E. Check content area for prompt pattern (Issue #473: "Ask anything..." is in content area,
-      // not in lastLines, due to OpenCode TUI padding between content and footer)
-      const { promptPattern: ocPromptPattern } = getCliToolPatterns('opencode');
-      if (ocPromptPattern.test(contentCheckWindow)) {
+      // E. Idle composer (Issue #473 found the row; Issue #1883 made it positive).
+      //
+      // `Ask anything...` is a *placeholder*, not a question: opencode paints it
+      // only while the input buffer is empty and replaces it with the first
+      // typed character. Finding it inside the input box is therefore positive
+      // evidence that the composer is empty — the same class of evidence as
+      // claude's `❯` or codex's `›` idle row — and this branch is opencode's
+      // implementation of design rule D1 ("declare a turn finished only on
+      // positive evidence"), not a fallback for "nothing looked busy".
+      //
+      // Two things changed in #1883, both measured against the live frames under
+      // `tests/unit/lib/detection/fixtures/opencode-live-1883/`:
+      //
+      //  - the row is matched on `lines` (ANSI stripped, box drawing intact) via
+      //    OPENCODE_IDLE_COMPOSER_PATTERN, so it must carry the input box's own
+      //    gutter. The bare phrase reaching the pane inside a response body is
+      //    no longer read as an idle composer. Windowing `lines` with an index
+      //    taken from `contentCandidates` is safe because `stripBoxDrawing` maps
+      //    line-for-line — it blanks border-only rows rather than dropping them
+      //    — so the two arrays stay aligned.
+      //  - the verdict is now `input_prompt` / `hasActivePrompt: false`, like
+      //    every other CLI's idle input row. The old `prompt_detected` /
+      //    `hasActivePrompt: true` told `resolvePromptWaiting` a human had to
+      //    answer something, which blocked *every* send with
+      //    `blockedBy: 'scraper'` and pinned the sidebar to `waiting` for a
+      //    session that had only just started (and `respond` had nothing to
+      //    answer, because no dialog existed).
+      //
+      // D1's other half — "and the footer shows no processing marker" — is
+      // branch A above, which has already returned `running` for any frame whose
+      // footer carries `esc interrupt`.
+      const composerWindow = lines
+        .slice(Math.max(0, lastContentIdx - STATUS_CHECK_LINE_COUNT + 1), lastContentIdx + 1)
+        .join('\n');
+      if (OPENCODE_IDLE_COMPOSER_PATTERN.test(composerWindow)) {
         return {
           status: 'ready',
           confidence: 'high',
-          reason: STATUS_REASON.PROMPT_DETECTED,
-          hasActivePrompt: true,
+          reason: STATUS_REASON.INPUT_PROMPT,
+          hasActivePrompt: false,
           promptDetection,
         };
       }
@@ -794,8 +825,18 @@ export function detectSessionStatus(
 
   // 3. Input prompt detection
   // CLI tool is waiting for user input (shows >, ❯, ›, $, %, etc.)
+  //
+  // Issue #1883: opencode opts out. Its promptPattern is the bare phrase
+  // `Ask anything...`, so this generic window check is a second, looser copy of
+  // branch 2.5 E that answers `ready` for the phrase appearing anywhere in the
+  // last 15 rows — including in a response body, where it is not a composer at
+  // all. Leaving it in would also make E's gutter anchor unobservable: every
+  // frame E declines would be re-admitted here with the same verdict. opencode's
+  // idle evidence is E's gutter-anchored composer row and its completion marker
+  // (branch D); a frame carrying neither has no evidence, and falls through to
+  // the heuristics below exactly as design rule D1 asks.
   const { promptPattern } = getCliToolPatterns(cliToolId);
-  if (promptPattern.test(lastLines)) {
+  if (cliToolId !== 'opencode' && promptPattern.test(lastLines)) {
     return {
       status: 'ready',
       confidence: 'high',

@@ -100,6 +100,10 @@ beforeEach(async () => {
   home = mkdtempSync(join(tmpdir(), 'cmate-copilot-start-'));
   process.env.COPILOT_HOME = home;
   delete process.env.CM_AGENT_HOOKS_INJECT;
+  // Issue #1904 puts the receiving port on the launch line, so the line this
+  // file asserts byte-for-byte would otherwise depend on the developer's own
+  // `CM_PORT`.
+  vi.stubEnv('CM_PORT', '3210');
 
   // The event state hangs off globalThis, so a generation left by an earlier
   // file in this worker would make the fence assertions pass for free.
@@ -132,6 +136,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   delete process.env.COPILOT_HOME;
   delete process.env.CM_AGENT_HOOKS_INJECT;
   removeTempDir(home);
@@ -200,7 +205,8 @@ describe('the launch command', () => {
     await startSession('copilot-2');
 
     expect(await sentCommand()).toBe(
-      `CM_AGENT_WORKTREE_ID='${WORKTREE_ID}' CM_AGENT_INSTANCE_ID='copilot-2' copilot`
+      `CM_AGENT_WORKTREE_ID='${WORKTREE_ID}' CM_AGENT_INSTANCE_ID='copilot-2' ` +
+        `CM_HOOK_PORT='3210' copilot`
     );
   });
 

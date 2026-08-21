@@ -165,6 +165,13 @@ function buildOpencodeSource(server: FakeServer): AgentEventSource {
       ],
       configScope: 'none',
       decisionTimeoutSeconds: null,
+      // #1924: the pull row of §4 D3 — the only source that can positively
+      // say a permission was answered, and the only one with a real id.
+      permissionHookPredictsDialog: false,
+      sessionStartMayArriveLate: false,
+      permissionReplyReleasesPrompt: true,
+      eventIdentity: 'permission-id',
+      resync: 'session-status-poll',
     },
 
     mappers: OPENCODE_MAPPERS.map(withConversation),

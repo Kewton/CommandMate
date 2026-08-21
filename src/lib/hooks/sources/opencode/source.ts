@@ -279,6 +279,20 @@ export const opencodeAgentEventSource: AgentEventSource = definePullEventSource(
     supportedEvents: OPENCODE_SUPPORTED_EVENTS,
     configScope: 'none',
     decisionTimeoutSeconds: null,
+    // Issue #1924, §4 D3. Not hooks at all: CommandMate holds the SSE stream and
+    // adjudicates itself, so there is no hook answer to forecast a dialog from.
+    permissionHookPredictsDialog: false,
+    sessionStartMayArriveLate: false,
+    // `permission.replied` arrives on the same stream and is a positive
+    // statement that the dialog is gone (#1898). The only source that can say so.
+    permissionReplyReleasesPrompt: true,
+    // `per_...` — the id in the reply URL, which is the same id the frame
+    // carries (#1899). Real identity, so this source does not need the time
+    // window that loses the `stop` of a short turn.
+    eventIdentity: 'permission-id',
+    // pull: the stream can drop, and `GET /session/status` is how a reconnect
+    // finds out whether the conversation is still working (#1900).
+    resync: 'session-status-poll',
   },
 
   // C4. Predicates, not a name table: see ./mappers.
