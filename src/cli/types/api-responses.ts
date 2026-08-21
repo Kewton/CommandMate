@@ -95,7 +95,11 @@ export type AutoYesSuppressionReason =
   | 'deny-pattern'
   | 'deny-pattern-unusable'
   | 'type-not-allowed'
-  | 'agent-launch-dialog';
+  | 'agent-launch-dialog'
+  // `unclassified-frame` is NOT one either (Issue #1924): the generic prompt
+  // estimator matched and the tool's own dialog detector did not, so nothing
+  // was sent. Same channel, third kind of cause.
+  | 'unclassified-frame';
 
 // Mirrors: src/app/api/worktrees/[id]/current-output/route.ts response shape
 // [DR2-03] All server-side fields included
@@ -200,6 +204,35 @@ export interface CurrentOutputResponse {
     promptWaitingSince?: number | null;
     /** `notification` / `permission-request`, or null (Issue #1725). */
     promptWaitingSource?: string | null;
+    /**
+     * Which agent event source speaks for this tool, and what it declares it can
+     * do (Issue #1924).
+     *
+     * Mirrors: src/lib/session/current-output-builder.ts StructuredSourcePayload.
+     * Optional here and required there for the usual reason — this CLI can be
+     * newer than the server it is pointed at, and a build from before #1924
+     * sends no `source` at all.
+     *
+     * The string-typed fields are string-typed on purpose, exactly as
+     * `lastSuppression.reason` is: a server newer than this CLI can declare a
+     * `configScope`, an `eventIdentity` or a `resync` strategy this build has
+     * never heard of, and narrowing the wire to the unions this build knows
+     * would turn a forward-compatible payload into a parse failure.
+     */
+    source?: {
+      cliToolId: string;
+      capabilities: {
+        supportedEvents: string[];
+        configScope: string;
+        decisionTimeoutSeconds: number | null;
+        /** Issue #1924, §4 D3: the five declared values, verbatim. */
+        permissionHookPredictsDialog: boolean;
+        sessionStartMayArriveLate: boolean;
+        permissionReplyReleasesPrompt: boolean;
+        eventIdentity: string | null;
+        resync: string;
+      };
+    };
   };
   /**
    * Issue #1839: the upstream (model API) fault visible on the live frame, or

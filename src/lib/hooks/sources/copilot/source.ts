@@ -195,6 +195,22 @@ export const copilotAgentEventSource: AgentEventSource = definePushHookSource({
     // One file for the whole machine. See `./hook-settings`.
     configScope: 'global-singleton',
     decisionTimeoutSeconds: COPILOT_HOOK_TIMEOUT_SECONDS,
+    // Issue #1924, §4 D3. copilot DOES register a permission hook — this is the
+    // row where registration and prediction come apart. It fires on every tool
+    // call and copilot executes most of them straight away (#1901), so reading a
+    // non-allow as "a dialog is coming" files a prompt that never appears and
+    // leaves the pane `waiting` until the provisional record expires.
+    permissionHookPredictsDialog: false,
+    // The one `true` in this column, and a stopwatch rather than an inference:
+    // `UserPromptSubmit` at 20.813Z, `SessionStart` at 20.915Z (#1903). See the
+    // module comment above.
+    sessionStartMayArriveLate: true,
+    permissionReplyReleasesPrompt: false,
+    // Not audited. No captured copilot payload carries a `tool_use_id`, so
+    // `'tool-call-id'` would be a guess; whether one exists is still to be
+    // measured. Default = Claude's fallback, the time window.
+    eventIdentity: null,
+    resync: 'none',
   },
 
   // The same CamelCase dialect as Claude and codex — measured against six

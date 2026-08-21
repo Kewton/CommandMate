@@ -1101,7 +1101,20 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
     "lastEventAt": 1754296400000,
     "lastEventDetail": null,
     "promptWaitingSince": null,
-    "promptWaitingSource": null
+    "promptWaitingSource": null,
+    "source": {
+      "cliToolId": "claude",
+      "capabilities": {
+        "supportedEvents": ["stop", "notification", "session_start", "user_prompt_submit", "session_end", "pre_tool_use", "post_tool_use"],
+        "configScope": "per-instance",
+        "decisionTimeoutSeconds": 5,
+        "permissionHookPredictsDialog": true,
+        "sessionStartMayArriveLate": false,
+        "permissionReplyReleasesPrompt": false,
+        "eventIdentity": null,
+        "resync": "none"
+      }
+    }
   },
   "model": "claude-opus-5[1m]",
   "reasoningEffort": null,
@@ -1120,6 +1133,7 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
 | `isRunning` | tmux セッションが存在して healthy（`src/lib/session/claude-session.ts:543-556`）。**ターン進行中の意味ではない** |
 | `sessionStatus` / `sessionStatusReason` | 状態と、その根拠（`hook_*` なら hooks 由来、それ以外はスクレイパー由来。`HOOK_STATUS_REASON` は `src/lib/session/status-mapping.ts`） |
 | `structuredEvents.*` / `lastStopEventAt` | hooks の最終イベントと最終 `stop` 時刻。hooks が来ていなければ `null` |
+| `structuredEvents.source` | そのツールの構造化イベントソースの識別子と**宣言値**（Issue #1924）。セッションの状態ではなく**ソースの性質**なので、hooks が 1 件も来ていなくても・セッションが止まっていても必ず入る。ソース実装が無いツール（`vibe-local`）は互換ソースの「未計測」値（`supportedEvents: []`）を返す |
 | `upstreamFault` | 画面に上流障害の署名があれば `{id, matchedText, at}`、無ければ `null`（Issue #1839）。**`null` は「健全」ではなく「既知の署名が無かった」** |
 
 画面が空かどうかは `realtimeSnippet.trim() === ''` と `lineCount` で見る。
