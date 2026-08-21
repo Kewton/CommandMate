@@ -119,7 +119,7 @@ export function truncateOutput(output: string): string {
  * - codex: exec <message> --sandbox <permission>
  * - gemini: -p <message>
  * - vibe-local: [-p <message> -y] or [--model <model> -p <message> -y]
- * - opencode: [run <message>] or [run -m ollama/<model> <message>]
+ * - opencode: [run <message>] or [run -m <provider/model> <message>]
  * - antigravity: -p <message> --dangerously-skip-permissions
  * - others: -p <message> (fallback)
  *
@@ -141,9 +141,29 @@ export function buildCliArgs(message: string, cliToolId: string, permission?: st
       }
       return ['-p', message, '-y'];
     case 'opencode':
-      // [D2-007] When model is not specified, OpenCode uses opencode.json default model
+      // [D2-007] When model is not specified, OpenCode uses opencode.json default model.
+      //
+      // Issue #1914: the model is passed through **verbatim**. It used to be
+      // written as `ollama/${model}`, which had two problems and one excuse:
+      //
+      //  - `opencode run --help` documents `-m, --model` as taking a value "in
+      //    the format of provider/model" (measured on 1.18.21), so the prefix
+      //    made every non-Ollama provider unreachable and mangled any value that
+      //    already named one into `ollama/anthropic/…`.
+      //  - The prefix was a silent transform: nothing downstream could tell the
+      //    difference between "the user asked for Ollama" and "the code assumed
+      //    it".
+      //
+      // The excuse is that it never ran. `resolveModelOption()` answered
+      // `undefined` for opencode, and the only other caller
+      // (`daily-summary-generator`) is gated by `SUMMARY_ALLOWED_TOOLS`, which
+      // does not list opencode either — so there is no stored CMATE.md value
+      // that the removed prefix was keeping correct. The branch is kept rather
+      // than deleted because this Issue makes it reachable; deleting it would
+      // mean `opencode --model x` in CMATE.md parses, validates, and is then
+      // silently ignored, which is the same class of bug one layer down.
       if (options?.model) {
-        return ['run', '-m', `ollama/${options.model}`, message];
+        return ['run', '-m', options.model, message];
       }
       return ['run', message];
     case 'antigravity':

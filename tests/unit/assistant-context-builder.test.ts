@@ -168,3 +168,77 @@ describe('getEnabledRepositories', () => {
     expect(result.length).toBe(0);
   });
 });
+/**
+ * Issue #1914: the CLI reference handed to an assistant session was stale.
+ *
+ * It described `--agent NAME` as the way to name a target — the secondary form
+ * since Issue #1638 — and omitted `instances`, `verify`, `sync` and
+ * `send --contract` entirely. An assistant driving a worktree from that text
+ * writes `wait --agent codex`, a flag `wait` does not have.
+ *
+ * These are presence assertions over generated prose, so each one names a
+ * string that must appear; deleting the corresponding line from
+ * `buildCommandMateCliReference` turns the case red.
+ */
+describe('CommandMate CLI reference (Issue #1914)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetAllRepositories.mockReturnValue([]);
+    mockGetWorktrees.mockReturnValue([]);
+  });
+
+  function reference(): string {
+    return buildGlobalContext('claude', mockDb);
+  }
+
+  it.each([
+    ['instances', 'instances <worktree-id> [list|add|remove|alias|kill]'],
+    ['verify', 'verify <worktree-id> [--gates a,b]'],
+    ['sync', 'sync [--json]`'],
+    ['send --contract', '--contract <path>'],
+  ])('documents the %s surface', (_name, needle) => {
+    expect(reference()).toContain(needle);
+  });
+
+  it('presents --instance as the way to name a target', () => {
+    const text = reference();
+    expect(text).toContain('`--instance <id>`');
+    expect(text).toContain('send`');
+    // The flag is on the commands that accept it, not only in the prose.
+    expect(text).toContain('wait <worktree-id>... [--timeout N] [--stall-timeout N] [--on-prompt agent|human] [--instance ID]');
+  });
+
+  it('marks --agent as the ad-hoc form and records that wait has none', () => {
+    const text = reference();
+    expect(text).toContain('Issue #1638');
+    expect(text).toContain('ad-hoc');
+    expect(text).toContain('`wait` has no `--agent` at all');
+  });
+
+  it('does not advertise --agent on the targeting commands', () => {
+    const text = reference();
+    // The pre-#1914 spellings, one per command line.
+    for (const stale of [
+      'send <worktree-id> "message" [--agent NAME]',
+      'respond <worktree-id> "answer" [--agent NAME]',
+      'capture <worktree-id> [--json] [--agent NAME]',
+    ]) {
+      expect(text).not.toContain(stale);
+    }
+  });
+
+  it('lists all seven CLI tools', () => {
+    const text = reference();
+    for (const tool of [
+      'claude',
+      'codex',
+      'gemini',
+      'vibe-local',
+      'opencode',
+      'copilot',
+      'antigravity',
+    ]) {
+      expect(text).toContain(`\`${tool}\``);
+    }
+  });
+});

@@ -241,7 +241,7 @@
     "responseCompleted": "Response completed",
     "thinking": "Thinking...",
     "thinkingStatus": "Thinking",
-    "claudeIsThinking": "Claude is thinking..."
+    "agentIsThinking": "{toolName} is thinking..."
   },
   "output": {
     "latest": "Latest output",

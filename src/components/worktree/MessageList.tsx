@@ -655,7 +655,7 @@ export function MessageList({
                 <div className="text-center py-6">
                   <div className="inline-flex items-center gap-2 text-info-foreground">
                     <Loader2 size={20} className="animate-spin" aria-hidden="true" />
-                    <p className="text-sm font-medium">{tWorktree('status.claudeIsThinking')}</p>
+                    <p className="text-sm font-medium">{tWorktree('status.agentIsThinking', { toolName: getCliToolDisplayNameSafe(selectedCliTool) })}</p>
                   </div>
                 </div>
               ) : (
