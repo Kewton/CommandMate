@@ -516,7 +516,14 @@ async function pollWorktree(
       if (!data.isRunning && !everRunning) {
         console.error(
           `Not started: ${worktreeId} has no running ${data.cliToolId ?? 'agent'} session` +
-            `${options.instance ? ` for instance ${options.instance}` : ''}.`,
+            `${options.instance ? ` for instance ${options.instance}` : ''}` +
+            // Issue #1884: name the stage that chose the agent above. `wait` has
+            // no --agent to correct a mis-resolution with, so "no running claude
+            // session for instance opencode" was the entire evidence an operator
+            // got for a live agent reported as absent. `worktree-default` here
+            // means the instance is neither in the roster nor named after a
+            // tool; `client-fallback`, that the server is too old to resolve.
+            `${data.resolvedBy ? ` (resolvedBy=${data.resolvedBy})` : ''}.`,
         );
         return { exitCode: VerifyExitCode.NOT_STARTED };
       }

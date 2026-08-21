@@ -6,10 +6,41 @@
  * @remarks [D1-001 SRP] Separated from opencode.ts to maintain single responsibility.
  * This module handles Ollama/LM Studio HTTP API calls and config file I/O,
  * while opencode.ts handles tmux session management.
+ *
+ * ## Issue #1908: writing is opt-in, and the worktree is no longer the default
+ *
+ * Starting an opencode session used to drop a 4 KB `opencode.json` into the
+ * worktree root whenever Ollama or LM Studio answered on localhost — one
+ * untracked file per repository, in six repositories on the reporting machine,
+ * including CommandMate's own checkout. Nothing asked, nothing announced, and
+ * `git status` carried it from then on.
+ *
+ * Measured on opencode 1.18.21 (`opencode debug config`, disposable `HOME`), a
+ * worktree-root `opencode.json` is not an additive convenience:
+ *
+ * | layer                                   | read? | on a key collision |
+ * |-----------------------------------------|-------|--------------------|
+ * | `<worktree>/opencode.jsonc`             | yes   | beats `opencode.json` |
+ * | `<worktree>/opencode.json`              | yes   | beats both below   |
+ * | `$OPENCODE_CONFIG`                      | yes   | **loses** to the worktree file |
+ * | `$XDG_CONFIG_HOME/opencode/opencode.json(c)` | yes | loses to the worktree file |
+ *
+ * `provider` maps merge across the layers, so the generated file is additive
+ * *until* the operator defines the same provider key somewhere else — at which
+ * point CommandMate's snapshot silently outranks the config they chose,
+ * `OPENCODE_CONFIG` included. That is the reason the skip list below is not just
+ * "is there an `opencode.json`".
+ *
+ * So: generation is off unless {@link OPENCODE_LOCAL_PROVIDER_CONFIG_ENV} asks
+ * for it, and even then it stands down in front of any configuration the
+ * operator already owns. Files written by earlier versions are left exactly
+ * where they are — they still load, so nobody's provider list disappears.
  */
 
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
+import { resolveSafeDirectory } from '@/config/safe-directory';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('cli-tools/opencode-config');
@@ -102,6 +133,72 @@ const MAX_LM_STUDIO_RESPONSE_SIZE = 1 * 1024 * 1024;
 
 /** Config file name */
 const CONFIG_FILE_NAME = 'opencode.json';
+
+/**
+ * The environment variable that turns local-provider config generation back on
+ * (Issue #1908).
+ *
+ * Unset — the default — means CommandMate writes nothing. `worktree` restores
+ * the pre-#1908 destination (`<worktree>/opencode.json`), `global` writes the
+ * same content to `$XDG_CONFIG_HOME/opencode/opencode.json` so one machine-wide
+ * file serves every checkout instead of one file per repository.
+ *
+ * An env var rather than a stored setting because that is how every other
+ * launch-path switch in this codebase is spelled (`CM_AGENT_HOOKS_INJECT`,
+ * `CM_OPENCODE_PORT_FILE`), and because the decision has to be readable from the
+ * CLI, the server and a test without a database.
+ */
+export const OPENCODE_LOCAL_PROVIDER_CONFIG_ENV = 'CM_OPENCODE_LOCAL_PROVIDER_CONFIG';
+
+/**
+ * opencode's own "use this file" override. Treated as **positive evidence that
+ * the operator owns the configuration**, never as a write target: measured on
+ * 1.18.21, a worktree-root `opencode.json` outranks `$OPENCODE_CONFIG` on a key
+ * collision, so generating one is the one thing most likely to defeat it.
+ */
+export const OPENCODE_CONFIG_ENV = 'OPENCODE_CONFIG';
+
+/** Where generation may put the file (Issue #1908). */
+export type OpencodeConfigMode = 'off' | 'worktree' | 'global';
+
+/**
+ * Config file names opencode reads out of a project directory, in the order it
+ * merges them (measured with `opencode debug config`, 1.18.21). `.opencode/` is
+ * included because a config placed there loads exactly like a root-level one.
+ */
+const WORKTREE_CONFIG_RELATIVE_PATHS = [
+  'opencode.json',
+  'opencode.jsonc',
+  path.join('.opencode', 'opencode.json'),
+  path.join('.opencode', 'opencode.jsonc'),
+] as const;
+
+/** Config file names opencode reads out of its global config directory. */
+const GLOBAL_CONFIG_FILE_NAMES = ['opencode.json', 'opencode.jsonc'] as const;
+
+/**
+ * The environment as these resolvers read it.
+ *
+ * Deliberately looser than `NodeJS.ProcessEnv`, which this repository augments
+ * with a required `NODE_ENV`: the resolvers touch three variables and a caller
+ * should be able to hand them exactly those three.
+ */
+type EnvLike = Readonly<Record<string, string | undefined>>;
+
+/** What {@link ensureOpencodeConfig} decided, so callers and tests can see it. */
+export interface OpencodeConfigOutcome {
+  /** Whether a file was created by this call */
+  written: boolean;
+  /** The file that was written, or null */
+  configPath: string | null;
+  /** Why it came out that way */
+  reason:
+    | 'disabled'
+    | 'existing-config'
+    | 'no-providers'
+    | 'write-failed'
+    | 'written';
+}
 
 // =============================================================================
 // Types
@@ -331,39 +428,91 @@ export async function fetchLmStudioModels(): Promise<ProviderModels> {
 // =============================================================================
 
 /**
- * Ensure opencode.json exists in the worktree directory.
- * If the file already exists, it is NOT overwritten (respects user configuration).
- * If both Ollama and LM Studio are not running, the function returns without error
- * and does not generate opencode.json.
+ * opencode's global config directory — `$XDG_CONFIG_HOME/opencode`, falling
+ * back to `~/.config/opencode` (confirmed against `opencode debug paths` under a
+ * disposable `HOME`).
  *
- * Provider configuration is built dynamically: only providers with models are included.
- * If a 3rd provider is added, consider refactoring to a data-driven design
- * (providerDefinitions array + loop) instead of inline if-branches. [KISS]
- * HTTP fetch logic (fetchWithTimeout) can be extracted to a shared helper.
+ * `resolveSafeDirectory` because `XDG_CONFIG_HOME` is an operator-supplied
+ * directory that reaches a recursive `mkdir` below, which is the exact shape
+ * Issue #1774 guards.
  *
- * @param worktreePath - Worktree directory path (from DB)
  * @internal
  */
-export async function ensureOpencodeConfig(worktreePath: string): Promise<void> {
-  // Validate path [D4-004]
-  const validatedPath = validateWorktreePath(worktreePath);
+export function opencodeGlobalConfigDir(env: EnvLike = process.env): string {
+  const home = path.join(os.homedir(), '.config');
+  return path.join(resolveSafeDirectory(env.XDG_CONFIG_HOME, home, 'XDG_CONFIG_HOME'), 'opencode');
+}
 
-  const configPath = path.join(validatedPath, CONFIG_FILE_NAME);
+/**
+ * Read {@link OPENCODE_LOCAL_PROVIDER_CONFIG_ENV}.
+ *
+ * Unknown values resolve to `off` rather than to the old behaviour: a typo in an
+ * opt-in must not opt the operator in.
+ *
+ * @internal
+ */
+export function resolveOpencodeConfigMode(
+  env: EnvLike = process.env
+): OpencodeConfigMode {
+  const raw = (env[OPENCODE_LOCAL_PROVIDER_CONFIG_ENV] ?? '').trim().toLowerCase();
+  if (raw === 'worktree' || raw === 'project') return 'worktree';
+  if (raw === 'global' || raw === 'user') return 'global';
+  if (raw !== '' && raw !== 'off' && raw !== '0' && raw !== 'false' && raw !== 'none') {
+    logger.warn('opencode-config-mode-unrecognised', {
+      variable: OPENCODE_LOCAL_PROVIDER_CONFIG_ENV,
+      value: raw,
+    });
+  }
+  return 'off';
+}
 
-  // Skip if config already exists (respect user configuration)
-  if (fs.existsSync(configPath)) {
-    return;
+/**
+ * The configuration the operator already owns, if any.
+ *
+ * Returns the first thing found so the caller can log *what* made it stand down
+ * — `'env:OPENCODE_CONFIG'` or a path. Order is "most explicit first".
+ *
+ * @param worktreePath - Directory to check for project-level config, or null to
+ *   check only the global layer
+ * @internal
+ */
+export function findOwnedOpencodeConfig(
+  worktreePath: string | null,
+  env: EnvLike = process.env
+): string | null {
+  const explicit = (env[OPENCODE_CONFIG_ENV] ?? '').trim();
+  if (explicit !== '') return `env:${OPENCODE_CONFIG_ENV}`;
+
+  if (worktreePath !== null) {
+    for (const relative of WORKTREE_CONFIG_RELATIVE_PATHS) {
+      const candidate = path.join(worktreePath, relative);
+      if (fs.existsSync(candidate)) return candidate;
+    }
   }
 
-  // Fetch models from both providers in parallel.
-  // Each function catches all exceptions internally and returns {} on failure,
-  // so Promise.all will never reject.
+  const globalDir = opencodeGlobalConfigDir(env);
+  for (const name of GLOBAL_CONFIG_FILE_NAMES) {
+    const candidate = path.join(globalDir, name);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+
+  return null;
+}
+
+/**
+ * Build the `provider` block from whatever is answering on localhost.
+ *
+ * Both fetches catch everything internally and answer `{}`, so `Promise.all`
+ * never rejects. Only providers with at least one model are included.
+ *
+ * @internal
+ */
+async function buildLocalProviderBlock(): Promise<Record<string, unknown>> {
   const [ollamaModels, lmStudioModels] = await Promise.all([
     fetchOllamaModels(),
     fetchLmStudioModels(),
   ]);
 
-  // Dynamic provider configuration: only include providers with models
   const provider: Record<string, unknown> = {};
   if (Object.keys(ollamaModels).length > 0) {
     provider.ollama = {
@@ -381,10 +530,63 @@ export async function ensureOpencodeConfig(worktreePath: string): Promise<void> 
       models: lmStudioModels,
     };
   }
+  return provider;
+}
 
-  // Both providers have 0 models: skip opencode.json generation
+/**
+ * Generate a local-provider `opencode.json`, if and only if the operator asked
+ * for one (Issue #1908).
+ *
+ * ## Decision order
+ *
+ * 1. {@link resolveOpencodeConfigMode} is `off` (the default): return
+ *    immediately. Nothing is read, nothing is fetched, nothing is written — the
+ *    two localhost probes that used to run on every launch are skipped too.
+ * 2. {@link findOwnedOpencodeConfig} finds configuration the operator owns:
+ *    stand down. In `worktree` mode that includes the global layer, because a
+ *    file in the worktree root outranks both `$OPENCODE_CONFIG` and the global
+ *    config on a key collision (measured, 1.18.21) — writing one would quietly
+ *    override the very thing that proves they configured opencode themselves.
+ *    In `global` mode only the global layer is consulted; one repository's
+ *    config says nothing about the machine.
+ * 3. Neither Ollama nor LM Studio has a model: nothing worth writing.
+ * 4. Write with `flag: 'wx'`, so a racing writer wins and is left alone.
+ *
+ * Write failures stay non-fatal — a session must start whether or not this
+ * succeeded.
+ *
+ * **Pre-existing files are never touched or removed.** A file an older
+ * CommandMate wrote still loads, so upgrading does not take anyone's provider
+ * list away; it only stops new ones appearing.
+ *
+ * @param worktreePath - Worktree directory path (from DB)
+ * @returns What was decided, for logging and tests
+ * @internal
+ */
+export async function ensureOpencodeConfig(
+  worktreePath: string
+): Promise<OpencodeConfigOutcome> {
+  const mode = resolveOpencodeConfigMode();
+  if (mode === 'off') {
+    return { written: false, configPath: null, reason: 'disabled' };
+  }
+
+  // Validate path [D4-004]. Only on the worktree path, which is the only mode
+  // that touches the caller-supplied directory.
+  const validatedPath = mode === 'worktree' ? validateWorktreePath(worktreePath) : null;
+
+  const owned = findOwnedOpencodeConfig(validatedPath);
+  if (owned !== null) {
+    logger.info('opencode-config-generation-skipped', { mode, owned });
+    return { written: false, configPath: null, reason: 'existing-config' };
+  }
+
+  const targetDir = validatedPath ?? opencodeGlobalConfigDir();
+  const configPath = path.join(targetDir, CONFIG_FILE_NAME);
+
+  const provider = await buildLocalProviderBlock();
   if (Object.keys(provider).length === 0) {
-    return;
+    return { written: false, configPath: null, reason: 'no-providers' };
   }
 
   // [D4-005] Generate config using JSON.stringify (not template literals).
@@ -396,15 +598,22 @@ export async function ensureOpencodeConfig(worktreePath: string): Promise<void> 
   };
 
   try {
+    if (mode === 'global') {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), {
       encoding: 'utf-8',
       flag: 'wx',
     });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      return;
+      return { written: false, configPath: null, reason: 'existing-config' };
     }
     // Non-fatal: write failure should not prevent session start
     logger.warn('failed-to-write-opencodejson:error-insta');
+    return { written: false, configPath: null, reason: 'write-failed' };
   }
+
+  logger.info('opencode-config-generated', { mode, configPath });
+  return { written: true, configPath, reason: 'written' };
 }

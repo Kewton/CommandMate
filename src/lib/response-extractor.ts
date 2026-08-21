@@ -8,29 +8,51 @@
 
 import type { CLIToolType } from './cli-tools/types';
 import {
-  OPENCODE_RESPONSE_COMPLETE,
+  OPENCODE_TURN_COMPLETE_PATTERN,
   OPENCODE_PROCESSING_INDICATOR,
+  OPENCODE_PERMISSION_PATTERN,
 } from './detection/cli-patterns';
 
 /**
  * Check if OpenCode has completed its response.
- * Detects the Build summary line pattern (e.g., "square Build . model . 2.5s").
+ * Detects the finished-turn marker (e.g., "square Build . model . 2.5s").
  * [D2-002] Independent completion detection for OpenCode.
  *
  * Unlike Claude (prompt + separator) or Codex/Gemini (prompt + not thinking),
  * OpenCode signals completion via the Build summary line, which includes
  * the model name and generation timing.
  *
- * @param output - Cleaned tmux output to check (ANSI-stripped)
+ * Issue #1893 tightened both halves of this, because a `true` here is what
+ * makes `response-checker` persist the frame as the agent's answer and stop
+ * polling — the failure mode is a permission dialog saved as if it were a
+ * reply, with the turn it belongs to still unanswered:
+ *
+ *  1. the marker must carry its DURATION ({@link OPENCODE_TURN_COMPLETE_PATTERN}).
+ *     The duration-less `▣ Build · <model>` row opencode draws for a step that
+ *     is still open used to satisfy the old, looser pattern.
+ *  2. a permission dialog on screen is never a completion, whatever marker sits
+ *     above it. `opencode-live-1893/permission-after-complete.txt` is a live
+ *     frame with the box open and a genuine `· 2.3s` marker from the PREVIOUS
+ *     turn still in the transcript, so (1) alone does not cover it.
+ *
+ * @param output - Cleaned tmux output to check (ANSI-stripped). Box drawing must
+ *   still be present: `OPENCODE_PERMISSION_PATTERN` anchors on the dialog box's
+ *   own gutter. `response-checker` passes `stripAnsi(lines.join('\n'))`, which
+ *   is exactly that.
  * @returns True if OpenCode response is complete
  *
  * @internal Exported for unit testing (response-poller-opencode.test.ts)
  */
 export function isOpenCodeComplete(output: string): boolean {
-  // Must have a Build completion marker AND must NOT be actively processing.
+  // Must have a finished-turn marker, must NOT be actively processing, and must
+  // NOT be blocked on a permission dialog.
   // The "esc interrupt" indicator appears in the TUI footer during model processing.
   // Without this check, old Build markers from previous Q&As cause false completions.
-  return OPENCODE_RESPONSE_COMPLETE.test(output) && !OPENCODE_PROCESSING_INDICATOR.test(output);
+  return (
+    OPENCODE_TURN_COMPLETE_PATTERN.test(output) &&
+    !OPENCODE_PROCESSING_INDICATOR.test(output) &&
+    !OPENCODE_PERMISSION_PATTERN.test(output)
+  );
 }
 
 /**
