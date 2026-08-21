@@ -21,7 +21,7 @@
 
 import { useCallback, useState } from 'react';
 import type { CLIToolType } from '@/lib/cli-tools/types';
-import type { NavigationKey } from '@/lib/tmux/tmux';
+import type { NavigationKey } from '@/types/terminal-keys';
 import { useSpecialKeys } from '@/hooks/useSpecialKeys';
 import { KEY_PRESS_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
 
