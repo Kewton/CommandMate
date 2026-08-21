@@ -22,6 +22,9 @@ version: 1
 gates:
   # 静的ガード（各 0.1m）。失敗を秒で返せるよう、重いゲートより前に置く。
   # ランナーは失敗しても後続ゲートを止めないので、順序は報告順にしか効かない。
+  # [Issue #1917] この 3 本に `mutex` を付けてはいけない。0.1s のガードを他 worktree の
+  # 500s の unit の後ろに並ばせると、秒で失敗を返すという #1882 の設計意図が消える。
+  # 不変条件は tests/unit/guards/verify-heavy-gate-mutex.test.ts が固定している。
   - id: token-discipline
     command: "node scripts/check-token-discipline.mjs"
     timeoutSec: 120
@@ -31,6 +34,13 @@ gates:
   - id: claudemd-size
     command: "node scripts/check-claudemd-size.mjs"
     timeoutSec: 120
+  # [Issue #1917] lint / typecheck に `mutex` は付けない。2 worktree 同時実行 6 ラン中
+  # 6 回とも PASS で、キャッシュを揃えた A/B でも測れるほどの遅延が出ない
+  # （単独 lint 5.3s / typecheck 2.5s ⇔ 同時 5.2s / 2.4s）。すなわち
+  # 負荷起因の赤を出した実績が無い。一方 `mutex` を付けると、ロックが空かないまま
+  # timeoutSec に達したゲートは SKIP reason=mutex-wait ＝ RESULT error ＝ exit 99
+  # （裁定不能、9.4）になりうる。実在しない偽陽性を消すために、500s の unit の後ろに
+  # 並んで裁定不能になる経路を新設することになるので割に合わない。
   - id: lint
     command: "npm run lint"
     timeoutSec: 900
@@ -38,8 +48,27 @@ gates:
     command: "npx tsc --noEmit"
     timeoutSec: 900
   - id: unit
+    # [Issue #1917] `mutex` は「マシン上でこのゲートを同時に 1 本だけ」にする宣言
+    # （docs/design/verification-config.md 9.2）。並列ワーカーの `wait --verify` が
+    # フル test:unit を同時に走らせると、diff と無関係のテストが負荷で落ちて exit 20 に
+    # なる（実測: 単独 486-553s は PASS、同時実行の 640s だけ monitor-exit-codes.test.ts が
+    # exit 130 を取り逃して FAIL。単独再実行は 16/16 PASS）。裁定が負荷で反転するなら
+    # exit code で完了を判定する `/orchestrate` の設計が成り立たない。
+    #
+    # 名前が `unit` でも `test-unit` でもないのは 9.2 の規約による。mutex 名は
+    # **ゲート ID ではなく資源の名前**であり、ここで奪い合っている資源は固定ポートでも
+    # DB でもなく「このマシンで重いスイートを走らせる枠」＝ CPU と実時間である。
+    # 資源名にしておくと、別リポジトリの同じくらい重いゲートが同じ `cpu.heavy` を
+    # 宣言するだけで同じ枠を共有できる（9.2 が `port.60303` を例に挙げているのと同じ形）。
+    # ゲート ID を名前にすると、同じ CPU を食う別リポジトリの `test` と排他できない。
+    # `cpu` 単独にしなかったのは、5s の lint までこの枠を取りに来ると、失敗を秒で返す
+    # という #1882 の設計意図が消えるため。`heavy` は入場条件そのものを名前にしている。
+    #
+    # 9.1 の env 注入（CM_WORKTREE_INDEX）は効かない。分けられる資源が無いためで、
+    # 9 が「分けられるなら 9.1 を優先」と書いているケースには当たらない。
     command: "npm run test:unit"
     timeoutSec: 3600
+    mutex: cpu.heavy
 # e2e ゲートはここに**無い**。宣言したゲートは既定で毎回走るため（スキーマに「宣言はするが
 # 既定では走らない」フラグは無い）、常設すると `wait --verify` の所要が 1 ワーカーあたり
 # 5 分以上伸び、並列オーケストレーションの裁定時間に直結する（CI 実績 E2E 5m16s〜5m39s）。
