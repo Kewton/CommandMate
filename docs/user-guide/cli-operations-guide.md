@@ -406,8 +406,14 @@ esac
 | `type` | 意味 | 応答方法 |
 |--------|------|----------|
 | `yes_no` / `multiple_choice` | プロンプトを検出・解析できた | `commandmate respond <id> <答え>` |
-| `selection_list` | 矢印キー選択 UI（Codex の pager / `/model`、antigravity の権限メニュー等、Issue #1628）。選択肢としては解析できない | `commandmate respond` ではなく矢印キー相当の特殊キー送信 |
+| `selection_list` | 矢印キー選択 UI（Codex の pager / `/model`、antigravity の権限メニュー、**opencode の permission ダイアログ**（`Allow once / Allow always / Reject`、Issue #1893）等、Issue #1628）。選択肢としては解析できない | `commandmate respond` ではなく矢印キー相当の特殊キー送信 |
 | `unclassified` | **対話中の画面なのに検出層が分類できなかった**（Issue #1708）。`isUnclassifiedActive` が **60 秒連続**で立った場合のみ返る | 生ペインを見る: `commandmate capture <id> --pane` |
+
+> **`selection_list` に `commandmate respond <id> <番号>` を送らないこと（Issue #1893）。**
+> opencode の permission ダイアログは番号を持たないボタン列で、実測（1.18.21）では数字キーは無反応です。
+> 数値回答はテキストとして送られたあと Enter が続くため、**ハイライトされているボタン（既定は `Allow once`）が
+> 確定します** —— `respond <id> 3`（Reject のつもり）が承認に化けます。矢印キー相当の特殊キー（←/→ ＋ Enter）
+> か、Web UI の NavigationButtons を使ってください。
 
 `unclassified` は「検出漏れそのものを停止事由にする」ための安全網です。検出層をすり抜けると
 auto-yes も契約の `autoYes` ポリシーも exit 10 も一切発火しないため、以前は `--timeout` を
