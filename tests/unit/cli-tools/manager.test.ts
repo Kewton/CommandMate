@@ -4,12 +4,18 @@
  * Issue #1752: このファイルは以前 child_process をモックしておらず、`getToolInfo` /
  * `getAllToolsInfo` / `getInstalledTools` を呼ぶたびに 7 ツール分の実プロセスが起動していた。
  * `BaseCLITool.isInstalled()` は `which <cmd>`（timeout 5000ms）、`CopilotTool.isInstalled()` は
- * `gh --version` → `gh copilot --help` の 2 段直列（最悪 5000 + 5000 = 10,000ms）で、
+ * かつて `gh --version` → `gh copilot --help` の 2 段直列（最悪 5000 + 5000 = 10,000ms）で、
  * vitest 側は `testTimeout` 未設定＝既定 5000ms。つまり内側の予算が外側を構造的に超えており、
  * 負荷の高い CI ランナーではアサーション不一致ではなく **タイムアウト** で落ちていた。
  * exec / execFile をモックして実プロセスを排除し、あわせて `installed` を true / false の
  * 両方で固定する（以前は `typeof info.installed === 'boolean'` しか見ておらず、
  * どちらに転んでも緑になる assertion だった）。
+ *
+ * Issue #1907: copilot の判定は `gh copilot --help`（copilot 未インストールでも exit 0）を
+ * やめ、`resolveCopilotExecutable()` の肯定的証拠 1 本になった。ここではその resolver を
+ * モックする — 実体は PATH を実際に走査するため、モックしないとランナーに copilot が
+ * 入っているかどうかで結果が変わる。解決規則そのものは
+ * `copilot-install-detection-1907.test.ts` が実 fs で固定する。
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -26,12 +32,19 @@ vi.mock('child_process', async () => {
   };
 });
 
+// Issue #1907: copilot の実在判定。実体は PATH 走査 + `--version` の子プロセス。
+vi.mock('@/lib/cli-tools/copilot-executable', () => ({
+  resolveCopilotExecutable: vi.fn(),
+}));
+
 // `stopPollers()` の委譲先。このファイルは stopPollers を検証しない
 // （それは manager-stop-pollers.test.ts の担当）のに、response-poller の依存グラフだけで
 // import に 500ms 以上かかるため切り離す。実行時間の短縮が目的で、被検証範囲は変わらない。
 vi.mock('@/lib/polling/response-poller', () => ({ stopPolling: vi.fn() }));
 
 import { CLIToolManager } from '@/lib/cli-tools/manager';
+import { resolveCopilotExecutable } from '@/lib/cli-tools/copilot-executable';
+import type { CopilotExecutable } from '@/lib/cli-tools/copilot-executable';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 type ExecCallback = (error: Error | null, stdout: string, stderr: string) => void;
@@ -49,10 +62,10 @@ const TOOL_ORDER: CLIToolType[] = [
 
 /** 偽の `which` が見つけるコマンド集合 */
 let installedCommands: Set<string>;
-/** `gh --version`（stage 1）の成否 */
-let ghVersionOk: boolean;
-/** `gh copilot --help`（stage 2）の成否 */
-let ghCopilotOk: boolean;
+/** 偽の resolver が返す copilot（null = どこにも無い） */
+let copilotResolved: CopilotExecutable | null;
+/** resolver が呼ばれたか（並列性の観測に使う） */
+let copilotProbeIssued: boolean;
 /** true の間コールバックを発火せず parked に積む（並列性を観測するため） */
 let holdCallbacks: boolean;
 
@@ -96,8 +109,8 @@ describe('CLIToolManager', () => {
     manager = CLIToolManager.getInstance();
 
     installedCommands = new Set<string>();
-    ghVersionOk = false;
-    ghCopilotOk = false;
+    copilotResolved = null;
+    copilotProbeIssued = false;
     holdCallbacks = false;
     execCommands = [];
     execFileCalls = [];
@@ -114,6 +127,8 @@ describe('CLIToolManager', () => {
       return {} as childProcess.ChildProcess;
     }) as unknown as typeof childProcess.exec);
 
+    // 実プロセス起動の残る入口。Issue #1907 以降 copilot はここを通らないが、
+    // 実バイナリに触れる経路が生えたら失敗するようフェイルクローズで残す。
     vi.mocked(childProcess.execFile).mockImplementation(((
       file: string,
       args: string[],
@@ -121,10 +136,21 @@ describe('CLIToolManager', () => {
       callback?: unknown
     ) => {
       execFileCalls.push([file, ...args]);
-      const ok = args[0] === '--version' ? ghVersionOk : ghCopilotOk;
-      respond(ok, callback as ExecCallback | undefined);
+      respond(false, callback as ExecCallback | undefined);
       return {} as childProcess.ChildProcess;
     }) as unknown as typeof childProcess.execFile);
+
+    // resolver も他の probe と同じ parking 機構に載せる。載せないと
+    // 「7 本すべてが in-flight」の観測から copilot だけ抜け落ちる。
+    vi.mocked(resolveCopilotExecutable).mockImplementation(
+      () =>
+        new Promise<CopilotExecutable | null>((resolve) => {
+          copilotProbeIssued = true;
+          const fire = (): void => resolve(copilotResolved);
+          if (holdCallbacks) parked.push(fire);
+          else queueMicrotask(fire);
+        })
+    );
   });
 
   describe('Singleton pattern', () => {
@@ -175,7 +201,8 @@ describe('CLIToolManager', () => {
       const tool = manager.getTool('copilot');
       expect(tool.id).toBe('copilot');
       expect(tool.name).toBe('Copilot');
-      expect(tool.command).toBe('gh');
+      // Issue #1907: 単体実行ファイル。`gh` ではない
+      expect(tool.command).toBe('copilot');
     });
 
     it('should return AntigravityTool for antigravity (Issue #988)', () => {
@@ -257,53 +284,41 @@ describe('CLIToolManager', () => {
   });
 
   /**
-   * Issue #545 の 2 段チェックを manager 越しに固定する。
-   * stage 2 を落とすと「gh さえ入っていれば copilot 扱い」に退行するため、
-   * stage 1 単独成功で false になること／stage 1 失敗時に stage 2 を呼ばないことを個別に押さえる。
+   * Issue #1907: copilot の判定を manager 越しに固定する。
+   * 旧実装は `gh --version` → `gh copilot --help` の 2 段で、後段は copilot 不在でも
+   * exit 0 を返す（gh 2.86.0 実測）ため「gh さえ入っていれば copilot 扱い」だった。
+   * いまは resolver の肯定的証拠 1 本に落ちている。
    */
-  describe('getToolInfo (copilot の 2 段チェック)', () => {
-    it('should report installed = true only when both gh and the copilot extension answer', async () => {
-      ghVersionOk = true;
-      ghCopilotOk = true;
+  describe('getToolInfo (copilot の実在判定)', () => {
+    it('should report installed = true only when a copilot executable answered', async () => {
+      copilotResolved = { path: '/usr/local/bin/copilot', version: '1.0.80', source: 'path' };
 
       const info = await manager.getToolInfo('copilot');
 
       expect(info.installed).toBe(true);
-      expect(execFileCalls).toEqual([
-        ['gh', '--version'],
-        ['gh', 'copilot', '--help'],
-      ]);
     });
 
-    it('should report installed = false when gh answers but the copilot extension does not', async () => {
-      ghVersionOk = true;
-      ghCopilotOk = false;
+    it('should report installed = false when nothing answered', async () => {
+      copilotResolved = null;
 
       const info = await manager.getToolInfo('copilot');
 
       expect(info.installed).toBe(false);
-      expect(execFileCalls).toEqual([
-        ['gh', '--version'],
-        ['gh', 'copilot', '--help'],
-      ]);
     });
 
-    it('should skip the copilot extension check entirely when gh itself is missing', async () => {
-      ghVersionOk = false;
-      ghCopilotOk = true; // stage 2 に到達したら true になってしまう設定
+    it('should never ask gh whether copilot exists', async () => {
+      copilotResolved = null;
 
-      const info = await manager.getToolInfo('copilot');
+      await manager.getToolInfo('copilot');
 
-      expect(info.installed).toBe(false);
-      expect(execFileCalls).toEqual([['gh', '--version']]);
+      expect(execFileCalls).toEqual([]);
     });
   });
 
   describe('getAllToolsInfo', () => {
     it('should return per-tool installation status for all seven tools', async () => {
       installedCommands = new Set(['claude', 'gemini', 'agy']);
-      ghVersionOk = true;
-      ghCopilotOk = true;
+      copilotResolved = { path: '/usr/local/bin/copilot', version: '1.0.80', source: 'path' };
 
       const allInfo = await manager.getAllToolsInfo();
 
@@ -313,7 +328,7 @@ describe('CLIToolManager', () => {
         { id: 'gemini', name: 'Gemini CLI', command: 'gemini', installed: true },
         { id: 'vibe-local', name: 'Vibe Local', command: 'vibe-local', installed: false },
         { id: 'opencode', name: 'OpenCode', command: 'opencode', installed: false },
-        { id: 'copilot', name: 'Copilot', command: 'gh', installed: true },
+        { id: 'copilot', name: 'Copilot', command: 'copilot', installed: true },
         { id: 'antigravity', name: 'Antigravity CLI', command: 'agy', installed: true },
       ]);
     });
@@ -342,8 +357,7 @@ describe('CLIToolManager', () => {
         'opencode',
         'agy',
       ]);
-      ghVersionOk = true;
-      ghCopilotOk = true;
+      copilotResolved = { path: '/usr/local/bin/copilot', version: '1.0.80', source: 'path' };
       holdCallbacks = true;
 
       const pending = manager.getAllToolsInfo();
@@ -358,7 +372,7 @@ describe('CLIToolManager', () => {
         'which opencode',
         'which agy',
       ]);
-      expect(execFileCalls).toEqual([['gh', '--version']]);
+      expect(copilotProbeIssued).toBe(true);
 
       await releaseParked();
 
@@ -378,8 +392,7 @@ describe('CLIToolManager', () => {
   describe('getInstalledTools', () => {
     it('should return only the tools whose probe succeeded', async () => {
       installedCommands = new Set(['claude', 'gemini', 'agy']);
-      ghVersionOk = true;
-      ghCopilotOk = false; // copilot は gh があっても拡張が無いので除外される
+      copilotResolved = null; // gh があっても copilot 本体が無ければ除外される
 
       const installed = await manager.getInstalledTools();
 

@@ -47,6 +47,22 @@ export const DEPENDENCIES: DependencyCheck[] = [
     versionArg: '--version',
     required: false,
   },
+  // Issue #1907: agent CLIs CommandMate can drive but does not require. Copilot
+  // is checked as the standalone `copilot` executable, NOT as `gh copilot` —
+  // that is a preview command built into gh which exits 0 (and offers to
+  // download the CLI) on a machine that has no copilot at all.
+  {
+    name: 'GitHub Copilot CLI',
+    command: 'copilot',
+    versionArg: '--version',
+    required: false,
+  },
+  {
+    name: 'OpenCode CLI',
+    command: 'opencode',
+    versionArg: '--version',
+    required: false,
+  },
 ];
 
 /**

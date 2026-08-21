@@ -171,13 +171,22 @@ describe('getStructuredSessionState (Issue #1723)', () => {
 });
 
 describe('mergeStructuredStatus (Issue #1723)', () => {
-  const scraper = (over: Partial<ScraperVerdict> = {}): ScraperVerdict => ({
-    status: 'ready',
-    reason: 'no_recent_output',
-    thinking: false,
-    isUnclassifiedActive: false,
-    ...over,
-  });
+  // Issue #1924: `evidence` and `isUnclassifiedActive` are two readings of one
+  // fact, so the factory derives the first from the second unless a case states
+  // it. A fixture that set only one of them would hand `mergeStructuredStatus`
+  // an input the producer cannot build, and the pins below would be pinning a
+  // shape that never reaches the merge.
+  const scraper = (over: Partial<ScraperVerdict> = {}): ScraperVerdict => {
+    const base: ScraperVerdict = {
+      status: 'ready',
+      reason: 'no_recent_output',
+      thinking: false,
+      evidence: 'positive',
+      isUnclassifiedActive: false,
+      ...over,
+    };
+    return { ...base, evidence: over.evidence ?? (base.isUnclassifiedActive ? 'none' : 'positive') };
+  };
 
   const structured = (over: Partial<StructuredSessionState> = {}): StructuredSessionState => ({
     status: 'ready',

@@ -43,6 +43,7 @@ import {
   recordAgentStopEvent,
 } from '@/lib/session/agent-event-state';
 import type { AgentEventType } from '@/lib/hooks/agent-event-types';
+import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 
 const db = {} as Database.Database;
 
@@ -213,6 +214,20 @@ describe('duplicate suppression (Issue #1722)', () => {
 });
 
 describe('structuredEvents exposure (Issue #1722)', () => {
+  /**
+   * The source block Issue #1924 publishes alongside the event fields.
+   *
+   * Read from the registry rather than transcribed: `capabilities.test.ts` is
+   * what pins the values, and a second transcription here would be a second
+   * place for the 6x5 table to be wrong. What these two cases assert is the
+   * shape — that `structuredEvents` carries the block, on a session that has
+   * reported nothing as much as on one that has.
+   */
+  const claudeSource = {
+    cliToolId: 'claude',
+    capabilities: getAgentEventSource('claude').capabilities,
+  };
+
   it('is all nulls for a session whose agent has reported nothing', async () => {
     const payload = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
 
@@ -222,6 +237,7 @@ describe('structuredEvents exposure (Issue #1722)', () => {
       lastEventDetail: null,
       promptWaitingSince: null,
       promptWaitingSource: null,
+      source: claudeSource,
     });
   });
 
@@ -248,6 +264,7 @@ describe('structuredEvents exposure (Issue #1722)', () => {
       lastEventDetail: 'some_future_type',
       promptWaitingSince: null,
       promptWaitingSource: null,
+      source: claudeSource,
     });
     expect({ ...after, structuredEvents: null }).toEqual({ ...before, structuredEvents: null });
   });

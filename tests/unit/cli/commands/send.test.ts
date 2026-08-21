@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mockFetchResponse, mockFetchError, restoreFetch } from '../../../helpers/mock-api';
+import { mockFetchResponse, mockFetchSequence, mockFetchError, restoreFetch } from '../../../helpers/mock-api';
 
 const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -213,25 +213,48 @@ describe('send command action', () => {
 
   // Issue #1000: --register registers an ad-hoc --instance session into the roster
   describe('--register', () => {
-    // Issue #1629 prepends a roster read that resolves --instance to its CLI
-    // tool, so every --instance send now opens with GET /api/worktrees/:id.
+    /**
+     * Request order for `--instance … --register` since Issue #1925:
+     * the capability probe (answered by the helper, not by the sequence),
+     * GET /resolve-target, POST /send, GET /api/worktrees/:id for the roster,
+     * then PATCH when the instance is new. #1629 opened with the roster read
+     * itself; the resolution moved to the server, the roster read that follows
+     * the send is still the roster read.
+     */
+    const RESOLVED_CODEX = {
+      data: { cliToolId: 'codex', instanceId: 'codex', resolvedBy: 'primary', conflict: null },
+    };
+    const SENT = { data: { id: 1 }, status: 201 };
+    const EXISTING_ROSTER = {
+      data: { id: 'wt1', agentInstances: [{ id: 'codex', cliTool: 'codex', alias: 'Codex', order: 0 }] },
+    };
+
+    function urlsOf(): string[] {
+      return vi.mocked(global.fetch).mock.calls.map((c) => String(c[0]));
+    }
+
+    function callTo(fragment: string): [string, RequestInit] {
+      const call = vi.mocked(global.fetch).mock.calls.find((c) => String(c[0]).includes(fragment));
+      expect(call, fragment).toBeDefined();
+      return call as unknown as [string, RequestInit];
+    }
+
     it('registers a primary-instance id (no --agent required) after sending', async () => {
-      const mockFn = vi.fn()
-        .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({ id: 'wt1', agentInstances: [] }), text: () => Promise.resolve('{"id":"wt1","agentInstances":[]}') })
-        .mockResolvedValueOnce({ ok: true, status: 201, json: () => Promise.resolve({ id: 1 }), text: () => Promise.resolve('{"id":1}') })
-        .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({ id: 'wt1', agentInstances: [] }), text: () => Promise.resolve('{"id":"wt1","agentInstances":[]}') })
-        .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({}), text: () => Promise.resolve('{}') });
-      global.fetch = mockFn;
+      mockFetchSequence([
+        RESOLVED_CODEX,
+        SENT,
+        { data: { id: 'wt1', agentInstances: [] } },
+        { data: {} },
+      ]);
 
       const { createSendCommand } = await import('../../../../src/cli/commands/send');
       const cmd = createSendCommand();
       await cmd.parseAsync(['node', 'send', 'wt1', 'hello', '--instance', 'codex', '--register']);
 
-      expect(mockFn).toHaveBeenCalledTimes(4);
-      expect(mockFn.mock.calls[0][0]).toContain('/api/worktrees/wt1');
-      expect(mockFn.mock.calls[1][0]).toContain('/send');
-      expect(mockFn.mock.calls[2][0]).toContain('/api/worktrees/wt1');
-      expect(mockFn.mock.calls[3][1]).toEqual(
+      expect(urlsOf().filter((u) => !u.includes('/api/capabilities'))).toHaveLength(4);
+      expect(callTo('/resolve-target')[0]).toContain('instance=codex');
+      const patch = vi.mocked(global.fetch).mock.calls.find((c) => (c[1] as RequestInit)?.method === 'PATCH');
+      expect(patch?.[1]).toEqual(
         expect.objectContaining({
           method: 'PATCH',
           body: JSON.stringify({ agentInstances: [{ id: 'codex', cliTool: 'codex', alias: 'Codex', order: 0 }] }),
@@ -241,19 +264,19 @@ describe('send command action', () => {
     });
 
     it('registers a non-primary instance when --agent is provided', async () => {
-      const mockFn = vi.fn()
-        .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({ id: 'wt1', agentInstances: [{ id: 'codex', cliTool: 'codex', alias: 'Codex', order: 0 }] }), text: () => Promise.resolve('{}') })
-        .mockResolvedValueOnce({ ok: true, status: 201, json: () => Promise.resolve({ id: 1 }), text: () => Promise.resolve('{"id":1}') })
-        .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({ id: 'wt1', agentInstances: [{ id: 'codex', cliTool: 'codex', alias: 'Codex', order: 0 }] }), text: () => Promise.resolve('{}') })
-        .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({}), text: () => Promise.resolve('{}') });
-      global.fetch = mockFn;
+      mockFetchSequence([
+        { data: { cliToolId: 'codex', instanceId: 'codex-2', resolvedBy: 'explicit', conflict: null } },
+        SENT,
+        EXISTING_ROSTER,
+        { data: {} },
+      ]);
 
       const { createSendCommand } = await import('../../../../src/cli/commands/send');
       const cmd = createSendCommand();
       await cmd.parseAsync(['node', 'send', 'wt1', 'hello', '--agent', 'codex', '--instance', 'codex-2', '--register']);
 
-      expect(mockFn).toHaveBeenCalledTimes(4);
-      expect(mockFn.mock.calls[3][1]).toEqual(
+      const patch = vi.mocked(global.fetch).mock.calls.find((c) => (c[1] as RequestInit)?.method === 'PATCH');
+      expect(patch?.[1]).toEqual(
         expect.objectContaining({
           body: JSON.stringify({
             agentInstances: [
@@ -266,21 +289,20 @@ describe('send command action', () => {
     });
 
     it('does not PATCH when the instance is already registered', async () => {
-      const mockFn = vi.fn()
-        .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({ id: 'wt1', agentInstances: [{ id: 'codex', cliTool: 'codex', alias: 'Codex', order: 0 }] }), text: () => Promise.resolve('{}') })
-        .mockResolvedValueOnce({ ok: true, status: 201, json: () => Promise.resolve({ id: 1 }), text: () => Promise.resolve('{"id":1}') })
-        .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({ id: 'wt1', agentInstances: [{ id: 'codex', cliTool: 'codex', alias: 'Codex', order: 0 }] }), text: () => Promise.resolve('{}') });
-      global.fetch = mockFn;
+      mockFetchSequence([RESOLVED_CODEX, SENT, EXISTING_ROSTER]);
 
       const { createSendCommand } = await import('../../../../src/cli/commands/send');
       const cmd = createSendCommand();
       await cmd.parseAsync(['node', 'send', 'wt1', 'hello', '--instance', 'codex', '--register']);
 
-      // resolution GET + send + register GET; no PATCH, the instance is known.
-      expect(mockFn).toHaveBeenCalledTimes(3);
+      // resolve + send + register GET; no PATCH, the instance is known.
+      expect(urlsOf().filter((u) => !u.includes('/api/capabilities'))).toHaveLength(3);
+      expect(
+        vi.mocked(global.fetch).mock.calls.some((c) => (c[1] as RequestInit)?.method === 'PATCH')
+      ).toBe(false);
       // Issue #1629: the roster says `codex` is a codex instance, so the send
       // names codex explicitly instead of leaving it to the worktree default.
-      expect(JSON.parse(mockFn.mock.calls[1][1].body)).toEqual({
+      expect(JSON.parse(String(callTo('/send')[1].body))).toEqual({
         content: 'hello',
         cliToolId: 'codex',
         instanceId: 'codex',

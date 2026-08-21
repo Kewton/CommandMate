@@ -340,6 +340,7 @@ tmux セッション / Claude プロセスが落ちた場合
   - Claude: `mcbd-claude-feature-foo`
 - 1 worktree に対して 1 セッションを維持する。
 - ※ 旧命名規則 `cw_{worktreeId}` からの移行: Issue #4で実装
+- `cliToolId` / instance の解決は `src/lib/session/resolve-session-target.ts` 1 箇所で行う（Issue #1925 / 設計 §4 D5）。CLI は `GET /api/capabilities` で版を確かめてから `GET /api/worktrees/:id/resolve-target` へ委譲する薄いクライアント。
 
 ### 6.1.5 CLI Tool Abstraction Layer (Issue #4で実装)
 

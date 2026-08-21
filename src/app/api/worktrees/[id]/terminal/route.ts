@@ -9,10 +9,20 @@
  * - Session auto-creation removed (D1-004)
  * - MAX_COMMAND_LENGTH DoS protection (D1-006)
  * - Fixed-string error responses (D1-007, R4F002/R4F006/R4F007)
+ *
+ * Issue #1925: accepts an optional `instanceId` and resolves (tool, instance)
+ * through `resolveSessionTarget`, the shared authority. Before that the route
+ * derived the session name from the tool alone, so every non-primary instance
+ * was unreachable from it (#1906).
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { isCliToolType } from '@/lib/cli-tools/types';
+import { isCliToolType, isValidInstanceId } from '@/lib/cli-tools/types';
+import {
+  resolveSessionTargetStrict,
+  describeSessionTargetConflict,
+  INSTANCE_TOOL_CONFLICT,
+} from '@/lib/session/resolve-session-target';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { getWorktreeById } from '@/lib/db';
 import { getDbInstance } from '@/lib/db/db-instance';
@@ -35,7 +45,7 @@ export async function POST(
   try {
     const { id: requestedWorktreeId } = await params;
     const id = canonicalWorktreeId(requestedWorktreeId);
-    const { cliToolId, command } = await req.json();
+    const { cliToolId, command, instanceId: rawInstanceId } = await req.json();
 
     // Validate cliToolId against known CLI tool types
     if (!cliToolId || typeof cliToolId !== 'string' || !isCliToolType(cliToolId)) {
@@ -59,6 +69,18 @@ export async function POST(
       );
     }
 
+    // Issue #1925: this route took no instance and always addressed the primary
+    // one, so every non-primary session was unreachable from it (#1906). The id
+    // is embedded in the tmux session name, hence the same identifier check the
+    // other instance-aware routes use.
+    if (rawInstanceId !== undefined && (typeof rawInstanceId !== 'string' || !isValidInstanceId(rawInstanceId))) {
+      return NextResponse.json(
+        { error: 'Invalid instanceId parameter' },
+        { status: 400 }
+      );
+    }
+    const instanceId: string | undefined = rawInstanceId;
+
     // Verify worktree exists in DB
     const db = getDbInstance();
     const worktree = getWorktreeById(db, id);
@@ -69,10 +91,31 @@ export async function POST(
       );
     }
 
+    // Issue #1925: the roster, not the caller, declares which agent backs a
+    // named instance (design §4 D5). Sending is a side effect, so a caller that
+    // names a tool the roster contradicts is refused rather than resolved to a
+    // guess — the tool id is half the session name, and typing into the wrong
+    // session is not recoverable by the sender.
+    const resolution = resolveSessionTargetStrict(db, id, {
+      instanceId,
+      requestedCliTool: cliToolId,
+    });
+    if (!resolution.ok) {
+      return NextResponse.json(
+        {
+          error: describeSessionTargetConflict(resolution.conflict),
+          code: INSTANCE_TOOL_CONFLICT,
+          ...resolution.conflict,
+        },
+        { status: 400 }
+      );
+    }
+    const target = resolution.target;
+
     // Derive session name via CLIToolManager (validates via BaseCLITool.getSessionName)
     const manager = CLIToolManager.getInstance();
-    const cliTool = manager.getTool(cliToolId);
-    const sessionName = cliTool.getSessionName(id);
+    const cliTool = manager.getTool(target.cliToolId);
+    const sessionName = cliTool.getSessionName(id, instanceId);
 
     // No auto-creation; return 404 if session does not exist
     const sessionExists = await hasSession(sessionName);
@@ -85,7 +128,7 @@ export async function POST(
 
     // Send command to tmux session (non-blocking for all tools).
     // Note: copilot sendMessage() was reverted due to waitForPrompt blocking issues (#559)
-    if (cliToolId === 'copilot') {
+    if (target.cliToolId === 'copilot') {
       // Copilot CLI auto-enters multi-line mode when text exceeds pane width.
       // In multi-line mode, C-m (bundled with text) adds a newline instead of
       // submitting. Sending Enter as a separate command after a delay works.
@@ -106,7 +149,7 @@ export async function POST(
       await sendMessageWithSubmitVerification({
         sessionName,
         message: command,
-        cliToolId,
+        cliToolId: target.cliToolId,
         verifyAttempts: 2,
         verifyDelayMs: 200,
       });

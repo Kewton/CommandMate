@@ -47,6 +47,7 @@ import {
   broadcastSessionStatus,
   __resetTerminalBroadcastState,
 } from '@/lib/realtime/terminal-broadcast';
+import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 
 const mockBroadcast = vi.mocked(broadcast);
 const mockHasSubscribers = vi.mocked(hasRoomSubscribers);
@@ -59,6 +60,13 @@ const NO_STRUCTURED_EVENTS = {
   // Issue #1725: no dialog reported either.
   promptWaitingSince: null,
   promptWaitingSource: null,
+  // Issue #1924: the source block is present on every payload, reported or not —
+  // it describes the source, not the session. Read from the registry rather than
+  // transcribed, so this fixture cannot claim a capability set no source has.
+  source: {
+    cliToolId: 'claude',
+    capabilities: getAgentEventSource('claude').capabilities,
+  },
 } as const;
 
 /** Nothing has reported a model or an effort either (Issue #1785). */

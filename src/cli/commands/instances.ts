@@ -25,6 +25,7 @@ import {
   MAX_AGENT_ALIAS_LENGTH,
   MIN_AGENT_INSTANCES,
 } from '../utils/agent-instances';
+import { resolveSessionTarget, describeSessionTargetConflict } from '../utils/session-target';
 import type { CurrentOutputResponse } from '../types/api-responses';
 
 type InstanceRow = {
@@ -84,58 +85,63 @@ function formatInstancesTable(rows: InstanceRow[]): string {
 }
 
 /**
- * Resolve which CLI tool backs `instanceId`, from the worktree's roster
- * (Issue #1629). Shared by every command that targets an instance: `send`,
- * `respond`, `capture` and `auto-yes`.
+ * How the caller wants a roster contradiction handled (Issue #1925, DR3-015).
  *
- * `--instance <id>` on its own carries no CLI tool, so the server used to fall
- * back to the worktree default. Since the tool id is part of the tmux session
- * name, `send --instance codex` against a claude-default worktree started
- * Claude in `mcbd-claude-<worktree>-codex`. Resolving here means the resolved
- * tool is sent explicitly to every endpoint the command touches — including
- * `/tasks`, `/current-output` and `/prompt-response`, which have no other way
- * to learn it.
+ * `strict` is for commands with a side effect: refuse rather than pick one of
+ * two contradicting declarations and type into whichever session that names.
+ * `read-only` is for `capture`, which resolves in order to *look* — and which
+ * `.claude/skills/orchestrate-monitor/scripts/monitor.sh` polls in an
+ * unbounded loop, skipping the poll and never advancing its idle streak
+ * whenever capture exits non-zero. A worker whose `--agent` disagrees with the
+ * roster would leave that loop silently spinning forever.
+ */
+export type InstanceConflictMode = 'strict' | 'read-only';
+
+/**
+ * Resolve which CLI tool backs `instanceId`. Shared by every command that
+ * targets an instance: `send`, `respond`, `capture` and `auto-yes`.
  *
- * The roster wins over `--agent`: it is the user-maintained declaration of what
- * a named instance is, so a contradiction is an error rather than a session
- * whose name disagrees with the agent inside it. An instance the roster does
- * not know (the ad-hoc `send --instance <new-id>` flow) keeps `--agent` as
- * given, and an unreadable roster degrades to a warning so an older daemon
- * behaves as it did before.
+ * Issue #1925 turned this into a thin client over the server's resolver
+ * (`GET /api/worktrees/:id/resolve-target`). It used to resolve locally, with
+ * two of the server's four precedence stages — no primary anchor — so the same
+ * `--instance codex` against a roster that never registered `codex` resolved to
+ * codex on the server and to the worktree default here. The tool id is half the
+ * tmux session name, so two answers meant two sessions.
  *
- * @returns the CLI tool to send, or undefined to let the server decide
+ * The roster still wins over `--agent`: it is the user-maintained declaration
+ * of what a named instance is. What changed is that `capture` no longer dies of
+ * the contradiction (see {@link InstanceConflictMode}).
+ *
+ * @param client - API client aimed at the server
+ * @param worktreeId - Worktree ID
+ * @param instanceId - The `--instance` value
+ * @param requestedAgent - The `--agent` value, if the user gave one
+ * @param mode - What a roster contradiction means for this caller
+ * @returns the CLI tool to send, or undefined to let an older server decide
  */
 export async function resolveInstanceCliTool(
   client: ApiClient,
   worktreeId: string,
   instanceId: string,
-  requestedAgent: string | undefined
+  requestedAgent: string | undefined,
+  mode: InstanceConflictMode = 'strict'
 ): Promise<string | undefined> {
-  let registered: AgentInstance | undefined;
-  try {
-    const instances = await fetchAgentInstances(client, worktreeId);
-    registered = instances.find((inst) => inst.id === instanceId);
-  } catch (error) {
-    console.error(
-      `Warning: could not read the agent-instance roster (${getErrorMessage(error)}); using --agent as given.`
-    );
-    return requestedAgent;
+  const target = await resolveSessionTarget(client, worktreeId, {
+    instanceId,
+    requestedCliTool: requestedAgent,
+  });
+
+  if (target.conflict) {
+    const detail = describeSessionTargetConflict(target.conflict);
+    if (mode === 'strict') {
+      console.error(`Error: ${detail}`);
+      process.exit(ExitCode.CONFIG_ERROR);
+      return requestedAgent;
+    }
+    console.error(`Warning: ${detail} Reading ${target.conflict.rosterCliTool}.`);
   }
 
-  if (!registered) {
-    return requestedAgent;
-  }
-
-  if (requestedAgent && requestedAgent !== registered.cliTool) {
-    console.error(
-      `Error: instance '${instanceId}' is registered as ${registered.cliTool}, but --agent ${requestedAgent} was given. `
-      + `Drop --agent, pass --agent ${registered.cliTool}, or re-register the instance.`
-    );
-    process.exit(ExitCode.CONFIG_ERROR);
-    return requestedAgent;
-  }
-
-  return registered.cliTool;
+  return target.cliToolId;
 }
 
 /**
