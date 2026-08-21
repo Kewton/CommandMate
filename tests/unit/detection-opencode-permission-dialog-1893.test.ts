@@ -130,6 +130,22 @@ function withoutButtonGutter(raw: string): string {
 }
 
 /**
+ * Break the button strip's third LABEL and leave the box itself intact.
+ *
+ * The other half of the same non-vacuity, needed since #1911 gave
+ * `isOpenCodeComplete` a structural reading of the frame: {@link
+ * withoutButtonGutter} takes a gutter off the pane's last box, which is also the
+ * boundary `findOpenCodeChromeStart` walks, so that mutation moves the chrome
+ * start onto the button row and the turn region collapses to nothing. The
+ * function then answers `false` for a reason that has nothing to do with the
+ * guard under test. Editing a label defeats `OPENCODE_PERMISSION_PATTERN`
+ * without moving a single box character.
+ */
+function withoutButtonLabels(raw: string): string {
+  return raw.replace(/Reject/, 'Rejact');
+}
+
+/**
  * Give the duration-less `▣ Build · <model>` row a duration, leaving the frame
  * otherwise byte-identical.
  *
@@ -351,13 +367,32 @@ describe('Issue #1893: the guards are load-bearing (mutation-injected)', () => {
   });
 
   it('lets the completion marker back through when the dialog guard is mutated away', () => {
-    // Non-vacuity for the SECOND guard in `isOpenCodeComplete`. This frame has a
-    // real `· 2.3s` marker from the previous turn, so the duration requirement
-    // alone does not save it: with the gutter gone the function goes back to
-    // calling an open dialog a finished response.
+    // Non-vacuity for the SECOND guard in `isOpenCodeComplete`, isolated from the
+    // THIRD one #1911 added behind it.
+    //
+    // This frame's `· 2.3s` marker belongs to the PREVIOUS turn, which is why the
+    // duration requirement alone never saved it — and, since #1911, why removing
+    // the gutter alone no longer does either: the marker now also has to sit
+    // below the newest echoed prompt, and this one does not. Isolating guard 2
+    // therefore takes both mutations — give the CURRENT turn's waiting step a
+    // duration (that is the row `withInjectedDuration` finds, `▣  Build ·
+    // GPT-5.6 Luna` under `Now run the shell command`), and take the gutter off
+    // the button row. With guards 1 and 3 both satisfied, guard 2 is the only
+    // thing left standing between this frame and a saved dialog body.
     const raw = frame('permission-after-complete');
+    const currentTurnFinished = withInjectedDuration(raw);
+
     expect(completionOf(raw)).toBe(false);
-    expect(completionOf(withoutButtonGutter(raw))).toBe(true);
+    // Guard 3 alone (marker in the previous turn) still rejects the unmutated frame.
+    expect(completionOf(withoutButtonLabels(raw))).toBe(false);
+    // Guard 2 alone rejects the frame whose current turn carries a real marker...
+    expect(OPENCODE_PERMISSION_PATTERN.test(stripAnsi(currentTurnFinished))).toBe(true);
+    expect(completionOf(currentTurnFinished)).toBe(false);
+    // ...and it is the only thing doing so: take the labels away and the open
+    // dialog is a finished response again, exactly as before #1893.
+    const withoutGuard2 = withoutButtonLabels(currentTurnFinished);
+    expect(OPENCODE_PERMISSION_PATTERN.test(stripAnsi(withoutGuard2))).toBe(false);
+    expect(completionOf(withoutGuard2)).toBe(true);
   });
 
   it('flips the aborted turn to ready when a duration is injected into its marker', () => {
