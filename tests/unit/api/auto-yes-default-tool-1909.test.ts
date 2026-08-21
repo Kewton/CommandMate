@@ -70,12 +70,28 @@ vi.mock('@/lib/polling/auto-yes-manager', async (importOriginal) => {
   };
 });
 
+/**
+ * Issue #1898-2 arrived on this route while #1909 was in review, and the two
+ * meet in one expression: the re-check is handed the pair #1909 resolves.
+ * Mocked (rather than left real) because the assertion is *which target it was
+ * called with* — unmocked it answers `resync-unsupported` for every hook tool
+ * and `no-pending` for opencode with no assigned port, which is indistinguishable
+ * from never having been called.
+ */
+vi.mock('@/lib/hooks/pending-decision-recheck', () => ({
+  recheckPendingDecisions: vi.fn(),
+}));
+
 import { GET, POST } from '@/app/api/worktrees/[id]/auto-yes/route';
+import { recheckPendingDecisions } from '@/lib/hooks/pending-decision-recheck';
 import {
   startAutoYesPolling,
   getAutoYesState,
   clearAllAutoYesStates,
 } from '@/lib/polling/auto-yes-manager';
+
+/** A re-check that ran and found nothing — the ordinary answer. */
+const NO_PENDING = { examined: 0, delivered: 0, skipped: 0, reason: 'no-pending' as const };
 
 const WORKTREE_ID = 'wt-1909';
 
@@ -87,6 +103,7 @@ interface AutoYesBody {
   instanceId?: string;
   resolvedBy?: string;
   conflict?: { instanceId: string; rosterCliTool: string; requestedCliTool: string } | null;
+  pendingDecisions?: { examined: number; delivered: number; skipped: number };
   agents?: Record<string, { enabled: boolean }>;
   instances?: Record<string, { enabled: boolean }>;
   error?: string;
@@ -140,6 +157,7 @@ describe('POST /api/worktrees/:id/auto-yes — default agent (Issue #1909)', () 
     await setUpDb('copilot');
     clearAllAutoYesStates();
     vi.clearAllMocks();
+    vi.mocked(recheckPendingDecisions).mockResolvedValue(NO_PENDING);
   });
 
   afterEach(async () => {
@@ -201,6 +219,7 @@ describe('POST /api/worktrees/:id/auto-yes — default agent (Issue #1909)', () 
       { id: 'oc-2', cliTool: 'opencode', alias: 'OpenCode 2', order: 0 },
     ]);
     vi.clearAllMocks();
+    vi.mocked(recheckPendingDecisions).mockResolvedValue(NO_PENDING);
 
     const body = (await (await post({ enabled: true, instanceId: 'oc-2' })).json()) as AutoYesBody;
 
@@ -227,6 +246,7 @@ describe('POST /api/worktrees/:id/auto-yes — default agent (Issue #1909)', () 
       { id: 'oc-2', cliTool: 'opencode', alias: 'OpenCode 2', order: 0 },
     ]);
     vi.clearAllMocks();
+    vi.mocked(recheckPendingDecisions).mockResolvedValue(NO_PENDING);
 
     const response = await post({ enabled: true, instanceId: 'oc-2', cliToolId: 'claude' });
     expect(response.status).toBe(400);
@@ -260,6 +280,7 @@ describe('POST /api/worktrees/:id/auto-yes — default agent (Issue #1909)', () 
   it('resolves an agent-less worktree as worktree-default, not fallback', async () => {
     await setUpDb(undefined);
     vi.clearAllMocks();
+    vi.mocked(recheckPendingDecisions).mockResolvedValue(NO_PENDING);
 
     const body = (await (await post({ enabled: true })).json()) as AutoYesBody;
 
@@ -275,6 +296,7 @@ describe('POST /api/worktrees/:id/auto-yes — default agent (Issue #1909)', () 
   it('names no agent on the untargeted disable-all request', async () => {
     await post({ enabled: true });
     vi.clearAllMocks();
+    vi.mocked(recheckPendingDecisions).mockResolvedValue(NO_PENDING);
 
     const body = (await (await post({ enabled: false })).json()) as AutoYesBody;
 
@@ -293,6 +315,7 @@ describe('GET /api/worktrees/:id/auto-yes — default agent (Issue #1909, DR3-01
     ]);
     clearAllAutoYesStates();
     vi.clearAllMocks();
+    vi.mocked(recheckPendingDecisions).mockResolvedValue(NO_PENDING);
   });
 
   afterEach(async () => {
@@ -362,5 +385,111 @@ describe('GET /api/worktrees/:id/auto-yes — default agent (Issue #1909, DR3-01
 
   it('still rejects a malformed instanceId', async () => {
     expect((await get('?instanceId=' + encodeURIComponent('bad/instance'))).status).toBe(400);
+  });
+});
+
+/**
+ * Where #1909 and #1898 meet (merge of PR #1956 and PR #1957).
+ *
+ * #1909 decided *which* agent an arming targets; #1898-2 added "and re-judge
+ * what that agent is already blocked on" to the same request. They are one
+ * expression: `recheckPendingDecisions` is handed the pair
+ * `resolveSessionTargetStrict` produced, so a worktree whose default is copilot
+ * re-reads *copilot's* pending approvals. Before #1909 that argument was a
+ * hard-coded claude, which for a pull source means asking the wrong agent's
+ * server — or, for the claude source, not asking at all (`resync: 'none'`).
+ *
+ * Pinned here because nothing else pins it: #1898's own tests drive
+ * `recheckPendingDecisions` directly, and #1909's drive the route, so dropping
+ * the call from the route — the obvious way to lose one half in a conflict
+ * resolution — leaves every other suite green.
+ */
+describe('POST /api/worktrees/:id/auto-yes — arming re-judges pending approvals (#1898 × #1909)', () => {
+  beforeEach(async () => {
+    const db = await setUpDb('copilot');
+    setAgentInstances(db, WORKTREE_ID, [
+      { id: 'oc-2', cliTool: 'opencode', alias: 'OpenCode 2', order: 0 },
+    ]);
+    clearAllAutoYesStates();
+    vi.clearAllMocks();
+    vi.mocked(recheckPendingDecisions).mockResolvedValue(NO_PENDING);
+  });
+
+  afterEach(async () => {
+    clearAllAutoYesStates();
+    const { closeDbInstance } = await import('@/lib/db/db-instance');
+    closeDbInstance();
+  });
+
+  /** The #1909 half feeding the #1898 half: the resolved agent, not claude. */
+  it('re-checks the worktree default agent when the request names none', async () => {
+    await post({ enabled: true });
+
+    expect(recheckPendingDecisions).toHaveBeenCalledTimes(1);
+    expect(recheckPendingDecisions).toHaveBeenCalledWith({
+      worktreeId: WORKTREE_ID,
+      cliToolId: 'copilot',
+      instanceId: 'copilot',
+    });
+  });
+
+  /**
+   * The resolved instance, not the raw `body.instanceId`. Equivalent today —
+   * every consumer keys through `buildCompositeKey`, which collapses an absent
+   * instance into the primary — but the two arguments must describe one target,
+   * and `instanceId: undefined` beside a resolved `cliToolId` does not.
+   */
+  it('re-checks the roster instance under its registered agent', async () => {
+    await post({ enabled: true, instanceId: 'oc-2' });
+
+    expect(recheckPendingDecisions).toHaveBeenCalledWith({
+      worktreeId: WORKTREE_ID,
+      cliToolId: 'opencode',
+      instanceId: 'oc-2',
+    });
+  });
+
+  /** Both additions ride back on one response; neither displaces the other. */
+  it('reports the re-judged approvals alongside the agent that was armed', async () => {
+    vi.mocked(recheckPendingDecisions).mockResolvedValue({
+      examined: 3, delivered: 2, skipped: 1, reason: null,
+    });
+
+    const body = (await (await post({ enabled: true })).json()) as AutoYesBody;
+
+    expect(body.cliToolId).toBe('copilot');
+    expect(body.resolvedBy).toBe('worktree-default');
+    expect(body.pendingDecisions).toEqual({ examined: 3, delivered: 2, skipped: 1 });
+  });
+
+  /** A re-check that found nothing says nothing, rather than reporting zeroes. */
+  it('omits pendingDecisions when the re-check had nothing to judge', async () => {
+    const body = (await (await post({ enabled: true })).json()) as AutoYesBody;
+
+    expect(body.pendingDecisions).toBeUndefined();
+    expect(body.cliToolId).toBe('copilot');
+  });
+
+  /** Disabling changes no policy that could answer anything. */
+  it('does not re-check when auto-yes is being turned off', async () => {
+    await post({ enabled: true });
+    vi.clearAllMocks();
+    vi.mocked(recheckPendingDecisions).mockResolvedValue(NO_PENDING);
+
+    await post({ enabled: false });
+
+    expect(recheckPendingDecisions).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A refused contradiction (DR3-015) must not re-judge either: the whole point
+   * of the 400 is that the route does not know which agent was meant, and
+   * answering an approval is exactly the side effect it is refusing to guess at.
+   */
+  it('does not re-check a request it refuses for contradicting the roster', async () => {
+    const response = await post({ enabled: true, instanceId: 'oc-2', cliToolId: 'claude' });
+
+    expect(response.status).toBe(400);
+    expect(recheckPendingDecisions).not.toHaveBeenCalled();
   });
 });

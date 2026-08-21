@@ -1080,6 +1080,16 @@ A non-primary `--instance` reads as `(opencode, instance oc-2)`. If no agent is 
 (`Auto-yes enabled for proj-cp.`), the **running server is older than the CLI** and is still
 hard-coding claude; restart it with `commandmate stop && commandmate start`.
 
+Arming a session that is already stuck on a dialog adds a second line reporting what it re-judged
+for **that resolved agent** (Issue #1898-2 — only sources with a `resync` capability, which today
+means opencode; the five hook tools print nothing).
+
+```console
+$ commandmate auto-yes proj-oc --enable
+Auto-yes enabled for proj-oc (opencode).
+Re-judged 2 pending approval(s): 2 answered.
+```
+
 ### `--stop-pattern` Matches Terminal Output (It Cannot Suppress a Command)
 
 `--stop-pattern` **does not watch the commands the agent runs**. It is a regular expression matched

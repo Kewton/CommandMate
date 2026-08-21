@@ -1444,6 +1444,16 @@ Auto-yes enabled for proj-cp (copilot).
 エージェント名が出ない（`Auto-yes enabled for proj-cp.`）ときは、**稼働中のサーバが CLI より古く**
 まだ claude 固定で動いています。`commandmate stop && commandmate start` で再起動してください。
 
+ダイアログが出たまま停まっているセッションに対して有効化した場合は、**その解決済みエージェントの**
+保留承認を再裁定した結果が 2 行目に出ます（Issue #1898-2。`resync` capability を持つソース＝
+現状 opencode のみが対象で、hook 系 5 ツールでは何も出ません）。
+
+```console
+$ commandmate auto-yes proj-oc --enable
+Auto-yes enabled for proj-oc (opencode).
+Re-judged 2 pending approval(s): 2 answered.
+```
+
 ### `--stop-pattern` はターミナル出力への照合（コマンドの抑止には使えない）
 
 `--stop-pattern` はエージェントが実行する**コマンドを監視するものではなく**、ターミナル出力の

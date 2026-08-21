@@ -53,7 +53,17 @@ vi.mock('@/lib/polling/auto-yes-manager', async (importOriginal) => {
   };
 });
 
+/**
+ * Issue #1898-2's re-check runs inside the POST this test drives. Mocked so the
+ * CLI's report of it can be asserted; unmocked it answers `resync-unsupported`
+ * for copilot and prints nothing.
+ */
+vi.mock('@/lib/hooks/pending-decision-recheck', () => ({
+  recheckPendingDecisions: vi.fn(),
+}));
+
 import { GET, POST } from '@/app/api/worktrees/[id]/auto-yes/route';
+import { recheckPendingDecisions } from '@/lib/hooks/pending-decision-recheck';
 import { GET as RESOLVE_TARGET } from '@/app/api/worktrees/[id]/resolve-target/route';
 import { GET as CAPABILITIES } from '@/app/api/capabilities/route';
 import { startAutoYesPolling, clearAllAutoYesStates } from '@/lib/polling/auto-yes-manager';
@@ -128,6 +138,9 @@ describe('commandmate auto-yes --enable against the real route (Issue #1909)', (
     mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.mocked(recheckPendingDecisions).mockResolvedValue({
+      examined: 0, delivered: 0, skipped: 0, reason: 'no-pending',
+    });
   });
 
   afterEach(async () => {
@@ -206,5 +219,80 @@ describe('commandmate auto-yes --enable against the real route (Issue #1909)', (
 
     expect(stderr()).toContain(`Auto-yes enabled for ${WORKTREE_ID}.`);
     expect(stderr()).not.toContain('undefined');
+  });
+});
+
+/**
+ * The CLI half of the #1909 × #1898 seam: one arming, two things worth saying.
+ *
+ * `Auto-yes enabled for … (copilot).` answers "which agent did this arm"
+ * (#1909); `Re-judged N pending approval(s)` answers "and did it unstick the
+ * worker that was already blocked" (#1898-2). Both are stderr lines from the
+ * same command, and a conflict resolution that keeps only one of them is green
+ * everywhere else.
+ */
+describe('commandmate auto-yes --enable reports both halves (#1898 × #1909)', () => {
+  beforeEach(async () => {
+    await setUpDb('copilot');
+    clearAllAutoYesStates();
+    vi.clearAllMocks();
+
+    global.fetch = vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const params = { params: Promise.resolve({ id: WORKTREE_ID }) };
+      if (url.pathname === '/api/capabilities') return CAPABILITIES() as unknown as Response;
+      if (url.pathname.endsWith('/auto-yes')) {
+        const method = (init?.method ?? 'GET').toUpperCase();
+        const request = new NextRequest(url, { method, body: init?.body as string | undefined });
+        return (method === 'POST' ? POST(request, params) : GET(request, params)) as unknown as Response;
+      }
+      throw new Error(`unexpected request from auto-yes: ${url.pathname}`);
+    }) as unknown as typeof fetch;
+
+    mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(async () => {
+    global.fetch = originalFetch;
+    clearAllAutoYesStates();
+    const { closeDbInstance } = await import('@/lib/db/db-instance');
+    closeDbInstance();
+    vi.restoreAllMocks();
+  });
+
+  it('names the agent it armed and the approvals it answered on the way in', async () => {
+    vi.mocked(recheckPendingDecisions).mockResolvedValue({
+      examined: 2, delivered: 2, skipped: 0, reason: null,
+    });
+
+    await runAutoYes('--enable');
+
+    expect(armedTarget()).toEqual({ cliToolId: 'copilot', instanceId: 'copilot' });
+    expect(stderr()).toContain(`Auto-yes enabled for ${WORKTREE_ID} (copilot).`);
+    expect(stderr()).toContain('Re-judged 2 pending approval(s): 2 answered.');
+    expect(mockExit).not.toHaveBeenCalled();
+  });
+
+  it('reports the bounded pass when the agent had more than the cap', async () => {
+    vi.mocked(recheckPendingDecisions).mockResolvedValue({
+      examined: 50, delivered: 50, skipped: 7, reason: null,
+    });
+
+    await runAutoYes('--enable');
+
+    expect(stderr()).toContain('Re-judged 50 pending approval(s): 50 answered, 7 skipped (limit).');
+  });
+
+  it('stays silent about approvals when there were none, but still names the agent', async () => {
+    vi.mocked(recheckPendingDecisions).mockResolvedValue({
+      examined: 0, delivered: 0, skipped: 0, reason: 'no-pending',
+    });
+
+    await runAutoYes('--enable');
+
+    expect(stderr()).toContain(`Auto-yes enabled for ${WORKTREE_ID} (copilot).`);
+    expect(stderr()).not.toContain('Re-judged');
   });
 });

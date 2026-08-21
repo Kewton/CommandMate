@@ -27,6 +27,7 @@ import {
   extractInstanceId,
   type AutoYesState,
 } from '@/lib/polling/auto-yes-manager';
+import { recheckPendingDecisions } from '@/lib/hooks/pending-decision-recheck';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { isAllowedDuration, DEFAULT_AUTO_YES_DURATION, validateStopPattern, type AutoYesDuration } from '@/config/auto-yes-config';
@@ -57,12 +58,30 @@ interface AutoYesResponse {
    * that named no agent — only the server log said which one. Carried on the
    * single-target responses (the `?cliToolId` GET and every POST), not on the
    * map entries, whose key already is the agent.
+   *
+   * This is also the agent `pendingDecisions` below was re-judged for: the two
+   * fields describe one target, resolved once (#1898 / #1909).
    */
   cliToolId?: CLIToolType;
   instanceId?: string;
   resolvedBy?: SessionTarget['resolvedBy'];
   /** Read path only: the explicit request the roster contradicts, or null (DR3-015). */
   conflict?: SessionTarget['conflict'] | null;
+  /**
+   * Approvals that were already pending and got re-judged by this call
+   * (Issue #1898-2), or absent when nothing was re-read.
+   *
+   * Enabling Auto-Yes under a dialog that is already up used to do nothing at
+   * all: the request had been abstained on when it arrived, and the only
+   * re-read ran on re-connect. This field is how the operator sees the
+   * difference — `commandmate auto-yes --enable` says how many approvals it
+   * answered on the way in.
+   */
+  pendingDecisions?: {
+    examined: number;
+    delivered: number;
+    skipped: number;
+  };
 }
 
 /**
@@ -71,11 +90,13 @@ interface AutoYesResponse {
  * @param state - The stored state, or null when nothing is armed
  * @param pollingStarted - Whether this request started a poller (POST only)
  * @param target - The resolved (agent, instance) this state belongs to (Issue #1909)
+ * @param pendingDecisions - What the arming re-judged on the way in (Issue #1898-2)
  */
 function buildAutoYesResponse(
   state: AutoYesState | null,
   pollingStarted?: boolean,
-  target?: SessionTarget
+  target?: SessionTarget,
+  pendingDecisions?: AutoYesResponse['pendingDecisions']
 ): AutoYesResponse {
   const response: AutoYesResponse = {
     enabled: state?.enabled ?? false,
@@ -89,6 +110,9 @@ function buildAutoYesResponse(
     response.instanceId = target.instanceId;
     response.resolvedBy = target.resolvedBy;
     response.conflict = target.conflict ?? null;
+  }
+  if (pendingDecisions !== undefined) {
+    response.pendingDecisions = pendingDecisions;
   }
   return response;
 }
@@ -334,6 +358,7 @@ export async function POST(
 
     // Issue #138, #525, #896: Start or stop server-side polling (per-instance)
     let pollingStarted = false;
+    let pendingDecisions: AutoYesResponse['pendingDecisions'];
     let state;
     if (body.enabled) {
       state = setAutoYesEnabled(
@@ -348,6 +373,38 @@ export async function POST(
       pollingStarted = result.started;
       if (!result.started) {
         logger.warn('polling-not-started:');
+      }
+
+      // Issue #1898-2: the policy just changed, so re-judge what the agent is
+      // already blocked on. The poller cannot: it reads the SCREEN, and the
+      // approval this is about is an object on the agent's own server that was
+      // abstained on before Auto-Yes existed for this session. Measured before
+      // this call: 30+ seconds of `waiting` with no adjudication log.
+      //
+      // Awaited rather than fired and forgotten, so `commandmate auto-yes
+      // --enable` returns only once the pending approval has been answered —
+      // an operator who runs it on a stuck worker should not have to poll to
+      // find out whether it worked. Bounded: it answers immediately for every
+      // source that declares `resync: 'none'`, which is all five hook tools.
+      //
+      // Issue #1909: `cliToolId` and `instanceId` here are the pair
+      // `resolveSessionTargetStrict` produced above — the same pair
+      // `startAutoYesPolling` was just armed with. Passing the raw
+      // `body.instanceId` instead would be equivalent today (every consumer
+      // keys through `buildCompositeKey`, which collapses `undefined` into the
+      // primary instance) but would read as a second, unresolved notion of the
+      // target sitting next to a resolved `cliToolId`. One resolution, one pair.
+      const recheck = await recheckPendingDecisions({
+        worktreeId: id,
+        cliToolId,
+        instanceId,
+      });
+      if (recheck.reason === null) {
+        pendingDecisions = {
+          examined: recheck.examined,
+          delivered: recheck.delivered,
+          skipped: recheck.skipped,
+        };
       }
     } else {
       // Issue #525, #896: instanceId/cliToolId specified -> stop that instance;
@@ -380,10 +437,16 @@ export async function POST(
     //
     // Withheld from the untargeted `{enabled: false}` request, which disables
     // every instance of the worktree: naming one agent there would describe a
-    // request that deliberately named none.
+    // request that deliberately named none. `pendingDecisions` (#1898-2) is
+    // undefined on that path anyway — nothing is re-judged when nothing is armed.
     const targetedRequest = body.enabled || !!body.instanceId || !!body.cliToolId;
     return NextResponse.json(
-      buildAutoYesResponse(state, pollingStarted, targetedRequest ? target : undefined)
+      buildAutoYesResponse(
+        state,
+        pollingStarted,
+        targetedRequest ? target : undefined,
+        pendingDecisions
+      )
     );
   } catch (error: unknown) {
     logger.error('error-setting-auto-yes-state:', { error: error instanceof Error ? error.message : String(error) });

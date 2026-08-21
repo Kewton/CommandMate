@@ -40,7 +40,11 @@
 
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
-import { MAX_EVENT_DETAIL_LENGTH, type AgentEventType } from '@/lib/hooks/agent-event-types';
+import {
+  MAX_EVENT_DETAIL_LENGTH,
+  PERMISSION_REPLIED_DETAIL,
+  type AgentEventType,
+} from '@/lib/hooks/agent-event-types';
 import type { AskUserQuestionSpec } from '@/lib/hooks/ask-user-question-payload';
 import { ASK_USER_QUESTION_TOOL } from '@/lib/hooks/permission-request-payload';
 // Issue #1784: the terminal-frame half of "which model / effort is this on".
@@ -229,6 +233,34 @@ export interface AgentEventRecord {
    * question is answered by {@link getLastKnownAgentModel} instead.
    */
   model?: string | null;
+  /**
+   * The dialog this event opens or closes, as the agent's own id (Issue #1898).
+   *
+   * Set only by a source whose {@link AgentSourceCapabilities.eventIdentity}
+   * names one — opencode's `per_…`, which is both the id in the
+   * `permission.asked` frame and the id in the reply URL. Everything else
+   * leaves it absent, and an absent id means "this event says nothing about
+   * *which* dialog", which is why the release below matches permissively
+   * rather than refusing to act.
+   */
+  decisionId?: string | null;
+  /**
+   * Whether the source states that no dialog is left open by this event
+   * (Issue #1898).
+   *
+   * The caller computes it, because the caller is the only layer that knows
+   * both what happened (a verdict was delivered, a `permission.replied` frame
+   * arrived) and whether this source's
+   * {@link AgentSourceCapabilities.permissionReplyReleasesPrompt} says that
+   * settles anything. A hook source can never set it: its verdict goes into the
+   * body of a request nobody hears the end of, so the dialog on screen has to
+   * be released by something that can observe it.
+   *
+   * Absent is not `false` in meaning — it is "this source made no statement" —
+   * but the two act the same here, and that is deliberate: the pre-#1898
+   * behaviour is what an event with nothing to say must keep producing.
+   */
+  promptSettled?: boolean;
 }
 
 /**
@@ -400,16 +432,32 @@ export function isAwaitingInstruction(
  * The `prompt_waiting` half of the state machine, driven by the same events
  * (Issue #1725).
  *
- * | event                             | effect on prompt_waiting |
- * |-----------------------------------|--------------------------|
- * | `notification(permission_prompt)` | **open**, confirmed      |
- * | `notification(idle_prompt)`       | release                  |
- * | `notification(other/none)`        | unchanged                |
- * | `stop`                            | release                  |
- * | `user_prompt_submit`              | release                  |
- * | `session_start` / `session_end`   | release                  |
- * | `pre_tool_use`                    | unchanged                |
- * | `post_tool_use`                   | release                  |
+ * | event                                       | effect on prompt_waiting |
+ * |---------------------------------------------|--------------------------|
+ * | `notification(permission_prompt)`           | **open**, confirmed      |
+ * | `notification(permission_prompt)` + settled | release (Issue #1898)    |
+ * | `notification(permission_replied)`          | release when settled     |
+ * | `notification(idle_prompt)`                 | release                  |
+ * | `notification(other/none)`                  | unchanged                |
+ * | `stop`                                      | release                  |
+ * | `user_prompt_submit`                        | release                  |
+ * | `session_start` / `session_end`             | release                  |
+ * | `pre_tool_use`                              | unchanged                |
+ * | `post_tool_use`                             | release                  |
+ *
+ * The two {@link AgentEventRecord.promptSettled} rows are Issue #1898, and they
+ * are the reason the caller adjudicates *before* it records. An approval that
+ * Auto-Yes answered in the same breath it arrived never blocked anybody, so
+ * opening a record for it published `waiting` for the whole of the tool call
+ * that followed — measured at eight seconds on `sleep 8; pwd`, released only by
+ * the `post_tool_use` at the end. `promptSettled` is how the caller says "the
+ * verdict is already on its way", and the record is never opened at all.
+ *
+ * A `permission_replied` notification is the same statement made by the agent
+ * rather than by us: it is the frame a source publishes when *anybody* answered
+ * the dialog, including a human at the terminal. Only a source whose
+ * `permissionReplyReleasesPrompt` capability is true has one, and the caller
+ * reads that capability — this table reads the boolean it produced.
  *
  * `pre_tool_use` leaves this half alone on purpose (Issue #1726). It is the
  * `AskUserQuestion` invocation, and a picker being *about to be drawn* is not
@@ -444,11 +492,24 @@ function applyPromptWaitingTransition(key: string, record: AgentEventRecord): vo
   switch (record.event) {
     case 'notification':
       if (record.detail === 'permission_prompt') {
+        if (record.promptSettled === true) {
+          // Issue #1898: adjudicated before it was recorded, and the verdict
+          // reached the agent. There is no dialog and there never was one for
+          // a human to answer.
+          releaseSettledPromptWaiting(key, record);
+          return;
+        }
         openPromptWaiting(key, {
           source: 'notification',
           message: record.message ?? null,
+          decisionId: record.decisionId ?? null,
           at: record.at,
         });
+      } else if (record.detail === PERMISSION_REPLIED_DETAIL) {
+        // Issue #1898. The agent's own statement that the dialog is gone —
+        // whoever answered it. Not a word of the seven, so it decides no
+        // status; all it does is retire the record.
+        if (record.promptSettled === true) releaseSettledPromptWaiting(key, record);
       } else if (record.detail === 'idle_prompt') {
         promptWaiting.delete(key);
       }
@@ -797,6 +858,16 @@ export interface StructuredPromptWaitingState {
   /** Tool the pre-empted permission request named, or null. */
   toolName: string | null;
   /**
+   * The agent's own id for this dialog, or null (Issue #1898).
+   *
+   * Present only for a source whose
+   * {@link AgentSourceCapabilities.eventIdentity} names one. It is what makes
+   * "this reply answered *that* dialog" a question with an answer: without it a
+   * `permission.replied` for one approval would retire whichever record
+   * happened to be open.
+   */
+  decisionId: string | null;
+  /**
    * Epoch ms something independent established that a dialog is really there:
    * a `Notification(permission_prompt)`, or the scraper reading the frame as
    * `waiting`. Null while the record is still only a prediction.
@@ -823,6 +894,7 @@ function openPromptWaiting(
     source: StructuredPromptSource;
     message: string | null;
     toolName?: string | null;
+    decisionId?: string | null;
     at: number;
   },
 ): void {
@@ -836,6 +908,7 @@ function openPromptWaiting(
     // age bound are measured from — and take the confirmation.
     existing.message = input.message ?? existing.message;
     existing.toolName = input.toolName ?? existing.toolName;
+    existing.decisionId = input.decisionId ?? existing.decisionId;
     if (confirmed) {
       existing.source = 'notification';
       existing.confirmedAt ??= input.at;
@@ -850,10 +923,30 @@ function openPromptWaiting(
       ? input.message.slice(0, MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH)
       : null,
     toolName: input.toolName ?? null,
+    decisionId: input.decisionId ?? null,
     confirmedAt: confirmed ? input.at : null,
     scraperCorroborated: false,
     recorded: false,
   });
+}
+
+/**
+ * Retire the open record because a verdict for this dialog was delivered
+ * (Issue #1898).
+ *
+ * Matched on {@link AgentEventRecord.decisionId} when both sides have one: an
+ * agent that can run two approvals at once would otherwise have the reply to
+ * the first retire the record for the second, which is the failure this Issue
+ * is fixing pointed the other way. When either side is anonymous the release is
+ * unconditional — an unmatched id is a source that publishes none, and refusing
+ * to act there would leave the pre-#1898 stall in place for it.
+ */
+function releaseSettledPromptWaiting(key: string, record: AgentEventRecord): void {
+  const open = promptWaiting.get(key);
+  if (!open) return;
+  const settledId = record.decisionId ?? null;
+  if (settledId !== null && open.decisionId !== null && open.decisionId !== settledId) return;
+  promptWaiting.delete(key);
 }
 
 /**
