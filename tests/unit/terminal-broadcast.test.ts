@@ -60,6 +60,9 @@ const NO_STRUCTURED_EVENTS = {
   // Issue #1725: no dialog reported either.
   promptWaitingSince: null,
   promptWaitingSource: null,
+  // Issue #1902: nothing on this session had a `tool_input` that needed
+  // rewriting — the ordinary case for every tool but copilot.
+  toolInputNormalization: null,
   // Issue #1924: the source block is present on every payload, reported or not —
   // it describes the source, not the session. Read from the registry rather than
   // transcribed, so this fixture cannot claim a capability set no source has.
