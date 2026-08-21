@@ -385,6 +385,17 @@ gates:
 
 これが**衝突そのものを無くす**唯一の手段であり、並列度を保てるのはこちらだけである。
 
+**実機で確認済み（Issue #1871、2026-08-21）。** 2 つの linked worktree で e2e ゲートを同時に
+走らせ、導出ポート（3219 / 3220）では両方 PASS、同じ実験をポート固定で行うと後発が
+`Port 3177 is already in use` で `GATE e2e-fixed FAIL (exit=1)` になることを、実 exit code と
+実 LISTEN ポートつきで記録した。同じ機会に `mutex` の直列化と `waited=`（`duration` に
+足されないこと）も確認している。表と再現手順は
+[docs/qa/1871-parallel-e2e-port-collision.md](../qa/1871-parallel-e2e-port-collision.md)。
+
+CommandMate 自身は導出を**ゲートのコマンドではなく `playwright.config.ts` 側**に置いている
+（`tests/e2e/fixtures/e2e-port.ts`）。verify 経由でなくても効くこと、シェル算術が不正値を
+黙って 0 に潰す（＝全 worktree が同一ポートに戻る）のを型のある場所で弾けることが理由である。
+
 **採番は CommandMate 由来ではない。** Issue #1771 本文は「サーバが worktree を採番している」
 としていたが、実測ではしていない: `worktrees.id` はディレクトリ basename 由来の TEXT 主キー
 （`src/lib/git/worktree-id.ts:73`）で、順序列も作成時刻も列に無く
@@ -401,6 +412,11 @@ gates:
   1 行で持つファイル。**両ランナーが従う規約**であり、standalone 側は
   `set -C; printf '%s\n' "$id" > "$root/$n"`（noclobber）で同じ意味を実装できる。
 - 環境変数 `CM_VERIFY_WORKTREE_INDEX_ROOT` でルートを差し替えられる（テスト・隔離 CI 用）。
+  **unit スイートは `tests/setup.ts` でこれを `tmpdir()` 配下に固定している**（Issue #1873）。
+  `executeRun` は `root` 無しで `resolveWorktreeIndex` を呼ぶため、差し替えないと `wt-*` フィクスチャが
+  開発者マシンの共有レジストリに枠を取り、**枠は解放されない**ので実在 worktree の番号を食い潰す
+  （実測で 45 件中 40 件が幻の `wt-*` になっていた）。個別テストの `vi.stubEnv` / `{ root }` 明示は
+  この固定より優先される。
 - **worktree を削除しても枠は解放しない。** 再利用すると、生きている worktree の番号が
   動き、削除された側のサーバがまだ握っているポートに載る可能性がある。
 - **ハッシュは採用しなかった**（Issue 本文の代替案）。同じ番号になる性質は満たすが、
