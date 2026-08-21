@@ -36,8 +36,23 @@ interface RouteResponse {
  * requests and a strict sequence would pass even if it called them in an order
  * that could not work (status reported before the message was sent).
  */
+/**
+ * Answered for every mockRoutes() set (Issue #1925): the capability probe is
+ * infrastructure every instance-targeting command runs, not part of what a
+ * contract test is about.
+ */
+const CAPABILITIES_ROUTE = {
+  match: '/api/capabilities',
+  method: 'GET',
+  response: {
+    status: 200,
+    data: { serverVersion: '0.0.0-test', capabilities: ['resolve-session-target'] },
+  },
+};
+
 function mockRoutes(routes: Array<{ match: string; method?: string; response: RouteResponse }>) {
   const calls: Array<{ url: string; method: string; body: unknown }> = [];
+  routes = [CAPABILITIES_ROUTE, ...routes];
   global.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
     const method = (init?.method ?? 'GET').toUpperCase();
     calls.push({
@@ -49,6 +64,11 @@ function mockRoutes(routes: Array<{ match: string; method?: string; response: Ro
       (candidate) =>
         url.includes(candidate.match) && (candidate.method ?? 'POST').toUpperCase() === method
     );
+    if (url.includes('/api/capabilities')) {
+      // Not recorded: tests here assert on the requests the command makes, and
+      // the probe is not one of them.
+      calls.pop();
+    }
     if (!route) {
       return Promise.reject(new Error(`unexpected request: ${method} ${url}`));
     }
@@ -56,6 +76,11 @@ function mockRoutes(routes: Array<{ match: string; method?: string; response: Ro
     return Promise.resolve({
       ok: status >= 200 && status < 300,
       status,
+      redirected: false,
+      // Issue #1925: the capability probe reads content-type and refuses to
+      // classify a response without one, so a mock that omits it looks exactly
+      // like the proxy-answered HTML the probe exists to reject.
+      headers: new Headers({ 'content-type': 'application/json' }),
       json: () => Promise.resolve(data),
       text: () => Promise.resolve(JSON.stringify(data)),
     });
@@ -164,6 +189,14 @@ describe('send --contract', () => {
 
   it('forwards --agent and --instance so the task records who it was sent to', async () => {
     const calls = mockRoutes([
+      {
+        match: '/api/worktrees/wt1/resolve-target',
+        method: 'GET',
+        response: {
+          status: 200,
+          data: { cliToolId: 'codex', instanceId: 'codex-2', resolvedBy: 'roster', conflict: null },
+        },
+      },
       { match: '/api/worktrees/wt1/tasks', response: TASK_CREATED },
       { match: '/api/worktrees/wt1/send', response: SEND_OK },
       { match: `/api/tasks/${TASK_ID}`, method: 'PATCH', response: { status: 200, data: {} } },
@@ -282,6 +315,14 @@ describe('send option validation happens before the task row is created', () => 
       { match: '/api/worktrees/wt1/tasks', response: TASK_CREATED },
       { match: '/api/worktrees/wt1/auto-yes', response: { status: 200, data: {} } },
       { match: '/api/worktrees/wt1/send', response: SEND_OK },
+      {
+        match: '/api/worktrees/wt1/resolve-target',
+        method: 'GET',
+        response: {
+          status: 200,
+          data: { cliToolId: 'claude', instanceId: 'claude', resolvedBy: 'worktree-default', conflict: null },
+        },
+      },
       { match: '/api/worktrees/wt1', method: 'GET', response: { status: 200, data: { id: 'wt1', agentInstances: [] } } },
       { match: `/api/tasks/${TASK_ID}`, method: 'PATCH', response: { status: 200, data: {} } },
     ]);

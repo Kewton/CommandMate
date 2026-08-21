@@ -238,6 +238,29 @@ export class ApiClient {
   }
 
   /**
+   * GET without any status handling, for callers that must read the raw response.
+   *
+   * Issue #1925: the server-capability probe has to tell a real 404 (an older
+   * daemon that predates the endpoint) from a 302 to /login (this request never
+   * authenticated) and from an HTML body served by something in the middle.
+   * {@link get} collapses all three into an exception with a message, which is
+   * exactly the distinction the probe exists to make — so it issues its own
+   * request, with `redirect: 'manual'` so a redirect stays visible instead of
+   * being followed to a 200 that parses as nothing.
+   *
+   * @param path - Path appended to the client's base URL
+   * @param init - Extra request headers merged over the client's own
+   * @returns The raw Response, whatever its status
+   */
+  async rawGet(path: string, init?: { headers?: Record<string, string> }): Promise<Response> {
+    return fetch(`${this.baseUrl}${path}`, {
+      method: 'GET',
+      headers: { ...this.getHeaders(), ...(init?.headers ?? {}) },
+      redirect: 'manual',
+    });
+  }
+
+  /**
    * HTTP GET request
    * [DR1-05] Generic type parameter specified at call site
    */

@@ -250,22 +250,6 @@ export function createSendCommand(): Command {
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
-        // Issue #576/#588/#989: Validate --model option via shared validator (DR1-003)
-        if (options.model) {
-          // --model requires --agent copilot or --agent antigravity
-          if (!options.agent || (options.agent !== 'copilot' && options.agent !== 'antigravity')) {
-            console.error('Error: --model option requires --agent copilot or --agent antigravity');
-            process.exit(ExitCode.CONFIG_ERROR);
-          }
-          const modelValidation = options.agent === 'antigravity'
-            ? validateAntigravityModelName(options.model)
-            : validateCopilotModelName(options.model);
-          if (!modelValidation.valid) {
-            console.error(`Error: Invalid model name: ${modelValidation.reason}`);
-            process.exit(ExitCode.CONFIG_ERROR);
-          }
-        }
-
         // Issue #1608: every option that can be judged from its own value is
         // judged here, before the first side effect. --duration used to be the
         // exception: enableAutoYes() validated it, and that runs after
@@ -284,6 +268,30 @@ export function createSendCommand(): Command {
         const agent = options.instance
           ? await resolveInstanceCliTool(client, worktreeId, options.instance, options.agent)
           : options.agent;
+
+        // Issue #576/#588/#989: Validate --model option via shared validator (DR1-003).
+        // Issue #1925: judged against the RESOLVED agent, not against --agent.
+        // `--instance copilot-2 --model gpt-5` names a copilot session in the
+        // only way the roster understands, and this check used to reject it for
+        // not repeating `--agent copilot` — the tool-dependent option was being
+        // validated before the tool was known (design §4 D5 決定 3). Still ahead
+        // of every side effect: resolution only reads.
+        if (options.model) {
+          if (agent !== 'copilot' && agent !== 'antigravity') {
+            console.error(
+              'Error: --model option requires --agent copilot or --agent antigravity'
+              + ' (or an --instance registered as one)'
+            );
+            process.exit(ExitCode.CONFIG_ERROR);
+          }
+          const modelValidation = agent === 'antigravity'
+            ? validateAntigravityModelName(options.model)
+            : validateCopilotModelName(options.model);
+          if (!modelValidation.valid) {
+            console.error(`Error: Invalid model name: ${modelValidation.reason}`);
+            process.exit(ExitCode.CONFIG_ERROR);
+          }
+        }
 
         // Issue #1545: resolve the contract before anything with a side effect,
         // so an invalid contract cannot leave auto-yes enabled for a message
