@@ -10,6 +10,7 @@
 import type Database from 'better-sqlite3';
 import { getSessionState, createMessage } from '@/lib/db';
 import { observeUnclassifiedFrame } from '@/lib/detection/unclassified-frame-tracker';
+import { extractComposerText, type ComposerTextState } from '@/lib/detection/composer-text';
 import { matchUpstreamFault } from '@/lib/detection/upstream-faults';
 import { UNCLASSIFIED_PROMPT_TYPE, type UnclassifiedFrameRecord } from '@/types/models';
 import { createLogger } from '@/lib/logger';
@@ -250,6 +251,37 @@ export interface CurrentOutputPayload {
     /** Epoch ms the frame this was read from was captured. */
     at: number;
   } | null;
+  /**
+   * Text the user has in the CLI's composer but has not sent, or null
+   * (Issue #1879).
+   *
+   * **Always present, null when there is none.** Read
+   * `src/lib/detection/composer-text.ts` before reading this field: null is
+   * "nothing REAL is in the input box", which covers four different situations
+   * that {@link composerState} tells apart — most importantly Claude Code's dim
+   * suggestion text, which after `stripAnsi` is indistinguishable from typed
+   * input and which this field must never carry (a bar offering to run a hint
+   * that no `C-u` can clear is a defect the user sees, not a cosmetic one).
+   *
+   * Extracted structurally from the raw frame, NOT from any status verdict: it
+   * does not consult `sessionStatus`, `isPromptWaiting`, `isUnclassifiedActive`
+   * or `isSelectionListActive`, and none of them consult it. That independence
+   * is the point — the existing Enter-capable surfaces are gated on detection
+   * flags precisely so a stray Enter cannot reach a normal input prompt, and
+   * #1879's bar is allowed at a normal input prompt only because the user reads
+   * what is there before pressing it.
+   *
+   * claude only for now; every other CLI reports `unsupported_tool`.
+   */
+  composerText: string | null;
+  /**
+   * Which of the composer states {@link composerText} came from (Issue #1879).
+   *
+   * Exposure only — nothing branches on it server-side. It exists so
+   * `capture --json` can answer "the box looked occupied but it was a ghost"
+   * instead of leaving a null indistinguishable from an empty prompt.
+   */
+  composerState: ComposerTextState;
 }
 
 const logger = createLogger('current-output-builder');
@@ -598,6 +630,11 @@ export async function buildCurrentOutput(
       // is a claim about what is on screen right now, and a dead session has no
       // screen.
       upstreamFault: null,
+      // Issue #1879: same reasoning as `upstreamFault` — there is no input box
+      // on a session that is not running, so there is nothing to report and
+      // nothing the UI could act on.
+      composerText: null,
+      composerState: 'no_composer',
     };
   }
 
@@ -779,6 +816,11 @@ export async function buildCurrentOutput(
     });
   }
 
+  // Issue #1879: structural, and computed here next to the other frame readers
+  // rather than inside a status branch — the bar it feeds must appear on the
+  // strength of what is in the box, never on the strength of a status verdict.
+  const composer = extractComposerText(output, cliToolId);
+
   const realtimeSnippet = lines.slice(-100).join('\n');
   // Issue #1839: judged on exactly what is published as `realtimeSnippet`, not
   // on `output`. The wider capture keeps a banner from an hour ago in scope, and
@@ -848,5 +890,12 @@ export async function buildCurrentOutput(
           at: Date.now(),
         }
       : null,
+    // Issue #1879: read from `output` — the RAW capture, still carrying the SGR
+    // attributes `capture-pane -e` fetched. Everything else in this function
+    // works on stripped text; this one deliberately does not, because dim is the
+    // only thing that separates Claude's ghost suggestion from text a human
+    // typed. Do not "tidy" this to read a stripped variable.
+    composerText: composer.state === 'content' ? composer.text : null,
+    composerState: composer.state,
   };
 }

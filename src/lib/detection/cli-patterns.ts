@@ -7,6 +7,7 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { DetectPromptOptions } from './types';
 import { createLogger } from '@/lib/logger';
 import { stripAnsi } from './ansi';
+import { findClaudeInputBox } from './composer-text';
 import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
 
 const logger = createLogger('cli-patterns');
@@ -167,12 +168,6 @@ export const CLAUDE_PROMPT_PATTERN = /^[>❯](\s*$|\s+\S)/m;
  */
 export const CLAUDE_SEPARATOR_PATTERN = /^─{10,}$/m;
 
-/** How far above the last line the input box's closing separator may sit. */
-const CLAUDE_STATUS_BAR_MAX_ROWS = 4;
-
-/** How many rows the input box may span before the block stops looking like the footer. */
-const CLAUDE_INPUT_BOX_MAX_ROWS = 40;
-
 /**
  * Locate the start of Claude Code's bottom-pinned footer within a captured pane.
  *
@@ -201,40 +196,16 @@ const CLAUDE_INPUT_BOX_MAX_ROWS = 40;
  * @returns Index of the first footer row, or -1 when no footer is present
  */
 export function findClaudeChromeStart(lines: string[]): number {
-  const isSeparator = (line: string): boolean => /^─{10,}$/.test(stripAnsi(line).trimEnd());
-
-  // Callers pass both trimmed panes and raw captures padded with blank rows.
-  let lastRow = lines.length - 1;
-  while (lastRow >= 0 && lines[lastRow].trim() === '') lastRow--;
-  if (lastRow < 0) return -1;
-
-  // The input box's closing separator sits just above the status bar.
-  let closingSeparator = -1;
-  for (let i = lastRow; i >= Math.max(0, lastRow - CLAUDE_STATUS_BAR_MAX_ROWS); i--) {
-    if (isSeparator(lines[i])) {
-      closingSeparator = i;
-      break;
-    }
-  }
-  if (closingSeparator < 0) return -1;
-
-  // Walk up over the input box to the opening separator.
-  let openingSeparator = -1;
-  for (let i = closingSeparator - 1; i >= Math.max(0, closingSeparator - CLAUDE_INPUT_BOX_MAX_ROWS); i--) {
-    if (isSeparator(lines[i])) {
-      openingSeparator = i;
-      break;
-    }
-  }
-  if (openingSeparator < 0) return -1;
-
-  // Confirm the rows between the separators really are the input box rather than
-  // a reply that happens to be fenced by two horizontal rules — truncating one of
-  // those would silently swallow the tail of a genuine response.
-  if (!/^[>❯]/.test(stripAnsi(lines[openingSeparator + 1] ?? ''))) return -1;
+  // Issue #1879: the structural search (closing separator → opening separator →
+  // prompt glyph, including the "is this really the input box and not a reply
+  // fenced by two horizontal rules?" check) moved to `findClaudeInputBox` so the
+  // composer reader locates the same box this trimmer does. Behaviour here is
+  // unchanged; only the caller of the search moved.
+  const box = findClaudeInputBox(lines);
+  if (box === null) return -1;
 
   // Include the reserved hint row directly above the opening separator.
-  return Math.max(0, openingSeparator - 1);
+  return Math.max(0, box.openingSeparator - 1);
 }
 
 /**

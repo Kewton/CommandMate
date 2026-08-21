@@ -333,6 +333,12 @@
     "endSession": "End session",
     "endSessionFor": "End session for {name}"
   },
+  "unsentComposer": {
+    "regionLabel": "Unsent input",
+    "label": "Unsent input:",
+    "run": "Run",
+    "clear": "Clear"
+  },
   "todo": {
     "addPlaceholder": "Add a todo…",
     "add": "Add",

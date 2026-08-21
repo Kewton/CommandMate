@@ -31,6 +31,7 @@ import { TerminalSplitPane } from '@/components/worktree/TerminalSplitPane';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
+import { UnsentComposerBar, hasUnsentComposerText } from '@/components/worktree/UnsentComposerBar';
 import { PromptPanel } from '@/components/worktree/PromptPanel';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { HistoryPane, splitHistorySlotId } from '@/components/worktree/HistoryPane';
@@ -321,6 +322,16 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     !showNav &&
     !prompt.visible;
 
+  // Issue #1879: the unsent-input bar. Its gate is the composer's CONTENTS and
+  // nothing else — not isUnclassifiedActive, not isSelectionListActive, not
+  // prompt.visible. Those three gates exist so a stray Enter cannot reach a live
+  // input line; this bar shows the user the exact text before they aim an Enter
+  // at it, which is a different act. Blank composer (including a frame where all
+  // that is on screen is Claude's dim ghost suggestion, which
+  // `extractComposerText` has already dropped) means no bar, so the "no Enter
+  // affordance when the box is empty" property still holds.
+  const showUnsentComposerBar = hasUnsentComposerText(terminal.composerText);
+
   // Issue #744: the embedded HistoryPane for THIS split. Receives this split's
   // own messages (useSplitMessages) and the per-split highlight namespace via
   // `splitIndex`. Insert routing targets this split (S3-005). No client-side
@@ -494,6 +505,15 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             onKeysSent={refresh}
           />
         ) : null}
+        {showUnsentComposerBar ? (
+          <UnsentComposerBar
+            worktreeId={worktreeId}
+            cliToolId={cliToolId}
+            instanceId={resolvedInstanceId}
+            composerText={terminal.composerText}
+            onActionSent={refresh}
+          />
+        ) : null}
         {showPrompt ? (
           <PromptPanel
             promptData={prompt.data}
@@ -543,6 +563,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       showNav,
       showPrompt,
       showEscapeHatch,
+      showUnsentComposerBar,
+      terminal.composerText,
       terminal.isPagerActive,
       worktreeId,
       cliToolId,

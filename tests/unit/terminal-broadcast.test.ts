@@ -70,6 +70,9 @@ const NO_PROMPT_DEDUP = { promptDedup: { skippedCount: 0, lastSkippedAt: null } 
 /** No upstream API failure signature on the frame (Issue #1839). */
 const NO_UPSTREAM_FAULT = { upstreamFault: null } as const;
 
+/** Nothing unsent in the composer (Issue #1879). */
+const NO_COMPOSER_TEXT = { composerText: null, composerState: 'empty' } as const;
+
 beforeEach(() => {
   vi.clearAllMocks();
   __resetTerminalBroadcastState();
@@ -93,6 +96,7 @@ beforeEach(() => {
     ...NO_MODEL_INFO,
     ...NO_PROMPT_DEDUP,
     ...NO_UPSTREAM_FAULT,
+    ...NO_COMPOSER_TEXT,
   });
 });
 
@@ -149,6 +153,7 @@ describe('broadcastTerminalSnapshotAfterInteraction', () => {
         ...NO_MODEL_INFO,
         ...NO_PROMPT_DEDUP,
         ...NO_UPSTREAM_FAULT,
+        ...NO_COMPOSER_TEXT,
       })
       .mockResolvedValueOnce({
         isRunning: true,
@@ -164,6 +169,7 @@ describe('broadcastTerminalSnapshotAfterInteraction', () => {
         ...NO_MODEL_INFO,
         ...NO_PROMPT_DEDUP,
         ...NO_UPSTREAM_FAULT,
+        ...NO_COMPOSER_TEXT,
       });
 
     const pending = broadcastTerminalSnapshotAfterInteraction(
