@@ -18,6 +18,10 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 import {
+  getLastPermissionDecision,
+  type PermissionDecisionRecord,
+} from '@/lib/hooks/permission-decision-state';
+import {
   getLastToolInputNormalization,
   type ToolInputNormalizationRecord,
 } from '@/lib/hooks/tool-input-normalization-state';
@@ -64,6 +68,7 @@ import { applyAskUserQuestion } from '@/lib/session/ask-user-question-prompt';
 import {
   buildStructuredPromptData,
   buildStructuredPromptHistoryRecord,
+  STRUCTURED_DECISION_OPTIONS,
   type StructuredAskUserQuestionSummary,
   type StructuredPromptFacts,
   type StructuredPromptSource,
@@ -123,6 +128,24 @@ export interface StructuredEventsPayload {
    * Exposure only: nothing reads it back.
    */
   toolInputNormalization: ToolInputNormalizationRecord | null;
+  /**
+   * The last approval this server adjudicated on the agent's behalf, or null
+   * (Issue #1898).
+   *
+   * The same shape of field as {@link toolInputNormalization} and for the same
+   * reason. Five of the six tools are adjudicated inside the request they are
+   * blocked on, so the agent learns the verdict by being answered; opencode is
+   * adjudicated over a connection nobody is holding, which means Auto-Yes can
+   * approve a `rm`, dismiss the dialog and leave nothing on any surface an
+   * operator reads. This field is that surface: what was asked, what was
+   * answered, whether it landed, and whether it retired the prompt.
+   *
+   * Always present, null on every session nothing has been adjudicated for.
+   * Reported on a stopped session too, for the reason `promptDedup` is.
+   *
+   * Exposure only: nothing reads it back.
+   */
+  permissionDecision: PermissionDecisionRecord | null;
   /**
    * Which {@link AgentEventSource} speaks for this tool, and what it declares it
    * can do (Issue #1924, §7).
@@ -713,6 +736,11 @@ export async function buildCurrentOutput(
     // Issue #1902. Read here, before the `isRunning` branch, so both return
     // paths carry it.
     toolInputNormalization: getLastToolInputNormalization(worktreeId, cliToolId, instanceId),
+    // Issue #1898, the same shape and for the same reason: an automatic verdict
+    // this server delivered on the agent's behalf is invisible to the operator
+    // otherwise. Exposure only — the dialog state is `promptWaitingSince` /
+    // `isPromptWaiting`, and nothing reads this back to decide anything.
+    permissionDecision: getLastPermissionDecision(worktreeId, cliToolId, instanceId),
     source: {
       cliToolId: eventSource.cliToolId,
       capabilities: eventSource.capabilities,
@@ -876,10 +904,30 @@ export async function buildCurrentOutput(
   // The degraded form, for a dialog only the structured layer can see. Enriched
   // with the question text when one is in flight — that turns "a dialog is open
   // and nobody could read it" into "a dialog is open and here is what it asks".
+  //
+  // Issue #1898 adds the replies the dialog accepts, for the sources that can be
+  // answered without touching the pane. The gate is `eventIdentity`: a source
+  // that publishes a per-decision id is a source whose approval can be answered
+  // by that id, which is what makes an option NUMBER here mean something other
+  // than a line on a screen nobody parsed. `source === 'notification'` narrows
+  // it to a dialog the agent actually reported — a `permission-request` record
+  // is a prediction, and a question is answered with a choice rather than with
+  // one of these three verdicts.
+  const decisionOptions =
+    promptWaiting !== null &&
+    promptWaiting.source === 'notification' &&
+    eventSource.capabilities.eventIdentity === 'permission-id'
+      ? STRUCTURED_DECISION_OPTIONS
+      : null;
+
   const structuredFacts: StructuredPromptFacts | null =
     promptWaiting === null
       ? null
-      : { ...promptWaiting, askUserQuestion: summarizeAskUserQuestion(askUserQuestion) };
+      : {
+          ...promptWaiting,
+          askUserQuestion: summarizeAskUserQuestion(askUserQuestion),
+          decisionOptions,
+        };
 
   const promptData: PromptData | StructuredPromptWaitingData | null = scraperPromptWaiting
     ? correctedPromptData ??

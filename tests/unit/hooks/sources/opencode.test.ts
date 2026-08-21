@@ -61,6 +61,7 @@ import {
   rememberOpencodeToolCall,
   resetOpencodeToolCalls,
 } from '@/lib/hooks/sources/opencode/payloads';
+import { repliedPermissionId } from '@/lib/hooks/sources/opencode/mappers';
 import {
   rememberOpencodePort,
   resetOpencodePortAssignments,
@@ -213,6 +214,23 @@ describe('normalizeEvent against captured frames', () => {
     ).toBe('permission_prompt');
   });
 
+  it('spells the reply notification the way agent-event-state releases on', () => {
+    // Issue #1898. `permission.replied` was unmapped until this Issue, which is
+    // why a dialog answered in the terminal went on reading `waiting` until the
+    // tool call it gated finished. It is the only positive "the dialog is gone"
+    // any of the six tools publishes, and `applyPromptWaitingTransition`
+    // retires its record on exactly this string.
+    const replied = opencodeAgentEventSource.normalizeEvent({
+      payload: frame('permission-replied'),
+    });
+    expect(replied).toMatchObject({ event: 'notification', detail: 'permission_replied' });
+    // The reply names the approval with `requestID`, not `id` — measured, and
+    // the difference is what keeps one dialog's reply from retiring another's.
+    expect(repliedPermissionId(frame('permission-replied'))).toBe(
+      'per_0000000000000000000000000'
+    );
+  });
+
   it('drops unknown frames, counts them, and never throws', () => {
     // `server.heartbeat` is not in the server's own OpenAPI Event union and
     // arrives every ten seconds; a reader that threw would fail six times a
@@ -222,7 +240,6 @@ describe('normalizeEvent against captured frames', () => {
       'server-connected',
       'session-status-busy',
       'session-status-idle',
-      'permission-replied',
       'question-replied',
     ]) {
       expect(() => opencodeAgentEventSource.normalizeEvent({ payload: frame(name) })).not.toThrow();
@@ -232,7 +249,6 @@ describe('normalizeEvent against captured frames', () => {
       'server.heartbeat',
       'server.connected',
       'session.status',
-      'permission.replied',
       'question.replied',
     ]);
   });

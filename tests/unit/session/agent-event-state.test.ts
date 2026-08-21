@@ -240,6 +240,10 @@ describe('structuredEvents exposure (Issue #1722)', () => {
       // Issue #1902: claude sends `tool_input` as an object, so nothing here is
       // ever rewritten. The key is present and null rather than absent.
       toolInputNormalization: null,
+      // Issue #1898: nothing on this session has been adjudicated on the
+      // agent's behalf — claude answers its own hook, so this stays null for it
+      // for the life of the session. Present and null, not absent.
+      permissionDecision: null,
       source: claudeSource,
     });
   });
@@ -270,6 +274,10 @@ describe('structuredEvents exposure (Issue #1722)', () => {
       // Issue #1902: claude sends `tool_input` as an object, so nothing here is
       // ever rewritten. The key is present and null rather than absent.
       toolInputNormalization: null,
+      // Issue #1898: nothing on this session has been adjudicated on the
+      // agent's behalf — claude answers its own hook, so this stays null for it
+      // for the life of the session. Present and null, not absent.
+      permissionDecision: null,
       source: claudeSource,
     });
     expect({ ...after, structuredEvents: null }).toEqual({ ...before, structuredEvents: null });
