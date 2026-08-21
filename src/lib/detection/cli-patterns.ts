@@ -698,6 +698,38 @@ export const GEMINI_THINKING_PATTERN = /[\u2800-\u28FF]|Thinking\.\.\./;
 export const OPENCODE_PROMPT_PATTERN = /Ask anything\.\.\./;
 
 /**
+ * OpenCode idle composer pattern (Issue #1883).
+ *
+ * The `Ask anything...` placeholder as opencode actually draws it: **inside the
+ * input box**, behind the box's own gutter (`\u2503`, or `\u2502` on a lighter
+ * border style). Two measured facts make that row positive evidence that the
+ * composer is empty, rather than the mere absence of a busy marker (design
+ * principle D1 in `docs/design/multi-agent-state-architecture.md`):
+ *
+ * - opencode paints the placeholder **only while the input buffer is empty**.
+ *   The first typed character replaces the whole row — measured live on
+ *   opencode 1.18.20, pane 80x200 (`opencode-live-1883/composer-residual.txt`
+ *   holds `\u2503  echo PREFILLED` where the idle frame holds the placeholder).
+ * - the gutter says the row belongs to the input box. `Ask anything...` printed
+ *   in a response body has no gutter, and reading that as an idle composer is
+ *   the "the phrase is on screen somewhere" inference D1 forbids.
+ *
+ * **Match this against the ANSI-stripped frame BEFORE {@link stripBoxDrawing}**,
+ * which strips the very gutter this pattern anchors on.
+ *
+ * The whitespace runs are `[^\S\n]` (horizontal only) on purpose: plain `\s`
+ * crosses newlines under the `m` flag, which let the gutter of one row pair up
+ * with the phrase several rows below it and matched frames that hold no
+ * composer at all (measured on `phrase-in-response.txt`).
+ *
+ * {@link OPENCODE_PROMPT_PATTERN} stays as it is: `response-checker` and
+ * `OPENCODE_SKIP_PATTERNS` want the bare phrase wherever it lands, because they
+ * are deleting the row from an extracted response, not judging a session.
+ */
+export const OPENCODE_IDLE_COMPOSER_PATTERN =
+  /^[^\S\n]*[\u2502\u2503][^\S\n]*Ask anything\.\.\./m;
+
+/**
  * OpenCode prompt pattern after response completion (Issue #379)
  * Shows "tab agents  ctrl+p commands" in the TUI status bar after a response finishes.
  * Used as extraction stop condition in response-poller.ts [D2-003].
