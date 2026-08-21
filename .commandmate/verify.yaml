@@ -16,6 +16,17 @@ gates:
   - id: unit
     command: "npm run test:unit"
     timeoutSec: 3600
+# e2e ゲートはここに**無い**。宣言したゲートは既定で毎回走るため（スキーマに「宣言はするが
+# 既定では走らない」フラグは無い）、常設すると `wait --verify` の所要が 1 ワーカーあたり
+# 5 分以上伸び、並列オーケストレーションの裁定時間に直結する（CI 実績 E2E 5m16s〜5m39s）。
+# フル e2e は ci-pr.yml が PR ごとに回しており、verify ゲートはその複製ではない。
+# 必要なときは以下を足すか、タスク契約の `verify.gates` に `e2e` を含める。ポートは
+# playwright.config.ts が CM_WORKTREE_INDEX から導出するので、コマンド側に算術は要らない
+# （Issue #1871。実機記録は docs/qa/1871-parallel-e2e-port-collision.md）。
+#
+#   - id: e2e
+#     command: "npm run test:e2e"
+#     timeoutSec: 1800
 options:
   baseRef: origin/develop
   skipInPrimaryCheckout: true
