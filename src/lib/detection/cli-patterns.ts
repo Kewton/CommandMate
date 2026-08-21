@@ -772,10 +772,12 @@ export const OPENCODE_LOADING_PATTERN = /\u2B1D{4,}/;
  *   (`opencode-live-1893/permission-bash.txt`, `…/turn-aborted-no-duration.txt`).
  *
  * Kept loose because three callers want the LINE rather than the verdict:
- * `tui-accumulator.ts`, `response-cleaner.ts` and the turn-boundary counter in
- * `polling/response-checker.ts` all use it to drop the summary row from an
- * extracted response, and the mid-step row has to be dropped too. Renaming it
- * to match that job belongs with #1911, which owns those files.
+ * `tui-accumulator.ts`, `response-cleaner.ts` and `polling/response-checker.ts`
+ * all use it to drop the summary row from an extracted response, and the
+ * mid-step row has to be dropped too. #1911 removed the one caller that used it
+ * as a turn BOUNDARY rather than a line filter (the "second-to-last ▣" anchor,
+ * replaced by {@link findOpenCodeUserEchoEnd}); the name is left alone because
+ * the remaining three callers all want the line.
  */
 export const OPENCODE_RESPONSE_COMPLETE = /\u25A3\s+\w+\s+\u00b7\s+\S+(?:\s+\u00b7\s+(?:[\d]+h\s*)?(?:[\d]+m\s*)?[\d.]+s)?/;
 
@@ -859,6 +861,159 @@ export const OPENCODE_PERMISSION_PATTERN =
  * Filtered from response extraction via OPENCODE_SKIP_PATTERNS.
  */
 export const OPENCODE_PROCESSING_INDICATOR = /esc interrupt/;
+
+/**
+ * OpenCode's composer bottom border: `  ╹▀▀▀▀▀▀…` (Issue #1911).
+ *
+ * `╹` (heavy up) is the corner opencode joins the input box's `┃`
+ * gutter to, and the `▀` run is the box's bottom edge. It is the one row of
+ * the bottom-anchored chrome that can never appear inside a response body, which
+ * makes it the anchor {@link findOpenCodeChromeStart} walks up from.
+ */
+export const OPENCODE_COMPOSER_BOTTOM_BORDER = /^[^\S\n]*╹▀{4,}/;
+
+/**
+ * A row that belongs to one of opencode's boxes, matched by its own gutter
+ * (Issue #1911).
+ *
+ * opencode draws three different boxes with the same `┃` gutter (`│`
+ * on a lighter border style): the echoed USER PROMPT in the transcript, the
+ * COMPOSER pinned to the bottom of the pane, and the PERMISSION DIALOG that
+ * replaces the composer. Which one a matched row belongs to is decided by where
+ * it sits, not by what it says — see {@link findOpenCodeChromeStart} and
+ * {@link findOpenCodeUserEchoEnd}.
+ *
+ * **Match against the ANSI-stripped frame BEFORE {@link stripBoxDrawing}**,
+ * which removes the very gutter this anchors on.
+ */
+export const OPENCODE_GUTTER_ROW_PATTERN = /^[^\S\n]*[│┃]/;
+
+/**
+ * An echoed user prompt row: a gutter row that carries text (Issue #1911).
+ *
+ * The echo block opencode draws for a submitted message is a blank gutter row,
+ * one or more gutter rows holding the message, and another blank gutter row.
+ * This matches the middle ones.
+ */
+export const OPENCODE_USER_ECHO_PATTERN = /^[^\S\n]*[│┃][^\S\n]*\S/;
+
+/**
+ * The status cell of opencode's bottom footer (Issue #1911).
+ *
+ * Measured at the production 80x200 geometry the footer reads
+ * `<cwd>    6.4K (1%) · $ctrl+p` / `commands` while idle and
+ * `⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt   6.3K (1%) · $0.00  ctrl+p commands` while running:
+ * a context-usage cell followed by the cost sigil. Neither
+ * {@link OPENCODE_PROMPT_AFTER_RESPONSE} (`tab agents  ctrl+p commands`, which
+ * opencode only prints on the FIRST idle frame, before any turn has run) nor
+ * {@link OPENCODE_PROCESSING_INDICATOR} covers the idle form, so this row used
+ * to be saved as part of the assistant's reply.
+ *
+ * This is a SECONDARY net. The cwd that shares the row wraps over up to three
+ * further rows that carry no signature at all, so the footer is removed
+ * structurally by {@link findOpenCodeChromeStart}; this pattern only catches the
+ * signed row when that boundary is not available (e.g. a caller holding a
+ * fragment rather than a whole pane).
+ *
+ * Linear, no nested quantifiers — ReDoS safe.
+ */
+export const OPENCODE_FOOTER_STATUS_PATTERN =
+  /\d+(?:\.\d+)?[KMGT]?\s+\(\d+%\)\s+·\s+\$/;
+
+/**
+ * Locate the start of opencode's bottom-anchored chrome within a captured pane
+ * (Issue #1911).
+ *
+ * opencode runs in the alternate screen and reserves the last rows of the pane
+ * for chrome that is never transcript content:
+ *
+ * ```
+ *   ┃                              ← composer box (blank rows + model row),
+ *   ┃  Build · GPT-5.6 Luna …        or the permission dialog that replaces it
+ *   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀   ← composer bottom border
+ *   /private/tmp/…-share-    6.4K (1%) · $ctrl+p   ← footer, cwd wrapped
+ *   work-github-kewton-…                 commands     over up to three rows
+ * ```
+ *
+ * Everything from the returned index down is chrome. This is the opencode twin
+ * of {@link findClaudeChromeStart} and exists for the same reason (#1289): the
+ * footer's cwd rows and the composer's model row were reaching saved responses,
+ * which is defect 1 of #1911.
+ *
+ * Found structurally rather than by matching footer text, because the footer's
+ * text is opencode's to change and two of its four rows (the cwd continuations)
+ * are an arbitrary filesystem path with no signature at all.
+ *
+ * @param lines - Captured pane lines, ANSI-stripped, box drawing intact.
+ *   Trailing blank rows are tolerated.
+ * @returns Index of the first chrome row, or -1 when no chrome is recognisable.
+ */
+export function findOpenCodeChromeStart(lines: string[]): number {
+  let last = lines.length - 1;
+  while (last >= 0 && lines[last].trim() === '') last--;
+  if (last < 0) return -1;
+
+  const walkUpGutter = (from: number): number => {
+    let top = from;
+    while (top - 1 >= 0 && OPENCODE_GUTTER_ROW_PATTERN.test(lines[top - 1])) top--;
+    return top;
+  };
+
+  // The composer's bottom border. Searched from the last row upwards over the
+  // WHOLE pane rather than over the few rows the footer occupies: on the boot
+  // screen opencode centres the composer under its banner (row ~99 of 200) while
+  // the footer stays pinned to the bottom, so a window sized for the footer
+  // misses the border entirely (measured, `opencode-live-1883/boot-idle.txt`).
+  for (let i = last; i >= 0; i--) {
+    if (OPENCODE_COMPOSER_BOTTOM_BORDER.test(lines[i])) {
+      return walkUpGutter(i);
+    }
+  }
+
+  // No border: the permission dialog draws over the composer and its own box
+  // runs to the last row of the pane (measured, `opencode-live-1893/permission-*.txt`).
+  if (OPENCODE_GUTTER_ROW_PATTERN.test(lines[last])) {
+    return walkUpGutter(last);
+  }
+
+  return -1;
+}
+
+/**
+ * Locate the last row of the NEWEST echoed user prompt in a captured pane
+ * (Issue #1911).
+ *
+ * The turn currently being answered starts on the row after this one, so it is
+ * both the extraction anchor (`resolveExtractionStartIndex`'s opencode branch)
+ * and the floor the finished-turn marker has to sit below before a frame counts
+ * as a completed turn (`isOpenCodeComplete`).
+ *
+ * Before #1911 the anchor was "the second-to-last `▣ Build` row", which has two
+ * measured failure modes: on the first turn of a session there is no second row,
+ * so extraction fell back to line 0 and saved the whole pane; and the row it
+ * anchors on belongs to the PREVIOUS turn, so the echoed prompt of the current
+ * one was always included in the reply.
+ *
+ * @param lines - Captured pane lines, ANSI-stripped, box drawing intact.
+ * @param chromeStart - Result of {@link findOpenCodeChromeStart}; the search
+ *   stops above it so the composer's and the permission dialog's own gutter rows
+ *   are never read as an echoed prompt. Pass -1 when no chrome was found.
+ * @returns Index of the echo block's last row, or -1 when no echo is on screen
+ *   (a turn whose head has scrolled out of the alternate-screen pane).
+ */
+export function findOpenCodeUserEchoEnd(lines: string[], chromeStart: number): number {
+  const limit = chromeStart >= 0 ? chromeStart : lines.length;
+
+  for (let i = limit - 1; i >= 0; i--) {
+    if (!OPENCODE_USER_ECHO_PATTERN.test(lines[i])) continue;
+    // The block's trailing blank gutter row(s) belong to the echo, not to the reply.
+    let end = i;
+    while (end + 1 < limit && OPENCODE_GUTTER_ROW_PATTERN.test(lines[end + 1])) end++;
+    return end;
+  }
+
+  return -1;
+}
 
 /**
  * OpenCode TUI selection list pattern (Issue #473, narrowed by Issue #1896).
@@ -961,7 +1116,8 @@ export const OPENCODE_SEPARATOR_PATTERN = /^[\u2503\u2579\u25A3\u2580\u2500\u250
  * OpenCode skip patterns for response cleaning (Issue #379)
  * Lines matching any of these patterns are filtered from extracted responses.
  * Includes: TUI separators, loading indicators, Build summary prefix,
- * status bar prompts, processing indicators, input prompt, and pasted text markers.
+ * status bar prompts, processing indicators, input prompt, the footer's
+ * context/cost status cell (Issue #1911), and pasted text markers.
  */
 export const OPENCODE_SKIP_PATTERNS: readonly RegExp[] = [
   OPENCODE_SEPARATOR_PATTERN,
@@ -970,6 +1126,7 @@ export const OPENCODE_SKIP_PATTERNS: readonly RegExp[] = [
   OPENCODE_PROMPT_AFTER_RESPONSE,
   OPENCODE_PROCESSING_INDICATOR,
   OPENCODE_PROMPT_PATTERN,
+  OPENCODE_FOOTER_STATUS_PATTERN,
   PASTED_TEXT_PATTERN,
 ] as const;
 
