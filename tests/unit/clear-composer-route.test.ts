@@ -64,7 +64,7 @@ describe('POST /api/worktrees/[id]/clear-composer (Issue #1879)', () => {
     );
     vi.mocked(hasSession).mockResolvedValue(true);
     vi.mocked(clearComposer).mockResolvedValue({
-      cleared: true, passes: 1, state: 'empty', remainingText: '',
+      cleared: true, passes: 1, state: 'empty', remainingText: '', discardedText: 'echo PREFILLED',
     });
   });
 
@@ -96,7 +96,7 @@ describe('POST /api/worktrees/[id]/clear-composer (Issue #1879)', () => {
     // A truthful failure is the point: the caller must not be told the box is
     // empty when the loop hit its cap with text still in it.
     vi.mocked(clearComposer).mockResolvedValue({
-      cleared: false, passes: 12, state: 'content', remainingText: 'echo PREFILLED',
+      cleared: false, passes: 12, state: 'content', remainingText: 'echo PREFILLED', discardedText: 'echo PREFILLED',
     });
 
     const res = await POST(createRequest({ cliToolId: 'claude' }), defaultParams);

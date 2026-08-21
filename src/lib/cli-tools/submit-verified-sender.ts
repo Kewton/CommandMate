@@ -37,6 +37,21 @@
  * behind (detonating on the next send). The decision is now three-valued —
  * submitted / pending / replaced — and a `replaced` verdict clears the input
  * line and THROWS instead of resending Enter (see classifySubmit).
+ *
+ * Issue #1880 closes the hole on the OTHER side of the send. Everything above
+ * verifies what happens after Enter; nothing looked at what was already in the
+ * composer before the body was typed. `sendKeys` injects the body as plain
+ * keystrokes at the TUI's CURRENT CURSOR POSITION, so residual text is spliced
+ * into the body instead of being replaced by it. #1878 measured four shapes of
+ * that damage: content mutation (`echo PREFILLED` + body), slash-command
+ * demotion (a `/cost` body typed after residual is no longer `/`-initial),
+ * order inversion when the cursor sat at column 0, and — worst — total loss of
+ * the body when the RESIDUAL started with `/` (`/costZZTOP…` is an
+ * `Unknown command`, so the message never reaches the model at all). All four
+ * reported `exit 0` / `Message sent.` / `sessionStatus: ready`, i.e. they were
+ * indistinguishable from a clean send by every signal a caller has. The
+ * composer is therefore emptied and read back BEFORE the body is typed — see
+ * {@link clearComposerBeforeSend}.
  */
 
 import { sendKeys, sendSpecialKeys, capturePane, clearInputLine } from '../tmux/tmux';
@@ -48,6 +63,7 @@ import {
   TUI_MESSAGE_PROCESSED_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
 import { createLogger } from '@/lib/logger';
+import { clearComposer } from '@/lib/session/composer-clear';
 
 const logger = createLogger('cli-tools/submit-verified-sender');
 
@@ -255,6 +271,91 @@ export function isSubmitted(output: string, cliToolId: CLIToolType, message: str
 }
 
 /**
+ * CLIs whose composer this layer is allowed to empty before typing (Issue #1880).
+ *
+ * The gate is `extractComposerText`'s reach, not a preference: it short-circuits
+ * every tool but claude to `unsupported_tool`, so for codex/gemini/copilot/
+ * opencode/vibe-local/antigravity {@link clearComposer} can never observe an
+ * empty box and always returns `cleared: false`. Reading that as "the clear
+ * failed" and refusing to send would take every one of those tools offline
+ * while claude kept working and the unit tests stayed green — so those tools do
+ * not enter the clear path at all: no read-back capture, no `C-e`+`C-u`, no new
+ * failure mode. Byte-for-byte the pre-#1880 send.
+ *
+ * Adding a tool here means teaching `extractComposerText` its input-box layout
+ * first. Blind `C-u` into an input line nobody has measured is how the residual
+ * problem gets replaced with a data-loss problem.
+ */
+const COMPOSER_CLEAR_SUPPORTED_TOOLS: ReadonlySet<string> = new Set<CLIToolType>(['claude']);
+
+/**
+ * Empty the composer before the body is typed into it (Issue #1880).
+ *
+ * Delegates the how to {@link clearComposer} (#1879), which already sends
+ * `C-e`+`C-u` — the `C-e` is what makes a column-0 cursor clearable — in a
+ * read-back-verified loop, so a multi-row residual is not left half-eaten and
+ * claude's dim ghost suggestions do not spin it to its cap. This function is the
+ * policy layer on top: which tools take part, and which outcomes are failures.
+ *
+ * Exactly one outcome is a failure: **claude, still reporting `content` after
+ * the pass cap**. That is a composer this code demonstrably could not empty, so
+ * typing into it would splice the body into whatever is there and then report
+ * success — the defect #1880 exists to remove. Everything else proceeds:
+ *
+ *   - `unsupported_tool` — never reached (see COMPOSER_CLEAR_SUPPORTED_TOOLS),
+ *     but it means "this layer cannot read that box", not "the box is dirty".
+ *   - `no_composer` — the input box is not on screen (a full-screen dialog, a
+ *     pager, a session still starting). Nothing was inspected and nothing was
+ *     sent; refusing here would invent a second way for sends to stall, on a
+ *     frame that carries no evidence of residual text.
+ *   - `empty` / `ghost` — verified clean, with or without passes.
+ *
+ * A throw from {@link clearComposer} itself is a tmux failure (`capture-pane` or
+ * `send-keys` returned non-zero) and is deliberately NOT caught: the very next
+ * thing this module does is drive the same tmux binary against the same session,
+ * and swallowing it would mean typing into a composer whose contents are
+ * unknown while still reporting success.
+ *
+ * @throws Error when claude's composer still holds text after the pass cap.
+ */
+export async function clearComposerBeforeSend(
+  sessionName: string,
+  cliToolId: CLIToolType
+): Promise<void> {
+  if (!COMPOSER_CLEAR_SUPPORTED_TOOLS.has(cliToolId)) return;
+
+  const result = await clearComposer(sessionName, cliToolId);
+
+  if (result.state === 'content') {
+    logger.error('pre-send-composer-clear-failed', {
+      sessionName,
+      cliToolId,
+      passes: result.passes,
+      remainingLength: result.remainingText.length,
+      remainingText: result.remainingText,
+    });
+    throw new Error(
+      `Composer for session ${sessionName} still holds unsent text after ${result.passes} clear passes; ` +
+        'refusing to type the message, which would be concatenated with it (Issue #1880).'
+    );
+  }
+
+  if (result.passes > 0) {
+    // The only record of what was thrown away. `remainingText` is the FINAL
+    // read and is empty on this path by definition, which is why clearComposer
+    // reports `discardedText` separately.
+    logger.warn('pre-send-composer-cleared', {
+      sessionName,
+      cliToolId,
+      passes: result.passes,
+      state: result.state,
+      discardedLength: result.discardedText.length,
+      discardedText: result.discardedText,
+    });
+  }
+}
+
+/**
  * Type a message body and submit it, then verify the submit actually happened.
  *
  * The body and Enter are always separate tmux commands (never batched), so the
@@ -279,6 +380,11 @@ export async function sendMessageWithSubmitVerification(
     verifyAttempts = DEFAULT_VERIFY_ATTEMPTS,
     verifyDelayMs = TUI_MESSAGE_PROCESSED_WAIT_MS,
   } = params;
+
+  // 0. Empty the composer first (Issue #1880). The body below is typed at the
+  //    TUI's current cursor position, so anything already in the box would be
+  //    spliced into it. Throws for a claude composer that could not be emptied.
+  await clearComposerBeforeSend(sessionName, cliToolId);
 
   // 1. Type the body only — never send Enter in the same tmux command.
   await sendKeys(sessionName, message, false);

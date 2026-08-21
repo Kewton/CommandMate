@@ -52,7 +52,7 @@ describe('clearComposer (Issue #1879)', () => {
     });
 
     expect(sendClear).not.toHaveBeenCalled();
-    expect(result).toEqual({ cleared: true, passes: 0, state: 'empty', remainingText: '' });
+    expect(result).toEqual({ cleared: true, passes: 0, state: 'empty', remainingText: '', discardedText: '' });
     // Nothing was sent, so nothing invalidated the poller's cached frame.
     expect(invalidateCache).not.toHaveBeenCalled();
   });
@@ -84,7 +84,7 @@ describe('clearComposer (Issue #1879)', () => {
 
     expect(sendClear).toHaveBeenCalledTimes(1);
     expect(sendClear).toHaveBeenCalledWith('sess');
-    expect(result).toEqual({ cleared: true, passes: 1, state: 'empty', remainingText: '' });
+    expect(result).toEqual({ cleared: true, passes: 1, state: 'empty', remainingText: '', discardedText: 'echo PREFILLED' });
   });
 
   it('keeps going while the composer still holds text (multi-row residual)', async () => {
@@ -129,6 +129,33 @@ describe('clearComposer (Issue #1879)', () => {
     expect(result.cleared).toBe(false);
     expect(result.state).toBe('content');
     expect(result.remainingText).toBe('echo PREFILLED');
+  });
+
+  it('reports what it destroyed, which a successful clear cannot read back (Issue #1880)', async () => {
+    // `remainingText` is the FINAL read, so on a successful clear it is '' and
+    // the text is gone. The pre-send clear in submit-verified-sender has to log
+    // what it threw away on the user's behalf, so the FIRST read is kept too —
+    // and it is the first read that holds every row of a multi-row residual.
+    const frames = [TWO_ROWS, ONE_ROW, ONE_ROW, EMPTY];
+    const result = await clearComposer('sess', 'claude', {
+      capture: async () => frames.shift() ?? EMPTY,
+      sendClear: vi.fn(),
+      delay: noDelay,
+    });
+
+    expect(result.cleared).toBe(true);
+    expect(result.remainingText).toBe('');
+    expect(result.discardedText).toBe('RESIDLINE1\nRESIDLINE2');
+  });
+
+  it('reports no discarded text when the composer started out empty', async () => {
+    const result = await clearComposer('sess', 'claude', {
+      capture: async () => EMPTY,
+      sendClear: vi.fn(),
+      delay: noDelay,
+    });
+
+    expect(result.discardedText).toBe('');
   });
 
   it('defaults the cap to the documented value', () => {
