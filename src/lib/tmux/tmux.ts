@@ -9,6 +9,7 @@ import { invalidateCache } from './tmux-capture-cache';
 import { validateSessionName } from '@/lib/cli-tools/validation';
 import { TMUX_HISTORY_LIMIT, TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '@/config/tmux-pane-config';
 import { createLogger } from '@/lib/logger';
+import { NAVIGATION_KEY_VALUES, type NavigationKey } from '@/types/terminal-keys';
 
 const execFileAsync = promisify(execFile);
 const logger = createLogger('tmux');
@@ -779,24 +780,16 @@ export async function clearComposerLine(sessionName: string): Promise<void> {
  * Allowed navigation key names for special-keys API validation.
  * Used for TUI navigation sequences (e.g., Up/Down cursor, Enter/Escape selection).
  *
+ * Declared in `@/types/terminal-keys` and re-exported here so server-side callers
+ * keep their existing import path. The declaration moved out of this module in
+ * Issue #1922: the two client components that type their key props with
+ * `NavigationKey` must not import from `src/lib/tmux/**` (§4 D4).
+ *
  * Separate from SPECIAL_KEY_VALUES (sendSpecialKey() control keys) and
  * ALLOWED_SPECIAL_KEYS (sendSpecialKeys() broader TUI key set).
- * This as const array is exported for route-level validation (immutable, DRY).
- *
- * [DR3-001] Named NAVIGATION_KEY_VALUES to avoid collision with existing SPECIAL_KEY_VALUES.
- * [DR2-004] Exported as as const array + type guard (not Set) for immutability guarantee.
  */
-export const NAVIGATION_KEY_VALUES = [
-  'Up', 'Down', 'Left', 'Right', 'Enter', 'Escape', 'Tab', 'BTab',
-  // Issue #1017: Codex pager / edit-previous mode keys surfaced by NavigationButtons.
-  // 'q' is the pager quit key (literal char). PageUp/PageDown/Home/End are tmux named keys.
-  'PageUp', 'PageDown', 'Home', 'End', 'q',
-] as const;
-
-/**
- * Navigation key type derived from NAVIGATION_KEY_VALUES.
- */
-export type NavigationKey = typeof NAVIGATION_KEY_VALUES[number];
+export { NAVIGATION_KEY_VALUES };
+export type { NavigationKey };
 
 /**
  * Type guard for navigation key validation (special-keys API).
