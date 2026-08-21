@@ -183,11 +183,14 @@ describe('bookkeeping', () => {
     gate.observe('session.status', {
       properties: { sessionID: 'ses_a', status: { type: 'busy' } },
     });
-    // `ses_b` was never armed, so its idle is not `ses_a`'s completion.
+    // `ses_b`'s idle is not `ses_a`'s completion. Issue #1900 renamed the
+    // reason: while `ses_a` — the primary — is still busy, the frame is
+    // rejected for belonging to another session before it is ever asked
+    // whether *this* connection watched it start. Suppressed either way.
     expect(gate.observe('session.idle', { properties: { sessionID: 'ses_b' } })).toEqual({
       kind: 'suppressed',
       sessionId: 'ses_b',
-      reason: 'never-armed',
+      reason: 'foreign-session',
     });
     expect(gate.observe('session.idle', { properties: { sessionID: 'ses_a' } }).kind).toBe(
       'completed'

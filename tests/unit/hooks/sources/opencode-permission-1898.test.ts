@@ -47,7 +47,11 @@ vi.mock('@/lib/hooks/sources/opencode/client', async (importOriginal) => {
     fetchOpencodePendingQuestions: vi.fn().mockResolvedValue([]),
     replyOpencodePermission: vi.fn().mockResolvedValue(true),
     replyOpencodeQuestion: vi.fn().mockResolvedValue(true),
-    readOpencodeEventStream: vi.fn(),
+    fetchOpencodeSessionStatuses: vi.fn().mockResolvedValue({}),
+    probeOpencodeHealth: vi
+      .fn()
+      .mockResolvedValue({ kind: 'healthy', health: { healthy: true, version: '1.18.3' } }),
+    openOpencodeEventStream: vi.fn(),
   };
 });
 
@@ -64,7 +68,7 @@ vi.mock('@/lib/hooks/agent-event-service', () => ({
     .mockResolvedValue({ taskId: null, taskEventApplied: false, verificationRunId: null }),
 }));
 
-import { readOpencodeEventStream, replyOpencodePermission, type OpencodeFrame } from '@/lib/hooks/sources/opencode/client';
+import { openOpencodeEventStream, replyOpencodePermission, type OpencodeFrame } from '@/lib/hooks/sources/opencode/client';
 import { ingestOpencodeEvent } from '@/lib/hooks/sources/opencode/ingest';
 import { opencodeAgentEventSource } from '@/lib/hooks/sources/opencode/source';
 import { resetOpencodeToolCalls } from '@/lib/hooks/sources/opencode/payloads';
@@ -152,7 +156,7 @@ async function subscribe(): Promise<void> {
       });
     },
     (raw) => opencodeAgentEventSource.normalizeEvent(raw),
-    PORT
+    { port: PORT }
   );
 }
 
@@ -172,8 +176,8 @@ beforeEach(() => {
   clearAgentStopEvents();
   clearPermissionDecisions();
   rememberOpencodePort(TARGET, PORT, '/tmp/wt');
-  vi.mocked(readOpencodeEventStream).mockImplementation((_port: number, signal: AbortSignal) =>
-    pump.stream(signal)
+  vi.mocked(openOpencodeEventStream).mockImplementation(
+    async (_port: number, signal: AbortSignal) => pump.stream(signal)
   );
   vi.mocked(replyOpencodePermission).mockResolvedValue(true);
   // Auto-Yes off: the pre-#1898 default, and the branch where a human really is

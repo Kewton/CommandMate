@@ -238,6 +238,11 @@ async function listOpencodePending(target: AgentInstanceRef): Promise<PendingDec
  * Note what `busy` includes: a session blocked on an approval reads `busy`
  * (#1758 §5.3.1), because from the server's point of view the turn has not
  * ended. This answers "is the turn over", never "is a human needed".
+ *
+ * The aggregate of the same `GET /session/status` the reconnect reads per
+ * session (#1900). Callers outside this directory hold an instance rather than
+ * a session id, so aggregating is the only answer they can use; the reconnect
+ * needs the detail, and both go through one reader in `./client`.
  */
 async function probeOpencodeActivity(
   target: AgentInstanceRef
@@ -312,7 +317,11 @@ export const opencodeAgentEventSource: AgentEventSource = definePullEventSource(
     // window that loses the `stop` of a short turn.
     eventIdentity: 'permission-id',
     // pull: the stream can drop, and `GET /session/status` is how a reconnect
-    // finds out whether the conversation is still working (#1900).
+    // finds out whether the conversation is still working (#1900). Read by
+    // `./subscription`, which re-arms a `busy` session and synthesises the
+    // `stop` of one that finished off-stream; flipping this to `'none'` puts
+    // both back to the pre-#1900 behaviour, which is what the mutation case in
+    // `tests/unit/hooks/sources/opencode-resilience-1900.test.ts` asserts.
     resync: 'session-status-poll',
   },
 
@@ -330,10 +339,16 @@ export const opencodeAgentEventSource: AgentEventSource = definePullEventSource(
   parsePermissionRequest: parseOpencodePermissionRequest,
   parseQuestion: parseOpencodeQuestion,
 
-  // Self-reference resolves at call time, which is after this const is bound.
+  // Self-reference resolves at call time, which is after this const is bound —
+  // which is also how the reconnect loop gets to read a capability declared in
+  // the same object literal it is declared in (#1900). It is handed across
+  // rather than imported because `./subscription` is imported *by* this module.
   subscribe: (target, onEvent) =>
-    openOpencodeSubscription(target, onEvent, (raw) =>
-      opencodeAgentEventSource.normalizeEvent(raw)
+    openOpencodeSubscription(
+      target,
+      onEvent,
+      (raw) => opencodeAgentEventSource.normalizeEvent(raw),
+      { resync: opencodeAgentEventSource.capabilities.resync }
     ),
 
   decide: decideOpencode,

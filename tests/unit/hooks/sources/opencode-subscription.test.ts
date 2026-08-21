@@ -22,13 +22,16 @@ vi.mock('@/lib/hooks/sources/opencode/client', async (importOriginal) => {
     ...actual,
     fetchOpencodePendingPermissions: vi.fn().mockResolvedValue([]),
     fetchOpencodePendingQuestions: vi.fn().mockResolvedValue([]),
-    readOpencodeEventStream: vi.fn(),
+    fetchOpencodeSessionStatuses: vi.fn().mockResolvedValue({}),
+    probeOpencodeHealth: vi.fn(),
+    openOpencodeEventStream: vi.fn(),
   };
 });
 
 import {
   fetchOpencodePendingPermissions,
-  readOpencodeEventStream,
+  openOpencodeEventStream,
+  probeOpencodeHealth,
   type OpencodeFrame,
 } from '@/lib/hooks/sources/opencode/client';
 import {
@@ -76,7 +79,7 @@ function subscribe() {
     TARGET,
     (event) => received.push(event),
     (raw) => opencodeAgentEventSource.normalizeEvent(raw),
-    PORT
+    { port: PORT }
   );
 }
 
@@ -88,10 +91,18 @@ beforeEach(() => {
   queued = [];
   received = [];
   vi.mocked(fetchOpencodePendingPermissions).mockResolvedValue([]);
-  vi.mocked(readOpencodeEventStream).mockImplementation((_port: number, signal: AbortSignal) => {
-    const next = queued.shift() ?? silentStream(signal);
-    return next(signal);
+  // Issue #1900: the reconnect asks who is on the port before it trusts the
+  // stream. Unmocked this would be a real request to a closed port.
+  vi.mocked(probeOpencodeHealth).mockResolvedValue({
+    kind: 'healthy',
+    health: { healthy: true, version: '1.18.3' },
   });
+  vi.mocked(openOpencodeEventStream).mockImplementation(
+    async (_port: number, signal: AbortSignal) => {
+      const next = queued.shift() ?? silentStream(signal);
+      return next(signal);
+    }
+  );
 });
 
 afterEach(() => {
@@ -207,7 +218,7 @@ describe('turn completion', () => {
     await subscribe();
 
     // Nothing to wait for, so drive one full stream lifecycle instead.
-    await vi.waitFor(() => expect(vi.mocked(readOpencodeEventStream).mock.calls.length).toBe(1));
+    await vi.waitFor(() => expect(vi.mocked(openOpencodeEventStream).mock.calls.length).toBe(1));
     expect(received.filter((event) => event.event === 'stop')).toHaveLength(0);
   });
 });
@@ -254,7 +265,7 @@ describe('losing the connection', () => {
     await subscribe();
 
     await vi.waitFor(
-      () => expect(vi.mocked(readOpencodeEventStream).mock.calls.length).toBeGreaterThanOrEqual(2),
+      () => expect(vi.mocked(openOpencodeEventStream).mock.calls.length).toBeGreaterThanOrEqual(2),
       { timeout: 4000 }
     );
     await vi.waitFor(() => expect(getOpencodeLiveness(TARGET).state).toBe('lost'));
@@ -287,7 +298,7 @@ describe('re-sync', () => {
     await subscribe();
 
     await vi.waitFor(
-      () => expect(vi.mocked(readOpencodeEventStream).mock.calls.length).toBeGreaterThanOrEqual(2),
+      () => expect(vi.mocked(openOpencodeEventStream).mock.calls.length).toBeGreaterThanOrEqual(2),
       { timeout: 4000 }
     );
     expect(received).toHaveLength(1);
@@ -304,7 +315,7 @@ describe('lifecycle', () => {
       (raw) => opencodeAgentEventSource.normalizeEvent(raw)
     );
 
-    expect(vi.mocked(readOpencodeEventStream)).not.toHaveBeenCalled();
+    expect(vi.mocked(openOpencodeEventStream)).not.toHaveBeenCalled();
     expect(subscription.liveness).toEqual({ state: 'unknown' });
     expect(isOpencodeSubscribed(TARGET)).toBe(false);
   });
@@ -312,10 +323,10 @@ describe('lifecycle', () => {
   it('re-uses the open stream instead of opening a second one', async () => {
     // Two streams would deliver every event twice, and nothing would error.
     await subscribe();
-    await vi.waitFor(() => expect(vi.mocked(readOpencodeEventStream)).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(vi.mocked(openOpencodeEventStream)).toHaveBeenCalledTimes(1));
     await subscribe();
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(vi.mocked(readOpencodeEventStream)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(openOpencodeEventStream)).toHaveBeenCalledTimes(1);
   });
 
   it('stops delivering after close', async () => {

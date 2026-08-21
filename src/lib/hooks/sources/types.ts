@@ -397,8 +397,18 @@ export interface AgentSourceCapabilities {
    * missed. Push sources answer `'none'` — a hook that was dropped is gone, and
    * there is nothing to poll.
    */
-  readonly resync: 'none' | 'session-status-poll';
+  readonly resync: SourceResync;
 }
+
+/**
+ * The value {@link AgentSourceCapabilities.resync} declares.
+ *
+ * Named rather than spelled inline because the reconnect loop that obeys it
+ * lives in `sources/opencode/subscription` and is imported *by* the source that
+ * declares it, so the value has to be handed across that edge as a parameter.
+ * A second inline copy of the union would be a second place to widen it.
+ */
+export type SourceResync = 'none' | 'session-status-poll';
 
 /**
  * Everything {@link AgentEventSource.prepareLaunch} is given (Issue #1846).
