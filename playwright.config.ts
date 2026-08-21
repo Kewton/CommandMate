@@ -3,6 +3,7 @@ import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { resolveE2EPort } from './tests/e2e/fixtures/e2e-port';
 
 /**
  * Playwright configuration.
@@ -36,33 +37,16 @@ import path from 'path';
  * os.tmpdir() resolves under /var on macOS and /tmp on Linux.
  *
  * Override the port with `CM_E2E_PORT` when 3177 is taken. Port 3000 is rejected.
+ *
+ * [Issue #1871] (1) alone is only isolation from a *live* server, not from a
+ * sibling *E2E run*: two worktrees verified in parallel both boot on 3177 and
+ * the second dies on the bind, which reads as `GATE e2e FAIL exit=1` — the same
+ * thing a broken branch reads as. So the port is derived per worktree from
+ * `CM_WORKTREE_INDEX`, the number the verification runner claims for each
+ * worktree (Issue #1771). The rule lives in tests/e2e/fixtures/e2e-port.ts,
+ * which is unit-tested; this module cannot be, because importing it mkdirs the
+ * scratch dir and runs git.
  */
-
-const DEFAULT_E2E_PORT = 3177;
-
-/** The port a developer's real CommandMate instance uses. Never test against it. */
-const FORBIDDEN_PORT = 3000;
-
-function resolveE2EPort(): number {
-  const raw = process.env.CM_E2E_PORT;
-  if (raw === undefined || raw === '') {
-    return DEFAULT_E2E_PORT;
-  }
-
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < 1024 || parsed > 65535) {
-    throw new Error(
-      `CM_E2E_PORT must be an integer between 1024 and 65535, received: ${raw}`
-    );
-  }
-  if (parsed === FORBIDDEN_PORT) {
-    throw new Error(
-      `CM_E2E_PORT must not be ${FORBIDDEN_PORT}: that is the default CommandMate port. ` +
-        `Pointing E2E at it risks driving a live server and its production DB (Issue #1180).`
-    );
-  }
-  return parsed;
-}
 
 const PORT = resolveE2EPort();
 
