@@ -166,10 +166,13 @@ describe('SELECTION_LIST_REASONS Set', () => {
     expect(SELECTION_LIST_REASONS.has(STATUS_REASON.CODEX_PAGER)).toBe(true);
     // Issue #1829: codex's hooks review screens, whose only exits are `t`/`esc`.
     expect(SELECTION_LIST_REASONS.has(STATUS_REASON.CODEX_HOOKS_REVIEW)).toBe(true);
+    // Issue #1893: opencode's permission dialog — a ←/→ button strip that a
+    // typed option number does not drive.
+    expect(SELECTION_LIST_REASONS.has(STATUS_REASON.OPENCODE_PERMISSION_PROMPT)).toBe(true);
   });
 
-  it('should have exactly 7 entries', () => {
-    expect(SELECTION_LIST_REASONS.size).toBe(7);
+  it('should have exactly 8 entries', () => {
+    expect(SELECTION_LIST_REASONS.size).toBe(8);
   });
 
   it('should not contain unrelated reasons', () => {
