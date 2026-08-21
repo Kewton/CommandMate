@@ -89,6 +89,17 @@ export function createRespondCommand(): Command {
           // because the other reasons leave the answer's fate unknown.
           const refusedBeforeSending =
             reason === 'unresolvable_answer' || reason === 'answer_out_of_range';
+          // Issue #1898: the verdict was addressed to the agent's own API and
+          // the POST did not land. Distinct from the two above — the answer was
+          // resolved and an attempt was made — and distinct from a keystroke,
+          // whose fate is never knowable.
+          if (reason === 'decision_not_delivered') {
+            console.error(
+              `Error: The approval could not be delivered to the agent (reason: ${reason}). ` +
+                'The dialog is still open; answer it in the terminal.',
+            );
+            process.exit(ExitCode.UNEXPECTED_ERROR);
+          }
           if (refusedBeforeSending) {
             console.error(`Error: Answer was not sent. Reason: ${reason}${result.message ? ` (${result.message})` : ''}`);
           } else {
@@ -105,7 +116,16 @@ export function createRespondCommand(): Command {
         // Issue #1681: audit trail — print which option was actually selected.
         const resolved = result?.resolved;
         if (resolved) {
-          if (resolved.via === 'semantic') {
+          if (resolved.via === 'structured-decision') {
+            // Issue #1898: no key was sent. The verdict went to the agent's own
+            // API by decision id, which is the only way an opencode approval can
+            // be answered at all — worth saying, because "Response sent." on
+            // this path would read as "a 1 was typed into the pane".
+            console.log(
+              `Answered approval ${resolved.decisionId ?? '(unknown id)'} with ` +
+                `option ${resolved.optionNumber}: ${resolved.optionLabel}`,
+            );
+          } else if (resolved.via === 'semantic') {
             console.log(`Resolved "${answer}" to option ${resolved.optionNumber}: ${resolved.optionLabel}`);
           } else if (resolved.optionNumber !== undefined) {
             console.log(`Selected default option ${resolved.optionNumber}: ${resolved.optionLabel}`);

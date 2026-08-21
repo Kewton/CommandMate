@@ -79,6 +79,72 @@ describe('wait command action', () => {
     expect(output.question).toBe('Continue?');
   });
 
+  it('reports the verdicts a structured approval accepts (Issue #1898)', async () => {
+    // The degraded `unclassified` payload carries no screen options — nothing
+    // parsed the frame — but for a source whose approvals are answered by
+    // decision id it carries `decisionOptions`, which a caller CAN act on
+    // (`commandmate respond wt1 1`). Reporting an empty list here told a
+    // pipeline a human was needed and gave it nothing to hand the human.
+    const promptOutput = {
+      ...baseOutput,
+      isRunning: true,
+      isPromptWaiting: true,
+      sessionStatus: 'waiting' as const,
+      cliToolId: 'opencode',
+      promptData: {
+        type: 'unclassified',
+        question: 'A dialog is open in wt1 …',
+        options: [],
+        status: 'pending',
+        decisionOptions: [
+          { number: 1, label: 'Allow once', reply: 'once' },
+          { number: 2, label: 'Allow always', reply: 'always' },
+          { number: 3, label: 'Reject', reply: 'reject' },
+        ],
+      },
+    };
+    mockFetchSequence([{ data: promptOutput }]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    const cmd = createWaitCommand();
+    await cmd.parseAsync(['node', 'wait', 'wt1']);
+
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+    const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
+    expect(output.type).toBe('unclassified');
+    expect(output.options).toEqual([
+      { number: 1, label: 'Allow once', reply: 'once' },
+      { number: 2, label: 'Allow always', reply: 'always' },
+      { number: 3, label: 'Reject', reply: 'reject' },
+    ]);
+  });
+
+  it('keeps the scraper’s own options when there are any (Issue #1898)', async () => {
+    // `decisionOptions` is a fallback, never an override: a parsed prompt has
+    // real screen options and answering it means typing one of THOSE.
+    const promptOutput = {
+      ...baseOutput,
+      isRunning: true,
+      isPromptWaiting: true,
+      sessionStatus: 'waiting' as const,
+      promptData: {
+        type: 'multiple_choice',
+        question: 'Continue?',
+        options: [{ number: 1, label: 'Yes' }],
+        status: 'pending',
+        decisionOptions: [{ number: 1, label: 'Allow once', reply: 'once' }],
+      },
+    };
+    mockFetchSequence([{ data: promptOutput }]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    const cmd = createWaitCommand();
+    await cmd.parseAsync(['node', 'wait', 'wt1']);
+
+    const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
+    expect(output.options).toEqual([{ number: 1, label: 'Yes' }]);
+  });
+
   it('rejects invalid worktree ID', async () => {
     const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
     const cmd = createWaitCommand();
