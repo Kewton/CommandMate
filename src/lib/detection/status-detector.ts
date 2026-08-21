@@ -24,7 +24,7 @@
  * coupling via a minimal DTO/projection type.
  */
 
-import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_IDLE_COMPOSER_PATTERN, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, readCopilotStatusBar, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN, CODEX_APPROVAL_FOOTER_PATTERN, CODEX_PAGER_FOOTER_PATTERN, CODEX_STATUS_BAR_PATTERN, getCodexLifecycleDialog, CLAUDE_INTERRUPT_HINT_PATTERN, ANTIGRAVITY_SELECTION_LIST_PATTERN } from './cli-patterns';
+import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_TURN_COMPLETE_PATTERN, OPENCODE_PROCESSING_INDICATOR, OPENCODE_IDLE_COMPOSER_PATTERN, OPENCODE_PERMISSION_PATTERN, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, readCopilotStatusBar, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN, CODEX_APPROVAL_FOOTER_PATTERN, CODEX_PAGER_FOOTER_PATTERN, CODEX_STATUS_BAR_PATTERN, getCodexLifecycleDialog, CLAUDE_INTERRUPT_HINT_PATTERN, ANTIGRAVITY_SELECTION_LIST_PATTERN } from './cli-patterns';
 import { detectPrompt } from './prompt-detector';
 import { normalizeTuiFrameForDetection } from './tui-detection-frame';
 import type { PromptDetectionResult } from './prompt-detector';
@@ -102,6 +102,8 @@ export const STATUS_REASON = {
   THINKING_INDICATOR: 'thinking_indicator',
   OPENCODE_PROCESSING_INDICATOR: 'opencode_processing_indicator',
   OPENCODE_SELECTION_LIST: 'opencode_selection_list',
+  /** Issue #1893: opencode's permission dialog — an arrow-key button strip. */
+  OPENCODE_PERMISSION_PROMPT: 'opencode_permission_prompt',
   CLAUDE_SELECTION_LIST: 'claude_selection_list',
   COPILOT_SELECTION_LIST: 'copilot_selection_list',
   CODEX_SELECTION_LIST: 'codex_selection_list',
@@ -125,6 +127,10 @@ export const STATUS_REASON = {
  */
 export const SELECTION_LIST_REASONS = new Set<string>([
   STATUS_REASON.OPENCODE_SELECTION_LIST,
+  // Issue #1893: opencode's permission dialog is a horizontal button strip that
+  // only ←/→ + Enter drive — typing an option number does nothing (measured on
+  // 1.18.21), so it is a `menu`, not something `respond <id> N` can answer.
+  STATUS_REASON.OPENCODE_PERMISSION_PROMPT,
   STATUS_REASON.CLAUDE_SELECTION_LIST,
   STATUS_REASON.COPILOT_SELECTION_LIST,
   STATUS_REASON.CODEX_SELECTION_LIST,
@@ -593,10 +599,51 @@ export function detectSessionStatus(
   // Standard windowed checks (last N lines) only see footer/padding, never the content area.
   //
   // Detection strategy:
+  // A0. Permission dialog button strip → waiting (Issue #1893; first, see below)
   // A. "esc interrupt" in footer → actively processing (running)
   // B. Find footer boundary via "ctrl+t" keybinding line, extract content above it, check for thinking → running
-  // C. Same content window, check for ▣ Build completion → ready
+  // C. Same content window, check for a selection list → waiting
+  // D. Same content window, check for ▣ Build completion WITH a duration → ready
+  // E. Idle composer placeholder inside the input box gutter → ready (Issue #1883)
   if (cliToolId === 'opencode') {
+    // A0. Permission dialog (Issue #1893) — ahead of every other opencode branch.
+    //
+    // opencode asks for tool permission with a bottom-anchored box whose button
+    // strip reads "Allow once   Allow always   Reject". It has no number, no
+    // (y/n) and no "press enter to confirm" footer, so `detectPrompt` at step 1
+    // answered `isPrompt: false` and this block fell through to branch D — which
+    // matched the `▣ Build · <model>` row opencode draws for the step that is
+    // WAITING on this very dialog and published the blocked session as
+    // `ready`/`opencode_response_complete`. `wait` then reported a false
+    // completion, the sidebar went idle and the send guard opened.
+    //
+    // It is checked before branch A (`esc interrupt`) and before branch D on
+    // purpose: a dialog is the agent blocked on a human whatever else is on the
+    // pane, and `permission-after-complete.txt` is a live frame where the box is
+    // open with a genuinely finished `· 2.3s` marker still in the transcript
+    // above it — branch D would win that frame on ordering alone.
+    //
+    // `hasActivePrompt` stays FALSE and the reason joins SELECTION_LIST_REASONS,
+    // which is the `menu` half of the #1786 taxonomy ("only the terminal can
+    // drive it") rather than the `prompt` half ("the app can answer this for
+    // you"). That is a measurement, not a preference: on opencode 1.18.21 the
+    // strip is driven by ←/→ + Enter and typing a number does nothing at all
+    // (the button row is byte-identical before and after `3` is sent). Synthesising
+    // `1. Allow once / 2. Allow always / 3. Reject` here would have made
+    // `respond <id> 3` send the text "3" — swallowed — followed by Enter, which
+    // confirms whatever is highlighted: asking to REJECT would have APPROVED.
+    // `wait` still stops for it (`isSelectionListActive` → exit 10) and the UI
+    // renders NavigationButtons, which send exactly the keys the strip takes.
+    if (OPENCODE_PERMISSION_PATTERN.test(lastLines)) {
+      return {
+        status: 'waiting',
+        confidence: 'high',
+        reason: STATUS_REASON.OPENCODE_PERMISSION_PROMPT,
+        hasActivePrompt: false,
+        promptDetection,
+      };
+    }
+
     // A. Check footer for processing indicator ("esc interrupt" replaces "ctrl+t variants..." during processing)
     if (OPENCODE_PROCESSING_INDICATOR.test(lastLines)) {
       return {
@@ -661,8 +708,17 @@ export function detectSessionStatus(
         };
       }
 
-      // D. Check last few content lines for completion marker (▣ Build · model · time)
-      if (OPENCODE_RESPONSE_COMPLETE.test(contentCheckWindow)) {
+      // D. Check last few content lines for the finished-turn marker.
+      //
+      // Issue #1893 made the duration mandatory here (OPENCODE_TURN_COMPLETE_PATTERN
+      // rather than the line-filter OPENCODE_RESPONSE_COMPLETE). opencode draws
+      // `▣ <Action> · <model>` with no duration for a step that is still open —
+      // notably the one blocked on a permission dialog — and matching that row
+      // was the reported false `ready`. A duration-less row now carries no
+      // verdict at all: an aborted turn (`turn-aborted-no-duration.txt`) falls
+      // through to the heuristics rather than claiming a completion that never
+      // happened, which is what design rule D1 asks for.
+      if (OPENCODE_TURN_COMPLETE_PATTERN.test(contentCheckWindow)) {
         return {
           status: 'ready',
           confidence: 'high',

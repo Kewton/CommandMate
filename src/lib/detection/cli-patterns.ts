@@ -751,14 +751,107 @@ export const OPENCODE_THINKING_PATTERN = /Thinking:/;
 export const OPENCODE_LOADING_PATTERN = /\u2B1D{4,}/;
 
 /**
- * OpenCode response completion pattern (Issue #379)
- * Matches the action summary line: "&#x25A3; {Action} · model" with optional timing "· Ns".
- * (U+25A3 square + action word + middle dot + model name [+ middle dot + timing]).
- * Action can be "Build", "Compaction", or other OpenCode action names.
- * Short responses may omit the timing portion (e.g., "▣ Build · qwen3.5:27b").
- * This is the primary completion signal for OpenCode [D2-002].
+ * OpenCode's Build summary LINE, in either of the two forms it is drawn in
+ * (Issue #379, corrected by Issue #1893).
+ *
+ * **This is a line filter, not completion evidence.** It matches
+ * `▣ <Action> · <model>` with the duration OPTIONAL, and opencode 1.18 draws
+ * that duration-less form on a step that is still in flight -- so a frame this
+ * pattern matches may be mid-turn, waiting on a permission dialog, or aborted.
+ * Use {@link OPENCODE_TURN_COMPLETE_PATTERN} to decide that a turn has finished.
+ *
+ * The docstring that stood here until #1893 claimed the opposite ("short
+ * responses may omit the timing portion"). Measured against opencode 1.18.21 at
+ * the production 80x200 geometry, that is wrong in both directions:
+ *
+ * - a 2.3-second answer still carries its duration
+ *   (`▣  Build · GPT-5.6 Luna · 2.3s`, `opencode-live-1893/turn-complete-short.txt`),
+ *   so no completed turn needs the duration-less branch;
+ * - the duration-less form is what opencode leaves on screen while a tool call
+ *   waits for permission and after a rejected one
+ *   (`opencode-live-1893/permission-bash.txt`, `…/turn-aborted-no-duration.txt`).
+ *
+ * Kept loose because three callers want the LINE rather than the verdict:
+ * `tui-accumulator.ts`, `response-cleaner.ts` and the turn-boundary counter in
+ * `polling/response-checker.ts` all use it to drop the summary row from an
+ * extracted response, and the mid-step row has to be dropped too. Renaming it
+ * to match that job belongs with #1911, which owns those files.
  */
 export const OPENCODE_RESPONSE_COMPLETE = /\u25A3\s+\w+\s+\u00b7\s+\S+(?:\s+\u00b7\s+(?:[\d]+h\s*)?(?:[\d]+m\s*)?[\d.]+s)?/;
+
+/**
+ * OpenCode's finished-turn marker: the Build summary line WITH its duration
+ * (Issue #1893).
+ *
+ * `▣  Build · GPT-5.6 Luna · 5.2s`. This is the one tool-specific completion
+ * marker design rule D1 recognises today
+ * (`docs/design/multi-agent-state-architecture.md` §4 D1 decision 1, item 1),
+ * and the duration is the whole of what makes it positive evidence: opencode
+ * prints the same row without a duration while a step is still open, which is
+ * how a session parked on a permission dialog was published as
+ * `ready`/`opencode_response_complete` (#1893) and how `isOpenCodeComplete`
+ * saved the dialog body as if it were an answer.
+ *
+ * The model segment is `[^·\n]+` rather than `\S+` because real model names
+ * carry spaces (`GPT-5.6 Luna`): with `\S+` the optional-duration group of
+ * {@link OPENCODE_RESPONSE_COMPLETE} could never reach the duration on a
+ * two-word model, so "with duration" and "without duration" were the same match
+ * there. Excluding the middle dot rather than allowing anything keeps the
+ * quantifier unable to swallow its own delimiter (no nested/ambiguous
+ * quantifier -- ReDoS safe), and `.`/`[^·\n]` never cross a line without the
+ * `m` flag, so the duration has to be on the marker's own row.
+ *
+ * Durations observed: `2.3s`, `5.2s`, `45.2s`; the `Nh`/`Nm` prefixes are
+ * inherited from the #379 pattern and kept for long turns.
+ */
+export const OPENCODE_TURN_COMPLETE_PATTERN =
+  /\u25A3\s+\w+\s+\u00b7\s+[^\u00b7\n]+\u00b7\s+(?:\d+h\s*)?(?:\d+m\s*)?[\d.]+s/;
+
+/**
+ * OpenCode's permission dialog, anchored on its button row (Issue #1893).
+ *
+ * opencode 1.18 asks for tool permission with a bottom-anchored box whose last
+ * interactive row is a horizontal button strip:
+ *
+ * ```
+ *   ┃  △   Permission required
+ *   ┃    # Shell command
+ *   ┃  $ ls -la
+ *   ┃   Allow once   Allow always   Reject  ctrl+f fullscreen  ⇆ select  enter con
+ * ```
+ *
+ * Nothing in the detection layer saw it before #1893: it carries no number, no
+ * `(y/n)`, and no "press enter to confirm" footer, so `detectPrompt` answers
+ * `isPrompt: false` and the status detector fell through to the Build marker
+ * above it. The row is matched as POSITIVE evidence that a decision is pending
+ * (design rule D1) -- it is the affordance itself, not the absence of a busy
+ * marker.
+ *
+ * **Match this against the ANSI-stripped frame BEFORE {@link stripBoxDrawing}**,
+ * exactly like {@link OPENCODE_IDLE_COMPOSER_PATTERN}: the leading `┃` (or
+ * `│` on a lighter border style) is what says the row belongs to the dialog box
+ * rather than to a response body that happens to quote the labels -- the
+ * "the phrase is on screen somewhere" inference #1883 had to remove.
+ *
+ * Deliberately NOT anchored on:
+ *
+ * - `enter confirm`, which is truncated to `enter con` at opencode's own 80
+ *   column layout (measured);
+ * - `△ Permission required` alone, which is a heading rather than an
+ *   affordance and survives in the fullscreen (`ctrl+f`) view whose key handling
+ *   was not measured.
+ *
+ * The three labels are the same for the `bash` and the `edit` dialog (measured:
+ * `permission-bash.txt`, `permission-edit.txt`), and the strip is repainted away
+ * the moment the dialog is answered, so a matched row is never scrollback
+ * (`turn-aborted-no-duration.txt` holds no `Allow once`).
+ *
+ * The whitespace runs are `[^\S\n]` (horizontal only) for the reason #1883
+ * documents: plain `\s` crosses newlines under the `m` flag and would pair a
+ * gutter on one row with labels several rows below it.
+ */
+export const OPENCODE_PERMISSION_PATTERN =
+  /^[^\S\n]*[\u2502\u2503][^\S\n]*Allow once[^\S\n]+Allow always[^\S\n]+Reject\b/m;
 
 /**
  * OpenCode processing indicator pattern (Issue #379)
