@@ -115,6 +115,16 @@ export interface PushHookSourceSpec {
    * with one nested exception can say so without giving up the list.
    */
   extractModel?: (payload: Record<string, unknown>) => string | null;
+  /**
+   * The frame's own id, for identity de-duplication (Issue #1899).
+   *
+   * Omit it and the source answers null for every frame, which is the only
+   * honest answer while its `capabilities.eventIdentity` is `null`: nobody has
+   * measured where — or whether — this tool publishes a per-frame id. The two
+   * declarations move together, and `tests/unit/hooks/sources/capabilities.test.ts`
+   * pins the capability half.
+   */
+  extractEventIdentity?: (payload: Record<string, unknown>) => string | null;
   /** Subtype extraction for events whose rule did not fix one (S2). */
   extractDetail?: (event: AgentEventType, payload: Record<string, unknown>) => string | null;
   parsePermissionRequest: (payload: Record<string, unknown>) => PermissionRequestPayload | null;
@@ -182,6 +192,14 @@ export function definePushHookSource(spec: PushHookSourceSpec): AgentEventSource
         modelFields: spec.modelFields,
         extractModel: spec.extractModel,
       });
+    },
+
+    eventIdentityOf(payload: Record<string, unknown>): string | null {
+      // Issue #1899. Absent by default, because a push tool whose capability
+      // says `eventIdentity: null` has nothing to read — and answering null is
+      // what puts it on the time window `isDuplicateAgentEvent` has always
+      // applied to it.
+      return spec.extractEventIdentity?.(payload) ?? null;
     },
 
     parsePermissionRequest: spec.parsePermissionRequest,
@@ -252,6 +270,8 @@ export interface PullEventSourceSpec {
   modelFields?: readonly string[];
   /** Nested model extraction (#1783). See {@link PushHookSourceSpec.extractModel}. */
   extractModel?: (payload: Record<string, unknown>) => string | null;
+  /** Frame id extraction (#1899). See {@link PushHookSourceSpec.extractEventIdentity}. */
+  extractEventIdentity?: (payload: Record<string, unknown>) => string | null;
   extractDetail?: (event: AgentEventType, payload: Record<string, unknown>) => string | null;
   parsePermissionRequest: (payload: Record<string, unknown>) => PermissionRequestPayload | null;
   parseQuestion: (payload: Record<string, unknown>) => AskUserQuestionSpec | null;
@@ -326,6 +346,14 @@ export function definePullEventSource(spec: PullEventSourceSpec): AgentEventSour
         modelFields: spec.modelFields,
         extractModel: spec.extractModel,
       });
+    },
+
+    eventIdentityOf(payload: Record<string, unknown>): string | null {
+      // Issue #1899. See the push factory's copy — the difference is that a
+      // pull source is the one that actually declares an `eventIdentity`, so
+      // omitting the extractor here would leave the capability announcing an id
+      // nothing can read.
+      return spec.extractEventIdentity?.(payload) ?? null;
     },
 
     parsePermissionRequest: spec.parsePermissionRequest,
