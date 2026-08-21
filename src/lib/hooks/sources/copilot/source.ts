@@ -61,6 +61,7 @@
  */
 
 import { MAX_TOOL_NAME_LENGTH, type PermissionRequestPayload } from '@/lib/hooks/permission-request-payload';
+import { readPermissionToolInput } from '@/lib/hooks/tool-input-normalization';
 import { definePushHookSource } from '../define-source';
 import { fromNameTable, isPlainObject, readStringField } from '../event-mapper';
 import {
@@ -113,13 +114,24 @@ export function parseCopilotPermissionRequest(body: unknown): PermissionRequestP
   const toolName = readStringField(body, 'tool_name');
   if (!toolName || toolName.length > MAX_TOOL_NAME_LENGTH) return null;
 
-  // No `tool_input` means nothing for the deny patterns to be judged against,
-  // which makes the request unadjudicatable rather than harmless.
-  if (!isPlainObject(body.tool_input)) return null;
+  // No usable `tool_input` means nothing for the deny patterns to be judged
+  // against, which makes the request unadjudicatable rather than harmless.
+  //
+  // Issue #1902: this used to be `isPlainObject(body.tool_input)`, and that was
+  // the bug. Copilot 1.0.80's `Edit` sends the apply-patch envelope as a bare
+  // *string*, so the object check answered null for every file edit copilot
+  // ever made — null became `unknown-payload`, `unknown-payload` is a
+  // no-decision, and Auto-Yes v2 abstained on the whole edit family while
+  // working perfectly on `Read` and `Bash`, whose inputs are objects. The
+  // string is now read as a patch and the rewrite is reported rather than done
+  // in silence; see `lib/hooks/tool-input-normalization`.
+  const input = readPermissionToolInput(body.tool_input);
+  if (!input) return null;
 
   return {
     toolName,
-    toolInput: body.tool_input,
+    toolInput: input.toolInput,
+    toolInputNormalization: input.normalization,
     promptId: null,
     sessionId: readStringField(body, 'session_id'),
     permissionMode: null,

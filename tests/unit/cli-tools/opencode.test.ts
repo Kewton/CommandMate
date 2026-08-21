@@ -8,12 +8,21 @@
 import { afterAll, afterEach, describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { join } from 'path';
 import { makeTempDir, removeTempDir } from '@tests/helpers/temp-dir';
-import { OpenCodeTool, OPENCODE_EXIT_COMMAND, OPENCODE_INIT_WAIT_MS, OPENCODE_PANE_HEIGHT } from '@/lib/cli-tools/opencode';
+import {
+  OpenCodeTool,
+  OPENCODE_EXIT_COMMAND,
+  OPENCODE_PANE_HEIGHT,
+  OPENCODE_READY_MAX_ATTEMPTS,
+  OPENCODE_READY_POLL_INTERVAL_MS,
+} from '@/lib/cli-tools/opencode';
+import { buildOpencodeComposerFrame } from '@tests/fixtures/opencode-launch-boot-11821';
 
 // Mock tmux module
 vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn(),
   createSession: vi.fn(),
+  // Issue #1908: the launch path polls the pane instead of sleeping 15 s.
+  capturePane: vi.fn(),
   sendKeys: vi.fn(),
   sendSpecialKey: vi.fn(),
   killSession: vi.fn(),
@@ -66,6 +75,7 @@ vi.mock('@/lib/session/agent-session-lifecycle', async (importOriginal) => {
 import {
   hasSession,
   createSession,
+  capturePane,
   sendKeys,
   killSession,
 } from '@/lib/tmux/tmux';
@@ -110,6 +120,10 @@ describe('OpenCodeTool', () => {
     vi.mocked(attachOpencodeEventStream).mockResolvedValue(false);
     vi.mocked(resumeOpencodeEventStream).mockResolvedValue(false);
     vi.mocked(releaseOpencodeEventStream).mockResolvedValue(undefined);
+    // Issue #1908: the default frame is a ready one, so the launch tests below
+    // leave `waitForReady` on its first attempt. The polling itself is pinned in
+    // tests/unit/cli-tools/opencode-launch-readiness-1908.test.ts.
+    vi.mocked(capturePane).mockResolvedValue(buildOpencodeComposerFrame());
     tool = new OpenCodeTool();
   });
 
@@ -137,8 +151,13 @@ describe('OpenCodeTool', () => {
       expect(OPENCODE_EXIT_COMMAND).toBe('/exit');
     });
 
-    it('should export OPENCODE_INIT_WAIT_MS as 15000', () => {
-      expect(OPENCODE_INIT_WAIT_MS).toBe(15000);
+    it('polls for readiness over a 30-second window instead of sleeping (#1908)', () => {
+      // The old `OPENCODE_INIT_WAIT_MS = 15000` was removed, not retuned: no
+      // fixed number is right when the composer lands at 3 s idle and at 24 s
+      // under load. What is pinned instead is the window the poll covers.
+      expect(OPENCODE_READY_POLL_INTERVAL_MS).toBe(500);
+      expect(OPENCODE_READY_MAX_ATTEMPTS).toBe(60);
+      expect(OPENCODE_READY_POLL_INTERVAL_MS * OPENCODE_READY_MAX_ATTEMPTS).toBe(30_000);
     });
 
     it('should export OPENCODE_PANE_HEIGHT as 200', () => {
@@ -199,7 +218,11 @@ describe('OpenCodeTool', () => {
       // — a freshly started pane publishing `running` before anybody typed.
       vi.mocked(hasSession).mockResolvedValue(false);
       vi.mocked(createSession).mockResolvedValue(undefined);
-      vi.mocked(ensureOpencodeConfig).mockResolvedValue(undefined);
+      vi.mocked(ensureOpencodeConfig).mockResolvedValue({
+        written: false,
+        configPath: null,
+        reason: 'disabled',
+      });
 
       vi.useFakeTimers();
       void tool.startSession('test-123', '/test/path', 'opencode-2');
@@ -223,7 +246,11 @@ describe('OpenCodeTool', () => {
       // HTTP server, so there is no `serve` process to start and no `attach`.
       vi.mocked(hasSession).mockResolvedValue(false);
       vi.mocked(createSession).mockResolvedValue(undefined);
-      vi.mocked(ensureOpencodeConfig).mockResolvedValue(undefined);
+      vi.mocked(ensureOpencodeConfig).mockResolvedValue({
+        written: false,
+        configPath: null,
+        reason: 'disabled',
+      });
       vi.mocked(reserveOpencodeServerPort).mockImplementation(async (target) => {
         rememberOpencodePort(target, 4242, '/test/path');
         return 4242;
@@ -248,7 +275,11 @@ describe('OpenCodeTool', () => {
       // behaviour rather than a half-configured one.
       vi.mocked(hasSession).mockResolvedValue(false);
       vi.mocked(createSession).mockResolvedValue(undefined);
-      vi.mocked(ensureOpencodeConfig).mockResolvedValue(undefined);
+      vi.mocked(ensureOpencodeConfig).mockResolvedValue({
+        written: false,
+        configPath: null,
+        reason: 'disabled',
+      });
       rememberOpencodePort(
         { worktreeId: 'test-123', cliToolId: 'opencode' },
         4242,
@@ -268,7 +299,11 @@ describe('OpenCodeTool', () => {
       vi.mocked(hasSession).mockResolvedValue(false);
       vi.mocked(createSession).mockResolvedValue(undefined);
       vi.mocked(sendKeys).mockResolvedValue(undefined);
-      vi.mocked(ensureOpencodeConfig).mockResolvedValue(undefined);
+      vi.mocked(ensureOpencodeConfig).mockResolvedValue({
+        written: false,
+        configPath: null,
+        reason: 'disabled',
+      });
 
       // Speed up test by mocking setTimeout
       vi.useFakeTimers();

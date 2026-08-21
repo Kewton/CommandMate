@@ -16,7 +16,15 @@ import { UNCLASSIFIED_PROMPT_TYPE, type UnclassifiedFrameRecord } from '@/types/
 import { createLogger } from '@/lib/logger';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import type {
+  SessionTargetConflict,
+  SessionTargetResolvedBy,
+} from '@/lib/session/resolve-session-target';
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
+import {
+  getLastToolInputNormalization,
+  type ToolInputNormalizationRecord,
+} from '@/lib/hooks/tool-input-normalization-state';
 import type { AgentSourceCapabilities } from '@/lib/hooks/sources/types';
 import { captureSessionOutput } from '@/lib/session/cli-session';
 import {
@@ -98,6 +106,27 @@ export interface StructuredEventsPayload {
   promptWaitingSince: number | null;
   /** `notification` / `permission-request`, or null. See above. */
   promptWaitingSource: StructuredPromptSource | null;
+  /**
+   * The last `tool_input` this server had to rewrite before it could adjudicate
+   * it, or null (Issue #1902).
+   *
+   * Copilot 1.0.80's `Edit` sends its apply-patch envelope as a bare string, so
+   * the adjudicated object is `{ patch: … }` rather than what arrived on the
+   * wire. §7's discoverability rule is that an automatic action visible only in
+   * the server log does not exist, and this is that action's reason code: it
+   * says the input was a string and was read as a patch, which is also what
+   * says why the deny patterns saw the envelope's action headers instead of its
+   * body.
+   *
+   * Always present, null on every session that has never been normalised —
+   * which is every tool but copilot. Reported on a stopped session too, for the
+   * reason `promptDedup` is: it is a record of something that already happened,
+   * and zeroing it would erase the evidence at the moment an operator comes
+   * looking for it.
+   *
+   * Exposure only: nothing reads it back.
+   */
+  toolInputNormalization: ToolInputNormalizationRecord | null;
   /**
    * Which {@link AgentEventSource} speaks for this tool, and what it declares it
    * can do (Issue #1924, §7).
@@ -322,6 +351,47 @@ export interface CurrentOutputPayload {
    * instead of leaving a null indistinguishable from an empty prompt.
    */
   composerState: ComposerTextState;
+  /**
+   * Which stage of the shared precedence chain chose {@link cliToolId}
+   * (Issue #1884, design §4 D5 / §7).
+   *
+   * Present only when the caller resolved through
+   * {@link SessionTargetResolution} — the HTTP route does, the WS terminal
+   * streamer is handed an already-resolved pair by the poller and passes none.
+   *
+   * Exposure only, and the field an operator reads when a session they can see
+   * in tmux is reported as not running: `worktree-default` on a request that
+   * named an instance means the instance is not in the roster and its id is not
+   * a tool name, which is the shape #1884 produced silently. `fallback` means
+   * the worktree row has no CLI tool of its own (design §4 D5 決定 5) and is a
+   * warning, not information.
+   */
+  resolvedBy?: SessionTargetResolvedBy;
+  /**
+   * The explicit `?cliTool` the roster contradicts, or null (Issue #1884).
+   *
+   * Present alongside {@link resolvedBy}. This is a read path, so a
+   * contradiction resolves (the roster wins) and answers 200 with the fact
+   * attached rather than 400 — `capture` is the inner call of unbounded monitor
+   * loops and a non-zero exit there is a poll skipped forever, not an error
+   * anyone reads (design §4 D5 / DR3-015). Routes with a side effect refuse it
+   * instead, through `resolveSessionTargetStrict`.
+   */
+  conflict?: SessionTargetConflict | null;
+}
+
+/**
+ * How a caller's request was resolved to the (tool, instance) pair it passes in
+ * (Issue #1884).
+ *
+ * Deliberately the *result* of {@link resolveSessionTarget} rather than its
+ * inputs: this module does not resolve anything and must not grow a second
+ * copy of the precedence chain (design §4 D5). The route resolves, then hands
+ * the answer here to be published next to the payload it produced.
+ */
+export interface SessionTargetResolution {
+  resolvedBy: SessionTargetResolvedBy;
+  conflict?: SessionTargetConflict | null;
 }
 
 const logger = createLogger('current-output-builder');
@@ -660,10 +730,36 @@ export function mergeStructuredStatus(
  *
  * @param db - Database instance
  * @param worktreeId - Worktree ID (assumed already validated by the caller)
- * @param cliToolId - CLI tool ID
+ * @param cliToolId - CLI tool ID, ALREADY resolved by the caller
  * @param instanceId - Optional agent instance ID (defaults to the primary instance)
+ * @param resolution - How the caller resolved that pair, when it resolved one
+ *   (Issue #1884). Appended to the payload; nothing here reads it.
  */
 export async function buildCurrentOutput(
+  db: Database.Database,
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string,
+  resolution?: SessionTargetResolution,
+): Promise<CurrentOutputPayload> {
+  const payload = await buildPayload(db, worktreeId, cliToolId, instanceId);
+  if (!resolution) return payload;
+  return {
+    ...payload,
+    resolvedBy: resolution.resolvedBy,
+    // Explicit null rather than an absent key: `capture --json | jq '.conflict'`
+    // must answer "no contradiction" rather than nothing at all, exactly as
+    // `model` does.
+    conflict: resolution.conflict ?? null,
+  };
+}
+
+/**
+ * The payload itself, with no knowledge of how its (tool, instance) pair was
+ * chosen. Split from {@link buildCurrentOutput} so the resolution fields are
+ * appended in one place instead of at both of the two return sites below.
+ */
+async function buildPayload(
   db: Database.Database,
   worktreeId: string,
   cliToolId: CLIToolType,
@@ -685,6 +781,9 @@ export async function buildCurrentOutput(
     lastEventDetail: lastEvent?.detail ?? null,
     promptWaitingSince: null,
     promptWaitingSource: null,
+    // Issue #1902. Read here, before the `isRunning` branch, so both return
+    // paths carry it.
+    toolInputNormalization: getLastToolInputNormalization(worktreeId, cliToolId, instanceId),
     source: {
       cliToolId: eventSource.cliToolId,
       capabilities: eventSource.capabilities,

@@ -205,6 +205,43 @@ export interface CurrentOutputResponse {
     /** `notification` / `permission-request`, or null (Issue #1725). */
     promptWaitingSource?: string | null;
     /**
+     * The last `tool_input` this server had to rewrite before it could
+     * adjudicate it, or null (Issue #1902).
+     *
+     * Mirrors: src/lib/hooks/tool-input-normalization-state.ts
+     * ToolInputNormalizationRecord.
+     *
+     * Copilot 1.0.80's `Edit` sends its apply-patch envelope as a bare string,
+     * which `parseCopilotPermissionRequest` used to refuse — so every file edit
+     * copilot made was answered `unknown-payload` (a no-decision) and drew a
+     * dialog no matter what Auto-Yes said. It is now read as a patch, and this
+     * field is how an operator sees that it was: a non-null `reason` says the
+     * shape that was judged is not the shape the agent sent, and therefore why
+     * the deny patterns were matched against the envelope's action headers
+     * (`*** Add File: …`) rather than against the file body.
+     *
+     * `reason` is string-typed on the wire for the same reason
+     * `lastSuppression.reason` is: a newer server may name a normalisation this
+     * build has never heard of, and narrowing here would turn a
+     * forward-compatible payload into a parse failure (Issue #1843).
+     *
+     * Optional here although the server always sends it — this mirror also
+     * describes what an older daemon answers, and `undefined` means "this
+     * server predates the field" rather than "nothing was normalised".
+     */
+    toolInputNormalization?: {
+      /** `string-tool-input-as-patch` / `string-tool-input-as-text`. */
+      reason: string;
+      /** Key the raw value was stored under: `patch` or `text`. */
+      key: string;
+      /** `typeof` the value the agent sent. `string` is the only measured one. */
+      receivedType: string;
+      /** `tool_name` of the call that was normalised (`Edit` in #1902). */
+      toolName: string;
+      /** Epoch ms. */
+      at: number;
+    } | null;
+    /**
      * Which agent event source speaks for this tool, and what it declares it can
      * do (Issue #1924).
      *
@@ -303,6 +340,35 @@ export interface CurrentOutputResponse {
     skippedCount: number;
     lastSkippedAt: number | null;
   };
+  /**
+   * Issue #1884: which stage of the server's precedence chain picked
+   * {@link CurrentOutputResponse.cliToolId}.
+   *
+   * Mirrors: src/lib/session/current-output-builder.ts
+   * CurrentOutputPayload.resolvedBy — and, like `lastSuppression.reason`,
+   * deliberately typed as the wire's `string` rather than the union this build
+   * knows: a server newer than the CLI can name a stage this build has never
+   * heard of, and narrowing here would turn a forward-compatible payload into a
+   * parse failure.
+   *
+   * The field to read when a session visible in tmux is reported as not
+   * running. Absent from a server that predates #1884 — which is also a server
+   * that resolves `?instance=` incorrectly, so its absence is itself the answer.
+   */
+  resolvedBy?: string;
+  /**
+   * Issue #1884: the explicit `?cliTool` the roster contradicts, or null.
+   *
+   * Mirrors: src/lib/session/current-output-builder.ts
+   * CurrentOutputPayload.conflict. This is a read path, so the server resolves
+   * the contradiction (roster wins) and answers 200 with it attached rather
+   * than 400 — the commands that act refuse it instead (DR3-015).
+   */
+  conflict?: {
+    instanceId: string;
+    rosterCliTool: string;
+    requestedCliTool: string;
+  } | null;
 }
 
 // Mirrors: src/types/models.ts BasePromptData (subset for CLI output)
