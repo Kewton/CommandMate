@@ -202,10 +202,23 @@ UI の配色方針は次の 2 分類のみ。曖昧な「暗いまま」の島�
 - **ツールチップ**: 反転サーフェス `bg-foreground text-background`（Radix `TooltipContent` が基準。
   ライトで暗い吹き出し、ダークで明るい吹き出しにテーマ追従する）。二次テキストは `text-background/70`。
 
-## トークン規律 CI ガード (Issue #1082 / #1116)
+## トークン規律 ガード (Issue #1082 / #1116 / #1882)
 
-移行済みディレクトリに **生の直書きカラークラス（`bg-`/`text-`/`border-`/`ring-`）が再流入したら CI で hard-fail** する
-（`.github/workflows/ci-pr.yml` の `token-discipline` ジョブ。CLAUDE.md size check と同方式の `git grep` ガード）。
+移行済みディレクトリに **生の直書きカラークラス（`bg-`/`text-`/`border-`/`ring-`）が再流入したら hard-fail** する。
+
+検査本体は **`scripts/check-token-discipline.mjs` の 1 本だけ**（Issue #1882）。パターン・対象ディレクトリ一覧・
+除外はすべてこのファイルが単一の権威ソースで、次の 2 箇所は**それを呼ぶだけ**である。
+
+| 実行元 | 呼び出し |
+|--------|----------|
+| CI | `.github/workflows/ci-pr.yml` の `token-discipline` ジョブ |
+| `commandmate verify` / `wait --verify` | `.commandmate/verify.yaml` の `token-discipline` ゲート（実測 0.1s） |
+
+> #1882 以前は検査本体が `ci-pr.yml` にインラインのシェルで直書きされており、`verify.yaml` は
+> lint / typecheck / unit の 3 本しか宣言していなかった。そのため PR #1881 は `wait --verify` が
+> **全ゲート exit 0** を返した commit が CI の Token discipline で FAILURE になっている。
+> verify.yaml へ `git grep` をコピーすると同じ検査が 2 箇所に増えて静かに乖離するため、
+> **スクリプトを共有する**形にしてある。
 
 - **対象カラー**: 中立色 `gray` / `slate`（#1082）に加え、**chromatic 色**
   `red` / `green` / `yellow` / `amber` / `orange` / `purple` / `violet` / `sky` / `blue`（#1116）。
@@ -219,6 +232,10 @@ UI の配色方針は次の 2 分類のみ。曖昧な「暗いまま」の島�
   - `src/app/worktrees/**`（ワークツリー詳細ルート／ターミナルページ。CLI ブランド色
     `claude=bg-purple-600` / `codex=bg-blue-600` / `gemini=bg-green-600` / `bash=bg-gray-600` を含む）。
   - テストファイル（`*.test.*` / `*.spec.*` / `__tests__`）はクラス文字列を検証するため除外。
+- **既知の限界（#1882 で記録、対応は範囲外）**: このガードは**生配色の「不在」しか見ない**。
+  存在しないトークン名（例: `bg-surface-elevated-typo`）へ置換しても PASS するため、無スタイル化の
+  silent failure は検出できない。トークン名の実在検証（`src/app/globals.css` の `--color-*` との突き合わせ）は
+  別途必要。
 - **違反時の直し方**: ホワイトリストをいじらず、`docs/design-system.md` のセマンティックトークンへ置換する。
   中立色は `foreground` / `muted` / `muted-foreground` / `border` / `surface` / `input` / `ring`、
   状態色は `bg-{status}-subtle` / `border-{status}-border` / `text-{status}-foreground` / `bg-{status}`
