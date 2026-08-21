@@ -14,6 +14,40 @@ import '@testing-library/jest-dom/vitest';
 // A test that cares about the path sets its own value; this only fills a gap.
 process.env.CODEX_HOME ??= join(tmpdir(), 'commandmate-test-codex-home');
 
+// Issue #1873: keep worktree-index claims out of the developer's home.
+//
+// `executeRun` hands every command gate `CM_WORKTREE_INDEX`, and minting that
+// number calls `resolveWorktreeIndex(worktreeId)` with no `root`
+// (`src/lib/verification/gate-runner.ts`), so it lands in
+// `~/.commandmate/worktree-index/` — the *shared, deliberately permanent*
+// registry that numbers this machine's real worktrees. Slots are never
+// released, so every `wt-*` fixture that ever ran burned one: measured on the
+// author's machine, 40 of 45 entries were fixtures that had never been a
+// worktree.
+//
+// Pinned here rather than per file for the same reason as CODEX_HOME above:
+// the default is what makes it dangerous, so the fix has to sit where a test
+// written next month inherits it without knowing the hazard exists. The three
+// files that were leaking (`gate-runner`, `gate-runner-timestamps`,
+// `hooks-agent-event`) plus `require-commit-conformance` never mention this
+// variable; `gate-mutex` / `gate-flaky` / `worktree-index` already redirect
+// themselves and keep doing so — `vi.stubEnv` and an explicit `{ root }`
+// argument both still win over this line.
+//
+// Filled only when absent *or blank*, not unconditionally, because the
+// override exists for isolated runners too and an explicitly chosen root must
+// survive. Blank counts as absent because `resolveWorktreeIndexRoot` itself
+// treats an empty or whitespace value as unset — leaving one in place would
+// silently route back to the real registry, which is the exact bug this line
+// closes.
+//
+// One shared path under tmpdir is safe: claims are `O_EXCL` creates keyed by
+// worktree id, so concurrent suites in different checkouts either reuse their
+// own slot or take the next free one, never each other's.
+if ((process.env.CM_VERIFY_WORKTREE_INDEX_ROOT ?? '').trim() === '') {
+  process.env.CM_VERIFY_WORKTREE_INDEX_ROOT = join(tmpdir(), 'commandmate-test-worktree-index');
+}
+
 // Mock next-intl for all component tests
 vi.mock('next-intl', () => ({
   useTranslations: (namespace?: string) => {
