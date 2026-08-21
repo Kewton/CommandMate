@@ -205,6 +205,43 @@ export interface CurrentOutputResponse {
     /** `notification` / `permission-request`, or null (Issue #1725). */
     promptWaitingSource?: string | null;
     /**
+     * The last `tool_input` this server had to rewrite before it could
+     * adjudicate it, or null (Issue #1902).
+     *
+     * Mirrors: src/lib/hooks/tool-input-normalization-state.ts
+     * ToolInputNormalizationRecord.
+     *
+     * Copilot 1.0.80's `Edit` sends its apply-patch envelope as a bare string,
+     * which `parseCopilotPermissionRequest` used to refuse — so every file edit
+     * copilot made was answered `unknown-payload` (a no-decision) and drew a
+     * dialog no matter what Auto-Yes said. It is now read as a patch, and this
+     * field is how an operator sees that it was: a non-null `reason` says the
+     * shape that was judged is not the shape the agent sent, and therefore why
+     * the deny patterns were matched against the envelope's action headers
+     * (`*** Add File: …`) rather than against the file body.
+     *
+     * `reason` is string-typed on the wire for the same reason
+     * `lastSuppression.reason` is: a newer server may name a normalisation this
+     * build has never heard of, and narrowing here would turn a
+     * forward-compatible payload into a parse failure (Issue #1843).
+     *
+     * Optional here although the server always sends it — this mirror also
+     * describes what an older daemon answers, and `undefined` means "this
+     * server predates the field" rather than "nothing was normalised".
+     */
+    toolInputNormalization?: {
+      /** `string-tool-input-as-patch` / `string-tool-input-as-text`. */
+      reason: string;
+      /** Key the raw value was stored under: `patch` or `text`. */
+      key: string;
+      /** `typeof` the value the agent sent. `string` is the only measured one. */
+      receivedType: string;
+      /** `tool_name` of the call that was normalised (`Edit` in #1902). */
+      toolName: string;
+      /** Epoch ms. */
+      at: number;
+    } | null;
+    /**
      * Which agent event source speaks for this tool, and what it declares it can
      * do (Issue #1924).
      *

@@ -17,6 +17,10 @@ import { createLogger } from '@/lib/logger';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
+import {
+  getLastToolInputNormalization,
+  type ToolInputNormalizationRecord,
+} from '@/lib/hooks/tool-input-normalization-state';
 import type { AgentSourceCapabilities } from '@/lib/hooks/sources/types';
 import { captureSessionOutput } from '@/lib/session/cli-session';
 import {
@@ -98,6 +102,27 @@ export interface StructuredEventsPayload {
   promptWaitingSince: number | null;
   /** `notification` / `permission-request`, or null. See above. */
   promptWaitingSource: StructuredPromptSource | null;
+  /**
+   * The last `tool_input` this server had to rewrite before it could adjudicate
+   * it, or null (Issue #1902).
+   *
+   * Copilot 1.0.80's `Edit` sends its apply-patch envelope as a bare string, so
+   * the adjudicated object is `{ patch: … }` rather than what arrived on the
+   * wire. §7's discoverability rule is that an automatic action visible only in
+   * the server log does not exist, and this is that action's reason code: it
+   * says the input was a string and was read as a patch, which is also what
+   * says why the deny patterns saw the envelope's action headers instead of its
+   * body.
+   *
+   * Always present, null on every session that has never been normalised —
+   * which is every tool but copilot. Reported on a stopped session too, for the
+   * reason `promptDedup` is: it is a record of something that already happened,
+   * and zeroing it would erase the evidence at the moment an operator comes
+   * looking for it.
+   *
+   * Exposure only: nothing reads it back.
+   */
+  toolInputNormalization: ToolInputNormalizationRecord | null;
   /**
    * Which {@link AgentEventSource} speaks for this tool, and what it declares it
    * can do (Issue #1924, §7).
@@ -685,6 +710,9 @@ export async function buildCurrentOutput(
     lastEventDetail: lastEvent?.detail ?? null,
     promptWaitingSince: null,
     promptWaitingSource: null,
+    // Issue #1902. Read here, before the `isRunning` branch, so both return
+    // paths carry it.
+    toolInputNormalization: getLastToolInputNormalization(worktreeId, cliToolId, instanceId),
     source: {
       cliToolId: eventSource.cliToolId,
       capabilities: eventSource.capabilities,
