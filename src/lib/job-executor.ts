@@ -11,6 +11,7 @@
 
 import { randomUUID } from 'crypto';
 import { executeClaudeCommand, type ExecuteCommandOptions } from './session/claude-executor';
+import { TOOLS_WITH_MODEL_SUPPORT } from '@/lib/cmate-cli-tool-parser';
 import type { ScheduleEntry } from '@/types/cmate';
 import { createLogger } from '@/lib/logger';
 
@@ -151,9 +152,20 @@ export function recoverRunningLogs(): void {
 
 /**
  * Resolve the model option for a scheduled execution (DR1-004).
- * Centralizes per-tool model resolution strategy:
- * - copilot: from CMATE.md ScheduleEntry.model
- * - vibe-local: from DB worktree.vibe_local_model
+ *
+ * Two sources, because a model reaches a schedule two different ways:
+ * - **the CMATE.md CLI Tool column** (`<tool> --model <name>`), for every tool in
+ *   {@link TOOLS_WITH_MODEL_SUPPORT};
+ * - **the DB** (`worktree.vibe_local_model`), for vibe-local, whose model is
+ *   chosen in the worktree's Agent settings rather than written in the file.
+ *
+ * Issue #1914: the first branch used to read `entry.cliToolId === 'copilot'`,
+ * a second hard-coded copy of the parser's Set. That is what made
+ * `buildCliArgs()`'s `opencode run -m …` branch unreachable — the parser would
+ * have to start accepting `opencode --model x` *and* somebody would have to
+ * remember this line. Reading the Set means adding an id in one place wires the
+ * whole path, and a tool added to the Set can no longer have its model silently
+ * dropped here.
  *
  * @param entry - Schedule entry from CMATE.md
  * @param worktree - Worktree row from DB
@@ -163,7 +175,7 @@ export function resolveModelOption(
   entry: ScheduleEntry,
   worktree: WorktreeRow
 ): ExecuteCommandOptions | undefined {
-  if (entry.cliToolId === 'copilot' && entry.model) {
+  if (entry.model && TOOLS_WITH_MODEL_SUPPORT.has(entry.cliToolId)) {
     return { model: entry.model };
   }
   if (entry.cliToolId === 'vibe-local' && worktree.vibe_local_model) {

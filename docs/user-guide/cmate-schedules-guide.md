@@ -67,7 +67,7 @@ your-project/          ← worktreeルート
 | **Name** | はい | スケジュール名。1〜100文字。英数字・日本語・ハイフン・スペースが使用可能 | - |
 | **Cron** | はい | cron式（5〜6フィールド）。実行タイミングを指定 | - |
 | **Message** | はい | `claude -p`に送信するプロンプト。最大10,000文字 | - |
-| **CLI Tool** | いいえ | 使用するCLIツール（`claude` / `codex` / `gemini` / `vibe-local` / `opencode` / `copilot` / `antigravity`。正本は `src/lib/cli-tools/types.ts` の `CLI_TOOL_IDS`）。**`--model <model-name>` を書けるのは copilot のみ**で、他のツールに書くと構文エラーとして行ごとスキップされる | `claude` |
+| **CLI Tool** | いいえ | 使用するCLIツール（`claude` / `codex` / `gemini` / `vibe-local` / `opencode` / `copilot` / `antigravity`。正本は `src/lib/cli-tools/types.ts` の `CLI_TOOL_IDS`）。**`--model <model-name>` を書けるのは copilot と opencode のみ**で、他のツールに書くと構文エラーとして行ごとスキップされる | `claude` |
 | **Enabled** | いいえ | スケジュールの有効/無効（`true` / `false`） | `true` |
 | **Permission** | いいえ | 実行時の許可レベル。下記のPermission一覧を参照 | ツール別のデフォルト値 |
 
@@ -128,7 +128,7 @@ CLI Tool列で `copilot --model <model-name>` と記述すると、スケジュ�
 | copilot-task | 0 9 * * * | コードを分析してください | copilot --model claude-opus-4.6 | true | allow-all-tools |
 ```
 
-モデル名は英数字・ハイフン・ドット・スラッシュが使用可能です。**`--model` を書けるのは CLI Tool 列では copilot のみ**で、他のツールに書いた場合は「無視される」のではなく**構文エラーになり、その行がスケジュールごとスキップされます**（`parseCliToolColumn` の `TOOLS_WITH_MODEL_SUPPORT`）。vibe-local のモデルは worktree の Agent 設定（DB）で決まります。
+モデル名は英数字・ハイフン・ドット・スラッシュ・コロンが使用可能で、先頭は英数字である必要があります（先頭 `-` は CLI オプションと紛れるため拒否）。**`--model` を書けるのは CLI Tool 列では copilot と opencode の 2 つだけ**で、他のツールに書いた場合は「無視される」のではなく**構文エラーになり、その行がスケジュールごとスキップされます**（`parseCliToolColumn` の `TOOLS_WITH_MODEL_SUPPORT`）。vibe-local のモデルは worktree の Agent 設定（DB）で決まります。antigravity の `--model` は表示名に空白を含むため CLI Tool 列では扱えず、`commandmate send --model` 側の担当です。
 
 ### antigravity（--dangerously-skip-permissions）
 
@@ -140,10 +140,36 @@ CLI Tool列で `copilot --model <model-name>` と記述すると、スケジュ�
 
 ### opencode
 
-パーミッション設定なし。opencode CLI に許可レベルのフラグが存在しないためで、
-**Permission 列に値を書くとバリデーションエラーになります**（Issue #1914）。
-それ以前は Claude の `--permission-mode` の値（`acceptEdits` など）が
-そのまま通ってしまい、opencode に存在しないオプションとして扱われていました。
+パーミッション設定なし。**Permission 列に値を書くとバリデーションエラーになります**（Issue #1914）。
+それ以前は Claude の `--permission-mode` の値（`acceptEdits` など）がそのまま通ってしまい、
+opencode に存在しないオプションとして扱われていました。
+
+> **Note:** opencode に「許可レベル」の語彙が無いという意味で、フラグが 1 つも無いわけではありません。
+> `opencode run` には真偽値の `--auto`（"auto-approve permissions that are not explicitly denied"、
+> opencode 1.18.21 の `--help` で実測）がありますが、これは claude の `--permission-mode` や
+> codex の `--sandbox` のような**段階**ではなく、CommandMate は現在これを渡していません。
+
+#### opencodeのモデル指定
+
+CLI Tool 列で `opencode --model <provider/model>` と記述すると、スケジュール実行時に
+`opencode run -m <provider/model> <message>` で起動します。
+
+```markdown
+| oc-task | 0 9 * * * | コードを分析してください | opencode --model ollama/qwen3:8b | true | |
+```
+
+値は **`provider/model` 形式**です（`opencode run --help` の `-m, --model` が
+"model to use in the format of provider/model" と明記。opencode 1.18.21 で実測）。
+CommandMate は値を**そのまま渡します** — Issue #1914 以前のコードは `ollama/` を前置していましたが、
+その分岐は到達不能で（`resolveModelOption()` が opencode に対して常に `undefined` を返していた）、
+Ollama 以外のプロバイダを指定する手段が無く、`ollama/anthropic/…` のように二重化する形でした。
+モデル名の書式が誤っている場合、opencode 側は不透明なエラーで終了します
+（実測: 存在しない provider と裸のモデル名は同じ `UnknownError` になり区別できないため、
+CommandMate は書式を推測して拒否することはしません）。実行結果は Execution Log で確認してください。
+
+> **Note:** `commandmate report generate --tool` に opencode は含まれません
+> （`SUMMARY_ALLOWED_TOOLS` は claude / codex / copilot / antigravity）。
+> `--model` が使えるようになったのは CMATE.md のスケジュール実行だけです。
 
 ### vibe-local
 

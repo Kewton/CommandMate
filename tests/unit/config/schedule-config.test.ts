@@ -10,11 +10,18 @@ import {
   MAX_SCHEDULE_CRON_LENGTH,
   UUID_V4_PATTERN,
   isValidUuidV4,
+  CLAUDE_PERMISSIONS,
+  CODEX_SANDBOXES,
   COPILOT_PERMISSIONS,
   ANTIGRAVITY_PERMISSIONS,
+  GEMINI_PERMISSIONS,
+  VIBE_LOCAL_PERMISSIONS,
+  OPENCODE_PERMISSIONS,
+  NO_PERMISSION_FLAGS,
   DEFAULT_PERMISSIONS,
   getPermissionOptionsForTool,
 } from '../../../src/config/schedule-config';
+import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
 
 describe('schedule-config', () => {
   describe('constants', () => {
@@ -123,5 +130,69 @@ describe('schedule-config', () => {
     it('should return ANTIGRAVITY_PERMISSIONS for antigravity', () => {
       expect(getPermissionOptionsForTool('antigravity')).toBe(ANTIGRAVITY_PERMISSIONS);
     });
+  });
+});
+/**
+ * Issue #1914: `getPermissionOptionsForTool()` used to end in
+ * `default: return GEMINI_PERMISSIONS`, so `opencode` — and any tool added to
+ * `CLI_TOOL_IDS` afterwards — got the right *value* (`[]`) through a case that
+ * named the wrong tool. The same fallback shape in `cmate-parser.ts` /
+ * `cmate-validator.ts` resolved to CLAUDE_PERMISSIONS and was a real bug there.
+ *
+ * These assertions use `toBe` (object identity), which is what makes them
+ * non-vacuous: every empty list here is `[]`, so `toEqual` would pass no matter
+ * which branch answered.
+ */
+describe('getPermissionOptionsForTool() resolves through the tool\'s own case (Issue #1914)', () => {
+  it.each([
+    ['claude', CLAUDE_PERMISSIONS],
+    ['codex', CODEX_SANDBOXES],
+    ['copilot', COPILOT_PERMISSIONS],
+    ['antigravity', ANTIGRAVITY_PERMISSIONS],
+    ['gemini', GEMINI_PERMISSIONS],
+    ['vibe-local', VIBE_LOCAL_PERMISSIONS],
+    ['opencode', OPENCODE_PERMISSIONS],
+  ] as const)('%s', (cliToolId, expected) => {
+    expect(getPermissionOptionsForTool(cliToolId)).toBe(expected);
+  });
+
+  it('every CLI_TOOL_IDS member has its own case (none falls through to default)', () => {
+    // Guards the guard: an empty or truncated CLI_TOOL_IDS would make this vacuous.
+    expect(CLI_TOOL_IDS.length).toBeGreaterThanOrEqual(7);
+    for (const cliToolId of CLI_TOOL_IDS) {
+      expect(
+        getPermissionOptionsForTool(cliToolId),
+        `${cliToolId} fell through to the default branch`
+      ).not.toBe(NO_PERMISSION_FLAGS);
+    }
+  });
+
+  it('an unknown tool gets NO_PERMISSION_FLAGS, not gemini\'s list', () => {
+    expect(getPermissionOptionsForTool('not-a-real-tool')).toBe(NO_PERMISSION_FLAGS);
+    expect(getPermissionOptionsForTool('not-a-real-tool')).not.toBe(GEMINI_PERMISSIONS);
+  });
+
+  it('opencode is not gemini', () => {
+    expect(OPENCODE_PERMISSIONS).not.toBe(GEMINI_PERMISSIONS);
+    expect(getPermissionOptionsForTool('opencode')).toEqual([]);
+  });
+
+  it('DEFAULT_PERMISSIONS has an entry for every CLI tool', () => {
+    for (const cliToolId of CLI_TOOL_IDS) {
+      expect(DEFAULT_PERMISSIONS[cliToolId], `${cliToolId} has no default`).toBeDefined();
+    }
+    expect(DEFAULT_PERMISSIONS.opencode).toBe('');
+  });
+
+  it('every default is inside its own tool\'s allowed list (or empty)', () => {
+    for (const cliToolId of CLI_TOOL_IDS) {
+      const fallback = DEFAULT_PERMISSIONS[cliToolId];
+      const options = getPermissionOptionsForTool(cliToolId);
+      if (fallback === '') {
+        expect(options, `${cliToolId} has a default of "" but offers options`).toEqual([]);
+      } else {
+        expect(options, `${cliToolId}'s default is not one of its options`).toContain(fallback);
+      }
+    }
   });
 });

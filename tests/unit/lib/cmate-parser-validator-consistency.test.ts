@@ -149,11 +149,49 @@ describe('cmate-parser / cmate-validator consistency (SEC4-004)', () => {
       expect(validateSchedulesSection([row])).toEqual([]);
     });
 
-    it('opencode still rejects `--model` in the CLI Tool column', () => {
-      // TOOLS_WITH_MODEL_SUPPORT is copilot-only; #1914 does not widen it.
-      // Pinned so the "no permission flags" change is not read as "opencode now
-      // behaves like copilot".
-      const row = ['oc-task', '0 9 * * *', 'Do something', 'opencode --model anthropic/claude-sonnet-4', 'true', ''];
+    /**
+     * Issue #1914 (second commit): `opencode --model provider/model` is now
+     * accepted, and the two surfaces have to agree about it — a row the
+     * validator passes and the parser drops is a schedule that looks configured
+     * and never runs.
+     *
+     * The first #1914 commit pinned the opposite ("opencode still rejects
+     * --model") because `TOOLS_WITH_MODEL_SUPPORT` was copilot-only then. That
+     * assertion failing is how this change announced itself, which is the point
+     * of having pinned it.
+     */
+    it.each([
+      'ollama/qwen3:8b',
+      'anthropic/claude-sonnet-4-5',
+    ])('accepts `opencode --model %s` in both parser and validator', (model) => {
+      const row = ['oc-task', '0 9 * * *', 'Do something', `opencode --model ${model}`, 'true', ''];
+
+      const entries = parseSchedulesSection([row]);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].cliToolId).toBe('opencode');
+      expect(entries[0].model).toBe(model);
+      expect(entries[0].permission).toBe('');
+
+      expect(validateSchedulesSection([row])).toEqual([]);
+    });
+
+    it('a model with no permission is still the only valid opencode shape', () => {
+      // Permission and model are independent: adding `--model` must not reopen
+      // the permission column that this Issue's first commit closed.
+      const row = ['oc-task', '0 9 * * *', 'Do something', 'opencode --model ollama/qwen3:8b', 'true', 'acceptEdits'];
+
+      const entries = parseSchedulesSection([row]);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].model).toBe('ollama/qwen3:8b');
+      expect(entries[0].permission).toBe('');
+
+      const errors = validateSchedulesSection([row]);
+      expect(errors).toHaveLength(1);
+      expect(errors[0].field).toBe('permission');
+    });
+
+    it('still rejects a second option that is not `--model`', () => {
+      const row = ['oc-task', '0 9 * * *', 'Do something', 'opencode --auto', 'true', ''];
 
       expect(parseSchedulesSection([row])).toHaveLength(0);
       expect(validateSchedulesSection([row]).length).toBeGreaterThan(0);

@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
+import { TOOLS_WITH_MODEL_SUPPORT } from '@/lib/cmate-cli-tool-parser';
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 
@@ -61,5 +62,46 @@ describe('CMATE schedules guide covers every CLI tool (Issue #1914)', () => {
   it.each(GUIDES)('$lang guide documents antigravity permissions', ({ file }) => {
     const body = read(file);
     expect(body).toContain('--dangerously-skip-permissions');
+  });
+});
+/**
+ * The `--model` half of the CLI Tool column (Issue #1914, second commit).
+ *
+ * `TOOLS_WITH_MODEL_SUPPORT` is what decides whether `<tool> --model <name>`
+ * parses at all; a tool added there without a section in the guide is a feature
+ * nobody can find, and a tool removed from it leaves the guide promising syntax
+ * that now skips the whole schedule row. Anchored to the Set for that reason.
+ */
+describe('CMATE schedules guide documents --model for exactly the supported tools (Issue #1914)', () => {
+  it('the Set has more than one member', () => {
+    // Guards the guard: with one member the loop would say nothing about opencode.
+    expect(TOOLS_WITH_MODEL_SUPPORT.size).toBeGreaterThan(1);
+    expect(TOOLS_WITH_MODEL_SUPPORT.has('opencode')).toBe(true);
+  });
+
+  it.each(GUIDES)('$lang guide shows `<tool> --model` for every supporting tool', ({ file }) => {
+    const body = read(file);
+    for (const toolId of TOOLS_WITH_MODEL_SUPPORT) {
+      expect(body, `${file} never shows \`${toolId} --model\``).toContain(`${toolId} --model`);
+    }
+  });
+
+  it.each(GUIDES)('$lang guide states opencode takes provider/model, not a bare name', ({ file }) => {
+    const body = read(file);
+    expect(body).toContain('provider/model');
+    // The prefix that used to be synthesised. The guide has to say it is gone,
+    // because the only place a reader could otherwise learn it is the diff.
+    expect(body).toContain('ollama/');
+  });
+
+  it.each(GUIDES)('$lang guide does not claim opencode has no flags at all', ({ file }) => {
+    const body = read(file);
+    // Measured on opencode 1.18.21: `opencode run` has a boolean `--auto`.
+    // "No permission *level*" is true; "no permission flag at all" is not.
+    expect(body).not.toContain('the opencode CLI has no permission flag at all');
+    expect(body).not.toContain('opencode CLI に許可レベルのフラグが存在しないためで');
+    // Quoted from `opencode run --help`, so the assertion cannot be satisfied by
+    // an unrelated string that merely starts with `--auto`.
+    expect(body).toContain('auto-approve permissions that are not explicitly denied');
   });
 });
