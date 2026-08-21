@@ -194,6 +194,11 @@ const SUPPRESSION_CAUSE: Record<AutoYesSuppressionReason, string> = {
   'deny-pattern-unusable': CONTRACT_POLICY_CAUSE,
   'type-not-allowed': CONTRACT_POLICY_CAUSE,
   'agent-launch-dialog': "while the agent's launch dialog was on screen",
+  // Issue #1924. Deliberately not "by contract policy": no contract was
+  // consulted. The frame looked like a numbered list to the generic estimator
+  // and like prose to the tool's own detector, and an operator who reads this
+  // should go and look at the pane rather than at `denyPatterns`.
+  'unclassified-frame': 'because no tool-specific dialog detector recognised the frame',
 };
 
 /**

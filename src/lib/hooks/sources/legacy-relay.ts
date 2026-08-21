@@ -63,6 +63,18 @@ export function createLegacyRelaySource(cliToolId: CLIToolType): AgentEventSourc
       supportedEvents: [],
       configScope: 'none',
       decisionTimeoutSeconds: null,
+      // Issue #1924. Same reasoning as `supportedEvents` above: nothing has been
+      // measured for this tool through this path, so every capability answers
+      // the value that makes the state machine do what it does today for a tool
+      // it knows nothing about. `permissionHookPredictsDialog: false` in
+      // particular is deliberately NOT Claude's `true` — forecasting a dialog
+      // for a tool whose permission hook nobody has seen would publish
+      // `waiting` for a prompt that may not exist.
+      permissionHookPredictsDialog: false,
+      sessionStartMayArriveLate: false,
+      permissionReplyReleasesPrompt: false,
+      eventIdentity: null,
+      resync: 'none',
     },
 
     mappers: fromNameTable(CAMEL_CASE_HOOK_EVENT_NAMES),

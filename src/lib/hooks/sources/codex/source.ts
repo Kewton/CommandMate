@@ -112,6 +112,16 @@ export const codexAgentEventSource: AgentEventSource = definePushHookSource({
     // is 600 s; the receiver decides from in-memory state, so the budget it
     // needs is small and the failure it bounds is a wedged server.
     decisionTimeoutSeconds: 5,
+    // Issue #1924, §4 D3. codex registers the same `PermissionRequest` handler
+    // Claude does and its payload is Claude-shaped field for field, so the
+    // forecast reading carries over with it.
+    permissionHookPredictsDialog: true,
+    // Not audited (#1891 measured opencode and copilot). Default = Claude's
+    // current behaviour, which is what the state machine does today.
+    sessionStartMayArriveLate: false,
+    permissionReplyReleasesPrompt: false,
+    eventIdentity: null,
+    resync: 'none',
   },
 
   // Same CamelCase dialect as Claude and copilot (#1757 §8.1). The table is

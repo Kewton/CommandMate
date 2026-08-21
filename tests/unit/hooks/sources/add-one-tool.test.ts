@@ -76,6 +76,13 @@ const codexSource: AgentEventSource = definePushHookSource({
     // `$CODEX_HOME/hooks.json` plus `<cwd>/.codex/hooks.json`.
     configScope: 'per-worktree',
     decisionTimeoutSeconds: 600,
+    // #1924: the five declared values of §4 D3. codex is a Claude-shaped
+    // permission hook, so its forecast column matches Claude's.
+    permissionHookPredictsDialog: true,
+    sessionStartMayArriveLate: false,
+    permissionReplyReleasesPrompt: false,
+    eventIdentity: null,
+    resync: 'none',
   },
 
   // Same CamelCase dialect as Claude — measured, not assumed (#1757 §8.1).
@@ -175,6 +182,14 @@ describe('copilot: same spellings, different order, shorter fuse', () => {
       // ≈10s, against Claude's 600s. A decision path budgeted for Claude never
       // lands here.
       decisionTimeoutSeconds: 10,
+      // #1924: copilot's two departures from the Claude row — its permission
+      // hook fires on every tool call (#1901) and `SessionStart` trails
+      // `UserPromptSubmit` (#1903).
+      permissionHookPredictsDialog: false,
+      sessionStartMayArriveLate: true,
+      permissionReplyReleasesPrompt: false,
+      eventIdentity: null,
+      resync: 'none',
     },
     mappers: fromNameTable(CAMEL_CASE_HOOK_EVENT_NAMES),
     conversationIdFields: SESSION_ID_FIELDS,
@@ -232,6 +247,12 @@ describe('gemini: four of the seven are spelled differently', () => {
       // `<worktree>/.gemini/settings.json` — the one tool that scopes naturally.
       configScope: 'per-worktree',
       decisionTimeoutSeconds: null,
+      // #1924: gemini registers no permission hook at all.
+      permissionHookPredictsDialog: false,
+      sessionStartMayArriveLate: false,
+      permissionReplyReleasesPrompt: false,
+      eventIdentity: null,
+      resync: 'none',
     },
     mappers: fromNameTable(GEMINI_EVENT_NAMES),
     conversationIdFields: SESSION_ID_FIELDS,
@@ -289,6 +310,12 @@ describe('antigravity: no event name, no cwd, camelCase, fail-closed', () => {
       // documented workspace-local file is never read.
       configScope: 'global-singleton',
       decisionTimeoutSeconds: 30,
+      // #1924: agy's hook is adjudicated, not forecast.
+      permissionHookPredictsDialog: false,
+      sessionStartMayArriveLate: false,
+      permissionReplyReleasesPrompt: false,
+      eventIdentity: null,
+      resync: 'none',
     },
 
     mappers: [agyToolName],
