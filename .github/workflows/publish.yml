@@ -15,19 +15,29 @@ permissions:
 
 jobs:
   publish:
-    # [self-hosted] Same expression every job in ci-pr.yml uses. This workflow is
-    # only ever triggered by `release: [published]`, so the pull-request arm never
-    # fires here — it is kept identical so the two files cannot drift into
-    # different rules for "which runner".
+    # GitHub-hosted, deliberately. #1867 moved this job to `self-hosted` and the
+    # v0.26.1 release is the first publish that actually ran there: it failed at
+    # the preflight with `missing required tool: npm`.
     #
-    # RISK, STATED. npm Trusted Publishers (OIDC) and `--provenance` were measured
-    # on GitHub-hosted runners only; whether npm accepts a token minted on a
-    # self-hosted runner has NOT been measured here. If it refuses, the job fails
-    # BEFORE `npm publish` writes anything — nothing reaches the registry and the
-    # published GitHub Release stays valid — and `gh run rerun --failed` retries
-    # after a one-line revert of this block. The preflight below makes the
-    # prerequisites fail by name instead of inside npm.
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
+    # The cause is step order, not the runner. The preflight is the FIRST step and
+    # `actions/setup-node@v4` is the second, so it checks for a tool the next step
+    # installs. A GitHub-hosted image ships node+npm, so the ordering never
+    # mattered there; the ephemeral self-hosted image ships node (via pnpm) but
+    # NOT npm (measured 2026-08-21: `command -v npm` is empty in
+    # `my-ephemeral-runner:latest`). ci-pr.yml survives on self-hosted because
+    # every one of its jobs runs setup-node before it needs a toolchain.
+    #
+    # This is the one-line revert the previous comment prescribed for exactly this
+    # situation. Reverting rather than reordering also sidesteps the risk that
+    # block stated and never measured: whether npm Trusted Publishers accepts an
+    # OIDC token minted on a self-hosted runner. Re-attempting self-hosted needs
+    # both fixes and a way to measure OIDC there — tracked separately, not folded
+    # into a release recovery.
+    #
+    # The preflight below stays first. It did its job: the run died by name before
+    # `npm publish` wrote anything, so nothing reached the registry and 0.26.1 was
+    # still publishable.
+    runs-on: ubuntu-latest
     environment: npm-publish  # Required: must match npm Trusted Publisher settings
     # [Issue #1830] This job publishes to npm, so a hang here leaves the release
     # state ambiguous — did the version go out or not? — on top of squatting a
