@@ -303,6 +303,35 @@ export interface CurrentOutputResponse {
     skippedCount: number;
     lastSkippedAt: number | null;
   };
+  /**
+   * Issue #1884: which stage of the server's precedence chain picked
+   * {@link CurrentOutputResponse.cliToolId}.
+   *
+   * Mirrors: src/lib/session/current-output-builder.ts
+   * CurrentOutputPayload.resolvedBy — and, like `lastSuppression.reason`,
+   * deliberately typed as the wire's `string` rather than the union this build
+   * knows: a server newer than the CLI can name a stage this build has never
+   * heard of, and narrowing here would turn a forward-compatible payload into a
+   * parse failure.
+   *
+   * The field to read when a session visible in tmux is reported as not
+   * running. Absent from a server that predates #1884 — which is also a server
+   * that resolves `?instance=` incorrectly, so its absence is itself the answer.
+   */
+  resolvedBy?: string;
+  /**
+   * Issue #1884: the explicit `?cliTool` the roster contradicts, or null.
+   *
+   * Mirrors: src/lib/session/current-output-builder.ts
+   * CurrentOutputPayload.conflict. This is a read path, so the server resolves
+   * the contradiction (roster wins) and answers 200 with it attached rather
+   * than 400 — the commands that act refuse it instead (DR3-015).
+   */
+  conflict?: {
+    instanceId: string;
+    rosterCliTool: string;
+    requestedCliTool: string;
+  } | null;
 }
 
 // Mirrors: src/types/models.ts BasePromptData (subset for CLI output)
