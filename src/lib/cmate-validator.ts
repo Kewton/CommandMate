@@ -272,12 +272,17 @@ export function validateSchedulesSection(
       const trimmedPermission = permissionStr.trim();
       const cliToolId = parsed.cliToolId;
       // DR3-002: copilot separated from gemini/vibe-local to accept COPILOT_PERMISSIONS
+      // Issue #1914: the fallback is `[]`, not CLAUDE_PERMISSIONS. Every tool
+      // whose CLI has a permission flag is named explicitly; anything else --
+      // `opencode`, `gemini`, `vibe-local`, and any tool added to CLI_TOOL_IDS
+      // without a branch here -- has no flag, so a non-empty Permission cell is
+      // an error rather than something silently checked against Claude's list.
       const allowedValues: readonly string[] =
-        cliToolId === 'codex' ? CODEX_SANDBOXES
+        cliToolId === 'claude' ? CLAUDE_PERMISSIONS
+        : cliToolId === 'codex' ? CODEX_SANDBOXES
         : cliToolId === 'copilot' ? COPILOT_PERMISSIONS
         : cliToolId === 'antigravity' ? ANTIGRAVITY_PERMISSIONS
-        : (cliToolId === 'gemini' || cliToolId === 'vibe-local') ? []
-        : CLAUDE_PERMISSIONS;
+        : [];
       if (!allowedValues.includes(trimmedPermission)) {
         errors.push({
           row: i,

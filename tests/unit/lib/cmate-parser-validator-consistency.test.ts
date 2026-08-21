@@ -22,7 +22,7 @@ vi.mock('@/lib/logger', () => ({
 
 import { parseSchedulesSection } from '@/lib/cmate-parser';
 import { validateSchedulesSection } from '@/lib/cmate-validator';
-import { COPILOT_PERMISSIONS, ANTIGRAVITY_PERMISSIONS } from '@/config/schedule-config';
+import { COPILOT_PERMISSIONS, ANTIGRAVITY_PERMISSIONS, CLAUDE_PERMISSIONS } from '@/config/schedule-config';
 
 describe('cmate-parser / cmate-validator consistency (SEC4-004)', () => {
   for (const permission of COPILOT_PERMISSIONS) {
@@ -106,4 +106,73 @@ describe('cmate-parser / cmate-validator consistency (SEC4-004)', () => {
     expect(errors).toHaveLength(1);
     expect(errors[0].field).toBe('permission');
   });
+  /**
+   * Issue #1914: `opencode` has no permission flag, and the `default:` branch of
+   * both switches used to resolve to CLAUDE_PERMISSIONS.
+   *
+   * The consequence was not cosmetic: a CMATE.md row reading
+   * `| … | opencode | true | acceptEdits |` validated clean and the parser kept
+   * `acceptEdits` on the entry, so a value that only means something to
+   * `claude --permission-mode` was carried on an opencode schedule.
+   *
+   * Non-vacuous: revert either switch's fallback to CLAUDE_PERMISSIONS and the
+   * first case below fails on the parser (permission is preserved rather than
+   * cleared) and the second on the validator (no error is reported).
+   */
+  describe('opencode has no permission flags (Issue #1914)', () => {
+    for (const claudeOnly of CLAUDE_PERMISSIONS) {
+      it(`parser clears claude's "${claudeOnly}" instead of keeping it for opencode`, () => {
+        const row = ['oc-task', '0 9 * * *', 'Do something', 'opencode', 'true', claudeOnly];
+
+        const entries = parseSchedulesSection([row]);
+        expect(entries).toHaveLength(1);
+        expect(entries[0].cliToolId).toBe('opencode');
+        expect(entries[0].permission).toBe('');
+      });
+
+      it(`validator rejects claude's "${claudeOnly}" for opencode`, () => {
+        const row = ['oc-task', '0 9 * * *', 'Do something', 'opencode', 'true', claudeOnly];
+
+        const errors = validateSchedulesSection([row]);
+        expect(errors).toHaveLength(1);
+        expect(errors[0].field).toBe('permission');
+        expect(errors[0].message).toContain('opencode');
+      });
+    }
+
+    it('an empty Permission cell stays valid for opencode', () => {
+      const row = ['oc-task', '0 9 * * *', 'Do something', 'opencode', 'true', ''];
+
+      const entries = parseSchedulesSection([row]);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].permission).toBe('');
+      expect(validateSchedulesSection([row])).toEqual([]);
+    });
+
+    it('opencode still rejects `--model` in the CLI Tool column', () => {
+      // TOOLS_WITH_MODEL_SUPPORT is copilot-only; #1914 does not widen it.
+      // Pinned so the "no permission flags" change is not read as "opencode now
+      // behaves like copilot".
+      const row = ['oc-task', '0 9 * * *', 'Do something', 'opencode --model anthropic/claude-sonnet-4', 'true', ''];
+
+      expect(parseSchedulesSection([row])).toHaveLength(0);
+      expect(validateSchedulesSection([row]).length).toBeGreaterThan(0);
+    });
+  });
+
+  /**
+   * Issue #1914: claude keeps its own vocabulary — the fix moved `default:` off
+   * CLAUDE_PERMISSIONS, and this is the regression that would catch moving it
+   * too far (claude losing its permission set along with everyone else).
+   */
+  for (const permission of CLAUDE_PERMISSIONS) {
+    it(`should accept claude permission "${permission}" in both parser and validator`, () => {
+      const row = ['claude-task', '0 9 * * *', 'Do something', 'claude', 'true', permission];
+
+      const entries = parseSchedulesSection([row]);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].permission).toBe(permission);
+      expect(validateSchedulesSection([row])).toEqual([]);
+    });
+  }
 });

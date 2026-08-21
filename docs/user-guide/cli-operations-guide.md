@@ -1616,7 +1616,7 @@ commandmate report metrics --json                  # JSON出力
 | オプション | 説明 | デフォルト |
 |-----------|------|-----------|
 | `--date <date>` | 対象日（`YYYY-MM-DD`） | 当日 |
-| `--tool <tool>` | 使用するAIツール（claude, codex, copilot） | claude |
+| `--tool <tool>` | 使用するAIツール（claude, codex, copilot, antigravity） | claude |
 | `--model <model>` | モデル名（copilot 向け） | - |
 | `--template <id>` | テンプレートIDを指示文として使用 | - |
 | `--instruction <text>` | カスタム指示文（`--template` の代替） | - |
@@ -1632,7 +1632,7 @@ commandmate report metrics --json                  # JSON出力
 | `--token <token>` | 認証トークン（`CM_AUTH_TOKEN` 環境変数を推奨） | - |
 
 > **注意**: `--date` は `YYYY-MM-DD` 形式のみ受け付けます。不正な形式は `exit 2`（CONFIG_ERROR）になります。
-> `--tool` は claude / codex / copilot のいずれか、`--days` は 1 以上を指定してください。
+> `--tool` は claude / codex / copilot / antigravity のいずれか、`--days` は 1 以上を指定してください。
 
 ### list 出力例
 

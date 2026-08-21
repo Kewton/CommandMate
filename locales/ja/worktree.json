@@ -241,7 +241,7 @@
     "responseCompleted": "レスポンス完了",
     "thinking": "考え中...",
     "thinkingStatus": "思考中",
-    "claudeIsThinking": "Claude が考え中です..."
+    "agentIsThinking": "{toolName} が考え中です..."
   },
   "output": {
     "latest": "最新の出力",
