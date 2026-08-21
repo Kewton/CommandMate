@@ -10,6 +10,7 @@ import {
   COPILOT_MODEL_SWITCH_TIMEOUT_MS,
   MODEL_NAME_PATTERN,
   MAX_MODEL_NAME_LENGTH,
+  COPILOT_INSTALL_HINT,
 } from '@/config/copilot-constants';
 
 describe('copilot-constants', () => {
@@ -75,5 +76,17 @@ describe('copilot-constants', () => {
   it('MAX_MODEL_NAME_LENGTH should be a positive number', () => {
     expect(typeof MAX_MODEL_NAME_LENGTH).toBe('number');
     expect(MAX_MODEL_NAME_LENGTH).toBeGreaterThan(0);
+  });
+
+  // Issue #1907: `gh extension install github/gh-copilot` installs a different,
+  // retired product; naming it sent operators to the wrong CLI entirely.
+  it('COPILOT_INSTALL_HINT should name the current installers', () => {
+    expect(COPILOT_INSTALL_HINT).toContain('brew install copilot-cli');
+    expect(COPILOT_INSTALL_HINT).toContain('npm i -g @github/copilot');
+  });
+
+  it('COPILOT_INSTALL_HINT should not name the retired gh extension', () => {
+    expect(COPILOT_INSTALL_HINT).not.toContain('gh extension install');
+    expect(COPILOT_INSTALL_HINT).not.toContain('gh-copilot');
   });
 });
