@@ -19,6 +19,7 @@ import {
   LM_STUDIO_BASE_URL,
   MAX_LM_STUDIO_MODELS,
   LM_STUDIO_MODEL_PATTERN,
+  OPENCODE_LOCAL_PROVIDER_CONFIG_ENV,
 } from '@/lib/cli-tools/opencode-config';
 
 // Mock fs module
@@ -26,6 +27,7 @@ vi.mock('fs', () => {
   return {
     existsSync: vi.fn(),
     writeFileSync: vi.fn(),
+    mkdirSync: vi.fn(),
     lstatSync: vi.fn(),
     realpathSync: vi.fn(),
   };
@@ -52,6 +54,7 @@ describe('opencode-config', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
   });
 
   // ===========================================================================
@@ -458,6 +461,15 @@ describe('opencode-config', () => {
   // ===========================================================================
 
   describe('ensureOpencodeConfig()', () => {
+    // Issue #1908: generation is off unless the operator opts in, so the
+    // generator tests below have to say which destination they are exercising.
+    // The default (nothing written at all) is pinned in
+    // tests/unit/cli-tools/opencode-config-optin-1908.test.ts.
+    beforeEach(() => {
+      vi.stubEnv(OPENCODE_LOCAL_PROVIDER_CONFIG_ENV, 'worktree');
+      vi.stubEnv('OPENCODE_CONFIG', '');
+    });
+
     /**
      * Helper: create URL-branching mockFetch implementation.
      * Returns specified responses for Ollama and LM Studio URLs.
@@ -595,7 +607,11 @@ describe('opencode-config', () => {
         lmStudio: 'reject',
       });
 
-      await expect(ensureOpencodeConfig('/test/worktree')).resolves.toBeUndefined();
+      await expect(ensureOpencodeConfig('/test/worktree')).resolves.toEqual({
+        written: false,
+        configPath: null,
+        reason: 'no-providers',
+      });
       expect(fs.writeFileSync).not.toHaveBeenCalled();
     });
 
@@ -611,7 +627,11 @@ describe('opencode-config', () => {
         },
       });
 
-      await expect(ensureOpencodeConfig('/test/worktree')).resolves.toBeUndefined();
+      await expect(ensureOpencodeConfig('/test/worktree')).resolves.toEqual({
+        written: false,
+        configPath: null,
+        reason: 'no-providers',
+      });
       expect(fs.writeFileSync).not.toHaveBeenCalled();
     });
 
@@ -644,7 +664,11 @@ describe('opencode-config', () => {
       });
 
       // Should not throw (write failure is non-fatal)
-      await expect(ensureOpencodeConfig('/test/worktree')).resolves.toBeUndefined();
+      await expect(ensureOpencodeConfig('/test/worktree')).resolves.toEqual({
+        written: false,
+        configPath: null,
+        reason: 'write-failed',
+      });
     });
 
     it('should treat concurrent file creation as non-fatal', async () => {
@@ -659,7 +683,11 @@ describe('opencode-config', () => {
         lmStudio: 'reject',
       });
 
-      await expect(ensureOpencodeConfig('/test/worktree')).resolves.toBeUndefined();
+      await expect(ensureOpencodeConfig('/test/worktree')).resolves.toEqual({
+        written: false,
+        configPath: null,
+        reason: 'existing-config',
+      });
     });
 
     it('should call both fetch functions in parallel via Promise.all', async () => {
