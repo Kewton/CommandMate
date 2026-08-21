@@ -315,8 +315,15 @@ No new exit code was minted, so callers that already branch on exit 10 (a dispat
 | `type` | Meaning | How to answer |
 |--------|---------|---------------|
 | `yes_no` / `multiple_choice` | The prompt was detected and parsed | `commandmate respond <id> <answer>` |
-| `selection_list` | An arrow-key selection UI (Codex's pager and `/model`, antigravity's permission menu, Issue #1628). It cannot be parsed into options | Not `commandmate respond` — send the special keys that stand in for arrow keys |
+| `selection_list` | An arrow-key selection UI (Codex's pager and `/model`, antigravity's permission menu, **opencode's permission dialog** (`Allow once / Allow always / Reject`, Issue #1893), Issue #1628). It cannot be parsed into options | Not `commandmate respond` — send the special keys that stand in for arrow keys |
 | `unclassified` | **An interactive frame the detection layer could not classify** (Issue #1708). Returned only when `isUnclassifiedActive` has been set for **60 consecutive seconds** | Look at the raw pane: `commandmate capture <id> --pane` |
+
+> **Never answer a `selection_list` with `commandmate respond <id> <number>` (Issue #1893).**
+> opencode's permission dialog is an unnumbered button strip, and number keys do nothing on it
+> (measured on 1.18.21). A numeric answer is sent as literal text followed by Enter, so what gets
+> confirmed is **whichever button is highlighted** (`Allow once` by default) — `respond <id> 3`,
+> meant as Reject, approves instead. Use the arrow-key special keys (←/→ then Enter) or the
+> NavigationButtons in the web UI.
 
 `unclassified` is the safety net that turns a detection miss into a stop reason of its own. A frame
 that slips past the detection layer fires neither auto-yes, nor the contract's `autoYes` policy, nor
