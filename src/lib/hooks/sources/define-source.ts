@@ -41,7 +41,11 @@ import {
   runEventMappers,
   type EventMapper,
 } from './event-mapper';
-import { fillDecisionSlot, listOpenDecisions } from './pending-decisions';
+import {
+  fillDecisionSlot,
+  listOpenDecisions,
+  recordDecisionDelivery,
+} from './pending-decisions';
 import type {
   AgentEventSource,
   AgentInstanceRef,
@@ -202,7 +206,15 @@ export function definePushHookSource(spec: PushHookSourceSpec): AgentEventSource
     ): Promise<void> {
       // C2: the verdict leaves through the body of the request the agent is
       // blocked on, which the receiver is holding open in a slot.
-      fillDecisionSlot(target, decision.id, spec.encodeVerdict(verdict));
+      const filled = fillDecisionSlot(target, decision.id, spec.encodeVerdict(verdict));
+      // Issue #1898: for a push source "delivered" and "the slot was still
+      // open" are the same fact — the body has nowhere else to go. Reported so
+      // callers of `answerPendingDecisionWithReceipt` get the same shape of
+      // answer from both transports.
+      recordDecisionDelivery(target, decision.id, {
+        delivered: filled,
+        reason: filled ? 'response-body' : 'slot-closed',
+      });
     },
 
     async listPending(target: AgentInstanceRef): Promise<PendingDecision[]> {

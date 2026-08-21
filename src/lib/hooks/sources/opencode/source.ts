@@ -45,6 +45,7 @@ import { AGENT_EVENT_TYPES } from '@/lib/hooks/agent-event-types';
 import { isHookInjectionEnabled, shellQuote } from '@/lib/hooks/hook-settings-generator';
 import { createLogger } from '@/lib/logger';
 import { definePullEventSource } from '../define-source';
+import { recordDecisionDelivery } from '../pending-decisions';
 import type {
   AgentEventSource,
   AgentInstanceRef,
@@ -134,6 +135,7 @@ async function decideOpencode(
       decisionId: decision.id,
       consequence: 'the agent waits indefinitely; nothing else will unblock it',
     });
+    recordDecisionDelivery(target, decision.id, { delivered: false, reason: 'abstained' });
     return;
   }
 
@@ -144,6 +146,7 @@ async function decideOpencode(
       instanceId,
       decisionId: decision.id,
     });
+    recordDecisionDelivery(target, decision.id, { delivered: false, reason: 'no-port' });
     return;
   }
 
@@ -158,6 +161,10 @@ async function decideOpencode(
         decisionId: decision.id,
         verdict: verdict.kind,
       });
+      recordDecisionDelivery(target, decision.id, {
+        delivered: false,
+        reason: 'question-needs-answer-verdict',
+      });
       return;
     }
     const delivered = await replyOpencodeQuestion(port, decision.id, verdict.answers);
@@ -167,11 +174,18 @@ async function decideOpencode(
       decisionId: decision.id,
       delivered,
     });
+    recordDecisionDelivery(target, decision.id, {
+      delivered,
+      reason: delivered ? 'question-reply' : 'question-reply-failed',
+    });
     return;
   }
 
   const reply = toOpencodePermissionReply(verdict);
-  if (reply === null) return;
+  if (reply === null) {
+    recordDecisionDelivery(target, decision.id, { delivered: false, reason: 'no-wire-value' });
+    return;
+  }
 
   const delivered = await replyOpencodePermission(
     port,
@@ -185,6 +199,13 @@ async function decideOpencode(
     decisionId: decision.id,
     reply,
     delivered,
+  });
+  // Issue #1898: the fact the ingest needs in order to decide whether a human
+  // is still blocked. `replyOpencodePermission` answers false for a refused
+  // connection, and a verdict that never arrived leaves the dialog on screen.
+  recordDecisionDelivery(target, decision.id, {
+    delivered,
+    reason: delivered ? `permission-reply:${reply}` : 'permission-reply-failed',
   });
 }
 
