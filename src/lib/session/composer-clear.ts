@@ -15,10 +15,11 @@
  * So the loop here is: read the frame → decide whether real text is still there
  * → send one pass → read again. It stops the moment
  * {@link extractComposerText} stops reporting `content`, which is also what
- * makes it correct in the presence of Claude's dim ghost text: `C-u` cannot
+ * makes it correct in the presence of a CLI's dim placeholder text: `C-u` cannot
  * remove a suggestion that was never in the buffer, and a loop that compared
- * ANSI-stripped strings instead would spin until its cap on every idle claude
- * session with a hint on screen.
+ * ANSI-stripped strings instead would spin until its cap on every idle session
+ * with a hint on screen — claude's rotating suggestion, or codex's
+ * `Ask Codex to do anything` (Issue #1890).
  *
  * The capture is taken with {@link capturePane} directly rather than through
  * `captureSessionOutput`, because that path is served by a 5-second TTL cache
@@ -94,8 +95,8 @@ const defaultDelay = (ms: number): Promise<void> => new Promise(resolve => setTi
  * Empty the composer of a running session and verify the result.
  *
  * @param sessionName - tmux session to act on (must already exist; the caller checks)
- * @param cliToolId - CLI whose composer layout to read. Only `claude` can be
- *   verified today (see {@link extractComposerText}); for anything else the
+ * @param cliToolId - CLI whose composer layout to read. `claude` and `codex` can
+ *   be verified today (see {@link extractComposerText}); for anything else the
  *   extractor reports `unsupported_tool`, no pass is sent, and `cleared` is
  *   false — a truthful "this endpoint cannot do that yet" rather than blind keys
  *   into an input line nobody has measured.

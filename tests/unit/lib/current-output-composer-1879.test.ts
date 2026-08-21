@@ -34,11 +34,13 @@ vi.mock('@/lib/polling/auto-yes-manager', () => ({
 import { captureSessionOutput } from '@/lib/session/cli-session';
 import { buildCurrentOutput } from '@/lib/session/current-output-builder';
 
-const FIXTURES = path.resolve(__dirname, '../lib/detection/fixtures/claude-live-1879');
+const FIXTURE_ROOT = path.resolve(__dirname, '../lib/detection/fixtures');
 const frame = (name: string): string =>
-  fs.readFileSync(path.join(FIXTURES, `${name}.txt`), 'utf-8');
+  fs.readFileSync(path.join(FIXTURE_ROOT, 'claude-live-1879', `${name}.txt`), 'utf-8');
+const codexFrame = (name: string): string =>
+  fs.readFileSync(path.join(FIXTURE_ROOT, 'codex-live-1890', `${name}.txt`), 'utf-8');
 
-const capture = (tool: 'claude' | 'codex' = 'claude') =>
+const capture = (tool: 'claude' | 'codex' | 'gemini' = 'claude') =>
   buildCurrentOutput({} as Database.Database, 'wt-1', tool);
 
 describe('capture payload exposes the unsent composer (Issue #1879)', () => {
@@ -76,13 +78,35 @@ describe('capture payload exposes the unsent composer (Issue #1879)', () => {
     expect(payload.composerState).toBe('empty');
   });
 
-  it('publishes null with state `unsupported_tool` for codex', async () => {
+  it('publishes null with state `unsupported_tool` for an unmeasured CLI', async () => {
     vi.mocked(captureSessionOutput).mockResolvedValue(frame('composer-residual-plain'));
+
+    const payload = await capture('gemini');
+
+    expect(payload.composerText).toBeNull();
+    expect(payload.composerState).toBe('unsupported_tool');
+  });
+
+  // Issue #1890. The payload half of teaching the reader codex: `capture --json`
+  // and the WebSocket snapshot both come through here, so a codex composer that
+  // the module reads correctly but the builder never publishes is still the
+  // `unsupported_tool` the Issue was filed about.
+  it('publishes real residual text from a codex frame', async () => {
+    vi.mocked(captureSessionOutput).mockResolvedValue(codexFrame('composer-residual-plain'));
+
+    const payload = await capture('codex');
+
+    expect(payload.composerText).toBe('echo PREFILLED');
+    expect(payload.composerState).toBe('content');
+  });
+
+  it('publishes null with state `ghost` for codex’s idle placeholder', async () => {
+    vi.mocked(captureSessionOutput).mockResolvedValue(codexFrame('composer-placeholder-ask'));
 
     const payload = await capture('codex');
 
     expect(payload.composerText).toBeNull();
-    expect(payload.composerState).toBe('unsupported_tool');
+    expect(payload.composerState).toBe('ghost');
   });
 
   it('publishes the key explicitly, so an old server is distinguishable from an empty box', async () => {

@@ -81,9 +81,11 @@ export interface PaneTerminalState {
    * push is healthy) would otherwise disagree for up to that whole window — the
    * bar would linger after a Clear, or not appear until the fallback poll.
    *
-   * Empty for every state other than real content — in particular for Claude's
-   * dim ghost suggestions, which is the whole reason the extraction reads the
-   * raw ANSI frame rather than the rendered text.
+   * Empty for every state other than real content — in particular for the dim
+   * placeholder a CLI paints into an EMPTY composer (Claude's rotating
+   * suggestion, codex's `Ask Codex to do anything` since #1890), which is the
+   * whole reason the extraction reads the raw ANSI frame rather than the
+   * rendered text.
    */
   composerText: string;
   attaching: boolean;

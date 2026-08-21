@@ -1,0 +1,148 @@
+version: 1
+title: "Issue #1890: extractComposerText に codex の composer を教える"
+goal: |
+  /bug-fix 1890
+
+  https://github.com/Kewton/CommandMate/issues/1890 を実装してください。
+
+  ## 課題
+
+  `/send` の composer 連結欠陥（#1880）は claude では解消しましたが、**codex では依然として発生します**。
+  `src/lib/detection/composer-text.ts` の `extractComposerText` が claude 以外を短絡するためです:
+
+      if (cliToolId !== 'claude') return { text: '', state: 'unsupported_tool' };
+
+  #1880 の実機検証ケース7（codex ＋ 残存）で**連結が再現済み**です（ケース6 の残存なしは退行なしを確認）。
+
+  codex を教えると 3 つが同時に効きます:
+
+  | 機能 | 現状（codex） |
+  |---|---|
+  | `/send` の送信前クリア（#1880） | 効かない → **連結する** |
+  | 未送信入力バー（#1879 `UnsentComposerBar`） | 出ない（`unsupported_tool`） |
+  | `POST /api/worktrees/[id]/clear-composer` | `cleared: false` |
+
+  ## 【最重要】誤検知のコストが #1879 の頃より上がっている
+
+  #1879 単体なら判別ミスは「バーが出ない／幻のバーが出る」で済みました。
+  **#1880 が着地した今、判別ミスは「送信のたびに誤ってクリアを撃つ＝ユーザーの入力を破壊する」に変わっています。**
+
+  したがって:
+
+  - **判別に自信が持てないなら `unsupported_tool` のままにする方が安全**です。
+    「一応動く」実装を入れるくらいなら、根拠つきで見送る判断を報告してください
+  - `src/lib/cli-tools/submit-verified-sender.ts` の `COMPOSER_CLEAR_SUPPORTED_TOOLS` に codex を足すのは、
+    **判別が実測で確証を得てから**にすること
+
+  ## 既知の障害（設計前に必ず読むこと）
+
+  1. **codex の composer は構造が違う（#1879 で実測済み）。**
+     claude 用の `findClaudeInputBox()` は「終端セパレータ → 開始セパレータ → `^[>❯]`」で入力箱を特定しますが、
+     codex に対して回すと**終端セパレータが見つかりません**。別の構造探索が要ります。
+  2. **codex は空 composer に placeholder を描く（#1879 で実測済み）。**
+     `Ask Codex to do anything` が空の入力欄に描画されます。**これを実内容として扱うとクリアが暴発します。**
+     claude では dim（`ESC[2m`）で判別できましたが、**codex が同じ SGR を使う保証はありません**。
+     `tmux display-message -p '#{cursor_x}'` による判別も併せて実測してください。
+  3. コードベースは既にこの罠を知っています（`submit-verified-sender.ts` の `classifySubmit` case E コメント
+     「idle-prompt placeholders … never mistaken for this」）。
+
+  ## 並走している関連 Issue に注意（重複実装の回避）
+
+  **#1883**（OPEN）は「opencode の idle composer `Ask anything...` が `hasActivePrompt=true` になり
+  send が全拒否される」という Issue で、**本 Issue と同根**です（どちらも「非 claude の空 composer の
+  placeholder をどう扱うか」）。#1885 / #1886 も同じ family（copilot の TUI 状態検出）です。
+
+  #1883 は `src/lib/detection/status-detector.ts` 側、本 Issue は `src/lib/detection/composer-text.ts` 側で、
+  **ファイルは別ですが判定ロジックが重複しうる**。着手前に `gh issue view 1883` を読み、
+  **placeholder 判定を二重に実装しないでください**。共通化できるなら根拠を書いて共通化し、
+  できないなら「なぜ別実装が妥当か」を書いてください。
+
+  ## 受入条件
+
+  - [ ] `extractComposerText` が codex の入力箱を構造的に特定できる
+  - [ ] codex の **placeholder（`Ask Codex to do anything`）が `content` にならない**ことを、
+        **ANSI 付きの実 capture fixture** でテスト固定する
+        （**ANSI 除去済み fixture では空振りします**。#1879 の
+        `tests/unit/lib/detection/fixtures/claude-live-1879/` と同じ作法で採ること）
+  - [ ] codex の**実残存**が `content` として検出される
+  - [ ] `clearComposer()` が codex セッションを実際に空にできる（実機で確認）
+  - [ ] #1880 の送信前クリアが codex でも効く（**#1880 実測ケース7 が再現しない**）
+  - [ ] **claude の挙動が一切変わらない**ことをテストで固定する
+  - [ ] 判別根拠（SGR / `cursor_x` / その他）を実測して記録する
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` 全緑
+  - [ ] CHANGELOG `[Unreleased]` に 1 行
+
+  ## スコープ外
+
+  - gemini / copilot / opencode / vibe-local / antigravity。**まず codex 1 つで確定させる**
+    （6 ツールを一度に入れると、どのツールで判別が外れたのか切り分けられなくなる）
+
+  ## 実測での確認（必須。ユニットテストのモックだけでは不足）
+
+  #1878 / #1879 / #1880 と同じく**使い捨て worktree ＋ 専用セッション**で行うこと。
+  少なくとも以下を実 TUI で確認し、`dev-reports/issue/1890/verification.md` に記録してください
+  （commit には含めない）:
+
+  1. codex・空 composer（placeholder 表示中）→ クリアが**発火しない**
+  2. codex・残存あり（カーソル末尾）→ 本文だけが投入される
+  3. codex・残存あり（**カーソル行頭**）→ 本文だけが投入される
+  4. codex・**複数行**残存 → 本文だけが投入される
+  5. **claude が従来どおり**（#1880 のケース1〜4 が引き続き解消されたまま）
+
+  ## 作業ルール（厳守）
+
+  ### tmux / 稼働環境の保護
+
+  ユーザーの本番 CommandMate サーバ（http://127.0.0.1:3000）と稼働中セッションが
+  **同一の既定 tmux サーバ上**で動いています。1 本でも壊すと実害が出ます。
+
+  - **`tmux kill-server` を絶対に打たない。** 後始末は `tmux kill-session -t '=<完全一致名>:'` のみ
+  - **`tmux set-option -g` / `bind-key` / `unbind-key` を絶対に打たない**（サーバグローバル）
+  - **`send-keys` / `capture-pane` は必ず `-t '=<セッション名>:'` の完全一致指定**
+  - **以下の稼働セッションに一切触れない**:
+    `mcbd-claude-mycodebranchdesk` / `mcbd-claude-mycodebranchdesk-2` /
+    `mcbd-claude-commandagent-develop` / `mcbd-codex-commandagent-develop` /
+    `mcbd-claude-borderfreekidsmap-develop-2` / `mcbd-claude-commandmate-issue-1878` /
+    `mcbd-claude-commandmate-issue-1879` / `mcbd-claude-commandmate-issue-1880` /
+    `mcbd-claude-commandmate-issue-1882` /
+    `mcbd-codex-commandagent-issue-285-python-cli-205-plan-run-static-cli-probe-not-run` /
+    `mcbd-opencode-commandmate-marketing` / `mcbd-opencode-harness-pack-uat-sandbox-uatrun1` /
+    `mcbd-claude-commandmate-issue-1889`（**並走中の別ワーカー**） /
+    `mcbd-claude-commandmate-issue-1890`（**あなた自身**）
+  - `TMUX_TMPDIR` を隔離手段に使わない（`$TMUX` があると無視される）
+  - **稼働サーバ（port 3000）を停止・再起動しない。`MyCodeBranchDesk` で `npm run build` を走らせない**
+
+  ### fixture の作法
+
+  - **`capture-pane -p -e` で ANSI を保持**して採る（除去すると placeholder 判別を検証できない）
+  - **200x1000 ペイン**で採る（既定サイズだと再現しない事象がある）
+  - provenance（採取日・codex のバージョン・ペインサイズ）を README に残す
+
+  ### 進め方
+
+  - **GitHub Issue / PR を編集しない**（オーケストレーターが管理します）
+  - **PR を作らない・push しない**（オーケストレーターが行います）
+  - 作業は**このブランチ上の単一 commit**。`dev-reports/` は commit に含めない
+  - **Issue 本文と実コードが食い違ったら実コードを正**とし、食い違いを明記する
+  - #1889 が別 worktree で並走しています。`CHANGELOG.md` は双方が触りますが**自分のぶんだけ書けばよい**
+
+scope:
+  allow:
+    - "src/lib/detection/**"
+    - "src/lib/session/**"
+    - "src/lib/cli-tools/**"
+    - "src/lib/tmux/**"
+    - "src/components/worktree/**"
+    - "src/hooks/**"
+    - "src/config/**"
+    - "src/cli/types/**"
+    - "tests/unit/**"
+    - "tests/helpers/**"
+    - "locales/**"
+    - "CHANGELOG.md"
+    - "docs/module-reference.md"
+  deny: []
+
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

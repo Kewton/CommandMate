@@ -164,9 +164,10 @@ describe('clearComposer (Issue #1879)', () => {
 
   it('refuses to claim success for a CLI whose composer it cannot read', async () => {
     // Reporting `cleared: true` here would be the server asserting it emptied a
-    // box it never looked at.
+    // box it never looked at. codex used to be this case and stopped being it in
+    // Issue #1890, which is why the tool named here is one still unmeasured.
     const sendClear = vi.fn();
-    const result = await clearComposer('sess', 'codex', {
+    const result = await clearComposer('sess', 'gemini', {
       capture: async () => ONE_ROW,
       sendClear,
       delay: noDelay,
@@ -175,6 +176,77 @@ describe('clearComposer (Issue #1879)', () => {
     expect(sendClear).not.toHaveBeenCalled();
     expect(result.cleared).toBe(false);
     expect(result.state).toBe('unsupported_tool');
+  });
+
+  // Issue #1890: the loop's two exit conditions, driven through codex's own
+  // layout rather than claude's. Nothing about `clearComposer` is tool-specific,
+  // but the reason it terminates is — it stops when `extractComposerText` stops
+  // saying `content`, and on codex that verdict is reached through a different
+  // locator and a different placeholder.
+  describe('codex (Issue #1890)', () => {
+    /** A codex tail with the given composer rows (raw, attributes intact). */
+    function codexFrame(...composerRows: string[]): string {
+      return ['\u2022 a reply', '', ...composerRows, '', '  gpt-5.6-sol xhigh \u00b7 /repo'].join('\n');
+    }
+
+    const CODEX_PLACEHOLDER = codexFrame(`${ESC}[1m\u203A${ESC}[0m ${ESC}[2mAsk Codex to do anything${ESC}[0m`);
+    const CODEX_ONE_ROW = codexFrame(`${ESC}[1m\u203A${ESC}[0m echo PREFILLED`);
+
+    it('sends nothing when the composer holds only codex’s placeholder', async () => {
+      // The regression #1890 is most exposed to: a pass here fires on EVERY idle
+      // codex send, spins to the cap, and then refuses to send at all.
+      const sendClear = vi.fn();
+      const result = await clearComposer('sess', 'codex', {
+        capture: async () => CODEX_PLACEHOLDER,
+        sendClear,
+        delay: noDelay,
+      });
+
+      expect(sendClear).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        cleared: true,
+        passes: 0,
+        state: 'ghost',
+        remainingText: '',
+        discardedText: '',
+      });
+    });
+
+    it('clears real residual text and records what it threw away', async () => {
+      const frames = [CODEX_ONE_ROW, CODEX_PLACEHOLDER];
+      const sendClear = vi.fn();
+      const result = await clearComposer('sess', 'codex', {
+        capture: async () => frames.shift() ?? CODEX_PLACEHOLDER,
+        sendClear,
+        delay: noDelay,
+      });
+
+      expect(sendClear).toHaveBeenCalledTimes(1);
+      expect(result.cleared).toBe(true);
+      expect(result.passes).toBe(1);
+      expect(result.discardedText).toBe('echo PREFILLED');
+      expect(invalidateCache).toHaveBeenCalledWith('sess');
+    });
+
+    it('refuses to claim success on a codex dialog, and sends no keys at it', async () => {
+      // An approval screen has the composer off screen entirely. `no_composer`
+      // is the honest verdict, and the important half is that no `C-e`+`C-u`
+      // reaches a dialog whose keys have consequences.
+      const sendClear = vi.fn();
+      const result = await clearComposer('sess', 'codex', {
+        capture: async () =>
+          ['  Would you like to make the following edits?', '',
+           `${ESC}[1m${ESC}[38;5;6m\u203A 1. Yes, proceed (y)${ESC}[0m`,
+           "  2. Yes, and don't ask again for these files",
+           '', '  Press enter to confirm or esc to cancel'].join('\n'),
+        sendClear,
+        delay: noDelay,
+      });
+
+      expect(sendClear).not.toHaveBeenCalled();
+      expect(result.cleared).toBe(false);
+      expect(result.state).toBe('no_composer');
+    });
   });
 
   it('refuses to claim success when no input box is on screen', async () => {
