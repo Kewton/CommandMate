@@ -351,8 +351,17 @@ commandmate wait <worktree-id> --fail-on-upstream-fault  # 上流障害で compo
 | 10 | プロンプト検出（`--on-prompt agent` 時） | `respond` で応答し、再度 `wait` |
 | 11 | 上流障害（`--fail-on-upstream-fault` 指定時のみ、Issue #1839） | **`verify` を回さず**時間をおいて同じ内容を再 `send` |
 | 20 | 検証ゲート不合格（`--verify`） | `verify --json` で失敗ゲートを確認し修正 |
-| 21 | 作業証跡ゼロ（コミットも未コミット変更も無い） | エージェントが着手していない。再度 `send` |
+| 21 | 作業証跡ゼロ（コミットも未コミット変更も無い）／セッションが一度も稼働していない | エージェントが着手していない。再度 `send` |
 | 124 | タイムアウト | `capture` で状況確認、再度 `wait` or 中断 |
+
+> **exit 21 が出たときは、まず送り先の解決を疑ってください（Issue #1884）**。
+> `Not started: <id> has no running <agent> session for instance <x> (resolvedBy=...)` の
+> 末尾が**解決の根拠**です。`resolvedBy=worktree-default` なのに `--instance` を渡している場合、
+> その instance は roster にも無くツール名でもないため **worktree の既定エージェント**を
+> 見に行っています（`commandmate instances <id>` で roster を確認してください）。
+> `resolvedBy=fallback` は worktree 自身に CLI ツールが記録されていないという別の異常です。
+> #1884 以前のサーバーはこの末尾を返さないので、**末尾が無いこと自体**が
+> 「サーバーが `--instance` のツールを解決しない版である」ことを意味します。
 
 ### --verify / --require-work（Issue #1544）
 
@@ -1124,7 +1133,9 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
   },
   "model": "claude-opus-5[1m]",
   "reasoningEffort": null,
-  "upstreamFault": null
+  "upstreamFault": null,
+  "resolvedBy": "roster",
+  "conflict": null
 }
 ```
 
@@ -1141,6 +1152,7 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
 | `structuredEvents.*` / `lastStopEventAt` | hooks の最終イベントと最終 `stop` 時刻。hooks が来ていなければ `null` |
 | `structuredEvents.source` | そのツールの構造化イベントソースの識別子と**宣言値**（Issue #1924）。セッションの状態ではなく**ソースの性質**なので、hooks が 1 件も来ていなくても・セッションが止まっていても必ず入る。ソース実装が無いツール（`vibe-local`）は互換ソースの「未計測」値（`supportedEvents: []`）を返す |
 | `upstreamFault` | 画面に上流障害の署名があれば `{id, matchedText, at}`、無ければ `null`（Issue #1839）。**`null` は「健全」ではなく「既知の署名が無かった」** |
+| `resolvedBy` / `conflict` | `cliToolId` を選んだ**解決段**と、roster と明示指定の矛盾（Issue #1884）。下記参照 |
 
 画面が空かどうかは `realtimeSnippet.trim() === ''` と `lineCount` で見る。
 `content` は差分なので単独では判断しない。
@@ -1161,6 +1173,34 @@ commandmate capture <worktree-id> --json | jq -r '.model // "unknown"'
 - `reasoningEffort` は Issue #1784 着地までは常に `null` です
 - **既存フィールドは一切変わっていません**。`content` / `realtimeSnippet` /
   `sessionStatus` / `sessionStatusReason` を読んでいる監視スクリプトはそのままです
+
+#### `resolvedBy` / `conflict`: 送り先の解決（Issue #1884）
+
+`cliToolId` が**どの段で決まったか**と、roster と明示指定（`--agent` / `?cliTool`）が
+食い違っていたかを載せます。どちらも**追加フィールド**で、既存フィールドは変わりません。
+#1884 以前のサーバーは両方とも返しません（キー自体が無い）。
+
+| `resolvedBy` | 意味 |
+|---|---|
+| `roster` | `--instance` が roster に登録されており、その `cliTool` を採用した（最優先） |
+| `explicit` | roster が知らない instance に対して明示指定を採用した／instance 未指定で明示指定があった |
+| `primary` | instance ID がツール名そのもの（`--instance opencode` 等）なので、そのツールのプライマリインスタンスと解釈した（Issue #868） |
+| `worktree-default` | 上記のいずれにも当たらず、worktree の既定エージェントを採用した |
+| `fallback` | worktree に CLI ツールが記録されていなかった。**正常な結果ではありません**（設計 §4 D5 決定 5） |
+
+```bash
+# --instance を渡したのに worktree 既定が返ってきていないか
+commandmate capture <worktree-id> --instance worker-7 --json | jq -r '.resolvedBy'
+```
+
+`conflict` は roster と明示指定が食い違ったときだけ非 `null` になります。
+**読み取り経路なので 400 にはせず 200 を返し、roster を優先して解決した事実を載せます**
+（副作用のある `send` / `respond` / `kill-session` などは同じ矛盾を 400 `instance_tool_conflict`
+で拒否します）。
+
+```json
+"conflict": { "instanceId": "oc-2", "rosterCliTool": "opencode", "requestedCliTool": "claude" }
+```
 
 #### `upstreamFault`: 上流障害の観測（Issue #1839）
 
