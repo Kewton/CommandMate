@@ -16,6 +16,7 @@ import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/dete
 import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
 import { resolvePromptAnswer, PromptAnswerResolutionError, type AnswerResolution } from '@/lib/prompt-answer-semantic';
 import { getAskUserQuestion } from '@/lib/session/agent-event-state';
+import { answerStructuredDecision } from '@/lib/hooks/structured-decision-response';
 import {
   applyAskUserQuestion,
   resolveAskUserQuestionAnswer,
@@ -125,6 +126,63 @@ export async function POST(
         { error: `${cliTool.name} session is not running` },
         { status: 400 }
       );
+    }
+
+    // Issue #1898: answer the approval the agent is actually holding, before
+    // going anywhere near the pane.
+    //
+    // `respond` has only ever been able to press a key, so a dialog the
+    // detectors cannot read was unanswerable — which on opencode is every
+    // approval: `wait` reported it (exit 10) and told the operator to run
+    // `respond`, and `respond` then answered `prompt_no_longer_active`. The
+    // structured layer knows the decision by id and can reply to it over the
+    // agent's own API.
+    //
+    // Declines to `not-applicable` for every source with no decision identity
+    // and for every session holding no approval, which is where the keystroke
+    // path below carries on unchanged. The id is never taken from the caller —
+    // see the module comment for why that closes DR4-003 by construction.
+    const structuredDecision = await answerStructuredDecision({
+      worktreeId: id,
+      cliToolId,
+      instanceId,
+      answer,
+      useDefault,
+    });
+    if (structuredDecision.kind === 'refused') {
+      logger.info('prompt-response-refused', {
+        worktreeId: id,
+        cliToolId,
+        instanceId,
+        reason: structuredDecision.reason,
+      });
+      return NextResponse.json({
+        success: false,
+        reason: structuredDecision.reason,
+        message: structuredDecision.message,
+        answer: answer ?? '',
+      });
+    }
+    if (structuredDecision.kind === 'answered') {
+      const { option, decisionId, delivered } = structuredDecision;
+      // Issue #1548: a person answered, attributed exactly as the keystroke
+      // path attributes it.
+      applyEventToActiveTask(db, id, cliToolId, instanceId ?? cliToolId, 'prompt_answered_human', {
+        promptType: 'multiple_choice',
+      });
+      startPolling(id, cliToolId, instanceId);
+      void broadcastTerminalSnapshotAfterInteraction(id, cliToolId, instanceId);
+      return NextResponse.json({
+        success: delivered,
+        answer: String(option.number),
+        ...(delivered ? {} : { reason: 'decision_not_delivered' }),
+        resolved: {
+          via: 'structured-decision',
+          optionNumber: option.number,
+          optionLabel: option.label,
+          decisionId,
+        },
+      });
     }
 
     // Get session name for the CLI tool (Issue #868: per-instance)

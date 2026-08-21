@@ -49,6 +49,58 @@ import { UNCLASSIFIED_PROMPT_TYPE } from '@/types/models';
  */
 export type StructuredPromptSource = 'notification' | 'permission-request';
 
+/**
+ * One reply an open approval accepts, addressed to the agent's own API rather
+ * than to its screen (Issue #1898).
+ *
+ * These are **not** option numbers read off a dialog, and the distinction is
+ * the whole reason they may be published at all. #1725 kept the degraded form
+ * option-less because a number published against a screen nobody parsed is an
+ * answer to the wrong question — the picker renumbers, the confirmation screen
+ * looks identical, and Enter takes whatever is highlighted (#1681). A verdict
+ * delivered over REST has none of those failure modes: it names the decision by
+ * id, the agent applies it, and no key is sent anywhere.
+ *
+ * So they are offered only for a source that can be answered that way — see
+ * `AgentSourceCapabilities.eventIdentity`, which is what
+ * `current-output-builder` reads before filling this in.
+ */
+export interface StructuredDecisionOption {
+  /** What an operator types: `commandmate respond <worktree> <number>`. */
+  number: number;
+  /** The human-facing label. */
+  label: string;
+  /** The wire value the reply carries. Accepted by `respond` as well. */
+  reply: string;
+}
+
+/**
+ * The three verdicts an approval dialog accepts, in the order `respond` numbers
+ * them (Issue #1898).
+ *
+ * Verdict kinds rather than a tool's wire words: `allowOnce` / `allowAlways` /
+ * `deny` is the shared vocabulary every source encodes for itself
+ * (`AgentEventSource.encodeVerdict`), so this list stays true for the next
+ * source that can be answered out of band. `reply` is opencode's spelling of
+ * the same three, published because it is what its own logs and REST calls say
+ * and an operator correlating the two should not have to translate.
+ */
+export const STRUCTURED_DECISION_OPTIONS: readonly StructuredDecisionOption[] = [
+  // i18n (#1271) deliberately not applied to these three labels: they are part
+  // of the CLI's accepted vocabulary, not display text. `commandmate respond
+  // <id> "Allow once"` matches against them (see
+  // `lib/hooks/structured-decision-response`), and a locale-dependent label
+  // would make the same command work on one machine and fail on another. The
+  // whole of this module is English by the same rule — see
+  // `buildStructuredPromptQuestion`, whose output goes to stderr and stdout.
+  // eslint-disable-next-line no-restricted-syntax -- CLI answer vocabulary, not display text
+  { number: 1, label: 'Allow once', reply: 'once' },
+  // eslint-disable-next-line no-restricted-syntax -- CLI answer vocabulary, not display text
+  { number: 2, label: 'Allow always', reply: 'always' },
+  // eslint-disable-next-line no-restricted-syntax -- CLI answer vocabulary, not display text
+  { number: 3, label: 'Reject', reply: 'reject' },
+];
+
 /** Bound on the agent's `message`, which is prose and only ever displayed. */
 export const MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH = 500;
 
@@ -91,6 +143,11 @@ export interface StructuredPromptFacts {
   toolName?: string | null;
   /** The `AskUserQuestion` call in flight, when there is one (Issue #1726). */
   askUserQuestion?: StructuredAskUserQuestionSummary | null;
+  /**
+   * The replies this dialog accepts over the agent's own API, when it accepts
+   * any (Issue #1898). Null everywhere else, which is every hook source.
+   */
+  decisionOptions?: readonly StructuredDecisionOption[] | null;
 }
 
 /**
@@ -118,6 +175,16 @@ export interface StructuredPromptWaitingData {
   toolName?: string;
   /** What the agent asked, when it was an `AskUserQuestion` (Issue #1726). */
   askUserQuestion?: StructuredAskUserQuestionSummary;
+  /**
+   * The replies this dialog accepts over the agent's own API (Issue #1898).
+   *
+   * A separate field from {@link StructuredPromptWaitingData.options}, which
+   * stays `never[]`, and deliberately so: `options` is the field every path
+   * that answers a prompt *by option number on screen* reads, and this payload
+   * must go on being unanswerable by those. A reader that understands this
+   * field understands that answering means `respond`, not a keystroke.
+   */
+  decisionOptions?: readonly StructuredDecisionOption[];
 }
 
 /**
@@ -165,10 +232,26 @@ export function buildStructuredPromptQuestion(
     `A dialog is open in ${worktreeId}: the agent reported it via ${SOURCE_LABEL[facts.source]}` +
       `${facts.toolName ? ` for ${facts.toolName}` : ''}, but the detection layer published no ` +
       `options for it.`,
-    `Answer it in the terminal, or send the option NUMBER with ` +
-      `\`commandmate respond ${worktreeId} <number>\` — yes/no is not resolved on a numbered ` +
-      `dialog (Issue #1681).`,
   ];
+  if (facts.decisionOptions && facts.decisionOptions.length > 0) {
+    // Issue #1898. The numbers are real here — they address a decision the
+    // agent is holding, not a line on a screen — so the guidance says which one
+    // to send instead of warning that none of them can be trusted.
+    parts.push(
+      `Answer it with \`commandmate respond ${worktreeId} <number>\`: ` +
+        facts.decisionOptions
+          .map((option) => `${option.number} = ${option.label} (${option.reply})`)
+          .join(', ') +
+        `. The reply goes to the agent's own API, so no keys are sent to the terminal ` +
+        `and the label works too (\`respond ${worktreeId} "Allow once"\`).`,
+    );
+  } else {
+    parts.push(
+      `Answer it in the terminal, or send the option NUMBER with ` +
+        `\`commandmate respond ${worktreeId} <number>\` — yes/no is not resolved on a numbered ` +
+        `dialog (Issue #1681).`,
+    );
+  }
   if (facts.message) {
     parts.push(`Agent message: "${facts.message}"`);
   }
@@ -198,6 +281,9 @@ export function buildStructuredPromptData(
     ...(facts.message ? { message: facts.message } : {}),
     ...(facts.toolName ? { toolName: facts.toolName } : {}),
     ...(facts.askUserQuestion ? { askUserQuestion: facts.askUserQuestion } : {}),
+    ...(facts.decisionOptions && facts.decisionOptions.length > 0
+      ? { decisionOptions: facts.decisionOptions }
+      : {}),
   };
 }
 

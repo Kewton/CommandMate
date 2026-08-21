@@ -242,6 +242,47 @@ export interface CurrentOutputResponse {
       at: number;
     } | null;
     /**
+     * The last approval this server adjudicated on the agent's behalf, or null
+     * (Issue #1898).
+     *
+     * Mirrors: src/lib/hooks/permission-decision-state.ts
+     * PermissionDecisionRecord.
+     *
+     * opencode's approvals are answered over a REST call nobody is holding, so
+     * an Auto-Yes allow can approve a command, dismiss the dialog and leave no
+     * trace on any surface an operator reads. This is that trace: what was
+     * asked (`toolName`), what was answered (`behavior` / `reason`), whether it
+     * reached the agent (`delivered`), and whether it retired the prompt
+     * (`releasedPrompt`). `trigger` tells the live path apart from the
+     * re-judgement `auto-yes --enable` performs on a dialog that was already up.
+     *
+     * `reason` and `trigger` are string-typed on the wire for the same reason
+     * `lastSuppression.reason` is: a newer server may name a value this build
+     * has never heard of, and narrowing here would turn a forward-compatible
+     * payload into a parse failure (Issue #1843).
+     *
+     * Optional here although the server always sends it — this mirror also
+     * describes what an older daemon answers.
+     */
+    permissionDecision?: {
+      /** The agent's own id for the dialog (`per_…`), or null. */
+      decisionId: string | null;
+      /** `tool_name` the approval was judged as, or null. */
+      toolName: string | null;
+      /** `allow`, or null for a no-decision. */
+      behavior: 'allow' | null;
+      /** e.g. `auto-yes`, `auto-yes-disabled`, `policy-suppressed`. */
+      reason: string;
+      /** Whether the verdict actually reached the agent. */
+      delivered: boolean;
+      /** Whether this delivery retired the prompt-waiting record. */
+      releasedPrompt: boolean;
+      /** `event` for the live frame, `policy-recheck` for `auto-yes --enable`. */
+      trigger: string;
+      /** Epoch ms. */
+      at: number;
+    } | null;
+    /**
      * Which agent event source speaks for this tool, and what it declares it can
      * do (Issue #1924).
      *
@@ -404,6 +445,20 @@ export interface PromptData {
    * the latter is a pane window and carries finished turns.
    */
   approvalTarget?: string;
+  /**
+   * The verdicts a structured approval accepts, when this payload is the
+   * degraded `unclassified` form for a source that can be answered by decision
+   * id (Issue #1898).
+   *
+   * Mirrors: src/lib/session/structured-prompt.ts StructuredDecisionOption.
+   *
+   * Held apart from {@link options}, which stays empty on that payload: a
+   * reader that answers by typing an option number at the pane must go on
+   * finding nothing here, because these numbers are verdicts delivered over the
+   * agent's own API rather than lines on a screen. `commandmate wait` reports
+   * them on its exit-10 output so the caller is told what `respond` will take.
+   */
+  decisionOptions?: Array<{ number: number; label: string; reply: string }>;
   [key: string]: unknown;
 }
 
@@ -443,9 +498,37 @@ export interface PromptResponseResult {
    * matched against the agent's structured options (`respond <id> Blue` → 1).
    */
   resolved?: {
-    via: 'semantic' | 'default';
+    /**
+     * Issue #1898 adds `structured-decision`: the answer was delivered to the
+     * agent's own API by decision id rather than typed at the pane, so
+     * `optionNumber` names a verdict (1 = Allow once, 2 = Allow always,
+     * 3 = Reject) and not a line on a screen.
+     */
+    via: 'semantic' | 'default' | 'structured-decision';
     optionNumber?: number;
     optionLabel: string;
+    /** The approval that was answered (Issue #1898). Absent on the key paths. */
+    decisionId?: string;
+  };
+}
+
+/**
+ * Mirrors: src/app/api/worktrees/[id]/auto-yes/route.ts AutoYesResponse
+ * [Issue #1898].
+ */
+export interface AutoYesSetResult {
+  enabled: boolean;
+  expiresAt: number | null;
+  pollingStarted?: boolean;
+  /**
+   * Approvals that were already pending and got re-judged by this call
+   * (Issue #1898-2). Absent when nothing was re-read — which is every hook
+   * tool, whose `resync` capability is `none`.
+   */
+  pendingDecisions?: {
+    examined: number;
+    delivered: number;
+    skipped: number;
   };
 }
 

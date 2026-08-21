@@ -6,6 +6,7 @@
 import { Command } from 'commander';
 import { ExitCode } from '../types';
 import type { AutoYesOptions } from '../types';
+import type { AutoYesSetResult } from '../types/api-responses';
 import { ApiClient, isValidWorktreeId, isValidInstanceId, MAX_STOP_PATTERN_LENGTH } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { parseDurationToMs, ALLOWED_DURATIONS } from '../config/duration-constants';
@@ -101,10 +102,25 @@ export function createAutoYesCommand(): Command {
           body.instanceId = options.instance;
         }
 
-        await client.post<void>(`/api/worktrees/${worktreeId}/auto-yes`, body);
+        const result = await client.post<AutoYesSetResult>(
+          `/api/worktrees/${worktreeId}/auto-yes`,
+          body,
+        );
 
         if (options.enable) {
           console.error(`Auto-yes enabled for ${worktreeId}.`);
+          // Issue #1898-2: enabling Auto-Yes under a dialog that was already up
+          // used to do nothing at all, silently. If it answered something on the
+          // way in, say so — that is the difference between "armed for next
+          // time" and "the worker you were unsticking is moving again".
+          const pending = result?.pendingDecisions;
+          if (pending && pending.examined > 0) {
+            console.error(
+              `Re-judged ${pending.examined} pending approval(s): ` +
+                `${pending.delivered} answered` +
+                `${pending.skipped > 0 ? `, ${pending.skipped} skipped (limit)` : ''}.`,
+            );
+          }
         } else {
           console.error(`Auto-yes disabled for ${worktreeId}.`);
         }
