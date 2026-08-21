@@ -32,6 +32,7 @@ import {
   COPILOT_BOOT_BANNER_ANCHORS,
   COPILOT_USER_ECHO_PATTERN,
   COPILOT_TRANSCRIPT_CONTINUATION_PATTERN,
+  findOpenCodeChromeStart,
 } from '@/lib/detection/cli-patterns';
 import { createLogger } from '@/lib/logger';
 import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
@@ -40,7 +41,7 @@ import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tm
 const logger = createLogger('response-poller');
 
 // Sub-module imports
-import { resolveExtractionStartIndex, isOpenCodeComplete } from '../response-extractor';
+import { resolveExtractionStartIndex, isOpenCodeComplete, resolveOpenCodeTurnRegion, sliceOpenCodeTurn } from '../response-extractor';
 import { cleanClaudeResponse, cleanGeminiResponse, cleanOpenCodeResponse, cleanCopilotResponse, truncateMessage } from '../response-cleaner';
 import { COPILOT_MAX_MESSAGE_LENGTH, COPILOT_TRUNCATION_MARKER } from '@/config/copilot-constants';
 import {
@@ -102,6 +103,13 @@ export interface ExtractionResult {
    * whose `lineCount` is compared against `session_states.last_captured_line`.
    */
   captureWindowSaturated?: boolean;
+  /**
+   * True when the turn on screen has no echoed user prompt left in the capture
+   * (Issue #1911), i.e. it outgrew the alternate-screen pane and `response` is
+   * missing its head. Set for opencode only; the Layer-2 accumulator is the only
+   * place that head still exists, and this is the flag that says to read it.
+   */
+  turnHeadTruncated?: boolean;
 }
 
 /**
@@ -226,11 +234,30 @@ export function extractResponse(
   // composer, the status bar) to the bottom of its pane, and it is the reason the
   // agent's saved reply read " Working esc interrupt GPT-5.6 Terra" -- see
   // findCopilotChromeStart().
+  //
+  // Issue #1911: opencode pins the same kind of chrome to the bottom of its
+  // alternate-screen pane — the composer box (whose model row reads
+  // `Build · GPT-5.6 Luna GitHub Copilot`) and, below its `╹▀▀▀` border, a footer
+  // whose wrapped cwd carries no signature at all. Both were being saved as part
+  // of the assistant's reply, which is defect 1 of #1911; no pattern can remove
+  // the cwd rows, so the boundary has to be structural.
+  //
+  // The three readers stay three functions on purpose. All three answer "where
+  // does the transcript stop?", but each is anchored on a DIFFERENT measured
+  // landmark — claude's two full-width rules around its input box (#1289),
+  // copilot's bottom status-bar row (#1885/#1897), opencode's `╹▀▀▀` composer
+  // border (#1911) — and a landmark is only as good as the frames it was measured
+  // on. Folding them into one reader would let a rewording in one tool's chrome
+  // silently delete another tool's boundary, and a boundary that stops existing
+  // does not fail loudly: it puts terminal furniture back into History.
+  const openCodeCleanLines = cliToolId === 'opencode' ? lines.map(stripAnsi) : null;
   const chromeStart = cliToolId === 'claude'
     ? findClaudeChromeStart(lines)
     : cliToolId === 'copilot'
       ? findCopilotChromeStart(lines)
-      : -1;
+      : openCodeCleanLines
+        ? findOpenCodeChromeStart(openCodeCleanLines)
+        : -1;
   const contentEnd = chromeStart >= 0 ? chromeStart : totalLines;
 
   const BUFFER_RESET_TOLERANCE = 25;
@@ -247,8 +274,8 @@ export function extractResponse(
   const checkLineCount = 20;
   const startLine = Math.max(0, totalLines - checkLineCount);
   const linesToCheck = lines.slice(startLine);
-  const outputToCheck = cliToolId === 'opencode'
-    ? stripAnsi(lines.join('\n'))
+  const outputToCheck = openCodeCleanLines
+    ? openCodeCleanLines.join('\n')
     : linesToCheck.join('\n');
 
   // Get tool-specific patterns from shared module
@@ -258,18 +285,16 @@ export function extractResponse(
     let userPromptPattern: RegExp;
     if (cliToolId === 'codex') {
       userPromptPattern = /^›\s+(?!Implement|Find and fix|Type|Summarize)/;
-    } else if (cliToolId === 'opencode') {
-      let buildCount = 0;
-      for (let i = totalLines - 1; i >= Math.max(0, totalLines - windowSize); i--) {
-        const cleanLine = stripAnsi(lines[i]);
-        if (OPENCODE_RESPONSE_COMPLETE.test(cleanLine)) {
-          buildCount++;
-          if (buildCount === 2) {
-            return i;
-          }
-        }
-      }
-      return -1;
+    } else if (openCodeCleanLines) {
+      // Issue #1911: anchor on the newest ECHOED USER PROMPT, not on the
+      // second-to-last `▣ Build` row. The old anchor belonged to the PREVIOUS
+      // turn, so the echoed prompt of the current one was always extracted as
+      // part of the reply — and on the first turn of a session, where there is
+      // no second marker, it fell through to line 0 and the whole pane (banner
+      // included) became the answer. `windowSize` is ignored: the alternate
+      // screen has no scrollback, so the whole pane IS the window, and every
+      // caller already passes `totalLines` or more for this tool.
+      return resolveOpenCodeTurnRegion(openCodeCleanLines).echoEnd;
     } else if (cliToolId === 'copilot') {
       // Issue #1897: copilot 1.0.80 draws the transcript one column in, so the
       // bare `^[>❯]` form below never matched the echoed prompt -- every copilot
@@ -280,6 +305,11 @@ export function extractResponse(
       // The scan then walks past the echo's own wrapped rows and returns the LAST
       // of them, so that callers' `+ 1` lands on the reply rather than on the
       // second half of the operator's question.
+      //
+      // Same defect as #1911's opencode branch above and the same shape of fix,
+      // but NOT the same code: opencode's echo is a `┃  <text>` gutter row and
+      // copilot's is ` ❯ <text>` at the pane's one-column indent, so the anchor
+      // and the continuation rule are both tool-specific measurements.
       for (let i = contentEnd - 1; i >= Math.max(0, contentEnd - windowSize); i--) {
         if (!COPILOT_USER_ECHO_PATTERN.test(stripAnsi(lines[i]))) continue;
         let echoEnd = i;
@@ -398,7 +428,14 @@ export function extractResponse(
         break;
       }
 
-      if (cliToolId === 'opencode') {
+      // Issue #1911: both rows this stops on (`Ask anything...` in the composer,
+      // `tab agents  ctrl+p commands` under its border) live in the chrome, which
+      // `contentEnd` now excludes structurally. Kept only as the fallback for a
+      // frame whose chrome could not be located, because there it is still the
+      // one boundary available — and #1883 measured that a REPLY can contain
+      // `Ask anything...`, so cutting the turn on it is a last resort, not the
+      // primary rule.
+      if (cliToolId === 'opencode' && chromeStart < 0) {
         if (OPENCODE_PROMPT_PATTERN.test(cleanLine) || OPENCODE_PROMPT_AFTER_RESPONSE.test(cleanLine)) {
           endIndex = i;
           break;
@@ -516,6 +553,12 @@ export function extractResponse(
       lineCount: endIndex,
       bufferReset,
       captureWindowSaturated,
+      // Issue #1911: opencode only. `echoEnd < 0` means the turn is longer than
+      // the alternate-screen pane and its head has already scrolled away, so
+      // `response` starts mid-answer. Nothing else in this frame can recover it.
+      turnHeadTruncated: openCodeCleanLines
+        ? resolveOpenCodeTurnRegion(openCodeCleanLines).headTruncated
+        : undefined,
     };
   }
 
@@ -622,10 +665,17 @@ export async function checkForResponse(
     // (Issue #1670) — a literal here would silently decouple the two.
     const output = await captureSessionOutput(worktreeId, cliToolId, CACHE_MAX_CAPTURE_LINES, instanceId);
 
-    // Layer 2: Accumulate TUI content for full-screen TUI tools (for overlap tracking only).
+    // Layer 2: Accumulate TUI content for full-screen TUI tools, so a turn that
+    // outgrows the alternate-screen pane keeps the head that has scrolled away.
     if (cliToolId === 'opencode' || cliToolId === 'copilot') {
       const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
-      accumulateTuiContent(pollerKey, output, cliToolId);
+      // Issue #1911: opencode is accumulated from the CURRENT TURN'S REGION
+      // rather than the whole frame. Feeding the raw pane seeded the accumulator
+      // with the previous turn's transcript, the echoed prompt and the bottom
+      // chrome on the very first poll, so the accumulated content could never be
+      // used as a response source without re-introducing defect 1.
+      const accumulatorSource = cliToolId === 'opencode' ? sliceOpenCodeTurn(output) : output;
+      accumulateTuiContent(pollerKey, accumulatorSource, cliToolId);
     }
 
     // Extract response
@@ -796,9 +846,27 @@ export async function checkForResponse(
 
       clearTuiAccumulator(pollerKey);
     } else if (cliToolId === 'opencode') {
-      cleanedResponse = cleanOpenCodeResponse(result.response);
-
       const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
+      // Issue #1911 defect 3: opencode wrote to the Layer-2 accumulator but never
+      // read it, so any turn longer than the pane was saved without its head.
+      //
+      // Read it only when the head is ACTUALLY gone, which is what
+      // `turnHeadTruncated` measures — deliberately NOT copilot's unconditional
+      // `accumulated || response`. The accumulator appends whatever the overlap
+      // check cannot match against the previous poll, and opencode rewrites rows
+      // in place while it works (`+ Thought: … · 12ms` becomes `· 579ms`, a
+      // pending patch row becomes the applied edit). Every such rewrite breaks
+      // the overlap and re-appends the lines above it, so preferring the
+      // accumulator for the common short answer would duplicate content that
+      // `result.response` already holds exactly. When the echo is off screen the
+      // frame is missing content outright, and a possible duplicate beats a
+      // guaranteed truncation.
+      const accumulatedContent = getAccumulatedContent(pollerKey);
+      const sourceContent = result.turnHeadTruncated && accumulatedContent
+        ? accumulatedContent
+        : result.response;
+      cleanedResponse = cleanOpenCodeResponse(sourceContent);
+
       clearTuiAccumulator(pollerKey);
     }
 

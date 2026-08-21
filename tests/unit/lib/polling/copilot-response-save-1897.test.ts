@@ -170,6 +170,25 @@ describe('Issue #1897: the #1885 trap — status vocabulary inside a reply', () 
     expect(extractResponse(frame, 0, 'copilot')?.isComplete).toBe(true);
   });
 
+  it('extracts THIS turn only — not the previous reply, not the question', () => {
+    // Asserted on `extractResponse`'s own output rather than the cleaned form,
+    // because `cleanCopilotResponse` re-anchors on the last `❯` and would mask a
+    // broken extractor anchor. This frame is the one that can tell the difference:
+    // it carries a finished earlier turn (the semicolon essay) above the current
+    // one, so an anchor belonging to the wrong turn shows up here and nowhere else.
+    //
+    // It is also the guard that copilot is not routed through opencode's turn
+    // reader (#1911): `resolveOpenCodeTurnRegion` anchors on `┃`/`│` gutter rows,
+    // and copilot's reasoning block is full of them — on this frame it lands 19
+    // rows above copilot's real echo.
+    const response = stripAnsi(extractResponse(frame, 0, 'copilot')!.response);
+
+    expect(response).toContain('Working esc interrupt');
+    expect(response).not.toContain('The semicolon began as a response');
+    expect(response).not.toContain('Reply with exactly these three lines');
+    expect(response).not.toContain('Thought for');
+  });
+
   it('saves the quoted vocabulary as the reply instead of deleting it', () => {
     const result = extractResponse(frame, 0, 'copilot');
     const cleaned = cleanCopilotResponse(result!.response);
@@ -179,6 +198,57 @@ describe('Issue #1897: the #1885 trap — status vocabulary inside a reply', () 
     expect(cleaned).toBe(
       ['Working esc interrupt', 'Thinking…', 'open sidebar / commands ? help tab next tab'].join('\n')
     );
+  });
+});
+
+describe('Issue #1897: the tail-window thinking gate does not fire on copilot', () => {
+  /**
+   * A minimal frame in copilot 1.0.80's measured layout: transcript at the pane's
+   * one-column indent, then the five reserved rows (cwd header, rule, composer,
+   * rule, status bar). Built rather than captured because the case under test is
+   * a REPLY whose wording trips a detector, and asking a live agent for that
+   * wording is how `status-vocabulary-in-response.txt` came to exist — one such
+   * fixture is enough to establish the shape.
+   */
+  const buildFrame = (replyRows: string[]): string =>
+    [
+      ' ❯ explain ellipses',
+      '',
+      ...replyRows,
+      '',
+      ' /tmp/scratch [⎇ main]                                   Session: 1 AIC used',
+      '─'.repeat(78),
+      '❯ ',
+      '─'.repeat(78),
+      ' ← open sidebar · / commands · ? help · tab next tab            GPT-5.6 Terra',
+    ].join('\n');
+
+  it('completes a turn whose reply spans "..." then "Thinking"', () => {
+    // `COPILOT_THINKING_PATTERN`'s `\.\.\.\s+Thinking` alternative matches across a
+    // newline (`\s` does), so it can only ever fire on the JOINED response tail —
+    // every alternative is also a per-line skip pattern, which removes it before
+    // the response is assembled. That makes this the one reachable way the gate
+    // could pin a finished copilot turn to "still thinking" for the rest of the
+    // session, which is why copilot is exempt from it.
+    expect(COPILOT_THINKING_PATTERN.test('...')).toBe(false);
+    expect(COPILOT_THINKING_PATTERN.test('Thinking is hard.')).toBe(false);
+    expect(COPILOT_THINKING_PATTERN.test('...\nThinking is hard.')).toBe(true);
+
+    const frame = buildFrame([' ● Ellipses look like this:', '   ...', '   Thinking is hard.']);
+    const result = extractResponse(frame, 0, 'copilot');
+
+    expect(result?.isComplete).toBe(true);
+    expect(cleanCopilotResponse(result!.response)).toBe(
+      ['Ellipses look like this:', '...', 'Thinking is hard.'].join('\n')
+    );
+  });
+
+  it('still trims the chrome off a hand-built frame', () => {
+    // Keeps the builder honest: if the five reserved rows stopped being
+    // recognised, the test above would pass for the wrong reason.
+    const frame = buildFrame([' ● short answer']);
+    expect(findCopilotChromeStart(frame.split('\n'))).toBeGreaterThan(0);
+    expect(cleanCopilotResponse(extractResponse(frame, 0, 'copilot')!.response)).toBe('short answer');
   });
 });
 
