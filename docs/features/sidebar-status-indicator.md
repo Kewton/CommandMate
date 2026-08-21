@@ -89,7 +89,8 @@ Issue #1078 で両者とも `<StatusDot>` へ移行し、この不整合は解�
   Issue #1787 でトークン `bg-warning` へ統一済み（`MobileTabBar.tsx` も解消済み）。
   同ファイルに残る `bg-amber-500` / `bg-green-500` / `bg-red-500`（disabled / connected /
   disconnected の接続ステータス）は**ターミナル面の常時ダーク島**として現状維持で、
-  CI の Token discipline も `*Terminal*` を除外している。
+  Token discipline ガード（`scripts/check-token-discipline.mjs`。CI と verify ゲートの双方が呼ぶ）も
+  `*Terminal*` を除外している。
 
 ## ブランチ左の集約ステータスアイコン（Issue #867）
 

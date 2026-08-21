@@ -2,11 +2,35 @@
 # 仕様: docs/design/verification-config.md
 # ランナー: .claude/skills/cmate-verify/scripts/verify-run.sh
 #
-# ゲートは CI（.github/workflows/ci-pr.yml）の lint / type-check / test-unit ジョブと
-# 同じコマンドを宣言している。build は稼働サーバの足元で走らせると配信中の成果物を
-# 壊すため、skipInPrimaryCheckout が守る linked worktree でのみ意味を持つ。
+# ゲートは CI（.github/workflows/ci-pr.yml）の lint / type-check / test-unit と、
+# 静的ガード 3 本（token-discipline / control-chars / claudemd-size）を宣言している。
+# build は稼働サーバの足元で走らせると配信中の成果物を壊すため、
+# skipInPrimaryCheckout が守る linked worktree でのみ意味を持つ。
+#
+# [Issue #1882] 静的ガード 3 本は CI と**同じスクリプト**（scripts/check-*.mjs）を呼ぶ。
+# verify.yaml へ検査本体（grep や上限値）をコピーすると同じ検査の実装が 2 箇所に増え、
+# 片方だけ更新されて静かに乖離する。実測はいずれも 0.1 分（ci-pr.yml 冒頭の計測表、n=12）
+# なので裁定時間への影響はほぼゼロ。npm install も要らない（依存なしの Node スクリプト）。
+#
+# 事故の記録: PR #1881 は `wait --verify` が全ゲート exit 0 を返した commit が
+# CI の Token discipline で FAILURE になった。宣言ゲートが lint/typecheck/unit の
+# 3 本だけで、CI 11 ジョブのうち 8 本を見ていなかったため。
+#
+# ここに**追加しない**もの: Integration Tests（実測 2.1m）/ Legacy tmux（Docker 必須）/
+# Security Audit（ネットワーク依存）/ Build（稼働サーバの足元を壊す）/ E2E（下記参照）。
 version: 1
 gates:
+  # 静的ガード（各 0.1m）。失敗を秒で返せるよう、重いゲートより前に置く。
+  # ランナーは失敗しても後続ゲートを止めないので、順序は報告順にしか効かない。
+  - id: token-discipline
+    command: "node scripts/check-token-discipline.mjs"
+    timeoutSec: 120
+  - id: control-chars
+    command: "node scripts/check-control-chars.mjs"
+    timeoutSec: 120
+  - id: claudemd-size
+    command: "node scripts/check-claudemd-size.mjs"
+    timeoutSec: 120
   - id: lint
     command: "npm run lint"
     timeoutSec: 900

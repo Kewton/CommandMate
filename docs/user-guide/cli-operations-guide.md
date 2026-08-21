@@ -607,6 +607,36 @@ GATE unit FAIL (exit=1, 45.0s)
 RESULT failed
 ```
 
+### CI と同じ検査を宣言する（Issue #1882）
+
+`wait --verify` の exit code は `/orchestrate` がワーカーの完了を裁定する根拠なので、**宣言ゲートが
+見ていない CI ジョブは、裁定が緑でも赤になりうる**。PR #1881 では全ゲート exit 0 の commit が
+CI の `Token discipline` で FAILURE になった（宣言ゲートが lint / typecheck / unit の 3 本だけだった）。
+
+このとき **verify.yaml へ検査本体（`git grep` や閾値）をコピーしてはいけない**。同じ検査の実装が
+2 箇所に増え、片方だけ更新されて静かに乖離する。乖離は「verify は緑・CI は赤」の向きに倒れるので、
+塞ごうとした事故そのものが再発する。正しい形は**両方が同じスクリプトを呼ぶ**こと。
+
+```yaml
+# .commandmate/verify.yaml
+gates:
+  - id: token-discipline
+    command: "node scripts/check-token-discipline.mjs"   # ← CI の run: と同一
+    timeoutSec: 120
+```
+
+```yaml
+# .github/workflows/ci-pr.yml — ジョブ側は呼ぶだけ
+      - name: Guard against raw gray/slate + chromatic colors in migrated directories
+        run: node scripts/check-token-discipline.mjs
+```
+
+**何を宣言し、何を宣言しないか**は所要時間で決まる。宣言ゲートは既定で毎ラン走るため
+（「宣言はするが既定では走らない」フラグはスキーマに無い）、1 本の追加はワーカー 1 体あたりの
+裁定時間にそのまま乗る。CommandMate 本体では静的ガード 3 本（各 0.1 分）を足し、
+Integration（2.1 分）/ Legacy tmux（Docker 必須）/ Security Audit（ネットワーク依存）/
+Build（稼働サーバの成果物を差し替える）/ E2E（5 分超）は**足していない**。
+
 ### 並列 worktree と共有資源（Issue #1771）
 
 固定ポート・ローカル DB・エミュレータを掴むゲートは、並列 worktree で重なると後発が
