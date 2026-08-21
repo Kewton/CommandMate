@@ -32,22 +32,24 @@
 
 import { createLogger } from '@/lib/logger';
 import { MAX_EVENT_DETAIL_LENGTH } from '@/lib/hooks/agent-event-types';
+import { adjudicatePendingPermission } from '@/lib/hooks/permission-adjudication';
 import {
   isDuplicateAgentEvent,
   recordAgentEvent,
   recordAskUserQuestion,
   reportPermissionRequestPending,
+  type AgentEventRecord,
 } from '@/lib/session/agent-event-state';
 import { MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH } from '@/lib/session/structured-prompt';
-import { describeAbstain } from '../abstain';
 import { isPlainObject, readNestedString, readStringField } from '../event-mapper';
-import { answerPendingDecision } from '../pending-decisions';
 import { getAgentEventSource } from '../registry';
-import type { AgentInstanceRef, NormalizedAgentEvent, Verdict } from '../types';
+import type { AgentInstanceRef, NormalizedAgentEvent } from '../types';
 import {
   OPENCODE_ERROR_DETAIL,
   OPENCODE_PERMISSION_DETAIL,
+  OPENCODE_PERMISSION_REPLIED_DETAIL,
   OPENCODE_QUESTION_DETAIL,
+  repliedPermissionId,
 } from './mappers';
 import { toOpencodePendingPermission } from './payloads';
 import { OPENCODE_CLI_TOOL_ID } from './tool-id';
@@ -83,20 +85,28 @@ function describeNotification(event: NormalizedAgentEvent): string | null {
 }
 
 /**
- * Adjudicate one approval and answer it over REST (Auto-Yes v2).
+ * Adjudicate one approval, answer it over REST, and say whether anybody is
+ * still blocked (Auto-Yes v2, reordered by Issue #1898).
  *
  * The adjudication itself is `resolvePermissionRequest`, unchanged and shared
- * with every hook-based tool. What is opencode-specific is what silence means:
- * on Claude an abstention costs a dialog, here it costs the session, because
- * the agent waits with no timeout at all (#1758 §5.5.3). `describeAbstain` is
- * how that gets said out loud — nothing else will say it, since a blocked
- * opencode session looks exactly like one that is thinking.
+ * with every hook-based tool; `adjudicatePendingPermission` is the wrapper that
+ * delivers the verdict and reads the source's capabilities to decide what the
+ * delivery means. What is opencode-specific is what silence costs: on Claude an
+ * abstention costs a dialog, here it costs the session, because the agent waits
+ * with no timeout at all (#1758 §5.5.3).
+ *
+ * **This runs before the event is recorded, and that ordering is the fix.** See
+ * {@link ingestOpencodeEvent}.
+ *
+ * @returns Whether the dialog can be treated as closed — a verdict was
+ *   delivered and this source declares that a reply releases the prompt. False
+ *   for every abstain, and false for an allow whose POST was refused.
  */
 async function adjudicatePermission(
   target: AgentInstanceRef,
   event: NormalizedAgentEvent,
   instanceId: string
-): Promise<void> {
+): Promise<boolean> {
   const source = getAgentEventSource(OPENCODE_CLI_TOOL_ID);
   const pending = toOpencodePendingPermission(event.raw, event.receivedAt);
   if (!pending) {
@@ -104,53 +114,49 @@ async function adjudicatePermission(
       worktreeId: target.worktreeId,
       instanceId,
     });
-    return;
+    return false;
   }
 
-  const { resolvePermissionRequest } = await import('@/lib/hooks/permission-decision-service');
-  const payload = source.parsePermissionRequest(event.raw);
-  const decision = resolvePermissionRequest(
-    { worktreeId: target.worktreeId, cliToolId: OPENCODE_CLI_TOOL_ID, instanceId },
-    payload
-  );
-
-  const verdict: Verdict =
-    decision.behavior === 'allow' ? { kind: 'allowOnce' } : { kind: 'abstain' };
-
-  if (verdict.kind === 'abstain') {
-    const abstain = describeAbstain(source);
-    if (!abstain.safe) {
-      logger.warn('permission-request-abstain-blocks-agent', {
-        worktreeId: target.worktreeId,
-        cliToolId: OPENCODE_CLI_TOOL_ID,
-        instanceId,
-        toolName: payload?.toolName ?? null,
-        decisionId: pending.id,
-        reason: decision.reason,
-        consequence: abstain.summary,
-        blocksForMs: abstain.blocksForMs,
-      });
-    }
-  }
-
-  // C2: for this source the verdict leaves over its own connection, and the
-  // `{}` that comes back is an acknowledgement rather than a reply body.
-  await answerPendingDecision(
+  const outcome = await adjudicatePendingPermission(
     source,
-    { worktreeId: target.worktreeId, cliToolId: OPENCODE_CLI_TOOL_ID, instanceId },
+    target,
     pending,
-    verdict
+    source.parsePermissionRequest(event.raw)
   );
 
   logger.info('opencode-permission-decided', {
     worktreeId: target.worktreeId,
     instanceId,
     decisionId: pending.id,
-    toolName: payload?.toolName ?? null,
-    behavior: decision.behavior,
-    reason: decision.reason,
-    suppressedBy: decision.suppressedBy,
+    behavior: outcome.behavior,
+    reason: outcome.reason,
+    delivered: outcome.delivered,
+    settled: outcome.settled,
   });
+
+  return outcome.settled;
+}
+
+/**
+ * Whether a `permission.replied` frame retires the prompt-waiting record
+ * (Issue #1898).
+ *
+ * The capability read, not a tool check: `permissionReplyReleasesPrompt` is the
+ * declared value that says "a reply on this source's own stream is a positive
+ * statement that the dialog is gone" (#1924, §4 D3). Flipping opencode's
+ * declaration to false puts this frame back to deciding nothing, which is the
+ * pre-#1898 behaviour and is exactly what the mutation case in
+ * `tests/unit/hooks/sources/opencode-permission-1898.test.ts` asserts.
+ */
+function replyReleasesPrompt(target: AgentInstanceRef, instanceId: string): boolean {
+  const source = getAgentEventSource(OPENCODE_CLI_TOOL_ID);
+  if (source.capabilities.permissionReplyReleasesPrompt) return true;
+  logger.info('opencode-permission-reply-not-releasing', {
+    worktreeId: target.worktreeId,
+    instanceId,
+    reason: 'capability-permissionReplyReleasesPrompt-false',
+  });
+  return false;
 }
 
 /**
@@ -228,6 +234,23 @@ async function applyStop(target: AgentInstanceRef, instanceId: string): Promise<
 /**
  * Apply one event from the stream.
  *
+ * ## Adjudicate, then record (Issue #1898)
+ *
+ * `recordAgentEvent` is what opens the prompt-waiting record — it keys off
+ * `notification(permission_prompt)` — so recording an approval before deciding
+ * it publishes "a human is blocked" for an approval Auto-Yes is about to
+ * answer in the same tick. Measured: `capture --json` read
+ * `waiting / hook_permission_prompt` from the instant the reply was delivered
+ * until `sleep 8` finished, `wait --on-prompt agent` exited 10 the whole time,
+ * and `send` was refused by the guard. The verdict now goes out first and the
+ * record carries {@link AgentEventRecord.promptSettled}, so the state the human
+ * would have had to wait out is never entered.
+ *
+ * The order must not be put back. Recording first and clearing afterwards looks
+ * equivalent — nothing reads the map in between — but it re-creates a window
+ * that only stays closed by accident, and the release would then have to be
+ * repeated at every future caller instead of being a property of the record.
+ *
  * @param target - The instance the subscription belongs to
  * @param event - Already normalised and already through the turn gate
  */
@@ -261,7 +284,7 @@ export async function ingestOpencodeEvent(
       return;
     }
 
-    recordAgentEvent(target.worktreeId, OPENCODE_CLI_TOOL_ID, instanceId, {
+    const record: AgentEventRecord = {
       event: event.event,
       at: event.receivedAt,
       detail: event.detail?.slice(0, MAX_EVENT_DETAIL_LENGTH) ?? null,
@@ -273,12 +296,37 @@ export async function ingestOpencodeEvent(
       // Already bounded by the normaliser; null on the frames that carry no
       // `properties.info.model` (every `session.idle`, every tool part).
       model: event.model,
-    });
+    };
 
     if (event.event === 'notification' && event.detail === OPENCODE_PERMISSION_DETAIL) {
-      await adjudicatePermission(target, event, instanceId);
+      // Issue #1898: the verdict leaves BEFORE the record is written. See the
+      // docblock above for what recording first cost.
+      record.decisionId = readStringField(
+        isPlainObject(event.raw.properties) ? event.raw.properties : {},
+        'id'
+      );
+      record.promptSettled = await adjudicatePermission(target, event, instanceId);
+      recordAgentEvent(target.worktreeId, OPENCODE_CLI_TOOL_ID, instanceId, record);
       return;
     }
+
+    if (event.event === 'notification' && event.detail === OPENCODE_PERMISSION_REPLIED_DETAIL) {
+      // Issue #1898: somebody answered — this server, another client, or a
+      // human at the terminal. The last of those is the one nothing else can
+      // see, and it is why this frame is mapped at all.
+      record.decisionId = repliedPermissionId(event.raw);
+      record.promptSettled = replyReleasesPrompt(target, instanceId);
+      recordAgentEvent(target.worktreeId, OPENCODE_CLI_TOOL_ID, instanceId, record);
+      logger.info('opencode-permission-reply-observed', {
+        worktreeId: target.worktreeId,
+        instanceId,
+        decisionId: record.decisionId,
+        released: record.promptSettled,
+      });
+      return;
+    }
+
+    recordAgentEvent(target.worktreeId, OPENCODE_CLI_TOOL_ID, instanceId, record);
 
     if (event.event === 'notification' && event.detail === OPENCODE_QUESTION_DETAIL) {
       recordQuestion(target, event, instanceId);
