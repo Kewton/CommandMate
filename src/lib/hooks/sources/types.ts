@@ -397,8 +397,18 @@ export interface AgentSourceCapabilities {
    * missed. Push sources answer `'none'` — a hook that was dropped is gone, and
    * there is nothing to poll.
    */
-  readonly resync: 'none' | 'session-status-poll';
+  readonly resync: SourceResync;
 }
+
+/**
+ * The value {@link AgentSourceCapabilities.resync} declares.
+ *
+ * Named rather than spelled inline because the reconnect loop that obeys it
+ * lives in `sources/opencode/subscription` and is imported *by* the source that
+ * declares it, so the value has to be handed across that edge as a parameter.
+ * A second inline copy of the union would be a second place to widen it.
+ */
+export type SourceResync = 'none' | 'session-status-poll';
 
 /**
  * Everything {@link AgentEventSource.prepareLaunch} is given (Issue #1846).
@@ -500,6 +510,30 @@ export interface AgentEventSource {
    * events return null and are counted — see `getUnknownEventTally`.
    */
   normalizeEvent(raw: RawAgentEvent): NormalizedAgentEvent | null;
+
+  /**
+   * This frame's own id — the value {@link AgentSourceCapabilities.eventIdentity}
+   * names — or null when the frame publishes none (Issue #1899).
+   *
+   * The capability declares *which* id de-duplication should use; this reads
+   * it, because only the source knows where it lives and the answer differs
+   * between frames of the same source. opencode alone shows all four shapes: an
+   * approval is asked under `properties.id` and answered under
+   * `properties.requestID` (different spellings for the same permission — see
+   * `./opencode/mappers`), a tool call is `part.callID`, a prompt is
+   * `info.id`, and `session.idle` carries `{ sessionID }` and nothing else.
+   *
+   * **Null is an ordinary answer, not a failure.** A source that declares
+   * `eventIdentity: null` answers null for every frame and falls back to the
+   * time window; a source that declares one still answers null for the frames
+   * that carry no id, and `classifyAgentEventDelivery` decides what that means
+   * per event word.
+   *
+   * Must never throw, for the same reason {@link normalizeEvent} must not: this
+   * runs on a live stream, and an unreadable id may cost the de-duplication but
+   * never the event.
+   */
+  eventIdentityOf(payload: Record<string, unknown>): string | null;
 
   /** Read this source's permission-request payload, or null when unreadable (S7). */
   parsePermissionRequest(payload: Record<string, unknown>): PermissionRequestPayload | null;

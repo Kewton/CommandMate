@@ -28,7 +28,7 @@
 
 import { createLogger } from '@/lib/logger';
 import type { AgentInstanceRef } from '../types';
-import { fetchOpencodeHealth } from './client';
+import { probeOpencodeHealth, type OpencodeHealth } from './client';
 import { ingestOpencodeEvent } from './ingest';
 import {
   allocateOpencodePort,
@@ -72,14 +72,74 @@ export async function reserveOpencodeServerPort(
 }
 
 /**
+ * How long to keep asking `/global/health` before giving up on the attach.
+ *
+ * Delays *before* each attempt, so the first costs nothing: five probes over
+ * 7.5 s. Issue #1900 item 4 — the check used to be one shot, and one shot is a
+ * decision that lasts the whole session, because nothing re-attaches a pane
+ * that is already running. #1908 measured that opencode's HTTP server answers
+ * 1.3-1.8 s *before* the composer this call waits for, so the ordinary path
+ * still succeeds on the first probe; the retries are for the pane whose
+ * composer poll timed out (24.1 s launches under load were measured) and which
+ * would otherwise be scraper-only for the rest of its life.
+ *
+ * A short ceiling on purpose: this sits inside the HTTP request that started
+ * the session, and every second here is a second the caller is blocked.
+ */
+export const OPENCODE_ATTACH_HEALTH_DELAYS_MS: readonly number[] = [0, 500, 1_000, 2_000, 4_000];
+
+/**
+ * Probe until an opencode server answers, or until asking again cannot help.
+ *
+ * A `rejected` outcome ends the loop immediately: something *is* on the port and
+ * it is refusing CommandMate — `OPENCODE_SERVER_PASSWORD` in the pane's
+ * environment makes every request a 401 — and 7.5 s of re-asking would only
+ * delay the fall back to the scraper. It is logged with its status so the cause
+ * is visible rather than collapsed into "not reachable".
+ */
+async function awaitOpencodeHealth(
+  target: AgentInstanceRef,
+  port: number
+): Promise<OpencodeHealth | null> {
+  for (const [attempt, waitMs] of OPENCODE_ATTACH_HEALTH_DELAYS_MS.entries()) {
+    if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    const outcome = await probeOpencodeHealth(port);
+    if (outcome.kind === 'healthy') {
+      if (attempt > 0) {
+        logger.info('opencode-server-reachable-after-retry', {
+          worktreeId: target.worktreeId,
+          instanceId: target.instanceId ?? target.cliToolId,
+          port,
+          attempt,
+        });
+      }
+      return outcome.health;
+    }
+    if (outcome.kind === 'rejected') {
+      logger.warn('opencode-server-refused-commandmate', {
+        worktreeId: target.worktreeId,
+        instanceId: target.instanceId ?? target.cliToolId,
+        port,
+        status: outcome.status,
+        consequence: 'structured events are off for this session; the scraper decides',
+      });
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
  * Open the event stream for an instance whose pane has just started.
  *
  * Health-checked first, and this is not belt-and-braces: a user running an
  * opencode old enough not to accept `--port` gets a TUI with no server, and
  * subscribing to a port nothing is listening on would spend the rest of the
- * session reconnecting to it. One sub-millisecond probe (#1758 §5.7.2) is the
- * difference between "no structured events, scraper as before" and a reconnect
- * loop that never succeeds.
+ * session reconnecting to it. Probes are sub-millisecond when the port is
+ * closed (#1758 §5.7.2), which is what makes
+ * {@link OPENCODE_ATTACH_HEALTH_DELAYS_MS} affordable: the difference between
+ * "no structured events, scraper as before" and a reconnect loop that never
+ * succeeds is still one probe, it is just no longer *only* one.
  *
  * @returns Whether a stream was opened
  */
@@ -89,12 +149,13 @@ export async function attachOpencodeEventStream(target: AgentInstanceRef): Promi
     if (port === null) return false;
     if (isOpencodeSubscribed(target)) return true;
 
-    const health = await fetchOpencodeHealth(port);
+    const health = await awaitOpencodeHealth(target, port);
     if (!health) {
       logger.info('opencode-server-not-reachable', {
         worktreeId: target.worktreeId,
         instanceId: target.instanceId ?? target.cliToolId,
         port,
+        attempts: OPENCODE_ATTACH_HEALTH_DELAYS_MS.length,
       });
       return false;
     }
