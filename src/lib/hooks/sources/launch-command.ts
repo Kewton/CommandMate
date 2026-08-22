@@ -63,9 +63,16 @@ export const HOOK_PORT_ENV_VAR = 'CM_HOOK_PORT';
  * Every `CM_HOOK_*` variable CommandMate sets on a launch line.
  *
  * Enumerated so the launch-line pin (受入条件 S8) has one list to check rather
- * than a grep, and so the sanitizer that strips CommandMate's own variables out
- * of an agent's child environment has one to import. A name that is here and
- * not on the launch line is a hook reading a value CommandMate never wrote.
+ * than a grep. A name that is here and not on the launch line is a hook reading
+ * a value CommandMate never wrote.
+ *
+ * **Every entry must start with `CM_HOOK_`** (Issue #1942). That prefix is what
+ * `lib/security/env-sanitizer` strips out of a child process's environment, so
+ * a name outside the namespace would be declared here and still ride along into
+ * `claude -p` and the CLI probes. `lib/security` does not import this list —
+ * the dependency between the two packages already runs hooks → security — so
+ * the invariant is held by `tests/unit/security/child-process-hook-env-1942.test.ts`
+ * rather than by the type system.
  */
 export const COMMANDMATE_HOOK_ENV_VARS: readonly string[] = [
   AGENT_EVENT_URL_ENV_VAR,
