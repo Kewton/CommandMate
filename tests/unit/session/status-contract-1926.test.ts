@@ -20,8 +20,9 @@
  * @vitest-environment node
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type Database from 'better-sqlite3';
+import { freezeClock, FROZEN_NOW_MS, unfreezeClock } from '../../helpers/frozen-clock';
 
 vi.mock('@/lib/db', () => ({ getSessionState: vi.fn(() => null), createMessage: vi.fn() }));
 
@@ -70,6 +71,9 @@ beforeEach(() => {
   clearLastKnownStatuses();
   isRunning.mockResolvedValue(true);
 });
+
+// Only the cases that freeze it do; this is the unconditional restore.
+afterEach(() => unfreezeClock());
 
 /** A frame the detector reads as an idle composer — `ready` / `input_prompt`. */
 const IDLE_COMPOSER_FRAME = 'some agent output\n> ';
@@ -136,7 +140,46 @@ describe('[#1926] lastKnownStatus — the latch behind §7', () => {
     const payload = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
 
     expect(payload.lastKnownStatus).toBe(payload.sessionStatus);
-    expect(payload.lastKnownStatusAt).toEqual(expect.any(Number));
+  });
+
+  it('stamps the wall clock of the poll that confirmed it', async () => {
+    // A range rather than an equality, so this is deterministic under any load,
+    // and a range rather than `expect.any(Number)`, because "when the status was
+    // last known" is the whole meaning of the field: a stamp taken from the
+    // event's own time, from a counter, or from a constant would all satisfy a
+    // type check and none of them would be this.
+    vi.mocked(captureSessionOutput).mockResolvedValue(IDLE_COMPOSER_FRAME);
+
+    const before = Date.now();
+    const payload = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
+    const after = Date.now();
+
+    expect(payload.lastKnownStatusAt).toBeGreaterThanOrEqual(before);
+    expect(payload.lastKnownStatusAt).toBeLessThanOrEqual(after);
+  });
+
+  it('re-stamps on every poll that confirms, and holds while none does', async () => {
+    // The monotonicity contract, pinned exactly rather than with `>=` — a `>=`
+    // between two polls is satisfied by a field that never moves at all. The
+    // clock is driven by hand so both halves are asserted as equalities:
+    // re-confirmation advances the stamp, and a frame with no evidence leaves it
+    // exactly where the last confirmation put it.
+    freezeClock(FROZEN_NOW_MS);
+    vi.mocked(captureSessionOutput).mockResolvedValue(IDLE_COMPOSER_FRAME);
+
+    const first = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
+    expect(first.lastKnownStatusAt).toBe(FROZEN_NOW_MS);
+
+    vi.setSystemTime(FROZEN_NOW_MS + 5_000);
+    const second = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
+    expect(second.lastKnownStatusAt).toBe(FROZEN_NOW_MS + 5_000);
+
+    vi.setSystemTime(FROZEN_NOW_MS + 9_000);
+    vi.mocked(captureSessionOutput).mockResolvedValue(UNREADABLE_FRAME);
+    const blind = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
+
+    expect(blind.statusEvidence).toBe('none');
+    expect(blind.lastKnownStatusAt).toBe(FROZEN_NOW_MS + 5_000);
   });
 
   it('keeps the previous verdict standing while the frame carries no evidence', async () => {

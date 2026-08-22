@@ -19,8 +19,9 @@
  * @vitest-environment node
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type Database from 'better-sqlite3';
+import { freezeClock, unfreezeClock } from '../../helpers/frozen-clock';
 
 vi.mock('@/lib/db', () => ({ getSessionState: vi.fn(() => null) }));
 
@@ -64,6 +65,9 @@ beforeEach(() => {
   isRunning.mockResolvedValue(true);
   vi.mocked(captureSessionOutput).mockResolvedValue('some agent output\n> ');
 });
+
+// Only the case that freezes it does; this is the unconditional restore.
+afterEach(() => unfreezeClock());
 
 describe('buildCurrentOutput exposure (Issue #1902)', () => {
   it('is null on a session whose tool_input never needed rewriting', async () => {
@@ -136,6 +140,13 @@ describe('buildCurrentOutput exposure (Issue #1902)', () => {
   });
 
   it('leaves the rest of the payload untouched', async () => {
+    // Frozen for the reason the two `agent-event-state` cases are: this whole-
+    // payload equality includes `lastKnownStatusAt` (Issue #1926), which is
+    // `Date.now()` read at the poll, so the assertion is time-dependent unless
+    // both builds see one instant. Found by auditing for this shape after CI
+    // hit it on PR #1964, not by a failure here.
+    freezeClock();
+
     const before = await buildCurrentOutput(db, 'wt-1902', 'copilot', 'copilot');
     recordToolInputNormalization(
       'wt-1902',

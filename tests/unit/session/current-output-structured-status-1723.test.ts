@@ -11,7 +11,8 @@
  * @vitest-environment node
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { freezeClock, unfreezeClock } from '../../helpers/frozen-clock';
 import type Database from 'better-sqlite3';
 
 // vi.mock factories are hoisted above the imports, so the mock logger has to be
@@ -86,6 +87,9 @@ beforeEach(() => {
   vi.mocked(getLastServerResponseTimestamp).mockReturnValue(null);
   vi.mocked(captureSessionOutput).mockResolvedValue(UNREADABLE_FRAME);
 });
+
+// Only the case that freezes it does; this is the unconditional restore.
+afterEach(() => unfreezeClock());
 
 describe('buildCurrentOutput: no structured events (Issue #1723 non-impact)', () => {
   it('publishes exactly the scraper verdict for the unreadable frame', async () => {
@@ -190,22 +194,19 @@ describe('buildCurrentOutput: the scraper keeps prompts (Issue #1723 scope line)
   });
 
   it('does not let a permission notification touch the payload', async () => {
+    // Frozen before `record()`, which stamps the event relative to now: the
+    // clock has to be the same one the staleness bound is measured against, or
+    // freezing would change the verdict instead of just stabilising the
+    // timestamp. `lastKnownStatusAt` (Issue #1926) is the field that makes this
+    // whole-payload comparison time-dependent, and it stays in it.
+    freezeClock();
+
     const before = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
 
     record('notification', 'permission_prompt');
     const after = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
 
-    // `lastKnownStatusAt` is blanked alongside `structuredEvents` for the same
-    // kind of reason, but it is worth stating rather than folding in silently:
-    // it is the wall-clock of the poll, so two calls a millisecond apart differ
-    // by design (Issue #1926). What this case is about is the VERDICT, and
-    // `lastKnownStatus` itself stays in the comparison.
-    const comparable = (p: Awaited<ReturnType<typeof buildCurrentOutput>>) => ({
-      ...p,
-      structuredEvents: null,
-      lastKnownStatusAt: null,
-    });
-    expect(comparable(after)).toEqual(comparable(before));
+    expect({ ...after, structuredEvents: null }).toEqual({ ...before, structuredEvents: null });
   });
 });
 

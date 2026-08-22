@@ -11,8 +11,9 @@
  * @vitest-environment node
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type Database from 'better-sqlite3';
+import { freezeClock, unfreezeClock } from '../../helpers/frozen-clock';
 
 vi.mock('@/lib/db', () => ({ getSessionState: vi.fn(() => null) }));
 
@@ -53,6 +54,9 @@ beforeEach(() => {
   isRunning.mockResolvedValue(true);
   vi.mocked(captureSessionOutput).mockResolvedValue('some agent output\n> ');
 });
+
+// Only the cases that freeze it do; this is the unconditional restore.
+afterEach(() => unfreezeClock());
 
 describe('agent-event-state', () => {
   it('returns null until an event is recorded', () => {
@@ -95,6 +99,13 @@ describe('buildCurrentOutput exposure', () => {
   });
 
   it('surfaces the timestamp without disturbing anything else in the payload', async () => {
+    // Frozen, because this whole-payload equality is the assertion and
+    // `lastKnownStatusAt` (Issue #1926) is `Date.now()` at the poll: two builds
+    // that straddle a millisecond would fail it, which is what CI hit on
+    // PR #1964. Freezing keeps the field IN the comparison — dropping it would
+    // make this case stop checking the one field most likely to move.
+    freezeClock();
+
     const before = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
 
     recordAgentStopEvent('wt-1', 'claude', 'claude', 1_700_000_000_000);
@@ -255,6 +266,11 @@ describe('structuredEvents exposure (Issue #1722)', () => {
   });
 
   it('surfaces the last event without disturbing anything else in the payload', async () => {
+    // Frozen for the same reason as the `lastStopEventAt` case above: the tail
+    // of this test compares the whole payload minus `structuredEvents`, and
+    // `lastKnownStatusAt` is a wall-clock read.
+    freezeClock();
+
     const before = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
 
     // A `Notification` whose type this server has never observed. #1722's
@@ -292,16 +308,7 @@ describe('structuredEvents exposure (Issue #1722)', () => {
       closedBy: null,
       source: claudeSource,
     });
-    // `lastKnownStatusAt` is blanked alongside `structuredEvents`: it is the
-    // wall-clock of the poll (Issue #1926), so two calls that land in different
-    // milliseconds differ by design and this comparison would be a clock race.
-    // The verdict itself (`lastKnownStatus`) stays in.
-    const comparable = (p: typeof after) => ({
-      ...p,
-      structuredEvents: null,
-      lastKnownStatusAt: null,
-    });
-    expect(comparable(after)).toEqual(comparable(before));
+    expect({ ...after, structuredEvents: null }).toEqual({ ...before, structuredEvents: null });
   });
 
   it('surfaces the last event for a session that is no longer running', async () => {

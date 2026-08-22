@@ -165,15 +165,20 @@ describe('[#1926] sessionStatusByCli carries the reason and the evidence', () =>
 });
 
 describe('[#1926] lastKnownStatus on sessionStatusByCli', () => {
-  it('reports the verdict the current probe confirmed', async () => {
+  it('reports the verdict the current probe confirmed, stamped with the probe\'s own clock', async () => {
     mockDetectedStatus('waiting', STATUS_REASON.PROMPT_DETECTED);
 
+    const before = Date.now();
     const result = await detect();
+    const after = Date.now();
 
-    expect(result.sessionStatusByCli.claude).toMatchObject({
-      lastKnownStatus: 'waiting',
-      lastKnownStatusAt: expect.any(Number),
-    });
+    const status = result.sessionStatusByCli.claude;
+    expect(status?.lastKnownStatus).toBe('waiting');
+    // A range, not `expect.any(Number)`: "when the status was last known" is the
+    // meaning of the field, and a stamp that came from anywhere but this probe
+    // would still be a number.
+    expect(status?.lastKnownStatusAt).toBeGreaterThanOrEqual(before);
+    expect(status?.lastKnownStatusAt).toBeLessThanOrEqual(after);
   });
 
   it('keeps the previous verdict while the frame carries no evidence', async () => {
