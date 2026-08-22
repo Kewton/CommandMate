@@ -51,9 +51,19 @@ vi.mock('@/lib/db/db-instance', () => {
 
 import { POST } from '@/app/api/worktrees/[id]/kill-session/route';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { killSession } from '@/lib/tmux/tmux';
+import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
 
 const WORKTREE_ID = 'wt-kill';
+
+/**
+ * Session names the route asked the gateway to kill, in call order.
+ *
+ * Issue #1905 moved the kill off `lib/tmux`'s `killSession` and onto
+ * `ICLITool.killSession`, so the pane the route acted on is now read from the
+ * gateway call rather than from the tmux mock. The resolution being pinned here
+ * is unchanged by that.
+ */
+let killedSessions: string[];
 
 function call(query: string) {
   const request = new NextRequest(
@@ -63,13 +73,22 @@ function call(query: string) {
   return POST(request, { params: Promise.resolve({ id: WORKTREE_ID }) });
 }
 
-/** Report exactly one (tool, instance) pair as live, so the kill has a target. */
+/**
+ * Report exactly one (tool, instance) pair as live, so the kill has a target,
+ * and record what the route hands to the gateway instead of ending a session.
+ */
 function onlyRunning(cliToolId: string, instanceId: string): void {
   const manager = CLIToolManager.getInstance();
-  for (const tool of ['claude', 'codex', 'gemini', 'vibe-local', 'opencode', 'copilot', 'antigravity'] as const) {
-    vi.spyOn(manager.getTool(tool), 'isRunning').mockImplementation(
+  for (const tool of CLI_TOOL_IDS) {
+    const impl = manager.getTool(tool);
+    vi.spyOn(impl, 'isRunning').mockImplementation(
       async (_worktreeId: string, instance?: string) =>
         tool === cliToolId && (instance ?? tool) === instanceId
+    );
+    vi.spyOn(impl, 'killSession').mockImplementation(
+      async (worktreeId: string, instance?: string) => {
+        killedSessions.push(impl.getSessionName(worktreeId, instance));
+      }
     );
   }
 }
@@ -95,6 +114,7 @@ describe('POST /api/worktrees/:id/kill-session — instance resolution', () => {
     setAgentInstances(db, WORKTREE_ID, [
       { id: 'codex', cliTool: 'codex', alias: 'Codex', order: 0 },
     ]);
+    killedSessions = [];
     vi.clearAllMocks();
   });
 
@@ -113,9 +133,7 @@ describe('POST /api/worktrees/:id/kill-session — instance resolution', () => {
     const response = await call('?instance=codex');
 
     expect(response.status).toBe(200);
-    expect(vi.mocked(killSession).mock.calls.map((c) => c[0])).toEqual([
-      expect.stringContaining('codex'),
-    ]);
+    expect(killedSessions).toEqual([expect.stringContaining('codex')]);
   });
 
   it('refuses an explicit cliTool that contradicts the roster', async () => {
@@ -129,7 +147,7 @@ describe('POST /api/worktrees/:id/kill-session — instance resolution', () => {
       rosterCliTool: 'codex',
       requestedCliTool: 'claude',
     });
-    expect(killSession).not.toHaveBeenCalled();
+    expect(killedSessions).toEqual([]);
   });
 
   it('accepts an explicit cliTool that agrees with the roster', async () => {
@@ -146,9 +164,7 @@ describe('POST /api/worktrees/:id/kill-session — instance resolution', () => {
     onlyRunning('opencode', 'opencode');
     const response = await call('?instance=opencode');
     expect(response.status).toBe(200);
-    expect(vi.mocked(killSession).mock.calls.map((c) => c[0])).toEqual([
-      expect.stringContaining('opencode'),
-    ]);
+    expect(killedSessions).toEqual([expect.stringContaining('opencode')]);
   });
 
   /**
@@ -162,8 +178,6 @@ describe('POST /api/worktrees/:id/kill-session — instance resolution', () => {
     onlyRunning('claude', 'worker-1');
     const response = await call('?instance=worker-1');
     expect(response.status).toBe(200);
-    expect(vi.mocked(killSession).mock.calls.map((c) => c[0])).toEqual([
-      expect.stringContaining('worker-1'),
-    ]);
+    expect(killedSessions).toEqual([expect.stringContaining('worker-1')]);
   });
 });

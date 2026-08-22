@@ -4,9 +4,10 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { CopilotTool } from '@/lib/cli-tools/copilot';
+import { CopilotTool, COPILOT_EXIT_COMMAND } from '@/lib/cli-tools/copilot';
 import { resolveCopilotExecutable } from '@/lib/cli-tools/copilot-executable';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { COPILOT_EXIT_WAIT_MS, TUI_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
 
 // Mock child_process execFile so nothing here can spawn a real process
 vi.mock('child_process', async () => {
@@ -30,6 +31,8 @@ vi.mock('@/lib/tmux/tmux', () => ({
   createSession: vi.fn().mockResolvedValue(undefined),
   sendKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKey: vi.fn().mockResolvedValue(undefined),
+  // Issue #1905: the exit command is typed and submitted separately.
+  sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
   killSession: vi.fn().mockResolvedValue(true),
   capturePane: vi.fn().mockResolvedValue(''),
   reconcileSessionGeometry: vi.fn().mockResolvedValue(false),
@@ -293,6 +296,93 @@ describe('CopilotTool', () => {
       expect(result).toBe(false);
 
       vi.useRealTimers();
+    });
+  });
+
+  /**
+   * Issue #1905. Until this Issue nothing reached this method from the product:
+   * `POST /api/worktrees/:id/kill-session` called `lib/tmux`'s `killSession`
+   * directly and the Assistant session route (the only other caller) does not
+   * allow copilot. Both defects below are therefore first-time regressions,
+   * pinned against measurements on GitHub Copilot CLI 1.0.80.
+   */
+  describe('killSession (Issue #1905)', () => {
+    async function runKill(): Promise<{
+      sendKeys: ReturnType<typeof vi.fn>;
+      sendSpecialKey: ReturnType<typeof vi.fn>;
+      sendSpecialKeys: ReturnType<typeof vi.fn>;
+      killSession: ReturnType<typeof vi.fn>;
+    }> {
+      const tmux = await import('@/lib/tmux/tmux');
+      vi.mocked(tmux.hasSession).mockResolvedValue(true);
+      vi.useFakeTimers();
+      const promise = tool.killSession('feature-foo');
+      await vi.runAllTimersAsync();
+      await promise;
+      vi.useRealTimers();
+      return tmux as unknown as {
+        sendKeys: ReturnType<typeof vi.fn>;
+        sendSpecialKey: ReturnType<typeof vi.fn>;
+        sendSpecialKeys: ReturnType<typeof vi.fn>;
+        killSession: ReturnType<typeof vi.fn>;
+      };
+    }
+
+    /**
+     * The body used to be the bare word `exit` batched with its Enter into one
+     * `send-keys exit C-m`. Measured on 1.0.80, that spelling does end the
+     * process — the Issue's premise that it only becomes a chat message is
+     * wrong for this version — but it is indistinguishable from a prompt and
+     * the batched form is the shape #1471 removed everywhere else.
+     */
+    it('types the slash exit command without batching Enter into it', async () => {
+      const { sendKeys } = await runKill();
+
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-copilot-feature-foo', COPILOT_EXIT_COMMAND, false);
+      expect(COPILOT_EXIT_COMMAND).toBe('/exit');
+      // No `sendEnter: true` batch, and no bare `exit` body, anywhere.
+      for (const call of sendKeys.mock.calls) {
+        expect(call[2]).toBe(false);
+        expect(call[1]).not.toBe('exit');
+      }
+    });
+
+    it('submits with a separate Enter, after the body and after the interrupt', async () => {
+      const { sendSpecialKey, sendSpecialKeys } = await runKill();
+
+      expect(sendSpecialKey).toHaveBeenCalledWith('mcbd-copilot-feature-foo', 'C-c');
+      expect(sendSpecialKeys).toHaveBeenCalledWith('mcbd-copilot-feature-foo', ['Enter']);
+      expect(sendSpecialKey.mock.invocationCallOrder[0]).toBeLessThan(
+        sendSpecialKeys.mock.invocationCallOrder[0]
+      );
+    });
+
+    /**
+     * The wait between the submit and the tmux kill. 11 samples of copilot
+     * 1.0.80's shutdown ran 1.006 s to 2.193 s, so the generic
+     * `TUI_EXIT_WAIT_MS` (500) guaranteed the kill landed mid-shutdown. Held to
+     * the measurement rather than to the constant's identity, so lowering the
+     * constant back under a second fails here.
+     */
+    it('waits longer than the slowest measured shutdown before force-killing', () => {
+      expect(COPILOT_EXIT_WAIT_MS).toBeGreaterThan(2193);
+      expect(COPILOT_EXIT_WAIT_MS).toBeGreaterThan(TUI_EXIT_WAIT_MS);
+    });
+
+    it('still force-kills the tmux session as the fallback', async () => {
+      const { killSession } = await runKill();
+      expect(killSession).toHaveBeenCalledWith('mcbd-copilot-feature-foo');
+    });
+
+    it('does not touch the pane when there is no session to exit', async () => {
+      const tmux = await import('@/lib/tmux/tmux');
+      vi.mocked(tmux.hasSession).mockResolvedValue(false);
+
+      await tool.killSession('feature-foo');
+
+      expect(tmux.sendKeys).not.toHaveBeenCalled();
+      expect(tmux.sendSpecialKeys).not.toHaveBeenCalled();
+      expect(tmux.killSession).toHaveBeenCalledWith('mcbd-copilot-feature-foo');
     });
   });
 });
