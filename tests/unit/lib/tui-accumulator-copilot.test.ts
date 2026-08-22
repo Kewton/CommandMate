@@ -11,6 +11,11 @@ import {
   normalizeCopilotLine,
 } from '@/lib/tui-accumulator';
 import {
+  findCopilotChromeStart,
+  isCopilotSelectionFrame,
+  stripAnsi,
+} from '@/lib/detection/cli-patterns';
+import {
   initTuiAccumulator,
   accumulateTuiContent,
   getAccumulatedContent,
@@ -42,6 +47,82 @@ function liveFrame(dir: string, name: string): string {
  * (`isCopilotSelectionFrame`), which is a different code path with its own tests.
  */
 const PICKER_FOOTER = '↑/↓ to navigate · enter to select · esc to cancel';
+
+/**
+ * Issue #1895 + #1897: the two positional rules `extractCopilotContentLines`
+ * applies, and why their order is not a style choice.
+ *
+ * #1897 cuts copilot's bottom-pinned chrome (cwd row, two rules, composer,
+ * status bar) because this accumulator — not `extractResponse` — is what feeds
+ * `cleanCopilotResponse` in `checkForResponse`. #1895 discards the frame
+ * entirely when copilot has replaced that chrome with a picker. Neither
+ * subsumes the other, and putting the picker question after the trim is wrong
+ * in BOTH directions, which is what this block pins.
+ */
+describe('Issue #1895 + #1897: picker check runs before the chrome trim', () => {
+  it('would MISS the real /model picker if the trim ran first', () => {
+    // `/model` draws its search field as rule / `❯  Search models…` / rule with
+    // the key-hint footer where the status bar would be — structurally a
+    // composer. So `findCopilotChromeStart` accepts the frame instead of
+    // declining it, and the rows it takes are the only evidence that this is a
+    // picker at all.
+    const rows = stripAnsi(liveFrame('copilot-live-1885', 'model-picker')).split('\n');
+    const chromeStart = findCopilotChromeStart(rows);
+    expect(chromeStart).toBeGreaterThanOrEqual(0);
+
+    expect(isCopilotSelectionFrame(rows)).toBe(true);
+    expect(isCopilotSelectionFrame(rows.slice(0, chromeStart))).toBe(false);
+    // Over 100 rows of model list would have been left behind as "content".
+    expect(rows.slice(0, chromeStart).filter((r) => r.trim() !== '').length).toBeGreaterThan(100);
+
+    // The shipped order asks first, so nothing is accumulated.
+    expect(extractCopilotContentLines(liveFrame('copilot-live-1885', 'model-picker'))).toEqual([]);
+  });
+
+  it('would INVENT a picker on a finished turn if the trim ran first', () => {
+    // The other direction, and the more damaging one. This frame is a completed
+    // turn whose reply quotes two key-hint bars. Trimming removes the status
+    // bar, which is exactly the guard `isCopilotSelectionFrame` leans on, and
+    // the quoted bars become the bottom rows — so asked afterwards it says yes
+    // and the whole reply is thrown away.
+    const raw = liveFrame('copilot-picker-1895', 'picker-vocabulary-in-response');
+    const rows = stripAnsi(raw).split('\n');
+    const chromeStart = findCopilotChromeStart(rows);
+    expect(chromeStart).toBeGreaterThanOrEqual(0);
+
+    expect(isCopilotSelectionFrame(rows)).toBe(false);
+    expect(isCopilotSelectionFrame(rows.slice(0, chromeStart))).toBe(true);
+
+    // The shipped order asks first, so the reply survives.
+    const kept = extractCopilotContentLines(raw);
+    expect(kept.length).toBeGreaterThan(10);
+    expect(kept).toContain('● Use /model. It opens the Select Model dialog.');
+  });
+
+  it('still cuts the bottom chrome off an ordinary frame (Issue #1897)', () => {
+    const kept = extractCopilotContentLines(liveFrame('copilot-live-1885', 'turn-complete'));
+    expect(kept.length).toBeGreaterThan(10);
+    for (const row of kept) {
+      expect(row, 'the status bar reached the accumulator').not.toContain('esc interrupt');
+      expect(row, 'the key-hint bar reached the accumulator').not.toContain('open sidebar');
+      expect(row, 'the cwd/branch header reached the accumulator').not.toContain('AIC used');
+    }
+  });
+
+  it('keeps the status-bar vocabulary when copilot printed it as the reply (Issue #1897)', () => {
+    // The #1885 trap. The real bar is gone (position), the quoted one is not
+    // (it is the answer). Both halves in one frame.
+    const kept = extractCopilotContentLines(
+      liveFrame('copilot-live-1885', 'status-vocabulary-in-response'),
+    );
+    expect(kept).toContain('● Working esc interrupt');
+    expect(kept).toContain('Thinking…');
+    expect(kept).toContain('open sidebar / commands ? help tab next tab');
+    // …and the bar itself, which would repeat the same words with the model
+    // name flush right, is not there.
+    expect(kept.some((r) => r.includes('GPT-5.6 Terra'))).toBe(false);
+  });
+});
 
 describe('Copilot TUI Accumulator', () => {
   describe('normalizeCopilotLine()', () => {
