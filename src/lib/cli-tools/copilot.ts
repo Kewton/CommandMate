@@ -31,7 +31,7 @@ import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import {
   COPILOT_PROMPT_PATTERN,
-  COPILOT_SELECTION_LIST_PATTERN,
+  isCopilotSelectionFrame,
   COPILOT_SEPARATOR_PATTERN,
   COPILOT_FOLDER_TRUST_ANSWER_KEY,
   isCopilotFolderTrustDialog,
@@ -67,31 +67,43 @@ const COPILOT_INIT_MAX_ATTEMPTS = 30;
 const COPILOT_PROMPT_WAIT_TIMEOUT_MS = 15000;
 
 /**
- * Copilot CLI slash commands that trigger a selection list UI.
- * These commands open an interactive picker after execution.
- * When sending these, we must wait for the selection list to appear
- * before allowing further input, to prevent text leaking into the search field.
+ * Copilot CLI slash commands that open a picker.
  *
- * Issue #1913 measured the pickers on copilot 1.0.80 in a private tmux socket.
- * Eleven commands open one: model, agent, theme, permissions, skills, mcp,
- * settings, statusline, subagents, resume, session. The set below was NOT
- * widened to cover the other eight, because the wait they would enter is
- * already broken on this version and widening it would only add latency:
+ * Sending one is not like sending a message: the picker takes the composer
+ * away, so anything typed afterwards lands in the picker's own search field and
+ * any stray Enter/`n`/`x` is a keystroke the picker acts on. (Measured while
+ * capturing the frames for Issue #1895: text sent into an open `/session`
+ * picker created a session. `/session` is also the one picker `esc` does not
+ * close.) That is why this branch sends the command, waits for positive
+ * evidence that the picker is up, and then stops.
  *
- *   `COPILOT_SELECTION_LIST_PATTERN` matches none of the eleven frames — not
- *   even the three listed here. `/model` renders `❯  Search models…` with
- *   U+2026, so `Search\s+\w+\.\.\.` misses it, and every picker footer spells
- *   the verbs in lower case (`↑/↓ to navigate · enter to select · esc to
- *   cancel`), so `Enter to (?:select|confirm)` misses them too. So
- *   `waitForSelectionList` burns its full 5s window and returns false for every
- *   entry in this set.
+ * All eleven commands #1913 measured on 1.0.80 are listed. The set was
+ * `model`/`agent`/`theme`, and the note left in its place said to widen it "once
+ * the pattern actually matches 1.0.80 frames" -- which is what Issue #1895 did:
+ * {@link isCopilotSelectionFrame} matches all eleven of the live frames in
+ * `tests/unit/lib/detection/fixtures/copilot-picker-1895/`, so the wait now
+ * returns on evidence in ~300ms instead of expiring at 5s. Widening was cheap
+ * only because of that; each entry still buys a wait, so this stays the eleven
+ * that were opened and captured rather than a guess about the rest of the
+ * catalogue.
  *
- * Fixing the pattern belongs to the detection layer (`cli-patterns.ts`, the
- * #1885 / #1886 line of work); this branch is additionally unreachable today
- * because `send-user-message.ts` bypasses `CopilotTool.sendMessage` (#1906).
- * Widen this set once the pattern actually matches 1.0.80 frames.
+ * Neither the widening nor the wait has a live effect yet: `send-user-message.ts`
+ * bypasses `CopilotTool.sendMessage` entirely (#1906), so this branch is
+ * unreachable in production until that lands.
  */
-const SELECTION_LIST_COMMANDS = new Set(['model', 'agent', 'theme']);
+const SELECTION_LIST_COMMANDS = new Set([
+  'model',
+  'agent',
+  'theme',
+  'permissions',
+  'skills',
+  'mcp',
+  'settings',
+  'statusline',
+  'subagents',
+  'resume',
+  'session',
+]);
 
 /**
  * The composer row, matched one line at a time (Issue #1907).
@@ -441,7 +453,7 @@ export class CopilotTool extends BaseCLITool {
 
   /**
    * Wait for the selection list to appear after sending a selection list command.
-   * Polls the terminal output for COPILOT_SELECTION_LIST_PATTERN.
+   * Polls the terminal output for {@link isCopilotSelectionFrame}.
    *
    * @returns true if selection list was detected, false if timed out
    */
@@ -452,9 +464,11 @@ export class CopilotTool extends BaseCLITool {
     while (Date.now() - startTime < maxWaitMs) {
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
       try {
+        // 50 rows is bottom-anchored (`-S -50 -E -`), which is the half of the
+        // pane `isCopilotSelectionFrame` reads. Issue #1895.
         const rawOutput = await capturePane(sessionName, 50);
         const output = stripAnsi(rawOutput);
-        if (COPILOT_SELECTION_LIST_PATTERN.test(output)) {
+        if (isCopilotSelectionFrame(output.split('\n'))) {
           logger.info('copilot-selection-list-detected');
           return true;
         }
@@ -528,9 +542,17 @@ export class CopilotTool extends BaseCLITool {
    * Flow:
    * 1. Verify session exists
    * 2. Send `/model <modelName>` + Enter
-   * 3. Wait for selection list to appear
-   * 4. If selection list detected, send Enter to confirm
-   * 5. Wait for prompt recovery with extended timeout
+   * 3. Wait for prompt recovery with extended timeout
+   *
+   * Steps 3 and 4 of the original flow -- wait up to 5s for the picker, then
+   * send Enter if it appeared -- are gone (Issue #1895). `/model` opens a picker
+   * only when it is given NO argument; with one it switches in place and prints
+   * `● Model changed from gpt-5.6-terra (xhigh) to gpt-5-mini (medium) for this
+   * session.` (measured on 1.0.80: the status bar carries the new model within
+   * ~300ms and the composer is back). An unknown id prints the list of valid
+   * ids and changes nothing -- also no picker. So the wait could only ever
+   * expire, and the `C-m` it guarded was a bare Enter aimed at whatever was on
+   * screen 5 seconds after a switch that had already finished.
    *
    * @param worktreeId - Worktree ID
    * @param modelName - Model name to switch to
@@ -547,16 +569,9 @@ export class CopilotTool extends BaseCLITool {
     }
 
     try {
-      // Send /model <modelName> command with Enter
+      // Send /model <modelName> command with Enter. An argument means an
+      // in-place switch, never a picker (Issue #1895).
       await sendKeys(sessionName, `/model ${modelName}`, true);
-
-      // Wait for selection list to appear
-      const selectionListDetected = await this.waitForSelectionList(sessionName);
-
-      // If selection list appeared, send Enter to confirm the selection
-      if (selectionListDetected) {
-        await sendSpecialKey(sessionName, 'C-m');
-      }
 
       // Wait for prompt recovery with extended timeout for model switching
       await this.waitForPrompt(sessionName, COPILOT_MODEL_SWITCH_TIMEOUT_MS);

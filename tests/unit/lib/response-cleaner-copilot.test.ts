@@ -33,9 +33,18 @@ describe('cleanCopilotResponse', () => {
     expect(cleanCopilotResponse(input)).toBe('Actual response');
   });
 
-  it('should skip selection list patterns', () => {
-    const input = 'Search models...\nContent\nSelect Model';
+  it('should skip the picker key-hint footer', () => {
+    const input = ' ↑/↓ to navigate · enter to select · esc to cancel\nContent\n ↑/↓ nav · enter toggle · esc close';
     expect(cleanCopilotResponse(input)).toBe('Content');
+  });
+
+  it('should keep prose that merely mentions the picker (Issue #1895)', () => {
+    // `COPILOT_SKIP_PATTERNS` carried `Search \w+...|Select Model` until this
+    // Issue, so a reply explaining how to switch models had those sentences
+    // deleted from the message CommandMate saved. The vocabulary is copilot's
+    // ordinary prose; only the footer row is chrome.
+    const input = 'Search models...\nContent\nSelect Model';
+    expect(cleanCopilotResponse(input)).toBe(input);
   });
 
   it('should skip pasted text markers', () => {
