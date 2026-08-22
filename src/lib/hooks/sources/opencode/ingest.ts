@@ -312,6 +312,16 @@ export async function ingestOpencodeEvent(
       model: event.model,
     };
 
+    // Issue #1903: the same declared value the hook receiver passes, from the
+    // same place. opencode declares `false` — `session.created` really does open
+    // a session here — so this changes nothing for this source today; it is
+    // wired because the two receiving paths must not disagree about which
+    // capabilities the state machine is being told about, which is the mistake
+    // #1783 records having made with `model`.
+    const options = {
+      sessionStartMayArriveLate: source.capabilities.sessionStartMayArriveLate,
+    };
+
     if (event.event === 'notification' && event.detail === OPENCODE_PERMISSION_DETAIL) {
       // Issue #1898: the verdict leaves BEFORE the record is written. See the
       // docblock above for what recording first cost.
@@ -320,7 +330,7 @@ export async function ingestOpencodeEvent(
         'id'
       );
       record.promptSettled = await adjudicatePermission(target, event, instanceId);
-      recordAgentEvent(target.worktreeId, OPENCODE_CLI_TOOL_ID, instanceId, record);
+      recordAgentEvent(target.worktreeId, OPENCODE_CLI_TOOL_ID, instanceId, record, options);
       return;
     }
 
@@ -330,7 +340,7 @@ export async function ingestOpencodeEvent(
       // see, and it is why this frame is mapped at all.
       record.decisionId = repliedPermissionId(event.raw);
       record.promptSettled = replyReleasesPrompt(target, instanceId);
-      recordAgentEvent(target.worktreeId, OPENCODE_CLI_TOOL_ID, instanceId, record);
+      recordAgentEvent(target.worktreeId, OPENCODE_CLI_TOOL_ID, instanceId, record, options);
       logger.info('opencode-permission-reply-observed', {
         worktreeId: target.worktreeId,
         instanceId,
@@ -340,7 +350,7 @@ export async function ingestOpencodeEvent(
       return;
     }
 
-    recordAgentEvent(target.worktreeId, OPENCODE_CLI_TOOL_ID, instanceId, record);
+    recordAgentEvent(target.worktreeId, OPENCODE_CLI_TOOL_ID, instanceId, record, options);
 
     if (event.event === 'notification' && event.detail === OPENCODE_QUESTION_DETAIL) {
       recordQuestion(target, event, instanceId);
