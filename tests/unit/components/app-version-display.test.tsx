@@ -171,6 +171,75 @@ vi.mock('@/components/worktree/FileViewer', () => ({
   FileViewer: () => null,
 }));
 
+// Issue #1977: the panes below are never asserted on by this file — it opens
+// the info modal and reads one version string — but importing them was the
+// whole cost of the suite. Timed in a cold worker, `WorktreeDetailRefactored`
+// takes 1731ms to import; the single heaviest sub-graph under it is
+// `WorktreeDetailMobile` (1931ms when it is the first thing imported into a
+// cold worker, i.e. while it still pays for the deps it shares with the rest).
+// Its own leaves, each timed with the previous ones already warm:
+//
+//   HistoryPane 1003ms (already mocked above) | NotesAndLogsPane 553ms
+//   MobileTerminalTab 287ms | GitPane 256ms | FileTreeView 105ms (mocked)
+//
+// `vi.resetModules()` is NOT the cost, which is worth stating because it is the
+// obvious suspect: after the first import, a reset + re-import of the same
+// graph measures 11ms and then 8ms — vitest keeps the transformed code, so only
+// the FIRST import pays. That single import is what stretches under load
+// (1.04s in a loaded full run, 3.56s under deliberate process pressure), and
+// hundreds of module loads is exactly the kind of work a busy machine stretches
+// worst. Mocking the panes this file does not exercise removes it at the root
+// instead of widening the budget.
+vi.mock('@/components/worktree/NotesAndLogsPane', () => ({
+  NotesAndLogsPane: () => <div data-testid="notes-and-logs-pane" />,
+}));
+
+vi.mock('@/components/worktree/GitPane', () => ({
+  GitPane: () => <div data-testid="git-pane" />,
+}));
+
+vi.mock('@/components/worktree/MobileTerminalTab', () => ({
+  MobileTerminalTab: () => <div data-testid="mobile-terminal-tab" />,
+}));
+
+vi.mock('@/components/worktree/SearchBar', () => ({
+  SearchBar: () => <div data-testid="search-bar" />,
+}));
+
+// Same reason, desktop side. `WorktreeDetailDesktop` measured 437ms of the
+// remaining graph, spread over eleven panes it builds an ActivityContentMap
+// out of; these four are the ones worth naming (164 / 97 / 73 / 48ms). The
+// rest are 13-25ms each and are left real rather than turning this header into
+// a list of every component on the screen.
+vi.mock('@/components/worktree/FilePanelSplit', () => ({
+  FilePanelSplit: () => <div data-testid="file-panel-split" />,
+}));
+
+vi.mock('@/components/worktree/TerminalSplitPaneContent', () => ({
+  TerminalSplitPaneContent: () => <div data-testid="terminal-split-pane-content" />,
+}));
+
+vi.mock('@/components/skills/WorktreeSkillsPane', () => ({
+  WorktreeSkillsPane: () => <div data-testid="worktree-skills-pane" />,
+}));
+
+vi.mock('@/components/worktree/ExecutionLogPane', () => ({
+  ExecutionLogPane: () => <div data-testid="execution-log-pane" />,
+}));
+
+// Issue #1977: warm the component graph once, here, at collection time.
+//
+// Every `it()` below does `vi.resetModules()` + a dynamic import, and the
+// measurement says only the FIRST import of the graph is expensive: 1731ms
+// cold, then 11ms and 8ms for a reset + re-import of the same graph, because
+// vitest keeps the transformed code and only re-evaluates. So the whole file's
+// cost was landing on whichever test ran first — 1.04s in a loaded full run,
+// 3.56s under deliberate process pressure, against a 5000ms per-test budget.
+// This side-effect import pays it during collection instead, where it is not
+// racing a per-test timeout. The mocks above (which `vi.mock` hoists over every
+// import in this file, including this one) are what actually made it smaller.
+import '@/components/worktree/WorktreeDetailRefactored';
+
 // Mock data
 const mockWorktree = {
   id: 'test-worktree-123',
