@@ -27,6 +27,11 @@ import {
   OPENCODE_PROMPT_AFTER_RESPONSE,
   OPENCODE_RESPONSE_COMPLETE,
   OPENCODE_SKIP_PATTERNS,
+  findCopilotChromeStart,
+  readCopilotStatusBar,
+  COPILOT_BOOT_BANNER_ANCHORS,
+  COPILOT_USER_ECHO_PATTERN,
+  COPILOT_TRANSCRIPT_CONTINUATION_PATTERN,
   findOpenCodeChromeStart,
 } from '@/lib/detection/cli-patterns';
 import { createLogger } from '@/lib/logger';
@@ -55,6 +60,17 @@ import { notifyPushSubscribers } from '@/lib/push';
 import { startWaitingPushNotifier } from '@/lib/push/waiting-push-notifier';
 import { getWaitingEpisode, observeWaitingEdge } from '@/lib/session/waiting-episode-state';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
+
+/**
+ * How many rows from the bottom of a copilot capture may hold its status bar.
+ *
+ * `readCopilotStatusBar` stops at the first non-blank row from the end, and the
+ * capture handed to it here has already had its trailing blanks trimmed, so one
+ * row is enough in practice. The slack exists so the reader keeps working if that
+ * trim ever changes, without mapping a thousand rows through `stripAnsi` on every
+ * poll tick. (Issue #1897)
+ */
+const COPILOT_STATUS_BAR_SCAN_ROWS = 8;
 
 // Issue #1790: arm the waiting-edge push subscription.
 //
@@ -214,18 +230,34 @@ export function extractResponse(
   // reads the untouched buffer: it keys off that very footer (the input box
   // supplies `hasPrompt`, its rules supply `hasSeparator`).
   //
+  // Issue #1897: copilot pins the same shape of chrome (cwd row, two rules, the
+  // composer, the status bar) to the bottom of its pane, and it is the reason the
+  // agent's saved reply read " Working esc interrupt GPT-5.6 Terra" -- see
+  // findCopilotChromeStart().
+  //
   // Issue #1911: opencode pins the same kind of chrome to the bottom of its
   // alternate-screen pane — the composer box (whose model row reads
   // `Build · GPT-5.6 Luna GitHub Copilot`) and, below its `╹▀▀▀` border, a footer
   // whose wrapped cwd carries no signature at all. Both were being saved as part
   // of the assistant's reply, which is defect 1 of #1911; no pattern can remove
   // the cwd rows, so the boundary has to be structural.
+  //
+  // The three readers stay three functions on purpose. All three answer "where
+  // does the transcript stop?", but each is anchored on a DIFFERENT measured
+  // landmark — claude's two full-width rules around its input box (#1289),
+  // copilot's bottom status-bar row (#1885/#1897), opencode's `╹▀▀▀` composer
+  // border (#1911) — and a landmark is only as good as the frames it was measured
+  // on. Folding them into one reader would let a rewording in one tool's chrome
+  // silently delete another tool's boundary, and a boundary that stops existing
+  // does not fail loudly: it puts terminal furniture back into History.
   const openCodeCleanLines = cliToolId === 'opencode' ? lines.map(stripAnsi) : null;
   const chromeStart = cliToolId === 'claude'
     ? findClaudeChromeStart(lines)
-    : openCodeCleanLines
-      ? findOpenCodeChromeStart(openCodeCleanLines)
-      : -1;
+    : cliToolId === 'copilot'
+      ? findCopilotChromeStart(lines)
+      : openCodeCleanLines
+        ? findOpenCodeChromeStart(openCodeCleanLines)
+        : -1;
   const contentEnd = chromeStart >= 0 ? chromeStart : totalLines;
 
   const BUFFER_RESET_TOLERANCE = 25;
@@ -263,6 +295,33 @@ export function extractResponse(
       // screen has no scrollback, so the whole pane IS the window, and every
       // caller already passes `totalLines` or more for this tool.
       return resolveOpenCodeTurnRegion(openCodeCleanLines).echoEnd;
+    } else if (cliToolId === 'copilot') {
+      // Issue #1897: copilot 1.0.80 draws the transcript one column in, so the
+      // bare `^[>❯]` form below never matched the echoed prompt -- every copilot
+      // extraction fell back to line 0, i.e. to the launch banner. The composer,
+      // which IS at column 0, lives below `contentEnd` and so cannot be picked up
+      // as an echo here.
+      //
+      // The scan then walks past the echo's own wrapped rows and returns the LAST
+      // of them, so that callers' `+ 1` lands on the reply rather than on the
+      // second half of the operator's question.
+      //
+      // Same defect as #1911's opencode branch above and the same shape of fix,
+      // but NOT the same code: opencode's echo is a `┃  <text>` gutter row and
+      // copilot's is ` ❯ <text>` at the pane's one-column indent, so the anchor
+      // and the continuation rule are both tool-specific measurements.
+      for (let i = contentEnd - 1; i >= Math.max(0, contentEnd - windowSize); i--) {
+        if (!COPILOT_USER_ECHO_PATTERN.test(stripAnsi(lines[i]))) continue;
+        let echoEnd = i;
+        while (
+          echoEnd + 1 < contentEnd &&
+          COPILOT_TRANSCRIPT_CONTINUATION_PATTERN.test(stripAnsi(lines[echoEnd + 1]))
+        ) {
+          echoEnd++;
+        }
+        return echoEnd;
+      }
+      return -1;
     } else {
       userPromptPattern = /^[>❯]\s+\S/;
     }
@@ -309,8 +368,30 @@ export function extractResponse(
     ? isCodexTurnActive(lines, checkLineCount)
     : thinkingPattern.test(cleanOutputToCheck);
 
+  // Issue #1897: copilot's `hasPrompt` is worthless as a completion signal and
+  // its `isThinking` is worthless as a liveness one. The `❯` composer is drawn
+  // between its two rules throughout a turn (measured on every frame of #1885's
+  // running fixtures), and `COPILOT_THINKING_PATTERN` matches nothing copilot
+  // 1.0.80 draws (0 of 44 live generating frames). So `hasPrompt && !isThinking`
+  // was true on the very first poll of a running turn -- the extractor declared
+  // the turn finished, saved the status bar as the reply, and `checkForResponse`
+  // stopped polling, which is why the real answer never reached History.
+  //
+  // 1.0.80 paints the turn's state on the bottom row of the pane and nowhere
+  // else, so that ROW -- never a tail window, which copilot's own reply text can
+  // forge (`status-vocabulary-in-response.txt`) -- is the evidence. `idle` is a
+  // positive observation that the turn is over (design policy §4 D1 decision 1
+  // item 2); `working` and `null` (a dialog box has taken the bar away) both mean
+  // "not finished", and the dialog case is already served by the prompt path
+  // above.
+  const copilotStatusBar = cliToolId === 'copilot'
+    ? readCopilotStatusBar(lines.slice(Math.max(0, totalLines - COPILOT_STATUS_BAR_SCAN_ROWS)).map(stripAnsi))
+    : null;
+
   // Prompt-based completion logic
-  const isPromptBasedComplete = (cliToolId === 'codex' || cliToolId === 'gemini' || cliToolId === 'vibe-local' || cliToolId === 'copilot' || cliToolId === 'antigravity') && hasPrompt && !isThinking;
+  const isPromptBasedComplete = cliToolId === 'copilot'
+    ? copilotStatusBar === 'idle'
+    : (cliToolId === 'codex' || cliToolId === 'gemini' || cliToolId === 'vibe-local' || cliToolId === 'antigravity') && hasPrompt && !isThinking;
   const isClaudeComplete = cliToolId === 'claude' && hasPrompt && hasSeparator && !isThinking;
   const isOpenCodeDone = cliToolId === 'opencode' && isOpenCodeComplete(cleanOutputToCheck);
 
@@ -372,8 +453,16 @@ export function extractResponse(
     const response = responseLines.join('\n').trim();
 
     // DR-004: Check only the tail of the response for thinking indicators.
+    //
+    // Issue #1897: not for copilot. This is the same tail-window match the #1671
+    // codex fix removed from the liveness test, and on copilot it is both
+    // redundant and harmful: the status bar above has already made a positive
+    // `idle` observation about THIS frame, while the window here sees transcript
+    // that never scrolls away. `COPILOT_THINKING_PATTERN`'s braille alternative
+    // matches any spinner glyph a reply happens to quote, and the turn would then
+    // be reported unfinished for the rest of the session.
     const responseTailLines = response.split('\n').slice(-THINKING_TAIL_LINE_COUNT).join('\n');
-    if (thinkingPattern.test(responseTailLines)) {
+    if (cliToolId !== 'copilot' && thinkingPattern.test(responseTailLines)) {
       return incompleteResult(totalLines);
     }
 
@@ -403,6 +492,26 @@ export function extractResponse(
           return incompleteResult(totalLines);
         }
       } else if ((hasBannerArt || hasVersionInfo || hasStartupTips || hasProjectInit) && response.length < 2000) {
+        return incompleteResult(totalLines);
+      }
+    }
+
+    // Issue #1897: copilot's launch screen is a complete, idle frame -- composer
+    // drawn, key hints on the status bar -- so every check above accepts it and
+    // History used to open with the banner ("Current Sessions Issues Pull
+    // requests Gists / No copilot-instructions.md found… / Tip: /app") saved as
+    // the agent's first reply, before the operator had said anything.
+    //
+    // What actually distinguishes it is that no turn has happened: copilot echoes
+    // every prompt into the transcript as ` ❯ <text>`, and the launch screen has
+    // none. The banner anchors are only consulted once that echo is missing, so a
+    // reply that quotes any of this wording is unaffected.
+    if (cliToolId === 'copilot') {
+      const cleanResponse = stripAnsi(response);
+      const hasUserEcho = cleanResponse
+        .split('\n')
+        .some(line => COPILOT_USER_ECHO_PATTERN.test(line));
+      if (!hasUserEcho && COPILOT_BOOT_BANNER_ANCHORS.some(anchor => anchor.test(cleanResponse))) {
         return incompleteResult(totalLines);
       }
     }
