@@ -5,6 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import {
+  REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
+  assertSubprocessCompleted,
+} from '@tests/helpers/real-shell-budget';
+
 /**
  * Issue #1728 (secondary) — telling "the monitor is quiet" apart from "the
  * monitor is dead".
@@ -32,7 +37,12 @@ const SCRIPTS = path.join(process.cwd(), '.claude/skills/orchestrate-monitor/scr
 const MONITOR = path.join(SCRIPTS, 'monitor.sh');
 const FIXTURES = fileURLToPath(new URL('./fixtures', import.meta.url));
 
-const HARD_TIMEOUT_MS = 25_000;
+// Issue #1950: the guard is shared, and the vitest budget that tests/setup.ts
+// gives this family is deliberately larger than it, so a run that overruns is
+// reported by the guard (naming itself) rather than by a 5000ms wall clock that
+// names nothing. The per-file values this replaced (15s / 20s / 25s) were all
+// UNDER the 5s default budget's reach, so none of them could ever fire.
+const HARD_TIMEOUT_MS = REAL_SHELL_SUBPROCESS_TIMEOUT_MS;
 
 /**
  * A fake `commandmate` that answers every poll with the same fixture, and a
@@ -85,6 +95,7 @@ function runBounded(args: string[], fixture: string | string[] = 'live-idle.json
     timeout: HARD_TIMEOUT_MS,
     env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}`, CM: cm },
   });
+  assertSubprocessCompleted(proc, 'monitor-liveness.test.ts');
   return {
     stdout: proc.stdout ?? '',
     stderr: proc.stderr ?? '',
@@ -242,6 +253,7 @@ describe('monitor.sh reports only unexpected exits (Issue #1728, proposal E)', (
         env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}`, CM: cm },
       },
     );
+    assertSubprocessCompleted(proc, 'monitor-liveness.test.ts');
 
     expect(proc.stdout).toContain('monitor: all 1 worker(s) complete');
     expect(proc.stderr).toBe('');

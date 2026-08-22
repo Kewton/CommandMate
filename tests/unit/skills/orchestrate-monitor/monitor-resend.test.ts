@@ -5,6 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import {
+  REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
+  assertSubprocessCompleted,
+} from '@tests/helpers/real-shell-budget';
+
 const MONITOR = path.join(
   process.cwd(),
   '.claude/skills/orchestrate-monitor/scripts/monitor.sh',
@@ -37,7 +42,12 @@ const IDLE_THRESHOLD = 1;
  * a handful of subprocess spawns). No assertion depends on it — if it ever fires,
  * expectPolls() reports it as a failure instead of silently shortening the loop.
  */
-const HARD_TIMEOUT_MS = 15_000;
+// Issue #1950: the guard is shared, and the vitest budget that tests/setup.ts
+// gives this family is deliberately larger than it, so a run that overruns is
+// reported by the guard (naming itself) rather than by a 5000ms wall clock that
+// names nothing. The per-file values this replaced (15s / 20s / 25s) were all
+// UNDER the 5s default budget's reach, so none of them could ever fire.
+const HARD_TIMEOUT_MS = REAL_SHELL_SUBPROCESS_TIMEOUT_MS;
 
 interface RunResult {
   stdout: string;
@@ -97,6 +107,8 @@ function runLoop(fixture: string, polls: number, extraArgs: string[] = []): RunR
     },
   );
 
+  assertSubprocessCompleted(proc, 'monitor-resend.test.ts');
+
   return {
     stdout: proc.stdout ?? '',
     status: proc.status,
@@ -152,7 +164,7 @@ describe('monitor.sh recovers from retry exhaustion (Issue #1522, defect 4)', ()
       'has-session -t =mcbd-claude-w1:',
       `send-keys -t =mcbd-claude-w1: ${RESEND_MESSAGE} Enter`,
     ]);
-  }, 20_000);
+  });
 
   it('never intervenes while the CLI is still inside its own backoff', () => {
     // The production harm: input sent mid-backoff is queued, then delivered once
@@ -170,7 +182,7 @@ describe('monitor.sh recovers from retry exhaustion (Issue #1522, defect 4)', ()
     // or not-running, the streak would have crossed the threshold and reported
     // NOT_STARTED. That keeps the empty-tmuxCalls claim about *this* state.
     expect(run.stdout).not.toContain('NOT_STARTED');
-  }, 20_000);
+  });
 
   it('never intervenes on a healthy worker whose pane shows rate-limiter source', () => {
     // The 5th defect at loop level: this frame used to classify as RATE_LIMIT and
@@ -182,7 +194,7 @@ describe('monitor.sh recovers from retry exhaustion (Issue #1522, defect 4)', ()
     expect(run.tmuxCalls).toEqual([]);
     expect(run.stdout).not.toContain("sent 'a'");
     expect(run.stdout).not.toContain('NOT_STARTED');
-  }, 20_000);
+  });
 
   it('still sends "a" on a genuine usage-limit banner', () => {
     // RATE_LIMIT is acted on immediately, so a single poll is the whole scenario.
@@ -198,5 +210,5 @@ describe('monitor.sh recovers from retry exhaustion (Issue #1522, defect 4)', ()
       'has-session -t =mcbd-claude-w1:',
       'send-keys -t =mcbd-claude-w1: a Enter',
     ]);
-  }, 20_000);
+  });
 });

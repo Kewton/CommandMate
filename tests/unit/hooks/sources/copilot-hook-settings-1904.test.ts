@@ -39,6 +39,8 @@ import { join } from 'path';
 import { removeTempDir } from '@tests/helpers/temp-dir';
 import { COMMANDMATE_HOOK_ENV_VARS, renderAgentLaunchCommand } from '@/lib/hooks/sources';
 
+import { REAL_SHELL_SUBPROCESS_TIMEOUT_MS } from '@tests/helpers/real-shell-budget';
+
 // Real fs, wrapped: `writeFileSync` and `renameSync` are the two calls S16 is
 // about, and the difference between them is invisible in the file afterwards.
 vi.mock('fs', async (importOriginal) => {
@@ -403,7 +405,7 @@ describe('the generated commands in a real shell', () => {
     command: string,
     env: Record<string, string>
   ): Promise<{ code: number; stdout: string; stderr: string }> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       // A minimal environment rather than `process.env`: the point of most of
       // these cases is what the hook does when a variable is *absent*, and an
       // inherited `CM_AUTH_TOKEN` or `CM_HOOK_PORT` would answer for it.
@@ -416,7 +418,26 @@ describe('the generated commands in a real shell', () => {
       let stderr = '';
       child.stdout.on('data', (c) => (stdout += c));
       child.stderr.on('data', (c) => (stderr += c));
-      child.on('close', (code) => resolve({ code: code ?? -1, stdout, stderr }));
+      // Issue #1950: an explicit hang guard, because `spawn` has none and this
+      // file is one of the two outside tests/unit/skills/orchestrate-monitor
+      // observed timing out under parallel load. Without it the only limit was
+      // vitest's per-test budget, which reports the wall clock rather than the
+      // hang. Rejecting (not resolving with a sentinel code) keeps a wedged
+      // shell from reading as a hook that answered with the wrong exit code.
+      const guard = setTimeout(() => {
+        child.kill('SIGKILL');
+        reject(
+          new Error(
+            `/bin/sh did not finish within its ${REAL_SHELL_SUBPROCESS_TIMEOUT_MS}ms guard. ` +
+              `stdout so far: ${JSON.stringify(stdout)}; stderr so far: ${JSON.stringify(stderr)}`,
+          ),
+        );
+      }, REAL_SHELL_SUBPROCESS_TIMEOUT_MS);
+      guard.unref?.();
+      child.on('close', (code) => {
+        clearTimeout(guard);
+        resolve({ code: code ?? -1, stdout, stderr });
+      });
       child.stdin.end('{"hook_event_name":"Stop","session_id":"s1","cwd":"/tmp"}');
     });
   }

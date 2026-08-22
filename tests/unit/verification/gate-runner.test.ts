@@ -345,8 +345,15 @@ options:
     // signal-derived code would look like the command decided something.
     expect(gate?.exitCode).toBeNull();
     // Proves the process was killed rather than waited out: `sleep 30` would
-    // have taken 30s, and this test's own 5s budget would have expired first.
-    expect(gate?.durationMs ?? Number.MAX_SAFE_INTEGER).toBeLessThan(4000);
+    // have taken 30s, so anything comfortably under that settles it.
+    //
+    // Issue #1950: the bound is half the sleep rather than 4000ms. The old
+    // number was picked to sit under vitest's 5000ms default budget, which made
+    // it a second wall-clock race on a suite whose real-shell tests measure
+    // p99.9 = 16.5s under load — it would have failed on a busy machine while
+    // the gate was behaving perfectly. Half of `sleep 30` still separates
+    // "killed at timeoutSec: 1" from "waited out" by a factor of 15.
+    expect(gate?.durationMs ?? Number.MAX_SAFE_INTEGER).toBeLessThan(15_000);
     expect(getVerificationRun(db, runId)?.status).toBe('failed');
   });
 });

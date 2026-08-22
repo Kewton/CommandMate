@@ -5,6 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import {
+  REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
+  assertSubprocessCompleted,
+} from '@tests/helpers/real-shell-budget';
+
 const SCRIPTS = path.join(
   process.cwd(),
   '.claude/skills/orchestrate-monitor/scripts',
@@ -18,7 +23,12 @@ const FIXTURES = fileURLToPath(new URL('./fixtures', import.meta.url));
 // --max-polls ends the run from the inside.
 const INTERVAL_SEC = 0;
 const IDLE_THRESHOLD = 1;
-const HARD_TIMEOUT_MS = 15_000;
+// Issue #1950: the guard is shared, and the vitest budget that tests/setup.ts
+// gives this family is deliberately larger than it, so a run that overruns is
+// reported by the guard (naming itself) rather than by a 5000ms wall clock that
+// names nothing. The per-file values this replaced (15s / 20s / 25s) were all
+// UNDER the 5s default budget's reach, so none of them could ever fire.
+const HARD_TIMEOUT_MS = REAL_SHELL_SUBPROCESS_TIMEOUT_MS;
 
 /**
  * GENERATING on the first poll latches `started=1`; every later poll is IDLE, so
@@ -103,6 +113,8 @@ function runLoop({ fixtures, polls, args = [], env = {}, id = 'w1' }: RunOptions
       env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}`, CM: cmShim, ...env },
     },
   );
+
+  assertSubprocessCompleted(proc, 'monitor-observability.test.ts');
 
   return {
     stdout: proc.stdout ?? '',
@@ -196,7 +208,7 @@ describe('monitor.sh --verbose per-poll state log (Issue #1533, scope A)', () =>
       ].join('\n'),
     );
     expect(parsePolls(run.stdout)).toEqual([]);
-  }, 20_000);
+  });
 
   it('emits exactly one parseable line per poll under --verbose', () => {
     const POLLS = 3;
@@ -219,7 +231,7 @@ describe('monitor.sh --verbose per-poll state log (Issue #1533, scope A)', () =>
     // capture group: `task=-` would satisfy neither, and a `task=` with nothing
     // after it would still parse.
     expect(run.stdout).not.toContain('task=');
-  }, 20_000);
+  });
 
   it('adds only the poll lines: --verbose stdout minus them equals the default stdout', () => {
     const POLLS = 3;
@@ -233,7 +245,7 @@ describe('monitor.sh --verbose per-poll state log (Issue #1533, scope A)', () =>
       .filter((line) => !POLL_LINE.test(line))
       .join('\n');
     expect(stripped).toBe(plain.stdout);
-  }, 20_000);
+  });
 
   it('records interventions in the same run, so poll count and interventions line up', () => {
     // RATE_LIMIT on every poll: the intervention line the operator already got and
@@ -246,7 +258,7 @@ describe('monitor.sh --verbose per-poll state log (Issue #1533, scope A)', () =>
     expect(
       run.stdout.split('\n').filter((l) => l.includes("rate limit -> sent 'a' to mcbd-claude-w1")),
     ).toHaveLength(2);
-  }, 20_000);
+  });
 });
 
 describe('monitor.sh completion hooks (Issue #1533, scope B)', () => {
@@ -268,7 +280,7 @@ describe('monitor.sh completion hooks (Issue #1533, scope B)', () => {
     expect(run.stdout).not.toContain('COMPLETE');
     expect(run.stdout).toContain('NOT_STARTED — idle with no work');
     expect(parsePolls(run.stdout).every((r) => r.commits === 0 && r.uncommitted === 0)).toBe(true);
-  }, 20_000);
+  });
 
   it('reaches COMPLETE once --hooks supplies real counters', () => {
     const hooks = writeHooks('count_commits() { echo 2; }\ncount_uncommitted() { echo 5; }\n');
@@ -288,7 +300,7 @@ describe('monitor.sh completion hooks (Issue #1533, scope B)', () => {
       { id: 'w1', poll: 1, state: 'GENERATING', started: 1, streak: 0, commits: 2, uncommitted: 5, task: null, verdict: 'WORKING' },
       { id: 'w1', poll: 2, state: 'IDLE', started: 1, streak: 1, commits: 2, uncommitted: 5, task: null, verdict: 'COMPLETE' },
     ]);
-  }, 20_000);
+  });
 
   it('accepts MONITOR_HOOKS from the environment', () => {
     const hooks = writeHooks('count_uncommitted() { echo 3; }\n');
@@ -304,7 +316,7 @@ describe('monitor.sh completion hooks (Issue #1533, scope B)', () => {
     // a hooks file is allowed to supply one counter without breaking the other.
     const last = parsePolls(run.stdout).at(-1);
     expect(last).toMatchObject({ commits: 0, uncommitted: 3, verdict: 'COMPLETE' });
-  }, 20_000);
+  });
 
   it('fails loudly instead of silently stubbing when the hooks file is missing', () => {
     const run = runLoop({
@@ -316,7 +328,7 @@ describe('monitor.sh completion hooks (Issue #1533, scope B)', () => {
     expect(run.status).toBe(2);
     expect(run.stderr).toContain('hooks file not found');
     expect(run.captureCalls).toEqual([]);
-  }, 20_000);
+  });
 });
 
 describe('hooks-git.sh reference implementation (Issue #1533, scope B)', () => {
@@ -361,7 +373,7 @@ describe('hooks-git.sh reference implementation (Issue #1533, scope B)', () => {
     expect({ status: probe.status, stderr: probe.stderr }).toEqual({ status: 0, stderr: '' });
     // 1 commit ahead of main, 1 untracked file.
     expect(probe.stdout.trim()).toBe('1 1');
-  }, 20_000);
+  });
 
   it('returns 0 rather than erroring for an id that resolves to no worktree', () => {
     const { repo, base } = makeRepo();
@@ -376,7 +388,7 @@ describe('hooks-git.sh reference implementation (Issue #1533, scope B)', () => {
 
     expect(probe.status).toBe(0);
     expect(probe.stdout.trim()).toBe('0 0');
-  }, 20_000);
+  });
 
   it('drives monitor.sh to COMPLETE end to end', () => {
     // The whole point of scope B: the shipped reference — not just a test double —
@@ -398,7 +410,7 @@ describe('hooks-git.sh reference implementation (Issue #1533, scope B)', () => {
       uncommitted: 1,
       verdict: 'COMPLETE',
     });
-  }, 20_000);
+  });
 
   it('warns on an unresolvable base ref instead of silently counting zero commits', () => {
     const { repo } = makeRepo();
@@ -408,5 +420,5 @@ describe('hooks-git.sh reference implementation (Issue #1533, scope B)', () => {
     });
 
     expect(probe.stderr).toContain("base ref 'origin/nope' does not resolve");
-  }, 20_000);
+  });
 });

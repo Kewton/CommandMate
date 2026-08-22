@@ -1,8 +1,50 @@
 // Vitest setup file
-import { beforeAll, afterAll, afterEach, vi } from 'vitest';
+import { beforeAll, afterAll, afterEach, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import '@testing-library/jest-dom/vitest';
+import {
+  REAL_SHELL_TEST_TIMEOUT_MS,
+  startsRealSubprocess,
+} from './helpers/real-shell-budget';
+
+// Issue #1950: give tests that start a real subprocess a budget that matches
+// what they actually do.
+//
+// This runs once per test file, before collection, so `vi.setConfig` here is
+// the file's default rather than a per-test override: an `it()` that states its
+// own timeout still wins, which is how `compose` keeps its 300_000 and how a
+// future test can opt back down.
+//
+// Membership is read off the file's own source instead of a path list, because
+// a list is a thing that goes stale the first time somebody writes a new test
+// that shells out. The cost is one `readFileSync` per test file — ~974 reads
+// spread across the worker pool, against a suite whose baseline is 66s — and
+// only the ~7% of files that match go on to change their budget.
+//
+// Why this cannot be expressed in vitest.config.ts: `testTimeout` there is
+// global or per-`projects` entry, and splitting the family into its own project
+// changes the pool the files run in. The budget is the fix; the pool is not
+// (serializing the family was measured at 3x the wall clock and rejected).
+// See tests/helpers/real-shell-budget.ts for the measurements.
+const currentTestPath = expect.getState().testPath;
+if (currentTestPath !== undefined) {
+  let source = '';
+  try {
+    source = readFileSync(currentTestPath, 'utf8');
+  } catch {
+    // A file vitest can run but this process cannot read is not a case worth
+    // failing the suite over; it simply keeps the default budget.
+    source = '';
+  }
+  if (startsRealSubprocess(source)) {
+    vi.setConfig({
+      testTimeout: REAL_SHELL_TEST_TIMEOUT_MS,
+      hookTimeout: REAL_SHELL_TEST_TIMEOUT_MS,
+    });
+  }
+}
 
 // Issue #1760: keep agent config generation out of the developer's home.
 //
