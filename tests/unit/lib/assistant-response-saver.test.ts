@@ -7,30 +7,30 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
-import { runMigrations } from '../db/db-migrations';
-import { upsertWorktree, getMessages, updateSessionState, getSessionState } from '../db';
-import type { CLIToolType } from '../cli-tools/types';
+import { runMigrations } from '@/lib/db/db-migrations';
+import { upsertWorktree, getMessages, updateSessionState, getSessionState } from '@/lib/db';
+import type { CLIToolType } from '@/lib/cli-tools/types';
 
 // The module we're testing - will be created
 import {
   savePendingAssistantResponse,
   cleanCliResponse,
   detectBufferReset,
-} from '../assistant-response-saver';
+} from '@/lib/assistant-response-saver';
 
 // Mock cli-session module
-vi.mock('../session/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', () => ({
   captureSessionOutput: vi.fn(),
   isSessionRunning: vi.fn(),
 }));
 
 // Mock ws-server module
-vi.mock('../ws-server', () => ({
+vi.mock('@/lib/ws-server', () => ({
   broadcastMessage: vi.fn(),
 }));
 
-import { captureSessionOutput } from '../session/cli-session';
-import { broadcastMessage } from '../ws-server';
+import { captureSessionOutput } from '@/lib/session/cli-session';
+import { broadcastMessage } from '@/lib/ws-server';
 
 const mockCaptureSessionOutput = vi.mocked(captureSessionOutput);
 const mockBroadcastMessage = vi.mocked(broadcastMessage);

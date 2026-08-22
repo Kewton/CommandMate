@@ -7,9 +7,21 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { ConversationPairCard } from '../ConversationPairCard';
+import { ConversationPairCard } from '@/components/worktree/ConversationPairCard';
 import type { ConversationPair } from '@/types/conversation';
 import type { ChatMessage } from '@/types/models';
+
+// [Issue #1939] The global next-intl mock in tests/setup.ts echoes
+// `namespace.key` and drops interpolation, so every assertion below on the
+// rendered wording ("You", "Assistant", "System Message", "Open file: <path>")
+// would be comparing against a key. Those assertions were written before the
+// #1276 i18n migration and are the point of this file, so resolve them through
+// the real dictionary — the same choice tests/unit/components/HistoryPane.test.tsx
+// made for #1206.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
 
 // Helper to create test messages
 function createMessage(
