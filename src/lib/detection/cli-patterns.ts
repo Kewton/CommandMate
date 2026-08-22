@@ -1016,6 +1016,77 @@ export function findOpenCodeUserEchoEnd(lines: string[], chromeStart: number): n
 }
 
 /**
+ * The rows of opencode's composer that hold the INPUT BUFFER (Issue #1906).
+ *
+ * opencode has no prompt marker — no `>` / `❯` / `›` anywhere near its input —
+ * so "is the message still sitting in the composer?" cannot be asked the way it
+ * is asked of every other TUI. What opencode has instead is a box, and the box
+ * has a fixed shape, measured at the production 80x200 geometry across every
+ * frame in `opencode-live-1883/`, `opencode-live-1893/` and
+ * `opencode-live-1906/`:
+ *
+ * ```
+ *   ┃                                     ← buffer rows: blank when empty,
+ *   ┃  Review the send path.                one row per (wrapped) line of the
+ *   ┃  Check newline handling.              typed message, or the
+ *   ┃  Report findings.                     `Ask anything...` placeholder on a
+ *   ┃                                       session that has not answered yet
+ *   ┃  Build · GPT-5.6 Luna GitHub Copilot ← the agent/model row, ALWAYS last
+ *   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ ← the box's bottom border
+ * ```
+ *
+ * The agent/model row is what makes a naive "any guttered row with text" read
+ * wrong: it always carries text, so the composer would never look empty. It is
+ * identified structurally — the last gutter row before the border — rather than
+ * by matching `Build ·` or a model name, both of which are opencode's to change
+ * and neither of which is stable across agents (`Build`, `Plan`, a custom agent).
+ *
+ * Anchored on the border, not on the bottom of the pane, because opencode
+ * centres the whole box under its banner before the first turn (row ~100 of 200)
+ * and only pins it to the bottom afterwards — see {@link findOpenCodeChromeStart},
+ * whose upward walk this shares.
+ *
+ * Returns `null` when no composer is on screen at all. That is the permission
+ * dialog (it replaces the composer and draws no bottom border — measured,
+ * `opencode-live-1893/permission-*.txt`), a full-screen overlay, or a session
+ * still starting.
+ *
+ * @param lines - Captured pane lines, ANSI-stripped, box drawing intact. Must be
+ *   the WHOLE pane: a tail window sized for the other tools does not contain the
+ *   box on a pre-first-turn frame.
+ * @returns The buffer rows with their gutters intact, or `null` when the
+ *   composer is not on screen. An empty array means a box with no buffer row,
+ *   which no measured frame produces.
+ */
+export function findOpenCodeComposerRows(lines: string[]): string[] | null {
+  let border = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (OPENCODE_COMPOSER_BOTTOM_BORDER.test(lines[i])) {
+      border = i;
+      break;
+    }
+  }
+  if (border < 0) return null;
+
+  let top = border;
+  while (top - 1 >= 0 && OPENCODE_GUTTER_ROW_PATTERN.test(lines[top - 1])) top--;
+
+  // `top .. border - 1` are the box's gutter rows; the last of them is the
+  // agent/model row, which belongs to the chrome rather than to the buffer.
+  const modelRow = border - 1;
+  if (modelRow < top) return null;
+  return lines.slice(top, modelRow);
+}
+
+/**
+ * A composer row with its gutter (and the padding either side) removed
+ * (Issue #1906). Blank for an empty buffer row.
+ */
+export function stripOpenCodeGutter(row: string): string {
+  return row.replace(OPENCODE_GUTTER_ROW_PATTERN, '').trim();
+}
+
+/**
  * OpenCode TUI selection list pattern (Issue #473, narrowed by Issue #1896).
  *
  * Detects the fuzzy-search picker overlay opencode draws for `/models`,

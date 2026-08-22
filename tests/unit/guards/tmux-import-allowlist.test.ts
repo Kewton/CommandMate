@@ -7,7 +7,8 @@
  * import of the tmux modules an **error**, plus an `overrides` allowlist of the
  * files that already do it. §4 D4 of `docs/design/multi-agent-state-architecture.md`
  * says that allowlist may only ever **shrink** — #1905 deleted its line
- * (`kill-session/route.ts`, 19 staged entries -> 18) and #1906 deletes more — so the
+ * (`kill-session/route.ts`, 19 staged entries -> 18) and #1906 deleted two more
+ * (`terminal/route.ts` and `send-user-message.ts`, 18 -> 16) — so the
  * interesting property is not "the rule exists" but "the exact set of exempt files is
  * this one".
  *
@@ -24,7 +25,7 @@
  *    can hold the allowlist to a count. The count lives here.
  * 2. **`overrides.files` is matched with minimatch.** A literal Next.js dynamic
  *    segment written as `src/app/api/worktrees/[id]/route.ts` is a *character
- *    class* and matches `.../i/route.ts` — not the real directory. Six of the 30
+ *    class* and matches `.../i/route.ts` — not the real directory. Five of the 28
  *    entries have `[id]` in them; unescaped, they would silently stop exempting
  *    their file and lint would go red on day one. They are escaped as `\[id\]`.
  * 3. **ESLint 8's core `no-restricted-imports` never sees `await import()` or
@@ -84,7 +85,6 @@ const STAGED_REMOVAL = [
   'src/app/api/worktrees/[id]/capture/route.ts',
   'src/app/api/worktrees/[id]/clear-composer/route.ts',
   'src/app/api/worktrees/[id]/special-keys/route.ts',
-  'src/app/api/worktrees/[id]/terminal/route.ts',
   'src/app/worktrees/[id]/terminal/page.tsx',
   'src/components/Terminal.tsx',
   'src/lib/auto-yes-poller.ts',
@@ -98,7 +98,6 @@ const STAGED_REMOVAL = [
   'src/lib/session-key-sender.ts',
   'src/lib/session/claude-session.ts',
   'src/lib/session/composer-clear.ts',
-  'src/lib/session/send-user-message.ts',
 ] as const;
 
 const ALLOWLIST = [...PERMANENT_EXEMPT, ...STAGED_REMOVAL].slice().sort();
@@ -285,11 +284,14 @@ describe('lib/tmux import guard: ESLint configuration', () => {
 });
 
 describe('lib/tmux import guard: the allowlist', () => {
-  it('is exactly 12 permanent + 18 staged files', () => {
+  it('is exactly 12 permanent + 16 staged files', () => {
     // 19 -> 18: #1905 moved `kill-session/route.ts` onto `ICLITool.killSession`.
+    // 18 -> 16: #1906 moved `terminal/route.ts` and `send-user-message.ts` onto
+    // `ICLITool.sendMessage` / `ICLITool.isRunning`, deleting the copilot
+    // `sendKeys` + delayed-Enter bypass that was the reason both reached tmux.
     expect(PERMANENT_EXEMPT).toHaveLength(12);
-    expect(STAGED_REMOVAL).toHaveLength(18);
-    expect(ALLOWLIST).toHaveLength(30);
+    expect(STAGED_REMOVAL).toHaveLength(16);
+    expect(ALLOWLIST).toHaveLength(28);
   });
 
   it('keeps the two groups sorted, deduplicated and disjoint', () => {
@@ -312,11 +314,12 @@ describe('lib/tmux import guard: the allowlist', () => {
 
   it('escapes the Next.js dynamic segments so minimatch matches the real directory', () => {
     // Unescaped, `[id]` is a character class: the entry would match `.../i/route.ts`
-    // and stop exempting the file it names. 7 -> 6 with #1905's removal.
+    // and stop exempting the file it names. 7 -> 6 with #1905's removal, 6 -> 5
+    // with #1906's (`terminal/route.ts`).
     const withBrackets = rc.overrides
       .flatMap((o) => o.files)
       .filter((f) => unescapeGlob(f).includes('[id]'));
-    expect(withBrackets).toHaveLength(6);
+    expect(withBrackets).toHaveLength(5);
     for (const pattern of withBrackets) {
       expect(pattern).toContain('\\[id\\]');
       expect(pattern).not.toMatch(/(^|[^\\])\[id\]/);

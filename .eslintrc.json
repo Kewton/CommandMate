@@ -104,12 +104,13 @@
     },
     {
       "files": [
-        // 3) 段階解消 (staged removal, 18 files): the only progress metric. Shrinks in #1905 / #1906.
+        // 3) 段階解消 (staged removal, 16 files): the only progress metric.
         // #1905 removed kill-session/route.ts: it kills through ICLITool.killSession now.
+        // #1906 removed terminal/route.ts and send-user-message.ts: both dropped the
+        // copilot sendKeys bypass and now send through ICLITool.sendMessage.
         "src/app/api/worktrees/\\[id\\]/capture/route.ts",
         "src/app/api/worktrees/\\[id\\]/clear-composer/route.ts",
         "src/app/api/worktrees/\\[id\\]/special-keys/route.ts",
-        "src/app/api/worktrees/\\[id\\]/terminal/route.ts",
         "src/app/worktrees/\\[id\\]/terminal/page.tsx",
         "src/components/Terminal.tsx",
         "src/lib/auto-yes-poller.ts",
@@ -122,8 +123,7 @@
         "src/lib/session-cleanup.ts",
         "src/lib/session-key-sender.ts",
         "src/lib/session/claude-session.ts",
-        "src/lib/session/composer-clear.ts",
-        "src/lib/session/send-user-message.ts"
+        "src/lib/session/composer-clear.ts"
       ],
       "rules": {
         "no-restricted-imports": "off"

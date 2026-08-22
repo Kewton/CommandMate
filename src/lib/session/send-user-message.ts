@@ -11,7 +11,7 @@
  *   1. savePendingAssistantResponse  — persist the previous assistant reply
  *   2. orphan detection              — Issue #379 duplicate-message guard
  *   3. copilot /model command        — Issue #576 (copilot only)
- *   4. send to CLI tool              — image / copilot / normal branches
+ *   4. send to CLI tool              — image branch / ICLITool.sendMessage
  *   5. createMessage (role: 'user')  — INSERT INTO chat_messages (History source)
  *   6. orphan deletion               — remove prior duplicate after persist
  *   7. updateLastUserMessage
@@ -35,11 +35,8 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { isImageCapableCLITool, type CLIToolType } from '@/lib/cli-tools/types';
 import { startPolling } from '@/lib/polling/response-poller';
 import { savePendingAssistantResponse } from '@/lib/assistant-response-saver';
-import { sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
-import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
 import { createLogger } from '@/lib/logger';
 import { isPromptWaiting, promptWaitingMessage } from '@/lib/session/prompt-waiting-guard';
-import { COPILOT_SEND_ENTER_DELAY_MS } from '@/config/copilot-constants';
 import type { CopilotTool } from '@/lib/cli-tools/copilot';
 import type { ChatMessage, MessageType } from '@/types/models';
 
@@ -193,20 +190,20 @@ export async function sendUserMessage(
           : `[添付画像: ${absoluteImagePath}]`;
         await cliTool.sendMessage(worktreeId, messageWithPath, instanceId);
       }
-    } else if (cliToolId === 'copilot') {
-      // Copilot: use sendKeys directly to avoid waitForPrompt blocking (#559).
-      // Copilot CLI auto-enters multi-line mode when text exceeds pane width.
-      // In multi-line mode, C-m (bundled with text) adds a newline instead of
-      // submitting. Sending Enter as a separate tmux command after a delay
-      // allows the TUI to process the text first, then accept Enter as submit.
-      const sessionName = cliTool.getSessionName(worktreeId, instanceId);
-      // Replace newlines with spaces to prevent Copilot CLI multi-line mode
-      const copilotContent = content.replace(/\n+/g, ' ').trim();
-      await sendKeys(sessionName, copilotContent, false);
-      await new Promise(resolve => setTimeout(resolve, COPILOT_SEND_ENTER_DELAY_MS));
-      await sendSpecialKeys(sessionName, ['Enter']);
-      invalidateCache(sessionName);
     } else {
+      // Issue #1906: every tool — copilot included — goes through its own
+      // `ICLITool.sendMessage`. copilot used to be special-cased here with a raw
+      // `sendKeys` + delayed Enter, which skipped `CopilotTool.sendMessage`
+      // entirely: no `waitForPrompt` (so a folder-trust dialog was typed into,
+      // #1886), no selection-list branch (#1895), and — because nothing read the
+      // pane back — no #1471 "the Enter was swallowed" failure, so a typed-but-
+      // unsent message was reported as sent. It also flattened `\n+` to spaces,
+      // which silently turned a contract preamble or a Markdown body into one
+      // line. Measured on copilot 1.0.80 (private tmux socket, `tmux -L`):
+      // `send-keys` with literal newlines leaves the body multi-line in the
+      // composer (`❯ line one` / `  line two` / `  line three`) and a SEPARATE
+      // Enter submits all of it — the transcript echo keeps the line breaks — so
+      // the flattening is not needed to make Enter submit and is now gone.
       await cliTool.sendMessage(worktreeId, content, instanceId);
     }
   } catch (error) {

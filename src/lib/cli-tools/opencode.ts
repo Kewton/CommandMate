@@ -52,6 +52,7 @@ import {
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { ensureOpencodeConfig } from './opencode-config';
+import { OPENCODE_PANE_HEIGHT } from '@/config/tmux-pane-config';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { createLogger } from '@/lib/logger';
@@ -92,12 +93,13 @@ export const OPENCODE_EXIT_COMMAND = '/exit';
 
 /**
  * OpenCode tmux pane height (rows).
- * Set to 200 to expand the TUI content area (~190 visible lines),
- * allowing most responses to be captured in a single tmux capture-pane.
- * OpenCode runs in alternate screen mode with no scrollback buffer,
- * so only visible rows are capturable.
+ *
+ * Defined in `@/config/tmux-pane-config` since Issue #1906 and re-exported here
+ * so existing importers are unchanged. It moved because
+ * `cli-tools/submit-verified-sender.ts` — which THIS module imports — needs it
+ * to size its read-back window.
  */
-export const OPENCODE_PANE_HEIGHT = 200;
+export { OPENCODE_PANE_HEIGHT };
 
 /**
  * Interval between readiness polls while opencode paints its TUI (Issue #1908).

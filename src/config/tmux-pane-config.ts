@@ -23,6 +23,24 @@ export const TUI_PANE_HEIGHT = 1000;
 export const TUI_PANE_WIDTH = 200;
 
 /**
+ * OpenCode tmux pane height (rows).
+ *
+ * Set to 200 to expand the TUI content area (~190 visible lines), allowing most
+ * responses to be captured in a single tmux capture-pane. OpenCode runs in
+ * alternate screen mode with no scrollback buffer, so only visible rows are
+ * capturable — which makes this both the session's height and the most a
+ * `capture-pane` can ever return for it.
+ *
+ * Issue #1906 moved it here from `lib/cli-tools/opencode.ts` (which re-exports
+ * it, so every existing importer is unchanged). `submit-verified-sender.ts` now
+ * needs the number to size its read-back window, and it is imported BY
+ * `opencode.ts` — taking the constant from there would have created an import
+ * cycle and pulled opencode's `child_process` use into every consumer of the
+ * sender. This module has no imports at all, so it costs nothing to depend on.
+ */
+export const OPENCODE_PANE_HEIGHT = 200;
+
+/**
  * Scrollback lines retained per pane (`history-limit`), Issue #1624.
  *
  * Only NON-alternate-screen tools (codex / gemini / vibe-local / antigravity)
