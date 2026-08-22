@@ -28,6 +28,28 @@ export interface DetectPromptOptions {
   requireDefaultIndicator?: boolean;
 
   /**
+   * Whether this CLI's OWN dialogs are ever answerable by typing a number
+   * (Issue #1896). Default `true` -- every tool keeps the existing behaviour
+   * unless it opts out.
+   *
+   * `false` says something measured about the tool, not about the frame: this
+   * CLI renders no dialog that a typed number drives, so a `1. / 2. / 3.` block
+   * on its pane is transcript by construction and
+   * {@link detectMultipleChoicePrompt} must not report it as a prompt.
+   *
+   * This is design rule D1 decision 4
+   * (`docs/design/multi-agent-state-architecture.md` §4): Auto-Yes may fire only
+   * on a POSITIVELY detected tool dialog, never on the generic numbered-list
+   * inference alone. Auto-Yes calls `detectPrompt` directly
+   * (`auto-yes-poller.ts` -> `detectAndRespondToPrompt`), so this option is the
+   * only place that can gate both it and `detectSessionStatus` at once.
+   *
+   * Set for `opencode` only. See {@link buildDetectPromptOptions} for the
+   * measurement behind it.
+   */
+  hasNumberedDialogs?: boolean;
+
+  /**
    * Pre-computed lines from output.split('\n').
    * When provided, detectPrompt() reuses these lines instead of performing
    * a redundant split('\n') on the output string.
