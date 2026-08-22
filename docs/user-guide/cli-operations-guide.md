@@ -1518,6 +1518,34 @@ commandmate auto-yes <worktree-id> --enable --instance codex-2  # 追加イン�
 | `--instance <id>` | **対象の推奨指定方法**。対象インスタンスID。他インスタンスと独立してAuto-Yesを制御 |
 | `--agent <id>` | roster に無いインスタンス向けの補助（`--instance` 単独で足りる場合は不要） |
 
+### 対象エージェントは worktree の既定（Issue #1909）
+
+`--instance` も `--agent` も付けない `auto-yes <id> --enable` は、
+[`--agent` と `--instance` の優先順位](#--agent-と---instance-の優先順位issue-1629--1925)の表を
+そのまま適用します。つまり **worktree の既定エージェント**が対象で、`send` / `wait` / `capture`
+と同じ送り先です。**Issue #1909 以前は claude 固定**で、既定が copilot / opencode の worktree では
+claude の poller が起動して 2 秒ごとに `Claude Code session ... does not exist` を出しつつ、
+実際のダイアログは無応答のまま残っていました。どのエージェントを武装したかは実行時に表示されます。
+
+```console
+$ commandmate auto-yes proj-cp --enable
+Auto-yes enabled for proj-cp (copilot).
+```
+
+`--instance` でプライマリ以外を指定した場合は `(opencode, instance oc-2)` の形になります。
+エージェント名が出ない（`Auto-yes enabled for proj-cp.`）ときは、**稼働中のサーバが CLI より古く**
+まだ claude 固定で動いています。`commandmate stop && commandmate start` で再起動してください。
+
+ダイアログが出たまま停まっているセッションに対して有効化した場合は、**その解決済みエージェントの**
+保留承認を再裁定した結果が 2 行目に出ます（Issue #1898-2。`resync` capability を持つソース＝
+現状 opencode のみが対象で、hook 系 5 ツールでは何も出ません）。
+
+```console
+$ commandmate auto-yes proj-oc --enable
+Auto-yes enabled for proj-oc (opencode).
+Re-judged 2 pending approval(s): 2 answered.
+```
+
 ### `--stop-pattern` はターミナル出力への照合（コマンドの抑止には使えない）
 
 `--stop-pattern` はエージェントが実行する**コマンドを監視するものではなく**、ターミナル出力の
