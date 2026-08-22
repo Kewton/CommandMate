@@ -1,0 +1,200 @@
+[38;2;255;255;255m[48;2;10;10;10m     [38;2;238;238;238mvisual beauty that the new press could achieve. The Bible’s clear [38;2;255;255;255m
+     [38;2;238;238;238mlettering and careful layout helped establish printing as a serious [38;2;255;255;255m
+     [38;2;238;238;238mcraft rather than merely a mechanical process. Although the book was [38;2;255;255;255m
+     [38;2;238;238;238mexpensive and still resembled a handwritten manuscript in some ways, it [38;2;255;255;255m
+     [38;2;238;238;238mrepresented a major turning point in the history of communication.[38;2;255;255;255m
+
+     [38;2;238;238;238mPrinting technology spread rapidly throughout Europe. By the end of the [38;2;255;255;255m
+     [38;2;238;238;238mfifteenth century, printing presses operated in cities such as Venice, [38;2;255;255;255m
+     [38;2;238;238;238mParis, London, and Antwerp. Printers produced religious texts, classical [38;2;255;255;255m
+     [38;2;238;238;238mliterature, legal documents, calendars, maps, and pamphlets. Books [38;2;255;255;255m
+     [38;2;238;238;238mbecame more affordable, and literacy gradually expanded beyond the [38;2;255;255;255m
+     [38;2;238;238;238mclergy and wealthy elites. Printers also helped standardize spelling, [38;2;255;255;255m
+     [38;2;238;238;238mgrammar, and the forms of national languages because identical texts [38;2;255;255;255m
+     [38;2;238;238;238mcould be distributed across wide regions.[38;2;255;255;255m
+
+     [38;2;238;238;238mThe printing press had a profound impact on religion. During the [38;2;255;255;255m
+     [38;2;238;238;238mProtestant Reformation in the sixteenth century, Martin Luther and other [38;2;255;255;255m
+     [38;2;238;238;238mreformers used pamphlets, sermons, and translated Bibles to circulate [38;2;255;255;255m
+     [38;2;238;238;238mtheir ideas. Printing allowed religious arguments to reach ordinary [38;2;255;255;255m
+     [38;2;238;238;238mpeople directly, weakening the exclusive control that church authorities [38;2;255;255;255m
+     [38;2;238;238;238mhad traditionally held over religious knowledge. At the same time, [38;2;255;255;255m
+     [38;2;238;238;238mgovernments and churches used censorship, licensing, and book bans to [38;2;255;255;255m
+     [38;2;238;238;238mcontrol what could be printed.[38;2;255;255;255m
+
+     [38;2;238;238;238mScience also benefited enormously. Scholars could compare identical [38;2;255;255;255m
+     [38;2;238;238;238mcopies of texts, correct errors, and build on one another’s discoveries. [38;2;255;255;255m
+     [38;2;238;238;238mPrinted works by figures such as Nicolaus Copernicus, Andreas Vesalius, [38;2;255;255;255m
+     [38;2;238;238;238mand Isaac Newton helped spread new ideas about astronomy, anatomy, and [38;2;255;255;255m
+     [38;2;238;238;238mphysics. The ability to reproduce diagrams, tables, and illustrations [38;2;255;255;255m
+     [38;2;238;238;238maccurately was particularly important for scientific communication.[38;2;255;255;255m
+
+     [38;2;238;238;238mOver time, printing continued to evolve. Steam-powered presses in the [38;2;255;255;255m
+     [38;2;238;238;238mnineteenth century greatly increased production speed, while rotary [38;2;255;255;255m
+     [38;2;238;238;238mpresses and cheaper wood-pulp paper made newspapers and books accessible [38;2;255;255;255m
+     [38;2;238;238;238mto mass audiences. In the twentieth century, offset printing and digital [38;2;255;255;255m
+     [38;2;238;238;238mtechnologies further transformed publishing.[38;2;255;255;255m
+
+     [38;2;238;238;238mThe printing press was more than a machine for producing books. It [38;2;255;255;255m
+     [38;2;238;238;238mchanged who could create, possess, and debate knowledge. By accelerating [38;2;255;255;255m
+     [38;2;238;238;238mthe circulation of ideas, it encouraged literacy, challenged [38;2;255;255;255m
+     [38;2;238;238;238minstitutions, supported scientific inquiry, and contributed to the [38;2;255;255;255m
+     [38;2;238;238;238mgrowth of modern democratic society. Its effects continue today, as [38;2;255;255;255m
+     [38;2;238;238;238mdigital media extend the same fundamental principle: information becomes [38;2;255;255;255m
+     [38;2;238;238;238mpowerful when it can be reproduced and shared widely.[38;2;255;255;255m
+
+     [38;2;92;156;245m▣ [38;2;255;255;255m [38;2;238;238;238mBuild[38;2;128;128;128m · GPT-5.6 Luna · 11.3s[38;2;255;255;255m
+
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;20;20;20m                                                                           [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;20;20;20m  [38;2;238;238;238mWrite a 900 word essay about the history of cartography, with many [38;2;255;255;255m      [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;20;20;20m  [38;2;238;238;238mconcrete dates and names.[38;2;255;255;255m                                                [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;20;20;20m                                                                           [48;2;10;10;10m
+
+     [38;2;245;167;66m+ Thought: Crafting an essay · 776ms[38;2;255;255;255m
+
+     [1m[38;2;245;167;66mThe History of Cartography[0m[38;2;255;255;255m[48;2;10;10;10m
+
+     [38;2;238;238;238mCartography, the art and science of making maps, has developed alongside [38;2;255;255;255m
+     [38;2;238;238;238mhuman civilization. Maps have helped people navigate landscapes, [38;2;255;255;255m
+     [38;2;238;238;238madminister empires, conduct trade, wage wars, and understand the shape [38;2;255;255;255m
+     [38;2;238;238;238mof the Earth. Although early maps were often symbolic rather than [38;2;255;255;255m
+     [38;2;238;238;238mgeographically accurate, the history of cartography reveals a gradual [38;2;255;255;255m
+     [38;2;238;238;238mmovement from local representations and sacred cosmologies toward [38;2;255;255;255m
+     [38;2;238;238;238mmathematical measurement, global surveying, and digital mapping.[38;2;255;255;255m
+
+     [38;2;238;238;238mSome of the earliest known maps were created in Mesopotamia. The [38;2;255;255;255m
+     [38;2;238;238;238mBabylonian “Map of the World,” inscribed on a clay tablet around 600 BCE,[38;2;255;255;255m
+     [38;2;238;238;238m depicted Babylon at the center of a circular world surrounded by a ring [38;2;255;255;255m
+     [38;2;238;238;238mrepresenting the ocean. It combined geographical knowledge with [38;2;255;255;255m
+     [38;2;238;238;238mmythology, showing that ancient maps were often intended to express a [38;2;255;255;255m
+     [38;2;238;238;238mculture’s worldview as much as physical space. An even older example, [38;2;255;255;255m
+     [38;2;238;238;238mthe Ga-Sur tablet from approximately 2500 BCE, appears to represent land [38;2;255;255;255m
+     [38;2;238;238;238mparcels and settlements near the ancient city of Nuzi.[38;2;255;255;255m
+
+     [38;2;238;238;238mAncient Egypt also produced maps for practical purposes. Egyptian [38;2;255;255;255m
+     [38;2;238;238;238msurveyors mapped agricultural land along the Nile, especially after [38;2;255;255;255m
+     [38;2;238;238;238mannual floods erased property boundaries. The Turin Papyrus Map, dating [38;2;255;255;255m
+     [38;2;238;238;238mfrom approximately 1150 BCE during the reign of Pharaoh Ramesses IV, is [38;2;255;255;255m
+     [38;2;238;238;238mone of the oldest surviving geological maps. It depicts part of Egypt’s [38;2;255;255;255m
+     [38;2;238;238;238mEastern Desert, including roads, hills, and locations of gold mines. [38;2;255;255;255m
+     [38;2;238;238;238mSuch maps supported mining, taxation, construction, and administration.[38;2;255;255;255m
+
+     [38;2;238;238;238mGreek thinkers introduced mathematics and astronomy into mapmaking. [38;2;255;255;255m
+     [38;2;238;238;238mAround 550 BCE, the philosopher Anaximander of Miletus is traditionally [38;2;255;255;255m
+     [38;2;238;238;238mcredited with creating one of the first Greek maps of the known world. [38;2;255;255;255m
+     [38;2;238;238;238mHecataeus of Miletus produced a more detailed map around 500 BCE, [38;2;255;255;255m
+     [38;2;238;238;238morganizing the world around the Mediterranean. During the fourth century [38;2;255;255;255m
+     [38;2;238;238;238mBCE, Aristotle argued that the Earth was spherical, based partly on [38;2;255;255;255m
+     [38;2;238;238;238mobservations of curved shadows and the changing appearance of stars.[38;2;255;255;255m
+
+     [38;2;238;238;238mThe mathematician and astronomer Eratosthenes, who served as head of the [38;2;255;255;255m
+     [38;2;238;238;238mLibrary of Alexandria, made a major contribution around 240 BCE. He [38;2;255;255;255m
+     [38;2;238;238;238mcalculated the circumference of the Earth by comparing the angle of the [38;2;255;255;255m
+     [38;2;238;238;238msun’s rays at Syene and Alexandria. His estimate, approximately 39,700 [38;2;255;255;255m
+     [38;2;238;238;238mkilometers, was remarkably close to the modern measurement of about 40,[38;2;255;255;255m
+     [38;2;238;238;238m075 kilometers at the equator. Eratosthenes also used lines of latitude [38;2;255;255;255m
+     [38;2;238;238;238mand longitude in his geographical work, establishing principles that [38;2;255;255;255m
+     [38;2;238;238;238mlater cartographers would develop further.[38;2;255;255;255m
+
+     [38;2;238;238;238mThe most influential ancient geographer was Claudius Ptolemy, who lived [38;2;255;255;255m
+     [38;2;238;238;238min Alexandria during the second century CE. Around 150 CE, he wrote [38;2;255;255;255m
+     [3m[38;2;229;192;123mGeographia[0m[38;2;238;238;238m[48;2;10;10;10m, a systematic guide to mapping the known world. Ptolemy [38;2;255;255;255m
+     [38;2;238;238;238mlisted the coordinates of thousands of places and described methods for [38;2;255;255;255m
+     [38;2;238;238;238mprojecting the spherical Earth onto a flat surface. Although many of his [38;2;255;255;255m
+     [38;2;238;238;238mcoordinates were inaccurate, his work became foundational for European [38;2;255;255;255m
+     [38;2;238;238;238mcartography after it was rediscovered in the early fifteenth century.[38;2;255;255;255m
+
+     [38;2;238;238;238mDuring the European Middle Ages, mapmaking often reflected Christian [38;2;255;255;255m
+     [38;2;238;238;238mtheology. The common “T and O” map placed Asia at the top, Europe at the [38;2;255;255;255m
+     [38;2;238;238;238mlower left, and Africa at the lower right, with Jerusalem frequently at [38;2;255;255;255m
+     [38;2;238;238;238mthe center. The Hereford Mappa Mundi, created around 1300 by an English [38;2;255;255;255m
+     [38;2;238;238;238mcartographer known as Richard of Haldingham, is a famous example. It [38;2;255;255;255m
+     [38;2;238;238;238mcombined geographical locations with biblical events, mythical creatures,[38;2;255;255;255m
+     [38;2;238;238;238m and historical stories. These maps were not designed primarily for [38;2;255;255;255m
+     [38;2;238;238;238mnavigation; they presented a religious interpretation of world history.[38;2;255;255;255m
+
+     [38;2;238;238;238mIslamic scholars preserved and expanded classical geographical knowledge.[38;2;255;255;255m
+     [38;2;238;238;238m In 1154, the Arab geographer Muhammad al-Idrisi completed the [3m[38;2;229;192;123mTabula [0m[38;2;255;255;255m[48;2;10;10;10m
+     [3m[38;2;229;192;123mRogeriana[0m[38;2;238;238;238m[48;2;10;10;10m for King Roger II of Sicily. Based on travelers’ reports, [38;2;255;255;255m
+     [38;2;238;238;238mearlier Greek works, and his own research, al-Idrisi produced one of the [38;2;255;255;255m
+     [38;2;238;238;238mmost detailed world maps of the medieval period. His map oriented south [38;2;255;255;255m
+     [38;2;238;238;238mat the top, a convention different from modern European practice. Other [38;2;255;255;255m
+     [38;2;238;238;238mscholars, including al-Biruni, who lived from 973 to 1048, made [38;2;255;255;255m
+     [38;2;238;238;238mimportant advances in geodesy, astronomy, and the calculation of [38;2;255;255;255m
+     [38;2;238;238;238mgeographical coordinates.[38;2;255;255;255m
+
+     [38;2;238;238;238mChinese cartography also developed sophisticated techniques. The scholar [38;2;255;255;255m
+     [38;2;238;238;238mPei Xiu, who died in 224 CE, is often called the father of Chinese [38;2;255;255;255m
+     [38;2;238;238;238mcartography. He advocated the use of scaled maps, directional grids, and [38;2;255;255;255m
+     [38;2;238;238;238mmeasured distances. In 1137, the “Yu Ji Tu,” or Map of the Tracks of Yu, [38;2;255;255;255m
+     [38;2;238;238;238mwas carved into stone in China. It included a coordinate grid and [38;2;255;255;255m
+     [38;2;238;238;238mrepresented China with considerable detail. The Korean Kangnido map, [38;2;255;255;255m
+     [38;2;238;238;238mcreated in 1402 by Li Hui and other scholars, combined Chinese, Korean, [38;2;255;255;255m
+     [38;2;238;238;238mand Islamic geographical information.[38;2;255;255;255m
+
+     [38;2;238;238;238mThe fifteenth and sixteenth centuries brought a dramatic transformation [38;2;255;255;255m
+     [38;2;238;238;238mthrough European maritime exploration. Portuguese navigators explored [38;2;255;255;255m
+     [38;2;238;238;238mthe African coast, while Bartolomeu Dias rounded the Cape of Good Hope [38;2;255;255;255m
+     [38;2;238;238;238min 1488. Vasco da Gama reached India by sea in 1498. Christopher [38;2;255;255;255m
+     [38;2;238;238;238mColumbus crossed the Atlantic in 1492, believing he had reached Asia, [38;2;255;255;255m
+     [38;2;238;238;238mand Amerigo Vespucci’s accounts helped Europeans understand that the [38;2;255;255;255m
+     [38;2;238;238;238mAmericas were separate continents.[38;2;255;255;255m
+
+     [38;2;238;238;238mThe printing press accelerated the spread of maps. Martin [38;2;255;255;255m
+     [38;2;238;238;238mWaldseemüller’s world map of 1507 was the first known map to label the [38;2;255;255;255m
+     [38;2;238;238;238mnewly recognized continent “America,” in honor of Vespucci. Gerardus [38;2;255;255;255m
+     [38;2;238;238;238mMercator published his famous world map in 1569 using the Mercator [38;2;255;255;255m
+     [38;2;238;238;238mprojection. This projection greatly enlarges areas near the poles, but [38;2;255;255;255m
+     [38;2;238;238;238mit preserves local compass directions, making it extremely useful for [38;2;255;255;255m
+     [38;2;238;238;238mmarine navigation.[38;2;255;255;255m
+
+     [38;2;238;238;238mIn the seventeenth and eighteenth centuries, states increasingly [38;2;255;255;255m
+     [38;2;238;238;238msponsored systematic surveys. France established the Cassini family’s [38;2;255;255;255m
+     [38;2;238;238;238mnational survey, begun by César-François Cassini de Thury in 1747. The [38;2;255;255;255m
+     [38;2;238;238;238mresulting map of France, completed in 1815, was based on triangulation [38;2;255;255;255m
+     [38;2;238;238;238mrather than travelers’ estimates. In Britain, the Ordnance Survey was [38;2;255;255;255m
+     [38;2;238;238;238mfounded in 1791, initially to map the southern coast in preparation for [38;2;255;255;255m
+     [38;2;238;238;238ma possible French invasion.[38;2;255;255;255m
+
+     [38;2;238;238;238mThe nineteenth century introduced new technologies, including [38;2;255;255;255m
+     [38;2;238;238;238mphotography, lithographic printing, aerial observation, and improved [38;2;255;255;255m
+     [38;2;238;238;238msurveying instruments. The Great Trigonometrical Survey of India began [38;2;255;255;255m
+     [38;2;238;238;238min 1802 under William Lambton and later continued under George Everest, [38;2;255;255;255m
+     [38;2;238;238;238mwho became Surveyor General of India in 1830. The survey measured the [38;2;255;255;255m
+     [38;2;238;238;238mIndian subcontinent with remarkable precision and helped determine the [38;2;255;255;255m
+     [38;2;238;238;238mheight of Mount Everest, named in 1865.[38;2;255;255;255m
+
+     [38;2;238;238;238mModern cartography expanded through aerial photography, satellite [38;2;255;255;255m
+     [38;2;238;238;238mimaging, and geographic information systems. The first artificial [38;2;255;255;255m
+     [38;2;238;238;238msatellite, Sputnik 1, launched by the Soviet Union on October 4, 1957, [38;2;255;255;255m
+     [38;2;238;238;238mbegan the space age and made global remote sensing possible. The [38;2;255;255;255m
+     [38;2;238;238;238mAmerican Landsat 1 satellite, launched on July 23, 1972, provided [38;2;255;255;255m
+     [38;2;238;238;238mcontinuous Earth-observation imagery. Geographic Information Systems, or [38;2;255;255;255m
+     [38;2;238;238;238mGIS, emerged in the 1960s through the work of Roger Tomlinson, who [38;2;255;255;255m
+     [38;2;238;238;238mdeveloped the Canada Geographic Information System.[38;2;255;255;255m
+
+     [38;2;238;238;238mToday, cartography combines surveying, computer science, satellite [38;2;255;255;255m
+     [38;2;238;238;238mtechnology, and data visualization. Digital maps can show traffic, [38;2;255;255;255m
+     [38;2;238;238;238mclimate patterns, population changes, and nearly every feature of the [38;2;255;255;255m
+     [38;2;238;238;238mplanet. Yet the essential purpose of cartography remains unchanged: to [38;2;255;255;255m
+     [38;2;238;238;238mtransform space into knowledge. From Babylonian clay tablets to [38;2;255;255;255m
+     [38;2;238;238;238minteractive satellite maps, cartography has allowed humanity not only to [38;2;255;255;255m
+     [38;2;238;238;238mlocate places, but also to imagine, govern, and understand the world.[38;2;255;255;255m
+
+     [38;2;92;156;245m▣ [38;2;255;255;255m [38;2;238;238;238mBuild[38;2;128;128;128m · GPT-5.6 Luna · 16.3s[38;2;255;255;255m
+
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;20;20;20m                                                                           [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;20;20;20m  [38;2;238;238;238mNow write a 900 word essay about the history of lighthouses.[38;2;255;255;255m             [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;20;20;20m                                                                           [48;2;10;10;10m
+
+     [38;2;245;167;66m⠦[38;2;255;255;255m [38;2;245;167;66mThinking: Preparing an essay[38;2;255;255;255m
+
+     [38;2;92;156;245m▣ [38;2;255;255;255m [38;2;238;238;238mBuild[38;2;128;128;128m · GPT-5.6 Luna[38;2;255;255;255m
+
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;30;30;30m                                                                           [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;30;30;30m                                                                           [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;30;30;30m                                                                           [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;30;30;30m  [38;2;92;156;245mBuild[38;2;255;255;255m [38;2;128;128;128m·[38;2;255;255;255m [38;2;238;238;238mGPT-5.6 Luna[38;2;255;255;255m [38;2;128;128;128mGitHub Copilot[38;2;255;255;255m                                      [48;2;10;10;10m
+  [38;2;92;156;245m╹[38;2;30;30;30m▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀[38;2;255;255;255m
+   [38;2;63;105;163m■[38;2;97;162;231m■[38;2;92;156;245m■[38;2;35;54;81m⬝⬝⬝⬝⬝[38;2;255;255;255m  [38;2;250;178;131mesc again to interrupt[38;2;255;255;255m         [38;2;128;128;128m8.7K (1%) · $0.00[38;2;255;255;255m  [38;2;238;238;238mctrl+p [38;2;128;128;128mcommands[38;2;255;255;255m
+
