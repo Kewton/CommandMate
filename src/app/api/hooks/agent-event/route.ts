@@ -223,24 +223,49 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(ACCEPTED, { status: 202 });
     }
 
-    recordAgentEvent(worktree.id, tool, instanceParam, {
-      event,
-      at: receivedAt,
-      detail,
-      sessionId: sessionId ?? null,
-      // Issue #1725: `Notification.message` is the agent's own one-line summary
-      // ("Claude needs your permission to use Bash"). Kept for display beside
-      // the prompt it announces; `notification_type` (in `detail`) remains the
-      // only thing anything branches on (D3).
-      message: readString(payload, 'message')?.slice(0, MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH) ?? null,
-      // Issue #1783: which key holds the model is the source's business — it is
-      // `model` on claude and codex and `modelName` on antigravity — so this
-      // route reads the already-normalised value and never the payload. Already
-      // bounded at extraction; null for the tools that never send one, and for
-      // every Claude event except `SessionStart`, which is why the store latches
-      // the last non-null rather than the newest.
-      model: normalized.model,
-    });
+    const recordOutcome = recordAgentEvent(
+      worktree.id,
+      tool,
+      instanceParam,
+      {
+        event,
+        at: receivedAt,
+        detail,
+        sessionId: sessionId ?? null,
+        // Issue #1725: `Notification.message` is the agent's own one-line summary
+        // ("Claude needs your permission to use Bash"). Kept for display beside
+        // the prompt it announces; `notification_type` (in `detail`) remains the
+        // only thing anything branches on (D3).
+        message:
+          readString(payload, 'message')?.slice(0, MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH) ?? null,
+        // Issue #1783: which key holds the model is the source's business — it is
+        // `model` on claude and codex and `modelName` on antigravity — so this
+        // route reads the already-normalised value and never the payload. Already
+        // bounded at extraction; null for the tools that never send one, and for
+        // every Claude event except `SessionStart`, which is why the store latches
+        // the last non-null rather than the newest.
+        model: normalized.model,
+      },
+      {
+        // Issue #1903: the declared value, read off the source this route already
+        // asked the registry for — never compared against a tool id. copilot
+        // fires `UserPromptSubmit` and then `SessionStart` 12-15 s later, and
+        // without this the second one erased the first one's `running`.
+        sessionStartMayArriveLate: source.capabilities.sessionStartMayArriveLate,
+      }
+    );
+
+    if (!recordOutcome.recorded) {
+      // Never silent: a held frame is the one thing an operator debugging
+      // "my hooks fire and nothing happens" needs to be able to see.
+      logger.info('agent-event-held', {
+        worktreeId: worktree.id,
+        tool,
+        instanceId: instanceParam,
+        event,
+        reason: recordOutcome.skipped,
+      });
+    }
 
     if (event === 'pre_tool_use') {
       // Issue #1726: the one event whose *body* is the point. The injected hook

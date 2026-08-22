@@ -50,6 +50,8 @@ import { ASK_USER_QUESTION_TOOL } from '@/lib/hooks/permission-request-payload';
 // Issue #1899: type-only, so nothing in the source registry's module graph —
 // `better-sqlite3` included — is pulled into this module at runtime.
 import type { AgentSourceCapabilities } from '@/lib/hooks/sources/types';
+// Issue #1903: the four-value vocabulary the verdicts below are read in.
+import type { SessionStatus } from '@/lib/detection/status-detector';
 // Issue #1784: the terminal-frame half of "which model / effort is this on".
 import { mergeModelInfo, type ModelInfo } from '@/lib/detection/model-info-extractor';
 import { agentEventToSessionStatus, type StructuredStatusVerdict } from '@/lib/session/status-mapping';
@@ -307,26 +309,147 @@ export function getLastStopEventAt(
 }
 
 /**
+ * What the source that delivered an event declares about itself (Issue #1903).
+ *
+ * Passed in by the caller rather than looked up here, for the reason the
+ * `AgentSourceCapabilities` import at the top of this file already gives: the
+ * registry's module graph reaches `better-sqlite3`, so this module reads
+ * capabilities as *values it is handed*. `AgentEventDelivery.identityKind`
+ * (#1899) is the same shape, and `AgentEventRecord.promptSettled` (#1898) is
+ * the same division of labour one step further along.
+ */
+export interface RecordAgentEventOptions {
+  /**
+   * The source's declared
+   * {@link AgentSourceCapabilities.sessionStartMayArriveLate} (#1924, §4 D3).
+   *
+   * Read by `session_start` and by nothing else, so a caller that only ever
+   * records `notification`s has nothing to pass. Absent means `false` — the
+   * pre-#1903 behaviour, which is what five of the six sources declare anyway —
+   * and that default is deliberate rather than defensive: a receiver added
+   * later that forgets this argument behaves like Claude, not like copilot.
+   */
+  sessionStartMayArriveLate?: AgentSourceCapabilities['sessionStartMayArriveLate'];
+}
+
+/** What {@link recordAgentEvent} did with one delivery (Issue #1903). */
+export type AgentEventRecordOutcome =
+  | { recorded: true }
+  | {
+      recorded: false;
+      /** Why it was held. One value today; a union so a log line can name it. */
+      skipped: 'late-session-start';
+    };
+
+/**
+ * The verdicts that mean this instance is inside a turn (Issue #1903).
+ *
+ * `waiting` is in the list because a dialog only happens *during* a turn: the
+ * agent asked for permission in the middle of the work it was doing, and the
+ * turn it belongs to is as open as one reading `running`. Leaving it out would
+ * fix the measured copilot window (`UserPromptSubmit` -> `SessionStart`) and
+ * leave the same hole one event further in.
+ *
+ * `ready` (`stop` / `idle_prompt`) and null (no event, a previous generation, a
+ * stale one, or an event with no verdict at all) both mean no turn is open.
+ */
+const OPEN_TURN_STATUSES: readonly SessionStatus[] = ['running', 'waiting'];
+
+/**
+ * Whether this `session_start` is the current turn's own, arriving late
+ * (Issue #1903).
+ *
+ * copilot 1.0.80 fires `UserPromptSubmit` and *then* `SessionStart`, 12-15 s
+ * later on a first turn — measured twice, and the payload says so itself: the
+ * captured `SessionStart` carries `initial_prompt` with the text of the prompt
+ * that was already submitted. Under the "newest event is the verdict" model
+ * that arrival erased `running / hook_prompt_submit`, because
+ * `agentEventToSessionStatus` answers null for `session_start`; the pane fell
+ * back to the scraper, which reads a generating copilot frame as `ready`
+ * (#1885), and a `commandmate wait` started inside that window exited 0 with
+ * `basis=scraper_ready` while the agent was still thinking.
+ *
+ * The rule is the design policy's (§4 D3 decision 2): *an event carrying no
+ * verdict does not close an open turn*. Here that is expressed as "it does not
+ * replace the event the verdict is read from either", because this model has
+ * one record where the turn model has two fields.
+ *
+ * Three conditions, and each one is load-bearing:
+ *
+ *  1. **The source declares it.** Not a tool id — flip copilot's capability to
+ *     `false` and the late frame overwrites again, flip claude's to `true` and
+ *     claude's would be held. #1901 reads `permissionHookPredictsDialog` the
+ *     same way.
+ *  2. **A turn is open**, judged by {@link getStructuredSessionState} *as of the
+ *     arriving event's own timestamp* — which is how this inherits the
+ *     generation fence and the {@link STRUCTURED_STATE_MAX_AGE_MS} bound rather
+ *     than growing a second copy of either. A `session_start` on an idle
+ *     instance, after a `stop`, or as the first event of a session is recorded
+ *     exactly as it always was, generation bump included. That is what keeps
+ *     `/clear` working: it arrives as `session_end` (verdict null, so the turn
+ *     is no longer open) followed by `session_start`.
+ *  3. **It does not name a different agent session.** A genuine restart inside
+ *     the pane is a different `session_id`, and holding *that* frame would be
+ *     the real cost of this rule — the instance would keep publishing the dead
+ *     process's `running`. When either side is null the two are treated as the
+ *     same session, because "no id" is the shape a hand-configured #1549 hook
+ *     posts and the fix has to survive it; that residue is bounded by
+ *     {@link STRUCTURED_STATE_MAX_AGE_MS}, after which the scraper takes the
+ *     session back, and by `beginAgentEventGeneration` on every session
+ *     CommandMate itself (re)starts.
+ */
+function isLateSessionStart(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+  record: AgentEventRecord,
+  options: RecordAgentEventOptions
+): boolean {
+  if (record.event !== 'session_start') return false;
+  if (options.sessionStartMayArriveLate !== true) return false;
+
+  const openTurn = getStructuredSessionState(worktreeId, cliToolId, instanceId, record.at);
+  if (openTurn === null || !OPEN_TURN_STATUSES.includes(openTurn.status)) return false;
+
+  const openSessionId =
+    lastAgentEvent.get(buildCompositeKey(worktreeId, cliToolId, instanceId))?.sessionId ?? null;
+  if (openSessionId === null || record.sessionId == null) return true;
+  return record.sessionId === openSessionId;
+}
+
+/**
  * Record any structured event against an instance (Issue #1722).
  *
  * Deliberately does not touch `lastStopEventAt`: that timestamp belongs to
  * `applyAgentStopEvent`, which writes it alongside the task transition it drives
  * so the two cannot disagree.
+ *
+ * @param options - What the delivering source declares about itself (#1903)
+ * @returns Whether the delivery was applied, so the caller can log a held one.
+ *   Callers that do not care may ignore it; every pre-#1903 caller does.
  */
 export function recordAgentEvent(
   worktreeId: string,
   cliToolId: CLIToolType,
   instanceId: string | undefined,
-  record: AgentEventRecord
-): void {
+  record: AgentEventRecord,
+  options: RecordAgentEventOptions = {}
+): AgentEventRecordOutcome {
   const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
-  lastAgentEvent.set(key, record);
-  // Issue #1783: latch, never clear. An event without a model is the ordinary
-  // case (Claude sends one on `SessionStart` alone), and reading it as "the
-  // model is now unknown" would blank the display on the very next event.
-  if (typeof record.model === 'string' && record.model !== '') {
-    lastAgentModel.set(key, record.model.slice(0, MAX_EVENT_DETAIL_LENGTH));
+
+  if (isLateSessionStart(worktreeId, cliToolId, instanceId, record, options)) {
+    // Issue #1903. Held, not discarded: the model latch below is not part of
+    // the turn and never was. `SessionStart` is the one event Claude puts a
+    // model on, so a source that both declares this capability and reports a
+    // model would otherwise be the single case where the model is extracted and
+    // then dropped on the floor. copilot reports none today (#1783), which is
+    // exactly why this has to be decided here rather than left to be noticed.
+    latchAgentModel(key, record);
+    return { recorded: false, skipped: 'late-session-start' };
   }
+
+  lastAgentEvent.set(key, record);
+  latchAgentModel(key, record);
   applyAskUserQuestionTransition(key, record);
   if (record.event === 'session_start') {
     // The agent restarting inside a pane CommandMate never touched — `claude`
@@ -338,6 +461,18 @@ export function recordAgentEvent(
   }
   applyPromptWaitingTransition(key, record);
   applyAwaitingInstructionTransition(key, record);
+  return { recorded: true };
+}
+
+/**
+ * Issue #1783: latch, never clear. An event without a model is the ordinary
+ * case (Claude sends one on `SessionStart` alone), and reading it as "the model
+ * is now unknown" would blank the display on the very next event.
+ */
+function latchAgentModel(key: string, record: AgentEventRecord): void {
+  if (typeof record.model === 'string' && record.model !== '') {
+    lastAgentModel.set(key, record.model.slice(0, MAX_EVENT_DETAIL_LENGTH));
+  }
 }
 
 /** The agent's own report that it is sitting at the composer (Issue #1786). */

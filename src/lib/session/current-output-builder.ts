@@ -15,7 +15,7 @@ import { matchUpstreamFault } from '@/lib/detection/upstream-faults';
 import { UNCLASSIFIED_PROMPT_TYPE, type UnclassifiedFrameRecord } from '@/types/models';
 import { createLogger } from '@/lib/logger';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import { capturedLineCountIsCursor, type CLIToolType } from '@/lib/cli-tools/types';
 import type {
   SessionTargetConflict,
   SessionTargetResolvedBy,
@@ -942,7 +942,19 @@ async function buildPayload(
     totalLines,
     Math.min(STATUS_CAPTURE_LINES, CACHE_MAX_CAPTURE_LINES),
   );
-  const newLines = captureWindowSaturated ? lines : lines.slice(Math.max(0, lastCapturedLine));
+
+  // Issue #1910: saturation of the capture WINDOW is only one of the two ways
+  // the cursor dies, and it is the one that never fires for the alternate-screen
+  // tools — their pane is 1000 rows (claude / copilot) or 200 (opencode), so a
+  // 10000-line window is never reached and the branch above stayed false
+  // forever. Meanwhile the poller stores `lastCapturedLine` for them too
+  // (`updateSessionState` is called unconditionally; only the DEDUP comparison
+  // is gated on the tool, response-checker.ts), so after one turn the stored
+  // value is the pane height, `slice()` starts past the last row, and `content`
+  // — the field `commandmate capture <id>` prints — was an empty string.
+  // `capturedLineCountIsCursor` states both conditions in one place.
+  const lineCountIsCursor = capturedLineCountIsCursor(cliToolId, captureWindowSaturated);
+  const newLines = lineCountIsCursor ? lines.slice(Math.max(0, lastCapturedLine)) : lines;
   const newContent = newLines.join('\n');
 
   const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
