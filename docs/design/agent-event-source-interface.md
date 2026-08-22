@@ -70,6 +70,7 @@ export interface AgentEventSource {
   readonly capabilities: AgentSourceCapabilities;
 
   normalizeEvent(raw: RawAgentEvent): NormalizedAgentEvent | null;          // S1/S2/C4/C8
+  eventIdentityOf(payload): string | null;                                   // #1899
   parsePermissionRequest(payload): PermissionRequestPayload | null;          // S7
   parseQuestion(payload): AskUserQuestionSpec | null;                        // S7
   encodeVerdict(verdict: Verdict): VerdictEncoding;                          // S6/C2
@@ -103,6 +104,7 @@ export interface AgentLaunchPlan {
 3. **`normalizeEvent` は throw してはいけない。** 未知は `null` ＋ `recordUnknownEvent()`。
 4. **`RawAgentEvent.event` は「呼び出し側が既に語を知っている」経路。** 中継スクリプトの `--event` がここに入る。**antigravity はこれしか無い**（payload にイベント名が無い）。
 5. **`decide()` を呼ぶのはレシーバであって、レシーバは transport を知らない。** `answerPendingDecision(source, ref, decision, verdict)` を使うこと。push なら body が返り、pull なら `{}` が返る。
+6. **`eventIdentityOf` は `capabilities.eventIdentity` の抽出側（#1899）。** capability は「どの id を重複判定に使うか」を**宣言**するだけで、**どこに入っているかは source しか知らない**。opencode 1 ツールの中だけで 4 通りある — `permission.asked` は `properties.id`、`permission.replied` は同じ値を `properties.requestID`、tool part は `part.callID`、prompt は `info.id`。`session.idle` は `{ sessionID }` だけで id を持たず、`null` が正しい答えである。`capabilities.eventIdentity` を宣言して `extractEventIdentity` を配線しないと、**id を宣言しているのに誰も読めない**状態になり、全フレームが黙って時間窓へ落ちる（両方まとめて変えること）。
 
 ### 3.1.1 起動は 2 段（#1846）
 
@@ -224,6 +226,8 @@ turn-gate の**状態機械**は汎用（初出だけ通す／arm→complete）�
    - `nativeEventNameFields` — payload にイベント名が無いなら `[]`
    - `conversationIdFields` / `toolCallIdFields`
    - `extractDetail`
+   - `extractEventIdentity` — **`capabilities.eventIdentity` を `null` 以外にするなら必須**（#1899）。
+     未計測なら capability を `null` のままにし、これも省く（＝時間窓 dedup にフォールバック）
    - `parsePermissionRequest` / `parseQuestion` — 実 payload を確認するまで `() => null` でよい（null＝「構造化データなし」＝この機能が無い機械と同じ挙動）
    - `encodeVerdict` — **`{}` が安全でないツールがある**（antigravity）
    - `prepareLaunch` — 設定ファイルの書き出しと起動コマンド。**throw しないこと**（fail-open）。

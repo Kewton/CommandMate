@@ -24,7 +24,7 @@ import {
   fetchOpencodeHealth,
   fetchOpencodePendingPermissions,
   opencodeBaseUrl,
-  readOpencodeEventStream,
+  openOpencodeEventStream,
   replyOpencodePermission,
   replyOpencodeQuestion,
 } from '@/lib/hooks/sources/opencode/client';
@@ -196,7 +196,7 @@ describe('the event stream', () => {
     ]);
 
     const frames: Record<string, unknown>[] = [];
-    for await (const frame of readOpencodeEventStream(4242, new AbortController().signal)) {
+    for await (const frame of await openOpencodeEventStream(4242, new AbortController().signal)) {
       frames.push(frame);
     }
 
@@ -208,7 +208,7 @@ describe('the event stream', () => {
     stubStream([`data: not json\n\n`, `data: ${fixtureText('session-idle')}\n\n`]);
 
     const frames: Record<string, unknown>[] = [];
-    for await (const frame of readOpencodeEventStream(4242, new AbortController().signal)) {
+    for await (const frame of await openOpencodeEventStream(4242, new AbortController().signal)) {
       frames.push(frame);
     }
 
@@ -218,10 +218,11 @@ describe('the event stream', () => {
   it('throws when the server refuses the subscription', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404 }) as unknown as typeof fetch;
 
-    await expect(async () => {
-      for await (const _frame of readOpencodeEventStream(4242, new AbortController().signal)) {
-        // The loop body never runs; the generator rejects on first pull.
-      }
-    }).rejects.toThrow('opencode /event responded 404');
+    // Issue #1900 split connecting from iterating, so the refusal surfaces on
+    // the connect rather than on the first pull — which is the point: the
+    // caller re-syncs pending state only once this call has resolved.
+    await expect(
+      openOpencodeEventStream(4242, new AbortController().signal)
+    ).rejects.toThrow('opencode /event responded 404');
   });
 });
