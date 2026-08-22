@@ -1,0 +1,114 @@
+version: 1
+title: "Issue #1905 (追加): kill-session の integration テストが旧経路を pin している"
+goal: |
+  #1905 の PR（#1958）で **CI の Integration Tests が落ちました**。追加の 1 コミットで直してください。
+
+      FAIL tests/integration/api-kill-session-cli-tool.test.ts
+        > POST /api/worktrees/:id/kill-session - CLI Tool Support > Claude tool > should kill claude session
+      AssertionError: expected "vi.fn()" to be called with arguments: [ 'mcbd-claude-claude-test' ]
+      AssertionError: expected 500 to be 200
+      Test Files  1 failed | 81 passed (82)
+
+  このテストは **route が `lib/tmux` の `killSession(sessionName)` を直接呼ぶこと**を pin して
+  います。あなたの修正はまさにそれを `ICLITool.killSession()` 経由に変えたので、**テストが
+  旧経路を固定したまま**になっています（500 は mock の噛み合わせ崩れです）。
+
+  **`tests/integration/**` は `.commandmate/verify.yaml` の宣言ゲートに入っていないため、
+  `wait --verify` はこの層を一切見ていません**（#1946）。あなたの落ち度ではありません。
+  ## オーケストレーター契約（Issue 本文より優先・厳守）
+
+  1. **PR を作成しない・push しない**（オーケストレーターが行います）。ブランチは checkout 済みです。
+  2. 実装は**このブランチ上の単一 commit** にまとめる。メッセージは `<type>(<scope>): <要約> (#N)` 形式。
+  3. commit に含めてよいのは `src/` `tests/` `docs/` `scripts/` `.eslintrc.json` `CHANGELOG.md`
+     `.commandmate/tasks/issue-N.yaml` のみ。**`dev-reports/` は絶対に含めない**（CI の hygiene で落ちます）。
+  4. `CHANGELOG.md` は `## [Unreleased]` に**自分の 1 行だけ**追加する。他の行を並べ替えない・消さない
+     （並列ワーカーが同じ節を触っており、衝突解消はオーケストレーターが機械的に行います）。
+  5. **GitHub の Issue / PR を編集しない**（`gh issue edit` 禁止）。Issue レビューのフェーズも実行しない。
+     Issue 本文の誤りは**コミットメッセージの「意図的な逸脱」節**に書いて渡すこと。
+  6. 完了したら最終行に `IMPL_COMPLETED` とだけ出力して停止する。
+
+  ## 実装方針は「推奨」であって決定ではない
+
+  Issue 本文と設計方針書の実装方針は**推奨**です。**必ず実コードで裏を取り、実測が食い違ったら
+  実測を正とし、乖離をコミットメッセージに明記してください。** 過去に私（オーケストレーター）が
+  書いた方針が 3 回連続でワーカーの実測に覆されています。逸脱報告は歓迎します。
+
+  ## 正本ドキュメント
+
+  - 設計方針書: `docs/design/multi-agent-state-architecture.md`（develop に着地済み、Stage 1-4 レビュー済み）。
+    §4 D1〜D5 / §8 / §13.2 を正とする。**Issue 本文と方針書が食い違ったら方針書を正**とする。
+  - Issue 本文中の設計方針書リンクが 404 になる場合は上のローカルパスを見ること。
+
+  ## テスト実行のルール（重要・厳守）
+
+  - **フル `npm run test:unit` を自分で回さないでください。** 並列ワーカーが同時にフル実行すると
+    diff と無関係のテストが `Test timed out in 5000ms` で落ち、存在しない回帰を追いかけることになります
+    （実測済み。#1917 で `verify.yaml` の unit ゲートに `mutex: cpu.heavy` を入れた理由がこれです）。
+  - 自分が触った/追加したテストだけ `npx vitest run <path>` で確認する。
+  - 全体の裁定はオーケストレーターが `commandmate wait --verify`（`.commandmate/verify.yaml` の全ゲート）
+    で行います。どうしても全体を回したい場合のみ `.claude/skills/cmate-verify/scripts/verify-run.sh`
+    （mutex 準拠）を使ってください。
+  - **`npm run build` を実行しない**（稼働中サーバの配信成果物を壊します）。
+  - `npm run lint` / `npx tsc --noEmit` は軽いので自由に回してよい。
+
+  ## 環境ルール（厳守）
+
+  - **稼働サーバ（port 3000）を停止・再起動しない。** 隣の `MyCodeBranchDesk` ディレクトリで何もしない。
+  - 実 tmux を触る検証は必ず `tmux -L <専用socket>` で行う（`-L`/`-S` は `$TMUX` より優先）。
+    フラグ無しの `tmux` は**ユーザーの本番セッション**に届きます。`kill-server` を `-L` 無しで打たない。
+    後始末は `kill-session -t '=<name>:'`。`TMUX_TMPDIR` は隔離手段にならない（`$TMUX` があると無視）。
+    `bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たない。
+  - 他の worktree（`../commandmate-issue-*`）に触らない。
+
+  ## 完了条件
+
+  Issue の受入条件をすべて満たし、`npm run lint` と `npx tsc --noEmit` が緑、追加したテストが
+  単独実行で緑であること。**ガード/pin 系のテストは変異注入で赤になることを必ず確認**してください
+  （空振り緑を作らない。確認手順と結果をコミットメッセージに書く）。
+
+  ## やること
+
+  - `tests/integration/api-kill-session-cli-tool.test.ts` を**新しい契約**（route は
+    `cliTool.killSession(worktreeId, instanceId)` を呼ぶ）に合わせて書き直す。
+  - **旧経路の pin をそのまま消さないこと。** 「route が tmux を直接呼ばない」ことは
+    #1905 の中心的な受入条件なので、**呼ばれないことを積極的に固定**してください
+    （`killSession` mock が呼ばれないこと ＋ `cliTool.killSession` が呼ばれること）。
+  - 直したら **`npm run test:integration` をフルで 1 回**回して 82/82 緑を確認してください
+    （integration は 1 分程度なので回してよい。フル `test:unit` は従来どおり禁止）。
+  - 500 の原因（mock の噛み合わせ）も実際に確認してから直すこと。「期待値を新しい値に
+    書き換えたら通った」で終わらせない。
+
+scope:
+  allow:
+    - "src/app/api/**"
+    - "src/lib/cli-tools/**"
+    - "src/lib/session/**"
+    - "src/config/**"
+    - ".eslintrc.json"
+    - "src/cli/**"
+    - "tests/unit/**"
+    - "tests/integration/**"
+    - "tests/helpers/**"
+    - "docs/**"
+    - "CHANGELOG.md"
+    - ".commandmate/tasks/issue-1905.yaml"
+    - ".commandmate/tasks/issue-1905b.yaml"
+  deny: []
+
+
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns:
+    - "rm -rf"
+    - "git push"
+    - "gh pr create"
+    - "gh issue edit"
+    - "kill-server"
+
+verify:
+  gates: [lint, typecheck]
+
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

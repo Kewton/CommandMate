@@ -23,6 +23,7 @@ import {
   createSession,
   sendKeys,
   sendSpecialKey,
+  sendSpecialKeys,
   killSession,
   capturePane,
 } from '../tmux/tmux';
@@ -44,7 +45,7 @@ import {
   COPILOT_MODEL_SWITCH_TIMEOUT_MS,
   COPILOT_INSTALL_HINT,
 } from '@/config/copilot-constants';
-import { TUI_SESSION_CREATE_WAIT_MS, TUI_INTERRUPT_SETTLE_MS, TUI_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
+import { TUI_SESSION_CREATE_WAIT_MS, TUI_INTERRUPT_SETTLE_MS, COPILOT_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
 import {
   beginAgentSession,
   buildAgentLaunchCommandLine,
@@ -102,6 +103,17 @@ const SELECTION_LIST_COMMANDS = new Set(['model', 'agent', 'theme']);
  * row is removed from the frame entirely (Issue #1886).
  */
 const COPILOT_COMPOSER_ROW_PATTERN = /^[>❯](?:\s|$)/;
+
+/**
+ * The TUI command that ends a Copilot session (Issue #1905).
+ *
+ * Copilot 1.0.80 accepts several spellings — `/exit`, `Ctrl+C` twice and
+ * `Ctrl+D` all end the process, and a bare `exit` submitted from the composer
+ * does too (measured; the Issue's premise that it merely becomes a chat message
+ * is wrong for this version). The slash form is the documented one and the only
+ * one that cannot be mistaken for a prompt, so it is what is sent.
+ */
+export const COPILOT_EXIT_COMMAND = '/exit';
 
 /**
  * Copilot CLI tool implementation
@@ -562,7 +574,25 @@ export class CopilotTool extends BaseCLITool {
   /**
    * Kill Copilot session
    *
+   * Issue #1905 is the first change to reach this method from the GUI / CLI at
+   * all: `POST /api/worktrees/:id/kill-session` used to call `lib/tmux`'s
+   * `killSession` directly, and the only other caller (the Assistant session
+   * route) does not allow copilot. Two things were wrong here as a result.
+   *
+   * 1. The body and Enter were batched into one `send-keys <body> C-m`. The
+   *    repository moved off that shape for message sends in #1471 because ink
+   *    TUIs swallow the trailing `C-m` as part of a bracketed paste; the exit
+   *    command is the same keystroke sequence and had been left behind.
+   * 2. `TUI_EXIT_WAIT_MS` (500 ms) was shorter than the shutdown takes on
+   *    copilot 1.0.80 — 11 measured samples ran 1.006 s to 2.193 s — so the
+   *    tmux kill always landed mid-shutdown. See {@link COPILOT_EXIT_WAIT_MS}.
+   *
+   * The `Ctrl+C` first is kept: it interrupts an in-flight generation so the
+   * composer is accepting input by the time the command is typed. tmux kill
+   * still runs unconditionally afterwards, as the fallback.
+   *
    * @param worktreeId - Worktree ID
+   * @param instanceId - Optional agent instance ID (defaults to primary)
    */
   async killSession(worktreeId: string, instanceId?: string): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
@@ -574,9 +604,12 @@ export class CopilotTool extends BaseCLITool {
         await sendSpecialKey(sessionName, 'C-c');
         await new Promise((resolve) => setTimeout(resolve, TUI_INTERRUPT_SETTLE_MS));
 
-        // Send exit to close gracefully
-        await sendKeys(sessionName, 'exit', true);
-        await new Promise((resolve) => setTimeout(resolve, TUI_EXIT_WAIT_MS));
+        // Type the exit command, then submit it as a separate tmux command.
+        await sendKeys(sessionName, COPILOT_EXIT_COMMAND, false);
+        await new Promise((resolve) => setTimeout(resolve, COPILOT_TEXT_INPUT_DELAY_MS));
+        await sendSpecialKeys(sessionName, ['Enter']);
+
+        await new Promise((resolve) => setTimeout(resolve, COPILOT_EXIT_WAIT_MS));
       }
 
       // Kill the tmux session

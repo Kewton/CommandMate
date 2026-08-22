@@ -104,10 +104,10 @@
     },
     {
       "files": [
-        // 3) 段階解消 (staged removal, 19 files): the only progress metric. Shrinks in #1905 / #1906.
+        // 3) 段階解消 (staged removal, 18 files): the only progress metric. Shrinks in #1905 / #1906.
+        // #1905 removed kill-session/route.ts: it kills through ICLITool.killSession now.
         "src/app/api/worktrees/\\[id\\]/capture/route.ts",
         "src/app/api/worktrees/\\[id\\]/clear-composer/route.ts",
-        "src/app/api/worktrees/\\[id\\]/kill-session/route.ts",
         "src/app/api/worktrees/\\[id\\]/special-keys/route.ts",
         "src/app/api/worktrees/\\[id\\]/terminal/route.ts",
         "src/app/worktrees/\\[id\\]/terminal/page.tsx",

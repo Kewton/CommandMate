@@ -68,6 +68,17 @@ import {
   resolvePromptWaiting,
   structuredWaitingReason,
 } from '@/lib/session/prompt-waiting-composition';
+import {
+  deriveProvisionalTurn,
+  type ProvisionalTurn,
+} from '@/lib/session/provisional-turn';
+import {
+  deriveScraperEvidence,
+  forgetLastKnownStatus,
+  getLastKnownStatus,
+  observeStatusEvidence,
+  type StatusEvidence,
+} from '@/lib/session/status-evidence';
 import { applyAskUserQuestion } from '@/lib/session/ask-user-question-prompt';
 import {
   buildStructuredPromptData,
@@ -92,8 +103,16 @@ import type { PromptData } from '@/types/models';
  * `hook_` is how you tell that it did — but the two are reported separately on
  * purpose: an event arrives here even when the merge declined to act on it, and
  * that gap is the measurement the Epic is collecting.
+ *
+ * Since Issue #1926 it also carries the {@link ProvisionalTurn} fields
+ * (`turnId` / `openedAt` / `closedAt` / `closedBy`), derived from that same one
+ * event. `lastEventType` / `lastEventAt` stay: §13 makes moving `wait`'s
+ * `adoptTurnStart` onto the turn fields a Phase 4 item, and the #1839 gate is
+ * not to be unhooked until the move is complete. Read the module docs on
+ * `provisional-turn.ts` before consuming `turnId` — it is not yet a stable turn
+ * identity.
  */
-export interface StructuredEventsPayload {
+export interface StructuredEventsPayload extends ProvisionalTurn {
   /** e.g. `stop`, `user_prompt_submit`, `notification`. */
   lastEventType: string | null;
   /** Epoch ms. */
@@ -240,6 +259,40 @@ export interface CurrentOutputPayload {
   isSelectionListActive?: boolean;
   isPagerActive?: boolean;
   isUnclassifiedActive?: boolean;
+  /**
+   * Whether {@link sessionStatus} rests on something positive (Issue #1926,
+   * §4 D1 / §7).
+   *
+   * **Always present.** `capture --json | jq -r '.statusEvidence'` has to answer
+   * for every session, including one that is not running, because the question
+   * it settles — "did anything actually confirm this?" — is exactly the question
+   * an operator asks of a verdict they distrust.
+   *
+   * Today it is the negation of {@link isUnclassifiedActive}, which is derived
+   * from it. The two are published side by side rather than one replacing the
+   * other because `isUnclassifiedActive` is an older CLI contract (`wait`'s
+   * `ready && !isUnclassifiedActive` rule) and this one is the reading Phase 3
+   * widens per tool.
+   */
+  statusEvidence: StatusEvidence;
+  /**
+   * The last status this server could positively confirm, or null (Issue #1926,
+   * §7 「直前の確定状態（証拠なしの間の表示）」).
+   *
+   * **Always present, null when nothing knows.** Null means one of: nothing has
+   * ever been confirmed for this session, the confirmation aged past
+   * `LAST_KNOWN_STATUS_TTL_MS`, the server restarted (the latch is in-memory by
+   * design), or the session is not running — a dead session's last status
+   * describes a process that is gone, so it is dropped for the reason
+   * {@link model} is.
+   *
+   * Equal to {@link sessionStatus} whenever `statusEvidence` is `'positive'`,
+   * because this poll just confirmed it. It earns its keep on the polls where
+   * the evidence is `'none'` and the wire status is a fallback.
+   */
+  lastKnownStatus: string | null;
+  /** Epoch ms of {@link lastKnownStatus}, or null when that is null. */
+  lastKnownStatusAt: number | null;
   lastServerResponseTimestamp?: number | null;
   serverPollerActive?: boolean;
   /**
@@ -573,20 +626,15 @@ function recordStructuredPrompt(
 }
 
 /**
- * Whether a status rests on something positive, or on the absence of a negative
- * (Issue #1924, §4 D1 decision 2).
+ * Re-exported from `@/lib/session/status-evidence`, where Issue #1926 moved it
+ * so `worktree-status-helper` — the second producer, and the one that drives the
+ * header chip, `BranchStatusIndicator` and `commandmate ls` — could call the
+ * same derivation instead of restating it.
  *
- * `'positive'` — a marker, a tool-specific idle-composer rule, or a structured
- * event said so. `'none'` — nothing on the frame could be read either way, and
- * the status is a fallback.
- *
- * The design policy adds this rather than a fifth `SessionStatus`: the value
- * domain stays four wide, because `src/cli/types/api-responses.ts` enumerates it
- * and a new member is a breaking change for every consumer older than the server
- * — including `commandmate-skills`' `orchestrate-monitor`, which reads
- * `capture --json` as its primary signal.
+ * Kept exported here because #1924 published it from this module and the type is
+ * imported by name elsewhere; the definition is one file away, not two.
  */
-export type StatusEvidence = 'positive' | 'none';
+export type { StatusEvidence };
 
 /** What `detectSessionStatus()` said about this frame, as this module uses it. */
 export interface ScraperVerdict {
@@ -802,6 +850,9 @@ async function buildPayload(
     lastEventType: lastEvent?.event ?? null,
     lastEventAt: lastEvent?.at ?? null,
     lastEventDetail: lastEvent?.detail ?? null,
+    // Issue #1926: derived from that same one event, before the `isRunning`
+    // branch so both return paths carry the turn fields.
+    ...deriveProvisionalTurn(lastEvent),
     promptWaitingSince: null,
     promptWaitingSource: null,
     // Issue #1902. Read here, before the `isRunning` branch, so both return
@@ -820,6 +871,10 @@ async function buildPayload(
 
   const running = await cliTool.isRunning(worktreeId, instanceId);
   if (!running) {
+    // Issue #1926: the latch describes a process, and this one is gone. Dropped
+    // rather than aged out so the next session on this key starts with no
+    // history instead of inheriting the last one's verdict.
+    forgetLastKnownStatus(buildCompositeKey(worktreeId, cliToolId, instanceId));
     return {
       isRunning: false,
       content: '',
@@ -827,6 +882,13 @@ async function buildPayload(
       cliToolId,
       sessionStatus: 'idle',
       sessionStatusReason: 'session_not_running',
+      // Issue #1926: `'positive'` is not a formality here. tmux was asked and
+      // answered — the absence of the session is a fact this layer observed,
+      // not a pattern that failed to match, which is the whole distinction §4 D1
+      // is drawing.
+      statusEvidence: 'positive',
+      lastKnownStatus: null,
+      lastKnownStatusAt: null,
       lastStopEventAt: stopEventAt,
       structuredEvents,
       // Issue #1785: null on a dead session, not the last model it ran. The
@@ -901,16 +963,10 @@ async function buildPayload(
   // `input_prompt`, never as `no_recent_output` — so treat the timed-out fallback
   // as unclassified too and keep the hatch open instead of stranding the user.
   // Issue #1924, §4 D1 decision 2: stated as evidence, with the published flag
-  // derived from it. The two `reason`s below are unchanged — Phase 3 is what
-  // moves `input_prompt` into the `'none'` half, tool by tool, once each tool
-  // has a positively confirmed idle-composer rule and its fixtures (DR2-002).
-  // Until then this is the pre-#1924 expression with the sign flipped, and no
-  // frame changes classification.
-  const evidence: StatusEvidence =
-    (statusResult.status === 'running' && statusResult.reason === STATUS_REASON.DEFAULT) ||
-    (statusResult.status === 'ready' && statusResult.reason === STATUS_REASON.NO_RECENT_OUTPUT)
-      ? 'none'
-      : 'positive';
+  // derived from it. The expression itself moved to `status-evidence.ts` in
+  // Issue #1926 — unchanged, but shared, because the list API now publishes the
+  // same reading and two copies is how Phase 3 moves one and not the other.
+  const evidence: StatusEvidence = deriveScraperEvidence(statusResult.status, statusResult.reason);
   const isUnclassifiedActive = evidence === 'none';
 
   // Issue #1723: the two-layer merge. Everything above this line is the string
@@ -1095,6 +1151,19 @@ async function buildPayload(
   // read of the scraped half would drop.
   const { model, effort } = getResolvedAgentModelInfo(worktreeId, cliToolId, instanceId);
 
+  // Issue #1926, §7: fed the MERGED verdict, for the reason the unclassified
+  // tracker above is — this is the verdict that gets published, so latching the
+  // scraper's raw reading would make `lastKnownStatus` disagree with the
+  // `sessionStatus` it sat next to one poll earlier. Observed before it is read
+  // so a positive poll reports itself, which is what keeps the field from
+  // looking stale on a healthy session.
+  observeStatusEvidence(compositeKey, {
+    status: merged.status,
+    reason: merged.reason,
+    evidence: merged.evidence,
+  });
+  const lastKnown = getLastKnownStatus(compositeKey);
+
   return {
     isRunning: true,
     cliToolId,
@@ -1123,6 +1192,12 @@ async function buildPayload(
     isSelectionListActive,
     isPagerActive,
     isUnclassifiedActive: merged.isUnclassifiedActive,
+    // Issue #1926: the same fact `isUnclassifiedActive` carries, named the way
+    // §4 D1 names it. Published from the merged verdict so the two cannot
+    // disagree on the wire.
+    statusEvidence: merged.evidence,
+    lastKnownStatus: lastKnown?.status ?? null,
+    lastKnownStatusAt: lastKnown?.at ?? null,
     lastServerResponseTimestamp,
     serverPollerActive: isPollerActive(compositeKey),
     lastStopEventAt: stopEventAt,
