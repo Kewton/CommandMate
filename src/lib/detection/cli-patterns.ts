@@ -779,7 +779,7 @@ export const OPENCODE_LOADING_PATTERN = /\u2B1D{4,}/;
  * replaced by {@link findOpenCodeUserEchoEnd}); the name is left alone because
  * the remaining three callers all want the line.
  */
-export const OPENCODE_RESPONSE_COMPLETE = /\u25A3\s+\w+\s+\u00b7\s+\S+(?:\s+\u00b7\s+(?:[\d]+h\s*)?(?:[\d]+m\s*)?[\d.]+s)?/;
+export const OPENCODE_RESPONSE_COMPLETE = /\u25A3\s+\w+\s+·\s+\S+(?:\s+·\s+(?:[\d]+h\s*)?(?:[\d]+m\s*)?[\d.]+s)?/;
 
 /**
  * OpenCode's finished-turn marker: the Build summary line WITH its duration
@@ -807,7 +807,7 @@ export const OPENCODE_RESPONSE_COMPLETE = /\u25A3\s+\w+\s+\u00b7\s+\S+(?:\s+\u00
  * inherited from the #379 pattern and kept for long turns.
  */
 export const OPENCODE_TURN_COMPLETE_PATTERN =
-  /\u25A3\s+\w+\s+\u00b7\s+[^\u00b7\n]+\u00b7\s+(?:\d+h\s*)?(?:\d+m\s*)?[\d.]+s/;
+  /\u25A3\s+\w+\s+·\s+[^·\n]+·\s+(?:\d+h\s*)?(?:\d+m\s*)?[\d.]+s/;
 
 /**
  * OpenCode's permission dialog, anchored on its button row (Issue #1893).
@@ -856,11 +856,44 @@ export const OPENCODE_PERMISSION_PATTERN =
   /^[^\S\n]*[\u2502\u2503][^\S\n]*Allow once[^\S\n]+Allow always[^\S\n]+Reject\b/m;
 
 /**
- * OpenCode processing indicator pattern (Issue #379)
- * Shows "esc interrupt" in the TUI status bar during active model processing.
- * Filtered from response extraction via OPENCODE_SKIP_PATTERNS.
+ * OpenCode's busy footer, in BOTH of the spellings it is drawn in (Issue #379,
+ * widened by Issue #1894).
+ *
+ * opencode 1.18 needs Escape TWICE to abort a turn, and the first press does not
+ * abort anything -- it re-labels the footer:
+ *
+ * ```
+ *    ⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt           6.5K (1%) · $0.00  ctrl+p commands
+ *    ⬝■■■■■■⬝  esc again to interrupt  7.2K (1%) · $0.00  ctrl+p commands
+ * ```
+ *
+ * Measured on opencode 1.18.21 at the production 80x200 geometry, sampling the
+ * footer every ~360 ms after a single Escape: the second spelling is up from
+ * 0.31 s to 4.71 s and the row is back to `esc interrupt` at 5.07 s -- a
+ * five-second window, exactly as long as the second-press deadline
+ * ({@link OPENCODE_INTERRUPT_SECOND_ESCAPE_DELAY_MS} is sized against it). The
+ * generation continues throughout; the turn ran to a natural
+ * `▣  Build · GPT-5.6 Luna · 11.3s`, 3 runs out of 3.
+ *
+ * Before #1894 those five seconds matched nothing at all: `detectSessionStatus`
+ * lost branch A and fell through to `running`/`default` while the frame was
+ * fresh, and to `ready`/`no_recent_output` once the poller's
+ * `lastOutputTimestamp` aged past `STALE_OUTPUT_THRESHOLD_MS` -- both of them
+ * `statusEvidence: 'none'` (`deriveScraperEvidence`), i.e. a generating session
+ * published with no evidence and, on the second path, as FINISHED. That is the
+ * "vocabulary changed, so `ready` came back" failure design rule D1 names
+ * (`docs/design/multi-agent-state-architecture.md` §4 D1, row #1894), and the
+ * row is the same positive busy evidence in either spelling.
+ *
+ * The optional group is `(?:again to )?` rather than a looser `.*` on purpose:
+ * it matches the two measured strings and nothing between an `esc` and an
+ * `interrupt` several words apart. Linear, no nested quantifiers -- ReDoS safe.
+ *
+ * Filtered from response extraction via OPENCODE_SKIP_PATTERNS, which shares
+ * this constant: the widened row is dropped from a saved answer for the same
+ * reason the narrow one was.
  */
-export const OPENCODE_PROCESSING_INDICATOR = /esc interrupt/;
+export const OPENCODE_PROCESSING_INDICATOR = /esc (?:again to )?interrupt/;
 
 /**
  * OpenCode's composer bottom border: `  ╹▀▀▀▀▀▀…` (Issue #1911).

@@ -6,7 +6,7 @@
  * - startSession: launches `opencode` TUI in tmux
  * - sendMessage: sends text via tmux send-keys + Enter
  * - killSession: types `/exit` + a separate Enter, then falls back to tmux kill-session
- * - interrupt(): inherits BaseCLITool default (Escape key) [D2-008]
+ * - interrupt(): Escape TWICE, 300 ms apart -- one press does not abort (Issue #1894)
  *
  * ## Structured events (Issue #1763, Epic #1720 Phase 4-5)
  *
@@ -40,6 +40,7 @@ import {
   createSession,
   capturePane,
   sendKeys,
+  sendSpecialKey,
   sendSpecialKeys,
   killSession,
   exactTarget,
@@ -71,6 +72,7 @@ import {
   TUI_SESSION_CREATE_WAIT_MS,
   TUI_TEXT_INPUT_WAIT_MS,
   OPENCODE_EXIT_WAIT_MS,
+  OPENCODE_INTERRUPT_SECOND_ESCAPE_DELAY_MS,
 } from '@/config/cli-tool-timing-config';
 
 const logger = createLogger('cli-tools/opencode');
@@ -139,8 +141,6 @@ export class OpenCodeTool extends BaseCLITool {
   readonly id: CLIToolType = 'opencode';
   readonly name = 'OpenCode';
   readonly command = 'opencode';
-  // interrupt() is inherited from BaseCLITool (Escape key) [D2-008]
-  // OpenCode TUI supports Escape for interruption ("esc interrupt" display)
 
   /**
    * Check if OpenCode session is running for a worktree
@@ -429,5 +429,63 @@ export class OpenCodeTool extends BaseCLITool {
       logger.error('session:stop-failed', { error: getErrorMessage(error) });
       throw error;
     }
+  }
+
+  /**
+   * Abort the running turn: Escape, wait, Escape (Issue #1894).
+   *
+   * `BaseCLITool.interrupt()` sends ONE Escape, and on opencode 1.18 that
+   * aborts nothing. The first press is a confirmation prompt drawn in the
+   * footer -- `esc interrupt` becomes `esc again to interrupt` -- and only a
+   * second press while that label is up ends the turn. Measured on opencode
+   * 1.18.21 at the production 80x200 geometry, in a private tmux socket:
+   *
+   * - one Escape 4-6 s into a generation: the label flips, the generation
+   *   continues, and the turn reaches a natural
+   *   `▣  Build · GPT-5.6 Luna · 11.3s` / `· 16.3s` / `· 19.0s`. 3 runs, 3
+   *   completions, 0 aborts. The default `interrupt()` has therefore never
+   *   interrupted an opencode session, which is what {@link OpenCodeTool} used
+   *   to claim it did [D2-008].
+   * - two Escapes: the turn stops mid-sentence and the transcript marker reads
+   *   `▣  Build · GPT-5.6 Luna · interrupted`. Confirmed twice -- once from a
+   *   shell harness (594 ms apart) and once by calling THIS method against a
+   *   live session, which took 317 ms end to end.
+   *
+   * The deadline is five seconds -- the label was sampled up from 0.31 s to
+   * 4.71 s and reverted by 5.07 s -- and the wait is
+   * {@link OPENCODE_INTERRUPT_SECOND_ESCAPE_DELAY_MS}, which documents both
+   * directions of that budget.
+   *
+   * `sendSpecialKey` twice with an awaited wait between, rather than
+   * `sendSpecialKeys(name, ['Escape', 'Escape'])`: that helper's own
+   * `SPECIAL_KEY_DELAY_MS` is a shared constant tuned for menu navigation, and
+   * this gap is sized against a measured five-second deadline that has nothing
+   * to do with menus. Keeping them separate means a future change to one cannot
+   * silently move the other outside the window.
+   *
+   * Note that a turn ended this way leaves NO duration-carrying completion
+   * marker on the pane (`· interrupted` is not `· 11.3s`), so
+   * `OPENCODE_TURN_COMPLETE_PATTERN` does not match it and the session reaches
+   * `ready` through the staleness fallback rather than through positive
+   * evidence. That is the same treatment Issue #1893 deliberately gave an
+   * aborted turn, and it is left alone here.
+   *
+   * @param worktreeId - Worktree ID
+   * @param instanceId - Agent instance ID (defaults to the primary instance)
+   */
+  async interrupt(worktreeId: string, instanceId?: string): Promise<void> {
+    const sessionName = this.getSessionName(worktreeId, instanceId);
+
+    await sendSpecialKey(sessionName, 'Escape');
+    await new Promise((resolve) =>
+      setTimeout(resolve, OPENCODE_INTERRUPT_SECOND_ESCAPE_DELAY_MS),
+    );
+    await sendSpecialKey(sessionName, 'Escape');
+
+    // Issue #405: the pane changed (the turn is aborted), so the cached capture
+    // is stale. `killSession` / `sendMessage` do the same after their keystrokes.
+    invalidateCache(sessionName);
+
+    logger.info('opencode-interrupt-sent');
   }
 }
