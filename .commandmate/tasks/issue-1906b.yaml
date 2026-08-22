@@ -1,0 +1,118 @@
+version: 1
+title: "Issue #1906 (追加): #1708 の prompt-waiting-guard importer pin を更新する"
+goal: |
+  #1906 の PR（#1973）で **CI の Integration Tests が落ちました**。追加の 1 コミットで直してください。
+  ローカルでも再現します（`CI=true npm run test:integration` → 1 failed / 81 passed）。
+
+      FAIL tests/integration/api-send-prompt-waiting-1708.test.ts
+        > the guard covers every message-send path and no answer path (Issue #1708)
+        > is called only from sendUserMessage
+      AssertionError: expected [ …(3) ] to deeply equal [ …(2) ]
+        [ "app/api/worktrees/[id]/send/route.ts",
+      +   "app/api/worktrees/[id]/terminal/route.ts",
+          "lib/session/send-user-message.ts" ]
+
+  **これはあなたの修正が正しかった結果です。** Issue #1906 の項目 3 が
+  「terminal route が prompt guard を無視している」なので、guard を通した分だけ
+  importer が 1 つ増えました。`tests/integration/**` が前回の契約の `scope.allow` に
+  入っていなかったのはオーケストレーター側の漏れです。
+  ## オーケストレーター契約（Issue 本文より優先・厳守）
+
+  1. **PR を作成しない・push しない**（オーケストレーターが行います）。ブランチは checkout 済みです。
+  2. 実装は**このブランチ上の単一 commit** にまとめる。メッセージは `<type>(<scope>): <要約> (#N)` 形式。
+  3. commit に含めてよいのは `src/` `tests/` `docs/` `scripts/` `.eslintrc.json` `CHANGELOG.md`
+     `.commandmate/tasks/issue-N.yaml` のみ。**`dev-reports/` は絶対に含めない**（CI の hygiene で落ちます）。
+  4. `CHANGELOG.md` は `## [Unreleased]` に**自分の 1 行だけ**追加する。他の行を並べ替えない・消さない
+     （並列ワーカーが同じ節を触っており、衝突解消はオーケストレーターが機械的に行います）。
+  5. **GitHub の Issue / PR を編集しない**（`gh issue edit` 禁止）。Issue レビューのフェーズも実行しない。
+     Issue 本文の誤りは**コミットメッセージの「意図的な逸脱」節**に書いて渡すこと。
+  6. 完了したら最終行に `IMPL_COMPLETED` とだけ出力して停止する。
+
+  ## 実装方針は「推奨」であって決定ではない
+
+  Issue 本文と設計方針書の実装方針は**推奨**です。**必ず実コードで裏を取り、実測が食い違ったら
+  実測を正とし、乖離をコミットメッセージに明記してください。** 過去に私（オーケストレーター）が
+  書いた方針が 3 回連続でワーカーの実測に覆されています。逸脱報告は歓迎します。
+
+  ## 正本ドキュメント
+
+  - 設計方針書: `docs/design/multi-agent-state-architecture.md`（develop に着地済み、Stage 1-4 レビュー済み）。
+    §4 D1〜D5 / §8 / §13.2 を正とする。**Issue 本文と方針書が食い違ったら方針書を正**とする。
+  - Issue 本文中の設計方針書リンクが 404 になる場合は上のローカルパスを見ること。
+
+  ## テスト実行のルール（重要・厳守）
+
+  - **フル `npm run test:unit` を自分で回さないでください。** 並列ワーカーが同時にフル実行すると
+    diff と無関係のテストが `Test timed out in 5000ms` で落ち、存在しない回帰を追いかけることになります
+    （実測済み。#1917 で `verify.yaml` の unit ゲートに `mutex: cpu.heavy` を入れた理由がこれです）。
+  - 自分が触った/追加したテストだけ `npx vitest run <path>` で確認する。
+  - 全体の裁定はオーケストレーターが `commandmate wait --verify`（`.commandmate/verify.yaml` の全ゲート）
+    で行います。どうしても全体を回したい場合のみ `.claude/skills/cmate-verify/scripts/verify-run.sh`
+    （mutex 準拠）を使ってください。
+  - **`npm run build` を実行しない**（稼働中サーバの配信成果物を壊します）。
+  - `npm run lint` / `npx tsc --noEmit` は軽いので自由に回してよい。
+
+  ## 環境ルール（厳守）
+
+  - **稼働サーバ（port 3000）を停止・再起動しない。** 隣の `MyCodeBranchDesk` ディレクトリで何もしない。
+  - 実 tmux を触る検証は必ず `tmux -L <専用socket>` で行う（`-L`/`-S` は `$TMUX` より優先）。
+    フラグ無しの `tmux` は**ユーザーの本番セッション**に届きます。`kill-server` を `-L` 無しで打たない。
+    後始末は `kill-session -t '=<name>:'`。`TMUX_TMPDIR` は隔離手段にならない（`$TMUX` があると無視）。
+    `bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たない。
+  - 他の worktree（`../commandmate-issue-*`）に触らない。
+
+  ## 完了条件
+
+  Issue の受入条件をすべて満たし、`npm run lint` と `npx tsc --noEmit` が緑、追加したテストが
+  単独実行で緑であること。**ガード/pin 系のテストは変異注入で赤になることを必ず確認**してください
+  （空振り緑を作らない。確認手順と結果をコミットメッセージに書く）。
+
+  ## やること
+
+  1. `tests/integration/api-send-prompt-waiting-1708.test.ts` の allowlist に
+     `app/api/worktrees/[id]/terminal/route.ts` を足す。
+  2. **「1 行足して通す」で終わらせないこと。** このテストの意図は
+     **「送信経路すべてが guard を通り、回答経路は通らない」**という #1708 の不変条件です。
+     - terminal route が**送信経路**であること（回答経路ではないこと）をコメントで明示する。
+       他の 2 エントリと同じ形で理由を書くこと。
+     - **回答経路（prompt-response / respond）が guard を import していない**ことが
+       今も pin されているか確認する。緩んでいたら締め直す。
+  3. その上で **`CI=true npm run test:integration` をフルで 1 回**回して 82/82 緑を確認。
+     `npm run lint` / `npx tsc --noEmit` も exit 0。
+  4. **追加の 1 コミット**として積む（前のコミットを amend / rebase しない）。
+
+scope:
+  allow:
+    - "src/lib/session/**"
+    - "src/lib/cli-tools/**"
+    - "src/lib/detection/**"
+    - "src/app/api/**"
+    - "src/config/**"
+    - ".eslintrc.json"
+    - "tests/unit/**"
+    - "tests/integration/**"
+    - "tests/fixtures/**"
+    - "tests/helpers/**"
+    - "docs/**"
+    - "CHANGELOG.md"
+    - ".commandmate/tasks/issue-1906.yaml"
+    - ".commandmate/tasks/issue-1906b.yaml"
+  deny: []
+
+
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns:
+    - "rm -rf"
+    - "git push"
+    - "gh pr create"
+    - "gh issue edit"
+    - "kill-server"
+
+verify:
+  gates: [lint, typecheck]
+
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
