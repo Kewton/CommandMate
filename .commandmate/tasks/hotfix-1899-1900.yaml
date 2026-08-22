@@ -1,0 +1,137 @@
+version: 1
+title: "hotfix: develop の tsc / unit が #1899 と #1900 の統合で壊れている"
+goal: |
+  **develop（`62e46da1`）が壊れています。最優先で直してください。**
+
+  #1899（PR #1961）と #1900（PR #1962）は**単独ではどちらも全ゲート緑**でしたが、
+  オーケストレーターが片方をマージした後にもう片方を再検証せずマージしたため、
+  統合された develop で `npx tsc --noEmit` と `npm run test:unit` が落ちています。
+  **あなたの落ち度ではありません。**
+
+  ## 症状（develop `62e46da1` の無改変チェックアウトで実測）
+
+      npx tsc --noEmit  -> exit 2
+        tests/unit/hooks/sources/opencode-event-dedup-1899.test.ts(100,3):
+          error TS2724: '"@/lib/hooks/sources/opencode/client"' has no exported member
+          named 'readOpencodeEventStream'. Did you mean 'openOpencodeEventStream'?
+        tests/unit/hooks/sources/opencode-event-dedup-1899.test.ts(395,7):
+          error TS2559: Type '4242' has no properties in common with type
+          'OpencodeSubscriptionOptions'
+
+  #1900 が `client.ts` の `readOpencodeEventStream` を **`openOpencodeEventStream`（async。
+  fetch 解決＝購読成立の後に stream を返す）**へ分割し、`openOpencodeSubscription` の
+  第 4 引数を `port: number` から `OpencodeSubscriptionOptions`（`{ port?, resync? }`）へ
+  変えました。#1899 のテストが旧 API を使ったままです。
+
+  ## オーケストレーターが入れた暫定修正（このブランチに未コミットで置いてあります）
+
+  `tests/unit/hooks/sources/opencode-event-dedup-1899.test.ts` を機械的に更新済みです:
+  mock 名と import を `openOpencodeEventStream` に、mock を `async` に、第 4 引数を
+  `{ port: PORT }` に。**これで `npx tsc --noEmit` は exit 0 になりました。**
+
+  **しかしテストは 2 件落ちたままです**（`npx vitest run` で 2 failed / 17 passed）:
+
+      × applies both stops of two turns delivered back to back
+        AssertionError: expected "vi.fn()" to be called 2 times, but got 0 times
+      × applies exactly one stop for an aborted turn that fires session.idle twice
+        AssertionError: expected "vi.fn()" to be called 1 times, but got 0 times
+
+  **stop が 1 件も適用されていません。** #1900 は購読の開始順序を変えており
+  （stream を開いてから resync、health probe の再試行、`TurnGate.arm()` と primary session の
+  導入）、テストの pump がフレームを流し始めるタイミングと噛み合っていない可能性が高いです。
+  ## オーケストレーター契約（Issue 本文より優先・厳守）
+
+  1. **PR を作成しない・push しない**（オーケストレーターが行います）。ブランチは checkout 済みです。
+  2. 実装は**このブランチ上の単一 commit** にまとめる。メッセージは `<type>(<scope>): <要約> (#N)` 形式。
+  3. commit に含めてよいのは `src/` `tests/` `docs/` `scripts/` `.eslintrc.json` `CHANGELOG.md`
+     `.commandmate/tasks/issue-N.yaml` のみ。**`dev-reports/` は絶対に含めない**（CI の hygiene で落ちます）。
+  4. `CHANGELOG.md` は `## [Unreleased]` に**自分の 1 行だけ**追加する。他の行を並べ替えない・消さない
+     （並列ワーカーが同じ節を触っており、衝突解消はオーケストレーターが機械的に行います）。
+  5. **GitHub の Issue / PR を編集しない**（`gh issue edit` 禁止）。Issue レビューのフェーズも実行しない。
+     Issue 本文の誤りは**コミットメッセージの「意図的な逸脱」節**に書いて渡すこと。
+  6. 完了したら最終行に `IMPL_COMPLETED` とだけ出力して停止する。
+
+  ## 実装方針は「推奨」であって決定ではない
+
+  Issue 本文と設計方針書の実装方針は**推奨**です。**必ず実コードで裏を取り、実測が食い違ったら
+  実測を正とし、乖離をコミットメッセージに明記してください。** 過去に私（オーケストレーター）が
+  書いた方針が 3 回連続でワーカーの実測に覆されています。逸脱報告は歓迎します。
+
+  ## 正本ドキュメント
+
+  - 設計方針書: `docs/design/multi-agent-state-architecture.md`（develop に着地済み、Stage 1-4 レビュー済み）。
+    §4 D1〜D5 / §8 / §13.2 を正とする。**Issue 本文と方針書が食い違ったら方針書を正**とする。
+  - Issue 本文中の設計方針書リンクが 404 になる場合は上のローカルパスを見ること。
+
+  ## テスト実行のルール（重要・厳守）
+
+  - **フル `npm run test:unit` を自分で回さないでください。** 並列ワーカーが同時にフル実行すると
+    diff と無関係のテストが `Test timed out in 5000ms` で落ち、存在しない回帰を追いかけることになります
+    （実測済み。#1917 で `verify.yaml` の unit ゲートに `mutex: cpu.heavy` を入れた理由がこれです）。
+  - 自分が触った/追加したテストだけ `npx vitest run <path>` で確認する。
+  - 全体の裁定はオーケストレーターが `commandmate wait --verify`（`.commandmate/verify.yaml` の全ゲート）
+    で行います。どうしても全体を回したい場合のみ `.claude/skills/cmate-verify/scripts/verify-run.sh`
+    （mutex 準拠）を使ってください。
+  - **`npm run build` を実行しない**（稼働中サーバの配信成果物を壊します）。
+  - `npm run lint` / `npx tsc --noEmit` は軽いので自由に回してよい。
+
+  ## 環境ルール（厳守）
+
+  - **稼働サーバ（port 3000）を停止・再起動しない。** 隣の `MyCodeBranchDesk` ディレクトリで何もしない。
+  - 実 tmux を触る検証は必ず `tmux -L <専用socket>` で行う（`-L`/`-S` は `$TMUX` より優先）。
+    フラグ無しの `tmux` は**ユーザーの本番セッション**に届きます。`kill-server` を `-L` 無しで打たない。
+    後始末は `kill-session -t '=<name>:'`。`TMUX_TMPDIR` は隔離手段にならない（`$TMUX` があると無視）。
+    `bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たない。
+  - 他の worktree（`../commandmate-issue-*`）に触らない。
+
+  ## 完了条件
+
+  Issue の受入条件をすべて満たし、`npm run lint` と `npx tsc --noEmit` が緑、追加したテストが
+  単独実行で緑であること。**ガード/pin 系のテストは変異注入で赤になることを必ず確認**してください
+  （空振り緑を作らない。確認手順と結果をコミットメッセージに書く）。
+
+  ## やること
+
+  1. 暫定修正を出発点にしてよい（捨てて書き直してもよい）。**2 件の失敗の原因を実際に特定**して
+     から直すこと。「期待値を 0 に書き換えたら通った」は禁止です。
+  2. **#1899 が固定していた不変条件を必ず維持**してください:
+     - 連続 2 ターンは **stop 2 本**（3 秒窓では落ちない）
+     - abort の二重 idle（19ms 差）は **stop 1 本**
+     この 2 つは #1899 の中心的な受入条件です。
+  3. **#1900 の実装は正しい前提**で扱ってください（primary session、`arm()`、
+     stream を開いてから resync、health-before-trust）。テスト側を新しい契約に合わせるのが
+     基本線です。#1900 の実装に本当の欠陥を見つけた場合のみ実装を直し、根拠を書いてください。
+  4. `npx tsc --noEmit` exit 0 と、**このテストファイルの単独実行が緑**であること。
+     加えて `tests/unit/hooks` と `tests/unit/session` を実行して赤が無いことを確認してください
+     （フル `test:unit` は禁止のままです）。
+  5. コミットは 1 本。メッセージは `fix(test): …（#1899 #1900）` の形で、
+     **何が噛み合っていなかったか**を書いてください。
+
+scope:
+  allow:
+    - "tests/unit/**"
+    - "tests/helpers/**"
+    - "src/lib/hooks/**"
+    - "src/lib/session/**"
+    - "docs/**"
+    - "CHANGELOG.md"
+    - ".commandmate/tasks/hotfix-1899-1900.yaml"
+  deny: []
+
+
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns:
+    - "rm -rf"
+    - "git push"
+    - "gh pr create"
+    - "gh issue edit"
+    - "kill-server"
+
+verify:
+  gates: [lint, typecheck]
+
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

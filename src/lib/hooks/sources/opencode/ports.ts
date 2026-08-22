@@ -191,20 +191,92 @@ export function forgetOpencodePort(target: AgentInstanceRef): void {
 }
 
 /**
+ * The addresses a candidate port is probed on, loopback first (Issue #1900).
+ *
+ * Loopback alone is not an answer on this platform. Node sets `SO_REUSEADDR` on
+ * every listener, and on macOS/BSD that flag lets a bind to a *specific*
+ * address succeed while another process holds the same port on a *wildcard*
+ * one. Measured on Darwin 25.6.0 with an occupant on `0.0.0.0:45217`:
+ *
+ * ```
+ * bind 127.0.0.1:45217 -> SUCCESS   <- the old probe: "free"
+ * bind 0.0.0.0:45217   -> EADDRINUSE
+ * bind :::45217        -> SUCCESS
+ * ```
+ *
+ * and with an occupant on `[::]:45218`, `0.0.0.0` and `::` both answered
+ * `EADDRINUSE` while loopback again said free. So the old probe called a port
+ * free that an Angular dev server (4200 is its default, and 4200-4299 is this
+ * range) was already serving on — and opencode, binding loopback with the same
+ * flag, would then win `http://localhost:4200` for the rest of the session.
+ * That is not a failed allocation, it is a hijacked one, which is why the
+ * wildcard addresses are probed even though opencode never binds them.
+ *
+ * `::` earns its place beyond `0.0.0.0` for a listener that set `IPV6_V6ONLY`;
+ * a probe on an address family this host does not have is inconclusive rather
+ * than occupied — see {@link probeBind}.
+ */
+export const OPENCODE_PORT_PROBE_HOSTS: readonly string[] = [
+  OPENCODE_SERVER_HOST,
+  '0.0.0.0',
+  '::',
+];
+
+/** What one bind attempt established about a port. */
+type BindProbe =
+  /** Bound and released: nothing holds this address. */
+  | 'free'
+  /** Somebody holds it, or this process may not have it. */
+  | 'in-use'
+  /** The address itself is not usable here, so the probe said nothing. */
+  | 'unavailable';
+
+/** Error codes that mean the port is spoken for, rather than unreachable. */
+const OCCUPIED_BIND_CODES: readonly string[] = ['EADDRINUSE', 'EACCES'];
+
+/**
+ * Bind one address for as long as it takes to learn whether it was free.
+ *
+ * The wildcard probes do expose the port to the network for the microseconds
+ * the socket is open. It carries no `connection` handler and is closed in the
+ * same tick, and there is no way to ask the kernel this question without
+ * asking it — the alternative is the mis-allocation documented above.
+ */
+function probeBind(port: number, host: string): Promise<BindProbe> {
+  return new Promise((resolve) => {
+    const server = createServer();
+    server.once('error', (error: NodeJS.ErrnoException) => {
+      resolve(OCCUPIED_BIND_CODES.includes(error.code ?? '') ? 'in-use' : 'unavailable');
+    });
+    server.listen(port, host, () => {
+      server.close(() => resolve('free'));
+    });
+  });
+}
+
+/**
  * Whether nothing is listening on a port.
  *
  * Binds and immediately closes, which is the only answer that is true at the
- * moment it is given. `EADDRINUSE` — and anything else — reads as "not free".
+ * moment it is given — on every address in {@link OPENCODE_PORT_PROBE_HOSTS},
+ * because loopback alone answers the wrong question here (Issue #1900).
+ *
+ * The loopback probe is the strict one: anything other than a clean bind reads
+ * as "not free", which is the pre-#1900 behaviour and the conservative answer
+ * for the address opencode will actually take. The wildcard probes only ever
+ * *veto*, and only on a code that names an occupant — a host without IPv6 must
+ * not make every port in the range look taken.
  */
-export function isPortFree(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const server = createServer();
-    server.once('error', () => resolve(false));
-    // Bound on the loopback interface — the one opencode itself will bind.
-    server.listen(port, OPENCODE_SERVER_HOST, () => {
-      server.close(() => resolve(true));
-    });
-  });
+export async function isPortFree(port: number): Promise<boolean> {
+  for (const [index, host] of OPENCODE_PORT_PROBE_HOSTS.entries()) {
+    const probe = await probeBind(port, host);
+    if (probe === 'free') continue;
+    if (index === 0 || probe === 'in-use') {
+      logger.debug('opencode-port-probe-occupied', { port, host, probe });
+      return false;
+    }
+  }
+  return true;
 }
 
 /**
