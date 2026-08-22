@@ -1,0 +1,120 @@
+version: 1
+title: "Issue #1909 (追加): #1898 のマージ後の develop を取り込んで衝突を解消する"
+goal: |
+  #1909 の実装は裁定を通り PR #1956 になりましたが、その後 **#1898（PR #1957）が develop に
+  マージされ、同じファイルを触ったため衝突しました**。追加の 1 コミットで解消してください。
+
+  衝突するファイル:
+
+      src/app/api/worktrees/[id]/auto-yes/route.ts   （衝突 4 箇所）
+      src/cli/commands/auto-yes.ts                   （衝突 2 箇所）
+
+  ## 相手側（#1898）が同じ route に入れたもの
+
+  - `recheckPendingDecisions()` を新設し、**`POST /api/worktrees/:id/auto-yes`
+    (`enabled:true`) から同期で呼ぶ**（方針書 §4 D3 決定 3 の契機 (2)）。
+  - 対象は `capabilities.resync !== 'none'` のソースのみ。hook 系 5 ツールは即 return。
+  - 採用件数は 50 で頭打ちにし、超過は件数を露出。
+
+  **あなたの解決と #1898 の呼び出しは両立します**（あなたは「どのツールを arming するか」を
+  直し、#1898 は「arming したときに保留分を取り直す」を足した）。**どちらか一方を落とさない
+  でください。** 特に `recheckPendingDecisions()` は、あなたが `resolveSessionTargetStrict`
+  で解決した **cliToolId / instanceId を使って**呼ばれるべきです（#1898 の実装が
+  どの値を受け取っているか実コードで確認してから繋いでください）。
+  ## オーケストレーター契約（Issue 本文より優先・厳守）
+
+  1. **PR を作成しない・push しない**（オーケストレーターが行います）。ブランチは checkout 済みです。
+  2. 実装は**このブランチ上の単一 commit** にまとめる。メッセージは `<type>(<scope>): <要約> (#N)` 形式。
+  3. commit に含めてよいのは `src/` `tests/` `docs/` `scripts/` `.eslintrc.json` `CHANGELOG.md`
+     `.commandmate/tasks/issue-N.yaml` のみ。**`dev-reports/` は絶対に含めない**（CI の hygiene で落ちます）。
+  4. `CHANGELOG.md` は `## [Unreleased]` に**自分の 1 行だけ**追加する。他の行を並べ替えない・消さない
+     （並列ワーカーが同じ節を触っており、衝突解消はオーケストレーターが機械的に行います）。
+  5. **GitHub の Issue / PR を編集しない**（`gh issue edit` 禁止）。Issue レビューのフェーズも実行しない。
+     Issue 本文の誤りは**コミットメッセージの「意図的な逸脱」節**に書いて渡すこと。
+  6. 完了したら最終行に `IMPL_COMPLETED` とだけ出力して停止する。
+
+  ## 実装方針は「推奨」であって決定ではない
+
+  Issue 本文と設計方針書の実装方針は**推奨**です。**必ず実コードで裏を取り、実測が食い違ったら
+  実測を正とし、乖離をコミットメッセージに明記してください。** 過去に私（オーケストレーター）が
+  書いた方針が 3 回連続でワーカーの実測に覆されています。逸脱報告は歓迎します。
+
+  ## 正本ドキュメント
+
+  - 設計方針書: `docs/design/multi-agent-state-architecture.md`（develop に着地済み、Stage 1-4 レビュー済み）。
+    §4 D1〜D5 / §8 / §13.2 を正とする。**Issue 本文と方針書が食い違ったら方針書を正**とする。
+  - Issue 本文中の設計方針書リンクが 404 になる場合は上のローカルパスを見ること。
+
+  ## テスト実行のルール（重要・厳守）
+
+  - **フル `npm run test:unit` を自分で回さないでください。** 並列ワーカーが同時にフル実行すると
+    diff と無関係のテストが `Test timed out in 5000ms` で落ち、存在しない回帰を追いかけることになります
+    （実測済み。#1917 で `verify.yaml` の unit ゲートに `mutex: cpu.heavy` を入れた理由がこれです）。
+  - 自分が触った/追加したテストだけ `npx vitest run <path>` で確認する。
+  - 全体の裁定はオーケストレーターが `commandmate wait --verify`（`.commandmate/verify.yaml` の全ゲート）
+    で行います。どうしても全体を回したい場合のみ `.claude/skills/cmate-verify/scripts/verify-run.sh`
+    （mutex 準拠）を使ってください。
+  - **`npm run build` を実行しない**（稼働中サーバの配信成果物を壊します）。
+  - `npm run lint` / `npx tsc --noEmit` は軽いので自由に回してよい。
+
+  ## 環境ルール（厳守）
+
+  - **稼働サーバ（port 3000）を停止・再起動しない。** 隣の `MyCodeBranchDesk` ディレクトリで何もしない。
+  - 実 tmux を触る検証は必ず `tmux -L <専用socket>` で行う（`-L`/`-S` は `$TMUX` より優先）。
+    フラグ無しの `tmux` は**ユーザーの本番セッション**に届きます。`kill-server` を `-L` 無しで打たない。
+    後始末は `kill-session -t '=<name>:'`。`TMUX_TMPDIR` は隔離手段にならない（`$TMUX` があると無視）。
+    `bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たない。
+  - 他の worktree（`../commandmate-issue-*`）に触らない。
+
+  ## 完了条件
+
+  Issue の受入条件をすべて満たし、`npm run lint` と `npx tsc --noEmit` が緑、追加したテストが
+  単独実行で緑であること。**ガード/pin 系のテストは変異注入で赤になることを必ず確認**してください
+  （空振り緑を作らない。確認手順と結果をコミットメッセージに書く）。
+
+  ## やること
+
+  1. `git merge origin/develop` して上記 2 ファイルの衝突を**意味を見て**解消する。
+     CHANGELOG / docs の衝突が出たらそれも解消してよい（両者のエントリを残す）。
+  2. **解消後に、両方の振る舞いが生きていることをテストで確認**してください:
+     - worktree 既定が copilot の worktree で arming すると copilot の poller が起動する（#1909）
+     - arming 時に保留 permission の再裁定が走る（#1898）
+     既存テストで足りなければ 1 本足してください。
+  3. `npm run lint` / `npx tsc --noEmit` と、両 Issue の追加テストを単独実行して緑にする。
+  4. **追加の 1 コミット**として積む（前のコミットを amend / rebase しない）。
+     コミットメッセージに「何と何を両立させたか」を書くこと。
+
+scope:
+  allow:
+    - "src/app/api/**"
+    - "src/cli/**"
+    - "src/lib/session/**"
+    - "src/lib/polling/**"
+    - "src/lib/hooks/**"
+    - "src/lib/auto-yes-poller.ts"
+    - "tests/unit/**"
+    - "tests/integration/**"
+    - "tests/helpers/**"
+    - "docs/**"
+    - "CHANGELOG.md"
+    - ".commandmate/tasks/issue-1909.yaml"
+    - ".commandmate/tasks/issue-1909b.yaml"
+  deny: []
+
+
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns:
+    - "rm -rf"
+    - "git push"
+    - "gh pr create"
+    - "gh issue edit"
+    - "kill-server"
+
+verify:
+  gates: [lint, typecheck]
+
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
