@@ -63,8 +63,11 @@ const db = {} as Database.Database;
  * A frame with no generation indicator anywhere in it.
  *
  * The scraper calls this `running`/`default` while the output still looks
- * fresh, and `ready`/`no_recent_output` once the Auto-Yes poller's timestamp
- * has gone stale — the two halves of `isUnclassifiedActive`.
+ * fresh, and `running`/`no_recent_output` once the Auto-Yes poller's timestamp
+ * has gone stale — the two halves of `isUnclassifiedActive`. Issue #1927 made
+ * the second one `running` too (§4 D1 決定 3): a frame that has not repainted
+ * for five seconds has produced no completion evidence, and `ready` is the one
+ * word that must not be said on none.
  */
 const UNREADABLE_FRAME = 'writing files\nediting src/app/page.tsx\n';
 
@@ -106,7 +109,8 @@ describe('buildCurrentOutput: no structured events (Issue #1723 non-impact)', ()
 
     const payload = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
 
-    expect(payload.sessionStatus).toBe('ready');
+    // Issue #1927: `running`, not `ready`. See the UNREADABLE_FRAME docstring.
+    expect(payload.sessionStatus).toBe('running');
     expect(payload.sessionStatusReason).toBe('no_recent_output');
     expect(payload.isUnclassifiedActive).toBe(true);
   });
@@ -124,9 +128,15 @@ describe('buildCurrentOutput: a stop event ends the turn (Issue #1723)', () => {
     expect(after.sessionStatusReason).toBe('hook_stop');
     expect(after.thinking).toBe(false);
     expect(after.isGenerating).toBe(false);
-    // Cleared so `commandmate wait` — whose completion test is
-    // `ready && isUnclassifiedActive !== true` — actually receives the benefit.
-    expect(after.isUnclassifiedActive).toBe(false);
+    // Issue #1927 (DR2-003): NOT cleared any more. `UNREADABLE_FRAME` is a
+    // frame the scraper could not classify, and a structured `ready` over a
+    // frame nobody could read is exactly the case #1708's hatch exists for —
+    // "the pane is unreadable and hooks say it is done" is where a missed
+    // dialog hides. The clear survives where it was earned: a pane whose
+    // spinner is still on screen reads `running`/`thinking_indicator`, which is
+    // POSITIVE evidence, so `wait` still completes on the case #1723 reported.
+    // See `tests/unit/session/current-output-unclassified-1927.test.ts`.
+    expect(after.isUnclassifiedActive).toBe(true);
   });
 
   it('is refused for a different instance in the same worktree', async () => {
@@ -146,14 +156,17 @@ describe('buildCurrentOutput: a stop event ends the turn (Issue #1723)', () => {
 
 describe('buildCurrentOutput: a submitted prompt keeps the session running (Issue #1723)', () => {
   beforeEach(() => {
-    // The frame has gone stale, so the scraper degrades it to ready — the
-    // false "Completed" that #805 / #1150 / #1497 are all instances of.
+    // The frame has gone stale. Before Issue #1927 the scraper degraded it to
+    // `ready` — the false "Completed" that #805 / #1150 / #1497 are all
+    // instances of, and which §4 D1 決定 3 has now removed at the source. What
+    // this group still pins is the structured layer's own override.
     vi.mocked(getLastServerResponseTimestamp).mockReturnValue(Date.now() - 60_000);
   });
 
-  it('overrides the scraper ready with running/hook_prompt_submit', async () => {
+  it('overrides the scraper verdict with running/hook_prompt_submit', async () => {
     const before = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
-    expect(before.sessionStatus).toBe('ready');
+    expect(before.sessionStatus).toBe('running');
+    expect(before.sessionStatusReason).toBe('no_recent_output');
 
     record('user_prompt_submit');
     const after = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');

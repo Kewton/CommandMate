@@ -19,6 +19,7 @@
   },
   "isSelectionListActive": false,
   "isPagerActive": false,
+  "statusEvidence": "positive",
   "isUnclassifiedActive": false,
   "lastServerResponseTimestamp": null,
   "serverPollerActive": true

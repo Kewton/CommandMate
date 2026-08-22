@@ -1,7 +1,7 @@
 {
   "isRunning": true,
   "cliToolId": "claude",
-  "sessionStatus": "ready",
+  "sessionStatus": "running",
   "sessionStatusReason": "no_recent_output",
   "content": "",
   "realtimeSnippet": "⏺ Which library should we use?\n\n  Use arrows, then Enter.\n❯ 1. Submit answers\n  2. Edit answers",
@@ -19,6 +19,7 @@
   },
   "isSelectionListActive": false,
   "isPagerActive": false,
+  "statusEvidence": "none",
   "isUnclassifiedActive": true,
   "lastServerResponseTimestamp": 1790000000000,
   "serverPollerActive": true

@@ -72,19 +72,32 @@ vi.mock('@/lib/polling/auto-yes-manager', () => ({
 import { detectWorktreeSessionStatus } from '@/lib/session/worktree-status-helper';
 import { detectSessionStatus, STATUS_REASON } from '@/lib/detection/status-detector';
 import { captureSessionOutput } from '@/lib/session/cli-session';
-import { clearLastKnownStatuses } from '@/lib/session/status-evidence';
+import {
+  clearLastKnownStatuses,
+  deriveScraperEvidence,
+  type StatusEvidence,
+} from '@/lib/session/status-evidence';
 
 const mockDb = {} as ReturnType<typeof import('@/lib/db/db-instance').getDbInstance>;
 const mockGetMessages = vi.fn().mockReturnValue([]);
 const mockMarkPending = vi.fn();
 const mockGetAgentInstances = vi.fn(() => [] as AgentInstance[]);
 
-function mockDetectedStatus(status: SessionStatus, reason: string): void {
+function mockDetectedStatus(
+  status: SessionStatus,
+  reason: string,
+  // Issue #1927: the detector produces `evidence` now, so the mock has to as
+  // well. The table below stopped being "the helper re-derives this from
+  // (status, reason)" and became "the helper publishes what the detector said",
+  // which is the point of moving the producer — see `status-detector.ts`.
+  evidence: StatusEvidence = deriveScraperEvidence(status, reason),
+): void {
   vi.mocked(detectSessionStatus).mockReturnValue({
     status,
     confidence: 'high',
     reason,
     hasActivePrompt: false,
+    evidence,
     promptDetection: { isPrompt: false, cleanContent: '' },
   });
 }

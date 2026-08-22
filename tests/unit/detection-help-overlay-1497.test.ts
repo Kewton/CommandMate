@@ -30,10 +30,17 @@ describe('Issue #1497: real /help overlay classification (detectSessionStatus)',
     expect(st.hasActivePrompt).toBe(false);
   });
 
-  it('with a stale lastOutputTimestamp: degrades to ready/no_recent_output (the frame that hid the hatch)', () => {
+  it('with a stale lastOutputTimestamp: running/no_recent_output, still with no evidence', () => {
+    // Issue #1927 (§4 D1 決定 3) abolished the `ready` this used to publish. A
+    // frame that has not repainted for five seconds has produced no completion
+    // evidence, and `ready` was the one word that must not be said on none —
+    // it is what let `wait` report a stalled worker as Completed. The reason
+    // code is kept for diagnosis and the hatch stays open either way, which is
+    // what #1497 needed from this branch in the first place.
     const st = detectSessionStatus(HELP_FRAME, 'claude', STALE_TS);
-    expect(st.status).toBe('ready');
+    expect(st.status).toBe('running');
     expect(st.reason).toBe('no_recent_output');
+    expect(st.evidence).toBe('none');
     expect(st.hasActivePrompt).toBe(false);
   });
 
@@ -53,5 +60,11 @@ describe('Issue #1497: real /help overlay classification (detectSessionStatus)',
     const st = detectSessionStatus(idleFrame, 'claude', STALE_TS);
     expect(st.status).toBe('ready');
     expect(st.reason).toBe('input_prompt');
+    // Issue #1927: the WIRE value is what #1497 depended on and it is unchanged
+    // (DR3-002 keeps `input_prompt` at `ready`). What did change is the second
+    // reading of it: this synthetic frame carries neither of Claude's measured
+    // idle proofs — no `✻ <Verb> for <N>s` completion marker, no startup banner
+    // — so the composer row alone no longer counts as evidence.
+    expect(st.evidence).toBe('none');
   });
 });

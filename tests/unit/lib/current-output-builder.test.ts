@@ -27,6 +27,7 @@ import {
   clearPolicySuppressions,
 } from '@/lib/polling/auto-yes-suppression-state';
 import { buildCurrentOutput } from '@/lib/session/current-output-builder';
+import { buildClaudeIdleComposerFrame } from '../../fixtures/claude-idle-composer';
 import { buildClaudeHelpOverlayFrame } from '../../fixtures/claude-help-overlay';
 
 describe('buildCurrentOutput Issue #1167 frame', () => {
@@ -109,10 +110,15 @@ describe('buildCurrentOutput Issue #1497 no_recent_output degrade', () => {
     vi.mocked(getLastServerResponseTimestamp).mockReturnValue(staleTimestamp);
   });
 
-  it('keeps the nav hatch gated open for a static /help overlay that degraded to ready/no_recent_output', async () => {
+  it('keeps the nav hatch gated open for a static /help overlay that stopped changing', async () => {
     // A real unclassified TUI overlay that stopped changing: detection falls
-    // through to the time heuristic and, with a stale timestamp, degrades to
-    // ready/no_recent_output — the frame that used to hide the nav hatch (#1017).
+    // through to the time heuristic — the frame that used to hide the nav hatch
+    // (#1017).
+    //
+    // Issue #1927 (§4 D1 決定 3) changed the wire status this publishes from
+    // `ready` to `running`: five seconds without a repaint is the absence of a
+    // completion, not one. The reason code and — the point of #1497 — the open
+    // hatch are unchanged.
     vi.mocked(captureSessionOutput).mockResolvedValue(buildClaudeHelpOverlayFrame());
 
     const payload = await buildCurrentOutput(
@@ -122,17 +128,23 @@ describe('buildCurrentOutput Issue #1497 no_recent_output degrade', () => {
       'claude-2',
     );
 
-    expect(payload.sessionStatus).toBe('ready');
+    expect(payload.sessionStatus).toBe('running');
     expect(payload.sessionStatusReason).toBe('no_recent_output');
     // The fix: the timed-out unclassified frame still gates the hatch open.
     expect(payload.isUnclassifiedActive).toBe(true);
   });
 
   it('does NOT gate the hatch open at a true idle input prompt even with a stale timestamp (non-regression)', async () => {
-    // A genuine idle prompt (`❯`) is classified as input_prompt at step 3,
-    // before the time heuristic — so it must stay ready/input_prompt and the
-    // hatch must remain hidden (Enter/`q` can never reach the composer).
-    vi.mocked(captureSessionOutput).mockResolvedValue('Some previous output\n───\n❯\n');
+    // A genuine idle prompt is classified as input_prompt before the time
+    // heuristic — so it must stay ready/input_prompt and the hatch must remain
+    // hidden (Enter/`q` can never reach the composer).
+    //
+    // Issue #1927 made the frame here a realistic one. The old three-character
+    // `───` rule was not an input box Claude ever draws, and the bare `❯` it
+    // fenced is drawn during generation too — which is precisely the evidence
+    // §4 D1 stopped accepting. What keeps the hatch shut now is Claude's
+    // measured completion marker, which the builder below includes.
+    vi.mocked(captureSessionOutput).mockResolvedValue(buildClaudeIdleComposerFrame());
 
     const payload = await buildCurrentOutput(
       {} as Database.Database,
@@ -143,6 +155,31 @@ describe('buildCurrentOutput Issue #1497 no_recent_output degrade', () => {
 
     expect(payload.sessionStatus).toBe('ready');
     expect(payload.sessionStatusReason).toBe('input_prompt');
+    expect(payload.statusEvidence).toBe('positive');
     expect(payload.isUnclassifiedActive).toBe(false);
+  });
+
+  it('gates the hatch open for an idle-looking frame with no completion evidence (Issue #1927)', async () => {
+    // The other half of the rollout, and the reason the assertion above is not
+    // vacuous: the SAME frame with its completion marker reworded still reads
+    // `ready`/`input_prompt` on the wire (DR3-002 — nothing downstream has to
+    // learn a new status), and now says so with no evidence, which is what
+    // opens the hatch and buys `wait` its 60-second dwell instead of a false
+    // Completed.
+    vi.mocked(captureSessionOutput).mockResolvedValue(
+      buildClaudeIdleComposerFrame('  it wrote some prose and stopped'),
+    );
+
+    const payload = await buildCurrentOutput(
+      {} as Database.Database,
+      'wt-1',
+      'claude',
+      'claude-2',
+    );
+
+    expect(payload.sessionStatus).toBe('ready');
+    expect(payload.sessionStatusReason).toBe('input_prompt');
+    expect(payload.statusEvidence).toBe('none');
+    expect(payload.isUnclassifiedActive).toBe(true);
   });
 });

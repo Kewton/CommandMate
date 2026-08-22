@@ -51,17 +51,22 @@ Do you want to proceed? (y/n)
         expect(result.reason).toBe('prompt_detected');
       });
 
-      it('should return "ready" with low confidence when no recent output', () => {
-        // If no output change for 5+ seconds, assume ready
+      it('should return "running" with no evidence when no recent output', () => {
+        // Issue #1927 (§4 D1 決定 3): "no output change for 5+ seconds" used to
+        // be read as "assume ready". It is not evidence of anything — it is the
+        // absence of a repaint — and the `ready` it published is what turned a
+        // stalled worker into a Completed one. The reason code stays for
+        // diagnosis; `evidence: 'none'` is the part consumers branch on.
         const output = `
 Some old output
 `;
         const fiveSecondsAgo = new Date(Date.now() - 6000);
         const result = detectSessionStatus(output, 'claude', fiveSecondsAgo);
 
-        expect(result.status).toBe('ready');
+        expect(result.status).toBe('running');
         expect(result.confidence).toBe('low');
         expect(result.reason).toBe('no_recent_output');
+        expect(result.evidence).toBe('none');
       });
 
       it('should return "running" with low confidence as default when no patterns match', () => {

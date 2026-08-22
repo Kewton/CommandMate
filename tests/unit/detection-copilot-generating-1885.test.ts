@@ -98,14 +98,13 @@ function autoYesPromptOf(raw: string) {
 function scraperVerdictOf(raw: string): ScraperVerdict {
   const status = statusOf(raw);
   // Issue #1924 restated this as `evidence`, with `isUnclassifiedActive`
-  // derived from it (`current-output-builder.ts`). Mirrored here in the same
-  // shape so the two do not drift: the two `reason`s that mean "the frame said
-  // nothing" are the `'none'` half, everything else is `'positive'`.
-  const evidence: ScraperVerdict['evidence'] =
-    (status.status === 'running' && status.reason === STATUS_REASON.DEFAULT) ||
-    (status.status === 'ready' && status.reason === STATUS_REASON.NO_RECENT_OUTPUT)
-      ? 'none'
-      : 'positive';
+  // derived from it (`current-output-builder.ts`). Issue #1927 moved the
+  // PRODUCER into the detector, so this helper reads the field instead of
+  // restating the formula — which is what the builder does now too. The old
+  // copy here would have answered `'positive'` for copilot's new
+  // `unknown_frame` floor, i.e. it would have started lying about exactly the
+  // frames this suite exists to keep honest.
+  const evidence: ScraperVerdict['evidence'] = status.evidence;
   return {
     status: status.status,
     reason: status.reason,

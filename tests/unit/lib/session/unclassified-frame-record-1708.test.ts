@@ -29,6 +29,7 @@ import {
   UNCLASSIFIED_RECORD_DWELL_MS,
 } from '@/lib/detection/unclassified-frame-tracker';
 import { UNCLASSIFIED_PROMPT_TYPE } from '@/types/models';
+import { buildClaudeIdleComposerFrame } from '../../../fixtures/claude-idle-composer';
 import type { PromptData, Worktree, YesNoPromptData } from '@/types/models';
 
 const WORKTREE_ID = 'wt-unclassified-1708';
@@ -65,8 +66,16 @@ const UNCLASSIFIED_FRAME = [
   '  ▸ beta',
 ].join('\n');
 
-/** A frame that classifies cleanly, so the flag goes away. */
-const CLASSIFIED_FRAME = ['⏺ done', '', '❯ '].join('\n');
+/**
+ * A frame that classifies cleanly, so the flag goes away.
+ *
+ * Issue #1927 replaced `['⏺ done', '', '❯ ']` here. A bare composer row is what
+ * §4 D1 stopped accepting as completion evidence — Claude draws `❯` while it
+ * generates too — so that frame now reads `ready`/`input_prompt` with no
+ * evidence and the flag would never clear. The builder below is the smallest
+ * frame carrying Claude's measured completion marker.
+ */
+const CLASSIFIED_FRAME = buildClaudeIdleComposerFrame();
 
 function seedWorktree(db: Database.Database): void {
   const worktree: Worktree = {

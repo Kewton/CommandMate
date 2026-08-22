@@ -74,7 +74,6 @@ import {
   type ProvisionalTurn,
 } from '@/lib/session/provisional-turn';
 import {
-  deriveScraperEvidence,
   forgetLastKnownStatus,
   getLastKnownStatus,
   observeStatusEvidence,
@@ -780,13 +779,31 @@ export function mergeStructuredStatus(
   }
 
   const thinking = structured.status === 'running';
-  // Issue #1924: the same rule as before, stated once as evidence and derived
-  // into the compatibility flag. A structured `ready` over a scraper `running`
-  // IS the positive completion evidence §4 D1 asks for — it is the agent's own
-  // `Stop` — so it clears the hatch; anything else leaves the frame's own
-  // reading alone. Writing the two independently is how they would come apart.
+  // Issue #1927 (DR2-003): the override that used to raise `evidence` here is
+  // now gated on the scraper having something positive to say.
+  //
+  // #1924 wrote it as "a structured `ready` over a scraper `running` IS the
+  // positive completion evidence §4 D1 asks for". That reading was safe only
+  // while `running` meant "the pane looks busy": the two frames that carry no
+  // evidence at all published `ready`/`no_recent_output` and `running`/`default`,
+  // and only the second could reach this branch. Issue #1927 moves
+  // `no_recent_output` to `running` (§4 D1 決定 3), so from now on BOTH
+  // no-evidence frames land here — and the branch would clear
+  // `isUnclassifiedActive` at exactly the moment worth protecting: the frame
+  // cannot be read and the agent's events say it is done. That is #1708's stall
+  // with the hatch nailed shut, and no scraper-level fixture can see it,
+  // which is why the guard for it is pinned on the MERGED verdict
+  // (`tests/unit/session/current-output-unclassified-1927.test.ts`).
+  //
+  // What survives is the case #1723 actually reported: `Stop` arrived while the
+  // spinner is still on screen. That frame reads `running`/`thinking_indicator`
+  // — POSITIVE evidence — so the hatch is already down and `wait` still
+  // completes on it. Only a frame nobody could classify keeps the flag up.
+  const scraperVouched = scraper.evidence === 'positive';
   const evidence: StatusEvidence =
-    structured.status === 'ready' && scraper.status === 'running' ? 'positive' : scraper.evidence;
+    structured.status === 'ready' && scraper.status === 'running' && scraperVouched
+      ? 'positive'
+      : scraper.evidence;
   return {
     status: structured.status,
     reason: structured.reason,
@@ -982,10 +999,16 @@ async function buildPayload(
   // `input_prompt`, never as `no_recent_output` — so treat the timed-out fallback
   // as unclassified too and keep the hatch open instead of stranding the user.
   // Issue #1924, §4 D1 decision 2: stated as evidence, with the published flag
-  // derived from it. The expression itself moved to `status-evidence.ts` in
-  // Issue #1926 — unchanged, but shared, because the list API now publishes the
-  // same reading and two copies is how Phase 3 moves one and not the other.
-  const evidence: StatusEvidence = deriveScraperEvidence(statusResult.status, statusResult.reason);
+  // derived from it.
+  //
+  // Issue #1927 moved the PRODUCER into the detector. `deriveScraperEvidence`
+  // reconstructed the reading downstream from `(status, reason)`, which holds
+  // only while a reason code means the same thing for every tool — and §4 D1's
+  // tool-by-tool rollout ends that: `input_prompt` is positive for a tool whose
+  // idle rule vouched for the frame and `'none'` for one whose rule declined,
+  // with the same status and the same reason on the wire. Only the detector
+  // knows which happened, so it is what says so now.
+  const evidence: StatusEvidence = statusResult.evidence;
   const isUnclassifiedActive = evidence === 'none';
 
   // Issue #1723: the two-layer merge. Everything above this line is the string

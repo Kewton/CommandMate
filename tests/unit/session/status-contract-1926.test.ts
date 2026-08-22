@@ -62,6 +62,7 @@ import {
 } from '@/lib/session/provisional-turn';
 import { TURN_OPENING_EVENT_TYPES } from '@/cli/commands/wait';
 import { STATUS_REASON } from '@/lib/detection/status-detector';
+import { buildClaudeIdleComposerFrame } from '../../fixtures/claude-idle-composer';
 
 const db = {} as Database.Database;
 
@@ -75,8 +76,17 @@ beforeEach(() => {
 // Only the cases that freeze it do; this is the unconditional restore.
 afterEach(() => unfreezeClock());
 
-/** A frame the detector reads as an idle composer — `ready` / `input_prompt`. */
-const IDLE_COMPOSER_FRAME = 'some agent output\n> ';
+/**
+ * A frame the detector reads as a finished, idle Claude turn.
+ *
+ * Issue #1927 replaced the two-line `'some agent output\n> '` this used to be.
+ * That frame was `ready`/`input_prompt` with `evidence: 'positive'` only
+ * because a bare composer row counted as completion evidence — which is exactly
+ * the "absence of a negative" §4 D1 removed. Claude's measured evidence is the
+ * turn-completion marker, so the frame this suite calls idle has to carry one
+ * or it stops being a positive row at all.
+ */
+const IDLE_COMPOSER_FRAME = buildClaudeIdleComposerFrame();
 
 /**
  * A frame with nothing on it at all.
@@ -261,13 +271,26 @@ describe('[#1926] lastKnownStatus — the latch behind §7', () => {
   });
 });
 
-describe('[#1926] deriveScraperEvidence is the one producer', () => {
+describe('[#1926] deriveScraperEvidence, superseded by the detector (#1927)', () => {
   /**
    * The rows §6.1 calls "the absence of a negative", and one row of each of the
    * kinds that are NOT.
    *
-   * Phase 3 moves `input_prompt` into the `'none'` half tool by tool; this table
-   * is what makes that move a visible diff instead of a silent widening.
+   * Issue #1927 is the Phase 3 move this table was written to make visible, and
+   * it turned out to be a move OF THE PRODUCER rather than of a row: the
+   * `(status, reason) -> evidence` mapping stops being expressible once
+   * `input_prompt` is positive for a tool whose idle rule vouched and `'none'`
+   * for one whose rule declined, with the same status and reason on the wire.
+   * So `StatusDetectionResult.evidence` is the producer now, and neither
+   * `current-output-builder` nor `worktree-status-helper` calls this function
+   * any more.
+   *
+   * The table is kept because the function is still exported and still correct
+   * for the shapes it can express — but note the last row: `running` /
+   * `no_recent_output` is what the detector emits since #1927, and this
+   * function answers `'positive'` for it. That is the drift a second expression
+   * produces, pinned here rather than left to be discovered. Removing the
+   * function is `status-evidence.ts`'s to do, one Issue's scope away.
    */
   const ROWS: Array<[Parameters<typeof deriveScraperEvidence>[0], string, 'positive' | 'none']> = [
     ['running', STATUS_REASON.DEFAULT, 'none'],

@@ -52,6 +52,7 @@ import {
 } from '@/lib/session/agent-event-state';
 import { HOOK_STATUS_REASON, type HookStatusReason } from '@/lib/session/status-mapping';
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
+import { buildClaudeIdleComposerFrame } from '../../fixtures/claude-idle-composer';
 
 const db = {} as Database.Database;
 
@@ -62,13 +63,15 @@ beforeEach(() => {
 });
 
 /**
- * A frame the detector reads as an idle composer.
+ * A frame the detector reads as a finished, idle Claude turn.
  *
- * `input_prompt` — positively classified today, and the row §8 Phase 3 will move
- * to `'none'` per tool, once each tool has a positively confirmed idle-composer
- * rule (DR2-002). Pinned here so that move is visible as a diff to this file.
+ * `input_prompt` — and, since Issue #1927 landed Claude's rule, positively
+ * classified for a measured reason rather than because a composer row was on
+ * screen. This is the diff #1924 asked to be able to see: the frame that used
+ * to be `'some agent output\n> '` now has to carry Claude's turn-completion
+ * marker to count as evidence at all.
  */
-const IDLE_COMPOSER_FRAME = 'some agent output\n> ';
+const IDLE_COMPOSER_FRAME = buildClaudeIdleComposerFrame();
 
 /**
  * A frame with nothing on it at all.
@@ -150,15 +153,42 @@ describe('[#1924] evidence — mergeStructuredStatus keeps one fact, not two', (
     expect(merged.isUnclassifiedActive).toBe(merged.evidence === 'none');
   });
 
-  it('treats a structured stop over a busy pane as positive evidence', () => {
-    // The one branch that raises evidence rather than passing it through: the
-    // agent's own `Stop` is exactly the positive completion evidence §4 D1 asks
-    // for, and it is why `wait` can finish on a pane whose spinner scrolled off.
+  it('does not raise evidence for a structured stop over a pane nobody could read', () => {
+    // Issue #1927 (DR2-003) closed the branch that used to raise evidence here.
+    //
+    // #1924 read a structured `Stop` over a scraper `running` as "the positive
+    // completion evidence §4 D1 asks for". That was safe only while `running`
+    // meant "the pane looks busy": `no_recent_output` still said `ready`, so the
+    // only frame that could reach the branch with no evidence was
+    // `running`/`default`. #1927 moves `no_recent_output` to `running` too, and
+    // this branch would then clear the hatch at the one moment it is worth
+    // keeping — the frame cannot be read AND the agent says it is done, which is
+    // where a missed dialog hides (#1708).
+    //
+    // What #1723 actually needs is untouched: a pane whose spinner is still on
+    // screen reads `thinking_indicator`, which IS positive evidence — see the
+    // case below.
     const merged = mergeStructuredStatus(
       scraper({ status: 'running', reason: 'default', thinking: true, isUnclassifiedActive: true }),
       structured('ready', HOOK_STATUS_REASON.STOP),
     );
 
+    expect(merged.status).toBe('ready');
+    expect(merged.evidence).toBe('none');
+    expect(merged.isUnclassifiedActive).toBe(true);
+  });
+
+  it('still clears the hatch when the pane it read was a busy one', () => {
+    // The #1723 case, and the reason the assertion above is a narrowing rather
+    // than a removal: `Stop` arrived while the spinner was still on screen. That
+    // frame carries positive evidence, so the structured `ready` lands on a
+    // verdict that was already classified and `wait` completes on it.
+    const merged = mergeStructuredStatus(
+      scraper({ status: 'running', reason: 'thinking_indicator', thinking: true }),
+      structured('ready', HOOK_STATUS_REASON.STOP),
+    );
+
+    expect(merged.status).toBe('ready');
     expect(merged.evidence).toBe('positive');
     expect(merged.isUnclassifiedActive).toBe(false);
   });

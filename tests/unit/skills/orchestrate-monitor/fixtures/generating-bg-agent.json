@@ -19,6 +19,7 @@
   },
   "isSelectionListActive": false,
   "isPagerActive": false,
+  "statusEvidence": "none",
   "isUnclassifiedActive": true,
   "lastServerResponseTimestamp": 1790000000000,
   "serverPollerActive": true

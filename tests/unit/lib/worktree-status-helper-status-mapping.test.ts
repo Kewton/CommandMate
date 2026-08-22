@@ -74,6 +74,8 @@ function mockDetectedStatus(status: SessionStatus, hasActivePrompt = false): voi
     confidence: 'high',
     reason: 'input_prompt',
     hasActivePrompt,
+    // Issue #1927: `evidence` became a required field of the detector's result.
+    evidence: 'positive',
     promptDetection: { isPrompt: hasActivePrompt, cleanContent: '' },
   });
 }
