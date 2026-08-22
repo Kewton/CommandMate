@@ -13,6 +13,8 @@ import {
   OPENCODE_SKIP_PATTERNS,
   OPENCODE_RESPONSE_COMPLETE,
   COPILOT_SKIP_PATTERNS,
+  COPILOT_TRANSCRIPT_CONTINUATION_PATTERN,
+  findCopilotChromeStart,
 } from './detection/cli-patterns';
 import { normalizeOpenCodeLine, normalizeCopilotLine } from './tui-accumulator';
 import {
@@ -162,14 +164,46 @@ export function cleanGeminiResponse(response: string): string {
 }
 
 /**
- * Copilot tool-action pattern: ● followed by English tool/action keywords.
- * These lines represent Copilot's internal tool calls (shell, file reads, etc.)
- * and should be filtered from saved responses.
- * Does NOT match ● followed by non-action text (e.g., Japanese response content).
+ * Copilot tool-action pattern: ● followed by one of copilot's TOOL NAMES.
  *
  * Issue #571: Distinguish tool actions from actual response content starting with ●
+ *
+ * Issue #1897: the list used to hold ~110 ordinary English verbs (Check, Add,
+ * Update, Show, Find, Set, Test, Save, Watch, Verify, Build, Start, …). On
+ * copilot 1.0.80 `●` is the marker for the AGENT'S MESSAGE -- tool calls are
+ * drawn as `$ <Tool> …` (see {@link COPILOT_TOOL_INVOCATION_PATTERN}) -- so every
+ * one of those verbs matched prose and nothing else. `● Check the config file`
+ * was deleted as a tool call, and because the match also opened a
+ * skip-until-next-marker block it took the rest of the reply with it.
+ *
+ * What remains is the set of names copilot actually labels tool rows with, which
+ * is why the ≤1.0.79 rows this was written for (`● Read package.json`,
+ * `● Get current directory structure (shell)`) are still filtered. A match is now
+ * a SINGLE-LINE skip: the follow-on command and output rows are recognised on
+ * their own by {@link COPILOT_FOLD_MARKER_PATTERN} and
+ * {@link COPILOT_COMMAND_OUTPUT_PATTERN}, so nothing needs a block that can run
+ * away over a whole message.
  */
-const COPILOT_TOOL_ACTION_PATTERN = /^●\s+(?:Get |Read |Run |Search |Write |Delete |Edit |List |Create |Check |Fetch |Map |Explore |Execute |Find |Install |Update |Open |Close |Copy |Move |Rename |Set |Test |Build |Deploy |Start |Stop |Restart |Kill |Call |Send |Upload |Download |Compile |Analyze |Scan |Apply |Revert |Reset |Push |Pull |Clone |Merge |Commit |Checkout |Branch |Tag |Diff |Log |Show |Status |Init |Config |Add |Remove |Index |Query |Connect |Disconnect |Ping |Trace |Debug |Validate |Verify |Inspect |Monitor |Watch |Clean |Purge |Flush |Load |Save |Export |Import |Format |Lint |Parse |Generate |Transform |Convert |Migrate |Upgrade |Patch |Enable |Disable |Grant |Revoke |Approve |Deny |Lock |Unlock |Mount |Unmount |Attach |Detach |Register |Unregister |Subscribe |Unsubscribe |Publish |Unpublish |Encrypt |Decrypt |Sign |Hash |Encode |Decode |Compress |Decompress |Archive |Extract |Backup |Restore |Dump |Model changed to:)/;
+const COPILOT_TOOL_ACTION_PATTERN = /^●\s+(?:Get |Read |Run |Search |Write |Edit |Delete |List |Create |Fetch |Explore |Execute |Install |Model changed to:)/;
+
+/**
+ * copilot 1.0.80's tool invocation row (Issue #1897).
+ *
+ * Measured on the live frames in
+ * `tests/unit/lib/detection/fixtures/copilot-live-1885/`: a tool call is a `$`
+ * marker row naming the tool, with the fold marker and the elapsed time
+ * right-aligned onto the same row, and the command it ran on the indented rows
+ * below:
+ *
+ *     $ Shell Wait 25 seconds then print status 2 lines…            1m 27s
+ *       sleep 25; echo finished
+ *
+ * The capitalised tool name is required so a `$ npm install` line inside a reply's
+ * code block is not read as copilot's own chrome. This is the one construct that
+ * still opens a skip block, and that block now ends at the next marker row or the
+ * next blank row rather than running to the end of the message.
+ */
+const COPILOT_TOOL_INVOCATION_PATTERN = /^\$\s+[A-Z][A-Za-z]*(?:\s|$)/;
 
 /**
  * Pattern for "N lines..." fold markers in Copilot TUI output.
@@ -185,8 +219,17 @@ const COPILOT_THINKING_INDICATOR_PATTERN = /^[◐◑◒◓]/;
 /**
  * Pattern for shell command output lines in Copilot TUI.
  * Matches common command prefixes that appear in tool call output.
+ *
+ * Issue #1897: the heads that are also ordinary English words at the start of a
+ * sentence were removed -- `find`, `go`, `make`, `cat`, `ls`, `cd`, `echo`,
+ * `node`, `python`, `ruby`. "find the file in src/", "go to the settings page",
+ * "make sure you run npm test" and "cat the file to check" were all being deleted
+ * from saved replies as if they were shell transcript. The heads that remain are
+ * tool names no English sentence opens with, so the rule keeps its purpose (the
+ * `git --no-pager …` and `npm run …` rows copilot echoes under a tool call) at no
+ * cost to prose.
  */
-const COPILOT_COMMAND_OUTPUT_PATTERN = /^(?:git\s+--no-pager|git\s+(?:log|diff|show|status|branch|remote|fetch|pull|push|merge|rebase|checkout|reset|stash|tag|config|clone|init|add|commit|rm|mv|bisect|grep|ls-files|rev-parse|describe|shortlog|blame|reflog|cherry-pick|revert|submodule|worktree)\b|npm\s+|npx\s+|node\s+|yarn\s+|pnpm\s+|cargo\s+|pip\s+|python\s+|ruby\s+|go\s+|rustc\s+|make\s+|cmake\s+|docker\s+|kubectl\s+|aws\s+|gcloud\s+|az\s+|terraform\s+|ansible\s+|curl\s+|wget\s+|ssh\s+|scp\s+|rsync\s+|find\s+|grep\s+|sed\s+|awk\s+|cat\s+|ls\s+|cd\s+|mkdir\s+|rm\s+|cp\s+|mv\s+|chmod\s+|chown\s+|echo\s+)/;
+const COPILOT_COMMAND_OUTPUT_PATTERN = /^(?:git\s+--no-pager|git\s+(?:log|diff|show|status|branch|remote|fetch|pull|push|merge|rebase|checkout|reset|stash|tag|config|clone|init|add|commit|rm|mv|bisect|grep|ls-files|rev-parse|describe|shortlog|blame|reflog|cherry-pick|revert|submodule|worktree)\b|npm\s+|npx\s+|yarn\s+|pnpm\s+|cargo\s+|pip\s+|rustc\s+|cmake\s+|docker\s+|kubectl\s+|aws\s+|gcloud\s+|az\s+|terraform\s+|ansible\s+|curl\s+|wget\s+|ssh\s+|scp\s+|rsync\s+|grep\s+|sed\s+|awk\s+|mkdir\s+|rm\s+|cp\s+|mv\s+|chmod\s+|chown\s+)/;
 
 /**
  * Clean Copilot response by removing TUI artifacts, extracting only the latest
@@ -207,7 +250,16 @@ const COPILOT_COMMAND_OUTPUT_PATTERN = /^(?:git\s+--no-pager|git\s+(?:log|diff|s
  */
 export function cleanCopilotResponse(response: string): string {
   const strippedResponse = stripAnsi(response);
-  const lines = strippedResponse.split('\n');
+  const allLines = strippedResponse.split('\n');
+
+  // Issue #1897: cut copilot's bottom-pinned chrome (cwd row, rules, composer,
+  // status bar) before anything else, positionally — the status bar's wording is
+  // something copilot will happily print as body text, so only its position tells
+  // the two apart. Returns -1, and so changes nothing, for input that is not a
+  // whole captured frame: the accumulated content this normally receives, and the
+  // synthetic strings the unit tests pass.
+  const chromeStart = findCopilotChromeStart(allLines);
+  const lines = chromeStart >= 0 ? allLines.slice(0, chromeStart) : allLines;
 
   // Step 1: Find the last ❯ prompt line with user input (not empty prompt)
   // This marks the boundary — everything after is the latest response
@@ -222,36 +274,61 @@ export function cleanCopilotResponse(response: string): string {
     }
   }
 
-  // Extract lines after the last user prompt
-  const startIndex = lastUserPromptIndex >= 0 ? lastUserPromptIndex + 1 : 0;
+  // Extract lines after the last user prompt.
+  //
+  // Issue #1897: a prompt too long for one row wraps onto indented continuation
+  // rows, and starting at `+ 1` opened the saved reply with the tail of the
+  // operator's own question. Walk past them. (Indentation only survives on a raw
+  // frame; the accumulator has its own copy of this rule for the normalised path.)
+  let startIndex = lastUserPromptIndex >= 0 ? lastUserPromptIndex + 1 : 0;
+  if (lastUserPromptIndex >= 0) {
+    while (
+      startIndex < lines.length &&
+      COPILOT_TRANSCRIPT_CONTINUATION_PATTERN.test(lines[startIndex])
+    ) {
+      startIndex++;
+    }
+  }
   const responseLines = lines.slice(startIndex);
 
   const cleanedLines: string[] = [];
 
   // Track block-level skip state for multi-line constructs
   let inThinkingBlock = false;
-  let inCommandOutputBlock = false;
+  let inToolOutputBlock = false;
 
   for (const line of responseLines) {
     // Normalize using the same function as TUI accumulator (DRY)
     const normalized = normalizeCopilotLine(line);
-    if (!normalized) continue;
+    if (!normalized) {
+      // Issue #1897: a blank row closes whatever block is open. copilot separates
+      // every transcript block with one, and skipping this reset is what allowed a
+      // single misclassified marker row to swallow the entire rest of the reply.
+      inThinkingBlock = false;
+      inToolOutputBlock = false;
+      continue;
+    }
 
     // Skip lines matching any Copilot skip pattern (existing patterns)
     const shouldSkip = COPILOT_SKIP_PATTERNS.some(pattern => pattern.test(normalized));
     if (shouldSkip) continue;
 
-    // Issue #571: Skip ● tool-action lines (but preserve ● response content)
-    if (COPILOT_TOOL_ACTION_PATTERN.test(normalized)) {
-      inCommandOutputBlock = true;
+    // Issue #1897: copilot 1.0.80's tool call. Its command / output rows follow
+    // until the next marker row or blank row.
+    if (COPILOT_TOOL_INVOCATION_PATTERN.test(normalized)) {
+      inToolOutputBlock = true;
       inThinkingBlock = false;
       continue;
     }
 
+    // Issue #571: Skip ● tool-action lines (but preserve ● response content).
+    // Issue #1897: a single-line skip — see COPILOT_TOOL_ACTION_PATTERN.
+    if (COPILOT_TOOL_ACTION_PATTERN.test(normalized)) continue;
+
     // Issue #571: Skip ◐◑◒◓ thinking indicator lines and their continuation lines
     if (COPILOT_THINKING_INDICATOR_PATTERN.test(normalized)) {
       inThinkingBlock = true;
-      inCommandOutputBlock = false;
+      inToolOutputBlock = false;
       continue;
     }
 
@@ -262,7 +339,11 @@ export function cleanCopilotResponse(response: string): string {
     if (COPILOT_COMMAND_OUTPUT_PATTERN.test(normalized)) continue;
 
     // Skip empty ❯ prompt lines and ❯ with content (previous prompts that leaked through)
-    if (/^❯\s*/.test(normalized)) continue;
+    if (/^❯\s*/.test(normalized)) {
+      inThinkingBlock = false;
+      inToolOutputBlock = false;
+      continue;
+    }
 
     // Issue #571: Skip │ and └ prefixed lines (command output block content)
     if (/^[│└]/.test(normalized)) {
@@ -272,17 +353,17 @@ export function cleanCopilotResponse(response: string): string {
     // Detect new content block: ● starts a new response block, reset skip states
     if (/^●/.test(normalized)) {
       inThinkingBlock = false;
-      inCommandOutputBlock = false;
+      inToolOutputBlock = false;
       // This is a ● line that didn't match COPILOT_TOOL_ACTION_PATTERN,
       // so it's actual response content — keep it, but remove the ● prefix
       cleanedLines.push(normalized.replace(/^●\s*/, ''));
       continue;
     }
 
-    // If we're in a thinking or command output block, skip continuation lines
-    // until a new block marker (● or ❯) is found.
+    // If we're in a thinking or tool output block, skip continuation lines until a
+    // new block marker (●, ❯, $) or a blank row is found.
     // Note: TUI accumulator normalizes lines (trim), so indentation is lost.
-    if (inThinkingBlock || inCommandOutputBlock) {
+    if (inThinkingBlock || inToolOutputBlock) {
       continue;
     }
 

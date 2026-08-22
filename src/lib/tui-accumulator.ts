@@ -17,6 +17,10 @@ import {
   OPENCODE_SKIP_PATTERNS,
   OPENCODE_RESPONSE_COMPLETE,
   COPILOT_SKIP_PATTERNS,
+  COPILOT_BOX_ROW_PATTERN,
+  COPILOT_TRANSCRIPT_CONTINUATION_PATTERN,
+  COPILOT_USER_ECHO_PATTERN,
+  findCopilotChromeStart,
 } from './detection/cli-patterns';
 
 /**
@@ -115,10 +119,44 @@ export function normalizeCopilotLine(line: string): string {
  */
 export function extractCopilotContentLines(rawOutput: string): string[] {
   const strippedOutput = stripAnsi(rawOutput);
-  const lines = strippedOutput.split('\n');
+  const allLines = strippedOutput.split('\n');
+
+  // Issue #1897: this accumulator, not extractResponse(), is what actually feeds
+  // cleanCopilotResponse() in checkForResponse(), so copilot's bottom-pinned
+  // chrome has to be cut HERE or the status bar joins the transcript on every
+  // poll and is saved as the agent's reply (" Working esc interrupt GPT-5.6
+  // Terra"). Cut positionally: copilot prints its own status-bar vocabulary as
+  // body text when asked to, so no wording rule can tell the two apart.
+  const chromeStart = findCopilotChromeStart(allLines);
+  const lines = chromeStart >= 0 ? allLines.slice(0, chromeStart) : allLines;
+
   const contentLines: string[] = [];
 
+  // Issue #1897: copilot wraps a long prompt echo onto indented continuation rows.
+  // Normalisation trims them, so downstream they are indistinguishable from reply
+  // text and `cleanCopilotResponse`'s "everything after the last ❯" rule opened
+  // the saved reply with the tail of the operator's own question. The echo row
+  // itself is kept — it is the turn boundary the cleaner anchors on.
+  let inUserEcho = false;
+
   for (const line of lines) {
+    // Issue #1897: tested before normalisation. normalizeCopilotLine() deletes
+    // every U+2500..U+257F glyph, so COPILOT_SKIP_PATTERNS' `[╭╮╰╯│]` rule can
+    // never fire below -- which is how copilot's reasoning block (rows of
+    // `│ <chain of thought>` under a `⌄ Thought for 41s` header) reached History
+    // as the reply.
+    if (COPILOT_BOX_ROW_PATTERN.test(line)) {
+      inUserEcho = false;
+      continue;
+    }
+
+    if (COPILOT_USER_ECHO_PATTERN.test(line)) {
+      inUserEcho = true;
+    } else if (inUserEcho) {
+      if (COPILOT_TRANSCRIPT_CONTINUATION_PATTERN.test(line)) continue;
+      inUserEcho = false;
+    }
+
     const normalized = normalizeCopilotLine(line);
     if (!normalized) continue;
     if (COPILOT_SKIP_PATTERNS.some(p => p.test(normalized))) continue;
