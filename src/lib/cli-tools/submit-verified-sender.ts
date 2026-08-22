@@ -56,12 +56,19 @@
 
 import { sendKeys, sendSpecialKeys, capturePane, clearInputLine } from '../tmux/tmux';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
-import { stripAnsi, detectThinking } from '../detection/cli-patterns';
+import {
+  stripAnsi,
+  detectThinking,
+  findOpenCodeComposerRows,
+  stripOpenCodeGutter,
+  OPENCODE_IDLE_COMPOSER_PATTERN,
+} from '../detection/cli-patterns';
 import type { CLIToolType } from './types';
 import {
   TUI_TEXT_INPUT_WAIT_MS,
   TUI_MESSAGE_PROCESSED_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
+import { OPENCODE_PANE_HEIGHT } from '@/config/tmux-pane-config';
 import { createLogger } from '@/lib/logger';
 import { clearComposer } from '@/lib/session/composer-clear';
 
@@ -92,14 +99,117 @@ const PASTE_PLACEHOLDER_PATTERN = /\[Pasted text[\s#]/;
 const REPLACEMENT_COMMAND_PATTERN = /^\/[A-Za-z]/;
 
 /**
- * Prompt input-line markers across the supported TUIs.
+ * Prompt input-line markers across the marker-drawing TUIs.
  * claude/gemini/copilot: `>` or `❯`; codex: `›`; antigravity: `>`;
  * vibe-local: `ctx:N% ❯`. Leading whitespace is tolerated (tmux padding).
+ *
+ * Issue #1906 scopes this to {@link INPUT_LINE_MARKER_TOOLS}. opencode draws no
+ * marker at all, so applying it there was wrong in both directions — see
+ * {@link readComposer}.
  */
 const INPUT_LINE_MARKER = /^\s*(?:ctx:\d+%\s*)?[>❯›]/;
 
+/**
+ * The tools whose composer is a marked input line (Issue #1906).
+ *
+ * Every supported TUI except opencode. Listed rather than written as
+ * "not opencode" so adding a tool is a decision someone makes with its frames in
+ * front of them: a tool that draws no marker silently gets `submitted` for every
+ * send, which is the exact defect this set exists to close.
+ */
+const INPUT_LINE_MARKER_TOOLS: ReadonlySet<CLIToolType> = new Set<CLIToolType>([
+  'claude',
+  'codex',
+  'gemini',
+  'copilot',
+  'vibe-local',
+  'antigravity',
+]);
+
 /** Lines of pane tail to inspect when verifying submit. */
 const VERIFY_WINDOW_LINES = 12;
+
+/**
+ * How many rows of pane to read back when verifying a submit (Issue #1906).
+ *
+ * {@link VERIFY_WINDOW_LINES} for the marker tools, whose composer is the last
+ * thing on the pane. opencode needs the WHOLE pane: it centres its input box
+ * under the banner until the first turn is answered, roughly 100 rows above the
+ * bottom of a 200-row pane, so a 12-row tail read of a first send contains
+ * nothing but blank padding and the cwd footer — no composer, therefore
+ * "submitted", every time (measured live on opencode 1.18.21).
+ *
+ * `OPENCODE_PANE_HEIGHT` is exactly the height opencode's sessions are created
+ * at, and opencode runs in the alternate screen with no scrollback, so this
+ * reads the visible frame and nothing more. Taken from `@/config` rather than
+ * from `./opencode`: that module imports THIS one, and importing it back pulled
+ * its `child_process` use into every consumer of the sender — which broke a
+ * codex suite whose partial `child_process` mock has no `execFile` (measured).
+ */
+function verifyCaptureLines(cliToolId: CLIToolType): number {
+  return cliToolId === 'opencode' ? OPENCODE_PANE_HEIGHT : VERIFY_WINDOW_LINES;
+}
+
+/**
+ * What the composer holds, read in whichever way the tool's TUI allows
+ * (Issue #1906).
+ *
+ *   absent - no composer on screen: the prompt scrolled away, a dialog replaced
+ *            it, or the session is still starting. Never a failure verdict.
+ *   empty  - the composer is on screen and holds nothing.
+ *   text   - the composer holds something; `text` is its first non-blank row and
+ *            `rows` every raw row it occupies.
+ */
+type ComposerRead =
+  | { kind: 'absent' }
+  | { kind: 'empty' }
+  | { kind: 'text'; text: string; rows: string[] };
+
+/**
+ * Read the composer out of a captured frame.
+ *
+ * Two readers, because the two families of TUI say "this is the input line" in
+ * incompatible ways:
+ *
+ * - **marker tools** ({@link INPUT_LINE_MARKER_TOOLS}) draw a `>` / `❯` / `›` at
+ *   the start of the row. Scanned bottom-up over the tail window so a status bar
+ *   below the box does not hide it.
+ * - **opencode** draws a box with a gutter and no marker anywhere. Its buffer
+ *   rows are located structurally by {@link findOpenCodeComposerRows} (#1911's
+ *   chrome walk), and `Ask anything...` inside that box is opencode's own way of
+ *   saying the buffer is empty (#1883) rather than a row of text.
+ *
+ * Before this split, opencode went through the marker reader, which is wrong
+ * both ways round. It never matched opencode's composer, so EVERY opencode send
+ * was classified `submitted` without evidence — #1471's "the Enter was
+ * swallowed" recovery has never once run on opencode. And when a `>` did land in
+ * the window from somewhere else (a Markdown quote in a reply), the reader
+ * treated that row as the input line and answered from it.
+ */
+function readComposer(
+  cliToolId: CLIToolType,
+  lines: string[],
+  windowLines: string[]
+): ComposerRead {
+  if (cliToolId === 'opencode') {
+    const rows = findOpenCodeComposerRows(lines);
+    if (rows === null) return { kind: 'absent' };
+    // The placeholder is painted only while the buffer is empty, and only
+    // inside the box — hence matched on the raw, still-guttered row (#1883).
+    if (rows.some((row) => OPENCODE_IDLE_COMPOSER_PATTERN.test(row))) return { kind: 'empty' };
+    const first = rows.map(stripOpenCodeGutter).find((row) => row.length > 0);
+    if (first === undefined) return { kind: 'empty' };
+    return { kind: 'text', text: first, rows };
+  }
+
+  if (!INPUT_LINE_MARKER_TOOLS.has(cliToolId)) return { kind: 'absent' };
+
+  const inputLine = findInputLine(windowLines);
+  if (inputLine === null) return { kind: 'absent' };
+  const stripped = stripInputMarker(inputLine);
+  if (stripped.length === 0) return { kind: 'empty' };
+  return { kind: 'text', text: stripped, rows: [inputLine] };
+}
 
 /** Default bounded read-back attempts before giving up (throwing). */
 const DEFAULT_VERIFY_ATTEMPTS = 4;
@@ -203,16 +313,24 @@ function inputMatchesBody(strippedInput: string, message: string): boolean {
  *
  * Version-independent by design — does NOT require the paste placeholder:
  *   A. The tool is generating a response              -> submitted.
- *   B. No input line, or the input line is empty       -> submitted.
- *   C. A paste placeholder is folded on the input line -> pending (Enter eaten).
- *   D. The body is still verbatim on the input line    -> pending (resend Enter).
- *   E. A DIFFERENT slash command is on the input line  -> replaced (TUI popup
+ *   B. No composer, or the composer is empty           -> submitted.
+ *   C. A paste placeholder is folded in the composer   -> pending (Enter eaten).
+ *   D. The body is still verbatim in the composer      -> pending (resend Enter).
+ *   E. A DIFFERENT slash command is in the composer    -> replaced (TUI popup
  *      autocompleted the command; clear the line and throw, never resend Enter).
  *   F. Any other non-empty text (idle placeholder/hint) -> submitted (unchanged
  *      pre-#1501 permissive default, so normal sends never spuriously fail).
  *
- * C–F are scoped to the input line only, so the user-message echo that a TUI
+ * C–F are scoped to the composer only, so the user-message echo that a TUI
  * prints into its history above the prompt never causes a false verdict.
+ *
+ * Issue #1906: "the composer" is read per tool by {@link readComposer} rather
+ * than by looking for a `>` in the last twelve rows. For opencode — which draws
+ * no marker — that read was unreachable, so every send reached F (in fact B) and
+ * this function has never returned anything but `submitted` for it.
+ *
+ * @param output - Captured pane, ANSI intact. For opencode this must be the
+ *   whole pane; {@link verifyCaptureLines} is what asks tmux for it.
  */
 export function classifySubmit(
   output: string,
@@ -220,40 +338,40 @@ export function classifySubmit(
   message: string
 ): SubmitState {
   const clean = stripAnsi(output);
-  const windowLines = clean.split('\n').slice(-VERIFY_WINDOW_LINES);
+  const lines = clean.split('\n');
+  const windowLines = lines.slice(-VERIFY_WINDOW_LINES);
   const windowStr = windowLines.join('\n');
 
-  // A. Actively generating a response => the message was accepted.
+  // A. Actively generating a response => the message was accepted. Read from the
+  //    tail window for every tool: each one's busy marker lives in a status bar
+  //    pinned to the bottom of the pane, and widening it to opencode's whole
+  //    frame would match `esc interrupt` printed inside a reply.
   if (detectThinking(cliToolId, windowStr)) {
     return 'submitted';
   }
 
-  const inputLine = findInputLine(windowLines);
-  // B. No input line visible => the prompt scrolled off / moved on => submitted.
-  if (!inputLine) {
+  const composer = readComposer(cliToolId, lines, windowLines);
+
+  // B. No composer visible (scrolled off / dialog / still starting), or the
+  //    composer is empty => the message left the box => submitted.
+  if (composer.kind !== 'text') {
     return 'submitted';
   }
 
-  const strippedInput = stripInputMarker(inputLine);
-  // B. Empty input line => the message left the box => submitted.
-  if (strippedInput.length === 0) {
-    return 'submitted';
-  }
-
-  // C. A paste placeholder is still folded on the input line => body is there.
-  if (PASTE_PLACEHOLDER_PATTERN.test(inputLine)) {
+  // C. A paste placeholder is still folded into the composer => body is there.
+  if (composer.rows.some((row) => PASTE_PLACEHOLDER_PATTERN.test(row))) {
     return 'pending';
   }
 
-  // D. The typed body is still sitting on the input line => resend Enter.
-  if (inputMatchesBody(strippedInput, message)) {
+  // D. The typed body is still sitting in the composer => resend Enter.
+  if (inputMatchesBody(composer.text, message)) {
     return 'pending';
   }
 
-  // E. A different slash command is on the input line => a completion popup
+  // E. A different slash command is in the composer => a completion popup
   //    replaced what we typed. (Scoped to `/…` so idle-prompt placeholders that
   //    some TUIs paint on an empty composer are never mistaken for this.)
-  if (REPLACEMENT_COMMAND_PATTERN.test(strippedInput)) {
+  if (REPLACEMENT_COMMAND_PATTERN.test(composer.text)) {
     return 'replaced';
   }
 
@@ -416,7 +534,7 @@ export async function sendMessageWithSubmitVerification(
   for (let attempt = 0; attempt < attempts; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, verifyDelayMs));
 
-    const output = await capturePane(sessionName, { startLine: -VERIFY_WINDOW_LINES });
+    const output = await capturePane(sessionName, { startLine: -verifyCaptureLines(cliToolId) });
     const state = classifySubmit(output, cliToolId, message);
 
     if (state === 'submitted') {

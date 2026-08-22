@@ -14,6 +14,21 @@
  * through `resolveSessionTarget`, the shared authority. Before that the route
  * derived the session name from the tool alone, so every non-primary instance
  * was unreachable from it (#1906).
+ *
+ * Issue #1906 finishes the job on the other two halves of that report. The
+ * route now (a) consults the same prompt guard `sendUserMessage` does before it
+ * types anything, and (b) sends through `ICLITool.sendMessage` instead of
+ * driving tmux itself — which is what removes the copilot special case that
+ * flattened newlines and skipped every copilot-specific check. Nothing here
+ * imports `lib/tmux` any more (design §4 D4).
+ *
+ * What it deliberately does NOT do is call `sendUserMessage`, which is what the
+ * Issue text proposed. That function also writes a `chat_messages` row and
+ * starts the response poller, and this route's one caller
+ * (`src/hooks/useSendMessage.ts`, the Review screen's input) already POSTs the
+ * message to `/api/worktrees/:id/messages` immediately afterwards — so routing
+ * through it would put every Review-screen message into History twice. The
+ * guard is what was missing, and the guard is what was taken.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -26,11 +41,12 @@ import {
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { getWorktreeById } from '@/lib/db';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { hasSession, sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
-import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
-import { sendMessageWithSubmitVerification } from '@/lib/cli-tools/submit-verified-sender';
+import {
+  isPromptWaiting,
+  promptWaitingMessage,
+  PROMPT_WAITING_CODE,
+} from '@/lib/session/prompt-waiting-guard';
 import { createLogger } from '@/lib/logger';
-import { COPILOT_SEND_ENTER_DELAY_MS } from '@/config/copilot-constants';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/terminal');
@@ -112,13 +128,12 @@ export async function POST(
     }
     const target = resolution.target;
 
-    // Derive session name via CLIToolManager (validates via BaseCLITool.getSessionName)
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(target.cliToolId);
-    const sessionName = cliTool.getSessionName(id, instanceId);
 
-    // No auto-creation; return 404 if session does not exist
-    const sessionExists = await hasSession(sessionName);
+    // No auto-creation; return 404 if session does not exist. `isRunning` is the
+    // ICLITool spelling of the `hasSession` check this used to make directly.
+    const sessionExists = await cliTool.isRunning(id, instanceId);
     if (!sessionExists) {
       return NextResponse.json(
         { error: 'Session not found. Use startSession API to create a session first.' },
@@ -126,37 +141,44 @@ export async function POST(
       );
     }
 
-    // Send command to tmux session (non-blocking for all tools).
-    // Note: copilot sendMessage() was reverted due to waitForPrompt blocking issues (#559)
-    if (target.cliToolId === 'copilot') {
-      // Copilot CLI auto-enters multi-line mode when text exceeds pane width.
-      // In multi-line mode, C-m (bundled with text) adds a newline instead of
-      // submitting. Sending Enter as a separate command after a delay works.
-      // Replace newlines with spaces to prevent Copilot CLI multi-line mode
-      const copilotCommand = command.replace(/\n+/g, ' ').trim();
-      await sendKeys(sessionName, copilotCommand, false);
-      await new Promise(resolve => setTimeout(resolve, COPILOT_SEND_ENTER_DELAY_MS));
-      await sendSpecialKeys(sessionName, ['Enter']);
-    } else {
-      // Issue #1470: the old `sendKeys(command)` batched body+C-m into a single
-      // send-keys, which TUIs (claude/codex/gemini/opencode/vibe-local/antigravity)
-      // treat as a bracketed paste that swallows the Enter — typed but unsent, yet
-      // this route still returned { success: true }. Delegate to the shared
-      // submit-verified helper so the body and Enter are separated and the submit
-      // is read-back verified. A bounded, quick verify profile keeps the route
-      // non-blocking (it must not re-introduce waitForPrompt-style blocking, #559);
-      // if submit cannot be confirmed the helper throws -> 500 (never a false success).
-      await sendMessageWithSubmitVerification({
-        sessionName,
-        message: command,
+    // Issue #1906: the same refusal `sendUserMessage` makes (#1708/#1737). This
+    // route typed into whatever was on screen, so a Review-screen message sent
+    // while a permission dialog was open landed in the DIALOG's input line: the
+    // message never reached the agent, and the next `respond` had to answer a
+    // prompt whose input already held it. 409 rather than 500 — the request was
+    // well formed and the server is healthy, the session simply cannot accept a
+    // message right now — with the same stable `code` the send route returns.
+    const promptGuard = await isPromptWaiting(id, target.cliToolId, instanceId);
+    if (promptGuard.waiting) {
+      logger.info('terminal-send-refused-prompt-waiting', {
+        worktreeId: id,
         cliToolId: target.cliToolId,
-        verifyAttempts: 2,
-        verifyDelayMs: 200,
+        reason: promptGuard.reason,
+        blockedBy: promptGuard.blockedBy,
       });
+      return NextResponse.json(
+        { error: promptWaitingMessage(id, promptGuard.blockedBy), code: PROMPT_WAITING_CODE },
+        { status: 409 }
+      );
     }
 
-    // Issue #405: Invalidate cache after sending command
-    invalidateCache(sessionName);
+    // Issue #1906: delegate to the tool. This route used to reach past
+    // `ICLITool.sendMessage` into tmux — a raw `sendKeys` + delayed Enter for
+    // copilot (newlines flattened to spaces, no submit verification, none of
+    // copilot's own dialog/picker handling) and `sendMessageWithSubmitVerification`
+    // for everything else, with a hand-tuned verify profile that had to be kept
+    // in step with the real one by hand. Each tool's own `sendMessage` already
+    // separates body from Enter and read-back-verifies the submit (#1471), so an
+    // unconfirmed submit still throws here and still becomes a 500 — never a
+    // false `{ success: true }`.
+    //
+    // The #559 note this replaces said copilot could not use its `sendMessage`
+    // because `waitForPrompt` blocks. Measured on copilot 1.0.80: the composer
+    // row `❯` is drawn at column 0 even mid-response, so `COPILOT_PROMPT_PATTERN`
+    // matches on the first poll and the wait returns immediately. It only spends
+    // its window when the composer is genuinely gone — i.e. a dialog is up, which
+    // is exactly when typing was the wrong thing to do.
+    await cliTool.sendMessage(id, command, instanceId);
 
     return NextResponse.json({ success: true });
   } catch (error) {

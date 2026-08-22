@@ -10,10 +10,13 @@
  *
  * The guard is deliberately ASYMMETRIC and that asymmetry is tested here:
  *
- *   - `send` is refused, because a send has no business arriving mid-prompt.
- *   - `respond` / `special-keys` / `prompt-response` are NOT, because they are
- *     the only ways out of this state. Blocking them would trade a lost message
- *     for a session nobody can unblock.
+ *   - message sends are refused, because a message has no business arriving
+ *     mid-prompt. Issue #1906 added the second such path: `POST /terminal`, the
+ *     Review screen's composer, which used to type into whatever was on screen.
+ *   - `respond` / `special-keys` / `prompt-response` / `interrupt` /
+ *     `clear-composer` are NOT, because they are the only ways out of this
+ *     state. Blocking them would trade a lost message for a session nobody can
+ *     unblock.
  *   - It only fires when the prompt IS detected. A frame that slips past
  *     detection is not covered here at all — that is what the `wait` dwell
  *     (Issue #1708 B-1) is for.
@@ -224,17 +227,37 @@ describe('sendUserMessage itself refuses, so scheduled sends are covered too (Is
 });
 
 describe('the guard covers every message-send path and no answer path (Issue #1708)', () => {
-  // Structural, and deliberately so. The guard sits in sendUserMessage() because
-  // that is the choke point for typing a message at an agent. Two invariants keep
-  // it honest, and neither is visible from any single file:
+  // Structural, and deliberately so. Two invariants keep the guard honest, and
+  // neither is visible from any single file:
   //
-  //   1. Everything that types a message goes through sendUserMessage(). The
-  //      timer manager calls it directly, and a guard placed in the send route
-  //      would have let scheduled sends fire into open dialogs.
-  //   2. respond / special-keys / prompt-response do NOT go through it. They are
-  //      the only way out of this state; if they ever start routing through
+  //   1. Every path that types a MESSAGE at a worktree agent consults the guard.
+  //   2. No path that ANSWERS or unblocks a prompt consults it. Those are the
+  //      only way out of this state; if they ever start routing through
   //      sendUserMessage they will begin refusing too, and the session becomes
   //      unblockable — the one failure worse than the one being fixed.
+  //
+  // Invariant 1 has TWO implementations, which is why this block enumerates
+  // spellings rather than counting one:
+  //
+  //   - through `sendUserMessage()`, the choke point for the send route and the
+  //     timer manager. The guard lives inside the service rather than in the
+  //     route because the timer manager calls the service directly, and a guard
+  //     placed in the route would have let scheduled sends fire into open
+  //     dialogs on their own timetable with nobody watching.
+  //   - directly, in `POST /terminal` (Issue #1906). That route is the Review
+  //     screen's message composer — its one caller is
+  //     `src/hooks/useSendMessage.ts` via `components/review/SimpleMessageInput`
+  //     — so it types a message and belongs under invariant 1. It cannot reach
+  //     the guard the first way: `useSendMessage` already POSTs the message to
+  //     `/messages` right after the terminal call, so routing it through
+  //     `sendUserMessage` would record every Review-screen message in History
+  //     twice and start the response poller twice. It therefore calls
+  //     `isPromptWaiting` itself, and the assertions below pin BOTH halves of
+  //     that arrangement so it cannot quietly become one or the other.
+  //
+  // Deliberately NOT in scope: `app/api/assistant/**`. Those routes drive the
+  // Assistant Chat conversation sessions, a different session family; the guard
+  // is keyed on `(worktreeId, cliToolId, instanceId)` worktree agent sessions.
   const SRC = fileURLToPath(new URL('../../src/', import.meta.url));
 
   /**
@@ -259,16 +282,38 @@ describe('the guard covers every message-send path and no answer path (Issue #17
     return hits.sort();
   }
 
-  it('is called only from sendUserMessage', () => {
+  it('is reached from the message-send paths and nothing else', () => {
     expect(importersOf('prompt-waiting-guard')).toEqual([
       'app/api/worktrees/[id]/send/route.ts', // PROMPT_WAITING_CODE only, see below
-      'lib/session/send-user-message.ts',
+      'app/api/worktrees/[id]/terminal/route.ts', // calls the guard itself, see below
+      'lib/session/send-user-message.ts', // where the check actually lives
     ]);
-    // The route imports the status code to map the refusal, not the check
+  });
+
+  it('keeps the send route on the code alone and the service on the check', () => {
+    // The send route imports the status code to map the refusal, not the check
     // itself. Re-adding a pre-check there would mean two capture passes per
     // send and two places to keep in step.
     const route = readFileSync(join(SRC, 'app/api/worktrees/[id]/send/route.ts'), 'utf8');
     expect(route).not.toContain('isPromptWaiting');
+    // ...and the service it calls is where the check is, so a send route that
+    // stopped delegating could not silently lose the guard with it.
+    const service = readFileSync(join(SRC, 'lib/session/send-user-message.ts'), 'utf8');
+    expect(service).toContain('isPromptWaiting(');
+  });
+
+  it('keeps the terminal route on the check, since it does not go through the service', () => {
+    // Issue #1906. Both halves are asserted because either one alone is a way
+    // for this route to stop being guarded while the allowlist entry above still
+    // passes: importing only `PROMPT_WAITING_CODE` (the send route's shape)
+    // would leave nothing checking, and routing through `sendUserMessage` would
+    // double-record every Review-screen message in History.
+    const route = readFileSync(join(SRC, 'app/api/worktrees/[id]/terminal/route.ts'), 'utf8');
+    expect(route).toContain('isPromptWaiting(');
+    expect(route).not.toContain('send-user-message');
+    // It must also still be a SEND path rather than a key path: the refusal is
+    // only correct for something that types a message at the agent.
+    expect(route).toContain('cliTool.sendMessage(');
   });
 
   it('names every caller of sendUserMessage, so a new one is a decision', () => {
@@ -278,14 +323,35 @@ describe('the guard covers every message-send path and no answer path (Issue #17
     ]);
   });
 
-  it('keeps the answer routes off that path entirely', () => {
-    for (const route of ['respond', 'special-keys', 'prompt-response']) {
+  it('keeps the answer and unblock paths off that path entirely', () => {
+    // The first three ANSWER a prompt; `interrupt` and `clear-composer` are the
+    // other two ways a human gets a stuck session back (Escape, and emptying the
+    // composer the dialog left text in). All five send keys to a session that is
+    // by definition sitting on a prompt, so a guard on any of them would refuse
+    // exactly when it is needed. `interrupt` / `clear-composer` were never
+    // named here; they are added by Issue #1906 because the enumeration is the
+    // whole value of this assertion.
+    const answerRoutes = [
+      'respond',
+      'special-keys',
+      'prompt-response',
+      'interrupt',
+      'clear-composer',
+    ];
+    for (const route of answerRoutes) {
       const source = readFileSync(
         join(SRC, 'app/api/worktrees/[id]', route, 'route.ts'),
         'utf8'
       );
-      expect(source).not.toContain('prompt-waiting-guard');
-      expect(source).not.toContain('send-user-message');
+      expect(source, `${route} must not consult the guard`).not.toContain('prompt-waiting-guard');
+      expect(source, `${route} must not route through the service`).not.toContain('send-user-message');
     }
+
+    // Auto-Yes answers dialogs with no human in the loop, from a poller rather
+    // than a route. Same rule, and it is the one place where a refusal would be
+    // silent as well as wrong.
+    const autoAnswer = readFileSync(join(SRC, 'lib/prompt-answer-sender.ts'), 'utf8');
+    expect(autoAnswer).not.toContain('prompt-waiting-guard');
+    expect(autoAnswer).not.toContain('send-user-message');
   });
 });
