@@ -27,18 +27,30 @@ describe('OPENCODE_SELECTION_LIST_PATTERN', () => {
   it('should match "Select model" header from actual capture-pane output', () => {
     // Actual OpenCode TUI output: "              Select model                                     esc"
     expect(OPENCODE_SELECTION_LIST_PATTERN.test('              Select model                                     esc')).toBe(true);
-    expect(OPENCODE_SELECTION_LIST_PATTERN.test('Select model')).toBe(true);
-    expect(OPENCODE_SELECTION_LIST_PATTERN.test('  Select model  ')).toBe(true);
   });
 
   it('should match "Select provider" header', () => {
     expect(OPENCODE_SELECTION_LIST_PATTERN.test('              Select provider                                  esc')).toBe(true);
-    expect(OPENCODE_SELECTION_LIST_PATTERN.test('Select provider')).toBe(true);
   });
 
   it('should match "Connect a provider" header from /connect command', () => {
     expect(OPENCODE_SELECTION_LIST_PATTERN.test('              Connect a provider                               esc')).toBe(true);
-    expect(OPENCODE_SELECTION_LIST_PATTERN.test('Connect a provider')).toBe(true);
+  });
+
+  // [Issue #1896] The bare phrase is no longer enough. `status-detector.ts` tests
+  // this pattern against the WHOLE content area (~200 rows, because the header
+  // can sit far above the last row of a long list), so matching the words alone
+  // parked a session on `waiting` / `opencode_selection_list` for the rest of its
+  // life as soon as an agent wrote "Select model to continue:" in an answer
+  // (measured live: `lib/detection/fixtures/opencode-live-1896/select-model-in-response.txt`).
+  // The picker's right-aligned `esc` hatch is now required — it is the overlay's
+  // own dismiss affordance, i.e. positive evidence that one is open.
+  it('should NOT match a header stripped of the picker esc hatch (Issue #1896)', () => {
+    expect(OPENCODE_SELECTION_LIST_PATTERN.test('Select model')).toBe(false);
+    expect(OPENCODE_SELECTION_LIST_PATTERN.test('  Select model  ')).toBe(false);
+    expect(OPENCODE_SELECTION_LIST_PATTERN.test('Select provider')).toBe(false);
+    expect(OPENCODE_SELECTION_LIST_PATTERN.test('Connect a provider')).toBe(false);
+    expect(OPENCODE_SELECTION_LIST_PATTERN.test('Select model to continue:')).toBe(false);
   });
 
   it('should match in multiline content', () => {
