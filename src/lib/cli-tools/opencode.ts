@@ -5,7 +5,7 @@
  * @remarks Follows the same tmux-based pattern as Claude/Codex/Gemini/VibeLocal tools.
  * - startSession: launches `opencode` TUI in tmux
  * - sendMessage: sends text via tmux send-keys + Enter
- * - killSession: sends `/exit` command then falls back to tmux kill-session
+ * - killSession: types `/exit` + a separate Enter, then falls back to tmux kill-session
  * - interrupt(): inherits BaseCLITool default (Escape key) [D2-008]
  *
  * ## Structured events (Issue #1763, Epic #1720 Phase 4-5)
@@ -40,6 +40,7 @@ import {
   createSession,
   capturePane,
   sendKeys,
+  sendSpecialKeys,
   killSession,
   exactTarget,
 } from '../tmux/tmux';
@@ -67,6 +68,7 @@ import {
 } from '@/lib/hooks/sources/opencode/runtime';
 import {
   TUI_SESSION_CREATE_WAIT_MS,
+  TUI_TEXT_INPUT_WAIT_MS,
   OPENCODE_EXIT_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
 
@@ -364,10 +366,25 @@ export class OpenCodeTool extends BaseCLITool {
    *
    * Shutdown sequence [D1-006, D1-007]:
    * 1. Check if session exists
-   * 2. If exists: send `/exit` TUI command for graceful shutdown
+   * 2. If exists: type `/exit`, then submit it with a separate Enter
    * 3. Wait 2s for OpenCode to process the exit command
    * 4. Re-check session: if still running, force-kill via tmux kill-session
    * 5. If session did not exist: attempt kill anyway (cleanup stale sessions)
+   *
+   * Step 2 used to be a single `send-keys '/exit' C-m` — the pre-#1471 shape.
+   * Measured on opencode 1.18.21 (private tmux socket, 200x50): the batched
+   * form does NOT exit. Typing `/` opens the command palette, and the `C-m`
+   * that arrives in the same tmux command is consumed by the palette rather
+   * than submitting, leaving `/exit` in the composer with the palette open —
+   * still up 10.8 s later, 2 runs out of 2. A separate Enter from that state
+   * exits in 0.34 s; typed-then-submitted from a clean composer it exits in
+   * 0.445 / 0.456 / 0.458 s (n=3). Until now nothing noticed, because
+   * `kill-session`'s route reached past this method into tmux (Issue #1905).
+   *
+   * `sendMessageWithSubmitVerification` is deliberately not reused here: it
+   * reads the pane back to confirm the submit and THROWS when it cannot, which
+   * for a command whose success condition is "the TUI is gone" would turn every
+   * successful exit into an error.
    *
    * @param worktreeId - Worktree ID
    */
@@ -383,8 +400,11 @@ export class OpenCodeTool extends BaseCLITool {
       // Step 1: Check if the tmux session currently exists
       const exists = await hasSession(sessionName);
       if (exists) {
-        // Step 2: Send /exit command for graceful TUI shutdown [D1-006]
-        await sendKeys(sessionName, OPENCODE_EXIT_COMMAND, true);
+        // Step 2: Send /exit command for graceful TUI shutdown [D1-006].
+        // Body and Enter are separate tmux commands (see the note above).
+        await sendKeys(sessionName, OPENCODE_EXIT_COMMAND, false);
+        await new Promise((resolve) => setTimeout(resolve, TUI_TEXT_INPUT_WAIT_MS));
+        await sendSpecialKeys(sessionName, ['Enter']);
 
         // Step 3: Wait for OpenCode to process the exit command
         await new Promise((resolve) => setTimeout(resolve, OPENCODE_EXIT_WAIT_MS));
