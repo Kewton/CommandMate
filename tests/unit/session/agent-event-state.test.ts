@@ -244,6 +244,12 @@ describe('structuredEvents exposure (Issue #1722)', () => {
       // agent's behalf — claude answers its own hook, so this stays null for it
       // for the life of the session. Present and null, not absent.
       permissionDecision: null,
+      // Issue #1926: derived from the same single event. Nothing has reported
+      // one, so no turn can be derived either.
+      turnId: null,
+      openedAt: null,
+      closedAt: null,
+      closedBy: null,
       source: claudeSource,
     });
   });
@@ -278,9 +284,24 @@ describe('structuredEvents exposure (Issue #1722)', () => {
       // agent's behalf — claude answers its own hook, so this stays null for it
       // for the life of the session. Present and null, not absent.
       permissionDecision: null,
+      // Issue #1926: derived from the same single event. Nothing has reported
+      // one, so no turn can be derived either.
+      turnId: null,
+      openedAt: null,
+      closedAt: null,
+      closedBy: null,
       source: claudeSource,
     });
-    expect({ ...after, structuredEvents: null }).toEqual({ ...before, structuredEvents: null });
+    // `lastKnownStatusAt` is blanked alongside `structuredEvents`: it is the
+    // wall-clock of the poll (Issue #1926), so two calls that land in different
+    // milliseconds differ by design and this comparison would be a clock race.
+    // The verdict itself (`lastKnownStatus`) stays in.
+    const comparable = (p: typeof after) => ({
+      ...p,
+      structuredEvents: null,
+      lastKnownStatusAt: null,
+    });
+    expect(comparable(after)).toEqual(comparable(before));
   });
 
   it('surfaces the last event for a session that is no longer running', async () => {

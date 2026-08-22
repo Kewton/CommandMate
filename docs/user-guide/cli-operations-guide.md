@@ -99,12 +99,12 @@ commandmate ls --id anvil-              # worktree IDプレフィックスでフ
 ### 出力例
 
 ```
-ID                                               NAME                  STATUS   DEFAULT
------------------------------------------------  --------------------  -------  ------
-localllm-test                                    main                  ready    claude
-commandmate                                      develop               running  claude
-commandmate-issue-518                            feature/518-worktree  ready    claude
-commandmate-main                                 main                  idle     claude
+ID                                               NAME                  STATUS   REASON                          DEFAULT
+-----------------------------------------------  --------------------  -------  ------------------------------  ------
+localllm-test                                    main                  ready    input_prompt                    claude
+commandmate                                      develop               running  thinking_indicator              claude
+commandmate-issue-518                            feature/518-worktree  ready    no_recent_output (no evidence)  claude
+commandmate-main                                 main                  idle     -                               claude
 ```
 
 > ID は **worktree ディレクトリ名**由来です（Issue #1621/#1645）。`/worktree-setup` が作る
@@ -119,6 +119,38 @@ commandmate-main                                 main                  idle     
 | `ready` | セッション起動中・入力待ち（タスク完了後の状態） |
 | `running` | エージェントがタスク実行中 |
 | `waiting` | 確認プロンプト待ち（Yes/No等） |
+
+### REASON列の意味（Issue #1926）
+
+STATUS の**根拠**です。同じ `ready` でも「エージェントが composer に戻った」（`input_prompt`）と
+「画面が読めないまま出力も止まったのでフォールバックで ready と呼んでいる」（`no_recent_output`）は
+別物で、これまで表からは区別できませんでした。
+
+| 表示 | 意味 |
+|---|---|
+| `input_prompt` | composer（入力プロンプト）を検出した |
+| `thinking_indicator` | 思考インジケータを検出した |
+| `prompt_detected` | 確認プロンプトを解析できた |
+| `<reason> (no evidence)` | **肯定的証拠なし**（`statusEvidence: 'none'`）。検出層が画面を分類できず、STATUS はフォールバック値です。現状は `default` と `no_recent_output` の 2 経路 |
+| `-` | サーバーが理由を返さない。#1926 以前のサーバー／セッション未起動／そのツールに 2 つ以上のインスタンスがある（集約に単一の理由は無い）のいずれか |
+
+> `(no evidence)` の行は「完了した」ではありません。`commandmate capture <id> --pane` で
+> 生ペインを確認してください。同じ状態が 60 秒続くと `commandmate wait` は exit 10
+> （`type: 'unclassified'`）を返します。
+
+`--json` の値は**サーバーの行そのまま**で、理由と証拠は `sessionStatusByCli.<tool>` の下に入ります
+（トップレベルには足していません。`GET /api/worktrees` と一致させるためです）。
+
+```bash
+commandmate ls --json \
+  | jq -r '.[] | "\(.id)\t\(.sessionStatusByCli.claude.sessionStatusReason // "-")\t\(.sessionStatusByCli.claude.statusEvidence // "-")"'
+```
+
+| フィールド | 意味 |
+|---|---|
+| `sessionStatusByCli.<tool>.statusEvidence` | `'positive'`（何かが肯定的に確認した）／`'none'`（読めなかった） |
+| `sessionStatusByCli.<tool>.sessionStatusReason` | スクレイパーの理由コード |
+| `sessionStatusByCli.<tool>.lastKnownStatus` / `lastKnownStatusAt` | 最後に**肯定的に確認できた**状態とその時刻。サーバーのメモリ上に保持（TTL 30 分、再起動でクリア、セッション停止で破棄） |
 
 ---
 
@@ -433,6 +465,11 @@ auto-yes も契約の `autoYes` ポリシーも exit 10 も一切発火しない
 
 `--timeout` / `--stall-timeout` を 60 秒未満に設定した場合は常にそちらが先に効きます（この滞留判定は
 長い待ちを先回りするためのもので、短い待ちを延ばすものではありません）。
+
+> **この段落の要点は `commandmate wait --help` にも出ます（Issue #1926）。** 滞留判定は専用フラグを
+> 持たない停止事由なので、オプション一覧を読んだだけでは存在に気づけません。60 秒・exit 10・
+> `--stall-timeout` / `--timeout` との優先関係・`capture --pane` への導線を `--help` の
+> `Unclassified frames` 節に置いています。
 
 #### `ready` は必ずしも「完了」ではありません
 
@@ -1106,6 +1143,9 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
   "isSelectionListActive": false,
   "isPagerActive": false,
   "isUnclassifiedActive": false,
+  "statusEvidence": "positive",
+  "lastKnownStatus": "running",
+  "lastKnownStatusAt": 1754296400123,
   "lastServerResponseTimestamp": null,
   "serverPollerActive": true,
   "sessionStatus": "running",
@@ -1115,6 +1155,10 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
     "lastEventType": "user_prompt_submit",
     "lastEventAt": 1754296400000,
     "lastEventDetail": null,
+    "turnId": "turn-1754296400000",
+    "openedAt": 1754296400000,
+    "closedAt": null,
+    "closedBy": null,
     "promptWaitingSince": null,
     "promptWaitingSource": null,
     "source": {
@@ -1150,12 +1194,60 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
 | `isRunning` | tmux セッションが存在して healthy（`src/lib/session/claude-session.ts:543-556`）。**ターン進行中の意味ではない** |
 | `sessionStatus` / `sessionStatusReason` | 状態と、その根拠（`hook_*` なら hooks 由来、それ以外はスクレイパー由来。`HOOK_STATUS_REASON` は `src/lib/session/status-mapping.ts`） |
 | `structuredEvents.*` / `lastStopEventAt` | hooks の最終イベントと最終 `stop` 時刻。hooks が来ていなければ `null` |
+| `statusEvidence` / `lastKnownStatus` / `lastKnownStatusAt` | 判定が肯定的証拠に基づくか、と直前の確定状態（Issue #1926）。下記参照 |
+| `structuredEvents.turnId` / `openedAt` / `closedAt` / `closedBy` | ターンの暫定境界（Issue #1926）。**まだ安定した turn 同一性ではありません**。下記参照 |
 | `structuredEvents.source` | そのツールの構造化イベントソースの識別子と**宣言値**（Issue #1924）。セッションの状態ではなく**ソースの性質**なので、hooks が 1 件も来ていなくても・セッションが止まっていても必ず入る。ソース実装が無いツール（`vibe-local`）は互換ソースの「未計測」値（`supportedEvents: []`）を返す |
 | `upstreamFault` | 画面に上流障害の署名があれば `{id, matchedText, at}`、無ければ `null`（Issue #1839）。**`null` は「健全」ではなく「既知の署名が無かった」** |
 | `resolvedBy` / `conflict` | `cliToolId` を選んだ**解決段**と、roster と明示指定の矛盾（Issue #1884）。下記参照 |
 
 画面が空かどうかは `realtimeSnippet.trim() === ''` と `lineCount` で見る。
 `content` は差分なので単独では判断しない。
+
+#### `statusEvidence` / `lastKnownStatus`（Issue #1926）
+
+`sessionStatus` が**肯定的証拠に基づく**のか、単に否定パターンに一致しなかっただけなのかを
+分けて出します。設計方針書 §4 D1 の「完了は肯定的証拠でのみ宣言する」に対応する追加フィールドで、
+**`sessionStatus` の値域（`idle` / `ready` / `running` / `waiting`）は変わりません**。
+
+| 値 | 意味 |
+|---|---|
+| `statusEvidence: "positive"` | 完了マーカー・思考インジケータ・解析できたプロンプト・composer、あるいはエージェント自身の `Stop` が判定の根拠 |
+| `statusEvidence: "none"` | 対話中の画面なのに検出層が読めなかった。`sessionStatus` はフォールバック値。現状は `running`/`default` と `ready`/`no_recent_output` の 2 経路で、既存の `isUnclassifiedActive` と**同じ事実**（`statusEvidence === 'none'` ⇔ `isUnclassifiedActive === true`） |
+
+`lastKnownStatus` / `lastKnownStatusAt` は**最後に肯定的に確認できた状態**とその時刻です。
+`statusEvidence` が `"positive"` の間は `sessionStatus` と同じ値で、`"none"` になった瞬間から
+「フォールバックが何と呼んでいるか」ではなく「直前まで実際に何だったか」を答えます。
+
+```bash
+# フォールバックで ready に見えているだけの worktree を弾く
+commandmate capture "$WT" --json | jq -r 'select(.statusEvidence == "none") | .lastKnownStatus'
+```
+
+- サーバーのメモリ上に保持します。**TTL 30 分**（構造化状態の staleness bound と同値）、
+  **サーバー再起動でクリア**、**セッション停止で破棄**します。`null` はこの 4 つを区別しません
+- `isRunning: false` のセッションは `lastKnownStatus: null` です（`model` と同じ理由）。
+  `statusEvidence` は `"positive"` — tmux に問い合わせて「セッションが無い」と確認した結果だからです
+- **キーが無い**のは #1926 以前のサーバーで、`"positive"` とは意味が違います
+- 既存フィールドは一切変わっていません。`isUnclassifiedActive` もそのまま出ます
+
+#### `structuredEvents` のターンフィールド（Issue #1926）
+
+| フィールド | 意味 |
+|---|---|
+| `turnId` | ターンの識別子（`turn-<openedAt>`）、無ければ `null` |
+| `openedAt` | 直近の `user_prompt_submit` / `pre_tool_use` / `post_tool_use` の時刻 |
+| `closedAt` | エージェントがターン終了（`Stop`）を報告した時刻 |
+| `closedBy` | 終了理由。現状は `'stop'` のみ |
+
+> **`turnId` はまだ安定したターン同一性ではありません。** 現状サーバーが保持しているのは
+> **最新イベント 1 件だけ**なので、ターン途中の `pre_tool_use` で `openedAt` と `turnId` が
+> 打ち直されます。`turnId` の変化を「新しいターンが始まった」と読むと 1 ターンの中で何度も
+> 誤検知します。本実装（generation フェンス配下の turn レコード）は Phase 4 です。
+>
+> `commandmate wait` はこれらをまだ読みません。ターン成立の判定（Issue #1839）は
+> `lastEventType` / `lastEventAt` のままで、`lastEventType` / `lastEventAt` も残っています。
+> `closedAt` が `null` でも「ターンが続いている」とは限りません（`notification` が最後なら
+> 4 つとも `null` になります）。
 
 #### `model` / `reasoningEffort`（Issue #1785）
 

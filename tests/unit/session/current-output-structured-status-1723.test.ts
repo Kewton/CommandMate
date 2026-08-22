@@ -195,7 +195,17 @@ describe('buildCurrentOutput: the scraper keeps prompts (Issue #1723 scope line)
     record('notification', 'permission_prompt');
     const after = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
 
-    expect({ ...after, structuredEvents: null }).toEqual({ ...before, structuredEvents: null });
+    // `lastKnownStatusAt` is blanked alongside `structuredEvents` for the same
+    // kind of reason, but it is worth stating rather than folding in silently:
+    // it is the wall-clock of the poll, so two calls a millisecond apart differ
+    // by design (Issue #1926). What this case is about is the VERDICT, and
+    // `lastKnownStatus` itself stays in the comparison.
+    const comparable = (p: Awaited<ReturnType<typeof buildCurrentOutput>>) => ({
+      ...p,
+      structuredEvents: null,
+      lastKnownStatusAt: null,
+    });
+    expect(comparable(after)).toEqual(comparable(before));
   });
 });
 
