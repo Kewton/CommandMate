@@ -527,6 +527,34 @@ export interface CurrentOutputResponse {
     rosterCliTool: string;
     requestedCliTool: string;
   } | null;
+
+  /**
+   * Whether the server's detection rules were read off the CLI build that is
+   * installed (Issue #1929, design §4 D2 / §7).
+   *
+   * Optional **twice over**, and the two absences mean different things:
+   *
+   *  - no `detector` key at all — either a server older than #1929, or a server
+   *    whose probe cache is still cold. `capture --json` runs on a 5-second
+   *    poll, so the probe is never awaited on that path (DR3-013); the first
+   *    polls after a restart simply carry nothing and a later one carries the
+   *    answer. Read it as "not known yet", never as "nothing is stale".
+   *  - `detector.staleness` present but `{}` — the probe HAS answered and every
+   *    tool it could read is at or below the version its rules were measured
+   *    against.
+   *
+   * A tool appears only when its installed build is strictly newer than
+   * `verifiedAgainst`. A tool that is not installed, whose `--version` could not
+   * be read, or whose executable did not resolve on `PATH` is absent — no probe
+   * was run for it and no child process was spawned (§13.2 S17).
+   *
+   * Kept off `GET /api/capabilities` deliberately: an installed-CLI version list
+   * is a software inventory, so it is published only on authenticated surfaces
+   * (DR4-008).
+   */
+  detector?: {
+    staleness?: Record<string, { installed: string; verifiedAgainst: string }>;
+  };
 }
 
 // Mirrors: src/types/models.ts BasePromptData (subset for CLI output)

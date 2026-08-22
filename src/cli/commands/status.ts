@@ -13,6 +13,7 @@ import { DaemonManager } from '../utils/daemon';
 import { getPidFilePath, getEnvPath, getPidsDir } from '../utils/env-setup';
 import { readPackageVersion } from '../utils/package-info';
 import { validateIssueNoResult } from '../utils/input-validators';
+import { getDetectorFreshness } from '../../lib/detection/version-probes';
 
 const logger = new CLILogger();
 
@@ -34,6 +35,36 @@ function printVersionInfo(status: DaemonStatus): void {
       `Installed CLI is v${cliVersion} but the running server is v${status.version}. ` +
         'Restart the server ("commandmate stop && commandmate start") to run the current version.'
     );
+  }
+}
+
+/**
+ * Warn when this build's detection rules were read off an older CLI than the one
+ * installed (Issue #1929, design §4 D2).
+ *
+ * `status` is the diagnostic command and an operator-initiated one-off, so
+ * unlike the `capture` polling path it may await the probes — the design draws
+ * exactly that line ("露出面ごとに待つ / 待たない を分ける"). Measured cost is
+ * the slowest single `--version` (~0.9s on the reference machine) because they
+ * run concurrently, and every probe is bounded by its own timeout.
+ *
+ * Silent when nothing is stale, so the existing output is unchanged on a machine
+ * whose CLIs match — a skew nobody can act on is not worth a line. Never throws:
+ * a broken probe must not turn `commandmate status` into a failure.
+ */
+async function printDetectorFreshness(): Promise<void> {
+  try {
+    const stale = (await getDetectorFreshness()).filter((row) => row.stale);
+    if (stale.length === 0) return;
+
+    console.log('');
+    console.log('Detector rules verified against an older CLI:');
+    for (const row of stale) {
+      console.log(`  ${row.tool}: installed ${row.installed}, rules read off ${row.verifiedAgainst}`);
+    }
+    console.log('  Detection may misread this tool; see docs/design/multi-agent-state-architecture.md.');
+  } catch {
+    // A version probe is a hint. Losing it changes nothing about server status.
   }
 }
 
@@ -111,6 +142,10 @@ async function showAllStatus(): Promise<void> {
   } catch {
     // pids directory may not exist yet
   }
+
+  // Once for the whole listing: the probe cache is process-level, so repeating
+  // it per server would print the same skew N times for one measurement.
+  await printDetectorFreshness();
 
   console.log('');
 }
@@ -197,6 +232,11 @@ export async function statusCommand(options: StatusOptions = {}): Promise<void> 
     if (allowedIps) {
       console.log(`IP ACL:  ${allowedIps}`);
     }
+
+    // Issue #1929: the other authenticated surface §4 D2 exposes detector
+    // staleness on (the first is `capture --json`). Only reached on a running
+    // server, where a detection skew is something the operator can act on.
+    await printDetectorFreshness();
 
     console.log('');
 

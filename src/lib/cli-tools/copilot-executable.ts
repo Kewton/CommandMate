@@ -40,7 +40,7 @@ import { execFile } from 'child_process';
 import { accessSync, constants, statSync } from 'fs';
 import { homedir } from 'os';
 import { delimiter, join } from 'path';
-import { sanitizeEnvForChildProcess } from '@/lib/security/env-sanitizer';
+import { sanitizeEnvForChildProcess } from '../security/env-sanitizer';
 
 /**
  * How a resolved copilot was found.
@@ -96,8 +96,16 @@ function isExecutableFile(candidate: string): boolean {
   }
 }
 
-/** First executable named `name` on `PATH`, as an absolute path. */
-function findOnPath(name: string): string | null {
+/**
+ * First executable named `name` on `PATH`, as an absolute path.
+ *
+ * Exported since Issue #1929: `DETECTOR_VERSION_PROBES` has to resolve every
+ * probe command the same way before executing it (DR4-010 (2)), and a second
+ * copy of this walk is exactly the "two probe mechanisms with different trust
+ * models" DR4-010 exists to prevent. The name stays generic because the walk
+ * is; what is copilot-specific is the caller below.
+ */
+export function findExecutableOnPath(name: string): string | null {
   const rawPath = process.env.PATH;
   if (!rawPath) return null;
   for (const directory of rawPath.split(delimiter)) {
@@ -154,7 +162,7 @@ function probeVersion(executable: string): Promise<string | null> {
  * makes `startSession` refuse instead of starting a download in the pane.
  */
 export async function resolveCopilotExecutable(): Promise<CopilotExecutable | null> {
-  const onPath = findOnPath(COPILOT_BINARY_NAME);
+  const onPath = findExecutableOnPath(COPILOT_BINARY_NAME);
   if (onPath) {
     const version = await probeVersion(onPath);
     if (version) return { path: onPath, version, source: 'path' };
@@ -162,7 +170,7 @@ export async function resolveCopilotExecutable(): Promise<CopilotExecutable | nu
 
   // The managed copy is only reachable through `gh copilot`, so a machine
   // without gh cannot launch it however present the file is.
-  if (!findOnPath(GH_BINARY_NAME)) return null;
+  if (!findExecutableOnPath(GH_BINARY_NAME)) return null;
 
   for (const candidate of ghManagedCandidates()) {
     if (!isExecutableFile(candidate)) continue;

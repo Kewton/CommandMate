@@ -14,6 +14,7 @@ import { codexStatusDetector } from './codex/detect';
 import { copilotStatusDetector } from './copilot/detect';
 import { opencodeStatusDetector } from './opencode/detect';
 import { createToolStatusDetector } from './run-detection';
+import { UNMEASURED_VERIFIED_AGAINST } from './verified-against';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { ToolStatusDetector } from './types';
 
@@ -28,7 +29,7 @@ import type { ToolStatusDetector } from './types';
 export function createGenericStatusDetector(tool: CLIToolType): ToolStatusDetector {
   return createToolStatusDetector({
     tool,
-    verifiedAgainst: { version: 'unmeasured', capturedAt: 'never', paneGeometry: 'unmeasured' },
+    verifiedAgainst: UNMEASURED_VERIFIED_AGAINST,
   });
 }
 
