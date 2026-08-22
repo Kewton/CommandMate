@@ -3,26 +3,33 @@
 # ランナー: .claude/skills/cmate-verify/scripts/verify-run.sh
 #
 # ゲートは CI（.github/workflows/ci-pr.yml）の lint / type-check / test-unit と、
-# 静的ガード 3 本（token-discipline / control-chars / claudemd-size）を宣言している。
+# 静的ガード 4 本（token-discipline / control-chars / claudemd-size / route-exports）を
+# 宣言している。
 # build は稼働サーバの足元で走らせると配信中の成果物を壊すため、
 # skipInPrimaryCheckout が守る linked worktree でのみ意味を持つ。
 #
-# [Issue #1882] 静的ガード 3 本は CI と**同じスクリプト**（scripts/check-*.mjs）を呼ぶ。
+# [Issue #1882] 静的ガードは CI と**同じスクリプト**（scripts/check-*.mjs）を呼ぶ。
 # verify.yaml へ検査本体（grep や上限値）をコピーすると同じ検査の実装が 2 箇所に増え、
 # 片方だけ更新されて静かに乖離する。実測はいずれも 0.1 分（ci-pr.yml 冒頭の計測表、n=12）
 # なので裁定時間への影響はほぼゼロ。npm install も要らない（依存なしの Node スクリプト）。
 #
 # 事故の記録: PR #1881 は `wait --verify` が全ゲート exit 0 を返した commit が
 # CI の Token discipline で FAILURE になった。宣言ゲートが lint/typecheck/unit の
-# 3 本だけで、CI 11 ジョブのうち 8 本を見ていなかったため。
+# 3 本だけで、当時の CI 11 ジョブのうち 8 本を見ていなかったため。
+# 事故の記録 2: PR #1943 は `next build` の route 型チェックだけが見る欠陥を
+# develop まで通した（Issue #1946）。build ゲートが無い以上、宣言ゲートを増やしても
+# 埋まらない穴だったので、build の一部を静的ガード（route-exports）として切り出した。
 #
-# ここに**追加しない**もの: Integration Tests（実測 2.1m）/ Legacy tmux（Docker 必須）/
+# ここに**追加しない**もの: Integration Tests / Legacy tmux（Docker 必須）/
 # Security Audit（ネットワーク依存）/ Build（稼働サーバの足元を壊す）/ E2E（下記参照）。
+# Integration と Build を足すかどうかは #1950 の着地後に別 Issue で判断する。実測と
+# 見解は dev-reports/issue-1946-gate-coverage.md（build 219s / integration は develop
+# 単独実行でも 4 件 timeout 失敗、2 回とも再現）。
 version: 1
 gates:
   # 静的ガード（各 0.1m）。失敗を秒で返せるよう、重いゲートより前に置く。
   # ランナーは失敗しても後続ゲートを止めないので、順序は報告順にしか効かない。
-  # [Issue #1917] この 3 本に `mutex` を付けてはいけない。0.1s のガードを他 worktree の
+  # [Issue #1917] この 4 本に `mutex` を付けてはいけない。0.1s のガードを他 worktree の
   # 500s の unit の後ろに並ばせると、秒で失敗を返すという #1882 の設計意図が消える。
   # 不変条件は tests/unit/guards/verify-heavy-gate-mutex.test.ts が固定している。
   - id: token-discipline
@@ -33,6 +40,16 @@ gates:
     timeoutSec: 120
   - id: claudemd-size
     command: "node scripts/check-claudemd-size.mjs"
+    timeoutSec: 120
+  # [Issue #1946] route.ts が Next の許さない名前を export していないかを見る。
+  # PR #1943 の `export const SERVER_CAPABILITIES` は lint / typecheck / unit を
+  # 素通りして develop の build を壊した。Next の route 型チェックは `next build` が
+  # 生成する型ガードファイルの中にしか存在しないため、build ゲートを持たないここでは
+  # 見えない。**この 1 本は build ゲートの代用ではない**（build が見るもののうち、
+  # 「route が何という名前を export しているか」だけを静的に再宣言している）。
+  # 実測 0.3s / 128 route entries。
+  - id: route-exports
+    command: "node scripts/check-route-exports.mjs"
     timeoutSec: 120
   # [Issue #1917] lint / typecheck に `mutex` は付けない。2 worktree 同時実行 6 ラン中
   # 6 回とも PASS で、キャッシュを揃えた A/B でも測れるほどの遅延が出ない

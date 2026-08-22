@@ -29,6 +29,12 @@ name: CI
 #   Control character check               12    0.1m     0.2m    10
 #   CLAUDE.md size check                  12    0.1m     0.2m    10
 #   Token discipline                      12    0.1m     0.2m    10
+#   Route export guard                     -       -        -    10
+#
+# `Route export guard` is new in Issue #1946 and therefore has no history in
+# that sample. It is the same shape as the three rows above it — a checkout and
+# one dependency-free Node script — and measured 0.3s over 128 route entries on
+# a developer machine, so it takes the same policy floor of 10.
 #
 # The distance to `max` is what keeps a healthy run from being cut. The tightest
 # ratio here is Unit Tests at 2.3x; everything on 10 has 4x or more. Unit Tests
@@ -147,6 +153,43 @@ jobs:
       # The script is dependency-free, so no npm install is needed.
       - name: Guard raw colors and token existence in migrated directories
         run: node scripts/check-token-discipline.mjs
+
+  route-exports:
+    name: Route export guard
+    # [self-hosted] This repository's ephemeral self-hosted runners (labels:
+    # self-hosted, Linux, ARM64, ubuntu-24.04), EXCEPT for a pull request opened
+    # from a fork, which falls back to `ubuntu-latest`. CommandMate is public, so
+    # a fork PR is code written by someone else; the runners are ephemeral and
+    # keep nothing between jobs, but the job still executes on hardware we own.
+    # The fallback keeps the full CI verdict on outside contributions without
+    # ever running them on our machines. See the identical change in
+    # Kewton/commandmate-skills#226.
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
+    timeout-minutes: 10 # measured 0.3s locally over 128 route entries; floor of the policy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # [Issue #1946] Hard-fail if a file under src/app exports a name Next.js
+      # does not accept for a Route. PR #1943 added `export const
+      # SERVER_CAPABILITIES` to src/app/api/capabilities/route.ts and broke
+      # develop's build with `"SERVER_CAPABILITIES" is not a valid Route export
+      # field`. That check only exists inside `next build`, because Next
+      # generates the type-guard file that produces it while building — so lint,
+      # `tsc --noEmit` and the unit suite are all blind to it, and
+      # `.commandmate/verify.yaml` (which declares no build gate) let the defect
+      # through `wait --verify` untouched.
+      #
+      # [Issue #1882] The allow-list and the scanner live in the script, not
+      # here. `.commandmate/verify.yaml` runs the SAME script as gate
+      # `route-exports`, so `commandmate verify` and this job cannot disagree
+      # about what a route may export. The list is derived from Next 15.5.20 and
+      # re-derived from node_modules by
+      # tests/unit/guards/route-export-allowlist.test.ts, so a Next upgrade that
+      # changes it turns the unit suite red rather than this guard silently
+      # wrong. The script is dependency-free, so no npm install is needed.
+      - name: Guard route export shape under src/app
+        run: node scripts/check-route-exports.mjs
 
   legacy-tmux-readmode:
     name: Legacy tmux (<3.2) reading-mode no-op

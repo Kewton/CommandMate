@@ -33,10 +33,12 @@
  *      the thing being contended — one heavy-suite slot per machine — so a
  *      different repository's equally heavy suite can join the same slot by
  *      declaring the same name. `unit` would exclude only ourselves.
- *   3. The cheap gates stay parallel. The three static guards exist to return a
+ *   3. The cheap gates stay parallel. The static guards exist to return a
  *      failure in seconds (Issue #1882); queueing them behind another worktree's
  *      500s `unit` run would delete that property. `lint` / `typecheck` are left
  *      out on measurement — see dev-reports and the comments in verify.yaml.
+ *      `route-exports` (Issue #1946, 0.3s over 128 route entries) is held to the
+ *      same rule: it exists to fail in under a second.
  *
  * @vitest-environment node
  */
@@ -58,7 +60,7 @@ const HEAVY_GATE_ID = 'unit';
 /**
  * Gates that must never be serialized.
  *
- * The static guards are the #1882 fast-fail path (0.1s each). `lint` and
+ * The static guards are the #1882 fast-fail path (0.1-0.3s each). `lint` and
  * `typecheck` are here as a recorded decision rather than an accident: measured
  * two-worktree-concurrent they stay green, and a `mutex` would trade a failure
  * mode that has never occurred for one that can — a gate whose lock never frees
@@ -69,6 +71,7 @@ const MUST_STAY_PARALLEL = [
   'token-discipline',
   'control-chars',
   'claudemd-size',
+  'route-exports',
   'lint',
   'typecheck',
 ];

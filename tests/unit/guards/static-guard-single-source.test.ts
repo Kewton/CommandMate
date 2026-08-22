@@ -24,7 +24,8 @@
  * asserted here.
  *
  * `scripts/check-control-chars.mjs` was already shaped this way before #1882 and
- * is included so the third gate is held to the same rule.
+ * is included so the third gate is held to the same rule. `check-route-exports.mjs`
+ * (Issue #1946) is the fourth, added for the same reason.
  *
  * @vitest-environment node
  */
@@ -39,15 +40,21 @@ const CI_WORKFLOW = join(REPO_ROOT, '.github', 'workflows', 'ci-pr.yml');
 const VERIFY_CONFIG = join(REPO_ROOT, '.commandmate', 'verify.yaml');
 
 /**
- * The three static guards, each as `CI job id` → `the one command that runs it`.
+ * The static guards, each as `CI job id` → `the one command that runs it`.
  *
  * The verify gate id is deliberately the CI job id: a `RESULT failed` line and a
  * red check in the Actions tab should name the same thing.
+ *
+ * `route-exports` joined in #1946. It is here for the same reason as the other
+ * three and for one more: the property it checks is only otherwise visible
+ * inside `next build`, and there is no build gate, so if its declaration ever
+ * drifts between CI and verify the failure mode is the #1943 accident again.
  */
 const STATIC_GUARDS = [
   { jobId: 'token-discipline', command: 'node scripts/check-token-discipline.mjs' },
   { jobId: 'control-chars', command: 'node scripts/check-control-chars.mjs' },
   { jobId: 'claudemd-size', command: 'node scripts/check-claudemd-size.mjs' },
+  { jobId: 'route-exports', command: 'node scripts/check-route-exports.mjs' },
 ] as const;
 
 interface WorkflowStep {
@@ -99,6 +106,10 @@ describe('neither declaration site carries a second copy of the logic', () => {
     [/\b35000\b/, '35000 — the CLAUDE.md byte cap belongs in the script'],
     [/:\(exclude\)/, 'a git pathspec exclusion — the guarded list belongs in the script'],
     [/Terminal\[\^:\]/, 'the *Terminal* exemption regex — it belongs in the script'],
+    [
+      /\bgenerateStaticParams\b|\bpreferredRegion\b|\bfetchCache\b/,
+      'a Next route field name — the route-exports allow-list belongs in the script',
+    ],
   ];
 
   it.each(STATIC_GUARDS)('$jobId: the CI job body is free of them', ({ jobId }) => {
@@ -130,6 +141,17 @@ describe('the gates that were deliberately NOT added stay out', () => {
    *   security-audit — reaches the npm registry; a network blip is not a verdict
    *   build — replaces the chunks the running server is serving mid-flight
    *   test-e2e — 5m+ per worker (already argued in verify.yaml's own comment)
+   *
+   * [Issue #1946] `build` stays out even though #1943's defect was a BUILD
+   * failure, and so does `integration`. Measured once each in this linked
+   * worktree, cold (no `.next`): `npm run build` = 219s, `npm run
+   * test:integration` = 32s then 51s — and integration is RED on develop as it
+   * stands (4 tests, all `Test timed out in 5000ms`, reproduced on both runs),
+   * so declaring it today would make every worker's verdict exit 20 regardless
+   * of its diff. The `route-exports` guard added here re-states, statically and
+   * in 0.3s, the one property of a route module that only `next build` could
+   * see. It is a narrower thing than a build gate, not a substitute for one;
+   * see dev-reports/issue-1946-gate-coverage.md.
    */
   const NOT_DECLARED = ['integration', 'legacy-tmux', 'security-audit', 'build', 'e2e'];
 
