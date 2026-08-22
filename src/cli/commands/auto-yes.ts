@@ -14,6 +14,50 @@ import { isCliToolId } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 import { resolveInstanceCliTool } from './instances';
 
+/**
+ * Report what arming Auto-Yes actually did: which agent (Issue #1909) and what
+ * it answered on the way in (Issue #1898-2).
+ *
+ * Both halves are read off the response rather than worked out here. For the
+ * agent that is a rule, not a convenience: a bare `auto-yes <id> --enable`
+ * deliberately sends no `cliToolId`, the server applies the precedence chain
+ * (roster > explicit > primary anchor > worktree default) that `send` / `wait` /
+ * `capture` also get, and resolving it a second time in the CLI is how the two
+ * answers diverged in the first place (design §4 D5 決定 1 / DR2-008). The
+ * server names what it chose; this only prints it.
+ *
+ * @param worktreeId - Worktree the command targeted
+ * @param result - Body of the auto-yes POST, or undefined from an old daemon
+ */
+function reportEnabled(worktreeId: string, result: AutoYesSetResult | undefined): void {
+  const agent = result?.cliToolId;
+  const instanceId = result?.instanceId;
+  // `instanceId === cliToolId` is how the primary instance is spelled (#868);
+  // repeating it as "copilot (copilot)" would be noise.
+  const label = agent && instanceId && instanceId !== agent
+    ? `${agent}, instance ${instanceId}`
+    : agent;
+  console.error(
+    label
+      ? `Auto-yes enabled for ${worktreeId} (${label}).`
+      : `Auto-yes enabled for ${worktreeId}.`
+  );
+
+  // Issue #1898-2: enabling Auto-Yes under a dialog that was already up used to
+  // do nothing at all, silently. If it answered something on the way in, say so
+  // — that is the difference between "armed for next time" and "the worker you
+  // were unsticking is moving again". Printed after the agent line because the
+  // approvals it re-judged are that agent's (#1909).
+  const pending = result?.pendingDecisions;
+  if (pending && pending.examined > 0) {
+    console.error(
+      `Re-judged ${pending.examined} pending approval(s): ` +
+        `${pending.delivered} answered` +
+        `${pending.skipped > 0 ? `, ${pending.skipped} skipped (limit)` : ''}.`,
+    );
+  }
+}
+
 export function createAutoYesCommand(): Command {
   const cmd = new Command('auto-yes');
   cmd
@@ -102,25 +146,13 @@ export function createAutoYesCommand(): Command {
           body.instanceId = options.instance;
         }
 
-        const result = await client.post<AutoYesSetResult>(
+        const result = await client.post<AutoYesSetResult | undefined>(
           `/api/worktrees/${worktreeId}/auto-yes`,
           body,
         );
 
         if (options.enable) {
-          console.error(`Auto-yes enabled for ${worktreeId}.`);
-          // Issue #1898-2: enabling Auto-Yes under a dialog that was already up
-          // used to do nothing at all, silently. If it answered something on the
-          // way in, say so — that is the difference between "armed for next
-          // time" and "the worker you were unsticking is moving again".
-          const pending = result?.pendingDecisions;
-          if (pending && pending.examined > 0) {
-            console.error(
-              `Re-judged ${pending.examined} pending approval(s): ` +
-                `${pending.delivered} answered` +
-                `${pending.skipped > 0 ? `, ${pending.skipped} skipped (limit)` : ''}.`,
-            );
-          }
+          reportEnabled(worktreeId, result);
         } else {
           console.error(`Auto-yes disabled for ${worktreeId}.`);
         }
