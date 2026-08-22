@@ -198,6 +198,36 @@ describe('agent-event-state is shared across module instances (#1736)', () => {
     second.clearAgentStopEvents();
   });
 
+  it('deduplicates against a frame id claimed by another instance (#1899)', async () => {
+    const { first, second } = await loadTwice<AgentEventStateModule>(
+      () => import('@/lib/session/agent-event-state')
+    );
+    expectsDistinctInstances(first, second, 'classifyAgentEventDelivery');
+    first.clearAgentStopEvents();
+
+    const at = 1_700_000_450_000;
+    const delivery = {
+      worktreeId: WT,
+      cliToolId: 'opencode' as const,
+      instanceId: 'opencode',
+      event: 'notification' as const,
+      detail: 'permission_prompt',
+      sessionId: 'ses_1899',
+      identity: 'per_1899',
+      identityKind: 'permission-id' as const,
+    };
+
+    expect(first.classifyAgentEventDelivery({ ...delivery, at })).toEqual({ duplicate: false });
+    expect(second.getRecentEventIdentityCount(WT, 'opencode', 'opencode')).toBe(1);
+    // The identity rule has no time bound at all, so a re-sync replaying the
+    // frame on the other bundle ten minutes later must still see the claim.
+    expect(second.classifyAgentEventDelivery({ ...delivery, at: at + 600_000 })).toEqual({
+      duplicate: true,
+      by: 'identity',
+    });
+    second.clearAgentStopEvents();
+  });
+
   it('clears through either instance', async () => {
     const { first, second } = await loadTwice<AgentEventStateModule>(
       () => import('@/lib/session/agent-event-state')

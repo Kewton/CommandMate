@@ -34,7 +34,7 @@ import { createLogger } from '@/lib/logger';
 import { MAX_EVENT_DETAIL_LENGTH } from '@/lib/hooks/agent-event-types';
 import { adjudicatePendingPermission } from '@/lib/hooks/permission-adjudication';
 import {
-  isDuplicateAgentEvent,
+  classifyAgentEventDelivery,
   recordAgentEvent,
   recordAskUserQuestion,
   reportPermissionRequestPending,
@@ -261,25 +261,39 @@ export async function ingestOpencodeEvent(
   const instanceId = target.instanceId ?? OPENCODE_CLI_TOOL_ID;
 
   try {
-    // The same guard the hook receiver applies. It cannot catch the abort
-    // double-idle on its own — see `./turn-gate`, which is what does — but it
-    // does cover a frame delivered twice by a re-sync racing the live stream.
-    if (
-      isDuplicateAgentEvent(
-        target.worktreeId,
-        OPENCODE_CLI_TOOL_ID,
-        instanceId,
-        event.event,
-        event.conversationId,
-        event.receivedAt,
-        event.detail
-      )
-    ) {
+    // Inside the `try` on purpose: this module's contract is that nothing here
+    // throws, and a registry lookup is still a lookup.
+    const source = getAgentEventSource(OPENCODE_CLI_TOOL_ID);
+
+    // Issue #1899. The guard the hook receiver applies is the *time window*,
+    // and on this stream it was dropping real events: two approvals a second
+    // apart share `(event, detail, sessionID)`, so the second one was neither
+    // adjudicated nor recorded, and opencode blocks on an unanswered approval
+    // for as long as it takes (10m19s, measured in #1758 §5.5.3).
+    //
+    // The capability decides which rule applies — no tool name is read here.
+    // `eventIdentity: 'permission-id'` puts frames that carry an id on the id,
+    // and leaves `session.idle` (which carries none, and which `./turn-gate`
+    // has already counted) unsuppressed. Declaring `null` instead puts every
+    // frame back on the window.
+    const delivery = classifyAgentEventDelivery({
+      worktreeId: target.worktreeId,
+      cliToolId: OPENCODE_CLI_TOOL_ID,
+      instanceId,
+      event: event.event,
+      detail: event.detail,
+      sessionId: event.conversationId,
+      at: event.receivedAt,
+      identity: source.eventIdentityOf(event.raw),
+      identityKind: source.capabilities.eventIdentity,
+    });
+    if (delivery.duplicate) {
       logger.info('opencode-event-duplicate-dropped', {
         worktreeId: target.worktreeId,
         instanceId,
         event: event.event,
         detail: event.detail,
+        by: delivery.by,
       });
       return;
     }

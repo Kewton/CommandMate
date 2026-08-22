@@ -36,6 +36,7 @@ import { PERMISSION_REPLIED_DETAIL } from '@/lib/hooks/agent-event-types';
 import {
   boundDetail,
   isPlainObject,
+  readEventIdentity,
   readNestedString,
   whenNamed,
   type EventMapper,
@@ -140,6 +141,62 @@ export function partCallId(payload: Record<string, unknown>): string | null {
  */
 export function repliedPermissionId(payload: Record<string, unknown>): string | null {
   return readNestedString(frameProperties(payload), ['requestID']);
+}
+
+/**
+ * The frame's own id, for identity de-duplication (Issue #1899).
+ *
+ * This is the extraction half of `capabilities.eventIdentity: 'permission-id'`:
+ * the capability names the id, this finds it. One function rather than a field
+ * on each mapper rule because the id is a property of the *frame*, and the
+ * frames that carry one are not the same set as the frames that map to a word.
+ *
+ * ## Where each id lives, and why the list is not one path
+ *
+ * | frame | id | note |
+ * |---|---|---|
+ * | `permission.asked` | `properties.id` | `per_…` |
+ * | `permission.replied` | `properties.requestID` | the **same** `per_…`, spelled differently (#1898) |
+ * | `question.asked` | `properties.id` | `que_…` |
+ * | `message.updated` | `properties.info.id` | `msg_…` |
+ * | `message.part.updated` | `properties.part.callID` | `toolu_…` |
+ *
+ * The first two rows are why the caller keys on `(event, detail, identity)`
+ * rather than on the identity alone: an approval and the reply that answers it
+ * carry **the same value**, and a key made of the id by itself would read the
+ * reply as a repeat of the ask and drop the only positive statement any source
+ * makes that a dialog is gone.
+ *
+ * ## The frames that answer null
+ *
+ * `session.idle` is `{ "sessionID": "ses_…" }` and nothing else — measured, and
+ * the reason `./turn-gate` exists. `session.created` / `session.deleted` /
+ * `session.error` publish no per-frame id either. Null is the honest answer for
+ * all of them, and `classifyAgentEventDelivery` is where "no id" is turned into
+ * a policy per event word.
+ *
+ * The envelope's own `id` (`evt_…`) is deliberately **not** used. The captured
+ * fixtures redact it to a single placeholder, so nothing in this repository
+ * establishes that it is unique per frame rather than per subscription or per
+ * aggregate — and a key built on an unverified uniqueness claim silently drops
+ * real events, which is the bug this Issue is fixing.
+ */
+export function opencodeEventIdentity(payload: Record<string, unknown>): string | null {
+  const properties = frameProperties(payload);
+
+  switch (readNestedString(payload, ['type'])) {
+    case 'permission.asked':
+    case 'question.asked':
+      return readEventIdentity(readNestedString(properties, ['id']));
+    case 'permission.replied':
+      return readEventIdentity(repliedPermissionId(payload));
+    case 'message.updated':
+      return readEventIdentity(readNestedString(properties, ['info', 'id']));
+    case 'message.part.updated':
+      return readEventIdentity(partCallId(payload));
+    default:
+      return null;
+  }
 }
 
 /** Statuses that mean the tool call is over, either way (#1758 §5.2.3). */
