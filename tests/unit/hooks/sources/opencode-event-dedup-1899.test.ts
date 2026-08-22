@@ -92,12 +92,23 @@ vi.mock('@/lib/hooks/sources/opencode/client', async (importOriginal) => {
     fetchOpencodePendingQuestions: vi.fn().mockResolvedValue([]),
     replyOpencodePermission: vi.fn().mockResolvedValue(true),
     replyOpencodeQuestion: vi.fn().mockResolvedValue(true),
-    readOpencodeEventStream: vi.fn(),
+    // Issue #1900 put two more client calls in front of the stream: the
+    // reconnect loop will not open `/event` until `/global/health` has named
+    // the process on the port, and it polls `/session/status` once the stream
+    // is up. Left unmocked they are real `fetch`es to a port nothing is
+    // listening on, the health probe answers `refused`, and the loop backs off
+    // without ever subscribing — which is exactly how this file broke when
+    // #1899 and #1900 were merged (Issue #1963).
+    probeOpencodeHealth: vi.fn(),
+    fetchOpencodeSessionStatuses: vi.fn().mockResolvedValue({}),
+    openOpencodeEventStream: vi.fn(),
   };
 });
 
 import {
-  readOpencodeEventStream,
+  fetchOpencodeSessionStatuses,
+  openOpencodeEventStream,
+  probeOpencodeHealth,
   replyOpencodePermission,
   type OpencodeFrame,
 } from '@/lib/hooks/sources/opencode/client';
@@ -109,10 +120,7 @@ import {
   rememberOpencodePort,
   resetOpencodePortAssignments,
 } from '@/lib/hooks/sources/opencode/ports';
-import {
-  openOpencodeSubscription,
-  resetOpencodeSubscriptions,
-} from '@/lib/hooks/sources/opencode/subscription';
+import { resetOpencodeSubscriptions } from '@/lib/hooks/sources/opencode/subscription';
 import { readEventIdentity, MAX_EVENT_IDENTITY_LENGTH } from '@/lib/hooks/sources/event-mapper';
 import { resolvePermissionRequest } from '@/lib/hooks/permission-decision-service';
 import { applyAgentStopEvent } from '@/lib/hooks/agent-event-service';
@@ -181,6 +189,8 @@ function droppedCount(): number {
 
 const T0 = 1_800_000_000_000;
 const PORT = 4242;
+/** What `/global/health` answers. Constant, so no reconnect reads a new process. */
+const SERVER_VERSION = '1.18.21';
 const TARGET = { worktreeId: 'wt-1899', cliToolId: 'opencode', instanceId: 'opencode' } as const;
 const WORKTREE = { id: 'wt-1899', path: '/tmp/wt-1899' } as unknown as Worktree;
 
@@ -206,6 +216,11 @@ beforeEach(() => {
   rememberOpencodePort(TARGET, PORT, '/tmp/wt-1899');
   vi.mocked(getWorktreeById).mockReturnValue(WORKTREE);
   vi.mocked(replyOpencodePermission).mockResolvedValue(true);
+  vi.mocked(probeOpencodeHealth).mockResolvedValue({
+    kind: 'healthy',
+    health: { healthy: true, version: SERVER_VERSION },
+  });
+  vi.mocked(fetchOpencodeSessionStatuses).mockResolvedValue({});
   vi.mocked(resolvePermissionRequest).mockReturnValue({
     behavior: null,
     reason: 'auto-yes-disabled',
@@ -379,21 +394,42 @@ describe('the turn gate is what counts turns now', () => {
   }
 
   let pump: ReturnType<typeof makePump>;
+  /** How many times the loop reached `openOpencodeEventStream`. */
+  let pumpStreams: number;
 
   beforeEach(async () => {
     pump = makePump();
-    vi.mocked(readOpencodeEventStream).mockImplementation((_port: number, signal: AbortSignal) =>
-      pump.stream(signal)
+    pumpStreams = 0;
+    // Issue #1900 split the connect from the iteration: `readOpencodeEventStream`
+    // became `openOpencodeEventStream`, which is `async` and resolves only once
+    // the `fetch` has settled — that is what lets the loop re-read `GET
+    // /permission` on a stream it has already subscribed to. The mock resolves
+    // the pump for the same reason.
+    vi.mocked(openOpencodeEventStream).mockImplementation(
+      async (_port: number, signal: AbortSignal) => {
+        pumpStreams += 1;
+        return pump.stream(signal);
+      }
     );
+
     let chain = Promise.resolve();
-    await openOpencodeSubscription(
-      TARGET,
-      (event) => {
-        chain = chain.then(() => ingestOpencodeEvent(TARGET, event));
-      },
-      (raw) => opencodeAgentEventSource.normalizeEvent(raw),
-      PORT
-    );
+    // Subscribed the way production does, through the source, so the declared
+    // `capabilities.resync` is the one in play rather than a hand-written
+    // option object that cannot go stale (#1900). The port comes off the
+    // recorded assignment `rememberOpencodePort` made above.
+    await opencodeAgentEventSource.subscribe(TARGET, (event) => {
+      chain = chain.then(() => ingestOpencodeEvent(TARGET, event));
+    });
+
+    // The precondition every case below rests on, asserted rather than assumed.
+    // `openOpencodeSubscription` resolves when the reconnect *loop* starts, not
+    // when the stream is open, and since #1900 three awaits sit in between:
+    // `/global/health`, the stream itself, then `GET /permission` and
+    // `GET /session/status`. Frames pushed before the loop gets there are held
+    // by the pump, so the wait is about legibility — a health probe that says
+    // `refused` fails here, naming the cause, instead of surfacing three
+    // screens down as a `stop` that was never applied (Issue #1963).
+    await vi.waitFor(() => expect(pumpStreams).toBe(1));
   });
 
   afterEach(() => {
