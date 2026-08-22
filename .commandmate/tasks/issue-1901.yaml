@@ -1,0 +1,107 @@
+version: 1
+title: "Issue #1901: copilot の PreToolUse 予告でツール呼び出しごとに waiting が立つ"
+goal: |
+  /bug-fix 1901
+
+  https://github.com/Kewton/CommandMate/issues/1901 を修正してください。
+  ## オーケストレーター契約（Issue 本文より優先・厳守）
+
+  1. **PR を作成しない・push しない**（オーケストレーターが行います）。ブランチは checkout 済みです。
+  2. 実装は**このブランチ上の単一 commit** にまとめる。メッセージは `<type>(<scope>): <要約> (#N)` 形式。
+  3. commit に含めてよいのは `src/` `tests/` `docs/` `scripts/` `.eslintrc.json` `CHANGELOG.md`
+     `.commandmate/tasks/issue-N.yaml` のみ。**`dev-reports/` は絶対に含めない**（CI の hygiene で落ちます）。
+  4. `CHANGELOG.md` は `## [Unreleased]` に**自分の 1 行だけ**追加する。他の行を並べ替えない・消さない
+     （並列ワーカーが同じ節を触っており、衝突解消はオーケストレーターが機械的に行います）。
+  5. **GitHub の Issue / PR を編集しない**（`gh issue edit` 禁止）。Issue レビューのフェーズも実行しない。
+     Issue 本文の誤りは**コミットメッセージの「意図的な逸脱」節**に書いて渡すこと。
+  6. 完了したら最終行に `IMPL_COMPLETED` とだけ出力して停止する。
+
+  ## 実装方針は「推奨」であって決定ではない
+
+  Issue 本文と設計方針書の実装方針は**推奨**です。**必ず実コードで裏を取り、実測が食い違ったら
+  実測を正とし、乖離をコミットメッセージに明記してください。** 過去に私（オーケストレーター）が
+  書いた方針が 3 回連続でワーカーの実測に覆されています。逸脱報告は歓迎します。
+
+  ## 正本ドキュメント
+
+  - 設計方針書: `docs/design/multi-agent-state-architecture.md`（develop に着地済み、Stage 1-4 レビュー済み）。
+    §4 D1〜D5 / §8 / §13.2 を正とする。**Issue 本文と方針書が食い違ったら方針書を正**とする。
+  - Issue 本文中の設計方針書リンクが 404 になる場合は上のローカルパスを見ること。
+
+  ## テスト実行のルール（重要・厳守）
+
+  - **フル `npm run test:unit` を自分で回さないでください。** 並列ワーカーが同時にフル実行すると
+    diff と無関係のテストが `Test timed out in 5000ms` で落ち、存在しない回帰を追いかけることになります
+    （実測済み。#1917 で `verify.yaml` の unit ゲートに `mutex: cpu.heavy` を入れた理由がこれです）。
+  - 自分が触った/追加したテストだけ `npx vitest run <path>` で確認する。
+  - 全体の裁定はオーケストレーターが `commandmate wait --verify`（`.commandmate/verify.yaml` の全ゲート）
+    で行います。どうしても全体を回したい場合のみ `.claude/skills/cmate-verify/scripts/verify-run.sh`
+    （mutex 準拠）を使ってください。
+  - **`npm run build` を実行しない**（稼働中サーバの配信成果物を壊します）。
+  - `npm run lint` / `npx tsc --noEmit` は軽いので自由に回してよい。
+
+  ## 環境ルール（厳守）
+
+  - **稼働サーバ（port 3000）を停止・再起動しない。** 隣の `MyCodeBranchDesk` ディレクトリで何もしない。
+  - 実 tmux を触る検証は必ず `tmux -L <専用socket>` で行う（`-L`/`-S` は `$TMUX` より優先）。
+    フラグ無しの `tmux` は**ユーザーの本番セッション**に届きます。`kill-server` を `-L` 無しで打たない。
+    後始末は `kill-session -t '=<name>:'`。`TMUX_TMPDIR` は隔離手段にならない（`$TMUX` があると無視）。
+    `bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たない。
+  - 他の worktree（`../commandmate-issue-*`）に触らない。
+
+  ## 完了条件
+
+  Issue の受入条件をすべて満たし、`npm run lint` と `npx tsc --noEmit` が緑、追加したテストが
+  単独実行で緑であること。**ガード/pin 系のテストは変異注入で赤になることを必ず確認**してください
+  （空振り緑を作らない。確認手順と結果をコミットメッセージに書く）。
+
+  ## この Issue 固有の注意
+
+  - **Issue 本文の修正案「capability（例 `permissionHookPredictsDialog: false`）を追加し」は
+    もう不要です。** #1924（マージ済み）が `AgentSourceCapabilities` に
+    `permissionHookPredictsDialog` を追加済みで、**copilot / antigravity は既に `false` を
+    宣言しています**。本 Issue の仕事は **それを実際に読む**ことです。
+  - **#1898（マージ済み）と #1899（PR 中）が同じ形をやっています。** どちらも
+    「ツール名で分岐せず capability を読む」形で、#1898 は
+    `permissionReplyReleasesPrompt` / `eventIdentity` / `resync` を、#1899 は
+    `eventIdentity` を読んでいます。**同じ書き方に揃えてください。**
+  - `src/lib/session/agent-event-state.ts` は #1899（PR 中）が
+    `classifyAgentEventDelivery` を足しています。**衝突しそうならコミットメッセージに書いて
+    ください**（こちらで統合します）。dedup の分類そのものには触らないこと。
+  - **#1903（copilot の遅延 SessionStart）は本 Issue の後**に着手させます。同じ
+    `agent-event-state.ts` を触るので、#1903 の範囲（SessionStart の扱い）には触らないでください。
+  - **危険の方向**: `reportPendingDialog` をスキップしすぎると、**本物の承認ダイアログを
+    構造化層が知らなくなります**。Issue 本文は「ダイアログの有無は scraper に委ねる
+    （番号ダイアログは composer が消えるため正しく検出できる＝実測）」としていますが、
+    その前提が今も成り立つかを **#1885 / #1886 が入れた copilot の検出と突き合わせて**
+    確認してください。成り立たないなら別の設計にして理由を書くこと。
+  - 回帰は `PreToolUse(Read)` → abstain → `resolvePromptWaiting` が waiting にならないこと、
+    かつ**本物のダイアログでは waiting になること**の両方を pin してください。
+
+scope:
+  allow:
+    - "src/lib/hooks/**"
+    - "src/lib/session/**"
+    - "src/lib/polling/**"
+    - "src/app/api/**"
+    - "tests/unit/**"
+    - "tests/helpers/**"
+    - "docs/**"
+    - "CHANGELOG.md"
+    - ".commandmate/tasks/issue-1901.yaml"
+  deny: []
+
+
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns:
+    - "rm -rf"
+    - "git push"
+    - "gh pr create"
+    - "gh issue edit"
+    - "kill-server"
+
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
