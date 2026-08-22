@@ -50,8 +50,9 @@ export const TUI_INTERRUPT_SETTLE_MS = 300;
 /**
  * Wait (ms) after an exit/quit command (or Ctrl+D) for the CLI to shut down
  * gracefully before the tmux session is killed.
- * Sites: codex / gemini / vibe-local / copilot killSession(),
+ * Sites: codex / gemini / vibe-local killSession(),
  * session-key-sender stopSession().
+ * (copilot moved to {@link COPILOT_EXIT_WAIT_MS} in Issue #1905.)
  */
 export const TUI_EXIT_WAIT_MS = 500;
 
@@ -66,8 +67,30 @@ export const CODEX_DIALOG_SETTLE_MS = 500;
  * Wait (ms) for OpenCode to process its `/exit` TUI command. Longer than the
  * generic exit wait because OpenCode's TUI teardown is slower.
  * Site: opencode killSession().
+ *
+ * Issue #1905 measured the teardown on opencode 1.18.21 (private tmux socket,
+ * 200x50): once `/exit` is submitted as body-then-Enter the TUI is gone in
+ * 0.445 / 0.456 / 0.458 s (n=3), so this window is not the binding constraint.
+ * It was left at 2000 rather than tightened because the measurement is for an
+ * unloaded machine.
  */
 export const OPENCODE_EXIT_WAIT_MS = 2000;
+
+/**
+ * Wait (ms) for Copilot to process its `/exit` TUI command before the tmux
+ * session is killed. Copilot-specific because {@link TUI_EXIT_WAIT_MS} (500) is
+ * shorter than the shutdown actually takes.
+ * Site: copilot killSession().
+ *
+ * Issue #1905 measured GitHub Copilot CLI 1.0.80 in a private tmux socket
+ * (200x50, unloaded). Time from the submitting keystroke to the pane's process
+ * no longer being `copilot`, across every exit spelling copilot accepts:
+ * 1.006 / 1.109 / 1.115 / 1.118 / 1.204 / 1.208 / 1.288 / 1.330 / 1.795 /
+ * 2.165 / 2.193 s. Every sample is past 500 ms, i.e. the generic constant
+ * guaranteed the tmux kill landed mid-shutdown; 3000 covers the slowest sample
+ * with room for a loaded machine.
+ */
+export const COPILOT_EXIT_WAIT_MS = 3000;
 
 /**
  * Wait (ms) between the two Enter key presses in vibe-local's IME submit mode

@@ -1269,3 +1269,16 @@ Phase 1 の実装（`feature/1922-tmux-import-guard`）で棚卸しをやり直�
 **`overrides.files` の `[id]` は minimatch のキャラクタクラスである**。`src/app/api/worktrees/[id]/route.ts` をそのまま書くと `.../i/route.ts` にしか当たらず、**その 5 ファイルが投入直後に error になる**。`\[id\]` とエスケープすること（該当 7 エントリ）。
 
 **動的取得の severity**: DR4-005 の決定どおり `no-restricted-syntax` の base 1 キーに並べ、同時に D5 決定 4 (1) の「i18n セレクタを `warn` → `error` へ格上げ」も本 commit で実施した（実測 `npm run lint` は格上げ後も exit 0 / 出力 0 行）。selector は `(^|/)tmux(/|$)` で bare barrel まで見るように広げてある。
+
+#### 付録 A への追記（#1905 の実装時。allowlist を初めて減らした commit）
+
+**段階解消 19 → 18 / 総数 31 → 30**。削除したのは表の #7 `src/app/api/worktrees/[id]/kill-session/route.ts` の 1 行だけで、恒久除外 12 は不変。route は `ICLITool.killSession(worktreeId, instanceId)` を呼ぶようになり、`lib/tmux` の import を持たない（`getSessionName()` は D4 が公認するゲートウェイの一部なので残す。応答とログのためのセッション名取得にのみ使い、tmux の宛先には使わない）。
+
+D4 が「lint は迂回の全数保証をしない」ことの補完として受入条件に置いた**陽性テスト**は `tests/unit/api/kill-session-cli-tool-gateway-1905.test.ts`。lint が表現できない 2 点をここで測っている: (a) `cliTool.killSession` が**実際に呼ばれる**こと（kill を落とした route も `no-restricted-imports` は通る）、(b) route 自身が tmux を kill **しない**こと（全ツールの `killSession` を stub した状態で tmux `killSession` が 0 回）。加えて opencode の `releaseOpencodeEventStream` が route 経由で呼ばれることを固定した — 症状（SSE 購読と port が解放されない）に一番近い観測点がこれであるため。
+
+**ツール側の実測（2026-08-22・私設 tmux ソケット・200x50）**。route が本メソッド群を迂回していたので、いずれも #1905 まで無症状だった。
+
+- **opencode 1.18.21**: `send-keys '/exit' C-m`（一括）は**終了しない**。`/` がコマンドパレットを開き、同一コマンドの `C-m` をパレットが食う（`/exit` を composer に残したまま 10.8 秒後も稼働、2 回中 2 回）。本文と Enter を分離すると 0.445 / 0.456 / 0.458 秒で終了（n=3）、詰まった状態から Enter 単発でも 0.34 秒。§4 D4 の「本文とキーを 1 回の `send-keys` に混ぜない」の実例。
+- **copilot 1.0.80**: Issue #1905 本文の「素の `exit` はチャット送信になる」は**この版では成立しない**。`exit`（一括 / 分離）・`/exit`（一括 / 分離）・`C-c` ×2・`C-d` の 6 綴りすべてが終了する。実際の欠陥は待ち時間で、終了所要は 11 サンプルで 1.006〜2.193 秒＝**全サンプルが `TUI_EXIT_WAIT_MS`(500ms) 超**。tmux kill は必ず終了処理の途中に着弾していた。`COPILOT_EXIT_WAIT_MS`(3000ms) を新設し、送出は `/exit` の本文/Enter 分離に揃えた。
+- **未解決（#1906 以降へ）**: copilot の終了確認は今も盲目 sleep である。肯定的証拠（`#{pane_current_command}` / `alternate_on`）を採るには `src/lib/tmux/**` に新しい read が要り、本 Issue の scope 外だった。tmux セッション自体は agent 終了後もシェルが残るので `hasSession` は終了の証拠にならない（opencode の step 4 も同じ理由で常に force kill 側へ落ちる）。
+

@@ -25,6 +25,8 @@ vi.mock('@/lib/tmux/tmux', () => ({
   capturePane: vi.fn(),
   sendKeys: vi.fn(),
   sendSpecialKey: vi.fn(),
+  // Issue #1905: `/exit` is typed and submitted as two tmux commands.
+  sendSpecialKeys: vi.fn(),
   killSession: vi.fn(),
   reconcileSessionGeometry: vi.fn().mockResolvedValue(false),
 }));
@@ -77,6 +79,7 @@ import {
   createSession,
   capturePane,
   sendKeys,
+  sendSpecialKeys,
   killSession,
 } from '@/lib/tmux/tmux';
 import { ensureOpencodeConfig } from '@/lib/cli-tools/opencode-config';
@@ -393,9 +396,37 @@ describe('OpenCodeTool', () => {
       await tool.killSession('test-123');
 
       // Should send /exit command
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-test-123', OPENCODE_EXIT_COMMAND, true);
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-test-123', OPENCODE_EXIT_COMMAND, false);
       // Should fall back to kill-session
       expect(killSession).toHaveBeenCalledWith('mcbd-opencode-test-123');
+    });
+
+    /**
+     * Issue #1905, measured on opencode 1.18.21: `send-keys '/exit' C-m` in a
+     * single tmux command does not exit — `/` opens the command palette and the
+     * batched `C-m` is eaten by it, so the TUI sits there with `/exit` typed
+     * (still up 10.8 s later, 2 runs of 2). Sent as body-then-Enter it exits in
+     * ~0.45 s. The order matters as much as the split, so both are pinned.
+     */
+    it('types /exit and submits it with a separate Enter, in that order', async () => {
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(sendKeys).mockResolvedValue(undefined);
+      vi.mocked(sendSpecialKeys).mockResolvedValue(undefined);
+      vi.mocked(killSession).mockResolvedValue(true);
+
+      await tool.killSession('test-123');
+
+      // The body must never carry the Enter with it.
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-test-123', OPENCODE_EXIT_COMMAND, false);
+      expect(sendKeys).not.toHaveBeenCalledWith(
+        'mcbd-opencode-test-123',
+        OPENCODE_EXIT_COMMAND,
+        true
+      );
+      expect(sendSpecialKeys).toHaveBeenCalledWith('mcbd-opencode-test-123', ['Enter']);
+      expect(vi.mocked(sendKeys).mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(sendSpecialKeys).mock.invocationCallOrder[0]
+      );
     });
 
     it('should not kill if /exit successfully terminated the session', async () => {
@@ -406,7 +437,7 @@ describe('OpenCodeTool', () => {
 
       await tool.killSession('test-123');
 
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-test-123', OPENCODE_EXIT_COMMAND, true);
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-test-123', OPENCODE_EXIT_COMMAND, false);
       expect(killSession).not.toHaveBeenCalled();
     });
 
