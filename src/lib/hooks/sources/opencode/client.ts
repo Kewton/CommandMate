@@ -97,15 +97,65 @@ async function requestJson(url: string, init?: RequestInit): Promise<unknown | n
 }
 
 /**
+ * What a health probe found, told apart by whether asking again could help.
+ *
+ * `fetchOpencodeHealth` collapses all three into null, which is the right
+ * answer for a caller that only wants to know whether to subscribe. It is the
+ * wrong answer for one that is deciding whether to *retry* (Issue #1900): a
+ * refused connection is a server that has not finished booting and is worth
+ * another probe a second later, while a 401 is a server that will answer 401
+ * forever — `OPENCODE_SERVER_PASSWORD` in the pane's environment turns every
+ * request CommandMate makes into one (#1900 item 4), and retrying it just
+ * delays the fall back to the scraper.
+ */
+export type OpencodeHealthOutcome =
+  /** An opencode server answered and is healthy. */
+  | { kind: 'healthy'; health: OpencodeHealth }
+  /** Nothing answered. Ordinary while a TUI is still starting. */
+  | { kind: 'refused'; error: string }
+  /**
+   * Something answered and it cannot be used — an HTTP error, or a body that
+   * is not opencode's health document. `status` is 0 for the latter.
+   */
+  | { kind: 'rejected'; status: number };
+
+/**
+ * Ask whether an opencode server is listening on this port, and say what kind
+ * of no it was (Issue #1900).
+ */
+export async function probeOpencodeHealth(port: number): Promise<OpencodeHealthOutcome> {
+  const url = `${opencodeBaseUrl(port)}/global/health`;
+  let response: Response;
+  try {
+    response = await fetch(url, { signal: AbortSignal.timeout(OPENCODE_REQUEST_TIMEOUT_MS) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.debug('opencode-request-failed', { url, error: message });
+    return { kind: 'refused', error: message };
+  }
+  if (!response.ok) return { kind: 'rejected', status: response.status };
+
+  let body: unknown;
+  try {
+    body = (await response.json()) as unknown;
+  } catch {
+    return { kind: 'rejected', status: response.status };
+  }
+  if (!isPlainObject(body) || body.healthy !== true) return { kind: 'rejected', status: 0 };
+  return {
+    kind: 'healthy',
+    health: { healthy: true, version: typeof body.version === 'string' ? body.version : null },
+  };
+}
+
+/**
  * Ask whether an opencode server is listening on this port.
  *
  * @returns Its health and version, or null when nothing answered
  */
 export async function fetchOpencodeHealth(port: number): Promise<OpencodeHealth | null> {
-  const body = await requestJson(`${opencodeBaseUrl(port)}/global/health`);
-  if (!isPlainObject(body)) return null;
-  if (body.healthy !== true) return null;
-  return { healthy: true, version: typeof body.version === 'string' ? body.version : null };
+  const outcome = await probeOpencodeHealth(port);
+  return outcome.kind === 'healthy' ? outcome.health : null;
 }
 
 /** An array body, or an empty array — `GET /permission` answers a bare array. */
@@ -134,23 +184,71 @@ export async function fetchOpencodePendingQuestions(
   return asObjectArray(await requestJson(`${opencodeBaseUrl(port)}/question`));
 }
 
+/** What one session is doing, per `GET /session/status`. */
+export type OpencodeSessionActivity = 'busy' | 'idle';
+
 /**
- * Whether any session on this server is working (#1758 §5.7.4).
+ * Cap on sessions read back from one `/session/status` (§4 D3, DR4-009).
+ *
+ * The document comes off a process CommandMate did not start, and one server's
+ * `opencode.db` is shared by every TUI with the same HOME and project (#1758
+ * §5.6.3), so the map is not bounded by this instance's own behaviour.
+ */
+export const MAX_OPENCODE_SESSION_STATUSES = 128;
+
+/**
+ * What every session on this server is doing (#1758 §5.7.4).
  *
  * `GET /session/status` answers `{"ses_…":{"type":"busy"|"idle"}}`. Note what
  * this does *not* answer: a session blocked on an approval reads `busy`, so
  * this says "the turn is not over", never "the agent is thinking".
  *
+ * Per-session rather than aggregated, because a reconnect has to decide about
+ * *one* turn (Issue #1900): "something on this server is busy" cannot tell a
+ * parent session that is still working from a sub-agent's that is.
+ *
+ * @returns The map, or null when the server could not be asked. An entry whose
+ *   `type` is neither word is dropped rather than guessed at
+ */
+export async function fetchOpencodeSessionStatuses(
+  port: number
+): Promise<Record<string, OpencodeSessionActivity> | null> {
+  const body = await requestJson(`${opencodeBaseUrl(port)}/session/status`);
+  if (!isPlainObject(body)) return null;
+  const statuses: Record<string, OpencodeSessionActivity> = {};
+  let read = 0;
+  for (const [sessionId, value] of Object.entries(body)) {
+    if (read >= MAX_OPENCODE_SESSION_STATUSES) {
+      logger.warn('opencode-session-status-truncated', {
+        port,
+        kept: read,
+        total: Object.keys(body).length,
+        limit: MAX_OPENCODE_SESSION_STATUSES,
+      });
+      break;
+    }
+    if (!isPlainObject(value)) continue;
+    if (value.type !== 'busy' && value.type !== 'idle') continue;
+    statuses[sessionId] = value.type;
+    read += 1;
+  }
+  return statuses;
+}
+
+/**
+ * Whether any session on this server is working (#1758 §5.7.4).
+ *
+ * The aggregate view of {@link fetchOpencodeSessionStatuses}, which is what
+ * `AgentEventSource.probeActivity` promises its callers — they hold an instance,
+ * not a session id.
+ *
  * @returns `busy` when any session is busy, `idle` when none is, null when the
  *   server could not be asked
  */
 export async function fetchOpencodeActivity(port: number): Promise<'busy' | 'idle' | null> {
-  const body = await requestJson(`${opencodeBaseUrl(port)}/session/status`);
-  if (!isPlainObject(body)) return null;
-  for (const value of Object.values(body)) {
-    if (isPlainObject(value) && value.type === 'busy') return 'busy';
-  }
-  return 'idle';
+  const statuses = await fetchOpencodeSessionStatuses(port);
+  if (statuses === null) return null;
+  return Object.values(statuses).includes('busy') ? 'busy' : 'idle';
 }
 
 /** The three answers opencode accepts for an approval (#1758 §5.5.1). */
@@ -263,23 +361,33 @@ export function createSseParser(): { push(chunk: string): string[]; flush(): str
 }
 
 /**
- * Subscribe to one server's event stream.
+ * Subscribe to one server's event stream — connect first, iterate second.
  *
- * Yields parsed frames until the connection ends or `signal` aborts. A frame
- * that is not JSON is skipped rather than ending the stream: a malformed line
- * is a bug in one frame, not a reason to stop watching the session.
+ * The returned generator yields parsed frames until the connection ends or
+ * `signal` aborts. A frame that is not JSON is skipped rather than ending the
+ * stream: a malformed line is a bug in one frame, not a reason to stop watching
+ * the session. Ending is normal and is the caller's cue to reconnect — the
+ * connection dies without a clean EOF when the server goes away (`transfer
+ * closed with outstanding read data remaining`, #1758 §5.7.2).
  *
- * Ending is normal and is the caller's cue to reconnect — the connection dies
- * without a clean EOF when the server goes away (`transfer closed with
- * outstanding read data remaining`, #1758 §5.7.2).
+ * The two halves are split because *when* the subscription became live is a
+ * fact the caller needs and a generator cannot give it (Issue #1900 item 5): a
+ * generator does not issue its `fetch` until somebody pulls the first frame, so
+ * a caller that re-read `GET /permission` before starting to iterate was
+ * re-reading a server it had not subscribed to yet. An approval raised in that
+ * window appeared on neither side and stayed invisible until the next
+ * reconnect. This call resolves once the response headers are in, which is the
+ * instant the server has accepted the subscription — everything raised after it
+ * arrives on the returned stream.
  *
  * @param port - The instance's server
  * @param signal - Aborted by the subscription to close the stream
+ * @returns The frames, from the moment of connection
  */
-export async function* readOpencodeEventStream(
+export async function openOpencodeEventStream(
   port: number,
   signal: AbortSignal
-): AsyncGenerator<OpencodeFrame> {
+): Promise<AsyncGenerator<OpencodeFrame>> {
   const response = await fetch(`${opencodeBaseUrl(port)}/event`, {
     signal,
     headers: { Accept: 'text/event-stream' },
@@ -287,8 +395,13 @@ export async function* readOpencodeEventStream(
   if (!response.ok || !response.body) {
     throw new Error(`opencode /event responded ${response.status}`);
   }
+  return iterateOpencodeFrames(response.body.getReader());
+}
 
-  const reader = response.body.getReader();
+/** Parse an open body into frames until it ends. */
+async function* iterateOpencodeFrames(
+  reader: ReadableStreamDefaultReader<Uint8Array>
+): AsyncGenerator<OpencodeFrame> {
   const decoder = new TextDecoder();
   const parser = createSseParser();
 
