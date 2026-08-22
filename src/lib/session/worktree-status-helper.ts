@@ -25,6 +25,13 @@ import { getLastServerResponseTimestamp, buildCompositeKey } from '@/lib/polling
 import { GLOBAL_SESSION_WORKTREE_ID } from '@/lib/session/global-session-constants';
 import { peekPromptWaiting } from '@/lib/session/prompt-waiting-composition';
 import { deriveWaitingKind, type WaitingKind } from '@/lib/session/waiting-kind';
+import {
+  deriveScraperEvidence,
+  forgetLastKnownStatus,
+  getLastKnownStatus,
+  observeStatusEvidence,
+  type StatusEvidence,
+} from '@/lib/session/status-evidence';
 import { observeWaitingEdge } from '@/lib/session/waiting-episode-state';
 // Issue #1783 adds the model readers alongside #1786's `isAwaitingInstruction`;
 // Issue #1784 promotes them to `getResolvedAgentModelInfo`, which folds in what
@@ -118,6 +125,54 @@ export interface CliToolSessionStatus {
    * would be worse than reporting nothing.
    */
   reasoningEffort?: string | null;
+  /**
+   * Whether this instance's status rests on something positive (Issue #1926,
+   * 方針書 §4 D1 / §7 / DR3-005).
+   *
+   * The second of the two contract changes Phase 1 makes, and the reason it is
+   * needed: `CurrentOutputResponse` drives `PromptPanel` / `ActivityPane` /
+   * `TerminalEscapeHatch`, but the header status chip, `BranchStatusIndicator`
+   * and `commandmate ls` are driven by THIS object, which until now carried
+   * three booleans and no reason at all. §7's rows "スクレイパが肯定的証拠を
+   * 得られない" and "直前の確定状態" cannot be built on the other contract.
+   *
+   * `'none'` means the frame was interactive and nothing on it could be read
+   * either way — the same fact `CurrentOutputResponse.isUnclassifiedActive`
+   * carries, from the same derivation (`status-evidence.ts`).
+   *
+   * **The key is omitted rather than set to null when nothing is known**, for
+   * the reason {@link model} gives: these objects are compared with `toEqual` in
+   * existing suites, and a session that is not running (or whose capture threw)
+   * has no frame to have read. Same per-instance rule too — see
+   * {@link mergeSessionStatus}.
+   */
+  statusEvidence?: StatusEvidence;
+  /**
+   * The scraper's reason token for this instance's status (Issue #1926).
+   *
+   * `input_prompt` / `no_recent_output` / `thinking_indicator` / `default` … —
+   * `STATUS_REASON` in `src/lib/detection/status-detector.ts`. It is what turns
+   * an orange dot into a sentence, and what `commandmate ls` prints in its
+   * REASON column.
+   *
+   * Deliberately the SCRAPER's reason, not a `hook_` one: this object is built
+   * from `detectSessionStatus` alone (the list API does not run
+   * `mergeStructuredStatus`), and labelling a scraper verdict with a structured
+   * reason would misreport which layer decided. The merged reason is on
+   * `CurrentOutputResponse.sessionStatusReason`.
+   */
+  sessionStatusReason?: string;
+  /**
+   * The last status anything could positively confirm for this instance, or
+   * absent (Issue #1926, §7 「直前の確定状態（証拠なしの間の表示）」).
+   *
+   * Held server-side with a TTL of `LAST_KNOWN_STATUS_TTL_MS` and cleared by a
+   * restart. What a surface renders while {@link statusEvidence} is `'none'` and
+   * the three booleans are a fallback rather than a reading.
+   */
+  lastKnownStatus?: string;
+  /** Epoch ms of {@link lastKnownStatus}, absent when that is absent. */
+  lastKnownStatusAt?: number;
 }
 
 /** Aggregated session status result for a worktree */
@@ -183,6 +238,14 @@ function mergeWaitingSince(a: number | null, b: number | null): number | null {
  * different models. The aggregate therefore keeps them only when there was
  * nothing to fold — i.e. the tool has a single instance and this function was
  * never called for it.
+ *
+ * The four fields Issue #1926 adds (`statusEvidence` / `sessionStatusReason` /
+ * `lastKnownStatus` / `lastKnownStatusAt`) follow the same rule, and it is not a
+ * shortcut: there is no logical-OR of two reasons. Two instances of one tool can
+ * be at `input_prompt` and `thinking_indicator` at the same moment, and an
+ * aggregate that picked one would tell the header chip a reason that is true of
+ * an instance the user is not looking at. Read them from
+ * `sessionStatusByInstance`, which is never folded.
  */
 function mergeSessionStatus(
   a: CliToolSessionStatus,
@@ -236,6 +299,12 @@ async function detectInstanceSessionStatus(
   // are both "not waiting" and must end an episode that was open.
   let waitingKind: WaitingKind | null = null;
   let structuredWaitingSince: number | null = null;
+  // Issue #1926: what the frame said and whether it said it positively. Both
+  // stay null when there was no frame to read — the session is not running, or
+  // the capture threw — and the keys are then omitted from the result, which is
+  // the same rule `model` follows and for the same reason.
+  let statusEvidence: StatusEvidence | null = null;
+  let sessionStatusReason: string | null = null;
   if (isRunning) {
     try {
       const captureLines = getStatusCaptureLines(cliToolId);
@@ -262,6 +331,19 @@ async function detectInstanceSessionStatus(
       );
       // Issue #1550: SessionStatus → activity flags lives in status-mapping.ts
       ({ isWaitingForResponse, isProcessing } = sessionStatusToActivityFlags(statusResult.status));
+
+      // Issue #1926: the same derivation `current-output-builder` uses, called
+      // rather than restated (§4 D1 決定 2 — two expressions for one fact is how
+      // Phase 3 would move one and not the other). Latched here as well as
+      // there because this is the loop the sidebar polls, so it is what keeps
+      // `lastKnownStatus` warm for the header chip and `commandmate ls`.
+      sessionStatusReason = statusResult.reason;
+      statusEvidence = deriveScraperEvidence(statusResult.status, statusResult.reason);
+      observeStatusEvidence(compositeKey, {
+        status: statusResult.status,
+        reason: statusResult.reason,
+        evidence: statusEvidence,
+      });
 
       // Issue #1786: fold in what the agent's own events know. Until now the
       // list API — and therefore the sidebar, Home, Sessions, Review and the
@@ -335,6 +417,14 @@ async function detectInstanceSessionStatus(
   // recognisable chrome keeps exactly the shape #1786 left it with.
   const { model, effort } = getResolvedAgentModelInfo(worktreeId, cliToolId, instanceId);
 
+  // Issue #1926: the latch, read after it was fed above so a positive poll
+  // reports itself. Dropped outright for a session that is not running — its
+  // last confirmed status describes a process that is gone, which is the same
+  // call `current-output-builder` makes and the same one `model` makes.
+  const evidenceKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
+  if (!isRunning) forgetLastKnownStatus(evidenceKey);
+  const lastKnown = isRunning ? getLastKnownStatus(evidenceKey) : null;
+
   return {
     isRunning,
     isWaitingForResponse,
@@ -346,6 +436,11 @@ async function detectInstanceSessionStatus(
     awaitingInstruction: isRunning && isAwaitingInstruction(worktreeId, cliToolId, instanceId),
     ...(model !== null ? { model } : {}),
     ...(effort !== null ? { reasoningEffort: effort } : {}),
+    ...(statusEvidence !== null ? { statusEvidence } : {}),
+    ...(sessionStatusReason !== null ? { sessionStatusReason } : {}),
+    ...(lastKnown !== null
+      ? { lastKnownStatus: lastKnown.status, lastKnownStatusAt: lastKnown.at }
+      : {}),
   };
 }
 

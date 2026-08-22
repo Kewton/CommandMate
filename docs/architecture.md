@@ -540,10 +540,14 @@ feature/foo
    - 入力プロンプト (`❯`) → `ready`
    - それ以外 → `running` (処理中と推定)
 
+**証拠層（Issue #1926、方針書 §4 D1 / §7）:** 上の 4 値とは別に、判定が**肯定的証拠**に基づくか「否定パターンに一致しなかっただけ」かを `statusEvidence: 'positive' | 'none'` として `current-output`（`capture --json`）と `GET /api/worktrees` の `sessionStatusByCli` に additive 公開する（`src/lib/session/status-evidence.ts` が唯一の導出元で、`lastKnownStatus` の server 側 latch も持つ）。`SessionStatus` の値域は 4 値のまま変わらない。
+
 **関連ファイル:**
 - `src/config/status-colors.ts` - ステータス色の一元管理
 - `src/lib/detection/cli-patterns.ts` - CLIツール別パターン定義
 - `src/lib/detection/prompt-detector.ts` - プロンプト検出
+- `src/lib/session/status-evidence.ts` - 証拠（`statusEvidence`）と直前の確定状態の latch（Issue #1926）
+- `src/lib/session/provisional-turn.ts` - `structuredEvents` の turn フィールド暫定導出（Issue #1926、Phase 4 で本実装に置換）
 - `src/types/sidebar.ts` - ステータス判定ロジック
 
 詳細は [ステータスインジケーター](./features/sidebar-status-indicator.md) を参照。

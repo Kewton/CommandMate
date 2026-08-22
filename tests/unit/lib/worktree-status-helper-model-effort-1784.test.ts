@@ -171,6 +171,13 @@ describe('sessionStatusByInstance[…].reasoningEffort', () => {
       waitingKind: null,
       waitingSince: null,
       awaitingInstruction: false,
+      // Issue #1926: the frame WAS read here — an idle codex composer — so the
+      // reason and the evidence are present. Only the model keys are absent,
+      // which is what this case is about.
+      statusEvidence: 'positive',
+      sessionStatusReason: 'input_prompt',
+      lastKnownStatus: 'ready',
+      lastKnownStatusAt: expect.any(Number),
     });
   });
 
