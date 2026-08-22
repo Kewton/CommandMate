@@ -10,7 +10,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { usePendingMessages } from '../usePendingMessages';
+import { usePendingMessages } from '@/hooks/usePendingMessages';
 import type { ChatMessage } from '@/types/models';
 
 function serverUserMessage(content: string, id: string, timeMs: number): ChatMessage {

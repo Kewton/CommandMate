@@ -14,7 +14,7 @@ import {
   isPendingPair,
   isOrphanPair,
   getCombinedAssistantContent,
-} from '../conversation-grouper';
+} from '@/lib/conversation-grouper';
 
 // Test timestamps
 const T1 = new Date('2024-01-01T10:00:00');

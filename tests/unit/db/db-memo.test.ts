@@ -6,8 +6,8 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { runMigrations } from '../db/db-migrations';
-import { upsertWorktree } from '../db';
+import { runMigrations } from '@/lib/db/db-migrations';
+import { upsertWorktree } from '@/lib/db';
 import { MAX_MEMOS } from '@/config/memo-config';
 
 // Import functions that we'll implement
@@ -19,7 +19,7 @@ import {
   deleteMemo,
   reorderMemos,
   MemoDbError,
-} from '../db';
+} from '@/lib/db';
 
 describe('Database Memo Operations', () => {
   let testDb: Database.Database;

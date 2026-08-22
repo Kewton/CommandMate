@@ -12,7 +12,7 @@ import {
   confirmOptimisticMessage,
   removeOptimisticMessage,
   MAX_MESSAGES,
-} from '../message-sync';
+} from '@/lib/message-sync';
 import type { ChatMessage } from '@/types/models';
 
 // Helper to create test messages
