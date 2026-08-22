@@ -32,9 +32,11 @@
  * @module lib/hooks/sources/opencode/mappers
  */
 
+import { PERMISSION_REPLIED_DETAIL } from '@/lib/hooks/agent-event-types';
 import {
   boundDetail,
   isPlainObject,
+  readEventIdentity,
   readNestedString,
   whenNamed,
   type EventMapper,
@@ -60,6 +62,18 @@ export const OPENCODE_PERMISSION_DETAIL = 'permission_prompt';
  * sitting at the composer" — so that spelling never appears here.
  */
 export const OPENCODE_QUESTION_DETAIL = 'question_prompt';
+
+/**
+ * Detail for `permission.replied` (Issue #1898).
+ *
+ * The shared spelling, not a new one: `agent-event-state` releases the
+ * prompt-waiting record on exactly this word, and the same word is used by the
+ * adjudicator when *this server* is the one that answered. opencode is the only
+ * source that publishes the frame today, which is why its
+ * `permissionReplyReleasesPrompt` capability is the only one set to true — but
+ * the vocabulary is not opencode's, so it is imported rather than declared.
+ */
+export const OPENCODE_PERMISSION_REPLIED_DETAIL = PERMISSION_REPLIED_DETAIL;
 
 /** Detail for `session.error`. */
 export const OPENCODE_ERROR_DETAIL = 'error';
@@ -115,17 +129,97 @@ export function partCallId(payload: Record<string, unknown>): string | null {
   return readNestedString(frameProperties(payload), ['part', 'callID']);
 }
 
+/**
+ * `properties.requestID` — the approval a `permission.replied` frame answers
+ * (Issue #1898).
+ *
+ * Spelled differently from the `properties.id` an approval is *asked* under,
+ * and the difference is measured rather than assumed: `permission-replied.json`
+ * carries `{ sessionID, requestID, reply }` and no `id` at all. Reading `id`
+ * here would leave every reply anonymous, and an anonymous reply retires
+ * whichever dialog happens to be open.
+ */
+export function repliedPermissionId(payload: Record<string, unknown>): string | null {
+  return readNestedString(frameProperties(payload), ['requestID']);
+}
+
+/**
+ * The frame's own id, for identity de-duplication (Issue #1899).
+ *
+ * This is the extraction half of `capabilities.eventIdentity: 'permission-id'`:
+ * the capability names the id, this finds it. One function rather than a field
+ * on each mapper rule because the id is a property of the *frame*, and the
+ * frames that carry one are not the same set as the frames that map to a word.
+ *
+ * ## Where each id lives, and why the list is not one path
+ *
+ * | frame | id | note |
+ * |---|---|---|
+ * | `permission.asked` | `properties.id` | `per_…` |
+ * | `permission.replied` | `properties.requestID` | the **same** `per_…`, spelled differently (#1898) |
+ * | `question.asked` | `properties.id` | `que_…` |
+ * | `message.updated` | `properties.info.id` | `msg_…` |
+ * | `message.part.updated` | `properties.part.callID` | `toolu_…` |
+ *
+ * The first two rows are why the caller keys on `(event, detail, identity)`
+ * rather than on the identity alone: an approval and the reply that answers it
+ * carry **the same value**, and a key made of the id by itself would read the
+ * reply as a repeat of the ask and drop the only positive statement any source
+ * makes that a dialog is gone.
+ *
+ * ## The frames that answer null
+ *
+ * `session.idle` is `{ "sessionID": "ses_…" }` and nothing else — measured, and
+ * the reason `./turn-gate` exists. `session.created` / `session.deleted` /
+ * `session.error` publish no per-frame id either. Null is the honest answer for
+ * all of them, and `classifyAgentEventDelivery` is where "no id" is turned into
+ * a policy per event word.
+ *
+ * The envelope's own `id` (`evt_…`) is deliberately **not** used. The captured
+ * fixtures redact it to a single placeholder, so nothing in this repository
+ * establishes that it is unique per frame rather than per subscription or per
+ * aggregate — and a key built on an unverified uniqueness claim silently drops
+ * real events, which is the bug this Issue is fixing.
+ */
+export function opencodeEventIdentity(payload: Record<string, unknown>): string | null {
+  const properties = frameProperties(payload);
+
+  switch (readNestedString(payload, ['type'])) {
+    case 'permission.asked':
+    case 'question.asked':
+      return readEventIdentity(readNestedString(properties, ['id']));
+    case 'permission.replied':
+      return readEventIdentity(repliedPermissionId(payload));
+    case 'message.updated':
+      return readEventIdentity(readNestedString(properties, ['info', 'id']));
+    case 'message.part.updated':
+      return readEventIdentity(partCallId(payload));
+    default:
+      return null;
+  }
+}
+
 /** Statuses that mean the tool call is over, either way (#1758 §5.2.3). */
 const FINISHED_PART_STATUSES: readonly string[] = ['completed', 'error'];
 
 /**
  * The ordered rules, first match wins.
  *
- * `session.status`, `server.connected`, `server.heartbeat`, `permission.replied`
- * and `question.replied` are deliberately absent. They are real frames that
+ * `session.status`, `server.connected`, `server.heartbeat` and
+ * `question.replied` are deliberately absent. They are real frames that
  * arrive on every healthy connection and they map to none of the seven words,
  * so they fall through, return null and are counted (C8) — which is what the
  * interface asks for and what stops a ten-second keepalive from throwing.
+ *
+ * `permission.replied` was in that list until Issue #1898 and is now mapped,
+ * for a reason that took a live measurement to see: it is the *only* positive
+ * statement any of the six tools makes that an approval dialog is gone. Left
+ * unmapped, a dialog answered in the terminal went on reading `waiting` until
+ * the tool call it gated finished — eight seconds on `sleep 8; pwd`, and
+ * indefinitely for an approval whose tool emits nothing. It maps to
+ * `notification`, which is the bundle word, with a detail that decides no
+ * status of its own (`agentEventToSessionStatus` answers null for it, so the
+ * scraper keeps the frame): all it does is retire the record.
  *
  * `session.status(idle)` in particular must NOT be mapped: it is emitted in the
  * same millisecond as `session.idle` and mapping both would report every turn's
@@ -172,6 +266,7 @@ const OPENCODE_BASE_MAPPERS: readonly EventMapper[] = [
   whenNamed('permission.asked', 'notification', OPENCODE_PERMISSION_DETAIL),
   whenNamed('question.asked', 'notification', OPENCODE_QUESTION_DETAIL),
   whenNamed('session.error', 'notification', OPENCODE_ERROR_DETAIL),
+  whenNamed('permission.replied', 'notification', OPENCODE_PERMISSION_REPLIED_DETAIL),
 ];
 
 /**

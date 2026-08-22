@@ -21,6 +21,7 @@ import {
   extractInstanceId,
   type AutoYesState,
 } from '@/lib/polling/auto-yes-manager';
+import { recheckPendingDecisions } from '@/lib/hooks/pending-decision-recheck';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { isAllowedDuration, DEFAULT_AUTO_YES_DURATION, validateStopPattern, type AutoYesDuration } from '@/config/auto-yes-config';
@@ -42,12 +43,28 @@ interface AutoYesResponse {
   enabled: boolean;
   expiresAt: number | null;
   pollingStarted?: boolean;
+  /**
+   * Approvals that were already pending and got re-judged by this call
+   * (Issue #1898-2), or absent when nothing was re-read.
+   *
+   * Enabling Auto-Yes under a dialog that is already up used to do nothing at
+   * all: the request had been abstained on when it arrived, and the only
+   * re-read ran on re-connect. This field is how the operator sees the
+   * difference — `commandmate auto-yes --enable` says how many approvals it
+   * answered on the way in.
+   */
+  pendingDecisions?: {
+    examined: number;
+    delivered: number;
+    skipped: number;
+  };
 }
 
 /** Build the JSON response shape from an AutoYesState */
 function buildAutoYesResponse(
   state: AutoYesState | null,
-  pollingStarted?: boolean
+  pollingStarted?: boolean,
+  pendingDecisions?: AutoYesResponse['pendingDecisions']
 ): AutoYesResponse {
   const response: AutoYesResponse = {
     enabled: state?.enabled ?? false,
@@ -55,6 +72,9 @@ function buildAutoYesResponse(
   };
   if (pollingStarted !== undefined) {
     response.pollingStarted = pollingStarted;
+  }
+  if (pendingDecisions !== undefined) {
+    response.pendingDecisions = pendingDecisions;
   }
   return response;
 }
@@ -259,6 +279,7 @@ export async function POST(
 
     // Issue #138, #525, #896: Start or stop server-side polling (per-instance)
     let pollingStarted = false;
+    let pendingDecisions: AutoYesResponse['pendingDecisions'];
     let state;
     if (body.enabled) {
       state = setAutoYesEnabled(
@@ -273,6 +294,30 @@ export async function POST(
       pollingStarted = result.started;
       if (!result.started) {
         logger.warn('polling-not-started:');
+      }
+
+      // Issue #1898-2: the policy just changed, so re-judge what the agent is
+      // already blocked on. The poller cannot: it reads the SCREEN, and the
+      // approval this is about is an object on the agent's own server that was
+      // abstained on before Auto-Yes existed for this session. Measured before
+      // this call: 30+ seconds of `waiting` with no adjudication log.
+      //
+      // Awaited rather than fired and forgotten, so `commandmate auto-yes
+      // --enable` returns only once the pending approval has been answered —
+      // an operator who runs it on a stuck worker should not have to poll to
+      // find out whether it worked. Bounded: it answers immediately for every
+      // source that declares `resync: 'none'`, which is all five hook tools.
+      const recheck = await recheckPendingDecisions({
+        worktreeId: id,
+        cliToolId,
+        instanceId: body.instanceId,
+      });
+      if (recheck.reason === null) {
+        pendingDecisions = {
+          examined: recheck.examined,
+          delivered: recheck.delivered,
+          skipped: recheck.skipped,
+        };
       }
     } else {
       // Issue #525, #896: instanceId/cliToolId specified -> stop that instance;
@@ -299,7 +344,7 @@ export async function POST(
       }
     }
 
-    return NextResponse.json(buildAutoYesResponse(state, pollingStarted));
+    return NextResponse.json(buildAutoYesResponse(state, pollingStarted, pendingDecisions));
   } catch (error: unknown) {
     logger.error('error-setting-auto-yes-state:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(

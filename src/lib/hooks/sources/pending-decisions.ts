@@ -35,6 +35,23 @@ import type {
 
 const logger = createLogger('lib/hooks/sources/pending-decisions');
 
+/**
+ * What became of a verdict handed to {@link AgentEventSource.decide} (Issue #1898).
+ *
+ * A push source answers in the body of the request the agent is blocked on, so
+ * "was it delivered" is the same question as "was the slot still open". A pull
+ * source opens its own connection, which can be refused — and the difference
+ * matters, because a verdict that never arrived leaves a human blocked. Before
+ * this Issue the answer was logged inside `decide()` and thrown away, so the
+ * caller that had to decide whether a dialog is still open could not find out.
+ */
+export interface DecisionDelivery {
+  /** Whether the verdict actually reached the agent. */
+  delivered: boolean;
+  /** Machine-readable detail, for logs and payloads. Never prose to branch on. */
+  reason: string;
+}
+
 /** One decision a receiver is currently blocking on. */
 export interface DecisionSlot {
   readonly key: string;
@@ -42,6 +59,12 @@ export interface DecisionSlot {
   readonly decision: PendingDecision;
   /** Set by a push source's `decide()`; stays null for an out-of-band reply. */
   body: Record<string, unknown> | null;
+  /**
+   * What the source said became of the verdict (Issue #1898), or null when it
+   * said nothing — which is the honest reading for every source that has not
+   * been taught to report, and is why this is not defaulted to `delivered`.
+   */
+  delivery: DecisionDelivery | null;
 }
 
 /**
@@ -79,7 +102,7 @@ function keyOf(ref: AgentInstanceRef): string {
 /** Register a decision as in flight. Always paired with {@link closeDecisionSlot}. */
 export function openDecisionSlot(ref: AgentInstanceRef, decision: PendingDecision): DecisionSlot {
   const key = keyOf(ref);
-  const slot: DecisionSlot = { key, ref, decision, body: null };
+  const slot: DecisionSlot = { key, ref, decision, body: null, delivery: null };
   const open = pendingByInstance.get(key) ?? [];
   open.push(slot);
   while (open.length > MAX_OPEN_DECISIONS_PER_INSTANCE) open.shift();
@@ -107,6 +130,28 @@ export function closeDecisionSlot(slot: DecisionSlot): Record<string, unknown> {
 /** The decisions currently in flight for one instance. */
 export function listOpenDecisions(ref: AgentInstanceRef): PendingDecision[] {
   return (pendingByInstance.get(keyOf(ref)) ?? []).map((slot) => slot.decision);
+}
+
+/**
+ * Record what became of the verdict for an open slot (Issue #1898).
+ *
+ * Called from a source's own `decide()`, beside — not instead of — filling the
+ * body: a push source that wrote a body delivered it, and a pull source that
+ * POSTed it somewhere has an HTTP result nobody else can see.
+ *
+ * @returns Whether a slot was still open to record against
+ */
+export function recordDecisionDelivery(
+  ref: AgentInstanceRef,
+  decisionId: string,
+  delivery: DecisionDelivery
+): boolean {
+  const open = pendingByInstance.get(keyOf(ref));
+  if (!open) return false;
+  const slot = open.find((candidate) => candidate.decision.id === decisionId);
+  if (!slot) return false;
+  slot.delivery = delivery;
+  return true;
 }
 
 /** Fill the slot a push source is answering, if it is still open. */
@@ -145,6 +190,36 @@ export async function answerPendingDecision(
   decision: PendingDecision,
   verdict: Verdict
 ): Promise<Record<string, unknown>> {
+  return (await answerPendingDecisionWithReceipt(source, ref, decision, verdict)).body;
+}
+
+/** {@link answerPendingDecision} plus what the source said about delivery. */
+export interface AnsweredDecision {
+  /** The body to write. See {@link answerPendingDecision}. */
+  body: Record<string, unknown>;
+  /**
+   * The source's own account of the delivery, or null when it gave none
+   * (Issue #1898). A caller that has to decide whether a human is still blocked
+   * must treat null as "unknown", never as "delivered".
+   */
+  delivery: DecisionDelivery | null;
+}
+
+/**
+ * Answer one decision and keep the receipt (Issue #1898).
+ *
+ * The same call as {@link answerPendingDecision} — one slot, one `decide()`,
+ * one close — and the reason it exists separately is that the receiver routes
+ * only ever want the body, while a caller that adjudicated *on the agent's
+ * behalf* (opencode's ingest, the Auto-Yes re-check) has to know whether the
+ * verdict landed before it decides that no dialog is open.
+ */
+export async function answerPendingDecisionWithReceipt(
+  source: AgentEventSource,
+  ref: AgentInstanceRef,
+  decision: PendingDecision,
+  verdict: Verdict
+): Promise<AnsweredDecision> {
   const slot = openDecisionSlot(ref, decision);
   try {
     await source.decide(ref, decision, verdict);
@@ -159,6 +234,11 @@ export async function answerPendingDecision(
       decisionId: decision.id,
       error: error instanceof Error ? error.message : String(error),
     });
+    slot.delivery = {
+      delivered: false,
+      reason: error instanceof Error ? `decide-threw:${error.message}` : 'decide-threw',
+    };
   }
-  return closeDecisionSlot(slot);
+  const delivery = slot.delivery;
+  return { body: closeDecisionSlot(slot), delivery };
 }

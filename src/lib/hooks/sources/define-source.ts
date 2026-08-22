@@ -41,7 +41,11 @@ import {
   runEventMappers,
   type EventMapper,
 } from './event-mapper';
-import { fillDecisionSlot, listOpenDecisions } from './pending-decisions';
+import {
+  fillDecisionSlot,
+  listOpenDecisions,
+  recordDecisionDelivery,
+} from './pending-decisions';
 import type {
   AgentEventSource,
   AgentInstanceRef,
@@ -111,6 +115,16 @@ export interface PushHookSourceSpec {
    * with one nested exception can say so without giving up the list.
    */
   extractModel?: (payload: Record<string, unknown>) => string | null;
+  /**
+   * The frame's own id, for identity de-duplication (Issue #1899).
+   *
+   * Omit it and the source answers null for every frame, which is the only
+   * honest answer while its `capabilities.eventIdentity` is `null`: nobody has
+   * measured where — or whether — this tool publishes a per-frame id. The two
+   * declarations move together, and `tests/unit/hooks/sources/capabilities.test.ts`
+   * pins the capability half.
+   */
+  extractEventIdentity?: (payload: Record<string, unknown>) => string | null;
   /** Subtype extraction for events whose rule did not fix one (S2). */
   extractDetail?: (event: AgentEventType, payload: Record<string, unknown>) => string | null;
   parsePermissionRequest: (payload: Record<string, unknown>) => PermissionRequestPayload | null;
@@ -180,6 +194,14 @@ export function definePushHookSource(spec: PushHookSourceSpec): AgentEventSource
       });
     },
 
+    eventIdentityOf(payload: Record<string, unknown>): string | null {
+      // Issue #1899. Absent by default, because a push tool whose capability
+      // says `eventIdentity: null` has nothing to read — and answering null is
+      // what puts it on the time window `isDuplicateAgentEvent` has always
+      // applied to it.
+      return spec.extractEventIdentity?.(payload) ?? null;
+    },
+
     parsePermissionRequest: spec.parsePermissionRequest,
     parseQuestion: spec.parseQuestion,
 
@@ -202,7 +224,15 @@ export function definePushHookSource(spec: PushHookSourceSpec): AgentEventSource
     ): Promise<void> {
       // C2: the verdict leaves through the body of the request the agent is
       // blocked on, which the receiver is holding open in a slot.
-      fillDecisionSlot(target, decision.id, spec.encodeVerdict(verdict));
+      const filled = fillDecisionSlot(target, decision.id, spec.encodeVerdict(verdict));
+      // Issue #1898: for a push source "delivered" and "the slot was still
+      // open" are the same fact — the body has nowhere else to go. Reported so
+      // callers of `answerPendingDecisionWithReceipt` get the same shape of
+      // answer from both transports.
+      recordDecisionDelivery(target, decision.id, {
+        delivered: filled,
+        reason: filled ? 'response-body' : 'slot-closed',
+      });
     },
 
     async listPending(target: AgentInstanceRef): Promise<PendingDecision[]> {
@@ -240,6 +270,8 @@ export interface PullEventSourceSpec {
   modelFields?: readonly string[];
   /** Nested model extraction (#1783). See {@link PushHookSourceSpec.extractModel}. */
   extractModel?: (payload: Record<string, unknown>) => string | null;
+  /** Frame id extraction (#1899). See {@link PushHookSourceSpec.extractEventIdentity}. */
+  extractEventIdentity?: (payload: Record<string, unknown>) => string | null;
   extractDetail?: (event: AgentEventType, payload: Record<string, unknown>) => string | null;
   parsePermissionRequest: (payload: Record<string, unknown>) => PermissionRequestPayload | null;
   parseQuestion: (payload: Record<string, unknown>) => AskUserQuestionSpec | null;
@@ -314,6 +346,14 @@ export function definePullEventSource(spec: PullEventSourceSpec): AgentEventSour
         modelFields: spec.modelFields,
         extractModel: spec.extractModel,
       });
+    },
+
+    eventIdentityOf(payload: Record<string, unknown>): string | null {
+      // Issue #1899. See the push factory's copy — the difference is that a
+      // pull source is the one that actually declares an `eventIdentity`, so
+      // omitting the extractor here would leave the capability announcing an id
+      // nothing can read.
+      return spec.extractEventIdentity?.(payload) ?? null;
     },
 
     parsePermissionRequest: spec.parsePermissionRequest,

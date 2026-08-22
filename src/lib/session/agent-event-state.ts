@@ -40,9 +40,16 @@
 
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
-import { MAX_EVENT_DETAIL_LENGTH, type AgentEventType } from '@/lib/hooks/agent-event-types';
+import {
+  MAX_EVENT_DETAIL_LENGTH,
+  PERMISSION_REPLIED_DETAIL,
+  type AgentEventType,
+} from '@/lib/hooks/agent-event-types';
 import type { AskUserQuestionSpec } from '@/lib/hooks/ask-user-question-payload';
 import { ASK_USER_QUESTION_TOOL } from '@/lib/hooks/permission-request-payload';
+// Issue #1899: type-only, so nothing in the source registry's module graph —
+// `better-sqlite3` included — is pulled into this module at runtime.
+import type { AgentSourceCapabilities } from '@/lib/hooks/sources/types';
 // Issue #1784: the terminal-frame half of "which model / effort is this on".
 import { mergeModelInfo, type ModelInfo } from '@/lib/detection/model-info-extractor';
 import { agentEventToSessionStatus, type StructuredStatusVerdict } from '@/lib/session/status-mapping';
@@ -96,6 +103,8 @@ declare global {
   // eslint-disable-next-line no-var
   var __agentEventRecentKeys: Map<string, number> | undefined;
   // eslint-disable-next-line no-var
+  var __agentEventRecentIdentities: Map<string, Map<string, number>> | undefined;
+  // eslint-disable-next-line no-var
   var __agentEventAwaitingInstruction: Map<string, AwaitingInstructionRecord> | undefined;
   // eslint-disable-next-line no-var
   var __agentEventLastModel: Map<string, string> | undefined;
@@ -126,6 +135,17 @@ const askUserQuestion = globalThis.__agentEventAskUserQuestion ??
 /** dedup key -> epoch ms it was first seen. See {@link isDuplicateAgentEvent}. */
 const recentEventKeys = globalThis.__agentEventRecentKeys ??
   (globalThis.__agentEventRecentKeys = new Map<string, number>());
+
+/**
+ * compositeKey -> (identity key -> epoch ms it was first seen) (Issue #1899).
+ *
+ * Nested rather than flat so the bound is *per instance*, which the flat
+ * {@link recentEventKeys} is not: one chatty agent must not be able to evict
+ * another's ids and let a genuine re-delivery through on a quiet pane. See
+ * {@link claimEventIdentity}.
+ */
+const recentEventIdentities = globalThis.__agentEventRecentIdentities ??
+  (globalThis.__agentEventRecentIdentities = new Map<string, Map<string, number>>());
 
 /** compositeKey -> the agent's own "I am waiting for instructions" (#1786). */
 const awaitingInstruction = globalThis.__agentEventAwaitingInstruction ??
@@ -229,6 +249,34 @@ export interface AgentEventRecord {
    * question is answered by {@link getLastKnownAgentModel} instead.
    */
   model?: string | null;
+  /**
+   * The dialog this event opens or closes, as the agent's own id (Issue #1898).
+   *
+   * Set only by a source whose {@link AgentSourceCapabilities.eventIdentity}
+   * names one — opencode's `per_…`, which is both the id in the
+   * `permission.asked` frame and the id in the reply URL. Everything else
+   * leaves it absent, and an absent id means "this event says nothing about
+   * *which* dialog", which is why the release below matches permissively
+   * rather than refusing to act.
+   */
+  decisionId?: string | null;
+  /**
+   * Whether the source states that no dialog is left open by this event
+   * (Issue #1898).
+   *
+   * The caller computes it, because the caller is the only layer that knows
+   * both what happened (a verdict was delivered, a `permission.replied` frame
+   * arrived) and whether this source's
+   * {@link AgentSourceCapabilities.permissionReplyReleasesPrompt} says that
+   * settles anything. A hook source can never set it: its verdict goes into the
+   * body of a request nobody hears the end of, so the dialog on screen has to
+   * be released by something that can observe it.
+   *
+   * Absent is not `false` in meaning — it is "this source made no statement" —
+   * but the two act the same here, and that is deliberate: the pre-#1898
+   * behaviour is what an event with nothing to say must keep producing.
+   */
+  promptSettled?: boolean;
 }
 
 /**
@@ -400,16 +448,32 @@ export function isAwaitingInstruction(
  * The `prompt_waiting` half of the state machine, driven by the same events
  * (Issue #1725).
  *
- * | event                             | effect on prompt_waiting |
- * |-----------------------------------|--------------------------|
- * | `notification(permission_prompt)` | **open**, confirmed      |
- * | `notification(idle_prompt)`       | release                  |
- * | `notification(other/none)`        | unchanged                |
- * | `stop`                            | release                  |
- * | `user_prompt_submit`              | release                  |
- * | `session_start` / `session_end`   | release                  |
- * | `pre_tool_use`                    | unchanged                |
- * | `post_tool_use`                   | release                  |
+ * | event                                       | effect on prompt_waiting |
+ * |---------------------------------------------|--------------------------|
+ * | `notification(permission_prompt)`           | **open**, confirmed      |
+ * | `notification(permission_prompt)` + settled | release (Issue #1898)    |
+ * | `notification(permission_replied)`          | release when settled     |
+ * | `notification(idle_prompt)`                 | release                  |
+ * | `notification(other/none)`                  | unchanged                |
+ * | `stop`                                      | release                  |
+ * | `user_prompt_submit`                        | release                  |
+ * | `session_start` / `session_end`             | release                  |
+ * | `pre_tool_use`                              | unchanged                |
+ * | `post_tool_use`                             | release                  |
+ *
+ * The two {@link AgentEventRecord.promptSettled} rows are Issue #1898, and they
+ * are the reason the caller adjudicates *before* it records. An approval that
+ * Auto-Yes answered in the same breath it arrived never blocked anybody, so
+ * opening a record for it published `waiting` for the whole of the tool call
+ * that followed — measured at eight seconds on `sleep 8; pwd`, released only by
+ * the `post_tool_use` at the end. `promptSettled` is how the caller says "the
+ * verdict is already on its way", and the record is never opened at all.
+ *
+ * A `permission_replied` notification is the same statement made by the agent
+ * rather than by us: it is the frame a source publishes when *anybody* answered
+ * the dialog, including a human at the terminal. Only a source whose
+ * `permissionReplyReleasesPrompt` capability is true has one, and the caller
+ * reads that capability — this table reads the boolean it produced.
  *
  * `pre_tool_use` leaves this half alone on purpose (Issue #1726). It is the
  * `AskUserQuestion` invocation, and a picker being *about to be drawn* is not
@@ -444,11 +508,24 @@ function applyPromptWaitingTransition(key: string, record: AgentEventRecord): vo
   switch (record.event) {
     case 'notification':
       if (record.detail === 'permission_prompt') {
+        if (record.promptSettled === true) {
+          // Issue #1898: adjudicated before it was recorded, and the verdict
+          // reached the agent. There is no dialog and there never was one for
+          // a human to answer.
+          releaseSettledPromptWaiting(key, record);
+          return;
+        }
         openPromptWaiting(key, {
           source: 'notification',
           message: record.message ?? null,
+          decisionId: record.decisionId ?? null,
           at: record.at,
         });
+      } else if (record.detail === PERMISSION_REPLIED_DETAIL) {
+        // Issue #1898. The agent's own statement that the dialog is gone —
+        // whoever answered it. Not a word of the seven, so it decides no
+        // status; all it does is retire the record.
+        if (record.promptSettled === true) releaseSettledPromptWaiting(key, record);
       } else if (record.detail === 'idle_prompt') {
         promptWaiting.delete(key);
       }
@@ -683,6 +760,10 @@ export function beginAgentEventGeneration(
   // a relaunch would show the old process's effort with no frame left that
   // could contradict it. The next poll re-reads a live footer immediately.
   capturedModelInfo.delete(key);
+  // Issue #1899: the ids claimed for this key were issued by the process that
+  // has just been replaced. Unlike the time-window keys, they never expire on
+  // their own, so a generation is the only thing that retires them.
+  recentEventIdentities.delete(key);
 }
 
 /**
@@ -722,6 +803,8 @@ export function discardAgentEventState(
   lastAgentModel.delete(key);
   // Issue #1784: nor does the pane its footer was read from.
   capturedModelInfo.delete(key);
+  // Issue #1899: nor do the frame ids that session issued.
+  recentEventIdentities.delete(key);
 }
 
 /**
@@ -797,6 +880,16 @@ export interface StructuredPromptWaitingState {
   /** Tool the pre-empted permission request named, or null. */
   toolName: string | null;
   /**
+   * The agent's own id for this dialog, or null (Issue #1898).
+   *
+   * Present only for a source whose
+   * {@link AgentSourceCapabilities.eventIdentity} names one. It is what makes
+   * "this reply answered *that* dialog" a question with an answer: without it a
+   * `permission.replied` for one approval would retire whichever record
+   * happened to be open.
+   */
+  decisionId: string | null;
+  /**
    * Epoch ms something independent established that a dialog is really there:
    * a `Notification(permission_prompt)`, or the scraper reading the frame as
    * `waiting`. Null while the record is still only a prediction.
@@ -823,6 +916,7 @@ function openPromptWaiting(
     source: StructuredPromptSource;
     message: string | null;
     toolName?: string | null;
+    decisionId?: string | null;
     at: number;
   },
 ): void {
@@ -836,6 +930,7 @@ function openPromptWaiting(
     // age bound are measured from — and take the confirmation.
     existing.message = input.message ?? existing.message;
     existing.toolName = input.toolName ?? existing.toolName;
+    existing.decisionId = input.decisionId ?? existing.decisionId;
     if (confirmed) {
       existing.source = 'notification';
       existing.confirmedAt ??= input.at;
@@ -850,10 +945,30 @@ function openPromptWaiting(
       ? input.message.slice(0, MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH)
       : null,
     toolName: input.toolName ?? null,
+    decisionId: input.decisionId ?? null,
     confirmedAt: confirmed ? input.at : null,
     scraperCorroborated: false,
     recorded: false,
   });
+}
+
+/**
+ * Retire the open record because a verdict for this dialog was delivered
+ * (Issue #1898).
+ *
+ * Matched on {@link AgentEventRecord.decisionId} when both sides have one: an
+ * agent that can run two approvals at once would otherwise have the reply to
+ * the first retire the record for the second, which is the failure this Issue
+ * is fixing pointed the other way. When either side is anonymous the release is
+ * unconditional — an unmatched id is a source that publishes none, and refusing
+ * to act there would leave the pre-#1898 stall in place for it.
+ */
+function releaseSettledPromptWaiting(key: string, record: AgentEventRecord): void {
+  const open = promptWaiting.get(key);
+  if (!open) return;
+  const settledId = record.decisionId ?? null;
+  if (settledId !== null && open.decisionId !== null && open.decisionId !== settledId) return;
+  promptWaiting.delete(key);
 }
 
 /**
@@ -1193,11 +1308,192 @@ export function getRecentEventKeyCount(): number {
   return recentEventKeys.size;
 }
 
+// =============================================================================
+// Identity de-duplication (Issue #1899)
+// =============================================================================
+
+/**
+ * Event words whose repeat is a fact about the session, not a re-delivery
+ * (Issue #1899; design §4 D3 decision 2).
+ *
+ * These are the two words that end something, and neither of them carries an
+ * id on any source measured so far. `session.idle` — opencode's `stop` — is
+ * `{ "sessionID": "ses_…" }` and nothing else, which is exactly why
+ * `sources/opencode/turn-gate` exists. With no id, a generic deduper has only
+ * the clock, and the clock cannot tell a second turn from a second delivery:
+ * #1899 measured a real `stop` 2.5 s after the previous one being dropped,
+ * which leaves the newest event at `user_prompt_submit`, the instance reading
+ * `running`, and `commandmate wait` blocked until the 30-minute staleness
+ * bound.
+ *
+ * **The exemption is conditional on the source declaring an identity**, and
+ * that condition is the whole safety argument. A source that declares one is a
+ * source with a real deduper elsewhere — on the SSE path, `TurnGate`, which
+ * arms on `session.status(busy)` and completes on the first `session.idle`
+ * after arming, so the abort double-idle (19 ms apart, §5.3.2) never reaches
+ * the ingest at all. Push hooks have no such gate: #1722's concatenated
+ * settings really do post two `Stop`s for one turn, and
+ * {@link isDuplicateAgentEvent} — which is what every hook receiver still
+ * calls — is left untouched for them.
+ */
+export const LIFECYCLE_AGENT_EVENT_TYPES: readonly AgentEventType[] = ['stop', 'session_end'];
+
+/** Which rule judged a delivery a repeat. */
+export type AgentEventDedupBasis = 'identity' | 'time-window';
+
+/** One delivery, described as far as its source can describe it. */
+export interface AgentEventDelivery {
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  instanceId: string | undefined;
+  event: AgentEventType;
+  /** The event's subtype, when it has one. */
+  detail: string | null;
+  /** The source's own conversation id. Only the time-window rule reads it. */
+  sessionId: string | null | undefined;
+  /** Epoch ms. */
+  at: number;
+  /**
+   * The frame's own id — `AgentEventSource.eventIdentityOf` — or null when
+   * this frame publishes none.
+   */
+  identity: string | null;
+  /**
+   * What the source declares in {@link AgentSourceCapabilities.eventIdentity}.
+   * `null` selects the time window, which is every push source today.
+   */
+  identityKind: AgentSourceCapabilities['eventIdentity'];
+}
+
+/** Whether to drop this delivery, and on whose authority. */
+export type AgentEventDedupVerdict =
+  | { duplicate: false }
+  | { duplicate: true; by: AgentEventDedupBasis };
+
+/**
+ * Whether this delivery is a second copy of one already handled (Issue #1899).
+ *
+ * The tool-agnostic replacement for calling {@link isDuplicateAgentEvent}
+ * directly, and it branches on the source's declared capability rather than on
+ * its name — flip opencode's `eventIdentity` to `null` and every case below
+ * falls back to the 3-second window it used before this Issue.
+ *
+ * Three rules, in order:
+ *
+ *  1. **The frame has an id** — key on it, with no time bound at all. An id is
+ *     a claim about identity that a clock cannot improve on: two approvals
+ *     1 s apart are two approvals, and the same approval replayed by
+ *     `resyncPending` four minutes later is still one approval. That second
+ *     half is what the ingest's window was reaching for ("a frame delivered
+ *     twice by a re-sync racing the live stream") and never actually covered,
+ *     since a re-sync is not obliged to land within three seconds.
+ *  2. **No id, but the word ends something** — never suppressed. See
+ *     {@link LIFECYCLE_AGENT_EVENT_TYPES}.
+ *  3. **Anything else** — the time window, unchanged. That is every push
+ *     source, and the identity-declaring source's `session.created` /
+ *     `session.error`, which publish no id either but are not turn boundaries.
+ *
+ * Calling this *claims* the key, exactly as {@link isDuplicateAgentEvent} does:
+ * ask once per delivery and act on the answer.
+ */
+export function classifyAgentEventDelivery(
+  delivery: AgentEventDelivery
+): AgentEventDedupVerdict {
+  if (delivery.identityKind !== null) {
+    if (delivery.identity !== null) {
+      return claimEventIdentity(delivery, delivery.identity)
+        ? { duplicate: true, by: 'identity' }
+        : { duplicate: false };
+    }
+    if (LIFECYCLE_AGENT_EVENT_TYPES.includes(delivery.event)) {
+      return { duplicate: false };
+    }
+  }
+
+  const duplicate = isDuplicateAgentEvent(
+    delivery.worktreeId,
+    delivery.cliToolId,
+    delivery.instanceId,
+    delivery.event,
+    delivery.sessionId,
+    delivery.at,
+    delivery.detail
+  );
+  return duplicate ? { duplicate: true, by: 'time-window' } : { duplicate: false };
+}
+
+/**
+ * Claim `(event, detail, identity)` for one instance, answering whether it was
+ * already claimed.
+ *
+ * `event` and `detail` are in the key and are not decoration: opencode asks an
+ * approval under `properties.id` and answers it under `properties.requestID`
+ * with **the same `per_…` value** (#1898), so a key made of the identity alone
+ * would read `permission.replied` as a repeat of `permission.asked` and drop
+ * the one frame that releases the dialog. The same shape covers
+ * `pre_tool_use` / `post_tool_use`, which share a `callID`.
+ *
+ * `sessionId` is deliberately *not* in the key. An id is unique within the
+ * agent that issued it, and folding in a field that is null on some deliveries
+ * would let the same frame through twice.
+ */
+function claimEventIdentity(delivery: AgentEventDelivery, identity: string): boolean {
+  const composite = buildCompositeKey(
+    delivery.worktreeId,
+    delivery.cliToolId,
+    delivery.instanceId
+  );
+
+  let claimed = recentEventIdentities.get(composite);
+  if (!claimed) {
+    claimed = new Map<string, number>();
+    recentEventIdentities.set(composite, claimed);
+    // Bound the instances as well as the entries per instance: the composite
+    // key is (worktree, tool, instance) and a long-lived server accumulates
+    // worktrees (DR4-009).
+    trimOldestEntries(recentEventIdentities, MAX_RECENT_EVENT_KEYS);
+  }
+
+  const key = [delivery.event, delivery.detail ?? '', identity].join(' ');
+  if (claimed.has(key)) return true;
+
+  claimed.set(key, delivery.at);
+  trimOldestEntries(claimed, MAX_RECENT_EVENT_KEYS);
+  return false;
+}
+
+/** Drop the oldest entries until the map fits. Maps iterate in insertion order. */
+function trimOldestEntries<V>(entries: Map<string, V>, max: number): void {
+  while (entries.size > max) {
+    const oldest = entries.keys().next();
+    if (oldest.done) break;
+    entries.delete(oldest.value);
+  }
+}
+
+/**
+ * How many identities are retained for one instance, or across all of them when
+ * no instance is named. Test seam for the bound above.
+ */
+export function getRecentEventIdentityCount(
+  worktreeId?: string,
+  cliToolId?: CLIToolType,
+  instanceId?: string
+): number {
+  if (worktreeId === undefined || cliToolId === undefined) {
+    let total = 0;
+    for (const claimed of recentEventIdentities.values()) total += claimed.size;
+    return total;
+  }
+  return recentEventIdentities.get(buildCompositeKey(worktreeId, cliToolId, instanceId))?.size ?? 0;
+}
+
 /** Drop every recorded event. Test seam. */
 export function clearAgentStopEvents(): void {
   lastStopEventAt.clear();
   lastAgentEvent.clear();
   recentEventKeys.clear();
+  recentEventIdentities.clear();
   generationStartedAt.clear();
   promptWaiting.clear();
   askUserQuestion.clear();

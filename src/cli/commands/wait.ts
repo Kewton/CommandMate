@@ -365,12 +365,24 @@ async function pollWorktree(
         }
 
         // Default (agent mode): output prompt info and exit 10
+        //
+        // Issue #1898: the degraded `unclassified` payload carries no `options`
+        // — by construction, because nothing parsed the screen — but for a
+        // source whose approvals are answered by decision id it does carry
+        // `decisionOptions`, which ARE answerable (`respond <id> 1`). Reporting
+        // an empty list there told the caller a dialog was open and gave it
+        // nothing to do about it, which is the whole of #1898-3 seen from the
+        // pipeline's side.
+        const promptOptions =
+          (data.promptData.options as unknown[])?.length
+            ? (data.promptData.options as unknown[])
+            : (data.promptData.decisionOptions ?? []);
         const promptOutput: WaitPromptOutput = {
           worktreeId,
           cliToolId: data.cliToolId || 'claude',
           type: data.promptData.type || 'unknown',
           question: data.promptData.question || '',
-          options: (data.promptData.options as unknown[]) || [],
+          options: promptOptions,
           status: data.promptData.status || 'pending',
           ...(data.promptData.approvalTarget !== undefined && {
             approvalTarget: data.promptData.approvalTarget,
