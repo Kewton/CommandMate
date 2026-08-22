@@ -17,6 +17,7 @@ import {
   OPENCODE_SKIP_PATTERNS,
   OPENCODE_RESPONSE_COMPLETE,
   COPILOT_SKIP_PATTERNS,
+  isCopilotSelectionFrame,
   COPILOT_BOX_ROW_PATTERN,
   COPILOT_TRANSCRIPT_CONTINUATION_PATTERN,
   COPILOT_USER_ECHO_PATTERN,
@@ -120,6 +121,42 @@ export function normalizeCopilotLine(line: string): string {
 export function extractCopilotContentLines(rawOutput: string): string[] {
   const strippedOutput = stripAnsi(rawOutput);
   const allLines = strippedOutput.split('\n');
+
+  // Issue #1895, and it must run BEFORE the #1897 chrome trim below, against
+  // `allLines`. The two checks are complementary, not alternatives, and the
+  // order is forced in BOTH directions — measured over the 16 live fixtures:
+  //
+  //  - Trim-then-ask MISSES the real picker. `/model` draws its search field as
+  //    rule / `❯  Search models…` / rule with the key-hint footer where the
+  //    status bar would be, which is structurally a composer, so
+  //    `findCopilotChromeStart` accepts it (996, six rows off the end) instead
+  //    of returning -1 — and the six rows it takes are the only evidence that
+  //    this frame is a picker. 112 non-blank rows of model list stay behind and
+  //    `isCopilotSelectionFrame` on what is left answers no. (The other ten
+  //    pickers do give -1, so for them the order is merely harmless.)
+  //  - Trim-then-ask also INVENTS a picker. On
+  //    `picker-vocabulary-in-response.txt` — a finished turn whose reply quotes
+  //    two key-hint bars — the trim removes the status bar, which is exactly the
+  //    guard `isCopilotSelectionFrame` leans on, and the quoted bars are then the
+  //    bottom rows. Asked after the trim it answers yes and the whole reply is
+  //    discarded. Asked before, it answers no and the 54 rows survive.
+  //
+  // While a picker is open the frame carries NO response content at all: copilot
+  // draws the list instead of the transcript. The poller feeds this function the
+  // whole pane on every tick (`response-checker.ts`), so an operator who opens
+  // `/model` and reads it for a minute would otherwise have the model list
+  // appended to the saved response once per poll. Line patterns cannot fix that:
+  // `Recommended models` and `GPT-5.6 Luna 328K Medium` are not distinguishable
+  // from prose, and the pattern that used to sit in `COPILOT_SKIP_PATTERNS` for
+  // this (`Search \w+\.\.\.|Select Model`) matched none of the chrome and DID
+  // match copilot's own answers about the picker. The frame-level question has an
+  // exact answer, so ask that instead.
+  //
+  // Returning [] leaves the accumulator untouched (`accumulateTuiContent`
+  // early-returns on empty), which is the wanted behaviour: the picker is a
+  // transient overlay over a transcript whose earlier polls are already
+  // accumulated, and the next poll after it closes resumes normally.
+  if (isCopilotSelectionFrame(allLines)) return [];
 
   // Issue #1897: this accumulator, not extractResponse(), is what actually feeds
   // cleanCopilotResponse() in checkForResponse(), so copilot's bottom-pinned

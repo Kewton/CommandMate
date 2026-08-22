@@ -57,6 +57,12 @@ const NO_STRUCTURED_EVENTS = {
   lastEventType: null,
   lastEventAt: null,
   lastEventDetail: null,
+  // Issue #1926: the turn fields are derived from that same absent event, so
+  // "nothing has reported anything" is four more nulls rather than a shape.
+  turnId: null,
+  openedAt: null,
+  closedAt: null,
+  closedBy: null,
   // Issue #1725: no dialog reported either.
   promptWaitingSince: null,
   promptWaitingSource: null,
@@ -87,6 +93,19 @@ const NO_UPSTREAM_FAULT = { upstreamFault: null } as const;
 /** Nothing unsent in the composer (Issue #1879). */
 const NO_COMPOSER_TEXT = { composerText: null, composerState: 'empty' } as const;
 
+/**
+ * The evidence trio Issue #1926 adds to every payload.
+ *
+ * `positive` because the fixture's verdict is `thinking_indicator` — a frame the
+ * detector positively recognised — and the latch has nothing older to report on
+ * a session this fixture invented one line ago.
+ */
+const POSITIVE_EVIDENCE = {
+  statusEvidence: 'positive',
+  lastKnownStatus: null,
+  lastKnownStatusAt: null,
+} as const;
+
 beforeEach(() => {
   vi.clearAllMocks();
   __resetTerminalBroadcastState();
@@ -111,6 +130,7 @@ beforeEach(() => {
     ...NO_PROMPT_DEDUP,
     ...NO_UPSTREAM_FAULT,
     ...NO_COMPOSER_TEXT,
+    ...POSITIVE_EVIDENCE,
   });
 });
 
@@ -168,6 +188,7 @@ describe('broadcastTerminalSnapshotAfterInteraction', () => {
         ...NO_PROMPT_DEDUP,
         ...NO_UPSTREAM_FAULT,
         ...NO_COMPOSER_TEXT,
+    ...POSITIVE_EVIDENCE,
       })
       .mockResolvedValueOnce({
         isRunning: true,
@@ -184,6 +205,7 @@ describe('broadcastTerminalSnapshotAfterInteraction', () => {
         ...NO_PROMPT_DEDUP,
         ...NO_UPSTREAM_FAULT,
         ...NO_COMPOSER_TEXT,
+    ...POSITIVE_EVIDENCE,
       });
 
     const pending = broadcastTerminalSnapshotAfterInteraction(
