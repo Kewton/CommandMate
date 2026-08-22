@@ -355,16 +355,56 @@ Previous response
     });
 
     describe('gemini', () => {
-      it('should return "ready" with high confidence when shell prompt is detected', () => {
+      // [Issue #1939] This block used to assert that a bare shell prompt
+      // (`maenokota@host %`) means `ready`. That was true of the original
+      // GEMINI_PROMPT_PATTERN `/^(%|\$|.*@.*[%$#])\s*$/m`, written when gemini
+      // ran one-shot through a pipe (`echo | gemini`) and the shell prompt
+      // returning WAS the completion signal.
+      //
+      // Issue #368 (commit 32129187, "fix(368): rewrite Gemini CLI to
+      // interactive REPL mode") replaced that with `/^[>❯]\s*$|^\s*[>❯]\s+Type
+      // your message.*$/m` and started launching `gemini` in tmux like
+      // claude/codex. The idle evidence is now gemini's own composer row, not
+      // the shell's. This file never ran, so the assertion was never updated.
+      //
+      // NOT a regression from Epic #1891: the change predates it by months and
+      // is visible in the pattern diff of 32129187.
+      it('should return "ready" with high confidence when the REPL composer is detected', () => {
         const output = `
 Gemini response here
-maenokota@host %
+>
 `;
         const result = detectSessionStatus(output, 'gemini');
 
         expect(result.status).toBe('ready');
         expect(result.confidence).toBe('high');
         expect(result.reason).toBe('input_prompt');
+      });
+
+      it('should return "ready" for the placeholder form of the composer row', () => {
+        const output = `
+Gemini response here
+ >   Type your message or @path/to/file
+`;
+        const result = detectSessionStatus(output, 'gemini');
+
+        expect(result.status).toBe('ready');
+        expect(result.confidence).toBe('high');
+        expect(result.reason).toBe('input_prompt');
+      });
+
+      // The behaviour change of #368, pinned so it cannot drift back silently.
+      // A shell prompt means gemini is not running in this pane at all, which is
+      // not evidence that a turn finished.
+      it('should NOT treat a bare shell prompt as gemini being ready (Issue #368)', () => {
+        const output = `
+Gemini response here
+maenokota@host %
+`;
+        const result = detectSessionStatus(output, 'gemini');
+
+        expect(result.status).not.toBe('ready');
+        expect(result.reason).not.toBe('input_prompt');
       });
     });
 

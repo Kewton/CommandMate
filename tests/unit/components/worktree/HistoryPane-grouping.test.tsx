@@ -7,9 +7,21 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { HistoryPane } from '../HistoryPane';
+import { HistoryPane } from '@/components/worktree/HistoryPane';
 import type { ChatMessage } from '@/types/models';
 import { installVirtualLayout } from '@tests/helpers/virtual-layout';
+
+// [Issue #1939] The global next-intl mock in tests/setup.ts echoes
+// `namespace.key` and drops interpolation, so every assertion below on the
+// rendered wording ("You", "Assistant", "System Message", "Open file: <path>")
+// would be comparing against a key. Those assertions were written before the
+// #1276 i18n migration and are the point of this file, so resolve them through
+// the real dictionary — the same choice tests/unit/components/HistoryPane.test.tsx
+// made for #1206.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
 
 // Helper to create test messages
 function createTestMessage(
@@ -393,7 +405,10 @@ describe('HistoryPane Integration', () => {
       fireEvent.click(screen.getByRole('button', { name: /open search/i }));
 
       const scrollContainer = screen.getByTestId('history-scroll-container');
-      const searchInput = screen.getByLabelText('検索キーワード');
+      // [Issue #1939] Was the hard-coded Japanese literal '検索キーワード' from
+      // before #1276; the label now comes from worktree.history.search.keywordLabel,
+      // and this file pins the `en` dictionary.
+      const searchInput = screen.getByLabelText('Search keyword');
 
       // The search bar is a fixed row above the scroll region, not inside it.
       expect(scrollContainer.contains(searchInput)).toBe(false);

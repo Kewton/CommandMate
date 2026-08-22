@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useConversationHistory } from '../useConversationHistory';
+import { useConversationHistory } from '@/hooks/useConversationHistory';
 import type { ChatMessage } from '@/types/models';
 
 // Helper to create test messages
