@@ -35,6 +35,7 @@ import {
   detectSessionStatus,
   STATUS_REASON,
   SELECTION_LIST_REASONS,
+  isGeneratingStatus,
   type SessionStatus,
 } from '@/lib/detection/status-detector';
 import {
@@ -949,7 +950,13 @@ async function buildPayload(
   const lastOutputTimestamp = lastServerResponseTimestamp ? new Date(lastServerResponseTimestamp) : undefined;
 
   const statusResult = detectSessionStatus(output, cliToolId, lastOutputTimestamp);
-  const thinking = statusResult.status === 'running' && statusResult.reason === STATUS_REASON.THINKING_INDICATOR;
+  // Issue #1912: every `running` reason that means "the agent is producing
+  // output", not just `thinking_indicator`. opencode answers
+  // `opencode_processing_indicator` for its `esc interrupt` footer, which is
+  // the only signal it gives between the submitted prompt and the first
+  // transcript row — on a scraper-only session that stretch showed no
+  // thinking indicator at all.
+  const thinking = isGeneratingStatus(statusResult);
   const scraperPromptWaiting = statusResult.hasActivePrompt;
   const isSelectionListActive =
     statusResult.status === 'waiting' && SELECTION_LIST_REASONS.has(statusResult.reason);

@@ -13,6 +13,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
 
 const logger = createLogger('api/logs');
 
@@ -51,8 +52,11 @@ export const GET = withLogging<{ id: string; filename: string }>(async (
       );
     }
 
-    // Try to find file in CLI tool subdirectories (claude, codex, gemini, antigravity)
-    const cliTools = ['claude', 'codex', 'gemini', 'antigravity'];
+    // Try to find the file in every CLI tool subdirectory. `log-manager.ts`
+    // writes under `CLI_TOOL_IDS` and the list route enumerates the same set, so
+    // a hard-coded subset made copilot/opencode logs list fine and 404 on open
+    // (Issue #1912).
+    const cliTools: readonly string[] = CLI_TOOL_IDS;
     let fileFound = false;
     let fileContent = '';
     let fileStat: { size: number; mtime: Date } | null = null;

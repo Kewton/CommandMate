@@ -143,6 +143,42 @@ export const SELECTION_LIST_REASONS = new Set<string>([
 ]);
 
 /**
+ * The `running` reasons that mean "the agent is producing output right now"
+ * (Issue #1912).
+ *
+ * `current-output-builder` derives `thinking` / `isGenerating` from this, and it
+ * was a single `=== THINKING_INDICATOR` comparison until opencode grew a second
+ * one: branch A of the opencode block answers `opencode_processing_indicator`
+ * for the footer that reads `esc interrupt`, which is opencode's ONLY signal
+ * while it is between the submitted prompt and the first transcript row. A
+ * scraper-only session (no hooks) therefore showed no thinking indicator in
+ * `MessageList` for exactly the stretch where one is wanted.
+ *
+ * `DEFAULT` is deliberately absent: it is the "output changed recently" fallback
+ * and says nothing about the agent having announced itself, so promoting it
+ * would light the indicator on any repainting frame.
+ *
+ * @see STATUS_REASON
+ */
+export const GENERATING_REASONS = new Set<string>([
+  STATUS_REASON.THINKING_INDICATOR,
+  STATUS_REASON.OPENCODE_PROCESSING_INDICATOR,
+]);
+
+/**
+ * Whether a detection result describes an agent that is actively generating.
+ *
+ * Both halves matter: the reason alone is not enough because a stale frame can
+ * carry a `running` reason after the status has degraded to `ready`.
+ */
+export function isGeneratingStatus(result: {
+  status: SessionStatus;
+  reason: string;
+}): boolean {
+  return result.status === 'running' && GENERATING_REASONS.has(result.reason);
+}
+
+/**
  * Time threshold (in ms) for considering output as "stale"
  * If no new output for this duration, assume processing is complete
  * @constant

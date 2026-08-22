@@ -235,8 +235,14 @@ describe('extractModelInfo: antigravity', () => {
 // =============================================================================
 
 describe('extractModelInfo: out-of-scope tools', () => {
-  it.each(['gemini', 'copilot', 'vibe-local', 'opencode'] as const)(
-    'answers unknown for %s',
+  // copilot and opencode left this list in Issue #1912; neither gemini nor
+  // vibe-local prints a model on its pane in any captured frame.
+  it.each(['gemini', 'vibe-local'] as const)('answers unknown for %s', (cliToolId) => {
+    expect(extractModelInfo(cliToolId, CODEX_FOOTER_CAPTURE_V0_147)).toEqual(UNKNOWN);
+  });
+
+  it.each(['copilot', 'opencode'] as const)(
+    'does not read another tool\'s chrome for %s',
     (cliToolId) => {
       expect(extractModelInfo(cliToolId, CODEX_FOOTER_CAPTURE_V0_147)).toEqual(UNKNOWN);
     }
