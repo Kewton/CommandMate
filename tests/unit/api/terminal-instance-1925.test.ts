@@ -10,6 +10,12 @@
  * Sending is a side effect, so the contradiction rule here is the strict one:
  * a caller naming an agent the roster disagrees with is refused rather than
  * resolved to a guess. Text typed into the wrong session cannot be taken back.
+ *
+ * Issue #1906 moved the send off `sendMessageWithSubmitVerification` (which the
+ * route called with a session name it derived itself) and onto
+ * `ICLITool.sendMessage`, which takes the worktree id and the instance id. The
+ * assertions follow: "addressed the right session" is now "the right tool's
+ * `sendMessage` was called with the right instance id".
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -32,6 +38,32 @@ vi.mock('@/lib/cli-tools/submit-verified-sender', () => ({
   sendMessageWithSubmitVerification: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Issue #1906: the route sends through the tool. Real `CLIToolManager`
+// instances would drive tmux for real, so the send/liveness pair is stubbed
+// while everything the test is actually about — roster resolution — stays real.
+const sendMessage = vi.fn().mockResolvedValue(undefined);
+vi.mock('@/lib/cli-tools/manager', () => ({
+  CLIToolManager: {
+    getInstance: () => ({
+      getTool: (id: string) => ({
+        id,
+        getSessionName: (worktreeId: string, instanceId?: string) =>
+          instanceId && instanceId !== id ? `mcbd-${id}-${worktreeId}-${instanceId.split('-').pop()}` : `mcbd-${id}-${worktreeId}`,
+        isRunning: async () => true,
+        sendMessage: (...args: unknown[]) => sendMessage(id, ...args),
+      }),
+    }),
+  },
+}));
+
+// Issue #1906: the prompt guard runs before the send; it would otherwise
+// capture a pane that does not exist.
+vi.mock('@/lib/session/prompt-waiting-guard', () => ({
+  isPromptWaiting: vi.fn().mockResolvedValue({ waiting: false }),
+  promptWaitingMessage: vi.fn(() => 'waiting'),
+  PROMPT_WAITING_CODE: 'PROMPT_WAITING',
+}));
+
 declare module '@/lib/db/db-instance' {
   export function setMockDb(db: Database.Database): void;
 }
@@ -49,7 +81,6 @@ vi.mock('@/lib/db/db-instance', () => {
 });
 
 import { POST } from '@/app/api/worktrees/[id]/terminal/route';
-import { sendMessageWithSubmitVerification } from '@/lib/cli-tools/submit-verified-sender';
 
 const WORKTREE_ID = 'wt-terminal';
 
@@ -94,14 +125,10 @@ describe('POST /api/worktrees/:id/terminal — instance targeting', () => {
     const response = await call({ cliToolId: 'codex', command: 'hello', instanceId: 'codex-2' });
 
     expect(response.status).toBe(200);
-    const [call0] = vi.mocked(sendMessageWithSubmitVerification).mock.calls;
-    expect(call0[0]).toMatchObject({ cliToolId: 'codex', message: 'hello' });
-    // #868 names the primary session after the tool alone and appends the
-    // instance's suffix for the rest, so "not the primary one" is the assertion
-    // that actually distinguishes them.
-    expect(call0[0].sessionName).toContain('codex');
-    expect(call0[0].sessionName).toMatch(/-2$/);
-    expect(call0[0].sessionName).not.toBe(`mcbd-codex-${WORKTREE_ID}`);
+    // The roster says `codex-2` is a codex instance, so the codex tool is the
+    // one driven and the instance id is carried through to it — #868 turns that
+    // pair into the non-primary session name.
+    expect(sendMessage).toHaveBeenCalledWith('codex', WORKTREE_ID, 'hello', 'codex-2');
   });
 
   /** The pre-#1925 shape stays exactly as it was: no instance means primary. */
@@ -109,9 +136,7 @@ describe('POST /api/worktrees/:id/terminal — instance targeting', () => {
     const response = await call({ cliToolId: 'claude', command: 'hello' });
 
     expect(response.status).toBe(200);
-    const { sessionName } = vi.mocked(sendMessageWithSubmitVerification).mock.calls[0][0];
-    expect(sessionName).toContain('claude');
-    expect(sessionName).not.toContain('codex');
+    expect(sendMessage).toHaveBeenCalledWith('claude', WORKTREE_ID, 'hello', undefined);
   });
 
   it('refuses a cliToolId that contradicts the roster, without typing anything', async () => {
@@ -124,14 +149,14 @@ describe('POST /api/worktrees/:id/terminal — instance targeting', () => {
       rosterCliTool: 'codex',
       requestedCliTool: 'claude',
     });
-    expect(sendMessageWithSubmitVerification).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   /** The id lands in a tmux session name, so it gets the same check as everywhere else. */
   it('rejects a malformed instanceId', async () => {
     const response = await call({ cliToolId: 'claude', command: 'hello', instanceId: 'bad id!' });
     expect(response.status).toBe(400);
-    expect(sendMessageWithSubmitVerification).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   it('rejects a non-string instanceId', async () => {

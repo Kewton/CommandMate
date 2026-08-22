@@ -87,9 +87,11 @@ const COPILOT_PROMPT_WAIT_TIMEOUT_MS = 15000;
  * that were opened and captured rather than a guess about the rest of the
  * catalogue.
  *
- * Neither the widening nor the wait has a live effect yet: `send-user-message.ts`
- * bypasses `CopilotTool.sendMessage` entirely (#1906), so this branch is
- * unreachable in production until that lands.
+ * Issue #1906 is what made any of it live. Until then `send-user-message.ts` and
+ * the terminal route both bypassed this method with a raw `sendKeys` + delayed
+ * Enter, so this branch — and `waitForPrompt`'s folder-trust answer (#1886) —
+ * were unreachable in production. Both bypasses are gone; every path that types
+ * a message at copilot comes through here.
  */
 const SELECTION_LIST_COMMANDS = new Set([
   'model',
@@ -405,6 +407,26 @@ export class CopilotTool extends BaseCLITool {
   /**
    * Wait for Copilot prompt before sending a message.
    * Used by sendMessage to ensure Copilot is ready to accept input.
+   *
+   * Issue #1906 is the first change that lets a GUI/CLI send reach this wait, so
+   * what it actually costs was measured (copilot 1.0.80, private tmux socket,
+   * `tmux -L`):
+   *
+   * - **Composer on screen — idle or mid-response: ~0 ms.** copilot keeps drawing
+   *   `❯` at column 0 while it is Working, the loop captures BEFORE its first
+   *   sleep, and `COPILOT_PROMPT_PATTERN` matches immediately. A whole
+   *   `sendMessage` measured 338 ms end to end, verification included.
+   * - **Composer gone — a dialog is up: the full 15 s, then it sends anyway.**
+   *   Measured against a session parked on copilot's own `Asked user …` question:
+   *   the window expired and the body was typed into the QUESTION's input line,
+   *   which is single-line, so a four-line message arrived as
+   *   `ping oneping twoping three…`.
+   *
+   * That second case is #559's objection, and it is real — but it is not a
+   * reason to skip this method, because skipping it is what produced the same
+   * outcome in 0 ms instead of 15 s. What keeps it out of production is the layer
+   * above: `sendUserMessage` and the terminal route both consult
+   * `isPromptWaiting` (#1708/#1737) and refuse before reaching here.
    *
    * @param sessionName - tmux session name
    * @param timeoutMs - Optional timeout in ms (default: COPILOT_PROMPT_WAIT_TIMEOUT_MS)
