@@ -514,7 +514,14 @@ export interface PromptResponseResult {
 
 /**
  * Mirrors: src/app/api/worktrees/[id]/auto-yes/route.ts AutoYesResponse
- * [Issue #1898].
+ * [Issue #1898, extended by Issue #1909].
+ *
+ * Every optional field is optional for the reason the rest of this file states —
+ * the CLI is routinely newer than the daemon it talks to (`npm i -g` does not
+ * restart a running server), so a field's absence means "this daemon predates
+ * it", never "the answer is none". For `cliToolId` that distinction is the bug
+ * itself: a server that does not name the agent is a server still arming a
+ * hard-coded claude (#1909). The CLI reports what it was told and nothing more.
  */
 export interface AutoYesSetResult {
   enabled: boolean;
@@ -530,6 +537,26 @@ export interface AutoYesSetResult {
     delivered: number;
     skipped: number;
   };
+  /**
+   * Issue #1909: the agent whose poller this request armed — and, therefore,
+   * the agent `pendingDecisions` was re-judged for. One resolved pair.
+   */
+  cliToolId?: string;
+  /** The instance it was armed for (the primary instance's id is its cliToolId). */
+  instanceId?: string;
+  /**
+   * Which stage of the server's precedence chain chose `cliToolId`. Typed as the
+   * wire's `string` rather than a union, like CurrentOutputResponse.resolvedBy:
+   * a newer server may name a stage this build has never heard of, and
+   * narrowing would turn that into a parse failure.
+   */
+  resolvedBy?: string;
+  /** Read path only; a POST that contradicts the roster is refused, not resolved. */
+  conflict?: {
+    instanceId: string;
+    rosterCliTool: string;
+    requestedCliTool: string;
+  } | null;
 }
 
 /** wait exit 10 CLI extended output type */
