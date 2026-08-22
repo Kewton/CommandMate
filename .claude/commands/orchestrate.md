@@ -50,7 +50,7 @@ TodoWriteツールで作業計画を作成：
 - [ ] Phase 3: 並列開発（契約付き send → wait --verify）
 - [ ] Phase 4: 設計突合（バリア）
 - [ ] Phase 5: 品質確認
-- [ ] Phase 6: PR作成・マージ（/pr-merge-pipeline）
+- [ ] Phase 6: PR作成・マージ（同時CIは2〜3本 / refresh→tsc→影響テスト→マージ / 断片の一本化）
 - [ ] Phase 7: UAT（--full時のみ）
 - [ ] Phase 8: 完了報告
 ```
@@ -172,8 +172,7 @@ scope:
   allow:               # Issueの影響範囲。requireScopeClean が true なら1件以上必須
     - "src/lib/<module>/**"
     - "tests/unit/<module>/**"
-    - "docs/module-reference.md"
-  deny: []
+  deny: []             # 共有ファイル（CHANGELOG.md / docs/module-reference.md）は入れない。2-4-1 参照
 verify:
   # キーごと省略が既定（= 全ゲート）。時間制約がある時だけ絞る
   gates: [lint, typecheck, unit]
@@ -188,6 +187,31 @@ success:
   狭すぎる allow は正当な変更を不合格にする。迷ったら Phase 1 の依存関係分析で洗い出した
   ファイル集合をそのまま使う。
 - `verify.gates` を絞ると**絞ったゲートしか裁定しない**。既定（省略）を第一選択にする。
+
+### 2-4-1. 共有ファイルはワーカーに書かせない（必須）
+
+**`CHANGELOG.md` と `docs/module-reference.md` を `scope.allow` に入れてはならない。**
+代わりに各ワーカーには**断片ファイル**を書かせ、オーケストレーターがマージ時に本体へ一本化する。
+
+契約の「作業ルール（厳守）」に次をそのまま転記する:
+
+> - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+>   代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+>   - `dev-reports/changelog/issue-<N>.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+>     貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#<N>): …`）。どの節
+>     （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+>   - `dev-reports/module-reference/issue-<N>.md` — `docs/module-reference.md` の表に足す注記を
+>     **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。
+> - 断片が無いとリリースノートと module-reference に載らない。**実装と同じ commit の時点で書くこと。**
+
+**なぜこうするか（2026-08-22 の実測）**: 全ワーカーが `CHANGELOG.md` の同じ節に追記すると、
+**1 本マージするたびに残りの PR が全部 CONFLICTING になり、refresh → CI 全周やり直しが必要**になる。
+CI は中央値 38 分（self-hosted 1 台・11 ジョブ、同時 5〜6 本なら 55 分）なので、
+N 本のマージが N 回の直列 CI に化ける。実測では PR 21 本に対し CI 53 回（1 PR あたり 2.5 回）で、
+やり直しの大半がこの結合に起因していた。断片方式なら PR 間の強制直列がほぼ消える。
+
+`docs/module-reference.md` は **表**なので、両側保持で解決してはいけない（同じ行が 2 本になる）。
+断片方式ならこの解決自体が不要になる。
 
 ### 2-5. tmux / セッションに触れる Issue の追加ルール（必須）
 
@@ -458,7 +482,72 @@ for each worktree:
 /pr-merge-pipeline {issue_numbers}
 ```
 
-詳細は `/pr-merge-pipeline` コマンドを参照。
+詳細は `/pr-merge-pipeline` コマンドを参照。ただし**並列オーケストレーションでは次の 3 つを守る**。
+
+### 6-1. PR の同時 CI は 2〜3 本まで（ワーカーの並列度とは別に管理する）
+
+**ワーカーの並列度（5〜6）をそのまま PR の並列度にしないこと。** CI は self-hosted ランナー
+1 台で PR あたり 11 ジョブを回すため、**5〜6 本を同時に乗せると 1 本あたりの所要が約 2 倍**に
+なる（実測: 単独 23〜25 分 / 同時 5〜6 本 38〜60 分、中央値 38 分・n=12）。
+裁定（`wait --verify`）が終わったワーカーが 4 本目以降になったら、**PR を作らずに待たせる**。
+worktree はそのまま残しておけばよい。
+
+### 6-2. マージは「先行をマージ → 後続を refresh → tsc ＋ 影響テスト → マージ」
+
+**`gh pr view --json mergeable` の `MERGEABLE` は「テキスト衝突が無い」しか意味しない。
+組み合わせがコンパイルできる証拠ではない。** 2026-08-22 に、単独でどちらも全ゲート緑・CI 11/11 の
+2 本を続けてマージして develop の `tsc` と `test:unit` を壊した（一方が関数を rename し、
+他方のテストが旧名を使っていた）。同型の統合破壊はこの run で 2 件あり、**どちらも
+`npx tsc --noEmit` と影響テストのローカル実行で捕まった**。
+
+1 本マージするたびに、残りの各 PR で次を順に行う:
+
+```bash
+git fetch origin && git merge origin/develop     # 衝突は意味を見て解消（機械解決は共有ファイルだけ）
+git grep -l -E '^(<<<<<<< |>>>>>>> |={7}$)' -- .  # 0 件であること。ここは必ず全追跡ファイルを走査する
+npx tsc --noEmit                                  # 実際の統合破壊はここで出る
+CI=true npx vitest run <衝突したファイルに関係するテスト>   # 型に出ない相互作用はここで出る
+git push
+```
+
+**マーカー走査を CHANGELOG などの決め打ちにしないこと。** 2026-08-22 に JSDoc ブロックコメントの
+内側へ落ちた衝突マーカーをコミットした事例がある（**コメント内なので `tsc` は exit 0、
+関連テストも緑**だった）。
+
+上記が通れば**フル CI の完走を待たずにマージしてよい**。develop 側の CI（12〜25 分）が安全網に
+なる。**最後の 1 本だけ**はフル CI を待つ。
+
+### 6-3. マージ前に全チェックが pass であることを機械的に確認する
+
+`gh pr checks <PR> --json name,bucket` を読み、**`bucket` が 1 つでも `pass` 以外なら
+マージしない**。2026-08-22 に「10 pass / 1 fail（Build）」の PR を、fail を目視で見落として
+マージし develop のビルドを壊した。判定は目視ではなくスクリプトで行うこと（`pending` は待ち、
+`fail` / `cancel` は拒否）。
+
+### 6-4. 断片を本体へ一本化する（オーケストレーターの仕事）
+
+2-4-1 でワーカーに書かせた断片を、**オーケストレーターが PR ブランチ上で本体へ写してから
+push する**（マージの直前、6-2 の refresh と同じタイミング）。
+
+```bash
+D=<worktree>
+# CHANGELOG: 断片を [Unreleased] の指定された節の先頭へ 1 エントリだけ挿入
+sed -n '2,$p' "$D/dev-reports/changelog/issue-<N>.md"   # 1 行目は節名のコメント
+# module-reference: 行キーごとに既存行の注記セルへ追記（行を増やさない）
+cat "$D/dev-reports/module-reference/issue-<N>.md"
+```
+
+一本化したら**必ず機械的に検証する**:
+
+```bash
+# CHANGELOG: エントリ集合が develop と完全一致 ＋ 自分の 1 行だけ増えている
+diff <(git show origin/develop:CHANGELOG.md | grep -cE '^- \*\*') <(grep -cE '^- \*\*' CHANGELOG.md)
+# module-reference: 同じ行キーが 2 本になっていない
+awk -F'|' '/^\| `/{print $2}' docs/module-reference.md | sort | uniq -d
+```
+
+**断片が無い PR はマージしない。** リリースノートに載らない Issue が出る（過去に実際に発生し、
+後追いで docs PR が必要になった）。
 
 **`--phase pr` 指定時**: PR作成・マージ完了を確認して終了。
 
@@ -567,6 +656,7 @@ npm run build
 - [ ] 全Issueの開発が完了している（契約付き委任は `wait --verify` が exit 0）
 - [ ] 品質チェック全パス（ESLint, TypeScript, テスト, ビルド）
 - [ ] 全IssueのPRがdevelopにマージ済み
+- [ ] 各Issueの CHANGELOG エントリと module-reference の注記が本体に一本化されている（6-4）
 - [ ] developブランチでの統合ビルド・テストが全パス
 - [ ] （--full時）UAT全テストPASS
 - [ ] 統合サマリーが出力されている
