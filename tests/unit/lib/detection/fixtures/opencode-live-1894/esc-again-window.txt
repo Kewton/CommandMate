@@ -1,0 +1,200 @@
+[38;2;255;255;255m[48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;20;20;20m                                                                           [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;20;20;20m  [38;2;238;238;238mWrite a 700 word essay about the history of the printing press. Be [38;2;255;255;255m      [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;20;20;20m  [38;2;238;238;238mdetailed and thorough.[38;2;255;255;255m                                                   [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;20;20;20m                                                                           [48;2;10;10;10m
+
+     [38;2;245;167;66m+ Thought: Preparing for essay writing · 1.9s[38;2;255;255;255m
+
+     [1m[38;2;245;167;66mThe History of the Printing Press[0m[38;2;255;255;255m[48;2;10;10;10m
+
+     [38;2;238;238;238mThe printing press was one of the most transformative inventions in [38;2;255;255;255m
+     [38;2;238;238;238mhuman history. By making written information faster, cheaper, and more [38;2;255;255;255m
+     [38;2;238;238;238mwidely available, it changed education, religion, politics, science, and [38;2;255;255;255m
+     [38;2;238;238;238mculture. Although printing techniques existed in Asia centuries earlier, [38;2;255;255;255m
+     [38;2;238;238;238mthe development of the movable-type printing press in Europe during the [38;2;255;255;255m
+     [38;2;238;238;238mfifteenth century created a communication revolution that helped shape [38;2;255;255;255m
+     [38;2;238;238;238mthe modern world.[38;2;255;255;255m
+
+     [38;2;238;238;238mEarly forms of printing appeared in China. By the eighth century, [38;2;255;255;255m
+     [38;2;238;238;238mChinese printers were using woodblocks to reproduce Buddhist texts, [38;2;255;255;255m
+     [38;2;238;238;238mofficial documents, and literary works. Woodblock printing involved [38;2;255;255;255m
+     [38;2;238;238;238mcarving an entire page of text or images into a wooden block, covering [38;2;255;255;255m
+     [38;2;238;238;238mit with ink, and pressing paper against it. This method was effective [38;2;255;255;255m
+     [38;2;238;238;238mbut time-consuming because every new page required a separate carved [38;2;255;255;255m
+     [38;2;238;238;238mblock. Chinese inventors later developed movable type, in which [38;2;255;255;255m
+     [38;2;238;238;238mindividual characters could be arranged and reused. Bi Sheng created an [38;2;255;255;255m
+     [38;2;238;238;238mearly form of movable type from clay during the eleventh century. In [38;2;255;255;255m
+     [38;2;238;238;238mKorea, printers later produced metal movable type, demonstrating the [38;2;255;255;255m
+     [38;2;238;238;238mpossibilities of a system based on reusable characters.[38;2;255;255;255m
+
+     [38;2;238;238;238mDespite these innovations, movable type was especially difficult to use [38;2;255;255;255m
+     [38;2;238;238;238min East Asian languages because they contained thousands of distinct [38;2;255;255;255m
+     [38;2;238;238;238mcharacters. European languages, by contrast, used relatively small [38;2;255;255;255m
+     [38;2;238;238;238malphabets. This made movable type more practical in Europe, where it [38;2;255;255;255m
+     [38;2;238;238;238mcould be combined with advances in metalworking, papermaking, and [38;2;255;255;255m
+     [38;2;238;238;238mmechanical engineering.[38;2;255;255;255m
+
+     [38;2;238;238;238mThe person most closely associated with the European printing press is [38;2;255;255;255m
+     [38;2;238;238;238mJohannes Gutenberg, a German craftsman and goldsmith who worked in Mainz [38;2;255;255;255m
+     [38;2;238;238;238mduring the 1440s and 1450s. Gutenberg did not invent printing itself, [38;2;255;255;255m
+     [38;2;238;238;238mbut he developed an efficient system that combined several existing [38;2;255;255;255m
+     [38;2;238;238;238mtechnologies. His press used durable metal type, oil-based ink, and a [38;2;255;255;255m
+     [38;2;238;238;238mscrew mechanism adapted from wine and olive presses. The metal letters [38;2;255;255;255m
+     [38;2;238;238;238mcould be arranged into pages, inked, pressed onto paper, and then [38;2;255;255;255m
+     [38;2;238;238;238mdisassembled for reuse. This process allowed printers to produce [38;2;255;255;255m
+     [38;2;238;238;238mhundreds of nearly identical pages much more quickly than scribes could [38;2;255;255;255m
+     [38;2;238;238;238mcopy manuscripts by hand.[38;2;255;255;255m
+
+     [38;2;238;238;238mGutenberg’s most famous achievement was the Gutenberg Bible, completed [38;2;255;255;255m
+     [38;2;238;238;238maround 1455. Printed in Latin, it demonstrated the technical quality and [38;2;255;255;255m
+     [38;2;238;238;238mvisual beauty that the new press could achieve. The Bible’s clear [38;2;255;255;255m
+     [38;2;238;238;238mlettering and careful layout helped establish printing as a serious [38;2;255;255;255m
+     [38;2;238;238;238mcraft rather than merely a mechanical process. Although the book was [38;2;255;255;255m
+     [38;2;238;238;238mexpensive and still resembled a handwritten manuscript in some ways, it [38;2;255;255;255m
+     [38;2;238;238;238mrepresented a major turning point in the history of communication.[38;2;255;255;255m
+
+     [38;2;238;238;238mPrinting technology spread rapidly throughout Europe. By the end of the [38;2;255;255;255m
+     [38;2;238;238;238mfifteenth century, printing presses operated in cities such as Venice, [38;2;255;255;255m
+     [38;2;238;238;238mParis, London, and Antwerp. Printers produced religious texts, classical [38;2;255;255;255m
+     [38;2;238;238;238mliterature, legal documents, calendars, maps, and pamphlets. Books [38;2;255;255;255m
+     [38;2;238;238;238mbecame more affordable, and literacy gradually expanded beyond the [38;2;255;255;255m
+     [38;2;238;238;238mclergy and wealthy elites. Printers also helped standardize spelling, [38;2;255;255;255m
+     [38;2;238;238;238mgrammar, and the forms of national languages because identical texts [38;2;255;255;255m
+     [38;2;238;238;238mcould be distributed across wide regions.[38;2;255;255;255m
+
+     [38;2;238;238;238mThe printing press had a profound impact on religion. During the [38;2;255;255;255m
+     [38;2;238;238;238mProtestant Reformation in the sixteenth century, Martin Luther and other [38;2;255;255;255m
+     [38;2;238;238;238mreformers used pamphlets, sermons, and translated Bibles to circulate [38;2;255;255;255m
+     [38;2;238;238;238mtheir ideas. Printing allowed religious arguments to reach ordinary [38;2;255;255;255m
+     [38;2;238;238;238mpeople directly, weakening the exclusive control that church authorities [38;2;255;255;255m
+     [38;2;238;238;238mhad traditionally held over religious knowledge. At the same time, [38;2;255;255;255m
+     [38;2;238;238;238mgovernments and churches used censorship, licensing, and book bans to [38;2;255;255;255m
+     [38;2;238;238;238mcontrol what could be printed.[38;2;255;255;255m
+
+     [38;2;238;238;238mScience also benefited enormously. Scholars could compare identical [38;2;255;255;255m
+     [38;2;238;238;238mcopies of texts, correct errors, and build on one another’s discoveries. [38;2;255;255;255m
+     [38;2;238;238;238mPrinted works by figures such as Nicolaus Copernicus, Andreas Vesalius, [38;2;255;255;255m
+     [38;2;238;238;238mand Isaac Newton helped spread new ideas about astronomy, anatomy, and [38;2;255;255;255m
+     [38;2;238;238;238mphysics. The ability to reproduce diagrams, tables, and illustrations [38;2;255;255;255m
+     [38;2;238;238;238maccurately was particularly important for scientific communication.[38;2;255;255;255m
+
+     [38;2;238;238;238mOver time, printing continued to evolve. Steam-powered presses in the [38;2;255;255;255m
+     [38;2;238;238;238mnineteenth century greatly increased production speed, while rotary [38;2;255;255;255m
+     [38;2;238;238;238mpresses and cheaper wood-pulp paper made newspapers and books accessible [38;2;255;255;255m
+     [38;2;238;238;238mto mass audiences. In the twentieth century, offset printing and digital [38;2;255;255;255m
+     [38;2;238;238;238mtechnologies further transformed publishing.[38;2;255;255;255m
+
+     [38;2;238;238;238mThe printing press was more than a machine for producing books. It [38;2;255;255;255m
+     [38;2;238;238;238mchanged who could create, possess, and debate knowledge. By accelerating [38;2;255;255;255m
+     [38;2;238;238;238mthe circulation of ideas, it encouraged literacy, challenged [38;2;255;255;255m
+     [38;2;238;238;238minstitutions, supported scientific inquiry, and contributed to the [38;2;255;255;255m
+     [38;2;238;238;238mgrowth of modern democratic society. Its effects continue today, as [38;2;255;255;255m
+     [38;2;238;238;238mdigital media extend the same fundamental principle: information becomes [38;2;255;255;255m
+     [38;2;238;238;238mpowerful when it can be reproduced and shared widely.[38;2;255;255;255m
+
+     [38;2;92;156;245m▣ [38;2;255;255;255m [38;2;238;238;238mBuild[38;2;128;128;128m · GPT-5.6 Luna · 11.3s[38;2;255;255;255m
+
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;20;20;20m                                                                           [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;20;20;20m  [38;2;238;238;238mWrite a 900 word essay about the history of cartography, with many [38;2;255;255;255m      [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;20;20;20m  [38;2;238;238;238mconcrete dates and names.[38;2;255;255;255m                                                [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;20;20;20m                                                                           [48;2;10;10;10m
+
+     [38;2;245;167;66m+ Thought: Crafting an essay · 776ms[38;2;255;255;255m
+
+     [1m[38;2;245;167;66mThe History of Cartography[0m[38;2;255;255;255m[48;2;10;10;10m
+
+     [38;2;238;238;238mCartography, the art and science of making maps, has developed alongside [38;2;255;255;255m
+     [38;2;238;238;238mhuman civilization. Maps have helped people navigate landscapes, [38;2;255;255;255m
+     [38;2;238;238;238madminister empires, conduct trade, wage wars, and understand the shape [38;2;255;255;255m
+     [38;2;238;238;238mof the Earth. Although early maps were often symbolic rather than [38;2;255;255;255m
+     [38;2;238;238;238mgeographically accurate, the history of cartography reveals a gradual [38;2;255;255;255m
+     [38;2;238;238;238mmovement from local representations and sacred cosmologies toward [38;2;255;255;255m
+     [38;2;238;238;238mmathematical measurement, global surveying, and digital mapping.[38;2;255;255;255m
+
+     [38;2;238;238;238mSome of the earliest known maps were created in Mesopotamia. The [38;2;255;255;255m
+     [38;2;238;238;238mBabylonian “Map of the World,” inscribed on a clay tablet around 600 BCE,[38;2;255;255;255m
+     [38;2;238;238;238m depicted Babylon at the center of a circular world surrounded by a ring [38;2;255;255;255m
+     [38;2;238;238;238mrepresenting the ocean. It combined geographical knowledge with [38;2;255;255;255m
+     [38;2;238;238;238mmythology, showing that ancient maps were often intended to express a [38;2;255;255;255m
+     [38;2;238;238;238mculture’s worldview as much as physical space. An even older example, [38;2;255;255;255m
+     [38;2;238;238;238mthe Ga-Sur tablet from approximately 2500 BCE, appears to represent land [38;2;255;255;255m
+     [38;2;238;238;238mparcels and settlements near the ancient city of Nuzi.[38;2;255;255;255m
+
+     [38;2;238;238;238mAncient Egypt also produced maps for practical purposes. Egyptian [38;2;255;255;255m
+     [38;2;238;238;238msurveyors mapped agricultural land along the Nile, especially after [38;2;255;255;255m
+     [38;2;238;238;238mannual floods erased property boundaries. The Turin Papyrus Map, dating [38;2;255;255;255m
+     [38;2;238;238;238mfrom approximately 1150 BCE during the reign of Pharaoh Ramesses IV, is [38;2;255;255;255m
+     [38;2;238;238;238mone of the oldest surviving geological maps. It depicts part of Egypt’s [38;2;255;255;255m
+     [38;2;238;238;238mEastern Desert, including roads, hills, and locations of gold mines. [38;2;255;255;255m
+     [38;2;238;238;238mSuch maps supported mining, taxation, construction, and administration.[38;2;255;255;255m
+
+     [38;2;238;238;238mGreek thinkers introduced mathematics and astronomy into mapmaking. [38;2;255;255;255m
+     [38;2;238;238;238mAround 550 BCE, the philosopher Anaximander of Miletus is traditionally [38;2;255;255;255m
+     [38;2;238;238;238mcredited with creating one of the first Greek maps of the known world. [38;2;255;255;255m
+     [38;2;238;238;238mHecataeus of Miletus produced a more detailed map around 500 BCE, [38;2;255;255;255m
+     [38;2;238;238;238morganizing the world around the Mediterranean. During the fourth century [38;2;255;255;255m
+     [38;2;238;238;238mBCE, Aristotle argued that the Earth was spherical, based partly on [38;2;255;255;255m
+     [38;2;238;238;238mobservations of curved shadows and the changing appearance of stars.[38;2;255;255;255m
+
+     [38;2;238;238;238mThe mathematician and astronomer Eratosthenes, who served as head of the [38;2;255;255;255m
+     [38;2;238;238;238mLibrary of Alexandria, made a major contribution around 240 BCE. He [38;2;255;255;255m
+     [38;2;238;238;238mcalculated the circumference of the Earth by comparing the angle of the [38;2;255;255;255m
+     [38;2;238;238;238msun’s rays at Syene and Alexandria. His estimate, approximately 39,700 [38;2;255;255;255m
+     [38;2;238;238;238mkilometers, was remarkably close to the modern measurement of about 40,[38;2;255;255;255m
+     [38;2;238;238;238m075 kilometers at the equator. Eratosthenes also used lines of latitude [38;2;255;255;255m
+     [38;2;238;238;238mand longitude in his geographical work, establishing principles that [38;2;255;255;255m
+     [38;2;238;238;238mlater cartographers would develop further.[38;2;255;255;255m
+
+     [38;2;238;238;238mThe most influential ancient geographer was Claudius Ptolemy, who lived [38;2;255;255;255m
+     [38;2;238;238;238min Alexandria during the second century CE. Around 150 CE, he wrote [38;2;255;255;255m
+     [3m[38;2;229;192;123mGeographia[0m[38;2;238;238;238m[48;2;10;10;10m, a systematic guide to mapping the known world. Ptolemy [38;2;255;255;255m
+     [38;2;238;238;238mlisted the coordinates of thousands of places and described methods for [38;2;255;255;255m
+     [38;2;238;238;238mprojecting the spherical Earth onto a flat surface. Although many of his [38;2;255;255;255m
+     [38;2;238;238;238mcoordinates were inaccurate, his work became foundational for European [38;2;255;255;255m
+     [38;2;238;238;238mcartography after it was rediscovered in the early fifteenth century.[38;2;255;255;255m
+
+     [38;2;238;238;238mDuring the European Middle Ages, map[38;2;255;255;255m
+
+     [38;2;92;156;245m▣ [38;2;255;255;255m [38;2;238;238;238mBuild[38;2;128;128;128m · GPT-5.6 Luna[38;2;255;255;255m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;30;30;30m                                                                           [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;30;30;30m                                                                           [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;30;30;30m                                                                           [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;30;30;30m  [38;2;92;156;245mBuild[38;2;255;255;255m [38;2;128;128;128m·[38;2;255;255;255m [38;2;238;238;238mGPT-5.6 Luna[38;2;255;255;255m [38;2;128;128;128mGitHub Copilot[38;2;255;255;255m                                      [48;2;10;10;10m
+  [38;2;92;156;245m╹[38;2;30;30;30m▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀[38;2;255;255;255m
+   [38;2;54;89;137m⬝[38;2;25;36;52m■[38;2;33;50;75m■[38;2;45;72;110m■[38;2;63;105;163m■[38;2;97;162;231m■[38;2;92;156;245m■[38;2;54;89;137m⬝[38;2;255;255;255m  [38;2;250;178;131mesc again to interrupt[38;2;255;255;255m         [38;2;128;128;128m7.2K (1%) · $0.00[38;2;255;255;255m  [38;2;238;238;238mctrl+p [38;2;128;128;128mcommands[38;2;255;255;255m
+
