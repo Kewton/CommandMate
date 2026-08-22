@@ -794,7 +794,31 @@ fi
 # wait exactly, the duration as a lower bound.
 holder_waited=$(sed -n 's/^GATE e2e PASS exit=0 duration=\([0-9]*\)s waited=\([0-9]*\)s$/\2/p' "$SANDBOX/mutex-a.out")
 holder_duration=$(sed -n 's/^GATE e2e PASS exit=0 duration=\([0-9]*\)s waited=\([0-9]*\)s$/\1/p' "$SANDBOX/mutex-a.out")
-assert_eq "mutex: the first run declares a wait of zero rather than nothing" "0" "$holder_waited"
+# Issue #1950: this was `assert_eq ... "0" "$holder_waited"`, exactly, and it went
+# red under parallel load with `expected [0], got [1]` on a run where nothing was
+# wrong. That is the SAME whole-second granularity the comment above already
+# documents for `duration=3s`: `date +%s` has no sub-second half (bash 3.2), so a
+# wait of zero that straddles a second boundary reads as 1. The duration half was
+# loosened for that reason in #228 and the wait half was not, which left one
+# literal digit as the only load-fragile assertion in this file.
+#
+# The fact being asserted is named in that comment and is NOT the digit: a mutexed
+# gate that did not queue still has to SAY so, or "serialized and got the lock
+# straight away" and "not serialized at all" stop being tellable apart (section
+# 9.3). That fact is the FIELD's presence — `waited_field()` in verify-run.sh
+# prints nothing whatsoever when the gate declared no mutex, so an empty capture
+# here IS "not serialized at all", and it is what this now checks first.
+#
+# The value is not discarded either. The holder is the run that went FIRST, so its
+# wait has to be strictly shorter than the wait of the run that queued behind it.
+# Both numbers are measured on the same machine seconds apart, so load moves them
+# together: there is no machine speed at which a correct runner fails this, while
+# a holder that somehow waited as long as its own queue still fails it.
+if [ -n "$holder_waited" ] && [ -n "$waited" ] && [ "$holder_waited" -lt "$waited" ]; then
+  ok "mutex: the first run declares a wait of zero rather than nothing (waited=${holder_waited}s, against ${waited}s for the run that queued behind it)"
+else
+  notok "mutex: the first run declares a wait of zero rather than nothing (holder waited=[$holder_waited], queued run waited=[$waited] in $(cat "$SANDBOX/mutex-a.out"))"
+fi
 if [ -n "$holder_duration" ] && [ "$holder_duration" -ge 3 ]; then
   ok "mutex: the first run's duration is its own 3s hold, not the waiter's (duration=${holder_duration}s)"
 else
@@ -868,7 +892,18 @@ run_verify --config "$FIXTURES/mutex-flaky.yaml" --cwd "$mx" --base-ref "$BASE_B
 assert_eq "mutex-flaky: exit code is 20" "20" "$RC"
 assert_has "mutex-flaky: both runs and the wait are all reported, each in its own field" "$OUT" \
   "GATE unit FLAKY exit=1,0 duration="
-assert_has "mutex-flaky: the wait keeps its own field beside a two-valued duration" "$OUT" "waited=0s"
+# Issue #1950: the needle here was the literal `waited=0s`, which went red under
+# load for the same whole-second reason as the mutex case above. It was also
+# weaker than its own name: `assert_has` is a substring match, and a substring
+# cannot tell "its own field" from a `waited=` glued onto the end of the duration
+# list — which is the exact confusion this assertion exists to rule out. Anchoring
+# the whole GATE line checks the shape the name promises (a two-valued duration,
+# then a separate `waited=` field) at whatever value the clock reports.
+if grep -Eq '^GATE unit FLAKY exit=1,0 duration=[0-9]+(\.[0-9]+)?s,[0-9]+(\.[0-9]+)?s waited=[0-9]+(\.[0-9]+)?s$' "$OUT"; then
+  ok "mutex-flaky: the wait keeps its own field beside a two-valued duration"
+else
+  notok "mutex-flaky: the wait keeps its own field beside a two-valued duration (no GATE line of that shape in $OUT: $(grep '^GATE unit' "$OUT" | head -1))"
+fi
 assert_file_absent "mutex-flaky: the lock is released per attempt, not held across both" "$LOCK_DIR"
 unset CMATE_VERIFY_TEST_HOLD
 

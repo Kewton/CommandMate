@@ -5,6 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import {
+  REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
+  assertSubprocessCompleted,
+} from '@tests/helpers/real-shell-budget';
+
 const SCRIPTS = path.join(process.cwd(), '.claude/skills/orchestrate-monitor/scripts');
 const MONITOR = path.join(SCRIPTS, 'monitor.sh');
 const HOOKS_TASK = path.join(SCRIPTS, 'hooks-task.sh');
@@ -14,7 +19,12 @@ const FIXTURES = fileURLToPath(new URL('./fixtures', import.meta.url));
 // --interval 0 removes the wall clock, --max-polls ends the run from the inside.
 const INTERVAL_SEC = 0;
 const IDLE_THRESHOLD = 1;
-const HARD_TIMEOUT_MS = 15_000;
+// Issue #1950: the guard is shared, and the vitest budget that tests/setup.ts
+// gives this family is deliberately larger than it, so a run that overruns is
+// reported by the guard (naming itself) rather than by a 5000ms wall clock that
+// names nothing. The per-file values this replaced (15s / 20s / 25s) were all
+// UNDER the 5s default budget's reach, so none of them could ever fire.
+const HARD_TIMEOUT_MS = REAL_SHELL_SUBPROCESS_TIMEOUT_MS;
 
 /** GENERATING latches started=1, then IDLE crosses the threshold. */
 const STARTED_THEN_IDLE = ['live-generating-token.json', 'live-idle.json'];
@@ -116,6 +126,8 @@ function runLoop(opts: {
     },
   );
 
+  assertSubprocessCompleted(proc, 'monitor-task-source.test.ts');
+
   return {
     stdout: proc.stdout ?? '',
     stderr: proc.stderr ?? '',
@@ -216,7 +228,7 @@ describe('monitor.sh takes its completion verdict from the task ledger (Issue #1
     expect(run.taskCalls).toEqual(['task list w1 --limit 1', 'task list w1 --limit 1']);
     expect(run.captureCalls).toEqual(['capture w1 --json', 'capture w1 --json']);
     expect(run.stdout).toMatch(/verdict=COMPLETE task=succeeded$/m);
-  }, 20_000);
+  });
 
   it('reports VERIFY_FAILED and stops, instead of COMPLETE, for a failed task', () => {
     const run = runLoop({ fixtures: STARTED_THEN_IDLE, polls: 5, taskStatus: taskListRow('failed') });
@@ -228,7 +240,7 @@ describe('monitor.sh takes its completion verdict from the task ledger (Issue #1
     // Terminal: the loop ends on the verdict rather than running out of polls.
     expect(run.stdout).not.toContain('reached --max-polls');
     expect(run.stdout).toMatch(/verdict=VERIFY_FAILED task=failed$/m);
-  }, 20_000);
+  });
 
   it('keeps a live worker WORKING even when the newest task already succeeded', () => {
     // A stale terminal status plus a generating pane. Ending the watch here would
@@ -243,7 +255,7 @@ describe('monitor.sh takes its completion verdict from the task ledger (Issue #1
     expect(run.stdout).not.toContain('COMPLETE (approvals=');
     expect(run.stdout).toContain('reached --max-polls');
     expect(run.stdout).toMatch(/verdict=WORKING task=succeeded$/m);
-  }, 20_000);
+  });
 
   it('loads work counters and the task status from two --hooks files at once', () => {
     // The reason --hooks is repeatable: hooks-git.sh answers "what did the worker
@@ -261,7 +273,7 @@ describe('monitor.sh takes its completion verdict from the task ledger (Issue #1
     });
 
     expect(run.stdout).toMatch(/commits=7 uncommitted=0 verdict=COMPLETE task=succeeded$/m);
-  }, 20_000);
+  });
 
   it('fails loudly when any file in a repeated --hooks list is missing', () => {
     const run = runLoop({
@@ -274,7 +286,7 @@ describe('monitor.sh takes its completion verdict from the task ledger (Issue #1
     expect(run.status).toBe(2);
     expect(run.stderr).toContain('hooks file not found');
     expect(run.captureCalls).toEqual([]);
-  }, 20_000);
+  });
 });
 
 /** The one line the loop owes an operator when it stops adjudicating (Issue #1613). */
@@ -311,7 +323,7 @@ describe('monitor.sh announces an unreachable task ledger instead of degrading q
     expect(run.taskCalls).toHaveLength(3);
     expect(run.stdout).not.toContain('COMPLETE (approvals=');
     expect(run.stdout).toContain('reached --max-polls');
-  }, 20_000);
+  });
 
   it('keeps polling the ledger so a server that comes back is picked up', () => {
     // Downgrading to empty must not latch the hook off. The gate file only silences
@@ -324,7 +336,7 @@ describe('monitor.sh announces an unreachable task ledger instead of degrading q
     });
 
     expect(run.taskCalls).toEqual(Array.from({ length: 4 }, () => 'task list w1 --limit 1'));
-  }, 20_000);
+  });
 
   it('omits task= from the poll lines while the ledger is unreachable', () => {
     // `unavailable` is downgraded to empty before the poll line is built, so the
@@ -341,7 +353,7 @@ describe('monitor.sh announces an unreachable task ledger instead of degrading q
     expect(pollLines).toHaveLength(3);
     expect(pollLines.some((line) => line.includes('task='))).toBe(false);
     expect(pollLines.every((line) => /verdict=[A-Z_]+$/.test(line))).toBe(true);
-  }, 20_000);
+  });
 
   it('stays silent for a contract-less worktree, where nothing was promised', () => {
     // The control arm, and the reason the branch keys on the exit code rather than
@@ -357,7 +369,7 @@ describe('monitor.sh announces an unreachable task ledger instead of degrading q
     expect(run.stdout).not.toContain('FALLBACK MODE');
     expect(run.stdout).not.toContain('task=');
     expect(run.taskCalls).toHaveLength(3);
-  }, 20_000);
+  });
 
   it('stays silent when the hook was never wired, so the stub is not a failure', () => {
     // monitor.sh's own `read_task_status` stub returns empty, not `unavailable`:
@@ -380,8 +392,10 @@ describe('monitor.sh announces an unreachable task ledger instead of degrading q
       },
     );
 
+    assertSubprocessCompleted(proc, 'monitor-task-source.test.ts');
+
     expect(proc.status).toBe(0);
     expect(proc.stdout ?? '').not.toContain('FALLBACK MODE');
     expect(proc.stdout ?? '').not.toContain('task=');
-  }, 20_000);
+  });
 });

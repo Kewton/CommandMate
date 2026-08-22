@@ -5,6 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import {
+  REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
+  assertSubprocessCompleted,
+} from '@tests/helpers/real-shell-budget';
+
 /**
  * Issue #1728 (secondary) — telling "the monitor is quiet" apart from "the
  * monitor is dead".
@@ -32,7 +37,12 @@ const SCRIPTS = path.join(process.cwd(), '.claude/skills/orchestrate-monitor/scr
 const MONITOR = path.join(SCRIPTS, 'monitor.sh');
 const FIXTURES = fileURLToPath(new URL('./fixtures', import.meta.url));
 
-const HARD_TIMEOUT_MS = 25_000;
+// Issue #1950: the guard is shared, and the vitest budget that tests/setup.ts
+// gives this family is deliberately larger than it, so a run that overruns is
+// reported by the guard (naming itself) rather than by a 5000ms wall clock that
+// names nothing. The per-file values this replaced (15s / 20s / 25s) were all
+// UNDER the 5s default budget's reach, so none of them could ever fire.
+const HARD_TIMEOUT_MS = REAL_SHELL_SUBPROCESS_TIMEOUT_MS;
 
 /**
  * A fake `commandmate` that answers every poll with the same fixture, and a
@@ -85,6 +95,7 @@ function runBounded(args: string[], fixture: string | string[] = 'live-idle.json
     timeout: HARD_TIMEOUT_MS,
     env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}`, CM: cm },
   });
+  assertSubprocessCompleted(proc, 'monitor-liveness.test.ts');
   return {
     stdout: proc.stdout ?? '',
     stderr: proc.stderr ?? '',
@@ -145,6 +156,47 @@ function runAndSignal(signal: NodeJS.Signals, args: string[] = []): Promise<RunR
 }
 
 describe('monitor.sh names the signal that stopped it (Issue #1728, proposal E)', () => {
+  it('reports the kill, not the broken pipe, when a supervisor times it out (Issue #1950)', () => {
+    // The way this loop actually gets killed in a test harness, reproduced whole:
+    // `spawnSync`'s `timeout` sends SIGTERM AND closes the child's stdio in the
+    // same step. So the SIGTERM handler writes its diagnostic into a stderr that
+    // is already gone, takes SIGPIPE for it, and re-enters the fatal handler.
+    //
+    // Before #1950 that second entry won, and the run reported 141 (128+13,
+    // SIGPIPE) with an empty stderr. Every reader — including the Issue that
+    // chased it — took that for an argument about an exit code. It is not: it is
+    // a timeout, and `error.code` says so while `status` does not.
+    //
+    // 143 is 128+15: the signal that was actually sent. Revert the
+    // `fatal_reported` guard in monitor.sh and this is 141 again.
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'monitor-live-to-'));
+    const cm = path.join(dir, 'fake-cm');
+    // Slower than the timeout below, so the timeout is what ends the run — but
+    // only just. The shim outlives the kill and keeps the pipe open until it
+    // exits, and `spawnSync` does not return until the pipe closes, so this sleep
+    // sets the test's wall clock. At 30s it cost 30s; 3s buys the same proof.
+    writeFileSync(cm, `#!/bin/sh\nsleep 3\ncat "${path.join(FIXTURES, 'live-idle.json')}"\n`);
+    writeFileSync(path.join(dir, 'tmux'), '#!/bin/sh\nexit 0\n');
+    chmodSync(cm, 0o755);
+    chmodSync(path.join(dir, 'tmux'), 0o755);
+
+    const proc = spawnSync(
+      'bash',
+      [MONITOR, '--interval', '0', '--idle-threshold', '1', '--max-polls', '1', 'w1'],
+      {
+        encoding: 'utf8',
+        timeout: 1_500,
+        env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}`, CM: cm },
+      },
+    );
+
+    // Prove the run really was timed out rather than merely slow, so the status
+    // assertion below cannot pass for some unrelated reason.
+    expect((proc.error as NodeJS.ErrnoException | undefined)?.code).toBe('ETIMEDOUT');
+    expect(proc.status).toBe(143);
+    expect(proc.status).not.toBe(141);
+  });
+
   it('reports SIGTERM on stderr and exits 143 instead of dying silently', async () => {
     const run = await runAndSignal('SIGTERM');
 
@@ -242,6 +294,7 @@ describe('monitor.sh reports only unexpected exits (Issue #1728, proposal E)', (
         env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}`, CM: cm },
       },
     );
+    assertSubprocessCompleted(proc, 'monitor-liveness.test.ts');
 
     expect(proc.stdout).toContain('monitor: all 1 worker(s) complete');
     expect(proc.stderr).toBe('');

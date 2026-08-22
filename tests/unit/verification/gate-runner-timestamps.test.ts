@@ -293,6 +293,10 @@ describe('gate timestamps — executed gates', () => {
     setMockDb(withSlowGateInserts(db, 'slow', INSERT_DELAY_MS, inserts));
 
     const runId = await runToCompletion('wt-slow-write', repo);
+    // Issue #1950: one wall-clock reading taken here, used as the ceiling
+    // below. Everything that could possibly belong to this gate happened
+    // before it.
+    const doneAt = Date.now();
 
     const slow = gatesById(runId).get('slow')!;
     expect(slow.status).toBe('passed');
@@ -319,10 +323,30 @@ describe('gate timestamps — executed gates', () => {
     // Kept as the second half of the same statement: the leak the check above
     // catches at the window's start, this one catches in its length, for a
     // runner that measured from before the write while stamping started_at
-    // after it. The bound is the injected cost by construction, so it detects
-    // that leak in full no matter how INSERT_DELAY_MS is sized — see the
-    // constant for why it is sized the way it is.
-    expect(slow.durationMs).toBeLessThan(GATE_SLEEP_MS + INSERT_DELAY_MS);
+    // after it.
+    //
+    // Issue #1950 changed the ceiling from the constant
+    // `GATE_SLEEP_MS + INSERT_DELAY_MS` (800ms) to an interval this run
+    // actually observed. The constant compared a real `sleep`, measured on a
+    // shared machine, against a fixed number, so a busy box failed it while the
+    // runner was behaving perfectly: CI reported `expected 1104 to be less than
+    // 800` on a PR that touched nothing under src/lib/verification.
+    //
+    // `doneAt - insert.returnedAt` cannot do that. It is the wall clock from
+    // the moment the row write returned — which is when the command was free to
+    // start — to after the whole run came back, so it STRICTLY CONTAINS the
+    // interval a correct runner measures. Load inflates both sides together and
+    // the assertion holds; there is no machine speed at which a correct runner
+    // fails it.
+    //
+    // It still catches the leak it was written for, because a runner that
+    // counted from before the write reports `duration + INSERT_DELAY_MS` (400ms
+    // by construction) while the ceiling only grows by the run's post-command
+    // bookkeeping, which is nowhere near that. Verified by injecting exactly
+    // that defect into src/lib/verification/gate-runner.ts (#1950 mutation M5).
+    // The 1ms-exact half of the detection is the `startedAt` assertion above;
+    // this one is the magnitude half.
+    expect(slow.durationMs).toBeLessThanOrEqual(doneAt - insert!.returnedAt);
     expect(slow.timingsMeasured).toBe(true);
   });
 

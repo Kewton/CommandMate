@@ -4,6 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import {
+  REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
+  assertSubprocessCompleted,
+} from '@tests/helpers/real-shell-budget';
+
 /**
  * Issue #1728 — which worktree-id scheme `hooks-git.sh` can resolve.
  *
@@ -30,7 +35,12 @@ import { describe, expect, it } from 'vitest';
  */
 const SCRIPTS = path.join(process.cwd(), '.claude/skills/orchestrate-monitor/scripts');
 const HOOKS_GIT = path.join(SCRIPTS, 'hooks-git.sh');
-const HARD_TIMEOUT_MS = 20_000;
+// Issue #1950: the guard is shared, and the vitest budget that tests/setup.ts
+// gives this family is deliberately larger than it, so a run that overruns is
+// reported by the guard (naming itself) rather than by a 5000ms wall clock that
+// names nothing. The per-file values this replaced (15s / 20s / 25s) were all
+// UNDER the 5s default budget's reach, so none of them could ever fire.
+const HARD_TIMEOUT_MS = REAL_SHELL_SUBPROCESS_TIMEOUT_MS;
 
 /** Absolute, so a test never depends on how the runner's PATH is ordered. */
 const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
@@ -116,6 +126,7 @@ function inHooks(
       ...env,
     },
   });
+  assertSubprocessCompleted(proc, 'hooks-git-resolution.test.ts');
   return { stdout: proc.stdout ?? '', stderr: proc.stderr ?? '', status: proc.status };
 }
 

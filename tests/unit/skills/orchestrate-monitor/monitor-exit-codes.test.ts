@@ -5,6 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import {
+  REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
+  assertSubprocessCompleted,
+} from '@tests/helpers/real-shell-budget';
+
 /**
  * Issue #1614: every external command the monitor depends on must have its exit
  * code read. Two failure families are covered here, and they are pinned in
@@ -27,7 +32,12 @@ const FIXTURES = fileURLToPath(new URL('./fixtures', import.meta.url));
 /** Absolute path, so a PATH shim named `git` can still call the real one. */
 const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
 
-const HARD_TIMEOUT_MS = 15_000;
+// Issue #1950: the guard is shared, and the vitest budget that tests/setup.ts
+// gives this family is deliberately larger than it, so a run that overruns is
+// reported by the guard (naming itself) rather than by a 5000ms wall clock that
+// names nothing. The per-file values this replaced (15s / 20s / 25s) were all
+// UNDER the 5s default budget's reach, so none of them could ever fire.
+const HARD_TIMEOUT_MS = REAL_SHELL_SUBPROCESS_TIMEOUT_MS;
 
 function git(cwd: string, ...args: string[]): void {
   execFileSync(REAL_GIT, ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
@@ -124,6 +134,8 @@ function probeCounters(repo: Repo, opts: { shimDir?: string; id?: string } = {})
     { encoding: 'utf8', env, timeout: HARD_TIMEOUT_MS },
   );
 
+  assertSubprocessCompleted(proc, 'monitor-exit-codes.test.ts');
+
   return {
     counts: (proc.stdout ?? '').trim(),
     stderr: proc.stderr ?? '',
@@ -145,7 +157,7 @@ describe('hooks-git.sh counts exactly, for zero / one / many (Issue #1614)', () 
   ])('reports "$expected" for $commits commit(s) and $changes change(s)', ({ commits, changes, expected }) => {
     const probe = probeCounters(makeRepo(commits, changes));
     expect({ counts: probe.counts, status: probe.status }).toEqual({ counts: expected, status: 0 });
-  }, 20_000);
+  });
 
   it('stays silent for a worker that genuinely has no commits and no changes', () => {
     // The control arm for every failure test below, and the reason they cannot
@@ -156,7 +168,7 @@ describe('hooks-git.sh counts exactly, for zero / one / many (Issue #1614)', () 
 
     expect(probe.counts).toBe('0 0');
     expect(probe.stderr).toBe('');
-  }, 20_000);
+  });
 });
 
 describe('hooks-git.sh separates a failed git from zero work (Issue #1614)', () => {
@@ -170,7 +182,7 @@ describe('hooks-git.sh separates a failed git from zero work (Issue #1614)', () 
     expect(probe.counts).toBe('0 0');
     expect(probe.stderr).toContain(`[${repo.id}] 'git -C ${repo.repo} worktree list --porcelain' failed (exit 128)`);
     expect(probe.stderr).toContain('UNKNOWN and reported as 0');
-  }, 20_000);
+  });
 
   it('reports a failing `git log` while the uncommitted counter still answers', () => {
     // Asymmetry on purpose: `git status` is untouched here, so the run proves the
@@ -182,7 +194,7 @@ describe('hooks-git.sh separates a failed git from zero work (Issue #1614)', () 
     expect(probe.stderr).toContain(`[${repo.id}] 'git -C `);
     expect(probe.stderr).toContain(`log --oneline main..HEAD' failed (exit 129)`);
     expect(probe.stderr).toContain('the commit count is UNKNOWN and reported as 0');
-  }, 20_000);
+  });
 
   it('reports a failing `git status` while the commit counter still answers', () => {
     const repo = makeRepo(2, 1);
@@ -191,7 +203,7 @@ describe('hooks-git.sh separates a failed git from zero work (Issue #1614)', () 
     expect(probe.counts).toBe('2 0');
     expect(probe.stderr).toContain(`status --porcelain' failed (exit 130)`);
     expect(probe.stderr).toContain('the uncommitted-change count is UNKNOWN and reported as 0');
-  }, 20_000);
+  });
 
   it('reports an id that resolves to no checkout, which also sinks both counters', () => {
     // Not a git failure, the same silent floor of 0: `git worktree list` answered
@@ -203,7 +215,7 @@ describe('hooks-git.sh separates a failed git from zero work (Issue #1614)', () 
     expect(probe.counts).toBe('0 0');
     expect(probe.stderr).toContain('[nope-nope] no checkout resolved');
     expect(probe.stderr).toContain('not because the worker did nothing');
-  }, 20_000);
+  });
 });
 
 /* ------------------------------------------------------------------ *
@@ -292,6 +304,8 @@ function runLoop(opts: {
       env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}`, CM: cmShim },
     },
   );
+
+  assertSubprocessCompleted(proc, 'monitor-exit-codes.test.ts');
 
   return {
     stdout: proc.stdout ?? '',
@@ -399,7 +413,7 @@ describe('monitor.sh checks classify-state.sh the way it already checked capture
     expect(run.stdout).toContain('reached --max-polls');
     // Polls 4-6 produce no verdict at all, so only the first three carry a poll line.
     expect(run.stdout.split('\n').filter((line) => / poll \d+ -> /.test(line))).toHaveLength(3);
-  }, 20_000);
+  });
 
   it('still reaches COMPLETE on the same schedule when the classifier works', () => {
     // The control: without it, "no COMPLETE" above could be an artifact of the
@@ -415,7 +429,7 @@ describe('monitor.sh checks classify-state.sh the way it already checked capture
 
     expect(run.stdout).toContain('monitor[w1]: COMPLETE (approvals=0)');
     expect(run.stdout).not.toContain('classify-state failed');
-  }, 20_000);
+  });
 });
 
 describe('monitor.sh checks verify-completion.sh instead of skipping the poll silently (Issue #1614)', () => {
@@ -444,7 +458,7 @@ describe('monitor.sh checks verify-completion.sh instead of skipping the poll si
     // Both polls happened and neither produced a verdict line.
     expect(run.captureCalls).toHaveLength(2);
     expect(run.stdout.split('\n').filter((line) => / poll \d+ -> /.test(line))).toHaveLength(0);
-  }, 20_000);
+  });
 });
 
 describe('hooks-git.sh warns once per worker, not once per poll (Issue #1614)', () => {
@@ -484,10 +498,12 @@ describe('hooks-git.sh warns once per worker, not once per poll (Issue #1614)', 
       },
     );
 
+    assertSubprocessCompleted(proc, 'monitor-exit-codes.test.ts');
+
     const warnings = (proc.stderr ?? '')
       .split('\n')
       .filter((line) => line.includes("worktree list --porcelain' failed"));
     expect(readFileSync(captureLog, 'utf8').split('\n').filter(Boolean)).toHaveLength(4);
     expect(warnings).toHaveLength(1);
-  }, 20_000);
+  });
 });

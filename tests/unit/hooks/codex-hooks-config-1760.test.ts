@@ -30,6 +30,11 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { removeTempDir } from '@tests/helpers/temp-dir';
 import { renderAgentLaunchCommand } from '@/lib/hooks/sources';
+
+import {
+  REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
+  assertSubprocessCompleted,
+} from '@tests/helpers/real-shell-budget';
 import {
   buildCodexEventHookCommand,
   buildCodexHookSettings,
@@ -141,6 +146,13 @@ function runCommand(
   }
   const result = spawnSync('sh', ['-c', command], {
     encoding: 'utf8',
+    // Issue #1950: this file is one of the two outside
+    // tests/unit/skills/orchestrate-monitor that were observed timing out under
+    // parallel load, and it had no guard at all — vitest's 5000ms default was
+    // the only thing standing between a hung `sh` and a wedged suite. The guard
+    // is now explicit and named; tests/setup.ts keeps this file's budget above
+    // it so the guard is what fires.
+    timeout: REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
     input: '{"hook_event_name":"Stop","session_id":"s-1","cwd":"/tmp"}',
     env: {
       ...process.env,
@@ -151,6 +163,7 @@ function runCommand(
       ...env,
     },
   });
+  assertSubprocessCompleted(result, 'codex-hooks-config-1760.test.ts');
   const read = (file: string): string[] | null => {
     const text = readFileSync(file, 'utf8');
     return text === '' ? null : text.split('\n').slice(0, -1);

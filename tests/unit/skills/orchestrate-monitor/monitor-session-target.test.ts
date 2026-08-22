@@ -5,6 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import {
+  REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
+  assertSubprocessCompleted,
+} from '@tests/helpers/real-shell-budget';
+
 const MONITOR = path.join(
   process.cwd(),
   '.claude/skills/orchestrate-monitor/scripts/monitor.sh',
@@ -16,7 +21,12 @@ const FIXTURES = fileURLToPath(new URL('./fixtures', import.meta.url));
 // ends the run from the inside.
 const INTERVAL_SEC = 0;
 const IDLE_THRESHOLD = 1;
-const HARD_TIMEOUT_MS = 15_000;
+// Issue #1950: the guard is shared, and the vitest budget that tests/setup.ts
+// gives this family is deliberately larger than it, so a run that overruns is
+// reported by the guard (naming itself) rather than by a 5000ms wall clock that
+// names nothing. The per-file values this replaced (15s / 20s / 25s) were all
+// UNDER the 5s default budget's reach, so none of them could ever fire.
+const HARD_TIMEOUT_MS = REAL_SHELL_SUBPROCESS_TIMEOUT_MS;
 
 /**
  * The session name monitor.sh addressed before Issue #1601 (SESSION_PREFIX="cm").
@@ -164,6 +174,8 @@ function runLoop({
     },
   );
 
+  assertSubprocessCompleted(proc, 'monitor-session-target.test.ts');
+
   const lines = (file: string): string[] =>
     readFileSync(file, 'utf8').split('\n').filter(Boolean);
 
@@ -206,7 +218,7 @@ describe('monitor.sh derives the intervention target from the capture payload (I
     expect(run.stdout).toContain('monitor[w1]: intervention target = mcbd-claude-w1');
     // Explicit, so restoring the old default fails here and not only on wording.
     expect(run.tmuxCalls.join('\n')).not.toContain(DEAD_TARGET);
-  }, 20_000);
+  });
 
   it('follows the payload to a non-claude agent instead of assuming claude', () => {
     // A fleet running claude and codex at once is the reason a single fixed
@@ -221,7 +233,7 @@ describe('monitor.sh derives the intervention target from the capture payload (I
       'has-session -t =mcbd-codex-w1:',
       'send-keys -t =mcbd-codex-w1: a Enter',
     ]);
-  }, 20_000);
+  });
 
   it('resolves <id>@<instance> to the instance session AND polls that instance', () => {
     // Both halves matter: `--agent`/`--instance` put the capture on the
@@ -245,7 +257,7 @@ describe('monitor.sh derives the intervention target from the capture payload (I
       'send-keys -t =mcbd-codex-w1-2: a Enter',
     ]);
     expect(run.stdout).toContain('monitor[w1@codex-2]: intervention target = mcbd-codex-w1-2');
-  }, 20_000);
+  });
 
   it('keeps two instances of the same worktree apart', () => {
     // Per-worker state is keyed by `<id>@<instance>`, not by worktree id: sharing
@@ -267,7 +279,7 @@ describe('monitor.sh derives the intervention target from the capture payload (I
       'has-session -t =mcbd-claude-w1-2:',
       'send-keys -t =mcbd-claude-w1-2: a Enter',
     ]);
-  }, 20_000);
+  });
 
   it('uses tmux exact-match targets so an intervention cannot leak to another instance', () => {
     // Issue #1156: a bare `-t <name>` falls back to prefix matching when nothing
@@ -283,7 +295,7 @@ describe('monitor.sh derives the intervention target from the capture payload (I
       expect(target.startsWith('=')).toBe(true);
       expect(target.split(' ')[0].endsWith(':')).toBe(true);
     }
-  }, 20_000);
+  });
 
   it('replaces only the derived head when the legacy --session-prefix is given', () => {
     // Kept for a session this tool did not create. The instance suffix is still
@@ -301,7 +313,7 @@ describe('monitor.sh derives the intervention target from the capture payload (I
       'has-session -t =legacy-w1-2:',
       'send-keys -t =legacy-w1-2: a Enter',
     ]);
-  }, 20_000);
+  });
 });
 
 describe('monitor.sh reports undelivered interventions instead of swallowing them (Issue #1601)', () => {
@@ -322,7 +334,7 @@ describe('monitor.sh reports undelivered interventions instead of swallowing the
     // The success wording must be absent: a failed intervention is never logged
     // as one, which is the whole point of moving the log after the send.
     expect(run.stdout).not.toContain("sent 'a'");
-  }, 20_000);
+  });
 
   it('refuses to invent a session name when the payload carries no cliToolId', () => {
     // Guessing here is exactly what #1601 was. With nothing to derive from and no
@@ -336,7 +348,7 @@ describe('monitor.sh reports undelivered interventions instead of swallowing the
     expect(run.tmuxCalls).toEqual([]);
     expect(run.stderr).toContain('no tmux session could be derived');
     expect(run.stdout).not.toContain('intervention target');
-  }, 20_000);
+  });
 
   it('counts an approval only when tmux accepted the Enter', () => {
     // GENERATING latches started=1, PROMPT triggers the auto-approve, IDLE at the
@@ -360,7 +372,7 @@ describe('monitor.sh reports undelivered interventions instead of swallowing the
     expect(missed.stdout).toContain('monitor[w1]: COMPLETE (approvals=0)');
     expect(missed.stderr).toContain('prompt approval Enter NOT delivered');
     expect(missed.tmuxCalls).toEqual(['has-session -t =mcbd-claude-w1:']);
-  }, 20_000);
+  });
 
   it('does not spend the resend budget on a resend that never landed', () => {
     // Spending it would escalate to "resend budget spent — operator needed" after
@@ -377,7 +389,7 @@ describe('monitor.sh reports undelivered interventions instead of swallowing the
     expect(run.stdout).not.toContain('resent');
     expect(run.stdout).not.toContain('resend budget spent');
     expect(run.stderr.split('\n').filter((l) => l.includes('NOT delivered'))).toHaveLength(3);
-  }, 20_000);
+  });
 });
 
 describe('monitor.sh validates worker specs before they reach tmux (Issue #1601)', () => {
@@ -394,5 +406,5 @@ describe('monitor.sh validates worker specs before they reach tmux (Issue #1601)
     // before it can be, mirroring validateSessionName() on the product side.
     expect(run.captureCalls).toEqual([]);
     expect(run.tmuxCalls).toEqual([]);
-  }, 20_000);
+  });
 });
