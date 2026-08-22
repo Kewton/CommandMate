@@ -57,6 +57,14 @@
  * wrong for this tool specifically, which is why the fence in
  * `beginAgentSession` is a timestamp rather than a state machine.
  *
+ * On a first turn the gap is not milliseconds but 12-15 s (#1903, measured
+ * twice), which is long enough for the structured layer to publish a verdict
+ * and then take it away again. That is what `sessionStartMayArriveLate` below
+ * declares, and `agent-event-state.recordAgentEvent` is what reads it: a
+ * `SessionStart` arriving inside a turn this instance has already opened does
+ * not replace the event the verdict is read from. Nothing there compares
+ * against `copilot`.
+ *
  * @module lib/hooks/sources/copilot/source
  */
 

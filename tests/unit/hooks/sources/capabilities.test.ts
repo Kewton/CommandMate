@@ -12,13 +12,19 @@
  *
  * ## What a mutation costs
  *
- * Phase 1 lands the declarations; the state machine starts reading them in Phase
- * 4 (`tests/unit/session/turn-model.test.ts`, Issue #1927 and the #1901 / #1903
- * pair). Until those exist, flipping a cell has exactly one detector — this file
- * — and that is the point of writing the cells out: the table is the artefact the
- * later Issues are implemented against, so it has to be wrong *loudly* rather
- * than quietly. The mapping from each flip to the Phase 4 case it must break is
- * recorded next to each column below.
+ * Phase 1 lands the declarations; the state machine starts reading them one
+ * column at a time. Two are read already —
+ * `permissionHookPredictsDialog` by `reportPendingDialog`
+ * (`tests/unit/hooks/permission-dialog-forecast-1901.test.ts`, #1901) and
+ * `sessionStartMayArriveLate` by `recordAgentEvent`
+ * (`tests/unit/session/late-session-start-1903.test.ts`, #1903) — and both of
+ * those suites flip the cell themselves, so a wrong value there is red twice.
+ * The rest are still Phase 4 (`tests/unit/session/turn-model.test.ts`, #1927),
+ * and until that exists flipping one of those cells has exactly one detector:
+ * this file. That is the point of writing the cells out — the table is the
+ * artefact the later Issues are implemented against, so it has to be wrong
+ * *loudly* rather than quietly. The mapping from each flip to the case it must
+ * break is recorded next to each column below.
  *
  * ## The columns, and what a wrong value does downstream
  *
@@ -27,8 +33,10 @@
  *   pane reads `waiting` until it expires. Flipping claude to `false` removes
  *   the record #1725 shipped, so a real permission prompt reads `running`.
  * - `sessionStartMayArriveLate` — flipping copilot to `false` lets the late
- *   `SessionStart` (20.915Z, after `UserPromptSubmit` at 20.813Z) overwrite the
- *   displayed event, which is #1903.
+ *   `SessionStart` (20.915Z, after `UserPromptSubmit` at 20.813Z; 12-15 s on a
+ *   first turn) overwrite the displayed event and the verdict read from it,
+ *   which is #1903. Read by `recordAgentEvent`; flipping it also reddens
+ *   `tests/unit/session/late-session-start-1903.test.ts`.
  * - `permissionReplyReleasesPrompt` — flipping opencode to `false` leaves an
  *   answered permission `waiting` until expiry (#1898). Flipping any push source
  *   to `true` releases a dialog nothing observed being answered.
