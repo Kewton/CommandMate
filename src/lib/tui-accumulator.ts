@@ -17,6 +17,7 @@ import {
   OPENCODE_SKIP_PATTERNS,
   OPENCODE_RESPONSE_COMPLETE,
   COPILOT_SKIP_PATTERNS,
+  isCopilotSelectionFrame,
 } from './detection/cli-patterns';
 
 /**
@@ -116,6 +117,25 @@ export function normalizeCopilotLine(line: string): string {
 export function extractCopilotContentLines(rawOutput: string): string[] {
   const strippedOutput = stripAnsi(rawOutput);
   const lines = strippedOutput.split('\n');
+
+  // Issue #1895: while a picker is open the frame carries NO response content —
+  // copilot draws the list instead of the transcript and its bottom chrome. The
+  // poller feeds this function the whole pane on every tick
+  // (`response-checker.ts`), so an operator who opens `/model` and reads it for
+  // a minute would otherwise have ~50 rows of model names appended to the saved
+  // response once per poll. Line patterns cannot fix that: `Recommended models`
+  // and `GPT-5.6 Luna 328K Medium` are not distinguishable from prose, and the
+  // pattern that used to sit in `COPILOT_SKIP_PATTERNS` for this
+  // (`Search \w+\.\.\.|Select Model`) matched none of the chrome and DID match
+  // copilot's own answers about the picker. The frame-level question has an
+  // exact answer, so ask that instead.
+  //
+  // Returning [] leaves the accumulator untouched (`accumulateTuiContent`
+  // early-returns on empty), which is the wanted behaviour: the picker is a
+  // transient overlay over a transcript whose earlier polls are already
+  // accumulated, and the next poll after it closes resumes normally.
+  if (isCopilotSelectionFrame(lines)) return [];
+
   const contentLines: string[] = [];
 
   for (const line of lines) {
