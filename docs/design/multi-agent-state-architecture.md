@@ -126,13 +126,19 @@ CommandMate は **7 種類**の Coding Agent CLI（`CLI_TOOL_IDS`: claude / code
 **決定 1 — `ready` の条件（DR2-002 で改訂）**: `sessionStatus: 'ready'`（turn 完了）を返してよいのは、次の**肯定的証拠**のいずれかを観測したときだけとする。
 
 1. **ツール固有の完了マーカー（実在するツールのみ）**。現在 `cli-patterns.ts` に実在する完了マーカーは `OPENCODE_RESPONSE_COMPLETE`（時間付き `▣ <Agent> · <model> · <duration>`）の **1 件だけ**である。
-2. **肯定確認された idle composer（ツール別）**。「composer が空」かつ「ステータスバー / フッタに処理中表示が無い」ことを、**そのツールの実フレームで肯定的に確認**した状態（例: copilot は `●` 応答行の直後に空の composer かつステータスバーに `Working` 無し）。判定規則はツールごとに定義して fixture で pin する。**完了マーカーを持たない claude / copilot / codex / gemini / antigravity では、この経路が唯一の完了証拠になる**。
+2. **肯定確認された idle 証拠（ツール別）**。**そのツールの実フレームで肯定的に確認**した「turn が動いていない」状態。**どの行を読むかはツールごとに違い、「composer が空」はそれ自体では完了証拠にならないツールがある**（本書初版の copilot の例は実測で覆った。#1979 / §15.5）。判定規則はツールごとに定義して fixture で pin する。**完了マーカーを持たない claude / copilot / codex / gemini / antigravity では、この経路が唯一の完了証拠になる**。
+
+   **copilot の実測（1.0.80・200x1000 ペイン・#1885 で着地。fixture: `tests/unit/lib/detection/fixtures/copilot-live-1885/`）**: copilot は代替画面に描き、chrome をペイン下端に固定する。composer `❯` は**下から 3 行目（1000 行ペインの 999 行目）に固定**で、応答本文の最終行の**約 930〜970 行下**にある（実測: `turn-complete.txt` は本文 65 行目 → composer 999 行目、`turn-running-thinking.txt` は 28 行目 → 999 行目）。さらに **composer は生成中も同じ形で描かれる**（4 fixture すべてで `❯ ` の 1 行）。したがって「`●` 応答行の直後に空の composer」という初版の例は 1.0.80 のどのフレームにも存在せず、これを規則にすると**生成中を ready と誤判定する**（#1885 の症状そのもの）。**copilot の肯定的完了証拠はペイン最下行のステータスバー**で、turn 中とその外で同じ 1 行が 2 通りに描き分けられる:
+   - idle: `← open sidebar · / commands · ? help · tab next tab`（`COPILOT_IDLE_STATUS_PATTERN`）＝**完了の肯定的証拠**
+   - 生成中: `● Working esc interrupt` / `◉ Working · 1.5 KiB esc interrupt`（`COPILOT_WORKING_STATUS_PATTERN`）
+
+   読むのは**最下行のみ**（`readCopilotStatusBar`。下から最初の非空行で走査を止め、どちらでもなければ `null` ＝ 証拠なし）。窓で照合してはならない: `status-vocabulary-in-response.txt` は copilot 自身が ` ● Working esc interrupt` を本文として印字した実フレームで、窓照合だと完了済みセッションが恒久的に `running` に貼りつく。ダイアログ（`permission-dialog.txt`）と `/model` ピッカー（`model-picker.txt`）は最下行が別物なので `null` を返し、既存の `detectPrompt` / 選択リスト分岐へそのまま落ちる。
 3. **構造化 `stop`**（自 turn に束縛されたもの、D3）。
 4. **未開始（not-started）**: turn が一度も開いていない状態。この場合のみ `ready` / `input_prompt` を返す（`SessionStatus` 値は `ready` のまま。`idle` は「セッションが無い」の意味なので使わない）。
 
 **前提条件とロールアウト順序（DR2-002）**: 本書の初版は「claude は既存の `⏺` + composer が完了マーカー」と書いていたが、**これは実装に存在しない**。`⏺` は `CLAUDE_SPINNER_CHARS` の 1 要素（`CLAUDE_THINKING_PATTERN`）＝ **running 側の証拠**である。したがって:
 
-- **各 detector の「肯定確認された idle composer」規則（2 の実装）が D1 適用の前提条件**である。規則が無いツールで `input_prompt` 経路の evidence を `'none'` に倒してはならない。
+- **各 detector の「肯定確認された idle 証拠」規則（2 の実装）が D1 適用の前提条件**である。規則が無いツールで `input_prompt` 経路の evidence を `'none'` に倒してはならない。**規則は必ずそのツールの実フレームから起こす**（他ツールからの類推で書かない。copilot の初版の例が実測で覆った、#1979 / §15.5）。
 - **ロールアウトはツール単位**とする（§8 Phase 3）。あるツールで (2) の規則と fixture（肯定ケース＋変異ケース）が揃うまで、そのツールの `input_prompt` は**現行どおり `ready` 相当**（`evidence: 'positive'`）として扱う。全ツール一斉に倒すと、通常の idle composer が `evidence: 'none'` に落ち、`TerminalEscapeHatch` が常時開き、`wait` の完了条件（`ready && !isUnclassifiedActive`）が成立しなくなる。
 - 対応する子 Issue: opencode の idle composer（`Ask anything...`）は **#1883**、copilot は **#1885 / #1886**（§8 Phase 2）。
 
@@ -206,12 +212,33 @@ export interface ToolStatusDetector {
 | claude | `claude --version` | `which` 解決 → 絶対パスで `execFile` | 既存 `VERSION_PROBES` |
 | codex | `codex --version` | 同上 | 既存 `VERSION_PROBES` |
 | antigravity | **`agy --version`**（ツール id と実行ファイル名が違う、DR2-023） | 同上 | 既存 `VERSION_PROBES` |
-| opencode | 新規（`opencode --version` 想定、実測で確定） | 同上 | **#1913**（`VERSION_PROBES` / `CATALOG_VERIFIED_AGAINST` への追加）を出所とする。未着地なら Phase 3 で実測（DR2-017） |
-| copilot | **`gh copilot -- --version`**（起動実体が `COPILOT_LAUNCH_COMMAND = 'gh copilot'` であるため。**裸の `copilot` を probe しない**、DR4-010） | `gh` を `which` 解決 → 絶対パスで `execFile` | **#1913** を出所とする。未着地なら Phase 3 で実測（DR2-017） |
+| opencode | `opencode --version` | 同上 | **#1913 で着地済み**（`VERSION_PROBES` / `CATALOG_VERIFIED_AGAINST`。実測 develop `a175767a`） |
+| copilot | **`resolveCopilotExecutable()` へ委譲**（解決された copilot 実体に `--version`。**`gh copilot -- --version` は使わない**、DR4-010 訂正） | `PATH` の `copilot` を絶対パス解決 → 実行可能な**通常ファイル**か検査 → `execFile`。無ければ gh 管理コピー（`$XDG_DATA_HOME`（既定 `~/.local/share`）`/gh/copilot`）を `statSync` で検査してから `execFile`。どちらも無ければ **null（子プロセスを 1 つも起動しない）** | **#1907 で着地**（`src/lib/cli-tools/copilot-executable.ts`）。`VERSION_PROBES` への接続は **#1913**（`kind:'delegated'`）。実測 develop `a175767a` |
 | gemini | 新規（`gemini --version` 想定、実測で確定） | `which` 解決 → 絶対パスで `execFile` | Phase 3 で実測（#1913 の対象外） |
 | vibe-local | 対象外（外部 CLI ではない） | — | — |
 
-- **probe の実行面を広げないための規約（DR4-010・決定）**: probe を 3 → 7 に増やすと、`opencode` / `copilot` / `gemini` という**一般的な名前を PATH から解決して実行する**箇所が増える。サーバの PATH は起動シェル由来で、リポジトリローカルの `node_modules/.bin` を含む構成は珍しくないため、悪意あるリポジトリを worktree として開くだけで cold probe 時にサーバ権限で任意バイナリが走りうる。したがって: (1) **probe は起動に使う実行体と同じ解決方法で行う**（copilot は `gh copilot -- --version`。probe 対象と launch 対象を別物にしない）、(2) **コマンドは絶対パスに解決してから `execFile` する。解決できなければ probe をスキップし `detector.staleness` を `undefined` のままにする**（本 D2 の既定と整合）、(3) probe は `sanitizeEnvForChildProcess()` の env で起動する、(4) `timeout` に加えて **`maxBuffer` を明示**する。PATH が信頼できない外部入力であることは §10 の「外部入力」に記載する。
+- **probe の実行面を広げないための規約（DR4-010・決定）**: probe を 3 → 7 に増やすと、`opencode` / `copilot` / `gemini` という**一般的な名前を PATH から解決して実行する**箇所が増える。サーバの PATH は起動シェル由来で、リポジトリローカルの `node_modules/.bin` を含む構成は珍しくないため、悪意あるリポジトリを worktree として開くだけで cold probe 時にサーバ権限で任意バイナリが走りうる。したがって: (1) **probe は起動に使う実行体と同じ解決方法で行う**（probe 対象と launch 対象を別物にしない）、(2) **コマンドは絶対パスに解決してから `execFile` する。解決できなければ probe をスキップし `detector.staleness` を `undefined` のままにする**（本 D2 の既定と整合）、(3) probe は `sanitizeEnvForChildProcess()` の env で起動する、(4) `timeout` に加えて **`maxBuffer` を明示**する。**加えて (5) probe は環境を変更してはならない**（インストール・ダウンロード・設定ファイル生成のいずれも起こさない）。version を知るためのヒントが副作用を持つと、`DETECTOR_VERSION_PROBES` を「ホットパスで安全に回せる」とした本 D2 の前提そのものが崩れる。PATH が信頼できない外部入力であることは §10 の「外部入力」に記載する。
+
+- **copilot の probe を `gh copilot -- --version` から `resolveCopilotExecutable()` 委譲へ差し替える（DR4-010 訂正・決定。#1979）**: 初版は規約 (1) を「起動実体が `COPILOT_LAUNCH_COMMAND = 'gh copilot'` だから probe も `gh copilot`」と適用したが、**この具体的なコマンドは規約 (5) に違反する**。
+
+  **実測（develop `a175767a`・gh 2.86.0 / copilot 1.0.80・macOS darwin 25.6.0）**:
+  - `gh copilot --help` は gh 自身の文言で「`gh` will execute the Copilot CLI found in your `PATH`. **If the Copilot CLI is not installed, it will be downloaded to `~/.local/share/gh/copilot`**」と述べる。つまり未インストール環境で `gh copilot -- --version` を撃つと**リリースのダウンロードが始まる**（#1907 が実測。破壊的なので本 Issue では再実行していない）。
+  - **`copilot` は gh の拡張ではない**（gh 2.86.0 に組み込まれた preview コマンド）。したがって `gh extension list` は copilot を**一切列挙しない**（本機で出力 0 行・exit 0）。「`gh extension list` から `github/gh-copilot` の版を読む」案は成立しない。
+  - `gh extension list --json` は **`unknown flag: --json`**（gh 2.86.0）。この案も成立しない。
+
+  **採る案**: `src/lib/cli-tools/copilot-executable.ts` の **`resolveCopilotExecutable()` に委譲する**（#1907 で着地、#1913 が `VERSION_PROBES` に `kind:'delegated'` で接続済み）。`PATH` の `copilot` → gh 管理コピー（`$XDG_DATA_HOME/gh/copilot`）の順に**実行可能な通常ファイルであることを `statSync` / `accessSync` で確かめてから**絶対パスで `--version` を撃ち、`GitHub Copilot CLI 1.0.80.` から版を読む。
+
+  **これは DR4-010 の例外ではない。規約 (1) をより強く満たす**: `CopilotTool.isInstalled()` / `startSession()` が**同じ関数の同じ戻り値**で起動先を決めている（`launchExecutable()` は `source==='path'` なら `copilot`、gh 管理コピーなら `gh copilot`）ため、probe と launch が原理的に食い違えない。初版が別物だと見なした「起動実体 `gh copilot` と probe 対象 `copilot`」は、#1907 が起動側を PATH の `copilot` 優先へ移したことで解消している。規約 (2)(3)(4) も充足（絶対パス解決・`sanitizeEnvForChildProcess()`・`timeout` 5000ms・`maxBuffer` 64KiB）。
+
+  **未インストール環境での無害性（使い捨て `PATH` / `HOME` / `XDG_DATA_HOME` で実測）**:
+
+  | 環境 | 結果 | 起動した子プロセス | 副作用 |
+  |---|---|---|---|
+  | `copilot` も `gh` も PATH に無い | `null`（0 ms） | **0** | 無し |
+  | `gh` はあるが `copilot` が PATH にも `$XDG_DATA_HOME/gh/copilot` にも無い | `null`（0 ms） | **0**（`gh` は `findOnPath` のゲートに使うだけで**実行しない**） | 無し。`$XDG_DATA_HOME/gh` は作られない |
+  | `copilot` が PATH にある（本機） | `{path:'/opt/homebrew/bin/copilot', version:'1.0.80', source:'path'}`（358 ms） | 1（`copilot --version`） | 無し |
+
+  いずれの scenario でもユーザーの `~/.config/gh`（`config.yml` / `hosts.yml`）は更新されず、`~/.local/share/gh` は作成されなかった。**「解決できなければ probe をスキップし `detector.staleness` を `undefined` のままにする」既定（規約 (2)）にそのまま合流する**ので、copilot だけを probe 対象から外す必要はない。
 - **`detector.staleness` は `GET /api/capabilities` に載せない（DR4-008・決定）**: `{ tool, installed, verifiedAgainst }` は**ローカルにインストールされた CLI のバージョン一覧＝ソフトウェアインベントリ**であり、認証必須の `capture --json` / `commandmate status` に限って露出する。capabilities エンドポイントは静的トークン列だけを返す（§10 の「`GET /api/capabilities` の開示範囲」）。
 
 - `ready` フォールバックと「否定の不在」分岐を禁止する **lint ルール**は現実的でないため、代わりに **各 detector の fixture セットに「証拠なし」期待ケース**（処理中語彙を 1 語変えたフレーム）を必須にするテスト規約で担保する（`tests/unit/detection/tools/<tool>/fixtures.test.ts` が全 fixture を走査）。この変異ケースは**受入条件**であり、緑の非空虚性はこれでしか証明できない（DR1-020）。
@@ -546,13 +573,13 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 
 | 現行経路（`status-detector.ts` 末尾。docstring 番号は §3 P1 参照） | 現行の返り値 | 移行後 | merged `isUnclassifiedActive`（DR2-001 / DR2-003） |
 |---|---|---|---|
-| (2) `promptPattern` 一致（reason `input_prompt`） | `ready` / `input_prompt`（high） | **そのツールの「肯定確認された idle composer」規則が実装済みのときだけ**、「composer が空」かつ「ステータスバー / フッタに処理中表示なし」を**肯定的に**確認して `ready` / `input_prompt`（＝未開始 or 完了）。確認できなければ**証拠なし**へ倒す（**wire 値は `ready` のまま**。`running` に倒さない、DR3-002）。**規則が未実装のツールは現行どおり `ready` ＋ `evidence:'positive'` 扱い**（§4 D1 決定 1 のツール単位ロールアウト、DR2-002） | 肯定確認できたとき `false` / できないとき `true`。**現行は常に `false` なので、これは意図的な拡大**であり等価性 pin の対象にしない（新たに `true` になる fixture を別表で列挙して pin、DR2-001） |
+| (2) `promptPattern` 一致（reason `input_prompt`） | `ready` / `input_prompt`（high） | **そのツールの「肯定確認された idle 証拠」規則が実装済みのときだけ**、**そのツールで実測した行**を**肯定的に**読めたときに `ready` / `input_prompt`（＝未開始 or 完了）とする。**「composer が空」を全ツール共通の規則にしてはならない**: copilot は生成中も同じ composer を描くため、証拠はペイン最下行のステータスバーである（§4 D1 決定 1 の実測、#1979）。確認できなければ**証拠なし**へ倒す（**wire 値は `ready` のまま**。`running` に倒さない、DR3-002）。**規則が未実装のツールは現行どおり `ready` ＋ `evidence:'positive'` 扱い**（§4 D1 決定 1 のツール単位ロールアウト、DR2-002） | 肯定確認できたとき `false` / できないとき `true`。**現行は常に `false` なので、これは意図的な拡大**であり等価性 pin の対象にしない（新たに `true` になる fixture を別表で列挙して pin、DR2-001） |
 | (3) 5 秒 stale（`STALE_OUTPUT_THRESHOLD_MS`、reason `no_recent_output`） | `ready` / `no_recent_output`（low） | **`ready` を廃止**。`running` ＋ `evidence:'none'` ＋ reason `no_recent_output`（理由コードは診断のため維持） | `true`（**現状と同値**。ただし `mergeStructuredStatus` の上書き分岐を同時に改訂しないと、構造化 `ready` のときに `false` へ反転する。DR2-003） |
 | (4) 既定（reason `default`） | `running` / `default`（low） | **wire 値は変更なし**（`running` / `default`）＋ `evidence:'none'` | `true`（現状と同値） |
 | ツール別完了マーカー（新規。実在するのは現在 opencode の 1 件のみ） | — | `ready` / `<tool>_response_complete` ＋ `evidence:'positive'` | `false` |
 
 - `StatusVerdict` に `evidence: 'positive' | 'none'` を追加する。`SessionStatus` の値域は**変更しない**。
-- `STATUS_REASON.UNKNOWN_FRAME = 'unknown_frame'` を追加（ツール別 detector が証拠を得られなかったときの理由コード）。
+- `STATUS_REASON.UNKNOWN_FRAME = 'unknown_frame'` を追加（ツール別 detector が証拠を得られなかったときの理由コード）。**Phase 2（Epic #1891）の scope 外だったため未着地である**（`grep -rn 'UNKNOWN_FRAME' src/` は **0 件**。develop `a175767a` で実測。`STATUS_REASON` の現在値は `prompt_detected` / `thinking_indicator` / 各ツールの `*_selection_list` / `opencode_processing_indicator` / `opencode_permission_prompt` / `codex_pager` / `codex_hooks_review` / `opencode_response_complete` / `input_prompt` / `no_recent_output` / `default`）。**追加は Phase 3・#1927 の作業に含まれる**（§8）。
 - `current-output-builder.ts` の `isUnclassifiedActive` を **`evidence === 'none'` からの導出**に置き換える。**pin は merged（`mergeStructuredStatus` 適用後）の値に対して行い、「(3)(4) 由来は等価」と「(2) 由来の新規 `true` は明示列挙」の 2 本に分ける**（§11、DR2-001）。
 - **`mergeStructuredStatus` の上書き分岐を同時に改訂する（DR2-003、必須）**: 現行の「`structured.status === 'ready'` かつ `scraper.status === 'running'` なら `isUnclassifiedActive = false`」を、「**scraper が `evidence: 'positive'` のときだけ下ろす**」に変える。改訂せずに `no_recent_output` を `running` へ倒すと、この分岐が新たに成立して #1708 のガード（`wait` の 60 秒 dwell → exit 10、`TerminalEscapeHatch`、`unclassified-frame-tracker` の記録）が**無音で外れる**。この反転は scraper 単体 fixture では検出できないため、**ガードの pin は `current-output-builder` レベルのテストで行う**（§11）。
 - `capture --json` に `statusEvidence`（optional）・`lastKnownStatus` / `lastKnownStatusAt`（§7、DR1-014）を additive に追加する。
@@ -650,7 +677,7 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 | 0 | 本書の確定（マルチステージ設計レビュー） | `docs/design/multi-agent-state-architecture.md` へ転記 | — |
 | 1 | ガード先行 ＋ 解決の一本化: `no-restricted-imports`（error・**パターン 3 つ**・**allowlist の初期値は実測 31 ファイル全件**）+ パス列挙 pin、`no-claude-fallback`（**vitest ガード**・スコープ内 baseline 36 箇所 / 19 ファイルの区分確定）、i18n `no-restricted-syntax` の `error` 格上げ、`VERIFIED_AGAINST` 雛形、capability 5 項目の型と宣言値、`resolveSessionTarget` 新設、**`GET /api/capabilities` の新設と CLI の版スキュー対応（DR3-004）** | 本 Issue（#1915） | **挙動変化 3 件**: (a) auto-yes の既定ツールが `claude` から worktree 既定に変わる（#1909。**POST 側と GET 側の両方**、DR3-010。in-memory Map なのでデータ移行は不要）、(b) **`kill-session` の解決が明示優先から roster 優先に変わり、矛盾時 400 `instance_tool_conflict`**（DR2-009）、(c) **読み取り経路の conflict は 400 ではなく 200 ＋ `conflict` フィールド**（DR3-015）。いずれも CHANGELOG に明記。**ガード投入時点の `npm run lint` は 0 error を維持する**（DR3-001）。それ以外の経路は挙動不変 |
 | 2 | #1891 の子 Issue をこの方針で実装（下表） | #1893〜#1914 | 各 PR ごとに既存テスト緑 |
-| 3 | スクレイパのツール別モジュール化・fixture 移行・`evidence` 導入・`no_recent_output` の `ready` 廃止・**ツール単位の idle composer 肯定検出**・live probe・**ツール単位のキルスイッチ（DR3-016）**・**`CliToolSessionStatus` / `ls` への reason 露出（DR3-005）**・**リポジトリ内 skill fixture の更新（DR3-012）** | 新規 Issue（Phase 0 完了時に分割） | `SessionStatus` の**値域は不変**。`statusEvidence` / `lastKnownStatus` は additive な optional フィールド。stalled フレームの表示が `ready` → `running` に変わる。**`input_prompt` 経路の evidence 変更はツール単位**で、そのツールの肯定確認規則と fixture が揃ってから行う（DR2-002） |
+| 3 | スクレイパのツール別モジュール化・fixture 移行・`evidence` 導入・**`STATUS_REASON.UNKNOWN_FRAME` の追加（#1927。Phase 2 の scope 外だったため未着地。`grep -rn 'UNKNOWN_FRAME' src/` は 0 件・develop `a175767a` 実測、§6.1）**・`no_recent_output` の `ready` 廃止・**ツール単位の idle 証拠の肯定検出（#1928。copilot は composer ではなく最下行ステータスバー、§4 D1 決定 1）**・**live probe（#1929。copilot は `resolveCopilotExecutable()` 委譲、§4 D2）**・**ツール単位のキルスイッチ（DR3-016）**・**`CliToolSessionStatus` / `ls` への reason 露出（DR3-005）**・**リポジトリ内 skill fixture の更新（DR3-012）** | **#1927 / #1928 / #1929** | `SessionStatus` の**値域は不変**。`statusEvidence` / `lastKnownStatus` は additive な optional フィールド。stalled フレームの表示が `ready` → `running` に変わる。**`input_prompt` 経路の evidence 変更はツール単位**で、そのツールの肯定確認規則と fixture が揃ってから行う（DR2-002） |
 | 4 | turn モデルへの置換（**generation フェンス配下**、DR3-003）、`resync` 実装、`mergeStructuredStatus` 改訂、**Web UI の構造化 decision 応答（`respond/route.ts` ＋ `PromptPanelProps` の `decisionId`、DR3-007）** | 新規 Issue | 公開 getter の型は不変。`turnId` / `closedBy` は additive。`respond/route.ts` は `messageId` を optional 化する additive 変更（既存の Web UI 応答は不変） |
 
 **Phase 2 の対応（Issue 番号ベース、DR1-015）**: 群記号での対応づけは Epic の実態とずれるため、Issue 番号で書く。
@@ -842,7 +869,8 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 ### 10.11 lint ガードと子プロセス（DR4-005 / DR4-010）
 
 - **lint ガード自体は外部入力を扱わない**。ただし**ガードが実際には効かない範囲を明記していないと、偽の安心を与える**: ESLint 8.57.1 の `no-restricted-imports` は静的 `import` と `export … from` のみを検出し、`await import()` / `require()` は検出しない（実測）。動的取得は `no-restricted-syntax` のセレクタ ＋ vitest ガードで塞ぐ（§4 D4）。**allowlist 済みモジュールの `export * from` 再エクスポート**（`src/lib/session/index.ts` が実例）も別 pin で塞ぐ。
-- **PATH は信頼できる入力ではない**（DR4-010）: `DETECTOR_VERSION_PROBES` の 3 → 7 拡張は、`opencode` / `copilot` / `gemini` という一般的な名前を PATH から解決して**サーバ権限で実行する**箇所を増やす。probe は**起動に使う実行体と同じ解決方法**（copilot は `gh copilot -- --version`）で、**絶対パスに解決してから `execFile`** する。解決できなければ probe をスキップする。`sanitizeEnvForChildProcess()` の env で起動し、`timeout` に加えて `maxBuffer` を明示する（§4 D2）。
+- **PATH は信頼できる入力ではない**（DR4-010）: `DETECTOR_VERSION_PROBES` の 3 → 7 拡張は、`opencode` / `copilot` / `gemini` という一般的な名前を PATH から解決して**サーバ権限で実行する**箇所を増やす。probe は**起動に使う実行体と同じ解決方法**で、**絶対パスに解決してから `execFile`** する。解決できなければ probe をスキップする。`sanitizeEnvForChildProcess()` の env で起動し、`timeout` に加えて `maxBuffer` を明示する（§4 D2）。
+- **probe は環境を変更してはならない**（DR4-010 (5)・#1979 で追加）: `gh copilot -- --version` は **未インストール環境で copilot のリリースをダウンロードする**（gh 自身の help がそう述べる。#1907 実測）。probe が任意のネットワーク取得とインストールを起こすと、供給元の乗っ取り（A08）がそのままサーバ権限のコード実行になる。copilot の probe は **`resolveCopilotExecutable()`（`CopilotTool.startSession` と同じ解決）へ委譲**し、実行可能ファイルが実在するときだけ絶対パスで `--version` を撃つ（§4 D2 の DR4-010 訂正）。
 
 ### 10.12 tmux 送出面（DR4-011）
 
@@ -934,7 +962,9 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 
 ### 13.1 Phase 3 / 4 の着手前提（Stage 2 / Stage 3 由来）
 
-- [ ] **ツールごとの「肯定確認された idle composer」規則と fixture（肯定＋変異）が揃ってから**、そのツールの `input_prompt` 経路の evidence を `'none'` に倒す（全ツール一斉に倒さない。完了マーカーは opencode の 1 件しか実在しない、DR2-002）
+- [ ] **ツールごとの「肯定確認された idle 証拠」規則と fixture（肯定＋変異）が揃ってから**、そのツールの `input_prompt` 経路の evidence を `'none'` に倒す（全ツール一斉に倒さない。完了マーカーは opencode の 1 件しか実在しない、DR2-002）。**規則はそのツールの実フレームから起こす**（copilot は composer ではなくペイン最下行のステータスバー、#1979 / §4 D1 決定 1）
+- [ ] **`STATUS_REASON.UNKNOWN_FRAME = 'unknown_frame'` を追加する**（Phase 2 の scope 外で未着地。`grep -rn 'UNKNOWN_FRAME' src/` は 0 件・develop `a175767a` 実測。#1927 の作業、§6.1 / §8）
+- [ ] **copilot の version probe を `resolveCopilotExecutable()` へ委譲する**（`gh copilot -- --version` は未インストール環境でダウンロードを起こすため使わない。#1929 の作業、§4 D2 / §13.2 S17）
 - [ ] **`mergeStructuredStatus` の上書き分岐を「scraper が `evidence:'positive'` のときだけ `isUnclassifiedActive` を下ろす」に改訂**してから `no_recent_output` を `running` に倒す（順序を逆にすると #1708 のガードが無音で外れる、DR2-003）
 - [ ] `dialogPendingMaxMs`（保持期限）と `decisionTimeoutSeconds`（送達期限）を**別の値として実装**する。`deliveryExpired` は `waiting` を解除しない（DR2-004）
 - [ ] `#1898-3` の実装先は **`prompt-response/route.ts`**（CLI `respond` の実経路、DR2-010）。**Web UI 側の `respond/route.ts` は別項として Phase 4 で対応する**（DR3-007。「実経路の取り違え」と「Web UI 経路の非目標化」を混同しない）
@@ -971,7 +1001,7 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 | S14 | **DoS 上限**: (a) SSE 1 フレーム上限超過でバッファを捨てて再接続、(b) replay の採用件数上限と超過件数の露出、(c) **`PendingDecision` が受信 payload を保持しない**、(d) dedup 集合の instance ごと上限、(e) `isValidWorktreeId` の長さ上限、をそれぞれ pin | client / payloads / path-validator | 4（(e) は 1） | DR4-009 |
 | S15 | **動的 import の陽性対照**: `await import('…/tmux/…')` と `require('…/tmux/…')` の fixture が**それぞれ赤になる**ことを確認してから allowlist を入れる。**allowlist 済みモジュールが tmux シンボルを再エクスポートしないこと**も pin（`src/lib/session/index.ts` の `export *` が実例） | `tmux-import-allowlist.test.ts` | 1 | DR4-005 |
 | S16 | **設定書き込みの原子性**: `~/.copilot/settings.json` の書き込みが **temp + rename** であり、ロックを取れないときは**書かずに hooks なしで起動**することを pin。既存ファイルが壊れているときに**上書きしない**既存挙動も維持 | `hook-settings.ts` | 2 | DR4-013 |
-| S17 | **probe の実行体**: version probe が**絶対パス解決**を経ること、copilot は `gh copilot -- --version`（裸の `copilot` を実行しない）こと、解決できなければ probe をスキップして `detector.staleness` が `undefined` のままになることを pin | `DETECTOR_VERSION_PROBES` | 3 | DR4-010 |
+| S17 | **probe の実行体**: version probe が**絶対パス解決**を経ること、**copilot は `resolveCopilotExecutable()` へ委譲**し **`gh copilot` を子プロセスとして起動しない**こと（`gh copilot -- --version` を綴った実装が赤になる変異ケースを併設）、`copilot` も gh 管理コピーも無い環境で **子プロセスを 1 つも起動せず** probe をスキップして `detector.staleness` が `undefined` のままになることを pin | `DETECTOR_VERSION_PROBES` / `copilot-executable.ts` | 3 | DR4-010（#1979 で訂正） |
 | S18 | **秘密を pane に出さない**: `AgentLaunchPlan.env` に `CM_AUTH_TOKEN` などの秘密が入らないことを pin（launch line は scrollback / `capture --json` に載る） | `launch-command.ts` | 2 | DR4-017 |
 | S19 | **XSS の非回帰**: `PromptPanel` / `ActivityPane` が新設フィールドを**テキストノードとしてのみ**描画し、`dangerouslySetInnerHTML` / `title` を使わないことを pin | 該当コンポーネントのテスト | 3〜4 | DR4-016 |
 | S20 | **レート制限の方針**: `resolve-target` に `createRequestRateLimiter` が適用されていること、`capabilities` に適用しない理由がコードコメント / 本書に残っていることを確認 | 新設 route | 1 | DR4-015 |
@@ -1082,7 +1112,7 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 | DR4-007 | Should | A05 ／ A07 | capabilities の 404 判定は、**認証リダイレクト（`/login` へ 307 → 200 HTML）や中間装置の 404 を「旧サーバ」と誤読**して `client-fallback` へ静かに降格させる | **§4 D5 決定 1 の判定表**（4 分岐・`Accept` ＋ `redirect:'manual'`）、**§10.6**、§6.4、§7（`resolvedBy` 行 ＋ 新規行）、§13.2 S12 |
 | DR4-008 | Should | A01 ／ A05 | capabilities の**開示範囲を固定する規約が §10 に無い**。認証既定 OFF ＋ `CM_BIND=0.0.0.0` は実在の構成で、インベントリと絶対パスが無認証で読まれうる | **§10.6**（固定トークンのみ・`AUTH_EXCLUDED_PATHS` 非追加・`no-store`・キー完全一致 pin）、§4 D2（`detector.staleness` を載せない）、§6.4、§13.2 S11 |
 | DR4-009 | Should | A04（Resource exhaustion） | DoS 上限が turn / `pendingDecisions` だけで、**SSE 行バッファ無制限・replay 件数無制限・`raw` 全量保持・dedup churn・`isValidWorktreeId` の長さ無制限**を覆っていない | **§10.10（7 項目）**、§4 D3 決定 2（dedup 上限 / replay 上限 / `PendingDecision` コメント）、§6.2、§13.2 S14 |
-| DR4-010 | Should | A08（untrusted search path） | probe の 3 → 7 拡張が**裸のコマンド名を PATH から実行する面**を広げる。copilot は起動実体（`gh copilot`）と probe 対象（`copilot`）が別物 | **§4 D2 の probe 表（解決方法の列）＋ 規約 4 点**、§10.1（PATH を外部入力に追加）、**§10.11**、§13.2 S17 |
+| DR4-010 | Should | A08（untrusted search path） | probe の 3 → 7 拡張が**裸のコマンド名を PATH から実行する面**を広げる。~~copilot は起動実体（`gh copilot`）と probe 対象（`copilot`）が別物~~ → **#1907 が起動側を PATH の `copilot` 優先に移したため別物ではない。実際の欠陥は `gh copilot -- --version` が未インストール環境でダウンロードを起こすこと**（#1979 で訂正） | **§4 D2 の probe 表（解決方法の列）＋ 規約 5 点**（(5) 環境を変更しない、を #1979 で追加）、§10.1（PATH を外部入力に追加）、**§10.11**、§13.2 S17 |
 | DR4-011 | Should | A03（Injection） | `sendKeys` は `-l` を付けておらず（リポジトリ全体で 0 件）、**本文が `Escape` / `C-c` / `Enter` と一致するとキーとして着弾**する。`KeySequence` が literal と key を型で分けないと必ずどちらかに倒れる | **§4 D4 の `KeySequence` 判別可能 union**、§6.3、**§10.12**、§13.2 S9 |
 | DR4-012 | Should | A05 | graceful exit の**後置条件が未規定**で、無認証の opencode HTTP サーバが loopback に取り残されうる（release が先・完了判定は `hasSession` のみ） | **§4 D4 の後置条件**（`hasSession` false ＋ port 無応答、forget は最後）、§6.3、§7（`port_orphaned` / `graceful_exit_timeout`）、**§10.9 / §10.14**、§13.2 S10 |
 | DR4-013 | Should | A04 ／ A05 | copilot `settings.json` への書き込みが**非原子・非排他の read-modify-write**。複数サーバ同時稼働は公式機能で、ユーザーのファイルを壊しうる | **§10.9（新設）**、§4 D3 決定 1 の注記（`global-singleton` は宣言値であって保証ではない）、§6.2、§13.2 S16 |
@@ -1110,7 +1140,7 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 
 | 未決事項 | 状態 | 扱い |
 |---|---|---|
-| opencode / copilot の detector probe コマンド | **決着（Stage 2）** | **#1913 が `VERSION_PROBES` / `CATALOG_VERIFIED_AGAINST` に opencode / copilot を追加するので、それを出所とする**。未着地なら Phase 3 で実測して同じ定数へ寄せる（DR2-017、§4 D2） |
+| opencode / copilot の detector probe コマンド | **決着（Phase 2 で着地・#1979 で訂正）** | **#1913 が `VERSION_PROBES` / `CATALOG_VERIFIED_AGAINST` へ着地済み**（develop `a175767a` で実測）。**opencode は `opencode --version`（`kind:'execFile'`）、copilot は `resolveCopilotExecutable()` への委譲（`kind:'delegated'`）**。`gh copilot -- --version` は未インストール環境でダウンロードを起こすため**採らない**（DR4-010 訂正、§4 D2） |
 | gemini の detector probe コマンド | 未決 | #1913 の対象外。Phase 3 で実測（`gemini --version` 想定） |
 | copilot の `eventIdentity` | 未決 | `tool-call-id` が使えるかは実測待ち。現状は `null` ＝ 時間窓 dedup。`types.ts` の `toolCallId` コメントが「codex / copilot / gemini / antigravity は mostly absent」と既に実測しているので、既定 `null` はこれを根拠にできる |
 | 解決の権威と CLI 側の扱い | **決着（Stage 2）** | **CLI は server の解決エンドポイントに委譲し、レスポンスの `resolvedBy` を使う**。ローカル解決の残置＋等価性契約テスト案は却下（CLI に primary anchor 段が無く実際に食い違うため、DR2-008、§4 D5 決定 1） |
@@ -1187,6 +1217,18 @@ Stage 2 の子 Issue 整合性チェックで、**Issue #1915 の GitHub 本文�
 | D4 の allowlist を「`cli-tools` と `tmux` のみ」と記述 | allowlist の実体は **`lib/tmux` を import する 31 ファイル全件**（routes 11 / pollers 4 / ws・broadcast 6 / client 4 / cli 1 / session 5）。**恒久除外 12 / 段階解消 19** の 2 区分を持ち、Phase 1 の初期値は 31 件全件（DR3-001） | §4 D4、§16 付録 A |
 | D1 の完了マーカーを全ツール前提で記述 | 完了マーカーは **opencode の 1 件のみ**。他ツールは「肯定確認された idle composer」規則の新設が前提で、ロールアウトはツール単位 | §4 D1 決定 1（DR2-002） |
 | 対象範囲を子 Issue #1893〜#1914 と記述 | **＋ 既報 4 件（#1883 / #1884 / #1885 / #1886）** | §1、§8 Phase 2 表（DR2-015） |
+
+**Phase 2 の実装・実機受入で覆った実測（#1979。基準 develop `a175767a`）**
+
+本書の初版〜Stage 4 版が**設計レビュー時点の推定で書いていた 3 件**が、Epic #1891 の実装 26 件と実機受入で覆った。いずれも Phase 3 の実装が直接の対象にしている記述なので、**訂正前の本書どおりに実装すると誤りが再生産される**。
+
+| # | 覆った記述（訂正前） | 実測（訂正後） | 出所 | 影響を受ける Issue |
+|---|---|---|---|---|
+| 1 | §4 D2 probe 表・DR4-010 規約 (1)・§10.11・§13.2 S17 が copilot の probe を **`gh copilot -- --version`** と規定 | **使えない**。`copilot` は gh の拡張ではなく gh 2.86.0 組み込みの preview コマンドで、**未インストール環境ではリリースをダウンロードする**（gh 自身の help が明記）。代替として `gh extension list` は copilot を列挙せず（出力 0 行）、`gh extension list --json` は `unknown flag`。**採る案は `resolveCopilotExecutable()` への委譲**（`kind:'delegated'`）で、これは DR4-010 (1) を**より強く**満たす（`startSession` と同一関数）。未インストール環境では**子プロセスを 1 つも起動せず** `null` を返し、規約 (2) の「probe をスキップし `staleness` を `undefined`」へ合流する。**規約に (5) 環境を変更しない を追加**した | #1907（`copilot-executable.ts` 着地）／ #1913（`VERSION_PROBES` 接続）／ #1979 の使い捨て `PATH`・`HOME`・`XDG_DATA_HOME` 実測 3 scenario | **#1929**（`DETECTOR_VERSION_PROBES`）／ §13.2 S17 |
+| 2 | §4 D1 決定 1 の (2) が copilot の idle 例を **「`●` 応答行の直後に空の composer かつステータスバーに `Working` 無し」** と記述 | **1.0.80 のどのフレームにもこの形は存在しない**。composer `❯` は 200x1000 ペインの 999 行目に固定で、応答本文の**約 930〜970 行下**にあり、**生成中も同一の形で描かれる**。肯定的完了証拠は**ペイン最下行のステータスバー**（idle: `← open sidebar · / commands · ? help · tab next tab` ／ 生成中: `● Working esc interrupt`）。窓照合は不可（copilot 自身がこの語彙を本文に印字する実フレームがある）。「否定の不在」でなく「肯定的に読めた 1 行」であることが D1 の要件を満たす根拠 | #1885 の実 TUI キャプチャ 4 件（`tests/unit/lib/detection/fixtures/copilot-live-1885/`・200x1000・copilot 1.0.80）と `readCopilotStatusBar` / `COPILOT_IDLE_STATUS_PATTERN` / `COPILOT_WORKING_STATUS_PATTERN` | **#1928**（ツール別 idle 証拠規則）／ §4 D1 決定 1 |
+| 3 | §6.1 が `STATUS_REASON.UNKNOWN_FRAME = 'unknown_frame'` の追加を規定（着地済みとも未着地とも書いていない） | **未着地**。`grep -rn 'UNKNOWN_FRAME' src/` は **0 件**（Phase 2 の scope 外だった）。§8 Phase 3 行に **#1927 の作業**として明記した | develop `a175767a` の実測 | **#1927**（`evidence` 導入と同一 PR） |
+
+**この 3 件に共通する失敗の形**: いずれも「実行体・実フレーム・実定数を見ずに、設計上そうあるべき形を書いた」ものである。probe 表（1）は launch コマンド定数から probe コマンドを演繹し、idle 例（2）は他ツールの composer 挙動から copilot を類推し、（3）は規定を書いたことを着地と混同していた。**Phase 3 / 4 で本書に新しい「実行体・実フレーム・実定数」を書くときは、必ず実測の出所（コミット・fixture パス・コマンド出力）を併記する**。
 
 ### 15.6 Stage 4 Consider 項目の採否
 
