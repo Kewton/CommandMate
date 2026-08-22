@@ -60,6 +60,7 @@ import {
   collectToolInputMatchTexts,
   type PermissionRequestPayload,
 } from './permission-request-payload';
+import { getAgentEventSource } from './sources/registry';
 import { recordToolInputNormalization } from './tool-input-normalization-state';
 
 const logger = createLogger('lib/hooks/permission-decision-service');
@@ -307,31 +308,83 @@ function recordAllowedPermission(
 const NON_BLOCKING_PERMISSION_MODES = new Set(['bypassPermissions']);
 
 /**
- * Tell the detection layer that a dialog is about to be drawn (Issue #1725).
+ * Tell the detection layer that a dialog is about to be drawn (Issue #1725),
+ * but only on a source where that is true (Issue #1901).
  *
- * A no-decision means precisely this: D5 measured `{}` landing back in the
- * ordinary TUI approval flow, i.e. the dialog appears. That is ~6 seconds
- * before `Notification(permission_prompt)` announces the same dialog (§5.5), so
- * it is the earliest moment anything in this system can know a human is needed.
+ * On Claude a no-decision means precisely this: D5 measured `{}` landing back
+ * in the ordinary TUI approval flow, i.e. the dialog appears. That is ~6
+ * seconds before `Notification(permission_prompt)` announces the same dialog
+ * (§5.5), so it is the earliest moment anything in this system can know a human
+ * is needed.
  *
  * It is a prediction rather than an observation, and it is recorded as one:
  * `agent-event-state` expires a `permission-request` record that nothing
  * corroborates within 20 s. See STRUCTURED_PROMPT_PROVISIONAL_MAX_AGE_MS for
  * why the asymmetry with the notification source is deliberate.
  *
- * `AskUserQuestion` is included even though this Issue does not claim to detect
- * its screens: it also raises a `PermissionRequest`, and allowing it does not
- * dismiss the picker (§5.6), so a no-decision there is followed by a screen a
- * human must act on just the same. What is NOT claimed is that the state
- * survives — nothing about that screen produces events, so unless the scraper
- * corroborates it the record expires, which is the honest outcome for a screen
- * this layer cannot see. That screen belongs to #1708 / #1726.
+ * ## Why the source is asked first (Issue #1901)
+ *
+ * "Non-allow means a dialog is coming" is *Claude's* semantics, and #1725
+ * applied it to every tool that reached this module. copilot fires its
+ * `PreToolUse` on **every** tool call and executes most of them straight away
+ * — measured: `Read` followed by `PostToolUse` 0–1 s later, no dialog — so a
+ * forecast was filed for every `Read` / `Grep` / `Bash` of a build. Each one
+ * published `waiting / hook_permission_request` for up to
+ * STRUCTURED_PROMPT_PROVISIONAL_MAX_AGE_MS, which made `wait --on-prompt agent`
+ * exit 10 on a session nobody was blocking, refused `send` with
+ * `blockedBy: 'structured'`, and flashed a WS / push notification per tool call.
+ * antigravity is wired the same way.
+ *
+ * So the forecast is now conditioned on the source's declared
+ * {@link AgentSourceCapabilities.permissionHookPredictsDialog} (#1924, §4 D3
+ * decision 1; §6.2 names this function). Not a tool-id branch and not
+ * `supportedEvents`: the capability block is the whole vocabulary, exactly as
+ * `permission-adjudication` reads `permissionReplyReleasesPrompt` (#1898) and
+ * `sources/opencode/ingest` reads it for `permission.replied`.
+ *
+ * **What is given up, and why it is affordable.** On a source that declares
+ * `false`, whether a dialog is on the pane goes back to being the scraper's
+ * question alone. That premise was re-checked against the detection #1885 /
+ * #1886 landed rather than assumed: copilot draws an approval as a box over the
+ * bottom of the pane, which takes the status bar and the composer away, so
+ * `detectSessionStatus` answers `waiting` / `prompt_detected` /
+ * `hasActivePrompt: true` on the live frame
+ * (`tests/unit/lib/detection/fixtures/copilot-live-1885/permission-dialog.txt`).
+ * The cost is latency, not blindness: the scraper reads through a 5 s capture
+ * cache, so a real copilot dialog is reported up to a poll later than the
+ * forecast would have reported it. opencode gives up nothing at all — its
+ * approvals arrive as `notification(permission_prompt)` frames, which are
+ * observations and open the record through `recordAgentEvent` regardless.
+ *
+ * `AskUserQuestion` is included on a forecasting source even though this Issue
+ * does not claim to detect its screens: it also raises a `PermissionRequest`,
+ * and allowing it does not dismiss the picker (§5.6), so a no-decision there is
+ * followed by a screen a human must act on just the same. What is NOT claimed
+ * is that the state survives — nothing about that screen produces events, so
+ * unless the scraper corroborates it the record expires, which is the honest
+ * outcome for a screen this layer cannot see. That screen belongs to
+ * #1708 / #1726.
  */
 function reportPendingDialog(
   session: PermissionRequestSession,
   payload: PermissionRequestPayload | null
 ): void {
   if (payload?.permissionMode && NON_BLOCKING_PERMISSION_MODES.has(payload.permissionMode)) {
+    return;
+  }
+  // The declared value, read through the registry rather than compared against
+  // a tool id. An unregistered tool answers from `sources/legacy-relay`, which
+  // declares `false` on purpose (#1924): forecasting a dialog for a permission
+  // hook nobody has measured would publish `waiting` for a prompt that may not
+  // exist.
+  if (!getAgentEventSource(session.cliToolId).capabilities.permissionHookPredictsDialog) {
+    logger.debug('permission-request:dialog-forecast-skipped', {
+      worktreeId: session.worktreeId,
+      cliToolId: session.cliToolId,
+      instanceId: session.instanceId,
+      toolName: payload?.toolName ?? null,
+      reason: 'capability-permissionHookPredictsDialog-false',
+    });
     return;
   }
   reportPermissionRequestPending(
