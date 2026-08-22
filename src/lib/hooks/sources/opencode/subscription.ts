@@ -12,10 +12,18 @@
  * - **Reconnect, and re-read what was missed.** Durable replay does not work on
  *   1.18.3: `GET /api/session/:id/event?after=<seq>` returns zero bytes (#1758
  *   §5.2.2). So a reconnect cannot ask "what did I miss"; it re-reads *state*
- *   instead, from `GET /permission` and `GET /question`, which is what makes a
- *   dropped approval recoverable rather than lost forever. A missed
- *   `session.idle` is not recoverable and is not pretended to be — `wait` falls
+ *   instead, from `GET /permission`, `GET /question` and — since Issue #1900 —
+ *   `GET /session/status`. The first two make a dropped approval recoverable
+ *   rather than lost forever. The third makes a dropped *turn boundary*
+ *   recoverable too: a session the server still calls busy is re-armed, and one
+ *   it calls idle that was mid-turn when the stream died is the `stop` that
+ *   never arrived. What is still not recoverable is a boundary the server has
+ *   stopped reporting either way, and that is not pretended to be — `wait` falls
  *   back to the scraper, which is the pre-#1763 behaviour.
+ * - **Not believe a port that changed hands.** The server is loopback and
+ *   unauthenticated, so the identity check in {@link degradeToScraper}'s caller
+ *   is what stands between "the pane owns this port" and a squatter closing a
+ *   `wait` with one frame (§4 D3, DR4-004).
  * - **Not report a turn twice.** See `./turn-gate`.
  * - **Not throw on an unknown frame.** `server.heartbeat` arrives every ten
  *   seconds and is not in the server's own OpenAPI `Event` union (#1758 D5), so
@@ -47,12 +55,15 @@ import type {
   NormalizedAgentEvent,
   RawAgentEvent,
   SourceLiveness,
+  SourceResync,
   Subscription,
 } from '../types';
 import {
   fetchOpencodePendingPermissions,
   fetchOpencodePendingQuestions,
-  readOpencodeEventStream,
+  fetchOpencodeSessionStatuses,
+  openOpencodeEventStream,
+  probeOpencodeHealth,
   type OpencodeFrame,
 } from './client';
 import { partCallId, partToolName } from './mappers';
@@ -80,6 +91,15 @@ export const OPENCODE_RECONNECT_BACKOFF_MS: readonly number[] = [
 /** Cap on remembered decision ids, so a long session cannot grow the set. */
 const MAX_SEEN_DECISIONS = 256;
 
+/**
+ * Cap on approvals and questions replayed by one re-sync (§4 D3, DR4-009).
+ *
+ * The same number and the same reason as `MAX_RECHECKED_DECISIONS`: the list
+ * comes off a server CommandMate did not start, and a bounded pass that reports
+ * its overflow beats an unbounded one that does not.
+ */
+export const MAX_RESYNCED_DECISIONS = 50;
+
 /** One live subscription. */
 interface OpencodeSubscriptionState {
   readonly key: string;
@@ -88,10 +108,31 @@ interface OpencodeSubscriptionState {
   readonly onEvent: (event: NormalizedAgentEvent) => void;
   readonly normalize: (raw: RawAgentEvent) => NormalizedAgentEvent | null;
   readonly gate: TurnGate;
+  /** The source's declared {@link SourceResync}; gates the status poll. */
+  readonly resync: SourceResync;
   /** Ids already delivered, so a re-sync does not re-announce a live dialog. */
   readonly seenDecisions: Set<string>;
   /** Aborts the current attempt. Replaced on every reconnect. */
   streamController: AbortController;
+  /**
+   * Aborted by `close()` alone, and never replaced.
+   *
+   * The backoff waits on this rather than on `streamController` (Issue #1900):
+   * by the time the loop reaches the sleep, `streamController` has *already*
+   * been aborted — that abort is what ended the read — and
+   * `addEventListener('abort')` on an already-aborted signal never fires. So a
+   * `close()` during the backoff could not shorten it, and a torn-down
+   * subscription held a timer for up to thirty seconds.
+   */
+  readonly lifetimeController: AbortController;
+  /**
+   * `/global/health`'s `version` from the first probe (Issue #1900, DR4-004).
+   *
+   * The identity a later probe is compared against. A different answer on the
+   * same port is a different process, and the whole trust model here is "the
+   * pane owns this port" — see {@link degradeToScraper}.
+   */
+  serverVersion: string | null;
   liveness: SourceLiveness;
   /** Set by `close()`; the loop checks it instead of being cancelled. */
   closed: boolean;
@@ -134,6 +175,22 @@ function inertSubscription(): Subscription {
   return { close: async () => {}, liveness: { state: 'unknown' } };
 }
 
+/** What the caller may tell {@link openOpencodeSubscription}. */
+export interface OpencodeSubscriptionOptions {
+  /** Overrides the recorded assignment. For tests. */
+  readonly port?: number;
+  /**
+   * The source's `capabilities.resync` (Issue #1900, #1924 §4 D3).
+   *
+   * Passed in rather than read from the registry because the registry imports
+   * `./source`, which imports this module — so a static import back would close
+   * a cycle, and the declaration is the source's to make anyway. `'none'` is the
+   * default and means the reconnect re-reads pending approvals and nothing else:
+   * no `GET /session/status`, no re-arming, no synthesised `stop`.
+   */
+  readonly resync?: SourceResync;
+}
+
 /**
  * Open — or re-use — the event stream for one instance.
  *
@@ -149,19 +206,19 @@ function inertSubscription(): Subscription {
  * @param onEvent - Receives normalised events, gated by {@link TurnGate}
  * @param normalize - The source's own `normalizeEvent`, passed in rather than
  *   imported so this module does not depend on the module that depends on it
- * @param port - Overrides the recorded assignment. For tests
+ * @param options - See {@link OpencodeSubscriptionOptions}
  */
 export async function openOpencodeSubscription(
   target: AgentInstanceRef,
   onEvent: (event: NormalizedAgentEvent) => void,
   normalize: (raw: RawAgentEvent) => NormalizedAgentEvent | null,
-  port?: number
+  options: OpencodeSubscriptionOptions = {}
 ): Promise<Subscription> {
   const key = keyOf(target);
   const existing = subscriptions.get(key);
   if (existing) return handleFor(existing);
 
-  const resolvedPort = port ?? getAssignedOpencodePort(target);
+  const resolvedPort = options.port ?? getAssignedOpencodePort(target);
   if (resolvedPort === null) {
     // No port was assigned: structured events are off, allocation failed, or
     // this pane predates the feature. All three mean "the scraper is in charge",
@@ -180,8 +237,11 @@ export async function openOpencodeSubscription(
     onEvent,
     normalize,
     gate: createTurnGate(),
+    resync: options.resync ?? 'none',
     seenDecisions: new Set<string>(),
     streamController: new AbortController(),
+    lifetimeController: new AbortController(),
+    serverVersion: null,
     liveness: { state: 'unknown' },
     closed: false,
     watchdog: null,
@@ -220,6 +280,8 @@ export async function closeOpencodeSubscription(target: AgentInstanceRef): Promi
   state.closed = true;
   clearWatchdog(state);
   state.streamController.abort();
+  // Issue #1900: the only signal a backoff is listening to.
+  state.lifetimeController.abort();
   subscriptions.delete(key);
   logger.info('opencode-subscription-closed', {
     worktreeId: target.worktreeId,
@@ -234,6 +296,7 @@ export function resetOpencodeSubscriptions(): void {
     state.closed = true;
     clearWatchdog(state);
     state.streamController.abort();
+    state.lifetimeController.abort();
   }
   subscriptions.clear();
 }
@@ -268,15 +331,36 @@ function armWatchdog(state: OpencodeSubscriptionState): void {
   state.watchdog = timer;
 }
 
-/** Sleep, unless the subscription is torn down first. */
-function delay(ms: number, signal: AbortSignal): Promise<void> {
+/**
+ * Sleep, unless the subscription is torn down first.
+ *
+ * The already-aborted check and the listener removal are both load-bearing
+ * (Issue #1900). Without the first, a signal that aborted before the call — the
+ * ordinary case, because the abort is what ended the read — waits out the full
+ * delay with nothing able to cut it short. Without the second, every reconnect
+ * leaves a listener on a signal that lives as long as the session, and a pane
+ * that reconnects a dozen times collects a `MaxListenersExceededWarning`.
+ *
+ * Exported as a test seam: both properties are invisible from outside the loop
+ * — a backoff that is not cut short still ends, it just ends late — so the only
+ * way to pin them without a wall-clock assertion is to drive this directly.
+ */
+export function waitUnlessAborted(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    timer.unref?.();
-    signal.addEventListener('abort', () => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const onAbort = (): void => {
       clearTimeout(timer);
       resolve();
-    }, { once: true });
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    timer.unref?.();
   });
 }
 
@@ -291,6 +375,21 @@ function backoffFor(attempt: number): number {
  * Runs until `close()`. Every ending — a clean EOF, an aborted read, a refused
  * connection — is the same thing to this function: reconnect after a backoff,
  * having first re-read the state that could not be replayed.
+ *
+ * ## The order the reconnect does things in (Issue #1900)
+ *
+ * 1. **Ask who is on the port.** `/global/health` has to answer, and answer with
+ *    the same `version` as the first time. §4 D3 (DR4-004) makes this a
+ *    precondition of trusting the stream at all: the port is loopback and
+ *    unauthenticated, so a different process squatting on it could otherwise
+ *    close a `wait` with one `session.idle` frame — or with a single
+ *    `{"ses_x":{"type":"idle"}}` reply to step 3.
+ * 2. **Open the stream, then re-read.** The re-read used to run first, which
+ *    left a window: an approval raised between `GET /permission` and the `/event`
+ *    subscription appeared on neither, and stayed invisible until the *next*
+ *    reconnect. Opening first makes the window an overlap instead — a duplicate
+ *    the `seenDecisions` set collapses.
+ * 3. **Find out whether the turn survived.** See {@link recoverTurnState}.
  */
 async function runStream(state: OpencodeSubscriptionState): Promise<void> {
   let attempt = 0;
@@ -299,17 +398,31 @@ async function runStream(state: OpencodeSubscriptionState): Promise<void> {
     state.streamController = new AbortController();
     // A reconnect is a new arming window: whatever was mid-turn when the
     // connection dropped, its `session.status(busy)` was on the old stream, and
-    // an idle that arrives without one must not resolve a `wait`.
+    // an idle that arrives without one must not resolve a `wait`. What *was*
+    // armed is carried into `recoverTurnState`, which is the half of the answer
+    // this reset used to throw away.
+    const armedBefore = state.gate.armedSessions();
     state.gate.reset();
 
     let reason = 'stream-ended';
     try {
-      await resyncPending(state);
-      armWatchdog(state);
-      for await (const frame of readOpencodeEventStream(state.port, state.streamController.signal)) {
-        attempt = 0;
+      const identity = await verifyServerIdentity(state);
+      if (state.closed) break;
+      if (identity === 'changed') return;
+      if (identity === 'unreachable') {
+        reason = 'health-unreachable';
+      } else {
+        const frames = await openOpencodeEventStream(state.port, state.streamController.signal);
+        state.liveness = { state: 'live', lastHeartbeatAt: Date.now() };
         armWatchdog(state);
-        handleFrame(state, frame);
+        await resyncPending(state);
+        await recoverTurnState(state, armedBefore);
+        attempt = 0;
+        for await (const frame of frames) {
+          attempt = 0;
+          armWatchdog(state);
+          handleFrame(state, frame);
+        }
       }
     } catch (error) {
       reason = error instanceof Error ? error.message : String(error);
@@ -328,19 +441,91 @@ async function runStream(state: OpencodeSubscriptionState): Promise<void> {
       attempt,
     });
 
-    await delay(backoffFor(attempt), state.streamController.signal);
+    await waitUnlessAborted(backoffFor(attempt), state.lifetimeController.signal);
     attempt += 1;
   }
+}
+
+/** What a pre-connect health probe concluded. */
+type ServerIdentity = 'same' | 'changed' | 'unreachable';
+
+/**
+ * Health-before-trust (Issue #1900, §4 D3 DR4-004 / §13.2 S5).
+ *
+ * The first successful probe records the `version`; every later one is compared
+ * against it. Equal — or unknowable, because the field is missing — means carry
+ * on. Different means the process that owned this port is gone and somebody else
+ * has it, at which point nothing on the port may be believed, including the
+ * `/session/status` answer {@link recoverTurnState} would otherwise turn into a
+ * `stop`.
+ *
+ * Anything that is merely *not answering* is a reconnect, not a betrayal: the
+ * caller falls through to the ordinary backoff.
+ */
+async function verifyServerIdentity(state: OpencodeSubscriptionState): Promise<ServerIdentity> {
+  const outcome = await probeOpencodeHealth(state.port);
+  if (outcome.kind !== 'healthy') {
+    logger.info('opencode-subscription-health-unavailable', {
+      worktreeId: state.target.worktreeId,
+      instanceId: state.target.instanceId ?? state.target.cliToolId,
+      port: state.port,
+      outcome: outcome.kind,
+      status: outcome.kind === 'rejected' ? outcome.status : undefined,
+    });
+    return 'unreachable';
+  }
+
+  const version = outcome.health.version;
+  if (state.serverVersion === null || version === null) {
+    state.serverVersion ??= version;
+    return 'same';
+  }
+  if (version === state.serverVersion) return 'same';
+
+  degradeToScraper(state, version);
+  return 'changed';
+}
+
+/**
+ * Stop watching a port that is no longer this instance's, and say so.
+ *
+ * Not a close in the ordinary sense — the pane may still be alive — so the
+ * subscription is dropped rather than the session. Everything above falls back
+ * to the screen scraper, which is the pre-#1763 behaviour and the only source
+ * left that is reading the pane rather than the port.
+ */
+function degradeToScraper(state: OpencodeSubscriptionState, observedVersion: string): void {
+  logger.warn('opencode-subscription-port-identity-changed', {
+    worktreeId: state.target.worktreeId,
+    instanceId: state.target.instanceId ?? state.target.cliToolId,
+    port: state.port,
+    reason: 'port_identity_changed',
+    expectedVersion: state.serverVersion,
+    observedVersion,
+  });
+  state.closed = true;
+  clearWatchdog(state);
+  state.streamController.abort();
+  state.lifetimeController.abort();
+  state.liveness = { state: 'lost', since: Date.now(), reason: 'port_identity_changed' };
+  subscriptions.delete(state.key);
 }
 
 /**
  * Re-read what is waiting on a human and announce anything not seen yet (C7).
  *
- * The only recovery opencode offers. An approval raised while CommandMate was
- * disconnected is still pending on the server, so re-reading it restores both
- * the "a human is blocked" state and Auto-Yes's chance to adjudicate it — which
- * matters more here than anywhere else, because an unanswered opencode approval
- * waits forever (#1758 §5.5.3).
+ * The only recovery opencode offers for a *decision*. An approval raised while
+ * CommandMate was disconnected is still pending on the server, so re-reading it
+ * restores both the "a human is blocked" state and Auto-Yes's chance to
+ * adjudicate it — which matters more here than anywhere else, because an
+ * unanswered opencode approval waits forever (#1758 §5.5.3).
+ *
+ * Not the same contract as `recheckPendingDecisions` (#1898), which answers the
+ * *policy changed* trigger of §4 D3 decision 3 and adjudicates directly. This
+ * one replays the frames so the whole ingest path runs, and the two cannot
+ * double-answer one approval: an id delivered here is in `seenDecisions`, and an
+ * approval adjudicated there has already left through `answerPendingDecision`,
+ * which is idempotent per decision id.
  */
 async function resyncPending(state: OpencodeSubscriptionState): Promise<void> {
   const now = Date.now();
@@ -350,7 +535,20 @@ async function resyncPending(state: OpencodeSubscriptionState): Promise<void> {
   ]);
 
   const replay = (entries: Record<string, unknown>[], type: string): void => {
-    for (const entry of entries) {
+    // DR4-009: bounded, and the overflow is counted rather than dropped in
+    // silence. Same limit and same reason as `MAX_RECHECKED_DECISIONS`.
+    const kept = entries.slice(0, MAX_RESYNCED_DECISIONS);
+    if (entries.length > kept.length) {
+      logger.warn('opencode-resync-truncated', {
+        worktreeId: state.target.worktreeId,
+        instanceId: state.target.instanceId ?? state.target.cliToolId,
+        type,
+        examined: kept.length,
+        skipped: entries.length - kept.length,
+        limit: MAX_RESYNCED_DECISIONS,
+      });
+    }
+    for (const entry of kept) {
       const id = readStringField(entry, 'id');
       if (!id || state.seenDecisions.has(id)) continue;
       // Rebuilt into the envelope the live path uses, so one mapper and one
@@ -361,6 +559,88 @@ async function resyncPending(state: OpencodeSubscriptionState): Promise<void> {
 
   replay(permissions, 'permission.asked');
   replay(questions, 'question.asked');
+}
+
+/**
+ * Work out what happened to the turn while the connection was down (Issue
+ * #1900 item 1, §4 D3 `closedBy: 'resync_idle'`).
+ *
+ * `?after=<seq>` returns zero bytes on this server, so a reconnect cannot ask
+ * what it missed. What it *can* ask is what is true now, and `GET /session/status`
+ * answers per session. Two things follow from one reply:
+ *
+ *  - **`busy` re-arms.** Without this the gate is empty, the `session.idle` that
+ *    eventually arrives is dropped as `never-armed`, and the instance reads
+ *    `running` off its last `post_tool_use` for the whole thirty-minute
+ *    staleness bound. That is the reported failure: a watchdog trip mid-turn
+ *    cost the `stop` entirely.
+ *  - **`idle` for a session that *was* armed is the completion that was lost.**
+ *    It is synthesised into the same `session.idle` frame the live path would
+ *    have carried, so it goes through the gate, the mapper and the ingest
+ *    unchanged. Only an explicit `idle` counts — a session missing from the
+ *    reply says nothing, and guessing there would resolve a `wait` on absence.
+ *
+ * Re-arming runs first so the primary session is claimed by something that is
+ * genuinely working before any synthesised idle can claim it.
+ *
+ * Gated on the declared {@link SourceResync}: a source that says `'none'` has no
+ * endpoint to poll and this must be a no-op for it.
+ *
+ * @param armedBefore - Sessions the gate had mid-turn when the stream dropped
+ */
+async function recoverTurnState(
+  state: OpencodeSubscriptionState,
+  armedBefore: readonly string[]
+): Promise<void> {
+  if (state.resync !== 'session-status-poll') return;
+
+  const statuses = await fetchOpencodeSessionStatuses(state.port);
+  if (statuses === null) {
+    // Unreachable between the health probe and here. Nothing is claimed, and
+    // the scraper decides — which is the pre-#1900 outcome, not a new one.
+    logger.info('opencode-resync-status-unavailable', {
+      worktreeId: state.target.worktreeId,
+      instanceId: state.target.instanceId ?? state.target.cliToolId,
+      port: state.port,
+    });
+    return;
+  }
+
+  const rearmed: string[] = [];
+  for (const [sessionId, activity] of Object.entries(statuses)) {
+    if (activity !== 'busy') continue;
+    state.gate.arm(sessionId);
+    rearmed.push(sessionId);
+  }
+
+  const synthesized: string[] = [];
+  for (const sessionId of armedBefore) {
+    if (statuses[sessionId] !== 'idle') continue;
+    // Armed so the gate reads the synthesised frame as a completion rather than
+    // as the `never-armed` idle its own reset just made it.
+    state.gate.arm(sessionId);
+    synthesized.push(sessionId);
+    deliver(
+      state,
+      {
+        id: `resync_idle_${sessionId}`,
+        type: 'session.idle',
+        properties: { sessionID: sessionId },
+      },
+      Date.now()
+    );
+  }
+
+  if (rearmed.length > 0 || synthesized.length > 0) {
+    logger.info('opencode-turn-state-recovered', {
+      worktreeId: state.target.worktreeId,
+      instanceId: state.target.instanceId ?? state.target.cliToolId,
+      port: state.port,
+      rearmed,
+      synthesized,
+      primarySession: state.gate.primarySession(),
+    });
+  }
 }
 
 /** Process one frame off the stream. */

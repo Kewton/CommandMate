@@ -55,7 +55,10 @@ vi.mock('@/lib/hooks/sources/opencode/client', async (importOriginal) => {
     ...actual,
     replyOpencodePermission: vi.fn().mockResolvedValue(true),
     replyOpencodeQuestion: vi.fn().mockResolvedValue(true),
-    readOpencodeEventStream: vi.fn(),
+    probeOpencodeHealth: vi
+      .fn()
+      .mockResolvedValue({ kind: 'healthy', health: { healthy: true, version: '1.18.3' } }),
+    openOpencodeEventStream: vi.fn(),
   };
 });
 
