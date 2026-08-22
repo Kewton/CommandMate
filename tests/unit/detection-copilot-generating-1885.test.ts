@@ -183,13 +183,21 @@ describe('Issue #1885: copilot fixtures are raw live captures', () => {
     }
   });
 
-  it('still carries copilot OSC 8 hyperlinks, which stripAnsi does not remove', () => {
-    // Issue #1912 owns the removal. Recorded here because these fixtures are the
-    // evidence that the sequence is on a real copilot screen, and because a
-    // pattern written against a hyperlinked row would see the URL twice.
+  it('still carries copilot OSC 8 hyperlinks, and stripAnsi now removes them', () => {
+    // These fixtures are the evidence that the sequence is on a real copilot
+    // screen. Issue #1885 recorded that stripAnsi left it behind (the URL was
+    // then visible twice to any pattern written against a hyperlinked row);
+    // Issue #1912 taught ANSI_PATTERN the ST (ESC \\) terminator, so the whole
+    // sequence is gone and only the link label survives.
     const raw = frame('boot-idle');
     expect(raw).toContain('\x1b]8;');
-    expect(stripAnsi(raw)).toContain('\x1b]8;');
+    expect(stripAnsi(raw)).not.toContain('\x1b]8;');
+    // The label of this particular link is the URL itself, so it survives once
+    // as visible text; what disappears is the duplicate inside the OSC payload.
+    const count = (text: string): number =>
+      text.split('https://github.com/features/ai/github-app').length - 1;
+    expect(count(raw)).toBe(2);
+    expect(count(stripAnsi(raw))).toBe(1);
   });
 });
 

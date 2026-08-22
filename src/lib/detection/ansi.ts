@@ -9,7 +9,8 @@
  *
  * Covers:
  * - SGR sequences: ESC[Nm (colors, bold, underline, etc.)
- * - OSC sequences: ESC]...BEL (window title, hyperlinks, etc.)
+ * - OSC sequences: ESC]...BEL and ESC]...ST (ESC \\) - window title, and the
+ *   OSC 8 hyperlinks that claude/codex/copilot emit (Issue #1912)
  * - CSI sequences: ESC[...letter (cursor movement, erase, etc.)
  *
  * Known limitations (SEC-002): 8-bit CSI (0x9B), DEC private modes (ESC[?25h),
@@ -17,7 +18,8 @@
  * practice tmux capture-pane output rarely contains these.
  */
 
-export const ANSI_PATTERN = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\[[0-9;]*m/g;
+export const ANSI_PATTERN =
+  /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\[[0-9;]*m/g;
 
 /** Remove all ANSI escape sequences from a string. */
 export function stripAnsi(str: string): string {

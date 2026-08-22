@@ -36,6 +36,12 @@
  * | claude      | banner:  `▝▜█████▛▘  Opus 5 (1M context) with xhigh effort · Claude Max` |
  * | antigravity | footer:  `? for shortcuts …               Gemini 3.7 Flash · hig` |
  * | antigravity | banner:  `    ▀▀▀▀▀▀▀▀      Gemini 3.7 Flash (High)`              |
+ * | copilot     | footer:  `← open sidebar · … · tab next tab      GPT-5 mini · Medium` |
+ * | copilot     | notice:  `● Model changed from gpt-5.6-terra (xhigh) to gpt-5-mini (medium) for this session.` |
+ * | opencode    | step:    `▣  Build · GPT-5.6 Luna · 3.1s`                          |
+ *
+ * The copilot and opencode rows were added by Issue #1912 and read off the live
+ * fixtures #1885 / #1895 / #1893 / #1896 recorded, not off a fresh capture.
  *
  * Everything is matched **after** `stripAnsi`. The real captures are shot
  * through with SGR sequences *inside* the value — the Codex footer arrives as
@@ -55,7 +61,11 @@
 
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { stripAnsi } from './ansi';
-import { CODEX_STATUS_BAR_PATTERN } from './cli-patterns';
+import {
+  CODEX_STATUS_BAR_PATTERN,
+  COPILOT_IDLE_STATUS_PATTERN,
+  COPILOT_WORKING_STATUS_PATTERN,
+} from './cli-patterns';
 
 /**
  * The reasoning-effort vocabulary these tools actually print.
@@ -286,6 +296,176 @@ function readAntigravityBanner(line: string): ModelInfo | null {
 }
 
 // =============================================================================
+// Copilot (Issue #1912)
+// =============================================================================
+
+/**
+ * Reads `<model>[ · <Effort>]` out of the right-hand cell of copilot's status
+ * bar (Issue #1912).
+ *
+ * Measured on copilot 1.0.80 at the production 200x1000 geometry — the bottom
+ * row of `copilot-live-1885/` and `copilot-picker-1895/`:
+ *
+ *   ` ← open sidebar · / commands · ? help · tab next tab      GPT-5.6 Terra`
+ *   ` ← open sidebar · / commands · ? help · tab next tab   GPT-5 mini · Medium`
+ *   ` ◉ Working · 1.5 KiB esc interrupt                       GPT-5.6 Terra`
+ *
+ * **The Issue text says `<model> (effort)`; the pane says `<model> · <Effort>`.**
+ * The parenthesised form is the transcript notice below, not the bar — see
+ * {@link COPILOT_MODEL_CHANGE_PATTERN}.
+ *
+ * Two deliberate choices:
+ *
+ *  - **The row is identified by the two patterns the detector already uses**
+ *    ({@link COPILOT_IDLE_STATUS_PATTERN} / {@link COPILOT_WORKING_STATUS_PATTERN},
+ *    Issue #1885), imported read-only. There must be exactly one answer in this
+ *    repository to "which row is copilot's status bar", and #1885 owns it.
+ *  - **The model is the last alignment-separated chunk**, not "the text after
+ *    the last `·`": the left-hand hints are themselves `·`-separated, so a
+ *    `lastIndexOf('·')` read of ` … · ? help · tab next tab   GPT-5.6 Terra`
+ *    returns `tab next tab   GPT-5.6 Terra`. The right cell is right-aligned, so
+ *    a run of 2+ spaces is what actually separates it.
+ *
+ * Applied to the BOTTOM-MOST NON-EMPTY ROW ONLY, never scanned over the frame —
+ * {@link readCopilotBarRow} is the same loop `readCopilotStatusBar` runs, for the
+ * same measured reason. `copilot-live-1885/model-picker.txt` holds a user prompt
+ * echoed 930 rows above the bar that reads `… the text  Working esc interrupt .
+ * Line 2: … Line 3: the text  open     03:00`: a scan matched the working
+ * pattern there and published `03:00` as the model.
+ */
+function readCopilotStatusBarModel(line: string): ModelInfo | null {
+  if (!COPILOT_IDLE_STATUS_PATTERN.test(line) && !COPILOT_WORKING_STATUS_PATTERN.test(line)) {
+    return null;
+  }
+  const chunks = line.trim().split(/\s{2,}/);
+  if (chunks.length < 2) return null;
+  const parts = chunks[chunks.length - 1].split('·').map((part) => part.trim());
+  // More than one middle dot in the right cell means the split found something
+  // that is not the model cell; half-reading it would latch a wrong value.
+  if (parts.length > 2) return null;
+  const model = parts[0];
+  if (!isPlausibleModelLabel(model)) return null;
+  if (parts.length === 1) return { model, effort: null };
+  const effort = resolveEffortToken(parts[1]);
+  return effort === null ? null : { model, effort };
+}
+
+/**
+ * Apply {@link readCopilotStatusBarModel} to the bottom-most non-empty row.
+ *
+ * Deliberately NOT {@link scanFromEnd}: position is the only thing that
+ * separates copilot's status bar from copilot repeating its own status-bar
+ * vocabulary as body text (#1885, #1897). The bar is the last row of the pane;
+ * anything above it that reads like one is transcript.
+ */
+function readCopilotBarRow(captureText: string): ModelInfo | null {
+  const lines = captureText.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const row = stripAnsi(lines[i]);
+    if (row.trim() === '') continue;
+    return readCopilotStatusBarModel(row);
+  }
+  return null;
+}
+
+/**
+ * copilot's transcript notice for a mid-session model switch (Issue #1912).
+ *
+ * Measured on copilot 1.0.80, ~1s after `/model gpt-5-mini`
+ * (`copilot-picker-1895/model-arg-immediate.txt`, and again in
+ * `picker-vocabulary-in-response.txt`):
+ *
+ *   ` ● Model changed from gpt-5.6-terra (xhigh) to gpt-5-mini (medium) for this session. Use /config to set default`
+ *
+ * This is the one place copilot prints a reasoning effort in words. It is used
+ * as a FALLBACK behind the status bar and — see {@link extractModelInfo} — as
+ * the effort for a bar that names the same model without one, which is the state
+ * `picker-vocabulary-in-response.txt` was captured in (bar `GPT-5 mini`, notice
+ * `gpt-5-mini (medium)`).
+ *
+ * The whole sentence is required, bullet and `for this session` included: #1895
+ * measured that copilot will print its own chrome vocabulary as body text when
+ * asked to, and a value read here latches for the rest of the session.
+ *
+ * No /g. No nested quantifiers — `\S+`, `[^)]*` and the literals are adjacent.
+ */
+export const COPILOT_MODEL_CHANGE_PATTERN =
+  /^\s*[●◉◎○]\s+Model\s+changed\s+from\s+\S+(?:\s+\([^)]*\))?\s+to\s+(\S+)(?:\s+\((minimal|low|medium|high|xhigh)\))?\s+for\s+this\s+session\b/i;
+
+function readCopilotModelChange(line: string): ModelInfo | null {
+  const match = COPILOT_MODEL_CHANGE_PATTERN.exec(line);
+  if (!match) return null;
+  const model = match[1];
+  if (!isPlausibleModelToken(model)) return null;
+  return { model, effort: match[2] ? resolveEffortToken(match[2]) : null };
+}
+
+/**
+ * Do a display label and a model id name the same model?
+ *
+ * `GPT-5 mini` (the bar) and `gpt-5-mini` (the notice) are one model rendered
+ * two ways, and case, spaces and dashes are the entire difference across every
+ * pair in the live fixtures. Compared on alphanumerics alone so the two can be
+ * recognised as the same thing without either being rewritten into the other.
+ */
+function sameModel(a: string, b: string): boolean {
+  const key = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return key(a) === key(b);
+}
+
+// =============================================================================
+// OpenCode (Issue #1912)
+// =============================================================================
+
+/**
+ * Reads `<model>` off an opencode step marker (Issue #1912).
+ *
+ * Measured on opencode 1.18.20 / 1.18.21 (`opencode-live-1883/`, `-1893/`,
+ * `-1896/`) — the row opencode closes every agent step with:
+ *
+ *   `     ▣  Build · GPT-5.6 Luna · 3.1s`   (finished; #1893 owns the duration)
+ *   `     ▣  Build · GPT-5.6 Luna`          (step still open)
+ *
+ * opencode prints no reasoning effort anywhere on the pane, in any of the 17
+ * live frames, so `effort` is always null here. That is not a gap in this
+ * reader: the number is not on screen to read.
+ *
+ * ## Why not the footer model bar
+ *
+ * The Issue also names `Build · <model> GitHub Copilot` — the bar two rows above
+ * the keybinding line. It is deliberately NOT read, and the reason is in the raw
+ * bytes:
+ *
+ *   `…mBuild\x1b[38;2;128;128;128m · \x1b[38;2;238;238;238mGPT-5.6 Luna\x1b[38;2;128;128;128m GitHub Copilot`
+ *
+ * The model and the PROVIDER are separated by nothing but an SGR colour change
+ * and a single space. After `stripAnsi` — which everything in this module is
+ * matched after, for the reasons its header states — `GPT-5.6 Luna GitHub
+ * Copilot` is one blob, and opencode's provider vocabulary is open-ended (the
+ * `/models` picker in `opencode-live-1896/model-picker.txt` groups by
+ * `OpenCode Zen`, `GitHub Copilot`, `LMStudio`, `Ollama Cloud`, … — whatever the
+ * user has configured). There is no text-only split that is right for a provider
+ * nobody measured, and publishing `GPT-5.6 Luna GitHub Copilot` as a model name
+ * would latch that string for the session.
+ *
+ * The step marker has `·` on both sides of the value and needs no vocabulary, so
+ * it is the whole rule. A session that has not finished a step yet answers null
+ * — the honest "the screen does not say" this module's header describes, and
+ * opencode is the one tool whose model the structured layer already reports.
+ *
+ * No /g. No nested quantifiers: `[^·]+?` is bounded by literal `·`/end.
+ */
+export const OPENCODE_STEP_MODEL_PATTERN =
+  /^\s*▣\s+[A-Za-z][A-Za-z0-9-]*\s+·\s+([^·]+?)(?:\s+·\s+[\d.]+\s?m?s)?\s*$/;
+
+function readOpencodeStepMarker(line: string): ModelInfo | null {
+  const match = OPENCODE_STEP_MODEL_PATTERN.exec(line);
+  if (!match) return null;
+  const model = match[1].trim();
+  return isPlausibleModelLabel(model) ? { model, effort: null } : null;
+}
+
+// =============================================================================
 // Public API
 // =============================================================================
 
@@ -315,9 +495,10 @@ function scanFromEnd(
  * What this capture says the session's model and reasoning effort are (#1784).
  *
  * Pure and side-effect free. Never throws, and answers `{ model: null, effort:
- * null }` for every tool it has no rule for (gemini / copilot / vibe-local /
- * opencode — out of scope for this Issue) and for every frame that does not show
- * the chrome it looks for.
+ * null }` for every tool it has no rule for (gemini / vibe-local — neither
+ * prints a model on its pane in any captured frame; copilot and opencode were
+ * added by Issue #1912) and for every frame that does not show the chrome it
+ * looks for.
  *
  * **Answering null is a correct outcome, not a failure.** tmux keeps a
  * 2000-line `history-limit`; a Claude session that has been talking for hours
@@ -342,6 +523,21 @@ export function extractModelInfo(cliToolId: CLIToolType, captureText: string): M
         scanFromEnd(captureText, readAntigravityBanner) ??
         unknown()
       );
+    case 'copilot': {
+      // Issue #1912. The bar is live chrome and wins; the switch notice is the
+      // fallback for a frame that hides the bar (a picker is drawn INSTEAD of
+      // copilot's bottom five rows — #1895), and supplies the effort for a bar
+      // that names the same model without one. It is only ever consulted for a
+      // model it agrees with, so a stale notice from before a later switch can
+      // never contribute an effort to the model that replaced it.
+      const bar = readCopilotBarRow(captureText);
+      const notice = scanFromEnd(captureText, readCopilotModelChange);
+      if (!bar) return notice ?? unknown();
+      if (bar.effort !== null || notice === null || notice.effort === null) return bar;
+      return sameModel(bar.model!, notice.model!) ? { model: bar.model, effort: notice.effort } : bar;
+    }
+    case 'opencode':
+      return scanFromEnd(captureText, readOpencodeStepMarker) ?? unknown();
     default:
       return unknown();
   }
