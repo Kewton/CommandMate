@@ -291,11 +291,14 @@ describe('Issue #1885: the frames that carry no status bar are left alone', () =
     expect(autoYesPromptOf(raw).isPrompt).toBe(true);
   });
 
-  it('leaves the /model picker unclassified rather than calling it finished', () => {
-    // Issue #1895's subject, pinned here as the blast radius of this change:
-    // the picker ends in its own footer, not the status bar, so no positive
-    // evidence exists and the frame falls to the heuristics. `wait` then has its
-    // exit-10 handoff instead of reporting a human-blocked picker as Completed.
+  it('never reads the /model picker as a finished turn', () => {
+    // The picker ends in its own footer, not the status bar, so the running and
+    // idle checks here both decline it — which is what leaves the screen to the
+    // picker branch. Issue #1885 could only assert the absence (`not
+    // INPUT_PROMPT`, `isUnclassifiedActive: true`); Issue #1895 gave that branch
+    // something to say, so the frame now carries positive evidence and is
+    // classified. `wait` gets its exit-10 handoff either way, which is the part
+    // that must never regress.
     const raw = frame('model-picker');
 
     expect(readCopilotStatusBar(stripAnsi(raw).split('\n'))).toBeNull();
@@ -303,7 +306,9 @@ describe('Issue #1885: the frames that carry no status bar are left alone', () =
     const result = statusOf(raw);
     expect(result.reason).not.toBe(STATUS_REASON.INPUT_PROMPT);
     expect(waitWouldReportCompleted(raw)).toBe(false);
-    expect(scraperVerdictOf(raw).isUnclassifiedActive).toBe(true);
+    // Issue #1895: was `true` (no evidence at all); the picker is now named.
+    expect(scraperVerdictOf(raw).isUnclassifiedActive).toBe(false);
+    expect(result.reason).toBe(STATUS_REASON.COPILOT_SELECTION_LIST);
   });
 
   it('never offers an idle or generating frame to Auto-Yes as an answerable prompt', () => {

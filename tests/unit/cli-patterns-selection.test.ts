@@ -12,7 +12,7 @@ import {
   OPENCODE_PROMPT_PATTERN,
   OPENCODE_THINKING_PATTERN,
   OPENCODE_RESPONSE_COMPLETE,
-  COPILOT_SELECTION_LIST_PATTERN,
+  COPILOT_SELECTION_FOOTER_PATTERN,
   CLAUDE_SELECTION_LIST_FOOTER,
   ANTIGRAVITY_SELECTION_LIST_PATTERN,
   CODEX_PAGER_FOOTER_PATTERN,
@@ -91,57 +91,83 @@ describe('OPENCODE_SELECTION_LIST_PATTERN', () => {
   });
 });
 
-describe('COPILOT_SELECTION_LIST_PATTERN', () => {
+describe('COPILOT_SELECTION_FOOTER_PATTERN', () => {
+  // Issue #1895 replaced `COPILOT_SELECTION_LIST_PATTERN` (`Search \w+...` /
+  // `Select Model` / `Enter to select`) with this one. That vocabulary was not
+  // on any copilot 1.0.80 picker, and it WAS in copilot's answers about them.
+  // The eleven live footers and both directions of the bug are pinned against
+  // real captures in `tests/unit/detection-copilot-picker-1895.test.ts`; this
+  // block covers the pattern's own edges.
   it('should be a RegExp', () => {
-    expect(COPILOT_SELECTION_LIST_PATTERN).toBeInstanceOf(RegExp);
+    expect(COPILOT_SELECTION_FOOTER_PATTERN).toBeInstanceOf(RegExp);
   });
 
-  it('should match "Search models..." prompt', () => {
-    expect(COPILOT_SELECTION_LIST_PATTERN.test('Search models...')).toBe(true);
+  it('should match the /model footer copilot 1.0.80 actually draws', () => {
+    expect(COPILOT_SELECTION_FOOTER_PATTERN.test(
+      ' ↑/↓ to navigate · ←/→ reasoning effort · tab context window · shift+tab group: recommended · enter to select · esc to cancel',
+    )).toBe(true);
   });
 
-  it('should match "Search agents..." prompt', () => {
-    expect(COPILOT_SELECTION_LIST_PATTERN.test('Search agents...')).toBe(true);
+  it('should match a footer whose only navigation hint is the dismiss key', () => {
+    // /agent, when the workspace has no custom agents: nothing to walk, so no
+    // arrow-key hint is drawn.
+    expect(COPILOT_SELECTION_FOOTER_PATTERN.test(' n new agent · ? learn more · esc cancel')).toBe(true);
   });
 
-  it('should match "Select Model" header', () => {
-    expect(COPILOT_SELECTION_LIST_PATTERN.test('Select Model')).toBe(true);
+  it('should match a footer that offers no esc at all', () => {
+    // /session, which is closed with ctrl+x rather than esc.
+    expect(COPILOT_SELECTION_FOOTER_PATTERN.test(
+      '/ search · ↑/↓ navigate · enter open · n new · tab switch tabs · a filter:all',
+    )).toBe(true);
   });
 
-  it('should match in multiline content with Search prompt', () => {
-    const multiline = `Select Model
-Search models...
-❯ gpt-4o
-  gpt-4o-mini
-  claude-3.5-sonnet`;
-    expect(COPILOT_SELECTION_LIST_PATTERN.test(multiline)).toBe(true);
+  it('should accept the pre-1.0.79 arrow spelling without the slash', () => {
+    expect(COPILOT_SELECTION_FOOTER_PATTERN.test('↑↓ to navigate · Enter to select · Esc to cancel')).toBe(true);
   });
 
-  it('should match in multiline content with Select Model header', () => {
-    const multiline = `
-Select Model
-  gpt-4o
-❯ gpt-4o-mini
-  claude-3.5-sonnet`;
-    expect(COPILOT_SELECTION_LIST_PATTERN.test(multiline)).toBe(true);
+  it('should match only the footer row of a multiline frame', () => {
+    const multiline = [
+      '   Recommended models',
+      ' ❯ Auto                       —          —',
+      '   GPT-5.6 Luna               328K       Medium',
+      ' ↑/↓ to navigate · enter to select · esc to cancel',
+    ].join('\n');
+    expect(COPILOT_SELECTION_FOOTER_PATTERN.test(multiline)).toBe(true);
+    expect(COPILOT_SELECTION_FOOTER_PATTERN.test(multiline.split('\n').slice(0, 3).join('\n'))).toBe(false);
+  });
+
+  it('should not match the header and search field the old pattern rested on', () => {
+    // These two rows ARE on the live /model picker (`Search models…` carries a
+    // U+2026, which is why the old `Search \w+\.\.\.` missed it), but neither is
+    // a key-hint bar, and both appear verbatim in copilot's prose about the
+    // picker. Only the footer decides.
+    expect(COPILOT_SELECTION_FOOTER_PATTERN.test('Select Model')).toBe(false);
+    expect(COPILOT_SELECTION_FOOTER_PATTERN.test(' ❯  Search models…')).toBe(false);
+    expect(COPILOT_SELECTION_FOOTER_PATTERN.test('Search models...')).toBe(false);
   });
 
   it('should not match regular text output', () => {
-    expect(COPILOT_SELECTION_LIST_PATTERN.test('Hello, how can I help you?')).toBe(false);
-    expect(COPILOT_SELECTION_LIST_PATTERN.test('The code looks correct.')).toBe(false);
+    expect(COPILOT_SELECTION_FOOTER_PATTERN.test('Hello, how can I help you?')).toBe(false);
+    expect(COPILOT_SELECTION_FOOTER_PATTERN.test('The code looks correct.')).toBe(false);
   });
 
   it('should not match thinking pattern text', () => {
-    expect(COPILOT_SELECTION_LIST_PATTERN.test('Thinking about your question...')).toBe(false);
+    expect(COPILOT_SELECTION_FOOTER_PATTERN.test('Thinking about your question...')).toBe(false);
+    // The capitalised progress row: it carries a `·` AND `Esc to cancel`, so
+    // case is the only thing keeping it out.
+    expect(COPILOT_SELECTION_FOOTER_PATTERN.test('◉ Mapping structure (Esc to cancel · 8.4 KiB)')).toBe(false);
   });
 
   it('should not match non-selection CLI output patterns', () => {
-    expect(COPILOT_SELECTION_LIST_PATTERN.test('> ')).toBe(false);
-    expect(COPILOT_SELECTION_LIST_PATTERN.test('esc to interrupt')).toBe(false);
+    expect(COPILOT_SELECTION_FOOTER_PATTERN.test('> ')).toBe(false);
+    expect(COPILOT_SELECTION_FOOTER_PATTERN.test('esc to interrupt')).toBe(false);
+    // copilot's two status bars, which occupy the same row as a picker footer.
+    expect(COPILOT_SELECTION_FOOTER_PATTERN.test(' ← open sidebar · / commands · ? help · tab next tab      GPT-5.6 Terra')).toBe(false);
+    expect(COPILOT_SELECTION_FOOTER_PATTERN.test(' ◉ Working · 1.5 KiB esc interrupt                        GPT-5.6 Terra')).toBe(false);
   });
 
   it('should not use the global flag (no /g)', () => {
-    expect(COPILOT_SELECTION_LIST_PATTERN.global).toBe(false);
+    expect(COPILOT_SELECTION_FOOTER_PATTERN.global).toBe(false);
   });
 });
 
