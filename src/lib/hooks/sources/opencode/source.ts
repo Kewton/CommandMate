@@ -64,7 +64,7 @@ import {
   OPENCODE_SERVER_HOST,
   type OpencodePermissionReply,
 } from './client';
-import { frameModel, OPENCODE_MAPPERS } from './mappers';
+import { frameModel, opencodeEventIdentity, OPENCODE_MAPPERS } from './mappers';
 import {
   parseOpencodePermissionRequest,
   parseOpencodeQuestion,
@@ -326,6 +326,11 @@ export const opencodeAgentEventSource: AgentEventSource = definePullEventSource(
   // Issue #1783: nor `properties.info.model.*`, so the spec takes the reader
   // instead of a key list. See {@link frameModel} for the two spellings.
   extractModel: frameModel,
+  // Issue #1899: the extraction half of `eventIdentity: 'permission-id'`. The
+  // capability above says which id de-duplication uses; this is what reads it,
+  // and the two must be changed together — declaring the capability without
+  // this puts every frame back on the 3-second window.
+  extractEventIdentity: opencodeEventIdentity,
 
   parsePermissionRequest: parseOpencodePermissionRequest,
   parseQuestion: parseOpencodeQuestion,
