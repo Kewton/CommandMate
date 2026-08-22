@@ -204,29 +204,32 @@ describe('CopilotTool', () => {
       vi.useRealTimers();
     });
 
-    it('should send Enter to confirm selection list when detected', async () => {
+    it('should never send a bare Enter after an argument-form /model (Issue #1895)', async () => {
       vi.useFakeTimers();
 
+      // `/model <id>` switches in place and prints `● Model changed from … for
+      // this session.` — measured on 1.0.80 and captured as
+      // `copilot-picker-1895/model-arg-immediate.txt`. No picker is ever drawn.
+      //
+      // The pane is nonetheless mocked as a picker here, which is the strongest
+      // form of the assertion: even if copilot DID somehow show one, the
+      // argument form must not answer it on the operator's behalf. The old code
+      // waited 5s for exactly this screen and then sent `C-m` into it.
       const { hasSession, capturePane, sendSpecialKey } = await import('@/lib/tmux/tmux');
       vi.mocked(hasSession).mockResolvedValue(true);
-
-      let callCount = 0;
-      vi.mocked(capturePane).mockImplementation(async () => {
-        callCount++;
-        if (callCount <= 3) {
-          return 'Search models...';
-        }
-        return '> ';
-      });
+      vi.mocked(capturePane).mockResolvedValue(
+        [
+          '   Recommended models',
+          ' ❯  Search models…',
+          ' ↑/↓ to navigate · enter to select · esc to cancel',
+        ].join('\n'),
+      );
 
       const promise = tool.sendModelCommand('test-wt', 'gpt-5-mini');
       await vi.advanceTimersByTimeAsync(40000);
-      await promise;
+      await promise.catch(() => undefined);
 
-      expect(sendSpecialKey).toHaveBeenCalledWith(
-        'mcbd-copilot-test-wt',
-        'C-m'
-      );
+      expect(sendSpecialKey).not.toHaveBeenCalledWith('mcbd-copilot-test-wt', 'C-m');
 
       vi.useRealTimers();
     });
@@ -251,7 +254,16 @@ describe('CopilotTool', () => {
     it('should return true when selection list is detected', async () => {
       const { hasSession, capturePane } = await import('@/lib/tmux/tmux');
       vi.mocked(hasSession).mockResolvedValue(true);
-      vi.mocked(capturePane).mockResolvedValue('Search models...');
+      // The picker's key-hint footer at the bottom of the pane — the only thing
+      // `isCopilotSelectionFrame` reads (Issue #1895). `Search models…` alone is
+      // deliberately NOT enough any more.
+      vi.mocked(capturePane).mockResolvedValue(
+        [
+          '   Recommended models',
+          ' ❯  Search models…',
+          ' ↑/↓ to navigate · enter to select · esc to cancel',
+        ].join('\n'),
+      );
 
       // Access private method for testing
       const waitForSelectionList = (tool as unknown as {

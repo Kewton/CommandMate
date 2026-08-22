@@ -1211,16 +1211,117 @@ export function readCopilotStatusBar(
 export const COPILOT_SEPARATOR_PATTERN = /^─{10,}$/m;
 
 /**
- * Copilot CLI selection list pattern (Issue #547)
- * Detects Copilot CLI's interactive selection/navigation prompts:
- *   - Model picker: "Search models..." / "Select Model"
- *   - Trust dialog: "↑↓ to navigate · Enter to select · Esc to cancel"
- *   - Other interactive lists with arrow key navigation
+ * The key-hint footer copilot draws under a picker, matched one ROW at a time
+ * (Issue #547; rewritten against live 1.0.80 frames by Issue #1895).
  *
- * No /g flag (S4-5: would make test() stateful).
- * No nested quantifiers (SEC4-001: ReDoS safety).
+ * The pattern this replaced --
+ * `/Search\s+\w+\.\.\.|Select\s+Model|to (?:navigate|select).*Enter to (?:select|confirm)/`
+ * -- matched **none** of the eleven pickers 1.0.80 opens (measured; the frames
+ * are in `tests/unit/lib/detection/fixtures/copilot-picker-1895/`, and #1885 /
+ * #1886 / #1913 reached the same result independently). `/model` renders
+ * `❯  Search models…` with U+2026 rather than three periods, no picker carries
+ * the words `Select Model`, and every footer spells its verbs in lower case.
+ *
+ * What all eleven footers do share is the shape of a key-hint bar: `·`-separated
+ * hints carrying either arrow-key navigation or a lower-case dismiss verb.
+ * Measured verbatim, bottom-most first:
+ *
+ *   /model       ↑/↓ to navigate · ←/→ reasoning effort · tab context window ·
+ *                shift+tab group: recommended · enter to select · esc to cancel
+ *   /agent       n new agent · ? learn more · esc cancel
+ *   /theme       ↑/↓ to navigate · enter to select · esc to cancel
+ *   /permissions 1-2 to select · ↑/↓ to navigate · enter to confirm · esc to cancel
+ *   /skills      ↑/↓ to navigate · enter to toggle · esc to close
+ *   /mcp         ↑/↓ to select · enter to show · a to add · esc to close
+ *   /settings    / search · ↑/↓ navigate · tab switch scope · enter edit ·
+ *                ctrl+r reset · ctrl+e editor · esc close
+ *   /statusline  ↑/↓ nav · enter toggle · esc close
+ *   /subagents   ↑/↓ to navigate · space on/off · r reset · enter to select · esc to cancel
+ *   /resume      / search · ↑/↓ navigate · enter select · ←/→ switch tabs · r refresh ·
+ *                x delete · s sort:relevance · esc cancel
+ *   /session     / search · ↑/↓ navigate · enter open · n new · tab switch tabs · a filter:all
+ *
+ * Neither half of the alternation is universal -- `/agent` has no list to walk
+ * so it prints no `↑/↓`, and `/session` offers no `esc` -- but every footer has
+ * one of them, so the union covers 11/11 while each individual disjunct stays
+ * specific enough to be worth requiring. The slash in `↑/↓` is optional only as
+ * a rewording tolerance: the synthetic frames pinned since Issue #547 spell it
+ * `↑↓`, and whether copilot ever drew it that way is not something this Issue
+ * measured. Every 1.0.80 footer above has the slash.
+ *
+ * Three deliberate narrowings keep this off ordinary text:
+ *  - the `·` lookahead, so a sentence such as "press esc to cancel" is not a
+ *    footer unless it is also a hint bar;
+ *  - lower case, which is what 1.0.80 draws. `(Esc to cancel · 2.3 KiB)` -- the
+ *    capitalised spelling in {@link COPILOT_THINKING_PATTERN} -- is a *progress*
+ *    row, and it would otherwise satisfy both halves of this pattern;
+ *  - `cancel|close` only, so the status bar's `esc interrupt`
+ *    ({@link COPILOT_WORKING_STATUS_PATTERN}) is not a footer either.
+ *
+ * The narrowings are defence in depth; the load-bearing guard is positional and
+ * lives in {@link isCopilotSelectionFrame} -- copilot's own answer text can and
+ * does contain these exact rows (`picker-vocabulary-in-response.txt` is a live
+ * frame of it), so no window-scoped match on this vocabulary can be safe.
+ *
+ * No /g flag (S4-5: would make test() stateful). `[^\n]*` cannot cross a row and
+ * no quantifier is nested inside another (SEC4-001: ReDoS safe).
  */
-export const COPILOT_SELECTION_LIST_PATTERN = /Search\s+\w+\.\.\.|Select\s+Model|to (?:navigate|select).*Enter to (?:select|confirm)/m;
+export const COPILOT_SELECTION_FOOTER_PATTERN =
+  /^(?=[^\n]*·)[^\n]*(?:↑\/?↓|\besc\s+(?:to\s+)?(?:cancel|close)\b)/m;
+
+/**
+ * How many non-blank rows up from the bottom of the pane may carry the footer.
+ *
+ * Nine of the eleven pickers put it on the bottom row itself; `/agent` and
+ * `/subagents` draw their panel with a closing full-width rule underneath it,
+ * which puts the footer two non-blank rows up. Three is that measurement plus
+ * one row of slack -- deliberately far short of a window that could reach the
+ * transcript, which on the production 200x1000 geometry sits ~950 rows above.
+ */
+const COPILOT_SELECTION_FOOTER_SCAN_ROWS = 3;
+
+/**
+ * Whether the pane is sitting on one of copilot's pickers (Issue #1895).
+ *
+ * Takes the whole frame rather than a window for the same reason
+ * {@link readCopilotStatusBar} does: the evidence is positional, and a call site
+ * cannot be trusted to preserve "near the bottom of the pane" on its own. Two
+ * facts, both measured on 1.0.80, make the position sufficient:
+ *
+ *  - **A picker replaces copilot's chrome.** In the idle and generating states
+ *    the bottom five rows are cwd / rule / composer / rule / status bar; while a
+ *    picker is up, none of them are drawn. So a frame whose bottom row is a
+ *    status bar is not a picker, whatever its transcript says -- which is the
+ *    whole of the false-positive half of Issue #1895. `detectSessionStatus`
+ *    reads the same row for the running verdict at step 0.5, so checking it
+ *    first here also fixes the order between the two branches: the status bar
+ *    wins, and the picker branch only speaks when copilot has taken it away.
+ *  - **An answerable dialog is drawn inside a box; a picker is not.** The
+ *    folder-trust and permission dialogs wear the same lower-case
+ *    `↑/↓ to navigate · enter to select · esc to cancel` footer, but every one of
+ *    their rows reads `│ … │` and the bottom row is `╰─…─╯`. Skipping boxed rows
+ *    keeps those on the prompt branch, where they belong: they are the agent
+ *    blocked on the human (`hasActivePrompt: true`, exit 10 for `wait`), not a
+ *    list the operator opened.
+ *
+ * @param contentLines - Frame rows, ANSI already stripped, in pane order
+ * @returns True when the bottom of the pane is a picker's key-hint footer
+ */
+export function isCopilotSelectionFrame(contentLines: readonly string[]): boolean {
+  if (readCopilotStatusBar(contentLines) !== null) return false;
+
+  let scanned = 0;
+  for (let i = contentLines.length - 1; i >= 0; i--) {
+    const row = contentLines[i];
+    const trimmed = row.trim();
+    if (trimmed === '') continue;
+    if (++scanned > COPILOT_SELECTION_FOOTER_SCAN_ROWS) break;
+    // A boxed row belongs to a dialog, not a picker (see above).
+    if (trimmed.startsWith('│') || trimmed.endsWith('│')) continue;
+    if (COPILOT_SELECTION_FOOTER_PATTERN.test(row)) return true;
+  }
+  return false;
+}
 
 /**
  * Anchors of Copilot CLI's first-launch "Confirm folder trust" dialog (Issue #1886).
@@ -1292,7 +1393,7 @@ export const COPILOT_SKIP_PATTERNS: readonly RegExp[] = [
   PASTED_TEXT_PATTERN,
   COPILOT_SEPARATOR_PATTERN,
   COPILOT_THINKING_PATTERN,
-  COPILOT_SELECTION_LIST_PATTERN,
+  COPILOT_SELECTION_FOOTER_PATTERN,
   // Logo/banner lines
   /^GitHub Copilot\s+v/,
   /[█▘▝▖▗▔▄▌▐]/,

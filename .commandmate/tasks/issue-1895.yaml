@@ -1,0 +1,107 @@
+version: 1
+title: "Issue #1895: copilot の /model ピッカーが検出されず、返答の語だけで selection list になる"
+goal: |
+  /bug-fix 1895
+
+  https://github.com/Kewton/CommandMate/issues/1895 を修正してください。
+  ## オーケストレーター契約（Issue 本文より優先・厳守）
+
+  1. **PR を作成しない・push しない**（オーケストレーターが行います）。ブランチは checkout 済みです。
+  2. 実装は**このブランチ上の単一 commit** にまとめる。メッセージは `<type>(<scope>): <要約> (#N)` 形式。
+  3. commit に含めてよいのは `src/` `tests/` `docs/` `scripts/` `.eslintrc.json` `CHANGELOG.md`
+     `.commandmate/tasks/issue-N.yaml` のみ。**`dev-reports/` は絶対に含めない**（CI の hygiene で落ちます）。
+  4. `CHANGELOG.md` は `## [Unreleased]` に**自分の 1 行だけ**追加する。他の行を並べ替えない・消さない
+     （並列ワーカーが同じ節を触っており、衝突解消はオーケストレーターが機械的に行います）。
+  5. **GitHub の Issue / PR を編集しない**（`gh issue edit` 禁止）。Issue レビューのフェーズも実行しない。
+     Issue 本文の誤りは**コミットメッセージの「意図的な逸脱」節**に書いて渡すこと。
+  6. 完了したら最終行に `IMPL_COMPLETED` とだけ出力して停止する。
+
+  ## 実装方針は「推奨」であって決定ではない
+
+  Issue 本文と設計方針書の実装方針は**推奨**です。**必ず実コードで裏を取り、実測が食い違ったら
+  実測を正とし、乖離をコミットメッセージに明記してください。** 過去に私（オーケストレーター）が
+  書いた方針が 3 回連続でワーカーの実測に覆されています。逸脱報告は歓迎します。
+
+  ## 正本ドキュメント
+
+  - 設計方針書: `docs/design/multi-agent-state-architecture.md`（develop に着地済み、Stage 1-4 レビュー済み）。
+    §4 D1〜D5 / §8 / §13.2 を正とする。**Issue 本文と方針書が食い違ったら方針書を正**とする。
+  - Issue 本文中の設計方針書リンクが 404 になる場合は上のローカルパスを見ること。
+
+  ## テスト実行のルール（重要・厳守）
+
+  - **フル `npm run test:unit` を自分で回さないでください。** 並列ワーカーが同時にフル実行すると
+    diff と無関係のテストが `Test timed out in 5000ms` で落ち、存在しない回帰を追いかけることになります
+    （実測済み。#1917 で `verify.yaml` の unit ゲートに `mutex: cpu.heavy` を入れた理由がこれです）。
+  - 自分が触った/追加したテストだけ `npx vitest run <path>` で確認する。
+  - 全体の裁定はオーケストレーターが `commandmate wait --verify`（`.commandmate/verify.yaml` の全ゲート）
+    で行います。どうしても全体を回したい場合のみ `.claude/skills/cmate-verify/scripts/verify-run.sh`
+    （mutex 準拠）を使ってください。
+  - **`npm run build` を実行しない**（稼働中サーバの配信成果物を壊します）。
+  - `npm run lint` / `npx tsc --noEmit` は軽いので自由に回してよい。
+
+  ## 環境ルール（厳守）
+
+  - **稼働サーバ（port 3000）を停止・再起動しない。** 隣の `MyCodeBranchDesk` ディレクトリで何もしない。
+  - 実 tmux を触る検証は必ず `tmux -L <専用socket>` で行う（`-L`/`-S` は `$TMUX` より優先）。
+    フラグ無しの `tmux` は**ユーザーの本番セッション**に届きます。`kill-server` を `-L` 無しで打たない。
+    後始末は `kill-session -t '=<name>:'`。`TMUX_TMPDIR` は隔離手段にならない（`$TMUX` があると無視）。
+    `bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たない。
+  - 他の worktree（`../commandmate-issue-*`）に触らない。
+
+  ## 完了条件
+
+  Issue の受入条件をすべて満たし、`npm run lint` と `npx tsc --noEmit` が緑、追加したテストが
+  単独実行で緑であること。**ガード/pin 系のテストは変異注入で赤になることを必ず確認**してください
+  （空振り緑を作らない。確認手順と結果をコミットメッセージに書く）。
+
+  ## この Issue 固有の注意（3 本の独立した実測が既にあります）
+
+  - **#1885 / #1886 / #1913 が同じ結論に到達しています**: `COPILOT_SELECTION_LIST_PATTERN` は
+    1.0.80 の**ピッカー 11 種の frame に 1 つも当たりません**。理由は
+    (a) 実フッタが小文字 `enter to select`（パターンは大文字 `Enter` を要求）、
+    (b) 検索欄が `Search models…`（**U+2026**、`...` ではない）、
+    (c) ヘッダが `Recommended models` 等で `Select Model` が存在しない。
+    ピッカーを開く 11 コマンドは model / agent / theme / permissions / skills / mcp /
+    settings / statusline / subagents / resume / session（#1913 実測）。
+  - **実フレームが既にリポジトリにあります**:
+    `tests/unit/lib/detection/fixtures/copilot-live-1885/model-picker.txt`（#1885 が採取）。
+    まずこれを使ってください。追加採取が必要なら私設ソケット（`tmux -L <名前>`）＋ 200x1000 で。
+  - **#1885 が入れた `readCopilotStatusBar()`（最下行 1 行だけを読む）と衝突しないこと。**
+    ピッカー表示中にステータスバーがどうなるかを実測し、判定順を決めてください。
+  - **偽陽性の方向も直すのが本 Issue の半分です**（返答や echo に「Select Model」
+    「Search models...」があるだけで `waiting` になる）。**両方向を fixture で pin** してください。
+  - `CopilotTool` の `SELECTION_LIST_COMMANDS`（現在 model / agent / theme）を 11 件へ広げるかは
+    **あなたの判断**。#1913 は「パターンが当たらないうちは広げても 5 秒の空振りが増えるだけ」と
+    判断して見送り、理由をコード内コメントに残しています。パターンが当たるようになった今、
+    広げるなら理由を、広げないなら理由を書いてください。なおこの経路は
+    `send-user-message.ts` が `CopilotTool.sendMessage` を迂回するため**現状は到達不能**です（#1906）。
+
+scope:
+  allow:
+    - "src/lib/detection/**"
+    - "src/lib/cli-tools/**"
+    - "src/lib/session/**"
+    - "src/config/**"
+    - "tests/unit/**"
+    - "tests/fixtures/**"
+    - "tests/helpers/**"
+    - "docs/**"
+    - "CHANGELOG.md"
+    - ".commandmate/tasks/issue-1895.yaml"
+  deny: []
+
+
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns:
+    - "rm -rf"
+    - "git push"
+    - "gh pr create"
+    - "gh issue edit"
+    - "kill-server"
+
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

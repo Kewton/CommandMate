@@ -24,7 +24,7 @@
  * coupling via a minimal DTO/projection type.
  */
 
-import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_TURN_COMPLETE_PATTERN, OPENCODE_PROCESSING_INDICATOR, OPENCODE_IDLE_COMPOSER_PATTERN, OPENCODE_PERMISSION_PATTERN, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, readCopilotStatusBar, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN, CODEX_APPROVAL_FOOTER_PATTERN, CODEX_PAGER_FOOTER_PATTERN, CODEX_STATUS_BAR_PATTERN, getCodexLifecycleDialog, CLAUDE_INTERRUPT_HINT_PATTERN, ANTIGRAVITY_SELECTION_LIST_PATTERN } from './cli-patterns';
+import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_TURN_COMPLETE_PATTERN, OPENCODE_PROCESSING_INDICATOR, OPENCODE_IDLE_COMPOSER_PATTERN, OPENCODE_PERMISSION_PATTERN, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, isCopilotSelectionFrame, readCopilotStatusBar, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN, CODEX_APPROVAL_FOOTER_PATTERN, CODEX_PAGER_FOOTER_PATTERN, CODEX_STATUS_BAR_PATTERN, getCodexLifecycleDialog, CLAUDE_INTERRUPT_HINT_PATTERN, ANTIGRAVITY_SELECTION_LIST_PATTERN } from './cli-patterns';
 import { detectPrompt } from './prompt-detector';
 import { normalizeTuiFrameForDetection } from './tui-detection-frame';
 import type { PromptDetectionResult } from './prompt-detector';
@@ -301,15 +301,29 @@ export function detectSessionStatus(
   // frames on their existing branches.
   const copilotStatusBar = cliToolId === 'copilot' ? readCopilotStatusBar(contentLines) : null;
 
-  // 0. Copilot: selection list detection BEFORE thinking detection
+  // 0. Copilot: picker detection BEFORE thinking detection
   // COPILOT_THINKING_PATTERN includes "Reasoning\s+[■▪▮]" which matches the
   // "Reasoning ■■■ medium" UI element shown in /model selection lists.
   // Without this early check, the selection list would be misdetected as thinking.
-  // However, yes/no prompts also contain "to navigate · Enter to select" footer,
+  // However, yes/no prompts also contain "to navigate · enter to select" footer,
   // so we must check detectPrompt first — if a prompt is detected, it takes priority
-  // over selection list (prompts show PromptPanel with Yes/No buttons).
-  const copilotSelectionWindow = contentLines.slice(-30).join('\n');
-  if (cliToolId === 'copilot' && COPILOT_SELECTION_LIST_PATTERN.test(copilotSelectionWindow)) {
+  // over selection list (prompts show PromptPanel with Yes/No buttons). That branch
+  // is not hypothetical on 1.0.80: `/permissions` is a picker whose body is a
+  // two-option numbered list, and it is the one of the eleven that belongs on
+  // PromptPanel rather than on NavigationButtons.
+  //
+  // Issue #1895 replaced what this reads. The 30-row window it used to match
+  // `COPILOT_SELECTION_LIST_PATTERN` against was wrong in both directions at once:
+  // it matched none of 1.0.80's eleven pickers (so `/model` fell through to the
+  // `running`/`default` floor with no NavigationButtons and `wait` sat on it until
+  // the operator closed the picker), and it matched copilot's own prose whenever a
+  // reply mentioned "Select Model" or "Search models..." (so a finished turn was
+  // published as `waiting`). `isCopilotSelectionFrame` is positional instead: a
+  // picker is what copilot draws INSTEAD of its bottom chrome, so the evidence is
+  // the bottom row of the pane -- the same row step 0.5 reads -- and never the
+  // transcript. Ordering against 0.5 is therefore settled inside the helper: it
+  // declines any frame that still has a status bar.
+  if (cliToolId === 'copilot' && isCopilotSelectionFrame(contentLines)) {
     const promptOptions = buildDetectPromptOptions(cliToolId);
     const promptDetection = detectPrompt(stripBoxDrawing(cleanOutput), promptOptions);
     if (promptDetection.isPrompt) {
