@@ -1188,7 +1188,7 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
 
 | フィールド | 意味 |
 |---|---|
-| `content` | lastCapturedLine 以降の差分（`src/lib/session/current-output-builder.ts:535-556`）。ポーラーが保存済みなら正常時でも空 |
+| `content` | ポーラーがまだ保存していない分（`buildCurrentOutput`）。**行数がカーソルとして使えるツールでのみ差分**＝ scrollback を持つ codex / gemini / vibe-local / antigravity で、かつ capture window（10000 行）が未飽和のとき。この場合ポーラーが保存済みなら正常時でも空になる。**alternate screen のツール（claude / opencode / copilot）と、window 飽和時は capture 全体**（行数が pane 高さ・window 幅で pin され「読んだ位置」にならないため。Issue #1910 / #1670 / #1268） |
 | `realtimeSnippet` | pane 末尾 100 行（画面そのもの。`src/lib/session/current-output-builder.ts:712`） |
 | `lineCount` | capture 全体の行数（空白行を含む。TUI は 1000 行のペインに描かれるため、空白 pane でも 1001 になりうる） |
 | `isRunning` | tmux セッションが存在して healthy（`src/lib/session/claude-session.ts:543-556`）。**ターン進行中の意味ではない** |

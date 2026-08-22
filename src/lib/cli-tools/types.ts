@@ -47,6 +47,50 @@ export function usesAlternateScreen(cliToolId: CLIToolType): boolean {
   return ALTERNATE_SCREEN_CLI_TOOLS.has(cliToolId);
 }
 
+/**
+ * Whether a stored `last_captured_line` still indexes into THIS capture, i.e.
+ * whether it may be used as a "how far have I read" cursor (Issue #1910).
+ *
+ * Two independent things pin a captured line count so it stops growing with the
+ * transcript, and a caller that slices at the stored cursor has to survive both:
+ *
+ *  - **the tool renders in the alternate screen** ({@link usesAlternateScreen}):
+ *    tmux keeps no scrollback, every capture returns exactly `pane_height` rows,
+ *    and the count is pinned there from the very first frame (Issue #1268);
+ *  - **the capture window saturated** (`isCaptureWindowSaturated` in
+ *    `lib/tmux/tmux-capture-cache.ts`): the pane outgrew the sliding window the
+ *    capture is taken through, so the count is pinned at the window size and the
+ *    window merely slides (Issue #1670).
+ *
+ * Either one makes a previously stored index denote a different line — or no
+ * line at all — so `lines.slice(cursor)` silently yields nothing. That is
+ * Issue #1910: `commandmate capture <id>` printed a single empty byte for every
+ * alternate-screen session that had taken one turn, because the poller had
+ * stored the pane height (1000 on copilot / claude, 200 on opencode) and the
+ * next frame is exactly that many rows.
+ *
+ * A caller that reads `false` must fall back to the WHOLE capture: repeating
+ * rows the reader has already seen is harmless, dropping new output is not.
+ *
+ * The two conditions are stated together here rather than at each call site
+ * because they are one rule — "is the count a cursor?" — reached from two
+ * sides, and #1670 fixed only the second one in
+ * `src/lib/session/current-output-builder.ts` while `src/lib/polling/
+ * response-checker.ts` (which spells the same expression inline as
+ * `lineCountIsCursor`) already had both. Folding that second copy in here is
+ * left to the next change that touches the poller.
+ *
+ * @param cliToolId - CLI tool the capture came from
+ * @param captureWindowSaturated - Whether this capture came back clipped by the window
+ * @returns True when the stored line count is still a usable cursor
+ */
+export function capturedLineCountIsCursor(
+  cliToolId: CLIToolType,
+  captureWindowSaturated: boolean
+): boolean {
+  return !usesAlternateScreen(cliToolId) && !captureWindowSaturated;
+}
+
 // ============================================================================
 // Agent Instances (Issue #868: multi-session foundation)
 // ============================================================================
