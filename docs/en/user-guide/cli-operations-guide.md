@@ -820,7 +820,7 @@ function names (`buildCurrentOutput` / `isClaudeRunning`) is the safer way to fi
 
 | Field | Meaning |
 |---|---|
-| `content` | The delta since `lastCapturedLine` (`src/lib/session/current-output-builder.ts:535-556`). Empty even on a healthy session once the poller has already saved it |
+| `content` | Whatever the poller has not saved yet (`buildCurrentOutput`). **It is a delta only for tools whose line count is a usable cursor** — the scrollback tools (codex / gemini / vibe-local / antigravity) while the 10000-line capture window is unsaturated; there it is empty even on a healthy session once the poller has saved it. For the **alternate-screen tools (claude / opencode / copilot), and for any saturated window, it is the WHOLE capture** (the line count is pinned at the pane height / window size and no longer denotes a read position — Issues #1910 / #1670 / #1268) |
 | `realtimeSnippet` | The last 100 rows of the pane — the screen itself (`src/lib/session/current-output-builder.ts:712`) |
 | `lineCount` | The row count of the whole capture, blank rows included. A TUI is drawn on a 1000-row pane, so even a blank pane can report 1001 |
 | `isRunning` | The tmux session exists and is healthy (`src/lib/session/claude-session.ts:543-556`). **It does not mean a turn is in progress** |
