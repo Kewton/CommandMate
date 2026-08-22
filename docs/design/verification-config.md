@@ -474,8 +474,9 @@ exit code は裁定ではない**。
 ゲートまでこの枠を取りに来ると 9.4 の SKIP 経路（＝ exit 99、裁定不能）を安いゲートに
 持ち込むことになるため。
 
-**安いゲートには付けない。** 静的ガード 3 本（各 0.1s）は失敗を秒で返すために存在し
-（Issue #1882）、他 worktree の 500s のスイートの後ろに並ばせるとその性質が消える。
+**安いゲートには付けない。** 静的ガード 4 本（token-discipline / control-chars /
+claudemd-size / route-exports。各 0.1〜0.3s）は失敗を秒で返すために存在し
+（Issue #1882 / #1946）、他 worktree の 500s のスイートの後ろに並ばせるとその性質が消える。
 `lint` / `typecheck` も付けない ——「2 worktree 同時でも緑のまま」が実測で確認されており、
 **実在しない偽陽性を消すために 9.4 の裁定不能経路を新設する**取引になるからである。
 実機記録は [docs/qa/1917-parallel-unit-mutex.md](../qa/1917-parallel-unit-mutex.md)。

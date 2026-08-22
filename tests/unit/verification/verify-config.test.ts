@@ -691,15 +691,16 @@ describe('the repository\'s own .commandmate/verify.yaml', () => {
 
     expect(config).not.toBeNull();
     expect(config?.version).toBe(1);
-    // The three static guards come first so a violation is reported in seconds
-    // rather than after the ~13 minute unit suite (Issue #1882). Each runs the
-    // SAME script as its CI job — the check itself lives in scripts/, never
-    // copied into this file or into ci-pr.yml; see
+    // The static guards come first so a violation is reported in seconds rather
+    // than after the ~13 minute unit suite (Issue #1882; `route-exports` joined
+    // in #1946). Each runs the SAME script as its CI job — the check itself
+    // lives in scripts/, never copied into this file or into ci-pr.yml; see
     // tests/unit/guards/static-guard-single-source.test.ts.
     expect(config?.gates.map((g) => g.id)).toEqual([
       'token-discipline',
       'control-chars',
       'claudemd-size',
+      'route-exports',
       'lint',
       'typecheck',
       'unit',
@@ -708,6 +709,7 @@ describe('the repository\'s own .commandmate/verify.yaml', () => {
       'node scripts/check-token-discipline.mjs',
       'node scripts/check-control-chars.mjs',
       'node scripts/check-claudemd-size.mjs',
+      'node scripts/check-route-exports.mjs',
       'npm run lint',
       'npx tsc --noEmit',
       'npm run test:unit',
