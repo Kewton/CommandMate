@@ -457,6 +457,8 @@ roster と明示指定が矛盾したら **400 / exit 2** とし、これは新�
 | **合計** | **36** | **19** | — |
 
   なお `src` 全体の 231 箇所 / 85 ファイルという実測値は Stage 3 でも再現した（スコープを切る根拠は維持）。**「削除のみ許可」を機械的に運用すると、上表のうち正しいコード（primary anchor・表示既定・Claude 固有モジュール）まで削除を誘発する**ため、baseline のパス列挙には **1 行ごとに「解決フォールバック / 対象外（理由）」の区分を併記**し、対象外行は削除の進捗指標に数えない。Phase 1 の最初の作業は「測定」ではなく **この区分の確定**である（増加は CI 赤、**減ることだけを許す**は維持）。
+
+  **実測の更新（#1923 着地時点）**: 上表の 36 箇所 / 19 ファイルは `'claude'` の**素の grep** 値であり、`case 'claude':` / `=== 'claude'` / 許可リスト配列 / コメントを含む。本決定が指定する **AST の綴り**で測り直すと **21 箇所 / 13 ファイル**で、内訳は **解決フォールバック 10 件（すべて `src/app/api` 配下の `route.ts`）・対象外 10 件・許可 1 件（`resolve-session-target.ts` の `DEFAULT_SESSION_CLI_TOOL`）**。`src/cli/commands/**` と `src/lib/session/**` の解決フォールバックは **0 件**である（`wait.ts` は表示既定、`report.ts` は commander 既定、`worktree-status-helper.ts` の `=== 'claude'` は綴り対象外）。また綴りは 5 つでは足りず、`{ cliToolId: 'claude' }`（オブジェクト値）と `return 'claude'`（`slash-commands/route.ts` の後方互換既定＝解決フォールバック）が漏れるため **8 綴り**に拡張した。区分と綴りの正本は `tests/unit/guards/no-claude-fallback.test.ts`。
 - 検出は AST ベースで行い、次の **5 綴り**を捕まえる: `x ?? 'claude'` / `x || 'claude'` / `cond ? x : 'claude'` / `const D: CLIToolType = 'claude'` / **`f(..., 'claude')`（呼び出し引数の既定。DR3-009。`auto-yes/route.ts` の `getAutoYesState(id, 'claude')` がこれに当たり、4 綴りだけでは捕まらない。これは #1909 の GET 側の双子である）**。
 - `resolveSessionTarget` 内部のみ `'claude'` を書いてよい。0 件化は Phase 2 以降の目標として §8 に置く。
 
