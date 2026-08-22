@@ -56,6 +56,47 @@ if (currentTestPath !== undefined) {
 // A test that cares about the path sets its own value; this only fills a gap.
 process.env.CODEX_HOME ??= join(tmpdir(), 'commandmate-test-codex-home');
 
+// Issue #1942: the same hazard, for the tool that has no per-session escape.
+//
+// `~/.copilot/settings.json` is where copilot reads its hooks from, and it is
+// the ONLY place: the source declares `configScope: 'global-singleton'` because
+// copilot has no `--settings` flag. `writeCopilotHookSettings` therefore writes
+// one file for the whole machine, and `COPILOT_HOME` is the single override
+// that moves it. A test that starts a copilot session without setting the
+// variable edits the developer's live copilot configuration — merged into,
+// backed up over, and re-pointed at whatever port that run happened to use.
+//
+// Measured before adding this line, so it is a fence rather than a fix: the
+// full `tests/unit` suite was run once with `HOME` redirected to an empty
+// sentinel directory and `COPILOT_HOME` unset. No `.copilot` was created there
+// at all — every copilot test sets `COPILOT_HOME` or `HOME` for itself today,
+// and `terminal-route` / `api-send-cli-tool` mock `CopilotTool` outright. The
+// default is here for the test written next month, which will inherit the
+// isolation without knowing the hazard exists.
+//
+// Blank counts as absent, unlike CODEX_HOME's `??=` above: `resolveSafeDirectory`
+// reads `''` as unset and answers `~/.copilot`, so an empty value left by an
+// isolated runner would route straight back to the file this line is closing.
+// An explicitly chosen directory still wins, and a test that redirects itself
+// with `vi.stubEnv` or a bare assignment still wins over this.
+//
+// Scoped by worker pid, unlike CODEX_HOME's and CM_VERIFY_WORKTREE_INDEX_ROOT's
+// single shared paths, because this default has a real writer and the file it
+// writes is the contended one. `launch-contract-1846` stubs HOME but not
+// COPILOT_HOME, so it lands here — and `writeCopilotHookSettings` MERGES into
+// whatever is already at that path, takes a `.cmate.lock` it will decline to
+// write without, and leaves a `.cmate-backup`. Two checkouts running the suite
+// at once (this repo routinely runs five) would be reproducing the exact
+// machine-global collision the isolation exists to prevent, one directory
+// further down. Grouped under one parent so the whole family is `rm -rf`-able.
+if ((process.env.COPILOT_HOME ?? '').trim() === '') {
+  process.env.COPILOT_HOME = join(
+    tmpdir(),
+    'commandmate-test-copilot-home',
+    String(process.pid)
+  );
+}
+
 // Issue #1873: keep worktree-index claims out of the developer's home.
 //
 // `executeRun` hands every command gate `CM_WORKTREE_INDEX`, and minting that
