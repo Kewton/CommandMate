@@ -11,6 +11,10 @@ import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 
 /**
  * Derive display status from worktree flags.
+ *
+ * Deliberately still the three-way boolean branch (design DR3-005 says so in as
+ * many words): Issue #1926 adds a reason column beside this, not a fourth
+ * branch inside it. The status vocabulary is unchanged.
  */
 function deriveStatus(wt: WorktreeItem): string {
   if (wt.isWaitingForResponse) return 'waiting';
@@ -19,17 +23,72 @@ function deriveStatus(wt: WorktreeItem): string {
   return 'idle';
 }
 
+/** One entry of the per-CLI-tool status map the list API publishes. */
+type CliStatusEntry = NonNullable<WorktreeItem['sessionStatusByCli']>[string];
+
+/**
+ * The per-tool status entry that explains this row's STATUS (Issue #1926).
+ *
+ * `deriveStatus` folds every tool of the worktree into one word, so the reason
+ * beside it has to come from the tool that produced that word — printing the
+ * worktree default's reason next to a `waiting` raised by a second agent would
+ * be a sentence about the wrong session. The worktree default is preferred among
+ * the candidates, because on the ordinary single-agent worktree it is the only
+ * one and on a multi-agent one it is the session the operator means.
+ *
+ * Returns undefined for `idle` (nothing is running, so nothing read a frame) and
+ * for a server older than #1926, which sends no such fields.
+ */
+function pickStatusEntry(wt: WorktreeItem, status: string): CliStatusEntry | undefined {
+  const byCli = wt.sessionStatusByCli;
+  if (!byCli) return undefined;
+
+  const explains = (entry: CliStatusEntry | undefined): boolean => {
+    if (!entry) return false;
+    if (status === 'waiting') return entry.isWaitingForResponse;
+    if (status === 'running') return entry.isProcessing;
+    if (status === 'ready') return entry.isRunning;
+    return false;
+  };
+
+  const preferred = wt.cliToolId ? byCli[wt.cliToolId] : undefined;
+  if (explains(preferred)) return preferred;
+  return Object.values(byCli).find(explains);
+}
+
+/**
+ * The REASON cell: why the STATUS beside it says what it says (Issue #1926).
+ *
+ * `-` when the server does not say — it predates #1926, the session is not
+ * running, or the tool has two or more instances and the aggregate dropped the
+ * reason (see `mergeSessionStatus` server-side; `--json` still carries the
+ * per-tool rows).
+ *
+ * `(no evidence)` marks `statusEvidence: 'none'` — the frame was interactive and
+ * nothing on it could be read either way, so the STATUS beside it is a fallback
+ * rather than a reading. Today that is exactly the `default` and
+ * `no_recent_output` reasons; design Phase 3 widens it per tool, and the marker
+ * is what makes the widening visible here without the reason token changing.
+ */
+function deriveReason(wt: WorktreeItem): string {
+  const entry = pickStatusEntry(wt, deriveStatus(wt));
+  const reason = entry?.sessionStatusReason;
+  if (!reason) return '-';
+  return entry?.statusEvidence === 'none' ? `${reason} (no evidence)` : reason;
+}
+
 /**
  * Format worktrees as a table for terminal display.
  */
 function formatTable(worktrees: WorktreeItem[]): string {
   if (worktrees.length === 0) return 'No worktrees found.';
 
-  const headers = ['ID', 'NAME', 'STATUS', 'DEFAULT'];
+  const headers = ['ID', 'NAME', 'STATUS', 'REASON', 'DEFAULT'];
   const rows = worktrees.map(wt => [
     wt.id,
     wt.name,
     deriveStatus(wt),
+    deriveReason(wt),
     wt.cliToolId || '-',
   ]);
 
@@ -49,6 +108,19 @@ function formatTable(worktrees: WorktreeItem[]): string {
 
 /**
  * Format output based on options [DR1-02]
+ *
+ * `--json` prints the server's rows verbatim, and Issue #1926 does not change
+ * that. `statusEvidence` / `sessionStatusReason` / `lastKnownStatus` /
+ * `lastKnownStatusAt` ride along inside `sessionStatusByCli.<tool>`, which is
+ * where the server puts them:
+ *
+ *     commandmate ls --json | jq -r '.[] | "\(.id) \(.sessionStatusByCli.claude.statusEvidence)"'
+ *
+ * Deliberately not hoisted to the top level of each row. A synthesised
+ * `statusEvidence` there would read as a server field to anyone holding
+ * `WorktreeItem`, would need the same tool-picking rule the REASON column
+ * applies for display, and would make `ls --json` disagree with
+ * `GET /api/worktrees` — three costs for a shorter jq path.
  */
 function formatOutput(worktrees: WorktreeItem[], options: LsOptions): string {
   if (options.json) {

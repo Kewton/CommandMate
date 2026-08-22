@@ -37,10 +37,53 @@ export interface WorktreeItem {
   isWaitingForResponse?: boolean;
   isProcessing?: boolean;
   // [DR2-09] Per-CLI-tool session status for agent filtering
+  //
+  // Mirrors: src/lib/session/worktree-status-helper.ts CliToolSessionStatus
+  // (the subset the CLI reads). Entries are the logical-OR aggregate across
+  // every instance of a tool; the un-aggregated per-instance map is
+  // `sessionStatusByInstance`, which the CLI does not read.
   sessionStatusByCli?: Partial<Record<string, {
     isRunning: boolean;
     isWaitingForResponse: boolean;
     isProcessing: boolean;
+    /**
+     * Whether the status rests on something positive, or only on nothing
+     * having matched (Issue #1926, design §4 D1 / §7 / DR3-005).
+     *
+     * The second of Phase 1's two contract changes: `commandmate ls`, the
+     * header status chip and `BranchStatusIndicator` read this object, not
+     * `CurrentOutputResponse`, so the evidence reading had to be published
+     * here as well as there.
+     *
+     * Optional twice over. A server older than #1926 sends no such key, and
+     * even a current one omits it for a session that is not running (there was
+     * no frame to read) and for a tool with two or more instances (an
+     * aggregate has no single reason — read `--json` for the per-tool rows).
+     */
+    statusEvidence?: 'positive' | 'none';
+    /**
+     * The scraper's reason token: `input_prompt` / `no_recent_output` /
+     * `thinking_indicator` / `default` … (Issue #1926).
+     *
+     * `string` rather than a union on purpose, exactly as
+     * {@link CurrentOutputResponse.sessionStatusReason} is: the detector's
+     * vocabulary grows, and a newer server naming a reason this build has never
+     * heard of must not be a parse failure. This is what `commandmate ls`
+     * prints in its REASON column.
+     */
+    sessionStatusReason?: string;
+    /**
+     * The last status anything could positively confirm for this tool, or
+     * absent (Issue #1926, design §7).
+     *
+     * Held in server memory with a TTL and cleared by a restart, so absent is
+     * the ordinary answer for a session nobody has polled recently. Read it
+     * next to {@link statusEvidence}: it earns its keep when that is `'none'`
+     * and the three booleans are a fallback rather than a reading.
+     */
+    lastKnownStatus?: string;
+    /** Epoch ms of {@link lastKnownStatus}. */
+    lastKnownStatusAt?: number;
   }>>;
   // Mirrors: src/lib/cli-tools/types.ts AgentInstance[] (Issue #869/#1000).
   // Present on both GET /api/worktrees and GET /api/worktrees/[id].
@@ -160,6 +203,44 @@ export interface CurrentOutputResponse {
    * UNCLASSIFIED_DWELL_MS in wait.ts.
    */
   isUnclassifiedActive?: boolean;
+  /**
+   * Whether {@link sessionStatus} rests on something positive, or only on
+   * nothing having matched (Issue #1926, design §4 D1 決定 2 / §7).
+   *
+   * `'positive'` — a completion marker, a thinking indicator, a parsed prompt,
+   * an idle composer, or the agent's own `Stop` said so. `'none'` — the frame
+   * was interactive and nothing on it could be read either way, so the status is
+   * a fallback. It is the same fact {@link isUnclassifiedActive} carries, named
+   * the way the design names it; both are published because the flag is the
+   * older contract (`wait`'s `ready && !isUnclassifiedActive` rule) and this is
+   * the reading design Phase 3 widens, tool by tool.
+   *
+   * A closed union, like {@link sessionStatus} and for the same reason: the
+   * design fixes the domain at two members precisely so a newer server cannot
+   * hand an older CLI a value it has never heard of. Adding a third would be a
+   * breaking change, not an additive one.
+   *
+   * Optional because a server older than #1926 sends no such key — which is not
+   * the same as `'positive'`. Treat `undefined` as "this server does not say".
+   */
+  statusEvidence?: 'positive' | 'none';
+  /**
+   * The last status this server could positively confirm, or null
+   * (Issue #1926, design §7 「直前の確定状態（証拠なしの間の表示）」).
+   *
+   * Equal to {@link sessionStatus} whenever `statusEvidence` is `'positive'`,
+   * because the poll that answered just confirmed it. It says something the
+   * other fields do not only when the evidence is `'none'`: this is what the
+   * session last actually was, as opposed to what the fallback is calling it.
+   *
+   * Held in server memory, so `null` covers "nothing was ever confirmed", "the
+   * confirmation aged out", "the server restarted" and "the session is not
+   * running" without distinguishing them. Undefined means a server older than
+   * #1926.
+   */
+  lastKnownStatus?: 'idle' | 'ready' | 'running' | 'waiting' | null;
+  /** Epoch ms of {@link lastKnownStatus}, null when that is null (Issue #1926). */
+  lastKnownStatusAt?: number | null;
   lastServerResponseTimestamp: number | null;
   serverPollerActive: boolean;
   /**
@@ -196,6 +277,42 @@ export interface CurrentOutputResponse {
     lastEventType: string | null;
     lastEventAt: number | null;
     lastEventDetail: string | null;
+    /**
+     * An id for the turn the agent last reported activity in, or null
+     * (Issue #1926, design §7).
+     *
+     * **Provisional, and not yet a stable turn identity — read this before
+     * consuming it.** Phase 1 derives all four turn fields from the single most
+     * recent event, which is all the server retains today, so a `pre_tool_use`
+     * arriving mid-turn re-stamps {@link openedAt} and therefore this id. A
+     * consumer that reads a changed `turnId` as "a new turn began" will
+     * false-positive several times inside one turn. Phase 4 replaces the
+     * derivation with a real turn record under the generation fence.
+     *
+     * `wait` deliberately does not read it yet: `adoptTurnStart` still adopts
+     * turns from `lastEventType` / `lastEventAt`, and the Issue #1839 gate stays
+     * on that source until the Phase 4 migration is complete.
+     */
+    turnId?: string | null;
+    /**
+     * Epoch ms of the most recent `user_prompt_submit` / `pre_tool_use` /
+     * `post_tool_use`, or null (Issue #1926). The same three events
+     * `adoptTurnStart` treats as opening a turn.
+     */
+    openedAt?: number | null;
+    /** Epoch ms the agent reported the turn ended, or null (Issue #1926). */
+    closedAt?: number | null;
+    /**
+     * Why the turn ended, or null while none has (Issue #1926).
+     *
+     * `'stop'` — the agent's own `Stop` — is the only value Phase 1 produces.
+     * Design §7 reserves `resync_idle` / `stale` / `scraper_evidence` /
+     * `generation` for the Phase 4 turn model, which is why this is a plain
+     * `string`: a newer server can name a close reason this build has never
+     * heard of, and narrowing here would turn a forward-compatible payload into
+     * a parse failure (Issue #1843).
+     */
+    closedBy?: string | null;
     /**
      * Epoch ms the structured layer first learned a dialog was open, or null
      * (Issue #1725). Non-null together with `isPromptWaiting` is how a caller

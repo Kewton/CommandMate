@@ -94,8 +94,17 @@ const COMPLETION_BASIS = {
  * ran nothing at all, because the composer had been idle for a minute. Reading
  * it as a turn boundary would have re-created the false completion this gate
  * exists to stop, one minute later. Only `Stop` ends a turn.
+ *
+ * Exported for the cross-layer pin in
+ * `tests/unit/session/status-contract-1926.test.ts`. Issue #1926 publishes the
+ * same three events as `structuredEvents.openedAt` (see
+ * `src/lib/session/provisional-turn.ts` TURN_ACTIVITY_EVENTS), and Phase 4 moves
+ * `adoptTurnStart` onto that field — a set that had drifted by then would change
+ * this gate silently at the moment of the switch. The CLI cannot import the
+ * server module (`tsconfig.cli.json` sets `"paths": {}`), so the test is the
+ * only thing holding the two together.
  */
-const TURN_OPENING_EVENT_TYPES: ReadonlySet<string> = new Set([
+export const TURN_OPENING_EVENT_TYPES: ReadonlySet<string> = new Set([
   'user_prompt_submit',
   'pre_tool_use',
   'post_tool_use',
@@ -734,6 +743,25 @@ export function createWaitCommand(): Command {
     .option('--require-work', 'After completion, run only the work-evidence gate; exit 21 when the worktree has no commits and no uncommitted changes')
     .option('--fail-on-upstream-fault', 'Exit 11 instead of 0 when the agent returns to its composer with an upstream API failure (529/limit/API Error) on the frame')
     .option('--token <token>', TOKEN_WARNING)
+    // Issue #1926 (design 規約 3): the unclassified dwell is a stop reason with
+    // no flag of its own, so `--help` is the only place a caller can find out
+    // that it exists — and the only place the interaction with --stall-timeout
+    // and --timeout can be stated. Leaving it to the guide means an operator
+    // debugging an unexpected exit 10 has nowhere local to look.
+    .addHelpText('after', `
+Unclassified frames (exit 10, Issue #1708):
+  A frame that is interactive but that the detection layer could not parse
+  raises statusEvidence: 'none' (isUnclassifiedActive). It is not an immediate
+  stop reason: a capture taken mid-repaint raises it for a single poll. Only
+  after it has held for 60 s does wait exit 10 with {"type":"unclassified"},
+  and --on-prompt human keeps waiting through it like any other prompt.
+
+  The 60 s dwell is a constant, not a flag. --timeout and --stall-timeout below
+  60 s therefore always win and return 124 instead: the dwell pre-empts long
+  waits, it never extends short ones. Inspect the raw pane with
+  \`commandmate capture <id> --pane\`; see also statusEvidence /
+  sessionStatusReason / lastKnownStatus in \`commandmate capture <id> --json\`.
+`)
     .action(async (worktreeIds: string[], options: WaitOptions) => {
       try {
         // [SEC4-04] Validate all worktree IDs
