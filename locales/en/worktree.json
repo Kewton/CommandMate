@@ -789,7 +789,8 @@
     "timer": "Timer",
     "todo": "ToDo",
     "skills": "Skills",
-    "verification": "Verification"
+    "verification": "Verification",
+    "env": "Env"
   },
   "branchMismatch": {
     "changedFrom": "Branch changed from",
@@ -974,6 +975,46 @@
       "failed": "failed",
       "not_started": "not_started",
       "cancelled": "cancelled"
+    }
+  },
+  "envManager": {
+    "title": "Env Manager",
+    "description": "View and edit this worktree's environment files. Values are hidden by default.",
+    "filePickerLabel": "Environment file",
+    "viewModeLabel": "View mode",
+    "viewKeyValue": "Key-Value",
+    "viewRaw": "Raw",
+    "notCreated": "not created",
+    "templateBadge": "template",
+    "notCreatedHint": "{file} does not exist yet. Add a key and save to create it.",
+    "keyLabel": "Variable name",
+    "valueLabel": "Value of {key}",
+    "showValue": "Show the value of {key}",
+    "hideValue": "Hide the value of {key}",
+    "removeRow": "Remove {key}",
+    "addRow": "Add variable",
+    "revealAll": "Show values",
+    "hideAll": "Hide values",
+    "reload": "Reload from disk",
+    "save": "Save",
+    "saved": "Saved.",
+    "loading": "Loading environment file...",
+    "loadError": "The environment file could not be loaded.",
+    "empty": "No variables defined yet.",
+    "validationFailed": "This file cannot be saved yet.",
+    "suggestionsTitle": "Keys from the template",
+    "suggestionsHint": "Defined in .env.example / .env.sample but missing here. Tap to add.",
+    "rawLabel": "Raw environment file",
+    "rawMaskedLabel": "Raw environment file (values hidden)",
+    "rawMaskedHint": "Values are shown as {mask}. Choose \"Show values\" to reveal and edit them.",
+    "issues": {
+      "invalidSyntax": "Line {line}: not a KEY=VALUE assignment.",
+      "invalidKey": "Line {line}: invalid variable name. Use letters, digits and underscores, starting with a letter or underscore.",
+      "unterminatedQuote": "Line {line}: the quoted value for {key} is never closed.",
+      "duplicateKey": "Line {line}: {key} is defined more than once. The last one wins.",
+      "controlCharacter": "Line {line}: contains a control character that is not allowed in an environment file.",
+      "tooLarge": "This file is too large to edit here.",
+      "tooManyEntries": "This file defines too many variables to edit here."
     }
   }
 }

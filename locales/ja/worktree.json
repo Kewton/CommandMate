@@ -789,7 +789,8 @@
     "timer": "タイマー",
     "todo": "ToDo",
     "skills": "スキル",
-    "verification": "検証"
+    "verification": "検証",
+    "env": "環境変数"
   },
   "branchMismatch": {
     "changedFrom": "ブランチが",
@@ -974,6 +975,46 @@
       "failed": "failed（不合格）",
       "not_started": "not_started（作業証跡ゼロ）",
       "cancelled": "cancelled（中止）"
+    }
+  },
+  "envManager": {
+    "title": "環境変数マネージャ",
+    "description": "このワークツリーの環境変数ファイルを表示・編集します。値は既定で伏せられます。",
+    "filePickerLabel": "環境変数ファイル",
+    "viewModeLabel": "表示形式",
+    "viewKeyValue": "キー / 値",
+    "viewRaw": "テキスト",
+    "notCreated": "未作成",
+    "templateBadge": "テンプレート",
+    "notCreatedHint": "{file} はまだ存在しません。キーを追加して保存すると作成されます。",
+    "keyLabel": "変数名",
+    "valueLabel": "{key} の値",
+    "showValue": "{key} の値を表示",
+    "hideValue": "{key} の値を隠す",
+    "removeRow": "{key} を削除",
+    "addRow": "変数を追加",
+    "revealAll": "値を表示",
+    "hideAll": "値を隠す",
+    "reload": "ディスクから再読み込み",
+    "save": "保存",
+    "saved": "保存しました。",
+    "loading": "環境変数ファイルを読み込み中...",
+    "loadError": "環境変数ファイルを読み込めませんでした。",
+    "empty": "変数はまだ定義されていません。",
+    "validationFailed": "このファイルはまだ保存できません。",
+    "suggestionsTitle": "テンプレートのキー",
+    "suggestionsHint": ".env.example / .env.sample にあってこのファイルに無いキーです。タップで追加します。",
+    "rawLabel": "環境変数ファイル（テキスト）",
+    "rawMaskedLabel": "環境変数ファイル（値を伏せた表示）",
+    "rawMaskedHint": "値は {mask} で伏せられています。「値を表示」で表示・編集できます。",
+    "issues": {
+      "invalidSyntax": "{line} 行目: KEY=VALUE の形式ではありません。",
+      "invalidKey": "{line} 行目: 変数名が不正です。英字かアンダースコアで始まり、英数字とアンダースコアのみが使えます。",
+      "unterminatedQuote": "{line} 行目: {key} の引用符が閉じられていません。",
+      "duplicateKey": "{line} 行目: {key} が重複しています。最後の定義が有効になります。",
+      "controlCharacter": "{line} 行目: 環境変数ファイルに使用できない制御文字が含まれています。",
+      "tooLarge": "このファイルは大きすぎるため、ここでは編集できません。",
+      "tooManyEntries": "このファイルは変数が多すぎるため、ここでは編集できません。"
     }
   }
 }

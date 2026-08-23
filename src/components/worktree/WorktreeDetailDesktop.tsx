@@ -44,6 +44,7 @@ import { AgentInstancesPane } from '@/components/worktree/AgentInstancesPane';
 import { GitPane } from '@/components/worktree/GitPane';
 import { WorktreeSkillsPane } from '@/components/skills/WorktreeSkillsPane';
 import { VerificationPane } from '@/components/worktree/VerificationPane';
+import { EnvManagerPane } from '@/components/worktree/EnvManagerPane';
 import { VerificationStatusChip } from '@/components/worktree/VerificationStatusChip';
 import { Modal } from '@/components/ui/Modal';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
@@ -695,6 +696,10 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       // by the shared `verification` state, so this pane and the header chip
       // never disagree and never fetch the same rows twice.
       verification: <VerificationPane state={verification} className="h-full" />,
+      // Issue #1968: the masked `.env` editor. Owns its own state via
+      // `useEnvManager` (an env file is edited by a human, not polled), so the
+      // only thing it needs from here is the worktree it is scoped to.
+      env: <EnvManagerPane worktreeId={worktreeId} className="h-full" />,
     }),
     [
       worktreeId,
