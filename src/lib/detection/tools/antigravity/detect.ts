@@ -15,14 +15,11 @@
 import { detectThinking, getCliToolPatterns, ANTIGRAVITY_SELECTION_LIST_PATTERN } from '../../cli-patterns';
 import { STATUS_REASON } from '../../status-reason';
 import { createToolStatusDetector } from '../run-detection';
+import { ANTIGRAVITY_VERIFIED_AGAINST } from '../verified-against';
 import type { ToolStatusVerdict } from '../types';
 
-/** agy build these rules were read off (Issue #988 / #995). */
-export const VERIFIED_AGAINST = {
-  version: '0.4.x',
-  capturedAt: '2026-07-30',
-  paneGeometry: 'inline',
-} as const;
+/** agy build these rules were read off (Issue #988 / #995; value in ../verified-against, #1929). */
+export const VERIFIED_AGAINST = ANTIGRAVITY_VERIFIED_AGAINST;
 
 export const antigravityStatusDetector = createToolStatusDetector({
   tool: 'antigravity',

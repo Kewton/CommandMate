@@ -90,9 +90,11 @@ export const CLAUDE_TRANSCRIPT_USER_TURN_PATTERN = /^\s*[>❯]\s+\S/;
  */
 export const CLAUDE_EFFORT_CHIP_PATTERN = /·\s*\/effort\s*$/;
 
-/** Which build these rules were read off. */
-export const VERIFIED_AGAINST = {
-  version: '2.1.240',
-  capturedAt: '2026-08-23',
-  paneGeometry: '200x1000',
-} as const;
+/**
+ * Which build these rules were read off.
+ *
+ * The value itself lives in `../verified-against` so §4 D2's staleness probe can
+ * read every tool's stamp as data (Issue #1929); it is re-exported here so a
+ * reader of these patterns still finds it next to them.
+ */
+export { CLAUDE_VERIFIED_AGAINST as VERIFIED_AGAINST } from '../verified-against';
