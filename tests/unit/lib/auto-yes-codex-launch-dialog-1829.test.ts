@@ -62,13 +62,23 @@ vi.mock('@/lib/cli-tools/manager', () => ({
 }));
 
 const warn = vi.fn();
+// `withContext` is part of the logger contract and `detectThinking` uses it —
+// which Issue #1928 made reachable from this test, because the Auto-Yes dialog
+// gate consults codex's own detector (and therefore its #1160 staleness guard)
+// before an answer is sent. A mock missing a method the production path calls
+// does not fail as "unmocked"; it throws inside the poller's catch and every
+// assertion here reads `'error'`.
 vi.mock('@/lib/logger', () => ({
-  createLogger: () => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: (...args: unknown[]) => warn(...(args as [])),
-    error: vi.fn(),
-  }),
+  createLogger: () => {
+    const mockLogger: Record<string, unknown> = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: (...args: unknown[]) => warn(...(args as [])),
+      error: vi.fn(),
+      withContext: vi.fn(() => mockLogger),
+    };
+    return mockLogger;
+  },
 }));
 
 import {
@@ -207,14 +217,39 @@ describe('the guard does not switch Auto-Yes off for codex', () => {
   });
 
   it('does not gag another CLI tool that prints the same words', async () => {
+    // The anchors #1829 added are codex-scoped, and this is the control for it.
+    //
+    // Issue #1928 changed what this test has to feed in, without changing what
+    // it proves. Auto-Yes now answers only where the tool's OWN `detectDialog`
+    // vouched for the frame, so handing claude a pane drawn in codex's chrome no
+    // longer answers anything — not because of #1829's anchors, but because it
+    // is not a claude dialog. The wording is therefore re-rendered in claude's
+    // chrome (`❯` cursor, `Esc to cancel · Tab to amend …` footer, measured in
+    // `claude-live-1708/bash-approval-taskpanel.txt`): same words, claude's
+    // dialog, and it must still be answered.
+    const claudeDialogWithCodexWords = [
+      '  Hooks need review',
+      '  4 hooks are new or changed.',
+      '',
+      ' Do you want to proceed?',
+      ' ❯ 1. Review hooks',
+      '   2. Trust all and continue',
+      "   3. Continue without trusting (hooks won't run)",
+      '',
+      ' Esc to cancel · Tab to amend · ctrl+e to explain',
+    ].join('\n');
+
     const result = await detectAndRespondToPrompt(
       WORKTREE_ID,
       { ...pollerState(), cliToolId: 'claude', instanceId: 'claude' },
       'claude',
-      CODEX_HOOKS_REVIEW_PANE
+      claudeDialogWithCodexWords
     );
 
     expect(result).toBe('responded');
     expect(sendPromptAnswer).toHaveBeenCalled();
+    // …and the reason it answered is not that #1829's guard was skipped for the
+    // wrong reason: nothing was suppressed for claude at all.
+    expect(getLastPolicySuppression(WORKTREE_ID, 'claude')).toBeNull();
   });
 });

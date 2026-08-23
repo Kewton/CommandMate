@@ -7,11 +7,13 @@
  *  1. **The registry is total.** Every `CLIToolType` resolves to a detector,
  *     including the ones with no rules of their own, so no caller needs a "does
  *     this tool have a module?" branch.
- *  2. **`detectDialog` is a seam, not an implementation.** #1927 lands the口
- *     and nothing behind it; Issue #1928 fills it with the per-tool dialog rules
- *     and wires `response-checker` to them (§4 D1 決定 4). If this file ever
- *     asserts a non-null verdict, check that #1928 has actually landed and this
- *     is not a rule that leaked in early.
+ *  2. **`detectDialog` is a seam with a rollout.** #1927 landed the口; Issue
+ *     #1928 filled it per tool and wired the Auto-Yes poller to it (§4 D1 決定
+ *     4). What this file owns is the boundary: WHICH tools declared rules, and
+ *     that `hasDialogRules` — not the presence of the function, which the
+ *     factory always supplies — is how a caller tells "nobody has measured this
+ *     tool" from "this frame is not my dialog". The per-tool rules themselves
+ *     are pinned against live captures in `tools/dialogs.test.ts`.
  *  3. **`unknown_frame` is defined AND used.** A reason constant nobody produces
  *     is the "empty green" §13.1 warns about — `grep` finds it, and it means
  *     nothing.
@@ -64,19 +66,70 @@ describe('[#1927] the registry answers for every tool', () => {
   });
 });
 
-describe('[#1927] detectDialog is the seam Issue #1928 fills', () => {
+describe('[#1928] detectDialog is the seam Auto-Yes reads', () => {
+  /**
+   * The rollout, as a table rather than as a property of whichever modules
+   * happen to import a `prompt.ts`.
+   *
+   * `true` means the tool's dialogs were measured from its own live captures and
+   * the Auto-Yes gate may therefore hold it to them (D1 決定 4: Auto-Yes fires
+   * only on a POSITIVELY detected tool dialog, never on the generic
+   * numbered-list inference). `false` means nobody has measured that tool, and
+   * gating it would silence its Auto-Yes rather than sharpen it.
+   */
+  const DIALOG_RULES_BY_TOOL: Readonly<Record<string, boolean>> = {
+    claude: true,
+    codex: true,
+    copilot: true,
+    opencode: true,
+    gemini: false,
+    antigravity: false,
+    'vibe-local': false,
+  };
+
+  it('declares which tools have measured dialog rules', () => {
+    // Pinned by equality: adding a tool to the gate has to be a visible diff to
+    // this line, for the same reason the idle-evidence table is pinned that way.
+    expect(
+      Object.fromEntries(TOOL_STATUS_DETECTORS.map(d => [d.tool, d.hasDialogRules])),
+    ).toEqual(DIALOG_RULES_BY_TOOL);
+  });
+
   it.each(TOOL_STATUS_DETECTORS.map(d => [d.tool, d] as const))(
-    '%s answers null for every frame today',
+    '%s reads a frame with no dialog on it as null',
     (_tool, detector) => {
-      // The口 exists so #1928 has somewhere to put the per-tool dialog rules and
-      // Auto-Yes has something to read (D1 決定 4: Auto-Yes may fire only on a
-      // POSITIVELY detected tool dialog, never on the generic numbered-list
-      // inference). Implementing it here would leave that Issue with nothing.
-      for (const frame of ['', '❯ ', '1. Yes\n2. No\npress enter to confirm']) {
+      for (const frame of ['', '❯ ', 'nothing interactive here']) {
         expect(detector.detectDialog(normalizeFrame(frame))).toBeNull();
       }
     },
   );
+
+  it.each(TOOL_STATUS_DETECTORS.filter(d => !d.hasDialogRules).map(d => [d.tool, d] as const))(
+    '%s has no rules, so it answers null even for a frame that looks like a dialog',
+    (_tool, detector) => {
+      // The substitute `createToolStatusDetector` installs. `hasDialogRules` is
+      // what tells the gate this null means "nobody looked" rather than "this is
+      // not my dialog" — the two must not lead to the same action.
+      expect(
+        detector.detectDialog(normalizeFrame('❯ 1. Yes\n  2. No\npress enter to confirm')),
+      ).toBeNull();
+    },
+  );
+
+  it('answers a positively recognised dialog with its options and answer mode', () => {
+    // codex's own shape, and the narrowest possible statement that the seam is
+    // filled: the footer is what vouches for the block (Issue #1628), so the
+    // same rows without it must answer null.
+    const withFooter = '  Run this?\n› 1. Yes\n  2. No\n\n  Press enter to confirm or esc to cancel';
+    const withoutFooter = '  Run this?\n› 1. Yes\n  2. No';
+
+    expect(getToolStatusDetector('codex').detectDialog(normalizeFrame(withFooter))).toEqual({
+      kind: 'permission',
+      options: ['Yes', 'No'],
+      answerMode: 'numbered',
+    });
+    expect(getToolStatusDetector('codex').detectDialog(normalizeFrame(withoutFooter))).toBeNull();
+  });
 });
 
 describe('[#1927] unknown_frame is defined and produced', () => {
