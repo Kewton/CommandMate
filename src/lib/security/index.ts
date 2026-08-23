@@ -39,6 +39,7 @@ export { isPathSafe, validateWorktreePath, resolveAndValidateRealPath } from './
 // env-sanitizer.ts
 export {
   SENSITIVE_ENV_KEYS,
+  AGENT_CORRELATION_ENV_KEYS,
   COMMANDMATE_HOOK_ENV_PREFIX,
   isStrippedChildProcessEnvKey,
   sanitizeEnvForChildProcess,

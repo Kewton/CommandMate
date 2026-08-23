@@ -29,9 +29,14 @@
  * mechanism it is supposed to protect, so the assertion is an allowlist of
  * namespaces, with the secret list checked separately and exactly.
  *
- * Building the plans also turned up something #1942's docblock does not say:
- * the launch line carries SIX correlation variables, and only two of them start
- * with `CM_HOOK_`. See `ALLOWED_CORRELATION_PREFIXES` and the last test.
+ * Building the plans also turned up something #1942's docblock did not say: the
+ * launch line carries SIX correlation variables, and only two of them start
+ * with `CM_HOOK_`. Issue #1996 closed that — all six are stripped now, by an
+ * enumeration beside the prefix — and moved the measurement from a record into
+ * a **drift guard**: the last test asserts the seven plans' env keys are
+ * EXACTLY `AGENT_CORRELATION_ENV_VARS` plus `AGENT_LAUNCH_CONFIG_ENV_VARS`, in
+ * both directions. That is what replaces the prefix for names outside
+ * `CM_HOOK_`, which the prefix never covered at all.
  *
  * @vitest-environment node
  */
@@ -39,6 +44,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 import {
+  AGENT_CORRELATION_ENV_VARS,
+  AGENT_LAUNCH_CONFIG_ENV_VARS,
   COMMANDMATE_HOOK_ENV_VARS,
   renderAgentLaunchCommand,
 } from '@/lib/hooks/sources/launch-command';
@@ -69,37 +76,29 @@ const PLANTED_SECRETS: Record<string, string> = {
 };
 
 /**
- * Config-file variables a source is allowed to set, beyond the correlation
- * namespaces.
+ * Config-file variables a source is allowed to set, beyond the correlation set.
  *
- * Each is a per-tool HOME/config redirect the tool needs in order to read the
- * settings file CommandMate wrote for it. Enumerated, so a source that starts
- * exporting something new has to be looked at rather than waved through.
+ * A per-tool HOME/config redirect the tool needs in order to read the settings
+ * file CommandMate wrote for it. This file used to carry its own allowlist of
+ * three (`CODEX_HOME` / `XDG_CONFIG_HOME` / `COPILOT_HOME`); #1996 measured that
+ * only `CODEX_HOME` is ever written — the other two are *read* from the ambient
+ * environment to decide where a file goes and never reach `plan.env` — and moved
+ * the declaration into `launch-command` so the exact-set assertion below has one
+ * list rather than a local copy.
  */
-const ALLOWED_CONFIG_ENV_VARS = ['CODEX_HOME', 'XDG_CONFIG_HOME', 'COPILOT_HOME'];
+const ALLOWED_CONFIG_ENV_VARS = AGENT_LAUNCH_CONFIG_ENV_VARS;
 
 /**
- * The namespaces a correlation variable may live in, as MEASURED on this
- * branch — not as `COMMANDMATE_HOOK_ENV_VARS` describes them.
+ * Every correlation variable a source may set, as MEASURED and now DECLARED.
  *
- * That list names two variables (`CM_HOOK_URL`, `CM_HOOK_PORT`) and its
- * docblock calls itself "every `CM_HOOK_*` variable CommandMate sets on a
- * launch line", which is true and also not the whole launch line. Building the
- * seven plans and reading their `env` back turns up four more names, none of
- * which start with `CM_HOOK_`:
- *
- *   CM_AGENT_TOOL / CM_AGENT_WORKTREE_ID / CM_AGENT_INSTANCE_ID  (codex, copilot)
- *   CM_PERMISSION_HOOK_URL                                        (codex, antigravity)
- *
- * They are correlation keys, not credentials, so S18 — "no secret reaches
- * `AgentLaunchPlan.env`" — is met. What they are not is stripped from
- * CommandMate's own child processes, which the last test in this file states
- * outright rather than leaving for somebody to discover.
+ * Until #1996 this was a pair of namespace prefixes, because
+ * `COMMANDMATE_HOOK_ENV_VARS` named two variables while the launch line carried
+ * six. A prefix allowlist admits a name nobody has looked at, which is the wrong
+ * shape for the question "did a source start exporting something new?" — so the
+ * declaration is now the exact list, `AGENT_CORRELATION_ENV_VARS`, and the last
+ * test in this file holds the measurement to it in both directions.
  */
-const ALLOWED_CORRELATION_PREFIXES = [COMMANDMATE_HOOK_ENV_PREFIX, 'CM_AGENT_'];
-
-/** Correlation variables outside those prefixes, enumerated so they cannot grow silently. */
-const ALLOWED_CORRELATION_NAMES = ['CM_PERMISSION_HOOK_URL'];
+const ALLOWED_CORRELATION_NAMES = AGENT_CORRELATION_ENV_VARS;
 
 const originalEnv = { ...process.env };
 
@@ -149,9 +148,7 @@ describe('AgentLaunchPlan.env carries no secrets (Issue #1933 S18)', () => {
 
       for (const name of Object.keys(plan.env)) {
         const allowed =
-          ALLOWED_CORRELATION_PREFIXES.some((prefix) => name.startsWith(prefix)) ||
-          ALLOWED_CORRELATION_NAMES.includes(name) ||
-          ALLOWED_CONFIG_ENV_VARS.includes(name);
+          ALLOWED_CORRELATION_NAMES.includes(name) || ALLOWED_CONFIG_ENV_VARS.includes(name);
         expect(allowed, `unexpected launch-line variable: ${name}`).toBe(true);
       }
     }
@@ -183,53 +180,61 @@ describe('AgentLaunchPlan.env carries no secrets (Issue #1933 S18)', () => {
   });
 
   /**
-   * The measured launch line, name by name, and which half of it
-   * `sanitizeEnvForChildProcess()` reaches.
+   * The launch line, measured — and held to the declaration in both directions
+   * (Issue #1996).
    *
    * #1942's leak is that a CommandMate server started from inside a pane
    * CommandMate launched inherits that pane's correlation variables, and every
    * child THAT process spawns (`claude -p`, the slash-command probes,
    * `copilot --version`) inherits them in turn — so a relay firing from one of
-   * those children posts to a server that is not the one running. The fix was a
-   * prefix strip on `CM_HOOK_`. Reading the plans back shows that catches two of
-   * the six correlation variables actually on the launch line.
+   * those children posts to a server that is not the one running, or under an
+   * instance that is not its own. The fix was a prefix strip on `CM_HOOK_`, and
+   * reading the plans back showed that caught two of the six.
    *
-   * The remaining four are recorded here rather than fixed: closing the gap
-   * means editing `lib/security/env-sanitizer.ts`, which is outside Issue
-   * #1933's scope. This assertion is what makes the next person's edit to
-   * either module land in front of the fact.
+   * #1996 stripped all six, and this assertion is what replaced the prefix as
+   * the drift guard. Being an EXACT set comparison it fires in both directions:
+   * a source that starts writing a new launch-line variable — in any namespace,
+   * `CM_HOOK_` or not — goes red here by name, and so does one that stops
+   * writing a declared one. The prefix never covered either case for a name
+   * outside its own namespace; this does.
+   *
+   * The set is the union across all seven sources, not per-tool: no single tool
+   * writes all six (copilot has no `CM_AGENT_TOOL`, antigravity no
+   * `CM_AGENT_*` at all), and what a child inherits is the union of whatever
+   * pane it was started under.
    */
-  it('records which launch-line correlation variables a child process still inherits', () => {
+  it('writes exactly the launch-line variables that are declared', () => {
     const onLaunchLine = new Set<string>();
     for (const id of CLI_TOOL_IDS) {
       for (const name of Object.keys(planFor(id).env)) onLaunchLine.add(name);
     }
 
-    const correlation = [...onLaunchLine]
-      .filter((name) => !ALLOWED_CONFIG_ENV_VARS.includes(name))
-      .sort();
+    const declared = [...ALLOWED_CORRELATION_NAMES, ...ALLOWED_CONFIG_ENV_VARS].sort();
+    expect([...onLaunchLine].sort()).toEqual(declared);
 
-    expect(correlation).toEqual([
-      'CM_AGENT_INSTANCE_ID',
-      'CM_AGENT_TOOL',
-      'CM_AGENT_WORKTREE_ID',
-      'CM_HOOK_PORT',
-      'CM_HOOK_URL',
-      'CM_PERMISSION_HOOK_URL',
-    ]);
+    // Non-vacuity: hook injection can be switched off (`CM_AGENT_HOOKS_INJECT=0`),
+    // and every plan then renders a bare command with an empty `env`. An empty
+    // measurement would make the comparison above pass against an empty
+    // declaration, so the count is pinned too.
+    expect(onLaunchLine.size).toBe(7);
+  });
 
-    const stripped = correlation.filter(isStrippedChildProcessEnvKey);
-    const inherited = correlation.filter((name) => !isStrippedChildProcessEnvKey(name));
+  /**
+   * And every one of the correlation half is gone from a child's environment.
+   *
+   * Stated here as well as in
+   * `tests/unit/security/child-process-agent-env-1996.test.ts` because the two
+   * files answer different questions: that one proves a real child cannot read
+   * them, this one proves the names it proves it for are the names the launch
+   * line actually writes.
+   */
+  it('has the sanitizer strip the correlation half and keep the config half', () => {
+    const correlation = [...ALLOWED_CORRELATION_NAMES].sort();
 
-    expect(stripped).toEqual(['CM_HOOK_PORT', 'CM_HOOK_URL']);
-    expect(inherited).toEqual([
-      'CM_AGENT_INSTANCE_ID',
-      'CM_AGENT_TOOL',
-      'CM_AGENT_WORKTREE_ID',
-      'CM_PERMISSION_HOOK_URL',
-    ]);
+    expect(correlation.filter(isStrippedChildProcessEnvKey)).toEqual(correlation);
+    expect([...ALLOWED_CONFIG_ENV_VARS].filter(isStrippedChildProcessEnvKey)).toEqual([]);
     // None of them is a credential, which is what S18 asks about.
-    for (const name of inherited) {
+    for (const name of correlation) {
       expect(SENSITIVE_ENV_KEYS).not.toContain(name);
     }
   });
