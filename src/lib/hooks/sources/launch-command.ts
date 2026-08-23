@@ -60,24 +60,85 @@ export const AGENT_EVENT_URL_ENV_VAR = 'CM_HOOK_URL';
 export const HOOK_PORT_ENV_VAR = 'CM_HOOK_PORT';
 
 /**
- * Every `CM_HOOK_*` variable CommandMate sets on a launch line.
+ * The `CM_HOOK_*` variables CommandMate sets on a launch line.
  *
  * Enumerated so the launch-line pin (受入条件 S8) has one list to check rather
  * than a grep. A name that is here and not on the launch line is a hook reading
  * a value CommandMate never wrote.
  *
- * **Every entry must start with `CM_HOOK_`** (Issue #1942). That prefix is what
- * `lib/security/env-sanitizer` strips out of a child process's environment, so
- * a name outside the namespace would be declared here and still ride along into
- * `claude -p` and the CLI probes. `lib/security` does not import this list —
- * the dependency between the two packages already runs hooks → security — so
- * the invariant is held by `tests/unit/security/child-process-hook-env-1942.test.ts`
- * rather than by the type system.
+ * **This is a subset, not the launch line.** Issue #1942 read this list as
+ * "the correlation variables", which it is not and has never been: the
+ * measurement in `tests/unit/lib/agent-launch-plan-secrets-1933.test.ts` finds
+ * six identity variables across the seven sources and only these two are in
+ * CommandMate's `CM_HOOK_` namespace. The whole set is
+ * {@link AGENT_CORRELATION_ENV_VARS}, and that is the list a caller asking
+ * "what identifies this agent?" wants.
+ *
+ * What this list is still for is the namespace invariant: **every entry must
+ * start with `CM_HOOK_`** (Issue #1942), because that prefix is what
+ * `lib/security/env-sanitizer` strips without needing to know the name. A
+ * `CM_HOOK_*` variable invented next year is covered by the prefix alone; one
+ * invented outside it has to be added to {@link AGENT_CORRELATION_ENV_VARS} and
+ * to the sanitizer's own copy, and the drift guard named below is what says so.
  */
 export const COMMANDMATE_HOOK_ENV_VARS: readonly string[] = [
   AGENT_EVENT_URL_ENV_VAR,
   HOOK_PORT_ENV_VAR,
 ];
+
+/**
+ * Every variable an `AgentLaunchPlan.env` uses to say **which server this agent
+ * reports to and as which instance** (Issue #1996).
+ *
+ * The four beyond {@link COMMANDMATE_HOOK_ENV_VARS} are spelled as literals here
+ * rather than imported from the sources that write them (`codex/hooks-config`,
+ * `copilot/hook-settings`, `antigravity/hooks-config`) because a plan is data,
+ * not a schema: this module renders `plan.env`, it does not know how any source
+ * built it. Importing three source modules to collect four strings would give
+ * `launch-command` a dependency on every tool it renders for, which is the
+ * coupling `AgentLaunchPlan` exists to avoid.
+ *
+ * What binds the literals to reality is a measurement, not the type system.
+ * `tests/unit/lib/agent-launch-plan-secrets-1933.test.ts` builds all seven
+ * plans and asserts their env keys are exactly this list plus
+ * {@link AGENT_LAUNCH_CONFIG_ENV_VARS}. A source that adds a variable, drops
+ * one, or renames one turns that test red and names it.
+ *
+ * `lib/security/env-sanitizer` keeps its own copy as
+ * `AGENT_CORRELATION_ENV_KEYS` and strips all of them. The two are joined by a
+ * test rather than an import, for the reason that file's module comment gives.
+ * Sorted, so a set diff reads cleanly.
+ */
+export const AGENT_CORRELATION_ENV_VARS: readonly string[] = [
+  'CM_AGENT_INSTANCE_ID',
+  'CM_AGENT_TOOL',
+  'CM_AGENT_WORKTREE_ID',
+  HOOK_PORT_ENV_VAR,
+  AGENT_EVENT_URL_ENV_VAR,
+  'CM_PERMISSION_HOOK_URL',
+];
+
+/**
+ * The other thing a launch line carries: where a tool reads its own settings.
+ *
+ * A per-tool HOME/config redirect, set by a source so the agent resolves the
+ * same settings file CommandMate just wrote — codex's `CODEX_HOME` is the whole
+ * of it today. Deliberately **not** stripped from CommandMate's child
+ * processes: a redirect is neither a credential nor an identity, and a child
+ * that inherits one is unaffected.
+ *
+ * **One name, measured, not three.** #1933's test carried a local allowlist of
+ * `CODEX_HOME` / `COPILOT_HOME` / `XDG_CONFIG_HOME`; building the seven plans
+ * shows only the first is ever written. `COPILOT_HOME` and `XDG_CONFIG_HOME` are
+ * *read* from the ambient environment by `copilot/hook-settings` and the
+ * antigravity config writer to decide where a file goes — they never reach
+ * `plan.env`. An allowlist wide enough to admit them would wave through a source
+ * that started setting one, which is the opposite of what this list is for.
+ *
+ * Enumerated for the same reason as the list above: so the drift guard can
+ * subtract it and hold the remainder to an exact set.
+ */
+export const AGENT_LAUNCH_CONFIG_ENV_VARS: readonly string[] = ['CODEX_HOME'];
 
 /**
  * Turn a plan into the line a shell can run.
