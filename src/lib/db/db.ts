@@ -194,6 +194,8 @@ export {
   getPushSubscriptionByEndpoint,
   getAllPushSubscriptions,
   getPushSubscriptionsForKind,
+  // Issue #2001: how many devices are in the acting bucket, without reading them.
+  countPushSubscriptionsForKind,
   updatePushSubscriptionPreferences,
   deletePushSubscriptionByEndpoint,
   // Issue #2000: the per-kind state a *new* subscription is created with.

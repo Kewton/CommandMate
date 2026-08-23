@@ -81,3 +81,25 @@ export {
   MAX_ESCALATION_THRESHOLD_MINUTES,
 } from './escalation-settings';
 export type { PushEscalationSettings } from './escalation-settings';
+
+// Cross-device dismissal of a resolved wait (Issue #2001).
+// NOTE: `waiting-push-notifier` reaches the notifier through its own module
+// path, for the reason the two blocks above give — a suite that stubs the whole
+// '@/lib/push' barrel would otherwise leave the closing edge inert.
+export {
+  decidePromptResolution,
+  notifyPromptResolved,
+  MIN_DEVICES_FOR_CROSS_DEVICE_CLEAR,
+} from './resolution-push-notifier';
+export type {
+  ResolutionPushDecision,
+  ResolutionPushReason,
+  PromptResolvedInput,
+} from './resolution-push-notifier';
+export {
+  markPromptCardShown,
+  hasPromptCard,
+  clearPromptCard,
+  clearAllPromptCards,
+  promptCardCount,
+} from './prompt-card-state';

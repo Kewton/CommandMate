@@ -37,6 +37,7 @@ import jaNotifications from '../../../locales/ja/notifications.json';
 import type { WaitingKind } from '@/lib/session/waiting-kind';
 import { getVapidConfig } from './vapid';
 import { shouldSendNotification, shouldSendWaitingPush } from './notification-dedup';
+import { markPromptCardShown } from './prompt-card-state';
 
 const logger = createLogger('push/sender');
 
@@ -121,6 +122,16 @@ export interface NotificationEvent {
    * chooses the body and supplies the dedup key — see {@link FailureContext}.
    */
   failure?: FailureContext;
+  /**
+   * This event *ends* a wait rather than opening one (Issue #2001).
+   *
+   * It rides on `kind: 'prompt'` deliberately, so it reaches exactly the
+   * devices that were told about the wait and carries exactly the `tag` their
+   * stale card has. Only `resolution-push-notifier` sets it; see that module
+   * and `docs/design/cross-device-notification-dismissal.md` for why the
+   * resolution is a *displayed* notification and not a silent close.
+   */
+  resolved?: boolean;
 }
 
 /** The JSON payload delivered to the Service Worker. Minimal by design. */
@@ -137,6 +148,14 @@ export interface PushPayload {
    * elsewhere, so a completion payload keeps the exact shape #1125 shipped.
    */
   waitingKind?: WaitingKind;
+  /**
+   * Present only on a resolution push (Issue #2001), and omitted rather than
+   * `false` elsewhere so every payload that shipped before keeps its exact
+   * shape. It is the Service Worker's whole instruction: close the stale cards
+   * carrying {@link PushPayload.tag}, then show this one silently in their
+   * place.
+   */
+  resolved?: true;
 }
 
 /** Collapse whitespace and truncate to a single short line. Never the full terminal. */
@@ -248,7 +267,12 @@ export function buildPushPayload(
   const messages = PUSH_MESSAGES[resolvePushLocale(locale)];
   const body =
     event.kind === 'prompt'
-      ? buildWaitingBody(event, messages, excerpt, now)
+      ? // Issue #2001: the resolution's body replaces the stale card's, so it
+        // has to answer the question that card asked. It quotes no excerpt —
+        // the prompt is over, and repeating it would read as a new one.
+        event.resolved === true
+        ? messages.promptResolved
+        : buildWaitingBody(event, messages, excerpt, now)
       : event.kind === 'failure'
         ? buildFailureBody(event, messages, excerpt)
         : excerpt
@@ -267,6 +291,7 @@ export function buildPushPayload(
     tag: `${event.worktreeId}:${event.kind}`,
     timestamp: now,
     ...(event.waitingKind ? { waitingKind: event.waitingKind } : {}),
+    ...(event.resolved === true ? { resolved: true as const } : {}),
   };
 }
 
@@ -307,6 +332,14 @@ async function sendToOne(
  * content hash, while two *distinct* incidents can share a line of prose.
  */
 function passesDedup(event: NotificationEvent): boolean {
+  // Issue #2001: a resolution is guarded by the card state instead, which is
+  // exact — `resolution-push-notifier` clears the mark as it sends, so a second
+  // resolution for the same card decides `no-card` and never reaches here.
+  // Running the content hash for it would be worse than redundant: its key is
+  // `${worktreeId}:prompt`, the same slot a legacy (pre-#1790) prompt event
+  // uses, so the two would suppress each other on a 30 s window neither wants.
+  if (event.resolved === true) return true;
+
   if (event.kind === 'prompt' && typeof event.waitingSince === 'number') {
     return shouldSendWaitingPush({
       worktreeId: event.worktreeId,
@@ -346,6 +379,17 @@ export async function notifyPushSubscribers(
     const db = getDbInstance();
     const subscriptions = getPushSubscriptionsForKind(db, event.kind);
     if (subscriptions.length === 0) return;
+
+    // Issue #2001: this is the only line in the process that knows a prompt card
+    // is really going to reach a device — past the VAPID check, past the dedup,
+    // past an empty subscription table. Recording it anywhere earlier would tell
+    // `resolution-push-notifier` to clear cards that were never shown, which is
+    // exactly the extra push Epic #2002 is trying not to spend. The resolution
+    // itself does not mark; it clears, and it does so in its own module so each
+    // direction has one writer.
+    if (event.kind === 'prompt' && event.resolved !== true) {
+      markPromptCardShown(event.worktreeId, now);
+    }
 
     webpush.setVapidDetails(config.subject, config.publicKey, config.privateKey);
 

@@ -74,3 +74,39 @@ describe('public/sw.js safety invariants', () => {
     expect(swSource).toContain('#1125');
   });
 });
+
+describe('public/sw.js userVisibleOnly contract (Issue #2001)', () => {
+  /**
+   * The resolution helper, sliced out of the file. Placed above the `push`
+   * listener in sw.js on purpose so this slice is well defined.
+   */
+  const helper = swSource.slice(
+    swSource.indexOf('function replaceStaleNotifications'),
+    swSource.indexOf("addEventListener('push'")
+  );
+
+  it('ships the cross-device clear at all', () => {
+    expect(helper).toContain('getNotifications');
+    expect(helper).toContain('.close()');
+  });
+
+  it('never ends a push event without a displayed notification', () => {
+    // Every subscription is created with `userVisibleOnly: true`
+    // (NotificationsSettings). Each engine checks what is *displayed* when the
+    // waitUntil promise settles, so closing after showing — or not showing at
+    // all — is a contract violation: Chrome substitutes its own generic card,
+    // Firefox spends a silent-push quota, WebKit revokes the subscription.
+    // docs/design/cross-device-notification-dismissal.md carries the citations.
+    expect(helper).toContain('showNotification');
+    expect(helper.indexOf('.close()')).toBeLessThan(helper.indexOf('showNotification'));
+  });
+
+  it('keeps the resolution silent and non-renotifying', () => {
+    const pushBlock = swSource.slice(
+      swSource.indexOf("addEventListener('push'"),
+      swSource.indexOf("addEventListener('notificationclick'")
+    );
+    expect(pushBlock).toContain('renotify: !resolved');
+    expect(pushBlock).toContain('options.silent = true');
+  });
+});
