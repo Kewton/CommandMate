@@ -4,7 +4,7 @@
 - **根拠 Epic**: [#1891](https://github.com/Kewton/CommandMate/issues/1891)（opencode / Copilot CLI 実機監査 38 件）
 - **先行設計**: #1720（hooks を機械判断の第一級ソースへ）、#1708（解釈できないフレーム）、#1737（waiting 判定の単一生成者）、#1629（instance → tool 解決）、[discoverability 原則](./discoverability-principle.md)（#1686）
 - **ステータス**: Reviewed（Stage 1–4 完了。Stage 1 / 2 / 3 / 4 の指摘を全件反映済み。Stage 4 は develop `90b67eb9` 基準のセキュリティ / OWASP レビュー）
-- **棚卸し基準日**: 2026-08-21（develop `90b67eb9`。関数名・ファイルパスで参照し、行番号は原則書かない）
+- **棚卸し基準日**: 2026-08-21（develop `90b67eb9`。関数名・ファイルパスで参照し、行番号は原則書かない）。**識別子の実在は 2026-08-23 に再棚卸しした**（#1995、develop `2d33c839`。方法と結果は §17）
 
 ---
 
@@ -145,7 +145,7 @@ CommandMate は **7 種類**の Coding Agent CLI（`CLI_TOOL_IDS`: claude / code
 **決定 2 — 既存機構との統合（DR1-001 / DR1-003）**: 「証拠が読めない」を表す機構は #1708 で**既に出荷済み**である。本書は**新しい状態値・新しい exit code・新しいタイマーを作らない**。
 
 - `sessionStatus` の値域は **4 値のまま**とし、`unknown` を追加しない。
-- 代わりに `StatusVerdict` に **`evidence: 'positive' | 'none'`** を持たせ、`capture --json` には additive な optional フィールド `statusEvidence` として露出する。
+- 代わりに `ScraperVerdict`（`src/lib/session/current-output-builder.ts`）に **`evidence: 'positive' | 'none'`** を持たせ、`capture --json` には additive な optional フィールド `statusEvidence` として露出する。
 - `isUnclassifiedActive` は **`evidence === 'none'` から導出**する互換フィールドに縮退させる。**現行定義 `(running && default) || (ready && no_recent_output)` との関係は経路ごとに異なる**（DR2-001。「すべての経路で真偽が変わらない」という初版の記述は §6.1 行(2) と自己矛盾していたため撤回する）。
   - `no_recent_output`（3）/ `default`（4）経路: **真偽は不変**（現行 `true`／移行後も `true`）。ここは既存 fixture で等価性を pin する。
   - `input_prompt`（2）経路: 現行は常に `false`。移行後は「肯定確認できなければ `true`」となるため、**意図的に `true` の範囲が広がる**。ここで等価性を pin してはならない（設計どおり実装すると必ず落ちる）。新たに `true` になる fixture を**別表で明示列挙**して pin する（§11）。
@@ -164,7 +164,11 @@ CommandMate は **7 種類**の Coding Agent CLI（`CLI_TOOL_IDS`: claude / code
 
 **決定 3 — 「否定の不在 → ready」3 経路の移行後マッピング（DR1-002）**: §6.1 の表を正とする。要点は **`no_recent_output`（5 秒 stale ヒューリスティック）由来の `ready` を廃止する**こと、および **`default` の wire 値（`running`）は変えない**ことである。
 
-**決定 4 — Auto-Yes との関係（DR1-006）**: Auto-Yes / response 系ポーリングは `sessionStatus` を**経由しない**。`src/lib/polling/response-checker.ts` の `detectPromptWithOptions`（`stripBoxDrawing(stripAnsi(...))` → `detectPrompt`）を直接呼ぶ（`src/lib/polling/` に `detectSessionStatus` / `sessionStatus` の参照は 0 件）。したがって「`unknown` では何もしない」という記述は**何も抑止しない**ため撤回し、次を決定とする。
+**決定 4 — Auto-Yes との関係（DR1-006）**: Auto-Yes / response 系ポーリングは `sessionStatus` を**経由しない**。`detectPrompt` を直接呼ぶ（`src/lib/polling/` に `detectSessionStatus` / `sessionStatus` の参照は 0 件）。**ただし「Auto-Yes の接続先は `src/lib/polling/response-checker.ts` の `detectPromptWithOptions`」という初版の記述は誤りである**（#1928 の実測。#1995 で訂正）。この 2 本は別のポーラで、キーを送るのは片方だけである:
+
+  - **キーを送る側 ＝ `src/lib/auto-yes-poller.ts` の `detectAndRespondToPrompt`**。`buildDetectPromptOptions(cliToolId)` を組んで `detectPrompt` を直接呼び、答えを解決して送出する。**下の抑止規則が実装されるのはここ**（#1928 で `evaluateAutoYesDialogGate` として着地済み）。
+  - **送らない側 ＝ `response-checker.ts` の `detectPromptWithOptions`**。プロンプトを DB に保存し WS broadcast / Web Push を出す「気づかせる」経路で、**送出コードを 1 行も持たない**（実測: 同ファイルに `sendKeys` 系の参照 0 件、`detectPromptWithOptions` の呼び出し元も同ファイル内のみ）。ここに抑止を足しても何も止まらない。
+したがって「`unknown` では何もしない」という記述は**何も抑止しない**ため撤回し、次を決定とする。
 
 - Auto-Yes が撃ってよいのは **D2 のツール別 `detectDialog` が肯定的にダイアログを返したとき**だけとする（`detectPrompt` の汎用な番号リスト推定だけでは撃たない）。これが #1896（返答本文の番号リストに `1` を送る）を止める唯一の位置である。
 - 汎用推定が真でツール別 `detectDialog` が偽のときは撃たず、既存の露出面 `autoYes.lastSuppression` に **`reason: 'unclassified-frame'`** を載せる（規約 1）。`AutoYesSuppressionReason` は server（`auto-yes-resolver.ts`）と CLI（`api-responses.ts`）の双方向 pin テスト（`tests/unit/cli/config/cross-validation.test.ts`）を持つため、**両方の更新を同一 PR の受入条件**にする。
@@ -196,7 +200,7 @@ export interface ToolStatusDetector {
   readonly tool: CLIToolType;
   readonly verifiedAgainst: { version: string; capturedAt: string };
   /** 肯定的証拠のみで判定。証拠が無ければ { status: 'running', evidence: 'none', reason: 'unknown_frame' } */
-  detect(frame: NormalizedFrame): StatusVerdict;
+  detect(frame: NormalizedFrame): ToolStatusVerdict;
   /** Auto-Yes と共有する肯定的ダイアログ検出（D1 決定 4） */
   detectDialog(frame: NormalizedFrame): DialogVerdict | null;
 }
@@ -235,7 +239,7 @@ export interface ToolStatusDetector {
   | 環境 | 結果 | 起動した子プロセス | 副作用 |
   |---|---|---|---|
   | `copilot` も `gh` も PATH に無い | `null`（0 ms） | **0** | 無し |
-  | `gh` はあるが `copilot` が PATH にも `$XDG_DATA_HOME/gh/copilot` にも無い | `null`（0 ms） | **0**（`gh` は `findOnPath` のゲートに使うだけで**実行しない**） | 無し。`$XDG_DATA_HOME/gh` は作られない |
+  | `gh` はあるが `copilot` が PATH にも `$XDG_DATA_HOME/gh/copilot` にも無い | `null`（0 ms） | **0**（`gh` は `findExecutableOnPath`（`src/lib/cli-tools/copilot-executable.ts`）のゲートに使うだけで**実行しない**） | 無し。`$XDG_DATA_HOME/gh` は作られない |
   | `copilot` が PATH にある（本機） | `{path:'/opt/homebrew/bin/copilot', version:'1.0.80', source:'path'}`（358 ms） | 1（`copilot --version`） | 無し |
 
   いずれの scenario でもユーザーの `~/.config/gh`（`config.yml` / `hosts.yml`）は更新されず、`~/.local/share/gh` は作成されなかった。**「解決できなければ probe をスキップし `detector.staleness` を `undefined` のままにする」既定（規約 (2)）にそのまま合流する**ので、copilot だけを probe 対象から外す必要はない。
@@ -278,13 +282,13 @@ id の**抽出そのもの**は各ソース実装（`sources/<tool>/`）の `Age
 2. **変異ケース**: 各 capability について「宣言値を反転させると `tests/unit/session/turn-model.test.ts` のどのケースが赤になるか」を受入条件として明記する（DR1-020 と同じ形。反転して赤にならない capability は、その時点で状態機械が capability を読んでいない証拠）。
 3. **`grep` を残す場合は「進捗指標ではない」と明示する**。0 件であることは着手前から真であり、D3 の実装有無を判定しない。
 
-**ツール名の `===` 比較が実在する 6 箇所（実測・grep ゲートの対象はここ）**: いずれも状態機械の外側にあり、D3 ではなく **D4 / D1 の担当**である。ファイル単位のゲートを掛けるならこの 3 ファイルに掛ける。
+**ツール名の `===` 比較が実在する 3 箇所（実測 2026-08-23。初版は 6 箇所）**: いずれも状態機械の外側にあり、D3 ではなく **D4 / D1 の担当**である。ファイル単位のゲートを掛けるならこの 3 ファイルに掛ける。**初版の 6 件のうち 3 件は着地済み**（#1906 が `send-user-message.ts` の生 `sendKeys` 分岐を、#1933 が `worktree-status-helper.ts` の `getStatusCaptureLines` の 2 分岐を消した）。**この再計測はこの表の 3 ファイルだけに掛けたもの**で、本書の他の件数（「実測 38 ファイル」「31 ファイル」等）は #1995 の棚卸しでは再計測していない（§17）。
 
 | ファイル | 箇所 | 内容 | 帰属 |
 |---|---|---|---|
 | `src/lib/session/claude-session.ts` | 1 | セッション名の primary anchor（`!instanceId \|\| instanceId === 'claude'`） | **ガード対象外**（#868 の primary anchor 規約。§4 D5 決定 4 のスコープ外＝Claude 固有モジュール） |
-| `src/lib/session/send-user-message.ts` | 2 | copilot の生 `sendKeys` 分岐（`copilotModel && cliToolId === 'copilot'` ほか） | **D4 / #1906 が削除する**（`cliTool.sendMessage` へ統一） |
-| `src/lib/session/worktree-status-helper.ts` | 3 | `getStatusCaptureLines` の opencode / gemini 分岐（2 件）と Claude 限定 health check（1 件） | **D4 の `captureSpec()` へ寄せる（2 件、DR3-014）／ health check 1 件は §12 で扱いを決める** |
+| `src/lib/session/send-user-message.ts` | 1 | `/model` 送出の copilot 分岐（`copilotModel && cliToolId === 'copilot'`、#576） | **生 `sendKeys` 分岐は #1906 が削除済み**（`cliTool.sendMessage` へ統一）。残る 1 件は `CopilotTool.sendModelCommand` の呼び出しで、D4 のゲートウェイ内側 |
+| `src/lib/session/worktree-status-helper.ts` | 1 | Claude 限定 health check（`isRunning && cliToolId === 'claude'`） | **`getStatusCaptureLines` の opencode / gemini 分岐 2 件は #1933 が `captureSpec()` へ移し終えており、この関数はもう存在しない**（DR3-014 は解消済み）。残る health check 1 件は §12 で扱いを決める |
 
 **6 ソース × 5 capability の宣言値（DR1-013）**: `tests/unit/hooks/sources/capabilities.test.ts` はこの表を pin する。「未検証」は Epic #1891 の実測範囲外（claude / codex / gemini / vibe-local は未監査）であることを意味し、既定値は **claude の現行挙動と等価**になるよう選ぶ。
 
@@ -345,14 +349,14 @@ interface TurnRecord {
   - release の第一義は期限ではなく**肯定的な解消**（`reply` / `permission.replied` / `post_tool_use` / `stop` / ポリシー再裁定）である。期限は最後の安全弁として扱う。
 - 重複判定は `eventIdentity` が宣言する id で行い、`null` のソースだけ時間窓を使う。**ライフサイクル系イベント（`stop` / `session_end`）は時間窓 dedup の対象外**とする（#1899 の「短い turn の `stop` が 3 秒窓で消える」は固有 id が無いことに起因するため、identity ではなく対象外化で塞ぐ）。**dedup 集合には instance ごとの上限を置く**（既存 `MAX_RECENT_EVENT_KEYS`=512 と同じ定数族。`resyncPending` の契機を一般化すると id の churn が増えるため、DR4-009）。
 - 再接続（pull 型）は `resync: 'session-status-poll'` に従い `GET /session/status` と `GET /permission` を読み、busy なら turn を再武装、idle かつ open turn があれば `stop` を合成（`closedBy: 'resync_idle'`）。
-- **再接続のたびに identity を確かめてからストリームを信じる（DR4-004・必須）**: 再接続ループは `readOpencodeEventStream` を開く前に **`/global/health` を通し、`version` が前回と一致すること**を確認する。一致しなければ（＝ port に別プロセスが居る）ストリームを開かず scraper へ降格し、理由コード **`port_identity_changed`** を運用者層に出す。**`resync_idle` による `stop` の合成も、この health チェックを通過した後にだけ行う**。health を通さないと、loopback に居る別プロセスが `stop` フレーム 1 本、あるいは `GET /session/status` の `{"ses_x":{"type":"idle"}}` 1 応答だけで `commandmate wait` を exit 0（完了）に化けさせられる（信頼境界の詳細は §10「opencode ポートの信頼境界」）。
+- **再接続のたびに identity を確かめてからストリームを信じる（DR4-004・必須）**: 再接続ループは `openOpencodeEventStream` を開く前に **`/global/health` を通し、`version` が前回と一致すること**を確認する。一致しなければ（＝ port に別プロセスが居る）ストリームを開かず scraper へ降格し、理由コード **`port_identity_changed`** を運用者層に出す。**`resync_idle` による `stop` の合成も、この health チェックを通過した後にだけ行う**。health を通さないと、loopback に居る別プロセスが `stop` フレーム 1 本、あるいは `GET /session/status` の `{"ses_x":{"type":"idle"}}` 1 応答だけで `commandmate wait` を exit 0（完了）に化けさせられる（信頼境界の詳細は §10「opencode ポートの信頼境界」）。
 - **replay の採用件数に上限を置く（DR4-009）**: `GET /permission` / `GET /question` の replay は 1 回あたりの採用件数に上限（例 50）を持ち、超過分は `decision_evicted` と同じ理由コードで**件数を露出**する（無言で落とさない、DR1-021 と同じ規律）。
 
 **決定 3 — 保留 decision の再裁定と `respond`（DR1-012）**:
 
 - `pendingDecisions` は **ポリシー変更時に再裁定される**。契機は (1) SSE / hooks の再接続、(2) **Auto-Yes の有効化・ポリシー変更**（#1898-2: 後から Auto-Yes を有効にしても保留 permission が裁定されない）、(3) `respond` の到達、(4) roster の変更。`resyncPending` を「再接続時のみ」から「上記契機の一般化」に広げる。
 - **`respond` は scraper の `promptData` が無くても `pendingDecisions[].id` で応答できる**（#1898-3）。対象は **`src/app/api/worktrees/[id]/prompt-response/route.ts`**（`src/cli/commands/respond.ts` が実際に叩く経路。pane を再キャプチャして `detectPrompt` を回す ID 不要のルートで、**すでに `getAskUserQuestion`（構造化）を参照する前例がある**）と `src/cli/commands/respond.ts` である（DR2-010）。**初版が挙げていた `respond/route.ts` は `messageId` 必須の Web UI 経路**であり、そこを直しても CLI `respond` は経路が違うため #1898-3 は解消しない。**`respond/route.ts`（Web UI の `messageId` 経路）は Stage 3 で対象に加えた（DR3-007）**: `#1898-3` の実装先は `prompt-response/route.ts` のままだが、`PromptPanel` を構造化 decision の受け皿にする以上、**Web UI から応答できる口（`PromptPanelProps` の `decisionId` と `respond/route.ts` の `messageId` optional 化）を Phase 4 で用意する**（§6.2 / §8 Phase 4 / §12）。番号 / ラベル → id の変換は server 側で行う（§10 のセキュリティ制約：id は SSE で受けたものだけを使う）。
-- **`decisionId` の解決スコープは resolve 済み target に閉じる（DR4-003・必須）**: `pendingDecisions` は `(worktreeId, cliToolId, instanceId)` の合成キーで保持されるのに、`respond` の入力は worktreeId ＋ 任意文字列である。したがって **`resolveSessionTarget` が返した (worktreeId, cliToolId, instanceId) の `pendingDecisions` の中だけ**を探す。**全 instance / 全 worktree を横断検索する実装を書いてはならない**（横断検索は worktree A への `respond` が別 instance の permission を承認し、しかも opencode の reply は port 単位なので**別の port へ送られる**）。解決できない id は **404 `decision_not_found`** を返し、`replyOpencodePermission` / 各 `source.deliverVerdict` へ渡さない（「見つからなければそのまま送る」フォールバックを作らない）。同じ規則を Phase 4 の `respond/route.ts` / `PromptPanelProps.decisionId` にも適用する。**既存の `respond/route.ts` は `getMessageById(db, messageId)` を引くだけで `message.worktreeId` と URL の `:id` を照合していない**（実測。所属未照合の前例）。**Phase 4 はこの前例を繰り返さず、併せて既存 `messageId` 経路にも所属照合を追加する**。
+- **`decisionId` の解決スコープは resolve 済み target に閉じる（DR4-003・必須）**: `pendingDecisions` は `(worktreeId, cliToolId, instanceId)` の合成キーで保持されるのに、`respond` の入力は worktreeId ＋ 任意文字列である。したがって **`resolveSessionTarget` が返した (worktreeId, cliToolId, instanceId) の `pendingDecisions` の中だけ**を探す。**全 instance / 全 worktree を横断検索する実装を書いてはならない**（横断検索は worktree A への `respond` が別 instance の permission を承認し、しかも opencode の reply は port 単位なので**別の port へ送られる**）。解決できない id は **404 `decision_not_found`** を返し、`replyOpencodePermission` / `answerPendingDecision`（内部で `AgentEventSource.encodeVerdict` を呼ぶ）へ渡さない（「見つからなければそのまま送る」フォールバックを作らない）。同じ規則を Phase 4 の `respond/route.ts` / `PromptPanelProps.decisionId` にも適用する。**既存の `respond/route.ts` は `getMessageById(db, messageId)` を引くだけで `message.worktreeId` と URL の `:id` を照合していない**（実測。所属未照合の前例）。**Phase 4 はこの前例を繰り返さず、併せて既存 `messageId` 経路にも所属照合を追加する**。
 - dedup で落としたイベント数は `promptDedup`（#1695 の前例）と同型のカウンタで露出する（§7）。
 
 **互換性（DR2-007 で改訂）**: `getStructuredSessionState` / `getStructuredPromptWaiting` / `getLastStopEventAt` の戻り値型は維持し、内部を turn レコードから導出する。
@@ -362,7 +366,7 @@ interface TurnRecord {
 - **DR1-019 の「`displayEvent` を状態導出に使ってはならない」は新規コードに対する規範**であり、出荷済みの `adoptTurnStart`（#1839 の「composer に戻っただけで `Stop` が来ていない turn を完了と呼ばない」ゲート）は **`turnId` / `openedAt` への移行が完了するまでの経過措置**として例外扱いとする。移行前に #1839 のゲートを外してはならない。
 - `closedBy` は `wait` の完了出力にも既存 `COMPLETION_BASIS`（`hook_stop` / `session_gone` / `scraper_ready`）と揃えた語彙で出す。
 
-### D4. `CLITool` を唯一のゲートウェイにする
+### D4. `ICLITool` を唯一のゲートウェイにする
 
 **決定**:
 
@@ -381,21 +385,21 @@ interface TurnRecord {
 |---|---|---|---|---|
 | routes（`src/app/api/**`） | 11 | assistant 5（`hasSession` / `capturePane`）／ `worktrees/route.ts`・`worktrees/[id]/route.ts`（`listSessions`）／ `worktrees/[id]/{capture,kill-session,special-keys,terminal}`（`capturePane` / `killSession` / `sendKeys` / `invalidateCache`） | 恒久除外 7 ＋ 段階解消 4 | 下の routes 内訳表のとおり。段階解消 4 件は Phase 2 |
 | pollers | 4 | `src/lib/auto-yes-poller.ts`（`invalidateCache`）／ `src/lib/polling/assistant-conversation-poller.ts`（`hasSession`）／ `src/lib/polling/global-session-poller.ts`（`hasSession`）／ `src/lib/polling/response-checker.ts`（`CACHE_MAX_CAPTURE_LINES` / `isCaptureWindowSaturated`） | **段階解消（4）** | D4 は禁止対象に poller を名指ししているのに、初版はこの 4 本をどちらの区分にも置いていなかった。**読み取りは第 2 のゲートウェイ（`captureSessionOutput`）と `ICLITool.isRunning` 経由に寄せ、キャッシュ無効化と capture 上限は `session` ファサード**（`src/lib/session/` に `invalidateSessionCache()` / `getCaptureWindow()` を新設し、行数は `ICLITool.captureSpec()` から取る）を通す。Phase 2（#1905 / #1906 と同じ層） |
-| ws / broadcast | 6 | `src/lib/ws-server.ts`（control-mode transport / flags / metrics）／ `src/lib/realtime/terminal-broadcast.ts`（`invalidateCache`）／ `src/lib/session-key-sender.ts`・`src/lib/prompt-answer-sender.ts`（`sendKeys` / `sendSpecialKeys` / `invalidateCache`）／ `src/lib/pasted-text-helper.ts`（`capturePane` / `sendKeys`）／ `src/lib/session-cleanup.ts`（`killSession` / `hasSession` / `clearAllCache`） | **恒久除外 1（`ws-server`）＋ 段階解消 5** | キー送出系（`session-key-sender` / `prompt-answer-sender` / `pasted-text-helper`）は `ICLITool.sendMessage` と special-keys 経路へ、`session-cleanup` は `ICLITool.killSession` へ、`terminal-broadcast` のキャッシュ無効化は上記ファサードへ寄せる。**`ws-server` の control-mode transport / flags / metrics は tmux トランスポートそのもの**で対応する `CLITool` メソッドが存在しないため**恒久除外** |
+| ws / broadcast | 6 | `src/lib/ws-server.ts`（control-mode transport / flags / metrics）／ `src/lib/realtime/terminal-broadcast.ts`（`invalidateCache`）／ `src/lib/session-key-sender.ts`・`src/lib/prompt-answer-sender.ts`（`sendKeys` / `sendSpecialKeys` / `invalidateCache`）／ `src/lib/pasted-text-helper.ts`（`capturePane` / `sendKeys`）／ `src/lib/session-cleanup.ts`（`killSession` / `hasSession` / `clearAllCache`） | **恒久除外 1（`ws-server`）＋ 段階解消 5** | キー送出系（`session-key-sender` / `prompt-answer-sender` / `pasted-text-helper`）は `ICLITool.sendMessage` と special-keys 経路へ、`session-cleanup` は `ICLITool.killSession` へ、`terminal-broadcast` のキャッシュ無効化は上記ファサードへ寄せる。**`ws-server` の control-mode transport / flags / metrics は tmux トランスポートそのもの**で対応する `ICLITool` メソッドが存在しないため**恒久除外** |
 | client（型のみ import ＋ フラグ参照） | 4 | `src/components/worktree/NavigationButtons.tsx`・`src/components/worktree/TerminalEscapeHatch.tsx`（`import type { NavigationKey }`）／ `src/components/Terminal.tsx`・`src/app/worktrees/[id]/terminal/page.tsx`（`isTmuxControlModeEnabledForClient`） | **段階解消（4）** | 型 2 件は `NavigationKey` の型モジュール移設で解消（上記決定。`allowTypeImports` は採らない）。フラグ 2 件は `isTmuxControlModeEnabledForClient` を client 安全モジュール（`src/config/` か `src/lib/browser-compat/`）へ移設して解消 |
 | cli（`src/cli/**`） | 1 | `src/cli/commands/capture.ts`（`../../lib/tmux/transcript-squeeze`。`src/cli/**` の違反はこれだけ） | 恒久除外 | tmux プロセスに触れない純粋な文字列関数で、D4 が防ごうとしている「ツール固有の前後処理の迂回」に当たらない。`src/lib/text/` 等へ移設できたら allowlist から外す（別 Issue） |
-| session（`src/lib/session/**`） | 5 | `cli-session.ts`（`session-transport` / `polling-tmux-transport` / `tmux-capture-cache`）／ `current-output-builder.ts`（`tmux-capture-cache`）／ `claude-session.ts`（`tmux`）／ `send-user-message.ts`（`tmux` / `tmux-capture-cache`）／ `worktree-session-reconcile.ts`（`tmux` / `control-mode-tmux-transport`） | **恒久除外 3 ＋ 段階解消 2** | **`cli-session`（`captureSessionOutput` の実体）と `current-output-builder`（capture キャッシュの読み手）は第 2 の公認ゲートウェイ本体なので恒久除外**。**`worktree-session-reconcile` も `listSessions` / `renameSession` を使っており、`src/app/api/worktrees/route.ts` と同じ理由（対応する `CLITool` メソッドが無い）で恒久除外**。`send-user-message` の生 `sendKeys` は **#1906 が削除**、`claude-session` は `ICLITool`（`startSession` / `isRunning` / `killSession`）へ寄せる |
+| session（`src/lib/session/**`） | 5 | `cli-session.ts`（`session-transport` / `polling-tmux-transport` / `tmux-capture-cache`）／ `current-output-builder.ts`（`tmux-capture-cache`）／ `claude-session.ts`（`tmux`）／ `send-user-message.ts`（`tmux` / `tmux-capture-cache`）／ `worktree-session-reconcile.ts`（`tmux` / `control-mode-tmux-transport`） | **恒久除外 3 ＋ 段階解消 2** | **`cli-session`（`captureSessionOutput` の実体）と `current-output-builder`（capture キャッシュの読み手）は第 2 の公認ゲートウェイ本体なので恒久除外**。**`worktree-session-reconcile` も `listSessions` / `renameSession` を使っており、`src/app/api/worktrees/route.ts` と同じ理由（対応する `ICLITool` メソッドが無い）で恒久除外**。`send-user-message` の生 `sendKeys` は **#1906 が削除**、`claude-session` は `ICLITool`（`startSession` / `isRunning` / `killSession`）へ寄せる |
 
 **routes 11 件の内訳（初版の 2 区分表を維持）**:
 
 | 区分 | 対象 | 理由 |
 |---|---|---|
-| 恒久除外 | `src/app/api/assistant/{conversation,current-output,session,start,terminal}/route.ts`（5 件） | `hasSession` / `capturePane`。Assistant Chat のセッションには対応する `CLITool` インスタンスが存在しない |
-| 恒久除外 | `src/app/api/worktrees/route.ts`、`src/app/api/worktrees/[id]/route.ts`（2 件） | `listSessions`（tmux セッションの全列挙）に対応する `CLITool` メソッドが無い |
-| 段階解消 | `src/app/api/worktrees/[id]/{capture,kill-session,special-keys,terminal}/route.ts`（4 件） | 対応する経路がある（`capture` は `captureSessionOutput`、他は `CLITool` メソッド）。Phase 2 で置換する |
+| 恒久除外 | `src/app/api/assistant/{conversation,current-output,session,start,terminal}/route.ts`（5 件） | `hasSession` / `capturePane`。Assistant Chat のセッションには対応する `ICLITool` インスタンスが存在しない |
+| 恒久除外 | `src/app/api/worktrees/route.ts`、`src/app/api/worktrees/[id]/route.ts`（2 件） | `listSessions`（tmux セッションの全列挙）に対応する `ICLITool` メソッドが無い |
+| 段階解消 | `src/app/api/worktrees/[id]/{capture,kill-session,special-keys,terminal}/route.ts`（4 件） | 対応する経路がある（`capture` は `captureSessionOutput`、他は `ICLITool` メソッド）。Phase 2 で置換する |
 
 **区分の合計（ファイル単位。allowlist もファイル単位で pin する）**: **恒久除外 12 ファイル**（assistant 5 ／ routes の `listSessions` 2 ／ `cli/commands/capture.ts` 1 ／ `cli-session` + `current-output-builder` + `worktree-session-reconcile` 3 ／ `ws-server` 1）、**段階解消 19 ファイル**（routes 4 ／ pollers 4 ／ ws・broadcast 5 ／ client 4 ／ session 2）。合計 31。**「削除のみ許可」の進捗対象は段階解消の 19 ファイルに限り、恒久除外 12 ファイルは進捗指標に数えない**。区分ごとの全件は **§16 付録 A**。
-- **間接迂回の限界を明記する（DR1-010）**: `no-restricted-imports` は import パスしか禁じないため、allowlist 対象（`src/lib/session/**` の一部）を経由すればゲートウェイを迂回できる。lint は迂回の**全数保証をしない**。補完として「`kill-session` route が `CLITool.killSession` を呼ぶ」ことを直接検証する**陽性テスト**を受入条件に置く。
+- **間接迂回の限界を明記する（DR1-010）**: `no-restricted-imports` は import パスしか禁じないため、allowlist 対象（`src/lib/session/**` の一部）を経由すればゲートウェイを迂回できる。lint は迂回の**全数保証をしない**。補完として「`kill-session` route が `ICLITool.killSession` を呼ぶ」ことを直接検証する**陽性テスト**を受入条件に置く。
 - **動的 import の扱い（DR4-005・訂正。初版の「同じ制限の対象とする」は撤回する）**: **ESLint 8 系（本リポジトリは `^8.57.0` / node_modules 実測 8.57.1）の `no-restricted-imports` は静的 `import` と `export … from` しか検出しない**。隔離環境の実測では、同じ `patterns` 設定に対して `import … from './lib/tmux/tmux'` と `export * from './lib/tmux/tmux'` は error になったが、**`await import('./lib/tmux/tmux')` と `require('./lib/tmux/tmux')` は 1 件も報告されなかった**。コアルールは `ImportExpression` / `CallExpression(require)` を見ないためである。したがって「動的取得も同じ制限の対象」という初版の記述は**成立せず、そのまま出荷するとガードが偽の安心を与える**（本リポジトリは Next.js の ALS 対策で `await import()` を実際に使う方針を持っており、動的化が「ガードを外す作法」として定着する余地がある）。決定は次のとおり。
   - **(a) 動的取得は `no-restricted-syntax` の別セレクタで捕まえる**: `ImportExpression[source.value=/(^|\/)(lib\/)?tmux\//]` と `CallExpression[callee.name='require'][arguments.0.value=/(^|\/)(lib\/)?tmux\//]` を、D5 決定 4 (1) で `error` へ格上げする既存 i18n セレクタと**同じ配列**に足す（1 ルール 1 severity・`overrides` は置換、という制約と両立させるため、`no-restricted-syntax` は base の 1 キーにセレクタを並べる形を保つ）。**現状 0 件なので allowlist は持たせず、例外を作らない**。
   - **(b) 同じ綴りを vitest ガード側にも二重化する**: `tests/unit/guards/tmux-import-allowlist.test.ts` が `import\(\s*['"][^'"]*tmux` / `require\(\s*['"][^'"]*tmux` を検出する（ESLint 設定の改変だけでガードが消えないようにする）。
@@ -578,17 +582,17 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 | (4) 既定（reason `default`） | `running` / `default`（low） | **wire 値は変更なし**（`running` / `default`）＋ `evidence:'none'` | `true`（現状と同値） |
 | ツール別完了マーカー（新規。実在するのは現在 opencode の 1 件のみ） | — | `ready` / `<tool>_response_complete` ＋ `evidence:'positive'` | `false` |
 
-- `StatusVerdict` に `evidence: 'positive' | 'none'` を追加する。`SessionStatus` の値域は**変更しない**。
+- `ScraperVerdict` に `evidence: 'positive' | 'none'` を追加する。`SessionStatus` の値域は**変更しない**。
 - `STATUS_REASON.UNKNOWN_FRAME = 'unknown_frame'` を追加（ツール別 detector が証拠を得られなかったときの理由コード）。**Phase 2（Epic #1891）の scope 外だったため未着地である**（`grep -rn 'UNKNOWN_FRAME' src/` は **0 件**。develop `a175767a` で実測。`STATUS_REASON` の現在値は `prompt_detected` / `thinking_indicator` / 各ツールの `*_selection_list` / `opencode_processing_indicator` / `opencode_permission_prompt` / `codex_pager` / `codex_hooks_review` / `opencode_response_complete` / `input_prompt` / `no_recent_output` / `default`）。**追加は Phase 3・#1927 の作業に含まれる**（§8）。
 - `current-output-builder.ts` の `isUnclassifiedActive` を **`evidence === 'none'` からの導出**に置き換える。**pin は merged（`mergeStructuredStatus` 適用後）の値に対して行い、「(3)(4) 由来は等価」と「(2) 由来の新規 `true` は明示列挙」の 2 本に分ける**（§11、DR2-001）。
 - **`mergeStructuredStatus` の上書き分岐を同時に改訂する（DR2-003、必須）**: 現行の「`structured.status === 'ready'` かつ `scraper.status === 'running'` なら `isUnclassifiedActive = false`」を、「**scraper が `evidence: 'positive'` のときだけ下ろす**」に変える。改訂せずに `no_recent_output` を `running` へ倒すと、この分岐が新たに成立して #1708 のガード（`wait` の 60 秒 dwell → exit 10、`TerminalEscapeHatch`、`unclassified-frame-tracker` の記録）が**無音で外れる**。この反転は scraper 単体 fixture では検出できないため、**ガードの pin は `current-output-builder` レベルのテストで行う**（§11）。
 - `capture --json` に `statusEvidence`（optional）・`lastKnownStatus` / `lastKnownStatusAt`（§7、DR1-014）を additive に追加する。
 - **契約変更は `current-output` だけでは足りない（DR3-005・必須）**: §7 のうちヘッダチップ / `BranchStatusIndicator` / sidebar / `ls` を受け皿にする行は、`current-output` ではなく **`GET /api/worktrees`（および `GET /api/worktrees/[id]`）が返す `sessionStatusByCli`（`CliToolSessionStatus`）の boolean 3 つ**で駆動されている（`isRunning` / `isWaitingForResponse` / `isProcessing` ＋ `waitingKind` / `waitingSince` / `awaitingInstruction` / `model`。reason も evidence も無い）。したがって **`CliToolSessionStatus` にも additive に `statusEvidence?` / `sessionStatusReason?`（および `lastKnownStatus?` / `lastKnownStatusAt?`）を足す**ことを、`CurrentOutputResponse` と**並ぶ第 2 の契約変更**として立てる。生成元は `src/lib/session/worktree-status-helper.ts`。**`sessionStatusByCli` を実装 PR が場当たりに広げると、`WorktreeItem` を読む 14 ファイル（`CommandPalette` / `RecentSessionsList` / `useWorktreesCache` / `WorktreeSelectionContext` 等）と CLI 契約が同時に動く**ため、追加フィールドは本書で確定した 4 つに限る。
 - **`ls` に理由を出す（DR3-005）**: `src/cli/commands/ls.ts` の `deriveStatus` は `isWaitingForResponse → isProcessing → isSessionRunning` の 3 分岐しか持たない。**表の状態列の隣に理由列（`reason`）を追加**し、`--json` には `statusEvidence` / `sessionStatusReason` をそのまま載せる（列が増えることは CHANGELOG に記載する）。`src/cli/types/api-responses.ts` の `CurrentOutputResponse` と `docs/user-guide/cli-operations-guide.md`、および commandmate-skills 側の転写箇所の更新を**同一 Phase の受入条件**に含める。
-- Auto-Yes の入口は `src/lib/polling/response-checker.ts` の `detectPromptWithOptions` である。ツール別 `detectDialog` を Auto-Yes と共有し、抑止時は `autoYes.lastSuppression.reason = 'unclassified-frame'` を載せる。**`AutoYesSuppressionReason` に 1 値足すときの同時更新先は 3 箇所（DR3-008）**: (1) server 側 `src/lib/polling/auto-yes-resolver.ts` の union、(2) CLI 側 `src/cli/types/api-responses.ts` の写し、(3) **`src/cli/commands/wait.ts` の `SUPPRESSION_CAUSE`（`Record<AutoYesSuppressionReason, string>` の網羅 Record。足さないと `npx tsc --noEmit` が落ちる）**。`tests/unit/cli/config/cross-validation.test.ts` が (1)(2) を双方向 pin する。なお同ファイルの `suppressionCause()` は未知 reason を verbatim で出す前方互換実装なので、**旧 CLI × 新サーバ**は理由コードをそのまま表示して壊れない（実測）。
+- Auto-Yes の入口（キーを送る側）は `src/lib/auto-yes-poller.ts` の `detectAndRespondToPrompt` である（§4 D1 決定 4。`response-checker.ts` の `detectPromptWithOptions` ではない）。ツール別 `detectDialog` を Auto-Yes と共有し、抑止時は `autoYes.lastSuppression.reason = 'unclassified-frame'` を載せる。**`AutoYesSuppressionReason` に 1 値足すときの同時更新先は 3 箇所（DR3-008）**: (1) server 側 `src/lib/polling/auto-yes-resolver.ts` の union、(2) CLI 側 `src/cli/types/api-responses.ts` の写し、(3) **`src/cli/commands/wait.ts` の `SUPPRESSION_CAUSE`（`Record<AutoYesSuppressionReason, string>` の網羅 Record。足さないと `npx tsc --noEmit` が落ちる）**。`tests/unit/cli/config/cross-validation.test.ts` が (1)(2) を双方向 pin する。なお同ファイルの `suppressionCause()` は未知 reason を verbatim で出す前方互換実装なので、**旧 CLI × 新サーバ**は理由コードをそのまま表示して壊れない（実測）。
 - 対象ファイルに `src/lib/session/prompt-waiting-composition.ts`（waiting の唯一の生成者）と `src/lib/detection/unclassified-frame-tracker.ts` を含める。
 - `wait --help` に「unclassified dwell（60 秒、exit 10）と `--stall-timeout` の違い」の相互参照を追加する（規約 3）。
-- **影響を受ける既存テストは `tests/` 配下だけではない**（DR2-024）: `src/lib/__tests__/status-detector.test.ts`（`reason === 'no_recent_output'` を直接 assert）と `src/lib/__tests__/cli-patterns.test.ts` も対象に含める（§9）。
+- **DR2-024 の「`src/` 配下にも影響テストがある」は #1939 で解消した**: 当該 2 本は `tests/unit/lib/status-detector-per-tool.test.ts`（`reason === 'no_recent_output'` を直接 assert）と `tests/unit/lib/cli-patterns-claude-prompt.test.ts` へ移り、`src/lib/__tests__/` は存在しない（#1939 / PR #1981 が `src/` 同居の unit テスト 13 ファイルを `tests/unit` へ移設）。影響テストの探索は `tests/` 配下で閉じてよい（§9）。
 - #1893 / #1894 / #1895 / #1896 / #1897 に加え、既報の **#1883（opencode の idle composer `Ask anything...`）/ #1885（copilot の生成中フレームが `ready`）/ #1886（copilot の folder-trust ダイアログ）** もこの構造で実装する（DR2-015）。移行前に着手する場合も、**`ready` フォールバックに依存しない**こと。
 
 ### 6.2 D3（構造化層）
@@ -597,7 +601,7 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 - `agent-event-state.ts` に `TurnRecord` と `openTurn / closeTurn / recordDecision / settleDecision / expireDecisions` を追加。既存 getter は turn から導出。`closedBy` と `displayEvent`（旧 `lastEvent`、表示専用）を持たせる。
 - **`TurnRecord` を既存の generation フェンスに接続する（DR3-003・必須）**: `beginAgentEventGeneration` に「open turn を `closedBy:'generation'` で閉じ、`pendingDecisions` を破棄する」処理を足し（既にダイアログ（#1725）とモデル（#1783）をクリアしている場所）、turn の導出側は既存 getter と**同じ条件**（`record.at < generation` を捨てる）で `generationAt < generationStartedAt` の turn を無視する。**(worktreeId, cliToolId, instanceId) の合成キーは再作成セッションで再利用される**ため、これを落とすと新品セッションが最大 30 分 `running` を publish し、`tests/unit/session/agent-event-generation-1723.test.ts`（実 `startClaudeSession` / `stopClaudeSession` を駆動）が赤になる。
 - `ingest.ts`（opencode）: `isDuplicateAgentEvent` を `eventIdentity` ベースに置換（`stop` / `session_end` は dedup 対象外）。裁定 → 記録の順に並べ替え。`permission.replied` を release にマップ。
-- `subscription.ts`: **`resyncPending`（`GET /permission` / `GET /question` の replay）は既に実装済み**なので新規に書き起こさない（二重 replay になる、DR2-011）。**追加するのは (a) activity 再取得（`probeActivity` / `fetchOpencodeActivity` ＝ `GET /session/status` に本番の呼び出し元を接続）と (b) 再接続後の turn 再武装**である。順序は `resyncPending` → `GET /session/status`。併せて `resyncPending` の**契機**を「再接続・Auto-Yes 有効化 / ポリシー変更・`respond` 到達・roster 変更」に一般化する。**さらに (c) 再接続ループの先頭に `fetchOpencodeHealth`（`/global/health`）を入れ、`version` の一致を確認してからストリームを開く**（現行 `runStream` は `state.gate.reset()` → `resyncPending(state)` → `readOpencodeEventStream(state.port, …)` を無条件に回しており、health check は初回 attach の `attachOpencodeEventStream` にしか無い）。不一致なら `port_identity_changed` で降格する（DR4-004、§10）。**replay の採用件数上限（例 50）と SSE 1 フレームの上限（例 256 KiB）もここで実装する**（DR4-009）。
+- `subscription.ts`: **`resyncPending`（`GET /permission` / `GET /question` の replay）は既に実装済み**なので新規に書き起こさない（二重 replay になる、DR2-011）。**追加するのは (a) activity 再取得（`probeActivity` / `fetchOpencodeActivity` ＝ `GET /session/status` に本番の呼び出し元を接続）と (b) 再接続後の turn 再武装**である。順序は `resyncPending` → `GET /session/status`。併せて `resyncPending` の**契機**を「再接続・Auto-Yes 有効化 / ポリシー変更・`respond` 到達・roster 変更」に一般化する。**さらに (c) 再接続ループの先頭に `fetchOpencodeHealth`（`/global/health`）を入れ、`version` の一致を確認してからストリームを開く**（現行 `runStream` は `state.gate.reset()` → `resyncPending(state)` → `openOpencodeEventStream(state.port, …)` を無条件に回しており、health check は初回 attach の `attachOpencodeEventStream` にしか無い）。不一致なら `port_identity_changed` で降格する（DR4-004、§10）。**replay の採用件数上限（例 50）と SSE 1 フレームの上限（例 256 KiB）もここで実装する**（DR4-009）。
 - `permission-decision-service.ts`: `reportPendingDialog` を `permissionHookPredictsDialog` で条件化。**期限は 2 本**（送達期限 `decisionTimeoutSeconds` は `deliveryExpired` を立てるだけで `waiting` を維持、保持期限 `dialogPendingMaxMs` 超過で `releasedBy: 'dialog_timeout'`）を実装する（DR2-004）。`decisionTimeoutSeconds` を release 期限に流用しないこと。
 - **`src/app/api/worktrees/[id]/prompt-response/route.ts`**（CLI `respond` の実経路。`getAskUserQuestion` を参照する前例あり）と `src/cli/commands/respond.ts`: scraper の `promptData` が無くても `pendingDecisions[].id` で応答できるようにする（#1898-3、DR2-010）。
 - **Web UI の応答経路も範囲に入れる（DR3-007・決定。DR2-010 の除外を解除）**: `src/app/api/worktrees/[id]/respond/route.ts`（`messageId` 必須の Web UI 経路）と `PromptPanelProps` に **`decisionId` を受ける口**を足し、`messageId` が無くても構造化 decision に応答できるようにする。**Phase 4 の作業**とし、Phase 4 が着地するまでは §7 の該当 3 行（未裁定 decision / `deliveryExpired` / `dialog_timeout`）の Web UI 欄を「**表示のみ。応答は TUI か CLI `respond`**」と明記して出す。現行の `PromptPanelProps` は `promptData: PanelPromptData | null` / `messageId: string | null` / `onRespond: (answer: string) => Promise<void>` しか持たないため、除外したままだと **「裁定待ちがある」と表示しながらその UI からは応答できない**画面を出荷することになり、discoverability 規約 1（判定を出したら操作手段も出す）に反する。
@@ -606,7 +610,7 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 - dedup / eviction のカウンタを `structuredEvents` に露出（§7）。
 - **ソース入口の共通バリデータを 1 つ作る（DR4-001 / DR4-014）**: `src/lib/hooks/sources/event-mapper.ts` に **`readBoundedId`** を追加し（現行 `readStringField` / `readNestedString` は非空判定だけで長さ上限も文字種制約も無い。`boundDetail` のような slice が無い）、`sources/*/` が payload から id / sessionId / toolName を取り出す経路を**すべてこれに通す**。上限値は push 経路（`/api/hooks/agent-event`）の定数を**共有**し、2 箇所に分かれないようにする（§10 外部入力の表）。**不正値は破棄（切り詰めない）**。
 - **`payloads.ts` の `raw: payload`（受信 payload の全量保持）をやめる**（`toOpencodePendingPermission` / `toOpencodePendingQuestion`）。deny パターン照合に必要な部分だけを上限つきで切り出して保持する（DR4-009）。
-- **`client.ts` の全 fetch を `redirect: 'manual'` にし、`content-type` を検証する**（`requestJson` は `application/json`、`readOpencodeEventStream` は `text/event-stream`）。3xx はエラーとして扱う。現行は `fetch` の既定（`redirect: 'follow'`）で content-type も見ておらず、**loopback 発の SSRF で `CM_ALLOWED_IPS` の IP 制限を迂回できる**（`src/middleware.ts` の IP 制限は `getClientIp` ベースなので、サーバ自身の loopback fetch は素通りする、DR4-004）。
+- **`client.ts` の全 fetch を `redirect: 'manual'` にし、`content-type` を検証する**（`requestJson` は `application/json`、`openOpencodeEventStream` は `text/event-stream`）。3xx はエラーとして扱う。現行は `fetch` の既定（`redirect: 'follow'`）で content-type も見ておらず、**loopback 発の SSRF で `CM_ALLOWED_IPS` の IP 制限を迂回できる**（`src/middleware.ts` の IP 制限は `getClientIp` ベースなので、サーバ自身の loopback fetch は素通りする、DR4-004）。
 - **`prompt-response/route.ts`（および Phase 4 の `respond/route.ts`）の `decisionId` 解決を resolve 済み target に閉じる**: 横断検索を実装せず、解決できない id は **404 `decision_not_found`**。Phase 4 では併せて既存 `messageId` 経路に **`message.worktreeId` と URL の `:id` の照合**を追加する（現行は未照合、DR4-003）。
 
 ### 6.3 D4（ツール抽象）
@@ -614,13 +618,13 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 - ESLint 設定に `no-restricted-imports` を **severity `error`** で追加。禁止パターンは **`@/lib/tmux/**`・`**/lib/tmux/**`・`./tmux/**` の 3 つ**（§4 D4 と同一定義。`./tmux/**` を落とすと `src/lib` 直下の 6 ファイルが素通りする、DR3-001。初版の `**/tmux/tmux` という書き方は使わない、DR2-013）。allowlist は `overrides` で明示してよい（`no-restricted-imports` は `no-restricted-syntax` と別ルール名なので i18n ガードに干渉しない、DR2-005）。**allowlist の初期値は §16 付録 A の 31 ファイル全件**（投入時点で lint 0 error を保つ、DR3-001）。`tests/unit/guards/tmux-import-allowlist.test.ts` が **ソート済みパス列挙を完全一致で pin**（増加禁止・削除のみ許可。**恒久除外 12 ファイルは削除の進捗対象にしない**）。**allowlist を空にすると 31 件が全件 error になる**ことを陽性対照として同テストに含める。
 - **動的取得は `no-restricted-imports` では捕まらないので別に塞ぐ（DR4-005）**: `no-restricted-syntax` に `ImportExpression` / `require` の tmux セレクタを足し（i18n セレクタと同じ base の 1 キー・`error`）、`tmux-import-allowlist.test.ts` にも同じ綴りの検出と **dynamic import 版 / require 版の陽性対照 2 件**を入れる。併せて **allowlist 済みモジュールが tmux シンボルを再エクスポートしないこと**を pin する（`src/lib/session/index.ts` が既に `export * from './claude-session'` を持つため、陽性対照が必須）。
 - `NavigationKey` を `src/lib/tmux/tmux.ts` から型モジュール（例 `src/types/terminal-keys.ts`）へ移し、`NavigationButtons.tsx` / `TerminalEscapeHatch.tsx` の型のみ import を解消する（`allowTypeImports` を持つ `@typescript-eslint/no-restricted-imports` へは切り替えない、DR3-001）。`isTmuxControlModeEnabledForClient` も client 安全モジュールへ移設する。
-- 陽性テスト: `kill-session` route が `CLITool.killSession` を呼ぶことを直接検証する（間接迂回は lint では捕まらないため）。
+- 陽性テスト: `kill-session` route が `ICLITool.killSession` を呼ぶことを直接検証する（間接迂回は lint では捕まらないため）。
 - `kill-session` route → `cliTool.killSession(id, instanceId)`。`OpenCodeTool.killSession` は **`/exit`（本文/Enter 分離）→ 待機 → force kill → 後置条件の確認（`hasSession` が false かつ割当 port の `/global/health` が無応答）→ port を forget** の順にする（**現行は `releaseOpencodeEventStream` ＝ `forgetOpencodePort` が先頭にあるため、順序を入れ替える**、DR4-012）。後置条件を満たせないときは `port_orphaned` / `graceful_exit_timeout` を理由コードとして出す。`CopilotTool.killSession` は `/exit`（分離送信）または `C-c` 二度、待機 ≥ 1s。
 - **`sendKeys` に `-l`（literal）経路を導入する（DR4-011）**: `KeySequence` の `kind:'literal'` は `tmux send-keys -l`、`kind:'key'` は既存 `ALLOWED_SPECIAL_KEYS` の allowlist 経路。本文とキーを 1 回の `send-keys` に混ぜない。現行はリポジトリ全体で `-l` の使用が 0 件で、本文が `Escape` / `C-c` / `Enter` と一致するとキーとして着弾する。**既存挙動の変更なので CHANGELOG に記載**する。
 - `send-user-message.ts` / `terminal/route.ts` の copilot 分岐を削除し `cliTool.sendMessage` に統一。`CopilotTool.sendMessage` は `sendMessageWithSubmitVerification` + copilot の `ComposerSpec`。
 - `OpenCodeTool.interrupt()` を override（Escape ×2、間隔 300ms）。**担当は #1894**（Phase 2 表では D1・D2 に加えて **D4** を持つ、DR2-016）。
 - `captureSessionOutput` は `ICLITool.captureSpec()` を読む（#1910 の alt-screen 対応の受け皿。#1910 自体は本方針の対象外、DR2-012）。
-- **`captureSpec()` の消費者は 2 つある（DR3-014）**: `captureSessionOutput` に加えて **`src/lib/session/worktree-status-helper.ts` の `getStatusCaptureLines`**（opencode → `OPENCODE_PANE_HEIGHT` / gemini → `GEMINI_PANE_HEIGHT` / その他 → `STATUS_DETECTION_CAPTURE_LINES`）が**同じ「ツール別 capture 行数」を第 2 の場所で決めている**。この経路は `captureSessionOutput` を通らない（sidebar / 一覧 API の状態検出が使う）。**Phase 3 で `getStatusCaptureLines` を `captureSpec()` に寄せる**（寄せるまでは pane geometry の定義が 2 箇所に残り、#1910 の alt-screen 対応が capture 経路にだけ入ると状態検出の capture 行数と食い違う）。同ファイルの Claude 限定 `isSessionHealthy` 分岐（`isRunning && cliToolId === 'claude'`）は capability でも `captureSpec` でも表せない別関心なので、扱いは §12 で決める。
+- **`captureSpec()` の消費者は 2 つある（DR3-014・#1933 で解消済み）**: `captureSessionOutput` に加えて **`src/lib/session/worktree-status-helper.ts`**（sidebar / 一覧 API の状態検出。`captureSessionOutput` を通らない）が「ツール別 capture 行数」を必要とする。初版はこれを同ファイル内の private な `getStatusCaptureLines`（opencode → `OPENCODE_PANE_HEIGHT` / gemini → `GEMINI_PANE_HEIGHT` / その他 → `STATUS_DETECTION_CAPTURE_LINES`）が第 2 の場所で決めていたが、**#1933 がこの関数を削除し、両消費者とも `resolveCaptureSpec()`（`src/lib/cli-tools/capture-spec.ts`）を読むようにした**ので、pane geometry の定義は 1 箇所になっている。同ファイルの Claude 限定 `isSessionHealthy` 分岐（`isRunning && cliToolId === 'claude'`）は capability でも `captureSpec` でも表せない別関心なので、扱いは §12 で決める。
 
 ### 6.4 D5（解決）
 
@@ -723,7 +727,7 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 
 | カテゴリ | 対象 | 変更 | リスク | 対策 |
 |---|---|---|---|---|
-| 検出層（**実測 38 ファイル / 1220 ケース**、DR3-021） | `src/lib/detection/**`、`tests/unit/status-detector*.test.ts`、`tests/unit/lib/cli-patterns.test.ts`、`tests/unit/lib/detection/**`、`tests/unit/detection-*.test.ts`、**`src/lib/__tests__/{status-detector,cli-patterns}.test.ts`**（`src` 配下にも `reason === 'no_recent_output'` を直接 assert するテストがある、DR2-024）。**`no_recent_output` を直接 assert するのは 8 ファイル**（`src/lib/__tests__/status-detector.test.ts` 32 中 1・`tests/unit/lib/status-detector.test.ts` 47 中 1・`tests/unit/detection-help-overlay-1497.test.ts` 4 中 2・`tests/unit/lib/current-output-builder.test.ts` 6 中 1・`tests/unit/cli/commands/wait.test.ts` 61 中 3・`tests/unit/session/structured-status-1723.test.ts` 16 中 3・`tests/unit/session/current-output-structured-status-1723.test.ts` 13 中 1・`tests/unit/status-detector-selection.test.ts` 53 中 1（定数 pin）） | 再編・`evidence` 追加・`no_recent_output` の `ready` 廃止・ツール別 idle composer 肯定検出 | 既存テストの期待値（`ready`/`no_recent_output` → `running`）が変わる。`input_prompt` 経路はツール単位で変わる（**wire 値は `ready` のまま**、DR3-002） | fixture 移行を先に行い、差分は明示的に更新。**`isUnclassifiedActive` は「(3)(4) 由来は真偽不変」と「(2) 由来の新規 `true` は明示列挙」の 2 本に分けて merged レベルで pin**（DR2-001 / DR2-003）。**`tests/unit/cli/commands/wait.test.ts` の「`ready` × `no_recent_output` × `isUnclassifiedActive` 無し → exit 0」は旧サーバ互換の pin として残し、`describe` 名に「旧サーバ（Phase 3 以前）」と明記する**（DR3-018。同ファイルの `isUnclassifiedActive` 付き degraded 形の pin とは矛盾しない） |
+| 検出層（**実測 38 ファイル / 1220 ケース**、DR3-021） | `src/lib/detection/**`、`tests/unit/status-detector*.test.ts`、`tests/unit/lib/cli-patterns.test.ts`、`tests/unit/lib/detection/**`、`tests/unit/detection-*.test.ts`、**`tests/unit/lib/{status-detector-per-tool,cli-patterns-claude-prompt}.test.ts`**（DR2-024 が `src/lib/__tests__/` に見つけた 2 本。#1939 / PR #1981 で `tests/unit` へ移設済み）。**`no_recent_output` を直接 assert するのは 8 ファイル**（`tests/unit/lib/status-detector-per-tool.test.ts` 32 中 1・`tests/unit/lib/status-detector.test.ts` 47 中 1・`tests/unit/detection-help-overlay-1497.test.ts` 4 中 2・`tests/unit/lib/current-output-builder.test.ts` 6 中 1・`tests/unit/cli/commands/wait.test.ts` 61 中 3・`tests/unit/session/structured-status-1723.test.ts` 16 中 3・`tests/unit/session/current-output-structured-status-1723.test.ts` 13 中 1・`tests/unit/status-detector-selection.test.ts` 53 中 1（定数 pin）） | 再編・`evidence` 追加・`no_recent_output` の `ready` 廃止・ツール別 idle composer 肯定検出 | 既存テストの期待値（`ready`/`no_recent_output` → `running`）が変わる。`input_prompt` 経路はツール単位で変わる（**wire 値は `ready` のまま**、DR3-002） | fixture 移行を先に行い、差分は明示的に更新。**`isUnclassifiedActive` は「(3)(4) 由来は真偽不変」と「(2) 由来の新規 `true` は明示列挙」の 2 本に分けて merged レベルで pin**（DR2-001 / DR2-003）。**`tests/unit/cli/commands/wait.test.ts` の「`ready` × `no_recent_output` × `isUnclassifiedActive` 無し → exit 0」は旧サーバ互換の pin として残し、`describe` 名に「旧サーバ（Phase 3 以前）」と明記する**（DR3-018。同ファイルの `isUnclassifiedActive` 付き degraded 形の pin とは矛盾しない） |
 | 構造化層（**実測 37 ファイル / 546 ケースが `agent-event-state` を参照**、DR3-021） | `src/lib/session/agent-event-state.ts`（1211 行）、`src/lib/hooks/**`、`permission-decision-service.ts` | turn モデル・capability | Claude の既存挙動（#1720〜#1725）の回帰。**generation フェンスを踏まないと #1723 の回帰（新品セッションが最大 30 分 `running`）が再発し `agent-event-generation-1723.test.ts` が赤になる**（DR3-003）。**#1901 / #1903 が同一ファイルで正面衝突する**（DR3-011） | 既存 Claude fixture/テストを全件維持。capability 既定値は Claude の現行挙動。**turn は generation フェンス配下**（§4 D3 決定 2）。**#1901 / #1903 は直列化し、Phase 1 の capability 型着地後に着手**（§8 順序制約） |
 | 統合判定 | `current-output-builder.ts`、`prompt-waiting-composition.ts`、`worktree-status-helper.ts` | 優先順位改訂＋**`mergeStructuredStatus` の上書き分岐の改訂**（構造化 `ready` は `evidence:'positive'` のときだけ `isUnclassifiedActive` を下ろす） | sidebar / `wait` の挙動変化。waiting 判定の二重化。**改訂を忘れると #1708 のガードが無音で外れる**（DR2-003） | waiting は `resolvePromptWaiting` の単一生成を維持。証拠なしは既存 `isUnclassifiedActive` 経路に集約し、`wait` の完了条件（`ready && !isUnclassifiedActive`）は変えない。**ガードの pin は merged レベル（`current-output-builder`）のテストで行う** |
 | 統合判定（表示） | sidebar / `ls` / ヘッダチップ / **`MessageInput` のトースト**（DR3-023） | `no_recent_output` 由来の stalled フレームが `ready` → `running`。**`input_prompt` 由来は `ready` のまま**（DR3-002） | 「完了に見えていたものが running に見える」ことへの戸惑い。**`running` は `sessionStatusToActivityFlags` で `isProcessing: true` になり、`MessageInput` の「queued (session busy)」トーストが新たに発火する**（DR3-023）。`.claude/skills/demo-video/scripts/cli-scene.sh` の `wait_until_busy` プローブも `isProcessing` で判定する | `lastKnownStatus` と理由コードを tooltip / `--json` に出す。CHANGELOG に明記。**`input_prompt` を `running` に倒さない決定（DR3-002）により、idle composer のトースト誤発火とデモ収録の破綻は起きない** |
@@ -734,7 +738,7 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 | lint / CI | ESLint 設定、ガードテスト | 追加（severity `error`） | **既存違反で CI 赤**（実測: develop の `npm run lint` は exit 0 / 0 行。allowlist が 31 件に満たないと即赤で子 Issue 22 本が止まる、DR3-001） / warn なら偽 PASS / **baseline に正しいコード（primary anchor・表示既定）を混ぜると誤削除を誘発**（DR3-009） | allowlist・baseline をパス列挙で初期化（**tmux は 31 件全件、`'claude'` は 36 箇所 / 19 ファイルに「解決フォールバック / 対象外」の区分を併記**）、増加禁止。`--max-warnings` に依存しない `error` を使う。**ガードの効きは陽性対照（allowlist を空にすると 31 件 error）で確認する** |
 | CLI 契約 | `src/cli/types/api-responses.ts`、`docs/user-guide/cli-operations-guide.md`、commandmate-skills（外部リポジトリ）の転写箇所、**`src/cli/commands/wait.ts` の `SUPPRESSION_CAUSE`**（`Record<AutoYesSuppressionReason, string>`。union に 1 値足すと `npx tsc --noEmit` が落ちる第 3 の更新先、DR3-008） | **`sessionStatus` の値域は不変**。optional フィールドの追加のみ。`resolvedBy` に `'client-fallback'` を additive 追加（DR3-004） | 旧 CLI / 旧 skill が新フィールドを知らない。**新 CLI × 旧サーバ**では解決エンドポイントが 404 になる（`handleApiError` は `code` 無し 404 を `UNEXPECTED_ERROR` にマップするため「worktree が無い」と区別できない、DR3-004） | 未知フィールドは無視されるだけで、`sessionStatus` / `isUnclassifiedActive` の既存分岐はそのまま動く（`wait.ts` の `suppressionCause()` は未知 reason を verbatim 表示する前方互換実装）。**旧サーバ対策は能力プローブ ＋ `client-fallback`**（§4 D5 決定 1）。4 箇所の更新を同一 Phase の受入条件に含める |
 | skills（**リポジトリ内**、DR3-012） | `tests/unit/skills/orchestrate-monitor/`（**14 テスト / fixtures 17 件**。うち **4 件が `sessionStatusReason:'no_recent_output'`、14 件が `isUnclassifiedActive`** を持つ）、`.claude/skills/orchestrate-monitor/scripts/{classify-state.sh,monitor.sh,verify-completion.sh}`、`.claude/skills/demo-video/scripts/cli-scene.sh`、**`.agents/skills` の写し** | Phase 3 で `no_recent_output` の wire 値が変わるため、**fixture が「製品が二度と出さない payload」になる** | `fixture-fidelity.test.ts` は「製品が出さない payload を fixture が記述する」ことを **#1522 の根本原因として明示的に禁じている**ため、放置すると赤になる。`classify-state.sh` は `sessionStatus == 'waiting'` 以外を IDLE に落とす（**D1 が製品層で消そうとしている「否定の不在」がスキル側に残る**）。`monitor.sh` は `cliToolId` から `mcbd-<cliToolId>-<worktree-id>` を組み立てて介入先ペインを決める。`cli-scene.sh` は `sessionStatusByCli.claude.isProcessing` でプローブし `[ $FIRST_WAIT -eq 10 ]` を hard assert する | **Phase 3 の受入条件に fixture 再採取（実 `capture --json` の生 payload）を含める**。`.claude/skills` と `.agents/skills` は byte-identical に保つ。`statusEvidence` を `classify-state.sh` の一次シグナルへ昇格させるかは §7 の未決行で決める |
-| Auto-Yes | `response-checker.ts`、`auto-yes-resolver.ts`、`api-responses.ts`、**`src/cli/commands/wait.ts`（`SUPPRESSION_CAUSE`）**（DR3-008）、**`src/app/api/worktrees/[id]/auto-yes/route.ts` の GET / POST 両方**（DR3-010） | `detectDialog` 共有・抑止理由の追加・既定ツールの解決一本化 | 抑止が広すぎると自動応答が止まる。**GET 側を直さないと「表示は claude・実際に走るのは worktree 既定の poller」という食い違いが残る**（DR3-010） | 抑止時は必ず `lastSuppression` に出す。実機 UAT で誤抑止を確認。**auto-yes state は in-memory Map（`globalThis.__autoYesStates`）で DB 永続化が無いため、既定変更にデータ移行は不要**（CHANGELOG にもそう書く） |
+| Auto-Yes | **`auto-yes-poller.ts`（キーを送る側。抑止規則はここ、§4 D1 決定 4）**、`response-checker.ts`（通知のみ）、`auto-yes-resolver.ts`、`api-responses.ts`、**`src/cli/commands/wait.ts`（`SUPPRESSION_CAUSE`）**（DR3-008）、**`src/app/api/worktrees/[id]/auto-yes/route.ts` の GET / POST 両方**（DR3-010） | `detectDialog` 共有・抑止理由の追加・既定ツールの解決一本化 | 抑止が広すぎると自動応答が止まる。**GET 側を直さないと「表示は claude・実際に走るのは worktree 既定の poller」という食い違いが残る**（DR3-010） | 抑止時は必ず `lastSuppression` に出す。実機 UAT で誤抑止を確認。**auto-yes state は in-memory Map（`globalThis.__autoYesStates`）で DB 永続化が無いため、既定変更にデータ移行は不要**（CHANGELOG にもそう書く） |
 | docs | `docs/module-reference.md`、`docs/architecture.md`、**`docs/design/upstream-fault-turn-boundary-1839.md`**（§1.3 に「経過 × scraper status/reason × `hasActivePrompt` × `isUnclassifiedActive`」の表を持ち、`wait` の完了条件 `!isRunning \|\| (sessionStatus === 'ready' && isUnclassifiedActive !== true)` を逐語で書いている）、**`docs/user-guide/cli-operations-guide.md`**（exit 10 の type 3 種と exit code 表）（DR3-019） | `module-reference` / `architecture` は 1 行ずつ追記。**残り 2 件は該当節を Phase 3 の受入条件として更新**（`no_recent_output` の wire 値変更・exit 10 の type・`ls` の理由列） | CLAUDE.md サイズ制限。**既存設計文書の逐語表が古くなると、次のレビューが古い表を根拠にする** | CLAUDE.md には書かない。更新漏れは Phase 3 の受入条件で塞ぐ |
 
 ---
@@ -779,7 +783,7 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 ### 10.3 decisionId の解決スコープ（DR4-003・IDOR）
 
 - **`decisionId` の解決は、`resolveSessionTarget` が返した (worktreeId, cliToolId, instanceId) に紐づく `pendingDecisions` の中だけで行う。横断検索を実装してはならない。**
-- **解決できない id は 404 `decision_not_found`** を返し、下流（`replyOpencodePermission` / 各 `source.deliverVerdict`）へ**渡さない**。「見つからなければそのまま送る」フォールバックを作らない。
+- **解決できない id は 404 `decision_not_found`** を返し、下流（`replyOpencodePermission` / `answerPendingDecision`）へ**渡さない**。「見つからなければそのまま送る」フォールバックを作らない。
 - **Phase 4 の `respond/route.ts` ＋ `PromptPanelProps.decisionId` にも同じ規則を適用する**。併せて、**既存の `messageId` 経路が `getMessageById(db, messageId)` を引くだけで `message.worktreeId` と URL の `:id` を照合していない**（実測）ことを Phase 4 で修正する。**この前例を新しい `decisionId` 経路に持ち込まないこと**が本項の主眼である。
 - 危険の形: `pendingDecisions` は合成キー `(worktreeId, cliToolId, instanceId)` で保持されるのに、`respond` の入力は worktreeId ＋ 任意文字列である。横断検索を選ぶと **worktree A への `respond` が別 instance の permission を承認**し、opencode の reply は port 単位なので**別の port へ送られる**。
 
@@ -789,9 +793,9 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 
 決定:
 
-1. **再接続のたびに `/global/health` を通す**。`version` が前回と変わっていたら（＝別プロセス）**ストリームを開かず scraper へ降格**し、理由コード `port_identity_changed` を運用者層に出す（§7）。現行 `subscription.ts` の `runStream` は**再接続ループに health check が無く**、`gate.reset()` → `resyncPending()` → `readOpencodeEventStream()` を無条件に回す（health は初回 attach のみ）。
+1. **再接続のたびに `/global/health` を通す**。`version` が前回と変わっていたら（＝別プロセス）**ストリームを開かず scraper へ降格**し、理由コード `port_identity_changed` を運用者層に出す（§7）。現行 `subscription.ts` の `runStream` は**再接続ループに health check が無く**、`gate.reset()` → `resyncPending()` → `openOpencodeEventStream()` を無条件に回す（health は初回 attach のみ）。
 2. **`resync` 由来の `stop` / idle 合成は、この health チェックを通過した後にだけ行う**。`closedBy:'resync_idle'` は「ストリームの内容ではなくポーリング結果で turn を閉じた」ことを意味するので、identity が確認できないときに使ってはならない。
-3. **`client.ts` の全 fetch を `redirect: 'manual'` にし、3xx を失敗として扱う。`content-type` も検証する**（`requestJson` は `application/json`、`readOpencodeEventStream` は `text/event-stream`）。現行は `fetch` 既定の `redirect: 'follow'` で content-type も未検証のため、**rogue が 302 を返せばサーバ側 fetch を任意 URL へ誘導でき、宛先が自分自身の API なら送信元が 127.0.0.1 になって `CM_ALLOWED_IPS` の IP 制限を迂回できる**（`middleware.ts` の IP 制限は `getClientIp` ベース。認証既定 OFF の構成で成立する）。
+3. **`client.ts` の全 fetch を `redirect: 'manual'` にし、3xx を失敗として扱う。`content-type` も検証する**（`requestJson` は `application/json`、`openOpencodeEventStream` は `text/event-stream`）。現行は `fetch` 既定の `redirect: 'follow'` で content-type も未検証のため、**rogue が 302 を返せばサーバ側 fetch を任意 URL へ誘導でき、宛先が自分自身の API なら送信元が 127.0.0.1 になって `CM_ALLOWED_IPS` の IP 制限を迂回できる**（`middleware.ts` の IP 制限は `getClientIp` ベース。認証既定 OFF の構成で成立する）。
 4. **`isPortFree` の TOCTOU は消せない**。`allocateOpencodePort` は bind して即 close する判定なので、判定と opencode 自身の bind の間に窓がある。したがって**「空いていた」ことを根拠にせず、launch 後に「その port の `/global/health` が応答すること」を確認してから subscription を開く**（現行 attach の順序を規約として固定する）。
 5. **kill の後置条件**（§4 D4 / §10.9 の graceful exit）を満たすまで port を forget しない。
 
@@ -896,12 +900,12 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 | 層 | テスト | 要点 |
 |---|---|---|
 | スクレイパ | `tests/unit/detection/tools/<tool>/fixtures.test.ts` | fixture 全件走査。各ツールに「処理中語彙を 1 語変えたフレーム → 証拠なし（`evidence:'none'`）」を**受入条件**として必須化（変異注入でしか非空虚性を証明できない、DR1-020） |
-| スクレイパ（互換 A: 等価） | `tests/unit/session/current-output-unclassified.test.ts`（新規 or 既存に追加。**`current-output-builder` を通した merged 値を検証する**） | `no_recent_output`（3）/ `default`（4）由来の `isUnclassifiedActive` の真偽が新旧定義で一致することを pin。**構造化 `ready` × scraper `running` の組合せを必ず含める**（`mergeStructuredStatus` の上書き分岐で `true` → `false` に反転しないこと。scraper 単体 fixture では検出できない、DR2-003） |
+| スクレイパ（互換 A: 等価） | `tests/unit/session/current-output-unclassified-1927.test.ts`（#1927 で着地済み。**`current-output-builder` を通した merged 値を検証する**） | `no_recent_output`（3）/ `default`（4）由来の `isUnclassifiedActive` の真偽が新旧定義で一致することを pin。**構造化 `ready` × scraper `running` の組合せを必ず含める**（`mergeStructuredStatus` の上書き分岐で `true` → `false` に反転しないこと。scraper 単体 fixture では検出できない、DR2-003） |
 | スクレイパ（互換 B: 拡大） | 同上（**別表として分離**） | `input_prompt`（2）由来で**新たに `true` になる fixture を明示列挙**して pin する。ここは等価性を pin しない（設計どおり実装すると必ず落ちるため、DR2-001）。ツール単位ロールアウトのため、肯定確認規則が未実装のツールは「現行どおり `false`」を pin する |
 | 構造化 | `tests/unit/hooks/sources/capabilities.test.ts`、`tests/unit/session/turn-model.test.ts` | §4 D3 の 6×5 表を**完全一致で** pin（**これが D3 の受入指標。grep 0 件は着手前から真なので指標にしない**、DR3-006）。**各 capability の宣言値を反転させると `turn-model.test.ts` のどのケースが赤になるかを受入条件として明記**（変異注入、DR1-020 / DR3-006）。実機で採った SSE 列（`permission.asked → replied → message.updated(user) → idle → message.updated(user)`）、copilot の `UserPromptSubmit → 12s → SessionStart`、別 session の idle、`stop` 欠落 → `stale` / `scraper_evidence` クローズ、`decisionTimeoutSeconds` 超過の release。**セッション再作成をまたいだ turn の非継承**（`beginAgentEventGeneration` 後に前世代の open turn が `running` を作らないこと。既存 `tests/unit/session/agent-event-generation-1723.test.ts` と整合、DR3-003） |
 | 統合 | `tests/unit/session/current-output-*.test.ts` | 優先順位 5 段の組合せ表。waiting が `resolvePromptWaiting` の出力とのみ一致すること |
 | 消費者契約 | `tests/unit/session/consumer-contract.test.ts`（新規、DR1-020） | 「証拠なし / `waiting` / `ready` を返したとき、`wait` の完了判定・send guard（`blocksSend`）・Auto-Yes・sidebar 集約・`ls` がそれぞれどう振る舞うか」を 1 本の表駆動テストで pin |
-| ガード | `tests/unit/guards/{tmux-import-allowlist,no-claude-fallback}.test.ts` | **ソート済みパス列挙の完全一致 pin**（件数 pin は不可）。増加禁止・削除のみ許可（tmux 側の**恒久除外 12 ファイルは削除の進捗対象にしない**、DR2-013 / DR3-001）。**初期値は §16 付録 A の 31 件全件**とし、**allowlist を空にすると 31 件が全件 error になる陽性対照**を同テストに含める（パターンが 3 綴りを押さえていることの証明、DR3-001）。`no-claude-fallback` は **vitest 側が本体**で、`files` スコープ（`src/app/api/**/route.ts`・`src/cli/commands/**`・`src/lib/session/**`）と**スコープ外の Claude 固有モジュール（`claude-session.ts` / `claude-executor.ts`）**を明示し、**5 綴り**（`??` / `\|\|` / 三項 / 変数初期化 / **呼び出し引数の既定**）を検出する（DR2-005 / DR2-006 / DR3-009）。`kill-session` route が `CLITool.killSession` を呼ぶ陽性テストを併設 |
+| ガード | `tests/unit/guards/{tmux-import-allowlist,no-claude-fallback}.test.ts` | **ソート済みパス列挙の完全一致 pin**（件数 pin は不可）。増加禁止・削除のみ許可（tmux 側の**恒久除外 12 ファイルは削除の進捗対象にしない**、DR2-013 / DR3-001）。**初期値は §16 付録 A の 31 件全件**とし、**allowlist を空にすると 31 件が全件 error になる陽性対照**を同テストに含める（パターンが 3 綴りを押さえていることの証明、DR3-001）。`no-claude-fallback` は **vitest 側が本体**で、`files` スコープ（`src/app/api/**/route.ts`・`src/cli/commands/**`・`src/lib/session/**`）と**スコープ外の Claude 固有モジュール（`claude-session.ts` / `claude-executor.ts`）**を明示し、**5 綴り**（`??` / `\|\|` / 三項 / 変数初期化 / **呼び出し引数の既定**）を検出する（DR2-005 / DR2-006 / DR3-009）。`kill-session` route が `ICLITool.killSession` を呼ぶ陽性テストを併設 |
 | CLI 契約 | `tests/unit/cli/config/cross-validation.test.ts`（既存） | `AutoYesSuppressionReason`（`unclassified-frame` 追加）の server / CLI 双方向 pin。**`src/cli/commands/wait.ts` の `SUPPRESSION_CAUSE`（網羅 `Record`）が第 3 の更新先**で、漏らすと `npx tsc --noEmit` が落ちる（DR3-008） |
 | skills（リポジトリ内） | `tests/unit/skills/orchestrate-monitor/`（14 テスト / fixtures 17 件） | **`fixture-fidelity.test.ts` は「製品が出さない payload を fixture が記述する」ことを禁じる**（#1522 の根本原因）。Phase 3 で `no_recent_output` の wire 値が変わると **4 fixture が製品の出力と食い違う**（`isUnclassifiedActive` を持つのは 14 件）。fixture は実 `capture --json` の生 payload で再採取する。`monitor-session-target.test.ts` の「payload に `cliToolId` が無ければセッション名を捏造しない」pin は `wait.ts` の表示既定と表裏なので壊さない（DR3-009 / DR3-012） |
 | **セキュリティ（DR4-006）** | `tests/unit/hooks/sources/event-id-validation.test.ts`（新規）／ `tests/unit/session/turn-model.test.ts`（既定の置き場）／ `tests/unit/api/capabilities.test.ts`（新規）／ opencode の `client` / `subscription` の単体テスト／ `tests/unit/guards/*`／ hook 生成の単体テスト | **§13.2 の受入条件がそのままテストの一覧である**。本リポジトリの既存のやり方（`AUTH_EXCLUDED_PATHS` の完全一致・`SENSITIVE_ENV_KEYS`・`ALLOWED_SPECIAL_KEYS` の allowlist・`MAX_SESSION_ID_LENGTH` の 400 応答・logger の `SENSITIVE_KEY_PATTERN` がいずれも単体テストで pin されている）に倣い、**§10 の決定は必ず機械可読なガードに落とす**。とくに (a) **不正 id は破棄であって切り詰めではない**こと、(b) `redirect:'manual'`、(c) **health を通す前に stop / idle を信じない**こと、(d) **別 target の decisionId は 404**、の 4 件は**変異注入**（規則を外すと赤になること）まで確認する |
@@ -919,7 +923,7 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 - Epic #1891 のうち #1907 / #1908 / #1910 / #1912 / #1913 / #1914 の課題（§8 Phase 2 の表で「対象外」と明記した子 Issue。#1911 は D1 の対象に格上げ、#1913 は対象外だが `DETECTOR_VERSION_PROBES` の前提を提供する）。
 - **`no-claude-fallback` の `files` スコープ外**（`src/lib/db/**`（`migrations` を含む）・`src/components/**`・`**/__tests__/**`・`src/lib/hooks/sources/claude/**`・`src/types/**` など）の `'claude'` リテラル。これらは allowlist ではなく**ガードの対象外**とする（`src` 全体では 231 箇所 / 85 ファイルあり、allowlist として現実的でないため、DR2-006）。
 - ~~`src/app/api/worktrees/[id]/respond/route.ts`（Web UI の `messageId` 経路）の構造化 decision 対応~~ → **除外を解除し Phase 4 の範囲に入れた**（DR3-007）。CLI `respond` の実経路は `prompt-response/route.ts` である（DR2-010）という事実は変わらないが、`respond/route.ts` と `PromptPanelProps` を外したままだと **「裁定待ちを表示するのに応答できない Web UI」**を出荷することになる。Phase 4 で `decisionId` を受ける口を additive に足す。Phase 4 着地までは §7 の当該 3 行を「表示のみ（応答は TUI / CLI `respond`）」と明記して運用する。
-- `src/lib/session/worktree-status-helper.ts` の **Claude 限定 `isSessionHealthy` 分岐**（`isRunning && cliToolId === 'claude'`）の一般化（DR3-014）。capability でも `captureSpec()` でも表せない別関心（プロセス健全性）であり、本書では扱わない。**ただし `getStatusCaptureLines`（ツール別 capture 行数）は Phase 3 で `captureSpec()` に寄せる**（同ファイル内だが別の関心）。
+- `src/lib/session/worktree-status-helper.ts` の **Claude 限定 `isSessionHealthy` 分岐**（`isRunning && cliToolId === 'claude'`）の一般化（DR3-014）。capability でも `captureSpec()` でも表せない別関心（プロセス健全性）であり、本書では扱わない。**ツール別 capture 行数のほうは #1933 が `resolveCaptureSpec()` へ寄せ終えており**（同ファイル内だが別の関心）、Phase 3 に残っていない。
 
 ---
 
@@ -928,7 +932,7 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 - [ ] 本書を Stage 1〜4 でレビューし、`docs/design/multi-agent-state-architecture.md` に転記する
 - [ ] `AgentSourceCapabilities` に 5 項目（**すべて宣言値**、`eventIdentity` は文字列 union）を追加
 - [ ] §4 D3 の **6×5 宣言値表**を `tests/unit/hooks/sources/capabilities.test.ts` で pin（「未検証」セルは既定＝claude 相当であることをコメントで残す）
-- [ ] `StatusVerdict` に `evidence: 'positive' | 'none'` を追加（**`SessionStatus` の値域は変更しない**）
+- [x] `ScraperVerdict` に `evidence: 'positive' | 'none'` を追加（**`SessionStatus` の値域は変更しない**）。**#1924 で `ScraperVerdict.evidence` ＋ `deriveScraperEvidence`（`src/lib/session/status-evidence.ts`）、#1926 で `statusEvidence` の露出が着地済み**
 - [ ] `STATUS_REASON.UNKNOWN_FRAME = 'unknown_frame'` を追加（使用は Phase 3）
 - [ ] `isUnclassifiedActive` を `evidence === 'none'` から導出に置き換え、**merged（`mergeStructuredStatus` 適用後）の値**に対して pin を 2 本用意する: (A) `no_recent_output` / `default` 由来は真偽が変わらない（構造化 `ready` × scraper `running` の組合せを含む）、(B) `input_prompt` 由来で新たに `true` になるケースは別表で明示列挙（DR2-001 / DR2-003）
 - [ ] `CurrentOutputResponse` に `statusEvidence?` / `lastKnownStatus?` / `lastKnownStatusAt?` を additive 追加し、`src/cli/types/api-responses.ts`・`docs/user-guide/cli-operations-guide.md`・commandmate-skills の転写箇所を同一 Phase で更新
@@ -938,7 +942,7 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 - [ ] ESLint `no-restricted-imports`（**severity `error`**、パターンは **`@/lib/tmux/**`・`**/lib/tmux/**`・`./tmux/**` の 3 つ**）＋ **§16 付録 A の 31 ファイルを初期値とするソート済み allowlist**（**恒久除外 12 / 段階解消 19 の 2 区分つき**）＋ `tmux-import-allowlist.test.ts`（完全一致 pin ＋ **allowlist を空にすると 31 件が全件 error になる陽性対照**）（DR2-013 / DR3-001）
 - [ ] **投入直後に `npm run lint` が exit 0 / 0 error のままであることを確認する**（develop の実測値。赤くすると Epic の子 Issue 22 本の CI が一斉に止まる、DR3-001）
 - [ ] `NavigationKey` を `src/lib/tmux/tmux.ts` から型モジュール（例 `src/types/terminal-keys.ts`）へ移し、`NavigationButtons.tsx` / `TerminalEscapeHatch.tsx` の型のみ import を解消する（**`@typescript-eslint/no-restricted-imports` + `allowTypeImports` へは切り替えない**。理由は §4 D4、DR3-001）
-- [ ] `kill-session` route が `CLITool.killSession` を呼ぶ**陽性テスト**
+- [ ] `kill-session` route が `ICLITool.killSession` を呼ぶ**陽性テスト**
 - [ ] `no-claude-fallback`: **vitest ガード**（`tests/unit/guards/no-claude-fallback.test.ts`）で実装し、`files` スコープを `src/app/api/**/route.ts`・`src/cli/commands/**`・`src/lib/session/**` に限定（DR2-005 / DR2-006）
 - [ ] **スコープ内の `'claude'` リテラル baseline は実測済み（36 箇所 / 19 ファイル: api 20/13・cli 8/3・session 8/3）**。Phase 1 の最初の作業は測定ではなく **1 行ごとの区分（解決フォールバック / 対象外）の確定**とし、そのソート済みパス列挙を pin する（減少のみ許可。対象外行は削除の進捗指標に数えない、DR3-009）
 - [ ] `no-claude-fallback` のスコープ外に **`src/lib/session/claude-session.ts` / `src/lib/session/claude-executor.ts`** を加え、**表示 / ラベル用の既定（`wait.ts`）・commander の option 既定（`report.ts`）・コメント行（`capture.ts`）は対象外**と明記する（DR3-009）
@@ -974,7 +978,7 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 - [ ] **`TurnRecord` を `beginAgentEventGeneration` の generation フェンス配下に置く**（open turn は `closedBy:'generation'` で閉じ、`generationAt < generationStartedAt` の turn は導出に使わない）。`turn-model.test.ts` に「セッション再作成をまたいだ turn の非継承」を入れる（DR3-003）
 - [ ] **D3 の受入指標を capability 表の完全一致 pin ＋ 変異ケースに差し替える**（grep 0 件は着手前から真＝空虚な緑。残すなら「進捗指標ではない」と明記する、DR3-006）
 - [ ] **Web UI の構造化 decision 応答**（`respond/route.ts` の `decisionId` 対応と `PromptPanelProps` の `decisionId`）を Phase 4 の範囲として起票する。着地までは §7 の 3 行を「表示のみ」と明記（DR3-007）
-- [ ] **`getStatusCaptureLines`（`worktree-status-helper.ts`）を `captureSpec()` に寄せる**（ツール別 capture 行数の第 2 の生産者。#1910 の alt-screen 対応と食い違わせない、DR3-014）
+- [x] **ツール別 capture 行数の第 2 の生産者（`worktree-status-helper.ts` の private な `getStatusCaptureLines`）を `captureSpec()` に寄せる**（#1910 の alt-screen 対応と食い違わせない、DR3-014）。**#1933 で着地済み**（関数は削除され `resolveCaptureSpec()` に置き換わった）
 - [ ] **ツール単位のキルスイッチ**（env / settings で当該ツールの evidence 判定を旧挙動へ戻す）と、**ロールアウト判断の観測条件**（`unclassified_frames` の記録件数が倒す前後で有意に増えない）を用意する（DR3-016）
 - [ ] **リポジトリ内 skill の fixture を再採取する**（`tests/unit/skills/orchestrate-monitor/fixtures/**` の 17 件。うち 4 件が `no_recent_output`・14 件が `isUnclassifiedActive`）。`fixture-fidelity.test.ts` が「製品が出さない payload」を禁じているため、Phase 3 の受入条件に含める（DR3-012）
 
@@ -987,9 +991,9 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 | S1 | **id 検証**: 長さ 256 超過 / 不正文字（`^[A-Za-z0-9._:-]+$` 外）の id を含む `permission.asked` fixture が **decision を作らない**ことを pin。**「切り詰めた id で decision が作られる」実装が赤になる**変異ケースを併設する（切り詰めは別リクエストへの誤爆を生む） | `event-mapper.readBoundedId` / `turn-model.test.ts` | 1（型・定数）／ 4（turn 側） | DR4-001 |
 | S2 | **定数の共有**: pull 側 id の上限が push 経路（`/api/hooks/agent-event`）の `MAX_SESSION_ID_LENGTH` と**同じ定数を参照**していることを pin（値の二重定義があれば赤） | 共通バリデータ | 1 | DR4-014 |
 | S3 | **破棄の露出**: 検証で落ちた decision の件数が `capture --json` に出る（無言で消えない） | `structuredEvents` | 4 | DR4-001 / DR1-021 |
-| S4 | **`redirect:'manual'`**: opencode `client.ts` の `requestJson` / `readOpencodeEventStream` が **3xx を失敗として扱う**ことを pin（302 を返す stub に対してリダイレクト先へ fetch しない）。`content-type` 不一致も失敗 | opencode `client` | 4（先行実装可） | DR4-004 |
+| S4 | **`redirect:'manual'`**: opencode `client.ts` の `requestJson` / `openOpencodeEventStream` が **3xx を失敗として扱う**ことを pin（302 を返す stub に対してリダイレクト先へ fetch しない）。`content-type` 不一致も失敗 | opencode `client` | 4（先行実装可） | DR4-004 |
 | S5 | **health-before-trust**: **再接続ループが `/global/health` を通し、`version` 不一致ならストリームを開かない**ことを pin。併せて **`resync` 由来の `stop` / idle 合成が health 未通過では起きない**ことを pin（health を外すと赤になる変異ケース） | opencode `subscription` | 4 | DR4-004 |
-| S6 | **decision スコープ**: **別 instance / 別 worktree の `decisionId` を送ると 404 `decision_not_found`** になり、`deliverVerdict` が呼ばれないことを pin。横断検索実装は赤 | `prompt-response/route.ts` | 1〜2 | DR4-003 |
+| S6 | **decision スコープ**: **別 instance / 別 worktree の `decisionId` を送ると 404 `decision_not_found`** になり、`answerPendingDecisionWithReceipt`（`src/lib/hooks/sources/pending-decisions.ts`）が呼ばれないことを pin。横断検索実装は赤 | `prompt-response/route.ts` | 1〜2 | DR4-003 |
 | S6b | **所属照合**: Phase 4 で `respond/route.ts` の `messageId` 経路に `message.worktreeId === :id` の照合が入ることを pin | `respond/route.ts` | 4 | DR4-003 |
 | S7 | **shell スニペットの port 検証**: 生成される hook コマンドに `case "$CM_HOOK_PORT" in ''\|*[!0-9]*) exit 0;; esac` 相当の数値検証が**含まれる**こと、および **scheme / host / relay 絶対パスが env 由来でない**ことを生成物の文字列比較で pin。**`${…:-` の既定値つき綴りが現れたら赤** | `hook-settings.ts` の生成テスト | 2（#1904） | DR4-002 |
 | S8 | **env の一覧**: `CM_HOOK_*` が launch line に必ず含まれること、および**子プロセス環境から除去される対象の一覧**（`sanitizeSessionEnvironment` / `SENSITIVE_ENV_KEYS` 相当）に入っていることを pin | launch / env sanitizer | 2 | DR4-002 |
@@ -1168,7 +1172,7 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 | DR2-021 | id 長さ上限 256 と関数名 `isCliToolId` が既存と揃わない | **採用（Stage 4 で上限値のみ 256 へ差し戻し）** | 関数名の `isCliToolType` への訂正は維持（§10.1(a)）。**上限は Stage 4 の DR4-014 により 128 → `MAX_SESSION_ID_LENGTH`（256）に改める**: 128 の根拠は `MAX_EVENT_DETAIL_LENGTH` との並びだったが、要求は push / pull を**同じ値**にすることであり、push 側 route が 256 で受理する id を pull 側だけ 128 で落とすと同じ id が経路によって通ったり落ちたりする。`MAX_EVENT_DETAIL_LENGTH`（128）は detail / `toolName` の上限として維持（§10.1 の表） |
 | DR2-022 | `capabilities` を毎ポーリング payload に載せるコスト | **採用（露出面を分ける）** | §7 に「ホットパス（`current-output`）では `source` 名と版のみ。`capabilities` 本体は `capture --json` の詳細取得時 / `instances` 一覧でのみ返す」を注記 |
 | DR2-023 | antigravity の probe は `agy --version`。`commandmate doctor` は存在しない | **採用** | §4 D2 の表を `agy --version` と実コマンドで記載し、`doctor` の言及を削除して `commandmate status` に一本化（新設が必要になったら別 Issue） |
-| DR2-024 | 影響テスト列に `src` 配下のテストが入っていない | **採用** | §9 検出層行に `src/lib/__tests__/{status-detector,cli-patterns}.test.ts` と `tests/unit/lib/detection/**` / `tests/unit/detection-*.test.ts` を追加し、§6.1 にも「`tests/` 配下だけを見ない」と明記 |
+| DR2-024 | 影響テスト列に `src` 配下のテストが入っていない | **採用（#1939 で前提が消滅）** | §9 検出層行に当該 2 本と `tests/unit/lib/detection/**` / `tests/unit/detection-*.test.ts` を追加した。当該 2 本は #1939 / PR #1981 が `tests/unit/lib/{status-detector-per-tool,cli-patterns-claude-prompt}.test.ts` へ移設したので、**`src/` 配下を別途見る必要はもう無い** |
 
 ### 15.3 Stage 3 Consider 項目の採否
 
@@ -1266,14 +1270,14 @@ Stage 4 が develop `90b67eb9` に対して実測し、**追加の対処を要�
 
 | # | パス | 使用している tmux API | import の綴り | カテゴリ | 区分 | 寄せ先 |
 |---|---|---|---|---|---|---|
-| 1 | `src/app/api/assistant/conversation/route.ts` | `hasSession` | `@/lib/tmux/**` | routes | 恒久除外 | —（Assistant Chat のセッションに対応する `CLITool` インスタンスが無い） |
+| 1 | `src/app/api/assistant/conversation/route.ts` | `hasSession` | `@/lib/tmux/**` | routes | 恒久除外 | —（Assistant Chat のセッションに対応する `ICLITool` インスタンスが無い） |
 | 2 | `src/app/api/assistant/current-output/route.ts` | `capturePane` / `hasSession` | `@/lib/tmux/**` | routes | 恒久除外 | 同上 |
 | 3 | `src/app/api/assistant/session/route.ts` | `hasSession` | `@/lib/tmux/**` | routes | 恒久除外 | 同上 |
 | 4 | `src/app/api/assistant/start/route.ts` | `hasSession` | `@/lib/tmux/**` | routes | 恒久除外 | 同上 |
 | 5 | `src/app/api/assistant/terminal/route.ts` | `hasSession` | `@/lib/tmux/**` | routes | 恒久除外 | 同上 |
 | 6 | `src/app/api/worktrees/[id]/capture/route.ts` | `hasSession` / `capturePane` | `@/lib/tmux/**` | routes | 段階解消 | `captureSessionOutput`（第 2 のゲートウェイ） |
 | 7 | `src/app/api/worktrees/[id]/kill-session/route.ts` | `killSession` | `@/lib/tmux/**` | routes | 段階解消 | `ICLITool.killSession`（#1905。陽性テスト対象） |
-| 8 | `src/app/api/worktrees/[id]/route.ts` | `listSessions` | `@/lib/tmux/**` | routes | 恒久除外 | —（`listSessions` に対応する `CLITool` メソッドが無い） |
+| 8 | `src/app/api/worktrees/[id]/route.ts` | `listSessions` | `@/lib/tmux/**` | routes | 恒久除外 | —（`listSessions` に対応する `ICLITool` メソッドが無い） |
 | 9 | `src/app/api/worktrees/[id]/special-keys/route.ts` | `hasSession` / `isAllowedSpecialKey` / `sendSpecialKeysAndInvalidate` | `@/lib/tmux/**` | routes | 段階解消 | `ICLITool`（special-keys 経路） |
 | 10 | `src/app/api/worktrees/[id]/terminal/route.ts` | `hasSession` / `sendKeys` / `sendSpecialKeys` / `invalidateCache` | `@/lib/tmux/**` | routes | 段階解消 | `ICLITool.sendMessage`（#1906） |
 | 11 | `src/app/api/worktrees/route.ts` | `listSessions` | `@/lib/tmux/**` | routes | 恒久除外 | —（同上） |
@@ -1295,7 +1299,7 @@ Stage 4 が develop `90b67eb9` に対して実測し、**追加の対処を要�
 | 27 | `src/lib/session/cli-session.ts` | `SessionTransport` / `getPollingTmuxTransport` / capture キャッシュ一式 | `@/lib/tmux/**` | session | 恒久除外 | **`captureSessionOutput` の実体＝第 2 の公認ゲートウェイ本体** |
 | 28 | `src/lib/session/current-output-builder.ts` | `CACHE_MAX_CAPTURE_LINES` / `isCaptureWindowSaturated` | `@/lib/tmux/**` | session | 恒久除外 | capture キャッシュの読み手（統合判定の本体） |
 | 29 | `src/lib/session/send-user-message.ts` | `sendKeys` / `sendSpecialKeys` / `invalidateCache` | `@/lib/tmux/**` | session | 段階解消 | `ICLITool.sendMessage`（#1906 が copilot 分岐ごと削除） |
-| 30 | `src/lib/session/worktree-session-reconcile.ts` | `listSessions` / `renameSession` / `getControlModeTmuxTransport` | `@/lib/tmux/**` | session | 恒久除外 | —（`listSessions` / `renameSession` に対応する `CLITool` メソッドが無い。`worktrees/route.ts` と同じ理由） |
+| 30 | `src/lib/session/worktree-session-reconcile.ts` | `listSessions` / `renameSession` / `getControlModeTmuxTransport` | `@/lib/tmux/**` | session | 恒久除外 | —（`listSessions` / `renameSession` に対応する `ICLITool` メソッドが無い。`worktrees/route.ts` と同じ理由） |
 | 31 | `src/lib/ws-server.ts` | `observeTmuxControlFirstOutputLatency` / `getControlModeTmuxTransport` / `isTmuxControlModeEnabled` | **`./tmux/**`** | ws / broadcast | 恒久除外 | —（control-mode トランスポートそのもの） |
 
 **内訳の再掲**: routes 11 ／ pollers 4 ／ ws・broadcast 6 ／ client 4 ／ cli 1 ／ session 5 ＝ **31**。区分は**恒久除外 12**（#1〜5, 8, 11, 13, 27, 28, 30, 31）／ **段階解消 19**（残り）。
@@ -1326,3 +1330,55 @@ D4 が「lint は迂回の全数保証をしない」ことの補完として受
 - **copilot 1.0.80**: Issue #1905 本文の「素の `exit` はチャット送信になる」は**この版では成立しない**。`exit`（一括 / 分離）・`/exit`（一括 / 分離）・`C-c` ×2・`C-d` の 6 綴りすべてが終了する。実際の欠陥は待ち時間で、終了所要は 11 サンプルで 1.006〜2.193 秒＝**全サンプルが `TUI_EXIT_WAIT_MS`(500ms) 超**。tmux kill は必ず終了処理の途中に着弾していた。`COPILOT_EXIT_WAIT_MS`(3000ms) を新設し、送出は `/exit` の本文/Enter 分離に揃えた。
 - **未解決（#1906 以降へ）**: copilot の終了確認は今も盲目 sleep である。肯定的証拠（`#{pane_current_command}` / `alternate_on`）を採るには `src/lib/tmux/**` に新しい read が要り、本 Issue の scope 外だった。tmux セッション自体は agent 終了後もシェルが残るので `hasSession` は終了の証拠にならない（opencode の step 4 も同じ理由で常に force kill 側へ落ちる）。
 
+---
+
+## 17. 識別子の棚卸しとガード（#1995）
+
+**本書は実装 Issue の正本として読まれる**（#1915 / Epic #1921）。存在しない識別子を名指す記述は、ワーカーを
+「探して見つからない」で止めるか、実在するものの**隣にもう 1 つ作らせる**。2026-08-23 の棚卸しで、実際に
+その状態だった記述が 8 件見つかった（内訳は #1995 の commit message）。原因はいずれも同じで、**改名・削除を
+した Issue が本書を直さなかった**ことである（#1900 / #1906 / #1928 / #1933 / #1939）。
+
+### 17.1 何を検査したか
+
+本書のバックティック span をすべて機械抽出し、`src/` / `tests/` / `scripts/` に**コメントを除いて**実在するかを
+突き合わせた。対象は識別子（型名・関数名・定数名・camelCase シンボル・snake_case の理由コード）と
+ファイルパス。実装は `scripts/design-doc-identifiers.ts`（任意の設計書に向けられる）。
+
+**件数は検査していない**。本書は「実測 38 ファイル」「31 件」のような数を各所に持つが、この棚卸しが読んだのは
+名前だけである。再計測したのは §4 D3 のツール名 `===` 比較の表 1 つだけで、他の数は 2026-08-21 時点の
+スナップショットのままである。
+
+### 17.2 なぜ「未実装」と「陳腐化」を機械で分けないか
+
+名前が実在しないとき、それが**陳腐化**（コードが動いたのに本書が追随していない）なのか**未実装**（本書が
+これから作れと言っている）なのかは、**外からは区別が付かない**。設計方針書は「これから作るもの」を名指す
+文書なので、実在しない名前があること自体は誤りではない。文面の手がかりでも分けられない —「新設する」と
+「既存の」は同じ表の中に並んでおり、#1939 が `src/lib/__tests__/**` を移したときに壊れたのは
+**「既存の」と書かれた文**だった。
+
+したがってガードはこの判定をしない。**人が一度だけ判定し、理由つきで宣言する**
+（`tests/unit/docs/design-doc-identifier-audit.test.ts` の宣言表。2026-08-23 時点で 20 件：
+未実装 11 / 撤回・削除の記録 2 / 外部語彙 5 / 本書独自の呼び名 1 / テスト内在 1）。
+そのうえで機械が固定するのは**遷移**である:
+
+- **実在 → 不在**: 改名か削除が着地し、本書が旧名を指したまま。宣言に無い finding として**その commit で赤になる**。
+  #1900 と #1933 はまさにこの形で、いずれも数週間気づかれなかった。
+- **不在 → 実在**: 予定していたものが着地した。宣言が finding を生まなくなり、**本書の時制（多くは §13 の
+  `- [ ]`）が実装より遅れている**ことが赤で分かる。
+
+### 17.3 ガードの置き場所（CI か verify か）
+
+**vitest（`tests/unit/docs/`）に置く。`npm run test:unit` は `.commandmate/verify.yaml` と
+`.github/workflows/ci-pr.yml` の両方が既に宣言しているので、これで CI と verify の両面に載る。**
+
+`scripts/check-*.mjs` の静的ガード 4 本に足す形は採らなかった。あの 4 本が独立スクリプトなのは
+「長い unit スイートより前に秒で落ちる」ためで（verify.yaml / #1882）、設計書は Epic あたり数回しか
+変わらず、その速さを必要とする下流が無い。5 本目にすると CI と verify に宣言が 2 つ増え、#1882 が
+静的ガードから取り除いた「同じ規則の宣言が 2 箇所にあって片方だけ更新される」形を作り直すことになる。
+同じ取引を `tests/unit/guards/test-file-placement.test.ts`（#1939）が先に採っている。
+
+**非空虚性**は変異注入で確認した。(a) §13.2 S4 に #1900 の旧名を戻すと「宣言に無い」ケースが赤、
+(b) 既に実在する名前を宣言表に足すと「着地済み」ケースが赤、(c) 無傷の tree では 17 ケース全緑。
+ガード自身とスクリプト自身は corpus から除外している（自分の散文を証拠に読むと、捕まえるべき名前が
+ちょうど「実在する」に化ける）。
