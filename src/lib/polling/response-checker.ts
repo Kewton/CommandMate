@@ -63,6 +63,9 @@ import { notifyPushSubscribers } from '@/lib/push';
 // `undefined` in exactly those tests — a TypeError this function's catch would
 // report as an ordinary "no response found".
 import { isPromptPushSuppressed } from '@/lib/push/prompt-push-gate';
+// Issue #2000: deep path for the same reason as the two imports above.
+import { notifyUpstreamFaultPush } from '@/lib/push/failure-push-notifier';
+import { matchUpstreamFault } from '@/lib/detection/upstream-faults';
 import { startWaitingPushNotifier } from '@/lib/push/waiting-push-notifier';
 import { getWaitingEpisode, observeWaitingEdge } from '@/lib/session/waiting-episode-state';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
@@ -77,6 +80,54 @@ import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
  * poll tick. (Issue #1897)
  */
 const COPILOT_STATUS_BAR_SCAN_ROWS = 8;
+
+/**
+ * How many rows from the bottom of a capture the upstream-fault check reads
+ * (Issue #2000).
+ *
+ * The same 100 as `current-output-builder`'s `realtimeSnippet`, and for the
+ * reason #1839 gives there: the wider capture keeps a banner from an hour ago
+ * in scope, and "is this happening now" is the only question worth ringing a
+ * phone about. Keeping the two windows equal also means the notification and
+ * the `upstreamFault` field an operator reads in `capture --json` are judging
+ * the same rows — a fault that rang but is invisible in the payload next to it
+ * is unverifiable.
+ */
+const UPSTREAM_FAULT_SCAN_ROWS = 100;
+
+/**
+ * Raise a push notification when this frame shows a NEW upstream fault
+ * (Issue #2000).
+ *
+ * Observed here, on the poller, rather than in `current-output-builder` where
+ * the published `upstreamFault` field is computed. That field is on a read
+ * path: it is evaluated when a browser polls the status API or holds the
+ * WebSocket open, i.e. exactly when the user is already looking. A phone
+ * notification is for the opposite situation, so the observation has to come
+ * from something the server runs on its own — and this poller is it.
+ *
+ * Every decision (new episode / still the same one / inside the cooldown) is
+ * made and logged by `push/failure-push-notifier`; nothing here decides
+ * anything, so the level can be handed over on every poll.
+ */
+function observeUpstreamFaultForPush(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+  output: string
+): void {
+  const snippet = output.split('\n').slice(-UPSTREAM_FAULT_SCAN_ROWS).join('\n');
+  const match = matchUpstreamFault(snippet);
+  // Fire-and-forget, like every other push call in this file: the poller must
+  // not slow down or break because a notification could not be delivered.
+  void notifyUpstreamFaultPush({
+    worktreeId,
+    cliToolId,
+    instanceId,
+    faultId: match?.fault.id ?? null,
+    matchedText: match?.matchedText,
+  }).catch(() => {});
+}
 
 // Issue #1790: arm the waiting-edge push subscription.
 //
@@ -670,6 +721,11 @@ export async function checkForResponse(
     // taken from the same constant extractResponse() measures saturation against
     // (Issue #1670) — a literal here would silently decouple the two.
     const output = await captureSessionOutput(worktreeId, cliToolId, CACHE_MAX_CAPTURE_LINES, instanceId);
+
+    // Issue #2000: the frame is in hand, so this is the cheapest place to ask
+    // whether the model API has stalled the session. Level in, edge out — see
+    // the helper.
+    observeUpstreamFaultForPush(worktreeId, cliToolId, instanceId, output);
 
     // Layer 2: Accumulate TUI content for full-screen TUI tools, so a turn that
     // outgrows the alternate-screen pane keeps the head that has scrolled away.

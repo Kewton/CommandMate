@@ -31,6 +31,8 @@ import {
   finishVerificationRun,
   getRunningVerificationRun,
   getTask,
+  // Issue #2000: read back to name the failing gates in the notification body.
+  getVerificationRun,
   listTasks,
   type Task,
   type VerificationGateSource,
@@ -45,6 +47,10 @@ import {
 import { getVerifiableTask } from '@/lib/db/tasks-db';
 import { resolveDefaultBranchName } from '@/lib/git/git-default-branch';
 import { createLogger } from '@/lib/logger';
+// Issue #2000: deep path, not the `@/lib/push` barrel — several suites replace
+// that barrel with a stub declaring only `notifyPushSubscribers`, and a call
+// reached through it would be `undefined` in exactly those tests.
+import { notifyVerificationFailurePush } from '@/lib/push/failure-push-notifier';
 import {
   contractGateDefinitions,
   resolveContractGateIds,
@@ -1312,6 +1318,47 @@ function findDetachedContract(
 }
 
 /**
+ * Tell the operator's phone that a run did not pass (Issue #2000).
+ *
+ * Called from both terminal paths — the synchronous config failure and the
+ * executed run — because both leave the caller with no verdict and something to
+ * fix. Whether it actually notifies (a contract run does not) and how it is
+ * logged belongs to `push/failure-push-notifier`; this wrapper exists only to
+ * gather the failing gate ids and to guarantee that a broken notifier cannot
+ * take a verification run down with it.
+ *
+ * Fire-and-forget: the run's verdict is already recorded and the caller is
+ * waiting on it.
+ */
+function notifyRunFailure(
+  db: Database.Database,
+  input: RunVerificationInput,
+  runId: number,
+  taskId: string | null,
+  status: VerificationRunTerminalStatus
+): void {
+  let failedGateIds: string[] | undefined;
+  try {
+    failedGateIds = getVerificationRun(db, runId)
+      ?.gates.filter((gate) => gate.status !== 'passed' && gate.status !== 'skipped')
+      .map((gate) => gate.gateId);
+  } catch {
+    // The row is gone (worktree deleted mid-run). The notification is still
+    // worth sending; it just cannot name the gates.
+  }
+
+  void notifyVerificationFailurePush({
+    worktreeId: input.worktreeId,
+    runId,
+    taskId,
+    status,
+    trigger: input.trigger,
+    instanceId: input.instanceId ?? null,
+    failedGateIds,
+  }).catch(() => {});
+}
+
+/**
  * Open a verification run and execute it in the background.
  *
  * Returns as soon as the run row exists, so an HTTP caller gets an id it can
@@ -1417,6 +1464,10 @@ export async function startVerification(
     });
     finishVerificationRun(db, run.id, 'error');
     logger.warn('verification-config-unusable', { runId: run.id, worktreeId: input.worktreeId });
+    // Issue #2000: an unusable config leaves the verdict as absent as a red
+    // gate does, and the operator's next move is the same — so this path
+    // notifies too, subject to the same contract-task exclusion.
+    notifyRunFailure(db, input, run.id, taskId, 'error');
     if (trackedTask) {
       // The run opened and immediately errored, so the task passes through
       // `verifying` the same way it would for gates that ran: an unusable config
@@ -1477,6 +1528,11 @@ export async function startVerification(
       if (trackedTask) {
         recordTaskTransition(db, trackedTask.id, taskEventForRunStatus(terminalStatus), run.id);
       }
+      // Issue #2000. In the `finally` so a crashed run (which is recorded as
+      // `error` in the catch above) notifies exactly like a judged one, and
+      // after the task transition so the run's own history is complete before
+      // anything is said about it.
+      notifyRunFailure(db, input, run.id, taskId, terminalStatus);
       releaseSlot();
       inFlight.delete(run.id);
     }

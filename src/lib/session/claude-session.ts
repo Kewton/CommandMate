@@ -41,6 +41,10 @@ import {
   SessionStartTimeoutError,
   isSafeSessionStartError,
 } from '@/lib/session/session-start-error';
+// Issue #2000: deep path rather than the `@/lib/push` barrel — suites that
+// replace that barrel wholesale would leave this undefined on the very path it
+// reports, and the catch below would report the TypeError as a session failure.
+import { notifySessionStartFailurePush } from '@/lib/push/failure-push-notifier';
 
 const logger = createLogger('claude-session');
 
@@ -760,6 +764,20 @@ export async function startClaudeSession(
       // dialog so a dialog still on screen is answered first.
       const errorPattern = findSessionErrorPattern(cleanOutput);
       if (errorPattern !== null) {
+        // Issue #2000: the reader has to act on this — retrying will not help
+        // until the reason on screen is dealt with — so it belongs in the
+        // "action required" bucket. Raised here rather than at a caller because
+        // this is the one place the terminal failure is established, and the
+        // sibling `SessionStartTimeoutError` below deliberately does NOT notify
+        // (#1637: the session and its process are alive and the documented
+        // advice is to retry in a few seconds).
+        void notifySessionStartFailurePush({
+          worktreeId,
+          cliToolId: CLAUDE_CLI_TOOL_ID,
+          instanceId,
+          toolName: 'Claude Code',
+          detectedPattern: errorPattern,
+        }).catch(() => {});
         throw new SessionStartFailedError('Claude Code', sessionName, errorPattern);
       }
     }

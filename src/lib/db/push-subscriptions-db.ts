@@ -10,8 +10,57 @@
 import { randomUUID } from 'crypto';
 import Database from 'better-sqlite3';
 
-/** Notification kinds that a subscription can independently opt into. */
-export type PushNotificationKind = 'prompt' | 'completion';
+/**
+ * Notification kinds a subscription can be fanned out for.
+ *
+ * Issue #2000 split the axis from "what happened" to "do you have to act".
+ * `prompt` and `failure` are both the acting half, so they share one stored
+ * toggle — see {@link KIND_COLUMN}. The kind still travels separately because
+ * the body wording and the Service Worker `tag` differ: a failure must not
+ * replace the card for a prompt that is still waiting.
+ */
+export type PushNotificationKind = 'prompt' | 'completion' | 'failure';
+
+/**
+ * Which stored toggle governs each kind (Issue #2000).
+ *
+ * The table keeps two columns on purpose. The Issue's own proposal is two
+ * buckets — "you need to act" and "for information" — and a prompt waiting, a
+ * failed verification, an upstream fault and a session that could not start are
+ * all the first one. A third column would have to be migrated, surfaced in the
+ * UI and explained, to split a bucket nobody has asked to split. Written as an
+ * exhaustive Record so a new kind fails the type check here rather than
+ * silently landing in the completion bucket.
+ */
+const KIND_COLUMN: Record<PushNotificationKind, 'enabled_prompt' | 'enabled_completion'> = {
+  prompt: 'enabled_prompt',
+  failure: 'enabled_prompt',
+  completion: 'enabled_completion',
+};
+
+/**
+ * Per-kind state a **newly created** subscription starts in (Issue #2000).
+ *
+ * `enabledCompletion: false` is the whole of the Issue's default change. It is
+ * applied here, in the INSERT, and NOT as a schema DEFAULT or a migration:
+ *
+ *  - the INSERT below has always bound these two columns explicitly, so the
+ *    `DEFAULT 1` v41 declares is dead code on this path (measured: it is the
+ *    only INSERT into this table in `src/`);
+ *  - existing rows must not move. Turning a live subscriber's completions off
+ *    behind their back reads as "notifications broke", which is indistinguishable
+ *    from a genuine fault. The adjudication on Issue #2000 is explicit: new
+ *    subscriptions only, existing rows untouched.
+ *
+ * The `ON CONFLICT` clause below preserves per-type preferences, so a device
+ * that re-subscribes with the same endpoint keeps whatever it had — the new
+ * default reaches an existing reader only when their endpoint changes (another
+ * browser, another device, or a full unsubscribe/re-register).
+ */
+export const NEW_SUBSCRIPTION_DEFAULTS = {
+  enabledPrompt: true,
+  enabledCompletion: false,
+} as const;
 
 /** A stored Web Push subscription (one device). */
 export interface PushSubscriptionRecord {
@@ -90,14 +139,25 @@ export function upsertPushSubscription(
       id, endpoint, p256dh, auth, device_label,
       enabled_prompt, enabled_completion, locale, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, 1, 1, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(endpoint) DO UPDATE SET
       p256dh = excluded.p256dh,
       auth = excluded.auth,
       device_label = excluded.device_label,
       locale = COALESCE(excluded.locale, push_subscriptions.locale),
       updated_at = excluded.updated_at
-  `).run(randomUUID(), input.endpoint, input.p256dh, input.auth, deviceLabel, locale, now, now);
+  `).run(
+    randomUUID(),
+    input.endpoint,
+    input.p256dh,
+    input.auth,
+    deviceLabel,
+    NEW_SUBSCRIPTION_DEFAULTS.enabledPrompt ? 1 : 0,
+    NEW_SUBSCRIPTION_DEFAULTS.enabledCompletion ? 1 : 0,
+    locale,
+    now,
+    now
+  );
 
   const record = getPushSubscriptionByEndpoint(db, input.endpoint);
   if (!record) {
@@ -130,7 +190,7 @@ export function getPushSubscriptionsForKind(
   db: Database.Database,
   kind: PushNotificationKind
 ): PushSubscriptionRecord[] {
-  const column = kind === 'prompt' ? 'enabled_prompt' : 'enabled_completion';
+  const column = KIND_COLUMN[kind];
   const rows = db
     .prepare(
       `SELECT ${SELECT_COLUMNS} FROM push_subscriptions WHERE ${column} = 1 ORDER BY created_at ASC`

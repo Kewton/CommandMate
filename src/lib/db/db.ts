@@ -196,6 +196,8 @@ export {
   getPushSubscriptionsForKind,
   updatePushSubscriptionPreferences,
   deletePushSubscriptionByEndpoint,
+  // Issue #2000: the per-kind state a *new* subscription is created with.
+  NEW_SUBSCRIPTION_DEFAULTS,
 } from './push-subscriptions-db';
 export type {
   PushSubscriptionRecord,

@@ -124,8 +124,10 @@ describe('push notification flow', () => {
   it('only sends to subscriptions opted into the event kind', async () => {
     upsertPushSubscription(db, sub('https://push.example/a'));
     upsertPushSubscription(db, sub('https://push.example/b'));
-    // b opts out of completion.
-    updatePushSubscriptionPreferences(db, 'https://push.example/b', { enabledCompletion: false });
+    // Issue #2000: completion is off for both at creation, so `a` has to opt IN
+    // for this to test the column rather than the default. `b` is left as
+    // created, which is the opted-out side.
+    updatePushSubscriptionPreferences(db, 'https://push.example/a', { enabledCompletion: true });
 
     const { notifyPushSubscribers } = await import('@/lib/push');
     await notifyPushSubscribers({

@@ -160,7 +160,8 @@ describe('push subscriptions API', () => {
     );
     const data = await res.json();
     expect(data.subscribed).toBe(true);
-    expect(data.subscription.preferences).toEqual({ prompt: true, completion: true });
+    // Issue #2000: completions are off for a newly registered device.
+    expect(data.subscription.preferences).toEqual({ prompt: true, completion: false });
   });
 
   it('GET reports not-subscribed for an unknown endpoint', async () => {
@@ -177,11 +178,13 @@ describe('push subscriptions API', () => {
     const res = await PATCH(
       jsonRequest('PATCH', {
         endpoint: 'https://push.example/device-1',
-        preferences: { completion: false },
+        preferences: { completion: true },
       })
     );
     const data = await res.json();
-    expect(data.subscription.preferences).toEqual({ prompt: true, completion: false });
+    // Issue #2000: asserted in the direction that differs from the creation
+    // default, so a PATCH that silently did nothing would fail here.
+    expect(data.subscription.preferences).toEqual({ prompt: true, completion: true });
   });
 
   it('PATCH returns 404 for an unknown endpoint', async () => {

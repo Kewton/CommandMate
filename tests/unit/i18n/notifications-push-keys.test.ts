@@ -32,6 +32,17 @@ const PUSH_KEYS = [
   'terminalAttention',
   'stillWaitingPrompt',
   'stillWaitingTerminal',
+  // Issue #2000: the failure bodies. One pair per FailurePushReason, plus a
+  // generic pair `buildFailureBody` falls back to when a producer sends
+  // `kind: 'failure'` without naming the reason.
+  'failureVerificationWithExcerpt',
+  'failureVerification',
+  'failureUpstreamWithExcerpt',
+  'failureUpstream',
+  'failureSessionStartWithExcerpt',
+  'failureSessionStart',
+  'failureWithExcerpt',
+  'failure',
 ] as const;
 
 /** Keys whose copy must carry the placeholder push-sender substitutes. */
@@ -39,6 +50,11 @@ const EXCERPT_KEYS = [
   'promptWaitingWithExcerpt',
   'completionWithExcerpt',
   'terminalAttentionWithExcerpt',
+  // Issue #2000
+  'failureVerificationWithExcerpt',
+  'failureUpstreamWithExcerpt',
+  'failureSessionStartWithExcerpt',
+  'failureWithExcerpt',
 ] as const;
 
 /** Keys whose copy must carry the elapsed-minutes placeholder (Issue #1790). */
