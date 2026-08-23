@@ -18,6 +18,20 @@ export {
 } from './notification-dedup';
 export type { DedupEvent, WaitingDedupEvent } from './notification-dedup';
 
+// Whether a prompt wait is worth notifying about at all (Issue #1999).
+// NOTE: the two producers import this from './prompt-push-gate' directly. A
+// suite that stubs the whole '@/lib/push' barrel would otherwise leave the gate
+// undefined on the path it guards.
+export {
+  decidePromptPush,
+  isPromptPushSuppressed,
+} from './prompt-push-gate';
+export type {
+  PromptPushGateInput,
+  PromptPushGateDecision,
+  PromptPushGateReason,
+} from './prompt-push-gate';
+
 // Waiting-edge driven notifications (Issue #1790).
 export {
   startWaitingPushNotifier,

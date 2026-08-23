@@ -57,6 +57,12 @@ import { notifyPushSubscribers } from '@/lib/push';
 // Issue #1790: imported by deep path, not through `@/lib/push`. Suites that
 // replace the barrel to count notifications (e.g. the #1547 escalation test)
 // would otherwise get `undefined` here and take down module evaluation.
+// Issue #1999: imported from its own module, not from the `@/lib/push` barrel
+// above. Several suites replace that barrel wholesale with a stub that only
+// declares `notifyPushSubscribers`, and a gate reached through it would be
+// `undefined` in exactly those tests — a TypeError this function's catch would
+// report as an ordinary "no response found".
+import { isPromptPushSuppressed } from '@/lib/push/prompt-push-gate';
 import { startWaitingPushNotifier } from '@/lib/push/waiting-push-notifier';
 import { getWaitingEpisode, observeWaitingEdge } from '@/lib/session/waiting-episode-state';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
@@ -793,16 +799,32 @@ export async function checkForResponse(
       const promptWaitingSince =
         getWaitingEpisode(worktreeId, cliToolId, instanceId)?.since ?? promptObservedAt;
 
-      void notifyPushSubscribers({
-        worktreeId,
-        worktreeName: worktree.name,
-        kind: 'prompt',
-        agentName: resolvedInstanceId,
-        instanceId: resolvedInstanceId,
-        waitingKind: 'prompt',
-        waitingSince: promptWaitingSince,
-        excerpt: promptDetection.promptData?.question ?? promptSaveContent,
-      }).catch(() => {});
+      // Issue #1999: Auto-Yes is a declaration that this session's prompts are
+      // answered without a human, so notifying for one is telling the reader the
+      // opposite of the truth. Only the notification is gated — the episode
+      // below still opens, so the WebSocket frame, the status API and the #1790
+      // reminder all see the wait exactly as they did before. The gate runs
+      // before the call rather than inside it because `shouldSendWaitingPush`
+      // records the episode the moment it decides to send.
+      if (
+        !isPromptPushSuppressed({
+          worktreeId,
+          cliToolId,
+          instanceId,
+          waitingSince: promptWaitingSince,
+        })
+      ) {
+        void notifyPushSubscribers({
+          worktreeId,
+          worktreeName: worktree.name,
+          kind: 'prompt',
+          agentName: resolvedInstanceId,
+          instanceId: resolvedInstanceId,
+          waitingKind: 'prompt',
+          waitingSince: promptWaitingSince,
+          excerpt: promptDetection.promptData?.question ?? promptSaveContent,
+        }).catch(() => {});
+      }
 
       observeWaitingEdge({
         worktreeId,
