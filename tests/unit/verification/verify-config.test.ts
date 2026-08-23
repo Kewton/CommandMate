@@ -696,13 +696,26 @@ describe('the repository\'s own .commandmate/verify.yaml', () => {
     // in #1946). Each runs the SAME script as its CI job — the check itself
     // lives in scripts/, never copied into this file or into ci-pr.yml; see
     // tests/unit/guards/static-guard-single-source.test.ts.
+    //
+    // [Issue #1994] `build-cli` / `build-server` / `build` / `integration`
+    // joined, closing four of CI's five unwatched jobs. The ONE piece of this
+    // order that is load-bearing rather than cosmetic is `build` before
+    // `typecheck`: `tsconfig.json` includes `.next/types`, so a build declared
+    // after the type check hands the NEXT run stale generated route types to
+    // trip over. That rule, the gate/CI command parity and the mutex decision
+    // are asserted in tests/unit/guards/verify-build-integration-gates.test.ts
+    // and tests/unit/guards/verify-heavy-gate-mutex.test.ts.
     expect(config?.gates.map((g) => g.id)).toEqual([
       'token-discipline',
       'control-chars',
       'claudemd-size',
       'route-exports',
+      'build-cli',
+      'build-server',
       'lint',
+      'build',
       'typecheck',
+      'integration',
       'unit',
     ]);
     expect(config?.gates.map((g) => g.command)).toEqual([
@@ -710,8 +723,12 @@ describe('the repository\'s own .commandmate/verify.yaml', () => {
       'node scripts/check-control-chars.mjs',
       'node scripts/check-claudemd-size.mjs',
       'node scripts/check-route-exports.mjs',
+      'npm run build:cli',
+      'npm run build:server',
       'npm run lint',
+      'npm run build',
       'npx tsc --noEmit',
+      'npm run test:integration',
       'npm run test:unit',
     ]);
     expect(config?.options.baseRef).toBe('origin/develop');

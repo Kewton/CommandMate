@@ -293,6 +293,45 @@ options:
     expect(gatesById(runId).get('env-probe')?.logTail).toContain('CI_SEEN=true');
   });
 
+  it('does not hand the server process NODE_ENV to gate commands (Issue #1994)', async () => {
+    // The process running these gates is the CommandMate *server*, and the
+    // server has a NODE_ENV of its own: `production` under `commandmate start`,
+    // `development` under `commandmate start --dev` and `npm run dev`.
+    //
+    // Measured on the branch that added the build gates: `npm run build`
+    // (Next.js 15) exits 0 with NODE_ENV unset and exits 1 with
+    // NODE_ENV=development, failing to prerender /404, /500 and /offline with
+    // `<Html> should not be imported outside of pages/_document`. Inherited,
+    // that would have made a `build` gate red for every worker on every run
+    // whenever an operator happened to have started the server with `--dev` —
+    // a verdict about the host wearing the costume of a verdict about the diff.
+    //
+    // GitHub Actions leaves NODE_ENV unset, so "unset" is what matches CI, the
+    // same reason CI=true is exported above. `${NODE_ENV-unset}` distinguishes
+    // absent from present-but-empty; `NODE_ENV=` is not "unset".
+    vi.stubEnv('NODE_ENV', 'development');
+    try {
+      const repo = createRepo(`
+version: 1
+gates:
+  - id: node-env-probe
+    command: "sh -c 'echo NODE_ENV_SEEN=[\${NODE_ENV-unset}]'"
+    timeoutSec: 30
+options:
+  baseRef: main
+`);
+      addUncommittedWork(repo);
+      registerWorktree('wt-node-env', repo);
+
+      const runId = await runToCompletion('wt-node-env', repo);
+      const logTail = gatesById(runId).get('node-env-probe')?.logTail ?? '';
+      expect(logTail).toContain('NODE_ENV_SEEN=[unset]');
+      expect(logTail).not.toContain('development');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('keeps only the tail of the output, bounded by maxLogTailBytes', async () => {
     // Three writes of very different sizes, the middle one far larger than the
     // window. The retained tail therefore has to straddle a write boundary,
