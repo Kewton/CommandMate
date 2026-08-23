@@ -17,6 +17,7 @@ import {
   OPENCODE_SELECTION_LIST_PATTERN,
 } from '../../cli-patterns';
 import { STATUS_REASON } from '../../status-reason';
+import { detectOpenCodeDialog } from './prompt';
 import { STATUS_CHECK_LINE_COUNT } from '../frame';
 import { createToolStatusDetector } from '../run-detection';
 import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
@@ -250,6 +251,14 @@ export const opencodeStatusDetector = createToolStatusDetector({
   skipGenericInputPrompt: true,
 
   readIdleEvidence,
+
+  // §4 D1 決定 4 (Issue #1928). The content window is branch C's, passed rather
+  // than recomputed, so the picker the dialog rule reports is the picker the
+  // status branch reports.
+  detectDialog(frame) {
+    const { candidates } = findContentEnd(frame);
+    return detectOpenCodeDialog(frame, { contentWindow: candidates.join('\n') });
+  },
 
   // As with copilot: branches A0–E are the only rules that run for opencode, so
   // a frame reaching the floor is one they could not read.

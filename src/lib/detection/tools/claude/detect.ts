@@ -14,6 +14,7 @@ import {
 import { findClaudeInputBox } from '../../composer-text';
 import { findClaudeTaskPanelLines } from '../../prompt-detect-multiple-choice';
 import { STATUS_REASON } from '../../status-reason';
+import { detectClaudeDialog } from './prompt';
 import { createToolStatusDetector } from '../run-detection';
 import {
   CLAUDE_BANNER_PATTERN,
@@ -143,6 +144,15 @@ export const claudeStatusDetector = createToolStatusDetector({
   },
 
   readIdleEvidence,
+
+  // §4 D1 決定 4 (Issue #1928): the seam Auto-Yes reads. The region is measured
+  // here and parsed there, so the dialog rule and the idle rule agree about
+  // where Claude's chrome starts and `prompt.ts` needs no import from this file.
+  detectDialog(frame) {
+    return detectClaudeDialog(frame, {
+      transcriptTail: findClaudeTranscriptTail(frame.contentLines),
+    });
+  },
 
   // No `unreadableReason`: Claude does NOT opt out of the generic composer
   // check, so a Claude frame only reaches the floor when there was no composer
