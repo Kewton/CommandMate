@@ -56,6 +56,7 @@ import {
 } from '@/lib/session/waiting-episode-state';
 import type { WaitingKind } from '@/lib/session/waiting-kind';
 import { getPushEscalationSettings } from './escalation-settings';
+import { isPromptPushSuppressed } from './prompt-push-gate';
 import { notifyPushSubscribers } from './push-sender';
 import { isPushConfigured } from './vapid';
 
@@ -188,8 +189,25 @@ export function handleWaitingTransition(transition: WaitingTransition): void {
     kind: transition.kind,
   };
 
+  // Issue #1999: the wait is tracked and the reminder armed either way — only
+  // the notification is gated. Dropping the wait from `pending` instead would
+  // discard the escalation that makes the suppression safe, and the gate has to
+  // run before `sendWaitingPush` because `shouldSendWaitingPush` records the
+  // episode at the moment it decides to send.
   pending.set(key, wait);
   startEscalationTimer();
+
+  if (
+    isPromptPushSuppressed({
+      worktreeId: wait.worktreeId,
+      cliToolId: wait.cliToolId,
+      instanceId: wait.instanceId,
+      waitingSince: wait.since,
+    })
+  ) {
+    return;
+  }
+
   void sendWaitingPush(wait, false, transition.at);
 }
 
@@ -220,6 +238,24 @@ export function runEscalationTick(now: number = Date.now()): void {
 
     if (!settings.enabled) continue;
     if (now - wait.since < thresholdMs) continue;
+
+    // Issue #1999: the same gate, asked with `escalated`. It never suppresses a
+    // reminder — the episode check above has already proved Auto-Yes did not
+    // resolve this wait — but routing the reminder through it keeps the rule in
+    // one place and puts the decision in the log next to the opening edge's.
+    // The wait is left in `pending` if it ever does suppress, so a later tick
+    // can reconsider rather than losing the reminder outright.
+    if (
+      isPromptPushSuppressed({
+        worktreeId: wait.worktreeId,
+        cliToolId: wait.cliToolId,
+        instanceId: wait.instanceId,
+        waitingSince: wait.since,
+        escalated: true,
+      })
+    ) {
+      continue;
+    }
 
     // Dropped before sending, not after: the reminder is once per episode, and
     // an in-flight fan-out must not be able to earn a second one.
