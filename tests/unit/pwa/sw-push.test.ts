@@ -14,17 +14,53 @@ const swSource = readFileSync(resolve(__dirname, '../../../public/sw.js'), 'utf8
 
 type Listener = (event: unknown) => void;
 
-function loadServiceWorker(openWindows: Array<{ url: string; focus: () => unknown; navigate?: (url: string) => Promise<unknown> }> = []) {
+/**
+ * One notification already on the device, as `getNotifications` hands them back
+ * (Issue #2001). Only `close` is ever called on them.
+ */
+interface StaleNotification {
+  tag: string;
+  close: ReturnType<typeof vi.fn>;
+}
+
+interface LoadOptions {
+  /** Notifications the registration reports as currently displayed. */
+  displayed?: StaleNotification[];
+  /** Make `getNotifications` reject, as a registration in a bad state would. */
+  getNotificationsRejects?: boolean;
+  /** Drop `getNotifications` entirely, as an engine without it would. */
+  omitGetNotifications?: boolean;
+}
+
+function loadServiceWorker(
+  openWindows: Array<{ url: string; focus: () => unknown; navigate?: (url: string) => Promise<unknown> }> = [],
+  options: LoadOptions = {}
+) {
   const listeners: Record<string, Listener> = {};
-  const showNotification = vi.fn(() => Promise.resolve());
+  // Typed by the two parameters the assertions read, so `mock.calls[n][1]` is
+  // the options object rather than a 0-tuple index error.
+  const showNotification = vi.fn(
+    (_title: string, _options: Record<string, unknown>) => Promise.resolve()
+  );
   const openWindow = vi.fn(() => Promise.resolve({ focus: vi.fn() }));
+  const displayed = options.displayed ?? [];
+  const getNotifications = vi.fn((filter?: { tag?: string }) =>
+    options.getNotificationsRejects
+      ? Promise.reject(new Error('registration unavailable'))
+      : Promise.resolve(
+          filter?.tag ? displayed.filter((n) => n.tag === filter.tag) : displayed
+        )
+  );
+
+  const registration: Record<string, unknown> = { showNotification };
+  if (!options.omitGetNotifications) registration.getNotifications = getNotifications;
 
   const self = {
     addEventListener: (type: string, handler: Listener) => {
       listeners[type] = handler;
     },
     location: { origin: 'https://app.example' },
-    registration: { showNotification },
+    registration,
     skipWaiting: vi.fn(),
     clients: {
       claim: vi.fn(),
@@ -39,7 +75,12 @@ function loadServiceWorker(openWindows: Array<{ url: string; focus: () => unknow
   const run = new Function('self', 'caches', swSource);
   run(self, cachesStub);
 
-  return { listeners, showNotification, openWindow, self };
+  return { listeners, showNotification, getNotifications, openWindow, self };
+}
+
+/** A notification the device is already showing, ready to assert `close` on. */
+function stale(tag: string): StaleNotification {
+  return { tag, close: vi.fn() };
 }
 
 function pushEvent(payload: unknown) {
@@ -127,5 +168,153 @@ describe('service worker notificationclick handler', () => {
     await event._promise;
     expect(navigate).toHaveBeenCalledWith('/worktrees/abc');
     expect(openWindow).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// Issue #2001 — the resolution push
+// ============================================================================
+
+/** The payload `resolution-push-notifier` produces, as the SW receives it. */
+function resolutionPayload(tag = 'abc:prompt') {
+  return {
+    title: 'feature-x (claude)',
+    body: 'Handled — answered on another device',
+    url: '/worktrees/abc',
+    tag,
+    worktreeId: 'abc',
+    kind: 'prompt',
+    resolved: true,
+  };
+}
+
+describe('service worker resolution push (Issue #2001)', () => {
+  it('closes every stale card carrying the tag, then shows the replacement', async () => {
+    const mine = [stale('abc:prompt'), stale('abc:prompt')];
+    const { listeners, showNotification, getNotifications } = loadServiceWorker([], {
+      displayed: [...mine, stale('other:prompt')],
+    });
+
+    const event = pushEvent(resolutionPayload());
+    listeners.push(event);
+    await event._promise;
+
+    expect(getNotifications).toHaveBeenCalledWith({ tag: 'abc:prompt' });
+    for (const notification of mine) expect(notification.close).toHaveBeenCalledTimes(1);
+    expect(showNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves another worktree’s card alone', async () => {
+    const foreign = stale('other:prompt');
+    const { listeners } = loadServiceWorker([], { displayed: [stale('abc:prompt'), foreign] });
+
+    const event = pushEvent(resolutionPayload());
+    listeners.push(event);
+    await event._promise;
+
+    expect(foreign.close).not.toHaveBeenCalled();
+  });
+
+  it('closes BEFORE showing — the order the userVisibleOnly contract depends on', async () => {
+    // Inverting these two ends the push event with nothing displayed, which
+    // Chrome answers with its own generic card, Firefox charges to a silent-push
+    // quota and WebKit punishes by revoking the subscription. See
+    // docs/design/cross-device-notification-dismissal.md.
+    const outstanding = stale('abc:prompt');
+    const { listeners, showNotification } = loadServiceWorker([], { displayed: [outstanding] });
+
+    const event = pushEvent(resolutionPayload());
+    listeners.push(event);
+    await event._promise;
+
+    expect(outstanding.close.mock.invocationCallOrder[0]).toBeLessThan(
+      showNotification.mock.invocationCallOrder[0]
+    );
+  });
+
+  it('replaces silently and without re-alerting, on the stale card’s own tag', async () => {
+    const { listeners, showNotification } = loadServiceWorker([], {
+      displayed: [stale('abc:prompt')],
+    });
+
+    const event = pushEvent(resolutionPayload());
+    listeners.push(event);
+    await event._promise;
+
+    expect(showNotification).toHaveBeenCalledWith(
+      'feature-x (claude)',
+      expect.objectContaining({
+        body: 'Handled — answered on another device',
+        // Same tag as the prompt card: this is what makes it a replacement
+        // rather than a second card.
+        tag: 'abc:prompt',
+        silent: true,
+        renotify: false,
+        data: expect.objectContaining({ resolved: true }),
+      })
+    );
+  });
+
+  it('still shows a notification when there was nothing to close', async () => {
+    // The device the reader answered on has already closed its own card. The
+    // contract is per delivered push, not per card cleared, so this one still
+    // has to display something.
+    const { listeners, showNotification } = loadServiceWorker([], { displayed: [] });
+
+    const event = pushEvent(resolutionPayload());
+    listeners.push(event);
+    await event._promise;
+
+    expect(showNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('still shows a notification when getNotifications rejects', async () => {
+    const { listeners, showNotification } = loadServiceWorker([], {
+      getNotificationsRejects: true,
+    });
+
+    const event = pushEvent(resolutionPayload());
+    listeners.push(event);
+    await event._promise;
+
+    expect(showNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('still shows a notification on an engine without getNotifications', async () => {
+    const { listeners, showNotification } = loadServiceWorker([], {
+      omitGetNotifications: true,
+    });
+
+    const event = pushEvent(resolutionPayload());
+    listeners.push(event);
+    await event._promise;
+
+    expect(showNotification).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('an ordinary notification is untouched by Issue #2001', () => {
+  it('does not enumerate notifications and keeps alerting', async () => {
+    const { listeners, showNotification, getNotifications } = loadServiceWorker([], {
+      displayed: [stale('abc:prompt')],
+    });
+
+    const event = pushEvent({
+      title: 'feature-x (claude)',
+      body: 'Waiting for your reply',
+      url: '/worktrees/abc',
+      tag: 'abc:prompt',
+      worktreeId: 'abc',
+      kind: 'prompt',
+    });
+    listeners.push(event);
+    await event._promise;
+
+    expect(getNotifications).not.toHaveBeenCalled();
+    const options = showNotification.mock.calls[0][1] as Record<string, unknown>;
+    expect(options.renotify).toBe(true);
+    // Absent, not `false`: the Notifications API reads an absent `silent` as
+    // "respect the device's settings", which is the pre-#2001 behaviour.
+    expect(options).not.toHaveProperty('silent');
   });
 });

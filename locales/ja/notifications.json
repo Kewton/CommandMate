@@ -42,7 +42,8 @@
     "failureSessionStartWithExcerpt": "セッションを起動できませんでした: {excerpt}",
     "failureSessionStart": "セッションを起動できませんでした",
     "failureWithExcerpt": "失敗しました: {excerpt}",
-    "failure": "失敗しました"
+    "failure": "失敗しました",
+    "promptResolved": "対応済みです（他の端末で応答されました）"
   },
   "escalation": {
     "heading": "再通知",

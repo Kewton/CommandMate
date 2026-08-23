@@ -144,6 +144,53 @@ self.addEventListener('message', function (event) {
 // above. Payloads are minimal (worktree name + kind + short excerpt); the SW
 // never receives full terminal output.
 
+// --- Issue #2001 (cross-device dismissal) ----------------------------------
+//
+// A `resolved: true` payload says: the wait this worktree's card is about is
+// over, and this device may still be showing it. Close the stale cards carrying
+// that tag, then show ONE silent replacement in their place.
+//
+// THE ORDER IS LOAD-BEARING AND MUST NOT BE INVERTED. Every subscription in
+// this app is created with `userVisibleOnly: true` — the only value browsers
+// accept from a web page — and each engine enforces it by looking at what is
+// *displayed* once the promise handed to `event.waitUntil` has settled, not at
+// whether `showNotification` was called. Closing after showing therefore ends
+// the event with an empty screen, which Chrome answers with its own generic
+// "This site has been updated in the background" card, Firefox charges to a
+// per-subscription silent-push quota (and unsubscribes when it runs out), and
+// WebKit punishes by revoking the push subscription outright.
+// See docs/design/cross-device-notification-dismissal.md for the citations.
+//
+// This is also why there is no "close and show nothing" branch: a resolution
+// with nothing to close still shows its card. That is the contract, not an
+// oversight.
+function replaceStaleNotifications(title, options) {
+  var registration = self.registration;
+  var tag = options.tag;
+  var closing;
+
+  if (!tag || typeof registration.getNotifications !== 'function') {
+    closing = Promise.resolve();
+  } else {
+    closing = registration
+      .getNotifications({ tag: tag })
+      .then(function (stale) {
+        for (var i = 0; i < stale.length; i++) {
+          stale[i].close();
+        }
+      })
+      .catch(function (err) {
+        // A registration that cannot enumerate its notifications still has to
+        // show one. Showing the replacement below is what keeps the promise;
+        // on this path the tag alone collapses the stale card on most engines.
+      });
+  }
+
+  return closing.then(function () {
+    return registration.showNotification(title, options);
+  });
+}
+
 self.addEventListener('push', function (event) {
   var payload = {};
   try {
@@ -152,21 +199,37 @@ self.addEventListener('push', function (event) {
     payload = {};
   }
 
+  var resolved = payload.resolved === true;
+
   var title = payload.title || 'CommandMate';
   var options = {
     body: payload.body || '',
     tag: payload.tag || undefined,
-    renotify: true,
+    // A resolution replaces a card the reader has already been alerted about,
+    // so it must not alert again — that would trade a stale notification for a
+    // second buzz and undo what Issues #1999 / #2000 removed.
+    renotify: !resolved,
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
     data: {
       url: payload.url || '/',
       worktreeId: payload.worktreeId,
       kind: payload.kind,
+      resolved: resolved,
     },
   };
 
-  event.waitUntil(self.registration.showNotification(title, options));
+  // `silent` is set only for a resolution. The Notifications API reads an absent
+  // value as "respect the device's own settings", which is what every alerting
+  // notification shipped before this Issue did; `silent: false` would be a
+  // different, louder instruction.
+  if (resolved) options.silent = true;
+
+  event.waitUntil(
+    resolved
+      ? replaceStaleNotifications(title, options)
+      : self.registration.showNotification(title, options)
+  );
 });
 
 self.addEventListener('notificationclick', function (event) {

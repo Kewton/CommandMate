@@ -43,6 +43,9 @@ const PUSH_KEYS = [
   'failureSessionStart',
   'failureWithExcerpt',
   'failure',
+  // Issue #2001: the body of the card that *replaces* a resolved wait's
+  // notification on the reader's other devices. No excerpt — the prompt is over.
+  'promptResolved',
 ] as const;
 
 /** Keys whose copy must carry the placeholder push-sender substitutes. */

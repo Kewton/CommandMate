@@ -199,6 +199,26 @@ export function getPushSubscriptionsForKind(
   return rows.map(mapRow);
 }
 
+/**
+ * How many subscriptions have opted into a given kind (Issue #2001).
+ *
+ * Separate from {@link getPushSubscriptionsForKind} because the cross-device
+ * dismissal asks a question about the *fleet*, not about the rows: "is there a
+ * second device that could still be holding a stale card?". Counting in SQL
+ * keeps that decision from materialising — and from logging the shape of — a
+ * table of endpoints and encryption keys it has no use for.
+ */
+export function countPushSubscriptionsForKind(
+  db: Database.Database,
+  kind: PushNotificationKind
+): number {
+  const column = KIND_COLUMN[kind];
+  const row = db
+    .prepare(`SELECT COUNT(*) AS total FROM push_subscriptions WHERE ${column} = 1`)
+    .get() as { total: number };
+  return row.total;
+}
+
 /** Update per-type preferences for a subscription. Returns the updated record or null. */
 export function updatePushSubscriptionPreferences(
   db: Database.Database,

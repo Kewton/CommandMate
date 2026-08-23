@@ -58,6 +58,7 @@ import type { WaitingKind } from '@/lib/session/waiting-kind';
 import { getPushEscalationSettings } from './escalation-settings';
 import { isPromptPushSuppressed } from './prompt-push-gate';
 import { notifyPushSubscribers } from './push-sender';
+import { notifyPromptResolved } from './resolution-push-notifier';
 import { isPushConfigured } from './vapid';
 
 const logger = createLogger('push/waiting-notifier');
@@ -178,6 +179,18 @@ export function handleWaitingTransition(transition: WaitingTransition): void {
   if (!transition.waiting || transition.since === null) {
     pending.delete(key);
     stopEscalationTimerIfIdle();
+    // Issue #2001: this is the moment the notification on every *other* device
+    // stopped being true. It is the only edge that sees it — the poller closes
+    // the episode here (`response-checker`) and so does the status probe
+    // (`worktree-status-helper`), so hooking the edge covers both producers the
+    // way #1790 already does for the opening one. Fire-and-forget: the notifier
+    // never rejects, and the `void` keeps the synchronous listener contract
+    // `emit` relies on.
+    void notifyPromptResolved({
+      worktreeId: transition.worktreeId,
+      agentName: transition.instanceId ?? transition.cliToolId,
+      at: transition.at,
+    });
     return;
   }
 

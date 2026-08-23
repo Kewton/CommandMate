@@ -42,7 +42,8 @@
     "failureSessionStartWithExcerpt": "Could not start the session: {excerpt}",
     "failureSessionStart": "Could not start the session",
     "failureWithExcerpt": "Failed: {excerpt}",
-    "failure": "Failed"
+    "failure": "Failed",
+    "promptResolved": "Handled — answered on another device"
   },
   "escalation": {
     "heading": "Reminder",
