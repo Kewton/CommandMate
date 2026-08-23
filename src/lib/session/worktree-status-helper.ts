@@ -26,7 +26,6 @@ import { GLOBAL_SESSION_WORKTREE_ID } from '@/lib/session/global-session-constan
 import { peekPromptWaiting } from '@/lib/session/prompt-waiting-composition';
 import { deriveWaitingKind, type WaitingKind } from '@/lib/session/waiting-kind';
 import {
-  deriveScraperEvidence,
   forgetLastKnownStatus,
   getLastKnownStatus,
   observeStatusEvidence,
@@ -332,13 +331,16 @@ async function detectInstanceSessionStatus(
       // Issue #1550: SessionStatus → activity flags lives in status-mapping.ts
       ({ isWaitingForResponse, isProcessing } = sessionStatusToActivityFlags(statusResult.status));
 
-      // Issue #1926: the same derivation `current-output-builder` uses, called
-      // rather than restated (§4 D1 決定 2 — two expressions for one fact is how
-      // Phase 3 would move one and not the other). Latched here as well as
-      // there because this is the loop the sidebar polls, so it is what keeps
-      // `lastKnownStatus` warm for the header chip and `commandmate ls`.
+      // Issue #1926 read the same derivation `current-output-builder` used;
+      // Issue #1927 replaced the derivation with the detector's own answer, for
+      // both of them at once. §4 D1 決定 2's rule — one fact, one expression —
+      // is unchanged and now stronger: there is no expression left to keep in
+      // sync, because the layer that applied the rule is the layer that reports
+      // it. Latched here as well as in the builder because this is the loop the
+      // sidebar polls, so it is what keeps `lastKnownStatus` warm for the header
+      // chip and `commandmate ls`.
       sessionStatusReason = statusResult.reason;
-      statusEvidence = deriveScraperEvidence(statusResult.status, statusResult.reason);
+      statusEvidence = statusResult.evidence;
       observeStatusEvidence(compositeKey, {
         status: statusResult.status,
         reason: statusResult.reason,

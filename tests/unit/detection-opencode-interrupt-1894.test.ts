@@ -231,13 +231,22 @@ describe('Issue #1894: the interrupt window is running, on positive evidence', (
 
     const fresh = statusOf(mutated);
     expect(fresh.status).toBe('running');
-    expect(fresh.reason).toBe(STATUS_REASON.DEFAULT);
-    expect(deriveScraperEvidence(fresh.status, fresh.reason)).toBe('none');
+    // Issue #1927: opencode's floor is `unknown_frame`, not `default`. opencode
+    // opts out of the generic composer check, so its own branches (A0-E) are the
+    // only rules that run — a frame that reaches the floor is one THEY could not
+    // read, which is a different (and actionable) statement from "no pattern
+    // matched anywhere". Both are `running` with `evidence: 'none'`.
+    expect(fresh.reason).toBe(STATUS_REASON.UNKNOWN_FRAME);
+    expect(fresh.evidence).toBe('none');
 
+    // Issue #1927 (§4 D1 決定 3): the 5-second staleness heuristic no longer
+    // says `ready`. "Nothing repainted for five seconds" is the absence of a
+    // completion, and publishing `ready` for it is what let a stalled worker be
+    // reported as Completed. The reason code stays for diagnosis.
     const stale = statusOf(mutated, staleTimestamp());
-    expect(stale.status).toBe('ready');
+    expect(stale.status).toBe('running');
     expect(stale.reason).toBe(STATUS_REASON.NO_RECENT_OUTPUT);
-    expect(deriveScraperEvidence(stale.status, stale.reason)).toBe('none');
+    expect(stale.evidence).toBe('none');
   });
 });
 

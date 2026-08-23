@@ -12,6 +12,29 @@
  * assertion about code nobody ran; here the payload the builder produced is
  * literally what the command consumes.
  *
+ * ## What Issue #1927 (DR2-003) narrowed, and why it shows up HERE
+ *
+ * #1927 stopped `mergeStructuredStatus` from raising `evidence` — a structured
+ * `Stop` over a scraper `running` now clears `isUnclassifiedActive` only when
+ * the scraper had something POSITIVE to say about the frame. That is a
+ * deliberate decision (方針書 §5.2 補足 / §6.1 / §11's table A), not a side
+ * effect: once `no_recent_output` publishes `running` instead of `ready`, BOTH
+ * no-evidence routes reach that branch, and it would clear the #1708 hatch at
+ * exactly the moment worth keeping it — the pane is unreadable AND the agent's
+ * hooks say the turn is done.
+ *
+ * The unit twin of this file pins the payload fields. What only THIS file can
+ * say is what the narrowing does to the command, because it feeds the real
+ * `wait` the real payload. So #1723's headline claim is restated rather than
+ * deleted, and it is now two claims instead of one:
+ *
+ *  - a `Stop` over a pane the scraper reads as busy (the interrupt affordance
+ *    still on the chrome — #1723's own description of the case) still completes
+ *    `wait` on the first poll, exactly as before;
+ *  - a `Stop` over a pane NOTHING could read hands the session to the 60-second
+ *    unclassified dwell and exit 10, which is the #1708 route the design chose
+ *    over reporting a frame nobody understood as `Completed`.
+ *
  * @vitest-environment node
  */
 
@@ -60,6 +83,25 @@ const INSTANCE_ID = 'claude';
  * turn read as still running, and a running turn read as finished.
  */
 const UNREADABLE_FRAME = 'writing files\nediting src/app/page.tsx\n';
+
+/**
+ * A frame the scraper reads as busy on POSITIVE evidence (Issue #1927).
+ *
+ * Claude's bottom chrome with the interrupt affordance still on it, which is
+ * what a pane looks like in the seconds between the agent posting `Stop` and
+ * the TUI repainting — i.e. #1723's own "the pane still looks busy after Stop".
+ * `CLAUDE_INTERRUPT_HINT_PATTERN` matches it, so the verdict is
+ * `running`/`thinking_indicator` with `evidence: 'positive'` and the structured
+ * `ready` lands on a frame the scraper had already classified.
+ */
+const BUSY_FRAME = [
+  'writing files',
+  '',
+  '────────────────────────────────────────',
+  '❯ ',
+  '────────────────────────────────────────',
+  '  ⏸ manual mode on · esc to interrupt · ⇥ for agents',
+].join('\n');
 
 let db: Database.Database;
 
@@ -121,9 +163,37 @@ describe('Issue #1723: a posted Stop reaches current-output', () => {
     expect(after.sessionStatus).toBe('ready');
     expect(after.sessionStatusReason).toBe('hook_stop');
     expect(after.isGenerating).toBe(false);
-    expect(after.isUnclassifiedActive).toBe(false);
+    // Issue #1927 (DR2-003): the hatch is NOT cleared here any more, and this
+    // frame is why. `UNREADABLE_FRAME` carries no evidence of any kind, so
+    // "the agent says it stopped" is the only thing anyone knows about it —
+    // which is precisely the shape a missed dialog wears (#1708). The status
+    // the agent reported is still published; what is no longer published is a
+    // claim that the frame was understood.
+    expect(after.statusEvidence).toBe('none');
+    expect(after.isUnclassifiedActive).toBe(true);
     // #1722's diagnostic field still reports the raw event beside the verdict.
     expect(after.structuredEvents.lastEventType).toBe('stop');
+  });
+
+  it('clears the hatch when the pane the Stop landed on WAS readable', async () => {
+    // The other half of DR2-003, end to end: the narrowing is a narrowing, not
+    // a removal. A pane that still shows the interrupt affordance is a pane the
+    // scraper positively classified, so the structured `ready` lands on a
+    // verdict rather than on a blank, and everything #1723 promised holds.
+    vi.mocked(captureSessionOutput).mockResolvedValue(BUSY_FRAME);
+
+    const before = await buildCurrentOutput(db, WORKTREE_ID, 'claude', INSTANCE_ID);
+    expect(before.sessionStatus).toBe('running');
+    expect(before.sessionStatusReason).toBe('thinking_indicator');
+    expect(before.statusEvidence).toBe('positive');
+
+    await postHookEvent('Stop');
+
+    const after = await buildCurrentOutput(db, WORKTREE_ID, 'claude', INSTANCE_ID);
+    expect(after.sessionStatus).toBe('ready');
+    expect(after.sessionStatusReason).toBe('hook_stop');
+    expect(after.statusEvidence).toBe('positive');
+    expect(after.isUnclassifiedActive).toBe(false);
   });
 
   it('keeps the session running after a UserPromptSubmit', async () => {
@@ -161,8 +231,17 @@ describe('Issue #1723: the benefit reaches `commandmate wait` unchanged', () => 
   });
 
   it('completes on the payload a posted Stop produces', async () => {
+    // Issue #1927 moved this test onto `BUSY_FRAME`. The claim it exists to
+    // carry — "#1723's benefit reaches `wait`" — is about a pane that still
+    // looks busy when the agent's `Stop` arrives, and after DR2-003 that claim
+    // holds for a pane the scraper could read. Running it on a frame nothing
+    // can classify would have been testing the #1708 dwell instead, which is
+    // the test below.
+    vi.mocked(captureSessionOutput).mockResolvedValue(BUSY_FRAME);
+
     await postHookEvent('Stop');
     const payload = await buildCurrentOutput(db, WORKTREE_ID, 'claude', INSTANCE_ID);
+    expect(payload.isUnclassifiedActive).toBe(false);
 
     const exit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -177,6 +256,43 @@ describe('Issue #1723: the benefit reaches `commandmate wait` unchanged', () => 
 
     exit.mockRestore();
     consoleError.mockRestore();
+  });
+
+  it('hands an unreadable pane to the 60s dwell instead of reporting Completed', async () => {
+    // The behaviour DR2-003 chose, at the layer an operator actually meets it.
+    // The agent posted `Stop`, so `sessionStatus` is `ready` — but nothing
+    // could read the pane, and `wait`'s completion check is suppressed while
+    // the hatch is up. After the existing 60-second dwell it exits 10 with the
+    // `unclassified` payload #1708 designed, which tells the operator to look
+    // at the pane. No new timer and no new exit code (§4 D1 決定 2).
+    await postHookEvent('Stop');
+    const payload = await buildCurrentOutput(db, WORKTREE_ID, 'claude', INSTANCE_ID);
+    expect(payload.sessionStatus).toBe('ready');
+    expect(payload.isUnclassifiedActive).toBe(true);
+
+    vi.useFakeTimers();
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    // 60s of dwell at a 5s poll interval, plus slack: the same payload every time.
+    mockFetchSequence(Array.from({ length: 20 }, () => ({ data: payload })));
+
+    const { createWaitCommand } = await import('../../src/cli/commands/wait');
+    const promise = createWaitCommand().parseAsync(['node', 'wait', WORKTREE_ID]);
+    await vi.advanceTimersByTimeAsync(70_000);
+    await promise;
+
+    expect(exit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining('Unclassified interactive frame'),
+    );
+    // The prompt payload the skill layer reads off stdout.
+    const printed = log.mock.calls.map(([line]) => String(line)).join('\n');
+    expect(JSON.parse(printed)).toMatchObject({ type: 'unclassified', options: [] });
+
+    exit.mockRestore();
+    consoleError.mockRestore();
+    log.mockRestore();
   });
 
   it('would NOT have completed on the same frame without the event', async () => {

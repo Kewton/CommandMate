@@ -475,14 +475,20 @@ describe('status-detector', () => {
   });
 
   describe('existing behavior preservation', () => {
-    it('should return ready with time-based heuristic when no patterns match', () => {
+    it('should return running/no-evidence with the time-based heuristic when no patterns match', () => {
       const output = 'Some generic output without patterns';
       const oldTimestamp = new Date(Date.now() - 10000); // 10 seconds ago
 
+      // Issue #1927 (§4 D1 決定 3): the 5-second staleness heuristic no longer
+      // answers `ready`. Five seconds without a repaint is the ABSENCE of a
+      // completion, and `ready` on no evidence is what let `wait` report a
+      // stalled worker as Completed (#1900). The reason code is kept for
+      // diagnosis; `evidence` is what a consumer branches on.
       const result = detectSessionStatus(output, 'claude', oldTimestamp);
-      expect(result.status).toBe('ready');
+      expect(result.status).toBe('running');
       expect(result.confidence).toBe('low');
       expect(result.reason).toBe('no_recent_output');
+      expect(result.evidence).toBe('none');
     });
 
     it('should return running (low confidence) as default when no patterns match', () => {
