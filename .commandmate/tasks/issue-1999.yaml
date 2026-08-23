@@ -1,0 +1,158 @@
+version: 1
+title: "Issue #1999: Auto-Yes が自動応答するプロンプトのプッシュ通知を抑止する"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/1999 を実装してください。
+  Epic は #2002（「対応が必要なときだけスマホに通知」）で、本 Issue はその 1 本目・最優先です。
+
+  ## 何を直すのか
+
+  Auto-Yes を有効にした worktree でも、プロンプトのたびにスマホが鳴ります。Auto-Yes は
+  「このプロンプトは自動承認するので人間は見なくてよい」という宣言なのに、通知は
+  「あなたの応答を待っています」と言ってきます。数秒後には自動応答が済んでいるので、
+  **通知を見て開いた頃には何もすることがない**。並列オーケストレーション中に特に酷い。
+
+  ## 私の下調べ（推奨であって確定ではない。コードで裏取りし、食い違えば実測を正としてください）
+
+  以下は私が develop `490e2b7a` で読んだ結果です。**そのまま信じず必ず裏取りしてください。**
+  食い違いを見つけたら実測を正とし、commit message の「下調べとの食い違い」節に書いてください。
+
+  ### プロンプト通知の生産者は 2 つ（これが全部かも確認してください）
+
+  | # | 場所 | kind | 現状の Auto-Yes 判定 |
+  |---|---|---|---|
+  | 1 | `src/lib/polling/response-checker.ts:796` の `void notifyPushSubscribers({...kind:'prompt'...})` | prompt | 無し |
+  | 2 | `src/lib/push/waiting-push-notifier.ts:193` `handleWaitingTransition` → `sendWaitingPush(wait,false,...)` | prompt | 無し |
+
+  `runEscalationTick`（`:201`）は同じ `sendWaitingPush` を `escalated=true` で呼びます。
+  `response-checker.ts:952` は `kind:'completion'` で、**本 Issue のスコープ外**（#2000 が扱う）。
+
+  **`grep -rna "notifyPushSubscribers" src/` で 3 箇所しか出ないことを自分で確認してください。**
+  grep の 0 件・少数件は「存在しない」の証拠になりません（定数経由の間接呼び出しを疑うこと）。
+
+  ### 【重要】Issue 本文の 4 行の表は、コードを読むともっと単純な規則に畳めます（推奨）
+
+  Issue 本文は「Auto-Yes 有効／ポリシー差し控え／stop-pattern 停止／期限切れ」の 4 状態を
+  個別に判定するよう書いていますが、`src/lib/auto-yes-state.ts` を読むと:
+
+  - `getAutoYesState()`（`:189`）は**期限切れなら `disableAutoYes(...,'expired',...)` を呼んで
+    `enabled:false` の状態を返す**（`:200-203`）。つまり期限切れは `enabled === false` に畳まれる。
+  - `disableAutoYes()`（`:262`）は `stop_pattern_matched` でも `consecutive_errors` でも
+    `enabled:false` を書く。つまり停止系も `enabled === false` に畳まれる。
+  - **`AutoYesStopReason` は `'expired' | 'stop_pattern_matched' | 'consecutive_errors'` の 3 値**で、
+    Issue 本文は `consecutive_errors` を挙げ忘れています（`src/config/auto-yes-config.ts:74` 実測）。
+
+  したがって推奨する規則は:
+
+      抑止する = getAutoYesState(worktreeId, cliToolId, instanceId) が非 null かつ enabled === true
+                 かつ「このプロンプトについてポリシーが回答を差し控えていない」
+
+  それ以外（null / enabled===false / 差し控えあり）は**従来どおり通知する**。
+  この形なら `consecutive_errors` を書き忘れても正しく通知側に倒れます。
+
+  **これは推奨であって命令ではありません。** 実測して違う結論になったらそちらを採り、
+  理由を commit message に書いてください。
+
+  ### ポリシー差し控え（#1684）の読み方には競合があります — ここが一番の設計判断です
+
+  `getLastPolicySuppression()`（`src/lib/polling/auto-yes-suppression-state.ts:93`）の docblock は
+  「**記録は再抑止のたびに `at` が更新される**」「消費側は `isPromptWaiting` と組み合わせて
+  現在進行中の差し控えか過去のものかを見分ける」と書いています（`:12-16` 実測）。
+
+  つまり **待機の開始エッジの瞬間には、まだ差し控えが記録されていない可能性があります**
+  （ポーラが次の poll で記録する）。開始エッジで `getLastPolicySuppression` を見るだけでは
+  取りこぼします。
+
+  推奨する扱い（これも要検証）:
+
+  - **開始エッジでは抑止してよい**（Auto-Yes が有効なら数秒で解決するのが通常）。ただし
+    **`pending` からは消さない**でください。`handleWaitingTransition` は現状
+    `pending.set(key, wait)` → `startEscalationTimer()` → `sendWaitingPush(...)` の順ですが、
+    抑止するのは **3 番目だけ**にしてください。
+  - すると `runEscalationTick`（既定 10 分・`DEFAULT_ESCALATION_SETTINGS`）が生き残ります。
+    Auto-Yes が実際に答えていれば待機は閉じ、`getWaitingEpisode` が null / 別 `since` を返して
+    `pending` から落ちる（`:215-219`）ので鳴りません。**10 分経っても同じ待機が残っている＝
+    Auto-Yes が答えていない**ので、そこは人間が要る場面です。
+  - 受入条件の「エスカレーション再通知も同じ判定に従う（Auto-Yes で解決済みの待機が 10 分後に
+    再通知されない）」は、**解決済みの待機**についての条項であり、上の episode チェックで既に
+    満たされていると私は読みました。**「Auto-Yes 有効なら 10 分後も絶対に鳴らすな」と読むと
+    ポリシー差し控えで止まったパイプラインを永久に取りこぼします。** どちらの読みを採ったかを
+    明示し、根拠を書いてください。
+
+  - dedup（`shouldSendWaitingPush`、`src/lib/push/notification-dedup.ts:111`）は
+    **送ると決めた時点で記録します**。したがって抑止は `notifyPushSubscribers` を
+    **呼ぶ前**に行ってください。呼んでから捨てると dedup に記録が残り、
+    後続のエスカレーションが `prev.since === since` で落ちます。
+
+  ### 使える既存 API（新規に作らないこと）
+
+  | 用途 | API | 場所 |
+  |---|---|---|
+  | Auto-Yes 状態 | `getAutoYesState(worktreeId, cliToolId, instanceId)` | `src/lib/auto-yes-state.ts:189` |
+  | 期限切れ判定 | `isAutoYesExpired(state)` | 同 `:170` |
+  | キー組み立て | `buildCompositeKey(...)` | 同 `:51`（`waiting-push-notifier.ts:47` で**既に import 済み**） |
+  | 差し控えの記録 | `getLastPolicySuppression(worktreeId, cliToolId, instanceId)` | `src/lib/polling/auto-yes-suppression-state.ts:93` |
+
+  **`getAutoYesState` などの既存 API のシグネチャ・挙動を変えないでください（読むだけ）。**
+  変える必要が出たら、実装せずに理由を報告して止まってください。
+
+  ## 設計上の要求
+
+  1. **判定は 1 箇所に置いてください。** 生産者が 2 つあるので、両方に同じ if を書き写すと
+     片方だけ直る改修が必ず起きます。`src/lib/push/` に小さな述語モジュールを新設し、
+     2 つの生産者がそれを呼ぶ形を推奨します（名前は任せます）。
+     - `notifyPushSubscribers` の引数には `cliToolId` が無い（`instanceId` だけ）ので、
+       述語は**生産者側**で呼ぶ必要があります。`push-sender` の中に押し込めるかを検討し、
+       できない理由があれば書いてください。
+     - `src/lib/push/push-sender.ts` は **CJS で読まれる制約**があります（ESM-only の
+       next-intl を import できない）。新モジュールがこの制約に触れるか確認してください。
+  2. **判定は理由コードつきでログに出してください。** 「鳴らなかった」は運用者から見て
+     「壊れている」と区別がつきません。`logger.debug`/`info` で
+     「どの worktree/instance のどの待機を、どの理由で抑止したか」を出してください。
+     （発見可能性の原則: `docs/design/discoverability-principle.md`）
+  3. **Auto-Yes 無効時の挙動が 1 バイトも変わらないこと**をテストで固定してください。
+
+  ## 検証（必須）
+
+  - **変異注入で空振り緑を反証してください。** 少なくとも:
+    (a) 抑止条件を常に false（＝常に通知）にすると、新規テストが赤くなること
+    (b) 抑止条件を常に true（＝常に抑止）にすると、「差し控え時は通知する」「Auto-Yes 無効時は
+        通知する」のテストが赤くなること
+    (c) 生産者 2 つのうち片方だけに判定を入れると、もう片方のテストが赤くなること
+    各変異を 1 つずつ入れて対象テストのみ実行し、元に戻して再確認。結果を commit message に表で。
+  - 宣言ゲート 11 本すべて（`verify.gates`）。
+
+  ## 成果物
+
+  - 単一 commit（PR は作らないでください。私が作ります）。
+  - **CHANGELOG は `CHANGELOG.md` を直接編集せず、`dev-reports/changelog/issue-1999.md` に
+    断片を 1 行で書いてください。** 形式は厳密に:
+    `- **<type>(<scope>): <subject>** (#1999): <body>`
+    （`(#1999)` は太字の**外側**、1 エントリ 1 行、改行を入れない）
+  - module-reference に書くべき変更があれば `dev-reports/module-reference/issue-1999.md` に
+    「どの行のどのキーに何を足すか」を書いてください（`docs/module-reference.md` は直接編集しない）。
+  - commit message に「意図的な逸脱」「下調べとの食い違い」「変異注入」の節を必ず入れてください。
+  - 完了したら最後に `IMPL_COMPLETED` とだけ出力してください。
+scope:
+  allow:
+    - "src/lib/push/**"
+    - "src/lib/polling/**"
+    - "src/lib/auto-yes-state.ts"
+    - "src/lib/session/waiting-episode-state.ts"
+    - "src/types/**"
+    - "tests/unit/push/**"
+    - "tests/unit/polling/**"
+    - "tests/unit/lib/**"
+    - "tests/integration/**"
+    - "dev-reports/changelog/**"
+    - "dev-reports/module-reference/**"
+    - "docs/design/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, build-cli, build-server, lint, build, typecheck, integration, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
