@@ -1,0 +1,136 @@
+version: 1
+title: "Issue #1930: 構造化層を TurnRecord へ置換する（Phase 4 の中核）"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/1930 を実装してください。**Epic #1921 Phase 4 の中核**で、
+  Epic 全体で最も重い変更です。`agent-event-state.ts`（**実測 1642 行**）の状態導出を instance ごとの
+  `TurnRecord` に置き換えます。
+
+  ## 着手前に読むべき実測（私が develop `b982fb88` で確認済み）
+
+  1. **`TurnRecord` という名前は既に `src/lib/session/provisional-turn.ts`（128 行）にあります。**
+     これは **#1926 が Phase 1 で置いた契約だけの暫定物**で、ファイル自身の doc が
+     「`turnId` は**まだ安定したターン同一性ではない**。`pre_tool_use` がターン途中に来ると
+     `openedAt` が打ち直されて id も変わる。**それを直すのが Phase 4 の `TurnRecord`**」と書いています。
+     **本 Issue がその置き換えです。** 消費者は `src/cli/commands/wait.ts` と
+     `src/lib/session/current-output-builder.ts` の 2 つで、`tests/unit/session/status-contract-1926.test.ts`
+     が契約を pin しています。**この 2 消費者を壊さないこと。**
+
+  2. **`dialogPendingMaxMs` と `dedupDropped` は src に 1 件も存在しません**（新設）。
+     `decisionTimeoutSeconds` と `eventIdentity` は #1924 で着地済み
+     （`src/cli/types/api-responses.ts` ほか）。
+
+  3. **`beginAgentEventGeneration` は `agent-event-state.ts` と `agent-session-lifecycle.ts` にあります**
+     （generation fence の実体）。
+
+  ## 絶対に壊してはいけないもの（#1975、直前のランで着地）
+
+  `wait.ts` には **#1975 が入れた偽完了ガード**があります。`send` 直後の `wait` が 0 秒で
+  `exit 0` を返す欠陥（copilot 3/3 再現）を塞いだもので、機構は**時計ではなく台帳の突き合わせ**です:
+
+  - `readNewestPromptAt()` が `GET /api/worktrees/:id/messages?limit=1&unit=pairs` の
+    **サーバ打刻の user メッセージ時刻**を読む
+  - `outstandingPrompt()` が **最新プロンプト送信時刻 > `lastStopEventAt`（null 含む）** なら完了を保留
+  - 入口は **#1924 の `supportedEvents`** で、`stop` と turn 開始イベントの**両方**を宣言する
+    ソースだけが対象（hook を出さないツールは台帳の HTTP すら撃たない）
+  - 保留上限は `PENDING_PROMPT_HOLD_MS` = 60 秒
+
+  Issue 本文は「`wait.ts` の `adoptTurnStart` を `turnId` / `openedAt` へ移行」と書いていますが、
+  **その移行で #1975 のガードを消してはいけません。** 実機で 3/3 の偽完了が再発します。
+  移行後も次が成り立つことを**テストで固定**してください:
+
+  - アイドル状態から `send` → `wait` で、成果物が存在する時点でのみ `Completed` を返す
+  - **すでにアイドルなセッションへの `wait` は追加の遅延なく即完了する**（オーケストレーターの正当な用法。
+    #1975 の実測で 234/242/259 ms）
+  - hook を出さないツールの挙動は不変
+
+  ## 分岐は capability で行うこと（ツール ID で分岐しない）
+
+  `permissionHookPredictsDialog` / `sessionStartMayArriveLate` / `permissionReplyReleasesPrompt` /
+  `eventIdentity` / `resync` は **#1924 が 6 ソース分の宣言値として着地済み**です。
+  `if (cliToolId === 'copilot')` のような分岐を新設しないこと（方針書 §4 D3 決定 1）。
+
+  ## 受入条件（Issue 本文のとおり）
+
+  - `tests/unit/session/turn-model.test.ts`: 実機 SSE 列
+    （`permission.asked → replied → message.updated(user) → idle → message.updated(user)`）、
+    copilot の `UserPromptSubmit → 12s → SessionStart`、**別 session の idle**、
+    セッション再作成をまたいだ turn の非継承、**capability 反転で赤になる変異ケース**。
+  - S1 / S3 / S14(c)(d): 外部由来 id の検証は**破棄**（切り詰め禁止）、破棄件数の露出、
+    **payload 非保持**（`PendingDecision` は deny 照合に要る部分だけ上限つき）、dedup 集合の上限。
+  - 既存 #1720〜#1725 の Claude テストが全緑。`agent-event-generation-1723.test.ts` が赤にならないこと。
+  - 公開 getter（`getStructuredSessionState` / `getStructuredPromptWaiting` / `getLastStopEventAt`）の
+    **型は不変**。
+
+  ## この Issue で**やらないこと**
+
+  - **`respond` の `decisionId` 対応は #1932 の作業**です。`pendingDecisions[].id` を持つところまでが
+    本 Issue で、`prompt-response/route.ts` / CLI `respond` / Web `respond/route.ts` には触らないこと。
+  - **opencode SSE の再接続・health/version 境界は #1931 の作業**です
+    （大半は #1900 で着地済み）。`src/lib/hooks/sources/opencode/**` には触らないこと。
+  - **`src/lib/detection/**` に触らないこと。** Phase 3（#1927 / #1928 / #1929）が着地したばかりです。
+
+  ## 触ってよい範囲
+
+  `src/lib/session/agent-event-state.ts`・`src/lib/session/provisional-turn.ts`・
+  `src/lib/session/agent-session-lifecycle.ts`・`src/lib/session/current-output-builder.ts`・
+  `src/lib/hooks/ingest.ts`・`src/lib/hooks/structured-decision-response.ts`・
+  `src/cli/commands/wait.ts`・`src/cli/types/api-responses.ts`・
+  `tests/unit/session/**`・`tests/unit/hooks/**`・`tests/unit/cli/**`・`tests/integration/**`。
+
+  **`src/lib/cli-tools/**`・`src/lib/tmux/**`・`src/lib/session/worktree-status-helper.ts` は
+  触らないでください**（#1933 のワーカーが同時に編集しています）。
+
+  ## 作業ルール（厳守）
+
+  - **commit は 1 本にまとめる。** PR は作らない・push しない（オーケストレーターが行う）。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しない。** 代わりに
+    `dev-reports/changelog/issue-1930.md`（`## [Unreleased]` にそのまま貼れる 1 エントリ。1 行目に
+    どの節へ入るかをコメント）と `dev-reports/module-reference/issue-1930.md` を書くこと。
+    **既存行への追記を指示する場合は `grep -n '^| `<path>`' docs/module-reference.md` で実在を確認してから**書くこと。
+  - **`docs/design/multi-agent-state-architecture.md` を編集しない。** Phase 2 の実測による訂正は
+    #1979 で着地済み（develop `561d6706`）。方針書は現在正しい状態です。
+  - **この契約の方針は「推奨」。** 別解が正しいと判断したら採ってよいが、**逸脱と理由を commit message に明記**すること。
+  - **Issue 本文をコードで裏取りすること。** 食い違ったら**実測を正**とし、commit message に書く。
+    この Issue は私が書いており、自作 Issue の記述が実測と食い違った実績が多数あります。
+  - **テストを足した「後」に `npx tsc --noEmit` を回すこと。** `npm run test:unit`（vitest は esbuild で
+    型検査をしない）の緑を tsc の緑と取り違えた事例が直前のランで出ています。
+  - **`npm run test:integration` も自分で回すこと。** `wait --verify` の宣言ゲートに integration は
+    **含まれていません**（#1946）。#1927 はこれで CI を 1 回落としました。
+  - **`wait --verify` の unit ゲートは素の `npm run test:unit` の約 9 倍かかる**（62s ↔ 560s）。
+    `gate-runner.ts:414` が `CI:'true'` を渡し `fileParallelism:false` になるためで、異常ではありません。
+  - **フル `npm run test:unit` の実行中にソースやテストを編集しないこと**（vitest の遅延 transform で偽の赤が出る）。
+  - **別ワークツリーと同時にフル `npm run test:unit` を回さないこと**（#1985。30s サブプロセスガードが
+    その条件では小さく、無関係な 44 件が落ちます）。**この repo では今あなたを含め複数の worktree が動いています。**
+  - 作業が終わったら最終行に `IMPL_COMPLETED` とだけ出力すること。
+
+  ## 実 tmux を触る検証の追加ルール（厳守）
+
+  - **必ず `tmux -L <専用socket>` で行う。** `-L` / `-S` は `$TMUX` より優先されます。フラグ無しの `tmux` は
+    **ユーザーの本番サーバ**に届きます。
+  - **`kill-server` を `-L` 無しで書かない。** 後始末は `kill-session -t '=<name>:'`（完全一致）で。
+  - **`TMUX_TMPDIR` を隔離手段に使わない**（`$TMUX` があると無視される）。
+  - **`bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たない**（サーバグローバル）。
+scope:
+  allow:
+    - "src/lib/session/agent-event-state.ts"
+    - "src/lib/session/provisional-turn.ts"
+    - "src/lib/session/agent-session-lifecycle.ts"
+    - "src/lib/session/current-output-builder.ts"
+    - "src/lib/hooks/ingest.ts"
+    - "src/lib/hooks/structured-decision-response.ts"
+    - "src/cli/commands/wait.ts"
+    - "src/cli/types/api-responses.ts"
+    - "tests/unit/session/**"
+    - "tests/unit/hooks/**"
+    - "tests/unit/cli/**"
+    - "tests/integration/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, lint, typecheck, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

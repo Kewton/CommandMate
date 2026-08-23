@@ -55,12 +55,17 @@ import {
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tmux-capture-cache';
 import {
+  getAgentEventDropCounts,
   getAskUserQuestion,
   getLastAgentEvent,
   getLastStopEventAt,
+  getPendingDecisions,
+  getPublishedAgentTurn,
   getResolvedAgentModelInfo,
   getStructuredSessionState,
   markStructuredPromptRecorded,
+  observeScraperCompletionEvidence,
+  type AgentEventDropCounts,
   type AskUserQuestionEpisode,
   type StructuredPromptWaitingState,
   type StructuredSessionState,
@@ -70,8 +75,9 @@ import {
   structuredWaitingReason,
 } from '@/lib/session/prompt-waiting-composition';
 import {
-  deriveProvisionalTurn,
-  type ProvisionalTurn,
+  DIALOG_PENDING_MAX_MS,
+  isDeliveryExpired,
+  type PublishedTurn,
 } from '@/lib/session/provisional-turn';
 import {
   forgetLastKnownStatus,
@@ -104,15 +110,20 @@ import type { PromptData } from '@/types/models';
  * purpose: an event arrives here even when the merge declined to act on it, and
  * that gap is the measurement the Epic is collecting.
  *
- * Since Issue #1926 it also carries the {@link ProvisionalTurn} fields
- * (`turnId` / `openedAt` / `closedAt` / `closedBy`), derived from that same one
- * event. `lastEventType` / `lastEventAt` stay: §13 makes moving `wait`'s
- * `adoptTurnStart` onto the turn fields a Phase 4 item, and the #1839 gate is
- * not to be unhooked until the move is complete. Read the module docs on
- * `provisional-turn.ts` before consuming `turnId` — it is not yet a stable turn
- * identity.
+ * Since Issue #1926 it also carries the {@link PublishedTurn} fields
+ * (`turnId` / `openedAt` / `closedAt` / `closedBy`). Issue #1930 made them a
+ * real turn record rather than a derivation from the newest event, so `turnId`
+ * IS a turn identity now — stable across the tool calls inside a turn, and not
+ * inherited by a session recreated in the same pane. `wait`'s `adoptTurnStart`
+ * reads `openedAt` since that Issue.
+ *
+ * `lastEventType` / `lastEventAt` stay, and are deliberately allowed to
+ * disagree with the turn fields: they answer "did anything reach this server,
+ * and for the right instance?", which is the diagnostic question this block was
+ * added for, and an event carrying no verdict answers it while changing no
+ * state at all.
  */
-export interface StructuredEventsPayload extends ProvisionalTurn {
+export interface StructuredEventsPayload extends PublishedTurn {
   /** e.g. `stop`, `user_prompt_submit`, `notification`. */
   lastEventType: string | null;
   /** Epoch ms. */
@@ -184,6 +195,77 @@ export interface StructuredEventsPayload extends ProvisionalTurn {
    * "nothing has been measured" rather than guessing Claude's.
    */
   source: StructuredSourcePayload;
+  /**
+   * The approvals this instance is blocked on, oldest first (Issue #1930).
+   *
+   * Set on every payload this build produces, and empty on every session with
+   * no dialog open — which is almost every session almost all of the time. The
+   * `id` is what `#1932` teaches `commandmate respond` to name; until then it is
+   * what lets an operator tell two concurrent approvals apart in
+   * `capture --json`.
+   *
+   * **The agent's `tool_input` is not here and never will be.** What a
+   * permission request carries is a command line, a patch or a file's contents,
+   * and this payload is served over HTTP to anyone who can reach the server.
+   * What is published is what a reader has to be able to act on: which dialog,
+   * how old, whether anything corroborated it, and whether a verdict from this
+   * server can still reach the agent.
+   *
+   * Optional on the type for the reason the three fields below it are, stated
+   * once here: this shape is also *constructed* — by suites that stand in for
+   * the builder, and by the CLI's mirror in `api-responses.ts`, which has to
+   * describe a server older than the field as well as one newer. A reader takes
+   * `?? []`.
+   */
+  pendingDecisions?: PendingDecisionPayload[];
+  /**
+   * What this instance has had dropped, and on whose authority (Issue #1930).
+   *
+   * §7's discoverability rule applied to every bound in the structured layer: a
+   * de-duplicated delivery, a discarded id, an evicted dialog and an overflowed
+   * decision list are all *automatic actions*, and an automatic action visible
+   * only in the server log does not exist. "My `stop` never arrived" and "my
+   * `stop` arrived and something had already claimed its id" are the same
+   * symptom with different fixes, and this is what separates them.
+   *
+   * Zeroed on an instance nothing has been dropped for. Optional on the type;
+   * see `pendingDecisions` above.
+   */
+  dedupDropped?: AgentEventDropCounts;
+  /**
+   * The retention bounds a dialog record is held under, in ms (Issue #1930).
+   *
+   * Published so `capture --json` can explain a dialog that went away on its
+   * own. Two values because a prediction and a proof are different statements —
+   * see `provisional-turn`'s `DIALOG_PENDING_MAX_MS`. Optional on the type; see
+   * `pendingDecisions` above.
+   */
+  dialogPendingMaxMs?: { predicted: number; confirmed: number };
+}
+
+/** One approval, as it is published (Issue #1930). */
+export interface PendingDecisionPayload {
+  /** The agent's own id for it, or null for a source that publishes none. */
+  id: string | null;
+  /** Epoch ms it was first reported. */
+  at: number;
+  /** `notification` (a dialog was proved) / `permission-request` (predicted). */
+  source: StructuredPromptSource;
+  /** The tool it named, or null. Bounded. */
+  toolName: string | null;
+  /** Epoch ms something independent confirmed it, or null while predicted. */
+  confirmedAt: number | null;
+  /** Whether the scraper has itself seen a blocking frame this episode. */
+  scraperCorroborated: boolean;
+  /**
+   * Whether a verdict from this server can still reach the agent (Issue #1930).
+   *
+   * `capabilities.decisionTimeoutSeconds` (#1924) applied to this record's age.
+   * Deliberately does NOT retire it: the dialog is on the pane whether or not
+   * this server can still answer it, and reporting the pane free at ten seconds
+   * because copilot stopped listening would be the wrong half of the fact.
+   */
+  deliveryExpired: boolean;
 }
 
 /**
@@ -864,13 +946,35 @@ async function buildPayload(
   // when there is one, the compatibility source otherwise — so this needs no
   // null branch and never names a tool.
   const eventSource = getAgentEventSource(cliToolId);
+  const now = Date.now();
+  const pendingDecisions = getPendingDecisions(worktreeId, cliToolId, instanceId, now);
   const structuredEvents: StructuredEventsPayload = {
     lastEventType: lastEvent?.event ?? null,
     lastEventAt: lastEvent?.at ?? null,
     lastEventDetail: lastEvent?.detail ?? null,
-    // Issue #1926: derived from that same one event, before the `isRunning`
-    // branch so both return paths carry the turn fields.
-    ...deriveProvisionalTurn(lastEvent),
+    // Issue #1926 published these; Issue #1930 made them a real record. Read
+    // before the `isRunning` branch so both return paths carry the turn fields.
+    ...getPublishedAgentTurn(worktreeId, cliToolId, instanceId, now),
+    // Issue #1930. `deliveryExpired` is computed HERE and only here, because
+    // this is the layer that holds both halves: the record's age, and the
+    // source's declared `decisionTimeoutSeconds`. `agent-event-state` cannot
+    // reach the registry — its module graph pulls in `better-sqlite3` — which
+    // is why every capability arrives there as a value a caller hands over.
+    pendingDecisions: pendingDecisions.map((decision) => ({
+      id: decision.decisionId,
+      at: decision.at,
+      source: decision.source,
+      toolName: decision.toolName,
+      confirmedAt: decision.confirmedAt,
+      scraperCorroborated: decision.scraperCorroborated,
+      deliveryExpired: isDeliveryExpired(
+        decision,
+        eventSource.capabilities.decisionTimeoutSeconds,
+        now
+      ),
+    })),
+    dedupDropped: getAgentEventDropCounts(worktreeId, cliToolId, instanceId),
+    dialogPendingMaxMs: { ...DIALOG_PENDING_MAX_MS },
     promptWaitingSince: null,
     promptWaitingSource: null,
     // Issue #1902. Read here, before the `isRunning` branch, so both return
@@ -1015,6 +1119,25 @@ async function buildPayload(
   // analysis, unchanged and still the only source on a machine where no hook
   // ever fires — `getStructuredSessionState` answers null there, and
   // `mergeStructuredStatus` then returns the scraper's verdict untouched.
+  // Issue #1930: the screen's own half of "is this turn over". Fed BEFORE the
+  // structured state is read so a poll that closes the turn is the poll that
+  // reports it, and fed with the SCRAPER's verdict rather than the merged one —
+  // reading the merge back would be circular, since the merge is where this
+  // layer's `running` overrides the frame.
+  //
+  // What this buys is a bound on a lost `Stop` far shorter than the 30-minute
+  // staleness rule: three consecutive frames that positively read as a finished
+  // composer retire the structured `running`, and the pane goes back to being
+  // the scraper's to describe. What it deliberately does NOT do is complete a
+  // `commandmate wait` — see SCRAPER_COMPLETION_POLLS, and #1839's measurement
+  // of a 529 storm returning Claude to exactly this frame having run nothing.
+  observeScraperCompletionEvidence(
+    worktreeId,
+    cliToolId,
+    instanceId,
+    statusResult.status === 'ready' && evidence === 'positive'
+  );
+
   const structured = getStructuredSessionState(worktreeId, cliToolId, instanceId);
 
   // Issue #1725: the open-dialog half of the same merge, resolved before the
