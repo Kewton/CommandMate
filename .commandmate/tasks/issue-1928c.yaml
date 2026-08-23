@@ -1,0 +1,68 @@
+version: 1
+title: "Issue #1928 追補: tsc の TS2741（prompt-surface-text-nodes-1928.test.tsx:43）を直す"
+goal: |
+  **直前に送った「確認のみ」の契約を差し替えます。1 件だけ直してください。**
+
+  ## `npx tsc --noEmit` が exit 2 です
+
+      tests/unit/components/prompt-surface-text-nodes-1928.test.tsx(43,7):
+      error TS2741: Property 'status' is missing in type
+      '{ type: "multiple_choice"; question: string; options: (…)[] }'
+      but required in type 'MultipleChoicePromptData'.
+
+  `BasePromptData.status`（`src/types/models.ts:274`）は **required** です。
+
+  **あなたの報告では tsc は exit 0 でした。** おそらくこのテストファイルを足す前に測ったか、
+  `npm run test:unit`（vitest は esbuild で型検査をしない）の緑を tsc の緑と取り違えています。
+  **今後は「テストを足した後に」tsc を回してください。**
+
+  ## 直し方は自分で決めてください
+
+  `status` に何を入れるかは**意味のある選択**です。`src/types/models.ts:280-287` のコメントが
+  `'unclassified'`（#1708）と `'pending'` の違いを説明しており、この 2 値は
+  `markPendingPromptsAsAnswered()` の挙動を分けます。**このテストが何を主張しているのかを読んで**
+  適切な値を選び、理由を commit message に 1 行書いてください。
+
+  ## やること
+
+  - 上記 1 件を直す。
+  - `npx tsc --noEmit` が **exit 0** になることを確認する（必ず実際に回すこと）。
+  - `npm run lint` と、少なくとも `tests/unit/components/prompt-surface-text-nodes-1928.test.tsx` を
+    含むテストが緑であることを確認する。
+  - **既存 commit `1a68f323` へ `--amend` で畳む**（新しい commit を作らない）。
+  - 最終行に `IMPL_COMPLETED` とだけ出力する。
+
+  ## 私（オーケストレーター）が行った作業の共有
+
+  #1927 が develop へ squash マージされたため、あなたのブランチ（`9df208a9` ベース）は
+  add/add 衝突を起こす状態でした。**`origin/develop` へリセットして `1a68f323` を cherry-pick** し、
+  衝突マーカー 0・diff はあなたの 21 ファイルのみに作り直してあります（内容は 1 バイトも変えていません）。
+  **`src/lib/auto-yes-poller.ts` の scope 逸脱は承認済み**で、今回 `scope.allow` に入れました
+  （私の allow が `src/lib/polling/**` までで `src/lib/` 直下を含めていなかったのが原因です）。
+
+  module-reference 断片の「`src/lib/detection/tools/**` の行はまだ存在しない」という前提は、
+  **#1927 が develop `abfd6332` に着地したことで解消**しています。一本化は私が行います。
+scope:
+  allow:
+    - "src/lib/detection/tools/**"
+    - "src/lib/polling/**"
+    - "src/lib/auto-yes-poller.ts"
+    - "src/components/worktree/**"
+    - "tests/unit/detection/**"
+    - "tests/unit/detection-copilot-generating-1885.test.ts"
+    - "tests/unit/detection-help-overlay-1497.test.ts"
+    - "tests/unit/detection-opencode-interrupt-1894.test.ts"
+    - "tests/unit/lib/**"
+    - "tests/unit/polling/**"
+    - "tests/unit/components/**"
+    - "tests/fixtures/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, lint, typecheck, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

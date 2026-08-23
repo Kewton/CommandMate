@@ -1,0 +1,128 @@
+version: 1
+title: "Issue #1950: 実シェルを起動する unit テスト 69 ファイルがフル test:unit で断続的に落ちる"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/1950 を修正してください。
+
+  ## 事象（要約。詳細は Issue 本文と 4 つの追記を必ず読むこと）
+
+  `tests/unit` のうち **テスト本文で実シェル / 実サブプロセスを起動するテスト**（`execFileSync` /
+  `spawnSync` / `execSync` / `/bin/sh` を使うもの、実測 69 ファイル）が、**開発機のフル
+  `npm run test:unit` でだけ**断続的に落ちる。症状は 2 種類:
+
+  - `Test timed out in 5000ms`（vitest 既定のテスト予算。子プロセス生成待ちがそのまま予算を食う）
+  - `expected { status: 141 }` — `141 = 128 + 13` ＝ **SIGPIPE**（パイプの読み手が早く閉じた）
+
+  2026-08-22 の並列オーケストレーション中に**独立に 5 回**観測し、毎回**別のテスト**が落ちた。
+  いずれも:
+
+  - 落ちたテストは **diff に含まれていない**（無関係の PR の裁定が exit 20 になる）。
+  - **単独実行は緑**（3 連続で 3/3 exit 0 を確認済み）。
+  - **CI（self-hosted ランナー）では 1 度も落ちていない**（同じセッションで 11 本の PR が通過）。
+  - #1898 の実装者が独立に `git archive HEAD` で対照 checkout を作り、**同じ赤が対照でも出る**ことを
+    確認している（＝ diff 起因ではない）。
+
+  ## なぜ重要か
+
+  `/orchestrate` はワーカーの完了を `wait --verify` の exit code で裁定する。その unit ゲートが
+  フル `test:unit` なので、**このファミリが不安定だと裁定そのものが信用できない**。本ランでは
+  再検証に 4 回・約 40 分を失い、さらに「exit 20 は負荷かもしれない」という学習が生まれた
+  ＝ 本物の不合格まで疑われてゲートが形骸化する。**CI が緑だからよい、ではない。裁定が開発機で
+  行われる以上、開発機で安定していなければ裁定に使えない。**
+
+  ## 最初にやること（実測での裏取り）
+
+  1. `grep -rln "execFileSync\|spawnSync\|/bin/sh\|execSync" tests/unit --include='*.test.ts'` で
+     ファミリの実数を数え、Issue 本文の 65（私の計測値）と食い違うなら**実測を正**とする。
+  2. `git archive HEAD` で対照 checkout を作り、**負荷をかけた状態で同じ赤が出ること**を確認する
+     （帰属の証明。この手法は #1898 の実装者が実証済み）。
+  3. **SIGPIPE 141 と 5000ms timeout が同じ原因かどうかを切り分ける。** 別原因なら別々に直す。
+     `set -o pipefail` の下では上流の 141 がそのまま最終 exit code になる点に注意。
+
+  ## 対処の候補（推奨順。実測して選ぶこと）
+
+  - (a) 子プロセスの起動を `it()` 本文から `beforeAll` へ移し、5 秒のテスト予算から外す
+  - (b) このファミリだけ vitest の `poolOptions` / `projects` で直列化する
+  - (c) SIGPIPE を出さないパイプラインに直す（`head` や早期 `exit` の後ろで書き込みを続けている箇所）
+  - (d) このファミリにだけ専用の `testTimeout` を与える（**最後の手段**。予算を伸ばすだけで
+     根本は残るうえ、本物の hang を隠す）
+
+  **(b) を採る場合は `npm run test:unit` 全体の所要への影響を必ず測って commit message に書くこと。**
+  直列化で裁定が 2 倍遅くなるなら、それは別の形の裁定破壊になる。
+
+  ## 横断で洗ってほしいもの
+
+  Issue 追記 2 のとおり、**時間や実測値を固定閾値と比較する assert** も同じ性質の脆さを持つ。
+  `tests/unit/verification/gate-runner-timestamps.test.ts` は CI 側で
+  `expected 1104 to be less than 800` で落ちた実績がある。次で候補を洗い、直せるものは直すこと:
+
+      grep -rn "toBeLessThan\|toBeGreaterThan" tests/unit | grep -iE "ms|duration|elapsed|window"
+
+  ## 受入条件
+
+  - フル `npm run test:unit` を **連続 5 回**回し、**このファミリの全ファイルが 5/5 緑**であること。
+    5 回の所要（秒）を commit message に列挙すること。
+  - **変異注入**で、入れた安定化が「テストを無効化しただけ」ではないことを示すこと。
+    監視・検証ロジック側に欠陥を注入して**赤になること**を確認し、変異と結果を表にして
+    commit message に書く。テストを skip / timeout 延長だけで通した場合は不合格とみなす。
+  - `npm run lint` / `npx tsc --noEmit` が exit 0 のままであること。
+
+  ## 触ってよい範囲
+
+  `tests/**`・`vitest.config.ts`・`package.json`（`test:unit` スクリプトを変える場合のみ）。
+
+  **`.commandmate/verify.yaml` と `.github/workflows/ci-pr.yml` は触らないでください**（scope 外・
+  別 Issue #1946 のワーカーが同時に編集しています）。そこを変えないと直せないと判断した場合は、
+  変更せずに理由と必要な変更内容を commit message に書いて報告してください。
+
+  `src/**` も scope 外です。プロダクトコードの欠陥がこの flake の原因だと判明した場合も、
+  変更せずに commit message で報告してください。
+
+  ## 作業ルール（厳守）
+
+  - **commit は 1 本にまとめる。** PR は作らない・push しない（オーケストレーターが行う）。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+    - `dev-reports/changelog/issue-1950.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま貼れる
+      **1 エントリ**（先頭は `- **<type>(<scope>): …** (#1950): …`）。1 行目にどの節
+      （`### Added` / `### Changed` / `### Fixed`）へ入るかをコメントで書く。
+    - `dev-reports/module-reference/issue-1950.md` — `docs/module-reference.md` の表に足す注記を
+      **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。
+    断片が無いとリリースノートと module-reference に載らない。**実装と同じ commit の時点で書くこと。**
+  - **この契約に書いた方針は「推奨」であって命令ではない。** コードを読んで別の解のほうが正しいと
+    判断したら、そちらを採ってよい。ただし**逸脱した箇所と理由を commit message に明記すること**。
+  - **Issue 本文をコードで裏取りすること。** 本文と実測が食い違ったら**実測を正**とし、
+    どこがどう違ったかを commit message に書く。この Issue はオーケストレーター（私）が書いており、
+    過去のランでは自作 Issue の記述が実測と食い違った実績が複数ある。
+  - **`wait --verify` / `verify` の出力は 344 行で切られる。** 失敗の帰属を判断するときは必ず
+    `commandmate verify show <id>` で全文を見ること。切られた範囲に別ファイルの FAIL が隠れる。
+  - **フル `npm run test:unit` の実行中にソースやテストを編集しないこと。** vitest の遅延 transform に
+    より「新しいテスト × 古いソース」の組み合わせが走り、実在しない赤が出る（2026-08-22 に実例あり）。
+    待ち時間に手を動かすならリポジトリ外のファイルに限る。
+  - 作業が終わったら最終行に `IMPL_COMPLETED` とだけ出力すること。
+
+  ## 実 tmux を触る検証の追加ルール（厳守）
+
+  対象ファミリには `tests/unit/lib/tmux/**` が含まれる。実 tmux に触る検証を行う場合:
+
+  - **必ず `tmux -L <専用socket>` で行う。** `-L` / `-S` は `$TMUX` より優先される。
+    あなたは tmux ペインの中で動いていて `$TMUX` が既定サーバを指しているため、フラグ無しの
+    `tmux` 呼び出しは全て**ユーザーの本番サーバ**に届く。
+  - **`kill-server` を `-L` 無しで書かない。** 後始末は `kill-session -t '=<name>:'`（完全一致）で行う。
+  - **`TMUX_TMPDIR` を隔離手段に使わない。** `$TMUX` が設定されていると完全に無視される。
+  - **`bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たない。** サーバグローバルなので
+    他の全セッションに波及する（2026-08-02 に稼働中の全 `mcbd-*` セッションを消した実害がある）。
+scope:
+  allow:
+    - "tests/**"
+    - "vitest.config.ts"
+    - "package.json"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, lint, typecheck, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

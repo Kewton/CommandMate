@@ -1,0 +1,98 @@
+version: 1
+title: "Issue #1977: 非ファミリの遅い 5 テストを個別に直す（予算で覆わない）"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/1977 を修正してください。
+
+  #1950 で「実シェルを起動するテスト 69 ファイル」の負荷起因の赤は解消しました。**その外側に、
+  負荷で 9〜28 秒かかるテストが 5 本残っています。**
+
+  | ファイル | 所要（負荷下・60s 予算での実測） |
+  |---|---|
+  | `tests/unit/components/app-version-display.test.tsx` | **28.2s** |
+  | `tests/unit/lib/ws-server-cleanup.test.ts` | 20.5s |
+  | `tests/unit/api/hooks-claude-done-delegation.test.ts` | 11.2s |
+  | `tests/unit/lib/tmux-capture-invalidation.test.ts` | 9.4s |
+  | `tests/unit/config/eslint-i18n-module-scope-literal.test.ts` | （5000ms 超） |
+
+  **非ファミリ全体の所要分布は p99.9 = 4253ms** なので、vitest 既定の 5000ms は**このクラスに対して
+  正しいサイズ**です。上の 5 本は分布の外れ値であり、予算の問題ではなく**テスト（あるいは対象コードの）
+  問題**です。
+
+  ## やること
+
+  1. **5 本それぞれについて、何にその時間を使っているのかを実測する。** 原因はファイルごとに違うはずです
+     （jsdom のレイアウト、fake timer と実 timer の混在、`waitFor` のポーリング間隔、実ソケット待ち、
+     ESLint の実行、など）。**推測で直さないこと。**
+     `app-version-display.test.tsx` が jsdom のモーダル 1 枚に 28 秒かかるのは、それ自体が異常です。
+  2. 原因に応じて直す。
+  3. 直したものが空振りでないことを**変異注入**で示す。
+
+  ## やらないこと（重要）
+
+  - **グローバル `testTimeout` を上げない。** 非ファミリの p99.9 は 4253ms なので 5000ms は妥当で、
+    60s のグローバル予算は p99.9 の 14 倍＝「数字を大きくするだけ」のアンチパターンです。
+  - **`vitest.config.ts` と `tests/setup.ts` を触らない**（scope 外・#1939 / #1942 のワーカーが
+    同時に編集しています）。
+  - **#1950 が入れたファミリ側の仕組み**（`tests/helpers/real-shell-budget.ts`）を変更しない。
+    5 本のうち `tmux-capture-invalidation.test.ts` などがファミリ判定に入っているなら、
+    **予算を広げるのではなく個別の遅さを直す**こと。
+  - 個別の `testTimeout` を上げるのは**最後の手段**。採る場合は「なぜこのテストだけ本質的に遅いのか」を
+    根拠つきで commit message に書くこと。
+
+  ## 受入条件
+
+  - 負荷下（並列で shell を回すなどで load avg を上げた状態）でフル `npm run test:unit` を
+    **連続 3 回**回して、上記 5 ファイルが 3/3 緑。5 回の所要（秒）と load avg を commit message に。
+  - 各ファイルについて「遅さの原因」と「直した内容」が commit message の表に書かれている。
+  - グローバル `testTimeout` を上げていないこと。
+  - `npm run lint` / `npx tsc --noEmit` が exit 0。
+
+  ## 触ってよい範囲
+
+  上記 5 テストファイルと、遅さの原因が実装側だった場合の該当ソース
+  （`src/components/**`・`src/lib/**`・`src/app/api/**`）。
+
+  ## 作業ルール（厳守）
+
+  - **commit は 1 本にまとめる。** PR は作らない・push しない（オーケストレーターが行う）。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+    - `dev-reports/changelog/issue-1977.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま貼れる
+      **1 エントリ**（先頭は `- **<type>(<scope>): …** (#1977): …`）。1 行目にどの節
+      （`### Added` / `### Changed` / `### Fixed`）へ入るかをコメントで書く。
+    - `dev-reports/module-reference/issue-1977.md` — `docs/module-reference.md` の表に足す注記。
+      **既存行への追記を指示する場合は、その行が実在することを `grep -n '^| `<path>`' docs/module-reference.md`
+      で必ず確認してから書くこと**（前回のランで、存在しない行への追記を 4 件指示した実績があります）。
+  - **この契約に書いた方針は「推奨」であって命令ではない。** コードを読んで別の解のほうが正しいと
+    判断したら、そちらを採ってよい。ただし**逸脱した箇所と理由を commit message に明記すること**。
+  - **Issue 本文をコードで裏取りすること。** 本文と実測が食い違ったら**実測を正**とし、
+    どこがどう違ったかを commit message に書く。この Issue はオーケストレーター（私）が書いており、
+    過去のランでは自作 Issue の記述が実測と食い違った実績が複数あります。
+  - **`wait --verify` / `verify` の出力は 344 行で切られる。** 失敗の帰属を判断するときは必ず
+    `commandmate verify show <id>` で全文を見ること。
+  - **`wait --verify` の unit ゲートは素の `npm run test:unit` の約 9 倍の時間がかかる**
+    （62s ↔ 560s）。`src/lib/verification/gate-runner.ts:414` が `CI: 'true'` を渡し、
+    `vitest.config.ts` が `CI==='true'` で `fileParallelism:false` にするため。異常ではありません。
+  - **フル `npm run test:unit` の実行中にソースやテストを編集しないこと。** vitest の遅延 transform に
+    より「新しいテスト × 古いソース」が走り、実在しない赤が出ます。
+  - 作業が終わったら最終行に `IMPL_COMPLETED` とだけ出力すること。
+scope:
+  allow:
+    - "tests/unit/components/app-version-display.test.tsx"
+    - "tests/unit/lib/ws-server-cleanup.test.ts"
+    - "tests/unit/api/hooks-claude-done-delegation.test.ts"
+    - "tests/unit/lib/tmux-capture-invalidation.test.ts"
+    - "tests/unit/config/eslint-i18n-module-scope-literal.test.ts"
+    - "src/components/**"
+    - "src/lib/tmux/**"
+    - "src/app/api/hooks/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, lint, typecheck, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

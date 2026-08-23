@@ -1,0 +1,97 @@
+version: 1
+title: "Issue #1932: respond を decisionId で応答可能にする（Web 応答面を CLI と同じ土俵へ）"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/1932 を実装してください。
+
+  ## 実測（私が develop `a5934d49` で確認済み。Issue 本文より新しい状態です）
+
+  **`decisionId` の機構は既に動いています** — #1898 が着地させました:
+
+  - `src/app/api/worktrees/[id]/prompt-response/route.ts:167,183` が `structuredDecision` から
+    `{ option, decisionId, delivered }` を取り出して返している
+  - `src/cli/commands/respond.ts:125` が `Answered approval ${resolved.decisionId} with …` を出している
+  - `answerStructuredDecision()` / `resolveStructuredDecisionOption()` は
+    `src/lib/hooks/structured-decision-response.ts` にある
+
+  **残っているのは Web 側です:**
+
+  - `src/app/api/worktrees/[id]/respond/route.ts` は **`messageId` を必須にしています**
+    （`:44` で分解、`:47` で「messageId and answer are required」、`:57` で `getMessageById`）。
+    ここを **optional 化し、`decisionId` でも応答できるように**する。
+  - `src/components/worktree/PromptPanel.tsx:50` の `PromptPanelProps` に **`decisionId` が無い**。
+
+  したがって本 Issue は**「機構を作る」ではなく「Web の応答面を CLI と同じ土俵に乗せる」**作業です。
+  この認識が正しいか**自分で裏取りしてから**着手し、食い違ったら実測を正としてください。
+
+  ## 守ること
+
+  - **解決スコープは resolve 済みの (worktree, tool, instance) 内に閉じる**（方針書 §10.3 / D3 決定 3）。
+    **見つからなければ 404 `decision_not_found`。** 他インスタンスの decision に答えられてはいけません。
+  - **所属照合を必ず行う**こと。`decisionId` を受け取ったら、それが**この worktree のこの instance の
+    pending decision か**を確認してから適用する。照合なしに `answerStructuredDecision` を呼ばないこと。
+  - `messageId` を optional にしても、**既存の `messageId` 経路の挙動は 1 バイトも変えない**こと
+    （Web UI の既存フローが乗っています）。
+  - **`decisionId` は外部由来の id** です。#1930 の契約と同じく、`MAX_SESSION_ID_LENGTH`(256) と
+    `^[A-Za-z0-9._:-]+$` で検証し、**違反は破棄（切り詰め禁止）**。
+
+  ## 受入条件
+
+  - `respond/route.ts` が `messageId` / `decisionId` のどちらでも応答でき、両方欠けたら 400。
+  - **他インスタンスの `decisionId` を渡すと 404 `decision_not_found`** になることを pin
+    （変異注入: 所属照合を外すと赤）。
+  - `PromptPanelProps.decisionId` が入り、UI から decision で応答できる。
+  - `npm run lint` / `npx tsc --noEmit` / フル `npm run test:unit` / `npm run test:integration` が exit 0。
+
+  ## 触ってよい範囲
+
+  `src/app/api/worktrees/[id]/respond/**`・`src/app/api/worktrees/[id]/prompt-response/**`・
+  `src/cli/commands/respond.ts`・`src/components/worktree/PromptPanel.tsx`・
+  `src/components/worktree/**`・`src/hooks/**`・
+  `tests/unit/api/**`・`tests/unit/cli/**`・`tests/unit/components/**`・`tests/integration/**`。
+
+  **`src/lib/hooks/structured-decision-response.ts`・`src/lib/session/**`・
+  `src/cli/types/api-responses.ts` は触らないでください**（#1930 のワーカーが同時に編集中）。
+  そこを変えないと実装できないと判断したら、**変更せずに理由と必要な変更内容を commit message に書いて
+  報告**してください。
+
+  ## 作業ルール（厳守）
+
+  - **commit は 1 本にまとめる。** PR は作らない・push しない（オーケストレーターが行う）。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しない。** 代わりに
+    `dev-reports/changelog/issue-1932.md`（`## [Unreleased]` にそのまま貼れる 1 エントリ。1 行目に
+    どの節へ入るかをコメント）と `dev-reports/module-reference/issue-1932.md` を書くこと。
+    **既存行への追記を指示する場合は `grep -n '^| `<path>`' docs/module-reference.md` で実在を確認してから**書くこと。
+  - **`docs/design/multi-agent-state-architecture.md` を編集しない**（#1979 で訂正済み・develop `561d6706`）。
+  - **この契約の方針は「推奨」。** 別解が正しいと判断したら採ってよいが、**逸脱と理由を commit message に明記**すること。
+  - **Issue 本文をコードで裏取りすること。** 食い違ったら**実測を正**とし、commit message に書く。
+    この Issue は私が書いており、自作 Issue の記述が実測と食い違った実績が多数あります。
+  - **テストを足した「後」に `npx tsc --noEmit` を回すこと。** `npm run test:unit`（vitest は esbuild で
+    型検査をしない）の緑を tsc の緑と取り違えた事例が直前のランで出ています。
+  - **`npm run test:integration` も自分で回すこと。** `wait --verify` の宣言ゲートに integration は
+    **含まれていません**（#1946）。#1927 はこれで CI を 1 回落としました。
+  - **`wait --verify` の unit ゲートは素の `npm run test:unit` の約 9 倍かかる**（62s ↔ 560s）。異常ではありません。
+  - **フル `npm run test:unit` の実行中にソースやテストを編集しないこと**（vitest の遅延 transform で偽の赤が出る）。
+  - **別ワークツリーと同時にフル `npm run test:unit` を回さないこと**（#1985）。
+    **この repo では今あなたを含め 4 本の worktree が動いています。**
+  - 作業が終わったら最終行に `IMPL_COMPLETED` とだけ出力すること。
+scope:
+  allow:
+    - "src/app/api/worktrees/[id]/respond/**"
+    - "src/app/api/worktrees/[id]/prompt-response/**"
+    - "src/cli/commands/respond.ts"
+    - "src/components/worktree/**"
+    - "src/hooks/**"
+    - "tests/unit/api/**"
+    - "tests/unit/cli/**"
+    - "tests/unit/components/**"
+    - "tests/integration/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, lint, typecheck, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

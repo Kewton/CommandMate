@@ -1,0 +1,83 @@
+version: 1
+title: "Issue #1979: 方針書を Phase 2 の実測で訂正する（copilot probe / idle composer 例 / UNKNOWN_FRAME）"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/1979 を実施してください。
+
+  **方針書 `docs/design/multi-agent-state-architecture.md` の訂正のみ。ソースコードは変更しません。**
+
+  Epic #1891 の実装 26 件と実機受入で、方針書の記述が実測と食い違う箇所が 3 件見つかりました。
+  いずれも Phase 3（#1927 / #1928 / #1929）が直接の実装対象なので、直さずに着手すると
+  「方針書どおりに実装して間違える」ことになります。Issue 本文に 3 件の詳細があります。
+
+  ## 最も重要な作業は訂正 1（copilot probe の代替を決めること）
+
+  「`gh copilot -- --version` は使えない」と書くだけでは #1929 が着手できません。**非破壊な代替を
+  実測で探し、選んだ案を根拠つきで書いてください。** 候補と、確認すべきこと:
+
+  - `gh extension list` の出力から `github/gh-copilot` の版を読む（**出力形式を実測すること**）
+  - `~/.local/share/gh/extensions/` などインストール実体のパスを読む（**実在するか実測**）
+  - **copilot だけ probe 対象から外し `detector.staleness` を `undefined` のままにする** —
+    §4 D2 が既に「解決できなければ probe をスキップ」を既定にしているので、規約と矛盾しません
+  - どの案でも「**`gh copilot` 拡張が未インストールの環境で何も起こさない**」ことを確認してください
+    （`gh` 自体が無い場合も含む）。あなたの環境で拡張がインストール済みなら、未インストール環境の
+    挙動は `PATH` や `GH_CONFIG_DIR` を差し替えた使い捨て環境で確かめること。**ユーザーの
+    `~/.config/gh` を書き換えないこと。**
+
+  DR4-010 の規約文（probe 対象と launch 対象を別物にしない）は**維持したまま**、copilot だけ
+  例外扱いする理由を書いてください。
+
+  ## 訂正 2 は実フレームで裏を取ること
+
+  `:129` の copilot の例（`●` 応答行の直後に空の composer）は実測と食い違います。差し替える記述は
+  **実 TUI キャプチャ（200x1000 ペイン）に基づく**こと。`tests/fixtures/` に既存の copilot キャプチャが
+  あればそれを根拠に使ってください（無ければ「実測が必要」と明記し、推測で書かない）。
+
+  ## 訂正 3
+
+  `:555` の `STATUS_REASON.UNKNOWN_FRAME` は `grep -rn 'UNKNOWN_FRAME' src/` が 0 件（develop
+  `a175767a` で実測済み）。§8 の Phase 3 行に「#1927 の作業に含まれる」ことを明記してください。
+
+  ## 受入条件
+
+  - 3 箇所が実測に基づく記述へ差し替わっている。
+  - §15.5 に「Phase 2 の実装・実機受入で覆った実測」として 3 件を追記し、影響を受ける Issue
+    （#1927 / #1928 / #1929）を併記している。
+  - **ソースコードを 1 行も変更していない。**
+
+  ## 作業ルール（厳守）
+
+  - **commit は 1 本にまとめる。** PR は作らない・push しない（オーケストレーターが行う）。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+    - `dev-reports/changelog/issue-1979.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま貼れる
+      **1 エントリ**（先頭は `- **<type>(<scope>): …** (#1979): …`）。1 行目にどの節
+      （`### Added` / `### Changed` / `### Fixed`）へ入るかをコメントで書く。
+    - `dev-reports/module-reference/issue-1979.md` — `docs/module-reference.md` の表に足す注記。
+      **既存行への追記を指示する場合は、その行が実在することを `grep -n '^| `<path>`' docs/module-reference.md`
+      で必ず確認してから書くこと**（前回のランで、存在しない行への追記を 4 件指示した実績があります）。
+  - **この契約に書いた方針は「推奨」であって命令ではない。** コードを読んで別の解のほうが正しいと
+    判断したら、そちらを採ってよい。ただし**逸脱した箇所と理由を commit message に明記すること**。
+  - **Issue 本文をコードで裏取りすること。** 本文と実測が食い違ったら**実測を正**とし、
+    どこがどう違ったかを commit message に書く。この Issue はオーケストレーター（私）が書いており、
+    過去のランでは自作 Issue の記述が実測と食い違った実績が複数あります。
+  - **`wait --verify` / `verify` の出力は 344 行で切られる。** 失敗の帰属を判断するときは必ず
+    `commandmate verify show <id>` で全文を見ること。
+  - **`wait --verify` の unit ゲートは素の `npm run test:unit` の約 9 倍の時間がかかる**
+    （62s ↔ 560s）。`src/lib/verification/gate-runner.ts:414` が `CI: 'true'` を渡し、
+    `vitest.config.ts` が `CI==='true'` で `fileParallelism:false` にするため。異常ではありません。
+  - **フル `npm run test:unit` の実行中にソースやテストを編集しないこと。** vitest の遅延 transform に
+    より「新しいテスト × 古いソース」が走り、実在しない赤が出ます。
+  - 作業が終わったら最終行に `IMPL_COMPLETED` とだけ出力すること。
+scope:
+  allow:
+    - "docs/design/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, lint, typecheck]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

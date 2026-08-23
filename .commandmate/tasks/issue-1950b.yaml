@@ -1,0 +1,81 @@
+version: 1
+title: "Issue #1950 追補: cmate-verify の waited=0s 固定 assert を dual placement で直す"
+goal: |
+  **前回の作業（commit `1a2f1912`）は裁定に合格する見込みで、方針・実測・変異注入いずれも受領しました。**
+  グローバル予算を上げずにクラス予算＋ガードで解いた判断、対照 checkout での帰属証明、
+  無効になった 1 回目のキャンペーンを自分で破棄して取り直した点、いずれも正しい進め方です。
+
+  この送信は**あなたが「scope 外なので変更していない。必要な修正はこれ」と報告した 1 件を、
+  scope を広げて実際に直してもらう**ためのものです。
+
+  ## やること
+
+  ### 1. `waited=0s` の固定値 assert を直す（必須）
+
+  `.claude/skills/cmate-verify/scripts/tests/run-tests.sh` の 2 箇所:
+
+  - `:797` `assert_eq "mutex: the first run declares a wait of zero rather than nothing" "0" "$holder_waited"`
+  - `:871` `assert_has "mutex-flaky: the wait keeps its own field beside a two-valued duration" "$OUT" "waited=0s"`
+
+  あなたの報告どおり「**フィールドが存在すること**」の assert へ変えてください。元の assert が
+  何を守ろうとしていたのか（`:790` 付近のコメント）を読み、**その意図は保ったまま**、
+  負荷で 0 秒にならないケースを赤にしないようにすること。値そのものを捨てるのではなく、
+  「`waited=` フィールドが出ていること」「2 値の duration とは別フィールドであること」を
+  見る形が本来の意図に見えますが、コメントを読んだうえであなたが正しいと判断した形にしてください。
+
+  **`.claude/` と `.agents/` の両方を byte-identical に保つこと。** 現在どちらも
+  sha256 `180d7656c29e…` で一致しています。片方だけ直すと dual placement が壊れます。
+
+  ### 2. `monitor.sh` の PIPE trap（任意・安いと判断したときだけ）
+
+  `.claude/skills/orchestrate-monitor/scripts/monitor.sh` の `trap ... PIPE` があるため、
+  外から殺されると 141 を返す — あなたの報告どおり動作は正しいのですが、#1950 の調査を
+  丸一日ミスリードした表示です。trap 内の `echo ... >&2` を `2>/dev/null` で保護し、
+  TERM の 143 が保たれるようにする案を挙げていました。**安く安全に入るなら入れてください。
+  副作用が読み切れないなら入れず、理由を commit message に書いてください。** これも
+  `.claude/` と `.agents/` の両方が対象です。
+
+  ### 3. やらないこと
+
+  - **非ファミリで負荷に脆い 5 ファイル**（`app-version-display.test.tsx` 28.2s ほか）は
+    **触らないでください**。あなたの「クラスの予算は妥当であり、この 5 件は個別に
+    『なぜ jsdom のモーダル 1 枚に 28 秒かかるのか』を見るべき別 Issue」という判断を採用します。
+    別 Issue として私が起票します。
+  - `.commandmate/verify.yaml` / `.github/workflows/ci-pr.yml` — **#1946 は既に develop へ
+    マージ済み**（`417b9435`、静的ガード `route-exports` が 4 本目として増えています）。
+    あなたのブランチは私が `git merge origin/develop` で取り込み済みで、衝突はありませんでした。
+    これらのファイルは引き続き触らないでください。
+
+  ## 検証
+
+  - `tests/unit/skills/cmate-verify/verify-run.test.ts` を**負荷をかけた状態で 3 回**回して
+    3/3 緑であること（前回 run 1 と 4 で落ちた 2 件が出ないこと）。
+  - 直した assert が**空振りでないこと**を変異注入で示すこと — 元の assert が守っていた欠陥
+    （`waited` フィールドを落とす、2 値 duration に混ぜる 等）を注入して**赤になること**を確認し、
+    変異と結果を commit message に書く。「assert を緩めただけ」になっていないことの証明です。
+  - `npm run lint` / `npx tsc --noEmit` / 静的ガード 4 本（`route-exports` を含む）が exit 0。
+
+  commit は既存 `1a2f1912` への amend でも 2 本目でも構いません（PR は squash マージします）。
+  断片（`dev-reports/changelog/issue-1950.md` / `dev-reports/module-reference/issue-1950.md`）は
+  今回の修正を含む内容に**更新**してください。
+
+  作業が終わったら最終行に `IMPL_COMPLETED` とだけ出力すること。
+scope:
+  allow:
+    - "tests/**"
+    - "vitest.config.ts"
+    - "package.json"
+    - ".claude/skills/cmate-verify/**"
+    - ".agents/skills/cmate-verify/**"
+    - ".claude/skills/orchestrate-monitor/**"
+    - ".agents/skills/orchestrate-monitor/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, lint, typecheck, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

@@ -1,0 +1,57 @@
+version: 1
+title: "Issue #1928 再裁定: src/lib/auto-yes-poller.ts を scope に入れ直す（確認のみ）"
+goal: |
+  **追加の実装は不要です。** commit `1a68f323`（21 files / +2488 / −30）の内容を受領しました。
+  `src/lib/auto-yes-poller.ts` の scope 逸脱も**承認します** — 私の `scope.allow` が
+  `src/lib/polling/**` までで、`src/lib/auto-yes-poller.ts`（`src/lib/` 直下）を含めていませんでした。
+  Auto-Yes の実経路がそこにある以上、触らずに本 Issue は達成できません。**あなたの落ち度ではありません。**
+
+  今回 scope に `src/lib/auto-yes-poller.ts` を追加しました。
+
+  ## 私（オーケストレーター）が行った作業の共有
+
+  #1927 が develop へ squash マージされたため、あなたのブランチ（`9df208a9` ベース）は
+  add/add 衝突を起こす状態でした。**`origin/develop` へリセットして `1a68f323` を
+  cherry-pick** し、衝突マーカー 0・diff はあなたの 21 ファイルのみ、という形に作り直しました。
+  内容は 1 バイトも変えていません。
+
+  また **#1929（`VERIFIED_AGAINST` / `detector.staleness`）が PR #1988 として先に出ています**。
+  `detect.ts` を共有するので、#1929 がマージされたら私が refresh します。
+
+  ## やること
+
+  - `git status` を見て、`.commandmate/tasks/` 配下以外に未コミットの変更が無いことを確認する。
+  - **ファイルを 1 つも変更しない。** 新しい commit も作らない。
+  - 最終行に `VERIFY_ONLY_ACK` とだけ出力して終了する。
+
+  未コミットの変更が残っていた場合だけ `--amend` で畳んでから `VERIFY_ONLY_ACK` を出力してください。
+
+  ## 申し送り（あなたの作業ではありません）
+
+  module-reference 断片で「`src/lib/detection/tools/**` の行はまだ存在しない（#1927 の断片が
+  未適用のため）」と報告されていましたが、**#1927 は develop `abfd6332` に着地済み**で、
+  `tools/*` の行は既に入っています。一本化は私が行うので、あなたは何もしなくて構いません。
+scope:
+  allow:
+    - "src/lib/detection/tools/**"
+    - "src/lib/polling/**"
+    - "src/lib/auto-yes-poller.ts"
+    - "src/components/worktree/**"
+    - "tests/unit/detection/**"
+    - "tests/unit/detection-copilot-generating-1885.test.ts"
+    - "tests/unit/detection-help-overlay-1497.test.ts"
+    - "tests/unit/detection-opencode-interrupt-1894.test.ts"
+    - "tests/unit/lib/**"
+    - "tests/unit/polling/**"
+    - "tests/unit/components/**"
+    - "tests/fixtures/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, lint, typecheck, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

@@ -1,0 +1,147 @@
+version: 1
+title: "Issue #1928: ツール別の肯定確認 idle 規則と detectDialog、Auto-Yes をツール別判定に限定する"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/1928 を実装してください。**#1927 が作った
+  `src/lib/detection/tools/<tool>/` の構造の上に載せる**作業です。
+
+  ## Issue 本文の「実装内容」節に誤りが 1 件あります（引き継ぎ節が正）
+
+  「例: copilot は `●` 応答行直後の空 composer かつステータスバーに `Working` 無し」は
+  **1.0.80 の実測と食い違い、既に撤回されています**（#1885 実測、#1979 / PR #1980 で方針書を訂正済み）。
+
+  - composer `❯` は 200x1000 ペインの **999 行目に固定**で、応答本文の**約 930〜970 行下**
+  - **composer は生成中も同じ形で描かれる**（両 running fixture が `COPILOT_PROMPT_PATTERN` に
+    当たり続けることを #1885 が assert 済み）
+
+  **copilot の完了証拠に composer は使えません。** 正解は **ペイン最下行のステータスバー**で、
+  `readCopilotStatusBar()` / `COPILOT_IDLE_STATUS_PATTERN` / `COPILOT_WORKING_STATUS_PATTERN` として
+  **#1885 で着地済み**です（実測で所在確認: `src/lib/detection/cli-patterns.ts` と
+  `src/lib/polling/response-checker.ts`）。**書き直さず再利用してください。**
+
+  fixture も既にあります: `tests/unit/lib/detection/fixtures/copilot-live-1885/`（実キャプチャ 4 件）。
+
+  **窓で照合してはいけません** — `status-vocabulary-in-response.txt` は copilot 自身が
+  ` ● Working esc interrupt` を**本文として印字した**実フレームで、窓照合だと完了済みセッションが
+  恒久的に `running` に貼りつきます。最下行から最初の非空行 1 行だけを読み、どちらでもなければ
+  `null`（＝証拠なし）を返す形です。
+
+  ## 既に存在するもの（新設しないこと）
+
+  - **`AutoYesSuppressionReason` の `'unclassified-frame'`** は #1924 で着地済み
+    （`src/cli/types/api-responses.ts:145`、`src/cli/commands/wait.ts:211` に説明文もある）。
+    本 Issue の仕事は**その値を実際に記録すること**であって、enum を足すことではありません。
+  - **`OPENCODE_RESPONSE_COMPLETE`**（唯一の実在する完了マーカー）は `src/lib/tui-accumulator.ts` /
+    `src/lib/response-cleaner.ts` にあります。
+
+  ## この Issue の中心（ここを外すと #1896 が再発します）
+
+  **Auto-Yes が撃ってよいのは、ツール別 `detectDialog` が肯定的に返したときだけ**です。
+  `detectPrompt` の汎用番号リスト推定だけでは撃たない。汎用推定が真で `detectDialog` が偽なら
+  `autoYes.lastSuppression.reason = 'unclassified-frame'` を記録して**撃たない**。
+
+  接続先は `src/lib/polling/response-checker.ts` の `detectPromptWithOptions` 経路です
+  （Auto-Yes は `sessionStatus` を経由しません。§4 D1 決定 4 / [[reference_autoyes_bypasses_status_detector]] の実測）。
+
+  **#1896 の実フレーム**（opencode の返答本文に番号リストが出る）で Auto-Yes が撃たないことを
+  pin してください。これが本 Issue の受入の要です。
+
+  ## ロールアウトはツール単位
+
+  規則と fixture（**肯定ケース＋変異ケース**）が揃ったツールから `input_prompt` 経路の evidence を
+  `'none'` に倒します。揃っていないツールは**現行どおり `evidence:'positive'` のまま**にしてください。
+  一斉に倒すと、通常の idle composer が `evidence:'none'` に落ちて `TerminalEscapeHatch` が常時開き、
+  `wait` の完了条件（`ready && !isUnclassifiedActive`）が成立しなくなります。
+
+  #1927 が入れた**ツール単位キルスイッチ**が効くことも確認してください。
+
+  ## この Issue で**やらないこと**
+
+  - **`docs/design/multi-agent-state-architecture.md` を編集しない。** Issue 本文は「方針書 §4 D1 の
+    copilot 例も本 Issue で更新すること」と書いていますが、**それは #1979 で完了済み**です
+    （develop `561d6706`）。二重に書き換えないでください。
+  - **`VERIFIED_AGAINST` / `DETECTOR_VERSION_PROBES` / `detector.staleness` は #1929 の作業**です。
+    `tools/<tool>/patterns.ts` には触らないでください。
+  - **#1927 が作った `index.ts` / `shared/` の構造を作り替えない。**
+
+  ## 受入条件
+
+  - ツールごとに**肯定 fixture ＋ 変異 fixture**（composer に 1 文字残す / 処理中語を 1 語足す → evidence none）。
+  - **返答本文の番号リスト（#1896 の実フレーム）で Auto-Yes が撃たない**ことを pin。
+  - 新たに `isUnclassifiedActive` が true になる fixture を**別表で明示列挙**して pin（等価性 pin はしない）。
+  - S19: `PromptPanel` / `ActivityPane` が新設フィールドを**テキストノードとしてのみ**描画。
+  - `npm run lint` / `npx tsc --noEmit` / フル `npm run test:unit` / `npm run build` が exit 0。
+
+  ## 触ってよい範囲（#1927 の実構成を確認して確定しました）
+
+  `src/lib/detection/tools/*/detect.ts`（**検出規則の本体のみ**）・`src/lib/detection/tools/*/prompt.ts`（新設）・
+  `src/lib/detection/tools/*/fixtures/**`・`src/lib/detection/tools/types.ts`・
+  `src/lib/polling/**`・`src/components/worktree/**`・
+  `tests/unit/detection/**`・`tests/unit/detection-*.test.ts`・`tests/unit/lib/**`・`tests/unit/polling/**`・
+  `tests/unit/components/**`・`tests/fixtures/**`。
+
+  **`src/lib/detection/tools/registry.ts` と、`detect.ts` 内の `VERIFIED_AGAINST` 定数ブロックは
+  触らないでください**（#1929 のワーカーが同時に編集しています。`tools/copilot/detect.ts:24` に実例）。
+  `detect.ts` は共有しますが、あなたは**検出規則の本体**、#1929 は **`VERIFIED_AGAINST` の宣言**と
+  役割が分かれています。マージは #1928 → refresh → #1929 の順に私が直列化します。
+
+  ## このブランチのベースについて（重要）
+
+  あなたのブランチは **#1927 の実装コミット `9df208a9` の上**に切ってあります（まだ develop には
+  マージされていません）。したがって:
+
+  - `src/lib/detection/tools/` の構造は**既に存在します**。読んで、その上に足してください。
+  - **#1927 が触ったファイルを書き換えないでください。** `git diff 9df208a9..HEAD` が
+    あなたの変更だけになる状態を保つこと。
+  - #1927 が develop へマージされたら、私（オーケストレーター）が `git merge origin/develop` で
+    取り込みます。あなたは何もしなくて構いません。
+  - **`wait --verify` はまだ走らせません**（scope ゲートが #1927 の 59 ファイルを「範囲外」と読むため）。
+    裁定は #1927 のマージ後に私が行います。あなたは自分で `npm run lint` / `npx tsc --noEmit` /
+    フル `npm run test:unit` を回して確認してください。
+
+  ## 作業ルール（厳守）
+
+  - **commit は 1 本にまとめる。** PR は作らない・push しない（オーケストレーターが行う）。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しない。** 代わりに
+    `dev-reports/changelog/issue-1928.md`（`## [Unreleased]` にそのまま貼れる 1 エントリ。1 行目に
+    どの節へ入るかをコメント）と `dev-reports/module-reference/issue-1928.md` を書くこと。
+    **既存行への追記を指示する場合は `grep -n '^| `<path>`' docs/module-reference.md` で実在を確認してから**書くこと
+    （過去のランで、存在しない行への追記を 4 件指示した実績があります）。
+  - **この契約の方針は「推奨」。** 別解が正しいと判断したら採ってよいが、**逸脱と理由を commit message に明記**すること。
+  - **Issue 本文をコードで裏取りすること。** 食い違ったら**実測を正**とし、commit message に書く。
+    この Issue は私が書いており、自作 Issue の記述が実測と食い違った実績が複数あります。
+  - **フル `npm run test:unit` の実行中にソースやテストを編集しないこと**（vitest の遅延 transform で偽の赤が出る）。
+  - **別ワークツリーと同時にフル `npm run test:unit` を回さないこと**（#1985。30s サブプロセスガードが
+    その条件では小さく、無関係な 44 件が落ちます）。**この repo では今あなたを含め 3 本の worktree が
+    動いています。**
+  - 作業が終わったら最終行に `IMPL_COMPLETED` とだけ出力すること。
+
+  ## 実 tmux を触る検証の追加ルール（厳守）
+
+  - **必ず `tmux -L <専用socket>` で行う。** `-L` / `-S` は `$TMUX` より優先されます。フラグ無しの `tmux` は
+    **ユーザーの本番サーバ**に届きます。
+  - **`kill-server` を `-L` 無しで書かない。** 後始末は `kill-session -t '=<name>:'`（完全一致）で。
+  - **`TMUX_TMPDIR` を隔離手段に使わない**（`$TMUX` があると無視される）。
+  - **`bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たない**（サーバグローバル）。
+scope:
+  allow:
+    - "src/lib/detection/tools/**"
+    - "src/lib/polling/**"
+    - "src/components/worktree/**"
+    - "tests/unit/detection/**"
+    - "tests/unit/detection-copilot-generating-1885.test.ts"
+    - "tests/unit/detection-help-overlay-1497.test.ts"
+    - "tests/unit/detection-opencode-interrupt-1894.test.ts"
+    - "tests/unit/lib/**"
+    - "tests/unit/polling/**"
+    - "tests/unit/components/**"
+    - "tests/fixtures/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, lint, typecheck, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

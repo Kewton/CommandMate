@@ -1,0 +1,122 @@
+version: 1
+title: "Issue #1939: src/**/__tests__ の 267 テストをゲートに載せ 19 件の赤を裁く"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/1939 を修正してください。
+
+  `src/` に同居配置された unit テストが **13 ファイル / 267 テスト**あり、**CI でも `wait --verify` でも
+  一度も実行されません**。develop `a175767a` で実測すると **5 ファイル / 19 テストが赤**です:
+
+      src/components/worktree/__tests__/HistoryPane.integration.test.tsx  10 failed
+      src/components/worktree/__tests__/ConversationPairCard.test.tsx      5 failed
+      src/lib/__tests__/db-migrations-v10.test.ts                          2 failed
+      src/lib/__tests__/status-detector.test.ts                            1 failed
+      src/lib/__tests__/clipboard-utils.test.ts                            1 failed
+
+  #1946（route export ガード）と同じ穴です — **裁定が見ていない領域**があると、そこは永久に直りません。
+
+  ## 方針（推奨は B。ただし実測して判断すること）
+
+  Issue 本文の A / B / C のうち **B（`tests/unit` へ移設し、同居配置を禁止するガードを入れる）を
+  推奨**します。理由: テストの置き場が 2 つあること自体が「同じ規約の実装が 2 箇所」であり、
+  #1882 が静的ガードで潰したのと同じ形の欠陥だからです。CLAUDE.md のファイル構成も
+  `tests/unit/` / `tests/integration/` を正としています。
+
+  ただし移設には判断が要ります:
+  - `HistoryPane.integration.test.tsx` は名前が integration ですが testing-library のコンポーネント
+    テストです。`tests/unit/` と `tests/integration/` のどちらへ置くかを**中身を読んで**決めること。
+  - 相対 import が壊れないこと（`@/` エイリアスへ寄せるのが素直）。
+  - `tests/unit` 側に**後継が既にある重複**が無いか調べること（あれば移設ではなく削除）。
+
+  A（`test:unit` を `vitest run tests/unit src` にする）を採ってもよいですが、その場合は
+  **同居配置が今後も増えることを受け入れる**判断になるので、理由を commit message に書いてください。
+
+  ## 19 件の赤は 1 件ずつ裁定すること（ここが本体）
+
+  A/B のどちらでも**赤を先に裁く**必要があります。**「テストが陳腐化している」のか「実装のバグ」なのかは
+  ファイルごとに違います。** 一律にテストを書き換えて緑にするのは不合格とみなします。各件について
+  「どちらだったか」と根拠を commit message の表に書いてください。
+
+  分かっている手がかり:
+  - `clipboard-utils`: `document is not defined` ＝ environment が node のまま。`@vitest-environment jsdom`
+    の docblock 漏れの可能性が高い（**テスト側の欠陥**）。
+  - `db-migrations-v10`: `SqliteError: table worktrees has no column named memo` ＝ スキーマ変更に
+    テストが追随できていない疑い。**ただし migration の実装バグの可能性も潰すこと。**
+  - `status-detector` の gemini `expected 'running' to be 'ready'`: **Epic #1891 で検出層の挙動が
+    意図的に変わった可能性がある**。変わったのなら、テストを更新したうえで「どの Issue の
+    どの変更で変わったか」を書くこと。実装の回帰なら実装を直すこと。**ここは Phase 3（#1927）の
+    主戦場なので、判断を書き残すこと自体に価値があります。**
+  - `ConversationPairCard` / `HistoryPane`: `Unable to find an element with the text: …`。
+    React 19 移行（`act()` 外の更新は遅延する）で壊れた可能性を疑うこと。
+
+  ## ゲートに載せる
+
+  `.commandmate/verify.yaml` の `unit` ゲートと CI の Unit Tests が**この 267 テストを実際に走らせる**
+  ようにしてください。#1882 の単一実装規律（verify と CI が同じものを呼ぶ）を守ること。
+
+  ## 受入条件
+
+  - 267 テストが `npm run test:unit` と CI の Unit Tests の両方で走り、**全件緑**。
+  - **変異注入**: 移設・ゲート追加が空振りでないことを示す。移設したテストの 1 つにわざと欠陥を入れて
+    `npm run test:unit` が赤になることを確認し、変異と結果を commit message に書く。
+  - `npm run lint` / `npx tsc --noEmit` / 静的ガード 4 本が exit 0。
+
+  ## 触ってよい範囲
+
+  `src/**/__tests__/**`・`tests/unit/**`・`tests/integration/**`・`package.json`・`vitest.config.ts`・
+  `.commandmate/verify.yaml`・`.github/workflows/ci-pr.yml`、および**赤の原因が実装側だった場合の
+  該当ソース**（`src/lib/db/**`・`src/lib/clipboard-utils.ts`・`src/components/worktree/**`）。
+
+  **`tests/setup.ts` は触らないでください**（scope 外・#1942 のワーカーが同時に編集しています）。
+  **`tests/unit/components/app-version-display.test.tsx`・`tests/unit/lib/ws-server-cleanup.test.ts`・
+  `tests/unit/api/hooks-claude-done-delegation.test.ts`・`tests/unit/lib/tmux-capture-invalidation.test.ts`・
+  `tests/unit/config/eslint-i18n-module-scope-literal.test.ts` の 5 本も触らないでください**
+  （#1977 のワーカーが同時に編集しています）。
+
+  ## 作業ルール（厳守）
+
+  - **commit は 1 本にまとめる。** PR は作らない・push しない（オーケストレーターが行う）。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+    - `dev-reports/changelog/issue-1939.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま貼れる
+      **1 エントリ**（先頭は `- **<type>(<scope>): …** (#1939): …`）。1 行目にどの節
+      （`### Added` / `### Changed` / `### Fixed`）へ入るかをコメントで書く。
+    - `dev-reports/module-reference/issue-1939.md` — `docs/module-reference.md` の表に足す注記。
+      **既存行への追記を指示する場合は、その行が実在することを `grep -n '^| `<path>`' docs/module-reference.md`
+      で必ず確認してから書くこと**（前回のランで、存在しない行への追記を 4 件指示した実績があります）。
+  - **この契約に書いた方針は「推奨」であって命令ではない。** コードを読んで別の解のほうが正しいと
+    判断したら、そちらを採ってよい。ただし**逸脱した箇所と理由を commit message に明記すること**。
+  - **Issue 本文をコードで裏取りすること。** 本文と実測が食い違ったら**実測を正**とし、
+    どこがどう違ったかを commit message に書く。この Issue はオーケストレーター（私）が書いており、
+    過去のランでは自作 Issue の記述が実測と食い違った実績が複数あります。
+  - **`wait --verify` / `verify` の出力は 344 行で切られる。** 失敗の帰属を判断するときは必ず
+    `commandmate verify show <id>` で全文を見ること。
+  - **`wait --verify` の unit ゲートは素の `npm run test:unit` の約 9 倍の時間がかかる**
+    （62s ↔ 560s）。`src/lib/verification/gate-runner.ts:414` が `CI: 'true'` を渡し、
+    `vitest.config.ts` が `CI==='true'` で `fileParallelism:false` にするため。異常ではありません。
+  - **フル `npm run test:unit` の実行中にソースやテストを編集しないこと。** vitest の遅延 transform に
+    より「新しいテスト × 古いソース」が走り、実在しない赤が出ます。
+  - 作業が終わったら最終行に `IMPL_COMPLETED` とだけ出力すること。
+scope:
+  allow:
+    - "src/**/__tests__/**"
+    - "tests/unit/**"
+    - "tests/integration/**"
+    - "package.json"
+    - "vitest.config.ts"
+    - ".commandmate/verify.yaml"
+    - ".github/workflows/ci-pr.yml"
+    - "src/lib/db/**"
+    - "src/lib/clipboard-utils.ts"
+    - "src/components/worktree/**"
+    - "src/hooks/**"
+    - "src/lib/detection/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, lint, typecheck, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
