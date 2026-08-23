@@ -94,7 +94,17 @@ options:
 ### 3.2 途中で失敗しても止まらない
 
 **あるゲートが失敗しても残りのゲートは実行し、全結果を報告する。** 1 回の実行で全指摘を
-回収できることを優先する。定義順は打ち切りの制御ではなく、読みやすさのための並びである。
+回収できることを優先する。定義順は打ち切りの制御ではない。
+
+ただし**順序が意味を持つ場合はある** —— 先行ゲートの副作用を後続ゲートが読むときである
+（Issue #1994）。CommandMate 自身の例: `tsconfig.json` の include に `.next/types/**/*.ts`
+が在るため、`npx tsc --noEmit` は前回の `next build` が生成した route 型ガードを読む。
+route を rename / 削除した diff ではその生成物だけが古く残り、`typecheck` が
+`.next/types/...: error TS2307` という**成果物由来の偽の赤**を出す（実測で再現）。
+`next build` は `.next/types` を毎回作り直すので、`build` を `typecheck` の**前**に
+宣言しておけば、typecheck が読む型は必ずそのランの tree のものになる。
+**このような依存が在るときは、順序の意図をテストで固定すること**
+（`tests/unit/guards/verify-build-integration-gates.test.ts`）。
 
 ### 3.3 判定
 
@@ -208,6 +218,43 @@ UPDATE で辻褄を合わせるのは履歴の改竄である。代わりに読�
 `duration_ms` の計測方法は変えていない。**裁定（gate status / run status / exit code）は
 timestamp を一切使っていない**ので、この変更で合否は動かない。
 
+### 3.8 ゲートの実行環境（Issue #1994）
+
+ゲートは**リポジトリの CI チェックの再実行**である。したがってゲートが受け継ぐべきなのは
+**CI の形**であって、たまたまランナーをホストしているプロセスの形ではない。
+
+| 変数 | 規約 | 理由 |
+|---|---|---|
+| `CI` | **`true` を注入する** | vitest 等は `CI` で並列度を変える。CI と違う走らせ方をするゲートは「ここでは緑、CI では赤」を作る |
+| `NODE_ENV` | **継承から取り除く**（`NODE_ENV=` ではなく**不在**にする） | 下記 |
+| `CM_WORKTREE_ID` / `CM_WORKTREE_INDEX` | 注入する（9.1） | 並列 worktree の資源分割 |
+| それ以外 | 継承する | — |
+
+`NODE_ENV` を落とすのは、**ゲートを起動するのがサーバプロセスだから**である。CommandMate の
+サーバは自分の `NODE_ENV` を持つ（`commandmate start` なら `production`、
+`commandmate start --dev` と `npm run dev` なら `development`）。フレームワークのビルドを
+呼ぶゲートはそれを読む。実測（CommandMate、Next.js 15）: `npm run build` は
+**NODE_ENV 未設定なら exit 0、`NODE_ENV=development` なら exit 1** で、`/404` `/500` `/offline`
+の prerender が `<Html> should not be imported outside of pages/_document` で落ちる。
+継承したままだと、**オペレータがサーバを `--dev` で起動していたというだけで、
+全ワーカーの build ゲートが毎回赤になる** —— ホストについての裁定を diff についての裁定の
+顔で報告することになる。GitHub Actions は `NODE_ENV` を設定しないので、**落とすことが
+CI と一致させることである**。NODE_ENV が要るコマンドは自分で宣言すればよい
+（`NODE_ENV=test vitest run` / `NODE_ENV=production next build`）。
+
+**現状のランナー間差分（parity ギャップ）。** この規約を実装しているのは CommandMate 本体
+（`gate-runner.ts` の `gateProcessEnv()`）だけである。
+
+| ランナー | `CI=true` | `NODE_ENV` 除去 |
+|---|---|---|
+| CommandMate 本体 | ✅ | ✅ #1994 |
+| standalone（`verify-run.sh`） | ❌ | ❌ |
+
+**この差はゲートの走らせ方そのものを変える。** 例: `npm run test:integration` は
+本体経由なら直列（実測 49.9-50.3s）、standalone 経由なら並列（同 10.2-12.0s）で、
+後者だけが負荷で per-test の 5000ms timeout を踏む（9.6 の表）。宣言側でこの差を
+吸収する必要がある間は、影響を受けるゲートに `mutex` を付けるのが確実である。
+
 ---
 
 ## 4. 組み込みゲート `work-evidence`
@@ -264,13 +311,47 @@ timestamp を一切使っていない**ので、この変更で合否は動か�
 コマンド系ゲートを実行せず `RESULT skipped`（exit 22）とする。
 
 プライマリ checkout は稼働中の開発サーバの cwd になっていることがあり、その足元で
-build / test を回すと配信中のビルド成果物を壊す。判定は `git rev-parse --git-dir` と
-`--git-common-dir` が同じディレクトリを指すか（linked worktree は前者が
-`<common>/worktrees/<name>` になる）で行う。
+build / test を回すと配信中のビルド成果物を壊す。
 
-両者は `pwd -P` で **実パスに正規化してから**比較する。macOS の `$TMPDIR` は
-`/var -> /private/var` シンボリックリンク配下にあり、論理パスと実パスを比較すると
-どの checkout も linked と判定され、このガードが黙って無効化される。
+**判定方法は 2 ランナーで異なる。どちらも「守りたいもの」は同じだが、使える材料が違う。**
+
+| ランナー | 判定 | 意味 |
+|---|---|---|
+| standalone（`verify-run.sh`） | `git rev-parse --git-dir` と `--git-common-dir` が同じディレクトリを指すか（linked worktree は前者が `<common>/worktrees/<name>` になる） | 「そのリポジトリのメイン checkout か」 |
+| CommandMate 本体（`gate-runner.ts`） | `realpath(worktreePath) === realpath(process.cwd())` | 「**このサーバプロセスが動いているディレクトリ**か」 |
+
+standalone はサーバを知らないのでメイン checkout を代理指標にしている。本体は危険の
+定義そのもの（＝ 配信しているプロセスの足元）を直接見ている。**本体側の定義を
+「メイン checkout も skip」に広げてはならない** —— サーバとは別のリポジトリを
+そのメイン checkout で開発しているケース（CommandMate が実際にそう使われている）で
+全ゲートが skip ＝ exit 22 になり、何も検証していないランが返るようになる。
+
+代わりに残る限界を明示しておく: **同じマシンで 2 台目のサーバが別 checkout を配信している
+場合、本体側の判定はその checkout を守らない。** ビルド系ゲートを宣言するリポジトリは、
+この点を運用で担保すること（Issue #1994）。
+
+両者は実パスに正規化してから比較する（standalone は `pwd -P`、本体は `realpathSync`）。
+macOS の `$TMPDIR` は `/var -> /private/var` シンボリックリンク配下にあり、論理パスと
+実パスを比較するとどの checkout も linked と判定され、このガードが黙って無効化される。
+
+**実機確認（Issue #1994、2026-08-23）。** 隔離サーバ（cwd ＝ 登録済み worktree `repo`、
+ポート 3994、隔離 DB / HOME / `CM_VERIFY_LOCK_ROOT`）で、ステータス文字列ではなく
+**副作用**で確かめた。`touch .cm-1994-sentinel` だけを実行する使い捨てゲートを宣言し:
+
+| ラン | 結果 | sentinel ファイル |
+|---|---|---|
+| `verify repo --gates sentinel`（＝ サーバの cwd） | `GATE sentinel SKIP (skipped: worktreePath is the server process working directory ...)` / `RESULT error` / exit 99 | **作られない** |
+| `verify alpha --gates sentinel`（linked、陽性対照） | `GATE sentinel PASS (exit=0)` / `RESULT passed` / exit 0 | 作られる |
+| `verify repo --gates build,build-cli,build-server` | 3 本とも SKIP / `RESULT error` | `.next/BUILD_ID` は前後とも**存在しない** |
+| `verify alpha --gates build,build-cli,build-server`（陽性対照） | build-cli PASS 0.9s / build-server PASS 2.1s / build 実行 32.6s | `.next/BUILD_ID` が作られる |
+
+ガードはゲート単位ではなくループ手前の boolean 1 個なので、1 本で示せれば全ゲートに効く。
+
+> **綴りの差**: 3.3 は「コマンド系ゲートが 0 件 ＝ `skipped` ＝ exit 22」とするが、
+> 製品ランナーには `skipped` という run status が無く、`skipped` のゲートが 1 つでも
+> あれば run は `error` ＝ **exit 99** になる（`aggregateRunStatus`）。**どちらも
+> `passed` を返さない**という肝心の性質は同じで、差は綴りだけである。呼び出し側は
+> 20（不合格）と 21（未着手）以外を「裁定を得られなかった」として扱えばよい。
 
 ---
 
@@ -457,7 +538,8 @@ runner と standalone runner が同じ資源に触れる）:
 `token` は必須である。これが無いと、pid が死んで見えたために奪われた側が、あとから解放した
 ときに**次の保有者のロックを消す**（＝2 ランが同時に資源へ入る）。
 
-**CommandMate 自身の適用は `unit` ゲート 1 本だけである（Issue #1917）。** 9 の導入文は
+**CommandMate 自身の適用は `unit` と `integration` の 2 本である（Issue #1917 / #1994）。**
+9 の導入文は
 「固定ポート・ローカル DB・エミュレータ」を例に挙げているが、`unit` が奪い合うのは
 **固定資源ではなく CPU と実時間**であり、9.1 の env 注入で分けられる対象が無い。
 並列ワーカーの `wait --verify` が同時にフル `npm run test:unit` に到達すると、
@@ -480,6 +562,7 @@ claudemd-size / route-exports。各 0.1〜0.3s）は失敗を秒で返すため�
 `lint` / `typecheck` も付けない ——「2 worktree 同時でも緑のまま」が実測で確認されており、
 **実在しない偽陽性を消すために 9.4 の裁定不能経路を新設する**取引になるからである。
 実機記録は [docs/qa/1917-parallel-unit-mutex.md](../qa/1917-parallel-unit-mutex.md)。
+`build` / `build-cli` / `build-server` も同じ側である（Issue #1994、判定基準は 9.6）。
 
 ### 9.3 待ち時間は duration と別に記録する
 
@@ -582,6 +665,60 @@ exit 2）、PR #225 / #1861 で解消した。**新しいキーを足す提案�
 経由で導入した standalone runner / advisor に 4 キーを効かせるには、#225 を含む版の release が
 要る。CommandMate リポジトリ内の vendored copy（`.claude/skills/` / `.agents/skills/`）は catalog
 を経由しないので、#1861 の commit 時点で既に受理する。
+
+### 9.6 どのゲートに `mutex` を付けるかの判定基準（Issue #1994）
+
+**基準は所要時間ではない。「負荷が変えるのは実時間だけか、裁定そのものか」**である。
+
+| 種類 | 負荷が届く先 | 正しい対処 |
+|---|---|---|
+| 決定的なゲート（コンパイラ・型検査・ビルド） | 実時間だけ。裁定が反転する経路は `timeoutSec` の枯渇 ＝ TIMEOUT のみ | **`timeoutSec` の余裕**。`mutex` は 9.4 の裁定不能経路を持ち込むだけで得が無い |
+| 実時間の予算を内側に持つゲート（テストランナーの per-test timeout、固定ポート、子プロセスの exit code 検査） | 裁定そのもの。外側の `timeoutSec` では届かない | **`mutex`**（分けられる資源なら 9.1 を優先） |
+
+**実測は 3.8 の 2 モード両方で取ること。** 同じ 1 行の宣言が、`CI=true` を注入する
+製品ランナー（モード A）と注入しない standalone ランナー（モード B）で別の走らせ方に
+なるため、片方だけで測ると決定性の判断を誤る。
+
+CommandMate の実測（28 コア、2026-08-23）。「5 ワーカー相当」は別 worktree 1 本が `unit`
+（＝ `cpu.heavy` の保有者）、3 本が mutex 無しゲートを回す条件で、`unit` の mutex が在る以上
+**並列オーケストレーションが実際に作れる最大の負荷**である（モード A で load avg 17-29、
+モード B で 73-92）。「極端」は 4 worktree が同時にフル `test:unit` を回す条件（load avg
+135-173）で、timeout 予算の上限を取るためだけに測った。
+
+| ゲート | モード | 単独 | 5 ワーカー相当 | 極端 | 裁定 |
+|---|---|---|---|---|---|
+| `build-cli` | A | 0.8-0.9s | 0.9-1.2s | — | 6/6 PASS |
+| `build-cli` | B | 0.8-0.9s | 1.1-2.0s | 4.4-11.4s | 12/12 PASS |
+| `build-server` | A | 1.9s | 2.3-2.7s | — | 6/6 PASS |
+| `build-server` | B | 1.9-2.0s | 2.8-4.5s | 9.6-29.5s | 11/11 PASS |
+| `build` | A | warm 28.4-29.8s / cold 38.0s | 33.4-35.1s | — | 7/7 PASS |
+| `build` | B | warm 29.7-29.9s / cold 37.5s | warm 57.0-71.8s | warm 152-193s / cold 215.4s | 15/15 PASS |
+| `integration` | A | 49.9-50.3s | 62.4-66.4s | — | 9/9 PASS |
+| `integration` | B | 10.2-12.0s | 17.3-38.9s | 29.0-67.4s | **負荷下 11 ラン中 1/11 PASS** |
+| `integration`（ロック保有時） | B | — | 11.2-13.3s | — | **6/6 PASS** |
+
+結論: `build-cli` / `build-server` / `build` は **mutex なし**（`timeoutSec` 600 / 600 / 1800）、
+`integration` は **`mutex: cpu.heavy`**（`timeoutSec` 5400）。
+
+`integration` が落ちるのは常に同じ 2 ファイル（`auto-yes-persistence.test.ts` /
+`ws-auth-rejection.test.ts`）の `Test timed out in 5000ms` で、diff とは無関係である
+（Issue #1985）。5000ms は vitest の内側の予算なので `timeoutSec` では直せない。
+**モード A では 9/9 緑で偽の赤は観測していない。** それでも宣言するのは、1 行の宣言が
+両ランナーで走る以上、**決定性が「どちらのランナーで起動したか」に依存する状態**を
+残さないためである。代償はモード A の直列枠が 1 ワーカーあたり約 550s → 約 615s（+12%）。
+
+**mutex ゲートの `timeoutSec` は 9.2 のとおりロック待ちの上限でもある。** 同じ mutex に
+2 本のゲートが載ると、ワーカーは 1 ラン中に 2 回ロックを取る。N ワーカーが同時に完了した
+最悪ケースの直列総量は N ×（各ゲートの遅い実測の合計）で、CommandMate では
+5 ×（`unit` 640s ＋ `integration` 66s）= 3530s。3600 では余裕が 2% しか残らないため
+両ゲートの `timeoutSec` を **5400**（7 ワーカーの 4942s まで飲み込む）に置いた。
+**予算を割ったときの結果は 9.4 のとおり exit 99（裁定不能）であって 20 ではない** ——
+つまり mutex を足したことで新たに生じうる壊れ方は「偽の赤」ではなく「裁定しない」であり、
+mutex を付けなかった場合の壊れ方（負荷由来の exit 20）より厳密に良い。代償として、
+本当にハングしたスイートの TIMEOUT 判定は 60 分から 90 分に延びる。
+
+不変条件は `tests/unit/guards/verify-heavy-gate-mutex.test.ts`（どのゲートに付くか）と
+`tests/unit/guards/verify-build-integration-gates.test.ts`（ゲートの宣言と順序）が固定している。
 
 ---
 

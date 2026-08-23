@@ -2,11 +2,9 @@
 # 仕様: docs/design/verification-config.md
 # ランナー: .claude/skills/cmate-verify/scripts/verify-run.sh
 #
-# ゲートは CI（.github/workflows/ci-pr.yml）の lint / type-check / test-unit と、
-# 静的ガード 4 本（token-discipline / control-chars / claudemd-size / route-exports）を
-# 宣言している。
-# build は稼働サーバの足元で走らせると配信中の成果物を壊すため、
-# skipInPrimaryCheckout が守る linked worktree でのみ意味を持つ。
+# ゲートは CI（.github/workflows/ci-pr.yml）12 ジョブのうち 11 本を宣言している。
+# lint / type-check / test-unit / test-integration / build（3 ステップを 3 ゲートに分解）と、
+# 静的ガード 4 本（token-discipline / control-chars / claudemd-size / route-exports）。
 #
 # [Issue #1882] 静的ガードは CI と**同じスクリプト**（scripts/check-*.mjs）を呼ぶ。
 # verify.yaml へ検査本体（grep や上限値）をコピーすると同じ検査の実装が 2 箇所に増え、
@@ -19,12 +17,13 @@
 # 事故の記録 2: PR #1943 は `next build` の route 型チェックだけが見る欠陥を
 # develop まで通した（Issue #1946）。build ゲートが無い以上、宣言ゲートを増やしても
 # 埋まらない穴だったので、build の一部を静的ガード（route-exports）として切り出した。
+# 事故の記録 3: 2026-08-22〜23 の 3 日で、build と integration だけが見る欠陥が
+# **3 件** develop に入った（#1943 の route export / #1927 の integration 期待値 /
+# #1933 の `build:cli` TS2307）。3 件とも `wait --verify` は exit 0 を返していた。
+# Issue #1994 はその 5 本の穴のうち build 3 本と integration を塞ぐ。
 #
-# ここに**追加しない**もの: Integration Tests / Legacy tmux（Docker 必須）/
-# Security Audit（ネットワーク依存）/ Build（稼働サーバの足元を壊す）/ E2E（下記参照）。
-# Integration と Build を足すかどうかは #1950 の着地後に別 Issue で判断する。実測と
-# 見解は dev-reports/issue-1946-gate-coverage.md（build 219s / integration は develop
-# 単独実行でも 4 件 timeout 失敗、2 回とも再現）。
+# ここに**追加しない**もの: Legacy tmux（Docker 必須）/ Security Audit（ネットワーク依存）/
+# E2E（下記参照）。
 version: 1
 gates:
   # 静的ガード（各 0.1m）。失敗を秒で返せるよう、重いゲートより前に置く。
@@ -44,13 +43,29 @@ gates:
   # [Issue #1946] route.ts が Next の許さない名前を export していないかを見る。
   # PR #1943 の `export const SERVER_CAPABILITIES` は lint / typecheck / unit を
   # 素通りして develop の build を壊した。Next の route 型チェックは `next build` が
-  # 生成する型ガードファイルの中にしか存在しないため、build ゲートを持たないここでは
-  # 見えない。**この 1 本は build ゲートの代用ではない**（build が見るもののうち、
-  # 「route が何という名前を export しているか」だけを静的に再宣言している）。
+  # 生成する型ガードファイルの中にしか存在しない。
+  # [Issue #1994] 下に build ゲートが入った今も、この 1 本は残す。0.3s で同じ欠陥を
+  # 名指すので、30s の build を待たずに失敗を返せる（#1882 の設計意図）。
   # 実測 0.3s / 128 route entries。
   - id: route-exports
     command: "node scripts/check-route-exports.mjs"
     timeoutSec: 120
+  # [Issue #1994] CI の Build ジョブ 3 ステップのうち軽い 2 本。ここに在る理由は
+  # 「build を宣言したから」ではなく、**ルートの `tsc --noEmit` が原理的に見られない
+  # ものを見る**からである。`tsconfig.cli.json` は `"paths": {}` を宣言するので、
+  # `src/cli/**` の推移閉包に `@/...` の import が 1 本混ざるだけで TS2307 になる。
+  # ルートの tsconfig.json は `@/*` を持つので同じ import を通してしまう
+  # （PR #1991 が直した #1933 の実害そのもの）。`build:server` は include が別集合で、
+  # `tsc-alias` の解決まで含めて見る。
+  # 実測（単独 / 5 ワーカー相当 / 極端。詳細は下の判断メモ）:
+  #   build-cli    0.8-0.9s / 0.9-2.0s / 4.4-11.4s  … 18/18 PASS
+  #   build-server 1.9-2.0s / 2.3-4.5s / 9.6-29.5s  … 17/17 PASS
+  - id: build-cli
+    command: "npm run build:cli"
+    timeoutSec: 600
+  - id: build-server
+    command: "npm run build:server"
+    timeoutSec: 600
   # [Issue #1917] lint / typecheck に `mutex` は付けない。2 worktree 同時実行 6 ラン中
   # 6 回とも PASS で、キャッシュを揃えた A/B でも測れるほどの遅延が出ない
   # （単独 lint 5.3s / typecheck 2.5s ⇔ 同時 5.2s / 2.4s）。すなわち
@@ -61,9 +76,107 @@ gates:
   - id: lint
     command: "npm run lint"
     timeoutSec: 900
+  # [Issue #1994] **`build` は `typecheck` より前に置くこと。順序が意味を持つ唯一の箇所。**
+  # tsconfig.json の include には `.next/types/**/*.ts` が在るので、`tsc --noEmit` は
+  # 前回のビルドが生成した route 型ガードを読む。route を rename / 削除した diff では
+  # その生成物だけが古いまま残り、
+  #   .next/types/app/api/<old>/route.ts(2,24): error TS2307: Cannot find module ...
+  #   .next/types/validator.ts(287,39): error TS2307: Cannot find module ...
+  # という**成果物由来の偽の赤**を typecheck が出す（実測で再現）。`next build` は
+  # `.next/types` を毎回作り直す（実測: route を消してビルドすると生成ディレクトリごと
+  # 消え、validator.ts からの参照も 0 件になる）ので、build を先に走らせておけば
+  # typecheck が読む型は必ずこのランの tree のものになる。この順序は
+  # tests/unit/guards/verify-build-integration-gates.test.ts が固定している。
+  # 実測: 単独 warm 28.4-29.9s / cold 37.5-39.3s、5 ワーカー相当 warm 33.4-71.8s、
+  # 極端 warm 152-193s / cold 215.4s。**22/22 PASS**。
+  # timeoutSec 1800 は最悪実測 215.4s の 8.4 倍。mutex ではなくこの余裕で守る（判断メモ）。
+  #
+  # この作業中に `npm run build` が落ちた唯一の例は `NODE_ENV=development` を
+  # 継承したときで、diff とは無関係に `/404` `/500` `/offline` の prerender が
+  # `<Html> should not be imported outside of pages/_document` で失敗した。
+  # ゲートは CommandMate **サーバ**の子プロセスなので `commandmate start --dev` の
+  # NODE_ENV がそのまま届く。同 Issue で 2 段に塞いだ:
+  #   1. `gate-runner.ts` の `gateProcessEnv()` が継承 env から NODE_ENV を落とす
+  #      （GitHub Actions も NODE_ENV を持たない。既存の `CI=true` と同じ正規化）
+  #   2. `package.json` の `build` スクリプト自身が `NODE_ENV=production` を宣言する
+  #      （どのランナー・どのシェルから叩かれても同じ結果にするため）
+  - id: build
+    command: "npm run build"
+    timeoutSec: 1800
   - id: typecheck
     command: "npx tsc --noEmit"
     timeoutSec: 900
+  # ===========================================================================
+  # [Issue #1994] mutex を付けるか付けないかの判断
+  # ===========================================================================
+  # 分け方は**ゲートの所要ではなく「負荷が変えるのは実時間だけか、裁定そのものか」**である。
+  #
+  # 実測を読む前に、ゲートの実行環境を 2 つに分けて考える必要がある:
+  #   モード A ＝ 製品ランナー（`wait --verify` / `commandmate verify`）。
+  #              `gate-runner.ts` が `CI=true` を注入するので vitest は**直列**
+  #              （fileParallelism 無効 / maxConcurrency 1）＝ CI と同じ走らせ方。
+  #   モード B ＝ standalone ランナー（.claude/skills/cmate-verify/scripts/verify-run.sh）。
+  #              `CI` を注入しないので vitest は**並列**。
+  # 同じ 1 行の宣言が 2 つのモードで走るので、判断は**両方**で取る。
+  #
+  # 負荷条件は 3 つ:
+  #   単独           他に何も走っていない linked worktree（load avg 4-10）
+  #   5 ワーカー相当  別 worktree 1 本が `unit`（＝ cpu.heavy の保有者）、3 本が
+  #                  mutex 無しゲートを回す。unit の mutex が在る以上、これが
+  #                  並列オーケストレーションで実際に作れる最大の負荷である
+  #                  （モード A で load avg 17-29、モード B で 73-92）
+  #   極端           4 worktree が同時にフル `test:unit`（load avg 135-173）。
+  #                  #1917 以前の姿で、timeout 予算の上限を取るためだけに測った
+  #
+  #   モード A（製品ランナー）      単独            5 ワーカー相当     裁定
+  #     build-cli                 0.8-0.9s        0.9-1.2s          6/6 PASS
+  #     build-server              1.9s            2.3-2.7s          6/6 PASS
+  #     build (warm/cold)         28.4-29.8/38.0  33.4-35.1s        7/7 PASS
+  #     integration               49.9-50.3s      62.4-66.4s        9/9 PASS
+  #
+  #   モード B（standalone）        単独            5 ワーカー相当     極端
+  #     build-cli                 0.8-0.9s        1.1-2.0s          4.4-11.4s   12/12 PASS
+  #     build-server              1.9-2.0s        2.8-4.5s          9.6-29.5s   11/11 PASS
+  #     build (warm)              29.7-29.9s      57.0-71.8s        152-193s    15/15 PASS
+  #     integration               10.2-12.0s      17.3-38.9s        29.0-67.4s  **11 ラン中 1/11 PASS**
+  #     integration（ロック保有時） —              11.2-13.3s        —           **6/6 PASS**
+  #
+  # build 系 3 本に**付けない**理由: 3 本とも tsc / next build であって、タイマも
+  # 子プロセスの exit code もポートも持たない。負荷が変えられるのは実時間だけで、
+  # 裁定が反転しうる経路は `timeoutSec` の枯渇 ＝ TIMEOUT だけである。だから正しい
+  # 対処は mutex ではなく **timeoutSec の余裕**（最悪実測 215.4s に対し build は 1800）。
+  # 3 本合わせて 57 ラン、極端条件を含めて**負荷起因の赤は 1 件も出ていない**。
+  # #1917 が lint / typecheck に付けなかったのと同じ取引で、得るものは実在しない
+  # 偽陽性の予防、失うものは exit 99（裁定不能）経路の新設である。
+  #
+  # `integration` に**付ける**理由: モード B では**裁定そのものが負荷で反転する**。
+  # 落ちるのは常に同じ 2 ファイル（auto-yes-persistence.test.ts /
+  # ws-auth-rejection.test.ts）の `Test timed out in 5000ms` で、diff とは無関係
+  # （Issue #1985）。5000ms は vitest の内側の予算なので `timeoutSec` では届かない。
+  # 負荷下 11 ラン中 10 ランが赤、`cpu.heavy` を保有した条件で測り直すと 6/6 緑。
+  # **モード A では 9/9 緑で偽の赤は観測していない** —— それでも付けるのは、
+  # 宣言 1 行が両ランナーで走る以上、決定性が「どちらのランナーで起動したか」に
+  # 依存する状態を残さないためである（#1917 が `unit` について採ったのと同じ立場:
+  # 「負荷で反転する exit code は裁定ではない」）。
+  # 代償はモード A の直列枠が 1 ワーカーあたり約 550s → 約 615s（+12%）伸びること。
+  #
+  # timeoutSec 5400 の根拠: mutex ゲートの `timeoutSec` は**ロック待ちの上限でもある**
+  # （9.2）。同じ mutex に 2 本載ると 1 ランでロックを 2 回取るので、N ワーカーが
+  # 同時に完了した最悪ケースの直列総量は N ×（各ゲートの遅い実測の合計）:
+  # 5 ×（unit 640s ＋ integration 66s）= 3530s。3600 では余裕が 2% しか無いので
+  # 5400 にした（7 ワーカーの 4942s まで飲み込む）。予算を割ったときは
+  # SKIP reason=mutex-wait ＝ RESULT error ＝ **exit 99（裁定不能）**であって 20 ではない
+  # （9.4）——壊れ方は「偽の赤」ではなく「裁定しない」である。
+  # 代償として、本当にハングしたスイートの TIMEOUT 判定は 60 分から 90 分に延びる。
+  #
+  # 採らなかった案 `sh -c 'CI=true npm run test:integration'`: モード B をモード A に
+  # 揃えれば mutex 無しで済むかもしれない。却下したのは (1) その条件での負荷実測を
+  # 取っていない、(2) ゲートの決定性を env 文字列 1 個に預けることになる、
+  # (3) mutex 版は両モードで実測 6/6 緑である、の 3 点による。
+  - id: integration
+    command: "npm run test:integration"
+    timeoutSec: 5400
+    mutex: cpu.heavy
   - id: unit
     # [Issue #1917] `mutex` は「マシン上でこのゲートを同時に 1 本だけ」にする宣言
     # （docs/design/verification-config.md 9.2）。並列ワーカーの `wait --verify` が
@@ -80,11 +193,13 @@ gates:
     # ゲート ID を名前にすると、同じ CPU を食う別リポジトリの `test` と排他できない。
     # `cpu` 単独にしなかったのは、5s の lint までこの枠を取りに来ると、失敗を秒で返す
     # という #1882 の設計意図が消えるため。`heavy` は入場条件そのものを名前にしている。
+    # [Issue #1994] `integration` が同じ枠に入った。資源名にしておいた狙いどおりで、
+    # 宣言は 1 行増えただけである。
     #
     # 9.1 の env 注入（CM_WORKTREE_INDEX）は効かない。分けられる資源が無いためで、
     # 9 が「分けられるなら 9.1 を優先」と書いているケースには当たらない。
     command: "npm run test:unit"
-    timeoutSec: 3600
+    timeoutSec: 5400
     mutex: cpu.heavy
 # e2e ゲートはここに**無い**。宣言したゲートは既定で毎回走るため（スキーマに「宣言はするが
 # 既定では走らない」フラグは無い）、常設すると `wait --verify` の所要が 1 ワーカーあたり

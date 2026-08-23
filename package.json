@@ -37,7 +37,7 @@
   ],
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "next build",
+    "build": "NODE_ENV=production next build",
     "build:cli": "tsc --project tsconfig.cli.json",
     "build:server": "tsc --project tsconfig.server.json && tsc-alias -p tsconfig.server.json",
     "build:all": "npm run build && npm run build:cli && npm run build:server",

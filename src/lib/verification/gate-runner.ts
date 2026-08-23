@@ -383,6 +383,43 @@ class TailBuffer {
 }
 
 /**
+ * The environment a gate command runs in (Issue #1994).
+ *
+ * A gate is a re-run of the repository's CI check, so what it must inherit is
+ * CI's shape — not the shape of whatever process happens to be hosting the
+ * runner. `CI=true` was already normalized for that reason; `NODE_ENV` is the
+ * variable where the omission bit.
+ *
+ * Gates are spawned by the CommandMate **server**, and the server has a
+ * NODE_ENV of its own — `production` under `commandmate start`, `development`
+ * under `commandmate start --dev` and `npm run dev`. A gate that shells out to
+ * a framework build reads it. Measured on this branch: `npm run build`
+ * (Next.js 15) exits 0 with NODE_ENV unset and **exits 1 with
+ * NODE_ENV=development**, on `<Html> should not be imported outside of
+ * pages/_document` while prerendering `/404`, `/500` and `/offline`. A `build`
+ * gate would therefore have been red for every worker on every run whenever an
+ * operator had started the server with `--dev`: a verdict about the host,
+ * reported as a verdict about the diff.
+ *
+ * GitHub Actions leaves NODE_ENV unset, so dropping it is precisely what makes
+ * the gate match CI. A command that needs one says so itself, as this
+ * repository's scripts already do (`NODE_ENV=test vitest run`,
+ * `NODE_ENV=production next build`).
+ */
+function gateProcessEnv(gateEnv: Record<string, string>): NodeJS.ProcessEnv {
+  const env: Record<string, string | undefined> = { ...process.env, CI: 'true', ...gateEnv };
+  // Removed rather than set to `undefined`: an explicitly-undefined key can
+  // still reach the child as an empty string, and `NODE_ENV=` is not the same
+  // thing as "unset".
+  delete env.NODE_ENV;
+  // `next/types/global.d.ts` augments NodeJS.ProcessEnv with a *required*
+  // readonly NODE_ENV, so the absence this function exists to produce cannot be
+  // expressed in that type. The runtime contract `spawn` uses is a plain string
+  // map, which is what is built above.
+  return env as NodeJS.ProcessEnv;
+}
+
+/**
  * Run one shell command and report its exit code.
  *
  * `shell: true` so a gate can be written the way a developer would type it
@@ -411,7 +448,7 @@ function runCommand(
       // a different fileParallelism otherwise, and a gate that passes here but
       // fails in CI is worse than no gate. `gateEnv` carries the per-worktree
       // identity (#1771) and is code-supplied, never user input.
-      env: { ...process.env, CI: 'true', ...gateEnv },
+      env: gateProcessEnv(gateEnv),
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });

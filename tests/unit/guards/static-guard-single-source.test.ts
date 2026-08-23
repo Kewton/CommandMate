@@ -46,9 +46,11 @@ const VERIFY_CONFIG = join(REPO_ROOT, '.commandmate', 'verify.yaml');
  * red check in the Actions tab should name the same thing.
  *
  * `route-exports` joined in #1946. It is here for the same reason as the other
- * three and for one more: the property it checks is only otherwise visible
- * inside `next build`, and there is no build gate, so if its declaration ever
- * drifts between CI and verify the failure mode is the #1943 accident again.
+ * three and for one more: the property it checks is otherwise visible only
+ * inside `next build`, so if its declaration ever drifts between CI and verify
+ * the failure mode is the #1943 accident again. Issue #1994 added a `build`
+ * gate, which does not retire this one — 0.3s names the same defect that a 30s
+ * build would, and #1882's whole point is failing in seconds.
  */
 const STATIC_GUARDS = [
   { jobId: 'token-discipline', command: 'node scripts/check-token-discipline.mjs' },
@@ -136,24 +138,27 @@ describe('the gates that were deliberately NOT added stay out', () => {
    * Declared gates run on EVERY `wait --verify`, and `/orchestrate` waits on
    * that number for every worker.
    *
-   *   test-integration — 2.1m measured, on top of unit's 12.3m
    *   legacy-tmux-readmode — needs Docker; the runner here may have none
    *   security-audit — reaches the npm registry; a network blip is not a verdict
-   *   build — replaces the chunks the running server is serving mid-flight
    *   test-e2e — 5m+ per worker (already argued in verify.yaml's own comment)
    *
-   * [Issue #1946] `build` stays out even though #1943's defect was a BUILD
-   * failure, and so does `integration`. Measured once each in this linked
-   * worktree, cold (no `.next`): `npm run build` = 219s, `npm run
-   * test:integration` = 32s then 51s — and integration is RED on develop as it
-   * stands (4 tests, all `Test timed out in 5000ms`, reproduced on both runs),
-   * so declaring it today would make every worker's verdict exit 20 regardless
-   * of its diff. The `route-exports` guard added here re-states, statically and
-   * in 0.3s, the one property of a route module that only `next build` could
-   * see. It is a narrower thing than a build gate, not a substitute for one;
-   * see dev-reports/issue-1946-gate-coverage.md.
+   * [Issue #1946] `build` and `integration` used to be on this list, on a
+   * measurement taken while an orchestration was running: `npm run build` = 219s
+   * and `npm run test:integration` red with four `Test timed out in 5000ms`,
+   * both read at the time as properties of the commands.
+   *
+   * [Issue #1994] Re-measured on an otherwise idle machine, they are not.
+   * `npm run build` is 37.5s cold / 29.8s warm solo; the 219s reproduces only
+   * under four concurrent full `test:unit` runs (215.4s measured), so that
+   * number was the load, not the build. `npm run test:integration` is 10.2-10.7s
+   * and green solo (82 files / 1183 tests, 5/5 runs) and only goes red under
+   * load — always the same two files, always Issue #1985's 5000ms vitest
+   * timeouts. Both are now declared: the three build gates unmutexed with a
+   * generous `timeoutSec`, `integration` on `cpu.heavy` because its verdict, not
+   * merely its clock, moves with load. The measurements and the per-gate mutex
+   * decision live in `verify-heavy-gate-mutex.test.ts` and in verify.yaml.
    */
-  const NOT_DECLARED = ['integration', 'legacy-tmux', 'security-audit', 'build', 'e2e'];
+  const NOT_DECLARED = ['legacy-tmux', 'security-audit', 'e2e'];
 
   it.each(NOT_DECLARED)('%s is not a declared gate', (id) => {
     expect(verifyConfig.gates.map((g) => g.id)).not.toContain(id);
