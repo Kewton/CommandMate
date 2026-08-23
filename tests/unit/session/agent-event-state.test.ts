@@ -42,6 +42,8 @@ import {
   isDuplicateAgentEvent,
   recordAgentEvent,
   recordAgentStopEvent,
+  STRUCTURED_PROMPT_PROVISIONAL_MAX_AGE_MS,
+  STRUCTURED_STATE_MAX_AGE_MS,
 } from '@/lib/session/agent-event-state';
 import type { AgentEventType } from '@/lib/hooks/agent-event-types';
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
@@ -255,12 +257,26 @@ describe('structuredEvents exposure (Issue #1722)', () => {
       // agent's behalf — claude answers its own hook, so this stays null for it
       // for the life of the session. Present and null, not absent.
       permissionDecision: null,
-      // Issue #1926: derived from the same single event. Nothing has reported
-      // one, so no turn can be derived either.
+      // Issue #1926 / #1930: nothing has been reported, so there is no turn.
       turnId: null,
       openedAt: null,
       closedAt: null,
       closedBy: null,
+      // Issue #1930: present and empty/zeroed rather than absent, for the same
+      // reason `permissionDecision` is present and null — a key that appears
+      // only once something has gone wrong is a key nobody knows to look for.
+      pendingDecisions: [],
+      dedupDropped: {
+        dedupDropped: { identity: 0, timeWindow: 0 },
+        decisionEvicted: 0,
+        idsDiscarded: 0,
+        dialogTimedOut: 0,
+        decisionOverflow: 0,
+      },
+      dialogPendingMaxMs: {
+        predicted: STRUCTURED_PROMPT_PROVISIONAL_MAX_AGE_MS,
+        confirmed: STRUCTURED_STATE_MAX_AGE_MS,
+      },
       source: claudeSource,
     });
   });
@@ -300,12 +316,26 @@ describe('structuredEvents exposure (Issue #1722)', () => {
       // agent's behalf — claude answers its own hook, so this stays null for it
       // for the life of the session. Present and null, not absent.
       permissionDecision: null,
-      // Issue #1926: derived from the same single event. Nothing has reported
-      // one, so no turn can be derived either.
+      // Issue #1926 / #1930: nothing has been reported, so there is no turn.
       turnId: null,
       openedAt: null,
       closedAt: null,
       closedBy: null,
+      // Issue #1930: present and empty/zeroed rather than absent, for the same
+      // reason `permissionDecision` is present and null — a key that appears
+      // only once something has gone wrong is a key nobody knows to look for.
+      pendingDecisions: [],
+      dedupDropped: {
+        dedupDropped: { identity: 0, timeWindow: 0 },
+        decisionEvicted: 0,
+        idsDiscarded: 0,
+        dialogTimedOut: 0,
+        decisionOverflow: 0,
+      },
+      dialogPendingMaxMs: {
+        predicted: STRUCTURED_PROMPT_PROVISIONAL_MAX_AGE_MS,
+        confirmed: STRUCTURED_STATE_MAX_AGE_MS,
+      },
       source: claudeSource,
     });
     expect({ ...after, structuredEvents: null }).toEqual({ ...before, structuredEvents: null });

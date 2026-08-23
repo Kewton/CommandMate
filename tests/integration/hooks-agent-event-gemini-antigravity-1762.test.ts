@@ -179,18 +179,43 @@ describe('gemini payloads reach agent-event-state', () => {
     const now = Date.now();
     beginAgentEventGeneration(WT, 'gemini', 'gemini', now - 60_000);
 
+    const opening = fixture('gemini', 'before-agent');
+    await post(opening, { tool: 'gemini', worktreeId: WT, instanceId: 'gemini' });
+    expect(getStructuredSessionState(WT, 'gemini', 'gemini', Date.now())?.status).toBe('running');
+
+    // Issue #1930: the closing frame has to name the SAME conversation as the
+    // opening one, because a `stop` now closes only the turn of the session
+    // that sent it (§4 D3 決定 2 — opencode publishes `session.idle` for every
+    // session its server holds, other processes' included). Real gemini carries
+    // one `session_id` through a turn; this used to be hand-written as `gm-1`
+    // against a fixture whose id is a UUID, which no live session does.
+    const closing = {
+      session_id: opening.session_id,
+      hook_event_name: 'AfterAgent',
+      cwd: repo,
+    };
+    await post(closing, { tool: 'gemini', worktreeId: WT, instanceId: 'gemini' });
+    expect(getStructuredSessionState(WT, 'gemini', 'gemini', Date.now())?.status).toBe('ready');
+  });
+
+  it('does not let an AfterAgent from another conversation close this turn', async () => {
+    // The rule the case above now depends on, asserted directly rather than
+    // left as an incidental property of a fixture. `commandmate wait` is
+    // unaffected either way: its completion gate reads `lastStopEventAt`, which
+    // `applyAgentStopEvent` writes for every delivery.
+    beginAgentEventGeneration(WT, 'gemini', 'gemini', Date.now() - 60_000);
+
     await post(fixture('gemini', 'before-agent'), {
       tool: 'gemini',
       worktreeId: WT,
       instanceId: 'gemini',
     });
-    expect(getStructuredSessionState(WT, 'gemini', 'gemini', Date.now())?.status).toBe('running');
-
     await post(
-      { session_id: 'gm-1', hook_event_name: 'AfterAgent', cwd: repo },
+      { session_id: 'a-different-conversation', hook_event_name: 'AfterAgent', cwd: repo },
       { tool: 'gemini', worktreeId: WT, instanceId: 'gemini' }
     );
-    expect(getStructuredSessionState(WT, 'gemini', 'gemini', Date.now())?.status).toBe('ready');
+
+    expect(getStructuredSessionState(WT, 'gemini', 'gemini', Date.now())?.status).toBe('running');
   });
 
   it('turns a ToolPermission notification into `waiting`', async () => {

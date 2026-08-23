@@ -38,7 +38,10 @@
 
 import { getAgentEventSource, renderAgentLaunchCommand } from '@/lib/hooks/sources';
 import type { AgentInstanceRef, AgentLaunchContext, AgentLaunchPlan } from '@/lib/hooks/sources';
-import { beginAgentEventGeneration } from '@/lib/session/agent-event-state';
+import {
+  beginAgentEventGeneration,
+  getAgentEventDropCounts,
+} from '@/lib/session/agent-event-state';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('lib/session/agent-session-lifecycle');
@@ -53,7 +56,19 @@ const logger = createLogger('lib/session/agent-session-lifecycle');
  * @param at - Epoch ms; defaults to now
  */
 export function beginAgentSession(target: AgentInstanceRef, at: number = Date.now()): void {
+  const before = getAgentEventDropCounts(
+    target.worktreeId,
+    target.cliToolId,
+    target.instanceId
+  ).decisionEvicted;
+
   beginAgentEventGeneration(target.worktreeId, target.cliToolId, target.instanceId, at);
+
+  const after = getAgentEventDropCounts(
+    target.worktreeId,
+    target.cliToolId,
+    target.instanceId
+  ).decisionEvicted;
 
   const source = getAgentEventSource(target.cliToolId);
   logger.info('agent-session-generation-begun', {
@@ -61,6 +76,12 @@ export function beginAgentSession(target: AgentInstanceRef, at: number = Date.no
     cliToolId: target.cliToolId,
     instanceId: target.instanceId ?? target.cliToolId,
     transport: source.transport,
+    // Issue #1930: approvals the replaced process was holding, discarded with
+    // it. Usually zero. A non-zero count on a *routine* restart is the
+    // interesting case — it says a session was recreated while somebody was
+    // blocked on a dialog, which is a thing an operator would otherwise only
+    // learn by noticing their `respond` no longer has anything to answer.
+    decisionsEvicted: after - before,
   });
 }
 
