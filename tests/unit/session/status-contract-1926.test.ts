@@ -57,9 +57,11 @@ import {
   observeStatusEvidence,
 } from '@/lib/session/status-evidence';
 import {
-  deriveProvisionalTurn,
+  derivePublishedTurn,
+  NO_TURN,
   TURN_ACTIVITY_EVENTS,
 } from '@/lib/session/provisional-turn';
+import { getAgentTurn } from '@/lib/session/agent-event-state';
 import { TURN_OPENING_EVENT_TYPES } from '@/cli/commands/wait';
 import { STATUS_REASON } from '@/lib/detection/status-detector';
 import { buildClaudeIdleComposerFrame } from '../../fixtures/claude-idle-composer';
@@ -311,63 +313,101 @@ describe('[#1926] deriveScraperEvidence, superseded by the detector (#1927)', ()
   });
 });
 
-describe('[#1926] structuredEvents turn fields', () => {
+describe('[#1926] structuredEvents turn fields, on the #1930 turn record', () => {
   const at = 1_700_000_000_500;
+
+  /** Record one event for wt-1/claude/claude. */
+  const record = (event: Parameters<typeof recordAgentEvent>[3]['event'], eventAt: number, detail: string | null = null) =>
+    recordAgentEvent('wt-1', 'claude', 'claude', {
+      event,
+      at: eventAt,
+      detail,
+      sessionId: 'sess-1926',
+    });
+
+  const turn = (now = at + 1) => getAgentTurn('wt-1', 'claude', 'claude', now);
 
   it('opens a turn on each of the three turn-activity events', () => {
     for (const event of TURN_ACTIVITY_EVENTS) {
-      expect(deriveProvisionalTurn({ event, at })).toEqual({
-        turnId: `turn-${at}`,
-        openedAt: at,
-        closedAt: null,
-        closedBy: null,
-      });
+      clearAgentStopEvents();
+      record(event, at);
+
+      const published = derivePublishedTurn(turn());
+      expect(published.openedAt).toBe(at);
+      expect(published.closedAt).toBeNull();
+      expect(published.closedBy).toBeNull();
+      expect(published.turnId).not.toBeNull();
     }
   });
 
-  it("closes on stop, and says so rather than guessing when it opened", () => {
-    expect(deriveProvisionalTurn({ event: 'stop', at })).toEqual({
-      turnId: null,
+  it('closes on stop, and says so rather than guessing when it opened', () => {
+    // The #1926 reasoning, unchanged and now structural rather than derived:
+    // a `stop` with no turn open publishes `openedAt: null`, because
+    // `closedAt - openedAt` is an elapsed time a header chip would render and a
+    // guess there is worse than a null.
+    record('stop', at);
+
+    expect(derivePublishedTurn(turn())).toMatchObject({
       openedAt: null,
       closedAt: at,
       closedBy: 'stop',
     });
   });
 
-  it.each(['notification', 'session_start', 'session_end'] as const)(
-    'derives no turn from %s',
-    (event) => {
-      expect(deriveProvisionalTurn({ event, at })).toEqual({
-        turnId: null,
-        openedAt: null,
-        closedAt: null,
-        closedBy: null,
-      });
-    },
-  );
+  it.each(['session_start', 'session_end'] as const)('derives no turn from %s alone', (event) => {
+    record(event, at);
+
+    expect(derivePublishedTurn(turn())).toEqual(NO_TURN);
+  });
+
+  it('derives no turn from an unrecognised notification', () => {
+    record('notification', at, 'some_future_type');
+
+    expect(derivePublishedTurn(turn())).toEqual(NO_TURN);
+  });
 
   it('derives nothing at all when no event has arrived', () => {
-    expect(deriveProvisionalTurn(null)).toEqual({
-      turnId: null,
-      openedAt: null,
-      closedAt: null,
-      closedBy: null,
-    });
+    expect(derivePublishedTurn(null)).toEqual(NO_TURN);
+    expect(derivePublishedTurn(turn())).toEqual(NO_TURN);
   });
 
-  it('re-stamps turnId inside one turn — it is not yet a turn identity', () => {
-    // Pinned, not hidden. Phase 1 retains one event, so a `pre_tool_use` mid-turn
-    // moves `openedAt` and the id with it. A consumer treating a changed
-    // `turnId` as a new turn will false-positive, and Phase 4's TurnRecord is
-    // what fixes it. If this ever starts passing as "stable", the derivation has
-    // been replaced and this test should be replaced with the real invariant.
-    const opened = deriveProvisionalTurn({ event: 'user_prompt_submit', at });
-    const midTurn = deriveProvisionalTurn({ event: 'pre_tool_use', at: at + 1_000 });
+  it('keeps turnId and openedAt fixed across the tool calls inside one turn', () => {
+    // The invariant that replaced #1926's "re-stamps turnId inside one turn"
+    // pin. That test existed to make the provisional derivation's defect
+    // visible and said, in as many words, that Phase 4's TurnRecord is what
+    // fixes it and that the pin should be replaced with the real invariant when
+    // it lands. This is that invariant: `wait` reads a changed `turnId` as "a
+    // new turn began", so a re-stamp mid-turn is a false turn boundary.
+    record('user_prompt_submit', at);
+    const opened = derivePublishedTurn(turn());
 
-    expect(midTurn.turnId).not.toBe(opened.turnId);
+    record('pre_tool_use', at + 1_000, 'Bash');
+    record('post_tool_use', at + 2_000, 'Bash');
+    const midTurn = derivePublishedTurn(turn(at + 2_001));
+
+    expect(midTurn.turnId).toBe(opened.turnId);
+    expect(midTurn.openedAt).toBe(at);
+    expect(midTurn.closedAt).toBeNull();
   });
 
-  it('publishes them on the payload, derived from the last event', async () => {
+  it('starts a new turn on the next user_prompt_submit', () => {
+    record('user_prompt_submit', at);
+    const first = derivePublishedTurn(turn());
+
+    record('stop', at + 1_000);
+    record('user_prompt_submit', at + 2_000);
+    const second = derivePublishedTurn(turn(at + 2_001));
+
+    expect(second.turnId).not.toBe(first.turnId);
+    expect(second.openedAt).toBe(at + 2_000);
+  });
+
+  it('publishes them on the payload', async () => {
+    // The turn is a real record now, so the staleness bound applies to it: a
+    // fixture timestamp from 2023 read against the wall clock is a turn that
+    // closed itself as `stale` thirty minutes later. Freezing is what makes
+    // this assertion about the publication rather than about the clock.
+    freezeClock(at + 1_000);
     vi.mocked(captureSessionOutput).mockResolvedValue(IDLE_COMPOSER_FRAME);
     recordAgentEvent('wt-1', 'claude', 'claude', {
       event: 'user_prompt_submit',
@@ -381,17 +421,17 @@ describe('[#1926] structuredEvents turn fields', () => {
     expect(payload.structuredEvents).toMatchObject({
       lastEventType: 'user_prompt_submit',
       lastEventAt: at,
-      turnId: `turn-${at}`,
       openedAt: at,
       closedAt: null,
       closedBy: null,
     });
+    expect(payload.structuredEvents.turnId).not.toBeNull();
   });
 
-  it('keeps lastEventType / lastEventAt alongside them (#1839 gate stays put)', async () => {
-    // §13: `wait`'s adoptTurnStart moves onto the turn fields in Phase 4, and
-    // the #1839 gate is not to be unhooked before then. Removing the old pair
-    // now would break it silently.
+  it('keeps lastEventType / lastEventAt alongside them', async () => {
+    // They answer a different question — "did anything reach this server, and
+    // for the right instance?" — and #1930 lets the two disagree on purpose for
+    // an event that carries no verdict.
     vi.mocked(captureSessionOutput).mockResolvedValue(IDLE_COMPOSER_FRAME);
     recordAgentEvent('wt-1', 'claude', 'claude', {
       event: 'stop',

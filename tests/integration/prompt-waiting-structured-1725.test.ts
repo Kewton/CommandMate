@@ -197,6 +197,61 @@ describe('Issue #1725: a posted permission notification reaches current-output',
     const other = await buildCurrentOutput(db, WORKTREE_ID, 'claude', 'claude-2');
     expect(other.isPromptWaiting).toBe(false);
   });
+
+  it('publishes the dialog on structuredEvents.pendingDecisions (Issue #1930)', async () => {
+    // §7's discoverability rule: `commandmate capture --json` prints this
+    // payload verbatim, so a dialog that only exists in `isPromptWaiting` gives
+    // an operator no way to tell two concurrent approvals apart. `#1932` is what
+    // teaches `respond` to name the `id`.
+    await postFixture('notification-permission-prompt.json');
+
+    const payload = await buildCurrentOutput(db, WORKTREE_ID, 'claude', INSTANCE_ID);
+    const decisions = payload.structuredEvents.pendingDecisions ?? [];
+
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]).toMatchObject({
+      source: 'notification',
+      confirmedAt: expect.any(Number),
+      scraperCorroborated: false,
+      // claude declares `decisionTimeoutSeconds: 600`, and this record is
+      // seconds old, so the server can still answer it.
+      deliveryExpired: false,
+    });
+    // The agent's own `tool_input` is not on the wire, and neither is anything
+    // else the payload carried: only the keys the published type declares.
+    expect(Object.keys(decisions[0]).sort()).toEqual([
+      'at',
+      'confirmedAt',
+      'deliveryExpired',
+      'id',
+      'scraperCorroborated',
+      'source',
+      'toolName',
+    ]);
+
+    // The two bookkeeping blocks travel with it: zeroed rather than absent, so
+    // an operator reading a healthy payload knows where to look when it is not.
+    expect(payload.structuredEvents.dedupDropped).toMatchObject({
+      dedupDropped: { identity: 0, timeWindow: 0 },
+      decisionEvicted: 0,
+      idsDiscarded: 0,
+    });
+    expect(payload.structuredEvents.dialogPendingMaxMs).toEqual({
+      predicted: 20_000,
+      confirmed: 30 * 60 * 1000,
+    });
+  });
+
+  it('empties pendingDecisions when the agent resumes the turn (Issue #1930)', async () => {
+    await postFixture('notification-permission-prompt.json');
+    expect((await buildCurrentOutput(db, WORKTREE_ID, 'claude', INSTANCE_ID))
+      .structuredEvents.pendingDecisions).toHaveLength(1);
+
+    await postFixture('stop.json');
+
+    const payload = await buildCurrentOutput(db, WORKTREE_ID, 'claude', INSTANCE_ID);
+    expect(payload.structuredEvents.pendingDecisions).toEqual([]);
+  });
 });
 
 describe('Issue #1725: `commandmate wait` stops on it', () => {

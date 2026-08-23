@@ -97,13 +97,13 @@ const COMPLETION_BASIS = {
  * exists to stop, one minute later. Only `Stop` ends a turn.
  *
  * Exported for the cross-layer pin in
- * `tests/unit/session/status-contract-1926.test.ts`. Issue #1926 publishes the
- * same three events as `structuredEvents.openedAt` (see
- * `src/lib/session/provisional-turn.ts` TURN_ACTIVITY_EVENTS), and Phase 4 moves
- * `adoptTurnStart` onto that field — a set that had drifted by then would change
- * this gate silently at the moment of the switch. The CLI cannot import the
- * server module (`tsconfig.cli.json` sets `"paths": {}`), so the test is the
- * only thing holding the two together.
+ * `tests/unit/session/status-contract-1926.test.ts`. The server opens a turn on
+ * the same three events (`src/lib/session/provisional-turn.ts`
+ * TURN_ACTIVITY_EVENTS), and since Issue #1930 `adoptTurnStart` reads that
+ * turn's `openedAt` rather than this set — so a set that drifted would change
+ * this gate silently. The set is still read here for the pre-#1930 fallback
+ * path, and the CLI cannot import the server module (`tsconfig.cli.json` sets
+ * `"paths": {}`), so the test is the only thing holding the two together.
  */
 export const TURN_OPENING_EVENT_TYPES: ReadonlySet<string> = new Set([
   'user_prompt_submit',
@@ -120,14 +120,16 @@ export const TURN_OPENING_EVENT_TYPES: ReadonlySet<string> = new Set([
  * after `wait` is already polling (measured at +0.6 s from the send). One poll
  * interval of slack covers a `wait` that starts a moment late.
  *
- * The bound is what keeps this from being a new way to hang. Structured events
- * live in a server-side Map keyed by (worktree, tool, instance) and are NOT
- * fenced by generation on the way into `structuredEvents` — a stale
- * `user_prompt_submit` from a previous agent process can still be the last event
- * on the wire. Refusing to adopt anything older than this wait means such a
- * record cannot gate it: a `wait` on an already-idle session sees no fresh
- * turn-opening event, keeps `turnStartedAt` null, and behaves exactly as it did
- * before this Issue.
+ * The bound is what keeps this from being a new way to hang, and Issue #1930
+ * narrowed what it has to defend against. It was written when structured events
+ * were NOT fenced by generation on the way into `structuredEvents`, so a stale
+ * `user_prompt_submit` from a previous agent process could still be the last
+ * event on the wire and this window was the only thing stopping it from gating
+ * a wait for ever. The server fences the turn now and publishes null when it
+ * does, so the window's remaining job is narrower and sharper: a turn that has
+ * already CLOSED must have closed inside this wait to count, or `wait` on a
+ * session that finished an hour ago would inherit that turn's gate. An open
+ * turn is adopted whatever its age — see {@link adoptTurnStart}.
  */
 const TURN_ADOPTION_GRACE_MS = POLL_INTERVAL_MS;
 
@@ -252,7 +254,54 @@ function formatSuppressionNotice(suppression: LastSuppression, ageSeconds: numbe
 }
 
 /**
- * Adopt the turn this wait is about, if this poll shows one opening.
+ * Whether this server publishes a real turn record (Issue #1930).
+ *
+ * `dialogPendingMaxMs` landed with the turn model and is set on every payload a
+ * server of that vintage produces, so its presence is the version probe. A
+ * *value* rather than a version string, for the reason #1924 gives for the
+ * capability block: a payload that has to be interpreted by its sender's
+ * version number is a payload nobody can read forward.
+ *
+ * The probe is needed because the two readings below disagree in exactly the
+ * case that matters. On a #1930 server, `openedAt` being null while
+ * `lastEventType` is `user_prompt_submit` means the turn was fenced off by a
+ * generation or aged out — the server has *decided* it is not this instance's
+ * turn. Falling back to the event on such a payload would put back the stale
+ * adoption the turn record exists to remove.
+ */
+function publishesTurnRecord(data: CurrentOutputResponse): boolean {
+  return data.structuredEvents?.dialogPendingMaxMs != null;
+}
+
+/**
+ * Adopt the turn this wait is about, if this poll shows one (Issue #1839,
+ * moved onto the turn record in #1930).
+ *
+ * ## What changed, and why the grace window is no longer the whole guard
+ *
+ * Before #1930 this read `lastEventType` / `lastEventAt` — the newest event of
+ * any kind — and refused anything older than {@link TURN_ADOPTION_GRACE_MS},
+ * because (in the words of that constant) structured events "are NOT fenced by
+ * generation on the way into `structuredEvents`", so a stale
+ * `user_prompt_submit` from a previous agent process could still be the last
+ * event on the wire. The bound was the only thing keeping such a record from
+ * gating a wait for ever.
+ *
+ * The server fences the turn now, and publishes null when it does. So an **open**
+ * turn is adopted whatever its age — which closes a hole the old reading had:
+ * a turn that opened ten minutes before this `wait` started, and is still
+ * running, used to be adopted only because its *newest* event was fresh. An
+ * agent that goes quiet mid-turn (thinking, a long tool call) has no fresh
+ * event, so the #1839 gate came down at exactly the moment a 529 storm would
+ * exploit it.
+ *
+ * A **closed** turn still has to have opened inside this wait's window, and the
+ * reason is the one the grace constant gives: `wait` does not know when `send`
+ * ran, so the last turn of a session that finished an hour ago must not gate a
+ * wait that has only just started. `commandmate wait` on an already-idle
+ * session therefore adopts nothing and completes on its first poll, exactly as
+ * it did before — #1975 measured that at 234/242/259 ms and it is the
+ * orchestrator's normal path.
  *
  * @param previous - the turn start adopted so far, or null
  * @returns the newest adopted turn start, or `previous` when nothing qualified
@@ -263,10 +312,46 @@ function adoptTurnStart(
   previous: number | null,
 ): number | null {
   const events = data.structuredEvents;
-  if (!events || events.lastEventAt == null || events.lastEventType == null) return previous;
-  if (!TURN_OPENING_EVENT_TYPES.has(events.lastEventType)) return previous;
-  if (events.lastEventAt < waitStartedAt - TURN_ADOPTION_GRACE_MS) return previous;
-  return previous === null || events.lastEventAt > previous ? events.lastEventAt : previous;
+  if (!events) return previous;
+
+  if (!publishesTurnRecord(data)) {
+    // A server older than #1930. Same reading this function has had since
+    // #1839, kept so a newer CLI pointed at an older server does not silently
+    // lose the gate.
+    if (events.lastEventAt == null || events.lastEventType == null) return previous;
+    if (!TURN_OPENING_EVENT_TYPES.has(events.lastEventType)) return previous;
+    if (events.lastEventAt < waitStartedAt - TURN_ADOPTION_GRACE_MS) return previous;
+    return previous === null || events.lastEventAt > previous ? events.lastEventAt : previous;
+  }
+
+  const openedAt = events.openedAt;
+  // Null covers every "there is no turn to adopt" case the server knows about:
+  // nothing reported, a previous generation, aged out, or a `stop` whose
+  // opening was never observed.
+  if (openedAt == null) return previous;
+  if (events.closedAt != null && openedAt < waitStartedAt - TURN_ADOPTION_GRACE_MS) {
+    return previous;
+  }
+  return previous === null || openedAt > previous ? openedAt : previous;
+}
+
+/**
+ * `structuredEvents.closedBy`, phrased for a diagnostic line (Issue #1930).
+ *
+ * The server's close-reason vocabulary and {@link COMPLETION_BASIS} answer two
+ * different questions — "why did the turn end" and "what did `wait` decide on"
+ * — and are deliberately printed side by side rather than folded together.
+ * `hook_stop` is the only place they meet: it is `closedBy: 'stop'` seen from
+ * the CLI's end. Everything else (`stale`, `scraper_evidence`, `session_end`,
+ * `generation`, `resync_idle`) is a reason the turn stopped being trusted, which
+ * is precisely what `wait` must NOT read as completion.
+ */
+function describeTurnClose(data: CurrentOutputResponse): string {
+  const events = data.structuredEvents;
+  if (!events) return 'turn=unknown';
+  const id = events.turnId ?? 'none';
+  const closedBy = events.closedBy ?? (events.openedAt != null ? 'open' : 'none');
+  return `turn=${id} closedBy=${closedBy}`;
 }
 
 /**
@@ -730,7 +815,7 @@ async function pollWorktree(
           console.error(
             `Waiting: ${worktreeId} is back at its composer, but its agent has not reported ` +
               `the end of this turn (turnStartedAt=${turnStartedAt}, ` +
-              `lastStopEventAt=${data.lastStopEventAt ?? 'none'}). ` +
+              `lastStopEventAt=${data.lastStopEventAt ?? 'none'}, ${describeTurnClose(data)}). ` +
               'Not reporting completion; inspect with ' +
               `\`commandmate capture ${worktreeId} --json\`.`,
           );
@@ -767,7 +852,7 @@ async function pollWorktree(
                 console.error(
                   `Waiting: ${worktreeId} is at its composer, but the newest prompt sent to it ` +
                     `has no reported end (sentAt=${new Date(ledger.submittedAt).toISOString()}, ` +
-                    `lastStopEventAt=${data.lastStopEventAt ?? 'none'}). ` +
+                    `lastStopEventAt=${data.lastStopEventAt ?? 'none'}, ${describeTurnClose(data)}). ` +
                     'Not reporting completion: the agent has not started this turn yet.',
                 );
                 await sleep(POLL_INTERVAL_MS);
