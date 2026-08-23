@@ -16,22 +16,29 @@ import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/termin
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { isAnswerablePromptData } from '@/types/models';
+import { respondByDecisionId } from './structured-decision';
 
 const logger = createLogger('api/respond');
 
 /**
  * POST /api/worktrees/[id]/respond
  *
- * Request body:
+ * Request body — one of two shapes (Issue #1932):
  * {
- *   "messageId": "uuid",
+ *   "messageId": "uuid",       // a stored prompt row; answered at the pane
  *   "answer": "yes" | "no"
+ * }
+ * {
+ *   "decisionId": "per_…",     // an approval the agent is holding; answered
+ *   "answer": "1",             // over the agent's own API, no keys sent
+ *   "cliTool": "opencode",     // optional; defaults to the worktree's tool
+ *   "instanceId": "opencode-2" // optional; defaults to the primary
  * }
  *
  * Response:
  * {
  *   "success": true,
- *   "message": ChatMessage
+ *   "message": ChatMessage     // messageId shape only
  * }
  */
 export async function POST(
@@ -41,22 +48,59 @@ export async function POST(
   try {
     const { id: requestedWorktreeId } = await params;
     const id = canonicalWorktreeId(requestedWorktreeId);
-    const { messageId, answer } = await req.json();
+    const { messageId, decisionId, answer, cliTool: bodyCliTool, instanceId: bodyInstanceId } = await req.json();
 
-    // Validation
-    if (!messageId || !answer) {
+    // Validation. Issue #1932 makes `messageId` optional, and only that: when
+    // no `decisionId` is offered the refusal is the pre-#1932 one, byte for
+    // byte, because the Web UI's existing flow reads it.
+    if (!decisionId) {
+      if (!messageId || !answer) {
+        return NextResponse.json(
+          { error: 'messageId and answer are required' },
+          { status: 400 }
+        );
+      }
+    } else if (!answer) {
       return NextResponse.json(
-        { error: 'messageId and answer are required' },
+        { error: 'answer is required' },
         { status: 400 }
       );
     }
 
     const db = getDbInstance();
 
+    // Issue #1932: the structured path. Taken only when no `messageId` was
+    // sent, so a request carrying both goes on being the stored-message request
+    // it has always been.
+    if (!messageId) {
+      return await respondByDecisionId({
+        db,
+        worktreeId: id,
+        decisionId,
+        answer,
+        cliToolParam: bodyCliTool,
+        instanceParam: bodyInstanceId,
+      });
+    }
+
     // Get message
     const message = getMessageById(db, messageId);
 
     if (!message) {
+      return NextResponse.json(
+        { error: 'Message not found' },
+        { status: 404 }
+      );
+    }
+
+    // Issue #1932 (S6b): the row must belong to the worktree in the URL.
+    // Without this, `POST /api/worktrees/<any-worktree>/respond` answered any
+    // message id in the database — the id is a UUID, so it was not a browsable
+    // hole, but the route then resolved the session from THIS worktree and typed
+    // the answer into a pane the prompt never came from. Answered as "not
+    // found" rather than "forbidden": a message in another worktree is not
+    // addressable here, and saying which ids exist is not this route's job.
+    if (message.worktreeId !== id) {
       return NextResponse.json(
         { error: 'Message not found' },
         { status: 404 }
