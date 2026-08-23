@@ -2,6 +2,12 @@
  * Type definitions and interfaces for CLI tools
  */
 
+import type {
+  CaptureSpec,
+  ComposerSpec,
+  GracefulExitSpec,
+} from '../../types/cli-tool-contracts';
+
 /**
  * CLI Tool IDs constant array
  * T2.1: Single source of truth for CLI tool IDs
@@ -267,6 +273,31 @@ export interface ICLITool {
    * @param instanceId - Agent instance ID (Issue #868). Defaults to the primary instance.
    */
   interrupt(worktreeId: string, instanceId?: string): Promise<void>;
+
+  /**
+   * Describe this tool's input box (Issue #1933, §6.3).
+   *
+   * How the composer is recognised on a captured frame, how many rows a submit
+   * read-back must ask for, whether it may be emptied before typing, and how
+   * many Enter presses submit. `sendMessageWithSubmitVerification` takes the
+   * result, which is what keeps the four facts in one declaration per tool
+   * instead of in four tables keyed on {@link CLIToolType}.
+   */
+  describeComposer(): ComposerSpec;
+
+  /**
+   * Describe how this tool is asked to quit (Issue #1933, §13.2).
+   *
+   * The keystrokes, the shutdown window they need, and whether the tool owns a
+   * loopback server whose port must be confirmed dead before it is reused.
+   */
+  gracefulExitSequence(): GracefulExitSpec;
+
+  /**
+   * Describe what a status capture of this tool must ask tmux for
+   * (Issue #1933, §10.12).
+   */
+  captureSpec(): CaptureSpec;
 }
 
 /**

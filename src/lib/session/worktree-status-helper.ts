@@ -17,9 +17,7 @@ import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from './cli-session';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
 import { sessionStatusToActivityFlags } from './status-mapping';
-import { OPENCODE_PANE_HEIGHT } from '@/lib/cli-tools/opencode';
-import { GEMINI_PANE_HEIGHT } from '@/lib/cli-tools/gemini';
-import { STATUS_DETECTION_CAPTURE_LINES } from '@/config/status-capture-config';
+import { resolveCaptureSpec } from '@/lib/cli-tools/capture-spec';
 import { isSessionHealthy } from './claude-session';
 import { getLastServerResponseTimestamp, buildCompositeKey } from '@/lib/polling/auto-yes-manager';
 import { GLOBAL_SESSION_WORKTREE_ID } from '@/lib/session/global-session-constants';
@@ -42,21 +40,6 @@ import {
 } from '@/lib/session/agent-event-state';
 import { extractModelInfo } from '@/lib/detection/model-info-extractor';
 import type { getMessages as GetMessagesFn, markPendingPromptsAsAnswered as MarkPendingFn, getAgentInstances as GetAgentInstancesFn } from '@/lib/db';
-
-function getStatusCaptureLines(cliToolId: CLIToolType): number {
-  if (cliToolId === 'opencode') {
-    return OPENCODE_PANE_HEIGHT;
-  }
-
-  if (cliToolId === 'gemini') {
-    return GEMINI_PANE_HEIGHT;
-  }
-
-  // Issue #965: detection uses a smaller capture than the display path. The
-  // status detector trims trailing blank padding before windowing, so this is
-  // enough to find the prompt/status while keeping capture-pane fast.
-  return STATUS_DETECTION_CAPTURE_LINES;
-}
 
 /** Per-CLI-tool session status */
 export interface CliToolSessionStatus {
@@ -306,7 +289,12 @@ async function detectInstanceSessionStatus(
   let sessionStatusReason: string | null = null;
   if (isRunning) {
     try {
-      const captureLines = getStatusCaptureLines(cliToolId);
+      // Issue #1933: the per-tool ladder that used to live here — and that made
+      // this module import two CLI-tool implementations for two pane heights —
+      // is `ICLITool.captureSpec()`, resolved from `lib/cli-tools/capture-spec`.
+      // Read through the resolver rather than through `CLIToolManager` so the
+      // status poll does not instantiate all seven tools for one number.
+      const captureLines = resolveCaptureSpec(cliToolId).statusLines;
       const output = await captureSessionOutput(worktreeId, cliToolId, captureLines, instanceId);
       // Issue #501, #525, #896: Pass last server response timestamp using the
       // per-instance compositeKey. Auto-yes / last-response tracking is now
