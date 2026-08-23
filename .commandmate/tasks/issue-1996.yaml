@@ -1,0 +1,118 @@
+version: 1
+title: "Issue #1996: 子プロセス env から剥がす集合を定義し直す（CM_AGENT_* / CM_PERMISSION_* / CM_AUTH_TOKEN の扱い）"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/1996 を実装してください。
+
+  ## 背景
+
+  #1942 は `sanitizeEnvForChildProcess()` に **`CM_HOOK_` 名前空間ごと剥がす** prefix 判定を入れました
+  （`isStrippedChildProcessEnvKey()`）。設計意図は「prefix は列挙より強い ——
+  次に生えた `CM_HOOK_*` は誰がこのファイルを読まなくても落ちる」。
+
+  **しかし #1933 の実装者が 7 ソースの `prepareLaunch` を実際に組んで `env` を読んだところ、
+  launch line 上の相関変数 6 個のうち `CM_HOOK_` で始まるのは 2 個だけでした。**
+
+  | 変数 | prefix 剥がしの対象か |
+  |---|---|
+  | `CM_HOOK_URL` / `CM_HOOK_PORT` | ✅ |
+  | `CM_AGENT_TOOL` / `CM_AGENT_WORKTREE_ID` / `CM_AGENT_INSTANCE_ID` / `CM_PERMISSION_HOOK_URL` | ❌ |
+
+  ## 最初にやること: **守る対象の定義**（ここが決まらないと 1 も 2 も決められません）
+
+  Issue の検討事項 3 が本体です。**「剥がすべき集合は何か」を先に定義してください。**
+
+  - 「相関キーは全部」なのか「hook の宛先だけ」なのか。#1942 の commit message は
+    「**相手は別サーバ、相関キーは他インスタンスのもの**」を問題としており、それなら 4 変数も対象になります
+  - 一方 `CM_AGENT_*` を将来「子プロセスに渡したい」用途で使うと、prefix を広げた判断と衝突します
+
+  **定義を決めてから、prefix を広げるのか列挙に戻すのか（＋別の drift ガード）を選んでください。**
+
+  ## 実測してほしいこと（私が下調べした範囲。裏取りして違えば実測を正とする）
+
+  1. **launch line に実際に載る `CM_*` の全数**。#1933 は 6 個と報告していますが、
+     私が `grep -rhoE 'CM_[A-Z_]+' src/lib/hooks/sources/` で見ると
+     `CM_AGENT_HOOKS_INJECT` / `CM_OPENCODE_PORT_FILE` / `CM_CODEX_HOOK_TRUST` / `CM_PORT` も出ます。
+     **grep ではなく #1933 と同じく `prepareLaunch` を実際に組んで `env` を読んで**確定してください。
+
+  2. **`CM_AUTH_TOKEN` が剥がされていない可能性**（**優先度高。私の下調べで見つけたもの**）。
+     `SENSITIVE_ENV_KEYS` に在るのは `CM_AUTH_TOKEN_HASH` だけで、**平文トークンの `CM_AUTH_TOKEN` は
+     一覧にありません**（`src/lib/security/env-sanitizer.ts:35-45` 実測）。
+     一方 CLI は `CM_AUTH_TOKEN` を**環境変数で渡すことを推奨**しています
+     （`src/cli/utils/api-client.ts:61` が `--token` より env var を勧める警告を出す）。
+
+     **確認してほしいこと**: そのシェルからサーバを起動した場合、`process.env.CM_AUTH_TOKEN` が
+     サーバに入り、`sanitizeEnvForChildProcess()` を通ってもエージェントの子プロセスへ渡るのか。
+     **実際に環境変数を置いて子プロセスから読めるかを実測**してください（#1942 の
+     `tests/unit/security/child-process-hook-env-1942.test.ts` と同じ形）。
+     **渡るなら本 Issue の最優先項目**です。渡らないなら「なぜ渡らないか」を書いてください。
+
+  ## 壊してはいけない設計（#1942 が意図的に選んだもの）
+
+  `env-sanitizer.ts` のコメントが明記しています:
+
+  > `lib/hooks/sources/launch-command` owns the *names* — `COMMANDMATE_HOOK_ENV_VARS` is the
+  > enumerated list, and `tests/unit/security/child-process-hook-env-1942.test.ts` pins that
+  > every one of them is caught by this prefix. **That test is the join between the two modules;
+  > the join is deliberately NOT an import.**
+
+  **`lib/security` から `lib/hooks` を import してはいけません**（package 循環になる。#1942 が
+  逆向きの依存 3 本を実測して避けた判断）。結合はテストが持つ形を維持してください。
+
+  ## 受入条件
+
+  - **剥がす集合の定義が根拠つきで書かれている**（`env-sanitizer.ts` のコメントか `docs/`）。
+    「何を守るのか」が 1 文で言えること。
+  - 定義どおりに剥がれることを、**実際に子プロセスを起こして読めないことで**確認する
+    （#1942 の `child-process-hook-env-1942.test.ts` と同じ形。単体の関数呼び出しだけでは不十分）。
+  - `COMMANDMATE_HOOK_ENV_VARS` の docblock が実態と一致する（現在は
+    「launch line に載る `CM_HOOK_*` の全て」と述べているが実測と食い違う）。
+  - **変異注入**: 剥がし漏れが赤になることを示す。定義に含めた変数それぞれについて。
+  - `lib/security` → `lib/hooks` の import を作っていないこと（ガードで固定するか、既存ガードで
+    捕まることを確認すること）。
+  - `npm run lint` / `npx tsc --noEmit` / フル `npm run test:unit` / `npm run test:integration` /
+    `npm run build` / `build:cli` / `build:server` が exit 0。
+
+  ## 触ってよい範囲
+
+  `src/lib/security/**`・`src/lib/hooks/sources/launch-command.ts`・`src/lib/cli-tools/**`・
+  `docs/design/**`・`tests/unit/security/**`・`tests/unit/hooks/**`・`tests/unit/lib/**`・
+  `tests/unit/cli-tools/**`・`tests/unit/guards/**`。
+
+  **`src/lib/hooks/` の launch-command.ts 以外は触らないでください。** 必要と判断したら
+  変更せずに理由を commit message に書いて報告してください。
+
+  ## 作業ルール（厳守）
+
+  - **commit は 1 本にまとめる。** PR は作らない・push しない（オーケストレーターが行う）。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しない。** 断片は `dev-reports/` 配下へ。
+    **書式は `/orchestrate` の 2-4-1 に実例があります**（#1997 で追加。CHANGELOG は
+    `- **<type>(<scope>): <要約>** (#1996): <本文>` の 1 行、module-reference は
+    「実在確認: <ファイル>:<行番号>」つき。足すものが無ければ「追記なし」の 1 行でよい）。
+  - **この契約の方針は「推奨」。** 別解が正しいと判断したら採ってよいが、**逸脱と理由を commit message に明記**すること。
+  - **Issue 本文と私の下調べをコードで裏取りすること。** 食い違ったら**実測を正**とし、commit message に書く。
+  - **テストを足した「後」に `npx tsc --noEmit` を回すこと。** さらに **`build:cli` と `build:server` も**
+    （`tsconfig.cli.json` は `"paths": {}` なので `@/` import はルート tsc を通っても build:cli で落ちる）。
+  - **稼働サーバ（port 3000）の足元でビルドしない。** 検証は必ずあなたの worktree で行うこと。
+  - **`~/.copilot/settings.json` などマシン共通のファイルに触る場合は sha256 を採って必ず復元**すること。
+  - 作業が終わったら最終行に `IMPL_COMPLETED` とだけ出力すること。
+scope:
+  allow:
+    - "src/lib/security/**"
+    - "src/lib/hooks/sources/launch-command.ts"
+    - "src/lib/cli-tools/**"
+    - "docs/design/**"
+    - "tests/unit/security/**"
+    - "tests/unit/hooks/**"
+    - "tests/unit/lib/**"
+    - "tests/unit/cli-tools/**"
+    - "tests/unit/guards/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, build-cli, build-server, lint, build, typecheck, integration, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
