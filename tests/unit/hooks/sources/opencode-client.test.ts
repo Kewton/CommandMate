@@ -43,11 +43,20 @@ function fixtureText(name: string): string {
 
 const originalFetch = globalThis.fetch;
 
-/** Answer every request with one JSON body. */
+/**
+ * Answer every request with one JSON body.
+ *
+ * The `content-type` is part of the stub because it is part of the contract
+ * (Issue #1931): a real opencode server answers an *unknown* route with
+ * `200 text/html`, so the client refuses a body whose media type is not the one
+ * the call can read. A stub without the header is a response this module would
+ * — correctly — throw away.
+ */
 function stubJson(body: unknown, ok = true): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn().mockResolvedValue({
     ok,
     status: ok ? 200 : 500,
+    headers: new Headers({ 'content-type': 'application/json' }),
     json: async () => body,
   });
   globalThis.fetch = fetchMock as unknown as typeof fetch;
@@ -60,6 +69,7 @@ function stubStream(chunks: string[]): void {
   globalThis.fetch = vi.fn().mockResolvedValue({
     ok: true,
     status: 200,
+    headers: new Headers({ 'content-type': 'text/event-stream' }),
     body: {
       getReader: () => {
         let index = 0;
