@@ -278,41 +278,94 @@ export interface CurrentOutputResponse {
     lastEventAt: number | null;
     lastEventDetail: string | null;
     /**
-     * An id for the turn the agent last reported activity in, or null
-     * (Issue #1926, design §7).
+     * The id of the turn this instance is in, or of the last one it was in
+     * (Issue #1926, made a real identity in #1930).
      *
-     * **Provisional, and not yet a stable turn identity — read this before
-     * consuming it.** Phase 1 derives all four turn fields from the single most
-     * recent event, which is all the server retains today, so a `pre_tool_use`
-     * arriving mid-turn re-stamps {@link openedAt} and therefore this id. A
-     * consumer that reads a changed `turnId` as "a new turn began" will
-     * false-positive several times inside one turn. Phase 4 replaces the
-     * derivation with a real turn record under the generation fence.
+     * Stable for the life of the turn: a `pre_tool_use` arriving mid-turn no
+     * longer re-stamps it, and a session recreated in the same pane does not
+     * inherit it. `wait` reads a change of id as "a new turn began".
      *
-     * `wait` deliberately does not read it yet: `adoptTurnStart` still adopts
-     * turns from `lastEventType` / `lastEventAt`, and the Issue #1839 gate stays
-     * on that source until the Phase 4 migration is complete.
+     * Absent from a server older than #1926, and null on one that has heard
+     * nothing from this instance.
      */
     turnId?: string | null;
     /**
-     * Epoch ms of the most recent `user_prompt_submit` / `pre_tool_use` /
-     * `post_tool_use`, or null (Issue #1926). The same three events
-     * `adoptTurnStart` treats as opening a turn.
+     * Epoch ms the turn opened, or null (Issue #1926).
+     *
+     * The event that opens a turn is one of `user_prompt_submit` /
+     * `pre_tool_use` / `post_tool_use` — the set `adoptTurnStart` mirrors as
+     * {@link TURN_OPENING_EVENT_TYPES}. Null means the opening was never
+     * observed: a `stop` arrived with no turn open, so the server publishes
+     * null rather than guessing a time `closedAt - openedAt` would be rendered
+     * from.
      */
     openedAt?: number | null;
-    /** Epoch ms the agent reported the turn ended, or null (Issue #1926). */
+    /** Epoch ms the turn ended, or null while it is open (Issue #1926). */
     closedAt?: number | null;
     /**
-     * Why the turn ended, or null while none has (Issue #1926).
+     * Why the turn ended, or null while none has (Issue #1926, filled in by
+     * #1930).
      *
-     * `'stop'` — the agent's own `Stop` — is the only value Phase 1 produces.
-     * Design §7 reserves `resync_idle` / `stale` / `scraper_evidence` /
-     * `generation` for the Phase 4 turn model, which is why this is a plain
-     * `string`: a newer server can name a close reason this build has never
-     * heard of, and narrowing here would turn a forward-compatible payload into
-     * a parse failure (Issue #1843).
+     * The six values a server produces today are `stop` (the agent's own
+     * `Stop`), `session_end`, `stale`, `scraper_evidence`, `resync_idle` and
+     * `generation`. A plain `string` on purpose: a newer server can name a
+     * close reason this build has never heard of, and narrowing here would turn
+     * a forward-compatible payload into a parse failure (Issue #1843).
      */
     closedBy?: string | null;
+    /**
+     * The approvals this instance is blocked on, oldest first (Issue #1930).
+     *
+     * Empty on a session with no dialog open. The agent's own `tool_input` is
+     * deliberately NOT here — see the server-side type; what is published is
+     * what a reader can act on.
+     *
+     * Mirrors: src/lib/session/current-output-builder.ts PendingDecisionPayload.
+     */
+    pendingDecisions?: Array<{
+      /** The agent's own id for it, or null for a source that publishes none. */
+      id: string | null;
+      at: number;
+      /** `notification` (proved) / `permission-request` (predicted). String-typed per #1843. */
+      source: string;
+      toolName: string | null;
+      confirmedAt: number | null;
+      scraperCorroborated: boolean;
+      /**
+       * Whether a verdict from the server can still reach the agent — the
+       * source's `decisionTimeoutSeconds` applied to this record's age.
+       *
+       * True does **not** mean the dialog is gone. The pane is still blocked;
+       * what has expired is the server's ability to answer it automatically.
+       */
+      deliveryExpired: boolean;
+    }>;
+    /**
+     * What this instance has had dropped by the structured layer's own bounds,
+     * and on whose authority (Issue #1930).
+     *
+     * The field that separates "my `stop` never arrived" from "my `stop`
+     * arrived and something had already claimed its id" — the same symptom with
+     * different fixes.
+     *
+     * Mirrors: src/lib/session/agent-event-state.ts AgentEventDropCounts.
+     */
+    dedupDropped?: {
+      dedupDropped: { identity: number; timeWindow: number };
+      decisionEvicted: number;
+      idsDiscarded: number;
+      dialogTimedOut: number;
+      decisionOverflow: number;
+    };
+    /**
+     * How long a dialog record is retained without being answered, in ms
+     * (Issue #1930).
+     *
+     * Two values because a prediction and a proof are different statements: a
+     * `PermissionRequest` nothing corroborated expires far sooner than a
+     * `Notification` that proved a dialog exists.
+     */
+    dialogPendingMaxMs?: { predicted: number; confirmed: number };
     /**
      * Epoch ms the structured layer first learned a dialog was open, or null
      * (Issue #1725). Non-null together with `isPromptWaiting` is how a caller
