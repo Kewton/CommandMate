@@ -18,15 +18,12 @@ import { detectPrompt } from '../../prompt-detector';
 import { STATUS_REASON } from '../../status-reason';
 import { detectCopilotDialog } from './prompt';
 import { createToolStatusDetector } from '../run-detection';
+import { COPILOT_VERIFIED_AGAINST } from '../verified-against';
 import type { StatusEvidence } from '@/lib/session/status-evidence';
 import type { NormalizedFrame } from '../types';
 
-/** copilot-cli build these rules were read off (#1885 / #1895 fixtures). */
-export const VERIFIED_AGAINST = {
-  version: '1.0.80',
-  capturedAt: '2026-08-21',
-  paneGeometry: '200x1000',
-} as const;
+/** copilot-cli build these rules were read off (#1885 / #1895; value in ../verified-against, #1929). */
+export const VERIFIED_AGAINST = COPILOT_VERIFIED_AGAINST;
 
 /**
  * §4 D1 決定 1: copilot's idle evidence is the bottom row of the pane.

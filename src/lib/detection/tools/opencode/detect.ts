@@ -20,16 +20,13 @@ import { STATUS_REASON } from '../../status-reason';
 import { detectOpenCodeDialog } from './prompt';
 import { STATUS_CHECK_LINE_COUNT } from '../frame';
 import { createToolStatusDetector } from '../run-detection';
+import { OPENCODE_VERIFIED_AGAINST } from '../verified-against';
 import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
 import type { StatusEvidence } from '@/lib/session/status-evidence';
 import type { NormalizedFrame, ToolStatusVerdict } from '../types';
 
-/** opencode build these rules were read off (#1883 / #1893 / #1896 fixtures). */
-export const VERIFIED_AGAINST = {
-  version: '1.18.21',
-  capturedAt: '2026-08-21',
-  paneGeometry: '80x200',
-} as const;
+/** opencode build these rules were read off (#1883 / #1893 / #1896; value in ../verified-against, #1929). */
+export const VERIFIED_AGAINST = OPENCODE_VERIFIED_AGAINST;
 
 /**
  * Where opencode's content area ends in this frame.

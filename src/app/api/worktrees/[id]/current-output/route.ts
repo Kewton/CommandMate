@@ -9,6 +9,7 @@ import { getWorktreeById } from '@/lib/db';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { buildCurrentOutput } from '@/lib/session/current-output-builder';
 import { resolveSessionTarget } from '@/lib/session/resolve-session-target';
+import { getDetectorStalenessSnapshot } from '@/lib/detection/version-probes';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
@@ -96,7 +97,22 @@ export async function GET(
       resolvedBy: target.resolvedBy,
       conflict: target.conflict,
     });
-    return NextResponse.json(payload, { status: 200 });
+
+    // Issue #1929 (§4 D2 / DR3-013): whether the detector's rules were read off
+    // the build that is installed. This is the 5-second polling path, so the
+    // SNAPSHOT is used — it answers from a process-level cache or answers
+    // `undefined` and probes in the background, and never awaits a child.
+    // `detector` is therefore absent until the cache is warm, which the reader
+    // must take as "not known yet" rather than "nothing is stale".
+    //
+    // Attached here rather than inside buildCurrentOutput on purpose: DR4-008
+    // limits this to authenticated surfaces (`capture --json` / `commandmate
+    // status`), and the builder is also the WS terminal streamer's payload.
+    const staleness = getDetectorStalenessSnapshot();
+    return NextResponse.json(
+      staleness === undefined ? payload : { ...payload, detector: { staleness } },
+      { status: 200 }
+    );
   } catch (error: unknown) {
     logger.error('error-getting-current-output:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(

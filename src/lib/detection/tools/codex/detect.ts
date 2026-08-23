@@ -29,16 +29,13 @@ import { STATUS_REASON } from '../../status-reason';
 import { detectCodexDialog } from './prompt';
 import { STATUS_CHECK_LINE_COUNT } from '../frame';
 import { createToolStatusDetector } from '../run-detection';
+import { CODEX_VERIFIED_AGAINST } from '../verified-against';
 import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
 import type { PromptDetectionResult } from '../../prompt-detector';
 import type { ToolStatusVerdict } from '../types';
 
-/** codex-cli build these rules were read off (#1628 / #1829 / #1890 fixtures). */
-export const VERIFIED_AGAINST = {
-  version: '0.148.0',
-  capturedAt: '2026-08-15',
-  paneGeometry: '200x1000',
-} as const;
+/** codex-cli build these rules were read off (#1628 / #1829 / #1890; value in ../verified-against, #1929). */
+export const VERIFIED_AGAINST = CODEX_VERIFIED_AGAINST;
 
 /**
  * Issue #1160: anchors for the BOTTOM edge of a Codex approval / numbered-choice
