@@ -696,30 +696,35 @@ async function pollWorktree(
       // to burn its whole --timeout without ever mentioning it. Treat a
       // PERSISTENT unclassified frame as a stop reason of its own.
       //
-      // The dwell deliberately spans BOTH states that raise this flag, and the
-      // completion check below is suppressed while it is up. That is the whole
-      // point, and it is worth spelling out because the obvious reading is the
-      // wrong one:
+      // The dwell deliberately spans ALL THREE states that raise this flag, and
+      // the completion check below is suppressed while it is up. That is the
+      // whole point, and it is worth spelling out because the obvious reading is
+      // the wrong one. The server's definition (`isUnclassifiedFrame` in
+      // `src/lib/session/status-evidence.ts`, restated there by Issue #2011):
       //
-      //   isUnclassifiedActive = (running && default) || (ready && no_recent_output)
+      //   isUnclassifiedActive =
+      //     running && (default | unknown_frame | no_recent_output)
       //
-      // The second disjunct exists because a static unrecognised overlay DEGRADES
-      // into it — once the Auto-Yes poller stamps lastServerResponseTimestamp, a
-      // frame that stopped changing flips from `running`/`default` to
-      // `ready`/`no_recent_output` after STALE_OUTPUT_THRESHOLD_MS (5s). See the
-      // Issue #1497 note in current-output-builder.ts.
+      // `no_recent_output` is there because a static unrecognised overlay
+      // DEGRADES into it — once the Auto-Yes poller stamps
+      // lastServerResponseTimestamp, a frame that stopped changing flips from
+      // `running`/`default` after STALE_OUTPUT_THRESHOLD_MS (5s). `unknown_frame`
+      // is the same floor for a tool that opts out of the generic composer check
+      // (copilot, opencode), and says "this tool's own rules looked and read
+      // nothing". Both arrive about twelve times faster than this dwell. Letting
+      // the completion check claim one turned a stalled worker into `Completed`,
+      // which is worse than the timeout Issue #1708 complained about: exit 124
+      // stops a pipeline, exit 0 lets it merge. Measured before this guard: two
+      // unclassified polls followed by the degraded state returned SUCCESS.
       //
-      // So `ready` here does NOT mean "the agent finished". It means "we still
-      // cannot read this frame, and now its output has gone stale too" — and it
-      // arrives about twelve times faster than this dwell. Letting the completion
-      // check claim it turned a stalled worker into `Completed`, which is worse
-      // than the timeout Issue #1708 complained about: exit 124 stops a pipeline,
-      // exit 0 lets it merge. Measured before this guard: two unclassified polls
-      // followed by the degraded state returned SUCCESS.
-      //
-      // A genuine completion is `ready`/`input_prompt` — the agent back at its
-      // composer — which does not raise the flag at all, so it still exits
-      // SUCCESS on the first poll, unchanged.
+      // What is deliberately NOT in the set is `ready`/`input_prompt` with
+      // `statusEvidence: 'none'` — the agent back at its composer on a frame no
+      // tool-specific idle rule could vouch for. That frame WAS classified; what
+      // is missing is positive proof, which is a different question and §4 D1's
+      // to answer. Issue #1927 folded the two together and every idle Claude pane
+      // stopped completing (#2011). Whether `wait` should hold for evidence as
+      // well as classification is open, and any answer belongs in the same place
+      // as the rollout that produces the evidence — not here.
       if (data.isUnclassifiedActive === true) {
         if (unclassifiedSince === null) unclassifiedSince = Date.now();
         const dwellMs = Date.now() - unclassifiedSince;
@@ -779,10 +784,11 @@ async function pollWorktree(
       }
 
       // Issue #1708 narrowed Path B: `ready` is only a completion when the frame
-      // was actually understood. `ready`/`no_recent_output` is the degraded form
-      // of an unreadable overlay (see the note above), and reporting it as
-      // `Completed` is how a stalled worker gets merged. Path A is untouched — a
-      // session that went away really is finished, and carries no flag anyway.
+      // was actually understood. A structured `hook_stop` over an unreadable
+      // pane is the degraded form of an overlay nobody could parse (see the note
+      // above), and reporting it as `Completed` is how a stalled worker gets
+      // merged. Path A is untouched — a session that went away really is
+      // finished, and carries no flag anyway.
       if (!data.isRunning) {
         console.error(`Completed: ${worktreeId} (basis=${COMPLETION_BASIS.SESSION_GONE})`);
         return { exitCode: WaitExitCode.SUCCESS };
@@ -1045,10 +1051,14 @@ export function createWaitCommand(): Command {
     .addHelpText('after', `
 Unclassified frames (exit 10, Issue #1708):
   A frame that is interactive but that the detection layer could not parse
-  raises statusEvidence: 'none' (isUnclassifiedActive). It is not an immediate
-  stop reason: a capture taken mid-repaint raises it for a single poll. Only
-  after it has held for 60 s does wait exit 10 with {"type":"unclassified"},
-  and --on-prompt human keeps waiting through it like any other prompt.
+  raises isUnclassifiedActive. It is not an immediate stop reason: a capture
+  taken mid-repaint raises it for a single poll. Only after it has held for
+  60 s does wait exit 10 with {"type":"unclassified"}, and --on-prompt human
+  keeps waiting through it like any other prompt.
+
+  Distinct from statusEvidence: 'none', which says the verdict rests on no
+  positive proof — an idle composer no tool-specific rule vouched for is
+  classified but unproven, and wait completes on it (Issue #2011).
 
   The 60 s dwell is a constant, not a flag. --timeout and --stall-timeout below
   60 s therefore always win and return 124 instead: the dwell pre-empts long

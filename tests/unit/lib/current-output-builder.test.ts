@@ -1,6 +1,6 @@
 /** @vitest-environment node */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 import { buildClaude1000RowPermissionFrame } from '../../fixtures/claude-1000-row-prompt';
 
@@ -27,6 +27,7 @@ import {
   clearPolicySuppressions,
 } from '@/lib/polling/auto-yes-suppression-state';
 import { buildCurrentOutput } from '@/lib/session/current-output-builder';
+import { IDLE_EVIDENCE_ENV_VAR } from '@/config/detection-evidence-config';
 import { buildClaudeIdleComposerFrame } from '../../fixtures/claude-idle-composer';
 import { buildClaudeHelpOverlayFrame } from '../../fixtures/claude-help-overlay';
 
@@ -107,7 +108,12 @@ describe('buildCurrentOutput Issue #1497 no_recent_output degrade', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env[IDLE_EVIDENCE_ENV_VAR];
     vi.mocked(getLastServerResponseTimestamp).mockReturnValue(staleTimestamp);
+  });
+
+  afterEach(() => {
+    delete process.env[IDLE_EVIDENCE_ENV_VAR];
   });
 
   it('keeps the nav hatch gated open for a static /help overlay that stopped changing', async () => {
@@ -159,13 +165,23 @@ describe('buildCurrentOutput Issue #1497 no_recent_output degrade', () => {
     expect(payload.isUnclassifiedActive).toBe(false);
   });
 
-  it('gates the hatch open for an idle-looking frame with no completion evidence (Issue #1927)', async () => {
+  it('drops the evidence but NOT the classification when no completion marker is on the frame', async () => {
     // The other half of the rollout, and the reason the assertion above is not
     // vacuous: the SAME frame with its completion marker reworded still reads
     // `ready`/`input_prompt` on the wire (DR3-002 — nothing downstream has to
-    // learn a new status), and now says so with no evidence, which is what
-    // opens the hatch and buys `wait` its 60-second dwell instead of a false
-    // Completed.
+    // learn a new status), and now says so with no evidence.
+    //
+    // Issue #2011: what that must NOT do is open the hatch. `evidence: 'none'`
+    // here means "no rule vouched that this pane is idle"; the frame itself was
+    // read perfectly well, and the composer row it was read from is one a human
+    // can type into. Gating the nav hatch and `wait`'s completion rule on this
+    // is what stalled every idle Claude pane on develop.
+    //
+    // The rule is asked for explicitly because #2011 put claude back to
+    // `observe` — see the rollout suite. Under the shipped default this frame
+    // publishes `'positive'`, and the flag is `false` either way, which is the
+    // separation being pinned.
+    process.env[IDLE_EVIDENCE_ENV_VAR] = 'claude=enforce';
     vi.mocked(captureSessionOutput).mockResolvedValue(
       buildClaudeIdleComposerFrame('  it wrote some prose and stopped'),
     );
@@ -180,6 +196,6 @@ describe('buildCurrentOutput Issue #1497 no_recent_output degrade', () => {
     expect(payload.sessionStatus).toBe('ready');
     expect(payload.sessionStatusReason).toBe('input_prompt');
     expect(payload.statusEvidence).toBe('none');
-    expect(payload.isUnclassifiedActive).toBe(true);
+    expect(payload.isUnclassifiedActive).toBe(false);
   });
 });
