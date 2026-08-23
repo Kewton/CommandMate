@@ -6,8 +6,7 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import type { ICLITool, CLIToolType } from './types';
-import { deriveSessionSuffix } from './types';
-import { validateSessionName } from './validation';
+import { resolveSessionName } from './session-name';
 import { reconcileSessionGeometry, sendSpecialKey, type SessionGeometryOptions } from '../tmux/tmux';
 import { resolveComposerSpec } from './composer-spec';
 import { resolveCaptureSpec } from './capture-spec';
@@ -52,21 +51,17 @@ export abstract class BaseCLITool implements ICLITool {
    *
    * T2.3: Added validation to prevent command injection (MF4-001)
    *
+   * Issue #1984: 規則の本体は `./session-name` に移した。名前だけが欲しい呼び出し側
+   * （`ws-server.ts` など）が、7 ツールの実装グラフごと import せずに済むようにするため。
+   * ここは委譲だけを行い、規則は 1 箇所に保つ。
+   *
    * @param worktreeId - Worktree ID
    * @param instanceId - Agent instance ID (defaults to the primary instance)
    * @returns Session name
    * @throws Error if the resulting session name is invalid
    */
   getSessionName(worktreeId: string, instanceId?: string): string {
-    const base = `mcbd-${this.id}-${worktreeId}`;
-    if (!instanceId || instanceId === this.id) {
-      validateSessionName(base);
-      return base;
-    }
-    const suffix = deriveSessionSuffix(instanceId, this.id);
-    const sessionName = suffix ? `${base}-${suffix}` : base;
-    validateSessionName(sessionName);
-    return sessionName;
+    return resolveSessionName(this.id, worktreeId, instanceId);
   }
 
   // Abstract methods that must be implemented by subclasses
