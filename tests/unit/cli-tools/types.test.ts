@@ -5,6 +5,20 @@
 import { describe, it, expect } from 'vitest';
 import type { CLIToolType, ICLITool, CLIToolInfo, IImageCapableCLITool } from '@/lib/cli-tools/types';
 import { isImageCapableCLITool } from '@/lib/cli-tools/types';
+import { resolveComposerSpec } from '@/lib/cli-tools/composer-spec';
+import { resolveCaptureSpec } from '@/lib/cli-tools/capture-spec';
+import { resolveGracefulExitSpec } from '@/lib/cli-tools/graceful-exit';
+
+/**
+ * The three contract methods Issue #1933 added to `ICLITool`, as a literal
+ * would implement them. `BaseCLITool` supplies exactly these defaults, so a
+ * hand-rolled tool object in this file stays a valid `ICLITool`.
+ */
+const contractMethods = (id: CLIToolType) => ({
+  describeComposer: () => resolveComposerSpec(id),
+  gracefulExitSequence: () => resolveGracefulExitSpec(id),
+  captureSpec: () => resolveCaptureSpec(id),
+});
 
 describe('CLITool Types', () => {
   it('should have valid CLI tool types', () => {
@@ -36,6 +50,7 @@ describe('CLITool Types', () => {
       killSession: async () => {},
       getSessionName: () => 'test-session',
       interrupt: async () => {},
+      ...contractMethods('claude'),
     };
 
     expect(mockTool.id).toBe('claude');
@@ -55,6 +70,7 @@ describe('CLITool Types', () => {
       killSession: async () => {},
       getSessionName: () => 'test-session',
       interrupt: async () => {},
+      ...contractMethods('claude'),
       supportsImage: () => true,
       sendMessageWithImage: async () => {},
     };
@@ -74,6 +90,7 @@ describe('CLITool Types', () => {
       killSession: async () => {},
       getSessionName: () => 'test-session',
       interrupt: async () => {},
+      ...contractMethods('codex'),
     };
 
     expect(isImageCapableCLITool(regularTool)).toBe(false);
@@ -91,6 +108,7 @@ describe('CLITool Types', () => {
       killSession: async () => {},
       getSessionName: () => 'test-session',
       interrupt: async () => {},
+      ...contractMethods('codex'),
       supportsImage: () => false as unknown as true,
     };
 

@@ -10,6 +10,12 @@ import { validateSessionName } from '@/lib/cli-tools/validation';
 import { TMUX_HISTORY_LIMIT, TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '@/config/tmux-pane-config';
 import { createLogger } from '@/lib/logger';
 import { NAVIGATION_KEY_VALUES, type NavigationKey } from '@/types/terminal-keys';
+import type { KeySequence } from '@/types/cli-tool-contracts';
+import {
+  keySequenceArgs,
+  runKeySequence,
+  type KeySequenceTransport,
+} from './key-sequence';
 
 const execFileAsync = promisify(execFile);
 const logger = createLogger('tmux');
@@ -367,38 +373,120 @@ export async function createSession(
   }
 }
 
+/** Options for {@link sendKeys}. */
+export interface SendKeysOptions {
+  /**
+   * Send `keys` as TEXT rather than letting tmux resolve it as a key name
+   * (Issue #1933, 受入条件 S9).
+   *
+   * Required for anything a user typed. Without it `tmux send-keys` looks the
+   * string up in the key table first, so a message body of exactly `Escape`
+   * interrupts the agent (`1b`), `Enter` submits an empty composer (`0d`) and
+   * `C-c` sends SIGINT — all measured on tmux 3.5a, see
+   * `./key-sequence`. A body starting with `-` is worse still: getopt eats it
+   * and `send-keys` returns 0 having sent nothing at all.
+   *
+   * Mutually exclusive with `sendEnter`: the literal argv carries no `C-m`,
+   * because a `C-m` argument after `-l` would be typed as the three characters
+   * `C`, `-`, `m`. Submit the message with a separate `sendSpecialKeys(…,
+   * ['Enter'])`, which is what every caller in this repository already does —
+   * body and Enter have been separate tmux commands since #1469.
+   */
+  literal?: boolean;
+}
+
 /**
  * Send keys to a tmux session
  *
  * @param sessionName - Target session name
  * @param keys - Keys to send (command text)
  * @param sendEnter - Whether to send Enter key after the command (default: true)
+ * @param options - {@link SendKeysOptions}; pass `{ literal: true }` for text
  *
- * @throws {Error} If session doesn't exist or command fails
+ * @throws {Error} If session doesn't exist, command fails, or `literal` is
+ *   combined with `sendEnter`
  *
  * @example
  * ```typescript
  * await sendKeys('my-session', 'echo hello');
  * await sendKeys('my-session', 'ls -la', true);
  * await sendKeys('my-session', 'incomplete command', false);
+ * // A message body the user typed — never resolved as a key name:
+ * await sendKeys('my-session', userMessage, false, { literal: true });
  * ```
  */
 export async function sendKeys(
   sessionName: string,
   keys: string,
-  sendEnter: boolean = true
+  sendEnter: boolean = true,
+  options?: SendKeysOptions
 ): Promise<void> {
+  if (options?.literal && sendEnter) {
+    throw new Error(
+      'sendKeys: { literal: true } cannot be combined with sendEnter — a trailing C-m would be typed as text. Send Enter as a separate key.'
+    );
+  }
+
   // execFile() passes arguments directly without shell interpretation,
   // so no shell-level escaping is needed
-  const args = sendEnter
-    ? ['send-keys', '-t', exactTarget(sessionName), keys, 'C-m']
-    : ['send-keys', '-t', exactTarget(sessionName), keys];
+  const args = options?.literal
+    ? keySequenceArgs(exactTarget(sessionName), { kind: 'literal', text: keys })
+    : sendEnter
+      ? ['send-keys', '-t', exactTarget(sessionName), keys, 'C-m']
+      : ['send-keys', '-t', exactTarget(sessionName), keys];
 
   try {
     await execFileAsync('tmux', args, { timeout: DEFAULT_TIMEOUT });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to send keys to tmux session: ${errorMessage}`);
+  }
+}
+
+/**
+ * Send a whole {@link KeySequence} to a session (Issue #1933).
+ *
+ * The executor half of `./key-sequence`, bound to this module's `execFile`
+ * transport. Literal steps go out through `send-keys -l --`, key steps through
+ * `send-keys --` after their name is re-validated, and each step is its own
+ * tmux invocation so a TUI cannot read the whole sequence as one paste.
+ *
+ * ## Status: the runner for `GracefulExitSpec.keys`, not yet its caller
+ *
+ * `ICLITool.gracefulExitSequence()` returns a `KeySequence[]`, so something has
+ * to be able to run one; this is that something, and
+ * `tests/unit/lib/key-sequence-1933.test.ts` drives it against a stubbed
+ * `execFile`. The seven `killSession()` implementations do **not** call it yet,
+ * and that is a deliberate scope line rather than an oversight: rerouting them
+ * changes the argv of calls that `tests/unit/api/kill-session-cli-tool-gateway-1905.test.ts`
+ * pins by exact arity, a file Issue #1933 may not edit — and it would buy no
+ * behaviour, because the exit strings (`/exit`, `/quit`) are tool-owned
+ * constants rather than tmux key names, so `-l` changes not one byte for them.
+ * The user-typed message body, which `-l` changes a great deal for, goes through
+ * {@link sendKeys}' `literal` option in the same commit. The Issue that is
+ * allowed to touch that gateway test owns the rest of the move;
+ * `tests/unit/cli-tools/graceful-exit-conformance-1933.test.ts` holds the
+ * declarations equal to the implementations until then.
+ *
+ * @param sessionName - Target session name
+ * @param steps - The sequence, in order
+ * @throws {Error} If a key name is not allowed, or a tmux command fails
+ */
+export async function sendKeySequence(
+  sessionName: string,
+  steps: readonly KeySequence[]
+): Promise<void> {
+  const transport: KeySequenceTransport = {
+    async run(args: string[]): Promise<void> {
+      await execFileAsync('tmux', args, { timeout: DEFAULT_TIMEOUT });
+    },
+  };
+
+  try {
+    await runKeySequence(exactTarget(sessionName), steps, transport);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to send key sequence to tmux session: ${errorMessage}`);
   }
 }
 

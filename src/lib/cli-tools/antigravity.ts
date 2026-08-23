@@ -291,6 +291,7 @@ export class AntigravityTool extends BaseCLITool {
         sessionName,
         message,
         cliToolId: 'antigravity',
+        composer: this.describeComposer(),
       });
 
       // Invalidate cache after sending message (required so the poller re-reads)
