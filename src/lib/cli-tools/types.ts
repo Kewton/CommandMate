@@ -6,7 +6,7 @@ import type {
   CaptureSpec,
   ComposerSpec,
   GracefulExitSpec,
-} from '@/types/cli-tool-contracts';
+} from '../../types/cli-tool-contracts';
 
 /**
  * CLI Tool IDs constant array

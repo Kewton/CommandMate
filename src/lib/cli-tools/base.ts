@@ -16,7 +16,7 @@ import type {
   CaptureSpec,
   ComposerSpec,
   GracefulExitSpec,
-} from '@/types/cli-tool-contracts';
+} from '../../types/cli-tool-contracts';
 
 const execAsync = promisify(exec);
 

@@ -12,9 +12,9 @@
  * @module lib/cli-tools/capture-spec
  */
 
-import { OPENCODE_PANE_HEIGHT } from '@/config/tmux-pane-config';
-import { STATUS_DETECTION_CAPTURE_LINES } from '@/config/status-capture-config';
-import type { CaptureSpec } from '@/types/cli-tool-contracts';
+import { OPENCODE_PANE_HEIGHT } from '../../config/tmux-pane-config';
+import { STATUS_DETECTION_CAPTURE_LINES } from '../../config/status-capture-config';
+import type { CaptureSpec } from '../../types/cli-tool-contracts';
 import { usesAlternateScreen, type CLIToolType } from './types';
 
 /**

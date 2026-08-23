@@ -23,8 +23,8 @@
  * @module lib/cli-tools/composer-spec
  */
 
-import { OPENCODE_PANE_HEIGHT } from '@/config/tmux-pane-config';
-import type { ComposerSpec } from '@/types/cli-tool-contracts';
+import { OPENCODE_PANE_HEIGHT } from '../../config/tmux-pane-config';
+import type { ComposerSpec } from '../../types/cli-tool-contracts';
 import type { CLIToolType } from './types';
 
 /**

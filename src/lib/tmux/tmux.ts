@@ -10,7 +10,7 @@ import { validateSessionName } from '@/lib/cli-tools/validation';
 import { TMUX_HISTORY_LIMIT, TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '@/config/tmux-pane-config';
 import { createLogger } from '@/lib/logger';
 import { NAVIGATION_KEY_VALUES, type NavigationKey } from '@/types/terminal-keys';
-import type { KeySequence } from '@/types/cli-tool-contracts';
+import type { KeySequence } from '../../types/cli-tool-contracts';
 import {
   keySequenceArgs,
   runKeySequence,

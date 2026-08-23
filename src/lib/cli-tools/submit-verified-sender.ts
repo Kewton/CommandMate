@@ -57,7 +57,7 @@
 import { sendKeys, sendSpecialKeys, capturePane, clearInputLine } from '../tmux/tmux';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { resolveComposerSpec } from './composer-spec';
-import type { ComposerSpec } from '@/types/cli-tool-contracts';
+import type { ComposerSpec } from '../../types/cli-tool-contracts';
 import {
   stripAnsi,
   detectThinking,

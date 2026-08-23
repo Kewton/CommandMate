@@ -41,20 +41,20 @@
  * @module lib/cli-tools/graceful-exit
  */
 
-import { COPILOT_TEXT_INPUT_DELAY_MS } from '@/config/copilot-constants';
+import { COPILOT_TEXT_INPUT_DELAY_MS } from '../../config/copilot-constants';
 import {
   COPILOT_EXIT_WAIT_MS,
   OPENCODE_EXIT_WAIT_MS,
   TUI_EXIT_WAIT_MS,
   TUI_INTERRUPT_SETTLE_MS,
   TUI_TEXT_INPUT_WAIT_MS,
-} from '@/config/cli-tool-timing-config';
+} from '../../config/cli-tool-timing-config';
 import {
   keyStep,
   literalStep,
   type GracefulExitSpec,
   type GracefulExitVerdict,
-} from '@/types/cli-tool-contracts';
+} from '../../types/cli-tool-contracts';
 import type { CLIToolType } from './types';
 
 /** The graceful exit command copilot's TUI accepts. */

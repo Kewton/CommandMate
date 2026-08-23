@@ -19,7 +19,7 @@ export type {
   GracefulExitVerdict,
   KeySequence,
   KeySequenceKeyName,
-} from '@/types/cli-tool-contracts';
+} from '../../types/cli-tool-contracts';
 export { resolveComposerSpec, DEFAULT_COMPOSER_SPEC } from './composer-spec';
 export { resolveCaptureSpec, GEMINI_PANE_HEIGHT } from './capture-spec';
 export {

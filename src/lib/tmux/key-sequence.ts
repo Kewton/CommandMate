@@ -55,7 +55,7 @@
  * @module lib/tmux/key-sequence
  */
 
-import { isKeySequenceKeyName, type KeySequence } from '@/types/cli-tool-contracts';
+import { isKeySequenceKeyName, type KeySequence } from '../../types/cli-tool-contracts';
 
 /**
  * The `tmux` arguments that send one step to a pane.
