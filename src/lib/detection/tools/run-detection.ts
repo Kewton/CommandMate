@@ -213,9 +213,12 @@ export function createToolStatusDetector(spec: ToolDetectorSpec): ToolStatusDete
   return {
     ...spec,
     detect: (frame, context) => runToolDetection(spec, frame, context),
-    // D1 決定 4's seam. Issue #1928 replaces the constant with the per-tool
-    // dialog rules and wires `response-checker` to them; landing anything here
-    // now would leave that Issue with nothing to implement.
+    // D1 決定 4's seam, filled per tool by Issue #1928. The substitute keeps
+    // every caller free of a null check; `hasDialogRules` is what tells a
+    // caller which of the two it got, because the Auto-Yes gate must suppress
+    // for "this tool has rules and this frame is not a dialog" and must NOT
+    // suppress for "nobody has measured this tool yet".
     detectDialog: spec.detectDialog ?? (() => null),
+    hasDialogRules: spec.detectDialog !== undefined,
   };
 }

@@ -92,17 +92,42 @@ export interface ToolStatusVerdict {
 }
 
 /**
- * A dialog a tool positively recognised — the seam Issue #1928 fills.
+ * How a positively recognised dialog takes its answer (Issue #1928).
  *
- * Deliberately narrow: `kind` names the dialog family and `options` carries the
- * replies the dialog accepts, which is the pair `respond` and Auto-Yes need. No
- * tool answers anything but `null` in this Issue.
+ * The distinction is a measurement about the tool's own rendering, not a
+ * preference, and Auto-Yes cannot be gated without it:
+ *
+ *  - `'numbered'` — the dialog is driven by typing an option number (or `y`),
+ *    which is what {@link resolveAutoAnswer} produces and what
+ *    `sendPromptAnswer` sends for codex / gemini / copilot, and what it
+ *    *navigates to* for claude / antigravity.
+ *  - `'keys'` — the dialog is driven by arrow keys and Enter, and a typed
+ *    number does something else entirely. opencode 1.18's permission strip is
+ *    the measured case: the `1` is swallowed by the button row and the Enter
+ *    after it confirms whatever is highlighted, so asking to REJECT would
+ *    APPROVE (Issue #1893 / #1896). Auto-Yes must never answer one of these;
+ *    the human drives it through NavigationButtons.
+ */
+export type DialogAnswerMode = 'numbered' | 'keys';
+
+/**
+ * A dialog a tool positively recognised — the seam Issue #1927 declared and
+ * Issue #1928 fills.
+ *
+ * Deliberately narrow: `kind` names the dialog family, `options` carries the
+ * replies the dialog draws, and {@link answerMode} says whether those replies
+ * can be sent as text at all. That triple is what `respond` and the Auto-Yes
+ * gate need, and nothing here is derived from the generic numbered-list
+ * inference — a `DialogVerdict` exists only where a tool's own measured rule
+ * said "this frame is my dialog".
  */
 export interface DialogVerdict {
   /** Dialog family, e.g. `permission` / `trust` / `ask_user` / `picker`. */
   kind: string;
   /** The replies the dialog accepts, in the order it draws them. */
   options: readonly string[];
+  /** How the dialog takes its answer (§4 D1 決定 4's gate reads this). */
+  answerMode: DialogAnswerMode;
 }
 
 /**
@@ -151,7 +176,22 @@ export interface ToolDetectorSpec {
    * the tool's rules.
    */
   readonly unreadableReason?: string;
-  /** D1 決定 4's seam. Issue #1928 implements it; every tool answers null today. */
+  /**
+   * §4 D1 決定 4: does this frame POSITIVELY carry one of this tool's dialogs?
+   *
+   * Declaring it is what puts the tool inside the Auto-Yes gate
+   * (`lib/polling/auto-yes-dialog-gate.ts`): from then on the generic
+   * numbered-list inference is not enough to send an answer, and a frame this
+   * returns `null` for is recorded as `unclassified-frame` instead of being
+   * typed into. A tool that omits it keeps the pre-#1928 behaviour, which is the
+   * same tool-by-tool rollout {@link readIdleEvidence} follows.
+   *
+   * The implementation must read the frame through `stripBoxDrawing(frame.clean)`
+   * or plain text only: Auto-Yes hands the detector a capture that has ALREADY
+   * had its ANSI and its box drawing removed (`captureAndCleanOutput`), so a
+   * rule anchored on a gutter glyph or an SGR attribute would answer `null` on
+   * the one path this seam exists for.
+   */
   detectDialog?(frame: NormalizedFrame): DialogVerdict | null;
 }
 
@@ -167,6 +207,16 @@ export interface ToolStatusDetector extends ToolDetectorSpec {
   readonly verifiedAgainst: DetectorProvenance;
   /** Run the whole priority chain over one frame. */
   detect(frame: NormalizedFrame, context?: ToolDetectionContext): ToolStatusVerdict;
-  /** D1 決定 4's seam — always `null` until Issue #1928. */
+  /** D1 決定 4's seam. See {@link ToolDetectorSpec.detectDialog}. */
   detectDialog(frame: NormalizedFrame): DialogVerdict | null;
+  /**
+   * Whether this tool DECLARED {@link detectDialog} (Issue #1928).
+   *
+   * {@link createToolStatusDetector} substitutes a `() => null` for a tool that
+   * did not, so the function's presence cannot be used to tell "this tool has
+   * measured dialog rules and this frame is not one of them" from "nobody has
+   * measured this tool yet". The Auto-Yes gate needs exactly that distinction:
+   * the first must suppress, the second must not.
+   */
+  readonly hasDialogRules: boolean;
 }

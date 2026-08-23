@@ -26,6 +26,7 @@ import {
 } from '../../cli-patterns';
 import { detectPrompt } from '../../prompt-detector';
 import { STATUS_REASON } from '../../status-reason';
+import { detectCodexDialog } from './prompt';
 import { STATUS_CHECK_LINE_COUNT } from '../frame';
 import { createToolStatusDetector } from '../run-detection';
 import { CODEX_VERIFIED_AGAINST } from '../verified-against';
@@ -57,6 +58,22 @@ function findCodexFooterBoundary(contentLines: readonly string[]): number {
     if (CODEX_STATUS_BAR_PATTERN.test(contentLines[ci])) return ci;
   }
   return -1;
+}
+
+/**
+ * Exclusive end of the conversation area — the row below the status bar, with
+ * the padding above it walked off (Issue #1928).
+ *
+ * The same boundary branches 0.8 and 2.7 compute inline, named once so
+ * `detectDialog` reads the region THEY read. Falls back to the whole frame when
+ * the bar cannot be located, which is Issue #1150's drift case: there the tail
+ * is the conversation, so the dialog rule still has the right rows.
+ */
+function findCodexContentEnd(contentLines: readonly string[]): number {
+  const boundary = findCodexFooterBoundary(contentLines);
+  let end = boundary >= 0 ? boundary - 1 : contentLines.length - 1;
+  while (end >= 0 && contentLines[end].trim() === '') end--;
+  return end + 1;
 }
 
 /**
@@ -265,6 +282,18 @@ export const codexStatusDetector = createToolStatusDetector({
 
   isStalePrompt(frame) {
     return isCodexStalePrompt(frame.contentLines);
+  },
+
+  // §4 D1 決定 4 (Issue #1928). All three inputs are readings this module
+  // already performs for its status branches, passed rather than recomputed:
+  // the content boundary (0.8 / 2.7), the #1160 staleness guard and the #1829
+  // lifecycle screens. `prompt.ts` therefore needs no import from this file.
+  detectDialog(frame) {
+    return detectCodexDialog(frame, {
+      contentEnd: findCodexContentEnd(frame.contentLines),
+      stalePrompt: isCodexStalePrompt(frame.contentLines),
+      lifecycleDialog: getCodexLifecycleDialog(frame.clean),
+    });
   },
 
   afterThinking(frame): ToolStatusVerdict | null {

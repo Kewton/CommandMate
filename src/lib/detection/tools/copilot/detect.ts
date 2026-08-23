@@ -16,6 +16,7 @@ import {
 } from '../../cli-patterns';
 import { detectPrompt } from '../../prompt-detector';
 import { STATUS_REASON } from '../../status-reason';
+import { detectCopilotDialog } from './prompt';
 import { createToolStatusDetector } from '../run-detection';
 import { COPILOT_VERIFIED_AGAINST } from '../verified-against';
 import type { StatusEvidence } from '@/lib/session/status-evidence';
@@ -177,6 +178,18 @@ export const copilotStatusDetector = createToolStatusDetector({
   skipGenericInputPrompt: true,
 
   readIdleEvidence,
+
+  // §4 D1 決定 4 (Issue #1928). Both inputs are the SAME two readings the status
+  // branches above use, passed rather than recomputed: the bottom row is
+  // copilot's only positional evidence, and a second reading of it would be a
+  // second chance to disagree about whether a dialog is on screen.
+  detectDialog(frame) {
+    return detectCopilotDialog(frame, {
+      statusBar: readCopilotStatusBar(frame.contentLines as string[]),
+      selectionFrame: isCopilotSelectionFrame(frame.contentLines as string[]),
+      contentEnd: frame.contentLines.length,
+    });
+  },
 
   // With the generic check off, this module's own rules are the ONLY rules that
   // run for copilot. A frame that reaches the floor is one they could not read
