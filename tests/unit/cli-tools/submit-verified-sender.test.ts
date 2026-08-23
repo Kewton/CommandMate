@@ -241,7 +241,7 @@ describe('submit-verified-sender', () => {
         await p;
 
         // body typed with sendEnter=false
-        expect(sendKeys).toHaveBeenCalledWith(SESSION, 'hello', false);
+        expect(sendKeys).toHaveBeenCalledWith(SESSION, 'hello', false, { literal: true });
         // Enter sent separately (never a batched body+C-m send-keys)
         expect(sendSpecialKeys).toHaveBeenCalledWith(SESSION, ['Enter']);
         expect(sendKeys).not.toHaveBeenCalledWith(SESSION, 'hello', true);
@@ -279,7 +279,7 @@ describe('submit-verified-sender', () => {
         expect(capturePane).toHaveBeenCalled();
         expect(invalidateCache).toHaveBeenCalledWith(SESSION);
         // No `\n` gate: the body is always typed via a non-Enter send-keys.
-        expect(sendKeys).toHaveBeenCalledWith(SESSION, message, false);
+        expect(sendKeys).toHaveBeenCalledWith(SESSION, message, false, { literal: true });
       } finally {
         vi.useRealTimers();
       }
@@ -489,7 +489,7 @@ describe('submit-verified-sender', () => {
         expect(clearComposerLine).toHaveBeenCalledWith(SESSION);
         expect(clearInputLine).not.toHaveBeenCalled();
         // Body typed verbatim, and only after the box was emptied.
-        expect(sendKeys).toHaveBeenCalledWith(SESSION, 'ZZTOP1234 とだけ返答してください', false);
+        expect(sendKeys).toHaveBeenCalledWith(SESSION, 'ZZTOP1234 とだけ返答してください', false, { literal: true });
         expect(callOrder(vi.mocked(clearComposerLine))).toBeLessThan(callOrder(vi.mocked(sendKeys)));
         // Nothing concatenated: the residual never appears in what was typed.
         for (const call of vi.mocked(sendKeys).mock.calls) {
@@ -517,7 +517,7 @@ describe('submit-verified-sender', () => {
 
         // Pre-#1880 this was typed into `echo PREFILLED` and executed as the
         // plain string `echo PREFILLED/cost` — the command silently demoted.
-        expect(sendKeys).toHaveBeenCalledWith(SESSION, '/cost', false);
+        expect(sendKeys).toHaveBeenCalledWith(SESSION, '/cost', false, { literal: true });
       } finally {
         vi.useRealTimers();
       }
@@ -543,7 +543,7 @@ describe('submit-verified-sender', () => {
         // The `/cost` is colored (38;5;153), not dim: real residual, not a
         // ghost — the SGR argument `2` in `38;5;153` must not read as faint.
         expect(clearComposerLine).toHaveBeenCalledWith(SESSION);
-        expect(sendKeys).toHaveBeenCalledWith(SESSION, 'ZZTOP5678 とだけ返答してください', false);
+        expect(sendKeys).toHaveBeenCalledWith(SESSION, 'ZZTOP5678 とだけ返答してください', false, { literal: true });
       } finally {
         vi.useRealTimers();
       }
@@ -568,7 +568,7 @@ describe('submit-verified-sender', () => {
         await expect(p).resolves.toBeUndefined();
 
         expect(vi.mocked(clearComposerLine).mock.calls.length).toBe(3);
-        expect(sendKeys).toHaveBeenCalledWith(SESSION, 'hello', false);
+        expect(sendKeys).toHaveBeenCalledWith(SESSION, 'hello', false, { literal: true });
       } finally {
         vi.useRealTimers();
       }
@@ -641,7 +641,7 @@ describe('submit-verified-sender', () => {
         await expect(p).resolves.toBeUndefined();
 
         expect(clearComposerLine).not.toHaveBeenCalled();
-        expect(sendKeys).toHaveBeenCalledWith(SESSION, 'hello', false);
+        expect(sendKeys).toHaveBeenCalledWith(SESSION, 'hello', false, { literal: true });
       } finally {
         vi.useRealTimers();
       }
@@ -665,7 +665,7 @@ describe('submit-verified-sender', () => {
         await expect(p).resolves.toBeUndefined();
 
         expect(clearComposerLine).not.toHaveBeenCalled();
-        expect(sendKeys).toHaveBeenCalledWith(SESSION, 'hello', false);
+        expect(sendKeys).toHaveBeenCalledWith(SESSION, 'hello', false, { literal: true });
       } finally {
         vi.useRealTimers();
       }
@@ -696,7 +696,7 @@ describe('submit-verified-sender', () => {
           await expect(p).resolves.toBeUndefined();
 
           expect(clearComposerLine).toHaveBeenCalledWith(SESSION);
-          expect(sendKeys).toHaveBeenCalledWith(SESSION, 'ZZTOP1234 とだけ返答してください', false);
+          expect(sendKeys).toHaveBeenCalledWith(SESSION, 'ZZTOP1234 とだけ返答してください', false, { literal: true });
           // The clear ran first: that ordering IS the fix.
           expect(callOrder(vi.mocked(clearComposerLine)))
             .toBeLessThan(callOrder(vi.mocked(sendKeys)));
@@ -724,7 +724,7 @@ describe('submit-verified-sender', () => {
           await expect(p).resolves.toBeUndefined();
 
           expect(clearComposerLine).not.toHaveBeenCalled();
-          expect(sendKeys).toHaveBeenCalledWith(SESSION, 'hello', false);
+          expect(sendKeys).toHaveBeenCalledWith(SESSION, 'hello', false, { literal: true });
         } finally {
           vi.useRealTimers();
         }
@@ -746,7 +746,7 @@ describe('submit-verified-sender', () => {
           await expect(p).resolves.toBeUndefined();
 
           expect(clearComposerLine).not.toHaveBeenCalled();
-          expect(sendKeys).toHaveBeenCalledWith(SESSION, 'hello', false);
+          expect(sendKeys).toHaveBeenCalledWith(SESSION, 'hello', false, { literal: true });
         } finally {
           vi.useRealTimers();
         }
@@ -805,7 +805,7 @@ describe('submit-verified-sender', () => {
             await expect(p).resolves.toBeUndefined();
 
             expect(clearComposerLine).not.toHaveBeenCalled();
-            expect(sendKeys).toHaveBeenCalledWith(SESSION, 'hello', false);
+            expect(sendKeys).toHaveBeenCalledWith(SESSION, 'hello', false, { literal: true });
             // No pre-send read either: the first capture is the post-Enter
             // verification, so the send costs exactly what it cost before.
             expect(callOrder(vi.mocked(sendKeys))).toBeLessThan(callOrder(vi.mocked(capturePane)));

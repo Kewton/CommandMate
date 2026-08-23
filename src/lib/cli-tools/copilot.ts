@@ -543,6 +543,7 @@ export class CopilotTool extends BaseCLITool {
         sessionName,
         message,
         cliToolId: 'copilot',
+        composer: this.describeComposer(),
         textInputWaitMs: COPILOT_TEXT_INPUT_DELAY_MS,
         verifyDelayMs: COPILOT_SEND_ENTER_DELAY_MS,
       });

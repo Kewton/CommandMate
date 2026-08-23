@@ -68,6 +68,9 @@ import {
   reserveOpencodeServerPort,
   resumeOpencodeEventStream,
 } from '@/lib/hooks/sources/opencode/runtime';
+import { getAssignedOpencodePort } from '@/lib/hooks/sources/opencode/ports';
+import { fetchOpencodeHealth } from '@/lib/hooks/sources/opencode/client';
+import { verifyGracefulExit } from './graceful-exit';
 import {
   TUI_SESSION_CREATE_WAIT_MS,
   TUI_TEXT_INPUT_WAIT_MS,
@@ -351,6 +354,7 @@ export class OpenCodeTool extends BaseCLITool {
         sessionName,
         message,
         cliToolId: 'opencode',
+        composer: this.describeComposer(),
       });
 
       // Issue #405: Invalidate cache after sending message
@@ -392,11 +396,18 @@ export class OpenCodeTool extends BaseCLITool {
    */
   async killSession(worktreeId: string, instanceId?: string): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
+    const target = opencodeTarget(worktreeId, instanceId);
+
+    // Issue #1933 S10: read the port BEFORE the release below drops it, because
+    // the postcondition is about that number and the release is what forgets it.
+    // Null whenever structured events are off or no port was ever allocated, and
+    // then the health probe is skipped entirely — there is nothing to orphan.
+    const assignedPort = getAssignedOpencodePort(target);
 
     // Issue #1763: stop watching before the pane goes, so the stream is not
     // reconnecting to a server that is being shut down. Also gives the port
     // back — the pane is what held it. Never throws.
-    await releaseOpencodeEventStream(opencodeTarget(worktreeId, instanceId));
+    await releaseOpencodeEventStream(target);
 
     try {
       // Step 1: Check if the tmux session currently exists
@@ -411,9 +422,37 @@ export class OpenCodeTool extends BaseCLITool {
         // Step 3: Wait for OpenCode to process the exit command
         await new Promise((resolve) => setTimeout(resolve, OPENCODE_EXIT_WAIT_MS));
 
-        // Step 4: Check if session still exists; force-kill if needed [D1-007]
-        const stillExists = await hasSession(sessionName);
-        if (stillExists) {
+        // Step 4: check the postcondition, and force-kill when it is not met
+        // (Issue #1933 S10, 方針書 §13.2). Two things have to be true and only
+        // one of them was ever checked:
+        //
+        //   - the pane is gone. It was not, in the case this branch already
+        //     handled; the reason token is `graceful_exit_timeout`.
+        //   - the port this instance was allocated has stopped answering
+        //     `/global/health`. opencode's TUI *is* an HTTP server once it is
+        //     given `--port` (#1758 §5.1.2), and `ports.ts` hands the number to
+        //     the next instance that asks. A server that outlives its pane
+        //     therefore collects the NEXT instance's subscription, and that
+        //     instance's events are filed against the wrong worktree with no
+        //     error anywhere — `port_orphaned`.
+        //
+        // Both verdicts force-kill; the difference is what gets logged, because
+        // an orphaned port is a number that must not be handed out again yet and
+        // nothing else in the system can see that it happened.
+        const verdict = await verifyGracefulExit({
+          sessionAlive: () => hasSession(sessionName),
+          portAnswering:
+            assignedPort === null
+              ? null
+              : async () => (await fetchOpencodeHealth(assignedPort)) !== null,
+        });
+
+        if (!verdict.ok) {
+          logger.warn('opencode-graceful-exit-postcondition-failed', {
+            sessionName,
+            reason: verdict.reason,
+            ...(assignedPort !== null ? { port: assignedPort } : {}),
+          });
           await killSession(sessionName);
         }
       } else {

@@ -155,7 +155,10 @@ export class VibeLocalTool extends BaseCLITool {
         sessionName,
         message,
         cliToolId: 'vibe-local',
-        submitEnterCount: 2,
+        // Issue #1933: the double Enter is `ComposerSpec.submitEnterCount`, so
+        // the IME quirk is declared once on the tool rather than re-passed by
+        // the one call site that knew about it.
+        composer: this.describeComposer(),
         interEnterWaitMs: VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS,
       });
 

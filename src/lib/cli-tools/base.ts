@@ -9,6 +9,14 @@ import type { ICLITool, CLIToolType } from './types';
 import { deriveSessionSuffix } from './types';
 import { validateSessionName } from './validation';
 import { reconcileSessionGeometry, sendSpecialKey, type SessionGeometryOptions } from '../tmux/tmux';
+import { resolveComposerSpec } from './composer-spec';
+import { resolveCaptureSpec } from './capture-spec';
+import { resolveGracefulExitSpec } from './graceful-exit';
+import type {
+  CaptureSpec,
+  ComposerSpec,
+  GracefulExitSpec,
+} from '../../types/cli-tool-contracts';
 
 const execAsync = promisify(exec);
 
@@ -85,5 +93,44 @@ export abstract class BaseCLITool implements ICLITool {
   async interrupt(worktreeId: string, instanceId?: string): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
     await sendSpecialKey(sessionName, 'Escape');
+  }
+
+  /**
+   * Describe this tool's input box (Issue #1933, §6.3).
+   *
+   * The default is claude's — a marked input line at the bottom of the pane, a
+   * twelve-row read-back, one Enter, and the composer emptied before the body
+   * is typed. Every tool's answer is resolved from `./composer-spec`, which is
+   * where the values that used to be three module-level tables inside
+   * `submit-verified-sender.ts` now live; a tool overrides this method when its
+   * box is not describable that way.
+   *
+   * @returns This tool's {@link ComposerSpec}
+   */
+  describeComposer(): ComposerSpec {
+    return resolveComposerSpec(this.id);
+  }
+
+  /**
+   * Describe how this tool is asked to quit (Issue #1933, §13.2).
+   *
+   * The default is claude's: one Ctrl-D, then the generic TUI shutdown window.
+   * The sequence is a DESCRIPTION — `killSession()` still sends its own
+   * measured keystrokes, and the conformance suite pins that the two agree.
+   *
+   * @returns This tool's {@link GracefulExitSpec}
+   */
+  gracefulExitSequence(): GracefulExitSpec {
+    return resolveGracefulExitSpec(this.id);
+  }
+
+  /**
+   * Describe what a status capture of this tool must ask tmux for
+   * (Issue #1933, §10.12).
+   *
+   * @returns This tool's {@link CaptureSpec}
+   */
+  captureSpec(): CaptureSpec {
+    return resolveCaptureSpec(this.id);
   }
 }

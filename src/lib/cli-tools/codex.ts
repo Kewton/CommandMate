@@ -399,6 +399,9 @@ export class CodexTool extends BaseCLITool {
         sessionName,
         message,
         cliToolId: 'codex',
+        // Issue #1933: the tool describes its own composer; the sender no
+        // longer keys three module-level tables on the id.
+        composer: this.describeComposer(),
       });
 
       // Issue #405: Invalidate cache after sending message
