@@ -8,7 +8,12 @@ export {
   buildExcerpt,
   resolvePushLocale,
 } from './push-sender';
-export type { NotificationEvent, PushPayload } from './push-sender';
+export type {
+  NotificationEvent,
+  PushPayload,
+  FailureContext,
+  FailurePushReason,
+} from './push-sender';
 export {
   shouldSendNotification,
   resetNotificationDedup,
@@ -31,6 +36,29 @@ export type {
   PromptPushGateDecision,
   PromptPushGateReason,
 } from './prompt-push-gate';
+
+// Failure notifications (Issue #2000).
+// NOTE: the producers import these from './failure-push-notifier' directly, for
+// the reason the prompt gate above gives — a suite that stubs the whole
+// '@/lib/push' barrel would otherwise leave the notifier undefined on the very
+// path it guards.
+export {
+  notifyVerificationFailurePush,
+  notifyUpstreamFaultPush,
+  notifySessionStartFailurePush,
+} from './failure-push-notifier';
+export type {
+  VerificationFailurePushInput,
+  UpstreamFaultPushInput,
+  SessionStartFailurePushInput,
+  FailurePushSuppressionReason,
+} from './failure-push-notifier';
+export {
+  observeUpstreamFaultEdge,
+  clearUpstreamFaultEpisodes,
+  UPSTREAM_FAULT_COOLDOWN_MS,
+} from './failure-episode-state';
+export type { UpstreamFaultEdge, UpstreamFaultEdgeReason } from './failure-episode-state';
 
 // Waiting-edge driven notifications (Issue #1790).
 export {

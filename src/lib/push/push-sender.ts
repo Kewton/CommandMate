@@ -1,8 +1,9 @@
 /**
  * Web Push fan-out (Issue #1125).
  *
- * Thin layer over detection: given an agent event (prompt-waiting / completion),
- * fan out a minimal notification to every opted-in subscription. Expired
+ * Thin layer over detection: given an agent event (prompt-waiting / completion /
+ * failure, Issue #2000), fan out a minimal notification to every opted-in
+ * subscription. Expired
  * endpoints (404/410 Gone) are auto-removed. This module NEVER logs endpoints or
  * VAPID secrets.
  *
@@ -58,6 +59,35 @@ export function resolvePushLocale(locale: string | null | undefined): SupportedL
   return isSupportedLocale(locale) ? locale : DEFAULT_LOCALE;
 }
 
+/**
+ * Which failure signal raised a `kind: 'failure'` notification (Issue #2000).
+ *
+ * Declared here, next to the wording it selects, rather than in
+ * `failure-push-notifier`: that module imports this one, and a type living the
+ * other way round would be a cycle for no gain. Each value maps to exactly one
+ * pair of dictionary keys, so a new signal cannot be added without deciding
+ * what the phone should say about it.
+ */
+export type FailurePushReason =
+  /** A verification run closed `failed` / `error` (`lib/verification/gate-runner`). */
+  | 'verification-failed'
+  /** An upstream (model API) fault signature appeared on the pane (#1839). */
+  | 'upstream-fault'
+  /** `SessionStartFailedError` — the CLI printed a terminal error while starting. */
+  | 'session-start-failed';
+
+/** What a failure notification is about (Issue #2000). */
+export interface FailureContext {
+  reason: FailurePushReason;
+  /**
+   * Identity of this failure episode. Never rendered — it replaces the excerpt
+   * as the dedup content, so the guard keys off *which incident* this is rather
+   * than off wording that changes between retries (a 529 banner carries an
+   * attempt counter). Producers build it; see `failure-push-notifier`.
+   */
+  signature: string;
+}
+
 /** The agent event that triggers a notification. */
 export interface NotificationEvent {
   worktreeId: string;
@@ -86,6 +116,11 @@ export interface NotificationEvent {
   instanceId?: string;
   /** True for the "still waiting" re-notification (Issue #1790). */
   escalated?: boolean;
+  /**
+   * Required for `kind: 'failure'` (Issue #2000), meaningless otherwise. It
+   * chooses the body and supplies the dedup key — see {@link FailureContext}.
+   */
+  failure?: FailureContext;
 }
 
 /** The JSON payload delivered to the Service Worker. Minimal by design. */
@@ -155,6 +190,52 @@ function buildWaitingBody(
     : messages.promptWaiting;
 }
 
+/**
+ * The body for a failure notification, in the reader's language (Issue #2000).
+ *
+ * Every wording names the failure explicitly ("不合格" / "failed", "障害" /
+ * "fault", "起動できません" / "could not start") so the acceptance criterion —
+ * a reader tells success from failure from the body alone — holds without
+ * having to open the app. A `reason` nobody added copy for would be a type
+ * error at {@link FAILURE_BODY_KEYS}, not a blank notification.
+ */
+const FAILURE_BODY_KEYS: Record<
+  FailurePushReason,
+  { withExcerpt: keyof typeof enNotifications.push; plain: keyof typeof enNotifications.push }
+> = {
+  'verification-failed': {
+    withExcerpt: 'failureVerificationWithExcerpt',
+    plain: 'failureVerification',
+  },
+  'upstream-fault': {
+    withExcerpt: 'failureUpstreamWithExcerpt',
+    plain: 'failureUpstream',
+  },
+  'session-start-failed': {
+    withExcerpt: 'failureSessionStartWithExcerpt',
+    plain: 'failureSessionStart',
+  },
+};
+
+function buildFailureBody(
+  event: NotificationEvent,
+  messages: typeof enNotifications.push,
+  excerpt: string
+): string {
+  // An event that claims `kind: 'failure'` without saying which failure is a
+  // producer bug. Falling back to the verification wording would misreport it,
+  // so the generic "something failed" copy is used instead.
+  const reason = event.failure?.reason;
+  if (reason === undefined) {
+    return excerpt ? messages.failureWithExcerpt.replace('{excerpt}', excerpt) : messages.failure;
+  }
+
+  const keys = FAILURE_BODY_KEYS[reason];
+  return excerpt
+    ? messages[keys.withExcerpt].replace('{excerpt}', excerpt)
+    : messages[keys.plain];
+}
+
 /** Build the minimal notification payload for an event, in the reader's language. */
 export function buildPushPayload(
   event: NotificationEvent,
@@ -168,9 +249,11 @@ export function buildPushPayload(
   const body =
     event.kind === 'prompt'
       ? buildWaitingBody(event, messages, excerpt, now)
-      : excerpt
-        ? messages.completionWithExcerpt.replace('{excerpt}', excerpt)
-        : messages.completion;
+      : event.kind === 'failure'
+        ? buildFailureBody(event, messages, excerpt)
+        : excerpt
+          ? messages.completionWithExcerpt.replace('{excerpt}', excerpt)
+          : messages.completion;
 
   return {
     kind: event.kind,
@@ -215,6 +298,13 @@ async function sendToOne(
  * everything else — every completion, and any prompt event that predates the
  * episode store — keeps the content hash and its 30 s window. Both record as
  * they decide, so this must be called exactly once per event.
+ *
+ * Issue #2000: a failure hashes its {@link FailureContext.signature} instead of
+ * its excerpt. The producers already collapse a failure to one notification per
+ * incident (`failure-push-notifier`), so this is the second net rather than the
+ * first — but the excerpt is the wrong key for it either way: a retry storm
+ * prints a different attempt counter every few seconds, which would defeat a
+ * content hash, while two *distinct* incidents can share a line of prose.
  */
 function passesDedup(event: NotificationEvent): boolean {
   if (event.kind === 'prompt' && typeof event.waitingSince === 'number') {
@@ -229,7 +319,7 @@ function passesDedup(event: NotificationEvent): boolean {
   return shouldSendNotification({
     worktreeId: event.worktreeId,
     kind: event.kind,
-    content: event.excerpt,
+    content: event.kind === 'failure' ? event.failure?.signature : event.excerpt,
   });
 }
 

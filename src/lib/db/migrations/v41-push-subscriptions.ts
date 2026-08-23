@@ -4,6 +4,17 @@
  * One row per browser push subscription (device). `endpoint` is the natural key
  * (unique) used for upsert and for 410-Gone auto-removal. Per-type toggles let a
  * device opt in/out of "prompt waiting" and "completion" notifications independently.
+ *
+ * Issue #2000 — do not read `enabled_completion DEFAULT 1` as the product default.
+ * `upsertPushSubscription()` is the only INSERT into this table and it binds both
+ * toggle columns explicitly, so neither DEFAULT is ever applied. The live default
+ * for a new subscription is `NEW_SUBSCRIPTION_DEFAULTS` in
+ * `src/lib/db/push-subscriptions-db.ts`, which #2000 set to
+ * `enabledCompletion: false`. The declaration is left at 1 on purpose: SQLite
+ * cannot ALTER a column default, so changing it means rebuilding the table and
+ * copying every row — real risk to live subscriptions, bought for a value nothing
+ * reads. Changing it would also NOT have moved existing rows, which is what the
+ * adjudication on #2000 required.
  */
 
 import type { Migration } from './runner';

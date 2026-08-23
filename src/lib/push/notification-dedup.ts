@@ -15,7 +15,14 @@ import { createHash } from 'crypto';
 
 export interface DedupEvent {
   worktreeId: string;
-  kind: 'prompt' | 'completion';
+  /**
+   * Kept as a literal union rather than imported from `push-subscriptions-db`:
+   * this module is a leaf with one dependency (`crypto`), and the DB module
+   * pulls in better-sqlite3. Issue #2000 added `failure`; the failure path
+   * passes its episode signature as {@link content}, so the hash keys off the
+   * incident's identity instead of its prose.
+   */
+  kind: 'prompt' | 'completion' | 'failure';
   content?: string;
 }
 

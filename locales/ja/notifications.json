@@ -1,16 +1,16 @@
 {
   "title": "通知",
-  "description": "エージェントが応答待ちになったり、セッションが完了したときに、アプリを開いていなくてもプッシュ通知を受け取れます。",
+  "description": "対応が必要になったとき（応答待ち・検証の不合格・上流APIの障害・セッションの起動失敗）に、アプリを開いていなくてもプッシュ通知を受け取れます。対応の要らない完了通知は任意です。",
   "enable": "通知を有効にする",
   "enabling": "有効化中…",
   "enabledOnThisDevice": "この端末で通知が有効です。",
   "unsubscribe": "この端末の通知を解除",
   "types": {
     "heading": "通知する種別",
-    "promptWaiting": "応答待ち",
-    "promptWaitingDesc": "エージェントがあなたの応答を待っているとき",
-    "completion": "セッション完了",
-    "completionDesc": "エージェントがセッションを完了したとき"
+    "promptWaiting": "対応が必要なとき",
+    "promptWaitingDesc": "応答待ち・検証ゲートの不合格・上流APIの障害・セッションの起動失敗。あなたが動かないと進みません",
+    "completion": "完了も知らせる（任意）",
+    "completionDesc": "対応の要らない正常完了。新しく登録した端末では既定でオフです（この端末の設定はここで変えられます）"
   },
   "permission": {
     "denied": "ブラウザの設定で通知がブロックされています。このサイトの通知を許可してください。"
@@ -34,7 +34,15 @@
     "terminalAttentionWithExcerpt": "端末の確認が必要です: {excerpt}",
     "terminalAttention": "端末の確認が必要です",
     "stillWaitingPrompt": "まだ応答待ちです（{minutes}分経過）",
-    "stillWaitingTerminal": "まだ端末の確認が必要です（{minutes}分経過）"
+    "stillWaitingTerminal": "まだ端末の確認が必要です（{minutes}分経過）",
+    "failureVerificationWithExcerpt": "検証ゲート不合格: {excerpt}",
+    "failureVerification": "検証ゲートに不合格しました",
+    "failureUpstreamWithExcerpt": "上流APIの障害で停止しています: {excerpt}",
+    "failureUpstream": "上流APIの障害で停止しています",
+    "failureSessionStartWithExcerpt": "セッションを起動できませんでした: {excerpt}",
+    "failureSessionStart": "セッションを起動できませんでした",
+    "failureWithExcerpt": "失敗しました: {excerpt}",
+    "failure": "失敗しました"
   },
   "escalation": {
     "heading": "再通知",
