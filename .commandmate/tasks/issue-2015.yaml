@@ -1,0 +1,70 @@
+version: 1
+title: "Issue #2015: api-responses.ts の statusEvidence docstring を #2011 後の定義に合わせる"
+goal: |
+    https://github.com/Kewton/CommandMate/issues/2015 を実装してください。**小さい Issue です。**
+
+    #2011（PR #2016、マージ待ち）が `isUnclassifiedActive` と `statusEvidence` を切り離しました。
+    `src/cli/types/api-responses.ts` の `statusEvidence` docstring は「`isUnclassifiedActive` が運ぶのと
+    同じ事実」と書いており、これが事実でなくなります。#2011 の scope 外だったので申し送られたものです。
+
+    **注意: #2011 はまだ develop にマージされていません。** `origin/develop` にはまだ旧実装が居ます。
+    正しい定義は #2011 のブランチ `fix/2011-unclassified-active-split` の
+    `src/lib/session/status-evidence.ts`（`isUnclassifiedFrame`）と `src/cli/commands/wait.ts` の
+    記述を読んで確認してください（`git fetch origin && git show origin/fix/2011-unclassified-active-split:<path>`）。
+    **本 Issue では `src/lib/**` を変更しないでください**（#2011 と衝突します）。
+
+    やること:
+    1. `statusEvidence` の docstring を #2011 後の定義に合わせ、`isUnclassifiedActive` との**違い**を明記する
+    2. 同ファイル内に #1927 期の同一視を前提にした記述が他に無いか確認（**0 件は陽性対照を撃ってから信じる**）
+    3. 変異注入は「docstring を元に戻すと赤になるテスト」が作れない性質なので、代わりに
+       **docstring の主張と実装の対応を固定する軽いテスト**（例: `isUnclassifiedFrame` の reason 集合と
+       docstring が名指しする reason が一致する）を置けるか検討し、置けない場合は理由を書いてください
+
+    ## 作業ルール（厳守）
+
+    - **フル `npm run test:unit` を手で回さないでください。** 他に 3 本のワーカーが並列で動いており、
+      同時フル実行は 30s サブプロセスガードを飢餓で落とします（#1985 がまさにその Issue）。
+      開発中は対象テストだけ絞って実行し、フル実行は裁定側のゲート（`mutex: cpu.heavy` で直列化）に任せてください。
+    - **Issue 本文の主張はコードで裏取りし、食い違えば実測を正とし**、commit message の
+      「下調べとの食い違い」節に書いてください。**grep の 0 件は「存在しない」の証拠になりません** —
+      陽性対照を撃ってから 0 件を信じてください。
+    - **実 tmux を触る検証は必ず `tmux -L <専用socket>` で。** `-L` は `$TMUX` より優先されます。
+      あなたは tmux ペインの中で動いていて `$TMUX` が既定サーバを指しているため、フラグ無しの
+      `tmux` はユーザーの本番サーバに届きます。`kill-server` を `-L` 無しで書かない。
+      `TMUX_TMPDIR` を隔離手段に使わない。`bind-key` / `set-option -g` を既定サーバへ撃たない。
+    - **ポート 3000 は本番サーバです。触らないでください。** 開発サーバが要るなら別ポート＋
+      `CM_DB_PATH` を `$HOME` 配下の使い捨てに。このシェルは `NODE_ENV=production` を export
+      しているので `NODE_ENV=development` を明示すること。停止は明示 PID を kill（広域 `pkill -f` 禁止）。
+    - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外）。代わりに:
+      - `dev-reports/changelog/issue-2015.md` — 1 行目に `<!-- ### Added -->` 等の節コメント、
+        2 行目に **1 エントリ 1 行**で `- **<type>(<scope>): <要約>** (#2015): <本文>`。
+        `(#2015)` は太字の**外側**、改行なし、`- **` で始める。
+      - `dev-reports/module-reference/issue-2015.md` — 行キーごとの追記指示。既存行に足すときは
+        **`grep -n "^| \`<path>\`" docs/module-reference.md` の出力（行番号つきの行キー）を断片に
+        書き写してから**書くこと。0 件だった行への追記を指示しない（新規行なら「新規行」と明記）。
+    - **変異注入で空振り緑を反証してください。** 各変異を 1 つずつ入れて対象テストのみ実行し、
+      元に戻して再確認。結果を commit message に表で。
+    - commit は単一。**PR は作らないでください**（私が作ります）。
+    - commit message に「意図的な逸脱」「下調べとの食い違い」「変異注入」の節を必ず入れてください。
+    - 完了したら最後に `IMPL_COMPLETED` とだけ出力してください。
+scope:
+  allow:
+    - "src/cli/types/**"
+    - "src/types/**"
+    - "docs/**"
+    - "tests/unit/**"
+    - "dev-reports/changelog/**"
+    - "dev-reports/module-reference/**"
+  deny:
+    - "src/lib/session/current-output-builder.ts"
+    - "src/lib/session/status-evidence.ts"
+    - "src/cli/commands/wait.ts"
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, build-cli, build-server, lint, build, typecheck, integration, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
