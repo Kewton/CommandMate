@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import type { WebSocket } from 'ws';
 import { getTmuxControlModeMetrics, resetTmuxControlModeMetrics } from '@/lib/tmux/tmux-control-mode-metrics';
+import { resolveSessionName } from '@/lib/cli-tools/session-name';
 
 const mockGetWorktreeById = vi.fn();
-const mockGetTool = vi.fn();
 const mockIsCliToolType = vi.fn();
 const mockIsTmuxControlModeEnabled = vi.fn();
 const mockSubscribe = vi.fn();
@@ -20,17 +20,16 @@ vi.mock('@/lib/db', () => ({
   getWorktreeById: (...args: unknown[]) => mockGetWorktreeById(...args),
 }));
 
-vi.mock('@/lib/cli-tools/types', () => ({
-  isCliToolType: (...args: unknown[]) => mockIsCliToolType(...args),
-}));
-
-vi.mock('@/lib/cli-tools/manager', () => ({
-  CLIToolManager: {
-    getInstance: () => ({
-      getTool: (...args: unknown[]) => mockGetTool(...args),
-    }),
-  },
-}));
+// Issue #1984: `deriveSessionSuffix` も同じモジュールに居り、`cli-tools/session-name`
+// がそれを使う。isCliToolType だけを差し替える部分モックにすると、相手の別 export が
+// undefined になって実経路が落ちるので、実体を残して 1 つだけ上書きする。
+vi.mock('@/lib/cli-tools/types', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/cli-tools/types')>();
+  return {
+    ...actual,
+    isCliToolType: (...args: unknown[]) => mockIsCliToolType(...args),
+  };
+});
 
 vi.mock('@/lib/tmux/tmux-control-mode-flags', () => ({
   isTmuxControlModeEnabled: (...args: unknown[]) => mockIsTmuxControlModeEnabled(...args),
@@ -45,6 +44,16 @@ vi.mock('@/lib/tmux/control-mode-tmux-transport', () => ({
     captureSnapshot: (...args: unknown[]) => mockCaptureSnapshot(...args),
   }),
 }));
+
+/**
+ * Issue #1984: `ws-server` は `CLIToolManager.getInstance().getTool(id).getSessionName()`
+ * をやめ、`cli-tools/session-name` の規則を直接引くようになった（manager 経由の
+ * 静的 import がモジュールスコープの循環の一辺だったため）。したがって期待値は
+ * テストが決めた任意の文字列ではなく、**実際の命名規則の出力**になる。
+ * 規則そのものは tests/unit/cli-tools/base.test.ts と
+ * tests/unit/cli-tools/session-name-1984.test.ts が固定する。
+ */
+const SESSION_NAME = resolveSessionName('codex', 'wt-1');
 
 function createMockWebSocket(): { ws: WebSocket; sendMock: Mock } {
   const sendMock = vi.fn();
@@ -62,9 +71,6 @@ describe('ws-server terminal handlers', () => {
     mockGetWorktreeById.mockReturnValue({ id: 'wt-1' });
     mockIsCliToolType.mockReturnValue(true);
     mockIsTmuxControlModeEnabled.mockReturnValue(true);
-    mockGetTool.mockReturnValue({
-      getSessionName: vi.fn(() => 'session-wt-1-codex'),
-    });
     mockGetSubscriberCount.mockReturnValue(0);
     mockSubscribe.mockResolvedValue({
       unsubscribe: vi.fn().mockResolvedValue(undefined),
@@ -246,7 +252,7 @@ describe('ws-server terminal handlers', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(mockCaptureSnapshot).toHaveBeenCalledWith('session-wt-1-codex', { startLine: -200 });
+    expect(mockCaptureSnapshot).toHaveBeenCalledWith(SESSION_NAME, { startLine: -200 });
     expect(sendMock).toHaveBeenCalledWith(JSON.stringify({
       type: 'terminal_output',
       data: 'snapshot output',

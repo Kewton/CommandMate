@@ -11,7 +11,6 @@ import { VibeLocalTool } from './vibe-local';
 import { OpenCodeTool } from './opencode';
 import { CopilotTool } from './copilot';
 import { AntigravityTool } from './antigravity';
-import { stopPolling as stopResponsePolling } from '../polling/response-poller';
 
 /**
  * CLI Tool Manager (Singleton)
@@ -166,6 +165,25 @@ export class CLIToolManager {
    * This method abstracts the poller stopping logic so API layer
    * doesn't need to know about specific poller implementations.
    *
+   * ## Issue #1984: なぜ `await import()` なのか
+   *
+   * この 1 行のためだけに `manager.ts` が `../polling/response-poller` を静的 import して
+   * いたことが、モジュールスコープの循環の起点だった:
+   *
+   *     ws-server -> cli-tools/manager -> polling/response-poller
+   *       -> polling/response-poller-core -> polling/response-checker -> ws-server
+   *       -> polling/response-poller-core -> realtime/terminal-broadcast -> ws-server
+   *
+   * `manager` を通る循環は実測 8 本あり、その **8 本すべて**が
+   * `manager -> response-poller` を通る。つまりここ 1 辺で全部落ちる
+   * （検査は tests/unit/guards/no-manager-poller-cycle-1984.test.ts）。
+   *
+   * 代償は API の非同期化。呼び出し元は `api/worktrees/[id]/kill-session/route.ts` の
+   * 1 箇所だけで、そこは `await` を付けてある。**付け忘れると poller 停止が
+   * 直後の `deleteSessionState()` より後ろにずれる**（型も lint も検出しない静かな
+   * 挙動変化）ので、順序を
+   * tests/unit/api/kill-session-stop-pollers-order-1984.test.ts で固定している。
+   *
    * @param worktreeId - Worktree ID
    * @param cliToolId - CLI tool ID
    * @param instanceId - Agent instance ID (Issue #868). Defaults to the primary instance.
@@ -173,11 +191,12 @@ export class CLIToolManager {
    * @example
    * ```typescript
    * const manager = CLIToolManager.getInstance();
-   * manager.stopPollers('my-worktree', 'claude');
+   * await manager.stopPollers('my-worktree', 'claude');
    * ```
    */
-  stopPollers(worktreeId: string, cliToolId: CLIToolType, instanceId?: string): void {
+  async stopPollers(worktreeId: string, cliToolId: CLIToolType, instanceId?: string): Promise<void> {
     // Stop response-poller for all tools
+    const { stopPolling: stopResponsePolling } = await import('../polling/response-poller');
     stopResponsePolling(worktreeId, cliToolId, instanceId);
   }
 }

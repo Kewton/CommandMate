@@ -13,7 +13,12 @@ import type { Duplex } from 'stream';
 import { isAuthEnabled, parseCookies, AUTH_COOKIE_NAME, verifyToken } from './security/auth';
 import { getAllowedRanges, isIpAllowed, isIpRestrictionEnabled, normalizeIp } from './security/ip-restriction';
 import { isCliToolType } from './cli-tools/types';
-import { CLIToolManager } from './cli-tools/manager';
+// Issue #1984: `CLIToolManager` ではなくセッション名の規則だけを引く。ここで欲しいのは
+// `getTool(id).getSessionName(...)` の戻り値 1 つで、7 ツールの実装は module load 時には
+// 1 つも要らない。manager 経由の静的 import は
+// `ws-server -> cli-tools/manager -> polling/response-poller -> ... -> ws-server` という
+// モジュールスコープの循環の一辺でもあった。
+import { resolveSessionName } from './cli-tools/session-name';
 import { getDbInstance } from './db/db-instance';
 import { getWorktreeById } from './db';
 import { observeTmuxControlFirstOutputLatency } from './tmux/tmux-control-mode-metrics';
@@ -692,8 +697,7 @@ async function handleTerminalSubscribe(ws: WebSocket, message: WebSocketMessage)
     clientInfo.terminalSubscription = null;
   }
 
-  const cliTool = CLIToolManager.getInstance().getTool(cliToolId);
-  const sessionName = cliTool.getSessionName(worktreeId);
+  const sessionName = resolveSessionName(cliToolId, worktreeId);
   const transport = getControlModeTmuxTransport();
   if (transport.getSubscriberCount(sessionName) >= MAX_TERMINAL_SUBSCRIBERS_PER_SESSION) {
     sendTerminalEvent(ws, {
@@ -955,8 +959,7 @@ export function migrateWorktreeRooms(
 
     try {
       if (!isCliToolType(subscription.cliToolId)) continue;
-      const cliTool = CLIToolManager.getInstance().getTool(subscription.cliToolId);
-      subscription.sessionName = cliTool.getSessionName(newId);
+      subscription.sessionName = resolveSessionName(subscription.cliToolId, newId);
       subscription.worktreeId = newId;
     } catch (error) {
       logger.warn('terminal:rename-failed', {

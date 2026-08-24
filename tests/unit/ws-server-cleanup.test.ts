@@ -29,25 +29,25 @@
  * 非同期化する必要がある（詳細は commit message / dev-reports/issue-1977-findings.md）。
  * ここでは unit テストとして正しい形 — 対象が使わない依存を stub する — を採る。
  * 実測: import 1160ms -> 372ms。
+ *
+ * ## Issue #1984: 本番側の import グラフが直った
+ *
+ * #1977 が scope 外として見送った「本来やりたいこと」を #1984 が実施し、
+ * `ws-server` はもう `@/lib/cli-tools/manager` を静的 import しない
+ * （必要なのはセッション名の規則だけなので `cli-tools/session-name` を引く）。
+ * `manager -> polling/response-poller` も `await import()` になった。
+ * 実測: `import('@/lib/ws-server')` 1043ms -> 228ms、
+ * `import('@/lib/cli-tools/manager')` 1025ms -> 417ms。
+ *
+ * よって下の stub は**もう何も塞いでいない** — `manager` は `ws-server` の依存グラフに
+ * 居ない。stub を残すと「これが無いと遅い」という誤った説明になるので外し、
+ * 代わりに *manager がグラフに居ないこと自体* を下のテストで名指しする。
+ * 循環そのものの検査は tests/unit/guards/no-ws-server-manager-cycle-1984.test.ts。
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-
-// Issue #1977: 使われたら黙って通さず、理由つきで落とす。`cleanupRooms` は
-// CLI ツールを一切呼ばないので、この throw に到達するのは「このファイルが
-// stub していない前提のテストを増やした」ときだけ。
-vi.mock('@/lib/cli-tools/manager', () => ({
-  CLIToolManager: {
-    getInstance: () => {
-      throw new Error(
-        'tests/unit/ws-server-cleanup.test.ts stubs @/lib/cli-tools/manager (Issue #1977): ' +
-          'cleanupRooms touches only the room/client maps, so the real manager — which drags in ' +
-          'response-poller -> response-checker -> cli-session — is not loaded here. ' +
-          'A test that needs a real CLI tool belongs in a file that does not stub it.'
-      );
-    },
-  },
-}));
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
 // We need to test cleanupRooms function behavior
 // Since ws-server uses global state, we test through the exported functions
@@ -74,5 +74,18 @@ describe('WebSocket Server cleanupRooms', () => {
   it('should handle non-existent rooms gracefully', () => {
     // Should not throw when cleaning up rooms that don't exist
     expect(() => cleanupRooms(['non-existent-1', 'non-existent-2'])).not.toThrow();
+  });
+
+  /**
+   * Issue #1984: この 3 本が速いのは stub のおかげ **ではない** — `ws-server` が
+   * 本当に manager を引かなくなったから。stub を消したうえで、消せた理由の側を
+   * 直接名指ししておく（これが戻れば import は 1000ms 台に戻る）。
+   */
+  it('loads ws-server without the CLI tool manager in its module graph', () => {
+    const source = readFileSync(join(process.cwd(), 'src/lib/ws-server.ts'), 'utf-8');
+
+    // 陽性対照: この正規表現が静的 import を実際に拾えることを、現に在る 1 本で確かめる。
+    expect(source).toMatch(/^\s*import\s[^\n]*from\s*'\.\/cli-tools\/types';/m);
+    expect(source).not.toMatch(/^\s*import\s[^\n]*from\s*'[^']*cli-tools\/manager'/m);
   });
 });
