@@ -57,6 +57,7 @@ import {
   notifyUpstreamFaultPush,
   notifyVerificationFailurePush,
 } from '@/lib/push/failure-push-notifier';
+import { SessionStartFailedError } from '@/lib/session/session-start-error';
 
 const WT = 'wt-2000';
 const ENDPOINT = 'https://push.example/2000';
@@ -266,13 +267,25 @@ describe('upstream fault push (Issue #2000)', () => {
 // 3. Session start failure
 // ===========================================================================
 
+/**
+ * Issue #2009 changed the input from a pre-digested `detectedPattern` to the
+ * error `startSession()` actually threw, because the classification (ring /
+ * stay quiet / which wording) is what has to live in one place. Every assertion
+ * below is byte-identical to #2000's: same title, same body, same dedup.
+ */
+const NESTED_SESSION_PATTERN = 'cannot be launched inside another Claude Code session';
+
+function claudeStartFailure(): SessionStartFailedError {
+  return new SessionStartFailedError('Claude Code', 'mcbd-claude-wt-2000', NESTED_SESSION_PATTERN);
+}
+
 describe('session start failure push (Issue #2000)', () => {
   it('notifies with the tool and the pattern that was detected', async () => {
     await notifySessionStartFailurePush({
       worktreeId: WT,
       cliToolId: 'claude',
       toolName: 'Claude Code',
-      detectedPattern: 'cannot be launched inside another Claude Code session',
+      error: claudeStartFailure(),
     });
 
     expect(payloads()).toHaveLength(1);
@@ -289,7 +302,7 @@ describe('session start failure push (Issue #2000)', () => {
       worktreeId: WT,
       cliToolId: 'claude' as const,
       toolName: 'Claude Code',
-      detectedPattern: 'cannot be launched inside another Claude Code session',
+      error: claudeStartFailure(),
     };
     await notifySessionStartFailurePush(input);
     await notifySessionStartFailurePush(input);
@@ -303,7 +316,7 @@ describe('session start failure push (Issue #2000)', () => {
       worktreeId: WT,
       cliToolId: 'claude' as const,
       toolName: 'Claude Code',
-      detectedPattern: 'cannot be launched inside another Claude Code session',
+      error: claudeStartFailure(),
     };
     await notifySessionStartFailurePush(input);
     await notifySessionStartFailurePush({ ...input, instanceId: 'claude-2' });

@@ -41,6 +41,8 @@
     "failureUpstream": "Stalled by an upstream API fault",
     "failureSessionStartWithExcerpt": "Could not start the session: {excerpt}",
     "failureSessionStart": "Could not start the session",
+    "failureSessionUnavailableWithExcerpt": "Could not start the session: {excerpt} is not installed",
+    "failureSessionUnavailable": "Could not start the session: the CLI tool is not installed",
     "failureWithExcerpt": "Failed: {excerpt}",
     "failure": "Failed",
     "promptResolved": "Handled — answered on another device"

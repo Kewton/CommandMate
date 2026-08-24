@@ -20,7 +20,10 @@ class TestCLITool extends BaseCLITool {
     return false;
   }
 
-  async startSession(worktreeId: string, worktreePath: string): Promise<void> {
+  // Issue #2009: `startSession` is now BaseCLITool's own (it wraps the launch in
+  // the one place a start failure becomes a notification), so a tool implements
+  // the launch instead.
+  protected async launchSession(worktreeId: string, worktreePath: string): Promise<void> {
     // テスト用のスタブ実装
   }
 

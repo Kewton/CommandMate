@@ -41,6 +41,8 @@
     "failureUpstream": "上流APIの障害で停止しています",
     "failureSessionStartWithExcerpt": "セッションを起動できませんでした: {excerpt}",
     "failureSessionStart": "セッションを起動できませんでした",
+    "failureSessionUnavailableWithExcerpt": "セッションを起動できませんでした: {excerpt} がインストールされていません",
+    "failureSessionUnavailable": "セッションを起動できませんでした: CLI ツールがインストールされていません",
     "failureWithExcerpt": "失敗しました: {excerpt}",
     "failure": "失敗しました",
     "promptResolved": "対応済みです（他の端末で応答されました）"

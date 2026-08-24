@@ -11,7 +11,9 @@ import { createMessage, getMessages, upsertWorktree } from '@/lib/db';
 import type { Worktree } from '@/types/models';
 import {
   SESSION_STARTING_CODE,
+  SESSION_START_UNAVAILABLE_CODE,
   SessionStartTimeoutError,
+  SessionStartUnavailableError,
 } from '@/lib/session/session-start-error';
 
 // Mock CLI tool modules
@@ -689,6 +691,46 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
       await send('cold-start-history');
 
       expect(getMessages(db, 'cold-start-history', { limit: 10 })).toHaveLength(0);
+    });
+
+    /**
+     * Issue #2009: the route's own install check is gone.
+     *
+     * It used to run BEFORE the tool was ever asked to start, which made each
+     * tool's own refusal unreachable from this route — and with it the seam that
+     * reports a failed start to a phone. The refusal now comes from the tool, and
+     * this route's job is only to give it the right status and code.
+     */
+    it('answers 503 + SESSION_START_UNAVAILABLE when the CLI is not installed', async () => {
+      seedWorktree('missing-cli');
+      const { startClaudeSession } = await import('@/lib/session/claude-session');
+      vi.mocked(startClaudeSession).mockRejectedValueOnce(
+        new SessionStartUnavailableError('Claude Code', 'Claude CLI is not installed or not in PATH')
+      );
+
+      const response = await send('missing-cli');
+      const body = (await response.json()) as { error?: string; code?: string };
+
+      // 503, not 500: the request was well formed and the server is healthy —
+      // the machine is simply missing the binary.
+      expect(response.status).toBe(503);
+      expect(body.code).toBe(SESSION_START_UNAVAILABLE_CODE);
+      // The tool's own wording travels, so copilot's install hint (#1907) is not
+      // discarded by a fixed sentence composed here.
+      expect(body.error).toBe('Claude CLI is not installed or not in PATH');
+      expect(body.error).not.toContain('Failed to start');
+    });
+
+    it('does not record a user message when the CLI is not installed', async () => {
+      seedWorktree('missing-cli-history');
+      const { startClaudeSession } = await import('@/lib/session/claude-session');
+      vi.mocked(startClaudeSession).mockRejectedValueOnce(
+        new SessionStartUnavailableError('Claude Code')
+      );
+
+      await send('missing-cli-history');
+
+      expect(getMessages(db, 'missing-cli-history', { limit: 10 })).toHaveLength(0);
     });
   });
 });

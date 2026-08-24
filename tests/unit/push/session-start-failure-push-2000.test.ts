@@ -3,16 +3,28 @@
  *
  * `SessionStartFailedError` has existed since #1637 and was only ever an HTTP
  * response body. It is the clearest "you have to act" of the three signals —
- * #1637's own wording is "retrying will not help until that is resolved" — so
- * the notification is raised at the throw site.
+ * #1637's own wording is "retrying will not help until that is resolved".
  *
  * Its sibling `SessionStartTimeoutError` deliberately does NOT notify, and that
  * asymmetry is asserted here: #1637 documents a slow start as "a slow start,
  * not a failed one — nothing needs repairing", and a phone that buzzes for it
  * would be reporting the opposite.
  *
- * Driven through the real `startClaudeSession` with tmux stubbed and only
- * `web-push` mocked, so what is measured is a notification leaving the process.
+ * ## What Issue #2009 changed, and what it did not
+ *
+ * #2000 raised the notification inside `startClaudeSession`, at the line that
+ * detected the pattern. #2009 moved it one level up to `BaseCLITool.startSession`
+ * — the method all seven tools inherit — because six of them had no such line
+ * and therefore failed silently. So the driver here is `ClaudeTool`, which is
+ * how every production caller reaches claude, instead of `startClaudeSession`
+ * directly.
+ *
+ * **Every assertion below is #2000's, unchanged**: same three cases, same title,
+ * same body, same counts. That is the point of this file after #2009 — it is the
+ * fixation that the claude path a phone actually sees did not move.
+ *
+ * Real tmux stubbed and only `web-push` mocked, so what is measured is a
+ * notification leaving the process.
  *
  * @vitest-environment node
  */
@@ -78,10 +90,17 @@ import {
   CLAUDE_INIT_POLL_INTERVAL,
   CLAUDE_INIT_TIMEOUT,
   clearCachedClaudePath,
-  startClaudeSession,
 } from '@/lib/session/claude-session';
+import { ClaudeTool } from '@/lib/cli-tools/claude';
 import { upsertPushSubscription } from '@/lib/db/push-subscriptions-db';
 import { resetNotificationDedup } from '@/lib/push/notification-dedup';
+// Statically imported for its side effect on the module cache, NOT to call it.
+// The seam reaches the notifier through `await import()` (Issue #2009), and an
+// uncached resolution settles after an unbounded number of event-loop turns —
+// measured: fine when this file runs alone, short by a lot when it shares a
+// worker. Loading it here makes the seam's import a cache hit, so `flush()` can
+// be a bounded drain instead of a race decided by machine load.
+import '@/lib/push/failure-push-notifier';
 
 const WT = 'wt-2000-start';
 const VAPID_ENV = ['CM_VAPID_PUBLIC_KEY', 'CM_VAPID_PRIVATE_KEY', 'CM_VAPID_SUBJECT'] as const;
@@ -98,10 +117,23 @@ let savedEnv: Record<string, string | undefined>;
  * Real timers first: `vi.useFakeTimers()` fakes `setImmediate` too, so a
  * macrotask hop taken under them never runs. The session start has already
  * settled by the time this is called, so nothing is left for the fake clock.
+ *
+ * Issue #2009: the seam no longer notifies from inside `startClaudeSession` but
+ * from `BaseCLITool.startSession`, one `await import()` further out. The drain
+ * is unconditional rather than "stop at the first payload" — two of the three
+ * cases assert that NOTHING arrives, and a helper that returned as soon as it
+ * saw one would make those pass by not looking.
  */
 async function flush(): Promise<void> {
   vi.useRealTimers();
-  await new Promise((resolve) => setImmediate(resolve));
+  for (let i = 0; i < 20; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+}
+
+/** Start claude the way every production caller does — through the tool. */
+function startClaudeThroughTool(): Promise<void> {
+  return new ClaudeTool().startSession(WT, '/tmp/wt-2000-start');
 }
 
 function failurePayloads(): Array<{ kind: string; body: string; title: string }> {
@@ -156,7 +188,7 @@ describe('Issue #2000: session start failure notification', () => {
   it('notifies when the CLI prints an error it cannot start past', async () => {
     vi.mocked(capturePane).mockResolvedValue(NESTED_SESSION_ERROR);
 
-    const promise = startClaudeSession({ worktreeId: WT, worktreePath: '/tmp/wt-2000-start' });
+    const promise = startClaudeThroughTool();
     const assertion = expect(promise).rejects.toThrow('reported an error while starting');
     await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 2);
     await assertion;
@@ -173,7 +205,7 @@ describe('Issue #2000: session start failure notification', () => {
     // left running. Nothing needs repairing, so nothing is worth a phone.
     vi.mocked(capturePane).mockResolvedValue('Loading...');
 
-    const promise = startClaudeSession({ worktreeId: WT, worktreePath: '/tmp/wt-2000-start' });
+    const promise = startClaudeThroughTool();
     const assertion = expect(promise).rejects.toThrow('initialization timeout');
     await vi.advanceTimersByTimeAsync(CLAUDE_INIT_TIMEOUT + 1000);
     await assertion;
@@ -185,7 +217,7 @@ describe('Issue #2000: session start failure notification', () => {
   it('stays quiet for a start that succeeds', async () => {
     vi.mocked(capturePane).mockResolvedValue('> ');
 
-    const promise = startClaudeSession({ worktreeId: WT, worktreePath: '/tmp/wt-2000-start' });
+    const promise = startClaudeThroughTool();
     await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 4 + 5_000);
     await expect(promise).resolves.toBeUndefined();
     await flush();

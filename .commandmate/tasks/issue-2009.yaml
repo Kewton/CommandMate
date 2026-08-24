@@ -1,0 +1,94 @@
+version: 1
+title: "Issue #2009: セッション起動失敗の通知を 7 ツールすべてに広げる"
+goal: |
+
+  https://github.com/Kewton/CommandMate/issues/2009 を実装してください。
+  前提の #2000（失敗通知の追加）は develop にマージ済みです。
+
+  #2000 で「セッション起動失敗」が push 通知の対象になりましたが、**現状 Claude でしか鳴りません。**
+  `SessionStartFailedError` を throw するのは `src/lib/session/claude-session.ts:763` の 1 箇所だけで、
+  #2000 の通知はその直前で発火します。
+
+  ## 穴は 2 段あります（本文より。裏取りしてください）
+
+  1. **型の穴** — 未インストール検知は 6 ツールとも持っているが、投げるのは**素の `Error`** なので
+     #2000 の通知に載らない（copilot / opencode / codex / gemini / antigravity / vibe-local）。
+  2. **検知の穴** — Claude だけが #1637 の `findSessionErrorPattern()` で**起動後の終端エラー**を
+     fail-fast する。他 6 ツールにはこの検知自体が無い。
+
+  ## 決めるべきこと（本文の 3 点）
+
+  - [ ] **1 と 2 の両方をやるか、1 だけか。** 2 はツールごとに実測フィクスチャが要り、実機確認も要ります。
+        **1 だけで区切るのは妥当な判断です**（その場合 2 は別 Issue に切り出して理由を書くこと）。
+  - [ ] **発火点を throw 箇所に置き続けるか、共通 seam に移すか。**
+        **7 実装に書き写すと「片方だけ直る改修」が必ず起きます。** `cli-tools/manager.ts` か route 層に
+        1 箇所置く案を検討してください（#1999 / #2000 が「判定は 1 箇所」を採ったのと同じ理由）。
+  - [ ] `SessionStartTimeoutError` 相当を広げるか。#1637 の定義では「セッションもプロセスも生きている
+        遅い起動であって修理は要らない」＝**通知しない**側です。
+
+  ## 注意（並列作業中）
+
+  - **`src/lib/cli-tools/manager.ts` は #1984 が直近で変更しました**（`stopPollers()` が `async` に）。
+    最新の develop を読んでから作業してください。
+  - **`src/lib/session/current-output-builder.ts` と `src/cli/commands/wait.ts` は触らないでください**
+    （#2011 が同じ領域を直しており、scope からも外してあります）。
+
+  ## 受入条件（本文より）
+
+  - 未インストールによる起動失敗が **7 ツールすべてで通知される**
+  - 通知本文から**どのツールが失敗したか**が読める
+  - 発火判定が **1 箇所**にある（7 実装に書き写さない）
+  - 「鳴らない」場合の理由コードがログに出る
+  - `SessionStartTimeoutError` 相当では**通知されない**ことをテストで固定
+  - **#2000 の Claude 経路の挙動が変わらない**ことをテストで固定
+
+  ## 作業ルール（厳守）
+
+  - **Issue 本文の主張はコードで裏取りし、食い違えば実測を正とし**、commit message の
+    「下調べとの食い違い」節に書いてください。**grep の 0 件は「存在しない」の証拠になりません** —
+    陽性対照を撃ってから 0 件を信じてください。
+  - **実 tmux を触る検証は必ず `tmux -L <専用socket>` で。** `-L` は `$TMUX` より優先されます。
+    あなたは tmux ペインの中で動いていて `$TMUX` が既定サーバを指しているため、フラグ無しの
+    `tmux` はユーザーの本番サーバに届きます。`kill-server` を `-L` 無しで書かない。
+    `TMUX_TMPDIR` を隔離手段に使わない。`bind-key` / `set-option -g` を既定サーバへ撃たない。
+  - **ポート 3000 は本番サーバです。触らないでください。** 開発サーバが要るなら別ポート＋
+    `CM_DB_PATH` を `$HOME` 配下の使い捨てに。このシェルは `NODE_ENV=production` を export
+    しているので `NODE_ENV=development` を明示すること。停止は明示 PID を kill（広域 `pkill -f` 禁止）。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外）。代わりに:
+    - `dev-reports/changelog/issue-2009.md` — 1 行目に `<!-- ### Fixed -->` 等の節コメント、
+      2 行目に **1 エントリ 1 行**で `- **<type>(<scope>): <要約>** (#2009): <本文>`。
+      `(#2009)` は太字の**外側**、改行なし、`- **` で始める。
+    - `dev-reports/module-reference/issue-2009.md` — 行キーごとの追記指示。既存行に足すときは
+      **`grep -n` で行キーの実在を確認し、その出力（行番号つきの行キー）を断片に書き写してから**書くこと。
+      0 件だった行への追記を指示しない（新規行なら「新規行」と明記）。
+  - **変異注入で空振り緑を反証してください。** 各変異を 1 つずつ入れて対象テストのみ実行し、
+    元に戻して再確認。結果を commit message に表で。
+  - commit は単一。**PR は作らないでください**（私が作ります）。
+  - commit message に「意図的な逸脱」「下調べとの食い違い」「変異注入」の節を必ず入れてください。
+  - 完了したら最後に `IMPL_COMPLETED` とだけ出力してください。
+scope:
+  allow:
+    - "src/lib/session/**"
+    - "src/lib/cli-tools/**"
+    - "src/lib/push/**"
+    - "src/app/api/worktrees/**"
+    - "src/types/**"
+    - "locales/**"
+    - "tests/unit/**"
+    - "tests/integration/**"
+    - "dev-reports/changelog/**"
+    - "dev-reports/module-reference/**"
+    - "docs/**"
+  deny:
+    - "src/lib/session/current-output-builder.ts"
+    - "src/lib/session/status-evidence.ts"
+    - "src/cli/commands/wait.ts"
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, build-cli, build-server, lint, build, typecheck, integration, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

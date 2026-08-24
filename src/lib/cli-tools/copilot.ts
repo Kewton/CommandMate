@@ -54,6 +54,7 @@ import { COPILOT_LAUNCH_COMMAND } from '@/lib/hooks/sources/copilot/hook-setting
 import { COPILOT_CLI_TOOL_ID } from '@/lib/hooks/sources/copilot/tool-id';
 import { getErrorMessage } from '@/lib/errors';
 import { createLogger } from '@/lib/logger';
+import { SessionStartUnavailableError } from '../session/session-start-error';
 
 const logger = createLogger('cli-tools/copilot');
 
@@ -195,14 +196,14 @@ export class CopilotTool extends BaseCLITool {
    * @param worktreeId - Worktree ID
    * @param worktreePath - Worktree path
    */
-  async startSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
+  protected async launchSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
     // Issue #1907: resolved once, and the same resolution decides both whether to
     // start at all and what to type. Asking `isInstalled()` and then launching a
     // hardcoded command is how `gh copilot` came to be sent to machines that had
     // no copilot: the answer and the action have to come from one measurement.
     const resolved = await resolveCopilotExecutable();
     if (!resolved) {
-      throw new Error(`GitHub Copilot CLI is not installed. ${COPILOT_INSTALL_HINT}`);
+      throw new SessionStartUnavailableError(this.name, `GitHub Copilot CLI is not installed. ${COPILOT_INSTALL_HINT}`);
     }
 
     const sessionName = this.getSessionName(worktreeId, instanceId);
