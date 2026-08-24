@@ -48,7 +48,12 @@ describe('[#1927] the rollout table', () => {
     // §4 D1 決定 1 forbids flipping a tool whose rule was not read off its own
     // frames (the mistake #1979 had to correct for copilot).
     expect(IDLE_EVIDENCE_DEFAULT_MODE).toEqual({
-      claude: 'enforce',
+      // Issue #2011: claude is `observe`, not `enforce`. #1927 shipped it
+      // straight to `enforce` without the §11 measurement, and the live rate
+      // measured afterwards was 7 idle panes in 8 answering `'none'`. The rule
+      // goes back to counting until it can cover a legitimately idle pane with
+      // no completion marker on it (`/model`, `/clear`, startup, Esc).
+      claude: 'observe',
       copilot: 'enforce',
       opencode: 'enforce',
       codex: 'legacy',
@@ -71,9 +76,24 @@ describe('[#1927] the rollout table', () => {
 });
 
 describe('[#1927] the kill switch', () => {
-  it('is off by default: an unvouched claude frame carries no evidence', () => {
+  it('is off by default — and claude`s shipped default is `observe`, so the frame reads positive', () => {
     const result = detectSessionStatus(UNVOUCHED_IDLE_FRAME, 'claude');
 
+    // Issue #2011. `observe` is byte-identical to `legacy` on the wire, so with
+    // no env var set an unvouched claude frame publishes `'positive'` — the
+    // pre-#1927 reading. What separates the two is the tally, asserted below.
+    expect(result.status).toBe('ready');
+    expect(result.reason).toBe(STATUS_REASON.INPUT_PROMPT);
+    expect(result.evidence).toBe('positive');
+  });
+
+  it('turns the rule on for one tool without a redeploy', () => {
+    process.env[IDLE_EVIDENCE_ENV_VAR] = 'claude=enforce';
+
+    const result = detectSessionStatus(UNVOUCHED_IDLE_FRAME, 'claude');
+
+    // The switch runs in both directions, which is what makes it the control
+    // §13.1 asks for rather than a one-way undo.
     expect(result.status).toBe('ready');
     expect(result.reason).toBe(STATUS_REASON.INPUT_PROMPT);
     expect(result.evidence).toBe('none');
@@ -99,10 +119,11 @@ describe('[#1927] the kill switch', () => {
   });
 
   it('is read on every call, so flipping it does not need a restart', () => {
+    process.env[IDLE_EVIDENCE_ENV_VAR] = 'claude=enforce';
     expect(detectSessionStatus(UNVOUCHED_IDLE_FRAME, 'claude').evidence).toBe('none');
     process.env[IDLE_EVIDENCE_ENV_VAR] = 'claude=legacy';
     expect(detectSessionStatus(UNVOUCHED_IDLE_FRAME, 'claude').evidence).toBe('positive');
-    delete process.env[IDLE_EVIDENCE_ENV_VAR];
+    process.env[IDLE_EVIDENCE_ENV_VAR] = 'claude=enforce';
     expect(detectSessionStatus(UNVOUCHED_IDLE_FRAME, 'claude').evidence).toBe('none');
   });
 
@@ -126,7 +147,7 @@ describe('[#1927] the kill switch', () => {
     for (const junk of ['claude=enfroce', 'claude', '=,=,=', '   ']) {
       expect(
         resolveIdleEvidenceMode('claude', { [IDLE_EVIDENCE_ENV_VAR]: junk } as unknown as NodeJS.ProcessEnv),
-      ).toBe('enforce');
+      ).toBe(IDLE_EVIDENCE_DEFAULT_MODE.claude);
     }
   });
 });
@@ -154,6 +175,8 @@ describe('[#1927] observe mode — the pre-rollout measurement §11 asks for', (
   });
 
   it('counts under enforce as well, so before and after are comparable', () => {
+    process.env[IDLE_EVIDENCE_ENV_VAR] = 'claude=enforce';
+
     detectSessionStatus(UNVOUCHED_IDLE_FRAME, 'claude');
     detectSessionStatus(UNVOUCHED_IDLE_FRAME, 'claude');
     detectSessionStatus(VOUCHED_IDLE_FRAME, 'claude');

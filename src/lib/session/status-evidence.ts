@@ -5,29 +5,49 @@
  * Two things live here, for one reason: they are the pair a surface needs in
  * order to say "I cannot read this frame, and here is what it last was".
  *
- *  1. {@link deriveScraperEvidence} — the ONE expression that decides whether a
- *     scraper verdict is `'positive'` or `'none'`. Issue #1924 introduced the
- *     reading inline in `current-output-builder`; #1926 has to publish it from a
- *     second producer (`worktree-status-helper`, which drives `GET
- *     /api/worktrees` and therefore the header chip, `BranchStatusIndicator` and
- *     `commandmate ls`), and §4 D1 決定 2 says in as many words that two
- *     expressions for one fact is how the two come apart. So the expression
- *     moved here and both producers call it.
+ *  1. {@link isUnclassifiedFrame} — the ONE expression that decides whether the
+ *     detector could classify a frame at all. Issue #1924 introduced the reading
+ *     inline in `current-output-builder`; §4 D1 決定 2 says in as many words that
+ *     two expressions for one fact is how consumers come apart, so it lives here
+ *     and the producer calls it.
  *  2. {@link observeStatusEvidence} / {@link getLastKnownStatus} — the server-side
  *     latch of the last verdict that WAS positive, which is what §7's row
  *     「直前の確定状態（証拠なしの間の表示）」 asks a surface to show while the
  *     current frame carries no evidence.
  *
- * ## What Phase 1 deliberately does not do
+ * ## The two facts, and why Issue #2011 had to pull them apart again
  *
- * Nothing here changes a classification. `deriveScraperEvidence` is the
- * pre-#1924 `isUnclassifiedActive` expression with the sign flipped, character
- * for character; §8 Phase 3 is what moves `input_prompt` into the `'none'` half,
- * tool by tool, once each tool has a positively confirmed idle-composer rule and
- * its fixtures (DR2-002).
+ * Until #1927 this module also held `deriveScraperEvidence`, which computed
+ * {@link StatusEvidence} from `(status, reason)` — and, because the two sets
+ * coincided at the time, doubled as the definition of "unclassified frame".
+ * #1927 moved the evidence producer into the detector (only the detector knows
+ * which rule answered) and left `current-output-builder` deriving the flag from
+ * `evidence === 'none'`. That silently redefined the flag: `'none'` means "I
+ * could not prove this pane is idle", which an ordinary Claude composer frame
+ * satisfies, while the flag's consumers — `TerminalEscapeHatch`, `wait`'s
+ * completion rule, `unclassified_frames` — were all written against "nobody
+ * could read this frame at all". Every idle Claude pane then raised the hatch
+ * and stalled `wait` (#2011).
+ *
+ * So they are two facts now, and both are published:
+ *
+ *  - `statusEvidence` — does the verdict rest on something positive? Produced by
+ *    the detector, per tool, and deliberately widened by the §4 D1 rollout.
+ *  - `isUnclassifiedActive` — could the frame be classified at all? That is
+ *    {@link isUnclassifiedFrame}, and it is a statement about the reason
+ *    vocabulary, not about the strength of the evidence behind it.
+ *
+ * A frame can be `evidence: 'none'` and classified (an idle composer no idle
+ * rule vouches for), and — since #2011's second half — `evidence: 'positive'`
+ * and unclassified (an unreadable pane whose agent reported `Stop`).
  */
 
-import { STATUS_REASON, type SessionStatus } from '@/lib/detection/status-detector';
+// From the leaf module rather than the `status-detector` facade that re-exports
+// it: this Set is built at module evaluation, and a suite that partially mocks
+// the facade to stub `detectSessionStatus` would leave `STATUS_REASON` undefined
+// at exactly that moment (`worktree-status-helper.test.ts` does).
+import { STATUS_REASON } from '@/lib/detection/status-reason';
+import type { SessionStatus } from '@/lib/detection/status-detector';
 import { STRUCTURED_STATE_MAX_AGE_MS } from '@/lib/session/agent-event-state';
 
 /**
@@ -47,25 +67,51 @@ import { STRUCTURED_STATE_MAX_AGE_MS } from '@/lib/session/agent-event-state';
 export type StatusEvidence = 'positive' | 'none';
 
 /**
- * Read a scraper verdict as evidence (Issue #1924, moved here by #1926).
+ * The reasons that mean "no rule could read this frame" (Issue #2011).
  *
- * The two reasons below are the two that mean "the frame said nothing":
- * `default` is "no pattern matched at all, call it running", and
- * `no_recent_output` is the 5-second staleness fallback that degrades an
- * unreadable overlay to `ready`. Everything else — a completion marker, a
- * thinking indicator, a parsed prompt, a selection list, an idle composer — is
- * something the detector positively recognised.
+ * These are exactly the three verdicts `tools/run-detection.ts` reaches when its
+ * chain has run out: the five-second staleness fallback (`no_recent_output`) and
+ * the two floors (`unknown_frame` for a tool whose own rules looked and found
+ * nothing, `default` for the generic "no pattern matched anywhere"). Every other
+ * reason names something the detector recognised — a completion marker, a
+ * thinking indicator, a parsed dialog, a selection list, a composer row.
  *
- * Pure and total, and the single producer: `current-output-builder` (the
- * `capture --json` / WS payload) and `worktree-status-helper` (the list API that
- * drives the sidebar, the header chip and `commandmate ls`) both call it rather
- * than restating it. A second copy would be one more place Phase 3 has to move.
+ * `input_prompt` is deliberately NOT here, and that is the whole of #2011: an
+ * idle composer whose tool-specific idle rule declined to vouch for it is a
+ * frame that WAS classified, published with `evidence: 'none'`. Putting it in
+ * this set is what opened `TerminalEscapeHatch` on every idle Claude pane and
+ * stopped `wait` completing on one.
  */
-export function deriveScraperEvidence(status: SessionStatus, reason: string): StatusEvidence {
-  return (status === 'running' && reason === STATUS_REASON.DEFAULT) ||
-    (status === 'ready' && reason === STATUS_REASON.NO_RECENT_OUTPUT)
-    ? 'none'
-    : 'positive';
+const UNCLASSIFIED_FRAME_REASONS: ReadonlySet<string> = new Set<string>([
+  STATUS_REASON.NO_RECENT_OUTPUT,
+  STATUS_REASON.UNKNOWN_FRAME,
+  STATUS_REASON.DEFAULT,
+]);
+
+/**
+ * Whether the detection layer failed to classify this frame (Issue #1497 /
+ * #1708, restated as its own expression by #2011).
+ *
+ * This is the published `isUnclassifiedActive` contract: `capture --json` sends
+ * it, `wait` suppresses its completion check while it holds and exits 10 after
+ * {@link https://github.com/Kewton/CommandMate/issues/1708 60 s} of it, and both
+ * terminal surfaces open the navigation hatch on it. All three are asking the
+ * same question — "is a human looking at something nothing here can drive?" —
+ * and none of them is asking how strong the evidence behind a readable verdict
+ * is.
+ *
+ * The status is checked as well as the reason for the reason the pre-#1924
+ * expression did: `default` on anything but `running` is not the floor. Since
+ * #1927 all three reasons are only ever produced with `running` (§4 D1 決定 3
+ * abolished the `ready` the staleness heuristic used to publish), so this is a
+ * guard against a future producer rather than a live discriminator.
+ *
+ * Pure and total, and the single producer: `current-output-builder` calls it
+ * rather than restating it, and `mergeStructuredStatus` carries its answer
+ * through rather than recomputing one.
+ */
+export function isUnclassifiedFrame(status: SessionStatus, reason: string): boolean {
+  return status === 'running' && UNCLASSIFIED_FRAME_REASONS.has(reason);
 }
 
 /**
